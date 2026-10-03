@@ -59,7 +59,7 @@ Why the harness changed in this re-descent: the documents moved after the harnes
 
 **Order.** Tasks are in dependency order, and each names what it depends on:
 - Part A (Task 1, the certification gap D1): done and removed.
-- Part B (Tasks 3–4): harness machinery — S-9's MDX judgement of spec-group files not named `.mdx`. Task 2 (P-8's and P-11's capture-limit errors) and Task 2b, split from it (every other conversion of a driver rejection), are done and removed: H-11's capture-limit errors.
+- Part B (Task 4): harness machinery — S-9's MDX judgement of spec-group files not named `.mdx`. Task 3 (the mechanism: `mdx.wellFormed` and the other `mdx` lists, the `file()` `mdx` option, or an MDX record at the path declare such a file an MDX source; module header of `test/helpers/workspace.ts`) is done and removed; Task 4 uses it. Task 2 (P-8's and P-11's capture-limit errors) and Task 2b, split from it (every other conversion of a driver rejection), are done and removed: H-11's capture-limit errors.
 - Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order.
 - Part D (Tasks 10–13): P-8's command sweep.
 - Task 14 confirms the result and deletes the plan.
@@ -70,41 +70,9 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part B — Machinery
 
-### Task 3 — S-9 judges a spec-group file not named `.mdx` as an MDX source when the staging declares it one (C2, part 1: the mechanism; TEST-SPEC §17 S-9; SPEC 14.20, 14.19, 7.1)
-
-**Depends on.** Nothing. Task 4 uses it.
-
-**The requirement.** S-9: "Every MDX source this document declares well-formed — each deterministic fixture's files … — derives under the grammar 14.20 fixes … checked … before any product exists". SPEC 14.20 judges "a spec-group file that is not well-formed MDX" whatever its name. A spec-group match without `.mdx` is invalid (7.1, 14.19) but still a spec-group file, and 11.2 keeps an invalid-path file's parse-local structure, so its content is an MDX source. The harness decides MDX-ness by name alone:
-- `isMdxPath` in `test/helpers/workspace.ts` (about L1335): "it ends in `.mdx`".
-- A staged-source record at a non-`.mdx` path is refused (about L665: "a path S-9 does not judge takes plain contents").
-
-No declaration can name another path as an MDX source, unlike code sources, which have `ts.wellFormed`. Today three spec-group files are never judged (Task 4).
-
-**Where.** `test/helpers/workspace.ts`:
-- `isMdxPath` and its call sites (about L546, 623, 665, 736, 923, 938, 969, 1369, 1432): the four stagings `create()`, `file()`, `edit()`, and `copyFrom()`; the staging-time judge (`judgeMdxDeclaration`); the record check; the undeclared-staging guard;
-- the workspace-level `mdx` declaration type and the per-`file()` `mdx` option (about L250–330);
-- the module header's S-9 paragraphs (about L40–100).
-
-Also `test/helpers/staged-mdx.ts` and `test/self/s9-staged-sources.test.ts` if records need to carry the path's MDX-ness.
-
-**Change.**
-- Add a declaration that makes a path an MDX source whatever its name, the MDX analogue of `ts.wellFormed`. For example, a workspace `mdx` entry or a `file()` option naming the path, with the same three verdicts as an `.mdx` path (well-formed, unparseable, unchecked). The name is your choice.
-- Let a staged-source record stand at such a path: the record carries the declaration, or the path is declared beside it. The builder's staging-time judge must apply to these paths exactly as to `.mdx` paths. So must the undeclared-staging guard: plain contents at a declared path after a product invocation are refused.
-- Undeclared non-`.mdx` paths stay unjudged, as now.
-- Document the declaration in the module header next to `ts.wellFormed`.
-
-**Checks.**
-- New self-test vectors (in the S-2 builder self-tests or the S-9 self-tests, wherever the `.mdx` vectors for the same judge live):
-  - an ill-formed non-`.mdx` spec-group file declared well-formed is refused with `HarnessStagingError` (mode `mdx-derivability`), never staged;
-  - a well-formed one is staged byte-exact;
-  - one declared unparseable but deriving is refused;
-  - plain contents at a declared path after a product invocation are refused by the undeclared-staging guard.
-- Red-check the vectors with AGENTS.md's stash-the-helper recipe: with `workspace.ts` stashed, the first vector fails.
-- Every existing staging is unchanged: the full self project is green.
-
 ### Task 4 — Declare the three non-`.mdx` spec-group files the suite stages as MDX sources (C2, part 2: the declarations; TEST-SPEC §17 S-9, T7.1-1, T11.6-2, T11.6-4)
 
-**Depends on.** Task 3.
+**Depends on.** Task 3 (done and removed): a spec-group file not named `.mdx` is judged once its staging declares it an MDX source — `mdx: { wellFormed: [path] }` (or another `mdx` list: `unparseable`, `unchecked`, `allowances`, `perDraw`) in the workspace declaration, a `file()` `mdx` option, or an MDX staged-source record at the path (`stagedMdx(name, source)`, which declares the path for its own write); plain contents at a declared path after a product invocation are refused by the undeclared-staging guard, at creation too. AGENTS.md's staged-source ledger bullet has the recipe.
 
 **The files.** Each is a spec-group match without `.mdx`, and each derives today, but nothing checks it. An ill-formed content would surface as a false product failure (an extra 14.20 beside the asserted findings).
 - **T7.1-1's `specs/notes.txt`**: `mdxSection("n")`, in `test/suite/registry/section-7.1-7.3.ts` (about L931; the workspace with `NON_MDX_MATCH_CONFIG`). TEST-SPEC: "a spec-group match without `.mdx` → 14.19", and the arm asserts exactly `{"14.19": 1}`, so the file must be well-formed. It is staged plain, after the body's first product invocation.
@@ -112,8 +80,8 @@ Also `test/helpers/staged-mdx.ts` and `test/self/s9-staged-sources.test.ts` if r
 - **T11.6-2's `specs/note.txt`**: the same content, in the same file (about L1232). `inventory` parses no sources (11.6), so declare it well-formed, or explicitly undeclared (`unchecked`) with a comment saying why.
 
 **Change.**
-- T7.1-1: stage `specs/notes.txt` as a staged-source record registered at module level, declared well-formed through Task 3's mechanism. `test/self/s9-staged-sources.test.ts` then judges it before any product exists. Keep the arm's bytes unchanged: move the expression, never re-spell it.
-- T11.6-4 and T11.6-2: declare each `specs/note.txt` through Task 3's mechanism. Use a record wherever the workspace is created after a product invocation in the body, since the guard now applies there.
+- T7.1-1: stage `specs/notes.txt` as a staged-source record registered at module level (a record at that path declares it a well-formed MDX source). `test/self/s9-staged-sources.test.ts` then judges it before any product exists. Keep the arm's bytes unchanged: move the expression, never re-spell it.
+- T11.6-4 and T11.6-2: declare each `specs/note.txt` (`mdx.wellFormed`, or a record). Use a record wherever the workspace is created after a product invocation in the body, since the guard now applies there.
 - Keep every assertion unchanged.
 
 **Checks.**

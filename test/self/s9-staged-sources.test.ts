@@ -25,12 +25,14 @@
 // that declaration is P-8's mutations' alone), its registration rules on a fresh
 // unsealed instance, the builder's record overload (a record stages exactly
 // its bytes under its own declaration, which overrides the workspace's for
-// the path; an `mdx` option beside it, or a non-`.mdx` path, throws with
-// nothing written), the record-accepting initial `files` of a workspace
+// the path; an `mdx` option beside it throws with nothing written; a record
+// makes its path an MDX source whatever the name, so at a spec-group file's
+// path not named `.mdx` it stages, and a contradicting one throws, as at an
+// `.mdx` path), the record-accepting initial `files` of a workspace
 // declaration (`InitialFileContents` — the form of a later-arm workspace's
-// initial `.mdx` files, which S-7's sweep never reaches: `create()` stages
-// a record under the record's declaration; a record at a non-`.mdx` key, or
-// beside a workspace-declaration entry naming its path, throws; the
+// initial MDX sources, which S-7's sweep never reaches: `create()` stages
+// a record under the record's declaration, at a key of any name; a record
+// beside a workspace-declaration entry naming its path throws; the
 // declaration's `perDraw` list judges a draw's initial file as well-formed
 // and declares the path `per-draw`; `mdxPathsOf` lists a rendered map's
 // plain `.mdx` keys for such a list, records left out), the builder's
@@ -57,8 +59,10 @@
 // bytes under the record's declaration, whatever the path's name or
 // workspace declaration (a `ts` option beside it, a workspace `ts` entry
 // beside an initial record, a path selecting the other grammar, and an
-// `.mdx` path all throw, nothing written); a contradicting record throws
-// at staging exactly as here.
+// MDX source's path — an `.mdx` path, or one the workspace's `mdx`
+// declaration or an `mdx` option declares an MDX source — all throw,
+// nothing written); a contradicting record throws at staging exactly as
+// here.
 
 import { Buffer } from "node:buffer";
 import { describe, expect, onTestFinished, test, vi } from "vitest";
@@ -426,16 +430,45 @@ describe("S-9: the builder stages a record's bytes under the record's declaratio
     expect(await workspace.kind("specs/record.mdx")).toBe("absent");
   });
 
-  test("a record at a path S-9 does not judge is a mistake: nothing is written", async () => {
-    const record = someWellFormedRecord();
+  test("a record makes its path an MDX source whatever the name: at a spec-group file's path not named `.mdx` it stages exactly its bytes under its own declaration, and a contradicting record throws there, nothing written", async () => {
+    const wellFormed = someWellFormedRecord();
+    const unparseable = someUnparseableRecord();
     const workspace = await stage();
-    await expectStagingRejected(
-      () => workspace.file("src/record.ts", record),
-      "src/record.ts",
-      "not an `.mdx` path",
-      JSON.stringify(record.name),
+    await workspace.file("specs/record.txt", wellFormed);
+    await workspace.file("specs/unparseable.txt", unparseable);
+    expect(
+      Buffer.compare(
+        Buffer.from(await workspace.readBytes("specs/record.txt")),
+        Buffer.from(bytesOf(wellFormed.source)),
+      ),
+    ).toBe(0);
+    expect(
+      Buffer.compare(
+        Buffer.from(await workspace.readBytes("specs/unparseable.txt")),
+        Buffer.from(bytesOf(unparseable.source)),
+      ),
+    ).toBe(0);
+    // The record declared the path for its own write alone.
+    expect(workspace.mdxDeclarationOf("specs/record.txt")).toBeUndefined();
+    const { ledger, builder } = await freshBuilder();
+    const illFormed = ledger.stagedMdx(
+      "T0-4 ill-formed at a path not named .mdx",
+      ILL_FORMED,
     );
-    expect(await workspace.kind("src/record.ts")).toBe("absent");
+    const fresh = await builder.TestWorkspace.create();
+    onTestFinished(() => fresh.dispose());
+    let thrown: unknown;
+    try {
+      await fresh.file("specs/notes.txt", illFormed);
+    } catch (error) {
+      thrown = error;
+    }
+    expectFreshStagingError(
+      thrown,
+      "specs/notes.txt",
+      "declared well-formed (S-9's default) but the stock MDX 3 parser rejects it",
+    );
+    expect(await fresh.kind("specs/notes.txt")).toBe("absent");
   });
 
   test("a record is judged at staging time too (the same judge): a fresh ledger's contradicting record throws", async () => {
@@ -532,13 +565,34 @@ describe("S-9: the builder stages an initial `files` record under the record's d
     }
   });
 
-  test("a record at a key S-9 does not judge is a mistake: `create()` throws", async () => {
+  test("a record at a key not named `.mdx` makes the key an MDX source: `create()` stages it under the record's declaration, and a contradicting record makes `create()` throw", async () => {
     const record = someWellFormedRecord();
-    await createRejected(
-      { files: { "src/record.ts": record } },
-      "src/record.ts",
-      "not an `.mdx` path",
-      JSON.stringify(record.name),
+    const workspace = await stage({ files: { "specs/record.txt": record } });
+    expect(
+      Buffer.compare(
+        Buffer.from(await workspace.readBytes("specs/record.txt")),
+        Buffer.from(bytesOf(record.source)),
+      ),
+    ).toBe(0);
+    const { ledger, builder } = await freshBuilder();
+    const deriving = ledger.stagedMdx(
+      "T0-5 deriving at a key not named .mdx, declared unparseable",
+      WELL_FORMED,
+      "unparseable",
+    );
+    let thrown: unknown;
+    try {
+      const fresh = await builder.TestWorkspace.create({
+        files: { "specs/notes.txt": deriving },
+      });
+      onTestFinished(() => fresh.dispose());
+    } catch (error) {
+      thrown = error;
+    }
+    expectFreshStagingError(
+      thrown,
+      "specs/notes.txt",
+      "declared unparseable (`mdx.unparseable`) but the source derives",
     );
   });
 
@@ -562,7 +616,7 @@ describe("S-9: the builder stages an initial `files` record under the record's d
     }
   });
 
-  test("`perDraw`: a listed path's initial contents are judged well-formed at creation and the path is declared `per-draw`; an ill-formed entry throws; a path in two lists, or not an MDX source, throws", async () => {
+  test("`perDraw`: a listed path's initial contents are judged well-formed at creation and the path is declared `per-draw`; an ill-formed entry throws, at a path of any name; a path in two lists throws", async () => {
     const draw = "specs/draw.mdx";
     const workspace = await stage({
       files: { [draw]: WELL_FORMED },
@@ -582,10 +636,15 @@ describe("S-9: the builder stages an initial `files` record under the record's d
       "more than one of",
       "`perDraw`",
     );
+    // A path of another name a `perDraw` list names is an MDX source judged
+    // per draw, as an `.mdx` path is.
     await createRejected(
-      { mdx: { perDraw: ["specs/draw.md"] } },
+      {
+        files: { "specs/draw.md": ILL_FORMED },
+        mdx: { perDraw: ["specs/draw.md"] },
+      },
       "specs/draw.md",
-      "not an MDX source",
+      "declared well-formed per draw",
     );
   });
 
@@ -1090,9 +1149,11 @@ describe("S-9: the builder stages a TypeScript record's bytes under the record's
     expect(await fresh.kind("src/view.ts")).toBe("absent");
   });
 
-  test("a TypeScript record at an `.mdx` path is a mistake: nothing is written", async () => {
+  test("a TypeScript record at an MDX source's path — an `.mdx` path, or one the workspace's `mdx` declaration or an `mdx` option beside it declares an MDX source — is a mistake: nothing is written", async () => {
     const record = someWellFormedTsRecord();
-    const workspace = await stage();
+    const workspace = await stage({
+      mdx: { wellFormed: ["specs/notes.txt"] },
+    });
     await expectTsRejected(
       () => workspace.file("docs/code.mdx", record),
       "docs/code.mdx",
@@ -1100,6 +1161,20 @@ describe("S-9: the builder stages a TypeScript record's bytes under the record's
       "`.mdx` path",
     );
     expect(await workspace.kind("docs/code.mdx")).toBe("absent");
+    await expectTsRejected(
+      () => workspace.file("specs/notes.txt", record),
+      "specs/notes.txt",
+      JSON.stringify(record.name),
+      "the workspace's `mdx` declaration names the path, an MDX source",
+    );
+    expect(await workspace.kind("specs/notes.txt")).toBe("absent");
+    await expectTsRejected(
+      () => workspace.file("specs/code.md", record, { mdx: "well-formed" }),
+      "specs/code.md",
+      JSON.stringify(record.name),
+      'the `mdx` option "well-formed" beside it declares the path an MDX source',
+    );
+    expect(await workspace.kind("specs/code.md")).toBe("absent");
   });
 
   test("a record is judged at staging time too (the same judge): a fresh ledger's contradicting records throw, one-way text under either declaration included", async () => {
@@ -1184,7 +1259,7 @@ describe("S-9: the builder stages an initial `files` TypeScript record under the
     expect(workspace.tsDeclarationOf("specs/code.md")).toBeUndefined();
   });
 
-  test("a record contradicting its declaration, at a path of the other grammar, at an `.mdx` key, or beside a workspace `ts` entry naming its path, makes `create()` throw", async () => {
+  test("a record contradicting its declaration, at a path of the other grammar, at an MDX source's key (an `.mdx` key, or one the workspace's `mdx` declaration names), or beside a workspace `ts` entry naming its path, makes `create()` throw", async () => {
     const { ledger, builder } = await freshTsBuilder();
     const wellFormed = ledger.stagedTs("T0-8 well-formed", TS_WELL_FORMED);
     const illFormed = ledger.stagedTs("T0-8 ill-formed", TS_ILL_FORMED);
@@ -1200,6 +1275,14 @@ describe("S-9: the builder stages an initial `files` TypeScript record under the
       ],
       [{ files: { "src/a.tsx": wellFormed } }, "src/a.tsx", ["grammar"]],
       [{ files: { "docs/a.mdx": wellFormed } }, "docs/a.mdx", ["`.mdx` path"]],
+      [
+        {
+          files: { "specs/a.txt": wellFormed },
+          mdx: { wellFormed: ["specs/a.txt"] },
+        },
+        "specs/a.txt",
+        ["names the path, an MDX source"],
+      ],
       [
         {
           files: { "src/a.ts": wellFormed },

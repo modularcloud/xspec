@@ -1387,7 +1387,11 @@ describe("S-9: the named allowances", () => {
 // The builder-side wiring (helpers/workspace.ts): every staged `.mdx` file is
 // judged at staging time against the staging's S-9 declaration — well-formed
 // by default — and a contradiction is a harness error (`HarnessStagingError`,
-// mode `mdx-derivability`), never an assertion failure and never a skip.
+// mode `mdx-derivability`), never an assertion failure and never a skip. A
+// spec-group file not named `.mdx` (SPEC 7.1, 14.19: an invalid path, yet an
+// MDX source 14.20 judges, kept parse-locally, 11.2) is judged the same way
+// once its staging declares it an MDX source — `mdx.wellFormed`, another
+// `mdx` list, or a `file()` option; an undeclared one is not judged.
 
 const STAGED_ILL_FORMED = doc('<S id="x">', "", "never closed");
 const STAGED_WELL_FORMED = doc('<S id="x">', "", "closed below", "", "</S>");
@@ -1613,7 +1617,7 @@ describe("S-9: the builder judges every staged `.mdx` source against its declara
     expect(await workspace.kind("specs/deep")).toBe("absent");
   });
 
-  test("only `.mdx` paths are judged; declaration keys are normalized paths; a byte path is keyed by its decoding", async () => {
+  test("an undeclared path not named `.mdx` is not judged; declaration keys are normalized paths; a byte path is keyed by its decoding", async () => {
     const workspace = await stage({
       files: {
         "notes.md": STAGED_ILL_FORMED,
@@ -1646,9 +1650,20 @@ describe("S-9: the builder judges every staged `.mdx` source against its declara
       "more than one",
     );
     await expectStagingError(
-      () => TestWorkspace.create({ mdx: { unchecked: ["specs/A.md"] } }),
-      "specs/A.md",
-      "not an MDX source",
+      () =>
+        TestWorkspace.create({
+          mdx: { wellFormed: ["specs/A.txt"], unparseable: ["specs/A.txt"] },
+        }),
+      "specs/A.txt",
+      "more than one of",
+      "`wellFormed`",
+    );
+    // `wellFormed` declares a path of another name; an `.mdx` path is
+    // well-formed by default, and naming it there is refused.
+    await expectStagingError(
+      () => TestWorkspace.create({ mdx: { wellFormed: ["specs//A.mdx"] } }),
+      "specs/A.mdx",
+      "`wellFormed` list names an `.mdx` path",
     );
     await expectStagingError(
       () =>
@@ -1668,5 +1683,159 @@ describe("S-9: the builder judges every staged `.mdx` source against its declara
       "specs/A.mdx",
       "unknown allowance",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A spec-group file not named `.mdx` — a match without the extension, an
+// invalid path (SPEC 7.1, 14.19) whose content 14.20 still judges and 11.2
+// keeps parse-locally (T7.1-1's `specs/notes.txt`, T11.6-2's and T11.6-4's
+// `specs/note.txt`): its name does not reach S-9's default, so its staging
+// declares it an MDX source, and the builder then judges it exactly as an
+// `.mdx` path — every verdict, every staging.
+
+describe("S-9: the builder judges a spec-group file not named `.mdx` that its staging declares an MDX source", () => {
+  const NOTES = "specs/notes.txt";
+
+  test("declared well-formed (`mdx.wellFormed`, or a `file()` option): an ill-formed source is refused with `mdx-derivability`, naming the path and the parser's reason, and nothing is written", async () => {
+    const error = await expectStagingError(
+      () =>
+        TestWorkspace.create({
+          files: { [NOTES]: STAGED_ILL_FORMED },
+          mdx: { wellFormed: [NOTES] },
+        }),
+      NOTES,
+      "declared well-formed",
+      "the stock MDX 3 parser rejects it",
+      "mdast-util-mdx-jsx",
+    );
+    expect(error.message).toContain(expectRejects(STAGED_ILL_FORMED).reason);
+    const declared = await stage({ mdx: { wellFormed: [NOTES] } });
+    expect(declared.mdxDeclarationOf(NOTES)).toBe("well-formed");
+    await expectStagingError(
+      () => declared.file(NOTES, STAGED_ILL_FORMED),
+      NOTES,
+      "declared well-formed",
+    );
+    expect(await declared.kind(NOTES)).toBe("absent");
+    const optioned = await stage({});
+    expect(optioned.mdxDeclarationOf(NOTES)).toBeUndefined();
+    await expectStagingError(
+      () => optioned.file(NOTES, STAGED_ILL_FORMED, { mdx: "well-formed" }),
+      NOTES,
+      "declared well-formed",
+    );
+    expect(await optioned.kind(NOTES)).toBe("absent");
+  });
+
+  test("a well-formed source is staged byte-exact, at creation and by `file()`", async () => {
+    const expected = Buffer.from(STAGED_WELL_FORMED, "utf8");
+    const workspace = await stage({
+      files: { [NOTES]: STAGED_WELL_FORMED },
+      mdx: { wellFormed: [NOTES] },
+    });
+    expect(Buffer.from(await workspace.readBytes(NOTES))).toEqual(expected);
+    await workspace.file("specs/other.md", STAGED_WELL_FORMED, {
+      mdx: "well-formed",
+    });
+    expect(Buffer.from(await workspace.readBytes("specs/other.md"))).toEqual(
+      expected,
+    );
+  });
+
+  test("declared unparseable: a deriving source is refused, nothing written; an ill-formed one stages", async () => {
+    await expectStagingError(
+      () =>
+        TestWorkspace.create({
+          files: { [NOTES]: STAGED_WELL_FORMED },
+          mdx: { unparseable: [NOTES] },
+        }),
+      NOTES,
+      "declared unparseable",
+      "derives",
+    );
+    const workspace = await stage({ mdx: { unparseable: [NOTES] } });
+    expect(workspace.mdxDeclarationOf(NOTES)).toBe("unparseable");
+    await expectStagingError(
+      () => workspace.file(NOTES, STAGED_WELL_FORMED),
+      NOTES,
+      "declared unparseable",
+    );
+    expect(await workspace.kind(NOTES)).toBe("absent");
+    await expectStagingError(
+      () =>
+        workspace.file("specs/x.txt", STAGED_WELL_FORMED, {
+          mdx: "unparseable",
+        }),
+      "specs/x.txt",
+      "declared unparseable",
+    );
+    expect(await workspace.kind("specs/x.txt")).toBe("absent");
+    await workspace.file(NOTES, STAGED_ILL_FORMED);
+    expect(await staged(workspace, NOTES)).toBe(STAGED_ILL_FORMED);
+  });
+
+  test("the other lists and stagings judge such a path as an `.mdx` path: `unchecked`, `allowances`, `perDraw`, `edit()`, and `copyFrom()`", async () => {
+    const workspace = await stage({
+      files: {
+        "specs/fuzz.txt": STAGED_ILL_FORMED,
+        "specs/dup.txt": DUPLICATE_BINDING,
+        "specs/draw.txt": STAGED_WELL_FORMED,
+        [NOTES]: STAGED_WELL_FORMED,
+      },
+      mdx: {
+        unchecked: ["specs/fuzz.txt"],
+        allowances: { "specs/dup.txt": ["duplicate-import-binding"] },
+        perDraw: ["specs/draw.txt"],
+        wellFormed: [NOTES],
+      },
+    });
+    expect(workspace.mdxDeclarationOf("specs/fuzz.txt")).toBe("unchecked");
+    expect(workspace.mdxDeclarationOf("specs/dup.txt")).toEqual({
+      allowances: ["duplicate-import-binding"],
+    });
+    expect(workspace.mdxDeclarationOf("specs/draw.txt")).toBe("per-draw");
+    await expectStagingError(
+      () =>
+        TestWorkspace.create({
+          files: { "specs/dup.txt": DUPLICATE_BINDING },
+          mdx: { wellFormed: ["specs/dup.txt"] },
+        }),
+      "specs/dup.txt",
+      "already been declared",
+    );
+    await expectStagingError(
+      () =>
+        TestWorkspace.create({
+          files: { "specs/draw.txt": STAGED_ILL_FORMED },
+          mdx: { perDraw: ["specs/draw.txt"] },
+        }),
+      "specs/draw.txt",
+      "declared well-formed per draw",
+    );
+    // `edit()` judges the rewrite under the path's declaration.
+    await expectStagingError(
+      () => workspace.edit(NOTES, "</S>", ""),
+      NOTES,
+      "declared well-formed",
+    );
+    expect(await staged(workspace, NOTES)).toBe(STAGED_WELL_FORMED);
+    const edited = STAGED_WELL_FORMED.replace("closed below", "closed, edited");
+    await workspace.edit(NOTES, "closed below", "closed, edited");
+    expect(await staged(workspace, NOTES)).toBe(edited);
+    // `copyFrom()` judges the bytes under this workspace's declaration for
+    // the destination (undeclared in the source workspace, never judged
+    // there).
+    const source = await stage({
+      files: { "specs/ill.txt": STAGED_ILL_FORMED },
+    });
+    await expectStagingError(
+      () => workspace.copyFrom(source, "specs/ill.txt", NOTES),
+      NOTES,
+      "declared well-formed",
+    );
+    expect(await staged(workspace, NOTES)).toBe(edited);
+    await workspace.copyFrom(source, "specs/ill.txt", "specs/fuzz.txt");
+    expect(await staged(workspace, "specs/fuzz.txt")).toBe(STAGED_ILL_FORMED);
   });
 });

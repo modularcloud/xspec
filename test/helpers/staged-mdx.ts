@@ -3,10 +3,12 @@
 // an edit, a replacement, an arm's variant — is a deterministic fixture file
 // the document declares well-formed (or unparseable, 14.20), and S-9's
 // derivability check must run for it before any product exists. The builder
-// judges every `.mdx` staging as it is written (helpers/workspace.ts), but a
-// staging a body makes after invoking the product is first reached at suite
-// time, against a real product: S-7's sweep against the empty stub fails the
-// body at that invocation and never gets there. The ledger closes the gap:
+// judges every MDX source's staging as it is written (helpers/workspace.ts:
+// an `.mdx` path, or a spec-group file of another name its staging declares
+// an MDX source), but a staging a body makes after invoking the product is
+// first reached at suite time, against a real product: S-7's sweep against
+// the empty stub fails the body at that invocation and never gets there.
+// The ledger closes the gap:
 //
 // - A registry module creates each such source at module load as a record
 //   (`stagedMdx`) carrying its bytes and its S-9 declaration together — the
@@ -32,14 +34,20 @@
 // The initial files of a workspace declaration are records too, wherever
 // S-7's sweep does not reach them: a body's FIRST workspace's initial files
 // are reached against the stub and may stay plain contents, but the initial
-// `.mdx` files of a workspace the body creates after its first product
+// MDX sources of a workspace the body creates after its first product
 // invocation — a later arm's, a helper's twin — are deterministic fixtures
 // the sweep never sees, so each is a record passed in the declaration's
 // `files` (the record-accepting `InitialFileContents`) and staged by
 // `TestWorkspace.create()` under the record's declaration, exactly as
 // `file()` stages one (the workspace declaration naming the record's path
-// is a contradiction and throws); a plain `.mdx` entry there is refused at
+// is a contradiction and throws); a plain MDX entry there is refused at
 // creation, as a plain `file()` staging after an invocation is.
+//
+// A record makes its path an MDX source whatever the name: a spec-group
+// file not named `.mdx` — invalid (SPEC 7.1, 14.19), yet judged by 14.20 —
+// takes a record exactly as an `.mdx` path does, the record carrying the
+// declaration the workspace's `mdx` lists (`wellFormed`, `unparseable`, …)
+// or a `file()` option would otherwise give the path.
 //
 // What is NOT a ledger record: a property draw (judged per draw by the
 // property runner, S-9's property clause, and staged under the `per-draw`
@@ -52,7 +60,7 @@
 // product exists there is nothing to judge) — as `TestWorkspace.copyFrom()`
 // carries another workspace's product-written bytes into a fresh one. The
 // builder's undeclared-staging guard (helpers/workspace.ts,
-// helpers/product-invocations.ts) refuses every other plain `.mdx` staging
+// helpers/product-invocations.ts) refuses every other plain MDX staging
 // made after a product invocation — a `file()` write, and an initial
 // `files` entry of a workspace created after the running body's first
 // invocation alike — so an omission from the ledger is a harness error at

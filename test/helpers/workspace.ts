@@ -22,21 +22,32 @@
 //   identical commit hashes on every platform and CI leg. Every git
 //   invocation runs with ambient configuration disabled: no system or global
 //   config, an isolated HOME, and all inherited `GIT_*` environment dropped.
-// - Every staged file whose path ends in `.mdx` is judged by S-9's
-//   derivability check (`deriveMdx`, helpers/mdx-derivability.ts — the stock
-//   MDX 3 parser, independent of the product) at staging time, before any
-//   product exists (H-8): it is declared well-formed by default, and a
-//   staging declares the exceptions per path — `unparseable` for a source
-//   TEST-SPEC declares unparseable (SPEC 14.20: invalid UTF-8, a byte-order
-//   mark, an MDX-syntax rejection), `allowances` for a source relying on an
+// - Every staged MDX source is judged by S-9's derivability check
+//   (`deriveMdx`, helpers/mdx-derivability.ts — the stock MDX 3 parser,
+//   independent of the product) at staging time, before any product exists
+//   (H-8). The default reaches a path by its name alone: every file whose
+//   path ends in `.mdx` is declared well-formed, and a staging declares the
+//   exceptions per path — `unparseable` for a source TEST-SPEC declares
+//   unparseable (SPEC 14.20: invalid UTF-8, a byte-order mark, an
+//   MDX-syntax rejection), `allowances` for a source relying on an
 //   ECMAScript early error 14.20 admits (S-9's named allowances), and
 //   `unchecked` only for a source whose derivability the document does not
-//   declare (a fuzz mutation, a noise file no discovery reaches). A source
-//   contradicting its declaration throws `HarnessStagingError` (mode
-//   `mdx-derivability`, naming the path and the parser's reason) — a harness
-//   error, never an assertion failure, never a skip. The parse is in-process
-//   and cheap at every scale the suite stages (the 4096-deep tower in ~0.3 s,
-//   T1.3-7's 4.2 MB document in ~1.4 s), so no staging is exempted for size.
+//   declare (a fuzz mutation, a noise file no discovery reaches). A
+//   spec-group file not named `.mdx` is an MDX source too — invalid (SPEC
+//   7.1, 14.19), yet judged by 14.20 whatever its name, its parse-local
+//   structure kept (11.2) — and its name cannot reveal that, so its staging
+//   declares it: `mdx: { wellFormed }` (the MDX analogue of
+//   `ts.wellFormed`), any other `mdx` list naming the path (`unparseable`,
+//   `unchecked`, `allowances`, `perDraw`), an `mdx` option on a `file()`
+//   call (for that write), or an MDX staged-source record at the path
+//   (below). A path so declared is judged exactly as an `.mdx` path is — by
+//   every staging, under the same verdicts, inside the same guard; an
+//   undeclared path not named `.mdx` is not judged. A source contradicting
+//   its declaration throws `HarnessStagingError` (mode `mdx-derivability`,
+//   naming the path and the parser's reason) — a harness error, never an
+//   assertion failure, never a skip. The parse is in-process and cheap at
+//   every scale the suite stages (the 4096-deep tower in ~0.3 s, T1.3-7's
+//   4.2 MB document in ~1.4 s), so no staging is exempted for size.
 // - Every staged code source and configuration file is judged the same way
 //   by S-9's TypeScript check (`judgeTypeScript`, helpers/ts-derivability.ts
 //   — the harness's own `typescript-5.9.3` parser at ESNext, read as module
@@ -62,7 +73,7 @@
 //   the release accepts read one way only, whatever its declaration but
 //   `unchecked` (no fixture is such text, S-9) — a harness error, never an
 //   assertion failure, never a skip.
-// - A `.mdx` source a test body stages after invoking the product in its
+// - An MDX source a test body stages after invoking the product in its
 //   workspace is passed to `file()` as a staged-source record
 //   (helpers/staged-mdx.ts) carrying the bytes and the S-9 declaration
 //   together: S-7's sweep never reaches such a staging (the body fails at
@@ -70,6 +81,9 @@
 //   test/self/s9-staged-sources.test.ts judges every record before any
 //   product exists (S-9's timing clause, H-8) through the judge the builder
 //   itself applies at staging time (`judgeMdxDeclaration` — one code path).
+//   A record makes its path an MDX source whatever the name — the per-write
+//   form of `mdx.wellFormed` (or `mdx.unparseable`, or named allowances) —
+//   so a spec-group file not named `.mdx` takes one as an `.mdx` path does.
 //   An edit of bytes the product itself wrote goes through `edit()`, judged
 //   at staging time alone: no harness constant equals them, so they are not
 //   a deterministic fixture.
@@ -79,8 +93,9 @@
 //   TypeScript record (helpers/staged-ts.ts) carrying the bytes, the S-9
 //   declaration, and the grammar the record is judged under, staged under
 //   the record's declaration (a `ts` option beside it, a workspace `ts`
-//   entry beside an initial record, an `.mdx` path, and a path selecting
-//   the other grammar all throw); the same self-test judges every such
+//   entry beside an initial record, an MDX source's path — an `.mdx` path,
+//   or one the staging declares an MDX source — and a path selecting the
+//   other grammar all throw); the same self-test judges every such
 //   record with `judgeTsDeclaration` before any product exists. A record
 //   makes its path judged whatever the name, as `ts.wellFormed` does. An
 //   `.mdx` path a code group discovers is a code source too: its MDX record
@@ -95,7 +110,8 @@
 //   first invocation in whatever workspace, so a staging into a fresh
 //   later-arm workspace is unreached too; helpers/product-invocations.ts),
 //   `file()` with plain contents throws `HarnessStagingError` (mode
-//   `undeclared-staging`) on an `.mdx` path unless the effective
+//   `undeclared-staging`) on an MDX source's path (an `.mdx` path, or one
+//   the staging declares an MDX source, above) unless the effective
 //   declaration is `unchecked` (P-8's mutations) or `per-draw` (a property
 //   draw the runner judged before the body saw it, S-9's property clause —
 //   the section-16 modules' alone), and — the guard's TypeScript arm — on
@@ -114,7 +130,7 @@
 //   product has been invoked in, where the bytes are the harness's own
 //   staging and both arms of the guard apply as to plain contents. A
 //   workspace declaration's initial `files` take a record too
-//   (`InitialFileContents`): the initial `.mdx` files, code sources, and
+//   (`InitialFileContents`): the initial MDX sources, code sources, and
 //   configuration of a workspace a body creates AFTER its first product
 //   invocation — a later arm's, a helper's twin — are deterministic
 //   fixtures S-7's sweep never reaches (the body fails at that
@@ -127,8 +143,9 @@
 //   plain entry of a workspace created after the running body's first
 //   product invocation is refused at creation (the diagnosis names it an
 //   initial `files` entry, with its remedies) unless its declaration
-//   exempts it — `mdx.unchecked` or `mdx.perDraw` for an `.mdx` path,
-//   `ts.unchecked` or `ts.perDraw` for a path the TypeScript check judges
+//   exempts it — `mdx.unchecked` or `mdx.perDraw` for an MDX source's
+//   path, `ts.unchecked` or `ts.perDraw` for a path the TypeScript check
+//   judges
 //   — and the half-built workspace is disposed. At creation only the
 //   per-body mark can be set — the root was registered an instant before
 //   and nothing has run in it — so outside a body context (a self-test,
@@ -190,18 +207,20 @@ export type FileContents = string | Uint8Array;
 /**
  * An initial `files` entry of a workspace declaration: plain contents, or a
  * staged-source record whose bytes `create()` stages under the record's own
- * S-9 declaration — an MDX record (helpers/staged-mdx.ts) at an `.mdx` key,
- * a TypeScript record (helpers/staged-ts.ts) at a code source's or
- * configuration file's key — the form of every such initial file of a
- * workspace a body creates after its first product invocation, so that the
- * S-9 self-test judged it before any product existed (module header). A
- * record belongs at a key the workspace's `mdx` (or `ts`) declaration does
- * not name; a body's first workspace's initial files may stay plain
- * contents, and a plain `.mdx` entry, code source, or configuration file of
- * a workspace created after the running body's first product invocation is
- * refused at creation (the undeclared-staging guard) unless its path is
- * listed `unchecked` or `perDraw` (in `mdx`, or in `ts` for a path the
- * TypeScript check judges).
+ * S-9 declaration — an MDX record (helpers/staged-mdx.ts) at an MDX
+ * source's key (an `.mdx` key, or a spec-group file's key of another name:
+ * the record declares its path an MDX source), a TypeScript record
+ * (helpers/staged-ts.ts) at a code source's or configuration file's key —
+ * the form of every such initial file of a workspace a body creates after
+ * its first product invocation, so that the S-9 self-test judged it before
+ * any product existed (module header). A record belongs at a key the
+ * workspace's `mdx` (or `ts`) declaration does not name; a body's first
+ * workspace's initial files may stay plain contents, and a plain entry at
+ * an MDX source's key (an `.mdx` key, or one the `mdx` declaration names),
+ * code source, or configuration file of a workspace created after the
+ * running body's first product invocation is refused at creation (the
+ * undeclared-staging guard) unless its path is listed `unchecked` or
+ * `perDraw` (in `mdx`, or in `ts` for a path the TypeScript check judges).
  */
 export type InitialFileContents = FileContents | StagedMdx | StagedTs;
 
@@ -210,9 +229,20 @@ export type InitialFileContents = FileContents | StagedMdx | StagedTs;
  * workspace-relative path (`/`-separated, as the file is staged; a byte
  * path is keyed by its UTF-8 decoding with replacement characters). Every
  * staged `.mdx` file not named here is declared well-formed and must derive
- * under SPEC 14.20's grammar; a path belongs to at most one list.
+ * under SPEC 14.20's grammar; a path belongs to at most one list. A path
+ * not named `.mdx` that a list names is an MDX source of that declaration
+ * — a spec-group file of another name (SPEC 7.1, 14.19, 14.20; module
+ * header) — judged exactly as an `.mdx` path; an unnamed one is not judged.
  */
 export interface WorkspaceMdxDecl {
+  /**
+   * Spec-group files not named `.mdx` that TEST-SPEC's fixtures declare
+   * well-formed (an invalid path, 14.19, whose content 14.20 still judges):
+   * each must derive, as a default `.mdx` path must — the MDX analogue of
+   * `ts.wellFormed`. An `.mdx` path is well-formed by default, so naming
+   * one here is refused as a declaration defect.
+   */
+  readonly wellFormed?: readonly string[];
   /**
    * Sources TEST-SPEC declares unparseable (14.20): each must NOT derive —
    * invalid UTF-8, a leading byte-order mark, an MDX-syntax rejection.
@@ -243,7 +273,10 @@ export interface WorkspaceMdxDecl {
 
 /**
  * One file's S-9 declaration, for a `file()` call after creation; overrides
- * the workspace declaration for that write alone. `per-draw` is a property
+ * the workspace declaration for that write alone, and at a path not named
+ * `.mdx` makes the path an MDX source for that write (a spec-group file of
+ * another name; module header) — the per-write form of the workspace
+ * declaration's lists, `mdx.wellFormed` included. `per-draw` is a property
  * draw's source (TEST-SPEC 16; S-9's property clause): well-formed — judged
  * at staging exactly as `well-formed` is — and already judged per draw by the
  * property runner before the body saw it (helpers/property.ts `drawSources`),
@@ -320,7 +353,12 @@ export type TsFileDeclaration = TsDeclaration | "unchecked" | "per-draw";
 
 /** Options of a single `file()` staging. */
 export interface FileOptions {
-  /** The file's S-9 declaration; defaults to the workspace declaration's. */
+  /**
+   * The file's S-9 declaration; defaults to the workspace declaration's,
+   * else to well-formed for an `.mdx` path (any other path the workspace
+   * declaration does not name is not judged). Given at a path not named
+   * `.mdx`, it declares the path an MDX source for this write.
+   */
   readonly mdx?: MdxFileDeclaration;
   /**
    * The file's S-9 TypeScript declaration; defaults to the workspace
@@ -334,9 +372,9 @@ export interface FileOptions {
 export interface WorkspaceDecl {
   /**
    * Regular files: workspace-relative path → exact contents, or a
-   * staged-source record — an MDX record at an `.mdx` path, a TypeScript
-   * record at a code source's or configuration file's path
-   * (`InitialFileContents`).
+   * staged-source record — an MDX record at an MDX source's path (an `.mdx`
+   * path, or a spec-group file's of another name), a TypeScript record at
+   * a code source's or configuration file's path (`InitialFileContents`).
    */
   readonly files?: Readonly<Record<string, InitialFileContents>>;
   /** Symbolic links: workspace-relative link path → verbatim target. */
@@ -344,11 +382,12 @@ export interface WorkspaceDecl {
   /** Directories created explicitly (parents of files are implicit). */
   readonly dirs?: readonly string[];
   /**
-   * S-9 declaration of the staged `.mdx` sources — those in `files` staged
+   * S-9 declaration of the staged MDX sources — those in `files` staged
    * as plain contents (a record carries its own declaration, and naming its
    * path here contradicts it) and those a later `file()` call stages; every
-   * `.mdx` path absent from it is declared well-formed (see the module
-   * header).
+   * `.mdx` path absent from it is declared well-formed, and a path of
+   * another name it names is an MDX source of that declaration (see the
+   * module header).
    */
   readonly mdx?: WorkspaceMdxDecl;
   /**
@@ -423,9 +462,9 @@ export class TestWorkspace {
   /**
    * Create a fresh workspace in a unique temporary directory and populate it
    * with the declared entries (directories, then files, then symlinks); each
-   * `.mdx` file, code source, and configuration file is judged against the
-   * staging's S-9 declarations as it is written (a contradiction throws
-   * `HarnessStagingError`).
+   * MDX source (an `.mdx` file, or one the declaration names), code source,
+   * and configuration file is judged against the staging's S-9 declarations
+   * as it is written (a contradiction throws `HarnessStagingError`).
    */
   static async create(decl: WorkspaceDecl = {}): Promise<TestWorkspace> {
     const mdxDeclarations = resolveMdxDeclaration(decl.mdx ?? {});
@@ -482,17 +521,20 @@ export class TestWorkspace {
 
   /**
    * Write a regular file with exactly the declared bytes, creating parents.
-   * A `.mdx` path is first judged against its S-9 declaration — the option's,
-   * else the workspace declaration's, else well-formed — and a contradiction
-   * throws `HarnessStagingError` before anything is written. A staged-source
-   * record (helpers/staged-mdx.ts) supplies both the bytes and the
-   * declaration of the write — the form of every `.mdx` staging a body makes
-   * after a product invocation in this workspace, so that the S-9 self-test
-   * judged it before any product existed; an `mdx` option beside a record
-   * contradicts it, and a record at a path S-9 does not judge is a mistake —
-   * both throw. Plain contents on an `.mdx` path after a product invocation
-   * — in this workspace, or anywhere in the running registered body — throw
-   * too (`undeclared-staging`, see `guardUndeclaredStaging`), unless the
+   * An MDX source's path is first judged against its S-9 declaration — the
+   * option's, else the workspace declaration's, else well-formed for an
+   * `.mdx` path (a path of another name is an MDX source only when the
+   * option, the workspace declaration, or a record declares it one; module
+   * header) — and a contradiction throws `HarnessStagingError` before
+   * anything is written. A staged-source record (helpers/staged-mdx.ts)
+   * supplies both the bytes and the declaration of the write, making its
+   * path an MDX source whatever the name — the form of every MDX staging a
+   * body makes after a product invocation in this workspace, so that the
+   * S-9 self-test judged it before any product existed; an `mdx` option
+   * beside a record contradicts it and throws. Plain contents on an MDX
+   * source's path after a product invocation — in this workspace, or
+   * anywhere in the running registered body — throw too
+   * (`undeclared-staging`, see `guardUndeclaredStaging`), unless the
    * effective declaration is `unchecked` or `per-draw`. A code source or
    * configuration file is judged against its S-9 TypeScript declaration —
    * the `ts` option's, else the workspace declaration's, else well-formed
@@ -500,8 +542,9 @@ export class TestWorkspace {
    * a TypeScript staged-source record (helpers/staged-ts.ts) supplies both
    * the bytes and that declaration — the form of every code source and
    * configuration file a body stages after a product invocation — and a
-   * `ts` option beside it, an `.mdx` path, or a path selecting the other
-   * grammar throws. Plain contents at a path the TypeScript check judges
+   * `ts` option beside it, an MDX source's path (an `mdx` option beside it
+   * included), or a path selecting the other grammar throws. Plain
+   * contents at a path the TypeScript check judges
    * after a product invocation throw `undeclared-staging` too (the guard's
    * TypeScript arm, `guardUndeclaredTsStaging`), unless the effective
    * TypeScript declaration is `unchecked` or `per-draw`; so does an MDX
@@ -540,15 +583,12 @@ export class TestWorkspace {
         contents,
         tsDeclaration,
         "option",
+        declaration,
       ));
     } else {
       data = toBytes(contents);
-      if (isMdxPath(rel)) {
-        this.guardUndeclaredStaging(
-          rel,
-          declaration ?? this.mdxDeclarations.get(mdxKey(rel)) ?? "well-formed",
-        );
-      }
+      const effective = declaration ?? this.mdxDeclarationOf(rel);
+      if (effective !== undefined) this.guardUndeclaredStaging(rel, effective);
       this.guardUndeclaredTsStaging(
         rel,
         tsDeclaration ?? this.tsDeclarationOf(rel),
@@ -569,14 +609,15 @@ export class TestWorkspace {
 
   /**
    * An initial `files` entry of the workspace declaration: plain contents,
-   * judged under the workspace declaration like every `.mdx` staging, or a
-   * staged-source record — an MDX record or a TypeScript one — staged under
-   * the record's own declaration (module header — the form of a later-arm
-   * workspace's initial `.mdx` files, code sources, and configuration,
-   * which S-7's sweep never reaches; a body's first workspace's may stay
-   * plain).
-   * Inside the undeclared-staging guard, as `file()` is: a plain `.mdx`
-   * entry of a workspace created after the running body's first product
+   * judged under the workspace declaration like every MDX source's staging,
+   * or a staged-source record — an MDX record or a TypeScript one — staged
+   * under the record's own declaration (module header — the form of a
+   * later-arm workspace's initial MDX sources, code sources, and
+   * configuration, which S-7's sweep never reaches; a body's first
+   * workspace's may stay plain).
+   * Inside the undeclared-staging guard, as `file()` is: a plain entry at
+   * an MDX source's path (an `.mdx` path, or one the workspace declaration
+   * names) of a workspace created after the running body's first product
    * invocation is refused before anything of it is written, unless the
    * workspace declaration lists it `unchecked` or `perDraw`
    * (`guardUndeclaredStaging`), and so is a plain entry at a path the
@@ -616,16 +657,14 @@ export class TestWorkspace {
         contents,
         this.tsDeclarations.get(mdxKey(rel)),
         "declaration entry",
+        undefined,
       ));
     } else {
       data = toBytes(contents);
       declaration = undefined;
-      if (isMdxPath(rel)) {
-        this.guardUndeclaredStaging(
-          rel,
-          this.mdxDeclarations.get(mdxKey(rel)) ?? "well-formed",
-          "initial entry",
-        );
+      const effective = this.mdxDeclarationOf(rel);
+      if (effective !== undefined) {
+        this.guardUndeclaredStaging(rel, effective, "initial entry");
       }
       this.guardUndeclaredTsStaging(
         rel,
@@ -641,10 +680,12 @@ export class TestWorkspace {
   /**
    * A staged-source record's staging — `file()`'s and an initial `files`
    * entry's alike: the record's bytes under the record's declaration, the
-   * one the S-9 self-test verified. A record at a path S-9 does not judge
-   * is a mistake, and a second declaration for the path beside the record
-   * (`file()`'s `mdx` option, the workspace declaration's entry) is a
-   * contradiction; both throw before anything is written. A record carrying
+   * one the S-9 self-test verified. The record makes its path an MDX source
+   * whatever the name — an `.mdx` path, or a spec-group file of another
+   * name (module header), judged under the record's declaration exactly as
+   * an `.mdx` path is — and a second declaration for the path beside the
+   * record (`file()`'s `mdx` option, the workspace declaration's entry) is
+   * a contradiction that throws before anything is written. A record carrying
    * a TypeScript declaration too (the path is a code source a code group
    * discovers; helpers/staged-mdx.ts) returns it for the TypeScript check,
    * and a `ts` option or workspace `ts` entry beside it is a contradiction
@@ -662,15 +703,6 @@ export class TestWorkspace {
     readonly tsDeclaration: TsFileDeclaration | undefined;
   } {
     const key = mdxKey(rel);
-    if (!isMdxPath(rel)) {
-      throw new HarnessStagingError(
-        "mdx-derivability",
-        key,
-        `the staged-source record ${JSON.stringify(record.name)} is an ` +
-          "MDX source and the path is not an `.mdx` path — a path S-9 " +
-          "does not judge takes plain contents",
-      );
-    }
     if (beside !== undefined) {
       const what =
         besideForm === "option"
@@ -713,13 +745,16 @@ export class TestWorkspace {
    * A TypeScript staged-source record's staging (helpers/staged-ts.ts) —
    * `file()`'s and an initial `files` entry's alike: the record's bytes
    * under the record's declaration, the one the S-9 self-test verified under
-   * the grammar the record names. An `.mdx` path is an MDX source first (an
-   * MDX record's), and a path selecting the other grammar (SPEC 14.20: a
-   * name ending `.tsx` selects TSX, any other plain TypeScript) would judge
-   * the bytes otherwise than the self-test did — both are mistakes; a
-   * second declaration for the path beside the record (`file()`'s `ts`
-   * option, the workspace declaration's `ts` entry) is a contradiction. All
-   * throw before anything is written. A record makes its path judged
+   * the grammar the record names. An MDX source's path — an `.mdx` path, or
+   * one the workspace declaration or the `mdx` option beside the record
+   * (`mdxBeside`) declares an MDX source — is an MDX record's (an MDX
+   * source first: the self-test judged the TypeScript record's bytes as
+   * TypeScript alone), and a path selecting the other grammar (SPEC 14.20:
+   * a name ending `.tsx` selects TSX, any other plain TypeScript) would
+   * judge the bytes otherwise than the self-test did — both are mistakes;
+   * a second declaration for the path beside the record (`file()`'s `ts`
+   * option, the workspace declaration's `ts` entry) is a contradiction.
+   * All throw before anything is written. A record makes its path judged
    * whatever its name: it is the per-write form of `ts.wellFormed` (or
    * `ts.unparseable`).
    */
@@ -728,18 +763,27 @@ export class TestWorkspace {
     record: StagedTs,
     beside: TsFileDeclaration | undefined,
     besideForm: "option" | "declaration entry",
+    mdxBeside: MdxFileDeclaration | undefined,
   ): {
     readonly data: Uint8Array;
     readonly tsDeclaration: TsFileDeclaration;
   } {
     const key = mdxKey(rel);
-    if (isMdxPath(rel)) {
+    const mdxSource = isMdxPath(rel)
+      ? "the path is an `.mdx` path"
+      : mdxBeside !== undefined
+        ? `the \`mdx\` option ${JSON.stringify(mdxBeside)} beside it declares the path an MDX source`
+        : this.mdxDeclarations.has(key)
+          ? "the workspace's `mdx` declaration names the path, an MDX source"
+          : undefined;
+    if (mdxSource !== undefined) {
       throw new HarnessStagingError(
         "ts-derivability",
         key,
         `the staged-source record ${JSON.stringify(record.name)} is a ` +
-          "TypeScript record and the path is an `.mdx` path — an MDX " +
-          "source is staged as an MDX record (helpers/staged-mdx.ts)",
+          `TypeScript record and ${mdxSource} — an MDX source is staged as ` +
+          "an MDX record (helpers/staged-mdx.ts), carrying its TypeScript " +
+          "declaration too where a code group discovers it",
       );
     }
     const selected = tsGrammarOf(key);
@@ -778,8 +822,10 @@ export class TestWorkspace {
 
   /**
    * The undeclared-staging guard (module header; TEST-SPEC S-9's timing
-   * clause, S-7, H-8): a plain `.mdx` staging — contents that are not a
-   * staged-source record — after a product invocation is first judged at
+   * clause, S-7, H-8): a plain staging at an MDX source's path — an `.mdx`
+   * path, or one the staging declares an MDX source (module header) —
+   * contents that are not a staged-source record, after a product
+   * invocation, is first judged at
    * suite time, against a real product, because S-7's sweep never reaches
    * it; unless its effective declaration exempts it, it is refused with the
    * rule to follow. "After a product invocation" is judged both per
@@ -874,8 +920,9 @@ export class TestWorkspace {
    * Rewrite one spelling in a file's current bytes — `from` replaced by `to`
    * once, in the UTF-8 decoding of the bytes as they stand — and stage the
    * result under the path's S-9 declarations (the workspace declaration's,
-   * else well-formed), judged at staging time like every `.mdx` write and
-   * every code source's or configuration file's (`tsDeclarationOf`). This
+   * else well-formed for an `.mdx` path — `mdxDeclarationOf`), judged at
+   * staging time like every MDX source's write and every code source's or
+   * configuration file's (`tsDeclarationOf`). This
    * stages an edit of bytes the PRODUCT wrote — a rename's or move's
    * rewritten source, which no harness constant equals and which nothing can
    * judge before the product exists — never of a file whose current bytes
@@ -900,8 +947,8 @@ export class TestWorkspace {
   /**
    * Stage another live workspace's current bytes of `rel` here, at `destRel`
    * (default: the same path), under this workspace's S-9 declarations for
-   * the destination, judged at staging time like every `.mdx` write and
-   * every code source's or configuration file's. This
+   * the destination, judged at staging time like every MDX source's write
+   * and every code source's or configuration file's. This
    * carries the PRODUCT's output — a rename's or move's rewritten sources,
    * the configuration and journal beside them — into a fresh workspace (the
    * H-6 two-directory protocol of T6.4-7, T6.5-1, T6.5-3): bytes no harness
@@ -909,9 +956,11 @@ export class TestWorkspace {
    * harness-spelled source (whatever the product left untouched was staged,
    * and judged, in `source` already). Out of a workspace no product has
    * been invoked in, the bytes are the harness's own staging under another
-   * name, so the undeclared-staging guard applies to an `.mdx` destination,
-   * and to a destination the TypeScript check judges, exactly as to plain
-   * contents (a deterministic fixture belongs in the ledger).
+   * name, so the undeclared-staging guard applies to a destination that is
+   * an MDX source's path (an `.mdx` path, or one this workspace's
+   * declaration names), and to a destination the TypeScript check judges,
+   * exactly as to plain contents (a deterministic fixture belongs in the
+   * ledger).
    */
   async copyFrom(
     source: TestWorkspace,
@@ -920,11 +969,9 @@ export class TestWorkspace {
   ): Promise<void> {
     const data = await source.readBytes(rel);
     if (!source.productInvoked) {
-      if (isMdxPath(destRel)) {
-        this.guardUndeclaredStaging(
-          destRel,
-          this.mdxDeclarations.get(mdxKey(destRel)) ?? "well-formed",
-        );
+      const effective = this.mdxDeclarationOf(destRel);
+      if (effective !== undefined) {
+        this.guardUndeclaredStaging(destRel, effective);
       }
       this.guardUndeclaredTsStaging(destRel, this.tsDeclarationOf(destRel));
     }
@@ -933,10 +980,18 @@ export class TestWorkspace {
     await this.write(destRel, data);
   }
 
-  /** The S-9 declaration in effect for a staged path (`.mdx` paths only). */
+  /**
+   * The S-9 declaration in effect for a staged path: the workspace
+   * declaration's entry — a path of any name it names is an MDX source of
+   * that declaration (module header) — else well-formed for an `.mdx`
+   * path; undefined for a path nothing judges (an undeclared path not named
+   * `.mdx`, unless a `file()` option or a record declares it for a write).
+   */
   mdxDeclarationOf(rel: RelPath): MdxFileDeclaration | undefined {
-    if (!isMdxPath(rel)) return undefined;
-    return this.mdxDeclarations.get(mdxKey(rel)) ?? "well-formed";
+    return (
+      this.mdxDeclarations.get(mdxKey(rel)) ??
+      (isMdxPath(rel) ? "well-formed" : undefined)
+    );
   }
 
   /**
@@ -966,7 +1021,6 @@ export class TestWorkspace {
     data: Uint8Array,
     override: MdxFileDeclaration | undefined,
   ): void {
-    if (!isMdxPath(rel)) return;
     const declaration = override ?? this.mdxDeclarationOf(rel);
     if (declaration === undefined) return;
     judgeMdxDeclaration(mdxKey(rel), data, declaration);
@@ -1177,8 +1231,8 @@ export class TestWorkspace {
 }
 
 /**
- * S-9's judge — one code path for the builder (every `.mdx` staging, as it
- * is written) and the self-tests (every staged-source record, before any
+ * S-9's judge — one code path for the builder (every MDX source's staging,
+ * as it is written) and the self-tests (every staged-source record, before any
  * product exists): `data`, a source's exact bytes, must match `declaration`
  * — derive under the stock MDX 3 parser when declared well-formed (under
  * exactly the named allowances when it names any), not derive when declared
@@ -1208,7 +1262,8 @@ export function judgeMdxDeclaration(
         key,
         "declared unparseable (`mdx.unparseable`) but the source derives " +
           "under the stock MDX 3 parser — SPEC 14.20 admits it; declare " +
-          "it well-formed (the default) or, if it relies on an early " +
+          "it well-formed (the default for an `.mdx` path, " +
+          "`mdx.wellFormed` for one of another name) or, if it relies on an early " +
           "error 14.20 admits, name its allowance",
       );
     }
@@ -1332,7 +1387,11 @@ function toBytes(contents: FileContents): Uint8Array {
 
 const MDX_SUFFIX = Buffer.from(".mdx", "utf8");
 
-/** Whether a staged path names an MDX source: it ends in `.mdx`. */
+/**
+ * Whether S-9's MDX default reaches a staged path by its name: it ends in
+ * `.mdx`. A path of another name is an MDX source only when its staging
+ * declares it one (`mdxDeclarationOf`, a `file()` option, a record).
+ */
 function isMdxPath(rel: RelPath): boolean {
   if (typeof rel === "string") return rel.endsWith(".mdx");
   return (
@@ -1421,33 +1480,40 @@ function assertKnownAllowances(
 
 /**
  * Resolve a workspace's S-9 declaration to one entry per path, refusing a
- * declaration defect: a path in two lists, a path that is not an MDX
- * source, an unknown allowance, an empty allowance list.
+ * declaration defect: a path in two lists, an `.mdx` path in `wellFormed`
+ * (its default already), an unknown allowance, an empty allowance list. A
+ * path of another name that a list names is an MDX source of that
+ * declaration (a spec-group file not named `.mdx`; module header).
  */
 function resolveMdxDeclaration(
   decl: WorkspaceMdxDecl,
 ): ReadonlyMap<string, MdxFileDeclaration> {
   const resolved = new Map<string, MdxFileDeclaration>();
   const declare = (rel: string, declaration: MdxFileDeclaration): void => {
-    if (!isMdxPath(rel)) {
-      throw new HarnessStagingError(
-        "mdx-derivability",
-        rel,
-        "the S-9 declaration names a path that is not an MDX source (only " +
-          "`.mdx` paths are judged)",
-      );
-    }
     const key = mdxKey(rel);
     if (resolved.has(key)) {
       throw new HarnessStagingError(
         "mdx-derivability",
         key,
         "the S-9 declaration names the path in more than one of " +
-          "`unparseable`, `unchecked`, `perDraw`, and `allowances`",
+          "`wellFormed`, `unparseable`, `unchecked`, `perDraw`, and " +
+          "`allowances`",
       );
     }
     resolved.set(key, declaration);
   };
+  for (const rel of decl.wellFormed ?? []) {
+    if (isMdxPath(rel)) {
+      throw new HarnessStagingError(
+        "mdx-derivability",
+        mdxKey(rel),
+        "the S-9 declaration's `wellFormed` list names an `.mdx` path, " +
+          "well-formed by default — omit it (`wellFormed` declares a " +
+          "spec-group file of another name an MDX source)",
+      );
+    }
+    declare(rel, "well-formed");
+  }
   for (const rel of decl.unparseable ?? []) declare(rel, "unparseable");
   for (const rel of decl.unchecked ?? []) declare(rel, "unchecked");
   for (const rel of decl.perDraw ?? []) declare(rel, "per-draw");
@@ -1457,7 +1523,8 @@ function resolveMdxDeclaration(
         "mdx-derivability",
         rel,
         "the S-9 declaration names an empty allowance list — omit the path " +
-          "instead (well-formed is the default)",
+          "instead (well-formed is the default for an `.mdx` path; " +
+          "`wellFormed` declares a path of another name)",
       );
     }
     assertKnownAllowances(rel, allowances);

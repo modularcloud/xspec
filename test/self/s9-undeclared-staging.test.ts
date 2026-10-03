@@ -21,7 +21,11 @@
 // in the diagnosis, whatever its declaration (well-formed, unparseable,
 // allowances), and the file is untouched; the exemptions — a staged-source
 // record, `edit()`, `unchecked` (by option or by workspace declaration),
-// `per-draw` (still judged well-formed at staging), a non-`.mdx` path; the
+// `per-draw` (still judged well-formed at staging), an undeclared path not
+// named `.mdx`; a spec-group file not named `.mdx` that its staging
+// declares an MDX source (`mdx.wellFormed`, an `mdx` option) is guarded as
+// an `.mdx` path is — by `file()`, and as an initial entry in a body —
+// with the same exemptions, a record at the path among them; the
 // marks — a working directory inside the root, a symbolic link resolving to
 // the root, a background `startProduct`, never a sibling workspace; the
 // per-body reach — a fresh later-arm workspace's `file()` is refused inside
@@ -318,12 +322,108 @@ test("the exemptions after an invocation: a staged-source record, `edit()`, `unc
   expect((thrown as HarnessStagingError).message).toContain("per draw");
   expect(text(await workspace.readBytes(A))).toBe(WELL_FORMED);
 
-  // A path S-9 judges neither way (a code source at such a name is judged
-  // only when declared — `ts.wellFormed` — and then guarded; below).
+  // A path S-9 judges neither way (an MDX source or a code source at such a
+  // name is judged only when declared — `mdx.wellFormed`, `ts.wellFormed` —
+  // and then guarded; the next test, and the TypeScript arm's below).
   await workspace.file("notes.txt", "plain text\n");
   await workspace.file("specs/code.md", "export {};\n");
   expect(text(await workspace.readBytes("notes.txt"))).toBe("plain text\n");
   expect(text(await workspace.readBytes("specs/code.md"))).toBe("export {};\n");
+});
+
+test("a spec-group file not named `.mdx` that its staging declares an MDX source joins the guard: after an invocation, plain contents there are refused — by `file()`, and as an initial `files` entry in a body — while a record, `unchecked`, and `per-draw` pass, and an undeclared path stays unjudged", async () => {
+  const NOTES = "specs/notes.txt";
+  const workspace = await stage({
+    files: { [A]: WELL_FORMED, [NOTES]: WELL_FORMED },
+    mdx: { wellFormed: [NOTES], unchecked: ["specs/fuzz.txt"] },
+  });
+  // Before any invocation the same plain staging passes, judged.
+  await workspace.file(NOTES, EDITED);
+  await invoke(workspace.root);
+
+  // Declared by the workspace's `mdx.wellFormed`: refused, nothing written.
+  await expectRefused(
+    () => workspace.file(NOTES, WELL_FORMED),
+    NOTES,
+    "in this workspace",
+    'declared "well-formed"',
+    "stagedMdx(",
+  );
+  expect(text(await workspace.readBytes(NOTES))).toBe(EDITED);
+  // Declared by a `file()` option, whatever the declaration.
+  await expectRefused(
+    () =>
+      workspace.file("specs/other.txt", WELL_FORMED, { mdx: "well-formed" }),
+    "specs/other.txt",
+    'declared "well-formed"',
+  );
+  await expectRefused(
+    () => workspace.file("specs/bad.txt", ILL_FORMED, { mdx: "unparseable" }),
+    "specs/bad.txt",
+    'declared "unparseable"',
+  );
+  expect(await workspace.kind("specs/other.txt")).toBe("absent");
+  expect(await workspace.kind("specs/bad.txt")).toBe("absent");
+
+  // The exemptions: a record (it declares its path an MDX source and
+  // carries the declaration), `unchecked`, and `per-draw` (still judged).
+  await workspace.file(
+    NOTES,
+    stagedMdx(
+      "T0-1 guard: the edited source at a path not named .mdx",
+      WELL_FORMED,
+    ),
+  );
+  expect(text(await workspace.readBytes(NOTES))).toBe(WELL_FORMED);
+  await workspace.file("specs/fuzz.txt", ILL_FORMED);
+  await workspace.file("specs/bad.txt", ILL_FORMED, { mdx: "unchecked" });
+  await workspace.file(NOTES, EDITED, { mdx: "per-draw" });
+  expect(text(await workspace.readBytes(NOTES))).toBe(EDITED);
+  let thrown: unknown;
+  try {
+    await workspace.file(NOTES, ILL_FORMED, { mdx: "per-draw" });
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(HarnessStagingError);
+  expect((thrown as HarnessStagingError).mode).toBe("mdx-derivability");
+  expect(text(await workspace.readBytes(NOTES))).toBe(EDITED);
+  // Undeclared: neither judged nor guarded.
+  await workspace.file("specs/plain.txt", ILL_FORMED);
+  expect(text(await workspace.readBytes("specs/plain.txt"))).toBe(ILL_FORMED);
+
+  // As an initial `files` entry of a workspace created after the running
+  // body's first invocation: refused at creation, nothing left behind; a
+  // record entry there passes, and an undeclared entry is unjudged.
+  await runProductTestBody("T0-16", async () => {
+    const first = await stage({ files: { [A]: WELL_FORMED } });
+    await invoke(first.root);
+    const refused = await createInPrivateTemp({
+      files: { [NOTES]: WELL_FORMED },
+      mdx: { wellFormed: [NOTES] },
+    });
+    expect(refused.created).toBeUndefined();
+    expectUndeclared(
+      refused.thrown,
+      NOTES,
+      "an initial `files` entry of a workspace created after a product invocation in the running body of T0-16",
+      'declared "well-formed"',
+    );
+    expect(refused.leftBehind).toEqual([]);
+    const record = expectCreated(
+      await createInPrivateTemp({
+        files: {
+          [NOTES]: stagedMdx(
+            "T0-16 guard: a later workspace's initial source at a path not named .mdx",
+            WELL_FORMED,
+          ),
+          "specs/plain.txt": ILL_FORMED,
+        },
+      }),
+    );
+    expect(text(await record.readBytes(NOTES))).toBe(WELL_FORMED);
+    expect(text(await record.readBytes("specs/plain.txt"))).toBe(ILL_FORMED);
+  });
 });
 
 test("an invocation inside the root marks the workspace; a background start marks it before the child runs; a sibling workspace stays unmarked", async () => {
