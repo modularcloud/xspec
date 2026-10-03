@@ -38,20 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 48 — T7-2: the four import-modifier arms (TEST-SPEC L321; SPEC 7, 14.14; B1)
-
-**Where.** `test/suite/registry/section-7-basics.ts`: `FORM_VIOLATIONS`.
-
-**Change.** Add four arms. Each import below is followed by an otherwise valid `export default defineConfig({…})`, and each fails with 14.14, exit 2:
-- `import type { defineConfig } from "xspec"`;
-- `import { type defineConfig } from "xspec"`;
-- `import defer { defineConfig } from "xspec"`;
-- `import { defineConfig } from "xspec" with { type: "json" }`.
-
-S-9 names every one of these configurations well-formed: 5.9.3 accepts each both ways.
-
-**Checks.** S-9 (Task 14's vectors already hold these forms) and S-7 pass. T7-2 against the built product.
-
 ### Task 49 — T7.1-1: the path-character arms and the code-group control (TEST-SPEC L326; SPEC 7.1, 14.19; B4)
 
 **Where.** `test/suite/registry/section-7.1-7.3.ts`.

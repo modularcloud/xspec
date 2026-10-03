@@ -75,6 +75,16 @@
 // - T7-2 single-deviation staging: every invalid fixture is the valid
 //   canonical configuration with exactly one deviation, so the refusal is
 //   attributable to the arm's malformation and nothing else.
+// - T7-2 import modifiers (SPEC 7): four arms — `import type { … }`,
+//   `import { type … }`, `import defer { … }`, and an import carrying
+//   `with { type: "json" }` — each the canonical configuration with only
+//   its import line changed. Every one is a text TypeScript 5.9.3 accepts
+//   both as module code and as script code, so each record is declared
+//   well-formed (S-9; the same four texts are vectors of
+//   test/self/s9-typescript-well-formedness.test.ts) and the refusal is the
+//   declarative form's (14.14), never a parse failure's; a product reading
+//   the binding loosely loads each and builds (exit 0), failing the
+//   exit-code assertion.
 // - T7-2 string-literal keys arm: "both groups discover their globs' files"
 //   is observed as the spec group's exact `ids` listing plus whole-graph
 //   edge-set equality carrying the code file's marker edge (T7-3's
@@ -994,6 +1004,56 @@ export default {
 export default defineConfig
 `,
   },
+  // The import carries no `type` or `defer` modifier and no import
+  // attributes (SPEC 7): four well-formed texts (module header).
+  {
+    label:
+      'a type-only import clause: import type { defineConfig } from "xspec"',
+    config: `import type { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label:
+      'a type-only import specifier: import { type defineConfig } from "xspec"',
+    config: `import { type defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label: 'a deferred import: import defer { defineConfig } from "xspec"',
+    config: `import defer { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label:
+      "import attributes: " +
+      'import { defineConfig } from "xspec" with { type: "json" }',
+    config: `import { defineConfig } from "xspec" with { type: "json" }
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
 ]);
 
 // The valid arm: an aliased defineConfig import (SPEC 7: optionally aliased).
@@ -1314,9 +1374,10 @@ const T7_2 = defineProductTest({
   id: "T7-2",
   title:
     "declarative form: a syntax error, a missing or misdirected " +
-    "defineConfig import, extra statements, each non-literal argument " +
-    "form, and a non-call default export are configuration errors (14.14, " +
-    "exit 2); an aliased defineConfig import is valid; string-literal " +
+    "defineConfig import, a type or defer modifier or import attributes " +
+    "on that import, extra statements, each non-literal argument form, " +
+    "and a non-call default export are configuration errors (14.14, exit " +
+    "2); an aliased defineConfig import is valid; string-literal " +
     "group-name keys are part of the accepted form — they load, discover, " +
     "and resolve in a coverage profile and a policy selector (SPEC 7, 7.4, " +
     "7.5, 8); literals are read verbatim — an escape-spelled glob matches " +
