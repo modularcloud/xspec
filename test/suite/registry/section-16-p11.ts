@@ -10,12 +10,18 @@
 //
 //   * every invocation terminates — operationalized by the subprocess
 //     driver's hang guard (helpers/subprocess.ts): a run killed by the
-//     per-invocation timeout or the runaway-output cap is converted into a
-//     *diagnosed assertion failure* (H-8), because termination is this
-//     property's assertion, not merely harness hygiene; the timeout is
-//     dimensioned to the staged answer scale (H-11; `FUZZ_COMMAND_TIMEOUT_MS`
-//     below), and a killed invocation is reported unshrunk, since every
-//     shrink candidate re-observing a kill would cost the full guard;
+//     per-invocation timeout is converted into a *diagnosed assertion
+//     failure* (H-8; S-3: hangs are reported as failures), because
+//     termination is this property's assertion, not merely harness hygiene;
+//     the timeout is dimensioned to the staged answer scale (H-11;
+//     `FUZZ_COMMAND_TIMEOUT_MS` below), and a killed invocation is reported
+//     unshrunk, since every shrink candidate re-observing a kill would cost
+//     the full guard. A run killed by the driver's output-capture cap is
+//     never converted: an exhausted capture limit is a loud harness error,
+//     which `checkProperty` reports with the seed — never a falsified
+//     property, since a truncated capture is indistinguishable from a
+//     partial document (H-11; S-8 dimensions the cap to the staged answer
+//     scale and pins this division);
 //   * stdout is one complete JSON document, never partial — the three
 //     surfaces are JSON-only (SPEC 11: a single JSON document is the only
 //     output form, with or without `--json`), so the entire stdout must
@@ -100,11 +106,11 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import {
-  ProductRunOutputOverflowError,
   ProductRunTimeoutError,
   runProduct,
 } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { FuzzRunGuards } from "./section-16-p8.js";
 import {
   drawFuzzMutation,
   FUZZ_BASE_FILES,
@@ -433,45 +439,43 @@ export function renderAvailabilityTrial(trial: AvailabilityTrial): string {
 const FUZZ_COMMAND_TIMEOUT_MS = 120_000;
 
 /**
- * Run one availability invocation, converting the hang-guard and
- * runaway-output kills — exactly those — into diagnosed assertion failures:
- * P-11's first clause is that every invocation terminates. Anything else
- * thrown by the driver stays a harness error (H-8).
+ * Run one availability invocation, converting the hang-guard kill — exactly
+ * that — into a diagnosed assertion failure: P-11's first clause is that
+ * every invocation terminates (S-3: hangs are reported as failures). An
+ * exhausted capture limit (`ProductRunOutputOverflowError`) is never
+ * converted: it propagates out of the property body as a harness error that
+ * `checkProperty` reports with the seed — never a falsified property (H-11)
+ * — and so does anything else the driver throws (H-8). `guards` is P-8's
+ * `FuzzRunGuards`, for S-8's self-test alone; the registered body passes
+ * none.
  */
-async function runAvailabilityCommand(
+export async function runAvailabilityCommand(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
+  guards: FuzzRunGuards = {},
 ): Promise<RunResult> {
   try {
     return await runProduct(product, {
       cwd: workspace.root,
       argv,
-      timeoutMs: FUZZ_COMMAND_TIMEOUT_MS,
+      timeoutMs: guards.timeoutMs ?? FUZZ_COMMAND_TIMEOUT_MS,
+      maxOutputBytes: guards.maxOutputBytes,
     });
   } catch (error) {
-    // Both driver kills are reported unshrunk (`shrinkable: false`): a
-    // shrink candidate can re-observe a kill only by waiting out the guard
-    // (or filling the output cap) again — one full guard per candidate — so
-    // shrinking's execution budget would stop bounding the body's wall
-    // clock (the entry's `timeoutMs` below). The drawn trial, at most three
-    // mutations and four invocations, is the reported counterexample, and
-    // its seed replays it (H-10).
+    // The hang-guard kill is reported unshrunk (`shrinkable: false`): a
+    // shrink candidate can re-observe it only by waiting out the guard
+    // again — one full guard per candidate — so shrinking's execution
+    // budget would stop bounding the body's wall clock (the entry's
+    // `timeoutMs` below). The drawn trial, at most three mutations and four
+    // invocations, is the reported counterexample, and its seed replays it
+    // (H-10).
     if (error instanceof ProductRunTimeoutError) {
       fail(
         `P-11: every invocation of the availability surfaces must terminate ` +
           `on fuzzed sources (TEST-SPEC §16 P-11; SPEC 11.2, 12.0), but the ` +
           `invocation was still running when the harness's hang guard killed ` +
           `it — ${error.message}`,
-        { shrinkable: false },
-      );
-    }
-    if (error instanceof ProductRunOutputOverflowError) {
-      fail(
-        `P-11: every invocation must terminate with bounded output — one ` +
-          `complete JSON document (TEST-SPEC §16 P-11; SPEC 11, 12.0) — but ` +
-          `the invocation emitted unbounded output until the harness's ` +
-          `runaway-output guard killed it — ${error.message}`,
         { shrinkable: false },
       );
     }

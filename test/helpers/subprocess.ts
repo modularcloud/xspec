@@ -18,7 +18,9 @@
 // - Robustness (H-8): a hanging child is killed and converted into a
 //   diagnosed timeout failure (never a skip, never a harness hang); a missing
 //   executable or working directory is a diagnosed per-test failure, not a
-//   harness crash; runaway output is capped, killed, and diagnosed.
+//   harness crash; runaway output is capped and killed, surfacing as a loud
+//   `ProductRunOutputOverflowError` — an exhausted capture limit is a
+//   harness error, never a silent truncation (H-11).
 // - 13.5 support: background start (`startProduct`), hold-file choreography
 //   (`createHoldFile` / `RunningProduct.waitForFile` / `releaseHoldFile`),
 //   process kill, and concurrent invocations (every run is independent).
@@ -121,10 +123,16 @@ export class ProductRunTimeoutError extends Error {
 }
 
 /**
- * A run killed by the runaway-output guard (H-8): combined stdout+stderr
- * exceeded the invocation's byte cap. Typed for the same reason as
- * {@link ProductRunTimeoutError}: unbounded output is non-termination within
- * budget for a robustness property.
+ * A run killed by the runaway-output guard (H-8: runaway output never hangs
+ * the harness): combined stdout+stderr exceeded the invocation's byte cap.
+ * The cap is the harness's capture limit, dimensioned to the suite's staged
+ * answer scale (`DEFAULT_MAX_OUTPUT_BYTES`), so exhausting it is a loud
+ * harness error — never a silent truncation, which is indistinguishable
+ * from a partial document, and never a diagnosed product failure (H-11).
+ * Typed so S-8 can pin that an exhausted cap fails loudly, and so the
+ * termination properties (P-8, P-11), which convert exactly the hang-guard
+ * kill ({@link ProductRunTimeoutError}) into a diagnosed failure, tell the
+ * two kills apart.
  */
 export class ProductRunOutputOverflowError extends Error {
   constructor(message: string) {
@@ -364,7 +372,7 @@ export class RunningProduct {
           if (overflowed) {
             reject(
               new ProductRunOutputOverflowError(
-                `${commandLine} exceeded the output limit of ${maxOutputBytes} bytes and was killed (H-8: runaway output is a failure, not a harness hang).`,
+                `${commandLine} exceeded the output limit of ${maxOutputBytes} bytes and was killed: an exhausted capture limit is a harness error, never a silent truncation (H-11).`,
               ),
             );
             return;

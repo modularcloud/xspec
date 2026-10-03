@@ -541,7 +541,7 @@ test("concurrent invocations stay isolated: each returns its own argv, output, a
   expect(exitResults.map((result) => result.exitCode)).toEqual([11, 12, 13]);
 });
 
-test("a child exceeding the output cap is killed with a diagnosed failure (H-8: runaway output never hangs the harness)", async () => {
+test("a child exceeding the output cap is killed with a loud overflow error, never a silent truncation (H-8: runaway output never hangs the harness; H-11)", async () => {
   const { workspace, binding } = await standin();
   await expect(
     runProduct(binding, {

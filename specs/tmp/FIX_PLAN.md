@@ -59,7 +59,7 @@ Why the harness changed in this re-descent: the documents moved after the harnes
 
 **Order.** Tasks are in dependency order, and each names what it depends on:
 - Part A (Task 1, the certification gap D1): done and removed.
-- Part B (Tasks 2–4): harness machinery — H-11's capture-limit errors, and S-9's MDX judgement of spec-group files not named `.mdx`.
+- Part B (Tasks 2b–4): harness machinery — H-11's capture-limit errors, and S-9's MDX judgement of spec-group files not named `.mdx`. Task 2 (P-8's and P-11's capture-limit errors) is done and removed; Task 2b, split from it, carries H-11's rule to the other helpers that convert driver rejections.
 - Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order.
 - Part D (Tasks 10–13): P-8's command sweep.
 - Task 14 confirms the result and deletes the plan.
@@ -70,28 +70,31 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part B — Machinery
 
-### Task 2 — An exhausted capture limit during P-8 or P-11 is a harness error, never a falsified property (C3; TEST-SPEC §0 H-11; §17 S-3)
+### Task 2b — Every other conversion of a driver rejection lets an exhausted capture limit propagate as a harness error (split from Task 2 by its spawn; TEST-SPEC §0 H-11)
 
-**Depends on.** Nothing. Land it before Part D, whose new P-8 forms inherit its semantics.
+**Depends on.** Task 2 (done and removed): P-8 and P-11 now convert only the hang-guard kill; `test/helpers/subprocess.ts` states H-11's rule on `ProductRunOutputOverflowError` and in its message; S-8's vector "an exhausted capture limit in a P-8 or P-11 command run is a harness error naming the seed …" pins those two properties through P-8's exported `FuzzRunGuards`.
 
-**The requirement.** H-11: "an exhausted capture limit MUST surface as a loud harness error, never as silent truncation … (P-8, P-11). A harness-side failure while capturing … — a crash, hang, or exhausted internal limit — is reported as a defect in the harness, never as a diagnosed product failure and never as a pass". The subprocess driver correctly raises `ProductRunOutputOverflowError` at its cap (`DEFAULT_MAX_OUTPUT_BYTES`, 512 MiB). P-8 and P-11 then catch it and call `fail(...)` ("emitted unbounded output until the harness's runaway-output guard killed it"). That turns it into a diagnosed failure of the property, and P-8's header calls this deliberate.
+**The requirement.** H-11 binds every capture, not only P-8's and P-11's: "an exhausted capture limit MUST surface as a loud harness error, never as silent truncation … A harness-side failure while capturing or evaluating an answer — a crash, hang, or exhausted internal limit — is reported as a defect in the harness, never as a diagnosed product failure and never as a pass". Task 2's survey found helpers that catch any rejection of `runProduct`, `RunningProduct.waitForExit`, or `RunningProduct.waitForFile` and turn it into `fail(...)`. A `ProductRunOutputOverflowError` reaching them becomes a diagnosed product failure. The gap is latent (no staging comes near the 512 MiB cap), but a product with runaway output would be misdiagnosed. `waitForFile` itself folds an overflow into a plain `Error` ("exited before creating … — <outcome>"), so its callers cannot tell it apart.
 
-**Where.**
-- `test/suite/registry/section-16-p8.ts`:
-  - `runFuzzCommand` (about L1225–1260), with the overflow branch at about L1250–1256;
-  - its doc comment ("converting the hang-guard and runaway-output kills — exactly those — into diagnosed assertion failures");
-  - the module header (about L10–14: "a run killed by the per-invocation timeout or by the runaway-output cap is converted into a *diagnosed assertion failure*").
-- `test/suite/registry/section-16-p11.ts`: the matching run helper (about L435–478), with the overflow branch at about L469–476, its doc comment, and the module header (about L13).
+**Where** (line numbers as of Task 2's commit):
+- `test/suite/registry/section-13.5.ts`:
+  - `runBounded` (catch at about L325) and `describeExit` (about L303–309, which folds a rejection into a premature-exit description);
+  - the `waitForExit` catches at about L515, L648, L1110, L1286, L1683, L1936, and L2094;
+  - T13.5-4's storm `Promise.allSettled` (about L1320–1333) and T13.5-6's (about L1718–1740, which rethrows only `HarnessAssertionError`).
+- `test/suite/registry/section-16-p10.ts`: `runHeldRead` (about L660–687), `settleStraddleRead` (about L702), the hold-file wait (about L920), the premature-exit fold (about L933–937), and the catches at about L973 and L1012.
+- `test/suite/registry/section-6.6.ts` (about L1408); `test/suite/registry/section-7-discovery.ts`, T7-5's `.catch` (about L1072).
+- `test/suite/registry/write-refusal-staging.ts`: about L128 (`waitForFile`), L659 (`runProduct`), and L694 (`waitForExit`).
+- The `waitForFile` catches in `section-12.0-i.ts` (about L1810) and `section-12.0-ii.ts` (about L1584).
+- `test/helpers/subprocess.ts`: `waitForFile`'s exited-first branch.
 
 **Change.**
-- Remove both overflow conversions, so `ProductRunOutputOverflowError` propagates out of the property body. `checkProperty` (`test/helpers/property.ts`) already rethrows any error other than `HarnessAssertionError` as a harness error carrying the seed (H-10).
-- Keep both timeout conversions: S-3 says the driver "detects hangs via timeout and reports them as failures, not skips", and termination is P-8's and P-11's first clause.
-- Rewrite the headers and doc comments: a timeout is a diagnosed failure of the termination clause; an exhausted capture limit is a harness error (H-11).
-- Leave the driver's cap and S-8's overflow test unchanged. Drop each module's `ProductRunOutputOverflowError` import if it becomes unused.
+- At every site, let `ProductRunOutputOverflowError` propagate unchanged: for instance, one exported helper in `test/helpers/subprocess.ts` that rethrows it, called first in each catch and in each `allSettled` rejection branch. Keep every conversion of the hang-guard kill (`ProductRunTimeoutError`) and of product-attributable outcomes as it is.
+- In `waitForFile`, when the child exited first because the cap killed it, rethrow that `ProductRunOutputOverflowError` itself instead of folding it into the "exited before creating" error.
+- Fix each doc comment that names runaway output among the converted rejections (for example P-10's "converting a rejection (hang, runaway output) into a diagnosed failure (H-8)").
 
 **Checks.**
-- Show that an overflow inside `checkProperty` now yields a harness error naming the seed: not a `PropertyFalsifiedError`, not any `HarnessAssertionError`. Do it with a scratch check deleted before committing: drive P-8's and P-11's run helpers, with the cap lowered, against a stand-in that floods stdout. Or add a permanent self-test vector, if the cap can be injected without changing what the registered bodies run.
-- P-8 and P-11 against the built product: outcomes unchanged (record them).
+- Show that at least `runBounded`, P-10's `runHeldRead`, and `waitForFile` surface a lowered-cap overflow, against a flooding stand-in, as an error that is not a `HarnessAssertionError`. Use a permanent self-test vector if the cap can be injected without changing what the registered bodies run (as Task 2 did with `FuzzRunGuards`), or a scratch check deleted before committing.
+- The touched suite files against the built product: outcomes unchanged (record them).
 
 ### Task 3 — S-9 judges a spec-group file not named `.mdx` as an MDX source when the staging declares it one (C2, part 1: the mechanism; TEST-SPEC §17 S-9; SPEC 14.20, 14.19, 7.1)
 
@@ -321,7 +324,7 @@ The engineer of iteration 1's Task 58 (dd68bfe) flagged this risk. Neither the b
 
 ### Task 11 — P-8 sweeps the read surfaces, and the JSON-only rule applies by surface (C1, part 2; TEST-SPEC §16 P-8, §0 H-5; SPEC 11.1, 11.3–11.6, 12.0, 12.6)
 
-**Depends on.** Tasks 2 and 10.
+**Depends on.** Task 10. (Task 2, done and removed, gave `runFuzzCommand` H-11's semantics: it converts only the hang-guard kill, and an exhausted capture limit propagates as a harness error.)
 
 **Change.**
 - Add to `COMMAND_MENU`:

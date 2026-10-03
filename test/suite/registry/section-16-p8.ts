@@ -9,9 +9,14 @@
 //
 //   * every command terminates — operationalized by the subprocess driver's
 //     hang guard (helpers/subprocess.ts): a run killed by the per-invocation
-//     timeout or by the runaway-output cap is converted into a *diagnosed
-//     assertion failure* (H-8), because termination is this property's
-//     assertion, not merely its harness hygiene;
+//     timeout is converted into a *diagnosed assertion failure* (H-8; S-3:
+//     hangs are reported as failures), because termination is this
+//     property's assertion, not merely its harness hygiene. A run killed by
+//     the driver's output-capture cap is never converted: an exhausted
+//     capture limit is a loud harness error, which `checkProperty` reports
+//     with the seed — never a falsified property, since a truncated capture
+//     is indistinguishable from a partial document (H-11; S-8 dimensions the
+//     cap to the staged answer scale and pins this division);
 //   * a command never dies by signal and always exits 0, 1, or 2 — the
 //     SPEC 12.0 exit-code partition ("exit codes partition all outcomes");
 //   * under `--json`, stdout is never a partial JSON document: exit 0/1
@@ -152,7 +157,6 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import {
-  ProductRunOutputOverflowError,
   ProductRunTimeoutError,
   runProduct,
 } from "../../helpers/subprocess.js";
@@ -1223,21 +1227,41 @@ export function renderFuzzTrial(trial: FuzzTrial): string {
 const FUZZ_COMMAND_TIMEOUT_MS = 10_000;
 
 /**
- * Run one command over the fuzzed workspace, converting the hang-guard and
- * runaway-output kills — exactly those — into diagnosed assertion failures:
- * P-8's first clause is that every command terminates. Anything else thrown
- * by the driver stays a harness error (H-8).
+ * The two subprocess-driver guards a fuzz command run is held to (P-8's
+ * `runFuzzCommand`, P-11's `runAvailabilityCommand`): the per-invocation
+ * hang guard — by default the property module's `FUZZ_COMMAND_TIMEOUT_MS` —
+ * and the output-capture cap — by default the driver's
+ * `DEFAULT_MAX_OUTPUT_BYTES` (H-11). The registered P-8 and P-11 bodies pass
+ * neither; S-8's self-test (test/self/s8-answer-scale-capacity.test.ts)
+ * lowers both, to pin which kill is a diagnosed failure of the termination
+ * clause and which a harness error.
  */
-async function runFuzzCommand(
+export interface FuzzRunGuards {
+  readonly timeoutMs?: number;
+  readonly maxOutputBytes?: number;
+}
+
+/**
+ * Run one command over the fuzzed workspace, converting the hang-guard kill
+ * — exactly that — into a diagnosed assertion failure: P-8's first clause is
+ * that every command terminates (S-3: hangs are reported as failures). An
+ * exhausted capture limit (`ProductRunOutputOverflowError`) is never
+ * converted: it propagates out of the property body as a harness error that
+ * `checkProperty` reports with the seed — never a falsified property (H-11)
+ * — and so does anything else the driver throws (H-8).
+ */
+export async function runFuzzCommand(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
+  guards: FuzzRunGuards = {},
 ): Promise<RunResult> {
   try {
     return await runProduct(product, {
       cwd: workspace.root,
       argv,
-      timeoutMs: FUZZ_COMMAND_TIMEOUT_MS,
+      timeoutMs: guards.timeoutMs ?? FUZZ_COMMAND_TIMEOUT_MS,
+      maxOutputBytes: guards.maxOutputBytes,
     });
   } catch (error) {
     if (error instanceof ProductRunTimeoutError) {
@@ -1245,13 +1269,6 @@ async function runFuzzCommand(
         `P-8: every command must terminate on fuzzed input (TEST-SPEC §16 P-8; ` +
           `SPEC 12.0), but the invocation was still running when the harness's ` +
           `hang guard killed it — ${error.message}`,
-      );
-    }
-    if (error instanceof ProductRunOutputOverflowError) {
-      fail(
-        `P-8: every command must terminate on fuzzed input with bounded output ` +
-          `(TEST-SPEC §16 P-8; SPEC 12.0), but the invocation emitted unbounded ` +
-          `output until the harness's runaway-output guard killed it — ${error.message}`,
       );
     }
     throw error;

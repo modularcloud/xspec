@@ -27,7 +27,13 @@
 //      (H-2, C-2); the captured bytes must be complete and identical to what
 //      it emitted, the capture feeds the decoders unchanged, the default
 //      capture cap must hold at least twice the document, and a cap set just
-//      below the document must surface as ProductRunOutputOverflowError.
+//      below the document must surface as ProductRunOutputOverflowError;
+//   4. an exhausted capture limit stays a harness error even where
+//      termination is the assertion: P-8's and P-11's command runs, their
+//      capture cap lowered against a flooding stand-in, let the overflow
+//      propagate out of the property, which reports it as a harness error
+//      naming the seed — never a falsified property — while the hang-guard
+//      kill, their termination clause, stays a diagnosed failure (S-3).
 
 import { Buffer } from "node:buffer";
 import { once } from "node:events";
@@ -54,8 +60,16 @@ import {
   describeJsonValue,
 } from "../helpers/adapters/index.js";
 import type { IdsTreeNode, ViewNode } from "../helpers/adapters/index.js";
-import { parseJsonStdout } from "../helpers/assertions.js";
-import { drawFixedSeedTrials } from "../helpers/property.js";
+import {
+  HarnessAssertionError,
+  parseJsonStdout,
+} from "../helpers/assertions.js";
+import {
+  checkProperty,
+  drawFixedSeedTrials,
+  PROPERTY_SEED_ENV,
+  PropertyFalsifiedError,
+} from "../helpers/property.js";
 import {
   DEFAULT_MAX_OUTPUT_BYTES,
   ProductRunOutputOverflowError,
@@ -84,6 +98,7 @@ import { canonicalizeJson } from "../suite/registry/section-12.0-i.js";
 import {
   documentCarriesUnavailability,
   genAvailabilityTrial,
+  runAvailabilityCommand,
 } from "../suite/registry/section-16-p11.js";
 import {
   generatedDoc,
@@ -92,6 +107,7 @@ import {
 import {
   genFuzzTrial,
   MAX_MUTATIONS_PER_TRIAL,
+  runFuzzCommand,
 } from "../suite/registry/section-16-p8.js";
 import {
   DEEPEST_STAGED_TOWER,
@@ -858,3 +874,101 @@ test("S-8: capture gate — the largest synthetic document (`view --text` blowup
   );
   expect(summary.containsTargets).toHaveLength(BLOWUP_TOWERS);
 }, 600_000);
+
+/**
+ * Stand-in for the two driver kills a fuzz command run can meet (header
+ * item 4): `flood` writes 4 MiB to stdout and exits — past any small capture
+ * cap — and `hang` never exits.
+ */
+const GUARD_STANDIN_SOURCE = `const mode = process.argv[2];
+if (mode === "flood") {
+  const chunk = "x".repeat(1 << 16);
+  for (let i = 0; i < 64; i += 1) process.stdout.write(chunk);
+} else {
+  setInterval(() => {}, 60000);
+}
+`;
+
+/** The seed the guard vectors run under (one of E-5's fixed seeds). */
+const GUARD_VECTOR_SEED = 314159265;
+
+/** What a property run rejects with; a run that resolves fails the vector. */
+async function rejectionOf(run: Promise<void>): Promise<unknown> {
+  try {
+    await run;
+  } catch (error) {
+    return error;
+  }
+  throw new Error("S-8: expected the property run to reject");
+}
+
+test("S-8: an exhausted capture limit in a P-8 or P-11 command run is a harness error naming the seed, never a falsified property; the hang-guard kill stays a diagnosed failure (H-11; S-3)", async () => {
+  const workspace = await TestWorkspace.create({
+    files: { "guards.mjs": GUARD_STANDIN_SOURCE },
+  });
+  onTestFinished(() => workspace.dispose());
+  const binding: ProductBinding = {
+    label: "S-8 guard stand-in",
+    command: process.execPath,
+    prefixArgs: [workspace.path("guards.mjs")],
+  };
+  const runners = [
+    ["P-8", runFuzzCommand],
+    ["P-11", runAvailabilityCommand],
+  ] as const;
+  for (const [property, run] of runners) {
+    // The capture cap lowered below what `flood` emits: the kill propagates
+    // out of the body, and `checkProperty` reports it as a harness error
+    // carrying the seed — neither a `PropertyFalsifiedError` nor any other
+    // `HarnessAssertionError`.
+    const overflow = await rejectionOf(
+      checkProperty(
+        `${property} capture-limit vector`,
+        () => null,
+        async () => {
+          await run(binding, workspace, ["flood"], { maxOutputBytes: 4096 });
+        },
+        {
+          runs: 1,
+          seeds: [GUARD_VECTOR_SEED],
+          env: {},
+          maxShrinkExecutions: 0,
+        },
+      ),
+    );
+    expect(overflow, property).toBeInstanceOf(Error);
+    expect(overflow, property).not.toBeInstanceOf(HarnessAssertionError);
+    const error = overflow as Error;
+    expect(error.message, property).toContain(
+      `harness error while running trial 1 of 1 with seed ${String(GUARD_VECTOR_SEED)}`,
+    );
+    expect(error.message, property).toContain(
+      `${PROPERTY_SEED_ENV}=${String(GUARD_VECTOR_SEED)}`,
+    );
+    expect(error.cause, property).toBeInstanceOf(ProductRunOutputOverflowError);
+
+    // The hang guard lowered below `hang`'s lifetime: the kill falsifies the
+    // property's termination clause, a diagnosed failure naming the seed.
+    const hang = await rejectionOf(
+      checkProperty(
+        `${property} hang-guard vector`,
+        () => null,
+        async () => {
+          await run(binding, workspace, ["hang"], { timeoutMs: 300 });
+        },
+        {
+          runs: 1,
+          seeds: [GUARD_VECTOR_SEED],
+          env: {},
+          maxShrinkExecutions: 0,
+        },
+      ),
+    );
+    expect(hang, property).toBeInstanceOf(PropertyFalsifiedError);
+    const falsified = hang as PropertyFalsifiedError;
+    expect(falsified.seed, property).toBe(GUARD_VECTOR_SEED);
+    expect(falsified.assertionMessage, property).toContain(
+      "hang guard killed it",
+    );
+  }
+}, 60_000);
