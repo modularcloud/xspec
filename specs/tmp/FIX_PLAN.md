@@ -36,30 +36,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ## Tasks
 
-### Part C — The T-numbered tests, in TEST-SPEC order
-
-### Task 61 — T14-12: the re-descent arms (TEST-SPEC L594; SPEC 14.20; B17)
-
-**Depends on.** Tasks 14, 15, and 17.
-
-**Where.** `test/suite/registry/section-14-iii.ts`: `T14_12_FORM_VECTORS` and its siblings.
-
-**Change.** Spellings from L594.
-- *Release pin.* `.ts` sources holding `{ using x = f(); }`, `async function g() { await using y = h(); }`, and `import a from "./a.json" with { type: "json" };`. For each, `build` and `check` exit 0 and a marker records its edge.
-- *Language level.*
-  - `const ` U+2EBF0 ` = 1` with the marker `S.`U+2EBF0, pointing at section U+2EBF0: exit 0, the `references` edge recorded.
-  - A configuration with `import { defineConfig as ` U+2EBF0 ` } from "xspec"` and `export default ` U+2EBF0 `({…})` loads, and `build` exits 0.
-- *U+1C89 negative.* `const ` U+1C89 `x = 1` in a `.ts` gives 14.20 at the zero-length range at offset 6.
-- *Code-source whitespace.* `const`, U+200B, `a = 1`, then on a later line `const`, U+0085, `b = 1`. This is well-formed: exit 0.
-- *Unicode-pin MDX arms.* None of the three may be 14.20:
-  - `{` U+2EBF0 `}` alone on its line gives 14.16 at the container;
-  - `<a` U+2EBF0 ` />` gives 14.16 at its tag;
-  - `<S id="x" a` U+2EBF0 `="v" />` gives 14.17 at that attribute.
-
-  Export each MDX staging for S-9, as `T14_12_FORM_VECTORS` is exported, and judge it in the S-9 self-test.
-
-**Checks.** S-9 (both judges) and S-7 pass. T14-12 against the built product.
-
 ### Part D — Properties, the Windows leg, and S-9's generated forms
 
 ### Task 62 — P-2: the full brace-whitespace set (TEST-SPEC §16 P-2, L605; S-9; C6; D's CONF-MD note)
