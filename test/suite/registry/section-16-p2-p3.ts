@@ -496,14 +496,46 @@ const LINE_COMMENT_ALPHABET: ReadonlyArray<readonly [number, string]> =
 const lineCommentProse: Gen<string> = (choices) =>
   ` ${run((c: Choices) => c.weightedPick(LINE_COMMENT_ALPHABET), 0, 6)(choices)} `;
 
-/** ECMAScript's whitespace and line terminators that 1.4 excludes (14.20). */
-const ECMASCRIPT_ONLY_WHITESPACE = [NBSP, FEFF, LS, PS] as const;
+/**
+ * The whitespace P-2 draws between a comment container's braces: ECMAScript's
+ * whitespace and line terminators that 1.4 excludes (14.20, T2.7-4) — U+FEFF,
+ * U+2028, U+2029, and every Unicode 15.1 space separator but U+0020: U+00A0,
+ * U+1680, U+2000 through U+200A, U+202F, U+205F, and U+3000 (TEST-SPEC §16
+ * P-2). Code point order, U+00A0 (the shrink target) first.
+ */
+export const ECMASCRIPT_ONLY_WHITESPACE: readonly string[] = [
+  NBSP,
+  cp(0x1680),
+  ...Array.from({ length: 0x200a - 0x2000 + 1 }, (_, k) => cp(0x2000 + k)),
+  LS,
+  PS,
+  cp(0x202f),
+  cp(0x205f),
+  cp(0x3000),
+  FEFF,
+];
 
 const ecmascriptOnlyWhitespaceChar: Gen<string> = (choices) =>
   choices.pick(ECMASCRIPT_ONLY_WHITESPACE);
 
-/** Whitespace beside a `text(...)` call or between comments in a container:
- * 1.4's inline whitespace and, less often, ECMAScript's own. */
+/**
+ * A gap of a block-comment sequence: a space, nothing, or — a third of the
+ * time, shared equally — one of the ECMAScript-only whitespace characters.
+ * One draw whatever the set's size; integer weights keep the space and
+ * nothing shares exact.
+ */
+const SEQUENCE_GAPS: ReadonlyArray<readonly [number, string]> = [
+  [3 * ECMASCRIPT_ONLY_WHITESPACE.length, SPACE],
+  [ECMASCRIPT_ONLY_WHITESPACE.length, ""],
+  ...ECMASCRIPT_ONLY_WHITESPACE.map((char): readonly [number, string] => [
+    2,
+    char,
+  ]),
+];
+
+/** Whitespace beside a `text(...)` call in an embedding container (the gaps
+ * of a comment's block-comment sequence are `SEQUENCE_GAPS`): 1.4's inline
+ * whitespace and, less often, ECMAScript's own. */
 const containerWhitespace: Gen<string> = run(
   (choices: Choices) =>
     choices.weightedPick<string>([
@@ -558,13 +590,7 @@ function mdxComment(choices: Choices, multiLine = true): string {
   }
   const block = (): string => `/*${commentProse(choices)}*/`;
   const line = (): string => `//${lineCommentProse(choices)}`;
-  const gap = (): string =>
-    choices.weightedPick<string>([
-      [3, " "],
-      [1, ""],
-      [1, NBSP],
-      [1, LS],
-    ]);
+  const gap = (): string => choices.weightedPick(SEQUENCE_GAPS);
   switch (choices.weightedPick(forms)) {
     case "usual":
       return `{${block()}}`;
@@ -1409,10 +1435,18 @@ const BLOCK_FORMS: readonly FormSpelling[] = [
     name: "comment line, block-comment sequence with ECMAScript-only whitespace between",
     lines: () => [`{${NBSP}/* ab */${LS}/* cd */${FEFF}}`],
   },
-  ...ECMASCRIPT_ONLY_WHITESPACE.map((char): FormSpelling => ({
-    name: `comment line, ${codePointName(char)} between the braces`,
-    lines: () => [`{${char}}`],
-  })),
+  // Each brace-side whitespace character P-2 names (TEST-SPEC §16 P-2), alone
+  // between the braces and in every gap of a block-comment sequence.
+  ...ECMASCRIPT_ONLY_WHITESPACE.flatMap((char): FormSpelling[] => [
+    {
+      name: `comment line, ${codePointName(char)} between the braces`,
+      lines: () => [`{${char}}`],
+    },
+    {
+      name: `comment line, block-comment sequence with ${codePointName(char)} in every gap`,
+      lines: () => [`{${char}/* ab */${char}/* cd */${char}}`],
+    },
+  ]),
   {
     name: "comment line, every ECMAScript-only whitespace between the braces",
     lines: () => [`{${ECMASCRIPT_ONLY_WHITESPACE.join("")}}`],
@@ -1569,6 +1603,18 @@ const INLINE_ELEMENTS: ReadonlyArray<
     "inline comment of ECMAScript-only whitespace",
     () => `{${ECMASCRIPT_ONLY_WHITESPACE.join("")}}`,
   ],
+  ...ECMASCRIPT_ONLY_WHITESPACE.flatMap(
+    (char): (readonly [string, () => string])[] => [
+      [
+        `inline comment, ${codePointName(char)} between the braces`,
+        () => `{${char}}`,
+      ],
+      [
+        `inline block-comment sequence with ${codePointName(char)} in every gap`,
+        () => `{${char}/* ab */${char}/* cd */${char}}`,
+      ],
+    ],
+  ),
   ["inline embedding, whitespace beside the call", () => `{ text("s0")${LS}}`],
   [
     "inline embedding, block comments beside the call",

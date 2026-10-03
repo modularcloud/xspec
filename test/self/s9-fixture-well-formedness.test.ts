@@ -38,7 +38,10 @@ import { HarnessStagingError } from "../helpers/permissions.js";
 import { TestWorkspace, type WorkspaceDecl } from "../helpers/workspace.js";
 import { REMOVALS_SOURCE, T3_7_SOURCE } from "../suite/registry/section-3.js";
 import { P1_FORM_VECTORS } from "../suite/registry/section-16-p1.js";
-import { P2_P3_FORM_VECTORS } from "../suite/registry/section-16-p2-p3.js";
+import {
+  ECMASCRIPT_ONLY_WHITESPACE,
+  P2_P3_FORM_VECTORS,
+} from "../suite/registry/section-16-p2-p3.js";
 import { P4_FORM_VECTORS } from "../suite/registry/section-16-p4.js";
 import { P5_FORM_VECTORS } from "../suite/registry/section-16-p5-p6.js";
 import { P7_FORM_VECTORS } from "../suite/registry/section-16-p7.js";
@@ -364,6 +367,33 @@ describe("S-9: every form the P-2/P-3 generator composes derives", () => {
     expect(new Set(P2_P3_FORM_VECTORS.map(([name]) => name)).size).toBe(
       P2_P3_FORM_VECTORS.length,
     );
+  });
+  // TEST-SPEC §16 P-2 names the whitespace drawn between a comment's braces:
+  // U+FEFF, U+2028, U+2029, and every Unicode 15.1 space separator but U+0020
+  // (U+00A0, U+1680, U+2000 through U+200A, U+202F, U+205F, and U+3000).
+  test("the generator draws exactly P-2's brace-side whitespace, and the vectors stage each code point alone between the braces and in every gap of a block-comment sequence", () => {
+    const named = [
+      0xfeff, 0x2028, 0x2029, 0x00a0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003,
+      0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x202f, 0x205f,
+      0x3000,
+    ];
+    const byCode = (a: number, b: number): number => a - b;
+    expect(
+      ECMASCRIPT_ONLY_WHITESPACE.map((char) => char.codePointAt(0)).sort(
+        (a, b) => byCode(a ?? -1, b ?? -1),
+      ),
+    ).toEqual([...named].sort(byCode));
+    for (const code of named) {
+      const char = String.fromCodePoint(code);
+      const alone = `{${char}}`;
+      const sequence = `{${char}/* ab */${char}/* cd */${char}}`;
+      expect(
+        P2_P3_FORM_VECTORS.some(([, source]) => source.includes(alone)),
+      ).toBe(true);
+      expect(
+        P2_P3_FORM_VECTORS.some(([, source]) => source.includes(sequence)),
+      ).toBe(true);
+    }
   });
   test.each(P2_P3_FORM_VECTORS)("%s", (_name, source) => {
     expectDerives(source);

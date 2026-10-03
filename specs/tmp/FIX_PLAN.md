@@ -38,19 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part D — Properties, the Windows leg, and S-9's generated forms
 
-### Task 62 — P-2: the full brace-whitespace set (TEST-SPEC §16 P-2, L605; S-9; C6; D's CONF-MD note)
-
-**Where.**
-- `test/suite/registry/section-16-p2-p3.ts`: `ECMASCRIPT_ONLY_WHITESPACE` (today NBSP, FEFF, LS, and PS), and the block-comment `sequence` gap, which draws only `" "`, `""`, NBSP, and LS;
-- the S-9 form vectors built from that constant (`test/self/s9-fixture-well-formedness.test.ts`).
-
-**Change.** Draw the whitespace between braces from the full set L605 names: U+FEFF, U+2028, U+2029, U+00A0, U+1680, U+2000 through U+200A, U+202F, U+205F, and U+3000. The form vectors must cover each code point.
-
-**Checks.**
-- The S-9 vectors pass.
-- `-t MD`: CONF-MD's conformer passes P-2 (reviewer D probed that it handles the full set). VIOL-MD-CLASS and VIOL-MD-CR still fail exactly their tests, P-2 among them.
-- P-2 and P-3 against the built product. Record P-2's timing in AGENTS.md if it moved.
-
 ### Task 63 — P-5: added imports held to T6.5-22(a), and spec basenames from the barred classes (TEST-SPEC §16 P-5, L608; C4)
 
 **Depends on.** Tasks 18 and 19.
