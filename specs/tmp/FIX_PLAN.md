@@ -74,6 +74,13 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 **Depends on.** Every task above.
 
+**Status (2026-10-03, TASK iteration 15, recorded in the commit that adds this paragraph).** Every step below but the last is done, at 79d2013's harness and product trees (`dist/` matches a fresh compile of `src/`):
+- Self project, alone under the namespace: 26 files, 4206 tests, all passing, 0 skipped (172 s). Certification: all 27 fixtures pass (6 conformers, 21 violators; the runner's lines sum to 154 PASS / 38 FAIL / 0 error / 0 hang, every FAIL a violator's expected outcome); the C-1 gate passes. AGENTS.md's counts and totals are updated.
+- Suite project against the built product, alone in CI's whole inner stage (network off, uid 1000, no capabilities): 79 files, 345 tests, 317 passing, 28 failing (1307 s), every failure a `HarnessAssertionError`; the 28 IDs are exactly the 28 recorded in the preamble, so no test changed outcome. The commit message lists each failing test's first failing arm.
+- S-2's tower vector: 2.3–2.5 s alone, 3.3 s inside the full self project; AGENTS.md's staged-scale bullet records it.
+- CI run 871 at 79d2013 (the same trees): `harness-self` green (26 files, 4206 tests), `suite-linux` red only on the same 28 diagnosed product failures (105 files, 4551 tests), the Windows leg green (3 files, 9 tests).
+- Not done: deleting this file. The session's permission system refused the Engineer's `git rm` of it ("Irreversible Local Destruction"); whether and how it is deleted is Developer's decision.
+
 **Change.**
 - Under the namespace, run the full self project alone: expect 0 failures. Update AGENTS.md's self-project file and test counts and its certification totals (still 6 conformers and 21 violators, 27 fixtures, every one passing).
 - Then run the suite project against the built product, alone. Every failure must be a diagnosed product failure. List each failing test with its first failing arm in the commit message, and compare the list with the 28 IDs recorded above: say which tests changed outcome and why.
