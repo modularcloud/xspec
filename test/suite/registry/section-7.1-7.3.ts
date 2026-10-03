@@ -25,11 +25,14 @@
 // default workspace-relative path) is itself a plain workspace-relative
 // path; any other spelling — empty, beginning with `/`, or carrying a `.`,
 // `..`, or empty segment — is a configuration error (14.14), decided by
-// spelling alone, never by where the path would resolve; the configured
-// emit destinations exist exactly while emission is enabled — with `emit:
-// true` they are the destination paths whether or not emission has yet
-// run, with `markdown` absent or `emit: false` no path is a destination, so
-// the 13.4 exclusion and the import rule of 4 have no Markdown component.
+// spelling alone, never by where the path would resolve; so is an `outDir`
+// of `.xspec` or beginning with `.xspec/` — no emit destination lies in the
+// graph-data area (13.3), so graph data is the only derived file under it
+// (13.1, 13.4; 11.6's claim); the configured emit destinations exist
+// exactly while emission is enabled — with `emit: true` they are the
+// destination paths whether or not emission has yet run, with `markdown`
+// absent or `emit: false` no path is a destination, so the 13.4 exclusion
+// and the import rule of 4 have no Markdown component.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — exit
@@ -51,6 +54,13 @@
 //   redirects. No arm depends on where a spelling would resolve: a product
 //   normalizing `./out`, `out//x`, or `out/` to a path inside the root, or
 //   reading `""` as "next to each source", fails its arm at the exit code.
+//   The graph-data area is refused by segment, one arm each: `".xspec"`
+//   and `".xspec/md"` are 14.14 through the same refusal contract, beside
+//   their look-alike controls `".xspec2"` and `".xspecs/md"`, each valid
+//   and asserted through the emission it redirects — its absent directory
+//   chain created as real directories (T13.4-8) — so a product testing the
+//   byte prefix `.xspec` without its segment boundary fails a control at
+//   the exit code, and one accepting the area fails its refused arm there.
 // - T7.1-1 coverage: profiles are looked up by name (T8.2-1 owns report
 //   ordering and the full report contract — counts and the ignored-node
 //   composition are not asserted here); "sees it in both" is asserted as the
@@ -117,8 +127,9 @@
 //   non-`.mdx`-match and path-character configurations and its
 //   code-source control's configuration and code source (the record
 //   staged at `src/it's<U+005C>x.ts`), T7.3-1's emission-matrix variants
-//   (the first's too, the table being one), outDir, destination, and
-//   configuration-alone workspaces — is a ledger record carrying its S-9
+//   (the first's too, the table being one), outDir (its graph-data-area
+//   look-alikes' included), destination, and configuration-alone
+//   workspaces — is a ledger record carrying its S-9
 //   declaration, judged by test/self/s9-staged-sources.test.ts before any
 //   product exists: every one well-formed, T7.3-1's destination code
 //   source at `specs/A.md` included (its record makes the path judged, a
@@ -1188,6 +1199,59 @@ const OUTDIR_SUB_CONFIG = stagedTs(
   specsMainConfig(',\n  markdown: { emit: true, outDir: "out/sub" }'),
 );
 
+// An `outDir` naming the graph-data area or a path under it → 14.14 (SPEC
+// 7.3: "So is an `outDir` of `.xspec` or beginning with `.xspec/`" — no emit
+// destination lies in the graph-data area, 13.3, so graph data is the only
+// derived file under it, 11.6, 13.1, 13.4). Both spellings are in plain
+// workspace-relative form, so each arm is refused for the area alone, one
+// arm each (TEST-SPEC T7.3-1). Each arm's configuration is a staged-source
+// record made at module load from its row (module header).
+const GRAPH_DATA_AREA_OUTDIRS: readonly {
+  readonly outDir: string;
+  readonly why: string;
+  readonly config: StagedTs;
+}[] = [
+  { outDir: ".xspec", why: "names the graph-data area itself" },
+  { outDir: ".xspec/md", why: "names a path under the graph-data area" },
+].map((row) => ({
+  outDir: row.outDir,
+  why: row.why,
+  config: stagedTs(
+    `T7.3-1 xspec.config.ts (outDir ${JSON.stringify(row.outDir)} ${row.why})`,
+    specsMainConfig(
+      `,\n  markdown: { emit: true, outDir: ${JSON.stringify(row.outDir)} }`,
+    ),
+  ),
+}));
+
+// The graph-data area's look-alikes (TEST-SPEC T7.3-1): `.xspec2` and
+// `.xspecs/md` are neither `.xspec` nor begin with `.xspec/` — a product
+// testing the byte prefix `.xspec` without its segment boundary refuses
+// them — so each is a valid `outDir`, and emission writes each destination
+// under it, creating the missing directory chain (SPEC 7.3, 13.4; T13.4-8).
+// `chain` lists every directory the destinations need, `outDir`'s own
+// components first, none of which the arm's staging creates. Each arm's
+// configuration is a staged-source record made at module load from its row
+// (module header).
+const LOOKALIKE_OUTDIRS: readonly {
+  readonly outDir: string;
+  readonly chain: readonly string[];
+  readonly config: StagedTs;
+}[] = [
+  { outDir: ".xspec2", chain: [".xspec2"] },
+  { outDir: ".xspecs/md", chain: [".xspecs", ".xspecs/md"] },
+].map((row) => ({
+  outDir: row.outDir,
+  chain: [...row.chain, `${row.outDir}/specs`, `${row.outDir}/specs/sub`],
+  config: stagedTs(
+    `T7.3-1 xspec.config.ts (outDir ${JSON.stringify(row.outDir)}, a ` +
+      `look-alike of the graph-data area)`,
+    specsMainConfig(
+      `,\n  markdown: { emit: true, outDir: ${JSON.stringify(row.outDir)} }`,
+    ),
+  ),
+}));
+
 // Classification-follows-emit, discovery channel (module header): the
 // destination path `specs/A.md` staged as a *valid code source* — plain-TS
 // content whose top-level marker records a `references` edge attributed to
@@ -1335,9 +1399,11 @@ const T7_3_1 = defineProductTest({
     "spelled in plain workspace-relative form — non-empty `/`-separated " +
     "segments, none `.` or `..` — decided by spelling alone (else 14.14: " +
     '"", "/out", "./out", "out/../x", "out//x", "out/"; "out/sub" valid); ' +
-    "emit-destination classification follows " +
-    "emit — by configuration alone, whether or not emission has yet run " +
-    "(SPEC 7.3, 13.2, 13.4, 14.14)",
+    "an outDir naming the graph-data area or a path under it is 14.14 " +
+    '(".xspec", ".xspec/md"), its look-alikes (".xspec2", ".xspecs/md") ' +
+    "valid, emission writing under them; emit-destination classification " +
+    "follows emit — by configuration alone, whether or not emission has " +
+    "yet run (SPEC 7.3, 13.2, 13.3, 13.4, 14.14)",
   run: async (product) => {
     // (a) The emission-scope matrix: absent → none, emit:false → none,
     // emit:true → next to each source. Fresh workspace per variant, so no
@@ -1476,6 +1542,71 @@ const T7_3_1 = defineProductTest({
         }
       },
     );
+
+    // (d'') An `outDir` naming the graph-data area or a path under it →
+    // 14.14 (exit 2, the configuration the concerned path, nothing modified
+    // — no graph data and no emitted file appears), one arm per spelling.
+    for (const arm of GRAPH_DATA_AREA_OUTDIRS) {
+      await expectConfigRefused(
+        product,
+        arm.config,
+        `T7.3-1 (outDir ${JSON.stringify(arm.outDir)} ${arm.why}: no emit ` +
+          `destination lies in the graph-data area, graph data being the ` +
+          `only derived file under it) \`build --json\` (SPEC 7.3, 13.3, ` +
+          `11.6, 14.14)`,
+      );
+    }
+
+    // (d''') The look-alikes `.xspec2` and `.xspecs/md` are valid: emission
+    // writes each destination under them, the absent directory chain
+    // created as real directories (13.4; T13.4-8), workspace-relative paths
+    // preserved — and redirects rather than duplicates.
+    for (const arm of LOOKALIKE_OUTDIRS) {
+      const label =
+        `T7.3-1 (outDir ${JSON.stringify(arm.outDir)}, a look-alike of the ` +
+        `graph-data area)`;
+      await withWorkspace(
+        { files: { "xspec.config.ts": arm.config, ...EMISSION_FILES } },
+        async (workspace) => {
+          await buildOk(
+            product,
+            workspace,
+            `${label} \`build\` — neither \`.xspec\` nor beginning with ` +
+              `\`.xspec/\`, the spelling is a valid outDir (SPEC 7.3)`,
+          );
+          for (const dir of arm.chain) {
+            const kind = await workspace.kind(dir);
+            if (kind !== "dir") {
+              fail(
+                `${label}: every directory component of the emit ` +
+                  `destinations comes into existence as a real directory ` +
+                  `(SPEC 13.4, 7.3; T13.4-8) — expected a directory at ` +
+                  `${dir}, found: ${kind}`,
+              );
+            }
+          }
+          await assertFileBytes(
+            workspace.path(`${arm.outDir}/specs/A.md`),
+            A_COMPILED,
+            `${label}: specs/A.mdx emits ${arm.outDir}/specs/A.md — outDir ` +
+              `prefixes the preserved workspace-relative path (SPEC 7.3, 13.2)`,
+          );
+          await assertFileBytes(
+            workspace.path(`${arm.outDir}/specs/sub/B.md`),
+            B_COMPILED,
+            `${label}: specs/sub/B.mdx emits ${arm.outDir}/specs/sub/B.md — ` +
+              `subdirectory structure preserved under outDir (SPEC 7.3, 13.2)`,
+          );
+          for (const vacant of ["specs/A.md", "specs/sub/B.md"]) {
+            await assertNotEmitted(
+              workspace,
+              vacant,
+              `${label} (outDir redirects, not duplicates)`,
+            );
+          }
+        },
+      );
+    }
 
     // (e) Classification follows `emit`, discovery channel: with emission
     // off the destination path IS a discovered (code) source — its marker
