@@ -38,18 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 52 — T12.0-5: the positive side of the backslash (TEST-SPEC L483; SPEC 12.0; E-6 at L641; B7; C7's note)
-
-**Where.** `test/suite/registry/section-12.0-i.ts`, which has only the negative arm today (the operand `specs`, backslash, `A.mdx`). The Windows subset reruns the whole T12.0-5 entry (`test/windows/e6-subset.test.ts`).
-
-**Change.** Both arms are Linux-leg only, gated inside the body as the non-UTF-8 arm is (E-6: "less its Linux-leg arms"). Spellings from L483.
-- *Spec side.* A discovered spec-group file `specs/a`, backslash, `b.mdx` (an invalid path). `view` and `at … 0` with that path name the file: membership holds and identities are unavailable. The exit is 1 with the condition-19 finding, never the unknown-file exit 2.
-- *Code side.* A valid code source `src/a`, backslash, `b.ts` beside `src/ab.ts`, each marking a node. `occurrences --file` with the first file's path, and with the pattern `src/a`, backslash, `*.ts`, each list only the first file's occurrence.
-
-**Checks.**
-- S-9 and S-7 pass. T12.0-5 against the built product.
-- Read the gating to confirm `npm run test:windows` would skip no arm.
-
 ### Task 53 — T12.0-10: two syntax-class rows (TEST-SPEC L488; SPEC 12.0, 1.4; B8)
 
 **Where.** `test/suite/registry/section-12.0-ii.ts`: `T12_0_10_SYNTAX_ROWS`.
