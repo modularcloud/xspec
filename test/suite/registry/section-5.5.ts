@@ -452,42 +452,55 @@ const T5_5_2_TOGGLED = stagedMdx(
   ownHashSource({ toggleTargetText: "Now present." }),
 );
 
-// Kind-distinction fixture: at the baseline `p` holds child `p.k` between the
-// runs "before\n" and "after\n". A journaled section move relocates the child
-// to another file, and a manual edit embeds the moved node (imported form) at
-// the child's former position, glued so the excised expression leaves `after`
-// as remaining line content — the own-content sequences of the two states are
-// byte-identical runs around one reference of the same canonical identity
-// (the journal walks B.mdx#k back to A.mdx#p.k, SPEC 5.4), differing only in
-// reference kind: child vs embedding (SPEC 1.6, 5.5).
+// Kind-distinction fixture, in TEST-SPEC T5.5-2's pinned geometry: the child
+// construct and its replacement are in-line — within one line of `p`, flanked
+// by content on that line (`foo <S id="p.k">Kid text.</S> baz` at the
+// baseline, `foo {text(B.k)} baz` after). A journaled section move relocates
+// the child to another file — its own characters deleted in place, the line
+// left holding `foo ` and ` baz` (SPEC 6.5) — and a manual edit embeds the
+// moved node (imported form) at the child's exact former position. Both
+// states compose `p` from the same line head and tail (`kindParent`), so
+// every other byte of `p` is identical; the import stands at the file's top,
+// outside `p`. The own-content sequences of the two states are then the
+// byte-identical runs `foo ` and ` baz` (with the line's terminator) around
+// one reference of the same canonical identity (the journal walks B.mdx#k
+// back to A.mdx#p.k, SPEC 5.4), differing only in reference kind: child vs
+// embedding (SPEC 1.6, 5.5). The geometry is what keeps the arm live: on its
+// own lines a construct's straddling lines drop with their terminators
+// (SPEC 3), while an own-line `{text(...)}` keeps its line in own content
+// (the excised expression counts as remaining line content, SPEC 1.6), so
+// the runs would differ as well and a product hashing references
+// kind-blindly would pass the arm vacuously.
 const KIND_P = "specs/A.mdx#p";
+const KIND_LINE_HEAD = "foo ";
+const KIND_LINE_TAIL = " baz";
+const KIND_CHILD_TEXT = "Kid text.";
+
+/** `specs/A.mdx`'s section `p`, `construct` standing in-line in its one line. */
+function kindParent(construct: string): string {
+  return [
+    '<S id="p">',
+    `${KIND_LINE_HEAD}${construct}${KIND_LINE_TAIL}`,
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+// `p`'s subtree text in both states (SPEC 1.6 and 3 fix these bytes): its tag
+// lines drop with their terminators, and at the construct's position stands
+// the child's contribution at the baseline and the embedding's expansion —
+// the moved node's subtree text, the same characters — after.
+const KIND_P_SUBTREE = `${KIND_LINE_HEAD}${KIND_CHILD_TEXT}${KIND_LINE_TAIL}\n`;
 // The kind arm's workspace is created after the matrix workspace's
 // invocations: its baseline is a staged-source record (S-9,
 // test/self/s9-staged-sources.test.ts).
 const KIND_BASELINE = stagedMdx(
-  "T5.5-2 specs/A.mdx with the child construct at its position (the kind arm's baseline)",
-  [
-    '<S id="p">',
-    "before",
-    '<S id="p.k">',
-    "Kid text.",
-    "</S>",
-    "after",
-    "</S>",
-    "",
-  ].join("\n"),
+  "T5.5-2 specs/A.mdx with the in-line child construct at its position (the kind arm's baseline)",
+  kindParent(`<S id="p.k">${KIND_CHILD_TEXT}</S>`),
 );
 const KIND_MANUAL = stagedMdx(
-  "T5.5-2 specs/A.mdx with the moved child embedded in imported form at its former position (the kind arm)",
-  [
-    'import B from "./B.xspec"',
-    "",
-    '<S id="p">',
-    "before",
-    "{text(B.k)}after",
-    "</S>",
-    "",
-  ].join("\n"),
+  "T5.5-2 specs/A.mdx with the moved child embedded in imported form at its former in-line position (the kind arm)",
+  ['import B from "./B.xspec"', "", kindParent("{text(B.k)}")].join("\n"),
 );
 
 const T5_5_2 = defineProductTest({
@@ -658,13 +671,21 @@ const T5_5_2 = defineProductTest({
       await buildOk(
         product,
         workspace,
-        "T5.5-2 kind arm: `build` over the child-construct baseline",
+        "T5.5-2 kind arm: `build` over the in-line child-construct baseline",
       );
-      const before = await queryHashes(
+      const before = await queryNode(
         product,
         workspace,
         KIND_P,
         "T5.5-2 kind arm, baseline:",
+      );
+      // Fixture anchor (SPEC 1.6, 3): the child's contribution stands in-line
+      // between the runs `foo ` and ` baz`.
+      assertBytesEqual(
+        before.subtreeText,
+        KIND_P_SUBTREE,
+        "T5.5-2 kind arm: baseline subtree text of `p` — the in-line child's " +
+          "contribution between the line's head and tail (SPEC 1.6, 3)",
       );
 
       await expectExit(
@@ -681,18 +702,28 @@ const T5_5_2 = defineProductTest({
         product,
         workspace,
         "T5.5-2 kind arm: `build` after embedding the moved node (imported " +
-          "form) at the child's former position",
+          "form) at the child's former in-line position",
       );
 
-      const after = await queryHashes(
+      const after = await queryNode(
         product,
         workspace,
         KIND_P,
         "T5.5-2 kind arm, after the replacement:",
       );
+      // Fixture anchor: the embedding expands at the child's exact former
+      // position, every surrounding byte identical, so `p`'s subtree text is
+      // byte-identical across the replacement (SPEC 1.6, 3, 6.5).
+      assertBytesEqual(
+        after.subtreeText,
+        KIND_P_SUBTREE,
+        "T5.5-2 kind arm: subtree text of `p` after the replacement — the " +
+          "embedding expands to the moved node's subtree text at the child's " +
+          "exact former position (SPEC 1.6, 3, 6.5)",
+      );
       assertHashChanged(
-        before.ownHash,
-        after.ownHash,
+        before.hashes.ownHash,
+        after.hashes.ownHash,
         "the parent's ownHash — its own-content sequences are equal runs " +
           "around one reference of the same canonical identity differing " +
           "only in kind (child vs embedding, SPEC 1.6, 5.4, 5.5)",

@@ -60,7 +60,7 @@ Why the harness changed in this re-descent: the documents moved after the harnes
 **Order.** Tasks are in dependency order, and each names what it depends on:
 - Part A (Task 1, the certification gap D1): done and removed.
 - Part B (harness machinery): done and removed. Tasks 3 and 4 gave S-9's MDX judgement spec-group files not named `.mdx` — Task 3 the mechanism (`mdx.wellFormed` and the other `mdx` lists, the `file()` `mdx` option, or an MDX record at the path declare such a file an MDX source; module header of `test/helpers/workspace.ts`), Task 4 the declarations of the suite's three such files (T7.1-1's `specs/notes.txt` and T11.6-2's `specs/note.txt` as staged-source records, T11.6-4's under `mdx.wellFormed`). Task 2 (P-8's and P-11's capture-limit errors) and Task 2b, split from it (every other conversion of a driver rejection), are done and removed: H-11's capture-limit errors.
-- Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order. Task 5 (T4.3-2's seven dynamic node-form arms each run `occurrences` on the failing workspace and assert no record) is done and removed. Task 6 (every T4.5-3 arm runs `occurrences --file src/app.ts` on its failing workspace and asserts no record, through `assertArmFailsWith`'s opt-in `noOccurrence` option, which T4.5-5 does not pass) is done and removed. Task 7 (T4.5-3's arm table gains TEST-SPEC's pinned optional-chaining spelling `SPEC?.a;`, optional on the root binding, over the shared `a`/`a.b` source; the extra arms `SPEC.a?.b;`, `SPEC.a!.b;`, and `(SPEC.a).b;` stay) is done and removed.
+- Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order. Task 5 (T4.3-2's seven dynamic node-form arms each run `occurrences` on the failing workspace and assert no record) is done and removed. Task 6 (every T4.5-3 arm runs `occurrences --file src/app.ts` on its failing workspace and asserts no record, through `assertArmFailsWith`'s opt-in `noOccurrence` option, which T4.5-5 does not pass) is done and removed. Task 7 (T4.5-3's arm table gains TEST-SPEC's pinned optional-chaining spelling `SPEC?.a;`, optional on the root binding, over the shared `a`/`a.b` source; the extra arms `SPEC.a?.b;`, `SPEC.a!.b;`, and `(SPEC.a).b;` stay) is done and removed. Task 8 (T5.5-2's kind-distinction arm restaged in-line: `foo <S id="p.k">Kid text.</S> baz` at the baseline, `foo {text(B.k)} baz` after the journaled move, both composed by `kindParent` from one line head and tail, with `p`'s subtree text anchored in both states) is done and removed.
 - Part D (Tasks 10–13): P-8's command sweep.
 - Task 14 confirms the result and deletes the plan.
 
@@ -69,34 +69,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 ## Tasks
 
 ### Part C — The T-numbered tests
-
-### Task 8 — T5.5-2: restage the kind-distinction arm in-line, as TEST-SPEC's fixture geometry requires (A3; TEST-SPEC §5.5 T5.5-2, L217; SPEC 1.6, 3, 5.4, 5.5, 5.6, 6.5)
-
-**Depends on.** Nothing.
-
-**The requirement.** TEST-SPEC L217, added at 46a6aed (Phase 6 finding O2) and never staged:
-- "a child construct is replaced at its exact position by a `text(...)` embedding of the same canonical identity with identical surrounding bytes — journaled-move the child section to another file, then embed the moved node (imported form) at its former position";
-- "Fixture geometry: the child construct and its replacement are in-line — within one line, flanked by content on that line (`foo <S id="c">…</S> baz` at baseline, `foo {text(X.c)} baz` after)".
-
-L217 says why: on its own line, a construct's straddling lines drop with their terminators (3), while an own-line `{text(...)}` keeps its line. The runs would then differ too, and the arm would pass vacuously.
-
-The harness's staging is the own-line shape L217 rules out:
-- `KIND_BASELINE` (about L467) puts the child `p.k` on its own three lines between `before` and `after`.
-- `KIND_MANUAL` (about L480) glues the replacement onto the next line as `{text(B.k)}after`. That is not flanked by content on both sides, and the bytes around it differ: the newline after `</S>` is gone.
-
-**Where.** `test/suite/registry/section-5.5.ts`: `KIND_BASELINE`, `KIND_MANUAL`, the comment above them (about L455–466), and the kind arm in `T5_5_2`'s body (about L654–735).
-
-**Change.**
-- *Baseline.* `p` holds one in-line line of the TEST-SPEC shape: content, the child construct, content, all on one line. For example `foo <S id="p.k">Kid text.</S> baz`, with the child's identity satisfying 1.3 as `p`'s child, as `p.k` does today.
-- *After the move.* After the journaled `move specs/A.mdx#p.k specs/B.mdx#k` (unchanged), the manual state is the same line with the construct replaced at its exact position by the imported-form embedding: `foo {text(B.k)} baz`. Every other byte of `p` is identical. The import `import B from "./B.xspec"` stands at the file's top, outside `p`, as now.
-- Keep every existing assertion: `p`'s ownHash differs from baseline; `impact --base <baseline>` reports `p` as `changed`; `p` is never reported deleted.
-- Rewrite the comment to state the in-line geometry and why it matters (L217).
-- Both stagings stay staged-source records.
-
-**Checks.**
-- `test/self/s9-staged-sources.test.ts` passes: both new stagings derive.
-- Hand-probe the built product on both states (`query node specs/A.mdx#p` before and after) and record the two ownHash values. T5.5-2 against the built product: record the outcome; it passed at 44c5dad. A failure counts only as a diagnosed product failure, after the probe.
-- A red check through the stand-in wrapper: answer the after-state `query node` for `p` with the baseline's ownHash, which is what a kind-blind product would give. T5.5-2 then fails diagnosed on the kind arm.
 
 ### Task 9 — T13.4-10: the manual-deletion correction is matched for its information, not its wording (B1; TEST-SPEC §13.4 T13.4-10, L563, with §0 H-3; SPEC 14.10)
 
