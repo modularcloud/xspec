@@ -505,6 +505,12 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // coverage at T6.5-*/T7.3-1/T13.1-*/T13.2-1; no numbered condition is
   // asserted (success paths only).
   "T13.4-8": ["13.4"],
+  // T13.4-9 asserts 13.4's relation between derived paths through condition
+  // 22 (14) at `build`, `check`, and the gate's `ids` (13.3); (e)'s
+  // `inventory` read (11.6), 7.3's emission settings, and 13.1/13.2's
+  // derived paths are carriage context with home coverage at
+  // T11.6-3/T7.3-1/T13.1-*/T13.2-1.
+  "T13.4-9": ["13.4", "13.3", "14"],
   // T13.4-11 asserts `build`'s removal of recorded derived files no longer
   // generated (12.1) and `check`'s recorded-file verification (12.2) through
   // condition 10's recorded-file form (14); the record (13.3), 7.2's code

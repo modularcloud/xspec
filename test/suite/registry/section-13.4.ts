@@ -2,8 +2,9 @@
 // committable files + sorted keys), T13.4-2 (derived reproducibility),
 // T13.4-3 (orphan knowledge boundary), T13.4-4 (derived paths belong to
 // xspec), T13.4-5 (durable protection), T13.4-6 (symlink write rules),
-// T13.4-8 (writes create missing directories), T13.4-11 (removing recorded
-// paths no longer generated).
+// T13.4-8 (writes create missing directories), T13.4-9 (derived paths above
+// sources and other derived paths), T13.4-11 (removing recorded paths no
+// longer generated).
 // T13.4-7 registers no test body: its TEST-SPEC entry is a cross-reference —
 // T7-6 (section-7-discovery.ts) carries the `.xspec.` / `.xspec/` /
 // emit-destination source exclusion. (A registered no-op body would pass
@@ -151,6 +152,37 @@
 //   under `outDir` in the emission arm) — companion sets being
 //   implementation latitude (13.1) and content another test's subject
 //   (T13.1-*, T13.2-1, T3-*).
+// - T13.4-9 (the relation between derived paths, SPEC 13.4 and 14.22's
+//   second sentence): each staging is one fresh workspace on which
+//   `build --json`, `check --json`, and the gated read `ids --json`
+//   (T13.3-3) run in turn, each inside a whole-root compare (the
+//   compare-around machinery CERTIFICATIONS.md's VIOL-CORE-CHATTYREADS note
+//   names this test under) — `build` writing and removing nothing, `check`
+//   reporting without writing, the gated read modifying nothing — and each
+//   exiting 1 with the form-exact 12.7 findings-only report ("answering
+//   nothing" for `ids`) holding exactly one finding: condition 22
+//   concerning the offending derived path, `locations` `[]`, nothing beside
+//   it. The set is exact on all three: each workspace otherwise passes
+//   `build`'s validations, the gate judges exactly `build`'s findings
+//   (13.3), and `check`, on a workspace failing `build`'s validations,
+//   leaves 14.10's mismatch forms unreported while neither whatever-validity
+//   form is staged — no record exists before any build, and (f)'s names
+//   `a.mdx`'s derived paths, every one still generated (SPEC 14.10).
+//   TEST-SPEC states each staging's emission settings and code groups and
+//   nothing more: the one spec group globs `specs/**/*.mdx` — `**/*.mdx` in
+//   (b) and (f), whose sources lie at the workspace root — (c) and (e)'s
+//   spec-source leg configure nothing else, and (e)'s code-source leg is
+//   configured as (d) is (emission next to sources, a code group globbing
+//   `specs/**/*.ts`). (e)'s companion paths are read per leg under that
+//   leg's configuration — "the staging's configuration" — through
+//   support.ts `readRecordedCompanionPaths` (a scratch twin holding
+//   `specs/A.mdx`'s bytes at that path alone, built, its `inventory`
+//   `recorded` set read), one staging per companion path in each leg.
+//   "Staged before any build" is verified before each of those stagings'
+//   first invocation — the offending path a directory ((a), (c), (d), (e))
+//   or nothing ((b)), a miss being a harness error — and (f)'s premise is
+//   re-pinned after its `build` of `a.mdx` alone: `out/a.md` the plain file
+//   that build emitted, a product writing none there failing diagnosed.
 // - T13.4-11 stays inside CERTIFICATIONS.md §CONF-ORPHAN's scope (the test
 //   is in-scope there): one spec group of trivial single-section `.mdx`
 //   sources whose glob matches `.mdx` names alone; `markdown` emitting next
@@ -189,6 +221,7 @@ import {
   decodeFindingsReport,
   decodeInventoryRecordedDatum,
   decodeSessionStatusReport,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
@@ -209,6 +242,7 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
@@ -221,10 +255,12 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import { STREAMS_VALID_SOURCE } from "./section-12.0-i.js";
 import { CORE_A_STAGED } from "./section-13.5.js";
 import {
+  assertConditionCounts,
   assertFindingConcernsPath,
   buildOk,
   expectExit,
   expectFindingFreeReport,
+  readRecordedCompanionPaths,
   runCli,
   runFindingsReport,
   runJson,
@@ -2552,6 +2588,393 @@ const T13_4_8 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
+// T13.4-9 — derived paths above sources and other derived paths
+// ---------------------------------------------------------------------------
+
+// T13.4-9's configurations (module header): one spec group, then a code
+// group and Markdown emission where the staging states them. Every
+// workspace but the body's first is created after a product invocation —
+// the companion legs' after their scratch twins' builds as well — so each
+// configuration is a TypeScript staged-source record (helpers/staged-ts.ts;
+// S-9's TypeScript and timing clauses), staged at every site.
+const RELATION_EMIT_CONFIG = stagedTs(
+  "T13.4-9 xspec.config.ts — specs/**/*.mdx, Markdown emitted next to sources ((a))",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`,
+);
+const RELATION_ROOT_OUT_CONFIG = stagedTs(
+  'T13.4-9 xspec.config.ts — **/*.mdx, Markdown emitted under outDir "out" ((b) and (f), the sources at the workspace root)',
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["**/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "out" }
+})
+`,
+);
+const RELATION_SPECS_CONFIG = stagedTs(
+  "T13.4-9 xspec.config.ts — specs/**/*.mdx alone, no Markdown emission ((c), (e)'s spec-source leg, and that leg's companion twin)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+);
+const RELATION_CODE_CONFIG = stagedTs(
+  "T13.4-9 xspec.config.ts — specs/**/*.mdx, a code group globbing specs/**/*.ts, Markdown emitted next to sources ((d), (e)'s code-source leg, and that leg's companion twin)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["specs/**/*.ts"]
+  },
+  markdown: { emit: true }
+})
+`,
+);
+
+// T13.4-9's sources: minimal single-section spec sources — the relation
+// reads paths alone, so their content is immaterial — and the code source
+// TEST-SPEC states, `export const v = 1` (followed by U+000A, as
+// T13.4-11(b)'s and T6.5-20's are), each the only file beneath the
+// offending path where (d) and (e) stage it.
+const RELATION_UPPER_MDX = stagedMdx(
+  "T13.4-9 the upper source — (a)'s and (d)'s specs/a.mdx, (b)'s and (f)'s a.mdx, (c)'s and (e)'s specs/A.mdx (and the companion twins')",
+  ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
+);
+const RELATION_BENEATH_MDX = stagedMdx(
+  "T13.4-9 the source beneath the offending path — (a)'s specs/a.md/b.mdx, (b)'s and (f)'s a.md/b.mdx, (c)'s specs/A.xspec.ts/B.mdx, (e)'s specs/A.xspec.<suffix>/B.mdx",
+  ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
+);
+const RELATION_CODE_SOURCE = stagedTs(
+  "T13.4-9 the code source beneath the offending path, the only file there — (d)'s specs/a.md/x.ts, (e)'s specs/A.xspec.<suffix>/c.ts — export const v = 1",
+  "export const v = 1\n",
+);
+
+/** One T13.4-9 staging (module header). */
+interface RelationStaging {
+  /** The staging's tag in assertion contexts. */
+  readonly tag: string;
+  readonly config: StagedTs;
+  /** The initial files beside the configuration. */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  /**
+   * What occupies the offending path once the staging is complete: for the
+   * five stagings made before any build, the directory over what lies
+   * beneath it, or nothing ((b): no build has emitted anything); for (f),
+   * the plain file its premise `build` of `files` emitted.
+   */
+  readonly occupant: "dir" | "absent" | "built-file";
+  /** (f) alone: the sources staged after the premise `build`. */
+  readonly added: Readonly<Record<string, StagedMdx>>;
+  /** The offending derived path: the one finding's concerned path. */
+  readonly offending: string;
+}
+
+/** (a) through (d), each staged before any build. */
+const RELATION_STAGINGS_A_TO_D: readonly RelationStaging[] = [
+  {
+    tag: "(a) emission next to sources, specs/a.mdx beside specs/a.md/b.mdx — a.mdx's emit path specs/a.md a directory component of a discovered source's path (and of b.mdx's derived paths)",
+    config: RELATION_EMIT_CONFIG,
+    files: {
+      "specs/a.mdx": RELATION_UPPER_MDX,
+      "specs/a.md/b.mdx": RELATION_BENEATH_MDX,
+    },
+    occupant: "dir",
+    added: {},
+    offending: "specs/a.md",
+  },
+  {
+    tag: '(b) emission under outDir "out", a.mdx and a.md/b.mdx at the workspace root — the emit path out/a.md a directory component of the emit path out/a.md/b.md',
+    config: RELATION_ROOT_OUT_CONFIG,
+    files: { "a.mdx": RELATION_UPPER_MDX, "a.md/b.mdx": RELATION_BENEATH_MDX },
+    occupant: "absent",
+    added: {},
+    offending: "out/a.md",
+  },
+  {
+    tag: "(c) specs/A.mdx beside a discovered specs/A.xspec.ts/B.mdx — the module path specs/A.xspec.ts a directory component of a source's path",
+    config: RELATION_SPECS_CONFIG,
+    files: {
+      "specs/A.mdx": RELATION_UPPER_MDX,
+      "specs/A.xspec.ts/B.mdx": RELATION_BENEATH_MDX,
+    },
+    occupant: "dir",
+    added: {},
+    offending: "specs/A.xspec.ts",
+  },
+  {
+    tag: "(d) emission next to sources, specs/a.mdx beside a discovered code source specs/a.md/x.ts, the only file beneath — the emit path specs/a.md a directory component of that source's path and of no derived path",
+    config: RELATION_CODE_CONFIG,
+    files: {
+      "specs/a.mdx": RELATION_UPPER_MDX,
+      "specs/a.md/x.ts": RELATION_CODE_SOURCE,
+    },
+    occupant: "dir",
+    added: {},
+    offending: "specs/a.md",
+  },
+];
+
+/**
+ * (e)'s stagings, the companion leg, each staged before any build: per
+ * leg, the companion paths a build of `specs/A.mdx` records under that
+ * leg's configuration (`readRecordedCompanionPaths`: a scratch twin holding
+ * `specs/A.mdx`'s bytes at that path alone, built, its `inventory`
+ * `recorded` set read; none for a product writing no companions), one
+ * staging per companion path — beside a discovered `<companion>/B.mdx`, as
+ * (c) stages the module path, and beside a discovered code source
+ * `<companion>/c.ts`, the only file beneath, as (d) stages the emit path.
+ */
+async function relationCompanionStagings(
+  product: ProductBinding,
+): Promise<readonly RelationStaging[]> {
+  const sourceLeg = await readRecordedCompanionPaths(
+    product,
+    RELATION_SPECS_CONFIG,
+    "specs/A.mdx",
+    RELATION_UPPER_MDX,
+    "T13.4-9 (e)'s companion paths of specs/A.mdx under (c)'s configuration",
+  );
+  const codeLeg = await readRecordedCompanionPaths(
+    product,
+    RELATION_CODE_CONFIG,
+    "specs/A.mdx",
+    RELATION_UPPER_MDX,
+    "T13.4-9 (e)'s companion paths of specs/A.mdx under (d)'s configuration",
+  );
+  return [
+    ...sourceLeg.map((companion): RelationStaging => ({
+      tag: `(e) specs/A.mdx beside a discovered ${companion}/B.mdx — the companion path ${companion} a directory component of a source's path and of B.mdx's derived paths`,
+      config: RELATION_SPECS_CONFIG,
+      files: {
+        "specs/A.mdx": RELATION_UPPER_MDX,
+        [`${companion}/B.mdx`]: RELATION_BENEATH_MDX,
+      },
+      occupant: "dir",
+      added: {},
+      offending: companion,
+    })),
+    ...codeLeg.map((companion): RelationStaging => ({
+      tag: `(e) specs/A.mdx beside a discovered code source ${companion}/c.ts, the only file beneath — the companion path ${companion} a directory component of that source's path`,
+      config: RELATION_CODE_CONFIG,
+      files: {
+        "specs/A.mdx": RELATION_UPPER_MDX,
+        [`${companion}/c.ts`]: RELATION_CODE_SOURCE,
+      },
+      occupant: "dir",
+      added: {},
+      offending: companion,
+    })),
+  ];
+}
+
+/**
+ * (f): (b)'s staging after a `build` of `a.mdx` alone, `a.md/b.mdx` added
+ * after it — `out/a.md`, the plain file that build emitted, occupies a
+ * directory component of the write path `out/a.md/b.md` (T13.4-6's
+ * relation) while being the derived path the relation between derived
+ * paths names: one offending component under both (14.22).
+ */
+const RELATION_STAGING_F: RelationStaging = {
+  tag: "(f) (b)'s staging after a build of a.mdx alone, a.md/b.mdx added after it — out/a.md the plain file that build emitted, offending under both relations at one component",
+  config: RELATION_ROOT_OUT_CONFIG,
+  files: { "a.mdx": RELATION_UPPER_MDX },
+  occupant: "built-file",
+  added: { "a.md/b.mdx": RELATION_BENEATH_MDX },
+  offending: "out/a.md",
+};
+
+/** The commands T13.4-9 drives on every staging, in order. */
+const RELATION_COMMANDS = ["build", "check", "ids"] as const;
+type RelationCommand = (typeof RELATION_COMMANDS)[number];
+
+/** Each command's part in the contract, for the exit-code failure. */
+const RELATION_ROLE: Readonly<Record<RelationCommand, string>> = {
+  build: "`build` refuses the write and reports it before making any write",
+  check: "`check` reports it without writing",
+  ids: "the gated read reports it and answers nothing (T13.3-3)",
+};
+
+/** Why nothing beside the one finding is reportable, per command. */
+const RELATION_EXACTNESS: Readonly<Record<RelationCommand, string>> = {
+  build:
+    "the workspace otherwise passes `build`'s validations, and `build` " +
+    "cannot observe 14.10 (SPEC 12.1)",
+  check:
+    "on a workspace failing `build`'s validations 14.10's mismatch forms " +
+    "go unreported, and neither whatever-validity form is staged — no " +
+    "record exists before any build, and (f)'s names `a.mdx`'s derived " +
+    "paths, every one still generated (SPEC 14.10, 13.3)",
+  ids:
+    "the gate is over exactly the findings a `build` would report (SPEC " +
+    "13.3)",
+};
+
+/** What the whole-root compare around each command pins. */
+const RELATION_UNCHANGED: Readonly<Record<RelationCommand, string>> = {
+  build:
+    "`build` refuses before any write — no module, companion, Markdown, " +
+    "or graph data written or removed, the directory and everything " +
+    "beneath it untouched (SPEC 14.22, 13.4, 12.1)",
+  check: "`check` reports without writing (SPEC 14.22, 12.2)",
+  ids: "the gated read modifies nothing (SPEC 13.3)",
+};
+
+/**
+ * T13.4-9's contract for one command on a completed staging (module
+ * header): inside a whole-root compare, exit 1 and the form-exact 12.7
+ * findings-only report holding exactly one finding — condition 22
+ * concerning the offending derived path, `locations` `[]` — and nothing
+ * beside it (SPEC 14.22, 13.4, 13.3, 12.7).
+ */
+async function expectRelationReport(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  command: RelationCommand,
+  offending: string,
+  what: string,
+): Promise<void> {
+  const context = `${what}: \`${command} --json\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const result = await runCli(product, workspace, [command, "--json"]);
+      assertExitCode(
+        result,
+        1,
+        `${context} — a derived path above a source or another derived ` +
+          `path is a condition-22 finding: ${RELATION_ROLE[command]}, exit ` +
+          `1, never a success or a crash (SPEC 14.22, 13.4, 13.3, 12.0)`,
+      );
+      const findings = decodeFindingsReport(
+        parseJsonStdout(result, context),
+        `${context} — the form-exact 12.7 findings-only report, answering ` +
+          `nothing (SPEC 12.7, 13.3, H-3)`,
+      ).findings;
+      assertConditionCounts(
+        findings,
+        { "14.22": 1 },
+        `${context} — exactly one condition-22 finding and nothing beside ` +
+          `it: one finding per distinct offending path, whatever write ` +
+          `paths it refuses and whichever relations it meets (SPEC 14.22); ` +
+          RELATION_EXACTNESS[command],
+      );
+      const finding = findings[0]!;
+      assertFindingConcernsPath(
+        finding,
+        offending,
+        `${context} — the finding concerns the offending derived path ` +
+          `(SPEC 14.22, 13.4)`,
+      );
+      if (finding.locations.length !== 0) {
+        fail(
+          `${context} — the condition-22 finding concerns a path, so its ` +
+            `\`locations\` is [] (SPEC 14.22, 12.7); got ` +
+            JSON.stringify(
+              finding.locations.map((location) => ({
+                file: renderPathValue(location.file),
+                range: location.range,
+              })),
+            ),
+        );
+      }
+    },
+    `${context} — ${RELATION_UNCHANGED[command]}`,
+  );
+}
+
+/**
+ * Stage one T13.4-9 staging in a fresh workspace (H-1) and drive `build`,
+ * `check`, and `ids` on it. A staging made before any build is verified
+ * before the first invocation — the offending path holding a directory or
+ * nothing, a miss being a harness error; (f)'s premise is re-pinned after
+ * its `build` — `out/a.md` the plain file that build emitted, a product
+ * writing none there failing diagnosed — before `added` is staged.
+ */
+async function runRelationStaging(
+  product: ProductBinding,
+  staging: RelationStaging,
+): Promise<void> {
+  const context = `T13.4-9 ${staging.tag}`;
+  await withWorkspace(
+    { files: { "xspec.config.ts": staging.config, ...staging.files } },
+    async (workspace) => {
+      if (staging.occupant === "built-file") {
+        await buildOk(
+          product,
+          workspace,
+          `${context}: the premise \`build\`, before ` +
+            `${Object.keys(staging.added).join(", ")} is added — the ` +
+            `staged workspace passes \`build\`'s validations, exit 0 (SPEC ` +
+            `12.1)`,
+        );
+        const kind = await workspace.kind(staging.offending);
+        if (kind !== "file") {
+          fail(
+            `${context}: staging premise — after the premise \`build\`, ` +
+              `${staging.offending} is the plain file that build emitted ` +
+              `(SPEC 7.3, 13.2, 13.4); found ${kind}`,
+          );
+        }
+        for (const [rel, source] of Object.entries(staging.added)) {
+          await workspace.file(rel, source);
+        }
+      } else {
+        const kind = await workspace.kind(staging.offending);
+        if (kind !== staging.occupant) {
+          throw new Error(
+            `internal error: ${context} — staged before any build, ` +
+              `${staging.offending} must hold ` +
+              `${staging.occupant === "dir" ? "a directory" : "nothing"}; ` +
+              `found ${kind}`,
+          );
+        }
+      }
+      for (const command of RELATION_COMMANDS) {
+        await expectRelationReport(
+          product,
+          workspace,
+          command,
+          staging.offending,
+          context,
+        );
+      }
+    },
+  );
+}
+
+const T13_4_9 = defineProductTest({
+  id: "T13.4-9",
+  title:
+    "derived paths above sources and other derived paths: a module, companion, or emitted Markdown path that is a directory component of a discovered source's path or of another such path xspec writes, occupied or not, is refused before any write — six stagings, each otherwise passing `build`'s validations, the first five staged before any build: (a) emission next to sources, `specs/a.mdx` beside `specs/a.md/b.mdx`; (b) under `outDir: \"out\"`, `a.mdx` and `a.md/b.mdx` at the workspace root, `out/a.md` above `out/a.md/b.md`; (c) `specs/A.mdx` beside `specs/A.xspec.ts/B.mdx`; (d) `specs/a.mdx` beside a code source `specs/a.md/x.ts`, the only file beneath; (e) per companion path `specs/A.xspec.<suffix>` a build of `specs/A.mdx` records (read from a scratch twin's `inventory`), `specs/A.mdx` beside `<companion>/B.mdx` and, separately, beside a code source `<companion>/c.ts`; (f) (b)'s staging after a `build` of `a.mdx` alone, `out/a.md` then the plain file it emitted — in each, `build` exits 1 with exactly one condition-22 finding concerning the offending derived path (`specs/a.md`, `out/a.md`, `specs/A.xspec.ts`, `specs/a.md`, the companion path, `out/a.md`), `locations` `[]`, writing and removing nothing; `check` reports the same finding without writing; `ids` reports it, exit 1, answering nothing (SPEC 13.4, 14.22, 13.3)",
+  run: async (product) => {
+    for (const staging of RELATION_STAGINGS_A_TO_D) {
+      await runRelationStaging(product, staging);
+    }
+    for (const staging of await relationCompanionStagings(product)) {
+      await runRelationStaging(product, staging);
+    }
+    await runRelationStaging(product, RELATION_STAGING_F);
+  },
+});
+
+// ---------------------------------------------------------------------------
 // T13.4-11 — removing recorded paths no longer generated
 // ---------------------------------------------------------------------------
 
@@ -3218,5 +3641,6 @@ export const section134Tests: readonly ProductTestEntry[] = [
   T13_4_5,
   T13_4_6,
   T13_4_8,
+  T13_4_9,
   T13_4_11,
 ];

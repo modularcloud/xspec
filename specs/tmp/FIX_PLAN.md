@@ -38,22 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 57 — Register T13.4-9 (TEST-SPEC L562; SPEC 13.4, 14.22; B12)
-
-**Where.** `test/suite/registry/section-13.4.ts`, and `traceability.ts` with `"14"`.
-
-**Change.** Stagings (a) through (f), as L562 states them:
-- the first five are staged before any build;
-- (e) is a pair per companion path, the paths read from `inventory`'s `recorded` set of a scratch twin;
-- (f) is staged after a build of `a.mdx` alone.
-
-In each staging:
-- `build` exits 1 with exactly one condition-22 finding concerning the offending derived path — `specs/a.md`, `out/a.md`, `specs/A.xspec.ts`, `specs/a.md`, (e)'s companion path, and `out/a.md` respectively — with `locations` `[]`, writing and removing nothing (compare-around machinery);
-- `check` reports the same finding without writing;
-- `ids` reports it with exit 1, answering nothing.
-
-**Checks.** S-9 and S-7 pass. T13.4-9 against the built product.
-
 ### Task 58 — Register T13.4-10 (TEST-SPEC L563; SPEC 13.4, 14.22, 14.10; B13)
 
 **Where.** `test/suite/registry/section-13.4.ts`, and `traceability.ts` with `"14"`.
