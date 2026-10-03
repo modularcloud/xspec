@@ -9,24 +9,27 @@
 // and rejects a product only via diagnosed assertion failures (H-8).
 //
 // SPEC 7.1: spec groups are named glob lists; a file MAY belong to multiple
-// groups; every matched file MUST have the `.mdx` extension, any other match
-// being invalid (14.19). SPEC 7.2: code groups serve as coverage boundaries
-// and as the impacted-code population; a file matched by both a spec and a
-// code group is a configuration error (14.14). SPEC 7.3: `markdown` absent →
-// no emission; when present, `emit` (boolean) is REQUIRED and controls
-// emission; `outDir` redirects emitted files preserving workspace-relative
-// paths and is a directory path relative to the workspace root spelled as
-// one or more non-empty `/`-separated segments, none `.` or `..` — the form
-// of every workspace-relative path (1.5, 7) — so that each emit destination
-// (`outDir` joined by `/` to the default workspace-relative path) is itself a
-// plain workspace-relative path; any other spelling — empty, beginning with
-// `/`, or carrying a `.`, `..`, or empty segment — is a configuration error
-// (14.14), decided by spelling alone, never by where the path would resolve;
-// the configured emit destinations exist exactly while emission
-// is enabled — with `emit: true` they are the destination paths whether or
-// not emission has yet run, with `markdown` absent or `emit: false` no path
-// is a destination, so the 13.4 exclusion and the import rule of 4 have no
-// Markdown component.
+// groups; every matched file MUST have the `.mdx` extension, and its
+// workspace-relative path MUST NOT contain U+0022, U+0027, U+005C (the
+// backslash), U+000A, U+000D, U+2028, or U+2029, any other match being
+// invalid (14.19) — a bar binding spec groups alone, 14.19's code-source
+// forms being `#`, U+FFFD, and non-UTF-8. SPEC 7.2: code groups serve as
+// coverage boundaries and as the impacted-code population; a file matched
+// by both a spec and a code group is a configuration error (14.14). SPEC
+// 7.3: `markdown` absent → no emission; when present, `emit` (boolean) is
+// REQUIRED and controls emission; `outDir` redirects emitted files
+// preserving workspace-relative paths and is a directory path relative to
+// the workspace root spelled as one or more non-empty `/`-separated
+// segments, none `.` or `..` — the form of every workspace-relative path
+// (1.5, 7) — so that each emit destination (`outDir` joined by `/` to the
+// default workspace-relative path) is itself a plain workspace-relative
+// path; any other spelling — empty, beginning with `/`, or carrying a `.`,
+// `..`, or empty segment — is a configuration error (14.14), decided by
+// spelling alone, never by where the path would resolve; the configured
+// emit destinations exist exactly while emission is enabled — with `emit:
+// true` they are the destination paths whether or not emission has yet
+// run, with `markdown` absent or `emit: false` no path is a destination, so
+// the 13.4 exclusion and the import rule of 4 have no Markdown component.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — exit
@@ -57,6 +60,23 @@
 // - T7.1-1 policy findings are compared as sorted "rule :: kind: from -> to"
 //   renderings: SPEC 7.5 fixes the information (rule name + offending edge),
 //   not an order, and one finding per (rule, edge) pair.
+// - T7.1-1 path characters (SPEC 7.1, 14.19): one arm per character 7.1
+//   bars in a spec-group file name (`specs/a<c>b.mdx`) plus U+0027 in a
+//   directory component (`specs/it's/a.mdx`), each file alone in its own
+//   workspace with condition-free content, so its one 14.19 finding — the
+//   stable code, `locations` empty, the path as concerned path — is the
+//   build's exact multiset. "Still discovered and reachable as T11.2-3's
+//   invalid-path files are" is asserted through `view --file <glob>`
+//   (T11.5-3's reading of "glob-reached"): exit 1, the file's finding
+//   accompanying, one view whose tree keeps its ranges and raw attribute
+//   entries with every identity, root included, unavailable (T11.2-3's
+//   projection). The U+0022, backslash, U+000A, and U+000D arms — names
+//   other filesystems cannot hold — are staged on the Linux leg alone
+//   (`process.platform === "linux"`, T1.5-2's precedent), gated in the
+//   body; so is the code-source control `src/it's<U+005C>x.ts`, its name
+//   holding a backslash, asserted finding-free under `build --json` and
+//   `check --json` and through its workspace's exact `query edges` set.
+//   Every barred character is built from its code point.
 // - T7.3-1 emitted Markdown is byte-asserted (SPEC 3 fixes the compiled
 //   bytes; H-4); the compilation semantics themselves are T3-*'s subject —
 //   fixture sources are single-section files with trivially known output.
@@ -78,7 +98,9 @@
 // - Staged-source records (TEST-SPEC S-9's before-any-product clause;
 //   helpers/staged-mdx.ts): every `.mdx` file a body stages in a workspace
 //   created after its first product invocation — `expectConfigRefused`'s
-//   one staging site, T7.1-1's non-`.mdx`-match workspace, T7.3-1's
+//   one staging site, T7.1-1's non-`.mdx`-match, path-character (one
+//   record staged at every barred path), and code-source-control
+//   workspaces, T7.3-1's
 //   `EMISSION_FILES` (its first workspace's too, the map being shared) and
 //   destination workspaces — is a ledger record, judged by
 //   test/self/s9-staged-sources.test.ts before any product exists: the
@@ -92,7 +114,9 @@
 //   code source a body stages in a workspace created after its first
 //   product invocation — `expectConfigRefused`'s one staging site (its
 //   arm tables' rows each a record made at module load), T7.1-1's
-//   non-`.mdx`-match configuration, T7.3-1's emission-matrix variants
+//   non-`.mdx`-match and path-character configurations and its
+//   code-source control's configuration and code source (the record
+//   staged at `src/it's<U+005C>x.ts`), T7.3-1's emission-matrix variants
 //   (the first's too, the table being one), outDir, destination, and
 //   configuration-alone workspaces — is a ledger record carrying its S-9
 //   declaration, judged by test/self/s9-staged-sources.test.ts before any
@@ -110,15 +134,21 @@ import type {
   Finding,
   GraphEdge,
   IdsFileEntry,
+  PathValue,
+  SourceRange,
+  ViewAttributeEntry,
+  ViewNode,
 } from "../../helpers/adapters/index.js";
 import {
   decodeCoverageReport,
   decodeEdgesReport,
   decodeFindingsReport,
   decodeIdsReport,
+  decodeViewReport,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
+  assertExitCode,
   assertFileBytes,
   fail,
   parseJsonStdout,
@@ -129,6 +159,7 @@ import {
   assertSnapshotsEqual,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { summarizeResult } from "../../helpers/subprocess.js";
@@ -149,6 +180,8 @@ import {
   expectConfigurationError,
   expectErrorDocument,
   expectExit,
+  expectFindingFreeReport,
+  runCli,
   runJson,
 } from "./support.js";
 
@@ -446,12 +479,360 @@ export default defineConfig({
 `,
 );
 
+// --- T7.1-1's path-character arms (SPEC 7.1, 14.19) --------------------------
+//
+// SPEC 7.1 bars U+0022, U+0027, U+005C (the backslash), U+000A, U+000D,
+// U+2028, and U+2029 from a spec-group file's workspace-relative path
+// (14.19): one arm per character in the file name (`specs/a<c>b.mdx`) plus
+// one with U+0027 in a directory component (`specs/it's/a.mdx`), each file
+// alone in its own workspace (module header). Every barred character is
+// built from its code point, never from an escape spelling.
+
+/** Whether the Linux-leg arms are staged (module-header note). */
+const LINUX_LEG = process.platform === "linux";
+
+const APOSTROPHE = String.fromCodePoint(0x27);
+const BACKSLASH = String.fromCodePoint(0x5c);
+
+/** One path-character arm: a barred spec-group file, alone in its workspace. */
+interface PathCharacterArm {
+  /** The barred character and where it stands, for diagnoses. */
+  readonly what: string;
+  /** The spec-group file's workspace-relative path. */
+  readonly path: string;
+  /** The `view --file` glob reaching exactly that file (SPEC 7's globs). */
+  readonly glob: string;
+  /** Staged on the Linux leg alone: a name other filesystems cannot hold. */
+  readonly linuxLeg: boolean;
+}
+
+function fileNameArm(
+  codePoint: number,
+  name: string,
+  linuxLeg: boolean,
+): PathCharacterArm {
+  return {
+    what: `${name} in the file name`,
+    path: `specs/a${String.fromCodePoint(codePoint)}b.mdx`,
+    glob: "specs/a*b.mdx",
+    linuxLeg,
+  };
+}
+
+const PATH_CHARACTER_ARMS: readonly PathCharacterArm[] = [
+  fileNameArm(0x22, "U+0022 QUOTATION MARK", true),
+  fileNameArm(0x27, "U+0027 APOSTROPHE", false),
+  fileNameArm(0x5c, "U+005C REVERSE SOLIDUS (the backslash)", true),
+  fileNameArm(0x0a, "U+000A LINE FEED", true),
+  fileNameArm(0x0d, "U+000D CARRIAGE RETURN", true),
+  fileNameArm(0x2028, "U+2028 LINE SEPARATOR", false),
+  fileNameArm(0x2029, "U+2029 PARAGRAPH SEPARATOR", false),
+  {
+    what: "U+0027 APOSTROPHE in a directory component",
+    path: `specs/it${APOSTROPHE}s/a.mdx`,
+    glob: "specs/*/a.mdx",
+    linuxLeg: false,
+  },
+];
+
+// The arms' configuration: one spec group whose glob reaches every arm's
+// file, the directory component included. A staged-source record (module
+// header): T7.1-1 stages it after its first product invocation.
+const PATH_CHARACTER_CONFIG = stagedTs(
+  "T7.1-1 xspec.config.ts (the path-character arms: the spec-group glob " +
+    "specs/**/*.mdx)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+);
+
+/**
+ * Running byte-offset composer (the T5.7-2 discipline): `add` appends a
+ * segment and returns its byte range, `attr` an attribute segment as its
+ * expected raw view entry (SPEC 11.4: the entry's text is the attribute's
+ * own characters), so every expected offset is composed from the parts the
+ * staged file is made of.
+ */
+class SourceComposer {
+  private readonly parts: string[] = [];
+  private bytes = 0;
+
+  get pos(): number {
+    return this.bytes;
+  }
+
+  get source(): string {
+    return this.parts.join("");
+  }
+
+  add(segment: string): SourceRange {
+    const start = this.bytes;
+    this.parts.push(segment);
+    this.bytes += Buffer.byteLength(segment, "utf8");
+    return { start, end: this.bytes };
+  }
+
+  attr(name: string, text: string): ViewAttributeEntry {
+    return { name, range: this.add(text), text };
+  }
+}
+
+// The arms' one spec source, staged at each barred path: a section with a
+// nested child, so "every identity unavailable" reaches the root, a
+// top-level section, and a nested one. Its content is condition-free — the
+// path is each arm's only defect, so the exact 14.19 count has teeth.
+const PATH_ARM = new SourceComposer();
+const PATH_ARM_OUTER_START = PATH_ARM.pos;
+PATH_ARM.add("<S ");
+const PATH_ARM_OUTER_ID = PATH_ARM.attr("id", 'id="p"');
+PATH_ARM.add(">\nText for p.\n\n");
+const PATH_ARM_INNER_START = PATH_ARM.pos;
+PATH_ARM.add("<S ");
+const PATH_ARM_INNER_ID = PATH_ARM.attr("id", 'id="p.kid"');
+PATH_ARM.add(">\nText for p.kid.\n</S>");
+const PATH_ARM_INNER_RANGE: SourceRange = {
+  start: PATH_ARM_INNER_START,
+  end: PATH_ARM.pos,
+};
+PATH_ARM.add("\n</S>");
+const PATH_ARM_OUTER_RANGE: SourceRange = {
+  start: PATH_ARM_OUTER_START,
+  end: PATH_ARM.pos,
+};
+PATH_ARM.add("\n");
+const PATH_ARM_SOURCE = stagedMdx(
+  "T7.1-1 the path-character arms' spec source (staged at each barred path)",
+  PATH_ARM.source,
+);
+
+/** The 12.7 unavailability marker, as decoded (one-datum state). */
+const UNAVAILABLE = { unavailable: true } as const;
+
+/**
+ * The tree projection T11.2-3 pins: per node, the identity datum (11.2
+ * three-state), the construct range (1.7), the raw attribute entries as
+ * parsed, and the children in document order.
+ */
+interface TreeExpectation {
+  readonly identity: string | { readonly unavailable: true };
+  readonly range: SourceRange;
+  readonly attributes: readonly ViewAttributeEntry[];
+  readonly children: readonly TreeExpectation[];
+}
+
+function projectTree(node: ViewNode): TreeExpectation {
+  return {
+    identity: node.identity,
+    range: node.range,
+    attributes: node.attributes.map((entry) => ({
+      name: entry.name,
+      range: entry.range,
+      text: entry.text,
+    })),
+    children: node.children.map(projectTree),
+  };
+}
+
+// The arm source's full positional tree, every identity unavailable.
+const PATH_ARM_TREE: TreeExpectation = {
+  identity: UNAVAILABLE,
+  range: { start: 0, end: PATH_ARM.pos },
+  attributes: [],
+  children: [
+    {
+      identity: UNAVAILABLE,
+      range: PATH_ARM_OUTER_RANGE,
+      attributes: [PATH_ARM_OUTER_ID],
+      children: [
+        {
+          identity: UNAVAILABLE,
+          range: PATH_ARM_INNER_RANGE,
+          attributes: [PATH_ARM_INNER_ID],
+          children: [],
+        },
+      ],
+    },
+  ],
+};
+
+/**
+ * The asserted projection of a 14.19 finding (T11.2-3's): the stable code
+ * token, the empty locations of a path-level condition, and the concerned
+ * path (SPEC 14, 12.7). Message and identities stay unpinned.
+ */
+interface PathFindingExpectation {
+  readonly code: string | null;
+  readonly locations: readonly unknown[];
+  readonly path: PathValue | null;
+}
+
+function projectPathFinding(finding: Finding): PathFindingExpectation {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+  };
+}
+
+function invalidPathFinding(path: string): PathFindingExpectation {
+  return { code: "invalid-source-path", locations: [], path };
+}
+
+/**
+ * One path-character arm (module header): `build --json` reports exactly
+ * the file's condition-19 finding, concerning its path, and the
+ * glob-reached `view` serves its tree with every identity unavailable, the
+ * finding accompanying — the file still discovered and reachable as
+ * T11.2-3's invalid-path files are (SPEC 7.1, 14.19, 11.2, 11.4).
+ */
+async function runPathCharacterArm(
+  product: ProductBinding,
+  arm: PathCharacterArm,
+): Promise<void> {
+  const label = `${JSON.stringify(arm.path)} (${arm.what})`;
+  const expected19 = [invalidPathFinding(arm.path)];
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": PATH_CHARACTER_CONFIG,
+        [arm.path]: PATH_ARM_SOURCE,
+      },
+    },
+    async (workspace) => {
+      const buildContext = `T7.1-1 \`build --json\` with the spec-group file ${label}`;
+      const findings = await buildFindings(product, workspace, buildContext);
+      assertConditionCounts(findings, { "14.19": 1 }, buildContext);
+      assertSameJson(
+        findings.map(projectPathFinding),
+        expected19,
+        `${buildContext} — the file is discovered and its path is invalid: ` +
+          `one condition-19 finding with the stable code ` +
+          `"invalid-source-path", no in-source locations, and the file's ` +
+          `workspace-relative path as its concerned path (SPEC 7.1, 14.19, ` +
+          `14, 12.7)`,
+      );
+
+      const viewContext =
+        `T7.1-1 \`view --file ${arm.glob}\` (the glob-reached view) over ` +
+        `the spec-group file ${label}`;
+      const viewResult = await runCli(product, workspace, [
+        "view",
+        "--file",
+        arm.glob,
+      ]);
+      assertExitCode(
+        viewResult,
+        1,
+        `${viewContext} — the answer carries the file's condition-19 ` +
+          `finding and explicitly-unavailable identities, so exit 1 with ` +
+          `the full document still emitted (SPEC 11.2, 11.4)`,
+      );
+      const report = decodeViewReport(
+        parseJsonStdout(
+          viewResult,
+          `${viewContext} — a single JSON document is the only output ` +
+            `form (SPEC 11)`,
+        ),
+        { text: false },
+        viewContext,
+      );
+      assertSameJson(
+        report.findings.map(projectPathFinding),
+        expected19,
+        `${viewContext} — the file's condition-19 finding accompanies the ` +
+          `answer whose consulted domain includes it (SPEC 11.2, 14.19)`,
+      );
+      assertSameJson(
+        report.views.map((view) => view.file),
+        [arm.path],
+        `${viewContext} — the glob admits the discovered file: one ` +
+          `per-file view, its \`file\` the workspace-relative path (SPEC ` +
+          `11.4, 7)`,
+      );
+      const view = report.views[0]!;
+      assertSameJson(
+        projectTree(view.root),
+        PATH_ARM_TREE,
+        `${viewContext} — the file keeps its full positional tree with ` +
+          `byte-exact construct ranges and raw attribute entries while ` +
+          `every node identity, root included, is explicitly unavailable ` +
+          `(SPEC 11.2, 11.4, 1.5)`,
+      );
+      assertSameJson(
+        [view.imports, view.occurrences, view.comments],
+        [[], [], []],
+        `${viewContext} — the file holds no imports, occurrences, or ` +
+          `comments: empty arrays, never null (SPEC 11.4, 12.7)`,
+      );
+    },
+  );
+}
+
+// --- T7.1-1's code-source control (SPEC 7.1, 14.19) --------------------------
+//
+// 7.1's bar binds spec groups alone (14.19's code-source forms are `#`,
+// U+FFFD, and non-UTF-8), so a code-group file whose path holds U+0027 and
+// the backslash — `src/it's<U+005C>x.ts`, one file name: the backslash is
+// no separator of a workspace-relative path (1.5) — is valid: `build` and
+// `check` exit 0, and its top-level marker records its `references` edge
+// from that whole-file location (4.5, 4.6), discriminating a product that
+// applies the bar to every source. Staged on the Linux leg (module header):
+// the name holds a backslash.
+const CODE_PATH_CONTROL_FILE = `src/it${APOSTROPHE}s${BACKSLASH}x.ts`;
+
+// The control's configuration and code source: staged-source records
+// (module header), T7.1-1 staging them after its first product invocation.
+const CODE_PATH_CONTROL_CONFIG = stagedTs(
+  "T7.1-1 xspec.config.ts (the code-source path control: spec glob " +
+    "specs/*.mdx, code glob src/*.ts)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  code: {
+    app: ["src/*.ts"]
+  }
+})
+`,
+);
+const CODE_PATH_CONTROL_SOURCE = stagedTs(
+  "T7.1-1 the code-source path control's code source (staged at " +
+    "src/it's<U+005C>x.ts: a top-level marker of specs/A.mdx#a)",
+  `import SPEC from "../specs/A.xspec"
+
+SPEC.a
+`,
+);
+
+// The control workspace's complete edge set (SPEC 5.1, 5.2): the source's
+// containment edge and the marker's references edge, sourced at the code
+// file's whole-file location — its path, the identity of a valid path.
+const CODE_PATH_CONTROL_EDGES: readonly GraphEdge[] = [
+  { from: "specs/A.mdx", to: "specs/A.mdx#a", kind: "contains" },
+  { from: CODE_PATH_CONTROL_FILE, to: "specs/A.mdx#a", kind: "references" },
+];
+
 const T7_1_1 = defineProductTest({
   id: "T7.1-1",
   title:
     "spec groups: a file in two spec groups is valid, listed once, and " +
     "coverage and policy see it in both groups; a spec-group match without " +
-    "`.mdx` is invalid (SPEC 7.1, 8, 7.5, 14.19)",
+    "`.mdx` is invalid; a spec-group file whose path holds U+0022, U+0027, " +
+    "U+005C, U+000A, U+000D, U+2028, or U+2029 — one arm per character in " +
+    "the file name, plus U+0027 in a directory component; the U+0022, " +
+    "U+005C, U+000A, and U+000D arms on the Linux leg — is invalid (14.19), " +
+    "still discovered and reachable: its finding concerns its path and a " +
+    "glob-reached `view` serves its tree with every identity unavailable; " +
+    "control (Linux leg): the code-group file `src/it's<U+005C>x.ts` is " +
+    "valid, `build` and `check` exiting 0 and its marker recording its edge " +
+    "from the whole-file location (SPEC 7.1, 8, 7.5, 14.19, 11.2, 11.4)",
   run: async (product) => {
     // A file in two spec groups is valid — and coverage/policy see it in
     // both.
@@ -557,6 +938,62 @@ const T7_1_1 = defineProductTest({
         }
       },
     );
+
+    // Path characters (SPEC 7.1, 14.19): one arm per barred character in
+    // the file name plus U+0027 in a directory component, each file alone
+    // in its own workspace; the U+0022, backslash, U+000A, and U+000D arms
+    // on the Linux leg alone (module header).
+    for (const arm of PATH_CHARACTER_ARMS) {
+      if (arm.linuxLeg && !LINUX_LEG) continue;
+      await runPathCharacterArm(product, arm);
+    }
+
+    // Control (Linux leg: the name holds a backslash): the code-group file
+    // `src/it's<U+005C>x.ts` is valid — 7.1's bar binds spec groups alone —
+    // so `build` and `check` are finding-free and its top-level marker
+    // records its edge from the whole-file location.
+    if (LINUX_LEG) {
+      await withWorkspace(
+        {
+          files: {
+            "xspec.config.ts": CODE_PATH_CONTROL_CONFIG,
+            "specs/A.mdx": SECTION_A_SOURCE,
+            [CODE_PATH_CONTROL_FILE]: CODE_PATH_CONTROL_SOURCE,
+          },
+        },
+        async (workspace) => {
+          const label =
+            `the code-group file ${JSON.stringify(CODE_PATH_CONTROL_FILE)} ` +
+            `(U+0027 and the backslash in a code source's path)`;
+          await expectFindingFreeReport(
+            product,
+            workspace,
+            ["build", "--json"],
+            `T7.1-1 \`build --json\` with ${label} — valid: 7.1's bar ` +
+              `binds spec groups alone, 14.19's code-source forms being ` +
+              `\`#\`, U+FFFD, and non-UTF-8 (SPEC 7.1, 14.19)`,
+          );
+          await expectFindingFreeReport(
+            product,
+            workspace,
+            ["check", "--json"],
+            `T7.1-1 \`check --json\` with ${label}, after the build — ` +
+              `valid and current (SPEC 7.1, 14.19, 12.2)`,
+          );
+          const edgesLabel = `T7.1-1 \`query edges\` with ${label}`;
+          assertEdgeSetEqual(
+            decodeEdgesReport(
+              await runJson(product, workspace, ["query", "edges"], edgesLabel),
+              edgesLabel,
+            ),
+            CODE_PATH_CONTROL_EDGES,
+            `${edgesLabel}: the file's top-level marker records its ` +
+              `references edge from the whole-file location, whose ` +
+              `identity is the file's path (SPEC 4.5, 4.6, 7.1)`,
+          );
+        },
+      );
+    }
   },
 });
 
