@@ -3,8 +3,8 @@
 // T13.4-3 (orphan knowledge boundary), T13.4-4 (derived paths belong to
 // xspec), T13.4-5 (durable protection), T13.4-6 (symlink write rules),
 // T13.4-8 (writes create missing directories), T13.4-9 (derived paths above
-// sources and other derived paths), T13.4-11 (removing recorded paths no
-// longer generated).
+// sources and other derived paths), T13.4-10 (rebuild-obstructing orphans),
+// T13.4-11 (removing recorded paths no longer generated).
 // T13.4-7 registers no test body: its TEST-SPEC entry is a cross-reference —
 // T7-6 (section-7-discovery.ts) carries the `.xspec.` / `.xspec/` /
 // emit-destination source exclusion. (A registered no-op body would pass
@@ -183,6 +183,35 @@
 //   or nothing ((b)), a miss being a harness error — and (f)'s premise is
 //   re-pinned after its `build` of `a.mdx` alone: `out/a.md` the plain file
 //   that build emitted, a product writing none there failing diagnosed.
+// - T13.4-10 (rebuild-obstructing orphans, SPEC 13.4, 14.22, and 14.10's
+//   correction): two arms, each in a fresh workspace — the recorded orphan,
+//   and the unrecorded twin, its graph data deleted before the
+//   reconfiguration (T13.3-2's operational definition, section-13.3.ts
+//   `deleteGraphData`). Each builds under one spec group globbing
+//   `specs/*.mdx` and `markdown: { emit: true, outDir: "out" }` — the
+//   staging's emission settings and nothing more — premising
+//   `out/specs/A.md` the plain file that build emitted, then reconfigures
+//   `outDir` to "out/specs/A.md". The refused `build --json` and the
+//   following `check --json` each run inside a whole-root compare (the
+//   compare-around machinery CERTIFICATIONS.md's VIOL-CORE-CHATTYREADS note
+//   names this test under): `build` modifies nothing, and `check`, which
+//   never refreshes (13.3), writes nothing either, so the orphan stays,
+//   byte-identical, until it is deleted by hand. The finding sets are
+//   exact: `build`'s one condition 22 concerning `out/specs/A.md`;
+//   `check`'s that finding beside one condition 10 concerning the same
+//   path (the recorded arm) or alone (the twin) — a condition-10 finding
+//   concerning a path no longer generated is the recorded-file form, and a
+//   mismatch form would be a further finding. The recorded-file finding's
+//   correction, "its manual deletion" (14.10), never a rebuild, is asserted
+//   by H-3's robust matching over its `message`: information presence — a
+//   deletion or removal and its manual character ("manual", "by hand", or
+//   "yourself"; `MANUAL_DELETION_MENTIONS`) — and no clause presenting a
+//   build as what removes the file (`REBUILD_REMEDY`: a build "to remove"
+//   it, a build that "removes" it, a removal "by" a build), so the generic
+//   correction instructing rebuilding fails while a message naming the
+//   refused rebuild beside the manual deletion passes. After the manual
+//   deletion, `build` exits 0, `out/specs/A.md/specs/A.md` is a plain file,
+//   and `check` is clean, in both arms.
 // - T13.4-11 stays inside CERTIFICATIONS.md §CONF-ORPHAN's scope (the test
 //   is in-scope there): one spec group of trivial single-section `.mdx`
 //   sources whose glob matches `.mdx` names alone; `markdown` emitting next
@@ -253,6 +282,7 @@ import type {
 } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { STREAMS_VALID_SOURCE } from "./section-12.0-i.js";
+import { deleteGraphData } from "./section-13.3.js";
 import { CORE_A_STAGED } from "./section-13.5.js";
 import {
   assertConditionCounts,
@@ -2975,6 +3005,295 @@ const T13_4_9 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
+// T13.4-10 — rebuild-obstructing orphans
+// ---------------------------------------------------------------------------
+
+// T13.4-10's configurations (module header): one spec group globbing
+// `specs/*.mdx`, Markdown emitted under `outDir: "out"`, then `outDir`
+// reconfigured to "out/specs/A.md". Each arm's reconfiguration is staged
+// after its initial `build`, and the unrecorded twin's workspace is created
+// after the body's first product invocation, so the configurations and the
+// source are staged-source records (helpers/staged-ts.ts,
+// helpers/staged-mdx.ts; S-9's TypeScript and timing clauses), staged at
+// every site.
+const OBSTRUCTION_OUT_CONFIG = stagedTs(
+  'T13.4-10 xspec.config.ts — specs/*.mdx, Markdown emitted under outDir "out" (the initial build of the recorded arm and of the unrecorded twin)',
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "out" }
+})
+`,
+);
+const OBSTRUCTION_RECONFIGURED_CONFIG = stagedTs(
+  'T13.4-10 xspec.config.ts — specs/*.mdx, outDir reconfigured to "out/specs/A.md" (both arms, staged after the initial build)',
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "out/specs/A.md" }
+})
+`,
+);
+const OBSTRUCTION_A_MDX = stagedMdx(
+  "T13.4-10 specs/A.mdx (the trivial single-section a: the recorded arm and the unrecorded twin)",
+  ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
+);
+
+/** The orphan: the initial build's emit path, no longer generated. */
+const OBSTRUCTION_ORPHAN = "out/specs/A.md";
+/** The reconfigured emit path, below the orphan (SPEC 7.3, 13.2). */
+const OBSTRUCTION_EMIT = "out/specs/A.md/specs/A.md";
+
+/**
+ * The correction "its manual deletion" (SPEC 14.10), by H-3's robust
+ * matching over the recorded-file finding's message (module header): the
+ * required information — a deletion or removal, and its manual character.
+ */
+const MANUAL_DELETION_MENTIONS: readonly RegExp[] = [
+  /\b(?:delet|remov)/i,
+  /\bmanual|\bby hand\b|\byourself\b/i,
+];
+
+/**
+ * "Never a rebuild" (TEST-SPEC T13.4-10), by the same robust matching: a
+ * clause presenting a build as what removes the file — a build "to remove"
+ * or "to delete" it, a build that "removes" or "will remove" it, or a
+ * removal "by", "via", "through", or "with" a build. A message naming the
+ * refused rebuild beside the manual deletion matches none of them.
+ */
+const REBUILD_REMEDY: readonly RegExp[] = [
+  /\b(?:re-?)?build(?:ing)?`?(?:\s+again)?\s+to\s+(?:remove|delete)\b/i,
+  /\b(?:re-?)?build(?:ing)?`?\s+(?:removes|deletes|(?:will|would|shall)\s+(?:remove|delete))\b/i,
+  /\b(?:remov|delet)\w*(?:\s+\w+){0,3}?\s+(?:by|via|through|with)\s+(?:running\s+|re-?running\s+|a\s+)?`?(?:xspec\s+)?(?:re-?)?build/i,
+];
+
+/**
+ * The recorded-file finding concerning the obstructing orphan instructs its
+ * manual deletion, never a rebuild: the rebuild that removes a recorded
+ * file no longer generated is the very write the orphan obstructs, refused
+ * (SPEC 14.10, 13.4, 14.22; H-3's robust matching).
+ */
+function assertManualDeletionCorrection(
+  finding: Finding,
+  context: string,
+): void {
+  assertReportMentions(
+    finding.message,
+    MANUAL_DELETION_MENTIONS,
+    `${context} — the recorded-file finding concerning ` +
+      `${OBSTRUCTION_ORPHAN} instructs the file's manual deletion, a ` +
+      `rebuild being refused while it obstructs the write (SPEC 14.10, ` +
+      `13.4, 14.22; H-3's robust matching: a deletion or removal, and its ` +
+      `manual character)`,
+  );
+  const remedy = REBUILD_REMEDY.find((pattern) =>
+    pattern.test(finding.message),
+  );
+  if (remedy !== undefined) {
+    fail(
+      `${context} — the recorded-file finding concerning ` +
+        `${OBSTRUCTION_ORPHAN} instructs its manual deletion, never a ` +
+        `rebuild: the rebuild is refused while the orphan obstructs its ` +
+        `write, so it removes nothing (SPEC 14.10, 13.4, 14.22; H-3's ` +
+        `robust matching: no clause presenting a build as what removes the ` +
+        `file, ${remedy.toString()}); got ${JSON.stringify(finding.message)}`,
+    );
+  }
+}
+
+/** One T13.4-10 arm: the recorded orphan, or its unrecorded twin. */
+interface ObstructionArm {
+  /** Diagnostic tag. */
+  readonly tag: string;
+  /**
+   * Whether the record lists the orphan: graph data as the initial build
+   * wrote it, or deleted before the reconfiguration (T13.3-2's operational
+   * definition) — the orphan then outside xspec's knowledge (T13.4-3).
+   */
+  readonly recorded: boolean;
+}
+
+const OBSTRUCTION_ARMS: readonly ObstructionArm[] = [
+  { tag: "T13.4-10 (the recorded orphan)", recorded: true },
+  {
+    tag: "T13.4-10 (the unrecorded twin: graph data deleted before the reconfiguration)",
+    recorded: false,
+  },
+];
+
+/**
+ * Walk one arm in a fresh workspace (H-1): build under `outDir: "out"`
+ * (`out/specs/A.md` premised the plain file that build emitted), delete the
+ * graph data in the twin, reconfigure `outDir`, then `build` and `check` —
+ * each inside a whole-root compare — delete the orphan by hand, `build`,
+ * and `check` again (module header).
+ */
+async function walkObstructionArm(
+  product: ProductBinding,
+  arm: ObstructionArm,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": OBSTRUCTION_OUT_CONFIG,
+        "specs/A.mdx": OBSTRUCTION_A_MDX,
+      },
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${arm.tag} initial \`build\` under outDir "out" (SPEC 12.1)`,
+      );
+      await assertKindIs(
+        workspace,
+        OBSTRUCTION_ORPHAN,
+        "file",
+        `${arm.tag}: staging premise — the initial build emits ` +
+          `specs/A.mdx's Markdown at ${OBSTRUCTION_ORPHAN} as a plain file, ` +
+          `recording it (SPEC 13.2, 7.3, 13.3)`,
+      );
+      if (!arm.recorded) {
+        await deleteGraphData(
+          workspace,
+          `${arm.tag}: deleting the graph data before the reconfiguration ` +
+            `(T13.3-2's operational definition)`,
+        );
+      }
+      await workspace.file("xspec.config.ts", OBSTRUCTION_RECONFIGURED_CONFIG);
+
+      const buildContext = `${arm.tag} \`build --json\` after the reconfiguration`;
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          const findings = await runFindingsReport(
+            product,
+            workspace,
+            ["build", "--json"],
+            1,
+            `${buildContext} — the orphan ${OBSTRUCTION_ORPHAN} occupies a ` +
+              `directory component of the emit path ${OBSTRUCTION_EMIT}, ` +
+              `obstructing that write: the rebuild is refused, exit 1 (SPEC ` +
+              `13.4, 14.22, 12.1, 12.0)`,
+          );
+          assertConditionCounts(
+            findings,
+            { "14.22": 1 },
+            `${buildContext} — exactly one condition-22 finding and nothing ` +
+              `beside it: the workspace otherwise passes \`build\`'s ` +
+              `validations, and \`build\` cannot observe 14.10 (SPEC 14.22, ` +
+              `12.1)`,
+          );
+          assertFindingConcernsPath(
+            findings[0]!,
+            OBSTRUCTION_ORPHAN,
+            `${buildContext} — the condition-22 finding concerns the ` +
+              `obstructing orphan (SPEC 14.22, 13.4)`,
+          );
+        },
+        `${buildContext} — the rebuild is refused before any write or ` +
+          `removal: the orphan, every other derived file, and graph data ` +
+          `byte-identical (SPEC 13.4, 14.22, 12.1)`,
+      );
+
+      const checkContext = `${arm.tag} \`check --json\` after the refused rebuild`;
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          const findings = await runFindingsReport(
+            product,
+            workspace,
+            ["check", "--json"],
+            1,
+            `${checkContext} — \`check\` performs \`build\`'s validations, ` +
+              `the refused write among them, and exits 1 on any finding ` +
+              `(SPEC 12.2, 14.22, 12.0)`,
+          );
+          assertConditionCounts(
+            findings,
+            arm.recorded ? { "14.22": 1, "14.10": 1 } : { "14.22": 1 },
+            arm.recorded
+              ? `${checkContext} — the condition-22 finding and, beside it, ` +
+                  `exactly one condition-10 finding, and nothing else: the ` +
+                  `recorded-file form compares the record against the ` +
+                  `generated paths on any workspace, while the mismatch ` +
+                  `forms are undetectable on a workspace failing \`build\`'s ` +
+                  `validations (SPEC 14.10, 14.22, 12.2)`
+              : `${checkContext} — the condition-22 finding alone: no ` +
+                  `record lists ${OBSTRUCTION_ORPHAN}, so no recorded-file ` +
+                  `finding, and the missing graph data is a mismatch form, ` +
+                  `undetectable on a workspace failing \`build\`'s ` +
+                  `validations (SPEC 14.10, 14.22, 13.4)`,
+          );
+          assertFindingConcernsPath(
+            findings.find((finding) => finding.condition === "14.22")!,
+            OBSTRUCTION_ORPHAN,
+            `${checkContext} — the condition-22 finding concerns the ` +
+              `obstructing orphan (SPEC 14.22, 13.4)`,
+          );
+          if (arm.recorded) {
+            const stale = findings.find(
+              (finding) => finding.condition === "14.10",
+            )!;
+            assertFindingConcernsPath(
+              stale,
+              OBSTRUCTION_ORPHAN,
+              `${checkContext} — the condition-10 finding is the ` +
+                `recorded-file form concerning ${OBSTRUCTION_ORPHAN}, a ` +
+                `recorded derived file remaining at a path no longer ` +
+                `generated, never a mismatch form (SPEC 14.10, 12.7)`,
+            );
+            assertManualDeletionCorrection(stale, checkContext);
+          }
+        },
+        `${checkContext} — \`check\` reports without writing, so the ` +
+          `orphan stays until it is deleted manually (SPEC 13.3, 13.4, 12.2)`,
+      );
+
+      await fsp.rm(workspace.path(OBSTRUCTION_ORPHAN));
+      await buildOk(
+        product,
+        workspace,
+        `${arm.tag} \`build\` after ${OBSTRUCTION_ORPHAN} is deleted by hand ` +
+          `— nothing obstructs the write, exit 0 (SPEC 13.4, 12.1)`,
+      );
+      await assertKindIs(
+        workspace,
+        OBSTRUCTION_EMIT,
+        "file",
+        `${arm.tag}: after the manual deletion, \`build\` writes ` +
+          `specs/A.mdx's Markdown at the reconfigured emit path ` +
+          `${OBSTRUCTION_EMIT} as a plain file (SPEC 13.2, 7.3, 13.4)`,
+      );
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        `${arm.tag} \`check --json\` after the manual deletion and the ` +
+          `\`build\` — clean (SPEC 13.4, 14.10)`,
+      );
+    },
+  );
+}
+
+const T13_4_10 = defineProductTest({
+  id: "T13.4-10",
+  title:
+    'rebuild-obstructing orphans: an orphan, recorded or not, occupying a workspace-relative directory component of a path the rebuild writes obstructs that write — `build` with `markdown: { emit: true, outDir: "out" }` emits `specs/A.mdx`\'s Markdown at `out/specs/A.md`, then `outDir` is reconfigured to `"out/specs/A.md"`: `build` exits 1 with exactly one condition-22 finding concerning `out/specs/A.md`, modifying nothing; `check` exits 1 reporting that finding and exactly one condition-10 finding in the recorded-file form concerning `out/specs/A.md` whose correction is the file\'s manual deletion, never a rebuild, and no mismatch form; once the file is deleted by hand, `build` exits 0 writing `out/specs/A.md/specs/A.md` and `check` is clean; the unrecorded twin — graph data deleted before the reconfiguration — obstructs identically, and its `check` reports the condition-22 finding alone (SPEC 13.4, 14.22, 14.10, 12.1, 12.2, 13.5)',
+  run: async (product) => {
+    for (const arm of OBSTRUCTION_ARMS) {
+      await walkObstructionArm(product, arm);
+    }
+  },
+});
+
+// ---------------------------------------------------------------------------
 // T13.4-11 — removing recorded paths no longer generated
 // ---------------------------------------------------------------------------
 
@@ -3642,5 +3961,6 @@ export const section134Tests: readonly ProductTestEntry[] = [
   T13_4_6,
   T13_4_8,
   T13_4_9,
+  T13_4_10,
   T13_4_11,
 ];

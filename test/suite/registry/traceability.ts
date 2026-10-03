@@ -511,6 +511,14 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // derived paths are carriage context with home coverage at
   // T11.6-3/T7.3-1/T13.1-*/T13.2-1.
   "T13.4-9": ["13.4", "13.3", "14"],
+  // T13.4-10 asserts 13.4's rebuild-obstructing orphans through condition
+  // 22 and condition 10's recorded-file form with its manual-deletion
+  // correction (14), `build`'s refusal modifying nothing (12.1), `check`'s
+  // recorded-file verification (12.2), and 13.5's exception to rerunning
+  // `build` — the orphans 13.4 leaves for manual deletion; 7.3's emission
+  // settings, 13.2's emit paths, and the twin's graph-data deletion (13.3)
+  // are carriage context with home coverage at T7.3-1/T13.2-1/T13.3-2.
+  "T13.4-10": ["13.4", "12.1", "12.2", "13.5", "14"],
   // T13.4-11 asserts `build`'s removal of recorded derived files no longer
   // generated (12.1) and `check`'s recorded-file verification (12.2) through
   // condition 10's recorded-file form (14); the record (13.3), 7.2's code

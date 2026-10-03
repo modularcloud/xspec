@@ -38,19 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 58 — Register T13.4-10 (TEST-SPEC L563; SPEC 13.4, 14.22, 14.10; B13)
-
-**Where.** `test/suite/registry/section-13.4.ts`, and `traceability.ts` with `"14"`.
-
-**Change.**
-- *Staging.* `build` with `markdown: { emit: true, outDir: "out" }` and `specs/A.mdx`, recording the emitted `out/specs/A.md`. Then reconfigure `outDir` to `"out/specs/A.md"`.
-- *`build`* exits 1 with exactly one condition-22 finding concerning `out/specs/A.md`, and modifies nothing (compare-around).
-- *`check`* exits 1, reporting that finding and exactly one condition-10 recorded-file finding concerning `out/specs/A.md`. Its correction is the file's manual deletion, never a rebuild (H-3's robust matching). No mismatch form is reported.
-- *After deleting the file by hand,* `build` exits 0, writing `out/specs/A.md/specs/A.md`, and `check` is clean.
-- *The unrecorded twin.* Graph data is deleted before the reconfiguration. The rest behaves the same, except that `check` reports the condition-22 finding alone.
-
-**Checks.** S-7 passes. T13.4-10 against the built product.
-
 ### Task 59 — T14-7: `refused-exposed-derived-file`, and the new `refused-invalid-destination` arms (TEST-SPEC L589; B15)
 
 **Depends on.** Tasks 13, 33, and 39–42.
