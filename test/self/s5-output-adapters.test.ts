@@ -59,7 +59,7 @@ import {
   decodeNodeRowsReport,
   decodeNodeSummary,
   decodeNodeSummaryRowsReport,
-  decodeNodeTextSummary,
+  decodeNodeTextAlgebraSummary,
   decodePerformedOperationReport,
   decodePreviewReport,
   decodeReachableReport,
@@ -176,6 +176,13 @@ const EDGE_OUT = {
   from: "specs/A.mdx#login",
   to: "specs/B.mdx#account",
   kind: "depends",
+};
+
+/** A `contains` edge from GOOD_NODE's section to a child (SPEC.md 5.2). */
+const CONTAINS_DETAILS = {
+  from: "specs/A.mdx#login",
+  to: "specs/A.mdx#login.details",
+  kind: "contains",
 };
 
 const GOOD_NODE = {
@@ -1042,25 +1049,67 @@ const DECODERS: readonly DecoderSpec[] = [
     ],
   },
   {
-    name: "query node (own/subtree text summary)",
-    decode: decodeNodeTextSummary,
-    good: GOOD_NODE,
-    verify: (decoded: ReturnType<typeof decodeNodeTextSummary>) => {
+    name: "query node (text-algebra summary)",
+    decode: decodeNodeTextAlgebraSummary,
+    // GOOD_NODE with a `contains` edge to a child beside its dependency
+    // edge: the child's identity decodes, the dependency edge is passed over.
+    good: put(GOOD_NODE, [EDGE_OUT, CONTAINS_DETAILS], "edges", "outgoing"),
+    verify: (decoded: ReturnType<typeof decodeNodeTextAlgebraSummary>) => {
       expect(decoded.ownText).toBe("Login must work.\n");
       expect(decoded.subtreeText).toBe("Login must work.\n\nDetails.\n");
+      expect(decoded.sourceRange).toEqual({ start: 12, end: 96 });
+      expect(decoded.containsTargets).toEqual(["specs/A.mdx#login.details"]);
     },
     alsoGood: [
       {
         // The point of this summary decoder: a document carrying only the
-        // CONF-MD-scoped query surface — own and subtree text, nothing else
-        // — decodes (CERTIFICATIONS.md §CONF-MD; P-2, P-3), and empty texts
-        // are legitimate values (an empty leaf section, SPEC.md 1.1), never
-        // rejected and never defaulted.
-        label: "a document carrying only the scoped text fields (both empty)",
-        doc: { ownText: "", subtreeText: "" },
-        verify: (decoded: ReturnType<typeof decodeNodeTextSummary>): void => {
+        // CONF-MD-scoped members it reads — own and subtree text, source
+        // range, outgoing edges; no identity, hashes, tags, coverage, or
+        // incoming edges — decodes (CERTIFICATIONS.md §CONF-MD; P-3), and
+        // empty texts and an empty edge list are legitimate values (an
+        // empty leaf section, SPEC.md 1.1), never rejected and never
+        // defaulted.
+        label:
+          "a document carrying only the scoped members (empty texts, no children)",
+        doc: {
+          ownText: "",
+          subtreeText: "",
+          sourceRange: { start: 3, end: 3 },
+          edges: { outgoing: [] },
+        },
+        verify: (
+          decoded: ReturnType<typeof decodeNodeTextAlgebraSummary>,
+        ): void => {
           expect(decoded.ownText).toBe("");
           expect(decoded.subtreeText).toBe("");
+          expect(decoded.sourceRange).toEqual({ start: 3, end: 3 });
+          expect(decoded.containsTargets).toEqual([]);
+        },
+      },
+      {
+        // Several children keep the answer's own order — ordering them by
+        // their reported ranges is P-3's step, not the adapter's — and an
+        // edge of a dependency kind is passed over unread: its
+        // out-of-scope content (here no `to`) is never decoded.
+        label:
+          "contains targets in answer order beside an unread dependency edge",
+        doc: put(
+          GOOD_NODE,
+          [
+            { ...CONTAINS_DETAILS, to: "specs/A.mdx#login.b" },
+            { from: "specs/A.mdx#login", kind: "embeds" },
+            { ...CONTAINS_DETAILS, to: "specs/A.mdx#login.a" },
+          ],
+          "edges",
+          "outgoing",
+        ),
+        verify: (
+          decoded: ReturnType<typeof decodeNodeTextAlgebraSummary>,
+        ): void => {
+          expect(decoded.containsTargets).toEqual([
+            "specs/A.mdx#login.b",
+            "specs/A.mdx#login.a",
+          ]);
         },
       },
     ],
@@ -1072,6 +1121,73 @@ const DECODERS: readonly DecoderSpec[] = [
       {
         label: "non-string subtreeText",
         doc: put(GOOD_NODE, ["x"], "subtreeText"),
+      },
+      { label: "missing sourceRange", doc: omit(GOOD_NODE, "sourceRange") },
+      {
+        label: "sourceRange as a pair (12.7: {start, end} exactly)",
+        doc: put(GOOD_NODE, [12, 96], "sourceRange"),
+      },
+      {
+        label: "sourceRange with an extra member (12.7: no other member)",
+        doc: put(GOOD_NODE, { start: 12, end: 96, length: 84 }, "sourceRange"),
+      },
+      { label: "missing edges", doc: omit(GOOD_NODE, "edges") },
+      {
+        label: "missing outgoing edges",
+        doc: omit(GOOD_NODE, "edges", "outgoing"),
+      },
+      {
+        label: "outgoing edges not an array",
+        doc: put(GOOD_NODE, {}, "edges", "outgoing"),
+      },
+      {
+        label: "an outgoing edge that is a bare identity, not an edge object",
+        doc: put(GOOD_NODE, ["specs/A.mdx#login.details"], "edges", "outgoing"),
+      },
+      {
+        label: "an outgoing edge without a kind",
+        doc: put(
+          GOOD_NODE,
+          [{ from: "specs/A.mdx#login", to: "specs/A.mdx#login.details" }],
+          "edges",
+          "outgoing",
+        ),
+      },
+      {
+        label: "an outgoing edge of a kind outside SPEC.md 5.2's vocabulary",
+        doc: put(
+          GOOD_NODE,
+          [{ ...CONTAINS_DETAILS, kind: "child" }],
+          "edges",
+          "outgoing",
+        ),
+      },
+      {
+        label: "a contains edge without a target",
+        doc: put(
+          GOOD_NODE,
+          [{ from: "specs/A.mdx#login", kind: "contains" }],
+          "edges",
+          "outgoing",
+        ),
+      },
+      {
+        label: "a contains edge with an empty target",
+        doc: put(
+          GOOD_NODE,
+          [{ ...CONTAINS_DETAILS, to: "" }],
+          "edges",
+          "outgoing",
+        ),
+      },
+      {
+        label: "a contains edge with a non-string target",
+        doc: put(
+          GOOD_NODE,
+          [{ ...CONTAINS_DETAILS, to: 7 }],
+          "edges",
+          "outgoing",
+        ),
       },
     ],
   },
@@ -4777,7 +4893,7 @@ const UNPINNED_ADAPTER_NAMES: readonly string[] = [
   "query node/show",
   "query node (identity/tags summary)",
   "query node (identity/tags/metadataHash summary)",
-  "query node (own/subtree text summary)",
+  "query node (text-algebra summary)",
   "query nodes (identity/tags summary rows)",
   "query nodes (identity-only rows)",
   "query nodes/subtree/ancestors",

@@ -58,7 +58,7 @@ Why the harness changed in this re-descent: the documents moved after the harnes
 - P-6 drives only the file form of `move`, and P-9 uses only audit sessions; TEST-SPEC's wording does not clearly require more (reviewer C).
 
 **Order.** Tasks are in dependency order, and each names what it depends on:
-- Part A (Task 1): the certification gap.
+- Part A (Task 1, the certification gap D1): done and removed.
 - Part B (Tasks 2–4): harness machinery — H-11's capture-limit errors, and S-9's MDX judgement of spec-group files not named `.mdx`.
 - Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order.
 - Part D (Tasks 10–13): P-8's command sweep.
@@ -67,55 +67,6 @@ Why the harness changed in this re-descent: the documents moved after the harnes
 Take the topmost task unless told otherwise. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement.
 
 ## Tasks
-
-### Part A — Certification
-
-### Task 1 — CONF-MD's `query node` reports its `contains` edges, and P-3 takes each node's children from them (D1; CERTIFICATIONS.md §CONF-MD: the scope's command surface, P-3's staging constraint, and the justification's "the texts of the children its `contains` edges name"; TEST-SPEC §16 P-3; SPEC 1.6, 5.2, 11.1)
-
-**Depends on.** Nothing.
-
-**The requirement.** CERTIFICATIONS.md §CONF-MD has said since cbb0a35:
-- The conformer's command surface includes "`query node` reporting identity, source range (1.7), own and subtree text (1.6 …), and its `contains` edges (5.2) — the outgoing ones naming its children".
-- P-3 "reads each node's own and subtree text from `query node`, takes its children, in document order, from the same answer's outgoing `contains` edges ordered by the children's source ranges, and enumerates a document's nodes from `query nodes` or from the generated document itself — never through `view` (with or without `--text`) or `query subtree`".
-- Staging constraints are binding alongside C-1 (the document's preamble).
-
-Neither half holds today:
-- The conformer's `query node` answer carries only `identity`, `sourceRange`, `ownText`, and `subtreeText` — no `edges` member. VIOL-MD-CLASS and VIOL-MD-CR share the file and inherit this.
-- P-3 decodes each answer through `decodeNodeTextSummary` (own and subtree text only) and takes each node's children from the generator's own model (`DocNode.childRefs`), never from the answer.
-
-**Where.**
-- `test/fixtures/conf-md/product.mjs`: `commandQuery` (about L2050), its `query node` branch (`ownText`/`subtreeText` at about L2095).
-- `test/suite/registry/section-16-p2-p3.ts`:
-  - `runP3Trial` (about L2191);
-  - `assertTextAlgebra` (about L2153), which maps `node.childRefs`;
-  - the module header (about L50–53: "nothing beyond own and subtree text is demanded of a scoped fixture product").
-- `test/helpers/adapters/query.ts` (`decodeNodeTextSummary`, about L240; the ASSUMED SHAPE comment at the top), its re-exports in `test/helpers/adapters/index.ts`, and `test/helpers/adapters/model.ts` if a new model type is needed.
-
-**Change.** Land both halves in one commit: P-3 reading edges fails against today's conformer, and the conformer change alone leaves P-3 off its stated route.
-- *Conformer.* `query node` also reports the node's `contains` edges (SPEC 5.2) in the harness's assumed shape: `"edges": {"incoming": [Edge], "outgoing": [Edge]}`, where Edge is `{"from", "to", "kind"}`.
-  - Outgoing: one `contains` edge per child, the root's naming each top-level section.
-  - Incoming: the `contains` edge from its parent; a root has none.
-  - Hashes, tags, coverage, and dependency edges stay out of scope ("consulted by no in-scope test").
-  - The violators inherit the change unchanged; each deviation stays consistent across Markdown output and text.
-- *A scoped adapter.* A decoder that demands exactly four things of one `query node` answer: own text, subtree text, source range, and the outgoing `contains` edges' targets. It ignores everything else and fails loudly when one of the four is absent (H-3). Value forms decode through the existing literal decoders (`decodeSourceRange`, the 12.7 forms), never adapted.
-- *P-3.* For each node:
-  - read its own and subtree text from its own `query node` answer;
-  - take its children from that same answer's outgoing `contains` edges;
-  - order the children by their source ranges, each read from the child's own `query node` answer;
-  - run the SPEC 1.6 algebra over that list: the subtree text equals the own-text runs interleaved with the children's subtree texts, and N children yield N+1 runs; the root's subtree text still equals the compiled Markdown.
-
-  It may keep enumerating a document's nodes from the generated document. It never uses `view` or `query subtree`. Rewrite the module header to state this route.
-
-**Checks.**
-- `-t MD` certification:
-  - the conformer passes all 8 in-scope tests (T3-1 through T3-6, P-2, P-3);
-  - VIOL-MD-CLASS fails exactly T3-3 and P-2;
-  - VIOL-MD-CR fails exactly T3-4 and P-2;
-  - P-3 passes against both violators.
-- `test/self/certification-document.test.ts` and `test/self/certification-runner.test.ts` pass.
-- A probe of the conformer on a two-section file (`a` holding `a.k`) shows the new member: the root's outgoing edge names `a`, `a`'s names `a.k`, and `a.k` has none.
-- A red check: a scratch copy of the conformer whose `query node` omits one child's outgoing `contains` edge makes P-3 fail as a diagnosed assertion failure, never a harness error. This shows P-3 reads its children from the edges.
-- P-3 against the built product: AGENTS.md's "FIX_PLAN Task 11" bullet records P-2 and P-3 failing diagnosed against it. P-3 must still fail only diagnosed, or pass; never with a decode error from an adapter mismatch. Record the outcome.
 
 ### Part B — Machinery
 

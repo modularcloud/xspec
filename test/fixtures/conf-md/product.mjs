@@ -15,7 +15,12 @@
 //   next to each source (13.2); no code groups, no `coverage` or `policy`
 //   configuration keys, no git.
 // - `build` with byte-exact Markdown output per SPEC 3, and `query node`
-//   reporting own and subtree text (SPEC 1.6, defined through the rules of 3).
+//   reporting identity, source range (SPEC 1.7), own and subtree text (1.6,
+//   defined through the rules of 3), and its `contains` edges (5.2): the
+//   outgoing ones naming its children in document order (a root's naming its
+//   top-level sections), the incoming one from its parent (none for a root).
+//   Hashes, tags, the coverage attribute, and dependency edges are consulted
+//   by no in-scope test and are not reported (their content is out of scope).
 // - For T3-1's grammar-boundary arm: `check` exiting 0, and
 //   `query nodes`/`query edges` reporting no node and no edge for the
 //   construct-like bytes inside fences and code spans (constructs exist only
@@ -119,7 +124,10 @@
 //     so a lone U+000D is an ordinary in-line character while CRLF and lone
 //     U+000A remain terminators.
 // Both points feed the single attributed compile, so a deviation applied
-// there is consistent across output and text values by construction.
+// there is consistent across output and text values by construction. The
+// `contains` edges `query node` reports come from the parse's section tree,
+// which neither switch touches, so every violator reports the conformer's
+// edges unchanged.
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
@@ -2040,12 +2048,18 @@ async function commandQueryEdges(io, cwd, argv) {
 }
 
 /**
- * `xspec query node <node>` (SPEC 11, scoped): a single JSON document — with
- * or without `--json` — reporting the node's own and subtree text (SPEC 1.6,
- * the §CONF-MD query surface); identity and source range ride along in the
- * natural SPEC 11 shape. `<node>` is `path#id`, or a bare `path` for a file's
- * root node (SPEC 1.5). The `nodes` and `edges` subcommands (above) complete
- * the scoped query surface; any other subcommand is out of scope.
+ * `xspec query node <node>` (SPEC 11.1, scoped): a single JSON document —
+ * with or without `--json` — reporting the §CONF-MD query surface in the
+ * natural SPEC 11 shape: the node's identity, source range (SPEC 1.7), own
+ * and subtree text (1.6), and its `contains` edges (5.2) as
+ * `"edges": {"incoming": [Edge], "outgoing": [Edge]}`, Edge
+ * `{"from", "kind", "to"}` — outgoing, one edge to each child in document
+ * order (a root's to each top-level section); incoming, the one edge from
+ * its parent (none for a root). Hashes, tags, the coverage attribute, and
+ * dependency edges are consulted by no in-scope test and are left out.
+ * `<node>` is `path#id`, or a bare `path` for a file's root node (SPEC 1.5).
+ * The `nodes` and `edges` subcommands (above) complete the scoped query
+ * surface; any other subcommand is out of scope.
  */
 async function commandQuery(io, cwd, argv) {
   const sub = argv[0];
@@ -2085,6 +2099,13 @@ async function commandQuery(io, cwd, argv) {
     );
   }
   const atoms = compiled.get(rel);
+  // SPEC 5.2: `contains` runs parent → child; `children` holds a node's
+  // child sections in document order (pushed as each opening tag parses).
+  const contains = (parent, child) => ({
+    from: nodeIdentity(rel, parent),
+    kind: "contains",
+    to: nodeIdentity(rel, child),
+  });
   io.stdout(
     canonicalJson({
       identity,
@@ -2094,6 +2115,10 @@ async function commandQuery(io, cwd, argv) {
       },
       ownText: textOfOwnAtoms(atoms, node),
       subtreeText: textOfSubtreeAtoms(atoms, node),
+      edges: {
+        incoming: node.parent === null ? [] : [contains(node.parent, node)],
+        outgoing: node.children.map((child) => contains(node, child)),
+      },
     }) + "\n",
   );
   return 0;

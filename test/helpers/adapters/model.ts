@@ -133,15 +133,23 @@ export interface NodeMetadataSummary {
 }
 
 /**
- * Own/subtree text summary of a `query node` document — the CONF-MD-scoped
+ * Text-algebra summary of a `query node` document — the four things the
+ * SPEC.md 1.6 algebra reads from one answer (P-3), within the CONF-MD-scoped
  * query surface (CERTIFICATIONS.md §CONF-MD: fixtures within that scope
- * promise `query node` reporting own and subtree text, SPEC.md 1.6), for the
- * text-algebra property (P-2/P-3). Either text MAY be empty (an empty leaf
+ * promise `query node` reporting identity, source range, own and subtree
+ * text, and its `contains` edges). Either text MAY be empty (an empty leaf
  * section, SPEC.md 1.1).
  */
-export interface NodeTextSummary {
+export interface NodeTextAlgebraSummary {
   readonly ownText: string;
   readonly subtreeText: string;
+  readonly sourceRange: SourceRange;
+  /**
+   * The targets of the answer's outgoing `contains` edges — the node's
+   * children (SPEC.md 5.2) — in the answer's own order; ordering them by
+   * their source ranges is the caller's step (P-3).
+   */
+  readonly containsTargets: readonly string[];
 }
 
 /** `query reachable` (T11-5): existence plus one shortest witness path. */

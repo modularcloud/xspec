@@ -44,7 +44,7 @@ import type {
   NodeReport,
   NodeRow,
   NodeSummary,
-  NodeTextSummary,
+  NodeTextAlgebraSummary,
   ReachableReport,
   SourceRange,
 } from "./model.js";
@@ -228,25 +228,55 @@ export function decodeNodeMetadataSummary(
 }
 
 /**
- * `query node` decoded to the CONF-MD-scoped text surface — own and subtree
- * text only (P-3; P-2's certification scope). CERTIFICATIONS.md §CONF-MD
- * pins the fixture product's query surface to reporting own and subtree
- * text (SPEC.md 1.6): demanding identity, hashes, or edges would reject a
- * document the scope permits. Both texts may legitimately be empty (an
- * empty leaf section, SPEC.md 1.1), so plain strings are demanded — absent
- * or non-string values still fail loudly (H-3). Everything else in the
- * document is ignored, not validated.
+ * `query node` decoded to the four things the SPEC.md 1.6 text algebra reads
+ * from one answer (P-3): own and subtree text, the source range (1.7), and
+ * the targets of the outgoing `contains` edges (5.2) — the node's children,
+ * in the answer's order. CERTIFICATIONS.md §CONF-MD pins the fixture
+ * product's `query node` to identity, source range, own and subtree text,
+ * and its `contains` edges, leaving hashes, tags, the coverage attribute,
+ * and dependency edges out of scope: demanding them would reject a
+ * document the scope permits. So every outgoing edge's `kind` is decoded
+ * (the SPEC.md 5.2 vocabulary, to tell `contains` edges apart) and a
+ * `contains` edge's `to` is demanded, while an edge of a dependency kind is
+ * passed over unread, and so are the incoming edges and every other member.
+ * Both texts may legitimately be empty (an empty leaf section, SPEC.md 1.1),
+ * so plain strings are demanded; an absent or malformed text, range,
+ * `edges.outgoing`, edge kind, or `contains` target fails loudly (H-3). The
+ * range decodes through the literal 12.7 form (`decodeSourceRange`), never
+ * adapted.
  */
-export function decodeNodeTextSummary(
+export function decodeNodeTextAlgebraSummary(
   doc: unknown,
   context?: string,
-): NodeTextSummary {
+): NodeTextAlgebraSummary {
   const site = documentRootSite(
     doc,
-    "query node (own/subtree text summary)",
+    "query node (text-algebra summary)",
     context,
   );
   const obj = expectObject(doc, site);
+  const edgesSite = at(site, "edges");
+  const edges = expectObject(requiredKey(obj, "edges", site), edgesSite);
+  const outgoingSite = at(edgesSite, "outgoing");
+  const containsTargets: string[] = [];
+  expectArray(requiredKey(edges, "outgoing", edgesSite), outgoingSite).forEach(
+    (element, index) => {
+      const edgeSite = at(outgoingSite, index);
+      const edge = expectObject(element, edgeSite);
+      const kind = expectToken(
+        requiredKey(edge, "kind", edgeSite),
+        EDGE_KINDS,
+        at(edgeSite, "kind"),
+      );
+      if (kind !== "contains") return; // a dependency edge: out of scope
+      containsTargets.push(
+        expectNonEmptyString(
+          requiredKey(edge, "to", edgeSite),
+          at(edgeSite, "to"),
+        ),
+      );
+    },
+  );
   return {
     ownText: expectString(
       requiredKey(obj, "ownText", site),
@@ -256,6 +286,11 @@ export function decodeNodeTextSummary(
       requiredKey(obj, "subtreeText", site),
       at(site, "subtreeText"),
     ),
+    sourceRange: decodeSourceRange(
+      requiredKey(obj, "sourceRange", site),
+      at(site, "sourceRange"),
+    ),
+    containsTargets,
   };
 }
 
@@ -302,7 +337,8 @@ export function decodeNodeSummaryRowsReport(
  * fixture product's `query nodes` surface to the no-node observation for
  * construct-like bytes inside fences and code spans: demanding tags,
  * coverage, or source-range semantics would reject a document the scope
- * permits (the row counterpart of {@link decodeNodeTextSummary}'s scoping).
+ * permits (the row counterpart of {@link decodeNodeTextAlgebraSummary}'s
+ * scoping).
  * The `nodes` key and per-row `identity` are the `query nodes` shape's own
  * (see the ASSUMED SHAPE above); other row members are ignored, not
  * validated. Absent or malformed identities still fail loudly (H-3).

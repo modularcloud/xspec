@@ -47,7 +47,7 @@ import {
   decodeNodeReport,
   decodeNodeRowsReport,
   decodeNodeSummaryRowsReport,
-  decodeNodeTextSummary,
+  decodeNodeTextAlgebraSummary,
   decodeOccurrencesReport,
   decodeReachableReport,
   decodeViewReport,
@@ -598,6 +598,9 @@ test("S-8: every H-3/12.7 decoder and answer-document walk succeeds at the synth
     edges: { incoming: edges, outgoing: edges },
   };
   expect(decodeNodeReport(node, "S-8 node").incomingEdges).toHaveLength(depth);
+  expect(
+    decodeNodeTextAlgebraSummary(node, "S-8 node").containsTargets,
+  ).toHaveLength(depth);
   assertNodeEdgeListsBare(node, "S-8 node");
   const reachable = { reachable: true, path: ids };
   expect(decodeReachableReport(reachable, "S-8 reachable").path).toHaveLength(
@@ -832,11 +835,26 @@ test("S-8: capture gate — the largest synthetic document (`view --text` blowup
   expect(innermost(outer).ownText).toBe(`${SEPARATOR}deep.${SEPARATOR}`);
   assertUnavailabilityMarkerForms(doc, "S-8 blowup");
   expect(documentCarriesUnavailability(doc)).toBe(false);
-  const summary = decodeNodeTextSummary(
-    { ownText: root.ownText, subtreeText: root.subtreeText },
+  // P-3's decode of the root's `query node` answer at the blowup scale: the
+  // captured texts and range, and one `contains` edge per tower.
+  const summary = decodeNodeTextAlgebraSummary(
+    {
+      ownText: root.ownText,
+      subtreeText: root.subtreeText,
+      sourceRange: root.range,
+      edges: {
+        incoming: [],
+        outgoing: root.children.map((child) => ({
+          from: VIEWED_FILE,
+          to: child.identity,
+          kind: "contains",
+        })),
+      },
+    },
     "S-8 text summary",
   );
   expect(summary.subtreeText).toHaveLength(
     BLOWUP_TOWERS * decodedSubtreeLength(BLOWUP_DEPTH, 1),
   );
+  expect(summary.containsTargets).toHaveLength(BLOWUP_TOWERS);
 }, 600_000);

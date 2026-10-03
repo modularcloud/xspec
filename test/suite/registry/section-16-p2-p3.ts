@@ -30,7 +30,10 @@
 //     children yielding N + 1 runs, so |subtree| = |own| + Σ|child subtree|
 //     and a run decomposition exists that splits the reported own text into
 //     exactly N + 1 runs (empty runs counting) around the children's
-//     reported subtree texts.
+//     reported subtree texts. A node's children are the product's answer
+//     too: the targets of its `query node` answer's outgoing `contains`
+//     edges (SPEC 5.2), put in document order by the source ranges (1.7)
+//     each child's own `query node` answer reports.
 //
 // CONF-MD in-scope (CERTIFICATIONS.md): both properties run against the
 // CONF-MD conformer, and P-2 is certified by §VIOL-MD-CLASS (the line-drop
@@ -48,9 +51,18 @@
 // ("consistently in Markdown output and, through 1.6, in own and subtree
 // text"), so P-3 passes against every CONF-MD fixture while P-2 fails
 // against exactly the violators. The bodies stay within the CONF-MD command
-// surface: `build` plus `query node` decoded through the scoped own/subtree
-// text adapter (decodeNodeTextSummary) — nothing beyond own and subtree
-// text is demanded of a scoped fixture product.
+// surface, on the route its P-3 staging constraint fixes: `build`, plus one
+// `query node` per node decoded through the scoped text-algebra adapter
+// (decodeNodeTextAlgebraSummary: own and subtree text, source range, and
+// the targets of the outgoing `contains` edges — nothing else is demanded
+// of a scoped fixture product). P-3 reads each node's own and subtree text
+// from its own answer, takes its children from that same answer's outgoing
+// `contains` edges ordered by the source ranges the children's own answers
+// report, and enumerates a document's nodes from the generated document
+// itself — never through `view` (with or without `--text`) or
+// `query subtree`. The generator's record of the structure
+// (`DocNode.childRefs`) is never consulted, so no harness model stands
+// between the product's answers.
 //
 // Staging discipline (byte-exact per HARNESS-01; the generator, not the
 // oracle, owns these choices):
@@ -128,8 +140,11 @@
 //     the interior compiles compositionally; validated against T3-2's
 //     hand-derived chain).
 
-import { decodeNodeTextSummary } from "../../helpers/adapters/index.js";
-import type { NodeTextSummary } from "../../helpers/adapters/index.js";
+import { decodeNodeTextAlgebraSummary } from "../../helpers/adapters/index.js";
+import type {
+  NodeTextAlgebraSummary,
+  SourceRange,
+} from "../../helpers/adapters/index.js";
 import {
   assertFileBytes,
   assertFilesEqual,
@@ -247,7 +262,11 @@ export type TargetShape =
 export interface DocNode {
   /** `path` for a root, `path#dotted.id` for a section (SPEC 1.5). */
   readonly ref: string;
-  /** Direct child sections' refs, in document order (SPEC 1.6). */
+  /**
+   * Direct child sections' refs, in document order (SPEC 1.6) — the
+   * generator's own record, never consulted by P-3, which takes each node's
+   * children from the product's `contains` edges (module header).
+   */
   readonly childRefs: readonly string[];
 }
 
@@ -2149,41 +2168,70 @@ function excerpt(text: string): string {
   return rendered.length <= 160 ? rendered : `${rendered.slice(0, 160)}…`;
 }
 
-/** The SPEC 1.6 algebra for one node, over product-reported values only. */
+/**
+ * One child of a node as the P-3 algebra reads it: an identity named by the
+ * node's outgoing `contains` edges, with the source range and subtree text
+ * the child's own `query node` answer reports.
+ */
+interface P3Child {
+  readonly identity: string;
+  readonly sourceRange: SourceRange;
+  readonly subtreeText: string;
+}
+
+/** Document order of siblings: by reported source range (SPEC 1.7). */
+function bySourceRange(a: P3Child, b: P3Child): number {
+  return (
+    a.sourceRange.start - b.sourceRange.start ||
+    a.sourceRange.end - b.sourceRange.end
+  );
+}
+
+function describeChildren(children: readonly P3Child[]): string {
+  if (children.length === 0) return "(none)";
+  return children
+    .map(
+      (child) =>
+        `\n    ${child.identity} ` +
+        `[${String(child.sourceRange.start)}, ${String(child.sourceRange.end)}): ` +
+        excerpt(child.subtreeText),
+    )
+    .join("");
+}
+
+/**
+ * The SPEC 1.6 algebra for one node, over product-reported values only: the
+ * node's own answer and the children its outgoing `contains` edges name, in
+ * document order (`children`, already ordered by their reported ranges).
+ */
 function assertTextAlgebra(
-  node: DocNode,
-  texts: ReadonlyMap<string, NodeTextSummary>,
+  identity: string,
+  self: NodeTextAlgebraSummary,
+  children: readonly P3Child[],
   context: string,
 ): void {
-  const self = texts.get(node.ref);
-  if (self === undefined) {
-    throw new Error(`P-3 harness defect: no queried texts for ${node.ref}`);
-  }
-  const children = node.childRefs.map((ref) => {
-    const child = texts.get(ref);
-    if (child === undefined) {
-      throw new Error(`P-3 harness defect: no queried texts for ${ref}`);
-    }
-    return child.subtreeText;
-  });
-  const childrenLength = children.reduce((sum, text) => sum + text.length, 0);
+  const childTexts = children.map((child) => child.subtreeText);
+  const childrenLength = childTexts.reduce((sum, text) => sum + text.length, 0);
   if (self.subtreeText.length !== self.ownText.length + childrenLength) {
     fail(
-      `${context}: for ${node.ref}, |subtree text| must equal |own text| plus the sum of ` +
-        `the ${String(children.length)} children's |subtree text| — the children interleave ` +
-        `with exactly N + 1 own-text runs and nothing else (SPEC 1.6); got ` +
+      `${context}: for ${identity}, |subtree text| must equal |own text| plus the sum of ` +
+        `the ${String(children.length)} children's |subtree text| — the children its ` +
+        `outgoing \`contains\` edges name interleave with exactly N + 1 own-text runs and ` +
+        `nothing else (SPEC 1.6, 5.2); got ` +
         `${String(self.subtreeText.length)} vs ${String(self.ownText.length)} + ${String(childrenLength)}\n` +
-        `  subtree: ${excerpt(self.subtreeText)}\n  own:     ${excerpt(self.ownText)}`,
+        `  subtree:  ${excerpt(self.subtreeText)}\n  own:      ${excerpt(self.ownText)}\n` +
+        `  children (by source range): ${describeChildren(children)}`,
     );
   }
-  if (!interleavingExists(self.subtreeText, self.ownText, children)) {
+  if (!interleavingExists(self.subtreeText, self.ownText, childTexts)) {
     fail(
-      `${context}: for ${node.ref}, the reported subtree text does not decompose as the ` +
-        `reported own text's N + 1 runs interleaved with the ${String(children.length)} ` +
-        `children's reported subtree texts in document order (SPEC 1.6)\n` +
+      `${context}: for ${identity}, the reported subtree text does not decompose as the ` +
+        `reported own text's N + 1 runs interleaved with the reported subtree texts of the ` +
+        `${String(children.length)} children its outgoing \`contains\` edges name, in ` +
+        `document order by their reported source ranges (SPEC 1.6, 5.2, 1.7)\n` +
         `  subtree:  ${excerpt(self.subtreeText)}\n` +
         `  own:      ${excerpt(self.ownText)}\n` +
-        `  children: ${children.map(excerpt).join(", ")}`,
+        `  children (by source range): ${describeChildren(children)}`,
     );
   }
 }
@@ -2204,27 +2252,30 @@ async function runP3Trial(
       workspace,
       "P-3: `build` of the generated workspace with `markdown: { emit: true }`",
     );
+    // One `query node` answer per identity, each node queried once whether
+    // it is reached by enumeration or named by a parent's `contains` edge
+    // (a named identity outside the enumeration is queried too, so the
+    // algebra compares the product's answers to each other alone).
+    const answers = new Map<string, NodeTextAlgebraSummary>();
+    const answerOf = async (
+      identity: string,
+    ): Promise<NodeTextAlgebraSummary> => {
+      const known = answers.get(identity);
+      if (known !== undefined) return known;
+      const label = `P-3 \`query node ${identity}\``;
+      const answer = decodeNodeTextAlgebraSummary(
+        await runJson(product, workspace, ["query", "node", identity], label),
+        label,
+      );
+      answers.set(identity, answer);
+      return answer;
+    };
     for (const file of doc.files) {
-      const texts = new Map<string, NodeTextSummary>();
-      for (const node of file.nodes) {
-        const label = `P-3 \`query node ${node.ref}\``;
-        texts.set(
-          node.ref,
-          decodeNodeTextSummary(
-            await runJson(
-              product,
-              workspace,
-              ["query", "node", node.ref],
-              label,
-            ),
-            label,
-          ),
-        );
-      }
-      const root = texts.get(file.path);
-      if (root === undefined) {
-        throw new Error(`P-3 harness defect: no root texts for ${file.path}`);
-      }
+      // The document's nodes are enumerated from the generated document
+      // itself (CERTIFICATIONS.md §CONF-MD's P-3 staging constraint admits
+      // it); every text, range, and child below is the product's answer.
+      for (const node of file.nodes) await answerOf(node.ref);
+      const root = await answerOf(file.path);
       const mdRel = mdPathOf(file.path);
       await assertFileBytes(
         workspace.path(mdRel),
@@ -2233,7 +2284,18 @@ async function runP3Trial(
           `output emitted at ${mdRel}, byte for byte (SPEC 1.6, 1.2, 3)`,
       );
       for (const node of file.nodes) {
-        assertTextAlgebra(node, texts, "P-3");
+        const self = await answerOf(node.ref);
+        const children: P3Child[] = [];
+        for (const identity of self.containsTargets) {
+          const child = await answerOf(identity);
+          children.push({
+            identity,
+            sourceRange: child.sourceRange,
+            subtreeText: child.subtreeText,
+          });
+        }
+        children.sort(bySourceRange);
+        assertTextAlgebra(node.ref, self, children, "P-3");
       }
     }
   } finally {
@@ -2280,9 +2342,10 @@ const P_3 = defineProductTest({
   id: "P-3",
   title:
     "property: for random documents, the root's subtree text equals the compiled Markdown " +
-    "output, and every node's subtree text equals its own-text runs interleaved with its " +
-    "children's subtree texts in document order, N children yielding N + 1 runs — asserted " +
-    "as internal consistency of the product's reported values (SPEC 1.6, 3; TEST-SPEC §16 P-3)",
+    "output, and every node's subtree text equals its own-text runs interleaved with the " +
+    "subtree texts of the children its `contains` edges name, in document order, N children " +
+    "yielding N + 1 runs — asserted as internal consistency of the product's reported values " +
+    "(SPEC 1.6, 5.2, 3; TEST-SPEC §16 P-3)",
   // Wall-clock hang guard only (H-10): one build plus one `query node` per
   // requirement node per trial, three fixed seeds (E-5), plus shrinking.
   timeoutMs: 300_000,

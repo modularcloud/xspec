@@ -238,7 +238,9 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
   // CONF-MD (§CONF-MD): Markdown compilation — `build` with byte-exact
   // Markdown output per SPEC 3 (removal, replacement, the line-drop rule,
   // line terminators, the parse-not-pattern grammar boundary), `query node`
-  // reporting own and subtree text (SPEC 1.6), `check` exiting 0 and
+  // reporting identity, source range (SPEC 1.7), own and subtree text (1.6),
+  // and its `contains` edges (5.2) — the outgoing ones naming its children,
+  // whence P-3 takes them — `check` exiting 0 and
   // `query nodes`/`query edges` reporting no node and no edge for
   // construct-like bytes inside fences and code spans (T3-1's
   // grammar-boundary arm), and the emission scope of SPEC 7.3, over
