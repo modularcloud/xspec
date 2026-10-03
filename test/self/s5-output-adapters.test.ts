@@ -20,7 +20,11 @@ import { Buffer } from "node:buffer";
 import { expect, onTestFinished, test } from "vitest";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import type { RunResult } from "../helpers/subprocess.js";
-import type { Finding, ViewReport } from "../helpers/adapters/index.js";
+import type {
+  Finding,
+  ManualDeletionVerdict,
+  ViewReport,
+} from "../helpers/adapters/index.js";
 import {
   GRAPH_DATA_AREA_PATH,
   ITEM_STATUSES,
@@ -70,6 +74,7 @@ import {
   decodeViewReport,
   expectNonNegativeInteger,
   isGraphDataKey,
+  judgeManualDeletionCorrection,
   rootSite,
   stageBlockedByAbsentItem,
   stageBlockedByCycle,
@@ -5105,6 +5110,174 @@ test("S-5: conditionMention distinguishes 14.2 from 14.20 in both directions", (
   expect(conditionMention("14.20").test("error 14.20: encoding")).toBe(true);
   expect(conditionMention("14.20").test("error 14.2: structure")).toBe(false);
   expectDiagnosed("not a condition identity", () => conditionMention("15.1"));
+});
+
+// T13.4-10's correction judge (TEST-SPEC T13.4-10, §0 H-3; SPEC 14.10):
+// the recorded-file finding concerning `out/specs/A.md` has "the file's
+// manual deletion, never a rebuild" as its correction, matched for its
+// information, never its wording. Every vector is a complete message.
+
+/** The obstructing orphan T13.4-10 stages, the path the judge is given. */
+const OBSTRUCTING_ORPHAN = "out/specs/A.md";
+
+/** U+2014 EM DASH and U+2019 RIGHT SINGLE QUOTATION MARK, by code point. */
+const EM_DASH = String.fromCodePoint(0x2014);
+const APOSTROPHE = String.fromCodePoint(0x2019);
+
+/** A recorded-file finding's account of the file, before its correction. */
+const STALE_HEAD =
+  "stale generated output: the recorded derived file out/specs/A.md " +
+  "remains at a path the current sources and configuration no longer " +
+  "generate";
+
+/** Messages carrying the correction, each with the form that carries it. */
+const MANUAL_DELETION_ACCEPTED: readonly {
+  readonly message: string;
+  readonly form: "manual-marker" | "instruction";
+}[] = [
+  // The reviewers' three plain imperatives, each without a manual marker.
+  {
+    message: `${STALE_HEAD} and obstructs the rebuild's write of out/specs/A.md/specs/A.md; delete it, then rebuild (SPEC 14.10)`,
+    form: "instruction",
+  },
+  {
+    message:
+      "Delete out/specs/A.md: it is a recorded derived file the current sources and configuration no longer generate, and it obstructs the rebuild's write of out/specs/A.md/specs/A.md (SPEC 14.10, 14.22)",
+    form: "instruction",
+  },
+  {
+    message: `${STALE_HEAD}; remove it (a rebuild is refused while it obstructs the write of out/specs/A.md/specs/A.md) (SPEC 14.10, 14.22)`,
+    form: "instruction",
+  },
+  // Further instructions to the reader: other openers and objects.
+  {
+    message: `${STALE_HEAD}; the rebuild is refused ${EM_DASH} delete it, then rebuild (SPEC 14.10)`,
+    form: "instruction",
+  },
+  {
+    message: `${STALE_HEAD}; please remove out/specs/A.md and rebuild (SPEC 14.10)`,
+    form: "instruction",
+  },
+  {
+    message: `${STALE_HEAD}; it obstructs the rebuild, so remove \`out/specs/A.md\` and rebuild (SPEC 14.10)`,
+    form: "instruction",
+  },
+  {
+    message: `${STALE_HEAD}; a rebuild does not remove it, so delete it (SPEC 14.10)`,
+    form: "instruction",
+  },
+  {
+    message: `${STALE_HEAD}; you must delete it before the rebuild can write out/specs/A.md/specs/A.md (SPEC 14.10)`,
+    form: "instruction",
+  },
+  {
+    message: `${STALE_HEAD}; xspec won${APOSTROPHE}t remove it: delete it (SPEC 14.10)`,
+    form: "instruction",
+  },
+  {
+    message: `${STALE_HEAD}; first remove the stale orphan, then rebuild (SPEC 14.10)`,
+    form: "instruction",
+  },
+  {
+    message: "Remove the obstructing file out/specs/A.md, then rebuild.",
+    form: "instruction",
+  },
+  { message: `${STALE_HEAD}.\nDelete it.`, form: "instruction" },
+  // The manual marker beside a deletion or removal word.
+  {
+    message: `${STALE_HEAD}; delete out/specs/A.md manually (SPEC 14.10)`,
+    form: "manual-marker",
+  },
+  {
+    message: `${STALE_HEAD}; remove it by hand: a rebuild is refused while it obstructs the write of out/specs/A.md/specs/A.md (SPEC 14.10)`,
+    form: "manual-marker",
+  },
+  {
+    message: `${STALE_HEAD}; delete the file yourself, then rebuild (SPEC 14.10)`,
+    form: "manual-marker",
+  },
+  // A negated or general mention of a build or xspec presents no remover.
+  {
+    message: `${STALE_HEAD}; delete it by hand: it is not removed by a rebuild, which is refused while it obstructs the write of out/specs/A.md/specs/A.md (SPEC 14.10)`,
+    form: "manual-marker",
+  },
+  {
+    message: `${STALE_HEAD}; delete it manually ${EM_DASH} xspec will not remove it (SPEC 14.10)`,
+    form: "manual-marker",
+  },
+  {
+    message: `${STALE_HEAD}; do not run \`xspec build\` to remove it: delete it by hand (SPEC 14.10)`,
+    form: "manual-marker",
+  },
+  {
+    message: `${STALE_HEAD}; any build or rebuild is refused while it obstructs the write; delete it by hand.`,
+    form: "manual-marker",
+  },
+  {
+    message:
+      "xspec removes recorded files no longer generated only when a rebuild succeeds, and this one is refused; delete out/specs/A.md by hand.",
+    form: "manual-marker",
+  },
+];
+
+/** Messages presenting a build or xspec as what removes the file. */
+const MANUAL_DELETION_REBUILD_REMEDIES: readonly string[] = [
+  // The built product's message, and the task's other two remedies.
+  `${STALE_HEAD}; run \`xspec build\` to remove it (SPEC 14.10)`,
+  "stale generated output: out/specs/A.md is a recorded derived file the current sources and configuration no longer generate; rebuild; xspec will remove out/specs/A.md (SPEC 14.10)",
+  "stale generated output: the recorded derived file out/specs/A.md is no longer generated; rebuilding removes it (SPEC 14.10)",
+  // xspec presented as the remover, beside a manual marker or alone.
+  `${STALE_HEAD}; xspec will remove out/specs/A.md, so you need not delete it by hand (SPEC 14.10)`,
+  `${STALE_HEAD}; it is removed by xspec, never by hand (SPEC 14.10)`,
+  `${STALE_HEAD}; xspec will then remove it (SPEC 14.10)`,
+  `${STALE_HEAD}; let xspec remove it (SPEC 14.10)`,
+  // A removal instruction whose means is a build.
+  `${STALE_HEAD}; remove it: run \`xspec build\` (SPEC 14.10)`,
+  `${STALE_HEAD}; remove it ${EM_DASH} run \`xspec build\` (SPEC 14.10)`,
+  `${STALE_HEAD}; remove it (by running \`xspec build\`)`,
+  `${STALE_HEAD}; remove out/specs/A.md by running \`xspec build\` (SPEC 14.10)`,
+  `${STALE_HEAD}; delete it using \`xspec build\` (SPEC 14.10)`,
+  `${STALE_HEAD}; remove it by rerunning the build (SPEC 14.10)`,
+  // A build offered as the alternative to the deletion.
+  `${STALE_HEAD}; delete it, or run \`xspec build\` (SPEC 14.10)`,
+  `${STALE_HEAD}; delete it by hand, or rebuild.`,
+  `${STALE_HEAD}; remove it by hand or by rerunning \`xspec build\` (SPEC 14.10)`,
+];
+
+/** Messages carrying no instruction to delete the file. */
+const MANUAL_DELETION_ABSENT: readonly string[] = [
+  `${STALE_HEAD} (SPEC 14.10)`,
+  `${STALE_HEAD}; delete out/specs/A.md/specs/A.md, then rebuild (SPEC 14.10)`,
+  `${STALE_HEAD}; do not delete it (SPEC 14.10)`,
+];
+
+test("S-5: T13.4-10's correction judge accepts the manual deletion in either form, a manual marker or an instruction to the reader (H-3: information, never wording)", () => {
+  const mismatches = MANUAL_DELETION_ACCEPTED.flatMap(({ message, form }) => {
+    const verdict: ManualDeletionVerdict = judgeManualDeletionCorrection(
+      message,
+      OBSTRUCTING_ORPHAN,
+    );
+    return verdict.verdict === "manual-deletion" && verdict.form === form
+      ? []
+      : [{ message, expected: form, verdict }];
+  });
+  expect(mismatches).toEqual([]);
+});
+
+test("S-5: T13.4-10's correction judge rejects every clause presenting a build or xspec as what removes the file (never a rebuild)", () => {
+  const mismatches = MANUAL_DELETION_REBUILD_REMEDIES.flatMap((message) => {
+    const verdict = judgeManualDeletionCorrection(message, OBSTRUCTING_ORPHAN);
+    return verdict.verdict === "rebuild-remedy" ? [] : [{ message, verdict }];
+  });
+  expect(mismatches).toEqual([]);
+});
+
+test("S-5: T13.4-10's correction judge finds the correction absent from a message carrying no instruction to delete the file", () => {
+  const mismatches = MANUAL_DELETION_ABSENT.flatMap((message) => {
+    const verdict = judgeManualDeletionCorrection(message, OBSTRUCTING_ORPHAN);
+    return verdict.verdict === "absent" ? [] : [{ message, verdict }];
+  });
+  expect(mismatches).toEqual([]);
 });
 
 test("S-5: ignored-reason classifier maps SPEC 8.2 reason spellings in order and rejects the unrecognizable", () => {

@@ -60,51 +60,13 @@ Why the harness changed in this re-descent: the documents moved after the harnes
 **Order.** Tasks are in dependency order, and each names what it depends on:
 - Part A (Task 1, the certification gap D1): done and removed.
 - Part B (harness machinery): done and removed. Tasks 3 and 4 gave S-9's MDX judgement spec-group files not named `.mdx` — Task 3 the mechanism (`mdx.wellFormed` and the other `mdx` lists, the `file()` `mdx` option, or an MDX record at the path declare such a file an MDX source; module header of `test/helpers/workspace.ts`), Task 4 the declarations of the suite's three such files (T7.1-1's `specs/notes.txt` and T11.6-2's `specs/note.txt` as staged-source records, T11.6-4's under `mdx.wellFormed`). Task 2 (P-8's and P-11's capture-limit errors) and Task 2b, split from it (every other conversion of a driver rejection), are done and removed: H-11's capture-limit errors.
-- Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order. Task 5 (T4.3-2's seven dynamic node-form arms each run `occurrences` on the failing workspace and assert no record) is done and removed. Task 6 (every T4.5-3 arm runs `occurrences --file src/app.ts` on its failing workspace and asserts no record, through `assertArmFailsWith`'s opt-in `noOccurrence` option, which T4.5-5 does not pass) is done and removed. Task 7 (T4.5-3's arm table gains TEST-SPEC's pinned optional-chaining spelling `SPEC?.a;`, optional on the root binding, over the shared `a`/`a.b` source; the extra arms `SPEC.a?.b;`, `SPEC.a!.b;`, and `(SPEC.a).b;` stay) is done and removed. Task 8 (T5.5-2's kind-distinction arm restaged in-line: `foo <S id="p.k">Kid text.</S> baz` at the baseline, `foo {text(B.k)} baz` after the journaled move, both composed by `kindParent` from one line head and tail, with `p`'s subtree text anchored in both states) is done and removed.
+- Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order. Task 5 (T4.3-2's seven dynamic node-form arms each run `occurrences` on the failing workspace and assert no record) is done and removed. Task 6 (every T4.5-3 arm runs `occurrences --file src/app.ts` on its failing workspace and asserts no record, through `assertArmFailsWith`'s opt-in `noOccurrence` option, which T4.5-5 does not pass) is done and removed. Task 7 (T4.5-3's arm table gains TEST-SPEC's pinned optional-chaining spelling `SPEC?.a;`, optional on the root binding, over the shared `a`/`a.b` source; the extra arms `SPEC.a?.b;`, `SPEC.a!.b;`, and `(SPEC.a).b;` stay) is done and removed. Task 8 (T5.5-2's kind-distinction arm restaged in-line: `foo <S id="p.k">Kid text.</S> baz` at the baseline, `foo {text(B.k)} baz` after the journaled move, both composed by `kindParent` from one line head and tail, with `p`'s subtree text anchored in both states) is done and removed. Task 9 (T13.4-10's correction judged by the pure `judgeManualDeletionCorrection` in `test/helpers/adapters/human.ts`: a manual marker beside a deletion word, or an instruction to the reader to delete or remove the file, accepted; a build or xspec presented as the remover, unless negated, rejected; S-5's "correction judge" vectors) is done and removed.
 - Part D (Tasks 10–13): P-8's command sweep.
 - Task 14 confirms the result and deletes the plan.
 
 Take the topmost task unless told otherwise. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement.
 
 ## Tasks
-
-### Part C — The T-numbered tests
-
-### Task 9 — T13.4-10: the manual-deletion correction is matched for its information, not its wording (B1; TEST-SPEC §13.4 T13.4-10, L563, with §0 H-3; SPEC 14.10)
-
-**Depends on.** Nothing.
-
-**The requirement.**
-- T13.4-10: `check`'s condition-10 recorded-file finding concerning `out/specs/A.md` has "the file's manual deletion, never a rebuild" as its correction, "asserted by H-3's robust matching".
-- H-3: human reports are asserted "only for required information (via robust matching), never exact wording".
-- SPEC 14.10 states the correction as "its manual deletion".
-
-The harness's matcher requires a deletion or removal word and also one of three markers: "manual", "by hand", or "yourself". So a conforming finding that tells the reader to delete the file in plain imperative form fails the test. Reviewer B ran it on these messages, and each fails only for want of a marker:
-- "…; delete it, then rebuild";
-- "Delete out/specs/A.md: it … obstructs the rebuild's write of out/specs/A.md/specs/A.md";
-- "…; remove it (a rebuild is refused while it obstructs …)".
-
-The engineer of iteration 1's Task 58 (dd68bfe) flagged this risk. Neither the built product's message nor any certification depends on it.
-
-**Where.** `test/suite/registry/section-13.4.ts`:
-- `MANUAL_DELETION_MENTIONS` (about L3058);
-- `REBUILD_REMEDY` (about L3070);
-- `assertManualDeletionCorrection` (about L3082, called about L3252);
-- the module header's account of the check.
-
-**Change.**
-- *Accept* either form as the required information:
-  - an explicit manual marker beside a deletion or removal word (today's rule); or
-  - an instruction to the reader to delete or remove the file: a clause opening with "delete" or "remove" (any case), at the message's start or after a clause boundary (`;`, `:`, `.`, `,`, an em dash, "then", "and", "please"), naming the path `out/specs/A.md`, "it", or "the file".
-- *Reject*, as now, every clause that presents a build as what removes the file (`REBUILD_REMEDY`). Extend the rejection to xspec itself presented as the remover, e.g. "xspec will remove it", "xspec removes it", "removed by xspec".
-- Make the matcher a pure exported function (in the module or a helper under `test/helpers/`) that a self-test can drive. Update the module header.
-
-**Checks.**
-- New fixed vectors under `test/self/` drive the matcher. Write complete messages, not the reviewers' elisions:
-  - *Accept:* the three imperative phrasings above, and manual ones such as "delete out/specs/A.md manually", "remove it by hand", "delete the file yourself".
-  - *Reject:* "run `xspec build` to remove it", "rebuild; xspec will remove out/specs/A.md", "rebuilding removes it", and a message with no deletion instruction at all.
-- Red-check the vectors with the stash-the-helper recipe: today's matcher fails the imperative accept vectors.
-- T13.4-10 against the built product: it fails diagnosed at 44c5dad, and the product's message ("run `xspec build` to remove it") must still be rejected. Record the first failing arm before and after; it must not move to a different arm for a harness reason.
 
 ### Part D — P-8's command sweep
 

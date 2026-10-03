@@ -203,15 +203,24 @@
 //   concerning a path no longer generated is the recorded-file form, and a
 //   mismatch form would be a further finding. The recorded-file finding's
 //   correction, "its manual deletion" (14.10), never a rebuild, is asserted
-//   by H-3's robust matching over its `message`, judged by the pure
-//   `judgeManualDeletionCorrection` of the human-report adapter
-//   (`test/helpers/adapters/human.ts`, driven by S-5 vectors): information
-//   presence — a deletion or removal and its manual character ("manual",
-//   "by hand", or "yourself") — and no clause presenting a build as what
-//   removes the file (`REBUILD_REMEDY`: a build "to remove" it, a build that
-//   "removes" it, a removal "by" a build), so the generic correction
-//   instructing rebuilding fails while a message naming the refused rebuild
-//   beside the manual deletion passes. After the manual
+//   by H-3's robust matching over its `message` — required information,
+//   never wording — judged by the pure `judgeManualDeletionCorrection` of
+//   the human-report adapter (`test/helpers/adapters/human.ts`, driven by
+//   S-5 vectors). The manual deletion is present in either form: a
+//   deletion or removal word beside its manual character ("manual", "by
+//   hand", or "yourself"), or an instruction to the reader to delete or
+//   remove the file — a clause opening with "delete" or "remove" at the
+//   message's start or after a clause boundary (`;`, `:`, `.`, `,`, an em
+//   dash, "then", "and", "please", among others) and naming
+//   `out/specs/A.md`, "it", or "the file" — so "delete it, then rebuild"
+//   passes as "delete it manually" does. No clause may present a build or
+//   xspec itself as what removes the file, unless it negates that removal:
+//   a build "to remove" it, a build or xspec that "removes" or "will
+//   remove" it, a removal "by" a build or xspec, a removal whose means is a
+//   build ("remove it: run `xspec build`"), or a build offered as the
+//   alternative ("or run `xspec build`"). So the generic correction
+//   instructing rebuilding fails, while a message naming the refused
+//   rebuild beside the manual deletion passes. After the manual
 //   deletion, `build` exits 0, `out/specs/A.md/specs/A.md` is a plain file,
 //   and `check` is clean, in both arms.
 // - T13.4-11 stays inside CERTIFICATIONS.md §CONF-ORPHAN's scope (the test
@@ -3086,8 +3095,9 @@ function assertManualDeletionCorrection(
         `${OBSTRUCTION_ORPHAN} instructs the file's manual deletion, a ` +
         `rebuild being refused while it obstructs the write (SPEC 14.10, ` +
         `13.4, 14.22): required information missing from the human report ` +
-        `(H-3: information presence, never exact wording) — no deletion or ` +
-        `removal with its manual character; got ` +
+        `(H-3: information presence, never exact wording) — neither a ` +
+        `deletion or removal word beside its manual character nor an ` +
+        `instruction to the reader to delete or remove the file; got ` +
         `${JSON.stringify(finding.message)}`,
     );
   }
