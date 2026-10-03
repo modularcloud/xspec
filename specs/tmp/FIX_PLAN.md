@@ -38,42 +38,19 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 44 — Register T6.5-23, arms (a)–(e) (TEST-SPEC L302; SPEC 6.5; A29)
-
-**Depends on.** Tasks 14 and 19.
-
-**Where.** The new 6.5 module; `traceability.ts`; and the preview parity check, wherever T6.6-4(b)'s machinery lives (`section-6.6.ts`).
-
-**Change.** T6.5-23 is about 26 KB of text; read L302 whole before starting.
-- *The common contract,* stated at L302 before (a):
-  - Each arm is a section move of `specs/origin.mdx#x` to `specs/target.mdx#y`, or the move the arm names. Its receiver gains `import <X> from "../specs/target.xspec"`, apart from the exceptions L302 lists, value-blind in `<X>` alone (T6.5-8's discipline; Task 19's assertion).
-  - `build` and `check` are clean after each move.
-  - The preview's `import-addition` stands at the offset the real operation then uses (T6.6-4(b)).
-  - Every code file, before and after, is accepted by 5.9.3 both as module code and as script code. Use Task 14's judge as an assertion on the post-move bytes.
-- *Arms (a)–(e), exact bytes at L302:*
-  - (a) the directive prologue — both stagings, including the latitude among offsets 26, 27, 64, and 65;
-  - (b) file-top directives;
-  - (c) a comment governing a statement, with its standard-tooling compile;
-  - (d) a trailing comment, plus the forced mid-line stagings with U+00A0 and with U+2028;
-  - (e) statement splitting.
-
-Arms (f) through (p) follow in Tasks 45–47.
-
-**Checks.** S-9 and S-7 pass. T6.5-23 against the built product (diagnose).
-
 ### Task 45 — T6.5-23, arms (f) and (g) (TEST-SPEC L302)
 
-**Depends on.** Task 44.
+**Depends on.** Task 44 (done at 6962dd1: arms (a)–(e) in `test/suite/registry/section-6.5-v.ts`, the `S23_*` section; its machinery is AGENTS.md's T6.5-23 bullet).
 
 **Change.** Exact bytes at L302.
 - (f) Timeliness: 6.5's example; its two boundary stagings (interposing `type T = number` and `import Z = require("./z")`); its control; its two exempt-side stagings (interposing `import type { T } from "./t"` and `import "./p"`); and its precedence branch at a distance.
 - (g) The spec-source side of the split rule.
 
-**Checks.** As Task 44.
+**Checks.** S-9 and S-7 pass. T6.5-23 against the built product (diagnose).
 
 ### Task 46 — T6.5-23, arms (h)–(k) (TEST-SPEC L302)
 
-**Depends on.** Task 44.
+**Depends on.** Task 44 (done at 6962dd1: arms (a)–(e) in `test/suite/registry/section-6.5-v.ts`, the `S23_*` section; its machinery is AGENTS.md's T6.5-23 bullet).
 
 **Change.** Exact bytes at L302.
 - (h) A removed declaration's place.
@@ -83,11 +60,11 @@ Arms (f) through (p) follow in Tasks 45–47.
 
 In (h) through (j), `f` is `export function f() { O.x }`, so the origin import loses its last use. There the preview's `import-addition` must stand at the removal's end alone.
 
-**Checks.** As Task 44.
+**Checks.** S-9 and S-7 pass. T6.5-23 against the built product (diagnose).
 
 ### Task 47 — T6.5-23, arms (l)–(p) (TEST-SPEC L302)
 
-**Depends on.** Task 44.
+**Depends on.** Task 44 (done at 6962dd1: arms (a)–(e) in `test/suite/registry/section-6.5-v.ts`, the `S23_*` section; its machinery is AGENTS.md's T6.5-23 bullet).
 
 **Change.** Exact bytes at L302.
 - (l) One added binding rooting spellings that were rooted at different bindings.
@@ -98,7 +75,7 @@ In (h) through (j), `f` is `export function f() { O.x }`, so the origin import l
 
 After this task T6.5-23 covers (a) through (p).
 
-**Checks.** As Task 44.
+**Checks.** S-9 and S-7 pass. T6.5-23 against the built product (diagnose).
 
 ### Task 48 — T7-2: the four import-modifier arms (TEST-SPEC L321; SPEC 7, 14.14; B1)
 
