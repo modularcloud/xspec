@@ -594,8 +594,9 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // convention they use (1.7), the `d`-entry, marker, and `text(...)` spans
   // (5.7), the attribute, opening-tag, and import ranges (11.4), and the
   // per-spelling resolution inside a repeated `d` with the occurrence it
-  // records (11.2); 2.4/2.7/4.5's staged forms are context with home
-  // coverage at T2.4-*/T2.7-*/T4.5-*.
+  // records (11.2); 2.4/2.7/4.5's staged forms, and 4's module-linking
+  // forms whose 14.15 ranges arms (j) and (x) pin, are context with home
+  // coverage at T2.4-*/T2.7-*/T4.5-* and T4-2.
   "T14-11": ["14", "1.4", "1.6", "1.7", "2.4", "2.7", "5.7", "11.2", "11.4"],
   // T14-12 asserts the well-formedness contract of 14.20 (the "14" key)
   // through the ordinary outcomes of well-formed files: the import

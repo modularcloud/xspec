@@ -279,14 +279,20 @@
 //   refined `d`-value ranges (p)–(t) follow the occurrence-span rule of
 //   SPEC 14 (5.7) over a module imported as `BASE`: `(BASE.a)` with its
 //   parentheses, a comma sequence whole, `BASE.missing` alone past a block
-//   comment and past U+00A0/U+FEFF, a spread entry with its `...`, and the
-//   elisions of one array literal as one finding at the whole literal.
-//   The colliding-declaration forms (u) stage T4.5-8's shared table
-//   (`T4_5_8_FURTHER_LOCATED_FORMS`, section-4.5.ts), one code file per
-//   form beside its import; the encoding forms (v) stage SPEC 14's four
-//   ill-formed byte sequences as exact bytes, a spec and a code source
-//   each, pinning the first ill-formed byte's offset zero-length — never
-//   the byte at which a decoder notices, never a one-byte range.
+//   comment and past U+00A0, U+FEFF, U+1680, and U+3000, a spread entry
+//   with its `...`, and the elisions of one array literal as one finding
+//   at the whole literal. The colliding-declaration forms (u) stage
+//   T4.5-8's shared table (`T4_5_8_FURTHER_LOCATED_FORMS`, section-4.5.ts),
+//   one code file per form beside its import; the encoding forms (v) stage
+//   SPEC 14's four ill-formed byte sequences as exact bytes, a spec and a
+//   code source each, pinning the first ill-formed byte's offset
+//   zero-length — never the byte at which a decoder notices, never a
+//   one-byte range. The module-linking forms (x) stage the 14.15 forms
+//   beyond (j)'s, one code file each: `export import X = require(…)` from
+//   `import`, two import types from `import` through the closing
+//   parenthesis of the argument list (a `typeof` before and a qualifier or
+//   type arguments after excluded), and a string-named module declaration
+//   whole and, past a leading `export`, from `declare`.
 
 import { Buffer } from "node:buffer";
 import * as path from "node:path";
@@ -4866,9 +4872,14 @@ const T14_11_D_COMMA = assemble([
 
 // (r) 14.5 — the unresolved expression alone: the braces, and the whitespace
 // and comment between them and the expression, excluded — a block comment
-// with ASCII whitespace, U+00A0 on each side, and U+FEFF before it
-// (ECMAScript whitespace, SPEC 1.4, T5.7-2), the latter two shifting the
-// pinned start by their own byte lengths (2 and 3).
+// with ASCII whitespace, U+00A0 on each side, U+FEFF before it, and U+1680
+// and U+3000 each on each side (ECMAScript whitespace, SPEC 1.4: its space
+// separators Unicode 15.1's, 14.20; T5.7-2), the last four shifting the
+// pinned start by their own byte lengths (2, 3, 3, and 3), so a product
+// bounding the expression by ASCII or Latin-1 whitespace alone, or
+// counting characters, fails the arm.
+const OGHAM_SPACE = String.fromCodePoint(0x1680); // U+1680 — a Unicode 15.1 space separator (Zs)
+const IDEOGRAPHIC_SPACE = String.fromCodePoint(0x3000); // U+3000 — a Unicode 15.1 space separator (Zs)
 const T14_11_D_TRIVIA = assemble([
   T14_11_BASE_IMPORT,
   T14_11_PREAMBLE,
@@ -4878,7 +4889,13 @@ const T14_11_D_TRIVIA = assemble([
   pin("BASE.missing"),
   NBSP + '}>\nU+00A0 on each side.\n</S>\n\n<S id="m3" d={' + ZWNBSP,
   pin("BASE.missing"),
-  "}>\nU+FEFF before the reference.\n</S>\n",
+  '}>\nU+FEFF before the reference.\n</S>\n\n<S id="m4" d={' + OGHAM_SPACE,
+  pin("BASE.missing"),
+  OGHAM_SPACE +
+    '}>\nU+1680 on each side.\n</S>\n\n<S id="m5" d={' +
+    IDEOGRAPHIC_SPACE,
+  pin("BASE.missing"),
+  IDEOGRAPHIC_SPACE + "}>\nU+3000 on each side.\n</S>\n",
 ]);
 
 // (s) 14.8 — a spread entry `d={[...BASE.a]}`: `...BASE.a`, the `...`
@@ -5110,6 +5127,90 @@ const T14_11_REASSERTED_CASES: readonly RangeRuleCase[] =
   T14_11_REASSERTED_STAGINGS.map((staging, index) =>
     reassertedCase(index + 1, staging),
   );
+
+// (x) 14.15 per form, the module-linking forms beyond (j)'s (SPEC 4, 14):
+// `export import X = require(…)` from `import` — the leading `export` and
+// the space separating it excluded, as 1.7 excludes one; an import type
+// from `import` through the closing parenthesis of its argument list, in
+// two type positions — `typeof import(…).default`, the `typeof` before it
+// and the `.default` qualifier after it excluded, and `import(…).T<number>`,
+// the `.T` qualifier and the type arguments excluded; and a string-named
+// module declaration by its own characters — `declare module "…" { }`
+// whole, `declare` included, and `export declare module "…" { }` from
+// `declare`, the leading `export` excluded (1.7). Each form stands alone in
+// its own code file, staged without `;` as in (j), after a declaration
+// holding the multibyte `é`, so a product counting characters misplaces
+// every range. Every specifier designates the discovered spec source
+// `specs/A.mdx`, so the form alone is the defect (an import declaration is
+// the only form through which a TypeScript file consumes a spec module,
+// SPEC 4). TypeScript's complaints about these files — a relative ambient
+// module name, an `export` modifier on an ambient module declaration — are
+// post-parse checks, so each file is well-formed (14.20), its one finding
+// 14.15's.
+const T14_11_LINKING_LEAD = 'const before = "café"\n\n';
+const T14_11_LINKING_FORMS: readonly {
+  readonly file: string;
+  readonly form: string;
+  readonly fixture: AssembledFixture;
+}[] = [
+  {
+    file: "src/export-require.ts",
+    form: "export import X = require of the spec module, located from import",
+    fixture: assemble([
+      T14_11_LINKING_LEAD + "export ",
+      pin('import X = require("../specs/A.xspec")'),
+      "\n",
+    ]),
+  },
+  {
+    file: "src/typeof-import.ts",
+    form: "the import type typeof import(…).default, located import through the argument list",
+    fixture: assemble([
+      T14_11_LINKING_LEAD + "type D = typeof ",
+      pin('import("../specs/A.xspec")'),
+      ".default\n",
+    ]),
+  },
+  {
+    file: "src/qualified-import.ts",
+    form: "the import type import(…).T<number>, located import through the argument list",
+    fixture: assemble([
+      T14_11_LINKING_LEAD + "type G = ",
+      pin('import("../specs/A.xspec")'),
+      ".T<number>\n",
+    ]),
+  },
+  {
+    file: "src/module.ts",
+    form: "declare module of the spec module, located whole",
+    fixture: assemble([
+      T14_11_LINKING_LEAD,
+      pin('declare module "../specs/A.xspec" { }'),
+      "\n",
+    ]),
+  },
+  {
+    file: "src/export-module.ts",
+    form: "export declare module of the spec module, located from declare",
+    fixture: assemble([
+      T14_11_LINKING_LEAD + "export ",
+      pin('declare module "../specs/A.xspec" { }'),
+      "\n",
+    ]),
+  },
+];
+
+/**
+ * The (x) forms as the code files of one workspace, each a staged-source
+ * record (S-9; arm (x) follows the body's first invocation).
+ */
+const T14_11_LINKING_FILES = T14_11_LINKING_FORMS.map(
+  ({ file, form, fixture }) => ({
+    file,
+    fixture,
+    source: stagedTs(`T14-11 (x) ${file} (${form})`, fixture.text),
+  }),
+);
 
 const T14_11_SPEC = "specs/A.mdx";
 const T14_11_CODE = "src/app.ts";
@@ -5458,16 +5559,16 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
   },
   {
     arm: "r",
-    rule: "14.5 — `BASE.missing` alone: the braces and the whitespace and comment between them and the expression excluded, U+00A0 and U+FEFF spelled there likewise",
+    rule: "14.5 — `BASE.missing` alone: the braces and the whitespace and comment between them and the expression excluded, U+00A0, U+FEFF, U+1680, and U+3000 spelled there likewise",
     config: SPECS_ONLY_CONFIG,
     files: {
       [T14_11_BASE]: T14_11_A_MDX,
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (r) specs/A.mdx (BASE.missing past a block comment, U+00A0, and U+FEFF)",
+        "T14-11 (r) specs/A.mdx (BASE.missing past a block comment, U+00A0, U+FEFF, U+1680, and U+3000)",
         T14_11_D_TRIVIA.text,
       ),
     },
-    expected: [0, 1, 2].map((index) => ({
+    expected: [0, 1, 2, 3, 4].map((index) => ({
       condition: "14.5",
       locations: located(T14_11_SPEC, T14_11_D_TRIVIA, index),
     })),
@@ -5541,6 +5642,21 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     })),
   },
   ...T14_11_REASSERTED_CASES,
+  {
+    arm: "x",
+    rule: "14.15 per form — `export import X = require(…)` from `import`, its leading `export` excluded; an import type `import` through the closing parenthesis of its argument list, a `typeof` before it and a qualifier or type arguments after it excluded; a string-named module declaration by its own characters, `declare` included, a leading `export` excluded",
+    config: SPEC_AND_CODE_CONFIG,
+    files: {
+      [T14_11_SPEC]: T14_11_A_MDX,
+      ...Object.fromEntries(
+        T14_11_LINKING_FILES.map((entry) => [entry.file, entry.source]),
+      ),
+    },
+    expected: T14_11_LINKING_FILES.map((entry) => ({
+      condition: "14.15",
+      locations: located(entry.file, entry.fixture, 0),
+    })),
+  },
 ];
 
 /**
@@ -5769,7 +5885,7 @@ async function runRefusedReadArm(product: ProductBinding): Promise<void> {
 const T14_11 = defineProductTest({
   id: "T14-11",
   title:
-    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), a non-static bare reference exclusive of its `;`, the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax — its own two forms and, re-asserted the same way, the offsets T2.3-3, T2.4-2, T2.7-3, T2.7-4, and T14-12 pin; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.6, 1.7, 2.4, 5.7, 11.2, 11.4, 12.7)",
+    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF/U+1680/U+3000, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), a non-static bare reference exclusive of its `;`, the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms (`export import X = require(…)` from `import`, its `export` excluded), import types (`import` through the closing parenthesis of the argument list — `typeof import(…).default` and `import(…).T<number>`, the `typeof`, qualifier, and type arguments excluded), string-named module declarations (`declare module` whole, `export declare module` from `declare`), and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax — its own two forms and, re-asserted the same way, the offsets T2.3-3, T2.4-2, T2.7-3, T2.7-4, and T14-12 pin; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.4, 1.6, 1.7, 2.4, 4, 5.7, 11.2, 11.4, 12.7)",
   run: async (product) => {
     for (const kase of T14_11_CASES) {
       await runRangeRuleArm(product, kase);
