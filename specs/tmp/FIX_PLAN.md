@@ -38,26 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 42 — Register T6.5-21: `refused-exposed-derived-file` (TEST-SPEC L300; SPEC 6.5, 13.4, 14; A27, A30)
-
-**Depends on.** Task 13, and Task 39's module (`test/suite/registry/section-6.5-iv.ts`).
-
-**Where.** The new 6.5 module; `section-6.6.ts` for T6.6-3's twins; `traceability.ts`, with `"14"`.
-
-**Change.** Each arm stages `move specs/A.mdx specs/sub/A.mdx`, with emission next to sources and spec globs `specs/**/*.mdx`. Spellings from L300.
-- *Refused, (a) and (b).* Each exits 1 and modifies nothing (compare-around; the journal absent or byte-unchanged). It reports exactly one finding: code `refused-exposed-derived-file`, `path` the origin's emit destination `specs/A.md`, `locations` `[]`, and `identities` `[]`. The `--preview` reports the same.
-  - (a) After a `build`, with a second spec glob `specs/*.md`.
-  - (b) With no build ever run: `specs/A.md` is the user's plain file, under a code group `specs/*.md`.
-- *Performed controls.*
-  - (c) No glob reaches `specs/A.md`.
-  - (d) A symbolic link to a file outside the workspace is the occupant, with (a)'s glob present: the move succeeds, the regeneration removes the link as the link, and the target stays byte-identical. Reuse the shared link staging `stageLinkToOutsideFile` and `assertOutsideLinkTargetUnchanged` (`section-13.4.ts`; export them, or move them to `support.ts`).
-  - (e) The section form in (a)'s staging: exit 0, the preview succeeding alike, with the effects L300 states and `check` clean.
-- *Multi-reason order.* `move specs/A.mdx "specs/a'b.mdx"` in (a)'s staging reports `refused-invalid-destination`, then `refused-exposed-derived-file`. Export the staging: T12.7-2 asserts the same order (Task 55).
-
-**Note (from Task 13).** The vocabulary, decoder, and comparator know the code; `IDENTITY_PINNED_REFUSAL_CODES` (`test/suite/registry/support.ts`) does not list it, so `assertRefusalIdentities` throws a harness defect on a case stating its `identities`. Asserting L300's `identities` `[]` through that path needs the code classified there, with its doc comment, or a direct assertion.
-
-**Checks.** S-7 passes. T6.5-21 and T6.6-3 against the built product.
-
 ### Task 43 — Register T6.5-22 with its (b) lures (TEST-SPEC L301; S-6; A28)
 
 **Depends on.** Tasks 18 and 19, and Task 14 for judging each receiving code file both ways.
@@ -222,6 +202,8 @@ S-9 names every one of these configurations well-formed: 5.9.3 accepts each both
 
 **Change.** In T6.5-21(a)'s staging (reuse its exported staging), `move specs/A.mdx "specs/a'b.mdx"` reports `refused-invalid-destination`, then `refused-exposed-derived-file`.
 
+**Note (from Task 42).** `test/suite/registry/section-6.5-iv.ts` exports the staging and the move: `runD21RefusedStaging(product, { ...D21_A_STAGING, moves: [D21_TWO_REASON_MOVE] }, context, perMove)` stages (a) (its premise `build` re-pinning `specs/A.md` a plain file) and hands the two-reason move to `perMove`; `D21_TWO_REASON_MOVE.findings` lists the two expected findings in 14's order (code and `path`; the exposure's `identities` `[]`).
+
 **Checks.** S-7 passes. T12.7-2 against the built product.
 
 ### Task 56 — T13.4-4: the directory-occupant arms (TEST-SPEC L557; SPEC 13.4; B11)
@@ -274,6 +256,8 @@ In each staging:
 - Assert `refused-invalid-destination`, never 14.22, for:
   - T6.5-4's barred path characters: Task 33's cases, if not already reached through `MOVE_REFUSAL_CASES` (done at Task 33: they sit in `MOVE_REFUSAL_CASES`, which T14-7 iterates through `assertRefusalReport`, each asserting `refused-invalid-destination` alone with its `path`);
   - T6.5-20's derived-path relations and module-linking designation, through its exported stagings.
+
+**Note (from Task 42).** T6.5-21's refused stagings are `D21_REFUSED_STAGINGS` (`test/suite/registry/section-6.5-iv.ts`; (a) with its file-form move and the two-reason move, and (b)), staged by `runD21RefusedStaging`, each move's expected findings in `move.findings` (code, `path`, and `identities` exactly where pinned); `refused-exposed-derived-file` is now in `IDENTITY_PINNED_REFUSAL_CODES`, so a T14-7 case naming it must state `identities` `[]`.
 
 **Note (from Task 41).** Every refused staging of T6.5-20, arms (a) through (e), is an entry of the table `d20RefusedStagings` returns (`test/suite/registry/section-6.5-iv.ts`): (d)'s six module-linking designations and (e)'s after-build and section-form controls included, each staged by `runD20RefusedStaging`, as T6.6-3's twins iterate it.
 

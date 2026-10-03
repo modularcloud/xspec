@@ -1243,7 +1243,7 @@ const D21_DESTINATION = "specs/sub/A.mdx";
 const D21_DESTINATION_EMIT_PATH = "specs/sub/A.md";
 /** The section (e)'s section form moves, keeping its ID. */
 const D21_SECTION = "x";
-/** The second glob that reaches `specs/A.md`: (a)'s spec glob, (b)'s code glob. */
+/** The glob reaching `specs/A.md`: (a)'s second spec glob, (b)'s code glob. */
 const D21_MD_GLOB = "specs/*.md";
 
 /**
