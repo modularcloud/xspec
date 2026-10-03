@@ -87,9 +87,21 @@
 //   disk); beside them a spec-group file without the `.mdx` extension
 //   (14.19 staged beside it, SPEC 7.1) is listed in `sources` with its
 //   membership while its `module` and `markdown` are the stated
-//   structural-absence null (11.6/13.1/12.7) — and the answer stays
-//   complete, finding-free, exit 0: the 14.19 finding is reported where its
-//   condition assigns it, never here (11.6);
+//   structural-absence null (11.6/13.1/12.7), whereas an `.mdx` source
+//   whose path is invalid keeps both — per-source derived paths follow the
+//   `NAME.mdx` name shape alone (13.1), and the inventory answers whatever
+//   the sources' validity (11.6): `specs/a'b.mdx` (7.1's bar, T7.1-1) →
+//   module `specs/a'b.xspec.ts` and Markdown `specs/a'b.md`; on the Linux
+//   leg, the non-UTF-8-named `specs/b<0xFF>.mdx` (T1.5-2's name) → its
+//   entry's `source`, `module`, and `markdown` each in the marked byte form
+//   (12.0, 12.7, T12.7-1), composed from the staged source bytes with the
+//   final `.mdx` replaced by `.xspec.ts` or `.md` — conditional staging
+//   inside the shared body, never a skip (H-9), as T12.7-1's byte-form arm
+//   stages. Each invalid-path entry is diagnosed on its own before the
+//   whole-map compare, so a product deriving paths for valid sources alone
+//   fails there by name — and the answer stays complete, finding-free,
+//   exit 0: the 14.19 findings are reported where their condition assigns
+//   them, never here (11.6);
 // - emission redirected: `markdown.outDir` echoes in the view and every
 //   emit destination lies under it, preserving workspace-relative paths
 //   (7.3), nested source included;
@@ -224,6 +236,7 @@ import type {
   DependencyEdgeKind,
   GroupKind,
   InventoryConfigurationView,
+  InventoryDerivedEntry,
   InventoryDocument,
   InventoryJournalStatus,
   InventoryResolvedMap,
@@ -236,6 +249,7 @@ import {
   decodeInventoryDocument,
   decodeInventoryFindings,
   decodeInventoryResolvedMap,
+  pathValueBytes,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
@@ -944,6 +958,105 @@ const T11_6_2_EMIT_A = stagedMdx(
   "T11.6-2 emit workspace specs/a.mdx",
   '<S id="seule">\nÉmise.\n</S>\n',
 );
+
+// The emit workspace's invalid-path `.mdx` sources (SPEC 13.1: per-source
+// derived paths follow the `NAME.mdx` name shape alone; 11.6: the inventory
+// answers whatever the sources' validity). `specs/a'b.mdx` — `'` is barred
+// from a spec-group file's path (7.1, T7.1-1), so the file is invalid
+// (14.19) — keeps its module path and, with emission next to sources, its
+// Markdown destination.
+const T11_6_2_QUOTE_SOURCE = "specs/a'b.mdx";
+const T11_6_2_EMIT_QUOTE = stagedMdx(
+  "T11.6-2 emit workspace specs/a'b.mdx (an invalid-path .mdx source: 7.1's bar)",
+  '<S id="apostrophe">\nInvalide par son nom.\n</S>\n',
+);
+
+/**
+ * Whether non-UTF-8 file names are stageable: the Linux leg, where file
+ * names are byte strings (TEST-SPEC T1.5-2, T11.6-2) — conditional staging
+ * inside the shared body, never a skip (H-9), as T12.7-1's byte-form arm.
+ */
+const NON_UTF8_STAGED = process.platform === "linux";
+
+// (Linux leg) The non-UTF-8-named `.mdx` source — T1.5-2's
+// `specs/b<0xFF>.mdx` (0xFF occurs in no valid UTF-8 sequence; SPEC 7's
+// byte-wise glob rules still discover it). Its entry's `source`, `module`,
+// and `markdown` are each the marked byte form (12.0, 12.7), composed from
+// the SAME bytes that stage the file — the module path and the Markdown
+// destination are the source's bytes with the final `.mdx` replaced by
+// `.xspec.ts` and `.md` (13.1, 13.2, 7.3) — never measured from product
+// output.
+const T11_6_2_NU_SOURCE_BYTES = Buffer.concat([
+  Buffer.from("specs/b", "utf8"),
+  Buffer.from([0xff]),
+  Buffer.from(".mdx", "utf8"),
+]);
+
+/** `source`'s bytes with the final `.mdx` replaced by `suffix` (SPEC 13.1). */
+function replaceFinalMdx(source: Buffer, suffix: string): Buffer {
+  const mdx = Buffer.from(".mdx", "utf8");
+  if (!source.subarray(source.length - mdx.length).equals(mdx)) {
+    throw new Error(
+      `T11.6-2 fixture: the byte path ${source.toString("hex")} does not ` +
+        "end in .mdx",
+    );
+  }
+  return Buffer.concat([
+    source.subarray(0, source.length - mdx.length),
+    Buffer.from(suffix, "utf8"),
+  ]);
+}
+
+const T11_6_2_EMIT_NU = stagedMdx(
+  "T11.6-2 emit workspace specs/b<0xFF>.mdx (Linux leg: a non-UTF-8-named .mdx source)",
+  '<S id="octet">\nNom hors UTF-8.\n</S>\n',
+);
+
+/** `specs/a'b.mdx`'s expected derived-map entry (SPEC 13.1, 7.3). */
+const T11_6_2_QUOTE_ENTRY: InventoryDerivedEntry = {
+  source: T11_6_2_QUOTE_SOURCE,
+  module: "specs/a'b.xspec.ts",
+  markdown: "specs/a'b.md",
+};
+
+/**
+ * (Linux leg) `specs/b<0xFF>.mdx`'s expected derived-map entry: `source`,
+ * `module`, and `markdown` each the marked byte form (SPEC 12.0, 12.7).
+ */
+const T11_6_2_NU_ENTRY: InventoryDerivedEntry = {
+  source: { bytes: T11_6_2_NU_SOURCE_BYTES.toString("hex") },
+  module: {
+    bytes: replaceFinalMdx(T11_6_2_NU_SOURCE_BYTES, ".xspec.ts").toString(
+      "hex",
+    ),
+  },
+  markdown: {
+    bytes: replaceFinalMdx(T11_6_2_NU_SOURCE_BYTES, ".md").toString("hex"),
+  },
+};
+
+/**
+ * The emit workspace's invalid-path `.mdx` entries, each asserted on its own
+ * before the whole-map compare — the Linux-leg one exactly where staged.
+ */
+const T11_6_2_INVALID_PATH_ENTRIES: readonly {
+  readonly what: string;
+  readonly entry: InventoryDerivedEntry;
+}[] = [
+  {
+    what: "`specs/a'b.mdx` (`'` barred by 7.1, T7.1-1)",
+    entry: T11_6_2_QUOTE_ENTRY,
+  },
+  ...(NON_UTF8_STAGED
+    ? [
+        {
+          what: "the non-UTF-8-named `specs/b<0xFF>.mdx` (Linux leg, T1.5-2)",
+          entry: T11_6_2_NU_ENTRY,
+        },
+      ]
+    : []),
+];
+
 const T11_6_2_OUTDIR_G = stagedMdx(
   "T11.6-2 outDir workspace specs/g.mdx",
   '<S id="haut">\nRacine.\n</S>\n',
@@ -968,7 +1081,7 @@ const T11_6_2_SETS_X = stagedMdx(
 const T11_6_2 = defineProductTest({
   id: "T11.6-2",
   title:
-    'inventory configuration, sources, derived map: the resolved configuration view with every default and inferred kind explicit — `markdown` key absent resolving to {"emit": false, "outDir": null}; a defaulted profile reporting `targets` "leaves", `edgeKinds` all three, `boundaryKind` explicit though inferred, `targetTags` null; a defaulted rule reporting `kinds` all three with each group selector\'s `kind` explicit though inferred; group references inside profiles and rules staying configured names resolving against the reported group list — every discovered source with its group memberships (a two-group file carrying both, in configuration order); the derived map per spec source: generated-module path (13.1) and Markdown emit destination exactly while emission is enabled (default next-to-source and `markdown.outDir`-redirected placements alike), both present before any build has run — determined by configuration and discovery; a spec-group file without the `.mdx` extension (14.19 staged beside it) listed in `sources` while `module` and `markdown` are the stated structural-absence null; with emission disabled — the key absent, or `emit` false with `outDir` configured — `markdown` null for every source; every answer complete and finding-free at exit 0, the defaults workspace asserted in the flag-less and `--json` forms against one expectation; configured sets — a profile\'s `targetTags: ["z", "a", "a"]` and `edgeKinds: ["references", "depends"]`, a rule\'s `kinds: ["embeds", "depends"]`, and a `tags` selector `["b", "a", "b"]`, each valid and read as a set — reported in their 12.7 value forms, form-exact and compared literally: ["a", "z"] and ["a", "b"] in byte order with the repeated element collapsed, ["depends", "references"] and ["depends", "embeds"] in 5.2\'s order however configured (SPEC 11.6, 12.7, 7.3, 7.4, 7.5, 13.1, 12.0, 11)',
+    'inventory configuration, sources, derived map: the resolved configuration view with every default and inferred kind explicit — `markdown` key absent resolving to {"emit": false, "outDir": null}; a defaulted profile reporting `targets` "leaves", `edgeKinds` all three, `boundaryKind` explicit though inferred, `targetTags` null; a defaulted rule reporting `kinds` all three with each group selector\'s `kind` explicit though inferred; group references inside profiles and rules staying configured names resolving against the reported group list — every discovered source with its group memberships (a two-group file carrying both, in configuration order); the derived map per spec source: generated-module path (13.1) and Markdown emit destination exactly while emission is enabled (default next-to-source and `markdown.outDir`-redirected placements alike), both present before any build has run — determined by configuration and discovery; a spec-group file without the `.mdx` extension (14.19 staged beside it) listed in `sources` while `module` and `markdown` are the stated structural-absence null, whereas an `.mdx` source whose path is invalid keeps both — `specs/a\'b.mdx` (7.1\'s bar) → module `specs/a\'b.xspec.ts` and, emitting next to sources, Markdown `specs/a\'b.md`, and on the Linux leg a non-UTF-8-named `.mdx` source → its `source`, `module`, and `markdown` each in the marked byte form, the final `.mdx` replaced by `.xspec.ts` and `.md` — per-source derived paths following the `NAME.mdx` name shape alone; with emission disabled — the key absent, or `emit` false with `outDir` configured — `markdown` null for every source; every answer complete and finding-free at exit 0, the defaults workspace asserted in the flag-less and `--json` forms against one expectation; configured sets — a profile\'s `targetTags: ["z", "a", "a"]` and `edgeKinds: ["references", "depends"]`, a rule\'s `kinds: ["embeds", "depends"]`, and a `tags` selector `["b", "a", "b"]`, each valid and read as a set — reported in their 12.7 value forms, form-exact and compared literally: ["a", "z"] and ["a", "b"] in byte order with the repeated element collapsed, ["depends", "references"] and ["depends", "embeds"] in 5.2\'s order however configured (SPEC 11.6, 12.7, 7.3, 7.4, 7.5, 7.1, 13.1, 12.0, 11)',
   run: async (product) => {
     // --- defaults workspace: every default and inferred kind explicit ------
     const defaults = await TestWorkspace.create({
@@ -1109,6 +1222,10 @@ const T11_6_2 = defineProductTest({
       files: {
         [CONFIG_FILE]: RESOLVED_EMIT_CONFIG,
         "specs/a.mdx": T11_6_2_EMIT_A,
+        // An `.mdx` source whose path is invalid (`'`, 14.19, SPEC 7.1):
+        // discovered, and its derived paths follow the `NAME.mdx` name
+        // shape alone (13.1).
+        [T11_6_2_QUOTE_SOURCE]: T11_6_2_EMIT_QUOTE,
         // A spec-group file without the `.mdx` extension: discovered (the
         // extension-free glob matches it), invalid (14.19, SPEC 7.1) — a
         // finding of build/check, never of the inventory (11.6).
@@ -1116,14 +1233,48 @@ const T11_6_2 = defineProductTest({
       },
     });
     try {
+      // (Linux leg) The non-UTF-8-named `.mdx` source, staged through the
+      // builder's byte-path `file` (T1.5-2's staging).
+      if (NON_UTF8_STAGED) {
+        await emit.file(T11_6_2_NU_SOURCE_BYTES, T11_6_2_EMIT_NU);
+      }
       const map = await expectResolvedInventory(
         product,
         emit.root,
         ["inventory"],
-        "T11.6-2 — `inventory` with emission enabled (default destinations) " +
-          "and a non-`.mdx` spec-group file staged beside the valid source " +
-          "(SPEC 11.6, 7.3)",
+        "T11.6-2 — `inventory` with emission enabled (default destinations), " +
+          "invalid-path `.mdx` sources and a non-`.mdx` spec-group file " +
+          "staged beside the valid source (SPEC 11.6, 7.3, 13.1)",
       );
+      // Each invalid-path `.mdx` source keeps both derived paths, diagnosed
+      // on its own: a product deriving paths for valid sources alone (or
+      // for UTF-8 paths alone) fails here by name, before the whole-map
+      // compare (SPEC 13.1, 11.6, 7.3; 12.0, 12.7 for the byte form).
+      for (const { what, entry } of T11_6_2_INVALID_PATH_ENTRIES) {
+        const sourceBytes = pathValueBytes(entry.source);
+        const got = map.derived.find((candidate) =>
+          pathValueBytes(candidate.source).equals(sourceBytes),
+        );
+        if (got === undefined) {
+          fail(
+            `T11.6-2 — ${what}: the derived map carries one entry per ` +
+              `discovered spec source, this invalid-path one included (SPEC ` +
+              `11.6, 7.1: the file is discovered whatever its validity); ` +
+              `got entries for ` +
+              `${map.derived.map((e) => renderPathValue(e.source)).join(", ")}`,
+          );
+        }
+        assertSameJson(
+          got,
+          entry,
+          `T11.6-2 — ${what}: an \`.mdx\` source whose path is invalid ` +
+            `keeps its generated-module path and, with emission next to ` +
+            `sources, its Markdown destination — per-source derived paths ` +
+            `follow the \`NAME.mdx\` name shape alone, the final \`.mdx\` ` +
+            `replaced by \`.xspec.ts\` and \`.md\`, a non-UTF-8 path in ` +
+            `the marked byte form (SPEC 13.1, 11.6, 7.3, 12.0, 12.7)`,
+        );
+      }
       assertSameJson(
         map,
         {
@@ -1137,11 +1288,28 @@ const T11_6_2 = defineProductTest({
             coverage: [],
             policy: [],
           },
+          // Byte order of workspace-relative path (11.6): `specs/a'b.mdx`
+          // (0x27 after `specs/a`) before `specs/a.mdx` (0x2E), then the
+          // Linux leg's `specs/b<0xFF>.mdx`, then `specs/note.txt`.
           sources: [
+            // Every discovered source, valid or not, with its membership
+            // (11.6 "every discovered source file").
+            {
+              path: T11_6_2_QUOTE_ENTRY.source,
+              groups: [{ name: "main", kind: "spec" }],
+            },
             {
               path: "specs/a.mdx",
               groups: [{ name: "main", kind: "spec" }],
             },
+            ...(NON_UTF8_STAGED
+              ? [
+                  {
+                    path: T11_6_2_NU_ENTRY.source,
+                    groups: [{ name: "main", kind: "spec" as const }],
+                  },
+                ]
+              : []),
             // The non-`.mdx` file IS a discovered spec-group source: listed
             // with its membership (11.6 "every discovered source file").
             {
@@ -1150,6 +1318,9 @@ const T11_6_2 = defineProductTest({
             },
           ],
           derived: [
+            // An `.mdx` source whose path is invalid keeps both derived
+            // paths: the `NAME.mdx` name shape alone defines them (13.1).
+            T11_6_2_QUOTE_ENTRY,
             // Module path and Markdown destination both present before any
             // build has run — determined by configuration and discovery
             // (11.6, 13.1); the default placement emits next to the source
@@ -1159,6 +1330,9 @@ const T11_6_2 = defineProductTest({
               module: "specs/a.xspec.ts",
               markdown: "specs/a.md",
             },
+            // (Linux leg) The non-UTF-8-named `.mdx` source: all three
+            // members in the marked byte form (12.0, 12.7).
+            ...(NON_UTF8_STAGED ? [T11_6_2_NU_ENTRY] : []),
             // The spec-group file without `.mdx` generates and emits
             // nothing (13.1): both structurally absent — the stated null,
             // never omission (11.6, 12.7).
@@ -1167,9 +1341,11 @@ const T11_6_2 = defineProductTest({
         } satisfies InventoryResolvedMap,
         "T11.6-2 — emission enabled: per spec source the generated-module " +
           "path and the next-to-source Markdown destination, both present " +
-          "before any build has run; the non-`.mdx` spec-group file listed " +
-          "in `sources` with `module` and `markdown` null (SPEC 11.6, 7.3, " +
-          "13.1, 12.7)",
+          "before any build has run, an `.mdx` source whose path is " +
+          "invalid keeping both (the non-UTF-8 one in the marked byte " +
+          "form, Linux leg); the non-`.mdx` spec-group file listed in " +
+          "`sources` with `module` and `markdown` null (SPEC 11.6, 7.3, " +
+          "13.1, 12.0, 12.7)",
       );
     } finally {
       await emit.dispose();

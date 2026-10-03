@@ -389,6 +389,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T11.5-2": ["11.5"],
   "T11.5-3": ["11.5", "12.0", "12.7", "14"],
   "T11.6-1": ["11.6"],
+  // T11.6-2: 7.1/7.3/7.4/7.5/13.1/12.0/12.7 are carriage context with home
+  // coverage at T7.1-*/T7.3-*/T7.4-*/T7.5-*/T13.1-*/T12.0-*/T12.7-* — the
+  // invalid-path `.mdx` arms (`specs/a'b.mdx`; Linux leg, a non-UTF-8 name
+  // in the marked byte form) included; every answer asserts findings [] —
+  // no numbered condition is asserted, so no "14".
   "T11.6-2": ["11.6"],
   // T11.6-3: 13.3/13.1/6.1/10.1/12.7 are carriage context with home
   // coverage at T13.3-*/T13.1-*/T6.1-*/T10.1-*/T12.7-*; the occupancy and
