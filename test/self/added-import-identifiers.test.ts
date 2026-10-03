@@ -27,9 +27,17 @@
 //     `import let from "./let.xspec"` derives) — is read (`readMdxTree`)
 //     though no S-9 allowance admits it, `deriveMdx`'s verdicts unchanged,
 //     while a reserved word no binding derives (`enum`) is read nowhere.
+// And `judgeAddedImportsOfFile`, the same judgement over one file's two
+// texts that T6.5-22(b)'s lures apply to their receiving file after the
+// move: the declarations added, each with its specifier's value and local
+// bindings, and the breaches, in a spec source and a code source alike; a
+// side not well-formed yields that problem alone.
 
 import { describe, expect, onTestFinished, test } from "vitest";
-import { readPerformedMove } from "../helpers/added-import-identifiers.js";
+import {
+  judgeAddedImportsOfFile,
+  readPerformedMove,
+} from "../helpers/added-import-identifiers.js";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import {
   deriveMdx,
@@ -489,5 +497,86 @@ describe("T6.5-22(a): a spec source's strict-mode-barred import bindings read, S
     ]) {
       expect(() => readMdxTree(text)).toThrow(/does not derive/);
     }
+  });
+});
+
+describe("T6.5-22(b): one file's added declarations and breaches (`judgeAddedImportsOfFile`)", () => {
+  const HOST_BEFORE =
+    'import A from "./A.xspec"\n\n<S id="host" d={A.w}>\nHost text, quoting {text(A.a)}.\n</S>\n';
+  const hostAfter = (name: string): string =>
+    `import A from "./A.xspec"\nimport ${name} from "./let.xspec"\n\n<S id="host" d={A.w}>\nHost text, quoting {text(${name}.a)}.\n</S>\n`;
+
+  test("a spec source: the added declaration with its specifier's value and binding; a fresh one passes, `let` is barred", () => {
+    expect(
+      judgeAddedImportsOfFile(
+        "specs/host.mdx",
+        "spec-source",
+        HOST_BEFORE,
+        hostAfter("let2"),
+      ),
+    ).toEqual({
+      added: [
+        {
+          text: 'import let2 from "./let.xspec"',
+          specifier: "./let.xspec",
+          identifiers: ["let2"],
+        },
+      ],
+      problems: [],
+    });
+    const barred = judgeAddedImportsOfFile(
+      "specs/host.mdx",
+      "spec-source",
+      HOST_BEFORE,
+      hostAfter("let"),
+    );
+    expect(barred.added.map((declaration) => declaration.identifiers)).toEqual([
+      ["let"],
+    ]);
+    expect(barred.problems).toHaveLength(1);
+    expect(barred.problems[0]).toMatch(
+      /^specs\/host\.mdx: the added identifier `let` \(`import let from "\.\/let\.xspec"`\) is barred/,
+    );
+  });
+
+  test("a code source: `Record`, referenced only in a type annotation, is a breach; an unchanged file adds nothing", () => {
+    const before =
+      'import A from "../specs/A.xspec"\n\nlet r: Record<string, number> = {}\n\nA.m\nA.w\n';
+    const after =
+      'import A from "../specs/A.xspec"\nimport Record from "../specs/Record.xspec"\n\nlet r: Record<string, number> = {}\n\nRecord.m\nA.w\n';
+    const judgement = judgeAddedImportsOfFile(
+      "src/record.ts",
+      "typescript",
+      before,
+      after,
+    );
+    expect(judgement.added).toEqual([
+      {
+        text: 'import Record from "../specs/Record.xspec"',
+        specifier: "../specs/Record.xspec",
+        identifiers: ["Record"],
+      },
+    ]);
+    expect(judgement.problems).toHaveLength(1);
+    expect(judgement.problems[0]).toMatch(
+      /the added identifier `Record` .* is equal to a name the pre-operation file references/,
+    );
+    expect(
+      judgeAddedImportsOfFile("src/record.ts", "typescript", before, before),
+    ).toEqual({ added: [], problems: [] });
+  });
+
+  test("a side not well-formed yields that problem alone", () => {
+    const judgement = judgeAddedImportsOfFile(
+      "specs/host.mdx",
+      "spec-source",
+      HOST_BEFORE,
+      'import A from "./A.xspec"\nimport await from "./await.xspec"\n\n<S id="host" d={A.w}>\nHost text, quoting {text(await.a)}.\n</S>\n',
+    );
+    expect(judgement.added).toEqual([]);
+    expect(judgement.problems).toHaveLength(1);
+    expect(judgement.problems[0]).toMatch(
+      /^specs\/host\.mdx, which the operation rewrote, is not well-formed under its grammar after it/,
+    );
   });
 });

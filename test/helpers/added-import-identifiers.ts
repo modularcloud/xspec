@@ -454,8 +454,54 @@ interface DeclarationReading {
   readonly text: string;
   /** Its characters, the specifier literal's blanked where asked. */
   readonly key: string;
+  /** The specifier literal's value, as the file's grammar reads it. */
+  readonly specifier: string | undefined;
   /** The local bindings it declares. */
   readonly identifiers: readonly string[];
+}
+
+/** An import declaration an operation added to a file (see
+ * `judgeAddedImportsOfFile`). */
+export interface AddedImportDeclaration {
+  /** The declaration's characters. */
+  readonly text: string;
+  /** The specifier literal's value, as the file's grammar reads it. */
+  readonly specifier: string | undefined;
+  /** The local bindings it declares. */
+  readonly identifiers: readonly string[];
+}
+
+/** One file's judgement: the declarations the operation added to it, and
+ * every problem — a breach, or a side not well-formed (none added then). */
+interface FileJudgement {
+  readonly added: readonly AddedImportDeclaration[];
+  readonly problems: readonly string[];
+}
+
+/**
+ * T6.5-22(a)'s judgement of one file a section move rewrote, for a caller
+ * holding both of its texts (T6.5-22(b)'s lures, one code path with the
+ * driver's): the import declarations `after` holds that no declaration of
+ * `before` accounts for, compared by their characters, in `after`'s order,
+ * and every breach their identifiers make in `before`, worded as the driver
+ * words it; when either text is not well-formed under its grammar (14.20),
+ * no declarations and that problem alone. `file` names the file in the
+ * problems' wording.
+ */
+export function judgeAddedImportsOfFile(
+  file: string,
+  kind: ReceivingFileKind,
+  before: string,
+  after: string,
+): FileJudgement {
+  const encoder = new TextEncoder();
+  return judgeFileDeclarations(
+    file,
+    kind,
+    encoder.encode(before),
+    encoder.encode(after),
+    false,
+  );
 }
 
 function judgeFile(
@@ -465,17 +511,39 @@ function judgeFile(
   bytes: Uint8Array,
   specifiersRewritten: boolean,
 ): readonly string[] {
+  return judgeFileDeclarations(
+    file,
+    kind,
+    priorBytes,
+    bytes,
+    specifiersRewritten,
+  ).problems;
+}
+
+function judgeFileDeclarations(
+  file: string,
+  kind: ReceivingFileKind,
+  priorBytes: Uint8Array,
+  bytes: Uint8Array,
+  specifiersRewritten: boolean,
+): FileJudgement {
   const after = readDeclarations(kind, bytes, specifiersRewritten);
   if (typeof after === "string") {
-    return [
-      `${file}, which the operation rewrote, is not well-formed under its grammar after it (SPEC 14.20: ${after}) — 6.5 keeps every file a successful move rewrites well-formed — so the import declarations it added cannot be read`,
-    ];
+    return {
+      added: [],
+      problems: [
+        `${file}, which the operation rewrote, is not well-formed under its grammar after it (SPEC 14.20: ${after}) — 6.5 keeps every file a successful move rewrites well-formed — so the import declarations it added cannot be read`,
+      ],
+    };
   }
   const before = readDeclarations(kind, priorBytes, specifiersRewritten);
   if (typeof before === "string") {
-    return [
-      `${file}, which the operation rewrote, was not well-formed under its grammar before it (SPEC 14.20: ${before}) — the valid-workspace precondition of 6.4 and 6.5 refuses a move over such a source — so the names an added identifier must avoid cannot be read`,
-    ];
+    return {
+      added: [],
+      problems: [
+        `${file}, which the operation rewrote, was not well-formed under its grammar before it (SPEC 14.20: ${before}) — the valid-workspace precondition of 6.4 and 6.5 refuses a move over such a source — so the names an added identifier must avoid cannot be read`,
+      ],
+    };
   }
   const unmatched = new Map<string, number>();
   for (const declaration of before.declarations) {
@@ -487,7 +555,14 @@ function judgeFile(
     if (count > 0) unmatched.set(declaration.key, count - 1);
     else added.push(declaration);
   }
-  if (added.length === 0) return [];
+  const addedDeclarations = added.map(
+    ({ text, specifier, identifiers }): AddedImportDeclaration => ({
+      text,
+      specifier,
+      identifiers,
+    }),
+  );
+  if (added.length === 0) return { added: addedDeclarations, problems: [] };
   const addedBy = new Map<string, string>();
   for (const declaration of added) {
     for (const identifier of declaration.identifiers) {
@@ -498,10 +573,13 @@ function judgeFile(
     analyzeNames(kind, before.text),
     added.flatMap((declaration) => declaration.identifiers),
   );
-  return breaches.map(
-    (breach) =>
-      `${file}: the added identifier \`${breach.identifier}\` (\`${addedBy.get(breach.identifier) ?? "?"}\`) is ${breach.clause}`,
-  );
+  return {
+    added: addedDeclarations,
+    problems: breaches.map(
+      (breach) =>
+        `${file}: the added identifier \`${breach.identifier}\` (\`${addedBy.get(breach.identifier) ?? "?"}\`) is ${breach.clause}`,
+    ),
+  };
 }
 
 /** A source's decoded text and import declarations, or why it is not
@@ -520,6 +598,7 @@ function readDeclarations(
     start: number,
     end: number,
     specifier: { readonly start: number; readonly end: number } | undefined,
+    value: string | undefined,
     identifiers: readonly string[],
   ): void => {
     const declaration = text.slice(start, end);
@@ -529,7 +608,12 @@ function readDeclarations(
           String.fromCharCode(0) +
           text.slice(specifier.end, end)
         : declaration;
-    declarations.push({ text: declaration, key, identifiers });
+    declarations.push({
+      text: declaration,
+      key,
+      specifier: value,
+      identifiers,
+    });
   };
   if (kind === "spec-source") {
     let tree: MdastNode;
@@ -552,6 +636,7 @@ type AddDeclaration = (
   start: number,
   end: number,
   specifier: { readonly start: number; readonly end: number } | undefined,
+  value: string | undefined,
   identifiers: readonly string[],
 ) => void;
 
@@ -565,7 +650,11 @@ interface EsImportDeclaration {
   readonly type: "ImportDeclaration";
   readonly start: number;
   readonly end: number;
-  readonly source: { readonly start: number; readonly end: number };
+  readonly source: {
+    readonly start: number;
+    readonly end: number;
+    readonly value?: unknown;
+  };
   readonly specifiers: readonly { readonly local: { readonly name: string } }[];
 }
 
@@ -587,6 +676,9 @@ function readMdxDeclarations(node: MdastNode, add: AddDeclaration): void {
         declaration.start,
         declaration.end,
         declaration.source,
+        typeof declaration.source.value === "string"
+          ? declaration.source.value
+          : undefined,
         declaration.specifiers.map((specifier) => specifier.local.name),
       );
     }
@@ -638,16 +730,23 @@ function readTypeScriptDeclarations(
         range.start,
         range.end,
         rangeOf(statement.moduleSpecifier),
+        ts.isStringLiteral(statement.moduleSpecifier)
+          ? statement.moduleSpecifier.text
+          : undefined,
         identifiers,
       );
     } else if (ts.isImportEqualsDeclaration(statement)) {
       const reference = statement.moduleReference;
       const range = rangeOf(statement);
+      const external = ts.isExternalModuleReference(reference)
+        ? reference.expression
+        : undefined;
       add(
         range.start,
         range.end,
-        ts.isExternalModuleReference(reference)
-          ? rangeOf(reference.expression)
+        external === undefined ? undefined : rangeOf(external),
+        external !== undefined && ts.isStringLiteral(external)
+          ? external.text
           : undefined,
         [statement.name.text],
       );

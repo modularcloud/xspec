@@ -1,6 +1,8 @@
 // TEST-SPEC §6.5 (move), fourth part — SUITE-25 (continued): T6.5-20,
-// destination refusals over derived paths, and T6.5-21, the
-// exposed-derived-file refusal. T6.5-1…T6.5-10 are section-6.5.ts's
+// destination refusals over derived paths, T6.5-21, the
+// exposed-derived-file refusal, and T6.5-22's (b) lures, barred and
+// captured names ((a) is the subprocess driver's,
+// helpers/added-import-identifiers.ts). T6.5-1…T6.5-10 are section-6.5.ts's
 // business, T6.5-11 section-6.5-ii.ts's, and T6.5-12…T6.5-19
 // section-6.5-iii.ts's; this module keeps those files' edits bounded (the
 // section-10.7-i/-ii precedent).
@@ -159,13 +161,20 @@ import {
   decodePreviewReport,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
+import { judgeAddedImportsOfFile } from "../../helpers/added-import-identifiers.js";
 import {
   assertFileBytes,
   assertFilesEqual,
   fail,
+  HarnessAssertionError,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { deriveMdx } from "../../helpers/mdx-derivability.js";
+import {
+  analyzeNames,
+  nameVerdict,
+  type ReceivingFileKind,
+} from "../../helpers/oracles/name-analysis.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
@@ -1906,5 +1915,582 @@ const T6_5_21 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T6.5-22 Barred and captured names — (b)'s lures
+// ---------------------------------------------------------------------------
+//
+// SPEC 6.5 (Added imports) holds an added import's identifiers to more than
+// freshness against the module scope: each is one module code, strict
+// throughout, admits as a binding; none is `require` or `exports`, begins
+// with `__`, or names a global the compiler's emitted code may read (clause
+// 19's and Annex B's global-object properties, `Iterator`, `AsyncIterator`,
+// `SuppressedError`), nor, in a TSX source, `React` or the leading
+// identifier of a factory a `@jsx` or `@jsxFrag` pragma in any of its
+// comments names; each is bound by no declaration already in the file, in
+// any scope and at value or type level, equal to no name the file
+// references, distinct from the others added, and in a spec source none of
+// `S`, `Spec`, `text`. T6.5-22(a), the universal assertion, is the
+// subprocess driver's: every performed move through it is judged on exit 0
+// (helpers/added-import-identifiers.ts, with S-6's name analysis), whichever
+// test performs it. This section is (b): the lures, each a section move
+// whose receiving file needs an import of a target module named to steer a
+// basename- or stem-derived choice onto a barred or captured name, under
+// (a)'s assertion and with `check` clean after the move.
+//
+// Conservative operationalizations (noted per H-4):
+// - One fresh workspace per lure (H-1): the configuration (one spec group,
+//   `specs/**/*.mdx`; one code group, `src/**/*.ts` and `src/**/*.tsx`), the
+//   origin `specs/A.mdx` holding the top-level sections `a`, `m`, and `w`,
+//   and the lure's one receiving file — all staged-source records, every
+//   lure after the first being staged after the body's first invocation
+//   (S-9's timing clause).
+// - The receiving file binds the origin module as `A` and roots one
+//   reference at it to the moved section — a spec source's embedding
+//   `{text(A.a)}`, a code source's marker `A.m`, as TEST-SPEC's
+//   `{text(await.a)}` and `yield.m` spell them — and one to `w`, which stays
+//   (`d={A.w}`; the marker `A.w`). `A` keeps a use, so the move removes no
+//   import: the receiving file's edits are the rewritten reference and the
+//   one declaration added for the target module's default binding (a chain
+//   is rooted at the default export, 2.1, 4.5).
+// - The move is `move specs/A.mdx#<id> <target>#<id> --json`, the moved
+//   section's ID kept, top-level, into a target file the move creates:
+//   TEST-SPEC names the target paths and leaves their occupancy open;
+//   nothing occupies them, so the lured name is the target's basename alone.
+// - Before staging, the body holds the lure to its premise, a harness error
+//   otherwise: S-6's name analysis (vetted by its own vectors) finds the
+//   lured name barred, declared, or referenced in the receiver, as the
+//   lure's entry states.
+// - Per lure: the move exits 0 with the form-exact performed-operation
+//   report (12.7) — the driver judging the added identifiers on that exit;
+//   the body then reads the receiving file and judges it again through
+//   `judgeAddedImportsOfFile` (one code path with the driver), asserting the
+//   lure's premise beside: exactly one declaration added, its specifier's
+//   value the target module's canonical relative spelling (6.5) — so a
+//   product binding the lured name fails at the added bytes whatever the
+//   driver judged; then `check --json` is clean (12.2, 12.7).
+// - Every lure runs; each one's diagnosed failure is collected and the body
+//   fails once at the end, naming every lure that failed, so one run
+//   diagnoses every breach. A harness error — anything but a diagnosed
+//   assertion failure, a hang included — propagates at once.
+
+const B22_ORIGIN = "specs/A.mdx";
+
+// One spec group and one code group reaching every receiver (SPEC 7.1,
+// 7.2): a staged-source record, staged by every lure after the body's first
+// invocation (S-9's timing clause).
+const B22_CONFIG = stagedTs(
+  "T6.5-22 xspec.config.ts — one spec group and one code group globbing src/**/*.ts and src/**/*.tsx",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts", "src/**/*.tsx"]
+  }
+})
+`,
+);
+
+// The origin: the moved sections `a` (a spec source's lures) and `m` (a
+// code source's), and the kept `w`, each standing alone on its lines.
+const B22_ORIGIN_SOURCE = stagedMdx(
+  "T6.5-22 specs/A.mdx (the origin: the moved a and m, the kept w)",
+  [
+    '<S id="a">',
+    "A text.",
+    "</S>",
+    "",
+    '<S id="m">',
+    "M text.",
+    "</S>",
+    "",
+    '<S id="w">',
+    "W text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+/** A lure's receiving file. */
+interface B22Receiver {
+  readonly file: string;
+  readonly kind: ReceivingFileKind;
+  /** The staged text. */
+  readonly text: string;
+  /** The staged-source record (S-9). */
+  readonly staged: StagedMdx | StagedTs;
+  /** The moved section: `a` for a spec source, `m` for a code source. */
+  readonly section: "a" | "m";
+  /** The canonical relative spelling of `specs/` from the receiver's
+   * directory, `./` or `../specs/` (6.5, 2.1). */
+  readonly toSpecs: "./" | "../specs/";
+}
+
+/**
+ * A receiving file at module load: its lines, each followed by U+000A, as a
+ * staged-source record — an MDX one for `specs/host.mdx`, a TypeScript one
+ * of the grammar the name selects otherwise (14.20).
+ */
+function b22Receiver(
+  file: string,
+  what: string,
+  lines: readonly string[],
+): B22Receiver {
+  const text = [...lines, ""].join("\n");
+  const name = `T6.5-22 ${file} (${what})`;
+  if (file.endsWith(".mdx")) {
+    return {
+      file,
+      kind: "spec-source",
+      text,
+      staged: stagedMdx(name, text),
+      section: "a",
+      toSpecs: "./",
+    };
+  }
+  const tsx = file.endsWith(".tsx");
+  return {
+    file,
+    kind: tsx ? "tsx" : "typescript",
+    text,
+    staged: stagedTs(name, text, "well-formed", tsx ? "tsx" : "ts"),
+    section: "m",
+    toSpecs: "../specs/",
+  };
+}
+
+/** A code receiver's origin declaration (see the notes). */
+const B22_IMPORT_A = 'import A from "../specs/A.xspec"';
+
+// The receivers of the thirteen named targets, one per kind of file the
+// entry names: a spec source and a `.ts` code source.
+const B22_SPEC_HOST = b22Receiver(
+  "specs/host.mdx",
+  "the spec-source receiver of the thirteen named targets",
+  [
+    'import A from "./A.xspec"',
+    "",
+    '<S id="host" d={A.w}>',
+    "Host text, quoting {text(A.a)}.",
+    "</S>",
+  ],
+);
+const B22_TS_HOST = b22Receiver(
+  "src/host.ts",
+  "the .ts receiver of the thirteen named targets",
+  [
+    B22_IMPORT_A,
+    "",
+    "export function area(width: number, height: number): number {",
+    "  return width * height;",
+    "}",
+    "",
+    "A.m",
+    "A.w",
+  ],
+);
+
+// The `.tsx` receivers: `React`'s two, each pragma's, and the two whose
+// pragma TypeScript's own reading ignores (a line comment; a block comment
+// inside a function body after the file's first statement). The pragmas
+// TypeScript reads lead their files, among its leading comments.
+const B22_VIEW = b22Receiver(
+  "src/view.tsx",
+  "the .tsx receiver of specs/React.mdx holding classic-runtime JSX",
+  [B22_IMPORT_A, "", "export const view = <div />;", "", "A.m", "A.w"],
+);
+const B22_PLAIN = b22Receiver(
+  "src/plain.tsx",
+  "the .tsx receiver of specs/React.mdx holding no JSX",
+  [B22_IMPORT_A, "", "export const plain = 1;", "", "A.m", "A.w"],
+);
+/** A `.tsx` receiver led by the comment `pragma`, holding `jsx`. */
+function b22PragmaReceiver(
+  file: string,
+  what: string,
+  pragma: string,
+  jsx: string,
+): B22Receiver {
+  return b22Receiver(file, what, [
+    pragma,
+    B22_IMPORT_A,
+    "",
+    `export const view = ${jsx};`,
+    "",
+    "A.m",
+    "A.w",
+  ]);
+}
+const B22_JSX_DOC = b22PragmaReceiver(
+  "src/jsx-doc.tsx",
+  "the .tsx receiver of specs/h.mdx carrying /** @jsx h */",
+  "/** @jsx h */",
+  "<div />",
+);
+const B22_JSX_UPPER = b22PragmaReceiver(
+  "src/jsx-upper.tsx",
+  "the .tsx receiver of specs/h.mdx carrying /* @JSX h */",
+  "/* @JSX h */",
+  "<div />",
+);
+const B22_JSX_PREACT = b22PragmaReceiver(
+  "src/jsx-preact.tsx",
+  "the .tsx receiver of specs/preact.mdx carrying /** @jsx preact.h */",
+  "/** @jsx preact.h */",
+  "<div />",
+);
+const B22_JSX_FRAG = b22PragmaReceiver(
+  "src/jsx-frag.tsx",
+  "the .tsx receiver of specs/Frag.mdx carrying /** @jsxFrag Frag */ alone",
+  "/** @jsxFrag Frag */",
+  "<></>",
+);
+const B22_JSX_LINE = b22PragmaReceiver(
+  "src/jsx-line.tsx",
+  "the .tsx receiver of specs/h.mdx carrying the line comment // @jsx h",
+  "// @jsx h",
+  "<div />",
+);
+const B22_JSX_INNER = b22Receiver(
+  "src/jsx-inner.tsx",
+  "the .tsx receiver of specs/h.mdx carrying /** @jsx h */ inside a function body, after the first statement",
+  [
+    B22_IMPORT_A,
+    "",
+    "export function render() {",
+    "  /** @jsx h */",
+    "  return <div />;",
+    "}",
+    "",
+    "A.m",
+    "A.w",
+  ],
+);
+
+// The `.ts` receivers whose own names capture the lure: `helper` declared
+// only inside a function and only as a type, `Record` mentioned only in a
+// type annotation, and an undeclared global `test` called — each spelled as
+// TEST-SPEC spells it.
+const B22_HELPER_FN = b22Receiver(
+  "src/helper-fn.ts",
+  "the .ts receiver of specs/helper.mdx declaring helper only inside a function",
+  [
+    B22_IMPORT_A,
+    "",
+    "function g() { const helper = 1; return helper }",
+    "",
+    "A.m",
+    "A.w",
+  ],
+);
+const B22_HELPER_TYPE = b22Receiver(
+  "src/helper-type.ts",
+  "the .ts receiver of specs/helper.mdx declaring helper only as a type",
+  [B22_IMPORT_A, "", "type helper = number", "", "A.m", "A.w"],
+);
+const B22_RECORD = b22Receiver(
+  "src/record.ts",
+  "the .ts receiver of specs/Record.mdx whose only mention of Record is a type annotation",
+  [B22_IMPORT_A, "", "let r: Record<string, number> = {}", "", "A.m", "A.w"],
+);
+const B22_TEST_CALL = b22Receiver(
+  "src/test-call.ts",
+  "the .ts receiver of specs/test.mdx calling an undeclared global test(…)",
+  [B22_IMPORT_A, "", 'test("adds", () => {', "  A.m", "})", "", "A.w"],
+);
+
+/** One lure: its receiver, the lured name its target's basename spells,
+ * the name's standing there, and why 6.5 keeps it from an added import. */
+interface B22Lure {
+  readonly lured: string;
+  readonly receiver: B22Receiver;
+  readonly standing: "barred" | "declared" | "referenced";
+  readonly why: string;
+}
+
+// The thirteen named targets, every barred class of 6.5 with a fixed lure
+// (TEST-SPEC T6.5-22(b); §16's anchoring beside P-5's drawn basenames).
+const B22_NAMED_TARGETS: ReadonlyArray<readonly [lured: string, why: string]> =
+  [
+    [
+      "let",
+      "a word strict code admits as no binding, whose binding 14.20's derivability admits",
+    ],
+    [
+      "await",
+      "a reserved word a script's code admits as a binding; a spec source's `{text(await.a)}` does not derive, so the post-move `check` sees such a product first",
+    ],
+    [
+      "yield",
+      "the one reserved word 6.5 names whose binding and use derive in both kinds of file, so (a) alone sees a product binding it",
+    ],
+    ["eval", "a word strict code admits as no binding"],
+    [
+      "Object",
+      "a constructor among clause 19's global-object properties, read by a lowered object spread",
+    ],
+    [
+      "require",
+      "reserved by TypeScript's compiler in a module it emits in any format but ECMAScript's",
+    ],
+    ["exports", "barred beside `require`"],
+    ["__x", "barred by its `__` prefix alone"],
+    ["escape", "Annex B's global-object property (B.2.1)"],
+    ["unescape", "Annex B's global-object property (B.2.1)"],
+    [
+      "Iterator",
+      "barred by name, being no ECMAScript 2024 global-object property",
+    ],
+    [
+      "AsyncIterator",
+      "barred by name, being no ECMAScript 2024 global-object property",
+    ],
+    [
+      "SuppressedError",
+      "barred by name, being no ECMAScript 2024 global-object property",
+    ],
+  ];
+
+/** Every lure, in TEST-SPEC T6.5-22(b)'s order. */
+const B22_LURES: readonly B22Lure[] = [
+  ...B22_NAMED_TARGETS.flatMap(([lured, why]): B22Lure[] => [
+    { lured, receiver: B22_SPEC_HOST, standing: "barred", why },
+    { lured, receiver: B22_TS_HOST, standing: "barred", why },
+  ]),
+  {
+    lured: "React",
+    receiver: B22_VIEW,
+    standing: "barred",
+    why: "barred in every TSX source, here one holding classic-runtime JSX",
+  },
+  {
+    lured: "React",
+    receiver: B22_PLAIN,
+    standing: "barred",
+    why: "barred in every TSX source, here one holding no JSX, which a product barring it only where the file spells JSX misses",
+  },
+  {
+    lured: "h",
+    receiver: B22_JSX_DOC,
+    standing: "barred",
+    why: "the factory `/** @jsx h */` names",
+  },
+  {
+    lured: "h",
+    receiver: B22_JSX_UPPER,
+    standing: "barred",
+    why: "the factory `/* @JSX h */` names, the pragma's name matched regardless of ASCII case (12.0's second exception)",
+  },
+  {
+    lured: "preact",
+    receiver: B22_JSX_PREACT,
+    standing: "barred",
+    why: "the leading identifier of the factory `/** @jsx preact.h */` names",
+  },
+  {
+    lured: "Frag",
+    receiver: B22_JSX_FRAG,
+    standing: "barred",
+    why: "the fragment factory `/** @jsxFrag Frag */` names, which a product reading `@jsx` pragmas alone misses",
+  },
+  {
+    lured: "h",
+    receiver: B22_JSX_LINE,
+    standing: "barred",
+    why: "the factory the line comment `// @jsx h` names: TypeScript's own pragma reading ignores it, 6.5 bars it",
+  },
+  {
+    lured: "h",
+    receiver: B22_JSX_INNER,
+    standing: "barred",
+    why: "the factory an in-function `/** @jsx h */` after the first statement names: TypeScript's own pragma reading ignores it, 6.5 bars it",
+  },
+  {
+    lured: "helper",
+    receiver: B22_HELPER_FN,
+    standing: "declared",
+    why: "declared only inside a function: 6.5's freshness spans every scope",
+  },
+  {
+    lured: "helper",
+    receiver: B22_HELPER_TYPE,
+    standing: "declared",
+    why: "declared only as a type: 6.5's freshness spans the type level",
+  },
+  {
+    lured: "Record",
+    receiver: B22_RECORD,
+    standing: "referenced",
+    why: "a lib type's name the file references only in a type annotation, which 6.5's reference clause alone bars, at type level",
+  },
+  {
+    lured: "test",
+    receiver: B22_TEST_CALL,
+    standing: "referenced",
+    why: "an undeclared global the file calls: binding it captures the call, a use of a spec module binding — a condition-18 finding in the post-move `check` (4.5)",
+  },
+];
+
+/**
+ * The lure's premise, a harness defect when it fails: S-6's name analysis
+ * of the staged receiver gives the lured name the standing the entry
+ * states, so the move steers a stem-derived choice onto a name 6.5 keeps
+ * from an added import there.
+ */
+function b22AssertLures(lure: B22Lure, context: string): void {
+  const verdict = nameVerdict(
+    analyzeNames(lure.receiver.kind, lure.receiver.text),
+    lure.lured,
+  );
+  const holds =
+    lure.standing === "barred"
+      ? verdict.barred !== undefined
+      : lure.standing === "declared"
+        ? verdict.declared
+        : verdict.referenced;
+  if (!holds) {
+    throw new Error(
+      `${context}: a harness defect — S-6's name analysis does not find ` +
+        `\`${lure.lured}\` ${lure.standing} in the staged ` +
+        `${lure.receiver.file} (${JSON.stringify(verdict)}), so the lure ` +
+        `lures nothing`,
+    );
+  }
+}
+
+/** The receiving file's text after the move, failing diagnosed unless it
+ * is a plain file of valid UTF-8 (SPEC 6.5 rewrites it in place; 1.6). */
+async function b22ReadReceiver(
+  workspace: TestWorkspace,
+  file: string,
+  context: string,
+): Promise<string> {
+  const kind = await workspace.kind(file);
+  if (kind !== "file") {
+    fail(
+      `${context}: after the move, ${file} must still be a plain file — ` +
+        `the move rewrites it in place (SPEC 6.5); found ${kind}`,
+    );
+  }
+  const bytes = await workspace.readBytes(file);
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      bytes,
+    );
+  } catch {
+    fail(
+      `${context}: after the move, ${file} is not valid UTF-8 — 6.5 keeps ` +
+        `every file a move rewrites well-formed (SPEC 1.6, 14.20)`,
+    );
+  }
+}
+
+/** One lure in its own fresh workspace (see the notes). */
+async function runB22Lure(
+  product: ProductBinding,
+  lure: B22Lure,
+): Promise<void> {
+  const { lured, receiver } = lure;
+  const target = `specs/${lured}.mdx`;
+  const specifier = `${receiver.toSpecs}${lured}.xspec`;
+  const argv = [
+    "move",
+    `${B22_ORIGIN}#${receiver.section}`,
+    `${target}#${receiver.section}`,
+    "--json",
+  ];
+  const context =
+    `T6.5-22 (b) the lure ${target} received by ${receiver.file} ` +
+    `(\`${lured}\`: ${lure.why})`;
+  b22AssertLures(lure, context);
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": B22_CONFIG,
+      [B22_ORIGIN]: B22_ORIGIN_SOURCE,
+      [receiver.file]: receiver.staged,
+    },
+  });
+  try {
+    const label = `${context}: \`${argv.join(" ")}\``;
+    decodeAppliedMappingReport(
+      await runJson(
+        product,
+        workspace,
+        argv,
+        `${label} — a valid section move into a target file it creates, ` +
+          `so it is performed: exit 0 (SPEC 6.5, 12.0)`,
+      ),
+      `${label} — the form-exact 12.7 performed-operation document ` +
+        `(SPEC 6.5, 12.7)`,
+    );
+    const after = await b22ReadReceiver(workspace, receiver.file, context);
+    const judgement = judgeAddedImportsOfFile(
+      receiver.file,
+      receiver.kind,
+      receiver.text,
+      after,
+    );
+    if (judgement.problems.length > 0) {
+      fail(
+        `${context}: T6.5-22(a)'s constraints on the added identifiers ` +
+          `(SPEC 6.5), read from the added bytes:\n` +
+          judgement.problems.map((problem) => `  - ${problem}`).join("\n"),
+      );
+    }
+    const added = judgement.added;
+    if (added.length !== 1 || added[0]?.specifier !== specifier) {
+      fail(
+        `${context}: the move adds exactly one import declaration to ` +
+          `${receiver.file}, for the target module's default binding, its ` +
+          `specifier the canonical ${JSON.stringify(specifier)} (SPEC 6.5: ` +
+          `one added declaration per module whose bindings the file's ` +
+          `spellings are rooted at and it lacks; \`A\` keeps its use by ` +
+          `\`w\`); the declarations added: ` +
+          JSON.stringify(added.map((declaration) => declaration.text)),
+      );
+    }
+    await expectFindingFreeReport(
+      product,
+      workspace,
+      ["check", "--json"],
+      `${context}: \`check --json\` after the move — clean (SPEC 6.5, ` +
+        `4.5, 14.20)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+const T6_5_22 = defineProductTest({
+  id: "T6.5-22",
+  title:
+    "barred and captured names, (b)'s lures under (a)'s universal assertion (the subprocess driver judges every performed move's added identifiers on exit 0): each a section move from `specs/A.mdx` into a target file it creates, whose receiving file needs an import of the target module, named to steer a basename- or stem-derived choice onto a barred or captured name — `specs/let.mdx`, `specs/await.mdx`, `specs/yield.mdx`, `specs/eval.mdx`, `specs/Object.mdx`, `specs/require.mdx`, `specs/exports.mdx`, `specs/__x.mdx`, `specs/escape.mdx`, `specs/unescape.mdx`, `specs/Iterator.mdx`, `specs/AsyncIterator.mdx`, and `specs/SuppressedError.mdx`, each received once by a spec source (`{text(A.a)}`) and once by a `.ts` code source (the marker `A.m`); `specs/React.mdx` by a `.tsx` receiver holding classic-runtime JSX (`<div />`) and by one holding none; `specs/h.mdx` by `.tsx` receivers carrying `/** @jsx h */` and `/* @JSX h */`, `specs/preact.mdx` by one carrying `/** @jsx preact.h */`, and `specs/Frag.mdx` by one carrying `/** @jsxFrag Frag */` alone; `specs/h.mdx` by `.tsx` receivers whose pragma TypeScript ignores, `// @jsx h` and an in-function `/** @jsx h */` after the first statement; `specs/helper.mdx` by `.ts` receivers declaring `helper` only inside a function and only as a type; `specs/Record.mdx` by a `.ts` receiver whose only mention of `Record` is `let r: Record<string, number> = {}`; and `specs/test.mdx` by a `.ts` receiver calling an undeclared global `test(…)` — each move exits 0 and adds exactly one import declaration, of the target module (its canonical specifier), whose identifiers, read from the added bytes, breach none of 6.5's constraints (the lured name in particular), and `check` is clean after it (SPEC 6.5, 2.1, 4, 4.5, 14.20, 12.7)",
+  timeoutMs: 300_000,
+  run: async (product) => {
+    const failures: string[] = [];
+    for (const lure of B22_LURES) {
+      try {
+        await runB22Lure(product, lure);
+      } catch (error) {
+        if (!(error instanceof HarnessAssertionError)) throw error;
+        failures.push(error.message);
+      }
+    }
+    if (failures.length > 0) {
+      fail(
+        `T6.5-22 (b): ${String(failures.length)} of ` +
+          `${String(B22_LURES.length)} lures failed, each diagnosed:\n` +
+          failures.map((failure) => `* ${failure}`).join("\n"),
+      );
+    }
+  },
+});
+
 /** TEST-SPEC §6.5, fourth part, in canonical ID order (SUITE-25). */
-export const section65ivTests: readonly ProductTestEntry[] = [T6_5_20, T6_5_21];
+export const section65ivTests: readonly ProductTestEntry[] = [
+  T6_5_20,
+  T6_5_21,
+  T6_5_22,
+];
