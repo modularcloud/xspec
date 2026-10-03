@@ -134,12 +134,16 @@
 // at an in-range offset of a base file, and `inventory` (with and without
 // `--json`) — `version` (12.6, with and without `--json`), `coverage`,
 // `impact --base` (no repository is staged: an unreadable baseline is
-// itself an exit-2 outcome, 6.3/12.0), `review` reads and `review create`,
-// `rename`, and file-form `move`. Each JSON-only surface has a form drawn
-// without `--json`, so the by-surface half of 12.0's rule is exercised (the
-// fixed-seed draw guard pins it). Mutating commands may legitimately
-// succeed and modify the workspace when the mutations happen to be
-// benign — P-8 constrains their termination, exit class, and JSON form
+// itself an exit-2 outcome, 6.3/12.0), `review list`, `create`, and `next`,
+// the review subcommands naming a session or an item — `status`, `show`,
+// `split`, `resolve`, and `export`, each with and without `--json` — as
+// composites (`armSteps`: the session created first, then for an item form
+// a JSON read of it yielding the item the form names, each step under the
+// same assertions), `rename`, and file-form `move`. Each JSON-only surface
+// has a form drawn without `--json`, so the by-surface half of 12.0's rule
+// is exercised (the fixed-seed draw guard pins it). Mutating commands may
+// legitimately succeed and modify the workspace when the mutations happen
+// to be benign — P-8 constrains their termination, exit class, and JSON form
 // only; the modifies-nothing arm is `build`'s (SPEC 12.1). Two facts about
 // the CI-pinned draws are guarded permanently, before any product runs, by
 // the fixed-seed draw guard (test/self/p8-fixed-seed-draws.test.ts), which
@@ -147,20 +151,22 @@
 // seed: every `COMMAND_MENU` entry is drawn at least once, and an intact
 // MDX section tower at least 2048 levels deep is staged (P-8's
 // giant-nesting floor); the same file pins `jsonOutputInEffect` and the
-// menu's bare form per JSON-only surface. Beyond those, an
-// implementation-time dry-run over the committed default seeds at the
-// registered 12 runs per seed (`drawFixedSeedTrials`, the S-8 replay)
-// verified that every mutation kind — the three refined classes
-// included — and every mutation target occurs — giant MDX section
-// towers (depths 512 and 2048), all three BOM flavors, a mid-file
-// BOM, lone and balanced fragments and a range-wrapping one, spread
-// attributes, empty braces, an EOF-unbalanced brace, a deleted closer, a
-// whitespace-singleton container, seeded and existing declaration lines
-// with comment, terminator, indentation, and split mutations included — so
-// the CI-pinned trial set (E-5) exercises every kind deterministically,
-// with staged files bounded (~32 KiB max); the refined classes' remaining
-// modes (a boundary expression replacing a container's content, a joined
-// block, a statement at a line start) are reached under
+// menu's bare form per JSON-only surface, and the review composites'
+// expansion. Beyond those, a dry-run over the committed default seeds at
+// the registered 12 runs per seed (`drawFixedSeedTrials`, the S-8 replay;
+// re-run when the review composites' 2–6 forms per trial moved the draws)
+// verified that every mutation kind — the three refined classes included —
+// and every mutation target occurs (64 mutations): a giant MDX section
+// tower (depth 2048) and TypeScript towers of depths 512, 2048, and 4096,
+// all three BOM flavors and a mid-file BOM, lone, balanced, and
+// range-wrapping fragments, a spread attribute, empty braces, EOF-unbalanced
+// braces, a non-whitespace-singleton container, a boundary expression
+// replacing a container's content, and seeded and existing declaration
+// lines with comment, terminator, indentation, and statement mutations —
+// so the CI-pinned trial set (E-5) exercises every kind deterministically,
+// with staged files bounded (22 KiB max); the modes it misses (a deleted
+// closer, an ECMAScript-whitespace singleton, a split or joined block, a
+// statement at a drawn line start) are reached under
 // `XSPEC_PROPERTY_SEED=random` runs, not by the pinned set.
 //
 // P-8 is outside every CERTIFICATIONS.md fixture scope (its preamble: "P-8
@@ -175,6 +181,10 @@
 
 import { Buffer } from "node:buffer";
 import { VALUE_FLAGS } from "../../helpers/added-import-identifiers.js";
+import {
+  decodeNextReport,
+  decodeSessionStatusReport,
+} from "../../helpers/adapters/index.js";
 import { assertJsonOutputConvention, fail } from "../../helpers/assertions.js";
 import type { Choices, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
@@ -362,6 +372,38 @@ function baseByteOffset(text: string, anchor: string, delta: number): number {
 const AT_OFFSET = String(baseByteOffset(BASE_SPEC_A, '{text("a.b")}', 1));
 
 /**
+ * The review session every `review` form of the menu names (a valid session
+ * name, SPEC 10.1): the static `create` and `next` forms name it directly,
+ * the composite forms through {@link SESSION_SLOT}.
+ */
+const REVIEW_SESSION = "r1";
+
+/**
+ * Composite-form slots, spelled after SPEC 10.7's synopsis. A menu form
+ * holding `<session>` is a review composite: its arm first runs `review
+ * create --strategy audit --name r1 --json`, then the form with `r1` in the
+ * slot. A form also holding `<item-id>` names an item: between the two, a
+ * JSON read of the session yields the item that fills the slot
+ * ({@link armSteps}). An independently drawn `show`, `split`, or `resolve`
+ * would only ever meet the no-session usage error; the composite reaches a
+ * session's items whenever the fuzzed workspace admits a session. Neither
+ * token ever reaches the product.
+ */
+export const SESSION_SLOT = "<session>";
+export const ITEM_ID_SLOT = "<item-id>";
+
+/**
+ * The item id a composite names when its read yields none — the create
+ * failed on the fuzzed workspace, the read exited non-zero, or the session
+ * holds no item to name: an id no product-derived item of the session
+ * carries, so the drawn command meets the usage error of an unknown review
+ * item (12.0), or whatever error precedes it (the unknown session, the gate
+ * of 13.3). Should a product ever derive this very id, the command runs on
+ * that item instead — every outcome is within P-8's contract either way.
+ */
+const ABSENT_ITEM_ID = "p8-absent-item";
+
+/**
  * P-8's command menu. Exported for the fixed-seed draw guard
  * (test/self/p8-fixed-seed-draws.test.ts), which replays P-8's own draws at
  * {@link P8_RUNS_PER_SEED} and fails unless every entry is drawn at least
@@ -405,13 +447,101 @@ export const COMMAND_MENU: ReadonlyArray<readonly string[]> = [
   ["coverage"],
   ["impact", "--base", "HEAD", "--json"],
   ["review", "list", "--json"],
-  ["review", "create", "--strategy", "audit", "--name", "r1", "--json"],
-  ["review", "next", "r1", "--json"],
+  [
+    "review",
+    "create",
+    "--strategy",
+    "audit",
+    "--name",
+    REVIEW_SESSION,
+    "--json",
+  ],
+  ["review", "next", REVIEW_SESSION, "--json"],
+  // The review subcommands naming a session, and an item, as composites
+  // (`armSteps`); `export` is JSON-only (10.7), so its bare form is held to
+  // the JSON contract too.
+  ["review", "status", SESSION_SLOT, "--json"],
+  ["review", "status", SESSION_SLOT],
+  ["review", "show", SESSION_SLOT, ITEM_ID_SLOT, "--json"],
+  ["review", "show", SESSION_SLOT, ITEM_ID_SLOT],
+  ["review", "split", SESSION_SLOT, ITEM_ID_SLOT, "--json"],
+  ["review", "split", SESSION_SLOT, ITEM_ID_SLOT],
+  [
+    "review",
+    "resolve",
+    SESSION_SLOT,
+    ITEM_ID_SLOT,
+    "--status",
+    "no-change",
+    "--json",
+  ],
+  ["review", "resolve", SESSION_SLOT, ITEM_ID_SLOT, "--status", "no-change"],
+  ["review", "export", SESSION_SLOT, "--json"],
+  ["review", "export", SESSION_SLOT],
   ["rename", "specs/A.mdx", "c", "c2", "--json"],
   ["move", "specs/B.mdx", "specs/moved.mdx", "--json"],
   ["version", "--json"],
   ["version"],
 ];
+
+/**
+ * One invocation of a drawn form's arm. A composite's read carries the
+ * session read it is (`yieldsItem`): its JSON answer yields the item that
+ * fills {@link ITEM_ID_SLOT} in the step after it.
+ */
+export interface ArmStep {
+  readonly argv: readonly string[];
+  readonly yieldsItem?: "next" | "status";
+}
+
+/**
+ * The invocations a drawn menu form runs, in order, each under
+ * `runFuzzArm`'s assertions. A static form is its one step. A review
+ * composite ({@link SESSION_SLOT}) runs:
+ *
+ *   1. `review create --strategy audit --name r1 --json`, creating the
+ *      session whenever the fuzzed workspace admits one (an `r1` an earlier
+ *      form of the trial created makes it a refused create, exit 1 — the
+ *      reads below then meet that session);
+ *   2. for a form naming an item, a JSON read of the session (10.7):
+ *      `review status r1 --json` for `split`, taking the first item in item
+ *      order — over the base workspace `specs/A.mdx`'s implicit root, an
+ *      audit scope node with children (10.6: root nodes included), so the
+ *      split performs over a benign draw — and `review next r1 --json` for
+ *      `show` and `resolve`, taking the first item needing review and
+ *      unblocked, so the resolve performs;
+ *   3. the form itself, `r1` in the session slot and the read's item — else
+ *      {@link ABSENT_ITEM_ID} — in the item slot.
+ */
+export function armSteps(form: readonly string[]): readonly ArmStep[] {
+  if (!form.includes(SESSION_SLOT)) return [{ argv: form }];
+  const steps: ArmStep[] = [
+    {
+      argv: [
+        "review",
+        "create",
+        "--strategy",
+        "audit",
+        "--name",
+        REVIEW_SESSION,
+        "--json",
+      ],
+    },
+  ];
+  if (form.includes(ITEM_ID_SLOT)) {
+    const read = form[1] === "split" ? "status" : "next";
+    steps.push({
+      argv: ["review", read, REVIEW_SESSION, "--json"],
+      yieldsItem: read,
+    });
+  }
+  steps.push({
+    argv: form.map((token) =>
+      token === SESSION_SLOT ? REVIEW_SESSION : token,
+    ),
+  });
+  return steps;
+}
 
 // ---------------------------------------------------------------------------
 // Mutations. Each apply function is pure (bytes in, bytes out) and draws all
@@ -1251,12 +1381,24 @@ export interface FuzzTrial {
   readonly files: ReadonlyArray<readonly [string, Uint8Array]>;
   /** Human-readable description of each applied mutation. */
   readonly mutations: readonly string[];
-  /** Drawn command invocations, run after the fixed `build --json` arm. */
+  /**
+   * Drawn `COMMAND_MENU` forms, run after the fixed `build --json` arm — a
+   * review composite as the invocations of its arm ({@link armSteps}).
+   */
   readonly commands: ReadonlyArray<readonly string[]>;
 }
 
 /** Mutations applied per trial: 1 + a draw in [0, MAX_MUTATIONS_PER_TRIAL - 1]. */
 export const MAX_MUTATIONS_PER_TRIAL = 3;
+
+/**
+ * Menu forms drawn per trial: 2, then up to this many while `listOf`'s
+ * continue draws (0.8 each) hold. Raised from 4 with the review composites
+ * (41 forms), so the fixed seeds draw every form at P8_RUNS_PER_SEED; it
+ * moves every later trial of a seed, the giant-nesting floor's included
+ * (the fixed-seed draw guard re-checks both).
+ */
+const MAX_COMMANDS_PER_TRIAL = 6;
 
 /** The P-8 trial generator (see the module header). */
 export const genFuzzTrial: Gen<FuzzTrial> = (choices) => {
@@ -1281,16 +1423,24 @@ export const genFuzzTrial: Gen<FuzzTrial> = (choices) => {
   }
   const commands = listOf((c: Choices) => c.pick(COMMAND_MENU), {
     min: 2,
-    max: 4,
+    max: MAX_COMMANDS_PER_TRIAL,
   })(choices);
   return { files: [...files.entries()], mutations, commands };
 };
 
-/** Counterexample rendering: the mutation log and the drawn commands. */
+/**
+ * Counterexample rendering: the mutation log and the drawn commands, a
+ * review composite as the list of every invocation its arm runs
+ * ({@link armSteps}; `<item-id>` stands for the item its read yields, else
+ * {@link ABSENT_ITEM_ID}).
+ */
 export function renderFuzzTrial(trial: FuzzTrial): string {
   return JSON.stringify({
     mutations: trial.mutations,
-    commands: trial.commands.map((argv) => argv.join(" ")),
+    commands: trial.commands.map((form) => {
+      const steps = armSteps(form).map((step) => step.argv.join(" "));
+      return steps.length === 1 ? steps[0] : steps;
+    }),
   });
 }
 
@@ -1313,12 +1463,18 @@ export function renderFuzzTrial(trial: FuzzTrial): string {
  * (`specs/A.mdx` or `specs/B.mdx` carrying those towers, with or without
  * the U+2028 rewrite) — `view` 23.7 MB in at most 2.4 s, every other form
  * in at most 2.1 s, `inventory` and `version` under 0.4 s — and any form
- * over an unmutated-scale draw ~0.5 s. 60 s is 12× that maximum: the ≥ 4×
- * margin a conforming product is owed over its measured answer time, plus
- * headroom for slower CI runners and a slower product, and still more than
- * twice the 25.4 s of the largest answer any shared-generator draw admits
- * (P-11's `view --text` over `specs/A.mdx` under that rewrite, 125.8 MB),
- * which no menu form requests. So a conforming product is never killed while
+ * over an unmutated-scale draw ~0.5 s — the review composites' steps among
+ * them: a session exists only over a valid workspace, which no tower draw
+ * leaves (its nested `g` ids break 1.3), so over the generator maximum
+ * `review create --json` answers the 13.3 gate's report at `check --json`'s
+ * 4.7 MB and every step naming the session exits 2, each in at most 2.1 s
+ * (re-measured with the composites). 60 s is 12× the `view --text`
+ * maximum: the ≥ 4× margin a conforming product is owed over its measured
+ * answer time, plus headroom for slower CI runners and a slower product,
+ * and still more than twice the 25.4 s of the largest answer any
+ * shared-generator draw admits (P-11's `view --text` over `specs/A.mdx`
+ * under that rewrite, 125.8 MB), which no menu form requests. So a
+ * conforming product is never killed while
  * still emitting its answer (H-11: an exhausted harness limit is a harness
  * defect, never a diagnosed product failure), and a genuinely hanging one
  * costs one guard per diagnosis, reported unshrunk (`runFuzzCommand`).
@@ -1370,8 +1526,9 @@ export async function runFuzzCommand(
     // P-11's is: a shrink candidate can re-observe it only by waiting out
     // the guard again — one full guard per candidate — so shrinking's
     // execution budget would stop bounding the body's wall clock (the
-    // entry's `timeoutMs`). The drawn trial, at most three mutations and
-    // five invocations after the staging build, is the reported
+    // entry's `timeoutMs`). The drawn trial — at most three mutations and,
+    // after the staging build, 19 invocations: the fixed `build --json` and
+    // six drawn forms, a review composite three at most — is the reported
     // counterexample, and its seed replays it (H-10).
     if (error instanceof ProductRunTimeoutError) {
       fail(
@@ -1474,22 +1631,26 @@ export function jsonOutputInEffect(argv: readonly string[]): boolean {
  * surface with or without it) — the never-a-partial-JSON-document contract,
  * the 12.7 error document on exit 2 included. For `build` invocations the
  * modifies-nothing arm rides along: on a non-zero exit the whole workspace
- * tree must be byte-identical around the run (SPEC 12.1).
+ * tree must be byte-identical around the run (SPEC 12.1). Answers the exit
+ * code and, when JSON output is in effect, the parsed document. `step`
+ * places an invocation within a review composite's arm, for the diagnosis.
  */
 async function runFuzzArm(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
   trial: FuzzTrial,
-): Promise<void> {
+  step = "",
+): Promise<FuzzArmOutcome> {
   const context =
-    `P-8 ${describeCommand(argv)} over the fuzzed workspace ` +
+    `P-8 ${describeCommand(argv)}${step} over the fuzzed workspace ` +
     `(mutations: ${JSON.stringify(trial.mutations)})`;
   const isBuild = argv[0] === "build";
   const before = isBuild ? await snapshotDirectory(workspace.root) : undefined;
   const result = await runFuzzCommand(product, workspace, argv);
+  let document: unknown;
   if (jsonOutputInEffect(argv)) {
-    assertJsonOutputConvention(result, context);
+    document = assertJsonOutputConvention(result, context);
   } else {
     assertExitPartition(result, context);
   }
@@ -1502,6 +1663,67 @@ async function runFuzzArm(
         `modifies nothing — every derived file and all graph data remain ` +
         `byte-for-byte as they were (SPEC 12.1; P-8)`,
     );
+  }
+  return { exitCode: result.exitCode, document, context };
+}
+
+/**
+ * What one fuzz arm observed: its exit code, the parsed JSON document when
+ * JSON output is in effect (else `undefined`), and its diagnosis context.
+ */
+interface FuzzArmOutcome {
+  readonly exitCode: number | null;
+  readonly document: unknown;
+  readonly context: string;
+}
+
+/**
+ * The item a composite's read yields (SPEC 10.7), decoded through the review
+ * adapter (H-3: a document that lacks the item's information fails loudly —
+ * a diagnosed failure, never a silent fallback): from `review next --json`,
+ * the item it reports unless the session is fully resolved; from `review
+ * status --json`, the first item in item order. A read that exits non-zero
+ * — no session, a corrupt one, the 13.3 gate over a failing workspace —
+ * yields none, as does an empty or fully-resolved session.
+ */
+function yieldedItemId(
+  read: "next" | "status",
+  outcome: FuzzArmOutcome,
+): string | undefined {
+  if (outcome.exitCode !== 0) return undefined;
+  if (read === "next") {
+    return decodeNextReport(outcome.document, outcome.context).item?.id;
+  }
+  return decodeSessionStatusReport(outcome.document, outcome.context).items[0]
+    ?.id;
+}
+
+/**
+ * Run one drawn menu form: its arm's steps ({@link armSteps}) in order, each
+ * under the P-8 assertions, a composite's read filling the item slot of the
+ * step after it.
+ */
+async function runFuzzForm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  form: readonly string[],
+  trial: FuzzTrial,
+): Promise<void> {
+  const steps = armSteps(form);
+  let itemId = ABSENT_ITEM_ID;
+  for (const [index, step] of steps.entries()) {
+    const argv = step.argv.map((token) =>
+      token === ITEM_ID_SLOT ? itemId : token,
+    );
+    const place =
+      steps.length === 1
+        ? ""
+        : ` (step ${String(index + 1)} of ${String(steps.length)} of the ` +
+          `review composite for the drawn \`${form.join(" ")}\`)`;
+    const outcome = await runFuzzArm(product, workspace, argv, trial, place);
+    if (step.yieldsItem !== undefined) {
+      itemId = yieldedItemId(step.yieldsItem, outcome) ?? ABSENT_ITEM_ID;
+    }
   }
 }
 
@@ -1531,8 +1753,8 @@ async function runFuzzTrial(
       await workspace.file(path, bytes, { mdx: "unchecked", ts: "unchecked" });
     }
     await runFuzzArm(product, workspace, ["build", "--json"], trial);
-    for (const argv of trial.commands) {
-      await runFuzzArm(product, workspace, argv, trial);
+    for (const form of trial.commands) {
+      await runFuzzForm(product, workspace, form, trial);
     }
   } finally {
     await workspace.dispose();
@@ -1563,13 +1785,17 @@ const P_8 = defineProductTest({
     "partial JSON document under --json, always exits 0, 1, or 2, and failing " +
     "`build`s modify nothing (SPEC 12.0, 12.1; TEST-SPEC §16 P-8)",
   // Wall-clock hang guard only (H-10): three fixed seeds (E-5), one staging
-  // build plus a 3–5 command sweep with per-arm snapshots per trial, plus
-  // the shrink budget on falsification. A conforming sweep runs ~91 s
+  // build plus the fixed `build --json` arm and 2–6 drawn forms (a review
+  // composite up to three invocations) with per-arm snapshots per trial,
+  // plus the shrink budget on falsification. A conforming sweep runs ~133 s
   // against the built product on a 4-core machine (alone, under the
-  // unprivileged namespace); a hang's diagnosis adds one per-invocation
-  // guard (`FUZZ_COMMAND_TIMEOUT_MS`, 60 s), unshrunk — ~150 s in all, so
-  // this budget leaves CI runners more than 2.5× headroom.
-  timeoutMs: 420_000,
+  // unprivileged namespace; ~3.7 s a trial); a hang's diagnosis adds one
+  // per-invocation guard (`FUZZ_COMMAND_TIMEOUT_MS`, 60 s), unshrunk —
+  // ~195 s in all — and a falsification at most the 100 shrink executions,
+  // each a trial at most as large as the falsified one (~370 s at the mean
+  // trial) — ~500 s in all. This budget leaves CI runners 3× headroom over
+  // the hang's diagnosis and keeps the shrink budget inside it.
+  timeoutMs: 600_000,
   run: async (product) => {
     await checkProperty(
       "P-8 parser robustness",

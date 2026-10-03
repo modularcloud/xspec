@@ -34,6 +34,13 @@
 // without one (H-5) — and every JSON-only surface the menu holds has a form
 // without `--json`, so the by-surface half of the rule is exercised, not
 // only the flag half (the sweep guard above then has it drawn).
+//
+// A fourth pins how P-8 runs the review forms that name a session or an
+// item (SPEC 10.7): each as a composite (`armSteps`) over a session its arm
+// creates first, a JSON read of the session yielding the item an item form
+// names — so a drawn `show`, `split`, or `resolve` can reach a session's
+// items rather than only ever meeting the no-session usage error — with
+// every slot filled before a step runs.
 
 import { Buffer } from "node:buffer";
 import { expect, test } from "vitest";
@@ -42,11 +49,14 @@ import {
   drawFixedSeedTrials,
 } from "../helpers/property.js";
 import {
+  armSteps,
   COMMAND_MENU,
   genFuzzTrial,
+  ITEM_ID_SLOT,
   jsonOutputInEffect,
   P8_RUNS_PER_SEED,
   sectionTowerSource,
+  SESSION_SLOT,
 } from "../suite/registry/section-16-p8.js";
 import type { FuzzTrial } from "../suite/registry/section-16-p8.js";
 import { GIANT_NESTING_FLOOR } from "./staged-scale.js";
@@ -256,6 +266,7 @@ test("P-8 holds a form to the JSON contract exactly when SPEC 12.0 puts JSON out
       "inventory",
       "occurrences",
       "query",
+      "review export",
       "version",
       "view",
     ]),
@@ -265,4 +276,86 @@ test("P-8 holds a form to the JSON contract exactly when SPEC 12.0 puts JSON out
     "every JSON-only surface P-8's menu holds needs a form without --json, " +
       "so the by-surface half of SPEC 12.0's rule is exercised",
   ).toEqual([]);
+});
+
+test("P-8 runs every review form naming a session or an item as a composite over a session it creates first, a JSON read of it yielding the item (TEST-SPEC §16 P-8; SPEC 10.7, 12.0; guard vectors)", () => {
+  const create = [
+    "review",
+    "create",
+    "--strategy",
+    "audit",
+    "--name",
+    "r1",
+    "--json",
+  ];
+  // A static form is its own one step.
+  expect(armSteps(["check", "--json"])).toEqual([
+    { argv: ["check", "--json"] },
+  ]);
+  // A session form: the create, then the form naming the session.
+  expect(armSteps(["review", "export", SESSION_SLOT])).toEqual([
+    { argv: create },
+    { argv: ["review", "export", "r1"] },
+  ]);
+  // An item form: the create, the read yielding the item (`status` for
+  // `split`, `next` otherwise), then the form, its item slot left for the
+  // read's item.
+  expect(armSteps(["review", "show", SESSION_SLOT, ITEM_ID_SLOT])).toEqual([
+    { argv: create },
+    { argv: ["review", "next", "r1", "--json"], yieldsItem: "next" },
+    { argv: ["review", "show", "r1", ITEM_ID_SLOT] },
+  ]);
+  expect(
+    armSteps(["review", "split", SESSION_SLOT, ITEM_ID_SLOT, "--json"]),
+  ).toEqual([
+    { argv: create },
+    { argv: ["review", "status", "r1", "--json"], yieldsItem: "status" },
+    { argv: ["review", "split", "r1", ITEM_ID_SLOT, "--json"] },
+  ]);
+
+  // Over the menu: the composites are exactly the review subcommands that
+  // name a session (10.7's `status`, `show`, `split`, `resolve`, `export`),
+  // the item ones exactly `show`, `split`, and `resolve`, each with and
+  // without `--json` (12.0); no session slot reaches a step, the item slot
+  // only a composite's last step, after a JSON read that yields it.
+  const sessionForms = COMMAND_MENU.filter((form) =>
+    form.includes(SESSION_SLOT),
+  );
+  const subcommands = (forms: ReadonlyArray<readonly string[]>): string[] =>
+    [...new Set(forms.map((form) => form[1] ?? ""))].sort();
+  expect(subcommands(sessionForms)).toEqual([
+    "export",
+    "resolve",
+    "show",
+    "split",
+    "status",
+  ]);
+  expect(
+    subcommands(sessionForms.filter((form) => form.includes(ITEM_ID_SLOT))),
+  ).toEqual(["resolve", "show", "split"]);
+  for (const subcommand of subcommands(sessionForms)) {
+    const forms = sessionForms.filter((form) => form[1] === subcommand);
+    expect(
+      forms.map((form) => form.includes("--json")).sort(),
+      `review ${subcommand}: one form with --json, one without`,
+    ).toEqual([false, true]);
+  }
+  const misplaced: string[] = [];
+  for (const form of COMMAND_MENU) {
+    const steps = armSteps(form);
+    steps.forEach((step, index) => {
+      const read = steps[index - 1];
+      const itemSlotPlaced =
+        index === steps.length - 1 &&
+        read?.yieldsItem !== undefined &&
+        jsonOutputInEffect(read.argv);
+      if (
+        step.argv.includes(SESSION_SLOT) ||
+        (step.argv.includes(ITEM_ID_SLOT) && !itemSlotPlaced)
+      ) {
+        misplaced.push(`${form.join(" ")}: step ${String(index + 1)}`);
+      }
+    });
+  }
+  expect(misplaced, "slots left where no read fills them").toEqual([]);
 });
