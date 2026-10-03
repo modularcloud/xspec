@@ -38,16 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 51 — T11.6-2: the invalid-path `.mdx` derived-map arms (TEST-SPEC L471; SPEC 11.6, 7.1, 13.1; B6)
-
-**Where.** `test/suite/registry/section-11.6.ts`, which today stages only the non-`.mdx` file (null/null).
-
-**Change.**
-- `specs/a'b.mdx` gets a `derived` entry with `module` `specs/a'b.xspec.ts` and, with emission next to sources, `markdown` `specs/a'b.md`.
-- On the Linux leg, a source named with non-UTF-8 bytes and ending `.mdx` has its `source`, `module`, and `markdown` each in the marked byte form: the source bytes with the final `.mdx` replaced by `.xspec.ts` or `.md`.
-
-**Checks.** S-7 passes. T11.6-2 against the built product.
-
 ### Task 52 — T12.0-5: the positive side of the backslash (TEST-SPEC L483; SPEC 12.0; E-6 at L641; B7; C7's note)
 
 **Where.** `test/suite/registry/section-12.0-i.ts`, which has only the negative arm today (the operand `specs`, backslash, `A.mdx`). The Windows subset reruns the whole T12.0-5 entry (`test/windows/e6-subset.test.ts`).
