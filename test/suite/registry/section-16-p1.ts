@@ -119,7 +119,7 @@
 // attribute value of a flow tag, holding no quote of its own kind and no
 // blank line (above) — so each draw's staged source is judged by the
 // harness's derivability check before `build` sees it
-// (helpers/property.ts `mdxSources`, fed from the same pure staging
+// (helpers/property.ts `drawSources`, fed from the same pure staging
 // functions the bodies stage from), and the fixed vector set
 // `P1_FORM_VECTORS` below — every alphabet character alone and inside a
 // value, the forbidden-name shapes, the ancestor chains a `.`-bearing draw
@@ -158,6 +158,24 @@ export default defineConfig({
 })
 `,
 );
+
+/**
+ * S-9's fixed TypeScript form-vector set (TEST-SPEC 17 S-9; the §16
+ * preamble): the property's one configuration file, the record above — judged
+ * as a record by test/self/s9-staged-sources.test.ts too, and here beside
+ * every generated configuration and code source
+ * (test/self/s9-typescript-well-formedness.test.ts); P-1 composes no code
+ * source.
+ */
+export const P1_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string | Uint8Array]
+> = [
+  [
+    "P-1 configuration (SPECS_ONLY_CONFIG)",
+    "xspec.config.ts",
+    SPECS_ONLY_CONFIG.source,
+  ],
+];
 
 /** The character with the given code point (hex-spelled, tool-safe). */
 function cp(codePoint: number): string {
@@ -720,7 +738,7 @@ async function inStagedWorkspace(
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/A.mdx": source },
     // S-9: the source is the draw's, judged by the property runner before
-    // the body saw it (`mdxSources` on the registrations below) — declared
+    // the body saw it (`drawSources` on the registrations below) — declared
     // per draw, as every initial `.mdx` file a trial stages after the body's
     // first product invocation must be (helpers/workspace.ts).
     mdx: { perDraw: ["specs/A.mdx"] },
@@ -757,7 +775,7 @@ function tagsSource(value: string, quote: string): string {
   );
 }
 
-// S-9's per-draw check (helpers/property.ts `mdxSources`): the one source
+// S-9's per-draw check (helpers/property.ts `drawSources`): the one source
 // each property stages, composed by the same pure functions the bodies
 // stage from (module header).
 
@@ -978,7 +996,7 @@ const P_1 = defineProductTest({
       async (draw) => {
         await assertSegmentAcceptance(product, draw);
       },
-      { render: renderCodePoints, mdxSources: stagedSegmentSources },
+      { render: renderCodePoints, drawSources: stagedSegmentSources },
     );
     await checkProperty(
       "P-1 tag validity",
@@ -986,7 +1004,7 @@ const P_1 = defineProductTest({
       async (value) => {
         await assertTagsAcceptance(product, value);
       },
-      { render: renderCodePoints, mdxSources: stagedTagsSources },
+      { render: renderCodePoints, drawSources: stagedTagsSources },
     );
   },
 });

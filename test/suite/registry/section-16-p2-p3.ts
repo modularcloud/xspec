@@ -169,6 +169,24 @@ export default defineConfig({
 `,
 );
 
+/**
+ * S-9's fixed TypeScript form-vector set (TEST-SPEC 17 S-9; the §16
+ * preamble): the one configuration file P-2 and P-3 share, the record above —
+ * judged as a record by test/self/s9-staged-sources.test.ts too, and here
+ * beside every generated configuration and code source
+ * (test/self/s9-typescript-well-formedness.test.ts); neither composes a code
+ * source.
+ */
+export const P2_P3_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string | Uint8Array]
+> = [
+  [
+    "P-2/P-3 configuration (EMIT_TRUE_CONFIG)",
+    "xspec.config.ts",
+    EMIT_TRUE_CONFIG.source,
+  ],
+];
+
 /** The character with the given code point (hex-spelled, tool-safe). */
 function cp(codePoint: number): string {
   return String.fromCodePoint(codePoint);
@@ -1287,7 +1305,7 @@ export const generatedDoc: Gen<GeneratedDoc> = (choices) => {
 // (test/self/s9-fixture-well-formedness.test.ts) proves before any product
 // exists that every form derives under the grammar 14.20 fixes; at property
 // time every draw is checked the same way before the product sees it
-// (`mdxSources` on the registrations below; helpers/property.ts). A form
+// (`drawSources` on the registrations below; helpers/property.ts). A form
 // added to the generator is added here.
 
 /** Every character of the prose alphabet, once, in alphabet order. */
@@ -1927,7 +1945,7 @@ function workspaceFiles(
 }
 
 /**
- * S-9's per-draw check (helpers/property.ts `mdxSources`): every file a
+ * S-9's per-draw check (helpers/property.ts `drawSources`): every file a
  * draw composes — the `.mdx` sources are judged before the product sees
  * them. The configuration staged beside them is no draw's: a staged-source
  * record, judged by the ledger self-test before any product exists.
@@ -2252,7 +2270,7 @@ const P_2 = defineProductTest({
         runs: 12,
         maxShrinkExecutions: 150,
         render: renderDoc,
-        mdxSources: stagedSources,
+        drawSources: stagedSources,
       },
     );
   },
@@ -2279,7 +2297,7 @@ const P_3 = defineProductTest({
         runs: 6,
         maxShrinkExecutions: 100,
         render: renderDoc,
-        mdxSources: stagedSources,
+        drawSources: stagedSources,
       },
     );
   },

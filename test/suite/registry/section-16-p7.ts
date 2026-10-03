@@ -695,21 +695,38 @@ export const P7_FORM_VECTORS: ReadonlyArray<
   ["capture arm: mdxSection of the last target (t4)", mdxSection("t4")],
 ];
 
-// S-9's per-draw check (helpers/property.ts `mdxSources`): the spec sources
-// each arm stages — one `mdxSection` per drawn path (the `.mdx` ones are
-// judged; code sources and non-spec paths are not MDX).
+// S-9's per-draw check (helpers/property.ts `drawSources`): every file each
+// arm stages — the configuration the draw composed (judged well-formed
+// TypeScript), one `mdxSection` per drawn path (judged for derivability),
+// and, in the capture arm, each code source (judged well-formed TypeScript:
+// a code group discovers it whatever its name, and no capture-side source
+// name ends in a TypeScript-default suffix, so each is marked a code
+// source). The bodies stage exactly these files, from the same pure
+// functions.
 function stagedDiscoverySources(trial: DiscoveryTrial): DrawSource[] {
-  return trial.paths.map((path, index): DrawSource => [
-    path,
-    mdxSection(`s${String(index)}`),
-  ]);
+  return [
+    ["xspec.config.ts", discoveryConfig(trial)],
+    ...trial.paths.map((path, index): DrawSource => [
+      path,
+      mdxSection(`s${String(index)}`),
+    ]),
+  ];
 }
 
 function stagedCaptureSources(trial: CaptureTrial): DrawSource[] {
-  return trial.targets.map((target, j): DrawSource => [
-    target,
-    mdxSection(`t${String(j)}`),
-  ]);
+  return [
+    ["xspec.config.ts", captureConfig(trial)],
+    ...trial.targets.map((target, j): DrawSource => [
+      target,
+      mdxSection(`t${String(j)}`),
+    ]),
+    ...trial.sources.map((source): DrawSource => [
+      source,
+      codeSource(source, trial.targets),
+      "code source",
+      "code-source",
+    ]),
+  ];
 }
 
 /** One `{file, ids}` listing entry, and a bytewise-sorted copy for compare. */
@@ -726,6 +743,16 @@ function sortedListing(entries: readonly ListingEntry[]): ListingEntry[] {
     );
 }
 
+/** The discovery arm's configuration: one spec group over the patterns. */
+function discoveryConfig(trial: DiscoveryTrial): string {
+  return (
+    `import { defineConfig } from "xspec"\n\nexport default defineConfig({\n` +
+    `  specs: {\n    g: [${trial.patterns
+      .map((pattern) => JSON.stringify(pattern))
+      .join(", ")}]\n  }\n})\n`
+  );
+}
+
 function renderDiscoveryTrial(trial: DiscoveryTrial): string {
   return JSON.stringify({ patterns: trial.patterns, paths: trial.paths });
 }
@@ -736,11 +763,7 @@ async function assertDiscoveryAgreement(
   trial: DiscoveryTrial,
 ): Promise<void> {
   const files: Record<string, string> = {
-    "xspec.config.ts":
-      `import { defineConfig } from "xspec"\n\nexport default defineConfig({\n` +
-      `  specs: {\n    g: [${trial.patterns
-        .map((pattern) => JSON.stringify(pattern))
-        .join(", ")}]\n  }\n})\n`,
+    "xspec.config.ts": discoveryConfig(trial),
   };
   const expected: ListingEntry[] = [];
   trial.paths.forEach((path, index) => {
@@ -1139,17 +1162,20 @@ async function assertCaptureAgreement(
     files[source] = codeSource(source, trial.targets);
   }
   const expected = expectedFindingRenderings(trial);
-  // S-9: the targets are the draw's sources, judged by the property runner
-  // before the body saw them (`stagedCaptureSources` above) — declared per
-  // draw; a code source never ends in `.mdx` (the path alphabet spells no
-  // `m`, `d`, or `x`), so the list is exactly the targets. The configuration
-  // the draw composed is declared per draw too (`ts.perDraw`); a code
-  // source never ends in a TypeScript-default suffix (the alphabet spells no
-  // `t` or `j`), so that list is exactly the configuration.
+  // S-9: every staged file is the draw's, judged by the property runner
+  // before the body saw it (`stagedCaptureSources` above). The targets are
+  // declared per draw; a code source never ends in `.mdx` (the path
+  // alphabet spells no `m`, `d`, or `x`), so that list is exactly the
+  // targets. The configuration and the code sources the draw composed are
+  // declared per draw too (`ts.perDraw`: judged well-formed at staging, past
+  // the undeclared-staging guard's TypeScript arm); a code source never ends
+  // in a TypeScript-default suffix (the alphabet spells no `t` or `j`), so
+  // `tsPathsOf` lists the configuration alone and each code source is
+  // listed by name — a code group discovers it whatever its name.
   const workspace = await TestWorkspace.create({
     files,
     mdx: { perDraw: mdxPathsOf(files) },
-    ts: { perDraw: tsPathsOf(files) },
+    ts: { perDraw: [...new Set([...tsPathsOf(files), ...trial.sources])] },
   });
   try {
     const base =
@@ -1202,6 +1228,112 @@ async function assertCaptureAgreement(
 }
 
 // ---------------------------------------------------------------------------
+// S-9's fixed TypeScript form-vector set
+// ---------------------------------------------------------------------------
+
+/**
+ * Each distinct character an alphabet draws, then é — drawn on the Linux leg
+ * alone (`withByteProbe`), spelled here on every platform, so the vectors
+ * cover every leg's draws.
+ */
+function everyCharacterOf(alphabet: Weighted): string {
+  return [...new Set([...alphabet.map(([, char]) => char), E_ACUTE])].join("");
+}
+
+const DISCOVERY_LITERALS = everyCharacterOf(DISCOVERY_PATTERN_LITERAL_ALPHABET);
+const CAPTURE_LITERALS = everyCharacterOf(PATTERN_LITERAL_ALPHABET);
+const CAPTURE_PATH_CHARACTERS = everyCharacterOf(CAPTURE_PATH_ALPHABET);
+
+/** The capture arm's maximal target list (5, the cap), every path byte. */
+const VECTOR_TARGETS: readonly string[] = [
+  `tgt/${CAPTURE_PATH_CHARACTERS}.mdx`,
+  "tgt/a.mdx",
+  "tgt/b/c.mdx",
+  "tgt/$/$0.mdx",
+  "tgt/q/.a.mdx",
+];
+
+/**
+ * The fixed TypeScript form-vector set of the P-7 stagings (TEST-SPEC 17
+ * S-9; the §16 preamble): every configuration file and code source the two
+ * arms compose, through the templates the bodies stage from —
+ * `discoveryConfig` over one pattern and over two (the generator's maximum),
+ * spelling every discovery literal, `*`, `?`, and `**`; `captureConfig` over
+ * one rule, target, and source and over two rules, five targets, and three
+ * sources (the caps), its patterns spelling every capture-side literal,
+ * the captures `$1`–`$3`, and the literal `$` forms (`$0`, `$` fused to a
+ * non-digit, a trailing `$`); and `codeSource` at depths 0, 1, and 3 over
+ * one target and five, spelling every capture-side path byte. Each is
+ * `[name, staged path, source]`: the path selects the grammar (plain
+ * TypeScript, no capture-side source name ending `.tsx`), and a capture
+ * source is a code source whatever its name (a code group globs it).
+ */
+export const P7_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string]
+> = [
+  [
+    "discovery arm: discoveryConfig over one pattern",
+    "xspec.config.ts",
+    discoveryConfig({
+      patterns: [`**/${DISCOVERY_LITERALS}*?/w*`],
+      paths: [],
+    }),
+  ],
+  [
+    "discovery arm: discoveryConfig over two patterns",
+    "xspec.config.ts",
+    discoveryConfig({
+      patterns: [`${DISCOVERY_LITERALS}/**`, "w/*?/**"],
+      paths: ["w/a.mdx"],
+    }),
+  ],
+  [
+    "capture arm: captureConfig over one rule, target, and source",
+    "xspec.config.ts",
+    captureConfig({
+      rules: [{ name: "r0", from: "a$1", to: "tgt/$1.mdx" }],
+      sources: ["ab"],
+      targets: ["tgt/b.mdx"],
+    }),
+  ],
+  [
+    "capture arm: captureConfig over two rules, five targets, and three sources",
+    "xspec.config.ts",
+    captureConfig({
+      rules: [
+        {
+          name: "r0",
+          from: `**/$0$a$$1/${CAPTURE_LITERALS}*?$`,
+          to: "tgt/**/$$1$0.mdx",
+        },
+        {
+          name: "r1",
+          from: "a$2$3/$(*",
+          to: `tgt/${CAPTURE_LITERALS}$/$3$2.mdx`,
+        },
+      ],
+      sources: [`${CAPTURE_PATH_CHARACTERS}/q`, "a/b/c", "$0"],
+      targets: VECTOR_TARGETS,
+    }),
+  ],
+  [
+    "capture arm: codeSource at depth 0 over one target",
+    "ab",
+    codeSource("ab", ["tgt/b.mdx"]),
+  ],
+  [
+    "capture arm: codeSource at depth 1 over five targets",
+    `${CAPTURE_PATH_CHARACTERS}/q`,
+    codeSource(`${CAPTURE_PATH_CHARACTERS}/q`, VECTOR_TARGETS),
+  ],
+  [
+    "capture arm: codeSource at depth 3 over five targets",
+    "a/b/c/$0",
+    codeSource("a/b/c/$0", VECTOR_TARGETS),
+  ],
+];
+
+// ---------------------------------------------------------------------------
 // The registered property test
 // ---------------------------------------------------------------------------
 
@@ -1230,7 +1362,7 @@ const P_7 = defineProductTest({
         runs: 8,
         maxShrinkExecutions: 120,
         render: renderDiscoveryTrial,
-        mdxSources: stagedDiscoverySources,
+        drawSources: stagedDiscoverySources,
       },
     );
     await checkProperty(
@@ -1243,7 +1375,7 @@ const P_7 = defineProductTest({
         runs: 5,
         maxShrinkExecutions: 120,
         render: renderCaptureTrial,
-        mdxSources: stagedCaptureSources,
+        drawSources: stagedCaptureSources,
       },
     );
   },

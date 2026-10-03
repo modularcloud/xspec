@@ -27,10 +27,21 @@ import {
   type TsReading,
   type TsVerdict,
 } from "../helpers/ts-derivability.js";
+import { judgeTsDeclaration } from "../helpers/workspace.js";
 import {
   T14_12_CODE_FORM_VECTORS,
   T14_12_UNPARSEABLE_ARMS,
 } from "../suite/registry/section-14-iii.js";
+import { P1_TS_FORM_VECTORS } from "../suite/registry/section-16-p1.js";
+import { P10_TS_FORM_VECTORS } from "../suite/registry/section-16-p10.js";
+import { P12_TS_FORM_VECTORS } from "../suite/registry/section-16-p12.js";
+import { P13_TS_FORM_VECTORS } from "../suite/registry/section-16-p13.js";
+import { P2_P3_TS_FORM_VECTORS } from "../suite/registry/section-16-p2-p3.js";
+import { P4_TS_FORM_VECTORS } from "../suite/registry/section-16-p4.js";
+import { P5_P6_TS_FORM_VECTORS } from "../suite/registry/section-16-p5-p6.js";
+import { P7_TS_FORM_VECTORS } from "../suite/registry/section-16-p7.js";
+import { P8_P11_TS_FORM_VECTORS } from "../suite/registry/section-16-p8.js";
+import { P9_TS_FORM_VECTORS } from "../suite/registry/section-16-p9.js";
 
 const cp = (code: number): string => String.fromCodePoint(code);
 
@@ -567,6 +578,83 @@ describe("S-9 (TypeScript): every code source and configuration T14-12's positiv
     for (const reading of TS_READINGS) {
       expect(readTypeScript(source, file, reading)).toEqual([]);
     }
+  });
+});
+
+// The §16 generators' TypeScript forms (S-9: every code source and
+// configuration file the document declares well-formed, generated form
+// included, is judged before any product exists; the §16 preamble: every
+// generated workspace is valid by construction, no draw declared
+// unparseable). The fixed vector set: every property's configuration file
+// — P-7's and P-13's composed per draw, the rest fixed records also judged
+// by test/self/s9-staged-sources.test.ts — P-7's capture sources, P-13's
+// `c0/U.ts` and `c1/V.ts`, and P-8's and P-11's base code source, each
+// built from its generator's own templates and constants and judged under
+// the grammar its staged path selects, through the per-draw judgement the
+// property runner applies to each draw (helpers/property.ts `drawSources`).
+const GENERATED_TS_FORM_VECTORS: Readonly<
+  Record<
+    string,
+    ReadonlyArray<
+      readonly [name: string, path: string, source: string | Uint8Array]
+    >
+  >
+> = {
+  "P-1": P1_TS_FORM_VECTORS,
+  "P-2/P-3": P2_P3_TS_FORM_VECTORS,
+  "P-4": P4_TS_FORM_VECTORS,
+  "P-5/P-6": P5_P6_TS_FORM_VECTORS,
+  "P-7": P7_TS_FORM_VECTORS,
+  "P-8/P-11": P8_P11_TS_FORM_VECTORS,
+  "P-9": P9_TS_FORM_VECTORS,
+  "P-10": P10_TS_FORM_VECTORS,
+  "P-12": P12_TS_FORM_VECTORS,
+  "P-13": P13_TS_FORM_VECTORS,
+};
+
+const GENERATED_TS_VECTORS = Object.entries(GENERATED_TS_FORM_VECTORS).flatMap(
+  ([property, vectors]) =>
+    vectors.map(
+      ([name, path, source]) => [`${property} ${name}`, path, source] as const,
+    ),
+);
+
+describe("S-9 (TypeScript): every configuration file and code source the §16 generators compose is accepted both ways", () => {
+  test("the vector set covers every property and is uniquely named", () => {
+    const covered = Object.keys(GENERATED_TS_FORM_VECTORS).flatMap((key) =>
+      key.split("/"),
+    );
+    expect(covered.sort()).toEqual(
+      Array.from({ length: 13 }, (_, i) => `P-${String(i + 1)}`).sort(),
+    );
+    for (const vectors of Object.values(GENERATED_TS_FORM_VECTORS)) {
+      expect(vectors.some(([, path]) => path === "xspec.config.ts")).toBe(true);
+    }
+    expect(GENERATED_TS_VECTORS.length).toBe(22);
+    expect(new Set(GENERATED_TS_VECTORS.map(([name]) => name)).size).toBe(
+      GENERATED_TS_VECTORS.length,
+    );
+  });
+
+  test("P-7's capture sources, P-13's `c0/U.ts` and `c1/V.ts`, and the fuzz base code source are among them", () => {
+    const paths = new Set(GENERATED_TS_VECTORS.map(([, path]) => path));
+    for (const path of ["c0/U.ts", "c1/V.ts", "src/app.ts"]) {
+      expect(paths.has(path)).toBe(true);
+    }
+    expect(
+      P7_TS_FORM_VECTORS.filter(([name]) => name.includes("codeSource")).length,
+    ).toBe(3);
+  });
+
+  test.each(GENERATED_TS_VECTORS)("%s", (name, path, source) => {
+    const verdict = judgeTypeScript(source, path);
+    expect(verdict).toEqual({ verdict: "well-formed" });
+    const bytes =
+      typeof source === "string" ? Buffer.from(source, "utf8") : source;
+    expect(judgeTypeScript(bytes, path)).toEqual(verdict);
+    expect(() => {
+      judgeTsDeclaration(name, bytes, "per-draw", path);
+    }).not.toThrow();
   });
 });
 

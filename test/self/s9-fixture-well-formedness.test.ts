@@ -359,7 +359,7 @@ describe("S-9: the document's well-formed shapes derive", () => {
 // generators compose … in the fixed vector set of those forms") — each
 // enumerated form as its generator module spells it, judged here before any
 // product exists; each draw is judged the same way at property time
-// (helpers/property.ts `mdxSources`).
+// (helpers/property.ts `drawSources`).
 
 describe("S-9: every form the P-2/P-3 generator composes derives", () => {
   test("the vector set is non-empty and uniquely named", () => {

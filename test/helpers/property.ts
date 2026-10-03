@@ -58,20 +58,27 @@
 // shrink into hours, past the body's own hang guard.
 //
 // S-9's per-draw check (TEST-SPEC 16 preamble, 17 S-9): a property whose
-// generator composes MDX names the sources a draw stages through
-// `mdxSources`. Before the body — and so the product — sees a draw, the
+// generator composes sources names the files a draw stages through
+// `drawSources`. Before the body — and so the product — sees a draw, the
 // initial trial and every shrunk candidate alike, each `.mdx` source is
 // judged by `deriveMdx` (helpers/mdx-derivability.ts, the check the S-9
-// vectors and the workspace builder use), and a source that does not derive
-// is a harness error carrying the seed (H-10): never a diagnosed failure,
-// never a draw to skip — a generator composing an ill-formed form is a
-// harness defect. The workspace builder's own staging-time check is the
-// second line: a `HarnessStagingError` it throws while the body runs is
-// rethrown as a harness error naming the seed and the refused staging.
+// vectors and the workspace builder use), and each code source and
+// configuration file — a name `TS_DEFAULT_SUFFIXES` reaches, or an entry
+// marked `"code-source"` (a code group globs any name) — by the TypeScript
+// check (`judgeTsDeclaration` under the `per-draw` declaration,
+// helpers/workspace.ts and helpers/ts-derivability.ts: TypeScript 5.9.3's
+// parser at ESNext, accepted both as module code and as script code). A
+// source that does not derive, or is not well-formed TypeScript, is a
+// harness error carrying the seed (H-10): never a diagnosed failure, never
+// a draw to skip — a generator composing an ill-formed form is a harness
+// defect. The workspace builder's own staging-time check is the second
+// line: a `HarnessStagingError` it throws while the body runs is rethrown
+// as a harness error naming the seed and the refused staging.
 
 import { HarnessAssertionError } from "./assertions.js";
 import { deriveMdx } from "./mdx-derivability.js";
 import { HarnessStagingError } from "./permissions.js";
+import { TS_DEFAULT_SUFFIXES, judgeTsDeclaration } from "./workspace.js";
 
 /** Environment variable selecting the seed mode (E-5); see the module header. */
 export const PROPERTY_SEED_ENV = "XSPEC_PROPERTY_SEED";
@@ -227,28 +234,42 @@ export interface PropertyOptions<T> {
   /**
    * S-9's per-draw check (TEST-SPEC 16 preamble; module header): the files
    * a draw stages, each as `[path, contents]` with an optional label (e.g.
-   * which edit of the trial stages it). Every entry whose path ends in
-   * `.mdx` is judged for derivability under the grammar 14.20 fixes before
-   * the property body runs on the draw — the initial trial and each shrunk
-   * candidate alike; other entries are ignored, so a generator may hand over
-   * its whole staged file map. A non-deriving source is a harness error
-   * naming the path, the parser's reason, and the seed (H-10) — never a
-   * diagnosed failure, never a skipped draw. Generated MDX carries no S-9
-   * allowance: the generators compose valid MDX by construction (16).
+   * which edit of the trial stages it) and an optional role. Before the
+   * property body runs on the draw — the initial trial and each shrunk
+   * candidate alike — every entry whose path ends in `.mdx` is judged for
+   * derivability under the grammar 14.20 fixes, and every code source and
+   * configuration file — an entry whose path ends in one of
+   * `TS_DEFAULT_SUFFIXES`, or one whose role is `"code-source"` — is judged
+   * well-formed TypeScript under 14.20 (TypeScript 5.9.3 at ESNext, TSX or
+   * plain as the path selects, accepted both as module code and as script
+   * code); other entries are ignored, so a generator may hand over its
+   * whole staged file map. A failing source is a harness error naming the
+   * path, the parser's reason, and the seed (H-10) — never a diagnosed
+   * failure, never a skipped draw. Generated sources carry no S-9
+   * allowance: the generators compose valid workspaces by construction
+   * (16), and no draw is declared unparseable.
    */
-  readonly mdxSources?: (value: T) => Iterable<DrawSource>;
+  readonly drawSources?: (value: T) => Iterable<DrawSource>;
 }
 
 /**
- * One file a draw stages, for {@link PropertyOptions.mdxSources}: its
- * workspace-relative path, its bytes, and an optional label distinguishing
- * several stagings of one path within a trial.
+ * One file a draw stages, for {@link PropertyOptions.drawSources}: its
+ * workspace-relative path, its bytes, an optional label distinguishing
+ * several stagings of one path within a trial, and an optional role:
+ * `"code-source"` marks a code source a code group discovers at a name
+ * `TS_DEFAULT_SUFFIXES` does not reach (P-7's capture sources), judged as
+ * TypeScript all the same (S-9; SPEC 14.20 selects plain TypeScript for
+ * any name but `.tsx`).
  */
 export type DrawSource = readonly [
   path: string,
   contents: string | Uint8Array,
   label?: string,
+  role?: DrawSourceRole,
 ];
+
+/** The role a {@link DrawSource} may declare beyond what its name implies. */
+export type DrawSourceRole = "code-source";
 
 /** How the effective seed set was chosen; see the module header. */
 export type SeedMode = "fixed" | "env" | "randomized";
@@ -444,12 +465,12 @@ export async function checkProperty<T>(
         });
       }
       try {
-        checkDrawMdx(generated.value, options.mdxSources);
+        checkDrawSources(generated.value, options.drawSources);
       } catch (error) {
         throw harnessError({
           name,
           seed,
-          phase: `checking trial ${String(trial)} of ${String(runs)} (S-9: every MDX source a draw stages derives)`,
+          phase: `checking trial ${String(trial)} of ${String(runs)} (S-9: every MDX source a draw stages derives, and every code source and configuration file it stages is well-formed TypeScript)`,
           cause: error,
           renderedInput: renderValue(generated.value, options.render),
         });
@@ -480,7 +501,7 @@ export async function checkProperty<T>(
                 name,
                 seed,
                 render: options.render,
-                mdxSources: options.mdxSources,
+                drawSources: options.drawSources,
               },
             )
           : { final: { trial: generated, error }, steps: 0, executions: 0 };
@@ -788,7 +809,7 @@ async function shrinkFalsification<T>(
     readonly name: string;
     readonly seed: number;
     readonly render: ((value: T) => string) | undefined;
-    readonly mdxSources: ((value: T) => Iterable<DrawSource>) | undefined;
+    readonly drawSources: ((value: T) => Iterable<DrawSource>) | undefined;
   },
 ): Promise<ShrinkResult<T>> {
   let current = initial;
@@ -806,18 +827,20 @@ async function shrinkFalsification<T>(
     const replayed = replayTrial(generator, candidate);
     if (replayed === null) return false;
     if (!shortlexLess(replayed.tape, current.trial.tape)) return false;
-    // A shrunk candidate is a draw like any other: its staged MDX is checked
-    // before the body sees it (S-9), and a non-deriving one is a harness
-    // defect — never "candidate rejected" (a generator composing it on any
-    // tape is the defect).
+    // A shrunk candidate is a draw like any other: its staged sources are
+    // checked before the body sees them (S-9), and an ill-formed one is a
+    // harness defect — never "candidate rejected" (a generator composing it
+    // on any tape is the defect).
     try {
-      checkDrawMdx(replayed.value, context.mdxSources);
+      checkDrawSources(replayed.value, context.drawSources);
     } catch (error) {
       throw harnessError({
         name: context.name,
         seed: context.seed,
         phase:
-          "shrinking (S-9: an MDX source a shrunk input stages does not derive)",
+          "shrinking (S-9: an MDX source a shrunk input stages does not " +
+          "derive, or a code source or configuration file it stages is not " +
+          "well-formed TypeScript)",
         cause: error,
         renderedInput: renderValue(replayed.value, context.render),
       });
@@ -962,34 +985,57 @@ function harnessError(details: {
   );
 }
 
+const UTF8 = new TextEncoder();
+
 /**
- * S-9's per-draw check (module header): judge every `.mdx` source the draw
- * stages; the first that does not derive throws a `HarnessStagingError` of
- * mode `mdx-derivability`, spelled as the workspace builder spells its own
- * refusal, so both lines of the check report alike.
+ * S-9's per-draw check (module header): judge every source the draw stages.
+ * The first `.mdx` source that does not derive throws a
+ * `HarnessStagingError` of mode `mdx-derivability`, spelled as the workspace
+ * builder spells its own refusal, so both lines of the check report alike;
+ * the first code source or configuration file that is not well-formed
+ * TypeScript throws the builder's own `ts-derivability` refusal of a
+ * `per-draw` staging (`judgeTsDeclaration`, one code path), which names the
+ * generator as the defect.
  */
-function checkDrawMdx<T>(
+function checkDrawSources<T>(
   value: T,
-  mdxSources: ((value: T) => Iterable<DrawSource>) | undefined,
+  drawSources: ((value: T) => Iterable<DrawSource>) | undefined,
 ): void {
-  if (mdxSources === undefined) return;
-  for (const [path, contents, label] of mdxSources(value)) {
-    if (!path.endsWith(".mdx")) continue;
-    const verdict = deriveMdx(contents);
-    if (verdict.derives) continue;
-    const where =
-      verdict.position === undefined
-        ? ""
-        : ` at line ${String(verdict.position.line)}, column ${String(verdict.position.column)} (offset ${String(verdict.position.offset)})`;
-    throw new HarnessStagingError(
-      "mdx-derivability",
-      label === undefined ? path : `${path} (${label})`,
-      "composed by the generator as well-formed (TEST-SPEC 16: generated " +
-        "workspaces are valid by construction) but the stock MDX 3 parser " +
-        `rejects it${where}: ${verdict.reason} — a generator defect (S-9), ` +
-        "not a product failure",
-    );
+  if (drawSources === undefined) return;
+  for (const [path, contents, label, role] of drawSources(value)) {
+    const where = label === undefined ? path : `${path} (${label})`;
+    if (path.endsWith(".mdx")) checkDrawMdx(where, contents);
+    if (role === "code-source" || hasTsDefaultSuffix(path)) {
+      const bytes =
+        typeof contents === "string" ? UTF8.encode(contents) : contents;
+      // The staged path selects the grammar (TSX for a `.tsx` name, plain
+      // TypeScript for any other, SPEC 14.20); the label only names it.
+      judgeTsDeclaration(where, bytes, "per-draw", path);
+    }
   }
+}
+
+/** Whether S-9's TypeScript default reaches a draw's staged path by name. */
+function hasTsDefaultSuffix(path: string): boolean {
+  return TS_DEFAULT_SUFFIXES.some((suffix) => path.endsWith(suffix));
+}
+
+/** One `.mdx` source of a draw, judged by `deriveMdx` (S-9). */
+function checkDrawMdx(where: string, contents: string | Uint8Array): void {
+  const verdict = deriveMdx(contents);
+  if (verdict.derives) return;
+  const at =
+    verdict.position === undefined
+      ? ""
+      : ` at line ${String(verdict.position.line)}, column ${String(verdict.position.column)} (offset ${String(verdict.position.offset)})`;
+  throw new HarnessStagingError(
+    "mdx-derivability",
+    where,
+    "composed by the generator as well-formed (TEST-SPEC 16: generated " +
+      "workspaces are valid by construction) but the stock MDX 3 parser " +
+      `rejects it${at}: ${verdict.reason} — a generator defect (S-9), ` +
+      "not a product failure",
+  );
 }
 
 /**

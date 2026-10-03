@@ -145,6 +145,24 @@ export default defineConfig({
 `,
 );
 
+/**
+ * S-9's fixed TypeScript form-vector set (TEST-SPEC 17 S-9; the §16
+ * preamble): the property's one configuration file, the record above — judged
+ * as a record by test/self/s9-staged-sources.test.ts too, and here beside
+ * every generated configuration and code source
+ * (test/self/s9-typescript-well-formedness.test.ts); P-9 composes no code
+ * source.
+ */
+export const P9_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string | Uint8Array]
+> = [
+  [
+    "P-9 configuration (SPECS_ONLY_CONFIG)",
+    "xspec.config.ts",
+    SPECS_ONLY_CONFIG.source,
+  ],
+];
+
 // ---------------------------------------------------------------------------
 // Workspace model
 //
@@ -1248,7 +1266,7 @@ export const P9_FORM_VECTORS: ReadonlyArray<
 > = p9FormVectors();
 
 /**
- * S-9's per-draw check (helpers/property.ts `mdxSources`): the initial
+ * S-9's per-draw check (helpers/property.ts `drawSources`): the initial
  * workspace and, after each edit operation, the re-rendered files — the
  * model evolved exactly as runP9Op evolves it (the session operations touch
  * no source).
@@ -1342,7 +1360,7 @@ const P_9 = defineProductTest({
         runs: 3,
         maxShrinkExecutions: 50,
         render: renderP9Trial,
-        mdxSources: stagedP9Sources,
+        drawSources: stagedP9Sources,
       },
     );
   },

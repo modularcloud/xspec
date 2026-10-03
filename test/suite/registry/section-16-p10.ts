@@ -172,6 +172,24 @@ export default defineConfig({
 `,
 );
 
+/**
+ * S-9's fixed TypeScript form-vector set (TEST-SPEC 17 S-9; the §16
+ * preamble): the property's one configuration file, the record above — judged
+ * as a record by test/self/s9-staged-sources.test.ts too, and here beside
+ * every generated configuration and code source
+ * (test/self/s9-typescript-well-formedness.test.ts); P-10 composes no code
+ * source.
+ */
+export const P10_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string | Uint8Array]
+> = [
+  [
+    "P-10 configuration (SPECS_ONLY_CONFIG)",
+    "xspec.config.ts",
+    SPECS_ONLY_CONFIG.source,
+  ],
+];
+
 // The fixed initial spec file (module header): importless and tagless, one
 // top-level section with a child plus a second top-level leaf — the audit
 // session holds four items (file root, `a`, `a.k`, `g`; SPEC 10.6) with a

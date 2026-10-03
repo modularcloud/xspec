@@ -999,7 +999,138 @@ export const P13_FORM_VECTORS: ReadonlyArray<
     source,
   ]);
 
-/** S-9's per-draw check (helpers/property.ts `mdxSources`): the staged files. */
+// S-9's fixed TypeScript form-vector set: the configuration and code-source
+// forms of `renderP13Files` over three fixed trials — the MDX form trial
+// above (three imports per code file, one code group, a profile spelling
+// every optional member, `c0/U.ts` with a top-level marker and two units);
+// both code files `c0/U.ts` and `c1/V.ts` over one spec file (one import
+// each), without and with top-level statements, every statement kind on a
+// root, a section, and a grandchild, two code groups, and three profiles
+// omitting each optional member in turn (`targets` as `"leaves"` and
+// `"all"`); and a trial with no code file (the configuration without its
+// `code` block).
+
+const [FORM_A_FILE] = P13_FORM_TRIAL.specFiles;
+
+const P13_TS_FORM_TRIALS: ReadonlyArray<readonly [label: string, P13Trial]> = [
+  ["the MDX form trial", P13_FORM_TRIAL],
+  [
+    "two code files over one spec file",
+    {
+      specFiles: [FORM_A_FILE!],
+      codeFiles: [
+        {
+          index: 0,
+          path: CODE_PATHS[0],
+          topLevel: [],
+          units: [
+            {
+              name: UNIT_NAMES[0],
+              statements: [
+                { kind: "text", target: FORM_A },
+                { kind: "marker", target: `${FORM_A}#k.m.x` },
+              ],
+            },
+            {
+              name: UNIT_NAMES[1],
+              statements: [{ kind: "text", target: `${FORM_A}#k.m` }],
+            },
+          ],
+        },
+        {
+          index: 1,
+          path: CODE_PATHS[1],
+          topLevel: [{ kind: "text", target: `${FORM_A}#k` }],
+          units: [
+            {
+              name: UNIT_NAMES[0],
+              statements: [{ kind: "marker", target: FORM_A }],
+            },
+          ],
+        },
+      ],
+      specGroups: [[SPEC_GROUP_NAMES[0], [0]]],
+      codeGroups: [
+        [CODE_GROUP_NAMES[0], [0, 1]],
+        [CODE_GROUP_NAMES[1], [1]],
+      ],
+      profiles: [
+        {
+          name: "p1",
+          target: SPEC_GROUP_NAMES[0],
+          boundary: CODE_GROUP_NAMES[1],
+          mode: "direct",
+          targets: null,
+          targetTags: null,
+          edgeKinds: null,
+        },
+        {
+          name: "p2",
+          target: SPEC_GROUP_NAMES[0],
+          boundary: CODE_GROUP_NAMES[0],
+          mode: "transitive",
+          targets: "leaves",
+          targetTags: TARGET_TAG_SETS[3]!,
+          edgeKinds: null,
+        },
+        {
+          name: "p3",
+          target: SPEC_GROUP_NAMES[0],
+          boundary: SPEC_GROUP_NAMES[0],
+          mode: "direct",
+          targets: "all",
+          targetTags: null,
+          edgeKinds: KIND_SETS[2]!,
+        },
+      ],
+    },
+  ],
+  [
+    "no code file",
+    {
+      ...P13_FORM_TRIAL,
+      codeFiles: [],
+      codeGroups: [],
+      profiles: [
+        {
+          name: "p1",
+          target: SPEC_GROUP_NAMES[1],
+          boundary: SPEC_GROUP_NAMES[0],
+          mode: "transitive",
+          targets: null,
+          targetTags: null,
+          edgeKinds: null,
+        },
+      ],
+    },
+  ],
+];
+
+/**
+ * The fixed TypeScript form-vector set of the P-13 rendering (TEST-SPEC 17
+ * S-9; the §16 preamble): `[name, staged path, source]` for every
+ * configuration file and code source `renderP13Files` stages over the
+ * fixed trials above — `xspec.config.ts` three times, `c0/U.ts` twice, and
+ * `c1/V.ts` once; each path selects its grammar (plain TypeScript).
+ */
+export const P13_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string]
+> = P13_TS_FORM_TRIALS.flatMap(([label, trial]) =>
+  Object.entries(renderP13Files(trial))
+    .filter(([path]) => !path.endsWith(".mdx"))
+    .map(([path, source]): readonly [string, string, string] => [
+      `${label}: ${path}`,
+      path,
+      source,
+    ]),
+);
+
+/**
+ * S-9's per-draw check (helpers/property.ts `drawSources`): the staged files
+ * — the `.mdx` spec sources judged for derivability, and the configuration
+ * and the code sources (`c0/U.ts`, `c1/V.ts`, TypeScript-default names)
+ * judged well-formed TypeScript.
+ */
 function stagedP13Sources(trial: P13Trial): DrawSource[] {
   return Object.entries(renderP13Files(trial));
 }
@@ -1091,7 +1222,7 @@ const P_13 = defineProductTest({
         runs: 8,
         maxShrinkExecutions: 30,
         render: renderP13Trial,
-        mdxSources: stagedP13Sources,
+        drawSources: stagedP13Sources,
       },
     );
   },

@@ -231,7 +231,7 @@ export interface WorkspaceMdxDecl {
   readonly allowances?: Readonly<Record<string, readonly MdxAllowance[]>>;
   /**
    * Sources whose initial contents are a property draw the runner already
-   * judged (helpers/property.ts `mdxSources`; TEST-SPEC 16, S-9's property
+   * judged (helpers/property.ts `drawSources`; TEST-SPEC 16, S-9's property
    * clause): each is judged well-formed at creation exactly as the default
    * is, and a later plain `file()` staging of the path is exempt from the
    * undeclared-staging guard — the initial-file form of `per-draw`. Only
@@ -246,7 +246,7 @@ export interface WorkspaceMdxDecl {
  * the workspace declaration for that write alone. `per-draw` is a property
  * draw's source (TEST-SPEC 16; S-9's property clause): well-formed — judged
  * at staging exactly as `well-formed` is — and already judged per draw by the
- * property runner before the body saw it (helpers/property.ts `mdxSources`),
+ * property runner before the body saw it (helpers/property.ts `drawSources`),
  * so the undeclared-staging guard exempts it. Only the section-16 modules
  * pass it — to `file()` (section-16-p4.ts, -p5-p6.ts, -p9.ts), or as the
  * workspace declaration's `perDraw` list for a draw's initial files; a
@@ -289,13 +289,17 @@ export interface WorkspaceTsDecl {
   /**
    * Configuration files and code sources whose initial contents a property
    * draw composed (TEST-SPEC 16, S-9's property clause — P-7's
-   * configurations, P-13's configuration and code sources): each is judged
-   * well-formed at creation exactly as the default is, and the
+   * configurations and capture sources, P-13's configuration and code
+   * sources), each already judged by the property runner before the body
+   * saw the draw (helpers/property.ts `drawSources`): each is judged
+   * well-formed at creation exactly as the default is — a listed name the
+   * default does not reach (P-7's capture sources) included — and the
    * undeclared-staging guard exempts the path, at creation and for a later
    * plain `file()` staging — the initial-file form of `per-draw`. Only the
-   * section-16 modules list a path here (`tsPathsOf` over a rendered map);
-   * a deterministic test never does (a later-arm workspace's initial code
-   * sources and configuration are records).
+   * section-16 modules list a path here (`tsPathsOf` over a rendered map,
+   * plus any code source at another name); a deterministic test never does
+   * (a later-arm workspace's initial code sources and configuration are
+   * records).
    */
   readonly perDraw?: readonly string[];
 }

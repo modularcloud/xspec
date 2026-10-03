@@ -63,7 +63,7 @@
 // rendering's forms for the S-9 self-test
 // (test/self/s9-fixture-well-formedness.test.ts), and every draw's sources,
 // the edited files included, are judged before the product sees them
-// (`mdxSources`, helpers/property.ts).
+// (`drawSources`, helpers/property.ts).
 //
 // P-4 is outside every CERTIFICATIONS.md fixture scope (its preamble:
 // conformers for P-4/P-5/P-6 would be near-complete second products), so
@@ -141,6 +141,24 @@ export default defineConfig({
 })
 `,
 );
+
+/**
+ * S-9's fixed TypeScript form-vector set (TEST-SPEC 17 S-9; the §16
+ * preamble): the property's one configuration file, the record above — judged
+ * as a record by test/self/s9-staged-sources.test.ts too, and here beside
+ * every generated configuration and code source
+ * (test/self/s9-typescript-well-formedness.test.ts); P-4 composes no code
+ * source.
+ */
+export const P4_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string | Uint8Array]
+> = [
+  [
+    "P-4 configuration (SPECS_ONLY_CONFIG)",
+    "xspec.config.ts",
+    SPECS_ONLY_CONFIG.source,
+  ],
+];
 
 // ---------------------------------------------------------------------------
 // Workspace model
@@ -1924,7 +1942,7 @@ export const genP4Trial: Gen<P4Trial> = (choices) => {
 // duplicate), nested three deep, and an empty section — in one fixed model,
 // plus the added section of an addChild edit; the S-9 self-test proves every
 // vector derives before any product exists, and each draw's sources are
-// judged the same way before the product sees them (`mdxSources` below).
+// judged the same way before the product sees them (`drawSources` below).
 // P-5 and P-6 stage through this rendering too (section-16-p5-p6.ts adds
 // its own decorated forms).
 
@@ -2068,7 +2086,7 @@ export const P4_FORM_VECTORS: ReadonlyArray<
 ];
 
 /**
- * S-9's per-draw check (helpers/property.ts `mdxSources`): the staged
+ * S-9's per-draw check (helpers/property.ts `drawSources`): the staged
  * workspace and, per edit, the files the edit rewrites — every source the
  * trial stages, judged before the product sees it.
  */
@@ -2319,7 +2337,7 @@ const P_4 = defineProductTest({
         runs: 6,
         maxShrinkExecutions: 100,
         render: renderTrial,
-        mdxSources: stagedP4Sources,
+        drawSources: stagedP4Sources,
       },
     );
   },

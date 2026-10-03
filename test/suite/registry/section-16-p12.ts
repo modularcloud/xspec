@@ -96,7 +96,7 @@
 // (SPEC 1.7). `P12_FORM_VECTORS` below spells every composed form, each
 // where the generator may compose it, for the S-9 self-test
 // (test/self/s9-fixture-well-formedness.test.ts), and every draw's sources
-// are judged before the product sees them (`mdxSources`,
+// are judged before the product sees them (`drawSources`,
 // helpers/property.ts).
 //
 // Cost shape: the at ≡ view clause is exhaustive per trial (sum of file
@@ -494,6 +494,24 @@ export const P12_FORM_VECTORS: ReadonlyArray<
   ];
 });
 
+/**
+ * S-9's fixed TypeScript form-vector set (TEST-SPEC 17 S-9; the §16
+ * preamble): the property's one configuration file, section-11.2.ts's
+ * record — judged as a record by test/self/s9-staged-sources.test.ts too,
+ * and here beside every generated configuration and code source
+ * (test/self/s9-typescript-well-formedness.test.ts); P-12 composes no code
+ * source.
+ */
+export const P12_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string | Uint8Array]
+> = [
+  [
+    "P-12 configuration (section-11.2.ts's SPECS_ONLY_CONFIG)",
+    "xspec.config.ts",
+    SPECS_ONLY_CONFIG.source,
+  ],
+];
+
 /** The P-12 trial generator (see the module header). */
 export const genP12Trial: Gen<P12Trial> = (choices) => {
   const fileCount = choices.weightedPick<number>([
@@ -606,7 +624,7 @@ async function runAnswer(
 }
 
 /**
- * S-9's per-draw check (helpers/property.ts `mdxSources`): every composed
+ * S-9's per-draw check (helpers/property.ts `drawSources`): every composed
  * file, each of which must derive — the workspaces are valid by
  * construction (module header, "Input space"; TEST-SPEC §16 preamble).
  */
@@ -818,7 +836,7 @@ const P_12 = defineProductTest({
         runs: 3,
         maxShrinkExecutions: 25,
         render: renderP12Trial,
-        mdxSources: stagedP12Sources,
+        drawSources: stagedP12Sources,
       },
     );
   },

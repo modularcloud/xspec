@@ -101,7 +101,7 @@
 // lands at the destination — the S-9 self-test
 // (test/self/s9-fixture-well-formedness.test.ts) proves every one derives
 // before any product exists, and every draw's staged files are judged the
-// same way before the product sees them (`mdxSources` on the registrations;
+// same way before the product sees them (`drawSources` on the registrations;
 // helpers/property.ts). The forms obey this validity rule: a multi-line
 // element parses only fully flow (tags at line starts, at most trailing
 // whitespace sharing a tag's line) or fully inline (the whole element
@@ -1089,9 +1089,27 @@ const P5_P6_SPECS_ONLY_CONFIG = stagedTs(
 );
 
 /**
+ * S-9's fixed TypeScript form-vector set (TEST-SPEC 17 S-9; the §16
+ * preamble): the one configuration file P-5 and P-6 share, the record above —
+ * judged as a record by test/self/s9-staged-sources.test.ts too, and here
+ * beside every generated configuration and code source
+ * (test/self/s9-typescript-well-formedness.test.ts); neither composes a code
+ * source.
+ */
+export const P5_P6_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string | Uint8Array]
+> = [
+  [
+    "P-5/P-6 configuration (P5_P6_SPECS_ONLY_CONFIG)",
+    "xspec.config.ts",
+    P5_P6_SPECS_ONLY_CONFIG.source,
+  ],
+];
+
+/**
  * A trial's workspace declaration: the configuration (a staged-source
  * record) beside the rendered sources, every `.mdx` one declared per draw —
- * judged by the property runner before the body saw the draw (`mdxSources`
+ * judged by the property runner before the body saw the draw (`drawSources`
  * on the registrations below; S-9), as every initial `.mdx` file a trial
  * stages after the body's first product invocation must be
  * (helpers/workspace.ts).
@@ -2118,7 +2136,7 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
 // each spelled through the very builder the draws use, over one fixed
 // model. The S-9 self-test proves every vector derives before any product
 // exists; every draw's staged files are judged the same way before the
-// product sees them (`mdxSources` on the registrations below).
+// product sees them (`drawSources` on the registrations below).
 
 function vectorProse(text: string): ProseItem {
   return { kind: "prose", parts: [{ kind: "text", text }] };
@@ -2362,7 +2380,7 @@ export const P5_FORM_VECTORS: ReadonlyArray<
   ],
 ];
 
-// --- S-9's per-draw check (helpers/property.ts `mdxSources`) ----------------
+// --- S-9's per-draw check (helpers/property.ts `drawSources`) ----------------
 
 function stagedPuritySources(trial: PurityTrial): DrawSource[] {
   return Object.entries(
@@ -2854,7 +2872,7 @@ const P_5 = defineProductTest({
         runs: 3,
         maxShrinkExecutions: 60,
         render: renderPurityTrial,
-        mdxSources: stagedPuritySources,
+        drawSources: stagedPuritySources,
       },
     );
     await checkProperty(
@@ -2867,7 +2885,7 @@ const P_5 = defineProductTest({
         runs: 8,
         maxShrinkExecutions: 80,
         render: renderSectionMoveTrial,
-        mdxSources: stagedSectionMoveSources,
+        drawSources: stagedSectionMoveSources,
       },
     );
   },
@@ -2897,7 +2915,7 @@ const P_6 = defineProductTest({
         runs: 4,
         maxShrinkExecutions: 60,
         render: renderReplayTrial,
-        mdxSources: stagedReplaySources,
+        drawSources: stagedReplaySources,
       },
     );
   },

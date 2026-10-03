@@ -268,6 +268,26 @@ export const FUZZ_BASE_RECORDS: ReadonlyMap<string, StagedMdx | StagedTs> =
     ],
   ]);
 
+/**
+ * S-9's fixed TypeScript form-vector set (TEST-SPEC 17 S-9; the §16
+ * preamble): the base workspace's configuration and code source P-8 and
+ * P-11 share, unmutated — the records above, judged as records by
+ * test/self/s9-staged-sources.test.ts too, and here beside every generated
+ * configuration and code source
+ * (test/self/s9-typescript-well-formedness.test.ts). A mutated file is
+ * fuzz, staged `unchecked`: the document does not declare its
+ * well-formedness (16).
+ */
+export const P8_P11_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string | Uint8Array]
+> = FUZZ_BASE_FILES.filter(([path]) => path.endsWith(".ts")).map(
+  ([path, text]): readonly [string, string, string] => [
+    `P-8/P-11 base ${path}`,
+    path,
+    text,
+  ],
+);
+
 /** The base workspace as initial `files`: each entry its record. */
 function fuzzBaseWorkspaceFiles(): Record<string, InitialFileContents> {
   return Object.fromEntries(

@@ -19,11 +19,14 @@
 //     errors surface as plain harness errors (with the seed for
 //     reproduction), never as diagnosed assertion failures.
 //   * S-9 per-draw check (TEST-SPEC 16 preamble) — a draw whose staged MDX
-//     does not derive is a harness error carrying the seed, raised before
-//     the body sees the draw (the initial trial and shrunk candidates
-//     alike), never a diagnosed failure and never a skipped draw; a
-//     workspace-builder refusal thrown inside the body is attributed the
-//     same way, naming the refused staging.
+//     does not derive, or whose staged code source or configuration file is
+//     not well-formed TypeScript (a `TS_DEFAULT_SUFFIXES` name, or an entry
+//     marked `"code-source"`; rejected, or accepted read one way only), is a
+//     harness error carrying the seed, raised before the body sees the draw
+//     (the initial trial and shrunk candidates alike), never a diagnosed
+//     failure and never a skipped draw; a workspace-builder refusal thrown
+//     inside the body is attributed the same way, naming the refused
+//     staging.
 //
 // Every checkProperty call here injects env (and, where relevant, report and
 // entropy) — the ambient process environment must not leak into self-test
@@ -389,6 +392,16 @@ test("listOf stays within its bounds across generation", async () => {
 const LF = String.fromCodePoint(0x000a);
 const WELL_FORMED_MDX = `<S id="a">ok</S>${LF}`;
 const UNCLOSED_MDX = `<S id="a">${LF}${LF}never closed${LF}`;
+const WELL_FORMED_CONFIG =
+  `import { defineConfig } from "xspec"${LF}${LF}` +
+  `export default defineConfig({${LF}  specs: {${LF}` +
+  `    main: ["specs/**/*.mdx"]${LF}  }${LF}})${LF}`;
+/** A configuration missing its closing brace: rejected both ways. */
+const UNCLOSED_CONFIG = WELL_FORMED_CONFIG.replace(`})${LF}`, `)${LF}`);
+const WELL_FORMED_CODE = `import A from "../specs/A.xspec"${LF}${LF}A.a${LF}`;
+const ILL_FORMED_CODE = `import A from${LF}`;
+/** Accepted read as module code only (a top-level `await`, SPEC 14.20). */
+const MODULE_ONLY_CODE = `await /re/;${LF}`;
 
 test("S-9 per-draw check: a draw staging a non-deriving MDX source is a harness error carrying the seed, raised before the body runs on it", async () => {
   const seen: number[] = [];
@@ -403,8 +416,8 @@ test("S-9 per-draw check: a draw staging a non-deriving MDX source is a harness 
         runs: 8,
         seeds: [7],
         env: {},
-        mdxSources: (value) => [
-          ["xspec.config.ts", "not judged: only `.mdx` paths are"],
+        drawSources: (value) => [
+          ["notes.txt", "not judged: neither MDX nor a code source"],
           [
             "specs/A.mdx",
             value === 2 ? UNCLOSED_MDX : WELL_FORMED_MDX,
@@ -429,7 +442,7 @@ test("S-9 per-draw check: a draw staging a non-deriving MDX source is a harness 
   expect(seen.length).toBeGreaterThan(0);
 });
 
-test("S-9 per-draw check: a generator whose every draw derives runs unhindered, non-`.mdx` entries ignored", async () => {
+test("S-9 per-draw check: a generator whose every draw is well-formed runs unhindered, unjudged entries ignored", async () => {
   let ran = 0;
   await checkProperty(
     "well-formed draws",
@@ -441,14 +454,133 @@ test("S-9 per-draw check: a generator whose every draw derives runs unhindered, 
       runs: 5,
       seeds: [7],
       env: {},
-      mdxSources: (tag) => [
+      drawSources: (tag) => [
         ["specs/A.mdx", `<${tag} id="a">ok</${tag}>${LF}`],
         ["specs/B.mdx", Buffer.from(WELL_FORMED_MDX, "utf8")],
         ["notes.txt", UNCLOSED_MDX],
+        ["xspec.config.ts", WELL_FORMED_CONFIG],
+        ["src/app.tsx", `export const a = <${tag} id="a" />;${LF}`],
+        [
+          "src/cap$[x]",
+          Buffer.from(WELL_FORMED_CODE, "utf8"),
+          undefined,
+          "code-source",
+        ],
+        ["src/unmarked", ILL_FORMED_CODE],
       ],
     },
   );
   expect(ran).toBe(5);
+});
+
+test("S-9 per-draw check: a draw staging a configuration that is not well-formed TypeScript is a harness error carrying the seed, raised before the body runs on it", async () => {
+  const seen: number[] = [];
+  const thrown = await captureRejection(
+    checkProperty(
+      "ill-formed configuration draw",
+      (choices) => choices.intInclusive(0, 3),
+      (value) => {
+        seen.push(value);
+      },
+      {
+        runs: 8,
+        seeds: [7],
+        env: {},
+        drawSources: (value) => [
+          ["specs/A.mdx", WELL_FORMED_MDX],
+          [
+            "xspec.config.ts",
+            value === 2 ? UNCLOSED_CONFIG : WELL_FORMED_CONFIG,
+            `draw ${String(value)}`,
+          ],
+        ],
+      },
+    ),
+  );
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while checking trial");
+  expect(error.message).toContain("S-9");
+  expect(error.message).toContain("seed 7");
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=7`);
+  expect(error.message).toContain("xspec.config.ts (draw 2)");
+  expect(error.message).toContain("not well-formed TypeScript");
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
+  expect((error.cause as HarnessStagingError).mode).toBe("ts-derivability");
+  // The body never ran on the ill-formed draw: the check precedes it.
+  expect(seen).not.toContain(2);
+  expect(seen.length).toBeGreaterThan(0);
+});
+
+test("S-9 per-draw check: a code source marked `code-source` is judged at a name the default does not reach — text accepted read one way only is a harness error too", async () => {
+  let ran = 0;
+  const thrown = await captureRejection(
+    checkProperty(
+      "one-way code source draw",
+      (choices) => choices.intInclusive(0, 3),
+      () => {
+        ran += 1;
+      },
+      {
+        runs: 4,
+        seeds: [7],
+        env: {},
+        drawSources: () => [
+          ["src/unmarked", MODULE_ONLY_CODE],
+          ["src/cap$[x]", MODULE_ONLY_CODE, "capture source", "code-source"],
+        ],
+      },
+    ),
+  );
+  expect(ran).toBe(0);
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while checking trial 1 of 4");
+  expect(error.message).toContain("seed 7");
+  expect(error.message).toContain("src/cap$[x] (capture source)");
+  expect(error.message).toContain("accepted read as module code only");
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
+  expect((error.cause as HarnessStagingError).mode).toBe("ts-derivability");
+  expect((error.cause as HarnessStagingError).path).toBe(
+    "src/cap$[x] (capture source)",
+  );
+});
+
+test("S-9 per-draw check: a shrunk candidate's configuration is judged before the body runs on it — an ill-formed one is a harness error, never a rejected candidate", async () => {
+  const bodies: number[] = [];
+  const thrown = await captureRejection(
+    checkProperty(
+      "shrinks into an ill-formed configuration",
+      (choices) => choices.intInclusive(0, 9),
+      (value) => {
+        bodies.push(value);
+        fail(`falsified on ${String(value)}`);
+      },
+      {
+        runs: 1,
+        seeds: [7],
+        env: {},
+        drawSources: (value) => [
+          [
+            "xspec.config.ts",
+            value === 0 ? UNCLOSED_CONFIG : WELL_FORMED_CONFIG,
+          ],
+        ],
+      },
+    ),
+  );
+  expect(bodies.length).toBeGreaterThan(0);
+  expect(bodies[0]).not.toBe(0);
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while shrinking (S-9");
+  expect(error.message).toContain("seed 7");
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
+  expect((error.cause as HarnessStagingError).mode).toBe("ts-derivability");
+  expect(bodies).not.toContain(0);
 });
 
 test("S-9 per-draw check: a shrunk candidate is checked before the body runs on it — a non-deriving one is a harness error, never a rejected candidate", async () => {
@@ -468,7 +600,7 @@ test("S-9 per-draw check: a shrunk candidate is checked before the body runs on 
         runs: 1,
         seeds: [7],
         env: {},
-        mdxSources: (value) => [
+        drawSources: (value) => [
           ["specs/A.mdx", value === 0 ? UNCLOSED_MDX : WELL_FORMED_MDX],
         ],
       },
