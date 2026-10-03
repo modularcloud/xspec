@@ -1672,7 +1672,15 @@ const T6_5_23 = defineProductTest({
         await runS23Arm(product, arm);
       } catch (error) {
         if (!(error instanceof HarnessAssertionError)) throw error;
-        failures.push(error.message);
+        // A failure diagnosed outside the staging's own assertions — the
+        // subprocess driver's T6.5-22(a) hook, say — is named by its
+        // staging too.
+        const context = `T6.5-23 ${arm.key}`;
+        failures.push(
+          error.message.startsWith(`${context}:`)
+            ? error.message
+            : `${context}: ${error.message}`,
+        );
       }
     }
     if (failures.length > 0) {
