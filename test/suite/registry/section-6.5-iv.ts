@@ -1279,7 +1279,7 @@ function d21ConfigText(
 }
 
 const D21_SPEC_MD_CONFIG = stagedTs(
-  "T6.5-21/T6.6-3 xspec.config.ts — specs/**/*.mdx and a second spec glob specs/*.md in the one spec group, Markdown emitted next to sources ((a)'s staging with its two-reason move, (d)'s, (e)'s, and (e)'s twin)",
+  "T6.5-21/T6.6-3/T12.7-2 xspec.config.ts — specs/**/*.mdx and a second spec glob specs/*.md in the one spec group, Markdown emitted next to sources ((a)'s staging with its two-reason move, (d)'s, (e)'s, and (e)'s twin)",
   d21ConfigText([D20_SPEC_GLOB, D21_MD_GLOB], null),
 );
 const D21_CODE_MD_CONFIG = stagedTs(
@@ -1298,7 +1298,7 @@ const D21_UNREACHED_CONFIG = stagedTs(
  * nothing imports it, so no relocation rewrites a byte (SPEC 6.5).
  */
 const D21_A_SOURCE = stagedMdx(
-  "T6.5-21/T6.6-3 specs/A.mdx — the moved file, sections x and y, no import or reference (every staging's origin; at specs/sub/A.mdx, (c)'s twin's source)",
+  "T6.5-21/T6.6-3/T12.7-2 specs/A.mdx — the moved file, sections x and y, no import or reference (every staging's origin; at specs/sub/A.mdx, (c)'s twin's source)",
   [
     `<S id="${D21_SECTION}">`,
     "Alpha text.",

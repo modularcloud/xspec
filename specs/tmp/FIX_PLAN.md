@@ -38,18 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 55 — T12.7-2: T6.5-21's two-reason order (TEST-SPEC L531; SPEC 14, 12.7; B10)
-
-**Depends on.** Tasks 13 and 42.
-
-**Where.** `test/suite/registry/section-12.7.ts`.
-
-**Change.** In T6.5-21(a)'s staging (reuse its exported staging), `move specs/A.mdx "specs/a'b.mdx"` reports `refused-invalid-destination`, then `refused-exposed-derived-file`.
-
-**Note (from Task 42).** `test/suite/registry/section-6.5-iv.ts` exports the staging and the move: `runD21RefusedStaging(product, { ...D21_A_STAGING, moves: [D21_TWO_REASON_MOVE] }, context, perMove)` stages (a) (its premise `build` re-pinning `specs/A.md` a plain file) and hands the two-reason move to `perMove`; `D21_TWO_REASON_MOVE.findings` lists the two expected findings in 14's order (code and `path`; the exposure's `identities` `[]`).
-
-**Checks.** S-7 passes. T12.7-2 against the built product.
-
 ### Task 56 — T13.4-4: the directory-occupant arms (TEST-SPEC L557; SPEC 13.4; B11)
 
 **Depends on.** Nothing open. T13.4-4's link arm already stages through the shared helper `stageLinkToOutsideFile`; keep it there.

@@ -99,12 +99,16 @@
 //   only finding class (10.7, 14). The test stages each stageable class's
 //   internal order by value — numbered conditions across six codes whose
 //   numeric order inverts both the token-alphabetical order (`cycle` <
-//   `missing-id`) and the ordinal-decimal-string order ("15" < "3"), and the
-//   T14-7 refusal pair whose listed order inverts the token-alphabetical
-//   order (`refused-cycle` < `refused-id-collision` alphabetically, yet
-//   collision ranks 3rd and cycle 6th in 14's listing) — while the full
-//   pinned comparator, cross-class ranks included, is enforced over every
-//   findings array the suite captures (`decodeFindingsArray`, S-5-guarded).
+//   `missing-id`) and the ordinal-decimal-string order ("15" < "3"), and two
+//   multi-reason refusals (T14-7) whose listed order inverts the
+//   token-alphabetical order — the section move's pair (`refused-cycle` <
+//   `refused-id-collision` alphabetically, yet collision ranks 3rd and cycle
+//   5th in 14's listing) and T6.5-21's two-reason file move
+//   (`refused-exposed-derived-file` < `refused-invalid-destination`
+//   alphabetically, yet the invalid destination ranks 8th and the exposure
+//   9th, between it and `refused-invalid-rewrite`) — while the full pinned
+//   comparator, cross-class ranks included, is enforced over every findings
+//   array the suite captures (`decodeFindingsArray`, S-5-guarded).
 // - The locations proper-prefix rule, the `null`-before-path rule, and the
 //   message tie-break admit no product-independent discriminating fixture:
 //   two same-code findings agreeing on every earlier key while differing
@@ -143,6 +147,21 @@
 //   path is occupied by the discovered origin source itself, and nothing
 //   references the moved node, so no rewritten reference can fail to
 //   resolve.
+// - The second multi-reason refusal is the one the entry names: T6.5-21's
+//   two-reason file move, staged identically from section-6.5-iv.ts's
+//   exported table through that module's own staging code
+//   (`runD21RefusedStaging` over `D21_A_STAGING` with `D21_TWO_REASON_MOVE`
+//   alone — (a)'s premise `build` re-pinning `specs/A.md` the plain file it
+//   wrote): `move specs/A.mdx specs/a'b.mdx` reports
+//   `refused-invalid-destination` (the barred `'`, concerning the
+//   destination as spelled), then `refused-exposed-derived-file` (the
+//   vacated emit destination `specs/A.md`, which the second spec glob
+//   `specs/*.md` would discover). The code and concerned-path sequence is
+//   pinned exactly (order, count, and completeness); the move's full
+//   contract — the modifies-nothing compare, `locations` `[]`, the
+//   exposure's `identities` `[]` — is T6.5-21's own. The arm runs last in
+//   the body, so a product predating the reason (performing the move) still
+//   meets every other arm first.
 // - Document forms delegated per the TEST-SPEC entry's own citations: the
 //   refused preview's four-member form (T6.6-3), the full inventory and
 //   preview forms (T11.6-*, T6.6-4/5), a root's stated-null `tags`/
@@ -273,6 +292,11 @@ import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import {
+  D21_A_STAGING,
+  D21_TWO_REASON_MOVE,
+  runD21RefusedStaging,
+} from "./section-6.5-iv.js";
 import {
   assertConditionCounts,
   assertFindingMentionsLocation,
@@ -1850,7 +1874,7 @@ async function runConditionOrderingArm(product: ProductBinding): Promise<void> {
 //
 // TEST-SPEC 14's dual staging (T14-7): a section move staged to both collide
 // (`<new-id>` present in the target file) and create a dependency cycle. The
-// listed order — refused-id-collision (3rd) before refused-cycle (6th) —
+// listed order — refused-id-collision (3rd) before refused-cycle (5th) —
 // inverts the token-alphabetical order, so a token-sorting product fails.
 // No third reason is applicable (module header note).
 
@@ -1942,6 +1966,75 @@ async function runRefusalOrderingArm(product: ProductBinding): Promise<void> {
         `${context} — the cycle finding locates the participating ` +
           `reference spelling \`d={"keep"}\` (SPEC 14: the would-be ` +
           `cycle's full path in source)`,
+      );
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T12.7-2 arm B2 — T6.5-21's two-reason file move: refused-invalid-destination
+// before refused-exposed-derived-file
+// ---------------------------------------------------------------------------
+//
+// The multi-reason refusal the entry names (module header note): T6.5-21(a)'s
+// staging, staged identically through section-6.5-iv.ts's own staging code,
+// its two-reason move alone. 14 lists `refused-invalid-destination` 8th and
+// `refused-exposed-derived-file` 9th — between it and
+// `refused-invalid-rewrite` — the inverse of their alphabetical order, so a
+// token-sorting product fails. The body runs this arm last.
+
+/**
+ * T12.7-2's pin of the two-reason move's report: the reasons in 14's listed
+ * order, each concerning its path (`move specs/A.mdx specs/a'b.mdx` in
+ * T6.5-21(a)'s staging — the destination as spelled, then the origin's emit
+ * destination `specs/A.md`).
+ */
+const TWO_REASON_FINDINGS = [
+  { code: "refused-invalid-destination", path: "specs/a'b.mdx" },
+  { code: "refused-exposed-derived-file", path: "specs/A.md" },
+] as const;
+
+async function runTwoReasonFileMoveArm(product: ProductBinding): Promise<void> {
+  await runD21RefusedStaging(
+    product,
+    { ...D21_A_STAGING, moves: [D21_TWO_REASON_MOVE] },
+    `T12.7-2 (refusal ordering) T6.5-21's two-reason file move in ` +
+      `T6.5-21 ${D21_A_STAGING.key}`,
+    async (workspace, move, context) => {
+      const result = await expectExit(
+        product,
+        workspace,
+        [...move.argv, "--json"],
+        1,
+        `${context} — the file move is refused for two reasons at once: the ` +
+          `destination holds the barred \`'\` (SPEC 7.1), and the relocation ` +
+          `leaves specs/A.md, holding the Markdown the premise build wrote, ` +
+          `no emit destination while the spec glob specs/*.md would discover ` +
+          `it (SPEC 13.4, 7) — exit 1, every applicable reason reported ` +
+          `together (SPEC 6.5, 14, 12.0)`,
+      );
+      const findings = decodeFindingsReport(
+        parseJsonStdout(
+          result,
+          `${context} — a refused operation's report is the findings-only ` +
+            `document {"findings": […]} (SPEC 12.7, 14)`,
+        ),
+        context,
+      ).findings;
+      assertSameJson(
+        findings.map((finding) => ({
+          code: finding.code,
+          path: finding.path,
+        })),
+        TWO_REASON_FINDINGS,
+        `${context} — the two-reason refusal report: one finding per ` +
+          `applicable reason and no reason beside them (SPEC 14), in 14's ` +
+          `LISTED order — refused-invalid-destination (8th listed), ` +
+          `concerning the destination as spelled, before ` +
+          `refused-exposed-derived-file (9th, listed between it and ` +
+          `refused-invalid-rewrite), concerning the origin's emit ` +
+          `destination — the inverse of their alphabetical order (SPEC 14, ` +
+          `12.7)`,
       );
     },
   );
@@ -3110,8 +3203,13 @@ const T12_7_2 = defineProductTest({
     "the T14-7 multi-reason refusal (a section move staged to both collide " +
     "and create a dependency cycle) reports its reasons in 14's LISTED " +
     "order — refused-id-collision before refused-cycle, the inverse of " +
-    "their alphabetical order; two policy findings equal up to the rule " +
-    "name sort by identities element-wise, not configuration order; " +
+    "their alphabetical order — and so does T6.5-21's two-reason file move " +
+    "(move specs/A.mdx specs/a'b.mdx in T6.5-21(a)'s staging): " +
+    "refused-invalid-destination before refused-exposed-derived-file, " +
+    "which 14 lists between it and refused-invalid-rewrite, again the " +
+    "inverse of their alphabetical order; two policy findings equal up to " +
+    "the rule name sort by identities element-wise, not configuration " +
+    "order; " +
     "document forms are asserted literally (H-3): build/check/gated-read/" +
     'refused-operation reports are {"findings": […]} (a finding-free ' +
     "findings is [], never null — on a clean, freshly built workspace a " +
@@ -3127,13 +3225,14 @@ const T12_7_2 = defineProductTest({
     '"interface"}, and an unset outDir is null, never omitted (the ' +
     "refused preview's four-member form is T6.6-3's, the full inventory/" +
     "preview forms T11.6-*'s and T6.6-4/5's, a root's tags/coverage null " +
-    "T11.4-3's, an absent targetTags T11.6-2's) (SPEC 12.7, 14, 13.3, " +
+    "T11.4-3's, an absent targetTags T11.6-2's) (SPEC 12.7, 14, 6.5, 13.3, " +
     "11.3-11.5, 12.6, 7.3, 12.1, 12.2)",
   run: async (product) => {
     await runConditionOrderingArm(product);
     await runRefusalOrderingArm(product);
     await runIdentitiesOrderingArm(product);
     await runDocumentFormsArm(product);
+    await runTwoReasonFileMoveArm(product);
   },
 });
 
