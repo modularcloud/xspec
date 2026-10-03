@@ -45,6 +45,20 @@
 //   (T2.4-2), and the exact count {"14.8": 1} excludes it. The angle-bracket
 //   form parses only as plain TypeScript, which the `.ts` file name selects
 //   (SPEC 2.4, 14.20).
+// - T4.3-2's "no edge, no occurrence" attaches to the dynamic node-form
+//   list (the seven arms marked `dynamicNodeForm`). `query edges` refuses
+//   to answer on a failing workspace (13.3), so the occurrence record is
+//   the edge's witness (SPEC 5.7, 11.2), as in T4.4-1: after each such
+//   arm's `build`, `occurrences` on the same failing workspace must exit 1
+//   with its full answer emitted, its findings exactly {"14.8": 1}, that
+//   finding located in the offending statement's byte window as `build`'s
+//   is, and its record list empty (SPEC 11.2, 11.3). It runs unfiltered,
+//   consulting the whole discovered set; the spec source holds no
+//   reference, so `--file src/app.ts` would give the same verdict, and the
+//   unfiltered answer's guarantee is absolute (11.3). The string-argument
+//   and arity arms carry no such check: SPEC 5.7 lets an invalid call whose
+//   argument resolves record its occurrence beside its finding (14.11's
+//   cross-module call), and TEST-SPEC's clause does not cover them.
 // - T4.4-1 asserts the condition's facets (SPEC 14.11: reported by
 //   `build`/`check`, its edge and occurrence standing beside it,
 //   "additionally a TypeScript type error and a runtime throw per 4.4";
@@ -363,6 +377,13 @@ interface InvalidTextArgumentArm {
   readonly lines: readonly string[];
   /** The offending statement — exactly one of the lines. */
   readonly offending: string;
+  /**
+   * Whether this is one of TEST-SPEC's dynamic node-form arms, of which it
+   * says "no edge, no occurrence" (T4.3-2): `occurrences` on the failing
+   * workspace must list no record. False for the string-argument and arity
+   * arms, which that clause does not cover (module header).
+   */
+  readonly dynamicNodeForm: boolean;
 }
 
 const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
@@ -370,6 +391,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
     name: "a string argument to `text` (the string form is MDX-only, SPEC 4.3)",
     lines: ['import { text } from "../specs/A.xspec";', "", 'text("a");'],
     offending: 'text("a");',
+    dynamicNodeForm: false,
   },
   {
     name:
@@ -382,6 +404,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
       "text(SPEC[key]);",
     ],
     offending: "text(SPEC[key]);",
+    dynamicNodeForm: true,
   },
   // TEST-SPEC's `` text(SPEC[`a`]) ``, `SPEC`'s module holding `a`: template
   // literals are not static (SPEC 2.4), so a product reading the
@@ -398,6 +421,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
       "text(SPEC[`a`]);",
     ],
     offending: "text(SPEC[`a`]);",
+    dynamicNodeForm: true,
   },
   {
     name:
@@ -409,6 +433,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
       "text(SPEC.a?.b);",
     ],
     offending: "text(SPEC.a?.b);",
+    dynamicNodeForm: true,
   },
   // The four TypeScript-only forms SPEC 2.4 makes dynamic in a TypeScript
   // source — never a parse failure there (the spec-source counterparts are
@@ -428,6 +453,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
       "text(SPEC.a!);",
     ],
     offending: "text(SPEC.a!);",
+    dynamicNodeForm: true,
   },
   {
     name:
@@ -440,6 +466,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
       "text(SPEC.a as X);",
     ],
     offending: "text(SPEC.a as X);",
+    dynamicNodeForm: true,
   },
   {
     name:
@@ -453,6 +480,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
       "text(<X>SPEC.a);",
     ],
     offending: "text(<X>SPEC.a);",
+    dynamicNodeForm: true,
   },
   {
     name:
@@ -465,11 +493,13 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
       "text(SPEC.a satisfies X);",
     ],
     offending: "text(SPEC.a satisfies X);",
+    dynamicNodeForm: true,
   },
   {
     name: "a zero-argument `text()` call (arity, SPEC 2.4)",
     lines: ['import { text } from "../specs/A.xspec";', "", "text();"],
     offending: "text();",
+    dynamicNodeForm: false,
   },
   {
     name:
@@ -481,6 +511,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
       "text(SPEC.a, SPEC.a.b);",
     ],
     offending: "text(SPEC.a, SPEC.a.b);",
+    dynamicNodeForm: false,
   },
 ];
 
@@ -509,7 +540,7 @@ const T4_3_2_LAID_OUT_ARMS: readonly LaidOutTextArgumentArm[] = T4_3_2_ARMS.map(
 const T4_3_2 = defineProductTest({
   id: "T4.3-2",
   title:
-    "a string argument to `text` in a TypeScript file fails with 14.8; so does a dynamic node-form argument there — a computed index by variable, a computed index by template literal (`` text(SPEC[`a`]) ``, the module holding `a`: template literals are not static), an optional-chaining chain, and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`text(SPEC.a!)`, `text(SPEC.a as X)`, `text(<X>SPEC.a)` in a `.ts` file, `text(SPEC.a satisfies X)`), each as the `text` argument, the file well-formed — and so do a zero-argument and a two-argument `text(...)` call: 14.8's arity clause holds in either language, the MDX arms being T2.4-3 (SPEC 4.3, 2.4, 4.5)",
+    "a string argument to `text` in a TypeScript file fails with 14.8; so does a dynamic node-form argument there — a computed index by variable, a computed index by template literal (`` text(SPEC[`a`]) ``, the module holding `a`: template literals are not static), an optional-chaining chain, and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`text(SPEC.a!)`, `text(SPEC.a as X)`, `text(<X>SPEC.a)` in a `.ts` file, `text(SPEC.a satisfies X)`), each as the `text` argument, the file well-formed — each dynamic form 14.8 located at the call with no edge and no occurrence: `occurrences` on the failing workspace exits 1 with its full answer, the one 14.8 finding accompanying it located as `build`'s is, and lists no record; and so do a zero-argument and a two-argument `text(...)` call: 14.8's arity clause holds in either language, the MDX arms being T2.4-3 (SPEC 4.3, 2.4, 4.5, 5.7, 11.2, 11.3)",
   run: async (product) => {
     for (const { arm, app } of T4_3_2_LAID_OUT_ARMS) {
       const at = arm.lines.indexOf(arm.offending);
@@ -539,6 +570,35 @@ const T4_3_2 = defineProductTest({
             { file: "src/app.ts", window },
             `${context}: the 14.8 finding`,
           );
+          if (arm.dynamicNodeForm) {
+            // "No edge, no occurrence": `query edges` refuses to answer on a
+            // failing workspace (13.3), so the occurrence record is the
+            // edge's witness (SPEC 5.7, 11.2) — module header.
+            const occContext = `T4.3-2 \`occurrences\` over ${arm.name}`;
+            const report = await occurrencesOnFailingWorkspace(
+              product,
+              workspace,
+              occContext,
+            );
+            assertConditionCounts(
+              report.findings,
+              { "14.8": 1 },
+              `${occContext} — the call's finding accompanies the answer, ` +
+                `none beside it (SPEC 11.2)`,
+            );
+            assertFindingLocated(
+              report.findings[0]!,
+              { file: "src/app.ts", window },
+              `${occContext}: the 14.8 finding, located as \`build\`'s is`,
+            );
+            assertSameJson(
+              report.occurrences.map(projectRecord),
+              [],
+              `${occContext}: no record — a dynamic node-form \`text\` ` +
+                `argument records no edge and no occurrence (SPEC 5.7, ` +
+                `11.2; TEST-SPEC T4.3-2)`,
+            );
+          }
         },
       );
     }

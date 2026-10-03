@@ -60,7 +60,7 @@ Why the harness changed in this re-descent: the documents moved after the harnes
 **Order.** Tasks are in dependency order, and each names what it depends on:
 - Part A (Task 1, the certification gap D1): done and removed.
 - Part B (harness machinery): done and removed. Tasks 3 and 4 gave S-9's MDX judgement spec-group files not named `.mdx` — Task 3 the mechanism (`mdx.wellFormed` and the other `mdx` lists, the `file()` `mdx` option, or an MDX record at the path declare such a file an MDX source; module header of `test/helpers/workspace.ts`), Task 4 the declarations of the suite's three such files (T7.1-1's `specs/notes.txt` and T11.6-2's `specs/note.txt` as staged-source records, T11.6-4's under `mdx.wellFormed`). Task 2 (P-8's and P-11's capture-limit errors) and Task 2b, split from it (every other conversion of a driver rejection), are done and removed: H-11's capture-limit errors.
-- Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order.
+- Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order. Task 5 (T4.3-2's seven dynamic node-form arms each run `occurrences` on the failing workspace and assert no record) is done and removed.
 - Part D (Tasks 10–13): P-8's command sweep.
 - Task 14 confirms the result and deletes the plan.
 
@@ -69,36 +69,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 ## Tasks
 
 ### Part C — The T-numbered tests
-
-### Task 5 — T4.3-2: each dynamic node-form arm records no occurrence (A1; TEST-SPEC §4.3 T4.3-2, L172; SPEC 4.3, 5.7, 11.2, 11.3)
-
-**Depends on.** Nothing.
-
-**The requirement.** TEST-SPEC L172 lists the dynamic node-form arguments of `text` in a TypeScript file:
-- a computed index by variable;
-- a computed index by template literal;
-- an optional-chaining chain;
-- `text(SPEC.a!)`, `text(SPEC.a as X)`, `text(<X>SPEC.a)`, and `text(SPEC.a satisfies X)`.
-
-It says of them: "each 14.8 located at the call (T14-11), no edge, no occurrence, the file well-formed". `T4_3_2` asserts only `build --json`'s exact `{"14.8": 1}` and the finding's location. So a product that reports the 14.8 and also records an occurrence for, say, `text(SPEC.a!)` passes. The engineer of iteration 1's Task 26 (8d5071b) flagged this for T4.3-2 and T4.5-3 and left it out of scope.
-
-**Where.** `test/suite/registry/section-4.3-4.4.ts`:
-- `T4_3_2_ARMS` (about L368–495) and `T4_3_2` (about L509);
-- `occurrencesOnFailingWorkspace` (about L726), which T4.4-1 already uses;
-- T4.4-1's resolving-argument arms (about L860–1000) as the pattern.
-
-**Change.**
-- Mark the seven dynamic node-form arms in the table. In each, after the `build --json` assertions, run `occurrences --file src/app.ts` on the same failing workspace. Assert:
-  - exit 1, the full answer still emitted (11.2);
-  - its findings exactly `{"14.8": 1}`, that finding located as `build`'s is;
-  - an empty record list.
-  `occurrencesOnFailingWorkspace` runs `occurrences` unfiltered; either domain gives the same verdict here, since the spec source holds no reference.
-- Leave the string-argument arm and the two arity arms (zero-argument and two-argument calls) as they are. TEST-SPEC's "no edge, no occurrence" clause attaches to the dynamic node-form list. SPEC 5.7 lets an invalid call whose argument resolves record its occurrence beside its finding (the cross-module call of 14.11), so asserting none for `text("a")` would go beyond the document.
-- Extend the test's title to state the no-edge, no-occurrence check for the dynamic arms.
-
-**Checks.**
-- T4.3-2 against the built product: record the outcome; it passed at 44c5dad.
-- A red check through AGENTS.md's stand-in wrapper: rewrite the `occurrences` answer of one dynamic arm to carry a record (an `embeds` record spanning the call, target `specs/A.mdx#a`); T4.3-2 fails diagnosed on that arm.
 
 ### Task 6 — T4.5-3: every arm records no occurrence (A2(a); TEST-SPEC §4.5 T4.5-3, L183; SPEC 4.5, 5.7, 11.2, 11.3)
 
