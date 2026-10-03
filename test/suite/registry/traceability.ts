@@ -606,12 +606,14 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // consulted surfaces (11.2, 11.3, 11.4).
   "T14-12": [
     "14",
+    "1.4",
     "1.7",
     "2.1",
     "2.7",
     "4.5",
     "4.6",
     "5.7",
+    "7",
     "11.2",
     "11.3",
     "11.4",

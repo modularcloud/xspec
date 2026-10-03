@@ -69,6 +69,44 @@
 //   (n) a duplicate declaration, `let a; let a;` — the marker inside a
 //       sibling function `f`;
 //   (o) a type error, `const n: number = "x"` — the marker inside `f`.
+// The release pin (SPEC 14.20: TypeScript's grammar at release 5.9.3,
+// language level ESNext, every text that release accepts both as module
+// code and as script code well-formed) — each a `.ts` code source holding a
+// form the releases before it reject, beside a marker inside the sibling
+// unit `k`: `build` and `check` exit 0, the marker's `references` edge
+// recorded:
+//   (x) `{ using x = f(); }`;
+//   (y) `async function g() { await using y = h(); }`;
+//   (z) `import a from "./a.json" with { type: "json" };` (the spec-source
+//       twin of the import-attributes form stays 14.20: arm (t)).
+// The language level (14.20: ESNext, the level deciding which characters an
+// identifier admits, 1.4) — U+2EBF0, a Unicode 15.1 letter that release
+// admits at ESNext but rejects at ES3 and ES5:
+//   (aa) a `.ts` code source holding, inside the unit `f`, `const` U+2EBF0
+//        `= 1` and the marker `S.`U+2EBF0, `S` the default binding of
+//        `specs/S.mdx`, which holds a section U+2EBF0 (a valid segment, 1.4):
+//        `build` and `check` exit 0, the marker's `references` edge to that
+//        section recorded;
+//   (ab) a configuration importing `defineConfig as` U+2EBF0 and exporting
+//        `export default` U+2EBF0 `({…})` over an otherwise valid argument
+//        (T7-2's aliased import): `build` exits 0 — the configuration loads
+//        — and `ids --json` lists the spec group's one file, the
+//        configuration in effect (T7-2's own confirmation).
+// The release's other side: (ac), `const` U+1C89 `x = 1`, a negative arm
+// (below).
+// The code source's whitespace — that release's scanner's, not ECMAScript's:
+//   (ad) `const`, U+200B, `a = 1` and, on the next line, `const`, U+0085,
+//        `b = 1`, each away from any reference spelling, beside a marker
+//        inside the unit `f`: `build` and `check` exit 0, its edge recorded.
+// The Unicode pin (14.20: ECMAScript 2024 takes its identifier characters,
+// JSX names' included, from Unicode 15.1) — each a spec source deriving
+// (S-9), its construct alone on its line after the valid section, never
+// 14.20:
+//   (ae) `{` U+2EBF0 `}` — 14.16 at the container;
+//   (af) `<a` U+2EBF0 ` />` — 14.16 at the element's own tag (its
+//        self-closing tag's own characters, SPEC 14);
+//   (ag) `<S id="x" a` U+2EBF0 `="v" />` — 14.17 at that attribute, an
+//        unknown prop (the attribute's own characters, SPEC 14).
 //
 // Negative arms (TEST-SPEC T14-12, negative half) — 14.20, the one
 // zero-length range at the offset the rule of 14 fixes, precomputed from the
@@ -78,6 +116,11 @@
 //   (p) `010` and (q) `09` in a `.ts` file — text ECMAScript derives but
 //       TypeScript's scanner rejects — each at the literal's second digit
 //       (the prefix through its `0` begins a well-formed file);
+//   (ac) `const` U+1C89 `x = 1` in a `.ts` file — at offset 6, U+1C89's
+//       first byte (the prefix `const ` begins a well-formed file, and none
+//       under that release begins `const ` then U+1C89, which 5.9.3 admits
+//       neither to begin nor to continue an identifier at any level — a
+//       runtime's tables postdating Unicode 15.1 admit it);
 //   (r) a spread attribute `{...a, b}` — at its comma (T2.7-3's grammar
 //       pair, failing side);
 //   (s) an ESM block holding a statement — an import line followed on the
@@ -113,11 +156,19 @@
 //   parser's rejection position wherever the two coincide (every arm but
 //   the spread's: the stock parser reports a spread's extra content at the
 //   content, past the comma the rule of 14 fixes — the rule, not the tool,
-//   fixes the offset).
+//   fixes the offset). The Unicode-pin arms (ae)–(ag) are among the form
+//   vectors: S-9's check judges their identifier characters, a JSX name's
+//   included, code point by code point under Unicode 15.1, so each derives
+//   whatever a tokenizer judging a JSX name one UTF-16 code unit at a time
+//   reports. The positive arms' code sources and (ab)'s configuration are
+//   exported as `T14_12_CODE_FORM_VECTORS` for S-9's TypeScript check, which
+//   judges each accepted by TypeScript 5.9.3 both as module code and as
+//   script code; the negative code arms reach it through
+//   `T14_12_UNPARSEABLE_ARMS`.
 // - Every workspace after the body's first — (b)'s onward — stages its
 //   `.mdx` sources as staged-source records (helpers/staged-mdx.ts; S-9's
 //   timing clause), and its configuration and code sources as TypeScript
-//   records (helpers/staged-ts.ts) — the two configurations, each code
+//   records (helpers/staged-ts.ts) — the three configurations, each code
 //   arm's `src/app.ts` — registered at load and judged by the ledger
 //   self-test before any product exists, each carrying its arm's
 //   declaration: an early-error form its allowance, a negative arm's
@@ -130,8 +181,10 @@
 //   (`id="bad name"`, 14.4) before its failing construct — for the ESM-block
 //   arms after the block, (s) also spelling an import designating no
 //   discovered spec source (14.15) before the failure — and every code-source
-//   staging a would-be unresolved marker (`A.missing`, 14.7) before the
-//   literal: the pinned multiset is exactly one 14.20, so a product
+//   staging a would-be unresolved marker (`A.missing`, 14.7) — before the
+//   literal in (p) and (q), after the failing line in (ac), whose pinned
+//   offset 6 fixes the file's opening bytes: the pinned multiset is exactly
+//   one 14.20, so a product
 //   reporting the masked condition, or reporting it instead of the parse
 //   failure, fails. `check --json` is pinned exactly on the never-built
 //   workspace: it holds no record, so 14.10 has nothing to report beside
@@ -150,6 +203,7 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   decodeEdgesReport,
+  decodeIdsReport,
   decodeOccurrencesReport,
   decodeViewReport,
 } from "../../helpers/adapters/index.js";
@@ -182,6 +236,19 @@ import {
 // ---------------------------------------------------------------------------
 // Shared staging
 // ---------------------------------------------------------------------------
+
+// The exotic characters the release-pin, language-level, whitespace, and
+// Unicode-pin arms stage, each built from its code point (never spelled as
+// an escape or a literal in this file).
+
+/** U+2EBF0, CJK Unified Ideographs Extension I's first character — a letter Unicode 15.1 added, astral. */
+const EXT_I = String.fromCodePoint(0x2ebf0);
+/** U+1C89, CYRILLIC CAPITAL LETTER TJE — a Unicode 16 letter, no identifier character under TypeScript 5.9.3. */
+const TJE = String.fromCodePoint(0x1c89);
+/** U+200B ZERO WIDTH SPACE: whitespace to TypeScript 5.9.3's scanner, none to ECMAScript's grammar. */
+const ZWSP = String.fromCodePoint(0x200b);
+/** U+0085 NEXT LINE: whitespace to TypeScript 5.9.3's scanner, none to ECMAScript's grammar. */
+const NEL = String.fromCodePoint(0x0085);
 
 // A staged-source record (S-9): every arm's workspace but the body's first
 // follows its first product invocation, and T14-4's and T14-6's sweeps stage
@@ -498,6 +565,25 @@ const SPEC_FORM_ROWS: readonly SpecFormRow[] = [
     name: "`export const x = <b/>` — JSX inside an ESM block's declaration is an export statement (14.16 at the statement whole, never 14.20)",
     fixture: assemble([PREAMBLE, pin("export const x = <b/>"), "\n"]),
     conditions: ["14.16"],
+  },
+  // The Unicode pin: U+2EBF0, a Unicode 15.1 letter, as an expression's
+  // identifier and inside a JSX element's and an attribute's name.
+  containerArm(
+    "ae",
+    "`{` U+2EBF0 `}` — the one-character identifier U+2EBF0, a letter Unicode 15.1 added, alone in an expression container (14.16 at the container, never 14.20)",
+    `{${EXT_I}}`,
+  ),
+  {
+    arm: "af",
+    name: "`<a` U+2EBF0 ` />` — a JSX element name continued by U+2EBF0, a Unicode 15.1 letter judged as one code point (14.16 at the element's own tag, never 14.20)",
+    fixture: assemble([PREAMBLE, pin(`<a${EXT_I} />`), "\n"]),
+    conditions: ["14.16"],
+  },
+  {
+    arm: "ag",
+    name: '`<S id="x" a` U+2EBF0 `="v" />` — an attribute name continued by U+2EBF0, a Unicode 15.1 letter judged as one code point (14.17 at that attribute, an unknown prop; never 14.20)',
+    fixture: assemble([PREAMBLE, '<S id="x" ', pin(`a${EXT_I}="v"`), " />\n"]),
+    conditions: ["14.17"],
   },
 ];
 
@@ -906,10 +992,11 @@ async function runExportNopeArm(product: ProductBinding): Promise<void> {
 const A_MDX = '<S id="a">\nAlpha behavior.\n</S>\n';
 
 /**
- * `A_MDX` as a staged-source record (S-9): every code arm's workspace —
- * (l)–(o)'s and the negative (p)'s and (q)'s — follows the body's first
+ * `A_MDX` as a staged-source record (S-9): every code arm's workspace but
+ * (aa)'s — (l)–(o)'s, (x)–(z)'s, and (ad)'s, the negative (p)'s, (q)'s,
+ * and (ac)'s — and the configuration arm (ab)'s follow the body's first
  * product invocation, and T14-4's and T14-6's sweeps and T14-11's
- * re-staging stage (p)'s and (q)'s after theirs.
+ * re-staging stage (p)'s, (q)'s, and (ac)'s after theirs.
  */
 const A_STAGED = stagedMdx(
   "T14-4/T14-6/T14-11/T14-12 the code arms' spec source specs/A.mdx",
@@ -919,15 +1006,45 @@ const A_STAGED = stagedMdx(
 const CODE_IMPORT = 'import A from "../specs/A.xspec"';
 const CODE_FILE = "src/app.ts";
 
+/** The spec source a code arm's marker designates a node of. */
+interface CodeFormTarget {
+  /** The spec source's workspace-relative path. */
+  readonly file: string;
+  /** Its staged-source record (S-9). */
+  readonly source: StagedMdx;
+  /** The designated node's identity in that file. */
+  readonly id: string;
+}
+
+/** The default target: `specs/A.mdx`'s section `a`, the marker `A.a`. */
+const A_TARGET: CodeFormTarget = {
+  file: "specs/A.mdx",
+  source: A_STAGED,
+  id: "a",
+};
+
 /** One code arm's row: `src/app.ts`'s lines and the unit the marker lies in. */
 interface CodeFormRow {
   readonly arm: string;
   readonly name: string;
   /** The file's lines, each LF-terminated when laid out. */
   readonly lines: readonly string[];
-  /** The named unit (SPEC 4.6) enclosing the marker `A.a`. */
+  /** The named unit (SPEC 4.6) enclosing the marker. */
   readonly unit: string;
+  /** The node the marker designates; absent, `A_TARGET` (the marker `A.a`). */
+  readonly target?: CodeFormTarget;
 }
+
+/**
+ * The language-level arm's spec source: one top-level section whose
+ * segment is U+2EBF0 (a valid segment, SPEC 1.4) — a staged-source record
+ * (S-9), the arm's workspace following the body's first invocation.
+ */
+const S_MDX = `<S id="${EXT_I}">\nIdeograph behavior.\n</S>\n`;
+const S_STAGED = stagedMdx(
+  "T14-12 (aa) the language-level arm's spec source, one section U+2EBF0 specs/S.mdx",
+  S_MDX,
+);
 
 const CODE_FORM_ROWS: readonly CodeFormRow[] = [
   {
@@ -985,6 +1102,81 @@ const CODE_FORM_ROWS: readonly CodeFormRow[] = [
     ],
     unit: "f",
   },
+  // The release pin: forms the releases predating their admission reject,
+  // each beside a marker inside the sibling unit `k`.
+  {
+    arm: "x",
+    name: "the release pin: `{ using x = f(); }` — a `using` declaration in a block (well-formed TypeScript at 5.9.3)",
+    lines: [
+      CODE_IMPORT,
+      "",
+      "{ using x = f(); }",
+      "",
+      "function k(): void {",
+      "  A.a",
+      "}",
+    ],
+    unit: "k",
+  },
+  {
+    arm: "y",
+    name: "the release pin: `async function g() { await using y = h(); }` — an `await using` declaration (well-formed TypeScript at 5.9.3)",
+    lines: [
+      CODE_IMPORT,
+      "",
+      "async function g() { await using y = h(); }",
+      "",
+      "function k(): void {",
+      "  A.a",
+      "}",
+    ],
+    unit: "k",
+  },
+  {
+    arm: "z",
+    name: 'the release pin: `import a from "./a.json" with { type: "json" };` — an import spelled with import attributes in a code source (well-formed TypeScript at 5.9.3)',
+    lines: [
+      CODE_IMPORT,
+      'import a from "./a.json" with { type: "json" };',
+      "",
+      "function k(): void {",
+      "  A.a",
+      "}",
+    ],
+    unit: "k",
+  },
+  // The language level: U+2EBF0 begins an identifier at ESNext, not at ES3
+  // or ES5 — the local `const` and the marker's segment alike.
+  {
+    arm: "aa",
+    name: "the language level: `const` U+2EBF0 `= 1` and the marker `S.` U+2EBF0 inside one unit — an identifier character TypeScript 5.9.3 admits at ESNext alone (well-formed TypeScript)",
+    lines: [
+      'import S from "../specs/S.xspec"',
+      "",
+      "function f(): void {",
+      `  const ${EXT_I} = 1`,
+      `  S.${EXT_I}`,
+      "}",
+    ],
+    unit: "f",
+    target: { file: "specs/S.mdx", source: S_STAGED, id: EXT_I },
+  },
+  // The code source's whitespace: that release's scanner's, not ECMAScript's.
+  {
+    arm: "ad",
+    name: "the whitespace: `const` U+200B `a = 1` and, on the next line, `const` U+0085 `b = 1` — both code points whitespace to that release's scanner, neither to ECMAScript's grammar (well-formed TypeScript)",
+    lines: [
+      CODE_IMPORT,
+      "",
+      `const${ZWSP}a = 1`,
+      `const${NEL}b = 1`,
+      "",
+      "function f(): void {",
+      "  A.a",
+      "}",
+    ],
+    unit: "f",
+  },
 ];
 
 /**
@@ -993,18 +1185,21 @@ const CODE_FORM_ROWS: readonly CodeFormRow[] = [
  * invocation.
  */
 interface CodeFormArm extends CodeFormRow {
-  /** `lines` laid out, each LF-terminated, as its record. */
+  /** `lines` laid out, each LF-terminated. */
+  readonly text: string;
+  /** `text` as its record. */
   readonly source: StagedTs;
 }
 
 const CODE_FORM_ARMS: readonly CodeFormArm[] = CODE_FORM_ROWS.map(
-  (row): CodeFormArm => ({
-    ...row,
-    source: stagedTs(
-      `T14-12 (${row.arm}) ${row.name} ${CODE_FILE}`,
-      row.lines.map((line) => line + "\n").join(""),
-    ),
-  }),
+  (row): CodeFormArm => {
+    const text = row.lines.map((line) => line + "\n").join("");
+    return {
+      ...row,
+      text,
+      source: stagedTs(`T14-12 (${row.arm}) ${row.name} ${CODE_FILE}`, text),
+    };
+  },
 );
 
 /**
@@ -1017,11 +1212,12 @@ async function runCodeFormArm(
   arm: CodeFormArm,
 ): Promise<void> {
   const context = `T14-12 (${arm.arm}) ${arm.name}`;
+  const target = arm.target ?? A_TARGET;
   await withWorkspace(
     {
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-        "specs/A.mdx": A_STAGED,
+        [target.file]: target.source,
         [CODE_FILE]: arm.source,
       },
     },
@@ -1055,13 +1251,88 @@ async function runCodeFormArm(
         [
           {
             from: `${CODE_FILE}#${arm.unit}`,
-            to: "specs/A.mdx#a",
+            to: `${target.file}#${target.id}`,
             kind: "references",
           },
         ],
         `${context}: the marker inside the unit is attributed to it and its ` +
           `\`references\` edge recorded — the workspace's whole set (SPEC ` +
           `4.5, 4.6, 14.20)`,
+      );
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// (ab) The language level in the configuration file
+// ---------------------------------------------------------------------------
+
+/**
+ * (ab)'s configuration: T7-2's aliased `defineConfig` import, the alias the
+ * one-character identifier U+2EBF0 — well-formed under TypeScript 5.9.3 at
+ * ESNext, the grammar 14.20 judges a configuration file by, and rejected at
+ * ES3 and ES5 — over an otherwise valid argument (one spec group). A
+ * TypeScript record (S-9): the arm's workspace follows the body's first
+ * product invocation.
+ */
+const ALIASED_IDEOGRAPH_CONFIG_TEXT = `import { defineConfig as ${EXT_I} } from "xspec"
+
+export default ${EXT_I}({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`;
+const ALIASED_IDEOGRAPH_CONFIG = stagedTs(
+  "T14-12 (ab) xspec.config.ts (defineConfig imported as U+2EBF0, one spec group)",
+  ALIASED_IDEOGRAPH_CONFIG_TEXT,
+);
+
+/**
+ * (ab): the configuration loads without error — `build` exits 0 and
+ * `check` is clean on the otherwise valid workspace, where a product
+ * parsing the configuration file at ES3 or ES5 reports 14.20 or 14.14 — and
+ * is in effect: `ids --json` lists exactly the spec group's one file and
+ * its one identity (T7-2's aliased arm's own confirmation; SPEC 7, 14.20).
+ */
+async function runAliasedConfigArm(product: ProductBinding): Promise<void> {
+  const context =
+    "T14-12 (ab) the language level: a configuration importing " +
+    "`defineConfig as` U+2EBF0 and exporting `export default` U+2EBF0 " +
+    "`({…})` — an identifier character TypeScript 5.9.3 admits at ESNext " +
+    "alone (T7-2's aliased import)";
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": ALIASED_IDEOGRAPH_CONFIG,
+        "specs/A.mdx": A_STAGED,
+      },
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${context} — \`build\` exits 0: the configuration is well-formed ` +
+          `TypeScript and loads without error, the workspace otherwise ` +
+          `valid (SPEC 14.20, 7, 12.1)`,
+      );
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        `${context} — \`check --json\` on the freshly built workspace ` +
+          `(SPEC 14.20, 12.2)`,
+      );
+      const label = `${context} — \`ids --json\``;
+      const report = decodeIdsReport(
+        await runJson(product, workspace, ["ids", "--json"], label),
+        label,
+      );
+      assertSameJson(
+        report.files,
+        [{ file: "specs/A.mdx", ids: ["a"] }],
+        `${label}: the aliased configuration took effect — its spec group ` +
+          `drives discovery (SPEC 7)`,
       );
     },
   );
@@ -1220,6 +1491,26 @@ export const T14_12_UNPARSEABLE_ARMS: readonly UnparseableArm[] = [
     "`09` in a `.ts` file — a leading-zero decimal, rejected by TypeScript's scanner (14.20 at the literal's second digit)",
     [CODE_IMPORT, "\n\n", MASKED_MARKER, "\n\n", "const n = 0", pin(""), "9\n"],
     LEADING_ZERO_RULE,
+  ),
+  codeUnparseableArm(
+    "ac",
+    "`const` U+1C89 `x = 1` in a `.ts` file — U+1C89, a Unicode 16 letter, which TypeScript 5.9.3 admits neither to begin nor to continue an identifier (14.20 at offset 6, its first byte)",
+    [
+      "const ",
+      pin(""),
+      `${TJE}x = 1`,
+      "\n\n",
+      CODE_IMPORT,
+      "\n\n",
+      MASKED_MARKER,
+      "\n",
+    ],
+    "U+1C89's first byte, offset 6: the prefix `const ` begins a " +
+      "well-formed file, while TypeScript 5.9.3 admits U+1C89 neither to " +
+      "begin nor to continue an identifier at any language level — " +
+      "whatever a runtime's Unicode tables postdating 15.1 admit — so no " +
+      "well-formed file begins with `const ` then U+1C89 (SPEC 14.20: " +
+      "TypeScript's grammar at release 5.9.3)",
   ),
   specUnparseableArm(
     "r",
@@ -1393,7 +1684,7 @@ async function runUnparseableArm(
 const T14_12 = defineProductTest({
   id: "T14-12",
   title:
-    "well-formedness is decided by derivability alone (SPEC 14.20) — positive arms, each file well-formed and proceeding to its ordinary outcome, never 14.20: in a spec source, ECMAScript's early errors — two imports binding one identifier in one ESM block (14.15), `export { nope }` after a valid, used import (exactly one 14.16 at the statement whole, no 14.15; the import listed by `view` with its resolved target, the statement getting no view entry, the `{text(BASE.a)}` embedding recorded by `occurrences --file`, the finding accompanying each answer, exit 1), `{1 = 2}`, `{let}`, `{010}` (14.16 each) — and the expression grammar — `{a, b}` (14.16), `d={BASE.a, BASE.b}` (14.8 located whole), `{await x}`, `{function(){}}` (14.16 each), `{...(a, b)}` (14.17 at the whole braced construct), `export const x = <b/>` (14.16 at the statement whole); in a code-group file, TypeScript's post-parse checks — a rest parameter that is not last, a misplaced `abstract` modifier, a duplicate `let` declaration, a type error — each leaving the file well-formed: `build` and `check` exit 0, a marker inside one of the file's units attributed to it and its `references` edge recorded; negative arms, each file unparseable — 14.20, the one zero-length range at the offset the rule of 14 fixes, reported by `build` and by `check` and masking every condition inside the file: `010` and `09` in a `.ts` file at the literal's second digit, a spread attribute `{...a, b}` at its comma, an ESM block holding a `const` statement at the start of its line, import attributes at `with`, `d={]}` at the `]`, `{text(}` at its `}`, and an unbalanced `{text(\"a\")` ending the file at the file's byte length (the surfaces of 11.2 over the same stagings: T14-4's rows) (SPEC 14.20, 14, 1.7, 2.1, 2.7, 4.5, 4.6, 5.7, 11.2, 11.3, 11.4)",
+    "well-formedness is decided by derivability alone (SPEC 14.20) — positive arms, each file well-formed and proceeding to its ordinary outcome, never 14.20: in a spec source, ECMAScript's early errors — two imports binding one identifier in one ESM block (14.15), `export { nope }` after a valid, used import (exactly one 14.16 at the statement whole, no 14.15; the import listed by `view` with its resolved target, the statement getting no view entry, the `{text(BASE.a)}` embedding recorded by `occurrences --file`, the finding accompanying each answer, exit 1), `{1 = 2}`, `{let}`, `{010}` (14.16 each) — and the expression grammar — `{a, b}` (14.16), `d={BASE.a, BASE.b}` (14.8 located whole), `{await x}`, `{function(){}}` (14.16 each), `{...(a, b)}` (14.17 at the whole braced construct), `export const x = <b/>` (14.16 at the statement whole) — and the Unicode pin, U+2EBF0 judged as one Unicode 15.1 code point — `{` U+2EBF0 `}` (14.16 at the container), the element `<a` U+2EBF0 ` />` (14.16 at its own tag), and a section attribute named `a` then U+2EBF0 (14.17 at that attribute); in a code-group file, TypeScript's post-parse checks — a rest parameter that is not last, a misplaced `abstract` modifier, a duplicate `let` declaration, a type error — each leaving the file well-formed: `build` and `check` exit 0, a marker inside one of the file's units attributed to it and its `references` edge recorded; the release pin — `{ using x = f(); }`, `async function g() { await using y = h(); }`, and an import spelled with import attributes in a code source — the language level — `const` U+2EBF0 `= 1` beside the marker `S.` U+2EBF0 inside one unit, its edge to the section U+2EBF0 recorded, and a configuration importing `defineConfig as` U+2EBF0 (`build` exit 0, `check` clean, the configuration in effect) — and the code source's whitespace — `const` U+200B `a = 1` and `const` U+0085 `b = 1` — each well-formed under TypeScript 5.9.3 at ESNext: `build` and `check` exit 0, the marker's `references` edge recorded; negative arms, each file unparseable — 14.20, the one zero-length range at the offset the rule of 14 fixes, reported by `build` and by `check` and masking every condition inside the file: `010` and `09` in a `.ts` file at the literal's second digit, `const` U+1C89 `x = 1` in a `.ts` file at offset 6 (U+1C89's first byte), a spread attribute `{...a, b}` at its comma, an ESM block holding a `const` statement at the start of its line, import attributes at `with`, `d={]}` at the `]`, `{text(}` at its `}`, and an unbalanced `{text(\"a\")` ending the file at the file's byte length (the surfaces of 11.2 over the same stagings: T14-4's rows) (SPEC 14.20, 14, 1.4, 1.7, 2.1, 2.7, 4.5, 4.6, 5.7, 7, 11.2, 11.3, 11.4)",
   run: async (product) => {
     await runDuplicateBindingArm(product);
     await runExportNopeArm(product);
@@ -1403,6 +1694,7 @@ const T14_12 = defineProductTest({
     for (const arm of CODE_FORM_ARMS) {
       await runCodeFormArm(product, arm);
     }
+    await runAliasedConfigArm(product);
     for (const arm of T14_12_UNPARSEABLE_ARMS) {
       await runUnparseableArm(product, arm);
     }
@@ -1446,6 +1738,36 @@ export const T14_12_FORM_VECTORS: readonly (readonly [
     ],
   ),
   ["T14-12 the code arms' spec source", A_MDX, []],
+  [
+    "T14-12 (aa) the language-level arm's spec source, one section U+2EBF0",
+    S_MDX,
+    [],
+  ],
+];
+
+/**
+ * Every code source and configuration file T14-12's positive arms stage —
+ * the post-parse arms (l)–(o), the release pin (x)–(z), the language level
+ * (aa) and (ab)'s configuration, the whitespace arm (ad) — each declared
+ * well-formed (S-9), for the S-9 TypeScript self-test, which judges each
+ * accepted by TypeScript 5.9.3 both as module code and as script code
+ * without the product. `[name, file name, source]`, uniquely named.
+ */
+export const T14_12_CODE_FORM_VECTORS: readonly (readonly [
+  string,
+  string,
+  string,
+])[] = [
+  ...CODE_FORM_ARMS.map((arm): readonly [string, string, string] => [
+    `T14-12 (${arm.arm}) ${arm.name}`,
+    CODE_FILE,
+    arm.text,
+  ]),
+  [
+    "T14-12 (ab) a configuration importing `defineConfig as` U+2EBF0",
+    "xspec.config.ts",
+    ALIASED_IDEOGRAPH_CONFIG_TEXT,
+  ],
 ];
 
 /**

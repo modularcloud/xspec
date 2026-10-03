@@ -27,7 +27,10 @@ import {
   type TsReading,
   type TsVerdict,
 } from "../helpers/ts-derivability.js";
-import { T14_12_UNPARSEABLE_ARMS } from "../suite/registry/section-14-iii.js";
+import {
+  T14_12_CODE_FORM_VECTORS,
+  T14_12_UNPARSEABLE_ARMS,
+} from "../suite/registry/section-14-iii.js";
 
 const cp = (code: number): string => String.fromCodePoint(code);
 
@@ -517,8 +520,24 @@ describe("S-9 (TypeScript): T14-12's staged code arms are rejected both ways", (
 
   test("the code arms are present", () => {
     expect(codeArms.map((arm) => arm.arm)).toEqual(
-      expect.arrayContaining(["p", "q"]),
+      expect.arrayContaining(["p", "q", "ac"]),
     );
+  });
+
+  test("(ac)'s pinned offset is 6, U+1C89's first byte, where the release itself rejects", () => {
+    const arm = codeArms.find((candidate) => candidate.arm === "ac");
+    expect(arm).toBeDefined();
+    expect(arm?.offset).toBe(6);
+    expect(arm?.source.startsWith(`const ${U16_LETTER}x = 1`)).toBe(true);
+    const verdict = expectUnparseable(judged(arm?.source ?? "", "src/app.ts"));
+    for (const reading of TS_READINGS) {
+      // "Invalid character." at the code point: an ASCII prefix, so the
+      // release's UTF-16 position is the byte offset.
+      expect(verdict.errors[reading][0]).toMatchObject({
+        code: 1127,
+        offset: 6,
+      });
+    }
   });
 
   test.each(
@@ -529,6 +548,25 @@ describe("S-9 (TypeScript): T14-12's staged code arms are rejected both ways", (
   )("%s", (_name, file, source) => {
     const verdict = expectUnparseable(judged(source, file));
     expect(tsDeclarationProblem(verdict, "unparseable")).toBeUndefined();
+  });
+});
+
+// T14-12's positive code arms as staged (section-14-iii.ts): the post-parse
+// arms, the release pin, the language level (the code source and the
+// configuration), and the whitespace arm — each accepted both ways.
+describe("S-9 (TypeScript): every code source and configuration T14-12's positive arms stage is accepted both ways", () => {
+  test("the vector set is complete and uniquely named", () => {
+    expect(T14_12_CODE_FORM_VECTORS.length).toBe(10);
+    expect(new Set(T14_12_CODE_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      T14_12_CODE_FORM_VECTORS.length,
+    );
+  });
+
+  test.each(T14_12_CODE_FORM_VECTORS)("%s", (_name, file, source) => {
+    expect(judged(source, file)).toEqual({ verdict: "well-formed" });
+    for (const reading of TS_READINGS) {
+      expect(readTypeScript(source, file, reading)).toEqual([]);
+    }
   });
 });
 
