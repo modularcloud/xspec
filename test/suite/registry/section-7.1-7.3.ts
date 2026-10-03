@@ -106,19 +106,20 @@
 //   destination) and a clean build (`emit: false` — no path is a
 //   destination, so the ordinary import is outside xspec's validations).
 // - Staged-source records (TEST-SPEC S-9's before-any-product clause;
-//   helpers/staged-mdx.ts): every `.mdx` file a body stages in a workspace
+//   helpers/staged-mdx.ts): every MDX source a body stages in a workspace
 //   created after its first product invocation — `expectConfigRefused`'s
-//   one staging site, T7.1-1's non-`.mdx`-match, path-character (one
-//   record staged at every barred path), and code-source-control
-//   workspaces, T7.3-1's
+//   one staging site, T7.1-1's non-`.mdx`-match (its `specs/notes.txt`
+//   included: a spec-group file not named `.mdx` is an MDX source all the
+//   same, invalid by its name yet judged by 14.20, and a record at that
+//   path declares it a well-formed one), path-character (one record staged
+//   at every barred path), and code-source-control workspaces, T7.3-1's
 //   `EMISSION_FILES` (its first workspace's too, the map being shared) and
 //   destination workspaces — is a ledger record, judged by
 //   test/self/s9-staged-sources.test.ts before any product exists: the
 //   minimal `a` and `b` sources are section-7-basics.ts's shared records,
 //   staged byte-identically by the three §7 modules. T7.1-1's two-group
 //   workspace and T7.2-1's overlap workspace, each its body's first,
-//   precede any invocation and stay plain; `specs/notes.txt` is no `.mdx`
-//   path and stays a string.
+//   precede any invocation and stay plain.
 // - TypeScript staged-source records (TEST-SPEC S-9's TypeScript and
 //   timing clauses; helpers/staged-ts.ts): every configuration file and
 //   code source a body stages in a workspace created after its first
@@ -488,6 +489,21 @@ export default defineConfig({
   }
 })
 `,
+);
+
+// The non-`.mdx`-match workspace's spec-group file not named `.mdx`: an MDX
+// source all the same — invalid by its name (SPEC 7.1, 14.19), its content
+// still judged by 14.20 (11.2 keeps its parse-local structure) — whose
+// content is well-formed, so the invalid path is the workspace's only
+// condition and the arm's exact `{"14.19": 1}` has teeth. T7.1-1 stages it
+// after its first product invocation, so it is a staged-source record
+// (module header; S-9's before-any-product clause): a record at a path not
+// named `.mdx` declares that path a well-formed MDX source for its own
+// write, so the ledger self-test judges it before any product exists.
+const NON_MDX_MATCH_NOTES = stagedMdx(
+  "T7.1-1 specs/notes.txt (the spec-group match without .mdx, its content " +
+    "well-formed so the 14.19 is the workspace's only condition)",
+  mdxSection("n"),
 );
 
 // --- T7.1-1's path-character arms (SPEC 7.1, 14.19) --------------------------
@@ -919,7 +935,8 @@ const T7_1_1 = defineProductTest({
     });
 
     // A spec-group match without `.mdx` → 14.19. The offending file's
-    // content is itself well-formed, so the invalid path is the workspace's
+    // content is itself well-formed (its record declares it so, and S-9's
+    // ledger self-test judges it), so the invalid path is the workspace's
     // only condition (the exact-count assertion has teeth) — and a product
     // that wrongly accepts the match builds cleanly and fails the exit-code
     // assertion.
@@ -928,7 +945,7 @@ const T7_1_1 = defineProductTest({
         files: {
           "xspec.config.ts": NON_MDX_MATCH_CONFIG,
           "specs/A.mdx": SECTION_A_SOURCE,
-          "specs/notes.txt": mdxSection("n"),
+          "specs/notes.txt": NON_MDX_MATCH_NOTES,
         },
       },
       async (workspace) => {

@@ -959,6 +959,19 @@ const T11_6_2_EMIT_A = stagedMdx(
   '<S id="seule">\nÉmise.\n</S>\n',
 );
 
+// The emit workspace's spec-group file without the `.mdx` extension (the
+// extension-free glob `specs/*` matches it; 14.19, SPEC 7.1): an MDX source
+// all the same, its content judged by 14.20 whatever its name (11.2). The
+// inventory parses no sources (11.6), so no assertion turns on its content;
+// it is declared well-formed all the same — one line of prose, which
+// derives — rather than left undeclared: a record at a path not named
+// `.mdx` declares that path a well-formed MDX source for its own write, so
+// the ledger self-test judges it before any product exists (S-9).
+const T11_6_2_EMIT_NOTE = stagedMdx(
+  "T11.6-2 emit workspace specs/note.txt (a spec-group file without .mdx)",
+  "pas une source xspec\n",
+);
+
 // The emit workspace's invalid-path `.mdx` sources (SPEC 13.1: per-source
 // derived paths follow the `NAME.mdx` name shape alone; 11.6: the inventory
 // answers whatever the sources' validity). `specs/a'b.mdx` — `'` is barred
@@ -1228,8 +1241,9 @@ const T11_6_2 = defineProductTest({
         [T11_6_2_QUOTE_SOURCE]: T11_6_2_EMIT_QUOTE,
         // A spec-group file without the `.mdx` extension: discovered (the
         // extension-free glob matches it), invalid (14.19, SPEC 7.1) — a
-        // finding of build/check, never of the inventory (11.6).
-        "specs/note.txt": "pas une source xspec\n",
+        // finding of build/check, never of the inventory (11.6). Its record
+        // declares it a well-formed MDX source (S-9).
+        "specs/note.txt": T11_6_2_EMIT_NOTE,
       },
     });
     try {
@@ -2443,7 +2457,15 @@ const T11_6_4 = defineProductTest({
         [CORRUPT_SESSION_PATH]: "{{{ pas du JSON — session corrompue\n",
       },
       // S-9: casse.mdx is the imperfect workspace's parse failure (14.20).
-      mdx: { unparseable: ["specs/casse.mdx"] },
+      // note.txt, the spec-group file without `.mdx` (14.19), is an MDX
+      // source all the same, its content judged by 14.20 whatever its name:
+      // declared well-formed — the premise's one finding per staged
+      // construct allows it no 14.20 — and judged at creation, the body's
+      // first staging, before any product invocation.
+      mdx: {
+        unparseable: ["specs/casse.mdx"],
+        wellFormed: ["specs/note.txt"],
+      },
     });
     try {
       // Staging premise (SPEC 14; the Exclusions' positively-reported

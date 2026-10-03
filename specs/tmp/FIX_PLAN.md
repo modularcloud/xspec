@@ -59,7 +59,7 @@ Why the harness changed in this re-descent: the documents moved after the harnes
 
 **Order.** Tasks are in dependency order, and each names what it depends on:
 - Part A (Task 1, the certification gap D1): done and removed.
-- Part B (Task 4): harness machinery — S-9's MDX judgement of spec-group files not named `.mdx`. Task 3 (the mechanism: `mdx.wellFormed` and the other `mdx` lists, the `file()` `mdx` option, or an MDX record at the path declare such a file an MDX source; module header of `test/helpers/workspace.ts`) is done and removed; Task 4 uses it. Task 2 (P-8's and P-11's capture-limit errors) and Task 2b, split from it (every other conversion of a driver rejection), are done and removed: H-11's capture-limit errors.
+- Part B (harness machinery): done and removed. Tasks 3 and 4 gave S-9's MDX judgement spec-group files not named `.mdx` — Task 3 the mechanism (`mdx.wellFormed` and the other `mdx` lists, the `file()` `mdx` option, or an MDX record at the path declare such a file an MDX source; module header of `test/helpers/workspace.ts`), Task 4 the declarations of the suite's three such files (T7.1-1's `specs/notes.txt` and T11.6-2's `specs/note.txt` as staged-source records, T11.6-4's under `mdx.wellFormed`). Task 2 (P-8's and P-11's capture-limit errors) and Task 2b, split from it (every other conversion of a driver rejection), are done and removed: H-11's capture-limit errors.
 - Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order.
 - Part D (Tasks 10–13): P-8's command sweep.
 - Task 14 confirms the result and deletes the plan.
@@ -67,27 +67,6 @@ Why the harness changed in this re-descent: the documents moved after the harnes
 Take the topmost task unless told otherwise. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement.
 
 ## Tasks
-
-### Part B — Machinery
-
-### Task 4 — Declare the three non-`.mdx` spec-group files the suite stages as MDX sources (C2, part 2: the declarations; TEST-SPEC §17 S-9, T7.1-1, T11.6-2, T11.6-4)
-
-**Depends on.** Task 3 (done and removed): a spec-group file not named `.mdx` is judged once its staging declares it an MDX source — `mdx: { wellFormed: [path] }` (or another `mdx` list: `unparseable`, `unchecked`, `allowances`, `perDraw`) in the workspace declaration, a `file()` `mdx` option, or an MDX staged-source record at the path (`stagedMdx(name, source)`, which declares the path for its own write); plain contents at a declared path after a product invocation are refused by the undeclared-staging guard, at creation too. AGENTS.md's staged-source ledger bullet has the recipe.
-
-**The files.** Each is a spec-group match without `.mdx`, and each derives today, but nothing checks it. An ill-formed content would surface as a false product failure (an extra 14.20 beside the asserted findings).
-- **T7.1-1's `specs/notes.txt`**: `mdxSection("n")`, in `test/suite/registry/section-7.1-7.3.ts` (about L931; the workspace with `NON_MDX_MATCH_CONFIG`). TEST-SPEC: "a spec-group match without `.mdx` → 14.19", and the arm asserts exactly `{"14.19": 1}`, so the file must be well-formed. It is staged plain, after the body's first product invocation.
-- **T11.6-4's `specs/note.txt`**: one line of French prose ("pas une source xspec" and a line feed), in `test/suite/registry/section-11.6.ts` (about L2439, arm A's imperfect workspace). The body's premise `build --json` must report exactly one finding per staged construct (`IMPERFECT_PREMISE_CONDITIONS`, about L2287–2300), so the file must be well-formed.
-- **T11.6-2's `specs/note.txt`**: the same content, in the same file (about L1232). `inventory` parses no sources (11.6), so declare it well-formed, or explicitly undeclared (`unchecked`) with a comment saying why.
-
-**Change.**
-- T7.1-1: stage `specs/notes.txt` as a staged-source record registered at module level (a record at that path declares it a well-formed MDX source). `test/self/s9-staged-sources.test.ts` then judges it before any product exists. Keep the arm's bytes unchanged: move the expression, never re-spell it.
-- T11.6-4 and T11.6-2: declare each `specs/note.txt` (`mdx.wellFormed`, or a record). Use a record wherever the workspace is created after a product invocation in the body, since the guard now applies there.
-- Keep every assertion unchanged.
-
-**Checks.**
-- `test/self/s9-staged-sources.test.ts` passes, with its record count up by the new records.
-- A red check per file: temporarily give its content an ill-formed line, for example an unclosed `<S id="n">`. Staging, or the ledger self-test for a record, must refuse it as a harness error before the product runs. Then restore it byte-for-byte.
-- T7.1-1, T11.6-2, and T11.6-4 against the built product: outcomes unchanged. At 44c5dad T7.1-1 fails diagnosed (CI run 854), and T11.6-2 and T11.6-4 pass.
 
 ### Part C — The T-numbered tests
 
