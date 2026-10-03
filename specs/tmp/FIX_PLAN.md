@@ -38,20 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 60 — T14-11: arm (r) widened, and the new 14.15 location arms (TEST-SPEC L593; B16)
-
-**Where.** `test/suite/registry/section-14.ts`.
-
-**Change.** Spellings from L593.
-- *Arm (r).* U+1680 and U+3000 between the braces and `BASE.missing`, each excluded from the 14.5 range.
-- *14.15 locations:*
-  - `export import X = require("./A.xspec")`, located from `import`;
-  - the import types `typeof import("./A.xspec").default` and `import("./A.xspec").T<number>`, each locating `import("./A.xspec")`;
-  - `declare module "./A.xspec" { }`, located whole, `declare` included;
-  - `export declare module "./A.xspec" { }`, located from `declare`.
-
-**Checks.** S-9 and S-7 pass. T14-11 against the built product.
-
 ### Task 61 — T14-12: the re-descent arms (TEST-SPEC L594; SPEC 14.20; B17)
 
 **Depends on.** Tasks 14, 15, and 17.
