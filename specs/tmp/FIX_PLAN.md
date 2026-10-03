@@ -38,25 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 41 — T6.5-20, arms (d) and (e): module-linking designation, and the derived paths a move retires (TEST-SPEC L299)
-
-**Depends on.** Task 39 (done).
-
-**Where.** As Task 39: `test/suite/registry/section-6.5-iv.ts`, T6.6-3's twins through its table.
-
-**Change.** Spellings from L299; every code source must be accepted by 5.9.3 both ways.
-- *Arm (d).* Emission is next to sources, and `src/c.ts` holds one module-linking form alone, its relative specifier `../specs/B.md`. There is one staging per form 4 names, each line followed by U+000A: `import "../specs/B.md"`, `export * from "../specs/B.md"`, `import X = require("../specs/B.md")`, `import("../specs/B.md")`, `type T = import("../specs/B.md")`, and `declare module "../specs/B.md" { }`. Each makes `move specs/Z.mdx specs/B.mdx` refused.
-  - *Controls, each performed with `check` clean afterward:* emission disabled, under each of the six stagings; and emission enabled with the path named only by `require("../specs/B.md")`, by the triple-slash reference, and by the template-literal `import()`.
-  - *Section form.* (d)'s section-form recurrences are refused alike.
-- *Arm (e), the derived paths a file-form move retires.* `specs/A.mdx` is the only source, holding a section `x` and no import, with each staging staged before any build.
-  - *Performed, exit 0 with `check` clean:* `move specs/A.mdx specs/A.xspec.ts/B.mdx`, `move specs/A.mdx specs/A.md/B.mdx`, and one staging per companion path.
-  - *Refused controls:* each of those staged after a `build` instead (T6.5-4's relation alone), and the section form `move specs/A.mdx#x specs/A.xspec.ts/B.mdx#x` staged before any build.
-- *T6.6-3 twins* for every refused staging.
-
-**Checks.** As Task 39: S-7 passes; T6.5-20 and T6.6-3 against the built product (diagnose).
-
-**Note (from Tasks 39 and 40).** `test/suite/registry/section-6.5-iv.ts` holds T6.5-20. A refused staging is one `D20RefusedStaging` (configuration and files as staged-source records, `builtOccupant` `null` before any build, else a derived path the premise `build` must leave a plain file; moves with their concerned `path`) appended to the list `d20RefusedStagings` returns; T6.6-3 iterates that list through `runD20RefusedStaging`, so the twins need no `section-6.6.ts` edit. A companion leg reads its paths through `readRecordedCompanionPaths` (`test/suite/registry/support.ts`) with its own twin (configuration, path, bytes), as (c)'s second read in `d20RefusedStagings` does. `d20ConfigText(markdown, codeGlob)` composes a configuration with an optional code group (`D20_EMIT_NEXT` is emission next to sources). Performed arms are no T6.6-3 twins: run them in the body after the refused stagings, as (c)'s `runD20Exemption` does (the move through `runJson` and `decodeAppliedMappingReport`, the bytes, then `check` clean through `expectFindingFreeReport`). `specs/Z.mdx` (`D20_Z_SOURCE`) already holds the section `x`; (e)'s `specs/A.mdx` holds a section `x`, unlike `D20_A_SOURCE`.
-
 ### Task 42 — Register T6.5-21: `refused-exposed-derived-file` (TEST-SPEC L300; SPEC 6.5, 13.4, 14; A27, A30)
 
 **Depends on.** Task 13, and Task 39's module (`test/suite/registry/section-6.5-iv.ts`).
@@ -293,6 +274,8 @@ In each staging:
 - Assert `refused-invalid-destination`, never 14.22, for:
   - T6.5-4's barred path characters: Task 33's cases, if not already reached through `MOVE_REFUSAL_CASES` (done at Task 33: they sit in `MOVE_REFUSAL_CASES`, which T14-7 iterates through `assertRefusalReport`, each asserting `refused-invalid-destination` alone with its `path`);
   - T6.5-20's derived-path relations and module-linking designation, through its exported stagings.
+
+**Note (from Task 41).** Every refused staging of T6.5-20, arms (a) through (e), is an entry of the table `d20RefusedStagings` returns (`test/suite/registry/section-6.5-iv.ts`): (d)'s six module-linking designations and (e)'s after-build and section-form controls included, each staged by `runD20RefusedStaging`, as T6.6-3's twins iterate it.
 
 **Checks.** S-7 passes. T14-7 against the built product.
 
