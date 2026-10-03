@@ -38,38 +38,11 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 39 — Register T6.5-20, arms (a) and (b): destination refusals over derived paths (TEST-SPEC L299; SPEC 6.5, 13.4, 14; A26, A30)
-
-**Depends on.** None. Tasks 40 and 41 add arms (c) through (e).
-
-**Where.**
-- The registry module for the new 6.5 tests. `section-6.5-iii.ts` is 6500 lines, so a new `section-6.5-iv.ts`, with its wrapper and index import, is reasonable.
-- `section-6.6.ts`: T6.6-3's preview twins.
-- `traceability.ts`, with `"14"`.
-
-**Change.** Spellings from L299.
-- *The common contract, for every refused arm.*
-  - It exits 1 and modifies nothing: a workspace compare-around, with the journal absent or byte-unchanged.
-  - It reports exactly one `refused-invalid-destination` finding: `path` the destination as spelled, `locations` `[]`, never 14.22.
-  - Its `--preview` reports the same; this is T6.6-3's twin, wired in T6.6-3.
-  - Spec globs are `specs/**/*.mdx` throughout.
-- *Arm (a), under a derived path the sources would generate after the move.*
-  - The module-path pair, staged before any build: the file form `move specs/Z.mdx specs/A.xspec.ts/B.mdx`, and the section form creating that target.
-  - The same pair under each companion path of `specs/A.mdx`, staged before any build. Read the paths from `inventory`'s `recorded` set after a scratch twin's build, as T13.4-9(e) reads them; there are none for a product writing no companions.
-  - The module-path pair again, staged after a `build`: exactly one finding, the two relations meeting at one component.
-  - The `outDir: "out"` pair (`move specs/Z.mdx specs/x.md/y.mdx`, and its section form), staged before any build.
-- *Arm (b), a directory component of another derived path.*
-  - `move specs/Z.mdx specs/a.mdx` beside `specs/a.md/b.mdx`, under `outDir: "out"`.
-  - `move specs/Z.mdx specs/B.mdx` under `markdown.outDir: "specs/B.mdx/md"`, staged before any build.
-  - (b)'s section-form recurrences, as L299 lists them after (d).
-
-**Checks.** S-7 passes. T6.5-20 and T6.6-3 against the built product (diagnose).
-
 ### Task 40 — T6.5-20, arm (c): a source hidden or replaced, and its performed exemption (TEST-SPEC L299)
 
-**Depends on.** Task 39.
+**Depends on.** Task 39 (done).
 
-**Where.** As Task 39.
+**Where.** As Task 39: `test/suite/registry/section-6.5-iv.ts`, T6.6-3's twins through its table.
 
 **Change.** Emission is next to sources, and each refused staging is staged before any build. Spellings from L299; every code source must be accepted by 5.9.3 both ways.
 - *Refused stagings, under Task 39's common contract:*
@@ -82,13 +55,15 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 - *Section form.* (c)'s section-form recurrences are refused alike. The exemption staging in the section form (`move specs/B.md/C.mdx#x specs/B.mdx#x`) is refused.
 - *T6.6-3 twins* for every refused staging.
 
-**Checks.** As Task 39.
+**Checks.** As Task 39: S-7 passes; T6.5-20 and T6.6-3 against the built product (diagnose).
+
+**Note (from Task 39).** `test/suite/registry/section-6.5-iv.ts` holds T6.5-20. A refused staging is one `D20RefusedStaging` (configuration and files as staged-source records, `builtOccupant` `null` before any build, moves with their concerned `path`) appended to the list `d20RefusedStagings` returns; T6.6-3 iterates that list through `runD20RefusedStaging`, so the twins need no `section-6.6.ts` edit. A companion leg reads its paths through `readRecordedCompanionPaths` (`test/suite/registry/support.ts`) with its own twin (configuration, path, bytes). Performed arms are no T6.6-3 twins: run them in the body after the refused stagings. `specs/Z.mdx` (`D20_Z_SOURCE`) already holds the section `x`.
 
 ### Task 41 — T6.5-20, arms (d) and (e): module-linking designation, and the derived paths a move retires (TEST-SPEC L299)
 
-**Depends on.** Task 39.
+**Depends on.** Task 39 (done).
 
-**Where.** As Task 39.
+**Where.** As Task 39: `test/suite/registry/section-6.5-iv.ts`, T6.6-3's twins through its table.
 
 **Change.** Spellings from L299; every code source must be accepted by 5.9.3 both ways.
 - *Arm (d).* Emission is next to sources, and `src/c.ts` holds one module-linking form alone, its relative specifier `../specs/B.md`. There is one staging per form 4 names, each line followed by U+000A: `import "../specs/B.md"`, `export * from "../specs/B.md"`, `import X = require("../specs/B.md")`, `import("../specs/B.md")`, `type T = import("../specs/B.md")`, and `declare module "../specs/B.md" { }`. Each makes `move specs/Z.mdx specs/B.mdx` refused.
@@ -99,11 +74,13 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
   - *Refused controls:* each of those staged after a `build` instead (T6.5-4's relation alone), and the section form `move specs/A.mdx#x specs/A.xspec.ts/B.mdx#x` staged before any build.
 - *T6.6-3 twins* for every refused staging.
 
-**Checks.** As Task 39.
+**Checks.** As Task 39: S-7 passes; T6.5-20 and T6.6-3 against the built product (diagnose).
+
+**Note (from Task 39).** As Task 40's note. (e)'s `specs/A.mdx` holds a section `x`, unlike `D20_A_SOURCE`.
 
 ### Task 42 — Register T6.5-21: `refused-exposed-derived-file` (TEST-SPEC L300; SPEC 6.5, 13.4, 14; A27, A30)
 
-**Depends on.** Task 13, and Task 39's module.
+**Depends on.** Task 13, and Task 39's module (`test/suite/registry/section-6.5-iv.ts`).
 
 **Where.** The new 6.5 module; `section-6.6.ts` for T6.6-3's twins; `traceability.ts`, with `"14"`.
 

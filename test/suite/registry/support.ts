@@ -19,6 +19,7 @@ import type {
 import {
   decodeErrorDocument,
   decodeFindingsReport,
+  decodeInventoryRecordedDatum,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
@@ -298,6 +299,108 @@ export async function readGeneratedModule(
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     fail(`${context}: the generated module at ${rel} is not valid UTF-8`);
+  }
+}
+
+/**
+ * The companion paths a product records for one spec source, read as
+ * TEST-SPEC T13.4-9(e) reads them (T6.5-20's companion legs read them the
+ * same way): a scratch twin holding, under the staging's configuration, the
+ * source's bytes at its path alone is built — `build` exit 0 — and
+ * `inventory`'s `recorded` set is read (SPEC 11.6, T11.6-3). The companions
+ * are the recorded entries `DIR/NAME.xspec.<suffix>` other than the module
+ * `DIR/NAME.xspec.ts`, each attributable to its source through 13.1's naming,
+ * the suffixes the product's own (as T6.6-5 composes them): none for a
+ * product writing no companions. The record must name the module — a record
+ * lacking it is no reading of the product's derived paths — and every entry
+ * under the name shape must be a plain file name beside the module (13.1:
+ * `NAME.xspec.` plus a non-empty suffix); either slip fails diagnosed (H-8).
+ * Returned in the record's byte order (11.6). The twin is disposed before
+ * returning (H-1); its initial files are whatever the caller passes — a
+ * staged-source record wherever the twin follows a product invocation (S-9's
+ * timing clause).
+ */
+export async function readRecordedCompanionPaths(
+  product: ProductBinding,
+  config: InitialFileContents,
+  sourcePath: string,
+  source: InitialFileContents,
+  context: string,
+): Promise<readonly string[]> {
+  if (!sourcePath.endsWith(".mdx") || sourcePath.length <= ".mdx".length) {
+    throw new Error(
+      `harness defect: ${context} — ${JSON.stringify(sourcePath)} is not a ` +
+        "NAME.mdx spec source path (SPEC 13.1)",
+    );
+  }
+  const prefix = `${sourcePath.slice(0, -".mdx".length)}.xspec.`;
+  const modulePath = `${prefix}ts`;
+  const prefixBytes = Buffer.from(prefix, "utf8");
+  const twin = await TestWorkspace.create({
+    files: { "xspec.config.ts": config, [sourcePath]: source },
+  });
+  try {
+    await buildOk(
+      product,
+      twin,
+      `${context}: the scratch twin's \`build\` — ${sourcePath}'s bytes at ` +
+        `that path alone, under the staging's configuration, pass ` +
+        `\`build\`'s validations, exit 0 (SPEC 12.1)`,
+    );
+    const inventoryContext = `${context}: the scratch twin's \`inventory\` after its build`;
+    const recorded = decodeInventoryRecordedDatum(
+      await runJson(product, twin, ["inventory"], inventoryContext),
+      inventoryContext,
+    );
+    if (recorded.state !== "value") {
+      fail(
+        `${inventoryContext}: after a successful \`build\` the record-` +
+          `supplied datum is the plain list of recorded derived-file paths ` +
+          `— never unavailability, never null (SPEC 13.3, 11.6, 12.7); got ` +
+          `state ${JSON.stringify(recorded.state)}`,
+      );
+    }
+    const rendered = recorded.value.map(renderPathValue);
+    let moduleRecorded = false;
+    const companions: string[] = [];
+    for (const entry of recorded.value) {
+      const bytes =
+        typeof entry === "string"
+          ? Buffer.from(entry, "utf8")
+          : Buffer.from(entry.bytes, "hex");
+      if (
+        bytes.length < prefixBytes.length ||
+        !bytes.subarray(0, prefixBytes.length).equals(prefixBytes)
+      ) {
+        continue;
+      }
+      if (entry === modulePath) {
+        moduleRecorded = true;
+        continue;
+      }
+      const suffix =
+        typeof entry === "string" ? entry.slice(prefix.length) : "";
+      if (suffix.length === 0 || suffix.includes("/")) {
+        fail(
+          `${inventoryContext}: the record lists ${renderPathValue(entry)} ` +
+            `under ${sourcePath}'s name shape, but every companion is a ` +
+            `plain file beside the module named \`NAME.xspec.\` plus a ` +
+            `suffix, valid UTF-8 like its source's name (SPEC 13.1, 13.3); ` +
+            `recorded ${JSON.stringify(rendered)}`,
+        );
+      }
+      companions.push(entry as string);
+    }
+    if (!moduleRecorded) {
+      fail(
+        `${inventoryContext}: the record names the derived files the build ` +
+          `generated — ${sourcePath}'s module ${modulePath} among them ` +
+          `(SPEC 13.1, 13.3, 11.6); recorded ${JSON.stringify(rendered)}`,
+      );
+    }
+    return companions;
+  } finally {
+    await twin.dispose();
   }
 }
 
