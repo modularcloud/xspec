@@ -164,7 +164,7 @@ import type {
 import {
   pathExists,
   releaseHoldFile,
-  rethrowOutputOverflow,
+  rethrowHarnessError,
   runProduct,
   startProduct,
   summarizeResult,
@@ -301,15 +301,16 @@ async function assertEmptyHoldFile(
 }
 
 /**
- * One-line outcome of a settled run, for premature-exit diagnoses. An
- * exhausted capture limit is never folded into one: it propagates as the
- * harness error it is (H-11).
+ * One-line outcome of a settled run, for premature-exit diagnoses. A
+ * harness error — an exhausted capture limit, a failure of the driver's
+ * in-run evaluation (T6.5-22(a)'s check) — is never folded into one: it
+ * propagates as itself (H-11).
  */
 export async function describeExit(running: RunningProduct): Promise<string> {
   try {
     return summarizeResult(await running.waitForExit());
   } catch (error) {
-    rethrowOutputOverflow(error);
+    rethrowHarnessError(error);
     return error instanceof Error ? error.message : String(error);
   }
 }
@@ -318,8 +319,9 @@ export async function describeExit(running: RunningProduct): Promise<string> {
  * Run a command to completion under a bound, converting a rejection (a
  * product that blocks or hangs instead of exiting, killed at the bound) into
  * a diagnosed assertion failure (H-8). The bound is a hang guard, never an
- * assertion input (H-10). An exhausted capture limit is never converted: it
- * propagates as the harness error it is (H-11). `guards` lower the bound or
+ * assertion input (H-10). A harness error — an exhausted capture limit, a
+ * failure of the driver's in-run evaluation (T6.5-22(a)'s check) — is never
+ * converted: it propagates as itself (H-11). `guards` lower the bound or
  * the capture limit for S-8's vector alone.
  */
 export async function runBounded(
@@ -337,7 +339,7 @@ export async function runBounded(
       maxOutputBytes: guards.maxOutputBytes,
     });
   } catch (error) {
-    rethrowOutputOverflow(error);
+    rethrowHarnessError(error);
     return fail(
       `${context}: the command must terminate on its own rather than block ` +
         `or hang (SPEC 13.5, 12.0; H-8: hangs become diagnosed failures) — ` +
@@ -528,7 +530,7 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
           try {
             result = await running.waitForExit();
           } catch (error) {
-            rethrowOutputOverflow(error);
+            rethrowHarnessError(error);
             return fail(
               `${context}: once the hold file is deleted the command must ` +
                 `proceed and complete normally (SPEC 13.5) — ` +
@@ -662,7 +664,7 @@ const T13_5_1 = defineProductTest({
             try {
               result = await running.waitForExit();
             } catch (error) {
-              rethrowOutputOverflow(error);
+              rethrowHarnessError(error);
               return fail(
                 `${context}: once the hold file is deleted the command must ` +
                   `proceed and complete normally (SPEC 13.5) — ` +
@@ -1125,7 +1127,7 @@ const T13_5_2 = defineProductTest({
         try {
           result1 = await running.waitForExit();
         } catch (error) {
-          rethrowOutputOverflow(error);
+          rethrowHarnessError(error);
           return fail(
             `${context1}: command 1 must complete normally once the hold ` +
               `file is deleted (SPEC 13.5) — ` +
@@ -1302,7 +1304,7 @@ const T13_5_4 = defineProductTest({
         try {
           result = await running.waitForExit();
         } catch (error) {
-          rethrowOutputOverflow(error);
+          rethrowHarnessError(error);
           return fail(
             `${contextHeld}: the held rename must complete normally once ` +
               `the hold file is deleted (SPEC 13.5) — ` +
@@ -1339,11 +1341,12 @@ const T13_5_4 = defineProductTest({
         const settled = await Promise.allSettled(
           started.map((running) => running.waitForExit()),
         );
-        // An exhausted capture limit anywhere in the storm is the harness's
-        // own failure (H-11), reported ahead of any diagnosed one.
+        // A harness error anywhere in the storm — an exhausted capture
+        // limit, a failed in-run evaluation — is the harness's own failure
+        // (H-11), reported ahead of any diagnosed one.
         for (const outcome of settled) {
           if (outcome.status === "rejected") {
-            rethrowOutputOverflow(outcome.reason);
+            rethrowHarnessError(outcome.reason);
           }
         }
         settled.forEach((outcome, index) => {
@@ -1707,7 +1710,7 @@ const T13_5_6 = defineProductTest({
         try {
           result1 = await running.waitForExit();
         } catch (error) {
-          rethrowOutputOverflow(error);
+          rethrowHarnessError(error);
           return fail(
             `${contextHeld}: workspace 1's rename must complete normally ` +
               `once the hold file is deleted (SPEC 13.5) — ` +
@@ -1756,11 +1759,12 @@ const T13_5_6 = defineProductTest({
           "T13.5-6 concurrent workspace 2",
         ),
       ]);
-      // An exhausted capture limit in either script is the harness's own
-      // failure (H-11), reported ahead of any diagnosed one.
+      // A harness error in either script — an exhausted capture limit, a
+      // failed in-run evaluation — is the harness's own failure (H-11),
+      // reported ahead of any diagnosed one.
       for (const outcome of settled) {
         if (outcome.status === "rejected") {
-          rethrowOutputOverflow(outcome.reason);
+          rethrowHarnessError(outcome.reason);
         }
       }
       for (const outcome of settled) {
@@ -1968,7 +1972,7 @@ async function refusedSeamArm(
     try {
       result = await running.waitForExit();
     } catch (error) {
-      rethrowOutputOverflow(error);
+      rethrowHarnessError(error);
       return fail(
         `${context}: once the hold file is deleted the command must proceed ` +
           `to its own refusal and exit (SPEC 13.5) — ` +
@@ -2127,7 +2131,7 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
       try {
         result1 = await running.waitForExit();
       } catch (error) {
-        rethrowOutputOverflow(error);
+        rethrowHarnessError(error);
         return fail(
           `${context1}: once the hold file is deleted command 1 must ` +
             `proceed to the gate and exit (SPEC 13.5, 13.3) — ` +

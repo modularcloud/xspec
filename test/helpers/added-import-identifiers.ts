@@ -14,7 +14,13 @@
 // exits 0 its `verify` reads the post-operation sources and judges them
 // before the driver hands the run's result back. A breach is a diagnosed
 // product failure (`HarnessAssertionError`) naming the file, the identifier,
-// and the clause; a run that does not exit 0 is not judged.
+// and the clause; a run that does not exit 0 is not judged. Anything else
+// either step throws — a crash of the harness's own parsers or name
+// analysis, an exhausted internal limit, such as the plain `Error` below
+// for an ESM block the MDX parse attached no program to — is a failure of
+// the harness's evaluation, never a diagnosed product failure and never a
+// pass: the driver reports it as the harness error `HarnessEvaluationError`
+// (helpers/subprocess.ts; H-11).
 //
 // What it reads. The sources the operation could have rewritten — the
 // workspace's discovered spec and code sources, found by the harness's own

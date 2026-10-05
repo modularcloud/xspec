@@ -9,8 +9,15 @@
 // machinery: background start, hold-file choreography, kill, concurrency.
 // The capture limit (H-11) is pinned here too: an overflow is a loud
 // `ProductRunOutputOverflowError`, never a truncation, which the hold-file
-// wait surfaces as itself and `rethrowOutputOverflow` — the first call of
-// every helper converting a run's rejection — lets through unchanged.
+// wait surfaces as itself and `rethrowHarnessError` — the first call of
+// every helper converting a run's rejection — lets through unchanged. So is
+// the classification of the driver's in-run evaluation (H-11): T6.5-22(a)'s
+// check of a performed move (helpers/added-import-identifiers.ts), made to
+// fail on purpose through a scoped `vi.doMock` of that module — the driver
+// loads it on demand, so the mock reaches the driver's own import — is a
+// harness error, `HarnessEvaluationError` carrying the original as its
+// `cause`, whether it fails before the spawn or judging the exited run,
+// while its breach (`HarnessAssertionError`) passes through unchanged.
 //
 // The stand-in is a tiny argv-driven Node script written into a fresh
 // TestWorkspace per test (the builder itself is certified by S-2) and driven
@@ -24,16 +31,18 @@ import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { expect, onTestFinished, test } from "vitest";
+import { expect, onTestFinished, test, vi } from "vitest";
+import type * as AddedImportCheckModule from "../helpers/added-import-identifiers.js";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import {
   builtProductBinding,
   createHoldFile,
+  HarnessEvaluationError,
   pathExists,
   ProductRunOutputOverflowError,
   ProductRunTimeoutError,
   releaseHoldFile,
-  rethrowOutputOverflow,
+  rethrowHarnessError,
   runProduct,
   startProduct,
 } from "../helpers/subprocess.js";
@@ -65,6 +74,11 @@ switch (mode) {
   case "bytes": {
     process.stdout.write(Buffer.from([0x6f, 0x75, 0x74, 0x00, 0xff, 0xfe, 0x0d, 0x0a, 0x0d]));
     process.stderr.write(Buffer.from([0x65, 0x72, 0x72, 0x80, 0xc3, 0x28, 0x0a]));
+    process.exit(0);
+    break;
+  }
+  case "move": {
+    fs.writeFileSync("moved", "");
     process.exit(0);
     break;
   }
@@ -585,15 +599,28 @@ test("waitForFile surfaces a capture-limit kill as the driver's ProductRunOutput
   expect(settled).toBe(error);
 });
 
-test("rethrowOutputOverflow rethrows exactly the capture-limit error, unchanged, and returns for every other rejection a helper converts (H-11)", () => {
-  const overflow = new ProductRunOutputOverflowError("capture limit");
-  let rethrown: unknown = null;
-  try {
-    rethrowOutputOverflow(overflow);
-  } catch (thrown) {
-    rethrown = thrown;
+test("rethrowHarnessError rethrows exactly the harness errors — the capture-limit error and a failed in-run evaluation — unchanged, and returns for every other rejection a helper converts (H-11)", () => {
+  for (const harnessError of [
+    new ProductRunOutputOverflowError("capture limit"),
+    new HarnessEvaluationError(
+      "stand-in move",
+      "verify",
+      new Error("evaluation crashed"),
+    ),
+    new HarnessEvaluationError(
+      "stand-in move",
+      "prepare",
+      new RangeError("parser limit"),
+    ),
+  ]) {
+    let rethrown: unknown = null;
+    try {
+      rethrowHarnessError(harnessError);
+    } catch (thrown) {
+      rethrown = thrown;
+    }
+    expect(rethrown, harnessError.message).toBe(harnessError);
   }
-  expect(rethrown).toBe(overflow);
   for (const other of [
     new ProductRunTimeoutError("hang guard"),
     new HarnessAssertionError("diagnosed"),
@@ -602,7 +629,144 @@ test("rethrowOutputOverflow rethrows exactly the capture-limit error, unchanged,
     undefined,
   ]) {
     expect(() => {
-      rethrowOutputOverflow(other);
+      rethrowHarnessError(other);
     }).not.toThrow();
   }
+});
+
+// ---------------------------------------------------------------------------
+// The driver's in-run evaluation (H-11): T6.5-22(a)'s check of a performed
+// move (helpers/added-import-identifiers.ts) is the harness evaluating the
+// run's answer, so its own failure is a harness error, never a diagnosed
+// product failure — and its breach stays the diagnosed failure it is.
+
+/** The module the driver loads on demand for T6.5-22(a)'s check. */
+const CHECK_MODULE = "../helpers/added-import-identifiers.js";
+
+/** A performed move's argv, as the driver reads it (the stand-in's `move`). */
+const MOVE_ARGV = ["move", "specs/A.mdx", "specs/B.mdx"];
+
+/**
+ * Replace T6.5-22(a)'s check for the running test alone: a scoped
+ * `vi.doMock` of the module the driver imports on demand, the real module's
+ * other exports kept; undone when the test finishes.
+ */
+function injectAddedImportCheck(
+  prepare: typeof AddedImportCheckModule.prepareAddedImportCheck,
+): void {
+  vi.doMock(CHECK_MODULE, async (importOriginal) => ({
+    ...(await importOriginal<typeof AddedImportCheckModule>()),
+    prepareAddedImportCheck: prepare,
+  }));
+  onTestFinished(() => {
+    vi.doUnmock(CHECK_MODULE);
+  });
+}
+
+/** What a promise rejects with; null when it resolves. */
+async function rejectionOf(pending: Promise<unknown>): Promise<unknown> {
+  return await pending.then(
+    () => null,
+    (thrown: unknown) => thrown,
+  );
+}
+
+test("a failure of T6.5-22(a)'s check judging an exited move rejects waitForExit and runProduct with the harness error HarnessEvaluationError, its cause the original — never a diagnosed HarnessAssertionError (H-11)", async () => {
+  const { workspace, binding } = await standin();
+  const original = new Error("S-3: the check's judgement crashed");
+  const judged: (number | null)[] = [];
+  injectAddedImportCheck(async () => ({
+    verify: async (result) => {
+      judged.push(result.exitCode);
+      throw original;
+    },
+  }));
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: MOVE_ARGV,
+  });
+  const settled = await rejectionOf(running.waitForExit());
+  expect(settled).toBeInstanceOf(HarnessEvaluationError);
+  expect(settled).not.toBeInstanceOf(HarnessAssertionError);
+  const error = settled as HarnessEvaluationError;
+  expect(error.cause).toBe(original);
+  expect(error.stage).toBe("verify");
+  expect(error.commandLine).toBe(running.commandLine);
+  expect(error.message).toContain("T6.5-22(a)");
+  expect(error.message).toContain(running.commandLine);
+  expect(error.message).toContain(original.message);
+  // The judgement ran on the exited run; every await sees the same error.
+  expect(judged).toEqual([0]);
+  expect(await rejectionOf(running.waitForExit())).toBe(error);
+  // The foreground path rejects alike.
+  const foreground = await rejectionOf(
+    runProduct(binding, { cwd: workspace.root, argv: MOVE_ARGV }),
+  );
+  expect(foreground).toBeInstanceOf(HarnessEvaluationError);
+  expect((foreground as HarnessEvaluationError).cause).toBe(original);
+});
+
+test("a failure of T6.5-22(a)'s check reading the pre-operation sources rejects startProduct with HarnessEvaluationError, nothing spawned (H-11)", async () => {
+  const { workspace, binding } = await standin();
+  const original = new RangeError("S-3: the pre-operation reading crashed");
+  injectAddedImportCheck(async () => {
+    throw original;
+  });
+  const rejected = await rejectionOf(
+    startProduct(binding, { cwd: workspace.root, argv: MOVE_ARGV }),
+  );
+  expect(rejected).toBeInstanceOf(HarnessEvaluationError);
+  expect(rejected).not.toBeInstanceOf(HarnessAssertionError);
+  const error = rejected as HarnessEvaluationError;
+  expect(error.cause).toBe(original);
+  expect(error.stage).toBe("prepare");
+  expect(error.message).toContain("T6.5-22(a)");
+  expect(error.message).toContain(MOVE_ARGV.join(" "));
+  // The reading precedes the spawn: the stand-in's `move` never ran.
+  expect(await pathExists(workspace.path("moved"))).toBe(false);
+});
+
+test("a T6.5-22(a) breach (HarnessAssertionError) passes through the driver unchanged — the very error, from waitForExit and from startProduct — a diagnosed product failure", async () => {
+  const { workspace, binding } = await standin();
+  const breach = new HarnessAssertionError("T6.5-22(a): stand-in breach");
+  injectAddedImportCheck(async () => ({
+    verify: async () => {
+      throw breach;
+    },
+  }));
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: MOVE_ARGV,
+  });
+  expect(await rejectionOf(running.waitForExit())).toBe(breach);
+  const early = new HarnessAssertionError("T6.5-22(a): stand-in early");
+  injectAddedImportCheck(async () => {
+    throw early;
+  });
+  expect(
+    await rejectionOf(
+      startProduct(binding, { cwd: workspace.root, argv: MOVE_ARGV }),
+    ),
+  ).toBe(early);
+});
+
+test("waitForFile on a run whose T6.5-22(a) check fails rejects with that HarnessEvaluationError itself, never folded into the premature-exit error (H-11)", async () => {
+  const { workspace, binding } = await standin();
+  const original = new Error("S-3: the check's judgement crashed");
+  injectAddedImportCheck(async () => ({
+    verify: async () => {
+      throw original;
+    },
+  }));
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: MOVE_ARGV,
+  });
+  const neverCreated = path.join(workspace.tempRoot, "never-created");
+  const error = await rejectionOf(running.waitForFile(neverCreated));
+  expect(error).toBeInstanceOf(HarnessEvaluationError);
+  expect((error as Error).cause).toBe(original);
+  expect((error as Error).message).not.toContain("exited before creating");
+  // The very rejection the run settled with, not a copy.
+  expect(await rejectionOf(running.waitForExit())).toBe(error);
 });

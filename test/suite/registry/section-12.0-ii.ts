@@ -139,7 +139,7 @@ import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import {
   pathExists,
   releaseHoldFile,
-  rethrowOutputOverflow,
+  rethrowHarnessError,
   runProduct,
   startProduct,
 } from "../../helpers/subprocess.js";
@@ -1583,7 +1583,7 @@ const T12_0_9 = defineProductTest({
           try {
             await running.waitForFile(holdPath);
           } catch (error) {
-            rethrowOutputOverflow(error);
+            rethrowHarnessError(error);
             fail(
               `${holdContext}: the mutating command creates the hold file ` +
                 `immediately after acquiring workspace exclusivity ` +

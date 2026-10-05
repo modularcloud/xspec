@@ -42,13 +42,28 @@
 //      stand-in, each lets the driver's ProductRunOutputOverflowError
 //      through unchanged, while the hang-guard kill (for a hold-file wait,
 //      a premature exit) stays a diagnosed failure. S-3 pins the driver's
-//      own hold-file wait and `rethrowOutputOverflow`; the conversions
-//      written inline in registered bodies call it the same way.
+//      own hold-file wait and `rethrowHarnessError`; the conversions
+//      written inline in registered bodies call it the same way;
+//   6. and a harness-side failure while evaluating an answer is no
+//      diagnosed product failure either: the driver evaluates every
+//      performed move's answer in the run (T6.5-22(a)'s check), and when
+//      that check itself fails — made to fail here by a scoped `vi.doMock`
+//      of its module, which the driver imports on demand — the run rejects
+//      with the harness error HarnessEvaluationError (S-3), which every
+//      shared helper through which a move can run — 13.5's runBounded and
+//      describeExit, the write-refusal staging's awaitHoldFile, runSettled,
+//      and runHeldWithStaging, P-10's settleStraddleRead and settleKilled —
+//      lets through unchanged, never converted into a HarnessAssertionError
+//      — and P-10's property runner reports it as a harness error naming
+//      the seed. (P-10's runHeldRead runs only its fixed read menu, which
+//      never prepares the check; it calls `rethrowHarnessError` all the
+//      same.)
 
 import { Buffer } from "node:buffer";
 import { once } from "node:events";
 import { createReadStream, createWriteStream } from "node:fs";
-import { expect, onTestFinished, test } from "vitest";
+import { expect, onTestFinished, test, vi } from "vitest";
+import type * as AddedImportCheckModule from "../helpers/added-import-identifiers.js";
 import {
   assertBareEdgeEndpoints,
   assertNodeEdgeListsBare,
@@ -82,6 +97,7 @@ import {
 } from "../helpers/property.js";
 import {
   DEFAULT_MAX_OUTPUT_BYTES,
+  HarnessEvaluationError,
   ProductRunOutputOverflowError,
   runProduct,
   startProduct,
@@ -1002,13 +1018,13 @@ test("S-8: an exhausted capture limit in a P-8 or P-11 command run is a harness 
 }, 60_000);
 
 /**
- * Stand-in for the conversion vector (header item 5). Its mode rides the
- * binding's prefix, so the argv a helper appends — a P-10 menu read, a
- * `--test-hold <path>` pair — follows it, read only for the hold path:
- * `flood` writes 4 MiB to stdout and exits, past any small capture cap;
- * `exit` exits 3 at once; `hold-flood` and `hold-hang` create the hold file,
- * wait for its deletion, then flood or never exit; anything else never
- * exits.
+ * Stand-in for the conversion vectors (header items 5 and 6). Its mode rides
+ * the binding's prefix, so the argv a helper appends — a P-10 menu read, a
+ * move, a `--test-hold <path>` pair — follows it, read only for the hold
+ * path: `flood` writes 4 MiB to stdout and exits, past any small capture
+ * cap; `exit` exits 3 and `complete` exits 0, at once; `hold-flood`,
+ * `hold-hang`, and `hold-complete` create the hold file, wait for its
+ * deletion, then flood, never exit, or exit 0; anything else never exits.
  */
 const CONVERSION_STANDIN_SOURCE = `import fs from "node:fs";
 const mode = process.argv[2];
@@ -1021,13 +1037,16 @@ if (mode === "flood") {
   flood();
 } else if (mode === "exit") {
   process.exit(3);
-} else if (mode === "hold-flood" || mode === "hold-hang") {
+} else if (mode === "complete") {
+  process.exit(0);
+} else if (mode === "hold-flood" || mode === "hold-hang" || mode === "hold-complete") {
   const hold = process.argv[process.argv.indexOf("--test-hold") + 1];
   fs.writeFileSync(hold, "");
   const poll = setInterval(() => {
     if (!fs.existsSync(hold)) {
       clearInterval(poll);
       if (mode === "hold-flood") flood();
+      else if (mode === "hold-complete") process.exit(0);
       else hang();
     }
   }, 10);
@@ -1167,4 +1186,136 @@ test("S-8: an exhausted capture limit propagates as a harness error out of every
   );
   expect(described).toBeInstanceOf(ProductRunOutputOverflowError);
   expect(await describeExit(await start("exit"))).toContain("exit code 3");
+}, 60_000);
+
+/** The module the driver loads on demand for T6.5-22(a)'s check. */
+const CHECK_MODULE = "../helpers/added-import-identifiers.js";
+
+test("S-8: a failure of the driver's in-run evaluation — T6.5-22(a)'s check of a performed move — propagates as the harness error HarnessEvaluationError out of every shared helper through which a move can run — 13.5's, the write-refusal staging's, P-10's — never converted into a diagnosed HarnessAssertionError (H-11; S-3)", async () => {
+  const workspace = await TestWorkspace.create({
+    files: { "conversions.mjs": CONVERSION_STANDIN_SOURCE },
+  });
+  onTestFinished(() => workspace.dispose());
+  // The check made to fail on purpose (header item 6): whatever the run
+  // did, judging it crashes — the harness's failure, never the product's.
+  const original = new Error("S-8: the check's judgement crashed");
+  vi.doMock(CHECK_MODULE, async (importOriginal) => ({
+    ...(await importOriginal<typeof AddedImportCheckModule>()),
+    prepareAddedImportCheck: async () => ({
+      verify: async () => {
+        throw original;
+      },
+    }),
+  }));
+  onTestFinished(() => {
+    vi.doUnmock(CHECK_MODULE);
+  });
+  const standin = (mode: string): ProductBinding => ({
+    label: `S-8 evaluation stand-in (${mode})`,
+    command: process.execPath,
+    prefixArgs: [workspace.path("conversions.mjs"), mode],
+  });
+  // A performed move, as the driver reads the argv; the stand-in's mode
+  // decides what the run does.
+  const move = ["move", "specs/A.mdx", "specs/B.mdx"];
+  const startMove = async (mode: string): Promise<RunningProduct> =>
+    await startProduct(standin(mode), { cwd: workspace.root, argv: move });
+  // The held helper's staging is beside the point here: a no-op.
+  const noStaging: StagingApplier = async (root) => ({
+    mode: "write-refusal",
+    path: root,
+    restore: async () => {},
+  });
+  const context = "S-8 evaluation vector";
+  const helpers: readonly {
+    readonly helper: string;
+    readonly run: () => Promise<unknown>;
+  }[] = [
+    {
+      helper: "13.5's runBounded",
+      run: () => runBounded(standin("complete"), workspace.root, move, context),
+    },
+    {
+      helper: "13.5's describeExit",
+      run: async () => await describeExit(await startMove("complete")),
+    },
+    {
+      // The move exits before creating the hold file: the premature-exit
+      // path, whose settled outcome is the failed evaluation.
+      helper: "the write-refusal staging's awaitHoldFile",
+      run: async () =>
+        await awaitHoldFile(
+          await startMove("complete"),
+          holdPathFor(workspace, "never-c.tmp"),
+          context,
+        ),
+    },
+    {
+      helper: "the write-refusal staging's runSettled",
+      run: () => runSettled(standin("complete"), workspace, move, context),
+    },
+    {
+      helper: "the write-refusal staging's runHeldWithStaging",
+      run: () =>
+        runHeldWithStaging(
+          standin("hold-complete"),
+          workspace,
+          move,
+          "hold-c.tmp",
+          noStaging,
+          context,
+        ),
+    },
+    {
+      helper: "P-10's settleStraddleRead",
+      run: async () =>
+        await settleStraddleRead(
+          { running: await startMove("complete"), what: "`move`" },
+          context,
+        ),
+    },
+    {
+      // A mutator that completed before its kill landed is judged as any
+      // completed move is.
+      helper: "P-10's settleKilled",
+      run: async () => await settleKilled(await startMove("complete"), context),
+    },
+  ];
+  for (const { helper, run } of helpers) {
+    const rejected = await run().then(
+      () => {
+        throw new Error(
+          `S-8: ${helper} resolved — it must reject with the failed evaluation`,
+        );
+      },
+      (thrown: unknown) => thrown,
+    );
+    expect(rejected, helper).toBeInstanceOf(HarnessEvaluationError);
+    expect(rejected, helper).not.toBeInstanceOf(HarnessAssertionError);
+    expect((rejected as HarnessEvaluationError).cause, helper).toBe(original);
+  }
+  // P-10 runs its episodes inside the property runner, which reports what
+  // escapes a body — this harness error included — as a harness error
+  // naming the seed, never a falsified property.
+  const reported = await rejectionOf(
+    checkProperty(
+      "P-10 evaluation vector",
+      () => null,
+      async () => {
+        await settleKilled(await startMove("complete"), context);
+      },
+      {
+        runs: 1,
+        seeds: [GUARD_VECTOR_SEED],
+        env: {},
+        maxShrinkExecutions: 0,
+      },
+    ),
+  );
+  expect(reported).toBeInstanceOf(Error);
+  expect(reported).not.toBeInstanceOf(HarnessAssertionError);
+  expect((reported as Error).message).toContain(
+    `harness error while running trial 1 of 1 with seed ${String(GUARD_VECTOR_SEED)}`,
+  );
+  expect((reported as Error).cause).toBeInstanceOf(HarnessEvaluationError);
 }, 60_000);

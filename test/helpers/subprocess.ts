@@ -20,9 +20,11 @@
 //   executable or working directory is a diagnosed per-test failure, not a
 //   harness crash; runaway output is capped and killed, surfacing as a loud
 //   `ProductRunOutputOverflowError` — an exhausted capture limit is a
-//   harness error, never a silent truncation (H-11). Every helper that
-//   converts a run's rejection into a diagnosed failure lets that error
-//   through unchanged (`rethrowOutputOverflow`), the driver's own
+//   harness error, never a silent truncation (H-11) — and a failure of the
+//   driver's own in-run evaluation of an answer (T6.5-22(a)'s check, below)
+//   surfaces as the harness error `HarnessEvaluationError` (H-11). Every
+//   helper that converts a run's rejection into a diagnosed failure lets
+//   both through unchanged (`rethrowHarnessError`), the driver's own
 //   `waitForFile` included.
 // - 13.5 support: background start (`startProduct`), hold-file choreography
 //   (`createHoldFile` / `RunningProduct.waitForFile` / `releaseHoldFile`),
@@ -54,8 +56,15 @@
 //   identifiers of every import declaration it added are judged before
 //   `waitForExit` resolves — a breach rejects it with a diagnosed failure
 //   (`HarnessAssertionError`) — so the assertion holds whichever test
-//   performs the operation. The module loads only for an argv holding the
-//   token `move`.
+//   performs the operation. The check is the harness evaluating the run's
+//   answer with its own parsers and S-6's name analysis, so anything else
+//   it throws — a crash of those parsers or of the analysis, an exhausted
+//   internal limit — is a defect in the harness (H-11), never a diagnosed
+//   product failure and never a pass: the driver wraps it in
+//   `HarnessEvaluationError` (its `cause` the original), with which
+//   `startProduct` rejects when the pre-operation reading fails and
+//   `waitForExit` (so `runProduct` and `waitForFile`) when the judgement
+//   does. The module loads only for an argv holding the token `move`.
 
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
@@ -66,6 +75,7 @@ import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import type { AddedImportCheck } from "./added-import-identifiers.js";
+import { HarnessAssertionError } from "./assertions.js";
 import { noteProductInvocation } from "./product-invocations.js";
 
 /** Hang guard applied to every invocation unless overridden (H-8). */
@@ -136,7 +146,8 @@ export class ProductRunTimeoutError extends Error {
  * termination properties (P-8, P-11), which convert exactly the hang-guard
  * kill ({@link ProductRunTimeoutError}) into a diagnosed failure, tell the
  * two kills apart, and so every other helper converting a run's rejection
- * lets this one through ({@link rethrowOutputOverflow}).
+ * lets this one through ({@link rethrowHarnessError}, which lets
+ * {@link HarnessEvaluationError} through as well).
  */
 export class ProductRunOutputOverflowError extends Error {
   constructor(message: string) {
@@ -145,16 +156,85 @@ export class ProductRunOutputOverflowError extends Error {
   }
 }
 
+/** Where T6.5-22(a)'s check failed (see {@link HarnessEvaluationError}). */
+export type EvaluationStage = "prepare" | "verify";
+
+/**
+ * A harness-side failure of the driver's in-run evaluation of an answer
+ * (H-11): T6.5-22(a)'s check of a performed move (module header) threw
+ * something other than its breach — a `HarnessAssertionError`, the
+ * diagnosed product failure, which passes through unchanged — either while
+ * reading the pre-operation sources before the spawn (`"prepare"`:
+ * `startProduct` rejects with it, nothing spawned) or while judging the
+ * run once it exited (`"verify"`: `waitForExit`, and so `runProduct` and
+ * `waitForFile`, reject with it). A crash of the harness's own TypeScript
+ * or MDX parser or of S-6's name analysis, an internal limit exhausted: a
+ * defect in the harness, never a diagnosed product failure and never a
+ * pass. The original error is its `cause`. Typed so every helper converting
+ * a run's rejection into a diagnosed failure lets it through
+ * ({@link rethrowHarnessError}).
+ */
+export class HarnessEvaluationError extends Error {
+  /** The invocation whose check failed. */
+  readonly commandLine: string;
+  /** Before the spawn (`"prepare"`) or judging the exited run (`"verify"`). */
+  readonly stage: EvaluationStage;
+
+  constructor(commandLine: string, stage: EvaluationStage, cause: unknown) {
+    const where =
+      stage === "prepare"
+        ? "reading the pre-operation sources before the spawn"
+        : "judging the run once it exited";
+    super(
+      `harness error (H-11): T6.5-22(a)'s check of ${commandLine} failed ` +
+        `${where} — a defect in the harness, never a diagnosed product ` +
+        `failure and never a pass: ${describeCause(cause)}`,
+      { cause },
+    );
+    this.name = "HarnessEvaluationError";
+    this.commandLine = commandLine;
+    this.stage = stage;
+  }
+}
+
 /**
  * H-11 at a conversion of a driver rejection: rethrow `error` unchanged when
- * the capture limit killed the run ({@link ProductRunOutputOverflowError}),
- * and return otherwise. A helper that turns a rejected run — the hang-guard
- * kill, a premature exit, a spawn failure — into a diagnosed failure (H-8)
- * calls it first, so an exhausted capture limit always surfaces as the
- * harness error it is, never as a diagnosed product failure.
+ * it is a harness error — the capture limit killed the run
+ * ({@link ProductRunOutputOverflowError}), or the driver's in-run
+ * evaluation of the answer failed ({@link HarnessEvaluationError}) — and
+ * return otherwise. A helper that turns a rejected run — the hang-guard
+ * kill, a premature exit, a spawn failure, a T6.5-22(a) breach — into a
+ * diagnosed failure (H-8) calls it first, so a harness-side failure always
+ * surfaces as the harness error it is, never as a diagnosed product failure.
  */
-export function rethrowOutputOverflow(error: unknown): void {
-  if (error instanceof ProductRunOutputOverflowError) throw error;
+export function rethrowHarnessError(error: unknown): void {
+  if (
+    error instanceof ProductRunOutputOverflowError ||
+    error instanceof HarnessEvaluationError
+  ) {
+    throw error;
+  }
+}
+
+/**
+ * What T6.5-22(a)'s check threw, as the driver reports it: a breach
+ * (`HarnessAssertionError`) unchanged, anything else a
+ * {@link HarnessEvaluationError} wrapping it.
+ */
+function evaluationFailure(
+  error: unknown,
+  commandLine: string,
+  stage: EvaluationStage,
+): unknown {
+  return error instanceof HarnessAssertionError
+    ? error
+    : new HarnessEvaluationError(commandLine, stage, error);
+}
+
+function describeCause(cause: unknown): string {
+  return cause instanceof Error
+    ? `${cause.name}: ${cause.message}`
+    : String(cause);
 }
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -230,6 +310,8 @@ export interface RunResult {
  * coordinates via hold files, kills, or concurrent invocations, then awaits
  * `waitForExit`). Pre-flight problems — relative/missing working directory,
  * missing required files — throw diagnosed errors before anything is spawned.
+ * A failure of T6.5-22(a)'s pre-operation reading rejects with the harness
+ * error {@link HarnessEvaluationError} (H-11), nothing spawned.
  */
 export async function startProduct(
   binding: ProductBinding,
@@ -300,7 +382,8 @@ export async function startProduct(
  * T6.5-22(a)'s check for an invocation (helpers/added-import-identifiers.ts),
  * or undefined when its argv cannot read as a performed move — the module,
  * which loads the harness's TypeScript and MDX parsers, is loaded only for
- * an argv holding the token `move`.
+ * an argv holding the token `move`. Anything it throws but a
+ * `HarnessAssertionError` rejects as {@link HarnessEvaluationError} (H-11).
  */
 async function prepareAddedImportCheck(
   cwd: string,
@@ -308,9 +391,13 @@ async function prepareAddedImportCheck(
   commandLine: string,
 ): Promise<AddedImportCheck | undefined> {
   if (!argv.includes("move")) return undefined;
-  const { prepareAddedImportCheck: prepare } =
-    await import("./added-import-identifiers.js");
-  return await prepare(cwd, argv, commandLine);
+  try {
+    const { prepareAddedImportCheck: prepare } =
+      await import("./added-import-identifiers.js");
+    return await prepare(cwd, argv, commandLine);
+  } catch (error) {
+    throw evaluationFailure(error, commandLine, "prepare");
+  }
 }
 
 /** Run an invocation to completion — the common foreground path. */
@@ -325,8 +412,9 @@ export async function runProduct(
 /**
  * A started invocation. `waitForExit` resolves with the run result (normal
  * exits and requested kills alike) and rejects, diagnosed, on timeout,
- * spawn failure, or a performed move's breach of T6.5-22(a) — and with the
- * harness error `ProductRunOutputOverflowError` on output overflow (H-11).
+ * spawn failure, or a performed move's breach of T6.5-22(a) — and with a
+ * harness error (H-11): `ProductRunOutputOverflowError` on output overflow,
+ * `HarnessEvaluationError` when T6.5-22(a)'s check itself fails.
  */
 export class RunningProduct {
   readonly commandLine: string;
@@ -423,12 +511,18 @@ export class RunningProduct {
       });
     });
     // T6.5-22(a): a performed move's added imports, judged once it exits 0
-    // and before any awaiter sees the result (helpers/subprocess.ts header).
+    // and before any awaiter sees the result (helpers/subprocess.ts header);
+    // a failure of the judgement itself is the harness error
+    // `HarnessEvaluationError` (H-11), a breach passing through unchanged.
     this.#exit =
       addedImportCheck === undefined
         ? exit
         : exit.then(async (result) => {
-            await addedImportCheck.verify(result);
+            try {
+              await addedImportCheck.verify(result);
+            } catch (error) {
+              throw evaluationFailure(error, commandLine, "verify");
+            }
             return result;
           });
     // Mark rejections as observed even when a test aborts before awaiting;
@@ -453,9 +547,11 @@ export class RunningProduct {
   /**
    * The run's outcome. Resolves for normal exits and requested kills; rejects
    * with a diagnosed error on timeout or spawn failure, with the harness
-   * error `ProductRunOutputOverflowError` on output overflow (H-11), and
-   * with a diagnosed assertion failure when a performed move exiting 0 added
-   * an import T6.5-22(a) rejects. Callable any number of times.
+   * error `ProductRunOutputOverflowError` on output overflow (H-11), with a
+   * diagnosed assertion failure when a performed move exiting 0 added an
+   * import T6.5-22(a) rejects, and with the harness error
+   * `HarnessEvaluationError` when that check itself fails (H-11). Callable
+   * any number of times.
    */
   async waitForExit(): Promise<RunResult> {
     return await this.#exit;
@@ -466,9 +562,10 @@ export class RunningProduct {
    * SPEC.md 13.5 (`--test-hold`). Fails diagnosed, never hangs (H-8): rejects
    * when the process exits first without creating it (the red-green path for
    * stub products, carrying the run outcome), and on timeout while the
-   * process is still running. A run the capture limit killed rejects with
-   * that `ProductRunOutputOverflowError` itself, never folded into the
-   * premature-exit error: an exhausted capture limit is a harness error
+   * process is still running. A run the capture limit killed, or whose
+   * T6.5-22(a) check failed, rejects with that
+   * `ProductRunOutputOverflowError` or `HarnessEvaluationError` itself,
+   * never folded into the premature-exit error: both are harness errors
    * (H-11).
    */
   async waitForFile(
@@ -484,12 +581,13 @@ export class RunningProduct {
     for (;;) {
       if (await pathExists(absPath)) return;
       // A capture-limit kill counts as the exit at once: the run settles
-      // with that error, which propagates as itself (H-11).
+      // with that error, which propagates as itself (H-11) — as does a
+      // failure of T6.5-22(a)'s check, settled once the run has exited.
       if (this.hasExited() || this.#overflowed) {
         const outcome = await this.#exit.then(
           summarizeResult,
           (error: unknown) => {
-            rethrowOutputOverflow(error);
+            rethrowHarnessError(error);
             return error instanceof Error ? error.message : String(error);
           },
         );
