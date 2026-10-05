@@ -39,6 +39,16 @@
 //   engages on an invocation a later check refuses or the gate turns back.
 //
 // Key mechanisms:
+// - Invocation grammar (SPEC 12.0; CERTIFICATIONS.md preamble): the
+//   arguments are read once, before dispatch (readInvocation) — flag tokens
+//   anywhere, a value-taking flag taking the whole next token (arity fixed
+//   by name across commands, FLAG_ARITY), `--` ending flag reading — and the
+//   remaining tokens must match the command's synopsis exactly (SYNOPSES,
+//   QUERY_SYNOPSES, REVIEW_SYNOPSES). Every syntax-class error is decided
+//   from the arguments alone, before configuration is loaded and before any
+//   acquisition or hold; a flag, command, or form outside this fixture's
+//   surface is refused (exit 70) only after those checks. JSON output is in
+//   effect exactly when a `--json` token is read as a flag.
 // - Exclusivity (SPEC 13.5): a lock file in the OS temp directory keyed by
 //   the workspace root's realpath, holding the owner's PID. A second mutating
 //   command finds a live owner and fails promptly with a usage error; a dead
@@ -2035,51 +2045,487 @@ function emitFindings(io, json, findings) {
 }
 
 // ---------------------------------------------------------------------------
-// Argument parsing (SPEC 12.0 flag rules)
+// Invocation grammar (SPEC 12.0)
 // ---------------------------------------------------------------------------
 
+const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
+
 /**
- * Parse flags per command. `flagSpec` maps flag names to "bool" | "value";
- * unknown flags, repeated flags, and missing values are usage errors.
+ * Every flag of every command with its arity, fixed by name (SPEC 12.0): 1
+ * for a flag taking the whole next token as its value, 0 for one taking
+ * none — the flags the synopses and defining sections name (6, 8, 9, 10.7,
+ * 11, 12, 13.5). A `--` token naming no flag of any command takes no value.
  */
-function parseArgs(argv, flagSpec, positionalRange) {
-  const flags = {};
-  const positionals = [];
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg.startsWith("--")) {
-      const kind = flagSpec[arg];
-      if (kind === undefined)
-        throw new UsageError(`unknown flag ${arg} (SPEC 12.0)`);
-      if (Object.hasOwn(flags, arg)) {
-        throw new UsageError(
-          `repeated flag ${arg}: a flag may be given at most once (SPEC 12.0)`,
-        );
-      }
-      if (kind === "bool") {
-        flags[arg] = true;
-      } else {
-        const value = argv[i + 1];
-        if (value === undefined)
-          throw new UsageError(`missing value for ${arg} (SPEC 12.0)`);
-        flags[arg] = value;
-        i += 1;
-      }
-    } else {
-      positionals.push(arg);
-    }
-  }
-  const [min, max] = positionalRange;
-  if (positionals.length < min || positionals.length > max) {
-    throw new UsageError(
-      `expected ${min === max ? String(min) : `${String(min)}-${String(max)}`} argument(s), got ${String(positionals.length)} (SPEC 12.0)`,
-    );
-  }
-  return { flags, positionals };
+const FLAG_ARITY = new Map([
+  ["--json", 0],
+  ["--preview", 0],
+  ["--tree", 0],
+  ["--text", 0],
+  ["--check", 0],
+  ["--unreferenced", 0],
+  ["--config", 1],
+  ["--test-hold", 1],
+  ["--file", 1],
+  ["--to", 1],
+  ["--from", 1],
+  ["--kinds", 1],
+  ["--group", 1],
+  ["--tag", 1],
+  ["--coverage", 1],
+  ["--base", 1],
+  ["--strategy", 1],
+  ["--name", 1],
+  ["--status", 1],
+  ["--note", 1],
+]);
+
+/** Every command of the product (SPEC 12). */
+const PRODUCT_COMMANDS = new Set([
+  "build",
+  "check",
+  "ids",
+  "show",
+  "coverage",
+  "impact",
+  "review",
+  "query",
+  "occurrences",
+  "view",
+  "at",
+  "inventory",
+  "rename",
+  "move",
+  "version",
+]);
+
+/**
+ * The synopses of this fixture's surface (§CONF-CORE; SPEC 12.1–12.4, 8.2,
+ * 9, 6.4, 6.5) — each naming the flags it accepts beside the globals
+ * `--json` and `--config` (12.0), the flags it requires, its least and most
+ * operand counts, whether it is a mutating command (13.5: `rename`, `move`,
+ * and the mutating `review` subcommands, which alone accept `--test-hold`,
+ * excluded under `--preview`, 6.6), and the named flags this fixture does
+ * not serve. Every syntax-class check of 12.0 precedes every scope refusal:
+ * an unserved flag, a `move` preview or section form, and a product command
+ * outside the surface are refused loudly (FixtureScopeError, exit 70) only
+ * once the arguments match the synopsis and the value spellings the
+ * arguments alone decide have passed — a usage error is never masked by a
+ * scope refusal.
+ * @typedef {{ flags: readonly string[], required?: readonly string[],
+ *             operands: readonly [number, number], mutating?: boolean,
+ *             unservedFlags?: readonly string[] }} Synopsis
+ * @type {Map<string, Synopsis>}
+ */
+const SYNOPSES = new Map([
+  ["build", { flags: [], operands: [0, 0] }],
+  ["check", { flags: [], operands: [0, 0] }],
+  [
+    "ids",
+    {
+      flags: ["--tree", "--file", "--unreferenced"],
+      operands: [0, 0],
+      unservedFlags: ["--tree", "--file", "--unreferenced"],
+    },
+  ],
+  ["show", { flags: [], operands: [1, 1] }],
+  ["coverage", { flags: ["--check"], operands: [0, 1] }],
+  ["impact", { flags: ["--base"], required: ["--base"], operands: [0, 0] }],
+  ["rename", { flags: ["--preview"], operands: [3, 3], mutating: true }],
+  ["move", { flags: ["--preview"], operands: [2, 2], mutating: true }],
+]);
+
+/**
+ * `query`'s subcommands (SPEC 11.1): `query edges` is served in its
+ * unfiltered form alone, `query nodes` likewise.
+ * @type {Map<string, Synopsis>}
+ */
+const QUERY_SYNOPSES = new Map([
+  ["node", { flags: [], operands: [1, 1] }],
+  [
+    "nodes",
+    {
+      flags: ["--group", "--file", "--tag", "--coverage"],
+      operands: [0, 0],
+      unservedFlags: ["--group", "--file", "--tag", "--coverage"],
+    },
+  ],
+  [
+    "edges",
+    {
+      flags: ["--from", "--to", "--kinds"],
+      operands: [0, 0],
+      unservedFlags: ["--from", "--to", "--kinds"],
+    },
+  ],
+  ["subtree", { flags: [], operands: [1, 1] }],
+  ["ancestors", { flags: [], operands: [1, 1] }],
+  [
+    "reachable",
+    {
+      flags: ["--from", "--to", "--kinds"],
+      required: ["--from", "--to"],
+      operands: [0, 0],
+    },
+  ],
+]);
+
+/**
+ * `review`'s subcommands (SPEC 10.7): `create`, `resolve`, and `split`
+ * mutating (13.5), the others reads.
+ * @type {Map<string, Synopsis>}
+ */
+const REVIEW_SYNOPSES = new Map([
+  [
+    "create",
+    {
+      flags: ["--base", "--strategy", "--coverage", "--name"],
+      required: ["--name"],
+      operands: [0, 0],
+      mutating: true,
+    },
+  ],
+  ["list", { flags: [], operands: [0, 0] }],
+  ["status", { flags: [], operands: [1, 1] }],
+  ["next", { flags: [], operands: [1, 1] }],
+  ["show", { flags: [], operands: [2, 2] }],
+  ["split", { flags: [], operands: [2, 2], mutating: true }],
+  [
+    "resolve",
+    {
+      flags: ["--status", "--note"],
+      required: ["--status"],
+      operands: [2, 2],
+      mutating: true,
+    },
+  ],
+  ["export", { flags: [], operands: [1, 1] }],
+]);
+
+/**
+ * An argument value is malformed when it is not valid UTF-8 or contains
+ * U+FFFD (SPEC 12.0); Node decodes argv lossily, an ill-formed byte arriving
+ * as U+FFFD, so the one test covers both.
+ */
+function isMalformedValue(value) {
+  return value.includes(REPLACEMENT_CHARACTER);
 }
 
-const READ_FLAGS = { "--json": "bool", "--config": "value" };
-const MUTATING_FLAGS = { ...READ_FLAGS, "--test-hold": "value" };
+/**
+ * Read the arguments under the grammar of SPEC 12.0: flag tokens anywhere —
+ * before the command word, between it and its operands, or after them — a
+ * value-taking flag taking the whole next token, whatever it looks like, and
+ * `--` ending flag reading (dropped; every later token a non-flag token).
+ * Returns the flags (name to value, `true` for a flag taking none), the
+ * remaining non-flag tokens in order — the command, the subcommand of
+ * `query` or `review`, then the operands — whether a `--json` token was read
+ * as a flag (never as another flag's value), and the first syntax-class
+ * error met that the arguments decide for every command alike, if any.
+ */
+function readInvocation(argv) {
+  const flags = new Map();
+  const words = [];
+  let json = false;
+  let error = null;
+  const note = (message) => {
+    if (error === null) error = message;
+  };
+  let flagsEnded = false;
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (!flagsEnded && token === "--") {
+      flagsEnded = true;
+      continue;
+    }
+    if (!flagsEnded && token.startsWith("--")) {
+      if (token === "--json") json = true;
+      if (flags.has(token)) {
+        note(
+          `repeated flag ${token}: a flag may be given at most once (SPEC 12.0)`,
+        );
+      }
+      if (FLAG_ARITY.get(token) === 1) {
+        if (i + 1 >= argv.length) {
+          note(`flag ${token} lacks its value (SPEC 12.0)`);
+          flags.set(token, true);
+        } else {
+          i += 1;
+          const value = argv[i];
+          if (isMalformedValue(value)) {
+            note(
+              `malformed value for ${token}: not valid UTF-8, or containing U+FFFD (SPEC 12.0)`,
+            );
+          }
+          flags.set(token, value);
+        }
+      } else {
+        if (!FLAG_ARITY.has(token)) note(`unknown flag ${token} (SPEC 12.0)`);
+        flags.set(token, true);
+      }
+      continue;
+    }
+    if (isMalformedValue(token)) {
+      note(
+        "malformed argument: not valid UTF-8, or containing U+FFFD (SPEC 12.0)",
+      );
+    }
+    words.push(token);
+  }
+  return { flags, words, json, error };
+}
+
+/**
+ * The synopsis checks of SPEC 12.0's syntax class for one command or
+ * subcommand (`spelled`): every flag given is one it accepts — its
+ * synopsis's, the global `--json` and `--config`, or, for a mutating
+ * command, `--test-hold` (13.5), which `--preview` excludes (6.6) — the
+ * operands match its synopsis in number, and its required flags are given.
+ */
+function checkSynopsis(spelled, synopsis, flags, operands) {
+  for (const name of flags.keys()) {
+    if (name === "--json" || name === "--config") continue;
+    if (synopsis.flags.includes(name)) continue;
+    if (name === "--test-hold" && synopsis.mutating === true) continue;
+    throw new UsageError(
+      name === "--test-hold"
+        ? `unknown flag --test-hold for ${spelled}: the seam belongs to the mutating commands alone (SPEC 13.5, 12.0)`
+        : `unknown flag ${name} for ${spelled} (SPEC 12.0)`,
+    );
+  }
+  if (flags.has("--test-hold") && flags.has("--preview")) {
+    throw new UsageError(
+      "--test-hold is excluded under --preview: a preview acquires no exclusivity and takes no seam (SPEC 6.6, 12.0)",
+    );
+  }
+  const [least, most] = synopsis.operands;
+  if (operands.length < least) {
+    throw new UsageError(`${spelled}: missing operand (SPEC 12.0)`);
+  }
+  if (operands.length > most) {
+    throw new UsageError(
+      `surplus operand ${operands[most]}: ${spelled} takes at most ${String(most)} operand(s) (SPEC 12.0)`,
+    );
+  }
+  for (const name of synopsis.required ?? []) {
+    if (!flags.has(name)) {
+      throw new UsageError(
+        `${spelled}: missing required flag ${name} (SPEC 12.0)`,
+      );
+    }
+  }
+}
+
+/** The forbidden segment names of SPEC 1.4, all five (exact strings). */
+const FORBIDDEN_NAMES = new Set([
+  "$",
+  "__proto__",
+  "prototype",
+  "constructor",
+  "then",
+]);
+
+/**
+ * The code points SPEC 1.4 bars from every segment and tag beside its
+ * whitespace and control classes: `"`, `#`, `&`, `'`, `\`, U+2028, U+2029,
+ * and U+FFFD — spelled as code points, never as escapes.
+ */
+const BARRED_TAG_CODE_POINTS = new Set([
+  0x22, 0x23, 0x26, 0x27, 0x5c, 0x2028, 0x2029, 0xfffd,
+]);
+
+function codePointName(codePoint) {
+  return `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+/**
+ * `query nodes --tag`'s acceptance (SPEC 11.1): syntactic, whatever the
+ * workspace contains — a spelling no tag can have under 1.4 (a tag follows
+ * the rules of an ID segment, except that it MAY contain `.`) is a
+ * malformed value, a usage error of the syntax class (12.0): empty, a
+ * forbidden name, or containing a whitespace or control character (1.4's
+ * classes exactly: U+0009–U+000D and U+0020; U+0000–U+001F and U+007F) or a
+ * barred code point.
+ */
+function checkTagValue(value) {
+  let violation = null;
+  if (value.length === 0) {
+    violation = "it is empty";
+  } else if (FORBIDDEN_NAMES.has(value)) {
+    violation = `it is the forbidden name ${JSON.stringify(value)}`;
+  } else {
+    for (const character of value) {
+      const codePoint = character.codePointAt(0);
+      if (codePoint <= 0x20 || codePoint === 0x7f) {
+        violation = `it contains the whitespace or control character ${codePointName(codePoint)}`;
+        break;
+      }
+      if (BARRED_TAG_CODE_POINTS.has(codePoint)) {
+        violation = `it contains the barred character ${codePointName(codePoint)}`;
+        break;
+      }
+    }
+  }
+  if (violation !== null) {
+    throw new UsageError(
+      `query nodes: malformed --tag value ${JSON.stringify(value)}: ${violation}, so no tag is so spelled (SPEC 1.4, 11.1, 12.0)`,
+    );
+  }
+}
+
+/** `query nodes --coverage`'s vocabulary (SPEC 11.1). */
+const COVERAGE_VALUES = new Set(["required", "none"]);
+
+/**
+ * A `--file` pattern's outside-root rule (SPEC 7, 11.1, 12.3), decided by
+ * its spelling alone — an invalid flag value of 12.0's syntax class:
+ * reading its `/`-separated segments from a depth of zero, a `..` segment
+ * lowers the depth, a `.`, empty, or `**` segment leaves it, and every other
+ * segment raises it; a leading `/` or a depth falling below zero lies
+ * outside the root.
+ */
+function checkFileGlob(spelled, value) {
+  let depth = 0;
+  let outside = value.startsWith("/");
+  for (const segment of value.split("/")) {
+    if (outside) break;
+    if (segment === "..") {
+      depth -= 1;
+      outside = depth < 0;
+    } else if (segment !== "." && segment !== "" && segment !== "**") {
+      depth += 1;
+    }
+  }
+  if (outside) {
+    throw new UsageError(
+      `${spelled}: invalid --file value ${JSON.stringify(value)}: the pattern lies outside the workspace root (SPEC 7, 11.1, 12.0)`,
+    );
+  }
+}
+
+/**
+ * A `<node>` or `<graph-node>` spelling's syntax (SPEC 1.5, 12.0) — and
+ * `move`'s operands, split alike (6.5): at most one `#` is well-formed, no
+ * identity containing one in path, id, or unit, so a spelling with more is
+ * a malformed value, judged from the argument alone.
+ */
+function checkIdentitySpelling(spelled, value) {
+  if (value.split("#").length > 2) {
+    throw new UsageError(
+      `${spelled}: malformed identity ${JSON.stringify(value)}: more than one "#" (SPEC 1.5, 12.0)`,
+    );
+  }
+}
+
+/** The four edge kinds (SPEC 5): `query edges --kinds`' vocabulary (11.1). */
+const EDGE_KINDS = new Set(["contains", "depends", "embeds", "references"]);
+
+/**
+ * The three dependency edge kinds: `query reachable --kinds`' vocabulary,
+ * `contains` an invalid flag value there (SPEC 11.1).
+ */
+const DEPENDENCY_KINDS = new Set(["depends", "embeds", "references"]);
+
+/**
+ * A `--kinds` list (SPEC 11.1, 12.0): comma-separated elements drawn from
+ * the command's vocabulary; an empty element — a leading, trailing, or
+ * doubled comma — or one outside the vocabulary is an invalid flag value of
+ * the syntax class.
+ */
+function checkKinds(spelled, value, vocabulary) {
+  for (const element of value.split(",")) {
+    if (!vocabulary.has(element)) {
+      throw new UsageError(
+        `${spelled}: invalid --kinds value ${JSON.stringify(value)}: ${element === "" ? "an empty element" : `${JSON.stringify(element)} is outside its vocabulary`} (SPEC 11.1, 12.0)`,
+      );
+    }
+  }
+}
+
+/** A session name outside the form of SPEC 10.1: a syntax-class error. */
+function checkSessionNameForm(spelled, name) {
+  if (!sessionNameValid(name)) {
+    throw new UsageError(
+      `${spelled}: invalid session name ${JSON.stringify(name)} (SPEC 10.1, 12.0)`,
+    );
+  }
+}
+
+/**
+ * The value spellings of SPEC 12.0's syntax class that a fixed vocabulary, a
+ * spelling rule, or a co-occurrence rule decides, for the invoked command
+ * or subcommand (`spelled`) — judged from the arguments alone, before
+ * configuration is loaded and before any acquisition or hold (12.0, 13.5),
+ * the unserved flags' values included, so that no scope refusal masks a
+ * usage error. `review create`'s and `review resolve`'s remaining flag
+ * rules (10.7) are judged in their handlers, likewise before configuration
+ * is loaded.
+ */
+function checkValueSpellings(spelled, flags, operands) {
+  switch (spelled) {
+    case "ids":
+      if (flags.has("--file")) checkFileGlob(spelled, flags.get("--file"));
+      return;
+    case "show":
+    case "query node":
+    case "query subtree":
+    case "query ancestors":
+      checkIdentitySpelling(spelled, operands[0]);
+      return;
+    case "query nodes":
+      if (flags.has("--tag")) checkTagValue(flags.get("--tag"));
+      if (
+        flags.has("--coverage") &&
+        !COVERAGE_VALUES.has(flags.get("--coverage"))
+      ) {
+        throw new UsageError(
+          `query nodes: invalid --coverage value ${JSON.stringify(flags.get("--coverage"))}: expected required or none (SPEC 11.1, 12.0)`,
+        );
+      }
+      if (flags.has("--file")) checkFileGlob(spelled, flags.get("--file"));
+      return;
+    case "query edges":
+    case "query reachable":
+      for (const flag of ["--from", "--to"]) {
+        if (flags.has(flag)) {
+          checkIdentitySpelling(`${spelled} ${flag}`, flags.get(flag));
+        }
+      }
+      if (flags.has("--kinds")) {
+        checkKinds(
+          spelled,
+          flags.get("--kinds"),
+          spelled === "query edges" ? EDGE_KINDS : DEPENDENCY_KINDS,
+        );
+      }
+      return;
+    case "move":
+      for (const operand of operands) checkIdentitySpelling(spelled, operand);
+      return;
+    case "review status":
+    case "review next":
+    case "review show":
+    case "review split":
+    case "review resolve":
+    case "review export":
+      checkSessionNameForm(spelled, operands[0]);
+      return;
+    default:
+      return;
+  }
+}
+
+/**
+ * Refuse a flag a served synopsis names but this fixture does not serve —
+ * called only once the syntax-class checks have passed (12.0).
+ */
+function refuseUnservedFlags(spelled, synopsis, flags) {
+  for (const flag of synopsis.unservedFlags ?? []) {
+    if (flags.has(flag)) {
+      throw new FixtureScopeError(
+        `${spelled} ${flag} is outside this fixture's certified surface (§CONF-CORE: ${spelled} in its unfiltered form alone)`,
+      );
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Mutating-command scaffold: exclusivity, hold seam, operation, release
@@ -2274,8 +2720,7 @@ function isRefusedOutcome(error) {
 // Commands
 // ---------------------------------------------------------------------------
 
-async function commandBuild(io, cwd, argv) {
-  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
+async function commandBuild(io, cwd, { flags }) {
   const config = await loadConfig(cwd, flags["--config"]);
   const graph = await loadGraph(config.root, config.groups);
   await regenerate(graph);
@@ -2286,8 +2731,7 @@ async function commandBuild(io, cwd, argv) {
   return 0;
 }
 
-async function commandCheck(io, cwd, argv) {
-  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
+async function commandCheck(io, cwd, { flags }) {
   const config = await loadConfig(cwd, flags["--config"]);
   const graph = await loadGraph(config.root, config.groups);
   /** @type {Finding[]} */
@@ -2366,8 +2810,7 @@ async function commandCheck(io, cwd, argv) {
   return 0;
 }
 
-async function commandIds(io, cwd, argv) {
-  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
+async function commandIds(io, cwd, { flags }) {
   const config = await loadConfig(cwd, flags["--config"]);
   const graph = await loadGraph(config.root, config.groups);
   const doc = {
@@ -2429,8 +2872,7 @@ function requireNode(graph, identity) {
   return node;
 }
 
-async function commandShow(io, cwd, argv) {
-  const { flags, positionals } = parseArgs(argv, READ_FLAGS, [1, 1]);
+async function commandShow(io, cwd, { flags, positionals }) {
   const config = await loadConfig(cwd, flags["--config"]);
   const graph = await loadGraph(config.root, config.groups);
   const doc = nodeReportDoc(requireNode(graph, positionals[0]));
@@ -2446,41 +2888,12 @@ function nodeRow(node) {
   };
 }
 
-async function commandQuery(io, cwd, argv) {
-  const sub = argv[0];
-  const rest = argv.slice(1);
-  const flagSpecs = {
-    node: READ_FLAGS,
-    nodes: READ_FLAGS,
-    edges: {
-      ...READ_FLAGS,
-      "--from": "value",
-      "--to": "value",
-      "--kinds": "value",
-    },
-    subtree: READ_FLAGS,
-    ancestors: READ_FLAGS,
-    reachable: {
-      ...READ_FLAGS,
-      "--from": "value",
-      "--to": "value",
-      "--kinds": "value",
-    },
-  };
-  if (sub === undefined || flagSpecs[sub] === undefined) {
-    throw new UsageError(
-      `unknown query subcommand ${String(sub)} (SPEC 11, 12.0)`,
-    );
-  }
-  const positionalRange =
-    sub === "node" || sub === "subtree" || sub === "ancestors"
-      ? [1, 1]
-      : [0, 0];
-  const { flags, positionals } = parseArgs(
-    rest,
-    flagSpecs[sub],
-    positionalRange,
-  );
+/**
+ * `query`'s served subcommands (SPEC 11.1), the subcommand and its operands
+ * read under 12.0's grammar by dispatchCommand: `query edges` and `query
+ * nodes` in their unfiltered forms alone (refuseUnservedFlags).
+ */
+async function commandQuery(io, cwd, sub, { flags, positionals }) {
   const config = await loadConfig(cwd, flags["--config"]);
   const graph = await loadGraph(config.root, config.groups);
   const allNodes = graph.files.flatMap((model) => model.nodes);
@@ -2520,26 +2933,25 @@ async function commandQuery(io, cwd, argv) {
     return 0;
   }
   // reachable: dependency kinds only; this scope has no dependency edges.
-  const from = flags["--from"];
-  const to = flags["--to"];
-  if (from === undefined || to === undefined) {
-    throw new UsageError(
-      "query reachable requires --from and --to (SPEC 11, 12.0)",
-    );
-  }
-  requireNode(graph, from);
-  requireNode(graph, to);
+  // Both flags are required by the synopsis (checkSynopsis, SPEC 11.1,
+  // 12.0); `--kinds`, its vocabulary judged there too, selects among
+  // dependency kinds, of which this scope's graph holds no edge.
+  requireNode(graph, flags["--from"]);
+  requireNode(graph, flags["--to"]);
   emitJsonOnly(io, { reachable: false });
   return 0;
 }
 
-async function commandCoverage(io, cwd, argv) {
-  const { flags } = parseArgs(
-    argv,
-    { ...READ_FLAGS, "--check": "bool" },
-    [0, 0],
-  );
+async function commandCoverage(io, cwd, { flags, positionals }) {
   const config = await loadConfig(cwd, flags["--config"]);
+  if (positionals.length === 1) {
+    // `coverage <name>` (SPEC 8.2): this scope configures no profile, so
+    // every name is an unknown profile — a usage error judged against the
+    // configuration, ahead of the gate of 13.3 (12.0).
+    throw new UsageError(
+      `unknown coverage profile ${positionals[0]}: no profile is configured (SPEC 8.2, 12.0)`,
+    );
+  }
   await loadGraph(config.root, config.groups); // reads answer per current sources
   emitDoc(io, flags["--json"] === true, { profiles: [] }, [
     "coverage: 0 profiles configured",
@@ -2547,16 +2959,9 @@ async function commandCoverage(io, cwd, argv) {
   return 0;
 }
 
-async function commandImpact(io, cwd, argv) {
-  const { flags } = parseArgs(
-    argv,
-    { ...READ_FLAGS, "--base": "value" },
-    [0, 0],
-  );
+async function commandImpact(io, cwd, { flags }) {
+  // `--base` is required by the synopsis (checkSynopsis, SPEC 9, 12.0).
   await loadConfig(cwd, flags["--config"]);
-  if (flags["--base"] === undefined) {
-    throw new UsageError("impact requires --base <ref> (SPEC 9, 12.0)");
-  }
   // §CONF-CORE scope has no git: a baseline that cannot be read or
   // reconstructed is a usage error (SPEC 6.3, 12.0).
   throw new UsageError(
@@ -2565,8 +2970,6 @@ async function commandImpact(io, cwd, argv) {
 }
 
 // --- rename / move (SPEC 6.4, 6.5) ---
-
-const RENAME_FLAGS = { ...MUTATING_FLAGS, "--preview": "bool" };
 
 /**
  * The argument checks of `rename` and `move` over the origin file (SPEC 6.4,
@@ -2623,8 +3026,7 @@ async function spelledSectionsOf(root, rel) {
   return parsed.findings.length > 0 ? null : parsed.sections;
 }
 
-async function commandRename(io, cwd, argv) {
-  const { flags, positionals } = parseArgs(argv, RENAME_FLAGS, [3, 3]);
+async function commandRename(io, cwd, { flags, positionals }) {
   const [file, oldId, newId] = positionals;
   if (flags["--preview"] === true) {
     return await previewRename(cwd, flags, file, oldId, newId);
@@ -2748,18 +3150,14 @@ async function commandRename(io, cwd, argv) {
  * A preview is a non-mutating command under 13.5: it acquires no workspace
  * exclusivity, creates no hold file, and does not take the acquisition-tied
  * seam — `--test-hold` beside `--preview` is a usage error of the syntax
- * class (SPEC 12.0), judged before configuration is loaded — and it is
+ * class (SPEC 12.0), judged from the arguments alone by checkSynopsis,
+ * before configuration is loaded — and it is
  * refused exactly as the real operation would be: the argument checks of
  * 12.0 (a nonexistent origin file or old ID, 6.4) exit 2 at once, modifying
  * nothing. A preview of a performable rename lies outside this surface and
  * is refused loudly, outside the 12.0 partition, never answered.
  */
 async function previewRename(cwd, flags, file, oldId, newId) {
-  if (flags["--test-hold"] !== undefined) {
-    throw new UsageError(
-      "--test-hold is excluded under --preview: a preview acquires no exclusivity and takes no seam (SPEC 6.6, 12.0)",
-    );
-  }
   const config = await loadConfig(cwd, flags["--config"]);
   const graph = await loadGraph(config.root, config.groups);
   const model = graph.files.find((candidate) => candidate.rel === file);
@@ -2776,14 +3174,22 @@ async function previewRename(cwd, flags, file, oldId, newId) {
   );
 }
 
-async function commandMove(io, cwd, argv) {
-  const { flags, positionals } = parseArgs(argv, MUTATING_FLAGS, [2, 2]);
+async function commandMove(io, cwd, { flags, positionals }) {
   const [oldPath, newPath] = positionals;
+  // The section form and every preview are outside this fixture's certified
+  // scope (CERTIFICATIONS.md §CONF-CORE: file-form move only; `rename
+  // --preview` alone, as T13.5-8 drives it) — refused loudly only once the
+  // syntax-class checks of 12.0 have passed (dispatchCommand: each operand
+  // holds at most one `#`, and `--test-hold` beside `--preview` is a usage
+  // error), so no scope refusal masks a usage error.
   if (oldPath.includes("#") || newPath.includes("#")) {
-    // The section form is outside this fixture's certified scope
-    // (CERTIFICATIONS.md §CONF-CORE: file-form move only).
     throw new FixtureScopeError(
       "this fixture implements the file form of move only (§CONF-CORE scope)",
+    );
+  }
+  if (flags["--preview"] === true) {
+    throw new FixtureScopeError(
+      "move --preview lies outside this fixture's certified surface (§CONF-CORE scope)",
     );
   }
   // The checks judged ahead of the operation, in 12.0's order: first the
@@ -2892,23 +3298,13 @@ function requireItem(session, itemId) {
   return item;
 }
 
-async function reviewCreate(io, cwd, argv) {
-  const { flags } = parseArgs(
-    argv,
-    {
-      ...MUTATING_FLAGS,
-      "--strategy": "value",
-      "--name": "value",
-      "--base": "value",
-      "--coverage": "value",
-    },
-    [0, 0],
-  );
+async function reviewCreate(io, cwd, { flags }) {
+  // The flag rules of 10.7 — of 12.0's syntax class, judged from the
+  // arguments alone, before configuration is loaded and before acquisition
+  // and the hold: `--name` (required by the synopsis, checkSynopsis) in the
+  // form of 10.1, exactly one of `--base`, `--strategy audit`, and
+  // `--coverage`, and `--strategy`'s vocabulary.
   const name = flags["--name"];
-  if (name === undefined)
-    throw new UsageError(
-      "review create requires --name <name> (SPEC 10.7, 12.0)",
-    );
   if (!sessionNameValid(name)) {
     throw new UsageError(
       `invalid session name ${JSON.stringify(name)} (SPEC 10.1, 12.0)`,
@@ -3030,9 +3426,11 @@ async function judgeGate(config) {
  * The argument check of `review resolve` and `review split` ahead of the
  * gate (runMutating's `judgeArguments`; SPEC 12.0: a session name is judged
  * against the session directory, identically on valid and failing
- * workspaces, before the invalid-workspace report of 13.3): the name must be
- * in the form of 10.1 and name a session file in the directory — a usage
- * error, exit 2, otherwise. The session file itself is read only past the
+ * workspaces, before the invalid-workspace report of 13.3): the name must
+ * name a session file in the directory — a usage error, exit 2, otherwise;
+ * its form (10.1) is of 12.0's syntax class, judged from the arguments
+ * alone before configuration is loaded (checkValueSpellings), so the form
+ * test here never refuses. The session file itself is read only past the
  * gate and refresh (requireSession), where its corruption is reported (13.3,
  * 14.21) and its item id judged (12.0). T13.5-8's held `review resolve` on
  * the failing workspace names an existing session, so it passes here and
@@ -3051,15 +3449,14 @@ function judgeSessionName(name) {
   };
 }
 
-async function reviewResolve(io, cwd, argv) {
-  const { flags, positionals } = parseArgs(
-    argv,
-    { ...MUTATING_FLAGS, "--status": "value", "--note": "value" },
-    [2, 2],
-  );
+async function reviewResolve(io, cwd, { flags, positionals }) {
   const [name, itemId] = positionals;
+  // `--status`'s vocabulary (10.7): of 12.0's syntax class, judged before
+  // configuration is loaded and before acquisition and the hold — the flag
+  // itself required by the synopsis (checkSynopsis), the session name's
+  // form judged by checkValueSpellings.
   const status = flags["--status"];
-  if (status === undefined || !RESOLVE_STATUSES.has(status)) {
+  if (!RESOLVE_STATUSES.has(status)) {
     throw new UsageError(
       `--status accepts updated, no-change, and skipped; got ${String(status)} (SPEC 10.7, 12.0)`,
     );
@@ -3163,8 +3560,7 @@ function rederive(session, graph, journal) {
   }
 }
 
-async function reviewSplit(io, cwd, argv) {
-  const { flags, positionals } = parseArgs(argv, MUTATING_FLAGS, [2, 2]);
+async function reviewSplit(io, cwd, { flags, positionals }) {
   const [name, itemId] = positionals;
   return await runMutating(
     cwd,
@@ -3296,8 +3692,7 @@ async function reviewSplit(io, cwd, argv) {
   );
 }
 
-async function reviewList(io, cwd, argv) {
-  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
+async function reviewList(io, cwd, { flags }) {
   const config = await loadConfig(cwd, flags["--config"]);
   await loadGraph(config.root, config.groups); // 13.3: reads validate sources
   const sessions = [];
@@ -3339,8 +3734,7 @@ async function reviewList(io, cwd, argv) {
   return anyCorrupt ? 1 : 0;
 }
 
-async function reviewStatus(io, cwd, argv) {
-  const { flags, positionals } = parseArgs(argv, READ_FLAGS, [1, 1]);
+async function reviewStatus(io, cwd, { flags, positionals }) {
   const config = await loadConfig(cwd, flags["--config"]);
   const graph = await loadGraph(config.root, config.groups);
   const session = await requireSession(config.root, positionals[0]);
@@ -3380,8 +3774,7 @@ async function reviewStatus(io, cwd, argv) {
   });
 }
 
-async function reviewNext(io, cwd, argv) {
-  const { flags, positionals } = parseArgs(argv, READ_FLAGS, [1, 1]);
+async function reviewNext(io, cwd, { flags, positionals }) {
   const config = await loadConfig(cwd, flags["--config"]);
   const graph = await loadGraph(config.root, config.groups);
   const session = await requireSession(config.root, positionals[0]);
@@ -3413,8 +3806,7 @@ async function reviewNext(io, cwd, argv) {
   });
 }
 
-async function reviewShow(io, cwd, argv) {
-  const { flags, positionals } = parseArgs(argv, READ_FLAGS, [2, 2]);
+async function reviewShow(io, cwd, { flags, positionals }) {
   const config = await loadConfig(cwd, flags["--config"]);
   const graph = await loadGraph(config.root, config.groups);
   const session = await requireSession(config.root, positionals[0]);
@@ -3427,8 +3819,7 @@ async function reviewShow(io, cwd, argv) {
   });
 }
 
-async function reviewExport(io, cwd, argv) {
-  const { flags, positionals } = parseArgs(argv, READ_FLAGS, [1, 1]);
+async function reviewExport(io, cwd, { flags, positionals }) {
   const config = await loadConfig(cwd, flags["--config"]);
   const graph = await loadGraph(config.root, config.groups);
   const session = await requireSession(config.root, positionals[0]);
@@ -3448,30 +3839,30 @@ async function reviewExport(io, cwd, argv) {
   });
 }
 
-async function commandReview(io, cwd, argv) {
-  const sub = argv[0];
-  const rest = argv.slice(1);
+/**
+ * `review`'s subcommands (SPEC 10.7), the subcommand and its operands read
+ * under 12.0's grammar by dispatchCommand.
+ */
+async function commandReview(io, cwd, sub, args) {
   switch (sub) {
     case "create":
-      return await reviewCreate(io, cwd, rest);
+      return await reviewCreate(io, cwd, args);
     case "resolve":
-      return await reviewResolve(io, cwd, rest);
+      return await reviewResolve(io, cwd, args);
     case "split":
-      return await reviewSplit(io, cwd, rest);
+      return await reviewSplit(io, cwd, args);
     case "list":
-      return await reviewList(io, cwd, rest);
+      return await reviewList(io, cwd, args);
     case "status":
-      return await reviewStatus(io, cwd, rest);
+      return await reviewStatus(io, cwd, args);
     case "next":
-      return await reviewNext(io, cwd, rest);
+      return await reviewNext(io, cwd, args);
     case "show":
-      return await reviewShow(io, cwd, rest);
+      return await reviewShow(io, cwd, args);
     case "export":
-      return await reviewExport(io, cwd, rest);
+      return await reviewExport(io, cwd, args);
     default:
-      throw new UsageError(
-        `unknown review subcommand ${String(sub)} (SPEC 10.7, 12.0)`,
-      );
+      throw new Error(`no handler for the review subcommand ${sub}`);
   }
 }
 
@@ -3531,9 +3922,10 @@ let deviations = {};
  * VIOL-CORE-CHATTYREADS (CERTIFICATIONS.md): the invocations that append the
  * fixed line — `build` and the read commands of SPEC 13.3 (for `review`,
  * exactly the read subcommands; the mutating `create`/`resolve`/`split` are
- * unchanged, as are `rename` and `move`). The subcommand token is read the
- * same way commandReview dispatches it, so an unknown-subcommand invocation
- * (exit 2) never matches anyway.
+ * unchanged, as are `rename` and `move`). The command and subcommand are
+ * the first two non-flag tokens of the invocation read under 12.0's grammar
+ * (readInvocation's `words`), exactly as dispatchCommand identifies them, so
+ * the switch reads nothing of argv beyond what the conformer reads.
  */
 const CHATTY_READ_COMMANDS = new Set([
   "build",
@@ -3552,9 +3944,10 @@ const CHATTY_REVIEW_READ_SUBCOMMANDS = new Set([
   "export",
 ]);
 
-function isChattyReadInvocation(argv) {
-  if (CHATTY_READ_COMMANDS.has(argv[0])) return true;
-  return argv[0] === "review" && CHATTY_REVIEW_READ_SUBCOMMANDS.has(argv[1]);
+function isChattyReadInvocation(words) {
+  const [command, subcommand] = words;
+  if (CHATTY_READ_COMMANDS.has(command)) return true;
+  return command === "review" && CHATTY_REVIEW_READ_SUBCOMMANDS.has(subcommand);
 }
 
 /**
@@ -3588,8 +3981,13 @@ export async function runXspec(argv, cwd, options = {}) {
     stdout: (text) => process.stdout.write(text),
     stderr: (text) => process.stderr.write(text),
   };
-  const code = await dispatchCommand(io, cwd, argv);
-  if (deviations.chattyReads && code !== 2 && isChattyReadInvocation(argv)) {
+  const invocation = readInvocation(argv);
+  const code = await dispatchCommand(io, cwd, invocation);
+  if (
+    deviations.chattyReads &&
+    code !== 2 &&
+    isChattyReadInvocation(invocation.words)
+  ) {
     // VIOL-CORE-CHATTYREADS (CERTIFICATIONS.md): the append happens after
     // the command's own work, against the root the command actually resolved
     // (set by loadConfig on every path that reaches a non-exit-2 outcome; the
@@ -3604,35 +4002,88 @@ export async function runXspec(argv, cwd, options = {}) {
   return code;
 }
 
-/** Dispatch one parsed invocation and map its outcome to SPEC 12.0's codes. */
-async function dispatchCommand(io, cwd, argv) {
-  const wantsJson = argv.includes("--json");
+/**
+ * Dispatch one invocation read under the grammar of SPEC 12.0
+ * (readInvocation) and map its outcome to 12.0's codes. Every syntax-class
+ * error is decided from the arguments alone, before configuration is loaded
+ * and before any acquisition or hold (12.0, 13.5): first the checks the
+ * arguments decide for every command alike — unknown, repeated, or
+ * valueless flags and malformed values (readInvocation) — then the command
+ * and the subcommand of `query` or `review`, then the synopsis
+ * (checkSynopsis) and the value spellings (checkValueSpellings); only then
+ * is anything refused as outside this fixture's scope (exit 70).
+ */
+async function dispatchCommand(io, cwd, invocation) {
+  const [command, ...operands] = invocation.words;
+  // JSON output is in effect exactly when a `--json` token is read as a
+  // flag — not as another flag's value — governing error delivery even when
+  // the arguments are themselves the error (SPEC 12.0).
+  const wantsJson = invocation.json;
   try {
-    const command = argv[0];
-    const rest = argv.slice(1);
+    if (invocation.error !== null) throw new UsageError(invocation.error);
+    if (command === undefined) {
+      throw new UsageError("expected a command (SPEC 12.0)");
+    }
+    if (!PRODUCT_COMMANDS.has(command)) {
+      throw new UsageError(`unknown command ${command} (SPEC 12.0)`);
+    }
+    let spelled = command;
+    let synopsis = SYNOPSES.get(command);
+    let subcommand;
+    let rest = operands;
+    const subcommands =
+      command === "query"
+        ? QUERY_SYNOPSES
+        : command === "review"
+          ? REVIEW_SYNOPSES
+          : undefined;
+    if (subcommands !== undefined) {
+      [subcommand, ...rest] = operands;
+      if (subcommand === undefined) {
+        throw new UsageError(`${command}: missing subcommand (SPEC 12.0)`);
+      }
+      synopsis = subcommands.get(subcommand);
+      if (synopsis === undefined) {
+        throw new UsageError(
+          `${command}: unknown subcommand ${subcommand} (SPEC ${command === "query" ? "11.1" : "10.7"}, 12.0)`,
+        );
+      }
+      spelled = `${command} ${subcommand}`;
+    } else if (synopsis === undefined) {
+      throw new FixtureScopeError(
+        `the ${command} command is outside this fixture's certified surface (§CONF-CORE)`,
+      );
+    }
+    checkSynopsis(spelled, synopsis, invocation.flags, rest);
+    checkValueSpellings(spelled, invocation.flags, rest);
+    refuseUnservedFlags(spelled, synopsis, invocation.flags);
+    const args = {
+      flags: Object.fromEntries(invocation.flags),
+      positionals: rest,
+    };
     switch (command) {
       case "build":
-        return await commandBuild(io, cwd, rest);
+        return await commandBuild(io, cwd, args);
       case "check":
-        return await commandCheck(io, cwd, rest);
+        return await commandCheck(io, cwd, args);
       case "ids":
-        return await commandIds(io, cwd, rest);
+        return await commandIds(io, cwd, args);
       case "show":
-        return await commandShow(io, cwd, rest);
+        return await commandShow(io, cwd, args);
       case "query":
-        return await commandQuery(io, cwd, rest);
+        return await commandQuery(io, cwd, subcommand, args);
       case "coverage":
-        return await commandCoverage(io, cwd, rest);
+        return await commandCoverage(io, cwd, args);
       case "impact":
-        return await commandImpact(io, cwd, rest);
+        return await commandImpact(io, cwd, args);
       case "rename":
-        return await commandRename(io, cwd, rest);
+        return await commandRename(io, cwd, args);
       case "move":
-        return await commandMove(io, cwd, rest);
+        return await commandMove(io, cwd, args);
       case "review":
-        return await commandReview(io, cwd, rest);
+        return await commandReview(io, cwd, subcommand, args);
       default:
-        throw new UsageError(`unknown command ${String(command)} (SPEC 12.0)`);
+        throw new Error(`no handler for the served command ${command}`);
     }
   } catch (error) {
     if (error instanceof UsageError) {
