@@ -176,7 +176,14 @@
 //   unchanged identity as the sole element, the bare `<new-file>` for the
 //   file form (its entry) — every identity-pinned reason's `identities`
 //   being asserted exact (support.ts assertRefusalIdentities).
-//   T14-7's own stagings add what no home table stages: the plain file as
+//   T14-7's own stagings add what no home table stages: the two command
+//   lines the entry spells for refused-invalid-id, each run in its home
+//   workspace after the home table's loop — `rename specs/A.mdx a a.then`
+//   (the new ID misplaced as well as invalid, so refused-structural-parent
+//   beside it fails) and `move specs/A.mdx#x 'specs/B.mdx#x y'` (`x`
+//   holding `x.sub`) — each `identities` exactly the new identity, no
+//   prefix-produced identity beside it (14: intrinsic form only; the note
+//   above runIntrinsicInvalidIdArm); the plain file as
 //   a directory component of the destination path itself (the other
 //   destination-side directory-component case of 6.5 beside T6.5-4's
 //   derived-path arm — refused-invalid-destination, never 14.22); the
@@ -3237,6 +3244,132 @@ async function runT147MovedImportArms(product: ProductBinding): Promise<void> {
   }
 }
 
+// The two command lines T14-7 spells for refused-invalid-id (TEST-SPEC
+// T14-7: "`identities` exactly `["specs/A.mdx#a.then"]` for `rename
+// specs/A.mdx a a.then` and `["specs/B.mdx#x y"]` for `move specs/A.mdx#x
+// 'specs/B.mdx#x y'`, the invalid ID spelled verbatim; intrinsic form only";
+// SPEC 14, 1.3, 1.4, 6.4, 6.5). Each runs in its home workspace after the
+// home table's loop: every refusal there modifies nothing (T6.4-3's and
+// T6.5-4's compares), so each arm sees the workspace as staged, and a
+// product performing either operation fails the arm's exit assertion first.
+// The shared case tables stay untouched, so T6.4-3, T6.5-4, and T6.6-3 do
+// not change.
+// - The rename makes T6.4-3's top-level `a` (holding `a.mid`, with child
+//   `a.mid.kid`, and `a.sib`) the two-segment `a.then`: intrinsically
+//   invalid (the forbidden name `then`, 1.4) and misplaced at once (a
+//   top-level section's ID has exactly one segment, 1.3). SPEC 14 evaluates
+//   the position check only over intrinsically valid IDs, so the report is
+//   refused-invalid-id alone, never refused-structural-parent beside it —
+//   the home table's `rename specs/A.mdx a.mid a.then` keeps `a.then` under
+//   `a`, so it cannot tell — and it concerns the new identity alone, no
+//   identity the prefix replacement produces (`a.then.mid`,
+//   `a.then.mid.kid`, `a.then.sib`) beside it.
+// - The move carries T6.5-4's `x`, holding `x.sub`, into `specs/B.mdx`
+//   (holding `b` and `y`) as `x y`, one whitespace-bearing segment (1.4):
+//   its target parent is the file root, it collides with nothing, `x` and
+//   `x.sub` carry no references (no cycle), and refused-invalid-rewrite is
+//   evaluated only over an intrinsically valid new ID — so the report is
+//   refused-invalid-id alone, its `identities` exactly the new identity,
+//   never the prefix-produced `specs/B.mdx#x y.sub` (SPEC 14: no produced
+//   identity reports separately). The last operand is one argv element
+//   holding a space (the entry's quotes are shell quoting).
+// assertRefusalReport's exact one-entry multiset and exact `identities`
+// compare give both arms their teeth. Each arm's premise — the descendants
+// whose produced identities it asserts absent — is checked against the home
+// fixture's staged bytes (never the live workspace, which only a product
+// could have changed); a fixture no longer staging them is a harness defect.
+
+/** One spelled refused-invalid-id command line (the note above). */
+interface IntrinsicInvalidIdArm {
+  /** The command line as T14-7 spells it, for diagnoses. */
+  readonly spelled: string;
+  readonly argv: readonly string[];
+  /** The one expected `identities` entry: the new identity, verbatim. */
+  readonly identity: string;
+  /** The home fixture's file holding the renamed or moved section. */
+  readonly origin: string;
+  /** Constructs the home fixture must stage inside that section. */
+  readonly descendants: readonly string[];
+  readonly reason: string;
+}
+
+const T14_7_INTRINSIC_RENAME_ARM: IntrinsicInvalidIdArm = {
+  spelled: "rename specs/A.mdx a a.then",
+  argv: ["rename", "specs/A.mdx", "a", "a.then"],
+  identity: "specs/A.mdx#a.then",
+  origin: "specs/A.mdx",
+  descendants: ['<S id="a.mid">', '<S id="a.mid.kid">', '<S id="a.sib">'],
+  reason:
+    "the top-level `a` renamed to the two-segment `a.then`, intrinsically " +
+    "invalid (the forbidden name `then`, 1.4) and structurally misplaced " +
+    "(1.3) at once — refused-invalid-id alone, never " +
+    "refused-structural-parent beside it, concerning the new identity " +
+    "alone: no prefix-produced `a.then.mid`, `a.then.mid.kid`, or " +
+    "`a.then.sib`",
+};
+
+const T14_7_INTRINSIC_MOVE_ARM: IntrinsicInvalidIdArm = {
+  spelled: "move specs/A.mdx#x 'specs/B.mdx#x y'",
+  argv: ["move", "specs/A.mdx#x", "specs/B.mdx#x y"],
+  identity: "specs/B.mdx#x y",
+  origin: "specs/A.mdx",
+  descendants: ['<S id="x.sub">'],
+  reason:
+    "`x`, holding `x.sub`, moved into `specs/B.mdx` as the " +
+    "whitespace-bearing `x y` (1.4) — refused-invalid-id alone, concerning " +
+    "the new identity alone: never the prefix-produced `specs/B.mdx#x y.sub`",
+};
+
+/** A staged file's bytes as text, for the arms' premise checks. */
+function stagedFileText(contents: InitialFileContents | undefined): string {
+  if (contents === undefined) return "";
+  const source =
+    contents instanceof StagedMdx || contents instanceof StagedTs
+      ? contents.source
+      : contents;
+  return typeof source === "string"
+    ? source
+    : Buffer.from(source).toString("utf8");
+}
+
+/**
+ * One spelled refused-invalid-id command line (the note above), in its home
+ * workspace after the home table's loop: exit 1, the form-exact 12.7
+ * report, exactly one finding — refused-invalid-id — whose `identities` is
+ * exactly the new identity, the invalid ID spelled verbatim (SPEC 14).
+ * `files` is the home fixture's staged file map, the premise's ground.
+ */
+async function runIntrinsicInvalidIdArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  files: Readonly<Record<string, InitialFileContents>>,
+  arm: IntrinsicInvalidIdArm,
+): Promise<void> {
+  const staged = stagedFileText(files[arm.origin]);
+  for (const construct of arm.descendants) {
+    if (!staged.includes(construct)) {
+      throw new Error(
+        `harness defect: T14-7's \`${arm.spelled}\` arm needs the home ` +
+          `fixture's ${arm.origin} to stage ${construct} inside the ` +
+          `section the operation renames or moves — the produced identity ` +
+          `it asserts absent — and the fixture no longer does`,
+      );
+    }
+  }
+  await assertRefusalReport(
+    product,
+    workspace,
+    arm.argv,
+    { finding: "refused-invalid-id", identities: [arm.identity] },
+    `T14-7 \`${arm.spelled}\` (${arm.reason}; TEST-SPEC T14-7: ` +
+      `"refused-invalid-id (concerning the new identity alone — ` +
+      `\`identities\` exactly [${JSON.stringify(arm.identity)}] … the ` +
+      `invalid ID spelled verbatim; intrinsic form only — a structurally ` +
+      `misplaced but intrinsically valid new ID reports ` +
+      `\`refused-structural-parent\` alone, never both)"; SPEC 14, 1.3, 1.4)`,
+  );
+}
+
 // The invalid-path identity staging (T14-7's own; SPEC 14, 1.5, 12.0,
 // 12.7): `specs/new.txt` — an absent path lacking `.mdx`, no valid
 // destination (6.5, 14.19) — as a section move's target file. A refusal's
@@ -3607,7 +3740,7 @@ async function runT147ExposedDerivedFileArms(
 const T14_7 = defineProductTest({
   id: "T14-7",
   title:
-    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's full path in pre-operation coordinates — a dependency cycle's participating `d` spelling; a spec import cycle's existing import declaration by its own characters and, for the import the move would add, the local reference spelling whose rewrite requires it, exactly those two, never a range for the import that does not yet exist; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included — occupancy judged in discovered-path form alone: a destination spelled `./a.mdx` for the origin `a.mdx`, `specs//b.mdx`, or `specs/../specs/b.mdx`, each naming an occupied path were it normalized, is refused-invalid-destination alone concerning the path as spelled, never reported occupied, and a section-form target path so spelled likewise; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination, and in T6.5-4's symbolic-link arms a link to a directory at a component of the destination path, of a created target file's path, and of the `outDir` emit destination, the link and its target byte-identical after each refusal — and so do T6.5-4's barred path characters and T6.5-20's derived-path relations and module-linking designation, over T6.5-20's exported refused stagings; refused-exposed-derived-file over T6.5-21's exported refused stagings — `path` the origin's emit destination, `locations` `[]`, `identities` `[]`, the two-reason move's refused-invalid-destination beside it; every reason concerning a path carrying it as the finding's `path` with `locations` `[]`; the eleven reasons 14 lists (refused-exposed-derived-file, refused-invalid-rewrite, and refused-moved-import, T6.5-21's, T6.5-16's, and T6.5-17's subjects, included) are the whole refusal vocabulary — a code 14 does not list never appears in any report, the form-exact decode admitting only 14's codes (no unresolvable-reference reason exists); every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them; refused-invalid-rewrite and refused-moved-import re-asserted over T6.5-16's and T6.5-17's exported arms — the former locating the moved construct and, for an addition no offset admits, the spellings rooted at its binding, its identities the concerned files' paths in byte order; the latter locating each moved declaration by the import range of 11.4, its identities empty — `path` null for both, every reason the entry pins beside reported together; identities over invalid paths: `move specs/A.mdx#x 'specs/new.txt#x y'` reports refused-invalid-destination (`path` `specs/new.txt`) beside refused-invalid-id with identities exactly `[\"specs/new.txt#x y\"]`, and `move specs/A.mdx#x specs/new.txt#p.y` refused-invalid-destination beside refused-missing-target-parent with `[\"specs/new.txt#p\"]` — each a plain string over the path as spelled, defining no node: `query node` on it is a usage error, exit 2; and the spec import cycle's sibling arm — `A` imports a third module `C`, the moved text carries `d={C.foo}`, `C` imports `B` — locating `C`'s existing import of `B` and the chain's spelling in `A`, the located set the spellings rooted at the added binding, independent of whether each appears as a reference-rewrite (SPEC 14, 6.4, 6.5, 4, 5.3, 5.7, 1.5, 7, 11.4, 12.0, 12.7, 13.4)",
+    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it: `[\"specs/A.mdx#a.then\"]` for `rename specs/A.mdx a a.then` (the top-level `a`, holding `a.mid` and `a.sib`, made the two-segment `a.then`, no refused-structural-parent beside it) and `[\"specs/B.mdx#x y\"]` for `move specs/A.mdx#x 'specs/B.mdx#x y'` (`x` holding `x.sub`, never `specs/B.mdx#x y.sub`) (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's full path in pre-operation coordinates — a dependency cycle's participating `d` spelling; a spec import cycle's existing import declaration by its own characters and, for the import the move would add, the local reference spelling whose rewrite requires it, exactly those two, never a range for the import that does not yet exist; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included — occupancy judged in discovered-path form alone: a destination spelled `./a.mdx` for the origin `a.mdx`, `specs//b.mdx`, or `specs/../specs/b.mdx`, each naming an occupied path were it normalized, is refused-invalid-destination alone concerning the path as spelled, never reported occupied, and a section-form target path so spelled likewise; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination, and in T6.5-4's symbolic-link arms a link to a directory at a component of the destination path, of a created target file's path, and of the `outDir` emit destination, the link and its target byte-identical after each refusal — and so do T6.5-4's barred path characters and T6.5-20's derived-path relations and module-linking designation, over T6.5-20's exported refused stagings; refused-exposed-derived-file over T6.5-21's exported refused stagings — `path` the origin's emit destination, `locations` `[]`, `identities` `[]`, the two-reason move's refused-invalid-destination beside it; every reason concerning a path carrying it as the finding's `path` with `locations` `[]`; the eleven reasons 14 lists (refused-exposed-derived-file, refused-invalid-rewrite, and refused-moved-import, T6.5-21's, T6.5-16's, and T6.5-17's subjects, included) are the whole refusal vocabulary — a code 14 does not list never appears in any report, the form-exact decode admitting only 14's codes (no unresolvable-reference reason exists); every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them; refused-invalid-rewrite and refused-moved-import re-asserted over T6.5-16's and T6.5-17's exported arms — the former locating the moved construct and, for an addition no offset admits, the spellings rooted at its binding, its identities the concerned files' paths in byte order; the latter locating each moved declaration by the import range of 11.4, its identities empty — `path` null for both, every reason the entry pins beside reported together; identities over invalid paths: `move specs/A.mdx#x 'specs/new.txt#x y'` reports refused-invalid-destination (`path` `specs/new.txt`) beside refused-invalid-id with identities exactly `[\"specs/new.txt#x y\"]`, and `move specs/A.mdx#x specs/new.txt#p.y` refused-invalid-destination beside refused-missing-target-parent with `[\"specs/new.txt#p\"]` — each a plain string over the path as spelled, defining no node: `query node` on it is a usage error, exit 2; and the spec import cycle's sibling arm — `A` imports a third module `C`, the moved text carries `d={C.foo}`, `C` imports `B` — locating `C`'s existing import of `B` and the chain's spelling in `A`, the located set the spellings rooted at the added binding, independent of whether each appears as a reference-rewrite (SPEC 14, 6.4, 6.5, 4, 5.3, 5.7, 1.5, 7, 11.4, 12.0, 12.7, 13.4)",
   timeoutMs: 300_000,
   run: async (product) => {
     // --- The rename reasons, staged via T6.4-3's exported fixture: the
@@ -3644,6 +3777,15 @@ const T14_7 = defineProductTest({
             `T14-7 rename (${reason})`,
           );
         }
+        // The spelled `rename specs/A.mdx a a.then` (the note above
+        // runIntrinsicInvalidIdArm): refused-invalid-id alone, never
+        // refused-structural-parent beside it, no produced identity.
+        await runIntrinsicInvalidIdArm(
+          product,
+          workspace,
+          RENAME_REFUSAL_FILES,
+          T14_7_INTRINSIC_RENAME_ARM,
+        );
       },
     );
 
@@ -3695,6 +3837,15 @@ const T14_7 = defineProductTest({
             await report();
           }
         }
+        // The spelled `move specs/A.mdx#x 'specs/B.mdx#x y'` (the note
+        // above runIntrinsicInvalidIdArm): refused-invalid-id alone, its
+        // identities never holding the prefix-produced `x y.sub`.
+        await runIntrinsicInvalidIdArm(
+          product,
+          workspace,
+          MOVE_REFUSAL_FILES,
+          T14_7_INTRINSIC_MOVE_ARM,
+        );
       },
     );
 
