@@ -14,11 +14,13 @@
 //   well-formed TypeScript of the `export const n = 1` form (14.20); no
 //   `coverage`, `policy`, or git. Anything outside that shape — another
 //   source form, another code form, a `coverage` or `policy` rule, another
-//   command, the `--test-hold` seam — is refused loudly with exit 70
-//   (`xspec: fixture scope error: …` on stderr), outside SPEC 12.0's exit
-//   partition: a fixture-side condition, never a product verdict.
+//   command — is refused loudly with exit 70 (`xspec: fixture scope error:
+//   …` on stderr), outside SPEC 12.0's exit partition: a fixture-side
+//   condition, never a product verdict.
 // - Command surface: `build` (12.1) and `check` (12.2), each with `--json`
-//   and `--config`, read under the invocation grammar of 12.0 (flag tokens
+//   and `--config` — neither mutating (13.5), so `--test-hold`, value-taking
+//   by name all the same, is an unknown flag of both, the usage error of
+//   12.0 — read under the invocation grammar of 12.0 (flag tokens
 //   anywhere, a value-taking flag taking the whole next token, `--` ending
 //   flag reading, arity fixed by name, a repeated flag, an unknown flag or
 //   command, and a surplus operand usage errors; JSON output in effect
@@ -230,11 +232,15 @@ const PRODUCT_COMMANDS = new Set([
 ]);
 
 /**
- * The flags each served command accepts: the globals `--json` and
- * `--config`, plus `--test-hold` for the mutating `build` (13.5).
+ * The flags each served command accepts (12.0): the globals `--json` and
+ * `--config` alone. Neither `build` nor `check` is a mutating command (13.5:
+ * `rename`, `move`, and the mutating `review` subcommands), so `--test-hold`
+ * is an unknown flag of both — still value-taking, its arity fixed by name in
+ * `FLAG_ARITY`, so `build --test-hold --json` reads `--json` as its value and
+ * leaves JSON out of effect (CERTIFICATIONS.md preamble, T13.5-1).
  */
 const COMMAND_FLAGS = {
-  build: new Set(["--json", "--config", "--test-hold"]),
+  build: new Set(["--json", "--config"]),
   check: new Set(["--json", "--config"]),
 };
 
@@ -1513,11 +1519,6 @@ export async function runXspec(argv, cwd, options = {}) {
     if (operands.length > 0) {
       throw new UsageError(
         `surplus operand ${operands[0]}: ${command} takes no operands (SPEC 12.0)`,
-      );
-    }
-    if (invocation.flags.has("--test-hold")) {
-      throw new ScopeError(
-        "the --test-hold seam (13.5) is outside this fixture's scope (CERTIFICATIONS.md §CONF-ORPHAN)",
       );
     }
     const configFlag = invocation.flags.get("--config");
