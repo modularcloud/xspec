@@ -49,8 +49,10 @@ import {
   decodeFindingsReport,
   decodeIdsReport,
   decodeInventoryDocument,
+  decodeNodeIdentityRowsReport,
   decodeNodeMetadataSummary,
   decodeNodeSummaryRowsReport,
+  decodeNodeTextAlgebraSummary,
   decodeOccurrencesReport,
   decodeViewReport,
 } from "../helpers/adapters/index.js";
@@ -1824,6 +1826,618 @@ const VALID_TABLE: GrammarTable = {
   ],
 };
 
+// --- CONF-MD (CERTIFICATIONS.md §CONF-MD: `build`, `check`, and `query
+// node`, `query nodes`, and `query edges` as its scope serves them) ---------
+
+/** SPEC 1.3's own nested shape: `a` containing `a.b`, finding-free. */
+const MD_SOURCE = `<S id="a">
+Alpha text.
+
+<S id="a.b">
+Beta text.
+</S>
+</S>
+`;
+
+/**
+ * One spec group with Markdown emission next to each source (7.3, 13.2) —
+ * so a `build` that runs writes `specs/A.md`, and an exit-2 row's unchanged
+ * workspace shows that none ran — and MD_SOURCE, a valid workspace as
+ * §CONF-MD's scope admits ("every file well-formed MDX (14.20) and
+ * valid"). No row runs `check` to exit 0: on a workspace never built, a
+ * conforming `check` reports the missing derived files and graph data
+ * (12.2, 14.10), which §CONF-MD's scope leaves out ("for T3-1's
+ * grammar-boundary arm, `check` exiting 0", after its `build`), so `check`
+ * appears in exit-2 rows alone.
+ */
+const MD_STAGING: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`,
+    "specs/A.mdx": MD_SOURCE,
+  },
+};
+
+/**
+ * The same source under a configuration lacking the required `specs` key
+ * (SPEC 7: "`specs` is required"), a configuration error (14.14).
+ */
+const MD_NO_SPECS_STAGING: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  markdown: { emit: true }
+})
+`,
+    "specs/A.mdx": MD_SOURCE,
+  },
+};
+
+const MD_FILE = "specs/A.mdx";
+const MD_TARGET = `${MD_FILE}#a`;
+const MD_CHILD = `${MD_FILE}#a.b`;
+/** Every requirement node of MD_STAGING: the root, `a`, and `a.b`. */
+const MD_NODES = [MD_FILE, MD_TARGET, MD_CHILD];
+/** Its `contains` edges (5.2): the root to `a`, `a` to `a.b`. */
+const MD_EDGES: readonly GraphEdge[] = [
+  { from: MD_FILE, to: MD_TARGET, kind: "contains" },
+  { from: MD_TARGET, to: MD_CHILD, kind: "contains" },
+];
+/** `MD_TARGET` with a U+FFFD appended: a malformed value (12.0). */
+const MD_MALFORMED_NODE = MD_TARGET + String.fromCodePoint(0xfffd);
+
+/**
+ * A `query nodes` answer (11.1) in the row form §CONF-MD's scope reports —
+ * "`query nodes` in its unfiltered form, one row per requirement node", its
+ * rows' other members out of scope — its rows exactly the nodes
+ * `identities` names, compared as a set: 11.1 pins "stable, deterministic
+ * ordering" alone, and a `like` row compares the order byte-wise against
+ * the canonical spelling's.
+ */
+function identityRowsOf(identities: readonly string[]): DocumentCheck {
+  return (doc, context) => {
+    const actual = JSON.stringify(
+      [...decodeNodeIdentityRowsReport(doc, context)].sort(),
+    );
+    const expected = JSON.stringify([...identities].sort());
+    if (actual !== expected) {
+      fail(
+        `${context}: the query nodes rows are the nodes ${expected} (SPEC ` +
+          `11.1: unfiltered, one row per requirement node), but they are ` +
+          `${actual}`,
+      );
+    }
+  };
+}
+
+/**
+ * A `query node` answer (11.1) in the form §CONF-MD's scope reports —
+ * source range, own and subtree text, and `contains` edges — its outgoing
+ * `contains` edges naming exactly `children`, the queried node's child
+ * sections (5.2), compared as a set.
+ */
+function childrenOf(children: readonly string[]): DocumentCheck {
+  return (doc, context) => {
+    const actual = JSON.stringify(
+      [...decodeNodeTextAlgebraSummary(doc, context).containsTargets].sort(),
+    );
+    const expected = JSON.stringify([...children].sort());
+    if (actual !== expected) {
+      fail(
+        `${context}: the query node answer's outgoing contains edges name ` +
+          `${expected} (SPEC 11.1: a node's incoming and outgoing edges by ` +
+          `kind; 5.2: a node contains its child sections), but they name ` +
+          `${actual}`,
+      );
+    }
+  };
+}
+
+/**
+ * A `query edges` answer (11.1) holding exactly `edges`, compared as a set:
+ * 11.1 pins "stable, deterministic ordering" alone, and a `like` row
+ * compares the order byte-wise against the canonical spelling's.
+ */
+function edgeSetOf(edges: readonly GraphEdge[]): DocumentCheck {
+  const spelling = ({ from, to, kind }: GraphEdge): string =>
+    JSON.stringify({ from, to, kind });
+  return (doc, context) => {
+    const actual = JSON.stringify(
+      decodeEdgesReport(doc, context).map(spelling).sort(),
+    );
+    const expected = JSON.stringify(edges.map(spelling).sort());
+    if (actual !== expected) {
+      fail(
+        `${context}: the edge enumeration is the set ${expected} (SPEC ` +
+          `11.1: unfiltered, every edge; 5.2: a node contains its child ` +
+          `sections), but it is ${actual}`,
+      );
+    }
+  };
+}
+
+const MD_NODE_A = childrenOf([MD_CHILD]);
+const MD_ROOT = childrenOf([MD_TARGET]);
+const MD_ALL_NODES = identityRowsOf(MD_NODES);
+const MD_ALL_EDGES = edgeSetOf(MD_EDGES);
+const CONFIG_ANCHORED =
+  "SPEC 14: \"A configuration error's concerned path is reported in the " +
+  "anchoring form of 11.6, identified relative to the invocation working " +
+  "directory: where a configuration path is concerned — the path the " +
+  'upward search found … — it is that path" (14.14, `configuration-error`)';
+
+const MD_TABLE: GrammarTable = {
+  conformer: "CONF-MD",
+  staging: MD_STAGING,
+  rows: [
+    // Flag tokens anywhere, `query`'s subcommand among the remaining tokens.
+    {
+      argv: ["--json", "query", "nodes"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["query", "nodes", "--json"], MD_ALL_NODES),
+    },
+    {
+      argv: ["query", "--json", "nodes"],
+      clause: `${FLAGS_ANYWHERE}; ${SUBCOMMAND_ORDER}`,
+      exit: 0,
+      stdout: like(["query", "nodes", "--json"], MD_ALL_NODES),
+    },
+    {
+      argv: ["query", "--json", "edges"],
+      clause: `${FLAGS_ANYWHERE}; ${SUBCOMMAND_ORDER}`,
+      exit: 0,
+      stdout: like(["query", "edges", "--json"], MD_ALL_EDGES),
+    },
+    {
+      argv: ["query", "node", "--json", MD_TARGET],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["query", "node", MD_TARGET, "--json"], MD_NODE_A),
+    },
+    {
+      argv: ["--json", "query", "node", MD_FILE],
+      clause: `${FLAGS_ANYWHERE}; 11.1: a bare \`path\` names the file's root node`,
+      exit: 0,
+      stdout: like(["query", "node", MD_FILE, "--json"], MD_ROOT),
+    },
+    {
+      argv: ["--json", "build"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["build", "--json"], findingFreeReport),
+    },
+    {
+      argv: ["--config", "xspec.config.ts", "query", "nodes"],
+      clause: `${FLAGS_ANYWHERE}; ${ARITY_BY_NAME}`,
+      exit: 0,
+      stdout: like(
+        ["query", "nodes", "--config", "xspec.config.ts"],
+        MD_ALL_NODES,
+      ),
+    },
+    // `query` answers in JSON without `--json` (12.0, 11).
+    {
+      argv: ["query", "nodes"],
+      clause: `${QUERY_JSON_ONLY}; 11.1: \`nodes\` unfiltered lists every requirement node`,
+      exit: 0,
+      stdout: like(["query", "nodes", "--json"], MD_ALL_NODES),
+    },
+    {
+      argv: ["query", "node", MD_TARGET],
+      clause: QUERY_JSON_ONLY,
+      exit: 0,
+      stdout: like(["query", "node", MD_TARGET, "--json"], MD_NODE_A),
+    },
+    {
+      argv: ["query", "edges"],
+      clause: `${QUERY_JSON_ONLY}; 11.1: \`edges\` unfiltered lists every edge`,
+      exit: 0,
+      stdout: like(["query", "edges", "--json"], MD_ALL_EDGES),
+    },
+    // `--` ends flag reading (12.0).
+    {
+      argv: ["build", "--json", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["build", "--json"], findingFreeReport),
+    },
+    {
+      argv: ["query", "nodes", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["query", "nodes"], MD_ALL_NODES),
+    },
+    {
+      argv: ["query", "edges", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["query", "edges"], MD_ALL_EDGES),
+    },
+    {
+      argv: ["--", "build"],
+      clause: `${DASH_DASH}: the command word included`,
+      exit: 0,
+      stdout: like(["build"]),
+    },
+    {
+      argv: ["query", "node", "--", MD_TARGET],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["query", "node", MD_TARGET], MD_NODE_A),
+    },
+    {
+      argv: ["query", "node", "--", "--json"],
+      clause: `${DASH_DASH}, so \`--json\` is \`query node\`'s operand, an identity no discovered file spells (${UNKNOWN_NAME}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--", "--json"],
+      clause: `${DASH_DASH}, so \`--json\` is no flag but \`build\`'s surplus operand (${SURPLUS}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["check", "--", "--json"],
+      clause: `${DASH_DASH}, so \`--json\` is no flag but \`check\`'s surplus operand (${SURPLUS}; 12.2: \`check\` takes no operand); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    // Arity fixed by name: a value-taking flag takes the whole next token.
+    {
+      argv: ["build", "--test-hold", "--json"],
+      clause: `${ARITY_BY_NAME}: \`--test-hold\` takes \`--json\` as its value (CERTIFICATIONS.md preamble: "so \`build --test-hold --json\` consumes \`--json\` as its value and leaves JSON out of effect"), and is \`build\`'s unknown flag (${NOT_MUTATING}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "--json", created: false },
+    },
+    {
+      argv: ["check", "--test-hold", "--json"],
+      clause: `${ARITY_BY_NAME}: \`--test-hold\` takes \`--json\` as its value, and is \`check\`'s unknown flag (${NOT_MUTATING}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "--json", created: false },
+    },
+    {
+      argv: ["query", "node", "--config", "--json"],
+      clause: `${WHOLE_NEXT_TOKEN}, so \`--config\` takes \`--json\` and \`query node\` lacks its operand (${NO_COMMAND}), of the syntax class — ${SYNTAX_FIRST}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--json", "--config", "--json"],
+      clause: `${WHOLE_NEXT_TOKEN}, so \`--config\` names the path \`--json\`; ${CONFIG_AS_GIVEN}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "--json",
+      },
+    },
+    {
+      argv: ["nosuch", "--bogus", "--json"],
+      clause: `${NO_VALUE_UNLESS_KNOWN}, so \`--json\` is read as a flag; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // `--test-hold` beside a command that is not mutating (13.5).
+    {
+      argv: ["build", "--test-hold", "h", "--json"],
+      clause: `${UNKNOWN_FLAG}, \`build\` not mutating (${NOT_MUTATING}); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: ["--test-hold", "h", "build"],
+      clause: `${ARITY_BY_NAME}: before the command word \`--test-hold\` takes \`h\`, and \`build\` is the command, whose unknown flag it is (${UNKNOWN_FLAG}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: ["query", "nodes", "--test-hold", "h"],
+      clause: `${UNKNOWN_FLAG}, \`query\` not mutating (${NOT_MUTATING}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      hold: { path: "h", created: false },
+    },
+    // Usage errors of the syntax class (12.0), each in the error document
+    // whenever JSON output is in effect — `query` always.
+    {
+      argv: ["--json", "nosuch"],
+      clause: `${NO_COMMAND}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: [],
+      clause: `${NO_COMMAND}: no command word; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["query"],
+      clause: `${SUBCOMMAND_ORDER}, and they "MUST match the command's synopsis exactly" — \`query\` names a subcommand (11.1); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nosuch"],
+      clause: `${NO_COMMAND}: an unknown subcommand; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "extra"],
+      clause: `${SURPLUS} (11.1: \`query nodes\` takes no operand); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node", MD_TARGET, "extra"],
+      clause: `${SURPLUS} (11.1: \`query node <node>\` takes one operand); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "extra"],
+      clause: `${SURPLUS} (11.1: \`query edges\` takes no operand); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node"],
+      clause: `${NO_COMMAND}: a missing operand (11.1: \`query node <node>\`); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "reachable", "--from", MD_TARGET],
+      clause: `${MISSING_REQUIRED}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["check", "extra", "--json"],
+      clause: `${SURPLUS} (12.2: \`check\` takes no operand); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["check", "extra"],
+      clause: `${SURPLUS}; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["build", "extra", "--json"],
+      clause: `${SURPLUS} (12.1: \`build\` takes no operand); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "extra", "--config", "nosuch.ts"],
+      clause: `${SURPLUS}; ${SYNTAX_FIRST}, so no configuration error; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--json", "--json"],
+      clause: `${REPEATED}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--json", "--json"],
+      clause: `${REPEATED}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--json", "--json"],
+      clause: `${REPEATED} — decided from the arguments alone, for every command; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--json", "--config"],
+      clause: `${MISSING_VALUE}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--kinds"],
+      clause: `${MISSING_VALUE}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--config=x", "--json"],
+      clause:
+        'SPEC 12.0: "`--name=value` is not a spelling of any flag" — an ' +
+        'unknown flag — and "a `--` token naming no flag of any command ' +
+        'takes no value", so the `--json` after it is read as a flag; ' +
+        PLAIN_DOCUMENT,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node", MD_TARGET, "--tag", "x"],
+      clause: `${UNKNOWN_FLAG} — 11.1 names \`--tag\` for \`query nodes\` alone; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["check", "--file", "specs/*.mdx", "--json"],
+      clause: `${UNKNOWN_FLAG} — 12.2 names no flag for \`check\`; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["view", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${jsonOnly("`view`")}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // Malformed values and the value spellings of the syntax class.
+    {
+      argv: ["build", "--json", "--config", MALFORMED_CONFIG],
+      clause: `${MALFORMED} — a malformed \`--config\` path is no configuration error but a plain usage error; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node", MD_MALFORMED_NODE],
+      clause: `${MALFORMED}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node", `${MD_TARGET}#b`, "--config", "nosuch.ts"],
+      clause: `${MALFORMED_IDENTITY} — ${SYNTAX_FIRST}, so no configuration error; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--from", `${MD_TARGET}#b`],
+      clause: `${MALFORMED_IDENTITY}: a \`<graph-node>\` value; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--to", MD_MALFORMED_NODE],
+      clause: `${MALFORMED}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--kinds", "contains,,depends"],
+      clause: `${INVALID_KINDS}: a doubled comma; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--kinds", "bogus", "--config", "nosuch.ts"],
+      clause: `${INVALID_KINDS} — ${SYNTAX_FIRST}, so no configuration error; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--tag", "x y"],
+      clause: `${TAG_SYNTACTIC}: a spelling containing whitespace; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--tag", "", "--config", "nosuch.ts"],
+      clause: `${TAG_SYNTACTIC}: the empty spelling — ${SYNTAX_FIRST}, so no configuration error; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--coverage", "bogus"],
+      clause: `${COVERAGE_VOCABULARY}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--file", "../A.mdx"],
+      clause: `${FILE_OUTSIDE_ROOT}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // A node identity the arguments name, judged against the workspace.
+    {
+      argv: ["query", "node", `${MD_FILE}#zz`],
+      clause: `${UNKNOWN_NAME}: no section of \`${MD_FILE}\` spells \`zz\` (${IDENTITY_CHECK}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node", "specs/B.mdx#a"],
+      clause: `${UNKNOWN_NAME}: \`specs/B.mdx\` is no discovered path (${IDENTITY_CHECK}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // Configuration located and read (12.0, 14).
+    {
+      argv: ["build", "--json", "--config", "nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${JSON_IN_EFFECT}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "nosuch.ts",
+      },
+    },
+    {
+      argv: ["check", "--config", "./nosuch.ts", "--json"],
+      clause: `${CONFIG_AS_GIVEN}; ${JSON_IN_EFFECT}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "./nosuch.ts",
+      },
+    },
+    {
+      argv: ["query", "edges", "--config", "./nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${QUERY_JSON_ONLY}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "./nosuch.ts",
+      },
+    },
+    {
+      argv: ["query", "nodes"],
+      clause: `${CONFIG_ANCHORED}: the configuration lacks \`specs\` (SPEC 7: "\`specs\` is required"); ${QUERY_JSON_ONLY}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "xspec.config.ts",
+      },
+      staging: MD_NO_SPECS_STAGING,
+    },
+    {
+      argv: ["build", "--json"],
+      clause: `${CONFIG_ANCHORED}: the configuration lacks \`specs\` (SPEC 7: "\`specs\` is required"); ${JSON_IN_EFFECT}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "xspec.config.ts",
+      },
+      staging: MD_NO_SPECS_STAGING,
+    },
+    {
+      argv: ["build"],
+      clause: `${CONFIG_ANCHORED}: the configuration lacks \`specs\`; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      staging: MD_NO_SPECS_STAGING,
+    },
+  ],
+};
+
 // --- the tests ----------------------------------------------------------------
 
 /**
@@ -1837,6 +2451,7 @@ const GRAMMAR_TABLES: readonly GrammarTable[] = [
   AVAIL_TABLE,
   ORPHAN_TABLE,
   VALID_TABLE,
+  MD_TABLE,
 ];
 
 for (const table of GRAMMAR_TABLES) {
