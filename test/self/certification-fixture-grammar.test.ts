@@ -20,8 +20,11 @@
 // current output: the exit code; standard output byte-empty, the 12.7 error
 // document (decoded form-exact, its finding's `code` and `path` asserted and
 // its `locations` empty), a document the surface's adapter decodes, or
-// byte-equal to a canonical spelling's answer over the same state; and, for
-// a `--test-hold` row, whether the hold file exists afterwards (13.5). Every
+// byte-equal to a canonical spelling's answer over the same state; for a
+// `--test-hold` row, whether the invocation creates the hold file (13.5) — a
+// held row started in the background, its hold awaited and deleted before
+// its exit is awaited, a refused one watched while it runs; and, for a row
+// that performs an operation, its effect on the workspace. Every
 // row runs in a fresh workspace staged from its table's declaration (or the
 // row's own) before any invocation, so a row that writes (`build`) never
 // changes another row's state; a canonical spelling runs in a twin staged
@@ -42,8 +45,10 @@
 // test/self/certification-fixture-grammar.test.ts`, under the unprivileged
 // namespace as the whole self project runs (AGENTS.md).
 
+import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "vitest";
 import {
+  decodeAppliedMappingReport,
   decodeEdgesReport,
   decodeErrorDocument,
   decodeFindingsReport,
@@ -54,6 +59,7 @@ import {
   decodeNodeSummaryRowsReport,
   decodeNodeTextAlgebraSummary,
   decodeOccurrencesReport,
+  decodeSessionListReport,
   decodeViewReport,
 } from "../helpers/adapters/index.js";
 import type {
@@ -74,8 +80,18 @@ import {
   assertSnapshotsEqual,
   snapshotDirectory,
 } from "../helpers/snapshot.js";
-import { pathExists, runProduct } from "../helpers/subprocess.js";
-import type { ProductBinding, RunResult } from "../helpers/subprocess.js";
+import {
+  pathExists,
+  releaseHoldFile,
+  rethrowHarnessError,
+  runProduct,
+  startProduct,
+} from "../helpers/subprocess.js";
+import type {
+  ProductBinding,
+  RunningProduct,
+  RunResult,
+} from "../helpers/subprocess.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 import type { WorkspaceDecl } from "../helpers/workspace.js";
 import { CERTIFICATION_FIXTURES } from "./certification-fixtures.js";
@@ -107,13 +123,26 @@ type StdoutExpectation =
    * Byte-equal to the answer of `canonical` — the same invocation spelled
    * canonically — over the same state: run in a twin workspace staged from
    * the same declaration, with the row's exit code, its document judged by
-   * `check` when given, and the two after-states byte-identical.
+   * `check` when given, and the two after-states byte-identical. A
+   * `canonicalHold` path (relative to the twin's working directory) makes
+   * the canonical run a held one, choreographed as a held row's (13.5).
    */
   | {
       readonly form: "like";
       readonly canonical: readonly string[];
       readonly check?: DocumentCheck;
+      readonly canonicalHold?: string;
     };
+
+/**
+ * A check of a row's workspace after its run (e.g. that a performed
+ * operation changed what it names); a `like` row's twin is compared
+ * byte-equal to it besides.
+ */
+type WorkspaceCheck = (
+  workspace: TestWorkspace,
+  context: string,
+) => Promise<void>;
 
 /** One invocation and the outcome SPEC fixes for it. */
 interface GrammarRow {
@@ -126,9 +155,17 @@ interface GrammarRow {
   readonly stdout: StdoutExpectation;
   /**
    * A `--test-hold` row: the hold file's path, relative to the working
-   * directory (12.0), and whether the invocation leaves it created (13.5).
+   * directory (12.0), and whether the invocation creates it (13.5). One
+   * that creates it is held: the guard starts it, waits for the file,
+   * deletes it, and only then awaits the exit (13.5: the command "proceeds
+   * normally only once that file has been deleted"); one refused before
+   * any acquisition or hold must never create it — watched while it runs,
+   * so a fixture that holds anyway fails the row at once rather than
+   * hanging until the driver's guard kills it.
    */
   readonly hold?: { readonly path: string; readonly created: boolean };
+  /** Checked on the row's workspace once its run (and its twin's) is done. */
+  readonly after?: WorkspaceCheck;
   /**
    * The row's own workspace shape, in place of its table's — staged afresh
    * for the row and for its canonical twin alike (e.g. a workspace failing
@@ -161,10 +198,14 @@ const PLAIN_USAGE_ERROR: StdoutExpectation = {
 function like(
   canonical: readonly string[],
   check?: DocumentCheck,
+  canonicalHold?: string,
 ): StdoutExpectation {
-  return check === undefined
-    ? { form: "like", canonical }
-    : { form: "like", canonical, check };
+  return {
+    form: "like",
+    canonical,
+    ...(check === undefined ? {} : { check }),
+    ...(canonicalHold === undefined ? {} : { canonicalHold }),
+  };
 }
 
 /** A document's `findings` member is `[]`, as `premise` states. */
@@ -295,10 +336,13 @@ async function checkRow(
   const workspace = await TestWorkspace.create(row.staging ?? table.staging);
   try {
     const before = await snapshotDirectory(workspace.root);
-    const result = await runProduct(binding, {
-      cwd: workspace.root,
-      argv: row.argv,
-    });
+    const result = await runInvocation(
+      binding,
+      workspace,
+      row.argv,
+      row.hold,
+      context,
+    );
     assertExitCode(result, row.exit, context);
     if (row.exit === 2) {
       if (result.stderrBytes.length === 0) {
@@ -317,20 +361,87 @@ async function checkRow(
       );
     }
     await checkStdout(binding, table, row, workspace, result, context);
-    if (row.hold !== undefined) {
-      const created = await pathExists(workspace.path(row.hold.path));
-      if (created !== row.hold.created) {
-        fail(
-          `${context}: the hold file ${JSON.stringify(row.hold.path)} ` +
-            (row.hold.created
-              ? "was not created (SPEC 13.5)"
-              : "was created, though the invocation is refused before " +
-                "any acquisition or hold (SPEC 12.0, 13.5)"),
-        );
-      }
+    if (
+      row.hold !== undefined &&
+      !row.hold.created &&
+      (await pathExists(workspace.path(row.hold.path)))
+    ) {
+      fail(
+        `${context}: the hold file ${JSON.stringify(row.hold.path)} was ` +
+          `created, though the invocation is refused before any ` +
+          `acquisition or hold (SPEC 12.0, 13.5)`,
+      );
     }
+    if (row.after !== undefined) await row.after(workspace, context);
   } finally {
     await workspace.dispose();
+  }
+}
+
+/** The polling interval of a refused `--test-hold` row's watch. */
+const HOLD_POLL_MS = 10;
+
+/**
+ * Run one invocation in `workspace`, choreographing its hold (13.5) when
+ * `hold` names one. A held invocation (`created`) is started and its hold
+ * file awaited — one that never appears fails the row diagnosed, the run
+ * killed — then deleted, and only then is its exit awaited. An invocation
+ * that must create none is watched while it runs: a hold file appearing
+ * fails the row diagnosed, the run killed and the file removed. Harness
+ * errors — the capture limit's kill, a failure of the driver's own
+ * evaluation — propagate as themselves (H-11).
+ */
+async function runInvocation(
+  binding: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  hold: GrammarRow["hold"],
+  context: string,
+): Promise<RunResult> {
+  if (hold === undefined) {
+    return await runProduct(binding, { cwd: workspace.root, argv });
+  }
+  const holdPath = workspace.path(hold.path);
+  const running = await startProduct(binding, { cwd: workspace.root, argv });
+  if (hold.created) {
+    try {
+      await running.waitForFile(holdPath);
+    } catch (error) {
+      rethrowHarnessError(error);
+      await stopRun(running);
+      fail(
+        `${context}: the mutating command must create the hold file ` +
+          `${JSON.stringify(hold.path)} immediately after acquiring ` +
+          `workspace exclusivity and before modifying anything, then ` +
+          `wait for its deletion (SPEC 13.5) — ` +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+    await releaseHoldFile(holdPath);
+    return await running.waitForExit();
+  }
+  while (!running.hasExited()) {
+    if (await pathExists(holdPath)) {
+      await stopRun(running);
+      await releaseHoldFile(holdPath);
+      fail(
+        `${context}: the hold file ${JSON.stringify(hold.path)} was ` +
+          `created while the invocation ran, though it is refused before ` +
+          `any acquisition or hold (SPEC 12.0, 13.5)`,
+      );
+    }
+    await sleep(HOLD_POLL_MS);
+  }
+  return await running.waitForExit();
+}
+
+/** Kill a run the row has given up on, and await its end. */
+async function stopRun(running: RunningProduct): Promise<void> {
+  running.kill();
+  try {
+    await running.waitForExit();
+  } catch (error) {
+    rethrowHarnessError(error);
   }
 }
 
@@ -384,10 +495,15 @@ async function checkStdout(
       const twin = await TestWorkspace.create(row.staging ?? table.staging);
       try {
         const canonicalContext = `${context}: the canonical spelling ${spell(expectation.canonical)}`;
-        const canonical = await runProduct(binding, {
-          cwd: twin.root,
-          argv: expectation.canonical,
-        });
+        const canonical = await runInvocation(
+          binding,
+          twin,
+          expectation.canonical,
+          expectation.canonicalHold === undefined
+            ? undefined
+            : { path: expectation.canonicalHold, created: true },
+          canonicalContext,
+        );
         assertExitCode(canonical, row.exit, canonicalContext);
         if (expectation.check !== undefined) {
           expectation.check(
@@ -2438,6 +2554,264 @@ const MD_TABLE: GrammarTable = {
   ],
 };
 
+// --- CONF-CORE (CERTIFICATIONS.md §CONF-CORE: `build`; the reads `check`,
+// `ids`, `show`, `query`, `coverage`, the `review` reads, and `impact
+// --base`; `rename`, file-form `move`, and the mutating `review`
+// subcommands, `--test-hold` included) ------------------------------------------
+
+/**
+ * One spec group of one single-section source, as §CONF-CORE's scope admits
+ * (no imports, embeddings, `d` props, or tags; no `code`, `markdown`,
+ * `coverage`, or `policy` keys; no git): a valid workspace every served read
+ * answers and every served mutating command performs on.
+ */
+const CORE_STAGING: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": SPEC_GROUP_CONFIG,
+    "specs/A.mdx": `<S id="a">
+Alpha text.
+</S>
+`,
+  },
+};
+
+const CORE_FILE = "specs/A.mdx";
+const CORE_TARGET = `${CORE_FILE}#a`;
+const CORE_IDS = idsOf([{ file: CORE_FILE, ids: ["a"] }]);
+const CORE_NODES = identityRowsOf([CORE_FILE, CORE_TARGET]);
+
+/** `review list` (10.7) over a workspace holding no session. */
+const NO_SESSIONS: DocumentCheck = (doc, context) => {
+  const { sessions } = decodeSessionListReport(doc, context);
+  if (sessions.length > 0) {
+    fail(
+      `${context}: review list reports every session (SPEC 10.7) and the ` +
+        `workspace holds none, but it reports ` +
+        JSON.stringify(sessions.map((session) => session.name)),
+    );
+  }
+};
+
+/**
+ * A performed `rename`/`move` report (12.7: on success `{"findings",
+ * "mapping"}`, decoded form-exact), its mapping exactly `pairs` — each
+ * `[from, to]` — in the pinned `from`-byte order (6.4, 6.5, 6.6).
+ */
+function mappingOf(
+  pairs: readonly (readonly [string, string])[],
+): DocumentCheck {
+  return (doc, context) => {
+    const actual = JSON.stringify(
+      decodeAppliedMappingReport(doc, context).map((pair) => [
+        pair.from,
+        pair.to,
+      ]),
+    );
+    const expected = JSON.stringify(pairs);
+    if (actual !== expected) {
+      fail(
+        `${context}: the performed operation's mapping is ${expected} ` +
+          `(SPEC 6.4, 6.5: one pair per node whose identity changes, in ` +
+          `\`from\`-byte order), but it is ${actual}`,
+      );
+    }
+  };
+}
+
+/** `rename specs/A.mdx a b`'s mapping: the renamed section alone (6.4). */
+const RENAMED_MAPPING = mappingOf([[CORE_TARGET, `${CORE_FILE}#b`]]);
+
+/**
+ * `move specs/A.mdx specs/B.mdx`'s mapping: the root and every section of
+ * the moved file (6.5, 6.6), in `from`-byte order.
+ */
+const MOVED_MAPPING = mappingOf([
+  [CORE_FILE, "specs/B.mdx"],
+  [CORE_TARGET, "specs/B.mdx#a"],
+]);
+
+/**
+ * The workspace after a performed `rename specs/A.mdx a b` (6.4): the
+ * section's identity changed — its `id` attribute rewritten in place,
+ * "minimal in-place edits", so the source's bytes are exactly the staged
+ * ones spelling `b` for `a`.
+ */
+const RENAMED_A_TO_B: WorkspaceCheck = async (workspace, context) => {
+  assertBytesEqual(
+    await workspace.readBytes(CORE_FILE),
+    `<S id="b">
+Alpha text.
+</S>
+`,
+    `${context}: ${CORE_FILE} after the performed rename — ${CORE_TARGET} ` +
+      `renamed to ${CORE_FILE}#b (SPEC 6.4: "Rewrites are minimal in-place ` +
+      `edits")`,
+  );
+};
+
+const HOLD_SEAM =
+  '13.5: every mutating command accepts `--test-hold <path>` — "immediately ' +
+  "after acquiring workspace exclusivity and before modifying anything, the " +
+  "command creates an empty file at the given path … then proceeds " +
+  'normally only once that file has been deleted"';
+const PREVIEW_EXCLUDES_HOLD =
+  'SPEC 6.6: "supplying `--test-hold` together with `--preview` is a usage ' +
+  'error (12.0)", of the syntax class (12.0: "`--test-hold` beside ' +
+  '`--preview` (6.6)")';
+const SYNTAX_BEFORE_HOLD =
+  'SPEC 12.0: a syntax-class error "is reported without loading ' +
+  'configuration", and a mutating command "acquires exclusivity once its ' +
+  'configuration is loaded" (13.5), so no hold file is created';
+const SESSION_NAME_FORM =
+  '10.1: a session name outside its form — "any other name is a usage ' +
+  'error (12.0)" — is of the syntax class (12.0: "a session name outside ' +
+  'the form of 10.1")';
+const OPERAND_IDENTITY =
+  'SPEC 12.0: the `#` split "applies equally to an operand spelled ' +
+  '`<file>#<id>` (6.5)", and "a spelling containing more than one `#` is a ' +
+  'malformed value, a usage error", of the syntax class';
+
+const CORE_TABLE: GrammarTable = {
+  conformer: "CONF-CORE",
+  staging: CORE_STAGING,
+  rows: [
+    // Flags before the command word, and between `query`/`review` and the
+    // subcommand.
+    {
+      argv: ["--json", "ids"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["ids", "--json"], CORE_IDS),
+    },
+    {
+      argv: ["--config", "xspec.config.ts", "ids"],
+      clause: `${FLAGS_ANYWHERE}; ${WHOLE_NEXT_TOKEN}`,
+      exit: 0,
+      stdout: like(["ids", "--config", "xspec.config.ts"]),
+    },
+    {
+      argv: ["--json", "query", "nodes"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["query", "nodes", "--json"], CORE_NODES),
+    },
+    {
+      argv: ["query", "--json", "nodes"],
+      clause: `${FLAGS_ANYWHERE}; ${SUBCOMMAND_ORDER}`,
+      exit: 0,
+      stdout: like(["query", "nodes", "--json"], CORE_NODES),
+    },
+    {
+      argv: ["review", "--json", "list"],
+      clause: `${FLAGS_ANYWHERE}; ${SUBCOMMAND_ORDER}`,
+      exit: 0,
+      stdout: like(["review", "list", "--json"], NO_SESSIONS),
+    },
+    {
+      argv: ["rename", CORE_FILE, "--json", "a", "b"],
+      clause: `${FLAGS_ANYWHERE}: between the command word and its operands`,
+      exit: 0,
+      stdout: like(["rename", CORE_FILE, "a", "b", "--json"], RENAMED_MAPPING),
+      after: RENAMED_A_TO_B,
+    },
+    {
+      argv: ["--json", "move", CORE_FILE, "specs/B.mdx"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["move", CORE_FILE, "specs/B.mdx", "--json"], MOVED_MAPPING),
+    },
+    // `--` ends flag reading.
+    {
+      argv: ["--", "ids"],
+      clause: `${DASH_DASH}: the command word included`,
+      exit: 0,
+      stdout: like(["ids"]),
+    },
+    {
+      argv: ["ids", "--json", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["ids", "--json"], CORE_IDS),
+    },
+    {
+      argv: ["build", "--json", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["build", "--json"], findingFreeReport),
+    },
+    {
+      argv: ["ids", "--", "--json"],
+      clause: `${DASH_DASH}, so \`--json\` is no flag but \`ids\`'s surplus operand (${SURPLUS}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    // The seam (13.5): `--test-hold` read under the grammar like any flag.
+    {
+      argv: ["--test-hold", "h", "rename", CORE_FILE, "a", "b"],
+      clause: `${FLAGS_ANYWHERE}: \`--test-hold h\` before the command word holds the mutating \`rename\` (${HOLD_SEAM}), which then performs the rename`,
+      exit: 0,
+      stdout: like(
+        ["rename", CORE_FILE, "a", "b", "--test-hold", "h"],
+        undefined,
+        "h",
+      ),
+      hold: { path: "h", created: true },
+      after: RENAMED_A_TO_B,
+    },
+    {
+      argv: ["rename", CORE_FILE, "a", "b", "--test-hold", "--json"],
+      clause: `${ARITY_BY_NAME}: \`--test-hold\` takes \`--json\` as its hold path (${HOLD_SEAM}) and leaves JSON out of effect, the rename's report in its plain form`,
+      exit: 0,
+      stdout: like(["rename", CORE_FILE, "a", "b"]),
+      hold: { path: "--json", created: true },
+      after: RENAMED_A_TO_B,
+    },
+    {
+      argv: ["build", "--test-hold", "--json"],
+      clause: `${ARITY_BY_NAME}: \`--test-hold\` takes \`--json\` as its value (CERTIFICATIONS.md preamble: "so \`build --test-hold --json\` consumes \`--json\` as its value and leaves JSON out of effect"), and is \`build\`'s unknown flag (${NOT_MUTATING}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "--json", created: false },
+    },
+    {
+      argv: ["ids", "--test-hold", "h"],
+      clause: `${UNKNOWN_FLAG}, \`ids\` not mutating (${NOT_MUTATING}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: ["rename", CORE_FILE, "a", "b", "--preview", "--test-hold", "h"],
+      clause: `${PREVIEW_EXCLUDES_HOLD}; ${SYNTAX_BEFORE_HOLD}; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: [
+        "review",
+        "resolve",
+        "bad/name",
+        "i1",
+        "--status",
+        "updated",
+        "--test-hold",
+        "h",
+      ],
+      clause: `${SESSION_NAME_FORM}; ${SYNTAX_BEFORE_HOLD}; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: ["move", "specs/A.mdx#a#b", "specs/B.mdx#b"],
+      clause: `${OPERAND_IDENTITY}; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+  ],
+};
+
 // --- the tests ----------------------------------------------------------------
 
 /**
@@ -2452,6 +2826,7 @@ const GRAMMAR_TABLES: readonly GrammarTable[] = [
   ORPHAN_TABLE,
   VALID_TABLE,
   MD_TABLE,
+  CORE_TABLE,
 ];
 
 for (const table of GRAMMAR_TABLES) {
