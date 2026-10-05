@@ -1881,9 +1881,12 @@ const BOM_MDX =
   String.fromCodePoint(0xfeff) + '<S id="b">\nBom content.\n</S>\n';
 // Staged after the session was created, so a ledger record (S-9's
 // before-any-product clause; helpers/staged-mdx.ts) — the same constant under
-// the call's former `unparseable` declaration (14.20).
-const T13_5_8_BOM = stagedMdx(
-  "T13.5-8 specs/B.mdx beginning with a byte-order mark",
+// the call's former `unparseable` declaration (14.20). The certification
+// fixtures' grammar guard (test/self/certification-fixture-grammar.test.ts)
+// stages the same bytes at the same path after a `build`, for its CONF-CORE
+// rows on §CONF-CORE's failing workspace: one record per byte sequence.
+export const T13_5_8_BOM = stagedMdx(
+  "T13.5-8 specs/B.mdx beginning with a byte-order mark (also the certification fixtures' grammar guard's CONF-CORE failing workspace)",
   BOM_MDX,
   "unparseable",
 );

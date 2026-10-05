@@ -26,9 +26,12 @@
 // its exit is awaited, a refused one watched while it runs; and, for a row
 // that performs an operation, its effect on the workspace. Every
 // row runs in a fresh workspace staged from its table's declaration (or the
-// row's own) before any invocation, so a row that writes (`build`) never
-// changes another row's state; a canonical spelling runs in a twin staged
-// the same way, and the two workspaces' after-states must then be
+// row's own) before any invocation — and prepared, where the row names a
+// preparation, by product invocations and the stagings that follow them
+// (§CONF-CORE's failing workspace, built valid and then extended; an
+// existing review session) — so a row that writes (`build`) never changes
+// another row's state; a canonical spelling runs in a twin staged and
+// prepared the same way, and the two workspaces' after-states must then be
 // byte-identical (12.0's determinism). An exit-2 row carries its message on
 // standard error (12.0) and leaves its workspace byte-for-byte unchanged: a
 // syntax-class error is reported from the arguments alone, without loading
@@ -51,6 +54,7 @@ import {
   decodeAppliedMappingReport,
   decodeEdgesReport,
   decodeErrorDocument,
+  decodeExportReport,
   decodeFindingsReport,
   decodeIdsReport,
   decodeInventoryDocument,
@@ -94,6 +98,7 @@ import type {
 } from "../helpers/subprocess.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 import type { WorkspaceDecl } from "../helpers/workspace.js";
+import { T13_5_8_BOM } from "../suite/registry/section-13.5.js";
 import { CERTIFICATION_FIXTURES } from "./certification-fixtures.js";
 
 /** A decoder of a surface's document (H-3): fails diagnosed, never defaults. */
@@ -144,6 +149,21 @@ type WorkspaceCheck = (
   context: string,
 ) => Promise<void>;
 
+/**
+ * A preparation of a row's freshly staged workspace — and of its canonical
+ * twin's — run before the row's invocation and before the snapshot an
+ * exit-2 row is compared against: product invocations through the
+ * conformer's binding, and the stagings that follow them, reaching a state
+ * no declaration stages (e.g. §CONF-CORE's failing workspace, built valid
+ * and then extended). A source staged after an invocation is a staged-source
+ * record (S-9; helpers/staged-mdx.ts), as the builder requires.
+ */
+type RowPreparation = (
+  binding: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+) => Promise<void>;
+
 /** One invocation and the outcome SPEC fixes for it. */
 interface GrammarRow {
   /** The arguments after the executable, passed verbatim. */
@@ -172,6 +192,8 @@ interface GrammarRow {
    * `build`'s validations, for a gated read's report, 13.3).
    */
   readonly staging?: WorkspaceDecl;
+  /** Run on the row's staged workspace and on its canonical twin's alike. */
+  readonly prepare?: RowPreparation;
 }
 
 /** One conformer's rows over one staged workspace shape. */
@@ -335,6 +357,9 @@ async function checkRow(
   const context = `${table.conformer} ${spell(row.argv)} (${row.clause})`;
   const workspace = await TestWorkspace.create(row.staging ?? table.staging);
   try {
+    if (row.prepare !== undefined) {
+      await row.prepare(binding, workspace, context);
+    }
     const before = await snapshotDirectory(workspace.root);
     const result = await runInvocation(
       binding,
@@ -495,6 +520,9 @@ async function checkStdout(
       const twin = await TestWorkspace.create(row.staging ?? table.staging);
       try {
         const canonicalContext = `${context}: the canonical spelling ${spell(expectation.canonical)}`;
+        if (row.prepare !== undefined) {
+          await row.prepare(binding, twin, canonicalContext);
+        }
         const canonical = await runInvocation(
           binding,
           twin,
@@ -2671,6 +2699,150 @@ const OPERAND_IDENTITY =
   '`<file>#<id>` (6.5)", and "a spelling containing more than one `#` is a ' +
   'malformed value, a usage error", of the syntax class';
 
+/** The byte-order-mark source of §CONF-CORE's failing workspace (T13.5-8). */
+const CORE_BOM_FILE = "specs/B.mdx";
+
+/** One preparation step through the conformer, which must exit 0. */
+async function prepareStep(
+  binding: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<void> {
+  const result = await runProduct(binding, { cwd: workspace.root, argv });
+  assertExitCode(result, 0, `${context}: the preparation ${spell(argv)}`);
+}
+
+/**
+ * An audit session `s` (10.6, 10.7), created under `--strategy audit` on
+ * the freshly built workspace, as §CONF-CORE's mutating runs start (no
+ * refresh pending).
+ */
+const AUDIT_SESSION: RowPreparation = async (binding, workspace, context) => {
+  await prepareStep(binding, workspace, ["build"], context);
+  await prepareStep(
+    binding,
+    workspace,
+    ["review", "create", "--strategy", "audit", "--name", "s"],
+    context,
+  );
+};
+
+/**
+ * §CONF-CORE's in-scope failing workspace, staged as its staging constraint
+ * on T13.5-8 stages it: built valid, then a second spec source beginning
+ * with a byte-order mark added (14.20, 1.6) — T13.5-8's own staged-source
+ * record at T13.5-8's path, staged after a product invocation (S-9).
+ */
+const BUILT_THEN_BOM: RowPreparation = async (binding, workspace, context) => {
+  await prepareStep(binding, workspace, ["build"], context);
+  await workspace.file(CORE_BOM_FILE, T13_5_8_BOM);
+};
+
+/**
+ * The failing workspace holding the session `s`: the source "added after
+ * the workspace was built valid and the session its `review resolve` names
+ * was created under `--strategy audit`" (§CONF-CORE).
+ */
+const AUDIT_SESSION_THEN_BOM: RowPreparation = async (
+  binding,
+  workspace,
+  context,
+) => {
+  await AUDIT_SESSION(binding, workspace, context);
+  await workspace.file(CORE_BOM_FILE, T13_5_8_BOM);
+};
+
+/**
+ * The gate's report on §CONF-CORE's failing workspace (13.3, 12.7): exactly
+ * the findings `build` reports — one, condition 20 (`unparseable-source`),
+ * located in the byte-order-mark source by the zero-length range at offset
+ * 0 (SPEC 14: "0 for a byte-order mark"; §CONF-CORE: "its finding the
+ * zero-length range at offset 0").
+ */
+const CORE_GATED_REPORT: DocumentCheck = (doc, context) => {
+  const actual = JSON.stringify(
+    decodeFindingsReport(doc, context).findings.map((finding) => ({
+      code: finding.code,
+      locations: finding.locations.map((location) => [
+        location.file,
+        location.range.start,
+        location.range.end,
+      ]),
+    })),
+  );
+  const expected = JSON.stringify([
+    { code: "unparseable-source", locations: [[CORE_BOM_FILE, 0, 0]] },
+  ]);
+  if (actual !== expected) {
+    fail(
+      `${context}: the gated report carries exactly the findings a build ` +
+        `would report, ${expected} (13.3; SPEC 14: an unparseable source's ` +
+        `one zero-length range, at offset 0 for a byte-order mark), but it ` +
+        `carries ${actual}`,
+    );
+  }
+};
+
+/** `review export s` (10.7): the session `s`, its strategy `audit`. */
+const EXPORT_OF_S: DocumentCheck = (doc, context) => {
+  const report = decodeExportReport(doc, context);
+  if (report.name !== "s" || report.strategy !== "audit") {
+    fail(
+      `${context}: the export reports the named session — its name \`s\` ` +
+        `and strategy \`audit\` (SPEC 10.7) — but it reports ` +
+        JSON.stringify({ name: report.name, strategy: report.strategy }),
+    );
+  }
+};
+
+/**
+ * The workspace under a configuration lacking the required `specs` key
+ * (SPEC 7: "`specs` is required"), a configuration error (14.14).
+ */
+const CORE_NO_SPECS_STAGING: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({})
+`,
+    "specs/A.mdx": `<S id="a">
+Alpha text.
+</S>
+`,
+  },
+};
+
+/** The valid workspace with a file already at the hold path `h`. */
+const CORE_HOLD_OCCUPIED_STAGING: WorkspaceDecl = {
+  files: { ...CORE_STAGING.files, h: "" },
+};
+
+const UNREADABLE_BASELINE =
+  '§CONF-CORE: "`impact --base` (without git, the exit-2 ' +
+  'unreadable-baseline case of 6.3/12.0)" — 6.3: "a baseline that cannot ' +
+  'be read or reconstructed is a usage error (12.0)", a plain one (14: "a ' +
+  'plain usage error (12.0) … carries no stable code")';
+const EXPORT_JSON_ONLY =
+  'SPEC 12.0: JSON output is in effect also "when the invoked surface is ' +
+  "JSON-only, a single JSON document its only output form with or without " +
+  '`--json` (10.7, 11, 12.6)" — 10.7: "`export <name>` emits the entire ' +
+  "session as a single JSON document — its only output form, with or " +
+  'without `--json`"';
+const UNKNOWN_SESSION =
+  'SPEC 12.0: exit 2 for "unknown profiles, sessions, … named in ' +
+  'arguments", a plain usage error, the name judged "against the session ' +
+  'directory (10.1)"';
+const NONEXISTENT_OLD_ID =
+  "§CONF-CORE: `rename`'s \"argument checks of 12.0 (a nonexistent old ID " +
+  'a usage error, exit 2)", a plain usage error';
+const HOLD_UNCREATABLE =
+  '13.5: "If the hold file cannot be created, the command fails with a ' +
+  'usage error (12.0) without modifying anything" — "creation MUST fail ' +
+  'if anything … already exists at that path" — and 14.24: "a hold file ' +
+  "that cannot be created is the usage error of 13.5, never this " +
+  'condition", a plain usage error';
+
 const CORE_TABLE: GrammarTable = {
   conformer: "CONF-CORE",
   staging: CORE_STAGING,
@@ -2808,6 +2980,195 @@ const CORE_TABLE: GrammarTable = {
       clause: `${OPERAND_IDENTITY}; ${NO_JSON_EMPTY}`,
       exit: 2,
       stdout: EMPTY,
+    },
+    // The 12.7 error document, JSON in effect by a `--json` read as a flag.
+    {
+      argv: ["ids", "extra", "--json"],
+      clause: `${SURPLUS}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--json", "--json"],
+      clause: `${REPEATED}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--json", "--config"],
+      clause: `${MISSING_VALUE}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--json", "--config=x"],
+      clause: `SPEC 12.0: "\`--name=value\` is not a spelling of any flag", an unknown flag; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--json", "--config", "--json"],
+      clause: `${WHOLE_NEXT_TOKEN}, so \`--config\` names the path \`--json\` and the first \`--json\` alone is read as a flag; ${CONFIG_AS_GIVEN}; ${JSON_IN_EFFECT}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "--json",
+      },
+    },
+    {
+      argv: ["ids", "--json"],
+      clause: `${CONFIG_ANCHORED}: the configuration lacks \`specs\` (SPEC 7: "\`specs\` is required"); ${JSON_IN_EFFECT}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "xspec.config.ts",
+      },
+      staging: CORE_NO_SPECS_STAGING,
+    },
+    {
+      argv: ["impact", "--base", "main", "--json"],
+      clause: `${UNREADABLE_BASELINE}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--test-hold", "h", "--json"],
+      clause: `${UNKNOWN_FLAG}, \`ids\` not mutating (${NOT_MUTATING}); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: ["rename", CORE_FILE, "nope", "x", "--json"],
+      clause: `${NONEXISTENT_OLD_ID}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["rename", CORE_FILE, "a", "b", "--test-hold", "h", "--json"],
+      clause: `${HOLD_UNCREATABLE}: a file occupies \`h\`; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      staging: CORE_HOLD_OCCUPIED_STAGING,
+    },
+    {
+      argv: [
+        "review",
+        "resolve",
+        "nope",
+        "i1",
+        "--status",
+        "updated",
+        "--json",
+      ],
+      clause: `${UNKNOWN_SESSION}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // JSON-only surfaces (11's `query`, 10.7's `review export`): every
+    // answer and every usage error JSON, with or without `--json`.
+    {
+      argv: ["query", "nodes", "extra"],
+      clause: `${SURPLUS}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node", `${CORE_FILE}#zz`],
+      clause: `${UNKNOWN_NAME}: no section of \`${CORE_FILE}\` spells \`zz\` (${IDENTITY_CHECK}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--config", "./nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${QUERY_JSON_ONLY}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "./nosuch.ts",
+      },
+    },
+    {
+      argv: ["query", "nodes"],
+      clause: `${CONFIG_ANCHORED}: the configuration lacks \`specs\`; ${QUERY_JSON_ONLY}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "xspec.config.ts",
+      },
+      staging: CORE_NO_SPECS_STAGING,
+    },
+    {
+      argv: ["review", "export", "nope"],
+      clause: `${UNKNOWN_SESSION}; ${EXPORT_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["review", "export", "s", "extra"],
+      clause: `${SURPLUS}: the session \`s\` exists; ${EXPORT_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      prepare: AUDIT_SESSION,
+    },
+    {
+      argv: ["review", "export", "s", "--config", "nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${EXPORT_JSON_ONLY}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "nosuch.ts",
+      },
+      prepare: AUDIT_SESSION,
+    },
+    {
+      argv: ["review", "export", "s"],
+      clause: EXPORT_JSON_ONLY,
+      exit: 0,
+      stdout: like(["review", "export", "s", "--json"], EXPORT_OF_S),
+      prepare: AUDIT_SESSION,
+    },
+    {
+      argv: ["review", "status", "nope"],
+      clause: `${UNKNOWN_SESSION}; \`review status\` is no JSON-only surface (10.7), so ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    // The gate's report (13.3) on §CONF-CORE's failing workspace, built
+    // valid and then extended by a source beginning with a byte-order mark:
+    // in the form of 12.7 on the JSON-only surfaces.
+    {
+      argv: ["query", "nodes"],
+      clause: `${QUERY_JSON_ONLY}; ${GATED_READ}`,
+      exit: 1,
+      stdout: like(["query", "nodes", "--json"], CORE_GATED_REPORT),
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["query", "node", CORE_TARGET],
+      clause: `${IDENTITY_CHECK}: the check passes; ${QUERY_JSON_ONLY}; ${GATED_READ}`,
+      exit: 1,
+      stdout: like(["query", "node", CORE_TARGET, "--json"], CORE_GATED_REPORT),
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["query", "edges"],
+      clause: `${QUERY_JSON_ONLY}; ${GATED_READ}`,
+      exit: 1,
+      stdout: like(["query", "edges", "--json"], CORE_GATED_REPORT),
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["review", "export", "s"],
+      clause: `${UNKNOWN_SESSION}: \`s\` exists, so the check passes; ${EXPORT_JSON_ONLY}; ${GATED_READ}`,
+      exit: 1,
+      stdout: like(["review", "export", "s", "--json"], CORE_GATED_REPORT),
+      prepare: AUDIT_SESSION_THEN_BOM,
     },
   ],
 };

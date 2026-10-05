@@ -48,7 +48,12 @@
 //   from the arguments alone, before configuration is loaded and before any
 //   acquisition or hold; a flag, command, or form outside this fixture's
 //   surface is refused (exit 70) only after those checks. JSON output is in
-//   effect exactly when a `--json` token is read as a flag.
+//   effect when a `--json` token is read as a flag, or on a JSON-only
+//   surface (`query`, `review export`; isJsonOnlySurface) with or without
+//   `--json`; it then carries every answer, every findings report, and
+//   every exit-2 error — the 12.7 error document, its `code` and `path`
+//   `configuration-error` and SPEC 14's concerned path for a configuration
+//   error, `null`/`null` for a plain usage error (UsageError).
 // - Exclusivity (SPEC 13.5): a lock file in the OS temp directory keyed by
 //   the workspace root's realpath, holding the owner's PID. A second mutating
 //   command finds a live owner and fails promptly with a usage error; a dead
@@ -97,8 +102,25 @@ import { setTimeout as sleep } from "node:timers/promises";
 // Outcome carriers
 // ---------------------------------------------------------------------------
 
-/** Usage or configuration error (SPEC 12.0 exit 2): message on stderr. */
-class UsageError extends Error {}
+/**
+ * Usage or configuration error (SPEC 12.0 exit 2): the message is stderr
+ * content; with JSON output in effect the 12.7 error document is the
+ * entire stdout. `code`/`path` are the error finding's stable code and
+ * concerned path — set for configuration errors (14.14:
+ * `configuration-error` plus the concerned path, SPEC 14), `null` for plain
+ * usage errors (SPEC 12.7, 14), 13.5's exclusivity and hold-file errors and
+ * the unreadable baseline of 6.3 among them. This scope reports no write or
+ * read failure (14.24, 14.25).
+ */
+class UsageError extends Error {
+  /** @param {string} message
+   *  @param {{ code?: string | null, path?: string | null }} [finding] */
+  constructor(message, { code = null, path = null } = {}) {
+    super(message);
+    this.code = code;
+    this.path = path;
+  }
+}
 
 /** Findings (SPEC 12.0 exit 1): a findings report on stdout. */
 class FindingsError extends Error {
@@ -233,12 +255,37 @@ async function pathOccupied(absPath) {
 
 const CONFIG_NAME = "xspec.config.ts";
 
+/**
+ * A located configuration file's concerned path in the anchoring form of
+ * SPEC 11.6, as SPEC 14 reports a configuration error's: identified
+ * relative to the invocation working directory, the working directory and
+ * the workspace root (the file's directory, 7) entering as physical paths
+ * with every symbolic link among their components resolved, the file as its
+ * own name under the root so spelled — the segments ascending to the
+ * nearest common ancestor spelled `..`, then the descending segments,
+ * `/`-joined; the platform's absolute form only where no relative path
+ * exists (11.6).
+ */
+async function anchoringPath(cwd, configPath) {
+  const physicalCwd = await fsp.realpath(cwd);
+  const physicalRoot = await fsp.realpath(path.dirname(configPath));
+  const relative = path.relative(physicalCwd, physicalRoot);
+  const name = path.basename(configPath);
+  if (relative === "") return name;
+  if (path.isAbsolute(relative)) return path.join(relative, name);
+  return [...relative.split(path.sep), name].join("/");
+}
+
 async function findConfigPath(cwd, configFlag) {
   if (configFlag !== undefined) {
     const abs = path.resolve(cwd, configFlag);
     if (!(await pathOccupied(abs))) {
       throw new UsageError(
         `configuration file not found: --config ${configFlag}`,
+        // A `--config` path nothing occupies — the one concerned path no
+        // physical resolution can spell — is reported as the argument value
+        // exactly as given (SPEC 14, 12.0).
+        { code: "configuration-error", path: configFlag },
       );
     }
     return abs;
@@ -251,6 +298,9 @@ async function findConfigPath(cwd, configFlag) {
     if (parent === dir) {
       throw new UsageError(
         `configuration error: no ${CONFIG_NAME} found by upward search from the working directory`,
+        // Missing configuration with no `--config`: the concerned path is
+        // the directory the failed search started from, spelled "." (14).
+        { code: "configuration-error", path: "." },
       );
     }
     dir = parent;
@@ -432,11 +482,6 @@ class LiteralParser {
 }
 
 /**
- * Load and validate the configuration; returns the workspace root and the
- * spec groups. The in-scope shape is one spec group and no other keys
- * (CERTIFICATIONS.md §CONF-CORE); `specs` is required (SPEC 7).
- */
-/**
  * The workspace root of this invocation's successful configuration
  * resolution, or null before one succeeds (module state; each bin*.mjs entry
  * runs exactly one invocation per process). Consumed only by the
@@ -447,8 +492,40 @@ class LiteralParser {
  */
 let lastResolvedRoot = null;
 
+/**
+ * Load and validate the configuration; returns the workspace root and the
+ * spec groups. The in-scope shape is one spec group and no other keys
+ * (CERTIFICATIONS.md §CONF-CORE); `specs` is required (SPEC 7). Every
+ * failure is a configuration error (14.14), its error finding carrying
+ * `configuration-error` and SPEC 14's concerned path.
+ */
 async function loadConfig(cwd, configFlag) {
   const configPath = await findConfigPath(cwd, configFlag);
+  let groups;
+  try {
+    groups = await readConfigGroups(configPath);
+  } catch (error) {
+    // Every defect found while reading, parsing, or validating the located
+    // configuration is a configuration error (SPEC 14.14 — a refused read of
+    // the file's content included, 14.25): its error finding carries the
+    // stable code and the concerned configuration file in the anchoring
+    // form (SPEC 14, 12.7).
+    if (error instanceof UsageError && error.code === null) {
+      error.code = "configuration-error";
+      error.path = await anchoringPath(cwd, configPath);
+    }
+    throw error;
+  }
+  const root = path.dirname(configPath);
+  lastResolvedRoot = root;
+  return { root, groups };
+}
+
+/**
+ * The post-location half of {@link loadConfig}: read, parse, and validate
+ * the located configuration file; returns its spec groups.
+ */
+async function readConfigGroups(configPath) {
   let text;
   try {
     text = await fsp.readFile(configPath, "utf8");
@@ -486,9 +563,7 @@ async function loadConfig(cwd, configFlag) {
     }
     groups[name] = globs;
   }
-  const root = path.dirname(configPath);
-  lastResolvedRoot = root;
-  return { root, groups };
+  return groups;
 }
 
 // ---------------------------------------------------------------------------
@@ -2097,6 +2172,33 @@ const PRODUCT_COMMANDS = new Set([
   "move",
   "version",
 ]);
+
+/**
+ * The commands whose every surface is JSON-only (SPEC 12.0: 11's `query`,
+ * `occurrences`, `view`, `at`, and `inventory`; 12.6's `version`) — beside
+ * 10.7's `review export`, a subcommand's surface.
+ */
+const JSON_ONLY_COMMANDS = new Set([
+  "query",
+  "occurrences",
+  "view",
+  "at",
+  "inventory",
+  "version",
+]);
+
+/**
+ * Whether the invoked surface — the command word and, for `review`, its
+ * subcommand, both among the non-flag tokens (12.0) — is JSON-only, a single
+ * JSON document its only output form with or without `--json` (12.0).
+ */
+function isJsonOnlySurface(words) {
+  const [command, subcommand] = words;
+  return (
+    JSON_ONLY_COMMANDS.has(command) ||
+    (command === "review" && subcommand === "export")
+  );
+}
 
 /**
  * The synopses of this fixture's surface (§CONF-CORE; SPEC 12.1–12.4, 8.2,
@@ -4015,10 +4117,13 @@ export async function runXspec(argv, cwd, options = {}) {
  */
 async function dispatchCommand(io, cwd, invocation) {
   const [command, ...operands] = invocation.words;
-  // JSON output is in effect exactly when a `--json` token is read as a
-  // flag — not as another flag's value — governing error delivery even when
-  // the arguments are themselves the error (SPEC 12.0).
-  const wantsJson = invocation.json;
+  // JSON output is in effect when a `--json` token is read as a flag — not
+  // as another flag's value — or when the invoked surface is JSON-only
+  // (SPEC 12.0): `query` and `review export` among the served ones (11,
+  // 10.7), so their every answer, gated report (13.3), and usage error is
+  // JSON, with or without `--json`. It governs error delivery even when the
+  // arguments are themselves the error.
+  const jsonInEffect = invocation.json || isJsonOnlySurface(invocation.words);
   try {
     if (invocation.error !== null) throw new UsageError(invocation.error);
     if (command === undefined) {
@@ -4087,18 +4192,37 @@ async function dispatchCommand(io, cwd, invocation) {
     }
   } catch (error) {
     if (error instanceof UsageError) {
-      // Usage/configuration errors: stderr content, empty stdout (SPEC 12.0).
+      // Usage/configuration errors (SPEC 12.0): the message is stderr
+      // content in both output forms. With JSON output in effect the single
+      // 12.7 error document — {"error": …} holding one finding form, its
+      // stable code and concerned path for a configuration error, null/null
+      // for a plain usage error — is the entire stdout; without it, stdout
+      // stays empty. The output form never changes the exit code or the
+      // standard-error content.
+      if (jsonInEffect) {
+        io.stdout(
+          canonicalJson({
+            error: {
+              code: error.code,
+              message: error.message,
+              locations: [],
+              path: error.path,
+              identities: [],
+            },
+          }) + "\n",
+        );
+      }
       io.stderr(`xspec: ${error.message}\n`);
       return 2;
     }
     if (error instanceof FindingsError) {
-      emitFindings(io, wantsJson, error.findings);
+      emitFindings(io, jsonInEffect, error.findings);
       return 1;
     }
     if (error instanceof RefusalError) {
       // Refused operations are exit-1 findings outcomes (SPEC 12.0); the
       // refusal report is stdout content, with no pinned wording.
-      if (wantsJson) {
+      if (jsonInEffect) {
         io.stdout(canonicalJson({ refused: error.message }) + "\n");
       } else {
         io.stdout(`${error.message}\n`);
