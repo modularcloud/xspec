@@ -1,0 +1,302 @@
+# FIX_PLAN — Phase 9 (test harness), re-descent iteration 100
+
+Written 2026-10-05 at cc21726 (branch `claude/xspec-ui-apis-4df8fa`, standing in for `patch/external-ui-apis`). It plans from the re-descent's third compliance determination, which was not clean. Its findings:
+- compliance review A (TEST-SPEC's T1–T6 tests): 1 gap;
+- B (T7 and later): 1 gap;
+- C (everything outside the T-numbered tests): 1 gap;
+- D (CERTIFICATIONS.md): 2 gaps;
+- VERIFY V: green — every harness self-test and every certification passes, locally and in CI.
+
+Task headings cite the gaps as A1, B1, C1, D1, and D2. Governing IP: `specs/patches/0001-external-ui-apis.md` (Stage: Tests Specified); no task changes its stage. No Bug Report applies.
+
+Why the harness changes again: the documents moved after the harness was last green (Phase 9 ended at 3bfedb5). The deltas are `git diff 3311ccd..6780f53 -- specs/TEST-SPEC.md`, `git diff 3311ccd..301f2f9 -- specs/CERTIFICATIONS.md`, and `git diff 9d095d9..f31e100 -- specs/SPEC.md`; none of the three documents has changed since. The first plan (f0d3cd9) and the second (857e51a) closed every gap the first two determinations found. The second plan's finished text sits at `deleted/specs/tmp/FIX_PLAN.md`, moved there at the Developer's direction; it is not part of the harness or the product, and no task touches it. The five gaps below predate the second plan or were left by it — A1's clause landed at 3c5b757 and was never implemented — and none blocks on a spec defect.
+
+## Preamble — read before any task
+
+**Phase goal and scope guards (Phase 9).** The harness must adhere to `specs/TEST-SPEC.md` and `specs/CERTIFICATIONS.md`. Every harness self-test and every certification passes: each certified test passes against its conformer and fails against each of its violators exactly as the violator's entry states. Product tests may fail, but only as diagnosed assertion failures (H-8): never a harness error, crash, hang, or false pass. Never modify product code (`src/`; `dist/` is built from it). Every task is harness work under `test/` (fixtures under `test/fixtures/` are harness code), plus `AGENTS.md`'s build/run facts and this plan. A spec defect that blocks a task goes to the matching problems file under `specs/tmp/`, never into a silent workaround.
+
+**Known state at cc21726 (VERIFY, and CI run 873, ID 37327300240).**
+- Self project, run as CI runs it (no network, uid 1000, no capabilities): 26 files, 4206 tests, all passing, 0 skipped (170 s locally, 80 s in CI).
+- Certification: all 27 fixtures pass — CORE 1 conformer and 8 violators, VALID 1 and 3, MD 1 and 2, DISC 1 and 3, AVAIL 1 and 3, ORPHAN 1 and 2. The runner's lines sum to 154 PASS / 38 FAIL / 0 error / 0 hang: the conformers' 39 (test, fixture) pairs all PASS; the violators' 153 pairs are 115 PASS and 38 FAIL, every FAIL an expected outcome. The C-1 gate passes.
+- Suite against the built product (CI, no network, unprivileged): 345 tests in 79 files; 317 pass and 28 fail, every failure a `HarnessAssertionError` (diagnosed). The failing IDs: P-1, P-5, T1.4-1, T1.4-4, T4-2, T6.4-3, T6.5-4, T6.5-11, T6.5-20, T6.5-21, T6.5-22, T6.5-23, T6.6-3, T7-2, T7-6, T7.1-1, T7.3-1, T12.0-5, T12.0-10, T12.7-2, T13.4-9, T13.4-10, T13.4-11, T14-4, T14-6, T14-7, T14-11, and T14-12.
+- Windows leg (E-6 subset): 3 files, 9 tests, green.
+- `npm run typecheck` and `npm run format:check` pass; `dist/` matches a fresh compile of `src/`.
+- No self-test reads TEST-SPEC.md, and none probes the fixtures outside certification runs, so a green self project does not by itself show compliance: each task carries its own checks.
+
+**Run mechanics (AGENTS.md holds the recipes; read the bullets a task names before running anything).**
+- Confirm `git status` is clean on `claude/xspec-ui-apis-4df8fa` before editing. Never fetch or merge `main` (it carries a newer scaffold commit this run does not adopt). Push with `git push -u origin claude/xspec-ui-apis-4df8fa`, retrying network errors with backoff (2 s, 4 s, 8 s, 16 s); never force-push; check `git log -1` before every push. If `node_modules` is missing, `npm ci` restores it.
+- Run the self project under the unprivileged namespace (`unshare --map-user=1000 --map-group=1000 -- npm run test:self` in this root sandbox; AGENTS.md's namespace bullet also records how to reproduce CI's no-network stage). Redirect long runs to a log in the scratchpad and grep it for `×` and the `Tests` summary; never cap the output with `head`.
+- Never run the self project, a certification run, and a suite run at the same time, and check the load first (another agent may share the machine). S-2's tower vector ("the largest document the suite stages — T1.3-7's 2048-deep chained-id tower") takes 1.4–2.9 s (1.8 s alone here, about 1.4 s in CI) and has timed out at Vitest's 5000 ms default only under concurrent load. Such a timeout is not a task failure; rerun alone.
+- One registered test: `-t '<ID> '`, with the trailing space and the dots escaped, on its wrapper file (e.g. `npx vitest run --config test/vitest.config.ts --project suite test/suite/section-4.test.ts -t 'T4-4 '`).
+- One certification family: `npx vitest run --config test/vitest.config.ts --project self test/self/certification.test.ts -t <FAMILY>` (CORE, VALID, MD, DISC, AVAIL, ORPHAN), under the namespace. Compare the runner's per-pair `PASS`/`FAIL` lines with the known state above.
+- Red/green checks of a product test: AGENTS.md's stand-in wrapper recipe ("Red-checking a strengthened product test against the built product (Phase 9)": a temporary `test/self/zz-*.test.ts` calling `runProductTests` or an exported arm, deleted before committing). Red checks of a new self-test vector: AGENTS.md's stash-the-helper recipe, or a one-point mutation of a scratch copy of a fixture (AGENTS.md's "Red-checking a certified test's arm" bullet). Hand-driving a fixture: `node test/fixtures/<fixture>/bin.mjs <argv…>` with a scratch workspace as the working directory.
+- Rebuild the product (`npm run build`) only if `dist/` is stale; `src/` does not change in this phase.
+- The scratchpad is shared across spawns: use task-specific file names there.
+
+**Spellings.** Take every exact spelling — code points, escape-spelled literals, byte offsets, file contents, command lines — from the TEST-SPEC.md, CERTIFICATIONS.md, or SPEC.md line the task cites, never from this plan or the review reports. The reports' channel decoded escape spellings, and the tool-parameter layer decodes backslash-u spellings inconsistently in edit and Bash payloads, comments included. So this plan names code points as `U+XXXX` and spells no escapes. Build such spellings in code from code points and verify the staged bytes byte-wise (`od -c`, a sha256 compare).
+
+**Conventions for changed tests and fixtures.**
+- *Registration.* No task adds a registered product test. Task 4 adds a self-test file under `test/self/`, which the self project's include pattern picks up.
+- *S-9 timing.* A `.mdx` source that a registered body stages after its first product invocation, or in a workspace it creates after it, is a staged-source record (`test/helpers/staged-mdx.ts`, judged by `test/self/s9-staged-sources.test.ts`); a TypeScript code source or configuration file staged there is a `StagedTs` record (`test/helpers/staged-ts.ts`). Records register at module load only, and each adds one self-test. Files staged before a body's first invocation need no record. Self-tests stage their workspaces before invoking anything.
+- *Never-modifies compares* use the compare-around machinery (`assertLeavesUnchanged` and `snapshotDirectory` in `test/helpers/snapshot.ts`).
+- *Free text.* Corrections and other free-text checks use H-3's robust matching: required information only, never exact wording.
+- *Product verdicts.* The built product (Phase 10's, at c62f451) predates the SPEC changes of this re-descent. A new or strengthened arm that fails against it counts as a diagnosed product failure only once a hand-staged probe shows the product's answer contradicts the asserted SPEC behavior. A harness error, crash, or hang is a harness defect to fix in the task. An arm that passes against the product proves nothing about its liveness, so red-check it wherever the task says so.
+- *Fixture changes.* Each violator reuses its conformer's `product.mjs` (its `bin-<deviation>.mjs` passes one deviation switch), so a conformer change reaches every violator of its family. After a fixture change, read each switch of the family at its point of use and confirm it still produces its one deviation, and run the family's certification: every runner line must read as in the known state above. A certified test that changes outcome is a finding: diagnose it against TEST-SPEC.md's and CERTIFICATIONS.md's text before going on. A test body asserting what SPEC 12.0 contradicts is fixed in the same task, its clause cited in the commit message; a document defect goes to the problems file, and the task stops. Never shape a fixture to keep a wrong assertion passing.
+- *Every task ends with:*
+  - `npm run typecheck` and `npm run format:check`;
+  - the touched suite files against the built product (a fixture task touches none);
+  - for a fixture task, its family's certification first, for quick feedback (the full self project below runs the whole certification);
+  - the full self project under the namespace, with 0 failures (green at cc21726; keep it green);
+  - a commit message (`sdg(phase-9): <imperative summary> (FIX_PLAN Task N)`, with the two trailer lines the session requires) stating the honest results, including each touched product test's outcome before and after;
+  - removing the finished task from this plan in the same commit and adding its one-line summary to the Order section below (a done task leaves the plan).
+- *AGENTS.md* gets only build/run knowledge a later spawn needs (a recipe, a count or timing a later check relies on), never a task narrative.
+
+**Standing rulings.** Two rulings stand for this run: AGENTS.md's "Known residual 14.20 location gaps" and "Known SPEC 6.5 gap, deferred to a future SPEC revision" bullets. No task here addresses them, and none may be added for them.
+
+**Deleting this plan.** Only Task 11 deletes this file, with `git rm`, once no other task remains. If the permission system refuses the deletion, stop there: leave the file in place, commit nothing further for it, and report the refusal in the final report. Never move, rename, empty, or otherwise work around a refused deletion.
+
+**Considered and not planned (do not re-raise).**
+- *Carried from the second plan.*
+  - The note from the first plan's Task 19 (a40ce14): S-9 lists five allowances, none for a strict-mode-barred import binding such as `import let`, which T6.5-22 declares derivable. It is latent: no fixture stages such a file.
+  - VIOL-DISC-DERIVED's code-side arm in T7-6 fails at the arm's own `build` (exit 1: the user-written `specs/A.md` at the emit destination enters the code set and is no well-formed TypeScript), earlier than CERTIFICATIONS.md's narrative says, consistently with its "fails on the exclusion arms in any case" (reviewer D, again at cc21726). A matter for a future revision of that document.
+  - The Phase 7 round-3 certifications driver's note on VIOL-ORPHAN-THROUGHLINK (directory components resolve only through links whose target directory lies inside the workspace root): implemented as now written and certified. Reviewer D's differential sweep at cc21726 shows the violator diverging only at T13.4-11 arm (e)'s inside staging.
+  - The header comment of `test/suite/registry/traceability.ts` lists only four refusal-reason staging tests; the map itself is complete. A task touching that file may fix the comment.
+  - P-6 drives only the file form of `move`, and P-9 uses only audit sessions; TEST-SPEC's wording does not clearly require more.
+- *From reviewer A.*
+  - T4.3-2's string-argument and arity arms run no `occurrences` check: TEST-SPEC's "no occurrence" attaches to the dynamic node-form list alone, and "so do" for the arity arms means only "fail with 14.8".
+  - T4.3-2 and T4.5-3 assert locations by containment in the statement's byte window: TEST-SPEC delegates exact ranges to T14-11 (T14-8), whose `SPEC?.a;` arm pins the expression-statement rule exactly.
+  - T1.3-2's top-level arm asserts no expected-form wording: no wording-free substring exists for "exactly one segment" (H-3), and T1.3-4 pins the rule itself.
+  - T1.5-3's title is stale (it says bare paths "address the root" in `move`/`rename`) while its body asserts TEST-SPEC's reading (a bare path there names a file). Cosmetic; a task touching `test/suite/registry/section-1.5.ts` may fix the title.
+  - §5.7's per-file-view channel is covered by T11.4-1 and P-12, and T1.5-2's U+FFFD-path `view`/`at` clauses are asserted in T11.5-3's body.
+- *From reviewer B.* T12.7-1's body checks only that the module name appears in cross-module identities; the entry points the exact check to T4.4-1 (14.11), which checks it exactly.
+- *From reviewer C and VERIFY.*
+  - S-2's 4,225,030-byte tower vector runs under Vitest's default 5000 ms timeout: 1.4–2.9 s in CI, 1.8 s alone here, 3.6 s beside another agent's run, and one timeout (5159 ms) only with two harness runs overlapping (load about 11 on 4 cores). Rerun alone; a task touching that self-test may give it an explicit timeout.
+  - P-11's per-invocation hang guard is 120 s (`FUZZ_COMMAND_TIMEOUT_MS` in `test/suite/registry/section-16-p11.ts`), 4.7× its largest measured case (`view --text`, 125.8 MB in 25.4 s; AGENTS.md's answer-scale timings bullet). Reviewer C's "60 s, 2.4×" figure matches P-8's guard (60 s, `section-16-p8.ts`), not P-11's. Only randomized mode reaches that scale; the fixed seeds stage at most about 22 KiB.
+  - The driver's pre-flight working-directory refusals (a relative, missing, or non-directory working directory) stay diagnosed failures: they precede capture and evaluation, outside H-11's clause, and S-3 pins them ("refuses relative, missing, and non-directory working directories, diagnosed"). Task 3 leaves them as they are.
+  - `checkDrawSources` (`test/helpers/property.ts`) recognises MDX sources by the `.mdx` name (the second plan's Task 3 note). Latent: no generator stages a non-`.mdx` spec-group file, and P-7 forces `.mdx`.
+  - With `dist/` missing, the driver throws plain "required file missing" errors; H-8's alternative realization, the empty stub, is gated by S-7.
+  - P-8 checks the exit-2 document only as `{"error": object}`: its clause is "never partial", and T12.7 pins the full form.
+- *From the second plan's task notes.* T13.4-10's correction judge (`judgeManualDeletionCorrection`) matches wording, so it can over-reject some explanations (e.g. "rebuilding would remove it only if…"); reviewer B found it compliant at cc21726.
+
+**Order.** Tasks are in dependency order; take the topmost task unless told otherwise. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement. When a task is done, its commit removes it and adds a one-line summary to its bullet here.
+- Part A (Tasks 1–2): the T-numbered tests, in TEST-SPEC order — T4-4's declaration-modifier arm (A1), and T14-7's two spelled `refused-invalid-id` command lines (B1). Independent of each other and of Parts B and C.
+- Part B (Task 3): H-11 — a failure of the driver's in-run evaluation (T6.5-22(a)'s check) is a harness error, never a diagnosed product failure (C1). Independent of Parts A and C.
+- Part C (Tasks 4–10): the certification fixtures' invocation grammar and JSON error delivery (D1, D2). Task 4 creates the guard self-test that every later Part C task extends, so it goes first. Tasks 5–9 depend on Task 4 alone; Task 10 also depends on Task 9.
+- Task 11 confirms the result and deletes this plan. It depends on every task above.
+
+## Tasks
+
+### Part A — the T-numbered tests
+
+### Task 1 — T4-4's declaration-modifier arm (A1)
+
+**Cites.** TEST-SPEC §4, T4-4 (L153): "in the declaration-modifier arm `t` is bound by an ordinary `import { text as t } from "./NAME.xspec"` beside the type-only default binding (two declarations of one module binding distinct identifiers, valid under 4), so an ordinary `text` callee receives a chain rooted at a type-only binding; in the named-binding arm `SPEC` is itself bound type-only, by a second declaration `import type SPEC from "./NAME.xspec"` beside the `{ type text as t }` one". In both arms the marker-shaped `SPEC.a` and the call `t(SPEC.a)` "record no edge (`query edges` reports none from the file) and trigger no xspec finding — not 14.8 and not 14.18 … — and `build`/`check` exit 0". SPEC 4, 4.5, 14.18. Reviewer A, gap 1: the clause landed at 3c5b757 (Phase 6 item O1) and was never implemented.
+
+**Shortfall.** `T4_4` in `test/suite/registry/section-4.ts` (the T4-4 block, about L1290–1418) stages one type-only file, `src/typeonly.ts` (`T4_4_TYPE_ONLY_SOURCE`: `import type SPEC …;`, `import { type text as t } …;`, `SPEC.a;`, `t(SPEC.a);`) — the named-binding arm alone. No file anywhere in the suite binds `t` through an ordinary import beside a type-only default binding (T5.7-4, T6.5-1, and T6.5-18 stage other shapes). So a product that records an `embeds` edge for an ordinary `t` whose argument is rooted at a type-only binding passes T4-4, and so does one that reports 14.8 or 14.18 for that call.
+
+**Change.**
+- Stage the declaration-modifier arm's code file in T4-4's workspace, beside `src/typeonly.ts` and `src/control.ts` and before the body's first invocation — e.g. `src/typeonly-decl.ts`, holding `import type SPEC from "../specs/A.xspec";`, then `import { text as t } from "../specs/A.xspec";`, a blank line, `SPEC.a;`, and `t(SPEC.a);`, newline-terminated (the workspace's `../specs/A.xspec` specifier where TEST-SPEC writes `./NAME.xspec`, as the existing arm spells it).
+- Assert, beside the existing assertions:
+  - `build` and `check` still exit 0 over the workspace. The existing `buildOk` and `expectExit(… ["check"], 0 …)` cover the whole workspace and run first, so a 14.8 or 14.18 on the new file fails there; make their labels name both arms.
+  - `queryEdgesFrom(product, workspace, "src/typeonly-decl.ts", …)` reports no edge, as for `src/typeonly.ts`.
+  - The workspace-wide `query edges --kinds references` and `--kinds embeds` sets still hold only `src/control.ts`'s edge each (the existing loop, unchanged; it now also pins that the new file contributed to neither kind).
+- Comments name the two arms: `T4_4_TYPE_ONLY_SOURCE` is the named-binding arm (its comment now says "Both type-only forms"), the new constant the declaration-modifier arm. The title already names both modifiers and may stay.
+- Optional, as reviewer A notes: mirror the consumer-side compile-error grounding for the new file, after the xspec assertions. In this arm the callee `t` is an ordinary binding, so the TypeScript errors sit at `SPEC.a;` and at `SPEC` inside `t(SPEC.a)`, not at the callee; locate them so. TEST-SPEC places the consumer's TypeScript error outside xspec's validations, so this grounds the fixture and asserts nothing about the product.
+
+**Checks.**
+- S-9: the new file is a TypeScript code source staged before the first invocation, so it needs no record; the self project's well-formedness judgement must accept it.
+- T4-4 against the built product (it passes at cc21726). If it fails after the change, hand-probe the new arm in a scratch workspace (`build --json`, `check --json`, `query edges --from src/typeonly-decl.ts --json`; AGENTS.md's hand-staging recipe) and count it a diagnosed product failure only if the product's answer contradicts SPEC 4, 4.5, or 14.18. A harness error is a defect to fix here.
+- Red check: through AGENTS.md's stand-in wrapper, a mode that injects an `embeds` edge from `src/typeonly-decl.ts` to `specs/A.mdx#a` into the `query edges --from src/typeonly-decl.ts` answer must fail T4-4 at the new arm's assertion, and a mode injecting it into the `--kinds embeds` answer alone must fail it at the workspace-wide set. The unmodified product's outcome is the one recorded above.
+- The usual end-of-task checks (Preamble).
+
+### Task 2 — T14-7's two spelled `refused-invalid-id` command lines (B1)
+
+**Cites.** TEST-SPEC §14, T14-7 (L589): "`refused-invalid-id` (concerning the new identity alone — `identities` exactly `["specs/A.mdx#a.then"]` for `rename specs/A.mdx a a.then` and `["specs/B.mdx#x y"]` for `move specs/A.mdx#x 'specs/B.mdx#x y'`, the invalid ID spelled verbatim; intrinsic form only — a structurally misplaced but intrinsically valid new ID reports `refused-structural-parent` alone, never both)". SPEC 14 (the position check, `refused-structural-parent`, is evaluated only over intrinsically valid IDs, so no identity reports under both; no identity produced by the prefix replacement is reported separately), 1.3, 1.4, 6.4, 6.5. Reviewer B, gap 1.
+
+**Shortfall.** A search of `test/` finds neither command line. T14-7 (`T14_7` in `test/suite/registry/section-14.ts`, about L3606ff) runs substitutes:
+- for the rename, `rename specs/A.mdx a.mid a.then` (`RENAME_REFUSAL_CASES`, `test/suite/registry/section-6.4.ts` about L1565), whose `a.then` sits correctly under `a`. The spelled rename turns the top-level `a` into the two-segment `a.then`: invalid in itself (the forbidden name `then`) and in the wrong position (SPEC 1.3). A product that also reports `refused-structural-parent` there passes every current arm;
+- for the move, only moves of the childless `keep` (`MOVE_REFUSAL_CASES`, `section-6.5.ts` about L3573ff) or of `x` to `specs/new.txt#x y` (`section-14.ts` about L3259–3290). No arm moves a section with descendants to an invalid new ID, so a product that also reports the prefix-produced `specs/B.mdx#x y.sub` passes.
+
+**Change.** Add both arms to T14-7's own body, each through `assertRefusalReport` (it asserts exit 1, the exact multiset of reasons — so a reason beside the expected one fails — and `identities` exactly):
+- (i) In the rename-reason workspace (`RENAME_REFUSAL_CONFIG` plus `RENAME_REFUSAL_FILES`: `specs/A.mdx` holds the top-level `a`, which contains `a.mid`, with child `a.mid.kid`, and `a.sib`), after its `RENAME_REFUSAL_CASES` loop: argv `rename`, `specs/A.mdx`, `a`, `a.then`. Expect exactly one finding, `refused-invalid-id`, with `identities` exactly `["specs/A.mdx#a.then"]` — no `refused-structural-parent`, and no produced identity (`a.then.mid`, `a.then.mid.kid`, `a.then.sib`).
+- (ii) In the move-reason workspace (`MOVE_REFUSAL_CONFIG` plus `MOVE_REFUSAL_FILES`, occupants staged as today: `specs/A.mdx`'s `x` holds `x.sub`, and `specs/B.mdx` holds `b` and `y`), after its `MOVE_REFUSAL_CASES` loop: argv `move`, `specs/A.mdx#x`, `specs/B.mdx#x y` — the last a single argv element holding a space (TEST-SPEC's quotes are shell quoting). Expect exactly one finding, `refused-invalid-id`, with `identities` exactly `["specs/B.mdx#x y"]` — never `specs/B.mdx#x y.sub`.
+- Leave the shared case tables untouched, so T6.4-3, T6.5-4, and T6.6-3 do not change. Every refusal modifies nothing, so each new arm sees its workspace as the loop left it; a product that performs either operation fails the arm's exit assertion first. The context labels quote the TEST-SPEC clause; the title may gain the two command lines.
+- T14-7 is uncertified (CERTIFICATIONS.md's Exclusions: the 12.7 form sweeps and the code contracts), so no fixture changes. No source is newly staged, so S-9 is unchanged.
+
+**Checks.**
+- Hand-probe the built product on both command lines in scratch workspaces staged as those two fixtures stage them (AGENTS.md's hand-staging recipe), and record its answers in the commit message.
+- T14-7 against the built product fails diagnosed at cc21726 at its U+2028 rename arm (exit 0), before these arms. It must still fail diagnosed, at the same first arm.
+- Red/green the new arms through AGENTS.md's stand-in wrapper. T14-7 stops at its first failing arm, so drive the two arms alone: put them in one module-private function (e.g. `runIntrinsicInvalidIdArms(product)`), `export` it for the run with a one-line `sed` reverted before committing, and call it from a temporary `test/self/zz-*.test.ts` (as AGENTS.md drives T14-10's and T14-11's arms). A `conform` mode answering each command line with exactly the pinned report passes; a mode adding a `refused-structural-parent` finding (`identities` `["specs/A.mdx#a.then"]`) to the rename's report, inserted where 12.7's findings order puts it (the form-exact decode rejects a misordered array before any assertion runs; AGENTS.md's stand-in pitfalls), fails (i); a mode appending `specs/B.mdx#x y.sub` to the move's `refused-invalid-id` identities fails (ii); the raw product's outcome on each arm matches the hand-probe. Delete the temporary files.
+- The usual end-of-task checks (Preamble).
+
+### Part B — harness machinery
+
+### Task 3 — H-11: a failure of the driver's in-run evaluation is a harness error (C1)
+
+**Cites.** TEST-SPEC §0 H-11: "A harness-side failure while capturing or evaluating an answer — a crash, hang, or exhausted internal limit — is reported as a defect in the harness, never as a diagnosed product failure and never as a pass: H-8's rule generalized beyond the missing-product run". S-3 (the driver), S-8 (H-11's gate). Reviewer C, gap 1; the second plan's Task 2b note, which flagged it.
+
+**Shortfall.** The driver (`test/helpers/subprocess.ts`) evaluates every performed `move`'s answer inside the run, for T6.5-22(a): `startProduct` awaits `prepareAddedImportCheck` before spawning (about L271), and the exit promise chains `addedImportCheck.verify(result)` (about L427–433), which parses the rewritten sources with the harness's TypeScript 5.9.3 and MDX parsers plus S-6's name analysis. A breach is a `HarnessAssertionError`, a diagnosed product failure, as it should be. But a failure of the check itself is no breach — e.g. the plain `Error` at `test/helpers/added-import-identifiers.ts` about L669, or any non-`TypeError` the judges rethrow (`test/helpers/ts-derivability.ts` about L277 and L323), such as a parser's `RangeError` — and it reaches callers as a rejection of `startProduct`, `runProduct`, or `waitForExit`. Every conversion site first calls `rethrowOutputOverflow(error)` (subprocess.ts about L156), which rethrows only `ProductRunOutputOverflowError`, then folds every other rejection into `fail(…)`: a diagnosed product failure. Reviewer C's probe (`c100C/probe/h11.test.ts` in the scratchpad, if still there) shows P-10's `settleStraddleRead` and `settleKilled` turning a plain-`Error` `verify` into a `HarnessAssertionError`.
+- Real paths where `verify` runs behind such a fold: P-10's completion wait in `runEpisode` (`test/suite/registry/section-16-p10.ts`, about L984–997) for move episodes that complete, and T13.5-1's held-arm wait (`section-13.5.ts`, about L662–670; the held `move` at about L743).
+- The same fold at every other site: P-10's `runHeldRead`, `settleStraddleRead`, `settleKilled`, its hold-file wait and its premature-exit fold; 13.5's `runBounded`, `describeExit`, and its inline held waits (about L531, 1128, 1305, 1346, 1710, 1763, 1971, 2130); the write-refusal staging's `awaitHoldFile`, `runSettled`, and `runHeldWithStaging` (`test/suite/registry/write-refusal-staging.ts`); `section-6.6.ts` about L1410, `section-7-discovery.ts` about L1083, `section-12.0-i.ts` about L1812, `section-12.0-ii.ts` about L1586; and the driver's own `waitForFile`, which folds such an error into its "exited before creating …" message.
+
+**Change.**
+- Give the driver's in-run evaluation failures a dedicated harness-error type in `subprocess.ts` (suggested name `HarnessEvaluationError`), carrying the original error as `cause` and naming the command line and T6.5-22(a). The driver throws it for anything but a `HarnessAssertionError` thrown by `prepareAddedImportCheck` (so `startProduct` rejects with it) or by `verify` (so `waitForExit`, `runProduct`, and `waitForFile` reject with it). A `HarnessAssertionError` passes through unchanged.
+- The shared classifier every conversion site calls first rethrows that type as well as `ProductRunOutputOverflowError`. Rename `rethrowOutputOverflow` to say so (suggested `rethrowHarnessError`) and update every importer, or keep the name; either way, its doc comment, those of `ProductRunOutputOverflowError`, `waitForExit`, and `waitForFile`, the `subprocess.ts` module header, and `added-import-identifiers.ts`'s header ("A breach is a diagnosed product failure …") state both types. That one change fixes every site above, `waitForFile`'s handler included.
+- Sweep `test/` for every `catch`, `.catch`, or rejection handler that converts a rejection of `startProduct`, `runProduct`, `waitForExit`, or `waitForFile` into `fail(…)` or a message (`grep -rn 'waitForExit\|runProduct(\|startProduct(\|waitForFile(' test/`), and make sure each calls the classifier first.
+- These stay diagnosed failures, unchanged: a T6.5-22(a) breach (`HarnessAssertionError`), the hang-guard kill (`ProductRunTimeoutError`), a premature exit, a spawn failure, a missing product file (H-8), and the driver's pre-flight working-directory refusals (see "Considered and not planned").
+- The property runner already reports a non-`HarnessAssertionError` as a harness error naming the seed (`test/helpers/property.ts`, about L482 and L853). Confirm that P-10 then reports the new type that way.
+
+**Acceptance (self-tests).**
+- S-3 (`test/self/s3-subprocess-driver.test.ts`) pins the driver's classification:
+  - a run whose check's `verify` throws a plain `Error` makes `waitForExit` reject with the new type (its `cause` the original), never a `HarnessAssertionError`;
+  - a `prepareAddedImportCheck` that throws a plain `Error` makes `startProduct` reject with the new type;
+  - a `verify` that throws a `HarnessAssertionError` makes `waitForExit` reject with that very error;
+  - `waitForFile` on a run whose `verify` throws rejects with the new type, never folded into the premature-exit error;
+  - the classifier rethrows `ProductRunOutputOverflowError` and the new type unchanged, and returns for a `HarnessAssertionError`, a `ProductRunTimeoutError`, and a plain `Error` (extend the vector at about L588).
+- S-8 (`test/self/s8-answer-scale-capacity.test.ts`; extend its header's item 5 or add an item 6): every shared helper through which a `move` can run — 13.5's `runBounded` and `describeExit`; the write-refusal staging's `awaitHoldFile`, `runSettled`, and `runHeldWithStaging`; P-10's `settleStraddleRead` and `settleKilled`, each over a started `move` run — rejects with the new type, never a `HarnessAssertionError`, when the run's check throws a non-assertion error. The existing overflow and diagnosed halves stay. P-10's `runHeldRead` runs only its fixed read menu, which never prepares the check, so it needs no such vector; it still calls the classifier.
+- The means of making the check throw is the task's choice; keep it deterministic and confined to the self-tests. Reviewer C's probe builds a `RunningProduct` directly with a check object whose `verify` throws. A scoped `vi.doMock` of `test/helpers/added-import-identifiers.ts` (spreading the real module, so `VALUE_FLAGS` and the other exports stay) with the modules under test imported after it, or a narrowly scoped injection point in the driver, would also serve. A stand-in binding that exits 0 for a `move …` argv serves as the product. Never rely on a pathological real input whose failure depends on parser internals.
+- Red checks: each helper's classifier call reverted in turn to the overflow-only behavior fails its new vector; the driver's wrapping removed fails S-3's vectors. Restore each file byte for byte (sha256).
+
+**Checks.**
+- The touched suite files against the built product, before and after — at least `section-13.5`, `section-14-ii` (T14-9 and T14-10 use the write-refusal staging), `section-16-p10`, `section-6.6`, `section-7-discovery`, `section-12.0-i`, and `section-12.0-ii`: outcomes identical. At bc6e553 these files' 32 tests were 28 passing and 4 failing diagnosed (T6.6-3, T7-6, T12.0-5, T12.0-10); list today's in the commit message.
+- The whole certification: unchanged (154 / 38 / 0 / 0). The runner's taxonomy reports a harness error as `error`, never as a FAIL.
+- The self project green with the added vectors; record the new test count in AGENTS.md's self-project bullet.
+- The usual end-of-task checks (Preamble).
+
+### Part C — the certification fixtures' invocation grammar and JSON error delivery
+
+**Read first (common to Tasks 4–10).**
+- *Requirement.* CERTIFICATIONS.md, preamble, third paragraph: "Every conformer likewise reads its arguments under the invocation grammar of 12.0 — flag tokens standing anywhere, a value-taking flag taking the whole next token whatever it looks like, arity fixed by name across commands (`--test-hold` value-taking on every command, so `build --test-hold --json` consumes `--json` as its value and leaves JSON out of effect, T13.5-1), the remaining tokens matching the synopsis exactly, a surplus operand a usage error — and, with JSON in effect, reports every usage error in the exit-2 error document of 12.7: the grammar is universal (12.0), so no in-scope usage-error assertion is left to a fixture's own parser." Also §CONF-CORE's Scope (the reads "each behaving per 12.0 over such workspaces"; the gate reporting "in the form of 14/12.7") and §CONF-DISC's Scope ("`inventory` (11.6) in its full 12.7 document form"). Reviewer D, gaps 1 and 2: five conformers do not read the grammar, and three never print the error document; the 21 violators share the defects through their conformers' `product.mjs`. Certification itself is green, and must stay exactly as it is.
+- *The SPEC rules the fixtures implement.*
+  - SPEC 12.0's "Invocation grammar." bullet: flag tokens anywhere — before the command word, between it and its operands, or after them; the token `--` ends flag reading and is dropped; a value-taking flag takes the whole next token, whatever it looks like, and lacks its value when none follows; a flag's arity is fixed by its name, the same for every command and known before the command word is identified; `--name=value`, and any `--` token naming no flag the command accepts, is an unknown flag; a repeated flag is a usage error; once flags, values, and `--` are removed, the remaining tokens — the command, its subcommand for `query` and `review`, its operands — match the synopsis exactly.
+  - SPEC 12.0's JSON-in-effect rule: a `--json` token read as a flag, not as another flag's value — even when the arguments are themselves the error, a repeated `--json` included — or a JSON-only surface (10.7's `review export`; 11's `query`, `occurrences`, `view`, `at`, `inventory`; 12.6's `version`).
+  - SPEC 12.7's exit-2 error document: `{"error": …}` holding one finding form — `code` and `path` `null` for a plain usage error (SPEC 14: a plain usage error carries no stable code), `configuration-error` with its concerned path for 14.14 (SPEC 14: a `--config` path nothing occupies is reported as the argument value exactly as given), and `write-failure` or `read-failure` with theirs for 14.24 or 14.25.
+  - SPEC 12.0 and 13.5: `--test-hold` is accepted by a mutating command alone — `rename`, `move`, and the mutating `review` subcommands — and refused beside `--preview` (6.6); `build` and `check` are not mutating, so for them it is an unknown flag. SPEC 12.0's precedence: a syntax-class error is reported from the arguments alone, before configuration is loaded and before any acquisition or hold.
+- *Reference implementation.* CONF-ORPHAN's `readInvocation` and `FLAG_ARITY` (`test/fixtures/conf-orphan/product.mjs`, about L185–300) and its `runXspec` (about L1480–1563) already read the grammar and print the error document. Model the other fixtures' readers on them, but check every flag's arity against SPEC's synopses (12, 10.7, 11) rather than copying. Keep each fixture self-contained, as every fixture is today: no imports from `test/helpers/`. The harness's own reading of the grammar (`VALUE_FLAGS` in `test/helpers/added-import-identifiers.ts`) stays independent of what certification runs against.
+- *Reviewer D's probe workspace:* `xspec.config.ts` declaring one spec group, `main: ["specs/**/*.mdx"]`, and `specs/A.mdx` holding one section `a` with one text line. Its probe scripts may still be in the scratchpad (`p9i100D/probe_grammar.mjs`, `probe_arity.mjs`, `probe_more.mjs`, `probe_jsononly.mjs`, `probe_bom.mjs`, `probe_export.mjs`, `probe_inv.mjs`, `probe_hold.mjs`); they are aids, not authorities.
+- *The guard (Task 4 creates it).* `test/self/certification-fixture-grammar.test.ts` (name suggested): one `test(…)` per conformer, each staging its workspace(s) before any invocation and running a table of rows through the driver — `runProduct`, or `startProduct` with the hold-file helpers for a held row — with the conformer's binding from `CERTIFICATION_FIXTURES` (`test/self/certification-fixtures.ts`). A row names its argv and the outcome SPEC fixes: the exit code, and standard output either empty, the 12.7 error document (decoded form-exact with `decodeErrorDocument`, its `code` and `path` asserted), a document the surface's adapter decodes (`decodeFindingsReport`, `decodeInventoryDocument`, `decodeNodeRowsReport`, `decodeNodeReport`, `decodeEdgesReport`, `decodeViewReport`, `decodeOccurrencesReport`, `decodeIdsReport`, `decodeExportReport`, …), or byte-equal to a canonical spelling's answer over the same state (e.g. `--json ids` against `ids --json`). A `--test-hold` row also asserts whether the hold file was created. Derive every expectation from SPEC 12.0, 12.7, and 14 — never from a fixture's current output — and quote the clause in the row's label. A row whose invocation writes (`build`, `rename`) gets its own workspace, or an order that keeps every row's state defined.
+- *Each Part C task:* add its rows to the guard and red-check them against the unfixed fixture — every row restating one of reviewer D's observations must fail there, while the other rows pin behavior that may already hold; fix the fixture; rerun the guard (green) and the family's certification (unchanged, per the Preamble's fixture convention); update AGENTS.md's fixture bullet (line 18) wherever it describes changed behavior.
+
+### Task 4 — CONF-ORPHAN: `--test-hold` on `build` is the unknown-flag usage error; the guard self-test (D1 (e))
+
+**Cites.** Part C's requirement; SPEC 12.0 (the flags a command accepts: `--test-hold` only for a mutating command) and 13.5 (`build` is not mutating). Reviewer D, gap 1 (e).
+
+**Shortfall.** `build --test-hold <x>`, `build --test-hold --json` included, exits 70 with "fixture scope error". `COMMAND_FLAGS` (`test/fixtures/conf-orphan/product.mjs`, about L232–239) gives `--test-hold` to "the mutating `build`", and `runXspec` then refuses the seam as out of scope (about L1519–1523). Under 12.0 it is an unknown flag of `build` and of `check`: exit 2, standard output empty unless a `--json` token was read as a flag (then the error document, `code` and `path` `null`), and no hold file created. The fixture's reader is otherwise correct (reviewer D).
+
+**Change.**
+- Remove `--test-hold` from `build`'s accepted flags (it stays value-taking in `FLAG_ARITY`), and drop the unreachable `--test-hold` scope refusal. Fix the module header (about L14–19: the seam "is refused loudly with exit 70") and `COMMAND_FLAGS`' doc comment.
+- Create the guard (above) with CONF-ORPHAN's rows, at least:
+  - (e)'s rows: `build --test-hold h` (exit 2, stdout empty, no `h`); `build --test-hold --json` (exit 2, stdout empty: `--json` is the flag's value); `build --test-hold h --json` and `check --test-hold h --json` (exit 2, the error document with `code` and `path` `null`, no `h`); `--test-hold h build` (exit 2, stdout empty, no `h`).
+  - Grammar rows the fixture already answers per 12.0, pinning the reader against regressions: `--json build` like `build --json`; `build --json --` like `build --json`; `-- build` like `build`; `build -- --json` (a surplus operand: exit 2, stdout empty); `build extra --json`, `build --json --json`, `build --json --config`, and `build --config=x --json` (exit 2, the error document, `code` and `path` `null`); `build --json --config --json` (`--config` takes `--json` as its value: the error document carries `configuration-error` and the path `--json`, exactly as given). If one of these fails, fix the fixture in this task: it is the same requirement.
+- AGENTS.md: line 18's fixture bullet no longer lists `--test-hold` among CONF-ORPHAN's exit-70 scope errors; add a short bullet naming the guard and its run command (`npx vitest run --config test/vitest.config.ts --project self test/self/certification-fixture-grammar.test.ts`, under the namespace).
+
+**Checks.** The (e) rows on `build` fail against the unfixed fixture and pass after it; the `check` row and the grammar rows pass on both (`check` never accepted `--test-hold`). `-t ORPHAN` is unchanged: the conformer passes T13.4-11, and VIOL-ORPHAN-THROUGHLINK and VIOL-ORPHAN-LINKTARGET each fail it at their arms (AGENTS.md's arm-isolation recipe if in doubt). The self project gains the guard's file and tests: record the counts in AGENTS.md. The usual end-of-task checks.
+
+### Task 5 — CONF-AVAIL: the 12.0 grammar (D1 (a), (c))
+
+**Cites.** Part C's requirement; SPEC 12.0's invocation grammar and JSON-in-effect rule; SPEC 11.3 and 11.4 (the `occurrences` and `view` synopses). Reviewer D, gap 1 (a) and (c).
+
+**Shortfall.** `parseArgs` (`test/fixtures/conf-avail/product.mjs`, about L2375) reads flags only after the command word, and `dispatchCommand` (about L2689) takes `argv[0]` as the command. Observed: `--json view` and `--json occurrences` exit 2 ("unknown command"); `occurrences --` exits 2 ("unknown flag --") where `--` must end flag reading. `jsonInEffect` (about L2694) counts any `--json` token for an unknown command, a value's included. The error-document output itself is already right for `view` and `occurrences`.
+
+**Change.** A reader per 12.0 (Part C's model) feeding the dispatch: the command from the non-flag tokens; each command's accepted flags as today (`view`: `--json`, `--config`, `--text`, `--file`; `occurrences`: `--json`, `--config`, `--file`, `--to`; about L2507 and L2598) — any other flag token, read by its arity, an unknown flag; operands as each synopsis admits (the existing checks, `<file>` operands beside `--file` among them). JSON is in effect for `view` and `occurrences` always (JSON-only), and otherwise exactly when a `--json` token is read as a flag. Confirm the three switches (NULLMARKER, OMIT, NOFILE) read nothing of argv.
+
+**Guard rows** (at least): `--json view` and `--json occurrences`, each byte-equal to the flag-after spelling; `occurrences --` and `view --` like `occurrences` and `view`; `view` and `occurrences` without `--json` print their documents (decoded by their adapters); `occurrences --file` (missing value: exit 2, the error document, `null`/`null`); `occurrences extra` (surplus operand: exit 2, the error document); `--json nosuch` (unknown command, JSON in effect by the flag: exit 2, the error document); `nosuch --config --json` (`--config` takes `--json`: unknown command, JSON out of effect, exit 2, stdout empty).
+
+**Checks.** `-t AVAIL` unchanged (the conformer passes T11.2-2, T11.2-4, T11.3-4, T11.4-1, T11.4-3, and T11.4-4; each violator fails exactly its certified tests at the same arms). The usual end-of-task checks.
+
+### Task 6 — CONF-DISC: the 12.0 grammar, arity by name, and `inventory` as a JSON-only surface (D1 (a)–(d), D2 (b))
+
+**Cites.** Part C's requirement and §CONF-DISC's Scope ("`inventory` (11.6) in its full 12.7 document form"); SPEC 12.0, 11.1 (`query edges`), 11.6 (`inventory`, JSON-only). Reviewer D, gap 1 (a)–(d) and gap 2 (b).
+
+**Shortfall.** `parseArgs` (`test/fixtures/conf-disc/product.mjs`, about L1900), the per-command flag sets (`READ_FLAGS` about L1936, `QUERY_FLAGS` about L2157), and `dispatchCommand` (about L2323) read flags only after the command word, and `query`'s subcommand is `argv[0]` of the rest (about L2223). Observed:
+- (a) `--json ids` and `--json build` exit 2;
+- (b) `query --from specs/A.mdx edges` exits 2 ("unknown … subcommand");
+- (c) `ids --json --` and `build --json --` exit 2 ("unknown flag --") where they must answer exit 0;
+- (d) `build --test-hold --json`, `build --base --json`, and `build --name --json` each exit 2 with the error document on stdout: `wantsJson = argv.includes("--json") || argv[0] === "query"` (about L2326) counts a `--json` consumed as a flag's value. JSON must be out of effect there, stdout empty;
+- D2 (b): bare `inventory` prints a human form (`root: . config: xspec.config.ts specs/A.mdx [spec:main] …`) instead of the 12.7 inventory document, and `inventory extra` exits 2 with stdout empty. `inventory` is JSON-only.
+
+**Change.** A reader per 12.0 feeding the dispatch, `query`'s subcommand taken from the non-flag tokens; each command's accepted flags as today; JSON in effect exactly when a `--json` token is read as a flag or the command is `query` or `inventory`; `inventory` answers with its 12.7 document with or without `--json`, and its usage errors with the error document. The fixture's scope refusals (exit 70: `query nodes`, `query edges --kinds`, a `check` on a valid workspace, …; AGENTS.md line 18) stay, decided after the syntax-class checks. Confirm the three switches (DIALECT, SYMLINK, DERIVED) read nothing of argv.
+
+**Guard rows** (at least): reviewer D's (a)–(c) probes, each byte-equal to its canonical spelling (`ids --json`, `build --json`, `query edges --from specs/A.mdx`); (d)'s three probes (exit 2, stdout empty); `inventory` byte-equal to `inventory --json` and decoded by `decodeInventoryDocument`; `inventory extra` (exit 2, the error document, `null`/`null`); `ids -- --json` (`--json` an operand after `--`: exit 2, stdout empty).
+
+**Checks.** `-t DISC` unchanged (the conformer passes T7-4, T7-5, and T7-6; each violator fails exactly its certified tests at the same arms). The CONF-DISC fixture loads `typescript-5.9.3` lazily only for a workspace with a code group; the probe workspace has none. The usual end-of-task checks.
+
+### Task 7 — CONF-VALID: the 12.0 grammar and JSON error delivery (D1 (a)–(c), D2 (a)–(b))
+
+**Cites.** Part C's requirement; SPEC 12.0, 12.7, 14, 11.1 (`query`, JSON-only). Reviewer D, gap 1 (a)–(c) and gap 2 (a)–(b).
+
+**Shortfall.** `parseArgs` (`test/fixtures/conf-valid/product.mjs`, about L1336), `READ_FLAGS` (about L1372), the `query` subcommand dispatch (about L1415), and `dispatchCommand` (about L1494) read flags only after the command word; the usage-error branch (about L1508) writes stderr alone, and `UsageError` (about L103) carries no `code` or `path`. Observed:
+- (a) `--json query nodes` and (b) `query --json nodes` exit 2; (c) `--` is rejected as an unknown flag;
+- D2 (a): `query nodes extra` and `query node specs/A.mdx#a extra` exit 2 with stdout empty, though `query` is JSON-only;
+- D2 (b): `query node` and `query nodes` on a workspace failing 14.4 print human-form findings (exit 1) instead of the 12.7 findings document they print under `--json`.
+
+**Change.** A reader per 12.0 feeding the dispatch (`query`'s subcommand from the non-flag tokens; each command's accepted flags as today, `query nodes` with `--tag`); `UsageError` carrying `code` and `path` — `null`/`null` for a plain usage error, `configuration-error` and SPEC 14's concerned path for every 14.14 the fixture reports; the usage branch printing the error document whenever JSON is in effect; `query` answering in JSON with or without `--json`, its findings report on a failing workspace included. Confirm the three switches (CTRL, WIDE, SEP) read nothing of argv.
+
+**Guard rows** (at least): `--json query nodes` and `query --json nodes`, each byte-equal to `query nodes --json`; `build --json --` like `build --json`; `query nodes extra` and `query node specs/A.mdx#a extra` without `--json` (exit 2, the error document, `null`/`null`); on a second workspace failing 14.4 (a section whose `id` violates SPEC 1.4, as T1.4-1 stages one), `query nodes` and `query node` on a valid identity there, without `--json`, each byte-equal to its `--json` twin (the 12.7 findings document, exit 1 — the gate of 13.3); `build extra --json` (exit 2, the error document); `build --json --config nosuch.ts` (exit 2, `configuration-error`, `path` `nosuch.ts`); `build --test-hold --json` (exit 2, stdout empty).
+
+**Checks.** `-t VALID` unchanged (the conformer passes its twelve in-scope tests, P-1 included; each violator fails exactly its certified tests at the same counterexamples and arms). The usual end-of-task checks.
+
+### Task 8 — CONF-MD: the 12.0 grammar and JSON error delivery (D1 (a)–(c), D2 (a))
+
+**Cites.** Part C's requirement; SPEC 12.0, 12.7, 14, 11.1 (`query`, JSON-only). Reviewer D, gap 1 (a)–(c) and gap 2 (a).
+
+**Shortfall.** `parseArgs` (`test/fixtures/conf-md/product.mjs`, about L1854), `READ_FLAGS` (about L1890), the `query` subcommand dispatch (about L2065), and `dispatchCommand` (about L2147) read flags only after the command word; the usage-error branch (about L2163) writes stderr alone, and `UsageError` (about L140) carries no `code` or `path`. Observed: (a) `--json query nodes` and (b) `query --json nodes` exit 2; (c) `--` is rejected; D2 (a): `query nodes extra` and `query node specs/A.mdx#a extra` exit 2 with stdout empty, and so does `check extra --json`.
+
+**Change.** As Task 7, over CONF-MD's surface (`build`, `check`, and `query node`, `query nodes`, and `query edges` as §CONF-MD's Scope serves them): a reader per 12.0; `UsageError` carrying `code` and `path`; the error document whenever JSON is in effect; every `query` answer in JSON with or without `--json`. Confirm the two switches (CLASS, CR) read nothing of argv.
+
+**Guard rows** (at least): `--json query nodes` and `query --json nodes`, each byte-equal to `query nodes --json`; `build --json --` like `build --json`; `query nodes extra` and `query node specs/A.mdx#a extra` without `--json` (exit 2, the error document, `null`/`null`); `check extra --json` (exit 2, the error document); `query node specs/A.mdx#a` and `query edges` without `--json`, each byte-equal to its `--json` twin; `build --test-hold --json` (exit 2, stdout empty).
+
+**Checks.** `-t MD` unchanged (the conformer passes T3-1 through T3-6, P-2, and P-3; VIOL-MD-CLASS and VIOL-MD-CR fail exactly their certified tests at the same counterexamples and arms). The usual end-of-task checks.
+
+### Task 9 — CONF-CORE: the 12.0 grammar (D1 (a)–(c))
+
+**Cites.** Part C's requirement and §CONF-CORE's Scope ("each behaving per 12.0"; `--test-hold` refused "by non-mutating commands as an unknown flag of the syntax class (12.0, T13.5-1)"; acquisition before the argument checks of 12.0, T13.5-8); SPEC 12.0, 13.5, 6.6. Reviewer D, gap 1 (a)–(c).
+
+**Shortfall.** `parseArgs` (`test/fixtures/conf-core/product.mjs`, about L2045) reads each command's flags only after its command word, against `READ_FLAGS` and `MUTATING_FLAGS` (about L2080); `dispatchCommand` (about L3608) takes `argv[0]` as the command; the `query` and `review` subcommand dispatches take `argv[0]` of the rest (about L2450 and L3452); and VIOL-CORE-CHATTYREADS's `isChattyReadInvocation` (about L3555) reads `argv[0]` and `argv[1]`. Observed:
+- (a) `--json ids` and `--config xspec.config.ts ids` exit 2 ("unknown command"); `--test-hold h rename specs/A.mdx a b` exits 2 ("unknown command --test-hold");
+- (b) `query --json nodes` and `review --json list` exit 2 ("unknown … subcommand");
+- (c) `--` is rejected as an unknown flag: `ids --json --` and `build --json --` must answer exit 0.
+`wantsJson = argv.includes("--json")` (about L3609) also counts a `--json` consumed as a flag's value.
+
+**Change.**
+- A reader per 12.0 for the whole served surface — `build`, `check`, `ids`, `show`, `query` (its served subcommands), `coverage`, `impact`, `rename`, file-form `move`, and `review` (its served subcommands) — feeding the dispatch: command, subcommand, and operands from the non-flag tokens; each command's accepted flags as today (`--test-hold` for the mutating commands alone — `rename`, `move`, and the mutating `review` subcommands — refused beside `--preview` as the syntax-class error, an unknown flag on every other command); JSON in effect exactly when a `--json` token is read as a flag (Task 10 adds the JSON-only surfaces and the error document).
+- Keep 12.0's and 13.5's order: every syntax-class error is decided from the arguments alone, before configuration is loaded and before acquisition or the hold; acquisition and the hold still precede the argument checks that consult the workspace (a nonexistent old ID), baseline resolution, and the gate (T13.5-8).
+- `isChattyReadInvocation` reads the parsed command and subcommand. The other seven switches (NOLOCK, LATELOCK, STALELOCK, EARLYWRITE, PARTIALWRITE, PERSISTREADS, EARLYREFRESH) act in the mutating scaffold and the read paths: confirm each still deviates at its point.
+
+**Guard rows** (at least): `--json ids` and `--config xspec.config.ts ids`, each byte-equal to its flag-after spelling; `query --json nodes` and `review --json list`, each byte-equal to `query nodes --json` and `review list --json`; `ids --json --` and `build --json --` like `ids --json` and `build --json`; `ids -- --json` (`--json` an operand after `--`: exit 2, stdout empty); `--test-hold h rename specs/A.mdx a b`, held (start it, wait for `h`, release it; it then performs the rename, exit 0, as `rename specs/A.mdx a b --test-hold h` does — check the identity changed); `build --test-hold --json` (exit 2, stdout empty, no `h`); `ids --test-hold h` (exit 2, no `h`). For an exit-2 row with JSON in effect, assert the exit code and the hold-file outcome only; Task 10 adds its standard output.
+
+**Checks.** `-t CORE` unchanged (the conformer passes its nine in-scope tests; each of the eight violators fails exactly its certified tests at the same arms). The usual end-of-task checks.
+
+### Task 10 — CONF-CORE: the exit-2 error document and the JSON-only surfaces (D2 (a)–(b))
+
+**Depends on.** Task 9.
+
+**Cites.** Part C's requirement and §CONF-CORE's Scope (the gate reporting "in the form of 14/12.7, exit 1"); SPEC 12.0's JSON-in-effect rule, 12.7's error document, 14 (stable codes and concerned paths), 11.1 and 10.7 (`query` and `review export`, JSON-only). Reviewer D, gap 2 (a)–(b) and its "why it matters": T13.5-1's `build --test-hold --json` arm (exit 2, stdout empty) passes against CONF-CORE today only because the fixture never prints an error document.
+
+**Shortfall.** The usage-error branch of `dispatchCommand` (`test/fixtures/conf-core/product.mjs`, about L3638) writes stderr alone, and `UsageError` (about L91) carries no `code` or `path`. Observed, each exiting 2 with stdout empty:
+- with `--json` read as a flag: `ids extra --json`; `ids --json --json`; `ids --json --config` (missing value); `ids --json --config=x`; `ids --json --config --json` (a configuration error: `configuration-error`, its path `--json` as given); `impact --base main --json` (the git-less unreadable baseline);
+- on JSON-only surfaces without `--json`: `query nodes extra`; `query node specs/A.mdx#zz`; `review export nope`; `review export s extra`.
+And D2 (b): `query nodes` on CONF-CORE's in-scope failing workspace (a second spec source beginning with U+FEFF) prints `specs/B.mdx: 14.20: unparseable source: …` (exit 1) instead of the 12.7 findings document it prints under `--json`.
+
+**Change.**
+- `UsageError` carries `code` and `path`. Every exit-2 path in the fixture's scope carries the right pair: `null`/`null` for a plain usage error (an unknown command, subcommand, flag, name, session, or identity; a surplus operand; a missing value; a repeated flag; `--test-hold` beside `--preview`; the git-less unreadable baseline; 13.5's exclusivity and hold-file errors), `configuration-error` with SPEC 14's concerned path for 14.14, and `write-failure` or `read-failure` with SPEC 14's concerned path wherever the fixture reports 14.24 or 14.25.
+- The usage branch prints the 12.7 error document as the entire standard output whenever JSON is in effect; stderr content is unchanged.
+- `query` (every served subcommand) and `review export` are JSON-only: every answer — the gate's findings report on a failing workspace included — and every usage error on them is JSON with or without `--json`.
+- Exit-1 outputs other than these are outside this task.
+
+**Guard rows** (at least): each probe above, with the error document's `code` and `path` asserted; `query nodes` and `query node specs/A.mdx#a` on the U+FEFF workspace (staged as §CONF-CORE stages it: built valid first, then the second source added), each without `--json` and byte-equal to its `--json` twin (exit 1, the findings document) — the source added after an invocation must be a staged-source record (the undeclared-staging guard refuses a plain `.mdx` there), so reuse T13.5-8's (`T13_5_8_BOM` in `test/suite/registry/section-13.5.ts`, declared `"unparseable"`): export it and add the guard to its label, one record per byte sequence; `review export` on an existing audit session without `--json`, byte-equal to its `--json` twin; Task 9's exit-2 rows gain their standard output (`ids --test-hold h --json`: the error document, `null`/`null`; `build --test-hold --json`: still empty).
+
+**Checks.** `-t CORE` unchanged: in particular T13.5-1's `build --test-hold --json` arm still passes against the conformer, now because `--json` is read as `--test-hold`'s value. The usual end-of-task checks.
+
+### Final
+
+### Task 11 — Confirm locally and in CI; delete this plan
+
+**Depends on.** Every task above.
+
+**Change.**
+- Under the namespace, run the full self project alone: expect 0 failures. Update AGENTS.md's self-project counts (26 files and 4206 tests at cc21726; Task 3 adds vectors, Task 4 a file, Tasks 4–10 guard tests) and its certification totals (still 6 conformers and 21 violators, 27 fixtures, every one passing: 154 PASS / 38 FAIL / 0 error / 0 hang).
+- Then run the suite project against the built product, alone, inside CI's inner stage (network off, uid 1000, no capabilities; AGENTS.md's namespace bullet). Every failure must be a diagnosed product failure (`HarnessAssertionError`). List each failing test with its first failing arm in the commit message and compare the list with the 28 IDs in the Preamble: say which tests changed outcome and why (T4-4 joins them only if Task 1's hand-probe showed the product contradicting SPEC; T14-7 still fails at its first arm).
+- Check CI on the pushed head: the harness-self job and the Windows leg are green, and the full-suite job fails only on diagnosed product tests. VERIFY found that `gh api` reaches the runs, jobs, check-runs, pulls, and branches endpoints but not the log download's redirect, and that the GitHub MCP tool `get_job_logs` (with `return_content: false`) returns a signed blob URL that `curl` fetches through the proxy once each `&amp;` in it is turned into `&`. AGENTS.md's CI-reading bullet (line 36) says the shell cannot reach api.github.com: confirm VERIFY's finding and correct the bullet.
+- Record S-2's tower-vector timing in AGENTS.md's staged-scale bullet if it moved materially.
+- Delete `specs/tmp/FIX_PLAN.md` with `git rm` once no other task remains in it, under the Preamble's "Deleting this plan" rule: if the permission system refuses, stop and report the refusal — never move, rename, or empty the file.
