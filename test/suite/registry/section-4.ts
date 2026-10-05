@@ -1292,14 +1292,33 @@ const T4_3 = defineProductTest({
 
 const T4_4_SPEC_SOURCE = '<S id="a">\nAlpha behavior.\n</S>\n';
 
-// Both type-only forms (SPEC 4: a `type` modifier on the declaration, and on
-// a named binding), then the exact statements that under ordinary bindings
-// are a marker and an embedding `text` call. Bindings introduced type-only
-// are type-level names: these value-level uses fall under no condition and
-// record nothing.
+// The two type-only arms (SPEC 4: a `type` modifier on the declaration, and
+// on a named binding), each followed by the exact statements that under
+// ordinary bindings are a marker and an embedding `text` call. Bindings
+// introduced type-only are type-level names: these value-level uses fall
+// under no condition — not 14.8, not 14.18 — and record nothing (SPEC 4.5).
+//
+// The named-binding arm (`src/typeonly.ts`): `t` is bound type-only by the
+// `type` modifier on the named binding `{ type text as t }`, and `SPEC` is
+// itself bound type-only, by a second declaration `import type SPEC …`
+// beside it — so callee and argument are both rooted at type-only bindings.
 const T4_4_TYPE_ONLY_SOURCE = [
   'import type SPEC from "../specs/A.xspec";',
   'import { type text as t } from "../specs/A.xspec";',
+  "",
+  "SPEC.a;",
+  "t(SPEC.a);",
+  "",
+].join("\n");
+
+// The declaration-modifier arm (`src/typeonly-decl.ts`): `SPEC` is bound
+// type-only by the `type` modifier on its declaration, while `t` is bound by
+// an ordinary `import { text as t } …` beside it — two declarations of one
+// module binding distinct identifiers, valid under SPEC 4 — so an ordinary
+// `text` callee receives a chain rooted at a type-only binding.
+const T4_4_TYPE_ONLY_DECL_SOURCE = [
+  'import type SPEC from "../specs/A.xspec";',
+  'import { text as t } from "../specs/A.xspec";',
   "",
   "SPEC.a;",
   "t(SPEC.a);",
@@ -1326,38 +1345,58 @@ const T4_4 = defineProductTest({
       {
         "specs/A.mdx": T4_4_SPEC_SOURCE,
         "src/typeonly.ts": T4_4_TYPE_ONLY_SOURCE,
+        "src/typeonly-decl.ts": T4_4_TYPE_ONLY_DECL_SOURCE,
         "src/control.ts": T4_4_CONTROL_SOURCE,
       },
       async (workspace) => {
-        // The workspace stays valid: the type-only forms and their
+        // The workspace stays valid: both type-only arms and their
         // value-level uses trigger no xspec finding — not 14.8, not 14.18,
         // none at all (findings are exit-1 outcomes, SPEC 12.0).
         await buildOk(
           product,
           workspace,
           "T4-4 `build` with type-only spec module imports and value-level " +
-            "uses rooted at them",
+            "uses rooted at them — the declaration-modifier arm " +
+            "(`src/typeonly-decl.ts`: an ordinary `text` callee given a chain " +
+            "rooted at the type-only default binding) and the named-binding " +
+            "arm (`src/typeonly.ts`: callee and argument both rooted at " +
+            "type-only bindings)",
         );
         await expectExit(
           product,
           workspace,
           ["check"],
           0,
-          "T4-4 `check` over the same workspace (valid — the consumer-side " +
-            "TypeScript error is outside xspec's validations, SPEC 4.5)",
+          "T4-4 `check` over the same workspace, both type-only arms " +
+            "(declaration-modifier and named-binding) staged (valid — the " +
+            "consumer-side TypeScript error is outside xspec's validations, " +
+            "SPEC 4.5)",
         );
 
-        // No edge leaves the type-only file, however attributed.
-        assertEdgeSetEqual(
-          await queryEdgesFrom(product, workspace, "src/typeonly.ts", "T4-4"),
-          [],
-          "T4-4 statements rooted at type-only bindings record no edge " +
-            "(SPEC 4, 4.5)",
-        );
+        // No edge leaves either type-only file, however attributed.
+        for (const [file, arm] of [
+          [
+            "src/typeonly-decl.ts",
+            "the declaration-modifier arm — an ordinary `text` callee " +
+              "receiving a chain rooted at the type-only default binding",
+          ],
+          [
+            "src/typeonly.ts",
+            "the named-binding arm — callee and argument both rooted at " +
+              "type-only bindings",
+          ],
+        ] as const) {
+          assertEdgeSetEqual(
+            await queryEdgesFrom(product, workspace, file, "T4-4"),
+            [],
+            `T4-4 ${arm}: statements rooted at type-only bindings record no ` +
+              "edge (SPEC 4, 4.5)",
+          );
+        }
 
         // The control records exactly its two edges — and the workspace-wide
-        // per-kind sets pin that the type-only file contributed to neither
-        // kind anywhere in the graph.
+        // per-kind sets pin that neither type-only file contributed to
+        // either kind anywhere in the graph.
         for (const [kind, meaning] of [
           ["references", "the bare marker `SPEC.a` (SPEC 4.5)"],
           ["embeds", "the `text` call `t(SPEC.a)` (SPEC 4.3)"],
@@ -1376,12 +1415,13 @@ const T4_4 = defineProductTest({
             [{ from: "src/control.ts", to: "specs/A.mdx#a", kind }],
             `${label}: the workspace's complete \`${kind}\` edge set is the ` +
               `control file's edge from ${meaning} — the identical statement ` +
-              "under type-only bindings recorded nothing",
+              "under type-only bindings recorded nothing, in either arm " +
+              "(declaration-modifier or named-binding)",
           );
         }
 
         // Under standard tooling (SPEC 13.1): the control compiles clean,
-        // grounding the generated module and its skeleton; the type-only
+        // grounding the generated module and its skeleton; each type-only
         // file's value-level uses are consumer-side TypeScript errors at the
         // references under test — outside xspec's validations (SPEC 4.5).
         const control = await ConsumerProject.load({
@@ -1400,18 +1440,74 @@ const T4_4 = defineProductTest({
           typeOnly,
           typeOnly.locate("src/typeonly.ts", "SPEC.a;"),
           {},
-          "T4-4 the marker-shaped statement rooted at the type-only default " +
-            "binding — a value-level use of a type-level name is the " +
-            "consumer's TypeScript error (SPEC 4, 4.5)",
+          "T4-4 named-binding arm: the marker-shaped statement rooted at the " +
+            "type-only default binding — a value-level use of a type-level " +
+            "name is the consumer's TypeScript error (SPEC 4, 4.5)",
         );
         assertCompileErrorAt(
           typeOnly,
           typeOnly.locate("src/typeonly.ts", "t(SPEC.a);"),
           {},
-          "T4-4 the call rooted at the type-only `text` binding — a " +
-            "value-level use of a type-level name is the consumer's " +
+          "T4-4 named-binding arm: the call rooted at the type-only `text` " +
+            "binding — a value-level use of a type-level name is the " +
+            "consumer's TypeScript error (SPEC 4, 4.5)",
+        );
+
+        // The declaration-modifier arm: the callee `t` is an ordinary
+        // binding, so the consumer's errors sit at `SPEC` — in the
+        // marker-shaped statement and inside the call's argument — and none
+        // covers the callee (grounding that the fixture binds `t` ordinarily,
+        // as the arm requires).
+        const typeOnlyDecl = await ConsumerProject.load({
+          rootDir: workspace.root,
+          rootFiles: ["src/typeonly-decl.ts"],
+        });
+        assertCompileErrorAt(
+          typeOnlyDecl,
+          typeOnlyDecl.locate("src/typeonly-decl.ts", "SPEC.a;"),
+          {},
+          "T4-4 declaration-modifier arm: the marker-shaped statement " +
+            "rooted at the type-only default binding — a value-level use of " +
+            "a type-level name is the consumer's TypeScript error (SPEC 4, 4.5)",
+        );
+        assertCompileErrorAt(
+          typeOnlyDecl,
+          typeOnlyDecl.locate("src/typeonly-decl.ts", "t(SPEC.a);", {
+            charOffset: 2,
+          }),
+          {},
+          "T4-4 declaration-modifier arm: the ordinary `text` call's " +
+            "argument rooted at the type-only default binding — the " +
+            "value-level use of `SPEC` inside the call is the consumer's " +
             "TypeScript error (SPEC 4, 4.5)",
         );
+        const callee = typeOnlyDecl.locate(
+          "src/typeonly-decl.ts",
+          "t(SPEC.a);",
+        );
+        const calleeErrors = typeOnlyDecl
+          .errors()
+          .filter(
+            (diagnostic) =>
+              diagnostic.file === callee.file &&
+              diagnostic.start !== undefined &&
+              diagnostic.start.offset <= callee.offset &&
+              callee.offset <
+                diagnostic.start.offset + Math.max(diagnostic.length ?? 1, 1),
+          );
+        if (calleeErrors.length > 0) {
+          fail(
+            "T4-4 declaration-modifier arm: the callee `t` is bound by an " +
+              "ordinary `import { text as t } …` and the control's identical " +
+              "call compiled clean, so no consumer error may cover it — the " +
+              "fixture does not realize the arm. Errors at " +
+              `the callee:\n${calleeErrors
+                .map(
+                  (diagnostic) => `  ${formatConsumerDiagnostic(diagnostic)}`,
+                )
+                .join("\n")}`,
+          );
+        }
       },
     );
   },

@@ -79,7 +79,7 @@ Why the harness changes again: the documents moved after the harness was last gr
 - *From the second plan's task notes.* T13.4-10's correction judge (`judgeManualDeletionCorrection`) matches wording, so it can over-reject some explanations (e.g. "rebuilding would remove it only if…"); reviewer B found it compliant at cc21726.
 
 **Order.** Tasks are in dependency order; take the topmost task unless told otherwise. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement. When a task is done, its commit removes it and adds a one-line summary to its bullet here.
-- Part A (Tasks 1–2): the T-numbered tests, in TEST-SPEC order — T4-4's declaration-modifier arm (A1), and T14-7's two spelled `refused-invalid-id` command lines (B1). Independent of each other and of Parts B and C.
+- Part A (Tasks 1–2): the T-numbered tests, in TEST-SPEC order — T4-4's declaration-modifier arm (A1), and T14-7's two spelled `refused-invalid-id` command lines (B1). Independent of each other and of Parts B and C. Task 1 done (A1): T4-4 now stages the declaration-modifier arm's `src/typeonly-decl.ts` (an ordinary `t` beside `import type SPEC`) before its first invocation and asserts `build`/`check` exit 0 over both arms, no edge from the new file, and the workspace-wide `references`/`embeds` sets unchanged, plus consumer-side grounding (errors at both `SPEC` uses, none at the callee); it passes against the built product, and a stand-in injecting an `embeds` edge from the new file fails it at the per-file and the workspace-wide assertions.
 - Part B (Task 3): H-11 — a failure of the driver's in-run evaluation (T6.5-22(a)'s check) is a harness error, never a diagnosed product failure (C1). Independent of Parts A and C.
 - Part C (Tasks 4–10): the certification fixtures' invocation grammar and JSON error delivery (D1, D2). Task 4 creates the guard self-test that every later Part C task extends, so it goes first. Tasks 5–9 depend on Task 4 alone; Task 10 also depends on Task 9.
 - Task 11 confirms the result and deletes this plan. It depends on every task above.
@@ -87,27 +87,6 @@ Why the harness changes again: the documents moved after the harness was last gr
 ## Tasks
 
 ### Part A — the T-numbered tests
-
-### Task 1 — T4-4's declaration-modifier arm (A1)
-
-**Cites.** TEST-SPEC §4, T4-4 (L153): "in the declaration-modifier arm `t` is bound by an ordinary `import { text as t } from "./NAME.xspec"` beside the type-only default binding (two declarations of one module binding distinct identifiers, valid under 4), so an ordinary `text` callee receives a chain rooted at a type-only binding; in the named-binding arm `SPEC` is itself bound type-only, by a second declaration `import type SPEC from "./NAME.xspec"` beside the `{ type text as t }` one". In both arms the marker-shaped `SPEC.a` and the call `t(SPEC.a)` "record no edge (`query edges` reports none from the file) and trigger no xspec finding — not 14.8 and not 14.18 … — and `build`/`check` exit 0". SPEC 4, 4.5, 14.18. Reviewer A, gap 1: the clause landed at 3c5b757 (Phase 6 item O1) and was never implemented.
-
-**Shortfall.** `T4_4` in `test/suite/registry/section-4.ts` (the T4-4 block, about L1290–1418) stages one type-only file, `src/typeonly.ts` (`T4_4_TYPE_ONLY_SOURCE`: `import type SPEC …;`, `import { type text as t } …;`, `SPEC.a;`, `t(SPEC.a);`) — the named-binding arm alone. No file anywhere in the suite binds `t` through an ordinary import beside a type-only default binding (T5.7-4, T6.5-1, and T6.5-18 stage other shapes). So a product that records an `embeds` edge for an ordinary `t` whose argument is rooted at a type-only binding passes T4-4, and so does one that reports 14.8 or 14.18 for that call.
-
-**Change.**
-- Stage the declaration-modifier arm's code file in T4-4's workspace, beside `src/typeonly.ts` and `src/control.ts` and before the body's first invocation — e.g. `src/typeonly-decl.ts`, holding `import type SPEC from "../specs/A.xspec";`, then `import { text as t } from "../specs/A.xspec";`, a blank line, `SPEC.a;`, and `t(SPEC.a);`, newline-terminated (the workspace's `../specs/A.xspec` specifier where TEST-SPEC writes `./NAME.xspec`, as the existing arm spells it).
-- Assert, beside the existing assertions:
-  - `build` and `check` still exit 0 over the workspace. The existing `buildOk` and `expectExit(… ["check"], 0 …)` cover the whole workspace and run first, so a 14.8 or 14.18 on the new file fails there; make their labels name both arms.
-  - `queryEdgesFrom(product, workspace, "src/typeonly-decl.ts", …)` reports no edge, as for `src/typeonly.ts`.
-  - The workspace-wide `query edges --kinds references` and `--kinds embeds` sets still hold only `src/control.ts`'s edge each (the existing loop, unchanged; it now also pins that the new file contributed to neither kind).
-- Comments name the two arms: `T4_4_TYPE_ONLY_SOURCE` is the named-binding arm (its comment now says "Both type-only forms"), the new constant the declaration-modifier arm. The title already names both modifiers and may stay.
-- Optional, as reviewer A notes: mirror the consumer-side compile-error grounding for the new file, after the xspec assertions. In this arm the callee `t` is an ordinary binding, so the TypeScript errors sit at `SPEC.a;` and at `SPEC` inside `t(SPEC.a)`, not at the callee; locate them so. TEST-SPEC places the consumer's TypeScript error outside xspec's validations, so this grounds the fixture and asserts nothing about the product.
-
-**Checks.**
-- S-9: the new file is a TypeScript code source staged before the first invocation, so it needs no record; the self project's well-formedness judgement must accept it.
-- T4-4 against the built product (it passes at cc21726). If it fails after the change, hand-probe the new arm in a scratch workspace (`build --json`, `check --json`, `query edges --from src/typeonly-decl.ts --json`; AGENTS.md's hand-staging recipe) and count it a diagnosed product failure only if the product's answer contradicts SPEC 4, 4.5, or 14.18. A harness error is a defect to fix here.
-- Red check: through AGENTS.md's stand-in wrapper, a mode that injects an `embeds` edge from `src/typeonly-decl.ts` to `specs/A.mdx#a` into the `query edges --from src/typeonly-decl.ts` answer must fail T4-4 at the new arm's assertion, and a mode injecting it into the `--kinds embeds` answer alone must fail it at the workspace-wide set. The unmodified product's outcome is the one recorded above.
-- The usual end-of-task checks (Preamble).
 
 ### Task 2 — T14-7's two spelled `refused-invalid-id` command lines (B1)
 
