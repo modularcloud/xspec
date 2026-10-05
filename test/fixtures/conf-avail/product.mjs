@@ -27,6 +27,13 @@
 //   11.3) and `--file`/`--to` — each answering in the form-exact 12.7
 //   document forms. `at` (the 11.2 preamble's third surface) is NOT served:
 //   no in-scope staging drives it (the scope's stated staging constraint).
+//   Arguments are read under the invocation grammar of 12.0, as every
+//   conformer reads them (CERTIFICATIONS.md preamble; `readInvocation`):
+//   flag tokens anywhere, each flag's arity fixed by its name across every
+//   command, `--` ending flag reading, a surplus operand a usage error, and
+//   — both surfaces being JSON-only — every usage error the 12.7 error
+//   document. Every other product command, `at` included, is a fixture
+//   scope error (exit 70, outside the 12.0 partition), never an answer.
 // - Contracts under certification: the availability rules of 11.2 —
 //   parse-local structure and positional trees (a section inside an invalid
 //   non-section element parenting to the innermost enclosing SECTION
@@ -172,6 +179,14 @@ class UsageError extends Error {
   }
 }
 
+/**
+ * An invocation outside §CONF-AVAIL's scope — a product command other than
+ * `view` and `occurrences`, or a staging the fixture does not analyze: exit
+ * 70, outside SPEC 12.0's partition, a fixture-side condition and never a
+ * product verdict.
+ */
+class ScopeError extends Error {}
+
 /** See the module header for the three switches and their hook points. */
 let deviations = {};
 
@@ -258,9 +273,12 @@ async function findConfigPath(cwd, configFlag) {
   if (configFlag !== undefined) {
     const abs = path.resolve(cwd, configFlag);
     if (!(await pathOccupied(abs))) {
+      // A `--config` path nothing occupies — the one concerned path no
+      // physical resolution can spell — is reported as the argument value
+      // exactly as given (SPEC 14, 12.0).
       throw new UsageError(
         `configuration file not found: --config ${configFlag}`,
-        { code: "configuration-error", path: anchoringPath(cwd, abs) },
+        { code: "configuration-error", path: configFlag },
       );
     }
     return abs;
@@ -2365,47 +2383,139 @@ function domainFindings(ws, domain) {
 }
 
 // ---------------------------------------------------------------------------
-// Argument parsing (SPEC 12.0)
+// Invocation grammar (SPEC 12.0)
 // ---------------------------------------------------------------------------
 
+const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
+
 /**
- * Parse flags per command. `flagSpec` maps flag names to "bool" | "value";
- * unknown and repeated flags are usage errors (SPEC 12.0).
+ * Every flag of every command with its arity, fixed by name (SPEC 12.0): 1
+ * for a flag taking the whole next token as its value, 0 for one taking
+ * none — the flags the synopses and defining sections name (6, 8, 9, 10.7,
+ * 11, 12, 13.5). A `--` token naming no flag of any command takes no value.
  */
-function parseArgs(argv, flagSpec, positionalRange) {
-  const flags = {};
-  const positionals = [];
+const FLAG_ARITY = new Map([
+  ["--json", 0],
+  ["--preview", 0],
+  ["--tree", 0],
+  ["--text", 0],
+  ["--check", 0],
+  ["--unreferenced", 0],
+  ["--config", 1],
+  ["--test-hold", 1],
+  ["--file", 1],
+  ["--to", 1],
+  ["--from", 1],
+  ["--kinds", 1],
+  ["--group", 1],
+  ["--tag", 1],
+  ["--coverage", 1],
+  ["--base", 1],
+  ["--strategy", 1],
+  ["--name", 1],
+  ["--status", 1],
+  ["--note", 1],
+]);
+
+/** Every command of the product (12): `view` and `occurrences` are served. */
+const PRODUCT_COMMANDS = new Set([
+  "build",
+  "check",
+  "ids",
+  "show",
+  "coverage",
+  "impact",
+  "review",
+  "query",
+  "occurrences",
+  "view",
+  "at",
+  "inventory",
+  "rename",
+  "move",
+  "version",
+]);
+
+/**
+ * The flags each served command accepts (SPEC 12.0): its synopsis's (11.4,
+ * 11.3) plus the global `--json` and `--config`. Neither command is mutating
+ * (13.5), so `--test-hold` is an unknown flag of both — still value-taking,
+ * its arity fixed by name in `FLAG_ARITY`.
+ */
+const COMMAND_FLAGS = {
+  view: new Set(["--json", "--config", "--file", "--text"]),
+  occurrences: new Set(["--json", "--config", "--file", "--to"]),
+};
+
+/**
+ * An argument value is malformed when it is not valid UTF-8 or contains
+ * U+FFFD (SPEC 12.0); Node decodes argv lossily, an ill-formed byte arriving
+ * as U+FFFD, so the one test covers both.
+ */
+function isMalformedValue(value) {
+  return value.includes(REPLACEMENT_CHARACTER);
+}
+
+/**
+ * Read the arguments under the grammar of SPEC 12.0: flag tokens anywhere —
+ * before the command word, between it and its operands, or after them — a
+ * value-taking flag taking the whole next token, whatever it looks like, and
+ * `--` ending flag reading (dropped; every later token a non-flag token).
+ * Returns the flags (name to value, `true` for a flag taking none), the
+ * remaining non-flag tokens in order — the command, then its operands —
+ * whether a `--json` token was read as a flag (never as another flag's
+ * value), and the first syntax-class error met, if any.
+ */
+function readInvocation(argv) {
+  const flags = new Map();
+  const words = [];
+  let json = false;
+  let error = null;
+  const note = (message) => {
+    if (error === null) error = message;
+  };
+  let flagsEnded = false;
   for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg.startsWith("--")) {
-      const kind = flagSpec[arg];
-      if (kind === undefined)
-        throw new UsageError(`unknown flag ${arg} (SPEC 12.0)`);
-      if (Object.hasOwn(flags, arg)) {
-        throw new UsageError(
-          `repeated flag ${arg}: a flag may be given at most once (SPEC 12.0)`,
+    const token = argv[i];
+    if (!flagsEnded && token === "--") {
+      flagsEnded = true;
+      continue;
+    }
+    if (!flagsEnded && token.startsWith("--")) {
+      if (token === "--json") json = true;
+      if (flags.has(token)) {
+        note(
+          `repeated flag ${token}: a flag may be given at most once (SPEC 12.0)`,
         );
       }
-      if (kind === "bool") {
-        flags[arg] = true;
+      if (FLAG_ARITY.get(token) === 1) {
+        if (i + 1 >= argv.length) {
+          note(`flag ${token} lacks its value (SPEC 12.0)`);
+          flags.set(token, true);
+        } else {
+          i += 1;
+          const value = argv[i];
+          if (isMalformedValue(value)) {
+            note(
+              `malformed value for ${token}: not valid UTF-8, or containing U+FFFD (SPEC 12.0)`,
+            );
+          }
+          flags.set(token, value);
+        }
       } else {
-        const value = argv[i + 1];
-        if (value === undefined)
-          throw new UsageError(`missing value for ${arg} (SPEC 12.0)`);
-        flags[arg] = value;
-        i += 1;
+        if (!FLAG_ARITY.has(token)) note(`unknown flag ${token} (SPEC 12.0)`);
+        flags.set(token, true);
       }
-    } else {
-      positionals.push(arg);
+      continue;
     }
+    if (isMalformedValue(token)) {
+      note(
+        "malformed argument: not valid UTF-8, or containing U+FFFD (SPEC 12.0)",
+      );
+    }
+    words.push(token);
   }
-  const [min, max] = positionalRange;
-  if (positionals.length < min || positionals.length > max) {
-    throw new UsageError(
-      `expected ${min === max ? String(min) : `${String(min)}-${String(max)}`} argument(s), got ${String(positionals.length)} (SPEC 12.0)`,
-    );
-  }
-  return { flags, positionals };
+  return { flags, words, json, error };
 }
 
 // ---------------------------------------------------------------------------
@@ -2503,17 +2613,14 @@ function occurrenceDoc(ws, occurrence) {
   };
 }
 
-async function commandView(io, cwd, argv) {
-  const { flags, positionals } = parseArgs(
-    argv,
-    {
-      "--json": "bool",
-      "--config": "value",
-      "--text": "bool",
-      "--file": "value",
-    },
-    [0, Number.POSITIVE_INFINITY],
-  );
+/**
+ * `view` (SPEC 11.4) over a read invocation: `flags` maps each given flag —
+ * every one accepted by `view` — to its value (`true` for `--json` and
+ * `--text`), and `positionals` are the `<file>` operands, any number.
+ */
+async function commandView(io, cwd, flags, positionals) {
+  // Operands beside `--file`: a usage error of the syntax class, decided
+  // from the arguments alone, before configuration is loaded (SPEC 12.0).
   if (positionals.length > 0 && flags["--file"] !== undefined) {
     throw new UsageError(
       "`view` takes `<file>` operands or `--file`, not both (SPEC 11.4, 12.0)",
@@ -2594,17 +2701,17 @@ async function commandView(io, cwd, argv) {
 // `xspec occurrences` (SPEC 11.3)
 // ---------------------------------------------------------------------------
 
-async function commandOccurrences(io, cwd, argv) {
-  const { flags } = parseArgs(
-    argv,
-    {
-      "--json": "bool",
-      "--config": "value",
-      "--file": "value",
-      "--to": "value",
-    },
-    [0, 0],
-  );
+/**
+ * `occurrences` (SPEC 11.3) over a read invocation: `flags` maps each given
+ * flag — every one accepted by `occurrences` — to its value (`true` for
+ * `--json`), and `operands` must be empty: the synopsis admits none.
+ */
+async function commandOccurrences(io, cwd, flags, operands) {
+  if (operands.length > 0) {
+    throw new UsageError(
+      `surplus operand ${operands[0]}: \`occurrences\` takes no operands (SPEC 11.3, 12.0)`,
+    );
+  }
   const ws = await loadWorkspace(cwd, flags["--config"]);
 
   // The consulted domain (SPEC 11.3): the entire discovered set, or the
@@ -2624,8 +2731,8 @@ async function commandOccurrences(io, cwd, argv) {
   if (restriction !== undefined) {
     for (const rel of ws.codeSources) {
       if (globMatches(restriction, rel)) {
-        throw new Error(
-          `§CONF-AVAIL scope breach: --file ${restriction} admits the code source ${rel}, whose occurrences this fixture does not analyze`,
+        throw new ScopeError(
+          `--file ${restriction} admits the code source ${rel}, whose occurrences this fixture does not analyze (CERTIFICATIONS.md §CONF-AVAIL)`,
         );
       }
     }
@@ -2685,26 +2792,46 @@ export async function runXspec(argv, cwd, options = {}) {
   return await dispatchCommand(io, cwd, argv);
 }
 
-/** Dispatch one parsed invocation and map its outcome to SPEC 12.0's codes. */
+/**
+ * Read one invocation under the grammar of SPEC 12.0, dispatch it, and map
+ * its outcome to 12.0's codes. Every syntax-class error is decided from the
+ * arguments alone, before configuration is loaded (12.0).
+ */
 async function dispatchCommand(io, cwd, argv) {
-  const command = argv[0];
-  // The served surfaces are JSON-only (SPEC 11): JSON output is in effect
-  // for them whatever the arguments, so their usage errors emit the single
-  // 12.7 error document; an unknown command emits it only under `--json`.
+  const invocation = readInvocation(argv);
+  const [command, ...operands] = invocation.words;
+  // JSON output is in effect when a `--json` token is read as a flag — not
+  // as another flag's value — or when the invoked surface is JSON-only
+  // (SPEC 12.0): both served surfaces are (11), so their every answer and
+  // usage error is JSON, with or without `--json`; for an unknown command,
+  // or none, the flag alone decides.
   const jsonInEffect =
-    command === "view" || command === "occurrences" || argv.includes("--json");
+    invocation.json || command === "view" || command === "occurrences";
   try {
-    const rest = argv.slice(1);
-    switch (command) {
-      case "view":
-        return await commandView(io, cwd, rest);
-      case "occurrences":
-        return await commandOccurrences(io, cwd, rest);
-      default:
-        throw new UsageError(
-          `unknown command ${String(command)} (SPEC 12.0; this fixture's surface is view and occurrences, CERTIFICATIONS.md §CONF-AVAIL)`,
-        );
+    if (command === undefined) {
+      throw new UsageError("expected a command (SPEC 12.0)");
     }
+    if (!PRODUCT_COMMANDS.has(command)) {
+      throw new UsageError(
+        `unknown command ${command} (SPEC 12.0; this fixture's surface is view and occurrences, CERTIFICATIONS.md §CONF-AVAIL)`,
+      );
+    }
+    const accepted = COMMAND_FLAGS[command];
+    if (accepted === undefined) {
+      throw new ScopeError(
+        `the ${command} command is outside this fixture's surface: view and occurrences alone (CERTIFICATIONS.md §CONF-AVAIL)`,
+      );
+    }
+    if (invocation.error !== null) throw new UsageError(invocation.error);
+    for (const name of invocation.flags.keys()) {
+      if (!accepted.has(name)) {
+        throw new UsageError(`unknown flag ${name} for ${command} (SPEC 12.0)`);
+      }
+    }
+    const flags = Object.fromEntries(invocation.flags);
+    return command === "view"
+      ? await commandView(io, cwd, flags, operands)
+      : await commandOccurrences(io, cwd, flags, operands);
   } catch (error) {
     if (error instanceof UsageError) {
       // Usage/configuration errors (SPEC 12.0): the message is stderr
@@ -2725,6 +2852,12 @@ async function dispatchCommand(io, cwd, argv) {
       }
       io.stderr(`xspec: ${error.message}\n`);
       return 2;
+    }
+    if (error instanceof ScopeError) {
+      // An invocation outside §CONF-AVAIL's scope: a fixture-side
+      // condition, never a product verdict — outside the 12.0 partition.
+      io.stderr(`xspec: fixture scope error: ${error.message}\n`);
+      return 70;
     }
     // A crash is a fixture bug: exit outside the 12.0 partition so every
     // exit-code assertion fails loudly and the diagnosis carries the stack.

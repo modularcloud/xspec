@@ -45,7 +45,10 @@ import { test } from "vitest";
 import {
   decodeErrorDocument,
   decodeFindingsReport,
+  decodeOccurrencesReport,
+  decodeViewReport,
 } from "../helpers/adapters/index.js";
+import type { Finding } from "../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   assertExitCode,
@@ -143,22 +146,81 @@ function like(
     : { form: "like", canonical, check };
 }
 
+/** A document's `findings` member is `[]`, as `premise` states. */
+function assertNoFindings(
+  findings: readonly Finding[],
+  context: string,
+  premise: string,
+): void {
+  if (findings.length > 0) {
+    fail(
+      `${context}: ${premise}, but it carries ` +
+        `${String(findings.length)}: ` +
+        JSON.stringify(findings.map((finding) => finding.code)),
+    );
+  }
+}
+
 /**
  * A finding-free `build` or `check` report: `{"findings": []}` (12.7: a
  * report whose defined content is findings alone; a finding-free answer's
  * `findings` is `[]`), the answer of an exit-0 run with JSON in effect.
  */
 const findingFreeReport: DocumentCheck = (doc, context) => {
-  const report = decodeFindingsReport(doc, context);
-  if (report.findings.length > 0) {
-    fail(
-      `${context}: an exit-0 build or check report carries no findings ` +
-        `(SPEC 12.0's exit partition, 12.7), but it carries ` +
-        `${String(report.findings.length)}: ` +
-        JSON.stringify(report.findings.map((finding) => finding.code)),
-    );
-  }
+  assertNoFindings(
+    decodeFindingsReport(doc, context).findings,
+    context,
+    "an exit-0 build or check report carries no findings (SPEC 12.0's " +
+      "exit partition, 12.7)",
+  );
 };
+
+/** An exit-0 answer of a query surface is complete and finding-free (11.2). */
+const FINDING_FREE_ANSWER =
+  "an exit-0 answer is complete and finding-free (SPEC 11.2, 12.0's exit " +
+  "partition)";
+
+/**
+ * A `view` answer (11.4, 12.7), finding-free, holding exactly the per-file
+ * views of `files`, in byte order of path; `text` says whether `--text` is
+ * in effect, so whether every node carries its own and subtree text.
+ */
+function viewOf(files: readonly string[], text: boolean): DocumentCheck {
+  return (doc, context) => {
+    const report = decodeViewReport(doc, { text }, context);
+    assertNoFindings(report.findings, context, FINDING_FREE_ANSWER);
+    const actual = JSON.stringify(report.views.map((view) => view.file));
+    const expected = JSON.stringify(files);
+    if (actual !== expected) {
+      fail(
+        `${context}: the view document holds the per-file views of ` +
+          `${expected} (SPEC 11.4: the requested files, in byte order of ` +
+          `path), but it holds those of ${actual}`,
+      );
+    }
+  };
+}
+
+/**
+ * An `occurrences` answer (11.3, 12.7), finding-free, its records' targets
+ * exactly `targets`, in occurrence order (5.7).
+ */
+function occurrencesOf(targets: readonly string[]): DocumentCheck {
+  return (doc, context) => {
+    const report = decodeOccurrencesReport(doc, context);
+    assertNoFindings(report.findings, context, FINDING_FREE_ANSWER);
+    const actual = JSON.stringify(
+      report.occurrences.map((record) => record.target),
+    );
+    const expected = JSON.stringify(targets);
+    if (actual !== expected) {
+      fail(
+        `${context}: the occurrences document's records target ${expected} ` +
+          `in occurrence order (SPEC 11.3, 5.7), but they target ${actual}`,
+      );
+    }
+  };
+}
 
 function conformerBinding(name: string): ProductBinding {
   const entry = CERTIFICATION_FIXTURES.find((fixture) => fixture.name === name);
@@ -362,6 +424,284 @@ const DASH_DASH =
 const SURPLUS =
   'SPEC 12.0: "more operands than the synopsis admits … is a usage error ' +
   'of the syntax class … a surplus token is never accepted and ignored"';
+const FLAGS_ANYWHERE =
+  'SPEC 12.0: "Flag tokens may stand anywhere among the arguments — ' +
+  'before the command word, between it and its operands, or after them"';
+const NO_COMMAND =
+  'SPEC 12.0: "no command word, an unknown command or subcommand, a ' +
+  "missing operand, or more operands than the synopsis admits … is a " +
+  'usage error of the syntax class"';
+const WHOLE_NEXT_TOKEN =
+  'SPEC 12.0: a value-taking flag "takes the whole next token as its ' +
+  "value, whatever that token looks like — a value beginning with `-` or " +
+  '`--` included"';
+const MISSING_VALUE =
+  'SPEC 12.0: a flag that takes a value "lacks its value, a usage error, ' +
+  'when no token follows"';
+const NO_VALUE_UNLESS_KNOWN =
+  'SPEC 12.0: "a `--` token naming no flag of any command takes no value"';
+const REPEATED =
+  'SPEC 12.0: "repeating a flag is a usage error", and "a repeated ' +
+  '`--json`, itself a usage error, still puts it in effect"';
+const JSON_ONLY =
+  'SPEC 12.0: JSON output is in effect also "when the invoked surface is ' +
+  "JSON-only, a single JSON document its only output form with or without " +
+  '`--json` (10.7, 11, 12.6)" — `view` and `occurrences` among them (11)';
+const MALFORMED =
+  'SPEC 12.0: "An argument value is well-formed only when its bytes are ' +
+  "valid UTF-8 and it contains no U+FFFD (REPLACEMENT CHARACTER); any " +
+  "other argument value is a malformed value — a usage error of the " +
+  'syntax class (below), judged before every per-flag and per-operand check"';
+const CONFIG_AS_GIVEN =
+  'SPEC 14: "a `--config` path nothing occupies … is reported as the ' +
+  'argument value exactly as given (12.0)" in a configuration error ' +
+  "(14.14), `configuration-error`";
+
+// --- CONF-AVAIL (CERTIFICATIONS.md §CONF-AVAIL: `view` and `occurrences`) -----
+
+/** One spec group of `.mdx` sources (SPEC 7.1), no other configuration. */
+const SPEC_GROUP_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  }
+})
+`;
+
+/**
+ * One finding-free spec source as §CONF-AVAIL's scope admits: a section `a`,
+ * and a section `b` whose `d` prop and embedding each reference `a` locally
+ * — two resolving occurrences (5.7), so the answers compared hold records.
+ */
+const AVAIL_STAGING: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": SPEC_GROUP_CONFIG,
+    "specs/A.mdx": `<S id="a">
+Alpha text.
+</S>
+
+<S id="b" d={"a"}>
+Beta: {text("a")}
+</S>
+`,
+  },
+};
+
+const AVAIL_FILE = "specs/A.mdx";
+const AVAIL_TARGET = "specs/A.mdx#a";
+/** `b`'s `d` entry, then its embedding: occurrence order (5.7). */
+const AVAIL_RECORDS = [AVAIL_TARGET, AVAIL_TARGET];
+/** `AVAIL_TARGET` with a U+FFFD appended: a malformed value (12.0). */
+const MALFORMED_TO = AVAIL_TARGET + String.fromCodePoint(0xfffd);
+
+const AVAIL_TABLE: GrammarTable = {
+  conformer: "CONF-AVAIL",
+  staging: AVAIL_STAGING,
+  rows: [
+    // The JSON-only surfaces answer in JSON without `--json` (12.0, 11).
+    {
+      argv: ["view"],
+      clause: `${JSON_ONLY}; 11.4: "with neither, the request covers every discovered spec source"`,
+      exit: 0,
+      stdout: { form: "document", check: viewOf([AVAIL_FILE], false) },
+    },
+    {
+      argv: ["occurrences"],
+      clause: `${JSON_ONLY}; 11.3: "Without \`--file\`, the consulted domain is the entire discovered set"`,
+      exit: 0,
+      stdout: { form: "document", check: occurrencesOf(AVAIL_RECORDS) },
+    },
+    // Flag tokens anywhere, arity fixed by name (12.0).
+    {
+      argv: ["--json", "view"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["view", "--json"], viewOf([AVAIL_FILE], false)),
+    },
+    {
+      argv: ["--json", "occurrences"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["occurrences", "--json"], occurrencesOf(AVAIL_RECORDS)),
+    },
+    {
+      argv: ["--to", AVAIL_TARGET, "occurrences"],
+      clause: `${FLAGS_ANYWHERE}; ${ARITY_BY_NAME}`,
+      exit: 0,
+      stdout: like(
+        ["occurrences", "--to", AVAIL_TARGET],
+        occurrencesOf(AVAIL_RECORDS),
+      ),
+    },
+    {
+      argv: ["--file", AVAIL_FILE, "view"],
+      clause: `${FLAGS_ANYWHERE}; ${ARITY_BY_NAME}`,
+      exit: 0,
+      stdout: like(["view", "--file", AVAIL_FILE], viewOf([AVAIL_FILE], false)),
+    },
+    {
+      argv: ["--config", "xspec.config.ts", "occurrences"],
+      clause: `${FLAGS_ANYWHERE}; ${ARITY_BY_NAME}`,
+      exit: 0,
+      stdout: like(
+        ["occurrences", "--config", "xspec.config.ts"],
+        occurrencesOf(AVAIL_RECORDS),
+      ),
+    },
+    {
+      argv: ["view", "--text", AVAIL_FILE],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["view", AVAIL_FILE, "--text"], viewOf([AVAIL_FILE], true)),
+    },
+    // `--` ends flag reading (12.0).
+    {
+      argv: ["view", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["view"], viewOf([AVAIL_FILE], false)),
+    },
+    {
+      argv: ["occurrences", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["occurrences"], occurrencesOf(AVAIL_RECORDS)),
+    },
+    {
+      argv: ["--", "view", AVAIL_FILE],
+      clause: `${DASH_DASH}: the command word included`,
+      exit: 0,
+      stdout: like(["view", AVAIL_FILE], viewOf([AVAIL_FILE], false)),
+    },
+    {
+      argv: ["view", "--", "--json"],
+      clause: `${DASH_DASH}, so \`--json\` is a \`<file>\` operand — 11.4: "a file outside the discovered set is an unknown file (12.0)", a plain usage error; ${JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // A value-taking flag takes the whole next token (12.0).
+    {
+      argv: ["view", "--file", "--text"],
+      clause: `${WHOLE_NEXT_TOKEN}, so the glob is \`--text\`, and \`--text\` is not in effect; 11.4: "a glob admitting none … admits the empty set, an empty, finding-free answer, exit 0"`,
+      exit: 0,
+      stdout: { form: "document", check: viewOf([], false) },
+    },
+    {
+      argv: ["occurrences", "--to", "--json"],
+      clause: `${WHOLE_NEXT_TOKEN}, so \`--to\` names the bare path \`--json\`; 11.3: \`--to\` "accepts any syntactically well-formed requirement-node identity … whatever the workspace contains", and when it "does not currently resolve — its file not discovered … — the selection is empty"`,
+      exit: 0,
+      stdout: { form: "document", check: occurrencesOf([]) },
+    },
+    {
+      argv: ["nosuch", "--config", "--json"],
+      clause: `${ARITY_BY_NAME}: \`--config\` takes \`--json\` as its value, so JSON output is out of effect for the unknown command (${NO_COMMAND}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["nosuch", "--bogus", "--json"],
+      clause: `${NO_VALUE_UNLESS_KNOWN}, so \`--json\` is read as a flag; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // Usage errors of the syntax class (12.0), each in the error document
+    // whenever JSON output is in effect.
+    {
+      argv: ["--json", "nosuch"],
+      clause: `${NO_COMMAND}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["--json"],
+      clause: `${NO_COMMAND}: no command word; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: [],
+      clause: `${NO_COMMAND}: no command word; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["occurrences", "extra"],
+      clause: `${SURPLUS} (11.3: \`occurrences\` takes no operand); ${JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["occurrences", "--file"],
+      clause: `${MISSING_VALUE}; ${JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["occurrences", "--json", "--json"],
+      clause: `${REPEATED}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["occurrences", "--tree"],
+      clause: `${UNKNOWN_FLAG} — \`--tree\` is \`ids\`'s (12.3), not \`occurrences\`'s (11.3); ${JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["view", "--config=x"],
+      clause: `SPEC 12.0: "\`--name=value\` is not a spelling of any flag", an unknown flag; ${JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["view", "--file", AVAIL_FILE, AVAIL_FILE],
+      clause: `11.4: "Combining \`<file>\` operands with \`--file\` is a usage error", of the syntax class (12.0); ${JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["occurrences", "--to", MALFORMED_TO],
+      clause: `${MALFORMED}; ${JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // `--test-hold` beside a command that is not mutating (13.5).
+    {
+      argv: ["view", "--test-hold", "h"],
+      clause: `${UNKNOWN_FLAG}, \`view\` not mutating (${NOT_MUTATING}); ${JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: ["--test-hold", "h", "occurrences"],
+      clause: `${ARITY_BY_NAME}: before the command word \`--test-hold\` takes \`h\`, and \`occurrences\` is the command, whose unknown flag it is (${UNKNOWN_FLAG}; ${NOT_MUTATING}); ${JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: ["view", "--test-hold", "--json"],
+      clause: `${ARITY_BY_NAME}: \`--test-hold\` takes \`--json\` as its value and is \`view\`'s unknown flag; ${JSON_ONLY} — in effect whatever the arguments; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      hold: { path: "--json", created: false },
+    },
+    // Configuration located at the path `--config` names (12.0, 14).
+    {
+      argv: ["view", "--config", "./nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${JSON_ONLY}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "./nosuch.ts",
+      },
+    },
+  ],
+};
 
 // --- CONF-ORPHAN (CERTIFICATIONS.md §CONF-ORPHAN: `build` and `check`) --------
 
@@ -372,14 +712,7 @@ const SURPLUS =
  */
 const ORPHAN_STAGING: WorkspaceDecl = {
   files: {
-    "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/*.mdx"]
-  }
-})
-`,
+    "xspec.config.ts": SPEC_GROUP_CONFIG,
     "specs/A.mdx": `<S id="a">
 Alpha text.
 </S>
@@ -430,9 +763,7 @@ const ORPHAN_TABLE: GrammarTable = {
     // The grammar's other rules over `build`.
     {
       argv: ["--json", "build"],
-      clause:
-        'SPEC 12.0: "Flag tokens may stand anywhere among the arguments — ' +
-        'before the command word, between it and its operands, or after them"',
+      clause: FLAGS_ANYWHERE,
       exit: 0,
       stdout: like(["build", "--json"], findingFreeReport),
     },
@@ -462,18 +793,13 @@ const ORPHAN_TABLE: GrammarTable = {
     },
     {
       argv: ["build", "--json", "--json"],
-      clause:
-        'SPEC 12.0: "repeating a flag is a usage error", and "a repeated ' +
-        '`--json`, itself a usage error, still puts it in effect"; ' +
-        PLAIN_DOCUMENT,
+      clause: `${REPEATED}; ${PLAIN_DOCUMENT}`,
       exit: 2,
       stdout: PLAIN_USAGE_ERROR,
     },
     {
       argv: ["build", "--json", "--config"],
-      clause:
-        'SPEC 12.0: a flag that takes a value "lacks its value, a usage ' +
-        `error, when no token follows"; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      clause: `${MISSING_VALUE}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
       exit: 2,
       stdout: PLAIN_USAGE_ERROR,
     },
@@ -489,12 +815,7 @@ const ORPHAN_TABLE: GrammarTable = {
     },
     {
       argv: ["build", "--json", "--config", "--json"],
-      clause:
-        'SPEC 12.0: a value-taking flag "takes the whole next token as its ' +
-        'value, whatever that token looks like", so `--config` names the ' +
-        'path `--json`; 14: "a `--config` path nothing occupies … is ' +
-        'reported as the argument value exactly as given" in a configuration ' +
-        "error (14.14), `configuration-error`",
+      clause: `${WHOLE_NEXT_TOKEN}, so \`--config\` names the path \`--json\`; ${CONFIG_AS_GIVEN}`,
       exit: 2,
       stdout: {
         form: "error-document",
@@ -513,7 +834,7 @@ const ORPHAN_TABLE: GrammarTable = {
  */
 const TABLE_TIMEOUT_MS = 120_000;
 
-const GRAMMAR_TABLES: readonly GrammarTable[] = [ORPHAN_TABLE];
+const GRAMMAR_TABLES: readonly GrammarTable[] = [AVAIL_TABLE, ORPHAN_TABLE];
 
 for (const table of GRAMMAR_TABLES) {
   test(
