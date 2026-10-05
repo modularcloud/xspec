@@ -16,7 +16,27 @@
 //   exit codes per SPEC 12.0.
 // - `query node` / `query nodes` (with `--tag`) reporting identity, tags,
 //   and metadataHash — the scoped query surface; source ranges ride along in
-//   the natural SPEC 11 row shape.
+//   the natural SPEC 11 row shape. `query` is JSON-only (SPEC 12.0, 11): its
+//   answers, its gated findings report on a workspace failing `build`'s
+//   validations (13.3), and its usage errors are JSON with or without
+//   `--json`.
+// - Arguments are read under SPEC 12.0's universal invocation grammar
+//   (`readInvocation`; CERTIFICATIONS.md preamble) — flag tokens anywhere,
+//   before the command word included; a value-taking flag taking the whole
+//   next token, its arity fixed by name for every command (`FLAG_ARITY`), so
+//   `build --test-hold --json` reads `--json` as `--test-hold`'s value and
+//   leaves JSON out of effect; `--` ending flag reading; the remaining
+//   tokens matching the synopsis exactly (`checkSynopsis`). With JSON in
+//   effect every exit-2 error prints the 12.7 error document: `code` and
+//   `path` null for a plain usage error, `configuration-error` and SPEC 14's
+//   concerned path for 14.14. Every syntax-class check (12.0) — `--tag`'s
+//   well-formedness (11.1), `--coverage`'s vocabulary, `--file`'s
+//   outside-root rule, a `<node>` spelling's one `#` — precedes loading
+//   configuration, and the gated reads' argument checks precede the
+//   invalid-workspace report (12.0, 13.3). An invocation outside the scope —
+//   any other product command, `query`'s other subcommands, or `query
+//   nodes`' `--group`, `--file`, and `--coverage` filters — is refused
+//   loudly (exit 70) once every syntax-class check it can decide has passed.
 // - Contracts under certification: SPEC 1.3, SPEC 1.4 with its exact
 //   character classes, SPEC 2.6 tag splitting, and the masking rules of
 //   SPEC 14.1/14.17 over 14.2 (a section spelling no identity — `id`
@@ -99,8 +119,34 @@ import * as path from "node:path";
 // Outcome carriers
 // ---------------------------------------------------------------------------
 
-/** Usage or configuration error (SPEC 12.0 exit 2): message on stderr. */
-class UsageError extends Error {}
+/**
+ * Usage or configuration error (SPEC 12.0 exit 2): the message is stderr
+ * content; with JSON output in effect the 12.7 error document is the
+ * entire stdout. `code`/`path` are the error finding's stable code and
+ * concerned path — set for configuration errors (14.14:
+ * `configuration-error` plus the concerned path, SPEC 14), `null` for plain
+ * usage errors (SPEC 12.7, 14).
+ */
+class UsageError extends Error {
+  /** @param {string} message
+   *  @param {{ code?: string | null, path?: string | null }} [finding] */
+  constructor(message, { code = null, path = null } = {}) {
+    super(message);
+    this.code = code;
+    this.path = path;
+  }
+}
+
+/**
+ * An invocation outside this fixture's scope (CERTIFICATIONS.md
+ * §CONF-VALID) that a conforming product would answer — another product
+ * command, another `query` subcommand, or a `query nodes` filter no
+ * in-scope observation uses. Refused loudly with an exit code outside the
+ * 12.0 partition (as a crash is, below), so a test reaching it fails on its
+ * exit-code assertion with the cause on stderr — never on a fabricated
+ * answer or a false usage error.
+ */
+class ScopeError extends Error {}
 
 /** Findings (SPEC 12.0 exit 1): a findings report on stdout. */
 class FindingsError extends Error {
@@ -162,12 +208,37 @@ async function pathOccupied(absPath) {
 
 const CONFIG_NAME = "xspec.config.ts";
 
+/**
+ * A located configuration file's concerned path in the anchoring form of
+ * SPEC 11.6, as SPEC 14 reports a configuration error's: identified
+ * relative to the invocation working directory, the working directory and
+ * the workspace root (the file's directory, 7) entering as physical paths
+ * with every symbolic link among their components resolved, the file as its
+ * own name under the root so spelled — the segments ascending to the
+ * nearest common ancestor spelled `..`, then the descending segments,
+ * `/`-joined; the platform's absolute form only where no relative path
+ * exists (11.6).
+ */
+async function anchoringPath(cwd, configPath) {
+  const physicalCwd = await fsp.realpath(cwd);
+  const physicalRoot = await fsp.realpath(path.dirname(configPath));
+  const relative = path.relative(physicalCwd, physicalRoot);
+  const name = path.basename(configPath);
+  if (relative === "") return name;
+  if (path.isAbsolute(relative)) return path.join(relative, name);
+  return [...relative.split(path.sep), name].join("/");
+}
+
 async function findConfigPath(cwd, configFlag) {
   if (configFlag !== undefined) {
     const abs = path.resolve(cwd, configFlag);
     if (!(await pathOccupied(abs))) {
       throw new UsageError(
         `configuration file not found: --config ${configFlag}`,
+        // A `--config` path nothing occupies — the one concerned path no
+        // physical resolution can spell — is reported as the argument value
+        // exactly as given (SPEC 14, 12.0).
+        { code: "configuration-error", path: configFlag },
       );
     }
     return abs;
@@ -180,6 +251,9 @@ async function findConfigPath(cwd, configFlag) {
     if (parent === dir) {
       throw new UsageError(
         `configuration error: no ${CONFIG_NAME} found by upward search from the working directory`,
+        // Missing configuration with no `--config`: the concerned path is
+        // the directory the failed search started from, spelled "." (14).
+        { code: "configuration-error", path: "." },
       );
     }
     dir = parent;
@@ -367,6 +441,23 @@ class LiteralParser {
  */
 async function loadConfig(cwd, configFlag) {
   const configPath = await findConfigPath(cwd, configFlag);
+  try {
+    return await parseAndValidateConfig(configPath);
+  } catch (error) {
+    // Every defect found while reading, parsing, or validating the located
+    // configuration is a configuration error (SPEC 14.14): its error finding
+    // carries the stable code and the concerned configuration file in the
+    // anchoring form (SPEC 14, 12.7).
+    if (error instanceof UsageError && error.code === null) {
+      error.code = "configuration-error";
+      error.path = await anchoringPath(cwd, configPath);
+    }
+    throw error;
+  }
+}
+
+/** The post-location half of {@link loadConfig}: read, parse, validate. */
+async function parseAndValidateConfig(configPath) {
   let text;
   try {
     text = await fsp.readFile(configPath, "utf8");
@@ -579,13 +670,18 @@ function codePointName(codePoint) {
 /**
  * SPEC 1.4 validity of one segment or tag value: the reason it is invalid,
  * or null when valid. The two roles differ in exactly one rule: a tag MAY
- * contain `.`.
+ * contain `.`. `switches` are the deviation switches the judgement applies:
+ * the invocation's (`deviations`) for every value a source spells, none for
+ * an argument value judged by the syntax class (`--tag`, 11.1) — so each
+ * violator deviates in sources alone and reads its arguments exactly as the
+ * conformer does.
  *
  * @param {string} value
  * @param {"segment" | "tag"} role
+ * @param {Record<string, boolean | undefined>} [switches]
  * @returns {string | null}
  */
-function valueViolation(value, role) {
+function valueViolation(value, role, switches = deviations) {
   if (value.length === 0) {
     return `the ${role} is empty (SPEC 1.4: segments are non-empty)`;
   }
@@ -607,7 +703,7 @@ function valueViolation(value, role) {
     // 1.4 whitespace class, and every other classification is unchanged.
     if (
       isValidityWhitespace(codePoint) ||
-      (deviations.widenValidityWhitespace &&
+      (switches.widenValidityWhitespace &&
         WIDE_BOUNDARY_CODE_POINTS.has(codePoint))
     ) {
       return `the ${role} contains the whitespace character ${codePointName(codePoint)} (SPEC 1.4)`;
@@ -617,10 +713,7 @@ function valueViolation(value, role) {
     // class. The whitespace branch above runs first, so exactly U+0000–U+0008,
     // U+000E–U+001F, and U+007F are accepted; whitespace characters remain
     // rejected in segments, and `splitTags` below is untouched.
-    if (
-      isValidityControl(codePoint) &&
-      !deviations.acceptNonWhitespaceControls
-    ) {
+    if (isValidityControl(codePoint) && !switches.acceptNonWhitespaceControls) {
       return `the ${role} contains the control character ${codePointName(codePoint)} (SPEC 1.4)`;
     }
     // The quote, escape, and character-reference characters (SPEC 1.4):
@@ -641,7 +734,7 @@ function valueViolation(value, role) {
     // keeps a tag containing either whole.
     if (
       LINE_SEPARATOR_CODE_POINTS.has(codePoint) &&
-      !deviations.acceptLineSeparators
+      !switches.acceptLineSeparators
     ) {
       return `the ${role} contains ${codePointName(codePoint)} (${LINE_SEPARATOR_CODE_POINTS.get(codePoint)}), barred by the quote-and-escape bullet (SPEC 1.4)`;
     }
@@ -1210,13 +1303,18 @@ async function loadWorkspace(cwd, configFlag) {
   /** @type {Finding[]} */
   const findings = [];
   const nodes = [];
+  /** Discovered files whose parse failed (14.20): masked within. */
+  const unparseable = new Set();
   for (const rel of rels) {
     const bytes = await fsp.readFile(path.join(config.root, rel));
     const analyzed = analyzeFile(rel, bytes);
     findings.push(...analyzed.findings);
     nodes.push(...analyzed.nodes);
+    if (analyzed.findings.some((finding) => finding.condition === "14.20")) {
+      unparseable.add(rel);
+    }
   }
-  return { config, findings, nodes };
+  return { config, discovered: new Set(rels), unparseable, findings, nodes };
 }
 
 // ---------------------------------------------------------------------------
@@ -1329,56 +1427,323 @@ function emitFindings(io, json, findings) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Invocation grammar (SPEC 12.0)
+// ---------------------------------------------------------------------------
+
+const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
+
 /**
- * Parse flags per command. `flagSpec` maps flag names to "bool" | "value";
- * unknown and repeated flags are usage errors (SPEC 12.0).
+ * Every flag of every command with its arity, fixed by name (SPEC 12.0): 1
+ * for a flag taking the whole next token as its value, 0 for one taking
+ * none — the flags the synopses and defining sections name (6, 8, 9, 10.7,
+ * 11, 12, 13.5). A `--` token naming no flag of any command takes no value.
  */
-function parseArgs(argv, flagSpec, positionalRange) {
-  const flags = {};
-  const positionals = [];
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg.startsWith("--")) {
-      const kind = flagSpec[arg];
-      if (kind === undefined)
-        throw new UsageError(`unknown flag ${arg} (SPEC 12.0)`);
-      if (Object.hasOwn(flags, arg)) {
-        throw new UsageError(
-          `repeated flag ${arg}: a flag may be given at most once (SPEC 12.0)`,
-        );
-      }
-      if (kind === "bool") {
-        flags[arg] = true;
-      } else {
-        const value = argv[i + 1];
-        if (value === undefined)
-          throw new UsageError(`missing value for ${arg} (SPEC 12.0)`);
-        flags[arg] = value;
-        i += 1;
-      }
-    } else {
-      positionals.push(arg);
-    }
-  }
-  const [min, max] = positionalRange;
-  if (positionals.length < min || positionals.length > max) {
-    throw new UsageError(
-      `expected ${min === max ? String(min) : `${String(min)}-${String(max)}`} argument(s), got ${String(positionals.length)} (SPEC 12.0)`,
-    );
-  }
-  return { flags, positionals };
+const FLAG_ARITY = new Map([
+  ["--json", 0],
+  ["--preview", 0],
+  ["--tree", 0],
+  ["--text", 0],
+  ["--check", 0],
+  ["--unreferenced", 0],
+  ["--config", 1],
+  ["--test-hold", 1],
+  ["--file", 1],
+  ["--to", 1],
+  ["--from", 1],
+  ["--kinds", 1],
+  ["--group", 1],
+  ["--tag", 1],
+  ["--coverage", 1],
+  ["--base", 1],
+  ["--strategy", 1],
+  ["--name", 1],
+  ["--status", 1],
+  ["--note", 1],
+]);
+
+/** Every command of the product (12). */
+const PRODUCT_COMMANDS = new Set([
+  "build",
+  "check",
+  "ids",
+  "show",
+  "coverage",
+  "impact",
+  "review",
+  "query",
+  "occurrences",
+  "view",
+  "at",
+  "inventory",
+  "rename",
+  "move",
+  "version",
+]);
+
+/**
+ * The commands whose every surface is JSON-only (SPEC 12.0: 11's `query`,
+ * `occurrences`, `view`, `at`, and `inventory`; 12.6's `version`) — beside
+ * 10.7's `review export`, a subcommand's surface.
+ */
+const JSON_ONLY_COMMANDS = new Set([
+  "query",
+  "occurrences",
+  "view",
+  "at",
+  "inventory",
+  "version",
+]);
+
+/**
+ * Whether the invoked surface — the command word and, for `review`, its
+ * subcommand, both among the non-flag tokens (12.0) — is JSON-only, a single
+ * JSON document its only output form with or without `--json` (12.0).
+ */
+function isJsonOnlySurface(words) {
+  const [command, subcommand] = words;
+  return (
+    JSON_ONLY_COMMANDS.has(command) ||
+    (command === "review" && subcommand === "export")
+  );
 }
 
-const READ_FLAGS = { "--json": "bool", "--config": "value" };
+/**
+ * The synopses this fixture judges (SPEC 11.1, 12.1): `build`'s and each
+ * `query` subcommand's — the flags the synopsis names beside the globals
+ * `--json` and `--config` (12.0), the flags it requires, its operand count,
+ * whether this fixture serves it, and the named flags it does not serve.
+ * Every syntax-class check (12.0) runs before any scope refusal, so an
+ * unserved subcommand or flag is refused loudly (ScopeError, exit 70) only
+ * once the arguments match its synopsis — a usage error is never masked by
+ * a scope refusal. Every other product command is refused once the checks
+ * the arguments alone decide for every command have passed.
+ * @typedef {{ flags: readonly string[], required?: readonly string[],
+ *             operands: number, served: boolean,
+ *             unservedFlags?: readonly string[] }} Synopsis
+ * @type {Synopsis}
+ */
+const BUILD_SYNOPSIS = { flags: [], operands: 0, served: true };
+
+/** @type {Map<string, Synopsis>} */
+const QUERY_SYNOPSES = new Map([
+  ["node", { flags: [], operands: 1, served: true }],
+  [
+    "nodes",
+    {
+      flags: ["--group", "--file", "--tag", "--coverage"],
+      operands: 0,
+      served: true,
+      unservedFlags: ["--group", "--file", "--coverage"],
+    },
+  ],
+  [
+    "edges",
+    { flags: ["--from", "--to", "--kinds"], operands: 0, served: false },
+  ],
+  ["subtree", { flags: [], operands: 1, served: false }],
+  ["ancestors", { flags: [], operands: 1, served: false }],
+  [
+    "reachable",
+    {
+      flags: ["--from", "--to", "--kinds"],
+      required: ["--from", "--to"],
+      operands: 0,
+      served: false,
+    },
+  ],
+]);
+
+/**
+ * An argument value is malformed when it is not valid UTF-8 or contains
+ * U+FFFD (SPEC 12.0); Node decodes argv lossily, an ill-formed byte arriving
+ * as U+FFFD, so the one test covers both.
+ */
+function isMalformedValue(value) {
+  return value.includes(REPLACEMENT_CHARACTER);
+}
+
+/**
+ * Read the arguments under the grammar of SPEC 12.0: flag tokens anywhere —
+ * before the command word, between it and its operands, or after them — a
+ * value-taking flag taking the whole next token, whatever it looks like, and
+ * `--` ending flag reading (dropped; every later token a non-flag token).
+ * Returns the flags (name to value, `true` for a flag taking none), the
+ * remaining non-flag tokens in order — the command, `query`'s subcommand,
+ * then the operands — whether a `--json` token was read as a flag (never as
+ * another flag's value), and the first syntax-class error met that the
+ * arguments decide for every command alike, if any.
+ */
+function readInvocation(argv) {
+  const flags = new Map();
+  const words = [];
+  let json = false;
+  let error = null;
+  const note = (message) => {
+    if (error === null) error = message;
+  };
+  let flagsEnded = false;
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (!flagsEnded && token === "--") {
+      flagsEnded = true;
+      continue;
+    }
+    if (!flagsEnded && token.startsWith("--")) {
+      if (token === "--json") json = true;
+      if (flags.has(token)) {
+        note(
+          `repeated flag ${token}: a flag may be given at most once (SPEC 12.0)`,
+        );
+      }
+      if (FLAG_ARITY.get(token) === 1) {
+        if (i + 1 >= argv.length) {
+          note(`flag ${token} lacks its value (SPEC 12.0)`);
+          flags.set(token, true);
+        } else {
+          i += 1;
+          const value = argv[i];
+          if (isMalformedValue(value)) {
+            note(
+              `malformed value for ${token}: not valid UTF-8, or containing U+FFFD (SPEC 12.0)`,
+            );
+          }
+          flags.set(token, value);
+        }
+      } else {
+        if (!FLAG_ARITY.has(token)) note(`unknown flag ${token} (SPEC 12.0)`);
+        flags.set(token, true);
+      }
+      continue;
+    }
+    if (isMalformedValue(token)) {
+      note(
+        "malformed argument: not valid UTF-8, or containing U+FFFD (SPEC 12.0)",
+      );
+    }
+    words.push(token);
+  }
+  return { flags, words, json, error };
+}
+
+/**
+ * The synopsis checks of SPEC 12.0's syntax class for `build` or one
+ * `query` subcommand (`spelled`): every flag given is one it accepts — its
+ * synopsis's, or the global `--json` and `--config` (`--test-hold` belongs
+ * to the mutating commands alone, 13.5) — the operands match its synopsis
+ * in number, and its required flags are given.
+ */
+function checkSynopsis(spelled, synopsis, flags, operands) {
+  for (const name of flags.keys()) {
+    if (
+      name !== "--json" &&
+      name !== "--config" &&
+      !synopsis.flags.includes(name)
+    ) {
+      throw new UsageError(`unknown flag ${name} for ${spelled} (SPEC 12.0)`);
+    }
+  }
+  if (operands.length < synopsis.operands) {
+    throw new UsageError(`${spelled}: missing operand (SPEC 12.0)`);
+  }
+  if (operands.length > synopsis.operands) {
+    throw new UsageError(
+      `surplus operand ${operands[synopsis.operands]}: ${spelled} takes ${String(synopsis.operands)} operand(s) (SPEC 12.0)`,
+    );
+  }
+  for (const name of synopsis.required ?? []) {
+    if (!flags.has(name)) {
+      throw new UsageError(
+        `${spelled}: missing required flag ${name} (SPEC 11.1, 12.0)`,
+      );
+    }
+  }
+}
+
+/** No deviation switch: the argument checks of every fixture alike. */
+const NO_DEVIATIONS = Object.freeze({});
+
+/**
+ * `query nodes --tag`'s acceptance (SPEC 11.1): syntactic, whatever the
+ * workspace contains — a spelling no tag can have under 1.4 (empty, or
+ * containing whitespace, `"`, `#`, …) is a malformed value, a usage error
+ * of the syntax class (12.0). Judged by 1.4's exact classes in every
+ * fixture (`NO_DEVIATIONS`): the violators deviate in sources alone.
+ */
+function checkTagValue(value) {
+  const violation = valueViolation(value, "tag", NO_DEVIATIONS);
+  if (violation !== null) {
+    throw new UsageError(
+      `query nodes: malformed --tag value ${JSON.stringify(value)}: ${violation}, so no tag is so spelled (SPEC 11.1, 12.0)`,
+    );
+  }
+}
+
+/** `query nodes --coverage`'s vocabulary (SPEC 11.1). */
+const COVERAGE_VALUES = new Set(["required", "none"]);
+
+/**
+ * A `--coverage` value outside its fixed vocabulary is an invalid flag
+ * value of the syntax class (SPEC 11.1, 12.0).
+ */
+function checkCoverageValue(value) {
+  if (!COVERAGE_VALUES.has(value)) {
+    throw new UsageError(
+      `query nodes: invalid --coverage value ${JSON.stringify(value)}: expected required or none (SPEC 11.1, 12.0)`,
+    );
+  }
+}
+
+/**
+ * A `--file` pattern's outside-root rule (SPEC 7, 11.1), decided by its
+ * spelling alone — an invalid flag value of 12.0's syntax class: reading
+ * its `/`-separated segments from a depth of zero, a `..` segment lowers
+ * the depth, a `.`, empty, or `**` segment leaves it, and every other
+ * segment raises it; a leading `/` or a depth falling below zero lies
+ * outside the root.
+ */
+function checkFileGlob(flag, value) {
+  let depth = 0;
+  let outside = value.startsWith("/");
+  for (const segment of value.split("/")) {
+    if (outside) break;
+    if (segment === "..") {
+      depth -= 1;
+      outside = depth < 0;
+    } else if (segment !== "." && segment !== "" && segment !== "**") {
+      depth += 1;
+    }
+  }
+  if (outside) {
+    throw new UsageError(
+      `invalid ${flag} value ${JSON.stringify(value)}: the pattern lies outside the workspace root (SPEC 7, 11.1, 12.0)`,
+    );
+  }
+}
+
+/**
+ * A `<node>` spelling's syntax (SPEC 1.5, 12.0): at most one `#` is
+ * well-formed — no identity contains one in path or id — so a spelling
+ * with more is a malformed value, judged from the argument alone, before
+ * configuration is loaded. Returns the path part.
+ */
+function nodePathOf(value) {
+  const parts = value.split("#");
+  if (parts.length > 2) {
+    throw new UsageError(
+      `query node: malformed node identity ${JSON.stringify(value)}: more than one "#" (SPEC 1.5, 12.0)`,
+    );
+  }
+  return parts[0];
+}
 
 /** `xspec build` (SPEC 12.1, scoped): validate; write nothing. */
-async function commandBuild(io, cwd, argv) {
-  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
-  const workspace = await loadWorkspace(cwd, flags["--config"]);
+async function commandBuild(io, cwd, flags, json) {
+  const workspace = await loadWorkspace(cwd, flags.get("--config"));
   if (workspace.findings.length > 0) {
     throw new FindingsError(workspace.findings);
   }
-  if (flags["--json"]) {
+  if (json) {
     io.stdout(canonicalJson(findingsDoc([])) + "\n");
   }
   return 0;
@@ -1408,49 +1773,71 @@ function nodeRow(node) {
 }
 
 /**
- * `xspec query` (SPEC 11, scoped to `node` and `nodes`): a single JSON
- * document is the only output form, with or without `--json`.
+ * `xspec query node <node>` (SPEC 11.1, scoped). `query` is JSON-only (12.0,
+ * 11): a single JSON document is its only output form. The identity is
+ * judged parse-local against the named file, identically on valid and
+ * failing workspaces (12.0): its path a discovered source (every discovered
+ * file is a spec source in scope, its group one spec group), its `id` among
+ * the file's spelled identities (11.2) — an unparseable named file masking
+ * the check (14.20) — and an unknown identity is a usage error, exit 2,
+ * whatever findings the workspace carries. Only then does a workspace
+ * failing `build`'s validations report exactly those findings and exit 1
+ * without answering (13.3).
  */
-async function commandQuery(io, cwd, argv) {
-  const sub = argv[0];
-  if (sub === "node") {
-    const { flags, positionals } = parseArgs(argv.slice(1), READ_FLAGS, [1, 1]);
-    const workspace = await loadWorkspace(cwd, flags["--config"]);
-    if (workspace.findings.length > 0) {
-      throw new FindingsError(workspace.findings);
-    }
-    const identity = positionals[0];
-    const node = workspace.nodes.find(
-      (candidate) => candidate.identity === identity,
+async function commandQueryNode(io, cwd, flags, spelling) {
+  const file = nodePathOf(spelling);
+  const workspace = await loadWorkspace(cwd, flags.get("--config"));
+  const named =
+    workspace.discovered.has(file) &&
+    (workspace.unparseable.has(file) ||
+      workspace.nodes.some((candidate) => candidate.identity === spelling));
+  if (!named) {
+    throw new UsageError(
+      `query node: unknown node identity ${JSON.stringify(spelling)}: no discovered spec source spells it (SPEC 11.1, 11.2, 12.0)`,
     );
-    if (node === undefined) {
-      throw new UsageError(
-        `unknown node identity ${JSON.stringify(identity)} (SPEC 12.0)`,
+  }
+  if (workspace.findings.length > 0) {
+    throw new FindingsError(workspace.findings);
+  }
+  const node = workspace.nodes.find(
+    (candidate) => candidate.identity === spelling,
+  );
+  if (node === undefined) {
+    throw new Error(`no node ${spelling} on a finding-free workspace`);
+  }
+  io.stdout(canonicalJson(nodeDoc(node)) + "\n");
+  return 0;
+}
+
+/**
+ * `xspec query nodes [--tag <t>]` (SPEC 11.1, scoped), JSON-only (12.0, 11).
+ * The value spellings 11.1 fixes for its flags — `--tag`'s well-formedness,
+ * `--coverage`'s vocabulary, `--file`'s outside-root rule — are of the
+ * syntax class (12.0), decided before configuration is loaded and before
+ * this fixture refuses the filters it does not serve (`--group`, `--file`,
+ * `--coverage`). A well-formed tag no node carries matches nothing (11.1).
+ */
+async function commandQueryNodes(io, cwd, flags) {
+  if (flags.has("--tag")) checkTagValue(flags.get("--tag"));
+  if (flags.has("--coverage")) checkCoverageValue(flags.get("--coverage"));
+  if (flags.has("--file")) checkFileGlob("--file", flags.get("--file"));
+  for (const flag of QUERY_SYNOPSES.get("nodes").unservedFlags) {
+    if (flags.has(flag)) {
+      throw new ScopeError(
+        `query nodes ${flag} is outside this fixture's scope (CERTIFICATIONS.md §CONF-VALID: query nodes with the --tag filter alone)`,
       );
     }
-    io.stdout(canonicalJson(nodeDoc(node)) + "\n");
-    return 0;
   }
-  if (sub === "nodes") {
-    const { flags } = parseArgs(
-      argv.slice(1),
-      { ...READ_FLAGS, "--tag": "value" },
-      [0, 0],
-    );
-    const workspace = await loadWorkspace(cwd, flags["--config"]);
-    if (workspace.findings.length > 0) {
-      throw new FindingsError(workspace.findings);
-    }
-    const tag = flags["--tag"];
-    const rows = workspace.nodes
-      .filter((node) => tag === undefined || node.tags.includes(tag))
-      .map(nodeRow);
-    io.stdout(canonicalJson({ nodes: rows }) + "\n");
-    return 0;
+  const workspace = await loadWorkspace(cwd, flags.get("--config"));
+  if (workspace.findings.length > 0) {
+    throw new FindingsError(workspace.findings);
   }
-  throw new UsageError(
-    `unknown query subcommand ${String(sub)} (SPEC 11, 12.0)`,
-  );
+  const tag = flags.get("--tag");
+  const rows = workspace.nodes
+    .filter((node) => tag === undefined || node.tags.includes(tag))
+    .map(nodeRow);
+  io.stdout(canonicalJson({ nodes: rows }) + "\n");
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1472,6 +1859,10 @@ async function commandQuery(io, cwd, argv) {
  *     `valueViolation` — 1.4's bar on U+2028 and U+2029 is not enforced, so
  *     segments and tags containing either are accepted; `"`, `'`, `\`, and
  *     `&` stay barred, and tag splitting is unchanged.
+ * Each applies to the values sources spell alone: no switch reads the
+ * arguments, and the one argument check judging 1.4 (`query nodes --tag`,
+ * `checkTagValue`) passes `NO_DEVIATIONS`, so every violator reads its
+ * invocation exactly as the conformer does (SPEC 12.0).
  */
 let deviations = {};
 
@@ -1490,29 +1881,107 @@ export async function runXspec(argv, cwd, options = {}) {
   return await dispatchCommand(io, cwd, argv);
 }
 
-/** Dispatch one parsed invocation and map its outcome to SPEC 12.0's codes. */
+/**
+ * Read one invocation under the grammar of SPEC 12.0, dispatch it, and map
+ * its outcome to 12.0's codes. Every syntax-class error is decided from the
+ * arguments alone, before configuration is loaded and before any of this
+ * fixture's scope refusals (12.0): first the checks the arguments decide for
+ * every command alike — unknown, repeated, or valueless flags and malformed
+ * values (`readInvocation`) — then the command and `query`'s subcommand,
+ * then the synopsis (`checkSynopsis`) and the served flags' value spellings.
+ */
 async function dispatchCommand(io, cwd, argv) {
-  const wantsJson = argv.includes("--json");
+  const invocation = readInvocation(argv);
+  const [command, ...operands] = invocation.words;
+  // JSON output is in effect when a `--json` token is read as a flag — not
+  // as another flag's value — or when the invoked surface is JSON-only
+  // (SPEC 12.0): `query` among the served ones (11), so its every answer,
+  // gated report, and usage error is JSON, with or without `--json`. It
+  // governs error delivery even when the arguments are the error.
+  const jsonInEffect = invocation.json || isJsonOnlySurface(invocation.words);
   try {
-    const command = argv[0];
-    const rest = argv.slice(1);
-    switch (command) {
+    if (invocation.error !== null) throw new UsageError(invocation.error);
+    if (command === undefined) {
+      throw new UsageError("expected a command (SPEC 12.0)");
+    }
+    if (!PRODUCT_COMMANDS.has(command)) {
+      throw new UsageError(
+        `unknown command ${command} (SPEC 12.0; this fixture's surface is build, query node, and query nodes, CERTIFICATIONS.md §CONF-VALID)`,
+      );
+    }
+    let spelled = command;
+    let synopsis = BUILD_SYNOPSIS;
+    let rest = operands;
+    if (command === "query") {
+      const [subcommand, ...subcommandOperands] = operands;
+      if (subcommand === undefined) {
+        throw new UsageError("query: missing subcommand (SPEC 11.1, 12.0)");
+      }
+      synopsis = QUERY_SYNOPSES.get(subcommand);
+      if (synopsis === undefined) {
+        throw new UsageError(
+          `query: unknown subcommand ${subcommand} (SPEC 11.1, 12.0)`,
+        );
+      }
+      spelled = `query ${subcommand}`;
+      rest = subcommandOperands;
+    } else if (command !== "build") {
+      throw new ScopeError(
+        `the ${command} command is outside this fixture's surface: build, query node, and query nodes alone (CERTIFICATIONS.md §CONF-VALID)`,
+      );
+    }
+    checkSynopsis(spelled, synopsis, invocation.flags, rest);
+    if (!synopsis.served) {
+      throw new ScopeError(
+        `${spelled} is outside this fixture's scope (CERTIFICATIONS.md §CONF-VALID: query node and query nodes alone)`,
+      );
+    }
+    const { flags } = invocation;
+    switch (spelled) {
       case "build":
-        return await commandBuild(io, cwd, rest);
-      case "query":
-        return await commandQuery(io, cwd, rest);
+        return await commandBuild(io, cwd, flags, jsonInEffect);
+      case "query node":
+        return await commandQueryNode(io, cwd, flags, rest[0]);
+      case "query nodes":
+        return await commandQueryNodes(io, cwd, flags);
       default:
-        throw new UsageError(`unknown command ${String(command)} (SPEC 12.0)`);
+        throw new Error(`no handler for the served surface ${spelled}`);
     }
   } catch (error) {
     if (error instanceof UsageError) {
-      // Usage/configuration errors: stderr content, empty stdout (SPEC 12.0).
+      // Usage/configuration errors (SPEC 12.0): the message is stderr
+      // content in both output forms. With JSON output in effect the single
+      // 12.7 error document — {"error": …} holding one finding form, its
+      // stable code and concerned path for a configuration error, null/null
+      // for a plain usage error — is the entire stdout; without it, stdout
+      // stays empty. The output form never changes the exit code or the
+      // standard-error content.
+      if (jsonInEffect) {
+        io.stdout(
+          canonicalJson({
+            error: {
+              code: error.code,
+              message: error.message,
+              locations: [],
+              path: error.path,
+              identities: [],
+            },
+          }) + "\n",
+        );
+      }
       io.stderr(`xspec: ${error.message}\n`);
       return 2;
     }
     if (error instanceof FindingsError) {
-      emitFindings(io, wantsJson, error.findings);
+      emitFindings(io, jsonInEffect, error.findings);
       return 1;
+    }
+    if (error instanceof ScopeError) {
+      // Outside this fixture's scope (CERTIFICATIONS.md §CONF-VALID):
+      // refused loudly, outside the 12.0 partition — never answered, never
+      // misreported as a usage error.
+      io.stderr(`xspec: fixture scope error: ${error.message}\n`);
+      return 70;
     }
     // A crash is a fixture bug: exit outside the 12.0 partition so every
     // exit-code assertion fails loudly and the diagnosis carries the stack.

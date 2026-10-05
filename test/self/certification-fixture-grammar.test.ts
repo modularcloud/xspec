@@ -22,14 +22,15 @@
 // its `locations` empty), a document the surface's adapter decodes, or
 // byte-equal to a canonical spelling's answer over the same state; and, for
 // a `--test-hold` row, whether the hold file exists afterwards (13.5). Every
-// row runs in a fresh workspace staged from its table's declaration before
-// any invocation, so a row that writes (`build`) never changes another row's
-// state; a canonical spelling runs in a twin staged the same way, and the
-// two workspaces' after-states must then be byte-identical (12.0's
-// determinism). An exit-2 row carries its message on standard error (12.0)
-// and leaves its workspace byte-for-byte unchanged: a syntax-class error is
-// reported from the arguments alone, without loading configuration (12.0),
-// and a `build` failing with a configuration error modifies nothing (12.1).
+// row runs in a fresh workspace staged from its table's declaration (or the
+// row's own) before any invocation, so a row that writes (`build`) never
+// changes another row's state; a canonical spelling runs in a twin staged
+// the same way, and the two workspaces' after-states must then be
+// byte-identical (12.0's determinism). An exit-2 row carries its message on
+// standard error (12.0) and leaves its workspace byte-for-byte unchanged: a
+// syntax-class error is reported from the arguments alone, without loading
+// configuration (12.0), and a `build` failing with a configuration error
+// modifies nothing (12.1).
 //
 // Every row of a table runs, and the test then fails once listing every
 // failing row, so a red check shows each deviation in one run. Anything but
@@ -48,6 +49,8 @@ import {
   decodeFindingsReport,
   decodeIdsReport,
   decodeInventoryDocument,
+  decodeNodeMetadataSummary,
+  decodeNodeSummaryRowsReport,
   decodeOccurrencesReport,
   decodeViewReport,
 } from "../helpers/adapters/index.js";
@@ -124,13 +127,22 @@ interface GrammarRow {
    * directory (12.0), and whether the invocation leaves it created (13.5).
    */
   readonly hold?: { readonly path: string; readonly created: boolean };
+  /**
+   * The row's own workspace shape, in place of its table's — staged afresh
+   * for the row and for its canonical twin alike (e.g. a workspace failing
+   * `build`'s validations, for a gated read's report, 13.3).
+   */
+  readonly staging?: WorkspaceDecl;
 }
 
 /** One conformer's rows over one staged workspace shape. */
 interface GrammarTable {
   /** The conformer's `## CONF-…` name in CERTIFICATION_FIXTURES. */
   readonly conformer: string;
-  /** Staged afresh for every row, and for every canonical twin. */
+  /**
+   * Staged afresh for every row, and for every canonical twin, unless the
+   * row names its own staging.
+   */
   readonly staging: WorkspaceDecl;
   readonly rows: readonly GrammarRow[];
 }
@@ -278,7 +290,7 @@ async function checkRow(
   row: GrammarRow,
 ): Promise<void> {
   const context = `${table.conformer} ${spell(row.argv)} (${row.clause})`;
-  const workspace = await TestWorkspace.create(table.staging);
+  const workspace = await TestWorkspace.create(row.staging ?? table.staging);
   try {
     const before = await snapshotDirectory(workspace.root);
     const result = await runProduct(binding, {
@@ -367,7 +379,7 @@ async function checkStdout(
       expectation.check(parseJsonStdout(result, context), context);
       return;
     case "like": {
-      const twin = await TestWorkspace.create(table.staging);
+      const twin = await TestWorkspace.create(row.staging ?? table.staging);
       try {
         const canonicalContext = `${context}: the canonical spelling ${spell(expectation.canonical)}`;
         const canonical = await runProduct(binding, {
@@ -1260,6 +1272,558 @@ const ORPHAN_TABLE: GrammarTable = {
   ],
 };
 
+// --- CONF-VALID (CERTIFICATIONS.md §CONF-VALID: `build`, `query node`, and
+// `query nodes`) --------------------------------------------------------------
+
+/**
+ * One finding-free spec source as §CONF-VALID's scope admits — sections
+ * carrying `id` and `tags` props, `a` tagged `x` and `y` and `b` untagged —
+ * so a `--tag` filter selects a proper subset (11.1).
+ */
+const VALID_STAGING: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": SPEC_GROUP_CONFIG,
+    "specs/A.mdx": `<S id="a" tags="x y">
+Alpha text.
+</S>
+
+<S id="b">
+Beta text.
+</S>
+`,
+  },
+};
+
+/**
+ * The same shape failing `build`'s validations with one condition 4 (14.4),
+ * as T1.4-1's whitespace arms stage one: the second section's `id` spells a
+ * segment containing U+0020 (1.4). `a` keeps its defined identity, and `b c`
+ * is a spelled identity (11.2), malformed.
+ */
+const VALID_FAILING_STAGING: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": SPEC_GROUP_CONFIG,
+    "specs/A.mdx": `<S id="a">
+Alpha text.
+</S>
+
+<S id="b c">
+Beta text.
+</S>
+`,
+  },
+};
+
+const VALID_FILE = "specs/A.mdx";
+const VALID_TARGET = `${VALID_FILE}#a`;
+/** Every requirement node of VALID_STAGING: the root and its sections. */
+const VALID_NODES = [VALID_FILE, VALID_TARGET, `${VALID_FILE}#b`];
+/** `VALID_TARGET` with a U+FFFD appended: a malformed value (12.0). */
+const MALFORMED_NODE = VALID_TARGET + String.fromCodePoint(0xfffd);
+
+/**
+ * A `query nodes` answer (11.1) in the row form §CONF-VALID's scope reports
+ * (identity and tags), its rows exactly the nodes `identities` names —
+ * compared as a set: 11.1 pins "stable, deterministic ordering" alone, and a
+ * `like` row compares the order byte-wise against the canonical spelling's.
+ */
+function nodesOf(identities: readonly string[]): DocumentCheck {
+  return (doc, context) => {
+    const actual = JSON.stringify(
+      decodeNodeSummaryRowsReport(doc, context)
+        .map((row) => row.identity)
+        .sort(),
+    );
+    const expected = JSON.stringify([...identities].sort());
+    if (actual !== expected) {
+      fail(
+        `${context}: the query nodes rows are the nodes ${expected} (SPEC ` +
+          `11.1: the requirement nodes its filters select, conjunctively), ` +
+          `but they are ${actual}`,
+      );
+    }
+  };
+}
+
+/**
+ * A `query node` answer (11.1) for `identity` in the form §CONF-VALID's
+ * scope reports — identity, tags in the set form of 12.7, metadataHash.
+ */
+function nodeOf(identity: string, tags: readonly string[]): DocumentCheck {
+  return (doc, context) => {
+    const node = decodeNodeMetadataSummary(doc, context);
+    const actual = JSON.stringify({ identity: node.identity, tags: node.tags });
+    const expected = JSON.stringify({ identity, tags });
+    if (actual !== expected) {
+      fail(
+        `${context}: the query node answer reports ${expected} (SPEC 11.1: ` +
+          `the queried node's identity and tags; 12.7: a tag set in byte ` +
+          `order), but it reports ${actual}`,
+      );
+    }
+  };
+}
+
+/**
+ * The gated report of 13.3 over VALID_FAILING_STAGING, in the findings
+ * report form of 12.7: exactly the findings a `build` would report — one
+ * condition 4, `invalid-segment-or-tag`, located in `specs/A.mdx` (14: one
+ * finding per offending `id` attribute, located at the attribute).
+ */
+const VALID_GATED_REPORT: DocumentCheck = (doc, context) => {
+  const actual = JSON.stringify(
+    decodeFindingsReport(doc, context).findings.map((finding) => ({
+      code: finding.code,
+      files: finding.locations.map((location) => location.file),
+    })),
+  );
+  const expected = JSON.stringify([
+    { code: "invalid-segment-or-tag", files: [VALID_FILE] },
+  ]);
+  if (actual !== expected) {
+    fail(
+      `${context}: the gated report carries exactly the findings a build ` +
+        `would report, ${expected} (13.3; SPEC 14: one condition-4 finding ` +
+        `per offending \`id\` attribute), but it carries ${actual}`,
+    );
+  }
+};
+
+const GATED_READ =
+  '13.3: "When the current workspace fails the validations of `xspec ' +
+  "build` … `ids`, `show`, `coverage`, `impact`, `review`, and `query` " +
+  'report exactly those findings and exit 1 without answering"';
+const ARGUMENT_CHECKS_FIRST =
+  'SPEC 12.0: "The reads 13.3 gates … observe the same precedence: their ' +
+  "argument checks precede the invalid-workspace report of 13.3, so a " +
+  "usage-error argument — an unknown or wrong-kind name included — exits " +
+  '2 whatever findings the workspace carries"';
+const IDENTITY_CHECK =
+  'SPEC 12.0: each argument check is "judged from what it consults, ' +
+  "identically on valid and failing workspaces: … a requirement-node or " +
+  "graph-node identity parse-local against the named file … — a " +
+  "discovered path of the identity's kind (11.1), an `id` over the file's " +
+  'spelled identities (11.2)"';
+const UNKNOWN_NAME =
+  'SPEC 12.0: exit 2 for "unknown … node identities … named in ' +
+  'arguments", a plain usage error';
+const TAG_SYNTACTIC =
+  '11.1: "`--tag` accepts any well-formed tag (1.4), whatever the ' +
+  "workspace contains — acceptance is syntactic … a spelling no tag can " +
+  "have (empty, or containing whitespace, …) is a malformed value, a " +
+  "usage error (12.0), while a well-formed tag no node carries matches " +
+  'nothing, exit 0"';
+const COVERAGE_VOCABULARY =
+  'SPEC 12.0: of the syntax class is "every invalid flag value … that a ' +
+  'fixed vocabulary … decides — … `query nodes --coverage`"; 11.1: ' +
+  "`[--coverage required|none]`";
+const SYNTAX_FIRST =
+  "SPEC 12.0: \"Within exit class 2, an error the invocation's arguments " +
+  "alone determine — the syntax class — is reported without loading " +
+  'configuration"';
+const VALID_NODE_A = nodeOf(VALID_TARGET, ["x", "y"]);
+
+const VALID_TABLE: GrammarTable = {
+  conformer: "CONF-VALID",
+  staging: VALID_STAGING,
+  rows: [
+    // Flag tokens anywhere, `query`'s subcommand among the remaining tokens.
+    {
+      argv: ["--json", "query", "nodes"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["query", "nodes", "--json"], nodesOf(VALID_NODES)),
+    },
+    {
+      argv: ["query", "--json", "nodes"],
+      clause: `${FLAGS_ANYWHERE}; ${SUBCOMMAND_ORDER}`,
+      exit: 0,
+      stdout: like(["query", "nodes", "--json"], nodesOf(VALID_NODES)),
+    },
+    {
+      argv: ["query", "--tag", "x", "nodes"],
+      clause: `${FLAGS_ANYWHERE}; ${SUBCOMMAND_ORDER}; ${ARITY_BY_NAME}`,
+      exit: 0,
+      stdout: like(["query", "nodes", "--tag", "x"], nodesOf([VALID_TARGET])),
+    },
+    {
+      argv: ["query", "node", "--json", VALID_TARGET],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["query", "node", VALID_TARGET, "--json"], VALID_NODE_A),
+    },
+    {
+      argv: ["--json", "build"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["build", "--json"], findingFreeReport),
+    },
+    {
+      argv: ["--config", "xspec.config.ts", "query", "nodes"],
+      clause: `${FLAGS_ANYWHERE}; ${ARITY_BY_NAME}`,
+      exit: 0,
+      stdout: like(
+        ["query", "nodes", "--config", "xspec.config.ts"],
+        nodesOf(VALID_NODES),
+      ),
+    },
+    // `query` answers in JSON without `--json` (12.0, 11).
+    {
+      argv: ["query", "nodes"],
+      clause: `${QUERY_JSON_ONLY}; 11.1: \`nodes\` unfiltered lists every requirement node`,
+      exit: 0,
+      stdout: like(["query", "nodes", "--json"], nodesOf(VALID_NODES)),
+    },
+    {
+      argv: ["query", "node", VALID_TARGET],
+      clause: QUERY_JSON_ONLY,
+      exit: 0,
+      stdout: like(["query", "node", VALID_TARGET, "--json"], VALID_NODE_A),
+    },
+    // `--` ends flag reading (12.0).
+    {
+      argv: ["build", "--json", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["build", "--json"], findingFreeReport),
+    },
+    {
+      argv: ["query", "nodes", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["query", "nodes"], nodesOf(VALID_NODES)),
+    },
+    {
+      argv: ["--", "build"],
+      clause: `${DASH_DASH}: the command word included`,
+      exit: 0,
+      stdout: like(["build"]),
+    },
+    {
+      argv: ["query", "node", "--", VALID_TARGET],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["query", "node", VALID_TARGET], VALID_NODE_A),
+    },
+    {
+      argv: ["query", "node", "--", "--json"],
+      clause: `${DASH_DASH}, so \`--json\` is \`query node\`'s operand, an identity no discovered file spells (${UNKNOWN_NAME}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--", "--json"],
+      clause: `${DASH_DASH}, so \`--json\` is no flag but \`build\`'s surplus operand (${SURPLUS}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    // Arity fixed by name: a value-taking flag takes the whole next token.
+    {
+      argv: ["build", "--test-hold", "--json"],
+      clause: `${ARITY_BY_NAME}: \`--test-hold\` takes \`--json\` as its value (CERTIFICATIONS.md preamble: "so \`build --test-hold --json\` consumes \`--json\` as its value and leaves JSON out of effect"), and is \`build\`'s unknown flag (${NOT_MUTATING}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "--json", created: false },
+    },
+    {
+      argv: ["query", "nodes", "--tag", "--json"],
+      clause: `${WHOLE_NEXT_TOKEN}, so \`--tag\` names \`--json\`, a well-formed tag no node carries — ${TAG_SYNTACTIC}; ${QUERY_JSON_ONLY}`,
+      exit: 0,
+      stdout: { form: "document", check: nodesOf([]) },
+    },
+    {
+      argv: ["query", "node", "--config", "--json"],
+      clause: `${WHOLE_NEXT_TOKEN}, so \`--config\` takes \`--json\` and \`query node\` lacks its operand (${NO_COMMAND}), of the syntax class — ${SYNTAX_FIRST}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--json", "--config", "--json"],
+      clause: `${WHOLE_NEXT_TOKEN}, so \`--config\` names the path \`--json\`; ${CONFIG_AS_GIVEN}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "--json",
+      },
+    },
+    {
+      argv: ["nosuch", "--bogus", "--json"],
+      clause: `${NO_VALUE_UNLESS_KNOWN}, so \`--json\` is read as a flag; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // `--test-hold` beside a command that is not mutating (13.5).
+    {
+      argv: ["build", "--test-hold", "h", "--json"],
+      clause: `${UNKNOWN_FLAG}, \`build\` not mutating (${NOT_MUTATING}); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: ["--test-hold", "h", "build"],
+      clause: `${ARITY_BY_NAME}: before the command word \`--test-hold\` takes \`h\`, and \`build\` is the command, whose unknown flag it is (${UNKNOWN_FLAG}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "h", created: false },
+    },
+    // Usage errors of the syntax class (12.0), each in the error document
+    // whenever JSON output is in effect — `query` always.
+    {
+      argv: ["--json", "nosuch"],
+      clause: `${NO_COMMAND}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: [],
+      clause: `${NO_COMMAND}: no command word; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["query"],
+      clause: `${SUBCOMMAND_ORDER}, and they "MUST match the command's synopsis exactly" — \`query\` names a subcommand (11.1); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nosuch"],
+      clause: `${NO_COMMAND}: an unknown subcommand; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "extra"],
+      clause: `${SURPLUS} (11.1: \`query nodes\` takes no operand); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node", VALID_TARGET, "extra"],
+      clause: `${SURPLUS} (11.1: \`query node <node>\` takes one operand); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node"],
+      clause: `${NO_COMMAND}: a missing operand (11.1: \`query node <node>\`); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "reachable", "--from", VALID_TARGET],
+      clause: `${MISSING_REQUIRED}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "extra", "--json"],
+      clause: `${SURPLUS} (12.1: \`build\` takes no operand); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "extra"],
+      clause: `${SURPLUS}; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["query", "nodes", "extra", "--config", "nosuch.ts"],
+      clause: `${SURPLUS}; ${SYNTAX_FIRST}, so no configuration error; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--json", "--json"],
+      clause: `${REPEATED}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--tag", "x", "--tag", "y"],
+      clause: `${REPEATED}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--json", "--json"],
+      clause: `${REPEATED} — decided from the arguments alone, for every command; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--json", "--config"],
+      clause: `${MISSING_VALUE}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--tag"],
+      clause: `${MISSING_VALUE}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--config=x", "--json"],
+      clause:
+        'SPEC 12.0: "`--name=value` is not a spelling of any flag" — an ' +
+        'unknown flag — and "a `--` token naming no flag of any command ' +
+        'takes no value", so the `--json` after it is read as a flag; ' +
+        PLAIN_DOCUMENT,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node", VALID_TARGET, "--tag", "x"],
+      clause: `${UNKNOWN_FLAG} — 11.1 names \`--tag\` for \`query nodes\` alone; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["view", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${jsonOnly("`view`")}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // Malformed values and the value spellings of the syntax class.
+    {
+      argv: ["build", "--json", "--config", MALFORMED_CONFIG],
+      clause: `${MALFORMED} — a malformed \`--config\` path is no configuration error but a plain usage error; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node", MALFORMED_NODE],
+      clause: `${MALFORMED}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node", `${VALID_TARGET}#b`, "--config", "nosuch.ts"],
+      clause: `${MALFORMED_IDENTITY} — ${SYNTAX_FIRST}, so no configuration error; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--tag", "x y"],
+      clause: `${TAG_SYNTACTIC}: a spelling containing whitespace; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--tag", "", "--config", "nosuch.ts"],
+      clause: `${TAG_SYNTACTIC}: the empty spelling — ${SYNTAX_FIRST}, so no configuration error; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--tag", "zz"],
+      clause: `${TAG_SYNTACTIC}; ${QUERY_JSON_ONLY}`,
+      exit: 0,
+      stdout: { form: "document", check: nodesOf([]) },
+    },
+    {
+      argv: ["query", "nodes", "--coverage", "bogus"],
+      clause: `${COVERAGE_VOCABULARY}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--file", "../A.mdx"],
+      clause: `${FILE_OUTSIDE_ROOT}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // A node identity the arguments name, judged against the workspace.
+    {
+      argv: ["query", "node", `${VALID_FILE}#zz`],
+      clause: `${UNKNOWN_NAME}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // Configuration located at the path `--config` names (12.0, 14).
+    {
+      argv: ["build", "--json", "--config", "nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${JSON_IN_EFFECT}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "nosuch.ts",
+      },
+    },
+    {
+      argv: ["query", "nodes", "--config", "./nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${QUERY_JSON_ONLY}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "./nosuch.ts",
+      },
+    },
+    // The gated reads (13.3) on a workspace failing `build`'s validations:
+    // the report in JSON with or without `--json`, past the argument checks.
+    {
+      argv: ["query", "nodes"],
+      clause: `${QUERY_JSON_ONLY}; ${GATED_READ}`,
+      exit: 1,
+      stdout: like(["query", "nodes", "--json"], VALID_GATED_REPORT),
+      staging: VALID_FAILING_STAGING,
+    },
+    {
+      argv: ["query", "node", VALID_TARGET],
+      clause: `${IDENTITY_CHECK}: the check passes; ${QUERY_JSON_ONLY}; ${GATED_READ}`,
+      exit: 1,
+      stdout: like(
+        ["query", "node", VALID_TARGET, "--json"],
+        VALID_GATED_REPORT,
+      ),
+      staging: VALID_FAILING_STAGING,
+    },
+    {
+      argv: ["query", "node", VALID_FILE],
+      clause: `${IDENTITY_CHECK}: a bare path names its discovered file's root (11.1), so the check passes; ${QUERY_JSON_ONLY}; ${GATED_READ}`,
+      exit: 1,
+      stdout: like(["query", "node", VALID_FILE, "--json"], VALID_GATED_REPORT),
+      staging: VALID_FAILING_STAGING,
+    },
+    {
+      argv: ["query", "node", `${VALID_FILE}#b c`],
+      clause: `${IDENTITY_CHECK}: \`b c\` is spelled (11.2: "that value, well-formed or not, is its spelled identity"), so the check passes; ${QUERY_JSON_ONLY}; ${GATED_READ}`,
+      exit: 1,
+      stdout: like(
+        ["query", "node", `${VALID_FILE}#b c`, "--json"],
+        VALID_GATED_REPORT,
+      ),
+      staging: VALID_FAILING_STAGING,
+    },
+    {
+      argv: ["query", "node", `${VALID_FILE}#zz`],
+      clause: `${ARGUMENT_CHECKS_FIRST}: no section of \`${VALID_FILE}\` spells \`zz\` (${IDENTITY_CHECK}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      staging: VALID_FAILING_STAGING,
+    },
+    {
+      argv: ["query", "node", "specs/B.mdx#a"],
+      clause: `${ARGUMENT_CHECKS_FIRST}: \`specs/B.mdx\` is no discovered path (${IDENTITY_CHECK}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      staging: VALID_FAILING_STAGING,
+    },
+  ],
+};
+
 // --- the tests ----------------------------------------------------------------
 
 /**
@@ -1272,6 +1836,7 @@ const GRAMMAR_TABLES: readonly GrammarTable[] = [
   DISC_TABLE,
   AVAIL_TABLE,
   ORPHAN_TABLE,
+  VALID_TABLE,
 ];
 
 for (const table of GRAMMAR_TABLES) {
