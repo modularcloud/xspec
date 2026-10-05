@@ -43,12 +43,19 @@
 
 import { test } from "vitest";
 import {
+  decodeEdgesReport,
   decodeErrorDocument,
   decodeFindingsReport,
+  decodeIdsReport,
+  decodeInventoryDocument,
   decodeOccurrencesReport,
   decodeViewReport,
 } from "../helpers/adapters/index.js";
-import type { Finding } from "../helpers/adapters/index.js";
+import type {
+  Finding,
+  GraphEdge,
+  IdsFileEntry,
+} from "../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   assertExitCode,
@@ -443,10 +450,15 @@ const NO_VALUE_UNLESS_KNOWN =
 const REPEATED =
   'SPEC 12.0: "repeating a flag is a usage error", and "a repeated ' +
   '`--json`, itself a usage error, still puts it in effect"';
-const JSON_ONLY =
-  'SPEC 12.0: JSON output is in effect also "when the invoked surface is ' +
-  "JSON-only, a single JSON document its only output form with or without " +
-  '`--json` (10.7, 11, 12.6)" — `view` and `occurrences` among them (11)';
+/** SPEC 12.0's JSON-only rule, naming the row's surfaces among them. */
+function jsonOnly(surfaces: string): string {
+  return (
+    'SPEC 12.0: JSON output is in effect also "when the invoked surface is ' +
+    "JSON-only, a single JSON document its only output form with or without " +
+    `\`--json\` (10.7, 11, 12.6)" — ${surfaces} among them (11)`
+  );
+}
+const JSON_ONLY = jsonOnly("`view` and `occurrences`");
 const MALFORMED =
   'SPEC 12.0: "An argument value is well-formed only when its bytes are ' +
   "valid UTF-8 and it contains no U+FFFD (REPLACEMENT CHARACTER); any " +
@@ -456,8 +468,30 @@ const CONFIG_AS_GIVEN =
   'SPEC 14: "a `--config` path nothing occupies … is reported as the ' +
   'argument value exactly as given (12.0)" in a configuration error ' +
   "(14.14), `configuration-error`";
+const SUBCOMMAND_ORDER =
+  'SPEC 12.0: "once the flags, their values, and any `--` are removed, the ' +
+  "remaining tokens are, in order, the command, its subcommand where it " +
+  'has one (`query`, `review`), and its operands"';
+const MALFORMED_IDENTITY =
+  'SPEC 12.0: "a spelling containing more than one `#` is a malformed ' +
+  'value, a usage error", of the syntax class ("a `--to` or `--tag` ' +
+  'spelling malformed as an identity or tag")';
+const INVALID_KINDS =
+  '11.1: in a `--kinds` list, "an element that is empty — a leading, ' +
+  "trailing, or doubled comma — or outside the vocabulary is an invalid " +
+  'flag value (12.0)", of the syntax class (12.0: "each `--kinds` element ' +
+  'outside its vocabulary")';
+const MISSING_REQUIRED =
+  'SPEC 12.0: "a missing required flag or argument" is a usage error of ' +
+  "the syntax class — 11.1's synopsis `xspec query reachable --from " +
+  "<graph-node> --to <graph-node> [--kinds <kinds>]` requires both";
+const FILE_OUTSIDE_ROOT =
+  '11.1: "a `--file` pattern resolving outside the workspace root is an ' +
+  'invalid flag value (12.0)" — 12.0: "decided by its spelling alone (7)", ' +
+  'of the syntax class; 12.3: `ids --file <glob>` follows "the rules of ' +
+  '7, as in 11"';
 
-// --- CONF-AVAIL (CERTIFICATIONS.md §CONF-AVAIL: `view` and `occurrences`) -----
+// --- stagings shared by the tables --------------------------------------------
 
 /** One spec group of `.mdx` sources (SPEC 7.1), no other configuration. */
 const SPEC_GROUP_CONFIG = `import { defineConfig } from "xspec"
@@ -468,6 +502,406 @@ export default defineConfig({
   }
 })
 `;
+
+// --- CONF-DISC (CERTIFICATIONS.md §CONF-DISC: `build`, `check`, `ids`,
+// `inventory`, and `query edges`) ----------------------------------------------
+
+/**
+ * One trivial single-section `.mdx` source in one spec group, as
+ * §CONF-DISC's scope admits: no code group (so the conformer never loads
+ * TypeScript), Markdown emission absent — a valid workspace `build`
+ * regenerates and `ids` lists.
+ */
+const DISC_STAGING: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": SPEC_GROUP_CONFIG,
+    "specs/A.mdx": `<S id="a">
+Alpha text.
+</S>
+`,
+  },
+};
+
+const DISC_FILE = "specs/A.mdx";
+/** The workspace's one `contains` edge: the root to its section (5.2). */
+const DISC_EDGES: readonly GraphEdge[] = [
+  { from: DISC_FILE, to: `${DISC_FILE}#a`, kind: "contains" },
+];
+/** The configuration file name with a U+FFFD appended: malformed (12.0). */
+const MALFORMED_CONFIG = "xspec.config.ts" + String.fromCodePoint(0xfffd);
+
+/**
+ * An `ids` answer (12.3) listing exactly `files`: requirement IDs grouped by
+ * file, files in byte order of path, IDs in document order.
+ */
+function idsOf(files: readonly IdsFileEntry[]): DocumentCheck {
+  return (doc, context) => {
+    const actual = JSON.stringify(
+      decodeIdsReport(doc, context).files.map(({ file, ids }) => ({
+        file,
+        ids,
+      })),
+    );
+    const expected = JSON.stringify(files);
+    if (actual !== expected) {
+      fail(
+        `${context}: the ids document lists ${expected} (SPEC 12.3: ` +
+          `requirement IDs grouped by file, files in byte order of path, ` +
+          `IDs in document order), but it lists ${actual}`,
+      );
+    }
+  };
+}
+
+/** A `query edges` answer (11.1) holding exactly `edges`, in order. */
+function edgesOf(edges: readonly GraphEdge[]): DocumentCheck {
+  return (doc, context) => {
+    const actual = JSON.stringify(
+      decodeEdgesReport(doc, context).map(({ from, to, kind }) => ({
+        from,
+        to,
+        kind,
+      })),
+    );
+    const expected = JSON.stringify(edges);
+    if (actual !== expected) {
+      fail(
+        `${context}: the edge enumeration is ${expected} (SPEC 11.1: the ` +
+          `edges the filters select; 5.2: a root contains its top-level ` +
+          `sections), but it is ${actual}`,
+      );
+    }
+  };
+}
+
+/**
+ * An `inventory` answer (11.6) in its full 12.7 document form, finding-free,
+ * its discovered sources exactly `sources`, in byte order of path.
+ */
+function inventoryOf(sources: readonly string[]): DocumentCheck {
+  return (doc, context) => {
+    const inventory = decodeInventoryDocument(doc, context);
+    assertNoFindings(
+      inventory.findings,
+      context,
+      "an inventory over a workspace holding no recorded state carries no " +
+        "finding (SPEC 11.6: condition 23 is the only finding an inventory " +
+        "answer ever carries)",
+    );
+    const actual = JSON.stringify(inventory.sources.map((entry) => entry.path));
+    const expected = JSON.stringify(sources);
+    if (actual !== expected) {
+      fail(
+        `${context}: the inventory lists the discovered sources ${expected} ` +
+          `(SPEC 11.6: every discovered source file, in byte order of ` +
+          `path), but it lists ${actual}`,
+      );
+    }
+  };
+}
+
+const DISC_IDS = idsOf([{ file: DISC_FILE, ids: ["a"] }]);
+const DISC_INVENTORY = inventoryOf([DISC_FILE]);
+const QUERY_JSON_ONLY = jsonOnly("`query`");
+const INVENTORY_JSON_ONLY = jsonOnly("`inventory`");
+
+const DISC_TABLE: GrammarTable = {
+  conformer: "CONF-DISC",
+  staging: DISC_STAGING,
+  rows: [
+    // Flag tokens anywhere, the subcommand among the remaining tokens (12.0).
+    {
+      argv: ["--json", "ids"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["ids", "--json"], DISC_IDS),
+    },
+    {
+      argv: ["--json", "build"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["build", "--json"], findingFreeReport),
+    },
+    {
+      argv: ["--json", "inventory"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["inventory", "--json"], DISC_INVENTORY),
+    },
+    {
+      argv: ["--config", "xspec.config.ts", "ids", "--json"],
+      clause: `${FLAGS_ANYWHERE}; ${ARITY_BY_NAME}`,
+      exit: 0,
+      stdout: like(["ids", "--json", "--config", "xspec.config.ts"], DISC_IDS),
+    },
+    {
+      argv: ["query", "--from", DISC_FILE, "edges"],
+      clause: `${FLAGS_ANYWHERE}; ${SUBCOMMAND_ORDER}`,
+      exit: 0,
+      stdout: like(
+        ["query", "edges", "--from", DISC_FILE],
+        edgesOf(DISC_EDGES),
+      ),
+    },
+    // The JSON-only surfaces answer in JSON without `--json` (12.0, 11).
+    {
+      argv: ["query", "edges"],
+      clause: `${QUERY_JSON_ONLY}; 11.1: \`edges\` with no filter enumerates every edge`,
+      exit: 0,
+      stdout: { form: "document", check: edgesOf(DISC_EDGES) },
+    },
+    {
+      argv: ["inventory"],
+      clause: `${INVENTORY_JSON_ONLY}; §CONF-DISC's Scope: "\`inventory\` (11.6) in its full 12.7 document form"`,
+      exit: 0,
+      stdout: like(["inventory", "--json"], DISC_INVENTORY),
+    },
+    // `--` ends flag reading (12.0).
+    {
+      argv: ["ids", "--json", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["ids", "--json"], DISC_IDS),
+    },
+    {
+      argv: ["build", "--json", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["build", "--json"], findingFreeReport),
+    },
+    {
+      argv: ["--", "build"],
+      clause: `${DASH_DASH}: the command word included`,
+      exit: 0,
+      stdout: like(["build"]),
+    },
+    {
+      argv: ["ids", "--", "--json"],
+      clause: `${DASH_DASH}, so \`--json\` is no flag but \`ids\`'s surplus operand (${SURPLUS}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    // Arity fixed by name: a value-taking flag takes the whole next token.
+    {
+      argv: ["build", "--test-hold", "--json"],
+      clause: `${ARITY_BY_NAME}: \`--test-hold\` takes \`--json\` as its value (CERTIFICATIONS.md preamble: "so \`build --test-hold --json\` consumes \`--json\` as its value and leaves JSON out of effect"), and is \`build\`'s unknown flag (${NOT_MUTATING}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "--json", created: false },
+    },
+    {
+      argv: ["build", "--base", "--json"],
+      clause: `${ARITY_BY_NAME}: \`--base\` (9, 10.7) takes \`--json\` as its value and is \`build\`'s unknown flag (${UNKNOWN_FLAG}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["build", "--name", "--json"],
+      clause: `${ARITY_BY_NAME}: \`--name\` (10.7) takes \`--json\` as its value and is \`build\`'s unknown flag (${UNKNOWN_FLAG}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["nosuch", "--config", "--json"],
+      clause: `${ARITY_BY_NAME}: \`--config\` takes \`--json\` as its value, so JSON output is out of effect for the unknown command (${NO_COMMAND}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["nosuch", "--bogus", "--json"],
+      clause: `${NO_VALUE_UNLESS_KNOWN}, so \`--json\` is read as a flag; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--from", "--json"],
+      clause: `${WHOLE_NEXT_TOKEN}, so \`--from\` names the path \`--json\` — 11.1: "a path in no configured group is unknown (12.0)", a plain usage error; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--json", "--config", "--json"],
+      clause: `${WHOLE_NEXT_TOKEN}, so \`--config\` names the path \`--json\`; ${CONFIG_AS_GIVEN}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "--json",
+      },
+    },
+    // `--test-hold` beside a command that is not mutating (13.5).
+    {
+      argv: ["check", "--test-hold", "h", "--json"],
+      clause: `${UNKNOWN_FLAG}, \`check\` not mutating (${NOT_MUTATING}); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: ["--test-hold", "h", "build"],
+      clause: `${ARITY_BY_NAME}: before the command word \`--test-hold\` takes \`h\`, and \`build\` is the command, whose unknown flag it is (${UNKNOWN_FLAG}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "h", created: false },
+    },
+    // Usage errors of the syntax class (12.0), each in the error document
+    // whenever JSON output is in effect — decided before any of the
+    // fixture's scope refusals, which the remaining rows reach no further.
+    {
+      argv: ["--json", "nosuch"],
+      clause: `${NO_COMMAND}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: [],
+      clause: `${NO_COMMAND}: no command word; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["query"],
+      clause: `${SUBCOMMAND_ORDER}, and they "MUST match the command's synopsis exactly" — \`query\` names a subcommand (11.1); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nosuch"],
+      clause: `${NO_COMMAND}: an unknown subcommand; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "extra"],
+      clause: `${SURPLUS} (11.1: \`query edges\` takes no operand); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "extra"],
+      clause: `${SURPLUS} (11.1: \`query nodes\` takes no operand); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node"],
+      clause: `${NO_COMMAND}: a missing operand (11.1: \`query node <node>\`); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "reachable", "--from", DISC_FILE],
+      clause: `${MISSING_REQUIRED}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["inventory", "extra"],
+      clause: `${SURPLUS} (11.6: \`inventory\` takes no operand); ${INVENTORY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "extra", "--json"],
+      clause: `${SURPLUS} — 12.0's own example, \`xspec ids extra\`; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--tree", "extra", "--json"],
+      clause: `${SURPLUS} — \`--tree\` is \`ids\`'s own flag (12.3); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["check", "extra"],
+      clause: `${SURPLUS} (12.2: \`check\` takes no operand); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["ids", "--json", "--json"],
+      clause: `${REPEATED}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--json", "--config"],
+      clause: `${MISSING_VALUE}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--config=x", "--json"],
+      clause:
+        'SPEC 12.0: "`--name=value` is not a spelling of any flag" — an ' +
+        'unknown flag — and "a `--` token naming no flag of any command ' +
+        'takes no value", so the `--json` after it is read as a flag; ' +
+        PLAIN_DOCUMENT,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["view", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${jsonOnly("`view`")}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--json", "--config", MALFORMED_CONFIG],
+      clause: `${MALFORMED} — a malformed \`--config\` path is no configuration error but a plain usage error; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--from", `${DISC_FILE}#a#b`],
+      clause: `${MALFORMED_IDENTITY}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--to", `${DISC_FILE}#a#b`],
+      clause: `${MALFORMED_IDENTITY}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--kinds", "contains,,embeds"],
+      clause: `${INVALID_KINDS}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--json", "--file", "../A.mdx"],
+      clause: `${FILE_OUTSIDE_ROOT}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // Configuration located at the path `--config` names (12.0, 14).
+    {
+      argv: ["build", "--json", "--config", "./nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${JSON_IN_EFFECT}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "./nosuch.ts",
+      },
+    },
+    {
+      argv: ["inventory", "--config", "./nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${INVENTORY_JSON_ONLY}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "./nosuch.ts",
+      },
+    },
+  ],
+};
+
+// --- CONF-AVAIL (CERTIFICATIONS.md §CONF-AVAIL: `view` and `occurrences`) -----
 
 /**
  * One finding-free spec source as §CONF-AVAIL's scope admits: a section `a`,
@@ -834,7 +1268,11 @@ const ORPHAN_TABLE: GrammarTable = {
  */
 const TABLE_TIMEOUT_MS = 120_000;
 
-const GRAMMAR_TABLES: readonly GrammarTable[] = [AVAIL_TABLE, ORPHAN_TABLE];
+const GRAMMAR_TABLES: readonly GrammarTable[] = [
+  DISC_TABLE,
+  AVAIL_TABLE,
+  ORPHAN_TABLE,
+];
 
 for (const table of GRAMMAR_TABLES) {
   test(

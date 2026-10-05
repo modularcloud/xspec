@@ -36,6 +36,31 @@
 //   14.19 (`#` and U+FFFD on either side; 7.1's path-character bar and a
 //   missing `.mdx` on the spec side), and 14.20 (spec sources by the MDX-lite
 //   lexer below, code sources by TypeScript 5.9.3, encoding on both sides).
+// - Invocation grammar (CERTIFICATIONS.md preamble; SPEC 12.0): arguments
+//   are read under 12.0's universal grammar (`readInvocation`) — flag tokens
+//   anywhere, before the command word, between it and `query`'s subcommand
+//   or the operands, or after them; a value-taking flag taking the whole
+//   next token, whatever it looks like, its arity fixed by name for every
+//   command (`FLAG_ARITY`), so `build --test-hold --json` reads `--json` as
+//   `--test-hold`'s value and leaves JSON out of effect; `--` ending flag
+//   reading; the remaining tokens matching the synopsis exactly (a surplus
+//   operand, a missing operand or required flag, and a flag the command does
+//   not accept are usage errors); a repeated flag, `--name=value`, and a
+//   malformed (U+FFFD) value are usage errors. JSON output is in effect when
+//   a `--json` token is read as a flag or the invoked surface is JSON-only
+//   (`query` and `inventory` among the served ones; `occurrences`, `view`,
+//   `at`, `version`, and `review export` beside them), and then every usage
+//   error prints the 12.7 error document — `null`/`null` for a plain usage
+//   error, `configuration-error` and its concerned path for 14.14, a
+//   `--config` path nothing occupies reported exactly as given (14). Every
+//   syntax-class check precedes the scope refusals below (exit 70): a
+//   command outside the surface (`show`, `view`, …) is refused once the
+//   checks the arguments decide for every command pass; `query`'s other
+//   subcommands, and the flags `ids` (`--tree`, `--file`, `--unreferenced`)
+//   and `query edges` (`--to`, `--kinds`) name but this fixture does not
+//   serve, once the arguments match the synopsis and the served surface's
+//   value spellings pass — `--from`'s and `--to`'s graph-node spellings,
+//   `--kinds`' vocabulary, and `--file`'s outside-root rule.
 // - Contracts under certification: glob semantics of 7 — `*`, `?`, `**`
 //   (any segments only as a whole pattern segment; each `*` of an in-segment
 //   `**` the single-segment wildcard), byte-wise case-sensitive matching,
@@ -150,11 +175,13 @@
 //   workspace-relative path (UTF-8 byte comparison, not code-unit order), IDs
 //   within a file in document order; `--json` emits the single JSON document
 //   as the entire stdout (12.0).
-// - `inventory` (11.6): the full 12.7 inventory document — anchoring, the
-//   resolved configuration view with every glob exactly as configured, the
-//   discovered sources with their group memberships, the derived-file map,
-//   the (empty) record, the graph-data area, the journal's occupancy, and
-//   the (empty) session list — parsing no source and writing nothing.
+// - `inventory` (11.6): JSON-only — the full 12.7 inventory document is the
+//   entire stdout with or without `--json`, and so is the 12.7 error
+//   document on exit 2 (12.0): anchoring, the resolved configuration view
+//   with every glob exactly as configured, the discovered sources with their
+//   group memberships, the derived-file map, the (empty) record, the
+//   graph-data area, the journal's occupancy, and the (empty) session list —
+//   parsing no source and writing nothing.
 // - `query edges [--from <graph-node>]` (11.1): JSON-only — the single edge
 //   enumeration `{"edges": [{"from", "to", "kind"}, …]}` is the entire
 //   stdout with or without `--json`, and so is the 12.7 error document on
@@ -335,9 +362,10 @@ async function findConfigPath(cwd, configFlag) {
     if (!(await pathOccupied(abs))) {
       throw new UsageError(
         `configuration file not found: --config ${configFlag}`,
-        // Missing configuration: the concerned path is the file --config
-        // names, in the anchoring form (SPEC 14, 11.6).
-        { code: "configuration-error", path: anchoringPath(cwd, abs) },
+        // Missing configuration: a `--config` path nothing occupies is the
+        // one concerned path no physical resolution can spell, reported as
+        // the argument value exactly as given (SPEC 14, 12.0).
+        { code: "configuration-error", path: configFlag },
       );
     }
     return abs;
@@ -1893,47 +1921,314 @@ function emitFindings(io, json, findings) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Invocation grammar (SPEC 12.0)
+// ---------------------------------------------------------------------------
+
 /**
- * Parse flags per command. `flagSpec` maps flag names to "bool" | "value";
- * unknown and repeated flags are usage errors (SPEC 12.0).
+ * Every flag of every command with its arity, fixed by name (SPEC 12.0): 1
+ * for a flag taking the whole next token as its value, 0 for one taking
+ * none — the flags the synopses and defining sections name (6, 8, 9, 10.7,
+ * 11, 12, 13.5). A `--` token naming no flag of any command takes no value.
  */
-function parseArgs(argv, flagSpec, positionalRange) {
-  const flags = {};
-  const positionals = [];
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg.startsWith("--")) {
-      const kind = flagSpec[arg];
-      if (kind === undefined)
-        throw new UsageError(`unknown flag ${arg} (SPEC 12.0)`);
-      if (Object.hasOwn(flags, arg)) {
-        throw new UsageError(
-          `repeated flag ${arg}: a flag may be given at most once (SPEC 12.0)`,
-        );
-      }
-      if (kind === "bool") {
-        flags[arg] = true;
-      } else {
-        const value = argv[i + 1];
-        if (value === undefined)
-          throw new UsageError(`missing value for ${arg} (SPEC 12.0)`);
-        flags[arg] = value;
-        i += 1;
-      }
-    } else {
-      positionals.push(arg);
-    }
-  }
-  const [min, max] = positionalRange;
-  if (positionals.length < min || positionals.length > max) {
-    throw new UsageError(
-      `expected ${min === max ? String(min) : `${String(min)}-${String(max)}`} argument(s), got ${String(positionals.length)} (SPEC 12.0)`,
-    );
-  }
-  return { flags, positionals };
+const FLAG_ARITY = new Map([
+  ["--json", 0],
+  ["--preview", 0],
+  ["--tree", 0],
+  ["--text", 0],
+  ["--check", 0],
+  ["--unreferenced", 0],
+  ["--config", 1],
+  ["--test-hold", 1],
+  ["--file", 1],
+  ["--to", 1],
+  ["--from", 1],
+  ["--kinds", 1],
+  ["--group", 1],
+  ["--tag", 1],
+  ["--coverage", 1],
+  ["--base", 1],
+  ["--strategy", 1],
+  ["--name", 1],
+  ["--status", 1],
+  ["--note", 1],
+]);
+
+/** Every command of the product (12). */
+const PRODUCT_COMMANDS = new Set([
+  "build",
+  "check",
+  "ids",
+  "show",
+  "coverage",
+  "impact",
+  "review",
+  "query",
+  "occurrences",
+  "view",
+  "at",
+  "inventory",
+  "rename",
+  "move",
+  "version",
+]);
+
+/**
+ * The commands whose every surface is JSON-only (SPEC 12.0: 11's `query`,
+ * `occurrences`, `view`, `at`, and `inventory`; 12.6's `version`) — beside
+ * 10.7's `review export`, a subcommand's surface.
+ */
+const JSON_ONLY_COMMANDS = new Set([
+  "query",
+  "occurrences",
+  "view",
+  "at",
+  "inventory",
+  "version",
+]);
+
+/**
+ * Whether the invoked surface — the command word and, for `review`, its
+ * subcommand, both among the non-flag tokens (12.0) — is JSON-only, a single
+ * JSON document its only output form with or without `--json` (12.0).
+ */
+function isJsonOnlySurface(words) {
+  const [command, subcommand] = words;
+  return (
+    JSON_ONLY_COMMANDS.has(command) ||
+    (command === "review" && subcommand === "export")
+  );
 }
 
-const READ_FLAGS = { "--json": "bool", "--config": "value" };
+/**
+ * The synopses this fixture judges (SPEC 11.1, 11.6, 12.1–12.3): for each
+ * command it serves and for each `query` subcommand, the flags the synopsis
+ * or defining section names beside the globals `--json` and `--config`
+ * (12.0), the flags it requires, its operand count, whether this fixture
+ * serves it, and the named flags it does not serve. Every syntax-class
+ * check (12.0) runs before any scope refusal, so an unserved subcommand or
+ * flag is refused loudly (ScopeError, exit 70) only once the arguments
+ * match its synopsis — a usage error is never masked by a scope refusal.
+ * A command outside this map and `query` (`show`, `view`, …) is refused
+ * once the checks the arguments alone decide for every command have passed.
+ * @typedef {{ flags: readonly string[], required?: readonly string[],
+ *             operands: number, served: boolean,
+ *             unservedFlags?: readonly string[] }} Synopsis
+ * @type {Map<string, Synopsis>}
+ */
+const SYNOPSES = new Map([
+  ["build", { flags: [], operands: 0, served: true }],
+  ["check", { flags: [], operands: 0, served: true }],
+  [
+    "ids",
+    {
+      flags: ["--tree", "--file", "--unreferenced"],
+      operands: 0,
+      served: true,
+      unservedFlags: ["--tree", "--file", "--unreferenced"],
+    },
+  ],
+  ["inventory", { flags: [], operands: 0, served: true }],
+]);
+
+/** @type {Map<string, Synopsis>} */
+const QUERY_SYNOPSES = new Map([
+  ["node", { flags: [], operands: 1, served: false }],
+  [
+    "nodes",
+    {
+      flags: ["--group", "--file", "--tag", "--coverage"],
+      operands: 0,
+      served: false,
+    },
+  ],
+  [
+    "edges",
+    {
+      flags: ["--from", "--to", "--kinds"],
+      operands: 0,
+      served: true,
+      unservedFlags: ["--to", "--kinds"],
+    },
+  ],
+  ["subtree", { flags: [], operands: 1, served: false }],
+  ["ancestors", { flags: [], operands: 1, served: false }],
+  [
+    "reachable",
+    {
+      flags: ["--from", "--to", "--kinds"],
+      required: ["--from", "--to"],
+      operands: 0,
+      served: false,
+    },
+  ],
+]);
+
+/**
+ * An argument value is malformed when it is not valid UTF-8 or contains
+ * U+FFFD (SPEC 12.0); Node decodes argv lossily, an ill-formed byte arriving
+ * as U+FFFD, so the one test covers both.
+ */
+function isMalformedValue(value) {
+  return value.includes(REPLACEMENT_CHARACTER);
+}
+
+/**
+ * Read the arguments under the grammar of SPEC 12.0: flag tokens anywhere —
+ * before the command word, between it and its operands, or after them — a
+ * value-taking flag taking the whole next token, whatever it looks like, and
+ * `--` ending flag reading (dropped; every later token a non-flag token).
+ * Returns the flags (name to value, `true` for a flag taking none), the
+ * remaining non-flag tokens in order — the command, `query`'s subcommand,
+ * then the operands — whether a `--json` token was read as a flag (never as
+ * another flag's value), and the first syntax-class error met that the
+ * arguments decide for every command alike, if any.
+ */
+function readInvocation(argv) {
+  const flags = new Map();
+  const words = [];
+  let json = false;
+  let error = null;
+  const note = (message) => {
+    if (error === null) error = message;
+  };
+  let flagsEnded = false;
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (!flagsEnded && token === "--") {
+      flagsEnded = true;
+      continue;
+    }
+    if (!flagsEnded && token.startsWith("--")) {
+      if (token === "--json") json = true;
+      if (flags.has(token)) {
+        note(
+          `repeated flag ${token}: a flag may be given at most once (SPEC 12.0)`,
+        );
+      }
+      if (FLAG_ARITY.get(token) === 1) {
+        if (i + 1 >= argv.length) {
+          note(`flag ${token} lacks its value (SPEC 12.0)`);
+          flags.set(token, true);
+        } else {
+          i += 1;
+          const value = argv[i];
+          if (isMalformedValue(value)) {
+            note(
+              `malformed value for ${token}: not valid UTF-8, or containing U+FFFD (SPEC 12.0)`,
+            );
+          }
+          flags.set(token, value);
+        }
+      } else {
+        if (!FLAG_ARITY.has(token)) note(`unknown flag ${token} (SPEC 12.0)`);
+        flags.set(token, true);
+      }
+      continue;
+    }
+    if (isMalformedValue(token)) {
+      note(
+        "malformed argument: not valid UTF-8, or containing U+FFFD (SPEC 12.0)",
+      );
+    }
+    words.push(token);
+  }
+  return { flags, words, json, error };
+}
+
+/**
+ * The synopsis checks of SPEC 12.0's syntax class for one command or
+ * `query` subcommand (`spelled`): every flag given is one it accepts — its
+ * synopsis's or defining section's, or the global `--json` and `--config`
+ * (`--test-hold` belongs to the mutating commands alone, 13.5) — the
+ * operands match its synopsis in number, and its required flags are given.
+ */
+function checkSynopsis(spelled, synopsis, flags, operands) {
+  for (const name of flags.keys()) {
+    if (
+      name !== "--json" &&
+      name !== "--config" &&
+      !synopsis.flags.includes(name)
+    ) {
+      throw new UsageError(`unknown flag ${name} for ${spelled} (SPEC 12.0)`);
+    }
+  }
+  if (operands.length < synopsis.operands) {
+    throw new UsageError(`${spelled}: missing operand (SPEC 12.0)`);
+  }
+  if (operands.length > synopsis.operands) {
+    throw new UsageError(
+      `surplus operand ${operands[synopsis.operands]}: ${spelled} takes ${String(synopsis.operands)} operand(s) (SPEC 12.0)`,
+    );
+  }
+  for (const name of synopsis.required ?? []) {
+    if (!flags.has(name)) {
+      throw new UsageError(
+        `${spelled}: missing required flag ${name} (SPEC 11.1, 12.0)`,
+      );
+    }
+  }
+}
+
+/**
+ * A graph-node identity spelling's syntax (SPEC 1.5, 4.6, 12.0): at most one
+ * `#`, a non-empty path part, and, when a `#` is present, a non-empty id or
+ * unit part — judged from the argument alone, before configuration is
+ * loaded. Returns the path and the part after `#` (`null` without one).
+ */
+function graphNodeSpelling(flag, value) {
+  const parts = value.split("#");
+  if (parts.length > 2 || parts[0] === "" || parts[1] === "") {
+    throw new UsageError(
+      `query edges: malformed graph-node identity ${JSON.stringify(value)} for ${flag} (SPEC 1.5, 12.0)`,
+    );
+  }
+  return { path: parts[0], id: parts[1] ?? null };
+}
+
+/** The four edge kinds (SPEC 5): `query edges --kinds`' vocabulary (11.1). */
+const EDGE_KINDS = new Set(["contains", "depends", "embeds", "references"]);
+
+/**
+ * `query edges --kinds`' list (SPEC 11.1, 12.0): comma-separated elements
+ * drawn from the four edge kinds; an empty element — a leading, trailing,
+ * or doubled comma — or one outside the vocabulary is an invalid flag value
+ * of the syntax class.
+ */
+function checkEdgeKinds(value) {
+  for (const element of value.split(",")) {
+    if (!EDGE_KINDS.has(element)) {
+      throw new UsageError(
+        `query edges: invalid --kinds value ${JSON.stringify(value)}: ${element === "" ? "an empty element" : `${JSON.stringify(element)} is no edge kind`} (SPEC 11.1, 12.0)`,
+      );
+    }
+  }
+}
+
+/**
+ * A `--file` pattern's outside-root rule (SPEC 7, 11.1, 12.3), decided by
+ * its spelling alone — an invalid flag value of 12.0's syntax class: read
+ * as {@link validatedPattern} reads a configured glob, a leading `/` or a
+ * depth falling below zero lies outside the root.
+ */
+function checkFileGlob(flag, value) {
+  let depth = 0;
+  let outside = value.startsWith("/");
+  for (const segment of value.split("/")) {
+    if (outside) break;
+    if (segment === "..") {
+      depth -= 1;
+      outside = depth < 0;
+    } else if (segment !== "." && segment !== "" && segment !== "**") {
+      depth += 1;
+    }
+  }
+  if (outside) {
+    throw new UsageError(
+      `invalid ${flag} value ${JSON.stringify(value)}: the pattern lies outside the workspace root (SPEC 7, 11.1, 12.0)`,
+    );
+  }
+}
 
 /** Fixed derived-file bytes: content beyond path is out of scope
  * (CERTIFICATIONS.md §CONF-DISC) and byte-deterministic (SPEC 12.0). */
@@ -1950,9 +2245,8 @@ const EMITTED_MARKDOWN_CONTENT =
  * replacing whatever occupies those paths (13.4). A failing build (findings,
  * exit 1) writes nothing (12.1).
  */
-async function commandBuild(io, cwd, argv) {
-  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
-  const ws = await loadWorkspace(cwd, flags["--config"]);
+async function commandBuild(io, cwd, flags, json) {
+  const ws = await loadWorkspace(cwd, flags.get("--config"));
   if (ws.findings.length > 0) {
     throw new FindingsError(ws.findings);
   }
@@ -1973,7 +2267,7 @@ async function commandBuild(io, cwd, argv) {
       );
     }
   }
-  if (flags["--json"]) {
+  if (json) {
     io.stdout(canonicalJson(findingsDoc([])) + "\n");
   }
   return 0;
@@ -1991,9 +2285,8 @@ async function commandBuild(io, cwd, argv) {
  * conformer keeps none of: outside the scope, refused loudly (exit 70) —
  * never a false clean answer.
  */
-async function commandCheck(io, cwd, argv) {
-  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
-  const ws = await loadWorkspace(cwd, flags["--config"]);
+async function commandCheck(io, cwd, flags) {
+  const ws = await loadWorkspace(cwd, flags.get("--config"));
   if (ws.findings.length > 0) {
     throw new FindingsError(ws.findings);
   }
@@ -2010,9 +2303,18 @@ async function commandCheck(io, cwd, argv) {
  * validation, reports the validation errors and exits 1 without answering
  * and without modifying anything (13.3).
  */
-async function commandIds(io, cwd, argv) {
-  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
-  const ws = await loadWorkspace(cwd, flags["--config"]);
+async function commandIds(io, cwd, flags, json) {
+  // The syntax class first (12.0): `--file`'s outside-root spelling; then
+  // the flags 12.3 names that this fixture does not serve, refused loudly.
+  if (flags.has("--file")) checkFileGlob("--file", flags.get("--file"));
+  for (const flag of SYNOPSES.get("ids").unservedFlags) {
+    if (flags.has(flag)) {
+      throw new ScopeError(
+        `ids ${flag} is outside this fixture's scope (CERTIFICATIONS.md §CONF-DISC: ids as the observation of the discovered spec set)`,
+      );
+    }
+  }
+  const ws = await loadWorkspace(cwd, flags.get("--config"));
   if (ws.findings.length > 0) {
     throw new FindingsError(ws.findings);
   }
@@ -2023,7 +2325,7 @@ async function commandIds(io, cwd, argv) {
       ids: record.sections.map((section) => section.id),
     });
   }
-  if (flags["--json"]) {
+  if (json) {
     io.stdout(canonicalJson({ files }) + "\n");
   } else {
     io.stdout(
@@ -2062,24 +2364,25 @@ async function occupiedUnderRoot(rootAbs, rel) {
 
 /**
  * `xspec inventory` (SPEC 11.6, scoped): the machine-readable shape of the
- * workspace in the full 12.7 document form — the anchoring (root and
- * configuration file relative to the working directory), the resolved
- * configuration view (groups with their globs exactly as configured, the
- * emission state, and the empty coverage and policy lists), every discovered
- * source with its group memberships in configuration order, the derived-file
- * map (the module `X.xspec.ts` and, while emission is enabled, `X.md` beside
- * each `.mdx` spec source; both structurally absent for a spec-group file
- * without the extension, 14.19/13.1), the recorded derived paths, the
- * graph-data area, the journal's occupancy, and the session files. It parses
+ * workspace in the full 12.7 document form, JSON-only (11, 12.0): the
+ * document is the entire stdout with or without `--json` — the anchoring
+ * (root and configuration file relative to the working directory), the
+ * resolved configuration view (groups with their globs exactly as
+ * configured, the emission state, and the empty coverage and policy lists),
+ * every discovered source with its group memberships in configuration
+ * order, the derived-file map (the module `X.xspec.ts` and, while emission
+ * is enabled, `X.md` beside each `.mdx` spec source; both structurally
+ * absent for a spec-group file without the extension, 14.19/13.1), the
+ * recorded derived paths, the graph-data area, the journal's occupancy, and
+ * the session files. It parses
  * no source, so it answers whatever the sources' validity — configuration
  * errors keep their precedence (14.14) — and it writes nothing. This
  * conformer keeps no graph data, so the record is empty (11.6: empty
  * wherever none exists) and no 14.23 arises; review sessions are outside the
  * scope, so a present session directory is refused loudly, never answered.
  */
-async function commandInventory(io, cwd, argv) {
-  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
-  const config = await loadConfig(cwd, flags["--config"]);
+async function commandInventory(io, cwd, flags) {
+  const config = await loadConfig(cwd, flags.get("--config"));
   const discovery = await discoverSources(config);
   const groupView = (map) =>
     Object.entries(map).map(([name, globs]) => ({ name, globs: [...globs] }));
@@ -2141,26 +2444,9 @@ async function commandInventory(io, cwd, argv) {
     },
     sessions: [],
   };
-  if (flags["--json"]) {
-    io.stdout(canonicalJson(doc) + "\n");
-  } else {
-    const lines = [`root: ${doc.root}`, `config: ${doc.config}`];
-    for (const entry of sources) {
-      const groups = entry.groups.map((g) => `${g.kind}:${g.name}`).join(", ");
-      lines.push(`${entry.path} [${groups}]`);
-    }
-    io.stdout(lines.map((line) => line + "\n").join(""));
-  }
+  emitJsonOnly(io, doc);
   return 0;
 }
-
-const QUERY_FLAGS = {
-  "--from": "value",
-  "--to": "value",
-  "--kinds": "value",
-  "--json": "bool",
-  "--config": "value",
-};
 
 /** JSON-only surfaces (SPEC 11): the single document is the entire stdout. */
 function emitJsonOnly(io, doc) {
@@ -2217,49 +2503,31 @@ function unknownGraphNode(spelling) {
  * its `contains` edges (5.2), and without `--from` every edge is enumerated,
  * files in byte order. `--to`, `--kinds`, named code units, and the other
  * `query` subcommands are outside this fixture's scope (ScopeError, exit
- * 70).
+ * 70), refused only after the syntax-class checks (12.0): the dispatch has
+ * matched the arguments to the subcommand's synopsis, and the `--from` and
+ * `--to` spellings and the `--kinds` list are judged here first.
  */
-async function commandQuery(io, cwd, argv) {
-  const subcommand = argv[0];
-  if (subcommand === undefined) {
-    throw new UsageError("query: missing subcommand (SPEC 11.1, 12.0)");
+async function commandQueryEdges(io, cwd, flags) {
+  // The syntax class first (SPEC 12.0), judged from the arguments alone
+  // before configuration is loaded: the graph-node spellings of `--from` and
+  // `--to` and `--kinds`' vocabulary; then the flags this fixture does not
+  // serve, refused loudly.
+  const from = flags.get("--from");
+  let fromPath = null;
+  let fromId = null;
+  if (from !== undefined) {
+    ({ path: fromPath, id: fromId } = graphNodeSpelling("--from", from));
   }
-  if (subcommand !== "edges") {
-    const known = ["node", "nodes", "subtree", "ancestors", "reachable"];
-    if (known.includes(subcommand)) {
-      throw new ScopeError(
-        `query ${subcommand} is outside this fixture's scope (CERTIFICATIONS.md §CONF-DISC: query edges --from <path> only)`,
-      );
-    }
-    throw new UsageError(
-      `query: unknown subcommand ${subcommand} (SPEC 11.1, 12.0)`,
-    );
-  }
-  const { flags } = parseArgs(argv.slice(1), QUERY_FLAGS, [0, 0]);
-  for (const flag of ["--to", "--kinds"]) {
-    if (flags[flag] !== undefined) {
+  if (flags.has("--to")) graphNodeSpelling("--to", flags.get("--to"));
+  if (flags.has("--kinds")) checkEdgeKinds(flags.get("--kinds"));
+  for (const flag of QUERY_SYNOPSES.get("edges").unservedFlags) {
+    if (flags.has(flag)) {
       throw new ScopeError(
         `query edges ${flag} is outside this fixture's scope (CERTIFICATIONS.md §CONF-DISC: query edges --from <path> only)`,
       );
     }
   }
-  // Syntax alone (SPEC 12.0): a graph-node spelling holds at most one `#`, a
-  // non-empty path part, and, when a `#` is present, a non-empty id part —
-  // judged before configuration is loaded.
-  const from = flags["--from"];
-  let fromPath = null;
-  let fromId = null;
-  if (from !== undefined) {
-    const parts = from.split("#");
-    if (parts.length > 2 || parts[0] === "" || parts[1] === "") {
-      throw new UsageError(
-        `query edges: malformed graph-node identity ${JSON.stringify(from)} for --from (SPEC 1.5, 12.0)`,
-      );
-    }
-    fromPath = parts[0];
-    fromId = parts[1] ?? null;
-  }
-  const ws = await loadWorkspace(cwd, flags["--config"]);
+  const ws = await loadWorkspace(cwd, flags.get("--config"));
   // The argument check precedes the gate (SPEC 12.0), judged from the
   // current discovery: a path in no configured group is unknown (11.1).
   let record = null;
@@ -2319,29 +2587,75 @@ export async function runXspec(argv, cwd, options = {}) {
   return await dispatchCommand(io, cwd, argv);
 }
 
-/** Dispatch one parsed invocation and map its outcome to SPEC 12.0's codes. */
+/**
+ * Read one invocation under the grammar of SPEC 12.0, dispatch it, and map
+ * its outcome to 12.0's codes. Every syntax-class error is decided from the
+ * arguments alone, before configuration is loaded and before any of this
+ * fixture's scope refusals (12.0): first the checks the arguments decide for
+ * every command alike — unknown, repeated, or valueless flags and malformed
+ * values (`readInvocation`) — then the command and `query`'s subcommand,
+ * then the synopsis (`checkSynopsis`) and the served flags' value spellings.
+ */
 async function dispatchCommand(io, cwd, argv) {
-  // JSON output is in effect with `--json`, or when the invoked surface is
-  // JSON-only (SPEC 12.0) — `query` (11) — governing error delivery too.
-  const wantsJson = argv.includes("--json") || argv[0] === "query";
+  const invocation = readInvocation(argv);
+  const [command, ...operands] = invocation.words;
+  // JSON output is in effect when a `--json` token is read as a flag — not
+  // as another flag's value — or when the invoked surface is JSON-only
+  // (SPEC 12.0): `query` and `inventory` among the served ones (11), so
+  // their every answer and usage error is JSON, with or without `--json`.
+  // It governs error delivery even when the arguments are the error.
+  const jsonInEffect = invocation.json || isJsonOnlySurface(invocation.words);
   try {
-    const command = argv[0];
-    const rest = argv.slice(1);
-    switch (command) {
-      case "build":
-        return await commandBuild(io, cwd, rest);
-      case "check":
-        return await commandCheck(io, cwd, rest);
-      case "ids":
-        return await commandIds(io, cwd, rest);
-      case "inventory":
-        return await commandInventory(io, cwd, rest);
-      case "query":
-        return await commandQuery(io, cwd, rest);
-      default:
+    if (invocation.error !== null) throw new UsageError(invocation.error);
+    if (command === undefined) {
+      throw new UsageError("expected a command (SPEC 12.0)");
+    }
+    if (!PRODUCT_COMMANDS.has(command)) {
+      throw new UsageError(
+        `unknown command ${command} (SPEC 12.0; this fixture's surface is build, check, ids, inventory, and query edges, CERTIFICATIONS.md §CONF-DISC)`,
+      );
+    }
+    let spelled = command;
+    let synopsis = SYNOPSES.get(command);
+    let rest = operands;
+    if (command === "query") {
+      const [subcommand, ...subcommandOperands] = operands;
+      if (subcommand === undefined) {
+        throw new UsageError("query: missing subcommand (SPEC 11.1, 12.0)");
+      }
+      synopsis = QUERY_SYNOPSES.get(subcommand);
+      if (synopsis === undefined) {
         throw new UsageError(
-          `unknown command ${String(command)} (SPEC 12.0; this fixture's surface is build, check, ids, inventory, and query edges, CERTIFICATIONS.md §CONF-DISC)`,
+          `query: unknown subcommand ${subcommand} (SPEC 11.1, 12.0)`,
         );
+      }
+      spelled = `query ${subcommand}`;
+      rest = subcommandOperands;
+    } else if (synopsis === undefined) {
+      throw new ScopeError(
+        `the ${command} command is outside this fixture's surface: build, check, ids, inventory, and query edges alone (CERTIFICATIONS.md §CONF-DISC)`,
+      );
+    }
+    checkSynopsis(spelled, synopsis, invocation.flags, rest);
+    if (!synopsis.served) {
+      throw new ScopeError(
+        `${spelled} is outside this fixture's scope (CERTIFICATIONS.md §CONF-DISC: query edges --from <path> only)`,
+      );
+    }
+    const { flags } = invocation;
+    switch (spelled) {
+      case "build":
+        return await commandBuild(io, cwd, flags, jsonInEffect);
+      case "check":
+        return await commandCheck(io, cwd, flags);
+      case "ids":
+        return await commandIds(io, cwd, flags, jsonInEffect);
+      case "inventory":
+        return await commandInventory(io, cwd, flags);
+      case "query edges":
+        return await commandQueryEdges(io, cwd, flags);
+      default:
+        throw new Error(`no handler for the served surface ${spelled}`);
     }
   } catch (error) {
     if (error instanceof UsageError) {
@@ -2352,7 +2666,7 @@ async function dispatchCommand(io, cwd, argv) {
       // for a plain usage error — is the entire stdout; without it, stdout
       // stays empty. The output form never changes the exit code or the
       // standard-error content.
-      if (wantsJson) {
+      if (jsonInEffect) {
         io.stdout(
           canonicalJson({
             error: {
@@ -2369,7 +2683,7 @@ async function dispatchCommand(io, cwd, argv) {
       return 2;
     }
     if (error instanceof FindingsError) {
-      emitFindings(io, wantsJson, error.findings);
+      emitFindings(io, jsonInEffect, error.findings);
       return 1;
     }
     if (error instanceof ScopeError) {
