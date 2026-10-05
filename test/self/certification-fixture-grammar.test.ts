@@ -2843,6 +2843,27 @@ const HOLD_UNCREATABLE =
   "that cannot be created is the usage error of 13.5, never this " +
   'condition", a plain usage error';
 
+/** A path no source of §CONF-CORE's failing workspace has. */
+const CORE_UNDISCOVERED_FILE = "specs/C.mdx";
+
+const MASKED_CHECK =
+  'SPEC 12.0: a node identity is judged "parse-local against the named ' +
+  'file, as 6.4 judges the old ID", "an unparseable named file masking the ' +
+  'check as in 6.4, the gated report of 13.3 then exiting 1" — the ' +
+  "byte-order-mark source unparseable (14.20, 1.6)";
+const ITEM_PAST_GATE =
+  'SPEC 12.0: "One check runs past the gate: an item ID is judged against ' +
+  "its session's content, which no gated command reads on a failing " +
+  'workspace (13.3)"';
+const PREVIEW_AS_REAL =
+  'SPEC 6.6: "A preview is refused exactly when — reporting what, and ' +
+  'exiting as — the real operation would be refused"';
+const RENAME_CHECKS_FIRST =
+  'SPEC 12.0: "The argument checks of `rename` and `move` (a nonexistent ' +
+  "origin file or old ID …) … precede source validation: these usage " +
+  "errors are reported, and the command exits 2, even when the current " +
+  'workspace also fails the validations of `xspec build` (6.4, 13.3)"';
+
 const CORE_TABLE: GrammarTable = {
   conformer: "CONF-CORE",
   staging: CORE_STAGING,
@@ -3169,6 +3190,157 @@ const CORE_TABLE: GrammarTable = {
       exit: 1,
       stdout: like(["review", "export", "s", "--json"], CORE_GATED_REPORT),
       prepare: AUDIT_SESSION_THEN_BOM,
+    },
+    // The gated reads' argument checks precede the gate (12.0) on the same
+    // failing workspace: an unknown identity or session exits 2, an
+    // unparseable named file masks the identity check, an item ID is judged
+    // past the gate, and a preview judges the real rename's argument checks.
+    {
+      argv: ["show", `${CORE_FILE}#zz`],
+      clause: `${ARGUMENT_CHECKS_FIRST}: no section of \`${CORE_FILE}\` spells \`zz\` (${IDENTITY_CHECK}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["show", `${CORE_FILE}#zz`, "--json"],
+      clause: `${ARGUMENT_CHECKS_FIRST}: no section of \`${CORE_FILE}\` spells \`zz\` (${IDENTITY_CHECK}); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["show", `${CORE_UNDISCOVERED_FILE}#a`],
+      clause: `${ARGUMENT_CHECKS_FIRST}: \`${CORE_UNDISCOVERED_FILE}\` is no discovered path (${IDENTITY_CHECK}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["show", CORE_TARGET, "--json"],
+      clause: `${IDENTITY_CHECK}: the check passes; ${JSON_IN_EFFECT}; ${GATED_READ}`,
+      exit: 1,
+      stdout: { form: "document", check: CORE_GATED_REPORT },
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["show", `${CORE_BOM_FILE}#b`, "--json"],
+      clause: `${MASKED_CHECK}; ${JSON_IN_EFFECT}; ${GATED_READ}`,
+      exit: 1,
+      stdout: { form: "document", check: CORE_GATED_REPORT },
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["show", `${CORE_BOM_FILE}#zz`, "--json"],
+      clause: `${MASKED_CHECK}, an \`id\` the file's text does not spell included; ${JSON_IN_EFFECT}; ${GATED_READ}`,
+      exit: 1,
+      stdout: { form: "document", check: CORE_GATED_REPORT },
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["query", "node", `${CORE_FILE}#zz`],
+      clause: `${ARGUMENT_CHECKS_FIRST}: no section of \`${CORE_FILE}\` spells \`zz\` (${IDENTITY_CHECK}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["query", "subtree", `${CORE_FILE}#zz`],
+      clause: `${ARGUMENT_CHECKS_FIRST}: no section of \`${CORE_FILE}\` spells \`zz\` (${IDENTITY_CHECK}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["query", "ancestors", `${CORE_FILE}#zz`],
+      clause: `${ARGUMENT_CHECKS_FIRST}: no section of \`${CORE_FILE}\` spells \`zz\` (${IDENTITY_CHECK}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: [
+        "query",
+        "reachable",
+        "--from",
+        CORE_TARGET,
+        "--to",
+        `${CORE_FILE}#zz`,
+      ],
+      clause: `${ARGUMENT_CHECKS_FIRST}: no section of \`${CORE_FILE}\` spells \`--to\`'s \`zz\` (${IDENTITY_CHECK}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: [
+        "query",
+        "reachable",
+        "--from",
+        `${CORE_FILE}#zz`,
+        "--to",
+        CORE_TARGET,
+      ],
+      clause: `${ARGUMENT_CHECKS_FIRST}: no section of \`${CORE_FILE}\` spells \`--from\`'s \`zz\` (${IDENTITY_CHECK}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["review", "status", "nope"],
+      clause: `${ARGUMENT_CHECKS_FIRST}; ${UNKNOWN_SESSION}; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["review", "next", "nope"],
+      clause: `${ARGUMENT_CHECKS_FIRST}; ${UNKNOWN_SESSION}; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["review", "show", "nope", "i1"],
+      clause: `${ARGUMENT_CHECKS_FIRST}; ${UNKNOWN_SESSION}; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["review", "export", "nope"],
+      clause: `${ARGUMENT_CHECKS_FIRST}; ${UNKNOWN_SESSION}; ${EXPORT_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["review", "show", "s", "nope", "--json"],
+      clause: `${UNKNOWN_SESSION}: \`s\` exists, so the check passes; ${ITEM_PAST_GATE}; ${JSON_IN_EFFECT}; ${GATED_READ}`,
+      exit: 1,
+      stdout: { form: "document", check: CORE_GATED_REPORT },
+      prepare: AUDIT_SESSION_THEN_BOM,
+    },
+    {
+      argv: ["rename", CORE_FILE, "nope", "x", "--preview"],
+      clause: `${PREVIEW_AS_REAL}; ${RENAME_CHECKS_FIRST}; ${NONEXISTENT_OLD_ID}; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["rename", CORE_FILE, "nope", "x", "--preview", "--json"],
+      clause: `${PREVIEW_AS_REAL}; ${RENAME_CHECKS_FIRST}; ${NONEXISTENT_OLD_ID}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      prepare: BUILT_THEN_BOM,
+    },
+    {
+      argv: ["rename", CORE_UNDISCOVERED_FILE, "a", "x", "--preview"],
+      clause: `${PREVIEW_AS_REAL}; ${RENAME_CHECKS_FIRST}: \`${CORE_UNDISCOVERED_FILE}\` is no discovered spec source; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      prepare: BUILT_THEN_BOM,
     },
   ],
 };

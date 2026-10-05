@@ -2966,17 +2966,77 @@ function nodeReportDoc(node) {
   };
 }
 
+/**
+ * A read 13.3 gates (`show`, `query`, the `review` reads; SPEC 12.0, 13.3):
+ * configuration, then the read's argument checks (`judgeArguments`) — each
+ * judged from what it consults, identically on valid and failing
+ * workspaces, so that a usage-error argument exits 2 whatever findings the
+ * workspace carries (12.0) — and only then the gate: the graph loaded over
+ * the current sources, a failing workspace's findings reported, exit 1, in
+ * place of the answer (13.3).
+ */
+async function loadGatedRead(cwd, flags, judgeArguments) {
+  const config = await loadConfig(cwd, flags["--config"]);
+  await judgeArguments(config);
+  return { config, graph: await loadGraph(config.root, config.groups) };
+}
+
+/**
+ * The identity checks of a gated read's `<node>` and `<graph-node>`
+ * arguments (SPEC 12.0), each judged parse-locally against the named file
+ * as 6.4 judges the old ID (judgeOriginFile): the path must be a discovered
+ * source — every discovered source is a spec source in this scope
+ * (§CONF-CORE: no code groups), and a bare path names its file's root (1.5)
+ * — and an `id` must be among the file's spelled identities (11.2,
+ * spelledSectionsOf), an unparseable named file masking the check, so that
+ * the gate then reports (exit 1). Each spelling holds at most one `#`, a
+ * syntax-class check already passed (checkValueSpellings).
+ */
+function judgeNodeIdentities(identities) {
+  return async (config) => {
+    const sourcePaths = await discoverSources(config.root, config.groups);
+    for (const identity of identities) {
+      const hash = identity.indexOf("#");
+      const file = hash === -1 ? identity : identity.slice(0, hash);
+      if (!sourcePaths.includes(file)) {
+        throw new UsageError(
+          `unknown node ${identity}: ${file} is not a discovered source (SPEC 11.1, 12.0)`,
+        );
+      }
+      if (hash === -1) continue;
+      const id = identity.slice(hash + 1);
+      const sections = await spelledSectionsOf(config.root, file);
+      if (sections !== null && !sections.some((node) => node.id === id)) {
+        throw new UsageError(
+          `unknown node ${identity}: no section of ${file} spells the id ${id} (SPEC 11.2, 12.0)`,
+        );
+      }
+    }
+  };
+}
+
+/**
+ * The node an identity names in the graph a gated read loaded — present,
+ * the read's argument checks having passed over the same files ahead of
+ * the gate (judgeNodeIdentities): on a workspace passing the gate, the
+ * spelled identities and the graph's agree.
+ */
 function requireNode(graph, identity) {
   const node = graph.byIdentity.get(identity);
   if (node === undefined) {
-    throw new UsageError(`unknown node ${identity} (SPEC 12.0)`);
+    throw new Error(
+      `fixture invariant: ${identity} passed the argument checks but is absent from the loaded graph`,
+    );
   }
   return node;
 }
 
 async function commandShow(io, cwd, { flags, positionals }) {
-  const config = await loadConfig(cwd, flags["--config"]);
-  const graph = await loadGraph(config.root, config.groups);
+  const { graph } = await loadGatedRead(
+    cwd,
+    flags,
+    judgeNodeIdentities([positionals[0]]),
+  );
   const doc = nodeReportDoc(requireNode(graph, positionals[0]));
   emitDoc(io, flags["--json"] === true, doc, [canonicalJson(doc)]);
   return 0;
@@ -2996,8 +3056,17 @@ function nodeRow(node) {
  * nodes` in their unfiltered forms alone (refuseUnservedFlags).
  */
 async function commandQuery(io, cwd, sub, { flags, positionals }) {
-  const config = await loadConfig(cwd, flags["--config"]);
-  const graph = await loadGraph(config.root, config.groups);
+  // The identities the invocation names, judged ahead of the gate (12.0):
+  // `reachable`'s two required `<graph-node>` flags, or the `<node>` operand
+  // of `node`, `subtree`, and `ancestors` — `nodes` and `edges`, served
+  // unfiltered alone, name none (their synopses admit no operand).
+  const { graph } = await loadGatedRead(
+    cwd,
+    flags,
+    judgeNodeIdentities(
+      sub === "reachable" ? [flags["--from"], flags["--to"]] : positionals,
+    ),
+  );
   const allNodes = graph.files.flatMap((model) => model.nodes);
   if (sub === "node") {
     emitJsonOnly(io, nodeReportDoc(requireNode(graph, positionals[0])));
@@ -3036,8 +3105,10 @@ async function commandQuery(io, cwd, sub, { flags, positionals }) {
   }
   // reachable: dependency kinds only; this scope has no dependency edges.
   // Both flags are required by the synopsis (checkSynopsis, SPEC 11.1,
-  // 12.0); `--kinds`, its vocabulary judged there too, selects among
-  // dependency kinds, of which this scope's graph holds no edge.
+  // 12.0), their identities judged ahead of the gate (above); `--kinds`,
+  // its vocabulary judged with the value spellings (checkValueSpellings),
+  // selects among dependency kinds, of which this scope's graph holds no
+  // edge.
   requireNode(graph, flags["--from"]);
   requireNode(graph, flags["--to"]);
   emitJsonOnly(io, { reachable: false });
@@ -3254,23 +3325,19 @@ async function commandRename(io, cwd, { flags, positionals }) {
  * seam — `--test-hold` beside `--preview` is a usage error of the syntax
  * class (SPEC 12.0), judged from the arguments alone by checkSynopsis,
  * before configuration is loaded — and it is
- * refused exactly as the real operation would be: the argument checks of
- * 12.0 (a nonexistent origin file or old ID, 6.4) exit 2 at once, modifying
- * nothing. A preview of a performable rename lies outside this surface and
- * is refused loudly, outside the 12.0 partition, never answered.
+ * refused exactly as the real operation would be (6.6): the real rename's
+ * argument checks of 12.0 (judgeOriginFile: a nonexistent origin file or
+ * old ID, 6.4) exit 2 at once, modifying nothing, judged as the real
+ * operation judges them — after configuration, ahead of the valid-workspace
+ * precondition of 6.4, so on valid and failing workspaces alike (12.0) —
+ * and only then the precondition over the current sources (findings, exit
+ * 1). A preview of a performable rename lies outside this surface and is
+ * refused loudly, outside the 12.0 partition, never answered.
  */
 async function previewRename(cwd, flags, file, oldId, newId) {
   const config = await loadConfig(cwd, flags["--config"]);
-  const graph = await loadGraph(config.root, config.groups);
-  const model = graph.files.find((candidate) => candidate.rel === file);
-  if (model === undefined) {
-    throw new UsageError(
-      `unknown file ${file}: not a discovered spec source (SPEC 6.4, 12.0)`,
-    );
-  }
-  if (!model.sections.some((section) => section.id === oldId)) {
-    throw new UsageError(`unknown id ${oldId} in ${file} (SPEC 6.4, 12.0)`);
-  }
+  await judgeOriginFile(file, oldId, "6.4")(config);
+  await loadGraph(config.root, config.groups);
   throw new FixtureScopeError(
     `rename --preview of a performable operation (${file} ${oldId} -> ${newId}) lies outside this fixture's certified surface (§CONF-CORE)`,
   );
@@ -3525,16 +3592,19 @@ async function judgeGate(config) {
 }
 
 /**
- * The argument check of `review resolve` and `review split` ahead of the
- * gate (runMutating's `judgeArguments`; SPEC 12.0: a session name is judged
- * against the session directory, identically on valid and failing
- * workspaces, before the invalid-workspace report of 13.3): the name must
+ * The argument check of the `review` subcommands naming a session, ahead of
+ * the gate — `resolve` and `split` (runMutating's `judgeArguments`) and the
+ * reads `status`, `next`, `show`, and `export` (loadGatedRead's) — per SPEC
+ * 12.0: a session name is judged against the session directory,
+ * identically on valid and failing workspaces, before the invalid-workspace
+ * report of 13.3: the name must
  * name a session file in the directory — a usage error, exit 2, otherwise;
  * its form (10.1) is of 12.0's syntax class, judged from the arguments
  * alone before configuration is loaded (checkValueSpellings), so the form
  * test here never refuses. The session file itself is read only past the
- * gate and refresh (requireSession), where its corruption is reported (13.3,
- * 14.21) and its item id judged (12.0). T13.5-8's held `review resolve` on
+ * gate — and, for the mutating subcommands, the refresh — (requireSession),
+ * where its corruption is reported (13.3, 14.21) and an item id judged
+ * (12.0: "One check runs past the gate"). T13.5-8's held `review resolve` on
  * the failing workspace names an existing session, so it passes here and
  * holds ahead of the gate.
  */
@@ -3837,8 +3907,11 @@ async function reviewList(io, cwd, { flags }) {
 }
 
 async function reviewStatus(io, cwd, { flags, positionals }) {
-  const config = await loadConfig(cwd, flags["--config"]);
-  const graph = await loadGraph(config.root, config.groups);
+  const { config, graph } = await loadGatedRead(
+    cwd,
+    flags,
+    judgeSessionName(positionals[0]),
+  );
   const session = await requireSession(config.root, positionals[0]);
   const journal = await readJournal(config.root);
   return await withReadInvalidationPersistence(config.root, session, () => {
@@ -3877,8 +3950,11 @@ async function reviewStatus(io, cwd, { flags, positionals }) {
 }
 
 async function reviewNext(io, cwd, { flags, positionals }) {
-  const config = await loadConfig(cwd, flags["--config"]);
-  const graph = await loadGraph(config.root, config.groups);
+  const { config, graph } = await loadGatedRead(
+    cwd,
+    flags,
+    judgeSessionName(positionals[0]),
+  );
   const session = await requireSession(config.root, positionals[0]);
   const journal = await readJournal(config.root);
   return await withReadInvalidationPersistence(config.root, session, () => {
@@ -3909,8 +3985,11 @@ async function reviewNext(io, cwd, { flags, positionals }) {
 }
 
 async function reviewShow(io, cwd, { flags, positionals }) {
-  const config = await loadConfig(cwd, flags["--config"]);
-  const graph = await loadGraph(config.root, config.groups);
+  const { config, graph } = await loadGatedRead(
+    cwd,
+    flags,
+    judgeSessionName(positionals[0]),
+  );
   const session = await requireSession(config.root, positionals[0]);
   const item = requireItem(session, positionals[1]);
   const journal = await readJournal(config.root);
@@ -3922,8 +4001,11 @@ async function reviewShow(io, cwd, { flags, positionals }) {
 }
 
 async function reviewExport(io, cwd, { flags, positionals }) {
-  const config = await loadConfig(cwd, flags["--config"]);
-  const graph = await loadGraph(config.root, config.groups);
+  const { config, graph } = await loadGatedRead(
+    cwd,
+    flags,
+    judgeSessionName(positionals[0]),
+  );
   const session = await requireSession(config.root, positionals[0]);
   const journal = await readJournal(config.root);
   return await withReadInvalidationPersistence(config.root, session, () => {
