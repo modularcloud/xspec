@@ -67,7 +67,10 @@ import {
   decodeNodeSummary,
 } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
-import { assertAddedImportInsertion } from "../../helpers/import-insertion.js";
+import {
+  assertAddedImportInsertion,
+  expectFreshIdentifier,
+} from "../../helpers/import-insertion.js";
 import { deriveMdx } from "../../helpers/mdx-derivability.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -80,6 +83,7 @@ import {
   assertNoCompileErrors,
   ConsumerProject,
 } from "../../helpers/tooling.js";
+import { identifierRunAt } from "../../helpers/ts-identifiers.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
@@ -1041,11 +1045,14 @@ const T1_4_5_FORBIDDEN_ROOTS: readonly { name: string; why: string }[] = [
 
 /**
  * The fresh identifier the moved `d` array is rooted at — the value-unpinned
- * binding of the added declaration (SPEC 6.5), read off its first entry —
+ * binding of the added declaration (SPEC 6.5), read off its first entry as
+ * TypeScript 5.9.3 at ESNext reads an identifier (helpers/ts-identifiers.ts:
+ * a non-ASCII letter or U+2EBF0 as readily as `a`; SPEC 1.4, 14.20) —
  * after asserting the moved section's opening tag is exactly the expected
  * one: every entry in 6.4's fallback spelling, rooted at that one binding,
  * the array's brackets, commas, and spaces unchanged. Diagnosed (H-8) when
- * the target holds no such tag line, or more than one.
+ * the target holds no such tag line, or more than one, or when the run the
+ * array opens with reads as no identifier.
  */
 function t145MovedArrayRoot(
   text: string,
@@ -1069,10 +1076,21 @@ function t145MovedArrayRoot(
         `in ${JSON.stringify(text)}`,
     );
   }
-  const root = /^<S id="m" d=\{\[([A-Za-z_$][A-Za-z0-9_$]*)[.[]/.exec(
-    tagLine,
-  )?.[1];
-  if (root === undefined || tagLine !== `<S id="m" ${arm.attribute(root)}>`) {
+  // The run the array opens with, up to its first ASCII delimiter (the
+  // entry's `.` or `[`), judged before the line is composed around it.
+  const opening = '<S id="m" d={[';
+  const root = tagLine.startsWith(opening)
+    ? identifierRunAt(tagLine, opening.length)
+    : "";
+  if (root !== "") {
+    expectFreshIdentifier(
+      root,
+      `${context}: specs/t.mdx's moved \`d\` array, in the line ` +
+        `${JSON.stringify(tagLine)}, must be rooted at the added ` +
+        `declaration's binding; ${expectation}`,
+    );
+  }
+  if (root === "" || tagLine !== `<S id="m" ${arm.attribute(root)}>`) {
     fail(
       `${context}: specs/t.mdx must hold ${expectation}; the line reads ` +
         `${JSON.stringify(tagLine)}`,

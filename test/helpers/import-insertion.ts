@@ -44,13 +44,31 @@
 // line-start admissible offset (T6.5-13) is not this reader's: the
 // exact-declaration reader below reads both forms and reports which one it
 // read (T6.5-11).
+//
+// The fresh identifier a caller reads off the rewritten bytes is judged as
+// TypeScript 5.9.3 at ESNext judges an identifier (helpers/ts-identifiers.ts;
+// SPEC 6.5, 1.4, 14.20) — a non-ASCII letter or U+2EBF0 as readily as `a` —
+// and a run reading as none fails diagnosed (`expectFreshIdentifier`).
 
 import { Buffer } from "node:buffer";
 import { posix as posixPath } from "node:path";
 import { fail } from "./assertions.js";
+import { freshIdentifierProblem } from "./ts-identifiers.js";
 
 const LF = 0x0a;
 const CR = 0x0d;
+
+/**
+ * `run`, read where an operation's fresh identifier stands, when TypeScript
+ * 5.9.3 at ESNext reads it as exactly one identifier (helpers/
+ * ts-identifiers.ts); otherwise a diagnosed failure (H-8) under `context`,
+ * naming the run, its offending code point, and SPEC 6.5 and 1.4.
+ */
+export function expectFreshIdentifier(run: string, context: string): string {
+  const problem = freshIdentifierProblem(run);
+  if (problem !== undefined) fail(`${context}: ${problem}`);
+  return run;
+}
 
 /**
  * Whether `offset` lies at the start of a line of `text` (SPEC 6.5: exactly

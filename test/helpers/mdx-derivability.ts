@@ -74,7 +74,10 @@ import acornJsx from "acorn-jsx";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { mdxFromMarkdown } from "mdast-util-mdx";
 import { mdxjs } from "micromark-extension-mdxjs";
-import ts from "typescript-5.9.3";
+import {
+  isTsIdentifierPart as isIdentifierPart151,
+  isTsIdentifierStart as isIdentifierStart151,
+} from "./ts-identifiers.js";
 
 /** S-9's named allowances — ECMAScript early errors 14.20 admits. */
 export const MDX_ALLOWANCES = [
@@ -193,20 +196,11 @@ const READING_RULES: readonly AllowanceRule[] = [
 // ---------------------------------------------------------------------------
 // Unicode 15.1's identifier characters and whitespace (SPEC 14.20, S-9).
 
-const ESNEXT = ts.ScriptTarget.ESNext;
-
-/** ECMAScript 2024's IdentifierStartChar under Unicode 15.1: ID_Start, `$`,
- * and `_` — TypeScript 5.9.3's ESNext table, 15.1's code point for code
- * point. */
-function isIdentifierStart151(code: number): boolean {
-  return ts.isIdentifierStart(code, ESNEXT);
-}
-
-/** IdentifierPartChar under Unicode 15.1: ID_Continue (U+200C and U+200D
- * among it since 15.1) and `$`. */
-function isIdentifierPart151(code: number): boolean {
-  return ts.isIdentifierPart(code, ESNEXT);
-}
+// ECMAScript 2024's IdentifierStartChar and IdentifierPartChar under
+// Unicode 15.1 are TypeScript 5.9.3's ESNext tables, 15.1's code point for
+// code point: `isIdentifierStart151` and `isIdentifierPart151` are imported
+// from helpers/ts-identifiers.ts, the one judge the harness's fresh-
+// identifier reader applies too, never a second copy of it.
 
 /** ECMAScript 2024's WhiteSpace and LineTerminator under Unicode 15.1 — TAB,
  * VT, FF, ZWNBSP, 15.1's space separators (general category Zs), LF, CR, LS,
