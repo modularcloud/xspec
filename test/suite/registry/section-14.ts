@@ -40,10 +40,15 @@
 //   lies outside the end-widened window, so a finding attributed to the
 //   wrong construct fails. Code-file conditions use the offending
 //   statement's own window (the section-4 convention, support.ts byteWindow).
-// - 14.20 locations (T14-3, T14-5): "the parse-failure location is reported"
-//   fixes presence, not the point — where a parser gives up inside an
-//   unparseable file is parser-specific — so the arms assert the finding
-//   names the file and carries a location, never a window.
+// - 14.20 locations (T14-3, T14-5): T14-3's malformed MDX is `d={]}`, and
+//   its entry pins that file's one location — the zero-length range at the
+//   offset of the `]` (SPEC 14's syntax-failure rule: the prefix through
+//   `d={` begins a well-formed file), precomputed from the staged bytes as
+//   T14-11 and T14-12 pin theirs. For T14-3's other three unparseable files
+//   and T14-5's `.mts` arm, "the parse-failure location is reported" fixes
+//   presence alone, so those arms assert the finding names the file and
+//   carries a location, never a window (T14-11 pins a byte-order mark's
+//   and an encoding failure's offsets in its own fixtures).
 // - check-side condition counts are exact, 14.10 included, like the
 //   `build`-side counts (`build` cannot observe 14.10, SPEC 14.10, 12.1):
 //   on a workspace failing `build`'s validations `check` reports 14.10 in
@@ -275,7 +280,8 @@
 //   statement carry a `;` the range must exclude. The 14.20 arms pin the
 //   offsets SPEC 14 fixes — 0 for a byte-order mark and a refused read, the
 //   first undecodable byte, the longest well-formed-prefix length — where
-//   T14-3/T14-5 assert presence alone; the refused-read arm is a
+//   T14-5 and T14-3's files other than its `d={]}` file assert presence
+//   alone; the refused-read arm is a
 //   permission staging (E-1), Linux leg, run last. `d={}` and
 //   `d={ /* c */ }` are condition 20 (SPEC 2.7, 14.20: an attribute value
 //   admits no empty expression), never 14.8 — the one zero-length range at
@@ -1017,18 +1023,28 @@ const T14_2 = defineProductTest({
 // condition, and any reference reported as something other than unresolved,
 // breaks it.
 
-// Malformed MDX: the element holding the referenced id `bm1` is never
-// closed, so the file fails to parse — the would-be 14.4 (`worse name`) is
-// masked, and references targeting `bm1` (an id that would exist) are
-// unresolved.
-const T14_3_BROKEN_MDX = [
-  '<S id="worse name">',
-  "A would-be invalid segment (14.4), masked by the parse failure.",
-  "</S>",
-  "",
-  '<S id="bm1">',
-  "The target id the references aim at; the file never parses.",
-].join("\n");
+// Malformed MDX, `d={]}` (TEST-SPEC T14-3): the element holding the
+// referenced id `bm1` carries a `d` attribute whose braces hold `]`, which
+// begins no expression, so the file fails to parse there and only there —
+// the would-be 14.4 (`worse name`) before it is masked, and references
+// targeting `bm1` (an id that would exist) are unresolved. The one location
+// is SPEC 14's zero-length range at the offset of the `]` (T14-11, T14-12's
+// arm (u)): the prefix through `d={` begins a well-formed file. The offset
+// is pinned from the staged bytes (`assemble`/`pin`, T14-11's fixture
+// notation, below); the stock parser (S-9) rejects the text at that same
+// byte, and completing the prefix as `d={"x"}>` derives.
+const T14_3_BROKEN_MDX_FILE = "specs/brokenmdx.mdx";
+const T14_3_BROKEN_MDX = assemble([
+  '<S id="worse name">\n',
+  "A would-be invalid segment (14.4), masked by the parse failure.\n",
+  "</S>\n",
+  "\n",
+  '<S id="bm1" d={',
+  pin(""),
+  "]}>\n",
+  "The target id the references aim at; the file never parses.\n",
+  "</S>\n",
+]);
 
 // Malformed TypeScript in a `.ts` file: the TSX-only construct (the grammar
 // selected by any name but `.tsx` is plain TypeScript, SPEC 14.20). The
@@ -1043,12 +1059,12 @@ const T14_3_FILES: WorkspaceDecl = {
   // S-9: the sources 14.20 declares unparseable — the three MDX sources, and
   // the TypeScript one (a TSX-only construct in a `.ts` file).
   mdx: {
-    unparseable: ["specs/brokenmdx.mdx", "specs/badutf8.mdx", "specs/bom.mdx"],
+    unparseable: [T14_3_BROKEN_MDX_FILE, "specs/badutf8.mdx", "specs/bom.mdx"],
   },
   ts: { unparseable: ["src/brokents.ts"] },
   files: {
     "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-    "specs/brokenmdx.mdx": T14_3_BROKEN_MDX,
+    [T14_3_BROKEN_MDX_FILE]: T14_3_BROKEN_MDX.text,
     "src/brokents.ts": T14_3_BROKEN_TS,
     "specs/badutf8.mdx": withInvalidUtf8Byte(
       "<S>\nA would-be missing id (14.1), masked; the invalid byte: ",
@@ -1093,7 +1109,7 @@ const T14_3_FILES: WorkspaceDecl = {
 };
 
 const T14_3_UNPARSEABLE_FILES: readonly string[] = [
-  "specs/brokenmdx.mdx",
+  T14_3_BROKEN_MDX_FILE,
   "src/brokents.ts",
   "specs/badutf8.mdx",
   "specs/bom.mdx",
@@ -1128,9 +1144,27 @@ function assertMaskingReport(
           ),
       );
     }
-    // "The parse-failure location is reported": presence, per the module
-    // header — where a parser fails inside an unparseable file is
-    // parser-specific.
+    if (file === T14_3_BROKEN_MDX_FILE) {
+      // `d={]}`: TEST-SPEC T14-3 pins the one location — SPEC 14's
+      // zero-length range at the offset of the `]`, computed from the
+      // staged bytes (the module header).
+      const failure = T14_3_BROKEN_MDX.ranges[0]!;
+      assertSameJson(
+        matching[0]!.locations.map((location) => ({
+          file: location.file,
+          range: { start: location.range.start, end: location.range.end },
+        })),
+        [{ file, range: failure }],
+        `${context}: the 14.20 finding for ${file} carries exactly one ` +
+          `location, the zero-length range at the offset of the \`]\` in ` +
+          `\`d={]}\` (byte ${String(failure.start)}): the prefix through ` +
+          `\`d={\` begins a well-formed file, no expression begins with ` +
+          `\`]\` (SPEC 14, 14.20, 1.7, 12.7)`,
+      );
+      continue;
+    }
+    // "The parse-failure location is reported": presence for the other
+    // three files, per the module header.
     assertFindingLocated(
       matching[0]!,
       { file },
@@ -1187,7 +1221,7 @@ const T14_3_CONFIG_ARM_FILES: Readonly<Record<string, InitialFileContents>> = {
 const T14_3 = defineProductTest({
   id: "T14-3",
   title:
-    "an unparseable file (14.20 — malformed MDX; a TSX-only construct in a `.ts` file; invalid UTF-8; BOM) masks conditions inside itself, every reference into it from other files reports as unresolved (14.5-14.7), and the parse-failure location is reported; a configuration error suppresses all source analysis — only 14.14 is reported (exit 2) even with invalid sources present (SPEC 14, 14.20, 14.14)",
+    "an unparseable file (14.20 — malformed MDX, `d={]}`, its zero-length range at the offset of the `]`; a TSX-only construct in a `.ts` file; invalid UTF-8; BOM) masks conditions inside itself, every reference into it from other files reports as unresolved (14.5-14.7), and the parse-failure location is reported; a configuration error suppresses all source analysis — only 14.14 is reported (exit 2) even with invalid sources present (SPEC 14, 14.20, 14.14)",
   timeoutMs: 180_000,
   run: async (product) => {
     await withWorkspace(T14_3_FILES, async (workspace) => {
