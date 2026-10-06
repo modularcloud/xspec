@@ -120,12 +120,15 @@
 //   its home arm stages, adapted by `homeStagingRow`), T2.7-1's
 //   (section-2.7.ts's exported `T2_7_1_FOREIGN_14_16_STAGINGS`, its four
 //   foreign constructs of condition 16, and `T2_7_1_CONTAINER_ARM` and
-//   `T2_7_1_FRAGMENT_ARM`, adapted the same way), and T14-12's
-//   (section-14-iii.ts's exported `T14_12_REPORTER_STAGINGS`:
-//   `export { nope }` and the early-error containers under their S-9
-//   allowances, the six unparseable spec sources' records declared
-//   unparseable, the two unparseable `.ts` sources); the `.ts` entries are
-//   code-source rows (`occurrences` alone).
+//   `T2_7_1_FRAGMENT_ARM`, adapted the same way), T2.7-4's (section-2.7.ts's
+//   exported `T2_7_4_EXPRESSION_ARM`, its expression beside a comment, and
+//   `T2_7_4_UNPARSEABLE_STAGINGS`, its six unparseable forms, adapted the
+//   same way), and T14-12's (section-14-iii.ts's exported
+//   `T14_12_REPORTER_STAGINGS`: `export { nope }` and the early-error
+//   containers under their S-9 allowances, the six unparseable spec
+//   sources' records declared unparseable, the two unparseable `.ts`
+//   sources); the `.ts` entries are code-source rows (`occurrences` alone).
+//   The home rows precede T14-12's, in the clause's order.
 // - T14-6 stages each condition via its primary test's fixture — the same
 //   minimal home-form stagings T14-4 sweeps, plus the five specially
 //   reported conditions' stagings (14.10, 14.12, 14.14, 14.21, 14.23),
@@ -373,6 +376,7 @@ import {
   T2_7_1_FOREIGN_14_16_STAGINGS,
   T2_7_1_FRAGMENT_ARM,
   T2_7_3_SPREAD_UNPARSEABLE_STAGING,
+  T2_7_4_EXPRESSION_ARM,
   T2_7_4_UNPARSEABLE_STAGINGS,
 } from "./section-2.7.js";
 import type { UnparseableArm } from "./section-14-iii.js";
@@ -1672,14 +1676,15 @@ export default defineConfig({
     answers: { kind: "no-domain-file", file: "specs/a.mdx" },
   },
   // The home tests' 14.16 and 14.20 arms (TEST-SPEC T14-4: "Among the
-  // matrix's stagings: … the 14.16 and 14.20 arms of T2.3-3, T2.7-1, …, and
-  // T14-12 (all three surfaces for their spec-source stagings)"), each
-  // staged by its home module and swept here for reporter membership:
-  // `build`, `check`, and the surfaces whose domain holds the staged file,
-  // each finding counted exactly as the home arm counts it — one per
-  // staging — the locations staying the home tests' subject. In the
-  // clause's order: T2.3-3's five invalid containers (one 14.16 each) and
-  // `{text("a") text("b")}` (14.20), through `homeStagingRow`.
+  // matrix's stagings: … the 14.16 and 14.20 arms of T2.3-3, T2.7-1,
+  // T2.7-4, and T14-12 (all three surfaces for their spec-source
+  // stagings)"), each staged by its home module and swept here for
+  // reporter membership: `build`, `check`, and the surfaces whose domain
+  // holds the staged file, each finding counted exactly as the home arm
+  // counts it — one per staging — the locations and offsets staying the
+  // home tests' subject. In the clause's order: T2.3-3's five invalid
+  // containers (one 14.16 each) and `{text("a") text("b")}` (14.20),
+  // through `homeStagingRow`.
   ...T2_3_3_INVALID_STAGINGS.map(({ arm, file, source }): SweepEntry =>
     homeStagingRow("14.16", arm, { file, files: { [file]: source } }),
   ),
@@ -1706,6 +1711,18 @@ export default defineConfig({
         file,
         files: { [file]: source },
       }),
+  ),
+  // T2.7-4's: the expression beside a comment, `{/* a */ 1}` (one 14.16;
+  // its comment forms report no finding and stay out), then its six
+  // unparseable forms — U+0085, U+200B, and U+180E between braces, `{// c`
+  // U+2028 or U+2029 `}` U+000A `}`, and `{// c}` with no later `}` (one
+  // 14.20 each, masking the file).
+  homeStagingRow("14.16", `T2.7-4 ${T2_7_4_EXPRESSION_ARM.name}`, {
+    file: T2_7_4_EXPRESSION_ARM.file,
+    files: { [T2_7_4_EXPRESSION_ARM.file]: T2_7_4_EXPRESSION_ARM.source },
+  }),
+  ...T2_7_4_UNPARSEABLE_STAGINGS.map((staging): SweepEntry =>
+    homeStagingRow("14.20", `T2.7-4 ${staging.name}`, staging),
   ),
   // Then T14-12's: the early-error forms under their S-9 allowances, the
   // unparseable spec sources declared so (`occurrences` alone for the `.ts`

@@ -64,11 +64,14 @@
 //
 // T2.7-1's condition-16 stagings — its four foreign constructs of condition
 // 16 (`T2_7_1_FOREIGN_14_16_STAGINGS`) and its container and fragment arms
-// (`T2_7_1_CONTAINER_ARM`, `T2_7_1_FRAGMENT_ARM`) — are exported as the very
-// records their arms stage: TEST-SPEC T14-4 sweeps them as reporter-matrix
-// rows (`build`, `check`, `occurrences`, `view`, and `at`, each finding
-// counted exactly; T14-6 reads the same rows' stable codes), the locations
-// staying this module's subject.
+// (`T2_7_1_CONTAINER_ARM`, `T2_7_1_FRAGMENT_ARM`) — and T2.7-4's 14.16 and
+// 14.20 stagings — its expression beside a comment
+// (`T2_7_4_EXPRESSION_ARM`) and its six unparseable forms
+// (`T2_7_4_UNPARSEABLE_STAGINGS`, which T14-11 re-stages too) — are exported
+// as the very records their arms stage: TEST-SPEC T14-4 sweeps them as
+// reporter-matrix rows (`build`, `check`, `occurrences`, `view`, and `at`,
+// each finding counted exactly; T14-6 reads the same rows' stable codes),
+// the locations and offsets staying this module's subject.
 //
 // No certification fixture scopes any T2.7 test (CERTIFICATIONS.md keeps the
 // 2.7 negative matrix among the representatively-certified ones), so only
@@ -2114,9 +2117,13 @@ async function runCommentForms(product: ProductBinding): Promise<void> {
 // container (14.16), the grammar deriving its content — T2.7-1's
 // enclosed-construct machinery pins the one finding brace through brace, the
 // view's tree without a node for it, its bytes preserved as content (11.2),
-// and no `comments` entry.
-const T2_7_4_EXPRESSION_ARM = enclosedConstructArm(
-  "T2.7-4 an expression beside a comment specs/A.mdx",
+// and no `comments` entry. The arm, the very record the body below drives,
+// is exported for T14-4's reporter matrix (TEST-SPEC T14-4: "the 14.16 and
+// 14.20 arms of T2.3-3, T2.7-1, T2.7-4, …"): its sweep, and T14-6's
+// stable-code sweep over the same row, re-stages the record after its own
+// body's first product invocation, never re-spelling the bytes.
+export const T2_7_4_EXPRESSION_ARM = enclosedConstructArm(
+  "T2.7-4/T14-4/T14-6 an expression beside a comment specs/A.mdx",
   {
     fixture: enclosedConstructFixture("{/* a */ 1}"),
     name: "an expression beside a comment (`{/* a */ 1}`)",
@@ -2147,8 +2154,8 @@ interface UnparseableCommentArm {
   readonly name: string;
   /**
    * The file's exact bytes, as its record: every arm's workspace follows
-   * the body's first product invocation, and T14-11 re-stages it after its
-   * own (`T2_7_4_UNPARSEABLE_STAGINGS`).
+   * the body's first product invocation, and T14-4, T14-6, and T14-11
+   * re-stage it after their own (`T2_7_4_UNPARSEABLE_STAGINGS`).
    */
   readonly source: StagedMdx;
   /** The pinned offset (SPEC 1.7 bytes). */
@@ -2171,7 +2178,7 @@ function unparseableCommentArm(
   return {
     name,
     source: stagedMdx(
-      `T2.7-4/T14-11 ${name} ${T2_7_4_UNPARSEABLE_FILE}`,
+      `T2.7-4/T14-4/T14-6/T14-11 ${name} ${T2_7_4_UNPARSEABLE_FILE}`,
       source,
       "unparseable",
     ),
@@ -2265,6 +2272,10 @@ const T2_7_4_UNPARSEABLE_ARMS: readonly UnparseableCommentArm[] = [
  * The six stagings as T14-11 re-asserts them (TEST-SPEC T14-11's closing
  * clause): each arm's record as `specs/A.mdx` with its offset — the same
  * staging `runUnparseableCommentArm` drives, declared unparseable (S-9).
+ * T14-4's reporter matrix sweeps the same records as its 14.20 arms of
+ * T2.7-4 (TEST-SPEC T14-4: "the 14.16 and 14.20 arms of T2.3-3, T2.7-1,
+ * T2.7-4, …"; T14-6's stable-code sweep stages the same rows), the offsets
+ * staying this module's and T14-11's subject.
  */
 export const T2_7_4_UNPARSEABLE_STAGINGS: readonly UnparseableStaging[] =
   T2_7_4_UNPARSEABLE_ARMS.map((arm): UnparseableStaging => ({
