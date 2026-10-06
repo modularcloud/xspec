@@ -54,14 +54,22 @@
 // a diagnosed failure too, after the operation or before it — 6.5 keeps
 // every file a successful move rewrites well-formed, and its valid-workspace
 // precondition refuses a move over sources that are not (6.4, 14.20) — its
-// names being unreadable either way.
+// names being unreadable either way. "Not well-formed" is a grammar verdict
+// and nothing else: bytes that are not valid UTF-8 (judged before decoding),
+// the MDX parse's non-derivation (`MdxNonDerivationError`,
+// helpers/mdx-derivability.ts), the TypeScript parse's `unparseable`
+// verdict (helpers/ts-derivability.ts `judgeTypeScript`). Whatever else
+// reaching a verdict throws — the MDX parse's exhausted stack, its runtime
+// check, a crash of either parser — propagates as thrown: the driver's
+// `HarnessEvaluationError` above, and a harness error to a direct caller of
+// `judgeAddedImportsOfFile`, never a problem it returns.
 
-import { Buffer } from "node:buffer";
+import { Buffer, isUtf8 } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import ts from "typescript-5.9.3";
 import { bytesEqual, fail } from "./assertions.js";
-import { readMdxTree } from "./mdx-derivability.js";
+import { MdxNonDerivationError, readMdxTree } from "./mdx-derivability.js";
 import { globMatches } from "./oracles/glob.js";
 import {
   addedIdentifierBreaches,
@@ -492,7 +500,9 @@ interface FileJudgement {
  * `before` accounts for, compared by their characters, in `after`'s order,
  * and every breach their identifiers make in `before`, worded as the driver
  * words it; when either text is not well-formed under its grammar (14.20),
- * no declarations and that problem alone. `file` names the file in the
+ * no declarations and that problem alone. A failure of the harness's own
+ * reading — anything but such a verdict — is thrown, never returned as a
+ * problem (H-11; see the module header). `file` names the file in the
  * problems' wording.
  */
 export function judgeAddedImportsOfFile(
@@ -627,7 +637,11 @@ function readDeclarations(
     try {
       tree = readMdxTree(text) as unknown as MdastNode;
     } catch (error) {
-      return (error as Error).message;
+      // The parse's grammar verdict alone reads as "not well-formed";
+      // anything else it throws — an exhausted stack, a parser crash — is
+      // the harness's own failure, propagated (H-11; see the module header).
+      if (error instanceof MdxNonDerivationError) return error.reason;
+      throw error;
     }
     readMdxDeclarations(tree, add);
   } else {
@@ -764,11 +778,9 @@ function readTypeScriptDeclarations(
 const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 /** The bytes' UTF-8 text, a leading byte-order mark kept as U+FEFF, or
- * undefined when they are not valid UTF-8. */
+ * undefined when they are not valid UTF-8 — judged before decoding, so
+ * nothing the decoder throws (an exhausted string limit, say) is taken for
+ * that verdict (H-11). */
 function decodeUtf8(bytes: Uint8Array): string | undefined {
-  try {
-    return UTF8.decode(bytes);
-  } catch {
-    return undefined;
-  }
+  return isUtf8(bytes) ? UTF8.decode(bytes) : undefined;
 }

@@ -817,6 +817,28 @@ function deriveMdxWith(
 export type MdxTree = ReturnType<typeof fromMarkdown>;
 
 /**
+ * `readMdxTree`'s refusal of a source that does not derive under 14.20: the
+ * parse's grammar verdict, `reason` the parse's. It is the one exception of
+ * that read a caller may take as "not well-formed" (T6.5-22(a)'s check of a
+ * rewritten source, helpers/added-import-identifiers.ts); anything else the
+ * read throws — an exhausted stack, a runtime whose whitespace class is not
+ * 15.1's, any other crash of the parser stack — is a failure of the
+ * harness's own parse, never a verdict (TEST-SPEC H-11).
+ */
+export class MdxNonDerivationError extends Error {
+  /** The parse's reason the source does not derive. */
+  readonly reason: string;
+
+  constructor(reason: string) {
+    super(
+      `S-9's MDX parse: no tree is read from a source that does not derive under SPEC 14.20 (${reason})`,
+    );
+    this.name = "MdxNonDerivationError";
+    this.reason = reason;
+  }
+}
+
+/**
  * The tree of a source that derives under 14.20, read by the parse
  * `deriveMdx` judges with — every S-9 allowance admitted, since a well-formed
  * file may carry any of those early errors, and the early errors of
@@ -825,15 +847,13 @@ export type MdxTree = ReturnType<typeof fromMarkdown>;
  * (helpers/oracles/name-analysis.ts) reads a spec source's names from it, and
  * T6.5-22(a)'s check (helpers/added-import-identifiers.ts) a rewritten
  * source's import declarations. A source that does not derive so has no tree
- * to read: a harness error, its reason the parse's.
+ * to read: `MdxNonDerivationError`, its reason the parse's (a harness error
+ * to S-6's name analysis, which reads names and never judges). Every other
+ * failure of the read propagates as thrown.
  */
 export function readMdxTree(text: string): MdxTree {
   const verdict = deriveMdxWith(text, MDX_ALLOWANCES, true);
-  if (!verdict.derives) {
-    throw new Error(
-      `S-9's MDX parse: no tree is read from a source that does not derive under SPEC 14.20 (${verdict.reason})`,
-    );
-  }
+  if (!verdict.derives) throw new MdxNonDerivationError(verdict.reason);
   checkRuntimeWhitespace();
   parsedText = text;
   try {

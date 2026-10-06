@@ -17,7 +17,13 @@
 // loads it on demand, so the mock reaches the driver's own import — is a
 // harness error, `HarnessEvaluationError` carrying the original as its
 // `cause`, whether it fails before the spawn or judging the exited run,
-// while its breach (`HarnessAssertionError`) passes through unchanged.
+// while its breach (`HarnessAssertionError`) passes through unchanged. A
+// crash inside the check's own MDX parse — injected into `readMdxTree`
+// reading a spec source the move rewrote, on either side of the move — is
+// that harness error too, never taken for the diagnosed "not well-formed"
+// breach a rewrite that genuinely does not derive stays; and
+// `judgeAddedImportsOfFile`, which T6.5-22(b) and T6.5-23 call directly,
+// throws such a crash instead of returning it as a problem.
 //
 // The stand-in is a tiny argv-driven Node script written into a fresh
 // TestWorkspace per test (the builder itself is certified by S-2) and driven
@@ -33,7 +39,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { expect, onTestFinished, test, vi } from "vitest";
 import type * as AddedImportCheckModule from "../helpers/added-import-identifiers.js";
+import { judgeAddedImportsOfFile } from "../helpers/added-import-identifiers.js";
 import { HarnessAssertionError } from "../helpers/assertions.js";
+import type * as MdxDerivabilityModule from "../helpers/mdx-derivability.js";
 import {
   builtProductBinding,
   createHoldFile,
@@ -79,6 +87,10 @@ switch (mode) {
   }
   case "move": {
     fs.writeFileSync("moved", "");
+    const writes = JSON.parse(process.env.XSPEC_S3_MOVE_WRITES ?? "{}");
+    for (const [rel, content] of Object.entries(writes)) {
+      fs.writeFileSync(rel, content);
+    }
     process.exit(0);
     break;
   }
@@ -133,9 +145,12 @@ interface Standin {
   readonly binding: ProductBinding;
 }
 
-async function standin(): Promise<Standin> {
+/** A fresh workspace holding the stand-in, beside `files` when given. */
+async function standin(
+  files: Readonly<Record<string, string>> = {},
+): Promise<Standin> {
   const workspace = await TestWorkspace.create({
-    files: { "standin.mjs": STANDIN_SOURCE },
+    files: { "standin.mjs": STANDIN_SOURCE, ...files },
   });
   onTestFinished(() => workspace.dispose());
   return {
@@ -769,4 +784,182 @@ test("waitForFile on a run whose T6.5-22(a) check fails rejects with that Harnes
   expect((error as Error).message).not.toContain("exited before creating");
   // The very rejection the run settled with, not a copy.
   expect(await rejectionOf(running.waitForExit())).toBe(error);
+});
+
+// ---------------------------------------------------------------------------
+// A crash of the harness's own MDX parse inside T6.5-22(a)'s check (H-11):
+// reading a spec source a performed move rewrote, the check takes the
+// parse's grammar verdict alone (`MdxNonDerivationError`) for "not
+// well-formed", the diagnosed breach, and lets anything else the read
+// throws — an exhausted stack, say — propagate as the harness's own
+// failure. The fault is injected into `readMdxTree`
+// (helpers/mdx-derivability.ts), which the check module binds when it is
+// first loaded: a `vi.doMock` made after any test of this file loaded that
+// module would not reach it, so the module is mocked for the whole file
+// (Vitest hoists `vi.mock` above the imports) by a pass-through that throws
+// only while the running test arms it, disarmed when that test finishes.
+
+/** The armed fault: what `readMdxTree` throws reading a text, if anything. */
+const mdxReadFault = vi.hoisted(() => ({
+  throwFor: undefined as ((text: string) => Error | undefined) | undefined,
+}));
+
+vi.mock("../helpers/mdx-derivability.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof MdxDerivabilityModule>();
+  const readMdxTree: typeof actual.readMdxTree = (text) => {
+    const fault = mdxReadFault.throwFor?.(text);
+    if (fault !== undefined) throw fault;
+    return actual.readMdxTree(text);
+  };
+  return { ...actual, readMdxTree };
+});
+
+/** Arms the fault for the running test alone: `readMdxTree` throws `error`
+ * reading exactly `text`, and reads every other text as it does. */
+function injectMdxReadFault(text: string, error: Error): void {
+  mdxReadFault.throwFor = (read) => (read === text ? error : undefined);
+  onTestFinished(() => {
+    mdxReadFault.throwFor = undefined;
+  });
+}
+
+/** The stand-in's `move` writes these files (relative path to content). */
+const MOVE_WRITES_ENV = "XSPEC_S3_MOVE_WRITES";
+
+/** A performed section-form move, as the driver reads it (SPEC 6.5, 12.0). */
+const SECTION_MOVE_ARGV = ["move", "specs/A.mdx#a", "specs/B.mdx#b.a"];
+
+const SECTION_B = '<S id="b">\n\nBeta.\n</S>\n';
+
+/** `specs/B.mdx` once `a` moved into it: well-formed, no import added. */
+const REWRITTEN_B = '<S id="b">\n\nBeta.\n\n<S id="a">\n\nAlpha.\n</S>\n</S>\n';
+
+/** A rewrite that genuinely does not derive under 14.20 (`<S>` unclosed). */
+const UNCLOSED_B = '<S id="b">\n\nBeta.\n';
+
+/** The workspace's one spec group discovers both sources (SPEC 7). */
+const SPEC_WORKSPACE = {
+  "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  "specs/A.mdx": '<S id="a">\n\nAlpha.\n</S>\n',
+  "specs/B.mdx": SECTION_B,
+};
+
+/** The stand-in's environment for a move rewriting `specs/B.mdx` so. */
+const rewritingB = (content: string): Readonly<Record<string, string>> => ({
+  [MOVE_WRITES_ENV]: JSON.stringify({ "specs/B.mdx": content }),
+});
+
+/** What a call throws; null when it returns. */
+function thrownBy(call: () => unknown): unknown {
+  try {
+    call();
+  } catch (thrown) {
+    return thrown;
+  }
+  return null;
+}
+
+const NOT_WELL_FORMED_AFTER =
+  /specs\/B\.mdx, which the operation rewrote, is not well-formed under its grammar after it \(SPEC 14\.20: /;
+
+test("a crash of the harness's own MDX parse reading a spec source a performed move rewrote, on either side of the move, rejects runProduct and waitForExit with HarnessEvaluationError, its cause the original — never the diagnosed 'not well-formed' HarnessAssertionError (H-11)", async () => {
+  const { workspace, binding } = await standin(SPEC_WORKSPACE);
+  // The rewritten text, read once the run exited: the foreground path.
+  const afterCrash = new RangeError("Maximum call stack size exceeded");
+  injectMdxReadFault(REWRITTEN_B, afterCrash);
+  const foreground = await rejectionOf(
+    runProduct(binding, {
+      cwd: workspace.root,
+      argv: SECTION_MOVE_ARGV,
+      env: rewritingB(REWRITTEN_B),
+    }),
+  );
+  expect(foreground).toBeInstanceOf(HarnessEvaluationError);
+  expect(foreground).not.toBeInstanceOf(HarnessAssertionError);
+  expect((foreground as HarnessEvaluationError).cause).toBe(afterCrash);
+  expect((foreground as HarnessEvaluationError).stage).toBe("verify");
+  // The run exited 0 having rewritten B: the judgement, not the run, failed.
+  expect(await fsp.readFile(workspace.path("specs/B.mdx"), "utf8")).toBe(
+    REWRITTEN_B,
+  );
+
+  // The pre-operation text, read once the run exited: the background path.
+  await fsp.writeFile(workspace.path("specs/B.mdx"), SECTION_B);
+  const beforeCrash = new RangeError("Maximum call stack size exceeded");
+  injectMdxReadFault(SECTION_B, beforeCrash);
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: SECTION_MOVE_ARGV,
+    env: rewritingB(REWRITTEN_B),
+  });
+  const settled = await rejectionOf(running.waitForExit());
+  expect(settled).toBeInstanceOf(HarnessEvaluationError);
+  expect(settled).not.toBeInstanceOf(HarnessAssertionError);
+  expect((settled as HarnessEvaluationError).cause).toBe(beforeCrash);
+  expect((settled as HarnessEvaluationError).stage).toBe("verify");
+});
+
+test("a spec source a performed move rewrote that genuinely does not derive under 14.20 (an unclosed `<S>`) stays the diagnosed breach, through the same pass-through parse (H-11's control)", async () => {
+  const { workspace, binding } = await standin(SPEC_WORKSPACE);
+  const error = await rejectionOf(
+    runProduct(binding, {
+      cwd: workspace.root,
+      argv: SECTION_MOVE_ARGV,
+      env: rewritingB(UNCLOSED_B),
+    }),
+  );
+  expect(error).toBeInstanceOf(HarnessAssertionError);
+  expect(error).not.toBeInstanceOf(HarnessEvaluationError);
+  expect((error as Error).message).toMatch(/^T6\.5-22\(a\)/);
+  expect((error as Error).message).toMatch(NOT_WELL_FORMED_AFTER);
+});
+
+test("judgeAddedImportsOfFile, called directly (T6.5-22(b), T6.5-23), throws a crash of the harness's own MDX parse on either side instead of returning it as a problem, while a genuine non-derivation stays its one problem (H-11)", () => {
+  // Unfaulted, both texts read: nothing added, no problem.
+  expect(
+    judgeAddedImportsOfFile(
+      "specs/B.mdx",
+      "spec-source",
+      SECTION_B,
+      REWRITTEN_B,
+    ),
+  ).toEqual({ added: [], problems: [] });
+  const crash = new RangeError("Maximum call stack size exceeded");
+  injectMdxReadFault(REWRITTEN_B, crash);
+  expect(
+    thrownBy(() =>
+      judgeAddedImportsOfFile(
+        "specs/B.mdx",
+        "spec-source",
+        SECTION_B,
+        REWRITTEN_B,
+      ),
+    ),
+  ).toBe(crash);
+  expect(
+    thrownBy(() =>
+      judgeAddedImportsOfFile(
+        "specs/B.mdx",
+        "spec-source",
+        REWRITTEN_B,
+        SECTION_B,
+      ),
+    ),
+  ).toBe(crash);
+  const judgement = judgeAddedImportsOfFile(
+    "specs/B.mdx",
+    "spec-source",
+    SECTION_B,
+    UNCLOSED_B,
+  );
+  expect(judgement.added).toEqual([]);
+  expect(judgement.problems).toHaveLength(1);
+  expect(judgement.problems[0]).toMatch(NOT_WELL_FORMED_AFTER);
 });
