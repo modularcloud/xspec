@@ -946,11 +946,16 @@ const T6_4_1 = defineProductTest({
 // (`["login-v2"]`) and single-quoted (`['login-v2']`) — and its local string
 // references and `id` attributes come in both quote kinds; the renamed
 // section's own `id` and one rewritten descendant's `id` are single-quoted
-// (SPEC 2.7). Arm 1 renames it to the identifier-valid `login2`: the
-// double-quoted computed segment stays computed and double-quoted (never
-// `.login2`), the single-quoted one keeps its single quotes, and so do the
-// single-quoted local strings and `id` values. Arm 2 renames it to
-// `login-v3`: the same forms, all kept.
+// (SPEC 2.7). The local strings spelling the renamed ID itself — exact
+// matches, rewritten whole — stand as `d` entries in both quote kinds
+// (`other`'s `"login-v2"`, `other.leaf`'s `'login-v2'`) and single-quoted in
+// `{text('login-v2')}`, beside descendant ones rewritten by prefix
+// replacement (`'login-v2.kid'`, `"login-v2.aux"`). Arm 1 renames it to the
+// identifier-valid `login2`: the double-quoted computed segment stays
+// computed and double-quoted (never `.login2`), the single-quoted one keeps
+// its single quotes, and so do the single-quoted local strings — the `d`
+// entry `'login2'` and `{text('login2')}` among them (TEST-SPEC T6.4-2) —
+// and `id` values. Arm 2 renames it to `login-v3`: the same forms, all kept.
 
 /** Fixture L's `specs/Core.mdx`; `seg` spells the renamed segment. */
 function coreL(seg: string): string {
@@ -970,7 +975,7 @@ function coreL(seg: string): string {
     `<S id="other" d={["${seg}", '${seg}.kid', 'other.leaf']}>`,
     `Other: {text('${seg}')} and {text("${seg}.aux")} and {text('other.leaf')}`,
     "",
-    '<S id="other.leaf">',
+    `<S id="other.leaf" d={['${seg}']}>`,
     "Leaf text.",
     "</S>",
     "</S>",
@@ -1036,8 +1041,11 @@ const OTHER_TS_L = [
 
 // Fixture M (arms 3 and 4): the renamed segment `mid` is a TS identifier,
 // referenced in dot access, in computed access of both quote kinds, and in
-// local strings of both quote kinds. Arm 3 renames it to `neo`: dot stays dot
-// and every computed segment keeps its quotes. Arm 4 renames it to `neo-2`:
+// local strings of both quote kinds — the renamed ID itself spelled as `d`
+// entries in both (`top.aid`'s `"top.mid"`, `top.res`'s `'top.mid'`) and in
+// `{text('top.mid')}`, each rewritten whole in its own quotes. Arm 3 renames
+// it to `neo`: dot stays dot and every computed segment keeps its quotes, as
+// every local string does. Arm 4 renames it to `neo-2`:
 // dot access cannot hold it and becomes double-quoted computed access (the
 // 6.4 fallback), while the computed segments keep their quote kinds and the
 // string literals hold any segment — untouched dot parts after the converted
@@ -1061,7 +1069,7 @@ function coreM(seg: string): string {
     `Embeds: {text("top.${seg}.kid-x")} and {text('top.${seg}')} and {text('top.res')}`,
     "</S>",
     "",
-    '<S id="top.res">',
+    `<S id="top.res" d={['top.${seg}']}>`,
     "Res text.",
     "</S>",
     "</S>",
