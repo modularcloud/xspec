@@ -1,0 +1,297 @@
+# FIX_PLAN — Phase 9 (test harness), re-descent iteration 127
+
+Written 2026-10-06 at 4117ede (branch `claude/xspec-ui-apis-4df8fa`, standing in for `patch/external-ui-apis`). It plans from the re-descent's fifth compliance determination, which was not clean. Its findings:
+- compliance review A (TEST-SPEC's T1–T6 tests): 6 gaps;
+- B (T7 and later): 1 gap;
+- C (everything outside the T-numbered tests): 2 gaps;
+- D (CERTIFICATIONS.md): compliant;
+- VERIFY V: green — every harness self-test and every certification passes, locally and in CI.
+
+Task headings cite the gaps as A1–A6 (reviewer A's G1–G6), B1, C1, and C2. Governing IP: `specs/patches/0001-external-ui-apis.md` (Stage: Tests Specified); no task changes its stage. No Bug Report applies.
+
+Why the harness changes again: the documents moved after the harness was last green (Phase 9 ended at 3bfedb5). The deltas are `git diff 3311ccd..6780f53 -- specs/TEST-SPEC.md`, `git diff 3311ccd..301f2f9 -- specs/CERTIFICATIONS.md`, and `git diff 9d095d9..f31e100 -- specs/SPEC.md`; none of the three documents has changed since. The plans written at f0d3cd9, 857e51a, ad9eb42, and 6a4a280 closed every gap the first four determinations found. The second's and third's finished texts sit at `deleted/specs/tmp/FIX_PLAN.md` and `deleted/specs/tmp/FIX_PLAN-2.md`, each moved there with the Developer's approval; the fourth's was deleted at 4117ede (its final text: `git show 8bebeba:specs/tmp/FIX_PLAN.md`). None of them is part of the harness or the product, and no task touches them. The nine gaps below are clauses no earlier plan implemented. None blocks on a spec defect.
+
+## Preamble — read before any task
+
+**Phase goal and scope guards (Phase 9).** The harness must adhere to `specs/TEST-SPEC.md` and `specs/CERTIFICATIONS.md`. Every harness self-test and every certification passes: each certified test passes against its conformer and fails against each of its violators exactly as the violator's entry states. Product tests may fail, but only as diagnosed assertion failures (H-8): never a harness error, crash, hang, or false pass. Never modify product code (`src/`; `dist/` is built from it). Every task is harness work under `test/` (fixtures under `test/fixtures/` are harness code), plus `AGENTS.md`'s build/run facts and this plan. A spec defect that blocks a task goes to the matching problems file under `specs/tmp/` (`SPEC-PROBLEMS.md`, `TEST-SPEC-PROBLEMS.md`, or `CERTIFICATIONS-PROBLEMS.md`), never into a silent workaround.
+
+**Known state at 4117ede (VERIFY, and CI run 903, ID 37529832606).**
+- Self project, run as CI runs it (no network, uid 1000, no capabilities): 27 files, 4220 tests, all passing, 0 skipped (192.75 s locally, 129 s in CI).
+- Certification: all 27 fixtures pass — CORE 1 conformer and 8 violators, VALID 1 and 3, MD 1 and 2, DISC 1 and 3, AVAIL 1 and 3, ORPHAN 1 and 2. The runner's lines sum to 154 PASS / 38 FAIL / 0 error / 0 hang: the conformers' 39 (test, fixture) pairs all PASS; the violators' 153 pairs are 115 PASS and 38 FAIL, every FAIL an expected outcome. The C-1 gate passes. The in-scope tests: CONF-CORE T6.1-2, T10.4-5, T13.4-5, T13.5-1 through T13.5-5, and T13.5-8; CONF-VALID T1.3-1 through T1.3-6, T1.4-1, T1.4-2, T1.4-4, T2.6-1, T2.6-2, and P-1; CONF-MD T3-1 through T3-6, P-2, and P-3; CONF-DISC T7-4, T7-5, and T7-6; CONF-AVAIL T11.2-2, T11.2-4, T11.3-4, T11.4-1, T11.4-3, and T11.4-4; CONF-ORPHAN T13.4-11. No task changes an in-scope test's body or a fixture. Two tasks come near them: Task 2 edits `test/suite/registry/section-1.4.ts`, which also holds T1.4-1, T1.4-2, and T1.4-4, and Task 10 edits the H-7 map entries (only the map) of T3-1, T11.2-2, T11.4-1, and T11.4-3.
+- Suite against the built product (local and CI, no network, unprivileged): 345 tests in 79 files; 317 pass and 28 fail, every failure a `HarnessAssertionError` (diagnosed). The failing IDs: P-1, P-5, T1.4-1, T1.4-4, T4-2, T6.4-3, T6.5-4, T6.5-11, T6.5-20, T6.5-21, T6.5-22, T6.5-23, T6.6-3, T7-2, T7-6, T7.1-1, T7.3-1, T12.0-5, T12.0-10, T12.7-2, T13.4-9, T13.4-10, T13.4-11, T14-4, T14-6, T14-7, T14-11, and T14-12. T6.5-11 fails at its arm (f): the rewritten call's callee is the untimely held `text` binding `tt` (the call reads `tt(target.y)`). Every other test Tasks 1–9 strengthen or touch passes against the built product at 4117ede. Local `npm test` in CI's inner stage (`XSPEC_E6_EXCHANGE_DIR` set): 106 files, 4565 tests, 1525.51 s; CI's full-suite job: 917 s.
+- Windows leg (E-6 subset): 3 files, 9 tests, green (32 s).
+- `npm run typecheck`, `npm run build`, and `npm run format:check` pass; both TypeScript copies are 5.9.3. `src/` has not changed since c62f451.
+- No self-test reads TEST-SPEC.md, and none probes the fixtures outside certification runs, so a green self project does not by itself show compliance: each task carries its own checks.
+
+**Run mechanics (AGENTS.md holds the recipes; read the bullets a task names before running anything).**
+- Confirm `git status` is clean on `claude/xspec-ui-apis-4df8fa` before editing. Never fetch or merge `main` (it carries a newer scaffold commit this run does not adopt). Push with `git push -u origin claude/xspec-ui-apis-4df8fa`, retrying network errors with backoff (2 s, 4 s, 8 s, 16 s); never force-push; check `git log -1` before every push. If `node_modules` is missing, `npm ci` restores it.
+- Run the self project under the unprivileged namespace (`unshare --map-user=1000 --map-group=1000 -- npm run test:self` in this root sandbox; AGENTS.md's namespace bullet also records how to reproduce CI's no-network stage). Redirect long runs to a log in the scratchpad and grep it for `×` and the `Tests` summary; never cap the output with `head`.
+- Never run the self project, a certification run, and a suite run at the same time, and check the load first (another agent may share the machine). S-2's tower vector (T1.3-7's 2048-deep chained-id tower, 4,225,030 bytes) takes about 2.4 s in CI and up to 3.2 s here under load, under Vitest's 5000 ms default; it has timed out only with two harness runs overlapping. Such a timeout is not a task failure; rerun alone.
+- One registered test: `-t '<ID> '`, with the trailing space and the dots escaped, on its wrapper file (e.g. `npx vitest run --config test/vitest.config.ts --project suite test/suite/section-6.4.test.ts -t 'T6\.4-1 '`).
+- One certification family: `npx vitest run --config test/vitest.config.ts --project self test/self/certification.test.ts -t <FAMILY>` (CORE, VALID, MD, DISC, AVAIL, ORPHAN), under the namespace. Compare the runner's per-pair `PASS`/`FAIL` lines with the known state above.
+- Red/green checks of a product test: AGENTS.md's stand-in wrapper recipe ("Red-checking a strengthened product test against the built product (Phase 9)": a temporary `test/self/zz-*.test.ts` calling `runProductTests` or an exported arm, deleted before committing; "Red-checking a generated-module type assertion" for a rewrite of the product's generated files). Red checks of a new self-test vector: AGENTS.md's stash-the-helper recipe ("Red-checking a new self-test vector"). Hand-driving the product: `node dist/cli/bin.js <argv…>` with a scratch workspace as the working directory.
+- Rebuild the product (`npm run build`) only if `dist/` is missing or stale; `src/` does not change in this phase.
+- The scratchpad is shared across spawns: use task-specific file names there.
+
+**Spellings.** Take every exact spelling — code points, escape-spelled literals, byte offsets, file contents, command lines — from the TEST-SPEC.md, CERTIFICATIONS.md, or SPEC.md text the task cites, or from the harness code it names, never from this plan or the review reports. The reports' channel decoded escape spellings, and the tool-parameter layer decodes backslash-u spellings inconsistently in edit and Bash payloads, comments included. So this plan names code points as `U+XXXX` and spells no escapes. Build such spellings in code from code points and verify the staged bytes byte-wise (`od -c`, a sha256 compare).
+
+**Conventions for changed tests and fixtures.**
+- *Registration.* No task adds a registered product test. Task 2 adds self-test vectors for the shared identifier reader to an existing self-test file; Task 11 adds sweep vectors to `test/self/s7-red-green-sweep.test.ts`. Every staged-source or `StagedTs` record a task adds is one more S-9 self-test, so the self project's test count grows; record the new count in the task's commit message.
+- *S-9 timing.* A `.mdx` source that a registered body stages after its first product invocation, or in a workspace it creates after it, is a staged-source record (`test/helpers/staged-mdx.ts`, judged by `test/self/s9-staged-sources.test.ts`); a TypeScript code source or configuration file staged there is a `StagedTs` record (`test/helpers/staged-ts.ts`). Records register at module load only, and each adds one self-test. Files staged before a body's first invocation need no record. A source a task declares unparseable stays declared so (`mdx.unparseable` in a `WorkspaceDecl`, or a record's `"unparseable"` argument). Self-tests stage their workspaces before invoking anything. The undeclared-staging guard (`test/helpers/product-invocations.ts`, `test/helpers/workspace.ts`; AGENTS.md's bullet) refuses an unrecorded staging after a body's first invocation.
+- *Never-modifies compares* use the compare-around machinery (`assertLeavesUnchanged` and `snapshotDirectory` in `test/helpers/snapshot.ts`).
+- *Free text.* Corrections and other free-text checks use H-3's robust matching: required information only, never exact wording.
+- *Product verdicts.* The built product (Phase 10's, at c62f451) predates the SPEC changes of this re-descent. A new or strengthened arm that fails against it counts as a diagnosed product failure only once a hand-staged probe shows the product's answer contradicts the asserted SPEC behavior. A harness error, crash, or hang is a harness defect to fix in the task. An arm that passes against the product proves nothing about its liveness, so red-check it wherever the task says so. A relaxed reader (Tasks 2, 5, and 6) is green-checked as well: a conforming stand-in the old reader wrongly failed must now pass, and a nonconforming one must still fail diagnosed.
+- *Fixture changes.* No task here changes a certification fixture or an in-scope test's body. Should a task find one necessary after all: each violator reuses its conformer's `product.mjs` (its `bin-<deviation>.mjs` passes one deviation switch), so a conformer change reaches every violator of its family; after the change, read each switch of the family at its point of use and confirm it still produces its one deviation, and run the family's certification — every runner line must read as in the known state above. A certified test that changes outcome is a finding: diagnose it against TEST-SPEC.md's and CERTIFICATIONS.md's text before going on. Never shape a fixture to keep a wrong assertion passing.
+- *Every task ends with:*
+  - `npm run typecheck` and `npm run format:check`;
+  - the touched suite files against the built product, each touched test's outcome before and after recorded (T6.5-11 must still fail at its arm (f) with the same diagnosis, or the change must explain why it now stops elsewhere); Tasks 10 and 11 change no registered body and run none;
+  - for a task touching a module that holds a certified test (`section-1.4.ts`: T1.4-1, T1.4-2, T1.4-4 under CONF-VALID), that family's certification first, for quick feedback (the full self project below runs the whole certification);
+  - the full self project under the namespace, with 0 failures (green at 4117ede; keep it green);
+  - a commit message (`sdg(phase-9): <imperative summary> (FIX_PLAN Task N)`, with the two trailer lines the session requires) stating the honest results, including each touched product test's outcome before and after;
+  - removing the finished task from this plan in the same commit and adding its one-line summary to its bullet in the Order section below (a done task leaves the plan).
+- *AGENTS.md* gets only build/run knowledge a later spawn needs (a recipe, a count or timing a later check relies on), never a task narrative.
+
+**Standing rulings.** Two Liaison rulings stand for this run: AGENTS.md's "Known residual 14.20 location gaps" and "Known SPEC 6.5 gap, deferred to a future SPEC revision (accepted for this run by ruling)" bullets. No task here addresses them, and none may be added for them.
+
+**Deleting this plan.** Only Task 12 deletes this file, with `git rm`, once no other task remains. If the permission system refuses the deletion, stop there: leave the file in place, commit nothing further for it, and report the refusal in the final report. Never move, rename, empty, or otherwise work around a refused deletion: the Developer's two earlier approvals to move a finished plan each covered that one file only.
+
+**Considered and not planned (do not re-raise).**
+- *Carried from the earlier plans (still standing at 4117ede).*
+  - S-9 lists five allowances, none for a strict-mode-barred import binding such as `import let`, which T6.5-22 declares derivable (the first plan's Task 19 note). Latent: no fixture stages such a file.
+  - VIOL-DISC-DERIVED's code-side arm in T7-6 fails at the arm's own `build` (the user-written `specs/A.md` at the emit destination enters the code set and is no well-formed TypeScript), earlier than CERTIFICATIONS.md's narrative says, consistently with its "fails on the exclusion arms in any case". A matter for a future revision of that document (reviewer D again at 4117ede).
+  - The Phase 7 round-3 certifications driver's note on VIOL-ORPHAN-THROUGHLINK (directory components resolve only through links whose target directory lies inside the workspace root): implemented as now written and certified. Reviewer D at 4117ede confirms the fixture follows only links whose target directory lies inside the root, its differential sweep diverging only at T13.4-11 arm (e)'s inside staging (its first `check`, and `build` deleting `foreign/A.md`).
+  - P-6 drives only the file form of `move`, draws no deletions and only dependency-free additions (to stay out of the two-sided ambiguity T6.2-3 describes), and P-9 uses only audit sessions; TEST-SPEC's wording ("edit/rename/move/commit") is met in kind (reviewer C again at 4117ede).
+  - T4.3-2's string-argument and arity arms run no `occurrences` check; T4.3-2 and T4.5-3 locate by containment in the statement's byte window (T14-11 pins exact ranges); T1.3-2's top-level arm asserts no expected-form wording; T1.5-3's title is stale (cosmetic; a task touching `test/suite/registry/section-1.5.ts` may fix it); §5.7's per-file-view channel is covered by T11.4-1 and P-12, and T1.5-2's U+FFFD-path `view`/`at` clauses are asserted in T11.5-3's body.
+  - T12.7-1's body checks only that the module name appears in cross-module identities; T4.4-1 (14.11) checks it exactly.
+  - P-11's per-invocation hang guard is 120 s (`FUZZ_COMMAND_TIMEOUT_MS`, `test/suite/registry/section-16-p11.ts`), 4.7 times its largest measured case; P-8's guard is 60 s. Only randomized mode reaches that scale.
+  - The driver's pre-flight working-directory refusals (relative, missing, or non-directory) stay diagnosed failures: they precede capture and evaluation, outside H-11's clause, and S-3 pins them.
+  - `checkDrawSources` (`test/helpers/property.ts`) recognises MDX sources by the `.mdx` name. Latent: no generator stages a non-`.mdx` spec-group file.
+  - With `dist/` missing, the driver throws plain "required file missing" errors, which `checkProperty` labels harness errors; H-8's empty-stub realization is gated by S-7 (Task 11 widens its sweep, not this).
+  - P-8 checks the exit-2 document only as `{"error": object}`: its clause is "never partial", and T12.7 pins the full form.
+  - T13.4-10's correction judge (`judgeManualDeletionCorrection`) matches wording and can over-reject a contrived explanation; reviewer B probed it with 15 phrasings at 72d5126 and found it compliant.
+  - CONF-CORE, with JSON in effect, prints `{"refused": …}` for a refused rename, move, or review operation, and the findings-alone form for a preview the valid-workspace precondition refuses. Both lie outside §CONF-CORE's surface, and no in-scope test drives either.
+  - From the fourth determination's reviewers (72d5126), still standing. A: T4.5-4's callee control `text(SPEC.a.b)` beside the shadowed `text(SPEC.a)` is by design; T5.5-4 stages its add/remove/retarget arms through `d` only; T4-1 checks the source file name, wording-free; T6.4-1's preview/performed mapping byte-equality is asserted in T6.6-2; T6.4-1's and T6.5-3's titles still say "report shape unpinned" though both decode form-exact (cosmetic; Tasks 3 and 5 touch those tests and may fix them); T4.6-3's `export default 42` has no further observable consequence. B: T14-4's 14.14 row runs `build`, `check`, and `version` only (T7-1's occupancy sweep covers every command); T12.0-5's U+FFFD arms use `alpha`-based command lines, and T14-11's code-source arms the specifier `../specs/A.xspec`. C: T6.5-22(a)'s walk skips unreadable files and directories; P-10's poller reports unexpected filesystem errors as diagnosed failures; 30 of 32 literal exit-2 runs without JSON in effect assert empty stdout, the other two asserting other subjects (H-5's "where relevant"); S-2's tower vector would be safer with an explicit timeout (a task touching `test/self/s2-workspace-builder.test.ts`'s scale vectors may add one). D: CONF-AVAIL accepts a malformed `--to` (other than U+FFFD) and an outside-root `--file`, carries `code`/`path` null in its configuration-content errors, and reports the `markdown`, `coverage`, and `policy` keys as configuration errors (all outside its scope); CONF-VALID reports non-zero 14.20 ranges (14.20 cannot arise in its scope); CONF-DISC writes no graph data; CONF-MD answers reads on an invalid workspace (outside its scope); CONF-VALID reports a root's `query` tags as `[]` (its scope's "`[]` when tagless"); VIOL-AVAIL-NULLMARKER's T11.2-4 fails first at an id-less section's identity, a staged undefined datum, within its deviation.
+  - From the fourth plan's tasks: the header of `test/suite/registry/section-14.ts` (about line 242) still lists "T5.3-1's file-dimension binding" among the home-test tolerances T14-8 backs; only T5.3-1's cross-file arm is now bound by file alone (cosmetic; a task touching that file may fix it).
+- *From this determination's reviewers (4117ede).*
+  - A: T6.3-4 stages "a baseline whose sources fail parse/validation" as a parse failure only (one failure class). T6.5-11's previews are pinned for (a), (e), and (f) only, as T6.5-11 states; T6.6-4(b)'s mention of T6.5-11(a)/(b) describes admissible offsets, not a separate preview. The `test/suite/registry/section-6.5-iii.ts` header (about lines 141–144) says T6.5-16's arms (f)–(i), applicability arms, and created-target arm "are still to be registered", though all are in `R16_REFUSED_ARMS`, `R16_ALONE_ARMS`, and `R16_CONTROL_ARMS` (cosmetic; Tasks 6 and 7 touch that file and may fix it). T6.5-1's fresh-build compare runs on arm (a) only, `check` on every arm. T6.5-21's controls (c) and (d) run no `check`; TEST-SPEC states none. T6.6-3's `--test-hold` plus `--preview` arms use one flag order per operation; TEST-SPEC requires only the combination. T6.5-2's self-closing parent has whitespace before the `/` only, TEST-SPEC's one worked example. T2.5-2's and T2.6-3's inline reason regexes equal the adapter's patterns. T6.5-22(a)'s universal check in the subprocess driver parses with the real MDX and TypeScript parsers, so A5 does not reach it.
+  - A5's out-of-scope patterns: `R12_MISROOTED` (`section-6.5-iii.ts`, about line 568), `s23SpelledIdentifiers` (`section-6.5-v.ts`, about line 716), and `LOOSE_DECLARATION` (`test/helpers/import-insertion.ts`, about line 246) read identifiers for diagnoses alone, and P-5's basename check (`section-16-p5-p6.ts`, about line 611) judges the harness's own draws; none decides a verdict, so none needs the shared reader (a task may widen them for nicer diagnoses).
+  - B: T11.2-2's `z` arm stages only the braced `id={"z"}` beside `z` (one representative invalid form meets "an invalid form contests nothing"). T14-4's 14.23 row runs a `rename` preview and no `move` preview; T6.6-6 asserts the `move --preview` condition-23 finding on the same staging. T14-4's condition-11 arms of T4.4-1 and the 14.15 and 14.18 arms of T4-5 and T4.5-9 are covered by their home bodies (`build`, `check`, and `occurrences` carrying the findings). T14-11's byte-order-mark arm is staged in a spec source only; a code source's byte-order-mark offset is pinned in `section-1.6-1.7.ts` (about lines 1237–1251). T14-7's dependency-cycle refusal locates a single participating spelling, exact on that fixture. T12.0-13 names `<graph-node>` in its rule; its assertions enumerate `show`, `query node`, `occurrences --to`, and `move`. T12.7-2's unstaged tie-break levels admit no product-independent staging; the full comparator is decode-enforced on every captured array. T12.0-9's 14.24 and 14.25 class-2 members are asserted by T14-9 and T14-10, and T13.5-7(e)'s `split` arm is present.
+  - C: 259 of 344 tests cite passages in their titles that their map entries omit; the map documents a primary-passages policy, S-1's checks hold, and only §14 carries an explicit completeness clause (Task 10). The UTF-8 decode catch-alls (`parseJsonStdout`, section-6.5-iv/v, 6.6, 5.4, `support.ts`, `sorted-keys.ts`, p2-p3) would read a decoder failure other than invalid UTF-8 (V8's string-length limit) as "not valid UTF-8", which within the 512 MiB capture limit can happen only in a 24-byte window, for output sizes no conforming product gives. The Windows leg runs with network, outside E-1's Linux clause.
+  - D: compliant. VIOL-AVAIL-NULLMARKER also changes T11.2-4's removal arm (after `GONE.mdx` is deleted, `IMP.mdx`'s undefined import target is carried as `null`, a staged undefined datum within its deviation; the entry declares only the enclosure arm unchanged). Commands outside a fixture's surface whose flags read cleanly but whose operands do not fit are refused with the scope error (exit 70) and report no usage error; no in-scope test drives them, and the document does not constrain out-of-scope invocations.
+
+**Order.** Tasks are in dependency order; take the topmost task unless told otherwise. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement. When a task is done, its commit removes it and adds a one-line summary to its bullet here.
+- Part A (Tasks 1–9): the T-numbered tests, in TEST-SPEC order — T1.1-2's skeleton equality (A6), the shared fresh-identifier reader and T1.4-5's reader (A5, part 1 of 3), T6.4-1's `check` after the rename (A2), T6.4-2's single-quoted exact-match `d` entry (A1), `section-6.5.ts`'s fresh-identifier readers (A5, part 2 of 3), the remaining fresh-identifier readers in `section-6.5-ii.ts`, `section-6.5-iii.ts`, and `section-6.6.ts` (A5, part 3 of 3), T6.5-13(l)'s compiled Markdown (A3), T6.6-5's expectations composed from the inventory's `recorded` set (A4), and T11.6-3's profile, rule, and code-group order (B1). Task 2 precedes Tasks 5 and 6, which reuse its reader and its AGENTS.md stand-in recipe; Tasks 6 and 7 both edit `section-6.5-iii.ts` and go in that order. Tasks 1, 3, 4, 8, and 9 depend on no other task.
+- Part B (Task 10): H-7 — `"14"` on every test asserting a §14 condition or a refusal code (C1). It follows Part A, whose Tasks 1, 3, and 9 may retitle tests its cross-check reads.
+- Part C (Task 11): S-7 sweeps the product-facing bodies outside the registry against the empty stub (C2). Independent of Parts A and B.
+- Task 12 confirms the result and deletes this plan. It depends on every task above.
+
+## Tasks
+
+### Part A — the T-numbered tests (TEST-SPEC order)
+
+### Task 1 — T1.1-2: assert that the two tag forms' generated modules expose equal skeletons (A6)
+
+**Requirement.** TEST-SPEC T1.1-2 (line 36 at 6780f53): "Two workspaces identical except one uses `<S>` and the other `<Spec>` (including nested and props-bearing sections): builds succeed; Markdown outputs are byte-identical; `query nodes` reports the same node set; generated modules expose the same skeleton; mixing both tag names in one file is valid." "The same" is an equality, not a common subset.
+
+**Shortfall.** In `test/suite/registry/section-1.1-1.2.ts`, `T1_1_2` (about line 180) compiles one consumer, `SKELETON_CONSUMER` (a `StagedTs` record, about line 168, staged after `build` at about line 271), referencing `SPEC.login`, `SPEC.login.validCredentials`, and `SPEC.meta`, against each workspace. That proves both modules expose at least those chains; a member exposed by one tag form's module alone (an extra node property, an extra export) passes.
+
+**Change.**
+- In each workspace, after its `build`, collect the generated module's exposed skeleton through TypeScript 5.9.3's checker over `specs/A.xspec.ts`: the module's export names, and the default export's member tree — each property's name, recursing into the property's type while the members are declared in the product's generated files (the module and its companions); members declared elsewhere (TypeScript's lib, an installed package) are leaves recorded by name, with a cycle guard and a depth bound well above the staging's depth. Compare names and nesting only, never the type or interface names a product generates (H-4). Use the harness's tooling (`test/helpers/tooling.ts`: `ConsumerProject`, given a narrow accessor for its program's type checker if needed, with an S-4 vector in `test/self/s4-typescript-tooling.test.ts` for any new tooling method; or a direct `ts.createProgram` under `defaultConsumerCompilerOptions()`).
+- Assert the two skeletons equal; the diagnosis names each member present in one form's module alone, by its access chain and tag form (SPEC 1.1, 4.1). Keep the existing consumer compile. Touch the title only if it no longer describes the body.
+
+**Checks.**
+- Against the built product: T1.1-2 passes before and after. A failure counts as a diagnosed product failure only once a hand probe shows the two modules' member trees differing.
+- Red check (AGENTS.md "Red-checking a generated-module type assertion"): a stand-in that, after an exit-0 `build` in the `<Spec>` workspace alone (its `specs/A.mdx` spells `<Spec`), adds a member to one node's interface in the type companion `specs/A.xspec.impl.d.ts` (e.g. `meta`'s interface gains `readonly extra: XspecNode_A;`) must fail the new assertion, naming `SPEC.meta.extra` and the `<Spec>` form, where the consumer compile alone passes it; the same edit in both workspaces passes.
+- T1.1-2 is uncertified.
+
+### Task 2 — Fresh identifiers: add a shared TypeScript 5.9.3 identifier reader and convert T1.4-5's reader (A5, part 1 of 3)
+
+**Requirement.** SPEC 6.5 ("Added imports") restricts an added import's fresh identifiers only by its barred lists and its freshness clauses, and SPEC 1.4 judges identifier characters alone, at the TypeScript release and language level 14.20 fixes (5.9.3, ESNext; TEST-SPEC T6.4-2, T1.4-5(c)), so a non-ASCII letter (U+00E9) or U+2EBF0 is a conforming choice. TEST-SPEC reads the fresh identifier value-blind wherever an arm composes the bytes around it: T1.4-5(b)/(c) (line 61: "the fresh identifier `<O>` and the choice among line-start admissible offsets its only unknowns"), T6.5-8 (line 287: "value-blind in the fresh identifier"), T6.5-10 (line 289), T6.5-11 (line 290), T6.5-13 (line 292: "value-blind in the fresh identifiers alone"), T6.5-14 (line 293), and, under the same discipline, T6.5-3 (line 280), T6.5-9 (line 288), T6.5-16's and T6.5-17's controls, T6.5-18, T6.5-19, and T6.6-4(b)/(e).
+
+**Shortfall (all three parts).** Every harness reader that extracts a fresh identifier before the byte compare accepts only `[A-Za-z_$][A-Za-z0-9_$]*`, so a conforming product binding a non-ASCII identifier fails with a diagnosis. The sites (grep that class under `test/suite/registry/`):
+- `section-1.4.ts`: `t145MovedArrayRoot` (about line 1072; T1.4-5(b)/(c)) — this task;
+- `section-6.5.ts`: `R3_THIRD_REWRITTEN` (about line 2703; T6.5-3's third-file arm), `A8_CODE_REWRITTEN` (about 5726; T6.5-8's TS arm, and T6.5-9's `a9RewrittenMarkerRoot`), the T6.5-8 MDX arms' patterns (about 5792 and 5845), T6.5-9's spec-source arm's `S9_REWRITTEN_*` (about 6625–6626), and T6.5-10's (a) and (c) patterns (about 7181–7183) — Task 5;
+- `section-6.5-ii.ts`: `REWRITTEN_CALL` (about 697; T6.5-11); `section-6.5-iii.ts`: `F14_REWRITTEN_DEPENDS` and `F14_REWRITTEN_EMBEDS` (about 775–776; T6.5-14), `a13ReadAddedIdentifiers` (about 2653; T6.5-13, T6.5-19, T6.6-4(e)), `r16ReadAddedIdentifier` (about 5260; T6.5-16(g)'s and T6.5-17(e)'s controls), and T6.5-18's two patterns (about 6055 and 6060); `section-6.6.ts`: T6.6-4(b)'s real-run reader (about 1869) — Task 6.
+
+The patterns that need no change are listed under "Considered and not planned".
+
+**Change.**
+- Add one shared, exported reader under `test/helpers/` that reads an identifier exactly as TypeScript 5.9.3 at ESNext judges one: an identifier-start code point, then identifier-part code points, read code point by code point (astral planes included, so U+2EBF0 is one character), through `ts.isIdentifierStart` and `ts.isIdentifierPart` with `ts.ScriptTarget.ESNext` — the test `test/helpers/mdx-derivability.ts` already applies privately (`isIdentifierStart151`, `isIdentifierPart151`); export or share it rather than duplicating it. Never judge by a Unicode property class (`\p{ID_Start}`): the runtime's tables postdate TypeScript 5.9.3's (U+1C89, TEST-SPEC T6.4-2).
+- The shape is the implementer's choice — for example a scanner returning the identifier that starts (or ends) at an offset, plus a validating predicate for a permissively captured run, so a site's regex can capture the run and the judge decide it. A run that reads as no identifier fails diagnosed, naming the run and SPEC 6.5 and 1.4. A lookbehind or lookahead guarding a capture (`(?<![A-Za-z0-9_$.])`) must exclude every identifier part under the same judge, not ASCII alone.
+- Self-test vectors in an existing self-test file (`test/self/s4-typescript-tooling.test.ts` or `test/self/added-import-identifiers.test.ts`), every non-ASCII input built from code points. Accepted: `x`, `$`, `_a`, U+00E9 alone and after `M`, and U+2EBF0 alone and after a letter (T6.4-2: 5.9.3 admits it at ESNext). Rejected: a leading digit, U+1C89 alone and before `x` (T6.4-2: 5.9.3 admits it nowhere in an identifier), the empty run, and a run holding a space or `-`. Any further vector pins the verdict `ts.isIdentifierStart`/`ts.isIdentifierPart` give at ESNext, probed first, never one assumed from a Unicode property.
+- Convert `t145MovedArrayRoot` to the reader, keeping the rest of its check (the line equal to the arm's composed attribute given the read root).
+- AGENTS.md: record the green-check stand-in below as a recipe, for Tasks 5 and 6 to reuse.
+
+**Checks.**
+- The new vectors pass; with the helper stashed (AGENTS.md "Red-checking a new self-test vector") they fail.
+- Against the built product: T1.4-5 passes before and after. Run `-t VALID` certification as well (the module holds T1.4-1, T1.4-2, and T1.4-4).
+- Green check: a stand-in that runs the built product and, after a performed `move` exits 0, renames the identifier the product's added import binds — read off the declaration lines the move added (diff the pre- and post-move bytes) — to U+00E9 followed by that identifier, consistently in every file the move wrote (a whole-identifier replacement, never inside a longer name), then runs the built product's `build` so the derived files match the renamed sources, as they would for a product choosing that identifier. Through it, T1.4-5's (b) and (c) arms must pass after this task (before it, they fail at `t145MovedArrayRoot`'s diagnosis). The same stand-in prefixing U+1C89 instead must fail them diagnosed. Where an arm also reads the identifier from a preview's answer, the stand-in renames it there too.
+- T1.4-5 is uncertified.
+
+### Task 3 — T6.4-1: run `check` after the rename and assert it clean (A2)
+
+**Requirement.** TEST-SPEC T6.4-3 (line 270): "6.4 states that every rewritten reference resolves by construction, so no refusal reason exists for it (14): the property is asserted on the success side of every successful rename — T6.4-1's `check` clean and every edge retargeted." SPEC 6.4: "A successful rename finishes by regenerating derived files exactly as `xspec build` does (12.1) … so generated modules, Markdown output, and graph data match the rewritten sources and no stale output (14.10) remains"; SPEC 12.2: `check` performs all build validations and verifies the derived files, exiting 1 on any finding.
+
+**Shortfall.** `T6_4_1` (`test/suite/registry/section-6.4.ts`, about lines 671–900) runs only `build` after the rename (`buildOk`, about line 781) and asserts identities and edges; `check` never runs, so a product leaving a stale derived file or an unresolved rewritten reference that the next `build` repairs passes.
+
+**Change.**
+- Right after the rename's exit-0 run and the journal assertion, before the rebuild, run `check --json` and assert it finding-free with `expectFindingFreeReport` (`test/suite/registry/support.ts`), its context citing SPEC 6.4 (every rewritten reference resolves; the finishing regeneration leaves nothing stale), 12.2, and TEST-SPEC T6.4-3. Keep the rebuild and the identity and edge assertions.
+- The title gains "`check` clean after the rename"; it may also drop its stale "report shape unpinned" (the body decodes the report form-exact).
+
+**Checks.**
+- Against the built product: T6.4-1 passes before and after.
+- Red check: a stand-in that, after the real `rename` exits 0, leaves one derived file stale (e.g. appends a byte to the renamed file's generated module) must fail at the new assertion, where the test passed before (the rebuild repairs the file).
+- T6.4-1 is uncertified.
+
+### Task 4 — T6.4-2: stage a single-quoted exact-match `d` entry in fixture L (A1)
+
+**Requirement.** TEST-SPEC T6.4-2 (line 269): "a single-quoted local string reference whose own segment is rewritten — `{text('login-v2')}` and a `d` array's `'login-v2'` entry — keeps its single quotes (T6.5-7 pins the same for a move's prefix re-identification)."
+
+**Shortfall.** Fixture L's `coreL` (`test/suite/registry/section-6.4.ts`, about lines 927–950) stages `{text('${seg}')}`, but no `d` array holds a single-quoted entry spelling the renamed ID itself: `other`'s array spells it double-quoted (`"${seg}"`), and the only single-quoted `d` entries (`'${seg}.kid'`, in `${seg}.aux`'s and `other`'s arrays) are descendant references, rewritten by prefix replacement. Fixture M (`coreM`, about lines 1018–1045) has the same shape (`"top.${seg}"` double-quoted, `'top.${seg}.kid-x'` single-quoted). A product re-emitting an exact-match `d` entry double-quoted passes arms 1 and 2.
+
+**Change.**
+- Stage a single-quoted `'${seg}'` entry in a `d` array of fixture L's `specs/Core.mdx`, keeping `other`'s double-quoted `"${seg}"`, so both quote kinds stand as exact-match entries — e.g. give `other.leaf` `d={['${seg}']}`, or add a top-level section whose `d` holds it. The fixture stays valid: no target twice in one array, no dependency on an ancestor (14.9), and the arm's first `build` exits 0. The expected bytes follow from the same template (`expectedL`), so arm 1 (`login2`) and arm 2 (`login-v3`) both cover the entry.
+- `T6_4_2_L_FILES`' records (about line 1121) take the new bytes; their names need no change. Update the fixture comment (about lines 914–924) to name the entry. Fixture M may gain the same (`'top.${seg}'`); optional.
+
+**Checks.**
+- Against the built product: T6.4-2 passes before; after the change, a failure counts as a diagnosed product failure only once a hand probe shows the product re-quoting the entry.
+- Red check: a stand-in that, after the real rename exits 0, rewrites the new single-quoted exact-match entry to double quotes inside its `d` array in `specs/Core.mdx` (arm 1: `'login2'` becomes `"login2"`) must fail arm 1 at `specs/Core.mdx`'s byte compare, and the same for arm 2.
+- T6.4-2 is uncertified.
+
+### Task 5 — Fresh identifiers: convert `section-6.5.ts`'s readers (A5, part 2 of 3)
+
+**Depends on.** Task 2 (the shared reader and its AGENTS.md stand-in recipe).
+
+**Requirement.** As in Task 2: SPEC 6.5 and 1.4; TEST-SPEC T6.5-3 (line 280), T6.5-8 (line 287), T6.5-9 (line 288), and T6.5-10 (line 289) read the fresh identifier value-blind.
+
+**Shortfall.** `test/suite/registry/section-6.5.ts` reads fresh identifiers with the ASCII-only class at: `R3_THIRD_REWRITTEN` (about line 2703, read by `thirdFileReferenceRoot`; T6.5-3's third-file arm); `A8_CODE_REWRITTEN` (about 5726; T6.5-8's TS arm, and T6.5-9 through `a9RewrittenMarkerRoot`, about 6476); `A8_ORG_REWRITTEN` and `A8_TGT_REWRITTEN` (about 5792 and 5845; T6.5-8's MDX arms); `S9_REWRITTEN_DEPENDS` and `S9_REWRITTEN_EMBEDS` (about 6625–6626; T6.5-9's spec-source arm); and `C10_REWRITTEN_DEPENDS` and `C10_REWRITTEN_EMBEDS` (about 7181–7183; T6.5-10's (a) and (c)).
+
+**Change.** Read each through Task 2's reader, keeping every other check at the site (the match counts, the single shared root, the byte compares the read identifier feeds). `A8_CODE_REWRITTEN`'s lookbehind `(?<![A-Za-z0-9_$.])` must exclude every identifier part under the same judge.
+
+**Checks.**
+- Against the built product: T6.5-3, T6.5-8, T6.5-9, and T6.5-10 pass before and after.
+- Green check (Task 2's AGENTS.md recipe): the U+00E9-prefixing stand-in passes T6.5-8's TS arm (the lookbehind site) and T6.5-10(a) after this task, and fails them before; the U+1C89-prefixing stand-in fails them diagnosed.
+- None of these tests is certified.
+
+### Task 6 — Fresh identifiers: convert the readers in `section-6.5-ii.ts`, `section-6.5-iii.ts`, and `section-6.6.ts` (A5, part 3 of 3)
+
+**Depends on.** Task 2.
+
+**Requirement.** As in Task 2: SPEC 6.5 and 1.4; TEST-SPEC T6.5-11 (line 290), T6.5-13 (line 292), T6.5-14 (line 293), T6.5-16's and T6.5-17's controls, T6.5-18, T6.5-19, and T6.6-4(b)/(e) read the fresh identifiers value-blind.
+
+**Shortfall.** The ASCII-only class reads fresh identifiers at: `REWRITTEN_CALL` (`test/suite/registry/section-6.5-ii.ts`, about line 697; T6.5-11); in `test/suite/registry/section-6.5-iii.ts`, `F14_REWRITTEN_DEPENDS` and `F14_REWRITTEN_EMBEDS` (about 775–776; T6.5-14), the exported `a13ReadAddedIdentifiers` (about 2644–2653; T6.5-13, T6.5-19, and T6.6-4(e) through `section-6.6.ts`), `r16ReadAddedIdentifier` (about 5254–5260; T6.5-16(g)'s and T6.5-17(e)'s controls), and `A18_MARKER_REWRITTEN` and `A18_CALL_REWRITTEN` (about 6055 and 6060, with lookbehinds and lookaheads; T6.5-18); and `assertRealRunInsertsImportAtPreviewedOffset`'s pattern (`test/suite/registry/section-6.6.ts`, about lines 1841–1869; T6.6-4(b)).
+
+**Change.** Read each through Task 2's reader, keeping every other check at the site; each lookbehind and lookahead must exclude every identifier part under the same judge. The stale header sentence of `section-6.5-iii.ts` (about lines 141–144; see "Considered and not planned") may be corrected here.
+
+**Checks.**
+- Against the built product: T6.5-13, T6.5-14, T6.5-16, T6.5-17, T6.5-18, T6.5-19, and T6.6-4 pass before and after; T6.5-11 still fails at its arm (f) with the same diagnosis.
+- Green check (Task 2's AGENTS.md recipe): the U+00E9-prefixing stand-in passes T6.5-18 (the lookbehind sites) and one `a13ReadAddedIdentifiers` arm of T6.5-13 (e.g. (a)) after this task, and fails them before; the U+1C89-prefixing stand-in fails them diagnosed.
+- None of these tests is certified.
+
+### Task 7 — T6.5-13(l): assert that the paragraph's lines stay content in the compiled Markdown (A3)
+
+**Requirement.** TEST-SPEC T6.5-13 (line 292), arm (l): a target whose first two lines, `// note` and `import B from "./B.xspec"`, are one paragraph — "an ESM block cannot interrupt a paragraph (14.20), so the second line is content, no declaration" — receives `p.n`, and "the result is exactly the file with the moved text and its terminator inserted before `</S>` and `import <X> from "./x.xspec"`, U+000A appended, the paragraph's bytes untouched and still content in the compiled Markdown, …"; "an indented twin — `  import B from "./B.xspec"` heading the file in the paragraph's place, a paragraph line likewise — alike: … the expectations the same".
+
+**Shortfall.** Both (l) arms (`a13ParagraphHeadedArm`, `test/suite/registry/section-6.5-iii.ts` about line 1757, used at about 2462 and 2475) run under the module's `CONFIG` (about line 233: no `markdown` key, so nothing is emitted). `runA13Arm` (about line 2931) asserts the bytes, the `view` imports, the own text and ownHash, the preview, and `check` and `build` (`assertCleanAfterMove`, about line 3076), but produces and reads no compiled Markdown.
+
+**Change.**
+- Give `A13Arm` (about line 1410) an optional configuration — passed to the module's `withWorkspace` as its third argument, `CONFIG` by default — and an optional compiled-Markdown expectation for the receiving file (a function of the fresh identifiers, like `compose`).
+- Stage both (l) arms with `markdown: { emit: true }`. The module's `J15_EMIT_CONFIG` (about line 3135) is that configuration: reuse it, adding T6.5-13 to its record's name, or stage another `StagedTs` record (S-9's timing clause: these workspaces follow product invocations).
+- In `runA13Arm`, after `assertCleanAfterMove`, byte-compare the receiving file's compiled Markdown — `specs/b.md`, its 13.2/7.3 destination with `outDir` unset — with the expectation, composed from SPEC 3's rules over the composed post-move source the way T6.5-15 composes its `compiled` expectation (`compiledBlock`, about line 3228; the compare at about 3548): the paragraph's lines (`// note` and `import B from "./B.xspec"`, or the twin's indented line) verbatim as content, and everything else as SPEC 3 compiles it (the added declaration removed with its line, the section tags dropped with their lines, any `{text(...)}` expanded). Asserting the staging's compiled Markdown before the move (the same paragraph lines present) is welcome.
+- Touch T6.5-13's title only if it no longer describes the body.
+
+**Checks.**
+- Against the built product: T6.5-13 passes before; after the change, a failure counts as a diagnosed product failure only once a hand probe shows the compiled Markdown dropping or altering the paragraph's lines.
+- Red check: a stand-in that, after each exit-0 `build`, deletes the `import B …` paragraph line from `specs/b.md` (as a product compiling it as a declaration would) must fail the new compare in both (l) arms — the compare reads the file after `assertCleanAfterMove`'s `build`, so `check` before it stays clean; a pass-through stand-in passes.
+- T6.5-16(g), the refusal-side twin, is unchanged, and T6.6-4 restages only T6.5-13's (b), (d), and (g), so no other test inherits the configuration change.
+- T6.5-13 is uncertified.
+
+### Task 8 — T6.6-5: compose the expected delta sets from the inventory's `recorded` set (A4)
+
+**Requirement.** TEST-SPEC T6.6-5 (line 311): "Record-based, not presence-based, with exact expectations in both directions (12.7: form-exact, paths in byte order): with graph data deleted (T13.3-2's operational definition) … the same move preview's `generated` is exactly every derived path the post-operation workspace generates, nothing being recorded: the module and companions of every discovered spec source, the moved file's under its destination path, plus each source's Markdown emit destination with emission enabled — composed from the `recorded` set the inventory reported after the build (11.6; the companion suffixes are the product's own, H-4), the moved file's entries re-based to its destination — and its `removed` is exactly `[]`". With the record present, `removed` holds "the recorded pre-move module, companions, and Markdown"; for the lagging record, "`removed` exactly the recorded pre-move module and companions".
+
+**Shortfall.** `T6_6_5` (`test/suite/registry/section-6.6.ts`, about line 3227) composes every expectation from the premise build's observed filesystem writes — `observeDerivedWrites` (about line 3087; used at about 3255, 3378, and 3437) and `fullRegenerationSet` (about 3327) — and never runs `inventory`. The module header (about lines 155–175) justifies this by pinning "recorded" through 13.3, a reading that predates TEST-SPEC's current wording. A product whose recorded set differs from its writes is judged against the wrong expectation.
+
+**Change.**
+- After each premise `build` — before graph data is deleted or the configuration changed — run `inventory --json` and decode its `recorded` datum (`decodeInventoryRecordedDatum`, `test/helpers/adapters/forms.ts`; `readRecordedCompanionPaths` and `recordedCompanionPaths` in `test/suite/registry/support.ts` show its use). An unavailable datum after a successful build is a diagnosed failure (SPEC 11.6).
+- Attribute each recorded path to exactly one staged source by 13.1's `DIR/NAME.xspec.<suffix>` shape and the 13.2/7.3 Markdown destination, failing diagnosed otherwise.
+- Compose every expectation from it. Record present: `removed` the moved file's recorded entries (module, companions, Markdown), `generated` those entries re-based to the destination. Graph data deleted: `generated` every recorded path, the moved file's re-based, and `removed` `[]`. Lagging record (emission enabled after the build): `removed` the moved file's recorded module and companions, `generated` those re-based plus the destination's Markdown and every other source's Markdown destination. Created target (T6.6-4(d)'s staging): `generated` the new file's module and companions, re-based from the origin's recorded entries. Re-basing replaces `DIR/NAME` with the destination's directory and name and keeps each suffix.
+- The observed writes may remain a premise check of what `build` wrote (the module present), but no expectation is composed from them, and no premise requires them equal to `recorded` (T11.6-3 pins the record's content). Update the module header and the comments.
+
+**Checks.**
+- Against the built product: T6.6-5 passes before and after (confirm by hand that the built product's `recorded` set after the premise build equals its writes, so both compositions agree on it).
+- Red/green check: a stand-in whose `inventory` answer drops one of the moved file's companions from `recorded`, and whose move previews drop it (and its re-based path) from their deltas consistently, must pass after the change and fail before; one dropping it from `recorded` alone must pass before and fail after, at the delta compare.
+- T6.6-5 is uncertified.
+
+### Task 9 — T11.6-3: stage code groups, profiles, and rules against name byte order (B1)
+
+**Requirement.** TEST-SPEC T11.6-3 (line 472): "Orders: paths byte order; groups, profiles, rules configuration order; session files byte order of file name." SPEC 11.6 lists "groups, profiles, and rules, a group's globs, and a file's groups in configuration order".
+
+**Shortfall.** Every configuration `test/suite/registry/section-11.6.ts` stages has at most one code group, one coverage profile, and one policy rule: `RESOLVED_DEFAULTS_CONFIG` (about line 721: `impl`, `socle`, `cloison`), `RESOLVED_SETS_CONFIG` (about 814: `ensemble`, `etiquettes`), and T11.6-3's own `DURABLES_EMIT_CONFIG` (about 1571: none). So the exact compares (about 1128–1143 and 1505–1524) see no order, and T11.6-3's body (about 1879–1888) pins only the spec groups' order (`zz` before `aa`), its comment deferring profiles and rules to T11.6-2's single-entry compares. A product listing `configuration.code`, `configuration.coverage`, or `configuration.policy` by name byte order, or reversed, passes.
+
+**Change.**
+- In T11.6-3 (preferably in a workspace of its own; its configuration is a `StagedTs` record when the workspace is created after the body's first invocation, S-9), stage a valid configuration holding two code groups, two coverage profiles, and two policy rules, each pair declared against name byte order (e.g. code groups `zc` then `ac`, profiles `zp` then `ap`, rules `zr` then `ar`). Profiles and rules need only valid targets, boundaries, and selectors (SPEC 7.4, 7.5; an invalid configuration is 14.14 at load); inventory evaluates neither. A group's globs declared against byte order (SPEC 11.6 names them; TEST-SPEC's Orders sentence does not) are welcome in the same staging.
+- Assert the inventory's `configuration.code`, `configuration.coverage`, and `configuration.policy` exactly — whole resolved entries, every default and inferred kind explicit as T11.6-2 writes them — in configuration order, form-exact, through both the bare `inventory` and `inventory --json` (one JSON document either way, SPEC 11).
+- Correct the comment at about lines 1879–1883, and update T11.6-3's title if it no longer describes the body.
+
+**Checks.**
+- Against the built product: T11.6-3 passes before and after (a failure counts as a diagnosed product failure only once a hand probe shows a list out of configuration order).
+- Red check: stand-ins rewriting the `inventory` answer so each of the three lists is sorted by name bytes, or reversed, each fail at the matching assertion.
+- T11.6-3 and T11.6-2 are uncertified.
+
+### Part B — H-7
+
+### Task 10 — H-7: map every test asserting a §14 condition or a refusal code to `"14"` (C1)
+
+**Depends on.** Tasks 1–9 (Tasks 1, 3, and 9 may retitle tests the cross-check below reads).
+
+**Requirement.** TEST-SPEC H-7 (line 25): the map runs "from test ID to the SPEC.md passage(s) it covers". TEST-SPEC §14's preamble (line 581): "Sections 1–13 exercise each numbered condition in its home context … Primary tests per condition (not exhaustive; the H-7 map is the complete record)". The map's own rule (`test/suite/registry/traceability.ts`, header about lines 38–45): "a test asserting a numbered condition (14.x) or a stable refusal code covers passage "14" wherever it lives."
+
+**Shortfall.** The rule is applied only to the tests §14's index names. Reviewer C found 50 registered tests whose titles cite a §14 condition and whose entries lack `"14"` — for example T11.4-3 asserts exactly five 14.17 findings; T11.2-2 exactly the staged 14.1, 14.3, 14.4, and 14.17 findings; T13.3-3 exactly 14.13 and exactly 14.22; T2.4-4 located 14.5, 14.6, and 14.7 findings; T12.7-2 the refusal reasons in 14's listed order. The header's list of the refusal reasons' staging tests names four (T6.4-3, T6.5-4, T6.5-6, T6.6-3) of the index's eight; T6.5-16, T6.5-17, T6.5-20, and T6.5-21 already carry `"14"`, so only the comment is stale.
+
+**Change.**
+- List A, 41 tests whose titles assert a condition's finding, its absence, or a refusal code — confirm each body asserts one, and add `"14"` to its entry: T2.4-4, T3-1, T4-4, T6.4-4, T6.4-6, T6.4-7, T6.5-3, T6.5-5, T6.7-1, T7.5-3, T7.5-4, T7.5-5, T10.1-3, T10.7-3, T10.7-5, T11-2, T11.2-1, T11.2-2, T11.2-3, T11.2-5, T11.3-2, T11.3-3, T11.4-1, T11.4-3, T11.4-5, T11.4-6, T11.5-2, T11.6-3, T12.0-2, T12.0-3, T12.0-13, T12.1-4, T12.2-3, T12.6-2, T12.7-1, T12.7-2, T12.7-3, T13.3-3, T13.4-3, T13.4-4, and P-9.
+- List B, 9 tests whose titles mention a condition only as staging or cross-reference context: T4.5-7, T6.5-2, T6.5-9, T6.5-11, T6.5-15, T6.5-19, T11.4-2, T11.6-2, and P-8. Add `"14"` where the body asserts a condition's finding or a refusal code; name each one left without it, with the reason, in the header.
+- Where the task meets a body asserting a condition its title does not name, add `"14"` there too.
+- Rewrite the header's `"14"` construction bullet to state the rule as now applied, and to list the refusal reasons' staging tests as §14's index names them (all eight).
+
+**Checks.**
+- S-1 (`test/self/s1-traceability.test.ts`) stays green.
+- Cross-check: list every registered test (`productTestSuite.all()`) whose title cites `14`, a `14.<n>` condition, or a refusal code and whose entry lacks `"14"`; only the exceptions the header names may remain. Reviewer C's probe does exactly this (`c127C/probe/titles14.test.ts`, run with `c127C/probe/vitest.config.mts`, in the scratchpad if still present); a scratch copy of it is fine, outside the repository or deleted before committing.
+- No test body changes, so no product test's outcome changes, and certification does not read the map (only S-1 does).
+
+### Part C — S-7
+
+### Task 11 — S-7: sweep the product-facing bodies outside the registry against the empty stub (C2)
+
+**Requirement.** TEST-SPEC S-7 (line 630): "Against an empty stub product (every command exits with an unexpected code and no output), every product-facing test fails with a diagnosed assertion and the suite completes without harness errors (H-8)." H-8 (line 26): "every product-facing test fails with a diagnosed assertion failure — never a harness crash, hang, or false pass."
+
+**Shortfall.** `test/self/s7-red-green-sweep.test.ts` (about lines 136–171) sweeps `productTestSuite.all()` only. Three product-facing bodies outside the registry are swept by no self-test:
+- (a) the E-6 representative fixture, `runE6RepresentativeFixture` (`test/helpers/e6.ts`, about line 290), run in the full suite by `test/suite/e6-exchange-writer.test.ts` and on the Windows leg by `test/windows/e6-byte-identity.test.ts`;
+- (b) the four single-casing probes `test/windows/e6-subset.test.ts` runs — `runT74SingleCasingGlobProbe`, `runT1012SessionNameCasingProbe`, `runT1013WrongCaseExtensionProbe`, and `runT1206SingleCasingPathProbe` (T7-4, T10.1-2, T10.1-3, T12.0-6);
+- (c) T11.6-1's drive-mismatch arm, whose body is inline in `test/windows/e6-drive-mismatch.test.ts` (about line 381).
+
+Reviewer C's probes at 4117ede show (a) and (b) failing with `HarnessAssertionError` against the stub: H-8 holds in practice, but no self-test checks it.
+
+**Change.**
+- Move (c)'s body into an exported function taking a `ProductBinding`, in a helper module of its own (e.g. `test/helpers/e6-drive-mismatch-arm.ts`; keep `test/helpers/e6-drive-mismatch.ts` the records-only module it is, since `test/self/s9-staged-sources.test.ts` imports it before the registry manifest seals the ledgers). The Windows test calls it with `builtProductBinding()`, its title and behavior unchanged. Against a stub, the arm's same-drive premise half fails first, on any platform, before the platform gate.
+- In S-7's file, run (a), each probe of (b), and (c) against the empty stub, and require for each the registry bodies' verdict: a `HarnessAssertionError` — no pass, no other error, no hang. One way: wrap each as a synthetic `defineProductTest` entry in the reserved T99.x ID space (as `SWEEP_PREMISE_PROBE` is) and run them through `runProductTests`, requiring the counts `{ pass: 0, fail: n, error: 0, hang: 0 }` (the runner counts only a `HarnessAssertionError` as a fail).
+- Update the S-7 file's header to name these bodies, and `test/helpers/e6-drive-mismatch.ts`'s header, which says S-7's sweep never runs the arm.
+- Mind the undeclared-staging guard: inside a body context, each body's stagings must stay records or precede its first invocation, as they do today.
+
+**Checks.**
+- The new vectors pass. Red check: a stand-in body (or a scratch edit) making one of them throw a plain `Error`, or return normally, fails the sweep, naming it.
+- `npm run typecheck` covers the Windows files, which keep their titles and their calls; the Windows leg runs in CI only, so confirm it green on the pushed head.
+- The self project stays green (its test count grows by the new vectors), certification stays 154 PASS / 38 FAIL / 0 error / 0 hang, and the suite's 28 failures are unchanged (no suite body changes).
+
+### Final
+
+### Task 12 — Confirm locally and in CI; delete this plan
+
+**Depends on.** Every task above.
+
+**Change.**
+- Under the namespace, run the full self project alone: expect 0 failures. Update AGENTS.md's self-project counts (27 files and 4220 tests at 4117ede; Tasks 1, 2, 7, 9, and 11 may add vectors or records) and its self-project timing (VERIFY measured 192.75 s locally and 129 s in CI at 4117ede, where AGENTS.md lists 177 s), and confirm the certification totals (still 6 conformers and 21 violators, 27 fixtures, every one passing: 154 PASS / 38 FAIL / 0 error / 0 hang).
+- Then run the suite project against the built product, alone, inside CI's inner stage (network off, uid 1000, no capabilities; AGENTS.md's namespace bullet). Every failure must be a diagnosed product failure (`HarnessAssertionError`). List each failing test with its first failing arm in the commit message and compare the list with the 28 IDs in the Preamble: say which tests changed outcome and why (a test Tasks 1–9 strengthened joins them only if its task's hand probe showed the product contradicting the new assertion; T6.5-11 stays at its arm (f)). Record the run time in AGENTS.md's timing bullet (VERIFY at 4117ede: `npm test` 1525.51 s locally, CI's full-suite job 917 s, the Windows leg 32 s; AGENTS.md's last suite entry is 1288 s).
+- Check CI on the pushed head: the harness-self job and the Windows leg are green, and the full-suite job fails only on diagnosed product tests (AGENTS.md's CI-reading bullet holds the recipe).
+- Delete `specs/tmp/FIX_PLAN.md` with `git rm` once no other task remains in it, under the Preamble's "Deleting this plan" rule: if the permission system refuses, stop and report the refusal — never move, rename, or empty the file.
