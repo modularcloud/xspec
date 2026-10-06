@@ -241,6 +241,7 @@ import {
   assertAddedImportInsertion,
   assertExactDeclarationInsertion,
   canonicalSpecifier,
+  expectFreshIdentifier,
 } from "../../helpers/import-insertion.js";
 import { deriveMdx } from "../../helpers/mdx-derivability.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -262,6 +263,10 @@ import {
   ConsumerProject,
   assertNoCompileErrors,
 } from "../../helpers/tooling.js";
+import {
+  IDENTIFIER_RUN_SOURCE,
+  NO_RUN_BEFORE_SOURCE,
+} from "../../helpers/ts-identifiers.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
@@ -2616,7 +2621,9 @@ const R3_SEED_FILES = [
 // are asserted with T6.5-8's discipline (`assertAddedImportInsertion`): its
 // expected post-move bytes are composed from the rules of 6.4/6.5 and 3
 // WITHOUT the added import, the fresh identifier read off the rewritten
-// reference, and the single inserted run isolated by diff must be
+// reference as TypeScript 5.9.3 at ESNext reads an identifier (a non-ASCII
+// letter as readily as `a`; helpers/ts-identifiers.ts, SPEC 1.4, 14.20),
+// and the single inserted run isolated by diff must be
 // byte-exactly 6.5's spelling, `import <X> from "./Target.xspec"`, followed
 // by U+000A at a line-start offset — the file holds one (its end after the
 // final terminator), which 6.5 takes over any other (T6.5-8). The origin
@@ -2699,13 +2706,33 @@ const R3_DEPENDS_EDGES: readonly GraphEdge[] = [
   { from: `${R3_TARGET}#tm.k2`, to: `${R3_TARGET}#tm.k1`, kind: "depends" },
 ];
 
+/**
+ * A global pattern for one rewritten reference in 6.4's pinned spelling:
+ * `before`, then the root captured as group 1 — a permissive identifier
+ * run (helpers/ts-identifiers.ts: every code point but ASCII's
+ * non-identifier ones, so it holds any identifier TypeScript 5.9.3 at
+ * ESNext reads, a non-ASCII letter or U+2EBF0 included, and stops at the
+ * spelling's ASCII `.` or `[`) — then `after`; both regular-expression
+ * sources. The bytes the spelling pins beside the root are ASCII, so the
+ * capture is the identifier whole; the reader judges it
+ * (`expectFreshIdentifier`: SPEC 6.5, 1.4, 14.20).
+ */
+function rewrittenRootPattern(before: string, after: string): RegExp {
+  return new RegExp(`${before}(${IDENTIFIER_RUN_SOURCE})${after}`, "g");
+}
+
 /** `<S id="th" d={<root>.tm}>` — the third file's rewritten reference. */
-const R3_THIRD_REWRITTEN = /<S id="th" d=\{([A-Za-z_$][A-Za-z0-9_$]*)\.tm\}>/g;
+const R3_THIRD_REWRITTEN = rewrittenRootPattern(
+  String.raw`<S id="th" d=\{`,
+  String.raw`\.tm\}>`,
+);
 
 /**
  * The identifier the third file's rewritten reference is rooted at — the
  * value-unpinned fresh binding (SPEC 6.5), read off the one place 6.4's
- * pinned spelling makes it observable.
+ * pinned spelling makes it observable, as TypeScript 5.9.3 at ESNext reads
+ * an identifier (SPEC 1.4, 14.20); diagnosed when the reference is not so
+ * spelled exactly once or its root reads as no identifier.
  */
 function thirdFileReferenceRoot(text: string, context: string): string {
   const matches = [...text.matchAll(R3_THIRD_REWRITTEN)];
@@ -2720,7 +2747,12 @@ function thirdFileReferenceRoot(text: string, context: string): string {
         `${String(matches.length)} in ${JSON.stringify(text)}`,
     );
   }
-  return root;
+  return expectFreshIdentifier(
+    root,
+    `${context}: ${R3_THIRD}'s rewritten reference ` +
+      `\`<S id="th" d={<binding>.tm}>\` must be rooted at the added ` +
+      `import's binding`,
+  );
 }
 
 /**
@@ -2848,7 +2880,7 @@ async function runThirdFileArm(
 const T6_5_3 = defineProductTest({
   id: "T6.5-3",
   title:
-    "re-identification and reference conversion: the moved subtree is re-identified by prefix replacement; references convert between local and imported forms; needed spec imports are added binding fresh, non-colliding identifiers and unneeded ones removed exactly (an import unreferenced before the move stays); rewritten content is byte-deterministic across two identical fixtures; the full mapping is appended to the journal and reported as the command's own applied-mapping report — the section form reports as rename does, T6.4-1's protocol (SPEC 6.5, 2.1, 6.1, 6.4, 12.0, 12.1, 14.10; H-3 adapter, report shape unpinned); third-file arms — a spec source neither origin nor target, importing the origin module and referencing the moved node through a `d` chain, has that reference rewritten to the target module under an import added there (bytes per T6.5-8's discipline: the single inserted run isolated by diff against bytes composed from 6.4/6.5 and 3 is byte-exactly `import <X> from \"./Target.xspec\"` followed by U+000A at a line-start offset, its identifier alone the product's), the origin import removed exactly when the moved reference was its binding's last and kept byte-for-byte when another reference through it remains, `query edges` listing the third file's `depends` edge under the new identity and `check` clean (SPEC 6.5, 2.1, 6.4, 3)",
+    "re-identification and reference conversion: the moved subtree is re-identified by prefix replacement; references convert between local and imported forms; needed spec imports are added binding fresh, non-colliding identifiers and unneeded ones removed exactly (an import unreferenced before the move stays); rewritten content is byte-deterministic across two identical fixtures; the full mapping is appended to the journal and reported as the command's own applied-mapping report — the section form reports as rename does, T6.4-1's protocol (SPEC 6.5, 2.1, 6.1, 6.4, 12.0, 12.1, 14.10; H-3 form-exact decode); third-file arms — a spec source neither origin nor target, importing the origin module and referencing the moved node through a `d` chain, has that reference rewritten to the target module under an import added there (bytes per T6.5-8's discipline: the single inserted run isolated by diff against bytes composed from 6.4/6.5 and 3 is byte-exactly `import <X> from \"./Target.xspec\"` followed by U+000A at a line-start offset, its identifier alone the product's), the origin import removed exactly when the moved reference was its binding's last and kept byte-for-byte when another reference through it remains, `query edges` listing the third file's `depends` edge under the new identity and `check` clean (SPEC 6.5, 2.1, 6.4, 3)",
   run: async (product) => {
     const created: TestWorkspace[] = [];
     try {
@@ -5573,7 +5605,9 @@ const T6_5_7 = defineProductTest({
 // it). Each arm's receiving file has its expected post-move bytes composed
 // from the rules of 6.4/6.5 and 3 up to exactly those two unknowns: the
 // fresh identifier is read off the rewritten reference (the one place
-// 6.4's pinned spellings make it observable), and
+// 6.4's pinned spellings make it observable) as TypeScript 5.9.3 at ESNext
+// reads an identifier — a non-ASCII letter or U+2EBF0 as readily as `a`
+// (helpers/ts-identifiers.ts; SPEC 1.4, 14.20) — and
 // `assertAddedImportInsertion` isolates the single inserted run by diff
 // against the composed bytes and reads it as byte-exactly 6.5's spelling —
 // `import <X> from "../specs/target.xspec"` in the TS arm (the canonical
@@ -5720,10 +5754,15 @@ function a8Code(marker: string): readonly string[] {
   return [A8_CODE_LINE_1, "function f() {", `  ${marker};`, "  O.w;", "}", ""];
 }
 
-// The rewritten marker: a root not preceded by an identifier character or a
-// `.`, then `.y;` (`O.w;` and the declarations never match, nor does an
-// unrewritten `O.x;`).
-const A8_CODE_REWRITTEN = /(?<![A-Za-z0-9_$.])([A-Za-z_$][A-Za-z0-9_$]*)\.y;/g;
+// The rewritten marker: a root not preceded by a `.` or by any code point a
+// permissive identifier run admits — so by no identifier part under
+// TypeScript 5.9.3 at ESNext, whatever its plane (`NO_RUN_BEFORE_SOURCE`;
+// `<U+00E9>a.y;` reads `<U+00E9>a`, never `a`) — then `.y;` (`O.w;` and the
+// declarations never match, nor does an unrewritten `O.x;`).
+const A8_CODE_REWRITTEN = rewrittenRootPattern(
+  String.raw`${NO_RUN_BEFORE_SOURCE}(?<!\.)`,
+  String.raw`\.y;`,
+);
 
 // MDX origin arm.
 const A8_ORG_ORIGIN_LINES: readonly string[] = [
@@ -5788,8 +5827,10 @@ const A8_ORG_MOVED_LINES: readonly string[] = [
   "</S>",
 ];
 
-const A8_ORG_REWRITTEN =
-  /<S id="org\.use" d=\{([A-Za-z_$][A-Za-z0-9_$]*)\.mv\.leaf\}>/g;
+const A8_ORG_REWRITTEN = rewrittenRootPattern(
+  String.raw`<S id="org\.use" d=\{`,
+  String.raw`\.mv\.leaf\}>`,
+);
 
 // MDX target arm. `org.base-line` is a valid ID (SPEC 1.4 forbids `.`, `#`,
 // whitespace, and control characters alone) whose second segment is not a
@@ -5841,8 +5882,10 @@ function a8TgtMoved(root: string): readonly string[] {
   return [`<S id="mv" d={${root}.org["base-line"]}>`, "Moved text.", "</S>"];
 }
 
-const A8_TGT_REWRITTEN =
-  /<S id="mv" d=\{([A-Za-z_$][A-Za-z0-9_$]*)\.org\["base-line"\]\}>/g;
+const A8_TGT_REWRITTEN = rewrittenRootPattern(
+  String.raw`<S id="mv" d=\{`,
+  String.raw`\.org\["base-line"\]\}>`,
+);
 
 /**
  * A target file after the section move (SPEC 6.5, 3): its staged lines
@@ -5875,7 +5918,10 @@ interface AddedImportArm {
   readonly argv: readonly string[];
   /** Workspace-relative path of the file gaining the import. */
   readonly receiving: string;
-  /** Matches the one rewritten reference; group 1 is the fresh root. */
+  /**
+   * Matches the one rewritten reference (`rewrittenRootPattern`); group 1
+   * is the fresh root's permissive run, judged when read.
+   */
   readonly rewritten: RegExp;
   /** The rewritten reference's expected spelling, for diagnoses. */
   readonly rewrittenForm: string;
@@ -6142,8 +6188,10 @@ const A8_KINDS: readonly A8Kind[] = [
 /**
  * The identifier the receiving file's rewritten reference is rooted at —
  * the value-unpinned fresh binding (SPEC 6.5), read off the one place 6.4's
- * pinned spelling makes it observable; diagnosed when the reference is not
- * spelled as 6.4 pins it (or is rewritten more or less than once).
+ * pinned spelling makes it observable, as TypeScript 5.9.3 at ESNext reads
+ * an identifier (SPEC 1.4, 14.20); diagnosed when the reference is not
+ * spelled as 6.4 pins it (or is rewritten more or less than once), or when
+ * its root reads as no identifier.
  */
 function addedImportReferenceRoot(
   text: string,
@@ -6162,7 +6210,11 @@ function addedImportReferenceRoot(
         `${String(matches.length)} in ${JSON.stringify(text)}`,
     );
   }
-  return root;
+  return expectFreshIdentifier(
+    root,
+    `${context}: ${arm.receiving}'s rewritten ${arm.rewrittenForm} must be ` +
+      `rooted at the added import's binding of ${arm.moduleLabel}`,
+  );
 }
 
 /**
@@ -6470,8 +6522,10 @@ const A9_EDGES: readonly GraphEdge[] = [
 /**
  * The identifier the rewritten marker is rooted at — the value-unpinned
  * fresh binding (SPEC 6.5), read off the one place 6.4's pinned spelling
- * makes it observable (T6.5-8); diagnosed when the marker is not spelled as
- * 6.4 pins it, or is rewritten more or less than once.
+ * makes it observable (T6.5-8), as TypeScript 5.9.3 at ESNext reads an
+ * identifier (SPEC 1.4, 14.20); diagnosed when the marker is not spelled as
+ * 6.4 pins it, or is rewritten more or less than once, or when its root
+ * reads as no identifier.
  */
 function a9RewrittenMarkerRoot(text: string, context: string): string {
   const matches = [...text.matchAll(A8_CODE_REWRITTEN)];
@@ -6485,7 +6539,11 @@ function a9RewrittenMarkerRoot(text: string, context: string): string {
         `in ${JSON.stringify(text)}`,
     );
   }
-  return root;
+  return expectFreshIdentifier(
+    root,
+    `${context}: ${A8_CODE}'s rewritten marker \`<fresh>.y;\` must be ` +
+      `rooted at the added import's binding of the target module`,
+  );
 }
 
 // Spec-source arm (TEST-SPEC T6.5-9): the freshness rule's other clauses —
@@ -6621,9 +6679,14 @@ const S9_TARGET_BASE = (sRoot: string, textRoot: string): string =>
     "",
   ].join("\n");
 
-const S9_REWRITTEN_DEPENDS =
-  /<S id="mv" d=\{([A-Za-z_$][A-Za-z0-9_$]*)\.foo\}>/g;
-const S9_REWRITTEN_EMBEDS = /\{text\(([A-Za-z_$][A-Za-z0-9_$]*)\.bar\)\}/g;
+const S9_REWRITTEN_DEPENDS = rewrittenRootPattern(
+  String.raw`<S id="mv" d=\{`,
+  String.raw`\.foo\}>`,
+);
+const S9_REWRITTEN_EMBEDS = rewrittenRootPattern(
+  String.raw`\{text\(`,
+  String.raw`\.bar\)\}`,
+);
 
 /** The complete `depends` and `embeds` edge sets after the move (SPEC 6.5, 5.2). */
 const S9_DEPENDS: readonly GraphEdge[] = [
@@ -6637,8 +6700,10 @@ const S9_EMBEDS: readonly GraphEdge[] = [
 
 /**
  * The identifier one of the target's rewritten third-module references is
- * rooted at, read off 6.4's pinned spelling; diagnosed when the reference
- * is not spelled as 6.4 pins it, or is present more or less than once.
+ * rooted at, read off 6.4's pinned spelling as TypeScript 5.9.3 at ESNext
+ * reads an identifier (SPEC 1.4, 14.20); diagnosed when the reference is
+ * not spelled as 6.4 pins it, or is present more or less than once, or
+ * when its root reads as no identifier.
  */
 function s9ReferenceRoot(
   text: string,
@@ -6656,7 +6721,11 @@ function s9ReferenceRoot(
         `${String(matches.length)} in ${JSON.stringify(text)}`,
     );
   }
-  return root;
+  return expectFreshIdentifier(
+    root,
+    `${context}: ${S9_TARGET}'s rewritten ${form} must be rooted at the ` +
+      `binding of its own module an added import supplies`,
+  );
 }
 
 const T6_5_9 = defineProductTest({
@@ -7177,10 +7246,14 @@ const C10_A_TARGET_BASE = (root: string): string =>
     "\n",
   );
 
-const C10_REWRITTEN_DEPENDS =
-  /<S id="mv" d=\{([A-Za-z_$][A-Za-z0-9_$]*)\.foo\}>/g;
-const C10_REWRITTEN_EMBEDS =
-  /\{text\(([A-Za-z_$][A-Za-z0-9_$]*)\["bar-baz"\]\)\}/g;
+const C10_REWRITTEN_DEPENDS = rewrittenRootPattern(
+  String.raw`<S id="mv" d=\{`,
+  String.raw`\.foo\}>`,
+);
+const C10_REWRITTEN_EMBEDS = rewrittenRootPattern(
+  String.raw`\{text\(`,
+  String.raw`\["bar-baz"\]\)\}`,
+);
 
 // Arm (b). The origin keeps `a.stay`'s reference through `X` outside the
 // moved subtree; the target already binds `x.mdx`'s module as `Z`, used by
@@ -7354,8 +7427,10 @@ const C10_MOVED_EMBEDS: GraphEdge = {
 
 /**
  * The identifier one of the target's rewritten third-module references is
- * rooted at, read off 6.4's pinned spelling; diagnosed when the reference
- * is not spelled as 6.4 pins it, or is present more or less than once.
+ * rooted at, read off 6.4's pinned spelling as TypeScript 5.9.3 at ESNext
+ * reads an identifier (SPEC 1.4, 14.20); diagnosed when the reference is
+ * not spelled as 6.4 pins it, or is present more or less than once, or
+ * when its root reads as no identifier.
  */
 function c10ReferenceRoot(
   text: string,
@@ -7375,7 +7450,11 @@ function c10ReferenceRoot(
         `${String(matches.length)} in ${JSON.stringify(text)}`,
     );
   }
-  return root;
+  return expectFreshIdentifier(
+    root,
+    `${context}: ${C10_TARGET}'s rewritten ${form} must be rooted at a ` +
+      `binding of ${C10_THIRD}'s module`,
+  );
 }
 
 /**
