@@ -19,14 +19,28 @@
 // Conservative operationalizations (noted per H-4):
 // - Cycle-path acceptance: SPEC 12.7/14 render a cycle's full path through
 //   the finding's `locations` — every reference spelling recording a
-//   participating dependency edge, each located in the file containing it —
-//   while the identity sequence is informational context (12.7: identities
-//   are contractual only where 14 states them). These fixtures do not
-//   precompute per-spelling byte offsets, so the assertion here binds the
-//   file dimension: every finding locates only within the participating
-//   files, and every participating file is identified through located
-//   files, message, or identity context. Byte-precise full-path location
-//   assertion is T14-8's (section-14.ts).
+//   participating dependency edge, each located in the file containing it at
+//   the span its occurrence occupies (5.7: a `d` reference's own expression,
+//   quotes included; an MDX embedding's entire `{text(...)}` container,
+//   brace through brace) — while the identity sequence is informational
+//   context (12.7: identities are contractual only where 14 states them).
+//   What is asserted where:
+//   - every arm of T5.3-1, and T5.3-2, binds the file dimension
+//     (`assertDependencyCycleFindings`): every finding is 14.9 and locates
+//     only within the participating files, the finding count is bounded,
+//     and every participating file is identified through located files,
+//     message, or identity context;
+//   - T5.3-1's five in-file arms also pin the full path exactly
+//     (`assertFullCyclePath`): the one 14.9 finding carries exactly one
+//     location per participating spelling — a `contains` edge records no
+//     spelling — each in specs/A.mdx at its byte range, in 12.7 order
+//     (start, then end), and no other location; each range is located in
+//     the staged bytes at module load and re-sliced by a fixture self-check
+//     before any product invocation (the T5.7-2 discipline);
+//   - the cross-file arm's full path is T14-8's (section-14.ts: its own
+//     cross-file cycle, every participating `d` spelling and import
+//     declaration within its construct's byte window), and T5.3-2's entry
+//     asks for no path.
 // - The cross-file `depends` arm of T5.3-1 necessarily co-stages a spec
 //   import cycle: a cross-file `depends` edge needs an external reference
 //   (the local string form is same-file only, SPEC 2.2), external references
@@ -42,7 +56,12 @@
 //   present and every reported finding must be 14.9 (SPEC 14: each present
 //   error reported, nothing else).
 
-import type { Finding, GraphEdge } from "../../helpers/adapters/index.js";
+import { Buffer } from "node:buffer";
+import type {
+  Finding,
+  GraphEdge,
+  SourceRange,
+} from "../../helpers/adapters/index.js";
 import {
   decodeEdgesReport,
   decodeFindingsReport,
@@ -51,6 +70,7 @@ import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
@@ -157,8 +177,9 @@ interface CycleExpectation {
  * the file containing it (SPEC 5.3, 14, 12.7) — the finding count is
  * bounded (one per cycle, or at most one per participating file), and every
  * participating file is identified through located files, message, or
- * identity context (the T2.1-5 convention; byte-precise path location is
- * T14-8's assertion).
+ * identity context (the T2.1-5 convention). The byte-precise path is
+ * asserted beside it: `assertFullCyclePath` for T5.3-1's in-file arms,
+ * T14-8 for a cross-file cycle (see the module header).
  */
 function assertDependencyCycleFindings(
   findings: readonly Finding[],
@@ -363,10 +384,213 @@ const T5_2_1 = defineProductTest({
 // T5.3-1 — check detects and reports cycles with the full cycle path
 // ---------------------------------------------------------------------------
 
+/**
+ * One participating reference spelling of an in-file cycle (SPEC 14: a
+ * cycle locates its full path in source, every reference spelling recording
+ * a participating dependency edge) and the byte range its occurrence
+ * occupies (5.7, 1.7), located at module load in the staged bytes — never
+ * from product output — as the one staged occurrence of `before` followed
+ * by the spelling, `before` the staged context pinning which spelling of
+ * the same characters is meant (`"s"` is spelled by `id="s"` too).
+ */
+interface CycleSpelling {
+  readonly what: string;
+  readonly spelling: string;
+  /**
+   * `{start: -1, end: -1}` when `before` + `spelling` is not staged exactly
+   * once: the fixture self-check then fails it as a harness defect.
+   */
+  readonly range: SourceRange;
+}
+
+/**
+ * An in-file arm's full cycle path: the file it is staged in, the staged
+ * record (the self-check ground), and every participating spelling,
+ * declared in the 12.7 within-finding order — one file, so start, then end.
+ */
+interface InFileCyclePath {
+  readonly file: string;
+  readonly staged: StagedMdx;
+  readonly spellings: readonly CycleSpelling[];
+}
+
+/** A staged record's bytes, exactly as the workspace writes them. */
+function stagedBytes(staged: StagedMdx): Buffer {
+  return typeof staged.source === "string"
+    ? Buffer.from(staged.source, "utf8")
+    : Buffer.from(staged.source);
+}
+
+/** A participating spelling as an arm declares it: `before` + `spelling`. */
+interface CycleSpellingDecl {
+  readonly what: string;
+  readonly before: string;
+  readonly spelling: string;
+}
+
+/** Locate each participating spelling in `staged`'s bytes (module load). */
+function inFileCyclePath(
+  file: string,
+  staged: StagedMdx,
+  spellings: readonly CycleSpellingDecl[],
+): InFileCyclePath {
+  const bytes = stagedBytes(staged);
+  return {
+    file,
+    staged,
+    spellings: spellings.map(({ what, before, spelling }) => {
+      const needle = Buffer.from(before + spelling, "utf8");
+      const at = bytes.indexOf(needle);
+      const once = at !== -1 && bytes.indexOf(needle, at + 1) === -1;
+      const start = at + Buffer.byteLength(before, "utf8");
+      return {
+        what,
+        spelling,
+        range: once
+          ? { start, end: start + Buffer.byteLength(spelling, "utf8") }
+          : { start: -1, end: -1 },
+      };
+    }),
+  };
+}
+
+/**
+ * Fixture self-check (harness-side, before any product invocation; the
+ * T5.7-2 discipline): a claimed byte range slices the staged bytes to
+ * exactly the spelling it claims. A failure is a staging defect of this
+ * test, thrown as a harness error, never a product result.
+ */
+function sliceCheck(
+  bytes: Buffer,
+  range: SourceRange,
+  spelling: string,
+  what: string,
+): void {
+  const actual =
+    range.start >= 0 && range.start <= range.end && range.end <= bytes.length
+      ? bytes.subarray(range.start, range.end).toString("utf8")
+      : undefined;
+  if (actual !== spelling) {
+    throw new Error(
+      `section-5.1-5.3 fixture self-check — ${what}: ` +
+        (range.start < 0
+          ? `the spelling ${JSON.stringify(spelling)} is not staged exactly ` +
+            `once after its context`
+          : `the claimed byte range [${String(range.start)}, ` +
+            `${String(range.end)}) slices the staged bytes to ` +
+            `${JSON.stringify(actual)}, expected ${JSON.stringify(spelling)}`) +
+        `; the staging arithmetic is wrong (harness defect, not a product ` +
+        `result)`,
+    );
+  }
+}
+
+/**
+ * Self-check an in-file arm's full path: every spelling slices back out of
+ * the staged bytes, and the declared sequence ascends strictly by start,
+ * then end — the 12.7 order of one file's locations — so the index-wise
+ * assertion below also pins that order.
+ */
+function checkCyclePathFixture(arm: string, path: InFileCyclePath): void {
+  const bytes = stagedBytes(path.staged);
+  let previous: SourceRange | undefined;
+  for (const { what, spelling, range } of path.spellings) {
+    sliceCheck(bytes, range, spelling, `${arm}: ${what}`);
+    if (
+      previous !== undefined &&
+      (range.start < previous.start ||
+        (range.start === previous.start && range.end <= previous.end))
+    ) {
+      throw new Error(
+        `section-5.1-5.3 fixture self-check — ${arm}: the participating ` +
+          `spellings must be declared in 12.7 order (start, then end); ` +
+          `${what} at [${String(range.start)}, ${String(range.end)}) ` +
+          `follows [${String(previous.start)}, ${String(previous.end)}) ` +
+          `(harness defect, not a product result)`,
+      );
+    }
+    previous = range;
+  }
+}
+
+/**
+ * Assert an in-file cycle's full path exactly (SPEC 5.3: reported with the
+ * full cycle path; 14: a cycle locates its full path in source, every
+ * reference spelling recording a participating dependency edge, ranges
+ * exact per condition, a reference spelling at the span its occurrence
+ * occupies, 5.7; 12.7: locations ordered by file path bytes, then range
+ * start, then range end): the arm's one 14.9 finding carries exactly one
+ * location per participating spelling, index-wise in the declared order,
+ * each in the arm's file at exactly the spelling's byte range — and no
+ * other location, so a representative spelling, a section tag, or any
+ * other construct located beside or instead of a spelling fails.
+ */
+function assertFullCyclePath(
+  findings: readonly Finding[],
+  path: InFileCyclePath,
+  context: string,
+): void {
+  const expected = path.spellings.map(({ what, spelling, range }) => ({
+    what,
+    spelling,
+    file: path.file,
+    range,
+  }));
+  if (findings.length !== 1) {
+    fail(
+      `${context}: the staged cycle is one condition instance in one file, ` +
+        `reported as exactly one 14.9 finding carrying its full path ` +
+        `(SPEC 5.3, 14); got ${String(findings.length)} finding(s): ` +
+        `${JSON.stringify(findings)}`,
+    );
+  }
+  const finding = findings[0]!;
+  if (finding.locations.length !== expected.length) {
+    fail(
+      `${context}: the 14.9 finding locates the full cycle path — exactly ` +
+        `one location per participating reference spelling, no ` +
+        `representative chosen and nothing beside them (a \`contains\` edge ` +
+        `records no spelling; SPEC 5.3, 14, 5.7) — expected exactly ` +
+        `${String(expected.length)} location(s), ${JSON.stringify(expected)}; ` +
+        `got ${String(finding.locations.length)}: ` +
+        `${JSON.stringify(finding.locations)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+  expected.forEach((spelling, index) => {
+    const location = finding.locations[index]!;
+    if (
+      location.file !== spelling.file ||
+      location.range.start !== spelling.range.start ||
+      location.range.end !== spelling.range.end
+    ) {
+      fail(
+        `${context}: location[${String(index)}] must locate ${spelling.what} ` +
+          `— ${JSON.stringify(spelling.spelling)} in ` +
+          `${JSON.stringify(spelling.file)} at exactly ` +
+          `[${String(spelling.range.start)}, ${String(spelling.range.end)}), ` +
+          `the span its occurrence occupies (SPEC 14: every reference ` +
+          `spelling recording a participating dependency edge, ranges exact ` +
+          `per condition; 5.7: a \`d\` reference's own expression, an MDX ` +
+          `embedding's entire braced container; 12.7: locations in file, ` +
+          `start, end order — the declared order); expected ` +
+          `${JSON.stringify(expected)}, got ` +
+          `${JSON.stringify(finding.locations)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+  });
+}
+
 /** One cycle fixture: its files plus the CycleExpectation it stages. */
 interface CycleArm extends CycleExpectation {
   readonly name: string;
   readonly files: Readonly<Record<string, InitialFileContents>>;
+  /**
+   * An in-file arm's full cycle path, asserted exactly; absent for the
+   * cross-file arm (its full path is T14-8's; see the module header).
+   */
+  readonly fullPath?: InFileCyclePath;
 }
 
 // The self-`depends` arm's source, exported: T14-4's and T14-6's sweeps
@@ -376,6 +600,28 @@ export const SELF_DEPENDS_STAGED = stagedMdx(
   "T5.3-1/T14-4/T14-6 self-depends specs/A.mdx (T14-4's and T14-6's sweep specs/a.mdx, the 14.9 dependency-cycle entry)",
   ['<S id="s" d={"s"}>', "Depends on itself.", "</S>", ""].join("\n"),
 );
+
+/** The one file every in-file arm stages its cycle in. */
+const IN_FILE_CYCLE_FILE = "specs/A.mdx";
+
+/**
+ * An in-file arm: its staged `specs/A.mdx` record and its participating
+ * spellings, located in the record's bytes at module load (the record is
+ * the very expression the staging uses, created in arm order).
+ */
+function inFileArm(arm: {
+  readonly name: string;
+  readonly staged: StagedMdx;
+  readonly cycle: readonly string[];
+  readonly spellings: readonly CycleSpellingDecl[];
+}): CycleArm {
+  return {
+    name: arm.name,
+    files: { [IN_FILE_CYCLE_FILE]: arm.staged },
+    cycle: arm.cycle,
+    fullPath: inFileCyclePath(IN_FILE_CYCLE_FILE, arm.staged, arm.spellings),
+  };
+}
 
 // Every arm past the first stages its files after the first arm's `check`:
 // the `.mdx` entries are staged-source records, judged before any product
@@ -415,112 +661,139 @@ const T5_3_1_ARMS: readonly CycleArm[] = [
     cycle: ["specs/A.mdx#a", "specs/B.mdx#b"],
     importCycleFiles: ["specs/A.mdx", "specs/B.mdx"],
   },
-  {
+  inFileArm({
     // p contains p.q; p.q embeds x; x embeds p — mixed through `contains`
     // and `embeds`, with no ancestor relation along either embeds edge (the
     // ancestor shapes are the two arms below).
     name: "a mixed cycle through `contains` + `embeds`",
-    files: {
-      "specs/A.mdx": stagedMdx(
-        "T5.3-1 mixed contains+embeds cycle specs/A.mdx",
-        [
-          '<S id="p">',
-          "P behavior.",
-          "",
-          '<S id="p.q">',
-          'Q embeds: {text("x")}',
-          "</S>",
-          "</S>",
-          "",
-          '<S id="x">',
-          'X embeds: {text("p")}',
-          "</S>",
-          "",
-        ].join("\n"),
-      ),
-    },
+    staged: stagedMdx(
+      "T5.3-1 mixed contains+embeds cycle specs/A.mdx",
+      [
+        '<S id="p">',
+        "P behavior.",
+        "",
+        '<S id="p.q">',
+        'Q embeds: {text("x")}',
+        "</S>",
+        "</S>",
+        "",
+        '<S id="x">',
+        'X embeds: {text("p")}',
+        "</S>",
+        "",
+      ].join("\n"),
+    ),
     cycle: ["specs/A.mdx#p", "specs/A.mdx#p.q", "specs/A.mdx#x"],
-  },
-  {
+    // The two embeddings; the `contains` edge p → p.q records no spelling.
+    spellings: [
+      { what: "p.q's embedding of x", before: "", spelling: '{text("x")}' },
+      { what: "x's embedding of p", before: "", spelling: '{text("p")}' },
+    ],
+  }),
+  inFileArm({
     name: "a self-`depends` (a dependency cycle of length one)",
-    files: {
-      "specs/A.mdx": SELF_DEPENDS_STAGED,
-    },
+    staged: SELF_DEPENDS_STAGED,
     cycle: ["specs/A.mdx#s"],
-  },
-  {
+    // The `d` reference's own expression, quotes included — never the
+    // `"s"` of `id="s"`.
+    spellings: [
+      { what: "s's `d` reference to itself", before: "d={", spelling: '"s"' },
+    ],
+  }),
+  inFileArm({
     name: "a self-`embeds` (a dependency cycle of length one)",
-    files: {
-      "specs/A.mdx": stagedMdx(
-        "T5.3-1 self-embeds specs/A.mdx",
-        ['<S id="s">', 'Embeds itself: {text("s")}', "</S>", ""].join("\n"),
-      ),
-    },
+    staged: stagedMdx(
+      "T5.3-1 self-embeds specs/A.mdx",
+      ['<S id="s">', 'Embeds itself: {text("s")}', "</S>", ""].join("\n"),
+    ),
     cycle: ["specs/A.mdx#s"],
-  },
-  {
-    // The full path must include the intermediate section a.b the `contains`
-    // chain runs through: a → a.b → a.b.c → a.
+    spellings: [
+      { what: "s's embedding of itself", before: "", spelling: '{text("s")}' },
+    ],
+  }),
+  inFileArm({
+    // The cycle runs through the intermediate section a.b the `contains`
+    // chain passes: a → a.b → a.b.c → a. Its one reference spelling is the
+    // `d` reference; the two `contains` edges record no spelling.
     name: "a section depending on its own ancestor (grandparent)",
-    files: {
-      "specs/A.mdx": stagedMdx(
-        "T5.3-1 depends on own grandparent specs/A.mdx",
-        [
-          '<S id="a">',
-          "Alpha behavior.",
-          "",
-          '<S id="a.b">',
-          "Beta behavior.",
-          "",
-          '<S id="a.b.c" d={"a"}>',
-          "Gamma depends on its grandparent.",
-          "</S>",
-          "</S>",
-          "</S>",
-          "",
-        ].join("\n"),
-      ),
-    },
+    staged: stagedMdx(
+      "T5.3-1 depends on own grandparent specs/A.mdx",
+      [
+        '<S id="a">',
+        "Alpha behavior.",
+        "",
+        '<S id="a.b">',
+        "Beta behavior.",
+        "",
+        '<S id="a.b.c" d={"a"}>',
+        "Gamma depends on its grandparent.",
+        "</S>",
+        "</S>",
+        "</S>",
+        "",
+      ].join("\n"),
+    ),
     cycle: ["specs/A.mdx#a", "specs/A.mdx#a.b", "specs/A.mdx#a.b.c"],
-  },
-  {
+    spellings: [
+      {
+        what: "a.b.c's `d` reference to its grandparent a",
+        before: "d={",
+        spelling: '"a"',
+      },
+    ],
+  }),
+  inFileArm({
+    // As above, the embedding the one reference spelling.
     name: "a section embedding its own ancestor (grandparent)",
-    files: {
-      "specs/A.mdx": stagedMdx(
-        "T5.3-1 embeds own grandparent specs/A.mdx",
-        [
-          '<S id="a">',
-          "Alpha behavior.",
-          "",
-          '<S id="a.b">',
-          "Beta behavior.",
-          "",
-          '<S id="a.b.c">',
-          'Gamma embeds its grandparent: {text("a")}',
-          "</S>",
-          "</S>",
-          "</S>",
-          "",
-        ].join("\n"),
-      ),
-    },
+    staged: stagedMdx(
+      "T5.3-1 embeds own grandparent specs/A.mdx",
+      [
+        '<S id="a">',
+        "Alpha behavior.",
+        "",
+        '<S id="a.b">',
+        "Beta behavior.",
+        "",
+        '<S id="a.b.c">',
+        'Gamma embeds its grandparent: {text("a")}',
+        "</S>",
+        "</S>",
+        "</S>",
+        "",
+      ].join("\n"),
+    ),
     cycle: ["specs/A.mdx#a", "specs/A.mdx#a.b", "specs/A.mdx#a.b.c"],
-  },
+    spellings: [
+      {
+        what: "a.b.c's embedding of its grandparent a",
+        before: "",
+        spelling: '{text("a")}',
+      },
+    ],
+  }),
 ];
 
 const T5_3_1 = defineProductTest({
   id: "T5.3-1",
   title:
-    "`check` detects and reports, with the full cycle path, each staged dependency cycle — a `depends` cycle A→B→A across files, a mixed cycle through `contains` + `embeds`, a self-`depends` and a self-`embeds` of length one, and a section depending on / embedding its own ancestor — at exit 1 (SPEC 5.3, 14.9)",
+    "`check` detects and reports, with the full cycle path, each staged dependency cycle — a `depends` cycle A→B→A across files, a mixed cycle through `contains` + `embeds`, a self-`depends` and a self-`embeds` of length one, and a section depending on / embedding its own ancestor — at exit 1; each in-file arm's one 14.9 finding locates exactly every participating reference spelling at its occurrence span in specs/A.mdx (a `d` reference's own expression, an embedding's braced container; no `contains` edge located), in 12.7 order, and nothing else (SPEC 5.3, 14.9, 14, 5.7, 12.7)",
   run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline): every in-file arm's located
+    // spellings slice back out of its staged bytes, in 12.7 order, before
+    // any product invocation.
+    for (const arm of T5_3_1_ARMS) {
+      if (arm.fullPath !== undefined) {
+        checkCyclePathFixture(arm.name, arm.fullPath);
+      }
+    }
     for (const arm of T5_3_1_ARMS) {
       await withWorkspace(SPECS_ONLY_CONFIG, arm.files, async (workspace) => {
         const context = `T5.3-1 \`check --json\` over ${arm.name}`;
-        assertDependencyCycleFindings(
-          await checkFindings(product, workspace, context),
-          arm,
-          context,
-        );
+        const findings = await checkFindings(product, workspace, context);
+        assertDependencyCycleFindings(findings, arm, context);
+        if (arm.fullPath !== undefined) {
+          assertFullCyclePath(findings, arm.fullPath, context);
+        }
       });
     }
   },
