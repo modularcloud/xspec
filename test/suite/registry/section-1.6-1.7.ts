@@ -21,6 +21,7 @@ import type {
   NodeReport,
   OccurrenceRecord,
   OccurrenceSourceNode,
+  ReviewItem,
   SourceRange,
 } from "../../helpers/adapters/index.js";
 import {
@@ -28,6 +29,7 @@ import {
   assertNodeEdgeListsBare,
   decodeEdgesReport,
   decodeImpactReport,
+  decodeItemReport,
   decodeNextReport,
   decodeNodeReport,
   decodeOccurrencesReport,
@@ -511,6 +513,8 @@ const MID_TEXT = "Mid: Leaf text.\n\n";
 // line before the child adds one more "\n" to the first own-text run.
 const SUMMARY_OWN = "Top: Mid: Leaf text.\n\n\n\n";
 const SUMMARY_SUBTREE = "Top: Mid: Leaf text.\n\n\n\nExtra prose.\n";
+// The child `summary.extra` is a leaf: its subtree text is its own text.
+const EXTRA_SUBTREE = "Extra prose.\n";
 // The top file root's own text: the import line drops with its terminator;
 // the heading prose stays; the summary construct's lines drop.
 const TOP_ROOT_OWN = "\n# Alpha file\n\n";
@@ -530,6 +534,37 @@ const EXPANSION_CONSUMER = stagedTs(
     "",
   ].join("\n"),
 );
+
+/**
+ * Byte-assert the text of a review payload's context entry for `node`: the
+ * entry occurs exactly once (SPEC 10.7: every context node enters the
+ * payload), is present, and carries text — a present node's text is read
+ * from the current graph, the expanded value of SPEC 1.6.
+ */
+function assertContextEntryText(
+  item: ReviewItem,
+  node: string,
+  expected: string,
+  context: string,
+): void {
+  const matches = item.context.filter((entry) => entry.node === node);
+  if (matches.length !== 1) {
+    fail(
+      `${context}: expected exactly one context entry for ${node} (SPEC 10.7); ` +
+        `found ${String(matches.length)} among ` +
+        JSON.stringify(item.context.map((entry) => entry.node)),
+    );
+  }
+  const entry = matches[0]!;
+  if (!entry.present || entry.text === undefined) {
+    fail(
+      `${context}: the payload must carry the present context node's text — own text ` +
+        `for an ancestor-chain context (SPEC 10.7); got present ` +
+        `${String(entry.present)}, text ${entry.text === undefined ? "absent" : "present"}`,
+    );
+  }
+  assertBytesEqual(entry.text, expected, context);
+}
 
 const T1_6_3 = defineProductTest({
   id: "T1.6-3",
@@ -576,12 +611,14 @@ const T1_6_3 = defineProductTest({
         showLabel,
       );
 
-      // Review payload (SPEC 10.2, 10.7): an audit session's
-      // `subtree-coherence` item for `summary` carries the scope root's
-      // subtree text and the ancestor chain's own text — every text value the
-      // expanded value of 1.6. The summary's item is blocked by its child's
-      // (SPEC 10.6), so the child item is resolved first via `status`
-      // lookup + `resolve`.
+      // Review payloads (SPEC 10.2, 10.7): an audit session's
+      // `subtree-coherence` items carry the scope root's subtree text and the
+      // ancestor chain's own text — every text value the expanded value of
+      // 1.6. The child's item (found via `status`) is read first through
+      // `review show`: its context, the file root and `summary`, carries
+      // `summary`'s own text, which holds the two-level embedding. The
+      // summary's item is blocked by its child's (SPEC 10.6), so the child
+      // item is then resolved and the summary's item read via `next`.
       await expectExit(
         product,
         workspace,
@@ -607,6 +644,61 @@ const T1_6_3 = defineProductTest({
             JSON.stringify(status.items.map((row) => row.scope)),
         );
       }
+      // The child's payload, read before its resolution (a read never
+      // writes the session, SPEC 10.4). Context membership is compared as a
+      // sorted identity set: SPEC 10.6 fixes the ancestor chain's members,
+      // not a payload order (as in T10.6-1).
+      const extraLabel = `T1.6-3 \`review show ${REVIEW_SESSION} ${extraRow.id} --json\``;
+      const extraItem = decodeItemReport(
+        await runJson(
+          product,
+          workspace,
+          ["review", "show", REVIEW_SESSION, extraRow.id, "--json"],
+          extraLabel,
+        ),
+        extraLabel,
+      );
+      if (
+        extraItem.kind !== "subtree-coherence" ||
+        extraItem.scope.node !== EXTRA_ID
+      ) {
+        fail(
+          `${extraLabel}: expected the subtree-coherence item scoped to ${EXTRA_ID} — the ` +
+            `item \`review status\` lists under that id (SPEC 10.6, 10.7); got kind ` +
+            `${JSON.stringify(extraItem.kind)}, scope ${JSON.stringify(extraItem.scope.node)}`,
+        );
+      }
+      if (!extraItem.scope.present || extraItem.scope.text === undefined) {
+        fail(
+          `${extraLabel}: the payload must carry the present scope node's text — the scope ` +
+            `root's subtree text for subtree-coherence (SPEC 10.7); got present ` +
+            `${String(extraItem.scope.present)}, text ${extraItem.scope.text === undefined ? "absent" : "present"}`,
+        );
+      }
+      assertBytesEqual(
+        extraItem.scope.text,
+        EXTRA_SUBTREE,
+        `${extraLabel}: scope text — the scope root's subtree text (SPEC 1.6, 10.7)`,
+      );
+      assertSameJson(
+        extraItem.context.map((entry) => entry.node).sort(),
+        ["specs/A.mdx", SUMMARY_ID],
+        `${extraLabel}: context — the scope node's ancestor chain, the file root and ` +
+          `${SUMMARY_ID} (SPEC 10.6; compared as a sorted identity set)`,
+      );
+      assertContextEntryText(
+        extraItem,
+        "specs/A.mdx",
+        TOP_ROOT_OWN,
+        `${extraLabel}: context text of specs/A.mdx — the root ancestor's own text (SPEC 1.6, 10.7)`,
+      );
+      assertContextEntryText(
+        extraItem,
+        SUMMARY_ID,
+        SUMMARY_OWN,
+        `${extraLabel}: context text of ${SUMMARY_ID} — its own text, the embedded ` +
+          `text fully expanded through two levels (SPEC 1.6, 10.7)`,
+      );
       await expectExit(
         product,
         workspace,
