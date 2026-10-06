@@ -378,21 +378,32 @@ const OPAQ_ACCEPT_CONSUMER = [
   "",
 ].join("\n");
 
+// Every runtime value reachable from the default export by child property
+// access — the root (the default export itself) and each child chain — as
+// the access chain the probe consumer evaluates, in its `nodes` order. The
+// body names a failing node by its chain.
+const OPAQ_NODE_CHAINS = [
+  "SPEC",
+  "SPEC.alpha",
+  "SPEC.alpha.beta",
+  "SPEC.gamma",
+] as const;
+
 // A consumer that never imports `text` and reaches every node by the
-// supported child-access operation, then inspects those values generically —
-// String(), JSON.stringify(), own keys, property values, prototypes, to a
-// bounded depth, every probe guarded (a node is an opaque token, so
-// unsupported operations may throw; SPEC 4.1) — and reports every observed
-// string. No observed string may carry requirement text.
+// supported child-access operation, records each node value's `typeof` (no
+// node value may be a string: a node is an opaque token, SPEC 4.1), then
+// inspects those values generically — String(), JSON.stringify(), own keys,
+// property values, prototypes, to a bounded depth, every probe guarded (a
+// node is an opaque token, so unsupported operations may throw; SPEC 4.1) —
+// and reports `{ kinds, seen }`: the kinds in `nodes` order and every
+// observed string. No observed string may carry requirement text.
 const OPAQ_PROBE_CONSUMER = [
   'import SPEC from "../specs/OPAQ.xspec";',
   "",
   "const nodes: readonly unknown[] = [",
-  "  SPEC,",
-  "  SPEC.alpha,",
-  "  SPEC.alpha.beta,",
-  "  SPEC.gamma,",
+  ...OPAQ_NODE_CHAINS.map((chain) => `  ${chain},`),
   "];",
+  "const kinds: string[] = nodes.map((node) => typeof node);",
   "const seen: string[] = [];",
   "",
   "function observe(value: unknown, depth: number): void {",
@@ -454,14 +465,88 @@ const OPAQ_PROBE_CONSUMER = [
   "  observe(node, 3);",
   "}",
   "",
-  "process.stdout.write(JSON.stringify(seen));",
+  "process.stdout.write(JSON.stringify({ kinds, seen }));",
   "",
 ].join("\n");
+
+/** The probe consumer's report: node kinds in chain order, observed strings. */
+interface OpaqueProbeReport {
+  readonly kinds: readonly string[];
+  readonly seen: readonly string[];
+}
+
+/** The harness-authored probe contract: `{ kinds, seen }`, one kind a node. */
+function isOpaqueProbeReport(value: unknown): value is OpaqueProbeReport {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const { kinds, seen } = value as Record<string, unknown>;
+  return (
+    Array.isArray(kinds) &&
+    kinds.length === OPAQ_NODE_CHAINS.length &&
+    kinds.every((kind) => typeof kind === "string") &&
+    Array.isArray(seen) &&
+    seen.every((observed) => typeof observed === "string")
+  );
+}
+
+/**
+ * Judge the probe consumer's report (TEST-SPEC T4.1-3): no runtime value
+ * reachable from the default export by child property access is a string
+ * (SPEC 4.1: a node is an opaque token), and the reflective deep walk of
+ * those values observed no string carrying the fixture's requirement-text
+ * sentinel (SPEC 4.1: nodes carry no requirement text as values; 4.3).
+ */
+function judgeOpaqueProbeReport(observed: unknown): void {
+  if (!isOpaqueProbeReport(observed)) {
+    fail(
+      "T4.1-3: the probe consumer must report a JSON object `{ kinds, " +
+        "seen }` — `kinds` the `typeof` of each of the " +
+        `${String(OPAQ_NODE_CHAINS.length)} node values (` +
+        `${OPAQ_NODE_CHAINS.join(", ")}), \`seen\` an array of observed ` +
+        "strings — harness-authored consumer contract; got " +
+        excerpt(JSON.stringify(observed) ?? String(observed)),
+    );
+  }
+  const stringNodes = OPAQ_NODE_CHAINS.filter(
+    (_chain, index) => observed.kinds[index] === "string",
+  );
+  if (stringNodes.length > 0) {
+    fail(
+      `T4.1-3: ${stringNodes.map((chain) => `\`${chain}\``).join(", ")} ` +
+        `evaluated to a string — every runtime value reachable from the ` +
+        `default export by child property access must be a node, an ` +
+        `opaque token whose only supported operations are child property ` +
+        `access and passing it to \`text()\`, never a string (SPEC 4.1). ` +
+        "typeof per node: " +
+        OPAQ_NODE_CHAINS.map(
+          (chain, index) => `${chain} ${String(observed.kinds[index])}`,
+        ).join(", "),
+    );
+  }
+  const leaks = observed.seen.filter((value) =>
+    value.includes(OPAQ_SENTINEL_PREFIX),
+  );
+  if (leaks.length > 0) {
+    fail(
+      "T4.1-3: requirement text is observable through the module's " +
+        "node values — a consumer that never imports `text` obtained " +
+        `${String(leaks.length)} observation(s) carrying the ` +
+        `fixture's requirement-text sentinel (SPEC 4.1: nodes carry ` +
+        `no requirement text as values; 4.3: text is reachable at ` +
+        `runtime only through the \`text\` export). First leaks: ` +
+        leaks
+          .slice(0, 3)
+          .map((leak) => excerpt(leak))
+          .join(", "),
+    );
+  }
+}
 
 const T4_1_3 = defineProductTest({
   id: "T4.1-3",
   title:
-    "nodes are opaque tokens: every value obtained by supported child access is accepted by `text()` and returns its subtree text, while a consumer that never imports `text` observes no requirement text on the values reachable by supported operations (SPEC 4.1, 4.3, 13.1)",
+    "nodes are opaque tokens: every value obtained by supported child access is accepted by `text()` and returns its subtree text, while a consumer that never imports `text` finds no such value a string and observes no requirement text on the values reachable by supported operations (SPEC 4.1, 4.3, 13.1)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -529,37 +614,11 @@ const T4_1_3 = defineProductTest({
             "child accesses are harmless at runtime and every unsupported " +
             "probe is guarded (SPEC 4.1, 4.5)",
         );
-        const observed = parseJsonStdout(
-          probeRun,
-          "T4.1-3 probe consumer output",
+        // No node value is a string, and no observed string carries
+        // requirement text (judged in `judgeOpaqueProbeReport`).
+        judgeOpaqueProbeReport(
+          parseJsonStdout(probeRun, "T4.1-3 probe consumer output"),
         );
-        if (
-          !Array.isArray(observed) ||
-          observed.some((value) => typeof value !== "string")
-        ) {
-          fail(
-            "T4.1-3: the probe consumer must report a JSON array of " +
-              "observed strings — harness-authored consumer contract; got " +
-              excerpt(JSON.stringify(observed)),
-          );
-        }
-        const leaks = (observed as string[]).filter((value) =>
-          value.includes(OPAQ_SENTINEL_PREFIX),
-        );
-        if (leaks.length > 0) {
-          fail(
-            "T4.1-3: requirement text is observable through the module's " +
-              "node values — a consumer that never imports `text` obtained " +
-              `${String(leaks.length)} observation(s) carrying the ` +
-              `fixture's requirement-text sentinel (SPEC 4.1: nodes carry ` +
-              `no requirement text as values; 4.3: text is reachable at ` +
-              `runtime only through the \`text\` export). First leaks: ` +
-              leaks
-                .slice(0, 3)
-                .map((leak) => excerpt(leak))
-                .join(", "),
-          );
-        }
       },
     );
   },
