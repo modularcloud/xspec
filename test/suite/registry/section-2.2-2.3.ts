@@ -839,8 +839,10 @@ interface T233ArmStaging {
   /** The arm's name in contexts. */
   readonly arm: string;
   readonly form: string;
+  /** The staged file's workspace-relative path (`specs/A.mdx`). */
+  readonly file: string;
   readonly staging: T233Staging;
-  /** `staging.source` as a staged-source record. */
+  /** `staging.source` as a staged-source record, staged at `file`. */
   readonly source: StagedMdx;
 }
 
@@ -849,31 +851,44 @@ interface T233ArmStaging {
  * with its record — computed once at module load: every workspace but the
  * body's first is created after its first product invocation, so S-9's
  * timing clause makes each staging a ledger record, and the table converts
- * uniformly.
+ * uniformly. `stagedBy` opens each record's name with every test that
+ * stages it.
  */
 function t233ArmStagings(
+  stagedBy: string,
   kind: string,
   sectionId: string,
   forms: readonly { readonly label: string; readonly form: string }[],
 ): readonly T233ArmStaging[] {
   return forms.map(({ label, form }) => {
     const staging = stageT233(sectionId, form);
-    const arm = `T2.3-3 ${kind} ${JSON.stringify(form)} (${label})`;
+    const what = `${kind} ${JSON.stringify(form)} (${label})`;
     return {
-      arm,
+      arm: `T2.3-3 ${what}`,
       form,
+      file: T2_3_3_FILE,
       staging,
-      source: stagedMdx(`${arm} ${T2_3_3_FILE}`, staging.source),
+      source: stagedMdx(`${stagedBy} ${what} ${T2_3_3_FILE}`, staging.source),
     };
   });
 }
 
 const T2_3_3_EMBEDDING_STAGINGS = t233ArmStagings(
+  "T2.3-3",
   "embedding form",
   "p",
   T2_3_3_EMBEDDING_FORMS,
 );
-const T2_3_3_INVALID_STAGINGS = t233ArmStagings(
+
+/**
+ * The invalid-container stagings (14.16), the very records the arms below
+ * drive — exported for T14-4's reporter matrix (TEST-SPEC T14-4: "the 14.16
+ * and 14.20 arms of T2.3-3, …"), whose sweep, and T14-6's stable-code sweep
+ * over the same rows, re-stages each record after its own body's first
+ * product invocation, never re-spelling the bytes.
+ */
+export const T2_3_3_INVALID_STAGINGS = t233ArmStagings(
+  "T2.3-3/T14-4/T14-6",
   "invalid container",
   "n",
   T2_3_3_INVALID_FORMS,
@@ -898,9 +913,11 @@ const T2_3_3_UNPARSEABLE_FORM = `${T2_3_3_UNPARSEABLE_PREFIX}text("b")}`;
  * below drives, staged alone in section `u`, the offset the container's
  * start plus the byte length of the prefix through the space after the
  * first call — exported for T14-11's re-assertion of the offset the same
- * way (TEST-SPEC T14-11's closing clause). `specs/A.mdx` is a staged-source
- * record declared unparseable (S-9), registered at load: the arm below and
- * T14-11 each stage it after their bodies' first product invocations.
+ * way (TEST-SPEC T14-11's closing clause) and for T14-4's reporter matrix
+ * (its 14.20 arm of T2.3-3; T14-6's stable-code sweep stages the same row).
+ * `specs/A.mdx` is a staged-source record declared unparseable (S-9),
+ * registered at load: the arm below, T14-4, T14-6, and T14-11 each stage it
+ * after their bodies' first product invocations.
  */
 export const T2_3_3_UNPARSEABLE_STAGING: UnparseableStaging = (() => {
   const staging = stageT233("u", T2_3_3_UNPARSEABLE_FORM);
@@ -912,7 +929,7 @@ export const T2_3_3_UNPARSEABLE_STAGING: UnparseableStaging = (() => {
     file: T2_3_3_FILE,
     files: {
       [T2_3_3_FILE]: stagedMdx(
-        `T2.3-3/T14-11 unparseable form ${JSON.stringify(T2_3_3_UNPARSEABLE_FORM)} (no expression the grammar derives) ${T2_3_3_FILE}`,
+        `T2.3-3/T14-4/T14-6/T14-11 unparseable form ${JSON.stringify(T2_3_3_UNPARSEABLE_FORM)} (no expression the grammar derives) ${T2_3_3_FILE}`,
         staging.source,
         "unparseable",
       ),

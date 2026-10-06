@@ -112,13 +112,17 @@
 //   breadth and modifies-nothing compares are T13.3-3's), while the three
 //   surfaces answer finding-free at exit 0 over the staged valid spec
 //   source. Per-surface semantics depth is T11.2-*..T11.5-*'s subject.
-// - T14-4 also sweeps T14-12's 14.16 and 14.20 stagings (section-14-iii.ts's
-//   exported `T14_12_REPORTER_STAGINGS`: `export { nope }` and the
-//   early-error containers under their S-9 allowances, the six unparseable
-//   spec sources' records declared unparseable, the two unparseable `.ts`
-//   sources) as further sweep entries — reporter membership by exact
-//   counts, the pinned offsets being T14-12's own subject; the `.ts`
-//   entries are code-source rows (`occurrences` alone).
+// - T14-4 also sweeps the home tests' 14.16 and 14.20 stagings as further
+//   sweep entries — reporter membership by exact counts, the pinned
+//   locations and offsets staying the home tests' own subject: T2.3-3's
+//   (section-2.2-2.3.ts's exported `T2_3_3_INVALID_STAGINGS`, its five
+//   invalid containers, and `T2_3_3_UNPARSEABLE_STAGING`, each the record
+//   its home arm stages, adapted by `homeStagingRow`) and T14-12's
+//   (section-14-iii.ts's exported `T14_12_REPORTER_STAGINGS`:
+//   `export { nope }` and the early-error containers under their S-9
+//   allowances, the six unparseable spec sources' records declared
+//   unparseable, the two unparseable `.ts` sources); the `.ts` entries are
+//   code-source rows (`occurrences` alone).
 // - T14-6 stages each condition via its primary test's fixture — the same
 //   minimal home-form stagings T14-4 sweeps, plus the five specially
 //   reported conditions' stagings (14.10, 14.12, 14.14, 14.21, 14.23),
@@ -356,7 +360,10 @@ import {
 } from "./section-6.4.js";
 import type { SameScopeDeclarationArm } from "./section-4.5.js";
 import { T4_5_8_FURTHER_LOCATED_FORMS } from "./section-4.5.js";
-import { T2_3_3_UNPARSEABLE_STAGING } from "./section-2.2-2.3.js";
+import {
+  T2_3_3_INVALID_STAGINGS,
+  T2_3_3_UNPARSEABLE_STAGING,
+} from "./section-2.2-2.3.js";
 import { T2_4_2_UNPARSEABLE_STAGINGS } from "./section-2.4.js";
 import {
   T2_7_3_SPREAD_UNPARSEABLE_STAGING,
@@ -1355,6 +1362,65 @@ function codeArm(
   };
 }
 
+/**
+ * A home test's spec-source staging, as its home module exports it: the file
+ * staging the condition and every source the home arm stages, the
+ * configuration excluded — `UnparseableStaging`'s shape (support.ts), which
+ * passes as is.
+ */
+interface HomeSpecStaging {
+  /** The workspace-relative path of the file staging the condition. */
+  readonly file: string;
+  /**
+   * Every source the home arm stages, the configuration excluded: each MDX
+   * source the staged-source record its home module registers (S-9).
+   */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+}
+
+/**
+ * Adapter: one home test's 14.16 or 14.20 spec-source staging as a sweep row
+ * (TEST-SPEC T14-4: "Among the matrix's stagings: … the 14.16 and 14.20 arms
+ * of T2.3-3, T2.7-1, T2.7-4, and T14-12 (all three surfaces for their
+ * spec-source stagings)"). The row stages the home arm's very sources, never
+ * re-spelled here, beside this module's specs-only configuration record (the
+ * home modules stage the same text), and probes all three surfaces over the
+ * staged file. T14-4's and T14-6's sweeps stage every row after their
+ * bodies' first invocations, so the staged file must be the record its home
+ * module registers, under the declaration the condition implies: declared
+ * unparseable for a 14.20 row, and derivable — well-formed, or under named
+ * early-error allowances — for a 14.16 row, a finding of a file that parses
+ * (14.20). Checked at load: a mismatch is a harness defect.
+ */
+function homeStagingRow(
+  condition: "14.16" | "14.20",
+  label: string,
+  staging: HomeSpecStaging,
+): SweepEntry {
+  const staged = staging.files[staging.file];
+  const unparseable = condition === "14.20";
+  if (
+    !(staged instanceof StagedMdx) ||
+    (staged.mdx === "unparseable") !== unparseable ||
+    "xspec.config.ts" in staging.files
+  ) {
+    throw new Error(
+      `T14-4/T14-6 sweep: the home staging ${JSON.stringify(label)} must ` +
+        `stage ${staging.file} as a staged-source record ` +
+        `${unparseable ? "declared unparseable" : "declared derivable"} ` +
+        `(S-9; condition ${condition}), beside no configuration of its own`,
+    );
+  }
+  return {
+    condition,
+    label,
+    decl: {
+      files: { "xspec.config.ts": SPECS_ONLY_CONFIG, ...staging.files },
+    },
+    answers: { kind: "spec-source", file: staging.file },
+  };
+}
+
 // The sources the sweep shares with the dedicated arms below, staged-source
 // records (S-9): the minimal valid source a1 — the journal-error and
 // symbolic-link entries' spec source and the ground of VALID_SPECS_DECL,
@@ -1599,12 +1665,25 @@ export default defineConfig({
     },
     answers: { kind: "no-domain-file", file: "specs/a.mdx" },
   },
-  // The 14.16 and 14.20 arms of T14-12 (TEST-SPEC T14-4: "among the
-  // matrix's stagings … all three surfaces for their spec-source
-  // stagings"), staged by their home module — the early-error forms under
-  // their S-9 allowances, the unparseable spec sources declared so — and
-  // swept here for reporter membership: `build`, `check`, and the surfaces
-  // whose domain holds the staged file (`occurrences` alone for the `.ts`
+  // The home tests' 14.16 and 14.20 arms (TEST-SPEC T14-4: "Among the
+  // matrix's stagings: … the 14.16 and 14.20 arms of T2.3-3, …, and T14-12
+  // (all three surfaces for their spec-source stagings)"), each staged by
+  // its home module and swept here for reporter membership: `build`,
+  // `check`, and the surfaces whose domain holds the staged file, each
+  // finding counted exactly as the home arm counts it — one per staging —
+  // the locations staying the home tests' subject. In the clause's order:
+  // T2.3-3's five invalid containers (one 14.16 each) and
+  // `{text("a") text("b")}` (14.20), through `homeStagingRow`.
+  ...T2_3_3_INVALID_STAGINGS.map(({ arm, file, source }): SweepEntry =>
+    homeStagingRow("14.16", arm, { file, files: { [file]: source } }),
+  ),
+  homeStagingRow(
+    "14.20",
+    `T2.3-3 ${T2_3_3_UNPARSEABLE_STAGING.name}`,
+    T2_3_3_UNPARSEABLE_STAGING,
+  ),
+  // Then T14-12's: the early-error forms under their S-9 allowances, the
+  // unparseable spec sources declared so (`occurrences` alone for the `.ts`
   // arms, 14.20 in a code source).
   ...T14_12_REPORTER_STAGINGS.map((staging): SweepEntry => ({
     condition: staging.condition,
