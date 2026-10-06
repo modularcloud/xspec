@@ -24,8 +24,12 @@
 //   anywhere, a value-taking flag taking the whole next token, `--` ending
 //   flag reading, arity fixed by name, a repeated flag, an unknown flag or
 //   command, and a surplus operand usage errors; JSON output in effect
-//   exactly when `--json` is read as a flag), with the configuration located
-//   per 7 (upward search for `xspec.config.ts`, or `--config` resolved
+//   exactly when `--json` is read as a flag or the invoked surface is
+//   JSON-only — `query`, `occurrences`, `view`, `at`, `inventory`,
+//   `version`, `review export`, none served, so the 12.7 error document
+//   reports a usage error there before the scope refusal, the grammar being
+//   universal per the CERTIFICATIONS.md preamble), with the configuration
+//   located per 7 (upward search for `xspec.config.ts`, or `--config` resolved
 //   against the working directory) and its errors reported per 14.14/12.7.
 // - Contracts under certification: 13.4's removal of a recorded derived path
 //   the current sources and configuration no longer generate — its occupant
@@ -232,6 +236,35 @@ const PRODUCT_COMMANDS = new Set([
 ]);
 
 /**
+ * The commands whose every surface is JSON-only (SPEC 12.0: 11's `query`,
+ * `occurrences`, `view`, `at`, and `inventory`; 12.6's `version`) — beside
+ * 10.7's `review export`, a subcommand's surface. None is served here, but
+ * the grammar is universal (CERTIFICATIONS.md preamble): a usage error on
+ * one is reported with JSON in effect, before the scope refusal.
+ */
+const JSON_ONLY_COMMANDS = new Set([
+  "query",
+  "occurrences",
+  "view",
+  "at",
+  "inventory",
+  "version",
+]);
+
+/**
+ * Whether the invoked surface — the command word and, for `review`, its
+ * subcommand, both among the non-flag tokens (12.0) — is JSON-only, a single
+ * JSON document its only output form with or without `--json` (12.0).
+ */
+function isJsonOnlySurface(words) {
+  const [command, subcommand] = words;
+  return (
+    JSON_ONLY_COMMANDS.has(command) ||
+    (command === "review" && subcommand === "export")
+  );
+}
+
+/**
  * The flags each served command accepts (12.0): the globals `--json` and
  * `--config` alone. Neither `build` nor `check` is a mutating command (13.5:
  * `rename`, `move`, and the mutating `review` subcommands), so `--test-hold`
@@ -256,9 +289,10 @@ function isMalformedValue(value) {
 /**
  * Read the arguments under the grammar of 12.0. Returns the flags (name to
  * value, `true` for a flag taking none), the remaining non-flag tokens in
- * order, whether JSON output is in effect (`--json` read as a flag, even
- * when the arguments are themselves the error), and the first syntax-class
- * error met, if any.
+ * order, whether `--json` is read as a flag (even when the arguments are
+ * themselves the error; runXspec adds 12.0's JSON-only surfaces, named by
+ * the non-flag tokens, to decide whether JSON output is in effect), and the
+ * first syntax-class error met, if any.
  */
 function readInvocation(argv) {
   const flags = new Map();
@@ -1496,7 +1530,14 @@ export async function runXspec(argv, cwd, options = {}) {
   let json = false;
   try {
     const invocation = readInvocation(argv);
-    json = invocation.json;
+    // JSON output is in effect when a `--json` token is read as a flag — not
+    // as another flag's value — or when the invoked surface is JSON-only
+    // (SPEC 12.0: `query`, `occurrences`, `view`, `at`, `inventory`,
+    // `version`, and `review export`, none served here), governing error
+    // delivery even when the arguments are themselves the error: a usage
+    // error on a JSON-only surface is the 12.7 error document, though the
+    // command, once its arguments read cleanly, is refused as out of scope.
+    json = invocation.json || isJsonOnlySurface(invocation.words);
     if (invocation.error !== null) throw new UsageError(invocation.error);
     const [command, ...operands] = invocation.words;
     if (command === undefined) {

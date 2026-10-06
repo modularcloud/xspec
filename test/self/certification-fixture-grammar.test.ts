@@ -608,12 +608,16 @@ const NO_VALUE_UNLESS_KNOWN =
 const REPEATED =
   'SPEC 12.0: "repeating a flag is a usage error", and "a repeated ' +
   '`--json`, itself a usage error, still puts it in effect"';
-/** SPEC 12.0's JSON-only rule, naming the row's surfaces among them. */
-function jsonOnly(surfaces: string): string {
+/**
+ * SPEC 12.0's JSON-only rule, naming the row's surfaces among them and the
+ * section making them JSON-only (11's machine-access commands by default;
+ * 12.6's `version`, 10.7's `review export`).
+ */
+function jsonOnly(surfaces: string, section = "11"): string {
   return (
     'SPEC 12.0: JSON output is in effect also "when the invoked surface is ' +
     "JSON-only, a single JSON document its only output form with or without " +
-    `\`--json\` (10.7, 11, 12.6)" — ${surfaces} among them (11)`
+    `\`--json\` (10.7, 11, 12.6)" — ${surfaces} among them (${section})`
   );
 }
 const JSON_ONLY = jsonOnly("`view` and `occurrences`");
@@ -1312,6 +1316,26 @@ Alpha text.
   },
 };
 
+/**
+ * The preamble's universality, for the JSON-only surfaces (12.0) — none of
+ * them §CONF-ORPHAN's: a usage error there is still a usage error with JSON
+ * in effect, so its 12.7 error document is owed whatever the fixture serves.
+ */
+const ORPHAN_UNIVERSAL =
+  'CERTIFICATIONS.md preamble: every conformer, "with JSON in effect, ' +
+  "reports every usage error in the exit-2 error document of 12.7: the " +
+  'grammar is universal (12.0)" — on a surface outside its own included';
+const VERSION_JSON_ONLY = jsonOnly("`version`", "12.6");
+const ORPHAN_EXPORT_JSON_ONLY = jsonOnly("`review export`", "10.7");
+/** No JSON-only surface invoked, no `--json` read as a flag (12.0). */
+const NO_JSON_ONLY_SURFACE =
+  "no JSON-only surface is invoked (SPEC 12.0: the command and, for " +
+  "`review`, its subcommand are the first non-flag tokens) and no `--json` " +
+  "is read as a flag";
+/** `specs/A.mdx#a`, and the tag `x`, with a U+FFFD appended: malformed (12.0). */
+const ORPHAN_MALFORMED_TO = "specs/A.mdx#a" + String.fromCodePoint(0xfffd);
+const ORPHAN_MALFORMED_TAG = "x" + String.fromCodePoint(0xfffd);
+
 const ORPHAN_TABLE: GrammarTable = {
   conformer: "CONF-ORPHAN",
   staging: ORPHAN_STAGING,
@@ -1414,6 +1438,185 @@ const ORPHAN_TABLE: GrammarTable = {
         code: "configuration-error",
         path: "--json",
       },
+    },
+    // Usage errors on the JSON-only surfaces (12.0), none §CONF-ORPHAN's:
+    // each judged from the arguments alone, before any scope refusal, and
+    // reported in the 12.7 error document with or without `--json`.
+    {
+      argv: ["view", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${jsonOnly("`view`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["view", "--text", "--text"],
+      clause: `${REPEATED}; ${jsonOnly("`view`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["view", "--config"],
+      clause: `${MISSING_VALUE}; ${jsonOnly("`view`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["view", "--config=x"],
+      clause: `SPEC 12.0: "\`--name=value\` is not a spelling of any flag", an unknown flag; ${jsonOnly("`view`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["view", "--file"],
+      clause: `${MISSING_VALUE}; ${jsonOnly("`view`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["view", "--file", "a", "--file", "b"],
+      clause: `${REPEATED}; ${jsonOnly("`view`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["view", "--config", MALFORMED_CONFIG],
+      clause: `${MALFORMED} — a malformed \`--config\` path is no configuration error but a plain usage error; ${jsonOnly("`view`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["at", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${jsonOnly("`at`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["occurrences", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${jsonOnly("`occurrences`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["occurrences", "--to", ORPHAN_MALFORMED_TO],
+      clause: `${MALFORMED}; ${jsonOnly("`occurrences`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["occurrences", "--file", "x", "--file", "y"],
+      clause: `${REPEATED}; ${jsonOnly("`occurrences`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["inventory", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${INVENTORY_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["inventory", "--config"],
+      clause: `${MISSING_VALUE}; ${INVENTORY_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["version", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${VERSION_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["version", "--config"],
+      clause: `${MISSING_VALUE}; ${VERSION_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "--bogus"],
+      clause: `${UNKNOWN_FLAG} — and \`query\` names no subcommand (${SUBCOMMAND_ORDER}), a plain usage error either way; ${QUERY_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${QUERY_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--kinds"],
+      clause: `${MISSING_VALUE}; ${QUERY_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nodes", "--tag", ORPHAN_MALFORMED_TAG],
+      clause: `${MALFORMED}; ${QUERY_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["review", "export", "--bogus"],
+      clause: `${UNKNOWN_FLAG} — and \`review export\` lacks its \`<name>\` (${NO_COMMAND}), a plain usage error either way; ${ORPHAN_EXPORT_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["review", "export", "s", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${ORPHAN_EXPORT_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["review", "--bogus", "export"],
+      clause: `${UNKNOWN_FLAG}; ${FLAGS_ANYWHERE}, so \`export\` is still \`review\`'s subcommand (${SUBCOMMAND_ORDER}); ${ORPHAN_EXPORT_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["--bogus", "view"],
+      clause: `${UNKNOWN_FLAG}; ${FLAGS_ANYWHERE}; ${jsonOnly("`view`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["--bogus", "query", "nodes"],
+      clause: `${UNKNOWN_FLAG}; ${FLAGS_ANYWHERE}; ${QUERY_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["--bogus", "version"],
+      clause: `${UNKNOWN_FLAG}; ${FLAGS_ANYWHERE}; ${VERSION_JSON_ONLY}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["--bogus", "--", "view"],
+      clause: `${UNKNOWN_FLAG}; ${DASH_DASH}, so \`view\` is the command word; ${jsonOnly("`view`")}; ${ORPHAN_UNIVERSAL}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // Exit-2 rows naming a JSON-only command in no command position: JSON
+    // output stays out of effect, so standard output stays empty.
+    {
+      argv: ["--config", "view"],
+      clause: `${WHOLE_NEXT_TOKEN}, so \`--config\` takes \`view\` as its value and no command word remains (${NO_COMMAND}); ${NO_JSON_ONLY_SURFACE}, so ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["build", "view", "--bogus"],
+      clause: `${UNKNOWN_FLAG}, and \`view\` is \`build\`'s surplus operand (${SURPLUS}); ${NO_JSON_ONLY_SURFACE}, so ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["review", "status", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; \`review status\` is no JSON-only surface (10.7: \`export\` alone has the single JSON document as its only output form) — ${NO_JSON_ONLY_SURFACE}, so ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
     },
   ],
 };
