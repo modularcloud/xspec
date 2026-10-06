@@ -62,6 +62,14 @@
 // stages the same bytes for `view`: build and view share one fixture, the
 // 14.17 beside the view being the condition the build reports here.
 //
+// T2.7-1's condition-16 stagings — its four foreign constructs of condition
+// 16 (`T2_7_1_FOREIGN_14_16_STAGINGS`) and its container and fragment arms
+// (`T2_7_1_CONTAINER_ARM`, `T2_7_1_FRAGMENT_ARM`) — are exported as the very
+// records their arms stage: TEST-SPEC T14-4 sweeps them as reporter-matrix
+// rows (`build`, `check`, `occurrences`, `view`, and `at`, each finding
+// counted exactly; T14-6 reads the same rows' stable codes), the locations
+// staying this module's subject.
+//
 // No certification fixture scopes any T2.7 test (CERTIFICATIONS.md keeps the
 // 2.7 negative matrix among the representatively-certified ones), so only
 // TEST-SPEC's own requirements bind these fixtures.
@@ -393,21 +401,43 @@ const FOREIGN_CONSTRUCT_ARMS: readonly ForeignConstructArm[] = [
 /** A foreign-construct arm with its file as a staged-source record. */
 interface ForeignConstructStaging {
   readonly arm: ForeignConstructArm;
-  /** `arm.prefix + arm.construct + arm.suffix`, staged as `specs/A.mdx`. */
+  /** The staged file's workspace-relative path (`specs/A.mdx`). */
+  readonly file: string;
+  /** `arm.prefix + arm.construct + arm.suffix`, staged at `file`. */
   readonly source: StagedMdx;
 }
 
+const T2_7_1_FOREIGN_FILE = "specs/A.mdx";
+
 // The arms' files, composed once at module load: every arm workspace after
 // the body's first is created after its first invocation (S-9's timing
-// clause), and the table converts uniformly.
+// clause), and the table converts uniformly. A condition-16 arm's record is
+// staged by T14-4's and T14-6's sweeps too (`T2_7_1_FOREIGN_14_16_STAGINGS`
+// below), and its name opens with every test that stages it.
 const FOREIGN_CONSTRUCT_STAGINGS: readonly ForeignConstructStaging[] =
   FOREIGN_CONSTRUCT_ARMS.map((arm) => ({
     arm,
+    file: T2_7_1_FOREIGN_FILE,
     source: stagedMdx(
-      `T2.7-1 ${arm.name} specs/A.mdx`,
+      `${arm.condition === "14.16" ? "T2.7-1/T14-4/T14-6" : "T2.7-1"} ` +
+        `${arm.name} ${T2_7_1_FOREIGN_FILE}`,
       arm.prefix + arm.construct + arm.suffix,
     ),
   }));
+
+/**
+ * The condition-16 foreign-construct stagings — the foreign element, the
+ * expression container, the export statement, and the foreign element
+ * carrying an attribute value expression; the 14.8 control
+ * `<S id="x" d={1}>` reports no condition 16 and stays out — the very
+ * records the body below drives, exported for T14-4's reporter matrix
+ * (TEST-SPEC T14-4: "the 14.16 and 14.20 arms of T2.3-3, T2.7-1, …"),
+ * whose sweep, and T14-6's stable-code sweep over the same rows, re-stages
+ * each record after its own body's first product invocation, never
+ * re-spelling the bytes.
+ */
+export const T2_7_1_FOREIGN_14_16_STAGINGS: readonly ForeignConstructStaging[] =
+  FOREIGN_CONSTRUCT_STAGINGS.filter(({ arm }) => arm.condition === "14.16");
 
 // The enclosed-construct arms: a construct spelled on its own line inside
 // `sec`, invalid (14.16) yet creating no node and preserved as content.
@@ -532,24 +562,38 @@ interface EnclosedConstructArmParts {
 
 /** The arm with its fixture's bytes as a staged-source record. */
 interface EnclosedConstructArm extends EnclosedConstructArmParts {
+  /**
+   * The staged file's workspace-relative path: `T2_7_1_ENCLOSED_FILE`, the
+   * path every enclosed-construct fixture is composed for.
+   */
+  readonly file: string;
   /** `fixture.source` as the record `runEnclosedConstructArm` stages. */
   readonly source: StagedMdx;
 }
 
 /**
- * Compose an arm with its record, named for the test that runs it: the
- * arm's workspace is created after that body's earlier invocations (S-9's
- * timing clause).
+ * Compose an arm with its record, named for the tests that run it: the
+ * arm's workspace is created after each such body's earlier invocations
+ * (S-9's timing clause).
  */
 function enclosedConstructArm(
   recordName: string,
   parts: EnclosedConstructArmParts,
 ): EnclosedConstructArm {
-  return { ...parts, source: stagedMdx(recordName, parts.fixture.source) };
+  return {
+    ...parts,
+    file: T2_7_1_ENCLOSED_FILE,
+    source: stagedMdx(recordName, parts.fixture.source),
+  };
 }
 
-const T2_7_1_CONTAINER_ARM = enclosedConstructArm(
-  "T2.7-1 a section spelled inside an expression container specs/A.mdx",
+// The container and fragment arms, the very records the body below drives,
+// are exported for T14-4's reporter matrix (TEST-SPEC T14-4: "the 14.16 and
+// 14.20 arms of T2.3-3, T2.7-1, …"): its sweep, and T14-6's stable-code
+// sweep over the same rows, re-stages each record after its own body's
+// first product invocation, never re-spelling the bytes.
+export const T2_7_1_CONTAINER_ARM = enclosedConstructArm(
+  "T2.7-1/T14-4/T14-6 a section spelled inside an expression container specs/A.mdx",
   {
     fixture: enclosedConstructFixture('{<S id="x">Inner x text.</S>}'),
     name: "a section spelled inside an expression container",
@@ -570,8 +614,8 @@ const T2_7_1_CONTAINER_ARM = enclosedConstructArm(
   },
 );
 
-const T2_7_1_FRAGMENT_ARM = enclosedConstructArm(
-  "T2.7-1 a fragment specs/A.mdx",
+export const T2_7_1_FRAGMENT_ARM = enclosedConstructArm(
+  "T2.7-1/T14-4/T14-6 a fragment specs/A.mdx",
   {
     fixture: enclosedConstructFixture("<>Fragment text.</>"),
     name: "a fragment (`<>` through `</>`)",
@@ -718,11 +762,11 @@ const T2_7_1 = defineProductTest({
   title:
     "a JSX element other than `<S>`/`<Spec>`, an expression container other than `text(...)` or an MDX comment, and an export statement each fail with 14.16; a fragment is one 14.16 from `<>` through `</>`, no node, its enclosed content preserved under `view --text`; an attribute value expression is part of its element — `<S id=\"x\" d={1}>` reports 14.8 alone and `<div a={1}></div>` exactly one 14.16; a section spelled inside an expression container is part of the container's expression — one 14.16 brace through brace, no node in the view's tree, its bytes content in the enclosing text (SPEC 2.7, 14.16, 11.2, 11.4)",
   run: async (product) => {
-    for (const { arm, source } of FOREIGN_CONSTRUCT_STAGINGS) {
+    for (const { arm, file, source } of FOREIGN_CONSTRUCT_STAGINGS) {
       const context = `T2.7-1 \`build --json\` with ${arm.name}`;
       await withWorkspace(
         SPECS_ONLY_CONFIG,
-        { "specs/A.mdx": source },
+        { [file]: source },
         async (workspace) => {
           const findings = await buildFindings(product, workspace, context);
           assertConditionCounts(
@@ -733,7 +777,7 @@ const T2_7_1 = defineProductTest({
           assertFindingLocated(
             findings[0]!,
             {
-              file: "specs/A.mdx",
+              file,
               window: byteWindow(arm.prefix, arm.construct),
             },
             `${context}: the ${arm.condition} finding (SPEC 2.7, 14)`,
