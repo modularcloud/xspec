@@ -22,10 +22,10 @@
 //   sections drops specs/sub/leaf.mdx and fails the exact file-list
 //   compare) — as per-file views in byte order of workspace-relative path.
 //   The staged names discriminate the collation: "specs/Zebra.mdx" (Z, 0x5A)
-//   sorts before "specs/alpha.mdx" (a, 0x61) before "specs/sub/leaf.mdx"
-//   (s, 0x73) by path bytes, while a case-folding or locale collation orders
-//   alpha first and fails (the exact compare here; the decode's
-//   strictly-ascending check besides).
+//   sorts before "specs/alpha.mdx" (a, 0x61) before "specs/lists.mdx" (l,
+//   0x6C) before "specs/sub/leaf.mdx" (s, 0x73) by path bytes, while a
+//   case-folding or locale collation orders alpha first and fails (the
+//   exact compare here; the decode's strictly-ascending check besides).
 // - Tree and decomposition (specs/Zebra.mdx, finding-free): the root and the
 //   full positional section tree in document order — paired sections at
 //   three depths, a self-closing leaf at depth three and another at depth
@@ -57,11 +57,29 @@
 //   order by locations; the windows are disjoint). The invalid elements get
 //   NO view entry (SPEC 11.4: the invalid constructs of 14.16 get no view
 //   entry — an extra node fails the tree compare).
+// - List orders (12.7; TEST-SPEC T11.4-1's closing sentence): specs/lists.mdx
+//   holds three imports, four MDX comments, and six reference occurrences
+//   (`d` references and `{text(...)}` embeddings interleaved), staged so
+//   that document order differs from every other plausible order — imports
+//   out of byte order by specifier, binding name, and resolved target;
+//   comments and occurrences spread across the root and sections, so
+//   owner-grouped orders differ; a `d` reference after embeddings, so
+//   kind-grouped orders differ; targets and sources out of byte order (a
+//   harness-side self-check proves each before any invocation). The file's
+//   `imports`, `comments`, and `occurrences` are each compared exactly, as
+//   decoded (form-exact, no adapter, H-3), against lists built from
+//   precomputed byte offsets: P-12 sorts the view's occurrences itself and
+//   cannot see a misordered list, so the order is asserted here (the
+//   decode's strictly-ascending checks reject a misordered list; the
+//   compares pin every entry's content). The file is finding-free — every
+//   import a default binding of a discovered spec source, every reference
+//   resolving, no cycle — so it adds no finding and no undefined datum.
 // - Findings and exit: the two 14.16 findings ARE the staging-integrity pin
 //   (no gate-reference `build` — see the certification note), and any
 //   finding means exit 1 with the full answer still emitted (SPEC 11.2).
-//   imports/occurrences/comments are asserted `[]` per file — nothing is
-//   staged, and empty lists are `[]`, never `null` (SPEC 12.7).
+//   Every other file's imports/occurrences/comments are asserted `[]` —
+//   nothing is staged there, and empty lists are `[]`, never `null` (SPEC
+//   12.7).
 //
 // T11.4-2 — operands vs restriction (SPEC 11.4). One failing-on-purpose
 // workspace, the whole sweep inside one modifies-nothing compare:
@@ -362,9 +380,14 @@
 // compare (graph-data and refresh behavior are expressly out of CONF-AVAIL
 // scope), and every staged condition drawn from the scope's stated set
 // (T11.4-3 stages 14.17 alone; T11.4-4 stages 14.15, 14.6, and 14.20 at
-// offset 0). T11.4-1's fixtures stage NO undefined datum — every
+// offset 0). T11.4-1's list-order arm stages several imports, comments,
+// and references in one file, as the scope admits — comments in the
+// `{/* … */}` form, embeddings spelling nothing beside the call, every import
+// a default binding of a discovered spec source, no import cycle, and no
+// finding. T11.4-1's fixtures stage NO undefined datum — every
 // node identity defined under 11.2's chain conditions, the invalid-element
-// arm keeping every spelled identity defined — so its answers carry the
+// arm keeping every spelled identity defined, every import target and
+// occurrence source of the list-order arm defined — so its answers carry the
 // unavailability marker nowhere: the marker-free ground
 // VIOL-AVAIL-NULLMARKER's passing side stands on (nothing undefined, so the
 // deviation touches nothing), while the stated `null`s the answers DO carry
@@ -605,6 +628,339 @@ const LEAF_ROOT_RANGE: SourceRange = {
   end: Buffer.byteLength(LEAF_SOURCE, "utf8"),
 };
 
+// --- specs/lists.mdx — the list-order arm (finding-free) ----------------------
+//
+// TEST-SPEC T11.4-1's list orders (12.7): one file holding several import
+// declarations, several MDX comments, and several reference occurrences,
+// interleaved so that document order differs from every other plausible
+// order (proven harness-side by `checkListOrderStaging` before any
+// invocation). Imports: two in one ESM block at the top and a third after
+// the sections, out of byte order by specifier, by binding name, and by
+// resolved target. Comments: two at the root level (before and between the
+// sections), one in flow position inside `b`, one in text position inside
+// `a` — owner-grouped orders differ. Occurrences: `d` references (one
+// external, one local string form — its quotes among its own characters,
+// SPEC 5.7 — beside a single external `d`) and embeddings (text and flow
+// position, external and local, one at the root level), a `d` reference
+// after embeddings, targets and sources out of byte order. Every import is
+// a default binding of a discovered spec source (no cycle: nothing imports
+// this file), every section spells a well-formed, conformant, unique
+// identity, and every reference resolves (no `d` or embedding targets an
+// ancestor, so no 14.9) — no undefined datum, no finding (CERTIFICATIONS.md
+// §CONF-AVAIL's scope: several of each in one file where this arm stages
+// them; comments in the `{/* … */}` form; embeddings spelling nothing beside
+// the call). The multi-byte prose and comment text shift every later offset
+// away from code-point and UTF-16 counts (SPEC 1.7).
+
+const LISTS_FILE = "specs/lists.mdx";
+
+const LS = new ByteFixture();
+LS.add("Listes — ordre du document.\n\n");
+const LS_IMPORT_ZED_TEXT = 'import Zed from "./sub/leaf.xspec"';
+const LS_IMPORT_ZED = LS.add(LS_IMPORT_ZED_TEXT);
+LS.add("\n");
+const LS_IMPORT_MID_TEXT = 'import Mid from "./Zebra.xspec"';
+const LS_IMPORT_MID = LS.add(LS_IMPORT_MID_TEXT);
+LS.add("\n\n");
+const LS_NOTE_BEFORE_TEXT = "{/* Note de racine — avant les sections. */}";
+const LS_NOTE_BEFORE = LS.add(LS_NOTE_BEFORE_TEXT);
+LS.add("\n\n");
+const LS_B_START = LS.pos;
+LS.add('<S id="b" d={[');
+const LS_D_TOP_TWO = LS.add("Mid.top.two");
+LS.add(", ");
+const LS_D_LOCAL_A = LS.add('"a"');
+LS.add("]}>");
+const LS_B_OPEN: SourceRange = { start: LS_B_START, end: LS.pos };
+LS.add("\nB own text ");
+const LS_EMBED_SIDE = LS.add("{text(Mid.side)}");
+LS.add(" continues.\n\n");
+const LS_NOTE_IN_B_TEXT = "{/* Note dans b — après le texte. */}";
+const LS_NOTE_IN_B = LS.add(LS_NOTE_IN_B_TEXT);
+LS.add("\n\n");
+const LS_INNER_OPEN = LS.add('<S id="b.inner">');
+LS.add("\n");
+const LS_EMBED_LOCAL_A = LS.add('{text("a")}');
+LS.add("\n");
+const LS_INNER_CLOSE = LS.add("</S>");
+const LS_INNER_RANGE: SourceRange = { start: LS_INNER_OPEN.start, end: LS.pos };
+LS.add("\n");
+const LS_B_CLOSE = LS.add("</S>");
+const LS_B_RANGE: SourceRange = { start: LS_B_START, end: LS.pos };
+LS.add("\n\n");
+const LS_NOTE_BETWEEN_TEXT = "{/* Note de racine — entre les sections. */}";
+const LS_NOTE_BETWEEN = LS.add(LS_NOTE_BETWEEN_TEXT);
+LS.add("\n\n");
+const LS_IMPORT_AL_TEXT = 'import Al from "./alpha.xspec"';
+const LS_IMPORT_AL = LS.add(LS_IMPORT_AL_TEXT);
+LS.add("\n\n");
+const LS_A_START = LS.pos;
+LS.add('<S id="a" d={');
+const LS_D_TOP = LS.add("Mid.top");
+LS.add("}>");
+const LS_A_OPEN: SourceRange = { start: LS_A_START, end: LS.pos };
+LS.add("\nA own text ");
+const LS_NOTE_IN_A_TEXT = "{/* Note en ligne — dans a. */}";
+const LS_NOTE_IN_A = LS.add(LS_NOTE_IN_A_TEXT);
+LS.add(" tail.\n");
+const LS_A_CLOSE = LS.add("</S>");
+const LS_A_RANGE: SourceRange = { start: LS_A_START, end: LS.pos };
+LS.add("\n\nClosing prose ");
+const LS_EMBED_TOP_ONE = LS.add("{text(Mid.top.one)}");
+LS.add(" at the root.\n");
+const LISTS_SOURCE = LS.source;
+const LS_ROOT_RANGE: SourceRange = { start: 0, end: LS.pos };
+
+const LS_ROOT_ID = LISTS_FILE;
+const LS_B_ID = `${LISTS_FILE}#b`;
+const LS_INNER_ID = `${LISTS_FILE}#b.inner`;
+const LS_A_ID = `${LISTS_FILE}#a`;
+
+/** The file's imports, in document order (SPEC 11.4, 12.7). */
+const LISTS_IMPORTS: readonly ViewImportEntry[] = [
+  { range: LS_IMPORT_ZED, name: "Zed", target: LEAF_FILE },
+  { range: LS_IMPORT_MID, name: "Mid", target: ZEBRA_FILE },
+  { range: LS_IMPORT_AL, name: "Al", target: ALPHA_FILE },
+];
+
+/** The imports' specifiers, parallel to `LISTS_IMPORTS`. */
+const LISTS_IMPORT_SPECIFIERS: readonly string[] = [
+  "./sub/leaf.xspec",
+  "./Zebra.xspec",
+  "./alpha.xspec",
+];
+
+/**
+ * The file's MDX comments — each the full braced container (SPEC 11.4) — in
+ * document order, each beside the node whose content holds it.
+ */
+const LISTS_COMMENTS: readonly {
+  readonly range: SourceRange;
+  readonly text: string;
+  readonly owner: string;
+}[] = [
+  { range: LS_NOTE_BEFORE, text: LS_NOTE_BEFORE_TEXT, owner: LS_ROOT_ID },
+  { range: LS_NOTE_IN_B, text: LS_NOTE_IN_B_TEXT, owner: LS_B_ID },
+  { range: LS_NOTE_BETWEEN, text: LS_NOTE_BETWEEN_TEXT, owner: LS_ROOT_ID },
+  { range: LS_NOTE_IN_A, text: LS_NOTE_IN_A_TEXT, owner: LS_A_ID },
+];
+
+/**
+ * The file's occurrence records in document order (SPEC 5.7, 11.4, 12.7),
+ * form-exact: a `d` reference spans its own expression (a string literal's
+ * quotes included), an embedding its full braced container; the source the
+ * section bearing the `d` prop or innermost enclosing the embedding — the
+ * root at the root level — with that node's construct range.
+ */
+const LISTS_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: LISTS_FILE,
+    range: LS_D_TOP_TWO,
+    kind: "depends",
+    source: { identity: LS_B_ID, range: LS_B_RANGE },
+    target: `${ZEBRA_FILE}#top.two`,
+  },
+  {
+    file: LISTS_FILE,
+    range: LS_D_LOCAL_A,
+    kind: "depends",
+    source: { identity: LS_B_ID, range: LS_B_RANGE },
+    target: LS_A_ID,
+  },
+  {
+    file: LISTS_FILE,
+    range: LS_EMBED_SIDE,
+    kind: "embeds",
+    source: { identity: LS_B_ID, range: LS_B_RANGE },
+    target: `${ZEBRA_FILE}#side`,
+  },
+  {
+    file: LISTS_FILE,
+    range: LS_EMBED_LOCAL_A,
+    kind: "embeds",
+    source: { identity: LS_INNER_ID, range: LS_INNER_RANGE },
+    target: LS_A_ID,
+  },
+  {
+    file: LISTS_FILE,
+    range: LS_D_TOP,
+    kind: "depends",
+    source: { identity: LS_A_ID, range: LS_A_RANGE },
+    target: `${ZEBRA_FILE}#top`,
+  },
+  {
+    file: LISTS_FILE,
+    range: LS_EMBED_TOP_ONE,
+    kind: "embeds",
+    source: { identity: LS_ROOT_ID, range: LS_ROOT_RANGE },
+    target: `${ZEBRA_FILE}#top.one`,
+  },
+];
+
+/** Each occurrence's spelling, parallel to `LISTS_OCCURRENCES`. */
+const LISTS_OCCURRENCE_SPELLINGS: readonly string[] = [
+  "Mid.top.two",
+  '"a"',
+  "{text(Mid.side)}",
+  '{text("a")}',
+  "Mid.top",
+  "{text(Mid.top.one)}",
+];
+
+/** The file's nodes in tree pre-order (the owner-grouping comparator). */
+const LISTS_PREORDER: readonly string[] = [
+  LS_ROOT_ID,
+  LS_B_ID,
+  LS_INNER_ID,
+  LS_A_ID,
+];
+
+/** Stable sort by a key, comparing keys as UTF-8 bytes (12.7 byte order). */
+function sortedByBytes<T>(
+  items: readonly T[],
+  key: (item: T) => string,
+): readonly T[] {
+  return [...items].sort((a, b) =>
+    Buffer.compare(Buffer.from(key(a), "utf8"), Buffer.from(key(b), "utf8")),
+  );
+}
+
+/** Stable sort by a numeric rank. */
+function sortedByRank<T>(
+  items: readonly T[],
+  rank: (item: T) => number,
+): readonly T[] {
+  return [...items].sort((a, b) => rank(a) - rank(b));
+}
+
+/**
+ * Fixture self-check (harness-side, before any product invocation): every
+ * list-order range slices the staged bytes to its construct, and document
+ * order differs from every other plausible order of each list — so a
+ * product emitting any of them fails the decode's document-order check or
+ * the exact compare instead of coinciding with the asserted list. A failure
+ * is a staging defect of the harness, never a product failure.
+ */
+function checkListOrderStaging(): void {
+  LISTS_IMPORTS.forEach((entry, index) => {
+    sliceCheck(
+      LISTS_SOURCE,
+      entry.range,
+      `import ${String(entry.name)} from "${LISTS_IMPORT_SPECIFIERS[index]!}"`,
+      `specs/lists.mdx import ${String(index)}`,
+    );
+  });
+  LISTS_COMMENTS.forEach((comment, index) => {
+    sliceCheck(
+      LISTS_SOURCE,
+      comment.range,
+      comment.text,
+      `specs/lists.mdx comment ${String(index)}`,
+    );
+  });
+  LISTS_OCCURRENCES.forEach((record, index) => {
+    sliceCheck(
+      LISTS_SOURCE,
+      record.range,
+      LISTS_OCCURRENCE_SPELLINGS[index]!,
+      `specs/lists.mdx occurrence ${String(index)}`,
+    );
+  });
+  sliceCheck(
+    LISTS_SOURCE,
+    LS_B_OPEN,
+    '<S id="b" d={[Mid.top.two, "a"]}>',
+    "b's opening tag",
+  );
+  sliceCheck(LISTS_SOURCE, LS_B_CLOSE, "</S>", "b's closing tag");
+  sliceCheck(
+    LISTS_SOURCE,
+    LS_INNER_OPEN,
+    '<S id="b.inner">',
+    "b.inner's opening tag",
+  );
+  sliceCheck(LISTS_SOURCE, LS_INNER_CLOSE, "</S>", "b.inner's closing tag");
+  sliceCheck(
+    LISTS_SOURCE,
+    LS_A_OPEN,
+    '<S id="a" d={Mid.top}>',
+    "a's opening tag",
+  );
+  sliceCheck(LISTS_SOURCE, LS_A_CLOSE, "</S>", "a's closing tag");
+
+  const imports = LISTS_IMPORTS.map((entry, index) => ({
+    entry,
+    specifier: LISTS_IMPORT_SPECIFIERS[index]!,
+  }));
+  const comments = [...LISTS_COMMENTS];
+  const occurrences = [...LISTS_OCCURRENCES];
+  const sourceIdentity = (record: OccurrenceRecord): string =>
+    "identity" in record.source ? record.source.identity : "";
+  const alternatives: readonly (readonly [
+    string,
+    readonly unknown[],
+    readonly unknown[],
+  ])[] = [
+    [
+      "imports by specifier bytes",
+      imports,
+      sortedByBytes(imports, (item) => item.specifier),
+    ],
+    [
+      "imports by binding name",
+      imports,
+      sortedByBytes(imports, (item) => item.entry.name ?? ""),
+    ],
+    [
+      "imports by resolved target",
+      imports,
+      sortedByBytes(imports, (item) => String(item.entry.target)),
+    ],
+    [
+      "comments grouped by owner in tree pre-order",
+      comments,
+      sortedByRank(comments, (item) => LISTS_PREORDER.indexOf(item.owner)),
+    ],
+    [
+      "occurrences by target bytes",
+      occurrences,
+      sortedByBytes(occurrences, (item) => item.target),
+    ],
+    [
+      "occurrences by source identity bytes",
+      occurrences,
+      sortedByBytes(occurrences, sourceIdentity),
+    ],
+    [
+      "occurrences by source in tree pre-order",
+      occurrences,
+      sortedByRank(occurrences, (item) =>
+        LISTS_PREORDER.indexOf(sourceIdentity(item)),
+      ),
+    ],
+    [
+      "occurrences, `d` references first",
+      occurrences,
+      sortedByRank(occurrences, (item) => (item.kind === "depends" ? 0 : 1)),
+    ],
+    [
+      "occurrences, embeddings first",
+      occurrences,
+      sortedByRank(occurrences, (item) => (item.kind === "embeds" ? 0 : 1)),
+    ],
+  ];
+  for (const [what, documentOrder, alternative] of alternatives) {
+    if (alternative.every((item, index) => item === documentOrder[index])) {
+      fail(
+        `§11.4 fixture self-check — specs/lists.mdx: the staged document ` +
+          `order coincides with ${what}, so the list-order arm could not ` +
+          `see a product emitting that order (a harness-side staging ` +
+          `error, not a product failure)`,
+      );
+    }
+  }
+}
+
 // --- expected trees -----------------------------------------------------------
 
 /**
@@ -726,19 +1082,84 @@ const LEAF_TREE: TreeShape = {
   children: [],
 };
 
+const LISTS_TREE: TreeShape = {
+  identity: LS_ROOT_ID,
+  range: LS_ROOT_RANGE,
+  opening: null,
+  closing: null,
+  children: [
+    {
+      identity: LS_B_ID,
+      range: LS_B_RANGE,
+      opening: LS_B_OPEN,
+      closing: LS_B_CLOSE,
+      children: [
+        {
+          identity: LS_INNER_ID,
+          range: LS_INNER_RANGE,
+          opening: LS_INNER_OPEN,
+          closing: LS_INNER_CLOSE,
+          children: [],
+        },
+      ],
+    },
+    {
+      identity: LS_A_ID,
+      range: LS_A_RANGE,
+      opening: LS_A_OPEN,
+      closing: LS_A_CLOSE,
+      children: [],
+    },
+  ],
+};
+
+/**
+ * Every viewed file, in byte order of workspace-relative path (Zebra 0x5A <
+ * alpha 0x61 < lists 0x6C < sub/leaf 0x73), with its expected tree and its
+ * three lists — `[]` (never `null`, SPEC 12.7) where nothing is staged, the
+ * list-order arm's lists in document order.
+ */
 const EXPECTED_VIEWS: readonly {
   readonly file: string;
   readonly tree: TreeShape;
+  readonly imports: readonly ViewImportEntry[];
+  readonly occurrences: readonly OccurrenceRecord[];
+  readonly comments: readonly SourceRange[];
 }[] = [
-  { file: ZEBRA_FILE, tree: ZEBRA_TREE },
-  { file: ALPHA_FILE, tree: ALPHA_TREE },
-  { file: LEAF_FILE, tree: LEAF_TREE },
+  {
+    file: ZEBRA_FILE,
+    tree: ZEBRA_TREE,
+    imports: [],
+    occurrences: [],
+    comments: [],
+  },
+  {
+    file: ALPHA_FILE,
+    tree: ALPHA_TREE,
+    imports: [],
+    occurrences: [],
+    comments: [],
+  },
+  {
+    file: LISTS_FILE,
+    tree: LISTS_TREE,
+    imports: LISTS_IMPORTS,
+    occurrences: LISTS_OCCURRENCES,
+    comments: LISTS_COMMENTS.map((comment) => comment.range),
+  },
+  {
+    file: LEAF_FILE,
+    tree: LEAF_TREE,
+    imports: [],
+    occurrences: [],
+    comments: [],
+  },
 ];
 
 const T11_4_1 = defineProductTest({
   id: "T11.4-1",
   title:
-    "with neither operands nor `--file`, one bare `view` (JSON-only, a single form-exact 12.7 document) serves every discovered spec source — a section-less file included — as per-file views in byte order of workspace-relative path (specs/Zebra.mdx < specs/alpha.mdx < specs/sub/leaf.mdx: 0x5A < 0x61 < 0x73, never a case-folding or locale collation); per file the root and the full positional section tree in document order, each node's construct range and decomposition byte-asserted against precomputed offsets behind a multi-byte prefix (SPEC 1.7): opening and closing tag ranges for paired sections at three depths, opening only — the whole self-closing tag, equal to the construct range — for self-closing sections, neither for the root, whose range is the entire file; a section nested inside an invalid `<div>` parents to the INNERMOST enclosing section construct (`wrap.mid`, never `wrap`, never the root — the enclosure 11.2's chain conditions read, so every staged identity stays a defined plain string) and a section inside a top-level `<em>` parents to the root, the invalid elements getting no view entry, exactly the two 14.16 findings accompanying (no phantom 14.2), each located within its own element's construct window, exit 1 with the full answer (SPEC 11.4, 11.2, 1.7, 12.7, 14)",
+    "with neither operands nor `--file`, one bare `view` (JSON-only, a single form-exact 12.7 document) serves every discovered spec source — a section-less file included — as per-file views in byte order of workspace-relative path (specs/Zebra.mdx < specs/alpha.mdx < specs/lists.mdx < specs/sub/leaf.mdx: 0x5A < 0x61 < 0x6C < 0x73, never a case-folding or locale collation); per file the root and the full positional section tree in document order, each node's construct range and decomposition byte-asserted against precomputed offsets behind a multi-byte prefix (SPEC 1.7): opening and closing tag ranges for paired sections at three depths, opening only — the whole self-closing tag, equal to the construct range — for self-closing sections, neither for the root, whose range is the entire file; a section nested inside an invalid `<div>` parents to the INNERMOST enclosing section construct (`wrap.mid`, never `wrap`, never the root — the enclosure 11.2's chain conditions read, so every staged identity stays a defined plain string) and a section inside a top-level `<em>` parents to the root, the invalid elements getting no view entry, exactly the two 14.16 findings accompanying (no phantom 14.2), each located within its own element's construct window; list orders (12.7): on specs/lists.mdx — three imports, four MDX comments, and six reference occurrences, `d` references and embeddings interleaved (a `d` reference after embeddings), document order differing from every byte-sorted and grouped order — `imports`, `comments`, and `occurrences` are each exactly the expected list in document order, form-exact, every entry's ranges byte-asserted (asserted here because P-12 sorts the view's occurrences itself and cannot see a misordered list), every other file's lists `[]`; exit 1 with the full answer (SPEC 11.4, 11.2, 1.7, 5.7, 12.7, 14)",
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline) — composed-range arithmetic
     // proven against the staged bytes before any product invocation.
@@ -789,12 +1210,14 @@ const T11_4_1 = defineProductTest({
       "wrap.mid.inner's whole construct",
     );
     sliceCheck(ALPHA_SOURCE, AL_FREE_RANGE, AL_FREE_TAG, "free's tag");
+    checkListOrderStaging();
 
     const workspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
         [ZEBRA_FILE]: ZEBRA_SOURCE,
         [ALPHA_FILE]: ALPHA_SOURCE,
+        [LISTS_FILE]: LISTS_SOURCE,
         [LEAF_FILE]: LEAF_SOURCE,
       },
     });
@@ -834,7 +1257,9 @@ const T11_4_1 = defineProductTest({
         `${context}: the consulted domain's findings are exactly the two ` +
           `invalid-element findings — every staged identity is spelled, ` +
           `well-formed, conformant against its positional parent, and ` +
-          `unique, so no 14.1/14.2/14.3/14.4 arises (SPEC 11.2, 11.4, 14)`,
+          `unique, so no 14.1/14.2/14.3/14.4 arises, and specs/lists.mdx's ` +
+          `imports and references all resolve, acyclic, so no 14.5, 14.6, ` +
+          `14.9, or 14.15 does (SPEC 11.2, 11.4, 14)`,
       );
       const invalidElementFindings = report.findings.filter(
         (finding) => finding.condition === "14.16",
@@ -856,9 +1281,10 @@ const T11_4_1 = defineProductTest({
           `element's construct in specs/alpha.mdx (SPEC 14, 12.7)`,
       );
 
-      // Whole domain, byte order: exactly the three discovered spec sources,
-      // Zebra (0x5A) < alpha (0x61) < sub/leaf (0x73) — completeness (the
-      // section-less leaf viewed) and collation in one compare.
+      // Whole domain, byte order: exactly the four discovered spec sources,
+      // Zebra (0x5A) < alpha (0x61) < lists (0x6C) < sub/leaf (0x73) —
+      // completeness (the section-less leaf viewed) and collation in one
+      // compare.
       assertSameJson(
         report.views.map((view) => view.file),
         EXPECTED_VIEWS.map((view) => view.file),
@@ -868,9 +1294,14 @@ const T11_4_1 = defineProductTest({
       );
 
       // Per file: the full positional section tree in document order, each
-      // node's construct range and decomposition byte-exact; nothing else is
-      // staged, so imports, occurrences, and comments are `[]` (never
-      // `null`, SPEC 12.7).
+      // node's construct range and decomposition byte-exact; then the
+      // file's imports, occurrences, and comments, each compared exactly as
+      // decoded (form-exact, no adapter, H-3): `[]` (never `null`, SPEC
+      // 12.7) where nothing is staged, and specs/lists.mdx's lists in
+      // document order — the list orders 12.7 pins, asserted here because
+      // P-12 sorts the view's occurrences itself and cannot see a
+      // misordered list (the decode's strictly-ascending checks reject a
+      // misordered list first; the compares pin every entry's content).
       EXPECTED_VIEWS.forEach((expected, index) => {
         const view = report.views[index]!;
         assertSameJson(
@@ -885,21 +1316,30 @@ const T11_4_1 = defineProductTest({
         );
         assertSameJson(
           view.imports,
-          [],
-          `${context} — ${expected.file}: no import is staged, and an ` +
-            `empty list is [], never null (SPEC 11.4, 12.7)`,
+          expected.imports,
+          `${context} — ${expected.file}: every import declaration in ` +
+            `document order, each \`{"range", "name", "target"}\` — its own ` +
+            `characters' byte range, its default binding's identifier, and ` +
+            `the discovered spec source its specifier designates — and an ` +
+            `empty list [], never null (SPEC 11.4, 2.1, 12.7)`,
         );
         assertSameJson(
           view.occurrences,
-          [],
-          `${context} — ${expected.file}: no reference spelling is staged ` +
-            `(SPEC 11.4, 5.7, 12.7)`,
+          expected.occurrences,
+          `${context} — ${expected.file}: every reference occurrence in ` +
+            `document order, each \`{"file", "range", "kind", "source", ` +
+            `"target"}\` — a \`d\` reference spanning its own expression, an ` +
+            `embedding its full braced container, the source the bearing or ` +
+            `innermost enclosing node with its construct range, the target's ` +
+            `identity — and an empty list [], never null (SPEC 11.4, 5.7, ` +
+            `12.7)`,
         );
         assertSameJson(
           view.comments,
-          [],
-          `${context} — ${expected.file}: no MDX comment is staged (SPEC ` +
-            `11.4, 12.7)`,
+          expected.comments,
+          `${context} — ${expected.file}: every MDX comment's full braced ` +
+            `container in document order, and an empty list [], never null ` +
+            `(SPEC 11.4, 2.7, 12.7)`,
         );
       });
     } finally {
