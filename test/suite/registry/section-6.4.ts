@@ -55,6 +55,15 @@
 //   (the renamed ID plus the prefix-replaced descendants, nothing else),
 //   listed in `from`-byte order. Any other member set, or the mapping in
 //   another shape or order, fails (T6.4-1).
+// - T6.4-1 "`check` clean after the rename" (TEST-SPEC T6.4-3 asserts 6.4's
+//   "every rewritten reference resolves by construction" on the success
+//   side of every successful rename): `check --json` runs right after the
+//   rename and its journal assertion, before any rebuild, through
+//   support.ts's `expectFindingFreeReport` — exit 0 and exactly
+//   `{"findings": []}` (SPEC 12.2: all build validations plus the derived
+//   files and graph data verified, exit 1 on any finding; 12.7). A product
+//   whose finishing regeneration leaves a derived file stale (SPEC 6.4,
+//   12.1) fails here, where the later rebuild would repair it.
 // - T6.4-2 stages every keepable form on the *affected* segment itself —
 //   computed access in both quote kinds, dot access, local string literals
 //   and `id` attributes in both quote kinds — and composes each expected
@@ -184,6 +193,7 @@ import {
   byteWindow,
   expectErrorDocument,
   expectExit,
+  expectFindingFreeReport,
   expectSyntaxClassUsageError,
   runJson,
   sortedIdentities,
@@ -671,7 +681,7 @@ async function assertDependencyEdges(
 const T6_4_1 = defineProductTest({
   id: "T6.4-1",
   title:
-    "rewrites: renaming a mid-tree ID rewrites its `id`, all descendant `id`s by prefix replacement, local string references, external chain references in other files, `text(...)` targets in MDX and TS, and TS markers — the workspace builds, all edges retarget (query-asserted), the mapping is appended to the journal, and the command's own report is the applied mapping — every journaled identity pair, the information of the preview's `mapping`, carried in JSON per 12.0 (SPEC 6.4, 6.6, 6.1, 12.0; H-3 adapter, report shape unpinned)",
+    "rewrites: renaming a mid-tree ID rewrites its `id`, all descendant `id`s by prefix replacement, local string references, external chain references in other files, `text(...)` targets in MDX and TS, and TS markers — `check` clean after the rename (every rewritten reference resolves, no derived output stale), the workspace builds, all edges retarget (query-asserted), the mapping is appended to the journal, and the command's own report is the applied mapping — every journaled identity pair, the information of the preview's `mapping`, carried in JSON per 12.0 in the form-exact performed-operation document of 12.7 (SPEC 6.4, 6.6, 6.1, 12.0, 12.2, 12.7; TEST-SPEC T6.4-3; H-3 form-exact decode)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -775,6 +785,25 @@ const T6_4_1 = defineProductTest({
               `found ${String(lines)} line(s) in ${String(journal.length)} bytes`,
           );
         }
+
+        // `check` clean immediately after the rename, before any rebuild —
+        // the success side of TEST-SPEC T6.4-3's "every rewritten reference
+        // resolves by construction": SPEC 6.4 (each rewritten reference
+        // targets an identity the operation creates or keeps; the finishing
+        // regeneration, exactly as `xspec build` does, leaves no stale
+        // output) and SPEC 12.2 (`check` performs all build validations and
+        // verifies the derived files and graph data, exiting 1 on any
+        // finding). Run before the rebuild below, which would repair a
+        // derived file the rename left stale.
+        await expectFindingFreeReport(
+          product,
+          workspace,
+          ["check", "--json"],
+          "T6.4-1 `check --json` immediately after the rename, before any " +
+            "rebuild — every rewritten reference resolves and the finishing " +
+            "regeneration left no derived file or graph data stale (SPEC " +
+            "6.4, 12.1, 12.2; TEST-SPEC T6.4-3)",
+        );
 
         // The rewritten workspace builds (SPEC 6.4: rename only ever rewrites
         // a valid workspace into a valid one).
@@ -1342,9 +1371,10 @@ const T6_4_2 = defineProductTest({
 // fails only 1.4 (forbidden name), `a.mi d` only 1.4 (whitespace), `a.mid`
 // only the differs-from-old check, `a.sib` only the collision check, `x.mid`
 // and `b.c` only the structural parent rules. The remaining 6.4 clause — all
-// rewritten references resolve — admits no discriminating fixture (TEST-SPEC
-// T6.4-3) and is exercised as the always-passing side of T6.4-1. The
-// two-bearer collision arm stages its own file beside this one (below).
+// rewritten references resolve — admits no refusal reason (TEST-SPEC
+// T6.4-3) and is asserted on the success side of T6.4-1: its `check` clean
+// right after the rename and every edge retargeted. The two-bearer
+// collision arm stages its own file beside this one (below).
 const V3_FILE = "specs/A.mdx";
 const V3_SOURCE = [
   '<S id="a">',
