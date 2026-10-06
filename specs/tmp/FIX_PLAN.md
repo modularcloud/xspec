@@ -78,7 +78,7 @@ Why the harness changes again: the documents moved after the harness was last gr
   - D: CONF-AVAIL accepts a malformed `--to` (other than U+FFFD) and an outside-root `--file` (value spellings are not part of the grammar the preamble makes universal; its surface serves both only as staged). CONF-AVAIL's configuration-content errors carry `code`/`path` null and it reports the `markdown`, `coverage`, and `policy` keys as configuration errors; its scope admits only valid configurations without those keys (it is the only fixture not reporting `configuration-error` there). CONF-VALID reports non-zero 14.20 ranges; 14.20 cannot arise within its scope. Commands outside a fixture's surface refused with exit 70 before their own operands or flags are judged report no usage error, and the document does not constrain out-of-scope invocations. CONF-DISC writes no graph data; CONF-MD answers reads on an invalid workspace (outside its scope); CONF-VALID reports a root's `query` tags as `[]` (its scope's "`[]` when tagless"). VIOL-AVAIL-NULLMARKER's T11.2-4 fails first at an id-less section's identity, a staged undefined datum, within its deviation.
 
 **Order.** Tasks are in dependency order; take the topmost task unless told otherwise. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement. When a task is done, its commit removes it and adds a one-line summary to its bullet here.
-- Part A (Tasks 1–9): the T-numbered tests, in TEST-SPEC order — T1.1-3's child chain on the `<Spec>` leaf (A1), T1.6-3's own text in a review payload (A2), T4.1-3's not-a-string assertion (A3), T5.3-1's full cycle path for its in-file arms (A4), T11.4-1's list-order arm (B3; certified under CONF-AVAIL), T14-3's `d={]}` staging and its pinned offset (B1), and T14-4's sweep of the 14.16 and 14.20 stagings of T2.3-3, T2.7-1, and T2.7-4 (B2, Tasks 7–9). Tasks 1–6 are independent of each other and of Tasks 7–11. Tasks 7, 8, and 9 go in that order: Task 7 adds the sweep adapter Tasks 8 and 9 reuse, and Task 9 settles the timeouts and comments for the whole set.
+- Part A (Tasks 1–9): the T-numbered tests, in TEST-SPEC order — T1.1-3's child chain on the `<Spec>` leaf (A1), T1.6-3's own text in a review payload (A2), T4.1-3's not-a-string assertion (A3), T5.3-1's full cycle path for its in-file arms (A4), T11.4-1's list-order arm (B3; certified under CONF-AVAIL), T14-3's `d={]}` staging and its pinned offset (B1), and T14-4's sweep of the 14.16 and 14.20 stagings of T2.3-3, T2.7-1, and T2.7-4 (B2, Tasks 7–9). Tasks 1–6 are independent of each other and of Tasks 7–11. Tasks 7, 8, and 9 go in that order: Task 7 adds the sweep adapter Tasks 8 and 9 reuse, and Task 9 settles the timeouts and comments for the whole set. Task 1 done: T1.1-3's bad consumer also stages `SPEC.empty.child;` and the body asserts its type error beside `SPEC.todo.child`'s; T1.1-3 passes against the built product before and after, and a stand-in giving either leaf's generated interface an index signature fails exactly that leaf's assertion.
 - Part B (Task 10): H-11 — a crash of the harness's own MDX parse inside T6.5-22(a)'s check is a harness error, never a diagnosed product failure (C1). Independent of Parts A and C.
 - Part C (Task 11): CONF-ORPHAN reports usage errors on JSON-only surfaces in the 12.7 error document (D1). Independent of Parts A and B.
 - Task 12 confirms the result and deletes this plan. It depends on every task above.
@@ -86,21 +86,6 @@ Why the harness changes again: the documents moved after the harness was last gr
 ## Tasks
 
 ### Part A — the T-numbered tests (TEST-SPEC order)
-
-### Task 1 — T1.1-3: assert the child-chain type error on the `<Spec id="empty" />` leaf (A1)
-
-**Requirement.** TEST-SPEC T1.1-3 (line 37 at 6780f53): "A file mixing paired sections with `<S id="todo" />` and `<Spec id="empty" />` builds: each self-closing section is an empty leaf (1.1) — … the generated module exposes the node with no child properties (a child chain is a type error, 4.1) …". "Each" covers both spellings.
-
-**Shortfall.** In `test/suite/registry/section-1.1-1.2.ts`, `T1_1_3` runs every per-node assertion for both `todo` and `empty` except the child chain: `CHILD_CHAIN_CONSUMER` (a `StagedTs` record, about line 359) stages only `SPEC.todo.child;`, and the one `assertCompileErrorAt` (about line 484) locates only that. A product giving the `<Spec>`-spelled leaf child properties (an index signature, say) passes.
-
-**Change.**
-- Stage `SPEC.empty.child;` as well: add the line to the bad consumer, or stage a second `StagedTs` record beside it. One file can carry both lines: `assertCompileErrorAt` (`test/helpers/tooling.ts`) matches any error diagnostic whose span covers the position. Either way the consumer is staged after `build`, so it stays a record registered at module load (S-9).
-- Assert `assertCompileErrorAt` at `child` in `SPEC.empty.child` (`charOffset: "SPEC.empty.".length`), beside the existing `todo` assertion, with a context naming the `<Spec>` spelling and SPEC 4.1. Touch the title only if it no longer describes the body.
-
-**Checks.**
-- Against the built product: T1.1-3 passes. If it fails, it is a diagnosed product failure only once a hand probe shows the generated module giving `empty` a child property (Preamble, *Product verdicts*).
-- Red check (AGENTS.md "Red-checking a strengthened product test against the built product (Phase 9)"): a stand-in that runs the real `build` and then rewrites the generated module's declarations for `specs/A.mdx` so the `empty` node's type admits any property (an index signature) must fail the new assertion, its diagnosis naming `SPEC.empty.child`, while the `todo` assertion still holds.
-- T1.1-3 is uncertified.
 
 ### Task 2 — T1.6-3: assert an own text carrying an embedding in a review payload (A2)
 

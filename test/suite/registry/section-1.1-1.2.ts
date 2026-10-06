@@ -356,11 +356,19 @@ const VALID_LEAF_CONSUMER = stagedTs(
   ].join("\n"),
 );
 
+// One child chain per self-closing spelling — `<S id="todo" />` and
+// `<Spec id="empty" />` — each its own statement, so each leaf's type error
+// is located at its own `child` (assertCompileErrorAt matches any error
+// whose span covers the position).
 const CHILD_CHAIN_CONSUMER = stagedTs(
-  "T1.1-3 bad-consumer.ts — the child-of-a-leaf chain, staged after `build`",
-  ['import SPEC from "./specs/A.xspec";', "", "SPEC.todo.child;", ""].join(
-    "\n",
-  ),
+  "T1.1-3 bad-consumer.ts — the child-of-a-leaf chains, staged after `build`",
+  [
+    'import SPEC from "./specs/A.xspec";',
+    "",
+    "SPEC.todo.child;",
+    "SPEC.empty.child;",
+    "",
+  ].join("\n"),
 );
 
 const T1_1_3 = defineProductTest({
@@ -466,7 +474,7 @@ const T1_1_3 = defineProductTest({
 
       // Generated module (SPEC 4.1): the empty leaves exist as nodes with no
       // child properties — the full-chain consumer compiles, a child chain on
-      // a leaf is a type error.
+      // either leaf, whichever self-closing spelling it has, is a type error.
       await workspace.file("consumer.ts", VALID_LEAF_CONSUMER);
       await workspace.file("bad-consumer.ts", CHILD_CHAIN_CONSUMER);
       const valid = await ConsumerProject.load({
@@ -487,7 +495,15 @@ const T1_1_3 = defineProductTest({
           charOffset: "SPEC.todo.".length,
         }),
         {},
-        "T1.1-3 child chain on an empty leaf (a missing requirement path is a type error, SPEC 4.1)",
+        'T1.1-3 child chain `SPEC.todo.child` on the `<S id="todo" />` empty leaf (a missing requirement path is a type error, SPEC 4.1)',
+      );
+      assertCompileErrorAt(
+        invalid,
+        invalid.locate("bad-consumer.ts", "SPEC.empty.child", {
+          charOffset: "SPEC.empty.".length,
+        }),
+        {},
+        'T1.1-3 child chain `SPEC.empty.child` on the `<Spec id="empty" />` empty leaf (a missing requirement path is a type error, SPEC 4.1)',
       );
     } finally {
       await workspace.dispose();
