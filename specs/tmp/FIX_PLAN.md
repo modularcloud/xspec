@@ -1,0 +1,290 @@
+# FIX_PLAN — Phase 9 (test harness), re-descent iteration 114
+
+Written 2026-10-06 at 72d5126 (branch `claude/xspec-ui-apis-4df8fa`, standing in for `patch/external-ui-apis`). It plans from the re-descent's fourth compliance determination, which was not clean. Its findings:
+- compliance review A (TEST-SPEC's T1–T6 tests): 4 gaps;
+- B (T7 and later): 3 gaps;
+- C (everything outside the T-numbered tests): 1 gap;
+- D (CERTIFICATIONS.md): 1 gap;
+- VERIFY V: green — every harness self-test and every certification passes, locally and in CI.
+
+Task headings cite the gaps as A1–A4, B1–B3, C1, and D1. Governing IP: `specs/patches/0001-external-ui-apis.md` (Stage: Tests Specified); no task changes its stage. No Bug Report applies.
+
+Why the harness changes again: the documents moved after the harness was last green (Phase 9 ended at 3bfedb5). The deltas are `git diff 3311ccd..6780f53 -- specs/TEST-SPEC.md`, `git diff 3311ccd..301f2f9 -- specs/CERTIFICATIONS.md`, and `git diff 9d095d9..f31e100 -- specs/SPEC.md`; none of the three documents has changed since. The plans written at f0d3cd9, 857e51a, and ad9eb42 closed every gap the first three determinations found. The second's and third's finished texts sit at `deleted/specs/tmp/FIX_PLAN.md` and `deleted/specs/tmp/FIX_PLAN-2.md`, each moved there with the Developer's approval; they are not part of the harness or the product, and no task touches them. The nine gaps below are clauses no earlier plan implemented (B1's landed at 09fe293, B3's at 46a6aed) or paths the third plan's fixes did not reach (C1, D1). None blocks on a spec defect.
+
+## Preamble — read before any task
+
+**Phase goal and scope guards (Phase 9).** The harness must adhere to `specs/TEST-SPEC.md` and `specs/CERTIFICATIONS.md`. Every harness self-test and every certification passes: each certified test passes against its conformer and fails against each of its violators exactly as the violator's entry states. Product tests may fail, but only as diagnosed assertion failures (H-8): never a harness error, crash, hang, or false pass. Never modify product code (`src/`; `dist/` is built from it). Every task is harness work under `test/` (fixtures under `test/fixtures/` are harness code), plus `AGENTS.md`'s build/run facts and this plan. A spec defect that blocks a task goes to the matching problems file under `specs/tmp/` (`SPEC-PROBLEMS.md`, `TEST-SPEC-PROBLEMS.md`, or `CERTIFICATIONS-PROBLEMS.md`), never into a silent workaround.
+
+**Known state at 72d5126 (VERIFY, and CI run 890, ID 37488926587).**
+- Self project, run as CI runs it (no network, uid 1000, no capabilities): 27 files, 4217 tests, all passing, 0 skipped (179 s locally, 107 s in CI).
+- Certification: all 27 fixtures pass — CORE 1 conformer and 8 violators, VALID 1 and 3, MD 1 and 2, DISC 1 and 3, AVAIL 1 and 3, ORPHAN 1 and 2. The runner's lines sum to 154 PASS / 38 FAIL / 0 error / 0 hang: the conformers' 39 (test, fixture) pairs all PASS; the violators' 153 pairs are 115 PASS and 38 FAIL, every FAIL an expected outcome. The C-1 gate passes.
+- Suite against the built product (local and CI, no network, unprivileged): 345 tests in 79 files; 317 pass and 28 fail, every failure a `HarnessAssertionError` (diagnosed). The failing IDs: P-1, P-5, T1.4-1, T1.4-4, T4-2, T6.4-3, T6.5-4, T6.5-11, T6.5-20, T6.5-21, T6.5-22, T6.5-23, T6.6-3, T7-2, T7-6, T7.1-1, T7.3-1, T12.0-5, T12.0-10, T12.7-2, T13.4-9, T13.4-10, T13.4-11, T14-4, T14-6, T14-7, T14-11, and T14-12. T14-4 (about 78 s) and T14-6 (about 15 s) both stop at their sweep's T14-12 (af) row, the element `<a` U+2EBF0 ` />`. The tests Tasks 1–6 strengthen (T1.1-3, T1.6-3, T4.1-3, T5.3-1, T11.4-1, T14-3) pass against the built product at 72d5126. Local `npm test`: 106 files, 4562 tests, 1482 s.
+- Windows leg (E-6 subset): 3 files, 9 tests, green.
+- `npm run typecheck`, `npm run build`, and `npm run format:check` pass; both TypeScript copies are 5.9.3; `dist/` matches a fresh compile of `src/`.
+- No self-test reads TEST-SPEC.md, and none probes the fixtures outside certification runs, so a green self project does not by itself show compliance: each task carries its own checks.
+
+**Run mechanics (AGENTS.md holds the recipes; read the bullets a task names before running anything).**
+- Confirm `git status` is clean on `claude/xspec-ui-apis-4df8fa` before editing. Never fetch or merge `main` (it carries a newer scaffold commit this run does not adopt). Push with `git push -u origin claude/xspec-ui-apis-4df8fa`, retrying network errors with backoff (2 s, 4 s, 8 s, 16 s); never force-push; check `git log -1` before every push. If `node_modules` is missing, `npm ci` restores it.
+- Run the self project under the unprivileged namespace (`unshare --map-user=1000 --map-group=1000 -- npm run test:self` in this root sandbox; AGENTS.md's namespace bullet also records how to reproduce CI's no-network stage). Redirect long runs to a log in the scratchpad and grep it for `×` and the `Tests` summary; never cap the output with `head`.
+- Never run the self project, a certification run, and a suite run at the same time, and check the load first (another agent may share the machine). S-2's tower vector (T1.3-7's 2048-deep chained-id tower, 4,225,030 bytes) takes 2.3 s in CI and up to 3.2 s here under load, under Vitest's 5000 ms default; it has timed out only with two harness runs overlapping. Such a timeout is not a task failure; rerun alone.
+- One registered test: `-t '<ID> '`, with the trailing space and the dots escaped, on its wrapper file (e.g. `npx vitest run --config test/vitest.config.ts --project suite test/suite/section-4.test.ts -t 'T4-4 '`).
+- One certification family: `npx vitest run --config test/vitest.config.ts --project self test/self/certification.test.ts -t <FAMILY>` (CORE, VALID, MD, DISC, AVAIL, ORPHAN), under the namespace. Compare the runner's per-pair `PASS`/`FAIL` lines with the known state above.
+- Red/green checks of a product test: AGENTS.md's stand-in wrapper recipe ("Red-checking a strengthened product test against the built product (Phase 9)": a temporary `test/self/zz-*.test.ts` calling `runProductTests` or an exported arm, deleted before committing). Red checks of a new self-test vector: AGENTS.md's stash-the-helper recipe ("Red-checking a new self-test vector"), or a one-point mutation of a scratch copy of a fixture ("Red-checking a certified test's arm"). Hand-driving a fixture: `node test/fixtures/<fixture>/bin.mjs <argv…>` with a scratch workspace as the working directory.
+- Rebuild the product (`npm run build`) only if `dist/` is stale; `src/` does not change in this phase.
+- The scratchpad is shared across spawns: use task-specific file names there.
+
+**Spellings.** Take every exact spelling — code points, escape-spelled literals, byte offsets, file contents, command lines — from the TEST-SPEC.md, CERTIFICATIONS.md, or SPEC.md text the task cites, or from the harness code it names, never from this plan or the review reports. The reports' channel decoded escape spellings, and the tool-parameter layer decodes backslash-u spellings inconsistently in edit and Bash payloads, comments included. So this plan names code points as `U+XXXX` and spells no escapes. Build such spellings in code from code points and verify the staged bytes byte-wise (`od -c`, a sha256 compare).
+
+**Conventions for changed tests and fixtures.**
+- *Registration.* No task adds a registered product test. Task 10 adds vectors to an existing self-test file; Task 11 adds rows to the grammar guard's CONF-ORPHAN table.
+- *S-9 timing.* A `.mdx` source that a registered body stages after its first product invocation, or in a workspace it creates after it, is a staged-source record (`test/helpers/staged-mdx.ts`, judged by `test/self/s9-staged-sources.test.ts`); a TypeScript code source or configuration file staged there is a `StagedTs` record (`test/helpers/staged-ts.ts`). Records register at module load only, and each adds one self-test. Files staged before a body's first invocation need no record. A source a task declares unparseable stays declared so (`mdx.unparseable` in a `WorkspaceDecl`, or a record's `"unparseable"` argument). Self-tests stage their workspaces before invoking anything.
+- *Never-modifies compares* use the compare-around machinery (`assertLeavesUnchanged` and `snapshotDirectory` in `test/helpers/snapshot.ts`).
+- *Free text.* Corrections and other free-text checks use H-3's robust matching: required information only, never exact wording.
+- *Product verdicts.* The built product (Phase 10's, at c62f451) predates the SPEC changes of this re-descent. A new or strengthened arm that fails against it counts as a diagnosed product failure only once a hand-staged probe shows the product's answer contradicts the asserted SPEC behavior. A harness error, crash, or hang is a harness defect to fix in the task. An arm that passes against the product proves nothing about its liveness, so red-check it wherever the task says so.
+- *Fixture changes.* Each violator reuses its conformer's `product.mjs` (its `bin-<deviation>.mjs` passes one deviation switch), so a conformer change reaches every violator of its family. After a fixture change, read each switch of the family at its point of use and confirm it still produces its one deviation, and run the family's certification: every runner line must read as in the known state above. A certified test that changes outcome is a finding: diagnose it against TEST-SPEC.md's and CERTIFICATIONS.md's text before going on. A test body asserting what SPEC 12.0 contradicts is fixed in the same task, its clause cited in the commit message; a document defect goes to the problems file, and the task stops. Never shape a fixture to keep a wrong assertion passing.
+- *Every task ends with:*
+  - `npm run typecheck` and `npm run format:check`;
+  - the touched suite files against the built product (a fixture-only task touches none), each touched test's outcome before and after recorded;
+  - for a task touching a certified test or a fixture, its family's certification first, for quick feedback (the full self project below runs the whole certification);
+  - the full self project under the namespace, with 0 failures (green at 72d5126; keep it green);
+  - a commit message (`sdg(phase-9): <imperative summary> (FIX_PLAN Task N)`, with the two trailer lines the session requires) stating the honest results, including each touched product test's outcome before and after;
+  - removing the finished task from this plan in the same commit and adding its one-line summary to its bullet in the Order section below (a done task leaves the plan).
+- *AGENTS.md* gets only build/run knowledge a later spawn needs (a recipe, a count or timing a later check relies on), never a task narrative.
+
+**Standing rulings.** Two Liaison rulings stand for this run: AGENTS.md's "Known residual 14.20 location gaps" and "Known SPEC 6.5 gap, deferred to a future SPEC revision (accepted for this run by ruling)" bullets. No task here addresses them, and none may be added for them. Task 6's `d={]}` is no residual: TEST-SPEC T14-3 names its staging and its offset.
+
+**Deleting this plan.** Only Task 12 deletes this file, with `git rm`, once no other task remains. If the permission system refuses the deletion, stop there: leave the file in place, commit nothing further for it, and report the refusal in the final report. Never move, rename, empty, or otherwise work around a refused deletion: the Developer's two earlier approvals to move a finished plan each covered that one file only.
+
+**Considered and not planned (do not re-raise).**
+- *Carried from the earlier plans (still standing at 72d5126).*
+  - S-9 lists five allowances, none for a strict-mode-barred import binding such as `import let`, which T6.5-22 declares derivable (the first plan's Task 19 note). Latent: no fixture stages such a file.
+  - VIOL-DISC-DERIVED's code-side arm in T7-6 fails at the arm's own `build` (the user-written `specs/A.md` at the emit destination enters the code set and is no well-formed TypeScript), earlier than CERTIFICATIONS.md's narrative says, consistently with its "fails on the exclusion arms in any case". A matter for a future revision of that document (reviewer D again at 72d5126).
+  - The Phase 7 round-3 certifications driver's note on VIOL-ORPHAN-THROUGHLINK (directory components resolve only through links whose target directory lies inside the workspace root): implemented as now written and certified; reviewer D's differential sweep at 72d5126 shows it diverging only at T13.4-11 arm (e)'s inside staging (its first `check`, and `build` deleting `foreign/A.md`).
+  - The header comment of `test/suite/registry/traceability.ts` lists only four refusal-reason staging tests; the map itself is complete (reviewer C again at 72d5126). A task touching that file may fix the comment.
+  - P-6 drives only the file form of `move`, draws no deletions and only dependency-free additions (to stay out of the two-sided ambiguity T6.2-3 describes), and P-9 uses only audit sessions; TEST-SPEC's wording ("edit/rename/move/commit") is met in kind (reviewer C again at 72d5126).
+  - T4.3-2's string-argument and arity arms run no `occurrences` check; T4.3-2 and T4.5-3 locate by containment in the statement's byte window (T14-11 pins exact ranges); T1.3-2's top-level arm asserts no expected-form wording; T1.5-3's title is stale (cosmetic; a task touching `test/suite/registry/section-1.5.ts` may fix it); §5.7's per-file-view channel is covered by T11.4-1 and P-12, and T1.5-2's U+FFFD-path `view`/`at` clauses are asserted in T11.5-3's body.
+  - T12.7-1's body checks only that the module name appears in cross-module identities; T4.4-1 (14.11) checks it exactly.
+  - P-11's per-invocation hang guard is 120 s (`FUZZ_COMMAND_TIMEOUT_MS`, `test/suite/registry/section-16-p11.ts`), 4.7 times its largest measured case; P-8's guard is 60 s. Only randomized mode reaches that scale.
+  - The driver's pre-flight working-directory refusals (relative, missing, or non-directory) stay diagnosed failures: they precede capture and evaluation, outside H-11's clause, and S-3 pins them.
+  - `checkDrawSources` (`test/helpers/property.ts`) recognises MDX sources by the `.mdx` name. Latent: no generator stages a non-`.mdx` spec-group file.
+  - With `dist/` missing, the driver throws plain "required file missing" errors, which `checkProperty` labels harness errors; H-8's empty-stub realization is gated by S-7.
+  - P-8 checks the exit-2 document only as `{"error": object}`: its clause is "never partial", and T12.7 pins the full form.
+  - T13.4-10's correction judge (`judgeManualDeletionCorrection`) matches wording and can over-reject a contrived explanation; reviewer B probed it with 15 phrasings at 72d5126 and found it compliant.
+  - CONF-CORE, with JSON in effect, prints `{"refused": …}` for a refused rename, move, or review operation, and the findings-alone form for a preview the valid-workspace precondition refuses (the third plan's Task 9 and 10a notes). Both lie outside §CONF-CORE's surface (only performed operations are reported; `rename --preview` only at T13.5-8's nonexistent-old-ID boundary), and no in-scope test drives either (reviewer D at 72d5126).
+- *From this determination's reviewers.*
+  - A: T4.5-4's callee control is `text(SPEC.a.b)` beside the shadowed `text(SPEC.a)` by design (a by-name product still fails on the exact 14.18 count and the occurrence multiset; T4.5-6 pins the plain call). T5.5-4 stages its add/remove/retarget arms through `d` only (an embedding edit changes ownHash anyway; T1.6-4 pins the transitive `embeds` case). T4-1 checks the source file name, wording-free. T6.4-1's preview/performed mapping byte-equality is asserted in T6.6-2. T6.4-1's and T6.5-3's titles still say "report shape unpinned" though both decode form-exact (cosmetic; a task touching those files may fix them). T4.6-3's `export default 42` has no further observable consequence beyond the forbidden-`default`-unit scan.
+  - B: T12.0-9's 14.24 and 14.25 class-2 members are asserted by T14-9 and T14-10, which the entry cites. T14-4's 14.14 row runs `build`, `check`, and `version` only; T7-1's occupancy sweep covers every command. T12.0-5's U+FFFD arms use `alpha`-based command lines, and T14-11's code-source arms the specifier `../specs/A.xspec` where the entry writes `./A.xspec`; neither drops a discriminating property.
+  - C: T6.5-22(a)'s walk skips unreadable files and directories (`readOrUndefined`, the `readdir` catch); no conforming move exiting 0 meets an unreadable source. P-10's poller reports unexpected filesystem errors as diagnosed failures; its "zero cycles" premise check cannot fire. 30 of 32 literal exit-2 runs without JSON in effect assert empty stdout; the other two (T12.0-9's held `review create`, T13.4-5's `review status s`) assert other subjects (H-5's "where relevant"). S-2's tower vector would be safer with an explicit timeout; a task touching `test/self/s2-workspace-builder.test.ts` (its scale vectors) may add one.
+  - D: CONF-AVAIL accepts a malformed `--to` (other than U+FFFD) and an outside-root `--file` (value spellings are not part of the grammar the preamble makes universal; its surface serves both only as staged). CONF-AVAIL's configuration-content errors carry `code`/`path` null and it reports the `markdown`, `coverage`, and `policy` keys as configuration errors; its scope admits only valid configurations without those keys (it is the only fixture not reporting `configuration-error` there). CONF-VALID reports non-zero 14.20 ranges; 14.20 cannot arise within its scope. Commands outside a fixture's surface refused with exit 70 before their own operands or flags are judged report no usage error, and the document does not constrain out-of-scope invocations. CONF-DISC writes no graph data; CONF-MD answers reads on an invalid workspace (outside its scope); CONF-VALID reports a root's `query` tags as `[]` (its scope's "`[]` when tagless"). VIOL-AVAIL-NULLMARKER's T11.2-4 fails first at an id-less section's identity, a staged undefined datum, within its deviation.
+
+**Order.** Tasks are in dependency order; take the topmost task unless told otherwise. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement. When a task is done, its commit removes it and adds a one-line summary to its bullet here.
+- Part A (Tasks 1–9): the T-numbered tests, in TEST-SPEC order — T1.1-3's child chain on the `<Spec>` leaf (A1), T1.6-3's own text in a review payload (A2), T4.1-3's not-a-string assertion (A3), T5.3-1's full cycle path for its in-file arms (A4), T11.4-1's list-order arm (B3; certified under CONF-AVAIL), T14-3's `d={]}` staging and its pinned offset (B1), and T14-4's sweep of the 14.16 and 14.20 stagings of T2.3-3, T2.7-1, and T2.7-4 (B2, Tasks 7–9). Tasks 1–6 are independent of each other and of Tasks 7–11. Tasks 7, 8, and 9 go in that order: Task 7 adds the sweep adapter Tasks 8 and 9 reuse, and Task 9 settles the timeouts and comments for the whole set.
+- Part B (Task 10): H-11 — a crash of the harness's own MDX parse inside T6.5-22(a)'s check is a harness error, never a diagnosed product failure (C1). Independent of Parts A and C.
+- Part C (Task 11): CONF-ORPHAN reports usage errors on JSON-only surfaces in the 12.7 error document (D1). Independent of Parts A and B.
+- Task 12 confirms the result and deletes this plan. It depends on every task above.
+
+## Tasks
+
+### Part A — the T-numbered tests (TEST-SPEC order)
+
+### Task 1 — T1.1-3: assert the child-chain type error on the `<Spec id="empty" />` leaf (A1)
+
+**Requirement.** TEST-SPEC T1.1-3 (line 37 at 6780f53): "A file mixing paired sections with `<S id="todo" />` and `<Spec id="empty" />` builds: each self-closing section is an empty leaf (1.1) — … the generated module exposes the node with no child properties (a child chain is a type error, 4.1) …". "Each" covers both spellings.
+
+**Shortfall.** In `test/suite/registry/section-1.1-1.2.ts`, `T1_1_3` runs every per-node assertion for both `todo` and `empty` except the child chain: `CHILD_CHAIN_CONSUMER` (a `StagedTs` record, about line 359) stages only `SPEC.todo.child;`, and the one `assertCompileErrorAt` (about line 484) locates only that. A product giving the `<Spec>`-spelled leaf child properties (an index signature, say) passes.
+
+**Change.**
+- Stage `SPEC.empty.child;` as well: add the line to the bad consumer, or stage a second `StagedTs` record beside it. One file can carry both lines: `assertCompileErrorAt` (`test/helpers/tooling.ts`) matches any error diagnostic whose span covers the position. Either way the consumer is staged after `build`, so it stays a record registered at module load (S-9).
+- Assert `assertCompileErrorAt` at `child` in `SPEC.empty.child` (`charOffset: "SPEC.empty.".length`), beside the existing `todo` assertion, with a context naming the `<Spec>` spelling and SPEC 4.1. Touch the title only if it no longer describes the body.
+
+**Checks.**
+- Against the built product: T1.1-3 passes. If it fails, it is a diagnosed product failure only once a hand probe shows the generated module giving `empty` a child property (Preamble, *Product verdicts*).
+- Red check (AGENTS.md "Red-checking a strengthened product test against the built product (Phase 9)"): a stand-in that runs the real `build` and then rewrites the generated module's declarations for `specs/A.mdx` so the `empty` node's type admits any property (an index signature) must fail the new assertion, its diagnosis naming `SPEC.empty.child`, while the `todo` assertion still holds.
+- T1.1-3 is uncertified.
+
+### Task 2 — T1.6-3: assert an own text carrying an embedding in a review payload (A2)
+
+**Requirement.** TEST-SPEC T1.6-3 (line 73): "With `{text(...)}` embeddings present, own and subtree text reported by `query`, `show`, and review payloads (10.2, 10.7) carry the embedded text fully expanded …". A review payload carries own text in its context entries (an ancestor chain's own text, 10.7).
+
+**Shortfall.** In `test/suite/registry/section-1.6-1.7.ts`, `T1_6_3` (about lines 534–715) reads one payload, the `summary` item's (`review next`). Its scope text is a subtree text, and its one context entry, the file root, has own text `TOP_ROOT_OWN` (about line 516), which holds no embedding. The `summary.extra` item, whose context carries `summary`'s own text (expanded: `SUMMARY_OWN`, about line 512), is resolved (`review resolve`, about line 615) without its payload being read. So no own text carrying an embedding is asserted in a payload, and a product presenting unexpanded own text in payloads passes.
+
+**Change.**
+- Before the `review resolve` of `extraRow`, read that item's payload: `review show expansion <extraRow.id> --json`, decoded by `decodeItemReport` (`test/helpers/adapters/review.ts`). `review next expansion --json` also returns it first at that point, but `review show` does not depend on the order.
+- Assert the item is the `subtree-coherence` item scoped to `specs/A.mdx#summary.extra`, that its context nodes are exactly `["specs/A.mdx", "specs/A.mdx#summary"]`, each present, and that their texts are byte-exact: the root's `TOP_ROOT_OWN` and `summary`'s `SUMMARY_OWN`, the embedded text fully expanded through two levels. Asserting the scope text too (the child's subtree text, `Extra prose.` and its line terminator) is welcome.
+- Keep the `summary` item's assertions unchanged.
+
+**Checks.**
+- Against the built product: T1.6-3 passes. Reviewer A's probe at 72d5126 showed the context `[specs/A.mdx, specs/A.mdx#summary]` carrying the root's own text and `SUMMARY_OWN`.
+- Red check: a stand-in that rewrites the `review show` answer so the `summary` context entry's text is anything but `SUMMARY_OWN` (the unexpanded own text, say) must fail the new assertion.
+- T1.6-3 is uncertified.
+
+### Task 3 — T4.1-3: assert that no node value is a string (A3)
+
+**Requirement.** TEST-SPEC T4.1-3 (line 160): "over every runtime value reachable from the default export by child property access, the harness asserts the value is not a string and that a reflective deep walk of it — property keys and values, own and inherited, its string coercion, and its JSON serialization — encounters no string equal to or containing any node's own or subtree text …".
+
+**Shortfall.** In `test/suite/registry/section-4.1-4.2.ts`, `OPAQ_PROBE_CONSUMER` (about line 387) pushes a string-valued node into `seen` and returns, and `T4_1_3` (about line 461) checks only that no observed string contains the sentinel (`OPAQ_SENTINEL_PREFIX`; the leak filter about line 546). Nothing asserts that `SPEC`, `SPEC.alpha`, `SPEC.alpha.beta`, or `SPEC.gamma` is not a string, so a product whose nodes are plain strings free of requirement text (identity strings that `text` resolves at runtime, say) passes.
+
+**Change.**
+- Have the probe also report each node's `typeof`, in the `nodes` order — for example print one JSON object `{ kinds, seen }`, `kinds` being `nodes.map((node) => typeof node)`.
+- In the body, assert that no kind is `"string"`, failing with a diagnosis that names the node's access chain (`SPEC.alpha.beta`, …) and cites SPEC 4.1. Keep the deep-walk leak check, and update the harness-authored output-contract check to the new shape (`kinds` an array of four strings, `seen` an array of strings).
+- The probe is staged in the body's initial `withWorkspace` files, before any invocation, so it needs no `StagedTs` record.
+
+**Checks.**
+- Against the built product: T4.1-3 passes (hand-confirm the four kinds first; a string-valued node is a diagnosed product failure only once probed).
+- Red check: a stand-in that runs the real `build` and then rewrites the generated runtime module for `specs/OPAQ.mdx` so one node (e.g. `gamma`) is a plain string free of the sentinel must fail the new assertion, naming that node, where the leak check alone passes it. If rewriting the generated module is impractical, factor the body's judgment of the probe output into a function and red-check it over a crafted output whose `kinds` hold one `"string"`.
+- T4.1-3 is uncertified.
+
+### Task 4 — T5.3-1: assert the full cycle path of the five in-file arms (A4)
+
+**Requirement.** TEST-SPEC T5.3-1 (line 206): "`check` detects and reports, with the full cycle path: a `depends` cycle A→B→A across files; a mixed cycle through `contains` + `embeds`; a self-`depends` (length one); a self-`embeds`; a section depending on its own ancestor; a section embedding its own ancestor. Exit 1." SPEC 14 renders the full path as locations: "a cycle locates its full path in source, every reference spelling recording a participating dependency edge". The spans are 5.7's: a `d` reference occurrence spans that one reference's own expression (`"s"` in `d={"s"}`, its quotes included), an MDX embedding occurrence the entire `{text(...)}` container, opening brace through closing brace. Location order within a finding is file bytes, then start, then end (12.7). T14-8 pins the full path only for the cross-file cycle.
+
+**Shortfall.** In `test/suite/registry/section-5.1-5.3.ts`, `assertDependencyCycleFindings` (about line 163; used by `T5_3_1`, about line 511, and by T5.3-2) asserts only that the conditions are 14.9, that the finding count lies within its bounds, that every location lies in a participating file, and that each participating file is identified. It never asserts the location count or that each participating spelling is located. The module header (about lines 20–29) defers byte-precise paths to T14-8, which stages only the cross-file cycle, so the five in-file arms' full path is asserted nowhere: a product locating one representative spelling, or a section tag, passes.
+
+**Change.**
+- Give each in-file arm of `T5_3_1_ARMS` (about line 384) its participating spellings, and compute each one's byte range from the staged bytes at module load, with a fixture self-check proving each slice is the intended spelling (the T5.7-2 discipline; a module-local `sliceCheck` like the one in `test/suite/registry/section-11.4.ts`). The spellings:
+  - the mixed cycle: `{text("x")}` in `p.q` and `{text("p")}` in `x` (the `contains` edge records no spelling);
+  - the self-`depends`: `"s"` in `d={"s"}`;
+  - the self-`embeds`: `{text("s")}`;
+  - the depends-on-ancestor arm: `"a"` in `d={"a"}`;
+  - the embeds-ancestor arm: `{text("a")}`.
+- For each in-file arm, beside the existing checks, assert that the arm's one 14.9 finding carries exactly one location per participating spelling, each in `specs/A.mdx` at exactly that range, in 12.7 order (start, then end), and no other location.
+- Leave the cross-file arm's assertions as they are (its full path is T14-8's), and leave T5.3-2 as it is (its entry asks for no path). Rewrite the module header's cycle-path note to say what is asserted where.
+
+**Checks.**
+- Against the built product: T5.3-1 passes. Reviewer A's probe at 72d5126 showed the mixed arm's finding locating exactly [47, 58) and [91, 102) of `specs/A.mdx`.
+- Red checks: stand-ins rewriting `check --json`'s 14.9 finding — one dropping one of the mixed arm's two locations, one replacing a location with the section's opening-tag range, one adding a location — each fail their arm.
+- T5.3-1 is uncertified.
+
+### Task 5 — T11.4-1: add the list-order arm (B3; certified under CONF-AVAIL)
+
+**Requirement.** TEST-SPEC T11.4-1, closing sentence (added at 46a6aed): "List orders (12.7): on a file holding several import declarations, several MDX comments, and several reference occurrences, `imports`, `comments`, and `occurrences` are each in document order, form-exact (H-3) — asserted here because P-12 sorts the view's occurrences itself and cannot see a misordered list." T12.7-1's index points occurrence records at "a view's `occurrences` (T11.4-1)". CERTIFICATIONS.md §CONF-AVAIL's scope admits "several of each in one file where T11.4-1's list-order arm stages them" and binds T11.4-1's fixtures to stage no undefined datum.
+
+**Shortfall.** `T11_4_1` in `test/suite/registry/section-11.4.ts` (its entry about line 739) stages no import, comment, or reference, and asserts `imports`, `occurrences`, and `comments` as `[]` for every file (about lines 886–903). T11.4-4 (its ten imports) and T11.4-6's host file (three occurrences, two comments) see some orders, but not as this entry requires.
+
+**Change.**
+- Stage a spec source holding at least two default imports of discovered spec sources, at least two `{/* … */}` comments, and at least two resolving reference occurrences, both `d` references and `{text(...)}` embeddings, interleaved so that document order differs from every other plausible order: imports out of byte order by specifier and by binding name, comments and occurrences spread across sections, a `d` reference after an embedding, occurrence targets and sources not in byte order.
+- CONF-AVAIL's staging constraints bind the arm (read the §CONF-AVAIL scope paragraph in full first):
+  - `.mdx` sources in the configured spec group at plain ASCII workspace-relative paths (no `#`, no U+FFFD, none of the characters 7.1 bars); no `markdown`, `coverage`, `policy`, or git;
+  - comments in the usual `{/* … */}` form, and embeddings spelling nothing beside the call;
+  - every import a default binding of a discovered spec source, and no import cycle;
+  - every section spelling a well-formed, structurally conformant identity no other section of its file spells, and every reference resolving, so no datum is undefined and no answer carries the unavailability marker;
+  - no command beyond `view` (in particular no `at`), and no new finding: an own workspace answers finding-free at exit 0, and the existing workspace keeps exactly its two 14.16s.
+- Either extend the existing workspace (the new file joins the whole-domain listing: `EXPECTED_VIEWS` gains its tree with precomputed ranges, and the byte-order listing is re-checked), or give the arm its own workspace and its own bare `view`. A workspace created after the body's first invocation stages its `.mdx` sources as staged-source records (S-9).
+- Assert the file's `imports`, `comments`, and `occurrences` exactly: `assertSameJson` against expected lists in document order, built from byte offsets precomputed with fixture self-checks (`sliceCheck`), each entry form-exact per 11.4 and 12.7, decoded with no adapter, as the body already does. Keep `[]` for every other file.
+
+**Checks.**
+- Against the built product: T11.4-1 passes (it fails diagnosed only once a hand probe shows a misordered or misformed list).
+- Red check: a stand-in reversing one of the three lists in the `view` answer (or swapping two occurrences of different kinds) must fail the arm.
+- `-t AVAIL`: the conformer passes T11.4-1 with the new arm; VIOL-AVAIL-OMIT still fails it; VIOL-AVAIL-NULLMARKER and VIOL-AVAIL-NOFILE still pass it; every runner line reads as in the known state. If the conformer fails the new arm, that is a fixture defect (its scope admits several of each in one file): fix `test/fixtures/conf-avail/product.mjs` in this task under the Preamble's *Fixture changes* rule, read each AVAIL switch at its point of use, and rerun.
+
+### Task 6 — T14-3: stage the malformed MDX as `d={]}` and pin its offset (B1)
+
+**Requirement.** TEST-SPEC T14-3 (clause added at 09fe293): "An unparseable file (14.20 — malformed MDX, `d={]}`, its zero-length range at the offset of the `]` (T14-11, T14-12); malformed TS under the grammar its name selects: a TSX-only construct in a `.ts` file; invalid UTF-8; BOM) masks conditions inside itself, and every reference into it from other files reports as unresolved (14.5–14.7); the parse-failure location is reported." CERTIFICATIONS.md's Exclusions (the well-formedness-contract bullet) lists "T14-3's `d={]}`" among the arms that assert 14.20 at a precomputed byte offset.
+
+**Shortfall.** In `test/suite/registry/section-14.ts`, `T14_3_BROKEN_MDX` (about line 1024) stages an unclosed `<S id="bm1">`, not `d={]}`, and `assertMaskingReport` (about line 1103) checks only that the file's 14.20 finding carries a location, citing a rationale the entry no longer has (the module header, about lines 43–46 and 278: where a parser fails is parser-specific). T14-12's arm (u) stages `d={]}` with no reference into it, so nothing checks that references into a `d={]}` file report as unresolved: a product whose MDX parser recovers from the bad attribute value, and so still defines `bm1`, passes everything.
+
+**Change.**
+- Restage `specs/brokenmdx.mdx` so that its only parse failure is `d={]}`: keep the masked `<S id="worse name">…</S>`, then add `<S id="bm1" d={]}>`, a line of prose, and `</S>`. It stays declared unparseable (`mdx.unparseable` in `T14_3_FILES`, S-9); confirm with AGENTS.md's MDX well-formedness bullet ("Checking whether a staged MDX shape is well-formed (SPEC 14.20)") that the text does not derive.
+- Keep the references into it (`specs/refs.mdx`'s `d={BROKEN.bm1}` and `{text(BROKEN.bm1)}`, `src/refs.ts`'s `BROKEN.bm1;`) and the condition multiset `{14.20: 4, 14.5: 3, 14.6: 1, 14.7: 1}` on `build` and `check`.
+- Assert that the file's 14.20 finding carries exactly one location: in `specs/brokenmdx.mdx`, the zero-length range at the byte offset of the `]`, computed from the staged bytes (as `pin()` does in T14-11 and T14-12). The other three unparseable files keep the presence check the entry asks of them.
+- Update the module header's 14.20 notes and T14-3's title to match.
+
+**Checks.**
+- Against the built product, hand-probe `build --json` and `check --json` over the new staging first. If the product masks the file and locates its 14.20 at the `]`, T14-3 passes. If not, T14-3 now fails diagnosed: record the probe in the commit message (T14-12, which already fails earlier, never reaches its arm (u) against this product).
+- Red checks: a stand-in moving the 14.20 location by one byte, or giving it a non-zero length, fails the new assertion; one reporting a reference into the file as resolved (dropping a 14.5) fails the multiset.
+- T14-3 is uncertified.
+
+### Tasks 7–9 — T14-4: sweep the 14.16 and 14.20 stagings of T2.3-3, T2.7-1, and T2.7-4 (B2)
+
+These three tasks share one requirement and one pattern; each adds one home test's rows. This shared block stays in the plan until Task 9 is done; Task 9's commit removes it together with Task 9.
+
+**Requirement (all three).** TEST-SPEC T14-4, closing sentence: "Among the matrix's stagings: the condition-11 arms of T4.4-1 (…), the 14.16 and 14.20 arms of T2.3-3, T2.7-1, T2.7-4, and T14-12 (all three surfaces for their spec-source stagings), and the 14.15 and 14.18 arms of T4-5 and T4.5-9 (`occurrences` alone)". For such a condition the matrix requires it "reported by both `build` and `check`, and as a domain file's finding accompanying the answers of each of `occurrences`/`view`/`at` whose domain can hold its staged file". (T4.4-1's, T4-5's, and T4.5-9's home bodies already run `build`, `check`, and `occurrences` with the finding asserted; only the three tests below are missing.)
+
+**Shortfall (all three).** `SWEEP_ENTRIES` in `test/suite/registry/section-14.ts` (about lines 1342–1581) spreads in only `T14_12_REPORTER_STAGINGS` (`section-14-iii.ts`), and its comment (about line 1568) elides the other three tests from the quoted clause. Their home bodies never run `check`, `occurrences`, or `at` over these stagings, and T14-11 re-runs some of them with `build` alone.
+
+**Pattern (all three).**
+- Each new row is a `SweepEntry` (`condition` `"14.16"` or `"14.20"`, a `label` naming the home test and arm, a `decl`, and `answers: { kind: "spec-source", file: <the staged file> }`), built from the very staged-source record the home arm stages, exported from its home module. T14-4 stages its rows after its first invocation, so every source and configuration in a row's `decl` must be a record (S-9): the home stagings are `stagedMdx` records already (unparseable ones declared so); the configuration must be a `StagedTs` record (the T14-12 rows' decls show the pattern).
+- For a spec-source row the sweep already asserts, through `assertSweepFindings`: `build` and `check` report the condition counted exactly at exit 1, and `occurrences`, `view`, and `at <file> 0` (`availabilityProbes`) each exit 1 with the finding accompanying the answer. If a home arm asserts more than one finding for its staging, carry that exact expectation into the row (extend `SweepEntry` only if needed) rather than drop the staging.
+- Place the new rows before the T14-12 rows, in the clause's order (T2.3-3, T2.7-1, T2.7-4). Against the built product, T14-4 (about 78 s) and T14-6 (about 15 s) both stop at their sweep's T14-12 (af) row, so rows placed before it run against the product.
+- `SWEEP_ENTRIES` also drives T14-6's stable-code sweep (`T14_6`, `for (const entry of SWEEP_ENTRIES)`, reading `build --json`), as the T14-12 rows already do: the new rows reach T14-6 too, which its entry admits (each row's `build` reports its condition's stable code). Record T14-6's outcome and run time before and after as well as T14-4's.
+- Red check per task (AGENTS.md's stand-in recipe): a stand-in dropping the finding from one surface's answer (`at`'s, say) for one new row fails that row; T14-4 and T14-6 are uncertified.
+- A new row failing against the built product is a diagnosed product failure only once a hand probe shows the product's answer contradicting it (for example, no finding accompanying `at`); record the probe in the commit message.
+
+### Task 7 — T14-4: sweep T2.3-3's 14.16 and 14.20 stagings (B2, part 1 of 3)
+
+**Change.**
+- In `test/suite/registry/section-2.2-2.3.ts`, export `T2_3_3_INVALID_STAGINGS` (about line 876; the invalid-container 14.16 forms, each element's `source` a `stagedMdx` record) and use the exported `T2_3_3_UNPARSEABLE_STAGING` (about line 905; 14.20, its file a record declared unparseable). T2.3-3's own body runs `build` and `view` over the 14.16 arms and `build` alone over the 14.20 arm.
+- Add a small adapter turning a home staging into a spec-source `SweepEntry` (Tasks 8 and 9 reuse it), and spread T2.3-3's rows into `SWEEP_ENTRIES` before the T14-12 rows, following the Pattern above.
+- Extend `SWEEP_ENTRIES`' clause comment to name T2.3-3; Task 9 completes it.
+
+**Checks.** The Pattern's checks; T2.3-3's own outcome is unchanged (its body is untouched beyond the export).
+
+### Task 8 — T14-4: sweep T2.7-1's 14.16 stagings (B2, part 2 of 3)
+
+**Depends on.** Task 7 (its adapter).
+
+**Change.**
+- In `test/suite/registry/section-2.7.ts`, export the 14.16 rows of `FOREIGN_CONSTRUCT_STAGINGS` (about line 403; every row whose arm's `condition` is `"14.16"`; the row whose condition is 14.8, the `d={1}` attribute value, stays out), `T2_7_1_CONTAINER_ARM` (about line 551), and `T2_7_1_FRAGMENT_ARM` (about line 573). Each carries a `stagedMdx` record. T2.7-1 has no 14.20 arm. Its own body runs `build` alone over the foreign-construct rows, and `build` and `view --text` over the container and fragment arms.
+- Spread T2.7-1's rows into `SWEEP_ENTRIES` after T2.3-3's and before the T14-12 rows, following the Pattern; extend the clause comment.
+
+**Checks.** The Pattern's checks; T2.7-1's own outcome is unchanged.
+
+### Task 9 — T14-4: sweep T2.7-4's 14.16 and 14.20 stagings; settle timeouts and comments (B2, part 3 of 3)
+
+**Depends on.** Tasks 7 and 8.
+
+**Change.**
+- In `test/suite/registry/section-2.7.ts`, export `T2_7_4_EXPRESSION_ARM` (about line 2074; the expression beside comments, 14.16, located brace through brace) and use the exported `T2_7_4_UNPARSEABLE_STAGINGS` (about line 2225; T2.7-4's six 14.20 arms, already imported by `section-14.ts` for T14-11). T2.7-4's own body runs `build` and `view --text` over them.
+- Spread T2.7-4's rows into `SWEEP_ENTRIES` after T2.7-1's and before the T14-12 rows, following the Pattern.
+- Settle the timeouts for the whole set: measure the new rows (Tasks 7–9, about 19 in all) against the built product with a scratch wrapper sweeping just them, estimate each test's full sweep as its measured run plus the rows it does not reach, and raise T14-4's `timeoutMs` (480 s) or T14-6's (300 s) wherever the estimate exceeds half of it, to at least twice the estimate.
+- Complete the clause comment (all four tests named) and update the module header's T14-4 notes and T14-4's title if they describe the sweep's sources.
+
+**Checks.** The Pattern's checks; T2.7-4's own outcome is unchanged.
+
+### Part B — H-11
+
+### Task 10 — H-11: a crash of the harness's own MDX parse in T6.5-22(a)'s check is a harness error (C1)
+
+**Requirement.** TEST-SPEC §0 H-11: "A harness-side failure while capturing or evaluating an answer — a crash, hang, or exhausted internal limit — is reported as a defect in the harness, never as a diagnosed product failure and never as a pass."
+
+**Shortfall.** In `test/helpers/added-import-identifiers.ts`, the spec-source branch of `readDeclarations` (about lines 594–640) catches every exception `readMdxTree` throws and returns its message as a "not well-formed" reason. That includes the failures `deriveMdxWith` deliberately rethrows as non-verdicts (`test/helpers/mdx-derivability.ts`, about lines 793–797: "an internal failure such as exhausted stack … never reported as a non-derivation"), a throw from `checkRuntimeWhitespace`, and a throw from `readMdxTree`'s second `fromMarkdown` parse. `judgeFileDeclarations` (about lines 530–560) turns the reason into a breach ("… is not well-formed under its grammar after it (SPEC 14.20: …)"), and `verify` calls `fail`, a `HarnessAssertionError` the driver passes through unchanged as a diagnosed product failure, so the third plan's `HarnessEvaluationError` (Task 3 of the plan written at ad9eb42) never sees this path. The TypeScript branch is already right: `judgeTypeScript` returns verdicts and lets internal failures propagate. Affected: every performed `move` exiting 0 that rewrites a spec source (the driver's check, which P-5, P-6, and the E-6 fixture also go through), and the direct callers of `judgeAddedImportsOfFile` in T6.5-22(b) (`test/suite/registry/section-6.5-iv.ts`, about line 2429) and T6.5-23 (`test/suite/registry/section-6.5-v.ts`, about line 1037), which `fail()` on its problems. Reviewer C reproduced it with a scoped mock of `readMdxTree` throwing a `RangeError` ("Maximum call stack size exceeded"): `runProduct` rejected with a `HarnessAssertionError`.
+
+**Change.**
+- Make the spec-source branch treat only a genuine non-derivation as "not well-formed". Either judge the verdict first with the same derivability check `readMdxTree` applies (the same allowances and reading), returning its reason when the text does not derive and then reading the tree with no catch, or give `readMdxTree`'s non-derivation throw (about line 834) a dedicated error class and catch only that. Every other exception propagates: the driver then wraps it as `HarnessEvaluationError` (stage `verify`), and the direct callers surface it as a harness error.
+- S-6's name analysis (`test/helpers/oracles/name-analysis.ts`) also calls `readMdxTree`; keep its behavior (a source that does not derive is a harness error there).
+- Correct the module header of `added-import-identifiers.ts`, whose H-11 claim this path contradicts until the fix.
+
+**Checks.**
+- S-3 (`test/self/s3-subprocess-driver.test.ts`, beside the third plan's `vi.doMock(CHECK_MODULE, …)` vectors): add a vector whose scoped `vi.doMock` of `helpers/mdx-derivability.js` makes `readMdxTree` throw a non-verdict error (a `RangeError`, say). Over a stand-in `move` that exits 0 and rewrites a spec source, `runProduct` and `waitForExit` reject with `HarnessEvaluationError` (its `cause` the original), never `HarnessAssertionError`; and a direct `judgeAddedImportsOfFile` call throws instead of returning a problem. Keep, or add, the control: a genuinely unparseable rewritten source (an unclosed `<S id="b">`, say) is still a diagnosed breach.
+- Red check (AGENTS.md "Red-checking a new self-test vector"): with the helper change stashed the new vectors fail; restored, they pass.
+- The suite files of T6.5-22 and T6.5-23 against the built product: both still fail diagnosed, at the same arms as before.
+- Self project green; certification 154 / 38 / 0 / 0.
+
+### Part C — certification fixtures
+
+### Task 11 — CONF-ORPHAN: report usage errors on JSON-only surfaces in the 12.7 error document (D1)
+
+**Requirement.** CERTIFICATIONS.md preamble, third paragraph: "Every conformer likewise reads its arguments under the invocation grammar of 12.0 … and, with JSON in effect, reports every usage error in the exit-2 error document of 12.7: the grammar is universal (12.0), so no in-scope usage-error assertion is left to a fixture's own parser." SPEC 12.0: JSON output is in effect when a `--json` token is read as a flag "or when the invoked surface is JSON-only, a single JSON document its only output form with or without `--json` (10.7, 11, 12.6)" — `query`, `occurrences`, `view`, `at`, `inventory`, `version`, and `review export` — and an invocation failing with a usage error (exit 2) then "emits as its entire standard output a single JSON document reporting the error — the error document of 12.7" (`{"error": …}`, its `code` and `path` null for a plain usage error).
+
+**Shortfall.** In `test/fixtures/conf-orphan/product.mjs`, `runXspec` (about line 1490) sets `json = invocation.json`, which counts only a `--json` read as a flag. The fixture judges grammar errors before its scope refusal, so a usage error on a JSON-only surface exits 2 with empty stdout (the message on stderr only). Reviewer D observed it for `view --bogus`, `view --text --text`, `view --config`, `view --file`, `view --file a --file b`, `at --bogus`, `occurrences --bogus`, `occurrences --file x --file y`, `inventory --bogus`, `inventory --config`, `version --bogus`, `version --config`, `query --bogus`, `query nodes --bogus`, `query edges --kinds`, `review export --bogus`, `review export s --bogus`, `--bogus view`, `--bogus query nodes`, and `--bogus version`, and for the malformed-value forms `view --config` with a value holding U+FFFD, `occurrences --to` with one, and `query nodes --tag` with one. `readInvocation` (about line 263) already reads every non-flag token into `words` past the first error. The other five conformers comply (CONF-CORE's `isJsonOnlySurface` is a model). The guard's CONF-ORPHAN table (`test/self/certification-fixture-grammar.test.ts`) has no JSON-only-surface row.
+
+**Change.**
+- Put JSON in effect when `invocation.json` holds or the words name a JSON-only surface: the command `query`, `occurrences`, `view`, `at`, `inventory`, or `version`, or `review` with the subcommand `export` (taken from the non-flag tokens). A JSON-only command with no usage error still gets the scope refusal (exit 70), unchanged.
+- Add CONF-ORPHAN guard rows (AGENTS.md's grammar-guard bullet): each invocation above exits 2, its entire stdout one 12.7 error document `{"error": {"code": null, "message": …, "locations": [], "path": null, "identities": []}}`, stderr unchanged (build every U+FFFD value from its code point); and negative rows where no JSON-only command word and no `--json` flag token stand, which still leave stdout empty: `--config view` (`view` is the configuration path), `build --test-hold --json` (`--json` consumed as the value), and `build -- --json` (an operand after `--`).
+
+**Checks.**
+- The new positive rows fail against the unfixed fixture (exit 2, empty stdout) and pass after the fix; one-point mutations of a scratch copy (dropping `review export`, or `version`, from the JSON-only set) each fail exactly their rows.
+- `-t ORPHAN` unchanged: T13.4-11 passes against the conformer and fails against VIOL-ORPHAN-THROUGHLINK at (e)'s inside staging and against VIOL-ORPHAN-LINKTARGET at (c). Read each ORPHAN switch at its point of use.
+- Self project green; certification 154 / 38 / 0 / 0.
+
+### Final
+
+### Task 12 — Confirm locally and in CI; delete this plan
+
+**Depends on.** Every task above.
+
+**Change.**
+- Under the namespace, run the full self project alone: expect 0 failures. Update AGENTS.md's self-project counts (27 files and 4217 tests at 72d5126; Task 10 adds vectors, Task 11 guard rows) and its self-project timing (VERIFY measured 179 s locally and 107 s in CI at 72d5126, where AGENTS.md lists about 137 s), and confirm the certification totals (still 6 conformers and 21 violators, 27 fixtures, every one passing: 154 PASS / 38 FAIL / 0 error / 0 hang).
+- Then run the suite project against the built product, alone, inside CI's inner stage (network off, uid 1000, no capabilities; AGENTS.md's namespace bullet). Every failure must be a diagnosed product failure (`HarnessAssertionError`). List each failing test with its first failing arm in the commit message and compare the list with the 28 IDs in the Preamble: say which tests changed outcome and why (T14-3 joins them only if Task 6's hand probe showed the product contradicting its `d={]}` arm; T14-4 and T14-6 may now stop at an earlier row, per Tasks 7–9's probes). Record the run time in AGENTS.md's timing bullet if it moved materially from 1482 s for `npm test`.
+- Check CI on the pushed head: the harness-self job and the Windows leg are green, and the full-suite job fails only on diagnosed product tests (AGENTS.md's CI-reading bullet holds the recipe).
+- Delete `specs/tmp/FIX_PLAN.md` with `git rm` once no other task remains in it, under the Preamble's "Deleting this plan" rule: if the permission system refuses, stop and report the refusal — never move, rename, or empty the file.
