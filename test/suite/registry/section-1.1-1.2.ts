@@ -33,9 +33,12 @@ import {
   assertCompileErrorAt,
   assertNoCompileErrors,
   ConsumerProject,
+  diffModuleSkeletons,
   formatConsumerDiagnostic,
   runConsumer,
+  skeletonChains,
 } from "../../helpers/tooling.js";
+import type { ModuleSkeleton } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertEdgeSetEqual,
@@ -164,7 +167,10 @@ const MIXED_TAGS_SOURCE = [
 
 // The identical consumer compiles against both workspaces' generated modules:
 // bare references are dependency markers (SPEC 4.5), so a clean compile of
-// the full chain set demonstrates both modules expose the same skeleton.
+// the full chain set shows both modules expose at least the staged chains.
+// The skeletons' equality itself is read through TypeScript's checker
+// (`moduleSkeleton`, below): a compile cannot see a member one module
+// exposes alone.
 const SKELETON_CONSUMER = stagedTs(
   "T1.1-2 consumer.ts — the skeleton consumer both tag forms compile against, staged after `build`",
   [
@@ -176,6 +182,20 @@ const SKELETON_CONSUMER = stagedTs(
     "",
   ].join("\n"),
 );
+
+// The files whose declarations make up `specs/A.mdx`'s generated skeleton:
+// the module `specs/A.xspec.ts` and its companions, each named `A.xspec.`
+// plus a suffix beside the source (SPEC 13.1). A member declared anywhere
+// else (TypeScript's lib) is a leaf of the skeleton, recorded by name.
+const isGeneratedFileOfA = (file: string): boolean =>
+  /^specs\/A\.xspec\.[^/]+$/.test(file);
+
+// Well above the staging's depth: two section levels, then each node's own
+// members (a product's brand, say) one or two levels further.
+const T1_1_2_SKELETON_DEPTH_BOUND = 16;
+
+// At most this many entries (chains, differences) are listed in a diagnosis.
+const T1_1_2_LISTED_ENTRIES = 40;
 
 const T1_1_2 = defineProductTest({
   id: "T1.1-2",
@@ -262,20 +282,71 @@ const T1_1_2 = defineProductTest({
         }
       }
 
-      // Generated modules expose the same skeleton: the identical consumer
-      // compiles cleanly against both (SPEC 4.1, 13.1).
-      for (const [workspace, styleLabel] of [
-        [sForm, "<S>"],
-        [specForm, "<Spec>"],
-      ] as const) {
+      // Generated modules expose the same skeleton (SPEC 1.1, 4.1, 13.1).
+      // The identical consumer compiles cleanly against both, and
+      // TypeScript's checker reads each module's whole exposed skeleton —
+      // its export names, and its default export's member tree through the
+      // module and its companions, names and nesting only (never a type or
+      // interface name the product generates, H-4). The two must be equal:
+      // "the same" is an equality, so a member one tag form's module
+      // exposes alone fails, named by its access chain.
+      const readSkeleton = async (
+        workspace: TestWorkspace,
+        styleLabel: "<S>" | "<Spec>",
+      ): Promise<ModuleSkeleton> => {
         await workspace.file("consumer.ts", SKELETON_CONSUMER);
         const project = await ConsumerProject.load({
           rootDir: workspace.root,
           rootFiles: ["consumer.ts"],
         });
-        assertNoCompileErrors(
-          project,
-          `T1.1-2 skeleton consumer against the ${styleLabel} workspace's generated module`,
+        const context = `T1.1-2 skeleton consumer against the ${styleLabel} workspace's generated module`;
+        assertNoCompileErrors(project, context);
+        const skeleton = project.moduleSkeleton("specs/A.xspec.ts", {
+          isOwnFile: isGeneratedFileOfA,
+          maxDepth: T1_1_2_SKELETON_DEPTH_BOUND,
+          context,
+        });
+        // Not vacuous: the compare below sees the staged chains in both
+        // skeletons (a default export TypeScript reads as `any` exposes no
+        // member, though the consumer compiles against it).
+        const chains = skeletonChains(skeleton, "SPEC");
+        for (const chain of [
+          "SPEC.login",
+          "SPEC.login.validCredentials",
+          "SPEC.meta",
+        ]) {
+          if (!chains.includes(chain)) {
+            fail(
+              `${context}: its default export's member tree lacks ${chain} — the default ` +
+                `export is the root node, and each node exposes its child sections as ` +
+                `readonly properties named by ID segment (SPEC 4.1); the tree read: ` +
+                JSON.stringify(chains.slice(0, T1_1_2_LISTED_ENTRIES)),
+            );
+          }
+        }
+        return skeleton;
+      };
+      const difference = diffModuleSkeletons(
+        await readSkeleton(sForm, "<S>"),
+        await readSkeleton(specForm, "<Spec>"),
+        "SPEC",
+      );
+      if (difference.onlyInA.length > 0 || difference.onlyInB.length > 0) {
+        const listed = (entries: readonly string[]): string =>
+          entries.length === 0
+            ? "nothing"
+            : entries.slice(0, T1_1_2_LISTED_ENTRIES).join(", ") +
+              (entries.length > T1_1_2_LISTED_ENTRIES
+                ? `, … (${entries.length} in all)`
+                : "");
+        fail(
+          "T1.1-2: the `<S>` and `<Spec>` workspaces' generated modules (specs/A.xspec.ts) " +
+            "expose different skeletons — the two tag names are equivalent (SPEC 1.1), so " +
+            "the module generated from either spelling exposes the same node skeleton " +
+            "(SPEC 4.1). Exposed by the `<S>` form's module alone: " +
+            `${listed(difference.onlyInA)}; exposed by the \`<Spec>\` form's module alone: ` +
+            `${listed(difference.onlyInB)} (each entry topmost: an export name, or an ` +
+            "access chain from the default export, nothing below it listed).",
         );
       }
 

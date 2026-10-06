@@ -24,6 +24,11 @@
 //   way tsserver does for editors, which is how a target can land in a
 //   non-TypeScript original such as a source `.mdx` file (SPEC.md 4.2, 13.1
 //   companion files). See the interface comments below.
+// - `moduleSkeleton` reads the skeleton a module exposes (SPEC.md 4.1)
+//   through the same program's type checker — export names and the default
+//   export's member tree, by names and nesting only — and
+//   `diffModuleSkeletons` compares two such skeletons (T1.1-2: the two tag
+//   names' generated modules expose the same skeleton).
 // - Compiled consumers run under plain Node (`runConsumer`) through the
 //   blackbox subprocess driver: `node <entry>` with the sanitized environment
 //   and `NODE_PATH` dropped, so nothing outside the consumer's own files (and
@@ -158,6 +163,76 @@ export interface EmitResult {
   /** Written files, project-relative, sorted. */
   readonly emittedFiles: readonly string[];
   readonly diagnostics: readonly ConsumerDiagnostic[];
+}
+
+/** One member of a module's exposed skeleton (`moduleSkeleton`). */
+export interface SkeletonMember {
+  /**
+   * The member's step in an access chain: `.name` for a property whose name
+   * is a plain ASCII identifier, `["name"]` (JSON-quoted) for any other
+   * property name, the name TypeScript displays for a symbol-keyed property
+   * (`[XSPEC_BRAND]`, `[Symbol.iterator]`) or `.#name` for a private one,
+   * `[<K>]` for an index signature whose key type is `K`, `()` for a type's
+   * call signatures, and `(new)` for its construct signatures. A step two
+   * members of one type share takes `@2`, `@3`, … in declaration order.
+   */
+  readonly segment: string;
+  /**
+   * The members of the member's type, sorted by segment, when the member was
+   * expanded (possibly none); absent for a leaf — a member declared only
+   * outside the module's own files, call and construct signatures, and a
+   * member whose expansion stopped.
+   */
+  readonly members?: readonly SkeletonMember[];
+  /**
+   * Set when an expandable member (one whose type has members) was not
+   * expanded: its type is already being expanded on the path from the root
+   * (`"cycle"`), or the member lies at the depth bound (`"depth"`).
+   */
+  readonly stopped?: "cycle" | "depth";
+}
+
+/** A module's exposed skeleton (`ConsumerProject.moduleSkeleton`). */
+export interface ModuleSkeleton {
+  /** The module file, project-relative. */
+  readonly module: string;
+  /** Every export name, sorted. */
+  readonly exports: readonly string[];
+  /**
+   * The default export's members, sorted by segment; absent when the module
+   * has no default export.
+   */
+  readonly defaultExport?: readonly SkeletonMember[];
+}
+
+export interface ModuleSkeletonOptions {
+  /**
+   * Whether a program file is one of the module's own files — for a
+   * product's generated module, the module and its companions (SPEC.md
+   * 13.1). Receives the project-relative path with `/` separators, or the
+   * absolute path of a file outside the project root.
+   */
+  readonly isOwnFile: (file: string) => boolean;
+  /**
+   * The depth bound (default 16): a member at this depth (the default
+   * export's own members are at depth 1) is not expanded.
+   */
+  readonly maxDepth?: number;
+  /** Prefix for failure diagnoses. */
+  readonly context?: string;
+}
+
+/** Differences between two module skeletons (`diffModuleSkeletons`). */
+export interface ModuleSkeletonDifference {
+  /**
+   * What the first skeleton exposes alone, topmost only (nothing below an
+   * entry is listed): `export <name>` for an export name, and an access
+   * chain rooted at the given root name for a member of the default export,
+   * a member whose expansion stopped carrying the reason.
+   */
+  readonly onlyInA: readonly string[];
+  /** The same for the second skeleton. */
+  readonly onlyInB: readonly string[];
 }
 
 /**
@@ -429,6 +504,135 @@ export class ConsumerProject {
   }
 
   /**
+   * The skeleton a module file of this program exposes (SPEC.md 4.1), read
+   * through TypeScript's checker: the module's export names, and its default
+   * export's member tree — every property (methods included) by name, every
+   * index signature by its key type, and call or construct signatures by
+   * their presence. A member declared in one of the module's own files
+   * (`isOwnFile`), or a synthetic one with no declaration (a mapped type's
+   * property, a tuple element), is expanded into its type's members (its
+   * non-nullable type); a member declared only elsewhere (TypeScript's lib,
+   * an installed package, another project file) is a leaf recorded by name.
+   * Expansion stops, marked, at a type already on the path from the root
+   * (a cycle) and at the depth bound. Names and nesting only: no type or
+   * interface name is recorded (H-4), so two modules declaring the same
+   * tree under different declaration names expose equal skeletons
+   * (`diffModuleSkeletons`). A module file outside the program, or a file
+   * that is no module, fails diagnosed (H-8).
+   */
+  moduleSkeleton(
+    moduleFile: string,
+    options: ModuleSkeletonOptions,
+  ): ModuleSkeleton {
+    const context = options.context ?? "module skeleton";
+    const maxDepth = options.maxDepth ?? DEFAULT_SKELETON_DEPTH_BOUND;
+    if (!Number.isInteger(maxDepth) || maxDepth < 1) {
+      throw new Error(
+        `moduleSkeleton: maxDepth must be a positive integer, got ${String(options.maxDepth)}`,
+      );
+    }
+    const program = this.#program();
+    const abs = this.#absPath(moduleFile);
+    const module = this.#describePath(abs);
+    const sourceFile = program.getSourceFile(abs);
+    if (sourceFile === undefined) {
+      fail(
+        `${context}: ${module} is not part of the consumer program — no root ` +
+          `file is it, and no root file's imports resolve to it (SPEC 4, 13.1)`,
+      );
+    }
+    const checker = program.getTypeChecker();
+    const moduleSymbol = checker.getSymbolAtLocation(sourceFile);
+    if (moduleSymbol === undefined) {
+      fail(
+        `${context}: ${module} is no module — TypeScript reads no import or ` +
+          `export in it (SPEC 4)`,
+      );
+    }
+    const exportSymbols = checker.getExportsOfModule(moduleSymbol);
+    const exports = exportSymbols
+      .map((symbol) => symbol.getName())
+      .sort(compareCodeUnits);
+    const defaultSymbol = exportSymbols.find(
+      (symbol) => symbol.escapedName === ts.InternalSymbolName.Default,
+    );
+    if (defaultSymbol === undefined) return { module, exports };
+
+    const isOwnDeclaration = (declaration: ts.Node): boolean =>
+      options.isOwnFile(
+        this.#describePath(declaration.getSourceFile().fileName),
+      );
+    const hasMembers = (type: ts.Type): boolean =>
+      checker.getPropertiesOfType(type).length > 0 ||
+      checker.getIndexInfosOfType(type).length > 0 ||
+      checker.getSignaturesOfType(type, ts.SignatureKind.Call).length > 0 ||
+      checker.getSignaturesOfType(type, ts.SignatureKind.Construct).length > 0;
+    const rootType = checker.getTypeOfSymbol(defaultSymbol);
+    const onPath = new Set<ts.Type>([rootType]);
+    const expand = (
+      declaredType: ts.Type,
+      depth: number,
+    ): Pick<SkeletonMember, "members" | "stopped"> => {
+      const type = checker.getNonNullableType(declaredType);
+      if (!hasMembers(type)) return { members: [] };
+      if (onPath.has(type)) return { stopped: "cycle" };
+      if (depth >= maxDepth) return { stopped: "depth" };
+      onPath.add(type);
+      try {
+        return { members: membersOf(type, depth + 1) };
+      } finally {
+        onPath.delete(type);
+      }
+    };
+    const membersOf = (type: ts.Type, depth: number): SkeletonMember[] => {
+      const members: SkeletonMember[] = [];
+      for (const property of checker.getPropertiesOfType(type)) {
+        const segment = propertySegment(checker, property);
+        const declarations = property.declarations ?? [];
+        const own =
+          declarations.length === 0 || declarations.some(isOwnDeclaration);
+        members.push(
+          own
+            ? { segment, ...expand(checker.getTypeOfSymbol(property), depth) }
+            : { segment },
+        );
+      }
+      for (const info of checker.getIndexInfosOfType(type)) {
+        const keyType = checker.typeToString(
+          info.keyType,
+          undefined,
+          ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.InTypeAlias,
+        );
+        const segment = `[<${keyType}>]`;
+        const own =
+          info.declaration === undefined || isOwnDeclaration(info.declaration);
+        members.push(
+          own ? { segment, ...expand(info.type, depth) } : { segment },
+        );
+      }
+      if (checker.getSignaturesOfType(type, ts.SignatureKind.Call).length > 0) {
+        members.push({ segment: "()" });
+      }
+      if (
+        checker.getSignaturesOfType(type, ts.SignatureKind.Construct).length > 0
+      ) {
+        members.push({ segment: "(new)" });
+      }
+      const seen = new Map<string, number>();
+      return members
+        .map((member) => {
+          const count = (seen.get(member.segment) ?? 0) + 1;
+          seen.set(member.segment, count);
+          return count === 1
+            ? member
+            : { ...member, segment: `${member.segment}@${count}` };
+        })
+        .sort((x, y) => compareCodeUnits(x.segment, y.segment));
+    };
+    return { module, exports, defaultExport: membersOf(rootType, 1) };
+  }
+
+  /**
    * Emit the program's JavaScript (in place unless the project's
    * compilerOptions direct otherwise), returning what was written. Emitting
    * is standard tsc behavior — it proceeds even with type errors; assert
@@ -642,6 +846,122 @@ export function assertCompileErrorAt(
     }
   }
   return match;
+}
+
+const SKELETON_STOP_NOTES: Readonly<
+  Record<NonNullable<SkeletonMember["stopped"]>, string>
+> = {
+  cycle: "(expansion stopped: cycle)",
+  depth: "(expansion stopped: depth bound)",
+};
+
+/** A member's step, with the reason its expansion stopped, if it did. */
+function skeletonMemberKey(member: SkeletonMember): string {
+  return member.stopped === undefined
+    ? member.segment
+    : `${member.segment} ${SKELETON_STOP_NOTES[member.stopped]}`;
+}
+
+/**
+ * Every access chain a skeleton's default export exposes, rooted at
+ * `rootName` (e.g. `SPEC.login.validCredentials`), parents before their
+ * members; a member whose expansion stopped carries the reason. Empty when
+ * the module has no default export.
+ */
+export function skeletonChains(
+  skeleton: ModuleSkeleton,
+  rootName: string,
+): string[] {
+  const chains: string[] = [];
+  const walk = (members: readonly SkeletonMember[], prefix: string): void => {
+    for (const member of members) {
+      chains.push(prefix + skeletonMemberKey(member));
+      if (member.members !== undefined) {
+        walk(member.members, prefix + member.segment);
+      }
+    }
+  };
+  walk(skeleton.defaultExport ?? [], rootName);
+  return chains;
+}
+
+/**
+ * Compare two module skeletons by names and nesting (H-4: declaration names
+ * never enter a skeleton): the export names each exposes alone, and the
+ * default-export members each exposes alone, topmost only — a member the
+ * other skeleton lacks is listed once, by its access chain rooted at
+ * `rootName`, and nothing below it. A member expanded in one skeleton and
+ * stopped in the other differs too (listed on both sides). Both lists are
+ * empty exactly when the skeletons are equal.
+ */
+export function diffModuleSkeletons(
+  a: ModuleSkeleton,
+  b: ModuleSkeleton,
+  rootName: string,
+): ModuleSkeletonDifference {
+  const onlyInA: string[] = [];
+  const onlyInB: string[] = [];
+  const exportsA = new Set(a.exports);
+  const exportsB = new Set(b.exports);
+  for (const name of a.exports) {
+    if (!exportsB.has(name)) onlyInA.push(`export ${name}`);
+  }
+  for (const name of b.exports) {
+    if (!exportsA.has(name)) onlyInB.push(`export ${name}`);
+  }
+  const walk = (
+    left: readonly SkeletonMember[],
+    right: readonly SkeletonMember[],
+    prefix: string,
+  ): void => {
+    const rightByKey = new Map(
+      right.map((member) => [skeletonMemberKey(member), member]),
+    );
+    const leftKeys = new Set(left.map(skeletonMemberKey));
+    for (const member of left) {
+      const key = skeletonMemberKey(member);
+      const twin = rightByKey.get(key);
+      if (twin === undefined) {
+        onlyInA.push(prefix + key);
+      } else {
+        walk(member.members ?? [], twin.members ?? [], prefix + member.segment);
+      }
+    }
+    for (const member of right) {
+      const key = skeletonMemberKey(member);
+      if (!leftKeys.has(key)) onlyInB.push(prefix + key);
+    }
+  };
+  // A default export one module lacks is listed among the export names.
+  if (a.defaultExport !== undefined && b.defaultExport !== undefined) {
+    walk(a.defaultExport, b.defaultExport, rootName);
+  }
+  return { onlyInA, onlyInB };
+}
+
+/** See `ModuleSkeletonOptions.maxDepth`. */
+const DEFAULT_SKELETON_DEPTH_BOUND = 16;
+
+/**
+ * A property's step in an access chain (`SkeletonMember.segment`). A
+ * symbol-keyed or private property's escaped name embeds a checker-internal
+ * symbol id (`__@XSPEC_BRAND@15`), which differs between programs, so its
+ * step is the name TypeScript displays instead.
+ */
+function propertySegment(checker: ts.TypeChecker, property: ts.Symbol): string {
+  const escaped = String(property.escapedName);
+  if (escaped.startsWith("__@") || escaped.startsWith("__#")) {
+    const shown = checker.symbolToString(property);
+    return shown.startsWith("[") ? shown : `.${shown}`;
+  }
+  const name = property.getName();
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)
+    ? `.${name}`
+    : `[${JSON.stringify(name)}]`;
+}
+
+function compareCodeUnits(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 function categoryName(

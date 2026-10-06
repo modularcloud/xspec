@@ -22,7 +22,11 @@
 // (SPEC.md 13.1; IMPLEMENTATION.md), an import nothing makes resolvable is a
 // diagnosed compile error (the red path for section 4 tests against the
 // stub product, H-8), and marker addressing and project loading fail loudly
-// rather than vacuously green.
+// rather than vacuously green. The skeleton reader T1.1-2 compares two
+// generated modules through (`moduleSkeleton`, `skeletonChains`,
+// `diffModuleSkeletons`) is pinned against a hand-written module in the
+// generated arrangement: its exact member tree, the compare's blindness to
+// declaration names and its topmost differences, and its loud failures.
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
@@ -35,7 +39,9 @@ import {
   assertCompileErrorAt,
   assertNoCompileErrors,
   ConsumerProject,
+  diffModuleSkeletons,
   runConsumer,
+  skeletonChains,
 } from "../helpers/tooling.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 import type { WorkspaceDecl } from "../helpers/workspace.js";
@@ -435,3 +441,274 @@ test("hover and definitions at an inert position report nothing (tests then fail
   expect(project.hoverAt(blank)).toBeUndefined();
   expect(project.definitionsAt(blank)).toEqual([]);
 });
+
+// `moduleSkeleton` (T1.1-2: two generated modules expose the same skeleton,
+// SPEC 1.1, 4.1). A hand-written module in the generated arrangement — the
+// module re-exporting a companion that declares one interface per node —
+// whose member tree exercises every rule: own members expanded, a member
+// declared elsewhere (another project file, TypeScript's lib) a leaf,
+// symbol-keyed and non-identifier names, an index signature expanded through
+// its own value type, call and construct signatures, an optional member
+// expanded through its non-nullable type, a cycle back to the root, and a
+// generic chain stopped at the depth bound.
+const SKELETON_SHARED = [
+  "export interface Shared {",
+  "  readonly inner: { readonly deeper: number };",
+  "}",
+  "",
+].join("\n");
+
+function skeletonCompanion(
+  options: {
+    readonly names?: Readonly<Record<string, string>>;
+    readonly extraOnN1?: boolean;
+    readonly loopTo?: "N0" | "N1";
+  } = {},
+): string {
+  const name = (base: string): string => options.names?.[base] ?? base;
+  return [
+    'import type { Shared } from "../shared.js";',
+    "declare const BRAND: unique symbol;",
+    `interface ${name("Base")} {`,
+    "  readonly [BRAND]: unknown;",
+    "}",
+    `interface ${name("N0")} extends ${name("Base")} {`,
+    `  readonly alpha: ${name("N1")};`,
+    `  readonly "kebab-case": ${name("N2")};`,
+    `  readonly loop: ${name(options.loopTo ?? "N0")};`,
+    "  readonly shared: Shared;",
+    "  readonly label: string;",
+    `  readonly deep: ${name("Deep")}<0>;`,
+    `  readonly maybe?: ${name("N1")};`,
+    "}",
+    `interface ${name("N1")} extends ${name("Base")} {`,
+    `  new (): ${name("Base")};`,
+    `  readonly beta: ${name("N2")};`,
+    ...(options.extraOnN1 === true
+      ? [`  readonly extra: ${name("Base")};`]
+      : []),
+    "}",
+    `interface ${name("N2")} extends ${name("Base")} {`,
+    "  (): void;",
+    `  readonly [key: string]: ${name("Base")};`,
+    "}",
+    `interface ${name("Deep")}<T> {`,
+    `  readonly next: ${name("Deep")}<[T]>;`,
+    "}",
+    `declare const root: ${name("N0")};`,
+    "export default root;",
+    `export declare function text(node: ${name("Base")}): string;`,
+    "",
+  ].join("\n");
+}
+
+const SKELETON_MODULE = [
+  'export { default, text } from "./m.xspec.impl.js";',
+  'export type { Shared } from "../shared.js";',
+  "",
+].join("\n");
+
+const SKELETON_MAIN = 'import ROOT from "./gen/m.xspec";\n\nROOT.alpha.beta;\n';
+
+const isSkeletonOwnFile = (file: string): boolean =>
+  file.startsWith("gen/m.xspec.");
+
+async function loadSkeletonProject(
+  companion: string,
+  module: string = SKELETON_MODULE,
+): Promise<ConsumerProject> {
+  const workspace = await makeWorkspace({
+    files: {
+      "shared.ts": SKELETON_SHARED,
+      "gen/m.xspec.ts": module,
+      // A `.ts` companion rather than a product's `.d.ts`, so the clean
+      // compile below checks it (declaration files are not checked under
+      // the driver's `skipLibCheck`): the vectors stand on valid TypeScript.
+      "gen/m.xspec.impl.ts": companion,
+      "main.ts": SKELETON_MAIN,
+      // A global declaration file: no module (under the driver's NodeNext
+      // module setting every other TypeScript file is one).
+      "globals.d.ts": "declare const scriptOnly: number;\n",
+    },
+  });
+  const project = await ConsumerProject.load({
+    rootDir: workspace.root,
+    rootFiles: ["main.ts", "globals.d.ts"],
+  });
+  assertNoCompileErrors(project, "module-skeleton fixture");
+  return project;
+}
+
+// Each vector compiles one to three projects; under the self project's full
+// parallel load Vitest's default 5 s budget can be exceeded. A hang guard
+// only, never an assertion input (H-10).
+const SKELETON_TEST_TIMEOUT_MS = 60_000;
+
+test(
+  "S-4: moduleSkeleton reads a module's export names and its default export's member tree (T1.1-2; SPEC 4.1)",
+  { timeout: SKELETON_TEST_TIMEOUT_MS },
+  async () => {
+    const project = await loadSkeletonProject(skeletonCompanion());
+    const skeleton = project.moduleSkeleton("gen/m.xspec.ts", {
+      isOwnFile: isSkeletonOwnFile,
+      maxDepth: 4,
+    });
+    expect(skeleton.module).toBe("gen/m.xspec.ts");
+    expect(skeleton.exports).toEqual(["Shared", "default", "text"]);
+    const chains = skeletonChains(skeleton, "ROOT");
+    // `label: string` is an own member, so it is expanded — into the string
+    // type's members, every one declared in TypeScript's lib: leaves recorded
+    // by name, nothing below them.
+    const label = skeleton.defaultExport?.find(
+      (member) => member.segment === ".label",
+    );
+    expect(label?.members?.map((member) => member.segment)).toEqual(
+      expect.arrayContaining([".charAt", ".length", "[<number>]"]),
+    );
+    expect(
+      label?.members?.some((member) => member.segment.startsWith("[Symbol.")),
+    ).toBe(true);
+    for (const member of label?.members ?? []) {
+      expect(member.members, `lib member ${member.segment}`).toBeUndefined();
+      expect(member.stopped, `lib member ${member.segment}`).toBeUndefined();
+    }
+    expect(
+      chains.filter(
+        (chain) =>
+          !chain.startsWith("ROOT.label.") && !chain.startsWith("ROOT.label["),
+      ),
+    ).toEqual([
+      "ROOT.alpha",
+      "ROOT.alpha(new)",
+      "ROOT.alpha.beta",
+      "ROOT.alpha.beta()",
+      "ROOT.alpha.beta[<string>]",
+      "ROOT.alpha.beta[<string>][BRAND]",
+      "ROOT.alpha.beta[BRAND]",
+      "ROOT.alpha[BRAND]",
+      "ROOT.deep",
+      "ROOT.deep.next",
+      "ROOT.deep.next.next",
+      "ROOT.deep.next.next.next (expansion stopped: depth bound)",
+      "ROOT.label",
+      "ROOT.loop (expansion stopped: cycle)",
+      "ROOT.maybe",
+      "ROOT.maybe(new)",
+      "ROOT.maybe.beta",
+      "ROOT.maybe.beta()",
+      "ROOT.maybe.beta[<string>]",
+      "ROOT.maybe.beta[<string>][BRAND]",
+      "ROOT.maybe.beta[BRAND]",
+      "ROOT.maybe[BRAND]",
+      // Declared in another project file: a leaf, `deeper` unread.
+      "ROOT.shared",
+      "ROOT.shared.inner",
+      'ROOT["kebab-case"]',
+      'ROOT["kebab-case"]()',
+      'ROOT["kebab-case"][<string>]',
+      'ROOT["kebab-case"][<string>][BRAND]',
+      'ROOT["kebab-case"][BRAND]',
+      "ROOT[BRAND]",
+    ]);
+    // The default bound (16) reaches further down the generic chain.
+    const deeper = skeletonChains(
+      project.moduleSkeleton("gen/m.xspec.ts", {
+        isOwnFile: isSkeletonOwnFile,
+      }),
+      "ROOT",
+    );
+    expect(
+      deeper.filter((chain) => chain.startsWith("ROOT.deep")),
+    ).toHaveLength(16);
+    expect(deeper).toContain(
+      `ROOT.deep${".next".repeat(15)} (expansion stopped: depth bound)`,
+    );
+    // A module without a default export exposes export names alone.
+    const shared = project.moduleSkeleton("shared.ts", {
+      isOwnFile: (file) => file === "shared.ts",
+    });
+    expect(shared.exports).toEqual(["Shared"]);
+    expect(shared.defaultExport).toBeUndefined();
+    expect(skeletonChains(shared, "ROOT")).toEqual([]);
+  },
+);
+
+test(
+  "S-4: diffModuleSkeletons compares names and nesting only, naming each topmost difference (T1.1-2)",
+  { timeout: SKELETON_TEST_TIMEOUT_MS },
+  async () => {
+    const options = { isOwnFile: isSkeletonOwnFile, maxDepth: 4 };
+    const base = (
+      await loadSkeletonProject(skeletonCompanion())
+    ).moduleSkeleton("gen/m.xspec.ts", options);
+    expect(diffModuleSkeletons(base, base, "ROOT")).toEqual({
+      onlyInA: [],
+      onlyInB: [],
+    });
+    // Every declaration renamed: the same skeleton (H-4: declaration names
+    // are the product's own).
+    const renamed = (
+      await loadSkeletonProject(
+        skeletonCompanion({
+          names: { Base: "Q", N0: "Q0", N1: "Q1", N2: "Q2", Deep: "QD" },
+        }),
+      )
+    ).moduleSkeleton("gen/m.xspec.ts", options);
+    expect(diffModuleSkeletons(base, renamed, "ROOT")).toEqual({
+      onlyInA: [],
+      onlyInB: [],
+    });
+    // An added member, a dropped export, and a cycle turned into an expansion.
+    const changed = (
+      await loadSkeletonProject(
+        skeletonCompanion({ extraOnN1: true, loopTo: "N1" }),
+        'export { default, text } from "./m.xspec.impl.js";\n',
+      )
+    ).moduleSkeleton("gen/m.xspec.ts", options);
+    const difference = diffModuleSkeletons(base, changed, "ROOT");
+    expect([...difference.onlyInA].sort()).toEqual([
+      "ROOT.loop (expansion stopped: cycle)",
+      "export Shared",
+    ]);
+    // Topmost only: nothing below `extra` or the expanded `loop` is listed.
+    expect([...difference.onlyInB].sort()).toEqual([
+      "ROOT.alpha.extra",
+      "ROOT.loop",
+      "ROOT.maybe.extra",
+    ]);
+    const reversed = diffModuleSkeletons(changed, base, "ROOT");
+    expect([...reversed.onlyInA].sort()).toEqual(
+      [...difference.onlyInB].sort(),
+    );
+    expect([...reversed.onlyInB].sort()).toEqual(
+      [...difference.onlyInA].sort(),
+    );
+  },
+);
+
+test(
+  "S-4: moduleSkeleton fails diagnosed on a module outside the program or a file that is no module",
+  { timeout: SKELETON_TEST_TIMEOUT_MS },
+  async () => {
+    const project = await loadSkeletonProject(skeletonCompanion());
+    const options = { isOwnFile: isSkeletonOwnFile, context: "S-4 probe" };
+    expect(() =>
+      project.moduleSkeleton("gen/absent.xspec.ts", options),
+    ).toThrowError(HarnessAssertionError);
+    expect(() =>
+      project.moduleSkeleton("gen/absent.xspec.ts", options),
+    ).toThrowError(
+      /S-4 probe: gen\/absent\.xspec\.ts is not part of the consumer program/,
+    );
+    expect(() => project.moduleSkeleton("globals.d.ts", options)).toThrowError(
+      HarnessAssertionError,
+    );
+    expect(() => project.moduleSkeleton("globals.d.ts", options)).toThrowError(
+      /globals\.d\.ts is no module/,
+    );
+    // A depth bound below 1 is a harness misuse, refused outright.
+    expect(() =>
+      project.moduleSkeleton("gen/m.xspec.ts", { ...options, maxDepth: 0 }),
+    ).toThrowError(/maxDepth must be a positive integer/);
+  },
+);
