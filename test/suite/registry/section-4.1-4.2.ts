@@ -389,9 +389,14 @@ const OPAQ_NODE_CHAINS = [
   "SPEC.gamma",
 ] as const;
 
-// The probe's walk budget (H-8: a walk that cannot finish fails, never
-// passes): each object or function the walk visits, and each prototype-chain
-// link it reads keys through, costs one step. The built product's generated
+// The probe's walk budget, a harness-internal limit (H-11: an exhausted one
+// is a harness error, never a diagnosed product failure and never a pass —
+// `OpaqueWalkCapError`): each object or function the walk visits, and each
+// prototype-chain link it reads keys through, costs one step. A conforming
+// module can exhaust it — SPEC 4.1 constrains only the supported
+// operations, so a getter minting a fresh object on every read is allowed
+// so long as no text is exposed — which is why a capped walk is the
+// harness's failure, not the product's. The built product's generated
 // module — frozen plain-object nodes over `Object.prototype`, a symbol-keyed
 // module path, the texts in a module-private map — takes 131 steps (46
 // objects and functions, `Object`'s and `Function`'s intrinsics included),
@@ -413,11 +418,14 @@ const OPAQ_WALK_CAP = 100_000;
 // through themselves). Every probe is guarded (a node is an opaque token, so
 // unsupported operations may throw; SPEC 4.1), and the walk runs off a work
 // list, so no depth can overflow the stack. The visited set makes the walk
-// finite and `OPAQ_WALK_CAP` bounds it loudly. It reports `{ kinds, seen,
-// capped }`: the kinds in `nodes` order, every observed string, and whether
-// the budget ran out with work left. No observed string may carry
-// requirement text, and a capped walk fails: it cannot show that none is
-// observable.
+// finite over a finite object graph, and `OPAQ_WALK_CAP` bounds it loudly
+// over any other. It reports `{ kinds, seen, capped }`: the kinds in
+// `nodes` order, every observed string, and whether the budget ran out with
+// work left. No observed string may carry requirement text. A capped walk
+// cannot show that none is observable, so once no string node and no leak
+// was found, `judgeOpaqueProbeReport` reports it as the harness error
+// `OpaqueWalkCapError` (H-11) — never a diagnosed product failure and never
+// a pass.
 const OPAQ_PROBE_CONSUMER = [
   'import SPEC from "../specs/OPAQ.xspec";',
   "",
@@ -560,13 +568,53 @@ function isOpaqueProbeReport(value: unknown): value is OpaqueProbeReport {
 }
 
 /**
+ * T4.1-3's probe walk spent its budget (`OPAQ_WALK_CAP`) with values still
+ * unwalked, having observed no string node and no requirement text: a
+ * harness-internal limit exhausted while evaluating an answer, which
+ * TEST-SPEC H-11 reports as a defect in the harness — never a diagnosed
+ * product failure (so never a `HarnessAssertionError`: the certification
+ * runner's outcome is `error`) and never a pass. A conforming module can
+ * exhaust the budget (SPEC 4.1 constrains only the supported operations),
+ * so the walk's inconclusive end is the harness's failure, in the manner of
+ * the driver's capacity errors (`ProductRunOutputOverflowError`,
+ * `HarnessEvaluationError` in helpers/subprocess.ts).
+ */
+class OpaqueWalkCapError extends Error {
+  /** Strings the walk observed before the cap, none carrying the sentinel. */
+  readonly observedStrings: number;
+
+  constructor(observedStrings: number) {
+    super(
+      "harness error (H-11): T4.1-3's probe consumer's reflective deep " +
+        "walk of the values reachable from the default export spent its " +
+        `budget of ${String(OPAQ_WALK_CAP)} steps (\`OPAQ_WALK_CAP\`: one ` +
+        "per object or function walked and per prototype-chain link read " +
+        "through) with values still unwalked. Strings observed before the " +
+        `cap: ${String(observedStrings)}, none carrying the fixture's ` +
+        "requirement-text sentinel, and no node value a string. The budget " +
+        "is a harness-internal limit a conforming module can exhaust (SPEC " +
+        "4.1 constrains only the supported operations), so the harness, " +
+        "not the product, failed: the walk cannot show that no requirement " +
+        "text is observable (SPEC 4.1, 4.3) — a defect in the harness, " +
+        "never a diagnosed product failure and never a pass.",
+    );
+    this.name = "OpaqueWalkCapError";
+    this.observedStrings = observedStrings;
+  }
+}
+
+/**
  * Judge the probe consumer's report (TEST-SPEC T4.1-3): no runtime value
  * reachable from the default export by child property access is a string
- * (SPEC 4.1: a node is an opaque token), the reflective deep walk of those
- * values observed no string carrying the fixture's requirement-text sentinel
- * (SPEC 4.1: nodes carry no requirement text as values; 4.3), and the walk
- * finished within its budget — a capped walk cannot show that no text is
- * observable, so it fails rather than pass (H-8).
+ * (SPEC 4.1: a node is an opaque token), and the reflective deep walk of
+ * those values observed no string carrying the fixture's requirement-text
+ * sentinel (SPEC 4.1: nodes carry no requirement text as values; 4.3) —
+ * each a diagnosed failure, checked in that order, so a leak observed
+ * before the cap fails the product. A walk that then ended capped cannot
+ * show that no text is observable, and its budget is a harness-internal
+ * limit a conforming module can exhaust: it throws `OpaqueWalkCapError`,
+ * the harness error H-11 prescribes — never a diagnosed product failure and
+ * never a pass.
  */
 function judgeOpaqueProbeReport(observed: unknown): void {
   if (!isOpaqueProbeReport(observed)) {
@@ -615,17 +663,9 @@ function judgeOpaqueProbeReport(observed: unknown): void {
     );
   }
   if (observed.capped) {
-    fail(
-      "T4.1-3: the probe consumer's reflective deep walk of the values " +
-        "reachable from the default export spent its budget of " +
-        `${String(OPAQ_WALK_CAP)} steps (one per object or function ` +
-        "walked and per prototype-chain link read through) with values " +
-        "still unwalked, so it cannot show that no requirement text is " +
-        "observable through the module's node values (SPEC 4.1: nodes " +
-        "carry no requirement text as values; 4.3) — a capped walk never " +
-        `passes (H-8). Strings observed before the cap: ` +
-        `${String(observed.seen.length)}, none carrying the sentinel.`,
-    );
+    // H-11: the harness's own limit ran out — a harness error, never
+    // `fail()` (a diagnosed product failure) and never a pass.
+    throw new OpaqueWalkCapError(observed.seen.length);
   }
 }
 
@@ -701,7 +741,9 @@ const T4_1_3 = defineProductTest({
             "probe is guarded (SPEC 4.1, 4.5)",
         );
         // No node value is a string, and no observed string carries
-        // requirement text (judged in `judgeOpaqueProbeReport`).
+        // requirement text (judged in `judgeOpaqueProbeReport`, which
+        // reports a capped walk as the harness error `OpaqueWalkCapError`,
+        // H-11).
         judgeOpaqueProbeReport(
           parseJsonStdout(probeRun, "T4.1-3 probe consumer output"),
         );
