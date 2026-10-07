@@ -271,6 +271,7 @@ import {
   decodeInventoryRecordedDatum,
   decodeSessionStatusReport,
   judgeManualDeletionCorrection,
+  pathValueBytes,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
@@ -967,8 +968,10 @@ async function assertRecordReplaced(
         );
       }
       // ASCII paths are plain strings in every 12.7 path value (the decoder
-      // rejects a valid-UTF-8 path in byte form), so the string compares
-      // are exact.
+      // rejects a valid-UTF-8 path in byte form), so the module compare is
+      // exact. The B-path filter compares exact bytes (`pathValueBytes`): a
+      // companion's suffix is the product's (SPEC 13.1), so a recorded B
+      // path may take the marked byte form, which the filter reaches too.
       const paths = recorded.value;
       if (!paths.some((p) => typeof p === "string" && p === A_MODULE_REL)) {
         fail(
@@ -977,16 +980,17 @@ async function assertRecordReplaced(
             `(SPEC 13.3, 13.1, 11.6); got ${JSON.stringify(paths)}`,
         );
       }
-      const strays = paths.filter(
-        (p) => typeof p === "string" && p.startsWith(B_DERIVED_PREFIX),
-      );
+      const bPrefix = Buffer.from(B_DERIVED_PREFIX, "utf8");
+      const strays = paths.filter((p) => {
+        return pathValueBytes(p).subarray(0, bPrefix.length).equals(bPrefix);
+      });
       if (strays.length > 0) {
         fail(
           `${context}: the replaced record holds the paths of the derived ` +
             `files most recently generated — B.mdx is no longer a ` +
             `configured source, so no B-derived path is recorded (the ` +
             `orphans are outside xspec's knowledge, SPEC 13.3, 13.4); got ` +
-            JSON.stringify(strays),
+            JSON.stringify(strays.map(renderPathValue)),
         );
       }
     },
