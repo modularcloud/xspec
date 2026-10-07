@@ -36,6 +36,13 @@
 //   14.19 (`#` and U+FFFD on either side; 7.1's path-character bar and a
 //   missing `.mdx` on the spec side), and 14.20 (spec sources by the MDX-lite
 //   lexer below, code sources by TypeScript 5.9.3, encoding on both sides).
+//   Both findings-report forms carry the same information (SPEC 12.0, 14)
+//   from one ordered, collapsed findings list (`emitFindings`): with
+//   `--json` the 12.7 document, without it one line per finding naming its
+//   file and byte range (`[start,end)`, SPEC 1.7; 14.20's zero-length) or,
+//   for the path-level 14.19, the path it concerns, then its condition and
+//   its message. A configuration error's standard-error line names its
+//   concerned path (14) before the message, in both output forms.
 // - Invocation grammar (CERTIFICATIONS.md preamble; SPEC 12.0): arguments
 //   are read under 12.0's universal grammar (`readInvocation`) — flag tokens
 //   anywhere, before the command word, between it and `query`'s subcommand
@@ -96,13 +103,16 @@
 //   segment (a drive-qualified `C:` included) raises it by one; a pattern
 //   beginning with `/`, or whose depth ever falls below zero, is a
 //   configuration error (14.14) reported at load by every command as a usage
-//   error (12.0) — exit 2, message on stderr; with `--json` the single 12.7
-//   error document ({"error": …} carrying the stable code
-//   `configuration-error` and the concerned path in the anchoring form) is
-//   the entire stdout, and without it stdout stays empty. Every other
-//   pattern is inside the root and is matched exactly as spelled, never
-//   normalized: its `.`, `..`, and empty segments are literal segments no
-//   discovered path carries (7), so they match nothing.
+//   error (12.0) — exit 2, the configuration file's path (anchoring form,
+//   14) and the message on stderr in both output forms (e.g.
+//   `xspec: ../xspec.config.ts: configuration error: pattern ../x/*.mdx …`
+//   run from `specs/`); with `--json` the single 12.7 error document
+//   ({"error": …} carrying the stable code `configuration-error` and the
+//   concerned path in the anchoring form) is the entire stdout, and without
+//   it stdout stays empty. Every other pattern is inside the root and is
+//   matched exactly as spelled, never normalized: its `.`, `..`, and empty
+//   segments are literal segments no discovered path carries (7), so they
+//   match nothing.
 // - Discovery pipeline order (SPEC 7, 13.4): walk plain files (symbolic links
 //   never discovered, never traversed — so link cycles cannot hang the walk),
 //   match the spec groups' globs and the code groups' globs — one matcher,
@@ -246,11 +256,11 @@ import * as path from "node:path";
 
 /**
  * Usage or configuration error (SPEC 12.0 exit 2): message on stderr in both
- * output forms; with JSON output in effect the 12.7 error document is the
- * entire stdout. `code`/`path` are the error finding's stable code and
- * concerned path — set for configuration errors (14.14: `configuration-error`
- * plus the concerned path in the anchoring form), `null` for plain usage
- * errors (SPEC 12.7).
+ * output forms, after the concerned path when one is set (SPEC 14); with
+ * JSON output in effect the 12.7 error document is the entire stdout.
+ * `code`/`path` are the error finding's stable code and concerned path — set
+ * for configuration errors (14.14: `configuration-error` plus the concerned
+ * path in the anchoring form), `null` for plain usage errors (SPEC 12.7).
  */
 class UsageError extends Error {
   /** @param {string} message
@@ -1865,14 +1875,16 @@ function compareFindingDocs(a, b) {
 }
 
 /**
- * The findings report in the 12.7 form: one `{"code", "message",
- * "locations", "path", "identities"}` per finding. A finding carrying an
+ * The findings in the pinned findings order, findings identical in every
+ * member collapsed to one (SPEC 12.7): each in the finding form `{"code",
+ * "message", "locations", "path", "identities"}` — a finding carrying an
  * in-source location (14.1, 14.15, 14.20 here) locates the offending
  * construct with `path` null; the path-level 14.19 carries the offending
- * path it concerns with `locations` empty. Findings are emitted in the
- * pinned order, identical findings collapsed to one (SPEC 12.7).
+ * path it concerns with `locations` empty — plus its condition
+ * (`internalCondition`, `14.N`), which orders it and names it in the human
+ * report. Both report forms render this one list (`emitFindings`).
  */
-function findingsDoc(findings) {
+function orderedFindings(findings) {
   const docs = findings.map((finding) => ({
     code: CODE_TOKENS[finding.condition],
     message: finding.message,
@@ -1893,8 +1905,17 @@ function findingsDoc(findings) {
     }
     collapsed.push(doc);
   }
+  return collapsed;
+}
+
+/**
+ * The findings report in the 12.7 form: one `{"code", "message",
+ * "locations", "path", "identities"}` per finding of `orderedFindings`, in
+ * its order.
+ */
+function findingsDoc(findings) {
   return {
-    findings: collapsed.map(
+    findings: orderedFindings(findings).map(
       ({ code, message, locations, path, identities }) => ({
         code,
         message,
@@ -1906,15 +1927,49 @@ function findingsDoc(findings) {
   };
 }
 
+/**
+ * What a human-report line names first (SPEC 14: the file and location, or
+ * for a condition without an in-source location the path it concerns): a
+ * located finding's file, then each of its locations' byte ranges in SPEC
+ * 1.7's convention — zero-based, start-inclusive and end-exclusive — as
+ * `[start,end)`, so 14.20's zero-length range at its failure's offset reads
+ * `[n,n)`, consecutive locations in one file naming it once (the JSON form's
+ * `locations`, in their order); a path-level finding's concerned path
+ * (14.19's offending path). No finding in this scope lacks both; such a
+ * finding would read `(workspace)`.
+ */
+function humanSubject(finding) {
+  if (finding.locations.length === 0) return finding.path ?? "(workspace)";
+  const parts = [];
+  let file = null;
+  for (const location of finding.locations) {
+    if (location.file !== file) {
+      file = location.file;
+      parts.push(file);
+    }
+    parts.push(`[${location.range.start},${location.range.end})`);
+  }
+  return parts.join(" ");
+}
+
+/**
+ * A findings report (SPEC 12.0: standard-output content, exit 1). With JSON
+ * in effect it is the 12.7 document; without, the human report renders the
+ * same ordered, collapsed findings, one line each, with the same
+ * information (12.0, 14): the finding's file and byte range, or the path it
+ * concerns (`humanSubject`), then its condition (`14.N`, naming its stable
+ * code one-to-one, 14) and its message, the correction — e.g.
+ * `specs/A.mdx [0,31): 14.15: invalid import: …`.
+ */
 function emitFindings(io, json, findings) {
   if (json) {
     io.stdout(canonicalJson(findingsDoc(findings)) + "\n");
   } else {
     io.stdout(
-      findings
+      orderedFindings(findings)
         .map(
           (finding) =>
-            `${finding.file ?? "(workspace)"}: ${finding.condition}: ${finding.message}\n`,
+            `${humanSubject(finding)}: ${finding.internalCondition}: ${finding.message}\n`,
         )
         .join(""),
     );
@@ -2660,12 +2715,17 @@ async function dispatchCommand(io, cwd, argv) {
   } catch (error) {
     if (error instanceof UsageError) {
       // Usage/configuration errors (SPEC 12.0): the message is stderr
-      // content in both output forms. With JSON output in effect the single
-      // 12.7 error document — {"error": …} holding one finding form, its
-      // stable code and concerned path for a configuration error, null/null
-      // for a plain usage error — is the entire stdout; without it, stdout
-      // stays empty. The output form never changes the exit code or the
-      // standard-error content.
+      // content in both output forms, after the concerned path when the
+      // error has one — a configuration error's, in the anchoring form (14),
+      // so the human line names the path the error concerns as the error
+      // document's `path` does (12.0, 14), e.g.
+      // `xspec: ../xspec.config.ts: configuration error: …`; a plain usage
+      // error's line is the message alone. With JSON output in effect the
+      // single 12.7 error document — {"error": …} holding one finding form,
+      // its stable code and concerned path for a configuration error,
+      // null/null for a plain usage error — is the entire stdout; without
+      // it, stdout stays empty. The output form never changes the exit code
+      // or the standard-error content.
       if (jsonInEffect) {
         io.stdout(
           canonicalJson({
@@ -2679,7 +2739,11 @@ async function dispatchCommand(io, cwd, argv) {
           }) + "\n",
         );
       }
-      io.stderr(`xspec: ${error.message}\n`);
+      io.stderr(
+        error.path === null
+          ? `xspec: ${error.message}\n`
+          : `xspec: ${error.path}: ${error.message}\n`,
+      );
       return 2;
     }
     if (error instanceof FindingsError) {
