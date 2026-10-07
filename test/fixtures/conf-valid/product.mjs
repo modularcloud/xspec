@@ -11,9 +11,9 @@
 //   `policy`, or git.
 // - `build` with the error reporting of SPEC 14 for conditions 14.1–14.4 —
 //   and 14.17 as T1.3-6's invalid-form arms stage it (a repeated `id`
-//   attribute and a braced `id={"x"}` value) — file, location, condition
-//   identity with its stable code, 14.2's statement of the expected form,
-//   exit codes per SPEC 12.0.
+//   attribute, a braced `id={"x"}` value, and the valueless bare name
+//   `<S id>`) — file, location, condition identity with its stable code,
+//   14.2's statement of the expected form, exit codes per SPEC 12.0.
 // - `query node` / `query nodes` (with `--tag`) reporting identity, tags,
 //   and metadataHash — the scoped query surface; source ranges ride along in
 //   the natural SPEC 11 row shape, and a root node's tags and coverage
@@ -77,13 +77,20 @@
 //   interpreted, so `id="a\u002Eb"` is a one-segment ID containing `\`
 //   and `id="a&#46;b"` one containing `&` — condition 4, never the
 //   two-segment ID `a.b` — and `tags="x\u0079"` a tag containing `\`.
-// - Findings of 14.1–14.3 and 14.17 carry the offending construct's own
-//   byte range per SPEC 1.7 (opening tag through closing tag, byte
-//   offsets); a 14.4 finding is one per offending `id` or `tags` attribute,
-//   however many of its segments or tokens violate 1.4 (SPEC 14), located
-//   at the attribute's own characters — name through closing quote
-//   (T14-11). Every report thus lands within its construct's window and
-//   never on a sibling construct.
+// - Findings carry SPEC 14's exact per-condition ranges (byte offsets,
+//   SPEC 1.7), one location per offending construct (12.7): 14.1 at the
+//   section's opening tag (the opening-tag range of 11.4 — a self-closing
+//   section's self-closing tag); 14.2 at the section's `id` attribute; 14.3
+//   as one finding per duplicated spelling in a file, locating every
+//   bearer's `id` attribute, no representative chosen; 14.4 as one finding
+//   per offending `id` or `tags` attribute, however many of its segments or
+//   tokens violate 1.4, located at that attribute; and 14.17 as one finding
+//   per invalid prop, a repeated prop locating every attribute spelling the
+//   name and a braced or valueless value its own attribute alone. An
+//   attribute's range is its own characters, the attribute range of 11.4:
+//   its name through the last character of its value (the closing quote or
+//   brace), or the bare name where it spells no value. Every report thus
+//   lands within its construct's window and never on a sibling construct.
 // - Tag sets (`query node`/`query nodes`; the set form of SPEC 12.7): tags
 //   in byte order — UTF-8 bytes, not UTF-16 code units — duplicates
 //   collapsed, `[]` for a tagless section. A root node carries no tags
@@ -164,8 +171,11 @@ class FindingsError extends Error {
 }
 
 /**
+ * A finding located in one source file: one byte range per offending
+ * construct (SPEC 12.7, 14), serialized in range order.
+ *
  * @typedef {{ condition: string, message: string, file: string,
- *             location: { start: number, end: number } }} Finding
+ *             locations: { start: number, end: number }[] }} Finding
  */
 
 // ---------------------------------------------------------------------------
@@ -867,12 +877,14 @@ function scanBracedAttributeValue(text, start) {
  * Attribute values are the raw characters between their quotes — control
  * bytes, line terminators, and boundary code points included — so 1.4
  * validity, never parseability, is what their content decides. Per element,
- * attribute occurrences are counted and value forms classified: a repeated
- * prop name or a non-quoted-static `id`/`tags` value is recorded on the node
- * as an `invalidProps` entry (condition 17, SPEC 2.7 — well-formed MDX, so
- * never a parse failure), an `id` so afflicted spells no identity
- * (`id` null, `idMissing` false — condition 17, never condition 1), and a
- * wholly absent `id` is `idMissing` (condition 1). Returns
+ * every attribute is kept in tag order with its own range (`attributes`, the
+ * attribute range of SPEC 11.4), attribute occurrences are counted, and value
+ * forms classified: a repeated prop name or a non-quoted-static `id`/`tags`
+ * value is recorded on the node as an `invalidProps` entry (condition 17,
+ * SPEC 2.7 — well-formed MDX, so never a parse failure; a value-form entry
+ * carrying its offending attribute's range), an `id` so afflicted spells no
+ * identity (`id` null, `idMissing` false — condition 17, never condition 1),
+ * and a wholly absent `id` is `idMissing` (condition 1). Returns
  * { root, sections, failure } where `failure` is null or { at, message }
  * (an unparseable source, SPEC 14.20 — masking the conditions inside).
  */
@@ -928,7 +940,10 @@ function parseMdx(text) {
       idAttr: null,
       /** @type {{ start: number, end: number } | null} */
       tagsAttr: null,
-      /** @type {{ name: string, kind: "repeated" | "value-form" }[]} */
+      /** @type {{ name: string, start: number, end: number }[]} */
+      attributes: [],
+      /** @type {{ name: string, kind: "repeated" | "value-form",
+       *            attribute: { start: number, end: number } | null }[]} */
       invalidProps: [],
       parent: stack.at(-1),
       children: [],
@@ -997,21 +1012,26 @@ function parseMdx(text) {
           return { root, sections, failure };
         }
       }
+      // The attribute's own characters, the attribute range of SPEC 11.4:
+      // its name through the last character of its value (the closing quote
+      // or brace), or the bare name where it spells no value — where every
+      // attribute condition on it is located (SPEC 14; T14-11).
+      const range = { start: attrStart, end: j };
+      node.attributes.push({ name, start: range.start, end: range.end });
       const count = (occurrences.get(name) ?? 0) + 1;
       occurrences.set(name, count);
       // A repeated prop, defined or unknown, is condition 17 (SPEC 2.7) —
-      // one violation per prop name, however many further repeats.
+      // one violation per prop name, however many further repeats, located
+      // at every attribute spelling the name (`validateSections`).
       if (count === 2) {
-        node.invalidProps.push({ name, kind: "repeated" });
+        node.invalidProps.push({ name, kind: "repeated", attribute: null });
       }
       // An `id`/`tags` value not in quoted static-string form — braced or
-      // valueless — is condition 17 (SPEC 2.4, 2.7). Unknown prop names stay
-      // ignored: out of the accepted workspace shapes (§CONF-VALID Scope).
+      // valueless — is condition 17 (SPEC 2.4, 2.7), located at its own
+      // attribute alone. Unknown prop names stay ignored: out of the accepted
+      // workspace shapes (§CONF-VALID Scope).
       if ((name === "id" || name === "tags") && count === 1) {
         if (form === "quoted") {
-          // The attribute's own characters, name through closing quote —
-          // where a 14.4 finding on it is located (SPEC 14; T14-11).
-          const range = { start: attrStart, end: j };
           if (name === "id") {
             idValue = value;
             idAttr = range;
@@ -1020,7 +1040,11 @@ function parseMdx(text) {
             tagsAttr = range;
           }
         } else {
-          node.invalidProps.push({ name, kind: "value-form" });
+          node.invalidProps.push({
+            name,
+            kind: "value-form",
+            attribute: range,
+          });
         }
       }
     }
@@ -1065,31 +1089,51 @@ function segmentsOf(id) {
 }
 
 /**
- * Validate one parsed file's sections in document order. A finding of
- * 14.1–14.3 or 14.17 carries the offending construct's own byte range (SPEC
- * 14: file, location, condition identity; SPEC 1.7 byte offsets); a 14.4
- * finding carries its `id` or `tags` attribute's own characters (SPEC 14,
- * T14-11) — so every finding falls within its construct's window and never
- * on a sibling.
+ * Validate one parsed file's sections in document order. Every finding
+ * carries SPEC 14's exact range for its condition, one per offending
+ * construct (SPEC 14: file, location, condition identity; 12.7; SPEC 1.7
+ * byte offsets): 14.1 the section's opening tag, the opening-tag range of
+ * 11.4; 14.2 the section's `id` attribute; 14.3 — one finding per
+ * duplicated spelling, no representative chosen — every bearer's `id`
+ * attribute; 14.4 the offending `id` or `tags` attribute (T14-11); 14.17 a
+ * repeated prop's every attribute spelling the name, or a braced or
+ * valueless value's own attribute. An attribute is located by its own
+ * characters, the attribute range of 11.4 — so every finding falls within
+ * its construct's window and never on a sibling.
  *
  * @returns {Finding[]}
  */
 function validateSections(rel, sections, byteOf) {
   /** @type {Finding[]} */
   const findings = [];
-  const seen = new Set();
+  /** A string-index range as its byte range (SPEC 1.7). */
+  const bytesOf = (range) => ({
+    start: byteOf(range.start),
+    end: byteOf(range.end),
+  });
+  /**
+   * Each spelled identity's bearers — their `id` attributes, in document
+   * order — for condition 14.3, reported once the file is walked.
+   *
+   * @type {Map<string, { start: number, end: number }[]>}
+   */
+  const bearers = new Map();
   for (const node of sections) {
-    const location = {
-      start: byteOf(node.openStart),
-      end: byteOf(node.closeEnd),
-    };
     // Condition 14.17 (SPEC 2.7): a repeated prop, or an `id`/`tags` value
-    // not in quoted static-string form — one finding per violation, located
-    // at the bearing element. An `id` so afflicted spells no identity: never
-    // condition 1 (SPEC 14.1), its own segment/structural/duplicate checks
-    // cannot run, and its immediate children's structural checks are masked
-    // below exactly as under a missing `id` (SPEC 14.2).
+    // not in quoted static-string form — one finding per violation. A
+    // repeated prop locates every attribute spelling the name, in tag order;
+    // a braced or valueless value its own attribute alone (SPEC 14). An `id`
+    // so afflicted spells no identity: never condition 1 (SPEC 14.1), its
+    // own segment/structural/duplicate checks cannot run, and its immediate
+    // children's structural checks are masked below exactly as under a
+    // missing `id` (SPEC 14.2).
     for (const invalid of node.invalidProps) {
+      const offending =
+        invalid.kind === "repeated"
+          ? node.attributes.filter(
+              (attribute) => attribute.name === invalid.name,
+            )
+          : [invalid.attribute];
       findings.push({
         condition: "14.17",
         message:
@@ -1097,19 +1141,21 @@ function validateSections(rel, sections, byteOf) {
             ? `invalid prop: the ${JSON.stringify(invalid.name)} prop is repeated — no prop name may occur more than once on one element (SPEC 2.7)`
             : `invalid prop: the ${JSON.stringify(invalid.name)} value must be a static string literal in quoted attribute form (SPEC 2.4, 2.7)`,
         file: rel,
-        location,
+        locations: offending.map(bytesOf),
       });
     }
     if (node.idMissing) {
-      // Condition 14.1 (SPEC 1.3): a non-root section without `id`. Its own
-      // structural and segment checks need an ID and cannot run; its
-      // immediate children's structural checks are masked below (SPEC 14.2).
+      // Condition 14.1 (SPEC 1.3): a non-root section without `id`, located
+      // at its opening tag — the opening-tag range of 11.4, a self-closing
+      // section's self-closing tag (SPEC 14). Its own structural and segment
+      // checks need an ID and cannot run; its immediate children's
+      // structural checks are masked below (SPEC 14.2).
       findings.push({
         condition: "14.1",
         message:
           "missing id: every non-root section must carry an `id` prop (SPEC 1.3)",
         file: rel,
-        location,
+        locations: [bytesOf({ start: node.openStart, end: node.openEnd })],
       });
     } else if (node.id !== null) {
       const segments = segmentsOf(node.id);
@@ -1129,22 +1175,19 @@ function validateSections(rel, sections, byteOf) {
           condition: "14.4",
           message: `invalid id ${JSON.stringify(node.id)}: ${segmentViolations.join("; ")}`,
           file: rel,
-          location: {
-            start: byteOf(node.idAttr.start),
-            end: byteOf(node.idAttr.end),
-          },
+          locations: [bytesOf(node.idAttr)],
         });
       }
       // Condition 14.2 (SPEC 1.3): the child ID equals the parent ID plus
       // exactly one segment, compared as segment sequences (an empty segment
-      // is a 1.4 matter, not a structural one). A top-level section is
-      // checked against the empty prefix: exactly one segment. Masking
-      // (SPEC 14.2): for the immediate children of a section spelling no
-      // identity — `id` missing (condition 1), repeated, or in invalid value
-      // form (condition 17) — the parent's condition masks this one; their
-      // other conditions, and this condition for their own children, report
-      // normally. Every such parent has `id` null here, so one test covers
-      // all three cases.
+      // is a 1.4 matter, not a structural one), located at the section's
+      // `id` attribute (SPEC 14). A top-level section is checked against the
+      // empty prefix: exactly one segment. Masking (SPEC 14.2): for the
+      // immediate children of a section spelling no identity — `id` missing
+      // (condition 1), repeated, or in invalid value form (condition 17) —
+      // the parent's condition masks this one; their other conditions, and
+      // this condition for their own children, report normally. Every such
+      // parent has `id` null here, so one test covers all three cases.
       const parent = node.parent;
       if (parent.isRoot || parent.id !== null) {
         const parentSegments = parent.isRoot ? [] : segmentsOf(parent.id);
@@ -1161,21 +1204,18 @@ function validateSections(rel, sections, byteOf) {
                 `parent's id plus "." plus exactly one segment — expected the form ` +
                 `"${parent.id}.<segment>" (SPEC 1.3)`,
             file: rel,
-            location,
+            locations: [bytesOf(node.idAttr)],
           });
         }
       }
-      // Condition 14.3 (SPEC 1.3): IDs unique within a source file; reported
-      // at each repeated occurrence.
-      if (seen.has(node.id)) {
-        findings.push({
-          condition: "14.3",
-          message: `duplicate id ${JSON.stringify(node.id)}: ids are unique within a source file (SPEC 1.3)`,
-          file: rel,
-          location,
-        });
+      // Condition 14.3 (SPEC 1.3): IDs unique within a source file. Every
+      // section spelling an identity bears it; the duplicates are reported
+      // after the walk, one finding per spelling (below).
+      const spelled = bearers.get(node.id);
+      if (spelled === undefined) {
+        bearers.set(node.id, [node.idAttr]);
       } else {
-        seen.add(node.id);
+        spelled.push(node.idAttr);
       }
     }
     // Condition 14.4 for tags (SPEC 1.4, 2.6): every token of the 2.6 split
@@ -1194,13 +1234,23 @@ function validateSections(rel, sections, byteOf) {
           condition: "14.4",
           message: `invalid tags ${JSON.stringify(node.tagsRaw)}: ${tokenViolations.join("; ")} (SPEC 2.6)`,
           file: rel,
-          location: {
-            start: byteOf(node.tagsAttr.start),
-            end: byteOf(node.tagsAttr.end),
-          },
+          locations: [bytesOf(node.tagsAttr)],
         });
       }
     }
+  }
+  // Condition 14.3 (SPEC 1.3, 14): several sections jointly violate
+  // uniqueness — one finding per duplicated spelling, carrying a location for
+  // every bearer, its `id` attribute, in document order; no representative is
+  // chosen. Uniqueness is per file: the same ID in two files is valid.
+  for (const [id, attributes] of bearers) {
+    if (attributes.length < 2) continue;
+    findings.push({
+      condition: "14.3",
+      message: `duplicate id ${JSON.stringify(id)}: ids are unique within a source file (SPEC 1.3)`,
+      file: rel,
+      locations: attributes.map(bytesOf),
+    });
   }
   return findings;
 }
@@ -1235,7 +1285,7 @@ function analyzeFile(rel, bytes) {
           condition: "14.20",
           message: `unparseable source: ${rel} is not valid UTF-8 (SPEC 1.6, 14.20)`,
           file: rel,
-          location: { start: 0, end: Math.min(1, bytes.length) },
+          locations: [{ start: 0, end: Math.min(1, bytes.length) }],
         },
       ],
       nodes: [],
@@ -1248,7 +1298,7 @@ function analyzeFile(rel, bytes) {
           condition: "14.20",
           message: `unparseable source: ${rel} begins with a byte-order mark (SPEC 1.6, 14.20)`,
           file: rel,
-          location: { start: 0, end: 3 },
+          locations: [{ start: 0, end: 3 }],
         },
       ],
       nodes: [],
@@ -1265,7 +1315,7 @@ function analyzeFile(rel, bytes) {
           condition: "14.20",
           message: `unparseable source: ${parsed.failure.message} (SPEC 14.20)`,
           file: rel,
-          location: { start: at, end: Math.min(at + 1, bytes.length) },
+          locations: [{ start: at, end: Math.min(at + 1, bytes.length) }],
         },
       ],
       nodes: [],
@@ -1353,7 +1403,7 @@ function conditionOrdinal(condition) {
  * numeric order), then locations element-wise (file path bytes, range start,
  * range end; a proper prefix first), then concerned path (null first), then
  * identities, then message — over this conformer's all-located findings the
- * live dimensions are ordinal, single location, and message.
+ * live dimensions are ordinal, locations, and message.
  */
 function compareFindingDocs(a, b) {
   const byOrdinal =
@@ -1386,15 +1436,18 @@ function compareFindingDocs(a, b) {
 /**
  * The findings report in the 12.7 form: one `{"code", "message",
  * "locations", "path", "identities"}` per finding — every condition this
- * scope reports locates in source, so `locations` carries the offending
- * construct and `path` is null — in the pinned findings order, findings
- * identical in every member collapsed to one (SPEC 12.7).
+ * scope reports locates in source, so `locations` carries one `{"file",
+ * "range"}` per offending construct, ordered by range start, then range end
+ * (one file per finding), and `path` is null — in the pinned findings order,
+ * findings identical in every member collapsed to one (SPEC 12.7).
  */
 function findingsDoc(findings) {
   const docs = findings.map((finding) => ({
     code: CODE_TOKENS[finding.condition],
     message: finding.message,
-    locations: [{ file: finding.file, range: finding.location }],
+    locations: [...finding.locations]
+      .sort((a, b) => a.start - b.start || a.end - b.end)
+      .map((range) => ({ file: finding.file, range })),
     path: null,
     identities: [],
     internalCondition: finding.condition,
