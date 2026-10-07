@@ -13,7 +13,12 @@
 //   and 14.17 as T1.3-6's invalid-form arms stage it (a repeated `id`
 //   attribute, a braced `id={"x"}` value, and the valueless bare name
 //   `<S id>`) — file, location, condition identity with its stable code,
-//   14.2's statement of the expected form, exit codes per SPEC 12.0.
+//   14.2's statement of the expected form, exit codes per SPEC 12.0. Both
+//   report forms carry the same information (SPEC 12.0, 14) from one
+//   ordered, collapsed findings list (`emitFindings`): with `--json` the
+//   12.7 document, without it one line per finding naming its file, every
+//   byte range it carries (`[start,end)`, SPEC 1.7), its condition, and its
+//   message.
 // - `query node` / `query nodes` (with `--tag`) reporting identity, tags,
 //   and metadataHash — the scoped query surface; source ranges ride along in
 //   the natural SPEC 11 row shape, and a root node's tags and coverage
@@ -1434,14 +1439,16 @@ function compareFindingDocs(a, b) {
 }
 
 /**
- * The findings report in the 12.7 form: one `{"code", "message",
- * "locations", "path", "identities"}` per finding — every condition this
+ * The findings in the pinned findings order, findings identical in every
+ * member collapsed to one (SPEC 12.7): each in the finding form `{"code",
+ * "message", "locations", "path", "identities"}` — every condition this
  * scope reports locates in source, so `locations` carries one `{"file",
  * "range"}` per offending construct, ordered by range start, then range end
- * (one file per finding), and `path` is null — in the pinned findings order,
- * findings identical in every member collapsed to one (SPEC 12.7).
+ * (one file per finding), and `path` is null — plus its condition
+ * (`internalCondition`, `14.N`), which orders it and names it in the human
+ * report. Both report forms render this one list (`emitFindings`).
  */
-function findingsDoc(findings) {
+function orderedFindings(findings) {
   const docs = findings.map((finding) => ({
     code: CODE_TOKENS[finding.condition],
     message: finding.message,
@@ -1461,8 +1468,17 @@ function findingsDoc(findings) {
     }
     collapsed.push(doc);
   }
+  return collapsed;
+}
+
+/**
+ * The findings report in the 12.7 form: one `{"code", "message",
+ * "locations", "path", "identities"}` per finding of `orderedFindings`, in
+ * its order.
+ */
+function findingsDoc(findings) {
   return {
-    findings: collapsed.map(
+    findings: orderedFindings(findings).map(
       ({ code, message, locations, path, identities }) => ({
         code,
         message,
@@ -1474,15 +1490,45 @@ function findingsDoc(findings) {
   };
 }
 
+/**
+ * A finding's locations as the human report spells them: each location's
+ * byte range in SPEC 1.7's convention — zero-based, start-inclusive and
+ * end-exclusive — as `[start,end)`, after its file, consecutive locations in
+ * one file naming it once: the JSON form's `locations`, in their order.
+ */
+function humanLocations(locations) {
+  const parts = [];
+  let file = null;
+  for (const location of locations) {
+    if (location.file !== file) {
+      file = location.file;
+      parts.push(file);
+    }
+    parts.push(`[${location.range.start},${location.range.end})`);
+  }
+  return parts.join(" ");
+}
+
+/**
+ * A findings report (SPEC 12.0: standard-output content, exit 1). With JSON
+ * in effect it is the 12.7 document; without, the human report renders the
+ * same ordered, collapsed findings, one line each, with the same
+ * information (12.0, 14): the file and every location the finding carries
+ * — each participant of a joint violation, 14.3's bearers and a repeated
+ * prop's attributes (14.17) — then its condition (`14.N`, naming its stable
+ * code one-to-one, 14) and its message, the correction (14.2's statement of
+ * the expected form included) — e.g.
+ * `specs/A.mdx [25,33) [34,42): 14.17: invalid prop: …`.
+ */
 function emitFindings(io, json, findings) {
   if (json) {
     io.stdout(canonicalJson(findingsDoc(findings)) + "\n");
   } else {
     io.stdout(
-      findings
+      orderedFindings(findings)
         .map(
           (finding) =>
-            `${finding.file}: ${finding.condition}: ${finding.message}\n`,
+            `${humanLocations(finding.locations)}: ${finding.internalCondition}: ${finding.message}\n`,
         )
         .join(""),
     );
