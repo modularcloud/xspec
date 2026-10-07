@@ -166,6 +166,18 @@
 //   stagings. Arms (f)–(i), the applicability arms, and the created-target
 //   arms are registered beside them (`R16_REFUSED_ARMS`, `R16_ALONE_ARMS`;
 //   (g)'s control in `R16_CONTROL_ARMS`); the preview twins are T6.6-3's.
+//   The applicability arms also assert the concern data SPEC 14 pins for
+//   the other reasons (TEST-SPEC line 9): the `refused-id-collision`
+//   reported beside locates its one colliding bearer, the target's `p.n`,
+//   none beside, `path` null, `identities` exactly `["specs/b.mdx#p.n"]`
+//   (`besideCollision`; T14-7 leaves this arm to its home); each alone
+//   arm's reason carries its concerned identity in 1.5's form over the
+//   target file — `["specs/b.mdx#p.then"]` for `refused-invalid-id`,
+//   `["specs/b.mdx#q"]` for `refused-missing-target-parent`
+//   (`R16AloneArm.identities`); the created target's
+//   `refused-invalid-destination` carries its path (`besidePath`). The (d)
+//   arm's beside `refused-missing-target-parent` is asserted by T14-7 on
+//   the identical staging (`besideExpectation` in section-14.ts).
 // - T6.5-18 runs four arms (`A18_ARMS`: the shadowed default, the
 //   type-only default (a), the type-only `text` (b), and the shadowed
 //   callee), each its own workspace of ledger records, the origin staged
@@ -240,10 +252,14 @@ import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
+  type BearerLocationExpectation,
   assertEdgeSetEqual,
   assertFindingIdentities,
+  assertFindingLocatesExactly,
+  assertRefusalIdentities,
   assertSameJson,
   buildOk,
+  byteWindow,
   expectExit,
   expectFindingFreeReport,
   runFindingsReport,
@@ -3900,8 +3916,28 @@ export interface R16RefusedArm {
   readonly beside?: readonly string[];
   /** A beside reason's finding `path`, where the entry pins it (`refused-invalid-destination`, T14-7). */
   readonly besidePath?: Readonly<Record<string, string>>;
+  /**
+   * The concern data of a `refused-id-collision` reported beside, where the
+   * arm stages one (the collision arm, `beside` naming the code).
+   */
+  readonly besideCollision?: R16CollisionConcern;
   /** For a file holding no admissible offset for an addition it needs: the (g) family's premise. */
   readonly noOffset?: R16NoOffset;
+}
+
+/**
+ * A `refused-id-collision` reported beside `refused-invalid-rewrite` (SPEC
+ * 14): it locates every colliding bearer — each section the move would
+ * leave in place whose ID a produced ID equals, never the moved section
+ * that would take it — exactly one location per bearer, within the
+ * bearer's byte window, none beside, in 12.7's order, `path` null
+ * (support.ts assertFindingLocatesExactly); its `identities` exactly the
+ * located bearers' identities in 1.5's form over the target file, in
+ * location order (assertRefusalIdentities; SPEC 14, 1.5, 12.7).
+ */
+export interface R16CollisionConcern {
+  readonly bearers: readonly BearerLocationExpectation[];
+  readonly identities: readonly string[];
 }
 
 /**
@@ -3935,7 +3971,8 @@ export interface R16NoOffset {
 /**
  * An arm refused for another reason alone — `refused-invalid-rewrite` not
  * applicable, no would-be text existing to judge — exit 1, nothing
- * modified, exactly the expected reasons reported (SPEC 6.5, 14).
+ * modified, exactly the expected reasons reported, each carrying its
+ * concerned identity (SPEC 6.5, 14, 1.5).
  */
 export interface R16AloneArm {
   readonly key: string;
@@ -3944,6 +3981,14 @@ export interface R16AloneArm {
   readonly argv: readonly string[];
   /** The report's codes, exactly, as a set. */
   readonly codes: readonly string[];
+  /**
+   * Each reported reason's exact `identities`, keyed by code: the identity
+   * it concerns as the sole element, in 1.5's form over the target file —
+   * `<target-file>#id` for a section move — whether or not the ID is valid
+   * (SPEC 14); stated for every code whose `identities` 14 pins
+   * (support.ts assertRefusalIdentities).
+   */
+  readonly identities: Readonly<Record<string, readonly string[]>>;
 }
 
 interface R16ControlArm {
@@ -4824,7 +4869,14 @@ const R16_H_ARM: R16RefusedArm = {
 // validity, the creation's composition judged on its own.
 
 // (c)'s first shape staged beside `refused-id-collision` — a section `p.n`
-// already in the target — reports both reasons.
+// already in the target — reports both reasons. The collision locates its
+// one colliding bearer, the target's `<S id="p.n">n</S>` — the section the
+// move would leave in place whose ID the moved section would take, never
+// the moved section itself — within that construct's byte window (the
+// enclosing `p` starts before it, so `p`'s range never satisfies it), none
+// beside, its `identities` exactly that bearer's identity (SPEC 14, 1.5).
+const R16_COLLISION_TARGET_PREFIX = 'foo <S id="p">bar ';
+const R16_COLLISION_BEARER = '<S id="p.n">n</S>';
 const R16_COLLISION_ARM: R16RefusedArm = {
   key: "(c) beside refused-id-collision: a section p.n already in the target",
   summary:
@@ -4836,7 +4888,7 @@ const R16_COLLISION_ARM: R16RefusedArm = {
     [R16_ORIGIN]: R16_FLOW_ORIGIN_STAGED,
     [R16_TARGET]: stagedMdx(
       "T6.5-16/T6.6-3 (c) beside refused-id-collision specs/b.mdx",
-      'foo <S id="p">bar <S id="p.n">n</S></S> baz\n',
+      `${R16_COLLISION_TARGET_PREFIX}${R16_COLLISION_BEARER}</S> baz\n`,
     ),
   },
   argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
@@ -4848,6 +4900,15 @@ const R16_COLLISION_ARM: R16RefusedArm = {
   identities: [R16_TARGET],
   locations: [r16Construct(R16_ORIGIN, R16_K, R16_FLOW_SECTION)],
   beside: ["refused-id-collision"],
+  besideCollision: {
+    bearers: [
+      {
+        file: R16_TARGET,
+        window: byteWindow(R16_COLLISION_TARGET_PREFIX, R16_COLLISION_BEARER),
+      },
+    ],
+    identities: [`${R16_TARGET}#p.n`],
+  },
 };
 
 // A missing target parent beside an origin deletion of shape (d): no
@@ -4919,7 +4980,11 @@ function r16CreatedArm(
 // verbatim leaves the would-be text undefined; and a missing target parent
 // beside the flow-form section and a text-position target file, the
 // origin's deletion leaving it well-formed — no target text exists to
-// judge.
+// judge. Each reason carries the identity it concerns as the sole element
+// of its `identities`, in 1.5's form over the target file whether or not
+// the ID is valid: the new identity `specs/b.mdx#p.then`, spelled
+// verbatim; the target-parent identity `specs/b.mdx#q`, the new ID minus
+// its final segment (SPEC 14).
 export const R16_ALONE_ARMS: readonly R16AloneArm[] = [
   {
     key: "(c)'s shape under the invalid new-id p.then: refused-invalid-id alone",
@@ -4933,6 +4998,7 @@ export const R16_ALONE_ARMS: readonly R16AloneArm[] = [
     },
     argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.then"],
     codes: ["refused-invalid-id"],
+    identities: { "refused-invalid-id": [`${R16_TARGET}#p.then`] },
   },
   {
     key: "a missing target parent beside a clean origin: refused-missing-target-parent alone",
@@ -4946,6 +5012,7 @@ export const R16_ALONE_ARMS: readonly R16AloneArm[] = [
     },
     argv: ["move", "specs/a.mdx#m", "specs/b.mdx#q.n"],
     codes: ["refused-missing-target-parent"],
+    identities: { "refused-missing-target-parent": [`${R16_TARGET}#q`] },
   },
 ];
 
@@ -5228,7 +5295,9 @@ function r16RenderLocations(locations: readonly R16Location[]): string {
  * `refused-invalid-rewrite` and the arm's `beside` reasons, none further —
  * the `refused-invalid-rewrite` finding's `locations` exactly the arm's in
  * 12.7's order, its `identities` exactly the concerned paths in byte
- * order, its `path` null (SPEC 14, 12.7, 1.7).
+ * order, its `path` null (SPEC 14, 12.7, 1.7); and each beside reason's
+ * concern data the arm pins — `besidePath`'s path, `besideCollision`'s
+ * located bearers and identities (SPEC 14, 1.5).
  */
 function r16AssertFinding(
   findings: readonly Finding[],
@@ -5306,6 +5375,27 @@ function r16AssertFinding(
           `${JSON.stringify(beside.message)})`,
       );
     }
+  }
+  if (arm.besideCollision !== undefined) {
+    const code = "refused-id-collision";
+    const collision = findings.find((candidate) => candidate.code === code)!;
+    assertFindingLocatesExactly(
+      collision,
+      arm.besideCollision.bearers,
+      `${context}: the \`${code}\` finding reported beside locates every ` +
+        `colliding bearer — each section the move would leave in place ` +
+        `whose ID a produced ID equals, never the moved section that would ` +
+        `take it — within the bearer's byte window, none beside, \`path\` ` +
+        `null (SPEC 14, 1.5, 12.7)`,
+    );
+    assertRefusalIdentities(
+      collision,
+      code,
+      arm.besideCollision.identities,
+      `${context}: the \`${code}\` finding reported beside carries the ` +
+        `located bearers' identities, each in 1.5's form over the target ` +
+        `file, in location order (SPEC 14, 1.5)`,
+    );
   }
 }
 
@@ -5395,6 +5485,20 @@ async function runR16AloneArm(
               `reason — ${JSON.stringify(arm.codes)} and no ` +
               `\`refused-invalid-rewrite\` beside it: ${arm.summary} ` +
               `(SPEC 6.5, 14, 12.7); got ${JSON.stringify(actualCodes)}`,
+          );
+        }
+        for (const code of arm.codes) {
+          const finding = findings.find(
+            (candidate) => candidate.code === code,
+          )!;
+          assertRefusalIdentities(
+            finding,
+            code,
+            arm.identities[code],
+            `${context}: the \`${code}\` finding carries the identity it ` +
+              `concerns as the sole element of its \`identities\`, in 1.5's ` +
+              `form over the target file — \`<target-file>#id\` for a ` +
+              `section move — whether or not the ID is valid (SPEC 14, 1.5)`,
           );
         }
       },
@@ -5508,7 +5612,7 @@ function r16ReadAddedIdentifier(
 const T6_5_16 = defineProductTest({
   id: "T6.5-16",
   title:
-    "refused-invalid-rewrite: a section-form move whose exact edits would leave a rewritten file other than well-formed MDX — the origin as its deletion leaves it, the target as its parent rewrite and insertion leave it or as its creation composes it, the one file when origin and target coincide — or a file the rewrite must add an import to holding no admissible offset, is refused: exit 1, nothing modified (the workspace byte-compared, the journal absent or byte-unchanged), exactly one `refused-invalid-rewrite` finding per operation, beside every other applicable reason, locating the moved section's construct range in the origin file plus, for an addition no offset admits, the reference spelling rooted at its binding by its occurrence span, its `identities` the concerned files' workspace-relative paths in byte order, its `path` null; each arm's would-be text verified underivable, every other rewritten file's verified to derive, and each named offset of an addition none admits probed (S-9) from a valid pre-move workspace: (a) the `body</S>` variant — `foo <S id=\"m\">`, then a space, a tab, or nothing, U+000A, `body</S>` — moved to top level; (b) the one-sided U+000C and U+000B spellings of 6.2's worked three-line shape; (c) a flow-position section, a self-closing section, and a single-line section holding nothing outside its tags, each moved into `foo <S id=\"p\">bar</S> baz`, into the parent with its closing tag on a later line, and into the self-closing parent after its paired-form rewrite; (d) a deletion leaving a list marker, a setext underline, a flow-position tag, a flow-position expression, or the parent's own closing tag at its line's start inside a text-position parent, and the insertion-side counterpart leaving `<S id=\"p.s\"> </S>` alone on its line; (e) a top-level insertion at the end of a file whose last line is an ESM block's, terminated and unterminated; (f) a section standing in a block quote, its moved text carrying the `>` prefixes of its interior lines; (g) a text-position target lacking the module the moved embedding is rooted at, terminated and unterminated, its pseudo-block twin headed by a paragraph of declarations, its top-level twin into the paragraph-ended `para`, terminated and unterminated, and its origin-side twin whose kept reference needs an import the unterminated origin holds no offset for — the finding locating the construct and the embedding's braced container; (h) the same-file variant, one path; (i) two files concerned, one finding, `identities` exactly [\"specs/b.mdx\", \"specs/z.mdx\"]; the applicability arms — (c)'s shape beside `refused-id-collision`; a missing target parent beside an origin deletion of shape (d), `identities` the origin alone, and, the origin clean, `refused-missing-target-parent` alone; (c)'s shape under `p.then`, `refused-invalid-id` alone; and (a)'s shape to the absent `specs/new.txt#y`, beside `refused-invalid-destination` with that path, and to `specs/new.mdx#y`, alone, nothing created; with the movable controls performed and byte-asserted, `check` and `build` clean — the in-line section `<S id=\"m\">x</S>` into each of (c)'s parents, (d)'s plain-prose remainder ` more` kept as a paragraph-continuation line, (e)'s declaration followed by the empty line ending its block, and (g)'s in-line moved text to the top level of `<S id=\"p\">`, `x`, `</S>`, the declaration at the end of the `</S>` line before the moved text and the root `changed` (SPEC 6.5, 6.2, 3, 2.1, 1.7, 5.7, 14, 12.7, 14.20)",
+    'refused-invalid-rewrite: a section-form move whose exact edits would leave a rewritten file other than well-formed MDX — the origin as its deletion leaves it, the target as its parent rewrite and insertion leave it or as its creation composes it, the one file when origin and target coincide — or a file the rewrite must add an import to holding no admissible offset, is refused: exit 1, nothing modified (the workspace byte-compared, the journal absent or byte-unchanged), exactly one `refused-invalid-rewrite` finding per operation, beside every other applicable reason, locating the moved section\'s construct range in the origin file plus, for an addition no offset admits, the reference spelling rooted at its binding by its occurrence span, its `identities` the concerned files\' workspace-relative paths in byte order, its `path` null; each arm\'s would-be text verified underivable, every other rewritten file\'s verified to derive, and each named offset of an addition none admits probed (S-9) from a valid pre-move workspace: (a) the `body</S>` variant — `foo <S id="m">`, then a space, a tab, or nothing, U+000A, `body</S>` — moved to top level; (b) the one-sided U+000C and U+000B spellings of 6.2\'s worked three-line shape; (c) a flow-position section, a self-closing section, and a single-line section holding nothing outside its tags, each moved into `foo <S id="p">bar</S> baz`, into the parent with its closing tag on a later line, and into the self-closing parent after its paired-form rewrite; (d) a deletion leaving a list marker, a setext underline, a flow-position tag, a flow-position expression, or the parent\'s own closing tag at its line\'s start inside a text-position parent, and the insertion-side counterpart leaving `<S id="p.s"> </S>` alone on its line; (e) a top-level insertion at the end of a file whose last line is an ESM block\'s, terminated and unterminated; (f) a section standing in a block quote, its moved text carrying the `>` prefixes of its interior lines; (g) a text-position target lacking the module the moved embedding is rooted at, terminated and unterminated, its pseudo-block twin headed by a paragraph of declarations, its top-level twin into the paragraph-ended `para`, terminated and unterminated, and its origin-side twin whose kept reference needs an import the unterminated origin holds no offset for — the finding locating the construct and the embedding\'s braced container; (h) the same-file variant, one path; (i) two files concerned, one finding, `identities` exactly ["specs/b.mdx", "specs/z.mdx"]; the applicability arms — (c)\'s shape beside `refused-id-collision`, that finding locating its one colliding bearer, the target\'s `p.n`, none beside, `identities` exactly ["specs/b.mdx#p.n"]; a missing target parent beside an origin deletion of shape (d), `identities` the origin alone, and, the origin clean, `refused-missing-target-parent` alone, `identities` exactly ["specs/b.mdx#q"]; (c)\'s shape under `p.then`, `refused-invalid-id` alone, `identities` exactly ["specs/b.mdx#p.then"]; and (a)\'s shape to the absent `specs/new.txt#y`, beside `refused-invalid-destination` with that path, and to `specs/new.mdx#y`, alone, nothing created; with the movable controls performed and byte-asserted, `check` and `build` clean — the in-line section `<S id="m">x</S>` into each of (c)\'s parents, (d)\'s plain-prose remainder ` more` kept as a paragraph-continuation line, (e)\'s declaration followed by the empty line ending its block, and (g)\'s in-line moved text to the top level of `<S id="p">`, `x`, `</S>`, the declaration at the end of the `</S>` line before the moved text and the root `changed` (SPEC 6.5, 6.2, 3, 2.1, 1.5, 1.7, 5.7, 14, 12.7, 14.20)',
   run: async (product) => {
     for (const arm of R16_REFUSED_ARMS) {
       await runR16RefusedArm(product, arm);

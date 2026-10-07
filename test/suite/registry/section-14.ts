@@ -3284,11 +3284,14 @@ const T14_7_IMPORT_DECLARATION_WINDOW = byteWindow(
 // modifies-nothing compares stay the home tests' subject.
 //
 // T6.5-16's one arm reported beside `refused-id-collision` is left to its
-// home: the entry pins that collision's bearers nowhere (T6.5-16 asserts
-// the beside reason's code alone), while T14-7 asserts the collision's
-// located bearers and identities over T6.4-3's, T6.5-4's, and its own
-// stagings. Every other beside reason's concern follows from the operands
-// alone (`besideExpectation`).
+// home, which asserts that collision's concern data itself: its one
+// colliding bearer, the target's `p.n`, located within the bearer's byte
+// window, none beside, `path` null, and its `identities` exactly
+// `["specs/b.mdx#p.n"]` (the arm's `besideCollision`, read by
+// `r16AssertFinding`; SPEC 14, 1.5); T14-7 asserts the collision's located
+// bearers and identities over T6.4-3's, T6.5-4's, and its own stagings.
+// Every other beside reason's concern follows from the operands alone
+// (`besideExpectation`).
 const T14_7_INVALID_REWRITE_ARMS: readonly R16RefusedArm[] =
   R16_REFUSED_ARMS.filter(
     (arm) => !(arm.beside ?? []).includes("refused-id-collision"),
