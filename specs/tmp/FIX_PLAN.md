@@ -1,0 +1,294 @@
+# FIX_PLAN — Phase 9 (test harness), re-descent iteration 148
+
+Written 2026-10-07 at b00e7cd (branch `claude/xspec-ui-apis-4df8fa`, standing in for `patch/external-ui-apis`). It plans from the re-descent's seventh compliance determination, which was not clean. Its findings:
+- compliance review A (TEST-SPEC's T1–T6 tests): 1 gap;
+- B (T7 and later): 2 gaps;
+- C (everything outside the T-numbered tests): 2 gaps;
+- D (CERTIFICATIONS.md): 1 gap;
+- VERIFY V: green — every harness self-test and every certification passes, locally and in CI run 924.
+
+Task headings cite the gaps as A1 (reviewer A's G1), B1 and B2 (reviewer B's GAP 1 and GAP 2), C1 and C2 (reviewer C's GAP 1 and GAP 2), and D1 (reviewer D's gap 1). A1, B1, C2, and D1 are one defect seen from four scopes — the query adapters demand a tag set on a root node, whose tags SPEC 11.1 states absent — and Part A plans them together. Governing IP: `specs/patches/0001-external-ui-apis.md` (Stage: Tests Specified); no task changes its stage. No Bug Report applies.
+
+Why the harness changes again: the documents moved after the harness was last green (Phase 9 ended at 3bfedb5). The deltas are `git diff 3311ccd..6780f53 -- specs/TEST-SPEC.md`, `git diff 3311ccd..301f2f9 -- specs/CERTIFICATIONS.md`, and `git diff 9d095d9..f31e100 -- specs/SPEC.md`; none of the three documents has changed since. The plans written at f0d3cd9, 857e51a, ad9eb42, 6a4a280, 1e2972e, and 849b69d closed every gap the first six determinations found. Their finished texts were deleted (at 44c5dad, 4117ede, and b00e7cd) or sit at `deleted/specs/tmp/FIX_PLAN.md`, `deleted/specs/tmp/FIX_PLAN-2.md`, and `deleted/specs/tmp/FIX_PLAN-3.md`, each moved there with the Developer's approval. None of them is part of the harness or the product, and no task touches them. The three defects below — the root-tags decode with its CONF-VALID counterpart (Part A), T4.1-3's capped walk (Part B), and T12.7-1's marker walk (Part C) — are clauses no earlier plan implemented; Part B's was introduced by the sixth plan's Task 1. None blocks on a spec defect.
+
+## Preamble — read before any task
+
+**Phase goal and scope guards (Phase 9).** The harness must adhere to `specs/TEST-SPEC.md` and `specs/CERTIFICATIONS.md`. Every harness self-test and every certification passes: each certified test passes against its conformer and fails against each of its violators exactly as the violator's entry states. Product tests may fail, but only as diagnosed assertion failures (H-8): never a harness error, crash, hang, or false pass. Never modify product code (`src/`; `dist/` is built from it). Every task is harness work under `test/` (fixtures under `test/fixtures/` are harness code), plus `AGENTS.md`'s build/run facts and this plan. A spec defect that blocks a task goes to the matching problems file under `specs/tmp/` (`SPEC-PROBLEMS.md`, `TEST-SPEC-PROBLEMS.md`, or `CERTIFICATIONS-PROBLEMS.md`), never into a silent workaround.
+
+**Known state at b00e7cd (VERIFY, and CI run 924, ID 37579958535).**
+- Self project, run as CI runs it (no network, uid 1000, no capabilities): 27 files, 4230 tests, all passing, 0 skipped (176.08 s locally with another agent's Vitest running beside it; 83.30 s in CI).
+- Certification: all 27 fixtures pass — CORE 1 conformer and 8 violators, VALID 1 and 3, MD 1 and 2, DISC 1 and 3, AVAIL 1 and 3, ORPHAN 1 and 2. The runner's lines sum to 154 PASS / 38 FAIL / 0 error / 0 hang; every FAIL is an expected outcome (each violator's FAIL set equals its Certifies list), and the C-1 gate passes. The in-scope tests: CONF-CORE T6.1-2, T10.4-5, T13.4-5, T13.5-1 through T13.5-5, and T13.5-8; CONF-VALID T1.3-1 through T1.3-6, T1.4-1, T1.4-2, T1.4-4, T2.6-1, T2.6-2, and P-1; CONF-MD T3-1 through T3-6, P-2, and P-3; CONF-DISC T7-4, T7-5, and T7-6; CONF-AVAIL T11.2-2, T11.2-4, T11.3-4, T11.4-1, T11.4-3, and T11.4-4; CONF-ORPHAN T13.4-11. Tasks 1 and 5 change shared helpers that certified tests run through (the query decoders behind T1.3-5, T1.4-2, T1.4-4, T2.6-1, and T2.6-2; `parseJsonStdout` behind every test), and Task 3 changes the CONF-VALID fixture: each of those tasks must leave every certification outcome unchanged.
+- Suite against the built product (local and CI, no network, unprivileged): 345 tests in 79 files; 317 pass and 28 fail, every failure a `HarnessAssertionError` (diagnosed). The failing IDs: P-1, P-5, T1.4-1, T1.4-4, T4-2, T6.4-3, T6.5-4, T6.5-11, T6.5-20, T6.5-21, T6.5-22, T6.5-23, T6.6-3, T7-2, T7-6, T7.1-1, T7.3-1, T12.0-5, T12.0-10, T12.7-2, T13.4-9, T13.4-10, T13.4-11, T14-4, T14-6, T14-7, T14-11, and T14-12. Local `npm test` in CI's inner stage (`XSPEC_E6_EXCHANGE_DIR` set): 106 files, 4575 tests, 1591.70 s with another agent's Vitest beside it; CI's full-suite job: 792.78 s.
+- Windows leg (E-6 subset): 3 files, 9 tests, green (39.62 s in CI).
+- `npm run typecheck`, `npm run build`, and `npm run format:check` pass; both TypeScript copies are 5.9.3. `src/` has not changed since c62f451.
+- The built product's root tags (planner's probe over a one-file workspace, `p148plan/ws` in the scratchpad, `specs/A.mdx` holding one section `a` with `tags="x"`): `query node specs/A.mdx`, every root row of `query nodes`, `query subtree`, and `query ancestors`, and `show specs/A.mdx --json` carry `"tags": []`, with no `coverage` member; `view` reports the root's `tags` and `coverage` as `null`. The CONF-VALID fixture reports `"tags": []` for a root as well (reviewer D).
+- No self-test reads TEST-SPEC.md, and none probes the fixtures outside certification runs, so a green self project does not by itself show compliance: each task carries its own checks.
+
+**Run mechanics (AGENTS.md holds the recipes; read the bullets a task names before running anything).**
+- Confirm `git status` is clean on `claude/xspec-ui-apis-4df8fa` before editing. Never fetch or merge `main` (it carries a newer scaffold commit this run does not adopt). Push with `git push -u origin claude/xspec-ui-apis-4df8fa`, retrying network errors with backoff (2 s, 4 s, 8 s, 16 s); never force-push; check `git log -1` before every push. If `node_modules` is missing, `npm ci` restores it.
+- Run the self project under the unprivileged namespace (`unshare --map-user=1000 --map-group=1000 -- npm run test:self` in this root sandbox; AGENTS.md's namespace bullet also records how to reproduce CI's no-network stage). Redirect long runs to a log in the scratchpad and grep it for `×` and the `Tests` summary; never cap the output with `head`.
+- Run the self project, a certification run, a stand-in sweep, and a suite run one at a time, never two together, and check the load first (another agent may share the machine). S-2's tower vector has timed out only with two harness runs overlapping; such a timeout is not a task failure — rerun alone.
+- One registered test: `-t '<ID> '`, with the trailing space and the dots escaped, on its wrapper file (e.g. `npx vitest run --config test/vitest.config.ts --project suite test/suite/section-11.test.ts -t 'T11-1 '`). Each registry module exports its entries as a `readonly ProductTestEntry[]` (e.g. `section11Tests` in `test/suite/registry/section-11.ts`), so a temporary self-test can also select a whole module's IDs.
+- Red/green checks of a product test: AGENTS.md's stand-in wrapper recipe ("Red-checking a strengthened product test against the built product (Phase 9)": a small `.mjs` wrapper in the scratchpad that spawns the real `dist/cli/bin.js` with the invocation's argv and cwd, rewrites the answer under test, and exits with the product's exit code, bound as `{ command: process.execPath, prefixArgs: [wrapper, mode, binJs] }` through a temporary `test/self/zz-*.test.ts` calling `runProductTests(binding, productTestSuite.select([...ids]))`, run alone as `--project self <file> --disable-console-intercept` under the namespace and deleted before committing). `runProductTests` (`test/self/certification-runner.ts`) reports each test's outcome as `pass`, `fail` (a `HarnessAssertionError`, the diagnosed product failure), `error` (any other throw — a harness error), or `hang`, with its `diagnosis`. "Red-checking a generated-module type assertion" covers rewriting the product's generated files after an exit-0 `build`; "Red-checking a new self-test vector" covers S-5 vectors. Hand-driving the product: `node dist/cli/bin.js <argv…>` with a scratch workspace as the working directory.
+- Rebuild the product (`npm run build`) only if `dist/` is missing or stale; `src/` does not change in this phase.
+- The scratchpad is shared across spawns: use task-specific file names there. The reviewers' scratch files cited below (`c148A_standin/`, `c148T7/`, `c148C/`, `c148D/`) and the planner's (`p148plan/`) live there; read any you reuse in full first, and rebuild from this plan's description if one is gone (container restarts have happened).
+
+**The root-tags stand-in (Tasks 1 and 2).** A wrapper per the stand-in recipe, with three modes. It spawns the real `dist/cli/bin.js` with the invocation's argv and cwd, passes stderr and the exit code through, and touches stdout only on an exit-0 answer of `query node`, `query nodes`, `query subtree`, `query ancestors` (JSON-only surfaces, SPEC 11), or `show … --json`. It finds the command word as the first argv token naming a command, since flags may precede it (12.0). In such an answer, every node object — the document itself for `query node` and `show`, each element of the `nodes` array for the row surfaces — whose `identity` is a string containing no `#` (a root, SPEC 1.5) and which carries a `tags` member is rewritten:
+- in mode `null`, `tags` is set to `null`;
+- in mode `omit`, the `tags` member is deleted;
+- mode `pass` rewrites nothing.
+
+The document is then re-serialized with a trailing newline. Modes `null` and `omit` give the two shapes SPEC 11.1's "reported as absent" can take in the unpinned `query`/`show` shape (H-3). Reviewers A and B built such wrappers (`c148A_standin/wrap.mjs`, taking the mode as its first argument; `c148T7/standin/multi.mjs`, reading it from a `mode.txt` beside a copied `dist/cli/bin.js`).
+
+**Spellings.** Take every exact spelling — code points, escape-spelled literals, byte offsets, file contents, command lines — from the TEST-SPEC.md, CERTIFICATIONS.md, or SPEC.md text the task cites, or from the harness code it names, never from this plan or the review reports. The reports' channel decoded escape spellings, and the tool-parameter layer decodes backslash-u spellings inconsistently in edit and Bash payloads, comments included. This plan spells no escapes and needs none. Should a task need one anyway, build it in code from code points and verify the staged bytes byte-wise (`od -c`, a sha256 compare).
+
+**Conventions for changed tests.**
+- *Registration and records.* No task adds or removes a registered product test or a staged-source record, and no task restages a product test's inputs (Task 3 changes a certification fixture product, not a staging). Tasks 1 and 5 add S-5 vectors. Where a vector is a new `test(...)` rather than a case in an existing table, the self project's test count grows; record the new count in the task's commit message, and Task 6 records it in AGENTS.md. The self project stays at 27 files.
+- *Product verdicts.* The built product (Phase 10's, at c62f451) predates this re-descent's SPEC changes. Task 2 makes T11-1, T11-2, and T11-3 fail against it, diagnosed at their root-tags assertions: the product reports a root's tags as `[]` where SPEC 11.1 states them absent (Known state above) — a product deviation left to Phase 10. No other task is planned to change any test's outcome against the built product. Task 5's walk could newly fail a test only where the product prints a near-marker (an object other than `{"unavailable": true}` carrying an `unavailable` member). Accept such a failure as diagnosed only after showing the near-marker in the captured document. A harness error, crash, or hang is a harness defect to fix in the task.
+- *Liveness.* An arm that passes against the product proves nothing about its liveness, so every task red-checks its change: with a stand-in, a fixture variant, or a stashed helper change, it shows something the old code let through being caught by the new code.
+- *Every task ends with:*
+  - `npm run typecheck` and `npm run format:check`;
+  - every suite file the task touches, run against the built product under the namespace, each of its tests' outcomes before and after recorded. They must keep their outcomes, except as the task states. A test failing diagnosed at b00e7cd must fail at the same arm with the same diagnosis;
+  - the full self project under the namespace, with 0 failures and certification lines summing to 154 PASS / 38 FAIL / 0 error / 0 hang (green at b00e7cd; keep it green);
+  - a commit message (`sdg(phase-9): <imperative summary> (FIX_PLAN Task N)`, with the two trailer lines the session requires) stating the honest results: each touched test's outcome before and after, and each red check's outcome before and after;
+  - removing the finished task from this plan in the same commit and adding its one-line summary to its bullet in the Order section below (a done task leaves the plan).
+- *AGENTS.md* gets only build/run knowledge a later spawn needs (a recipe, a count or timing a later check relies on), never a task narrative.
+
+**Standing rulings.** Two Liaison rulings stand for this run: AGENTS.md's "Known residual 14.20 location gaps" and "Known SPEC 6.5 gap, deferred to a future SPEC revision (accepted for this run by ruling)" bullets. No task here addresses them, and none may be added for them.
+
+**Deleting this plan.** Only Task 6 deletes this file, with `git rm`, once no other task remains. If the permission system refuses the deletion, stop there: leave the file in place, commit nothing further for it, and report the refusal in the final report. Never move, rename, empty, or otherwise work around a refused deletion: the Developer's three earlier approvals to move a finished plan each covered that one file only.
+
+**Considered and not planned (do not re-raise).**
+- *Carried from the earlier plans.* The "Considered and not planned" lists of `deleted/specs/tmp/FIX_PLAN-3.md` and of the sixth plan's final text (`git show 715dff7:specs/tmp/FIX_PLAN.md`) still stand in full at b00e7cd. The harness code their items concern is unchanged except where a task below changes it, and the reviewers re-confirmed the items they own. They are not repeated here.
+- *The Phase 7 round-3 certifications driver's note on VIOL-ORPHAN-THROUGHLINK* (its deviation resolves directory components only through links whose target directory lies inside the workspace root): implemented as now written (`linkedDirectoryInsideRoot` in the fixture) and certified. Reviewer D at b00e7cd confirms THROUGHLINK fails exactly T13.4-11, at arm (e)'s inside staging, and VERIFY's certification comparison (locally and in CI run 924) agrees. No task.
+- *The note relayed from the sixth plan's Task 5* (`p9c6_flagged_notes.txt`: perhaps TEST-SPEC and SPEC disagree, since T11-1 and T12.4-1 name only the coverage attribute absent for roots). Part A settles it as a harness defect, not a document disagreement. T11-1, T11-2, and T11-3 list tags among the fields every node or row carries, and SPEC 11.1 states a root's tags absent ("both reported as absent"), so Task 2 asserts absence there. No TEST-SPEC text asks for a root's tags to be `[]`, the value the harness pinned. T12.4-1 pins only the coverage attribute absent on its root arm and compares every field `show`-to-`query node`, so it gains no literal root-tags pin; Task 1 makes absent equal absent in that compare.
+- *From this determination's reviewers (b00e7cd).*
+  - A: T1.4-3's "type-checks and resolves" read as compile-time resolution. T3-6 asserts no `.md` only at the default emit destinations (the only ones SPEC 7.3 defines without `outDir`). T2.3-3's negative arms observe "no edge" as "no occurrence", since `query` cannot run on that failing workspace (13.3). T2.3-2 stages the string form at depth 2 and the node form at depth 3 and at the root. T1.7-2's function-valued variable arm stands in for "function- or class-valued", and since the unit `Outer` of `namespace Outer.Inner` produces no occurrence, the shared range is pinned through `Outer.Inner`. T5.6-6 stages its added and deleted subtrees as whole files. T4.1-3's walk leaves out Map and Set entries and method return values, which lie outside the walk TEST-SPEC defines (property keys and values, string coercion, JSON serialization). T2.7-3 stages a repeated unknown prop.
+  - B: T10.5-4, T10.6-2, and T10.7-4 still never stage the "then item `id`" key (judged not a gap before; unchanged). T11.3 and T11.5 run every invocation bare; their flag-less/`--json` parity is carried by T12.0-1's sweep. T12.0-8's impact arm compares the witness path inside `if (witness !== undefined)`, and a missing entry is still caught by `assertImpactedCode`'s group compare. No other "absent" datum of SPEC 7–15 is over-asserted.
+  - C: T12.4-1's title cites 12.7 and 2.6 while its map entry is `["12.4"]`, as the map's primary-passage policy allows. A hang or crash inside T4.1-3's probe consumer is reported through the driver's timeout and exit-code checks as a diagnosed failure: one consumer run cannot tell the product's module from the harness's probing as the cause (Task 4 changes only the cap's exhaustion, which is unambiguous). The earlier accepted items (the `dist/`-missing driver errors, P-6's and P-9's narrower draws, the UTF-8 decode catch-alls, the Windows leg's network, the platform `runIf` gates in self-tests) are unchanged.
+  - D: CONF-CORE's `query` and `show` answers report `tags: []` for roots and sections alike and omit `coverage` even for sections. CONF-CORE's certified contracts exclude 11.1's content, and no in-scope test decodes those answers, so Task 3 leaves `test/fixtures/conf-core/` alone. T13.5-4's storm compare covers the whole tree except the journal, wider than CHATTYREADS's "derived files alone", harmlessly (accepted at 68f0718).
+  - V: green; the timings it measured are recorded by Task 6 (V was read-only).
+- *The planner's own.*
+  - `decodeCoverage` keeps accepting an absent coverage attribute on any node, sections included. That is not a defaulted value: the datum stays absent, and every body asserting a section's coverage fails on its absence (T11-2's and T11-3's rows, T12.4-1's non-root arm). No reviewer raised it, and Task 1 does not change it.
+  - T12.7-1's walk (Task 5) covers the JSON the product prints on stdout, which is the "JSON output" 12.7 binds. Product-written state files the harness parses or tampers with are not 12.7 output documents and stay unwalked: the session file (T10.1-4, `test/helpers/adapters/session-staging.ts`, `section-10.1.ts`). Two `parseJsonStdout` sites parse harness-authored consumer output, T4.1-3's probe report and T4.4-1's consumer outcome. Both hold only strings, booleans, and `null`, so the walk passes them trivially.
+  - T4.1-3's probe walk (Task 4) traverses a generated module's runtime values inside the consumer process, not an answer document, so S-8 needs no vector for it.
+
+**Order.** Take the topmost task unless told otherwise; the dependencies below are hard. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement. When a task is done, its commit removes it and adds a one-line summary to its bullet here.
+- Part A (Tasks 1–3): a root node's tags are absent, never a demanded tag set (A1, B1, C2, D1). Task 1 makes the query decoders carry a root's absent tags (H-3), with S-5's vectors and the consumer sweep. Task 2 asserts the absence in T11-1, T11-2, and T11-3; it depends on Task 1. Task 3 makes the CONF-VALID fixture report it; it depends on Task 1, whose decoders T1.3-5 and the grammar self-test need before the fixture may emit `null`.
+- Part B (Task 4): T4.1-3's exhausted walk budget is a harness error, never a diagnosed failure (C1). Independent of every other task.
+- Part C (Task 5): T12.7-1's marker walk runs over every JSON document the suite captures (B2). Independent of Parts A and B, except that its full-suite check expects T11-1, T11-2, and T11-3 among the failures once Task 2 is done.
+- Task 6 confirms the result and deletes this plan. It depends on every task above.
+
+## Tasks
+
+### Part A — a root node's tags are absent (A1, B1, C2, D1)
+
+The rule in all three tasks. SPEC 11.1: `query node` reports "tags, coverage attribute, …; for a root node the tags and the coverage attribute are both reported as absent (5.5)", and the rows of `nodes`, `subtree`, and `ancestors` carry "identity, source range, tags, and coverage attribute (tags and coverage attribute both absent for roots)". SPEC 12.4: `show` prints "tags and coverage attribute (both absent for a root node, 11)". SPEC 5.5: "a root node has no `d` targets, no coverage attribute, and no tags". SPEC 12.7: "`null` never encodes emptiness — it marks a datum whose absence its form or defining section states", and `[]` is "a tagless section's `tags`". The `query` and `show` documents are unpinned-shape surfaces (H-3: "the command JSON of `query`, `ids`, `show`, …"), decoded through thin adapters whose latitude is the surrounding shape. So a root's absent tags may be `null` or an omitted member there, exactly as the harness already lets a root's coverage attribute be (`decodeCoverage`). Meanwhile an adapter "MUST fail loudly … when required information is absent", and a section's tags are required.
+
+### Task 1 — The query decoders carry a root's absent tags (A1, B1, C2, D1: the decoder side)
+
+**Requirement.** TEST-SPEC.md §0 H-3 (adapters map unpinned shape and are "never adjusted to values"; they fail loudly only when required information is absent) and §17 S-5 (each adapter rejects documents missing required information, fed synthetic wrong-shape documents), applied to Part A's rule.
+
+**Where.**
+- `test/helpers/adapters/query.ts`: `decodeNodeReport` (about line 136, `tags` at line 159; `query node` and `show`), `decodeNodeSummary` (line 181, `tags` at 193), `decodeNodeMetadataSummary` (line 205, `tags` at 222), `decodeNodeSummaryRowsReport` (line 305, `tags` at about 325), and `decodeNodeRow` (line 369, `tags` at 380; behind `decodeNodeRowsReport`). `decodeCoverage` (about line 122) is the model for an absent datum. The module's ASSUMED SHAPE block (about lines 17–35) shows `"tags"` on every node surface as a 12.7 tag set, with `"coverage"?` optional. No other adapter demands a node's `tags`: `forms.ts`'s other `tags` reads are the 7.5 selector form and `view`'s three-state datum, which already reads a root's tags as the stated `null`.
+- `test/helpers/adapters/model.ts`: `NodeReport.tags` (line 95), `NodeRow.tags` (106), `NodeSummary.tags` (119), and `NodeMetadataSummary.tags` (131), all `readonly string[]` today.
+- `test/self/s5-output-adapters.test.ts`: `GOOD_NODE` (about line 193, a section) and `GOOD_ROWS` (about line 209, whose second row is a root), and the `DECODERS` entries "query node/show" (about line 834), "query node (identity/tags summary)" (952), "query node (identity/tags/metadataHash summary)" (997), "query nodes (identity/tags summary rows)" (1200), and "query nodes/subtree/ancestors" (1293).
+- T1.1-2's `nodeSetOf` in `test/suite/registry/section-1.1-1.2.ts` (about lines 241–261, `[...row.tags].sort()` at 255).
+- Any other site the type change breaks at compile time. `assertSameJson` (`test/suite/registry/support.ts`) takes `unknown` and compares JSON renderings, so most consumers compile unchanged.
+
+**Shortfall.** All five decoders read `tags` through `requiredKey` (`decode.ts`: a missing or `null` member fails) and then `decodeTagSet`, on every node, roots included. A product that reports a root's tags absent — `null`, or the member left out — therefore fails as a diagnosed product failure ("expected required key "tags" with a non-null value"). The built product's `[]`, an empty set that 12.7 distinguishes from absence, passes. The reviewers' stand-ins (Preamble) show the reach:
+- In modes `null` and `omit`, reviewer A's fails 27 tests at that decode: T1.1-2, T1.2-1, T1.2-3, T1.3-5, T1.3-7, T1.5-1, T1.5-3, T1.6-1, T1.6-2, T1.7-1, T2.7-2, T2.7-3, T3-7, T5.4-2, T5.5-1, T5.5-5, T5.5-6, T6.1-1, T6.2-1, T6.2-2, T6.2-3, T6.4-1, T6.5-1, T6.5-3, T6.5-6, T6.5-13, and T6.5-19.
+- Reviewer B's fails 13 more there: T10.6-1, T10.7-7, T10.7-12, T11-1, T11-2, T11-3, T11-6, T11-7, T12.4-1, T12.5-1, T12.7-1, T13.3-1, and T13.3-2.
+- P-4, P-5, and P-6 decode `query nodes` rows through `assertIdentitySet` (`section-16-p4.ts`, `section-16-p5-p6.ts`; reviewer C).
+- Reviewer D's CONF-VALID variant reporting a root's tags as `null` fails T1.3-5 at it.
+
+**Change.**
+1. *Decoders.* In each of the five, decode the identity first. When the identity contains no `#` (a root, SPEC 1.5) and the `tags` member is missing or `null`, the tags are absent: decode them as `null`. In every other case keep the current form-exact decode (`decodeTagSet` over `requiredKey`):
+   - a section whose `tags` is missing or `null` still fails loudly;
+   - a root whose `tags` member holds a value must still hold a 12.7 tag set, and that value — the built product's `[]` included — reaches the body unjudged (value-blind, H-3; only Task 2's bodies judge a root's tags).
+
+   One small shared helper in `query.ts` keeps the five alike. Update each decoder's doc comment and the ASSUMED SHAPE block to say so: a root's `"tags"` may be `null` or omitted, as its `"coverage"` may.
+2. *Model.* Widen the four `tags` members to `readonly string[] | null`, documented as follows: `null` is absent — a root's tags, reported `null` or omitted (SPEC 11.1, 12.4, 5.5) — and never an empty set, which a section reports as `[]` (12.7). Use one representation, `null`, never `undefined`. Then whole-object compares that render JSON treat absent as equal to absent, and still tell absent from `[]`. T12.4-1's field-by-field compare (`normalizedNodeReport` in `section-12.3-12.5.ts`, about line 338) and `section-11.ts`'s projections need no change for that.
+3. *Consumers.* Fix every compile error the widening causes without changing any outcome for a product that reports tag sets:
+   - T1.1-2's `nodeSetOf` carries `null` through (e.g. `tags: row.tags === null ? null : [...row.tags].sort()`, its declared element type widened), so its `<S>`/`<Spec>` comparison of two product answers treats absent as equal to absent and still tells `[]` from absent;
+   - every other consumer that reads tags as an array either carries `null` through the same way or, where it reads a section's tags only, narrows with an explicit check (the decoder already rejects a section's absent tags). Never use a non-null assertion, which would surface as a `TypeError`, and never a check that would fail a root's absent tags.
+
+   Leave T11-1's, T11-2's, and T11-3's `[]` root pins (`section-11.ts`) to Task 2.
+4. *S-5 vectors*, in the five entries named above:
+   - `alsoGood` vectors with a root identity (`specs/A.mdx`; for the row decoders, `GOOD_ROWS`'s root row): `tags` `null` decodes to `null`; the `tags` member omitted decodes to `null`; `tags` `[]` decodes to `[]`.
+   - `bad` vectors: a section (an identity with `#`) whose `tags` is `null` fails; the existing "missing tags" vectors on `GOOD_NODE` already cover a section's omitted member for the node decoders. A root whose `tags` is present but not a tag set — out of byte order, a non-string element, a non-array — still fails.
+   - The two existing `bad` vectors labelled "row missing tags" (about lines 1233 and 1330) omit the *root* row's tags (`omit(GOOD_ROWS, "nodes", 1, "tags")`), which now decodes: retarget them to the section row (`"nodes", 0`), and cover the root row with the new `alsoGood` vectors.
+   - Red-check per AGENTS.md's "Red-checking a new self-test vector" bullet: with the decoder change stashed, the new root `alsoGood` vectors fail; restored, every vector passes.
+5. *AGENTS.md:* one short bullet for the root-tags stand-in (what it rewrites, its modes) and the sweep below (its ID list and run time per mode).
+
+**Checks.**
+- The built product's outcomes, pass-through. The decoders return exactly what they returned before for any document whose roots carry a tag set, so only the suite files whose code this task touches need re-running against the built product. Run `section-1.1-1.2.test.ts`, plus any suite file a compile fix touched: every test keeps its outcome.
+- The consumer sweep through the root-tags stand-in. Run modes `null` and `omit`, each alone under the namespace, over the 43 IDs above (A's 27, B's 13, and P-4, P-5, P-6). Expected in both modes after the change:
+  - T11-1, T11-2, and T11-3 now get past the decode and fail diagnosed at their `[]` root-tags pins (Task 2 replaces those pins);
+  - every other test has its outcome against the plain product: all pass, except P-5, which fails diagnosed at its section-move arm exactly as against the plain product (T6.5-22(a)'s driver hook; AGENTS.md's property-timings bullet).
+
+  The reviewers' probes established the state before the change, so re-running it is optional. Record each mode's outcomes (IDs grouped by outcome, each failure's first failing assertion) and run times in the commit message.
+- Completeness. If the sweep or a read of the decoders' consumers turns up another body pinning a root's tags, outside T11-1, T11-2, and T11-3, make it accept both a root's absent tags and `[]` (no TEST-SPEC entry outside those three constrains them), add its test to the sweep, and record it.
+- Certification is unchanged: until Task 3, every fixture reports a root's tags as `[]`, which decodes as before.
+- Every task's closing checks (Preamble).
+
+### Task 2 — T11-1, T11-2, and T11-3 assert a root's tags absent (B1, C2)
+
+**Depends on.** Task 1.
+
+**Requirement.** TEST-SPEC.md §11:
+- T11-1: `query node` "Returns identity, source range, own and subtree text (expanded, 1.6), all four hashes, tags, coverage attribute (absent for roots), and incoming and outgoing edges by kind."
+- T11-2: "each row carries identity, source range, tags, coverage attribute (absent for roots)".
+- T11-3: "rows carry the row fields of T11-2 — identity, source range, tags, coverage attribute … — asserted on `subtree` and `ancestors` rows including a tagged `coverage="none"` node and a root (attribute absent)".
+
+Each lists tags among the fields every node or row carries, and for a root SPEC 11.1 states that datum absent (Part A's rule); no TEST-SPEC text asks for `[]`.
+
+**Where.** `test/suite/registry/section-11.ts`:
+- T11-1's root arm, `assertSameJson(root.tags, [], `${rootLabel}: a root carries no tags`)` (about line 580), just before its coverage-absent check;
+- `ExpectedRow` (about lines 341–347, `tags: readonly string[]`) and `assertRowFields`, which compares `row.tags` with `want.tags` (about lines 350–380);
+- `T11_2_ROWS` (about lines 680–724): the two root rows (`specs/alpha/A.mdx`, `specs/beta/B.mdx`) with `tags: []`, and the comment above it;
+- `T11_3_ROW_ROOT` (about lines 1032–1036) with `tags: []`, and the comment after it (about lines 1037–1039: "a product omitting a row field from either subcommand fails on it or on the root row above");
+- the module header (about lines 16 and 28) and T11-1's and T11-2's titles (about lines 474 and 798), which name only the coverage attribute as absent for roots.
+
+**Shortfall (reviewer B's GAP 1, C's GAP 2).** T11-1's root arm pins a root's tags as `[]`, and T11-2's and T11-3's expected root rows do too. A product reporting the absence SPEC 11.1 states fails all three — since Task 1, at these pins rather than at the decode — while a product reporting the empty set `[]` passes.
+
+**Change.**
+1. Widen `ExpectedRow.tags` to `readonly string[] | null`, and set the three root rows' `tags` to `null`, documented as SPEC 11.1's absent root tags (5.5; 12.7: never `[]`, a tagless section's value).
+2. T11-1's root arm asserts that `root.tags` is `null`, i.e. absent: `null` or an omitted member, as Task 1 decodes. Its context cites SPEC 11.1 and 5.5 and says that `[]`, an empty tag set, is not absence (12.7).
+3. Correct the comments, the header, and the titles named above to say a root's tags and coverage attribute are both absent. T11-3's comment should say that a root row's tags and coverage attribute are absent, so the tagged `coverage="none"` row catches a product omitting the tags or coverage member, and the root row catches one omitting identity or range, or reporting either datum present.
+4. Leave the section rows' expectations, every other arm, and T11-4 through T11-7 as they are; the H-7 map is unchanged.
+
+**Checks.**
+- Against the built product, T11-1, T11-2, and T11-3 pass before and fail diagnosed after, each at its first root-tags assertion, since the product reports `[]` for each root (Known state). Quote each diagnosis in the commit message; this is the expected product deviation, left to Phase 10. T11-4 through T11-7 keep their outcomes (all pass at b00e7cd).
+- The three tests through the root-tags stand-in, each mode alone under the namespace:
+  - `pass` fails after, as above;
+  - `null` and `omit` fail before, at the `[]` pins (Task 1's sweep), and pass after;
+  - a further mode `nonempty`, setting each root's `tags` to `["x"]`, fails before and after at the root-tags assertion.
+- Every task's closing checks; the section-11 suite file's only outcome changes are the three above.
+
+### Task 3 — The CONF-VALID fixture reports a root's tags absent (D1)
+
+**Depends on.** Task 1 (T1.3-5 and the grammar self-test decode CONF-VALID's root rows).
+
+**Requirement.** The CERTIFICATIONS.md preamble (and PROCESS.md's certification concept): a conformer conforms to SPEC.md within its stated scope. §CONF-VALID's scope includes "`query node`/`query nodes` reporting identity, tags in the set form of 12.7 (byte order, duplicates collapsed, `[]` when tagless), and metadataHash", and T1.3-5, in scope, decodes an unfiltered `query nodes`. Part A's rule binds within that surface: a root's tags are absent (SPEC 11.1, 5.5), and `[]` is a tagless *section*'s value (12.7).
+
+**Where.** `test/fixtures/conf-valid/product.mjs`, shared by the conformer `bin.mjs` and the violators `bin-ctrl.mjs`, `bin-wide.mjs`, and `bin-sep.mjs`:
+- `nodeDoc` (about line 1753) and `nodeRow` (about line 1765) emit `tags: node.tags` for every node — for a root, `collapsedTags(undefined)`, i.e. `[]` (`rootTags`, about line 1270, which also feeds `metadataHashOf`).
+- `test/self/certification-fixture-grammar.test.ts` decodes this fixture's unfiltered `query nodes` rows, the root `specs/A.mdx` among `VALID_NODES`, through `decodeNodeSummaryRowsReport` (about line 1682); its `nodeOf` (about line 1701) is used only on the section `specs/A.mdx#a`.
+
+**Shortfall (reviewer D's gap 1).** The conformer reports `"tags": []` for a root in `query node` and in every `query nodes` row — the value of a tagless section (D's run: `specs/A.mdx` and `specs/B.mdx#dup` alike). T1.3-5 passed against it only because of that, which hid Task 1's decode defect: D's variant reporting the root's tags as `null` failed T1.3-5 at the decode while the other 11 in-scope tests passed.
+
+**Change.**
+1. In `nodeDoc` and `nodeRow`, emit `tags: null` when `node.isRoot`; sections keep their tag sets. Only the emitted datum changes. The internal node model stays as it is — `rootTags`, the root's `metadataHashOf(rootTags)` (computed from empty inputs, SPEC 5.5), and the `--tag` filtering keep working on `[]` internally. The root's `coverage` member stays omitted: coverage is outside §CONF-VALID's command-surface scope, and the decoders read the omission as absent.
+2. Update the fixture's comments on these functions (e.g. `nodeRow`'s "SPEC 11: coverage attribute absent for roots") to say the tags and the coverage attribute are both absent for roots.
+3. Leave CONF-CORE's fixture alone (Considered and not planned).
+
+**Checks.**
+- Hand-run the conformer (`node test/fixtures/conf-valid/bin.mjs …`) in a scratch two-file workspace holding a tagless section, as D did. `query nodes --json` reports each root with `"tags": null` and each section as before, and `query node specs/A.mdx --json` reports `"tags": null`.
+- Certification (self project, under the namespace):
+  - CONF-VALID passes all 12 in-scope tests;
+  - VIOL-VALID-CTRL, VIOL-VALID-WIDE, and VIOL-VALID-SEP each fail exactly their Certifies lists, at the arms CERTIFICATIONS.md names;
+  - the totals stay 154 PASS / 38 FAIL / 0 error / 0 hang;
+  - the grammar self-test stays green.
+- Red, through AGENTS.md's recipe for running a selection of product tests against one fixture executable (a temporary self-test binding `test/fixtures/conf-valid/bin.mjs`, T1.3-5 selected): with `query.ts` temporarily restored to its pre-Task-1 text, T1.3-5 fails at the root-row decode, as in D's probe; with Task 1's decoders it passes. Put Task 1's `query.ts` back before committing. Reverting the fixture change instead keeps everything green, since no in-scope test pins a root's tags; that is acceptable, because the requirement is the fixture's conformance.
+- Every task's closing checks (no suite file is touched).
+
+### Part B — T4.1-3's walk budget
+
+### Task 4 — T4.1-3: an exhausted walk budget is a harness error, never a diagnosed failure (C1)
+
+**Requirement.** TEST-SPEC.md §0 H-11: "A harness-side failure while capturing or evaluating an answer — a crash, hang, or exhausted internal limit — is reported as a defect in the harness, never as a diagnosed product failure and never as a pass: H-8's rule generalized beyond the missing-product run". The harness already does this for its capture cap (`ProductRunOutputOverflowError`) and for T6.5-22(a)'s in-run evaluation (`HarnessEvaluationError`), both in `test/helpers/subprocess.ts`. T4.1-3 (§4.1) prescribes the reflective deep walk whose budget is at issue.
+
+**Where.** `test/suite/registry/section-4.1-4.2.ts`:
+- `OPAQ_WALK_CAP` (line 399) and the comment above it (about lines 392–398, "H-8: a walk that cannot finish fails, never passes");
+- the comment above `OPAQ_PROBE_CONSUMER` (about lines 401–420), ending "a capped walk fails: it cannot show that none is observable";
+- `judgeOpaqueProbeReport` (about lines 562–631): its doc comment (about line 569) and its last branch, `if (observed.capped)` (about lines 617–629), which calls `fail()` citing H-8.
+
+AGENTS.md's "Red-checking a generated-module type assertion" bullet describes the runtime-companion red checks, including "one returning a fresh `Object.create(P)` fails at its walk-cap assertion".
+
+**Shortfall (reviewer C's GAP 1).** When the probe's walk spends its 100,000-step budget, `judgeOpaqueProbeReport` calls `fail()`, which throws a `HarnessAssertionError` — a diagnosed product failure. The budget is a harness-internal limit, and a conforming module can exhaust it: SPEC 4.1 constrains only the supported operations, so getters, proxies, and lazily created objects are allowed as long as no text is exposed. The sixth plan's own red check showed this — a prototype getter minting a fresh object on every read fails T4.1-3 at the cap assertion. H-8 governs the missing-product run; an exhausted harness limit is H-11's case.
+
+**Change.**
+1. In `judgeOpaqueProbeReport`, keep the string-node and leak checks first, as diagnosed failures in their current order: a leak observed before the cap is a real product failure. Then, when the report is `capped`, throw a harness error — an `Error` that is not a `HarnessAssertionError`, e.g. a module-private class with its `name` set, in the manner of the driver's two capacity classes. Its message:
+   - names H-11 and the budget (`OPAQ_WALK_CAP` steps, one per object or function walked and per prototype-chain link read through);
+   - gives the number of strings observed before the cap, none carrying the sentinel;
+   - says the harness, not the product, failed — never a diagnosed failure, never a pass.
+
+   Never call `fail()` there. Keep the cap and its value, so a capped walk still never passes.
+2. Correct the three H-8 citations — the comment above `OPAQ_WALK_CAP`, the judge's doc comment, and the old failure message — and the closing sentence of the comment above `OPAQ_PROBE_CONSUMER`, so they cite H-11 and describe the harness error.
+3. AGENTS.md: in the runtime-companion sentence of that bullet, the fresh-object rewrite now makes T4.1-3 error with the H-11 harness error (outcome `error` through `runProductTests`) instead of failing at an assertion.
+
+**Checks.**
+- T4.1-3 passes against the built product before and after (`npx vitest run --config test/vitest.config.ts --project suite test/suite/section-4.1-4.2.test.ts -t 'T4\.1-3 '`), and the module's 7 tests keep passing.
+- Red checks use the runtime-companion rewrite from that AGENTS.md bullet: after an exit-0 `build`, give each node a prototype `P`. Bind each variant through `runProductTests` with T4.1-3 selected, under the namespace:
+  - a getter returning a fresh `Object.create(P)`: outcome `fail` (the cap assertion) before; `error` after, with the new class and its H-11 message;
+  - a getter returning `XSPEC_TEXTS.get(this)`: `fail` at the leak assertion, before and after;
+  - a getter returning `this`: `pass`, before and after;
+  - a pass-through: `pass`.
+- Certification and S-7 are unaffected: T4.1-3 is not certified, and S-7's stub fails it at `build` first.
+- Every task's closing checks.
+
+### Part C — T12.7-1's marker walk
+
+### Task 5 — T12.7-1: the marker walk runs over every JSON document the suite captures (B2)
+
+**Requirement.** TEST-SPEC.md §12.7, T12.7-1: "Unavailability is exactly `{"unavailable": true}`, and no object of any other form carries a member named `unavailable` (a structural walk over every JSON document the suite captures — the unpinned-shape surfaces of H-3 included, the exclusivity being universal like the value forms; S-5 guards the walk)". SPEC 12.7: "no object of any form other than the unavailability marker carries a member named `unavailable`".
+
+**Where.**
+- `test/helpers/assertions.ts`: `parseJsonStdout` (about lines 159–188). Every stdout the harness reads as JSON passes through it — `runJson` and `expectErrorDocument` (`test/suite/registry/support.ts`), `assertJsonOutputConvention`, and module-local helpers among its roughly 240 call sites. The only other `JSON.parse` sites in `test/suite` and `test/helpers` parse product-written state files (the session file), harness data, or check that stdout is *not* JSON (`assertNotJsonDocument`, `section-12.0-iii.ts`).
+- `test/helpers/adapters/forms.ts`: `assertUnavailabilityMarkerForms` (about line 2373) and its doc comment (about lines 2356–2372, "so it runs over every JSON document the suite captures"), and the adapter-entry integration through `documentRootSite`.
+- `test/suite/registry/section-12.7.ts`: the header bullet on the walk (about lines 50–60) and T12.7-1's title (about line 3158, "run over every captured 12.7 document").
+- `test/self/s5-output-adapters.test.ts`: the walk's tests (about lines 4797–4983) and `syntheticResult` (about line 5049).
+
+**Shortfall (reviewer B's GAP 2).** The walk runs only inside the adapters' document decoders and in four explicit calls in `section-12.7.ts`, so stdout parsed by `parseJsonStdout` and never decoded is never walked. Examples:
+- T12.0-1's full-surface sweep checks single-document form and parity only (`section-12.0-i.ts`, about lines 508 and 532);
+- T12.0-9 stages with `review create … --json` (`section-12.0-ii.ts`, about line 1057);
+- T12.5-1 runs its `rename`/`move` dispatch (`section-12.3-12.5.ts`, about lines 1256 and 1263).
+
+No decoder exists for the success documents of `review create`, `review resolve`, and `review split` (`{"created": …}`, `{"resolved": …}`, `{"split": …}`). B's `injmut` stand-in (`c148T7/standin/multi.mjs`) adds a stray top-level `"unavailable": false` to every exit-0 `review create|resolve|split` JSON document, and it passes T12.0-1 (3 documents injected), T12.0-9, and T12.0-12 (14 injected). The three documentation statements named above (the walk's doc comment, the header bullet, and the title) overstate what is done.
+
+**Change.**
+1. At the end of `parseJsonStdout`, after a successful parse, run `assertUnavailabilityMarkerForms` over the parsed document before returning it, with a context naming the caller's context and the command line. Every captured JSON document is then walked, whether or not an adapter decodes it.
+   - Keep the adapter-entry integrations: decoders also take documents that never pass through `parseJsonStdout` (S-5's and S-8's synthetic ones).
+   - Mind the import cycle: `forms.ts` and `decode.ts` import `fail` from `assertions.ts`, so importing the walk into `assertions.ts` closes a cycle. ESM resolves it as long as neither module calls into the other while being evaluated, and reviewer B validated exactly this import in a scratch copy (`c148T7/tree2`). If it misbehaves, restructure, e.g. by moving the walk's implementation where both can reach it without a cycle; the walk's semantics and diagnoses stay as they are.
+2. S-5 vectors guarding the new integration (S-5 guards the walk):
+   - `parseJsonStdout` over a `syntheticResult` whose stdout carries a near-marker — `{"unavailable": false}`, or `{"unavailable": true, "x": 1}` — nested in an object member, and another in an array element, fails diagnosed (`HarnessAssertionError`), its message naming the JSON path and the command line;
+   - with an exact marker `{"unavailable": true}` in the same places, it returns the document;
+   - red-check per AGENTS.md's self-test-vector bullet: with the integration stashed, the rejecting vectors fail.
+3. Correct the documentation:
+   - the walk's doc comment in `forms.ts`: it runs at `parseJsonStdout` over every JSON document the suite captures, and at every document decoder's entry;
+   - the `section-12.7.ts` header bullet;
+   - T12.7-1's title phrase, e.g. "run over every JSON document the suite captures".
+4. AGENTS.md: one sentence where it describes the stand-in recipe — every `parseJsonStdout` now runs the 12.7 marker walk, so a stand-in that injects members into a JSON answer is caught there if any injected member is named `unavailable`.
+
+**Checks.**
+- Through B's stand-in modes, under the namespace, with `runProductTests` selecting T12.0-1, T12.0-9, and T12.0-12:
+  - `injmut` passes all three before and fails each after, at the walk on an injected document (B's validation: T12.0-1 at its `review create … --json` invocation);
+  - `inject` (a stray `"unavailable": false` on every exit-0 JSON object document) fails each after, at the walk;
+  - a pass-through passes all three before and after.
+- The full suite project against the built product, alone, in CI's inner stage (AGENTS.md's namespace bullet), with `--reporter=verbose --reporter=json --outputFile.json=<path>` as the timings bullet's recent entries do:
+  - every failure is a `HarnessAssertionError`;
+  - the failing set equals the Preamble's 28 IDs, plus T11-1, T11-2, and T11-3 if Task 2 is done;
+  - any other failure must first be shown to come from a near-marker in the product's captured document (Conventions); a walk failure on a harness-authored document, such as a consumer's output, is a harness defect to fix here;
+  - record the run time.
+- S-8's capacity gates now also run the walk wherever they pass through `parseJsonStdout`, and must stay green within their timeouts (part of the self project).
+- Certification is unchanged: no fixture prints a near-marker (VIOL-AVAIL-NULLMARKER prints `null`, and VIOL-AVAIL-OMIT omits members).
+- Every task's closing checks.
+
+### Final
+
+### Task 6 — Confirm locally and in CI; delete this plan
+
+**Depends on.** Every task above.
+
+**Change.**
+- *Self project and certification.* Under the namespace, run the full self project alone and expect 0 failures.
+  - Confirm the counts in AGENTS.md's "Harness self-tests and certification only" bullet: 27 files and 4230 tests at b00e7cd, plus any S-5 tests that Tasks 1 and 5 added as new `test(...)` entries. Record the new count and which tasks added tests.
+  - Add the run's timing to that bullet and to the timings bullet. VERIFY at b00e7cd measured 176.08 s locally, with another agent's Vitest beside it, and 83.30 s in CI run 924. The self-tests bullet's last entries are 147 s at the sixth plan's Task 6 and 99 s in CI run 923.
+  - Confirm the certification totals: still 6 conformers and 21 violators, 27 fixtures, every one passing, 154 PASS / 38 FAIL / 0 error / 0 hang.
+- *Suite against the built product.* Run the suite project alone, inside CI's inner stage (network off, uid 1000, no capabilities; AGENTS.md's namespace bullet), with the JSON reporter.
+  - Every failure must be a diagnosed product failure (`HarnessAssertionError`).
+  - The expected failing set is the Preamble's 28 IDs plus T11-1, T11-2, and T11-3 (Task 2), 31 in all. List each failing test with its first failing arm in the commit message, and explain any difference from that set.
+  - Record the run time in AGENTS.md's timings bullet, as a new entry naming the 31 failing IDs. VERIFY's figures at b00e7cd: `npm test` 1591.70 s locally in CI's inner stage with another agent's Vitest beside it, CI's full-suite job 792.78 s, the Windows leg 39.62 s. The bullet's last suite entry is 1102 s at the sixth plan's Task 6.
+- *CI.* Check CI on the pushed head (AGENTS.md's CI-reading bullet holds the recipe): the harness-self job and the Windows leg are green, and the full-suite job fails only on diagnosed product tests, the same 31.
+- *Delete this plan.* Once no other task remains in `specs/tmp/FIX_PLAN.md`, delete it with `git rm`, under the Preamble's "Deleting this plan" rule. If the permission system refuses, stop and report the refusal; never move, rename, or empty the file.
