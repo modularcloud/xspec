@@ -389,14 +389,35 @@ const OPAQ_NODE_CHAINS = [
   "SPEC.gamma",
 ] as const;
 
+// The probe's walk budget (H-8: a walk that cannot finish fails, never
+// passes): each object or function the walk visits, and each prototype-chain
+// link it reads keys through, costs one step. The built product's generated
+// module — frozen plain-object nodes over `Object.prototype`, a symbol-keyed
+// module path, the texts in a module-private map — takes 131 steps (46
+// objects and functions, `Object`'s and `Function`'s intrinsics included),
+// so the cap sits far above what this four-node fixture's walk needs.
+const OPAQ_WALK_CAP = 100_000;
+
 // A consumer that never imports `text` and reaches every node by the
 // supported child-access operation, records each node value's `typeof` (no
 // node value may be a string: a node is an opaque token, SPEC 4.1), then
-// inspects those values generically — String(), JSON.stringify(), own keys,
-// property values, prototypes, to a bounded depth, every probe guarded (a
-// node is an opaque token, so unsupported operations may throw; SPEC 4.1) —
-// and reports `{ kinds, seen }`: the kinds in `nodes` order and every
-// observed string. No observed string may carry requirement text.
+// walks those values reflectively, with no depth bound. Every object or
+// function reached is walked once (a visited set; strings and other
+// primitives are recorded at every encounter): its string coercion, its JSON
+// serialization, its own property keys and values, and the keys and values
+// of every object on its prototype chain, each inherited key read through
+// the walked value as receiver (`Reflect.get`) — so an inherited accessor
+// yields its value for the node itself, which a getter keyed on the instance
+// (a private map, a private field) withholds from its prototype — while the
+// prototype objects are walked in their own right too (their own keys read
+// through themselves). Every probe is guarded (a node is an opaque token, so
+// unsupported operations may throw; SPEC 4.1), and the walk runs off a work
+// list, so no depth can overflow the stack. The visited set makes the walk
+// finite and `OPAQ_WALK_CAP` bounds it loudly. It reports `{ kinds, seen,
+// capped }`: the kinds in `nodes` order, every observed string, and whether
+// the budget ran out with work left. No observed string may carry
+// requirement text, and a capped walk fails: it cannot show that none is
+// observable.
 const OPAQ_PROBE_CONSUMER = [
   'import SPEC from "../specs/OPAQ.xspec";',
   "",
@@ -405,8 +426,13 @@ const OPAQ_PROBE_CONSUMER = [
   "];",
   "const kinds: string[] = nodes.map((node) => typeof node);",
   "const seen: string[] = [];",
+  "const visited = new Set<object>();",
+  "const pending: object[] = [];",
+  `const cap = ${String(OPAQ_WALK_CAP)};`,
+  "let steps = 0;",
+  "let capped = false;",
   "",
-  "function observe(value: unknown, depth: number): void {",
+  "function observe(value: unknown): void {",
   '  if (typeof value === "string") {',
   "    seen.push(value);",
   "    return;",
@@ -418,6 +444,45 @@ const OPAQ_PROBE_CONSUMER = [
   "    seen.push(String(value));",
   "    return;",
   "  }",
+  "  if (!visited.has(value)) {",
+  "    visited.add(value);",
+  "    pending.push(value);",
+  "  }",
+  "}",
+  "",
+  "function step(): boolean {",
+  "  if (steps >= cap) {",
+  "    capped = true;",
+  "    return false;",
+  "  }",
+  "  steps += 1;",
+  "  return true;",
+  "}",
+  "",
+  "function readKeys(holder: object, receiver: object): void {",
+  "  let keys: readonly (string | symbol)[] = [];",
+  "  try {",
+  "    keys = [",
+  "      ...Object.getOwnPropertyNames(holder),",
+  "      ...Object.getOwnPropertySymbols(holder),",
+  "    ];",
+  "  } catch {",
+  '    seen.push("[own keys threw]");',
+  "  }",
+  "  for (const key of keys) {",
+  "    seen.push(String(key));",
+  "    let child: unknown;",
+  "    try {",
+  "      child = Reflect.get(holder, key, receiver);",
+  "    } catch {",
+  '      seen.push("[property read threw]");',
+  "      continue;",
+  "    }",
+  "    observe(child);",
+  "  }",
+  "}",
+  "",
+  "function walk(value: object): void {",
   "  try {",
   "    seen.push(String(value));",
   "  } catch {",
@@ -431,80 +496,88 @@ const OPAQ_PROBE_CONSUMER = [
   "  } catch {",
   '    seen.push("[JSON.stringify threw]");',
   "  }",
-  "  if (depth <= 0) {",
-  "    return;",
-  "  }",
-  "  let keys: readonly (string | symbol)[] = [];",
+  "  readKeys(value, value);",
+  "  let holder: object | null;",
   "  try {",
-  "    keys = [",
-  "      ...Object.getOwnPropertyNames(value),",
-  "      ...Object.getOwnPropertySymbols(value),",
-  "    ];",
-  "  } catch {",
-  '    seen.push("[own keys threw]");',
-  "  }",
-  "  for (const key of keys) {",
-  "    seen.push(String(key));",
-  "    let child: unknown;",
-  "    try {",
-  "      child = (value as Record<string | symbol, unknown>)[key];",
-  "    } catch {",
-  '      seen.push("[property read threw]");',
-  "      continue;",
-  "    }",
-  "    observe(child, depth - 1);",
-  "  }",
-  "  try {",
-  "    observe(Object.getPrototypeOf(value), depth - 1);",
+  "    holder = Object.getPrototypeOf(value) as object | null;",
   "  } catch {",
   '    seen.push("[prototype read threw]");',
+  "    return;",
+  "  }",
+  "  observe(holder);",
+  "  while (holder !== null) {",
+  "    if (!step()) {",
+  "      return;",
+  "    }",
+  "    readKeys(holder, value);",
+  "    try {",
+  "      holder = Object.getPrototypeOf(holder) as object | null;",
+  "    } catch {",
+  '      seen.push("[prototype read threw]");',
+  "      holder = null;",
+  "    }",
   "  }",
   "}",
   "",
   "for (const node of nodes) {",
-  "  observe(node, 3);",
+  "  observe(node);",
+  "}",
+  "while (pending.length > 0 && step()) {",
+  "  walk(pending.pop() as object);",
   "}",
   "",
-  "process.stdout.write(JSON.stringify({ kinds, seen }));",
+  "process.stdout.write(JSON.stringify({ kinds, seen, capped }));",
   "",
 ].join("\n");
 
-/** The probe consumer's report: node kinds in chain order, observed strings. */
+/**
+ * The probe consumer's report: node kinds in chain order, every observed
+ * string, and whether the walk's budget ran out with work left.
+ */
 interface OpaqueProbeReport {
   readonly kinds: readonly string[];
   readonly seen: readonly string[];
+  readonly capped: boolean;
 }
 
-/** The harness-authored probe contract: `{ kinds, seen }`, one kind a node. */
+/**
+ * The harness-authored probe contract: `{ kinds, seen, capped }`, one kind a
+ * node.
+ */
 function isOpaqueProbeReport(value: unknown): value is OpaqueProbeReport {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
   }
-  const { kinds, seen } = value as Record<string, unknown>;
+  const { kinds, seen, capped } = value as Record<string, unknown>;
   return (
     Array.isArray(kinds) &&
     kinds.length === OPAQ_NODE_CHAINS.length &&
     kinds.every((kind) => typeof kind === "string") &&
     Array.isArray(seen) &&
-    seen.every((observed) => typeof observed === "string")
+    seen.every((observed) => typeof observed === "string") &&
+    typeof capped === "boolean"
   );
 }
 
 /**
  * Judge the probe consumer's report (TEST-SPEC T4.1-3): no runtime value
  * reachable from the default export by child property access is a string
- * (SPEC 4.1: a node is an opaque token), and the reflective deep walk of
- * those values observed no string carrying the fixture's requirement-text
- * sentinel (SPEC 4.1: nodes carry no requirement text as values; 4.3).
+ * (SPEC 4.1: a node is an opaque token), the reflective deep walk of those
+ * values observed no string carrying the fixture's requirement-text sentinel
+ * (SPEC 4.1: nodes carry no requirement text as values; 4.3), and the walk
+ * finished within its budget — a capped walk cannot show that no text is
+ * observable, so it fails rather than pass (H-8).
  */
 function judgeOpaqueProbeReport(observed: unknown): void {
   if (!isOpaqueProbeReport(observed)) {
     fail(
       "T4.1-3: the probe consumer must report a JSON object `{ kinds, " +
-        "seen }` — `kinds` the `typeof` of each of the " +
+        "seen, capped }` — `kinds` the `typeof` of each of the " +
         `${String(OPAQ_NODE_CHAINS.length)} node values (` +
-        `${OPAQ_NODE_CHAINS.join(", ")}), \`seen\` an array of observed ` +
-        "strings — harness-authored consumer contract; got " +
+        `${OPAQ_NODE_CHAINS.join(", ")}), ` +
+        "`seen` an array of observed strings, `capped` a boolean (whether " +
+        "the walk's budget ran out) — harness-authored consumer contract; " +
+        "got " +
         excerpt(JSON.stringify(observed) ?? String(observed)),
     );
   }
@@ -539,6 +612,19 @@ function judgeOpaqueProbeReport(observed: unknown): void {
           .slice(0, 3)
           .map((leak) => excerpt(leak))
           .join(", "),
+    );
+  }
+  if (observed.capped) {
+    fail(
+      "T4.1-3: the probe consumer's reflective deep walk of the values " +
+        "reachable from the default export spent its budget of " +
+        `${String(OPAQ_WALK_CAP)} steps (one per object or function ` +
+        "walked and per prototype-chain link read through) with values " +
+        "still unwalked, so it cannot show that no requirement text is " +
+        "observable through the module's node values (SPEC 4.1: nodes " +
+        "carry no requirement text as values; 4.3) — a capped walk never " +
+        `passes (H-8). Strings observed before the cap: ` +
+        `${String(observed.seen.length)}, none carrying the sentinel.`,
     );
   }
 }
