@@ -67,45 +67,11 @@ Why the harness changes again: the documents moved after the harness was last gr
 
 **Order.** Take the topmost task unless told otherwise; the dependencies below are hard. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement. When a task is done, its commit removes it and adds a one-line summary to its bullet here.
 - Task 1 (D1): the CONF-VALID conformer locates 14.1, 14.2, 14.3, and 14.17 at the ranges SPEC 14 fixes, 14.3 as one finding locating every bearer. Independent of every other task. Task 1 done (the commit after a2bfdf4): `test/fixtures/conf-valid/product.mjs` keeps every attribute's own range in its parser (`attributes`; a value-form `invalidProps` entry carries its attribute), its findings carry a `locations` list serialized in range order, and it locates 14.1 at the opening tag, 14.2 at the `id` attribute, 14.3 as one finding per duplicated spelling locating every bearer's `id` attribute (reported after the file's walk), and 14.17 at every attribute spelling a repeated name or at a braced or valueless value's own attribute; its comments state SPEC 14's ranges. Probe (`t156_1/valid_probe.py`, the ten cases): before, exactly the 34032b5 column; after, exactly the required one (the self-closing control (20,25) both times). `-t VALID` before and after: CONF-VALID 12/12, each VIOL-VALID-* 9 pass / 3 fail on its Certifies list, identical first-line diagnoses; the grammar guard 6/6; typecheck and format clean; the self project 27 files, 4234 tests, 0 failures (172.71 s), certification 154 PASS / 38 FAIL / 0 error / 0 hang.
-- Task 2 (D2): the CONF-AVAIL conformer locates 14.1 at the opening tag, and 14.2 and 14.3 at the `id` attribute. Independent of every other task.
+- Task 2 (D2): the CONF-AVAIL conformer locates 14.1 at the opening tag, and 14.2 and 14.3 at the `id` attribute. Independent of every other task. Task 2 done (the commit after f595fd3): `test/fixtures/conf-avail/product.mjs` locates 14.1 at the section's opening tag (`openingRange`: `openStart` to `openEnd`, the `opening` its `view` reports), and 14.2 and 14.3 at the section's one spelling `id` attribute (`info.idAttr`, kept when the identity is spelled; 14.3 still one finding per duplicated spelling, every bearer in document order); `constructRange` is gone, and the comments state SPEC 14's ranges. Probe (`t156_2/task2_probe.py`: the table's five cases and D's nine controls): before, exactly the 34032b5 column; after, exactly the required one, every control unchanged, each 14.1 range the answer's `opening` and each 14.2 or 14.3 range a reported `id` attribute range; a whole-answer compare against HEAD's fixture (`t156_2/task2_compare.py`, 8 workspaces, `view` and `view --text`) differs only in those ranges. `-t AVAIL` before and after: CONF-AVAIL 6/6; NULLMARKER 2 pass / 4 fail, OMIT 1 / 5, NOFILE 5 / 1, each FAIL set its Certifies list, identical first-line diagnoses; the grammar guard 6/6; typecheck and format clean; the self project 27 files, 4234 tests, 0 failures (179.13 s), certification 154 PASS / 38 FAIL / 0 error / 0 hang.
 - Task 3 (D3): T1.3-5's and T14-4's 14.3 tolerance states its true basis; no assertion changes. Independent of every other task.
 - Task 4 confirms the result locally and in CI, corrects AGENTS.md's two stale verdict statements (B1), records VERIFY's timings, and deletes this plan. It depends on every task above.
 
 ## Tasks
-
-### Task 2 — CONF-AVAIL: locate 14.1 at the opening tag, and 14.2 and 14.3 at the `id` attribute (D2)
-
-**Requirement.**
-- CERTIFICATIONS.md §CONF-AVAIL Scope: "findings accompanying per 11.2/14 with stable codes and located ranges for the staged conditions (14.1, 14.3, 14.4, 14.5, 14.6, 14.9, 14.15, 14.16, 14.17, and 14.20 at offset 0 as staged above)"; the document's first paragraph: a conformer conforms to SPEC.md within its stated scope.
-- SPEC 14, the paragraph beginning "Every condition that locates in source": "Location cardinality follows the condition's structure: a condition that several constructs jointly violate is one finding carrying a location for every participating construct … — duplicate identities locate every bearer; a repeated prop locates every attribute spelling the name"; "Ranges are exact per condition"; "An attribute condition (14.2–14.4, 14.17) locates the attribute's own characters, the attribute range of 11.4: a duplicate identity each bearer's `id` attribute, a malformed segment the `id` attribute, a malformed tag the `tags` attribute"; "A missing `id` (14.1) locates the section's opening tag, the opening-tag range of 11.4". SPEC 12.7: a finding carries one `{"file", "range"}` per offending construct, ordered by file path bytes, then range start, then range end. Here: 14.1 locates the section's opening tag, the opening-tag range of 11.4; 14.3 is one finding locating each bearer's `id` attribute; 14.2 locates the `id` attribute.
-- 14.2 lies outside CONF-AVAIL's staged set. It takes the same correction anyway, so that every finding the fixture reports carries SPEC 14's range; D's trial patch included it, and certification came out the same.
-
-**Where.** `test/fixtures/conf-avail/product.mjs`, shared by the conformer and VIOL-AVAIL-NULLMARKER, -OMIT, and -NOFILE (their deviations lie in the datum forms and the `--file` restriction, not in finding locations).
-- The 14.1 site (about line 1593) locates `constructRange(section)`.
-- The 14.2 site (about line 1784) locates `constructRange(section)`.
-- The 14.3 site (about line 1805) already reports one finding per duplicated spelling locating every bearer, but each by `constructRange(bearer)`.
-- `attrRange` and `constructRange` are defined together (about line 1560), over `byteRange`. The fixture's `view` answer already reports each section's `opening` as `byteRange(record, node.openStart, node.openEnd)` (about line 2540), the range 14.1 must carry.
-
-**Change.**
-- 14.1: the section's opening tag, `openStart` to `openEnd`, the same range `view` reports as that section's `opening`.
-- 14.2 and 14.3: the section's one `id` attribute (`attrRange` of the `id` entry of `section.attrs`; a section reaching either check spells exactly one quoted `id`).
-- Leave every other finding site alone (D found the other staged conditions exact), and correct any comment that states the old ranges.
-- Reviewer D's trial patch (`c156D/probe_loc/conf-avail.patch`) makes these changes. If it is still there, read it in full and use it as a reference, not a prescription.
-
-**Checks.**
-- *Probe.* Use reviewer D's `c156D/probe_loc/avail_probe.py` and the planner's `p156plan/avail_check.py`, copied to `t156_2/`, or rebuild them from this table. Each case is a one-file workspace: `xspec.config.ts` is the specs-only configuration with `main: ["specs/*.mdx"]`, and `specs/A.mdx` holds the lines listed, each ending in one line feed (the workspaces Task 1 probed CONF-VALID with; its probe, `t156_1/valid_probe.py` in the scratchpad, stages them while it survives). Each case runs bare `node test/fixtures/conf-avail/bin.mjs view` from the workspace root and exits 1 before and after.
-
-  | Case | `specs/A.mdx` | Required (after) | Reported at 34032b5 |
-  |---|---|---|---|
-  | 14.1 | `<S id="ok">`, `A.`, `</S>`, `<S>`, `No id.`, `</S>` | (20,23) | (20,35) |
-  | 14.2, child | `<S id="login">`, `L.`, `<S id="validCredentials">`, `X.`, `</S>`, `</S>` | (21,42) | (18,51) |
-  | 14.2, top level | `<S id="auth.login">`, `X.`, `</S>` | (3,18) | (0,27) |
-  | 14.3, two bearers | `<S id="a">`, `A.`, `</S>`, `<S id="a">`, `B.`, `</S>` | one finding: (3,9) and (22,28) | one finding: (0,18) and (19,37) |
-  | 14.1, self-closing (control) | `<S id="ok">`, `A.`, `</S>`, `<S />` | (20,25) | (20,25) |
-
-  For each 14.1 case, also check that the finding's range equals the `opening` the same answer reports for that section. The other cases of D's probe are controls whose findings must not change: 14.4 for a malformed `id` (`<S id="a b">`, `A.`, `</S>`) at (3,11); 14.5 for `d={["nope"]}`; 14.6 for `{text("nope")}`; 14.9 for the two-section `d` cycle; 14.16 for the `<div>` element; and 14.17 for a repeated, a braced, and a valueless `id`, and for an invalid `coverage` value.
-- *Certification family.* Run `-t AVAIL` before and after. CONF-AVAIL passes its 6 in-scope tests. VIOL-AVAIL-NULLMARKER, -OMIT, and -NOFILE each fail exactly their Certifies lists, with the same first-line diagnoses as before the change. `test/self/certification-fixture-grammar.test.ts` passes.
-- *Every-task ending* (Conventions).
 
 ### Task 3 — State the true basis of T1.3-5's and T14-4's 14.3 tolerance (D3)
 

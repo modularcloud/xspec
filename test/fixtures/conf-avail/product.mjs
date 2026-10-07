@@ -1557,9 +1557,16 @@ async function loadWorkspace(cwd, configFlag) {
       continue;
     }
     const { parsed } = record;
+    // SPEC 14's ranges for the section conditions: a missing `id` (14.1)
+    // locates the section's opening tag, the opening-tag range of 11.4 (the
+    // `opening` this fixture's `view` reports for that section); an
+    // attribute condition (14.2, 14.3, 14.4, 14.17) the attribute's own
+    // characters, the attribute range of 11.4 — 14.2 and 14.4 the
+    // section's one spelling `id` attribute, 14.3 each bearer's, 14.17 each
+    // offending attribute.
     const attrRange = (attr) => byteRange(record, attr.start, attr.end);
-    const constructRange = (node) =>
-      byteRange(record, node.openStart, node.closeEnd);
+    const openingRange = (node) =>
+      byteRange(record, node.openStart, node.openEnd);
 
     for (const element of parsed.elements) {
       addFinding(
@@ -1577,6 +1584,8 @@ async function loadWorkspace(cwd, configFlag) {
     for (const section of parsed.sections) {
       const info = {
         spelled: null,
+        /** The one quoted `id` attribute, exactly when `spelled` is set. */
+        idAttr: null,
         wellFormed: false,
         conformant: true,
         unique: true,
@@ -1594,7 +1603,7 @@ async function loadWorkspace(cwd, configFlag) {
         addFinding(
           "14.1",
           "missing id: every section must spell an identity via an `id` prop (SPEC 1.3, 14.1)",
-          [{ file: record.rel, range: constructRange(section) }],
+          [{ file: record.rel, range: openingRange(section) }],
         );
       } else if (idAttrs.length > 1) {
         addFinding(
@@ -1610,6 +1619,7 @@ async function loadWorkspace(cwd, configFlag) {
         );
       } else {
         info.spelled = idAttrs[0].value;
+        info.idAttr = idAttrs[0];
         info.wellFormed = isWellFormedIdentity(info.spelled);
         if (!info.wellFormed) {
           addFinding(
@@ -1759,7 +1769,8 @@ async function loadWorkspace(cwd, configFlag) {
     }
 
     // Structural conformance (SPEC 1.3, 14.2), masked where the positional
-    // section parent spells no identity.
+    // section parent spells no identity; a finding locates the section's
+    // one spelling `id` attribute (an attribute condition, SPEC 14).
     for (const section of parsed.sections) {
       const info = record.info.get(section);
       if (info.spelled === null) continue;
@@ -1784,15 +1795,16 @@ async function loadWorkspace(cwd, configFlag) {
         addFinding(
           "14.2",
           `invalid structural id: ${JSON.stringify(info.spelled)} does not extend its parent's spelled identity by exactly one segment (SPEC 1.3, 14.2)`,
-          [{ file: record.rel, range: constructRange(section) }],
+          [{ file: record.rel, range: attrRange(info.idAttr) }],
         );
       }
     }
 
     // Uniqueness (SPEC 11.2, 14.3): spelled identities only — one finding
-    // per duplicated spelling, locating EVERY bearer; every bearer's own
-    // identity is undefined (no winner), while descendants judge their own
-    // spelling alone (duplication is not a chain condition).
+    // per duplicated spelling, locating EVERY bearer at its `id` attribute
+    // (SPEC 14), in document order; every bearer's own identity is
+    // undefined (no winner), while descendants judge their own spelling
+    // alone (duplication is not a chain condition).
     for (const section of parsed.sections) {
       const info = record.info.get(section);
       if (info.spelled === null) continue;
@@ -1808,7 +1820,7 @@ async function loadWorkspace(cwd, configFlag) {
         `duplicate id: ${JSON.stringify(spelling)} is spelled by ${String(bearers.length)} sections of ${record.rel} (SPEC 1.3, 14.3)`,
         bearers.map((bearer) => ({
           file: record.rel,
-          range: constructRange(bearer),
+          range: attrRange(record.info.get(bearer).idAttr),
         })),
       );
     }
