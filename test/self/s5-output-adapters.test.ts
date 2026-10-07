@@ -18,7 +18,10 @@
 
 import { Buffer } from "node:buffer";
 import { expect, onTestFinished, test } from "vitest";
-import { HarnessAssertionError } from "../helpers/assertions.js";
+import {
+  HarnessAssertionError,
+  parseJsonStdout,
+} from "../helpers/assertions.js";
 import type { RunResult } from "../helpers/subprocess.js";
 import type {
   Finding,
@@ -5134,6 +5137,64 @@ test("S-5: every adjustable adapter runs the marker walk over the whole document
     put(GOOD_NODE, { unavailable: true }, "meta"),
     "walk integration",
   );
+});
+
+// `parseJsonStdout` (helpers/assertions.ts) runs the marker walk over every
+// document it parses, so the walk covers every JSON document the suite
+// parses from a captured stdout, decoded by an adapter or not (T12.7-1): a
+// near-marker in a document no decoder reads — a `review create` success
+// document, say — still rejects, the diagnosis naming the JSON path and the
+// command line.
+test("S-5: parseJsonStdout runs the marker walk over every document it parses (T12.7-1)", () => {
+  const nearMarkers: readonly {
+    readonly label: string;
+    readonly value: unknown;
+  }[] = [
+    { label: "unavailable false", value: { unavailable: false } },
+    { label: "marker with a sibling", value: { unavailable: true, x: 1 } },
+  ];
+  const placements: readonly {
+    readonly label: string;
+    readonly document: (value: unknown) => unknown;
+    readonly path: string;
+  }[] = [
+    {
+      label: "nested in an object member",
+      document: (value) => ({ created: { item: { source: value } } }),
+      path: "$.created.item.source",
+    },
+    {
+      label: "an array element",
+      document: (value) => ({ nodes: [{ identity: "specs/A.mdx" }, value] }),
+      path: "$.nodes[1]",
+    },
+  ];
+  const stdoutOf = (document: unknown): RunResult =>
+    syntheticResult(`${JSON.stringify(document, null, 2)}\n`);
+  for (const near of nearMarkers) {
+    for (const place of placements) {
+      const failure = expectDiagnosed(`${near.label}, ${place.label}`, () =>
+        parseJsonStdout(stdoutOf(place.document(near.value)), "walk vector"),
+      );
+      expect(failure.message).toContain(`at ${place.path}: expected`);
+      expect(failure.message).toContain("`stand-in check` [synthetic result]");
+      expect(failure.message).toContain("walk vector");
+    }
+  }
+  // A stray member on the document itself, no caller context given.
+  const topLevel = expectDiagnosed("stray top-level member", () =>
+    parseJsonStdout(stdoutOf({ created: { name: "r" }, unavailable: false })),
+  );
+  expect(topLevel.message).toContain("at $: expected");
+  expect(topLevel.message).toContain("`stand-in check` [synthetic result]");
+  // Positive control: an exact marker in the same places is a legitimate
+  // value, and the parsed document is returned.
+  for (const place of placements) {
+    const document = place.document({ unavailable: true });
+    expect(parseJsonStdout(stdoutOf(document), "walk vector")).toEqual(
+      document,
+    );
+  }
 });
 
 // --- the bare edge-endpoint walk (T1.7-1) ------------------------------------

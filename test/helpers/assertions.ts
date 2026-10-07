@@ -24,6 +24,9 @@
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
+// An import cycle (forms.ts imports `fail` from here), safe under ESM because
+// neither module calls into the other while it is being evaluated.
+import { assertUnavailabilityMarkerForms } from "./adapters/forms.js";
 import type { RunResult } from "./subprocess.js";
 import { summarizeResult } from "./subprocess.js";
 
@@ -161,7 +164,12 @@ export function assertStderrEmpty(result: RunResult, context?: string): void {
  * parses as a single document (surrounding insignificant whitespace included;
  * a trailing newline after the document is still one document) — and return
  * it parsed. Empty stdout, invalid UTF-8, concatenated documents, and any
- * non-JSON contamination fail diagnosed (H-5; SPEC.md 12.0).
+ * non-JSON contamination fail diagnosed (H-5; SPEC.md 12.0). Every parsed
+ * document then passes the 12.7 unavailability-marker walk
+ * (`assertUnavailabilityMarkerForms`, adapters/forms.ts; T12.7-1): an object
+ * of any form other than `{"unavailable": true}` carrying a member named
+ * `unavailable` fails diagnosed, the message naming its JSON path, the
+ * caller's context, and the command line.
  */
 export function parseJsonStdout(result: RunResult, context?: string): unknown {
   const prefix = context === undefined ? "" : `${context}: `;
@@ -178,13 +186,26 @@ export function parseJsonStdout(result: RunResult, context?: string): unknown {
       `${prefix}expected exactly one JSON document as the entire stdout of ${result.commandLine}, but stdout is empty — ${summarizeResult(result)}`,
     );
   }
+  let doc: unknown;
   try {
-    return JSON.parse(text) as unknown;
+    doc = JSON.parse(text) as unknown;
   } catch (error) {
     return fail(
       `${prefix}stdout of ${result.commandLine} is not exactly one JSON document (H-5; SPEC.md 12.0): ${(error as Error).message}; stdout: ${renderStream(result.stdoutBytes)}`,
     );
   }
+  // T12.7-1 (SPEC 12.7): no object of any form other than the unavailability
+  // marker carries a member named `unavailable` — an exclusivity universal
+  // like the value forms (H-3) — so the structural walk runs here, over every
+  // JSON document the suite parses from a captured stdout, whether or not an
+  // adapter decodes it afterwards (S-5 guards this integration). The
+  // document decoders keep their own entry walks: they also take documents
+  // that never pass through here (S-5's and S-8's synthetic ones).
+  assertUnavailabilityMarkerForms(
+    doc,
+    `${context === undefined ? "" : `${context} — `}stdout of ${result.commandLine}`,
+  );
+  return doc;
 }
 
 /**

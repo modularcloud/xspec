@@ -43,11 +43,13 @@
 //     (6.6) with the ten edit classes and the pinned orders
 //   - the unavailability-marker structural walk T12.7-1 relies on: no object
 //     of any form other than the marker carries a member named "unavailable".
-//     Every public DOCUMENT decoder below runs the walk over the whole raw
+//     It runs at `parseJsonStdout` (../assertions.ts) over every JSON
+//     document the suite parses from a captured stdout, decoded or not, and
+//     every public DOCUMENT decoder below runs it again over the whole raw
 //     document before decoding members — the scoped decoders included, whose
-//     unread members the walk still covers — so the T12.7-1 walk runs over
-//     every 12.7 document the suite captures (captures go through these
-//     entry points; S-5 guards both the walk and this integration)
+//     unread members the walk still covers — since decoders also take
+//     documents that never pass through `parseJsonStdout` (S-5 guards the
+//     walk and each integration)
 
 import { Buffer, isUtf8 } from "node:buffer";
 import type {
@@ -2360,15 +2362,21 @@ export function decodePerformedOperationReport(
  * named `unavailable` — every object with that member is exactly
  * `{"unavailable": true}`. Diagnoses name the offending JSON path.
  *
- * Every public document decoder in this module runs this walk over the
- * whole raw document before decoding members (the scoped decoders included,
- * whose unread members the walk still covers), and every adjustable adapter
- * (query.ts, review.ts, reports.ts, operations.ts) runs it through
- * {@link documentRootSite} at each of its document-decode entries, so it
- * runs over every JSON document the suite captures — the pinned 12.7
- * document forms and the unpinned-shape surfaces of H-3 alike, the marker's
- * exclusivity being universal like the value forms (T12.7-1; S-5 guards the
- * walk and both integrations). Tests may additionally call it directly.
+ * It runs at `parseJsonStdout` (../assertions.ts), the step by which the
+ * harness turns a captured stdout into a JSON document, so it runs over
+ * every JSON document the suite parses from the product's output — the
+ * pinned 12.7 document forms, the unpinned-shape surfaces of H-3, and
+ * documents no adapter decodes (the `review create`, `resolve`, and `split`
+ * success documents) alike, the marker's exclusivity being universal like
+ * the value forms (T12.7-1). It also runs at every document decoder's
+ * entry, since decoders take documents that never pass through
+ * `parseJsonStdout` (S-5's and S-8's synthetic ones): every public document
+ * decoder in this module runs it over the whole raw document before
+ * decoding members (the scoped decoders included, whose unread members the
+ * walk still covers), and every adjustable adapter (query.ts, review.ts,
+ * reports.ts, operations.ts) runs it through {@link documentRootSite} at
+ * each of its document-decode entries. S-5 guards the walk and each
+ * integration. Tests may additionally call it directly.
  */
 export function assertUnavailabilityMarkerForms(
   doc: unknown,

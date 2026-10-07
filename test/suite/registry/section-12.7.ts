@@ -48,16 +48,19 @@
 //   (`specs/OK.mdx` among byte-form siblings, the `../OK.xspec` import's
 //   plain resolved target beside the byte-form `./Tgt.xspec` one).
 // - The marker-uniqueness walk (`assertUnavailabilityMarkerForms`, S-5
-//   guarded) runs over every 12.7 document the suite captures — integrated
-//   at every forms.ts document-decode entry point — and this test drives it
-//   explicitly over its own captured documents, which carry genuine markers
-//   (every identity of an invalid-path file; the occurrence records'
-//   `source`), so the walk's accepting side is exercised on marker-bearing
-//   answers, and marker exactness at the datum sites is value-asserted
-//   (`source` exactly `{"unavailable": true}`). The walk equally runs at
-//   every adjustable adapter's document entry (`documentRootSite`,
-//   forms.ts), the exclusivity clause being universal like the value forms:
-//   arm F's captured unpinned-shape documents pass through it too.
+//   guarded) runs over every JSON document the suite parses from a captured
+//   stdout — integrated at `parseJsonStdout` (helpers/assertions.ts), so it
+//   covers documents no adapter decodes (the `review create`, `resolve`, and
+//   `split` success documents), and again at every forms.ts document-decode
+//   entry point — and this test drives it explicitly over its own captured
+//   documents, which carry genuine markers (every identity of an
+//   invalid-path file; the occurrence records' `source`), so the walk's
+//   accepting side is exercised on marker-bearing answers, and marker
+//   exactness at the datum sites is value-asserted (`source` exactly
+//   `{"unavailable": true}`). The walk equally runs at every adjustable
+//   adapter's document entry (`documentRootSite`, forms.ts), the
+//   exclusivity clause being universal like the value forms: arm F's
+//   captured unpinned-shape documents pass through it too.
 // - Arm F asserts 12.7's range form where SPEC leaves the document shape
 //   unpinned (H-3): the adjustable adapters' range decode is the literal form
 //   decode itself (`decodeSourceRange` delegates to `decodeRangeForm` —
@@ -3155,7 +3158,8 @@ const T12_7_1 = defineProductTest({
     "file and concerned path, while a valid-UTF-8 path never takes the byte " +
     'form; unavailability is exactly {"unavailable": true} and no object ' +
     'of any other form carries a member named "unavailable" (the ' +
-    "S-5-guarded structural walk, run over every captured 12.7 document); " +
+    "S-5-guarded structural walk, run over every JSON document the suite " +
+    "parses from the product's output); " +
     'a finding is {"code", "message", "locations", "path", ' +
     '"identities"} — `code` the stable token or null where 14 assigns ' +
     'none (a review-refusal finding), `locations` one {"file", "range"} ' +
