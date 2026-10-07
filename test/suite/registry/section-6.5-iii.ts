@@ -127,7 +127,14 @@
 //   `a`'s); (l) and its indented twin assert the pre-move `build --json`
 //   clean and `view`'s `imports` empty before, the added declaration alone
 //   after (its range the declaration's own characters, as T11.4-4 pins an
-//   import's).
+//   import's); both are staged with Markdown emission on (`EMIT_CONFIG`),
+//   and the receiving file's compiled Markdown, `specs/b.md` (13.2,
+//   `outDir` unset), is byte-compared after the pre-move `build` and after
+//   the move's clean `build` with the forms the S-6-vetted oracle
+//   (helpers/oracles/markdown.ts) compiles from 3's rules over the staged
+//   and the composed post-move source: the paragraph's lines content
+//   verbatim, the section tags and the added declaration removed with
+//   their lines, `{text(<X>.a)}` replaced by `a`'s subtree text.
 // - T6.5-15 stages its target already binding, under the origin's own
 //   identifiers, every module the moved text references, so no import is
 //   added and no spelling rewritten (each moved spelling is rooted at a
@@ -209,6 +216,11 @@ import {
   expectFreshIdentifier,
 } from "../../helpers/import-insertion.js";
 import { deriveMdx } from "../../helpers/mdx-derivability.js";
+import type { MarkdownPiece } from "../../helpers/oracles/markdown.js";
+import {
+  compileMarkdown,
+  sourceTextOf,
+} from "../../helpers/oracles/markdown.js";
 import { HarnessStagingError } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
@@ -266,6 +278,25 @@ export default defineConfig({
  * cross-file text (section-6.5-v.ts).
  */
 export const R16_CONFIG = CONFIG;
+
+// The module's configuration with Markdown emission on (SPEC 7.3, 13.2):
+// `CONFIG` plus `markdown: { emit: true }`, `outDir` unset, so a source
+// `NAME.mdx` emits `NAME.md` beside it. A staged-source record: T6.5-13's
+// (l) arms (`a13ParagraphHeadedArm`) and every T6.5-15 arm after the first
+// stage it in workspaces created after a product invocation (S-9's timing
+// clause; test/self/s9-staged-sources.test.ts).
+const EMIT_CONFIG = stagedTs(
+  "T6.5-13/T6.5-15 xspec.config.ts — one spec group with Markdown emission",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`,
+);
 
 // One spec group plus one code group (SPEC 7.1), for T6.5-18's code file. A
 // staged-source record: T6.5-18 stages it in workspaces created after a
@@ -1332,6 +1363,8 @@ const T6_5_14 = defineProductTest({
 
 const A13_ORIGIN = "specs/a.mdx";
 const A13_TARGET = "specs/b.mdx";
+/** The target's Markdown emit destination: `specs/b.mdx` emits `specs/b.md` beside it, `outDir` unset (SPEC 13.2, 7.3). */
+const A13_TARGET_MARKDOWN = "specs/b.md";
 const A13_THIRD = "specs/x.mdx";
 const A13_THIRD_MODULE = "specs/x.xspec";
 const A13_THIRD_SOURCE = ['<S id="a">', "A text.", "</S>", ""].join("\n");
@@ -1487,6 +1520,32 @@ interface A13Arm {
   readonly impact?: (idents: readonly string[]) => A13ImpactExpectation;
   /** Repeat the move in a fresh workspace and require byte-identical receiving bytes (H-6). */
   readonly repeatable?: boolean;
+  /** The configuration the arm is staged under in place of the module's `CONFIG` (`a13Files`); `CONFIG` when absent. */
+  readonly config?: StagedTs;
+  /**
+   * The receiving file's compiled Markdown (SPEC 3), read from its emit
+   * destination under a `config` enabling emission (7.3, 13.2): after the
+   * pre-move `build`, and after `assertCleanAfterMove`'s `build`.
+   */
+  readonly compiled?: A13Compiled;
+}
+
+/**
+ * An arm's compiled-Markdown expectation for the receiving file, each form
+ * composed through the S-6-vetted oracle (helpers/oracles/markdown.ts) from
+ * 3's rules over the staged and the composed post-move source.
+ */
+interface A13Compiled {
+  /** The emit destination: the receiving file's 13.2 path, `outDir` unset (7.3). */
+  readonly destination: string;
+  /** The staging's compiled Markdown. */
+  readonly before: string;
+  /** The compiled Markdown after the move, given the fresh identifiers in `added`'s order. */
+  readonly after: (idents: readonly string[]) => string;
+  /** What 3 keeps and drops in the staging, for both compares' diagnoses. */
+  readonly reason: string;
+  /** What 3 makes of the move's edits, for the post-move compare's diagnosis. */
+  readonly afterReason: string;
 }
 
 /** The source each added declaration's canonical specifier designates (SPEC 2.1, 11.4). */
@@ -1786,7 +1845,81 @@ const A13_L_INDENTED_HEAD: readonly string[] = [
   "",
 ];
 
-/** A paragraph-headed (l) arm: the head's lines, then (a)'s target; the root's own text the head verbatim. */
+/**
+ * A paragraph-headed (l) receiving file as 3's compile reads it, in the
+ * oracle's pieces (helpers/oracles/markdown.ts): the head's lines plain
+ * content — a paragraph, no ESM block's lines (14.20), so its `import B …`
+ * line is no spec module import, its bytes preserved and subject only to
+ * the drop rule — and `p`'s tags removals; after the move (`ident` the
+ * fresh identifier given), the moved section's tags removals too, its
+ * `{text(<X>.a)}` an embedding expanding to `a`'s subtree text (2.3, 1.6),
+ * and the added declaration a removal (3: spec module imports removed).
+ */
+function a13ParagraphHeadedPieces(
+  head: readonly string[],
+  ident?: string,
+): MarkdownPiece[] {
+  const pieces: MarkdownPiece[] = [
+    { kind: "content", text: `${head.join("\n")}\n` },
+    { kind: "removal", text: '<S id="p">' },
+    { kind: "content", text: "\nx\n" },
+  ];
+  if (ident !== undefined) {
+    pieces.push(
+      { kind: "removal", text: '<S id="p.n">' },
+      { kind: "content", text: "\nMoved " },
+      {
+        kind: "embedding",
+        text: `{text(${ident}.a)}`,
+        expansion: A13_A_SUBTREE_TEXT,
+      },
+      { kind: "content", text: " text.\n" },
+      { kind: "removal", text: "</S>" },
+      { kind: "content", text: "\n" },
+    );
+  }
+  pieces.push(
+    { kind: "removal", text: "</S>" },
+    { kind: "content", text: "\n" },
+  );
+  if (ident !== undefined) {
+    pieces.push(
+      { kind: "removal", text: a13Declaration(ident) },
+      { kind: "content", text: "\n" },
+    );
+  }
+  return pieces;
+}
+
+/**
+ * Compile a composed source through the S-6-vetted oracle (SPEC 3), its
+ * pieces first required to spell exactly that source: a mismatch is a
+ * defect of this table, never a product verdict.
+ */
+function a13CompileComposed(
+  source: string,
+  pieces: readonly MarkdownPiece[],
+  what: string,
+): string {
+  const spelled = sourceTextOf(pieces);
+  if (spelled !== source) {
+    throw new Error(
+      `T6.5-13 staging: the compile pieces of ${what} must spell its ` +
+        `composed source exactly — pieces ${JSON.stringify(spelled)}, ` +
+        `source ${JSON.stringify(source)}`,
+    );
+  }
+  return compileMarkdown(pieces);
+}
+
+/**
+ * A paragraph-headed (l) arm: the head's lines, then (a)'s target; the
+ * root's own text the head verbatim. Staged with Markdown emission on
+ * (`EMIT_CONFIG`), so the receiving file's compiled Markdown is asserted
+ * too — before the move and after it, the head's lines content verbatim
+ * (TEST-SPEC T6.5-13(l): "the paragraph's bytes untouched and still
+ * content in the compiled Markdown").
+ */
 function a13ParagraphHeadedArm(
   key: string,
   summary: string,
@@ -1794,13 +1927,28 @@ function a13ParagraphHeadedArm(
 ): A13Arm {
   const target = [...head, '<S id="p">', "x", "</S>", ""].join("\n");
   const ownText = `${head.join("\n")}\n`;
+  const compose = (ident: string): string =>
+    [...head, a13ComposeIntoP(ident, [""])].join("\n");
+  const compiledAfter = (ident: string): string =>
+    a13CompileComposed(
+      compose(ident),
+      a13ParagraphHeadedPieces(head, ident),
+      `arm ${key}'s ${A13_TARGET} after the move`,
+    );
+  // The premise, judged at load with a placeholder identifier: the pieces
+  // spell the composed post-move source (and, below, the staging).
+  compiledAfter("X");
+  const paragraph = head
+    .filter((line) => line !== "")
+    .map((line) => `\`${line}\``)
+    .join(", ");
   return {
     ...a13CrossArm({
       key,
       summary,
       target: stagedMdx(`T6.5-13 arm ${key} ${A13_TARGET}`, target),
       newId: "p.n",
-      compose: (ident) => [...head, a13ComposeIntoP(ident, [""])].join("\n"),
+      compose,
       previewEdits: [
         a13At("target-insertion", target.indexOf("</S>")),
         a13At("import-addition", target.length),
@@ -1811,6 +1959,25 @@ function a13ParagraphHeadedArm(
     }),
     cleanBefore: true,
     viewImports: true,
+    config: EMIT_CONFIG,
+    compiled: {
+      destination: A13_TARGET_MARKDOWN,
+      before: a13CompileComposed(
+        target,
+        a13ParagraphHeadedPieces(head),
+        `arm ${key}'s staged ${A13_TARGET}`,
+      ),
+      after: (idents) => compiledAfter(idents[0] ?? ""),
+      reason:
+        `the paragraph's lines (${paragraph}) stay content, byte for byte — ` +
+        `paragraph text, no ESM block's lines (14.20), so no spec module ` +
+        `import for the compile to remove (T3-1's grammar boundary) — ` +
+        `while \`p\`'s tags are removed with their lines`,
+      afterReason:
+        "the added declaration removed with its line, the moved section's " +
+        "tags with theirs, its `{text(<X>.a)}` replaced by `a`'s subtree " +
+        "text, fully expanded (2.3, 1.6)",
+    },
   };
 }
 
@@ -2942,7 +3109,7 @@ async function a13AssertRepeatable(
   first: string,
 ): Promise<void> {
   const context = `T6.5-13 ${arm.key} (repeated run)`;
-  await withWorkspace(arm.files, async (workspace) => {
+  await withWorkspace(a13Files(arm), async (workspace) => {
     await buildOk(product, workspace, `${context} \`build\` over the staging`);
     await expectExit(
       product,
@@ -2966,6 +3133,16 @@ async function a13AssertRepeatable(
   });
 }
 
+/**
+ * An arm's staging under its own configuration where it names one — in
+ * place of the module's `CONFIG`, which `withWorkspace`'s `files` override.
+ */
+function a13Files(arm: A13Arm): Readonly<Record<string, InitialFileContents>> {
+  return arm.config === undefined
+    ? arm.files
+    : { ...arm.files, "xspec.config.ts": arm.config };
+}
+
 /** The placeholder identifiers the premise check composes with (any valid identifiers serve). */
 const A13_PLACEHOLDER_IDENTS: readonly string[] = ["X", "Y", "Z"];
 
@@ -2986,7 +3163,7 @@ async function runA13Arm(
   )) {
     a13AssertPremiseDerives(form, arm, testId);
   }
-  return await withWorkspace(arm.files, async (workspace) => {
+  return await withWorkspace(a13Files(arm), async (workspace) => {
     await buildOk(product, workspace, `${context} \`build\` over the staging`);
     if (arm.cleanBefore === true) {
       await expectFindingFreeReport(
@@ -2996,6 +3173,15 @@ async function runA13Arm(
         `${context} \`build --json\` over the staging — clean: the target's ` +
           `paragraph-headed \`import B …\` line is content, no declaration ` +
           `of an absent module (SPEC 14.20, 12.1; T3-1's grammar boundary)`,
+      );
+    }
+    if (arm.compiled !== undefined) {
+      await assertFileBytes(
+        workspace.path(arm.compiled.destination),
+        arm.compiled.before,
+        `${context}: ${arm.compiled.destination}, ${arm.receiving}'s ` +
+          `compiled Markdown after the pre-move \`build\`, emission on — ` +
+          `${arm.compiled.reason} (SPEC 3, 13.2, 7.3, 14.20; H-4)`,
       );
     }
     let base = "";
@@ -3121,6 +3307,19 @@ async function runA13Arm(
       );
     }
     await assertCleanAfterMove(product, workspace, arm.summary, context);
+    if (arm.compiled !== undefined) {
+      // Read after `assertCleanAfterMove`'s `build`, the emission it
+      // regenerates (12.1, 7.3), so the compare judges the compile of the
+      // moved workspace whatever the move's own regeneration left.
+      await assertFileBytes(
+        workspace.path(arm.compiled.destination),
+        arm.compiled.after(idents),
+        `${context}: ${arm.compiled.destination}, ${arm.receiving}'s ` +
+          `compiled Markdown after the move and a clean \`build\`, emission ` +
+          `on — ${arm.compiled.reason}; ${arm.compiled.afterReason} ` +
+          `(SPEC 3, 6.5, 13.2, 7.3, 14.20; H-4)`,
+      );
+    }
     if (arm.impact !== undefined) {
       await a13AssertImpact(
         product,
@@ -3137,7 +3336,7 @@ async function runA13Arm(
 const T6_5_13 = defineProductTest({
   id: "T6.5-13",
   title:
-    "admissible offsets, the line-start preference, and composition in pre-operation coordinates: byte-asserted section-move arms whose receiving file is composed whole from 6.4/6.5 and 3, value-blind in the fresh identifier alone (read from the added declaration, whose other characters are T6.5-8's), the moved text carrying `{text(X.a)}` through the origin's binding of a third module the target lacks so that exactly `import <X> from \"./x.xspec\"` is added — (a) the preference: a target holding a line-start admissible offset (the file's end after its final terminator) and a mid-line one takes the line start, the declaration appended after the final terminator; its sibling, whose only line-start admissible offset is the start of an empty line after the `</S>` line, places the declaration there with the empty line kept; (b) the self-closing target parent, its line unterminated: the tag's end the only admissible offset, the result `<S id=\"p\">`, U+000A, the moved text, U+000A, `</S>`, U+000A, the declaration, U+000A, the preview's `target-parent-rewrite` spanning the tag and `target-insertion` and `import-addition` both zero-length at the tag's end in 12.7's tie-break order; with a final terminator the same bytes, the addition at the file's end; (c) the forced mid-line case, the file's end the only admissible offset, the added terminator ending the `</S>` line; (d) a top-level `new-id` at the end of a paragraph-ended file, terminated or not: `para`, U+000A, the moved text, U+000A, the declaration, U+000A, `target-insertion` and `import-addition` both zero-length at the file's byte length; (e) a same-file move in `foo <S id=\"p\">` / `<S id=\"p.m\">x</S></S> baz`, the insertion judged over the composed text so that no terminator is added; (f) a same-file top-level move of a file's last section whose unterminated last line the deletion drops, no terminator added; (g) two declarations added to (b)'s self-closing target — after the appended closing tag, U+000A, the two declarations contiguous, each followed by U+000A alone, in an order the product fixes, byte-identical across a repeated run (H-6), the preview holding exactly two `import-addition` entries zero-length at the tag's end before the `target-insertion` there; (h) the mid-line addition off the file's end — a target ending in an unterminated `trailing` paragraph line, the end of the `</S>` line before its terminator the only admissible offset, the `</S>` line's original terminator left an empty line, kept, the root's own text going from `trailing` to U+000A, `trailing` and its ownHash with it, `impact --base` against a commit made immediately before the move reporting the target root `changed` beside `p` and the origin parent, an other-file `d={B}` dependent `upstream-changed` with the root among its attribution, the moved node carrying no category, no other node `changed`; (i) the origin deletion dropping the file's unterminated last line — the origin's own `d={\"m\"}` converting to `d={<T>.m}` through the target module's declaration added at the composed file's end with no terminator, the `import-addition` at the deletion's start or the file's byte length, the origin root `changed` by its lost child alone, its own text empty before and after; (j) the file's-end addition whose ended `</S>{text(\"p\")}` line is kept, its excised embedding counting as content — the root's own text, the embedding fully expanded, gaining a trailing U+000A beside the moved text's arrival, its ownHash with it, `impact --base` reporting (h)'s enumeration; (k) the removal-side line start — a third file `<S id=\"q\" d={A.m} />`, U+000A, `import A from \"./a.xspec\"` with no final terminator, `A.m` re-rooted to `<T>.m`, `A`'s declaration removed with its unterminated last line and the target module's declaration added at the composed file's end, the preview's `reference-rewrite` spanning `A.m`, `import-removal` spanning line 2, `import-addition` at the removal's start or the file's byte length, the third file's root keeping its own content and `q` carrying no category, the two parents `changed`; (l) the admissibility exclusion for lines that were no ESM block's — a target headed by the paragraph `// note`, `import B from \"./B.xspec\"`, `specs/B.mdx` absent and the pre-move `build` clean, `view` listing no import: offset 0 heads a block joining the paragraph's lines, deriving yet inadmissible, so the declaration is appended at the file's end, the paragraph's bytes untouched, `view` listing under `imports` the added declaration alone, the root unchanged; its indented twin, `  import B from \"./B.xspec\"` heading the file, alike — each arm's preview offsets agreeing with the real bytes, the receiving root's own text and ownHash compared through `query node` before and after (unchanged in (a), (b), (c), (e), (f), (g), (k), (l); (d)'s, (h)'s, (i)'s, and (j)'s roots `changed`), `build` and `check` clean after each move, every composed form verified to derive (S-9) (SPEC 6.5, 6.4, 6.6, 6.2, 3, 1.6, 5.5, 5.6, 11.4, 12.7; H-4, H-6)",
+    "admissible offsets, the line-start preference, and composition in pre-operation coordinates: byte-asserted section-move arms whose receiving file is composed whole from 6.4/6.5 and 3, value-blind in the fresh identifier alone (read from the added declaration, whose other characters are T6.5-8's), the moved text carrying `{text(X.a)}` through the origin's binding of a third module the target lacks so that exactly `import <X> from \"./x.xspec\"` is added — (a) the preference: a target holding a line-start admissible offset (the file's end after its final terminator) and a mid-line one takes the line start, the declaration appended after the final terminator; its sibling, whose only line-start admissible offset is the start of an empty line after the `</S>` line, places the declaration there with the empty line kept; (b) the self-closing target parent, its line unterminated: the tag's end the only admissible offset, the result `<S id=\"p\">`, U+000A, the moved text, U+000A, `</S>`, U+000A, the declaration, U+000A, the preview's `target-parent-rewrite` spanning the tag and `target-insertion` and `import-addition` both zero-length at the tag's end in 12.7's tie-break order; with a final terminator the same bytes, the addition at the file's end; (c) the forced mid-line case, the file's end the only admissible offset, the added terminator ending the `</S>` line; (d) a top-level `new-id` at the end of a paragraph-ended file, terminated or not: `para`, U+000A, the moved text, U+000A, the declaration, U+000A, `target-insertion` and `import-addition` both zero-length at the file's byte length; (e) a same-file move in `foo <S id=\"p\">` / `<S id=\"p.m\">x</S></S> baz`, the insertion judged over the composed text so that no terminator is added; (f) a same-file top-level move of a file's last section whose unterminated last line the deletion drops, no terminator added; (g) two declarations added to (b)'s self-closing target — after the appended closing tag, U+000A, the two declarations contiguous, each followed by U+000A alone, in an order the product fixes, byte-identical across a repeated run (H-6), the preview holding exactly two `import-addition` entries zero-length at the tag's end before the `target-insertion` there; (h) the mid-line addition off the file's end — a target ending in an unterminated `trailing` paragraph line, the end of the `</S>` line before its terminator the only admissible offset, the `</S>` line's original terminator left an empty line, kept, the root's own text going from `trailing` to U+000A, `trailing` and its ownHash with it, `impact --base` against a commit made immediately before the move reporting the target root `changed` beside `p` and the origin parent, an other-file `d={B}` dependent `upstream-changed` with the root among its attribution, the moved node carrying no category, no other node `changed`; (i) the origin deletion dropping the file's unterminated last line — the origin's own `d={\"m\"}` converting to `d={<T>.m}` through the target module's declaration added at the composed file's end with no terminator, the `import-addition` at the deletion's start or the file's byte length, the origin root `changed` by its lost child alone, its own text empty before and after; (j) the file's-end addition whose ended `</S>{text(\"p\")}` line is kept, its excised embedding counting as content — the root's own text, the embedding fully expanded, gaining a trailing U+000A beside the moved text's arrival, its ownHash with it, `impact --base` reporting (h)'s enumeration; (k) the removal-side line start — a third file `<S id=\"q\" d={A.m} />`, U+000A, `import A from \"./a.xspec\"` with no final terminator, `A.m` re-rooted to `<T>.m`, `A`'s declaration removed with its unterminated last line and the target module's declaration added at the composed file's end, the preview's `reference-rewrite` spanning `A.m`, `import-removal` spanning line 2, `import-addition` at the removal's start or the file's byte length, the third file's root keeping its own content and `q` carrying no category, the two parents `changed`; (l) the admissibility exclusion for lines that were no ESM block's — a target headed by the paragraph `// note`, `import B from \"./B.xspec\"`, `specs/B.mdx` absent and the pre-move `build` clean, `view` listing no import: offset 0 heads a block joining the paragraph's lines, deriving yet inadmissible, so the declaration is appended at the file's end, the paragraph's bytes untouched and still content in the compiled Markdown (emission on, asserted before and after the move), `view` listing under `imports` the added declaration alone, the root unchanged; its indented twin, `  import B from \"./B.xspec\"` heading the file, alike — each arm's preview offsets agreeing with the real bytes, the receiving root's own text and ownHash compared through `query node` before and after (unchanged in (a), (b), (c), (e), (f), (g), (k), (l); (d)'s, (h)'s, (i)'s, and (j)'s roots `changed`), `build` and `check` clean after each move, every composed form verified to derive (S-9) (SPEC 6.5, 6.4, 6.6, 6.2, 3, 1.6, 5.5, 5.6, 11.4, 12.7; H-4, H-6)",
   run: async (product) => {
     for (const arm of A13_ARMS) {
       const bytes = await runA13Arm(product, arm);
@@ -3174,24 +3373,6 @@ const J15_ORIGIN = "specs/o.mdx";
 const J15_ORIGIN_MARKDOWN = "specs/o.md";
 const J15_TARGET = "specs/t.mdx";
 const J15_MOVE_ARGV = ["move", "specs/o.mdx#m", "specs/t.mdx#m"] as const;
-
-/**
- * The module's configuration with Markdown emission on (SPEC 7.3, 13.2). A
- * staged-source record: every arm after the first stages it in a workspace
- * created after a product invocation (S-9's timing clause).
- */
-const J15_EMIT_CONFIG = stagedTs(
-  "T6.5-15 xspec.config.ts — one spec group with Markdown emission",
-  `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  },
-  markdown: { emit: true }
-})
-`,
-);
 
 /** `import <B> from "./<B>.xspec"` — 2.1's one permitted form. */
 function j15Declaration(binding: string): string {
@@ -3529,7 +3710,7 @@ async function runJ15Arm(
   j15AssertPremiseDerives(staging.targetAfter, J15_TARGET, arm);
   await withWorkspace(
     {
-      "xspec.config.ts": J15_EMIT_CONFIG,
+      "xspec.config.ts": EMIT_CONFIG,
       [J15_ORIGIN]: entry.origin,
       [J15_TARGET]: entry.target,
       ...J15_MODULES,
