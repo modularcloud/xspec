@@ -74,7 +74,7 @@ The document is then re-serialized with a trailing newline. Modes `null` and `om
   - T4.1-3's probe walk (Task 4) traverses a generated module's runtime values inside the consumer process, not an answer document, so S-8 needs no vector for it.
 
 **Order.** Take the topmost task unless told otherwise; the dependencies below are hard. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement. When a task is done, its commit removes it and adds a one-line summary to its bullet here.
-- Part A (Tasks 1–3): a root node's tags are absent, never a demanded tag set (A1, B1, C2, D1). Task 1 makes the query decoders carry a root's absent tags (H-3), with S-5's vectors and the consumer sweep. Task 2 asserts the absence in T11-1, T11-2, and T11-3; it depends on Task 1. Task 3 makes the CONF-VALID fixture report it; it depends on Task 1, whose decoders T1.3-5 and the grammar self-test need before the fixture may emit `null`. Task 1 done (d6fe60e and its follow-up commit): the five query decoders read a root's `null` or omitted `tags` as `null` through `decodeNodeTags` (a section's absent tags and a root's present non-set value still fail; a root's `[]` passes through unjudged), the model's four `tags` members are `readonly string[] | null`, T1.1-2's `nodeSetOf` carries `null` through, and S-5's five entries gained root-tag vectors (no new tests: the self project stays at 27 files and 4230 tests); through the root-tags stand-in (`t148_1_standin/roottags.mjs` in the scratchpad, mode as its first argument: `pass`, `null`, `omit`, `nonempty`; AGENTS.md's root-tags stand-in bullet), modes `null` and `omit` fail exactly T11-1, T11-2, and T11-3 at their `[]` root pins and P-5 at its known arm; the pre-Task-1 `query.ts` for Task 3's red check is `git show 765d6b4:test/helpers/adapters/query.ts`.
+- Part A (Tasks 1–3): a root node's tags are absent, never a demanded tag set (A1, B1, C2, D1). Task 1 makes the query decoders carry a root's absent tags (H-3), with S-5's vectors and the consumer sweep. Task 2 asserts the absence in T11-1, T11-2, and T11-3; it depends on Task 1. Task 3 makes the CONF-VALID fixture report it; it depends on Task 1, whose decoders T1.3-5 and the grammar self-test need before the fixture may emit `null`. Task 1 done (d6fe60e and its follow-up commit): the five query decoders read a root's `null` or omitted `tags` as `null` through `decodeNodeTags` (a section's absent tags and a root's present non-set value still fail; a root's `[]` passes through unjudged), the model's four `tags` members are `readonly string[] | null`, T1.1-2's `nodeSetOf` carries `null` through, and S-5's five entries gained root-tag vectors (no new tests: the self project stays at 27 files and 4230 tests); through the root-tags stand-in (`t148_1_standin/roottags.mjs` in the scratchpad, mode as its first argument: `pass`, `null`, `omit`, `nonempty`; AGENTS.md's root-tags stand-in bullet), modes `null` and `omit` fail exactly T11-1, T11-2, and T11-3 at their `[]` root pins and P-5 at its known arm; the pre-Task-1 `query.ts` for Task 3's red check is `git show 765d6b4:test/helpers/adapters/query.ts`. Task 2 done (the commit after 5bc3705): T11-1's root arm asserts the root's tags absent (decoded `null`, i.e. reported `null` or omitted), `ExpectedRow.tags` is `readonly string[] | null` with T11-2's two root rows and T11-3's root row at `null` (`assertRowFields` diagnoses a root row's tags as absence, citing SPEC 11.1, 5.5, and 12.7), and the module header, the comments, and the three titles say a root's tags and coverage attribute are both absent; against the built product T11-1, T11-2, and T11-3 now fail diagnosed at their first root-tags assertion (`actual: []`, `expected: null`) — the product deviation left to Phase 10 — while T11-4 through T11-7 still pass; through the root-tags stand-in, modes `null` and `omit` pass all three (before: failed at the `[]` pins), and `pass` and `nonempty` fail them at those assertions (no new tests: the self project stays at 27 files and 4230 tests).
 - Part B (Task 4): T4.1-3's exhausted walk budget is a harness error, never a diagnosed failure (C1). Independent of every other task.
 - Part C (Task 5): T12.7-1's marker walk runs over every JSON document the suite captures (B2). Independent of Parts A and B, except that its full-suite check expects T11-1, T11-2, and T11-3 among the failures once Task 2 is done.
 - Task 6 confirms the result and deletes this plan. It depends on every task above.
@@ -84,40 +84,6 @@ The document is then re-serialized with a trailing newline. Modes `null` and `om
 ### Part A — a root node's tags are absent (A1, B1, C2, D1)
 
 The rule in all three tasks. SPEC 11.1: `query node` reports "tags, coverage attribute, …; for a root node the tags and the coverage attribute are both reported as absent (5.5)", and the rows of `nodes`, `subtree`, and `ancestors` carry "identity, source range, tags, and coverage attribute (tags and coverage attribute both absent for roots)". SPEC 12.4: `show` prints "tags and coverage attribute (both absent for a root node, 11)". SPEC 5.5: "a root node has no `d` targets, no coverage attribute, and no tags". SPEC 12.7: "`null` never encodes emptiness — it marks a datum whose absence its form or defining section states", and `[]` is "a tagless section's `tags`". The `query` and `show` documents are unpinned-shape surfaces (H-3: "the command JSON of `query`, `ids`, `show`, …"), decoded through thin adapters whose latitude is the surrounding shape. So a root's absent tags may be `null` or an omitted member there, exactly as the harness already lets a root's coverage attribute be (`decodeCoverage`). Meanwhile an adapter "MUST fail loudly … when required information is absent", and a section's tags are required.
-
-### Task 2 — T11-1, T11-2, and T11-3 assert a root's tags absent (B1, C2)
-
-**Depends on.** Task 1.
-
-**Requirement.** TEST-SPEC.md §11:
-- T11-1: `query node` "Returns identity, source range, own and subtree text (expanded, 1.6), all four hashes, tags, coverage attribute (absent for roots), and incoming and outgoing edges by kind."
-- T11-2: "each row carries identity, source range, tags, coverage attribute (absent for roots)".
-- T11-3: "rows carry the row fields of T11-2 — identity, source range, tags, coverage attribute … — asserted on `subtree` and `ancestors` rows including a tagged `coverage="none"` node and a root (attribute absent)".
-
-Each lists tags among the fields every node or row carries, and for a root SPEC 11.1 states that datum absent (Part A's rule); no TEST-SPEC text asks for `[]`.
-
-**Where.** `test/suite/registry/section-11.ts`:
-- T11-1's root arm, `assertSameJson(root.tags, [], `${rootLabel}: a root carries no tags`)` (about line 580), just before its coverage-absent check;
-- `ExpectedRow` (about lines 341–347, `tags: readonly string[]`) and `assertRowFields`, which compares `row.tags` with `want.tags` (about lines 350–380);
-- `T11_2_ROWS` (about lines 680–724): the two root rows (`specs/alpha/A.mdx`, `specs/beta/B.mdx`) with `tags: []`, and the comment above it;
-- `T11_3_ROW_ROOT` (about lines 1032–1036) with `tags: []`, and the comment after it (about lines 1037–1039: "a product omitting a row field from either subcommand fails on it or on the root row above");
-- the module header (about lines 16 and 28) and T11-1's and T11-2's titles (about lines 474 and 798), which name only the coverage attribute as absent for roots.
-
-**Shortfall (reviewer B's GAP 1, C's GAP 2).** T11-1's root arm pins a root's tags as `[]`, and T11-2's and T11-3's expected root rows do too. A product reporting the absence SPEC 11.1 states fails all three — since Task 1, at these pins rather than at the decode — while a product reporting the empty set `[]` passes.
-
-**Change.**
-1. Widen `ExpectedRow.tags` to `readonly string[] | null`, and set the three root rows' `tags` to `null`, documented as SPEC 11.1's absent root tags (5.5; 12.7: never `[]`, a tagless section's value).
-2. T11-1's root arm asserts that `root.tags` is `null`, i.e. absent: `null` or an omitted member, as Task 1 decodes. Its context cites SPEC 11.1 and 5.5 and says that `[]`, an empty tag set, is not absence (12.7).
-3. Correct the comments, the header, and the titles named above to say a root's tags and coverage attribute are both absent. T11-3's comment should say that a root row's tags and coverage attribute are absent, so the tagged `coverage="none"` row catches a product omitting the tags or coverage member, and the root row catches one omitting identity or range, or reporting either datum present.
-4. Leave the section rows' expectations, every other arm, and T11-4 through T11-7 as they are; the H-7 map is unchanged.
-
-**Checks.**
-- Against the built product, T11-1, T11-2, and T11-3 pass before and fail diagnosed after, each at its first root-tags assertion, since the product reports `[]` for each root (Known state). Quote each diagnosis in the commit message; this is the expected product deviation, left to Phase 10. T11-4 through T11-7 keep their outcomes (all pass at b00e7cd).
-- The three tests through the root-tags stand-in, each mode alone under the namespace:
-  - `pass` fails after, as above;
-  - `null` and `omit` fail before, at the `[]` pins (Task 1's sweep), and pass after;
-  - a further mode `nonempty`, setting each root's `tags` to `["x"]`, fails before and after at the root-tags assertion.
-- Every task's closing checks; the section-11 suite file's only outcome changes are the three above.
 
 ### Task 3 — The CONF-VALID fixture reports a root's tags absent (D1)
 

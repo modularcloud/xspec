@@ -13,9 +13,10 @@
 // bare path names a root node or a code file follows from the file's group
 // (7), and a path in no configured group is unknown (12.0). `node` returns
 // identity, source range (1.7), own and subtree text (expanded, 1.6), all
-// four hashes (5.5), tags, coverage attribute (absent for a root, 5.5), and
-// incoming and outgoing edges by kind. `nodes` filters (`--group`, `--file`,
-// `--tag`, `--coverage`) combine conjunctively over requirement-node rows;
+// four hashes (5.5), tags and coverage attribute (both absent for a root,
+// 11.1, 5.5), and incoming and outgoing edges by kind. `nodes` filters
+// (`--group`, `--file`, `--tag`, `--coverage`) combine conjunctively over
+// requirement-node rows;
 // `--coverage` matches no root; `--group` accepts only a spec group's name —
 // a code group's name is an invalid flag value (12.0, the wrong-kind group
 // reference of 14.14); `--file` uses the glob rules of 7, the outside-root
@@ -25,7 +26,10 @@
 // loading configuration (12.0), while a well-formed tag no node carries
 // matches nothing, exit 0. `nodes`, `subtree`, and `ancestors` share one row
 // contract:
-// identity, source range, tags, coverage attribute (absent for roots).
+// identity, source range, tags, coverage attribute (tags and coverage
+// attribute both absent for roots, 11.1, 5.5). A root's absent tags may be
+// `null` or an omitted member (H-3; both decode to `null`), never `[]`:
+// 12.7's `[]` is a tagless section's tag set, not absence.
 // `subtree` returns the queried node plus all descendants in document order;
 // `ancestors` returns the proper ancestors nearest-first ending at the file
 // root. `reachable` reports whether a dependency path — one or more edges; a
@@ -341,7 +345,12 @@ async function expectUsageError(
 interface ExpectedRow {
   readonly identity: string;
   readonly range: SourceRange;
-  readonly tags: readonly string[];
+  /**
+   * The 12.7 tag set, or `null` for a root node's absent tags (SPEC 11.1,
+   * 5.5: reported `null` or omitted, as decoded; never `[]`, which 12.7
+   * reserves for a tagless section).
+   */
+  readonly tags: readonly string[] | null;
   /** Coverage attribute value; omitted = absent (a root). */
   readonly coverage?: string;
 }
@@ -365,8 +374,13 @@ function assertRowFields(
     assertSameJson(
       row.tags,
       want.tags,
-      `${context}: tags of ${row.identity} — the 12.7 tag-set form, ` +
-        `strictly ascending by UTF-8 bytes (SPEC 2.6, 11, 12.7)`,
+      want.tags === null
+        ? `${context}: tags of ${row.identity} — a root node's tags are ` +
+            `reported as absent, \`null\` or an omitted member (SPEC 11.1, ` +
+            `5.5: a root node has no tags); \`[]\`, an empty tag set, is a ` +
+            `tagless section's value, not absence (12.7)`
+        : `${context}: tags of ${row.identity} — the 12.7 tag-set form, ` +
+            `strictly ascending by UTF-8 bytes (SPEC 2.6, 11, 12.7)`,
     );
     if (row.coverage !== want.coverage) {
       fail(
@@ -471,7 +485,7 @@ const T11_1_OMEGA_ID = "specs/MAIN.mdx#omega";
 const T11_1 = defineProductTest({
   id: "T11-1",
   title:
-    "`query node` returns identity, exact source range, own and subtree text (fully expanded, SPEC 1.6), all four hashes, tags, coverage attribute (absent for the root, `none`/default-`required` otherwise), and incoming and outgoing edges by kind across all four kinds — with and without `--json`, one JSON document carrying the same information (SPEC 11, 1.5, 1.6, 1.7, 5.5)",
+    "`query node` returns identity, exact source range, own and subtree text (fully expanded, SPEC 1.6), all four hashes, tags and coverage attribute (both absent for the root, its tags never `[]`; otherwise the tag set and `none`/default-`required`), and incoming and outgoing edges by kind across all four kinds — with and without `--json`, one JSON document carrying the same information (SPEC 11, 1.5, 1.6, 1.7, 5.5)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -543,8 +557,9 @@ const T11_1 = defineProductTest({
           `${alphaContext}: outgoing edges by kind (SPEC 5.2, 11)`,
         );
 
-        // The root node: coverage attribute absent, range = the whole file,
-        // subtree text = the entire compiled output (SPEC 1.6, 1.7, 5.5).
+        // The root node: tags and coverage attribute both absent (SPEC 11.1,
+        // 5.5), range = the whole file, subtree text = the entire compiled
+        // output (SPEC 1.6, 1.7).
         const rootLabel = `T11-1 \`query node ${T11_1_MAIN} --json\` (root)`;
         const root = decodeNodeReport(
           await runJson(
@@ -577,7 +592,14 @@ const T11_1 = defineProductTest({
           `${rootLabel}: the root's own text — every top-level child ` +
             `contribution excised (SPEC 1.6)`,
         );
-        assertSameJson(root.tags, [], `${rootLabel}: a root carries no tags`);
+        assertSameJson(
+          root.tags,
+          null,
+          `${rootLabel}: a root node's tags are reported as absent — ` +
+            `\`null\` or an omitted member (SPEC 11.1, 5.5: a root node has ` +
+            `no tags); \`[]\`, an empty tag set, is a tagless section's ` +
+            `value, not absence (12.7)`,
+        );
         if (root.coverage !== undefined) {
           fail(
             `${rootLabel}: the coverage attribute is reported as absent for ` +
@@ -678,13 +700,15 @@ const T11_2_A_STAGED = stagedMdx("T11-2 specs/alpha/A.mdx", T11_2_A_SOURCE);
 const T11_2_B_STAGED = stagedMdx("T11-2 specs/beta/B.mdx", T11_2_B_SOURCE);
 
 // Every requirement node in the workspace with its full row contract —
-// identity, exact source range, tags, coverage attribute (absent for the two
-// roots, default `required` where unstated).
+// identity, exact source range, tags, coverage attribute: the two roots'
+// tags and coverage attribute both absent (SPEC 11.1, 5.5; `tags: null` —
+// never `[]`, a tagless section's tag set, 12.7), coverage default
+// `required` where unstated.
 const T11_2_ROWS: readonly ExpectedRow[] = [
   {
     identity: "specs/alpha/A.mdx",
     range: wholeFileRange(T11_2_A_SOURCE),
-    tags: [],
+    tags: null,
   },
   {
     identity: "specs/alpha/A.mdx#a1",
@@ -707,7 +731,7 @@ const T11_2_ROWS: readonly ExpectedRow[] = [
   {
     identity: "specs/beta/B.mdx",
     range: wholeFileRange(T11_2_B_SOURCE),
-    tags: [],
+    tags: null,
   },
   {
     identity: "specs/beta/B.mdx#b1",
@@ -795,7 +819,7 @@ const T11_2_MALFORMED_TAGS: ReadonlyArray<{
 const T11_2 = defineProductTest({
   id: "T11-2",
   title:
-    "`query nodes` rows are requirement nodes carrying identity, source range, tags, and coverage attribute (absent for roots); `--group`, `--file <glob>`, `--tag`, and `--coverage` combine conjunctively; `--coverage` matches no root; a `--file` pattern outside the workspace root by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`) is an invalid flag value — exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding — while an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`, and their twins over `specs/alpha`) is admitted and matches nothing, exit 0 with no rows; a `--group` naming a code group is an invalid flag value, exit 2; `--tag` acceptance is syntactic, as on `occurrences --to`: a well-formed tag no node carries (`green`; `a.b`, since a tag may contain `.`) matches nothing — exit 0, an empty row set — while a spelling no tag can have, one arm each — the empty string, `a b`, `#`, `then`, a control character (U+001F and U+007F, the class's argument-bearable boundaries), `\"`, `'`, `\\`, `&`, and U+FFFD — is a malformed value of the syntax class: exit 2 with the plain usage error's document (`code` and `path` null), reported without loading configuration — byte-identical with the configuration file invalid or missing (T12.0-10's discipline) — nothing modified (SPEC 11, 11.1, 1.4, 7, 12.0, 12.7, 14.14)",
+    "`query nodes` rows are requirement nodes carrying identity, source range, tags, and coverage attribute (tags and coverage attribute both absent for roots — tags never `[]`); `--group`, `--file <glob>`, `--tag`, and `--coverage` combine conjunctively; `--coverage` matches no root; a `--file` pattern outside the workspace root by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`) is an invalid flag value — exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding — while an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`, and their twins over `specs/alpha`) is admitted and matches nothing, exit 0 with no rows; a `--group` naming a code group is an invalid flag value, exit 2; `--tag` acceptance is syntactic, as on `occurrences --to`: a well-formed tag no node carries (`green`; `a.b`, since a tag may contain `.`) matches nothing — exit 0, an empty row set — while a spelling no tag can have, one arm each — the empty string, `a b`, `#`, `then`, a control character (U+001F and U+007F, the class's argument-bearable boundaries), `\"`, `'`, `\\`, `&`, and U+FFFD — is a malformed value of the syntax class: exit 2 with the plain usage error's document (`code` and `path` null), reported without loading configuration — byte-identical with the configuration file invalid or missing (T12.0-10's discipline) — nothing modified (SPEC 11, 11.1, 1.4, 7, 12.0, 12.7, 14.14)",
   run: async (product) => {
     await withWorkspace(
       TWO_SPEC_GROUP_CONFIG,
@@ -1029,14 +1053,17 @@ const T11_3_SOURCE = `${T11_3_TOP}\n\n${T11_3_AFTER}\n`;
 
 const T11_3_FILE = "specs/T.mdx";
 
+// The root row: tags and coverage attribute both absent (SPEC 11.1, 5.5).
 const T11_3_ROW_ROOT: ExpectedRow = {
   identity: T11_3_FILE,
   range: wholeFileRange(T11_3_SOURCE),
-  tags: [],
+  tags: null,
 };
-// The tagged coverage="none" row both subcommands must carry in full — a
-// product omitting a row field from either subcommand fails on it or on the
-// root row above (T11-3).
+// The tagged coverage="none" row both subcommands must carry in full. A root
+// row's tags and coverage attribute are absent, so this row catches a
+// product omitting the tags or coverage member from either subcommand, and
+// the root row above catches one omitting identity or range, or reporting
+// either datum present (T11-3).
 const T11_3_ROW_TOP: ExpectedRow = {
   identity: `${T11_3_FILE}#top`,
   range: rangeOf(T11_3_SOURCE, T11_3_TOP),
@@ -1071,7 +1098,7 @@ const T11_3_ROW_AFTER: ExpectedRow = {
 const T11_3 = defineProductTest({
   id: "T11-3",
   title:
-    '`query subtree` returns the queried node plus all descendants in document order (a root query returns the whole file); `query ancestors` returns the proper ancestors nearest-first ending at the file root, the queried node excluded and a root yielding none — every row carrying the one row contract (identity, source range, tags, coverage attribute), asserted including a tagged coverage="none" node and a root with the attribute absent (SPEC 11, 1.7, 2.5, 2.6)',
+    '`query subtree` returns the queried node plus all descendants in document order (a root query returns the whole file); `query ancestors` returns the proper ancestors nearest-first ending at the file root, the queried node excluded and a root yielding none — every row carrying the one row contract (identity, source range, tags, coverage attribute), asserted including a tagged coverage="none" node and a root with its tags and coverage attribute both absent (SPEC 11, 1.7, 2.5, 2.6, 5.5)',
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
