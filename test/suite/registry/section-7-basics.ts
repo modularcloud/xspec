@@ -101,9 +101,15 @@
 //   parent/child pair and nothing else), so an edge sourced at the
 //   undiscovered `.ts` file, or any other stray edge, fails the equality.
 // - T7-3 "no `.md` is written for any source": after `build`, a full
-//   recursive scan of the workspace tree finds no file whose name ends in
-//   `.md` (stronger than probing the default next-to-source destinations:
-//   emission anywhere would fail it).
+//   recursive scan of the workspace tree outside the graph-data area finds
+//   no file whose name ends in `.md` (stronger than probing the default
+//   next-to-source destinations: emission anywhere would fail it). The scan
+//   walks by exact name bytes (snapshot keys), so a directory whose name is
+//   not valid UTF-8 is reached, never misnamed, and it leaves `.xspec/` out:
+//   graph data there bears names the product chooses, a `.md` suffix
+//   included (SPEC 13.3: its layout "deliberately unenumerated"), and no
+//   emit destination lies in the area (7.3), so nothing there is emitted
+//   Markdown (H-4).
 // - T7-3 `--from` unknown: exit 2 with the single 12.7 error document as
 //   the entire stdout (SPEC 11: `query` is a JSON-only surface, so JSON
 //   output is in effect without `--json`, and 12.0 makes an exit-2 error
@@ -186,7 +192,6 @@
 //   `LOCATION_FILES` included.
 
 import { Buffer } from "node:buffer";
-import * as fsp from "node:fs/promises";
 import type { GraphEdge } from "../../helpers/adapters/index.js";
 import {
   decodeCoverageReport,
@@ -205,6 +210,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import {
   assertSnapshotsEqual,
+  displaySnapshotPath,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
@@ -2020,24 +2026,39 @@ const WOULD_VIOLATE_EDGE: readonly GraphEdge[] = [
   { from: "specs/product/P.mdx#p", to: "specs/other/O.mdx#o", kind: "depends" },
 ];
 
-/** Every regular file under `rel`, workspace-relative, sorted (recursive). */
-async function listFiles(
+/** The graph-data area's exact path bytes: `.xspec` at the root (SPEC 13.3). */
+const GRAPH_DATA_AREA_BYTES = Buffer.from(".xspec", "latin1");
+
+/**
+ * Every entry of the workspace tree outside the graph-data area that is not
+ * a directory, as snapshot keys — each entry's exact relative path bytes,
+ * `/`-separated, one latin1 character per byte (helpers/snapshot.ts) — in
+ * bytewise order. The tree is walked by exact name bytes
+ * (`snapshotDirectory`), so a directory whose name is not valid UTF-8 is
+ * reached and listed under, never misnamed; directories are recursed into,
+ * never listed, and every other entry — a symbolic link included, never
+ * followed — is listed. The graph-data area, the root's `.xspec`, is pruned
+ * whole, so no key equal to `.xspec` or beginning with `.xspec/` is ever
+ * listed: graph data lives there at paths the product chooses (SPEC 13.3:
+ * its layout "deliberately unenumerated"; 7.3: "unenumerated paths"), so any
+ * name may occur there, a `.md` suffix included, and no emit destination
+ * lies in the area (7.3: an `outDir` of `.xspec` or beginning with `.xspec/`
+ * is a configuration error), so nothing under it is emitted Markdown — its
+ * content and names are opaque to the harness (H-4).
+ */
+async function listFilesOutsideGraphDataArea(
   workspace: TestWorkspace,
-  rel: string,
 ): Promise<string[]> {
-  const out: string[] = [];
-  const entries = await fsp.readdir(workspace.path(rel), {
-    withFileTypes: true,
+  const snapshot = await snapshotDirectory(workspace.root, {
+    exclude: (rel) => Buffer.compare(rel, GRAPH_DATA_AREA_BYTES) === 0,
   });
-  for (const entry of entries) {
-    const childRel = rel === "." ? entry.name : `${rel}/${entry.name}`;
-    if (entry.isDirectory()) {
-      out.push(...(await listFiles(workspace, childRel)));
-    } else {
-      out.push(childRel);
-    }
+  const keys: string[] = [];
+  for (const [key, entry] of snapshot.entries) {
+    if (entry.kind !== "dir") keys.push(key);
   }
-  return out.sort();
+  // A latin1 key's UTF-16 code units are its bytes, so the default string
+  // sort orders the whole paths bytewise.
+  return keys.sort();
 }
 
 /**
@@ -2217,6 +2238,13 @@ const T7_3 = defineProductTest({
     );
 
     // (c) `markdown` omitted — no emission for any source (SPEC 7.3; T3-6).
+    // The whole tree outside the graph-data area is listed by exact name
+    // bytes, and each listed key judged by its bytes: `.md` is ASCII, so the
+    // latin1 key's `endsWith` is a byte-wise suffix test. Graph data under
+    // `.xspec/` is never judged — its names are the product's choice and no
+    // emit destination lies there (SPEC 13.3, 7.3;
+    // `listFilesOutsideGraphDataArea`); keys are rendered for the diagnosis
+    // alone (`displaySnapshotPath`).
     await withWorkspace(
       {
         files: {
@@ -2227,14 +2255,16 @@ const T7_3 = defineProductTest({
       },
       async (workspace) => {
         await buildOk(product, workspace, "T7-3 (markdown omitted): `build`");
-        const files = await listFiles(workspace, ".");
+        const files = await listFilesOutsideGraphDataArea(workspace);
         assertSameJson(
-          files.filter((relPath) => relPath.endsWith(".md")),
+          files.filter((key) => key.endsWith(".md")).map(displaySnapshotPath),
           [],
           "T7-3 (markdown omitted): after `build`, no file anywhere in the " +
-            "workspace tree has a .md name — omitting the markdown key " +
-            "means no Markdown emission for any source (SPEC 7, 7.3; " +
-            `full file list: ${JSON.stringify(files)})`,
+            "workspace tree outside the graph-data area `.xspec/` has a .md " +
+            "name — omitting the markdown key means no Markdown emission " +
+            "for any source, and no emit destination lies in the " +
+            "graph-data area (SPEC 7, 7.3, 13.3; full file list outside " +
+            `\`.xspec/\`: ${JSON.stringify(files.map(displaySnapshotPath))})`,
         );
       },
     );
