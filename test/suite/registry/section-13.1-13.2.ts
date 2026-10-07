@@ -19,10 +19,14 @@
 //   companion set: every entry `build` adds outside `.xspec/` must be a
 //   plain file directly in its source's directory named `NAME.xspec.` plus a
 //   non-empty suffix (hence every generated file carries `.xspec.` in its
-//   name). "The set is recorded such that later builds remove orphans" is
-//   asserted by its stated observable — deleting a source and rebuilding
-//   removes the module and every companion — while the fuller orphan matrix
-//   (manual rename, disabled emission) is T12.1-3's.
+//   name). Whether an entry lies under `.xspec/` is judged on its exact path
+//   bytes (the snapshot key), never on a rendering of them: graph data's
+//   names, directories included, are the product's choice, not necessarily
+//   valid UTF-8 (SPEC 13.3, 7.3). "The set is recorded such that later
+//   builds remove orphans" is asserted by its stated observable — deleting
+//   a source and rebuilding removes the module and every companion — while
+//   the fuller orphan matrix (manual rename, disabled emission) is
+//   T12.1-3's.
 // - T13.1-2 is the section-4 umbrella E2E: ONE standalone consumer project,
 //   staged beside the generated modules so the import is the spec-quoted
 //   literal `import SPEC, { text } from "./NAME.xspec"` (SPEC 4, 13.1),
@@ -169,10 +173,23 @@ const T13_1_1 = defineProductTest({
       // (graph data, SPEC 13.3 — content and layout under it are opaque and
       // out of 13.1's scope), each added entry must be a plain file directly
       // in its source's directory named `NAME.xspec.` plus a suffix.
+      //
+      // The `.xspec/` exemption is tested on the snapshot key itself — the
+      // entry's exact relative path bytes, one latin1 character per byte, so
+      // the ASCII prefix compares byte-wise — never on its display form:
+      // graph data lives at paths the product chooses (SPEC 13.3: its layout
+      // "deliberately unenumerated"; 7.3: "unenumerated paths"), any name a
+      // directory entry may carry, and `displaySnapshotPath` renders a name
+      // that is not valid UTF-8 as `<path bytes …>`, which would put such
+      // graph data — a file, or a directory and everything under it —
+      // outside the exemption (H-4, H-8, H-11). The display form serves the
+      // diagnoses and the source-directory matching below, where every
+      // permitted path is the ASCII prefix of a staged source plus a suffix:
+      // a valid-UTF-8 name displays as itself.
       for (const [key, entry] of after.entries) {
         if (before.entries.has(key)) continue;
+        if (key === ".xspec" || key.startsWith(".xspec/")) continue;
         const rel = displaySnapshotPath(key);
-        if (rel === ".xspec" || rel.startsWith(".xspec/")) continue;
         const home = LAYOUT_SOURCES.find((source) =>
           rel.startsWith(source.prefix),
         );
