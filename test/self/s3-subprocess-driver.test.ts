@@ -23,7 +23,15 @@
 // that harness error too, never taken for the diagnosed "not well-formed"
 // breach a rewrite that genuinely does not derive stays; and
 // `judgeAddedImportsOfFile`, which T6.5-22(b) and T6.5-23 call directly,
-// throws such a crash instead of returning it as a problem.
+// throws such a crash instead of returning it as a problem. The driver's
+// second in-run evaluation, T12.7-1's marker walk over the captured stdout
+// of every invocation with JSON output in effect (helpers/capture-walk.ts),
+// is pinned against an emitting stand-in: a near-marker rejects the run,
+// diagnosed, by flag and by JSON-only surface, on every exit code, a run
+// killed by request included; a run without JSON output in effect, or
+// whose stdout is no one JSON document, passes untouched; and a crash of
+// the walk, armed through a pass-through mock of its module, is the
+// harness error `HarnessEvaluationError` (stage `walk`).
 //
 // The stand-in is a tiny argv-driven Node script written into a fresh
 // TestWorkspace per test (the builder itself is certified by S-2) and driven
@@ -41,6 +49,7 @@ import { expect, onTestFinished, test, vi } from "vitest";
 import type * as AddedImportCheckModule from "../helpers/added-import-identifiers.js";
 import { judgeAddedImportsOfFile } from "../helpers/added-import-identifiers.js";
 import { HarnessAssertionError } from "../helpers/assertions.js";
+import type * as CaptureWalkModule from "../helpers/capture-walk.js";
 import type * as MdxDerivabilityModule from "../helpers/mdx-derivability.js";
 import {
   builtProductBinding,
@@ -54,7 +63,11 @@ import {
   runProduct,
   startProduct,
 } from "../helpers/subprocess.js";
-import type { ProductBinding } from "../helpers/subprocess.js";
+import type {
+  ArgvValue,
+  ProductBinding,
+  RunResult,
+} from "../helpers/subprocess.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 
 const onPosix = process.platform !== "win32";
@@ -962,4 +975,336 @@ test("judgeAddedImportsOfFile, called directly (T6.5-22(b), T6.5-23), throws a c
   expect(judgement.added).toEqual([]);
   expect(judgement.problems).toHaveLength(1);
   expect(judgement.problems[0]).toMatch(NOT_WELL_FORMED_AFTER);
+});
+
+// ---------------------------------------------------------------------------
+// T12.7-1's walk over every captured JSON document (helpers/capture-walk.ts):
+// the driver walks the captured stdout of every invocation with JSON output
+// in effect — its argv read by SPEC 12.0's grammar (helpers/invocation-
+// grammar.ts) — once the run has exited, so a near-marker in a document a
+// test only byte-compares or never reads still fails, diagnosed; a run
+// without JSON output in effect, or whose stdout is not one JSON document,
+// passes untouched; and a failure of the walk itself is the harness error
+// `HarnessEvaluationError` (stage `walk`, H-11). The walk's crash is armed
+// through a pass-through mock of the walk's module, hoisted for the whole
+// file like `readMdxTree`'s above: the driver binds the module statically.
+
+/**
+ * The walk vectors' stand-in. Its argv is never read — the argv the driver
+ * reads is free to spell any invocation — and its behavior rides its
+ * environment: it writes `XSPEC_S3_STDOUT` (UTF-8 text), or the bytes
+ * `XSPEC_S3_STDOUT_HEX` spells in hexadecimal, to stdout and exits with
+ * `XSPEC_S3_EXIT` (default 0); with `XSPEC_S3_HOLD` set it then creates
+ * that file and never exits, for a kill by request.
+ */
+const EMIT_STANDIN_SOURCE = `import fs from "node:fs";
+
+const hex = process.env.XSPEC_S3_STDOUT_HEX;
+const bytes =
+  hex === undefined
+    ? Buffer.from(process.env.XSPEC_S3_STDOUT ?? "", "utf8")
+    : Buffer.from(hex, "hex");
+const hold = process.env.XSPEC_S3_HOLD;
+process.stdout.write(bytes, () => {
+  if (hold === undefined) {
+    process.exitCode = Number(process.env.XSPEC_S3_EXIT ?? "0");
+    return;
+  }
+  fs.writeFileSync(hold, "");
+  setInterval(() => {}, 60000);
+});
+`;
+
+/** A fresh workspace holding the walk vectors' stand-in. */
+async function emitStandin(): Promise<Standin> {
+  const workspace = await TestWorkspace.create({
+    files: { "emit.mjs": EMIT_STANDIN_SOURCE },
+  });
+  onTestFinished(() => workspace.dispose());
+  return {
+    workspace,
+    binding: {
+      label: "S-3 emitting stand-in",
+      command: process.execPath,
+      prefixArgs: [workspace.path("emit.mjs")],
+    },
+  };
+}
+
+/** The stand-in's environment: emit `stdout`, then exit with `exit`. */
+const emitting = (
+  stdout: string,
+  exit = 0,
+): Readonly<Record<string, string>> => ({
+  XSPEC_S3_STDOUT: stdout,
+  XSPEC_S3_EXIT: String(exit),
+});
+
+/** A document carrying a near-marker at `$.nodes[0].tags` (SPEC 12.7). */
+const NEAR_MARKER_DOCUMENT = `${JSON.stringify(
+  {
+    findings: [],
+    nodes: [{ identity: "specs/A.mdx", tags: { unavailable: false } }],
+  },
+  null,
+  2,
+)}\n`;
+
+/** The same document with the exact marker in that place. */
+const EXACT_MARKER_DOCUMENT = `${JSON.stringify(
+  {
+    findings: [],
+    nodes: [{ identity: "specs/A.mdx", tags: { unavailable: true } }],
+  },
+  null,
+  2,
+)}\n`;
+
+/** The walk's diagnosis of the near-marker at `path` in a run's stdout. */
+function expectWalkDiagnosis(
+  error: unknown,
+  path: string,
+  argvShown: string,
+): void {
+  expect(error, argvShown).toBeInstanceOf(HarnessAssertionError);
+  expect(error, argvShown).not.toBeInstanceOf(HarnessEvaluationError);
+  const message = (error as Error).message;
+  expect(message, argvShown).toContain(
+    "T12.7-1, the driver's walk over every captured JSON document — stdout of",
+  );
+  expect(message, argvShown).toContain(argvShown);
+  expect(message, argvShown).toContain(
+    `at ${path}: expected no object of any form other than the unavailability marker`,
+  );
+}
+
+test("the driver walks the captured stdout of every invocation with JSON output in effect — by flag or by JSON-only surface, every exit code, a run killed by request included — and rejects runProduct and waitForExit with the walk's diagnosed failure on a near-marker, naming its JSON path and the command line (T12.7-1)", async () => {
+  const { workspace, binding } = await emitStandin();
+  // By flag and by surface (SPEC 12.0's grammar: flags stand anywhere, a
+  // value-taking flag takes the next token), on exits 0, 1, and 2.
+  const cases: readonly {
+    readonly argv: readonly string[];
+    readonly exit: number;
+  }[] = [
+    { argv: ["check", "--json"], exit: 1 },
+    { argv: ["--json", "build"], exit: 0 },
+    { argv: ["check", "--json", "--json"], exit: 2 },
+    { argv: ["query", "nodes"], exit: 0 },
+    { argv: ["--config", "xspec.config.ts", "view", "specs/A.mdx"], exit: 0 },
+    { argv: ["occurrences", "--to", "specs/A.mdx#a"], exit: 1 },
+    { argv: ["at", "specs/A.mdx", "0"], exit: 0 },
+    { argv: ["inventory"], exit: 0 },
+    { argv: ["version"], exit: 0 },
+    { argv: ["review", "export", "r1"], exit: 0 },
+  ];
+  for (const { argv, exit } of cases) {
+    const error = await rejectionOf(
+      runProduct(binding, {
+        cwd: workspace.root,
+        argv,
+        env: emitting(NEAR_MARKER_DOCUMENT, exit),
+      }),
+    );
+    expectWalkDiagnosis(error, "$.nodes[0].tags", argv.join(" "));
+  }
+  // An exit-2 error document and a marker with a sibling member.
+  const errorDocument = await rejectionOf(
+    runProduct(binding, {
+      cwd: workspace.root,
+      argv: ["nosuch", "--json"],
+      env: emitting(
+        `${JSON.stringify({
+          error: {
+            code: null,
+            message: "unknown command",
+            locations: [],
+            path: { unavailable: true, bytes: "ff" },
+            identities: [],
+          },
+        })}\n`,
+        2,
+      ),
+    }),
+  );
+  expectWalkDiagnosis(errorDocument, "$.error.path", "nosuch --json");
+  // A document led by a byte-order mark is still the one document
+  // `parseJsonStdout` reads it as, and is walked as such.
+  const bomLed = await rejectionOf(
+    runProduct(binding, {
+      cwd: workspace.root,
+      argv: ["ids", "--json"],
+      env: emitting(`${String.fromCodePoint(0xfeff)}${NEAR_MARKER_DOCUMENT}`),
+    }),
+  );
+  expectWalkDiagnosis(bomLed, "$.nodes[0].tags", "ids --json");
+  // The background path: every waitForExit settles with the one rejection.
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["query", "nodes", "--tag", "x"],
+    env: emitting(NEAR_MARKER_DOCUMENT),
+  });
+  const settled = await rejectionOf(running.waitForExit());
+  expectWalkDiagnosis(settled, "$.nodes[0].tags", "query nodes --tag x");
+  expect(await rejectionOf(running.waitForExit())).toBe(settled);
+  // A run killed by request after writing a whole document: what it
+  // captured is still a JSON document, walked like any other.
+  const hold = workspace.path("held");
+  const killed = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["review", "export", "r1"],
+    env: { ...emitting(NEAR_MARKER_DOCUMENT), XSPEC_S3_HOLD: hold },
+  });
+  await killed.waitForFile(hold);
+  killed.kill();
+  expectWalkDiagnosis(
+    await rejectionOf(killed.waitForExit()),
+    "$.nodes[0].tags",
+    "review export r1",
+  );
+  // A byte argv element (POSIX staging) reads as the string its bytes
+  // spell when they are valid UTF-8, as the product reads it.
+  if (onPosix) {
+    const byteFlag = await rejectionOf(
+      runProduct(binding, {
+        cwd: workspace.root,
+        argv: ["check", new Uint8Array(Buffer.from("--json", "utf8"))],
+        env: emitting(NEAR_MARKER_DOCUMENT, 1),
+      }),
+    );
+    expect(byteFlag).toBeInstanceOf(HarnessAssertionError);
+    expect((byteFlag as Error).message).toContain(
+      "at $.nodes[0].tags: expected no object of any form other than the unavailability marker",
+    );
+  }
+});
+
+test("the driver leaves untouched a run without JSON output in effect, and a captured stdout that is no one JSON document or carries only exact markers (T12.7-1)", async () => {
+  const { workspace, binding } = await emitStandin();
+  const resolves = async (
+    argv: readonly ArgvValue[],
+    env: Readonly<Record<string, string>>,
+  ): Promise<RunResult> => {
+    const result = await runProduct(binding, {
+      cwd: workspace.root,
+      argv,
+      env,
+    });
+    expect(result.signal).toBeNull();
+    return result;
+  };
+  // JSON output not in effect (SPEC 12.0): no `--json` read as a flag — a
+  // value-taking flag's value, a token after `--` — and no JSON-only
+  // surface: the near-marker document is never walked, its bytes intact.
+  for (const argv of [
+    ["check"],
+    ["check", "--note", "--json"],
+    ["check", "--", "--json"],
+    ["review", "list"],
+    ["rename", "specs/A.mdx", "a", "b", "--preview"],
+    [],
+  ]) {
+    const result = await resolves(argv, emitting(NEAR_MARKER_DOCUMENT, 1));
+    expect(result.exitCode, argv.join(" ")).toBe(1);
+    expect(result.stdout, argv.join(" ")).toBe(NEAR_MARKER_DOCUMENT);
+  }
+  if (onPosix) {
+    // A byte argv element that is not valid UTF-8 names no command.
+    const result = await resolves(
+      [new Uint8Array([0xff]), "nodes"],
+      emitting(NEAR_MARKER_DOCUMENT),
+    );
+    expect(result.stdout).toBe(NEAR_MARKER_DOCUMENT);
+  }
+  // JSON output in effect, every object with an `unavailable` member the
+  // exact marker: the run resolves, its document as emitted.
+  for (const argv of [
+    ["query", "nodes"],
+    ["build", "--json"],
+  ]) {
+    const result = await resolves(argv, emitting(EXACT_MARKER_DOCUMENT));
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(EXACT_MARKER_DOCUMENT);
+  }
+  // JSON output in effect, but no one JSON document to walk — empty,
+  // not JSON, two documents, invalid UTF-8: the run resolves, its form
+  // left to the run's own assertions (H-5).
+  for (const stdout of [
+    "",
+    "not json\n",
+    '{"unavailable": false}{"unavailable": false}\n',
+  ]) {
+    const result = await resolves(["check", "--json"], emitting(stdout, 1));
+    expect(result.stdout).toBe(stdout);
+  }
+  const invalidBytes = Buffer.concat([
+    Buffer.from('{"unavailable": 0}', "utf8"),
+    Buffer.from([0xff]),
+  ]);
+  const invalid = await resolves(["view"], {
+    XSPEC_S3_STDOUT_HEX: invalidBytes.toString("hex"),
+  });
+  expect(hex(invalid.stdoutBytes)).toBe(hex(invalidBytes));
+});
+
+/** The armed fault: what the walk throws for a run, if anything. */
+const walkFault = vi.hoisted(() => ({
+  throwFor: undefined as ((result: RunResult) => Error | undefined) | undefined,
+}));
+
+vi.mock("../helpers/capture-walk.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof CaptureWalkModule>();
+  const walkCapturedJsonDocument: typeof actual.walkCapturedJsonDocument = (
+    result,
+  ) => {
+    const fault = walkFault.throwFor?.(result);
+    if (fault !== undefined) throw fault;
+    actual.walkCapturedJsonDocument(result);
+  };
+  return { ...actual, walkCapturedJsonDocument };
+});
+
+test("a failure of the driver's walk itself rejects runProduct and waitForExit with the harness error HarnessEvaluationError (stage walk), its cause the original — never a diagnosed failure, never a pass (H-11)", async () => {
+  const { workspace, binding } = await emitStandin();
+  const crash = new RangeError("S-3: the walk crashed");
+  const walked: string[] = [];
+  walkFault.throwFor = (result) => {
+    walked.push(result.commandLine);
+    return crash;
+  };
+  onTestFinished(() => {
+    walkFault.throwFor = undefined;
+  });
+  const foreground = await rejectionOf(
+    runProduct(binding, {
+      cwd: workspace.root,
+      argv: ["query", "nodes"],
+      env: emitting(EXACT_MARKER_DOCUMENT),
+    }),
+  );
+  expect(foreground).toBeInstanceOf(HarnessEvaluationError);
+  expect(foreground).not.toBeInstanceOf(HarnessAssertionError);
+  const error = foreground as HarnessEvaluationError;
+  expect(error.cause).toBe(crash);
+  expect(error.stage).toBe("walk");
+  expect(error.commandLine).toContain("query nodes");
+  expect(error.message).toMatch(
+    /^harness error \(H-11\): T12\.7-1's marker walk/,
+  );
+  expect(thrownBy(() => rethrowHarnessError(error))).toBe(error);
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["check", "--json"],
+    env: emitting(EXACT_MARKER_DOCUMENT, 1),
+  });
+  const settled = await rejectionOf(running.waitForExit());
+  expect(settled).toBeInstanceOf(HarnessEvaluationError);
+  expect((settled as HarnessEvaluationError).cause).toBe(crash);
+  // A run without JSON output in effect never reaches the walk.
+  const plain = await runProduct(binding, {
+    cwd: workspace.root,
+    argv: ["check"],
+    env: emitting(EXACT_MARKER_DOCUMENT, 1),
+  });
+  expect(plain.exitCode).toBe(1);
+  expect(walked).toHaveLength(2);
 });

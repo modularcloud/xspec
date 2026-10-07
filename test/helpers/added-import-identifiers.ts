@@ -69,6 +69,7 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import ts from "typescript-5.9.3";
 import { bytesEqual, fail } from "./assertions.js";
+import { VALUE_FLAGS } from "./invocation-grammar.js";
 import { MdxNonDerivationError, readMdxTree } from "./mdx-derivability.js";
 import { globMatches } from "./oracles/glob.js";
 import {
@@ -118,19 +119,8 @@ export async function prepareAddedImportCheck(
 }
 
 // ---------------------------------------------------------------------------
-// The invocation (SPEC 12.0's grammar).
-
-/**
- * The flags that take a value, by name: SPEC 12.0 fixes a flag's arity by
- * its name, the same for every command, and every other `--` token takes
- * none. Exported for P-8's reading of when JSON output is in effect
- * (test/suite/registry/section-16-p8.ts).
- */
-// prettier-ignore
-export const VALUE_FLAGS: ReadonlySet<string> = new Set([
-  "base", "config", "coverage", "file", "from", "group", "kinds", "name",
-  "note", "status", "strategy", "tag", "test-hold", "to",
-]);
+// The invocation (SPEC 12.0's grammar; the flags taking a value, by name,
+// are helpers/invocation-grammar.ts's `VALUE_FLAGS`).
 
 /** A performed `move`, as its argv reads under SPEC 12.0's grammar. */
 export interface PerformedMove {

@@ -43,13 +43,18 @@
 //     (6.6) with the ten edit classes and the pinned orders
 //   - the unavailability-marker structural walk T12.7-1 relies on: no object
 //     of any form other than the marker carries a member named "unavailable".
-//     It runs at `parseJsonStdout` (../assertions.ts) over every JSON
-//     document the suite parses from a captured stdout, decoded or not, and
-//     every public DOCUMENT decoder below runs it again over the whole raw
-//     document before decoding members — the scoped decoders included, whose
-//     unread members the walk still covers — since decoders also take
-//     documents that never pass through `parseJsonStdout` (S-5 guards the
-//     walk and each integration)
+//     It runs over every JSON document the suite captures: the subprocess
+//     driver walks the captured stdout of every invocation with JSON output
+//     in effect once the run has exited (../capture-walk.ts, called from
+//     ../subprocess.ts), whether a test then decodes, parses, only
+//     byte-compares, or never reads it; `parseJsonStdout` (../assertions.ts)
+//     walks every document it parses; and every public DOCUMENT decoder
+//     below runs it again over the whole raw document before decoding
+//     members — the scoped decoders included, whose unread members the walk
+//     still covers — since decoders also take documents that never pass
+//     through the driver (S-5's and S-8's synthetic ones). S-5 guards the
+//     walk and its decoder and `parseJsonStdout` integrations, S-3 the
+//     driver's
 
 import { Buffer, isUtf8 } from "node:buffer";
 import type {
@@ -2362,15 +2367,19 @@ export function decodePerformedOperationReport(
  * named `unavailable` — every object with that member is exactly
  * `{"unavailable": true}`. Diagnoses name the offending JSON path.
  *
- * It runs at `parseJsonStdout` (../assertions.ts), the step by which the
- * harness turns a captured stdout into a JSON document, so it runs over
- * every JSON document the suite parses from the product's output — the
- * pinned 12.7 document forms, the unpinned-shape surfaces of H-3, and
- * documents no adapter decodes (the `review create`, `resolve`, and `split`
- * success documents) alike, the marker's exclusivity being universal like
- * the value forms (T12.7-1). It also runs at every document decoder's
- * entry, since decoders take documents that never pass through
- * `parseJsonStdout` (S-5's and S-8's synthetic ones): every public document
+ * It runs over every JSON document the suite captures from the product's
+ * output — the pinned 12.7 document forms, the unpinned-shape surfaces of
+ * H-3, documents no adapter decodes (the `review create`, `resolve`, and
+ * `split` success documents), and documents a test only byte-compares or
+ * never reads alike, the marker's exclusivity being universal like the
+ * value forms (T12.7-1): the subprocess driver runs it over the captured
+ * stdout of every invocation with JSON output in effect once the run has
+ * exited (`walkCapturedJsonDocument`, ../capture-walk.ts; S-3 guards that
+ * integration), and `parseJsonStdout` (../assertions.ts), the step by
+ * which the harness turns a captured stdout into a JSON document, runs it
+ * over every document it parses. It also runs at every document decoder's
+ * entry, since decoders take documents that never pass through the driver
+ * or `parseJsonStdout` (S-5's and S-8's synthetic ones): every public document
  * decoder in this module runs it over the whole raw document before
  * decoding members (the scoped decoders included, whose unread members the
  * walk still covers), and every adjustable adapter (query.ts, review.ts,

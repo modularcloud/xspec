@@ -24,7 +24,10 @@
 //   3. capture is gated at the same scale through S-3's stand-in mechanism:
 //      a stand-in command streams the largest synthetic document to stdout
 //      through the one ProductBinding/run path product invocations use
-//      (H-2, C-2); the captured bytes must be complete and identical to what
+//      (H-2, C-2), under an argv putting JSON output in effect (SPEC 12.0),
+//      so the driver's T12.7-1 walk over every captured JSON document
+//      (helpers/capture-walk.ts) runs over it as over a product's answer;
+//      the captured bytes must be complete and identical to what
 //      it emitted, the capture feeds the decoders unchanged, the default
 //      capture cap must hold at least twice the document, and a cap set just
 //      below the document must surface as ProductRunOutputOverflowError;
@@ -89,6 +92,7 @@ import {
   HarnessAssertionError,
   parseJsonStdout,
 } from "../helpers/assertions.js";
+import { jsonOutputInEffect } from "../helpers/invocation-grammar.js";
 import {
   checkProperty,
   drawFixedSeedTrials,
@@ -725,6 +729,14 @@ source.on("error", (error) => {
 source.pipe(process.stdout, { end: false });
 `;
 
+/**
+ * The capture gate's argv: the file the stand-in streams, then `--json`,
+ * which the stand-in ignores and the driver reads as putting JSON output
+ * in effect (SPEC 12.0), so the capture takes the path a product's JSON
+ * answer takes — T12.7-1's walk over the captured document included.
+ */
+const CAPTURE_ARGV: readonly string[] = ["answer.json", "--json"];
+
 /** Write JSON text pieces to a file under back-pressure; the byte length. */
 async function writePieces(
   path: string,
@@ -845,16 +857,19 @@ test("S-8: capture gate — the largest synthetic document (`view --text` blowup
   await expect(
     runProduct(binding, {
       cwd: workspace.root,
-      argv: ["answer.json"],
+      argv: CAPTURE_ARGV,
       timeoutMs: 120_000,
       maxOutputBytes: documentBytes - 1,
     }),
   ).rejects.toBeInstanceOf(ProductRunOutputOverflowError);
 
-  // The complete capture through the H-2 path: complete, byte-identical.
+  // The complete capture through the H-2 path: complete, byte-identical —
+  // and walked by the driver for T12.7-1 before the run resolves, since
+  // the argv puts JSON output in effect as a product invocation's would.
+  expect(jsonOutputInEffect(CAPTURE_ARGV)).toBe(true);
   const result = await runProduct(binding, {
     cwd: workspace.root,
-    argv: ["answer.json"],
+    argv: CAPTURE_ARGV,
     timeoutMs: 120_000,
   });
   expect(result.signal).toBeNull();

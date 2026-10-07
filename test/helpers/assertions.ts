@@ -197,10 +197,14 @@ export function parseJsonStdout(result: RunResult, context?: string): unknown {
   // T12.7-1 (SPEC 12.7): no object of any form other than the unavailability
   // marker carries a member named `unavailable` — an exclusivity universal
   // like the value forms (H-3) — so the structural walk runs here, over every
-  // JSON document the suite parses from a captured stdout, whether or not an
-  // adapter decodes it afterwards (S-5 guards this integration). The
-  // document decoders keep their own entry walks: they also take documents
-  // that never pass through here (S-5's and S-8's synthetic ones).
+  // JSON document the suite parses from a stdout, whether or not an adapter
+  // decodes it afterwards (S-5 guards this integration). The subprocess
+  // driver has already walked the captured stdout of every run with JSON
+  // output in effect (helpers/capture-walk.ts; S-3), the documents no test
+  // parses included; this walk also covers a document parsed from any other
+  // run or from a synthetic result. The document decoders keep their own
+  // entry walks: they also take documents that never pass through here or
+  // the driver (S-5's and S-8's synthetic ones).
   assertUnavailabilityMarkerForms(
     doc,
     `${context === undefined ? "" : `${context} — `}stdout of ${result.commandLine}`,

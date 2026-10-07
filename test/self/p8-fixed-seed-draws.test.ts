@@ -33,7 +33,9 @@
 // token read as a flag, or a JSON-only surface (10.7, 11, 12.6) with or
 // without one (H-5) — and every JSON-only surface the menu holds has a form
 // without `--json`, so the by-surface half of the rule is exercised, not
-// only the flag half (the sweep guard above then has it drawn).
+// only the flag half (the sweep guard above then has it drawn). The reading
+// (`jsonOutputInEffect`, helpers/invocation-grammar.ts) is the one the
+// subprocess driver shares to choose the runs T12.7-1's walk covers.
 //
 // A fourth pins how P-8 runs the review forms that name a session or an
 // item (SPEC 10.7): each as a composite (`armSteps`) over a session its arm
@@ -53,6 +55,7 @@
 
 import { Buffer } from "node:buffer";
 import { expect, test } from "vitest";
+import { jsonOutputInEffect } from "../helpers/invocation-grammar.js";
 import {
   DEFAULT_PROPERTY_SEEDS,
   drawFixedSeedTrials,
@@ -64,7 +67,6 @@ import {
   FUZZ_BASE_FILES,
   genFuzzTrial,
   ITEM_ID_SLOT,
-  jsonOutputInEffect,
   P8_RUNS_PER_SEED,
   sectionTowerSource,
   SESSION_SLOT,

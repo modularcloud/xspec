@@ -5140,8 +5140,10 @@ test("S-5: every adjustable adapter runs the marker walk over the whole document
 });
 
 // `parseJsonStdout` (helpers/assertions.ts) runs the marker walk over every
-// document it parses, so the walk covers every JSON document the suite
-// parses from a captured stdout, decoded by an adapter or not (T12.7-1): a
+// document it parses, decoded by an adapter or not — beside the subprocess
+// driver's walk over the captured stdout of every run with JSON output in
+// effect (helpers/capture-walk.ts, guarded by S-3), the two integrations by
+// which the walk covers every JSON document the suite captures (T12.7-1): a
 // near-marker in a document no decoder reads — a `review create` success
 // document, say — still rejects, the diagnosis naming the JSON path and the
 // command line.

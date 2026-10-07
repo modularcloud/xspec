@@ -28,7 +28,8 @@
 //     stdout, and exit 2 emits the 12.7 error document — `{"error": …}` —
 //     as that document (SPEC 12.0; the shared `assertJsonOutputConvention`,
 //     H-5). JSON output is in effect by flag or by surface, as 12.0 reads
-//     it (`jsonOutputInEffect`): a `--json` token read as a flag, or a
+//     it (`jsonOutputInEffect`, helpers/invocation-grammar.ts, the reading
+//     the subprocess driver shares): a `--json` token read as a flag, or a
 //     JSON-only surface — `query`, `occurrences`, `view`, `at`, and
 //     `inventory` (11), `version` (12.6), `review export` (10.7) — with or
 //     without `--json`; every other run is held to the exit partition
@@ -155,7 +156,8 @@
 // replays P-8's own draws at its registered `P8_RUNS_PER_SEED` runs per seed:
 // every `COMMAND_MENU` entry is drawn at least once, and an intact MDX
 // section tower at least 2048 levels deep is staged (P-8's giant-nesting
-// floor); the same file pins `jsonOutputInEffect`, the menu's bare form per
+// floor); the same file pins the shared `jsonOutputInEffect`
+// (helpers/invocation-grammar.ts), the menu's bare form per
 // JSON-only surface and JSON form per command, the review composites'
 // expansion, and the mutating commands' performed, preview, and section
 // forms. Beyond those, a dry-run over the committed default seeds at the
@@ -186,12 +188,12 @@
 // two command surfaces.
 
 import { Buffer } from "node:buffer";
-import { VALUE_FLAGS } from "../../helpers/added-import-identifiers.js";
 import {
   decodeNextReport,
   decodeSessionStatusReport,
 } from "../../helpers/adapters/index.js";
 import { assertJsonOutputConvention, fail } from "../../helpers/assertions.js";
+import { jsonOutputInEffect } from "../../helpers/invocation-grammar.js";
 import type { Choices, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -1627,61 +1629,6 @@ function assertExitPartition(result: RunResult, context: string): void {
 
 function describeCommand(argv: readonly string[]): string {
   return `\`xspec ${argv.join(" ")}\``;
-}
-
-/**
- * The JSON-only surfaces of SPEC 12.0 (10.7, 11, 12.6) — a single JSON
- * document their only output form, with or without `--json` — by command
- * word: the five query surfaces of 11 (`query`, `occurrences`, `view`, `at`,
- * `inventory`) and `version` (12.6). `review export` (10.7) is the one
- * JSON-only subcommand form ({@link JSON_ONLY_REVIEW_SUBCOMMANDS}).
- */
-const JSON_ONLY_COMMANDS: ReadonlySet<string> = new Set([
-  "query",
-  "occurrences",
-  "view",
-  "at",
-  "inventory",
-  "version",
-]);
-
-/** `review`'s JSON-only subcommands (SPEC 10.7: `export`). */
-const JSON_ONLY_REVIEW_SUBCOMMANDS: ReadonlySet<string> = new Set(["export"]);
-
-/**
- * Whether JSON output is in effect for an invocation, read as SPEC 12.0
- * reads it: a `--json` token read as a flag — not another flag's value
- * (`VALUE_FLAGS`, arity fixed by name), not after the `--` that ends flag
- * reading — or a JSON-only surface, named by the first non-flag tokens once
- * flags, their values, and `--` are removed: the command word and, for
- * `review`, its subcommand (12.0's invocation grammar). Exported for the
- * self-test that pins this reading (test/self/p8-fixed-seed-draws.test.ts).
- */
-export function jsonOutputInEffect(argv: readonly string[]): boolean {
-  const words: string[] = [];
-  let flagsEnded = false;
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index] as string;
-    if (!flagsEnded && token.startsWith("--")) {
-      if (token === "--") {
-        flagsEnded = true;
-      } else if (token === "--json") {
-        return true;
-      } else if (VALUE_FLAGS.has(token.slice(2))) {
-        index += 1;
-      }
-      continue;
-    }
-    words.push(token);
-  }
-  const [command, subcommand] = words;
-  if (command === undefined) return false;
-  if (JSON_ONLY_COMMANDS.has(command)) return true;
-  return (
-    command === "review" &&
-    subcommand !== undefined &&
-    JSON_ONLY_REVIEW_SUBCOMMANDS.has(subcommand)
-  );
 }
 
 /**
