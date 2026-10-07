@@ -74,7 +74,7 @@ The document is then re-serialized with a trailing newline. Modes `null` and `om
   - T4.1-3's probe walk (Task 4) traverses a generated module's runtime values inside the consumer process, not an answer document, so S-8 needs no vector for it.
 
 **Order.** Take the topmost task unless told otherwise; the dependencies below are hard. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement. When a task is done, its commit removes it and adds a one-line summary to its bullet here.
-- Part A (Tasks 1–3): a root node's tags are absent, never a demanded tag set (A1, B1, C2, D1). Task 1 makes the query decoders carry a root's absent tags (H-3), with S-5's vectors and the consumer sweep. Task 2 asserts the absence in T11-1, T11-2, and T11-3; it depends on Task 1. Task 3 makes the CONF-VALID fixture report it; it depends on Task 1, whose decoders T1.3-5 and the grammar self-test need before the fixture may emit `null`.
+- Part A (Tasks 1–3): a root node's tags are absent, never a demanded tag set (A1, B1, C2, D1). Task 1 makes the query decoders carry a root's absent tags (H-3), with S-5's vectors and the consumer sweep. Task 2 asserts the absence in T11-1, T11-2, and T11-3; it depends on Task 1. Task 3 makes the CONF-VALID fixture report it; it depends on Task 1, whose decoders T1.3-5 and the grammar self-test need before the fixture may emit `null`. Task 1 done (d6fe60e and its follow-up commit): the five query decoders read a root's `null` or omitted `tags` as `null` through `decodeNodeTags` (a section's absent tags and a root's present non-set value still fail; a root's `[]` passes through unjudged), the model's four `tags` members are `readonly string[] | null`, T1.1-2's `nodeSetOf` carries `null` through, and S-5's five entries gained root-tag vectors (no new tests: the self project stays at 27 files and 4230 tests); through the root-tags stand-in (`t148_1_standin/roottags.mjs` in the scratchpad, mode as its first argument: `pass`, `null`, `omit`, `nonempty`; AGENTS.md's root-tags stand-in bullet), modes `null` and `omit` fail exactly T11-1, T11-2, and T11-3 at their `[]` root pins and P-5 at its known arm; the pre-Task-1 `query.ts` for Task 3's red check is `git show 765d6b4:test/helpers/adapters/query.ts`.
 - Part B (Task 4): T4.1-3's exhausted walk budget is a harness error, never a diagnosed failure (C1). Independent of every other task.
 - Part C (Task 5): T12.7-1's marker walk runs over every JSON document the suite captures (B2). Independent of Parts A and B, except that its full-suite check expects T11-1, T11-2, and T11-3 among the failures once Task 2 is done.
 - Task 6 confirms the result and deletes this plan. It depends on every task above.
@@ -84,53 +84,6 @@ The document is then re-serialized with a trailing newline. Modes `null` and `om
 ### Part A — a root node's tags are absent (A1, B1, C2, D1)
 
 The rule in all three tasks. SPEC 11.1: `query node` reports "tags, coverage attribute, …; for a root node the tags and the coverage attribute are both reported as absent (5.5)", and the rows of `nodes`, `subtree`, and `ancestors` carry "identity, source range, tags, and coverage attribute (tags and coverage attribute both absent for roots)". SPEC 12.4: `show` prints "tags and coverage attribute (both absent for a root node, 11)". SPEC 5.5: "a root node has no `d` targets, no coverage attribute, and no tags". SPEC 12.7: "`null` never encodes emptiness — it marks a datum whose absence its form or defining section states", and `[]` is "a tagless section's `tags`". The `query` and `show` documents are unpinned-shape surfaces (H-3: "the command JSON of `query`, `ids`, `show`, …"), decoded through thin adapters whose latitude is the surrounding shape. So a root's absent tags may be `null` or an omitted member there, exactly as the harness already lets a root's coverage attribute be (`decodeCoverage`). Meanwhile an adapter "MUST fail loudly … when required information is absent", and a section's tags are required.
-
-### Task 1 — The query decoders carry a root's absent tags (A1, B1, C2, D1: the decoder side)
-
-**Requirement.** TEST-SPEC.md §0 H-3 (adapters map unpinned shape and are "never adjusted to values"; they fail loudly only when required information is absent) and §17 S-5 (each adapter rejects documents missing required information, fed synthetic wrong-shape documents), applied to Part A's rule.
-
-**Where.**
-- `test/helpers/adapters/query.ts`: `decodeNodeReport` (about line 136, `tags` at line 159; `query node` and `show`), `decodeNodeSummary` (line 181, `tags` at 193), `decodeNodeMetadataSummary` (line 205, `tags` at 222), `decodeNodeSummaryRowsReport` (line 305, `tags` at about 325), and `decodeNodeRow` (line 369, `tags` at 380; behind `decodeNodeRowsReport`). `decodeCoverage` (about line 122) is the model for an absent datum. The module's ASSUMED SHAPE block (about lines 17–35) shows `"tags"` on every node surface as a 12.7 tag set, with `"coverage"?` optional. No other adapter demands a node's `tags`: `forms.ts`'s other `tags` reads are the 7.5 selector form and `view`'s three-state datum, which already reads a root's tags as the stated `null`.
-- `test/helpers/adapters/model.ts`: `NodeReport.tags` (line 95), `NodeRow.tags` (106), `NodeSummary.tags` (119), and `NodeMetadataSummary.tags` (131), all `readonly string[]` today.
-- `test/self/s5-output-adapters.test.ts`: `GOOD_NODE` (about line 193, a section) and `GOOD_ROWS` (about line 209, whose second row is a root), and the `DECODERS` entries "query node/show" (about line 834), "query node (identity/tags summary)" (952), "query node (identity/tags/metadataHash summary)" (997), "query nodes (identity/tags summary rows)" (1200), and "query nodes/subtree/ancestors" (1293).
-- T1.1-2's `nodeSetOf` in `test/suite/registry/section-1.1-1.2.ts` (about lines 241–261, `[...row.tags].sort()` at 255).
-- Any other site the type change breaks at compile time. `assertSameJson` (`test/suite/registry/support.ts`) takes `unknown` and compares JSON renderings, so most consumers compile unchanged.
-
-**Shortfall.** All five decoders read `tags` through `requiredKey` (`decode.ts`: a missing or `null` member fails) and then `decodeTagSet`, on every node, roots included. A product that reports a root's tags absent — `null`, or the member left out — therefore fails as a diagnosed product failure ("expected required key "tags" with a non-null value"). The built product's `[]`, an empty set that 12.7 distinguishes from absence, passes. The reviewers' stand-ins (Preamble) show the reach:
-- In modes `null` and `omit`, reviewer A's fails 27 tests at that decode: T1.1-2, T1.2-1, T1.2-3, T1.3-5, T1.3-7, T1.5-1, T1.5-3, T1.6-1, T1.6-2, T1.7-1, T2.7-2, T2.7-3, T3-7, T5.4-2, T5.5-1, T5.5-5, T5.5-6, T6.1-1, T6.2-1, T6.2-2, T6.2-3, T6.4-1, T6.5-1, T6.5-3, T6.5-6, T6.5-13, and T6.5-19.
-- Reviewer B's fails 13 more there: T10.6-1, T10.7-7, T10.7-12, T11-1, T11-2, T11-3, T11-6, T11-7, T12.4-1, T12.5-1, T12.7-1, T13.3-1, and T13.3-2.
-- P-4, P-5, and P-6 decode `query nodes` rows through `assertIdentitySet` (`section-16-p4.ts`, `section-16-p5-p6.ts`; reviewer C).
-- Reviewer D's CONF-VALID variant reporting a root's tags as `null` fails T1.3-5 at it.
-
-**Change.**
-1. *Decoders.* In each of the five, decode the identity first. When the identity contains no `#` (a root, SPEC 1.5) and the `tags` member is missing or `null`, the tags are absent: decode them as `null`. In every other case keep the current form-exact decode (`decodeTagSet` over `requiredKey`):
-   - a section whose `tags` is missing or `null` still fails loudly;
-   - a root whose `tags` member holds a value must still hold a 12.7 tag set, and that value — the built product's `[]` included — reaches the body unjudged (value-blind, H-3; only Task 2's bodies judge a root's tags).
-
-   One small shared helper in `query.ts` keeps the five alike. Update each decoder's doc comment and the ASSUMED SHAPE block to say so: a root's `"tags"` may be `null` or omitted, as its `"coverage"` may.
-2. *Model.* Widen the four `tags` members to `readonly string[] | null`, documented as follows: `null` is absent — a root's tags, reported `null` or omitted (SPEC 11.1, 12.4, 5.5) — and never an empty set, which a section reports as `[]` (12.7). Use one representation, `null`, never `undefined`. Then whole-object compares that render JSON treat absent as equal to absent, and still tell absent from `[]`. T12.4-1's field-by-field compare (`normalizedNodeReport` in `section-12.3-12.5.ts`, about line 338) and `section-11.ts`'s projections need no change for that.
-3. *Consumers.* Fix every compile error the widening causes without changing any outcome for a product that reports tag sets:
-   - T1.1-2's `nodeSetOf` carries `null` through (e.g. `tags: row.tags === null ? null : [...row.tags].sort()`, its declared element type widened), so its `<S>`/`<Spec>` comparison of two product answers treats absent as equal to absent and still tells `[]` from absent;
-   - every other consumer that reads tags as an array either carries `null` through the same way or, where it reads a section's tags only, narrows with an explicit check (the decoder already rejects a section's absent tags). Never use a non-null assertion, which would surface as a `TypeError`, and never a check that would fail a root's absent tags.
-
-   Leave T11-1's, T11-2's, and T11-3's `[]` root pins (`section-11.ts`) to Task 2.
-4. *S-5 vectors*, in the five entries named above:
-   - `alsoGood` vectors with a root identity (`specs/A.mdx`; for the row decoders, `GOOD_ROWS`'s root row): `tags` `null` decodes to `null`; the `tags` member omitted decodes to `null`; `tags` `[]` decodes to `[]`.
-   - `bad` vectors: a section (an identity with `#`) whose `tags` is `null` fails; the existing "missing tags" vectors on `GOOD_NODE` already cover a section's omitted member for the node decoders. A root whose `tags` is present but not a tag set — out of byte order, a non-string element, a non-array — still fails.
-   - The two existing `bad` vectors labelled "row missing tags" (about lines 1233 and 1330) omit the *root* row's tags (`omit(GOOD_ROWS, "nodes", 1, "tags")`), which now decodes: retarget them to the section row (`"nodes", 0`), and cover the root row with the new `alsoGood` vectors.
-   - Red-check per AGENTS.md's "Red-checking a new self-test vector" bullet: with the decoder change stashed, the new root `alsoGood` vectors fail; restored, every vector passes.
-5. *AGENTS.md:* one short bullet for the root-tags stand-in (what it rewrites, its modes) and the sweep below (its ID list and run time per mode).
-
-**Checks.**
-- The built product's outcomes, pass-through. The decoders return exactly what they returned before for any document whose roots carry a tag set, so only the suite files whose code this task touches need re-running against the built product. Run `section-1.1-1.2.test.ts`, plus any suite file a compile fix touched: every test keeps its outcome.
-- The consumer sweep through the root-tags stand-in. Run modes `null` and `omit`, each alone under the namespace, over the 43 IDs above (A's 27, B's 13, and P-4, P-5, P-6). Expected in both modes after the change:
-  - T11-1, T11-2, and T11-3 now get past the decode and fail diagnosed at their `[]` root-tags pins (Task 2 replaces those pins);
-  - every other test has its outcome against the plain product: all pass, except P-5, which fails diagnosed at its section-move arm exactly as against the plain product (T6.5-22(a)'s driver hook; AGENTS.md's property-timings bullet).
-
-  The reviewers' probes established the state before the change, so re-running it is optional. Record each mode's outcomes (IDs grouped by outcome, each failure's first failing assertion) and run times in the commit message.
-- Completeness. If the sweep or a read of the decoders' consumers turns up another body pinning a root's tags, outside T11-1, T11-2, and T11-3, make it accept both a root's absent tags and `[]` (no TEST-SPEC entry outside those three constrains them), add its test to the sweep, and record it.
-- Certification is unchanged: until Task 3, every fixture reports a root's tags as `[]`, which decodes as before.
-- Every task's closing checks (Preamble).
 
 ### Task 2 — T11-1, T11-2, and T11-3 assert a root's tags absent (B1, C2)
 
