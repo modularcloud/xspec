@@ -87,6 +87,12 @@ import {
   stageGarbleDecompositions,
   stageUnknownItemStatus,
 } from "../helpers/adapters/index.js";
+import type { SnapshotEntry } from "../helpers/snapshot.js";
+import {
+  describeEntryDifference,
+  snapshotDirectory,
+  snapshotKeyBytes,
+} from "../helpers/snapshot.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 
 // --- shared machinery -------------------------------------------------------
@@ -5819,7 +5825,9 @@ test("S-5: staging fails loudly on shape mismatch and leaves the file untouched"
 // Shape-blind by design (graph-data content is opaque, H-4): the staging's
 // only shape knowledge is T13.3-2's operational path set, so the guards
 // cover the H-3 discipline — product-written files only, never fabricated,
-// loud with nothing modified when there is nothing to corrupt.
+// loud with nothing modified when there is nothing to corrupt — and every
+// file in the set is reached at its exact name bytes, whatever the name
+// (the set's layout is the product's, SPEC 13.3).
 
 test("S-5: corrupt-record staging garbles every graph-data file shape-blind, durables and structure untouched", async () => {
   const workspace = await TestWorkspace.create({
@@ -5955,6 +5963,73 @@ test("S-5: corrupt-record staging fails loudly on non-plain-file occupants, file
     ),
   ).toBe('{"nodes": []}');
 });
+
+test.runIf(process.platform === "linux")(
+  "S-5: corrupt-record staging reaches every graph-data file at its exact name bytes, a name that is not valid UTF-8 included (Linux)",
+  async () => {
+    // Graph data's layout is the product's (SPEC 13.3), so its file names
+    // may be anything: a name that is not ASCII, and — where file names are
+    // byte strings — one that is not valid UTF-8 (a UTF-8 listing would
+    // leave such a file intact and write a stray at its U+FFFD spelling).
+    const area = Buffer.from(`${GRAPH_DATA_AREA_PATH}/`);
+    const nonAsciiName = Buffer.concat([
+      Buffer.from("graph"),
+      Buffer.from(String.fromCodePoint(0xe9), "utf8"),
+      Buffer.from(".json"),
+    ]);
+    const invalidName = Buffer.from([0x61, 0xff, 0x2e, 0x6a, 0x73, 0x6f, 0x6e]);
+    const invalidDir = Buffer.from([0x64, 0xfe]);
+    const productWritten = [
+      Buffer.concat([area, nonAsciiName]),
+      Buffer.concat([area, invalidName]),
+      Buffer.concat([area, invalidDir, Buffer.from("/"), invalidName]),
+    ];
+    const workspace = await TestWorkspace.create({
+      files: {
+        ".xspec/journal": '{"op": 1}\n',
+        ".xspec/reviews/s1.json": '{"items": []}\n',
+        ".xspec/graph.json": '{"nodes": []}\n',
+      },
+    });
+    onTestFinished(() => workspace.dispose());
+    for (const rel of productWritten) {
+      await workspace.file(rel, '{"nodes": []}\n');
+    }
+    const before = await snapshotDirectory(workspace.root);
+    const corrupted = await corruptGraphDataShapeBlind(
+      workspace.root,
+      "S-5 record staging (byte names)",
+    );
+    // Snapshot keys — the exact path bytes, latin1-held — in byte order.
+    expect(corrupted).toEqual(
+      [Buffer.from(".xspec/graph.json"), ...productWritten]
+        .sort(Buffer.compare)
+        .map((rel) => rel.toString("latin1")),
+    );
+    // Every one of them now holds exactly the garbage; everything else —
+    // the durables, the directories, the file set itself — is untouched.
+    const after = await snapshotDirectory(workspace.root);
+    expect([...after.entries.keys()]).toEqual([...before.entries.keys()]);
+    for (const [key, entry] of after.entries) {
+      if (corrupted.includes(key)) {
+        expect(entry.kind).toBe("file");
+        expect(
+          Buffer.compare(
+            Buffer.from(await workspace.readBytes(snapshotKeyBytes(key))),
+            Buffer.from(RECORD_GARBAGE_BYTES),
+          ),
+        ).toBe(0);
+      } else {
+        expect(
+          describeEntryDifference(
+            before.entries.get(key) as SnapshotEntry,
+            entry,
+          ),
+        ).toBeUndefined();
+      }
+    }
+  },
+);
 
 // --- T13.4-1 sorted-keys assertion --------------------------------------------
 

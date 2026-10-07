@@ -178,7 +178,9 @@ import type {
 import {
   assertLeavesUnchanged,
   assertSnapshotsEqual,
+  displaySnapshotPath,
   snapshotDirectory,
+  snapshotKeyBytes,
 } from "../../helpers/snapshot.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -323,10 +325,23 @@ function assertEmptyRecord(
   );
 }
 
+/** The durable names inside `.xspec/` — no part of the graph data (SPEC 13.4). */
+const DURABLE_AREA_NAMES: readonly Buffer[] = [
+  Buffer.from("journal", "utf8"),
+  Buffer.from("reviews", "utf8"),
+];
+
 /**
  * Delete the graph data per the T13.3-2 operational definition: every path
- * under `.xspec/` except `.xspec/journal` and `.xspec/reviews/`. Exported
- * for T6.6-5's record-deleted arm (section-6.6.ts).
+ * under `.xspec/` except `.xspec/journal` and `.xspec/reviews/`. The area is
+ * listed by raw name bytes and every other entry removed at its exact byte
+ * path, so each name the product chose goes — one that is not ASCII, or not
+ * valid UTF-8, included (graph data's layout is the product's, SPEC 13.3; a
+ * name read through a lossy UTF-8 decode would be missed without an error).
+ * Exported for the suite modules sharing T13.3-2's operational definition:
+ * T6.6-5's record-deleted arm (section-6.6.ts), T13.4-10's obstruction arms
+ * (section-13.4.ts), and T12.2-2's and T12.2-3's missing-graph-data arms
+ * (section-12.1-12.2.ts).
  */
 export async function deleteGraphData(
   workspace: TestWorkspace,
@@ -339,49 +354,67 @@ export async function deleteGraphData(
         `graph data (SPEC 13.3); found ${kind}`,
     );
   }
-  for (const name of await workspace.readdirNames(".xspec")) {
-    if (name === "journal" || name === "reviews") continue;
-    await fsp.rm(workspace.path(`.xspec/${name}`), {
-      recursive: true,
-      force: true,
-    });
+  for (const name of await workspace.readdirBytes(".xspec")) {
+    if (DURABLE_AREA_NAMES.some((durable) => durable.equals(name))) continue;
+    await fsp.rm(
+      workspace.bytePath(Buffer.concat([Buffer.from(".xspec/"), name])),
+      { recursive: true, force: true },
+    );
   }
 }
 
 /**
  * Restore previously captured graph-data bytes (deleting whatever graph data
  * currently exists first) — the stale-graph staging of T13.3-2's source-edit
- * arm. Only plain files and directories are restorable: anything else under
+ * arm. Every captured directory and plain file is restored at its key's
+ * exact bytes (`snapshotKeyBytes`), whatever the name — graph data's layout
+ * is the product's (SPEC 13.3), so a name that is not ASCII, or not valid
+ * UTF-8, is restored like any other — through raw byte-path calls that judge
+ * no staged-source declaration: these are the product's own bytes at paths
+ * it chose, never a source (13.4). A filesystem error while restoring is the
+ * harness's own failure (H-11), thrown as an `Error`, never diagnosed. Only
+ * plain files and directories are restorable: anything else captured under
  * `.xspec/` violates SPEC 13.4 (every file xspec writes is a plain file) and
- * fails diagnosed.
+ * fails diagnosed, before anything is deleted or restored.
  */
 async function restoreGraphData(
   workspace: TestWorkspace,
   entries: ReadonlyMap<string, SnapshotEntry>,
   context: string,
 ): Promise<void> {
-  await deleteGraphData(workspace, context);
-  for (const key of [...entries.keys()].sort()) {
+  // Byte order (the keys hold one byte per character): a directory's key, a
+  // prefix of its contents' keys, sorts before them.
+  const keys = [...entries.keys()].sort();
+  for (const key of keys) {
     // The key set comes from the map itself, so `get` cannot miss.
     const entry = entries.get(key) as SnapshotEntry;
-    if (!/^[\x20-\x7e]+$/.test(key)) {
+    if (entry.kind !== "dir" && entry.kind !== "file") {
       fail(
-        `${context}: graph-data path ${JSON.stringify(key)} is not plain ` +
-          `ASCII — the harness stages stale graph data by path string, so ` +
-          `it cannot faithfully restore this entry (and a product writing ` +
-          `such paths under .xspec/ defeats the workspace-relative path ` +
-          `contract of SPEC 1.5/13.3)`,
+        `${context}: graph data at ${displaySnapshotPath(key)} is a ` +
+          `${entry.kind} — every file xspec writes is a plain file (SPEC ` +
+          `13.4), so the harness cannot restore it as staged stale graph data`,
       );
     }
-    if (entry.kind === "dir") {
-      await workspace.dir(key);
-    } else if (entry.kind === "file") {
-      await workspace.file(key, entry.bytes);
-    } else {
-      fail(
-        `${context}: graph data at ${key} is a ${entry.kind} — every file ` +
-          `xspec writes is a plain file (SPEC 13.4), so the harness cannot ` +
-          `restore it as staged stale graph data`,
+  }
+  await deleteGraphData(workspace, context);
+  for (const key of keys) {
+    const entry = entries.get(key) as SnapshotEntry;
+    const abs = workspace.bytePath(snapshotKeyBytes(key));
+    try {
+      if (entry.kind === "dir") {
+        await fsp.mkdir(abs, { recursive: true });
+      } else if (entry.kind === "file") {
+        await fsp.mkdir(abs.subarray(0, abs.lastIndexOf(0x2f)), {
+          recursive: true,
+        });
+        await fsp.writeFile(abs, entry.bytes);
+      }
+    } catch (error) {
+      throw new Error(
+        `${context}: harness error: cannot restore the captured graph ` +
+          `data at ${displaySnapshotPath(key)} (T13.3-2's stale-graph ` +
+          `staging): ${(error as Error).message}`,
+        { cause: error },
       );
     }
   }

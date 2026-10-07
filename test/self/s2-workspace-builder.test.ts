@@ -1,7 +1,8 @@
 // S-2 Workspace builder self-test (TEST-SPEC 17). The fixture builder must
 // write exactly the declared bytes — round-trip checks covering every
 // declared-byte class: LF/CRLF/lone-CR content, BOMs, invalid-UTF-8 blobs
-// (contents, and byte-string file names on Linux — T1.5-2 staging), symbolic
+// (contents, and byte-string file names on Linux — T1.5-2 staging — through
+// every byte-path form, `bytePath()`'s raw resolution included), symbolic
 // links (verbatim targets: live, dangling, directory, cyclic, external —
 // T7-5, T13.4-6), and git fixtures with scripted commits carrying pinned,
 // platform-independent identities and timestamps (E-6) — and scale vectors
@@ -196,6 +197,33 @@ test.runIf(onLinux)(
     await workspace.file(nested, "x\n");
     expect(await workspace.kind(dirBytes)).toBe("dir");
     expectSameBytes(await workspace.readBytes(nested), utf8("x\n"));
+
+    // `bytePath()`, the byte twin of `path()`: the root's bytes, a `/`, and
+    // exactly the relative bytes — raw calls through it create, read, and
+    // remove the entry at the declared name bytes (product-chosen names,
+    // e.g. graph data under `.xspec/`, SPEC 13.3), and every byte-path form
+    // reads the same entry back.
+    const rawDir = concatBytes(utf8(".xspec/c"), bytes(0xc3, 0xa9));
+    const rawName = concatBytes(utf8("a"), bytes(0xff), utf8(".json"));
+    const rawFile = concatBytes(rawDir, utf8("/"), rawName);
+    expectSameBytes(
+      workspace.bytePath(rawFile),
+      concatBytes(utf8(workspace.root), utf8("/"), rawFile),
+    );
+    await fsp.mkdir(workspace.bytePath(rawDir), { recursive: true });
+    await fsp.writeFile(workspace.bytePath(rawFile), contents);
+    expect((await workspace.readdirBytes(rawDir)).map(hex)).toEqual([
+      hex(rawName),
+    ]);
+    expect(await workspace.kind(rawFile)).toBe("file");
+    expectSameBytes(await workspace.readBytes(rawFile), contents);
+    expectSameBytes(
+      await fsp.readFile(workspace.bytePath(rawFile)),
+      await workspace.readBytes(rawFile),
+    );
+    await fsp.rm(workspace.bytePath(rawFile));
+    expect(await workspace.kind(rawFile)).toBe("absent");
+    expect(await workspace.readdirBytes(rawDir)).toEqual([]);
   },
 );
 
@@ -400,6 +428,17 @@ test("rejects declarations escaping the workspace root", async () => {
   await expect(workspace.file(bytes(0x2f, 0x61), "x")).rejects.toThrow(
     /workspace-relative/,
   );
+  // `bytePath()` validates like every byte path: it never leaves the root.
+  expect(() => workspace.bytePath(utf8("a/../../evil.txt"))).toThrow(
+    /'\.\.' segment/,
+  );
+  expect(() => workspace.bytePath(bytes(0x2f, 0x61))).toThrow(
+    /workspace-relative/,
+  );
+  expect(() => workspace.bytePath(utf8("a/./b"))).toThrow(/'\.' segment/);
+  expect(() => workspace.bytePath(utf8("a//b"))).toThrow(/empty segment/);
+  expect(() => workspace.bytePath(bytes(0x61, 0x00))).toThrow(/NUL/);
+  expect(() => workspace.bytePath(bytes())).toThrow(/empty/);
   // In-root normalization is not an escape.
   expect(workspace.path("a/../b.txt")).toBe(workspace.path("b.txt"));
 });

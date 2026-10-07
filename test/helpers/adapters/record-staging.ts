@@ -31,6 +31,7 @@ import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { fail } from "../assertions.js";
+import { displaySnapshotPath, snapshotKeyBytes } from "../snapshot.js";
 
 /**
  * The graph-data area: the location under which graph data is kept, spelled
@@ -85,32 +86,51 @@ function stagingFail(context: string, problem: string): never {
   );
 }
 
-/** Recursively collect the graph-data plain files under `rel` (see above). */
+/**
+ * The absolute byte path of a workspace-relative snapshot key: the root's
+ * bytes, a `/`, and the key's exact bytes (`snapshotKeyBytes`), so a name the
+ * product chose that is not ASCII, or not valid UTF-8, is reached exactly.
+ */
+function keyPath(rootBytes: Buffer, key: string): Buffer {
+  return Buffer.concat([rootBytes, Buffer.from([0x2f]), snapshotKeyBytes(key)]);
+}
+
+/**
+ * Recursively collect the graph-data plain files under `rel` (see above), as
+ * snapshot keys (helpers/snapshot.ts: the exact relative path bytes, held
+ * latin1-encoded). Names are listed as raw bytes and each entry classified
+ * by `lstat` at its exact byte path — graph data's layout is the product's
+ * (SPEC 13.3), so a name that is not ASCII, or not valid UTF-8, is collected
+ * like any other, where a UTF-8 listing would misname it. For an ASCII name
+ * the key is the path itself.
+ */
 async function collectGraphDataFiles(
-  rootAbs: string,
+  rootBytes: Buffer,
   rel: string,
   context: string,
 ): Promise<string[]> {
   const collected: string[] = [];
-  const entries = await fsp.readdir(path.join(rootAbs, rel), {
-    withFileTypes: true,
-  });
-  for (const entry of entries) {
-    const key = `${rel}/${entry.name}`;
+  const names = (
+    await fsp.readdir(keyPath(rootBytes, rel), { encoding: "buffer" })
+  ).sort(Buffer.compare);
+  for (const name of names) {
+    const key = `${rel}/${name.toString("latin1")}`;
     // The durable journal and reviews paths are no part of the record
     // (T13.3-2): skipped entirely, whatever occupies them.
     if (!isGraphDataKey(key)) continue;
-    if (entry.isDirectory()) {
-      collected.push(...(await collectGraphDataFiles(rootAbs, key, context)));
-    } else if (entry.isFile()) {
+    const stats = await fsp.lstat(keyPath(rootBytes, key));
+    if (stats.isDirectory()) {
+      collected.push(...(await collectGraphDataFiles(rootBytes, key, context)));
+    } else if (stats.isFile()) {
       collected.push(key);
     } else {
       stagingFail(
         context,
-        `${key} is not a plain file or directory — every file xspec writes ` +
-          `is a plain file and its writes never traverse a symbolic link ` +
-          `(SPEC 13.4), so this occupant is not a product-written record ` +
-          `file and the harness will not write through it`,
+        `${displaySnapshotPath(key)} is not a plain file or directory — ` +
+          `every file xspec writes is a plain file and its writes never ` +
+          `traverse a symbolic link (SPEC 13.4), so this occupant is not a ` +
+          `product-written record file and the harness will not write ` +
+          `through it`,
       );
     }
   }
@@ -126,8 +146,12 @@ async function collectGraphDataFiles(
  * nothing modified, when the graph-data area is missing or not a real
  * directory, when the set holds no plain file (nothing product-written to
  * corrupt — run a successful `build` first), or when it holds a
- * non-plain-file entry (SPEC 13.4). Returns the corrupted files'
- * workspace-relative paths in byte order.
+ * non-plain-file entry (SPEC 13.4). Every file is reached and overwritten
+ * at its exact name bytes, whatever the name the product chose (SPEC 13.3:
+ * graph data's layout is unenumerated). Returns the corrupted files as
+ * snapshot keys in byte order (helpers/snapshot.ts: the exact relative path
+ * bytes, held latin1-encoded — for an ASCII name, the workspace-relative
+ * path itself).
  */
 export async function corruptGraphDataShapeBlind(
   rootAbs: string,
@@ -152,8 +176,9 @@ export async function corruptGraphDataShapeBlind(
         `area the product writes is one (SPEC 13.3, 13.4)`,
     );
   }
+  const rootBytes = Buffer.from(rootAbs);
   const files = (
-    await collectGraphDataFiles(rootAbs, GRAPH_DATA_AREA_PATH, context)
+    await collectGraphDataFiles(rootBytes, GRAPH_DATA_AREA_PATH, context)
   ).sort();
   if (files.length === 0) {
     stagingFail(
@@ -165,7 +190,7 @@ export async function corruptGraphDataShapeBlind(
     );
   }
   for (const key of files) {
-    await fsp.writeFile(path.join(rootAbs, key), RECORD_GARBAGE_BYTES);
+    await fsp.writeFile(keyPath(rootBytes, key), RECORD_GARBAGE_BYTES);
   }
   return files;
 }

@@ -192,10 +192,27 @@ export async function assertLeavesUnchanged<T>(
 
 /** Human-readable rendering of a snapshot key (hex for non-UTF-8 names). */
 export function displaySnapshotPath(key: string): string {
-  const bytes = Buffer.from(key, "latin1");
+  const bytes = snapshotKeyBytes(key);
   const text = bytes.toString("utf8");
   if (Buffer.from(text, "utf8").equals(bytes)) return text;
   return `<path bytes ${bytes.toString("hex")}>`;
+}
+
+/**
+ * The exact relative path bytes a snapshot key denotes (`/`-separated; the
+ * key holds them latin1-encoded, one character per byte). The rule for every
+ * key — a snapshot's, or one built the same way from a byte listing: wherever
+ * a key becomes a filesystem path or meets a path the product reported, it
+ * goes through this function (a byte path, e.g. `TestWorkspace.bytePath`, or
+ * a byte compare), never through the key's own characters — read as a UTF-8
+ * path string, a key misnames every entry whose name is not ASCII (a valid
+ * UTF-8 name's bytes re-encoded, a name that is not valid UTF-8 unreachable),
+ * names the product chooses included (graph data, SPEC 13.3; companions,
+ * 13.1). For an ASCII path the key and the path string coincide; a key is
+ * rendered for a diagnosis with {@link displaySnapshotPath}.
+ */
+export function snapshotKeyBytes(key: string): Buffer {
+  return Buffer.from(key, "latin1");
 }
 
 /** One-line description of an entry (kind, size, target). */

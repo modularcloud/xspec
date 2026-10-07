@@ -520,6 +520,27 @@ export class TestWorkspace {
   }
 
   /**
+   * Resolve a workspace-relative byte path to its absolute native byte path
+   * — the root's bytes, a `/`, the relative bytes — the byte twin of
+   * `path()`, for raw filesystem calls on an entry by its exact name bytes
+   * (Node's `fs` takes `Buffer` paths): a snapshot key's bytes
+   * (`snapshotKeyBytes`, helpers/snapshot.ts) or a `readdirBytes` name, so a
+   * name the product chose that is not ASCII (graph data, SPEC 13.3;
+   * companions, 13.1) is reached exactly — including one that is not valid
+   * UTF-8 (Linux). Validated like every byte path (relative, no NUL, no
+   * `.`/`..`/empty segment; it throws otherwise), so it never leaves the
+   * root. Like `path()` it stages nothing and judges no S-9 declaration: a
+   * raw write through it is for the product's own bytes at paths the
+   * product chose — graph data, derived files, never a source (SPEC 13.4) —
+   * never a source staging, which goes through `file()`.
+   */
+  bytePath(rel: Uint8Array): Buffer {
+    const bytes = Buffer.from(rel);
+    assertValidBytePath(bytes);
+    return Buffer.concat([Buffer.from(this.root), Buffer.from([SLASH]), bytes]);
+  }
+
+  /**
    * Write a regular file with exactly the declared bytes, creating parents.
    * An MDX source's path is first judged against its S-9 declaration — the
    * option's, else the workspace declaration's, else well-formed for an
@@ -1166,9 +1187,7 @@ export class TestWorkspace {
     if (typeof rel === "string") {
       return this.path(rel);
     }
-    const bytes = Buffer.from(rel);
-    assertValidBytePath(bytes);
-    return Buffer.concat([Buffer.from(this.root), Buffer.from([SLASH]), bytes]);
+    return this.bytePath(rel);
   }
 
   private gitScratchDirs(): Promise<{ home: string; configFile: string }> {
