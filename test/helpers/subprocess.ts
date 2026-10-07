@@ -679,8 +679,11 @@ export async function releaseHoldFile(absPath: string): Promise<void> {
   await fsp.rm(absPath, { force: true });
 }
 
-/** Whether anything (file, directory, or symlink) occupies the path. */
-export async function pathExists(absPath: string): Promise<boolean> {
+/**
+ * Whether anything (file, directory, or symlink) occupies the path: a path
+ * string, or its exact bytes (a name that need not be valid UTF-8).
+ */
+export async function pathExists(absPath: string | Buffer): Promise<boolean> {
   try {
     await fsp.lstat(absPath);
     return true;

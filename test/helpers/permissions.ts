@@ -33,6 +33,15 @@
 //   unprivileged through .github/scripts/run-without-network.sh; a root
 //   sandbox reproduces its inner stage with
 //   `unshare --map-user=<uid> --map-group=<gid> -- <command>` (AGENTS.md).
+// - Names (SPEC 13.1, 13.3): the names in a product-written area are the
+//   product's to choose — graph data under `.xspec`, a companion's suffix
+//   under `specs/b` — and need be neither ASCII nor even valid UTF-8 (Linux).
+//   So wherever a staging reaches entries the harness does not name (the
+//   area form's walk, a listing refusal's by-name probe) it lists them as
+//   raw bytes and acts on each at its exact byte path, never through a UTF-8
+//   decode, which would misname such an entry and so skip or miss it; a
+//   caller holding such a path passes it as bytes (`StagedPath`). A
+//   diagnosis renders a path segment that is not valid UTF-8 as its hex.
 // - Platform: the Linux leg's (E-1). On any other platform every staging
 //   throws `HarnessStagingError` at once; the Linux-leg tests are never
 //   selected into the Windows subset (E-6).
@@ -42,6 +51,7 @@
 // tree writable before removal regardless, so a staging left unrestored by a
 // failing test never blocks cleanup.
 
+import { Buffer } from "node:buffer";
 import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
@@ -86,6 +96,7 @@ export type StagingMode =
  */
 export class HarnessStagingError extends Error {
   readonly mode: StagingMode;
+  /** The staged object's path: a path string as given, a byte path rendered. */
   readonly path: string;
 
   constructor(mode: StagingMode, stagedPath: string, detail: string) {
@@ -99,10 +110,22 @@ export class HarnessStagingError extends Error {
 /** A staging in effect: what it staged, and how to undo it. */
 export interface PermissionStaging {
   readonly mode: StagingMode;
-  readonly path: string;
+  /** The staged object as given: a path string, or its exact bytes. */
+  readonly path: string | Buffer;
   /** Reinstate every recorded mode, in reverse order of change; idempotent. */
   restore(): Promise<void>;
 }
+
+/**
+ * A path a staging takes, absolute: a path string (Node hands it to the
+ * filesystem as UTF-8), or exact path bytes — the form for a name the
+ * product chose that is not valid UTF-8 (module header: Names), e.g.
+ * `TestWorkspace.bytePath`'s.
+ */
+export type StagedPath = string | Uint8Array;
+
+/** A path as this module hands it to `fs`: a string, or exact bytes. */
+type FsPath = string | Buffer;
 
 const WRITE_BITS = 0o222;
 const MODE_BITS = 0o7777;
@@ -116,8 +139,64 @@ const PRIVILEGED_HINT =
   "`unshare --map-user=<uid> --map-group=<gid>`, see AGENTS.md)";
 
 interface ModeRecord {
-  readonly path: string;
+  readonly path: FsPath;
   readonly mode: number;
+}
+
+const SLASH = 0x2f;
+
+/** A staged path as `fs` takes it: a string as given, bytes as a `Buffer`. */
+function toFsPath(target: StagedPath): FsPath {
+  return typeof target === "string" ? target : Buffer.from(target);
+}
+
+/** A path's exact bytes: a byte path's own, a string's UTF-8 (as `fs`'s). */
+function pathBytes(target: FsPath): Buffer {
+  return typeof target === "string" ? Buffer.from(target, "utf8") : target;
+}
+
+/** The entry `name` of the directory `dir`, byte for byte (no decode). */
+function joinBytes(dir: Buffer, name: Buffer): Buffer {
+  return Buffer.concat([dir, Buffer.from([SLASH]), name]);
+}
+
+/** `name` within `dir`: `path.join` for two strings, else the bytes joined. */
+function joinPath(dir: FsPath, name: FsPath): FsPath {
+  if (typeof dir === "string" && typeof name === "string") {
+    return path.join(dir, name);
+  }
+  return joinBytes(pathBytes(dir), pathBytes(name));
+}
+
+/** Whether a path is absolute (bytes: a leading `/`). */
+function isAbsolutePath(target: FsPath): boolean {
+  return typeof target === "string"
+    ? path.isAbsolute(target)
+    : target[0] === SLASH;
+}
+
+/**
+ * A path rendered for a diagnosis: a string as itself; a byte path segment
+ * by segment, each valid UTF-8 segment as its text and any other as
+ * `<bytes HEX>` (the hex of its exact bytes) — so the bytes of a path string
+ * render as that string.
+ */
+function displayPath(target: FsPath): string {
+  if (typeof target === "string") return target;
+  const segments: string[] = [];
+  let start = 0;
+  for (let end = 0; end <= target.length; end++) {
+    if (end < target.length && target[end] !== SLASH) continue;
+    const segment = target.subarray(start, end);
+    const text = segment.toString("utf8");
+    segments.push(
+      Buffer.from(text, "utf8").equals(segment)
+        ? text
+        : `<bytes ${segment.toString("hex")}>`,
+    );
+    start = end + 1;
+  }
+  return segments.join("/");
 }
 
 function errorCode(thrown: unknown): string | undefined {
@@ -191,18 +270,18 @@ async function expectAllowed(
   await undo();
 }
 
-function assertLinux(mode: StagingMode, stagedPath: string): void {
+function assertLinux(mode: StagingMode, target: FsPath): void {
   if (process.platform !== "linux") {
     throw new HarnessStagingError(
       mode,
-      stagedPath,
+      displayPath(target),
       `permission-based stagings belong to the Linux leg (E-1); this platform is ${process.platform}`,
     );
   }
-  if (!path.isAbsolute(stagedPath)) {
+  if (!isAbsolutePath(target)) {
     throw new HarnessStagingError(
       mode,
-      stagedPath,
+      displayPath(target),
       "the staged path must be absolute",
     );
   }
@@ -210,7 +289,7 @@ function assertLinux(mode: StagingMode, stagedPath: string): void {
 
 type EntryKind = "absent" | "file" | "directory" | "symlink" | "other";
 
-async function kindOf(target: string): Promise<EntryKind> {
+async function kindOf(target: FsPath): Promise<EntryKind> {
   let stats: fs.Stats;
   try {
     stats = await fsp.lstat(target);
@@ -227,7 +306,7 @@ async function kindOf(target: string): Promise<EntryKind> {
 async function assertPlainDirectory(
   mode: StagingMode,
   stagedPath: string,
-  dir: string,
+  dir: FsPath,
   role: string,
 ): Promise<void> {
   const kind = await kindOf(dir);
@@ -235,19 +314,19 @@ async function assertPlainDirectory(
     throw new HarnessStagingError(
       mode,
       stagedPath,
-      `${role} ${dir} is ${kind}, not a directory (symbolic links and non-directory components are never involved)`,
+      `${role} ${displayPath(dir)} is ${kind}, not a directory (symbolic links and non-directory components are never involved)`,
     );
   }
 }
 
-async function modeOf(target: string): Promise<number> {
+async function modeOf(target: FsPath): Promise<number> {
   return (await fsp.stat(target)).mode & MODE_BITS;
 }
 
 /** Record `target`'s mode bits, then set them to `next`. */
 async function setMode(
   records: ModeRecord[],
-  target: string,
+  target: FsPath,
   next: (prior: number) => number,
 ): Promise<void> {
   const prior = await modeOf(target);
@@ -257,13 +336,13 @@ async function setMode(
 
 function makeStaging(
   mode: StagingMode,
-  stagedPath: string,
+  staged: FsPath,
   records: readonly ModeRecord[],
 ): PermissionStaging {
   let restored = false;
   return {
     mode,
-    path: stagedPath,
+    path: staged,
     async restore(): Promise<void> {
       if (restored) return;
       restored = true;
@@ -274,8 +353,8 @@ function makeStaging(
         } catch (thrown) {
           throw new HarnessStagingError(
             mode,
-            stagedPath,
-            `restoring mode ${record.mode.toString(8)} of ${record.path} failed with ${describeError(thrown) || String(thrown)}`,
+            displayPath(staged),
+            `restoring mode ${record.mode.toString(8)} of ${displayPath(record.path)} failed with ${describeError(thrown) || String(thrown)}`,
           );
         }
       }
@@ -303,21 +382,26 @@ async function verified(
 async function probeCreation(
   mode: StagingMode,
   stagedPath: string,
-  dir: string,
+  dir: FsPath,
 ): Promise<void> {
-  const file = path.join(dir, freshName());
-  await expectRefused(mode, stagedPath, `creating ${file}`, async () => {
-    const handle = await fsp.open(file, "wx");
-    return async () => {
-      await handle.close();
-      await fsp.unlink(file);
-    };
-  });
-  const sub = path.join(dir, freshName());
+  const file = joinPath(dir, freshName());
   await expectRefused(
     mode,
     stagedPath,
-    `creating directory ${sub}`,
+    `creating ${displayPath(file)}`,
+    async () => {
+      const handle = await fsp.open(file, "wx");
+      return async () => {
+        await handle.close();
+        await fsp.unlink(file);
+      };
+    },
+  );
+  const sub = joinPath(dir, freshName());
+  await expectRefused(
+    mode,
+    stagedPath,
+    `creating directory ${displayPath(sub)}`,
     async () => {
       await fsp.mkdir(sub);
       return () => fsp.rmdir(sub);
@@ -329,13 +413,13 @@ async function probeCreation(
 async function probeWriteOpen(
   mode: StagingMode,
   stagedPath: string,
-  file: string,
+  file: FsPath,
 ): Promise<void> {
   for (const flags of ["r+", "a"] as const) {
     await expectRefused(
       mode,
       stagedPath,
-      `opening ${file} with ${JSON.stringify(flags)}`,
+      `opening ${displayPath(file)} with ${JSON.stringify(flags)}`,
       async () => {
         const handle = await fsp.open(file, flags);
         return () => handle.close();
@@ -355,7 +439,7 @@ async function probeWriteOpen(
 async function probeReplaceAndRemove(
   mode: StagingMode,
   stagedPath: string,
-  target: string,
+  target: FsPath,
   occupied: boolean,
 ): Promise<void> {
   const scratch = await fsp.mkdtemp(
@@ -373,7 +457,7 @@ async function probeReplaceAndRemove(
     await expectRefused(
       mode,
       stagedPath,
-      `renaming ${sibling} over ${target}`,
+      `renaming ${sibling} over ${displayPath(target)}`,
       async () => {
         await fsp.rename(sibling, target);
         return async () => {
@@ -383,10 +467,15 @@ async function probeReplaceAndRemove(
       },
     );
     if (occupied) {
-      await expectRefused(mode, stagedPath, `unlinking ${target}`, async () => {
-        await fsp.unlink(target);
-        return () => fsp.copyFile(sibling, target);
-      });
+      await expectRefused(
+        mode,
+        stagedPath,
+        `unlinking ${displayPath(target)}`,
+        async () => {
+          await fsp.unlink(target);
+          return () => fsp.copyFile(sibling, target);
+        },
+      );
     }
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
@@ -448,19 +537,27 @@ export async function stageWriteRefusal(
 }
 
 interface Subtree {
-  readonly dirs: string[];
-  readonly files: string[];
+  readonly dirs: Buffer[];
+  readonly files: Buffer[];
 }
 
-/** Every directory (the root first) and regular file beneath `root`. */
-async function walkSubtree(root: string): Promise<Subtree> {
-  const dirs = [root];
-  const files: string[] = [];
+/**
+ * Every directory (the root first) and regular file beneath `root`, each as
+ * its exact byte path: names are listed as raw bytes in byte order and each
+ * entry classified by `lstat` at its exact bytes (module header: Names), so
+ * a name that is not valid UTF-8 is reached like any other; symbolic links
+ * and other kinds are left out.
+ */
+async function walkSubtree(root: FsPath): Promise<Subtree> {
+  const dirs = [pathBytes(root)];
+  const files: Buffer[] = [];
   for (let i = 0; i < dirs.length; i++) {
     const dir = dirs[i]!;
-    const names = (await fsp.readdir(dir)).sort();
+    const names = (await fsp.readdir(dir, { encoding: "buffer" })).sort(
+      Buffer.compare,
+    );
     for (const name of names) {
-      const entry = path.join(dir, name);
+      const entry = joinBytes(dir, name);
       const kind = await kindOf(entry);
       if (kind === "directory") dirs.push(entry);
       else if (kind === "file") files.push(entry);
@@ -473,23 +570,20 @@ async function walkSubtree(root: string): Promise<Subtree> {
  * E-1 verification of an area write refusal (exported for the self-test):
  * creation is attempted in every directory beneath `directory`, a write-open
  * on every regular file, a rename into `directory`, and the removal of its
- * first regular file.
+ * first regular file — each entry reached at its exact bytes.
  */
 export async function verifyWriteRefusalUnder(
-  directory: string,
+  directory: StagedPath,
 ): Promise<void> {
   const mode: StagingMode = "write-refusal-under";
-  const { dirs, files } = await walkSubtree(directory);
-  for (const dir of dirs) await probeCreation(mode, directory, dir);
-  for (const file of files) await probeWriteOpen(mode, directory, file);
-  await probeReplaceAndRemove(
-    mode,
-    directory,
-    path.join(directory, freshName()),
-    false,
-  );
+  const area = toFsPath(directory);
+  const shown = displayPath(area);
+  const { dirs, files } = await walkSubtree(area);
+  for (const dir of dirs) await probeCreation(mode, shown, dir);
+  for (const file of files) await probeWriteOpen(mode, shown, file);
+  await probeReplaceAndRemove(mode, shown, joinPath(area, freshName()), false);
   if (files.length > 0) {
-    await probeReplaceAndRemove(mode, directory, files[0]!, true);
+    await probeReplaceAndRemove(mode, shown, files[0]!, true);
   }
 }
 
@@ -498,21 +592,25 @@ export async function verifyWriteRefusalUnder(
  * discipline for an area whose write paths the harness cannot name (`.xspec`,
  * `specs/b`): the directory and every directory beneath it made read-only,
  * every regular file beneath made unwritable, symbolic links left alone, and
- * the directory's own parent untouched. Verified before returning (E-1).
+ * the directory's own parent untouched. Every entry is reached at its exact
+ * bytes, whatever name the product chose (module header: Names). Verified
+ * before returning (E-1).
  */
 export async function stageWriteRefusalUnder(
-  directory: string,
+  directory: StagedPath,
 ): Promise<PermissionStaging> {
   const mode: StagingMode = "write-refusal-under";
-  assertLinux(mode, directory);
-  await assertPlainDirectory(mode, directory, directory, "the staged area");
-  const { dirs, files } = await walkSubtree(directory);
+  const area = toFsPath(directory);
+  assertLinux(mode, area);
+  const shown = displayPath(area);
+  await assertPlainDirectory(mode, shown, area, "the staged area");
+  const { dirs, files } = await walkSubtree(area);
   const records: ModeRecord[] = [];
   for (const entry of [...dirs, ...files]) {
     await setMode(records, entry, (prior) => prior & ~WRITE_BITS);
   }
-  return verified(makeStaging(mode, directory, records), () =>
-    verifyWriteRefusalUnder(directory),
+  return verified(makeStaging(mode, area, records), () =>
+    verifyWriteRefusalUnder(area),
   );
 }
 
@@ -522,93 +620,105 @@ export async function stageWriteRefusalUnder(
  * E-1 verification of a file read refusal (exported for the self-test): the
  * read must be refused, a write-open (append, no bytes written) must succeed.
  */
-export async function verifyReadRefusalOfFile(target: string): Promise<void> {
+export async function verifyReadRefusalOfFile(
+  target: StagedPath,
+): Promise<void> {
   const mode: StagingMode = "read-refusal-of-file";
-  await expectRefused(mode, target, `reading ${target}`, async () => {
-    const handle = await fsp.open(target, "r");
+  const file = toFsPath(target);
+  const shown = displayPath(file);
+  await expectRefused(mode, shown, `reading ${shown}`, async () => {
+    const handle = await fsp.open(file, "r");
     return () => handle.close();
   });
-  await expectAllowed(
-    mode,
-    target,
-    `opening ${target} for writing`,
-    async () => {
-      const handle = await fsp.open(target, "a");
-      return () => handle.close();
-    },
-  );
+  await expectAllowed(mode, shown, `opening ${shown} for writing`, async () => {
+    const handle = await fsp.open(file, "a");
+    return () => handle.close();
+  });
 }
 
 /**
  * Stage a refused content read of the regular file `target` (T14-10): mode
  * 0o200, its write permission kept so a regeneration replacing or rewriting
- * it is never refused. Nonexistence is never staged as a refusal. Verified
- * before returning (E-1).
+ * it is never refused. Nonexistence is never staged as a refusal. A file
+ * whose name the product chose is passed as its exact bytes (module header:
+ * Names). Verified before returning (E-1).
  */
 export async function stageReadRefusalOfFile(
-  target: string,
+  target: StagedPath,
 ): Promise<PermissionStaging> {
   const mode: StagingMode = "read-refusal-of-file";
-  assertLinux(mode, target);
-  const kind = await kindOf(target);
+  const file = toFsPath(target);
+  assertLinux(mode, file);
+  const kind = await kindOf(file);
   if (kind !== "file") {
     throw new HarnessStagingError(
       mode,
-      target,
+      displayPath(file),
       `the target is ${kind}, not a regular file (nonexistence is never staged as a refusal; symbolic links are never involved)`,
     );
   }
   const records: ModeRecord[] = [];
-  await setMode(records, target, () => CONTENT_UNREADABLE);
-  return verified(makeStaging(mode, target, records), () =>
-    verifyReadRefusalOfFile(target),
+  await setMode(records, file, () => CONTENT_UNREADABLE);
+  return verified(makeStaging(mode, file, records), () =>
+    verifyReadRefusalOfFile(file),
   );
 }
 
 /**
  * E-1 verification of a directory read refusal (exported for the self-test):
  * the listing must be refused; search must be kept — the directory passes an
- * execute-access check and, when `knownEntry` names one of its entries, that
- * entry is reachable by name.
+ * execute-access check and, when `knownEntry` names one of its entries (a
+ * name string, or its exact bytes), that entry is reachable by name.
  */
 export async function verifyReadRefusalOfDirectory(
-  target: string,
-  knownEntry?: string,
+  target: StagedPath,
+  knownEntry?: StagedPath,
 ): Promise<void> {
   const mode: StagingMode = "read-refusal-of-directory";
-  await expectRefused(mode, target, `listing ${target}`, async () => {
-    await fsp.readdir(target);
+  const dir = toFsPath(target);
+  const shown = displayPath(dir);
+  await expectRefused(mode, shown, `listing ${shown}`, async () => {
+    await fsp.readdir(dir);
     return async () => undefined;
   });
-  await expectAllowed(mode, target, `searching ${target}`, async () => {
-    await fsp.access(target, fs.constants.X_OK);
+  await expectAllowed(mode, shown, `searching ${shown}`, async () => {
+    await fsp.access(dir, fs.constants.X_OK);
     return async () => undefined;
   });
   if (knownEntry !== undefined) {
-    const entry = path.join(target, knownEntry);
-    await expectAllowed(mode, target, `reaching ${entry} by name`, async () => {
-      await fsp.lstat(entry);
-      return async () => undefined;
-    });
+    const entry = joinPath(dir, toFsPath(knownEntry));
+    await expectAllowed(
+      mode,
+      shown,
+      `reaching ${displayPath(entry)} by name`,
+      async () => {
+        await fsp.lstat(entry);
+        return async () => undefined;
+      },
+    );
   }
 }
 
 /**
  * Stage a refused listing of the directory `target` (T14-10): mode 0o100,
  * its search permission kept so its entries stay reachable by name.
- * Verified before returning (E-1), the by-name probe using an entry listed
- * before the staging when the directory holds one.
+ * Verified before returning (E-1), the by-name probe using the entry listed
+ * first (bytewise) before the staging, at its exact bytes (module header:
+ * Names), when the directory holds one.
  */
 export async function stageReadRefusalOfDirectory(
-  target: string,
+  target: StagedPath,
 ): Promise<PermissionStaging> {
   const mode: StagingMode = "read-refusal-of-directory";
-  assertLinux(mode, target);
-  await assertPlainDirectory(mode, target, target, "the target");
-  const knownEntry = (await fsp.readdir(target)).sort()[0];
+  const dir = toFsPath(target);
+  assertLinux(mode, dir);
+  await assertPlainDirectory(mode, displayPath(dir), dir, "the target");
+  const knownEntry = (await fsp.readdir(dir, { encoding: "buffer" })).sort(
+    Buffer.compare,
+  )[0];
   const records: ModeRecord[] = [];
-  await setMode(records, target, () => LISTING_UNREADABLE);
-  return verified(makeStaging(mode, target, records), () =>
-    verifyReadRefusalOfDirectory(target, knownEntry),
+  await setMode(records, dir, () => LISTING_UNREADABLE);
+  return verified(makeStaging(mode, dir, records), () =>
+    verifyReadRefusalOfDirectory(dir, knownEntry),
   );
 }

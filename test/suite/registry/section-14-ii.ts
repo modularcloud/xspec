@@ -71,8 +71,9 @@
 //   form-exact.
 // - Arm (f)'s "every path under `.xspec/` other than the journal and the
 //   session directory staged unreadable" is every plain file in T13.3-2's
-//   operational path set (`isGraphDataKey`), recursively, at mode 0o200;
-//   directories keep their listing and write permission so the
+//   operational path set (`isGraphDataKey`), recursively, at mode 0o200,
+//   each reached at its exact name bytes (the names are the product's,
+//   13.3); directories keep their listing and write permission so the
 //   regeneration `ids` owes (13.3) is never itself refused, whatever the
 //   product's layout. A staged file the regeneration has since removed is
 //   not restored (nothing to reinstate). The preview is the file-form
@@ -125,6 +126,7 @@ import type { DirectorySnapshot } from "../../helpers/snapshot.js";
 import {
   assertSnapshotsEqual,
   displaySnapshotPath,
+  snapshotKeyBytes,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
@@ -1374,22 +1376,30 @@ function recordsIn(report: OccurrencesReport, file: string): number {
 /**
  * Every plain file under `rel` that is graph data (T13.3-2's operational
  * path set: under `.xspec/`, outside the durable journal and the session
- * directory), recursively, as workspace-relative paths.
+ * directory), recursively, as snapshot keys (helpers/snapshot.ts: the exact
+ * relative path bytes, held latin1-encoded — for an ASCII path, the path
+ * itself). Names are listed as raw bytes and each entry classified by
+ * `lstat` at its exact byte path: graph data's layout is the product's
+ * (SPEC 13.3), so a name that is not ASCII, or not valid UTF-8, is collected
+ * like any other, where a UTF-8 listing would misname it.
  */
 async function collectGraphDataFiles(
-  rootAbs: string,
+  workspace: TestWorkspace,
   rel: string,
 ): Promise<string[]> {
   const collected: string[] = [];
-  const entries = await fsp.readdir(path.join(rootAbs, rel), {
-    withFileTypes: true,
-  });
-  for (const entry of entries) {
-    const key = `${rel}/${entry.name}`;
+  const names = (
+    await fsp.readdir(workspace.bytePath(snapshotKeyBytes(rel)), {
+      encoding: "buffer",
+    })
+  ).sort(Buffer.compare);
+  for (const name of names) {
+    const key = `${rel}/${name.toString("latin1")}`;
     if (!isGraphDataKey(key)) continue;
-    if (entry.isDirectory()) {
-      collected.push(...(await collectGraphDataFiles(rootAbs, key)));
-    } else if (entry.isFile()) {
+    const stats = await fsp.lstat(workspace.bytePath(snapshotKeyBytes(key)));
+    if (stats.isDirectory()) {
+      collected.push(...(await collectGraphDataFiles(workspace, key)));
+    } else if (stats.isFile()) {
       collected.push(key);
     }
   }
@@ -1415,16 +1425,17 @@ async function restoreSurviving(
  * and the session directory unreadable (mode 0o200, each verified). Files
  * only — directories keep their listing and write permission, so the
  * regeneration a refreshing read owes (13.3) is never itself refused,
- * whatever the product's layout. At least one file must exist: the staging
- * applies to record files the product itself wrote (H-3), and staging
- * nothing would be no staging (H-11).
+ * whatever the product's layout. Each file is staged at its exact name
+ * bytes, whatever the name the product chose (SPEC 13.3). At least one file
+ * must exist: the staging applies to record files the product itself wrote
+ * (H-3), and staging nothing would be no staging (H-11).
  */
 async function stageGraphDataUnreadable(
   workspace: TestWorkspace,
   context: string,
 ): Promise<PermissionStaging[]> {
   const files = (
-    await collectGraphDataFiles(workspace.root, GRAPH_DATA_AREA)
+    await collectGraphDataFiles(workspace, GRAPH_DATA_AREA)
   ).sort();
   if (files.length === 0) {
     throw new HarnessStagingError(
@@ -1438,8 +1449,10 @@ async function stageGraphDataUnreadable(
   }
   const stagings: PermissionStaging[] = [];
   try {
-    for (const rel of files) {
-      stagings.push(await stageReadRefusalOfFile(workspace.path(rel)));
+    for (const key of files) {
+      stagings.push(
+        await stageReadRefusalOfFile(workspace.bytePath(snapshotKeyBytes(key))),
+      );
     }
   } catch (error) {
     await restoreSurviving(stagings).catch(() => undefined);

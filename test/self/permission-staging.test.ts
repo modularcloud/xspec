@@ -6,10 +6,14 @@
 // discipline names and keeps the permission it must keep; that `restore()`
 // reinstates every recorded mode, idempotently; that unstageable objects — a
 // directory in the path form, a symbolic link, an absent object for a read
-// refusal — are staging errors, never refusals; and that the E-1
-// ineffective-staging report fires: the exported verification functions run
-// on an unstaged path see their own attempts succeed, undo them, and throw
-// `HarnessStagingError`, which is not a `HarnessAssertionError` (H-8, H-11).
+// refusal — are staging errors, never refusals; that an entry the product
+// named is reached at its exact bytes whatever the name — not valid UTF-8,
+// or not ASCII (SPEC 13.1, 13.3) — by every staging that reaches entries the
+// harness does not name, its diagnoses rendering such a name readably; and
+// that the E-1 ineffective-staging report fires: the exported verification
+// functions run on an unstaged path see their own attempts succeed, undo
+// them, and throw `HarnessStagingError`, which is not a
+// `HarnessAssertionError` (H-8, H-11).
 //
 // On a privileged runner (root: CAP_DAC_OVERRIDE) the staging tests below
 // fail with that same error by design (H-9: never a pass or a skip); CI runs
@@ -86,11 +90,14 @@ async function outcome(attempt: Promise<unknown>): Promise<string> {
   }
 }
 
-async function modeOf(target: string): Promise<number> {
+async function modeOf(target: string | Buffer): Promise<number> {
   return (await fsp.stat(target)).mode & 0o7777;
 }
 
-async function openAndClose(target: string, flags: string): Promise<void> {
+async function openAndClose(
+  target: string | Buffer,
+  flags: string,
+): Promise<void> {
   const handle = await fsp.open(target, flags);
   await handle.close();
 }
@@ -282,6 +289,94 @@ test.runIf(onLinux)(
     expect(await outcome(fsp.readdir(empty))).toBe("EACCES");
     await emptyStaging.restore();
     expect(await fsp.readdir(empty)).toEqual([]);
+  },
+);
+
+// Names a product may choose (SPEC 13.1, 13.3; permissions.ts: Names), built
+// from bytes and code points: "a" then 0xFF — no valid UTF-8 — and "d" then
+// U+00E9, valid UTF-8 but not ASCII.
+const NOT_UTF8_NAME = Buffer.from([0x61, 0xff]);
+const NOT_ASCII_NAME = Buffer.from(`d${String.fromCodePoint(0xe9)}`, "utf8");
+
+test.runIf(onLinux)(
+  "byte paths: an entry the product named — not valid UTF-8, or not ASCII — is reached at its exact bytes by the area write refusal and its E-1 verification, a file read refusal, and a listing refusal's by-name probe; a diagnosis renders such a name's segment as hex; restore reinstates every mode",
+  async () => {
+    const workspace = await makeWorkspace();
+    const area = workspace.path(".xspec");
+    const rel = (...parts: Buffer[]): Buffer =>
+      Buffer.concat([Buffer.from(".xspec/"), ...parts]);
+    const fileRel = rel(NOT_UTF8_NAME);
+    const subRel = rel(NOT_ASCII_NAME);
+    const subFileRel = rel(NOT_ASCII_NAME, Buffer.from("/f"));
+    await workspace.file(fileRel, "x\n");
+    await workspace.file(subFileRel, "f\n");
+    const file = workspace.bytePath(fileRel);
+    const sub = workspace.bytePath(subRel);
+    const subFile = workspace.bytePath(subFileRel);
+    await fsp.chmod(sub, 0o755);
+    for (const target of [file, subFile]) await fsp.chmod(target, 0o644);
+    const shownFile = `${area}/<bytes ${NOT_UTF8_NAME.toString("hex")}>`;
+
+    // The area write refusal reaches both names, and so does its verification.
+    const staging = tracked(await stageWriteRefusalUnder(area));
+    expect(await modeOf(area)).toBe(0o555);
+    expect(await modeOf(file)).toBe(0o444);
+    expect(await modeOf(sub)).toBe(0o555);
+    expect(await modeOf(subFile)).toBe(0o444);
+    expect(await modeOf(workspace.path(".xspec/graph.json"))).toBe(0o444);
+    expect(await outcome(openAndClose(file, "r+"))).toBe("EACCES");
+    expect(await outcome(openAndClose(file, "a"))).toBe("EACCES");
+    expect(await outcome(openAndClose(subFile, "a"))).toBe("EACCES");
+    const fresh = Buffer.concat([sub, Buffer.from("/g")]);
+    expect(await outcome(openAndClose(fresh, "wx"))).toBe("EACCES");
+    // That one file left writable is an ineffective staging E-1 reports.
+    await fsp.chmod(file, 0o644);
+    const areaError = await stagingError(verifyWriteRefusalUnder(area));
+    expect(areaError.path).toBe(area);
+    expect(areaError.message).toContain(
+      `opening ${shownFile} with "r+" was not refused`,
+    );
+    await staging.restore();
+    expect(await modeOf(area)).toBe(0o755);
+    expect(await modeOf(sub)).toBe(0o755);
+    expect(await modeOf(subFile)).toBe(0o644);
+    expect(await modeOf(file)).toBe(0o644);
+
+    // A file read refusal at the exact bytes; unstaged, its verification
+    // names the file with the segment as hex.
+    const fileStaging = tracked(await stageReadRefusalOfFile(file));
+    expect(fileStaging.path).toEqual(file);
+    expect(await modeOf(file)).toBe(0o200);
+    expect(await outcome(fsp.readFile(file))).toBe("EACCES");
+    await openAndClose(file, "a");
+    await fileStaging.restore();
+    expect(await modeOf(file)).toBe(0o644);
+    const fileError = await stagingError(verifyReadRefusalOfFile(file));
+    expect(fileError.path).toBe(shownFile);
+    expect(fileError.message).toContain("was not refused");
+
+    // A listing refusal whose first entry, bytewise, is the name that is not
+    // valid UTF-8: the by-name probe reaches it.
+    const listing = tracked(await stageReadRefusalOfDirectory(area));
+    expect(await modeOf(area)).toBe(0o100);
+    expect(await outcome(fsp.readdir(area))).toBe("EACCES");
+    expect((await fsp.lstat(file)).isFile()).toBe(true);
+    await listing.restore();
+    expect(await modeOf(area)).toBe(0o755);
+    expect(
+      (await workspace.readdirBytes(".xspec"))
+        .map((name) => Buffer.from(name).toString("hex"))
+        .sort(),
+    ).toEqual(
+      [
+        NOT_UTF8_NAME,
+        NOT_ASCII_NAME,
+        Buffer.from("graph.json"),
+        Buffer.from("journal"),
+      ]
+        .map((name) => name.toString("hex"))
+        .sort(),
+    );
   },
 );
 
