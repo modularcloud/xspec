@@ -1293,14 +1293,21 @@ function displayBytePath(bytes: Uint8Array): string {
  * byte path, `/`-separated and validated like every byte path
  * (`TestWorkspace.bytePath`): an ASCII path's bytes (T13.4-11(c),
  * T6.5-21(d)) or a snapshot key's `snapshotKeyBytes` (T13.4-4, whose
- * graph-data link stands at a name the product chose, SPEC 13.3). The
- * occupant is cleared, the link created, and the staging verified at those
- * bytes, so a final name that is not ASCII, or not valid UTF-8, is linked
- * exactly; diagnoses render the path with `displaySnapshotPath`. Only the
- * final name may be the product's: the link's directory, which every
- * caller names in ASCII (`specs/`, `.xspec/`), must be valid UTF-8 — an
- * internal error otherwise — for the relative target is computed from it
- * as a native path.
+ * graph-data link stands at a path the product chose: SPEC 13.3 leaves
+ * graph data's layout unenumerated, the names of its directories
+ * included). The occupant is cleared, the link's directory created, the
+ * link created, and the staging verified at those bytes, never at a
+ * decoding of them, so any byte path a snapshot key can hold is linked
+ * exactly — a final name or a directory that is not ASCII, or not valid
+ * UTF-8, alike; diagnoses render the path with `displaySnapshotPath`. The
+ * relative target is built without decoding the directory either: one
+ * `..` per directory segment of the link's path, climbing from the link's
+ * directory to the root, then the target's path relative to the root —
+ * lexically the target `path.relative` from the link's directory gives. It
+ * reaches the target because every directory on the link's path is a
+ * plain directory (one the harness creates, or one a snapshot key lies
+ * under: a snapshot never descends through a link), as the
+ * self-verification confirms.
  */
 export async function stageLinkToOutsideFile(
   workspace: TestWorkspace,
@@ -1309,20 +1316,20 @@ export async function stageLinkToOutsideFile(
 ): Promise<OutsideFileLink> {
   const linkRelBytes = Buffer.from(linkRel);
   // `bytePath` validates the byte path (relative, no NUL, no `.`, `..`, or
-  // empty segment); the link's directory is its bytes before the last `/`.
+  // empty segment); the link's directory is its bytes before the last `/`,
+  // reached at those bytes — the root itself when there is none — and it
+  // has one segment per `/` of the link's path.
   const linkAbs = workspace.bytePath(linkRelBytes);
   const shown = displayBytePath(linkRelBytes);
   const slash = linkRelBytes.lastIndexOf(0x2f);
-  const dirBytes = linkRelBytes.subarray(0, Math.max(slash, 0));
-  const dirRel = dirBytes.toString("utf8");
-  if (!Buffer.from(dirRel, "utf8").equals(dirBytes)) {
-    throw new Error(
-      `internal error: the directory of the symbolic link to stage at ` +
-        `${shown} is not valid UTF-8 — only the link's final name may be ` +
-        `a name the product chose`,
-    );
+  const linkDirAbs =
+    slash < 0
+      ? Buffer.from(workspace.root)
+      : workspace.bytePath(linkRelBytes.subarray(0, slash));
+  let depth = 0;
+  for (const byte of linkRelBytes) {
+    if (byte === 0x2f) depth += 1;
   }
-  const linkDirAbs = dirRel === "" ? workspace.root : workspace.path(dirRel);
   const targetAbs = path.join(
     workspace.tempRoot,
     OUTSIDE_LINK_TARGETS_DIR,
@@ -1337,7 +1344,16 @@ export async function stageLinkToOutsideFile(
   );
   await fsp.rm(linkAbs, { force: true });
   await fsp.mkdir(linkDirAbs, { recursive: true });
-  await fsp.symlink(path.relative(linkDirAbs, targetAbs), linkAbs, "file");
+  // One `..` per directory segment climbs from the link's directory to the
+  // root, the directory's bytes never decoded (doc comment).
+  await fsp.symlink(
+    path.join(
+      ...new Array<string>(depth).fill(".."),
+      path.relative(workspace.root, targetAbs),
+    ),
+    linkAbs,
+    "file",
+  );
   if ((await workspace.kind(linkRelBytes)) !== "symlink") {
     throw new Error(
       `internal error: failed to stage a symbolic link at ${shown}`,
