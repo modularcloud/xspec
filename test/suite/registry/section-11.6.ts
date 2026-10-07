@@ -130,7 +130,7 @@
 // valid, and T11.6-2's 14.19 staging never being the inventory's finding.
 //
 // T11.6-3 — record, area, durables, order (SPEC 11.6, 13.3, 13.1, 6.1,
-// 10.1, 12.7). Two workspaces:
+// 10.1, 12.7, 7.2, 7.4, 7.5). Three workspaces:
 //
 // - record/area/journal workspace (emission enabled; two spec groups `zz`
 //   before `aa` so configuration order has teeth): before any build,
@@ -166,6 +166,18 @@
 //   name — "S.json" < "S2.json" < "ancien.json" (0x53 'S' sorts before
 //   0x61 'a'), inverting under case folding, so the byte-order contract has
 //   teeth.
+//
+// - order workspace (configuration alone, no build): two spec groups, two
+//   code groups, two coverage profiles, and two policy rules, each pair
+//   declared against name byte order (`zspec`/`aspec`, `zcode`/`acode`,
+//   `zprofil`/`aprofil`, `zregle`/`aregle`), `zcode`'s globs against byte
+//   order, and a code source matched by both code groups. All four lists
+//   are asserted in configuration order — the names first, then the whole
+//   resolved entries with every default and inferred kind explicit, as
+//   T11.6-2 writes them, form-exact — beside the whole view and the
+//   source's two memberships in configuration order, flag-less and
+//   `--json` forms against one expectation: a product listing groups,
+//   profiles, or rules by name bytes, or reversed, fails here.
 //
 // T11.6-4 — no parse, no write, one finding (SPEC 11.6, 14.23, 14.14, 12.7,
 // 12.0, 13.3). Three arm groups, three workspaces:
@@ -1566,7 +1578,8 @@ const T11_6_2 = defineProductTest({
 // emission is enabled so the post-build record carries modules AND Markdown;
 // the lag arm rewrites the configuration to the emission-off twin (still
 // valid — a configuration error would preempt the inventory, 14.14) without
-// rebuilding.
+// rebuilding. The order workspace's fixtures (code groups, profiles, and
+// rules against name byte order) follow the sessions workspace's below.
 
 const DURABLES_EMIT_CONFIG = `import { defineConfig } from "xspec"
 
@@ -1827,10 +1840,174 @@ const T11_6_3_SESSIONS_SEUL = stagedMdx(
   '<S id="seul">\nSeul.\n</S>\n',
 );
 
+// T11.6-3's order workspace is created after the body's first product
+// invocation too, so its configuration and its code source are TypeScript
+// staged-source records (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses), both well-formed. The configuration declares every list of the
+// resolved view against name byte order — spec groups `zspec` before
+// `aspec`, code groups `zcode` before `acode`, coverage profiles `zprofil`
+// before `aprofil`, policy rules `zregle` before `aregle` — and `zcode`'s
+// globs against byte order (`src/…` before `lib/…`), so 11.6's
+// configuration-order clause has teeth on every list it governs: a product
+// listing any of them by name bytes, or reversed, fails. Each profile and
+// rule is valid (SPEC 7.4, 7.5; an invalid configuration is 14.14 at load,
+// preempting the inventory) and spells a different mix of explicit and
+// defaulted fields, so the whole-entry compares pin complete definitions;
+// the inventory evaluates neither (SPEC 11.6). No spec source is staged:
+// a group matching no file is valid (SPEC 7).
+const ORDER_CONFIG = stagedTs(
+  "T11.6-3 order workspace xspec.config.ts — groups, profiles, and rules each declared against name byte order",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    zspec: ["specs/**/*.mdx"],
+    aspec: ["notes/**/*.mdx"]
+  },
+  code: {
+    zcode: ["src/**/*.ts", "lib/**/*.ts"],
+    acode: ["lib/**/*.ts"]
+  },
+  coverage: [
+    {
+      name: "zprofil",
+      target: "zspec",
+      targets: "all",
+      boundary: "zcode",
+      mode: "transitive"
+    },
+    {
+      name: "aprofil",
+      target: "aspec",
+      targetTags: ["t"],
+      boundary: "acode",
+      boundaryKind: "code",
+      mode: "direct",
+      edgeKinds: ["embeds"]
+    }
+  ],
+  policy: [
+    {
+      name: "zregle",
+      type: "allowedOnly",
+      from: { group: "zcode" },
+      to: { group: "zspec", kind: "spec" }
+    },
+    {
+      name: "aregle",
+      type: "forbidden",
+      from: { files: "src/**/*.ts" },
+      to: { tags: ["t"] },
+      kinds: ["references"]
+    }
+  ]
+})
+`,
+);
+
+/**
+ * The order workspace's one source: matched by both code groups (`zcode`
+ * through its second glob), so its memberships arrive in configuration
+ * order — `zcode` before `acode` (SPEC 11.6: a file's groups in
+ * configuration order; 7.2 bars only a spec-and-code double match).
+ */
+const T11_6_3_ORDER_CODE = stagedTs(
+  "T11.6-3 order workspace lib/deux.ts — a code source in both code groups",
+  "export const deux = 2;\n",
+);
+
+/**
+ * The order workspace's resolved configuration view (SPEC 11.6, 12.7): every
+ * list in configuration order, each entry carried with its complete
+ * definition and every default and inferred kind explicit, as T11.6-2 writes
+ * them — `zprofil`'s `targetTags` null, `boundaryKind` inferred, and
+ * `edgeKinds` all three (7.4); `zregle`'s `from` kind inferred and `kinds`
+ * all three (7.5); the explicit `targets`, `boundaryKind`, selector `kind`,
+ * and set-valued members reported as configured, in their value forms.
+ */
+const ORDER_EXPECTED_CONFIGURATION: InventoryConfigurationView = {
+  specs: [
+    { name: "zspec", globs: ["specs/**/*.mdx"] },
+    { name: "aspec", globs: ["notes/**/*.mdx"] },
+  ],
+  code: [
+    { name: "zcode", globs: ["src/**/*.ts", "lib/**/*.ts"] },
+    { name: "acode", globs: ["lib/**/*.ts"] },
+  ],
+  markdown: { emit: false, outDir: null },
+  coverage: [
+    {
+      name: "zprofil",
+      target: "zspec",
+      targetTags: null,
+      targets: "all",
+      boundary: "zcode",
+      boundaryKind: "code",
+      mode: "transitive",
+      edgeKinds: ALL_EDGE_KINDS,
+    },
+    {
+      name: "aprofil",
+      target: "aspec",
+      targetTags: ["t"],
+      targets: "leaves",
+      boundary: "acode",
+      boundaryKind: "code",
+      mode: "direct",
+      edgeKinds: ["embeds"],
+    },
+  ],
+  policy: [
+    {
+      name: "zregle",
+      type: "allowedOnly",
+      from: { group: "zcode", kind: "code" },
+      to: { group: "zspec", kind: "spec" },
+      kinds: ALL_EDGE_KINDS,
+    },
+    {
+      name: "aregle",
+      type: "forbidden",
+      from: { files: "src/**/*.ts" },
+      to: { tags: ["t"] },
+      kinds: ["references"],
+    },
+  ],
+};
+
+/**
+ * 11.6's ordering contract, configuration-order half, on one list of the
+ * resolved view: the entry names first — in configuration order, so a list
+ * ordered by name bytes, reversed, or shuffled is diagnosed as such — then
+ * the whole resolved entries, form-exact and compared literally (a group's
+ * globs in configuration order among them).
+ */
+function assertConfigurationOrder(
+  actual: readonly { readonly name: string }[],
+  expected: readonly { readonly name: string }[],
+  what: string,
+  context: string,
+): void {
+  assertSameJson(
+    actual.map((entry) => entry.name),
+    expected.map((entry) => entry.name),
+    `${context} — ${what} in configuration order, never by name byte ` +
+      `order or reversed (SPEC 11.6: groups, profiles, and rules in ` +
+      `configuration order)`,
+  );
+  assertSameJson(
+    actual,
+    expected,
+    `${context} — ${what} as whole resolved entries, each carried with its ` +
+      `complete definition, every default and inferred kind explicit (SPEC ` +
+      `11.6, 12.7, 7.2, 7.4, 7.5)`,
+  );
+}
+
 const T11_6_3 = defineProductTest({
   id: "T11.6-3",
   title:
-    'inventory record, area, durables, order: `recorded` is [] before any generation (never null, never unavailable) and after a build lists the recorded derived paths in byte order — generated modules and emitted Markdown pinned present, every further entry a companion attributable to its source through the 13.1 naming scheme — and after a configuration change without rebuild it lags, reported as recorded, not as configured (emission flipped off: `derived[*].markdown` null while the previously emitted `.md` paths stay recorded); the graph-data area is reported unconditionally — before any build — as ".xspec" with no trailing separator; a foreign file placed under `.xspec/` appears in no inventory list and is never claimed (its name absent from the document bytes); `journal` is {".xspec/journal", occupied} with occupancy by presence alone — absent false; a garbage-content plain file, a directory, and a broken symbolic link each true, content unread, no 14.13 from inventory, the answer finding-free; sessions are selected by name alone — a product-written session, a garbage-content S.json, and a directory named S2.json all listed (content unread, no 14.21 here) in byte order of file name ("S.json" < "S2.json" < "ancien.json", inverting under case folding), while notes.txt and .foo.json are never listed; groups stay in configuration order (`zz` before `aa` against name byte order); every answer complete and finding-free at exit 0, the pre-build state asserted in the flag-less and `--json` forms against one expectation (SPEC 11.6, 13.3, 13.1, 13.2, 6.1, 10.1, 12.7, 12.0, 11)',
+    'inventory record, area, durables, order: `recorded` is [] before any generation (never null, never unavailable) and after a build lists the recorded derived paths in byte order — generated modules and emitted Markdown pinned present, every further entry a companion attributable to its source through the 13.1 naming scheme — and after a configuration change without rebuild it lags, reported as recorded, not as configured (emission flipped off: `derived[*].markdown` null while the previously emitted `.md` paths stay recorded); the graph-data area is reported unconditionally — before any build — as ".xspec" with no trailing separator; a foreign file placed under `.xspec/` appears in no inventory list and is never claimed (its name absent from the document bytes); `journal` is {".xspec/journal", occupied} with occupancy by presence alone — absent false; a garbage-content plain file, a directory, and a broken symbolic link each true, content unread, no 14.13 from inventory, the answer finding-free; sessions are selected by name alone — a product-written session, a garbage-content S.json, and a directory named S2.json all listed (content unread, no 14.21 here) in byte order of file name ("S.json" < "S2.json" < "ancien.json", inverting under case folding), while notes.txt and .foo.json are never listed; groups, profiles, and rules stay in configuration order — the record workspace\'s spec groups `zz` before `aa`, and an order workspace declaring two spec groups, two code groups, two coverage profiles, and two policy rules, each pair against name byte order (`zspec`/`aspec`, `zcode`/`acode`, `zprofil`/`aprofil`, `zregle`/`aregle`), reporting all four lists in configuration order as whole resolved entries with every default and inferred kind explicit, form-exact — `zcode`\'s globs and a two-code-group file\'s memberships in configuration order too; every answer complete and finding-free at exit 0, the pre-build state and the order workspace asserted in the flag-less and `--json` forms against one expectation (SPEC 11.6, 13.3, 13.1, 13.2, 6.1, 10.1, 12.7, 12.0, 11, 7.2, 7.4, 7.5)',
   run: async (product) => {
     // --- record / area / journal workspace ---------------------------------
     const workspace = await TestWorkspace.create({
@@ -1878,8 +2055,9 @@ const T11_6_3 = defineProductTest({
         );
         // 11.6's ordering contract, configuration-order half: groups arrive
         // in configuration order — `zz` before `aa`, inverting name byte
-        // order (profiles and rules ride the same clause; their
-        // configuration-order exact compares are T11.6-2's).
+        // order. This workspace configures no code group, profile, or rule;
+        // the order workspace below declares two of each against name byte
+        // order and pins all four lists whole.
         assertSameJson(
           document.configuration.specs.map((group) => group.name),
           ["zz", "aa"],
@@ -2190,6 +2368,92 @@ const T11_6_3 = defineProductTest({
       );
     } finally {
       await sessions.dispose();
+    }
+
+    // --- order workspace ----------------------------------------------------
+    // 11.6's ordering contract, configuration-order half, on every list it
+    // governs: spec groups, code groups, coverage profiles, and policy
+    // rules, each pair declared against name byte order, `zcode`'s globs
+    // against byte order, and a code source in both code groups — the
+    // flag-less and `--json` forms against one expectation (JSON-only, SPEC
+    // 11). No build runs: the view is configuration alone (SPEC 11.6).
+    const order = await TestWorkspace.create({
+      files: {
+        [CONFIG_FILE]: ORDER_CONFIG,
+        "lib/deux.ts": T11_6_3_ORDER_CODE,
+      },
+    });
+    try {
+      for (const argv of [["inventory"], ["inventory", "--json"]] as const) {
+        const context =
+          `T11.6-3 — \`${argv.join(" ")}\` on the order workspace: groups, ` +
+          `profiles, and rules each declared against name byte order ` +
+          `(SPEC 11.6)`;
+        const { document } = await expectInventoryDocument(
+          product,
+          order.root,
+          argv,
+          context,
+        );
+        const view = document.configuration;
+        assertConfigurationOrder(
+          view.specs,
+          ORDER_EXPECTED_CONFIGURATION.specs,
+          "the spec groups (`zspec` before `aspec`)",
+          context,
+        );
+        assertConfigurationOrder(
+          view.code,
+          ORDER_EXPECTED_CONFIGURATION.code,
+          "the code groups (`zcode` before `acode`; `zcode`'s globs " +
+            "`src/**/*.ts` before `lib/**/*.ts`, a group's globs in " +
+            "configuration order)",
+          context,
+        );
+        assertConfigurationOrder(
+          view.coverage,
+          ORDER_EXPECTED_CONFIGURATION.coverage,
+          "the coverage profiles (`zprofil` before `aprofil`)",
+          context,
+        );
+        assertConfigurationOrder(
+          view.policy,
+          ORDER_EXPECTED_CONFIGURATION.policy,
+          "the policy rules (`zregle` before `aregle`)",
+          context,
+        );
+        assertSameJson(
+          view,
+          ORDER_EXPECTED_CONFIGURATION,
+          `${context} — the whole resolved configuration view: the four ` +
+            `lists above and \`markdown\` absent resolving to emit-false/` +
+            `outDir-null (SPEC 11.6, 7.3, 12.7)`,
+        );
+        assertSameJson(
+          document.sources,
+          [
+            {
+              path: "lib/deux.ts",
+              groups: [
+                { name: "zcode", kind: "code" },
+                { name: "acode", kind: "code" },
+              ],
+            },
+          ],
+          `${context} — the code source matched by both code groups ` +
+            `carries both memberships in configuration order, \`zcode\` ` +
+            `before \`acode\` (SPEC 11.6: a file's groups in configuration ` +
+            `order)`,
+        );
+        assertSameJson(
+          document.derived,
+          [],
+          `${context} — no spec source is discovered, so the derived map ` +
+            `holds no entry (SPEC 11.6, 13.1)`,
+        );
+      }
+    } finally {
+      await order.dispose();
     }
   },
 });
