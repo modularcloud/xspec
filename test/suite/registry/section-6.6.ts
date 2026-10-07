@@ -241,7 +241,11 @@
 //   byte), which makes the subsequent real move run on literally "the same
 //   state"; its exit-0 success, applied mapping, and `check` exit 0 realize
 //   "not refused — it proceeds, its finishing regeneration replacing the
-//   corrupt record" (SPEC 6.6, 6.4, 14.10; T12.2-2's protocol).
+//   corrupt record" (SPEC 6.6, 6.4, 14.10; T12.2-2's protocol). The
+//   refused preview's one finding, `refused-identity-unchanged`, is
+//   asserted with the identity it concerns (TEST-SPEC line 9's rule): its
+//   `identities` exactly the unchanged identity `specs/Origin.mdx#org`, the
+//   sole element, in 1.5's form over the rename's file (SPEC 14, 1.5).
 
 import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -372,6 +376,7 @@ import {
   assertAppliedMapping,
   assertConditionCounts,
   assertFindingConcernsPath,
+  assertRefusalIdentities,
   assertSameJson,
   buildFindings,
   buildOk,
@@ -3692,8 +3697,12 @@ const R6_MOVE_ARGV = [
 ] as const;
 // The refused preview staged on the same corrupt-record state: an
 // identity-unchanged rename collides with nothing and reports
-// `refused-identity-unchanged` alone (SPEC 6.4).
+// `refused-identity-unchanged` alone (SPEC 6.4), concerning the unchanged
+// identity — carried as the sole element of the finding's `identities`, in
+// 1.5's form over the operation's destination file, `<file>#id` for a
+// rename (SPEC 14, 1.5).
 const R6_RENAME_SAME_ARGV = ["rename", R6_ORIGIN, "org", "org"] as const;
+const R6_RENAME_SAME_IDENTITY = `${R6_ORIGIN}#org`;
 // The complete identity mapping the move journals — the moved ID and its
 // descendant, prefix-replaced, in full 1.5 identity form, `from`-byte
 // ordered (SPEC 6.4, 6.5, 12.7).
@@ -3731,7 +3740,7 @@ function requirePreviewPlan(
 const T6_6_6 = defineProductTest({
   id: "T6.6-6",
   title:
-    "unreadable record: with the product-written graph data corrupted shape-blind (garbage over T13.3-2's operational path set; H-3 record-staging adapter), a move `--preview` whose plan is otherwise valid exits 1 emitting the full preview — `mapping` and `files` complete: the exact journaled mapping, the files deep-equal to the intact-record run on the identical sources — with `delta` explicitly unavailable as one datum, never read as an empty record, and the condition-23 finding (`unreadable-record`, concerned path the graph-data area `.xspec`, no path inside it named: locations []) in `findings`; the real operation on the same state is not refused — it proceeds, its applied mapping the previewed mapping, its finishing regeneration replacing the corrupt record (`check` clean afterward, T12.2-2) — and a refused preview staged on the same corrupt-record state (an identity-unchanged rename) reports the refusal finding alone with `mapping`/`files`/`delta` null, never a condition-23 finding (SPEC 6.6, 6.4, 6.5, 14.23, 14.10, 11.6, 12.0, 12.7, 13.3; H-3, H-4)",
+    "unreadable record: with the product-written graph data corrupted shape-blind (garbage over T13.3-2's operational path set; H-3 record-staging adapter), a move `--preview` whose plan is otherwise valid exits 1 emitting the full preview — `mapping` and `files` complete: the exact journaled mapping, the files deep-equal to the intact-record run on the identical sources — with `delta` explicitly unavailable as one datum, never read as an empty record, and the condition-23 finding (`unreadable-record`, concerned path the graph-data area `.xspec`, no path inside it named: locations []) in `findings`; the real operation on the same state is not refused — it proceeds, its applied mapping the previewed mapping, its finishing regeneration replacing the corrupt record (`check` clean afterward, T12.2-2) — and a refused preview staged on the same corrupt-record state (an identity-unchanged rename) reports the refusal finding alone — `refused-identity-unchanged`, its `identities` exactly the unchanged identity `specs/Origin.mdx#org` in 1.5's form over the rename's file — with `mapping`/`files`/`delta` null, never a condition-23 finding (SPEC 6.6, 6.4, 6.5, 14, 14.23, 14.10, 1.5, 11.6, 12.0, 12.7, 13.3; H-3, H-4)",
   run: async (product) => {
     await withWorkspace(
       SPECS_MD_CONFIG,
@@ -3886,7 +3895,10 @@ const T6_6_6 = defineProductTest({
             // (2) A refused preview staged on the same corrupt-record
             // state: the identity-unchanged rename reports its refusal
             // finding alone — a refused preview consults no record, so no
-            // condition-23 finding ever accompanies it (SPEC 6.6, 6.4).
+            // condition-23 finding ever accompanies it (SPEC 6.6, 6.4) —
+            // and that finding carries the identity it concerns, the
+            // unchanged `specs/Origin.mdx#org`, as the sole element of its
+            // `identities` (SPEC 14, 1.5).
             const refusedContext = `${context} (record corrupt), refused rename preview`;
             const refusedArgv = [...R6_RENAME_SAME_ARGV, "--preview", "--json"];
             const refused = await expectExit(
@@ -3914,6 +3926,19 @@ const T6_6_6 = defineProductTest({
                 `condition-23 finding: a refused preview consults no ` +
                 `record (SPEC 6.4 "reports refused-identity-unchanged ` +
                 `alone", 6.6, 14)`,
+            );
+            const unchanged = refusedReport.findings.find(
+              (finding) => finding.code === "refused-identity-unchanged",
+            )!;
+            assertRefusalIdentities(
+              unchanged,
+              "refused-identity-unchanged",
+              [R6_RENAME_SAME_IDENTITY],
+              `${refusedContext}: the \`refused-identity-unchanged\` ` +
+                `finding carries the identity it concerns — the unchanged ` +
+                `identity — as the sole element of its \`identities\`, in ` +
+                `1.5's form over the operation's destination file, ` +
+                `\`<file>#id\` for a rename (SPEC 14, 1.5, 6.4)`,
             );
             if (
               refusedReport.mapping !== null ||
