@@ -345,9 +345,12 @@ interface InvalidTsImportArm {
   /** The statements of `src/app.ts`, staged one per line from byte 0. */
   readonly statements: readonly string[];
   /**
-   * Upper bound on accepted 14.15 findings. Duplicate-binding arms accept 2:
-   * SPEC 2.1/14.15 define one condition over the colliding pair, and whether
-   * a product reports the collision once or per import is not fixed.
+   * Upper bound on accepted 14.15 findings. Duplicate-binding arms accept 2.
+   * SPEC 14 fixes one 14.15 finding locating every colliding declaration;
+   * these arms deliberately accept one finding for the collision or one per
+   * import, because TEST-SPEC assigns the every-participant cardinality to
+   * T14-8 and the exact ranges to T14-11 (its §14 preamble), which assert
+   * them strictly.
    */
   readonly maxFindings?: number;
   /** Configuration override (defaults to SPEC_AND_CODE_CONFIG). */

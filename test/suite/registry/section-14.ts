@@ -258,13 +258,14 @@
 //   `path` also asserts `locations` `[]`: a reason concerning a path
 //   carries it as the finding's `path` with `locations` `[]` (14, 12.7).
 // - T14-8 owns the every-participant strictness the home tests SOME-quantify
-//   (T1.3-5's and T2.1-5's per-file tolerance, T5.3-1's file-dimension
-//   binding, T14-7's cycle mentions-location — its collision arms are
-//   every-participant strict, above): exact finding counts and an
-//   index-wise per-participant assertion — exactly one location per
-//   participating construct, each within its construct's byte window (the
-//   module-header window convention). Participant sequences are declared in
-//   the 12.7 within-finding order — document order within one file,
+//   (T1.3-5's per-occurrence, T2.1-3's and T4-2's per-import, and T2.1-5's
+//   per-file tolerance, T5.3-1's file-dimension binding, T14-7's cycle
+//   mentions-location — its collision arms are every-participant strict,
+//   above): exact finding counts and an index-wise per-participant
+//   assertion — exactly one location per participating construct, each
+//   within its construct's byte window (the module-header window
+//   convention). Participant sequences are declared in the 12.7
+//   within-finding order — document order within one file,
 //   file-path-byte order across files — so the index-wise assertion also
 //   pins "file bytes, then start, then end" value-wise, beside the
 //   form-exact decoder's enforcement of that order on every decoded finding

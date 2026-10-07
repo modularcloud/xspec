@@ -686,10 +686,12 @@ const DUP_BINDING_B2 = stagedMdx(
 /**
  * Run one duplicate-binding arm: `build --json` exits 1 and every finding is
  * 14.15 — never 14.20 — located within one of the two colliding import
- * statements' byte windows. SPEC 2.1 defines one condition over the colliding
- * pair; whether a product reports the collision once or per import is not
- * fixed, so one or two findings are accepted — every one of them must be
- * 14.15, name the file, and point at one of the two import statements.
+ * statements' byte windows. SPEC 14 fixes one 14.15 finding locating every
+ * colliding declaration. This arm deliberately accepts one finding for the
+ * collision or one per import — every one of them must be 14.15, name the
+ * file, and point at one of the two import statements — because TEST-SPEC
+ * assigns the every-participant cardinality to T14-8 and the exact ranges to
+ * T14-11 (its §14 preamble), which assert them strictly.
  */
 async function runDuplicateBindingArm(
   product: ProductBinding,
@@ -898,11 +900,17 @@ const SELF_IMPORT_SOURCE = stagedMdx(
 /**
  * Assert an import-cycle report: every finding is 14.9 (nothing else is
  * present in these fixtures — both files parse, and every reference
- * resolves), at most one finding per participating file (whether a product
- * reports a cycle once or per file is not fixed), and the report identifies
- * every participating file (SPEC 14: actionable errors identify the file —
- * each participating import declaration located in the file containing it)
- * through any of a finding's located files, message, or identity context.
+ * resolves), at most one finding per participating file, and the report
+ * identifies every participating file (SPEC 14: actionable errors identify
+ * the file — each participating import declaration located in the file
+ * containing it) through any of a finding's located files, message, or
+ * identity context. SPEC 14 fixes one 14.9 finding locating each
+ * participating import declaration of the cycle. This assertion deliberately
+ * accepts one finding for the cycle or one per participating file, because
+ * TEST-SPEC assigns the every-participant cardinality to T14-8 and the exact
+ * per-condition ranges to T14-11 (its §14 preamble). T14-8 asserts the cycle
+ * strictly — one 14.9 finding, exactly one location per participating import
+ * declaration, each within that declaration's own characters.
  */
 function assertImportCycleFindings(
   findings: readonly Finding[],
