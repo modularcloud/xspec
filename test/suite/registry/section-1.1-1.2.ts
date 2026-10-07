@@ -238,12 +238,14 @@ const T1_1_2 = defineProductTest({
 
       // `query nodes` reports the same node set. Compared on identity, tags,
       // and coverage — source ranges are excluded, since the two spellings
-      // legitimately differ in byte length.
+      // legitimately differ in byte length. A root's absent tags decode as
+      // `null` (SPEC 11.1) and are carried through as `null`, so absent
+      // compares equal to absent and still differs from an empty set `[]`.
       const nodeSetOf = async (
         workspace: TestWorkspace,
         label: string,
       ): Promise<
-        { identity: string; tags: string[]; coverage: string | null }[]
+        { identity: string; tags: string[] | null; coverage: string | null }[]
       > => {
         const rows = decodeNodeRowsReport(
           await runJson(product, workspace, ["query", "nodes"], label),
@@ -252,7 +254,7 @@ const T1_1_2 = defineProductTest({
         return rows
           .map((row) => ({
             identity: row.identity,
-            tags: [...row.tags].sort(),
+            tags: row.tags === null ? null : [...row.tags].sort(),
             coverage: row.coverage ?? null,
           }))
           .sort((x, y) =>

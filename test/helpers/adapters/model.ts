@@ -92,7 +92,12 @@ export interface NodeReport {
   readonly ownText: string;
   readonly subtreeText: string;
   readonly hashes: NodeHashes;
-  readonly tags: readonly string[];
+  /**
+   * The node's tags (12.7 tag set). `null` is absent: a root node's tags,
+   * reported `null` or omitted (SPEC 11.1, 12.4, 5.5) — never an empty set,
+   * which a tagless section reports as `[]` (12.7).
+   */
+  readonly tags: readonly string[] | null;
   /** Coverage attribute; absent for root nodes (T1.2-3, T11-1). */
   readonly coverage?: string;
   readonly incomingEdges: readonly GraphEdge[];
@@ -103,7 +108,12 @@ export interface NodeReport {
 export interface NodeRow {
   readonly identity: string;
   readonly sourceRange: SourceRange;
-  readonly tags: readonly string[];
+  /**
+   * The node's tags (12.7 tag set). `null` is absent: a root node's tags,
+   * reported `null` or omitted (SPEC 11.1, 12.4, 5.5) — never an empty set,
+   * which a tagless section reports as `[]` (12.7).
+   */
+  readonly tags: readonly string[] | null;
   /** Coverage attribute; absent for root nodes. */
   readonly coverage?: string;
 }
@@ -116,7 +126,12 @@ export interface NodeRow {
  */
 export interface NodeSummary {
   readonly identity: string;
-  readonly tags: readonly string[];
+  /**
+   * The node's tags (12.7 tag set). `null` is absent: a root node's tags,
+   * reported `null` or omitted (SPEC 11.1, 12.4, 5.5) — never an empty set,
+   * which a tagless section reports as `[]` (12.7).
+   */
+  readonly tags: readonly string[] | null;
 }
 
 /**
@@ -128,7 +143,12 @@ export interface NodeSummary {
  */
 export interface NodeMetadataSummary {
   readonly identity: string;
-  readonly tags: readonly string[];
+  /**
+   * The node's tags (12.7 tag set). `null` is absent: a root node's tags,
+   * reported `null` or omitted (SPEC 11.1, 12.4, 5.5) — never an empty set,
+   * which a tagless section reports as `[]` (12.7).
+   */
+  readonly tags: readonly string[] | null;
   readonly metadataHash: string;
 }
 

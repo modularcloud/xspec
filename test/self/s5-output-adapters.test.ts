@@ -206,6 +206,17 @@ const GOOD_NODE = {
   edges: { incoming: [EDGE_IN], outgoing: [EDGE_OUT] },
 };
 
+/**
+ * GOOD_NODE recast as a file's root node (identity `specs/A.mdx`, no `#`,
+ * SPEC 1.5), its tags and coverage attribute both absent (SPEC 11.1, 12.4,
+ * 5.5) — here as omitted members; the vectors below also spell the tags
+ * `null` and `[]`.
+ */
+const GOOD_ROOT_NODE = omit(
+  omit(put(GOOD_NODE, "specs/A.mdx", "identity"), "coverage"),
+  "tags",
+);
+
 const GOOD_ROWS = {
   nodes: [
     {
@@ -214,7 +225,10 @@ const GOOD_ROWS = {
       tags: ["auth"],
       coverage: "none",
     },
-    // A root row: coverage attribute absent (T1.2-3, T11-3).
+    // A root row: coverage attribute absent (T1.2-3, T11-3), tags spelled
+    // `[]` — a present value, decoded as the tag set it is and passed to the
+    // body unjudged (H-3); the vectors spell the root's absent tags `null` or
+    // omitted (SPEC 11.1).
     { identity: "specs/A.mdx", sourceRange: { start: 0, end: 120 }, tags: [] },
   ],
 };
@@ -829,6 +843,99 @@ const GENERIC_BAD: readonly BadCase[] = [
   { label: "number document", doc: 42 },
 ];
 
+/** A decoded node record's identity and tags (the five node-tags decoders). */
+interface DecodedNodeTags {
+  readonly identity: string;
+  readonly tags: readonly string[] | null;
+}
+
+/**
+ * The root-node `alsoGood` vectors the five node-tags decoders share. SPEC
+ * 11.1: "for a root node the tags and the coverage attribute are both
+ * reported as absent (5.5)"; on these unpinned-shape surfaces (H-3) the
+ * absent tags may be `null` or an omitted member, and both decode to `null`
+ * — never to `[]`, a tagless section's value (12.7). A root's present `[]`
+ * decodes to `[]`, passed to the body unjudged (value-blind, H-3).
+ * `rootDoc(tags)` stages the document with the root's `tags` member set to
+ * `tags`, or omitted when `tags` is `undefined`; `pick` selects the root's
+ * decoded record.
+ */
+function rootTagsGood(
+  rootDoc: (tags: unknown) => unknown,
+  pick: (decoded: never) => DecodedNodeTags,
+): NonNullable<DecoderSpec["alsoGood"]> {
+  const cases: [string, unknown, readonly string[] | null][] = [
+    [
+      "root node: tags omitted — absent (SPEC 11.1) — decode to null",
+      undefined,
+      null,
+    ],
+    ["root node: tags null — absent (SPEC 11.1) — decode to null", null, null],
+    [
+      "root node: a present tags [] decodes to [], never read as absent (H-3)",
+      [],
+      [],
+    ],
+  ];
+  return cases.map(([label, tags, want]) => ({
+    label,
+    doc: rootDoc(tags),
+    verify: (decoded: never) => {
+      const root = pick(decoded);
+      expect(root.identity).toBe("specs/A.mdx");
+      if (want === null) expect(root.tags).toBeNull();
+      else expect(root.tags).toEqual(want);
+    },
+  }));
+}
+
+/**
+ * The `bad` vectors the five node-tags decoders share: a section's tags are
+ * required information (`[]` when tagless, SPEC 12.7), so a `null` member
+ * fails loudly (an omitted one is each table's "missing tags" vector); and a
+ * root whose `tags` member holds a value must hold a 12.7 tag set.
+ * `sectionDoc(tags)` and `rootDoc(tags)` stage the section and the root
+ * with their `tags` member set to `tags`.
+ */
+function nodeTagsBad(
+  sectionDoc: (tags: unknown) => unknown,
+  rootDoc: (tags: unknown) => unknown,
+): BadCase[] {
+  return [
+    {
+      label: "a section's tags null (required: [] when tagless, SPEC 12.7)",
+      doc: sectionDoc(null),
+    },
+    {
+      label: "a root's present tags out of byte order (a 12.7 tag set still)",
+      doc: rootDoc(["v2", "auth"]),
+    },
+    {
+      label: "a root's present tags holding a non-string element",
+      doc: rootDoc([3]),
+    },
+    { label: "a root's present tags not an array", doc: rootDoc("auth") },
+  ];
+}
+
+/** GOOD_ROOT_NODE with its `tags` member set, or omitted for `undefined`. */
+const rootNodeWithTags = (tags: unknown): unknown =>
+  tags === undefined ? GOOD_ROOT_NODE : put(GOOD_ROOT_NODE, tags, "tags");
+
+/** GOOD_NODE (a section) with its `tags` member set. */
+const sectionNodeWithTags = (tags: unknown): unknown =>
+  put(GOOD_NODE, tags, "tags");
+
+/** GOOD_ROWS with its root row's `tags` member set, or omitted. */
+const rootRowWithTags = (tags: unknown): unknown =>
+  tags === undefined
+    ? omit(GOOD_ROWS, "nodes", 1, "tags")
+    : put(GOOD_ROWS, tags, "nodes", 1, "tags");
+
+/** GOOD_ROWS with its section row's `tags` member set. */
+const sectionRowWithTags = (tags: unknown): unknown =>
+  put(GOOD_ROWS, tags, "nodes", 0, "tags");
+
 const DECODERS: readonly DecoderSpec[] = [
   {
     name: "query node/show",
@@ -866,6 +973,18 @@ const DECODERS: readonly DecoderSpec[] = [
         doc: put(GOOD_NODE, ["Zed", "auth"], "tags"),
         verify: (decoded: ReturnType<typeof decodeNodeReport>) => {
           expect(decoded.tags).toEqual(["Zed", "auth"]);
+        },
+      },
+      ...rootTagsGood(
+        rootNodeWithTags,
+        (decoded: ReturnType<typeof decodeNodeReport>) => decoded,
+      ),
+      {
+        label: "root node: tags and coverage attribute both absent (SPEC 12.4)",
+        doc: GOOD_ROOT_NODE,
+        verify: (decoded: ReturnType<typeof decodeNodeReport>) => {
+          expect(decoded.tags).toBeNull();
+          expect(decoded.coverage).toBeUndefined();
         },
       },
     ],
@@ -929,6 +1048,7 @@ const DECODERS: readonly DecoderSpec[] = [
         label: "wrong-typed coverage (must reject, not default to absent)",
         doc: put(GOOD_NODE, 42, "coverage"),
       },
+      ...nodeTagsBad(sectionNodeWithTags, rootNodeWithTags),
       { label: "missing edges", doc: omit(GOOD_NODE, "edges") },
       {
         label: "missing incoming edges",
@@ -969,6 +1089,10 @@ const DECODERS: readonly DecoderSpec[] = [
           expect(decoded.tags).toEqual([]);
         },
       },
+      ...rootTagsGood(
+        rootNodeWithTags,
+        (decoded: ReturnType<typeof decodeNodeSummary>) => decoded,
+      ),
     ],
     bad: [
       { label: "missing identity", doc: omit(GOOD_NODE, "identity") },
@@ -991,6 +1115,7 @@ const DECODERS: readonly DecoderSpec[] = [
           "0x5a sorts before 0x61)",
         doc: put(GOOD_NODE, ["auth", "Zed"], "tags"),
       },
+      ...nodeTagsBad(sectionNodeWithTags, rootNodeWithTags),
     ],
   },
   {
@@ -1022,6 +1147,10 @@ const DECODERS: readonly DecoderSpec[] = [
           expect(decoded.metadataHash).toBe("meta-9");
         },
       },
+      ...rootTagsGood(
+        rootNodeWithTags,
+        (decoded: ReturnType<typeof decodeNodeMetadataSummary>) => decoded,
+      ),
     ],
     bad: [
       { label: "missing identity", doc: omit(GOOD_NODE, "identity") },
@@ -1051,6 +1180,7 @@ const DECODERS: readonly DecoderSpec[] = [
         label: "empty metadataHash",
         doc: put(GOOD_NODE, "", "hashes", "metadataHash"),
       },
+      ...nodeTagsBad(sectionNodeWithTags, rootNodeWithTags),
     ],
   },
   {
@@ -1221,6 +1351,10 @@ const DECODERS: readonly DecoderSpec[] = [
           ]);
         },
       },
+      ...rootTagsGood(
+        rootRowWithTags,
+        (decoded: ReturnType<typeof decodeNodeSummaryRowsReport>) => decoded[1],
+      ),
     ],
     bad: [
       { label: "missing nodes list", doc: {} },
@@ -1230,7 +1364,10 @@ const DECODERS: readonly DecoderSpec[] = [
         label: "row missing identity",
         doc: omit(GOOD_ROWS, "nodes", 0, "identity"),
       },
-      { label: "row missing tags", doc: omit(GOOD_ROWS, "nodes", 1, "tags") },
+      {
+        label: "section row missing tags (required: [] when tagless, 12.7)",
+        doc: omit(GOOD_ROWS, "nodes", 0, "tags"),
+      },
       {
         label:
           "tags out of byte order (12.7 tag-set form: byte order, never " +
@@ -1251,6 +1388,7 @@ const DECODERS: readonly DecoderSpec[] = [
         label: "row with a non-string tag",
         doc: put(GOOD_ROWS, [3], "nodes", 0, "tags"),
       },
+      ...nodeTagsBad(sectionRowWithTags, rootRowWithTags),
     ],
   },
   {
@@ -1301,6 +1439,21 @@ const DECODERS: readonly DecoderSpec[] = [
       expect(decoded[1].coverage).toBeUndefined();
       expect(decoded[1].tags).toEqual([]);
     },
+    alsoGood: [
+      ...rootTagsGood(
+        rootRowWithTags,
+        (decoded: ReturnType<typeof decodeNodeRowsReport>) => decoded[1],
+      ),
+      {
+        label: "root row: tags and coverage attribute both absent (SPEC 11.1)",
+        doc: rootRowWithTags(undefined),
+        verify: (decoded: ReturnType<typeof decodeNodeRowsReport>) => {
+          expect(decoded[0].tags).toEqual(["auth"]);
+          expect(decoded[1].tags).toBeNull();
+          expect(decoded[1].coverage).toBeUndefined();
+        },
+      },
+    ],
     bad: [
       { label: "missing nodes list", doc: {} },
       { label: "nodes not an array", doc: { nodes: {} } },
@@ -1327,7 +1480,10 @@ const DECODERS: readonly DecoderSpec[] = [
         label: "row range as an array [start, end] (never re-mapped, H-3)",
         doc: put(GOOD_ROWS, [0, 120], "nodes", 1, "sourceRange"),
       },
-      { label: "row missing tags", doc: omit(GOOD_ROWS, "nodes", 1, "tags") },
+      {
+        label: "section row missing tags (required: [] when tagless, 12.7)",
+        doc: omit(GOOD_ROWS, "nodes", 0, "tags"),
+      },
       {
         label:
           "tags out of byte order (12.7 tag-set form: byte order, never " +
@@ -1348,6 +1504,7 @@ const DECODERS: readonly DecoderSpec[] = [
         label: "row with wrong-typed coverage",
         doc: put(GOOD_ROWS, false, "nodes", 0, "coverage"),
       },
+      ...nodeTagsBad(sectionRowWithTags, rootRowWithTags),
     ],
   },
   {

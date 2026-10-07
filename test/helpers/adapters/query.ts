@@ -30,7 +30,12 @@
 //   "tags" on every node surface above is a 12.7 tag set — byte order,
 //   duplicates collapsed — decoded form-exact through forms.ts's decodeTagSet
 //   and never re-sorted here: the value forms are universal (H-3, T12.7-1;
-//   T2.6-1's `query node` tags, T12.4-1's `show`).
+//   T2.6-1's `query node` tags, T12.4-1's `show`). A section's tags are
+//   required (`[]` when tagless, 12.7). A root node's tags are absent (SPEC
+//   11.1, 12.4, 5.5): for a root (an identity without `#`, 1.5) "tags" may
+//   be `null` or omitted, as its "coverage" may, and decodes to `null`
+//   (`decodeNodeTags` below); a root's present "tags" still decodes as a tag
+//   set and reaches the body unjudged.
 
 import type {
   GraphEdge,
@@ -129,20 +134,48 @@ function decodeCoverage(
 }
 
 /**
+ * A node's tags, given its already-decoded identity: a 12.7 tag set, or `null`
+ * for a root node's absent tags. SPEC 11.1: "for a root node the tags and
+ * the coverage attribute are both reported as absent (5.5)", its rows
+ * carrying "tags and coverage attribute both absent for roots"; 12.4 prints
+ * them "both absent for a root node"; 12.7's `null` marks a datum whose
+ * absence its defining section states, while `[]` is a tagless section's
+ * value. On these unpinned-shape surfaces (H-3) a root's absent tags may
+ * therefore be `null` or an omitted member, as its coverage attribute may
+ * ({@link decodeCoverage}): both decode to `null`, never to `[]`. In every
+ * other case the decode stays form-exact: a section's tags (an identity with
+ * `#`, 1.5) are required information, so a missing or `null` member fails
+ * loudly; a root whose `tags` member holds a value must hold a tag set, and
+ * that value — `[]` included — reaches the body unjudged (value-blind, H-3).
+ */
+function decodeNodeTags(
+  obj: Record<string, unknown>,
+  identity: string,
+  site: DecodeSite,
+): string[] | null {
+  if (!identity.includes("#") && optionalKey(obj, "tags") === undefined) {
+    return null;
+  }
+  return decodeTagSet(requiredKey(obj, "tags", site), at(site, "tags"));
+}
+
+/**
  * `query node` / `show` (T11-1, T12.4-1): identity, source range, own and
- * subtree text, all four hashes, tags, coverage attribute (absent for roots),
- * and incoming and outgoing edges by kind.
+ * subtree text, all four hashes, tags, coverage attribute, and incoming and
+ * outgoing edges by kind — a root's tags and coverage attribute both absent
+ * (SPEC 11.1, 12.4: `null` or omitted; {@link decodeNodeTags}).
  */
 export function decodeNodeReport(doc: unknown, context?: string): NodeReport {
   const site = documentRootSite(doc, "query node/show", context);
   const obj = expectObject(doc, site);
   const edgesSite = at(site, "edges");
   const edges = expectObject(requiredKey(obj, "edges", site), edgesSite);
+  const identity = expectNonEmptyString(
+    requiredKey(obj, "identity", site),
+    at(site, "identity"),
+  );
   return {
-    identity: expectNonEmptyString(
-      requiredKey(obj, "identity", site),
-      at(site, "identity"),
-    ),
+    identity,
     sourceRange: decodeSourceRange(
       requiredKey(obj, "sourceRange", site),
       at(site, "sourceRange"),
@@ -156,7 +189,7 @@ export function decodeNodeReport(doc: unknown, context?: string): NodeReport {
       at(site, "subtreeText"),
     ),
     hashes: decodeHashes(requiredKey(obj, "hashes", site), at(site, "hashes")),
-    tags: decodeTagSet(requiredKey(obj, "tags", site), at(site, "tags")),
+    tags: decodeNodeTags(obj, identity, site),
     coverage: decodeCoverage(obj, site),
     incomingEdges: decodeEdgeArray(
       requiredKey(edges, "incoming", edgesSite),
@@ -176,7 +209,8 @@ export function decodeNodeReport(doc: unknown, context?: string): NodeReport {
  * metadataHash: decoding the full node report would demand information the
  * scoped fixture never promises. The two keys read here are the `query node`
  * shape's own (see the ASSUMED SHAPE above); everything else in the document
- * is ignored, not validated.
+ * is ignored, not validated. A root's tags are absent (SPEC 11.1: `null` or
+ * omitted; {@link decodeNodeTags}).
  */
 export function decodeNodeSummary(doc: unknown, context?: string): NodeSummary {
   const site = documentRootSite(
@@ -185,13 +219,11 @@ export function decodeNodeSummary(doc: unknown, context?: string): NodeSummary {
     context,
   );
   const obj = expectObject(doc, site);
-  return {
-    identity: expectNonEmptyString(
-      requiredKey(obj, "identity", site),
-      at(site, "identity"),
-    ),
-    tags: decodeTagSet(requiredKey(obj, "tags", site), at(site, "tags")),
-  };
+  const identity = expectNonEmptyString(
+    requiredKey(obj, "identity", site),
+    at(site, "identity"),
+  );
+  return { identity, tags: decodeNodeTags(obj, identity, site) };
 }
 
 /**
@@ -200,7 +232,8 @@ export function decodeNodeSummary(doc: unknown, context?: string): NodeSummary {
  * `metadataHash` is demanded: a scoped fixture product promises no other
  * hash (CERTIFICATIONS.md §CONF-VALID), so requiring the full four-hash
  * object would reject a document the scope permits. Everything else in the
- * document is ignored, not validated.
+ * document is ignored, not validated. A root's tags are absent (SPEC 11.1:
+ * `null` or omitted; {@link decodeNodeTags}).
  */
 export function decodeNodeMetadataSummary(
   doc: unknown,
@@ -214,12 +247,13 @@ export function decodeNodeMetadataSummary(
   const obj = expectObject(doc, site);
   const hashesSite = at(site, "hashes");
   const hashes = expectObject(requiredKey(obj, "hashes", site), hashesSite);
+  const identity = expectNonEmptyString(
+    requiredKey(obj, "identity", site),
+    at(site, "identity"),
+  );
   return {
-    identity: expectNonEmptyString(
-      requiredKey(obj, "identity", site),
-      at(site, "identity"),
-    ),
-    tags: decodeTagSet(requiredKey(obj, "tags", site), at(site, "tags")),
+    identity,
+    tags: decodeNodeTags(obj, identity, site),
     metadataHash: expectNonEmptyString(
       requiredKey(hashes, "metadataHash", hashesSite),
       at(hashesSite, "metadataHash"),
@@ -300,7 +334,9 @@ export function decodeNodeTextAlgebraSummary(
  * fixtures whose scoped query surface reports only identity, tags, and
  * metadataHash (CERTIFICATIONS.md §CONF-VALID): the full row contract's
  * source range is not demanded. The `nodes` key is the `query nodes` shape's
- * own (see the ASSUMED SHAPE above); other row members are ignored.
+ * own (see the ASSUMED SHAPE above); other row members are ignored. A root
+ * row's tags are absent (SPEC 11.1: `null` or omitted; {@link
+ * decodeNodeTags}).
  */
 export function decodeNodeSummaryRowsReport(
   doc: unknown,
@@ -317,16 +353,11 @@ export function decodeNodeSummaryRowsReport(
     (element, index) => {
       const rowSite = at(rowsSite, index);
       const row = expectObject(element, rowSite);
-      return {
-        identity: expectNonEmptyString(
-          requiredKey(row, "identity", rowSite),
-          at(rowSite, "identity"),
-        ),
-        tags: decodeTagSet(
-          requiredKey(row, "tags", rowSite),
-          at(rowSite, "tags"),
-        ),
-      };
+      const identity = expectNonEmptyString(
+        requiredKey(row, "identity", rowSite),
+        at(rowSite, "identity"),
+      );
+      return { identity, tags: decodeNodeTags(row, identity, rowSite) };
     },
   );
 }
@@ -368,16 +399,17 @@ export function decodeNodeIdentityRowsReport(
 
 function decodeNodeRow(value: unknown, site: DecodeSite): NodeRow {
   const obj = expectObject(value, site);
+  const identity = expectNonEmptyString(
+    requiredKey(obj, "identity", site),
+    at(site, "identity"),
+  );
   return {
-    identity: expectNonEmptyString(
-      requiredKey(obj, "identity", site),
-      at(site, "identity"),
-    ),
+    identity,
     sourceRange: decodeSourceRange(
       requiredKey(obj, "sourceRange", site),
       at(site, "sourceRange"),
     ),
-    tags: decodeTagSet(requiredKey(obj, "tags", site), at(site, "tags")),
+    tags: decodeNodeTags(obj, identity, site),
     coverage: decodeCoverage(obj, site),
   };
 }
@@ -385,7 +417,8 @@ function decodeNodeRow(value: unknown, site: DecodeSite): NodeRow {
 /**
  * `query nodes` / `query subtree` / `query ancestors` (T11-2, T11-3): rows in
  * the reported order, each with the one row contract — identity, source
- * range, tags, coverage attribute (absent for roots).
+ * range, tags, coverage attribute (tags and coverage attribute both absent
+ * for roots, SPEC 11.1: `null` or omitted; {@link decodeNodeTags}).
  */
 export function decodeNodeRowsReport(
   doc: unknown,
