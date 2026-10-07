@@ -37,12 +37,65 @@
 //   to the passages whose invariants it asserts per its TEST-SPEC entry.
 // - "14": SPEC.md 14 defines the validation conditions and the refusal
 //   reasons, so a test asserting a numbered condition (14.x) or a stable
-//   refusal code covers passage "14" wherever it lives. TEST-SPEC 14's
-//   per-condition record ("the H-7 map is the complete record") is carried
-//   here at H-7's passage granularity, the T7-1..T7.5-1 range resolved to
-//   the entries that assert a condition (T7-5 asserts none) and the refusal
-//   reasons' staging record resolved to its implemented tests (T6.4-3,
-//   T6.5-4, T6.5-6, T6.6-3).
+//   refusal code covers passage "14" wherever it lives. TEST-SPEC 14 names
+//   primary tests per condition, "not exhaustive; the H-7 map is the
+//   complete record", so the rule reaches every registered test, not only
+//   those 14's index names. As applied, "14" is on each test whose body
+//   asserts:
+//   (a) a numbered condition's finding — in a report, an answer, or an
+//       error document, by count, location, identities, or stable code, or
+//       by the exit and the explicitly unavailable datum it brings —
+//       staging premises and gates included (T12.0-13's premise 14.19,
+//       T11.4-2's and T11.5-2's gates, T12.0-14's premise configuration
+//       error, T13.4-3's premise `inventory`);
+//   (b) a stable refusal code;
+//   (c) a numbered condition's absence, where the test stages the
+//       condition and asserts that a surface does not report it (the
+//       inventory beside a staged 14.19, T11.6-2, and beside a garbage
+//       journal and garbage session files, no 14.13 or 14.21, T11.6-3;
+//       every syntax-class twin's invalid configuration answered with the
+//       plain usage error, never 14.14, T11-2 and T11-4 among them), or
+//       where its title names the absence as an asserted outcome: at the
+//       condition's boundary (T3-1's fenced bytes, 14.16 and 14.20; T4-4's
+//       type-only imports, 14.8 and 14.18; T10.1-3's non-session files,
+//       T10.7-3's unresolvable baseline, and P-9's sessions, 14.21;
+//       T13.4-4's directories at derived paths, 14.22), or in a clean
+//       state the condition would contradict (T6.4-7's and T6.5-3's
+//       `check` with no staleness, 14.10; T6.5-9's fresh identifiers, no
+//       14.15; T6.5-11's rewritten call, no 14.11).
+//   A condition named only as staging context, as a cross-reference to
+//   another test's assertion, or in the diagnostic of a generic clean
+//   outcome (`build` or `check` exit 0, findings []) puts no "14" on a
+//   test: a move's clean `check` naming 14.10 in its diagnostic is the
+//   operation's postcondition, covered by its home passage. Tests whose
+//   titles cite no condition but whose bodies assert one carry "14" too:
+//   T2.6-3 and T8-5 (14.12 policy findings), T6.3-4 (its premise's
+//   validation findings, unreported behind the baseline error), T11-4 (the
+//   syntax-class twins, never 14.14), T11.3-1 (14.19 with its stable code,
+//   T5.7-4's findings), T12.0-9 and T12.0-14 (the 14.14 configuration
+//   error with its stable code), P-1 (14.2/14.4 rejections), and P-7
+//   (14.12 findings). TEST-SPEC 14's per-condition record is carried here
+//   at H-7's passage granularity, the T7-1..T7.5-1 range resolved to the
+//   entries that assert a condition (T7-5 and T7.4-2 assert none) and the
+//   refusal reasons' staging record (T14-7's) to its eight tests: T6.4-3,
+//   T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T6.6-3. The
+//   tests whose titles cite a condition and that carry no "14", each for
+//   its reason:
+//   - T4.5-7: its 14.15 cross-references T4-2's import-type arms; its body
+//     asserts a clean `build` and `check`, no edges, and untouched bytes,
+//     naming no condition.
+//   - T6.5-2: its 14.20 is the staging's well-formedness (every composed
+//     form derives, judged by S-9) and the premise of its compiled-Markdown
+//     compare; the move's outcome is asserted byte-exactly.
+//   - T6.5-15: its 14.20 cites the grammar 6.5's joint-removal rule follows
+//     (where an ESM block begins); its body asserts bytes, preview edits,
+//     and clean outcomes.
+//   - T6.5-19: its 14.20 says why derivability does not decide 6.5's
+//     in-section exclusion; its body asserts bytes, offsets, and clean
+//     outcomes.
+//   - P-8: its 2.7/14.20 boundaries name where its mutations land; it
+//     asserts termination, exit classes, whole JSON documents, and that a
+//     failing `build` modifies nothing, never a condition's finding.
 // - Alias entries: TEST-SPEC's pointer-only tests are not separately
 //   implemented, so their coverage rides on the implementing tests —
 //   T12.0-10's rename/move and baseline arms ride on T6.4-4/T6.5-5 and
@@ -136,19 +189,19 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T2.4-1": ["2.4"],
   "T2.4-2": ["2.4", "14"],
   "T2.4-3": ["2.4", "14"],
-  "T2.4-4": ["2.4"],
+  "T2.4-4": ["2.4", "14"],
   "T2.4-5": ["2.4", "1.4", "2.1", "4.5", "5.7", "11.3", "14"],
   "T2.5-1": ["2.5"],
   "T2.5-2": ["2.5"],
   "T2.5-3": ["2.5", "2.4", "2.7", "14"],
   "T2.6-1": ["2.6"],
   "T2.6-2": ["2.6"],
-  "T2.6-3": ["2.6"],
+  "T2.6-3": ["2.6", "14"],
   "T2.7-1": ["2.7", "14", "11.2", "11.4"],
   "T2.7-2": ["2.7"],
   "T2.7-3": ["2.7", "14"],
   "T2.7-4": ["2.7", "14", "3", "1.4", "11.2", "11.4"],
-  "T3-1": ["3"],
+  "T3-1": ["3", "14"],
   "T3-2": ["3"],
   "T3-3": ["3"],
   "T3-4": ["3"],
@@ -162,7 +215,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // (6.5) and preview edits (6.6) over the constructs naming no module.
   "T4-2": ["4", "2.1", "2.4", "4.5", "5.7", "6.5", "6.6", "13.4", "14"],
   "T4-3": ["4"],
-  "T4-4": ["4"],
+  "T4-4": ["4", "14"],
   "T4-5": ["4", "2.1", "2.4", "4.5", "5.7", "11.2", "14"],
   "T4.1-1": ["4.1"],
   "T4.1-2": ["4.1"],
@@ -219,26 +272,26 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T6.3-1": ["6.3"],
   "T6.3-2": ["6.3"],
   "T6.3-3": ["6.3"],
-  "T6.3-4": ["6.3", "12.0"],
+  "T6.3-4": ["6.3", "12.0", "14"],
   "T6.3-5": ["6.3", "10.7", "12.0"],
   "T6.4-1": ["6.4"],
   "T6.4-2": ["6.4", "1.4", "2.4", "2.7"],
   "T6.4-3": ["6.4", "1.4", "14", "12.0", "12.7"],
-  "T6.4-4": ["6.4", "12.0"],
+  "T6.4-4": ["6.4", "12.0", "14"],
   "T6.4-5": ["6.4"],
-  "T6.4-6": ["6.4"],
-  "T6.4-7": ["6.4"],
+  "T6.4-6": ["6.4", "14"],
+  "T6.4-7": ["6.4", "14"],
   "T6.5-1": ["6.5", "6.6", "6.4", "2.1", "12.7", "4", "4.5"],
   "T6.5-2": ["6.5", "3"],
-  "T6.5-3": ["6.5"],
+  "T6.5-3": ["6.5", "14"],
   "T6.5-4": ["6.5", "1.4", "7.1", "14"],
-  "T6.5-5": ["6.5", "12.0", "12.7"],
+  "T6.5-5": ["6.5", "12.0", "12.7", "14"],
   "T6.5-6": ["6.5", "6.6", "12.7", "14"],
   "T6.5-7": ["6.5", "6.4", "3", "2.7", "4.5"],
   "T6.5-8": ["6.5", "6.4", "2.1", "3"],
-  "T6.5-9": ["6.5", "2.1", "4", "4.5", "6.4", "3", "11.4"],
+  "T6.5-9": ["6.5", "2.1", "4", "4.5", "6.4", "3", "11.4", "14"],
   "T6.5-10": ["6.5", "6.4", "6.6", "2.1", "3", "5.7"],
-  "T6.5-11": ["6.5", "4.3", "4.5", "4.6", "5.7", "6.6", "12.7"],
+  "T6.5-11": ["6.5", "4.3", "4.5", "4.6", "5.7", "6.6", "12.7", "14"],
   "T6.5-12": ["6.5", "6.4", "3"],
   "T6.5-13": [
     "6.5",
@@ -290,7 +343,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T6.6-4": ["6.6", "6.5", "12.7"],
   "T6.6-5": ["6.6", "13.2", "13.3"],
   "T6.6-6": ["6.6", "14"],
-  "T6.7-1": ["6.7"],
+  "T6.7-1": ["6.7", "14"],
   "T7-1": ["7", "14", "12.6"],
   "T7-2": ["7", "2.4", "7.4", "11.6", "14"],
   "T7-3": ["7", "7.1", "7.2", "14"],
@@ -304,15 +357,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T7.4-2": ["7.4", "8.1"],
   "T7.5-1": ["7.5", "14"],
   "T7.5-2": ["7.5", "14"],
-  "T7.5-3": ["7.5"],
-  "T7.5-4": ["7.5"],
-  "T7.5-5": ["7.5"],
+  "T7.5-3": ["7.5", "14"],
+  "T7.5-4": ["7.5", "14"],
+  "T7.5-5": ["7.5", "14"],
   "T7.5-6": ["7.5", "12.1", "14"],
   "T8-1": ["8"],
   "T8-2": ["8"],
   "T8-3": ["8"],
   "T8-4": ["8"],
-  "T8-5": ["8", "8.1"],
+  "T8-5": ["8", "8.1", "14"],
   "T8.2-1": ["8.2"],
   "T9-1": ["9"],
   "T9.1-1": ["9.1"],
@@ -326,7 +379,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T9.3-3": ["9.3"],
   "T10.1-1": ["10.1"],
   "T10.1-2": ["10.1"],
-  "T10.1-3": ["10.1"],
+  "T10.1-3": ["10.1", "14"],
   "T10.1-4": ["10.1", "14"],
   "T10.1-5": ["10.1", "14"],
   "T10.1-6": ["10.1", "10.7", "11.6", "12.2", "13.3", "13.4", "13.5", "14"],
@@ -352,9 +405,9 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T10.6-3": ["10.6"],
   "T10.7-1": ["10", "10.1", "10.7", "13.4", "14"],
   "T10.7-2": ["10.7"],
-  "T10.7-3": ["10.7"],
+  "T10.7-3": ["10.7", "14"],
   "T10.7-4": ["10", "10.7"],
-  "T10.7-5": ["10.7"],
+  "T10.7-5": ["10.7", "14"],
   "T10.7-6": ["10.7"],
   "T10.7-7": ["10.7"],
   "T10.7-8": ["10.7"],
@@ -363,43 +416,47 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T10.7-11": ["10.7"],
   "T10.7-12": ["1.7", "10.7"],
   "T11-1": ["11", "11.1"],
-  "T11-2": ["11", "11.1", "1.4", "12.0", "12.7"],
+  "T11-2": ["11", "11.1", "1.4", "12.0", "12.7", "14"],
   "T11-3": ["11", "11.1"],
-  "T11-4": ["11", "11.1", "12.0", "12.7"],
+  "T11-4": ["11", "11.1", "12.0", "12.7", "14"],
   "T11-5": ["11", "11.1"],
   "T11-6": ["11.1", "4.6", "12.0"],
   "T11-7": ["11.1"],
-  "T11.2-1": ["11.2"],
-  "T11.2-2": ["11.2"],
-  "T11.2-3": ["11.2"],
+  "T11.2-1": ["11.2", "14"],
+  "T11.2-2": ["11.2", "14"],
+  "T11.2-3": ["11.2", "14"],
   "T11.2-4": ["11.2", "14"],
-  "T11.2-5": ["11.2"],
+  "T11.2-5": ["11.2", "14"],
   "T11.2-6": ["11.2", "13.3", "13.4", "14"],
-  "T11.3-1": ["11.3"],
-  "T11.3-2": ["11.3"],
-  "T11.3-3": ["11.3", "1.4", "12.0", "12.7"],
+  "T11.3-1": ["11.3", "14"],
+  "T11.3-2": ["11.3", "14"],
+  "T11.3-3": ["11.3", "1.4", "12.0", "12.7", "14"],
   "T11.3-4": ["11.3"],
-  "T11.4-1": ["11.4"],
-  "T11.4-2": ["11.4"],
-  "T11.4-3": ["11.4", "2.6", "12.7"],
+  "T11.4-1": ["11.4", "14"],
+  "T11.4-2": ["11.4", "14"],
+  "T11.4-3": ["11.4", "2.6", "12.7", "14"],
   "T11.4-4": ["11.4", "11.2", "2.1", "1.6", "7.2", "12.7", "14"],
-  "T11.4-5": ["11.4"],
-  "T11.4-6": ["11.4"],
+  "T11.4-5": ["11.4", "14"],
+  "T11.4-6": ["11.4", "14"],
   "T11.5-1": ["11.5"],
-  "T11.5-2": ["11.5"],
+  "T11.5-2": ["11.5", "14"],
   "T11.5-3": ["11.5", "12.0", "12.7", "14"],
   "T11.6-1": ["11.6"],
-  // T11.6-2: 7.1/7.3/7.4/7.5/13.1/12.0/12.7 are carriage context with home
-  // coverage at T7.1-*/T7.3-*/T7.4-*/T7.5-*/T13.1-*/T12.0-*/T12.7-* — the
-  // invalid-path `.mdx` arms (`specs/a'b.mdx`; Linux leg, a non-UTF-8 name
-  // in the marked byte form) included; every answer asserts findings [] —
-  // no numbered condition is asserted, so no "14".
-  "T11.6-2": ["11.6"],
-  // T11.6-3: 13.3/13.1/6.1/10.1/12.7 are carriage context with home
-  // coverage at T13.3-*/T13.1-*/T6.1-*/T10.1-*/T12.7-*; the occupancy and
-  // listing arms assert findings [] — no numbered condition is asserted, so
-  // no "14" (the T11.6-2 precedent).
-  "T11.6-3": ["11.6"],
+  // T11.6-2: every answer asserts findings [] beside the staged 14.19
+  // sources — an inventory answer carries no finding but condition 23's,
+  // the others reported where their conditions assign them (11.6) — so
+  // "14" joins the home passage; 7.1/7.3/7.4/7.5/13.1/12.0/12.7 are
+  // carriage context with home coverage at T7.1-*/T7.3-*/T7.4-*/T7.5-*/
+  // T13.1-*/T12.0-*/T12.7-* — the invalid-path `.mdx` arms
+  // (`specs/a'b.mdx`; Linux leg, a non-UTF-8 name in the marked byte form)
+  // included.
+  "T11.6-2": ["11.6", "14"],
+  // T11.6-3: the occupancy and listing arms assert findings [] beside a
+  // garbage journal and garbage session files — no 14.13, no 14.21 from the
+  // inventory (11.6) — so "14" joins the home passage; 13.3/13.1/6.1/10.1/
+  // 12.7 are carriage context with home coverage at T13.3-*/T13.1-*/
+  // T6.1-*/T10.1-*/T12.7-*.
+  "T11.6-3": ["11.6", "14"],
   // T11.6-4: asserts numbered conditions — the premise build's
   // every-family multiset and the condition-23 finding (TEST-SPEC 14's
   // primary-test record lists T11.6-4 under 14.23) — so "14" joins the
@@ -407,8 +464,8 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // coverage at T7-*/T12.7-*/T13.3-*/T12.1-*.
   "T11.6-4": ["11.6", "14"],
   "T12.0-1": ["12.0"],
-  "T12.0-2": ["12.0"],
-  "T12.0-3": ["12.0"],
+  "T12.0-2": ["12.0", "14"],
+  "T12.0-3": ["12.0", "14"],
   "T12.0-4": ["12.0"],
   // T12.0-5: its positive side of the backslash asserts the condition-19
   // finding over a spec-group path 7.1 bars the backslash from (so "7.1"
@@ -419,7 +476,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T12.0-6": ["12.0"],
   "T12.0-7": ["12.0"],
   "T12.0-8": ["12.0"],
-  "T12.0-9": ["12.0"],
+  "T12.0-9": ["12.0", "14"],
   "T12.0-10": [
     "12.0",
     "1.4",
@@ -436,69 +493,78 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   ],
   "T12.0-11": ["preamble", "12.0"],
   "T12.0-12": ["preamble", "12.0"],
-  // T12.0-13: the FP-016 precedent — in no TEST-SPEC 14 staging record
-  // (its premise-pinned 14.19 rides staging integrity, the T11.2-3
-  // precedent), so no "14"; 11.2-11.5/12.7/6.5 are carriage context with
-  // home coverage at T11.2-3/T11.3-*/T11.4-*/T11.5-*/T12.7-*/T6.5-*.
-  "T12.0-13": ["12.0"],
+  // T12.0-13: its premise pins exactly one 14.19 with its stable code, and
+  // the `view`, `at`, and `occurrences` answers carry it, so "14" joins the
+  // home passage; 11.2-11.5/12.7/6.5 are carriage context with home
+  // coverage at T11.2-3/T11.3-*/T11.4-*/T11.5-*/T12.7-*/T6.5-*.
+  "T12.0-13": ["12.0", "14"],
   // T12.0-14: the grammar arms assert `ids --file`'s restriction (12.3),
   // `build`'s flag set (12.1), the session name `-a` and its file (10.1),
   // `review create` and `resolve --note` (10.7), `--kinds` list values
   // (11.1), the `--config` path's directory as the root (7), and the
-  // error document (12.7); no "14": the missing-configuration arm pins
-  // the stream contract, not the finding (T12.0-13's precedent).
-  "T12.0-14": ["12.0", "12.3", "12.1", "10.1", "10.7", "11.1", "7", "12.7"],
+  // error document (12.7); the `--config` arm's premise asserts the
+  // missing configuration's 14.14 error with its stable code (14).
+  "T12.0-14": [
+    "12.0",
+    "12.3",
+    "12.1",
+    "10.1",
+    "10.7",
+    "11.1",
+    "7",
+    "12.7",
+    "14",
+  ],
   "T12.1-1": ["12.1"],
   "T12.1-3": ["12.1"],
-  "T12.1-4": ["12.1"],
+  "T12.1-4": ["12.1", "14"],
   "T12.2-1": ["12.2"],
   "T12.2-2": ["12.2", "14"],
-  "T12.2-3": ["12.2"],
+  "T12.2-3": ["12.2", "14"],
   "T12.2-4": ["12.2", "13.3", "14", "7.5", "12.1"],
   "T12.3-1": ["12.3"],
   "T12.3-2": ["12.3"],
   "T12.4-1": ["12.4"],
   "T12.5-1": ["12.5"],
   "T12.6-1": ["12.6"],
-  "T12.6-2": ["12.6"],
-  // T12.7-1: the FP-016/T12.0-13 precedent — the staged conditions (14.1,
-  // 14.3, 14.9, 14.11, 14.12, 14.19) all have their primary tests in
-  // TEST-SPEC 14's per-condition record elsewhere (T12.7-1 appears in no
-  // staging record there), so no "14"; 11.2-11.6/10.7 are carriage context
-  // with home coverage at T11.2-*/T11.3-*/T11.4-*/T11.6-*/T10.7-*.
-  "T12.7-1": ["12.7"],
-  // T12.7-2: same precedent — the staged conditions (14.1, 14.3, 14.5,
-  // 14.9, 14.12, 14.15, 14.19) and the refusal reasons have their primaries
-  // in TEST-SPEC 14's records elsewhere (the refusal-reason record lists
-  // T14-7 staged at T6.4-3/T6.5-4/T6.5-6/T6.6-3, not this test), so no
-  // "14"; 13.3 (the gated read), 11.3-11.6, 12.6, 6.5/6.6, and 7.3 are
-  // carriage context with home coverage at T13.3-*/T11.*/T12.6-*/T6.5-*/
-  // T6.6-*/T11.6-2.
-  "T12.7-2": ["12.7"],
-  // T12.7-3: same precedent — the asserted configuration-error code's
-  // condition (14.14) has its primary tests in TEST-SPEC 14's per-condition
-  // record at T7-1..T7.5-1 (T12.7-3 appears in no staging record there; the
-  // T14-6 code-null parenthetical cites this test as it cites T12.7-1,
-  // which set the no-"14" precedent), so no "14"; 12.0 (JSON-in-effect,
+  "T12.6-2": ["12.6", "14"],
+  // T12.7-1: asserts the finding form over the staged conditions (14.1,
+  // 14.3, 14.9, 14.11, 14.12, 14.19), their stable codes, and a review
+  // refusal's null code, so "14" joins the home passage; 11.2-11.6/10.7
+  // are carriage context with home coverage at T11.2-*/T11.3-*/T11.4-*/
+  // T11.6-*/T10.7-*.
+  "T12.7-1": ["12.7", "14"],
+  // T12.7-2: asserts the staged conditions (14.1, 14.3, 14.5, 14.9, 14.12,
+  // 14.15, 14.19) ordered by code and the refusal reasons in 14's listed
+  // order, so "14" joins the home passage; 13.3 (the gated read),
+  // 11.3-11.6, 12.6, 6.5/6.6, and 7.3 are carriage context with home
+  // coverage at T13.3-*/T11.*/T12.6-*/T6.5-*/T6.6-*/T11.6-2.
+  "T12.7-2": ["12.7", "14"],
+  // T12.7-3: asserts the error document's stable codes — the 14.14
+  // configuration error's, 14.24's `write-failure`, and 14.25's
+  // `read-failure` — so "14" joins the home passage; 12.0 (JSON-in-effect,
   // stream separation, stderr diagnostics) and 11.6 (the anchoring form)
   // are carriage context with home coverage at T12.0-2/T11.6-1, and 7's
   // configuration location/validity at T7-*.
-  "T12.7-3": ["12.7"],
+  "T12.7-3": ["12.7", "14"],
   "T13.1-1": ["13.1"],
   "T13.1-2": ["13.1"],
   "T13.2-1": ["13.2"],
   "T13.3-1": ["13.3"],
   "T13.3-2": ["13.3", "11.6", "14"],
-  "T13.3-3": ["13.3"],
+  "T13.3-3": ["13.3", "14"],
   "T13.3-4": ["13.3"],
   "T13.4-1": ["13.4"],
   "T13.4-2": ["13.4"],
-  "T13.4-3": ["13.4"],
-  // T13.4-4's 12.1 and 14.22 citations are carriage context: every arm is a
-  // success path (`build` exits 0; the directory arms' `check` clean), the
-  // directory arms marking where 14.22's refusal stops, with its home
-  // coverage at T13.4-6/T13.4-9/T13.4-10; no numbered condition is asserted.
-  "T13.4-4": ["13.4"],
+  "T13.4-3": ["13.4", "14"],
+  // T13.4-4: its directory arms assert 14.22's boundary — a directory at a
+  // derived path holding nothing xspec discovers or generates is replaced
+  // (`build` exits 0, `check` clean), never refused, 14.22 reaching only a
+  // directory component of a discovered source's or another derived path
+  // (home coverage at T13.4-6/T13.4-9/T13.4-10) — so "14" joins the home
+  // passage; its 12.1 citation is carriage context (every arm a success
+  // path).
+  "T13.4-4": ["13.4", "14"],
   "T13.4-5": ["13.4"],
   "T13.4-6": ["13.4", "13.3", "14"],
   // T13.4-8's 6.5/7.3/13.1/13.2 citations are carriage context with home
@@ -619,15 +685,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "11.4",
   ],
   "T15-1": ["15"],
-  "P-1": ["1.4", "2.6"],
+  "P-1": ["1.4", "2.6", "14"],
   "P-2": ["2.3", "2.7", "3"],
   "P-3": ["1.6", "3"],
   "P-4": ["5.5"],
   "P-5": ["6.2", "6.4", "6.5", "2.1"],
   "P-6": ["6.3", "9.1"],
-  "P-7": ["7", "7.5"],
+  "P-7": ["7", "7.5", "14"],
   "P-8": ["12.0", "12.1"],
-  "P-9": ["10.1", "10.4", "10.7"],
+  "P-9": ["10.1", "10.4", "10.7", "14"],
   "P-10": ["6.1", "13.5"],
   "P-11": ["11.2", "11.4", "12.7"],
   "P-12": ["5.7", "11.5"],
