@@ -132,12 +132,20 @@
 //   target is the product's own healthy session file beside it, so a product
 //   that reads or writes through the link sees a valid durable file and
 //   proceeds; the exit-code and whole-workspace byte-compares then fail it
-//   ("never read, appended, or replaced"). The mutating attempt's refusal
-//   report content is unasserted (the section-6.4 precedent: TEST-SPEC pins
-//   no report content for refusals), while the 14.13/14.21 condition
+//   ("never read, appended, or replaced"). The 14.13/14.21 condition
 //   identities are asserted through `build --json` / `check --json` /
 //   /corrupt/i vocabulary, leniently per the T6.1-3 and T10.1-4 precedents
-//   (the staged condition present; cascades unpinned).
+//   (the staged condition present; cascades unpinned), and on the JSON
+//   reports so is the concern information SPEC 14 requires: a journal or
+//   session condition has no in-source location and carries the path it
+//   concerns (SPEC 14, 12.7), so every 14.13 finding of `build --json` and
+//   `check --json` carries the one journal's path, `.xspec/journal` (SPEC
+//   6.1), and every 14.21 finding of `check --json` the session-named path
+//   the link occupies, `.xspec/reviews/fake.json` (SPEC 10.1) — never the
+//   link's target `real.json` — each with empty `locations`. The mutating
+//   attempts' refusal report content is left unasserted: their condition
+//   and its concern information are the ones those JSON reports assert on
+//   the identical staging.
 // - T13.4-6 positive arm: the product is driven with its working directory
 //   given as a symbolic link (created beside the workspace root) resolving
 //   to the real root, with `PWD` naming the link path — path components
@@ -311,6 +319,7 @@ import { CORE_A_STAGED } from "./section-13.5.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
+  assertSameJson,
   buildOk,
   expectExit,
   expectFindingFreeReport,
@@ -1929,19 +1938,49 @@ const B_MDX = stagedMdx(
 const OCCUPANT = "not a directory\n";
 
 /**
- * Decode a findings report from an exit-1 `--json` run and assert at least
- * one finding carries the given condition; every finding is returned.
+ * Assert a decoded findings report carries at least one finding of the
+ * condition a durable arm stages — 14.13 (journal error) or 14.21 (corrupt
+ * session) — and that every such finding carries the occupied durable path
+ * as its 12.7 `path` member and empty `locations`: a journal or session
+ * condition has no in-source location and carries the path it concerns
+ * (SPEC 14, 12.7). The workspace has one journal (SPEC 6.1), and the
+ * session arm's one corrupt session is the session-named path its link
+ * occupies (SPEC 10.1), so every finding of the staged condition concerns
+ * `durablePath` — never a link's target. Other findings are tolerated
+ * (module header). Every failure names `durablePath` and its `occupant`;
+ * `why` cites SPEC for the concerned path.
  */
-function requireCondition(
+function requireDurableCondition(
   findings: readonly Finding[],
-  condition: string,
+  condition: "14.13" | "14.21",
+  durablePath: string,
+  occupant: string,
+  why: string,
   context: string,
 ): void {
-  if (!findings.some((finding) => finding.condition === condition)) {
+  const staged = findings.filter((finding) => finding.condition === condition);
+  if (staged.length === 0) {
     fail(
       `${context}: a condition-${condition} finding must be reported (SPEC ` +
         `14); reported conditions: ` +
         JSON.stringify(findings.map((finding) => finding.condition)),
+    );
+  }
+  const kind = condition === "14.13" ? "journal" : "session";
+  for (const [index, finding] of staged.entries()) {
+    const findingContext =
+      `${context}: condition-${condition} finding ${String(index + 1)} of ` +
+      `${String(staged.length)} (${durablePath} occupied by ${occupant})`;
+    assertFindingConcernsPath(
+      finding,
+      durablePath,
+      `${findingContext} — ${why}`,
+    );
+    assertSameJson(
+      finding.locations,
+      [],
+      `${findingContext} — a ${kind} condition has no in-source location, ` +
+        `so its locations are empty (SPEC 14, 12.7)`,
     );
   }
 }
@@ -2251,12 +2290,18 @@ const T13_4_6 = defineProductTest({
                   `${context}: the journal error is a finding (SPEC 14.13, ` +
                     `12.0)`,
                 );
-                requireCondition(
+                requireDurableCondition(
                   decodeFindingsReport(
                     parseJsonStdout(result, context),
                     context,
                   ).findings,
                   "14.13",
+                  JOURNAL_REL,
+                  occupant === "symlink" ? "a symbolic link" : "a directory",
+                  `the journal error concerns the occupied journal path: a ` +
+                    `journal condition carries the path it concerns, and ` +
+                    `the workspace has one journal, at ${JOURNAL_REL} ` +
+                    `(SPEC 14, 12.7, 6.1, 13.4)`,
                   context,
                 );
               },
@@ -2363,12 +2408,19 @@ const T13_4_6 = defineProductTest({
               `${checkContext}: the corrupt session is a finding (SPEC ` +
                 `12.2, 14.21)`,
             );
-            requireCondition(
+            requireDurableCondition(
               decodeFindingsReport(
                 parseJsonStdout(result, checkContext),
                 checkContext,
               ).findings,
               "14.21",
+              sessionRel("fake"),
+              `a symbolic link resolving to the healthy ${sessionRel("real")}`,
+              `the corrupt session concerns the session-named path the link ` +
+                `occupies, never the target it resolves to: a session ` +
+                `condition carries the session file it concerns, and a ` +
+                `session is stored at .xspec/reviews/<session-name>.json ` +
+                `(SPEC 14, 12.7, 10.1, 13.4)`,
               checkContext,
             );
           },
