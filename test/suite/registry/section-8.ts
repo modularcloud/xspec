@@ -1191,10 +1191,16 @@ const T8_5 = defineProductTest({
 // targetTags — reasons root node, non-leaf, lacking-tags, pinning the root
 // reason's first position (roots carry no tags and no coverage attribute,
 // SPEC 5.5). prof-aux (no targetTags) re-pins the order with the tag reason
-// inapplicable. bnd/B.mdx stages the 12.0 tie-break: `first` and `second`
-// each hold a depends edge to `win` (two equal-length covering paths; the
-// byte-least sequence runs through #first) and `chain` → `first` adds a
-// longer route prof-main's shortest-path selection must reject.
+// inapplicable. bnd/B.mdx stages the 12.0 tie-break: `second` and `first`
+// each hold a depends edge to `win` (two equal-length covering paths, in
+// both profiles; the byte-least sequence runs through #first) and `chain` →
+// `first` adds a longer route prof-main's shortest-path selection must
+// reject. The file spells `chain`, then `second`, then `first`, so the
+// byte-least route through #first is second in document order and in
+// `win`'s incoming-edge order: a product reporting the first-found candidate
+// — a search from the boundary nodes in document order, or one backward from
+// `win` over its incoming edges — reports the route through #second, and
+// only the 12.0 tie-break yields the asserted path.
 const REPORT_FILES: Readonly<Record<string, string>> = {
   "xspec.config.ts": `import { defineConfig } from "xspec"
 
@@ -1247,22 +1253,25 @@ Untagged leaf.
 A longer route to the winner, through first.
 </S>
 
-<S id="first" d={T.win}>
-First equal-length covering edge.
-</S>
-
 <S id="second" d={T.win}>
 Second equal-length covering edge.
+</S>
+
+<S id="first" d={T.win}>
+First equal-length covering edge.
 </S>
 `,
 };
 
 const WIN_ROW: ExpectedCoveredRow = {
   identity: "tgt/T.mdx#win",
-  // Three candidate covering paths exist in prof-main: [#first, win] and
-  // [#second, win] of equal length, and the longer [#chain, #first, win].
-  // One shortest path is reported, ties by element-wise byte comparison of
-  // the node-identity sequences (SPEC 8.2, 12.0): #first < #second.
+  // Three candidate covering paths exist in prof-main: [#second, win] and
+  // [#first, win] of equal length, and the longer [#chain, #first, win];
+  // prof-aux (direct) admits the two single edges alone. One shortest path
+  // is reported, ties by element-wise byte comparison of the node-identity
+  // sequences (SPEC 8.2, 12.0): #first < #second. The route through #first
+  // is second in bnd/B.mdx's document order and in `win`'s incoming-edge
+  // order, so a first-found product reports [#second, win] instead.
   path: ["bnd/B.mdx#first", "tgt/T.mdx#win"],
 };
 
@@ -1408,8 +1417,10 @@ const T8_2_1 = defineProductTest({
         profileNamed(full, "prof-main", fullLabel),
         PROF_MAIN_EXPECTED,
         `${fullLabel} profile prof-main — the equal-length paths through ` +
-          `#first and #second tie-break to the byte-least sequence, the ` +
-          `longer #chain route loses to the shortest, the root reports ` +
+          `#second and #first (in that document and incoming-edge order) ` +
+          `tie-break to the byte-least sequence, through #first, never the ` +
+          `first-found route through #second; the longer #chain route ` +
+          `loses to the shortest, the root reports ` +
           `reasons [root node, non-leaf, lacking every tag] pinning the ` +
           `root reason's first position, and combo reports ` +
           `[coverage="none", non-leaf, lacking every tag] (SPEC 8.2, 12.0)`,
@@ -1418,8 +1429,10 @@ const T8_2_1 = defineProductTest({
         profileNamed(full, "prof-aux", fullLabel),
         PROF_AUX_EXPECTED,
         `${fullLabel} profile prof-aux — without targetTags the tag reason ` +
-          `applies to no ignored node, and the untagged leaf joins the ` +
-          `required set (SPEC 8.1, 8.2)`,
+          `applies to no ignored node, the untagged leaf joins the ` +
+          `required set, and the two single-edge paths through #second and ` +
+          `#first tie-break alike to the byte-least, through #first ` +
+          `(SPEC 8.1, 8.2, 12.0)`,
       );
 
       // `coverage <name>` runs exactly the named profile, carrying the same
