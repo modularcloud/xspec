@@ -35,6 +35,15 @@
 //   output is a function of sources, configuration, and the journal alone
 //   (13.4), so conforming builds of both workspaces yield byte-identical
 //   trees.
+// - Product-chosen names (a companion's suffix, 13.1; graph data's layout,
+//   13.3) are acted on by their exact bytes: wherever T13.4-2, T13.4-3, or
+//   T13.4-4 turns a snapshot key into a filesystem path — T13.4-2's
+//   deletions and overwrites, T13.4-3's manual deletion, T13.4-4's links
+//   and their kind checks — it goes through `snapshotKeyBytes` to a byte
+//   path, never through the key's characters read as a UTF-8 path, and
+//   T13.4-3's missing-record half deletes the graph data through T13.3-2's
+//   `deleteGraphData`, which lists `.xspec/` by raw name bytes. Diagnoses
+//   render a key with `displaySnapshotPath`.
 // - T13.4-4's link arm and T13.4-11(c) stage their links through one
 //   function, `stageLinkToOutsideFile`: a symbolic link at a derived file's
 //   own path resolving to a plain file outside the workspace root (in the
@@ -280,7 +289,9 @@ import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
   assertSnapshotsEqual,
+  displaySnapshotPath,
   snapshotDirectory,
+  snapshotKeyBytes,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
@@ -397,6 +408,37 @@ function isDurableKey(key: string): boolean {
     key === REVIEWS_REL ||
     key.startsWith(`${REVIEWS_REL}/`)
   );
+}
+
+/**
+ * Remove the entry a snapshot key names, at the key's exact bytes
+ * (`snapshotKeyBytes`, through `TestWorkspace.bytePath`); an absent entry is
+ * no error. The keys the T13.4 bodies remove name derived files, whose
+ * names the product may choose — a companion's suffix (SPEC 13.1), graph
+ * data's layout (13.3) — so a name that is not ASCII, or not valid UTF-8, is
+ * reached exactly; the key's characters read as a UTF-8 path would miss it
+ * without an error.
+ */
+async function removeAtKey(
+  workspace: TestWorkspace,
+  key: string,
+): Promise<void> {
+  await fsp.rm(workspace.bytePath(snapshotKeyBytes(key)), { force: true });
+}
+
+/**
+ * Overwrite the plain file a snapshot key names with `bytes`, at the key's
+ * exact bytes (as `removeAtKey`). A raw write judging no staged-source
+ * declaration: a derived file is no source — no discovery reaches it (SPEC
+ * 13.4) — and the bytes are an edit of the product's own output at a path
+ * the product chose, which S-9 never judges.
+ */
+async function overwriteAtKey(
+  workspace: TestWorkspace,
+  key: string,
+  bytes: Uint8Array,
+): Promise<void> {
+  await fsp.writeFile(workspace.bytePath(snapshotKeyBytes(key)), bytes);
 }
 
 /** The entries of a snapshot satisfying `keep`, as a fresh map. */
@@ -762,7 +804,7 @@ const T13_4_2 = defineProductTest({
             "T13.4-2: staging premise — after `build`, the generated module " +
               "specs/A.xspec.ts, the emitted Markdown specs/A.md, and graph " +
               "data under .xspec/ must all exist (SPEC 13.1, 13.2, 13.3); " +
-              `found targets: ${JSON.stringify(targets)}`,
+              `found targets: ${JSON.stringify(targets.map(displaySnapshotPath))}`,
           );
         }
 
@@ -770,11 +812,19 @@ const T13_4_2 = defineProductTest({
           const entry = s0.entries.get(key);
           // Targets were selected from s0's file entries, so this cannot miss.
           if (entry === undefined || entry.kind !== "file") {
-            throw new Error(`T13.4-2 internal error: no file entry for ${key}`);
+            throw new Error(
+              `T13.4-2 internal error: no file entry for ${displaySnapshotPath(key)}`,
+            );
           }
           return entry.bytes;
         };
 
+        // Each round acts on each target at its exact bytes (`removeAtKey`,
+        // `overwriteAtKey`): companions' suffixes and graph data's names
+        // are the product's (SPEC 13.1, 13.3). The truncation and the
+        // garbage are raw writes judging no S-9 declaration — a derived
+        // file is no source (13.4), and these are edits of product-written
+        // bytes.
         const rounds: readonly (readonly [
           string,
           (key: string) => Promise<void>,
@@ -782,28 +832,24 @@ const T13_4_2 = defineProductTest({
           [
             "delete",
             async (key) => {
-              await fsp.rm(workspace.path(key), { force: true });
+              await removeAtKey(workspace, key);
             },
           ],
           [
             "truncate",
             async (key) => {
               const bytes = bytesOf(key);
-              // S-9: a derived file is no source — no discovery reaches it
-              // (13.4) — and these are edits of product-written bytes, so
-              // the TypeScript well-formedness of a truncated module or
-              // companion is undeclared.
-              await workspace.file(
+              await overwriteAtKey(
+                workspace,
                 key,
                 bytes.subarray(0, Math.floor(bytes.length / 2)),
-                { ts: "unchecked" },
               );
             },
           ],
           [
             "garbage-overwrite",
             async (key) => {
-              await workspace.file(key, GARBAGE_BYTES, { ts: "unchecked" });
+              await overwriteAtKey(workspace, key, GARBAGE_BYTES);
             },
           ],
         ];
@@ -987,7 +1033,7 @@ async function walkOrphanBoundary(
         fail(
           `${tag}: staging premise — after \`build\`, B.mdx's generated ` +
             `module specs/B.xspec.ts exists as a plain file (SPEC 13.1); ` +
-            `found B-derived files: ${JSON.stringify(bDerived)}`,
+            `found B-derived files: ${JSON.stringify(bDerived.map(displaySnapshotPath))}`,
         );
       }
 
@@ -1010,12 +1056,13 @@ async function walkOrphanBoundary(
       for (const key of bDerived) {
         const before = s1.entries.get(key);
         const after = s2.entries.get(key);
+        const shown = displaySnapshotPath(key);
         if (before === undefined || before.kind !== "file") {
-          throw new Error(`${tag} internal error: no file entry for ${key}`);
+          throw new Error(`${tag} internal error: no file entry for ${shown}`);
         }
         if (after === undefined || after.kind !== "file") {
           fail(
-            `${tag}: the orphaned derived file ${key} must survive the ` +
+            `${tag}: the orphaned derived file ${shown} must survive the ` +
               `build — it was orphaned while the recorded derived-file ` +
               `paths were ${half.label === "missing record" ? "missing" : "unreadable"}, ` +
               `so it is outside xspec's knowledge and is not removed ` +
@@ -1026,7 +1073,7 @@ async function walkOrphanBoundary(
         assertBytesEqual(
           after.bytes,
           before.bytes,
-          `${tag}: the orphaned derived file ${key} after the build — ` +
+          `${tag}: the orphaned derived file ${shown} after the build — ` +
             `left alone byte-exactly (SPEC 13.4)`,
         );
       }
@@ -1051,9 +1098,10 @@ async function walkOrphanBoundary(
 
       // The orphans may be deleted manually; builds do not resurrect them
       // (they are not generated by the current configuration and not
-      // recorded).
+      // recorded). Each goes at its exact bytes — a companion's suffix is
+      // the product's (SPEC 13.1) — through T13.4-2's byte-path removal.
       for (const key of bDerived) {
-        await fsp.rm(workspace.path(key), { force: true });
+        await removeAtKey(workspace, key);
       }
       await buildOk(
         product,
@@ -1084,7 +1132,9 @@ const T13_4_3 = defineProductTest({
     // The missing half: destroy the graph data — and with it the recorded
     // derived-file paths (T13.3-2's operational definition: everything
     // under .xspec/ except the durable journal and reviews/; neither
-    // exists here).
+    // exists here) — through T13.3-2's own `deleteGraphData`, which lists
+    // .xspec/ by raw name bytes and removes each entry at its exact bytes,
+    // so every name the product chose goes (SPEC 13.3).
     const missing = await walkOrphanBoundary(product, {
       label: "missing record",
       disturbRecord: async (workspace, tag) => {
@@ -1095,13 +1145,7 @@ const T13_4_3 = defineProductTest({
               `directory exists (SPEC 13.3); found ${xspecKind}`,
           );
         }
-        for (const name of await workspace.readdirNames(".xspec")) {
-          if (name === "journal" || name === "reviews") continue;
-          await fsp.rm(workspace.path(`.xspec/${name}`), {
-            recursive: true,
-            force: true,
-          });
-        }
+        await deleteGraphData(workspace, `${tag} staging`);
       },
     });
 
@@ -1199,12 +1243,20 @@ const OUTSIDE_LINK_TARGETS_DIR = "outside-link-targets";
  * staging for T6.5-21(d) (section-6.5-iv.ts).
  */
 export interface OutsideFileLink {
-  /** The link's workspace-relative path: a derived file's own path. */
-  readonly linkRel: string;
+  /**
+   * The link's workspace-relative path as its exact bytes (`/`-separated):
+   * a derived file's own path.
+   */
+  readonly linkRelBytes: Uint8Array;
   /** The target's absolute path, beside the workspace root. */
   readonly targetAbs: string;
   /** The target's bytes, captured once the staging was complete. */
   readonly targetBefore: Uint8Array;
+}
+
+/** A byte path rendered for a diagnosis, as `displaySnapshotPath` renders. */
+function displayBytePath(bytes: Uint8Array): string {
+  return displaySnapshotPath(Buffer.from(bytes).toString("latin1"));
 }
 
 /**
@@ -1223,12 +1275,41 @@ export interface OutsideFileLink {
  * link resolving to the target — and a staging that misses is an internal
  * harness error, never a product verdict. The link stores a relative
  * target; `targetName` names the target file, unique within the workspace.
+ *
+ * `linkRel` is the link's workspace-relative path as its exact bytes — a
+ * byte path, `/`-separated and validated like every byte path
+ * (`TestWorkspace.bytePath`): an ASCII path's bytes (T13.4-11(c),
+ * T6.5-21(d)) or a snapshot key's `snapshotKeyBytes` (T13.4-4, whose
+ * graph-data link stands at a name the product chose, SPEC 13.3). The
+ * occupant is cleared, the link created, and the staging verified at those
+ * bytes, so a final name that is not ASCII, or not valid UTF-8, is linked
+ * exactly; diagnoses render the path with `displaySnapshotPath`. Only the
+ * final name may be the product's: the link's directory, which every
+ * caller names in ASCII (`specs/`, `.xspec/`), must be valid UTF-8 — an
+ * internal error otherwise — for the relative target is computed from it
+ * as a native path.
  */
 export async function stageLinkToOutsideFile(
   workspace: TestWorkspace,
-  linkRel: string,
+  linkRel: Uint8Array,
   targetName: string,
 ): Promise<OutsideFileLink> {
+  const linkRelBytes = Buffer.from(linkRel);
+  // `bytePath` validates the byte path (relative, no NUL, no `.`, `..`, or
+  // empty segment); the link's directory is its bytes before the last `/`.
+  const linkAbs = workspace.bytePath(linkRelBytes);
+  const shown = displayBytePath(linkRelBytes);
+  const slash = linkRelBytes.lastIndexOf(0x2f);
+  const dirBytes = linkRelBytes.subarray(0, Math.max(slash, 0));
+  const dirRel = dirBytes.toString("utf8");
+  if (!Buffer.from(dirRel, "utf8").equals(dirBytes)) {
+    throw new Error(
+      `internal error: the directory of the symbolic link to stage at ` +
+        `${shown} is not valid UTF-8 — only the link's final name may be ` +
+        `a name the product chose`,
+    );
+  }
+  const linkDirAbs = dirRel === "" ? workspace.root : workspace.path(dirRel);
   const targetAbs = path.join(
     workspace.tempRoot,
     OUTSIDE_LINK_TARGETS_DIR,
@@ -1238,19 +1319,15 @@ export async function stageLinkToOutsideFile(
   await fsp.writeFile(
     targetAbs,
     `harness-owned link target outside the workspace root, linked from ` +
-      `${linkRel}: never written through, never removed\n`,
+      `${shown}: never written through, never removed\n`,
     { flag: "wx" },
   );
-  const linkAbs = workspace.path(linkRel);
   await fsp.rm(linkAbs, { force: true });
-  await workspace.symlink(
-    linkRel,
-    path.relative(path.dirname(linkAbs), targetAbs),
-    "file",
-  );
-  if ((await workspace.kind(linkRel)) !== "symlink") {
+  await fsp.mkdir(linkDirAbs, { recursive: true });
+  await fsp.symlink(path.relative(linkDirAbs, targetAbs), linkAbs, "file");
+  if ((await workspace.kind(linkRelBytes)) !== "symlink") {
     throw new Error(
-      `internal error: failed to stage a symbolic link at ${linkRel}`,
+      `internal error: failed to stage a symbolic link at ${shown}`,
     );
   }
   const [resolved, expected] = await Promise.all([
@@ -1259,11 +1336,15 @@ export async function stageLinkToOutsideFile(
   ]);
   if (resolved !== expected) {
     throw new Error(
-      `internal error: the symbolic link staged at ${linkRel} resolves to ` +
+      `internal error: the symbolic link staged at ${shown} resolves to ` +
         `${resolved}, not to its target ${expected}`,
     );
   }
-  return { linkRel, targetAbs, targetBefore: await fsp.readFile(targetAbs) };
+  return {
+    linkRelBytes,
+    targetAbs,
+    targetBefore: await fsp.readFile(targetAbs),
+  };
 }
 
 /**
@@ -1291,10 +1372,11 @@ export async function assertOutsideLinkTargetUnchanged(
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     kind = "absent";
   }
+  const shown = displayBytePath(link.linkRelBytes);
   if (kind !== "file") {
     fail(
       `${context}: the target of the symbolic link staged at ` +
-        `${link.linkRel} — a plain file outside the workspace root, at ` +
+        `${shown} — a plain file outside the workspace root, at ` +
         `${link.targetAbs} — must still be that plain file, byte-identical ` +
         `(SPEC 13.4: a symbolic link itself, never its target; nothing is ` +
         `ever written through a link); found ${kind}`,
@@ -1304,7 +1386,7 @@ export async function assertOutsideLinkTargetUnchanged(
     await fsp.readFile(link.targetAbs),
     link.targetBefore,
     `${context}: the target of the symbolic link staged at ` +
-      `${link.linkRel}, outside the workspace root, byte-identical (SPEC ` +
+      `${shown}, outside the workspace root, byte-identical (SPEC ` +
       `13.4: nothing is ever written through a link, and a removal removes ` +
       `the link itself, never its target)`,
   );
@@ -1490,14 +1572,15 @@ const T13_4_4 = defineProductTest({
       // each resolves to its own plain file outside the workspace root; a
       // product writing through a link modifies its target, a product
       // refusing errors out, and a conforming product replaces the link
-      // itself.
+      // itself. The links stand at the keys' exact bytes — the graph-data
+      // file's name is the product's (SPEC 13.3) — and are read back so.
       const linkKeys = ["specs/A.xspec.ts", "specs/A.md", graphKey] as const;
       const links: OutsideFileLink[] = [];
       for (const [index, key] of linkKeys.entries()) {
         links.push(
           await stageLinkToOutsideFile(
             dirty,
-            key,
+            snapshotKeyBytes(key),
             `T13.4-4-target-${String(index)}.txt`,
           ),
         );
@@ -1509,10 +1592,11 @@ const T13_4_4 = defineProductTest({
           "the link is an occupant like any other, not an error (SPEC 13.4)",
       );
       for (const key of linkKeys) {
-        const kind = await dirty.kind(key);
+        const kind = await dirty.kind(snapshotKeyBytes(key));
         if (kind !== "file") {
           fail(
-            `T13.4-4 (symlink occupants): after \`build\`, ${key} must be ` +
+            `T13.4-4 (symlink occupants): after \`build\`, ` +
+              `${displaySnapshotPath(key)} must be ` +
               `a plain file — the write replaces the link itself (link ` +
               `gone, plain file present; SPEC 13.4); found ${kind}`,
           );
@@ -3707,7 +3791,7 @@ const ORPHAN_ARM_LINK: OrphanArm = {
   stage: async (workspace) => {
     const link = await stageLinkToOutsideFile(
       workspace,
-      "specs/A.md",
+      Buffer.from("specs/A.md", "utf8"),
       "T13.4-11-c-target.md",
     );
     return async (context) => {

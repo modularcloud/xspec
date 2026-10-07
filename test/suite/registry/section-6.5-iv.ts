@@ -154,6 +154,7 @@
 //   (e)'s `--preview` runs first, inside a modifies-nothing compare: exit 0,
 //   `findings` [], the plan members present.
 
+import { Buffer } from "node:buffer";
 import type { Finding } from "../../helpers/adapters/index.js";
 import {
   decodeAppliedMappingReport,
@@ -1748,7 +1749,7 @@ async function runD21LinkOccupant(product: ProductBinding): Promise<void> {
     await d21BuildPremise(product, workspace, context);
     const link = await stageLinkToOutsideFile(
       workspace,
-      D21_EMIT_PATH,
+      Buffer.from(D21_EMIT_PATH, "utf8"),
       "T6.5-21-d-target.md",
     );
     await d21PerformFileMove(
