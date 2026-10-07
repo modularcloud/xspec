@@ -35,13 +35,15 @@
 // - "Rewrites nothing above it" is asserted as: the prior journal bytes are
 //   a strict byte prefix of the new journal bytes.
 // - T6.1-3 "naming the line": entry content is opaque, so the harness accepts
-//   any of — a location within the garbage line's byte window in
-//   `.xspec/journal`, the message echoing the garbage line's text, or the
-//   message citing line/entry 2 (`line 2`, `entry 2`, or a `journal:2`
-//   file:line form). The garbage sits on line 2 (one legitimate entry
-//   precedes it), so a finding pointing at line 1 or at the whole file
-//   without naming the line fails — the discrimination the TEST-SPEC asks
-//   for.
+//   either of — the message echoing the garbage line's text, or the message
+//   citing line/entry 2 (`line 2`, `entry 2`, or a `journal:2` file:line
+//   form). A journal condition has no in-source location and carries the
+//   path it concerns (SPEC 14, 12.7), and the workspace has one journal
+//   (SPEC 6.1): in every arm, each 14.13 finding carries `.xspec/journal` as
+//   its `path` and empty `locations`, so the line is named in the message
+//   alone. The garbage sits on line 2 (one legitimate entry precedes it), so
+//   a finding naming only line 1, or the journal as a whole without naming
+//   the line, fails — the discrimination the TEST-SPEC asks for.
 //
 // Staged-source records (TEST-SPEC S-9's before-any-product clause;
 // helpers/staged-mdx.ts): T6.1-3's directory- and symlink-occupant arms
@@ -84,7 +86,12 @@ import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
-import { buildOk, expectExit } from "./support.js";
+import {
+  assertFindingConcernsPath,
+  assertSameJson,
+  buildOk,
+  expectExit,
+} from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
 // other keys — the CONF-CORE workspace shape. T6.1-3's later arms stage it in
@@ -597,9 +604,13 @@ const GARBAGE_LINE = "?? harness-injected garbage: not a journal entry ??";
 
 /**
  * `check --json` over a workspace staged with a journal error: exit 1 with
- * at least one condition-14.13 finding (SPEC 12.2, 14.13). Other findings are
- * tolerated — whether the journal error masks or cascades into further
- * findings is not pinned here. Returns the 14.13 findings.
+ * at least one condition-14.13 finding (SPEC 12.2, 14.13), each carrying the
+ * journal path `.xspec/journal` as its 12.7 `path` and empty `locations` — a
+ * journal condition has no in-source location and carries the path it
+ * concerns (SPEC 14, 12.7), and the workspace has one journal (SPEC 6.1), so
+ * every journal error concerns it. Other findings are tolerated — whether
+ * the journal error masks or cascades into further findings is not pinned
+ * here. Returns the 14.13 findings.
  */
 async function checkReportsJournalError(
   product: ProductBinding,
@@ -628,30 +639,38 @@ async function checkReportsJournalError(
         `${JSON.stringify(findings.map((finding) => finding.condition))}`,
     );
   }
+  for (const [index, finding] of journalFindings.entries()) {
+    const findingContext =
+      `${context}: 14.13 finding ${String(index + 1)} of ` +
+      `${String(journalFindings.length)}`;
+    assertFindingConcernsPath(
+      finding,
+      JOURNAL_PATH,
+      `${findingContext} — a journal condition carries the journal path it ` +
+        `concerns, and the workspace has one journal (SPEC 14, 12.7, 6.1)`,
+    );
+    assertSameJson(
+      finding.locations,
+      [],
+      `${findingContext} — a journal condition has no in-source location, ` +
+        `so its locations are empty (SPEC 14, 12.7)`,
+    );
+  }
   return journalFindings;
 }
 
 /**
  * Does a 14.13 finding name the garbage line (line 2)? Accepted forms (H-4
  * operationalization, see the module header): the message echoing the
- * garbage line or citing line/entry 2 — a journal condition carries the
- * journal path it concerns and no in-source location (SPEC 14, 12.7), so
- * the lines are named in the message — or, tolerated, a location within the
- * garbage line's byte window in `.xspec/journal`.
+ * garbage line or citing line/entry 2. A journal condition carries the
+ * journal path it concerns and no in-source location (SPEC 14, 12.7) —
+ * `checkReportsJournalError` asserts both — so the line is named in the
+ * message alone.
  */
-function findingNamesGarbageLine(
-  finding: Finding,
-  window: { readonly start: number; readonly end: number },
-): boolean {
+function findingNamesGarbageLine(finding: Finding): boolean {
   if (finding.message.includes(GARBAGE_LINE)) return true;
   if (/\b(?:line|entry)\s*#?\s*2\b/i.test(finding.message)) return true;
-  if (finding.message.includes("journal:2")) return true;
-  return finding.locations.some(
-    (location) =>
-      location.file === JOURNAL_PATH &&
-      location.range.start >= window.start &&
-      location.range.end <= window.end + 1,
-  );
+  return finding.message.includes("journal:2");
 }
 
 const T6_1_3 = defineProductTest({
@@ -686,7 +705,6 @@ const T6_1_3 = defineProductTest({
       // whole-line append under either line convention.
       const needsTerminator =
         legitimate.length > 0 && legitimate[legitimate.length - 1] !== LF;
-      const garbageStart = legitimate.length + (needsTerminator ? 1 : 0);
       const tampered = Buffer.concat([
         legitimate,
         Buffer.from(
@@ -695,26 +713,18 @@ const T6_1_3 = defineProductTest({
         ),
       ]);
       await workspace.file(JOURNAL_PATH, tampered);
-      const window = {
-        start: garbageStart,
-        end: garbageStart + Buffer.byteLength(GARBAGE_LINE, "utf8"),
-      };
 
       const journalFindings = await checkReportsJournalError(
         product,
         workspace,
         context,
       );
-      if (
-        !journalFindings.some((finding) =>
-          findingNamesGarbageLine(finding, window),
-        )
-      ) {
+      if (!journalFindings.some(findingNamesGarbageLine)) {
         fail(
           `${context}: the 14.13 finding must name the malformed line — the ` +
-            `garbage on line 2 (SPEC 14.13 "naming the lines"): a location ` +
-            `within bytes [${String(window.start)}, ${String(window.end)}] of ` +
-            `${JOURNAL_PATH}, the garbage line's text, or a line/entry-2 ` +
+            `garbage on line 2 (SPEC 14.13 "naming the lines") — in its ` +
+            `message, a journal condition having no in-source location ` +
+            `(SPEC 14, 12.7): the garbage line's text or a line/entry-2 ` +
             `citation; got ${JSON.stringify(journalFindings)}`,
         );
       }
