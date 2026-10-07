@@ -30,6 +30,19 @@
 // is computed by comparison with the twin (`derivedPathsDifferingFrom`,
 // `graphDataDiffers`; TEST-SPEC T13.5-7 (b), (f)).
 //
+// Product-chosen names are compared by their exact bytes: a companion's
+// suffix is the product's choice (SPEC 13.1), so a derived path under
+// `specs/b/` may hold any bytes, and a reported path is a plain string when
+// its bytes are valid UTF-8 and the marked byte form otherwise, paths
+// comparing byte-wise (SPEC 12.0, 12.7). The admissible concerned paths of
+// `expectWriteFailure` and the expected per-file paths of
+// `assertStalenessAlone` are snapshot keys (helpers/snapshot.ts: a path's
+// exact bytes, one latin1 character per byte — an ASCII constant is its own
+// key), each compared with the reported path value byte for byte
+// (`snapshotKeyBytes` against `pathValueBytes`), never as strings; a
+// diagnosis renders a key with `displaySnapshotPath` and a reported path
+// with `renderPathValue`.
+//
 // Every arm starts from a freshly built, valid, journal-bearing workspace
 // with no refresh pending (`prepareRefusalWorkspace`): `build`, then a prior
 // journaled rename (SPEC 6.1: the journal comes into existence with the first
@@ -45,12 +58,15 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type {
   Finding,
   ImpactReport,
+  PathValue,
   SessionStatusReport,
 } from "../../helpers/adapters/index.js";
 import {
   decodeFindingsReport,
   decodeImpactReport,
   decodeSessionStatusReport,
+  pathValueBytes,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
@@ -70,7 +86,9 @@ import {
   assertLeavesUnchanged,
   assertSnapshotsEqual,
   describeEntry,
+  displaySnapshotPath,
   snapshotDirectory,
+  snapshotKeyBytes,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
@@ -601,7 +619,10 @@ export function assertEachWriteComplete(
   }
 }
 
-/** Derived paths whose occupant differs from the twin's derived state. */
+/**
+ * Derived paths whose occupant differs from the twin's derived state, as
+ * snapshot keys (`assertStalenessAlone`'s `perFile` form).
+ */
 export function derivedPathsDifferingFrom(
   after: DirectorySnapshot,
   twinAfter: DirectorySnapshot,
@@ -751,17 +772,53 @@ export async function runStaged(
 export const WRITE_FAILURE_CODE = "write-failure";
 
 /**
+ * The exact bytes of an expected path given as a snapshot key
+ * (`snapshotKeyBytes`). A string holding a character above U+00FF is no key
+ * — a key holds one latin1 character per byte — so it is refused as harness
+ * misuse, a plain `Error` (H-11), never a diagnosed failure: a non-ASCII
+ * path enters as the key a snapshot gives it, never as UTF-8 path text.
+ */
+function expectedPathBytes(key: string): Buffer {
+  for (const char of key) {
+    if ((char.codePointAt(0) ?? 0) > 0xff) {
+      throw new Error(
+        `write-refusal-staging: ${JSON.stringify(key)} is no snapshot key ` +
+          `(it holds a character above U+00FF); pass a non-ASCII path as ` +
+          `the key a snapshot gives it`,
+      );
+    }
+  }
+  return snapshotKeyBytes(key);
+}
+
+/** Path values in bytewise order, a `null` path first. */
+function comparePathValues(a: PathValue | null, b: PathValue | null): number {
+  if (a === null || b === null) {
+    return (a === null ? 0 : 1) - (b === null ? 0 : 1);
+  }
+  return Buffer.compare(pathValueBytes(a), pathValueBytes(b));
+}
+
+/**
  * A refused write's contract (SPEC 14.24, 12.0, 12.7; T13.5-7, T14-9): exit
  * 2; the error document as the entire stdout; its finding's stable code
  * `write-failure`; its `path` one of the admissible concerned paths — the
  * workspace-relative path of the file the write would have produced or
  * removed (or the graph-data area for a graph-data write).
+ *
+ * `concerned` holds snapshot keys — an ASCII constant is its own key; a
+ * non-ASCII path, such as a companion whose suffix the product chose (SPEC
+ * 13.1), enters as the key a snapshot gives it — and the reported path
+ * matches one when its exact bytes (`pathValueBytes`: a plain string's
+ * UTF-8, the marked byte form's decoded bytes) equal the key's (SPEC 12.7:
+ * paths compare byte-wise). A `null` path matches none.
  */
 export function expectWriteFailure(
   result: RunResult,
   concerned: readonly string[],
   context: string,
 ): Finding {
+  const admissible = concerned.map(expectedPathBytes);
   assertExitCode(
     result,
     2,
@@ -778,12 +835,18 @@ export function expectWriteFailure(
         `${JSON.stringify(finding.message)})`,
     );
   }
-  if (typeof finding.path !== "string" || !concerned.includes(finding.path)) {
+  const reported = finding.path;
+  if (
+    reported === null ||
+    !admissible.some((bytes) => bytes.equals(pathValueBytes(reported)))
+  ) {
+    const shown = concerned.map(displaySnapshotPath);
     fail(
       `${context} — the concerned path is the workspace-relative path of ` +
         `the file the refused write would have produced or removed: ` +
-        `${concerned.length === 1 ? JSON.stringify(concerned[0]) : `one of ${JSON.stringify(concerned)}`} ` +
-        `(SPEC 14.24, 12.7); got ${JSON.stringify(finding.path)} (message: ` +
+        `${shown.length === 1 ? JSON.stringify(shown[0]) : `one of ${JSON.stringify(shown)}`} ` +
+        `(SPEC 14.24, 12.7; paths compare byte-wise); got ` +
+        `${JSON.stringify(renderPathValue(reported))} (message: ` +
         `${JSON.stringify(finding.message)})`,
     );
   }
@@ -809,7 +872,11 @@ export async function checkFindings(
 
 /** The condition-10 forms `check` is expected to report (SPEC 14.10). */
 export interface StalenessExpectation {
-  /** Exactly the derived paths reported in the per-file form. */
+  /**
+   * Exactly the derived paths reported in the per-file form, as snapshot
+   * keys (an ASCII constant is its own key; a non-ASCII path enters as the
+   * key a snapshot gives it), compared with the reported paths by bytes.
+   */
   readonly perFile: readonly string[];
   /** Whether the graph-data unit form (concerning the area) is reported. */
   readonly unit: boolean;
@@ -819,13 +886,17 @@ export interface StalenessExpectation {
  * `check` reports condition 10 alone, in exactly the expected forms: one
  * per-file finding per expected derived path, concerning it, and the unit
  * form — concerning the graph-data area — exactly when expected (SPEC 14.10,
- * 12.7, 11.6).
+ * 12.7, 11.6). The per-file compare is order-insensitive and by exact bytes:
+ * the reported paths (`pathValueBytes`) and the expected keys
+ * (`snapshotKeyBytes`) must be the same multiset of byte strings (SPEC 12.7:
+ * paths compare byte-wise); a `null` path matches no expected path.
  */
 export function assertStalenessAlone(
   findings: readonly Finding[],
   expected: StalenessExpectation,
   context: string,
 ): void {
+  const expectedBytes = expected.perFile.map(expectedPathBytes);
   for (const finding of findings) {
     if (finding.condition !== "14.10") {
       fail(
@@ -839,25 +910,28 @@ export function assertStalenessAlone(
   const unitCount = findings.filter(
     (finding) => finding.path === GRAPH_DATA_AREA,
   ).length;
+  // Both sides in bytewise order (a `null` path first), compared element by
+  // element: equal exactly when they are the same multiset of byte strings.
   const perFile = findings
-    .filter((finding) => finding.path !== GRAPH_DATA_AREA)
-    .map((finding) =>
-      typeof finding.path === "string"
-        ? finding.path
-        : JSON.stringify(finding.path),
-    )
-    .sort();
-  const expectedPerFile = [...expected.perFile].sort();
+    .map((finding) => finding.path)
+    .filter((value) => value !== GRAPH_DATA_AREA)
+    .sort(comparePathValues);
+  const expectedPerFile = [...expectedBytes].sort(Buffer.compare);
   if (
     perFile.length !== expectedPerFile.length ||
-    perFile.some((rel, index) => rel !== expectedPerFile[index])
+    perFile.some(
+      (value, index) =>
+        value === null ||
+        !pathValueBytes(value).equals(expectedPerFile[index]!),
+    )
   ) {
     fail(
       `${context}: the per-file condition-10 findings must name exactly the ` +
         `derived paths whose occupant differs from what the current sources ` +
         `and configuration generate — one finding per path, concerning it ` +
-        `(SPEC 14.10, 12.7); expected ${JSON.stringify(expectedPerFile)}, ` +
-        `got ${JSON.stringify(perFile)}`,
+        `(SPEC 14.10, 12.7; paths compare byte-wise); expected ` +
+        `${JSON.stringify([...expected.perFile].sort().map(displaySnapshotPath))}, ` +
+        `got ${JSON.stringify(perFile.map(renderPathValue))}`,
     );
   }
   const expectedUnit = expected.unit ? 1 : 0;
@@ -1165,7 +1239,8 @@ export async function journalCommitPointArm(
         `${context}: B's generated module ${RENAME_B_MODULE} must differ ` +
           `from the twin's regenerated one — the rename changed the ` +
           `identities it exports (SPEC 13.1) — so it is certainly among the ` +
-          `stale derived paths; differing: ${JSON.stringify(perFile)}`,
+          `stale derived paths; differing: ` +
+          JSON.stringify(perFile.map(displaySnapshotPath)),
       );
     }
     if (!graphDataDiffers(after, twin.after)) {
@@ -1391,7 +1466,9 @@ export async function relocationArm(
         `${context}: the twin's completed move generates derived files for ` +
           `the destination under ${MOVE_DESTINATION_DIR}/ and ` +
           `${MOVE_MARKDOWN_DIR}/sub/ (SPEC 13.1, 13.2); found none among ` +
-          JSON.stringify([...twin.after.entries.keys()]),
+          JSON.stringify(
+            [...twin.after.entries.keys()].map(displaySnapshotPath),
+          ),
       );
     }
     assertStalenessAlone(
@@ -1702,7 +1779,7 @@ export async function buildArm(product: ProductBinding): Promise<void> {
       fail(
         `${context}: the twin's \`build\` generates B's module ` +
           `${RENAME_B_MODULE} beside its source (SPEC 13.1); found ` +
-          JSON.stringify(derivedUnderB),
+          JSON.stringify(derivedUnderB.map(displaySnapshotPath)),
       );
     }
     const result = await runStaged(
@@ -1739,7 +1816,7 @@ export async function buildArm(product: ProductBinding): Promise<void> {
         `${context}: B's module ${RENAME_B_MODULE}, whose regeneration was ` +
           `refused or never attempted, certainly differs from the twin's ` +
           `(the edited text changes it, SPEC 13.1); differing: ` +
-          JSON.stringify(perFile),
+          JSON.stringify(perFile.map(displaySnapshotPath)),
       );
     }
     assertStalenessAlone(

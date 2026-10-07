@@ -122,7 +122,10 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { DirectorySnapshot } from "../../helpers/snapshot.js";
-import { assertSnapshotsEqual } from "../../helpers/snapshot.js";
+import {
+  assertSnapshotsEqual,
+  displaySnapshotPath,
+} from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
@@ -216,8 +219,10 @@ const SHOW_IDENTITY = "specs/b/B.mdx#b";
 
 /**
  * A refused write's 14.24 contract with its diagnostic: exit 2, the error
- * document as stdout (`write-failure`, a concerned path — `expectWriteFailure`),
- * and a non-empty stderr (12.0: the diagnostic is standard-error content).
+ * document as stdout (`write-failure`, a concerned path — `expectWriteFailure`,
+ * whose admissible paths are snapshot keys compared with the reported path
+ * by bytes), and a non-empty stderr (12.0: the diagnostic is
+ * standard-error content).
  */
 function expectRefusal(
   result: RunResult,
@@ -582,7 +587,9 @@ async function sessionFileArm(product: ProductBinding): Promise<void> {
  * hold) — the error document concerns a derived path under `specs/b/`, the
  * first `specs/b/` write in the product's order: the set a regeneration
  * writes there is the set the prior build left (12.1 rewrites every derived
- * file; the edit changes content, not the set).
+ * file; the edit changes content, not the set). The set is the prior
+ * snapshot's keys, so a companion whose suffix the product chose (13.1)
+ * matches the reported path by its exact bytes, whatever they are.
  */
 async function derivedPathArm(product: ProductBinding): Promise<void> {
   const context =
@@ -604,7 +611,9 @@ async function derivedPathArm(product: ProductBinding): Promise<void> {
         `${context}: the built workspace holds B's generated module and ` +
           `companions beside its source under ${RENAME_B_DIR}/ (SPEC 13.1, ` +
           `13.2); found none among ` +
-          JSON.stringify([...prepared.before.entries.keys()]),
+          JSON.stringify(
+            [...prepared.before.entries.keys()].map(displaySnapshotPath),
+          ),
       );
     }
     await workspace.edit(RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
