@@ -169,12 +169,17 @@
 //   null), a product locating the first alone failing; T14-7's own
 //   collision arms declare their one remaining bearer the same way — the
 //   section move's occupant `keep.mv`, the control rename's `a.sib` —
-//   exactly one location, none beside. The home tables' cycle locations
-//   stay SOME-quantified (support.ts assertFindingMentionsLocation): "the
-//   would-be cycle's full path" is asserted as the dependency cycle's
-//   participating `d` spelling (T6.5-4's would-be spec import cycle's
-//   participating import declarations exist in no pre-operation source, so
-//   that arm pins code and form alone, the home note); T14-7's own spec
+//   exactly one location, none beside. The home table's dependency-cycle
+//   location stays SOME-quantified (support.ts
+//   assertFindingMentionsLocation): "the would-be cycle's full path" is
+//   asserted there as the participating `d` spelling. The home table's
+//   would-be spec import cycle (T6.5-4's, the home note) — both
+//   participating imports ones the move would add, existing in no
+//   pre-operation coordinates — declares its complete participant set
+//   every-participant strict (`locatedAtEach`): each added import by the
+//   reference spelling the move roots at its binding, the moved node's
+//   `d={"keep"}` and `user`'s `d={"mv"}`, both in `specs/A.mdx`, exactly
+//   those two in 12.7's within-finding order, path null; T14-7's own spec
 //   import cycle — `B` imports `A`, and `user` in `A` references the
 //   moved `x` in local form, its rewrite adding `B`'s import to `A` —
 //   declares the complete participant set every-participant strict
@@ -2871,7 +2876,8 @@ const T14_6 = defineProductTest({
  * assert each expected finding's concerned file/range/identity (the
  * SOME-quantified location of the home operationalization; module header)
  * or, where the case declares its complete bearer set (`locatedAtEach`),
- * exactly that set — every colliding bearer, none beside (SPEC 14); a
+ * exactly that set — every colliding bearer or would-be cycle participant,
+ * none beside (SPEC 14); a
  * reason concerning a path (`path` stated) carries it as the finding's
  * `path` with `locations` `[]` (SPEC 14, 12.7). The modifies-nothing
  * compares are the home tests' subject (T6.4-3, T6.5-4); the symbolic-link
@@ -2944,7 +2950,8 @@ async function assertRefusalReport(
         finding,
         expectation.locatedAtEach,
         `${context}: the ${expectation.finding} finding's complete ` +
-          `located-bearer set — every colliding bearer, none beside`,
+          `located-bearer set — every colliding bearer or would-be cycle ` +
+          `participant, none beside`,
       );
     }
     assertRefusalIdentities(
@@ -3956,15 +3963,17 @@ const T14_7 = defineProductTest({
     );
 
     // --- The move reasons, staged via T6.5-4's exported fixture: the two
-    // cycle arms (the dependency arm locating the participating `d`
-    // spelling), the destination occupants — the section form's
-    // non-spec-source occupants included, the out-of-group `.mdx` occupant
-    // refusing under both applicable reasons — the 1.4-invalid new IDs, the
-    // cross-file collision, the missing and within-subtree target parents,
-    // and the invalid destinations, T6.5-4's barred path characters and its
-    // inside-root symbolic-link arms among them — each link arm inside the
-    // link-and-target compare (TEST-SPEC T14-7: the link and its target
-    // byte-identical after each refusal; SPEC 6.5, 14).
+    // cycle arms (the spec-import arm locating exactly the two reference
+    // spellings rooted at its added imports' bindings, the dependency arm
+    // the participating `d` spelling), the destination occupants — the
+    // section form's non-spec-source occupants included, the out-of-group
+    // `.mdx` occupant refusing under both applicable reasons — the
+    // 1.4-invalid new IDs, the cross-file collision, the missing and
+    // within-subtree target parents, and the invalid destinations, T6.5-4's
+    // barred path characters and its inside-root symbolic-link arms among
+    // them — each link arm inside the link-and-target compare (TEST-SPEC
+    // T14-7: the link and its target byte-identical after each refusal;
+    // SPEC 6.5, 14).
     await withWorkspace(
       {
         files: {

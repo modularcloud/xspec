@@ -107,12 +107,19 @@
 //   (refused-destination-exists, refused-invalid-destination), or a located
 //   participant (refused-id-collision locates every colliding bearer — the
 //   remaining bearer's construct is the window where the staged bytes are
-//   known; refused-cycle locates every reference spelling recording a
-//   participating dependency edge — the `d={"keep"}` spelling for the
-//   dependency-cycle arm, while the would-be spec-import cycle's
-//   participating import declarations exist in no pre-operation source, so
-//   that arm pins the code and form alone). "Modifies nothing" stays the
-//   whole-workspace-root byte snapshot compare around each refused command
+//   known; refused-cycle locates the would-be cycle's full path over the
+//   pre-operation sources — for the dependency-cycle arm, the reference
+//   spelling recording the participating dependency edge, the moved node's
+//   `d={"keep"}`; for the spec-import-cycle arm, whose two participating
+//   imports the move would add and so exist in no pre-operation
+//   coordinates, each added import by the reference spelling the move
+//   roots at its binding: the moved node's `d={"keep"}` (B.mdx's added
+//   import of A.mdx) and `user`'s `d={"mv"}` (A.mdx's added import of
+//   B.mdx), both in specs/A.mdx, asserted every-participant strict —
+//   exactly those two locations in 12.7's within-finding order, `path`
+//   null (support.ts assertFindingLocatesExactly)). "Modifies nothing"
+//   stays the whole-workspace-root byte snapshot compare around each
+//   refused command
 //   with the pre-refusal `build`'s derived files present (the T6.4-3
 //   protocol); because each arm proves it modified nothing, the arms share
 //   one staged workspace — except the derived-path arm, which stages its
@@ -857,8 +864,9 @@ function renderArgv(argv: readonly ArgvValue[]): string {
  * What one finding of a refused move's report must hold (SPEC 14, 12.7):
  * its exact stable code plus whichever concern §14 assigns the reason: a
  * located participant, the exact `identities` where 14 pins them, a
- * concerned path, or nothing
- * further where no pre-operation construct renders the concern. An arm
+ * concerned path, or nothing further where the stating arm pins no concern
+ * (T6.6-3's preview twins, whose concerned data the home tests assert; a
+ * T14-7 beside reason whose entry pins none). An arm
  * staging several applicable reasons passes one expectation per reason
  * (SPEC 14: every applicable reason reports together, one finding each).
  * Exported for T6.6-3, which stages T6.5-4's refusals identically and
@@ -876,11 +884,15 @@ export interface RefusalExpectation {
   readonly locatedAt?: FindingSourceExpectation;
   /**
    * The finding's complete location set — exactly one location per listed
-   * bearer, none beside, index-wise in 12.7's within-finding order (SPEC 14:
-   * `refused-id-collision` locates every colliding bearer — the
-   * every-participant strictness of T6.4-3's two-bearer arm, asserted by
-   * its home test and by T14-7 over the shared case table; section-6.4.ts
-   * declares the same member). Declared beside `locatedAt`, whose
+   * bearer, none beside, index-wise in 12.7's within-finding order, `path`
+   * null (SPEC 14's cardinality rule: `refused-id-collision` locates every
+   * colliding bearer — the every-participant strictness of T6.4-3's
+   * two-bearer arm, asserted by its home test and by T14-7 over the shared
+   * case table; section-6.4.ts declares the same member — and
+   * `refused-cycle` the would-be cycle's full path: T6.5-4's
+   * spec-import-cycle case declares both reference spellings the move
+   * roots at its added imports' bindings, asserted by T6.5-4 and T14-7
+   * over MOVE_REFUSAL_CASES). Declared beside `locatedAt`, whose
    * SOME-quantified check consumers asserting it alone still apply.
    */
   readonly locatedAtEach?: readonly BearerLocationExpectation[];
@@ -3252,13 +3264,20 @@ const V4_OCC_SOURCE = stagedMdx(
 
 // Location windows within the staged sources (SPEC 14): the dependency-cycle
 // arm locates the reference spelling recording the participating dependency
-// edge — the moved node's `d={"keep"}` — and the cross-file collision arm
-// locates the remaining colliding bearer `y`'s construct in the target file
-// (any in-window precision passes; wrong-construct attribution fails).
+// edge — the moved node's `d={"keep"}` — and the spec-import-cycle arm the
+// reference spellings the move roots at its two added imports' bindings —
+// that same `d={"keep"}` and `user`'s `d={"mv"}`; the cross-file collision
+// arm locates the remaining colliding bearer `y`'s construct in the target
+// file (any in-window precision passes; wrong-construct attribution fails).
 const V4_KEEP_SPELLING = 'd={"keep"}';
 const V4_KEEP_WINDOW = byteWindow(
   V4_A_SOURCE.slice(0, V4_A_SOURCE.indexOf(V4_KEEP_SPELLING)),
   V4_KEEP_SPELLING,
+);
+const V4_MV_SPELLING = 'd={"mv"}';
+const V4_MV_WINDOW = byteWindow(
+  V4_A_SOURCE.slice(0, V4_A_SOURCE.indexOf(V4_MV_SPELLING)),
+  V4_MV_SPELLING,
 );
 const V4_Y_CONSTRUCT = '<S id="y">\nY text.\n</S>';
 const V4_Y_WINDOW = byteWindow(
@@ -3605,11 +3624,22 @@ const BARRED_DESTINATION_PATH_CASES: readonly MoveRefusalCase[] = [
 export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
   {
     argv: ["move", "specs/A.mdx#mv", "specs/B.mdx#bmv"],
-    // The would-be spec import cycle's participating import declarations
-    // exist in no pre-operation source (the move would add both), so no
-    // concern window is assertable: the case pins the exact code and the
-    // 12.7 form alone.
-    expected: { finding: "refused-cycle" },
+    // Both participating imports are ones the move would add — B.mdx's of
+    // A.mdx and A.mdx's of B.mdx — existing in no pre-operation
+    // coordinates, so SPEC 14 locates each by every reference spelling the
+    // move roots at its binding, read over the pre-operation sources: the
+    // moved node's `d={"keep"}` and `user`'s `d={"mv"}`, both in
+    // specs/A.mdx. No existing import declaration participates and no
+    // dependency cycle arises beside it, so the complete located set is
+    // exactly those two, in 12.7's within-finding order (one file: the
+    // `keep` spelling first), `path` null.
+    expected: {
+      finding: "refused-cycle",
+      locatedAtEach: [
+        { file: V4_A, window: V4_KEEP_WINDOW },
+        { file: V4_A, window: V4_MV_WINDOW },
+      ],
+    },
     reason:
       "spec import cycle — the moved node's local `d` on `keep` needs " +
       "B.mdx to import A.mdx while `user`'s reference to the moved " +
@@ -3911,7 +3941,7 @@ export const MOVE_PRECONDITION_CASE: MoveRefusalCase = {
 const T6_5_4 = defineProductTest({
   id: "T6.5-4",
   title:
-    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, the dependency arm locating the participating `d` spelling); file form whose destination exists — occupied by a plain file, by a directory, by a symbolic link, and by a broken symbolic link with its target absent, one arm each, the directory arm discriminating a product probing for a file alone and the broken-link arm discriminating a product probing existence through link-following stat (refused-destination-exists, concerning that path); section form whose target path is occupied by anything other than a discovered spec source — a directory; a symbolic link resolving to a discovered spec source (discovery never yields a symlink); and an existing `.mdx` file outside every configured spec group, the latter refusing under refused-destination-exists and refused-invalid-destination together, one finding per applicable reason; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment; the empty `<new-id>` of destination operand `specs/B.mdx#`, a well-formed 12.0 split with zero id segments, never the exit-2 generalization of 11.3's `--to` spelling rule; one arm per character 1.4's quote-and-escape bullet bars — the double quote, the single quote, the escape character, `&`, U+2028, and U+2029 — each between two letters in a one-segment `<new-id>` (destination operand `specs/B.mdx#a<c>b`), a well-formed argument value no spelling rule decides, so exit 1, never exit 2, the character verbatim in identities — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); destination paths in no configured spec group, in a code group as well, lacking `.mdx`, or containing a character 7.1 bars from spec-source paths — the double quote, the single quote, the backslash, U+000A, U+000D, U+2028, or U+2029 — one file-form arm and one section-form arm creating the target per character (`specs/a<c>b.mdx`, nothing at that path), and for the single quote one arm of each form placing it in a directory component instead (`specs/it's/b.mdx`, `specs/it's` absent: a validator checking the file name alone passes it), under the spec glob `specs/**/*.mdx`, which reaches every such destination, each refused concerning the destination path as spelled, never a usage error — every such spelling is a well-formed argument value (12.0) — and the derived-path arm — emission enabled under `markdown.outDir`, the otherwise-valid destination's emit-destination directory component `mdout/new` occupied by a plain file lying under no current source's write path, refused never 14.22 (refused-invalid-destination, concerning the destination path); the symbolic-link arms of the same clause — a file-form move to `specs/sub/b.mdx` and a section-form move creating the target file `specs/sub/new.mdx`, `specs/sub` a symbolic link to a real, empty directory, staged with the link targeting a directory inside the workspace root and, on its own workspace, one outside it — each refused-invalid-destination concerning the destination path, never 14.22, nothing written through the link inside or outside the workspace (the link and its target directory byte-identical afterward), and the derived-path arm's sibling staging `mdout/new` as such a link instead of a plain file, refused identically — each refusal the form-exact 12.7 findings-only report holding exactly one finding per applicable reason with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 7, 7.1, 7.3, 5.3, 2.1, 1.4, 1.3, 13.1, 13.2, 13.4, 14.14, 14.19, 14.22, 12.0, 12.7, 14)",
+    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, locating the would-be cycle's full path: the spec-import arm, whose participating imports the move would add, by the reference spellings it roots at their bindings — the moved node's `d` spelling on `keep` and `user`'s on `mv` — exactly those two, path null; the dependency arm the participating `d` spelling); file form whose destination exists — occupied by a plain file, by a directory, by a symbolic link, and by a broken symbolic link with its target absent, one arm each, the directory arm discriminating a product probing for a file alone and the broken-link arm discriminating a product probing existence through link-following stat (refused-destination-exists, concerning that path); section form whose target path is occupied by anything other than a discovered spec source — a directory; a symbolic link resolving to a discovered spec source (discovery never yields a symlink); and an existing `.mdx` file outside every configured spec group, the latter refusing under refused-destination-exists and refused-invalid-destination together, one finding per applicable reason; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment; the empty `<new-id>` of destination operand `specs/B.mdx#`, a well-formed 12.0 split with zero id segments, never the exit-2 generalization of 11.3's `--to` spelling rule; one arm per character 1.4's quote-and-escape bullet bars — the double quote, the single quote, the escape character, `&`, U+2028, and U+2029 — each between two letters in a one-segment `<new-id>` (destination operand `specs/B.mdx#a<c>b`), a well-formed argument value no spelling rule decides, so exit 1, never exit 2, the character verbatim in identities — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); destination paths in no configured spec group, in a code group as well, lacking `.mdx`, or containing a character 7.1 bars from spec-source paths — the double quote, the single quote, the backslash, U+000A, U+000D, U+2028, or U+2029 — one file-form arm and one section-form arm creating the target per character (`specs/a<c>b.mdx`, nothing at that path), and for the single quote one arm of each form placing it in a directory component instead (`specs/it's/b.mdx`, `specs/it's` absent: a validator checking the file name alone passes it), under the spec glob `specs/**/*.mdx`, which reaches every such destination, each refused concerning the destination path as spelled, never a usage error — every such spelling is a well-formed argument value (12.0) — and the derived-path arm — emission enabled under `markdown.outDir`, the otherwise-valid destination's emit-destination directory component `mdout/new` occupied by a plain file lying under no current source's write path, refused never 14.22 (refused-invalid-destination, concerning the destination path); the symbolic-link arms of the same clause — a file-form move to `specs/sub/b.mdx` and a section-form move creating the target file `specs/sub/new.mdx`, `specs/sub` a symbolic link to a real, empty directory, staged with the link targeting a directory inside the workspace root and, on its own workspace, one outside it — each refused-invalid-destination concerning the destination path, never 14.22, nothing written through the link inside or outside the workspace (the link and its target directory byte-identical afterward), and the derived-path arm's sibling staging `mdout/new` as such a link instead of a plain file, refused identically — each refusal the form-exact 12.7 findings-only report holding exactly one finding per applicable reason with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 7, 7.1, 7.3, 5.3, 2.1, 1.4, 1.3, 13.1, 13.2, 13.4, 14.14, 14.19, 14.22, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       MOVE_REFUSAL_CONFIG,
