@@ -16,7 +16,9 @@
 //   exit codes per SPEC 12.0.
 // - `query node` / `query nodes` (with `--tag`) reporting identity, tags,
 //   and metadataHash — the scoped query surface; source ranges ride along in
-//   the natural SPEC 11 row shape. `query` is JSON-only (SPEC 12.0, 11): its
+//   the natural SPEC 11 row shape, and a root node's tags and coverage
+//   attribute are both reported as absent (SPEC 11.1, 5.5: the tags `null`,
+//   the coverage attribute omitted). `query` is JSON-only (SPEC 12.0, 11): its
 //   answers, its gated findings report on a workspace failing `build`'s
 //   validations (13.3), and its usage errors are JSON with or without
 //   `--json`.
@@ -84,7 +86,11 @@
 //   never on a sibling construct.
 // - Tag sets (`query node`/`query nodes`; the set form of SPEC 12.7): tags
 //   in byte order — UTF-8 bytes, not UTF-16 code units — duplicates
-//   collapsed, `[]` when tagless.
+//   collapsed, `[]` for a tagless section. A root node carries no tags
+//   (SPEC 5.5), and its tags are reported as absent (11.1) — `null`, the
+//   12.7 spelling of a datum whose absence its defining section states,
+//   never `[]` — while the internal model keeps its empty tag set for the
+//   metadataHash and the `--tag` filter (`reportedTags`).
 // - `build` writes nothing: the scope observes validation and the query
 //   surface only, and every query recomputes from the sources, so reads need
 //   no stored graph data.
@@ -1267,6 +1273,9 @@ function analyzeFile(rel, bytes) {
   }
   const findings = validateSections(rel, parsed.sections, byteOf);
   const nodes = [];
+  // A root carries no tags (SPEC 5.5): its empty internal tag set feeds the
+  // metadataHash and the `--tag` filter, while its reported tags datum is
+  // absent (`reportedTags`, SPEC 11.1).
   const rootTags = collapsedTags(undefined);
   nodes.push({
     identity: rel,
@@ -1749,24 +1758,44 @@ async function commandBuild(io, cwd, flags, json) {
   return 0;
 }
 
-/** The scoped query-surface document for one node. */
+/**
+ * The tags datum a node's query answer reports (SPEC 11.1): a section's tag
+ * set in the set form of 12.7 (`[]` when tagless), and, for a root node,
+ * the stated absence — 11.1 reports a root's tags and coverage attribute
+ * both as absent (a root carries no tags, 5.5), and 12.7 spells a datum
+ * whose absence its defining section states as `null`, never `[]` (a
+ * tagless *section*'s value). Only the reported datum is absent: the
+ * internal model keeps a root's empty tag set, so its metadataHash is
+ * computed from empty inputs (5.5) and no `--tag` filter selects it (11.1).
+ */
+function reportedTags(node) {
+  return node.isRoot ? null : node.tags;
+}
+
+/**
+ * The scoped query-surface document for one node (SPEC 11.1): a root's tags
+ * `null` and its coverage attribute omitted — both absent for roots.
+ */
 function nodeDoc(node) {
   const doc = {
     identity: node.identity,
     sourceRange: node.sourceRange,
-    tags: node.tags,
+    tags: reportedTags(node),
     hashes: { metadataHash: node.metadataHash },
   };
   if (!node.isRoot) doc.coverage = "required";
   return doc;
 }
 
-/** One `query nodes` row (SPEC 11: coverage attribute absent for roots). */
+/**
+ * One `query nodes` row (SPEC 11.1: tags and coverage attribute both absent
+ * for roots — the tags `null`, the coverage attribute omitted).
+ */
 function nodeRow(node) {
   const row = {
     identity: node.identity,
     sourceRange: node.sourceRange,
-    tags: node.tags,
+    tags: reportedTags(node),
   };
   if (!node.isRoot) row.coverage = "required";
   return row;
