@@ -39,8 +39,11 @@
 //   spelling makes them observable: exactly one `<callee>(<root>.y)` in the
 //   file, `<callee>` the added `text` binding (or `text`), or (e)'s held
 //   `tt`, and `<root>` the target module's default binding, added or (b)'s
-//   held `T` — the added declaration is then composed byte-exactly with
-//   those identifiers substituted, the file's post-move bytes WITHOUT it
+//   held `T` (each read as TypeScript 5.9.3 at ESNext reads an identifier,
+//   a non-ASCII letter or U+2EBF0 as readily as `a`, a run reading as none
+//   failing diagnosed: helpers/ts-identifiers.ts; SPEC 1.4, 14.20) — the
+//   added declaration is then composed byte-exactly with those
+//   identifiers substituted, the file's post-move bytes WITHOUT it
 //   composed from the rules of 6.5 and 3 (the origin declaration's line
 //   removed where both its bindings lose their last use, the call's
 //   occurrence span replaced by the rewritten call — "the call's span as a
@@ -99,7 +102,10 @@ import {
   renderPathValue,
 } from "../../helpers/adapters/index.js";
 import { assertFileBytes, fail } from "../../helpers/assertions.js";
-import { assertExactDeclarationInsertion } from "../../helpers/import-insertion.js";
+import {
+  assertExactDeclarationInsertion,
+  expectFreshIdentifier,
+} from "../../helpers/import-insertion.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
@@ -109,6 +115,10 @@ import {
   ConsumerProject,
   assertNoCompileErrors,
 } from "../../helpers/tooling.js";
+import {
+  IDENTIFIER_RUN_SOURCE,
+  NO_RUN_BEFORE_SOURCE,
+} from "../../helpers/ts-identifiers.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
@@ -692,17 +702,29 @@ async function readCodeText(
 
 // The rewritten call in 6.4/6.5's pinned spelling: an identifier callee, an
 // identifier root, dot access for the identifier-valid `y`, the argument
-// alone. `t(O.w)` (c) and `typeof O.x` (d) never match.
-const REWRITTEN_CALL =
-  /([A-Za-z_$][A-Za-z0-9_$]*)\(([A-Za-z_$][A-Za-z0-9_$]*)\.y\)/g;
+// alone. `t(O.w)` (c) and `typeof O.x` (d) never match. Callee and root are
+// each captured as a permissive identifier run (helpers/ts-identifiers.ts:
+// every code point but ASCII's non-identifier ones, so it holds any
+// identifier TypeScript 5.9.3 at ESNext reads, a non-ASCII letter or U+2EBF0
+// included), the callee standing after no code point such a run admits
+// (`NO_RUN_BEFORE_SOURCE`: `<U+00E9>a(b.y)` reads `<U+00E9>a`, never `a`).
+// The bytes the composed text pins beside them are ASCII (`return ` before
+// the callee; `(`, `.y)`), so each capture is the identifier whole, and the
+// reader judges it (`expectFreshIdentifier`: SPEC 6.5, 1.4, 14.20).
+const REWRITTEN_CALL = new RegExp(
+  String.raw`${NO_RUN_BEFORE_SOURCE}(${IDENTIFIER_RUN_SOURCE})\((${IDENTIFIER_RUN_SOURCE})\.y\)`,
+  "g",
+);
 
 /**
  * The bindings the rewritten call is rooted at — the value-unpinned fresh
  * identifiers (SPEC 6.5), read off the one place the pinned spelling makes
- * them observable; diagnosed when the call is not rewritten as pinned, is
+ * them observable, as TypeScript 5.9.3 at ESNext reads an identifier (SPEC
+ * 1.4, 14.20); diagnosed when the call is not rewritten as pinned, is
  * rooted at anything but the existing default or `text` binding where the
- * file holds a timely one, has its callee rooted at a held `text` binding
- * untimely for it, or binds an identifier the file keeps.
+ * file holds a timely one, has a callee or root reading as no identifier,
+ * has its callee rooted at a held `text` binding untimely for it, or binds
+ * an identifier the file keeps.
  */
 function readRewrittenCall(
   text: string,
@@ -744,6 +766,18 @@ function readRewrittenCall(
         `\`${arm.existingCallee}(<X>.y)\` (SPEC 6.5); the call reads ` +
         `${JSON.stringify(rewrittenCall({ callee, root }))} — a product ` +
         `judging the \`text\` binding lacked whenever the default is`,
+    );
+  }
+  // Each capture judged (a held binding, equal by now to the existing one
+  // the arm names, reads as an identifier trivially).
+  for (const [role, run] of [
+    ["callee", callee],
+    ["argument root", root],
+  ] as const) {
+    expectFreshIdentifier(
+      run,
+      `${context}: the rewritten call's ${role}, in the call ` +
+        `${JSON.stringify(rewrittenCall({ callee, root }))}`,
     );
   }
   if (arm.untimelyCallee !== undefined && callee === arm.untimelyCallee.name) {

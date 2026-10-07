@@ -41,6 +41,13 @@
 // none of the compiler-provided names (2.1).
 //
 // Conservative operationalizations (noted per H-4):
+// - Every fresh identifier read below — off an added declaration's line, a
+//   rewritten reference, a marker, or a call — is read as TypeScript 5.9.3
+//   at ESNext reads an identifier, code point by code point: a permissive
+//   run captured between the pinned ASCII bytes, then judged (helpers/
+//   ts-identifiers.ts, `expectFreshIdentifier`; SPEC 6.5, 1.4, 14.20), so
+//   a non-ASCII letter or U+2EBF0 reads as readily as `a`, and a run
+//   reading as no identifier fails diagnosed.
 // - T6.5-12 stages no import addition (no reference the moved text carries
 //   needs a binding the target lacks), so the target's post-move bytes are
 //   composed whole from 6.4/6.5 and 3 with no latitude and asserted
@@ -150,7 +157,8 @@
 //   line — are performed and byte-asserted with `check` and `build` clean,
 //   those it names by ID (T6.2-3(a), (b), (c), (e)) being that test's
 //   stagings. Arms (f)–(i), the applicability arms, and the created-target
-//   arm are still to be registered; the preview twins are T6.6-3's.
+//   arms are registered beside them (`R16_REFUSED_ARMS`, `R16_ALONE_ARMS`;
+//   (g)'s control in `R16_CONTROL_ARMS`); the preview twins are T6.6-3's.
 // - T6.5-18 runs four arms (`A18_ARMS`: the shadowed default, the
 //   type-only default (a), the type-only `text` (b), and the shadowed
 //   callee), each its own workspace of ledger records, the origin staged
@@ -198,6 +206,7 @@ import { assertFileBytes, fail } from "../../helpers/assertions.js";
 import {
   assertExactDeclarationInsertion,
   canonicalSpecifier,
+  expectFreshIdentifier,
 } from "../../helpers/import-insertion.js";
 import { deriveMdx } from "../../helpers/mdx-derivability.js";
 import { HarnessStagingError } from "../../helpers/permissions.js";
@@ -209,6 +218,11 @@ import {
   ConsumerProject,
   assertNoCompileErrors,
 } from "../../helpers/tooling.js";
+import {
+  IDENTIFIER_RUN_SOURCE,
+  NO_RUN_AFTER_SOURCE,
+  NO_RUN_BEFORE_SOURCE,
+} from "../../helpers/ts-identifiers.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -772,8 +786,21 @@ const F14_DECL_ORIGIN_BEFORE = stagedMdx(
 // (SPEC 6.5, 3; T6.5-7's exact extent, T6.5-10 (a)).
 const F14_DECL_ORIGIN_AFTER = ["", ...F14_SIBLING_LINES, "", ""].join("\n");
 
-const F14_REWRITTEN_DEPENDS = /d=\{([A-Za-z_$][A-Za-z0-9_$]*)\.s\}/g;
-const F14_REWRITTEN_EMBEDS = /\{text\(([A-Za-z_$][A-Za-z0-9_$]*)\.q\)\}/g;
+// The created file's two rewritten references in 6.4's pinned spelling,
+// each root captured as a permissive identifier run (helpers/
+// ts-identifiers.ts: every code point but ASCII's non-identifier ones, so
+// it holds any identifier TypeScript 5.9.3 at ESNext reads, a non-ASCII
+// letter or U+2EBF0 included). The bytes pinned beside each root are ASCII
+// (`d={` and `.s}`; `{text(` and `.q)}`), so the capture is the identifier
+// whole; `f14ReferenceRoot` judges it (SPEC 6.5, 1.4, 14.20).
+const F14_REWRITTEN_DEPENDS = new RegExp(
+  String.raw`d=\{(${IDENTIFIER_RUN_SOURCE})\.s\}`,
+  "g",
+);
+const F14_REWRITTEN_EMBEDS = new RegExp(
+  String.raw`\{text\((${IDENTIFIER_RUN_SOURCE})\.q\)\}`,
+  "g",
+);
 
 const F14_DECL_DEPENDS: readonly GraphEdge[] = [
   { from: `${F14_CREATED}#m`, to: `${F14_ORIGIN}#s`, kind: "depends" },
@@ -784,8 +811,10 @@ const F14_DECL_EMBEDS: readonly GraphEdge[] = [
 
 /**
  * The identifier one of the created file's rewritten references is rooted
- * at, read off 6.4's pinned spelling; diagnosed when the reference is not
- * spelled as 6.4 pins it, or is present more or less than once.
+ * at, read off 6.4's pinned spelling as TypeScript 5.9.3 at ESNext reads an
+ * identifier (SPEC 1.4, 14.20); diagnosed when the reference is not spelled
+ * as 6.4 pins it, is present more or less than once, or its root reads as
+ * no identifier.
  */
 function f14ReferenceRoot(
   text: string,
@@ -803,7 +832,11 @@ function f14ReferenceRoot(
         `${String(matches.length)} in ${JSON.stringify(text)}`,
     );
   }
-  return root;
+  return expectFreshIdentifier(
+    root,
+    `${context}: ${F14_CREATED}'s ${form} must be rooted at the binding its ` +
+      `added declaration introduces`,
+  );
 }
 
 /**
@@ -2638,8 +2671,10 @@ function a13AssertPremiseDerives(
  * The fresh identifiers the receiving file's added declarations bind, read
  * off the declaration lines — for each lacked module exactly one line
  * `import <X> from "<specifier>"`, its other characters T6.5-8's (SPEC 6.5,
- * 2.1) — distinct from one another and none of the compiler-provided names.
- * Exported for T6.6-4's tie-break stagings, which read them the same way.
+ * 2.1), `<X>` read as TypeScript 5.9.3 at ESNext reads an identifier (SPEC
+ * 1.4, 14.20) — distinct from one another and none of the
+ * compiler-provided names. Exported for T6.6-4's tie-break stagings, which
+ * read them the same way.
  */
 export function a13ReadAddedIdentifiers(
   actual: string,
@@ -2649,13 +2684,15 @@ export function a13ReadAddedIdentifiers(
   const idents: string[] = [];
   for (const specifier of arm.added) {
     const escaped = specifier.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    // The binding captured as a permissive identifier run between the
+    // pinned ASCII spaces (helpers/ts-identifiers.ts), then judged.
     const pattern = new RegExp(
-      `^import ([A-Za-z_$][A-Za-z0-9_$]*) from "${escaped}"$`,
+      `^import (${IDENTIFIER_RUN_SOURCE}) from "${escaped}"$`,
       "gm",
     );
     const matches = [...actual.matchAll(pattern)];
-    const ident = matches.length === 1 ? matches[0]?.[1] : undefined;
-    if (ident === undefined) {
+    const run = matches.length === 1 ? matches[0]?.[1] : undefined;
+    if (run === undefined) {
       fail(
         `${context}: ${arm.receiving} after the move holds exactly one added ` +
           `declaration of the module "${specifier}" — a line of its own ` +
@@ -2665,6 +2702,11 @@ export function a13ReadAddedIdentifiers(
           `(SPEC 6.5, 2.1); found ${String(matches.length)} in ${JSON.stringify(actual)}`,
       );
     }
+    const ident = expectFreshIdentifier(
+      run,
+      `${context}: ${arm.receiving}'s added declaration of the module ` +
+        `"${specifier}" must bind a fresh identifier`,
+    );
     if (MDX_RESERVED_NAMES.includes(ident)) {
       fail(
         `${context}: the added declaration binds \`${ident}\`, one of the ` +
@@ -2838,9 +2880,14 @@ async function a13AssertViewImports(
   const expected = idents.map((ident, index) => {
     const specifier = arm.added[index] ?? "";
     const line = `import ${ident} from "${specifier}"`;
-    const start = actual.indexOf(line);
+    // A source range is a pair of byte offsets (SPEC 1.7), and the fresh
+    // identifier may be any identifier (a non-ASCII letter or U+2EBF0
+    // included; SPEC 6.5, 1.4): the declaration's place and extent are
+    // measured in UTF-8 bytes, never UTF-16 code units.
+    const at = actual.indexOf(line);
+    const start = at < 0 ? -1 : Buffer.byteLength(actual.slice(0, at), "utf8");
     return {
-      range: { start, end: start + line.length },
+      range: { start, end: start + Buffer.byteLength(line, "utf8") },
       name: ident,
       target: A13_MODULE_SOURCES[specifier] ?? "",
     };
@@ -5222,7 +5269,7 @@ async function runR16ControlArm(
     if (arm.added !== undefined) {
       const { rel, specifier, compose } = arm.added;
       const actual = await readSourceText(workspace, rel, context);
-      const ident = r16ReadAddedIdentifier(actual, specifier);
+      const ident = r16ReadAddedIdentifier(actual, specifier, context);
       await assertFileBytes(
         workspace.path(rel),
         compose(ident ?? "X"),
@@ -5248,23 +5295,32 @@ async function runR16ControlArm(
 /**
  * The fresh identifier a receiving file's one added declaration of
  * `specifier` binds, read off its line (`import <X> from "<specifier>"`,
- * SPEC 6.5); undefined when no such line stands alone — the caller then
- * pins the composition with `X`, and the byte assertion diagnoses.
+ * SPEC 6.5) as TypeScript 5.9.3 at ESNext reads an identifier (SPEC 1.4,
+ * 14.20: the binding captured as a permissive identifier run between the
+ * pinned ASCII spaces, helpers/ts-identifiers.ts, then judged — a run
+ * reading as no identifier fails diagnosed under `context`); undefined
+ * when no such line stands alone — the caller then pins the composition
+ * with `X`, and the byte assertion diagnoses.
  */
 function r16ReadAddedIdentifier(
   actual: string,
   specifier: string,
+  context: string,
 ): string | undefined {
   const escaped = specifier.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
   const pattern = new RegExp(
-    `^import ([A-Za-z_$][A-Za-z0-9_$]*) from "${escaped}"$`,
+    `^import (${IDENTIFIER_RUN_SOURCE}) from "${escaped}"$`,
     "gm",
   );
   const matches = [...actual.matchAll(pattern)];
-  const ident = matches.length === 1 ? matches[0]?.[1] : undefined;
-  if (ident === undefined || MDX_RESERVED_NAMES.includes(ident)) {
-    return undefined;
-  }
+  const run = matches.length === 1 ? matches[0]?.[1] : undefined;
+  if (run === undefined) return undefined;
+  const ident = expectFreshIdentifier(
+    run,
+    `${context}: the added declaration of the module "${specifier}" must ` +
+      `bind a fresh identifier`,
+  );
+  if (MDX_RESERVED_NAMES.includes(ident)) return undefined;
   return ident;
 }
 
@@ -6048,16 +6104,27 @@ const A18_ARMS: readonly A18Arm[] = [
   }),
 ];
 
-// The rewritten marker: a root not preceded by an identifier character or a
-// `.`, then `.y` not followed by one (`T.z`, `typeof T.z`, and the
-// declarations never match).
-const A18_MARKER_REWRITTEN =
-  /(?<![A-Za-z0-9_$.])([A-Za-z_$][A-Za-z0-9_$]*)\.y(?![A-Za-z0-9_$])/g;
+// The rewritten marker: a root captured as a permissive identifier run
+// (helpers/ts-identifiers.ts: every code point but ASCII's non-identifier
+// ones, so it holds any identifier TypeScript 5.9.3 at ESNext reads, a
+// non-ASCII letter or U+2EBF0 included), not preceded by a `.` or by any
+// code point such a run admits — so by no identifier part under the judge,
+// whatever its plane (`NO_RUN_BEFORE_SOURCE`; `<U+00E9>a.y` reads
+// `<U+00E9>a`, never `a`) — then `.y` followed by no such code point
+// (`NO_RUN_AFTER_SOURCE`). `T.z`, `typeof T.z`, and the declarations never
+// match; `a18ReadRewrite` judges the capture (SPEC 6.5, 1.4, 14.20).
+const A18_MARKER_REWRITTEN = new RegExp(
+  String.raw`${NO_RUN_BEFORE_SOURCE}(?<!\.)(${IDENTIFIER_RUN_SOURCE})\.y${NO_RUN_AFTER_SOURCE}`,
+  "g",
+);
 
-// The rewritten call: a callee not preceded by an identifier character or a
-// `.`, then `(`, the argument's root, `.y`, and `)`.
-const A18_CALL_REWRITTEN =
-  /(?<![A-Za-z0-9_$.])([A-Za-z_$][A-Za-z0-9_$]*)\(([A-Za-z_$][A-Za-z0-9_$]*)\.y\)/g;
+// The rewritten call: a callee captured as a permissive run, not preceded
+// by a `.` or by any code point such a run admits, then `(`, the argument's
+// root (another run), `.y`, and `)`.
+const A18_CALL_REWRITTEN = new RegExp(
+  String.raw`${NO_RUN_BEFORE_SOURCE}(?<!\.)(${IDENTIFIER_RUN_SOURCE})\((${IDENTIFIER_RUN_SOURCE})\.y\)`,
+  "g",
+);
 
 /** A rewritten occurrence and the declaration its fresh binding needs. */
 interface A18Rewrite {
@@ -6070,11 +6137,12 @@ interface A18Rewrite {
 /**
  * Read the rewritten occurrence off `src/c.ts` after the move — the fresh
  * binding value-unpinned (SPEC 6.5), read off the one place 6.4's pinned
- * spelling makes it observable (dot access, `y` being identifier-valid) —
- * and diagnose the wrong outcomes: an occurrence not spelled as 6.4 pins
- * it or rewritten more or less than once, one rooted at the arm's barred
- * held binding, and a call whose argument is not re-rooted at the held `T`
- * or whose callee is `T`.
+ * spelling makes it observable (dot access, `y` being identifier-valid), as
+ * TypeScript 5.9.3 at ESNext reads an identifier (SPEC 1.4, 14.20) — and
+ * diagnose the wrong outcomes: an occurrence not spelled as 6.4 pins it or
+ * rewritten more or less than once, a fresh binding reading as no
+ * identifier, one rooted at the arm's barred held binding, and a call
+ * whose argument is not re-rooted at the held `T` or whose callee is `T`.
  */
 function a18ReadRewrite(
   arm: A18Arm,
@@ -6095,6 +6163,11 @@ function a18ReadRewrite(
           `${JSON.stringify(text)}`,
       );
     }
+    expectFreshIdentifier(
+      root,
+      `${context}: the rewritten marker ${JSON.stringify(`${root}.y`)} must ` +
+        `be rooted at the added declaration's binding`,
+    );
     if (root === arm.barred.name) {
       fail(
         `${context}: the marker is rewritten to \`${root}.y\` — ` +
@@ -6121,6 +6194,12 @@ function a18ReadRewrite(
     );
   }
   const shown = `\`${callee}(${root}.y)\``;
+  // The callee judged; the root must be the held `T` (below).
+  expectFreshIdentifier(
+    callee,
+    `${context}: the rewritten call ${shown}'s callee must be the binding ` +
+      `of the target module's \`text\``,
+  );
   if (callee === arm.barred.name) {
     fail(
       `${context}: the call is rewritten to ${shown}, its callee ` +

@@ -259,6 +259,7 @@ import {
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { assertRunTwiceDeterministic } from "../../helpers/determinism.js";
+import { expectFreshIdentifier } from "../../helpers/import-insertion.js";
 import type { DirectorySnapshot } from "../../helpers/snapshot.js";
 import {
   assertLeavesUnchanged,
@@ -278,6 +279,7 @@ import {
   runProduct,
   startProduct,
 } from "../../helpers/subprocess.js";
+import { IDENTIFIER_RUN_SOURCE } from "../../helpers/ts-identifiers.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
@@ -1832,7 +1834,11 @@ function escapeRegExp(text: string): string {
  * preview-pinned pre-operation state, the rewritten file's bytes must equal
  * the pre-operation bytes with (1) the known reference rewrite applied over
  * its precomputed span — the fresh binding is the product's choice (SPEC
- * 6.5), read out of the one added import declaration — and (2) one
+ * 6.5), read out of the one added import declaration as TypeScript 5.9.3
+ * at ESNext reads an identifier (SPEC 1.4, 14.20: captured as a permissive
+ * identifier run between the declaration's ASCII blanks,
+ * helpers/ts-identifiers.ts, then judged, a run reading as none failing
+ * diagnosed) — and (2) one
  * added-import segment spliced in at exactly the previewed offset: the
  * declaration's characters followed by U+000A, preceded by one exactly when
  * the offset is not at the start of a line (SPEC 6.5). Any other insertion
@@ -1866,7 +1872,7 @@ async function assertRealRunInsertsImportAtPreviewedOffset(
     additionOffset,
   } = options;
   const declarationPattern = new RegExp(
-    `import[ \\t]+([A-Za-z_$][A-Za-z0-9_$]*)[ \\t]+from[ \\t]+(["'])${escapeRegExp(importSpecifier)}\\2`,
+    `import[ \\t]+(${IDENTIFIER_RUN_SOURCE})[ \\t]+from[ \\t]+(["'])${escapeRegExp(importSpecifier)}\\2`,
     "g",
   );
   if (preSource.match(declarationPattern) !== null) {
@@ -1905,7 +1911,11 @@ async function assertRealRunInsertsImportAtPreviewedOffset(
         `(SPEC 6.5, 2.1); found ${String(matches.length)} in the rewritten file`,
     );
   }
-  const binding = matches[0]![1]!;
+  const binding = expectFreshIdentifier(
+    matches[0]![1]!,
+    `${context}: ${file}'s added declaration of ${importSpecifier} must ` +
+      `bind a fresh identifier`,
+  );
   const rewrittenReference = `${binding}${rewrittenChainSuffix}`;
 
   const preBytes = Buffer.from(preSource, "utf8");
