@@ -54,6 +54,14 @@
 //   decoder enforcing 12.7's tag-set form). Symmetric omission is
 //   caught by pinning the discriminating fields on the `show` side directly:
 //   tags, `coverage="none"`, and the root arm's absent coverage attribute.
+//   The non-root node spells its tags out of tag-set form — out of byte
+//   order, with a duplicate and a mixed-case member — and the set form
+//   (byte order, duplicates collapsed, never case-folded: SPEC 12.7, 2.6)
+//   is pinned literally on both `show` and `query node`, so a product
+//   echoing the spelled order, keeping a duplicate, collating
+//   case-insensitively, or case-folding fails on either surface — the last
+//   one, when both surfaces share it, at the literal pin alone (TEST-SPEC
+//   T11.4-3's `query node`/`show --json` clause, T12.7-1).
 //   The human form is asserted for distinctive information presence,
 //   including the four hash values as reported by `query node` (12.4 prints
 //   hashes; an abbreviation is not the same information) — source-range
@@ -826,9 +834,13 @@ const T12_3_2 = defineProductTest({
 // coverage="none" (a `show` omitting either fails), plus edges of all four
 // kinds across the workspace — incoming contains/embeds, outgoing
 // contains/depends/embeds on `star`; the code marker gives `peer` an incoming
-// `references` edge.
+// `references` edge. `star`'s tags are spelled out of tag-set form (SPEC
+// 12.7, 2.6) — out of byte order, `amber` duplicated, and a mixed-case
+// member — so their set form, `T12_4_1_STAR_TAGS`, differs from the spelled
+// order with or without the duplicate, from a case-insensitive collation
+// (`amber`, `vital`, `Zeta`), and from the case-folded set (`zeta`).
 const T12_4_1_S = [
-  '<S id="star" tags="amber vital" coverage="none" d={"peer"}>',
+  '<S id="star" tags="vital amber amber Zeta" coverage="none" d={"peer"}>',
   "Star intro.",
   "",
   '<S id="star.point">',
@@ -859,11 +871,15 @@ const T12_4_1_APP = [
 
 const T12_4_1_STAR = "specs/S.mdx#star";
 const T12_4_1_ROOT = "specs/S.mdx";
+// The 12.7 tag-set form of `star`'s spelled `tags="vital amber amber Zeta"`:
+// byte order (U+005A sorts before U+0061), the duplicate collapsed, the
+// mixed-case member kept as spelled (SPEC 12.7, 2.6).
+const T12_4_1_STAR_TAGS = ["Zeta", "amber", "vital"];
 
 const T12_4_1 = defineProductTest({
   id: "T12.4-1",
   title:
-    '`show` accepts `path#id` and bare `path` (root) and prints the full 12.4 enumeration — identity, source range, own and subtree text, hashes, tags, coverage attribute, and edges by kind — each field equal to the corresponding `query node` field for the same node (adapter-compared); the staged tags and coverage="none" are pinned on the `show` side, and the root arm reports the coverage attribute absent (SPEC 12.4, 11, 1.7)',
+    '`show` accepts `path#id` and bare `path` (root) and prints the full 12.4 enumeration — identity, source range, own and subtree text, hashes, tags, coverage attribute, and edges by kind — each field equal to the corresponding `query node` field for the same node (adapter-compared); the staged tags — spelled out of byte order, with a duplicate and a mixed-case member — are pinned in 12.7\'s tag-set form (byte order, duplicates collapsed, never case-folded) on both `show` and `query node`, coverage="none" is pinned on the `show` side, and the root arm reports the coverage attribute absent (SPEC 12.4, 11, 1.7, 12.7, 2.6)',
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -914,13 +930,28 @@ const T12_4_1 = defineProductTest({
         };
 
         // path#id arm: the discriminating fields pinned on the show side —
-        // the adapter compare alone would accept a symmetric omission.
+        // the adapter compare alone would accept a symmetric omission. The
+        // tags are pinned literally in their 12.7 set form on both surfaces
+        // (each decoded form-exact, never re-sorted here): the decode
+        // rejects an unsorted or duplicated array, the adapter compare a
+        // form one surface alone deviates in, and these pins a form both
+        // share — a case-folded set is byte-sorted, so only they catch it.
         const star = await decodeBoth(T12_4_1_STAR, "path#id arm");
         assertSameJson(
           star.show.tags,
-          ["amber", "vital"],
-          `T12.4-1: \`show ${T12_4_1_STAR}\` reports the staged tags — a ` +
-            `show omitting tags fails (SPEC 12.4, 2.6)`,
+          T12_4_1_STAR_TAGS,
+          `T12.4-1: \`show ${T12_4_1_STAR} --json\` reports the staged ` +
+            `tags (spelled "vital amber amber Zeta") in the 12.7 tag-set ` +
+            `form — byte order, duplicates collapsed, never case-folded; a ` +
+            `show omitting tags fails (SPEC 12.4, 12.7, 2.6)`,
+        );
+        assertSameJson(
+          star.query.tags,
+          T12_4_1_STAR_TAGS,
+          `T12.4-1: \`query node ${T12_4_1_STAR} --json\` reports the ` +
+            `staged tags (spelled "vital amber amber Zeta") in the 12.7 ` +
+            `tag-set form — byte order, duplicates collapsed, never ` +
+            `case-folded (SPEC 11.1, 12.7, 2.6)`,
         );
         if (star.show.coverage !== "none") {
           fail(
@@ -960,6 +991,7 @@ const T12_4_1 = defineProductTest({
             T12_4_1_STAR,
             "amber",
             "vital",
+            "Zeta",
             "none",
             "specs/S.mdx#star.point",
             "specs/S.mdx#peer",
