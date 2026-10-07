@@ -41,8 +41,13 @@
 //   SPEC.md, so output depending on any of them is environment-dependent
 //   content (SPEC 12.0).
 // - T12.0-8 stages, per command, a fixture whose shortest-path candidates are
-//   exactly two equal-length sequences diverging in one element, so the
-//   asserted path is attributable to the byte-least tie-break alone.
+//   exactly two equal-length sequences diverging in one element, the
+//   byte-least one neither the fork node's first `d` entry nor first in
+//   document order: the fork's `d` value lists the other candidate's node
+//   first, and that node's section precedes the byte-least candidate's. A
+//   product reporting the first-found candidate — searching forward in
+//   `d`-list or document order, or backward in document order — therefore
+//   reports the other, never the asserted path.
 // - T12.0-9 asserts exact exit codes (the partition is the contract under
 //   test); stream separation is T12.0-2's. Rows whose class is only
 //   meaningful under a premise (impact *with differences*, coverage with an
@@ -647,18 +652,23 @@ const T12_0_7 = defineProductTest({
 // ---------------------------------------------------------------------------
 
 // `query reachable` fixture: exactly two shortest src → zz paths, diverging
-// only in the middle element (`ma` < `mb` byte-wise).
+// only in the middle element (`ma` < `mb` byte-wise). The byte-least one,
+// via ma, is neither src's first `d` entry nor first in document order: src
+// spells `d={["mb", "ma"]}`, and mb's section — with its `d` edge to zz —
+// precedes ma's, so a first-found search (forward in `d`-list or document
+// order, or backward from zz over its incoming edges in document order)
+// reports the route via mb.
 const TIE_REACHABLE_SOURCE = [
-  '<S id="src" d={["ma", "mb"]}>',
+  '<S id="src" d={["mb", "ma"]}>',
   "Source text.",
-  "</S>",
-  "",
-  '<S id="ma" d={"zz"}>',
-  "Middle a text.",
   "</S>",
   "",
   '<S id="mb" d={"zz"}>',
   "Middle b text.",
+  "</S>",
+  "",
+  '<S id="ma" d={"zz"}>',
+  "Middle a text.",
   "</S>",
   "",
   '<S id="zz">',
@@ -668,7 +678,11 @@ const TIE_REACHABLE_SOURCE = [
 ].join("\n");
 
 // Coverage fixture: boundary group `bnd` (only `b`), target group `tgt`;
-// transitive mode; two equal-length covering paths to `zz` via `ma`/`mb`.
+// transitive mode; two equal-length covering paths to `zz`, via `mb` and via
+// `ma`. As in the reachable fixture, the byte-least one (via ma) is neither
+// b's first `d` entry — b spells `d={[T.mb, T.ma]}` — nor first in document
+// order — mb's section precedes ma's in `T.mdx` — so a first-found search
+// reports the route via mb.
 // T12.0-8's coverage and impact arms follow its reachable arm's
 // invocations, so their configurations and code source are TypeScript
 // staged-source records (helpers/staged-ts.ts; S-9's TypeScript and timing
@@ -701,7 +715,7 @@ const TIE_BOUNDARY_SOURCE = stagedMdx(
   [
     'import T from "../tgt/T.xspec"',
     "",
-    '<S id="b" d={[T.ma, T.mb]}>',
+    '<S id="b" d={[T.mb, T.ma]}>',
     "Boundary text.",
     "</S>",
     "",
@@ -710,12 +724,12 @@ const TIE_BOUNDARY_SOURCE = stagedMdx(
 const TIE_TARGET_SOURCE = stagedMdx(
   "T12.0-8 coverage arm specs/tgt/T.mdx",
   [
-    '<S id="ma" d={"zz"}>',
-    "Middle a text.",
-    "</S>",
-    "",
     '<S id="mb" d={"zz"}>',
     "Middle b text.",
+    "</S>",
+    "",
+    '<S id="ma" d={"zz"}>',
+    "Middle a text.",
     "</S>",
     "",
     '<S id="zz">',
@@ -725,21 +739,25 @@ const TIE_TARGET_SOURCE = stagedMdx(
   ].join("\n"),
 );
 
-// Impact fixture: `src/app.ts` references `n`; `n` depends on `ca` and `cb`,
+// Impact fixture: `src/app.ts` references `n`; `n` depends on `cb` and `ca`,
 // both edited since the baseline — two equal-length witness paths from `n`.
+// The byte-least one, [n, ca], is neither n's first `d` entry nor first in
+// document order: n spells `d={["cb", "ca"]}`, and cb's section precedes
+// ca's, so a first-found search (forward from n, or backward from the edited
+// nodes in document order) reports [n, cb].
 const TIE_IMPACT_SPEC = "specs/M.mdx";
 const tieImpactSpecSource = (caText: string, cbText: string): string =>
   [
-    '<S id="n" d={["ca", "cb"]}>',
+    '<S id="n" d={["cb", "ca"]}>',
     "Anchor text.",
-    "</S>",
-    "",
-    '<S id="ca">',
-    caText,
     "</S>",
     "",
     '<S id="cb">',
     cbText,
+    "</S>",
+    "",
+    '<S id="ca">',
+    caText,
     "</S>",
     "",
   ].join("\n");
@@ -817,9 +835,11 @@ const T12_0_8 = defineProductTest({
         assertSameJson(
           report.path,
           ["specs/R.mdx#src", "specs/R.mdx#ma", "specs/R.mdx#zz"],
-          `${context}: exactly two shortest witness paths exist, via ma and ` +
-            `via mb; the element-wise byte-least node-identity sequence — ` +
-            `through ma ("…#ma" < "…#mb") — is the reported one (SPEC 12.0, 11)`,
+          `${context}: exactly two shortest witness paths exist, via mb ` +
+            `(src's first \`d\` entry and first in document order) and via ` +
+            `ma; the element-wise byte-least node-identity sequence — ` +
+            `through ma ("…#ma" < "…#mb") — is the reported one, not the ` +
+            `first-found one (SPEC 12.0, 11)`,
         );
       },
     );
@@ -854,8 +874,8 @@ const T12_0_8 = defineProductTest({
         );
         if (covered === undefined) {
           fail(
-            `${context}: zz is covered — transitive paths b → ma → zz and ` +
-              `b → mb → zz exist (SPEC 8) — so it must appear among the ` +
+            `${context}: zz is covered — transitive paths b → mb → zz and ` +
+              `b → ma → zz exist (SPEC 8) — so it must appear among the ` +
               `covered nodes; got ${JSON.stringify(
                 profile.covered.map((entry) => entry.identity),
               )}`,
@@ -864,9 +884,10 @@ const T12_0_8 = defineProductTest({
         assertSameJson(
           covered.path,
           ["specs/bnd/B.mdx#b", "specs/tgt/T.mdx#ma", "specs/tgt/T.mdx#zz"],
-          `${context}: zz's two shortest covering paths run through ma and ` +
-            `mb; the element-wise byte-least sequence — through ma — is the ` +
-            `reported one (SPEC 8.2, 12.0)`,
+          `${context}: zz's two shortest covering paths run through mb (b's ` +
+            `first \`d\` entry and first in document order in T.mdx) and ` +
+            `through ma; the element-wise byte-least sequence — through ma — ` +
+            `is the reported one, not the first-found one (SPEC 8.2, 12.0)`,
         );
       },
     );
@@ -890,13 +911,32 @@ const T12_0_8 = defineProductTest({
           "T12.0-8 impact-arm `build` over the doubly-edited workspace",
         );
         const context = "T12.0-8 `impact --base <baseline> --json`";
+        const report = await impactAgainst(product, workspace, base, context);
+        // n's own subtree is untouched, so the location is transitively
+        // impacted only; the two equal-length witness candidates from n end
+        // at the edited cb (n's first `d` entry and first in document order)
+        // and ca, and the byte-least sequence — [n, ca] — is reported, not
+        // the first-found [n, cb] (SPEC 9.2, 9.3, 12.0). The witness path is
+        // compared on its own first, so a wrong pick is diagnosed as the
+        // tie-break's; the whole code groups follow (the shared helper's
+        // diagnosis speaks of fixtures whose shortest path is unique).
+        const witness = report.code.transitive.find(
+          (entry) => entry.location === TIE_IMPACT_APP,
+        );
+        if (witness !== undefined) {
+          assertSameJson(
+            witness.path,
+            ["specs/M.mdx#n", "specs/M.mdx#ca"],
+            `${context}: ${TIE_IMPACT_APP}'s two shortest witness paths run ` +
+              `from n to the edited cb (n's first \`d\` entry and first in ` +
+              `document order) and to the edited ca; the element-wise ` +
+              `byte-least sequence — through ca — is the reported one, not ` +
+              `the first-found one (SPEC 9.3, 12.0)`,
+          );
+        }
         assertImpactedCode(
-          await impactAgainst(product, workspace, base, context),
+          report,
           {
-            // n's own subtree is untouched, so the location is transitively
-            // impacted only; the two equal-length witness candidates from n
-            // end at the edited ca and cb, and the byte-least sequence —
-            // [n, ca] — is reported (SPEC 9.2, 9.3, 12.0).
             direct: [],
             transitive: [
               {
