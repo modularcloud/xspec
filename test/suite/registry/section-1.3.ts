@@ -335,10 +335,13 @@ const T1_3_5 = defineProductTest({
   title:
     "duplicate IDs in one file fail with 14.3; the same ID in two files is valid — identities differ by path (SPEC 1.3, 1.5, 14.3)",
   run: async (product) => {
-    // Same-file arm. SPEC 14.3 defines one condition over the duplicate pair;
-    // whether a product reports the duplication once or per occurrence is not
-    // fixed, so one or two findings are accepted — every one of them must be
-    // 14.3, name the file, and point at one of the two `dup` constructs.
+    // Same-file arm. SPEC 14 fixes one 14.3 finding locating every bearer at
+    // its `id` attribute. This arm deliberately accepts one finding for the
+    // duplication or one per occurrence — every one of them must be 14.3,
+    // name the file, and locate inside one of the two `dup` constructs' byte
+    // windows — because TEST-SPEC assigns the every-participant cardinality
+    // to T14-8 and the exact ranges to T14-11 (its §14 preamble), which
+    // assert them strictly.
     const sameFileContext =
       "T1.3-5 `build --json` over two sections with the same ID in one file";
     const findings = await findingsOf(product, DUP_SOURCE, sameFileContext);

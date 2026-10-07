@@ -67,8 +67,12 @@
 //   the exit-2 contract (empty stdout under `--json`, stderr naming the
 //   configuration) for `build` and `check` alike, never a findings row.
 // - T14-4's 14.3 row tolerates one finding for the duplication or one per
-//   occurrence (the T1.3-5 operationalization; SPEC 14.3 fixes no count) —
-//   every reported finding must carry 14.3.
+//   occurrence (the T1.3-5 operationalization) — every reported finding
+//   must carry 14.3, and no location is checked: the sweep asserts reporter
+//   membership. SPEC 14 fixes one 14.3 finding locating every bearer at its
+//   `id` attribute; TEST-SPEC assigns that cardinality to T14-8 and the
+//   exact ranges to T14-11 (its §14 preamble), which assert them strictly
+//   (the T14-8 and T14-11 bullets below).
 // - T14-4 stages each sweep condition in its minimal home form; per-condition
 //   breadth belongs to the home-section tests (TEST-SPEC §14 preamble names
 //   them). The sweep asserts reporter membership: the staged condition is
@@ -1301,8 +1305,13 @@ interface SweepEntry {
     workspace: TestWorkspace,
   ) => Promise<void>;
   /**
-   * SPEC fixes no count for this condition: accept one finding for the
-   * staged defect or one per occurrence (the T1.3-5 operationalization).
+   * This sweep's tolerance, set on the 14.3 row alone: accept one finding
+   * for the staged defect or one per occurrence (the T1.3-5
+   * operationalization), every finding carrying the condition and no
+   * location checked — the sweep asserts reporter membership. SPEC 14
+   * fixes one 14.3 finding locating every bearer at its `id` attribute;
+   * TEST-SPEC assigns that cardinality to T14-8 and the exact ranges to
+   * T14-11, which assert them strictly.
    */
   readonly perOccurrenceTolerated?: boolean;
   /**
@@ -1872,8 +1881,9 @@ function assertSweepFindings(
       fail(
         `${context}: expected the staged ${entry.label} to report condition ` +
           `${entry.condition} — one finding for the defect, or one per ` +
-          `occurrence (SPEC 14.3 fixes no count; the T1.3-5 ` +
-          `operationalization) — got ${JSON.stringify(conditions)}`,
+          `occurrence: this sweep's tolerance (the T1.3-5 ` +
+          `operationalization); SPEC 14's single finding locating every ` +
+          `bearer is T14-8's to assert — got ${JSON.stringify(conditions)}`,
       );
     }
     return;
