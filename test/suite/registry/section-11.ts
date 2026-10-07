@@ -65,7 +65,9 @@
 // - Witness paths are decoded as the inclusive node-identity sequence from
 //   the `--from` node to the `--to` node (the H-3 adapter's model; the
 //   element-wise byte-least tie-break of 12.0 is asserted on that sequence
-//   over a two-equal-paths fixture).
+//   over a two-equal-paths fixture whose byte-least candidate is neither the
+//   fork's first `d` entry nor first in document order, so a first-found
+//   product reports the other).
 // - `--to` with a code location is accepted (SPEC 11: `--from`/`--to` accept
 //   code locations) and — since no edge kind targets a code location (5.2) —
 //   yields an empty edge list at exit 0.
@@ -1442,18 +1444,26 @@ const T11_4 = defineProductTest({
 // The dependency graph (all edges within one file, local `d` references and
 // one embedding; a code file adds a `references` origin):
 //
-//   src/r.ts#f --references--> start --depends--> mid-a --depends--> goal
-//                              start --depends--> mid-b --depends--> goal
+//   src/r.ts#f --references--> start --depends--> mid-b --depends--> goal
+//                              start --depends--> mid-a --depends--> goal
 //                              goal --embeds--> tail
 //   parent --contains--> parent.kid   (no dependency edge between them)
 //
-// start→goal has exactly two shortest witness candidates (via mid-a / via
-// mid-b) — the two-equal-paths fixture for the 12.0 element-wise byte-least
-// tie-break ("mid-a" < "mid-b").
+// start→goal has exactly two shortest witness candidates (via mid-b / via
+// mid-a) — the two-equal-paths fixture for the 12.0 element-wise byte-least
+// tie-break ("mid-a" < "mid-b"). The byte-least candidate, via mid-a, is
+// neither start's first `d` entry nor first in document order: start spells
+// `d={["mid-b", "mid-a"]}`, and mid-b's section — with its `d` edge to goal
+// — precedes mid-a's. A product reporting the first-found candidate (a
+// forward search in `d`-list or document order, or one backward from goal
+// over its incoming edges in document order) therefore reports the route via
+// mid-b, so only the tie-break yields the asserted path. Every positive arm
+// routing through start (start→tail, src/r.ts#f→goal, and the `--kinds
+// depends` and `--kinds depends,embeds` arms) meets the same tie.
 const T11_5_SOURCE = [
-  '<S id="start" d={["mid-a", "mid-b"]}>\nStart.\n</S>',
-  '<S id="mid-a" d={"goal"}>\nMid A.\n</S>',
+  '<S id="start" d={["mid-b", "mid-a"]}>\nStart.\n</S>',
   '<S id="mid-b" d={"goal"}>\nMid B.\n</S>',
+  '<S id="mid-a" d={"goal"}>\nMid A.\n</S>',
   '<S id="goal">\nGoal: {text("tail")}\n</S>',
   '<S id="tail">\nTail.\n</S>',
   '<S id="parent">\nParent.\n\n<S id="parent.kid">\nKid.\n</S>\n</S>',
@@ -1489,7 +1499,9 @@ const T11_5 = defineProductTest({
 
         // The primary arm, both forms: reachable with the tie-break — two
         // equal-length witness candidates exist, and the element-wise
-        // byte-least node-identity sequence (via mid-a) must be reported.
+        // byte-least node-identity sequence (via mid-a, start's second `d`
+        // entry and second in document order) must be reported, never the
+        // first-found one (via mid-b).
         const tieContext = `T11-5 \`query reachable --from ${T11_5_START} --to ${T11_5_GOAL}\``;
         const tie = await queryBothForms({
           product,
@@ -1515,9 +1527,10 @@ const T11_5 = defineProductTest({
           tie.path,
           [T11_5_START, T11_5_MID_A, T11_5_GOAL],
           `${tieContext}: one shortest witness path — two equal-length ` +
-            `candidates exist (via mid-a and via mid-b), and the reported ` +
-            `one must be the element-wise byte-least node-identity sequence ` +
-            `("mid-a" < "mid-b"; SPEC 12.0, 11)`,
+            `candidates exist (via mid-b, start's first \`d\` entry and ` +
+            `first in document order, and via mid-a), and the reported one ` +
+            `must be the element-wise byte-least node-identity sequence ` +
+            `("mid-a" < "mid-b"), not the first-found one (SPEC 12.0, 11)`,
         );
 
         // Positive arms across the kind space: the default covers all three
@@ -1536,7 +1549,8 @@ const T11_5 = defineProductTest({
             path: [T11_5_START, T11_5_MID_A, T11_5_GOAL, T11_5_TAIL],
             what:
               "default kinds are all three dependency kinds — the only " +
-              "paths mix `depends` and `embeds` (tie-break again via mid-a)",
+              "paths mix `depends` and `embeds` (tie-break again: via " +
+              "mid-a, not the first-found mid-b)",
           },
           {
             from: T11_5_F,
@@ -1544,21 +1558,25 @@ const T11_5 = defineProductTest({
             path: [T11_5_F, T11_5_START, T11_5_MID_A, T11_5_GOAL],
             what:
               "`references` is in the default kinds and `--from` accepts a " +
-              "code location (SPEC 11)",
+              "code location (SPEC 11; tie-break again via mid-a)",
           },
           {
             from: T11_5_START,
             to: T11_5_GOAL,
             kinds: "depends",
             path: [T11_5_START, T11_5_MID_A, T11_5_GOAL],
-            what: "`--kinds depends` still reaches goal over `depends` edges alone",
+            what:
+              "`--kinds depends` still reaches goal over `depends` edges " +
+              "alone (tie-break again via mid-a)",
           },
           {
             from: T11_5_START,
             to: T11_5_TAIL,
             kinds: "depends,embeds",
             path: [T11_5_START, T11_5_MID_A, T11_5_GOAL, T11_5_TAIL],
-            what: "`--kinds depends,embeds` — one comma-separated list value",
+            what:
+              "`--kinds depends,embeds` — one comma-separated list value " +
+              "(tie-break again via mid-a)",
           },
           {
             from: T11_5_GOAL,
