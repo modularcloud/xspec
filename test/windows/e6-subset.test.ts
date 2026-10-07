@@ -28,6 +28,10 @@
 //
 // Expected red against the stub product, as diagnosed assertion failures
 // (H-8) — on this leg and on any platform this project is run on locally.
+// S-7's sweep holds the four probes to that against the empty stub
+// (test/self/s7-red-green-sweep.test.ts, which runs them by name — a probe
+// added here joins that list too); the three registered entries are swept
+// with the rest of the registry.
 
 import { test } from "vitest";
 import { DEFAULT_PRODUCT_TEST_TIMEOUT_MS } from "../helpers/registry.js";

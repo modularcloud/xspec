@@ -54,11 +54,12 @@
 // diagnosed-assertion helpers, so against a stub product the fixture fails at
 // its first step as a diagnosed assertion failure on either leg — never a
 // crash or hang — and the writer writes nothing (the CI artifact upload
-// tolerates the empty directory). The Windows-side comparison consults the
-// exchange only after its own fixture run succeeded, and a missing or
-// malformed exchange is then a loud failure (never a skip or a vacuous pass,
-// H-9): with a working product, absent Linux outputs mean broken artifact
-// plumbing.
+// tolerates the empty directory). S-7's sweep holds the fixture to that
+// against the empty stub (test/self/s7-red-green-sweep.test.ts). The
+// Windows-side comparison consults the exchange only after its own fixture
+// run succeeded, and a missing or malformed exchange is then a loud failure
+// (never a skip or a vacuous pass, H-9): with a working product, absent
+// Linux outputs mean broken artifact plumbing.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -163,16 +164,20 @@ function otherSource(version: string): string {
 // (helpers/staged-mdx.ts): its three initial sources and the leaf edit it
 // stages between its baseline invocations and `impact`. S-9's check runs
 // before any product exists for a deterministic fixture's files, yet this
-// fixture is no registry entry — S-7's sweep never runs it, no per-body mark
-// is in effect, and the builder's undeclared-staging guard reaches only the
-// leaf edit (a staging after product invocations in its workspace), never
-// `create()`'s initial files — so nothing but the S-9 self-test judges these
-// sources first: test/self/s9-staged-sources.test.ts imports this module
-// itself, before the registry manifest seals the ledger, and judges every
-// record. The records' names lead with the fixture's §18 ID rather than a
-// test ID. Its configuration and code source are TypeScript records
-// (helpers/staged-ts.ts) for the same reason, judged by the same self-test
-// with S-9's TypeScript check.
+// fixture is no registry entry. Its own runs (the Linux leg's writer, the
+// Windows leg's byte-identity test) carry no per-body mark, so the builder's
+// undeclared-staging guard reaches only the leaf edit (a staging after
+// product invocations in its workspace), never `create()`'s initial files;
+// and S-7's sweep, which runs it against the empty stub
+// (test/self/s7-red-green-sweep.test.ts), stages the initial files but
+// fails at the first step, before the leaf edit. So the S-9 self-test
+// judges every one of these sources before any product exists:
+// test/self/s9-staged-sources.test.ts imports this module itself, before
+// the registry manifest seals the ledger, and judges every record (S-7's
+// sweep imports it before the manifest as well). The records' names lead
+// with the fixture's §18 ID rather than a test ID. Its configuration and
+// code source are TypeScript records (helpers/staged-ts.ts) for the same
+// reason, judged by the same self-test with S-9's TypeScript check.
 const E6_OTHER_VERSION_ONE = stagedMdx(
   "E-6 specs/Other.mdx version one — the initial source",
   otherSource("version one"),

@@ -51,9 +51,9 @@
 // handed a neutral file name of the record's grammar) before any product
 // exists. Also verified: the records' invariants once the registry has
 // loaded (sealed, non-empty, uniquely named after registered tests or E-6;
-// the Windows leg's drive-mismatch arm's configuration and spec source,
-// helpers/e6-drive-mismatch.ts — staged at creation outside every
-// registered body and S-7's sweep — imported before the seal like E-6's),
+// T11.6-1's drive-mismatch arm's configuration and spec source,
+// helpers/e6-drive-mismatch.ts — staged at creation, on the Windows leg
+// outside every registered body — imported before the seal like E-6's),
 // their registration rules on a fresh instance, and the builder's record
 // overload — `file()` and `create()`'s initial `files` stage a record's
 // bytes under the record's declaration, whatever the path's name or
@@ -90,15 +90,17 @@ import {
 } from "../helpers/workspace.js";
 import type { WorkspaceDecl, WorkspaceMdxDecl } from "../helpers/workspace.js";
 // The E-6 exchange fixture (helpers/e6.ts) is no registry entry, yet stages
-// four `.mdx` sources no sweep reaches — three initial files, and one edit
-// after its first invocations — as records of its own, which this import
-// registers BEFORE the registry manifest below seals the ledger.
+// four `.mdx` sources — three initial files, and one edit after its first
+// invocations, which S-7's sweep against the empty stub never reaches — as
+// records of its own, which this import registers BEFORE the registry
+// manifest below seals the ledger.
 import "../helpers/e6.js";
-// Likewise the Windows leg's drive-mismatch arm of T11.6-1
-// (test/windows/e6-drive-mismatch.test.ts): it stages its configuration and
-// spec source at creation, outside every registered body and S-7's sweep,
-// as records of helpers/e6-drive-mismatch.ts, registered here before the
-// seal and judged below.
+// Likewise T11.6-1's drive-mismatch arm (helpers/e6-drive-mismatch-arm.ts,
+// run by the Windows leg's test/windows/e6-drive-mismatch.test.ts): it
+// stages its configuration and spec source at creation — on the Windows
+// leg outside every registered body — as records of
+// helpers/e6-drive-mismatch.ts, registered here before the seal and judged
+// below.
 import {
   ANCHOR_CONFIG as DRIVE_MISMATCH_CONFIG,
   ANCHOR_SOURCE as DRIVE_MISMATCH_SOURCE,
@@ -917,11 +919,12 @@ describe("S-9: the staged TypeScript records, once the registry has loaded", () 
       }
     }
     // The fixture's configuration and code source, staged at its creation
-    // outside every registered body and S-7's sweep, are judged here alone.
+    // outside every registered body (S-7's sweep stages them only against
+    // the empty stub), are judged here before any product exists.
     expect(e6Records).toBe(2);
   });
 
-  test("hold the Windows leg's drive-mismatch configuration, and the MDX ledger its spec source (test/windows/e6-drive-mismatch.test.ts stages both at creation, outside every registered body and S-7's sweep): judged here, before any product exists", () => {
+  test("hold the drive-mismatch arm's configuration, and the MDX ledger its spec source (helpers/e6-drive-mismatch-arm.ts stages both at creation, on the Windows leg outside every registered body): judged here, before any product exists", () => {
     expect(TS_LEDGER).toContain(DRIVE_MISMATCH_CONFIG);
     expect(LEDGER).toContain(DRIVE_MISMATCH_SOURCE);
     expect(DRIVE_MISMATCH_CONFIG.ts).toBe("well-formed");

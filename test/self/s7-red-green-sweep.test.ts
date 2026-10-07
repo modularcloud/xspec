@@ -1,8 +1,9 @@
 // S-7 red-green sweep (TEST-SPEC 17 S-7, §0 H-8). Against an empty stub
 // product — every command exits with an unexpected code and no output — every
-// product-facing test in the registry must fail with a diagnosed assertion
-// failure (a `HarnessAssertionError`, helpers/assertions.ts), and the sweep
-// must complete with no harness error, no hang, and no false pass.
+// product-facing test, the registry's entries and the bodies outside the
+// registry alike, must fail with a diagnosed assertion failure (a
+// `HarnessAssertionError`, helpers/assertions.ts), and the sweep must
+// complete with no harness error, no hang, and no false pass.
 //
 // The sweep target is the harness-owned stub fixture
 // (test/fixtures/empty-stub/bin.mjs), deliberately not src/'s pre-product
@@ -10,7 +11,7 @@
 // to the placeholder would lose its subject the moment Phase 10 implements
 // the product. This file keeps S-7 green in every phase.
 //
-// Three layers, so the sweep's premise is pinned even while the registry is
+// Four layers, so the sweep's premise is pinned even while the registry is
 // still being populated:
 //   1. the stub fixture's own contract (unexpected exit code, silence,
 //      no filesystem effects) is asserted directly;
@@ -23,16 +24,46 @@
 //      (C-2 one code path). While the manifest is empty (no SUITE-*/PROP-*
 //      task has landed yet) the sweep is vacuously satisfied and layer 2
 //      carries the check; suite completeness itself is gated elsewhere (S-1
-//      traceability and the phase gate), not here.
+//      traceability and the phase gate), not here;
+//   4. the product-facing bodies outside the registry — §18's E-6
+//      machinery, keyed to no registry entry — run against the stub through
+//      the same runner, each wrapped as a synthetic entry in the reserved
+//      section-99 ID space: the representative fixture
+//      (`runE6RepresentativeFixture`, helpers/e6.ts), which
+//      test/suite/e6-exchange-writer.test.ts and the Windows leg's
+//      test/windows/e6-byte-identity.test.ts run before they touch the
+//      exchange; the Windows leg's four single-casing probes
+//      (test/windows/e6-subset.test.ts — T7-4's, T10.1-2's, T10.1-3's, and
+//      T12.0-6's, the probe functions their registered bodies share); and
+//      T11.6-1's drive-mismatch arm (`runT1161DriveMismatchArm`,
+//      helpers/e6-drive-mismatch-arm.ts, the body of
+//      test/windows/e6-drive-mismatch.test.ts). Each must reach the stub and
+//      fail there, diagnosed, exactly as a registered body must.
 
 import { expect, onTestFinished, test } from "vitest";
 import { fileURLToPath } from "node:url";
 import { assertExitCode } from "../helpers/assertions.js";
 import { defineProductTest } from "../helpers/registry.js";
+import type { ProductTestEntry } from "../helpers/registry.js";
 import { runProduct } from "../helpers/subprocess.js";
 import type { ProductBinding } from "../helpers/subprocess.js";
 import { TestWorkspace } from "../helpers/workspace.js";
+// Layer 4's bodies outside the registry. helpers/e6.ts and the drive-mismatch
+// arm's records module (helpers/e6-drive-mismatch.ts, which the arm imports)
+// create staged-source records at module load, so these two imports must
+// precede the registry manifest's below, which seals the ledgers — a record
+// created after the seal throws (test/self/s9-staged-sources.test.ts keeps
+// the same order).
+import { runE6RepresentativeFixture } from "../helpers/e6.js";
+import { runT1161DriveMismatchArm } from "../helpers/e6-drive-mismatch-arm.js";
 import { productTestSuite } from "../suite/registry/index.js";
+import {
+  runT1012SessionNameCasingProbe,
+  runT1013WrongCaseExtensionProbe,
+} from "../suite/registry/section-10.1.js";
+import { runT1206SingleCasingPathProbe } from "../suite/registry/section-12.0-i.js";
+import { runT74SingleCasingGlobProbe } from "../suite/registry/section-7-discovery.js";
+import type { FixtureRunReport } from "./certification-runner.js";
 import {
   renderFixtureReport,
   runProductTests,
@@ -170,5 +201,112 @@ test(
       error: 0,
       hang: 0,
     });
+  },
+);
+
+// Layer 4 (module header): the product-facing bodies outside the registry,
+// each wrapped as a synthetic entry in the reserved section-99 ID space
+// (never part of the manifest), so the certification runner judges each
+// exactly as it judges a registered body — a `HarnessAssertionError` a
+// fail, anything else thrown an error, a normal return a pass, a body that
+// never settles a hang. Each entry's budget is its own test's Vitest
+// timeout: the two E-6 fixture tests allow 300 s for the fixture's 25
+// invocations, the Windows leg's probes and arm the registry default.
+const E6_FIXTURE_BUDGET_MS = 300_000;
+
+const BODIES_OUTSIDE_THE_REGISTRY: readonly ProductTestEntry[] = [
+  defineProductTest({
+    id: "T99.7-2",
+    title:
+      "the E-6 representative fixture (`runE6RepresentativeFixture`, helpers/e6.ts), run first by test/suite/e6-exchange-writer.test.ts and test/windows/e6-byte-identity.test.ts",
+    timeoutMs: E6_FIXTURE_BUDGET_MS,
+    run: async (product) => {
+      await runE6RepresentativeFixture(product);
+    },
+  }),
+  defineProductTest({
+    id: "T99.7-3",
+    title:
+      "T7-4's single-casing glob probe (`runT74SingleCasingGlobProbe`), rerun by test/windows/e6-subset.test.ts",
+    run: runT74SingleCasingGlobProbe,
+  }),
+  defineProductTest({
+    id: "T99.7-4",
+    title:
+      "T10.1-2's single-casing session-name probe (`runT1012SessionNameCasingProbe`), rerun by test/windows/e6-subset.test.ts",
+    run: runT1012SessionNameCasingProbe,
+  }),
+  defineProductTest({
+    id: "T99.7-5",
+    title:
+      "T10.1-3's wrong-case extension probe (`runT1013WrongCaseExtensionProbe`), rerun by test/windows/e6-subset.test.ts",
+    run: runT1013WrongCaseExtensionProbe,
+  }),
+  defineProductTest({
+    id: "T99.7-6",
+    title:
+      "T12.0-6's single-casing path probe (`runT1206SingleCasingPathProbe`), rerun by test/windows/e6-subset.test.ts",
+    run: runT1206SingleCasingPathProbe,
+  }),
+  defineProductTest({
+    id: "T99.7-7",
+    title:
+      "T11.6-1's drive-mismatch arm (`runT1161DriveMismatchArm`, helpers/e6-drive-mismatch-arm.ts), the body of test/windows/e6-drive-mismatch.test.ts",
+    run: runT1161DriveMismatchArm,
+  }),
+];
+
+/**
+ * Layer 4's verdict (H-8): every body failed as a diagnosed assertion
+ * failure, and each diagnosis names the stub's exit code — the body reached
+ * the stub and was rejected for its answer (H-5: every test asserts the
+ * exact exit code), not by a harness-side check before any invocation. Any
+ * other outcome is named by test ID, with the runner's report.
+ */
+function expectEveryBodyFailedAtTheStub(report: FixtureRunReport): void {
+  const stubAnswer = `exit code ${STUB_EXIT_CODE}`;
+  const offenders = report.results.filter(
+    (result) =>
+      result.outcome !== "fail" ||
+      !(result.diagnosis ?? "").includes(stubAnswer),
+  );
+  if (offenders.length > 0) {
+    const named = offenders
+      .map(
+        (result) =>
+          `${result.id} (${
+            result.outcome === "fail"
+              ? `a diagnosis not naming the stub's ${stubAnswer}`
+              : result.outcome
+          })`,
+      )
+      .join(", ");
+    throw new Error(
+      `S-7 red-green sweep violated outside the registry: ${named} — every ` +
+        `product-facing body must fail as a diagnosed assertion failure at ` +
+        `the empty stub's answer (H-8: a pass here is a false pass; an error ` +
+        `or hang is a harness defect).\n${renderFixtureReport(report)}`,
+    );
+  }
+  expect(report.counts).toEqual({
+    pass: 0,
+    fail: report.results.length,
+    error: 0,
+    hang: 0,
+  });
+}
+
+test(
+  "S-7: every product-facing body outside the registry — the E-6 representative fixture, the Windows leg's four single-casing probes (T7-4, T10.1-2, T10.1-3, T12.0-6), and T11.6-1's drive-mismatch arm — fails as a diagnosed assertion failure at the empty stub's answer, with no false pass, harness error, or hang (H-8)",
+  { timeout: SWEEP_TIMEOUT_MS },
+  async () => {
+    // Six bodies, each exiting at its first invocation against the stub:
+    // one lane apiece.
+    const report = await runProductTests(
+      emptyStubBinding(),
+      BODIES_OUTSIDE_THE_REGISTRY,
+      { concurrency: BODIES_OUTSIDE_THE_REGISTRY.length },
+    );
+    expectEveryBodyFailedAtTheStub(report);
   },
 );

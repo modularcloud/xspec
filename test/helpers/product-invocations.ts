@@ -41,10 +41,12 @@
 //   workspace's initial `files` above all, which only this mark can refuse
 //   (at creation the workspace's own mark cannot be set yet: its root was
 //   registered an instant before, and nothing has run in it). Outside such
-//   a context — a self-test, the E-6 fixture of helpers/e6.ts, the Windows
-//   leg's drive-mismatch arm (whose initial files are records of
-//   helpers/e6-drive-mismatch.ts for that reason) — the per-workspace mark
-//   stands alone, and a creation is never refused.
+//   a context — a self-test, the E-6 fixture of helpers/e6.ts and the
+//   Windows leg's drive-mismatch arm (helpers/e6-drive-mismatch-arm.ts,
+//   whose initial files are records of helpers/e6-drive-mismatch.ts for
+//   that reason) in their own tests — the per-workspace mark stands alone,
+//   and a creation is never refused; S-7's sweep runs those two through the
+//   runner, inside a body context, against the empty stub.
 //
 // Every subprocess the driver starts counts, whatever its binding: a
 // certification fixture, the empty stub, or a compiled consumer program
