@@ -152,50 +152,64 @@
 //   byte-asserted against T6.5-13's composed forms. Delta content is
 //   T6.6-5's business — asserted here only as the decode's success
 //   encoding (non-null beside `mapping` and `files`).
-// - T6.6-5 asserts the delta's content record-based, its expected sets
-//   composed from the premise build's own observed writes (H-4): a source
-//   `DIR/NAME.mdx`'s module-and-companion paths are the plain files the
-//   build added under the 13.1 name shape `DIR/NAME.xspec.<suffix>` — the
-//   module `DIR/NAME.xspec.ts` asserted present; the companion suffix set
-//   is implementation latitude, so it is observed, never assumed — and its
-//   Markdown path is the 13.2/7.3 destination, `DIR/NAME.md` next to the
-//   source with `outDir` unset. Derived paths of a file not existing before
-//   the operation (the moved-to file, the created target) are the origin's
-//   observed suffix set transposed under the destination name (SPEC 13.1:
-//   per-source derived paths are defined by the `NAME.mdx` name shape
-//   alone). A partition self-check makes every premise-build write
-//   attributable — graph data (T13.3-2's key rule, shared from
-//   section-13.3.ts) or exactly one staged source's
-//   module/companion/Markdown — failing diagnosed otherwise (SPEC 13.1–13.3
-//   enumerate what `build` writes). The record itself is opaque (H-4), so
-//   "recorded" is pinned through 13.3's contract — the record holds the
-//   paths of the derived files most recently generated, exactly the premise
-//   build's observed writes — and the delta assertions discriminate a
-//   product recording anything else. The record-deleted arm (T13.3-2's
-//   operational definition) asserts the record-based rule from both
-//   directions: `generated` equal to the FULL post-move regeneration set —
-//   the staying sources' paths listed although their files sit on disk, the
-//   origin's still-on-disk paths in neither direction — and `removed`
-//   exactly [] (nothing recorded), so a presence-based product fails both
-//   set equalities. An absent record is nothing-recorded, the empty-record
-//   SUCCESS path (SPEC 6.6: findings [], delta a plain value) — never the
-//   14.23 unavailability of T6.6-6, which covers recorded state that exists
-//   but cannot be read — and the preview never refreshes it (whole-root
-//   compare around the invocation; graph data asserted still absent
-//   afterward). The lagging-record arm builds WITHOUT emission, then enables
-//   `markdown.emit` in the configuration and takes the same move preview
-//   with no rebuild: the record holds modules and companions alone — a
-//   lagging record alone is never staleness (SPEC 13.3), and a preview
-//   never refreshes it — so `generated` is exactly the destination's
-//   module, companions, and Markdown together with every OTHER discovered
-//   source's Markdown emit destination (the paths the current configuration
-//   generates that the stale record lacks; the staying sources' recorded
-//   modules and companions regenerate in place, in neither direction; the
-//   origin's Markdown, never recorded and not generated post-move, in
-//   neither) and `removed` exactly the recorded pre-move module and
-//   companions, no Markdown among them — a product composing either
-//   direction from the configuration alone, or from presence, fails a set
-//   equality; whole-root compare around the invocation.
+// - T6.6-5 asserts the delta's content record-based, every expected set
+//   composed from the `recorded` set the inventory reports right after
+//   each premise build — before graph data is deleted or the configuration
+//   changed (TEST-SPEC T6.6-5; SPEC 11.6: the record-supplied datum, the
+//   recorded derived-file paths, companions included). After a successful
+//   build that datum is the plain list (13.3: a record exists and is
+//   readable), and each recorded path is attributed to exactly one staged
+//   source — its module or a companion under the 13.1 name shape
+//   `DIR/NAME.xspec.<suffix>` (the suffix set is the product's own, H-4:
+//   read from the record, never assumed) or, the build having emitted
+//   Markdown, its 13.2/7.3 destination `DIR/NAME.md` next to the source
+//   (`outDir` unset) — every source's module and, with emission, its
+//   Markdown named; each slip fails diagnosed (H-8). A moved or created
+//   file's derived paths are the origin's recorded entries re-based: each
+//   entry's `DIR/NAME` replaced by the destination's directory and name,
+//   its suffix kept (SPEC 13.1: per-source derived paths are defined by the
+//   `NAME.mdx` name shape alone). The premise build's own writes stay a
+//   premise check alone — the module written, with emission the Markdown,
+//   and every write attributable to graph data (T13.3-2's key rule, shared
+//   from section-13.3.ts) or exactly one staged source, SPEC 13.1–13.3
+//   enumerating what `build` writes — which arms the presence
+//   discrimination below; no expectation is composed from the writes, and
+//   nothing requires them equal to the record (T11.6-3 pins the record's
+//   content). With the record present, `removed` is exactly the moved
+//   file's recorded module, companions, and Markdown and `generated` those
+//   entries re-based to the destination; a rename reports [] both ways;
+//   the created target (T6.6-4(d)'s staging, no emission) reports the new
+//   file's module and companions, re-based from the origin's recorded
+//   entries, under `generated` and `removed` []. The record-deleted arm
+//   (T13.3-2's operational definition) asserts the record-based rule from
+//   both directions: `generated` equal to the FULL post-move regeneration
+//   set — every path the build recorded, the moved file's re-based to its
+//   destination: the staying sources' paths listed although their files
+//   sit on disk, the origin's still-on-disk paths in neither direction —
+//   and `removed` exactly [] (nothing recorded), so a presence-based
+//   product fails both set equalities. An absent record is
+//   nothing-recorded, the empty-record SUCCESS path (SPEC 6.6: findings [],
+//   delta a plain value) — never the 14.23 unavailability of T6.6-6, which
+//   covers recorded state that exists but cannot be read — and the preview
+//   never refreshes it (whole-root compare around the invocation; graph
+//   data asserted still absent afterward). The lagging-record arm builds
+//   WITHOUT emission and reads the record before enabling `markdown.emit`
+//   in the configuration, then takes the same move preview with no
+//   rebuild: the record holds modules and companions alone (a recorded
+//   Markdown path is attributable to no source, emission having been
+//   disabled, 7.3) — a lagging record alone is never staleness (SPEC 13.3),
+//   and a preview never refreshes it — so `generated` is exactly the
+//   destination's module and companions (the origin's recorded entries
+//   re-based) and its Markdown together with every OTHER discovered
+//   source's Markdown emit destination (the paths the current
+//   configuration generates that the stale record lacks; the staying
+//   sources' recorded modules and companions regenerate in place, in
+//   neither direction; the origin's Markdown, never recorded and not
+//   generated post-move, in neither) and `removed` exactly the origin's
+//   recorded module and companions, no Markdown among them — a product
+//   composing either direction from the configuration alone, or from
+//   presence, fails a set equality; whole-root compare around the
+//   invocation.
 // - T6.6-6 stages the unreadable record through the H-3 corrupt-record
 //   adapter (record-staging.ts): shape-blind garbage — files present, their
 //   bytes readable as no record, not even valid UTF-8 — over every
@@ -248,6 +262,7 @@ import {
   GRAPH_DATA_AREA_PATH,
   corruptGraphDataShapeBlind,
   decodeFindingsReport,
+  decodeInventoryRecordedDatum,
   decodePerformedOperationReport,
   decodePreviewReport,
   renderPathValue,
@@ -3067,41 +3082,28 @@ function byteSortedPaths(paths: readonly string[]): readonly string[] {
   );
 }
 
-/** One staged source's observed derived files (module header, H-4). */
-interface ObservedDerived {
-  /** Observed `DIR/NAME.xspec.<suffix>` paths, byte-sorted. */
-  readonly moduleAndCompanions: readonly string[];
-  /** The Markdown destination; `null` while emission is disabled. */
-  readonly markdown: string | null;
-}
-
-/** Every derived path of one source — module, companions, Markdown. */
-function derivedPathsOf(observed: ObservedDerived): readonly string[] {
-  return [
-    ...observed.moduleAndCompanions,
-    ...(observed.markdown === null ? [] : [observed.markdown]),
-  ];
-}
-
 /**
- * Partition the premise build's written files into graph data and each
- * staged source's derived files (module header, H-4): per source, the
- * observed `DIR/NAME.xspec.<suffix>` plain files — the module
- * `DIR/NAME.xspec.ts` asserted present (SPEC 13.1), a suffix containing a
- * path separator rejected (every companion is a plain file beside the
- * module) — plus, with emission enabled, the 13.2/7.3 Markdown destination
- * asserted written. A write that is neither graph data nor attributable to
- * a staged source fails diagnosed: SPEC 13.1–13.3 enumerate what `build`
- * writes.
+ * Premise check of what the premise `build` wrote (module header, H-4):
+ * the written files partition into graph data (T13.3-2's key rule) and each
+ * staged source's derived files — per source, the `DIR/NAME.xspec.<suffix>`
+ * plain files, the module `DIR/NAME.xspec.ts` asserted written (SPEC 13.1)
+ * and a suffix containing a path separator rejected (every companion is a
+ * plain file beside the module), plus, with emission enabled, the 13.2/7.3
+ * Markdown destination asserted written. A write that is neither graph data
+ * nor attributable to a staged source fails diagnosed: SPEC 13.1–13.3
+ * enumerate what `build` writes. The check arms the record-deleted arm's
+ * presence discrimination (every staying source's derived files sit on
+ * disk); no expectation is composed from these writes, and nothing requires
+ * them equal to the record (`readRecordedDerived`; T11.6-3 pins the
+ * record's content).
  */
-function observeDerivedWrites(
+function assertPremiseBuildWrites(
   written: readonly string[],
   sources: readonly string[],
   emission: boolean,
   context: string,
-): ReadonlyMap<string, ObservedDerived> {
+): void {
   const unattributed = new Set(written.filter((path) => !isGraphDataKey(path)));
-  const observed = new Map<string, ObservedDerived>();
   for (const source of sources) {
     const prefix = moduleCompanionPrefix(source);
     const moduleAndCompanions = byteSortedPaths(
@@ -3125,9 +3127,8 @@ function observeDerivedWrites(
           `[${moduleAndCompanions.join(", ")}]`,
       );
     }
-    let markdown: string | null = null;
     if (emission) {
-      markdown = markdownDestination(source);
+      const markdown = markdownDestination(source);
       if (!unattributed.has(markdown)) {
         fail(
           `${context}: with emission enabled, ${source} emits ${markdown} — ` +
@@ -3137,7 +3138,6 @@ function observeDerivedWrites(
       }
       unattributed.delete(markdown);
     }
-    observed.set(source, { moduleAndCompanions, markdown });
   }
   if (unattributed.size > 0) {
     fail(
@@ -3147,30 +3147,155 @@ function observeDerivedWrites(
         `[${[...unattributed].join(", ")}]`,
     );
   }
-  return observed;
 }
 
 /**
- * The origin's observed module-and-companion paths transposed under another
- * source name — SPEC 13.1: per-source derived paths are defined by the
- * `NAME.mdx` name shape alone, so a not-yet-existing file's set is the
- * observed suffix set under its own `DIR/NAME.xspec.` prefix.
+ * The staged sources a recorded path is attributable to (T6.6-5): each
+ * source whose 13.1 name shape the path has — `DIR/NAME.xspec.` plus a
+ * non-empty suffix holding no path separator (the module and every
+ * companion are plain files beside it) — or, the build having run with
+ * emission enabled, whose 13.2/7.3 Markdown destination it is (`DIR/NAME.md`,
+ * `outDir` unset; with emission disabled no path is a Markdown emit
+ * destination, 7.3).
  */
-function transposeModuleCompanions(
-  observed: ObservedDerived,
+function recordedPathOwners(
+  path: string,
+  sources: readonly string[],
+  emission: boolean,
+): readonly string[] {
+  return sources.filter((source) => {
+    const prefix = moduleCompanionPrefix(source);
+    if (path.startsWith(prefix)) {
+      const suffix = path.slice(prefix.length);
+      return suffix.length > 0 && !suffix.includes("/");
+    }
+    return emission && path === markdownDestination(source);
+  });
+}
+
+/**
+ * Read the record T6.6-5 composes every expectation from (module header,
+ * H-4; TEST-SPEC T6.6-5: "composed from the `recorded` set the inventory
+ * reported after the build"): `inventory --json` right after the premise
+ * `build` — before graph data is deleted or the configuration changed —
+ * exit 0, its record-supplied datum decoded form-exact (SPEC 11.6, 12.7).
+ * After a successful build the datum is the plain list (13.3: a record
+ * exists and is readable — never unavailability, never null), and every
+ * recorded path is attributed to exactly one staged source
+ * (`recordedPathOwners`): a path no staged source owns — graph data records
+ * no paths of its own (13.3), and a byte-form path is no staged source's —
+ * fails diagnosed. The record names every source's module (13.1) and, the
+ * build having emitted Markdown, every source's Markdown (13.2): the paths
+ * of the derived files most recently generated (13.3). The companions are
+ * whatever the record lists — their suffixes are the product's own (H-4),
+ * never assumed. Returns each staged source's recorded paths, byte-sorted.
+ */
+async function readRecordedDerived(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  sources: readonly string[],
+  emission: boolean,
+  context: string,
+): Promise<ReadonlyMap<string, readonly string[]>> {
+  const inventoryContext = `${context}: \`inventory --json\` after the premise build`;
+  const recorded = decodeInventoryRecordedDatum(
+    await runJson(
+      product,
+      workspace,
+      ["inventory", "--json"],
+      inventoryContext,
+    ),
+    inventoryContext,
+  );
+  if (recorded.state !== "value") {
+    fail(
+      `${inventoryContext}: after a successful \`build\` the record-` +
+        `supplied datum is the plain list of recorded derived-file paths ` +
+        `— never unavailability, never null (SPEC 13.3, 11.6, 12.7); got ` +
+        `state ${JSON.stringify(recorded.state)}`,
+    );
+  }
+  const rendered = JSON.stringify(recorded.value.map(renderPathValue));
+  const attributed = new Map<string, string[]>(
+    sources.map((source) => [source, []]),
+  );
+  for (const entry of recorded.value) {
+    const owners =
+      typeof entry === "string"
+        ? recordedPathOwners(entry, sources, emission)
+        : [];
+    if (typeof entry !== "string" || owners.length === 0) {
+      fail(
+        `${inventoryContext}: the record lists ${renderPathValue(entry)}, ` +
+          `attributable to no staged source — every recorded path is a ` +
+          `source's module or companion, \`DIR/NAME.xspec.\` plus a suffix, ` +
+          `a plain file beside the module (SPEC 13.1), or ` +
+          (emission
+            ? `its emitted Markdown at its 13.2/7.3 destination`
+            : `nothing else, the build having emitted no Markdown (7.3)`) +
+          `; graph data records no paths of its own (13.3); recorded ` +
+          rendered,
+      );
+    }
+    if (owners.length > 1) {
+      throw new Error(
+        `T6.6-5 staging self-check: ${entry} is attributable to several ` +
+          `staged sources [${owners.join(", ")}]`,
+      );
+    }
+    attributed.get(owners[0]!)!.push(entry);
+  }
+  for (const source of sources) {
+    const paths = attributed.get(source)!;
+    const modulePath = `${moduleCompanionPrefix(source)}ts`;
+    if (!paths.includes(modulePath)) {
+      fail(
+        `${inventoryContext}: the record names the derived files the build ` +
+          `generated — ${source}'s module ${modulePath} among them (SPEC ` +
+          `13.1, 13.3, 11.6); recorded ${rendered}`,
+      );
+    }
+    const markdown = markdownDestination(source);
+    if (emission && !paths.includes(markdown)) {
+      fail(
+        `${inventoryContext}: the build emitted Markdown, so the record ` +
+          `names ${source}'s ${markdown} — the paths of the derived files ` +
+          `most recently generated, the emitted Markdown included (SPEC ` +
+          `13.2, 13.3, 11.6); recorded ${rendered}`,
+      );
+    }
+  }
+  return new Map(
+    [...attributed].map(([source, paths]) => [source, byteSortedPaths(paths)]),
+  );
+}
+
+/**
+ * Re-base one source's recorded derived paths to another source path
+ * (TEST-SPEC T6.6-5: "the moved file's entries re-based to its
+ * destination"): each path's `DIR/NAME` is replaced by the destination's
+ * directory and name, its suffix kept — `.xspec.<suffix>` for the module and
+ * each companion (SPEC 13.1: per-source derived paths are defined by the
+ * `NAME.mdx` name shape alone) and `.md` for the Markdown (13.2, 7.3: next
+ * to its source, `outDir` unset). Returned byte-sorted.
+ */
+function rebaseRecordedPaths(
+  paths: readonly string[],
   fromSource: string,
   toSource: string,
 ): readonly string[] {
-  const fromPrefix = moduleCompanionPrefix(fromSource);
-  const toPrefix = moduleCompanionPrefix(toSource);
-  return observed.moduleAndCompanions.map((path) => {
-    if (!path.startsWith(fromPrefix)) {
-      throw new Error(
-        `T6.6-5 staging self-check: ${path} must lie under ${fromPrefix}`,
-      );
-    }
-    return `${toPrefix}${path.slice(fromPrefix.length)}`;
-  });
+  const fromStem = sourceStem(fromSource);
+  const toStem = sourceStem(toSource);
+  return byteSortedPaths(
+    paths.map((path) => {
+      if (!path.startsWith(`${fromStem}.`)) {
+        throw new Error(
+          `T6.6-5 staging self-check: ${path} must lie under ${fromStem}.`,
+        );
+      }
+      return `${toStem}${path.slice(fromStem.length)}`;
+    }),
+  );
 }
 
 /**
@@ -3262,24 +3387,32 @@ const T6_6_5 = defineProductTest({
           after,
           `${context}: staging premise — the record the delta consults`,
         );
-        const observed = observeDerivedWrites(
+        assertPremiseBuildWrites(
           addedFiles(before, after),
           [C4_MV, C4_PAL, C4_USER],
           true,
           `${context} staging observation`,
         );
-        // `get` cannot miss: observeDerivedWrites maps exactly the sources.
-        const mv = observed.get(C4_MV)!;
-        const pal = observed.get(C4_PAL)!;
-        const user = observed.get(C4_USER)!;
+        // The record the delta consults, read before graph data is deleted
+        // below; every expectation in this workspace is composed from it.
+        const recorded = await readRecordedDerived(
+          product,
+          workspace,
+          [C4_MV, C4_PAL, C4_USER],
+          true,
+          `${context} staging`,
+        );
+        // `get` cannot miss: readRecordedDerived maps exactly the sources.
+        const mv = recorded.get(C4_MV)!;
+        const pal = recorded.get(C4_PAL)!;
+        const user = recorded.get(C4_USER)!;
 
-        // The destination's derived paths — nothing recorded there — and
-        // the moved file's recorded paths, left no longer generated.
-        const destinationDerived = byteSortedPaths([
-          ...transposeModuleCompanions(mv, C4_MV, F5_DEST),
-          markdownDestination(F5_DEST),
-        ]);
-        const originDerived = byteSortedPaths(derivedPathsOf(mv));
+        // The moved file's recorded paths — module, companions, Markdown —
+        // are what the operation leaves no longer generated; re-based to the
+        // destination they are what it newly generates, nothing being
+        // recorded there.
+        const destinationDerived = rebaseRecordedPaths(mv, C4_MV, F5_DEST);
+        const originDerived = mv;
 
         await assertLeavesUnchanged(
           workspace.root,
@@ -3329,15 +3462,17 @@ const T6_6_5 = defineProductTest({
         await deleteGraphData(workspace, deletedContext);
         // With nothing recorded, every path the operation would generate is
         // a path "where nothing is currently recorded as generated": the
-        // full post-move regeneration set — every post-move source's
-        // module, companions, and Markdown, the staying sources' present-
-        // on-disk files included (presence cannot tell a generated occupant
-        // from a foreign one, SPEC 6.6) — while `removed` is exactly []:
-        // the origin's still-on-disk files are recorded nowhere.
+        // full post-move regeneration set — every recorded path of the
+        // build, the moved file's re-based to its destination: every
+        // post-move source's module, companions, and Markdown, the staying
+        // sources' present-on-disk files included (presence cannot tell a
+        // generated occupant from a foreign one, SPEC 6.6) — while `removed`
+        // is exactly []: the origin's still-on-disk files are recorded
+        // nowhere.
         const fullRegenerationSet = byteSortedPaths([
           ...destinationDerived,
-          ...derivedPathsOf(pal),
-          ...derivedPathsOf(user),
+          ...pal,
+          ...user,
         ]);
         await assertLeavesUnchanged(
           workspace.root,
@@ -3385,19 +3520,28 @@ const T6_6_5 = defineProductTest({
           `${context}: staging premise \`build\` (SPEC 6.5, 6.6)`,
         );
         const after = await snapshotDirectory(workspace.root);
-        const observed = observeDerivedWrites(
+        assertPremiseBuildWrites(
           addedFiles(before, after),
           [D4_SOLO],
           false,
           `${context} staging observation`,
         );
-        const solo = observed.get(D4_SOLO)!;
-        // The created file's derived paths: the destination's module and
-        // companions — no Markdown component, emission being disabled
-        // (SPEC 7.3, 13.1). The origin file stays, its recorded paths
-        // regenerated in place, so `removed` is exactly [].
-        const madeDerived = byteSortedPaths(
-          transposeModuleCompanions(solo, D4_SOLO, D4_MADE),
+        const recorded = await readRecordedDerived(
+          product,
+          workspace,
+          [D4_SOLO],
+          false,
+          `${context} staging`,
+        );
+        // The created file's derived paths: the origin's recorded module and
+        // companions re-based to the new file — no Markdown component,
+        // emission being disabled (SPEC 7.3, 13.1). The origin file stays,
+        // its recorded paths regenerated in place, so `removed` is exactly
+        // [].
+        const madeDerived = rebaseRecordedPaths(
+          recorded.get(D4_SOLO)!,
+          D4_SOLO,
+          D4_MADE,
         );
         await assertLeavesUnchanged(
           workspace.root,
@@ -3444,13 +3588,23 @@ const T6_6_5 = defineProductTest({
           after,
           `${context}: staging premise — the record the delta consults`,
         );
-        const observed = observeDerivedWrites(
+        assertPremiseBuildWrites(
           addedFiles(before, after),
           [C4_MV, C4_PAL, C4_USER],
           false,
           `${context} staging observation`,
         );
-        const mv = observed.get(C4_MV)!;
+        // The record as the emission-less build left it, read before the
+        // configuration changes: modules and companions alone, a recorded
+        // Markdown path being attributable to no source (7.3).
+        const recorded = await readRecordedDerived(
+          product,
+          workspace,
+          [C4_MV, C4_PAL, C4_USER],
+          false,
+          `${context} staging`,
+        );
+        const mv = recorded.get(C4_MV)!;
 
         // Enable emission in the configuration, no rebuild: the record now
         // lags the configuration — no Markdown path recorded — and a
@@ -3460,23 +3614,24 @@ const T6_6_5 = defineProductTest({
         await workspace.file("xspec.config.ts", SPECS_MD_CONFIG);
 
         // `generated`: the paths the current configuration generates that
-        // the stale record lacks — the destination's module, companions,
-        // and Markdown (nothing recorded there) together with every OTHER
-        // discovered source's Markdown emit destination (unrecorded, the
-        // record predating emission). The staying sources' recorded modules
-        // and companions regenerate in place, in neither direction; the
-        // origin's Markdown — never recorded, not generated post-move — is
-        // in neither direction either.
+        // the stale record lacks — the destination's module and companions
+        // (the origin's recorded ones re-based) and its Markdown (nothing
+        // recorded there) together with every OTHER discovered source's
+        // Markdown emit destination (unrecorded, the record predating
+        // emission; 13.2/7.3 place each next to its source). The staying
+        // sources' recorded modules and companions regenerate in place, in
+        // neither direction; the origin's Markdown — never recorded, not
+        // generated post-move — is in neither direction either.
         const generated = byteSortedPaths([
-          ...transposeModuleCompanions(mv, C4_MV, F5_DEST),
+          ...rebaseRecordedPaths(mv, C4_MV, F5_DEST),
           markdownDestination(F5_DEST),
           markdownDestination(C4_PAL),
           markdownDestination(C4_USER),
         ]);
         // `removed`: exactly the recorded pre-move module and companions —
-        // the premise build's observed writes for the origin, no Markdown
-        // among them (SPEC 13.3).
-        const removed = byteSortedPaths(derivedPathsOf(mv));
+        // the origin's entries in the record the inventory reported, no
+        // Markdown among them (SPEC 13.3).
+        const removed = mv;
 
         await assertLeavesUnchanged(
           workspace.root,
