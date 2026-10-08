@@ -105,10 +105,11 @@
 //   empty journal is a prefix of every journal, 6.3) — so its baseline
 //   resolves and 14.22 is the operative gate finding (12.0). 14.13
 //   line naming follows T6.1-3's H-4 operationalization: the message
-//   echoing the garbage text or citing line/entry 2, or (tolerated) a
-//   location within the garbage line's byte window — a journal condition
-//   carries the concerned journal path, no in-source location (SPEC 14,
-//   12.7). The never-gated contrast (`occurrences`, `view`, `at` answering
+//   echoing the garbage text or citing line/entry 2 — a journal condition
+//   carries the concerned journal path and no in-source location (SPEC 14,
+//   12.7), so each gated read's finding is asserted with that path and
+//   empty `locations`, the line named in the message alone. The
+//   never-gated contrast (`occurrences`, `view`, `at` answering
 //   per 11.2, `inventory` answering whatever the sources' validity, SPEC
 //   11.6) is asserted at this module's identity/membership altitude, each
 //   probe inside its own whole-root compare: a gate condition is a finding
@@ -2272,26 +2273,16 @@ function journalLineCount(bytes: Uint8Array): number {
 }
 
 /**
- * Does a 14.13 finding name the garbage line (line 2)? T6.1-3's H-4
- * operationalization: the message echoing the garbage line's text or citing
- * line/entry 2 — a journal condition carries the journal path it concerns
- * and no in-source location (SPEC 14, 12.7), so the lines are named in the
- * message — or, tolerated, a location within the garbage line's byte window
- * in `.xspec/journal`.
+ * Does a 14.13 finding's message name the garbage line (line 2)? T6.1-3's
+ * H-4 operationalization: the message echoing the garbage line's text or
+ * citing line/entry 2. A journal condition carries the journal path it
+ * concerns and no in-source location (SPEC 14, 12.7) — the journal
+ * whole-gate arm asserts both — so the line is named in the message alone.
  */
-function findingNamesGarbageLine(
-  finding: Finding,
-  window: { readonly start: number; readonly end: number },
-): boolean {
+function findingNamesGarbageLine(finding: Finding): boolean {
   if (finding.message.includes(GATE_GARBAGE_LINE)) return true;
   if (/\b(?:line|entry)\s*#?\s*2\b/i.test(finding.message)) return true;
-  if (finding.message.includes("journal:2")) return true;
-  return finding.locations.some(
-    (location) =>
-      location.file === JOURNAL_PATH &&
-      location.range.start >= window.start &&
-      location.range.end <= window.end + 1,
-  );
+  return finding.message.includes("journal:2");
 }
 
 /**
@@ -2778,7 +2769,6 @@ const T13_3_3 = defineProductTest({
         }
         const needsTerminator =
           legitimate.length > 0 && legitimate[legitimate.length - 1] !== LF;
-        const garbageStart = legitimate.length + (needsTerminator ? 1 : 0);
         await workspace.file(
           JOURNAL_PATH,
           Buffer.concat([
@@ -2789,11 +2779,10 @@ const T13_3_3 = defineProductTest({
             ),
           ]),
         );
-        const window = {
-          start: garbageStart,
-          end: garbageStart + Buffer.byteLength(GATE_GARBAGE_LINE, "utf8"),
-        };
-
+        // Each gated read's one 14.13 finding: the concerned journal path,
+        // the garbage line named in the message, and empty `locations` — a
+        // journal condition has no in-source location (SPEC 14, 12.7), so a
+        // location never stands in for the message's line naming.
         for (const probe of gatedReadInvocations(ALPHA)) {
           await probeWholeGate(
             product,
@@ -2807,16 +2796,23 @@ const T13_3_3 = defineProductTest({
                 `${findingContext} — a journal condition carries the ` +
                   `journal path it concerns (SPEC 14, 12.7)`,
               );
-              if (!findingNamesGarbageLine(finding, window)) {
+              if (!findingNamesGarbageLine(finding)) {
                 fail(
-                  `${findingContext}: the 14.13 finding must name the ` +
-                    `malformed line — the garbage on line 2 (SPEC 14.13 ` +
-                    `"naming the lines"): the garbage line's text, a ` +
-                    `line/entry-2 citation, or a location within bytes ` +
-                    `[${String(window.start)}, ${String(window.end)}] of ` +
-                    `${JOURNAL_PATH}; got ${JSON.stringify(finding)}`,
+                  `${findingContext}: the 14.13 finding's message must ` +
+                    `name the malformed line — the garbage on line 2 (SPEC ` +
+                    `14.13 "naming the lines"): the garbage line's text or ` +
+                    `a line/entry-2 citation; a journal condition has no ` +
+                    `in-source location, so the line is named in the ` +
+                    `message alone (SPEC 14, 12.7); got ` +
+                    `${JSON.stringify(finding)}`,
                 );
               }
+              assertSameJson(
+                finding.locations,
+                [],
+                `${findingContext} — a journal condition has no in-source ` +
+                  `location, so its locations are empty (SPEC 14, 12.7)`,
+              );
             },
             `${context} ${probe.what}`,
           );
