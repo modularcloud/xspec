@@ -2058,9 +2058,11 @@ const T12_2_4_FILES: Readonly<Record<string, InitialFileContents>> = {
 /**
  * The violating edge's 14.12 identities, in 14.12's order (SPEC 12.7) —
  * the edge `POLICY_HI_SOURCE` stages under the rule `no-hi-to-lo`,
- * identical in every T12.2-4 arm and T12.2-2's policy family.
+ * identical in every T12.2-4 arm and T12.2-2's policy family, and exported
+ * for T14-4's 14.12 arm (section-14.ts), whose policy workspace stages the
+ * same edge under the same rule.
  */
-const T12_2_4_VIOLATION_IDENTITIES: readonly string[] = [
+export const T12_2_4_VIOLATION_IDENTITIES: readonly string[] = [
   "no-hi-to-lo",
   "hi/H.mdx#h1",
   "depends",

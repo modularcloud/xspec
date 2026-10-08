@@ -68,15 +68,29 @@
 //   configuration) for `build` and `check` alike, never a findings row.
 // - T14-4's 14.3 row tolerates one finding for the duplication or one per
 //   occurrence (the T1.3-5 operationalization) — every reported finding
-//   must carry 14.3, and no location is checked: the sweep asserts reporter
-//   membership. SPEC 14 fixes one 14.3 finding locating every bearer at its
-//   `id` attribute; TEST-SPEC assigns that cardinality to T14-8 and the
-//   exact ranges to T14-11 (its §14 preamble), which assert them strictly
-//   (the T14-8 and T14-11 bullets below).
+//   must carry 14.3 and locate in the staged file, no range checked (the
+//   row's concern, next bullet). SPEC 14 fixes one 14.3 finding locating
+//   every bearer at its `id` attribute; TEST-SPEC assigns that cardinality
+//   to T14-8 and the exact ranges to T14-11 (its §14 preamble), which
+//   assert them strictly (the T14-8 and T14-11 bullets below).
 // - T14-4 stages each sweep condition in its minimal home form; per-condition
 //   breadth belongs to the home-section tests (TEST-SPEC §14 preamble names
-//   them). The sweep asserts reporter membership: the staged condition is
-//   reported by `build` and by `check`.
+//   them). The sweep asserts reporter membership — the staged condition is
+//   reported by `build` and by `check` — and, on each of its own rows,
+//   identifies the staged condition's concern at every reporter the row
+//   reaches (TEST-SPEC's error-assertion rule; SPEC 14, 12.7; `SweepConcern`):
+//   a located row's finding locates in its staged file, every location
+//   there (`specs/a.mdx`, or `src/app.ts` for 14.7, 14.11, and 14.18), the
+//   14.11 finding's `identities` exactly bravo's root identity (the module
+//   whose `text` it calls); a path row's finding carries its concerned path
+//   with `locations` `[]` — `.xspec/journal` (14.13), `specs/a#b.mdx`
+//   (14.19), `out` (14.22), at the gated read too. Exact ranges stay
+//   T14-11's, and the home rows (below) keep reporter membership alone,
+//   their locations their home tests'. The dedicated arms identify theirs
+//   likewise: every 14.10 finding a concerned path with `locations` `[]`,
+//   `specs/a.md` among the paths; the 14.12 finding the edge T12.2-4 pins
+//   by `identities`, `locations` `[]`, `path` null; the 14.23 arm's
+//   findings (and `check`'s unit form) the graph-data area `.xspec`.
 // - T14-4's 14.21 arm asserts matrix membership — exit 1 with /corrupt/i on
 //   stdout, the T10.1-4 operationalization — for one subcommand naming the
 //   session (`review status`) and for `review list`; the all-subcommands
@@ -92,10 +106,11 @@
 //   `rename --preview` each carry exactly the one condition-23 finding;
 //   `check` reports exactly one condition-10 finding (the unit form — so
 //   never 14.23, never a per-file finding beside it on the freshly built,
-//   otherwise clean workspace); a refreshing read (`query nodes`) and
-//   `build` exit 0. Depth — `recorded`/`delta` unavailability, concerned
-//   paths, record discipline, replacement — is T11.6-4's, T6.6-6's,
-//   T12.2-2's, and T13.3-2's subject.
+//   otherwise clean workspace), each of the three findings concerning the
+//   graph-data area `.xspec` with `locations` `[]`; a refreshing read
+//   (`query nodes`) and `build` exit 0. Depth — `recorded`/`delta`
+//   unavailability, record discipline, replacement — is T11.6-4's,
+//   T6.6-6's, T12.2-2's, and T13.3-2's subject.
 // - T14-4's 14.14 row includes `version`: exit 0 with a single JSON document
 //   as its entire stdout (12.6 is JSON-only) on the same invalid
 //   configuration that makes `build`/`check` exit 2 — the never-`version`
@@ -109,11 +124,12 @@
 //   domains hold spec sources only) — each answer decoded through the
 //   form-exact 12.7 document decoders (so the full answer member is emitted
 //   beside the findings) at exit 1, its findings counted exactly like the
-//   `build` side (these surfaces never report 14.10, which is `check`'s
-//   alone). 14.13 and 14.22 are instead the
-//   findings of no domain file: one gated read (`query nodes`) reports
-//   exactly the staged finding at exit 1 (the 13.3 gate; the six-read
-//   breadth and modifies-nothing compares are T13.3-3's), while the three
+//   `build` side and their concern identified as there (these surfaces
+//   never report 14.10, which is `check`'s alone). 14.13 and 14.22 are
+//   instead the findings of no domain file: one gated read (`query nodes`)
+//   reports exactly the staged finding, its concerned path identified, at
+//   exit 1 (the 13.3 gate; the six-read breadth and modifies-nothing
+//   compares are T13.3-3's), while the three
 //   surfaces answer finding-free at exit 0 over the staged valid spec
 //   source. Per-surface semantics depth is T11.2-*..T11.5-*'s subject.
 // - T14-4 also sweeps the home tests' 14.16 and 14.20 stagings as further
@@ -144,10 +160,12 @@
 //   staged condition's exact token — sound because every staging stages
 //   exactly one condition (T14-4 pins the counts; 14.3's per-occurrence
 //   tolerance and several stale files under 14.10 both collapse into
-//   "every finding carries the one staged token"). Count precision and
-//   reporter breadth stay T14-4's and the home tests' subject; the
-//   `code`-null arms mirror T12.7-3's plain-usage-error and T12.7-1's
-//   review-refusal stagings, per T14-6's own citations.
+//   "every finding carries the one staged token"). Count precision,
+//   reporter breadth, and the concern data of these identical stagings
+//   (locations' files, concerned paths, identities) stay T14-4's and the
+//   home tests' subject; the `code`-null arms mirror T12.7-3's
+//   plain-usage-error and T12.7-1's review-refusal stagings, per T14-6's
+//   own citations.
 // - T14-7 stages the refusal reasons via the home fixtures — T6.4-3's and
 //   T6.5-4's exported staging and case tables (TEST-SPEC §14 preamble: the
 //   refusal reasons are staged at T6.4-3, T6.5-4, T6.5-6, T6.6-3) — and
@@ -332,6 +350,7 @@ import * as path from "node:path";
 import type { Finding, GraphEdge } from "../../helpers/adapters/index.js";
 import {
   CONDITION_CODE_TOKENS,
+  GRAPH_DATA_AREA_PATH,
   assertReportMentions,
   corruptGraphDataShapeBlind,
   decodeAtReport,
@@ -430,6 +449,7 @@ import {
 import {
   POLICY_HI_SOURCE,
   POLICY_LO_SOURCE,
+  T12_2_4_VIOLATION_IDENTITIES,
   VALID_A1_SOURCE,
 } from "./section-12.1-12.2.js";
 import { SELF_DEPENDS_STAGED } from "./section-5.1-5.3.js";
@@ -441,6 +461,7 @@ import {
   assertConditionCounts,
   assertEdgeSetEqual,
   assertFindingConcernsPath,
+  assertFindingIdentities,
   assertFindingLocated,
   assertFindingLocatesExactly,
   assertFindingMentionsLocation,
@@ -1299,6 +1320,29 @@ const T14_3 = defineProductTest({
 // T14-4 — reporter matrix
 // ---------------------------------------------------------------------------
 
+/**
+ * What a sweep row's staged condition must identify at every reporter the
+ * row reaches (TEST-SPEC.md's error-assertion rule: the report identifies
+ * the file/location information SPEC 14 requires; SPEC 14, 12.7) —
+ * identification, never exact ranges, which stay T14-11's:
+ * - `located`: a condition that locates in source — every finding carries
+ *   a location, every location in the staged `file`; `identities`, where
+ *   given, the finding's exact `identities` (14.11's foreign module);
+ * - `concerned-path`: a condition without an in-source location — every
+ *   finding's 12.7 `path` is exactly `path` (workspace-relative) and its
+ *   `locations` are `[]`;
+ * - `home-test`: a home test's staging swept for reporter membership
+ *   alone, its locations and offsets staying its home test's subject.
+ */
+type SweepConcern =
+  | {
+      readonly kind: "located";
+      readonly file: string;
+      readonly identities?: readonly string[];
+    }
+  | { readonly kind: "concerned-path"; readonly path: string }
+  | { readonly kind: "home-test" };
+
 // One minimal staging per both-reporter condition (the sweep of the T14-4
 // text: "every other condition reported by both `build` and `check`").
 interface SweepEntry {
@@ -1311,13 +1355,21 @@ interface SweepEntry {
     workspace: TestWorkspace,
   ) => Promise<void>;
   /**
+   * The staged condition's concern, asserted on every finding at every
+   * reporter the row reaches (`assertSweepFindings`): stated on each of
+   * the sweep's own rows — `located` in the staged file, or
+   * `concerned-path` — and `home-test` on the home rows, whose locations
+   * their home tests assert.
+   */
+  readonly concern: SweepConcern;
+  /**
    * This sweep's tolerance, set on the 14.3 row alone: accept one finding
    * for the staged defect or one per occurrence (the T1.3-5
-   * operationalization), every finding carrying the condition and no
-   * location checked — the sweep asserts reporter membership. SPEC 14
-   * fixes one 14.3 finding locating every bearer at its `id` attribute;
-   * TEST-SPEC assigns that cardinality to T14-8 and the exact ranges to
-   * T14-11, which assert them strictly.
+   * operationalization), every finding carrying the condition and
+   * locating in the staged file (the row's `located` concern; no range
+   * checked). SPEC 14 fixes one 14.3 finding locating every bearer at its
+   * `id` attribute; TEST-SPEC assigns that cardinality to T14-8 and the
+   * exact ranges to T14-11, which assert them strictly.
    */
   readonly perOccurrenceTolerated?: boolean;
   /**
@@ -1341,7 +1393,9 @@ interface SweepEntry {
  * Shorthand: a specs-only workspace whose one source stages the condition —
  * a staged-source record carrying its own S-9 declaration, beside the
  * configuration's record (every sweep workspace but T14-6's first follows
- * its body's first invocation; the table is converted uniformly).
+ * its body's first invocation; the table is converted uniformly). Every
+ * condition staged this way locates in source, so the row's concern is a
+ * location in its one staged file, `specs/a.mdx`.
  */
 function specArm(
   condition: string,
@@ -1354,6 +1408,7 @@ function specArm(
     decl: {
       files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/a.mdx": source },
     },
+    concern: { kind: "located", file: "specs/a.mdx" },
     answers: { kind: "spec-source", file: "specs/a.mdx" },
   };
 }
@@ -1367,6 +1422,8 @@ const CODE_ARM_SPEC_SOURCE = stagedMdx(
 /**
  * Shorthand: a valid spec plus one code file staging the condition — a
  * staged-source record (S-9; helpers/staged-ts.ts), as the spec arms' are.
+ * The condition locates in that code file, `src/app.ts` (the row's
+ * concern).
  */
 function codeArm(
   condition: string,
@@ -1383,6 +1440,7 @@ function codeArm(
         "src/app.ts": source,
       },
     },
+    concern: { kind: "located", file: "src/app.ts" },
     answers: { kind: "code-source" },
   };
 }
@@ -1415,7 +1473,9 @@ interface HomeSpecStaging {
  * module registers, under the declaration the condition implies: declared
  * unparseable for a 14.20 row, and derivable — well-formed, or under named
  * early-error allowances — for a 14.16 row, a finding of a file that parses
- * (14.20). Checked at load: a mismatch is a harness defect.
+ * (14.20). Checked at load: a mismatch is a harness defect. The row's
+ * concern is `home-test`: reporter membership alone, the staging's
+ * locations and offsets staying its home test's subject.
  */
 function homeStagingRow(
   condition: "14.16" | "14.20",
@@ -1442,6 +1502,7 @@ function homeStagingRow(
     decl: {
       files: { "xspec.config.ts": SPECS_ONLY_CONFIG, ...staging.files },
     },
+    concern: { kind: "home-test" },
     answers: { kind: "spec-source", file: staging.file },
   };
 }
@@ -1572,6 +1633,14 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
         ),
       },
     },
+    // Located at the call in the code source; its `identities` hold exactly
+    // the foreign module — the root identity of bravo, whose `text` export
+    // `textB` is (SPEC 14.11, 1.5, 12.7).
+    concern: {
+      kind: "located",
+      file: "src/app.ts",
+      identities: ["specs/bravo.mdx"],
+    },
     answers: { kind: "code-source" },
   },
   {
@@ -1592,6 +1661,8 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
       );
       await workspace.file(".xspec/journal", GARBAGE_JOURNAL_LINE);
     },
+    // A journal condition carries the journal's path (SPEC 14, 14.13, 12.7).
+    concern: { kind: "concerned-path", path: ".xspec/journal" },
     answers: { kind: "no-domain-file", file: "specs/a.mdx" },
   },
   specArm(
@@ -1653,7 +1724,10 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
     // The `#`-containing path is valid UTF-8, so the file is nameable by an
     // argument value: it keeps its parse-local view, every node identity in
     // it explicitly unavailable, its condition-19 finding accompanying every
-    // answer whose consulted domain includes it (SPEC 11.2, 11.4, 11.5).
+    // answer whose consulted domain includes it (SPEC 11.2, 11.4, 11.5). A
+    // path-level condition: the finding carries the offending path itself
+    // (SPEC 14, 14.19, 12.7).
+    concern: { kind: "concerned-path", path: "specs/a#b.mdx" },
     answers: { kind: "spec-source", file: "specs/a#b.mdx" },
   },
   // S-9: the one entry source the document declares unparseable.
@@ -1688,6 +1762,9 @@ export default defineConfig({
       dirs: ["real-out"],
       symlinks: { out: "real-out" },
     },
+    // The concerned path is the offending component's workspace-relative
+    // path, the link `out` (SPEC 14, 14.22, 12.7).
+    concern: { kind: "concerned-path", path: "out" },
     answers: { kind: "no-domain-file", file: "specs/a.mdx" },
   },
   // The home tests' 14.16 and 14.20 arms (TEST-SPEC T14-4: "Among the
@@ -1697,9 +1774,10 @@ export default defineConfig({
   // reporter membership: `build`, `check`, and the surfaces whose domain
   // holds the staged file, each finding counted exactly as the home arm
   // counts it — one per staging — the locations and offsets staying the
-  // home tests' subject. In the clause's order: T2.3-3's five invalid
-  // containers (one 14.16 each) and `{text("a") text("b")}` (14.20),
-  // through `homeStagingRow`.
+  // home tests' subject (each row's concern is `home-test`, unlike the own
+  // rows above, whose concern the sweep asserts). In the clause's order:
+  // T2.3-3's five invalid containers (one 14.16 each) and
+  // `{text("a") text("b")}` (14.20), through `homeStagingRow`.
   ...T2_3_3_INVALID_STAGINGS.map(({ arm, file, source }): SweepEntry =>
     homeStagingRow("14.16", arm, { file, files: { [file]: source } }),
   ),
@@ -1746,6 +1824,7 @@ export default defineConfig({
     condition: staging.condition,
     label: staging.label,
     decl: staging.decl,
+    concern: { kind: "home-test" },
     answers: staging.answers,
   })),
 ];
@@ -1871,12 +1950,89 @@ function availabilityProbes(file: string): readonly AvailabilityProbe[] {
   ];
 }
 
-/** One command's sweep assertion (`build` and `check` alike exact). */
+/**
+ * Assert a finding of a condition without an in-source location identifies
+ * its concern (SPEC 14: such a condition carries the file or path it
+ * concerns; 12.7: that path is the finding's `path`, and its `locations`
+ * are empty): `path` exactly the workspace-relative `concernedPath`,
+ * `locations` `[]`. `where` names the row or arm and the reporter; `cited`
+ * the SPEC sections the failure cites.
+ */
+function assertConcernedPathAlone(
+  finding: Finding,
+  concernedPath: string,
+  where: string,
+  cited: string,
+): void {
+  assertFindingConcernsPath(
+    finding,
+    concernedPath,
+    `${where} — a condition without an in-source location carries the ` +
+      `path it concerns (${cited})`,
+  );
+  assertSameJson(
+    finding.locations,
+    [],
+    `${where} — a condition without an in-source location carries no ` +
+      `location: \`locations\` [] (${cited})`,
+  );
+}
+
+/**
+ * Assert a sweep row's concern (`SweepConcern`) on each of `findings`, every
+ * one carrying the staged condition (the caller's count assertion passed):
+ * a `located` row's finding locates in the staged file, every location
+ * there — exact ranges stay T14-11's — with 14.11's `identities` exactly the
+ * foreign module; a `concerned-path` row's finding carries its path with
+ * `locations` `[]`; a `home-test` row's concern is its home test's subject.
+ */
+function assertSweepConcern(
+  findings: readonly Finding[],
+  entry: SweepEntry,
+  where: string,
+): void {
+  const { concern, condition } = entry;
+  if (concern.kind === "home-test") return;
+  const cited = `SPEC 14, ${condition}, 12.7`;
+  for (const finding of findings) {
+    if (concern.kind === "concerned-path") {
+      assertConcernedPathAlone(finding, concern.path, where, cited);
+      continue;
+    }
+    assertFindingLocated(
+      finding,
+      { file: concern.file },
+      `${where} — condition ${condition} locates in source: the finding ` +
+        `carries a location, every location in the staged file ` +
+        `${concern.file} (exact ranges: T14-11; ${cited})`,
+    );
+    if (concern.identities !== undefined) {
+      assertFindingIdentities(
+        finding,
+        concern.identities,
+        `${where} — condition ${condition}'s \`identities\` hold exactly ` +
+          `the foreign module, the root identity (1.5) of the spec module ` +
+          `whose \`text\` export is called (${cited})`,
+      );
+    }
+  }
+}
+
+/**
+ * One reporter's sweep assertion — `build`, `check`, the gated read, and
+ * the availability surfaces alike: the staged condition counted exactly
+ * (the 14.3 row under its tolerance), then the row's concern on every
+ * finding (`assertSweepConcern`: TEST-SPEC.md's error-assertion rule; SPEC
+ * 14, 12.7). `where` names the row and the reporter, `rationale` the
+ * count's claim; the count's failure reads `where — rationale`.
+ */
 function assertSweepFindings(
   findings: readonly Finding[],
   entry: SweepEntry,
-  context: string,
+  where: string,
+  rationale: string,
 ): void {
+  const context = `${where} — ${rationale}`;
   if (entry.perOccurrenceTolerated) {
     const conditions = findings.map((finding) => finding.condition);
     if (
@@ -1892,9 +2048,10 @@ function assertSweepFindings(
           `bearer is T14-8's to assert — got ${JSON.stringify(conditions)}`,
       );
     }
-    return;
+  } else {
+    assertConditionCounts(findings, { [entry.condition]: 1 }, context);
   }
-  assertConditionCounts(findings, { [entry.condition]: 1 }, context);
+  assertSweepConcern(findings, entry, where);
 }
 
 const T14_4 = defineProductTest({
@@ -1926,6 +2083,35 @@ const T14_4 = defineProductTest({
             JSON.stringify(findings.map((finding) => finding.condition)),
         );
       }
+      // Each finding concerns a path — a stale derived file's, or the
+      // graph-data area for the unit form — and locates nothing in source;
+      // the edited source's emitted Markdown, specs/a.md, is among the
+      // concerned paths (SPEC 14, 14.10, 13.2, 12.7).
+      for (const finding of findings) {
+        if (finding.path === null) {
+          fail(
+            `${context}: a condition-10 finding has no in-source location ` +
+              `and carries the derived path (or the graph-data area) it ` +
+              `concerns as its 12.7 \`path\`; got null (message: ` +
+              `${JSON.stringify(finding.message)}) (SPEC 14, 14.10, 12.7)`,
+          );
+        }
+        assertSameJson(
+          finding.locations,
+          [],
+          `${context} — a condition-10 finding has no in-source location: ` +
+            `\`locations\` [] (SPEC 14, 14.10, 12.7)`,
+        );
+      }
+      if (!findings.some((finding) => finding.path === "specs/a.md")) {
+        fail(
+          `${context}: the edited specs/a.mdx's emitted Markdown, ` +
+            `specs/a.md, no longer matches what the current source ` +
+            `generates, so a per-file finding concerning it is among the ` +
+            `findings (SPEC 14, 14.10, 13.2, 12.7); got the paths ` +
+            JSON.stringify(findings.map((finding) => finding.path)),
+        );
+      }
       await expectExit(
         product,
         workspace,
@@ -1955,12 +2141,42 @@ const T14_4 = defineProductTest({
           "policy violations are `check` findings, and `build` succeeds " +
           "and regenerates regardless (SPEC 14.12, 12.1, 7.5)",
       );
+      const policyContext = "T14-4 (14.12) `check --json`";
+      const policyFindings = await checkFindings(
+        product,
+        workspace,
+        policyContext,
+      );
       assertConditionCounts(
-        await checkFindings(product, workspace, "T14-4 (14.12) `check --json`"),
+        policyFindings,
         { "14.12": 1 },
         "T14-4 (14.12) `check` reports the one violating edge — the " +
           "freshly built workspace stages nothing else (SPEC 14.12, 12.2)",
       );
+      // The violation identifies its edge by `identities` alone — the edge
+      // T12.2-4 pins: no in-source location, no concerned path (SPEC 14,
+      // 14.12, 12.7).
+      const violation = policyFindings[0]!;
+      assertFindingIdentities(
+        violation,
+        T12_2_4_VIOLATION_IDENTITIES,
+        `${policyContext} — the violated rule's name and the edge's source ` +
+          `identity, kind token, and target identity, in order (SPEC 14, ` +
+          `14.12, 12.7)`,
+      );
+      assertSameJson(
+        violation.locations,
+        [],
+        `${policyContext} — the offending entity is a graph edge, not a ` +
+          `spelling: \`locations\` [] (SPEC 14, 14.12, 12.7)`,
+      );
+      if (violation.path !== null) {
+        fail(
+          `${policyContext}: a policy finding concerns no path — \`path\` ` +
+            `null (SPEC 14, 14.12, 12.7); got ` +
+            JSON.stringify(violation.path),
+        );
+      }
     });
 
     // --- 14.21: reported by `check`, by `review` subcommands naming the
@@ -2083,54 +2299,80 @@ const T14_4 = defineProductTest({
       );
       await corruptGraphDataShapeBlind(workspace.root, "T14-4 (14.23)");
 
+      // Each reporter's one finding — 14.23's, and `check`'s 14.10 unit
+      // form — concerns the graph-data area, `.xspec`, never a path inside
+      // it (the record's layout is unenumerated), and locates nothing in
+      // source (SPEC 14, 14.23, 14.10, 11.6, 13.3, 12.7).
       const inventoryContext = "T14-4 (14.23) `inventory`";
-      assertConditionCounts(
-        decodeInventoryFindings(
-          await runJsonExpecting(
-            product,
-            workspace,
-            ["inventory"],
-            1,
-            `${inventoryContext} — the condition-23 finding accompanies ` +
-              `the answer and the invocation exits 1 (SPEC 14.23, 11.6)`,
-          ),
-          inventoryContext,
+      const inventoryFindings = decodeInventoryFindings(
+        await runJsonExpecting(
+          product,
+          workspace,
+          ["inventory"],
+          1,
+          `${inventoryContext} — the condition-23 finding accompanies ` +
+            `the answer and the invocation exits 1 (SPEC 14.23, 11.6)`,
         ),
+        inventoryContext,
+      );
+      assertConditionCounts(
+        inventoryFindings,
         { "14.23": 1 },
         `${inventoryContext} — the unreadable record is the inventory ` +
           `answer's one finding on the otherwise clean workspace (SPEC ` +
           `14.23, 11.6)`,
       );
+      assertConcernedPathAlone(
+        inventoryFindings[0]!,
+        GRAPH_DATA_AREA_PATH,
+        inventoryContext,
+        "SPEC 14, 14.23, 11.6, 12.7",
+      );
 
       const previewContext =
         "T14-4 (14.23) `rename specs/a.mdx a1 a2 --preview --json`";
+      const previewFindings = decodePreviewReport(
+        await runJsonExpecting(
+          product,
+          workspace,
+          ["rename", "specs/a.mdx", "a1", "a2", "--preview", "--json"],
+          1,
+          `${previewContext} — the condition-23 finding accompanies the ` +
+            `answer and the invocation exits 1 (SPEC 14.23, 6.6)`,
+        ),
+        previewContext,
+      ).findings;
       assertConditionCounts(
-        decodePreviewReport(
-          await runJsonExpecting(
-            product,
-            workspace,
-            ["rename", "specs/a.mdx", "a1", "a2", "--preview", "--json"],
-            1,
-            `${previewContext} — the condition-23 finding accompanies the ` +
-              `answer and the invocation exits 1 (SPEC 14.23, 6.6)`,
-          ),
-          previewContext,
-        ).findings,
+        previewFindings,
         { "14.23": 1 },
         `${previewContext} — the preview consults the record for its ` +
           `delta, so the otherwise valid plan's report carries exactly ` +
           `the condition-23 finding (SPEC 14.23, 6.6; the delta's ` +
           `unavailability and the plan's completeness are T6.6-6's)`,
       );
+      assertConcernedPathAlone(
+        previewFindings[0]!,
+        GRAPH_DATA_AREA_PATH,
+        previewContext,
+        "SPEC 14, 14.23, 11.6, 12.7",
+      );
 
+      const unitContext = "T14-4 (14.23) `check --json`";
+      const unitFindings = await checkFindings(product, workspace, unitContext);
       assertConditionCounts(
-        await checkFindings(product, workspace, "T14-4 (14.23) `check --json`"),
+        unitFindings,
         { "14.10": 1 },
         "T14-4 (14.23) `check` reports the state as staleness — exactly " +
           "one condition-10 finding, the unit form: never 14.23, never " +
           "the mismatch form or a per-file finding beside it on the " +
           "freshly built, otherwise clean workspace (SPEC 14.23, 14.10; " +
           "depth: T12.2-2)",
+      );
+      assertConcernedPathAlone(
+        unitFindings[0]!,
+        GRAPH_DATA_AREA_PATH,
+        `${unitContext} (14.10's unit form)`,
+        "SPEC 14, 14.10, 11.6, 12.7",
       );
 
       await expectExit(
@@ -2209,7 +2451,9 @@ const T14_4 = defineProductTest({
     // --- Every other condition: reported by both `build` and `check`, and
     // per its staging's kind by the machine-interface answers (SPEC 11.2;
     // the availability rows of the module header). 14.13 and 14.22 instead
-    // ride the gated reads and accompany no such answer.
+    // ride the gated reads and accompany no such answer. At every reporter
+    // an own row's concern is identified too (assertSweepFindings,
+    // SweepConcern; SPEC 14, 12.7).
     for (const entry of SWEEP_ENTRIES) {
       await withWorkspace(entry.decl, async (workspace) => {
         await entry.prepare?.(product, workspace);
@@ -2217,17 +2461,18 @@ const T14_4 = defineProductTest({
         assertSweepFindings(
           await buildFindings(product, workspace, buildContext),
           entry,
-          `${buildContext} — condition ${entry.condition} is a \`build\` ` +
-            `finding, counted exactly (\`build\` cannot observe 14.10; ` +
-            `SPEC 14, 12.1)`,
+          buildContext,
+          `condition ${entry.condition} is a \`build\` finding, counted ` +
+            `exactly (\`build\` cannot observe 14.10; SPEC 14, 12.1)`,
         );
         const checkContext = `T14-4 (${entry.label}) \`check --json\``;
         assertSweepFindings(
           await checkFindings(product, workspace, checkContext),
           entry,
-          `${checkContext} — condition ${entry.condition} is a \`check\` ` +
-            `finding, counted exactly, 14.10 included (see the module ` +
-            `header; SPEC 14, 12.2, 14.10)`,
+          checkContext,
+          `condition ${entry.condition} is a \`check\` finding, counted ` +
+            `exactly, 14.10 included (see the module header; SPEC 14, ` +
+            `12.2, 14.10)`,
         );
 
         if (entry.answers.kind === "no-domain-file") {
@@ -2250,9 +2495,9 @@ const T14_4 = defineProductTest({
               gatedContext,
             ).findings,
             entry,
-            `${gatedContext} — condition ${entry.condition} is the gated ` +
-              `reads' finding, exactly as a \`build\`'s (SPEC 13.3, 14; ` +
-              `depth: T13.3-3)`,
+            gatedContext,
+            `condition ${entry.condition} is the gated reads' finding, ` +
+              `exactly as a \`build\`'s (SPEC 13.3, 14; depth: T13.3-3)`,
           );
           // ...yet accompanying no `occurrences`/`view`/`at` answer: the
           // condition is the finding of no domain file — the journal and a
@@ -2307,10 +2552,11 @@ const T14_4 = defineProductTest({
               context,
             ),
             entry,
-            `${context} — condition ${entry.condition} is a domain file's ` +
-              `finding and accompanies the answer, counted exactly (these ` +
-              `surfaces never report 14.10, which is \`check\`'s alone; ` +
-              `SPEC 11.2, 11.3-11.5, 14)`,
+            context,
+            `condition ${entry.condition} is a domain file's finding and ` +
+              `accompanies the answer, counted exactly (these surfaces ` +
+              `never report 14.10, which is \`check\`'s alone; SPEC 11.2, ` +
+              `11.3-11.5, 14)`,
           );
         }
       });
