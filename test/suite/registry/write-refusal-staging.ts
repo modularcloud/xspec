@@ -969,28 +969,23 @@ export function assertStalenessAlone(
 }
 
 /**
- * A never-reporter `check`'s staleness on the B-edited workspace — T13.5-7
- * (f)'s refreshing-read state and T14-9's reporter-set state, each a built
- * workspace whose `specs/b/B.mdx` text was edited without rebuilding, with
- * `.xspec` unwritable (SPEC 14.10, 14, 12.7): every condition-10 finding —
- * a per-file finding or the graph-data unit form — has no in-source
- * location and carries the derived path (or the graph-data area) it
- * concerns as its 12.7 `path`: `path` non-null, `locations` `[]`; and
- * every finding instructs rebuilding (`assertFindingInstructsRebuilding`:
- * its message names `build`), the correction SPEC 14.10 requires of each
- * per-file finding and of the unit form — the staging is a text edit of a
- * valid built workspace and the findings are condition 10 alone, so no
- * recorded file obstructs a rebuild write (that would be 14.22's, reported
- * beside; 13.4), the one form whose correction is its manual deletion
- * instead. B's generated module `specs/b/B.xspec.ts`, whose node
- * documentation embeds the edited text (SPEC 4.2, 13.1; TEST-SPEC T13.5-7
- * (f): B's module and companions certainly differ), is among the concerned
- * paths, compared by bytes. Which further derived files differ is the
- * product's (companions, 13.1; graph data, 13.3), so membership alone —
- * the shape of T12.2-2's edited-source arm. The caller asserts the
- * findings are condition 10 alone.
+ * The concern and the correction of every finding a `check` reporting
+ * condition 10 alone gives (SPEC 14.10, 14, 12.7): each condition-10
+ * finding — a per-file finding (a missing or mismatched derived file, or a
+ * recorded derived file the current sources and configuration no longer
+ * generate) or the graph-data unit form — has no in-source location and
+ * carries the derived path (or the graph-data area) it concerns as its 12.7
+ * `path`: `path` non-null, `locations` `[]`; and it instructs rebuilding
+ * (`assertFindingInstructsRebuilding`: its message names `build`), the
+ * correction SPEC 14.10 requires of each such finding. The caller asserts
+ * the findings are condition 10 alone, on a state holding no recorded file
+ * that obstructs a rebuild write — the one condition-10 form whose
+ * correction is its manual deletion instead (SPEC 14.10, 13.4, 14.22;
+ * T13.4-10's judge). Shared by T13.5-7 (c)'s `check` (`afterAppendArm`) and
+ * the never-reporter `check` of T13.5-7 (f) and T14-9
+ * (`assertEditedBStalenessConcerns`).
  */
-export function assertEditedBStalenessConcerns(
+function assertStaleFindingsConcernAndCorrection(
   findings: readonly Finding[],
   context: string,
 ): void {
@@ -1014,9 +1009,40 @@ export function assertEditedBStalenessConcerns(
       `${context} — the finding concerning ` +
         `${renderPathValue(finding.path)}: no recorded file obstructs a ` +
         `rebuild write on this state, so every condition-10 finding, per ` +
-        `file and unit form alike, instructs rebuilding (SPEC 14.10, 14)`,
+        `file and unit form alike, instructs rebuilding in its 12.7 ` +
+        `\`message\` (SPEC 14.10, 14, 12.7)`,
     );
   }
+}
+
+/**
+ * A never-reporter `check`'s staleness on the B-edited workspace — T13.5-7
+ * (f)'s refreshing-read state and T14-9's reporter-set state, each a built
+ * workspace whose `specs/b/B.mdx` text was edited without rebuilding, with
+ * `.xspec` unwritable (SPEC 14.10, 14, 12.7): every condition-10 finding —
+ * a per-file finding or the graph-data unit form — has no in-source
+ * location and carries the derived path (or the graph-data area) it
+ * concerns as its 12.7 `path`: `path` non-null, `locations` `[]`; and
+ * every finding instructs rebuilding (`assertFindingInstructsRebuilding`:
+ * its message names `build`), the correction SPEC 14.10 requires of each
+ * per-file finding and of the unit form — the staging is a text edit of a
+ * valid built workspace and the findings are condition 10 alone, so no
+ * recorded file obstructs a rebuild write (that would be 14.22's, reported
+ * beside; 13.4), the one form whose correction is its manual deletion
+ * instead (both through `assertStaleFindingsConcernAndCorrection`). B's
+ * generated module `specs/b/B.xspec.ts`, whose node documentation embeds
+ * the edited text (SPEC 4.2, 13.1; TEST-SPEC T13.5-7 (f): B's module and
+ * companions certainly differ), is among the concerned paths, compared by
+ * bytes. Which further derived files differ is the product's (companions,
+ * 13.1; graph data, 13.3), so membership alone — the shape of T12.2-2's
+ * edited-source arm. The caller asserts the findings are condition 10
+ * alone.
+ */
+export function assertEditedBStalenessConcerns(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertStaleFindingsConcernAndCorrection(findings, context);
   const moduleBytes = expectedPathBytes(RENAME_B_MODULE);
   const named = findings.some(
     (finding) =>
@@ -1408,8 +1434,16 @@ function isRegenerationPath(rel: string): boolean {
  * unpinned) as the entire stdout (no `mapping`); every derived-file and
  * graph-data entry its prior state or the twin's; `check` reports condition
  * 10 alone — the stale remainder, the destination's Markdown certainly
- * missing; restored, `impact` reports no change categories and the next
- * `build` leaves `check` clean.
+ * missing — each finding concerning its derived path (or, the unit form,
+ * the graph-data area) as its 12.7 `path` with `locations` `[]` and
+ * instructing rebuilding (`assertStaleFindingsConcernAndCorrection`; SPEC
+ * 14, 14.10, 12.7): the recorded derived files the move leaves behind (the
+ * origin's module, companions, and Markdown) lie at paths the current
+ * sources and configuration no longer generate, none of them a directory
+ * component of a path a rebuild writes (14.22), so none obstructs a
+ * rebuild write and every finding's correction is rebuilding; restored,
+ * `impact` reports no change categories and the next `build` leaves
+ * `check` clean.
  */
 export async function afterAppendArm(
   product: ProductBinding,
@@ -1466,6 +1500,13 @@ export async function afterAppendArm(
         );
       }
     }
+    assertStaleFindingsConcernAndCorrection(
+      findings,
+      `${context}: \`check\` after the stopped regeneration — each ` +
+        `finding of the stale remainder concerns its derived path or the ` +
+        `graph-data area, with no in-source location, and instructs ` +
+        `rebuilding (SPEC 14, 14.10, 12.7)`,
+    );
     const destinationMarkdown = MOVE_MARKDOWN_WRITES[0];
     if (!stalePaths.includes(destinationMarkdown)) {
       fail(
