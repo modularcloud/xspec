@@ -891,7 +891,18 @@ export interface StalenessExpectation {
  * 12.7, 11.6). The per-file compare is order-insensitive and by exact bytes:
  * the reported paths (`pathValueBytes`) and the expected keys
  * (`snapshotKeyBytes`) must be the same multiset of byte strings (SPEC 12.7:
- * paths compare byte-wise); a `null` path matches no expected path.
+ * paths compare byte-wise); a `null` path matches no expected path. Once
+ * the findings are condition 10 alone and concern exactly the expected
+ * paths, every finding instructs rebuilding
+ * (`assertFindingInstructsRebuilding`: its message names `build`), the
+ * correction SPEC 14.10 requires of each per-file finding and of the unit
+ * form. Every caller's state keeps each recorded derived file among the
+ * paths the current sources and configuration generate — T13.5-7 (b) a
+ * rename's identity change, (d) a relocation whose origin stays, (e) and
+ * (f) a text edit, T14-10 (e) and (f) a refused read — so no recorded file
+ * obstructs a rebuild write: the one condition-10 form whose correction is
+ * its manual deletion instead (SPEC 14.10, 13.4, 14.22; T13.4-10's judge),
+ * never this helper's.
  */
 export function assertStalenessAlone(
   findings: readonly Finding[],
@@ -944,6 +955,15 @@ export function assertStalenessAlone(
         `exactly when graph data does not match the current sources (SPEC ` +
         `14.10, 11.6); expected ${String(expectedUnit)}, got ` +
         `${String(unitCount)}`,
+    );
+  }
+  for (const finding of findings) {
+    assertFindingInstructsRebuilding(
+      finding,
+      `${context} — the finding concerning ` +
+        `${renderPathValue(finding.path)}: no recorded file obstructs a ` +
+        `rebuild write on this state, so every condition-10 finding, per ` +
+        `file and unit form alike, instructs rebuilding (SPEC 14.10, 14)`,
     );
   }
 }
