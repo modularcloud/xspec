@@ -14,10 +14,11 @@
 //
 // Location assertions: every offending import statement is staged at the very
 // start of its file (prefix ""), all pure ASCII, so string indices are byte
-// offsets and the 14.15 finding must fall within the import statement's own
-// byte window (end-widened by one byte for line-granular locations, see
-// support.ts byteWindow); every other staged construct lies beyond the
-// following blank line, outside the widened window.
+// offsets and the 14.15 finding — or, for T2.1-5's spec import cycles, each
+// 14.9 location — must fall within the import statement's own byte window
+// (end-widened by one byte for line-granular locations, see support.ts
+// byteWindow); every other staged construct lies beyond the following blank
+// line, outside the widened window.
 
 import type { Finding, ViewNode } from "../../helpers/adapters/index.js";
 import {
@@ -861,9 +862,15 @@ const T2_1_4 = defineProductTest({
 // level dependency edges are acyclic by construction — `x → y` and `z → w`
 // reach only childless sections with no outgoing dependency edges, so the
 // combined contains/depends/embeds graph of SPEC 5.3 has no cycle and 14.9
-// can only be the spec import cycle.
+// can only be the spec import cycle. Each file begins with its participating
+// import declaration (prefix ""), the construct each 14.9 location in that
+// file must fall within (SPEC 14: a spec import cycle locates each
+// participating import declaration; the module header's window convention).
+const CYCLE_A_DECLARATION = 'import B from "./B.xspec"';
+const CYCLE_B_DECLARATION = 'import A from "./A.xspec"';
+
 const CYCLE_A_SOURCE = [
-  'import B from "./B.xspec"',
+  CYCLE_A_DECLARATION,
   "",
   '<S id="x" d={B.y}>',
   "Depends across files, acyclically.",
@@ -876,7 +883,7 @@ const CYCLE_A_SOURCE = [
 ].join("\n");
 
 const CYCLE_B_SOURCE = [
-  'import A from "./A.xspec"',
+  CYCLE_B_DECLARATION,
   "",
   '<S id="y">',
   "Target of the other file's dependency.",
@@ -891,59 +898,127 @@ const CYCLE_B_SOURCE = [
 // The self-import arm: the import cycle of length one exists whether or not
 // the binding is used, so it stays unused — the import itself is the defect.
 // Its workspace is created after the two-file arm's invocation, so the
-// source is a staged-source record (S-9's timing clause).
+// source is a staged-source record (S-9's timing clause). Its import
+// declaration begins the file, as in the two-file arm.
+const SELF_IMPORT_DECLARATION = 'import SELF from "./SELF.xspec"';
 const SELF_IMPORT_SOURCE = stagedMdx(
   "T2.1-5 self-import specs/SELF.mdx",
-  'import SELF from "./SELF.xspec"' + IMPORTING_FILE_REST,
+  SELF_IMPORT_DECLARATION + IMPORTING_FILE_REST,
 );
 
 /**
- * Assert an import-cycle report: every finding is 14.9 (nothing else is
- * present in these fixtures — both files parse, and every reference
- * resolves), at most one finding per participating file, and the report
- * identifies every participating file (SPEC 14: actionable errors identify
- * the file — each participating import declaration located in the file
- * containing it) through any of a finding's located files, message, or
- * identity context. SPEC 14 fixes one 14.9 finding locating each
- * participating import declaration of the cycle. This assertion deliberately
- * accepts one finding for the cycle or one per participating file, because
- * TEST-SPEC assigns the every-participant cardinality to T14-8 and the exact
- * per-condition ranges to T14-11 (its §14 preamble). T14-8 asserts the cycle
- * strictly — one 14.9 finding, exactly one location per participating import
- * declaration, each within that declaration's own characters.
+ * One participant of a staged spec import cycle: its workspace-relative file
+ * and the participating import declaration that begins it (prefix ""), whose
+ * `byteWindow` every 14.9 location in that file must fall within.
+ */
+interface ImportCycleParticipant {
+  readonly file: string;
+  readonly declaration: string;
+}
+
+/**
+ * Assert an import-cycle report (SPEC 14: "a cycle locates its full path in
+ * source, … or each participating import declaration of a spec import
+ * cycle", every located condition carrying the containing file and a range
+ * for each offending construct; 14.9): every finding is 14.9 (nothing else
+ * is present in these fixtures — both files parse, and every reference
+ * resolves); every finding carries at least one location, and every
+ * location lies in a participating file within that file's import
+ * declaration window, `byteWindow("", declaration)` (the declaration begins
+ * its file; the one-byte end-widening tolerates a line-granular location);
+ * and every participating declaration is located by some finding. The count
+ * stays bounded rather than exact — one finding for the cycle, or at most
+ * one per participating file — although SPEC 14 fixes one 14.9 finding
+ * locating every participating import declaration, because TEST-SPEC
+ * assigns that every-participant cardinality to T14-8 and the exact
+ * per-condition ranges to T14-11 (its §14 preamble). T14-8 asserts its own
+ * import cycle strictly — one 14.9 finding, exactly one location per
+ * participating import declaration, each within that declaration's own
+ * characters.
  */
 function assertImportCycleFindings(
   findings: readonly Finding[],
-  expectedFiles: readonly string[],
+  participants: readonly ImportCycleParticipant[],
   context: string,
 ): void {
+  const files = JSON.stringify(participants.map(({ file }) => file));
   const conditions = findings.map((finding) => finding.condition);
   if (
     findings.length < 1 ||
-    findings.length > expectedFiles.length ||
+    findings.length > participants.length ||
     conditions.some((condition) => condition !== "14.9")
   ) {
     fail(
-      `${context}: expected the spec import cycle to report condition 14.9 — one ` +
-        `finding for the cycle, or at most one per participating file ` +
-        `(${String(expectedFiles.length)}) — got ${JSON.stringify(conditions)}`,
+      `${context}: expected the spec import cycle over the participating ` +
+        `file(s) ${files} to report condition 14.9 — one finding for the ` +
+        `cycle, or at most one per participating file ` +
+        `(${String(participants.length)}) — got ${JSON.stringify(conditions)} ` +
+        `(SPEC 14, 14.9)`,
     );
   }
-  const identified = findings
-    .map((finding) =>
-      [
-        finding.message,
-        ...finding.locations.map((location) => renderPathValue(location.file)),
-        ...finding.identities,
-      ].join("\n"),
-    )
-    .join("\n");
-  for (const file of expectedFiles) {
-    if (!identified.includes(file)) {
+  const windowOf = (
+    participant: ImportCycleParticipant,
+  ): { start: number; end: number } => byteWindow("", participant.declaration);
+  for (const finding of findings) {
+    if (finding.locations.length === 0) {
       fail(
-        `${context}: the 14.9 report must identify the cycle's participating file ` +
-          `${JSON.stringify(file)} (SPEC 14: actionable errors identify the file); ` +
-          `findings: ${JSON.stringify(findings)}`,
+        `${context}: a 14.9 finding locates each participating import ` +
+          `declaration of the spec import cycle in the file containing it — ` +
+          `the participating file(s) ${files} — but this one carries no ` +
+          `location (SPEC 14, 14.9; 12.7 locations); finding: ` +
+          `${JSON.stringify(finding)}`,
+      );
+    }
+    for (const location of finding.locations) {
+      const rendered =
+        `${renderPathValue(location.file)} [${String(location.range.start)}, ` +
+        `${String(location.range.end)})`;
+      const participant = participants.find(
+        ({ file }) => file === location.file,
+      );
+      if (participant === undefined) {
+        fail(
+          `${context}: a 14.9 finding's locations lie in the spec import ` +
+            `cycle's participating file(s) ${files}, each at its import ` +
+            `declaration (SPEC 14, 14.9); got the location ${rendered} ` +
+            `(message: ${JSON.stringify(finding.message)})`,
+        );
+      }
+      const window = windowOf(participant);
+      if (
+        location.range.start < window.start ||
+        location.range.end > window.end
+      ) {
+        fail(
+          `${context}: a 14.9 location in the participating file ` +
+            `${JSON.stringify(participant.file)} must fall within its import ` +
+            `declaration ${JSON.stringify(participant.declaration)}'s byte ` +
+            `window [${String(window.start)}, ${String(window.end)}] (SPEC 14, ` +
+            `14.9: a spec import cycle locates each participating import ` +
+            `declaration); got ${rendered} (message: ` +
+            `${JSON.stringify(finding.message)})`,
+        );
+      }
+    }
+  }
+  for (const participant of participants) {
+    const window = windowOf(participant);
+    const located = findings.some((finding) =>
+      finding.locations.some(
+        (location) =>
+          location.file === participant.file &&
+          location.range.start >= window.start &&
+          location.range.end <= window.end,
+      ),
+    );
+    if (!located) {
+      fail(
+        `${context}: the participating file ${JSON.stringify(participant.file)}'s ` +
+          `import declaration ${JSON.stringify(participant.declaration)} must ` +
+          `be located by a 14.9 finding within its byte window ` +
+          `[${String(window.start)}, ${String(window.end)}] (SPEC 14, 14.9: a ` +
+          `spec import cycle locates each participating import declaration, ` +
+          `each in the file containing it); findings: ${JSON.stringify(findings)}`,
       );
     }
   }
@@ -962,7 +1037,10 @@ const T2_1_5 = defineProductTest({
           "(requirement-level dependencies acyclic)";
         assertImportCycleFindings(
           await buildFindings(product, workspace, context),
-          ["specs/A.mdx", "specs/B.mdx"],
+          [
+            { file: "specs/A.mdx", declaration: CYCLE_A_DECLARATION },
+            { file: "specs/B.mdx", declaration: CYCLE_B_DECLARATION },
+          ],
           context,
         );
       },
@@ -973,7 +1051,7 @@ const T2_1_5 = defineProductTest({
         const context = "T2.1-5 `build --json` over a file importing itself";
         assertImportCycleFindings(
           await buildFindings(product, workspace, context),
-          ["specs/SELF.mdx"],
+          [{ file: "specs/SELF.mdx", declaration: SELF_IMPORT_DECLARATION }],
           context,
         );
       },

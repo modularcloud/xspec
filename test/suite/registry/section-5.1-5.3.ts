@@ -177,7 +177,9 @@ interface CycleExpectation {
  * the file containing it (SPEC 5.3, 14, 12.7) — the finding count is
  * bounded (one per cycle, or at most one per participating file), and every
  * participating file is identified through located files, message, or
- * identity context (the T2.1-5 convention). The byte-precise path is
+ * identity context (identification at file level; T2.1-5's own helper
+ * requires a location within each participating import declaration of its
+ * import cycles instead). The byte-precise path is
  * asserted beside it: `assertFullCyclePath` for T5.3-1's in-file arms,
  * T14-8 for a cross-file cycle (see the module header).
  */
