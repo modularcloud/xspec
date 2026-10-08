@@ -21,11 +21,13 @@
 //     no requirement categories and no impacted code (SPEC 6.2, 6.3, 9).
 //   * P-5 arm 2 — random section moves. One random section-form `move`: any
 //     section subtree to a random valid target parent (its own parent, a
-//     section of any file, a file root — same-file and cross-file — or a
-//     freshly created target file, its basename drawn as below), under a
-//     fresh ID, with the construct's byte layout at both boundaries
-//     randomized (see "arm-2 boundary staging" below). Staged
-//     tags/coverage/`d` travel with the subtree.
+//     section of any file — whose tags stand in flow position, or, for a
+//     single-line section holding prose, in text position (see "the target
+//     side" below) — a file root — same-file and cross-file — or a freshly
+//     created target file, its basename drawn as below), under a fresh ID,
+//     with the construct's byte layout at both boundaries randomized (see
+//     "arm-2 boundary staging" below). Staged tags/coverage/`d` travel with
+//     the subtree.
 //     The impact report against the pre-move baseline must satisfy the
 //     section-move category oracle (helpers/oracles/section-move.ts, vetted
 //     by its S-6 suite before this arm trusts it): the `changed` set drawn
@@ -159,28 +161,46 @@
 // §16 P-5); every other moved text opens a flow-position tag at its line
 // start, which interrupts the paragraph and closes no text-position tag
 // (T6.5-16(c)'s refused shape, never staged; buildSectionMove's guard). A
-// trial names it through `textPositionTarget` (genSectionMoveTrial draws
-// none yet). It is kept apart from the origin's decorations, never
-// rejected beside them: the moved construct and the target parent are
-// distinct items, each rendered from a line start through its own
-// terminator, so no line holds both, whether or not they are siblings
-// (buildFilePieces rejects a target parent that is the moved section or
-// lies within its subtree). Decoration bytes are owned by exactly the
-// origin parent (outside the moved construct's tags), the moved root
-// (inside them), and, around a text-position target parent, that parent's
-// own parent, its bytes on the line the insertion splits (6.2's
-// enumeration member "the insertion point's line at the destination";
-// T6.5-2's fourth geometry and T6.5-16(c)'s controls anchor it, and the S-6
-// suite's text-position vectors vet the oracle on it): the oracle judges
-// that node by the same own-content comparison, and it stays out of
-// `changed` — `tlead. ` and ` ttail` ride lines kept on both sides, the
-// insertion's own terminators the target parent's. The moved construct's
-// first and last body lines carry no other node's bytes, so no line whose
-// keep/drop status the move flips holds a third node's bytes (P-5: the
-// boundary lines hold prose outside the construct alone) — were one
-// staged, the oracle would predict it `changed` by the same own-content
-// comparison, 6.2's enumeration reaching every node with bytes on such a
-// line (T6.2-3's sibling stagings (d)/(e) are its deterministic anchors).
+// trial names it through `textPositionTarget`, the routing
+// genSectionMoveTrial draws after every other draw, so a trial that cannot
+// take it draws exactly what it drew before: an existing file's section
+// target receiving a collapse that holds prose goes into text position nine
+// times in ten, its shape drawn among those it admits — an empty target
+// self-closing there, which displaces the flow-position self-closing form
+// where that was drawn (the two exclude each other). Unbiased, no fixed-seed
+// trial could take the routing: 7 of the 24 fixed-seed models held no section
+// whose collapse holds prose, none held one beside a valid target admitting a
+// paired shape, and the trials over the 3 holding one beside a valid empty
+// target each drew another move. So the generator biases toward a
+// text-position-bound move in 40% of the trials drawing no import-adding
+// move: the moved section's collapse holds prose (a fresh such section
+// appended to a drawn file's top level when the model holds none), its layout
+// is the collapse, and its target is drawn by kind — one plain-prose item two
+// times in three, empty otherwise, so the three shapes come out alike — among
+// the valid candidates of that kind, else a fresh section of that kind
+// appended to the top level of a file whose root is a valid candidate (no
+// reference names it, its one ancestor that root); the bias shrinks toward
+// the unbiased pick. A text-position target parent is kept apart from the
+// origin's decorations, never rejected beside them: the moved construct and
+// the target parent are distinct items, each rendered from a line start
+// through its own terminator, so no line holds both, whether or not they are
+// siblings (buildFilePieces rejects a target parent that is the moved section
+// or lies within its subtree). Decoration bytes are owned by exactly the
+// origin parent (outside the moved construct's tags), the moved root (inside
+// them), and, around a text-position target parent, that parent's own parent,
+// its bytes on the line the insertion splits (6.2's enumeration member "the
+// insertion point's line at the destination"; T6.5-2's fourth geometry and
+// T6.5-16(c)'s controls anchor it, and the S-6 suite's text-position vectors
+// vet the oracle on it): the oracle judges that node by the same own-content
+// comparison, and it stays out of `changed` — `tlead. ` and ` ttail` ride
+// lines kept on both sides, the insertion's own terminators the target
+// parent's. The moved construct's first and last body lines carry no other
+// node's bytes, so no line whose keep/drop status the move flips holds a
+// third node's bytes (P-5: the boundary lines hold prose outside the
+// construct alone) — were one staged, the oracle would predict it `changed`
+// by the same own-content comparison, 6.2's enumeration reaching every node
+// with bytes on such a line (T6.2-3's sibling stagings (d)/(e) are its
+// deterministic anchors).
 // Embeddings keep the PROP-03 prose-flanked
 // staging everywhere (never on a straddling or decorated line), so no
 // line-drop decision ever consults an expansion's emptiness and the
@@ -1400,7 +1420,18 @@ function isPlainProse(item: BodyItem): item is ProseItem {
  * `selfClosing` — `tlead. <S … /> ttail` (T6.5-2's self-closing arm, in
  * text position).
  */
-type TextPositionShape = "sameLine" | "laterLine" | "selfClosing";
+export type TextPositionShape = "sameLine" | "laterLine" | "selfClosing";
+
+/**
+ * Every text-position shape, in `TextPositionShape`'s order — the shapes
+ * P-5's fixed-seed draw guard requires the section-move arm to reach
+ * (test/self/p5-fixed-seed-draws.test.ts).
+ */
+export const TEXT_POSITION_SHAPES: readonly TextPositionShape[] = [
+  "sameLine",
+  "laterLine",
+  "selfClosing",
+];
 
 /**
  * The text-position shapes a section admits as a target parent: a
@@ -1417,6 +1448,44 @@ function textPositionShapesFor(
     return ["sameLine", "laterLine"];
   }
   return [];
+}
+
+/**
+ * Whether the section's `collapse` line holds prose outside its tags — a
+ * single prose item with a text part that is not whitespace alone: the one
+ * moved text a text-position target parent receives (TEST-SPEC §16 P-5;
+ * module header, "the target side"). PROP-03's prose items open with
+ * anchored plain text, so every single-prose-item section qualifies; the
+ * generator's routing and buildSectionMove's guard read the rule here.
+ */
+function collapsesHoldingProse(section: SectionItem): boolean {
+  const only = section.items[0];
+  return (
+    section.items.length === 1 &&
+    only.kind === "prose" &&
+    only.parts.some((part) => part.kind === "text" && part.text.trim() !== "")
+  );
+}
+
+/**
+ * The `collapse` layout of a single-prose-item section (module header):
+ * optional origin-parent prose on either side when its prose is plain —
+ * embeddings stay valid only in the undecorated line-start collapse (the
+ * module header's validity rule).
+ */
+function genCollapseLayout(
+  choices: Choices,
+  section: SectionItem,
+): MovedLayout {
+  const plain = isPlainProse(section.items[0]);
+  return {
+    form: "collapse",
+    leadOutside: plain ? choices.pick(OUTSIDE_LEADS) : null,
+    leadInside: null,
+    tailInside: null,
+    tailOutside: plain ? choices.pick(OUTSIDE_TAILS) : null,
+    closeJoined: false,
+  };
 }
 
 /**
@@ -1454,20 +1523,7 @@ function genMovedLayout(choices: Choices, section: SectionItem): MovedLayout {
       ]);
     }
     if (section.items.length === 1 && section.items[0].kind === "prose") {
-      const plain = isPlainProse(section.items[0]);
-      options.push([
-        3,
-        () => ({
-          form: "collapse",
-          // Embeddings stay valid only in the undecorated line-start
-          // collapse (module header's validity rule).
-          leadOutside: plain ? choices.pick(OUTSIDE_LEADS) : null,
-          leadInside: null,
-          tailInside: null,
-          tailOutside: plain ? choices.pick(OUTSIDE_TAILS) : null,
-          closeJoined: false,
-        }),
-      ]);
+      options.push([3, () => genCollapseLayout(choices, section)]);
     }
   }
   return choices.weightedPick(options)();
@@ -1619,7 +1675,156 @@ function moveCandidates(
   };
 }
 
-const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
+/**
+ * Arm 2's section-move trials per seed, as the registration below draws
+ * them (three fixed seeds in CI, E-5: 24 trials) and as P-5's draw guard
+ * replays them (test/self/p5-fixed-seed-draws.test.ts).
+ */
+export const P5_SECTION_MOVE_RUNS = 8;
+
+// Text-position targets (module header, "the target side"): the bias toward
+// a text-position-bound move — drawn in this fraction of the trials drawing
+// no import-adding move — and the fixed probability with which a trial able
+// to take the routing renders its target parent in text position.
+const TEXT_POSITION_BIAS = 0.4;
+const TEXT_POSITION_ROUTING = 0.9;
+
+/** A fresh text-position-bound moved section's prose (PROP-03's alphabet). */
+const FRESH_MOVED_PROSE = "k9 fresh moved";
+/** A fresh text-position-bound target's prose (PROP-03's alphabet). */
+const FRESH_TARGET_PROSE = "k9 fresh dest";
+
+/**
+ * The model with a fresh section appended to file `fileIndex`'s top level
+ * under the file's next fresh segment (SPEC 1.3 uniqueness; PROP-03's
+ * counter, as addChild takes it): no props, `items` its body. Returns the
+ * copy and the section's dotted ID.
+ */
+function withFreshTopLevelSection(
+  model: WorkspaceModel,
+  fileIndex: number,
+  items: BodyItem[],
+): { readonly model: WorkspaceModel; readonly dotted: string } {
+  const after = structuredClone(model);
+  const file = after.files[fileIndex];
+  const seg = `s${String(file.nextSeg)}`;
+  file.nextSeg += 1;
+  file.items.push({
+    kind: "section",
+    seg,
+    tags: null,
+    coverageNone: false,
+    deps: null,
+    depsSingle: false,
+    items,
+  });
+  return { model: after, dotted: seg };
+}
+
+/** A prose item of one plain-text part. */
+function plainProseItem(text: string): ProseItem {
+  return { kind: "prose", parts: [{ kind: "text", text }] };
+}
+
+/**
+ * The text-position bias's moved section (genSectionMoveTrial; module
+ * header, "the target side"): a section whose collapse holds prose, drawn
+ * among the model's when it holds any, and otherwise a fresh one holding
+ * one plain-prose item, appended to a drawn file's top level (nothing
+ * references it, and it references nothing). Returns the model the trial
+ * carries — the one given, or a copy holding the fresh section.
+ */
+function drawTextPositionBoundMoved(
+  choices: Choices,
+  model: WorkspaceModel,
+): { readonly model: WorkspaceModel; readonly moved: SectionSite } {
+  const collapsing = sectionsOf(model).filter((site) =>
+    collapsesHoldingProse(site.section),
+  );
+  if (collapsing.length > 0) return { model, moved: choices.pick(collapsing) };
+  const fileIndex = choices.intInclusive(0, model.files.length - 1);
+  const fresh = withFreshTopLevelSection(model, fileIndex, [
+    plainProseItem(FRESH_MOVED_PROSE),
+  ]);
+  const moved = sectionsOf(fresh.model).find(
+    (site) => site.file === fileIndex && site.dotted === fresh.dotted,
+  );
+  if (moved === undefined) {
+    throw new Error(
+      `P-5 harness defect: the fresh section ${fresh.dotted} of file ` +
+        `${String(fileIndex)} is missing`,
+    );
+  }
+  return { model: fresh.model, moved };
+}
+
+/**
+ * The text-position bias's target (genSectionMoveTrial; module header, "the
+ * target side"). Its kind is drawn first — a section holding one plain-prose
+ * item two times in three, an empty one otherwise, so the shapes the routing
+ * then admits (`textPositionShapesFor`: the two paired shapes, the
+ * self-closing one) come out alike — then one of the moved section's valid
+ * candidates of that kind, an existing file's section, when any is, and
+ * otherwise a fresh section of that kind appended to the top level of a
+ * file whose root is a valid candidate: its one ancestor is that root,
+ * nothing references it, and it lies outside the moved subtree, so it meets
+ * every validation moveCandidates mirrors. Returns the model the trial
+ * carries — the one given, or a copy holding the fresh section.
+ */
+function drawTextPositionBoundTarget(
+  choices: Choices,
+  model: WorkspaceModel,
+  candidates: readonly MoveCandidate[],
+): { readonly model: WorkspaceModel; readonly target: MoveCandidate } {
+  const holdsProse = choices.weightedPick<boolean>([
+    [2, true],
+    [1, false],
+  ]);
+  const shape: TextPositionShape = holdsProse ? "sameLine" : "selfClosing";
+  const eligible = candidates.filter((candidate) => {
+    if (candidate.toFile === null || candidate.targetDotted === null) {
+      return false;
+    }
+    const located = locateSection(
+      model,
+      candidate.toFile,
+      candidate.targetDotted,
+    );
+    const item = located.items[located.index];
+    return (
+      item.kind === "section" && textPositionShapesFor(item).includes(shape)
+    );
+  });
+  if (eligible.length > 0) return { model, target: choices.pick(eligible) };
+  const files = candidates.flatMap((candidate) =>
+    candidate.toFile !== null && candidate.targetDotted === null
+      ? [candidate.toFile]
+      : [],
+  );
+  if (files.length === 0) {
+    // The moved section's own file root is always a valid target (its
+    // window holds its own file, and no reference names a root of its own
+    // file), so an empty list is a harness defect.
+    throw new Error(
+      "P-5 harness defect: no file root among the text-position bias's " +
+        "candidates",
+    );
+  }
+  const toFile = choices.pick(files);
+  const fresh = withFreshTopLevelSection(
+    model,
+    toFile,
+    holdsProse ? [plainProseItem(FRESH_TARGET_PROSE)] : [],
+  );
+  return { model: fresh.model, target: { toFile, targetDotted: fresh.dotted } };
+}
+
+/**
+ * P-5's arm-2 generator (module header), replayed at the fixed seeds by
+ * P-5's draw guard (test/self/p5-fixed-seed-draws.test.ts) exactly as the
+ * registration below draws it, `P5_SECTION_MOVE_RUNS` trials per seed.
+ */
+export const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
   let model = genWorkspaceModel(choices);
   if (sectionsOf(model).length === 0) {
     // Guarantee a movable subtree: add one prose-only section to file 0
@@ -1638,23 +1843,40 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
   // — the only moves of the drawn space that add an import, each judged by
   // T6.5-22(a)'s driver hook, the drawn basenames steering a
   // basename-derived binding (module header, "drawn spec basenames"); the
-  // unbiased picks below drew none under the fixed seeds. Otherwise toward
-  // subtree-bearing moves (descendant re-identification and the richer
-  // cascades) when any exist; a plain pick underexercises them under the
-  // fixed seeds. Shrinks toward the unbiased simple pick.
+  // unbiased picks below drew none under the fixed seeds.
   const importAdding = sections.filter((site) => {
     const { createdOk, createdAdds } = moveCandidates(model, site);
     return createdOk && createdAdds > 0;
   });
   const addsImports = importAdding.length > 0 && choices.boolean(0.4);
+  // Otherwise toward a text-position-bound move (module header, "the
+  // target side"): a section whose collapse holds prose moved
+  // (drawTextPositionBoundMoved), its target admitting a text-position
+  // shape (drawTextPositionBoundTarget), its layout the collapse, so the
+  // routing drawn last can take it — the unbiased picks drew no such trial
+  // under the fixed seeds, whose models held no collapsible section beside
+  // a valid target admitting a paired shape, and 7 of the 24 no
+  // collapsible section at all.
+  const towardTextPosition =
+    !addsImports && choices.boolean(TEXT_POSITION_BIAS);
+  // Otherwise toward subtree-bearing moves (descendant re-identification
+  // and the richer cascades) when any exist; a plain pick underexercises
+  // them under the fixed seeds. Each bias shrinks toward the unbiased
+  // simple pick.
   const withChildren = sections.filter((site) =>
     site.section.items.some((item) => item.kind === "section"),
   );
-  const moved = addsImports
-    ? choices.pick(importAdding)
-    : withChildren.length > 0 && choices.boolean(0.5)
-      ? choices.pick(withChildren)
-      : choices.pick(sections);
+  let moved: SectionSite;
+  if (addsImports) {
+    moved = choices.pick(importAdding);
+  } else if (towardTextPosition) {
+    ({ model, moved } = drawTextPositionBoundMoved(choices, model));
+  } else {
+    moved =
+      withChildren.length > 0 && choices.boolean(0.5)
+        ? choices.pick(withChildren)
+        : choices.pick(sections);
+  }
   const { candidates, createdOk } = moveCandidates(model, moved);
   if (candidates.length === 0) {
     // The moved section's own parent is always a valid target (same file,
@@ -1664,14 +1886,16 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
         `${String(moved.file)}#${moved.dotted}`,
     );
   }
-  // Target pick: a created target file for an import-adding move, and
-  // sometimes otherwise (the created-root-as-added arm) when the strict
-  // import window allows; sometimes the final child re-inserted at its
-  // own former position (T6.2-4's purity, reached in the
-  // random space — and confined to this branch: the ordinary pick excludes
-  // the pure-reproducing own-parent target so no-op trials stay rare);
-  // otherwise biased toward section parents (nesting under a section, the
-  // deeper 6.5 insertion) over file roots, which dominate small models.
+  // Target pick: for a text-position-bound move, a target admitting a
+  // text-position shape, drawn by kind (drawTextPositionBoundTarget); a
+  // created target file for an import-adding move, and sometimes otherwise
+  // (the created-root-as-added arm) when the strict import window allows;
+  // sometimes the final child re-inserted at its own former position
+  // (T6.2-4's purity, reached in the random space — and confined to this
+  // branch: the ordinary pick excludes the pure-reproducing own-parent target
+  // so no-op trials stay rare); otherwise biased toward section parents
+  // (nesting under a section, the deeper 6.5 insertion) over file roots,
+  // which dominate small models.
   const container = locateSection(model, moved.file, moved.dotted);
   const isFinalChild = container.index === container.items.length - 1;
   const ownParent: MoveCandidate = {
@@ -1679,7 +1903,13 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
     targetDotted: moved.parentDotted === "" ? null : moved.parentDotted,
   };
   let target: MoveCandidate;
-  if (addsImports || (createdOk && choices.boolean(0.2))) {
+  if (towardTextPosition) {
+    ({ model, target } = drawTextPositionBoundTarget(
+      choices,
+      model,
+      candidates,
+    ));
+  } else if (addsImports || (createdOk && choices.boolean(0.2))) {
     target = { toFile: null, targetDotted: null };
   } else if (isFinalChild && choices.boolean(0.2)) {
     target = ownParent;
@@ -1700,7 +1930,9 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
         ? choices.pick(sectionTargets)
         : choices.pick(effective);
   }
-  const layout = genMovedLayout(choices, moved.section);
+  const layout = towardTextPosition
+    ? genCollapseLayout(choices, moved.section)
+    : genMovedLayout(choices, moved.section);
   let selfCloseTargetParent = false;
   if (target.toFile !== null && target.targetDotted !== null) {
     const located = locateSection(model, target.toFile, target.targetDotted);
@@ -1734,6 +1966,30 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
     target.toFile === null
       ? drawSpecBasename(choices, new Set(basenames))
       : null;
+  // The text-position routing (module header, "the target side"), drawn
+  // after every other draw, so a trial that cannot take it draws exactly
+  // what it drew before. It admits an existing file's section target
+  // receiving a collapse that holds prose: a childless one-plain-prose
+  // section in either paired shape, an empty one in the self-closing shape
+  // (the flow-position self-closing form, where drawn, giving way to it —
+  // the two exclude each other). Text position is drawn with a fixed
+  // probability, the shape among those admitted.
+  let admitted: readonly TextPositionShape[] = [];
+  if (
+    target.toFile !== null &&
+    target.targetDotted !== null &&
+    layout.form === "collapse" &&
+    collapsesHoldingProse(moved.section)
+  ) {
+    const located = locateSection(model, target.toFile, target.targetDotted);
+    const parent = located.items[located.index];
+    if (parent.kind === "section") admitted = textPositionShapesFor(parent);
+  }
+  let textPositionTarget: TextPositionShape | null = null;
+  if (admitted.length > 0 && choices.boolean(TEXT_POSITION_ROUTING)) {
+    textPositionTarget = choices.pick(admitted);
+    if (textPositionTarget === "selfClosing") selfCloseTargetParent = false;
+  }
   return {
     model,
     fromFile: moved.file,
@@ -1746,10 +2002,7 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
     layout,
     selfCloseTargetParent,
     stripFinalNewline,
-    // The staging renders a text-position target parent (buildSectionMove,
-    // `P5_FORM_VECTORS`), but no draw routes a move there yet: every target
-    // parent drawn here keeps its flow position.
-    textPositionTarget: null,
+    textPositionTarget,
     basenames,
     createdBasename,
   };
@@ -2214,14 +2467,11 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
     }
     const movedSite = locateSection(model, trial.fromFile, trial.dotted);
     const movedSection = movedSite.items[movedSite.index];
-    const holdsProse =
-      movedSection.kind === "section" &&
-      movedSection.items.length === 1 &&
-      movedSection.items[0].kind === "prose" &&
-      movedSection.items[0].parts.some(
-        (part) => part.kind === "text" && part.text.trim() !== "",
-      );
-    if (trial.layout.form !== "collapse" || !holdsProse) {
+    if (
+      trial.layout.form !== "collapse" ||
+      movedSection.kind !== "section" ||
+      !collapsesHoldingProse(movedSection)
+    ) {
       stagingDefect(
         `a ${trial.layout.form} moved text into a ${textPositionShape} ` +
           `text-position target parent — only a single-line section holding ` +
@@ -3313,6 +3563,7 @@ function renderSectionMoveTrial(trial: SectionMoveTrial): string {
     layout: trial.layout,
     selfCloseTargetParent: trial.selfCloseTargetParent,
     stripFinalNewline: trial.stripFinalNewline,
+    textPositionTarget: trial.textPositionTarget,
   });
 }
 
@@ -3331,7 +3582,8 @@ const P_5 = defineProductTest({
     "operation's identity map, `check` passes (all references resolve, the journal replays), " +
     "and `impact --base` against every prior commit in the sequence reports no categories and " +
     "no impacted code; random section moves — boundary layouts randomized, same-file, " +
-    "cross-file, and created-target-file — produce exactly the section-move oracle's " +
+    "cross-file, and created-target-file, into target parents in flow and in text " +
+    "position — produce exactly the section-move oracle's " +
     "prediction: the changed set drawn from the origin parent, the target parent, and the " +
     "moved subtree via the straddling-line drop rules of 3, a created target root changed as " +
     "added, a coincident parent pure on exact re-insertion, metadata-changed on no node, and " +
@@ -3364,7 +3616,7 @@ const P_5 = defineProductTest({
         await runSectionMoveTrial(product, trial);
       },
       {
-        runs: 8,
+        runs: P5_SECTION_MOVE_RUNS,
         maxShrinkExecutions: 80,
         render: renderSectionMoveTrial,
         drawSources: stagedSectionMoveSources,
