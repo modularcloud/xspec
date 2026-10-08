@@ -85,6 +85,9 @@
 //   14.10 finding concerns a derived path of `specs/A.mdx` — `specs/A.xspec.`
 //   plus a suffix, the module and its companions (SPEC 13.1) — and the
 //   module itself is among them, since it embeds the edited text (SPEC 4.2).
+//   Each such finding instructs rebuilding — its message names `build`
+//   (SPEC 14.10): a text edit leaves no recorded file obstructing a path
+//   the rebuild writes.
 // - `review status s` against the occupied session directory is an unknown
 //   session — a plain usage error, so the exit-2 error document's `code` and
 //   `path` are `null` (SPEC 12.0, 12.7).
@@ -147,6 +150,7 @@ import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
+  assertFindingInstructsRebuilding,
   assertFindingLocated,
   assertSameJson,
   buildOk,
@@ -1702,8 +1706,15 @@ function assertExactlyOneFinding(
  * file, concerning a derived path of `specs/A.mdx` — `specs/A.xspec.` plus
  * a suffix (SPEC 13.1) — with the module itself among them (it embeds the
  * edited text, SPEC 4.2), and none is the graph-data unit form, whose
- * concerned path would be `.xspec` (SPEC 14.10). Beside the staleness,
- * exactly `beside` (counted by identity) and nothing else.
+ * concerned path would be `.xspec` (SPEC 14.10). Every such finding
+ * instructs rebuilding (`assertFindingInstructsRebuilding`: its message
+ * names `build`), the correction SPEC 14.10 requires of a per-file
+ * finding: each twin's state is a text edit, so every stale derived file
+ * is one the rebuild regenerates in place, and no recorded file obstructs
+ * a path the rebuild writes — the one condition-10 form whose correction
+ * is its manual deletion instead (SPEC 14.10, 13.4, 14.22; T13.4-10's
+ * judge). Beside the staleness, exactly `beside` (counted by identity)
+ * and nothing else.
  */
 function assertPerFileStalenessOfA(
   findings: readonly Finding[],
@@ -1745,6 +1756,14 @@ function assertPerFileStalenessOfA(
       [],
       `${context}: a per-file staleness finding names its path and has no ` +
         `in-source location — locations [] (SPEC 14.10, 12.7)`,
+    );
+    assertFindingInstructsRebuilding(
+      finding,
+      `${context}: the per-file staleness finding concerning ` +
+        `${JSON.stringify(finding.path)} — a derived file of the edited ` +
+        `source, which the rebuild regenerates in place; the twin's state ` +
+        `is a text edit, so no recorded file obstructs a rebuild write and ` +
+        `the finding instructs rebuilding (SPEC 14.10)`,
     );
   }
   if (!stale.some((finding) => finding.path === T10_1_6_A_MODULE)) {
