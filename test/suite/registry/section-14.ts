@@ -90,7 +90,13 @@
 //   likewise: every 14.10 finding a concerned path with `locations` `[]`,
 //   `specs/a.md` among the paths; the 14.12 finding the edge T12.2-4 pins
 //   by `identities`, `locations` `[]`, `path` null; the 14.23 arm's
-//   findings (and `check`'s unit form) the graph-data area `.xspec`.
+//   findings (and `check`'s unit form) the graph-data area `.xspec`. Their
+//   condition-10 findings also carry the correction SPEC 14.10 requires:
+//   every finding of the 14.10 arm, per file and unit form alike, and the
+//   14.23 arm's unit form instruct rebuilding (support.ts
+//   assertFindingInstructsRebuilding: the message names `build`), neither
+//   staging holding a recorded file that obstructs a rebuild write — the
+//   one form instructed to be deleted manually instead.
 // - T14-4's 14.21 arm asserts matrix membership — exit 1 with /corrupt/i on
 //   stdout, the T10.1-4 operationalization — for one subcommand naming the
 //   session (`review status`) and for `review list`; the all-subcommands
@@ -107,10 +113,11 @@
 //   `check` reports exactly one condition-10 finding (the unit form — so
 //   never 14.23, never a per-file finding beside it on the freshly built,
 //   otherwise clean workspace), each of the three findings concerning the
-//   graph-data area `.xspec` with `locations` `[]`; a refreshing read
-//   (`query nodes`) and `build` exit 0. Depth — `recorded`/`delta`
-//   unavailability, record discipline, replacement — is T11.6-4's,
-//   T6.6-6's, T12.2-2's, and T13.3-2's subject.
+//   graph-data area `.xspec` with `locations` `[]`, the unit form
+//   instructing rebuilding (SPEC 14.10: "one finding either way,
+//   instructing rebuilding"); a refreshing read (`query nodes`) and `build`
+//   exit 0. Depth — `recorded`/`delta` unavailability, record discipline,
+//   replacement — is T11.6-4's, T6.6-6's, T12.2-2's, and T13.3-2's subject.
 // - T14-4's 14.14 row includes `version`: exit 0 with a single JSON document
 //   as its entire stdout (12.6 is JSON-only) on the same invalid
 //   configuration that makes `build`/`check` exit 2 — the never-`version`
@@ -462,6 +469,7 @@ import {
   assertEdgeSetEqual,
   assertFindingConcernsPath,
   assertFindingIdentities,
+  assertFindingInstructsRebuilding,
   assertFindingLocated,
   assertFindingLocatesExactly,
   assertFindingMentionsLocation,
@@ -2084,9 +2092,12 @@ const T14_4 = defineProductTest({
         );
       }
       // Each finding concerns a path — a stale derived file's, or the
-      // graph-data area for the unit form — and locates nothing in source;
-      // the edited source's emitted Markdown, specs/a.md, is among the
-      // concerned paths (SPEC 14, 14.10, 13.2, 12.7).
+      // graph-data area for the unit form — locates nothing in source, and
+      // instructs rebuilding: no recorded file is staged, so none obstructs
+      // a rebuild write (the one form whose correction is its manual
+      // deletion instead); the edited source's emitted Markdown,
+      // specs/a.md, is among the concerned paths (SPEC 14, 14.10, 13.2,
+      // 12.7).
       for (const finding of findings) {
         if (finding.path === null) {
           fail(
@@ -2101,6 +2112,13 @@ const T14_4 = defineProductTest({
           [],
           `${context} — a condition-10 finding has no in-source location: ` +
             `\`locations\` [] (SPEC 14, 14.10, 12.7)`,
+        );
+        assertFindingInstructsRebuilding(
+          finding,
+          `${context} — the finding concerning ` +
+            `${JSON.stringify(finding.path)}: no recorded file obstructs a ` +
+            `rebuild write here, so every condition-10 finding, per file ` +
+            `and unit form alike, instructs rebuilding (SPEC 14, 14.10)`,
         );
       }
       if (!findings.some((finding) => finding.path === "specs/a.md")) {
@@ -2302,7 +2320,8 @@ const T14_4 = defineProductTest({
       // Each reporter's one finding — 14.23's, and `check`'s 14.10 unit
       // form — concerns the graph-data area, `.xspec`, never a path inside
       // it (the record's layout is unenumerated), and locates nothing in
-      // source (SPEC 14, 14.23, 14.10, 11.6, 13.3, 12.7).
+      // source; `check`'s unit form instructs rebuilding (SPEC 14, 14.23,
+      // 14.10, 11.6, 13.3, 12.7).
       const inventoryContext = "T14-4 (14.23) `inventory`";
       const inventoryFindings = decodeInventoryFindings(
         await runJsonExpecting(
@@ -2373,6 +2392,12 @@ const T14_4 = defineProductTest({
         GRAPH_DATA_AREA_PATH,
         `${unitContext} (14.10's unit form)`,
         "SPEC 14, 14.10, 11.6, 12.7",
+      );
+      assertFindingInstructsRebuilding(
+        unitFindings[0]!,
+        `${unitContext} (14.10's unit form) — the record that cannot be ` +
+          `read is reported as staleness's one unit-form finding, ` +
+          `instructing rebuilding (SPEC 14, 14.10, 14.23)`,
       );
 
       await expectExit(

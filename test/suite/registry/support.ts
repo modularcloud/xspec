@@ -850,6 +850,35 @@ export function assertFindingConcernsPath(
   );
 }
 
+/**
+ * Assert a condition-10 (stale generated output) finding instructs
+ * rebuilding: its message names `build` (`/build/i`; `rebuild` qualifies,
+ * H-3). SPEC 14.10 has each per-file finding — a missing or mismatched
+ * derived file, or a recorded derived file the current sources and
+ * configuration no longer generate — and the one unit-form finding (graph
+ * data missing or mismatched, or a record that cannot be read, 14.23)
+ * instruct rebuilding: the correction information SPEC 14 requires
+ * (TEST-SPEC's error-assertion rule). The keyword is that information's
+ * established judge (the keyword-matcher ruling recorded at 97c7c24: the
+ * matchers `/config/i`, `/build/i`, `/resolv/i`, and `/corrupt/i` each name
+ * information SPEC requires). A recorded file obstructing a path the
+ * rebuild writes, which refuses the rebuild (SPEC 13.4, 14.22), is instead
+ * instructed to be deleted manually (SPEC 14.10; T13.4-10's judge), so a
+ * caller applies this only where no recorded file obstructs a rebuild
+ * write.
+ */
+export function assertFindingInstructsRebuilding(
+  finding: Finding,
+  context: string,
+): void {
+  if (/build/i.test(finding.message)) return;
+  fail(
+    `${context}: a condition-10 finding instructs rebuilding (SPEC ` +
+      `14.10) — any message naming \`build\` qualifies (H-3); got ` +
+      JSON.stringify(finding.message),
+  );
+}
+
 function renderJson(value: unknown): string {
   return value === undefined ? "undefined" : JSON.stringify(value);
 }
