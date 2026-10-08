@@ -98,7 +98,8 @@
 // construct's boundaries. Every decorated byte form is checked live under
 // S-9 (SPEC 14.20): `P5_FORM_VECTORS` (below buildSectionMove) spells each
 // layout the generator can draw — at the origin, and as its moved text
-// lands at the destination — the S-9 self-test
+// lands at the destination — and each target-side form, the text-position
+// target parent before and after a move into it as well — the S-9 self-test
 // (test/self/s9-fixture-well-formedness.test.ts) proves every one derives
 // before any product exists, and every draw's staged files are judged the
 // same way before the product sees them (`drawSources` on the registrations;
@@ -140,19 +141,47 @@
 //     prose, only the undecorated line-start form);
 //   * self-closing — an empty moved section as `<S … />`, optional parent
 //     prose on either side.
-// The target side adds two forms: an empty target parent rendered
-// self-closing (T6.5-2's rewrite exercised against the product) and, for an
-// existing-file root target, the file's final line terminator stripped so
-// the insertion point is mid-line (6.5's preceding-U+000A rule). Decoration
-// bytes are owned by exactly the origin parent (outside the tags) and the
-// moved root (inside them), and the construct's first and last body lines
-// carry no other node's bytes, so no line whose keep/drop status the move
-// flips holds a third node's bytes (P-5: the boundary lines hold prose
-// outside the construct alone) — were one staged, the oracle would predict
-// it `changed` by the same own-content comparison, 6.2's enumeration
-// reaching every node with bytes on such a line (T6.2-3's sibling
-// stagings (d)/(e) are its deterministic anchors). Embeddings keep the
-// PROP-03 prose-flanked
+// The target side adds three forms: an empty target parent rendered
+// self-closing on a line of its own (T6.5-2's rewrite exercised against
+// the product); for an existing-file root target, the file's final line
+// terminator stripped so the insertion point is mid-line (6.5's
+// preceding-U+000A rule); and an existing file's section rendered as a
+// text-position target parent (`TextPositionShape`; T6.5-2's fourth
+// geometry and self-closing arm, T6.5-16(c)'s three control parents) —
+// inside a paragraph line of its parent, the parent's fixed prose
+// `tlead. ` immediately before its opening tag and ` ttail` immediately
+// after its closing tag: `sameLine` (`tlead. <S …>text</S> ttail`, for a
+// childless section whose one item is plain prose), `laterLine` (the same
+// with its closing tag at the next line's start), or `selfClosing`
+// (`tlead. <S … /> ttail`, for an empty section). A text-position target
+// parent receives only a single-line section holding prose outside its
+// tags — the collapse layout, which stays a paragraph line there (TEST-SPEC
+// §16 P-5); every other moved text opens a flow-position tag at its line
+// start, which interrupts the paragraph and closes no text-position tag
+// (T6.5-16(c)'s refused shape, never staged; buildSectionMove's guard). A
+// trial names it through `textPositionTarget` (genSectionMoveTrial draws
+// none yet). It is kept apart from the origin's decorations, never
+// rejected beside them: the moved construct and the target parent are
+// distinct items, each rendered from a line start through its own
+// terminator, so no line holds both, whether or not they are siblings
+// (buildFilePieces rejects a target parent that is the moved section or
+// lies within its subtree). Decoration bytes are owned by exactly the
+// origin parent (outside the moved construct's tags), the moved root
+// (inside them), and, around a text-position target parent, that parent's
+// own parent, its bytes on the line the insertion splits (6.2's
+// enumeration member "the insertion point's line at the destination";
+// T6.5-2's fourth geometry and T6.5-16(c)'s controls anchor it, and the S-6
+// suite's text-position vectors vet the oracle on it): the oracle judges
+// that node by the same own-content comparison, and it stays out of
+// `changed` — `tlead. ` and ` ttail` ride lines kept on both sides, the
+// insertion's own terminators the target parent's. The moved construct's
+// first and last body lines carry no other node's bytes, so no line whose
+// keep/drop status the move flips holds a third node's bytes (P-5: the
+// boundary lines hold prose outside the construct alone) — were one
+// staged, the oracle would predict it `changed` by the same own-content
+// comparison, 6.2's enumeration reaching every node with bytes on such a
+// line (T6.2-3's sibling stagings (d)/(e) are its deterministic anchors).
+// Embeddings keep the PROP-03 prose-flanked
 // staging everywhere (never on a straddling or decorated line), so no
 // line-drop decision ever consults an expansion's emptiness and the
 // oracle's emptiness-stability contract holds trivially; expansion values
@@ -1254,6 +1283,14 @@ const WS_RESIDUE = "  ";
 const TAB_RESIDUE = String.fromCodePoint(0x0009);
 const VT = String.fromCodePoint(0x000b);
 const FF = String.fromCodePoint(0x000c);
+// The text-position target parent's fixed surroundings (module header, "the
+// target side"): bytes its parent — the target parent's parent — owns
+// immediately before its opening tag and immediately after its closing tag,
+// on those tags' lines (T6.5-16(c)'s `foo ` and ` baz`). MDX-safe plain
+// prose the flow attempt cannot take, so each tag stands in text position;
+// distinct from the origin parent's decorations above.
+const TARGET_LEAD_OUTSIDE = "tlead. ";
+const TARGET_TAIL_OUTSIDE = " ttail";
 
 /**
  * Grammar-whitespace remainders and leads: nothing, spaces, a tab. The tag
@@ -1356,6 +1393,33 @@ function isPlainProse(item: BodyItem): item is ProseItem {
 }
 
 /**
+ * A text-position target parent's shape (module header, "the target side";
+ * T6.5-16(c)'s three control parents), its parent's fixed prose around it
+ * on its lines: `sameLine` — `tlead. <S …>text</S> ttail` (T6.5-2's fourth
+ * geometry); `laterLine` — `tlead. <S …>text`, U+000A, `</S> ttail`;
+ * `selfClosing` — `tlead. <S … /> ttail` (T6.5-2's self-closing arm, in
+ * text position).
+ */
+type TextPositionShape = "sameLine" | "laterLine" | "selfClosing";
+
+/**
+ * The text-position shapes a section admits as a target parent: a
+ * childless section whose only item is one plain-prose item (no
+ * embedding — none ever stands on a decorated line, module header) the
+ * two paired shapes, an empty section the self-closing one, any other
+ * none. Fixed order, simplest first.
+ */
+function textPositionShapesFor(
+  section: SectionItem,
+): readonly TextPositionShape[] {
+  if (section.items.length === 0) return ["selfClosing"];
+  if (section.items.length === 1 && isPlainProse(section.items[0])) {
+    return ["sameLine", "laterLine"];
+  }
+  return [];
+}
+
+/**
  * One random byte layout valid for the moved section's shape (module
  * header): inline requires a childless all-plain-prose body (or an empty
  * one, in the both-sides form), collapse a single prose item.
@@ -1421,6 +1485,14 @@ interface SectionMoveTrial {
   readonly selfCloseTargetParent: boolean;
   /** Strip the root-target file's final terminator (mid-line insertion). */
   readonly stripFinalNewline: boolean;
+  /**
+   * Render the target parent in text position, in this shape (module
+   * header, "the target side"; buildSectionMove's guards): an existing
+   * file's section admitting it, receiving a `collapse` moved text alone,
+   * never also self-closing on a line of its own. Null: the target parent
+   * keeps its PROP-03 flow position (or is a root or a created file).
+   */
+  readonly textPositionTarget: TextPositionShape | null;
   /** Drawn basename per model file: its staged `specs/<name>.mdx`. */
   readonly basenames: readonly string[];
   /**
@@ -1674,6 +1746,10 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
     layout,
     selfCloseTargetParent,
     stripFinalNewline,
+    // The staging renders a text-position target parent (buildSectionMove,
+    // `P5_FORM_VECTORS`), but no draw routes a move there yet: every target
+    // parent drawn here keeps its flow position.
+    textPositionTarget: null,
     basenames,
     createdBasename,
   };
@@ -1721,6 +1797,20 @@ interface FileDecorations {
   /** Dotted ID of an empty section to render self-closing. */
   readonly selfCloseDotted?: string;
   readonly stripFinalNewline?: boolean;
+  /**
+   * One section rendered as a text-position target parent (module header,
+   * "the target side"): inside a paragraph line of its parent, the parent's
+   * `TARGET_LEAD_OUTSIDE` immediately before its opening tag and
+   * `TARGET_TAIL_OUTSIDE` immediately after its closing tag, in the shape
+   * named. buildFilePieces' guards: the file holds the section, which
+   * admits the shape (`textPositionShapesFor`), is neither the moved
+   * section nor within its subtree, and is not `selfCloseDotted`; and the
+   * file's final terminator is not stripped (a root target's form).
+   */
+  readonly textPosition?: {
+    readonly dotted: string;
+    readonly shape: TextPositionShape;
+  };
 }
 
 function stagingDefect(message: string): never {
@@ -1772,6 +1862,36 @@ function buildFilePieces(
   deco: FileDecorations,
   stagedIdentity: IdentityFn = (identity) => identity,
 ): SectionMovePiece[] {
+  const textPosition = deco.textPosition;
+  if (textPosition !== undefined) {
+    // Kept apart from the origin's decorations (module header, "the target
+    // side"): the moved construct and the text-position target are distinct
+    // items, each rendered from a line start through its own terminator.
+    const moved = deco.moved?.dotted;
+    if (
+      moved !== undefined &&
+      (textPosition.dotted === moved ||
+        textPosition.dotted.startsWith(`${moved}.`))
+    ) {
+      stagingDefect(
+        `text-position target parent ${textPosition.dotted} is the moved ` +
+          `section ${moved} or lies within its subtree`,
+      );
+    }
+    if (deco.selfCloseDotted === textPosition.dotted) {
+      stagingDefect(
+        `${textPosition.dotted} decorated both self-closing on a line of ` +
+          `its own and as a text-position target parent`,
+      );
+    }
+    if (deco.stripFinalNewline === true) {
+      stagingDefect(
+        `text-position target parent ${textPosition.dotted} beside the ` +
+          `root target's stripped final terminator`,
+      );
+    }
+  }
+  let textPositionRendered = false;
   const prosePieces = (
     item: ProseItem,
     withTerminator: boolean,
@@ -1823,6 +1943,35 @@ function buildFilePieces(
             deco.moved !== undefined && deco.moved.dotted === dotted
               ? deco.moved.layout
               : null;
+          if (textPosition !== undefined && textPosition.dotted === dotted) {
+            // A text-position target parent (module header, "the target
+            // side"): its parent's fixed prose on both sides of its
+            // construct, its own bytes — the prose, and for `laterLine` the
+            // U+000A before its closing tag — its own.
+            const { shape } = textPosition;
+            if (!textPositionShapesFor(item).includes(shape)) {
+              stagingDefect(
+                `text-position shape ${shape} on ${dotted}, which does not ` +
+                  `admit it (paired shapes: one plain-prose item alone; ` +
+                  `selfClosing: an empty section)`,
+              );
+            }
+            const only = item.items[0];
+            const paired = shape !== "selfClosing" && isPlainProse(only);
+            out.push({ kind: "content", text: TARGET_LEAD_OUTSIDE });
+            out.push({
+              kind: "section",
+              id: dotted,
+              open: paired ? open : selfClosed,
+              close: paired ? "</S>" : null,
+              body: paired ? prosePieces(only, shape === "laterLine") : [],
+              depends,
+            });
+            out.push({ kind: "content", text: TARGET_TAIL_OUTSIDE });
+            out.push(newline);
+            textPositionRendered = true;
+            break;
+          }
           if (deco.selfCloseDotted === dotted) {
             if (item.items.length > 0 || layout !== null) {
               stagingDefect(
@@ -1947,6 +2096,12 @@ function buildFilePieces(
   // Mandatory blank line after the import block (PROP-03 module header).
   if (fileIndex > 0) pieces.push(newline);
   pieces.push(...walk(model.files[fileIndex].items, ""));
+  if (textPosition !== undefined && !textPositionRendered) {
+    stagingDefect(
+      `text-position target parent ${textPosition.dotted} names no section ` +
+        `of model file ${String(fileIndex)}`,
+    );
+  }
   if (deco.stripFinalNewline === true) {
     const last = pieces[pieces.length - 1];
     if (
@@ -2034,11 +2189,59 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
     }
   }
 
+  // A text-position target parent (module header, "the target side"): an
+  // existing file's section, never also self-closing on a line of its own,
+  // receiving a single-line section holding prose outside its tags alone —
+  // the `collapse` layout, whose prose item opens with anchored plain text
+  // (PROP-03) — which stays a paragraph line there (TEST-SPEC §16 P-5;
+  // T6.5-2's fourth geometry). Any other moved text opens a flow-position
+  // tag at its line start, which closes no text-position tag (T6.5-16(c)'s
+  // refused shape); the section's own admission is buildFilePieces' guard.
+  const textPositionShape = trial.textPositionTarget;
+  if (textPositionShape !== null) {
+    if (toFile === null || target.targetDotted === null) {
+      stagingDefect(
+        `a ${textPositionShape} text-position target parent for a ` +
+          `${toFile === null ? "created target file" : "root target"}`,
+      );
+    }
+    if (trial.selfCloseTargetParent || trial.stripFinalNewline) {
+      stagingDefect(
+        `a ${textPositionShape} text-position target parent beside a ` +
+          `flow-position self-closing target parent or a stripped root ` +
+          `terminator`,
+      );
+    }
+    const movedSite = locateSection(model, trial.fromFile, trial.dotted);
+    const movedSection = movedSite.items[movedSite.index];
+    const holdsProse =
+      movedSection.kind === "section" &&
+      movedSection.items.length === 1 &&
+      movedSection.items[0].kind === "prose" &&
+      movedSection.items[0].parts.some(
+        (part) => part.kind === "text" && part.text.trim() !== "",
+      );
+    if (trial.layout.form !== "collapse" || !holdsProse) {
+      stagingDefect(
+        `a ${trial.layout.form} moved text into a ${textPositionShape} ` +
+          `text-position target parent — only a single-line section holding ` +
+          `prose outside its tags goes there`,
+      );
+    }
+  }
   const targetSideDeco: FileDecorations = {
     ...(trial.selfCloseTargetParent && target.targetDotted !== null
       ? { selfCloseDotted: target.targetDotted }
       : {}),
     ...(trial.stripFinalNewline ? { stripFinalNewline: true } : {}),
+    ...(textPositionShape !== null && target.targetDotted !== null
+      ? {
+          textPosition: {
+            dotted: target.targetDotted,
+            shape: textPositionShape,
+          },
+        }
+      : {}),
   };
   const origin: SectionMoveDocument = {
     path: originPath,
@@ -2114,6 +2317,11 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
       `${trial.layout.closeJoined ? ", joined close" : ""}` +
       `${toFile === null ? ", created target" : ""}` +
       `${trial.selfCloseTargetParent ? ", self-closing target parent" : ""}` +
+      `${
+        textPositionShape !== null
+          ? `, text-position target parent (${textPositionShape})`
+          : ""
+      }` +
       `${trial.stripFinalNewline ? ", terminator-less EOF" : ""})`,
   };
 }
@@ -2134,9 +2342,17 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
 // naming a file under each drawn basename — plus the P-6 replay
 // rewrite after a file move (the import header naming the moved path),
 // each spelled through the very builder the draws use, over one fixed
-// model. The S-9 self-test proves every vector derives before any product
-// exists; every draw's staged files are judged the same way before the
-// product sees them (`drawSources` on the registrations below).
+// model; and, over a second fixed model (`P5_TEXT_POSITION_MODEL`), the
+// text-position target parent in each shape (`textPositionVectors`): its
+// file as staged, the parent at top level and nested in a flow-position
+// parent, and as each landed collapse form — plain prose, prose holding an
+// embedding, every prop kind — leaves that file arriving from another,
+// composed by T6.5-2's byte rules, never from product output; and the
+// coincident file with each collapse decoration on the moved text beside
+// each shape, as staged and as the move's deletion and insertion both
+// leave it. The S-9 self-test proves every vector derives before any
+// product exists; every draw's staged files are judged the same way before
+// the product sees them (`drawSources` on the registrations below).
 
 function vectorProse(text: string): ProseItem {
   return { kind: "prose", parts: [{ kind: "text", text }] };
@@ -2217,19 +2433,26 @@ const P5_FORM_MODEL: WorkspaceModel = {
   ],
 };
 
+/** A fixed model's file as the draws' own builder spells it, decorated. */
+function vectorSource(
+  model: WorkspaceModel,
+  fileIndex: number,
+  deco: FileDecorations,
+  paths: readonly string[] = Object.keys(renderWorkspace(model)),
+): string {
+  const expansionOf = expansionSentinels(semanticsOf(model));
+  return sectionMoveSourceText(
+    buildFilePieces(model, fileIndex, paths, expansionOf, deco),
+  );
+}
+
 function p5Vector(
   name: string,
   fileIndex: number,
   deco: FileDecorations,
   paths: readonly string[] = Object.keys(renderWorkspace(P5_FORM_MODEL)),
 ): readonly [string, string] {
-  const expansionOf = expansionSentinels(semanticsOf(P5_FORM_MODEL));
-  return [
-    name,
-    sectionMoveSourceText(
-      buildFilePieces(P5_FORM_MODEL, fileIndex, paths, expansionOf, deco),
-    ),
-  ];
+  return [name, vectorSource(P5_FORM_MODEL, fileIndex, deco, paths)];
 }
 
 function layoutName(layout: MovedLayout): string {
@@ -2282,6 +2505,264 @@ function movedHeaderVector(): string {
   const state = initTrialState(P5_FORM_MODEL);
   applyMoveFile(state, { kind: "moveFile", file: 0, newName: "N0" });
   return currentFileBytes(state, 1);
+}
+
+// The text-position target parents' fixed model (module header, "the target
+// side"), apart from P5_FORM_MODEL so every earlier vector keeps its bytes.
+// File 0 holds the moved texts such a parent receives — the plain collapse
+// `s1`, `s3` holding an embedding (the PROP-03 prose-flanked form), `s5`
+// carrying every prop kind — beside same-file targets of each shape, each
+// adjacent to a moved text (the empty `s2`, the one-prose-item `s4`); file
+// 1 holds cross-file targets at top level (`s0` carrying tags, the empty
+// `s1` carrying `d`) and nested in a flow-position parent (`s2.s0`,
+// `s2.s1`). Every reference names file 0's `s0` or root, which no vector
+// moves, so a composed move respells nothing outside the moved text.
+const P5_TEXT_POSITION_MODEL: WorkspaceModel = {
+  files: [
+    {
+      nextSeg: 6,
+      items: [
+        vectorProse("a0 first"),
+        vectorSection("s0", [vectorProse("k9 anchor")]),
+        vectorSection("s1", [vectorProse("k9 body")]),
+        vectorSection("s2", []),
+        vectorSection("s3", [vectorEmbedProse("s0")]),
+        vectorSection("s4", [vectorProse("k9 more")]),
+        vectorSection("s5", [vectorProse("k9 props")], {
+          tags: ["t1", "beta.x"],
+          coverageNone: true,
+          deps: [{ file: 0, dotted: "s0", spell: 1 }],
+          depsSingle: true,
+        }),
+      ],
+    },
+    {
+      nextSeg: 3,
+      items: [
+        vectorProse("b0 first"),
+        vectorSection("s0", [vectorProse("k9 dest")], { tags: ["zeta"] }),
+        vectorSection("s1", [], {
+          deps: [
+            { file: 0, dotted: "s0", spell: 2 },
+            { file: 0, dotted: "", spell: 0 },
+          ],
+        }),
+        vectorSection("s2", [
+          vectorSection("s0", [vectorProse("k9 inner")]),
+          vectorSection("s1", []),
+        ]),
+      ],
+    },
+  ],
+};
+
+function textPositionModelSection(
+  fileIndex: number,
+  dotted: string,
+): SectionItem {
+  const located = locateSection(P5_TEXT_POSITION_MODEL, fileIndex, dotted);
+  const item = located.items[located.index];
+  if (item.kind !== "section") stagingDefect(`${dotted} is no section`);
+  return item;
+}
+
+/** Replace the one occurrence of `needle` (a vector composition's guard). */
+function replaceOnce(
+  source: string,
+  needle: string,
+  replacement: string,
+): string {
+  const at = source.indexOf(needle);
+  if (at === -1 || source.indexOf(needle, at + 1) !== -1) {
+    stagingDefect(
+      `vector composition: ${JSON.stringify(needle)} does not occur ` +
+        `exactly once`,
+    );
+  }
+  return source.slice(0, at) + replacement + source.slice(at + needle.length);
+}
+
+/**
+ * A `collapse` moved text of the text-position model's file 0 as it stands
+ * in file `inFile` under `dotted` (SPEC 6.5): the construct's own characters
+ * on one line, every reference spelled from that file — at its own file and
+ * ID, the construct as staged.
+ */
+function collapseConstruct(
+  moved: string,
+  inFile: number,
+  dotted: string,
+): string {
+  const section = textPositionModelSection(0, moved);
+  const only = section.items[0];
+  if (section.items.length !== 1 || only.kind !== "prose") {
+    stagingDefect(`${moved} is no single-prose-item section`);
+  }
+  const prose = only.parts
+    .map((part) =>
+      part.kind === "text"
+        ? part.text
+        : `{text(${renderRef(part.ref, inFile)})}`,
+    )
+    .join("");
+  return `${renderOpenTag(section, dotted, inFile)}${prose}</S>`;
+}
+
+/**
+ * The file after `landed` arrives in its text-position target parent,
+ * composed by T6.5-2's byte rules from the staged bytes — never from product
+ * output: the moved text inserted immediately before the parent's closing
+ * tag and followed by a U+000A, preceded by one where that point is no line
+ * start — after the prose in `sameLine`, after the opening tag in
+ * `selfClosing` once the parent is rewritten to the paired form (its ` /`
+ * deleted, `</S>` appended after its `>`) — and at the start of the closing
+ * tag's own line in `laterLine`.
+ */
+function landInTextPositionTarget(
+  staged: string,
+  fileIndex: number,
+  dotted: string,
+  shape: TextPositionShape,
+  landed: string,
+): string {
+  const section = textPositionModelSection(fileIndex, dotted);
+  const open = renderOpenTag(section, dotted, fileIndex);
+  const text = section.items
+    .flatMap((item) => (item.kind === "prose" ? item.parts : []))
+    .map((part) => (part.kind === "text" ? part.text : ""))
+    .join("");
+  const lead = TARGET_LEAD_OUTSIDE;
+  const tail = TARGET_TAIL_OUTSIDE;
+  const arrived = `${lead}${open}${text}\n${landed}\n</S>${tail}\n`;
+  switch (shape) {
+    case "sameLine":
+      return replaceOnce(staged, `${lead}${open}${text}</S>${tail}\n`, arrived);
+    case "laterLine":
+      return replaceOnce(
+        staged,
+        `${lead}${open}${text}\n</S>${tail}\n`,
+        arrived,
+      );
+    case "selfClosing":
+      return replaceOnce(
+        staged,
+        `${lead}${open.slice(0, -1)} />${tail}\n`,
+        `${lead}${open}\n${landed}\n</S>${tail}\n`,
+      );
+  }
+}
+
+/**
+ * The origin after its deletion (SPEC 6.5): the moved construct's own
+ * characters deleted in place, its line dropped with its terminator when
+ * that deletion alone leaves it empty or whitespace-only (3).
+ */
+function deleteCollapse(
+  composed: string,
+  moved: string,
+  layout: MovedLayout,
+): string {
+  const lead = layout.leadOutside ?? "";
+  const tail = layout.tailOutside ?? "";
+  const rest = `${lead}${tail}`;
+  const whitespaceOnly = [...rest].every(
+    (char) =>
+      char === " " || char === TAB_RESIDUE || char === VT || char === FF,
+  );
+  return replaceOnce(
+    composed,
+    `\n${lead}${collapseConstruct(moved, 0, moved)}${tail}\n`,
+    whitespaceOnly ? "\n" : `\n${rest}\n`,
+  );
+}
+
+/**
+ * The text-position vectors (module header, "the target side"; S-9): each
+ * shape's target file as staged, at top level and nested in a flow-position
+ * parent, and as each landed `collapse` form — plain prose, prose holding an
+ * embedding, every prop kind — leaves it, arriving from the origin file;
+ * and the same-file staging with the origin's and the target's decorations
+ * both, before the move and as its deletion and insertion both leave the
+ * one file (the composed file 6.5 judges).
+ */
+function textPositionVectors(): (readonly [string, string])[] {
+  const model = P5_TEXT_POSITION_MODEL;
+  const vectors: (readonly [string, string])[] = [];
+  const crossTargets: readonly (readonly [string, TextPositionShape])[] = [
+    ["s0", "sameLine"],
+    ["s0", "laterLine"],
+    ["s1", "selfClosing"],
+    ["s2.s0", "sameLine"],
+    ["s2.s0", "laterLine"],
+    ["s2.s1", "selfClosing"],
+  ];
+  const landedForms: readonly (readonly [string, string])[] = [
+    ["s1", "the plain collapse"],
+    ["s3", "the collapse holding an embedding"],
+    ["s5", "the collapse carrying every prop kind"],
+  ];
+  const crossSeg = `s${String(model.files[1].nextSeg)}`;
+  for (const [dotted, shape] of crossTargets) {
+    const where = `${shape} text-position target parent ${dotted} of the target file`;
+    const staged = vectorSource(model, 1, { textPosition: { dotted, shape } });
+    vectors.push([`${where}, as staged`, staged]);
+    for (const [moved, form] of landedForms) {
+      const newDotted = `${dotted}.${crossSeg}`;
+      vectors.push([
+        `${where}, as ${form} ${moved} arriving from the origin file as ${newDotted} leaves it`,
+        landInTextPositionTarget(
+          staged,
+          1,
+          dotted,
+          shape,
+          collapseConstruct(moved, 1, newDotted),
+        ),
+      ]);
+    }
+  }
+  const sameFileSeg = `s${String(model.files[0].nextSeg)}`;
+  const sameFileTargets: readonly (readonly [string, TextPositionShape])[] = [
+    ["s2", "selfClosing"],
+    ["s4", "sameLine"],
+    ["s4", "laterLine"],
+  ];
+  const sameFileMoves: readonly (readonly [string, MovedLayout])[] = [
+    ...OUTSIDE_LEADS.flatMap((leadOutside) =>
+      OUTSIDE_TAILS.map(
+        (tailOutside) =>
+          ["s1", outsideLayout("collapse", leadOutside, tailOutside)] as const,
+      ),
+    ),
+    ["s3", outsideLayout("collapse", null, null)],
+  ];
+  for (const [moved, layout] of sameFileMoves) {
+    for (const [dotted, shape] of sameFileTargets) {
+      const where =
+        `same file: ${layoutName(layout)} on ${moved} beside the ${shape} ` +
+        `text-position target parent ${dotted}`;
+      const staged = vectorSource(model, 0, {
+        moved: { dotted: moved, layout },
+        textPosition: { dotted, shape },
+      });
+      const newDotted = `${dotted}.${sameFileSeg}`;
+      vectors.push([`${where}, as staged`, staged]);
+      vectors.push([
+        `${where}, as the move to ${newDotted} leaves the file`,
+        deleteCollapse(
+          landInTextPositionTarget(
+            staged,
+            0,
+            dotted,
+            shape,
+            collapseConstruct(moved, 0, newDotted),
+          ),
+          moved,
+          layout,
+        ),
+      ]);
+    }
+  }
+  return vectors;
 }
 
 /** The fixed form-vector set of the P-5 staging (S-9): name and source. */
@@ -2374,6 +2855,7 @@ export const P5_FORM_VECTORS: ReadonlyArray<
     selfCloseDotted: "s0",
     stripFinalNewline: true,
   }),
+  ...textPositionVectors(),
   [
     "P-6 replay rewrite after a file move: the import header names the moved path",
     movedHeaderVector(),
