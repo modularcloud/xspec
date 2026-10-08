@@ -5,8 +5,10 @@
 // asserts exact exit codes (H-5), decodes findings through the H-3 adapters,
 // and rejects a product only via diagnosed assertion failures (H-8). Error
 // reports are asserted for the SPEC.md 14 required information — condition
-// identity, file, location, and (14.2) a statement of the expected form —
-// never exact wording.
+// identity, file, location, and (14.2) a statement of the expected form,
+// wherever the form has an implementation-independent mention the offending
+// ID lacks (a child's parent prefix: T1.3-2's child arms, T1.3-6's
+// grandchildren) — never exact wording.
 //
 // CONF-VALID in-scope (CERTIFICATIONS.md §CONF-VALID): every fixture stays
 // within that entry's scope — one configured spec group of `.mdx` sources
@@ -422,7 +424,8 @@ const T1_3_5 = defineProductTest({
 //                         (a non-masking product would flag `a.b` here, so
 //                         the exact-count assertion below discriminates)
 //       <S id="zzz">    → grandchild: its structural check runs normally
-//                         against its parent's id `a.b` → the one 14.2
+//                         against its parent's id `a.b` → the one 14.2,
+//                         its error stating the expected form `a.b.<segment>`
 //     <S id="bad name"> → immediate child: 14.2 masked, but its own other
 //                         condition — whitespace in a segment, 14.4 — still
 //                         reports
@@ -435,6 +438,32 @@ const MASK_MID = "\n</S>\n\n";
 const MASK_BAD_CHILD =
   '<S id="bad name">\nImmediate child: its own non-structural condition still reports.\n</S>';
 const MASK_SOURCE = `${MASK_PREFIX}${MASK_GRANDCHILD}${MASK_MID}${MASK_BAD_CHILD}\n</S>\n`;
+
+// In every T1.3-6 staging — the masking one above and the three invalid-form
+// arms below — the grandchild `zzz` sits under its parent `a.b`, so its one
+// 14.2 error states the expected form `a.b.` plus exactly one segment (SPEC
+// 1.3, 14.2). T1.3-2's `expectedFormMention` reading applies: any statement
+// of that form exhibits the parent prefix `a.b.`, which the offending ID
+// `zzz` does not contain — implementation-independent and discriminating.
+const GRANDCHILD_EXPECTED_FORM_MENTION = "a.b.";
+
+/**
+ * Assert that a T1.3-6 staging's grandchild 14.2 finding states the expected
+ * form (SPEC 14.2: "the error states the expected form"), through the parent
+ * prefix every statement of it exhibits (`GRANDCHILD_EXPECTED_FORM_MENTION`).
+ */
+function assertGrandchildStatesExpectedForm(
+  finding: Finding,
+  context: string,
+): void {
+  assertReportMentions(
+    finding.message,
+    [GRANDCHILD_EXPECTED_FORM_MENTION],
+    `${context}: the grandchild's 14.2 error states the expected form (SPEC 14.2) — ` +
+      "any statement of the form for a child of `a.b` exhibits the parent prefix " +
+      JSON.stringify(GRANDCHILD_EXPECTED_FORM_MENTION),
+  );
+}
 
 // T1.3-6 invalid-form arms (SPEC 14.1: a repeated `id` attribute or a value
 // not in quoted static-string form is condition 17, never condition 1, and
@@ -509,7 +538,8 @@ const INVALID_ID_FORM_ARMS: readonly InvalidIdFormArm[] = [
 /**
  * Run one invalid-form arm: the bearer reports 14.17 and no 14.1, its
  * immediate child reports no 14.2, and the grandchild's structural check
- * still reports (SPEC 14.1, 14.2, 14.17).
+ * still reports, its error stating the expected form (SPEC 14.1, 14.2,
+ * 14.17).
  */
 async function runInvalidIdFormArm(
   product: ProductBinding,
@@ -547,6 +577,7 @@ async function runInvalidIdFormArm(
     `${context}: the grandchild's 14.2 finding (its structural check runs against ` +
       "its parent's spelled id `a.b` normally)",
   );
+  assertGrandchildStatesExpectedForm(ofCondition("14.2"), context);
 }
 
 const T1_3_6 = defineProductTest({
@@ -574,7 +605,8 @@ const T1_3_6 = defineProductTest({
       `${context}: the parent's 14.1 finding`,
     );
     // The one 14.2 must be the grandchild's — located within its construct,
-    // which excludes both immediate children's constructs.
+    // which excludes both immediate children's constructs — and its error
+    // states the expected form.
     assertFindingLocated(
       ofCondition("14.2"),
       {
@@ -584,6 +616,7 @@ const T1_3_6 = defineProductTest({
       `${context}: the grandchild's 14.2 finding (its structural check runs against ` +
         "its parent's id normally)",
     );
+    assertGrandchildStatesExpectedForm(ofCondition("14.2"), context);
     // The `bad name` child's own condition still reports, for that child.
     assertFindingLocated(
       ofCondition("14.4"),
