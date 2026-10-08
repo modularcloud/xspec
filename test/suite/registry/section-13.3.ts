@@ -189,6 +189,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
+  assertFindingInstructsRebuilding,
   assertFindingLocated,
   assertSameJson,
   buildOk,
@@ -2143,6 +2144,17 @@ const T13_3_2 = defineProductTest({
  * findings against one source's generated module and companions: every
  * finding carries condition 14.10 and a file under `<prefix>`, and the
  * module `<module>` itself is among the named files (SPEC 14.10, 13.1).
+ * Once the findings are condition 10 alone and concern those files, every
+ * finding instructs rebuilding (`assertFindingInstructsRebuilding`: its
+ * message names `build`), the correction SPEC 14.10 requires of each
+ * per-file finding. Neither caller's state holds a recorded file
+ * obstructing a path the rebuild writes — the one condition-10 form whose
+ * correction is its manual deletion instead (SPEC 14.10, 13.4, 14.22;
+ * T13.4-10's judge): T13.3-2's edited-source arm reports A's module and
+ * companions, which the rebuild regenerates, as mismatched; its
+ * deleted-source arm reports B's recorded module and companions, at paths
+ * the current sources no longer generate, as recorded orphans — none a
+ * workspace-relative directory component of any path the rebuild writes.
  */
 function assertStaleModuleFindings(
   findings: readonly Finding[],
@@ -2179,6 +2191,16 @@ function assertStaleModuleFindings(
       `${context}: the generated module ${module} must be among the named ` +
         `stale files (SPEC 14.10, 13.1); named: ` +
         JSON.stringify(findings.map((finding) => finding.path)),
+    );
+  }
+  for (const finding of findings) {
+    assertFindingInstructsRebuilding(
+      finding,
+      `${context} — the finding concerning ` +
+        `${JSON.stringify(finding.path)}: no recorded file obstructs a ` +
+        `rebuild write on this state, so every condition-10 finding, ` +
+        `mismatched module or companion and recorded orphan alike, ` +
+        `instructs rebuilding (SPEC 14.10)`,
     );
   }
 }
