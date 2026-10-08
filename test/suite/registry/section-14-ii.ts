@@ -42,10 +42,12 @@
 //   on the stale workspace with `.xspec` unwritable the area is the first
 //   refused write of each — never a path inside it (14.24, 11.6).
 // - The never-reporter `check` on that state asserts condition 10 alone,
-//   every finding concerning a path with `locations` `[]`, and B's
-//   generated module `specs/b/B.xspec.ts` among the paths — the edited
-//   text changes it (4.2, 13.1) — membership alone, since which companions
-//   and other derived files also differ is the product's
+//   every finding concerning a path with `locations` `[]` and instructing
+//   rebuilding — its message names `build` (14.10; no recorded file
+//   obstructs a rebuild write there) — and B's generated module
+//   `specs/b/B.xspec.ts` among the paths — the edited text changes it
+//   (4.2, 13.1) — membership alone, since which companions and other
+//   derived files also differ is the product's
 //   (`assertEditedBStalenessConcerns`, shared with T13.5-7 (f)).
 // - The validation refusal's one finding asserts its concerned identity
 //   exactly — the unchanged `specs/b/B.mdx#b` as the sole `identities`
@@ -727,9 +729,9 @@ function expectPlainUsageError(
  * refreshing read of 13.3 and the mutating `review create` exit 2 with the
  * error document concerning `.xspec` (14.24: a graph-data write concerns
  * the area); `check` exits 1 with the staleness alone — every finding
- * condition 10 concerning a path with `locations` `[]`, B's generated
- * module `specs/b/B.xspec.ts` among them (14.10, 14, 12.7;
- * `assertEditedBStalenessConcerns`) — `inventory` and
+ * condition 10 concerning a path with `locations` `[]` and instructing
+ * rebuilding, B's generated module `specs/b/B.xspec.ts` among them (14.10,
+ * 14, 12.7; `assertEditedBStalenessConcerns`) — `inventory` and
  * `version` exit 0, a `rename --preview` exits 0 writing nothing; the
  * invalid-flag-value and unknown-node usage errors precede the refresh
  * (`code` null); nothing in the workspace changes around the sweep.

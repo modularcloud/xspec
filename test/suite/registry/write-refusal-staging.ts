@@ -109,6 +109,7 @@ import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
+  assertFindingInstructsRebuilding,
   assertFindingLocated,
   assertSameJson,
   buildOk,
@@ -954,14 +955,20 @@ export function assertStalenessAlone(
  * `.xspec` unwritable (SPEC 14.10, 14, 12.7): every condition-10 finding —
  * a per-file finding or the graph-data unit form — has no in-source
  * location and carries the derived path (or the graph-data area) it
- * concerns as its 12.7 `path`: `path` non-null, `locations` `[]`. B's
- * generated module `specs/b/B.xspec.ts`, whose node documentation embeds
- * the edited text (SPEC 4.2, 13.1; TEST-SPEC T13.5-7 (f): B's module and
- * companions certainly differ), is among the concerned paths, compared by
- * bytes. Which further derived files differ is the product's (companions,
- * 13.1; graph data, 13.3), so membership alone — the shape of T12.2-2's
- * edited-source arm. The caller asserts the findings are condition 10
- * alone.
+ * concerns as its 12.7 `path`: `path` non-null, `locations` `[]`; and
+ * every finding instructs rebuilding (`assertFindingInstructsRebuilding`:
+ * its message names `build`), the correction SPEC 14.10 requires of each
+ * per-file finding and of the unit form — the staging is a text edit of a
+ * valid built workspace and the findings are condition 10 alone, so no
+ * recorded file obstructs a rebuild write (that would be 14.22's, reported
+ * beside; 13.4), the one form whose correction is its manual deletion
+ * instead. B's generated module `specs/b/B.xspec.ts`, whose node
+ * documentation embeds the edited text (SPEC 4.2, 13.1; TEST-SPEC T13.5-7
+ * (f): B's module and companions certainly differ), is among the concerned
+ * paths, compared by bytes. Which further derived files differ is the
+ * product's (companions, 13.1; graph data, 13.3), so membership alone —
+ * the shape of T12.2-2's edited-source arm. The caller asserts the
+ * findings are condition 10 alone.
  */
 export function assertEditedBStalenessConcerns(
   findings: readonly Finding[],
@@ -981,6 +988,13 @@ export function assertEditedBStalenessConcerns(
       [],
       `${context} — a condition-10 finding has no in-source location: ` +
         `\`locations\` [] (SPEC 14.10, 14, 12.7)`,
+    );
+    assertFindingInstructsRebuilding(
+      finding,
+      `${context} — the finding concerning ` +
+        `${renderPathValue(finding.path)}: no recorded file obstructs a ` +
+        `rebuild write on this state, so every condition-10 finding, per ` +
+        `file and unit form alike, instructs rebuilding (SPEC 14.10, 14)`,
     );
   }
   const moduleBytes = expectedPathBytes(RENAME_B_MODULE);
@@ -1907,8 +1921,8 @@ export async function buildArm(product: ProductBinding): Promise<void> {
  * graph-data write concerns the area), stdout exactly that document and no
  * answer (13.3, 11.2), while `check` on the same state exits 1 reporting the
  * staleness (never a 14.24 reporter) — condition 10 alone, every finding
- * concerning a path with `locations` `[]`, B's generated module
- * `specs/b/B.xspec.ts` among them (14.10, 14, 12.7;
+ * concerning a path with `locations` `[]` and instructing rebuilding, B's
+ * generated module `specs/b/B.xspec.ts` among them (14.10, 14, 12.7;
  * `assertEditedBStalenessConcerns`) — and a `move --preview` exits 0
  * writing nothing (6.6).
  */
