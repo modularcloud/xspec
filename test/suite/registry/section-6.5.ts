@@ -106,8 +106,12 @@
 //   concerned path
 //   (refused-destination-exists, refused-invalid-destination), or a located
 //   participant (refused-id-collision locates every colliding bearer — the
-//   remaining bearer's construct is the window where the staged bytes are
-//   known; refused-cycle locates the would-be cycle's full path over the
+//   remaining bearer's construct is the window wherever its bytes are
+//   known: staged (T6.5-4's cross-file arm), or pinned byte-exact before
+//   the refusal (T6.5-6's same-file arm, whose post-move B.mdx the test
+//   asserts as I6_B_AFTER), there asserted every-participant strict —
+//   exactly the one remaining bearer, never the moved section, `path`
+//   null; refused-cycle locates the would-be cycle's full path over the
 //   pre-operation sources — for the dependency-cycle arm, the reference
 //   spelling recording the participating dependency edge, the moved node's
 //   `d={"keep"}`; for the spec-import-cycle arm, whose two participating
@@ -888,7 +892,9 @@ export interface RefusalExpectation {
    * null (SPEC 14's cardinality rule: `refused-id-collision` locates every
    * colliding bearer — the every-participant strictness of T6.4-3's
    * two-bearer arm, asserted by its home test and by T14-7 over the shared
-   * case table; section-6.4.ts declares the same member — and
+   * case table; section-6.4.ts declares the same member — here T6.5-6's
+   * same-file collision, whose one remaining bearer is located alone and
+   * never the moved section beside it — and
    * `refused-cycle` the would-be cycle's full path: T6.5-4's
    * spec-import-cycle case declares both reference spellings the move
    * roots at its added imports' bindings, asserted by T6.5-4 and T14-7
@@ -4775,7 +4781,19 @@ const I6_A_SOURCE = I6_A_HEAD + I6_MOVED_TEXT + "\n";
 // was blank in the source and is kept (3 drops only lines a removal blanked).
 const I6_A_AFTER = I6_A_HEAD;
 
-const I6_B_SOURCE = ['<S id="b">', "Bee text.", "</S>", ""].join("\n");
+/**
+ * The section `b`'s construct: the remaining bearer T6.5-6's same-file
+ * collision locates (SPEC 14). It opens the target file before the kept-ID
+ * move and after it — the move appends the moved text behind it, and
+ * T6.5-6 asserts the result byte-exact (I6_B_AFTER) before the refusal
+ * runs — so its byte window in the refusal's pre-operation coordinates is
+ * known exactly (the module-header window convention: any in-construct
+ * precision passes).
+ */
+const I6_B_BEARER = ['<S id="b">', "Bee text.", "</S>"].join("\n");
+const I6_B_BEARER_WINDOW = byteWindow("", I6_B_BEARER);
+
+const I6_B_SOURCE = I6_B_BEARER + "\n";
 
 // Expected target bytes: a top-level `<new-id>` inserts the moved text at
 // the end of the file followed by U+000A; the file's final line is
@@ -4823,14 +4841,21 @@ export const MOVE_IDENTITY_SELF_MOVE_CASE: MoveRefusalCase = {
 
 /**
  * A same-file move whose `<new-id>` `b` collides with the ID `b` remaining
- * in the target file after the removal: `refused-id-collision` locating the
- * remaining bearer, its identity the sole `identities` entry (SPEC 6.5, 14).
+ * in the target file after the removal: `refused-id-collision` locating
+ * exactly the remaining bearer — one location, within `b`'s construct, and
+ * none at the moved section `x` that would take the ID (SPEC 14: every
+ * colliding bearer, never the moved section), `path` null — its identity the
+ * sole `identities` entry (SPEC 6.5, 14, 12.7). The identities cannot tell
+ * the two apart (`x`'s would-be identity is the same string), so the
+ * located set does: the bearer's bytes are known exactly, T6.5-6 having
+ * asserted the post-move B.mdx byte-exact (I6_B_AFTER) with `b`'s construct
+ * at its start and the moved text after it.
  */
 export const MOVE_IDENTITY_COLLISION_CASE: MoveRefusalCase = {
   argv: ["move", `${I6_B}#x`, `${I6_B}#b`],
   expected: {
     finding: "refused-id-collision",
-    locatedAt: { file: I6_B },
+    locatedAtEach: [{ file: I6_B, window: I6_B_BEARER_WINDOW }],
     identities: [`${I6_B}#b`],
   },
   reason:
@@ -5129,10 +5154,14 @@ const T6_5_6 = defineProductTest({
           product,
           workspace,
           MOVE_IDENTITY_COLLISION_CASE.argv,
-          // The collision locates every colliding bearer (SPEC 14); the
-          // remaining bearer `b` lives in B.mdx, whose bytes the earlier
-          // successful move rewrote (product-written), so the case asserts
-          // the bearer's file without a byte window.
+          // The collision locates every colliding bearer and never the moved
+          // section that would take the ID (SPEC 14): the remaining bearer
+          // `b` alone. Its bytes are known exactly — the byte compare above
+          // pinned B.mdx as I6_B_AFTER, `b`'s construct at its start and the
+          // moved `x` after it — so the case asserts the complete located
+          // set: exactly one location, in B.mdx within `b`'s construct
+          // window, `path` null; a location at `x`, beside or instead of
+          // `b`'s, fails.
           MOVE_IDENTITY_COLLISION_CASE.expected,
           `T6.5-6 (${MOVE_IDENTITY_COLLISION_CASE.reason})`,
         );
