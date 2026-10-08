@@ -113,8 +113,12 @@
 // each file referencing into the moved subtree with the created module's
 // import added at offset 0), so a refused shape drawn is a harness error
 // carrying the seed, never a product failure; P-5's fixed-seed draws run
-// through that check before any product exists
-// (test/self/p5-fixed-seed-draws.test.ts). The forms obey this validity
+// through that check before any product exists, and a refused shape handed
+// to P-5's per-draw sources as a draw — each one-sided inline spelling
+// below, whose staged files all derive, or a flow-opening moved text routed
+// into a text-position target parent, which buildSectionMove's guard
+// refuses — rejects the run as such a harness error, the body never running
+// on it (test/self/p5-fixed-seed-draws.test.ts). The forms obey this validity
 // rule: a multi-line element parses only fully flow (tags at line starts,
 // at most trailing whitespace sharing a tag's line) or fully inline (the
 // whole element inside one paragraph, non-whitespace forcers on BOTH
@@ -1292,7 +1296,7 @@ interface MovedLayout {
   readonly closeJoined: boolean;
 }
 
-const FLOW_LAYOUT: MovedLayout = {
+export const FLOW_LAYOUT: MovedLayout = {
   form: "flow",
   leadOutside: null,
   leadInside: null,
@@ -1305,13 +1309,16 @@ const FLOW_LAYOUT: MovedLayout = {
 // prose per the PROP-03 alphabet; the grammar-whitespace residues two spaces
 // and one tab (SPEC 6.2's "spaces and tabs"); and U+000B and U+000C —
 // whitespace under SPEC 1.4, none to the grammar — built from code points,
-// never escape spellings.
-const LEAD_OUTSIDE = "plead. ";
-const LEAD_INSIDE = "k9 lead";
-const TAIL_INSIDE = "k9 tail";
-const TAIL_OUTSIDE = "ptail";
-const WS_RESIDUE = "  ";
-const TAB_RESIDUE = String.fromCodePoint(0x0009);
+// never escape spellings. The six exported here, with `FLOW_LAYOUT`, are
+// what test/self/p5-fixed-seed-draws.test.ts spells its refused shapes with
+// (one-sided inline layouts; a flow-opening moved text routed into a
+// text-position target parent), so those shapes keep the draws' own bytes.
+export const LEAD_OUTSIDE = "plead. ";
+export const LEAD_INSIDE = "k9 lead";
+export const TAIL_INSIDE = "k9 tail";
+export const TAIL_OUTSIDE = "ptail";
+export const WS_RESIDUE = "  ";
+export const TAB_RESIDUE = String.fromCodePoint(0x0009);
 const VT = String.fromCodePoint(0x000b);
 const FF = String.fromCodePoint(0x000c);
 // The text-position target parent's fixed surroundings (module header, "the
@@ -3308,7 +3315,8 @@ function wouldBeSectionMoveSources(
  * judges each before the product sees the draw, and one that does not
  * derive is a harness error carrying the seed (TEST-SPEC §16 P-5, 17 S-9).
  * test/self/p5-fixed-seed-draws.test.ts runs every fixed-seed draw through
- * it before any product exists.
+ * it before any product exists, and hands it refused shapes as draws, each
+ * rejecting the run as such a harness error before the body runs.
  */
 export function stagedSectionMoveSources(
   trial: SectionMoveTrial,
