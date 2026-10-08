@@ -43,6 +43,15 @@
 //     target parent's run when the insertion point is mid-line), the
 //     self-closing moved section, and the self-closing target parent
 //     rewrite (T6.5-2's byte rule);
+//   * T6.5-2's fourth geometry and T6.5-16(c)'s controls: a single-line
+//     in-line section holding prose outside its tags moved into each
+//     text-position target parent shape — the closing tag on the opening
+//     tag's line (a U+000A added before the moved text), on a later line
+//     (none added: a line start), and a self-closing parent rewritten to
+//     paired form (one added) — the insertion point's line holding the
+//     target root's own bytes on both sides of the insertion, kept at both
+//     sides: the parent alone `changed` at the destination, the root
+//     keeping its sequence and carrying `descendant-changed` from it;
 //   * the drop-rule delegation to P-2's oracle, expansion semantics
 //     included (a non-empty expansion keeps the origin straddling line);
 //   * 6.2's enumeration beyond the parents and the moved subtree — each
@@ -888,6 +897,253 @@ test("S-6 (6.5 insertion): a top-level move into a file whose last line has no t
     "specs/T.mdx": { changed: chg(changed) },
     "specs/T.mdx#tp": {},
     "specs/T.mdx#z": {},
+  });
+});
+
+// =============================================================================
+// T6.5-2's fourth geometry and T6.5-16(c)'s controls: a single-line in-line
+// section holding prose outside its tags, moved into each text-position
+// target parent shape — the insertion point's line holding the target
+// parent's parent's own bytes on both sides of the insertion (6.2's
+// enumeration at the destination; P-5's text-position draws)
+// =============================================================================
+
+const X_A = "specs/xa.mdx";
+const X_AK = "specs/xa.mdx#k";
+const X_AM = "specs/xa.mdx#m";
+const X_B = "specs/xb.mdx";
+const X_BP = "specs/xb.mdx#p";
+const X_BPM = "specs/xb.mdx#p.m";
+
+/**
+ * The shared origin, as T6.5-16(c)'s control stages it: `<S id="k">z</S>`,
+ * U+000A, `<S id="m">x</S>`, U+000A — the moved section alone on its line,
+ * a paragraph line (`x</S>` follows its opening tag, so the flow attempt
+ * fails and both tags stand in text position). Its deletion leaves line 2
+ * empty purely by removal, dropped with its terminator (6.5, 3), so the
+ * origin root loses its child reference and that line's U+000A — `changed`
+ * (5.6) — while `k`, alone on line 1, keeps its content. The moved node's
+ * own content is `x` at both sides: its line's terminator is the root's,
+ * outside the construct, and at the destination 6.5's U+000A after the
+ * moved text is the target parent's.
+ */
+function textPositionOrigin(): SectionMoveDocument {
+  return doc(X_A, [
+    sec("k", "", [content("z")]),
+    content("\n"),
+    sec("m", "", [content("x")]),
+    content("\n"),
+  ]);
+}
+
+const X_ORIGIN_SOURCE_BEFORE = '<S id="k">z</S>\n<S id="m">x</S>\n';
+const X_ORIGIN_SOURCE_AFTER = '<S id="k">z</S>\n';
+const X_ORIGIN_TOKENS_BEFORE = [
+  ["run", ""],
+  ["child", X_AK],
+  ["run", "\n"],
+  ["child", X_AM],
+  ["run", "\n"],
+];
+const X_ORIGIN_TOKENS_AFTER = [
+  ["run", ""],
+  ["child", X_AK],
+  ["run", "\n"],
+];
+/**
+ * The target root's own content at both sides of every vector here: `foo `
+ * before `p`'s construct and ` baz`, U+000A after it, each on a line kept
+ * before and after the move (3).
+ */
+const X_TARGET_ROOT_TOKENS = [
+  ["run", "foo "],
+  ["child", X_BP],
+  ["run", " baz\n"],
+];
+
+test("S-6 (T6.5-2's fourth geometry; T6.5-16(c)'s control, first parent): an in-line section moved into a text-position parent whose closing tag shares its line takes a U+000A before the moved text — the parent alone changed at the destination, the target root keeping its content", () => {
+  // Target `foo <S id="p">bar</S> baz`, U+000A receiving `<S id="m">x</S>`
+  // into `p.m`, the hand-derived anchor (T6.5-2's fourth geometry): the
+  // insertion point, immediately before `p`'s closing tag, follows `bar` —
+  // no line start — so 6.5 adds a U+000A before the moved text as well as
+  // the one after it, giving `foo <S id="p">bar`, U+000A,
+  // `<S id="p.m">x</S>`, U+000A, `</S> baz`, U+000A: the insertion point's
+  // line split into three, each keeping non-whitespace once the tags are
+  // removed (3) — the moved text's line a paragraph continuation, the prose
+  // `x` denying the flow attempt. `p`'s own content, `bar` before, is
+  // `bar`, U+000A (the added terminator ending its first line), the child
+  // reference, U+000A (6.5's following terminator) after — `changed` (1.6,
+  // 5.5). The target root's `foo ` and ` baz`, U+000A ride kept lines at
+  // both sides — its sequence unchanged, so it is not `changed` and carries
+  // `descendant-changed` attributed to `p` (5.6); the moved node keeps `x`
+  // and carries nothing; the origin root is `changed` by its lost child.
+  const origin = textPositionOrigin();
+  const target = doc(X_B, [
+    content("foo "),
+    sec("p", "", [content("bar")]),
+    content(" baz\n"),
+  ]);
+  expect(sectionMoveSourceText(origin.pieces)).toBe(X_ORIGIN_SOURCE_BEFORE);
+  expect(sectionMoveSourceText(target.pieces)).toBe(
+    'foo <S id="p">bar</S> baz\n',
+  );
+  expectDerives("xa before", X_ORIGIN_SOURCE_BEFORE);
+  expectDerives("xa after", X_ORIGIN_SOURCE_AFTER);
+  expectDerives("xb before", sectionMoveSourceText(target.pieces));
+  expectDerives("xb after", 'foo <S id="p">bar\n<S id="p.m">x</S>\n</S> baz\n');
+
+  const prediction = predictSectionMoveImpact({
+    origin,
+    target,
+    movedId: "m",
+    newId: "p.m",
+  });
+
+  expect(Object.fromEntries(prediction.identityMap)).toEqual({
+    [X_AM]: X_BPM,
+  });
+  expect(prediction.beforeOwnTokens.get(X_BP)).toEqual([["run", "bar"]]);
+  expect(prediction.afterOwnTokens.get(X_BP)).toEqual([
+    ["run", "bar\n"],
+    ["child", X_BPM],
+    ["run", "\n"],
+  ]);
+  expect(prediction.beforeOwnTokens.get(X_B)).toEqual(X_TARGET_ROOT_TOKENS);
+  expect(prediction.afterOwnTokens.get(X_B)).toEqual(X_TARGET_ROOT_TOKENS);
+  expect(prediction.beforeOwnTokens.get(X_AM)).toEqual([["run", "x"]]);
+  expect(prediction.afterOwnTokens.get(X_BPM)).toEqual([["run", "x"]]);
+  expect(prediction.beforeOwnTokens.get(X_A)).toEqual(X_ORIGIN_TOKENS_BEFORE);
+  expect(prediction.afterOwnTokens.get(X_A)).toEqual(X_ORIGIN_TOKENS_AFTER);
+  expect(sortedSet(prediction.changed)).toEqual([X_A, X_BP]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+  const changed = [X_A, X_BP];
+  expect(tableOf(prediction)).toEqual({
+    [X_A]: { changed: chg(changed) },
+    [X_AK]: {},
+    [X_B]: { "descendant-changed": req(X_BP) },
+    [X_BP]: { changed: chg(changed) },
+    [X_BPM]: {},
+  });
+});
+
+test("S-6 (T6.5-16(c)'s control, second parent): an in-line section moved into a text-position parent whose closing tag stands on a later line takes no terminator before the moved text — the parent alone changed at the destination, the target root keeping its content", () => {
+  // Target `foo <S id="p">bar`, U+000A, `</S> baz`, U+000A: the insertion
+  // point, immediately before `p`'s closing tag, is that line's start, so
+  // 6.5 adds no terminator before the moved text — the composed file is
+  // the first parent's, byte for byte: `foo <S id="p">bar`, U+000A,
+  // `<S id="p.m">x</S>`, U+000A, `</S> baz`, U+000A. `p`'s own content,
+  // `bar`, U+000A before (line 1's terminator already its own), gains the
+  // child reference and 6.5's following U+000A — `changed`. The root's
+  // `foo ` stays on line 1 and its ` baz`, U+000A on the closing tag's
+  // line, both kept at both sides (3): its sequence unchanged, not
+  // `changed`, `descendant-changed` attributed to `p` (5.6); the moved node
+  // keeps `x`; the origin root is `changed` by its lost child.
+  const origin = textPositionOrigin();
+  const target = doc(X_B, [
+    content("foo "),
+    sec("p", "", [content("bar\n")]),
+    content(" baz\n"),
+  ]);
+  expect(sectionMoveSourceText(origin.pieces)).toBe(X_ORIGIN_SOURCE_BEFORE);
+  expect(sectionMoveSourceText(target.pieces)).toBe(
+    'foo <S id="p">bar\n</S> baz\n',
+  );
+  expectDerives("xa before", X_ORIGIN_SOURCE_BEFORE);
+  expectDerives("xa after", X_ORIGIN_SOURCE_AFTER);
+  expectDerives("xb before", sectionMoveSourceText(target.pieces));
+  expectDerives("xb after", 'foo <S id="p">bar\n<S id="p.m">x</S>\n</S> baz\n');
+
+  const prediction = predictSectionMoveImpact({
+    origin,
+    target,
+    movedId: "m",
+    newId: "p.m",
+  });
+
+  expect(Object.fromEntries(prediction.identityMap)).toEqual({
+    [X_AM]: X_BPM,
+  });
+  expect(prediction.beforeOwnTokens.get(X_BP)).toEqual([["run", "bar\n"]]);
+  expect(prediction.afterOwnTokens.get(X_BP)).toEqual([
+    ["run", "bar\n"],
+    ["child", X_BPM],
+    ["run", "\n"],
+  ]);
+  expect(prediction.beforeOwnTokens.get(X_B)).toEqual(X_TARGET_ROOT_TOKENS);
+  expect(prediction.afterOwnTokens.get(X_B)).toEqual(X_TARGET_ROOT_TOKENS);
+  expect(prediction.beforeOwnTokens.get(X_AM)).toEqual([["run", "x"]]);
+  expect(prediction.afterOwnTokens.get(X_BPM)).toEqual([["run", "x"]]);
+  expect(prediction.beforeOwnTokens.get(X_A)).toEqual(X_ORIGIN_TOKENS_BEFORE);
+  expect(prediction.afterOwnTokens.get(X_A)).toEqual(X_ORIGIN_TOKENS_AFTER);
+  expect(sortedSet(prediction.changed)).toEqual([X_A, X_BP]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+  const changed = [X_A, X_BP];
+  expect(tableOf(prediction)).toEqual({
+    [X_A]: { changed: chg(changed) },
+    [X_AK]: {},
+    [X_B]: { "descendant-changed": req(X_BP) },
+    [X_BP]: { changed: chg(changed) },
+    [X_BPM]: {},
+  });
+});
+
+test("S-6 (T6.5-16(c)'s control, self-closing parent; T6.5-2's self-closing arm): an in-line section moved into a self-closing text-position parent — rewritten to paired form, a U+000A before the moved text — the parent alone changed at the destination, the target root keeping its content", () => {
+  // Target `foo <S id="p" /> baz`, U+000A: 6.5 first rewrites the parent
+  // to the paired form — its `/` and the space before it deleted, `</S>`
+  // appended immediately after its `>` — so the insertion point, before
+  // that closing tag, follows `<S id="p">`, no line start, and a U+000A
+  // precedes the moved text as well as following it: `foo <S id="p">`,
+  // U+000A, `<S id="p.m">x</S>`, U+000A, `</S> baz`, U+000A. `p`'s own
+  // content, an empty run before (an empty body), is U+000A, the child
+  // reference, U+000A after — `changed`. The line `foo <S id="p">` keeps
+  // `foo ` once the tag is removed (3), and ` baz`, U+000A rides the
+  // closing tag's line, so the root's sequence is unchanged — not
+  // `changed`, `descendant-changed` attributed to `p` (5.6); the moved node
+  // keeps `x`; the origin root is `changed` by its lost child.
+  const origin = textPositionOrigin();
+  const target = doc(X_B, [
+    content("foo "),
+    selfClosing("p", ""),
+    content(" baz\n"),
+  ]);
+  expect(sectionMoveSourceText(origin.pieces)).toBe(X_ORIGIN_SOURCE_BEFORE);
+  expect(sectionMoveSourceText(target.pieces)).toBe('foo <S id="p" /> baz\n');
+  expectDerives("xa before", X_ORIGIN_SOURCE_BEFORE);
+  expectDerives("xa after", X_ORIGIN_SOURCE_AFTER);
+  expectDerives("xb before", sectionMoveSourceText(target.pieces));
+  expectDerives("xb after", 'foo <S id="p">\n<S id="p.m">x</S>\n</S> baz\n');
+
+  const prediction = predictSectionMoveImpact({
+    origin,
+    target,
+    movedId: "m",
+    newId: "p.m",
+  });
+
+  expect(Object.fromEntries(prediction.identityMap)).toEqual({
+    [X_AM]: X_BPM,
+  });
+  expect(prediction.beforeOwnTokens.get(X_BP)).toEqual([["run", ""]]);
+  expect(prediction.afterOwnTokens.get(X_BP)).toEqual([
+    ["run", "\n"],
+    ["child", X_BPM],
+    ["run", "\n"],
+  ]);
+  expect(prediction.beforeOwnTokens.get(X_B)).toEqual(X_TARGET_ROOT_TOKENS);
+  expect(prediction.afterOwnTokens.get(X_B)).toEqual(X_TARGET_ROOT_TOKENS);
+  expect(prediction.beforeOwnTokens.get(X_AM)).toEqual([["run", "x"]]);
+  expect(prediction.afterOwnTokens.get(X_BPM)).toEqual([["run", "x"]]);
+  expect(prediction.beforeOwnTokens.get(X_A)).toEqual(X_ORIGIN_TOKENS_BEFORE);
+  expect(prediction.afterOwnTokens.get(X_A)).toEqual(X_ORIGIN_TOKENS_AFTER);
+  expect(sortedSet(prediction.changed)).toEqual([X_A, X_BP]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+  const changed = [X_A, X_BP];
+  expect(tableOf(prediction)).toEqual({
+    [X_A]: { changed: chg(changed) },
+    [X_AK]: {},
+    [X_B]: { "descendant-changed": req(X_BP) },
+    [X_BP]: { changed: chg(changed) },
+    [X_BPM]: {},
   });
 });
 
