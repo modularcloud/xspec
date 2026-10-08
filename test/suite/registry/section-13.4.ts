@@ -252,7 +252,14 @@
 //   findings, the first `check`'s other findings left unasserted — the
 //   graph-data unit form unpinned (13.3, 14.10), and in (d) and (e) the
 //   per-file form of the fresh emit destination `md/specs/A.md` — so that
-//   `check` may exit 0 or 1, consistently with its findings (12.0). Every
+//   `check` may exit 0 or 1, consistently with its findings (12.0). (c)'s
+//   one recorded-file finding concerning `specs/A.md` is judged for 14.10's
+//   correction too: with emission disabled nothing is generated at or below
+//   that path, so the recorded file obstructs no path the rebuild writes,
+//   and the finding instructs rebuilding — support.ts
+//   `assertFindingInstructsRebuilding`, its message naming `build` (H-3:
+//   `rebuild` qualifies) — the obstructing form's manual deletion being
+//   T13.4-10's judge. Every
 //   "byte-identical" compares against a capture taken once the staging is
 //   complete, before the first `check`. (e)'s inside staging puts the
 //   link's target directory at `foreign/` in the root, under no group's
@@ -319,6 +326,7 @@ import { CORE_A_STAGED } from "./section-13.5.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
+  assertFindingInstructsRebuilding,
   assertSameJson,
   buildOk,
   expectExit,
@@ -3668,7 +3676,16 @@ interface OrphanArm {
   readonly stage: (
     workspace: TestWorkspace,
   ) => Promise<(context: string) => Promise<void>>;
-  /** The first `check`: the recorded-file finding (c), or no finding. */
+  /**
+   * The first `check`: the recorded-file finding (c), or no finding. The
+   * recorded-file finding is judged for 14.10's correction as well: it
+   * instructs rebuilding (`assertFindingInstructsRebuilding`: its message
+   * names `build`), the correction for a recorded file obstructing no path
+   * the rebuild writes — so an arm declaring it changes the configuration to
+   * generate nothing at or below its recorded path, as (c)'s disabled
+   * emission does; an obstructing recorded file's correction, its manual
+   * deletion, is T13.4-10's subject (SPEC 14.10, 13.4, 14.22).
+   */
   readonly firstCheck: "recorded-file-finding" | "no-finding";
   /** What the first `check`'s expectation rests on (diagnostics). */
   readonly why: string;
@@ -3729,6 +3746,20 @@ async function walkOrphanArm(
               ),
           );
         }
+        // 14.10's correction for the recorded-file form (TEST-SPEC's
+        // error-assertion rule): the changed configuration generates nothing
+        // at or below the recorded path, so the recorded file obstructs no
+        // path the rebuild writes, and the finding instructs rebuilding —
+        // never its manual deletion, the obstructing form's correction
+        // (13.4, 14.22; T13.4-10's judge).
+        assertFindingInstructsRebuilding(
+          concerning[0],
+          `${firstContext}: the recorded-file finding concerning ` +
+            `${arm.recordedRel} — ${arm.why}; the changed configuration ` +
+            `generates nothing at or below ${arm.recordedRel}, so the ` +
+            `recorded file obstructs no path the rebuild writes and the ` +
+            `finding instructs rebuilding (SPEC 14.10, 13.4)`,
+        );
       } else {
         const findings = await orphanCheckFindings(
           product,
