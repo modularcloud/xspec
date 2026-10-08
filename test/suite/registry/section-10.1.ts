@@ -88,9 +88,14 @@
 // - `review status s` against the occupied session directory is an unknown
 //   session — a plain usage error, so the exit-2 error document's `code` and
 //   `path` are `null` (SPEC 12.0, 12.7).
-// - The concerned path of the code-less existing-name refusal and of the
-//   condition-21 finding reported in its place is pinned nowhere (SPEC 10.7,
-//   14.21), so only their identity, count, and empty locations are asserted.
+// - The code-less existing-name refusal and the condition-21 finding
+//   reported in its place are each asserted by identity, count, and empty
+//   locations. The condition-21 finding's concerned path is pinned — a
+//   session condition carries the file it concerns (SPEC 14, 12.7), the
+//   session's own file `.xspec/reviews/s.json` (10.1) — and is asserted
+//   too; the code-less refusal's is pinned nowhere — 14 assigns that
+//   refusal no code and no concern datum (SPEC 10.7) — so it is left
+//   unasserted.
 //
 // Sources staged after a body's first product invocation — the stale arm's
 // and stale twins' edited `specs/A.mdx` (T10.1-1, T10.1-6) and T10.1-5's
@@ -1874,7 +1879,13 @@ async function assertSessionDirectoryOccupied(
 interface ExpectedRefusal {
   /** A condition token of 14, or `(code-less)` for the 10.7 refusal. */
   readonly identity: string;
-  /** The concerned path where SPEC pins one, else null (left unasserted). */
+  /**
+   * The concerned path where SPEC pins one — condition 22's obstructed
+   * session directory `.xspec/reviews` (14.22), condition 21's corrupt
+   * session file `.xspec/reviews/<name>.json` (SPEC 14, 12.7, 10.1) — else
+   * null, left unasserted: the code-less existing-name refusal's, to which
+   * 14 assigns no code and no concern datum (SPEC 10.7).
+   */
   readonly concernedPath: string | null;
 }
 
@@ -1913,7 +1924,7 @@ async function assertCreateFollowsRefresh(
   const createContext =
     `${label} \`${argv.join(" ")}\` on the stale twin — exit 1 with the ` +
     `one refusal finding, judged after the gate and refresh (SPEC 13.5, ` +
-    `14.22, 10.7, 14.21)`;
+    `14.22, 10.7, 14.21, 10.1)`;
   const before = await snapshotDirectory(workspace.root);
   const findings = await runFindingsReport(
     product,
@@ -2205,7 +2216,7 @@ const T10_1_6 = defineProductTest({
         product,
         workspace,
         T10_1_6_SESSION,
-        { identity: "14.21", concernedPath: null },
+        { identity: "14.21", concernedPath: sessionRel(T10_1_6_SESSION) },
         { "14.21": 1 },
         label,
       );

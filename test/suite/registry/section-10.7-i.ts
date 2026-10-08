@@ -63,9 +63,14 @@
 //   H-3 adapter over the product-written file. `create` naming the corrupt
 //   session then reports condition 21 in the code-less refusal's place —
 //   exactly one finding, exit 1, nothing modified (SPEC 10.1, 10.7, 14.21).
-//   The concerned path of the code-less existing-name refusal and of the
-//   condition-21 finding is pinned nowhere (SPEC 10.7, 14.21), so identity,
-//   count, and empty locations are asserted (T10.1-6's reading).
+//   Identity, count, and empty locations are asserted for both refusals
+//   (T10.1-6's reading). The condition-21 finding's concerned path is
+//   pinned — a session condition carries the file it concerns (SPEC 14,
+//   12.7), the session's own file `.xspec/reviews/s.json` (10.1), for a
+//   symbolic link there the link's own path, never its target's (13.4) —
+//   and is asserted too; the code-less existing-name refusal's is pinned
+//   nowhere — 14 assigns that refusal no code and no concern datum (SPEC
+//   10.7) — so it is left unasserted (H-4).
 // - Workspaces are git-less wherever no baseline is involved (T10.7-2,
 //   T10.7-4, T10.7-6): coverage and audit sessions require no git.
 // - Every fixture edit is followed by an explicit `build` before any read,
@@ -125,6 +130,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
+  assertFindingConcernsPath,
   assertSameJson,
   buildOk,
   expectErrorDocument,
@@ -586,8 +592,12 @@ async function requireStagedKind(
  * refusal beside it — with no in-source location (locations [], SPEC 12.7),
  * and nothing modified anywhere under the root (the whole-root compare; the
  * snapshot never follows links, so a link occupant and its target are both
- * covered). The finding's concerned path is pinned nowhere (SPEC 10.7,
- * 14.21; module header), so it is left unasserted (H-4).
+ * covered). The condition-21 finding carries the session file it concerns
+ * as its 12.7 `path` — `.xspec/reviews/s.json` (SPEC 14, 12.7, 10.1), in the
+ * symbolic-link state the link's own path, never its target `real.json`
+ * (13.4) — and that is asserted; the code-less refusal's concerned path is
+ * pinned nowhere — 14 assigns that refusal no code and no concern datum
+ * (SPEC 10.7; module header) — so it is left unasserted (H-4).
  */
 async function expectCreateRefused(
   product: ProductBinding,
@@ -637,6 +647,16 @@ async function expectCreateRefused(
         `${label}: the finding has no in-source location — locations [] ` +
           `(SPEC 12.7)`,
       );
+      if (identity === "14.21") {
+        assertFindingConcernsPath(
+          refusal,
+          W1_SESSION_REL,
+          `${label}: a session condition carries the session file it ` +
+            `concerns — the corrupt session's own path ${W1_SESSION_REL}, ` +
+            `a symbolic link there by its own path, never its target's ` +
+            `(SPEC 14, 12.7, 10.1, 13.4)`,
+        );
+      }
     },
     `${label} — the refused create modifies nothing: no session written, ` +
       `the existing session's file, occupant, and link target ` +
