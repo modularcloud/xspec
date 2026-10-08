@@ -38,14 +38,17 @@
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — exit
 //   2 exactly, the single 12.7 error document (stable code
 //   `configuration-error`, concerned path) as the entire stdout under
-//   --json, stderr matching /config/i. T7.3-1's own refusal arms (the local
-//   `expectConfigRefused`) further pin the document's `path` to exactly
-//   `xspec.config.ts` — the configuration file the upward search found, in
-//   the anchoring form of 11.6 relative to the invocation working directory,
-//   the workspace root — and `locations` to `[]` (a configuration condition
-//   carries the file it concerns, never a source range: SPEC 14, 12.7), and
-//   compare the workspace around the refused `build`: a build failing at
-//   configuration load modifies nothing (SPEC 12.1, 12.0).
+//   --json, stderr matching /config/i. T7.2-1's overlap arm and T7.3-1's
+//   own refusal arms (the local `expectConfigRefused`) further pin, through
+//   the local `assertFoundConfigurationConcerned`, the document's `path` to
+//   exactly `xspec.config.ts` — the configuration file the upward search
+//   found, in the anchoring form of 11.6 relative to the invocation working
+//   directory, the workspace root; for the overlap the configuration file,
+//   never the doubly matched file — and `locations` to `[]` (a
+//   configuration condition carries the file it concerns, never a source
+//   range: SPEC 14, 12.7). T7.3-1's arms also compare the workspace around
+//   the refused `build`: a build failing at configuration load modifies
+//   nothing (SPEC 12.1, 12.0).
 // - T7.3-1 `outDir` validity is decided by spelling (SPEC 7.3): one arm per
 //   pinned spelling — `""`, `"/out"`, `"./out"`, `"out/../x"`, `"out//x"`,
 //   `"out/"` — each 14.14, beside the two `..`-bearing spellings the arm
@@ -253,13 +256,54 @@ async function expectIdsListing(
 }
 
 /**
+ * Assert a configuration error's one finding — its 12.7 error document
+ * decoded by `expectErrorDocument` — concerns the configuration file the
+ * upward search found: the stable code "configuration-error", `locations`
+ * [] (a configuration condition carries the file it concerns, never a
+ * source range), and as its concerned path that file in the anchoring form
+ * of 11.6 relative to the invocation working directory. Every caller runs
+ * its invocation at the workspace root, where the staged `xspec.config.ts`
+ * sits, so the path is exactly "xspec.config.ts" (SPEC 14, 12.7, 11.6)
+ * whatever the defect — T7.2-1's overlap included, whose doubly matched
+ * file is never the concerned path. `citation` lists the SPEC sections the
+ * failure cites.
+ */
+function assertFoundConfigurationConcerned(
+  finding: Finding,
+  context: string,
+  citation: string,
+): void {
+  assertSameJson(
+    {
+      code: finding.code,
+      path: finding.path,
+      locations: finding.locations.map((location) => location.file),
+    },
+    {
+      code: "configuration-error",
+      path: "xspec.config.ts",
+      locations: [],
+    },
+    `${context}: the error document's one finding carries the stable ` +
+      `code "configuration-error", locations [] (a configuration ` +
+      `condition carries the file it concerns, never a source range), ` +
+      `and as its concerned path the configuration file the upward ` +
+      `search found, in the anchoring form of 11.6 relative to the ` +
+      `invocation working directory — the workspace root, so exactly ` +
+      `"xspec.config.ts" (${citation})`,
+  );
+}
+
+/**
  * Stage a workspace whose only defect is the given configuration — a
  * staged-source record, well-formed (module header), since T7.3-1 stages
  * every arm after its first product invocation (S-9's timing clause) — and
- * assert `build --json` refuses it per 14.14. The staged source is valid and
- * matched by every fixture configuration's spec glob, so a product that
- * wrongly accepts the configuration proceeds to a successful build (exit 0)
- * and fails the exit-code assertion — never exits 2 for a side reason.
+ * assert `build --json` refuses it per 14.14, its one finding concerning
+ * the configuration file (`assertFoundConfigurationConcerned`). The staged
+ * source is valid and matched by every fixture configuration's spec glob,
+ * so a product that wrongly accepts the configuration proceeds to a
+ * successful build (exit 0) and fails the exit-code assertion — never exits
+ * 2 for a side reason.
  */
 async function expectConfigRefused(
   product: ProductBinding,
@@ -281,25 +325,10 @@ async function expectConfigRefused(
         ["build"],
         context,
       );
-      const finding = expectErrorDocument(result, context);
-      assertSameJson(
-        {
-          code: finding.code,
-          path: finding.path,
-          locations: finding.locations.map((location) => location.file),
-        },
-        {
-          code: "configuration-error",
-          path: "xspec.config.ts",
-          locations: [],
-        },
-        `${context}: the error document's one finding carries the stable ` +
-          `code "configuration-error", locations [] (a configuration ` +
-          `condition carries the file it concerns, never a source range), ` +
-          `and as its concerned path the configuration file the upward ` +
-          `search found, in the anchoring form of 11.6 relative to the ` +
-          `invocation working directory — the workspace root, so exactly ` +
-          `"xspec.config.ts" (SPEC 14, 12.7, 11.6)`,
+      assertFoundConfigurationConcerned(
+        expectErrorDocument(result, context),
+        context,
+        "SPEC 14, 12.7, 11.6",
       );
       assertSnapshotsEqual(
         before,
@@ -1034,11 +1063,16 @@ const T7_1_1 = defineProductTest({
 // (T8-3, T9.2-*), per T7.2-1's own text. This test's subject is the overlap
 // rule: a file matched by both a spec and a code group is a configuration
 // error (14.14), reported when the configuration is loaded and sources are
-// discovered, as a usage error (exit 2). The decoy pair — a spec source and
-// a code source each matched by exactly one group — keeps the overlap the
-// workspace's only defect: a product that wrongly accepts it proceeds past
-// configuration load (to exit 0 or a finding exit 1, whatever it makes of
-// mixed/X.mdx) and fails the exit-2 assertion either way.
+// discovered, as a usage error (exit 2). The error document's one finding
+// concerns the configuration file the upward search found — exactly
+// `xspec.config.ts`, the invocation running at the workspace root (11.6's
+// anchoring form), never the doubly matched mixed/X.mdx — and carries
+// `locations` [] (SPEC 14, 12.7; `assertFoundConfigurationConcerned`). The
+// decoy pair — a spec source and a code source each matched by exactly one
+// group — keeps the overlap the workspace's only defect: a product that
+// wrongly accepts it proceeds past configuration load (to exit 0 or a
+// finding exit 1, whatever it makes of mixed/X.mdx) and fails the exit-2
+// assertion either way.
 const OVERLAP_CONFIG = `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1068,12 +1102,19 @@ const T7_2_1 = defineProductTest({
         },
       },
       async (workspace) => {
-        await expectConfigurationError(
+        const context =
+          "T7.2-1 `build --json` with mixed/X.mdx matched by both the spec " +
+          "group (mixed/*.mdx) and the code group (mixed/*)";
+        const result = await expectConfigurationError(
           product,
           workspace,
           ["build"],
-          "T7.2-1 `build --json` with mixed/X.mdx matched by both the spec " +
-            "group (mixed/*.mdx) and the code group (mixed/*)",
+          context,
+        );
+        assertFoundConfigurationConcerned(
+          expectErrorDocument(result, context),
+          context,
+          "SPEC 14, 12.7, 11.6, 7.2",
         );
       },
     );
