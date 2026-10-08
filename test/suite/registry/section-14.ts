@@ -33,7 +33,8 @@
 //   human message, beside the file and location the same SPEC 14 sentence
 //   demands; which phrasing counts as correction-oriented is not
 //   machine-decidable (H-3). (14.2's assertable "expected form" statement is
-//   T1.3-2's subject.)
+//   T1.3-2's subject, and T14-4's 14.2 sweep row's at every reporter the
+//   row reaches — the sweep bullet below.)
 // - MDX-staged conditions locate within the offending element's byte window:
 //   every plausible attribution point — the reference expression, the prop,
 //   the element itself — lies inside it, and every other staged construct
@@ -82,18 +83,23 @@
 //   a located row's finding locates in its staged file, every location
 //   there (`specs/a.mdx`, or `src/app.ts` for 14.7, 14.11, and 14.18), the
 //   14.11 finding's `identities` exactly bravo's root identity (the module
-//   whose `text` it calls); a path row's finding carries its concerned path
-//   with `locations` `[]` — `.xspec/journal` (14.13), `specs/a#b.mdx`
-//   (14.19), `out` (14.22), at the gated read too. Exact ranges stay
-//   T14-11's, and the home rows (below) keep reporter membership alone,
-//   their locations their home tests'. The dedicated arms identify theirs
-//   likewise: every 14.10 finding a concerned path with `locations` `[]`,
-//   `specs/a.md` among the paths; the 14.12 finding the edge T12.2-4 pins
-//   by `identities`, `locations` `[]`, `path` null; the 14.23 arm's
-//   findings (and `check`'s unit form) the graph-data area `.xspec`. Their
-//   condition-10 findings also carry the correction SPEC 14.10 requires:
-//   every finding of the 14.10 arm, per file and unit form alike, and the
-//   14.23 arm's unit form instruct rebuilding (support.ts
+//   whose `text` it calls), and the 14.2 finding's message stating the
+//   expected form, the correction SPEC 14.2 requires (T1.3-2's
+//   `expectedFormMention` reading): any statement of the form for the
+//   child of `p` exhibits the parent prefix `p.`, which the offending `q.r`
+//   does not contain — matched where no ASCII letter or digit precedes it,
+//   so a word such as "help." does not count; a path row's finding carries
+//   its concerned path with `locations` `[]` — `.xspec/journal` (14.13),
+//   `specs/a#b.mdx` (14.19), `out` (14.22), at the gated read too. Exact
+//   ranges stay T14-11's, and the home rows (below) keep reporter
+//   membership alone, their locations their home tests'. The dedicated
+//   arms identify theirs likewise: every 14.10 finding a concerned path
+//   with `locations` `[]`, `specs/a.md` among the paths; the 14.12 finding
+//   the edge T12.2-4 pins by `identities`, `locations` `[]`, `path` null;
+//   the 14.23 arm's findings (and `check`'s unit form) the graph-data area
+//   `.xspec`. Their condition-10 findings also carry the correction SPEC
+//   14.10 requires: every finding of the 14.10 arm, per file and unit form
+//   alike, and the 14.23 arm's unit form instruct rebuilding (support.ts
 //   assertFindingInstructsRebuilding: the message names `build`), neither
 //   staging holding a recorded file that obstructs a rebuild write — the
 //   one form instructed to be deleted manually instead.
@@ -169,10 +175,11 @@
 //   tolerance and several stale files under 14.10 both collapse into
 //   "every finding carries the one staged token"). Count precision,
 //   reporter breadth, and the concern data of these identical stagings
-//   (locations' files, concerned paths, identities) stay T14-4's and the
-//   home tests' subject; the `code`-null arms mirror T12.7-3's
-//   plain-usage-error and T12.7-1's review-refusal stagings, per T14-6's
-//   own citations.
+//   (locations' files, concerned paths, identities) and their correction
+//   information (14.2's expected form, 14.10's rebuild instruction) stay
+//   T14-4's and the home tests' subject; the `code`-null arms mirror
+//   T12.7-3's plain-usage-error and T12.7-1's review-refusal stagings, per
+//   T14-6's own citations.
 // - T14-7 stages the refusal reasons via the home fixtures — T6.4-3's and
 //   T6.5-4's exported staging and case tables (TEST-SPEC §14 preamble: the
 //   refusal reasons are staged at T6.4-3, T6.5-4, T6.5-6, T6.6-3) — and
@@ -354,7 +361,11 @@
 
 import { Buffer } from "node:buffer";
 import * as path from "node:path";
-import type { Finding, GraphEdge } from "../../helpers/adapters/index.js";
+import type {
+  Finding,
+  GraphEdge,
+  Mention,
+} from "../../helpers/adapters/index.js";
 import {
   CONDITION_CODE_TOKENS,
   GRAPH_DATA_AREA_PATH,
@@ -1331,11 +1342,14 @@ const T14_3 = defineProductTest({
 /**
  * What a sweep row's staged condition must identify at every reporter the
  * row reaches (TEST-SPEC.md's error-assertion rule: the report identifies
- * the file/location information SPEC 14 requires; SPEC 14, 12.7) —
- * identification, never exact ranges, which stay T14-11's:
+ * the file/location/correction information SPEC 14 requires; SPEC 14,
+ * 12.7) — identification, never exact ranges, which stay T14-11's:
  * - `located`: a condition that locates in source — every finding carries
  *   a location, every location in the staged `file`; `identities`, where
  *   given, the finding's exact `identities` (14.11's foreign module);
+ *   `expectedFormMention`, where given, a mention every finding's message
+ *   carries: the expected form SPEC 14.2 has the error state (the 14.2
+ *   row's parent prefix, T1.3-2's `expectedFormMention` reading);
  * - `concerned-path`: a condition without an in-source location — every
  *   finding's 12.7 `path` is exactly `path` (workspace-relative) and its
  *   `locations` are `[]`;
@@ -1347,6 +1361,14 @@ type SweepConcern =
       readonly kind: "located";
       readonly file: string;
       readonly identities?: readonly string[];
+      /**
+       * What every statement of the expected form exhibits (SPEC 14.2:
+       * "the error states the expected form"), where the staging admits
+       * an implementation-independent substring the offending ID does not
+       * contain: for a child of parent `P`, the parent prefix `P.` (SPEC
+       * 1.3; T1.3-2's `expectedFormMention` reading).
+       */
+      readonly expectedFormMention?: Mention;
     }
   | { readonly kind: "concerned-path"; readonly path: string }
   | { readonly kind: "home-test" };
@@ -1365,7 +1387,8 @@ interface SweepEntry {
   /**
    * The staged condition's concern, asserted on every finding at every
    * reporter the row reaches (`assertSweepFindings`): stated on each of
-   * the sweep's own rows — `located` in the staged file, or
+   * the sweep's own rows — `located` in the staged file (the 14.2 row's
+   * with the expected form's mention, overriding `specArm`'s default), or
    * `concerned-path` — and `home-test` on the home rows, whose locations
    * their home tests assert.
    */
@@ -1535,23 +1558,37 @@ const GARBAGE_JOURNAL_LINE =
 
 const SWEEP_ENTRIES: readonly SweepEntry[] = [
   specArm("14.1", "missing ID", ID_LESS_A_SOURCE),
-  specArm(
-    "14.2",
-    "invalid structural ID",
-    stagedMdx(
-      "T14-4/T14-6 sweep specs/a.mdx (14.2, invalid structural ID)",
-      [
-        '<S id="p">',
-        "Parent.",
-        "",
-        '<S id="q.r">',
-        "A child whose ID does not extend the parent's.",
-        "</S>",
-        "</S>",
-        "",
-      ].join("\n"),
+  {
+    ...specArm(
+      "14.2",
+      "invalid structural ID",
+      stagedMdx(
+        "T14-4/T14-6 sweep specs/a.mdx (14.2, invalid structural ID)",
+        [
+          '<S id="p">',
+          "Parent.",
+          "",
+          '<S id="q.r">',
+          "A child whose ID does not extend the parent's.",
+          "</S>",
+          "</S>",
+          "",
+        ].join("\n"),
+      ),
     ),
-  ),
+    // The error states the expected form (SPEC 14.2): any statement of it
+    // for the child of `p` — `p.<segment>`, a corrected ID such as `p.r` —
+    // exhibits the parent prefix `p.` (T1.3-2's `expectedFormMention`
+    // reading), which the offending `q.r` cannot satisfy. The prefix is
+    // short, so it counts only where no ASCII letter or digit precedes it:
+    // a word ending in `p` before a full stop ("help.", "step.") states no
+    // form.
+    concern: {
+      kind: "located",
+      file: "specs/a.mdx",
+      expectedFormMention: /(?<![0-9A-Za-z])p\./,
+    },
+  },
   {
     ...specArm(
       "14.3",
@@ -1991,7 +2028,9 @@ function assertConcernedPathAlone(
  * one carrying the staged condition (the caller's count assertion passed):
  * a `located` row's finding locates in the staged file, every location
  * there — exact ranges stay T14-11's — with 14.11's `identities` exactly the
- * foreign module; a `concerned-path` row's finding carries its path with
+ * foreign module, and the 14.2 row's message stating the expected form (its
+ * `expectedFormMention`; SPEC 14, 14.2) at whichever reporter `where`
+ * names; a `concerned-path` row's finding carries its path with
  * `locations` `[]`; a `home-test` row's concern is its home test's subject.
  */
 function assertSweepConcern(
@@ -2021,6 +2060,17 @@ function assertSweepConcern(
         `${where} — condition ${condition}'s \`identities\` hold exactly ` +
           `the foreign module, the root identity (1.5) of the spec module ` +
           `whose \`text\` export is called (${cited})`,
+      );
+    }
+    if (concern.expectedFormMention !== undefined) {
+      assertReportMentions(
+        finding.message,
+        [concern.expectedFormMention],
+        `${where} — condition ${condition}'s error states the expected ` +
+          `form, the correction SPEC 14 requires of it (SPEC 14, 14.2: ` +
+          `"the error states the expected form"): any statement of the ` +
+          `form for the staged child exhibits its parent's prefix (T1.3-2's ` +
+          `reading)`,
       );
     }
   }
