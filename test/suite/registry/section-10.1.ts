@@ -27,6 +27,12 @@
 //   standard-output content; SPEC.md's fixed vocabulary for the state is
 //   "corrupt" (10.1, 10.7, 14.21). Operationalized as exit 1 with stdout
 //   matching /corrupt/i (information presence, never exact wording, H-3).
+//   The corruption's concern information (SPEC 14: a session condition
+//   carries the file it concerns, no in-source location; 12.7) is asserted
+//   on the identical staging by each state's `check --json` arm: every
+//   condition-21 finding's `path` is the session file itself — a symbolic
+//   link there by its own path, never its target's (10.1, 13.4) — and its
+//   `locations` are [].
 // - "modifies nothing" is a whole-workspace snapshot compare around each
 //   command (H-4); the compares run with fresh graph data, so no 13.3
 //   refresh legitimately intervenes.
@@ -918,7 +924,12 @@ interface ExpectedSessionEntry {
  * subcommand naming the session reports the corruption (exit 1, /corrupt/i
  * on stdout — see the module header) and modifies nothing (whole-workspace
  * snapshot compare); `list` reports the session corrupt in place of its
- * fields and exits 1; `check` reports condition 14.21.
+ * fields and exits 1; `check` reports condition 14.21, every condition-21
+ * finding carrying the concern information SPEC 14 requires of a session
+ * condition (TEST-SPEC line 9's rule): `locations` [] and, as its 12.7
+ * `path`, the session file `.xspec/reviews/<name>.json` itself — for a
+ * symbolic link occupying it, the link's own path, never its target's
+ * (SPEC 14, 12.7, 10.1, 13.4). Each failure names the state.
  */
 async function assertCorruptSessionContract(
   product: ProductBinding,
@@ -1003,11 +1014,41 @@ async function assertCorruptSessionContract(
         parseJsonStdout(result, checkContext),
         checkContext,
       ).findings;
-      if (!findings.some((finding) => finding.condition === "14.21")) {
+      const corrupt = findings.filter(
+        (finding) => finding.condition === "14.21",
+      );
+      if (corrupt.length === 0) {
         fail(
           `${checkContext}: \`check\` must report the corrupt session with ` +
             `condition 14.21 (SPEC 12.2, 14.21); reported conditions: ` +
             JSON.stringify(findings.map((finding) => finding.condition)),
+        );
+      }
+      // The concern information SPEC 14 requires of a session condition
+      // (TEST-SPEC line 9's rule): no in-source location, and the concerned
+      // path is the corrupt session's own file (SPEC 10.1) — for a symbolic
+      // link occupying it, the link's own path, never its target's: an
+      // occupant is judged, never read through (13.4). Every condition-21
+      // finding concerns it, since the staged session is the only corrupt
+      // one (the symbolic-link state's `real` beside it is valid).
+      const concernedPath = sessionRel(CORRUPT_NAME);
+      for (const [index, finding] of corrupt.entries()) {
+        const findingContext =
+          `${checkContext} — condition-21 finding ${String(index + 1)} ` +
+          `of ${String(corrupt.length)}`;
+        assertFindingConcernsPath(
+          finding,
+          concernedPath,
+          `${findingContext}: a session condition carries the session file ` +
+            `it concerns — the corrupt session's own path ${concernedPath}, ` +
+            `a symbolic link there by its own path, never its target's ` +
+            `(SPEC 14, 12.7, 10.1, 13.4)`,
+        );
+        assertSameJson(
+          finding.locations,
+          [],
+          `${findingContext}: a session condition has no in-source ` +
+            `location — locations [] (SPEC 14, 12.7, 10.1)`,
         );
       }
     },
