@@ -110,6 +110,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertFindingLocated,
+  assertSameJson,
   buildOk,
   expectErrorDocument,
   expectExit,
@@ -942,6 +943,61 @@ export function assertStalenessAlone(
         `exactly when graph data does not match the current sources (SPEC ` +
         `14.10, 11.6); expected ${String(expectedUnit)}, got ` +
         `${String(unitCount)}`,
+    );
+  }
+}
+
+/**
+ * A never-reporter `check`'s staleness on the B-edited workspace — T13.5-7
+ * (f)'s refreshing-read state and T14-9's reporter-set state, each a built
+ * workspace whose `specs/b/B.mdx` text was edited without rebuilding, with
+ * `.xspec` unwritable (SPEC 14.10, 14, 12.7): every condition-10 finding —
+ * a per-file finding or the graph-data unit form — has no in-source
+ * location and carries the derived path (or the graph-data area) it
+ * concerns as its 12.7 `path`: `path` non-null, `locations` `[]`. B's
+ * generated module `specs/b/B.xspec.ts`, whose node documentation embeds
+ * the edited text (SPEC 4.2, 13.1; TEST-SPEC T13.5-7 (f): B's module and
+ * companions certainly differ), is among the concerned paths, compared by
+ * bytes. Which further derived files differ is the product's (companions,
+ * 13.1; graph data, 13.3), so membership alone — the shape of T12.2-2's
+ * edited-source arm. The caller asserts the findings are condition 10
+ * alone.
+ */
+export function assertEditedBStalenessConcerns(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  for (const finding of findings) {
+    if (finding.path === null) {
+      fail(
+        `${context}: a condition-10 finding has no in-source location and ` +
+          `carries the derived path (or the graph-data area) it concerns ` +
+          `as its 12.7 \`path\`; got null (message: ` +
+          `${JSON.stringify(finding.message)}) (SPEC 14.10, 14, 12.7)`,
+      );
+    }
+    assertSameJson(
+      finding.locations,
+      [],
+      `${context} — a condition-10 finding has no in-source location: ` +
+        `\`locations\` [] (SPEC 14.10, 14, 12.7)`,
+    );
+  }
+  const moduleBytes = expectedPathBytes(RENAME_B_MODULE);
+  const named = findings.some(
+    (finding) =>
+      finding.path !== null && pathValueBytes(finding.path).equals(moduleBytes),
+  );
+  if (!named) {
+    fail(
+      `${context}: B's generated module ${RENAME_B_MODULE} embeds the ` +
+        `edited text in its node documentation, so it no longer matches ` +
+        `what the current sources generate and a per-file finding ` +
+        `concerning it is among the findings (SPEC 14.10, 14, 12.7, 4.2, ` +
+        `13.1; paths compare byte-wise); got the paths ` +
+        JSON.stringify(
+          findings.map((finding) => renderPathValue(finding.path)),
+        ),
     );
   }
 }
@@ -1850,8 +1906,11 @@ export async function buildArm(product: ProductBinding): Promise<void> {
  * each exit 2 with the error document concerning `.xspec` (14.24: a
  * graph-data write concerns the area), stdout exactly that document and no
  * answer (13.3, 11.2), while `check` on the same state exits 1 reporting the
- * staleness (never a 14.24 reporter) and a `move --preview` exits 0 writing
- * nothing (6.6).
+ * staleness (never a 14.24 reporter) — condition 10 alone, every finding
+ * concerning a path with `locations` `[]`, B's generated module
+ * `specs/b/B.xspec.ts` among them (14.10, 14, 12.7;
+ * `assertEditedBStalenessConcerns`) — and a `move --preview` exits 0
+ * writing nothing (6.6).
  */
 export async function refreshingReadsArm(
   product: ProductBinding,
@@ -1917,6 +1976,10 @@ export async function refreshingReadsArm(
           );
         }
       }
+      assertEditedBStalenessConcerns(
+        findings,
+        `${checkLabel} — the staleness of B's edited text`,
+      );
       const previewArgv = [
         "move",
         RENAME_A_PATH,

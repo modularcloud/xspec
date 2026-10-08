@@ -41,6 +41,15 @@
 //   mutating `review create` refreshes before its session write (13.5), so
 //   on the stale workspace with `.xspec` unwritable the area is the first
 //   refused write of each — never a path inside it (14.24, 11.6).
+// - The never-reporter `check` on that state asserts condition 10 alone,
+//   every finding concerning a path with `locations` `[]`, and B's
+//   generated module `specs/b/B.xspec.ts` among the paths — the edited
+//   text changes it (4.2, 13.1) — membership alone, since which companions
+//   and other derived files also differ is the product's
+//   (`assertEditedBStalenessConcerns`, shared with T13.5-7 (f)).
+// - The validation refusal's one finding asserts its concerned identity
+//   exactly — the unchanged `specs/b/B.mdx#b` as the sole `identities`
+//   element — with `locations` `[]` and `path` null (14, 1.5, 12.7).
 // - The refused writes of the precedence arms and the state assertions
 //   beyond the contract (nothing written where the refused write is the
 //   operation's first; the journal or the session file byte-unchanged) are
@@ -138,6 +147,7 @@ import {
   assertConditionCounts,
   assertFindingConcernsPath,
   assertFindingLocated,
+  assertRefusalIdentities,
   assertSameJson,
   buildOk,
   expectConfigurationError,
@@ -162,8 +172,10 @@ import {
   RENAME_B_PATH,
   RENAME_C_PATH,
   RENAME_FIXTURE,
+  RENAME_OLD_IDENTITY,
   REVIEWS_DIR,
   WRITE_REFUSALS_STAGED,
+  assertEditedBStalenessConcerns,
   assertStalenessAlone,
   expectWriteFailure,
   isDerivedFile,
@@ -714,7 +726,10 @@ function expectPlainUsageError(
  * staged unwritable before each invocation (the reads take no hold). Every
  * refreshing read of 13.3 and the mutating `review create` exit 2 with the
  * error document concerning `.xspec` (14.24: a graph-data write concerns
- * the area); `check` exits 1 with the staleness alone, `inventory` and
+ * the area); `check` exits 1 with the staleness alone — every finding
+ * condition 10 concerning a path with `locations` `[]`, B's generated
+ * module `specs/b/B.xspec.ts` among them (14.10, 14, 12.7;
+ * `assertEditedBStalenessConcerns`) — `inventory` and
  * `version` exit 0, a `rename --preview` exits 0 writing nothing; the
  * invalid-flag-value and unknown-node usage errors precede the refresh
  * (`code` null); nothing in the workspace changes around the sweep.
@@ -808,6 +823,10 @@ async function reportersArm(product: ProductBinding): Promise<void> {
           );
         }
       }
+      assertEditedBStalenessConcerns(
+        checkFindings,
+        `${checkLabel} — the staleness of B's edited text`,
+      );
       await runJson(
         product,
         workspace,
@@ -943,7 +962,9 @@ async function failingTwinArm(product: ProductBinding): Promise<void> {
  * Precedence, a validation refusal under (a)'s staging: an
  * identity-unchanged rename (T6.4-3) with `specs/b` staged unwritable at the
  * seam exits 1 with its refusal reported alone — exactly one finding,
- * `refused-identity-unchanged` — and attempts no write: the workspace
+ * `refused-identity-unchanged`, concerning the unchanged identity: its
+ * `identities` exactly `["specs/b/B.mdx#b"]`, `locations` `[]`, `path`
+ * null (14, 1.5, 12.7) — and attempts no write: the workspace
  * byte-unchanged (6.4, 13.5).
  */
 async function validationRefusalArm(product: ProductBinding): Promise<void> {
@@ -980,6 +1001,33 @@ async function validationRefusalArm(product: ProductBinding): Promise<void> {
         `${context} — the refusal is reported alone: exactly one finding, ` +
           `its stable code \`refused-identity-unchanged\`, never a write ` +
           `failure beside it (SPEC 6.4, 14); got ${JSON.stringify(codes)}`,
+      );
+    }
+    // The reason concerns the unchanged identity alone: the sole element of
+    // its `identities`, in 1.5's form over the rename's file, with no
+    // in-source location and no concerned path (SPEC 14, 1.5, 6.4; 12.7).
+    const refusal = findings[0]!;
+    const concern =
+      `${context} — the identity-unchanged refusal concerns the unchanged ` +
+      `identity ${RENAME_OLD_IDENTITY}`;
+    assertRefusalIdentities(
+      refusal,
+      "refused-identity-unchanged",
+      [RENAME_OLD_IDENTITY],
+      `${concern}, carried as the sole element of its \`identities\` in ` +
+        `1.5's form over the rename's file, \`<file>#id\` (SPEC 14, 1.5, 6.4)`,
+    );
+    assertSameJson(
+      refusal.locations,
+      [],
+      `${concern}, locating nothing in source: \`locations\` [] (SPEC 14, ` +
+        `1.5, 6.4; 12.7)`,
+    );
+    if (refusal.path !== null) {
+      fail(
+        `${concern}, never a path: \`path\` null (SPEC 14, 1.5, 6.4; 12.7); ` +
+          `got ${JSON.stringify(refusal.path)} (message: ` +
+          `${JSON.stringify(refusal.message)})`,
       );
     }
     assertSnapshotsEqual(
