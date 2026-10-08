@@ -20,15 +20,32 @@
 // header of test/suite/registry/section-16-p5-p6.ts, "the target side");
 // should the fixed seeds miss a shape, re-weight the text-position bias or
 // routing there and re-measure; never weaken this.
+//
+// Every fixed-seed draw must also pass S-9's per-draw check (TEST-SPEC §16
+// P-5, §17 S-9) before any product exists, through the very code path P-5
+// takes: `checkProperty` over the arm-2 generator at the fixed seed set and
+// the registered runs, with P-5's own `drawSources`
+// (`stagedSectionMoveSources`) — each draw's staged files and the would-be
+// texts of its move, the files as 6.5's edits would leave them (the
+// origin, an existing target or the coincident file, a created target with
+// its declarations, each file referencing into the moved subtree with the
+// created module's import), each judged by `deriveMdx` before the body
+// runs. P-5 itself stops at its first falsified trial, so its later draws
+// reach the check only here. A draw failing it is a generator defect (a
+// refused shape drawn: exclude it as TEST-SPEC §16 P-5 lists) or a would-be
+// composition defect; fix that, never silence the check.
 
 import { expect, test } from "vitest";
 import {
+  checkProperty,
   DEFAULT_PROPERTY_SEEDS,
   drawFixedSeedTrials,
 } from "../helpers/property.js";
 import {
   genSectionMoveTrial,
   P5_SECTION_MOVE_RUNS,
+  P5_WOULD_BE_LABEL_PREFIX,
+  stagedSectionMoveSources,
   TEXT_POSITION_SHAPES,
 } from "../suite/registry/section-16-p5-p6.js";
 
@@ -53,5 +70,51 @@ test("P-5's own fixed-seed section moves route a single-line section holding pro
       `${JSON.stringify(Object.fromEntries(reached))}) — TEST-SPEC §16 P-5: ` +
       `a single-line section holding prose is drawn into either a ` +
       `flow-position parent or a text-position one`,
+  ).toEqual([]);
+});
+
+test("every fixed-seed P-5 section move's staged files and would-be texts pass S-9's per-draw check before any product exists, through P-5's own code path (TEST-SPEC §16 P-5, §17 S-9; E-5 replay at P-5's registered runs per seed)", async () => {
+  // P-5's arm 2 as its registration runs it — the generator, the fixed seed
+  // set (no `seeds`; `env: {}`, so no replay variable intervenes), the
+  // registered runs per seed, and `drawSources: stagedSectionMoveSources` —
+  // with a body that only counts: checkProperty judges each draw's sources
+  // before the body runs on it, and a draw failing S-9 rejects the run as a
+  // harness error naming its seed.
+  const wouldBePerDraw: number[] = [];
+  await checkProperty(
+    "P-5 random section moves (S-9 per-draw replay, no product)",
+    genSectionMoveTrial,
+    (trial) => {
+      wouldBePerDraw.push(
+        stagedSectionMoveSources(trial).filter(
+          ([, , label]) => label?.startsWith(P5_WOULD_BE_LABEL_PREFIX) === true,
+        ).length,
+      );
+    },
+    {
+      runs: P5_SECTION_MOVE_RUNS,
+      env: {},
+      drawSources: stagedSectionMoveSources,
+    },
+  );
+  expect(wouldBePerDraw).toHaveLength(
+    DEFAULT_PROPERTY_SEEDS.length * P5_SECTION_MOVE_RUNS,
+  );
+  // Not vacuous: every draw's move rewrites at least one file, so each
+  // draw yields a would-be text for the check to judge.
+  const without = wouldBePerDraw.flatMap((count, index) =>
+    count === 0
+      ? [
+          `seed ${String(
+            DEFAULT_PROPERTY_SEEDS[Math.floor(index / P5_SECTION_MOVE_RUNS)],
+          )}, trial ${String((index % P5_SECTION_MOVE_RUNS) + 1)}`,
+        ]
+      : [],
+  );
+  expect(
+    without,
+    `P-5 fixed-seed draws yielding no would-be text to S-9's per-draw ` +
+      `check (stagedSectionMoveSources; SPEC 6.5's would-be forms, ` +
+      `TEST-SPEC §16 P-5)`,
   ).toEqual([]);
 });

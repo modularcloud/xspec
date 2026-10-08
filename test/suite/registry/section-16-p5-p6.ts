@@ -105,22 +105,31 @@
 // (test/self/s9-fixture-well-formedness.test.ts) proves every one derives
 // before any product exists, and every draw's staged files are judged the
 // same way before the product sees them (`drawSources` on the registrations;
-// helpers/property.ts). The forms obey this validity rule: a multi-line
-// element parses only fully flow (tags at line starts, at most trailing
-// whitespace sharing a tag's line) or fully inline (the whole element
-// inside one paragraph, non-whitespace forcers on BOTH sides — an element
-// opened inline must also close inline, so SPEC 6.2's worked shape is
-// staged with a balanced close such as `</S>ptail`) — and it must parse
-// again at the destination, where the moved text lands at a line start
-// followed by a terminator with the parent's forcers gone (SPEC 6.5), so
-// an inline layout's boundary lines agree: the opening tag's remainder and
-// the closing tag's lead are both grammar whitespace (nothing, spaces, a
-// tab — each tag then a flow-position tag there; T6.2-3's staging (a)) or
-// both prose the flow attempt cannot take (`k9 lead`/`k9 tail`, U+000B,
-// U+000C — each tag then staying in text position; staging (b)), the
-// `body</S>` variant (staging (c)) closing inside the paragraph its last
-// body line makes under a prose remainder; the one-sided spellings SPEC
-// 6.2 and 6.5 refuse are never drawn (TEST-SPEC §16 P-5; T6.5-16's arms).
+// helpers/property.ts) — an arm-2 draw's would-be texts too, the files as
+// the move's edits would leave them, which 6.5's `refused-invalid-rewrite`
+// judges (stagedSectionMoveSources: the origin as its deletion leaves it,
+// an existing target as its parent rewrite and insertion leave it, the one
+// coincident file, a created target with the declarations it needs, and
+// each file referencing into the moved subtree with the created module's
+// import added at offset 0), so a refused shape drawn is a harness error
+// carrying the seed, never a product failure; P-5's fixed-seed draws run
+// through that check before any product exists
+// (test/self/p5-fixed-seed-draws.test.ts). The forms obey this validity
+// rule: a multi-line element parses only fully flow (tags at line starts,
+// at most trailing whitespace sharing a tag's line) or fully inline (the
+// whole element inside one paragraph, non-whitespace forcers on BOTH
+// sides — an element opened inline must also close inline, so SPEC 6.2's
+// worked shape is staged with a balanced close such as `</S>ptail`) —
+// and it must parse again at the destination, where the moved text lands
+// at a line start followed by a terminator with the parent's forcers gone
+// (SPEC 6.5), so an inline layout's boundary lines agree: the opening
+// tag's remainder and the closing tag's lead are both grammar whitespace
+// (nothing, spaces, a tab — each tag then a flow-position tag there; T6.2-3's
+// staging (a)) or both prose the flow attempt cannot take (`k9 lead`/`k9 tail`,
+// U+000B, U+000C — each tag then staying in text position; staging (b)), the
+// `body</S>` variant (staging (c)) closing inside the paragraph its last body
+// line makes under a prose remainder; the one-sided spellings SPEC 6.2 and 6.5
+// refuse are never drawn (TEST-SPEC §16 P-5; T6.5-16's arms).
 // The staged layouts:
 //   * flow — the PROP-03 form; any subtree (child sections, blanks,
 //     comments, embeddings); clean boundaries, moved subtree keeps every
@@ -312,12 +321,14 @@ import type {
 import { computeGraphDiff } from "../../helpers/oracles/graph-diff.js";
 import type {
   SectionMoveCategoryName,
+  SectionMoveComposedRole,
   SectionMoveDocument,
   SectionMoveGraphNode,
   SectionMovePiece,
   SectionMovePrediction,
 } from "../../helpers/oracles/section-move.js";
 import {
+  composeSectionMoveTexts,
   predictSectionMoveImpact,
   sectionMoveSourceText,
 } from "../../helpers/oracles/section-move.js";
@@ -1581,8 +1592,10 @@ interface MoveCandidate {
  * imports it, so the window must be strict — max referenced-out index
  * strictly below min referencing-in index. `createdAdds` counts the import
  * declarations such a move adds (module header, "drawn spec basenames"):
- * one in the created file per file the subtree references outside itself,
- * and one per file referencing into the subtree from outside it.
+ * one in the created file per file the subtree references outside itself
+ * (`outFiles`), and one per file referencing into the subtree from outside
+ * it (`inFiles`) — the two index sets, ascending, over which S-9's per-draw
+ * check composes those declarations (stagedSectionMoveSources).
  */
 function moveCandidates(
   model: WorkspaceModel,
@@ -1591,6 +1604,10 @@ function moveCandidates(
   readonly candidates: MoveCandidate[];
   readonly createdOk: boolean;
   readonly createdAdds: number;
+  /** Files the moved subtree references outside itself, ascending. */
+  readonly outFiles: readonly number[];
+  /** Files referencing into the moved subtree from outside it, ascending. */
+  readonly inFiles: readonly number[];
 } {
   const movedKeys = new Set(
     subtreeDotteds(moved.section, moved.dotted).map(
@@ -1668,10 +1685,14 @@ function moveCandidates(
     }
     consider(site.file, site.dotted, ancestorKeys);
   }
+  const ascending = (files: ReadonlySet<number>): number[] =>
+    [...files].sort((a, b) => a - b);
   return {
     candidates,
     createdOk: maxOut < minIn,
     createdAdds: outFiles.size + inFiles.size,
+    outFiles: ascending(outFiles),
+    inFiles: ascending(inFiles),
   };
 }
 
@@ -2602,7 +2623,13 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
 // each shape, as staged and as the move's deletion and insertion both
 // leave it. The S-9 self-test proves every vector derives before any
 // product exists; every draw's staged files are judged the same way before
-// the product sees them (`drawSources` on the registrations below).
+// the product sees them (`drawSources` on the registrations below), and so
+// is each arm-2 draw's every would-be text — its move's origin, target or
+// coincident file as the composer leaves it, a created target with its
+// declarations, and each file referencing into the moved subtree with the
+// created module's import added (stagedSectionMoveSources), P-5's
+// fixed-seed draws judged so before any product exists
+// (test/self/p5-fixed-seed-draws.test.ts).
 
 function vectorProse(text: string): ProseItem {
   return { kind: "prose", parts: [{ kind: "text", text }] };
@@ -3120,8 +3147,177 @@ function stagedPuritySources(trial: PurityTrial): DrawSource[] {
   );
 }
 
-function stagedSectionMoveSources(trial: SectionMoveTrial): DrawSource[] {
-  return Object.entries(buildSectionMove(trial).files);
+/**
+ * The label every would-be entry of {@link stagedSectionMoveSources} begins
+ * with (test/self/p5-fixed-seed-draws.test.ts counts them by it).
+ */
+export const P5_WOULD_BE_LABEL_PREFIX = "would-be: ";
+
+/** Each composed would-be form's label (SPEC 6.5's `refused-invalid-rewrite`). */
+const COMPOSED_WOULD_BE_FORMS: Readonly<
+  Record<SectionMoveComposedRole, string>
+> = {
+  origin: "the origin as the move's deletion leaves it",
+  target: "the target as its parent rewrite and insertion leave it",
+  coincident: "the one file as the move's deletion and insertion both leave it",
+  created:
+    "the created target as its creation composes it, needing no declaration",
+};
+
+/**
+ * The binding of the `index`th import declaration a would-be text adds to
+ * one file: harness-chosen, an identifier module code binds at ESNext,
+ * apart from the generator's own `M<j>` (the only bindings a staged file
+ * holds) and from the others added there. The product's choice is
+ * T6.5-22(a)'s subject, never the per-draw check's.
+ */
+function wouldBeBinding(index: number): string {
+  return `P5W${String(index)}`;
+}
+
+/**
+ * One added import declaration as its own line — SPEC 6.5's spelling in a
+ * spec source, the specifier from the importing file's directory (every
+ * drawn file lies flat under `specs/`) — followed by U+000A.
+ */
+function addedImportLine(binding: string, basename: string): string {
+  return `import ${binding} from "./${basename}.xspec"\n`;
+}
+
+/**
+ * The would-be texts of a drawn section move (SPEC 6.5: `refused-invalid-
+ * rewrite` judges them; TEST-SPEC §16 P-5: every draw is a move the product
+ * performs, S-9 gating the forms), each a labelled per-draw entry at its
+ * file's path:
+ * * the composer's (`composeSectionMoveTexts`) over the input
+ *   runSectionMoveTrial hands the oracle — the origin as the deletion
+ *   leaves it, an existing target as its parent rewrite and insertion leave
+ *   it, or the one coincident file;
+ * * for a created target — the drawn space's only import-adding move (module
+ *   header, "drawn spec basenames") — its content as 6.5 fixes it
+ *   (T6.5-14): one declaration per file the moved subtree references outside
+ *   itself, each followed by U+000A, then, when there is at least one,
+ *   U+000A, then the moved text and U+000A (the composer's created text);
+ * * and, for a created target, each file referencing into the moved subtree
+ *   from outside it — the composed origin when it is the origin, its staged
+ *   text otherwise — with one declaration of the created module and U+000A
+ *   added at offset 0, the line-start admissible offset its leading empty
+ *   line makes (TEST-SPEC §16 P-5; buildSectionMove's check).
+ * The two file sets are moveCandidates' own; the bindings are
+ * `wouldBeBinding`'s. Reference respellings are left out, as the composer
+ * leaves them: a respelling exchanges one static reference spelling for
+ * another inside the same expression container or `d` value, which no
+ * derivability verdict distinguishes. These texts feed nothing but the
+ * per-draw check: runSectionMoveTrial stages `files` and hands the oracle
+ * the piece trees, as before.
+ */
+function wouldBeSectionMoveSources(
+  trial: SectionMoveTrial,
+  built: BuiltSectionMove,
+): DrawSource[] {
+  const composed = composeSectionMoveTexts({
+    origin: built.origin,
+    target: built.target,
+    movedId: trial.dotted,
+    newId: built.newId,
+    otherNodes: built.otherNodes,
+  });
+  const entry = (path: string, text: string, form: string): DrawSource => [
+    path,
+    text,
+    `${P5_WOULD_BE_LABEL_PREFIX}${form} (SPEC 6.5)`,
+  ];
+  const { createdBasename } = trial;
+  if (createdBasename === null) {
+    return composed.map((file) =>
+      entry(file.path, file.text, COMPOSED_WOULD_BE_FORMS[file.role]),
+    );
+  }
+  const movedSite = sectionsOf(trial.model).find(
+    (site) => site.file === trial.fromFile && site.dotted === trial.dotted,
+  );
+  if (movedSite === undefined) {
+    stagingDefect(
+      `no section ${trial.dotted} in file ${String(trial.fromFile)} to move`,
+    );
+  }
+  const { outFiles, inFiles } = moveCandidates(trial.model, movedSite);
+  // The created module's declaration at offset 0 of a file referencing into
+  // the moved subtree: an ESM block the file's leading empty line ends.
+  const withCreatedImport = (path: string, text: string): string => {
+    if (!text.startsWith(LEADING_EMPTY_LINE)) {
+      stagingDefect(
+        `${path}, which references into the moved subtree, does not begin ` +
+          `with an empty line`,
+      );
+    }
+    return addedImportLine(wouldBeBinding(0), createdBasename) + text;
+  };
+  const sources: DrawSource[] = [];
+  for (const file of composed) {
+    if (file.role === "origin") {
+      sources.push(
+        inFiles.includes(trial.fromFile)
+          ? entry(
+              file.path,
+              withCreatedImport(file.path, file.text),
+              `${COMPOSED_WOULD_BE_FORMS.origin}, the created module's ` +
+                `import added at offset 0`,
+            )
+          : entry(file.path, file.text, COMPOSED_WOULD_BE_FORMS.origin),
+      );
+    } else if (file.role === "created") {
+      const declarations = outFiles.map((fileIndex, index) =>
+        addedImportLine(wouldBeBinding(index), trial.basenames[fileIndex]),
+      );
+      sources.push(
+        declarations.length === 0
+          ? entry(file.path, file.text, COMPOSED_WOULD_BE_FORMS.created)
+          : entry(
+              file.path,
+              `${declarations.join("")}\n${file.text}`,
+              `the created target as its creation composes it, its ` +
+                `${String(declarations.length)} declaration(s) first`,
+            ),
+      );
+    } else {
+      stagingDefect(`a ${file.role} would-be text for a created target`);
+    }
+  }
+  for (const fileIndex of inFiles) {
+    if (fileIndex === trial.fromFile) continue;
+    const path = specPath(trial.basenames[fileIndex]);
+    const staged = built.files[path];
+    if (staged === undefined) stagingDefect(`${path} is not staged`);
+    sources.push(
+      entry(
+        path,
+        withCreatedImport(path, staged),
+        "a file referencing into the moved subtree, the created module's " +
+          "import added at offset 0",
+      ),
+    );
+  }
+  return sources;
+}
+
+/**
+ * P-5 arm 2's per-draw sources: every file the draw stages
+ * (`buildSectionMove`, its guards and leading-empty-line check run first),
+ * then each would-be text of its move (`wouldBeSectionMoveSources`) — so S-9
+ * judges each before the product sees the draw, and one that does not
+ * derive is a harness error carrying the seed (TEST-SPEC §16 P-5, 17 S-9).
+ * test/self/p5-fixed-seed-draws.test.ts runs every fixed-seed draw through
+ * it before any product exists.
+ */
+export function stagedSectionMoveSources(
+  trial: SectionMoveTrial,
+): DrawSource[] {
+  const built = buildSectionMove(trial);
+  return [
+    ...Object.entries(built.files),
+    ...wouldBeSectionMoveSources(trial, built),
+  ];
 }
 
 /**
