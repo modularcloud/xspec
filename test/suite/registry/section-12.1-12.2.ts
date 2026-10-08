@@ -99,11 +99,33 @@
 //   again", 14.10 → 11.6), asserted as a plain list naming the generated
 //   module; the full inventory form and the corrupt-state unavailability
 //   report are T11.6-*'s subject (T11.6-4).
-// - 14.21 identification: the corrupt-session finding must let the user find
-//   the session — accepted as the finding naming the session file path or
-//   the message naming the session (H-3 information presence, never exact
-//   wording). Line-level 14.13 naming is T6.1-3's subject; here the family
-//   asserts the condition itself.
+// - Beside the exact counts, every T12.2-2 family finding of a staged
+//   condition identifies the concern SPEC 14 requires (TEST-SPEC line 9;
+//   SPEC 14, 12.7) — identification, never exact ranges (T14-8's and
+//   T14-11's) or wording (H-3). A located condition carries at least one
+//   location, every one in its staged file and within the offending
+//   construct's byte window (`byteWindow` over the named parts the staged
+//   source is composed of, its bytes and record name unchanged; the window
+//   is end-widened by one byte, `assertFindingLocated`): the build-
+//   validations family's 14.1 within the id-less nested section, its
+//   opening `<S>` through its `</S>` (T1.3-1's window convention; T12.1-4's
+//   first arm stages the identical bytes), and its 14.4 within the
+//   `bad name` section's opening tag; the references family's 14.5, 14.6,
+//   and 14.8 within their spellings in specs/A.mdx — the `d` value
+//   `"nope"`, the embedding `{text("nada")}`, the `d` value `42` — and its
+//   14.7 within the marker chain `A.missing` in src/app.ts; the cycles
+//   family's 14.9 within the self-reference `"s"`. A path-concerned
+//   condition carries its concerned path as 12.7's `path` and `locations`
+//   `[]`: the journal family's 14.13 the journal `.xspec/journal`, its
+//   message naming the malformed line ("naming the lines", 14.13) — line 1,
+//   the journal holding the garbage line alone — in T6.1-3's forms adapted
+//   to line 1 (the line's text, a line/entry 1 citation no "line 10"
+//   satisfies, or a `journal:1` file:line form; H-3 information presence);
+//   the sessions family's 14.21 exactly the session file
+//   `.xspec/reviews/bad.json` (SPEC 14, 10.1, 13.4). The policy family's
+//   14.12 carries exactly T12.2-4's violation (`assertOnlyTheViolation`):
+//   the rule's name and the edge's source identity, kind token, and target
+//   identity, `locations` `[]`, `path` null (SPEC 14.12, 12.7).
 // - "All build validations" (T12.2-2's first family) is asserted through
 //   representatives with unambiguous finding counts (14.1 missing ID, 14.4
 //   invalid segment) staged by editing two files of a previously built valid
@@ -167,6 +189,7 @@ import type { ProductBinding } from "../../helpers/subprocess.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { assertGraphDataPresent, deleteGraphData } from "./section-13.3.js";
+import type { FindingSourceExpectation } from "./support.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
@@ -274,7 +297,10 @@ async function checkFindings(
  * workspace the mismatch forms go unreported, and no family stages a
  * whatever-validity form (SPEC 14.10; the module header judges each
  * staging) — so the family condition may never be missing and no phantom
- * condition, staleness included, is accepted.
+ * condition, staleness included, is accepted. The families of the staged
+ * error conditions then assert each finding's concern beside the counts
+ * (`assertFamilyFindingsLocated`, `assertFamilyFindingsConcernPath`,
+ * `assertOnlyTheViolation`; the module header).
  */
 async function checkFamilyFindings(
   product: ProductBinding,
@@ -291,6 +317,87 @@ async function checkFamilyFindings(
       `form is staged (SPEC 14.10; see the module header)`,
   );
   return findings;
+}
+
+/**
+ * One staged condition's located concern in a T12.2-2 family (the module
+ * header): the family's finding of `condition` locates the offending
+ * construct in `file`, every location within `window` — the construct's
+ * `byteWindow` over the staged source's named parts (SPEC 14, 12.7).
+ */
+interface FamilyLocatedConcern extends FindingSourceExpectation {
+  /** The SPEC 14 condition (`14.N`) the family stages exactly once. */
+  readonly condition: string;
+  /** The offending construct and the SPEC 14 rule placing it (diagnostics). */
+  readonly construct: string;
+  readonly window: { readonly start: number; readonly end: number };
+}
+
+/**
+ * Every finding of each listed condition locates its concern (TEST-SPEC
+ * line 9; SPEC 14: a condition that locates in source carries the
+ * containing file and a range for each offending construct; 12.7) — at
+ * least one location, each in the staged file and within the construct's
+ * window (`assertFindingLocated`); run after `checkFamilyFindings` pinned
+ * exactly one finding per staged condition. Each failure names the family
+ * and cites SPEC 14 with the condition's number and 12.7.
+ */
+function assertFamilyFindingsLocated(
+  findings: readonly Finding[],
+  concerns: readonly FamilyLocatedConcern[],
+  family: string,
+): void {
+  for (const concern of concerns) {
+    for (const finding of findings) {
+      if (finding.condition !== concern.condition) continue;
+      assertFindingLocated(
+        finding,
+        concern,
+        `${family}: the ${concern.condition} finding locates ` +
+          `${concern.construct} in ${concern.file} ` +
+          `(SPEC 14, ${concern.condition}, 12.7)`,
+      );
+    }
+  }
+}
+
+/**
+ * Every finding of a path-concerned `condition` carries `path` as its 12.7
+ * concerned path and no in-source location (TEST-SPEC line 9; SPEC 14:
+ * conditions without an in-source location — journal and session
+ * conditions among them — carry the file or path they concern; 12.7:
+ * `locations` empty for them); run after `checkFamilyFindings` pinned
+ * exactly one. `what` names the concerned path and the rule fixing it
+ * (diagnostics). Returns the condition's findings, for the family's further
+ * checks. Each failure names the family and cites SPEC 14 with the
+ * condition's number and 12.7.
+ */
+function assertFamilyFindingsConcernPath(
+  findings: readonly Finding[],
+  condition: string,
+  path: string,
+  what: string,
+  family: string,
+): readonly Finding[] {
+  const ofCondition = findings.filter(
+    (finding) => finding.condition === condition,
+  );
+  for (const finding of ofCondition) {
+    assertFindingConcernsPath(
+      finding,
+      path,
+      `${family}: the ${condition} finding concerns ${what} ` +
+        `(SPEC 14, ${condition}, 12.7)`,
+    );
+    assertSameJson(
+      finding.locations,
+      [],
+      `${family}: the ${condition} finding has no in-source location — ` +
+        `its concern is the path ${path}, so its locations are empty ` +
+        `(SPEC 14, ${condition}, 12.7)`,
+    );
+  }
+  return ofCondition;
 }
 
 /**
@@ -693,19 +800,24 @@ const T12_1_3 = defineProductTest({
 
 // The valid source with a nested section lacking `id` — condition 14.1, the
 // staged validation error, staged over the built valid source (a ledger
-// record, S-9).
+// record, S-9). Composed of named parts so T12.2-2's build-validations
+// family computes the 14.1 window from them: the id-less nested section's
+// construct, its opening `<S>` through its `</S>` (T1.3-1's window
+// convention), and the bytes before it.
+const FAILED_BUILD_MISSING_ID_PREFIX = [
+  '<S id="a1">',
+  "Alpha behavior.",
+  "",
+  "",
+].join("\n");
+const FAILED_BUILD_MISSING_ID_CONSTRUCT = [
+  "<S>",
+  "Nested section without an id.",
+  "</S>",
+].join("\n");
 const FAILED_BUILD_INVALID_SOURCE = stagedMdx(
   "T12.1-4/T12.2-2 specs/A.mdx with a nested section lacking id (14.1), staged over the built valid source",
-  [
-    '<S id="a1">',
-    "Alpha behavior.",
-    "",
-    "<S>",
-    "Nested section without an id.",
-    "</S>",
-    "</S>",
-    "",
-  ].join("\n"),
+  `${FAILED_BUILD_MISSING_ID_PREFIX}${FAILED_BUILD_MISSING_ID_CONSTRUCT}\n</S>\n`,
 );
 
 // The valid configuration plus one unknown top-level key — a configuration
@@ -830,7 +942,40 @@ const T12_2_1 = defineProductTest({
 // The family's workspace follows family 1's invocations, so its
 // configuration and code source are TypeScript staged-source records
 // (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), wrapped in
-// place.
+// place. Both sources are composed of named parts — each offending
+// spelling and the bytes before it — so the family computes each finding's
+// window from them (SPEC 14: a reference spelling is located by the span
+// its occurrence occupies or would occupy — a `d` value's expression by its
+// own characters, an MDX embedding's full braced container, a marker's bare
+// reference chain).
+const REFERENCES_DEPENDENCY_PREFIX = '<S id="a1" d={';
+const REFERENCES_UNKNOWN_DEPENDENCY = '"nope"';
+const REFERENCES_TEXT_TARGET_PREFIX =
+  REFERENCES_DEPENDENCY_PREFIX +
+  REFERENCES_UNKNOWN_DEPENDENCY +
+  [
+    "}>",
+    "Unknown dependency target.",
+    "</S>",
+    "",
+    '<S id="a2">',
+    "Unknown text target below.",
+    "",
+    "",
+  ].join("\n");
+const REFERENCES_UNKNOWN_TEXT_TARGET = '{text("nada")}';
+const REFERENCES_NON_STATIC_PREFIX =
+  REFERENCES_TEXT_TARGET_PREFIX +
+  REFERENCES_UNKNOWN_TEXT_TARGET +
+  ["", "</S>", "", '<S id="a3" d={'].join("\n");
+const REFERENCES_NON_STATIC_VALUE = "42";
+const REFERENCES_MARKER_PREFIX = [
+  'import A from "../specs/A.xspec";',
+  "",
+  "function marker(): void {",
+  "  ",
+].join("\n");
+const REFERENCES_UNRESOLVED_MARKER = "A.missing";
 const REFERENCES_FAMILY_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": stagedTs(
     "T12.2-2 references family xspec.config.ts — one spec group and one code group (src/**/*.ts)",
@@ -848,44 +993,33 @@ export default defineConfig({
   ),
   "specs/A.mdx": stagedMdx(
     "T12.2-2 references family specs/A.mdx (an unknown d target, an unknown text target, and a non-static d value)",
-    [
-      '<S id="a1" d={"nope"}>',
-      "Unknown dependency target.",
-      "</S>",
-      "",
-      '<S id="a2">',
-      "Unknown text target below.",
-      "",
-      '{text("nada")}',
-      "</S>",
-      "",
-      '<S id="a3" d={42}>',
-      "Non-static dependency value.",
-      "</S>",
-      "",
-    ].join("\n"),
+    REFERENCES_NON_STATIC_PREFIX +
+      REFERENCES_NON_STATIC_VALUE +
+      ["}>", "Non-static dependency value.", "</S>", ""].join("\n"),
   ),
   "src/app.ts": stagedTs(
     "T12.2-2 references family src/app.ts (an unresolved TypeScript marker, A.missing)",
-    [
-      'import A from "../specs/A.xspec";',
-      "",
-      "function marker(): void {",
-      "  A.missing;",
-      "}",
-      "",
-    ].join("\n"),
+    REFERENCES_MARKER_PREFIX +
+      REFERENCES_UNRESOLVED_MARKER +
+      [";", "}", ""].join("\n"),
   ),
 };
 
 // Family: cycles. A self-`depends` is a dependency cycle of length one
 // (SPEC 5.3) needing no import — so no spec import cycle is co-staged and
-// the exact condition count holds.
+// the exact condition count holds. The source is composed of named parts:
+// the self-reference `"s"`, the one reference spelling recording the
+// cycle's participating edge (SPEC 14: a cycle locates every such
+// spelling), and the bytes before it.
+const CYCLE_DEPENDENCY_PREFIX = '<S id="s" d={';
+const CYCLE_SELF_DEPENDENCY = '"s"';
 const CYCLE_FAMILY_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": MARKDOWN_NO_EMIT_CONFIG,
   "specs/A.mdx": stagedMdx(
     "T12.2-2 cycles family specs/A.mdx (a self-depends cycle of length one)",
-    ['<S id="s" d={"s"}>', "Depends on itself.", "</S>", ""].join("\n"),
+    CYCLE_DEPENDENCY_PREFIX +
+      CYCLE_SELF_DEPENDENCY +
+      ["}>", "Depends on itself.", "</S>", ""].join("\n"),
   ),
 };
 
@@ -944,18 +1078,26 @@ export default defineConfig({
   "lo/L.mdx": POLICY_LO_SOURCE,
 };
 
-// TEST-SPEC-sanctioned malformed journal line (the T6.1-3 shape).
-const GARBAGE_JOURNAL_LINE =
-  "?? harness-injected garbage: not a journal entry ??\n";
+// TEST-SPEC-sanctioned malformed journal line (the T6.1-3 shape), written as
+// the whole journal: its text — which the 14.13 finding's message may echo
+// to name the line — and the line with its terminator.
+const GARBAGE_JOURNAL_TEXT =
+  "?? harness-injected garbage: not a journal entry ??";
+const GARBAGE_JOURNAL_LINE = `${GARBAGE_JOURNAL_TEXT}\n`;
+
+/** The workspace's one journal (SPEC 6.1), the 14.13 concerned path. */
+const JOURNAL_PATH = ".xspec/journal";
 
 const CORRUPT_SESSION_PATH = ".xspec/reviews/bad.json";
 
 // The family stagings made after each family workspace's `build` — the
 // build-validations family's second edit and the staleness and graph-data
-// families' source edits: ledger records (S-9, helpers/staged-mdx.ts).
+// families' source edits: ledger records (S-9, helpers/staged-mdx.ts). The
+// second edit's opening tag is named: the 14.4 finding locates within it.
+const T12_2_2_B_INVALID_SEGMENT_TAG = '<S id="bad name">';
 const T12_2_2_B_INVALID_SEGMENT = stagedMdx(
   "T12.2-2 specs/B.mdx with an invalid ID segment (14.4), staged over the built valid source (build-validations family)",
-  ['<S id="bad name">', "Invalid segment.", "</S>", ""].join("\n"),
+  [T12_2_2_B_INVALID_SEGMENT_TAG, "Invalid segment.", "</S>", ""].join("\n"),
 );
 const T12_2_2_A_EDITED = stagedMdx(
   "T12.2-2 specs/A.mdx with a1's text edited without rebuilding (staleness family, the edited-source arm)",
@@ -970,6 +1112,98 @@ const T12_2_2_A_MISMATCH_EDIT = stagedMdx(
     "",
   ].join("\n"),
 );
+
+// The located families' concerns (the module header): each staged
+// condition's file and the offending construct's window, computed from the
+// named parts each staged source is composed of.
+const BUILD_VALIDATIONS_CONCERNS: readonly FamilyLocatedConcern[] = [
+  {
+    condition: "14.1",
+    construct:
+      "the id-less nested section, its opening `<S>` through its `</S>` " +
+      "(a missing id locates the section's opening tag)",
+    file: "specs/A.mdx",
+    window: byteWindow(
+      FAILED_BUILD_MISSING_ID_PREFIX,
+      FAILED_BUILD_MISSING_ID_CONSTRUCT,
+    ),
+  },
+  {
+    condition: "14.4",
+    construct:
+      "the `bad name` section's opening tag (a malformed segment locates " +
+      "the `id` attribute)",
+    file: "specs/B.mdx",
+    window: byteWindow("", T12_2_2_B_INVALID_SEGMENT_TAG),
+  },
+];
+const REFERENCES_CONCERNS: readonly FamilyLocatedConcern[] = [
+  {
+    condition: "14.5",
+    construct:
+      'the `d` value `"nope"` (an unresolved reference spelling locates ' +
+      "the expression by its own characters)",
+    file: "specs/A.mdx",
+    window: byteWindow(
+      REFERENCES_DEPENDENCY_PREFIX,
+      REFERENCES_UNKNOWN_DEPENDENCY,
+    ),
+  },
+  {
+    condition: "14.6",
+    construct:
+      'the embedding `{text("nada")}` (an MDX embedding locates its full ' +
+      "braced container)",
+    file: "specs/A.mdx",
+    window: byteWindow(
+      REFERENCES_TEXT_TARGET_PREFIX,
+      REFERENCES_UNKNOWN_TEXT_TARGET,
+    ),
+  },
+  {
+    condition: "14.7",
+    construct:
+      "the marker `A.missing` (a marker locates its bare reference chain)",
+    file: "src/app.ts",
+    window: byteWindow(REFERENCES_MARKER_PREFIX, REFERENCES_UNRESOLVED_MARKER),
+  },
+  {
+    condition: "14.8",
+    construct:
+      "the `d` value `42` (a non-static reference spelling locates the " +
+      "expression by its own characters)",
+    file: "specs/A.mdx",
+    window: byteWindow(
+      REFERENCES_NON_STATIC_PREFIX,
+      REFERENCES_NON_STATIC_VALUE,
+    ),
+  },
+];
+const CYCLE_CONCERNS: readonly FamilyLocatedConcern[] = [
+  {
+    condition: "14.9",
+    construct:
+      'the self-reference `"s"` (a cycle locates every reference spelling ' +
+      "recording a participating dependency edge)",
+    file: "specs/A.mdx",
+    window: byteWindow(CYCLE_DEPENDENCY_PREFIX, CYCLE_SELF_DEPENDENCY),
+  },
+];
+
+/**
+ * Does a 14.13 finding's message name the malformed line — line 1, the
+ * journal holding the garbage line alone ("naming the lines", SPEC 14.13)?
+ * T6.1-3's forms adapted to line 1 (the module header; H-3 information
+ * presence, never exact wording): the line's text, a line/entry 1 citation
+ * (`line 1`, `entry #1`; never `line 10`), or a `journal:1` file:line form
+ * (never `journal:10`). The message alone names it: a journal condition's
+ * concern is its path, with no in-source location (SPEC 14, 12.7).
+ */
+function messageNamesJournalLineOne(message: string): boolean {
+  if (message.includes(GARBAGE_JOURNAL_TEXT)) return true;
+  if (/\b(?:line|entry)\s*#?\s*1\b/i.test(message)) return true;
+  return /journal:1(?![0-9])/.test(message);
+}
 
 const T12_2_2 = defineProductTest({
   id: "T12.2-2",
@@ -996,7 +1230,7 @@ const T12_2_2 = defineProductTest({
         );
         await workspace.file("specs/A.mdx", FAILED_BUILD_INVALID_SOURCE);
         await workspace.file("specs/B.mdx", T12_2_2_B_INVALID_SEGMENT);
-        await checkFamilyFindings(
+        const findings = await checkFamilyFindings(
           product,
           workspace,
           { "14.1": 1, "14.4": 1 },
@@ -1004,6 +1238,11 @@ const T12_2_2 = defineProductTest({
             "sources to be invalid — check performs all build validations " +
             "from the current sources rather than accepting the stale " +
             "outputs (SPEC 12.2, 14.1, 14.4)",
+        );
+        assertFamilyFindingsLocated(
+          findings,
+          BUILD_VALIDATIONS_CONCERNS,
+          "T12.2-2 (build validations) `check --json`",
         );
       },
     );
@@ -1377,7 +1616,7 @@ const T12_2_2 = defineProductTest({
     // Family 5 — unresolved and non-static references (14.5, 14.6, 14.7,
     // 14.8), each staged against a distinct missing name.
     await withWorkspace(REFERENCES_FAMILY_FILES, async (workspace) => {
-      await checkFamilyFindings(
+      const findings = await checkFamilyFindings(
         product,
         workspace,
         { "14.5": 1, "14.6": 1, "14.7": 1, "14.8": 1 },
@@ -1385,17 +1624,27 @@ const T12_2_2 = defineProductTest({
           "unknown `text(...)` target, an unresolved TypeScript marker, and " +
           "a non-static `d` value are each reported (SPEC 12.2, 14.5–14.8)",
       );
+      assertFamilyFindingsLocated(
+        findings,
+        REFERENCES_CONCERNS,
+        "T12.2-2 (references) `check --json`",
+      );
     });
 
     // Family 6 — cycles: a self-`depends` cycle of length one (no import
     // cycle co-staged).
     await withWorkspace(CYCLE_FAMILY_FILES, async (workspace) => {
-      await checkFamilyFindings(
+      const findings = await checkFamilyFindings(
         product,
         workspace,
         { "14.9": 1 },
         "T12.2-2 (cycles) `check --json` — a dependency cycle is a finding " +
           "(SPEC 12.2, 5.3, 14.9)",
+      );
+      assertFamilyFindingsLocated(
+        findings,
+        CYCLE_CONCERNS,
+        "T12.2-2 (cycles) `check --json`",
       );
     });
 
@@ -1411,16 +1660,37 @@ const T12_2_2 = defineProductTest({
           workspace,
           "T12.2-2 (journal) initial `build` (staging, SPEC 12.1)",
         );
-        await workspace.file(".xspec/journal", GARBAGE_JOURNAL_LINE);
-        await checkFamilyFindings(
+        await workspace.file(JOURNAL_PATH, GARBAGE_JOURNAL_LINE);
+        const findings = await checkFamilyFindings(
           product,
           workspace,
           { "14.13": 1 },
           "T12.2-2 (journal) `check --json` over a journal holding one " +
             "malformed line — the journal is well-formed and replayable or " +
-            "a 14.13 finding (SPEC 12.2, 6.1, 14.13; line naming is " +
-            "T6.1-3's subject)",
+            "a 14.13 finding naming the line (SPEC 12.2, 6.1, 14.13)",
         );
+        const family = "T12.2-2 (journal) `check --json`";
+        const journalFindings = assertFamilyFindingsConcernPath(
+          findings,
+          "14.13",
+          JOURNAL_PATH,
+          `the journal ${JOURNAL_PATH}, the workspace's one journal ` +
+            `(SPEC 6.1)`,
+          family,
+        );
+        for (const finding of journalFindings) {
+          if (!messageNamesJournalLineOne(finding.message)) {
+            fail(
+              `${family}: the 14.13 finding must name the malformed line ` +
+                `— line 1, the journal holding the garbage line alone — ` +
+                `in its message: the line's text, a line/entry 1 citation, ` +
+                `or a journal:1 file:line form (SPEC 14, 14.13: "naming ` +
+                `the lines"; 12.7: its concern is the path, so the message ` +
+                `alone names the line; H-3 information presence); got ` +
+                `${JSON.stringify(finding.message)}`,
+            );
+          }
+        }
       },
     );
 
@@ -1433,12 +1703,18 @@ const T12_2_2 = defineProductTest({
         "T12.2-2 (policy) `build` — build does not evaluate policy " +
           "(SPEC 12.1; the build-vs-check contrast is T7.5-6's subject)",
       );
-      await checkFamilyFindings(
+      const findings = await checkFamilyFindings(
         product,
         workspace,
         { "14.12": 1 },
         "T12.2-2 (policy) `check --json` — the violating edge is a 14.12 " +
           "finding (SPEC 12.2, 7.5, 14.12)",
+      );
+      // The same violation T12.2-4 pins (its fixture's identical edge):
+      // the rule's name and the edge's identities, no location, no path.
+      assertOnlyTheViolation(
+        findings,
+        "T12.2-2 (policy) `check --json`: the 14.12 finding (SPEC 14)",
       );
     });
 
@@ -1469,21 +1745,14 @@ const T12_2_2 = defineProductTest({
           { "14.21": 1 },
           context,
         );
-        const corrupt = findings.find(
-          (finding) => finding.condition === "14.21",
-        )!;
-        if (
-          corrupt.path !== CORRUPT_SESSION_PATH &&
-          !/bad/.test(corrupt.message)
-        ) {
-          fail(
-            `${context}: the 14.21 finding must identify the corrupt ` +
-              `session — the finding naming the session file ` +
-              `${CORRUPT_SESSION_PATH} or the message naming the session ` +
-              `"bad" (SPEC 14, 14.21; H-3 information presence); got path ` +
-              `${JSON.stringify(corrupt.path)}, message ${JSON.stringify(corrupt.message)}`,
-          );
-        }
+        assertFamilyFindingsConcernPath(
+          findings,
+          "14.21",
+          CORRUPT_SESSION_PATH,
+          `the corrupt session's file ${CORRUPT_SESSION_PATH}, where the ` +
+            `user finds the session (SPEC 10.1, 13.4)`,
+          "T12.2-2 (sessions) `check --json`",
+        );
       },
     );
   },
@@ -1786,7 +2055,11 @@ const T12_2_4_FILES: Readonly<Record<string, InitialFileContents>> = {
   ),
 };
 
-/** The violating edge's 14.12 identities, in 14.12's order (SPEC 12.7). */
+/**
+ * The violating edge's 14.12 identities, in 14.12's order (SPEC 12.7) —
+ * the edge `POLICY_HI_SOURCE` stages under the rule `no-hi-to-lo`,
+ * identical in every T12.2-4 arm and T12.2-2's policy family.
+ */
 const T12_2_4_VIOLATION_IDENTITIES: readonly string[] = [
   "no-hi-to-lo",
   "hi/H.mdx#h1",
@@ -1804,7 +2077,8 @@ type T1224StaleExpectation =
  * Exactly one 14.12 finding carrying the fixture's violating edge: the
  * violated rule's name and the edge's source identity, kind token, and
  * target identity in order, no in-source location, no concerned path
- * (SPEC 7.5, 14.12, 12.7).
+ * (SPEC 7.5, 14.12, 12.7). Shared by every T12.2-4 arm and T12.2-2's
+ * policy family, whose fixtures stage the same edge under the same rule.
  */
 function assertOnlyTheViolation(
   findings: readonly Finding[],
