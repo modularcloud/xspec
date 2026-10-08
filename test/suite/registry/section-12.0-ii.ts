@@ -73,7 +73,13 @@
 //   the exit-2 stdout is exactly the one 12.7 error document, a form with
 //   no findings member (12.7). "Reports the corruption" reuses T10.1-4's
 //   operationalization (exit 1, stdout matching /corrupt/i — SPEC.md's
-//   fixed vocabulary for the state; information presence, not wording).
+//   fixed vocabulary for the state; information presence, not wording),
+//   and the same `resolve` run under `--json` asserts what TEST-SPEC line
+//   9 requires of the reported error: exit 1 with the form-exact
+//   findings-only report holding exactly one finding, carrying condition
+//   21's stable code `corrupt-session`, the session file
+//   `.xspec/reviews/corrupt.json` as its 12.7 `path`, and `locations` []
+//   (SPEC 14, 14.21, 12.7, 10.1).
 // - T12.0-11 partitions a whole-workspace byte diff around each git-reading
 //   invocation: any change under `.git/` fails (same file set, same bytes),
 //   and every change outside it must be a write the command's own
@@ -161,6 +167,7 @@ import { impactAgainst, SPECS_ONLY_CONFIG } from "./section-5.6.js";
 import { assertImpactedCode, SPEC_AND_CODE_CONFIG } from "./section-9.js";
 import {
   assertConditionCounts,
+  assertFindingConcernsPath,
   assertFindingLocated,
   assertSameJson,
   buildFindings,
@@ -171,6 +178,7 @@ import {
   expectPlainUsageError,
   REPLACEMENT_CHARACTER_SPEC_PATH,
   runCli,
+  runFindingsReport,
   runJson,
 } from "./support.js";
 
@@ -2177,6 +2185,17 @@ const T12_0_10 = defineProductTest({
               `the file the product wrote`,
           );
         }
+        // The one `resolve` this arm runs: on the well-formed session (the
+        // premise), then on the corrupt one in human form and under
+        // `--json`.
+        const resolveArgv: readonly string[] = [
+          "review",
+          "resolve",
+          "corrupt",
+          PRECEDENCE_NO_SUCH_ITEM,
+          "--status",
+          "updated",
+        ];
         // Premise: with the session well-formed, the unknown item ID stays
         // a usage error (SPEC 10.7, 12.0; T10.7-10's contract) — so the
         // exit-1 flip below is attributable to the corruption withholding
@@ -2184,14 +2203,7 @@ const T12_0_10 = defineProductTest({
         await expectExit(
           product,
           workspace,
-          [
-            "review",
-            "resolve",
-            "corrupt",
-            PRECEDENCE_NO_SUCH_ITEM,
-            "--status",
-            "updated",
-          ],
+          resolveArgv,
           2,
           "T12.0-10 pre-corruption premise `review resolve corrupt " +
             "<no-such-item> --status updated` — an unknown item ID in a " +
@@ -2202,14 +2214,7 @@ const T12_0_10 = defineProductTest({
         const context =
           "T12.0-10 `review resolve corrupt <no-such-item> --status " +
           "updated` (corrupt session)";
-        const result = await runCli(product, workspace, [
-          "review",
-          "resolve",
-          "corrupt",
-          PRECEDENCE_NO_SUCH_ITEM,
-          "--status",
-          "updated",
-        ]);
+        const result = await runCli(product, workspace, resolveArgv);
         assertExitCode(
           result,
           1,
@@ -2225,6 +2230,50 @@ const T12_0_10 = defineProductTest({
           `${context} — the report identifies the session as corrupt ` +
             `(SPEC 10.1/14.21 vocabulary; T10.1-4's operationalization: ` +
             `information presence, never exact wording, H-3)`,
+        );
+        // The same `resolve` under `--json`, on the same corrupt state (a
+        // `review` subcommand naming a corrupt session modifies nothing,
+        // SPEC 10.1): the form-exact findings-only report holds exactly the
+        // one condition-21 finding, carrying its exact stable code
+        // `corrupt-session` and the concern information SPEC 14 requires
+        // of a session condition (TEST-SPEC line 9's rule) — no in-source
+        // location, and the corrupt session's own file as its 12.7 `path`.
+        const jsonContext =
+          "T12.0-10 `review resolve corrupt <no-such-item> --status " +
+          "updated --json` (corrupt session)";
+        const findings = await runFindingsReport(
+          product,
+          workspace,
+          [...resolveArgv, "--json"],
+          1,
+          `${jsonContext} — one check runs past the gate: the item ID is ` +
+            `judged only against session content, which the corruption ` +
+            `withholds, so the corruption is reported in the check's ` +
+            `place, exit 1, the findings-only report the entire stdout — ` +
+            `never the well-formed session's exit-2 unknown-item error ` +
+            `(SPEC 12.0, 10.1, 14.21, 12.7)`,
+        );
+        assertConditionCounts(
+          findings,
+          { "14.21": 1 },
+          `${jsonContext} — exactly one finding, carrying condition 21's ` +
+            `exact stable code \`corrupt-session\`: the corruption ` +
+            `reported in the item check's place, never an exit-2 ` +
+            `unknown-item error (SPEC 12.0, 10.1, 14, 14.21, 12.7)`,
+        );
+        const corruption = findings[0];
+        assertFindingConcernsPath(
+          corruption,
+          sessionRel,
+          `${jsonContext}: a session condition carries the session file it ` +
+            `concerns — the corrupt session's own path ${sessionRel} ` +
+            `(SPEC 14, 14.21, 12.7, 10.1)`,
+        );
+        assertSameJson(
+          corruption.locations,
+          [],
+          `${jsonContext}: a session condition has no in-source location ` +
+            `— locations [] (SPEC 14, 14.21, 12.7, 10.1)`,
         );
       },
     );
