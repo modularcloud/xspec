@@ -10,7 +10,12 @@
 //     assertion failure (H-8) naming its seed and how to replay it.
 //   * TEST-SPEC 16 shrinking — a forced failure is shrunk to the minimal
 //     counterexample (scalar and structured demos), deterministically (E-5:
-//     the identical failure is reported twice in a row).
+//     the identical failure is reported twice in a row). A failure that
+//     declines shrinking (a hang-guard kill, each re-observation costing a
+//     full guard) is reported as drawn when the drawn trial fails so, and
+//     ends the shrink as the reported counterexample when a shrink
+//     candidate does: re-observed at most once, its seed reported (H-10,
+//     S-3).
 //   * E-5 seed modes — the fixed default seed set (the CI mode) is used when
 //     nothing overrides it; XSPEC_PROPERTY_SEED=<uint32> replays exactly that
 //     seed; XSPEC_PROPERTY_SEED=random (the optional local mode) reports its
@@ -201,6 +206,68 @@ test("a failure that declines shrinking is reported as drawn, with its seed (P-1
 
   // The default is unchanged: a plain failure shrinks.
   expect(new HarnessAssertionError("plain").shrinkable).toBe(true);
+});
+
+test("a shrink candidate whose failure declines shrinking ends the shrink as the reported counterexample (P-8's and P-11's killed invocations)", async () => {
+  // The drawn failure (a value of 1000 or more) is shrinkable, but shrinking
+  // it toward 0 passes through 100–999, where the failure declines
+  // shrinking: a stand-in for an invocation the hang guard killed, each
+  // re-observation of which would cost a full guard (S-3).
+  const declining: number[] = [];
+  let lastGenerated: number | undefined;
+  let lastExecuted: number | undefined;
+  const thrown = await captureRejection(
+    checkProperty(
+      "demo: values from 100 up fail, those below 1000 unshrunk",
+      (choices) => {
+        const value = choices.intInclusive(0, 1_000_000);
+        lastGenerated = value;
+        return value;
+      },
+      (value) => {
+        lastExecuted = value;
+        if (value < 100) return;
+        if (value < 1000) {
+          declining.push(value);
+          fail(`stand-in hang-guard kill on ${String(value)}`, {
+            shrinkable: false,
+          });
+        }
+        fail(`generated value ${String(value)} is >= 1000`);
+      },
+      { runs: 50, seeds: [123456], env: {}, maxShrinkExecutions: 100 },
+    ),
+  );
+
+  // A diagnosed falsification naming its seed (H-8, H-10) …
+  expect(thrown).toBeInstanceOf(PropertyFalsifiedError);
+  expect(thrown).toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as PropertyFalsifiedError;
+  expect(error.seed).toBe(123456);
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=123456`);
+
+  // … whose drawn failure was shrinkable, and was shrunk …
+  expect(error.initialValue).toBeGreaterThanOrEqual(1000);
+  expect(error.shrinkDeclined).toBe(false);
+  expect(error.shrinkSteps).toBeGreaterThan(0);
+
+  // … until the first candidate whose failure declines shrinking: accepted
+  // as the counterexample, it ended the shrink — the only execution in
+  // 100–999, and the last execution and the last replay of all.
+  expect(declining).toHaveLength(1);
+  expect(error.value).toBe(declining[0]);
+  expect(lastExecuted).toBe(declining[0]);
+  expect(lastGenerated).toBe(declining[0]);
+  expect(error.assertionMessage).toBe(
+    `stand-in hang-guard kill on ${String(declining[0])}`,
+  );
+  expect(error.shrinkStopped).toBe(true);
+
+  // The report says shrinking stopped there, never claiming minimality.
+  expect(error.message).toContain(`counterexample: ${String(declining[0])}`);
+  expect(error.message).toContain(`shrunk from: ${String(error.initialValue)}`);
+  expect(error.message).toContain("shrinking stopped at this counterexample");
+  expect(error.message).not.toContain("already minimal");
 });
 
 test("structured counterexamples shrink, deterministically across runs (TEST-SPEC 16, E-5)", async () => {

@@ -51,12 +51,18 @@
 // S-7 sweep's outcome taxonomy (H-8).
 //
 // A failure may decline shrinking (`fail(message, { shrinkable: false })`,
-// helpers/assertions.ts): its drawn counterexample is reported as is, with
-// its seed. The shrink budget is counted in property executions, so it
-// bounds wall clock only while an execution is cheap; a failure whose every
-// re-observation costs a full hang guard — an invocation the subprocess
-// driver killed (P-11's termination clause) — would otherwise turn a bounded
-// shrink into hours, past the body's own hang guard.
+// helpers/assertions.ts). A drawn trial's declining failure is reported as
+// drawn, with its seed: no shrink runs. A shrink candidate's declining
+// failure — met while shrinking another, shrinkable failure — is accepted
+// like any other (a genuine falsification on a strictly smaller tape) and
+// ends the shrink at once as the reported counterexample, the report saying
+// so: no further candidate is replayed or executed. So a shrink re-observes
+// such a failure at most once. The shrink budget is counted in property
+// executions, so it bounds wall clock only while an execution is cheap; a
+// failure whose every re-observation costs a full hang guard — an
+// invocation the subprocess driver killed (P-8's and P-11's termination
+// clauses) — would otherwise turn a bounded shrink into hours, past the
+// body's own hang guard.
 //
 // S-9's per-draw check (TEST-SPEC 16 preamble, 17 S-9): a property whose
 // generator composes sources names the files a draw stages through
@@ -303,8 +309,19 @@ export class PropertyFalsifiedError extends HarnessAssertionError {
   readonly shrinkSteps: number;
   /** Property executions spent shrinking. */
   readonly shrinkExecutions: number;
-  /** True when the failure declined shrinking (`HarnessAssertionError.shrinkable`). */
+  /**
+   * True when the drawn trial's failure declined shrinking
+   * (`HarnessAssertionError.shrinkable`): no shrink ran, and the
+   * counterexample is the drawn value.
+   */
   readonly shrinkDeclined: boolean;
+  /**
+   * True when shrinking stopped at the reported counterexample because its
+   * failure — an accepted shrink candidate's — declines shrinking
+   * (`HarnessAssertionError.shrinkable`): no further candidate was replayed
+   * or executed (see the module header).
+   */
+  readonly shrinkStopped: boolean;
 
   constructor(details: {
     readonly propertyName: string;
@@ -319,12 +336,16 @@ export class PropertyFalsifiedError extends HarnessAssertionError {
     readonly shrinkSteps: number;
     readonly shrinkExecutions: number;
     readonly shrinkDeclined: boolean;
+    readonly shrinkStopped: boolean;
   }) {
+    const shrinkTally = `${String(details.shrinkSteps)} accepted shrink steps, ${String(details.shrinkExecutions)} property executions`;
     const shrinkNote = details.shrinkDeclined
       ? "\n  (reported as drawn: this failure declines shrinking — each re-observation would cost a full hang guard)"
-      : details.shrinkSteps > 0
-        ? `\n  shrunk from: ${details.renderedInitialValue}\n  (${String(details.shrinkSteps)} accepted shrink steps, ${String(details.shrinkExecutions)} property executions)`
-        : "\n  (already minimal: no shrink candidate was accepted)";
+      : details.shrinkStopped
+        ? `\n  shrunk from: ${details.renderedInitialValue}\n  (${shrinkTally}; shrinking stopped at this counterexample because its failure declines shrinking: each re-observation would cost a full hang guard)`
+        : details.shrinkSteps > 0
+          ? `\n  shrunk from: ${details.renderedInitialValue}\n  (${shrinkTally})`
+          : "\n  (already minimal: no shrink candidate was accepted)";
     super(
       `property ${JSON.stringify(details.propertyName)}: falsified with seed ${String(details.seed)} ` +
         `(trial ${String(details.trial)} of ${String(details.runs)})\n` +
@@ -342,6 +363,7 @@ export class PropertyFalsifiedError extends HarnessAssertionError {
     this.shrinkSteps = details.shrinkSteps;
     this.shrinkExecutions = details.shrinkExecutions;
     this.shrinkDeclined = details.shrinkDeclined;
+    this.shrinkStopped = details.shrinkStopped;
   }
 }
 
@@ -505,7 +527,12 @@ export async function checkProperty<T>(
                 drawSources: options.drawSources,
               },
             )
-          : { final: { trial: generated, error }, steps: 0, executions: 0 };
+          : {
+              final: { trial: generated, error },
+              steps: 0,
+              executions: 0,
+              stoppedAtDeclined: false,
+            };
         throw new PropertyFalsifiedError({
           propertyName: name,
           seed,
@@ -519,6 +546,7 @@ export async function checkProperty<T>(
           shrinkSteps: shrunk.steps,
           shrinkExecutions: shrunk.executions,
           shrinkDeclined: !error.shrinkable,
+          shrinkStopped: shrunk.stoppedAtDeclined,
         });
       }
     }
@@ -791,14 +819,26 @@ interface ShrinkResult<T> {
   readonly final: Falsification<T>;
   readonly steps: number;
   readonly executions: number;
+  /**
+   * True when the shrink ended at `final` because that accepted candidate's
+   * failure declines shrinking (`HarnessAssertionError.shrinkable` false):
+   * no further candidate was replayed or executed.
+   */
+  readonly stoppedAtDeclined: boolean;
 }
 
 /**
  * Shrink a falsification: sweep block deletion, block zeroing, and per-entry
  * binary-search minimization over the tape until a full sweep accepts
- * nothing or the budget runs out. A candidate is accepted iff it replays to
- * a strictly shortlex-smaller tape (termination) and the property rejects
- * its value with a `HarnessAssertionError` again. A candidate the generator
+ * nothing, the budget runs out, or an accepted candidate's failure declines
+ * shrinking. A candidate is accepted iff it replays to a strictly
+ * shortlex-smaller tape (termination) and the property rejects its value
+ * with a `HarnessAssertionError` again — one that declines shrinking
+ * (`shrinkable` false: P-8's and P-11's hang-guard kills) included, since
+ * it is a genuine falsification on a strictly smaller tape. Such a
+ * candidate ends the shrink at once (`stoppedAtDeclined`): re-observing it,
+ * or anything after it, could cost a full hang guard per candidate, so no
+ * further candidate is replayed or executed. A candidate the generator
  * cannot replay (its tape runs out, or an entry exceeds its draw's bound) is
  * discarded; anything else the generator throws on a candidate, an S-9
  * refusal of a candidate's staged sources, and anything but a
@@ -822,13 +862,20 @@ async function shrinkFalsification<T>(
   let steps = 0;
   let executions = 0;
   let replays = 0;
+  let stoppedAtDeclined = false;
 
-  const exhausted = (): boolean =>
-    executions >= maxExecutions || replays >= REPLAY_LIMIT;
+  // The shrink is over once its budget runs out or once it has accepted a
+  // candidate whose failure declines shrinking; every sweep below checks
+  // this, and `attempt` replays nothing after it.
+  const ended = (): boolean =>
+    stoppedAtDeclined || executions >= maxExecutions || replays >= REPLAY_LIMIT;
 
-  /** Try one candidate tape; true iff accepted (current updated). */
+  /**
+   * Try one candidate tape; true iff accepted (current updated). Once the
+   * shrink has ended, no candidate is replayed or executed.
+   */
   const attempt = async (candidate: readonly number[]): Promise<boolean> => {
-    if (exhausted()) return false;
+    if (ended()) return false;
     replays += 1;
     // A candidate tape the generator cannot replay (it runs out, or an entry
     // exceeds its draw's bound) is discarded: `replayTrial` turns that
@@ -889,14 +936,19 @@ async function shrinkFalsification<T>(
           renderedInput: renderValue(replayed.value, context.render),
         });
       }
+      // Accepted: a strictly smaller falsification. One that declines
+      // shrinking (a hang-guard kill) is accepted too — it is genuine — but
+      // ends the shrink here: each further candidate could cost another full
+      // hang guard, so it is the reported counterexample.
       current = { trial: replayed, error };
       steps += 1;
+      if (!error.shrinkable) stoppedAtDeclined = true;
       return true;
     }
   };
 
   let improved = true;
-  while (improved && !exhausted()) {
+  while (improved && !ended()) {
     improved = false;
 
     // Pass 1: delete blocks (largest first), scanning from the tail.
@@ -909,7 +961,7 @@ async function shrinkFalsification<T>(
         const tape = current.trial.tape;
         const candidate = [...tape.slice(0, i), ...tape.slice(i + block)];
         if (await attempt(candidate)) improved = true;
-        if (exhausted()) break;
+        if (ended()) break;
       }
     }
 
@@ -925,14 +977,14 @@ async function shrinkFalsification<T>(
         const candidate = [...tape];
         candidate.fill(0, i, i + block);
         if (await attempt(candidate)) improved = true;
-        if (exhausted()) break;
+        if (ended()) break;
       }
     }
 
     // Pass 3: binary-search each entry toward 0. Acceptance rewrites the
     // current tape (possibly shorter via replay trimming), so bounds re-read
     // it every step.
-    for (let i = 0; i < current.trial.tape.length && !exhausted(); i += 1) {
+    for (let i = 0; i < current.trial.tape.length && !ended(); i += 1) {
       const tryEntry = async (value: number): Promise<boolean> => {
         const tape = current.trial.tape;
         if (i >= tape.length || value >= tape[i]) return false;
@@ -949,7 +1001,7 @@ async function shrinkFalsification<T>(
       while (
         i < current.trial.tape.length &&
         current.trial.tape[i] - low > 1 &&
-        !exhausted()
+        !ended()
       ) {
         const mid = low + Math.floor((current.trial.tape[i] - low) / 2);
         if (await tryEntry(mid)) {
@@ -961,7 +1013,7 @@ async function shrinkFalsification<T>(
     }
   }
 
-  return { final: current, steps, executions };
+  return { final: current, steps, executions, stoppedAtDeclined };
 }
 
 /** Strict shortlex order: shorter first, then lexicographic. */

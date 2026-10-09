@@ -15,7 +15,8 @@
 //     dimensioned to the staged answer scale, `view --text` over the
 //     largest draw included (H-11; `FUZZ_COMMAND_TIMEOUT_MS`), and its kill
 //     is reported unshrunk, as P-11's is, since every shrink candidate that
-//     re-observes it costs a full guard. A run killed by the driver's
+//     re-observes it costs a full guard (a shrink candidate's kill ends the
+//     shrink as the reported counterexample). A run killed by the driver's
 //     output-capture cap is never converted: an exhausted capture limit is
 //     a loud harness error, which `checkProperty` reports with the seed —
 //     never a falsified property, since a truncated capture is
@@ -1588,10 +1589,13 @@ export async function runFuzzCommand(
     // P-11's is: a shrink candidate can re-observe it only by waiting out
     // the guard again — one full guard per candidate — so shrinking's
     // execution budget would stop bounding the body's wall clock (the
-    // entry's `timeoutMs`). The drawn trial — at most three mutations and,
-    // after the staging build, 19 invocations: the fixed `build --json` and
-    // six drawn forms, a review composite three at most — is the reported
-    // counterexample, and its seed replays it (H-10).
+    // entry's `timeoutMs`). A drawn trial's kill reports the drawn trial —
+    // at most three mutations and, after the staging build, 19 invocations:
+    // the fixed `build --json` and six drawn forms, a review composite three
+    // at most — as the counterexample; a shrink candidate's kill (met while
+    // shrinking another failure) ends the shrink as the reported
+    // counterexample (helpers/property.ts). So a diagnosis waits out at most
+    // one guard, and its seed replays it (H-10).
     if (error instanceof ProductRunTimeoutError) {
       fail(
         `P-8: every command must terminate on fuzzed input (TEST-SPEC §16 P-8; ` +
@@ -1801,8 +1805,10 @@ const P_8 = defineProductTest({
   // per-invocation guard (`FUZZ_COMMAND_TIMEOUT_MS`, 60 s), unshrunk —
   // ~185 s in all — and a falsification at most the 100 shrink executions,
   // each a trial at most as large as the falsified one (~340 s at the mean
-  // trial) — ~465 s in all. This budget leaves CI runners 3× headroom over
-  // the hang's diagnosis and keeps the shrink budget inside it.
+  // trial), plus at most one 60 s guard, since a shrink candidate the guard
+  // kills ends the shrink (helpers/property.ts) — ~525 s in all. This
+  // budget leaves CI runners 3× headroom over the hang's diagnosis and
+  // keeps the shrink budget inside it.
   timeoutMs: 600_000,
   run: async (product) => {
     await checkProperty(

@@ -16,9 +16,10 @@
 //     the timeout is dimensioned to the staged answer scale (H-11;
 //     `FUZZ_COMMAND_TIMEOUT_MS` below), and a killed invocation is reported
 //     unshrunk, since every shrink candidate re-observing a kill would cost
-//     the full guard. A run killed by the driver's output-capture cap is
-//     never converted: an exhausted capture limit is a loud harness error,
-//     which `checkProperty` reports with the seed — never a falsified
+//     the full guard (a shrink candidate's kill ends the shrink as the
+//     reported counterexample). A run killed by the driver's output-capture
+//     cap is never converted: an exhausted capture limit is a loud harness
+//     error, which `checkProperty` reports with the seed — never a falsified
 //     property, since a truncated capture is indistinguishable from a
 //     partial document (H-11; S-8 dimensions the cap to the staged answer
 //     scale and pins this division);
@@ -467,8 +468,11 @@ export async function runAvailabilityCommand(
     // shrink candidate can re-observe it only by waiting out the guard
     // again — one full guard per candidate — so shrinking's execution
     // budget would stop bounding the body's wall clock (the entry's
-    // `timeoutMs` below). The drawn trial, at most three mutations and four
-    // invocations, is the reported counterexample, and its seed replays it
+    // `timeoutMs` below). A drawn trial's kill reports the drawn trial, at
+    // most three mutations and four invocations, as the counterexample; a
+    // shrink candidate's kill (met while shrinking another failure) ends the
+    // shrink as the reported counterexample (helpers/property.ts). So a
+    // diagnosis waits out at most one guard, and its seed replays it
     // (H-10).
     if (error instanceof ProductRunTimeoutError) {
       fail(
@@ -690,8 +694,9 @@ const P_11 = defineProductTest({
   // slow-but-terminating product then fails as one hang-guard kill on top,
   // unshrunk (≈ 10.5 min in all), and 20 min doubles that for CI runners:
   // the failure is the guard's diagnosis of one invocation, never this body
-  // timeout. Shrinking any other failure class costs answer time, not guard
-  // time (≤ 100 executions at ≤ 17 s per maximal-scale text arm). The
+  // timeout. Shrinking any other failure class costs answer time plus at
+  // most one 120 s guard, since a hanging shrink candidate ends the shrink
+  // (≤ 100 executions at ≤ 17 s per maximal-scale text arm). The
   // adversarial bound — every invocation just under the guard — is ≈ 4.8 h,
   // past the 45-minute CI job ceiling governing the whole suite; no body
   // budget can cover it.
