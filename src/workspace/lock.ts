@@ -315,8 +315,10 @@ export async function acquireMutationLock(
       continue;
     }
     if (!(await writeLockEntry(handle, entry))) {
-      // The claim is made but its entry cannot be recorded: withdraw it.
-      await removeQuietly(lockPath);
+      // The claim is made but its entry cannot be recorded. The entry-less
+      // file is left as it is — removing it by path could remove a rival's
+      // fresh lock — and is judged a crash remnant after the grace, then
+      // taken over (by the next attempt here, or by a later command).
       refusal = UNUSABLE_MESSAGE;
       await delay(UNREADABLE_GRACE_MS);
       continue;
