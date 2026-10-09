@@ -1245,22 +1245,31 @@ interface FileComposition {
   positionOf(offset: number): number | null;
 }
 
-/** Map an original-byte offset through edits; null inside one's range. */
-function composedPosition(
-  offset: number,
+/**
+ * Map original-byte offsets through edits; null inside one's range. Each
+ * edit's byte delta is computed once, however many offsets are mapped (a
+ * placement maps every candidate offset of the file).
+ */
+function composedPositions(
   edits: readonly SourceEdit[],
-): number | null {
-  let delta = 0;
-  for (const edit of edits) {
-    if (edit.range.end <= offset) {
-      delta +=
-        encoder.encode(edit.replacement).length -
-        (edit.range.end - edit.range.start);
-    } else if (edit.range.start < offset) {
-      return null;
+): (offset: number) => number | null {
+  const deltas = edits.map(
+    (edit) =>
+      encoder.encode(edit.replacement).length -
+      (edit.range.end - edit.range.start),
+  );
+  return (offset) => {
+    let delta = 0;
+    for (let index = 0; index < edits.length; index += 1) {
+      const edit = edits[index]!;
+      if (edit.range.end <= offset) {
+        delta += deltas[index]!;
+      } else if (edit.range.start < offset) {
+        return null;
+      }
     }
-  }
-  return offset + delta;
+    return offset + delta;
+  };
 }
 
 /** The composition of a file receiving no moved text. */
@@ -1270,7 +1279,7 @@ function editsComposition(
 ): FileComposition {
   return {
     content: applyEdits(bytes, edits),
-    positionOf: (offset) => composedPosition(offset, edits),
+    positionOf: composedPositions(edits),
   };
 }
 
@@ -1286,10 +1295,11 @@ function insertionComposition(
 ): FileComposition {
   const content = assembleWithInsertion(bytes, edits, insertion);
   const inserted = content.length - applyEdits(bytes, edits).length;
+  const composedPosition = composedPositions(edits);
   return {
     content,
     positionOf: (offset) => {
-      const position = composedPosition(offset, edits);
+      const position = composedPosition(offset);
       if (position === null) {
         return null;
       }
@@ -2451,7 +2461,8 @@ function composeMoveSection(
   // spelling the operation roots at an added binding was rooted at before
   // — a chain's root import, a callee's `text` import — for each of which
   // the added declaration's offset must be timely (SPEC 6.5 "Added
-  // imports": its bindings timely for every spelling rooted at them).
+  // imports": its bindings timely for every spelling rooted at them) —
+  // each declaration recorded once, however many spellings it served.
   const codeAddedFormerDeclarations = new Map<string, ByteRange[]>();
   const addFormerDeclaration = (path: string, range: ByteRange): void => {
     let ranges = codeAddedFormerDeclarations.get(path);
@@ -2459,7 +2470,14 @@ function composeMoveSection(
       ranges = [];
       codeAddedFormerDeclarations.set(path, ranges);
     }
-    ranges.push(range);
+    if (
+      !ranges.some(
+        (recorded) =>
+          recorded.start === range.start && recorded.end === range.end,
+      )
+    ) {
+      ranges.push(range);
+    }
   };
   for (const analysis of code) {
     const usesBefore = analysis.imports.map(() => 0);
@@ -2489,6 +2507,24 @@ function composeMoveSection(
       }
       return layout;
     };
+    // Whether the binding a held declaration (`held`) gives is timely for a
+    // spelling rooted before the operation at one `former` gives — a
+    // relation between the two declarations alone, judged once per pair
+    // (each an index into the file's imports).
+    const timelyPairs = new Map<string, boolean>();
+    const heldTimely = (former: number, held: number): boolean => {
+      const key = `${former}:${held}`;
+      let timely = timelyPairs.get(key);
+      if (timely === undefined) {
+        timely = timelyAt(
+          statementLayout(),
+          analysis.imports[former]!.range,
+          analysis.imports[held]!.range.start,
+        );
+        timelyPairs.set(key, timely);
+      }
+      return timely;
+    };
     // The target module's value-level bindings the file already holds that
     // no local declaration shadows at the occurrence (SPEC 6.5 "Reference
     // spellings", 4.5) and that are timely for the spelling — declared at
@@ -2506,12 +2542,8 @@ function composeMoveSection(
       bindingsOf: (imported: CodeImport) => readonly CodeImportBinding[],
       former: number,
     ): { readonly importIndex: number; readonly name: string } | null => {
-      const formerDeclaration = analysis.imports[former]!.range;
       for (const [importIndex, imported] of analysis.imports.entries()) {
-        if (!holdsTarget(imported)) continue;
-        if (
-          !timelyAt(statementLayout(), formerDeclaration, imported.range.start)
-        ) {
+        if (!holdsTarget(imported) || !heldTimely(former, importIndex)) {
           continue;
         }
         const binding = bindingsOf(imported).find(
