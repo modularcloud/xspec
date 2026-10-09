@@ -2127,8 +2127,9 @@ class CodeAnalyzer {
   }
 
   /**
-   * One `text(...)` call (SPEC 4.3, 4.5): exactly one argument, a static
-   * property chain rooted at a spec module import binding; the string
+   * One `text(...)` call (SPEC 4.3, 4.5), an optional call or one with
+   * type arguments included: exactly one argument, a static property
+   * chain rooted at a spec module import binding; the string
    * form is MDX-only (4.3 → 14.8); a cross-module node is recorded with
    * its called module, resolution reporting 14.11 (4.4, graph.ts).
    * `calleeIdentifier` is the call's callee and `callee` the `text`
@@ -2144,24 +2145,13 @@ class CodeAnalyzer {
     callee: TextBinding,
   ): void {
     const calleeTarget = callee.target;
-    if (call.questionDotToken !== undefined) {
-      this.addFinding(
-        8,
-        call,
-        `invalid argument: an optional call is not a plain text(...) call ` +
-          `(SPEC 4.3, 2.4, 14.8)`,
-      );
-      return;
-    }
-    if (call.typeArguments !== undefined) {
-      this.addFinding(
-        8,
-        call,
-        `invalid argument: a text(...) call does not take type arguments ` +
-          `(SPEC 4.3, 2.4, 14.8)`,
-      );
-      return;
-    }
+    // SPEC 4.5, 14.8: an optional call (`text?.(A.a)`) and type arguments
+    // (`text<X>(A.a)`) leave the callee a spec module's `text` export and
+    // the call its sanctioned use — 14.8 judges the argument and the
+    // arity alone, type arguments are type-level (4.5), and 2.3's
+    // optional-call exclusion is the MDX embedding's — so either call
+    // takes the judgement below and records its edge and occurrence,
+    // callee through closing parenthesis (4.3, 5.7).
     if (call.arguments.length !== 1) {
       // SPEC 2.4: a text(...) call MUST have exactly one argument.
       this.addFinding(

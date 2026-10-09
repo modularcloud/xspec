@@ -2,7 +2,7 @@
 
 Source: the compliance determination that opened this Phase 10 loop at `b3cc3e3` (branch `claude/xspec-ui-apis-4df8fa`, PR #7; governing IP `specs/patches/0001-external-ui-apis.md`, Stage: Tested — no task here changes the Stage; bundle `specs/SPEC.md`, `specs/TEST-SPEC.md`, `specs/CERTIFICATIONS.md`, `specs/IMPLEMENTATION.md`). The documents changed after the product was last brought green (CI recorded at `9d095d9`): `git diff 9d095d9..f31e100 -- specs/SPEC.md`, `git diff 3311ccd..6780f53 -- specs/TEST-SPEC.md`, `git diff 3311ccd..301f2f9 -- specs/CERTIFICATIONS.md`; Phase 9 brought the harness into line, its last determination clean at `3fe91f5`. Reviewer A (SPEC 1–6) returned 10 gaps, reviewer B (7–11) 6, reviewer C (12–15) 14. VERIFY was red on 31 product tests, the same set locally and in CI run 1003's `suite-linux` job at `b3cc3e3` (every failure a `HarnessAssertionError`); `harness-self` (28 files, 4315 tests) and `suite-windows` were green, and certification had 0 discrepancies (154 PASS / 38 FAIL — the FAILs being violators' expected outcomes — / 0 error / 0 hang). The product's last change is `8a0da01`; `dist/` matches `src/`. Findings are cited as A<n>, B<n>, C<n> (reviewer, gap number); where reviewers reported the same gap, it is one task. Reviewer B also noted, uncounted and outside its scope, a wrong correction text on a refused source read; that is Task 21.
 
-Goal: every test passes — `npm test` locally, and CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head (PR #7 is conflicted, so CI runs on branch pushes) — and the product meets SPEC.md. Tasks 18–23, and Tasks 25–28 found since, fix SPEC departures that no test pins; they are in scope all the same (Tasks 18 and 19 have landed).
+Goal: every test passes — `npm test` locally, and CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head (PR #7 is conflicted, so CI runs on branch pushes) — and the product meets SPEC.md. Tasks 18–23, and Tasks 25–28 found since, fix SPEC departures that no test pins; they are in scope all the same (Tasks 18, 19, and 20 have landed).
 
 Not planned: nothing. Every counted gap and B's uncounted note has a task. The two standing rulings below close their families for this run.
 
@@ -29,7 +29,7 @@ Not planned: nothing. Every counted gap and B's uncounted note has a task. The t
 
 ## Index — each failing test and the tasks it waits on
 
-These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed then (local run and CI run 1003 alike). Each registry module is `test/suite/registry/<module>.ts`, and its suite file is `test/suite/<module>.test.ts`. Tasks 18 (landed), 19 (landed), 20–23, and 25–28 have no failing test.
+These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed then (local run and CI run 1003 alike). Each registry module is `test/suite/registry/<module>.ts`, and its suite file is `test/suite/<module>.test.ts`. Tasks 18 (landed), 19 (landed), 20 (landed), 21–23, and 25–28 have no failing test.
 
 | Test | Module | Tasks | First failure at `b3cc3e3` |
 |---|---|---|---|
@@ -64,20 +64,6 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 arms, reached only past that twin, hand-checked at Task 8 against T6.5-21's own expectations; passes since Task 10 landed |
 | T14-11 | section-14 | 9 (landed) | arm (x): 14.15 reported once, expected five times; passes since Task 9 landed |
 | T14-12 | section-14-iii | 14 (landed) | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16; passes since Task 14 landed |
-
-## Task 20 — In TypeScript, `text?.(A.a)` and `text<X>(A.a)` are sanctioned `text` calls (SPEC 4.5, 4.3, 14.8, 5.7, 2.3; A4)
-
-**Requirement.** SPEC 4.5 sanctions a node "as the sole argument of a call whose callee is a spec module's `text` export", and a `text` binding "as such a callee". None of 14.8's cases applies to an optional call or to type arguments on a call whose one argument is static: 14.8 covers a non-static reference, a call without exactly one argument, and a string-form argument in a TypeScript file. 2.3's optional-call exclusion concerns MDX embeddings alone (the MDX `{text?.("a")}` stays 14.16), and type arguments are type-level (4.5). So each call records its `embeds` edge and its occurrence (4.3, 5.7; the occurrence spans callee through closing parenthesis) and reports nothing.
-
-**Observed.** Both calls are reported as 14.8 ("an optional call is not a plain text(...) call"; "a text(...) call does not take type arguments"). This gap was also open at the `9d095d9` determination.
-
-**Location.** `analyzeTextCall` in `src/core/code-analysis.ts` (~1852–1876).
-
-**Change.** Drop those two 14.8 branches, so such calls take the ordinary `text` call judgement: arity, string form, static argument, cross-module call. Check that a section move carrying such a call's target into another file still rewrites the call whole over its occurrence span, as 6.5 composes a rewritten call, and that the preview's `reference-rewrite` spans it. If this reading turns out to collide with a test, stop and record it as the rules above say.
-
-**Verification.**
-- No suite test pins it. By hand: both forms (`query edges`, `occurrences`), the cross-module variant (14.11), and the MDX control.
-- Regressions: `section-4.3-4.4.test.ts`, `section-4.5.test.ts`, `section-5.7.test.ts`, `section-6.5-ii.test.ts` (T6.5-11), `section-2.2-2.3.test.ts`.
 
 ## Task 21 — A discovered source whose content the environment refuses is reported with a fitting correction (SPEC 14, 14.25, 14.20; B's uncounted note)
 
