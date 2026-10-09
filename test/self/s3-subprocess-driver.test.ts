@@ -48,7 +48,10 @@ import * as path from "node:path";
 import { expect, onTestFinished, test, vi } from "vitest";
 import type * as AddedImportCheckModule from "../helpers/added-import-identifiers.js";
 import { judgeAddedImportsOfFile } from "../helpers/added-import-identifiers.js";
-import { HarnessAssertionError } from "../helpers/assertions.js";
+import {
+  HarnessAssertionError,
+  parseJsonStdout,
+} from "../helpers/assertions.js";
 import type * as CaptureWalkModule from "../helpers/capture-walk.js";
 import type * as MdxDerivabilityModule from "../helpers/mdx-derivability.js";
 import {
@@ -1127,16 +1130,6 @@ test("the driver walks the captured stdout of every invocation with JSON output 
     }),
   );
   expectWalkDiagnosis(errorDocument, "$.error.path", "nosuch --json");
-  // A document led by a byte-order mark is still the one document
-  // `parseJsonStdout` reads it as, and is walked as such.
-  const bomLed = await rejectionOf(
-    runProduct(binding, {
-      cwd: workspace.root,
-      argv: ["ids", "--json"],
-      env: emitting(`${String.fromCodePoint(0xfeff)}${NEAR_MARKER_DOCUMENT}`),
-    }),
-  );
-  expectWalkDiagnosis(bomLed, "$.nodes[0].tags", "ids --json");
   // The background path: every waitForExit settles with the one rejection.
   const running = await startProduct(binding, {
     cwd: workspace.root,
@@ -1226,8 +1219,9 @@ test("the driver leaves untouched a run without JSON output in effect, and a cap
     expect(result.stdout).toBe(EXACT_MARKER_DOCUMENT);
   }
   // JSON output in effect, but no one JSON document to walk — empty,
-  // not JSON, two documents, invalid UTF-8: the run resolves, its form
-  // left to the run's own assertions (H-5).
+  // not JSON, two documents, invalid UTF-8, a document led by a UTF-8
+  // byte-order mark: the run resolves, its form left to the run's own
+  // assertions (H-5).
   for (const stdout of [
     "",
     "not json\n",
@@ -1244,6 +1238,26 @@ test("the driver leaves untouched a run without JSON output in effect, and a cap
     XSPEC_S3_STDOUT_HEX: invalidBytes.toString("hex"),
   });
   expect(hex(invalid.stdoutBytes)).toBe(hex(invalidBytes));
+  // The byte-order mark — U+FEFF, the bytes EF BB BF — is no part of a JSON
+  // text (SPEC 12.0: the single JSON document is the entire standard
+  // output), so the near-marker document it leads is never walked, though
+  // the document after it would draw the walk's diagnosis; and
+  // `parseJsonStdout` reads the same stdout as no one JSON document, a
+  // diagnosed failure naming the mark, so the driver's reading and the
+  // parse's stay one.
+  const bomLedBytes = Buffer.concat([
+    Buffer.from([0xef, 0xbb, 0xbf]),
+    Buffer.from(NEAR_MARKER_DOCUMENT, "utf8"),
+  ]);
+  const bomLed = await resolves(["ids", "--json"], {
+    XSPEC_S3_STDOUT_HEX: bomLedBytes.toString("hex"),
+  });
+  expect(bomLed.exitCode).toBe(0);
+  expect(hex(bomLed.stdoutBytes)).toBe(hex(bomLedBytes));
+  expect(() => parseJsonStdout(bomLed)).toThrow(HarnessAssertionError);
+  expect(() => parseJsonStdout(bomLed)).toThrow(
+    "begins with a UTF-8 byte-order mark (U+FEFF, the bytes EF BB BF)",
+  );
 });
 
 /** The armed fault: what the walk throws for a run, if anything. */

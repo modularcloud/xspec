@@ -163,19 +163,27 @@ export function assertStderrEmpty(result: RunResult, context?: string): void {
  * Assert stdout is exactly one JSON document — the entire standard output
  * parses as a single document (surrounding insignificant whitespace included;
  * a trailing newline after the document is still one document) — and return
- * it parsed. Empty stdout, invalid UTF-8, concatenated documents, and any
- * non-JSON contamination fail diagnosed (H-5; SPEC.md 12.0). Every parsed
- * document then passes the 12.7 unavailability-marker walk
- * (`assertUnavailabilityMarkerForms`, adapters/forms.ts; T12.7-1): an object
- * of any form other than `{"unavailable": true}` carrying a member named
- * `unavailable` fails diagnosed, the message naming its JSON path, the
+ * it parsed. Empty stdout, invalid UTF-8, a leading UTF-8 byte-order mark,
+ * concatenated documents, and any non-JSON contamination fail diagnosed
+ * (H-5; SPEC.md 12.0: the single JSON document is the entire standard
+ * output). The byte-order mark — U+FEFF, the bytes EF BB BF — is no part of
+ * a JSON text, whose whitespace is U+0009, U+000A, U+000D, and U+0020
+ * alone, so the decode keeps it rather than dropping it as a decoder's
+ * signature (H-4: these helpers normalize nothing), and a stdout it leads
+ * is not exactly one JSON document; a U+FEFF anywhere else fails the parse
+ * as such. Every parsed document then passes the 12.7 unavailability-marker
+ * walk (`assertUnavailabilityMarkerForms`, adapters/forms.ts; T12.7-1): an
+ * object of any form other than `{"unavailable": true}` carrying a member
+ * named `unavailable` fails diagnosed, the message naming its JSON path, the
  * caller's context, and the command line.
  */
 export function parseJsonStdout(result: RunResult, context?: string): unknown {
   const prefix = context === undefined ? "" : `${context}: `;
   let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(result.stdoutBytes);
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      result.stdoutBytes,
+    );
   } catch {
     return fail(
       `${prefix}stdout of ${result.commandLine} is not valid UTF-8, so it is not one JSON document (H-5): ${renderStream(result.stdoutBytes)}`,
@@ -184,6 +192,11 @@ export function parseJsonStdout(result: RunResult, context?: string): unknown {
   if (result.stdoutBytes.length === 0) {
     return fail(
       `${prefix}expected exactly one JSON document as the entire stdout of ${result.commandLine}, but stdout is empty — ${summarizeResult(result)}`,
+    );
+  }
+  if (startsWithUtf8ByteOrderMark(result.stdoutBytes)) {
+    return fail(
+      `${prefix}stdout of ${result.commandLine} begins with a UTF-8 byte-order mark (U+FEFF, the bytes EF BB BF), which is no part of a JSON text (JSON's whitespace is U+0009, U+000A, U+000D, and U+0020 alone), so it is not exactly one JSON document (H-5; SPEC.md 12.0: the single JSON document is the entire standard output): ${renderStream(result.stdoutBytes)}`,
     );
   }
   let doc: unknown;
@@ -340,6 +353,16 @@ function renderWindow(bytes: Uint8Array, offset: number): string {
     Buffer.from(bytes.subarray(start, end)).toString("utf8"),
   );
   return `${parts.join(" ")} ${printable}`;
+}
+
+/** Whether `bytes` begin with EF BB BF, the UTF-8 encoding of U+FEFF. */
+function startsWithUtf8ByteOrderMark(bytes: Uint8Array): boolean {
+  return (
+    bytes.length >= 3 &&
+    bytes[0] === 0xef &&
+    bytes[1] === 0xbb &&
+    bytes[2] === 0xbf
+  );
 }
 
 const STREAM_EXCERPT_LIMIT = 512;

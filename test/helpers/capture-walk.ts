@@ -16,21 +16,26 @@ import type { RunResult } from "./subprocess.js";
 
 /**
  * When `result`'s stdout is one JSON document as `parseJsonStdout`
- * (helpers/assertions.ts) reads one — valid UTF-8, a leading byte-order
- * mark dropped as its decoder drops it, the whole text parsing as exactly
- * one JSON value — run the 12.7 unavailability-marker walk over it
- * (`assertUnavailabilityMarkerForms`, adapters/forms.ts): a near-marker, an
- * object of any form other than `{"unavailable": true}` carrying a member
- * named `unavailable`, throws the walk's diagnosed failure
- * (`HarnessAssertionError`), naming its JSON path and the command line.
- * Any other stdout — empty, not valid UTF-8, not exactly one JSON document
- * — holds no document to walk and passes untouched: the run's own
- * assertions judge its form (H-5). Anything else thrown is a defect in the
- * harness (H-11), which the driver reports as `HarnessEvaluationError`.
+ * (helpers/assertions.ts) reads one — valid UTF-8, decoded dropping
+ * nothing, the whole text parsing as exactly one JSON value — run the 12.7
+ * unavailability-marker walk over it (`assertUnavailabilityMarkerForms`,
+ * adapters/forms.ts): a near-marker, an object of any form other than
+ * `{"unavailable": true}` carrying a member named `unavailable`, throws the
+ * walk's diagnosed failure (`HarnessAssertionError`), naming its JSON path
+ * and the command line. Any other stdout — empty, not valid UTF-8, led by a
+ * UTF-8 byte-order mark (U+FEFF, the bytes EF BB BF: no part of a JSON
+ * text, so the parse meets it and throws), not exactly one JSON document —
+ * holds no document to walk and passes untouched: the run's own assertions
+ * judge its form (H-5). Anything else thrown is a defect in the harness
+ * (H-11), which the driver reports as `HarnessEvaluationError`.
  */
 export function walkCapturedJsonDocument(result: RunResult): void {
   if (!isUtf8(result.stdoutBytes)) return;
-  const text = new TextDecoder("utf-8").decode(result.stdoutBytes);
+  // `ignoreBOM: true` keeps a leading U+FEFF in the text, as
+  // `parseJsonStdout`'s decode does, rather than dropping it.
+  const text = new TextDecoder("utf-8", { ignoreBOM: true }).decode(
+    result.stdoutBytes,
+  );
   let doc: unknown;
   try {
     doc = JSON.parse(text) as unknown;
