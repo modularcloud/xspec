@@ -34,7 +34,7 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | Test | Module | Tasks | First failure at `b3cc3e3` |
 |---|---|---|---|
 | P-1 | section-16-p1 | 1 (landed) | falsified, seed 271828183, trial 11 of 25 (a U+2028/U+2029 segment or tag accepted) |
-| P-5 | section-16-p5-p6 | 15 | falsified, seed 271828183, trial 1 of 8: added `import require from "./require.xspec"` |
+| P-5 | section-16-p5-p6 | 15 (landed) | falsified, seed 271828183, trial 1 of 8: added `import require from "./require.xspec"`; passes since Task 15 landed |
 | T1.4-1 | section-1.4 | 1 (landed) | a segment carrying U+2028: `build --json` exits 0, expected 1 |
 | T1.4-4 | section-1.4 | 1 (landed) | a tag carrying U+2028: `build --json` exits 0, expected 1 |
 | T4-2 | section-4 | 9 (landed) | an import type naming a `.xspec` module builds with exit 0; passes since Task 9 landed |
@@ -43,7 +43,7 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T6.5-11 | section-6.5-ii | 17 | arm (f): the rewritten call reads `tt(target.y)`, an untimely `text` binding |
 | T6.5-20 | section-6.5-iv | 7 (landed), 10 (landed; and 9 (landed) for (d)'s import-type and `declare module` stagings) | arm (a): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70 after modifying the workspace; since Task 7 landed, first fails at arm (d)'s first staging (Task 10): `move specs/Z.mdx specs/B.mdx` beside `src/c.ts` holding `import "../specs/B.md"` reports 14.15 once, expected `refused-invalid-destination` alone; passes since Task 10 landed |
 | T6.5-21 | section-6.5-iv | 8 (landed), 6 (landed; its two-reason arm) | arm (a): `move specs/A.mdx specs/sub/A.mdx` exits 0; passes since Task 8 landed |
-| T6.5-22 | section-6.5-iv | 15 | arm (b): 26 of 38 lures bound a barred name |
+| T6.5-22 | section-6.5-iv | 15 (landed) | arm (b): 26 of 38 lures bound a barred name; passes since Task 15 landed |
 | T6.5-23 | section-6.5-v | 16, 17 | 13 of 33 stagings place or root the added declaration wrongly |
 | T6.6-3 | section-6.6 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 twins, reached only past that arm, hand-checked at Task 8: each refused `--preview` reports the real move's findings, `mapping`, `files`, and `delta` `null`; passes since Task 10 landed |
 | T7-2 | section-7-basics | 11 (landed) | the `import defer { defineConfig }` arm builds with exit 0, expected 2; passes since Task 11 landed |
@@ -64,26 +64,6 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 arms, reached only past that twin, hand-checked at Task 8 against T6.5-21's own expectations; passes since Task 10 landed |
 | T14-11 | section-14 | 9 (landed) | arm (x): 14.15 reported once, expected five times; passes since Task 9 landed |
 | T14-12 | section-14-iii | 14 (landed) | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16; passes since Task 14 landed |
-
-## Task 15 — An added import's identifiers avoid every name SPEC 6.5 bars (SPEC 6.5 "Added imports", 12.0; A8)
-
-**Requirement.** SPEC 6.5 "Added imports" constrains each identifier an added import binds. Those not met today:
-- one that module code, strict throughout, admits as a binding: no ECMAScript reserved word (`default`, `enum`, `await`, and `yield` among them), and none of `let`, `static`, `implements`, `interface`, `package`, `private`, `protected`, `public`, `eval`, and `arguments` — most already barred;
-- none of `require` and `exports`, and none beginning with `__`;
-- none naming a global the compiler's emitted code may read: a property ECMAScript 2024, Annex B included, defines on the global object, `Iterator`, `AsyncIterator`, or `SuppressedError`. Clause 19's properties are `globalThis`, `Infinity`, `NaN`, `undefined`; `eval`, `isFinite`, `isNaN`, `parseFloat`, `parseInt`, `decodeURI`, `decodeURIComponent`, `encodeURI`, `encodeURIComponent`; the constructors `AggregateError`, `Array`, `ArrayBuffer`, `BigInt`, `BigInt64Array`, `BigUint64Array`, `Boolean`, `DataView`, `Date`, `Error`, `EvalError`, `FinalizationRegistry`, `Float32Array`, `Float64Array`, `Function`, `Int8Array`, `Int16Array`, `Int32Array`, `Map`, `Number`, `Object`, `Promise`, `Proxy`, `RangeError`, `ReferenceError`, `RegExp`, `Set`, `SharedArrayBuffer`, `String`, `Symbol`, `SyntaxError`, `TypeError`, `Uint8Array`, `Uint8ClampedArray`, `Uint16Array`, `Uint32Array`, `URIError`, `WeakMap`, `WeakRef`, `WeakSet`; and `Atomics`, `JSON`, `Math`, `Reflect`. Annex B (B.2.1) adds `escape` and `unescape`. Check this list against ECMAScript 2024 itself;
-- in a TSX source (a `.tsx` file name, 14.20): `React`, and the leading identifier of a factory that a `@jsx` or `@jsxFrag` pragma in any of the file's comments names — line or block comment, anywhere in the file — the pragma's name matched regardless of ASCII case (12.0's second exception). Examples: `h` from `/** @jsx h */`, `/* @JSX h */`, or `// @jsx h`; `preact` from `@jsx preact.h`; `Frag` from `@jsxFrag Frag`.
-
-The other constraints — bound by no declaration in any scope at value or type level, equal to no referenced name, distinct from the others added, and in a spec source none of `S`, `Spec`, `text` — already hold (T6.5-22's scope, type-level, and referenced-name lures pass).
-
-**Observed.** `freshBindingName` bars only reserved words, `eval`, `arguments`, `S`, `Spec`, and `text`. In spec and TypeScript receivers it binds `Object` (and any other global-object property), `escape`, `unescape`, `Iterator`, `AsyncIterator`, `SuppressedError`, `require`, `exports`, and `__x`; in TSX receivers it binds `React`, with or without JSX in the file, and pragma-named factories (`h`, `preact`, `Frag`, a pragma inside a function included). P-5 added `import require from "./require.xspec"`.
-
-**Location.** `freshBindingName`, `RESERVED_BINDING_NAMES`, and `COMPILER_PROVIDED_NAMES` in `src/core/move.ts` (~640–735), and the `taken` sets its callers build (~838, ~2297, ~2318).
-
-**Change.** Add one barred-name predicate — the fixed sets, the `__` prefix, and, for a `.tsx` receiver, `React` plus the pragma factory names gathered from all of the file's comments (TypeScript's scanner or comment ranges give them) — and apply it in `freshBindingName` for every receiving file. Keep the choice deterministic: the stem base, then numeric suffixes.
-
-**Verification.**
-- Should turn green: `section-6.5-iv.test.ts` T6.5-22, `section-16-p5-p6.test.ts` P-5.
-- Neighbours: `section-6.5.test.ts`, `section-6.5-ii.test.ts`, `section-6.5-iii.test.ts`, `section-6.5-v.test.ts`, `section-1.4.test.ts` (T1.4-5's added imports).
 
 ## Task 16 — Added-import placement in a TypeScript source: after the directive prologue, directly after a top-level statement's end with only 1.4 whitespace between (SPEC 6.5 "Added imports", 1.4; A9)
 
