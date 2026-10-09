@@ -22,12 +22,19 @@
 // - "Behaves as `ids`" and "byte-identical documents" are H-4's
 //   product-to-itself compare: the same exit code and byte-identical stdout
 //   for the two spellings on one fixture.
-// - "JSON out of effect, stdout not a JSON document" (`ids --file --json`)
-//   is asserted as: exit 0, stdout that does not parse as a JSON document
-//   (an empty human listing included — the human form is unpinned, H-3),
-//   and byte-identical to the human listing of a glob matching nothing —
-//   with the premise that a matching glob restricts the listing (12.3), so
-//   the pair is attributable to the glob `--json` being in effect.
+// - "Matching nothing, an empty listing, exit 0 — and JSON out of effect,
+//   stdout not a JSON document" (`ids --file --json`) is asserted as: exit
+//   0; stdout that does not parse as a JSON document (an empty human
+//   listing included — the human form is unpinned, H-3); and an empty
+//   listing, observed through its information (H-3), never its bytes: the
+//   human listing names no `specs/A.mdx`, where the unrestricted human
+//   listing names it (12.3: requirement IDs grouped by file), its wording
+//   free — it may name the glob it was given. A glob matching nothing
+//   (`no-such-dir/*.mdx`) yields the same omission, the premise that
+//   `--file` restricts the listing (12.3), so the empty listing is
+//   attributable to the glob `--json` being in effect. The two listings
+//   are never byte-compared: different globs are different input (12.0's
+//   determinism is for identical input; H-4).
 // - "Missing configuration, stdout empty (JSON out of effect, the diagnostic
 //   on stderr)" (`ids --config --json`): exit 2, empty stdout, non-empty
 //   stderr — wording unpinned (H-3). Its pair, `ids --json --config`,
@@ -52,6 +59,8 @@
 //   T11-4 pins in full.
 
 import {
+  assertReportMentions,
+  assertReportOmits,
   decodeItemReport,
   decodeNextReport,
 } from "../../helpers/adapters/index.js";
@@ -205,7 +214,7 @@ function assertNotJsonDocument(result: RunResult, context: string): void {
 const T12_0_14 = defineProductTest({
   id: "T12.0-14",
   title:
-    "invocation grammar (12.0's token rules, each arm discriminating a lenient parser): the remaining tokens match the synopsis exactly — `ids extra` and `rename specs/A.mdx a b c` (a fourth operand) exit 2 with nothing done (whole root byte-unchanged, journal and sources included), `xspec` alone and `query bogus` exit 2; `--name=value` spells no flag (`review create --strategy audit --name=n` exits 2 as an unknown flag, no session created); flag tokens stand anywhere (`--json ids` and `ids --json` emit byte-identical documents; `--config cfg/xspec.config.ts build` loads that configuration, exit 0 with derived output under `cfg/` alone where `build` alone is a configuration error); a value-taking flag takes the whole next token (`ids --file --json` runs with the glob `--json` — exit 0, an empty listing byte-identical to a no-match glob's, stdout not a JSON document; `ids --config --json` names the path `--json` — exit 2, missing configuration, stdout empty, the diagnostic on stderr — where `ids --json --config` exits 2 with the error document on stdout; `ids --file` as the last token exits 2); no single-dash short forms (`review create --strategy audit --name -a` creates `.xspec/reviews/-a.json`, `resolve … --note -x` stores the note `-x`, `ids -j` exits 2 as a surplus operand with stdout empty); `--` ends flag reading and is dropped (`ids --` byte-identical to `ids`; `ids -- --json` exits 2 with stdout empty); arity is fixed by name across commands (`build --file --json` exits 2 having consumed `--json`, stdout empty; `build --bogus --json` and `build --json --file` exit 2 with the error document; each modifying nothing); a repeated `--json` exits 2 with the error document as its entire stdout; list-valued flags: `--kinds depends,`, `,depends`, and `depends,,embeds` each exit 2 with the error document while `depends,depends` answers byte-identically to `depends` (SPEC 12.0, 12.3, 12.1, 10.1, 10.7, 11.1, 7, 12.7)",
+    "invocation grammar (12.0's token rules, each arm discriminating a lenient parser): the remaining tokens match the synopsis exactly — `ids extra` and `rename specs/A.mdx a b c` (a fourth operand) exit 2 with nothing done (whole root byte-unchanged, journal and sources included), `xspec` alone and `query bogus` exit 2; `--name=value` spells no flag (`review create --strategy audit --name=n` exits 2 as an unknown flag, no session created); flag tokens stand anywhere (`--json ids` and `ids --json` emit byte-identical documents; `--config cfg/xspec.config.ts build` loads that configuration, exit 0 with derived output under `cfg/` alone where `build` alone is a configuration error); a value-taking flag takes the whole next token (`ids --file --json` runs with the glob `--json` — exit 0, an empty listing naming no `specs/A.mdx` where the unrestricted listing does, stdout not a JSON document; `ids --config --json` names the path `--json` — exit 2, missing configuration, stdout empty, the diagnostic on stderr — where `ids --json --config` exits 2 with the error document on stdout; `ids --file` as the last token exits 2); no single-dash short forms (`review create --strategy audit --name -a` creates `.xspec/reviews/-a.json`, `resolve … --note -x` stores the note `-x`, `ids -j` exits 2 as a surplus operand with stdout empty); `--` ends flag reading and is dropped (`ids --` byte-identical to `ids`; `ids -- --json` exits 2 with stdout empty); arity is fixed by name across commands (`build --file --json` exits 2 having consumed `--json`, stdout empty; `build --bogus --json` and `build --json --file` exit 2 with the error document; each modifying nothing); a repeated `--json` exits 2 with the error document as its entire stdout; list-valued flags: `--kinds depends,`, `,depends`, and `depends,,embeds` each exit 2 with the error document while `depends,depends` answers byte-identically to `depends` (SPEC 12.0, 12.3, 12.1, 10.1, 10.7, 11.1, 7, 12.7)",
   timeoutMs: 180_000,
   run: async (product) => {
     await withWorkspace({ files: GRAMMAR_FILES }, async (workspace) => {
@@ -371,9 +380,24 @@ const T12_0_14 = defineProductTest({
 
       // --- A value-taking flag takes the whole next token, whatever it
       // looks like — a value beginning with `--` included.
-      // Premise: a `--file` glob restricts the listing (SPEC 12.3), so the
-      // no-match listing differs from the full one and the pair below is
-      // attributable to the glob `--json` being in effect.
+      // Premises: the unrestricted human listing names the listed file
+      // `specs/A.mdx` (SPEC 12.3: requirement IDs grouped by file), and a
+      // `--file` glob restricts the listing (SPEC 12.3) — the listing of a
+      // glob matching nothing names no file — so the empty listing of the
+      // glob `--json` below is observable through its information (H-3)
+      // and attributable to that glob being in effect. Its bytes are never
+      // compared with another glob's listing: different globs are
+      // different input, and the human wording is free (it may name the
+      // glob; SPEC 12.0's determinism is for identical input; H-3, H-4).
+      assertReportMentions(
+        idsHuman,
+        [GRAMMAR_SPEC_FILE],
+        `T12.0-14 premise: the unrestricted human listing of \`ids\` names ` +
+          `the listed file ${GRAMMAR_SPEC_FILE} — \`ids\` lists requirement ` +
+          `IDs grouped by file (SPEC 12.3), the human form carrying the same ` +
+          `information as the JSON form (SPEC 12.0; T12.3-1 asserts the ` +
+          `same information)`,
+      );
       const noMatch = await expectExit(
         product,
         workspace,
@@ -383,20 +407,15 @@ const T12_0_14 = defineProductTest({
           `inside the root matching no discovered file restricts the ` +
           `listing to nothing: an empty listing, exit 0 (SPEC 12.3, 7)`,
       );
-      if (
-        noMatch.stdoutBytes.length === idsHuman.stdoutBytes.length &&
-        noMatch.stdoutBytes.every(
-          (byte, index) => byte === idsHuman.stdoutBytes[index],
-        )
-      ) {
-        fail(
-          `T12.0-14 premise \`ids --file ${GRAMMAR_NO_MATCH_GLOB}\`: the ` +
-            `listing restricted to no file carries no file, so its bytes ` +
-            `must differ from the unrestricted listing's — \`--file\` ` +
-            `restricts the listing to the files the glob matches (SPEC ` +
-            `12.3); got the unrestricted listing`,
-        );
-      }
+      assertReportOmits(
+        noMatch,
+        [GRAMMAR_SPEC_FILE],
+        `T12.0-14 premise \`ids --file ${GRAMMAR_NO_MATCH_GLOB}\`: \`--file\` ` +
+          `restricts the listing to the files the glob matches (SPEC 12.3), ` +
+          `so the listing restricted to no file names no file — never ` +
+          `${GRAMMAR_SPEC_FILE}, which the unrestricted listing names — its ` +
+          `wording free (H-3)`,
+      );
       const fileJsonContext = "T12.0-14 `ids --file --json`";
       const fileJson = await expectExit(
         product,
@@ -409,13 +428,16 @@ const T12_0_14 = defineProductTest({
           `0 — never \`--file\` lacking its value (SPEC 12.0, 12.3)`,
       );
       assertNotJsonDocument(fileJson, fileJsonContext);
-      assertBytesEqual(
-        fileJson.stdoutBytes,
-        noMatch.stdoutBytes,
-        `${fileJsonContext} against \`ids --file ${GRAMMAR_NO_MATCH_GLOB}\`: ` +
-          `both are the human-form empty listing of a glob matching nothing ` +
-          `— byte-identical standard output, JSON output out of effect in ` +
-          `each (SPEC 12.0, 12.3; H-4's product-to-itself compare)`,
+      assertReportOmits(
+        fileJson,
+        [GRAMMAR_SPEC_FILE],
+        `${fileJsonContext}: \`--file\` takes the whole next token (SPEC ` +
+          `12.0), so the glob \`--json\` matches nothing and the listing is ` +
+          `empty (SPEC 12.3) — an empty listing names no file and so no ` +
+          `requirement ID (\`${GRAMMAR_SPEC_FILE}#a\` contains the path; the ` +
+          `bare ID \`a\` is too short to check for absence), never ` +
+          `${GRAMMAR_SPEC_FILE}, which the unrestricted listing names; its ` +
+          `wording is free (H-3), and it may name the glob`,
       );
       const configJson = await expectSilentUsageError(
         product,

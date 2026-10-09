@@ -15,7 +15,9 @@
 //                      rename/move (6.4, 6.5) — a thin alias of forms.ts's
 //                      form-exact performed-operation decoder (12.7)
 //   review.ts          review list/status/next/show/export
-//   human.ts           robust required-information matching on human reports
+//   human.ts           robust information matching on human reports — the
+//                      required information present, or absent where SPEC
+//                      requires its absence
 //   session-staging.ts T10.1-4 corruption transformations (shape-aware,
 //                      value-blind, over product-written session files)
 //   record-staging.ts  T6.6-6's shape-blind corrupt-record staging (garbage

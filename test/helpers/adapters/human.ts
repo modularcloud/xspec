@@ -2,9 +2,12 @@
 // content of human-readable reports, never their wording, so human output is
 // asserted only for required information via robust matching (H-3): a test
 // names the identities, paths, counts, and condition numbers a report must
-// carry, and this module checks each is mentioned — never exact wording,
-// never line formats. Missing required information fails loudly (a diagnosed
-// test error, S-5), exactly like the JSON decoders beside this module.
+// carry, and this module checks each is mentioned — or, where SPEC.md
+// requires information to be absent (an empty listing names no file), that
+// none of the named information is — never exact wording, never line
+// formats. Missing required information, or present information that must
+// be absent, fails loudly (a diagnosed test error, S-5), exactly like the
+// JSON decoders beside this module.
 
 import type { RunResult } from "../subprocess.js";
 import { fail } from "../assertions.js";
@@ -33,6 +36,13 @@ function mentionFound(text: string, mention: Mention): boolean {
   return new RegExp(mention.source, mention.flags.replace(/[gy]/g, "")).test(
     text,
   );
+}
+
+/** Where a matcher read the report: the text given, or a run's stdout. */
+function describeSource(output: string | RunResult): string {
+  return typeof output === "string"
+    ? "report text"
+    : `stdout of ${output.commandLine}`;
 }
 
 const EXCERPT_LIMIT = 2048;
@@ -64,14 +74,40 @@ export function assertReportMentions(
   const text = textOf(output);
   const missing = mentions.filter((mention) => !mentionFound(text, mention));
   if (missing.length === 0) return;
-  const where =
-    typeof output === "string"
-      ? "report text"
-      : `stdout of ${output.commandLine}`;
   fail(
     `${context}: required information missing from the human report (H-3: information presence, never exact wording).\n` +
       `Missing: ${missing.map(describeMention).join(", ")}\n` +
-      `From ${where}: ${excerpt(text)}`,
+      `From ${describeSource(output)}: ${excerpt(text)}`,
+  );
+}
+
+/**
+ * Assert a human report carries none of the named information — the
+ * negative counterpart of `assertReportMentions`, for information SPEC.md
+ * requires to be absent (an empty listing names no file): robust matching
+ * (H-3), information, never wording, so the report may say anything else.
+ * Accepts the report text or a RunResult (its stdout — reports are
+ * standard-output content, 12.0; stderr is never searched), and matches
+ * each mention exactly as `assertReportMentions` does. Fails diagnosed,
+ * listing every present mention with an excerpt of the report.
+ */
+export function assertReportOmits(
+  output: string | RunResult,
+  mentions: readonly Mention[],
+  context: string,
+): void {
+  if (mentions.length === 0) {
+    fail(
+      `${context}: assertReportOmits called with no mentions — a human-report assertion must name the information it checks (H-3)`,
+    );
+  }
+  const text = textOf(output);
+  const present = mentions.filter((mention) => mentionFound(text, mention));
+  if (present.length === 0) return;
+  fail(
+    `${context}: information that must be absent is present in the human report (H-3: information absence, never exact wording).\n` +
+      `Present: ${present.map(describeMention).join(", ")}\n` +
+      `From ${describeSource(output)}: ${excerpt(text)}`,
   );
 }
 

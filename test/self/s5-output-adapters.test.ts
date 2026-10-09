@@ -36,6 +36,7 @@ import {
   assertJsonKeysByteSorted,
   assertNodeEdgeListsBare,
   assertReportMentions,
+  assertReportOmits,
   assertUnavailabilityMarkerForms,
   classifyIgnoredReasons,
   compareFindings,
@@ -5325,6 +5326,72 @@ test("S-5: human-report matcher rejects reports missing required information", (
   // A mention-less assertion checks nothing and is itself a defect.
   expectDiagnosed("empty mention list", () =>
     assertReportMentions("anything", [], "empty assertion"),
+  );
+});
+
+test("S-5: human-report omission matcher accepts a report without the named information and rejects one carrying it", () => {
+  // An empty listing in free wording, naming its glob but no file (H-3).
+  const emptyListing = "No requirement IDs in files matching --json.\n";
+  assertReportOmits(
+    emptyListing,
+    ["specs/A.mdx", conditionMention("14.2")],
+    "string form",
+  );
+  // RunResult form reads stdout alone (12.0: reports are stdout content):
+  // a mention on stderr only is not in the report.
+  assertReportOmits(
+    syntheticResult(emptyListing),
+    ["specs/A.mdx"],
+    "RunResult form",
+  );
+  assertReportOmits(
+    syntheticResult(emptyListing, "note: specs/A.mdx\n"),
+    ["specs/A.mdx", conditionMention("14.2")],
+    "stderr is not the report stream",
+  );
+  // An empty report carries no information at all.
+  assertReportOmits("", ["specs/A.mdx"], "empty report text");
+  assertReportOmits(syntheticResult(""), ["specs/A.mdx"], "empty stdout");
+
+  // A string mention present: the message names it and the context.
+  const literal = expectDiagnosed("string mention present", () =>
+    assertReportOmits(
+      "specs/A.mdx\n  a\n",
+      ["specs/A.mdx"],
+      "restricted listing",
+    ),
+  );
+  expect(literal.message).toContain('Present: "specs/A.mdx"');
+  expect(literal.message).toContain("restricted listing");
+
+  // A pattern mention matched, in the RunResult form: only the present
+  // mention is listed, with the run's command line.
+  const condition = conditionMention("14.2");
+  const pattern = expectDiagnosed("pattern mention present", () =>
+    assertReportOmits(
+      syntheticResult("error 14.2 in specs/B.mdx\n"),
+      ["specs/A.mdx", condition],
+      "pattern report",
+    ),
+  );
+  expect(pattern.message).toContain(`Present: pattern ${condition.toString()}`);
+  expect(pattern.message).not.toContain('"specs/A.mdx"');
+  expect(pattern.message).toContain("pattern report");
+  expect(pattern.message).toContain("stand-in check");
+
+  // Every present mention is listed.
+  const both = expectDiagnosed("two mentions present", () =>
+    assertReportOmits(
+      "specs/A.mdx#a\n",
+      ["specs/A.mdx", /#a\b/],
+      "two present",
+    ),
+  );
+  expect(both.message).toContain('Present: "specs/A.mdx", pattern /#a\\b/');
+
+  // A mention-less assertion checks nothing and is itself a defect.
+  expectDiagnosed("empty mention list", () =>
+    assertReportOmits("anything", [], "empty assertion"),
   );
 });
 
