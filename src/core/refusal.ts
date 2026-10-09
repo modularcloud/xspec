@@ -56,7 +56,11 @@ import type { ByteRange } from "./bytes.js";
 import { sortByBytes } from "./bytes.js";
 import type { CodeAnalysis } from "./code-analysis.js";
 import type { Configuration, ConfiguredGroup } from "./config.js";
-import { specSourceDerivedPaths } from "./discovery.js";
+import {
+  BARRED_SPEC_PATH_CHARACTER_LIST,
+  barredSpecPathCharacters,
+  specSourceDerivedPaths,
+} from "./discovery.js";
 import type { Finding, FindingLocation, RefusalCode } from "./findings.js";
 import { compareLocations, sortLocations } from "./findings.js";
 import { findCycles } from "./graph.js";
@@ -263,6 +267,26 @@ export function assessDestinationPath(
     causes.push(
       `the path lacks the .mdx extension — every spec-group source must ` +
         `end ".mdx" (SPEC 7.1, 14.19)`,
+    );
+  }
+  // SPEC 6.5 → 7.1/14.19: containing a character 7.1 bars from every
+  // spec-group path, anywhere in it — the file name and every directory
+  // component alike — judged by the one 7.1 character rule discovery
+  // applies (discovery.ts `barredSpecPathCharacters`), a target file to be
+  // created included. Each such spelling is a well-formed argument value,
+  // so this is a refusal, never a usage error (SPEC 12.0); the path stays
+  // probeable, so every other cause and reason is still evaluated beside
+  // it (SPEC 14). A discovered section-form target never carries one:
+  // such a source is 14.19, the invalid-workspace precondition's case.
+  const barred = barredSpecPathCharacters(destination);
+  if (barred.length > 0) {
+    causes.push(
+      `the path contains ${englishList(barred)}, which a spec-group path ` +
+        `must not contain anywhere (${BARRED_SPEC_PATH_CHARACTER_LIST}), ` +
+        `so that every import specifier designating the source, delimited ` +
+        `by either quote character, is a well-formed string literal read ` +
+        `the same verbatim and by TypeScript tooling — choose a ` +
+        `destination path holding none of them (SPEC 7.1, 14.19)`,
     );
   }
   // SPEC 13.4: derived-file paths are never sources — a file name

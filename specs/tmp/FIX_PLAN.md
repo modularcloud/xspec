@@ -39,13 +39,13 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T1.4-4 | section-1.4 | 1 (landed) | a tag carrying U+2028: `build --json` exits 0, expected 1 |
 | T4-2 | section-4 | 9 | an import type naming a `.xspec` module builds with exit 0 |
 | T6.4-3 | section-6.4 | 1 (landed) | `rename specs/A.mdx a "a<U+2028>b"` exits 0 |
-| T6.5-4 | section-6.5 | 1 (landed), 6 | `move specs/A.mdx#keep "specs/B.mdx#a<U+2028>b"` exits 0; then the barred-character destination arms; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1 |
+| T6.5-4 | section-6.5 | 1 (landed), 6 (landed) | `move specs/A.mdx#keep "specs/B.mdx#a<U+2028>b"` exits 0; then the barred-character destination arms; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; passes since Task 6 landed |
 | T6.5-11 | section-6.5-ii | 17 | arm (f): the rewritten call reads `tt(target.y)`, an untimely `text` binding |
 | T6.5-20 | section-6.5-iv | 7, 10 (and 9 for (d)'s import-type and `declare module` stagings) | arm (a): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70 after modifying the workspace |
-| T6.5-21 | section-6.5-iv | 8, 6 (its two-reason arm) | arm (a): `move specs/A.mdx specs/sub/A.mdx` exits 0 |
+| T6.5-21 | section-6.5-iv | 8, 6 (landed; its two-reason arm) | arm (a): `move specs/A.mdx specs/sub/A.mdx` exits 0 |
 | T6.5-22 | section-6.5-iv | 15 | arm (b): 26 of 38 lures bound a barred name |
 | T6.5-23 | section-6.5-v | 16, 17 | 13 of 33 stagings place or root the added declaration wrongly |
-| T6.6-3 | section-6.6 | 1 (landed), 6, 7, 8, 10 | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1 |
+| T6.6-3 | section-6.6 | 1 (landed), 6 (landed), 7, 8, 10 | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1 |
 | T7-2 | section-7-basics | 11 | the `import defer { defineConfig }` arm builds with exit 0, expected 2 |
 | T7-6 | section-7-discovery | 5 (landed) | invalid-source arm: `check` reports 14.10 six times, expected 14.19 once |
 | T7.1-1 | section-7.1-7.3 | 5 (landed) | `specs/a"b.mdx` builds with exit 0, expected 1 |
@@ -55,34 +55,17 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T11-3 | section-11 | 13 | likewise |
 | T12.0-5 | section-12.0-i | 5 (landed) | `view 'specs/a\b.mdx'` exits 0 with no finding, expected 1 with condition 19 |
 | T12.0-10 | section-12.0-ii | 1 (landed) | `query nodes --tag a<U+2028>b` under an invalid configuration reports `configuration-error`, expected the plain usage error |
-| T12.7-2 | section-12.7 | 6, 8 | the two-reason `move specs/A.mdx "specs/a'b.mdx"` exits 0 |
+| T12.7-2 | section-12.7 | 6 (landed), 8 | the two-reason `move specs/A.mdx "specs/a'b.mdx"` exits 0; since Task 6 landed, it exits 1 reporting `refused-invalid-destination` alone, `refused-exposed-derived-file` (Task 8) missing after it |
 | T13.4-9 | section-13.4 | 2 (landed) | (a): a derived path above a source builds with exit 0, expected condition 22 |
 | T13.4-10 | section-13.4 | 4 (landed) | the recorded orphan's finding says "run `xspec build` to remove it" |
 | T13.4-11 | section-13.4 | 3 (landed) | (a): a condition-10 finding for a recorded path holding a directory |
 | T14-4 | section-14 | 14 (it sweeps T14-12's stagings) | U+2EBF0 in a JSX name judged one UTF-16 unit at a time: 14.20, expected 14.16 |
 | T14-6 | section-14 | 14 (likewise) | likewise |
-| T14-7 | section-14 | 1 (landed), 6, 7, 8, 10 | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1 |
+| T14-7 | section-14 | 1 (landed), 6 (landed), 7, 8, 10 | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1 |
 | T14-11 | section-14 | 9 | arm (x): 14.15 reported once, expected five times |
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
 If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, and the tasks a later arm waited on beside Task 14 (Tasks 1, 2, 3, 4, and 5) have landed.
-
-## Task 6 — A move destination containing a character 7.1 bars is `refused-invalid-destination` (SPEC 6.5, 7.1, 14.19, 14, 12.0; A5, C1's second bullet)
-
-Task 5 has landed; reuse its predicate: `barredSpecPathCharacters(path)` in `src/core/discovery.ts` names the 7.1-barred characters a path holds, in first-occurrence order (empty when none), and `BARRED_SPEC_PATH_CHARACTER_LIST` names the rule's whole list for the cause's wording.
-
-**Requirement.** SPEC 6.5 refuses as `refused-invalid-destination` a destination file path, a target file to be created included, "containing `"`, `'`, `\`, U+000A, U+000D, U+2028, or U+2029 (7.1, 14.19)" — anywhere in the path. The refusal exits 1, modifies nothing, and reports one finding concerning the destination as spelled (`path` the destination, `locations` `[]`); `--preview` reports the same (6.6). It is never a usage error: each such spelling is a well-formed argument value (12.0). Every other applicable reason reports beside it (14) — T6.5-21's two-reason arm puts `refused-exposed-derived-file` (Task 8) after it.
-
-**Observed.** `move specs/Z.mdx "specs/a'b.mdx" --preview` exits 0, as does each other character. `move specs/A.mdx "specs/a'b.mdx"`, `move specs/A.mdx 'specs/a\b.mdx'`, and `move specs/A.mdx#x 'specs/B"q.mdx#x'` are performed. Since Task 5 landed, such a performed move also writes the destination's module and companions, and the moved-to workspace then fails `build` with the destination's 14.19: the post-move re-validation does not re-classify the destination path, so only the up-front cause below catches it.
-
-**Location.** `assessDestinationPath` in `src/core/refusal.ts` (~206). It checks UTF-8, `#`, the path's shape, spec and code groups, `.mdx`, and the `.xspec.`/`.xspec/` exclusion — not these characters.
-
-**Change.** Add the cause to the one finding's causes, in the part of the function after group matching, so the destination stays probeable and every other reason is still evaluated. In the section form, the cause matters only for a target file to be created: an existing target with such a path is already a 14.19 source, the invalid-workspace precondition's case.
-
-**Verification.**
-- Should turn green, Task 1 having landed: `section-6.5.test.ts` T6.5-4 (one file-form and one section-form arm per character, and the `'`-in-a-directory arms).
-- Partially: `section-6.6.test.ts` T6.6-3 and `section-14.test.ts` T14-7 (both also wait on Tasks 7, 8, 10); `section-12.7.test.ts` T12.7-2 and `section-6.5-iv.test.ts` T6.5-21's two-reason arm (both also wait on Task 8).
-- Neighbours: `section-6.5-ii.test.ts`, `section-6.5-iii.test.ts`.
 
 ## Task 7 — Move destinations: the derived-path relations of `refused-invalid-destination` (SPEC 6.5, 13.4, 14.22, 14; A6 (a)–(c) and (e), C9's first four bullets)
 
@@ -135,8 +118,8 @@ Keep only the violations involving the destination or a derived path it would ge
 - Keep the check independent of the destination's validity.
 
 **Verification.**
-- Should turn green: `section-6.5-iv.test.ts` T6.5-21 (its two-reason arm with Task 6).
-- Partially: `section-12.7.test.ts` T12.7-2 (with Task 6), `section-6.6.test.ts` T6.6-3, `section-14.test.ts` T14-7.
+- Should turn green: `section-6.5-iv.test.ts` T6.5-21 (its two-reason arm too: Task 6 has landed).
+- Also green, Task 6 having landed: `section-12.7.test.ts` T12.7-2. Partially: `section-6.6.test.ts` T6.6-3, `section-14.test.ts` T14-7.
 - Neighbours: `section-6.5.test.ts`, `section-14.test.ts` (T14-6's stable codes).
 
 ## Task 9 — Import types and string-named module declarations are module-linking forms (14.15), each located per SPEC 14; `export import X = require(…)` is located from `import` (SPEC 4, 4.5, 14.15, 14's location rule, 1.7; A2, C3)
