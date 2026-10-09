@@ -737,11 +737,21 @@ class CodeAnalyzer {
     message: string,
     identities: readonly string[] = [],
   ): void {
+    this.addFindingAt(condition, this.rangeOf(node), message, identities);
+  }
+
+  /** A finding located at an explicit byte range (SPEC 14's range rules). */
+  private addFindingAt(
+    condition: 7 | 8 | 11 | 15 | 18,
+    range: ByteRange,
+    message: string,
+    identities: readonly string[] = [],
+  ): void {
     this.findings.push(
       locatedFinding(
         condition,
         message,
-        [{ file: this.file, range: this.rangeOf(node) }],
+        [{ file: this.file, range }],
         identities,
       ),
     );
@@ -893,9 +903,11 @@ class CodeAnalyzer {
    * Validate the file's module-linking constructs (SPEC 4 → 14.15):
    * import declarations (spec module imports and derived-path
    * specifiers), export declarations with module specifiers, and
-   * `import X = require(…)` declarations. Dynamic `import()` is a call
-   * expression and is checked during the use walk. Fills the declaration
-   * map the use analysis resolves against.
+   * `import X = require(…)` declarations among the top-level statements;
+   * then, wherever they stand, static-specifier dynamic `import()` calls,
+   * import types, and string-named module declarations
+   * (`scanNestedLinkingForms`). Fills the declaration map the use
+   * analysis resolves against.
    */
   private scanModuleLinks(): void {
     const bound: BoundName[] = [];
@@ -911,6 +923,7 @@ class CodeAnalyzer {
         this.scanImportEquals(statement, bound);
       }
     }
+    this.scanNestedLinkingForms();
     // SPEC 4/2.1/2.4 → 14.15: no import may bind an identifier already
     // bound by ANOTHER import, when either import is a spec module import,
     // and no spec module import's value-level binding may share its
@@ -980,7 +993,7 @@ class CodeAnalyzer {
         locatedFinding(15, message, [
           ...statements.map((declaration) => ({
             file: this.file,
-            range: this.rangeOf(declaration),
+            range: this.linkingDeclarationRange(declaration),
           })),
           ...constructs.map((construct) => ({
             file: this.file,
@@ -1125,7 +1138,11 @@ class CodeAnalyzer {
     }
 
     if (!spec) {
-      this.checkDerivedSpecifier(specifier, statement, "an import declaration");
+      this.checkDerivedSpecifier(
+        specifier,
+        this.rangeOf(statement),
+        "an import declaration",
+      );
       return;
     }
 
@@ -1293,7 +1310,11 @@ class CodeAnalyzer {
       );
       return;
     }
-    this.checkDerivedSpecifier(specifier, statement, "an export declaration");
+    this.checkDerivedSpecifier(
+      specifier,
+      this.rangeOf(statement),
+      "an export declaration",
+    );
   }
 
   /**
@@ -1323,10 +1344,13 @@ class CodeAnalyzer {
       role: null,
       statement,
     });
+    // SPEC 14: located by its own characters, a leading `export` (`export
+    // import X = require(…)`) and what separates it excluded, as in 1.7.
+    const range = this.declarationRange(statement);
     if (spec) {
-      this.addFinding(
+      this.addFindingAt(
         15,
-        statement,
+        range,
         `invalid import: an import ${statement.name.text} = require(...) ` +
           `declaration with a ".xspec" specifier — a spec module is ` +
           `consumed only through an import declaration (SPEC 4, 14.15)`,
@@ -1337,7 +1361,7 @@ class CodeAnalyzer {
     }
     this.checkDerivedSpecifier(
       specifier,
-      statement,
+      range,
       "an import ... = require(...) declaration",
     );
   }
@@ -1351,7 +1375,7 @@ class CodeAnalyzer {
    */
   private checkDerivedSpecifier(
     specifier: string,
-    at: tst.Node,
+    at: ByteRange,
     formLabel: string,
   ): void {
     if (!specifier.startsWith("./") && !specifier.startsWith("../")) return;
@@ -1374,7 +1398,7 @@ class CodeAnalyzer {
       "xspec-dir": `it lies under ".xspec/"`,
       "markdown-destination": `it is a configured Markdown emit destination (SPEC 7.3)`,
     };
-    this.addFinding(
+    this.addFindingAt(
       15,
       at,
       `invalid import: ${formLabel} whose relative specifier ` +
@@ -1382,6 +1406,142 @@ class CodeAnalyzer {
         `${JSON.stringify(resolved)} — ${why[kind]}; derived files are ` +
         `consumed only through a spec module import's ".xspec" specifier ` +
         `(SPEC 4, 13.4, 14.15)`,
+    );
+  }
+
+  /**
+   * SPEC 14: a module-linking declaration's 14.15 range — an import or
+   * export declaration by its own characters, and an `import X =
+   * require(…)` likewise, a leading `export` (`export import X =
+   * require(…)`) and what separates it from `import` excluded, as 1.7
+   * excludes one.
+   */
+  private linkingDeclarationRange(statement: tst.Statement): ByteRange {
+    return ts.isImportEqualsDeclaration(statement)
+      ? this.declarationRange(statement)
+      : this.rangeOf(statement);
+  }
+
+  /**
+   * SPEC 4 → 14.15: the module-linking forms that stand anywhere, not only
+   * among the top-level statements — a dynamic `import()` with a static
+   * string-literal specifier, an import type (`import("…")` in a type,
+   * `typeof import("…")` included), and a string-named module declaration
+   * (`declare module "…" { … }`, `declare` or not, an augmentation
+   * included) — found wherever they stand: type aliases, interfaces,
+   * annotations, type arguments, module bodies. Only their specifiers are
+   * judged here, never a position as value context: 4.5's type-level
+   * exemption stands, an import type is no value use, and none of these
+   * forms records an edge or an occurrence. A JSDoc comment is a comment
+   * (4, 14.20), which `forEachChild` never enters.
+   */
+  private scanNestedLinkingForms(): void {
+    const visit = (node: tst.Node): void => {
+      if (ts.isImportTypeNode(node)) {
+        this.scanImportType(node);
+      } else if (
+        ts.isModuleDeclaration(node) &&
+        ts.isStringLiteral(node.name)
+      ) {
+        this.scanStringNamedModule(node, node.name);
+      } else if (
+        ts.isCallExpression(node) &&
+        node.expression.kind === ts.SyntaxKind.ImportKeyword
+      ) {
+        this.visitImportCall(node);
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(this.sourceFile, visit);
+  }
+
+  /**
+   * SPEC 4 → 14.15: an import type whose specifier ends in `.xspec` is
+   * invalid — an import type is a module-linking form, never a free
+   * type-level reference (4.5) — and one whose relative specifier
+   * designates a derived-file path (13.4) is too. An argument that is no
+   * string literal (a template literal included) names no module (2.4).
+   */
+  private scanImportType(node: tst.ImportTypeNode): void {
+    const argument = node.argument;
+    if (
+      !ts.isLiteralTypeNode(argument) ||
+      !ts.isStringLiteral(argument.literal)
+    ) {
+      return;
+    }
+    // SPEC 2.4: the specifier is read as spelled.
+    const specifier = this.literalValue(argument.literal);
+    const range = this.importTypeRange(node);
+    if (specifier.endsWith(XSPEC_SUFFIX)) {
+      this.addFindingAt(
+        15,
+        range,
+        `invalid import: an import type with a ".xspec" specifier — an ` +
+          `import type is a module-linking form, never a free type-level ` +
+          `reference; a spec module is consumed only through an import ` +
+          `declaration (SPEC 4, 4.5, 14.15)`,
+      );
+      return;
+    }
+    this.checkDerivedSpecifier(specifier, range, "an import type");
+  }
+
+  /**
+   * SPEC 14: an import type is located from `import` through the closing
+   * parenthesis of its argument list — import attributes inside the
+   * parentheses included, a `typeof` before it and a qualifier or type
+   * arguments after it excluded. Both tokens are the node's own children:
+   * the attributes' braces are tokens of their own and the type arguments
+   * a nested list, so the first `)` child closes the argument list.
+   */
+  private importTypeRange(node: tst.ImportTypeNode): ByteRange {
+    let start = node.getStart(this.sourceFile);
+    let end = node.getEnd();
+    for (const child of node.getChildren(this.sourceFile)) {
+      if (child.kind === ts.SyntaxKind.ImportKeyword) {
+        start = child.getStart(this.sourceFile);
+      } else if (child.kind === ts.SyntaxKind.CloseParenToken) {
+        end = child.getEnd();
+        break;
+      }
+    }
+    return {
+      start: this.offsets.byteOffset(start),
+      end: this.offsets.byteOffset(end),
+    };
+  }
+
+  /**
+   * SPEC 4 → 14.15: a string-named module declaration — its name the
+   * specifier, `declare` or not, a module augmentation included — whose
+   * name ends in `.xspec` is invalid, a non-relative one (`declare module
+   * "*.xspec" { }`) included though it designates nothing; one whose
+   * relative name designates a derived-file path (13.4) is too. Located
+   * by its own characters, a leading `export` excluded as in 1.7 (14).
+   */
+  private scanStringNamedModule(
+    node: tst.ModuleDeclaration,
+    name: tst.StringLiteral,
+  ): void {
+    // SPEC 2.4: the specifier is read as spelled.
+    const specifier = this.literalValue(name);
+    const range = this.declarationRange(node);
+    if (specifier.endsWith(XSPEC_SUFFIX)) {
+      this.addFindingAt(
+        15,
+        range,
+        `invalid import: a string-named module declaration whose name ` +
+          `${JSON.stringify(specifier)} ends in ".xspec" — a spec module ` +
+          `is consumed only through an import declaration, and no module ` +
+          `declaration may name one (SPEC 4, 14.15)`,
+      );
+      return;
+    }
+    this.checkDerivedSpecifier(
+      specifier,
+      range,
+      "a string-named module declaration",
     );
   }
 
@@ -1503,10 +1663,17 @@ class CodeAnalyzer {
    * {}` spans `@dec class C {}`, while `@dec export class C {}` and `@dec
    * export default class C {}` span whole from their `@`, the `export`
    * inside; a further modifier (`async`, `abstract`) is the construct's own.
+   * SPEC 14 locates an `import X = require(…)` declaration and a
+   * string-named module declaration (14.15) by the same rule: `export
+   * import X = require(…)` from `import`, `export declare module "…" { }`
+   * from `declare`.
    */
   private declarationRange(
     node:
-      tst.FunctionDeclaration | tst.ClassDeclaration | tst.ModuleDeclaration,
+      | tst.FunctionDeclaration
+      | tst.ClassDeclaration
+      | tst.ModuleDeclaration
+      | tst.ImportEqualsDeclaration,
   ): ByteRange {
     const modifiers = node.modifiers ?? [];
     let leading: tst.Node | undefined;
@@ -1561,13 +1728,8 @@ class CodeAnalyzer {
       this.visitIdentifier(node);
       return;
     }
-    if (
-      ts.isCallExpression(node) &&
-      node.expression.kind === ts.SyntaxKind.ImportKeyword
-    ) {
-      this.visitImportCall(node);
-      // Arguments remain ordinary value context — fall through.
-    }
+    // A dynamic `import()` was judged in scanModuleLinks (SPEC 4 → 14.15);
+    // its arguments remain ordinary value context.
     ts.forEachChild(node, (child) => {
       this.walk(child);
     });
@@ -1594,7 +1756,11 @@ class CodeAnalyzer {
       );
       return;
     }
-    this.checkDerivedSpecifier(specifier, call, "a dynamic import()");
+    this.checkDerivedSpecifier(
+      specifier,
+      this.rangeOf(call),
+      "a dynamic import()",
+    );
   }
 
   /**
