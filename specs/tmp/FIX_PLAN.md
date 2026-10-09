@@ -2,7 +2,7 @@
 
 Source: the compliance determination that opened this Phase 10 loop at `b3cc3e3` (branch `claude/xspec-ui-apis-4df8fa`, PR #7; governing IP `specs/patches/0001-external-ui-apis.md`, Stage: Tested — no task here changes the Stage; bundle `specs/SPEC.md`, `specs/TEST-SPEC.md`, `specs/CERTIFICATIONS.md`, `specs/IMPLEMENTATION.md`). The documents changed after the product was last brought green (CI recorded at `9d095d9`): `git diff 9d095d9..f31e100 -- specs/SPEC.md`, `git diff 3311ccd..6780f53 -- specs/TEST-SPEC.md`, `git diff 3311ccd..301f2f9 -- specs/CERTIFICATIONS.md`; Phase 9 brought the harness into line, its last determination clean at `3fe91f5`. Reviewer A (SPEC 1–6) returned 10 gaps, reviewer B (7–11) 6, reviewer C (12–15) 14. VERIFY was red on 31 product tests, the same set locally and in CI run 1003's `suite-linux` job at `b3cc3e3` (every failure a `HarnessAssertionError`); `harness-self` (28 files, 4315 tests) and `suite-windows` were green, and certification had 0 discrepancies (154 PASS / 38 FAIL — the FAILs being violators' expected outcomes — / 0 error / 0 hang). The product's last change is `8a0da01`; `dist/` matches `src/`. Findings are cited as A<n>, B<n>, C<n> (reviewer, gap number); where reviewers reported the same gap, it is one task. Reviewer B also noted, uncounted and outside its scope, a wrong correction text on a refused source read; that is Task 21 (landed).
 
-Goal: every test passes — `npm test` locally, and CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head (PR #7 is conflicted, so CI runs on branch pushes) — and the product meets SPEC.md. Tasks 18–23, and Tasks 25–28 found since, fix SPEC departures that no test pins; they are in scope all the same (Tasks 18, 19, 20, 21, and 22 have landed).
+Goal: every test passes — `npm test` locally, and CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head (PR #7 is conflicted, so CI runs on branch pushes) — and the product meets SPEC.md. Tasks 18–23, and Tasks 25–28 found since, fix SPEC departures that no test pins; they are in scope all the same (Tasks 18, 19, 20, 21, and 22 have landed; Task 23 landed its unusable-location part, and its remainder, Task 23a, waits on a SPEC ruling recorded in `specs/tmp/SPEC-PROBLEMS.md`).
 
 Not planned: nothing. Every counted gap and B's uncounted note has a task. The two standing rulings below close their families for this run.
 
@@ -29,7 +29,7 @@ Not planned: nothing. Every counted gap and B's uncounted note has a task. The t
 
 ## Index — each failing test and the tasks it waits on
 
-These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed then (local run and CI run 1003 alike). Each registry module is `test/suite/registry/<module>.ts`, and its suite file is `test/suite/<module>.test.ts`. Tasks 18 (landed), 19 (landed), 20 (landed), 21 (landed), 22 (landed), 23, and 25–28 have no failing test.
+These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed then (local run and CI run 1003 alike). Each registry module is `test/suite/registry/<module>.ts`, and its suite file is `test/suite/<module>.test.ts`. Tasks 18 (landed), 19 (landed), 20 (landed), 21 (landed), 22 (landed), 23 (its unusable-location part landed; the rest is Task 23a, blocked on a SPEC ruling), and 25–28 have no failing test.
 
 | Test | Module | Tasks | First failure at `b3cc3e3` |
 |---|---|---|---|
@@ -64,20 +64,6 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 arms, reached only past that twin, hand-checked at Task 8 against T6.5-21's own expectations; passes since Task 10 landed |
 | T14-11 | section-14 | 9 (landed) | arm (x): 14.15 reported once, expected five times; passes since Task 9 landed |
 | T14-12 | section-14-iii | 14 (landed) | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16; passes since Task 14 landed |
-
-## Task 23 — Mutual exclusion holds per workspace whatever the environment or user (SPEC 13.5, 12.0; C11)
-
-**Requirement.** SPEC 13.5: "All state is workspace-local"; the mutating commands — `rename` and `move` (their previews excepted) and `review create`, `resolve`, `split` — "are mutually exclusive per workspace: while one runs, another MUST fail promptly — without waiting for the holder's exclusivity to end — with a usage error (12.0), modifying nothing"; a terminated holder never blocks later commands. Every exit stays within 12.0's partition, never the internal-error exit. Two constraints bind the design: T13.5-1 requires the workspace byte-identical while held (the harness snapshots the whole workspace root), so nothing may appear in the tree during a hold; IMPLEMENTATION forbids platform-specific code paths.
-
-**Observed.** `mutationLockPath` puts the lock at `os.tmpdir()/xspec-<uid>-<hash>.lock`. While `rename … --test-hold` runs under `TMPDIR=A`, a second `rename` on the same workspace under `TMPDIR=B` succeeds, and both are journaled; by the code, different users are not excluded either. With `TMPDIR` pointing at a plain file, every mutating command exits 70 ("internal error"). This gap was also open at the `9d095d9` determination.
-
-**Location.** `src/workspace/lock.ts` (`mutationLockPath` ~94, acquisition, release, and the holder-liveness check).
-
-**Change.** Key the exclusion on the workspace alone — a lock every process operating on the workspace finds, whatever its `TMPDIR` or user — that leaves the workspace tree byte-identical while held and recovers from a terminated holder; turn an unusable lock location into a 12.0 usage error, not exit 70. If no design meets 13.5, T13.5-1, and IMPLEMENTATION together, do not compromise silently: record the conflict, dated and precise, in `specs/tmp/SPEC-PROBLEMS.md` (or `specs/tmp/TEST-SPEC-PROBLEMS.md` if the test over-reaches), commit, push, and end with `OUTCOME: PROBLEM — <file>`.
-
-**Verification.**
-- Should stay green: `section-13.5.test.ts` (T13.5-1 through T13.5-7; T13.5-7 runs on the Linux leg as uid 1000), `section-6.6.test.ts` (T6.6-3's scheduling arm), `section-16-p10.test.ts`.
-- By hand: two held mutations of one workspace under different `TMPDIR` values (the second must fail promptly with a usage error); `TMPDIR` pointing at a plain file (no exit 70); a killed holder (the next command proceeds).
 
 ## Task 25 — Module-linking forms nested in a module declaration's body are judged as at top level (SPEC 4, 2.1, 14.15, 14's location rule, 6.5; found at Task 9)
 
@@ -130,6 +116,27 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 **Change.** Keep `climbUseExpression` for the judgement (marker, `text` argument, other use) and for the 14.8 locations, which SPEC 14 fixes as the statement's expression or the call. Locate the 14.18 by a separate climb from the identifier through the static-chain steps `classifyReference` (`src/core/references.ts`) accepts — a non-optional property access with an identifier name, a non-optional element access whose index is a string literal — stopping at the first other parent. A colliding node binding's use (`visitIdentifier` routes it through `visitNodeBindingUse`) takes the same range.
 
 **Verification.** No suite test pins it. By hand: the spellings above, and T14-11 (l)'s plain chain unchanged. Regressions: `section-4.5.test.ts`, `section-14.test.ts` (T14-11), `section-5.7.test.ts`, `section-11.6.test.ts`, `section-4.test.ts`.
+
+## Task 23a — Exclusion reaching every process operating on the workspace: waits on the SPEC ruling (SPEC 13.5, 13.4; C11; the rest of Task 23)
+
+**Status: blocked — do not work on this task** until `specs/tmp/SPEC-PROBLEMS.md`'s 2026-10-09 entry has been ruled on and the documents changed accordingly. Task 23 found no design that meets all of these together: SPEC 13.5's per-workspace exclusion, which no environment, user, or host limits; SPEC 13.4's closed classification of the files xspec writes; T13.5-1's workspace byte-identical while held; and IMPLEMENTATION's portability rules. While the entry stands, an Engineer choosing the topmost task skips this one. Task 24 cannot finish before it is resolved.
+
+**Landed at Task 23** (`src/workspace/lock.ts`):
+- An unusable lock location is now a 12.0 usage error, exit 2, `code` null, nothing modified, never exit 70. That covers the temporary directory missing, unwritable, or not a directory, and the lock's path held by a directory, a symbolic link, or another non-file.
+- The unusable case is retried within the existing ten-attempt bound, about 0.25 s, since some refusals pass quickly.
+- A release the environment refuses is left to the stale-lock takeover.
+- A stale entry recording this process's own ID (a reused ID) is taken over, not honored.
+
+The cases were checked by hand: a plain-file `TMPDIR`; an unwritable one under the unprivileged namespace; a directory and a dangling symbolic link at the lock path; a dead-PID and an empty entry, both taken over; a held command excluding a second one in ~0.3 s; and a killed holder not blocking the next command.
+
+**Remaining** (observed at `5a85136`): while `rename … --test-hold` runs under `TMPDIR=A`, a second `rename` on the same workspace under `TMPDIR=B` exits 0, and both renames are journaled. Different users are never excluded, because the lock name carries the uid.
+
+**Change — per the ruling.**
+- (a) The exclusion is scoped to one user, host, and temporary directory: bring the unusable-location outcome and the comments in `src/workspace/lock.ts` (its "Reach" note) in line with the ruling's wording, then remove this task.
+- (b) The lock lives in the workspace: once the harness change lands (Phase 9), move the lock to where the ruling places it. Keep the liveness takeover, the single-winner steal, the bounded acquisition, and the unusable-location usage error.
+- (c) Implement whatever mechanism the ruling requires.
+
+**Verification.** Run `section-13.5.test.ts`, `section-6.6.test.ts`, and `section-16-p10.test.ts`. By hand: the `TMPDIR=A` / `TMPDIR=B` probe above, a killed holder, and a plain-file `TMPDIR`.
 
 ## Task 24 — Confirm the full suite and CI are green, record the state, and delete this file
 

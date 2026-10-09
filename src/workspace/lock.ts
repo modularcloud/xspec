@@ -38,6 +38,14 @@
 //   proceeding and restores a lock it displaced wrongly. Acquisition is
 //   bounded: it either acquires, or fails promptly with the usage error —
 //   it never blocks (SPEC 13.5, 12.0).
+// - An unusable lock location — the temporary directory missing,
+//   unwritable, or not a directory, or the lock's path occupied by
+//   something other than a plain file — fails the command with a usage
+//   error (12.0) naming the cause, modifying nothing, as a hold file that
+//   cannot be created does (13.5); never the internal-error exit, which
+//   lies outside 12.0's exit partition. Every exit stays within it: a
+//   release the environment refuses is left to the stale-lock takeover
+//   (the entry records a process that is dead once this one exits).
 //
 // Conservative notes (IMPLEMENTATION: where the documents are silent,
 // choose conservatively): process-ID liveness is the standard lock-file
@@ -48,6 +56,13 @@
 // The user-scoped lock name confines exclusion to the invoking user's own
 // processes; the seam likewise "grants no access beyond the invoking
 // user's own file permissions" (SPEC 13.5).
+// Reach, an open conflict pending a SPEC decision: only the mutating
+// commands sharing the invoking user and the temporary directory find
+// this lock, while SPEC 13.5 excludes every process operating on the
+// workspace. No location outside the workspace is shared that widely, and
+// the workspace holds no lock entry: 13.4 classifies every file xspec
+// writes there as derived or durable, and a held command leaves the
+// workspace untouched.
 
 import { createHash } from "node:crypto";
 import * as fsp from "node:fs/promises";
@@ -61,6 +76,28 @@ const HELD_MESSAGE =
   "another mutating command is running in this workspace — `rename`, " +
   "`move`, and the mutating `review` subcommands are mutually exclusive " +
   "per workspace; retry once it completes (SPEC 13.5)";
+
+/**
+ * SPEC 13.5/12.0: the usage error when the lock cannot be kept where it
+ * lives. Fixed text: no path and no error code, both environment-dependent
+ * content (12.0); the variables named are the ones Node.js reads for the
+ * temporary directory on every platform.
+ */
+const UNUSABLE_MESSAGE =
+  "cannot acquire workspace exclusivity — the per-workspace lock that " +
+  "`rename`, `move`, and the mutating `review` subcommands take lives in " +
+  "the operating system's temporary directory (named by TMPDIR, TMP, or " +
+  "TEMP), and it can be neither created nor taken over there: the " +
+  "directory is missing, unwritable, or not a directory, or the lock's " +
+  "path is occupied by something other than a lock file; point the " +
+  "temporary directory at a writable directory and retry; nothing was " +
+  "modified (SPEC 13.5)";
+
+/** SPEC 13.5/12.0: the lock is keyed by the root's canonical path. */
+const UNRESOLVABLE_ROOT_MESSAGE =
+  "cannot acquire workspace exclusivity — the workspace root's canonical " +
+  "path, which keys the per-workspace lock, cannot be resolved; nothing " +
+  "was modified (SPEC 13.5)";
 
 /** Bounded acquisition: fail promptly rather than ever block (SPEC 13.5). */
 const MAX_ACQUIRE_ATTEMPTS = 10;
@@ -111,21 +148,35 @@ function processAlive(pid: number): boolean {
   }
 }
 
+/** Whether a filesystem error says nothing occupies the path. */
+function isAbsence(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
 /**
- * The process ID a lock file records, or null when the file is unreadable
- * or does not hold a well-formed entry, or "absent" when nothing occupies
- * the path (the holder released, or a rival stole it).
+ * The process ID a lock file records, or null when the plain file there is
+ * unreadable or does not hold a well-formed entry, or "absent" when nothing
+ * occupies the path (the holder released, or a rival stole it), or
+ * "unusable" when the occupant is no plain file — a directory, a symbolic
+ * link (never followed), anything else — or its kind cannot be read: no
+ * lock, and nothing this command may displace.
  */
 async function readLockHolder(
   lockPath: string,
-): Promise<number | null | "absent"> {
+): Promise<number | null | "absent" | "unusable"> {
+  try {
+    const stats = await fsp.lstat(lockPath);
+    if (!stats.isFile()) return "unusable";
+  } catch (error) {
+    return isAbsence(error) ? "absent" : "unusable";
+  }
   let text: string;
   try {
     text = await fsp.readFile(lockPath, "utf8");
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return "absent";
-    return null; // a directory or otherwise unreadable occupant: not a lock
+    if (isAbsence(error)) return "absent";
+    return null; // an unreadable plain file: judged like a malformed entry
   }
   const match = /^([0-9]{1,15})\n?$/.exec(text);
   if (match === null) return null;
@@ -139,18 +190,23 @@ async function readLockHolder(
  * what was displaced really was the stale entry, and remove it. When the
  * displaced content turns out to belong to a live holder — the file was
  * replaced between the staleness verdict and the rename — restore it if
- * the lock path is still free. Returns whether the path was freed for this
- * caller.
+ * the lock path is still free. Returns "freed" when the path was freed for
+ * this caller, "retry" when the next attempt must re-evaluate the path,
+ * and "unusable" when the environment refuses the displacement itself.
  */
-async function stealStaleLock(lockPath: string): Promise<boolean> {
+async function stealStaleLock(
+  lockPath: string,
+): Promise<"freed" | "retry" | "unusable"> {
   const privatePath = `${lockPath}.steal-${String(process.pid)}`;
   try {
     await fsp.rename(lockPath, privatePath);
-  } catch {
-    return false; // a rival stealer won, or the holder released: re-evaluate
+  } catch (error) {
+    // Nothing there: a rival stealer won, or the holder released —
+    // re-evaluate. Any other refusal leaves the stale entry in place.
+    return isAbsence(error) ? "retry" : "unusable";
   }
   const displaced = await readLockHolder(privatePath);
-  if (typeof displaced === "number" && processAlive(displaced)) {
+  if (heldByLiveRival(displaced)) {
     // Displaced a live lock (replaced under us): restore without ever
     // clobbering a rival's fresh lock — link creates only when the path is
     // free.
@@ -161,11 +217,38 @@ async function stealStaleLock(lockPath: string): Promise<boolean> {
       // be restored without displacing the new one. Fall through: the next
       // attempt re-evaluates whatever now holds the path.
     }
-    await fsp.rm(privatePath, { force: true });
-    return false;
+    await removeQuietly(privatePath);
+    return "retry";
   }
-  await fsp.rm(privatePath, { force: true });
-  return true;
+  await removeQuietly(privatePath);
+  return "freed";
+}
+
+/**
+ * Whether a recorded holder is a live process other than this one. This
+ * process records its own ID only once it has acquired, so an entry naming
+ * it during acquisition is a dead predecessor's whose ID was reused: stale.
+ */
+function heldByLiveRival(
+  holder: number | null | "absent" | "unusable",
+): boolean {
+  return (
+    typeof holder === "number" && holder !== process.pid && processAlive(holder)
+  );
+}
+
+/**
+ * Remove a lock-area file, best effort: a removal the environment refuses
+ * leaves an entry this command no longer needs — a displaced stale entry
+ * under a private name, or its own entry, which records a process that is
+ * dead once this one exits and is then taken over (SPEC 13.5).
+ */
+async function removeQuietly(filePath: string): Promise<void> {
+  try {
+    await fsp.rm(filePath, { force: true });
+  } catch {
+    // Left in place (above).
+  }
 }
 
 /**
@@ -174,20 +257,36 @@ async function stealStaleLock(lockPath: string): Promise<boolean> {
  * another mutating command holds the workspace. Callers acquire before
  * modifying any source or durable file and release on completion; a killed
  * holder releases by dying (the next acquirer detects the dead process and
- * takes the lock over).
+ * takes the lock over). A lock location the environment makes unusable is
+ * the same usage error class with its own message (module header): every
+ * outcome stays within 12.0's exit partition.
  */
 export async function acquireMutationLock(
   root: string,
 ): Promise<AcquireResult> {
-  const lockPath = await mutationLockPath(root);
+  let lockPath: string;
+  try {
+    lockPath = await mutationLockPath(root);
+  } catch {
+    return { ok: false, usageMessage: UNRESOLVABLE_ROOT_MESSAGE };
+  }
   const entry = `${String(process.pid)}\n`;
+  // The refusal to report should every bounded attempt fail: the last
+  // obstacle met — a holder (pathological contention) or an unusable
+  // location. An unusable location is retried within the bound, since a
+  // refusal can be momentary (a name whose removal is still pending).
+  let refusal = HELD_MESSAGE;
   for (let attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt += 1) {
     let handle: fsp.FileHandle;
     try {
       // O_CREAT|O_EXCL: atomic claim — fails on any occupant.
       handle = await fsp.open(lockPath, "wx");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        refusal = UNUSABLE_MESSAGE; // the directory refuses the creation
+        await delay(UNREADABLE_GRACE_MS);
+        continue;
+      }
       let holder = await readLockHolder(lockPath);
       if (holder === null) {
         // Possibly a lock whose process-ID write is a moment away: give a
@@ -197,16 +296,31 @@ export async function acquireMutationLock(
         holder = await readLockHolder(lockPath);
       }
       if (holder === "absent") continue; // released meanwhile: retry
-      if (typeof holder === "number" && processAlive(holder)) {
+      if (holder === "unusable") {
+        refusal = UNUSABLE_MESSAGE; // no lock there, and nothing to displace
+        await delay(UNREADABLE_GRACE_MS);
+        continue;
+      }
+      if (heldByLiveRival(holder)) {
         // SPEC 13.5: fail promptly with a usage error, modifying nothing.
         return { ok: false, usageMessage: HELD_MESSAGE };
       }
       // A terminated holder MUST NOT block later commands (SPEC 13.5).
-      await stealStaleLock(lockPath);
+      if ((await stealStaleLock(lockPath)) === "unusable") {
+        refusal = UNUSABLE_MESSAGE;
+        await delay(UNREADABLE_GRACE_MS);
+      } else {
+        refusal = HELD_MESSAGE;
+      }
       continue;
     }
-    await handle.writeFile(entry);
-    await handle.close();
+    if (!(await writeLockEntry(handle, entry))) {
+      // The claim is made but its entry cannot be recorded: withdraw it.
+      await removeQuietly(lockPath);
+      refusal = UNUSABLE_MESSAGE;
+      await delay(UNREADABLE_GRACE_MS);
+      continue;
+    }
     return {
       ok: true,
       lock: {
@@ -214,15 +328,40 @@ export async function acquireMutationLock(
           // Owner-checked release: unlink only our own entry, never a
           // successor's (a stale takeover can only follow our death, but
           // the check costs nothing and guards the pathological case).
+          // Best effort: a refused removal leaves an entry that is stale
+          // once this process exits (removeQuietly).
           if ((await readLockHolder(lockPath)) === Number(process.pid)) {
-            await fsp.rm(lockPath, { force: true });
+            await removeQuietly(lockPath);
           }
         },
       },
     };
   }
-  // Pathological contention: still fail promptly rather than block.
-  return { ok: false, usageMessage: HELD_MESSAGE };
+  // Still prompt: the bound reached, never a block (SPEC 13.5).
+  return { ok: false, usageMessage: refusal };
+}
+
+/**
+ * Write this process's entry into the lock file just claimed and close it;
+ * false when the environment refuses the write (exhausted storage, an I/O
+ * error), the handle closed either way.
+ */
+async function writeLockEntry(
+  handle: fsp.FileHandle,
+  entry: string,
+): Promise<boolean> {
+  let written = true;
+  try {
+    await handle.writeFile(entry);
+  } catch {
+    written = false;
+  }
+  try {
+    await handle.close();
+  } catch {
+    written = false;
+  }
+  return written;
 }
 
 export type HoldResult =
