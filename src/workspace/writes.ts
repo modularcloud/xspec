@@ -196,7 +196,9 @@ async function componentOccupant(
  * byte order; nonexistent components are never listed (writes create
  * those, SPEC 13.4). The `refused-invalid-destination` evaluation
  * (core/refusal.ts) consumes this for the destination path and the
- * derived paths it would generate.
+ * derived paths it would generate, and `refused-exposed-derived-file`'s
+ * for the origin's emit destination, which discovery never reaches
+ * through such a component (SPEC 7).
  */
 export async function nonDirectoryComponents(
   root: string,

@@ -24,6 +24,12 @@
 // `refused-invalid-destination` read paths alone — the discovered sources'
 // and the derived paths the sources would generate after the move
 // (core/derived-relation.ts `destinationRelations`) — so they need no probe.
+// The file form's `refused-exposed-derived-file` likewise reads one probed
+// fact, what occupies the origin's emit destination and whether discovery
+// would reach it there, over exactly the path `exposableEmitDestination`
+// names: the rest of the reason — emission enabled, the path vacated by
+// the relocation, a configured glob reaching it, no other exclusion
+// covering it — is configuration and discovery alone (SPEC 6.5, 7, 13.4).
 //
 // The would-be reason `refused-cycle` is evaluated over the
 // post-operation workspace, never by reanalyzing rewritten text: the
@@ -47,7 +53,7 @@
 // the finding locating the moved construct and the spellings rooted at an
 // addition no offset admits at their current, pre-operation coordinates.
 //
-// SPEC 14's ten reasons are the whole refusal vocabulary: every rewritten
+// SPEC 14's eleven reasons are the whole refusal vocabulary: every rewritten
 // reference resolves by construction, so no reason exists for one that
 // would not (SPEC 6.4, 6.5). A moved reference to the target file's own
 // root — which neither form could spell there: the local form names IDs
@@ -68,6 +74,8 @@ import type { SourceClassification } from "./discovery.js";
 import {
   BARRED_SPEC_PATH_CHARACTER_LIST,
   barredSpecPathCharacters,
+  derivedFilePathKind,
+  markdownEmitDestinations,
   specSourceDerivedPaths,
 } from "./discovery.js";
 import type { Finding, FindingLocation, RefusalCode } from "./findings.js";
@@ -983,6 +991,112 @@ function describeOccupantKind(
   }
 }
 
+/**
+ * The probed facts at the origin's emit destination (workspace/writes.ts)
+ * for `refused-exposed-derived-file` (SPEC 6.5, 14): the path
+ * `exposableEmitDestination` names, what occupies it judged by `lstat` —
+ * never through a symbolic link (SPEC 13.4) — and its workspace-relative
+ * directory components occupied by anything other than a directory, which
+ * discovery never traverses (SPEC 7), distinct, in byte order.
+ */
+export interface EmitDestinationProbe {
+  readonly path: string;
+  readonly occupant: DestinationProbe["occupant"];
+  readonly obstructedComponents: readonly string[];
+}
+
+/**
+ * The pure half of `refused-exposed-derived-file` (SPEC 6.5, 14): the
+ * origin's emit destination when a file-form move would expose whatever
+ * discovery yields there — while Markdown emission is enabled (7.3), the
+ * path no emit destination once the relocation removes the origin, so no
+ * longer excluded from discovery (13.4), a configured group's globs —
+ * a spec group's or a code group's alike — reaching it (7), and no other
+ * exclusion covering it (13.4) — or null when nothing there could be
+ * exposed. Whether the path holds an occupant discovery would yield is the
+ * workspace layer's probe (`EmitDestinationProbe`). Read on its own terms
+ * (SPEC 14), whatever the destination's validity: the destination enters
+ * only as the source the relocation adds, which keeps the origin's emit
+ * destination one exactly in the exact self-move (SPEC 6.5).
+ */
+export function exposableEmitDestination(
+  configuration: Configuration,
+  classification: SourceClassification,
+  originPath: string,
+  destination: string,
+): string | null {
+  const emitted = specSourceDerivedPaths(
+    utf8Encoder.encode(originPath),
+    configuration,
+  ).markdown;
+  // SPEC 7.3: with emission disabled no path is an emit destination, so a
+  // relocation vacates none.
+  if (typeof emitted !== "string") return null;
+  // SPEC 7.3, 13.4: the emit destinations once the relocation removes the
+  // origin — every other discovered spec source's, and the destination's
+  // where it has one (13.1: the `NAME.mdx` name shape alone).
+  const remaining = new Set(
+    markdownEmitDestinations(
+      configuration,
+      classification.specSources
+        .map((source) => source.path)
+        .filter((path) => path !== originPath),
+    ),
+  );
+  const relocated = specSourceDerivedPaths(
+    utf8Encoder.encode(destination),
+    configuration,
+  ).markdown;
+  if (typeof relocated === "string") remaining.add(relocated);
+  // SPEC 13.4: still a derived-file path after the move — an emit
+  // destination, a file name containing `.xspec.`, a path under `.xspec/` —
+  // the path stays excluded from every group, exposing nothing.
+  if (derivedFilePathKind(emitted, remaining) !== null) return null;
+  // SPEC 7: discovery is controlled exclusively by configuration — only a
+  // configured group's globs could yield the occupant.
+  const bytes = utf8Encoder.encode(emitted);
+  const reached =
+    matchingGroups(configuration.specGroups, bytes).length > 0 ||
+    matchingGroups(configuration.codeGroups, bytes).length > 0;
+  return reached ? emitted : null;
+}
+
+/**
+ * `refused-exposed-derived-file` (SPEC 6.5, 14) over the probed facts at
+ * the origin's emit destination, or null when its occupant is nothing
+ * discovery would yield: discovery yields plain files alone — never a
+ * symbolic link, a directory, or any other kind — and never traverses a
+ * symbolic link or reaches below a non-directory (SPEC 7). One finding
+ * concerning that path, `locations` and `identities` empty (SPEC 14).
+ */
+function exposedDerivedFileFinding(
+  configuration: Configuration,
+  originPath: string,
+  probe: EmitDestinationProbe,
+): Finding | null {
+  if (probe.occupant !== "file" || probe.obstructedComponents.length > 0) {
+    return null;
+  }
+  const bytes = utf8Encoder.encode(probe.path);
+  const specGroups = matchingGroups(configuration.specGroups, bytes);
+  const codeGroups = matchingGroups(configuration.codeGroups, bytes);
+  const reachedBy =
+    specGroups.length > 0
+      ? `spec group ${JSON.stringify(specGroups[0]!)}`
+      : `code group ${JSON.stringify(codeGroups[0] ?? "")}`;
+  return refusalFinding(
+    "refused-exposed-derived-file",
+    `exposed derived file ${JSON.stringify(probe.path)}: the origin ` +
+      `${JSON.stringify(originPath)} emits its Markdown there, a path the ` +
+      `relocation would leave no emit destination and so no longer exclude ` +
+      `from discovery (SPEC 13.4), and it holds a plain file the globs of ` +
+      `${reachedBy} reach, which discovery would then yield as a source ` +
+      `(SPEC 7) — delete or rename that file, or narrow the globs reaching ` +
+      `it, before moving the origin (SPEC 6.5)`,
+    { path: probe.path },
+  );
+}
+
 /** The inputs of a file-form move's refusal evaluation (SPEC 6.5, 14). */
 export interface MoveFileRefusalInputs {
   /** The configuration: the derived paths sources generate (13.1, 13.2, 7.3). */
@@ -998,6 +1112,12 @@ export interface MoveFileRefusalInputs {
   readonly destination: string;
   readonly assessment: DestinationPathAssessment;
   readonly probe: DestinationProbe;
+  /**
+   * The probed facts at the origin's emit destination where
+   * `exposableEmitDestination` names it; null where it names none —
+   * nothing there could be exposed, so nothing was probed (SPEC 6.5, 14).
+   */
+  readonly emitDestinationProbe: EmitDestinationProbe | null;
 }
 
 /**
@@ -1022,6 +1142,7 @@ export function evaluateMoveFileRefusals(
     destination,
     assessment,
     probe,
+    emitDestinationProbe,
   } = inputs;
   const findings: Finding[] = [];
 
@@ -1082,6 +1203,20 @@ export function evaluateMoveFileRefusals(
     relations,
   );
   if (invalidDestination !== null) findings.push(invalidDestination);
+
+  // SPEC 14 `refused-exposed-derived-file`: the origin's emit destination,
+  // which the relocation would leave no emit destination, holds an
+  // occupant discovery would then yield as a source (SPEC 6.5, 7, 13.4) —
+  // read on its own terms beside every other reason, whatever the
+  // destination's validity (SPEC 14).
+  if (emitDestinationProbe !== null) {
+    const exposed = exposedDerivedFileFinding(
+      configuration,
+      originPath,
+      emitDestinationProbe,
+    );
+    if (exposed !== null) findings.push(exposed);
+  }
 
   // SPEC 14 `refused-cycle`: evaluated on its own terms over the would-be
   // workspace (no new cycle can arise from a pure file rename of the

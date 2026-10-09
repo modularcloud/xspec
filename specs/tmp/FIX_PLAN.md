@@ -42,10 +42,10 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T6.5-4 | section-6.5 | 1 (landed), 6 (landed) | `move specs/A.mdx#keep "specs/B.mdx#a<U+2028>b"` exits 0; then the barred-character destination arms; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; passes since Task 6 landed |
 | T6.5-11 | section-6.5-ii | 17 | arm (f): the rewritten call reads `tt(target.y)`, an untimely `text` binding |
 | T6.5-20 | section-6.5-iv | 7 (landed), 10 (and 9 for (d)'s import-type and `declare module` stagings) | arm (a): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70 after modifying the workspace; since Task 7 landed, first fails at arm (d)'s first staging (Task 10): `move specs/Z.mdx specs/B.mdx` beside `src/c.ts` holding `import "../specs/B.md"` reports 14.15 once, expected `refused-invalid-destination` alone |
-| T6.5-21 | section-6.5-iv | 8, 6 (landed; its two-reason arm) | arm (a): `move specs/A.mdx specs/sub/A.mdx` exits 0 |
+| T6.5-21 | section-6.5-iv | 8 (landed), 6 (landed; its two-reason arm) | arm (a): `move specs/A.mdx specs/sub/A.mdx` exits 0; passes since Task 8 landed |
 | T6.5-22 | section-6.5-iv | 15 | arm (b): 26 of 38 lures bound a barred name |
 | T6.5-23 | section-6.5-v | 16, 17 | 13 of 33 stagings place or root the added declaration wrongly |
-| T6.6-3 | section-6.6 | 1 (landed), 6 (landed), 7 (landed), 8, 10 | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone |
+| T6.6-3 | section-6.6 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 twins, reached only past that arm, hand-checked at Task 8: each refused `--preview` reports the real move's findings, `mapping`, `files`, and `delta` `null` |
 | T7-2 | section-7-basics | 11 | the `import defer { defineConfig }` arm builds with exit 0, expected 2 |
 | T7-6 | section-7-discovery | 5 (landed) | invalid-source arm: `check` reports 14.10 six times, expected 14.19 once |
 | T7.1-1 | section-7.1-7.3 | 5 (landed) | `specs/a"b.mdx` builds with exit 0, expected 1 |
@@ -55,41 +55,17 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T11-3 | section-11 | 13 | likewise |
 | T12.0-5 | section-12.0-i | 5 (landed) | `view 'specs/a\b.mdx'` exits 0 with no finding, expected 1 with condition 19 |
 | T12.0-10 | section-12.0-ii | 1 (landed) | `query nodes --tag a<U+2028>b` under an invalid configuration reports `configuration-error`, expected the plain usage error |
-| T12.7-2 | section-12.7 | 6 (landed), 8 | the two-reason `move specs/A.mdx "specs/a'b.mdx"` exits 0; since Task 6 landed, it exits 1 reporting `refused-invalid-destination` alone, `refused-exposed-derived-file` (Task 8) missing after it |
+| T12.7-2 | section-12.7 | 6 (landed), 8 (landed) | the two-reason `move specs/A.mdx "specs/a'b.mdx"` exits 0; since Task 6 landed, it exits 1 reporting `refused-invalid-destination` alone, `refused-exposed-derived-file` (Task 8) missing after it; passes since Task 8 landed |
 | T13.4-9 | section-13.4 | 2 (landed) | (a): a derived path above a source builds with exit 0, expected condition 22 |
 | T13.4-10 | section-13.4 | 4 (landed) | the recorded orphan's finding says "run `xspec build` to remove it" |
 | T13.4-11 | section-13.4 | 3 (landed) | (a): a condition-10 finding for a recorded path holding a directory |
 | T14-4 | section-14 | 14 (it sweeps T14-12's stagings) | U+2EBF0 in a JSX name judged one UTF-16 unit at a time: 14.20, expected 14.16 |
 | T14-6 | section-14 | 14 (likewise) | likewise |
-| T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8, 10 | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone |
+| T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 arms, reached only past that twin, hand-checked at Task 8 against T6.5-21's own expectations |
 | T14-11 | section-14 | 9 | arm (x): 14.15 reported once, expected five times |
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
 If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, and the tasks a later arm waited on beside Task 14 (Tasks 1, 2, 3, 4, and 5) have landed.
-
-## Task 8 — `refused-exposed-derived-file` (SPEC 6.5, 13.4, 7, 14, 12.7; A7, C9's last bullet)
-
-**Requirement.** SPEC 6.5: "`refused-exposed-derived-file` — a file-form move, while Markdown emission is enabled, whose origin's emit destination — no longer an emit destination once the relocation removes the origin, so no longer excluded from discovery (13.4) — holds an occupant discovery would then yield as a source (7, 13.4)." SPEC 14 gives it one finding concerning that path: `path` the origin's emit destination, `locations` `[]`, `identities` `[]`. 14 lists it after `refused-invalid-destination` and before `refused-invalid-rewrite`, which fixes its place in a findings array (12.7). Further:
-- it is judged on its own terms beside every other reason: `move specs/A.mdx "specs/a'b.mdx"` in T6.5-21(a)'s staging reports `refused-invalid-destination` then `refused-exposed-derived-file`;
-- a section move relocates no origin and never meets it (T6.5-21(e));
-- a symbolic link, which discovery never yields (7), and a path no glob reaches expose nothing (T6.5-21 (c), (d)).
-
-**Observed.** `move specs/A.mdx specs/sub/A.mdx` succeeds, its preview too, in T6.5-21 (a) — after a build, `specs/A.md` holding A's Markdown and a second spec glob `specs/*.md` reaching it — and (b) — no build, a user's plain `specs/A.md`, and a code group `specs/*.md`. In (b) the next `check` then fails with 14.20 on the exposed `specs/A.md`. The code is absent from `REFUSAL_CODES` in `src/core/findings.ts` (~96). Controls (c)–(e) behave.
-
-**Location.**
-- `REFUSAL_CODES` in `src/core/findings.ts` (~96): its order is SPEC 14's listing order and drives finding order.
-- `evaluateMoveFileRefusals` in `src/core/refusal.ts` (~856), and the destination probing in the workspace layer.
-- Discovery's rules in `src/core/discovery.ts`: what the groups' globs match, which occupants it yields, and the exclusions (`.xspec.` file names, `.xspec/` paths, emit destinations).
-
-**Change.**
-- Add the code between `refused-invalid-destination` and `refused-invalid-rewrite`. Grep for every other enumeration of refusal codes (renderers, exit-class helpers, comments) and update it.
-- In the file form, while emission is enabled, probe the occupant at the origin's emit destination without following links. Report the finding when discovery would yield it once that path is no emit destination: a plain file that some configured group's globs match and that no other exclusion covers after the move.
-- Keep the check independent of the destination's validity.
-
-**Verification.**
-- Should turn green: `section-6.5-iv.test.ts` T6.5-21 (its two-reason arm too: Task 6 has landed).
-- Also green, Task 6 having landed: `section-12.7.test.ts` T12.7-2. Partially: `section-6.6.test.ts` T6.6-3, `section-14.test.ts` T14-7.
-- Neighbours: `section-6.5.test.ts`, `section-14.test.ts` (T14-6's stable codes).
 
 ## Task 9 — Import types and string-named module declarations are module-linking forms (14.15), each located per SPEC 14; `export import X = require(…)` is located from `import` (SPEC 4, 4.5, 14.15, 14's location rule, 1.7; A2, C3)
 

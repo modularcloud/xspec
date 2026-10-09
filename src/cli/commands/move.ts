@@ -57,7 +57,9 @@
 //    collisions after the removal), the target parent, destination
 //    occupancy and validity (obstructed destination-side directory
 //    components and the derived-path relations over the sources after the
-//    move included), would-be dependency and spec-import cycles,
+//    move included), the file form's origin emit destination exposed to
+//    discovery (`refused-exposed-derived-file`), would-be dependency and
+//    spec-import cycles,
 //    the section form's would-be text — each judged file well-formed, each
 //    added import at an admissible offset (`refused-invalid-rewrite`) —
 //    and moved text holding an import declaration (no reason exists for a
@@ -66,9 +68,10 @@
 //    stable code and concerned identity, path, or located participants (at
 //    current, pre-operation coordinates), as the 12.7 findings report
 //    (exit 1), modifying nothing. `--preview` (SPEC 6.6) shares exactly
-//    this evaluation. The destination-side filesystem facts are probed by
-//    the workspace layer (workspace/writes.ts) over exactly the paths the
-//    core assessment names.
+//    this evaluation. The destination-side filesystem facts, and the
+//    occupant of the origin's emit destination, are probed by the
+//    workspace layer (workspace/writes.ts) over exactly the paths the core
+//    assessments name.
 // 6. The rewritten workspace is re-validated in memory and the complete
 //    write set passes the SPEC 14.22 symlink check — internal-consistency
 //    guards on the would-succeed path (the refusal evaluation above
@@ -98,11 +101,13 @@ import { planMoveFile, planMoveSection } from "../../core/move.js";
 import type {
   DestinationPathAssessment,
   DestinationProbe,
+  EmitDestinationProbe,
 } from "../../core/refusal.js";
 import {
   assessDestinationPath,
   evaluateMoveFileRefusals,
   evaluateMoveSectionRefusals,
+  exposableEmitDestination,
   UNPROBED_DESTINATION,
 } from "../../core/refusal.js";
 import { executeBuildOutputs } from "../../workspace/build.js";
@@ -170,6 +175,34 @@ async function assessAndProbeDestination(
         assessment.componentProbePaths,
       ),
     },
+  };
+}
+
+/**
+ * Probe the origin's emit destination for `refused-exposed-derived-file`
+ * (SPEC 6.5, 14) where the pure half (core/refusal.ts
+ * `exposableEmitDestination`) names it — its occupant by `lstat`, never
+ * through a symbolic link (SPEC 13.4), and its workspace-relative directory
+ * components holding anything other than a directory, which discovery
+ * never traverses (SPEC 7) — or null, probing nothing, where it names none.
+ */
+async function probeEmitDestination(
+  workspace: LoadedWorkspace,
+  classification: SourceClassification,
+  originPath: string,
+  destination: string,
+): Promise<EmitDestinationProbe | null> {
+  const path = exposableEmitDestination(
+    workspace.configuration,
+    classification,
+    originPath,
+    destination,
+  );
+  if (path === null) return null;
+  return {
+    path,
+    occupant: await probeOccupant(workspace.root, path),
+    obstructedComponents: await nonDirectoryComponents(workspace.root, [path]),
   };
 }
 
@@ -336,13 +369,20 @@ async function runMoveFile(
 
   // SPEC 6.5/14: evaluate every applicable refusal reason together over
   // the valid workspace — destination occupancy and validity, identity
-  // change, and the would-be cycles, one finding per reason — and refuse
-  // (exit 1) with the 12.7 findings report, nothing modified. `--preview`
-  // shares exactly this evaluation (SPEC 6.6).
+  // change, the origin's emit destination exposed to discovery, and the
+  // would-be cycles, one finding per reason — and refuse (exit 1) with the
+  // 12.7 findings report, nothing modified. `--preview` shares exactly
+  // this evaluation (SPEC 6.6).
   const { assessment, probe } = await assessAndProbeDestination(
     workspace,
     destination,
     true,
+  );
+  const emitDestinationProbe = await probeEmitDestination(
+    workspace,
+    analysis.classification,
+    originPath,
+    destination,
   );
   const refusals = evaluateMoveFileRefusals({
     configuration: workspace.configuration,
@@ -353,6 +393,7 @@ async function runMoveFile(
     destination,
     assessment,
     probe,
+    emitDestinationProbe,
   });
   if (refusals.length > 0) {
     return emitFindingsRefusal(preview, invocation.json, stdout, refusals);
