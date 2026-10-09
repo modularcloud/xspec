@@ -49,7 +49,7 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T7-2 | section-7-basics | 11 (landed) | the `import defer { defineConfig }` arm builds with exit 0, expected 2; passes since Task 11 landed |
 | T7-6 | section-7-discovery | 5 (landed) | invalid-source arm: `check` reports 14.10 six times, expected 14.19 once |
 | T7.1-1 | section-7.1-7.3 | 5 (landed) | `specs/a"b.mdx` builds with exit 0, expected 1 |
-| T7.3-1 | section-7.1-7.3 | 12 | `outDir ".xspec"` builds with exit 0, expected 2 |
+| T7.3-1 | section-7.1-7.3 | 12 (landed) | `outDir ".xspec"` builds with exit 0, expected 2; passes since Task 12 landed |
 | T11-1 | section-11 | 13 | a root's tags reported `[]`, expected absent |
 | T11-2 | section-11 | 13 | likewise |
 | T11-3 | section-11 | 13 | likewise |
@@ -66,20 +66,6 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
 If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, and the tasks a later arm waited on beside Task 14 (Tasks 1, 2, 3, 4, and 5) have landed.
-
-## Task 12 — A `markdown.outDir` naming the graph-data area is a configuration error (SPEC 7.3, 14.14, 13.3, 11.6; B3, C2)
-
-**Requirement.** SPEC 7.3: "So is an `outDir` of `.xspec` or beginning with `.xspec/`: no emit destination lies in the graph-data area (13.3), which holds graph data at unenumerated paths beside the journal (6.1) and review sessions (10.1), so graph data is the only derived file under it". 14.14 lists "a `markdown.outDir` not in workspace-relative form or naming the graph-data area or a path under it". Comparison is byte-wise (12.0): `.xspec2`, `.xspecs/md`, `out/.xspec`, and `.XSPEC` are not the area and stay valid.
-
-**Observed.** An `outDir` of `.xspec`, `.xspec/md`, or `.xspec/reviews` builds with exit 0 and emits under `.xspec/`; the inventory then lists `.xspec/md/specs/A.md` as derived and recorded, against 11.6. The look-alikes are already accepted.
-
-**Location.** The `outDir` validation in `src/core/config.ts` (~963–990) and `outDirSpellingProblem` in `src/core/discovery.ts` (~215).
-
-**Change.** After the spelling check, refuse `outDir === ".xspec"` and any `outDir` beginning with `.xspec/` as a configuration error naming the graph-data area (SPEC 7.3, 14.14).
-
-**Verification.**
-- Should turn green: `section-7.1-7.3.test.ts` T7.3-1, which fails first at its `".xspec"` arm; reviewer B checked that its later arms pass.
-- Neighbours: `section-7-basics.test.ts`, `section-11.6.test.ts`, `section-13.1-13.2.test.ts`.
 
 ## Task 13 — A root node's tags are reported absent on `query` and `show` (SPEC 11.1, 12.4, 12.7, 5.5; B4, C12)
 

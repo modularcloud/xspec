@@ -19,6 +19,7 @@
 import type { Configuration, ConfiguredGroup } from "./config.js";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
+import { GRAPH_DATA_AREA } from "./graph-data.js";
 import type { PathText } from "./path-text.js";
 import { pathTextOf } from "./path-text.js";
 
@@ -330,6 +331,19 @@ export function outDirSpellingProblem(outDir: string): string | null {
     }
   }
   return null;
+}
+
+/**
+ * SPEC 7.3, 14.14: whether a `markdown.outDir` in plain workspace-relative
+ * form ({@link outDirSpellingProblem}) names the graph-data area or a path
+ * under it — "an `outDir` of `.xspec` or beginning with `.xspec/`" — a
+ * configuration error, since no emit destination lies in the graph-data
+ * area (13.3), where graph data is the only derived file (11.6, 13.1,
+ * 13.4). Compared byte-wise, segment by segment (12.0): look-alikes such
+ * as `.xspec2`, `.xspecs/md`, `out/.xspec`, and `.XSPEC` are not the area.
+ */
+export function outDirNamesGraphDataArea(outDir: string): boolean {
+  return outDir === GRAPH_DATA_AREA || outDir.startsWith(`${GRAPH_DATA_AREA}/`);
 }
 
 /**

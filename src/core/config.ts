@@ -25,11 +25,15 @@
 import ts from "./ts-module.js";
 import type * as tst from "typescript";
 import { byteOrderedSet } from "./bytes.js";
-import { outDirSpellingProblem } from "./discovery.js";
+import {
+  outDirNamesGraphDataArea,
+  outDirSpellingProblem,
+} from "./discovery.js";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
 import type { CompiledGlob } from "./glob.js";
 import { compileGlob, unboundToCaptures } from "./glob.js";
+import { GRAPH_DATA_AREA } from "./graph-data.js";
 import { identifierSpelling, stringLiteralValue } from "./references.js";
 
 // ---------------------------------------------------------------------------
@@ -934,7 +938,8 @@ function validateGroups(
 /**
  * SPEC 7.3: `markdown.emit` is a required boolean; `markdown.outDir` is an
  * optional directory path relative to the workspace root, spelled in plain
- * workspace-relative form; any other spelling and unknown keys are
+ * workspace-relative form and naming neither the graph-data area nor a path
+ * under it; any other spelling or placement and unknown keys are
  * configuration errors (14.14).
  */
 function validateMarkdown(
@@ -994,6 +999,18 @@ function validateMarkdown(
             `as a directory path relative to the workspace root: one or ` +
             `more non-empty "/"-separated segments, none "." or ".." ` +
             `(SPEC 7.3, 14.14)`,
+          outDirNode.line,
+        );
+      } else if (outDirNamesGraphDataArea(outDirNode.value)) {
+        // SPEC 7.3, 14.14: "So is an `outDir` of `.xspec` or beginning
+        // with `.xspec/`" — compared byte-wise (12.0), so `.xspec2` and
+        // `.xspecs/md` stay valid.
+        findings.add(
+          `"markdown.outDir" ("${outDirNode.value}") names the graph-data ` +
+            `area "${GRAPH_DATA_AREA}" or a path under it — no emit ` +
+            `destination may lie in the graph-data area, where graph data ` +
+            `is the only derived file; choose a directory outside ` +
+            `"${GRAPH_DATA_AREA}/" (SPEC 7.3, 13.3, 14.14)`,
           outDirNode.line,
         );
       } else {
