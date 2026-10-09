@@ -59,17 +59,17 @@ import type { ByteRange } from "./bytes.js";
 import { sortByBytes } from "./bytes.js";
 import type { CodeAnalysis } from "./code-analysis.js";
 import type { Configuration, ConfiguredGroup } from "./config.js";
-import {
-  BARRED_SPEC_PATH_CHARACTER_LIST,
-  barredSpecPathCharacters,
-  specSourceDerivedPaths,
-} from "./discovery.js";
-import type { SourceClassification } from "./discovery.js";
 import type {
   DerivedPathRole,
   DestinationRelation,
 } from "./derived-relation.js";
 import { destinationRelations } from "./derived-relation.js";
+import type { SourceClassification } from "./discovery.js";
+import {
+  BARRED_SPEC_PATH_CHARACTER_LIST,
+  barredSpecPathCharacters,
+  specSourceDerivedPaths,
+} from "./discovery.js";
 import type { Finding, FindingLocation, RefusalCode } from "./findings.js";
 import { compareLocations, sortLocations } from "./findings.js";
 import { findCycles } from "./graph.js";

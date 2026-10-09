@@ -41,11 +41,11 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T6.4-3 | section-6.4 | 1 (landed) | `rename specs/A.mdx a "a<U+2028>b"` exits 0 |
 | T6.5-4 | section-6.5 | 1 (landed), 6 (landed) | `move specs/A.mdx#keep "specs/B.mdx#a<U+2028>b"` exits 0; then the barred-character destination arms; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; passes since Task 6 landed |
 | T6.5-11 | section-6.5-ii | 17 | arm (f): the rewritten call reads `tt(target.y)`, an untimely `text` binding |
-| T6.5-20 | section-6.5-iv | 7, 10 (and 9 for (d)'s import-type and `declare module` stagings) | arm (a): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70 after modifying the workspace |
+| T6.5-20 | section-6.5-iv | 7 (landed), 10 (and 9 for (d)'s import-type and `declare module` stagings) | arm (a): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70 after modifying the workspace; since Task 7 landed, first fails at arm (d)'s first staging (Task 10): `move specs/Z.mdx specs/B.mdx` beside `src/c.ts` holding `import "../specs/B.md"` reports 14.15 once, expected `refused-invalid-destination` alone |
 | T6.5-21 | section-6.5-iv | 8, 6 (landed; its two-reason arm) | arm (a): `move specs/A.mdx specs/sub/A.mdx` exits 0 |
 | T6.5-22 | section-6.5-iv | 15 | arm (b): 26 of 38 lures bound a barred name |
 | T6.5-23 | section-6.5-v | 16, 17 | 13 of 33 stagings place or root the added declaration wrongly |
-| T6.6-3 | section-6.6 | 1 (landed), 6 (landed), 7, 8, 10 | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1 |
+| T6.6-3 | section-6.6 | 1 (landed), 6 (landed), 7 (landed), 8, 10 | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone |
 | T7-2 | section-7-basics | 11 | the `import defer { defineConfig }` arm builds with exit 0, expected 2 |
 | T7-6 | section-7-discovery | 5 (landed) | invalid-source arm: `check` reports 14.10 six times, expected 14.19 once |
 | T7.1-1 | section-7.1-7.3 | 5 (landed) | `specs/a"b.mdx` builds with exit 0, expected 1 |
@@ -61,42 +61,11 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T13.4-11 | section-13.4 | 3 (landed) | (a): a condition-10 finding for a recorded path holding a directory |
 | T14-4 | section-14 | 14 (it sweeps T14-12's stagings) | U+2EBF0 in a JSX name judged one UTF-16 unit at a time: 14.20, expected 14.16 |
 | T14-6 | section-14 | 14 (likewise) | likewise |
-| T14-7 | section-14 | 1 (landed), 6 (landed), 7, 8, 10 | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1 |
+| T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8, 10 | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone |
 | T14-11 | section-14 | 9 | arm (x): 14.15 reported once, expected five times |
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
 If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, and the tasks a later arm waited on beside Task 14 (Tasks 1, 2, 3, 4, and 5) have landed.
-
-## Task 7 — Move destinations: the derived-path relations of `refused-invalid-destination` (SPEC 6.5, 13.4, 14.22, 14; A6 (a)–(c) and (e), C9's first four bullets)
-
-After Task 2 (landed; reuse its relation: `derivedPathConflicts` over plain path sets, every pair of an offending derived path and a source or derived path beneath it, and `derivedPathEntries` for every spec source's module, companion, and Markdown paths tagged with role and source, both in `src/core/derived-relation.ts`; `build`'s validations merge it with the occupied-component relation in `refusedWriteFindings`, `src/workspace/build-validation.ts`).
-
-**Requirement.** SPEC 6.5 refuses as `refused-invalid-destination` "a file-form destination or a target file to be created, or a derived path it would generate, that is a directory component of another derived path the sources would generate after the move (13.1, 13.2, 7.3) or lies under one, or a derived path it would generate that is the path of, or a directory component of the path of, a discovered source other than a relocated origin". Its consequences:
-- The relations read the workspace after the move. A file move relocates its origin, so the origin's own module, companion, and Markdown paths are retired and refuse nothing (T6.5-20(e)), and the relocated origin is exempt from the source relation (T6.5-20(c)'s performed exemption). A section move relocates no origin, so the origin keeps its path and its derived paths in both relations.
-- Companions count as derived paths. Each relation holds whether or not anything occupies the paths.
-- The refusal is one finding with the reason's other causes, concerning the destination (`path` the destination as spelled, `locations` `[]`), exit 1, nothing modified, `--preview` alike — never 14.22, since a refused operation reports refusal reasons alone (14). Where these relations meet the occupied-component relation at one component, the move still reports exactly one `refused-invalid-destination` (T6.5-20(a) after a build).
-- So the finishing regeneration "cannot fail for any validation reason" (6.5).
-
-**Observed (T6.5-20's stagings; spec globs `specs/**/*.mdx`).**
-- (a) Before any build, beside `specs/A.mdx`: `move specs/Z.mdx specs/A.xspec.ts/B.mdx` previews with exit 0. The real move relocates and appends the journal, then exits 70 ("cannot write specs/A.xspec.ts/B.xspec.ts … is a plain file"), the regeneration writing `specs/A.xspec.ts` over the new directory and so losing the moved source. Likewise under a companion path (`specs/A.xspec.impl.js/B.mdx`) and for the section move creating `specs/A.xspec.ts/B.mdx` (the origin left empty, the moved text lost). Under `outDir: "out"` beside `specs/x.mdx`, `move specs/Z.mdx specs/x.md/y.mdx` is performed, leaving 14.22.
-- (b) `outDir: "out"` beside `specs/a.md/b.mdx`: `move specs/Z.mdx specs/a.mdx` is performed, leaving 14.22. With `outDir: "specs/B.mdx/md"`, `move specs/Z.mdx specs/B.mdx` exits 70 after modifying the workspace.
-- (c) Emission next to sources: moves whose emit, module, or companion path is a code source's path (`specs/B.md`) or a directory component of a source's (`specs/B.md/C.mdx`, `specs/B.md/x.ts`, `specs/A.xspec.ts/c.ts`, `specs/A.xspec.impl.js/c.ts`) are performed, overwriting or deleting the source. The section-form exemption staging `move specs/B.md/C.mdx#x specs/B.mdx#x` is performed, where it must be refused.
-- (e) The section-form control `move specs/A.mdx#x specs/A.xspec.ts/B.mdx#x` exits 70 after modifying the workspace.
-- Correct today: the occupied-component arm after a build, (c)'s file-form exemption, and (e)'s file-form moves under the origin's own derived paths.
-
-**Location.** In `src/core/refusal.ts`: `assessDestinationPath` (~206), `evaluateMoveFileRefusals` (~856), `evaluateMoveSectionRefusals` (~1064). Their filesystem inputs are probed by the workspace layer (`src/cli/commands/move.ts`, `src/workspace/writes.ts`). Derived paths per source: `specSourceDerivedPaths` (already called in `assessDestinationPath`), companions per 13.1.
-
-**Change.** Before anything is modified, and identically under `--preview`, apply Task 2's relation to the post-move path sets:
-- the sources after the move — in the file form the origin replaced by the destination, in the section form the target file to be created added — code sources included;
-- every derived path those sources generate, the destination's included.
-
-Keep only the violations involving the destination or a derived path it would generate, and add each as a cause of the one `refused-invalid-destination` finding.
-
-**Verification.**
-- Should turn green, with Task 10: `section-6.5-iv.test.ts` T6.5-20 — (a)–(c) and (e) here, (d) in Task 10.
-- Partially: `section-6.6.test.ts` T6.6-3, `section-14.test.ts` T14-7.
-- Neighbours: `section-6.5.test.ts` (T6.5-4's occupied-component and symbolic-link arms must stay one finding), `section-6.5-ii.test.ts`, `section-6.5-iii.test.ts`, `section-13.4.test.ts`.
-- By hand: each staging above exits 1 with exactly one finding, the workspace byte-unchanged and the journal absent or unchanged.
 
 ## Task 8 — `refused-exposed-derived-file` (SPEC 6.5, 13.4, 7, 14, 12.7; A7, C9's last bullet)
 
@@ -167,14 +136,14 @@ After Task 9.
 - the controls (emission disabled; `require(…)`, `/// <reference path>`, template-literal `import()`) behave.
 
 **Location.**
-- `evaluateMoveFileRefusals` (~856) and `evaluateMoveSectionRefusals` (~1064) in `src/core/refusal.ts`, which need each code source's module-linking specifiers as input (from the code analyses the move already holds).
+- `evaluateMoveFileRefusals` (~1013) and `evaluateMoveSectionRefusals` (~1250) in `src/core/refusal.ts`, which need each code source's module-linking specifiers as input (from the code analyses the move already holds). Since Task 7 both take `configuration` and `classification`, and `invalidDestinationFinding` takes the derived-path relations (`destinationRelations`, `src/core/derived-relation.ts`) as causes beside the occupied components: add the designation as one more cause there, so the finding stays one.
 - The specifier resolution `checkDerivedSpecifier` uses in `src/core/code-analysis.ts`.
 - The post-move re-validation in `src/cli/commands/rewrite-validation.ts`, which must never be what reports this case.
 
 **Change.** Have the code analysis expose every module-linking form's specifier with its file. Resolve each relative specifier lexically from its file's directory, as 14.15's derived-path check does (the resolution of 2.1 and 4). While emission is enabled, add the cause when one designates the destination's would-be Markdown emit path (`specSourceDerivedPaths(destination).markdown`).
 
 **Verification.**
-- Should turn green, with Task 7: `section-6.5-iv.test.ts` T6.5-20 — its (d) arm and (d)'s section-form stagings.
+- Should turn green (Task 7 has landed): `section-6.5-iv.test.ts` T6.5-20 — its (d) arm and (d)'s section-form stagings; (e) follows (d) in the table and passes by hand.
 - Partially: `section-6.6.test.ts` T6.6-3, `section-14.test.ts` T14-7.
 - Neighbours: `section-4.test.ts`, `section-6.5.test.ts`.
 
