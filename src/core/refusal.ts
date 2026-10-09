@@ -342,13 +342,16 @@ export function assessDestinationPath(
  * (`destinationRelations`) — or null when the destination is valid. Where
  * the occupied-component relation and the derived-path relations meet at
  * one component (a built module path the destination lies under), they
- * are causes of this one finding: one reason (SPEC 6.5, 14).
+ * are causes of this one finding: one reason (SPEC 6.5, 14). The
+ * emit-path designations (`emitPathDesignationCauses`) come last, as
+ * SPEC 6.5 lists them.
  */
 function invalidDestinationFinding(
   destination: string,
   causes: readonly string[],
   obstructedComponents: readonly string[],
   relations: readonly DestinationRelation[],
+  designations: readonly string[],
 ): Finding | null {
   const all = [...causes];
   for (const component of obstructedComponents) {
@@ -361,6 +364,7 @@ function invalidDestinationFinding(
     );
   }
   all.push(...relationCauses(destination, relations));
+  all.push(...designations);
   if (all.length === 0) return null;
   return refusalFinding(
     "refused-invalid-destination",
@@ -480,6 +484,57 @@ function relationCauses(
     }
   }
   return causes;
+}
+
+/**
+ * SPEC 6.5's last `refused-invalid-destination` cause: "while Markdown
+ * emission is enabled (7.3), the path the destination would emit Markdown
+ * to (13.2) designated by the relative specifier of a code source's
+ * module-linking form, which the move would make a derived-file path (4,
+ * 14.15)". Every module-linking form SPEC 4 names counts, wherever it
+ * stands — import and export declarations, `import X = require(…)`, a
+ * dynamic `import()` with a static specifier, an import type, a
+ * string-named module declaration — each relative specifier resolved as
+ * 14.15's derived-path rule resolves it (`CodeAnalysis.linkedPaths`); a
+ * `require(…)` call, a triple-slash directive, and a dynamic `import()`
+ * whose specifier is no string literal name no module (SPEC 4) and never
+ * count. One cause naming every designating code source in byte order
+ * (SPEC 12.0), so the finding stays one (SPEC 14): the refusal forestalls
+ * the 14.15 the finishing regeneration's re-validation would otherwise
+ * meet, a refused operation reporting refusal reasons alone (SPEC 14).
+ * `destination` is a probeable spelling — valid UTF-8, so its emit path is
+ * a plain string, compared with the designated paths byte-wise (12.0).
+ */
+function emitPathDesignationCauses(
+  configuration: Configuration,
+  destination: string,
+  code: readonly CodeAnalysis[],
+): string[] {
+  const { markdown } = specSourceDerivedPaths(
+    utf8Encoder.encode(destination),
+    configuration,
+  );
+  // Null while emission is disabled — no path is then an emit destination
+  // (SPEC 7.3) — and for a destination lacking `.mdx`, which generates
+  // nothing (SPEC 13.1, 13.2).
+  if (typeof markdown !== "string") return [];
+  const designating = sortByBytes(
+    code.filter((analysis) => analysis.linkedPaths.has(markdown)),
+    (analysis) => pathTextKey(analysis.file),
+  );
+  if (designating.length === 0) return [];
+  const sources = englishList(
+    designating.map((analysis) => quotePath(analysis.file)),
+  );
+  return [
+    `${derivedPathWords("markdown", "the destination")}, ` +
+      `${quotePath(markdown)}, is designated by the relative specifier of ` +
+      `a module-linking form in the code ` +
+      `${designating.length === 1 ? "source" : "sources"} ${sources} — ` +
+      `the move would make it a derived-file path, which no ` +
+      `module-linking form may designate other than through a spec ` +
+      `module import's ".xspec" specifier (SPEC 4, 13.2, 13.4, 7.3, 14.15)`,
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -1107,6 +1162,12 @@ export interface MoveFileRefusalInputs {
    */
   readonly classification: SourceClassification;
   readonly specs: readonly SpecFileAnalysis[];
+  /**
+   * The code sources, whose module-linking forms' designated paths the
+   * destination's would-be Markdown emit path is checked against (SPEC
+   * 6.5, 4, 14.15).
+   */
+  readonly code: readonly CodeAnalysis[];
   readonly graph: WorkspaceGraph;
   readonly originPath: string;
   readonly destination: string;
@@ -1137,6 +1198,7 @@ export function evaluateMoveFileRefusals(
     configuration,
     classification,
     specs,
+    code,
     graph,
     originPath,
     destination,
@@ -1187,7 +1249,11 @@ export function evaluateMoveFileRefusals(
   // the derived-path relations (SPEC 6.5) among them, read over the
   // sources after the move: the origin relocated to the destination, so
   // its own derived paths are retired and it is exempt from the source
-  // relation. A malformed spelling is never related to the workspace.
+  // relation; and the destination's would-be emit path designated by a
+  // code source's module-linking form (SPEC 6.5, 4, 14.15) — the code
+  // sources stay where they are, and the specifiers a file move rewrites
+  // all end in `.xspec`, so their designated paths are the same after the
+  // move. A malformed spelling is never related to the workspace.
   const relations = assessment.probeable
     ? destinationRelations(configuration, destination, {
         spec: classification.specSources
@@ -1196,11 +1262,15 @@ export function evaluateMoveFileRefusals(
         code: classification.codeSources.map((source) => source.path),
       })
     : [];
+  const designations = assessment.probeable
+    ? emitPathDesignationCauses(configuration, destination, code)
+    : [];
   const invalidDestination = invalidDestinationFinding(
     destination,
     assessment.causes,
     probe.obstructedComponents,
     relations,
+    designations,
   );
   if (invalidDestination !== null) findings.push(invalidDestination);
 
@@ -1484,19 +1554,27 @@ export function evaluateMoveSectionRefusals(
   // discovered source and the created target — the section form relocates
   // no origin, so the origin keeps its path and its derived paths in both
   // relations (SPEC 6.5). A discovered target adds no path, its relations
-  // ruled out by the valid-workspace precondition (13.4, 14.22).
-  const relations =
-    target === null && inputs.assessment.probeable
-      ? destinationRelations(configuration, targetPath, {
-          spec: classification.specSources.map((source) => source.path),
-          code: classification.codeSources.map((source) => source.path),
-        })
-      : [];
+  // ruled out by the valid-workspace precondition (13.4, 14.22). The
+  // emit-path designation (SPEC 6.5, 4, 14.15) likewise applies to a
+  // target file to be created alone: a discovered target's emit path is
+  // a configured emit destination already, so no code source's form
+  // designates it in a valid workspace.
+  const created = target === null && inputs.assessment.probeable;
+  const relations = created
+    ? destinationRelations(configuration, targetPath, {
+        spec: classification.specSources.map((source) => source.path),
+        code: classification.codeSources.map((source) => source.path),
+      })
+    : [];
+  const designations = created
+    ? emitPathDesignationCauses(configuration, targetPath, code)
+    : [];
   const invalidDestination = invalidDestinationFinding(
     targetPath,
     inputs.assessment.causes,
     probe.obstructedComponents,
     relations,
+    designations,
   );
   if (invalidDestination !== null) findings.push(invalidDestination);
 

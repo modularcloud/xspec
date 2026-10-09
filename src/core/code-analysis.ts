@@ -302,6 +302,22 @@ export interface CodeAnalysis {
    */
   readonly spelledNames: ReadonlySet<string>;
   /**
+   * The workspace-relative path each relative specifier of the file's
+   * module-linking forms designates (SPEC 4), resolved lexically from the
+   * file's directory as 2.1 resolves — exactly the paths 14.15's
+   * derived-path rule judges (SPEC 4, 13.4): those of import and export
+   * declarations, `import X = require(…)` declarations, dynamic `import()`
+   * calls with a static string-literal specifier, import types, and
+   * string-named module declarations, wherever they stand, each whose
+   * specifier does not end in `.xspec` (such a specifier names a spec
+   * module, designating a spec source, 2.1). A specifier climbing out of
+   * the workspace root designates nothing. SPEC 6.5 reads them: a move
+   * destination whose Markdown emit path one of them names would make
+   * that form invalid (14.15), so the move is refused
+   * (`refused-invalid-destination`).
+   */
+  readonly linkedPaths: ReadonlySet<string>;
+  /**
    * The per-file 14.7/14.8/14.15/14.18 findings, ordered by location — a
    * cross-module call's 14.11 is reported at resolution (graph.ts), since
    * the condition needs an argument that resolves (SPEC 14.11).
@@ -673,6 +689,12 @@ class CodeAnalyzer {
     readonly name: string;
     readonly declaration: tst.Node;
   }[] = [];
+  /**
+   * The paths the module-linking forms' relative specifiers designate,
+   * gathered where 14.15's derived-path rule judges them
+   * (`checkDerivedSpecifier`; `CodeAnalysis.linkedPaths`, SPEC 4, 6.5).
+   */
+  private readonly linkedPaths = new Set<string>();
 
   constructor(
     private readonly path: string,
@@ -697,6 +719,7 @@ class CodeAnalyzer {
         (a, b) => a.range.start - b.range.start || a.range.end - b.range.end,
       ),
       spelledNames: spelledIdentifierNames(this.sourceFile),
+      linkedPaths: this.linkedPaths,
       findings: sortFindings(this.findings),
     };
   }
@@ -1388,6 +1411,9 @@ class CodeAnalyzer {
     // the literal replacement character.
     const resolved = resolveImportSpecifier(this.path, specifier);
     if (resolved === null) return;
+    // SPEC 6.5: a move must not make this path a derived-file path — its
+    // destination's would-be Markdown emit path is checked against it.
+    this.linkedPaths.add(resolved);
     const kind = derivedFilePathKind(
       resolved,
       this.context.markdownDestinations,

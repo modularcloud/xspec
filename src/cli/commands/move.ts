@@ -388,6 +388,7 @@ async function runMoveFile(
     configuration: workspace.configuration,
     classification: analysis.classification,
     specs: analysis.specs,
+    code: analysis.code,
     graph: analysis.graph,
     originPath,
     destination,
