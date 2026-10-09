@@ -42,7 +42,113 @@ export function containsReplacementCharacter(path: string): boolean {
   return path.includes(REPLACEMENT_CHARACTER);
 }
 
+/**
+ * SPEC 7.1 → 14.19: the characters no spec-group file's workspace-relative
+ * path contains — `"`, `'`, `\`, U+000A (line feed), U+000D (carriage
+ * return), U+2028 (line separator), and U+2029 (paragraph separator) — so
+ * that every canonical specifier spelling designating a spec source (2.1;
+ * the spelling every specifier rewrite and import addition writes, 6.5),
+ * delimited by either quote character, is a well-formed string literal
+ * (14.20) whose value is the same read verbatim (2.4) or as TypeScript
+ * tooling reads it (13.1). Keyed by code unit: all seven are BMP
+ * characters and no surrogate half is any of them, so a code-unit scan is
+ * exact. Each value names the character for diagnostics, the printable
+ * ones built from their code points.
+ */
+const BARRED_SPEC_PATH_CHARACTERS: ReadonlyMap<number, string> = new Map([
+  [0x22, `a double quote (${String.fromCharCode(0x22)})`],
+  [0x27, `a single quote (${String.fromCharCode(0x27)})`],
+  [0x5c, `a backslash (${String.fromCharCode(0x5c)})`],
+  [0x0a, "a line feed (U+000A)"],
+  [0x0d, "a carriage return (U+000D)"],
+  [0x2028, "a line separator (U+2028)"],
+  [0x2029, "a paragraph separator (U+2029)"],
+]);
+
+/** Names joined as an English list: `a`, `a or b`, `a, b, or c`. */
+function joinAlternatives(names: readonly string[]): string {
+  if (names.length <= 2) return names.join(" or ");
+  return `${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]!}`;
+}
+
+/**
+ * SPEC 7.1: every character the spec-group path rule bars, named, as one
+ * English list — the rule's wording for diagnostics.
+ */
+export const BARRED_SPEC_PATH_CHARACTER_LIST = joinAlternatives([
+  ...BARRED_SPEC_PATH_CHARACTERS.values(),
+]);
+
+/**
+ * SPEC 7.1 → 14.19: the characters of `path` (a workspace-relative path
+ * read as characters) that 7.1 bars from a spec-group file's path, each
+ * named for diagnostics, in order of first occurrence — empty exactly when
+ * the path holds none, anywhere: the file name and every directory
+ * component alike. The one 7.1 character rule every spec-path judgement
+ * applies: discovery's (`classifySources`) and a move destination's
+ * (SPEC 6.5, `refused-invalid-destination`).
+ */
+export function barredSpecPathCharacters(path: string): readonly string[] {
+  const named: string[] = [];
+  const seen = new Set<number>();
+  for (let index = 0; index < path.length; index += 1) {
+    const code = path.charCodeAt(index);
+    const name = BARRED_SPEC_PATH_CHARACTERS.get(code);
+    if (name !== undefined && !seen.has(code)) {
+      seen.add(code);
+      named.push(name);
+    }
+  }
+  return named;
+}
+
+/**
+ * SPEC 7.1 → 14.19: the description of `path`'s barred characters (null
+ * when `barredSpecPathCharacters(path)` is empty), naming each and where it
+ * lies — the file name, a directory component, or both — with the
+ * correction that fits (SPEC 14: an actionable error identifies the
+ * correction). The path itself is never embedded: the finding's concerned
+ * path carries it, and a line feed or carriage return in it would break a
+ * one-line message.
+ */
+export function barredSpecPathDescription(path: string): string | null {
+  const found = barredSpecPathCharacters(path);
+  if (found.length === 0) return null;
+  const fileNameStart = path.lastIndexOf("/") + 1;
+  const inDirectory =
+    barredSpecPathCharacters(path.slice(0, fileNameStart)).length > 0;
+  const inFileName =
+    barredSpecPathCharacters(path.slice(fileNameStart)).length > 0;
+  const where =
+    inDirectory && inFileName
+      ? "in its file name and a directory component"
+      : inDirectory
+        ? "in a directory component"
+        : "in its file name";
+  const correction =
+    inDirectory && inFileName
+      ? "rename the file and the directory"
+      : inDirectory
+        ? "rename the directory, or relocate the file,"
+        : "rename the file";
+  return (
+    `the workspace-relative path contains ${joinAlternatives(found)} ` +
+    `${where}, which a spec-group path must not contain (` +
+    `${BARRED_SPEC_PATH_CHARACTER_LIST}), so that every import specifier ` +
+    `designating the file, delimited by either quote character, is a ` +
+    `well-formed string literal read the same verbatim and by TypeScript ` +
+    `tooling — ${correction} so the path holds none of them`
+  );
+}
+
 const utf8Encoder = new TextEncoder();
+/**
+ * A lossy UTF-8 reading: each ill-formed sequence becomes U+FFFD, which 7.1
+ * does not bar, and every well-formed character — the ASCII ones always
+ * among them — reads as itself, so the 7.1 character rule judges a path
+ * that is not valid UTF-8 on the characters it does spell.
+ */
+const lossyUtf8Decoder = new TextDecoder("utf-8");
 
 /** SPEC 13.4: derived-file name marker — `.xspec.` within the file name. */
 const XSPEC_NAME_INFIX = utf8Encoder.encode(".xspec.");
@@ -63,9 +169,9 @@ const MDX_SUFFIX = utf8Encoder.encode(".mdx");
 export interface InvalidSource {
   /**
    * The real path as data (SPEC 12.0, 12.7): the decoded string where the
-   * path bytes are valid UTF-8 (a `#`- or U+FFFD-containing path, or a
-   * non-`.mdx` spec-group path), otherwise the exact bytes in the marked
-   * form.
+   * path bytes are valid UTF-8 (a `#`- or U+FFFD-containing path, a
+   * non-`.mdx` spec-group path, or a spec-group path holding a character
+   * 7.1 bars), otherwise the exact bytes in the marked form.
    */
   readonly path: PathText;
   /** The path's exact bytes — the resolution and membership space. */
@@ -400,8 +506,10 @@ interface MatchedCandidate {
  * 3. Path validation on what remains: matched by both a spec and a code
  *    group → configuration error (SPEC 7.2, 14.14); a path containing `#`
  *    or U+FFFD, or not valid UTF-8 → 14.19 (SPEC 7); a spec-group match
- *    without the `.mdx` extension → 14.19 (SPEC 7.1). Each condition
- *    present is reported (SPEC 14).
+ *    without the `.mdx` extension, or whose path — file name or any
+ *    directory component — contains `"`, `'`, `\`, U+000A, U+000D,
+ *    U+2028, or U+2029 → 14.19 (SPEC 7.1). Each condition present is
+ *    reported (SPEC 14): one finding per cause.
  */
 export function classifySources(
   candidates: readonly Uint8Array[],
@@ -526,6 +634,29 @@ export function classifySources(
             `file does not have the .mdx extension — every spec-group ` +
             `match must end ".mdx"; rename the file or narrow the group's ` +
             `globs (SPEC 7.1, 14.19)`,
+          fileLabel,
+        ),
+      );
+    }
+    const barred =
+      candidate.specGroups.length > 0
+        ? barredSpecPathDescription(
+            decoded ?? lossyUtf8Decoder.decode(candidate.bytes),
+          )
+        : null;
+    if (barred !== null) {
+      // SPEC 7.1 → 14.19: a spec-group match's workspace-relative path —
+      // its file name and every directory component — MUST NOT contain
+      // `"`, `'`, `\`, U+000A, U+000D, U+2028, or U+2029. Code-group paths
+      // are unaffected (14.19's code-source forms are `#`, U+FFFD, and
+      // non-UTF-8). A path that is not valid UTF-8 is judged on the
+      // characters it does spell (`lossyUtf8Decoder`).
+      valid = false;
+      findings.push(
+        pathFinding(
+          19,
+          `matched by spec group "${candidate.specGroups[0]}" but ${barred} ` +
+            `(SPEC 7.1, 2.1, 14.19)`,
           fileLabel,
         ),
       );

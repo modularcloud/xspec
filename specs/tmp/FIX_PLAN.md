@@ -47,13 +47,13 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T6.5-23 | section-6.5-v | 16, 17 | 13 of 33 stagings place or root the added declaration wrongly |
 | T6.6-3 | section-6.6 | 1 (landed), 6, 7, 8, 10 | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1 |
 | T7-2 | section-7-basics | 11 | the `import defer { defineConfig }` arm builds with exit 0, expected 2 |
-| T7-6 | section-7-discovery | 5 | invalid-source arm: `check` reports 14.10 six times, expected 14.19 once |
-| T7.1-1 | section-7.1-7.3 | 5 | `specs/a"b.mdx` builds with exit 0, expected 1 |
+| T7-6 | section-7-discovery | 5 (landed) | invalid-source arm: `check` reports 14.10 six times, expected 14.19 once |
+| T7.1-1 | section-7.1-7.3 | 5 (landed) | `specs/a"b.mdx` builds with exit 0, expected 1 |
 | T7.3-1 | section-7.1-7.3 | 12 | `outDir ".xspec"` builds with exit 0, expected 2 |
 | T11-1 | section-11 | 13 | a root's tags reported `[]`, expected absent |
 | T11-2 | section-11 | 13 | likewise |
 | T11-3 | section-11 | 13 | likewise |
-| T12.0-5 | section-12.0-i | 5 | `view 'specs/a\b.mdx'` exits 0 with no finding, expected 1 with condition 19 |
+| T12.0-5 | section-12.0-i | 5 (landed) | `view 'specs/a\b.mdx'` exits 0 with no finding, expected 1 with condition 19 |
 | T12.0-10 | section-12.0-ii | 1 (landed) | `query nodes --tag a<U+2028>b` under an invalid configuration reports `configuration-error`, expected the plain usage error |
 | T12.7-2 | section-12.7 | 6, 8 | the two-reason `move specs/A.mdx "specs/a'b.mdx"` exits 0 |
 | T13.4-9 | section-13.4 | 2 (landed) | (a): a derived path above a source builds with exit 0, expected condition 22 |
@@ -65,33 +65,15 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-11 | section-14 | 9 | arm (x): 14.15 reported once, expected five times |
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
-If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, so a later arm may wait on Task 5 (Tasks 1, 2, 3, and 4 have landed).
-
-## Task 5 — A spec-group path containing a character 7.1 bars is an invalid source path (SPEC 7.1, 14.19, 11.2, 11.4, 11.5, 12.0, 13.4; B2, C1)
-
-**Requirement.** SPEC 7.1: a spec-group file's workspace-relative path "MUST NOT contain `"`, `'`, `\`, U+000A (line feed), U+000D (carriage return), U+2028 (line separator), or U+2029 (paragraph separator)"; such a match is invalid (14.19), whether the character is in the file name or in any directory component (`specs/it's/a.mdx`). Code-group paths are unaffected: 14.19's code-source forms stay `#`, U+FFFD, and non-UTF-8 (T7.1-1's control `src/it's\x.ts` is valid and records its marker edge). Such a file is handled exactly as a `#`-bearing path is today:
-- it stays discovered and keeps its view, every identity in it unavailable (11.2); `at` returns its section with `{"unavailable": true}` beside the condition-19 finding, exit 1; the gated reads report the finding;
-- no module, companion, or Markdown is generated for it, and its derived paths — by the `NAME.mdx` name shape alone — stay in the inventory's derived map and excluded from discovery.
-
-**Observed.**
-- `build` and `check` exit 0 with no finding for all seven characters and for the directory-component case; modules are generated; `ids` lists the file's IDs; `view 'specs/a\b.mdx'` exits 0 with defined identities.
-- T7-6's invalid-source arm — emission next to sources, a spec glob `specs/*.mdx`, a code glob `specs/*.md`, `specs/a'b.mdx` beside a plain `specs/a'b.md` holding `)` — reports six `stale-output` findings instead of exactly one condition 19. With emission disabled, only the 14.20 for `specs/a'b.md` appears, without the 14.19.
-
-**Location.** The 14.19 classification in `src/core/discovery.ts` (~476–530): the `#`, U+FFFD, non-UTF-8, and missing-`.mdx` causes, each setting `valid = false`.
-
-**Change.** For a spec-group match (`candidate.specGroups.length > 0`) whose decoded path contains any of the seven characters, add a 14.19 cause through the existing `valid = false` flow, naming the character and the correction (rename the file or directory; SPEC 7.1, 14.19). Export the character predicate from `core` (beside `segmentViolation` in `src/core/text.ts`, or in discovery) for Task 6 to reuse. All seven are BMP characters, so a code-unit scan is exact.
-
-**Verification.**
-- Should turn green: `section-7.1-7.3.test.ts` T7.1-1 (its `"`, `\`, U+000A, and U+000D arms run on Linux), `section-7-discovery.test.ts` T7-6, `section-12.0-i.test.ts` T12.0-5. T7.3-1 shares `section-7.1-7.3.test.ts` and stays red until Task 12.
-- Neighbours: `section-1.5.test.ts`, `section-11.2.test.ts` (T11.2-3), `section-11.4.test.ts`, `section-11.5.test.ts`, `section-11.6.test.ts`, `section-7-basics.test.ts`, `section-13.1-13.2.test.ts`.
+If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, and the tasks a later arm waited on beside Task 14 (Tasks 1, 2, 3, 4, and 5) have landed.
 
 ## Task 6 — A move destination containing a character 7.1 bars is `refused-invalid-destination` (SPEC 6.5, 7.1, 14.19, 14, 12.0; A5, C1's second bullet)
 
-After Task 5 (reuse its predicate).
+Task 5 has landed; reuse its predicate: `barredSpecPathCharacters(path)` in `src/core/discovery.ts` names the 7.1-barred characters a path holds, in first-occurrence order (empty when none), and `BARRED_SPEC_PATH_CHARACTER_LIST` names the rule's whole list for the cause's wording.
 
 **Requirement.** SPEC 6.5 refuses as `refused-invalid-destination` a destination file path, a target file to be created included, "containing `"`, `'`, `\`, U+000A, U+000D, U+2028, or U+2029 (7.1, 14.19)" — anywhere in the path. The refusal exits 1, modifies nothing, and reports one finding concerning the destination as spelled (`path` the destination, `locations` `[]`); `--preview` reports the same (6.6). It is never a usage error: each such spelling is a well-formed argument value (12.0). Every other applicable reason reports beside it (14) — T6.5-21's two-reason arm puts `refused-exposed-derived-file` (Task 8) after it.
 
-**Observed.** `move specs/Z.mdx "specs/a'b.mdx" --preview` exits 0, as does each other character. `move specs/A.mdx "specs/a'b.mdx"`, `move specs/A.mdx 'specs/a\b.mdx'`, and `move specs/A.mdx#x 'specs/B"q.mdx#x'` are performed.
+**Observed.** `move specs/Z.mdx "specs/a'b.mdx" --preview` exits 0, as does each other character. `move specs/A.mdx "specs/a'b.mdx"`, `move specs/A.mdx 'specs/a\b.mdx'`, and `move specs/A.mdx#x 'specs/B"q.mdx#x'` are performed. Since Task 5 landed, such a performed move also writes the destination's module and companions, and the moved-to workspace then fails `build` with the destination's 14.19: the post-move re-validation does not re-classify the destination path, so only the up-front cause below catches it.
 
 **Location.** `assessDestinationPath` in `src/core/refusal.ts` (~206). It checks UTF-8, `#`, the path's shape, spec and code groups, `.mdx`, and the `.xspec.`/`.xspec/` exclusion — not these characters.
 
