@@ -2,7 +2,7 @@
 
 Source: the compliance determination that opened this Phase 10 loop at `b3cc3e3` (branch `claude/xspec-ui-apis-4df8fa`, PR #7; governing IP `specs/patches/0001-external-ui-apis.md`, Stage: Tested — no task here changes the Stage; bundle `specs/SPEC.md`, `specs/TEST-SPEC.md`, `specs/CERTIFICATIONS.md`, `specs/IMPLEMENTATION.md`). The documents changed after the product was last brought green (CI recorded at `9d095d9`): `git diff 9d095d9..f31e100 -- specs/SPEC.md`, `git diff 3311ccd..6780f53 -- specs/TEST-SPEC.md`, `git diff 3311ccd..301f2f9 -- specs/CERTIFICATIONS.md`; Phase 9 brought the harness into line, its last determination clean at `3fe91f5`. Reviewer A (SPEC 1–6) returned 10 gaps, reviewer B (7–11) 6, reviewer C (12–15) 14. VERIFY was red on 31 product tests, the same set locally and in CI run 1003's `suite-linux` job at `b3cc3e3` (every failure a `HarnessAssertionError`); `harness-self` (28 files, 4315 tests) and `suite-windows` were green, and certification had 0 discrepancies (154 PASS / 38 FAIL — the FAILs being violators' expected outcomes — / 0 error / 0 hang). The product's last change is `8a0da01`; `dist/` matches `src/`. Findings are cited as A<n>, B<n>, C<n> (reviewer, gap number); where reviewers reported the same gap, it is one task. Reviewer B also noted, uncounted and outside its scope, a wrong correction text on a refused source read; that is Task 21.
 
-Goal: every test passes — `npm test` locally, and CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head (PR #7 is conflicted, so CI runs on branch pushes) — and the product meets SPEC.md. Tasks 18–23, and Tasks 25–27 found since, fix SPEC departures that no test pins; they are in scope all the same (Task 18 has landed).
+Goal: every test passes — `npm test` locally, and CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head (PR #7 is conflicted, so CI runs on branch pushes) — and the product meets SPEC.md. Tasks 18–23, and Tasks 25–28 found since, fix SPEC departures that no test pins; they are in scope all the same (Tasks 18 and 19 have landed).
 
 Not planned: nothing. Every counted gap and B's uncounted note has a task. The two standing rulings below close their families for this run.
 
@@ -29,7 +29,7 @@ Not planned: nothing. Every counted gap and B's uncounted note has a task. The t
 
 ## Index — each failing test and the tasks it waits on
 
-These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed then (local run and CI run 1003 alike). Each registry module is `test/suite/registry/<module>.ts`, and its suite file is `test/suite/<module>.test.ts`. Tasks 18 (landed), 19–23, and 25–27 have no failing test.
+These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed then (local run and CI run 1003 alike). Each registry module is `test/suite/registry/<module>.ts`, and its suite file is `test/suite/<module>.test.ts`. Tasks 18 (landed), 19 (landed), 20–23, and 25–28 have no failing test.
 
 | Test | Module | Tasks | First failure at `b3cc3e3` |
 |---|---|---|---|
@@ -64,26 +64,6 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 arms, reached only past that twin, hand-checked at Task 8 against T6.5-21's own expectations; passes since Task 10 landed |
 | T14-11 | section-14 | 9 (landed) | arm (x): 14.15 reported once, expected five times; passes since Task 9 landed |
 | T14-12 | section-14-iii | 14 (landed) | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16; passes since Task 14 landed |
-
-## Task 19 — TypeScript instantiation expressions over spec bindings are dynamic references or unsupported uses (SPEC 2.4, 4.5, 14.8, 14.18; A3)
-
-After Task 9 (same walk; landed at `ceabb13`, which moved the dynamic `import()` judgment out of the walk into `scanNestedLinkingForms`).
-
-**Requirement.** SPEC 2.4: optional chaining, parentheses, and other access forms applied to a chain make it dynamic, and "a non-null assertion (`BASE.a!`), a type assertion, or any other TypeScript-only syntax is dynamic in a TypeScript source". SPEC 4.5: a non-static bare reference in expression-statement position, like a non-static `text(...)` argument, is 14.8; any other value-level use of a node or of a `text` binding is 14.18. An instantiation expression (`A.a<X>`, `A<X>`, `text<X>`) is such value-level TypeScript-only syntax, not a type position.
-
-**Observed.** Each of these builds with exit 0 and records no finding, edge, or occurrence:
-- `A.a<X>;` and `A<X>;` — expected 14.8 at the statement's expression;
-- `text(A.a<X>)` — expected 14.8 at the call;
-- `export const g = text<X>;`, `export const h = A.a<X>;`, `[A<X>]`, and `f(A.a<X>)` — expected 14.18.
-This gap was also open at the `9d095d9` determination.
-
-**Location.** In `src/core/code-analysis.ts`: the walk's `if (ts.isTypeNode(node)) return;` (~1559), which swallows `ExpressionWithTypeArguments`; `climbUseExpression` and `leftmostIdentifier` (~2593–2640), which list the TypeScript-only wrappers (`NonNullExpression`, `AsExpression`, `SatisfiesExpression`, `TypeAssertionExpression`) that already make a chain dynamic.
-
-**Change.** Treat an `ExpressionWithTypeArguments` that stands outside a heritage clause as a value expression: walk its `expression`, and add it to the wrappers in `climbUseExpression` and `leftmostIdentifier`, so each spelling above is judged, and located, exactly as a non-null assertion over the same chain is. Heritage clauses keep their current handling.
-
-**Verification.**
-- No suite test pins it. By hand: each spelling above beside its non-null-assertion twin (`A.a!;`, `text(A.a!)`, `export const h = A.a!;`), comparing codes and ranges.
-- Regressions: `section-2.4.test.ts`, `section-4.test.ts`, `section-4.5.test.ts`, `section-14.test.ts` (T14-11), `section-16-p4.test.ts`.
 
 ## Task 20 — In TypeScript, `text?.(A.a)` and `text<X>(A.a)` are sanctioned `text` calls (SPEC 4.5, 4.3, 14.8, 5.7, 2.3; A4)
 
@@ -180,6 +160,18 @@ This gap was also open at the `9d095d9` determination.
 **Change.** Make `query` and `at` report configuration errors as every other command does and answer only from graph data equal to what this build derives from the current sources and configuration (refreshing first where 13.3 says so). Content equality cannot be established without the derivation, so the sound change is to retire the store-backed fast path — the full paths of `query` and `at` already compare and refresh, or answer from the current sources — or to narrow it to a check that is exact. A recorded digest or build fingerprint narrows the exposure (hand edits that leave the digest alone, stores from another build) but does not close it, so it does not meet 13.3 alone. Mind the time budgets: per `AGENTS.md`, P-12 (`test/suite/registry/section-16-p12.ts`, `timeoutMs` 600 000) runs ~158 s for its 1339 `at` invocations on the fast path and took ~5–6 min when most trials took the full path; a hand timing at this task gave ~108 ms per `at` on the fast path and ~235 ms on the full path in that one-file workspace. If retiring the fast path pushes a test past its budget, speed up the full path rather than keep an unsound shortcut.
 
 **Verification.** No suite test pins it: the store's layout is unenumerated (11.6), so the harness cannot edit its content. By hand: the probes above — `query nodes --json` and `at specs/A.mdx 11 --json` answer `end` 12 and the edited store is refreshed; the hand-set `defer` workspace exits 2 with `configuration-error`. Regressions, timed: `section-16-p12.test.ts` within its budget, `section-16-p13.test.ts`, `section-11.test.ts`, `section-11.5.test.ts`, `section-13.3.test.ts`; then the whole suite project at Task 24.
+
+## Task 28 — 14.18 at a node use under a wrapper or a dynamic access locates the longest static chain (SPEC 14's location rule for 14.18, 2.4; found at Task 19)
+
+**Requirement.** SPEC 14: "Unsupported usage (14.18) locates the binding's spelling at the offending use: the binding's identifier, extended — for a node binding — by the longest static property chain (2.4) it roots there." A static property chain's segments are non-computed accesses and computed accesses whose index is a static string literal (2.4); parentheses, a non-null assertion, a type assertion (`as`, `satisfies`, the angle-bracket form), an instantiation expression (Task 19), optional chaining, and any other index form are no part of one.
+
+**Observed** (hand probe at Task 19; `specs/A.mdx` holding `a` and `a.b`; each spelling in its own `src/*.ts` after `import A from "../specs/A.xspec";`, with `declare const k: string;` or `type X = string;` where the spelling needs one): `export const h = (A.a);`, `export const h = A.a!;`, `export const h = A.a!.b;`, `export const h = A.a as unknown;`, `export const h = A.a?.b;`, `export const h = A[k];`, `export const h = A.a<X>;`, and `export const k = [A<X>];` each report one 14.18, located at the whole climbed expression — `(A.a)`, `A.a!`, `A.a!.b`, `A.a as unknown`, `A.a?.b`, `A[k]`, `A.a<X>`, `A<X>` — expected `A.a`, `A.a`, `A.a`, `A.a`, `A.a`, `A`, `A.a`, `A`. Already right: a plain chain (`const n = SPEC.a.b`, T14-11 (l)), a callee chain (`export const h = A.a.b();` → `A.a.b`), a class's `extends A.a` (→ `A.a`), and a `text` binding's 14.18 (its identifier alone).
+
+**Location.** `visitNodeBindingUse` in `src/core/code-analysis.ts`: its closing `addFinding(18, use, …)` locates `climbUseExpression`'s result, which climbs through every wrapper and access so that the marker and `text`-argument judgements see the whole expression.
+
+**Change.** Keep `climbUseExpression` for the judgement (marker, `text` argument, other use) and for the 14.8 locations, which SPEC 14 fixes as the statement's expression or the call. Locate the 14.18 by a separate climb from the identifier through the static-chain steps `classifyReference` (`src/core/references.ts`) accepts — a non-optional property access with an identifier name, a non-optional element access whose index is a string literal — stopping at the first other parent. A colliding node binding's use (`visitIdentifier` routes it through `visitNodeBindingUse`) takes the same range.
+
+**Verification.** No suite test pins it. By hand: the spellings above, and T14-11 (l)'s plain chain unchanged. Regressions: `section-4.5.test.ts`, `section-14.test.ts` (T14-11), `section-5.7.test.ts`, `section-11.6.test.ts`, `section-4.test.ts`.
 
 ## Task 24 — Confirm the full suite and CI are green, record the state, and delete this file
 

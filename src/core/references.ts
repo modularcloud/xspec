@@ -300,6 +300,17 @@ export function classifyReference(
         "parentheses do not participate in a static property chain",
       );
     }
+    if (
+      ts.isExpressionWithTypeArguments(node) &&
+      !ts.isHeritageClause(node.parent)
+    ) {
+      // SPEC 2.4, 4.5: an instantiation expression is TypeScript-only
+      // syntax, which makes the reference dynamic.
+      return dynamic(
+        "type arguments (an instantiation expression) do not participate " +
+          "in a static property chain",
+      );
+    }
     return dynamic(OTHER_FORM_REASON);
   }
 }

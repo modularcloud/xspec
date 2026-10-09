@@ -866,10 +866,27 @@ class CodeAnalyzer {
     identifier: tst.Identifier,
   ): TrackedBinding | undefined {
     const parent = identifier.parent;
-    const symbol =
-      ts.isShorthandPropertyAssignment(parent) && parent.name === identifier
-        ? this.checker.getShorthandAssignmentValueSymbol(parent)
-        : this.checker.getSymbolAtLocation(identifier);
+    let symbol: tst.Symbol | undefined;
+    if (
+      ts.isShorthandPropertyAssignment(parent) &&
+      parent.name === identifier
+    ) {
+      symbol = this.checker.getShorthandAssignmentValueSymbol(parent);
+    } else if (rootsTypeArgumentsExpression(identifier)) {
+      // SPEC 4.5: rooting is scope-aware and value-level. The checker
+      // resolves the root of a chain under type arguments (`A.a<X>`, a
+      // class's `extends A.a<X>`) as a namespace, passing over a local
+      // value declaration that shadows the import binding; resolve it as
+      // the value it is instead.
+      symbol = this.checker.resolveName(
+        identifier.text,
+        identifier,
+        ts.SymbolFlags.Value,
+        false,
+      );
+    } else {
+      symbol = this.checker.getSymbolAtLocation(identifier);
+    }
     return this.bindingOfSymbol(symbol);
   }
 
@@ -1819,6 +1836,15 @@ class CodeAnalyzer {
       }
       return;
     }
+    if (isInstantiationExpression(node)) {
+      // SPEC 2.4, 4.5: an instantiation expression (`A.a<X>`, `A<X>`,
+      // `text<X>`) is value-level TypeScript-only syntax, not a type
+      // position: its expression is a value use, judged and located as
+      // under a non-null assertion (14.8, 14.18); its type arguments are
+      // type-level and unrestricted.
+      this.walk(node.expression);
+      return;
+    }
     if (ts.isTypeNode(node)) return;
     if (ts.isIdentifier(node)) {
       this.visitIdentifier(node);
@@ -2186,9 +2212,7 @@ class CodeAnalyzer {
     }
     const root = leftmostIdentifier(argument);
     const rootBinding =
-      root === null
-        ? undefined
-        : this.bindingOfSymbol(this.checker.getSymbolAtLocation(root));
+      root === null ? undefined : this.bindingOfIdentifier(root);
     if (
       root === null ||
       rootBinding === undefined ||
@@ -2911,12 +2935,49 @@ function isValueUseSite(identifier: tst.Identifier): boolean {
 }
 
 /**
+ * SPEC 2.4, 4.5: an instantiation expression — `A.a<X>`, `A<X>`, or
+ * `text<X>` in value position — is TypeScript-only syntax applied to its
+ * expression, which makes a reference dynamic. The same node kind in a
+ * heritage clause (`extends A.a<X>`, `implements I<X>`) is that clause's
+ * own form, never one: the walk judges a class `extends` expression
+ * without it.
+ */
+function isInstantiationExpression(
+  node: tst.Node,
+): node is tst.ExpressionWithTypeArguments {
+  return (
+    ts.isExpressionWithTypeArguments(node) && !ts.isHeritageClause(node.parent)
+  );
+}
+
+/**
+ * Whether `identifier` roots the expression an `ExpressionWithTypeArguments`
+ * holds — directly (`A<X>`) or through non-computed property accesses
+ * (`A.a<X>`, a class's `extends A.a`) — the position where the checker's
+ * symbol lookup is not the value-level scoping SPEC 4.5 roots chains by.
+ */
+function rootsTypeArgumentsExpression(identifier: tst.Identifier): boolean {
+  let node: tst.Node = identifier;
+  while (
+    ts.isPropertyAccessExpression(node.parent) &&
+    node.parent.expression === node
+  ) {
+    node = node.parent;
+  }
+  return (
+    ts.isExpressionWithTypeArguments(node.parent) &&
+    node.parent.expression === node
+  );
+}
+
+/**
  * The maximal reference expression around a use-site root identifier:
  * climbs through property and element accesses (of which the identifier
- * is the object), non-null assertions, parentheses, and type assertions
- * — the wrappers SPEC 2.4 rules on (each beyond plain accesses makes the
- * reference dynamic). The result is the expression classified as marker
- * (SPEC 4.5), `text` argument, or unsanctioned use.
+ * is the object), non-null assertions, parentheses, type assertions, and
+ * instantiation expressions — the wrappers SPEC 2.4 rules on (each beyond
+ * plain accesses makes the reference dynamic). The result is the
+ * expression classified as marker (SPEC 4.5), `text` argument, or
+ * unsanctioned use.
  */
 function climbUseExpression(identifier: tst.Identifier): tst.Expression {
   let use: tst.Expression = identifier;
@@ -2935,7 +2996,8 @@ function climbUseExpression(identifier: tst.Identifier): tst.Expression {
       ts.isParenthesizedExpression(parent) ||
       ts.isAsExpression(parent) ||
       ts.isSatisfiesExpression(parent) ||
-      ts.isTypeAssertionExpression(parent)
+      ts.isTypeAssertionExpression(parent) ||
+      isInstantiationExpression(parent)
     ) {
       use = parent;
       continue;
@@ -2961,7 +3023,8 @@ function leftmostIdentifier(expression: tst.Expression): tst.Identifier | null {
       ts.isParenthesizedExpression(node) ||
       ts.isAsExpression(node) ||
       ts.isSatisfiesExpression(node) ||
-      ts.isTypeAssertionExpression(node)
+      ts.isTypeAssertionExpression(node) ||
+      isInstantiationExpression(node)
     ) {
       node = node.expression;
       continue;
