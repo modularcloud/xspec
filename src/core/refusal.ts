@@ -20,7 +20,10 @@
 // path, and which workspace-relative directory components of the
 // destination-side write paths are occupied by non-directories — arrive as
 // inputs, probed by the workspace layer (workspace/writes.ts) over exactly
-// the paths `assessDestinationPath` names.
+// the paths `assessDestinationPath` names. The derived-path relations of
+// `refused-invalid-destination` read paths alone — the discovered sources'
+// and the derived paths the sources would generate after the move
+// (core/derived-relation.ts `destinationRelations`) — so they need no probe.
 //
 // The would-be reason `refused-cycle` is evaluated over the
 // post-operation workspace, never by reanalyzing rewritten text: the
@@ -61,6 +64,12 @@ import {
   barredSpecPathCharacters,
   specSourceDerivedPaths,
 } from "./discovery.js";
+import type { SourceClassification } from "./discovery.js";
+import type {
+  DerivedPathRole,
+  DestinationRelation,
+} from "./derived-relation.js";
+import { destinationRelations } from "./derived-relation.js";
 import type { Finding, FindingLocation, RefusalCode } from "./findings.js";
 import { compareLocations, sortLocations } from "./findings.js";
 import { findCycles } from "./graph.js";
@@ -69,6 +78,7 @@ import type { SpecSection } from "./mdx.js";
 import type { MoveSectionRewriteVerdict, WouldBeSpecImport } from "./move.js";
 import { judgeMoveSectionRewrite } from "./move.js";
 import type { PathText } from "./path-text.js";
+import { pathTextKey, renderPathText } from "./path-text.js";
 import { replaceIdPrefix } from "./rename.js";
 import { describeSegmentViolation, idSegmentViolations } from "./text.js";
 
@@ -319,13 +329,18 @@ export function assessDestinationPath(
 
 /**
  * The one `refused-invalid-destination` finding (SPEC 14: one finding per
- * reason, concerning the destination path) over the pure causes and the
- * probed component obstructions — or null when the destination is valid.
+ * reason, concerning the destination path) over the pure causes, the
+ * probed component obstructions, and the derived-path relations
+ * (`destinationRelations`) — or null when the destination is valid. Where
+ * the occupied-component relation and the derived-path relations meet at
+ * one component (a built module path the destination lies under), they
+ * are causes of this one finding: one reason (SPEC 6.5, 14).
  */
 function invalidDestinationFinding(
   destination: string,
   causes: readonly string[],
   obstructedComponents: readonly string[],
+  relations: readonly DestinationRelation[],
 ): Finding | null {
   const all = [...causes];
   for (const component of obstructedComponents) {
@@ -337,6 +352,7 @@ function invalidDestinationFinding(
         `never traverse or replace such an occupant (SPEC 13.4, 14.22)`,
     );
   }
+  all.push(...relationCauses(destination, relations));
   if (all.length === 0) return null;
   return refusalFinding(
     "refused-invalid-destination",
@@ -346,6 +362,116 @@ function invalidDestinationFinding(
       `(SPEC 6.5)`,
     { path: destination },
   );
+}
+
+/** A path, quoted, in its deterministic human spelling (SPEC 12.0). */
+function quotePath(path: PathText): string {
+  return JSON.stringify(renderPathText(path));
+}
+
+/** A derived path's description by role and generating source (13.1, 13.2). */
+function derivedPathWords(role: DerivedPathRole, generator: string): string {
+  switch (role) {
+    case "module":
+      return `the TypeScript module xspec would generate for ${generator}`;
+    case "companion":
+      return (
+        `a companion of the TypeScript module xspec would generate for ` +
+        generator
+      );
+    case "markdown":
+      return `the Markdown file xspec would emit for ${generator}`;
+  }
+}
+
+/**
+ * The causes SPEC 6.5's derived-path relations give a move destination
+ * (`destinationRelations`, core/derived-relation.ts): one per path the
+ * destination brings and kind of relation, naming its first witness — a
+ * discovered source before a derived path (the relations' order). A
+ * derived path lying under a path the destination itself lies under adds
+ * nothing to the destination's own cause — the module and its companions
+ * share the destination's directory (13.1) — so it is not listed apart.
+ */
+function relationCauses(
+  destination: string,
+  relations: readonly DestinationRelation[],
+): string[] {
+  const destinationKey = pathTextKey(destination);
+  const destinationUnder = new Set<string>();
+  for (const relation of relations) {
+    if (relation.role === "destination" && relation.kind === "below") {
+      destinationUnder.add(pathTextKey(relation.other));
+    }
+  }
+  const generatorOf = (source: PathText): string =>
+    pathTextKey(source) === destinationKey
+      ? "the destination"
+      : quotePath(source);
+  const listed = new Set<string>();
+  const causes: string[] = [];
+  for (const relation of relations) {
+    // A kind holds no ":", so the key splits unambiguously.
+    const key = `${relation.kind}:${pathTextKey(relation.path)}`;
+    if (listed.has(key)) continue;
+    if (
+      relation.role !== "destination" &&
+      relation.kind === "below" &&
+      destinationUnder.has(pathTextKey(relation.other))
+    ) {
+      continue;
+    }
+    listed.add(key);
+    const subject =
+      relation.role === "destination"
+        ? "the destination path"
+        : `${derivedPathWords(relation.role, "the destination")}, ` +
+          `${quotePath(relation.path)},`;
+    const other =
+      relation.otherEntry === null
+        ? `the discovered source ${quotePath(relation.other)}`
+        : `${quotePath(relation.other)}, ` +
+          derivedPathWords(
+            relation.otherEntry.role,
+            generatorOf(relation.otherEntry.source),
+          );
+    switch (relation.kind) {
+      case "above":
+        causes.push(
+          relation.otherEntry === null
+            ? `${subject} would be a directory component of the path of ` +
+                `${other} — the plain file the finishing regeneration ` +
+                `writes there would replace the directory holding that ` +
+                `source (SPEC 13.4)`
+            : `${subject} would be a directory component of ${other} — ` +
+                `${
+                  relation.role === "destination"
+                    ? "the destination, a plain file,"
+                    : "the plain file written there"
+                } would leave that write no directory (SPEC 13.4, 14.22)`,
+        );
+        break;
+      case "below":
+        causes.push(
+          `${subject} would lie under ${other} — the finishing ` +
+            `regeneration would write a plain file there, leaving ` +
+            `${relation.role === "destination" ? "the destination" : "that path"} ` +
+            `no directory (SPEC 13.4, 14.22)`,
+        );
+        break;
+      case "same":
+        causes.push(
+          `${subject} would be the path of ${other} — the finishing ` +
+            `regeneration would replace that source` +
+            (relation.role === "markdown"
+              ? `, an emit destination so added over a code source first ` +
+                `excluding it from every group (SPEC 7.2, 13.4)`
+              : ` (SPEC 13.4)`),
+        );
+        break;
+    }
+  }
+  return causes;
 }
 
 // ---------------------------------------------------------------------------
@@ -859,6 +985,13 @@ function describeOccupantKind(
 
 /** The inputs of a file-form move's refusal evaluation (SPEC 6.5, 14). */
 export interface MoveFileRefusalInputs {
+  /** The configuration: the derived paths sources generate (13.1, 13.2, 7.3). */
+  readonly configuration: Configuration;
+  /**
+   * The discovered sources (SPEC 7), spec and code, whose paths the
+   * destination's derived-path relations read (SPEC 6.5).
+   */
+  readonly classification: SourceClassification;
   readonly specs: readonly SpecFileAnalysis[];
   readonly graph: WorkspaceGraph;
   readonly originPath: string;
@@ -880,7 +1013,16 @@ export interface MoveFileRefusalInputs {
 export function evaluateMoveFileRefusals(
   inputs: MoveFileRefusalInputs,
 ): Finding[] {
-  const { specs, graph, originPath, destination, assessment, probe } = inputs;
+  const {
+    configuration,
+    classification,
+    specs,
+    graph,
+    originPath,
+    destination,
+    assessment,
+    probe,
+  } = inputs;
   const findings: Finding[] = [];
 
   // SPEC 14 `refused-identity-unchanged` (the mirrored identity check,
@@ -920,11 +1062,24 @@ export function evaluateMoveFileRefusals(
     );
   }
 
-  // SPEC 14 `refused-invalid-destination`: one finding over every cause.
+  // SPEC 14 `refused-invalid-destination`: one finding over every cause —
+  // the derived-path relations (SPEC 6.5) among them, read over the
+  // sources after the move: the origin relocated to the destination, so
+  // its own derived paths are retired and it is exempt from the source
+  // relation. A malformed spelling is never related to the workspace.
+  const relations = assessment.probeable
+    ? destinationRelations(configuration, destination, {
+        spec: classification.specSources
+          .map((source) => source.path)
+          .filter((path) => path !== originPath),
+        code: classification.codeSources.map((source) => source.path),
+      })
+    : [];
   const invalidDestination = invalidDestinationFinding(
     destination,
     assessment.causes,
     probe.obstructedComponents,
+    relations,
   );
   if (invalidDestination !== null) findings.push(invalidDestination);
 
@@ -1044,6 +1199,13 @@ function invalidRewriteFinding(
 
 /** The inputs of a section-form move's refusal evaluation (SPEC 6.5, 14). */
 export interface MoveSectionRefusalInputs {
+  /** The configuration: the derived paths sources generate (13.1, 13.2, 7.3). */
+  readonly configuration: Configuration;
+  /**
+   * The discovered sources (SPEC 7), spec and code, whose paths a target
+   * file to be created has its derived-path relations read over (SPEC 6.5).
+   */
+  readonly classification: SourceClassification;
   readonly specs: readonly SpecFileAnalysis[];
   /**
    * The code sources, judged for an admissible offset for the import
@@ -1089,6 +1251,8 @@ export function evaluateMoveSectionRefusals(
   inputs: MoveSectionRefusalInputs,
 ): Finding[] {
   const {
+    configuration,
+    classification,
     specs,
     code,
     graph,
@@ -1180,11 +1344,24 @@ export function evaluateMoveSectionRefusals(
   // to a target that is no discovered spec source (a discovered one IS a
   // valid source path — the caller passes a cause-free assessment); the
   // component obstructions apply to every target's destination-side
-  // write paths (SPEC 6.5, 14.22).
+  // write paths (SPEC 6.5, 14.22). The derived-path relations apply to a
+  // target file to be created, read over the sources after the move: every
+  // discovered source and the created target — the section form relocates
+  // no origin, so the origin keeps its path and its derived paths in both
+  // relations (SPEC 6.5). A discovered target adds no path, its relations
+  // ruled out by the valid-workspace precondition (13.4, 14.22).
+  const relations =
+    target === null && inputs.assessment.probeable
+      ? destinationRelations(configuration, targetPath, {
+          spec: classification.specSources.map((source) => source.path),
+          code: classification.codeSources.map((source) => source.path),
+        })
+      : [];
   const invalidDestination = invalidDestinationFinding(
     targetPath,
     inputs.assessment.causes,
     probe.obstructedComponents,
+    relations,
   );
   if (invalidDestination !== null) findings.push(invalidDestination);
 

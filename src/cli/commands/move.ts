@@ -56,7 +56,8 @@
 //    the mirrored identity checks (intrinsic form, identity change,
 //    collisions after the removal), the target parent, destination
 //    occupancy and validity (obstructed destination-side directory
-//    components included), would-be dependency and spec-import cycles,
+//    components and the derived-path relations over the sources after the
+//    move included), would-be dependency and spec-import cycles,
 //    the section form's would-be text — each judged file well-formed, each
 //    added import at an admissible offset (`refused-invalid-rewrite`) —
 //    and moved text holding an import declaration (no reason exists for a
@@ -344,6 +345,8 @@ async function runMoveFile(
     true,
   );
   const refusals = evaluateMoveFileRefusals({
+    configuration: workspace.configuration,
+    classification: analysis.classification,
     specs: analysis.specs,
     graph: analysis.graph,
     originPath,
@@ -547,6 +550,8 @@ async function runMoveSection(
     targetSpec === null,
   );
   const refusals = evaluateMoveSectionRefusals({
+    configuration: workspace.configuration,
+    classification: analysis.classification,
     specs: analysis.specs,
     code: analysis.code,
     graph: analysis.graph,
