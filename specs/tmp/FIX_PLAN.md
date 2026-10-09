@@ -33,19 +33,19 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 
 | Test | Module | Tasks | First failure at `b3cc3e3` |
 |---|---|---|---|
-| P-1 | section-16-p1 | 1 | falsified, seed 271828183, trial 11 of 25 (a U+2028/U+2029 segment or tag accepted) |
+| P-1 | section-16-p1 | 1 (landed) | falsified, seed 271828183, trial 11 of 25 (a U+2028/U+2029 segment or tag accepted) |
 | P-5 | section-16-p5-p6 | 15 | falsified, seed 271828183, trial 1 of 8: added `import require from "./require.xspec"` |
-| T1.4-1 | section-1.4 | 1 | a segment carrying U+2028: `build --json` exits 0, expected 1 |
-| T1.4-4 | section-1.4 | 1 | a tag carrying U+2028: `build --json` exits 0, expected 1 |
+| T1.4-1 | section-1.4 | 1 (landed) | a segment carrying U+2028: `build --json` exits 0, expected 1 |
+| T1.4-4 | section-1.4 | 1 (landed) | a tag carrying U+2028: `build --json` exits 0, expected 1 |
 | T4-2 | section-4 | 9 | an import type naming a `.xspec` module builds with exit 0 |
-| T6.4-3 | section-6.4 | 1 | `rename specs/A.mdx a "a<U+2028>b"` exits 0 |
-| T6.5-4 | section-6.5 | 1, 6 | `move specs/A.mdx#keep "specs/B.mdx#a<U+2028>b"` exits 0; then the barred-character destination arms |
+| T6.4-3 | section-6.4 | 1 (landed) | `rename specs/A.mdx a "a<U+2028>b"` exits 0 |
+| T6.5-4 | section-6.5 | 1 (landed), 6 | `move specs/A.mdx#keep "specs/B.mdx#a<U+2028>b"` exits 0; then the barred-character destination arms; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1 |
 | T6.5-11 | section-6.5-ii | 17 | arm (f): the rewritten call reads `tt(target.y)`, an untimely `text` binding |
 | T6.5-20 | section-6.5-iv | 7, 10 (and 9 for (d)'s import-type and `declare module` stagings) | arm (a): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70 after modifying the workspace |
 | T6.5-21 | section-6.5-iv | 8, 6 (its two-reason arm) | arm (a): `move specs/A.mdx specs/sub/A.mdx` exits 0 |
 | T6.5-22 | section-6.5-iv | 15 | arm (b): 26 of 38 lures bound a barred name |
 | T6.5-23 | section-6.5-v | 16, 17 | 13 of 33 stagings place or root the added declaration wrongly |
-| T6.6-3 | section-6.6 | 1, 6, 7, 8, 10 | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin |
+| T6.6-3 | section-6.6 | 1 (landed), 6, 7, 8, 10 | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1 |
 | T7-2 | section-7-basics | 11 | the `import defer { defineConfig }` arm builds with exit 0, expected 2 |
 | T7-6 | section-7-discovery | 5 | invalid-source arm: `check` reports 14.10 six times, expected 14.19 once |
 | T7.1-1 | section-7.1-7.3 | 5 | `specs/a"b.mdx` builds with exit 0, expected 1 |
@@ -54,38 +54,18 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T11-2 | section-11 | 13 | likewise |
 | T11-3 | section-11 | 13 | likewise |
 | T12.0-5 | section-12.0-i | 5 | `view 'specs/a\b.mdx'` exits 0 with no finding, expected 1 with condition 19 |
-| T12.0-10 | section-12.0-ii | 1 | `query nodes --tag a<U+2028>b` under an invalid configuration reports `configuration-error`, expected the plain usage error |
+| T12.0-10 | section-12.0-ii | 1 (landed) | `query nodes --tag a<U+2028>b` under an invalid configuration reports `configuration-error`, expected the plain usage error |
 | T12.7-2 | section-12.7 | 6, 8 | the two-reason `move specs/A.mdx "specs/a'b.mdx"` exits 0 |
 | T13.4-9 | section-13.4 | 2 | (a): a derived path above a source builds with exit 0, expected condition 22 |
 | T13.4-10 | section-13.4 | 4 | the recorded orphan's finding says "run `xspec build` to remove it" |
 | T13.4-11 | section-13.4 | 3 | (a): a condition-10 finding for a recorded path holding a directory |
 | T14-4 | section-14 | 14 (it sweeps T14-12's stagings) | U+2EBF0 in a JSX name judged one UTF-16 unit at a time: 14.20, expected 14.16 |
 | T14-6 | section-14 | 14 (likewise) | likewise |
-| T14-7 | section-14 | 1, 6, 7, 8, 10 | the U+2028 `rename` exits 0 |
+| T14-7 | section-14 | 1 (landed), 6, 7, 8, 10 | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1 |
 | T14-11 | section-14 | 9 | arm (x): 14.15 reported once, expected five times |
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
-If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, so a later arm may wait on Task 1, 2, or 5.
-
-## Task 1 — U+2028 and U+2029 are barred from ID segments and tags (SPEC 1.4, 14.4, 14 `refused-invalid-id`, 11.1, 11.2, 11.3, 12.0, 14.13; A1, B6, C8)
-
-**Requirement.** SPEC 1.4's quote-and-escape bullet now bars U+2028 (LINE SEPARATOR) and U+2029 (PARAGRAPH SEPARATOR) from every ID segment and tag, beside `"`, `'`, `\`, and `&`. Neither joins 1.4's whitespace or control classes (T1.4-2 keeps them in neither; T3-3's line-drop arms rely on that). Every site judging a segment or tag goes through the one validator, so the bar reaches each:
-- a declared `id` or `tags` value carrying either is 14.4, one finding per offending attribute, and its nodes' identities are unavailable on `view`/`at` (11.2);
-- a rename or section-move `<new-id>` carrying either is `refused-invalid-id`, exit 1 (never exit 2), `identities` carrying the character verbatim;
-- a `query nodes --tag` spelling or an `occurrences --to` id part carrying either is a malformed value — 12.0's syntax class, reported without loading configuration (`code` and `path` `null`);
-- a journal line naming such an ID is malformed (14.13).
-
-**Observed.** `id`/`tags` values with either character between two letters build with exit 0 and no finding. `rename specs/A.mdx a "a<U+2028>b"` and a section move to `specs/B.mdx#a<U+2029>b` succeed, previews included. `query nodes --tag "a<U+2028>b"` under an invalid configuration reports `configuration-error`. `occurrences --to "specs/A.mdx#a<U+2028>b"` exits 0 with an empty answer. Every other 1.4 rule held in reviewer A's 60-character probe.
-
-**Location.** `VERBATIM_BREAKING_CHARACTERS` and `segmentViolation` in `src/core/text.ts` (~55–135). The sites already route through `segmentViolation`: `src/core/mdx.ts`, `intrinsicIdProblem` in `src/core/refusal.ts`, `src/core/availability.ts`, `src/cli/args.ts` (the parse-level `--tag`/`--to` checks), `src/core/journal.ts`.
-
-**Change.** Add both code points to the barred set with diagnostic names (for instance "a line separator (U+2028)"), keyed by numeric code; update the doc comments, which list four characters. Change nothing else.
-
-**Verification.**
-- Should turn green: `section-1.4.test.ts` (T1.4-1, T1.4-4), `section-16-p1.test.ts` (P-1), `section-6.4.test.ts` (T6.4-3), `section-12.0-ii.test.ts` (T12.0-10).
-- Partially: `section-6.5.test.ts` (T6.5-4's U+2028/U+2029 `<new-id>` arms; it also waits on Task 6), `section-6.6.test.ts` (T6.6-3), `section-14.test.ts` (T14-7).
-- Neighbours, no regressions: `section-1.3.test.ts`, `section-3.test.ts`, `section-11.test.ts`, `section-11.3.test.ts`, `section-6.1.test.ts`.
-- By hand: each surface above with each character, including `view` and `at` on a file declaring `id="a<U+2028>b"` (identity unavailable, exit 1).
+If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, so a later arm may wait on Task 2 or 5 (Task 1 has landed).
 
 ## Task 2 — A derived path that is a directory component of a source's path or of another derived path is refused before any write (SPEC 13.4, 14.22, 12.1, 12.2, 13.3; C4, and A's note on `specs/A.xspec.ts/B.mdx`)
 
@@ -175,7 +155,7 @@ After Task 5 (reuse its predicate).
 **Change.** Add the cause to the one finding's causes, in the part of the function after group matching, so the destination stays probeable and every other reason is still evaluated. In the section form, the cause matters only for a target file to be created: an existing target with such a path is already a 14.19 source, the invalid-workspace precondition's case.
 
 **Verification.**
-- Should turn green, with Task 1: `section-6.5.test.ts` T6.5-4 (one file-form and one section-form arm per character, and the `'`-in-a-directory arms).
+- Should turn green, Task 1 having landed: `section-6.5.test.ts` T6.5-4 (one file-form and one section-form arm per character, and the `'`-in-a-directory arms).
 - Partially: `section-6.6.test.ts` T6.6-3 and `section-14.test.ts` T14-7 (both also wait on Tasks 7, 8, 10); `section-12.7.test.ts` T12.7-2 and `section-6.5-iv.test.ts` T6.5-21's two-reason arm (both also wait on Task 8).
 - Neighbours: `section-6.5-ii.test.ts`, `section-6.5-iii.test.ts`.
 

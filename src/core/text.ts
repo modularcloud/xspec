@@ -54,15 +54,20 @@ const FORBIDDEN_SEGMENT_NAMES: ReadonlySet<string> = new Set([
 
 /**
  * SPEC 1.4: the quote, escape, and character-reference characters — `"`,
- * `'`, `\`, and `&` — which no segment or tag contains, so that every
- * segment is spelled verbatim in every form (2.4, 2.7, 6.4). Keyed by code
- * unit; each value names the character for diagnostics.
+ * `'`, `\`, and `&` — and U+2028 (LINE SEPARATOR) and U+2029 (PARAGRAPH
+ * SEPARATOR), which no segment or tag contains, so that every segment is
+ * spelled verbatim in every form (2.4, 2.7, 6.4). The two separators join
+ * neither 1.4's whitespace nor its control class (each judged on its own
+ * here). Keyed by code unit; each value names the character for
+ * diagnostics.
  */
 const VERBATIM_BREAKING_CHARACTERS: ReadonlyMap<number, string> = new Map([
   [0x22, 'a double quote (")'],
   [0x27, "a single quote (')"],
   [0x5c, "a backslash (\\)"],
   [0x26, "an ampersand (&)"],
+  [0x2028, "a line separator (U+2028)"],
+  [0x2029, "a paragraph separator (U+2029)"],
 ]);
 
 /** SPEC 1.4: U+FFFD (REPLACEMENT CHARACTER), which no argument value carries (12.0). */
@@ -88,12 +93,12 @@ export type SegmentViolation =
  * segment (`kind` `"segment"`) or a tag (`"tag"`, which MAY contain `"."`,
  * 1.4's last paragraph), or null when it satisfies every rule. A segment:
  * is non-empty; contains no `"."`, no `"#"`, no whitespace or control
- * character (this module's exact classes), none of `"`, `'`, `\`, `&`, and
- * no U+FFFD; and is none of the forbidden names. Every site that judges a
- * segment or a tag goes through here — MDX `id`/`tags` props (14.4),
- * rename and move's `<new-id>` (`refused-invalid-id`, 14), `occurrences
- * --to` spellings (11.3), `query nodes --tag` spellings (11.1), and journal
- * entries (14.13).
+ * character (this module's exact classes), none of `"`, `'`, `\`, `&`,
+ * U+2028, and U+2029, and no U+FFFD; and is none of the forbidden names.
+ * Every site that judges a segment or a tag goes through here — MDX
+ * `id`/`tags` props (14.4), rename and move's `<new-id>`
+ * (`refused-invalid-id`, 14), `occurrences --to` spellings (11.3),
+ * `query nodes --tag` spellings (11.1), and journal entries (14.13).
  */
 export function segmentViolation(
   value: string,
@@ -170,9 +175,12 @@ export function describeSegmentViolation(violation: SegmentViolation): string {
     case "control":
       return "contains a control character";
     case "verbatim":
+      // SPEC 1.4: the quote, escape, and character-reference characters and
+      // the two separators, barred alike so every segment is spelled
+      // verbatim in every form.
       return (
-        `contains ${violation.character}, one of the quote, escape, and ` +
-        `character-reference characters`
+        `contains ${violation.character}, one of the characters barred so ` +
+        `that every segment is spelled verbatim in every form`
       );
     case "replacement":
       return "contains U+FFFD (REPLACEMENT CHARACTER)";
