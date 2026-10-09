@@ -34,11 +34,11 @@ import * as path from "node:path";
 import { computeBuildOutputs } from "../core/build.js";
 import type { Finding } from "../core/findings.js";
 import { graphDataMatchesCurrent } from "../core/graph-data.js";
+import { refusedWriteFindings } from "./build-validation.js";
 import type { LoadedWorkspace } from "./config.js";
 import { loadGraphData, writeGraphData } from "./graph-data.js";
 import type { WorkspaceAnalysis } from "./pipeline.js";
 import { analyzeWorkspace, workspaceInputsOf } from "./pipeline.js";
-import { obstructedWritePathFindings } from "./writes.js";
 
 /** The outcome of the SPEC 11.2 pre-answer step. */
 export type AvailabilityPreparation =
@@ -118,13 +118,15 @@ export async function finishAvailabilityRefresh(
   );
 
   // SPEC 13.3: refused writes (14.22) fail `build`'s validations alike —
-  // judged over build's complete write set, exactly the findings a `build`
-  // would now report. On that failing side these surfaces write nothing
-  // and consult no record (SPEC 11.2); the condition itself is no domain
-  // file's finding and accompanies no answer.
-  const writeFindings = await obstructedWritePathFindings(
+  // judged over build's write paths under both of 14.22's relations
+  // (./build-validation.ts), exactly the findings a `build` would now
+  // report. On that failing side these surfaces write nothing and consult
+  // no record (SPEC 11.2); the condition itself is no domain file's
+  // finding and accompanies no answer.
+  const writeFindings = await refusedWriteFindings(
     workspace.root,
-    build.writePaths,
+    workspace.configuration,
+    analysis.classification,
   );
   if (writeFindings.length > 0) {
     return;

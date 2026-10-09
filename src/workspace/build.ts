@@ -5,7 +5,7 @@
 // (src/core/build.ts); this module performs the writes, strictly after the
 // caller has validated the workspace (SPEC 12.1: a failed build modifies
 // nothing) and the complete write set (SPEC 14.22,
-// writes.ts/obstructedWritePathFindings). Every write goes through the
+// build-validation.ts/refusedWriteFindings). Every write goes through the
 // workspace write layer, so each file is atomic in its observable effect
 // (SPEC 13.5) and replaces whatever occupies its path (SPEC 13.4).
 

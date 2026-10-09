@@ -452,7 +452,7 @@ export async function readableDirectoryEntries(
 }
 
 /** The SPEC 14.22 finding for one obstructed directory component. */
-function obstructionFinding(obstructed: ObstructedComponent): Finding {
+export function obstructionFinding(obstructed: ObstructedComponent): Finding {
   const occupant =
     obstructed.occupant === "symlink"
       ? `a symbolic link — writes never traverse symbolic links, whatever ` +
@@ -472,22 +472,20 @@ function obstructionFinding(obstructed: ObstructedComponent): Finding {
 }
 
 /**
- * SPEC 14.22 findings over a set of workspace-relative write paths: one
- * finding per distinct offending component, whatever write paths it
- * refuses, each finding's concerned path the component's workspace-relative
- * path. Deterministic — paths are deduplicated and examined in byte order,
- * findings in byte order of component (SPEC 12.0), a path with no plain
- * string form (a derived path of a source whose path is not valid UTF-8,
- * 14.19) examined by its exact bytes in the same order
- * (`obstructedByteComponentOf`). Callers run this over their complete
- * write set before modifying anything ("a command refuses the write and
- * reports it before modifying anything"); `check` reports the same
- * findings without writing (SPEC 14.22).
+ * SPEC 14.22's occupied-component relation over a set of workspace-relative
+ * write paths, as data: each distinct offending component once, whatever
+ * write paths it refuses, with its occupant. Deterministic — paths are
+ * deduplicated and examined in byte order, components returned in byte
+ * order (SPEC 12.0), a path with no plain string form (a derived path of a
+ * source whose path is not valid UTF-8, 14.19) examined by its exact bytes
+ * in the same order (`obstructedByteComponentOf`). The data form of
+ * `obstructedWritePathFindings`, for `build`'s validations, which merge it
+ * with 14.22's relation between derived paths (./build-validation.ts).
  */
-export async function obstructedWritePathFindings(
+export async function obstructedWriteComponents(
   root: string,
   rels: Iterable<PathText>,
-): Promise<Finding[]> {
+): Promise<ObstructedComponent[]> {
   const unique = new Map<string, PathText>();
   for (const rel of rels) unique.set(pathTextKey(rel), rel);
   const obstructions = new Map<string, ObstructedComponent>();
@@ -500,9 +498,27 @@ export async function obstructedWritePathFindings(
     const key = pathTextKey(obstructed.component);
     if (!obstructions.has(key)) obstructions.set(key, obstructed);
   }
-  return [...obstructions.values()]
-    .sort((a, b) => comparePathTexts(a.component, b.component))
-    .map(obstructionFinding);
+  return [...obstructions.values()].sort((a, b) =>
+    comparePathTexts(a.component, b.component),
+  );
+}
+
+/**
+ * SPEC 14.22 findings over a set of workspace-relative write paths: one
+ * finding per distinct offending component, whatever write paths it
+ * refuses, each finding's concerned path the component's workspace-relative
+ * path, in byte order of component (`obstructedWriteComponents`). Callers
+ * run this over their complete write set before modifying anything ("a
+ * command refuses the write and reports it before modifying anything");
+ * `check` reports the same findings without writing (SPEC 14.22). `build`'s
+ * own write set is judged by ./build-validation.ts, which adds the relation
+ * between derived paths.
+ */
+export async function obstructedWritePathFindings(
+  root: string,
+  rels: Iterable<PathText>,
+): Promise<Finding[]> {
+  return (await obstructedWriteComponents(root, rels)).map(obstructionFinding);
 }
 
 /**

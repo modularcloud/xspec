@@ -56,7 +56,7 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T12.0-5 | section-12.0-i | 5 | `view 'specs/a\b.mdx'` exits 0 with no finding, expected 1 with condition 19 |
 | T12.0-10 | section-12.0-ii | 1 (landed) | `query nodes --tag a<U+2028>b` under an invalid configuration reports `configuration-error`, expected the plain usage error |
 | T12.7-2 | section-12.7 | 6, 8 | the two-reason `move specs/A.mdx "specs/a'b.mdx"` exits 0 |
-| T13.4-9 | section-13.4 | 2 | (a): a derived path above a source builds with exit 0, expected condition 22 |
+| T13.4-9 | section-13.4 | 2 (landed) | (a): a derived path above a source builds with exit 0, expected condition 22 |
 | T13.4-10 | section-13.4 | 4 | the recorded orphan's finding says "run `xspec build` to remove it" |
 | T13.4-11 | section-13.4 | 3 | (a): a condition-10 finding for a recorded path holding a directory |
 | T14-4 | section-14 | 14 (it sweeps T14-12's stagings) | U+2EBF0 in a JSX name judged one UTF-16 unit at a time: 14.20, expected 14.16 |
@@ -65,33 +65,7 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-11 | section-14 | 9 | arm (x): 14.15 reported once, expected five times |
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
-If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, so a later arm may wait on Task 2 or 5 (Task 1 has landed).
-
-## Task 2 — A derived path that is a directory component of a source's path or of another derived path is refused before any write (SPEC 13.4, 14.22, 12.1, 12.2, 13.3; C4, and A's note on `specs/A.xspec.ts/B.mdx`)
-
-**Requirement.** SPEC 13.4: writing a derived file replaces whatever exists at its path, "except that a module, companion, or Markdown path that is a directory component of a discovered source's path or of another such path is refused before any write (14.22)". SPEC 14.22: "It is equally this condition when a generated module's, companion's, or emitted Markdown file's path xspec writes (13.1, 13.2) is a directory component of another such path it writes or of a discovered source's path, occupied or not". So:
-- one finding per distinct offending derived path, concerning it, `locations` `[]`, whatever write paths it refuses and whichever relations it meets — merged with the existing occupied-component relation, so a path meeting both reports once (T13.4-9(f));
-- `build` refuses before any write or removal, exit 1; `check` reports it without writing; the gated reads report it and exit 1, answering nothing (13.3); it is one of `build`'s validations, so `rename`/`move`'s valid-workspace precondition (6.4) sees it;
-- companions are derived paths like modules and emitted Markdown.
-
-**Observed.**
-- (a) Emission next to sources, `specs/a.mdx` beside `specs/a.md/b.mdx`: `build` exits 0 and replaces the directory `specs/a.md` with the Markdown file, deleting the source `b.mdx`. Before any build, `check` reports only `stale-output` findings and `ids` exits 0.
-- (b) `outDir: "out"`, `specs/b.mdx` beside `specs/b.md/c.mdx`: `build` exits 0, but `out/specs/b.md/c.md` is not left in place.
-- (c) `specs/A.mdx` beside `specs/A.xspec.ts/B.mdx`: `build` deletes `B.mdx` (the module replaces the directory), then crashes, exit 70 ("specs/A.xspec.ts is a plain file").
-- (e) `specs/A.mdx` beside a code source `specs/A.xspec.impl.js/c.ts`: `build` exits 0 and deletes `c.ts`.
-
-**Location.**
-- `obstructedWritePathFindings` in `src/workspace/writes.ts` (~487) computes the occupied-component relation over a write set.
-- Its callers: `buildValidationFindings` in `src/workspace/build-validation.ts` (~41, over `discoveredWritePaths`); `src/workspace/availability.ts` (~125, the gated reads); `src/workspace/fast-read.ts` (~198); `src/cli/commands/review.ts` (~293); `src/cli/commands/rewrite-validation.ts` (~140).
-
-**Change.**
-- Add a pure relation in `core` over the derived write set W (every module, companion, and emitted Markdown path the current sources and configuration generate) and the discovered source paths S: a path p in W offends when it is a proper `/`-bounded directory prefix of another path in W or of a path in S, occupied or not. Give it a signature over plain path sets: Task 7 reuses it over the post-move sets.
-- Merge its offending paths with the occupied-component findings into one finding per distinct offending path, wherever `build`'s validations are computed, so `build`, `check`, and the gated reads report it alike. Keep 14.22's wording, naming the relation and a correction (move or rename the source, or reconfigure `markdown.outDir`).
-- Compare paths without a plain string form (14.19, non-UTF-8) by bytes, as `obstructedWritePathFindings` does.
-
-**Verification.**
-- Should turn green: `section-13.4.test.ts` T13.4-9, all six stagings; (e) reads the companion paths from `inventory`'s `recorded` set.
-- Neighbours: the rest of `section-13.4.test.ts`, `section-13.3.test.ts`, `section-12.1-12.2.test.ts`, `section-11.2.test.ts`, `section-6.4.test.ts`, `section-14.test.ts` (T14-4's 14.22 rows).
+If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, so a later arm may wait on Task 5 (Tasks 1 and 2 have landed).
 
 ## Task 3 — Removing a recorded path leaves a directory, a discovered source, or nothing as it is; 14.10 reports only what the removal would remove (SPEC 13.4, 14.10, 12.1; C5)
 
@@ -161,7 +135,7 @@ After Task 5 (reuse its predicate).
 
 ## Task 7 — Move destinations: the derived-path relations of `refused-invalid-destination` (SPEC 6.5, 13.4, 14.22, 14; A6 (a)–(c) and (e), C9's first four bullets)
 
-After Task 2 (reuse its relation).
+After Task 2 (landed; reuse its relation: `derivedPathConflicts` over plain path sets, every pair of an offending derived path and a source or derived path beneath it, and `derivedPathEntries` for every spec source's module, companion, and Markdown paths tagged with role and source, both in `src/core/derived-relation.ts`; `build`'s validations merge it with the occupied-component relation in `refusedWriteFindings`, `src/workspace/build-validation.ts`).
 
 **Requirement.** SPEC 6.5 refuses as `refused-invalid-destination` "a file-form destination or a target file to be created, or a derived path it would generate, that is a directory component of another derived path the sources would generate after the move (13.1, 13.2, 7.3) or lies under one, or a derived path it would generate that is the path of, or a directory component of the path of, a discovered source other than a relocated origin". Its consequences:
 - The relations read the workspace after the move. A file move relocates its origin, so the origin's own module, companion, and Markdown paths are retired and refuse nothing (T6.5-20(e)), and the relocated origin is exempt from the source relation (T6.5-20(c)'s performed exemption). A section move relocates no origin, so the origin keeps its path and its derived paths in both relations.

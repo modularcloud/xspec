@@ -287,7 +287,7 @@ export function recordedPathsOf(record: DerivedFileRecord): readonly string[] {
  * in its observable effect (SPEC 13.5), replacing whatever occupies the
  * path (SPEC 13.4). Byte-deterministic for a given workspace (SPEC 12.0).
  * Callers validate the write path first (SPEC 14.22,
- * `obstructedWritePathFindings`) and write only for workspaces that pass
+ * `refusedWriteFindings`) and write only for workspaces that pass
  * build validation — a failed build or refresh writes nothing (SPEC 12.1,
  * 13.3). A write the environment refuses concerns the graph-data area, no
  * path inside it named (SPEC 14.24, 11.6).

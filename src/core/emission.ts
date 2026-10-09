@@ -128,6 +128,20 @@ export interface SpecModulePaths {
 }
 
 /**
+ * The suffixes `NAME` takes in its generated module's and companions'
+ * paths (SPEC 13.1: every one `NAME.xspec.` plus a suffix), in
+ * `SpecModulePaths` order — the one naming source of `specModulePaths`
+ * and of the byte-wise enumeration of derived paths
+ * (core/derived-relation.ts).
+ */
+export const SPEC_MODULE_SUFFIXES: SpecModulePaths = {
+  module: ".xspec.ts",
+  runtime: ".xspec.impl.js",
+  types: ".xspec.impl.d.ts",
+  typesMap: ".xspec.impl.d.ts.map",
+};
+
+/**
  * The generated-module paths for the spec source at `specPath`
  * (workspace-relative): `NAME.mdx` generates `NAME.xspec.ts` and its
  * companions in the source file's directory (SPEC 13.1).
@@ -137,10 +151,10 @@ export function specModulePaths(specPath: string): SpecModulePaths {
     ? specPath.slice(0, -".mdx".length)
     : specPath;
   return {
-    module: `${stem}.xspec.ts`,
-    runtime: `${stem}.xspec.impl.js`,
-    types: `${stem}.xspec.impl.d.ts`,
-    typesMap: `${stem}.xspec.impl.d.ts.map`,
+    module: stem + SPEC_MODULE_SUFFIXES.module,
+    runtime: stem + SPEC_MODULE_SUFFIXES.runtime,
+    types: stem + SPEC_MODULE_SUFFIXES.types,
+    typesMap: stem + SPEC_MODULE_SUFFIXES.typesMap,
   };
 }
 
