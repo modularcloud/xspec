@@ -91,19 +91,22 @@ export function writeFailure(
   cause: NodeJS.ErrnoException,
 ): EnvironmentRefusal {
   const code = cause.code ?? "an unknown error";
+  // SPEC 12.0: the message names the path in the shared human spelling
+  // (core/path-text.ts), as the report line's concerned path does.
+  const spelled = renderPathText(concerned);
   let what: string;
   switch (write) {
     case "write":
-      what = `to write ${concerned}`;
+      what = `to write ${spelled}`;
       break;
     case "append":
-      what = `an append to ${concerned}`;
+      what = `an append to ${spelled}`;
       break;
     case "remove":
-      what = `the removal of ${concerned}`;
+      what = `the removal of ${spelled}`;
       break;
     case "graph-data":
-      what = `a graph-data write in the graph-data area ${concerned}`;
+      what = `a graph-data write in the graph-data area ${spelled}`;
       break;
   }
   return new EnvironmentRefusal(

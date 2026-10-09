@@ -33,7 +33,8 @@ import type { CliWriter, CommandIo } from "./io.js";
 /**
  * A location as human text: `FILE:START-END` — the file through the shared
  * deterministic path spelling (core/path-text.ts): a non-UTF-8 path (SPEC
- * 14.19) renders as its exact bytes, never lossily (SPEC 12.0).
+ * 14.19) renders as its exact bytes in the marked byte form, never lossily,
+ * and no plain path renders as a marked byte form (SPEC 12.0).
  */
 function renderLocation(location: FindingLocation): string {
   return `${renderPathText(location.file)}:${String(location.range.start)}-${String(location.range.end)}`;
@@ -235,9 +236,12 @@ export function emitPreviewReport(
   for (const pair of plan.mapping) {
     lines.push(`  ${pair.from} -> ${pair.to}\n`);
   }
+  // Every path in the human form goes through the one human path renderer
+  // (core/path-text.ts), so no plain path reads as a marked byte form
+  // (SPEC 12.0).
   lines.push("files:\n");
   for (const entry of plan.files) {
-    lines.push(`  ${entry.path}\n`);
+    lines.push(`  ${renderPathText(entry.path)}\n`);
     for (const edit of entry.edits) {
       lines.push(
         `    ${String(edit.range.start)}-${String(edit.range.end)} ${edit.class}\n`,
@@ -249,10 +253,10 @@ export function emitPreviewReport(
   } else {
     lines.push("delta:\n");
     for (const path of plan.delta.generated) {
-      lines.push(`  generated ${path}\n`);
+      lines.push(`  generated ${renderPathText(path)}\n`);
     }
     for (const path of plan.delta.removed) {
-      lines.push(`  removed ${path}\n`);
+      lines.push(`  removed ${renderPathText(path)}\n`);
     }
   }
   stdout.write(lines.join(""));

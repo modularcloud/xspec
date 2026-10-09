@@ -360,7 +360,7 @@ function invalidDestinationFinding(
   for (const component of obstructedComponents) {
     all.push(
       `its workspace-relative directory component ` +
-        `${JSON.stringify(component)} (of the destination path or of a ` +
+        `${quotePath(component)} (of the destination path or of a ` +
         `derived path the destination would generate, SPEC 13.1, 13.2, ` +
         `7.3) is occupied by something other than a directory — writes ` +
         `never traverse or replace such an occupant (SPEC 13.4, 14.22)`,
@@ -371,7 +371,7 @@ function invalidDestinationFinding(
   if (all.length === 0) return null;
   return refusalFinding(
     "refused-invalid-destination",
-    `invalid destination ${JSON.stringify(destination)}: the destination ` +
+    `invalid destination ${quotePath(destination)}: the destination ` +
       `file path would not be a valid discovered spec source after the ` +
       `move, or could not be written and regenerated — ${all.join("; ")} ` +
       `(SPEC 6.5)`,
@@ -1239,7 +1239,7 @@ export function evaluateMoveFileRefusals(
       refusalFinding(
         "refused-destination-exists",
         `destination exists: the destination path ` +
-          `${JSON.stringify(destination)} is already occupied by ` +
+          `${quotePath(destination)} is already occupied by ` +
           `${describeOccupantKind(probe.occupant)} — a file-form move ` +
           `refuses an existing destination, whatever occupies it ` +
           `(SPEC 6.5, 14)`,
@@ -1377,7 +1377,7 @@ function invalidRewriteFinding(
   if (verdict.illFormed.length > 0) {
     causes.push(
       `leave ${sortByBytes([...verdict.illFormed], (path) => path)
-        .map((path) => JSON.stringify(path))
+        .map((path) => quotePath(path))
         .join(" and ")} not well-formed MDX (SPEC 14.20)`,
     );
   }
@@ -1387,7 +1387,7 @@ function invalidRewriteFinding(
         verdict.inadmissible.map((entry) => entry.path),
         (path) => path,
       )
-        .map((path) => JSON.stringify(path))
+        .map((path) => quotePath(path))
         .join(" and ")}, ` +
         `${verdict.inadmissible.length === 1 ? "which holds" : "each holding"} ` +
         `no admissible offset for it — located by the reference spellings ` +
@@ -1539,7 +1539,7 @@ export function evaluateMoveSectionRefusals(
       refusalFinding(
         "refused-destination-exists",
         `destination exists: the target path ` +
-          `${JSON.stringify(targetPath)} is occupied by ` +
+          `${quotePath(targetPath)} is occupied by ` +
           `${describeOccupantKind(probe.occupant)} that is not a ` +
           `discovered spec source — neither an insertion target nor an ` +
           `absent path to create (SPEC 6.5, 7, 14)`,

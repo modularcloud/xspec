@@ -31,6 +31,7 @@ import {
   GRAPH_DATA_AREA,
   graphDataMatchesCurrent,
 } from "../core/graph-data.js";
+import { renderPathText } from "../core/path-text.js";
 import { isFilesystemFailure } from "./environment-refusal.js";
 import type { DerivedFileRecord, LoadedGraphData } from "./graph-data.js";
 import type { PathOccupant } from "./writes.js";
@@ -77,9 +78,10 @@ async function comparedOccupant(
 
 /** SPEC 14.10: a stale generated file — names the file, instructs rebuild. */
 function staleFinding(rel: string, state: string): Finding {
+  const spelled = renderPathText(rel); // SPEC 12.0 (core/path-text.ts)
   return pathFinding(
     10,
-    `stale generated output: ${rel} ${state} what the current sources ` +
+    `stale generated output: ${spelled} ${state} what the current sources ` +
       `and configuration generate; run \`xspec build\` to regenerate every ` +
       `derived file (SPEC 14.10)`,
     rel,
@@ -88,10 +90,11 @@ function staleFinding(rel: string, state: string): Finding {
 
 /** SPEC 14.10: a recorded derived file at a no-longer-generated path. */
 function orphanFinding(rel: string): Finding {
+  const spelled = renderPathText(rel); // SPEC 12.0 (core/path-text.ts)
   return pathFinding(
     10,
-    `stale generated output: the recorded derived file ${rel} remains at ` +
-      `a path the current sources and configuration no longer generate; ` +
+    `stale generated output: the recorded derived file ${spelled} remains ` +
+      `at a path the current sources and configuration no longer generate; ` +
       `run \`xspec build\` to remove it (SPEC 14.10)`,
     rel,
   );
@@ -107,13 +110,14 @@ function orphanFinding(rel: string): Finding {
  * the orphan stays until it is deleted manually (13.4, 13.5).
  */
 function obstructingOrphanFinding(rel: string): Finding {
+  const spelled = renderPathText(rel); // SPEC 12.0 (core/path-text.ts)
   return pathFinding(
     10,
-    `stale generated output: the recorded derived file ${rel} remains at ` +
-      `a path the current sources and configuration no longer generate, ` +
+    `stale generated output: the recorded derived file ${spelled} remains ` +
+      `at a path the current sources and configuration no longer generate, ` +
       `and it occupies a directory component of a path the rebuild ` +
       `writes, so \`xspec build\` is refused while it stays (SPEC 13.4, ` +
-      `14.22); delete ${rel} by hand, then run \`xspec build\` to ` +
+      `14.22); delete ${spelled} by hand, then run \`xspec build\` to ` +
       `regenerate every derived file (SPEC 14.10)`,
     rel,
   );

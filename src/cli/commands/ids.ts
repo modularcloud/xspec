@@ -25,6 +25,7 @@
 import type { JsonObject } from "../../core/canonical-json.js";
 import type { ExitCode } from "../../core/findings.js";
 import type { RequirementNode, WorkspaceGraph } from "../../core/graph.js";
+import { renderPathText } from "../../core/path-text.js";
 import type { Invocation } from "../args.js";
 import { flagPresent } from "../args.js";
 import type { CommandContext } from "../io.js";
@@ -127,11 +128,15 @@ function treeNodeJson(node: TreeNode): JsonObject {
   return { id: node.id, children: node.children.map(treeNodeJson) };
 }
 
-/** The flat human listing: the file line, IDs indented under it. */
+/**
+ * The flat human listing: the file line — the path in the shared human
+ * spelling (core/path-text.ts, SPEC 12.0), as in every human listing
+ * here — with the IDs indented under it.
+ */
 function renderFlatHuman(groups: readonly FileGroup[]): string {
   let out = "";
   for (const group of groups) {
-    out += `${group.file}\n`;
+    out += `${renderPathText(group.file)}\n`;
     for (const node of group.nodes) {
       out += `  ${requirementIdOf(node)}\n`;
     }
@@ -151,7 +156,7 @@ function renderTreeHuman(
     }
   };
   for (const group of groups) {
-    out += `${group.file}\n`;
+    out += `${renderPathText(group.file)}\n`;
     for (const node of group.nodes) {
       renderNode(node, 1);
     }

@@ -138,18 +138,45 @@ export function pathTextJson(path: PathText): JsonValue {
 }
 
 /**
- * The deterministic human spelling of a path value (SPEC 12.0: outputs are
- * byte-deterministic; 14: human and JSON reports carry the same
- * information): the path string itself, or — for a path with no plain
- * string form — an explicitly marked spelling of its exact bytes,
- * `<bytes HEX>`, distinguishable from every plain workspace-relative path
- * (which never contains `<` at a spelling boundary the renderer produces
- * and is never spelled this way by xspec). SPEC.md fixes no human spelling
- * for such paths; the hex form is chosen because it is injective and
- * mirrors the JSON marked byte form's information exactly.
+ * The marked shape of a human path spelling: one or more `<`, then
+ * `bytes`, one space, any run of lowercase hexadecimal digits, and `>`,
+ * with nothing before or after (see `renderPathText`). It holds no `/`, so
+ * only a one-segment path can have it — never a spec source (`.mdx`) or a
+ * derived file, whose names end in their extensions.
+ */
+const MARKED_SHAPE = /^<+bytes [0-9a-f]*>$/;
+
+/**
+ * The deterministic human spelling of a path value — the renderer of every
+ * path a human report presents, and of every path a message names that
+ * could have the marked shape (a spec source or derived path never can, so
+ * it is spelled the same either way). SPEC 12.0: a path that is not valid
+ * UTF-8 is presented in an explicitly marked byte form that carries its
+ * exact bytes and is distinguishable from every plain path string,
+ * deterministically, and a valid-UTF-8 path is never presented in the
+ * marked form; the human and JSON reports carry the same information.
+ * SPEC.md fixes no human spelling; the scheme is:
+ *
+ * - A path with no plain string form (`PathBytes`) is spelled in the
+ *   marked byte form `<bytes HEX>`: `<`, `bytes`, one space, its exact
+ *   bytes as lowercase hexadecimal, two digits per byte — the information
+ *   of 12.7's JSON `{"bytes": "…"}` — and `>`.
+ * - A plain path is spelled as its exact characters, except that one whose
+ *   whole spelling has the marked shape (`MARKED_SHAPE`) is spelled with
+ *   one more `<` in front, its exact characters following it.
+ *
+ * So a marked byte form has the marked shape with exactly one leading `<`,
+ * an escaped plain path has it with two or more, and every other plain
+ * path lacks it: the three sets are disjoint and each rule is injective. A
+ * spelling decodes uniquely — the marked shape with one `<` is the hex's
+ * bytes, with more `<` a plain path less one leading `<`, anything else a
+ * plain path as spelled — and no plain path, whether workspace-relative,
+ * in the anchoring form of 11.6, or a `--config` value echoed as given
+ * (14), is spelled as any marked byte form.
  */
 export function renderPathText(path: PathText): string {
-  return typeof path === "string"
-    ? path
-    : `<bytes ${lowercaseHex(path.bytes)}>`;
+  if (typeof path !== "string") {
+    return `<bytes ${lowercaseHex(path.bytes)}>`;
+  }
+  return MARKED_SHAPE.test(path) ? `<${path}` : path;
 }
