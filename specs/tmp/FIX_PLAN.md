@@ -40,11 +40,11 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T4-2 | section-4 | 9 (landed) | an import type naming a `.xspec` module builds with exit 0; passes since Task 9 landed |
 | T6.4-3 | section-6.4 | 1 (landed) | `rename specs/A.mdx a "a<U+2028>b"` exits 0 |
 | T6.5-4 | section-6.5 | 1 (landed), 6 (landed) | `move specs/A.mdx#keep "specs/B.mdx#a<U+2028>b"` exits 0; then the barred-character destination arms; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; passes since Task 6 landed |
-| T6.5-11 | section-6.5-ii | 17 | arm (f): the rewritten call reads `tt(target.y)`, an untimely `text` binding |
+| T6.5-11 | section-6.5-ii | 17 (landed) | arm (f): the rewritten call reads `tt(target.y)`, an untimely `text` binding; passes since Task 17 landed |
 | T6.5-20 | section-6.5-iv | 7 (landed), 10 (landed; and 9 (landed) for (d)'s import-type and `declare module` stagings) | arm (a): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70 after modifying the workspace; since Task 7 landed, first fails at arm (d)'s first staging (Task 10): `move specs/Z.mdx specs/B.mdx` beside `src/c.ts` holding `import "../specs/B.md"` reports 14.15 once, expected `refused-invalid-destination` alone; passes since Task 10 landed |
 | T6.5-21 | section-6.5-iv | 8 (landed), 6 (landed; its two-reason arm) | arm (a): `move specs/A.mdx specs/sub/A.mdx` exits 0; passes since Task 8 landed |
 | T6.5-22 | section-6.5-iv | 15 (landed) | arm (b): 26 of 38 lures bound a barred name; passes since Task 15 landed |
-| T6.5-23 | section-6.5-v | 16 (landed), 17 | 13 of 33 stagings place or root the added declaration wrongly; since Task 16 landed (its placement filter judging timeliness as well), 5 of 33 fail: (f)'s example and both boundary stagings, (k), and (m), each re-rooting a spelling at an untimely held binding (Task 17) |
+| T6.5-23 | section-6.5-v | 16 (landed), 17 (landed) | 13 of 33 stagings place or root the added declaration wrongly; since Task 16 landed (its placement filter judging timeliness as well), 5 of 33 fail: (f)'s example and both boundary stagings, (k), and (m), each re-rooting a spelling at an untimely held binding (Task 17); passes since Task 17 landed |
 | T6.6-3 | section-6.6 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 twins, reached only past that arm, hand-checked at Task 8: each refused `--preview` reports the real move's findings, `mapping`, `files`, and `delta` `null`; passes since Task 10 landed |
 | T7-2 | section-7-basics | 11 (landed) | the `import defer { defineConfig }` arm builds with exit 0, expected 2; passes since Task 11 landed |
 | T7-6 | section-7-discovery | 5 (landed) | invalid-source arm: `check` reports 14.10 six times, expected 14.19 once |
@@ -64,31 +64,6 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 arms, reached only past that twin, hand-checked at Task 8 against T6.5-21's own expectations; passes since Task 10 landed |
 | T14-11 | section-14 | 9 (landed) | arm (x): 14.15 reported once, expected five times; passes since Task 9 landed |
 | T14-12 | section-14-iii | 14 (landed) | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16; passes since Task 14 landed |
-
-## Task 17 — Timeliness in a TypeScript source: re-root only at timely bindings, and add declarations where their bindings are timely (SPEC 6.5 "Reference spellings" and "Added imports"; A10)
-
-Task 16 has landed, and with it this task's placement half: an added declaration's offset is already admitted only where it is timely for every spelling rooted at the added bindings (`timelyAt` and `admitsCodeAdditionOffset` in `src/core/move.ts`, each former binding's declaration recorded per file in `codeAddedFormerDeclarations` as the re-rooting loop roots a chain or a callee at an added binding, the file's statements read by `topLevelStatementLayout` in `src/core/code-analysis.ts`) — which turned T6.5-23's (l) and (d)-with-U+2028 stagings green. What remains is the re-rooting half: reusing a held binding only where it is timely.
-
-**Requirement.** SPEC 6.5: in a TypeScript source, a binding a rewritten spelling — a chain, or a call's callee — is rooted at must be timely for it: "a binding is timely for a spelling the operation roots — a chain, or a call's callee — when its declaration is or precedes that of the binding the spelling was rooted at before the operation, or follows it with no top-level statement between them but import declarations (positions in pre-operation coordinates, an added declaration's at its offset)". Consequences:
-- an existing binding is reused only when timely, as well as unshadowed at the occurrence (as today). Where the file holds no timely binding, an added declaration's binding roots the spelling — "an import is added exactly where a file lacks a binding a spelling is rooted at" — so a file may gain a second declaration of a module it already imports;
-- an added declaration's offset must make its bindings timely for every spelling rooted at them (6.5's TypeScript admissibility bullet);
-- callees (`text` bindings) are judged like chain roots;
-- any top-level statement other than an import declaration breaks the succession — `type T = number` and `import Z = require("./z")` included — while `import type { T } from "./t"` and `import "./p"` do not;
-- spec sources have no timeliness (T6.5-23(o)).
-
-**Observed.**
-- (f), 6.5's own example: the product writes `B.m` and adds nothing, where a fresh declaration of B's module at the start of line 2 and `<X>.m` are expected; the same with `type T = number` or `import Z = require("./z")` between the two declarations.
-- (m): it roots `A1.m` at the untimely `B`.
-- (k) and T6.5-11(f): it roots the callee at the untimely `tb` and `tt`.
-- ((l) and (d) with U+2028 pass since Task 16 landed.)
-
-**Location.** In `src/core/move.ts`: `existingBinding` (inside the code-reference loop of the section-move plan, its callers for default and `text` bindings beside it), the addition bookkeeping (`fresh.added`, `addFormerDeclaration`), and `timelyAt`, which judges a declaration position against a former binding's declaration over a `StatementLayout`.
-
-**Change.** In a TypeScript source, make `existingBinding` skip a held binding untimely for the spelling: the held import declaration's range against the declaration the spelling was rooted at before — `analysis.imports[reference.rootImport]` for a chain, `analysis.imports[reference.calleeImport]` for a callee — judged with `timelyAt` over the file's `topLevelStatementLayout` (computed once per file that needs it). Where no timely binding exists, root the spelling at the added declaration (recording its former declaration, as the default and `text` branches already do), which binds exactly the lacked default and/or `text` binding, one declaration per module — so a file may gain a second declaration of a module it already imports, and the placement filter then places it where it is timely. Keep the import-use counts (`usesBefore`/`usesAfter`) consistent with the chosen bindings.
-
-**Verification.**
-- Should turn green: `section-6.5-v.test.ts` T6.5-23 ((f)'s example and both boundary stagings, (k), (m)); `section-6.5-ii.test.ts` T6.5-11 (arm (f)).
-- Neighbours: `section-6.5-iii.test.ts` (T6.5-18's shadowing), `section-6.5.test.ts`, `section-6.6.test.ts`, `section-16-p5-p6.test.ts` (P-5).
 
 ## Task 18 — `review create` with a case variant of a corrupt session's name reports the corruption (SPEC 10.1, 10.7, 14.21, 13.5; B5, C13)
 

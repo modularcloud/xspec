@@ -1670,12 +1670,15 @@ function admitsAddedCodeDeclarations(
 
 /**
  * SPEC 6.5 "Reference spellings": whether a binding declared at `offset` —
- * an added declaration's position, in pre-operation coordinates — is
- * timely for a spelling rooted, before the operation, at a binding
- * `declaration` declares: the offset is or precedes that declaration, or
- * follows it with no top-level statement between them but import
- * declarations (`layout`, the file before the edit). The offset lies
- * inside no statement (`admitsCodeAdditionOffset` checks that first).
+ * an added declaration's position, or a held declaration's start, in
+ * pre-operation coordinates — is timely for a spelling rooted, before the
+ * operation, at a binding `declaration` declares: the offset is or
+ * precedes that declaration, or follows it with no top-level statement
+ * between them but import declarations (`layout`, the file before the
+ * edit). An added declaration's offset lies inside no statement
+ * (`admitsCodeAdditionOffset` checks that first); a held declaration's
+ * start lies at the start of, or inside, the top-level statement holding
+ * it, which therefore never counts as one standing between.
  */
 function timelyAt(
   layout: StatementLayout,
@@ -2416,15 +2419,18 @@ function composeMoveSection(
   // target module — a chain (a marker, a call's argument) at its default
   // binding, a call's callee at its `text` binding (4.3, 4.4) — each one
   // the file already holds that no local declaration shadows at the
-  // occurrence (4.5; the first such in document order, deterministic) or
-  // else one the declaration added to the file gives: one per module,
-  // binding exactly the lacked ones, its fresh identifiers shadowed
-  // nowhere (they avoid every identifier the file spells). A call is so
-  // rewritten whole, over its occurrence's span (5.7), and is never the
-  // cross-module call of 14.11. Under a same-file move the module is kept,
-  // so only a chain's segment prefix is re-identified and no callee is
-  // touched. Type-level references record no edges (SPEC 4.5) and are
-  // absent from the analyzed references.
+  // occurrence (4.5) and that is timely for the spelling (the first such
+  // in document order, deterministic) or else one the declaration added
+  // to the file gives: one per module, binding exactly the lacked ones,
+  // its fresh identifiers shadowed nowhere (they avoid every identifier
+  // the file spells) — so a file may gain a second declaration of a
+  // module it already imports, where every binding it holds of it is
+  // untimely for a spelling. A call is so rewritten whole, over its
+  // occurrence's span (5.7), and is never the cross-module call of 14.11.
+  // Under a same-file move the module is kept, so only a chain's segment
+  // prefix is re-identified and no callee is touched. Type-level
+  // references record no edges (SPEC 4.5) and are absent from the
+  // analyzed references.
   //
   // SPEC 6.5 "Import edits": an occurrence uses a binding when its chain is
   // rooted at it or, for a `text(...)` call, its callee is it (4.5); a spec
@@ -2464,20 +2470,50 @@ function composeMoveSection(
       }
     }
     const usesAfter = [...usesBefore];
+    // SPEC 6.5 "Reference spellings": the file's top-level statements
+    // before the edit, over which a held binding's timeliness is judged —
+    // read once, where it is first needed. The file is a discovered code
+    // source the workspace's validations parsed (6.5 judges only a valid
+    // workspace), every code source a TypeScript source.
+    let layout: StatementLayout | null = null;
+    const statementLayout = (): StatementLayout => {
+      layout ??= topLevelStatementLayout(
+        analysis.path,
+        encoder.encode(analysis.text),
+      );
+      if (layout === null) {
+        throw new Error(
+          `xspec internal error: ${analysis.path} is not well-formed ` +
+            `before the move`,
+        );
+      }
+      return layout;
+    };
     // The target module's value-level bindings the file already holds that
     // no local declaration shadows at the occurrence (SPEC 6.5 "Reference
-    // spellings", 4.5): the first such in document order — declarations,
-    // then a declaration's bindings — deterministic; null where the file
-    // holds none there, and the added declaration's binding roots the
-    // spelling instead.
+    // spellings", 4.5) and that are timely for the spelling — declared at
+    // or before the declaration of the binding it was rooted at before the
+    // operation (`former`, an index into the file's imports: a chain's
+    // root import, a callee's `text` import), or after it with no
+    // top-level statement between them but import declarations: the first
+    // such in document order — declarations, then a declaration's bindings
+    // — deterministic; null where the file holds none there, and the
+    // added declaration's binding roots the spelling instead.
     const holdsTarget = (imported: CodeImport): boolean =>
       imported.valid && imported.targetPath === targetPath;
     const existingBinding = (
       reference: CodeReference,
       bindingsOf: (imported: CodeImport) => readonly CodeImportBinding[],
+      former: number,
     ): { readonly importIndex: number; readonly name: string } | null => {
+      const formerDeclaration = analysis.imports[former]!.range;
       for (const [importIndex, imported] of analysis.imports.entries()) {
         if (!holdsTarget(imported)) continue;
+        if (
+          !timelyAt(statementLayout(), formerDeclaration, imported.range.start)
+        ) {
+          continue;
+        }
         const binding = bindingsOf(imported).find(
           (candidate) =>
             !candidate.typeOnly &&
@@ -2542,7 +2578,11 @@ function composeMoveSection(
         // The chain leaves its origin-module root for a binding of the
         // target module — another module, so another import.
         usesAfter[reference.rootImport]! -= 1;
-        const existingDefault = existingBinding(reference, defaultBindingsOf);
+        const existingDefault = existingBinding(
+          reference,
+          defaultBindingsOf,
+          reference.rootImport,
+        );
         if (existingDefault !== null) {
           rootName = existingDefault.name;
           usesAfter[existingDefault.importIndex]! += 1;
@@ -2567,7 +2607,11 @@ function composeMoveSection(
             );
           }
           usesAfter[reference.calleeImport]! -= 1;
-          const existingText = existingBinding(reference, textBindingsOf);
+          const existingText = existingBinding(
+            reference,
+            textBindingsOf,
+            reference.calleeImport,
+          );
           if (existingText !== null) {
             calleeName = existingText.name;
             usesAfter[existingText.importIndex]! += 1;
