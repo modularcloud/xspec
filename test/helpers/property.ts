@@ -44,10 +44,11 @@
 // Every falsification message names the failing seed and the replay
 // environment variable (H-10: the seed is reported on failure). A property
 // body that throws anything other than `HarnessAssertionError`, and a
-// generator that throws at all, is a harness defect: `checkProperty`
-// rethrows it as a plain `Error` (never a diagnosed assertion failure) with
-// the seed attached for reproduction, matching the certification runner's
-// and the S-7 sweep's outcome taxonomy (H-8).
+// generator that throws at all — generating a trial or replaying a shrink
+// candidate's choices alike — is a harness defect: `checkProperty` rethrows
+// it as a plain `Error` (never a diagnosed assertion failure) with the seed
+// attached for reproduction, matching the certification runner's and the
+// S-7 sweep's outcome taxonomy (H-8).
 //
 // A failure may decline shrinking (`fail(message, { shrinkable: false })`,
 // helpers/assertions.ts): its drawn counterexample is reported as is, with
@@ -797,7 +798,12 @@ interface ShrinkResult<T> {
  * binary-search minimization over the tape until a full sweep accepts
  * nothing or the budget runs out. A candidate is accepted iff it replays to
  * a strictly shortlex-smaller tape (termination) and the property rejects
- * its value with a `HarnessAssertionError` again. Fully deterministic for a
+ * its value with a `HarnessAssertionError` again. A candidate the generator
+ * cannot replay (its tape runs out, or an entry exceeds its draw's bound) is
+ * discarded; anything else the generator throws on a candidate, an S-9
+ * refusal of a candidate's staged sources, and anything but a
+ * `HarnessAssertionError` from the body are harness errors carrying the
+ * seed (H-10, H-8), never a rejected candidate. Fully deterministic for a
  * deterministic property (E-5).
  */
 async function shrinkFalsification<T>(
@@ -824,7 +830,26 @@ async function shrinkFalsification<T>(
   const attempt = async (candidate: readonly number[]): Promise<boolean> => {
     if (exhausted()) return false;
     replays += 1;
-    const replayed = replayTrial(generator, candidate);
+    // A candidate tape the generator cannot replay (it runs out, or an entry
+    // exceeds its draw's bound) is discarded: `replayTrial` turns that
+    // internal signal into null. Anything else the generator throws on a
+    // candidate's choices is a harness defect, as a throw while generating
+    // a trial is — always surfaced with the seed (H-10, H-8), never
+    // "candidate rejected", and never escaping as the generator's raw error.
+    // No input is rendered: the generator composed none.
+    let replayed: Trial<T> | null;
+    try {
+      replayed = replayTrial(generator, candidate);
+    } catch (error) {
+      throw harnessError({
+        name: context.name,
+        seed: context.seed,
+        phase:
+          "shrinking (the generator threw while replaying a shrink " +
+          "candidate's choices)",
+        cause: error,
+      });
+    }
     if (replayed === null) return false;
     if (!shortlexLess(replayed.tape, current.trial.tape)) return false;
     // A shrunk candidate is a draw like any other: its staged sources are

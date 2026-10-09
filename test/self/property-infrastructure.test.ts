@@ -15,7 +15,8 @@
 //     nothing overrides it; XSPEC_PROPERTY_SEED=<uint32> replays exactly that
 //     seed; XSPEC_PROPERTY_SEED=random (the optional local mode) reports its
 //     seed and that report reproduces the run.
-//   * H-8 classification — generator defects and non-assertion property
+//   * H-8 classification — generator defects (on a trial's draw or on a
+//     shrink candidate's replayed choices alike) and non-assertion property
 //     errors surface as plain harness errors (with the seed for
 //     reproduction), never as diagnosed assertion failures.
 //   * S-9 per-draw check (TEST-SPEC 16 preamble) — a draw whose staged MDX
@@ -361,6 +362,54 @@ test("generator defects are harness errors, never diagnosed failures (H-8)", asy
     expect(thrown, label).not.toBeInstanceOf(HarnessAssertionError);
     expect((thrown as Error).message, label).toContain("harness error");
   }
+});
+
+test("a generator that throws while a falsification is shrunk is a harness error carrying the property, the seed, and the replay variable — never an escaped raw error (H-10, H-8)", async () => {
+  // Below 5 the generator's own guard throws (a generator defect that only a
+  // shrink candidate reaches); every value it returns falsifies the
+  // property. Seed 271828183's first draw is at least 5 (asserted), so the
+  // initial trial generates cleanly and fails the body, and shrinking then
+  // replays smaller choices: the empty tape (the one entry deleted) cannot
+  // replay — a discarded candidate, never a harness error — and the zeroed
+  // entry reaches the guard. The rejection's cause being the guard's own
+  // error shows both.
+  const name = "generator guard reached while shrinking";
+  const generatorErrors: Error[] = [];
+  const bodies: number[] = [];
+  const thrown = await captureRejection(
+    checkProperty(
+      name,
+      (choices) => {
+        const value = choices.intInclusive(0, 1000);
+        if (value < 5) {
+          const error = new Error(
+            `generator guard: value ${String(value)} unsupported`,
+          );
+          generatorErrors.push(error);
+          throw error;
+        }
+        return value;
+      },
+      (value) => {
+        bodies.push(value);
+        fail(`falsified on ${String(value)}`);
+      },
+      { runs: 1, seeds: [271828183], env: {} },
+    ),
+  );
+  expect(bodies.length).toBeGreaterThan(0);
+  expect(bodies[0]).toBeGreaterThanOrEqual(5);
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while shrinking");
+  expect(error.message).toContain(JSON.stringify(name));
+  expect(error.message).toContain("with seed 271828183");
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=271828183`);
+  expect(generatorErrors).toHaveLength(1);
+  expect(error.message).toContain(generatorErrors[0].message);
+  expect(error.cause).toBe(generatorErrors[0]);
+  expect(bodies.filter((value) => value < 5)).toEqual([]);
 });
 
 test("listOf stays within its bounds across generation", async () => {
