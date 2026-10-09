@@ -31,7 +31,9 @@ export function analysisQueryView(analysis: WorkspaceAnalysis): QueryView {
       path: node.path,
       isRoot: node.id === null,
       range: node.section.range,
-      tags: node.section.tags,
+      // SPEC 11.1/12.4/5.5: a root node's tags are absent (null), as its
+      // coverage attribute is — never a tagless section's `[]` (12.7).
+      tags: node.id === null ? null : node.section.tags,
       coverage: node.section.coverage,
       hashes: nodeHashes,
       ownText: () => textModel.ownText(node.document, node.section),

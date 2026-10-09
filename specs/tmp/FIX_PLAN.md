@@ -50,9 +50,9 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T7-6 | section-7-discovery | 5 (landed) | invalid-source arm: `check` reports 14.10 six times, expected 14.19 once |
 | T7.1-1 | section-7.1-7.3 | 5 (landed) | `specs/a"b.mdx` builds with exit 0, expected 1 |
 | T7.3-1 | section-7.1-7.3 | 12 (landed) | `outDir ".xspec"` builds with exit 0, expected 2; passes since Task 12 landed |
-| T11-1 | section-11 | 13 | a root's tags reported `[]`, expected absent |
-| T11-2 | section-11 | 13 | likewise |
-| T11-3 | section-11 | 13 | likewise |
+| T11-1 | section-11 | 13 (landed) | a root's tags reported `[]`, expected absent; passes since Task 13 landed |
+| T11-2 | section-11 | 13 (landed) | likewise; passes since Task 13 landed |
+| T11-3 | section-11 | 13 (landed) | likewise; passes since Task 13 landed |
 | T12.0-5 | section-12.0-i | 5 (landed) | `view 'specs/a\b.mdx'` exits 0 with no finding, expected 1 with condition 19 |
 | T12.0-10 | section-12.0-ii | 1 (landed) | `query nodes --tag a<U+2028>b` under an invalid configuration reports `configuration-error`, expected the plain usage error |
 | T12.7-2 | section-12.7 | 6 (landed), 8 (landed) | the two-reason `move specs/A.mdx "specs/a'b.mdx"` exits 0; since Task 6 landed, it exits 1 reporting `refused-invalid-destination` alone, `refused-exposed-derived-file` (Task 8) missing after it; passes since Task 8 landed |
@@ -66,20 +66,6 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
 If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, and the tasks a later arm waited on beside Task 14 (Tasks 1, 2, 3, 4, and 5) have landed.
-
-## Task 13 — A root node's tags are reported absent on `query` and `show` (SPEC 11.1, 12.4, 12.7, 5.5; B4, C12)
-
-**Requirement.** SPEC 11.1: `node` reports tags and the coverage attribute, and "for a root node the tags and the coverage attribute are both reported as absent (5.5)"; the rows of `nodes`, `subtree`, and `ancestors` carry "tags and coverage attribute both absent for roots". SPEC 12.4: `show` prints "tags and coverage attribute (both absent for a root node, 11)". SPEC 12.7's value forms: `null` never encodes emptiness, and `[]` is a tagless section's tag set — so `[]` for a root reports a tag set the root does not have.
-
-**Observed.** `query node <root>` and the root rows of `query nodes`, `query subtree`, and `query ancestors` give `"tags": []`; so does `show --json <root>`; human `show <root>` prints an empty `tags:` line, identical to a tagless section's. The root's coverage is already omitted, and `view` already gives a root `tags: null`.
-
-**Location.** `rowJson` (~98) and `nodeReportOf` (~120) in `src/cli/commands/query-core.ts` (`QueryRow.tags` ~46); `src/cli/commands/query-fast.ts` (~31, rows read from graph data); `renderNodeHuman` in `src/cli/commands/show.ts` (~52).
-
-**Change.** On every one of these surfaces, report a root's tags as absent: omit the member exactly as `coverage` is omitted in the same objects, or give `null` (T11-1, T11-2, and T11-3 accept either) — the same choice for `query` and `show --json` — and omit the human `tags:` line for a root as its `coverage:` line is omitted. Tagless sections keep `[]`. The fast path (graph-data rows) and the analysis path must agree.
-
-**Verification.**
-- Should turn green: `section-11.test.ts` T11-1, T11-2, T11-3.
-- Neighbours: `section-12.3-12.5.test.ts` (`show`), `section-11.4.test.ts`, `section-12.7.test.ts`, `section-13.3.test.ts` (the fast path).
 
 ## Task 14 — Supplementary-plane identifier characters are valid in MDX JSX names (SPEC 14.20, 2.7, 14.16, 14.17; C7)
 

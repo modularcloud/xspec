@@ -28,7 +28,10 @@ function storeQueryView(data: GraphData): QueryView {
     path: stored.path,
     isRoot: stored.id === null,
     range: stored.range,
-    tags: stored.tags,
+    // SPEC 11.1/12.4/5.5: a root node's tags are absent (null). The store
+    // records a root's tags as `[]` (core/graph-data.ts); this path reports
+    // them absent exactly as the full path does (./analysis-view.ts).
+    tags: stored.id === null ? null : stored.tags,
     coverage: stored.coverage,
     hashes: stored.hashes,
     ownText: () => stored.ownText,

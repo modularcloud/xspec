@@ -2,11 +2,11 @@
 //
 // Accepts `path#id`, or a bare `path` for a file's root node (SPEC 1.5),
 // and prints the full enumeration: identity, source range (1.7), own and
-// subtree text (fully expanded, 1.6), all four hashes (5.5), tags, coverage
-// attribute (absent for a root node, 11), and edges by kind. `query node`
-// is the machine-facing equivalent: `show --json` emits the identical node
-// report document (./query-core.ts `nodeReportOf` — one shape, one place),
-// so the two commands can never disagree. The answer comes from the
+// subtree text (fully expanded, 1.6), all four hashes (5.5), tags and
+// coverage attribute (both absent for a root node, 11), and edges by kind.
+// `query node` is the machine-facing equivalent: `show --json` emits the
+// identical node report document (./query-core.ts `nodeReportOf` — one
+// shape, one place), so the two commands can never disagree. The answer comes from the
 // refreshed graph (SPEC 13.3, via cli/prepare.ts); an unknown node identity
 // is a usage error, exit 2 (SPEC 12.0) — judged parse-local against the
 // named file before the invalid-workspace report of 13.3 (./gated-args.ts).
@@ -41,15 +41,21 @@ function edgeLine(edge: GraphEdge, direction: "incoming" | "outgoing"): string {
 
 /**
  * The human report (SPEC 12.4): the same information as the `query node`
- * document — identity, source range, own and subtree text, hashes, tags,
- * coverage attribute (line omitted for a root node, which carries none),
- * and edges by kind (SPEC 12.0: the JSON form carries the same
- * information). Byte-deterministic: graph content and static text only.
+ * document — identity, source range, own and subtree text, hashes, tags
+ * and coverage attribute (both lines omitted for a root node, which
+ * carries neither), and edges by kind (SPEC 12.0: the JSON form carries
+ * the same information). Byte-deterministic: graph content and static text
+ * only.
  */
 function renderNodeHuman(view: QueryView, row: QueryRow): string {
   let out = `${row.identity}\n`;
   out += `source range: bytes ${String(row.range.start)}-${String(row.range.end)}\n`;
-  out += ["tags:", ...row.tags].join(" ") + "\n";
+  // SPEC 12.4/11.1/5.5: a root node's tags and coverage attribute are both
+  // absent — each line omitted for a root, so a root never prints the empty
+  // `tags:` line of a tagless section.
+  if (row.tags !== null) {
+    out += ["tags:", ...row.tags].join(" ") + "\n";
+  }
   if (row.coverage !== null) {
     out += `coverage: ${row.coverage}\n`;
   }

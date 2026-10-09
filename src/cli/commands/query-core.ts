@@ -42,8 +42,13 @@ export interface QueryRow {
   readonly isRoot: boolean;
   /** SPEC 1.7: the construct's byte range; the entire file for a root. */
   readonly range: ByteRange;
-  /** SPEC 2.6: the node's tags, in first-occurrence order. */
-  readonly tags: readonly string[];
+  /**
+   * SPEC 2.6, 12.7: the node's tags — a tag set, in byte order (SPEC 12.0),
+   * duplicates collapsed (core/mdx.ts forms it); `[]` for a section carrying
+   * none. Null for a root node, which carries no tags: SPEC 11.1 and 12.4
+   * report a root's tags as absent (5.5), never as the empty tag set.
+   */
+  readonly tags: readonly string[] | null;
   /** SPEC 2.5: the effective coverage attribute — null for a root. */
   readonly coverage: "required" | "none" | null;
   /** SPEC 5.5: the node's four hashes. */
@@ -93,14 +98,16 @@ export function edgeJson(edge: GraphEdge): JsonObject {
 
 /**
  * The one row contract of `nodes`, `subtree`, and `ancestors` (SPEC 11):
- * identity, source range (1.7), tags, coverage attribute — omitted for a
- * root node, which carries none (SPEC 5.5, 2.5).
+ * identity, source range (1.7), tags, coverage attribute — tags and
+ * coverage attribute both absent for a root node, which carries neither
+ * (SPEC 11.1, 5.5, 2.5): both members omitted, never `[]` for the tags,
+ * which would report a tagless section's tag set (12.7).
  */
 function rowJson(row: QueryRow): JsonObject {
   return {
     identity: row.identity,
     sourceRange: rangeJson(row.range),
-    tags: [...row.tags],
+    tags: row.tags === null ? undefined : [...row.tags],
     coverage: row.coverage ?? undefined,
   };
 }
@@ -113,8 +120,9 @@ function rowsDocument(rows: readonly QueryRow[]): JsonObject {
 /**
  * The one requirement-node report (SPEC 11, 12.4): identity, source range
  * (1.7), own and subtree text (fully expanded, 1.6), all four hashes (5.5),
- * tags, coverage attribute (absent for a root, 5.5), and incoming and
- * outgoing edges by kind. `query node` emits it as its document; `show
+ * tags and coverage attribute (both absent for a root, 11.1, 5.5), and
+ * incoming and outgoing edges by kind. `query node` emits it as its
+ * document; `show
  * --json` carries the same shape, so the two commands answer identically
  * (SPEC 12.4: `query node` is the machine-facing equivalent).
  */
@@ -132,8 +140,10 @@ export function nodeReportOf(view: QueryView, row: QueryRow): JsonObject {
       effectiveHash: row.hashes.effectiveHash,
       metadataHash: row.hashes.metadataHash,
     },
-    tags: [...row.tags],
-    // SPEC 11/5.5: reported as absent for a root node (key omitted).
+    // SPEC 11.1/12.4/5.5: a root node's tags and coverage attribute are
+    // both reported as absent (key omitted) — never `[]` for the tags, a
+    // tagless section's tag set (12.7).
+    tags: row.tags === null ? undefined : [...row.tags],
     coverage: row.coverage ?? undefined,
     // SPEC 11: incoming and outgoing edges by kind — the graph's
     // (source, kind, target) order, deterministic (SPEC 12.0). Filters of
@@ -291,7 +301,11 @@ function rowMatches(row: QueryRow, filters: NodesFilters): boolean {
   if (filters.fileGlob !== undefined && !filters.fileGlob.matches(row.path)) {
     return false;
   }
-  if (filters.tag !== undefined && !row.tags.includes(filters.tag)) {
+  // SPEC 11.1: `--tag` never matches a root — a root carries no tags (5.5).
+  if (
+    filters.tag !== undefined &&
+    (row.tags === null || !row.tags.includes(filters.tag))
+  ) {
     return false;
   }
   // SPEC 11: `--coverage` never matches a root — a root carries no
