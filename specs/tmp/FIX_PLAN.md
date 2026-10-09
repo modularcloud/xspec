@@ -58,31 +58,14 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T12.7-2 | section-12.7 | 6, 8 | the two-reason `move specs/A.mdx "specs/a'b.mdx"` exits 0 |
 | T13.4-9 | section-13.4 | 2 (landed) | (a): a derived path above a source builds with exit 0, expected condition 22 |
 | T13.4-10 | section-13.4 | 4 | the recorded orphan's finding says "run `xspec build` to remove it" |
-| T13.4-11 | section-13.4 | 3 | (a): a condition-10 finding for a recorded path holding a directory |
+| T13.4-11 | section-13.4 | 3 (landed) | (a): a condition-10 finding for a recorded path holding a directory |
 | T14-4 | section-14 | 14 (it sweeps T14-12's stagings) | U+2EBF0 in a JSX name judged one UTF-16 unit at a time: 14.20, expected 14.16 |
 | T14-6 | section-14 | 14 (likewise) | likewise |
 | T14-7 | section-14 | 1 (landed), 6, 7, 8, 10 | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1 |
 | T14-11 | section-14 | 9 | arm (x): 14.15 reported once, expected five times |
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
-If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, so a later arm may wait on Task 5 (Tasks 1 and 2 have landed).
-
-## Task 3 — Removing a recorded path leaves a directory, a discovered source, or nothing as it is; 14.10 reports only what the removal would remove (SPEC 13.4, 14.10, 12.1; C5)
-
-**Requirement.** SPEC 13.4: removing a recorded derived file the current sources and configuration no longer generate "removes its path's occupant when that is anything but a directory or a discovered source — a symbolic link itself, never its target; a path holding a directory, a discovered source, or nothing — no occupant, or lying below a workspace-relative directory component occupied by anything other than a directory, where nothing is read (below) — is left as it is, the removal making no write". SPEC 14.10's recorded-file form covers "an occupant the removal of 13.4 would remove, so neither a directory nor a discovered source", and is reported whatever the sources' validity.
-
-**Observed.** After a build with emission next to sources records `specs/A.md`, and emission is then disabled:
-- (a) `specs/A.md` replaced by a directory holding `keep.txt`: `check` reports `stale-output` for it, and `build` deletes the directory and `keep.txt`.
-- (b) `specs/A.md` a discovered code source (a code glob `specs/*.md`, content `export const n = 1`): `check` reports it stale, and `build` deletes the source.
-- Already correct, keep them so: a symbolic link (removed as itself), no occupant, below a non-directory component, below a symbolic link, and the order-independence arm.
-
-**Location.** `removeDerivedFile` in `src/workspace/writes.ts` (~752; it calls `fsp.rm(…, { recursive: true })` on a directory), called from `src/workspace/build.ts` (~35). The recorded-file form in `src/workspace/check.ts` (`orphanFinding` ~83 and the recorded-path loop near ~240).
-
-**Change.** `removeDerivedFile` leaves a directory occupant untouched and never removes a discovered source; pass the discovered source set, or a predicate, down from `build`. `check` reports the recorded-file form only for an occupant that removal would remove.
-
-**Verification.**
-- Should turn green: `section-13.4.test.ts` T13.4-11, arms (a) and (b), its other arms staying green.
-- Neighbours: the rest of `section-13.4.test.ts` (T13.4-3, T13.4-10), `section-13.3.test.ts`, `section-12.1-12.2.test.ts`, `section-14.test.ts` (T14-4's 14.10 rows).
+If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, so a later arm may wait on Task 5 (Tasks 1, 2, and 3 have landed).
 
 ## Task 4 — A recorded orphan obstructing a rebuild's write is reported for manual deletion (SPEC 14.10, 13.4, 13.5, 14.22; C6)
 

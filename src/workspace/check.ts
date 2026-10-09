@@ -34,7 +34,12 @@ import {
 import { isFilesystemFailure } from "./environment-refusal.js";
 import type { DerivedFileRecord, LoadedGraphData } from "./graph-data.js";
 import type { PathOccupant } from "./writes.js";
-import { classifyOccupant, describeOccupant, readsReach } from "./writes.js";
+import {
+  classifyOccupant,
+  describeOccupant,
+  orphanRemovalRemoves,
+  readsReach,
+} from "./writes.js";
 
 const utf8Encoder = new TextEncoder();
 
@@ -231,19 +236,24 @@ export async function mismatchStalenessFindings(
  *   but cannot be read as a record (SPEC 14.23), one finding whose
  *   concerned path is the graph-data area itself (exclusive with the
  *   mismatch unit form of `mismatchStalenessFindings`);
- * - the recorded-file form: each recorded derived file remaining (anything
- *   occupying its path) at a path the current sources and configuration no
- *   longer generate — `orphans`, the record's paths outside the set of
- *   generated paths that discovery and configuration define on any
- *   workspace, in byte order (core/build.ts: `orphanedRecordedPaths` over
- *   `discoveredGeneratedPaths`); one whose path is vacant remains nowhere,
- *   no finding. Each path is judged by the read side of SPEC 13.4
- *   (`readsReach`): its workspace-relative directory components shallowest
- *   first, so below a component that is absent or occupied by anything
- *   other than a directory — a plain file, or a symbolic link whatever it
- *   targets, never read through — the path holds nothing and remains
- *   nowhere (14.25's absence, never its refusal), as `build`'s removal
- *   leaves such a path untouched (`removeDerivedFile`). A component's kind
+ * - the recorded-file form: each recorded derived file remaining at a path
+ *   the current sources and configuration no longer generate — "an
+ *   occupant the removal of 13.4 would remove, so neither a directory nor
+ *   a discovered source" (SPEC 14.10). `orphans` is the record's paths
+ *   outside the set of generated paths that discovery and configuration
+ *   define on any workspace and outside the discovered sources' paths, in
+ *   byte order (core/build.ts: `orphanedRecordedPaths` over
+ *   `discoveredGeneratedPaths` and `discoveredSourcePaths`); of those, a
+ *   path is reported when its occupant is one the removal removes
+ *   (`orphanRemovalRemoves`, writes.ts) — a directory, like a vacant path,
+ *   holds no derived file, no finding. Each path is judged by the read
+ *   side of SPEC 13.4 (`readsReach`): its workspace-relative directory
+ *   components shallowest first, so below a component that is absent or
+ *   occupied by anything other than a directory — a plain file, or a
+ *   symbolic link whatever it targets, never read through — the path
+ *   holds nothing and remains nowhere (14.25's absence, never its
+ *   refusal), as `build`'s removal leaves such a path untouched
+ *   (`removeDerivedFile`). A component's kind
  *   read the environment refuses is the read failure concerning that
  *   component (SPEC 14.25: a path occupant's kind examined under 13.4, no
  *   derived file's), thrown so `check` stops at it, exit 2 — as the same
@@ -270,7 +280,12 @@ export async function recordStalenessFindings(
     // SPEC 13.4: reads traverse no non-directory component — below one the
     // recorded path holds nothing, and no derived file remains there.
     if (!(await readsReach(root, rel))) continue;
-    if ((await comparedOccupant(absoluteOf(root, rel))) !== "absent") {
+    // SPEC 14.10: only "an occupant the removal of 13.4 would remove, so
+    // neither a directory nor a discovered source" — the removal's own
+    // judgement (`orphanRemovalRemoves`; no discovered source is among
+    // `orphans`). A refused kind read leaves the path stale (SPEC 14.25).
+    const occupant = await comparedOccupant(absoluteOf(root, rel));
+    if (occupant === "refused" || orphanRemovalRemoves(occupant)) {
       findings.push(orphanFinding(rel));
     }
   }

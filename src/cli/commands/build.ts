@@ -15,7 +15,10 @@
 // source and journal findings (workspace/build-validation.ts).
 
 import type { BuildOutputs } from "../../core/build.js";
-import { computeBuildOutputs } from "../../core/build.js";
+import {
+  computeBuildOutputs,
+  discoveredSourcePaths,
+} from "../../core/build.js";
 import type { ExitCode } from "../../core/findings.js";
 import { executeBuildOutputs } from "../../workspace/build.js";
 import { buildValidationFindings } from "../../workspace/build-validation.js";
@@ -75,7 +78,8 @@ export async function buildCommand(
   // Valid workspace: derive the complete output set (core) — its write
   // paths exactly the set just examined (core/build.ts).
   // SPEC 12.1/13.4: the stored record's paths are the orphan-removal
-  // domain — none where the record is absent or unreadable.
+  // domain — none where the record is absent or unreadable, and never a
+  // discovered source's path (a source is never derived).
   const record = await readDerivedFileRecord(workspace.root);
   const outputs: BuildOutputs = computeBuildOutputs(
     workspace.configuration,
@@ -84,6 +88,7 @@ export async function buildCommand(
     analysis.textModel,
     analysis.hashes,
     recordedPathsOf(record),
+    discoveredSourcePaths(analysis.classification),
     workspaceInputsOf(workspace, analysis),
   );
   await executeBuildOutputs(workspace.root, outputs);

@@ -18,7 +18,10 @@
 // and takes no exclusivity (SPEC 6.6, 13.5).
 
 import type { BuildOutputs } from "../../core/build.js";
-import { computeBuildOutputs } from "../../core/build.js";
+import {
+  computeBuildOutputs,
+  discoveredSourcePaths,
+} from "../../core/build.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import { JOURNAL_PATH } from "../../core/journal.js";
 import {
@@ -121,7 +124,9 @@ export async function validateRewrittenWorkspace(
   // validation reads: the write set is the generated files and graph data.
   // A preview consults the record for its delta only, past this validation
   // (SPEC 6.6: a refused preview consults no record), so it derives the
-  // outputs over none.
+  // outputs over none. The discovered sources excluded from the orphan
+  // set are the rewritten workspace's (SPEC 13.4: a source is never
+  // derived).
   const recorded = preview
     ? []
     : recordedPathsOf(await readDerivedFileRecord(workspace.root));
@@ -132,6 +137,7 @@ export async function validateRewrittenWorkspace(
     rewritten.textModel,
     rewritten.hashes,
     recorded,
+    discoveredSourcePaths(rewritten.classification),
     workspaceInputsOf(workspace, rewritten),
   );
 

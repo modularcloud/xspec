@@ -17,7 +17,8 @@
 // - the orphans (SPEC 12.1, 13.3, 13.4): recorded derived files the current
 //   sources and configuration no longer generate, removed via their recorded
 //   paths only — a missing or malformed record records nothing, and such
-//   orphans stay outside xspec's knowledge.
+//   orphans stay outside xspec's knowledge; a recorded path holding a
+//   discovered source is no orphan (a source is never derived).
 //
 // Only valid workspaces reach this derivation (SPEC 12.1: a failed build
 // modifies nothing), so every value is a total, byte-deterministic function
@@ -61,7 +62,8 @@ export interface BuildOutputs {
   /**
    * SPEC 12.1, 13.3, 13.4: recorded derived files the current sources and
    * configuration no longer generate, in byte order — removed via these
-   * recorded paths only.
+   * recorded paths only; a recorded path holding a discovered source is
+   * not among them (`orphanedRecordedPaths`: a source is never derived).
    */
   readonly orphans: readonly string[];
   /**
@@ -77,8 +79,11 @@ export interface BuildOutputs {
  * Derive the SPEC 12.1 build outputs of a validated workspace. `recorded`
  * is the stored record's derived-file paths — empty when the record is
  * absent or cannot be read as a record: such orphans are outside xspec's
- * knowledge (SPEC 13.4) — the orphan-removal domain (SPEC 13.3, 13.4).
- * `hashes` must be the SPEC 5.5 computation over `graph`.
+ * knowledge (SPEC 13.4) — the orphan-removal domain (SPEC 13.3, 13.4);
+ * `sources` is the paths of the workspace's discovered sources
+ * (`discoveredSourcePaths`), which that domain excludes (SPEC 13.4: a
+ * source is never derived). `hashes` must be the SPEC 5.5 computation over
+ * `graph`.
  */
 export function computeBuildOutputs(
   configuration: Configuration,
@@ -87,6 +92,7 @@ export function computeBuildOutputs(
   textModel: WorkspaceTextModel,
   hashes: ReadonlyMap<string, NodeHashes>,
   recorded: readonly string[],
+  sources: ReadonlySet<string>,
   inputs: StoredInputs,
 ): BuildOutputs {
   // SPEC 12.0: deterministic output order — sources by byte order of
@@ -118,8 +124,9 @@ export function computeBuildOutputs(
   }
 
   const generated = new Set(files.map((file) => file.path));
-  // SPEC 12.1/13.3/13.4: orphan removal via recorded paths only.
-  const orphans = orphanedRecordedPaths(recorded, generated);
+  // SPEC 12.1/13.3/13.4: orphan removal via recorded paths only, never of
+  // a discovered source.
+  const orphans = orphanedRecordedPaths(recorded, generated, sources);
 
   return {
     files,
@@ -254,23 +261,55 @@ export function discoveredWritePaths(
 }
 
 /**
+ * The workspace-relative paths of every discovered source (SPEC 7) — spec
+ * and code alike, a source whose path 14.19 rejects included (it is
+ * discovered all the same, SPEC 7, 7.1) — as one set. A rejected path with
+ * no plain string form (not valid UTF-8, SPEC 12.0) is omitted: no
+ * recorded path, a string (13.3), can equal it. SPEC 13.4: "a source is
+ * never derived", so no discovered source is ever in the orphan-removal
+ * domain (`orphanedRecordedPaths`).
+ */
+export function discoveredSourcePaths(
+  classification: SourceClassification,
+): ReadonlySet<string> {
+  const paths = new Set<string>();
+  for (const source of classification.specSources) paths.add(source.path);
+  for (const source of classification.codeSources) paths.add(source.path);
+  for (const source of classification.invalidSources) {
+    if (typeof source.path === "string") paths.add(source.path);
+  }
+  return paths;
+}
+
+/**
  * SPEC 12.1, 13.3, 13.4, 14.10: the recorded derived-file paths the current
- * sources and configuration no longer generate — `recorded` (a readable
- * record's paths; none where the record is absent or cannot be read as a
- * record, files orphaned then being outside xspec's knowledge, 13.4)
- * outside `generated`, duplicate-free, in byte order. Graph data's own
- * paths are never recorded (13.3: graph data records no paths of its own);
- * a record naming one anyway is dropped defensively — the store is
- * rewritten, never removed, by a build. The one rule behind generation's
- * orphan removal and `check`'s recorded-file form.
+ * sources and configuration no longer generate whose removal may touch
+ * their occupants — `recorded` (a readable record's paths; none where the
+ * record is absent or cannot be read as a record, files orphaned then
+ * being outside xspec's knowledge, 13.4) outside `generated`, and outside
+ * `sources`, the paths of the discovered sources (`discoveredSourcePaths`):
+ * SPEC 13.4 leaves a recorded path holding a discovered source as it is,
+ * the removal making no write ("a source is never derived"), and 14.10's
+ * recorded-file form reports only an occupant that removal would remove,
+ * "so neither a directory nor a discovered source" — the directory, an
+ * occupant's kind, is judged where the occupant is read (workspace layer:
+ * `removeDerivedFile`, `recordStalenessFindings`). Duplicate-free, in byte
+ * order. Graph data's own paths are never recorded (13.3: graph data
+ * records no paths of its own); a record naming one anyway is dropped
+ * defensively — the store is rewritten, never removed, by a build. The one
+ * rule behind generation's orphan removal and `check`'s recorded-file form.
  */
 export function orphanedRecordedPaths(
   recorded: readonly string[],
   generated: ReadonlySet<string>,
+  sources: ReadonlySet<string>,
 ): readonly string[] {
   return [...new Set(recorded)]
     .filter(
-      (path) => !generated.has(path) && !GRAPH_DATA_OWN_PATHS.includes(path),
+      (path) =>
+        !generated.has(path) &&
+        !sources.has(path) &&
+        !GRAPH_DATA_OWN_PATHS.includes(path),
     )
     .sort(compareBytes);
 }

@@ -31,7 +31,7 @@
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 
-import { computeBuildOutputs } from "../core/build.js";
+import { computeBuildOutputs, discoveredSourcePaths } from "../core/build.js";
 import type { Finding } from "../core/findings.js";
 import { graphDataMatchesCurrent } from "../core/graph-data.js";
 import { refusedWriteFindings } from "./build-validation.js";
@@ -114,6 +114,7 @@ export async function finishAvailabilityRefresh(
     analysis.textModel,
     analysis.hashes,
     [],
+    discoveredSourcePaths(analysis.classification),
     workspaceInputsOf(workspace, analysis),
   );
 

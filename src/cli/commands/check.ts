@@ -32,6 +32,7 @@ import type { BuildOutputs } from "../../core/build.js";
 import {
   computeBuildOutputs,
   discoveredGeneratedPaths,
+  discoveredSourcePaths,
   orphanedRecordedPaths,
 } from "../../core/build.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
@@ -83,8 +84,13 @@ export async function checkCommand(
   // any workspace (13.1, 7.3, 11.6; core/build.ts) — so, like the
   // unreadable-record unit form, it is detectable whatever the sources'
   // validity: beside source validation errors, journal errors (14.13), and
-  // refused writes (14.22) alike.
+  // refused writes (14.22) alike. A recorded path holding a discovered
+  // source is no orphan: the removal of 13.4 leaves it as it is, so the
+  // form never reports it (SPEC 14.10: "neither a directory nor a
+  // discovered source"; the directory is judged at the occupant's read,
+  // workspace/check.ts).
   const record = await readDerivedFileRecord(workspace.root);
+  const sources = discoveredSourcePaths(analysis.classification);
   const orphans = orphanedRecordedPaths(
     recordedPathsOf(record),
     new Set(
@@ -93,6 +99,7 @@ export async function checkCommand(
         analysis.classification,
       ),
     ),
+    sources,
   );
 
   // SPEC 12.2 → 12.1, 13.3: all build validations — source validation
@@ -123,6 +130,7 @@ export async function checkCommand(
       analysis.textModel,
       analysis.hashes,
       recordedPathsOf(record),
+      sources,
       workspaceInputsOf(workspace, analysis),
     );
     findings.push(

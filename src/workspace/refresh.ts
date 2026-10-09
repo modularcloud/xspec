@@ -38,7 +38,7 @@
 // "what `xspec build` would write" is `computeBuildOutputs`' graph data,
 // so refresh and build agree by construction, byte for byte — SPEC 12.0).
 
-import { computeBuildOutputs } from "../core/build.js";
+import { computeBuildOutputs, discoveredSourcePaths } from "../core/build.js";
 import type { SourceClassification } from "../core/discovery.js";
 import type { Finding } from "../core/findings.js";
 import type { GraphData } from "../core/graph-data.js";
@@ -174,6 +174,7 @@ export async function assessWorkspaceRead(
     analysis.textModel,
     analysis.hashes,
     [],
+    discoveredSourcePaths(analysis.classification),
     workspaceInputsOf(workspace, analysis),
   );
 

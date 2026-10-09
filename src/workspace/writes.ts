@@ -752,18 +752,41 @@ export async function performSourceWrites(
 }
 
 /**
+ * SPEC 13.4: whether removing a recorded derived file the current sources
+ * and configuration no longer generate removes an occupant of this kind —
+ * "its path's occupant when that is anything but a directory or a
+ * discovered source — a symbolic link itself, never its target": a plain
+ * file, a symbolic link, or any other non-directory occupant. A directory
+ * is left as it is, and so is nothing (no occupant), the removal making no
+ * write: every derived file is a plain file. A discovered source never
+ * reaches this judgement — core/build.ts `orphanedRecordedPaths` keeps
+ * every discovered source's path out of the removal's domain ("a source is
+ * never derived"). The one judgement behind the removal
+ * (`removeDerivedFile`) and 14.10's recorded-file form, which reports
+ * exactly "an occupant the removal of 13.4 would remove"
+ * (workspace/check.ts `recordStalenessFindings`), so the two move
+ * together.
+ */
+export function orphanRemovalRemoves(occupant: PathOccupant): boolean {
+  return occupant !== "absent" && occupant !== "directory";
+}
+
+/**
  * Remove a derived file at a recorded path (orphan removal, SPEC 13.3/13.4:
  * a recorded derived file no longer generated is removed via its recorded
- * path). An absent occupant is a completed removal; a symbolic-link
- * occupant is removed as itself, never through the link; a directory
- * occupant is removed whole (the path belongs to xspec, SPEC 13.4). A
- * recorded path with a symbolic link at a workspace-relative directory
- * component is skipped untouched: removal never traverses a link (SPEC
- * 13.4), so the path no longer denotes a location xspec may touch — like an
- * orphan whose record is missing, it is outside xspec's knowledge; below
- * any other non-directory component the recorded path cannot exist, so the
- * removal is equally complete without touching anything. A refused removal
- * is the write failure concerning `rel` (SPEC 14.24).
+ * path — `rel` one of core/build.ts's orphans, never a discovered source's
+ * path). Its occupant is removed when `orphanRemovalRemoves` judges it so:
+ * a symbolic-link occupant is removed as itself, never through the link;
+ * a directory occupant is left as it is, with everything under it, and an
+ * absent one leaves nothing to remove — either way the removal makes no
+ * write (SPEC 13.4). A recorded path with a symbolic link at a
+ * workspace-relative directory component is skipped untouched: removal
+ * never traverses a link (SPEC 13.4), so the path no longer denotes a
+ * location xspec may touch — like an orphan whose record is missing, it is
+ * outside xspec's knowledge; below any other non-directory component the
+ * recorded path holds nothing (SPEC 13.4), so the removal is equally
+ * complete without touching anything. A refused removal is the write
+ * failure concerning `rel` (SPEC 14.24).
  */
 export async function removeDerivedFile(
   root: string,
@@ -772,13 +795,10 @@ export async function removeDerivedFile(
   if ((await obstructedComponentOf(root, rel)) !== null) return;
   const absolute = absoluteOf(root, rel);
   const occupant = await probeOccupant(root, rel);
-  if (occupant === "absent") return;
-  await performWrite(rel, "remove", () =>
-    fsp.rm(absolute, {
-      recursive: occupant === "directory",
-      force: true,
-    }),
-  );
+  if (!orphanRemovalRemoves(occupant)) return;
+  // Never recursive: the occupant is no directory (SPEC 13.4), and a
+  // symbolic link is unlinked as itself, whatever it targets.
+  await performWrite(rel, "remove", () => fsp.rm(absolute, { force: true }));
 }
 
 /**
