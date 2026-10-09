@@ -64,8 +64,13 @@
 // 14.14 exit-2 outcome preceding every answer, outside P-12's subject),
 // file paths are fixed valid spellings, and every staged argument is
 // well-formed with offsets in 0…byte length — so no invocation stages a
-// usage error and every answer exits 0 or 1 (SPEC 11.2: argument checks
-// alone exit 2; P-12's entry pins no exit beyond that). References follow
+// usage error (exit 2), and every answer is complete and finding-free: it
+// exits 0 with an empty `findings` member (SPEC 11.2: an answer's findings
+// are its domain files' findings alone, which a valid workspace does not
+// carry, and a complete, finding-free answer exits 0, where a finding or an
+// explicitly-unavailable datum would exit 1). P-12's entry names no exit
+// code, so H-5 asserts this exact one: accepting exit 1 as well would let a
+// product flagging valid workspaces as imperfect pass. References follow
 // P-4's discipline (section-16-p4.ts): each targets the file's constant
 // anchor `t` — its first top-level section, holding prose alone — or,
 // through the drawn import `M0` of the first file (files after the first
@@ -117,8 +122,9 @@
 // and the S-9 vectors spell both. Every file of both seed sets derives,
 // and every trial of both — as every one of the sample's 38 trials
 // spelling `"s1"`, and each form vector — builds under the built product
-// with exit 0 and no finding (an implementation-time cross-check, never a
-// committed check against the product). The `view` invocation runs first,
+// with exit 0 and no finding (an implementation-time cross-check: the body
+// runs no `build`, but it requires exit 0 and no finding of every answer it
+// obtains, "Input space" above). The `view` invocation runs first,
 // so a product without the §11 surfaces (the stub, S-7) fails immediately
 // and cheaply, and shrinking stays fast in the red phase (H-8).
 //
@@ -129,6 +135,7 @@
 import { Buffer } from "node:buffer";
 import type {
   FileView,
+  Finding,
   OccurrenceRecord,
   PathValue,
 } from "../../helpers/adapters/index.js";
@@ -143,7 +150,7 @@ import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
-import { runProduct } from "../../helpers/subprocess.js";
+import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import type { TestWorkspace as Workspace } from "../../helpers/workspace.js";
 import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
 import { SPECS_ONLY_CONFIG } from "./section-11.2.js";
@@ -590,10 +597,14 @@ function assertDistinctSpans(
 // The property body.
 
 /**
- * Run one invocation of the availability surfaces. Every argument staged by
- * P-12 is well-formed with the named file discovered and the offset in
- * 0…byte length, so no usage error exists and the answer exits 0 or 1
- * (SPEC 11.2: findings ride the answer at exit 1, never exit 2).
+ * Run one invocation of the availability surfaces and require exit 0, the
+ * exact code (H-5). Every argument staged by P-12 is well-formed with the
+ * named file discovered and the offset in 0…byte length, so no usage error
+ * exists; and the draws are valid by construction (module header, "Input
+ * space"; TEST-SPEC §16 preamble), so every answer is complete and
+ * finding-free and exits 0 (SPEC 11.2: a finding or an explicitly-
+ * unavailable datum would exit 1). The caller decodes the answer and checks
+ * its `findings` member empty (`assertFindingFree` below).
  */
 async function runAnswer(
   product: ProductBinding,
@@ -612,15 +623,42 @@ async function runAnswer(
         `all outcomes into exit codes 0, 1, and 2`,
     );
   }
-  if (result.exitCode !== 0 && result.exitCode !== 1) {
+  if (result.exitCode !== 0) {
     fail(
-      `${context}: exit ${String(result.exitCode)} — every P-12 invocation ` +
-        `is well-formed over discovered files (offsets within 0…byte ` +
-        `length), so no usage error exists and the answer exits 0 or 1, ` +
-        `whatever findings the workspace carries (SPEC 11.2, 12.0)`,
+      `${context}: exit ${String(result.exitCode)} where every P-12 answer ` +
+        `exits exactly 0 (TEST-SPEC H-5: the exact exit code) — the draws ` +
+        `are valid by construction (TEST-SPEC §16 preamble; this module's ` +
+        `"Input space" note) and every invocation is well-formed over ` +
+        `discovered files (offsets within 0…byte length), so no usage error ` +
+        `exists and every answer is complete and finding-free: a complete, ` +
+        `finding-free answer exits 0, and a finding or an explicitly-` +
+        `unavailable datum would exit 1 (SPEC 11.2); ` +
+        `${result.commandLine}: ${summarizeResult(result)}`,
     );
   }
   return result;
+}
+
+/**
+ * Every P-12 answer is finding-free (module header, "Input space"): an
+ * answer's findings are its domain files' findings alone (SPEC 11.2), and
+ * the draws are valid by construction, so no domain file carries one and
+ * each decoded answer's `findings` member is empty.
+ */
+function assertFindingFree(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  const first = findings[0];
+  if (first === undefined) return;
+  fail(
+    `${context}: the answer carries ${String(findings.length)} ` +
+      `finding(s), the first with code ${JSON.stringify(first.code)} and ` +
+      `message ${JSON.stringify(first.message)} — an answer's findings are ` +
+      `its domain files' findings alone, and the draws are valid by ` +
+      `construction (TEST-SPEC §16 preamble), so no domain file carries ` +
+      `one and every P-12 answer's \`findings\` member is empty (SPEC 11.2)`,
+  );
 }
 
 /**
@@ -661,6 +699,7 @@ async function runP12Trial(
       { text: false },
       viewContext,
     );
+    assertFindingFree(viewReport.findings, viewContext);
     const stagedPaths = new Set(trial.files.map(([path]) => path));
     const viewByPath = new Map<string, FileView>();
     for (const entry of viewReport.views) {
@@ -738,10 +777,12 @@ async function runP12Trial(
           `${String(second.exitCode)}`,
       );
     }
-    const enumeration = decodeOccurrencesReport(
+    const occurrencesReport = decodeOccurrencesReport(
       parseJsonStdout(first, occContext),
       occContext,
-    ).occurrences;
+    );
+    assertFindingFree(occurrencesReport.findings, occContext);
+    const enumeration = occurrencesReport.occurrences;
     assertDistinctSpans(enumeration, `${occContext} — the enumeration`);
     for (const [path, entry] of viewByPath) {
       assertDistinctSpans(
@@ -783,6 +824,7 @@ async function runP12Trial(
           ),
           context,
         );
+        assertFindingFree(report.findings, context);
         assertSameJson(
           report.resolution,
           resolveAtFromView(data, offset),
