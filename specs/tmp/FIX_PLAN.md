@@ -2,7 +2,7 @@
 
 Source: the compliance determination that opened this Phase 10 loop at `b3cc3e3` (branch `claude/xspec-ui-apis-4df8fa`, PR #7; governing IP `specs/patches/0001-external-ui-apis.md`, Stage: Tested — no task here changes the Stage; bundle `specs/SPEC.md`, `specs/TEST-SPEC.md`, `specs/CERTIFICATIONS.md`, `specs/IMPLEMENTATION.md`). The documents changed after the product was last brought green (CI recorded at `9d095d9`): `git diff 9d095d9..f31e100 -- specs/SPEC.md`, `git diff 3311ccd..6780f53 -- specs/TEST-SPEC.md`, `git diff 3311ccd..301f2f9 -- specs/CERTIFICATIONS.md`; Phase 9 brought the harness into line, its last determination clean at `3fe91f5`. Reviewer A (SPEC 1–6) returned 10 gaps, reviewer B (7–11) 6, reviewer C (12–15) 14. VERIFY was red on 31 product tests, the same set locally and in CI run 1003's `suite-linux` job at `b3cc3e3` (every failure a `HarnessAssertionError`); `harness-self` (28 files, 4315 tests) and `suite-windows` were green, and certification had 0 discrepancies (154 PASS / 38 FAIL — the FAILs being violators' expected outcomes — / 0 error / 0 hang). The product's last change is `8a0da01`; `dist/` matches `src/`. Findings are cited as A<n>, B<n>, C<n> (reviewer, gap number); where reviewers reported the same gap, it is one task. Reviewer B also noted, uncounted and outside its scope, a wrong correction text on a refused source read; that is Task 21.
 
-Goal: every test passes — `npm test` locally, and CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head (PR #7 is conflicted, so CI runs on branch pushes) — and the product meets SPEC.md. Tasks 18–23 fix SPEC departures that no test pins; they are in scope all the same.
+Goal: every test passes — `npm test` locally, and CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head (PR #7 is conflicted, so CI runs on branch pushes) — and the product meets SPEC.md. Tasks 18–23, and Tasks 25 and 26 found since, fix SPEC departures that no test pins; they are in scope all the same.
 
 Not planned: nothing. Every counted gap and B's uncounted note has a task. The two standing rulings below close their families for this run.
 
@@ -29,7 +29,7 @@ Not planned: nothing. Every counted gap and B's uncounted note has a task. The t
 
 ## Index — each failing test and the tasks it waits on
 
-These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed then (local run and CI run 1003 alike). Each registry module is `test/suite/registry/<module>.ts`, and its suite file is `test/suite/<module>.test.ts`. Tasks 18–23 have no failing test.
+These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed then (local run and CI run 1003 alike). Each registry module is `test/suite/registry/<module>.ts`, and its suite file is `test/suite/<module>.test.ts`. Tasks 18–23, 25, and 26 have no failing test.
 
 | Test | Module | Tasks | First failure at `b3cc3e3` |
 |---|---|---|---|
@@ -37,11 +37,11 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | P-5 | section-16-p5-p6 | 15 | falsified, seed 271828183, trial 1 of 8: added `import require from "./require.xspec"` |
 | T1.4-1 | section-1.4 | 1 (landed) | a segment carrying U+2028: `build --json` exits 0, expected 1 |
 | T1.4-4 | section-1.4 | 1 (landed) | a tag carrying U+2028: `build --json` exits 0, expected 1 |
-| T4-2 | section-4 | 9 | an import type naming a `.xspec` module builds with exit 0 |
+| T4-2 | section-4 | 9 (landed) | an import type naming a `.xspec` module builds with exit 0; passes since Task 9 landed |
 | T6.4-3 | section-6.4 | 1 (landed) | `rename specs/A.mdx a "a<U+2028>b"` exits 0 |
 | T6.5-4 | section-6.5 | 1 (landed), 6 (landed) | `move specs/A.mdx#keep "specs/B.mdx#a<U+2028>b"` exits 0; then the barred-character destination arms; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; passes since Task 6 landed |
 | T6.5-11 | section-6.5-ii | 17 | arm (f): the rewritten call reads `tt(target.y)`, an untimely `text` binding |
-| T6.5-20 | section-6.5-iv | 7 (landed), 10 (and 9 for (d)'s import-type and `declare module` stagings) | arm (a): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70 after modifying the workspace; since Task 7 landed, first fails at arm (d)'s first staging (Task 10): `move specs/Z.mdx specs/B.mdx` beside `src/c.ts` holding `import "../specs/B.md"` reports 14.15 once, expected `refused-invalid-destination` alone |
+| T6.5-20 | section-6.5-iv | 7 (landed), 10 (and 9 (landed) for (d)'s import-type and `declare module` stagings) | arm (a): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70 after modifying the workspace; since Task 7 landed, first fails at arm (d)'s first staging (Task 10): `move specs/Z.mdx specs/B.mdx` beside `src/c.ts` holding `import "../specs/B.md"` reports 14.15 once, expected `refused-invalid-destination` alone |
 | T6.5-21 | section-6.5-iv | 8 (landed), 6 (landed; its two-reason arm) | arm (a): `move specs/A.mdx specs/sub/A.mdx` exits 0; passes since Task 8 landed |
 | T6.5-22 | section-6.5-iv | 15 | arm (b): 26 of 38 lures bound a barred name |
 | T6.5-23 | section-6.5-v | 16, 17 | 13 of 33 stagings place or root the added declaration wrongly |
@@ -62,44 +62,14 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-4 | section-14 | 14 (it sweeps T14-12's stagings) | U+2EBF0 in a JSX name judged one UTF-16 unit at a time: 14.20, expected 14.16 |
 | T14-6 | section-14 | 14 (likewise) | likewise |
 | T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 arms, reached only past that twin, hand-checked at Task 8 against T6.5-21's own expectations |
-| T14-11 | section-14 | 9 | arm (x): 14.15 reported once, expected five times |
+| T14-11 | section-14 | 9 (landed) | arm (x): 14.15 reported once, expected five times; passes since Task 9 landed |
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
 If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, and the tasks a later arm waited on beside Task 14 (Tasks 1, 2, 3, 4, and 5) have landed.
 
-## Task 9 — Import types and string-named module declarations are module-linking forms (14.15), each located per SPEC 14; `export import X = require(…)` is located from `import` (SPEC 4, 4.5, 14.15, 14's location rule, 1.7; A2, C3)
-
-**Requirement.** SPEC 4 enumerates a TypeScript file's module-linking forms: an import declaration; an export declaration with a module specifier; an `import X = require(…)` declaration; a dynamic `import()` with a static string-literal specifier; an import type (`import("…")` in a type, `typeof import("…")` included); and a string-named module declaration (`declare module "…" { … }`, `declare` or not, a module augmentation included). Under 4 and 14.15:
-- every form but an import declaration whose specifier ends in `.xspec` is 14.15 — including the non-relative wildcard `declare module "*.xspec" { }`, which designates nothing;
-- every form whose relative specifier designates a derived-file path (a file name containing `.xspec.`, a path under `.xspec/`, or a configured Markdown emit destination while emission is enabled) other than through an import declaration's `.xspec` specifier is 14.15;
-- nothing else names a module, so none of these is read, validated, or rewritten as a specifier: a `require(…)` call's argument, a triple-slash directive (a comment), a string literal elsewhere, a non-static dynamic `import()` (template literal included). Comments, JSDoc included, are comments.
-
-SPEC 14's location rule for these:
-- an import type: from `import` through the closing parenthesis of its argument list, a `typeof` before it and a qualifier or type arguments after it excluded — `typeof import("./A.xspec").default` and `import("./A.xspec").T<number>` each locate `import("./A.xspec")`;
-- a string-named module declaration: by its own characters, `declare` included and a leading `export` excluded — `export declare module "./A.xspec" { }` from `declare`;
-- `export import X = require("./A.xspec")`: from `import`, the leading `export` and what separates it excluded, as 1.7 excludes one.
-
-**Observed.** None of these is reported: `type T = import("../specs/A.xspec")`, `let v: typeof import(…)`, `declare module "../specs/A.xspec" { }` alone or beside `export {}`, `module "…" { }`, `declare module "…";`, `declare module "*.xspec" { }`, nor either new form naming a derived-file path (`../specs/A.xspec.ts`, `../specs/A.xspec.impl.js`, `../.xspec/x`, an emit destination). `export import X = require("../specs/A.xspec");` after `const z = 1;` and one line feed is located from `export` (13) instead of `import` (20). The other forms already behave.
-
-**Location.** In `src/core/code-analysis.ts`:
-- the walk (~1500–1575) returns early on interface and type-alias declarations and on every type node (`if (ts.isTypeNode(node)) return;` ~1559), and never examines module declarations;
-- `visitImportCall` (~1580) and `checkDerivedSpecifier` hold the rules for a dynamic `import()`;
-- the `import X = require(…)` handling (`visitImportEqualsUse` and that finding's range).
-
-**Change.**
-- Collect import types (`ts.isImportTypeNode`) wherever they stand — type aliases, interfaces, annotations, type arguments — and string-named module declarations (`ts.isModuleDeclaration` with a string-literal name) at any depth, without walking type positions as value context: 4.5's type-level exemption for bindings stands, and an import type is no value use. A separate pass over the tree is simplest.
-- Judge each by the dynamic `import()`'s rules — the `.xspec` suffix and derived-file designation, the specifier read as spelled (2.4). Locate each per SPEC 14 above; compute an import type's range from its `import` keyword to the `)` closing its argument list, import attributes inside the parentheses included.
-- Start the `export import … = require(…)` range at `import`.
-- Record no edge and no occurrence for any of them.
-
-**Verification.**
-- Should turn green: `section-4.test.ts` T4-2, `section-14.test.ts` T14-11 (its 14.15 per-form arm (x)).
-- Feeds Task 10: `section-6.5-iv.test.ts` T6.5-20(d) stages an import type and a `declare module` among its six forms, so its refusal needs this task's collection of them.
-- Neighbours: `section-4.5.test.ts`, `section-4.6.test.ts`, `section-2.1.test.ts`, `section-1.6-1.7.test.ts`, `section-5.7.test.ts`, `section-16-p4.test.ts`.
-
 ## Task 10 — Move: a destination whose would-be emit path a code source's module-linking form designates is `refused-invalid-destination` (SPEC 6.5, 4, 14.15, 14; A6 (d), C9's fifth bullet)
 
-After Task 9.
+After Task 9 (landed at `ceabb13`). Since Task 9, `scanModuleLinks` in `src/core/code-analysis.ts` judges the top-level import and export declarations and `import X = require(…)` declarations, and `scanNestedLinkingForms` (called from it) judges static-specifier dynamic `import()` calls, import types, and string-named module declarations wherever they stand; between them they visit every form this task counts, so they are where each specifier can be collected.
 
 **Requirement.** SPEC 6.5's last `refused-invalid-destination` clause: "or, while Markdown emission is enabled (7.3), the path the destination would emit Markdown to (13.2) designated by the relative specifier of a code source's module-linking form, which the move would make a derived-file path (4, 14.15)". Its scope and form:
 - every module-linking form of SPEC 4 counts — Task 9's set: import and export declarations, `import X = require(…)`, a static dynamic `import()`, an import type, a string-named module declaration; a `require(…)` call, a triple-slash directive, and a template-literal `import()` do not;
@@ -108,7 +78,7 @@ After Task 9.
 
 **Observed.** Emission next to sources, with `src/c.ts` holding one form whose specifier is `../specs/B.md`, then `move specs/Z.mdx specs/B.mdx`:
 - for an import, an export, `import =`, and a dynamic `import()`, the move is refused, but as numbered condition 15 (`invalid-import`, located in `src/c.ts`) by the post-move re-validation;
-- for an import type and `declare module`, the move is performed, leaving 14.15 behind;
+- for an import type and `declare module`, the move is performed, leaving 14.15 behind; since Task 9 (hand-checked at `ceabb13`), these two behave as the four above — refused as condition 15 located in `src/c.ts`, nothing written;
 - the controls (emission disabled; `require(…)`, `/// <reference path>`, template-literal `import()`) behave.
 
 **Location.**
@@ -265,7 +235,7 @@ After Task 16 (same placement code).
 
 ## Task 19 — TypeScript instantiation expressions over spec bindings are dynamic references or unsupported uses (SPEC 2.4, 4.5, 14.8, 14.18; A3)
 
-After Task 9 (same walk).
+After Task 9 (same walk; landed at `ceabb13`, which moved the dynamic `import()` judgment out of the walk into `scanNestedLinkingForms`).
 
 **Requirement.** SPEC 2.4: optional chaining, parentheses, and other access forms applied to a chain make it dynamic, and "a non-null assertion (`BASE.a!`), a type assertion, or any other TypeScript-only syntax is dynamic in a TypeScript source". SPEC 4.5: a non-static bare reference in expression-statement position, like a non-static `text(...)` argument, is 14.8; any other value-level use of a node or of a `text` binding is 14.18. An instantiation expression (`A.a<X>`, `A<X>`, `text<X>`) is such value-level TypeScript-only syntax, not a type position.
 
@@ -338,6 +308,32 @@ This gap was also open at the `9d095d9` determination.
 **Verification.**
 - Should stay green: `section-13.5.test.ts` (T13.5-1 through T13.5-7; T13.5-7 runs on the Linux leg as uid 1000), `section-6.6.test.ts` (T6.6-3's scheduling arm), `section-16-p10.test.ts`.
 - By hand: two held mutations of one workspace under different `TMPDIR` values (the second must fail promptly with a usage error); `TMPDIR` pointing at a plain file (no exit 70); a killed holder (the next command proceeds).
+
+## Task 25 — Module-linking forms nested in a module declaration's body are judged as at top level (SPEC 4, 2.1, 14.15, 14's location rule, 6.5; found at Task 9)
+
+**Requirement.** SPEC 4 lists the module-linking forms with no position restriction ("the constructs naming a module by a string literal"): an import declaration, an export declaration with a module specifier, and an `import X = require(…)` declaration standing in a module declaration's body — `declare module "foo" { … }`, or a `namespace` body, where TypeScript's complaint is a post-parse check, so the file stays well-formed (14.20) — are module-linking forms as at top level. So:
+- a nested export declaration or `import X = require(…)` whose specifier ends in `.xspec` is 14.15, as is any nested form whose relative specifier designates a derived-file path other than through a spec module import's `.xspec` specifier (4, 13.4), each located per SPEC 14 as its top-level twin is;
+- a nested import declaration whose specifier ends in `.xspec` is a spec module import (4: "exactly when its specifier ends in `.xspec`"), held to 2.1's specifier form and resolution and to 4's permitted bindings (14.15), and its specifier is one a file move rewrites (6.5: "the paths by which other files import the moved file's generated module").
+
+**Observed** (hand probe at `ceabb13`, `markdown: { emit: true }`, `specs/A.mdx` discovered, code group `src/**/*.ts`): `build --json` exits 0 with no finding over each of `declare module "foo" { export * from "../specs/A.xspec"; }`, the same body holding `import X = require("../specs/A.xspec");` instead, one holding `export { x } from "../specs/A.xspec.ts";`, one holding `import { core } from "../specs/A.xspec";` and `import Z from "../specs/missing.xspec";`, and `namespace N { export * from "../specs/A.xspec"; }` (each staged with its body statements on their own lines). TypeScript 5.9.3 reports no parse diagnostic for any of them. With `src/n.ts` holding a valid nested `import Y from "../specs/A.xspec";` alone in such a body, `move specs/A.mdx specs/sub/A.mdx --preview --json` exits 0 listing only the relocation — no `import-specifier-rewrite` for `src/n.ts`.
+
+**Location.** `scanModuleLinks` in `src/core/code-analysis.ts` reads `this.sourceFile.statements` alone; `scanNestedLinkingForms` (Task 9) is the whole-tree pass that already finds dynamic `import()` calls, import types, and string-named module declarations at any depth. The move's specifier rewriting (`src/core/move.ts`) and Task 10's specifier collection must see the nested forms too.
+
+**Change.** Judge nested export declarations and `import X = require(…)` declarations with the top-level rules and ranges, and nested import declarations' derived-path designations. For nested `.xspec` import declarations, establish from SPEC 4, 2.1, 2.4, 4.5, and 6.5 how far the spec-module-import machinery reaches — binding forms and targets (14.15), the collision rule (4 reads "in the same file"; 2.4's value-level collision reads "of the same scope"), uses (an ambient body holds no statements but type-level ones), and rewriting under a file move. If the SPEC proves ambiguous there, record it in `specs/tmp/SPEC-PROBLEMS.md` rather than guess.
+
+**Verification.** No suite test pins it. By hand: each probe above reports its 14.15 findings (the `{ core }` binding and the `missing.xspec` target one each), located as their top-level twins are; a file move of `specs/A.mdx` into another directory rewrites a valid nested `import Y from "../specs/A.xspec";`. Regressions: `section-4.test.ts`, `section-14.test.ts` (T14-11), `section-6.5.test.ts`, `section-6.5-iv.test.ts`, `section-16-p4.test.ts`.
+
+## Task 26 — 14.18 at an aliased re-export or an import alias locates the binding's spelling (SPEC 14's location rule for 14.18, 4.5; found at Task 9)
+
+**Requirement.** SPEC 14: "Unsupported usage (14.18) locates the binding's spelling at the offending use: the binding's identifier, extended — for a node binding — by the longest static property chain (2.4) it roots there." Re-export and aliasing are 14.18 uses (4.5).
+
+**Observed** (hand probe at `ceabb13`): `src/alias.ts` holding `import SPEC, { text } from "../specs/A.xspec";`, then `export { SPEC as Y, text as t };`, `import t2 = text;`, and `export import X = SPEC.a.b;` on their own lines (`specs/A.mdx` holding `a` and `a.b`): `build --json` reports four 14.18 findings, located at `SPEC as Y`, `text as t`, the whole `import t2 = text;`, and the whole `export import X = SPEC.a.b;` — expected `SPEC`, `text`, `text`, and `SPEC.a.b`.
+
+**Location.** `visitExportSpecifiers` and `visitImportEqualsUse` in `src/core/code-analysis.ts`, which pass the whole export specifier or declaration to `addFinding`.
+
+**Change.** Locate an export specifier's local name (`propertyName ?? name`) and, for an import alias, the entity name's leftmost identifier, extended for a node binding by the qualified-name chain it roots there (`SPEC.a.b`), a `text` binding by nothing.
+
+**Verification.** No suite test pins it (T4.5-5 stages `export { SPEC };` alone, already located at `SPEC`). By hand: the four spellings above. Regressions: `section-4.5.test.ts`, `section-14.test.ts`.
 
 ## Task 24 — Confirm the full suite and CI are green, record the state, and delete this file
 
