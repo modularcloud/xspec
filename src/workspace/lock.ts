@@ -38,8 +38,8 @@
 //   proceeding and restores a lock it displaced wrongly. Acquisition is
 //   bounded: it either acquires, or fails promptly with the usage error —
 //   it never blocks (SPEC 13.5, 12.0).
-// - An unusable lock location — the temporary directory missing,
-//   unwritable, or not a directory, or the lock's path occupied by
+// - An unusable lock location — the temporary directory missing, not a
+//   directory, unwritable, or full, or the lock's path occupied by
 //   something other than a plain file — fails the command with a usage
 //   error (12.0) naming the cause, modifying nothing, as a hold file that
 //   cannot be created does (13.5); never the internal-error exit, which
@@ -88,8 +88,8 @@ const UNUSABLE_MESSAGE =
   "`rename`, `move`, and the mutating `review` subcommands take lives in " +
   "the operating system's temporary directory (named by TMPDIR, TMP, or " +
   "TEMP), and it can be neither created nor taken over there: the " +
-  "directory is missing, unwritable, or not a directory, or the lock's " +
-  "path is occupied by something other than a lock file; point the " +
+  "directory is missing, not a directory, unwritable, or full, or the " +
+  "lock's path is occupied by something other than a lock file; point the " +
   "temporary directory at a writable directory and retry; nothing was " +
   "modified (SPEC 13.5)";
 
@@ -306,11 +306,14 @@ export async function acquireMutationLock(
         return { ok: false, usageMessage: HELD_MESSAGE };
       }
       // A terminated holder MUST NOT block later commands (SPEC 13.5).
-      if ((await stealStaleLock(lockPath)) === "unusable") {
+      // A freed path is progress, not an obstacle: the refusal stays the
+      // last obstacle met (an entry-less claim of this command's own, say).
+      const stolen = await stealStaleLock(lockPath);
+      if (stolen === "unusable") {
         refusal = UNUSABLE_MESSAGE;
         await delay(UNREADABLE_GRACE_MS);
-      } else {
-        refusal = HELD_MESSAGE;
+      } else if (stolen === "retry") {
+        refusal = HELD_MESSAGE; // a rival moved first: contention
       }
       continue;
     }

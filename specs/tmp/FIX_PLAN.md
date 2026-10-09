@@ -122,12 +122,12 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 **Status: blocked — do not work on this task** until `specs/tmp/SPEC-PROBLEMS.md`'s 2026-10-09 entry has been ruled on and the documents changed accordingly. Task 23 found no design that meets all of these together: SPEC 13.5's per-workspace exclusion, which no environment, user, or host limits; SPEC 13.4's closed classification of the files xspec writes; T13.5-1's workspace byte-identical while held; and IMPLEMENTATION's portability rules. While the entry stands, an Engineer choosing the topmost task skips this one. Task 24 cannot finish before it is resolved.
 
 **Landed at Task 23** (`src/workspace/lock.ts`):
-- An unusable lock location is now a 12.0 usage error, exit 2, `code` null, nothing modified, never exit 70. That covers the temporary directory missing, unwritable, or not a directory, and the lock's path held by a directory, a symbolic link, or another non-file.
+- An unusable lock location is now a 12.0 usage error, exit 2, `code` null, nothing modified, never exit 70. That covers the temporary directory missing, not a directory, unwritable, or full, and the lock's path held by a directory, a symbolic link, or another non-file.
 - The unusable case is retried within the existing ten-attempt bound, about 0.25 s, since some refusals pass quickly.
-- A release the environment refuses is left to the stale-lock takeover.
+- A release the environment refuses is left to the stale-lock takeover. So is a claim whose process-ID entry cannot be written; removing it by path could remove a rival's fresh lock.
 - A stale entry recording this process's own ID (a reused ID) is taken over, not honored.
 
-The cases were checked by hand: a plain-file `TMPDIR`; an unwritable one under the unprivileged namespace; a directory and a dangling symbolic link at the lock path; a dead-PID and an empty entry, both taken over; a held command excluding a second one in ~0.3 s; and a killed holder not blocking the next command.
+The cases were checked by hand: a plain-file `TMPDIR`; an unwritable one under the unprivileged namespace; a full one (a 4 KiB tmpfs, filled, in a private mount namespace), which reports the unusable-location error with no lock left behind; a directory and a dangling symbolic link at the lock path; a dead-PID and an empty entry, both taken over; a held command excluding a second one in ~0.3 s; and a killed holder not blocking the next command.
 
 **Remaining** (observed at `5a85136`): while `rename … --test-hold` runs under `TMPDIR=A`, a second `rename` on the same workspace under `TMPDIR=B` exits 0, and both renames are journaled. Different users are never excluded, because the lock name carries the uid.
 
