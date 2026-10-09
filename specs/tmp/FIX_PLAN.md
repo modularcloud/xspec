@@ -41,11 +41,11 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T6.4-3 | section-6.4 | 1 (landed) | `rename specs/A.mdx a "a<U+2028>b"` exits 0 |
 | T6.5-4 | section-6.5 | 1 (landed), 6 (landed) | `move specs/A.mdx#keep "specs/B.mdx#a<U+2028>b"` exits 0; then the barred-character destination arms; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; passes since Task 6 landed |
 | T6.5-11 | section-6.5-ii | 17 | arm (f): the rewritten call reads `tt(target.y)`, an untimely `text` binding |
-| T6.5-20 | section-6.5-iv | 7 (landed), 10 (and 9 (landed) for (d)'s import-type and `declare module` stagings) | arm (a): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70 after modifying the workspace; since Task 7 landed, first fails at arm (d)'s first staging (Task 10): `move specs/Z.mdx specs/B.mdx` beside `src/c.ts` holding `import "../specs/B.md"` reports 14.15 once, expected `refused-invalid-destination` alone |
+| T6.5-20 | section-6.5-iv | 7 (landed), 10 (landed; and 9 (landed) for (d)'s import-type and `declare module` stagings) | arm (a): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70 after modifying the workspace; since Task 7 landed, first fails at arm (d)'s first staging (Task 10): `move specs/Z.mdx specs/B.mdx` beside `src/c.ts` holding `import "../specs/B.md"` reports 14.15 once, expected `refused-invalid-destination` alone; passes since Task 10 landed |
 | T6.5-21 | section-6.5-iv | 8 (landed), 6 (landed; its two-reason arm) | arm (a): `move specs/A.mdx specs/sub/A.mdx` exits 0; passes since Task 8 landed |
 | T6.5-22 | section-6.5-iv | 15 | arm (b): 26 of 38 lures bound a barred name |
 | T6.5-23 | section-6.5-v | 16, 17 | 13 of 33 stagings place or root the added declaration wrongly |
-| T6.6-3 | section-6.6 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 twins, reached only past that arm, hand-checked at Task 8: each refused `--preview` reports the real move's findings, `mapping`, `files`, and `delta` `null` |
+| T6.6-3 | section-6.6 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 twins, reached only past that arm, hand-checked at Task 8: each refused `--preview` reports the real move's findings, `mapping`, `files`, and `delta` `null`; passes since Task 10 landed |
 | T7-2 | section-7-basics | 11 | the `import defer { defineConfig }` arm builds with exit 0, expected 2 |
 | T7-6 | section-7-discovery | 5 (landed) | invalid-source arm: `check` reports 14.10 six times, expected 14.19 once |
 | T7.1-1 | section-7.1-7.3 | 5 (landed) | `specs/a"b.mdx` builds with exit 0, expected 1 |
@@ -61,37 +61,11 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T13.4-11 | section-13.4 | 3 (landed) | (a): a condition-10 finding for a recorded path holding a directory |
 | T14-4 | section-14 | 14 (it sweeps T14-12's stagings) | U+2EBF0 in a JSX name judged one UTF-16 unit at a time: 14.20, expected 14.16 |
 | T14-6 | section-14 | 14 (likewise) | likewise |
-| T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 arms, reached only past that twin, hand-checked at Task 8 against T6.5-21's own expectations |
+| T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 arms, reached only past that twin, hand-checked at Task 8 against T6.5-21's own expectations; passes since Task 10 landed |
 | T14-11 | section-14 | 9 (landed) | arm (x): 14.15 reported once, expected five times; passes since Task 9 landed |
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
 If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, and the tasks a later arm waited on beside Task 14 (Tasks 1, 2, 3, 4, and 5) have landed.
-
-## Task 10 — Move: a destination whose would-be emit path a code source's module-linking form designates is `refused-invalid-destination` (SPEC 6.5, 4, 14.15, 14; A6 (d), C9's fifth bullet)
-
-After Task 9 (landed at `ceabb13`). Since Task 9, `scanModuleLinks` in `src/core/code-analysis.ts` judges the top-level import and export declarations and `import X = require(…)` declarations, and `scanNestedLinkingForms` (called from it) judges static-specifier dynamic `import()` calls, import types, and string-named module declarations wherever they stand; between them they visit every form this task counts, so they are where each specifier can be collected.
-
-**Requirement.** SPEC 6.5's last `refused-invalid-destination` clause: "or, while Markdown emission is enabled (7.3), the path the destination would emit Markdown to (13.2) designated by the relative specifier of a code source's module-linking form, which the move would make a derived-file path (4, 14.15)". Its scope and form:
-- every module-linking form of SPEC 4 counts — Task 9's set: import and export declarations, `import X = require(…)`, a static dynamic `import()`, an import type, a string-named module declaration; a `require(…)` call, a triple-slash directive, and a template-literal `import()` do not;
-- it applies to a file-form destination and to a section-form target file to be created alike;
-- the cause joins the one `refused-invalid-destination` finding concerning the destination (`locations` `[]`). A refused operation reports refusal reasons alone, never 14.15 (14).
-
-**Observed.** Emission next to sources, with `src/c.ts` holding one form whose specifier is `../specs/B.md`, then `move specs/Z.mdx specs/B.mdx`:
-- for an import, an export, `import =`, and a dynamic `import()`, the move is refused, but as numbered condition 15 (`invalid-import`, located in `src/c.ts`) by the post-move re-validation;
-- for an import type and `declare module`, the move is performed, leaving 14.15 behind; since Task 9 (hand-checked at `ceabb13`), these two behave as the four above — refused as condition 15 located in `src/c.ts`, nothing written;
-- the controls (emission disabled; `require(…)`, `/// <reference path>`, template-literal `import()`) behave.
-
-**Location.**
-- `evaluateMoveFileRefusals` (~1013) and `evaluateMoveSectionRefusals` (~1250) in `src/core/refusal.ts`, which need each code source's module-linking specifiers as input (from the code analyses the move already holds). Since Task 7 both take `configuration` and `classification`, and `invalidDestinationFinding` takes the derived-path relations (`destinationRelations`, `src/core/derived-relation.ts`) as causes beside the occupied components: add the designation as one more cause there, so the finding stays one.
-- The specifier resolution `checkDerivedSpecifier` uses in `src/core/code-analysis.ts`.
-- The post-move re-validation in `src/cli/commands/rewrite-validation.ts`, which must never be what reports this case.
-
-**Change.** Have the code analysis expose every module-linking form's specifier with its file. Resolve each relative specifier lexically from its file's directory, as 14.15's derived-path check does (the resolution of 2.1 and 4). While emission is enabled, add the cause when one designates the destination's would-be Markdown emit path (`specSourceDerivedPaths(destination).markdown`).
-
-**Verification.**
-- Should turn green (Task 7 has landed): `section-6.5-iv.test.ts` T6.5-20 — its (d) arm and (d)'s section-form stagings; (e) follows (d) in the table and passes by hand.
-- Partially: `section-6.6.test.ts` T6.6-3, `section-14.test.ts` T14-7.
-- Neighbours: `section-4.test.ts`, `section-6.5.test.ts`.
 
 ## Task 11 — A `defer` configuration import is a configuration error (SPEC 7, 14.14; B1, C14)
 
@@ -317,7 +291,7 @@ This gap was also open at the `9d095d9` determination.
 
 **Observed** (hand probe at `ceabb13`, `markdown: { emit: true }`, `specs/A.mdx` discovered, code group `src/**/*.ts`): `build --json` exits 0 with no finding over each of `declare module "foo" { export * from "../specs/A.xspec"; }`, the same body holding `import X = require("../specs/A.xspec");` instead, one holding `export { x } from "../specs/A.xspec.ts";`, one holding `import { core } from "../specs/A.xspec";` and `import Z from "../specs/missing.xspec";`, and `namespace N { export * from "../specs/A.xspec"; }` (each staged with its body statements on their own lines). TypeScript 5.9.3 reports no parse diagnostic for any of them. With `src/n.ts` holding a valid nested `import Y from "../specs/A.xspec";` alone in such a body, `move specs/A.mdx specs/sub/A.mdx --preview --json` exits 0 listing only the relocation — no `import-specifier-rewrite` for `src/n.ts`.
 
-**Location.** `scanModuleLinks` in `src/core/code-analysis.ts` reads `this.sourceFile.statements` alone; `scanNestedLinkingForms` (Task 9) is the whole-tree pass that already finds dynamic `import()` calls, import types, and string-named module declarations at any depth. The move's specifier rewriting (`src/core/move.ts`) and Task 10's specifier collection must see the nested forms too.
+**Location.** `scanModuleLinks` in `src/core/code-analysis.ts` reads `this.sourceFile.statements` alone; `scanNestedLinkingForms` (Task 9) is the whole-tree pass that already finds dynamic `import()` calls, import types, and string-named module declarations at any depth. The move's specifier rewriting (`src/core/move.ts`) and Task 10's specifier collection (landed at `c540a86`: `CodeAnalysis.linkedPaths`, gathered in `checkDerivedSpecifier` and read by `emitPathDesignationCauses` in `src/core/refusal.ts`) must see the nested forms too — the collection does once a nested form's specifier goes through `checkDerivedSpecifier`.
 
 **Change.** Judge nested export declarations and `import X = require(…)` declarations with the top-level rules and ranges, and nested import declarations' derived-path designations. For nested `.xspec` import declarations, establish from SPEC 4, 2.1, 2.4, 4.5, and 6.5 how far the spec-module-import machinery reaches — binding forms and targets (14.15), the collision rule (4 reads "in the same file"; 2.4's value-level collision reads "of the same scope"), uses (an ambient body holds no statements but type-level ones), and rewriting under a file move. If the SPEC proves ambiguous there, record it in `specs/tmp/SPEC-PROBLEMS.md` rather than guess.
 

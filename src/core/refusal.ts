@@ -23,7 +23,10 @@
 // the paths `assessDestinationPath` names. The derived-path relations of
 // `refused-invalid-destination` read paths alone — the discovered sources'
 // and the derived paths the sources would generate after the move
-// (core/derived-relation.ts `destinationRelations`) — so they need no probe.
+// (core/derived-relation.ts `destinationRelations`) — so they need no probe;
+// nor does its emit-path designation, which reads the paths the code
+// sources' module-linking forms designate (core/code-analysis.ts
+// `CodeAnalysis.linkedPaths`; `emitPathDesignationCauses`).
 // The file form's `refused-exposed-derived-file` likewise reads one probed
 // fact, what occupies the origin's emit destination and whether discovery
 // would reach it there, over exactly the path `exposableEmitDestination`
