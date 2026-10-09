@@ -121,6 +121,7 @@ import type { WorkspaceAnalysis } from "../../workspace/pipeline.js";
 import {
   analyzeWorkspace,
   analyzeWorkspaceContent,
+  SOURCE_VANISHED,
 } from "../../workspace/pipeline.js";
 import {
   nonDirectoryComponents,
@@ -544,10 +545,10 @@ async function reanalyzeMoved(
   );
   return analyzeWorkspaceContent(workspace.configuration, {
     classification,
-    readSource: (rel) => Promise.resolve(byPath.get(rel) ?? null),
+    readSource: (rel) => Promise.resolve(byPath.get(rel) ?? SOURCE_VANISHED),
     // A valid workspace discovers no invalid-path sources (SPEC 14.19
     // gates move, 6.5), so this reanalysis is never asked for one.
-    readInvalidSource: () => Promise.resolve(null),
+    readInvalidSource: () => Promise.resolve(SOURCE_VANISHED),
     loadJournal: () => Promise.resolve(journalFromBytes(journalBytes)),
   });
 }
@@ -754,10 +755,10 @@ async function reanalyzeSectionMoved(
   );
   return analyzeWorkspaceContent(workspace.configuration, {
     classification,
-    readSource: (rel) => Promise.resolve(byPath.get(rel) ?? null),
+    readSource: (rel) => Promise.resolve(byPath.get(rel) ?? SOURCE_VANISHED),
     // A valid workspace discovers no invalid-path sources (SPEC 14.19
     // gates move, 6.5), so this reanalysis is never asked for one.
-    readInvalidSource: () => Promise.resolve(null),
+    readInvalidSource: () => Promise.resolve(SOURCE_VANISHED),
     loadJournal: () => Promise.resolve(journalFromBytes(journalBytes)),
   });
 }

@@ -1,8 +1,8 @@
 # FIX_PLAN — Phase 10 (re-descent, iteration 1): product adherence to `specs/SPEC.md`
 
-Source: the compliance determination that opened this Phase 10 loop at `b3cc3e3` (branch `claude/xspec-ui-apis-4df8fa`, PR #7; governing IP `specs/patches/0001-external-ui-apis.md`, Stage: Tested — no task here changes the Stage; bundle `specs/SPEC.md`, `specs/TEST-SPEC.md`, `specs/CERTIFICATIONS.md`, `specs/IMPLEMENTATION.md`). The documents changed after the product was last brought green (CI recorded at `9d095d9`): `git diff 9d095d9..f31e100 -- specs/SPEC.md`, `git diff 3311ccd..6780f53 -- specs/TEST-SPEC.md`, `git diff 3311ccd..301f2f9 -- specs/CERTIFICATIONS.md`; Phase 9 brought the harness into line, its last determination clean at `3fe91f5`. Reviewer A (SPEC 1–6) returned 10 gaps, reviewer B (7–11) 6, reviewer C (12–15) 14. VERIFY was red on 31 product tests, the same set locally and in CI run 1003's `suite-linux` job at `b3cc3e3` (every failure a `HarnessAssertionError`); `harness-self` (28 files, 4315 tests) and `suite-windows` were green, and certification had 0 discrepancies (154 PASS / 38 FAIL — the FAILs being violators' expected outcomes — / 0 error / 0 hang). The product's last change is `8a0da01`; `dist/` matches `src/`. Findings are cited as A<n>, B<n>, C<n> (reviewer, gap number); where reviewers reported the same gap, it is one task. Reviewer B also noted, uncounted and outside its scope, a wrong correction text on a refused source read; that is Task 21.
+Source: the compliance determination that opened this Phase 10 loop at `b3cc3e3` (branch `claude/xspec-ui-apis-4df8fa`, PR #7; governing IP `specs/patches/0001-external-ui-apis.md`, Stage: Tested — no task here changes the Stage; bundle `specs/SPEC.md`, `specs/TEST-SPEC.md`, `specs/CERTIFICATIONS.md`, `specs/IMPLEMENTATION.md`). The documents changed after the product was last brought green (CI recorded at `9d095d9`): `git diff 9d095d9..f31e100 -- specs/SPEC.md`, `git diff 3311ccd..6780f53 -- specs/TEST-SPEC.md`, `git diff 3311ccd..301f2f9 -- specs/CERTIFICATIONS.md`; Phase 9 brought the harness into line, its last determination clean at `3fe91f5`. Reviewer A (SPEC 1–6) returned 10 gaps, reviewer B (7–11) 6, reviewer C (12–15) 14. VERIFY was red on 31 product tests, the same set locally and in CI run 1003's `suite-linux` job at `b3cc3e3` (every failure a `HarnessAssertionError`); `harness-self` (28 files, 4315 tests) and `suite-windows` were green, and certification had 0 discrepancies (154 PASS / 38 FAIL — the FAILs being violators' expected outcomes — / 0 error / 0 hang). The product's last change is `8a0da01`; `dist/` matches `src/`. Findings are cited as A<n>, B<n>, C<n> (reviewer, gap number); where reviewers reported the same gap, it is one task. Reviewer B also noted, uncounted and outside its scope, a wrong correction text on a refused source read; that is Task 21 (landed).
 
-Goal: every test passes — `npm test` locally, and CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head (PR #7 is conflicted, so CI runs on branch pushes) — and the product meets SPEC.md. Tasks 18–23, and Tasks 25–28 found since, fix SPEC departures that no test pins; they are in scope all the same (Tasks 18, 19, and 20 have landed).
+Goal: every test passes — `npm test` locally, and CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head (PR #7 is conflicted, so CI runs on branch pushes) — and the product meets SPEC.md. Tasks 18–23, and Tasks 25–28 found since, fix SPEC departures that no test pins; they are in scope all the same (Tasks 18, 19, 20, and 21 have landed).
 
 Not planned: nothing. Every counted gap and B's uncounted note has a task. The two standing rulings below close their families for this run.
 
@@ -29,7 +29,7 @@ Not planned: nothing. Every counted gap and B's uncounted note has a task. The t
 
 ## Index — each failing test and the tasks it waits on
 
-These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed then (local run and CI run 1003 alike). Each registry module is `test/suite/registry/<module>.ts`, and its suite file is `test/suite/<module>.test.ts`. Tasks 18 (landed), 19 (landed), 20 (landed), 21–23, and 25–28 have no failing test.
+These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed then (local run and CI run 1003 alike). Each registry module is `test/suite/registry/<module>.ts`, and its suite file is `test/suite/<module>.test.ts`. Tasks 18 (landed), 19 (landed), 20 (landed), 21 (landed), 22, 23, and 25–28 have no failing test.
 
 | Test | Module | Tasks | First failure at `b3cc3e3` |
 |---|---|---|---|
@@ -64,20 +64,6 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 arms, reached only past that twin, hand-checked at Task 8 against T6.5-21's own expectations; passes since Task 10 landed |
 | T14-11 | section-14 | 9 (landed) | arm (x): 14.15 reported once, expected five times; passes since Task 9 landed |
 | T14-12 | section-14-iii | 14 (landed) | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16; passes since Task 14 landed |
-
-## Task 21 — A discovered source whose content the environment refuses is reported with a fitting correction (SPEC 14, 14.25, 14.20; B's uncounted note)
-
-**Requirement.** SPEC 14: `build` and `check` "MUST report actionable errors that identify the file, location, and correction". SPEC 14.25: a refused read of a discovered source's content is condition 20, its finding at offset 0, the file masked as one that fails to parse. The code and range are already right; the correction is not.
-
-**Observed.** As uid 1000, a discovered source whose permissions refuse reading gets 14.20 at offset 0 with the message "the discovered file could not be read — it changed or vanished while the command ran; re-run the command once the workspace is quiescent" — the wrong correction for a permission refusal, which no rerun cures.
-
-**Location.** `unreadableSourceFinding` in `src/workspace/pipeline.ts` (~527, called ~288, ~335, ~365) and the readers above it (`readSourceBytes` ~495 and `readInvalidSourceBytes` ~511), which discard the error.
-
-**Change.** Keep the failure's kind from the reader. A file that vanished keeps the current message; a refused read (permission denied, an I/O error) says the environment refused to deliver the file's content, naming the reason (for example `EACCES`), and tells the user to make the file readable or keep it out of the configured globs, citing SPEC 14.25 and 14.20. Code and range unchanged.
-
-**Verification.**
-- No suite test pins the wording. By hand, as uid 1000 (`unshare --map-user=1000 --map-group=1000 -- …`): a source with mode 000, then the same file deleted mid-run if you can stage it.
-- Regressions: `section-14-ii.test.ts` (T14-10's refused-read table, Linux leg), `section-11.2.test.ts`, `section-14.test.ts`.
 
 ## Task 22 — The human report presents a non-UTF-8 path distinguishably from every plain path (SPEC 12.0, 12.7; C10)
 

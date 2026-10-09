@@ -67,6 +67,10 @@ import {
 import { WorkspaceTextModel } from "../core/text-model.js";
 import type { LoadedWorkspace } from "./config.js";
 import { discoverSources } from "./discovery.js";
+import {
+  isAbsenceFailure,
+  isFilesystemFailure,
+} from "./environment-refusal.js";
 import type { LoadedJournal } from "./journal.js";
 import { loadJournal } from "./journal.js";
 
@@ -127,6 +131,27 @@ function absoluteOf(root: string, rel: string): string {
 }
 
 /**
+ * Why a discovered source's content could not be read — either way an
+ * unparseable source at offset 0, the file masked exactly as one that
+ * fails to parse (SPEC 14.20, 14.25) — so its finding names the fitting
+ * correction (SPEC 14: actionable errors). `vanished`: the file discovery
+ * listed no longer occupies its path as a file — removed, a directory
+ * component replaced, or the file replaced by a directory between the walk
+ * and the read: concurrent modification (SPEC 13.5), which a rerun on a
+ * quiescent workspace cures. `refused`: the environment refused to deliver
+ * the content — permission denied, an I/O error, any other failure the
+ * filesystem reports for the read (SPEC 14.25) — `reason` naming it by its
+ * error code (`EACCES`, `EIO`, …), never the filesystem's own message,
+ * which carries absolute paths (SPEC 12.0); no rerun cures it.
+ */
+export type SourceReadFailure =
+  | { readonly unread: "vanished" }
+  | { readonly unread: "refused"; readonly reason: string };
+
+/** The `vanished` source read failure (`SourceReadFailure`). */
+export const SOURCE_VANISHED: SourceReadFailure = { unread: "vanished" };
+
+/**
  * A workspace's content, however sourced: the classified file listing, a
  * byte reader for the discovered sources, and the journal. The filesystem
  * workspace (`analyzeWorkspace`) and a git tree at a baseline ref
@@ -136,19 +161,23 @@ function absoluteOf(root: string, rel: string): string {
 export interface WorkspaceContent {
   readonly classification: SourceClassification;
   /**
-   * Read one discovered source's exact bytes; null when the content cannot
-   * be read (reported as an unparseable source, SPEC 14.20).
+   * Read one discovered source's exact bytes; a `SourceReadFailure` when
+   * the content cannot be read (reported as an unparseable source,
+   * SPEC 14.20, 14.25).
    */
-  readonly readSource: (rel: string) => Promise<Uint8Array | null>;
+  readonly readSource: (rel: string) => Promise<Uint8Array | SourceReadFailure>;
   /**
    * Read one invalid-path discovered source's exact bytes (SPEC 14.19),
    * addressed by its exact path bytes — such a path may have no plain
-   * string form (SPEC 12.0). Null when the content cannot be read
-   * (SPEC 14.20). Called only for `classification.invalidSources`
-   * entries, so content sourced from a workspace that passed `build`'s
-   * validations (which discovers none) may answer null unconditionally.
+   * string form (SPEC 12.0). A `SourceReadFailure` when the content cannot
+   * be read (SPEC 14.20, 14.25). Called only for
+   * `classification.invalidSources` entries, so content sourced from a
+   * workspace that passed `build`'s validations (which discovers none) may
+   * answer a failure unconditionally.
    */
-  readonly readInvalidSource: (bytes: Uint8Array) => Promise<Uint8Array | null>;
+  readonly readInvalidSource: (
+    bytes: Uint8Array,
+  ) => Promise<Uint8Array | SourceReadFailure>;
   /**
    * Load the journal (SPEC 6.1). Called only when analysis proceeds past
    * configuration errors — those precede all source analysis (SPEC 14).
@@ -284,8 +313,8 @@ export async function analyzeWorkspaceContent(
   const specs: SpecFileAnalysis[] = [];
   for (const source of classification.specSources) {
     const bytes = await content.readSource(source.path);
-    if (bytes === null) {
-      findings.push(unreadableSourceFinding(source.path));
+    if (!(bytes instanceof Uint8Array)) {
+      findings.push(unreadableSourceFinding(source.path, bytes));
       continue;
     }
     sourceHashes.set(source.path, sha256Hex(bytes));
@@ -331,8 +360,8 @@ export async function analyzeWorkspaceContent(
   const code: CodeAnalysis[] = [];
   for (const source of classification.codeSources) {
     const bytes = await content.readSource(source.path);
-    if (bytes === null) {
-      findings.push(unreadableSourceFinding(source.path));
+    if (!(bytes instanceof Uint8Array)) {
+      findings.push(unreadableSourceFinding(source.path, bytes));
       continue;
     }
     sourceHashes.set(source.path, sha256Hex(bytes));
@@ -361,8 +390,8 @@ export async function analyzeWorkspaceContent(
   const invalidPathCode: CodeAnalysis[] = [];
   for (const source of classification.invalidSources) {
     const bytes = await content.readInvalidSource(source.bytes);
-    if (bytes === null) {
-      findings.push(unreadableSourceFinding(source.path));
+    if (!(bytes instanceof Uint8Array)) {
+      findings.push(unreadableSourceFinding(source.path, bytes));
       continue;
     }
     // The analyzers' identity-space path: a deterministic stand-in (the
@@ -489,17 +518,18 @@ export function workspaceInputsOf(
 const lossyDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
 /**
- * Read one discovered source's exact bytes from the filesystem, null when
- * unreadable — the reader `analyzeWorkspace` hands the shared body.
+ * Read one discovered source's exact bytes from the filesystem, or why
+ * they cannot be read (`sourceReadFailure`) — the reader
+ * `analyzeWorkspace` hands the shared body.
  */
 async function readSourceBytes(
   root: string,
   rel: string,
-): Promise<Uint8Array | null> {
+): Promise<Uint8Array | SourceReadFailure> {
   try {
     return await fsp.readFile(absoluteOf(root, rel));
-  } catch {
-    return null;
+  } catch (error) {
+    return sourceReadFailure(error);
   }
 }
 
@@ -507,36 +537,68 @@ async function readSourceBytes(
  * Read one invalid-path discovered source's exact bytes (SPEC 14.19) —
  * such a workspace-relative path may have no plain string form, so the
  * filesystem is addressed with the exact bytes (`/`-separated, as the
- * walk produced them; every platform Node supports accepts `/` here).
+ * walk produced them; every platform Node supports accepts `/` here) — or
+ * why they cannot be read (`sourceReadFailure`).
  */
 async function readInvalidSourceBytes(
   root: string,
   bytes: Uint8Array,
-): Promise<Uint8Array | null> {
+): Promise<Uint8Array | SourceReadFailure> {
   try {
     return await fsp.readFile(
       Buffer.concat([Buffer.from(root), Buffer.from("/"), Buffer.from(bytes)]),
     );
-  } catch {
-    return null;
+  } catch (error) {
+    return sourceReadFailure(error);
   }
 }
 
 /**
- * SPEC 14.20: a discovered source whose content cannot be read. On the
- * filesystem that means the file vanished (or became unreadable) between
- * the walk and the read — concurrent modification, SPEC 13.5
- * last-write-wins territory; it was discovered, and its content cannot be
- * analyzed.
+ * Classify a discovered source's failed content read (`SourceReadFailure`,
+ * SPEC 14.20, 14.25). Discovery lists plain files only (SPEC 7), so a read
+ * finding nothing there (`isAbsenceFailure`) or a directory there (`EISDIR`)
+ * means the file vanished or changed since the walk. Every failure the
+ * filesystem reports — and the runtime's refusal to deliver a file too
+ * large for one buffer (`ERR_FS_FILE_TOO_LARGE`), the environment refusing
+ * the content all the same — is a refused read naming its code. Anything
+ * else is a defect of the product's own and propagates unchanged.
  */
-function unreadableSourceFinding(rel: PathText): Finding {
-  // SPEC 14.20 locates in source; with no readable content, the failure
-  // locates at the file start (range [0, 0)).
-  return locatedFinding(
-    20,
-    `unparseable source: the discovered file could not be read — it ` +
-      `changed or vanished while the command ran; re-run the command ` +
-      `once the workspace is quiescent (SPEC 13.5, 14.20)`,
-    [{ file: rel, range: { start: 0, end: 0 } }],
-  );
+function sourceReadFailure(error: unknown): SourceReadFailure {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (isAbsenceFailure(error) || code === "EISDIR") return SOURCE_VANISHED;
+  if (isFilesystemFailure(error) || code === "ERR_FS_FILE_TOO_LARGE") {
+    return { unread: "refused", reason: code ?? "an unknown error" };
+  }
+  throw error;
+}
+
+/**
+ * SPEC 14.20, 14.25: a discovered source whose content cannot be read —
+ * content that cannot be read parses as nothing, so the file is masked
+ * exactly as one that fails to parse, its finding at offset 0 (the file
+ * start, range [0, 0)). The correction follows the failure's kind
+ * (`SourceReadFailure`, SPEC 14: actionable errors): a file that vanished
+ * or changed while the command ran is cured by rerunning once the
+ * workspace is quiescent (SPEC 13.5, last-write-wins territory); a read
+ * the environment refused, by making the file readable or keeping it out
+ * of the configured globs (SPEC 7) — no rerun alone cures that.
+ */
+function unreadableSourceFinding(
+  rel: PathText,
+  failure: SourceReadFailure,
+): Finding {
+  const message =
+    failure.unread === "refused"
+      ? `unparseable source: the environment refused to deliver the ` +
+        `discovered file's content (${failure.reason}) — content that ` +
+        `cannot be read parses as nothing, so the file is masked exactly ` +
+        `as one that fails to parse; make the file readable, or keep it ` +
+        `out of the configured globs, then rerun the command ` +
+        `(SPEC 14.25, 14.20)`
+      : `unparseable source: the discovered file could not be read — it ` +
+        `changed or vanished while the command ran; re-run the command ` +
+        `once the workspace is quiescent (SPEC 13.5, 14.20)`;
+  return locatedFinding(20, message, [
+    { file: rel, range: { start: 0, end: 0 } },
+  ]);
 }
