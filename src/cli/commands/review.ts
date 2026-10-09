@@ -28,8 +28,10 @@
 //      workspace's findings is the gate's exit-1 report — then commit the
 //      refresh write (a no-op when the store already matches);
 //   5. an existing session name — matched ignoring ASCII case (SPEC 10.1)
-//      — is refused, exit 1, nothing created (SPEC 10.7); an exact-name
-//      corrupt occupant reports the corruption instead (SPEC 10.1, 14.21);
+//      — is refused, exit 1, nothing created (SPEC 10.7); when the session
+//      so named — the exact-name occupant, else the byte-least name
+//      colliding ignoring ASCII case — is corrupt, its corruption is
+//      reported in the refusal's place (SPEC 10.7, 14.21, 13.5);
 //   6. derive the items (SPEC 10.5–10.7), validate the write path
 //      (SPEC 14.22), and write the session file (SPEC 10.1, 13.4).
 //
@@ -234,11 +236,27 @@ async function runCreate(
       [name],
     );
   }
+  // SPEC 10.1: no exact-name occupant, so a session whose name matches
+  // ignoring ASCII case is the existing session the name is treated as.
+  // Where several collide (only possible on a case-sensitive filesystem),
+  // the one judged is the byte-least colliding name — the first match
+  // `existingNameIgnoringAsciiCase` finds in the byte-ordered listing — so
+  // the outcome is deterministic (SPEC 12.0) and one finding either way
+  // (SPEC 10.7); the other colliding sessions are not read.
   const collision = existingNameIgnoringAsciiCase(
     await listSessionNames(workspace.root),
     name,
   );
   if (collision !== null) {
+    // SPEC 10.7, 14.21, 13.5: when that session is corrupt, its corruption
+    // is reported in the refusal's place — one finding concerning its own
+    // session file, exit 1, nothing created — as for an exact-name
+    // occupant above.
+    const collided = await loadSession(workspace.root, collision);
+    if (collided.state === "corrupt") {
+      emitFindingsReport(invocation.json, stdout, [collided.finding]);
+      return 1;
+    }
     // SPEC 10.1/10.7/14: one code-less finding, exit 1, nothing created;
     // the identities name the requested and the colliding session
     // (informational).

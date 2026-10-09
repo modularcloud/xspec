@@ -2,7 +2,7 @@
 
 Source: the compliance determination that opened this Phase 10 loop at `b3cc3e3` (branch `claude/xspec-ui-apis-4df8fa`, PR #7; governing IP `specs/patches/0001-external-ui-apis.md`, Stage: Tested — no task here changes the Stage; bundle `specs/SPEC.md`, `specs/TEST-SPEC.md`, `specs/CERTIFICATIONS.md`, `specs/IMPLEMENTATION.md`). The documents changed after the product was last brought green (CI recorded at `9d095d9`): `git diff 9d095d9..f31e100 -- specs/SPEC.md`, `git diff 3311ccd..6780f53 -- specs/TEST-SPEC.md`, `git diff 3311ccd..301f2f9 -- specs/CERTIFICATIONS.md`; Phase 9 brought the harness into line, its last determination clean at `3fe91f5`. Reviewer A (SPEC 1–6) returned 10 gaps, reviewer B (7–11) 6, reviewer C (12–15) 14. VERIFY was red on 31 product tests, the same set locally and in CI run 1003's `suite-linux` job at `b3cc3e3` (every failure a `HarnessAssertionError`); `harness-self` (28 files, 4315 tests) and `suite-windows` were green, and certification had 0 discrepancies (154 PASS / 38 FAIL — the FAILs being violators' expected outcomes — / 0 error / 0 hang). The product's last change is `8a0da01`; `dist/` matches `src/`. Findings are cited as A<n>, B<n>, C<n> (reviewer, gap number); where reviewers reported the same gap, it is one task. Reviewer B also noted, uncounted and outside its scope, a wrong correction text on a refused source read; that is Task 21.
 
-Goal: every test passes — `npm test` locally, and CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head (PR #7 is conflicted, so CI runs on branch pushes) — and the product meets SPEC.md. Tasks 18–23, and Tasks 25–27 found since, fix SPEC departures that no test pins; they are in scope all the same.
+Goal: every test passes — `npm test` locally, and CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head (PR #7 is conflicted, so CI runs on branch pushes) — and the product meets SPEC.md. Tasks 18–23, and Tasks 25–27 found since, fix SPEC departures that no test pins; they are in scope all the same (Task 18 has landed).
 
 Not planned: nothing. Every counted gap and B's uncounted note has a task. The two standing rulings below close their families for this run.
 
@@ -29,7 +29,7 @@ Not planned: nothing. Every counted gap and B's uncounted note has a task. The t
 
 ## Index — each failing test and the tasks it waits on
 
-These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed then (local run and CI run 1003 alike). Each registry module is `test/suite/registry/<module>.ts`, and its suite file is `test/suite/<module>.test.ts`. Tasks 18–23 and 25–27 have no failing test.
+These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed then (local run and CI run 1003 alike). Each registry module is `test/suite/registry/<module>.ts`, and its suite file is `test/suite/<module>.test.ts`. Tasks 18 (landed), 19–23, and 25–27 have no failing test.
 
 | Test | Module | Tasks | First failure at `b3cc3e3` |
 |---|---|---|---|
@@ -64,20 +64,6 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 arms, reached only past that twin, hand-checked at Task 8 against T6.5-21's own expectations; passes since Task 10 landed |
 | T14-11 | section-14 | 9 (landed) | arm (x): 14.15 reported once, expected five times; passes since Task 9 landed |
 | T14-12 | section-14-iii | 14 (landed) | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16; passes since Task 14 landed |
-
-## Task 18 — `review create` with a case variant of a corrupt session's name reports the corruption (SPEC 10.1, 10.7, 14.21, 13.5; B5, C13)
-
-**Requirement.** SPEC 10.1: a name that matches an existing session's name ignoring ASCII case "is treated at `review create` as the name of an existing session and refused (10.7)". SPEC 14.21 reports a corrupt session "by any `review` subcommand naming the session", and SPEC 13.5 orders `review create`'s "existing-name refusal (10.7), the corruption reported in that refusal's place (14.21)". So when the session a case variant collides with is corrupt, `create` reports exactly one `corrupt-session` finding concerning that session's file (for example `.xspec/reviews/foo.json`), exit 1, nothing created — as the exact-name case already does.
-
-**Observed.** With `.xspec/reviews/foo.json` unparseable, or a directory, `review create --strategy audit --name Foo --json` exits 1 with the code-less existing-name refusal, identities `["Foo","foo"]`. `--name foo` is already correct. This gap was also open at the `9d095d9` determination.
-
-**Location.** `src/cli/commands/review.ts`: the `existingNameIgnoringAsciiCase` branch (~237–251), just after the exact-name branch (~220–236), whose occupant handling shows how a corrupt exact-name session is reported.
-
-**Change.** Classify the colliding session as the exact-name branch does, and when it is corrupt, report its 14.21 finding in the refusal's place. Where several sessions collide, decide deterministically (report each colliding corrupt session's 14.21, or judge the one `existingNameIgnoringAsciiCase` names) and say which in a comment.
-
-**Verification.**
-- No suite test pins it. By hand: `review create --strategy audit --name foo`, overwrite `.xspec/reviews/foo.json` with `{broken`, then `review create --strategy audit --name Foo --json`; repeat with a directory at that path; check the healthy collision still gives the code-less refusal.
-- Regressions: `section-10.1.test.ts`, `section-10.7-i.test.ts`, `section-10.7-ii.test.ts`, `section-12.0-ii.test.ts` (T12.0-10's past-the-gate corruption arm).
 
 ## Task 19 — TypeScript instantiation expressions over spec bindings are dynamic references or unsupported uses (SPEC 2.4, 4.5, 14.8, 14.18; A3)
 
