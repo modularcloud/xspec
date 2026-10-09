@@ -2399,6 +2399,72 @@ function spelledIdentifierNames(sourceFile: tst.SourceFile): Set<string> {
   return names;
 }
 
+/** The pragma names whose factory 6.5 bars in a TSX source, lowercased. */
+const JSX_FACTORY_PRAGMAS: ReadonlySet<string> = new Set(["jsx", "jsxfrag"]);
+
+/** The longest of `JSX_FACTORY_PRAGMAS`. */
+const LONGEST_JSX_FACTORY_PRAGMA = "jsxfrag".length;
+
+/** A run of whitespace (ECMAScript's, as TypeScript's pragma patterns read it). */
+const WHITESPACE_RUN = /\s*/y;
+
+/** A run of anything else. */
+const NON_WHITESPACE_RUN = /\S*/y;
+
+/** Where the run `pattern` (sticky, possibly empty) matches from `from` ends. */
+function runEnd(pattern: RegExp, text: string, from: number): number {
+  pattern.lastIndex = from;
+  pattern.exec(text);
+  return pattern.lastIndex;
+}
+
+/**
+ * SPEC 6.5 "Added imports": the leading identifier of each factory a
+ * `@jsx` or `@jsxFrag` pragma in one of a TSX source's comments names —
+ * names an added import never binds there, through which TypeScript's
+ * classic JSX transform reaches the file's JSX factories. A pragma is read
+ * as TypeScript reads one (5.9.3's `extractPragmas`): at an `@`, its name,
+ * the run of characters up to the next whitespace, matched regardless of
+ * ASCII case (TypeScript lowercases it, and no other character lowercases
+ * to one of these names' letters), and its factory, the first argument —
+ * the next run of non-whitespace characters after whitespace — parsed as
+ * TypeScript parses a pragma's factory, an entity name, whose leftmost
+ * identifier is the leading one. Every `@` of the text is read so, wherever
+ * it stands: that takes in every pragma of every comment, a line comment's
+ * or a block comment's, leading or not — where TypeScript itself reads
+ * these pragmas from the file's leading block comments alone — and may take
+ * a few names besides (an `@` in a string or in JSX text), which only
+ * steers an added identifier's deterministic choice onward.
+ */
+export function jsxFactoryPragmaNames(text: string): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (let at = text.indexOf("@"); at !== -1; at = text.indexOf("@", at + 1)) {
+    const nameStart = at + 1;
+    // Only a name no longer than a pragma's can be one: read no further.
+    const window = text.slice(
+      nameStart,
+      nameStart + LONGEST_JSX_FACTORY_PRAGMA + 1,
+    );
+    const nameLength = runEnd(NON_WHITESPACE_RUN, window, 0);
+    if (!JSX_FACTORY_PRAGMAS.has(window.slice(0, nameLength).toLowerCase())) {
+      continue;
+    }
+    const nameEnd = nameStart + nameLength;
+    const factoryStart = runEnd(WHITESPACE_RUN, text, nameEnd);
+    if (factoryStart === nameEnd) continue;
+    const factoryEnd = runEnd(NON_WHITESPACE_RUN, text, factoryStart);
+    if (factoryEnd === factoryStart) continue;
+    let entity = ts.parseIsolatedEntityName(
+      text.slice(factoryStart, factoryEnd),
+      ts.ScriptTarget.Latest,
+    );
+    if (entity === undefined) continue;
+    while (ts.isQualifiedName(entity)) entity = entity.left;
+    names.add(entity.text);
+  }
+  return names;
+}
+
 /** Each judged namespace's verdict; null while it is under judgement. */
 type NamespaceJudgements = Map<tst.Node, boolean | null>;
 

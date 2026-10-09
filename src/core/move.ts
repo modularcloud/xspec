@@ -62,7 +62,10 @@ import type {
   CodeImportBinding,
   CodeReference,
 } from "./code-analysis.js";
-import { topLevelImportRanges } from "./code-analysis.js";
+import {
+  jsxFactoryPragmaNames,
+  topLevelImportRanges,
+} from "./code-analysis.js";
 import type { SourceEdit, SourceRewrite } from "./edits.js";
 import {
   applyEdits,
@@ -611,9 +614,10 @@ function removalsLeaveBlockHeaded(
 }
 
 /**
- * ECMAScript reserved words, which an import binding can never use — the
- * fresh-identifier chooser (SPEC 6.5) skips them — and `arguments` and
- * `eval`, which no binding of module (strict) code may bind.
+ * SPEC 6.5 "Added imports": the names module code, strict throughout,
+ * admits as no binding — ECMAScript's reserved words, and `let`, `static`,
+ * `implements`, `interface`, `package`, `private`, `protected`, `public`,
+ * `eval`, and `arguments` — which the fresh-identifier chooser skips.
  */
 const RESERVED_BINDING_NAMES: ReadonlySet<string> = new Set([
   "arguments",
@@ -666,7 +670,12 @@ const RESERVED_BINDING_NAMES: ReadonlySet<string> = new Set([
   "yield",
 ]);
 
-/** SPEC 2.1: names an xspec import may never bind (never shadowed). */
+/**
+ * SPEC 2.1: names an xspec import may never bind (never shadowed). SPEC 6.5
+ * bars them from an added import's identifiers in a spec source; the
+ * chooser skips them in every receiving file, which only steers its
+ * deterministic choice onward in a code source.
+ */
 const COMPILER_PROVIDED_NAMES: ReadonlySet<string> = new Set([
   "S",
   "Spec",
@@ -674,10 +683,141 @@ const COMPILER_PROVIDED_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * SPEC 6.5 "Added imports": names TypeScript's compiler reserves in a
+ * module it emits in any format but ECMAScript's, never an added import's
+ * identifiers.
+ */
+const EMIT_RESERVED_NAMES: ReadonlySet<string> = new Set([
+  "require",
+  "exports",
+]);
+
+/**
+ * SPEC 6.5 "Added imports": the prefix of the helpers TypeScript's emit
+ * declares at a module's top level (`__awaiter`); no added import's
+ * identifier begins with it.
+ */
+const EMIT_HELPER_PREFIX = "__";
+
+/**
+ * SPEC 6.5 "Added imports": the globals the compiler's emitted code may
+ * read, whatever the module format and target, which no added import's
+ * identifier names — every property ECMAScript 2024 defines on the global
+ * object (clause 19's value, function, constructor, and other properties,
+ * and Annex B's, B.2.1), and `Iterator`, `AsyncIterator`, and
+ * `SuppressedError`, which 6.5 names.
+ */
+const EMITTED_CODE_GLOBALS: ReadonlySet<string> = new Set([
+  // 19.1, the value properties.
+  "globalThis",
+  "Infinity",
+  "NaN",
+  "undefined",
+  // 19.2, the function properties.
+  "eval",
+  "isFinite",
+  "isNaN",
+  "parseFloat",
+  "parseInt",
+  "decodeURI",
+  "decodeURIComponent",
+  "encodeURI",
+  "encodeURIComponent",
+  // 19.3, the constructor properties.
+  "AggregateError",
+  "Array",
+  "ArrayBuffer",
+  "BigInt",
+  "BigInt64Array",
+  "BigUint64Array",
+  "Boolean",
+  "DataView",
+  "Date",
+  "Error",
+  "EvalError",
+  "FinalizationRegistry",
+  "Float32Array",
+  "Float64Array",
+  "Function",
+  "Int8Array",
+  "Int16Array",
+  "Int32Array",
+  "Map",
+  "Number",
+  "Object",
+  "Promise",
+  "Proxy",
+  "RangeError",
+  "ReferenceError",
+  "RegExp",
+  "Set",
+  "SharedArrayBuffer",
+  "String",
+  "Symbol",
+  "SyntaxError",
+  "TypeError",
+  "Uint8Array",
+  "Uint8ClampedArray",
+  "Uint16Array",
+  "Uint32Array",
+  "URIError",
+  "WeakMap",
+  "WeakRef",
+  "WeakSet",
+  // 19.4, the other properties.
+  "Atomics",
+  "JSON",
+  "Math",
+  "Reflect",
+  // Annex B, B.2.1.
+  "escape",
+  "unescape",
+  // Named by 6.5.
+  "Iterator",
+  "AsyncIterator",
+  "SuppressedError",
+]);
+
+/**
+ * SPEC 6.5 "Added imports": whether an added import may bind `name` in no
+ * receiving file whatever it holds — no binding module code, strict
+ * throughout, admits (reserved words, and the words strict mode bars as a
+ * binding), no name the compiler reserves or its emit's helpers spell, no
+ * global its emitted code may read, and none of the compiler-provided
+ * names. A file's own constraints — its declarations and references, and a
+ * TSX source's JSX factory names — are the caller's (`avoided`).
+ */
+function barredInEveryFile(name: string): boolean {
+  return (
+    RESERVED_BINDING_NAMES.has(name) ||
+    EMIT_RESERVED_NAMES.has(name) ||
+    name.startsWith(EMIT_HELPER_PREFIX) ||
+    EMITTED_CODE_GLOBALS.has(name) ||
+    COMPILER_PROVIDED_NAMES.has(name)
+  );
+}
+
+/**
+ * SPEC 6.5 "Added imports": in a TSX source (a `.tsx` file name, 14.20),
+ * the names through which TypeScript's classic JSX transform reaches the
+ * file's JSX factories where no compiler option names them — `React`, and
+ * the leading identifier of each factory a `@jsx` or `@jsxFrag` pragma in
+ * one of its comments names; in any other file, none.
+ */
+function jsxFactoryNames(path: string, text: string): readonly string[] {
+  if (!path.endsWith(".tsx")) {
+    return [];
+  }
+  return ["React", ...jsxFactoryPragmaNames(text)];
+}
+
+/**
  * The deterministic identifier base derived from a module path's file stem
  * (SPEC 6.5: identifier choice is deterministic): identifier-friendly
  * characters kept, every other character replaced by `_`, a leading digit
- * (or empty stem) prefixed with `_`.
+ * (or empty stem) prefixed with `_`, and a leading run of `_` kept to one:
+ * SPEC 6.5 bars every name beginning with `__`, which no suffix the chooser
+ * appends would leave.
  */
 function stemIdentifierBase(modulePath: string): string {
   const fileName = modulePath.slice(modulePath.lastIndexOf("/") + 1);
@@ -691,7 +831,7 @@ function stemIdentifierBase(modulePath: string): string {
   if (base.length === 0 || /^[0-9]/.test(base)) {
     base = `_${base}`;
   }
-  return base;
+  return base.replace(/^_+/, "_");
 }
 
 /**
@@ -702,21 +842,21 @@ function stemIdentifierBase(modulePath: string): string {
 const TEXT_BINDING_SUFFIX = "Text";
 
 /**
- * A fresh import binding name for `modulePath` colliding with no name in
- * `taken` (SPEC 6.5, 2.1: fresh, non-colliding, deterministic): the stem
- * base followed by `suffix`, then that with 2, 3, … appended — skipping
- * reserved words and the compiler-provided names.
+ * A fresh import binding name for `modulePath` (SPEC 6.5 "Added imports",
+ * 2.1: fresh, non-colliding, deterministic): the stem base followed by
+ * `suffix`, then that with 2, 3, … appended — the first that is no name in
+ * `avoided` (the receiving file's own: the names it binds or references,
+ * those already added there, and a TSX source's JSX factory names) and no
+ * name barred in every file (`barredInEveryFile`).
  */
 function freshBindingName(
   modulePath: string,
-  taken: ReadonlySet<string>,
+  avoided: ReadonlySet<string>,
   suffix = "",
 ): string {
   const base = `${stemIdentifierBase(modulePath)}${suffix}`;
   const usable = (name: string): boolean =>
-    !taken.has(name) &&
-    !RESERVED_BINDING_NAMES.has(name) &&
-    !COMPILER_PROVIDED_NAMES.has(name);
+    !avoided.has(name) && !barredInEveryFile(name);
   if (usable(base)) {
     return base;
   }
@@ -2248,16 +2388,22 @@ function composeMoveSection(
       imported: CodeImport,
     ): readonly CodeImportBinding[] => imported.textBindings;
     // The declaration the rewrite adds, and the names its fresh identifiers
-    // avoid (SPEC 6.5 "Import edits": colliding with no binding already in
-    // the file, 2.1, 4): every identifier the file spells — each binding of
-    // every scope, value- or type-level, imports included, and each name
-    // the file reads — so an added binding collides with no module-scope
-    // declaration, no inner declaration shadows it at an occurrence it
-    // roots (4.5), and it captures no use of an outer name.
+    // avoid (SPEC 6.5 "Added imports": bound by no declaration already in
+    // the file and equal to no name it references, 2.1, 4): every
+    // identifier the file spells — each binding of every scope, value- or
+    // type-level, imports included, and each name the file reads — so an
+    // added binding collides with no module-scope declaration, no inner
+    // declaration shadows it at an occurrence it roots (4.5), and it
+    // captures no use of an outer name; and in a TSX source the names
+    // through which the classic JSX transform reaches its factories. The
+    // names barred in every file are `freshBindingName`'s own.
     let added: AddedBindings | null = null;
     let taken: Set<string> | null = null;
     const addition = (): { added: AddedBindings; taken: Set<string> } => {
-      taken ??= new Set(analysis.spelledNames);
+      taken ??= new Set([
+        ...analysis.spelledNames,
+        ...jsxFactoryNames(analysis.path, analysis.text),
+      ]);
       if (added === null) {
         added = { defaultName: null, textName: null };
         let additions = codeAdditions.get(analysis.path);
