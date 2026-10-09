@@ -46,7 +46,7 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T6.5-22 | section-6.5-iv | 15 | arm (b): 26 of 38 lures bound a barred name |
 | T6.5-23 | section-6.5-v | 16, 17 | 13 of 33 stagings place or root the added declaration wrongly |
 | T6.6-3 | section-6.6 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 twins, reached only past that arm, hand-checked at Task 8: each refused `--preview` reports the real move's findings, `mapping`, `files`, and `delta` `null`; passes since Task 10 landed |
-| T7-2 | section-7-basics | 11 | the `import defer { defineConfig }` arm builds with exit 0, expected 2 |
+| T7-2 | section-7-basics | 11 (landed) | the `import defer { defineConfig }` arm builds with exit 0, expected 2; passes since Task 11 landed |
 | T7-6 | section-7-discovery | 5 (landed) | invalid-source arm: `check` reports 14.10 six times, expected 14.19 once |
 | T7.1-1 | section-7.1-7.3 | 5 (landed) | `specs/a"b.mdx` builds with exit 0, expected 1 |
 | T7.3-1 | section-7.1-7.3 | 12 | `outDir ".xspec"` builds with exit 0, expected 2 |
@@ -66,20 +66,6 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
 If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, and the tasks a later arm waited on beside Task 14 (Tasks 1, 2, 3, 4, and 5) have landed.
-
-## Task 11 — A `defer` configuration import is a configuration error (SPEC 7, 14.14; B1, C14)
-
-**Requirement.** SPEC 7: the configuration file consists of exactly an import of `defineConfig` from `"xspec"` — "optionally aliased; no `type` or `defer` modifier and no import attributes" — and a default export of one call to that binding. `import defer { defineConfig } from "xspec"`, and its aliased form `import defer { defineConfig as dc } from "xspec"`, is therefore a configuration error, exit 2 (14.14), though TypeScript 5.9.3 parses it without diagnostics.
-
-**Observed.** Both forms, each followed by a valid `export default …(…)`, load, and `build` exits 0 with `{"findings": []}`. The `type` clause, the `type` specifier, `with {…}`, `with {}`, and `assert {…}` are already refused.
-
-**Location.** The import-clause checks in `src/core/config.ts` (~318–345), which test `clause.isTypeOnly` alone.
-
-**Change.** Refuse an import clause whose phase modifier is `defer` (TypeScript 5.9's `ImportClause.phaseModifier === ts.SyntaxKind.DeferKeyword`, `ts` reached through `src/core/ts-module.ts`), in the existing message style, at the clause's line, citing SPEC 7.
-
-**Verification.**
-- Should turn green: `section-7-basics.test.ts` T7-2, whose `defer` arm is its only failing arm.
-- Neighbours: the rest of `section-7-basics.test.ts`, `section-14.test.ts` (T14-4's 14.14 rows).
 
 ## Task 12 — A `markdown.outDir` naming the graph-data area is a configuration error (SPEC 7.3, 14.14, 13.3, 11.6; B3, C2)
 

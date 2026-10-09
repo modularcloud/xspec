@@ -2,7 +2,8 @@
 //
 // SPEC 7: `xspec.config.ts` is declarative — data, not executed code. The
 // file MUST consist of exactly an import of `defineConfig` from the module
-// specifier "xspec" (optionally aliased) and a default export of one call
+// specifier "xspec" (optionally aliased; no `type` or `defer` modifier and
+// no import attributes) and a default export of one call
 // to that binding, whose sole argument is statically literal: object
 // literals with non-computed identifier or string-literal keys, array
 // literals, static string literals (2.4), and the boolean literals `true`
@@ -331,6 +332,19 @@ function checkImport(
       `the defineConfig import must not be type-only — the default export ` +
         `calls the binding (SPEC 7)`,
       lineOf(decl, sourceFile),
+    );
+    ok = false;
+  }
+  // SPEC 7: "no `type` or `defer` modifier". TypeScript 5.9 parses
+  // `import defer { defineConfig } from "xspec"` with no syntax diagnostic
+  // (a deferred import's namespace-only rule is a checker rule, which
+  // configuration loading never runs), so the clause's phase modifier is
+  // read here; the clause starts at the `defer` keyword.
+  if (clause.phaseModifier === ts.SyntaxKind.DeferKeyword) {
+    findings.add(
+      `the defineConfig import must not carry the \`defer\` modifier — the ` +
+        `configuration is declarative data (SPEC 7)`,
+      lineOf(clause, sourceFile),
     );
     ok = false;
   }
