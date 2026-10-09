@@ -44,7 +44,7 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T6.5-20 | section-6.5-iv | 7 (landed), 10 (landed; and 9 (landed) for (d)'s import-type and `declare module` stagings) | arm (a): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70 after modifying the workspace; since Task 7 landed, first fails at arm (d)'s first staging (Task 10): `move specs/Z.mdx specs/B.mdx` beside `src/c.ts` holding `import "../specs/B.md"` reports 14.15 once, expected `refused-invalid-destination` alone; passes since Task 10 landed |
 | T6.5-21 | section-6.5-iv | 8 (landed), 6 (landed; its two-reason arm) | arm (a): `move specs/A.mdx specs/sub/A.mdx` exits 0; passes since Task 8 landed |
 | T6.5-22 | section-6.5-iv | 15 (landed) | arm (b): 26 of 38 lures bound a barred name; passes since Task 15 landed |
-| T6.5-23 | section-6.5-v | 16, 17 | 13 of 33 stagings place or root the added declaration wrongly |
+| T6.5-23 | section-6.5-v | 16 (landed), 17 | 13 of 33 stagings place or root the added declaration wrongly; since Task 16 landed (its placement filter judging timeliness as well), 5 of 33 fail: (f)'s example and both boundary stagings, (k), and (m), each re-rooting a spelling at an untimely held binding (Task 17) |
 | T6.6-3 | section-6.6 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | T6.4-3's U+2028 twin; past it, T6.5-20(a)'s twin; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 twins, reached only past that arm, hand-checked at Task 8: each refused `--preview` reports the real move's findings, `mapping`, `files`, and `delta` `null`; passes since Task 10 landed |
 | T7-2 | section-7-basics | 11 (landed) | the `import defer { defineConfig }` arm builds with exit 0, expected 2; passes since Task 11 landed |
 | T7-6 | section-7-discovery | 5 (landed) | invalid-source arm: `check` reports 14.10 six times, expected 14.19 once |
@@ -65,30 +65,9 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-11 | section-14 | 9 (landed) | arm (x): 14.15 reported once, expected five times; passes since Task 9 landed |
 | T14-12 | section-14-iii | 14 (landed) | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16; passes since Task 14 landed |
 
-## Task 16 — Added-import placement in a TypeScript source: after the directive prologue, directly after a top-level statement's end with only 1.4 whitespace between (SPEC 6.5 "Added imports", 1.4; A9)
-
-**Requirement.** SPEC 6.5's TypeScript bullet of an admissible offset: "the offset lies at or after the end of the file's directive prologue (ECMAScript's: its leading statements each a string literal alone, such as `"use client"`) and follows the end of a top-level statement with nothing but whitespace (1.4) between, so that the added line parts no comment from the statement it precedes (a `// @ts-expect-error` from the line it governs) — the prologue's end and the statement's each judged, like timeliness, over the file before the edit, a statement the rewrite removes included, so the added line can take a removed declaration's place". In detail:
-- the whitespace is 1.4's six characters (U+0009, U+000A, U+000B, U+000C, U+000D, U+0020), not ECMAScript's — U+00A0 and U+2028 are no whitespace here, and U+2028 is no line terminator (3);
-- offset 0 follows no statement's end, so it is never admissible in a TypeScript source;
-- these conditions join the existing ones (inside no pre-edit statement; the composed file well-formed with the added line a top-level import declaration), under the existing line-start preference.
-
-**Observed (T6.5-23).** The product takes a line start that follows a trailing comment, and judges whitespace as ECMAScript does:
-- (a), the start of a line lying between two directives: inserts at 73, expected 26, 27, 64, or 65;
-- (d): inserts at 46, expected 37 or 38; (d) with U+00A0: inserts at 40, expected 37;
-- (e), 6.5's own shape: inserts at 130, expected one of 51, 52, 79, 80, 123, 124;
-- (n), and (n) with `namespace N {`: inserts at 46, expected 37 or 38.
-
-**Location.** In `src/core/move.ts`: `placeCodeImportAdditions` (~1531), `additionCandidates` (~1355), `admitsAddedCodeDeclarations` (~1510), and their caller in the code-file rewrite (~2790–2830).
-
-**Change.** Filter a TypeScript source's candidates by both conditions, judged over the pre-edit file's top-level statements — TypeScript's parse of the original bytes, statements the rewrite removes included. The offset must lie at or after the prologue's end, and every byte between some top-level statement's end (its `;` included) and the offset must be 1.4 whitespace. Keep the line-start preference and determinism. Spec sources are unaffected.
-
-**Verification.**
-- Partially: `section-6.5-v.test.ts` T6.5-23 — arms (a), (d), (e), and (n) here; (f), (k), (l), (m), and (d)'s U+2028 staging wait on Task 17.
-- Neighbours: `section-6.5-ii.test.ts` (T6.5-8 through T6.5-11), `section-6.5-iii.test.ts`, `section-6.5.test.ts`, `section-6.6.test.ts` (T6.6-4's addition offsets).
-
 ## Task 17 — Timeliness in a TypeScript source: re-root only at timely bindings, and add declarations where their bindings are timely (SPEC 6.5 "Reference spellings" and "Added imports"; A10)
 
-After Task 16 (same placement code).
+Task 16 has landed, and with it this task's placement half: an added declaration's offset is already admitted only where it is timely for every spelling rooted at the added bindings (`timelyAt` and `admitsCodeAdditionOffset` in `src/core/move.ts`, each former binding's declaration recorded per file in `codeAddedFormerDeclarations` as the re-rooting loop roots a chain or a callee at an added binding, the file's statements read by `topLevelStatementLayout` in `src/core/code-analysis.ts`) — which turned T6.5-23's (l) and (d)-with-U+2028 stagings green. What remains is the re-rooting half: reusing a held binding only where it is timely.
 
 **Requirement.** SPEC 6.5: in a TypeScript source, a binding a rewritten spelling — a chain, or a call's callee — is rooted at must be timely for it: "a binding is timely for a spelling the operation roots — a chain, or a call's callee — when its declaration is or precedes that of the binding the spelling was rooted at before the operation, or follows it with no top-level statement between them but import declarations (positions in pre-operation coordinates, an added declaration's at its offset)". Consequences:
 - an existing binding is reused only when timely, as well as unshadowed at the occurrence (as today). Where the file holds no timely binding, an added declaration's binding roots the spelling — "an import is added exactly where a file lacks a binding a spelling is rooted at" — so a file may gain a second declaration of a module it already imports;
@@ -101,15 +80,14 @@ After Task 16 (same placement code).
 - (f), 6.5's own example: the product writes `B.m` and adds nothing, where a fresh declaration of B's module at the start of line 2 and `<X>.m` are expected; the same with `type T = number` or `import Z = require("./z")` between the two declarations.
 - (m): it roots `A1.m` at the untimely `B`.
 - (k) and T6.5-11(f): it roots the callee at the untimely `tb` and `tt`.
-- (l): it adds the declaration after `A2`'s, past the statement `A1.m`.
-- (d) with U+2028: it appends at the file's end, after `f`; expected 37.
+- ((l) and (d) with U+2028 pass since Task 16 landed.)
 
-**Location.** In `src/core/move.ts`: `existingBinding` (~2227; used ~2291 for default bindings and ~2312 for `text` bindings), the addition bookkeeping (`fresh.added`, ~2297–2320), and the placement filter Task 16 adds to `placeCodeImportAdditions`.
+**Location.** In `src/core/move.ts`: `existingBinding` (inside the code-reference loop of the section-move plan, its callers for default and `text` bindings beside it), the addition bookkeeping (`fresh.added`, `addFormerDeclaration`), and `timelyAt`, which judges a declaration position against a former binding's declaration over a `StatementLayout`.
 
-**Change.** Give each rooted spelling its pre-operation binding's declaration position. In TypeScript sources, make `existingBinding` skip untimely bindings; where no timely binding exists, root the spelling at the added declaration, which binds exactly the lacked default and/or `text` binding, one declaration per module. Filter placement candidates to offsets timely for every spelling rooted at the added bindings.
+**Change.** In a TypeScript source, make `existingBinding` skip a held binding untimely for the spelling: the held import declaration's range against the declaration the spelling was rooted at before — `analysis.imports[reference.rootImport]` for a chain, `analysis.imports[reference.calleeImport]` for a callee — judged with `timelyAt` over the file's `topLevelStatementLayout` (computed once per file that needs it). Where no timely binding exists, root the spelling at the added declaration (recording its former declaration, as the default and `text` branches already do), which binds exactly the lacked default and/or `text` binding, one declaration per module — so a file may gain a second declaration of a module it already imports, and the placement filter then places it where it is timely. Keep the import-use counts (`usesBefore`/`usesAfter`) consistent with the chosen bindings.
 
 **Verification.**
-- Should turn green, with Task 16: `section-6.5-v.test.ts` T6.5-23; `section-6.5-ii.test.ts` T6.5-11 (arm (f)).
+- Should turn green: `section-6.5-v.test.ts` T6.5-23 ((f)'s example and both boundary stagings, (k), (m)); `section-6.5-ii.test.ts` T6.5-11 (arm (f)).
 - Neighbours: `section-6.5-iii.test.ts` (T6.5-18's shadowing), `section-6.5.test.ts`, `section-6.6.test.ts`, `section-16-p5-p6.test.ts` (P-5).
 
 ## Task 18 — `review create` with a case variant of a corrupt session's name reports the corruption (SPEC 10.1, 10.7, 14.21, 13.5; B5, C13)

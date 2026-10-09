@@ -61,10 +61,12 @@ import type {
   CodeImport,
   CodeImportBinding,
   CodeReference,
+  StatementLayout,
 } from "./code-analysis.js";
 import {
   jsxFactoryPragmaNames,
   topLevelImportRanges,
+  topLevelStatementLayout,
 } from "./code-analysis.js";
 import type { SourceEdit, SourceRewrite } from "./edits.js";
 import {
@@ -1486,23 +1488,26 @@ interface AdditionCandidate {
  * The candidate offsets for a file's added import declarations, in the
  * fixed order they are tried (SPEC 6.5: the choice among admissible
  * offsets is implementation latitude, exercised deterministically):
- * `preferred`, then every line start of the pre-operation file, then every
- * line's end, each once — those at the start of a line before every
- * other, an admissible offset at a line start being taken over any other.
- * An offset strictly inside another edit's range, where no addition may
- * stand, or one `excluded` names, is no candidate.
+ * `preferred`, then every line start of the pre-operation file, then
+ * `further` (a code source's top-level statement ends), then every line's
+ * end, each once — those at the start of a line before every other, an
+ * admissible offset at a line start being taken over any other. An offset
+ * strictly inside another edit's range, where no addition may stand, or
+ * one `excluded` names, is no candidate.
  */
 function additionCandidates(
   bytes: Uint8Array,
   composition: FileComposition,
   preferred: readonly number[],
   excluded: (offset: number) => boolean,
+  further: readonly number[] = [],
 ): AdditionCandidate[] {
   const candidates: AdditionCandidate[] = [];
   const seen = new Set<number>();
   for (const offset of [
     ...preferred,
     ...lineStartsOf(bytes),
+    ...further,
     ...lineEndsOf(bytes),
   ]) {
     if (seen.has(offset)) {
@@ -1664,8 +1669,76 @@ function admitsAddedCodeDeclarations(
 }
 
 /**
+ * SPEC 6.5 "Reference spellings": whether a binding declared at `offset` —
+ * an added declaration's position, in pre-operation coordinates — is
+ * timely for a spelling rooted, before the operation, at a binding
+ * `declaration` declares: the offset is or precedes that declaration, or
+ * follows it with no top-level statement between them but import
+ * declarations (`layout`, the file before the edit). The offset lies
+ * inside no statement (`admitsCodeAdditionOffset` checks that first).
+ */
+function timelyAt(
+  layout: StatementLayout,
+  declaration: ByteRange,
+  offset: number,
+): boolean {
+  if (offset <= declaration.start) {
+    return true;
+  }
+  return layout.statements.every(
+    (statement) =>
+      statement.importDeclaration ||
+      statement.range.start < declaration.end ||
+      statement.range.end > offset,
+  );
+}
+
+/**
+ * SPEC 6.5 "Added imports", a TypeScript source's own conditions on an
+ * added declaration's offset, each judged over the file before the edit,
+ * a statement the rewrite removes included (`layout`, its pre-operation
+ * `bytes`): the offset lies at or after the end of the directive
+ * prologue; it follows the end of a top-level statement with nothing but
+ * whitespace (1.4 — never U+00A0 or U+2028) between, so that it lies
+ * inside no statement and the added line parts no comment from the
+ * statement it precedes (offset 0 follows none); and the declaration
+ * added there is timely for every spelling rooted at its bindings — each
+ * former binding's declaration in `formerDeclarations`.
+ */
+function admitsCodeAdditionOffset(
+  bytes: Uint8Array,
+  layout: StatementLayout,
+  formerDeclarations: readonly ByteRange[],
+  offset: number,
+): boolean {
+  if (offset < layout.prologueEnd) {
+    return false;
+  }
+  let precedingEnd: number | null = null;
+  for (const statement of layout.statements) {
+    if (statement.range.end > offset) break;
+    precedingEnd = statement.range.end;
+  }
+  if (precedingEnd === null) {
+    return false;
+  }
+  for (let cursor = precedingEnd; cursor < offset; cursor += 1) {
+    if (!isWhitespaceByte(bytes[cursor]!)) {
+      return false;
+    }
+  }
+  return formerDeclarations.every((declaration) =>
+    timelyAt(layout, declaration, offset),
+  );
+}
+
+/**
  * Place a code source's added import declarations (SPEC 6.5 "Import
- * edits"): at the first candidate (`additionCandidates`) that admits them
+ * edits" and "Added imports"): at the first candidate
+ * (`additionCandidates`, every top-level statement's end among them, a
+ * mid-line offset that may be the file's only admissible one) whose
+ * offset meets a TypeScript source's conditions
+ * (`admitsCodeAdditionOffset`) and whose composition admits them
  * (`admitsAddedCodeDeclarations`).
  */
 function placeCodeImportAdditions(
@@ -1674,12 +1747,33 @@ function placeCodeImportAdditions(
   composition: FileComposition,
   lines: readonly string[],
   preferred: readonly number[],
+  formerDeclarations: readonly ByteRange[],
 ): PlacedAdditions {
+  // The file before the edit is a discovered code source the workspace's
+  // validations parsed (SPEC 6.5 judges only a valid workspace).
+  const layout = topLevelStatementLayout(path, bytes);
+  if (layout === null) {
+    throw new Error(
+      `xspec internal error: ${path} is not well-formed before the move`,
+    );
+  }
   return placeImportAdditions(
     composition,
     lines,
-    additionCandidates(bytes, composition, preferred, () => false),
-    (_, composed) => admitsAddedCodeDeclarations(path, composed),
+    additionCandidates(
+      bytes,
+      composition,
+      preferred,
+      () => false,
+      layout.statements.map((statement) => statement.range.end),
+    ),
+    (candidate, composed) =>
+      admitsCodeAdditionOffset(
+        bytes,
+        layout,
+        formerDeclarations,
+        candidate.offset,
+      ) && admitsAddedCodeDeclarations(path, composed),
   );
 }
 
@@ -2347,6 +2441,20 @@ function composeMoveSection(
   // the addition (SPEC 14), a `text(...)` call's by the whole call, whether
   // its argument's root, its callee, or both take an added binding.
   const codeAddedSpellings = new Map<string, FindingLocation[]>();
+  // Per code file: the pre-operation declaration of the binding each
+  // spelling the operation roots at an added binding was rooted at before
+  // — a chain's root import, a callee's `text` import — for each of which
+  // the added declaration's offset must be timely (SPEC 6.5 "Added
+  // imports": its bindings timely for every spelling rooted at them).
+  const codeAddedFormerDeclarations = new Map<string, ByteRange[]>();
+  const addFormerDeclaration = (path: string, range: ByteRange): void => {
+    let ranges = codeAddedFormerDeclarations.get(path);
+    if (ranges === undefined) {
+      ranges = [];
+      codeAddedFormerDeclarations.set(path, ranges);
+    }
+    ranges.push(range);
+  };
   for (const analysis of code) {
     const usesBefore = analysis.imports.map(() => 0);
     for (const reference of analysis.references) {
@@ -2444,6 +2552,10 @@ function composeMoveSection(
           fresh.taken.add(fresh.added.defaultName);
           rootName = fresh.added.defaultName;
           rootedAtAddition = true;
+          addFormerDeclaration(
+            analysis.path,
+            analysis.imports[reference.rootImport]!.range,
+          );
         }
         if (reference.callee !== null) {
           // SPEC 6.5, 4.4: the callee leaves the origin module's `text`
@@ -2469,6 +2581,10 @@ function composeMoveSection(
             fresh.taken.add(fresh.added.textName);
             calleeName = fresh.added.textName;
             rootedAtAddition = true;
+            addFormerDeclaration(
+              analysis.path,
+              analysis.imports[reference.calleeImport]!.range,
+            );
           }
         }
       }
@@ -2899,18 +3015,23 @@ function composeMoveSection(
   // Code files: chain and callee retargets, import removals, and added
   // imports (SPEC 6.5, 4). A removal is line-dropped like every 6.5 deletion and
   // reported with every byte it removes (SPEC 6.6, judged per
-  // declaration). An addition stands at an admissible offset: one at which
+  // declaration). An addition stands at an admissible offset: one at or
+  // after the end of the file's directive prologue, following the end of
+  // a top-level statement with nothing but 1.4 whitespace between, and
+  // timely for every spelling rooted at the added bindings, each judged
+  // over the file before the edit (`admitsCodeAdditionOffset`), at which
   // the file, as every edit of the rewrite leaves it, is well-formed under
   // the grammar its name selects (14.20) with each added line a top-level
   // import declaration (`admitsAddedCodeDeclarations`). Candidates are
   // tried in a fixed order — after the line of the file's last spec-module
   // import (a code file referencing the moved subtree always has one: its
   // chains root at import bindings), the first removed import's line
-  // start, the file's start, then every other line start and every line's
-  // end — an offset at the start of a line, judged over the composed text,
-  // taken over any other: the one deterministic offset the preview reports
-  // (SPEC 6.5, 6.6), an addition at the end of a removal's range reading
-  // what that removal leaves (SPEC 6.5 "Composition and admissibility").
+  // start, the file's start, then every other line start, every top-level
+  // statement's end, and every line's end — an offset at the start of a
+  // line, judged over the composed text, taken over any other: the one
+  // deterministic offset the preview reports (SPEC 6.5, 6.6), an addition
+  // at the end of a removal's range reading what that removal leaves
+  // (SPEC 6.5 "Composition and admissibility").
   for (const analysis of code) {
     const bytes = encoder.encode(analysis.text);
     const removed = codeRemovals.get(analysis.path) ?? [];
@@ -2969,6 +3090,7 @@ function composeMoveSection(
             : [lineStartBefore(bytes, firstRemoved.range.start)]),
           0,
         ],
+        codeAddedFormerDeclarations.get(analysis.path) ?? [],
       );
       if (!placed.admissible) {
         // SPEC 6.5/14 `refused-invalid-rewrite`: the file holds no

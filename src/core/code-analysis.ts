@@ -417,6 +417,72 @@ export function topLevelImportRanges(
   path: string,
   bytes: Uint8Array,
 ): ByteRange[] | null {
+  const statements = topLevelStatementsOf(path, bytes);
+  return statements === null
+    ? null
+    : statements
+        .filter((statement) => statement.importDeclaration)
+        .map((statement) => statement.range);
+}
+
+/**
+ * A top-level statement of a code source (SPEC 6.5 "Added imports"): its
+ * own characters — first token through last, a statement terminator the
+ * grammar reads into it included, no comment or whitespace around it —
+ * whether it is an import declaration (6.5's timeliness lets only import
+ * declarations stand between a replaced binding's declaration and a later
+ * timely one: `import Z = require(…)` is none), and whether it is a
+ * directive candidate, a string literal alone (ECMAScript's directive
+ * prologue is the file's leading run of such statements).
+ */
+export interface TopLevelStatement {
+  readonly range: ByteRange;
+  readonly importDeclaration: boolean;
+  readonly stringLiteralAlone: boolean;
+}
+
+/**
+ * SPEC 6.5 "Added imports": the layout of a code source a move adds an
+ * import to, judged over the file before the edit — its top-level
+ * statements in document order, each by its own characters (a statement
+ * the rewrite removes included), and the end of its directive prologue
+ * (ECMAScript's: its leading statements each a string literal alone, such
+ * as `"use client"`), 0 where the prologue is empty. Null for a text that
+ * is not well-formed (14.20) or that the parser cannot process.
+ */
+export interface StatementLayout {
+  readonly statements: readonly TopLevelStatement[];
+  readonly prologueEnd: number;
+}
+
+/** SPEC 6.5 "Added imports": a code source's `StatementLayout`. */
+export function topLevelStatementLayout(
+  path: string,
+  bytes: Uint8Array,
+): StatementLayout | null {
+  const statements = topLevelStatementsOf(path, bytes);
+  if (statements === null) {
+    return null;
+  }
+  let prologueEnd = 0;
+  for (const statement of statements) {
+    if (!statement.stringLiteralAlone) break;
+    prologueEnd = statement.range.end;
+  }
+  return { statements, prologueEnd };
+}
+
+/**
+ * Decode and parse `bytes` exactly as `analyzeCodeSource` judges a
+ * discovered code source (SPEC 1.6, 14.20: `.tsx` as TSX, any other name
+ * as plain TypeScript, well-formed exactly when scanning and parsing
+ * report no syntax error) and read its top-level statements; null for a
+ * text that is not well-formed or that the parser cannot process.
+ */
+function topLevelStatementsOf(
+  path: string,
+  bytes: Uint8Array,
+): TopLevelStatement[] | null {
   const decoded = decodeSourceBytes(path, bytes);
   if (!decoded.ok) {
     return null;
@@ -436,12 +502,16 @@ export function topLevelImportRanges(
       return null;
     }
     const offsets = new Utf8Offsets(decoded.text);
-    return sourceFile.statements
-      .filter((statement) => ts.isImportDeclaration(statement))
-      .map((statement) => ({
+    return sourceFile.statements.map((statement) => ({
+      range: {
         start: offsets.byteOffset(statement.getStart(sourceFile)),
         end: offsets.byteOffset(statement.end),
-      }));
+      },
+      importDeclaration: ts.isImportDeclaration(statement),
+      stringLiteralAlone:
+        ts.isExpressionStatement(statement) &&
+        ts.isStringLiteral(statement.expression),
+    }));
   } catch (error) {
     // As in `analyzeCodeSource`: a call-stack overflow is a text the
     // parser cannot process, never a crash.
