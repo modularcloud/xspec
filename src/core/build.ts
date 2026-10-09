@@ -36,6 +36,7 @@ import { buildGraphSnapshot, GRAPH_DATA_OWN_PATHS } from "./graph-data.js";
 import type { SpecFileAnalysis, WorkspaceGraph } from "./graph.js";
 import type { NodeHashes } from "./hashes.js";
 import type { PathText } from "./path-text.js";
+import { pathTextKey } from "./path-text.js";
 import type { WorkspaceTextModel } from "./text-model.js";
 
 /** Everything one `xspec build` writes and removes (SPEC 12.1). */
@@ -312,4 +313,43 @@ export function orphanedRecordedPaths(
         !GRAPH_DATA_OWN_PATHS.includes(path),
     )
     .sort(compareBytes);
+}
+
+/**
+ * SPEC 13.4, 14.22, 14.10: the orphans (`orphanedRecordedPaths`) whose path
+ * is a workspace-relative directory component of a path the rebuild writes
+ * (`discoveredWritePaths`) — a byte prefix of that path ending before one
+ * of its `/` bytes, so a write path with no plain string form (14.19) takes
+ * part like any other (SPEC 12.0: paths compare byte-wise). An orphan
+ * there whose occupant the removal of 13.4 would remove — anything but a
+ * directory — "obstructs that write like any other non-directory occupant
+ * (14.22): the rebuild is refused before any write or removal (12.1), so
+ * the orphan stays until it is deleted manually" (13.4), and 14.10's
+ * recorded-file form instructs "for a recorded file obstructing a path the
+ * rebuild writes, which refuses the rebuild (13.4, 14.22), its manual
+ * deletion", never a rebuild. Pure: paths alone are compared — the
+ * occupant is judged where the recorded-file form reads it
+ * (workspace/check.ts `recordStalenessFindings`), the components above it
+ * all directories there, so the orphan is the first non-directory
+ * component 14.22's examination meets on that write path.
+ */
+export function rebuildObstructingOrphans(
+  orphans: readonly string[],
+  writePaths: Iterable<PathText>,
+): ReadonlySet<string> {
+  const components = new Set<string>();
+  for (const path of writePaths) {
+    // A key spells each byte as one code unit, so the byte 0x2f is "/".
+    const key = pathTextKey(path);
+    for (
+      let end = key.indexOf("/");
+      end !== -1;
+      end = key.indexOf("/", end + 1)
+    ) {
+      components.add(key.slice(0, end));
+    }
+  }
+  return new Set(
+    orphans.filter((orphan) => components.has(pathTextKey(orphan))),
+  );
 }

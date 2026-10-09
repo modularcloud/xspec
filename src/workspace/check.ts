@@ -98,6 +98,28 @@ function orphanFinding(rel: string): Finding {
 }
 
 /**
+ * SPEC 14.10: a recorded derived file at a no-longer-generated path that
+ * occupies a workspace-relative directory component of a path the rebuild
+ * writes (core/build.ts `rebuildObstructingOrphans`) — names the file and
+ * instructs "for a recorded file obstructing a path the rebuild writes,
+ * which refuses the rebuild (13.4, 14.22), its manual deletion", never a
+ * rebuild: the rebuild is refused before any write or removal (12.1), so
+ * the orphan stays until it is deleted manually (13.4, 13.5).
+ */
+function obstructingOrphanFinding(rel: string): Finding {
+  return pathFinding(
+    10,
+    `stale generated output: the recorded derived file ${rel} remains at ` +
+      `a path the current sources and configuration no longer generate, ` +
+      `and it occupies a directory component of a path the rebuild ` +
+      `writes, so \`xspec build\` is refused while it stays (SPEC 13.4, ` +
+      `14.22); delete ${rel} by hand, then run \`xspec build\` to ` +
+      `regenerate every derived file (SPEC 14.10)`,
+    rel,
+  );
+}
+
+/**
  * SPEC 14.10's mismatch/missing unit form: graph data that is missing or
  * does not match the current sources and configuration (the comparison of
  * 13.3, the recorded derived-file paths excluded) — one condition-10
@@ -264,6 +286,12 @@ export async function mismatchStalenessFindings(
  *   construction, `recordedPathsOf`). A path reached whose own kind the
  *   environment refuses to read is stale all the same (SPEC 14.25 → 14.10:
  *   a derived file's kind that `check` compares, `comparedOccupant`).
+ *   Each finding instructs rebuilding — or, for an orphan in
+ *   `obstructing` (core/build.ts `rebuildObstructingOrphans`: a recorded
+ *   path at a workspace-relative directory component of a path the
+ *   rebuild writes), its manual deletion: reached, and occupied by
+ *   anything but a directory, it obstructs that write, which refuses the
+ *   rebuild (SPEC 14.10, 13.4, 14.22).
  *
  * Deterministic order: the graph data, then the orphans (SPEC 12.0).
  */
@@ -271,6 +299,7 @@ export async function recordStalenessFindings(
   root: string,
   record: DerivedFileRecord,
   orphans: readonly string[],
+  obstructing: ReadonlySet<string>,
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
   if (record.state === "unreadable") {
@@ -286,7 +315,14 @@ export async function recordStalenessFindings(
     // `orphans`). A refused kind read leaves the path stale (SPEC 14.25).
     const occupant = await comparedOccupant(absoluteOf(root, rel));
     if (occupant === "refused" || orphanRemovalRemoves(occupant)) {
-      findings.push(orphanFinding(rel));
+      // SPEC 14.10, 13.4: a recorded file obstructing a path the rebuild
+      // writes refuses the rebuild (14.22) — its correction is its manual
+      // deletion; any other orphan's is rebuilding.
+      findings.push(
+        obstructing.has(rel)
+          ? obstructingOrphanFinding(rel)
+          : orphanFinding(rel),
+      );
     }
   }
   return findings;

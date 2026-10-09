@@ -33,7 +33,9 @@ import {
   computeBuildOutputs,
   discoveredGeneratedPaths,
   discoveredSourcePaths,
+  discoveredWritePaths,
   orphanedRecordedPaths,
+  rebuildObstructingOrphans,
 } from "../../core/build.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import { evaluatePolicy } from "../../core/policy.js";
@@ -145,9 +147,21 @@ export async function checkCommand(
 
   // SPEC 14.10: the forms consulting no generated content — the
   // unreadable-record unit form and the recorded-file form — are reported
-  // whatever the sources' validity.
+  // whatever the sources' validity. A recorded file obstructing a path the
+  // rebuild writes — one at a workspace-relative directory component of
+  // `build`'s write paths, the set 14.22 judges (core/build.ts) — refuses
+  // the rebuild (13.4, 14.22), so its correction is its manual deletion.
+  const obstructing = rebuildObstructingOrphans(
+    orphans,
+    discoveredWritePaths(workspace.configuration, analysis.classification),
+  );
   findings.push(
-    ...(await recordStalenessFindings(workspace.root, record, orphans)),
+    ...(await recordStalenessFindings(
+      workspace.root,
+      record,
+      orphans,
+      obstructing,
+    )),
   );
 
   // SPEC 7.5 → 14.12 (`check`-only): the rules are evaluated only over a

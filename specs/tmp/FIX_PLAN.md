@@ -57,7 +57,7 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T12.0-10 | section-12.0-ii | 1 (landed) | `query nodes --tag a<U+2028>b` under an invalid configuration reports `configuration-error`, expected the plain usage error |
 | T12.7-2 | section-12.7 | 6, 8 | the two-reason `move specs/A.mdx "specs/a'b.mdx"` exits 0 |
 | T13.4-9 | section-13.4 | 2 (landed) | (a): a derived path above a source builds with exit 0, expected condition 22 |
-| T13.4-10 | section-13.4 | 4 | the recorded orphan's finding says "run `xspec build` to remove it" |
+| T13.4-10 | section-13.4 | 4 (landed) | the recorded orphan's finding says "run `xspec build` to remove it" |
 | T13.4-11 | section-13.4 | 3 (landed) | (a): a condition-10 finding for a recorded path holding a directory |
 | T14-4 | section-14 | 14 (it sweeps T14-12's stagings) | U+2EBF0 in a JSX name judged one UTF-16 unit at a time: 14.20, expected 14.16 |
 | T14-6 | section-14 | 14 (likewise) | likewise |
@@ -65,21 +65,7 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T14-11 | section-14 | 9 | arm (x): 14.15 reported once, expected five times |
 | T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
 
-If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, so a later arm may wait on Task 5 (Tasks 1, 2, and 3 have landed).
-
-## Task 4 — A recorded orphan obstructing a rebuild's write is reported for manual deletion (SPEC 14.10, 13.4, 13.5, 14.22; C6)
-
-**Requirement.** SPEC 14.10: the recorded-file form instructs rebuilding "— or, for a recorded file obstructing a path the rebuild writes, which refuses the rebuild (13.4, 14.22), its manual deletion". SPEC 13.4: such an orphan "obstructs that write like any other non-directory occupant (14.22): the rebuild is refused before any write or removal (12.1), so the orphan stays until it is deleted manually".
-
-**Observed.** T13.4-10's staging: `markdown: { emit: true, outDir: "out" }`, a build recording `out/specs/A.md`, then `outDir` reconfigured to `"out/specs/A.md"`. `build` correctly refuses with one 14.22 concerning `out/specs/A.md`. But `check`'s recorded-file finding for that path says "run `xspec build` to remove it".
-
-**Location.** `orphanFinding` in `src/workspace/check.ts` (~83) and its caller.
-
-**Change.** When a recorded orphan's path is a workspace-relative directory component of a path the rebuild writes (the occupied-component relation over `build`'s write set), its finding instructs deleting that file by hand, naming it — the rebuild being refused until then — instead of rebuilding. Other orphans keep the rebuild instruction. The harness matches the correction with H-3's robust matching: read TEST-SPEC H-3 and T13.4-10's registry entry for what it accepts.
-
-**Verification.**
-- Should turn green: `section-13.4.test.ts` T13.4-10, including its unrecorded twin, where `check` reports the 14.22 alone.
-- Neighbours: `section-13.3.test.ts` (T13.3-2's rebuild instructions), `section-10.1.test.ts`, `section-14.test.ts` (T14-4's 14.10 rows).
+If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, so a later arm may wait on Task 5 (Tasks 1, 2, 3, and 4 have landed).
 
 ## Task 5 — A spec-group path containing a character 7.1 bars is an invalid source path (SPEC 7.1, 14.19, 11.2, 11.4, 11.5, 12.0, 13.4; B2, C1)
 
