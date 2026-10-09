@@ -67,6 +67,8 @@ import {
   MDX_ACORN_OPTIONS,
   mdxAcorn,
 } from "./mdx-acorn.js";
+import { judgingNamesByCodePoint } from "./mdx-jsx-names.js";
+import type { NameStandIns } from "./mdx-jsx-names.js";
 import { closingTagDivergence } from "./viable-prefix.js";
 
 // ---------------------------------------------------------------------------
@@ -140,12 +142,23 @@ interface AnalysisParse extends RecordedParse {
 /** An unexpected throw (not the grammar's): the analysis gives up. */
 class AnalysisAbandoned extends Error {}
 
-/** One parse of `text` by the stock grammar, its acorn calls recorded. */
+/**
+ * One parse of `text` by the stock grammar, its acorn calls recorded — JSX
+ * names judged by code point (`judgingNamesByCodePoint`, ./mdx-jsx-names.ts:
+ * the calls are the last attempt's, and the failure is spelled as `text`).
+ */
 function recordedParse(text: string): RecordedParse {
-  const calls: AcornCall[] = [];
-  recording = calls;
+  let calls: AcornCall[] = [];
   try {
-    analysisParser.parse(text);
+    judgingNamesByCodePoint(text, (spelled) => {
+      calls = [];
+      recording = calls;
+      try {
+        return analysisParser.parse(spelled);
+      } finally {
+        recording = null;
+      }
+    });
     return { failure: null, calls };
   } catch (error) {
     const failure = error as MdxFailure;
@@ -154,8 +167,6 @@ function recordedParse(text: string): RecordedParse {
     }
     if (typeof failure.source !== "string") throw new AnalysisAbandoned();
     return { failure, calls };
-  } finally {
-    recording = null;
   }
 }
 
@@ -2075,19 +2086,28 @@ function respellRefusedContent(
  * `parse` — remark-mdx's stock grammar with `mdxAcorn`, as parsed here —
  * applied to `text` as SPEC 14.20 judges it: each refusal of an
  * attribute's content as empty that holds a token undone by respelling
- * (`respellRefusedContent`). The result comes with each respelled offset's
- * original character (none where the grammar refused no such content);
- * where the text is not well-formed, the last failure is thrown.
+ * (`respellRefusedContent`), and JSX names judged by code point
+ * (`judgingNamesByCodePoint`, ./mdx-jsx-names.ts). The result comes with
+ * each respelled offset's original character (none where the grammar
+ * refused no such content) and the stand-ins its JSX names were parsed with
+ * (`names`: a name read from the result is restored by
+ * `restoreNameSpelling`); where the text is not well-formed, the last
+ * failure is thrown, spelled as `text`.
  */
 export function parseAsJudged<T>(
   text: string,
   parse: (text: string) => T,
-): { readonly result: T; readonly originals: ReadonlyMap<number, string> } {
+): {
+  readonly result: T;
+  readonly originals: ReadonlyMap<number, string>;
+  readonly names: NameStandIns;
+} {
   let parsed = text;
   const originals = new Map<number, string>();
   for (let round = 0; ; round += 1) {
     try {
-      return { result: parse(parsed), originals };
+      const { result, standIns } = judgingNamesByCodePoint(parsed, parse);
+      return { result, originals, names: standIns };
     } catch (error) {
       const respelled =
         round < RESPELLINGS && typeof error === "object" && error !== null

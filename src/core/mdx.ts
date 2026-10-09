@@ -65,6 +65,8 @@ import type { ConditionNumber, Finding } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { PathText } from "./path-text.js";
 import { isEmptyExpression, MDX_ACORN_OPTIONS, mdxAcorn } from "./mdx-acorn.js";
+import { restoreNameSpelling } from "./mdx-jsx-names.js";
+import type { NameStandIns } from "./mdx-jsx-names.js";
 import { mdxSyntaxFailureOffset, parseAsJudged } from "./mdx-syntax-failure.js";
 import { decodeSourceBytes } from "./source-text.js";
 import {
@@ -561,11 +563,12 @@ function parseMdx(file: PathText, bytes: Uint8Array): MdxParse {
     // SPEC 14.20: remark-mdx's grammar defines well-formed MDX, its refusal
     // of an attribute's content as empty undone where that content holds
     // a token (`parseAsJudged`).
-    const { result, originals } = parseAsJudged(
+    const { result, originals, names } = parseAsJudged(
       text,
       (spelled) => mdxParser.parse(spelled) as unknown as MdxTreeNode,
     );
     if (originals.size > 0) restoreRespelledContent(result, text, originals);
+    if (names.units.size > 0) restoreJsxNames(result, names);
     return { kind: "tree", text, offsets, tree: result };
   } catch (error) {
     return {
@@ -770,6 +773,39 @@ function restoreRespelledContent(
   }
   for (const child of node.children ?? []) {
     restoreRespelledContent(child, text, originals);
+  }
+}
+
+/**
+ * SPEC 14.20: each JSX element's and attribute's name as spelled, where the
+ * text was parsed with its supplementary-plane name characters respelled
+ * (`judgingNamesByCodePoint`, ./mdx-jsx-names.ts) — names are read as
+ * spelled (SPEC 1.1, 2.7, 11.4). Only a name can hold a stand-in: the
+ * respelling touches characters the JSX tokenizer read as a name's.
+ */
+function restoreJsxNames(node: MdxTreeNode, names: NameStandIns): void {
+  if (
+    (node.type === "mdxJsxFlowElement" || node.type === "mdxJsxTextElement") &&
+    typeof node.name === "string"
+  ) {
+    (node as { name?: string | null }).name = restoreNameSpelling(
+      node.name,
+      names,
+    );
+  }
+  for (const attribute of node.attributes ?? []) {
+    if (
+      attribute.type === "mdxJsxAttribute" &&
+      typeof attribute.name === "string"
+    ) {
+      (attribute as { name?: string }).name = restoreNameSpelling(
+        attribute.name,
+        names,
+      );
+    }
+  }
+  for (const child of node.children ?? []) {
+    restoreJsxNames(child, names);
   }
 }
 
