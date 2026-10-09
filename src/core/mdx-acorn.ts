@@ -42,8 +42,17 @@
 // spelled, by lexing to no token (`judgeCommentsAsSpelled`, below).
 
 import type { Expression, Options, Program, TokenType } from "acorn";
-import { Parser, tokTypes } from "acorn";
+import { isIdentifierChar, Parser, tokTypes } from "acorn";
 import acornJsx from "acorn-jsx";
+
+declare module "acorn" {
+  /**
+   * Whether `code` continues an identifier, by acorn's own identifier
+   * tables — the function acorn's tokenizer reads identifiers with,
+   * exported by acorn 8 though its type declarations omit it.
+   */
+  export function isIdentifierChar(code: number, astral?: boolean): boolean;
+}
 
 /**
  * SPEC 14.20: the edition and goal MDX 3 parses with — ECMAScript 2024, a
@@ -942,14 +951,64 @@ function judgeCommentsAsSpelled(BaseParser: typeof Parser): typeof Parser {
   return Extended;
 }
 
+/** acorn-jsx's tokenizer state, as `judgeJsxNamesByCodePoint` uses it. */
+interface JsxNameReader {
+  readonly input: string;
+  pos: number;
+  readonly constructor: {
+    readonly acornJsx: { readonly tokTypes: { readonly jsxName: TokenType } };
+  };
+  finishToken(type: TokenType, value?: unknown): unknown;
+}
+
 /**
- * The parser remark-mdx is handed (SPEC 14.20): acorn with JSX, deriving the
- * ECMAScript 2024 grammar alone — early errors excluded — and judging
- * whitespace and comments alone by the comment deletions and, as spelled,
- * by lexing to no token.
+ * SPEC 14.20: "ECMAScript 2024 takes its identifier characters, JSX names'
+ * included, ... from the latest Unicode version" — a JSX name inside braces
+ * or an ESM block is an identifier start, then identifier parts and `-`,
+ * each one code point. acorn-jsx judges a name's first character as a code
+ * point (`readToken`) but reads the rest one UTF-16 code unit at a time
+ * (`jsx_readWord`), so a supplementary-plane character — two units, neither
+ * an identifier character alone — ends the name mid-character, and the text
+ * fails to lex (`{<a` U+2EBF0 ` />}`). The name is read here code point by
+ * code point, by acorn's own identifier tables (as acorn reads an
+ * identifier). The JSX tokenizer of the MDX text itself is
+ * ./mdx-jsx-names.ts's.
+ */
+function judgeJsxNamesByCodePoint(BaseParser: typeof Parser): typeof Parser {
+  // One more derivation level, so the class handed in stays untouched.
+  const Extended = class extends (BaseParser as unknown as new (
+    ...args: never[]
+  ) => object) {};
+  const prototype = Extended.prototype as unknown as {
+    jsx_readWord(this: JsxNameReader): unknown;
+  };
+  prototype.jsx_readWord = function () {
+    // `readToken` judged the first code point an identifier start.
+    const start = this.pos;
+    let at = start;
+    while (at < this.input.length) {
+      const code = this.input.codePointAt(at) as number;
+      if (at > start && code !== 0x2d && !isIdentifierChar(code, true)) break;
+      at += code > 0xffff ? 2 : 1;
+    }
+    this.pos = at;
+    return this.finishToken(
+      this.constructor.acornJsx.tokTypes.jsxName,
+      this.input.slice(start, at),
+    );
+  };
+  return Extended as unknown as typeof Parser;
+}
+
+/**
+ * The parser remark-mdx is handed (SPEC 14.20): acorn with JSX, its names
+ * read code point by code point, deriving the ECMAScript 2024 grammar alone
+ * — early errors excluded — and judging whitespace and comments alone by
+ * the comment deletions and, as spelled, by lexing to no token.
  */
 export const mdxAcorn: typeof Parser = Parser.extend(
   acornJsx(),
+  judgeJsxNamesByCodePoint,
   excludeEarlyErrors,
   judgeCommentsAsSpelled,
 );

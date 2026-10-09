@@ -59,30 +59,11 @@ These are VERIFY's 31 failures at `b3cc3e3`, each with where it first failed the
 | T13.4-9 | section-13.4 | 2 (landed) | (a): a derived path above a source builds with exit 0, expected condition 22 |
 | T13.4-10 | section-13.4 | 4 (landed) | the recorded orphan's finding says "run `xspec build` to remove it" |
 | T13.4-11 | section-13.4 | 3 (landed) | (a): a condition-10 finding for a recorded path holding a directory |
-| T14-4 | section-14 | 14 (it sweeps T14-12's stagings) | U+2EBF0 in a JSX name judged one UTF-16 unit at a time: 14.20, expected 14.16 |
-| T14-6 | section-14 | 14 (likewise) | likewise |
+| T14-4 | section-14 | 14 (landed; it sweeps T14-12's stagings) | U+2EBF0 in a JSX name judged one UTF-16 unit at a time: 14.20, expected 14.16; passes since Task 14 landed |
+| T14-6 | section-14 | 14 (landed; likewise) | likewise; passes since Task 14 landed |
 | T14-7 | section-14 | 1 (landed), 6 (landed), 7 (landed), 8 (landed), 10 (landed) | the U+2028 `rename` exits 0; since Task 1 landed, first fails at Task 6's arm: `move specs/A.mdx specs/a<U+0022>b.mdx` exits 0, expected 1; since Task 6 landed, first fails at T6.5-20(a)'s twin (Task 7): `move specs/Z.mdx specs/A.xspec.ts/B.mdx` exits 70, expected 1; since Task 7 landed, first fails at T6.5-20(d)'s twin (Task 10): `move specs/Z.mdx specs/B.mdx` reports 14.15 once, expected `refused-invalid-destination` alone; its T6.5-21 arms, reached only past that twin, hand-checked at Task 8 against T6.5-21's own expectations; passes since Task 10 landed |
 | T14-11 | section-14 | 9 (landed) | arm (x): 14.15 reported once, expected five times; passes since Task 9 landed |
-| T14-12 | section-14-iii | 14 | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16 |
-
-If T14-4 or T14-6 stays red after Task 14, read its first failing arm: they sweep every condition's home staging, and the tasks a later arm waited on beside Task 14 (Tasks 1, 2, 3, 4, and 5) have landed.
-
-## Task 14 — Supplementary-plane identifier characters are valid in MDX JSX names (SPEC 14.20, 2.7, 14.16, 14.17; C7)
-
-**Requirement.** SPEC 14.20: "ECMAScript 2024 takes its identifier characters, JSX names' included, and its space separators from the latest Unicode version: here Unicode 15.1's". A JSX element or attribute name whose characters ECMAScript admits — ID_Start, then ID_Continue (JSX names also admit `-`) — under Unicode 15.1 therefore derives, supplementary-plane characters included:
-- an element `<a`, U+2EBF0, ` />` alone on its line derives, and is 14.16 at the element, never 14.20;
-- `<S id="x" a`, U+2EBF0, `="v">…</S>` derives, and is 14.17 (an unknown prop) at the attribute.
-Expression containers and ESM blocks already accept such characters.
-
-**Observed.** Any supplementary-plane identifier character in a JSX element or attribute name — U+2EBF0, and older ones such as U+10400 and U+1D465 — gets 14.20 ("Unexpected character U+D87A … in name"). `micromark-extension-mdx-jsx` 3.0.2, beneath `remark-mdx`, tests identifier characters one UTF-16 code unit at a time (`estree-util-is-identifier-name`'s `start`/`cont` on each code), so a surrogate pair never passes.
-
-**Location.** The MDX parse in `src/core/mdx.ts` (`remark-mdx`, ~59) and the 14.20 locator in `src/core/mdx-syntax-failure.ts` (~60). The two must agree on what fails and where.
-
-**Change.** Make both judge JSX names by code point under the runtime's Unicode tables (Node 22's `\p{ID_Start}`/`\p{ID_Continue}` follow Unicode 15.1), keeping `remark-mdx` as the parser (IMPLEMENTATION) and every byte offset exact (1.7, 14). The approach is yours — for instance a same-length substitution of each supplementary-plane identifier character in JSX name positions before parsing, mapped back wherever names are read, or a wrapped name tokenizer. Names must still be read as spelled, so the element above stays an invalid construct and the attribute an unknown prop. A supplementary-plane character that is no identifier character stays 14.20 in a name. Note any dependency choice in your final report.
-
-**Verification.**
-- Should turn green: `section-14-iii.test.ts` T14-12 (arm (af)); `section-14.test.ts` T14-4 and T14-6, which sweep T14-12's stagings (see the note under the index if either stays red).
-- Neighbours: `section-2.7.test.ts`, `section-2.2-2.3.test.ts`, `section-1.6-1.7.test.ts`, `section-3.test.ts`, `section-16-p2-p3.test.ts`.
+| T14-12 | section-14-iii | 14 (landed) | arm (af): `<a` U+2EBF0 ` />` reported 14.20, expected 14.16; passes since Task 14 landed |
 
 ## Task 15 — An added import's identifiers avoid every name SPEC 6.5 bars (SPEC 6.5 "Added imports", 12.0; A8)
 
