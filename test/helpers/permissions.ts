@@ -64,10 +64,14 @@ import * as path from "node:path";
  * of a staged MDX source (`mdx-derivability`, helpers/workspace.ts), its
  * TypeScript check of a staged code source or configuration file
  * (`ts-derivability`, helpers/workspace.ts and helpers/ts-derivability.ts),
- * and the builder's undeclared-staging guard (`undeclared-staging`: a plain `.mdx`
+ * the builder's undeclared-staging guard (`undeclared-staging`: a plain `.mdx`
  * staging after a product invocation, which S-7's sweep never reaches and
  * so must be a staged-source record; helpers/workspace.ts,
- * helpers/product-invocations.ts).
+ * helpers/product-invocations.ts), and the lock-path leftover and
+ * obstruction stagings (`lock-path-leftover`, helpers/lock-staging.ts: a
+ * staged tree not reading back as declared, a permission removal on a
+ * leftover file the harness's own read reaches, `mkfifo` failing, a platform
+ * that is not the Linux leg's).
  */
 export type StagingMode =
   | "write-refusal"
@@ -76,7 +80,8 @@ export type StagingMode =
   | "read-refusal-of-directory"
   | "mdx-derivability"
   | "ts-derivability"
-  | "undeclared-staging";
+  | "undeclared-staging"
+  | "lock-path-leftover";
 
 /**
  * An ineffective or impossible staging: a permission staging (E-1, H-11)
@@ -90,7 +95,9 @@ export type StagingMode =
  * only (`ts-derivability`, helpers/workspace.ts), or an MDX source staged
  * with plain contents after a product invocation, outside the staged-source
  * ledger the S-9 self-test judges before any product exists
- * (`undeclared-staging`, helpers/workspace.ts). Never a
+ * (`undeclared-staging`, helpers/workspace.ts), or a lock-path leftover or
+ * obstruction staging that did not take effect as declared
+ * (`lock-path-leftover`, helpers/lock-staging.ts). Never a
  * `HarnessAssertionError`: nothing here is a product verdict — it is a
  * harness error, never a diagnosed product failure and never a skip.
  */
