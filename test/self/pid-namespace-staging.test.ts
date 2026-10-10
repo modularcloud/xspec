@@ -458,11 +458,15 @@ test("an ineffective namespace staging — a stand-in sudo granting access but s
   expect(probes).toHaveLength(2);
   await fsp.rm(record);
 
+  const began = Date.now();
   expectStagingError(
     await rejectionOf(openHarnessNamespace({ sudo })),
     "pid-namespace",
     /the first process of a fresh process-identifier namespace was not found as the one descendant of the started process \([0-9]+\) bearing identifier 1 in a namespace below the harness's: found none/,
   );
+  // Killed at once under T13.5-3's discipline, never left to the 30 s bound
+  // on its exit.
+  expect(Date.now() - began).toBeLessThan(15_000);
   const started = (await fsp.readFile(record, "utf8")).trim().split("\n");
   expect(started).toHaveLength(1);
   expect(await listedAmong(started.map(Number))).toEqual([]);

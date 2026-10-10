@@ -332,9 +332,14 @@ test("launcher B: a namespace whose first process is the harness's own opens fre
   expect(observation.listed).toEqual([1, ...identifiers]);
   expect(view.listed).toEqual(observation.listed);
   expect(view.cwd).toBe(scratch);
-  expect(observation.lastAllocated).toBe(Math.max(...identifiers));
+  // Threads draw from the same identifiers: the namespace has allocated at
+  // least as far as the run's processes bear, its threads' further on.
+  expect(observation.lastAllocated).toBeGreaterThanOrEqual(
+    Math.max(...identifiers),
+  );
   expect(hasAllocated(observation, Math.max(...identifiers))).toBe(true);
-  expect(hasAllocated(observation, Math.max(...identifiers) + 1)).toBe(false);
+  expect(hasAllocated(observation, observation.lastAllocated)).toBe(true);
+  expect(hasAllocated(observation, observation.lastAllocated + 1)).toBe(false);
 
   // T13.5-10(e)'s verification: the harness's own identifiers — this
   // process's and the entered run's sudo — are no identifiers there, unless

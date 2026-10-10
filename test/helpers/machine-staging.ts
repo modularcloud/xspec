@@ -1852,7 +1852,12 @@ export async function verifyListedByHarness(
 export interface NamespaceObservation {
   /** The namespace's process list, ascending: every identifier in it. */
   readonly listed: readonly number[];
-  /** The identifier the namespace allocated last (`ns_last_pid`). */
+  /**
+   * The identifier the namespace allocated last (`ns_last_pid`): to a
+   * process or to a thread of one, threads drawing from the same
+   * identifiers — a thread's identifier is one a liveness probe such as
+   * `kill(pid, 0)` answers for, so (e)'s reuse check counts it too.
+   */
   readonly lastAllocated: number;
 }
 
