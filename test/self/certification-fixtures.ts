@@ -123,11 +123,15 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // modifications before creating the hold file — it acquires
       // exclusivity, completes the operation's writes (journal append
       // included), then creates the hold file, waits for its deletion, and
-      // exits normally.
+      // exits normally. T13.5-8 fails where its acquisition-first arms run
+      // beside the held `review resolve` on a valid workspace: that
+      // holder's resolution, written before its hold, fails the held-state
+      // comparison made while it holds.
       violator("VIOL-CORE-EARLYWRITE", "conf-core/bin-earlywrite.mjs", [
         "T13.5-1",
         "T13.5-2",
         "T13.5-4",
+        "T13.5-8",
       ]),
       // VIOL-CORE-EARLYREFRESH: the 13.3 refresh a mutating `review`
       // subcommand performs on a stale workspace runs before workspace
