@@ -1106,9 +1106,15 @@ function buildFileModel(rel, text, byteLength, parsed) {
  * Load the workspace graph: discover, parse, validate. Throws FindingsError
  * (exit 1) when validation fails — reads report the errors and answer
  * nothing (SPEC 13.3), build/check report them (SPEC 12.1, 12.2).
+ *
+ * `afterDiscovery`, when given, is awaited with the root once the sources
+ * are discovered and before anything is parsed — the point where a mutating
+ * command acquires (SPEC 13.5). Only VIOL-CORE-BUILDWAIT's `build` passes
+ * one (awaitNoLiveHolder); every other caller passes none.
  */
-async function loadGraph(root, groups) {
+async function loadGraph(root, groups, afterDiscovery = null) {
   const sourcePaths = await discoverSources(root, groups);
+  if (afterDiscovery !== null) await afterDiscovery(root);
   /** @type {Finding[]} */
   const findings = [];
   const files = [];
@@ -3316,7 +3322,13 @@ function isRefusedOutcome(error) {
 
 async function commandBuild(io, cwd, { flags }) {
   const config = await loadConfig(cwd, flags["--config"]);
-  const graph = await loadGraph(config.root, config.groups);
+  // VIOL-CORE-BUILDWAIT (CERTIFICATIONS.md, `buildWaitsForHolders`): `build`
+  // waits out other runs' exclusivity once its sources are discovered.
+  const graph = await loadGraph(
+    config.root,
+    config.groups,
+    deviations.buildWaitsForHolders ? awaitNoLiveHolder : null,
+  );
   await regenerate(graph);
   // A `build` report's defined content is findings alone, so a successful
   // build's JSON document is the findings report of 12.7 with none:
@@ -4616,6 +4628,15 @@ async function commandReview(io, cwd, sub, args) {
  *   entry form recording the reader's own process identifier, and leave it
  *   there as they end; they list no lock directory, judge no entry, and are
  *   refused by none; see addReaderEntry.
+ * - `buildWaitsForHolders` (VIOL-CORE-BUILDWAIT): `build` waits out other
+ *   runs' exclusivity — once its configuration is loaded and its sources
+ *   discovered, while a directory occupies the lock path and its listing
+ *   holds an entry of another run alive on this machine (judged as
+ *   acquisition judges one), it lists again at a polling interval, and
+ *   proceeds as the conformer does once none stands; anything else at the
+ *   lock path, nothing there, and a refused listing hold it back from
+ *   nothing; it writes nothing at the lock path, and the read commands are
+ *   unchanged; see awaitNoLiveHolder.
  */
 let deviations = {};
 
@@ -4694,6 +4715,57 @@ async function addReaderEntry(root) {
   } catch {
     // Nothing at the lock path, or a creation the environment refused: the
     // reader adds nothing (the deviation's own precondition).
+  }
+}
+
+/**
+ * VIOL-CORE-BUILDWAIT (CERTIFICATIONS.md, `buildWaitsForHolders`): `build`,
+ * its configuration loaded and its sources discovered — where a mutating
+ * command acquires (SPEC 13.5; loadGraph's `afterDiscovery`) — waits out
+ * other runs' exclusivity: while a live holder stands (liveHolderStands) it
+ * looks again every BUILD_WAIT_POLL_MS, and once none stands it proceeds as
+ * the conformer does. It adds no entry, removes nothing, writes nothing at
+ * the lock path (SPEC 13.4), and is refused by nothing.
+ */
+const BUILD_WAIT_POLL_MS = 50;
+
+async function awaitNoLiveHolder(root) {
+  while (await liveHolderStands(root)) await sleep(BUILD_WAIT_POLL_MS);
+}
+
+/**
+ * Whether, for VIOL-CORE-BUILDWAIT's `build`, a live holder stands: a
+ * directory — never a symbolic link to one — occupies the lock path (the
+ * area's own path a directory too, as acquisition requires), and its
+ * listing holds an entry of another run alive on this machine: a plain file
+ * whose name records, in this conformer's entry form, an identifier other
+ * than this process's own that its process list lists — judged as
+ * acquisition judges one (judgeLockDirectory: recordedIdentifier,
+ * processListJudge). Anything else at the lock path or nothing there, and a
+ * listing or examination the environment refuses, mean none stands.
+ */
+async function liveHolderStands(root) {
+  const lockAbs = path.join(root, LOCK_REL);
+  try {
+    if ((await occupantKind(path.join(root, AREA_REL))) !== "directory") {
+      return false;
+    }
+    if ((await occupantKind(lockAbs)) !== "directory") return false;
+    const lockBytes = Buffer.from(lockAbs);
+    const names = await fsp.readdir(lockBytes, { encoding: "buffer" });
+    let listed = null;
+    for (const name of names) {
+      const identifier = recordedIdentifier(name);
+      if (identifier === null || identifier === process.pid) continue;
+      if ((await occupantKind(childPath(lockBytes, name))) !== "file") continue;
+      listed ??= await processListJudge();
+      if (listed(identifier)) return true;
+    }
+    return false;
+  } catch {
+    // A listing or examination the environment refused: nothing holds
+    // `build` back (the deviation's own precondition).
+    return false;
   }
 }
 

@@ -13,9 +13,10 @@
 // command's acquisition removes a reader's entry as it removes any dead
 // run's, though one meeting a reader still running refuses on its entry as
 // on any live run's. Certifies T13.5-4 (C-1): exactly it fails against this
-// fixture (once each read run during the hold has exited, the lock directory
-// holds that read's entry beside the holder's, where the held-state
-// comparison's count half asserts the holder's entry alone); every other
+// fixture (once each read, and the `build`, run during a hold has exited,
+// the lock directory holds that command's entry beside the holder's, where
+// the held-state comparison's count half asserts the holder's entry alone —
+// at the first read during the hold, before the `build` arm); every other
 // §CONF-CORE in-scope test passes.
 import { runXspec } from "./product.mjs";
 

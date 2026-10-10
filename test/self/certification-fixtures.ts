@@ -165,7 +165,10 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // `.xspec/journal`, creating the file when absent. Mutating commands,
       // and the entries `rename`/`move` append, are unchanged. Fails T13.4-5
       // (its journal byte-compares) and T13.5-4 (the held-state comparisons
-      // once its reads during the hold have exited, the journal grown).
+      // once its reads, and its `build`, during a hold have exited, the
+      // journal grown — at its first read during the hold, before the
+      // `build` arm, whose `rename` would end with the `build`'s line where
+      // its twin's journal holds none).
       violator("VIOL-CORE-CHATTYREADS", "conf-core/bin-chattyreads.mjs", [
         "T13.4-5",
         "T13.5-4",
@@ -223,10 +226,24 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // add nothing. They acquire nothing — list no lock directory, judge no
       // entry, are refused by none — and a mutating command's acquisition
       // removes a reader's entry as any dead run's. Fails T13.5-4: once each
-      // read run during the hold has exited, the lock directory holds its
-      // entry beside the holder's, where the held-state comparison's count
-      // half asserts the holder's entry alone.
+      // read, and the `build`, run during a hold has exited, the lock
+      // directory holds its entry beside the holder's, where the held-state
+      // comparison's count half asserts the holder's entry alone (at the
+      // first read during the hold, before the `build` arm).
       violator("VIOL-CORE-READERENTRY", "conf-core/bin-readerentry.mjs", [
+        "T13.5-4",
+      ]),
+      // VIOL-CORE-BUILDWAIT: `build` waits out other runs' exclusivity —
+      // once its configuration is loaded and its sources discovered, while
+      // a directory occupies the lock path, it lists it and, while that
+      // holds another live run's entry (judged as acquisition judges one),
+      // polls, proceeding as the conformer does once none stands; anything
+      // else at the lock path, nothing there, or a refused listing never
+      // holds it back, and it writes nothing there. Fails T13.5-4: the
+      // `build` it runs during a `rename`'s hold never exits while the hold
+      // stands, so the arm — awaiting that exit before it lifts the hold —
+      // fails by its hang detection (S-3); its reads arm passes.
+      violator("VIOL-CORE-BUILDWAIT", "conf-core/bin-buildwait.mjs", [
         "T13.5-4",
       ]),
     ],
