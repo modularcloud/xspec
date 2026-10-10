@@ -11,6 +11,16 @@
 // H-4/H-6 assert *byte* state (file set, kinds, contents, link targets), and
 // mode bits would tie compares to platform- and umask-specific metadata.
 //
+// The lock path `.xspec/lock` (SPEC 13.4, 13.5; helpers/lock-path.ts) is
+// included by default — H-6 includes it around commands that acquire
+// nothing — and its exclusion, which H-6 requires of comparisons across runs
+// or workspaces and around mutating runs, is the option `EXCLUDE_LOCK_PATH`
+// or `excludingLockPath` builds. A plain file at or under it whose own mode
+// refuses the walk's read (an entry's permissions are the product's own) is
+// read under H-4's grant-and-restore (`withOwnerGrant`), its exact mode back
+// before the snapshot returns; a refused read anywhere else, and every
+// refused listing, stays an error.
+//
 // Snapshots serve the modifies-nothing and compare-around-command tests
 // (`assertLeavesUnchanged`, e.g. read commands never write, refused commands
 // modify nothing, `.git/` untouched around git-reading invocations) and the
@@ -25,6 +35,7 @@ import {
   describeByteDifference,
   HarnessAssertionError,
 } from "./assertions.js";
+import { isLockPathBytes, withOwnerGrant } from "./lock-path.js";
 
 /** One directory entry as captured by a snapshot. */
 export type SnapshotEntry =
@@ -46,7 +57,8 @@ export interface DirectorySnapshot {
 export interface SnapshotOptions {
   /**
    * Omit entries whose relative byte path (`/`-separated) matches; an
-   * excluded directory's whole subtree is pruned.
+   * excluded directory's whole subtree is pruned. H-6's lock-path exclusion
+   * is `EXCLUDE_LOCK_PATH` / `excludingLockPath` (helpers/lock-path.ts).
    */
   readonly exclude?: (relPathBytes: Uint8Array) => boolean;
 }
@@ -294,7 +306,12 @@ async function walk(
       entries.set(key, { kind: "dir" });
       await walk(abs, rel, entries, exclude);
     } else if (stats.isFile()) {
-      entries.set(key, { kind: "file", bytes: await fsp.readFile(abs) });
+      // H-4: a lock-path file's own mode may refuse this read; it alone is
+      // granted, and its mode restored at once.
+      const bytes = isLockPathBytes(rel)
+        ? await withOwnerGrant(abs, "read", () => fsp.readFile(abs))
+        : await fsp.readFile(abs);
+      entries.set(key, { kind: "file", bytes });
     } else {
       entries.set(key, { kind: "other" });
     }
