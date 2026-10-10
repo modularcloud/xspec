@@ -1,10 +1,15 @@
 // TEST-SPEC §13.5 (concurrency and isolation) — SUITE-48: T13.5-1 (hold-seam
-// basics: five held mutating-command arms each compared byte-identically
-// against its no-seam twin (seam neutrality), the stale-workspace arm — the
-// hold precedes the 13.3 refresh, graph data byte-identical while held — the
-// occupied-hold-path exit-2 arms, the non-mutating unknown-flag arm, and
-// `build --test-hold --json` consuming `--json` as the hold path — the flag
-// value-taking by name on every command, JSON out of effect, stdout empty),
+// basics: five held mutating-command arms, each leaving nothing at
+// `.xspec/lock` once complete and compared byte-identically against its
+// no-seam twin, the lock path aside (seam neutrality; H-6), the
+// stale-workspace arm — the hold precedes the 13.3 refresh, graph data
+// byte-identical while held — the occupied-hold-path exit-2 arms (a file, a
+// directory, a symbolic link to a file, and a dangling symbolic link whose
+// target lies in a writable directory outside the workspace: each occupant
+// unchanged, `.xspec/lock` absent, nothing at the dangling link's target),
+// the non-mutating unknown-flag arm, and `build --test-hold --json`
+// consuming `--json` as the hold path — the flag value-taking by name on
+// every command, JSON out of effect, stdout empty),
 // T13.5-2 (mutual exclusion),
 // T13.5-3 (exclusivity ends with the process), T13.5-4 (readers during
 // mutation + build/query storm), T13.5-5 (atomic visibility via a polling
@@ -32,9 +37,11 @@
 //   or `policy` keys; no git.
 // - T13.5-1's seam-neutrality twin drives the exact command sequence of the
 //   held workspace — the staging `build` and the `review status` item
-//   lookup included — with the seam flag alone removed, and its whole-tree
-//   compare includes the journal (§VIOL-CORE-CHATTYREADS's passing analysis
-//   leans on exactly that sequence equality).
+//   lookup included — with the seam flag alone removed, no `build` or read
+//   command between the mutating command's start and the final compare,
+//   and its whole-tree compare includes the journal, the lock path alone
+//   left out (H-6; §VIOL-CORE-CHATTYREADS's passing analysis leans on
+//   exactly that sequence equality).
 // - T13.5-1's stale-workspace arm is the only in-scope mutating command
 //   started on stale graph data (§CONF-CORE's freshness constraint, which
 //   §VIOL-CORE-EARLYREFRESH's passing side leans on): it stages its own
@@ -42,6 +49,13 @@
 //   T13.5-1's basic arms, T13.5-2's held and excluded commands, T13.5-3's
 //   killed and subsequent commands, T13.5-4's held mutator — starts on a
 //   freshly built workspace with no refresh pending (T10.1-1).
+// - T13.5-1's dangling-link arm stages the link's target in a directory of
+//   its own outside the workspace, verified writable by the harness's own
+//   process before the run (§CONF-CORE's justification: with that directory
+//   missing or unwritable, a product creating the hold file through the
+//   link fails that creation and exits 2 exactly as a conforming product
+//   does), and its bounded run turns a product holding at the link's target
+//   into a diagnosed failure (S-3; §VIOL-CORE-HOLDLINK).
 // - T13.5-2's excluded commands carry no `--test-hold` (§VIOL-CORE-NOLOCK),
 //   and its modifies-nothing compare brackets each excluded command alone,
 //   with the baseline snapshot taken while command 1 is already held
@@ -93,8 +107,10 @@
 // - "Fails promptly" (T13.5-1 occupied path, T13.5-2): a bounded foreground
 //   run — a product that blocks instead of failing is killed at the bound
 //   and fails diagnosed (H-8; the bound is a hang guard, never an assertion
-//   input, H-10) — and for T13.5-2 the excluded command's exit is observed
-//   while command 1 is still held (asserted: command 1 has not exited).
+//   input, H-10; the driver's own timeout, unconverted, would be a harness
+//   error, which the certification runner counts as `error`, C-1) — and for
+//   T13.5-2 the excluded command's exit is observed while command 1 is
+//   still held (asserted: command 1 has not exited).
 // - "Observe the prior state" (T13.5-4): each read command's exit code and
 //   stdout bytes while the rename is held equal the same invocation's from
 //   before the rename started (SPEC 12.0 byte-determinism: identical
@@ -152,7 +168,10 @@ import {
   HarnessAssertionError,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
-import { assertHeldState } from "../../helpers/lock-state.js";
+import {
+  assertHeldState,
+  assertLockPathAbsent,
+} from "../../helpers/lock-state.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
@@ -558,6 +577,12 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
             `${context}: completes normally once the hold file is deleted ` +
               `(SPEC 13.5)`,
           );
+          // Release (SPEC 13.5; T13.5-11), as on the basic arms: nothing at
+          // the lock path once the run has completed.
+          await assertLockPathAbsent(
+            workspace.root,
+            `${context}: after completing normally`,
+          );
         } finally {
           running.kill();
           await releaseHoldFile(hold);
@@ -572,8 +597,10 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
 
         // Seam neutrality on this arm: the no-seam twin runs the same
         // operation on the same stale state without `--test-hold`, and the
-        // final trees are compared whole — sources, journal, sessions,
-        // derived files, and graph data (both refresh, to the same state).
+        // final trees are compared whole but for the lock path, which H-6
+        // leaves out across directories (absent on the held side, asserted
+        // above) — sources, journal, sessions, derived files, and graph data
+        // (both refresh, to the same state).
         await expectExit(
           product,
           twinNoSeam,
@@ -614,10 +641,292 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
   });
 }
 
+// T13.5-1's occupied hold path (SPEC 13.5: creation fails if anything, a
+// symbolic link included, already exists at the path).
+
+/** The bytes T13.5-1's plain-file occupant is staged with. */
+const HOLD_OCCUPANT_BYTES = "occupant bytes\n";
+/** The bytes of the file T13.5-1's link-to-a-file occupant points to. */
+const HOLD_LINK_TARGET_BYTES = "hold-path link target bytes\n";
+
+type OccupantKind = "absent" | "file" | "directory" | "symbolic link" | "other";
+
+/** What occupies an absolute path, judged by `lstat` (a link never followed). */
+async function occupantKindAt(abs: string): Promise<OccupantKind> {
+  let stats;
+  try {
+    stats = await fsp.lstat(abs);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent";
+    throw error;
+  }
+  if (stats.isFile()) return "file";
+  if (stats.isDirectory()) return "directory";
+  if (stats.isSymbolicLink()) return "symbolic link";
+  return "other";
+}
+
+/** A plain file at `abs` — never a link to one — holding exactly `bytes`. */
+async function assertPlainFileHolds(
+  abs: string,
+  bytes: string,
+  context: string,
+): Promise<void> {
+  const kind = await occupantKindAt(abs);
+  if (kind !== "file") {
+    fail(`${context}: expected a plain file at ${abs}; found ${kind}`);
+  }
+  assertBytesEqual(await fsp.readFile(abs), bytes, context);
+}
+
+/** A symbolic link at `abs` whose target is exactly `target`. */
+async function assertLinkTo(
+  abs: string,
+  target: string,
+  context: string,
+): Promise<void> {
+  const kind = await occupantKindAt(abs);
+  if (kind !== "symbolic link") {
+    fail(
+      `${context}: the occupant after the refusal must still be a symbolic ` +
+        `link — creation fails if anything, a symbolic link included, ` +
+        `already exists at the path (SPEC 13.5); found ${kind}`,
+    );
+  }
+  const actual = await fsp.readlink(abs);
+  if (actual !== target) {
+    fail(
+      `${context}: the link's target after the refusal — untouched (SPEC ` +
+        `13.5); expected ${JSON.stringify(target)}, got ` +
+        `${JSON.stringify(actual)}`,
+    );
+  }
+}
+
+/** A directory at `abs` holding exactly the entries `names`. */
+async function assertDirectoryNames(
+  abs: string,
+  names: readonly string[],
+  context: string,
+): Promise<void> {
+  const kind = await occupantKindAt(abs);
+  if (kind !== "directory") {
+    fail(`${context}: expected a directory at ${abs}; found ${kind}`);
+  }
+  const actual = [...(await fsp.readdir(abs))].sort();
+  const expected = [...names].sort();
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    fail(
+      `${context}: ${abs} must hold exactly ${JSON.stringify(expected)}; ` +
+        `found ${JSON.stringify(actual)}`,
+    );
+  }
+}
+
+/**
+ * A fresh directory of its own for an occupant link's target, in the
+ * workspace's tempRoot beside the root — outside the workspace — and
+ * verified writable by this process, the identity every product run takes
+ * (H-2): a probe file created there and removed, the directory left empty.
+ * A product creating the hold file through a link exposes itself only where
+ * the link's target lies in a writable directory; with the directory
+ * missing or unwritable that creation fails and the product exits 2,
+ * nothing at the target, exactly as a conforming product does
+ * (CERTIFICATIONS.md §CONF-CORE's justification, §VIOL-CORE-HOLDLINK) — so
+ * a directory failing the probe is a staging the harness never runs on, a
+ * harness error (H-11), never a product verdict.
+ */
+async function stageHoldLinkTargetDirectory(
+  workspace: TestWorkspace,
+): Promise<string> {
+  const dir = await fsp.mkdtemp(path.join(workspace.tempRoot, "hold-target-"));
+  await fsp.chmod(dir, 0o755);
+  const fromRoot = path.relative(workspace.root, dir);
+  if (fromRoot !== ".." && !fromRoot.startsWith(`..${path.sep}`)) {
+    throw new Error(
+      `T13.5-1 staging: the link target's directory ${dir} lies inside the ` +
+        `workspace ${workspace.root}; it must lie outside it (H-11)`,
+    );
+  }
+  const probe = path.join(dir, "probe");
+  try {
+    await fsp.writeFile(probe, "", { flag: "wx" });
+    await fsp.unlink(probe);
+  } catch (error) {
+    throw new Error(
+      `T13.5-1 staging: the link target's directory ${dir} must be writable ` +
+        `by this process, the identity the product runs as — a link into ` +
+        `an unwritable directory discriminates nothing (H-11) — ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const left = await fsp.readdir(dir);
+  if (left.length !== 0) {
+    throw new Error(
+      `T13.5-1 staging: the link target's directory ${dir} must hold ` +
+        `nothing once probed; found ${JSON.stringify(left)} (H-11)`,
+    );
+  }
+  return dir;
+}
+
+/**
+ * One occupant of T13.5-1's occupied hold path: `stage` places it at the
+ * hold path `abs`, with the outside target a link needs, and returns the
+ * check made once the command has been refused — the occupant unchanged
+ * and, for the dangling link, nothing at its target.
+ */
+interface HoldPathOccupant {
+  /** What occupies the path, as the arm's context names it. */
+  readonly kind: string;
+  /** The hold path's name in the workspace's tempRoot (holdPathFor). */
+  readonly name: string;
+  readonly stage: (
+    workspace: TestWorkspace,
+    abs: string,
+  ) => Promise<(context: string) => Promise<void>>;
+}
+
+const HOLD_PATH_OCCUPANTS: readonly HoldPathOccupant[] = [
+  {
+    kind: "file",
+    name: "occupied-file",
+    stage: async (_workspace, abs) => {
+      await fsp.writeFile(abs, HOLD_OCCUPANT_BYTES, { flag: "wx" });
+      return async (context) => {
+        await assertPlainFileHolds(
+          abs,
+          HOLD_OCCUPANT_BYTES,
+          `${context}: the occupant after the refusal — untouched (SPEC ` +
+            `13.5: creation fails; nothing is modified)`,
+        );
+      };
+    },
+  },
+  {
+    kind: "directory",
+    name: "occupied-directory",
+    stage: async (_workspace, abs) => {
+      await fsp.mkdir(abs);
+      return async (context) => {
+        await assertDirectoryNames(
+          abs,
+          [],
+          `${context}: the occupant after the refusal — still an empty ` +
+            `directory (SPEC 13.5: creation fails; nothing is modified)`,
+        );
+      };
+    },
+  },
+  {
+    kind: "symbolic link to a file",
+    name: "occupied-link-to-file",
+    stage: async (workspace, abs) => {
+      const dir = await stageHoldLinkTargetDirectory(workspace);
+      const target = path.join(dir, "target");
+      await fsp.writeFile(target, HOLD_LINK_TARGET_BYTES, { flag: "wx" });
+      await fsp.symlink(target, abs);
+      return async (context) => {
+        await assertLinkTo(abs, target, context);
+        await assertPlainFileHolds(
+          target,
+          HOLD_LINK_TARGET_BYTES,
+          `${context}: the link's target file after the refusal — ` +
+            `untouched, nothing written through the link (SPEC 13.5, 13.4)`,
+        );
+        await assertDirectoryNames(
+          dir,
+          ["target"],
+          `${context}: the link target's directory after the refusal — ` +
+            `nothing created beside the target (SPEC 13.5, 13.4)`,
+        );
+      };
+    },
+  },
+  {
+    kind: "dangling symbolic link",
+    name: "occupied-dangling-link",
+    stage: async (workspace, abs) => {
+      const dir = await stageHoldLinkTargetDirectory(workspace);
+      const target = path.join(dir, "absent");
+      await fsp.symlink(target, abs);
+      return async (context) => {
+        await assertLinkTo(abs, target, context);
+        const atTarget = await occupantKindAt(target);
+        if (atTarget !== "absent") {
+          fail(
+            `${context}: after the dangling link's arm nothing may exist at ` +
+              `the link's target ${target} — creation fails on the link ` +
+              `itself, never writing through it (SPEC 13.5: creation fails ` +
+              `if anything, a symbolic link included, already exists at the ` +
+              `path; 13.4); found ${atTarget}`,
+          );
+        }
+        await assertDirectoryNames(
+          dir,
+          [],
+          `${context}: the link target's directory after the refusal — ` +
+            `nothing created in it (SPEC 13.5, 13.4)`,
+        );
+      };
+    },
+  },
+];
+
+/**
+ * T13.5-1's occupied-hold-path arms: each occupant staged at the hold path,
+ * `rename specs/Moved.mdx a2 a3 --test-hold <path>` fails exit 2 without
+ * modifying anything (H-6 leaving out the lock path the run acted on), the
+ * occupant unchanged, `.xspec/lock` absent afterwards (T13.5-11: release as
+ * every normal end comes, a refusal included), and — after the dangling
+ * link's arm — nothing at the link's target. Each run is bounded
+ * (`runBounded`): a product creating the hold file through the dangling
+ * link holds at its target instead of exiting 2, and the bound's expiry is
+ * that arm's diagnosed failure within the test's budget (H-8, S-3) — the
+ * driver's own timeout, unconverted, is a harness error, which the
+ * certification runner counts as `error` (C-1; §VIOL-CORE-HOLDLINK).
+ */
+async function occupiedHoldPathArms(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  for (const occupant of HOLD_PATH_OCCUPANTS) {
+    const abs = holdPathFor(workspace, occupant.name);
+    const verifyOccupant = await occupant.stage(workspace, abs);
+    const context =
+      `T13.5-1 (hold path occupied by a ${occupant.kind}) ` +
+      "`rename specs/Moved.mdx a2 a3 --test-hold <occupied>`";
+    await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        const result = await runBounded(
+          product,
+          workspace.root,
+          ["rename", "specs/Moved.mdx", "a2", "a3", "--test-hold", abs],
+          context,
+        );
+        assertExitCode(
+          result,
+          2,
+          `${context}: the hold file cannot be created, so the command ` +
+            `fails with a usage error (SPEC 13.5, 12.0)`,
+        );
+      },
+      `${context}: fails without modifying anything (SPEC 13.5)`,
+    );
+    await verifyOccupant(context);
+    await assertLockPathAbsent(
+      workspace.root,
+      `${context}: after the refusal (SPEC 13.5: release as every normal ` +
+        `end comes, a refusal included)`,
+    );
+  }
+}
+
 const T13_5_1 = defineProductTest({
   id: "T13.5-1",
   title:
-    "each mutating command (`rename`, file-form `move`, `review create/resolve/split`) with `--test-hold` creates an empty file at the path after acquiring exclusivity and before modifying anything (the held-state comparison holding while held: every workspace path but the lock path `.xspec/lock` byte-identical to the pre-invocation state, and `.xspec/lock` a directory holding exactly the held run's entry, a plain file), proceeds only once the file is deleted, and completes normally, the held-then-released run's final workspace state — sources, journal, sessions, derived files, and graph data — byte-identical to the same operation run without `--test-hold` on an identical twin workspace (seam neutrality: the seam changes no other behavior; H-4/H-6); on a workspace whose graph data is stale (a section's text edited after `build`, the workspace still valid) `review create --strategy audit --test-hold` leaves graph data and every other workspace file but the lock path byte-identical while held — the hold precedes the 13.3 refresh too — and after release creates the session and refreshes the graph data to what `build` writes on an identical twin; anything at the hold path — file, directory, or symlink — fails the command exit 2 without modifying anything; `build` and `query` given `--test-hold` fail exit 2 as an unknown flag, and `build --test-hold --json` — the flag value-taking by name on every command — consumes `--json` as the hold path and leaves JSON out of effect: exit 2, stdout empty, no hold file (SPEC 13.5, 13.3, 12.0)",
+    "each mutating command (`rename`, file-form `move`, `review create/resolve/split`) with `--test-hold` creates an empty file at the path after acquiring exclusivity and before modifying anything (the held-state comparison holding while held: every workspace path but the lock path `.xspec/lock` byte-identical to the pre-invocation state, and `.xspec/lock` a directory holding exactly the held run's entry, a plain file), proceeds only once the file is deleted, and completes normally, `.xspec/lock` absent afterwards (T13.5-11), the held-then-released run's final workspace state — sources, journal, sessions, derived files, and graph data — byte-identical to the same operation run without `--test-hold` on an identical twin workspace (seam neutrality: the seam changes no other behavior; H-4, and H-6 leaving out the lock path across directories); on a workspace whose graph data is stale (a section's text edited after `build`, the workspace still valid) `review create --strategy audit --test-hold` leaves graph data and every other workspace file but the lock path byte-identical while held — the hold precedes the 13.3 refresh too — and after release creates the session, refreshes the graph data to what `build` writes on an identical twin, and leaves nothing at `.xspec/lock`; anything at the hold path — a file, a directory, a symbolic link to a file, or a dangling symbolic link whose target lies in a writable directory outside the workspace — fails the command exit 2 without modifying anything, the occupant unchanged, `.xspec/lock` absent afterwards, and nothing at the dangling link's target (creation fails on the link itself, never writing through it); `build` and `query` given `--test-hold` fail exit 2 as an unknown flag, and `build --test-hold --json` — the flag value-taking by name on every command — consumes `--json` as the hold path and leaves JSON out of effect: exit 2, stdout empty, no hold file (SPEC 13.5, 13.3, 13.4, 12.0)",
   run: async (product) => {
     // Every arm below stages itself on a freshly built workspace with no
     // refresh pending (CERTIFICATIONS.md §CONF-CORE's freshness constraint);
@@ -694,6 +1003,14 @@ const T13_5_1 = defineProductTest({
               `${context}: completes normally once the hold file is deleted ` +
                 `(SPEC 13.5)`,
             );
+            // Release (SPEC 13.5; T13.5-11): the completed run deleted its
+            // entry, then the emptied lock directory — the seam-neutrality
+            // compare below leaves the lock path out (H-6 across
+            // directories), so its absence is asserted here.
+            await assertLockPathAbsent(
+              workspace.root,
+              `${context}: after completing normally`,
+            );
             await onCompleted();
           } finally {
             running.kill();
@@ -702,7 +1019,9 @@ const T13_5_1 = defineProductTest({
 
           // Seam neutrality: the twin runs the same operation without
           // `--test-hold`, and the final workspace states are compared
-          // whole — no exclusions, the journal included.
+          // whole but for the lock path, which H-6 leaves out across
+          // directories (absent on the held side, asserted above) — the
+          // journal included.
           await expectExit(
             product,
             twin,
@@ -832,108 +1151,14 @@ const T13_5_1 = defineProductTest({
         );
       });
 
-      // Occupied hold path: anything at the path — a file, directory, or
-      // symbolic link (staged dangling: a create that follows the link
-      // instead of failing would succeed) — fails the command exit 2
-      // without modifying anything. `rename` is the representative mutating
-      // command; the workspace state is untouched by every refusal, so the
-      // arms chain.
-      const occupants: readonly {
-        readonly kind: string;
-        readonly stage: (abs: string) => Promise<void>;
-        readonly verifyUntouched: (abs: string) => Promise<void>;
-      }[] = [
-        {
-          kind: "file",
-          stage: async (abs) => {
-            await fsp.writeFile(abs, "occupant bytes\n");
-          },
-          verifyUntouched: async (abs) => {
-            assertBytesEqual(
-              await fsp.readFile(abs),
-              "occupant bytes\n",
-              "T13.5-1 (occupied by a file): the occupant's bytes after " +
-                "the refusal — untouched (SPEC 13.5: creation fails; " +
-                "nothing is modified)",
-            );
-          },
-        },
-        {
-          kind: "directory",
-          stage: async (abs) => {
-            await fsp.mkdir(abs);
-          },
-          verifyUntouched: async (abs) => {
-            const stats = await fsp.lstat(abs);
-            if (!stats.isDirectory()) {
-              fail(
-                "T13.5-1 (occupied by a directory): the occupant after the " +
-                  "refusal must still be a directory (SPEC 13.5)",
-              );
-            }
-          },
-        },
-        {
-          kind: "symlink",
-          stage: async (abs) => {
-            await fsp.symlink("dangling-hold-target", abs);
-          },
-          verifyUntouched: async (abs) => {
-            const stats = await fsp.lstat(abs);
-            if (!stats.isSymbolicLink()) {
-              fail(
-                "T13.5-1 (occupied by a symlink): the occupant after the " +
-                  "refusal must still be a symbolic link — creation fails " +
-                  "if anything, a symbolic link included, exists at the " +
-                  "path (SPEC 13.5)",
-              );
-            }
-            const target = await fsp.readlink(abs);
-            if (target !== "dangling-hold-target") {
-              fail(
-                "T13.5-1 (occupied by a symlink): the link's target after " +
-                  `the refusal — untouched (SPEC 13.5); got ` +
-                  `${JSON.stringify(target)}`,
-              );
-            }
-            if (
-              await pathExists(
-                path.join(workspace.tempRoot, "dangling-hold-target"),
-              )
-            ) {
-              fail(
-                "T13.5-1 (occupied by a symlink): nothing may be created " +
-                  "through the dangling link — creation must fail on the " +
-                  "occupied path itself (SPEC 13.5)",
-              );
-            }
-          },
-        },
-      ];
-      for (const occupant of occupants) {
-        const abs = holdPathFor(workspace, `occupied-${occupant.kind}`);
-        await occupant.stage(abs);
-        const context = `T13.5-1 (hold path occupied by a ${occupant.kind}) \`rename specs/Moved.mdx a2 a3 --test-hold <occupied>\``;
-        await assertLeavesUnchanged(
-          workspace.root,
-          async () => {
-            const result = await runBounded(
-              product,
-              workspace.root,
-              ["rename", "specs/Moved.mdx", "a2", "a3", "--test-hold", abs],
-              context,
-            );
-            assertExitCode(
-              result,
-              2,
-              `${context}: the hold file cannot be created, so the command ` +
-                `fails with a usage error (SPEC 13.5, 12.0)`,
-            );
-          },
-          `${context}: fails without modifying anything (SPEC 13.5)`,
-        );
-        await occupant.verifyUntouched(abs);
-      }
+      // Occupied hold path (SPEC 13.5: creation fails if anything, a
+      // symbolic link included, already exists at the path): a file, a
+      // directory, a symbolic link to a file, and a dangling symbolic link
+      // whose target lies in a writable directory outside the workspace —
+      // see occupiedHoldPathArms. `rename` is the representative mutating
+      // command; every refusal leaves the workspace untouched, so the arms
+      // chain on this workspace.
+      await occupiedHoldPathArms(product, workspace);
 
       // Non-mutating commands: `--test-hold` is an unknown flag — 13.5
       // grants the seam to mutating commands alone, and unknown flags are

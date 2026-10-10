@@ -187,6 +187,16 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // under `--test-hold`) — while its failing-workspace arms, whose
       // commands pass both checks, hold and are excluded as the conformer's.
       violator("VIOL-CORE-LATELOCK", "conf-core/bin-latelock.mjs", ["T13.5-8"]),
+      // VIOL-CORE-HOLDLINK: hold-file creation follows a symbolic link at
+      // the hold path — the path's occupancy judged through the link, so a
+      // dangling link reads as nothing there and the empty hold file is
+      // created at the link's target (a write through the link), the run
+      // proceeding only once the hold path, judged through the link, holds
+      // nothing; a link to an existing file or directory reads as occupied,
+      // so creation fails there with the seam's usage error as the
+      // conformer's does. Fails T13.5-1 on its dangling-link arm alone,
+      // through the arm's hang detection (S-3).
+      violator("VIOL-CORE-HOLDLINK", "conf-core/bin-holdlink.mjs", ["T13.5-1"]),
     ],
   ),
   // CONF-VALID (§CONF-VALID): segment and tag validity — `build` with the

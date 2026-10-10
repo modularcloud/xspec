@@ -1898,6 +1898,42 @@ async function removeLeftover(abs, kind) {
  */
 async function holdAtSeam(holdPath, cwd) {
   const abs = path.resolve(cwd, holdPath);
+  if (deviations.holdThroughLink) {
+    // VIOL-CORE-HOLDLINK (CERTIFICATIONS.md): hold-file creation follows a
+    // symbolic link at the hold path — the path's occupancy is judged
+    // through the link (`stat`, which follows it), so a dangling link reads
+    // as nothing there, and the empty hold file is created at the link's
+    // target (O_CREAT without O_EXCL, which follows the link: a write
+    // through it), the run then proceeding only once the hold path, judged
+    // through the link, holds nothing. A single deviation: a link to an
+    // existing file or directory reads as occupied through the link, so its
+    // creation falls to the conformer's below and fails there with the
+    // seam's usage error as the conformer's does, and a path holding no
+    // link is judged alike on both sides.
+    let throughLink = true;
+    try {
+      await fsp.stat(abs);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      throughLink = false;
+    }
+    if (!throughLink) {
+      const created = await fsp.open(
+        abs,
+        fsp.constants.O_WRONLY | fsp.constants.O_CREAT,
+      );
+      await created.close();
+      for (;;) {
+        try {
+          await fsp.stat(abs);
+        } catch (error) {
+          if (error.code === "ENOENT") return;
+          throw error;
+        }
+        await sleep(15);
+      }
+    }
+  }
   const handle = await fsp.open(abs, "wx"); // O_CREAT|O_EXCL: symlinks fail too
   await handle.close();
   for (;;) {
@@ -4523,6 +4559,13 @@ async function commandReview(io, cwd, sub, args) {
  *   resolution write nothing (`review list` computes no invalidation and is
  *   unchanged, as are the mutating subcommands); see
  *   withReadInvalidationPersistence.
+ * - `holdThroughLink` (VIOL-CORE-HOLDLINK): hold-file creation follows a
+ *   symbolic link at the hold path — occupancy judged through the link, so
+ *   a dangling link reads as nothing there and the empty hold file is
+ *   created at the link's target, the run proceeding only once the hold
+ *   path, judged through the link, holds nothing; a link to an existing
+ *   file or directory reads as occupied, failing with the conformer's usage
+ *   error; see holdAtSeam.
  */
 let deviations = {};
 
