@@ -496,7 +496,10 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
           );
         }
 
-        // Pre-invocation state: every workspace file, `.xspec/` included.
+        // Pre-invocation state: every workspace file, `.xspec/` included —
+        // the lock path aside, which the held run's acquisition writes (H-6:
+        // every snapshot compare spanning a mutating command's run leaves
+        // it out, helpers/snapshot.ts).
         const before = await snapshotDirectory(workspace.root);
         const hold = holdPathFor(workspace, "hold-stale.tmp");
         const running = await startProduct(product, {
@@ -513,7 +516,8 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
             `${context}: the workspace while held vs before the command ` +
               `started — graph data (.xspec/graph.json, the one file the ` +
               `pending 13.3 refresh changes) and every other workspace ` +
-              `file: the hold is created after acquiring exclusivity and ` +
+              `file but the lock path (H-6): the hold is created after ` +
+              `acquiring exclusivity and ` +
               `before every modification, the refresh included, so a ` +
               `product that refreshes before acquiring exclusivity fails ` +
               `here (SPEC 13.5, 13.3)`,

@@ -51,6 +51,14 @@
 //   builder refuses a plain `.mdx` staging that is not a staged-source
 //   record (helpers/workspace.ts). This is the one path every invocation
 //   takes, so the mark cannot be bypassed.
+// - H-6's classification of compares (helpers/acquiring-runs.ts): right
+//   before spawning, an invocation that is a mutating command's run (SPEC
+//   13.5: `rename` and `move` without `--preview`, `review create`,
+//   `resolve`, `split`) is noted with the lock path of the workspace it runs
+//   against, and its end once it exits, however it ended (a kill included),
+//   before `waitForExit` settles — so every snapshot compare spanning it
+//   leaves that lock path out, and every compare spanning only commands that
+//   acquire nothing keeps it (helpers/snapshot.ts).
 // - T6.5-22(a)'s universal assertion (helpers/added-import-identifiers.ts):
 //   an invocation whose argv reads as a performed `move` has its
 //   pre-operation sources read before it spawns, and once it exits 0 the
@@ -99,6 +107,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import type { AcquiringRun } from "./acquiring-runs.js";
+import { noteAcquiringRun } from "./acquiring-runs.js";
 import type { AddedImportCheck } from "./added-import-identifiers.js";
 import { HarnessAssertionError } from "./assertions.js";
 import { walkCapturedJsonDocument } from "./capture-walk.js";
@@ -401,12 +411,21 @@ export async function startProduct(
     options.cwd,
     await fsp.realpath(options.cwd).catch(() => options.cwd),
   );
-  const child = spawn(invocation.command, invocation.args, {
-    cwd: options.cwd,
-    env: childEnvironment(binding, options),
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-  });
+  // H-6 (module header): a mutating command's run is noted now, its start,
+  // and again once it exits, its end.
+  const acquiringRun = await noteAcquiringRun(options.cwd, options.argv ?? []);
+  let child: ChildProcess;
+  try {
+    child = spawn(invocation.command, invocation.args, {
+      cwd: options.cwd,
+      env: childEnvironment(binding, options),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+  } catch (error) {
+    acquiringRun?.ended();
+    throw error;
+  }
   return new RunningProduct(
     child,
     commandLine,
@@ -416,6 +435,7 @@ export async function startProduct(
     // T12.7-1 (module header): the run's captured stdout is walked exactly
     // when its argv puts JSON output in effect (SPEC 12.0).
     jsonOutputInEffect(options.argv ?? []),
+    acquiringRun,
   );
 }
 
@@ -476,6 +496,7 @@ export class RunningProduct {
     maxOutputBytes: number,
     addedImportCheck?: AddedImportCheck,
     walkCapturedJson = false,
+    acquiringRun?: AcquiringRun,
   ) {
     this.#child = child;
     this.commandLine = commandLine;
@@ -511,6 +532,9 @@ export class RunningProduct {
         done = true;
         this.#settled = true;
         clearTimeout(timer);
+        // H-6: a mutating command's run has ended (released, refused, or
+        // killed) before any awaiter takes its next snapshot.
+        acquiringRun?.ended();
         complete();
       };
       child.once("error", (error) => {

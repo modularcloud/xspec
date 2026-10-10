@@ -11,15 +11,37 @@
 // H-4/H-6 assert *byte* state (file set, kinds, contents, link targets), and
 // mode bits would tie compares to platform- and umask-specific metadata.
 //
-// The lock path `.xspec/lock` (SPEC 13.4, 13.5; helpers/lock-path.ts) is
-// included by default — H-6 includes it around commands that acquire
-// nothing — and its exclusion, which H-6 requires of comparisons across runs
-// or workspaces and around mutating runs, is the option `EXCLUDE_LOCK_PATH`
-// or `excludingLockPath` builds. A plain file at or under it whose own mode
-// refuses the walk's read (an entry's permissions are the product's own) is
-// read under H-4's grant-and-restore (`withOwnerGrant`), its exact mode back
-// before the snapshot returns; a refused read anywhere else, and every
-// refused listing, stays an error.
+// The lock path `.xspec/lock` (SPEC 13.4, 13.5; helpers/lock-path.ts) and
+// H-6: every comparison of two snapshots (`diffSnapshots`, and through it
+// `assertSnapshotsEqual`, `assertDirectoriesEqual`, `assertLeavesUnchanged`)
+// leaves out exactly what `lockPathExclusion` names, and nothing more:
+// - across directories — runs or workspaces, determinism and twin
+//   comparisons alike (two snapshots whose roots are different directories)
+//   — the lock path `.xspec/lock` and everything under it, always, and with
+//   it the lock path of every nested workspace root, a directory holding an
+//   `xspec.config.ts` entry in either snapshot (SPEC 7: 13.5 places each
+//   workspace's lock path under its own root);
+// - within one directory — its state before and after — the lock path of
+//   each workspace on which a mutating command's run acted between the two
+//   snapshots (helpers/acquiring-runs.ts: the run started or ended between
+//   them; the subprocess driver notes every such run), acquisition's and
+//   release's writes there counting as no modification (13.5); and nothing
+//   at all otherwise: around commands that acquire nothing — `build`,
+//   `check`, `version`, a preview, every read command — no other run
+//   acquiring, releasing, or being killed meanwhile, the lock path is
+//   compared like any other path, whatever occupied it before (nothing, a
+//   leftover, or a held run's entry) occupying it afterwards byte-identical
+//   (13.4: no write but acquisition and release touches it).
+// A snapshot records what that classification needs: its root's real path
+// and the acquisition event count as its walk began. The walk itself prunes
+// only what the caller's `exclude` option names — `EXCLUDE_LOCK_PATH` or
+// `excludingLockPath` (helpers/lock-path.ts) where a caller's compare
+// excludes the lock path whatever ran (the determinism protocol). A plain
+// file at or under the lock path whose own mode refuses the walk's read (an
+// entry's permissions are the product's own) is read under H-4's
+// grant-and-restore (`withOwnerGrant`), its exact mode back before the
+// snapshot returns; a refused read anywhere else, and every refused listing,
+// stays an error.
 //
 // Snapshots serve the modifies-nothing and compare-around-command tests
 // (`assertLeavesUnchanged`, e.g. read commands never write, refused commands
@@ -30,12 +52,18 @@
 import { Buffer } from "node:buffer";
 import type { Stats } from "node:fs";
 import * as fsp from "node:fs/promises";
+import * as path from "node:path";
+import {
+  acquisitionMark,
+  lockPathKeyUnder,
+  lockPathsActedOnBetween,
+} from "./acquiring-runs.js";
 import {
   bytesEqual,
   describeByteDifference,
   HarnessAssertionError,
 } from "./assertions.js";
-import { isLockPathBytes, withOwnerGrant } from "./lock-path.js";
+import { isLockPathBytes, LOCK_PATH, withOwnerGrant } from "./lock-path.js";
 
 /** One directory entry as captured by a snapshot. */
 export type SnapshotEntry =
@@ -48,17 +76,33 @@ export type SnapshotEntry =
  * The byte state of a directory tree. `entries` maps the `/`-separated
  * relative path of every entry — keyed by its exact bytes, latin1-encoded so
  * non-UTF-8 names are lossless — to what occupies it, in bytewise path order.
+ * A view built from a snapshot (a filtered entry map) carries the snapshot's
+ * `realRoot` and `acquisitionMark` over (`{ ...snapshot, entries }`), so its
+ * compares are classified as the snapshot's are (H-6).
  */
 export interface DirectorySnapshot {
   readonly root: string;
+  /**
+   * The root's real path at capture: two snapshots with one real root are
+   * one directory's states; with two, a comparison across directories (H-6).
+   */
+  readonly realRoot: string;
+  /**
+   * The acquisition event count as the walk began (helpers/acquiring-runs.ts
+   * `acquisitionMark`): two snapshots' marks bound the mutating commands'
+   * runs that acted between them.
+   */
+  readonly acquisitionMark: number;
   readonly entries: ReadonlyMap<string, SnapshotEntry>;
 }
 
 export interface SnapshotOptions {
   /**
    * Omit entries whose relative byte path (`/`-separated) matches; an
-   * excluded directory's whole subtree is pruned. H-6's lock-path exclusion
-   * is `EXCLUDE_LOCK_PATH` / `excludingLockPath` (helpers/lock-path.ts).
+   * excluded directory's whole subtree is pruned. Every compare applies
+   * H-6's lock-path exclusion itself (`lockPathExclusion`); pruning the lock
+   * path from the walk — `EXCLUDE_LOCK_PATH` / `excludingLockPath`
+   * (helpers/lock-path.ts) — serves a compare that excludes it whatever ran.
    */
   readonly exclude?: (relPathBytes: Uint8Array) => boolean;
 }
@@ -82,6 +126,8 @@ export async function snapshotDirectory(
   absDir: string,
   options: SnapshotOptions = {},
 ): Promise<DirectorySnapshot> {
+  // Taken first: a run noted while the walk proceeds counts as after it.
+  const mark = acquisitionMark();
   let rootStats: Stats;
   try {
     rootStats = await fsp.stat(absDir);
@@ -93,25 +139,87 @@ export async function snapshotDirectory(
   if (!rootStats.isDirectory()) {
     throw new Error(`snapshotDirectory: not a directory: ${absDir}`);
   }
+  const realRoot = await fsp.realpath(absDir).catch(() => path.resolve(absDir));
   const entries = new Map<string, SnapshotEntry>();
   await walk(Buffer.from(absDir), null, entries, options.exclude);
-  return { root: absDir, entries };
+  return { root: absDir, realRoot, acquisitionMark: mark, entries };
 }
 
 /**
- * All differences between two snapshots, in bytewise path order. "added" and
- * "removed" are relative to the second snapshot (added = present only in
- * `after`); for entries present in both, kind changes, file-byte changes
- * (diagnosed with the first differing offset), and symlink-target changes
- * are reported.
+ * What a comparison of two snapshots leaves out under H-6 (module header):
+ * `whole` when everything (the snapshots' root is a lock path, or lies under
+ * one, acted on between them), else the snapshot keys of the excluded lock
+ * paths, each with everything under it — none when the comparison includes
+ * every entry.
+ */
+export interface LockPathExclusion {
+  readonly whole: boolean;
+  readonly keys: readonly string[];
+  /** Whether the comparison leaves out the entry at snapshot key `key`. */
+  excludes(key: string): boolean;
+}
+
+const CONFIG_NAME = "xspec.config.ts";
+
+/**
+ * H-6's lock-path exclusion for a comparison of two snapshots (module
+ * header): across directories, the lock path of the root and of every
+ * nested workspace root holding an `xspec.config.ts` entry in either
+ * snapshot; within one directory, the lock path of each workspace a mutating
+ * command's run acted on between the two snapshots (started or ended between
+ * their acquisition marks), wherever it lies under the root; nothing else.
+ */
+export function lockPathExclusion(
+  first: DirectorySnapshot,
+  second: DirectorySnapshot,
+): LockPathExclusion {
+  const keys = new Set<string>();
+  let whole = false;
+  if (first.realRoot !== second.realRoot) {
+    keys.add(LOCK_PATH);
+    for (const snapshot of [first, second]) {
+      for (const key of snapshot.entries.keys()) {
+        if (key.endsWith(`/${CONFIG_NAME}`)) {
+          keys.add(`${key.slice(0, -CONFIG_NAME.length)}${LOCK_PATH}`);
+        }
+      }
+    }
+  } else {
+    for (const lockPath of lockPathsActedOnBetween(
+      first.acquisitionMark,
+      second.acquisitionMark,
+    )) {
+      const key = lockPathKeyUnder(first.realRoot, lockPath);
+      if (key === "all") whole = true;
+      else if (key !== undefined) keys.add(key);
+    }
+  }
+  const sorted = [...keys].sort();
+  return {
+    whole,
+    keys: sorted,
+    excludes: (key) =>
+      whole ||
+      sorted.some((lock) => key === lock || key.startsWith(`${lock}/`)),
+  };
+}
+
+/**
+ * All differences between two snapshots, in bytewise path order, H-6's
+ * lock-path exclusion applied (`lockPathExclusion`; the module header).
+ * "added" and "removed" are relative to the second snapshot (added = present
+ * only in `after`); for entries present in both, kind changes, file-byte
+ * changes (diagnosed with the first differing offset), and symlink-target
+ * changes are reported.
  */
 export function diffSnapshots(
   before: DirectorySnapshot,
   after: DirectorySnapshot,
 ): SnapshotChange[] {
-  const keys = [
-    ...new Set([...before.entries.keys(), ...after.entries.keys()]),
-  ].sort();
+  const exclusion = lockPathExclusion(before, after);
+  const keys = [...new Set([...before.entries.keys(), ...after.entries.keys()])]
+    .filter((key) => !exclusion.excludes(key))
+    .sort();
   const changes: SnapshotChange[] = [];
   for (const key of keys) {
     const entryBefore = before.entries.get(key);
@@ -162,8 +270,17 @@ export function assertSnapshotsEqual(
       ? `under ${before.root}`
       : `between ${before.root} and ${after.root}`;
   throw new HarnessAssertionError(
-    `${context}: ${String(changes.length)} byte-state difference(s) ${where} (H-4/H-6, normalizing nothing):\n${renderChanges(changes)}`,
+    `${context}: ${String(changes.length)} byte-state difference(s) ${where} (H-4/H-6, normalizing nothing${describeExclusion(lockPathExclusion(before, after))}):\n${renderChanges(changes)}`,
   );
+}
+
+/** The exclusion a compare applied, as a diagnosis clause ("" for none). */
+function describeExclusion(exclusion: LockPathExclusion): string {
+  if (exclusion.whole) {
+    return "; the whole tree, a lock path a mutating command's run acted on, excluded (H-6)";
+  }
+  if (exclusion.keys.length === 0) return "";
+  return `; excluded (H-6): ${exclusion.keys.map(displaySnapshotPath).join(", ")} and everything under it`;
 }
 
 /**
@@ -186,8 +303,11 @@ export async function assertDirectoriesEqual(
  * The compare-around-command protocol: snapshot `absDir`, run `action`,
  * snapshot again, and assert nothing changed — for modifies-nothing
  * assertions (read commands never write; refused commands modify nothing;
- * `.git/` byte-identical around git-reading invocations, T12.0-11). Returns
- * the action's result so the caller can go on asserting it.
+ * `.git/` byte-identical around git-reading invocations, T12.0-11). The lock
+ * path of each workspace a mutating command's run acted on during `action`
+ * is left out, and it alone (H-6; `lockPathExclusion`): around commands that
+ * acquire nothing it is compared like any other path. Returns the action's
+ * result so the caller can go on asserting it.
  */
 export async function assertLeavesUnchanged<T>(
   absDir: string,

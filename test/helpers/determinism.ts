@@ -23,8 +23,17 @@
 //   repositories, and the product never writes them (T12.0-11). A fixture
 //   factory that fails to rebuild identical non-`.git` content is a harness
 //   bug and is reported as a plain `Error`, not an assertion failure.
+//
+// Both forms leave the lock path `.xspec/lock` and everything under it out
+// of every snapshot they take (`EXCLUDE_LOCK_PATH`, helpers/lock-path.ts),
+// whatever the command: H-6 excludes it from every comparison of written
+// files across runs or workspaces — determinism comparisons alike — its
+// entries' names and content lying outside 12.0's determinism (13.4), which
+// matters only where a leftover survives a run (a kill, a refused release
+// deletion: T13.5-3, T13.5-11).
 
 import { assertBytesEqual, fail, HarnessAssertionError } from "./assertions.js";
+import { EXCLUDE_LOCK_PATH } from "./lock-path.js";
 import type {
   DirectorySnapshot,
   SnapshotChange,
@@ -66,9 +75,9 @@ export async function assertRunTwiceDeterministic(
   const context =
     options.context ?? `H-6 run-twice determinism of ${options.binding.label}`;
   const first = await runProduct(options.binding, options.run);
-  const afterFirst = await snapshotDirectory(workspaceDir);
+  const afterFirst = await snapshotDirectory(workspaceDir, EXCLUDE_LOCK_PATH);
   const second = await runProduct(options.binding, options.run);
-  const afterSecond = await snapshotDirectory(workspaceDir);
+  const afterSecond = await snapshotDirectory(workspaceDir, EXCLUDE_LOCK_PATH);
   assertRunOutcomesEqual(second, first, context, "run 2", "run 1");
   assertSnapshotsEqual(
     afterFirst,
@@ -115,8 +124,14 @@ export async function assertAcrossDirectoriesDeterministic(
       `${context}: makeWorkspace() returned the same root twice (${firstWorkspace.root}) — the protocol needs two separate directories`,
     );
   }
-  const preFirst = await snapshotDirectory(firstWorkspace.root);
-  const preSecond = await snapshotDirectory(secondWorkspace.root);
+  const preFirst = await snapshotDirectory(
+    firstWorkspace.root,
+    EXCLUDE_LOCK_PATH,
+  );
+  const preSecond = await snapshotDirectory(
+    secondWorkspace.root,
+    EXCLUDE_LOCK_PATH,
+  );
   const fixtureDrift = diffSnapshots(preFirst, preSecond).filter(
     (change) => !isGitInternal(change.key),
   );
@@ -135,8 +150,14 @@ export async function assertAcrossDirectoriesDeterministic(
     options.binding,
     options.makeRun(secondWorkspace),
   );
-  const postFirst = await snapshotDirectory(firstWorkspace.root);
-  const postSecond = await snapshotDirectory(secondWorkspace.root);
+  const postFirst = await snapshotDirectory(
+    firstWorkspace.root,
+    EXCLUDE_LOCK_PATH,
+  );
+  const postSecond = await snapshotDirectory(
+    secondWorkspace.root,
+    EXCLUDE_LOCK_PATH,
+  );
   assertRunOutcomesEqual(
     second,
     first,

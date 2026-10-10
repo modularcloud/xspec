@@ -276,12 +276,17 @@ function graphDataEntries(
   return filteredEntries(snapshot.entries, isGraphDataKey);
 }
 
-/** View a filtered entry map as a snapshot for `assertSnapshotsEqual`. */
+/**
+ * View a filtered entry map of `source` as a snapshot for
+ * `assertSnapshotsEqual`: `source`'s root, real root, and acquisition mark
+ * carried over, so the compare is classified as `source`'s (H-6,
+ * helpers/snapshot.ts `lockPathExclusion`).
+ */
 function asSnapshot(
-  root: string,
+  source: DirectorySnapshot,
   entries: ReadonlyMap<string, SnapshotEntry>,
 ): DirectorySnapshot {
-  return { root, entries };
+  return { ...source, entries };
 }
 
 /**
@@ -1258,7 +1263,7 @@ const T13_3_2 = defineProductTest({
           w0.entries,
           (key) => !isGraphDataKey(key),
         );
-        let refreshedGraphA: Map<string, SnapshotEntry> | undefined;
+        let refreshedGraphA: DirectorySnapshot | undefined;
         for (const probe of armAProbes) {
           await deleteGraphData(
             workspace,
@@ -1267,9 +1272,9 @@ const T13_3_2 = defineProductTest({
           await probe.run();
           const after = await snapshotDirectory(workspace.root);
           assertSnapshotsEqual(
-            asSnapshot(workspace.root, expectedOutsideGraphA),
+            asSnapshot(w0, expectedOutsideGraphA),
             asSnapshot(
-              workspace.root,
+              after,
               filteredEntries(after.entries, (key) => !isGraphDataKey(key)),
             ),
             `T13.3-2 (deleted graph data) after ${probe.label}: outside ` +
@@ -1285,11 +1290,11 @@ const T13_3_2 = defineProductTest({
               `T13.3-2 (deleted graph data) after ${probe.label} — the ` +
                 `read must have rewritten the deleted graph data`,
             );
-            refreshedGraphA = graphNow;
+            refreshedGraphA = asSnapshot(after, graphNow);
           } else {
             assertSnapshotsEqual(
-              asSnapshot(workspace.root, refreshedGraphA),
-              asSnapshot(workspace.root, graphNow),
+              refreshedGraphA,
+              asSnapshot(after, graphNow),
               `T13.3-2 (deleted graph data) after ${probe.label}: every ` +
                 `refreshing read rewrites the same graph-data bytes for ` +
                 `the same workspace state (SPEC 13.3, 12.0)`,
@@ -1594,7 +1599,7 @@ const T13_3_2 = defineProductTest({
           },
         ];
 
-        let refreshedGraph: Map<string, SnapshotEntry> | undefined;
+        let refreshedGraph: DirectorySnapshot | undefined;
         for (const probe of armBProbes) {
           await restoreGraphData(
             workspace,
@@ -1604,9 +1609,9 @@ const T13_3_2 = defineProductTest({
           await probe.run();
           const after = await snapshotDirectory(workspace.root);
           assertSnapshotsEqual(
-            asSnapshot(workspace.root, expectedNonGraph),
+            asSnapshot(w0, expectedNonGraph),
             asSnapshot(
-              workspace.root,
+              after,
               filteredEntries(after.entries, (key) => !isGraphDataKey(key)),
             ),
             `T13.3-2 (edited source) after ${probe.label}: outside the ` +
@@ -1617,15 +1622,15 @@ const T13_3_2 = defineProductTest({
           );
           const graphNow = graphDataEntries(after);
           if (refreshedGraph === undefined) {
-            refreshedGraph = graphNow;
+            refreshedGraph = asSnapshot(after, graphNow);
             assertGraphDataPresent(
               after,
               `T13.3-2 (edited source) after ${probe.label}`,
             );
           } else {
             assertSnapshotsEqual(
-              asSnapshot(workspace.root, refreshedGraph),
-              asSnapshot(workspace.root, graphNow),
+              refreshedGraph,
+              asSnapshot(after, graphNow),
               `T13.3-2 (edited source) after ${probe.label}: every ` +
                 `refreshing read rewrites the same graph-data bytes for ` +
                 `the same workspace state (SPEC 13.3, 12.0)`,
@@ -1681,8 +1686,11 @@ const T13_3_2 = defineProductTest({
           throw new Error("T13.3-2 internal error: no arm-B probe ran");
         }
         assertSnapshotsEqual(
-          asSnapshot(workspace.root, refreshedGraph),
-          asSnapshot(workspace.root, graphDataEntries(afterReferenceBuild)),
+          refreshedGraph,
+          asSnapshot(
+            afterReferenceBuild,
+            graphDataEntries(afterReferenceBuild),
+          ),
           "T13.3-2 (edited source): the graph data the refreshing reads " +
             "wrote vs the graph data `build` writes for the identical " +
             "workspace state — the refresh writes exactly what `xspec " +
@@ -1733,9 +1741,9 @@ const T13_3_2 = defineProductTest({
         );
         expectedAfterDelete.delete("specs/B.mdx");
         assertSnapshotsEqual(
-          asSnapshot(workspace.root, expectedAfterDelete),
+          asSnapshot(beforeDelete, expectedAfterDelete),
           asSnapshot(
-            workspace.root,
+            afterDeleteRead,
             filteredEntries(
               afterDeleteRead.entries,
               (key) => !isGraphDataKey(key),
@@ -2091,9 +2099,9 @@ const T13_3_2 = defineProductTest({
           // module header).
           const after = await snapshotDirectory(workspace.root);
           assertSnapshotsEqual(
-            asSnapshot(workspace.root, outsideGraph),
+            asSnapshot(corrupted, outsideGraph),
             asSnapshot(
-              workspace.root,
+              after,
               filteredEntries(after.entries, (key) => !isGraphDataKey(key)),
             ),
             `T13.3-2 (corrupt record) after ${probe.label} and its ` +
@@ -3013,8 +3021,8 @@ const T13_3_4 = defineProductTest({
       );
       const afterRebuilds = await snapshotDirectory(workspace.root);
       assertSnapshotsEqual(
-        asSnapshot(workspace.root, graphDataEntries(first)),
-        asSnapshot(workspace.root, graphDataEntries(afterRebuilds)),
+        asSnapshot(first, graphDataEntries(first)),
+        asSnapshot(afterRebuilds, graphDataEntries(afterRebuilds)),
         "T13.3-4: graph data after the rebuilds vs after the initial " +
           "`build` — byte-deterministic across rebuilds of an identical " +
           "workspace (SPEC 13.3, 12.0; H-4 self-comparison)",
@@ -3054,11 +3062,8 @@ const T13_3_4 = defineProductTest({
         "T13.3-4 after `build` in directory 1",
       );
       assertSnapshotsEqual(
-        asSnapshot(result.firstWorkspace.root, graphDataEntries(snapshotFirst)),
-        asSnapshot(
-          result.secondWorkspace.root,
-          graphDataEntries(snapshotSecond),
-        ),
+        asSnapshot(snapshotFirst, graphDataEntries(snapshotFirst)),
+        asSnapshot(snapshotSecond, graphDataEntries(snapshotSecond)),
         "T13.3-4: graph data of the two directories' builds — " +
           "byte-deterministic for identical workspaces (SPEC 13.3, 12.0)",
       );

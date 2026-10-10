@@ -529,7 +529,7 @@ function graphDataStateOf(snapshot: DirectorySnapshot): DirectorySnapshot {
   for (const [key, entry] of snapshot.entries) {
     if (isGraphDataKey(key)) entries.set(key, entry);
   }
-  return { root: snapshot.root, entries };
+  return { ...snapshot, entries };
 }
 
 /** Assert a plain file exists at `rel`, diagnosed with the SPEC cite. */

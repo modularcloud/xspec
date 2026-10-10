@@ -12,10 +12,15 @@
 // - H-6's exclusion. Every comparison of written files across runs or
 //   workspaces (determinism and twin comparisons alike), and every comparison
 //   of a mutating command's run against its own pre-invocation state,
-//   excludes the lock path and everything under it — `EXCLUDE_LOCK_PATH`, or
-//   `excludingLockPath` beside an exclusion of the caller's own — and nothing
-//   more: never the graph-data area whole. A comparison around commands that
-//   acquire nothing includes it, the snapshot default.
+//   excludes the lock path and everything under it, and nothing more: never
+//   the graph-data area whole; a comparison around commands that acquire
+//   nothing includes it. Every compare of two snapshots applies that rule
+//   itself (helpers/snapshot.ts `lockPathExclusion`, classifying by the
+//   mutating commands' runs the subprocess driver notes,
+//   helpers/acquiring-runs.ts); `EXCLUDE_LOCK_PATH`, or `excludingLockPath`
+//   beside an exclusion of the caller's own, prunes the lock path from a
+//   snapshot's walk for a compare that excludes it whatever ran (the
+//   determinism protocol, helpers/determinism.ts).
 // - H-4's grant-and-restore. An entry's permissions are the product's own
 //   (13.5), so a product may make its entries unreadable to their owner.
 //   Where a plain file's own mode refuses the harness's read of it (to compare
@@ -71,8 +76,9 @@ export function isLockPathKey(key: string): boolean {
 
 /**
  * Snapshot options excluding the lock path and everything under it, and
- * nothing else (H-6): for comparisons across runs or workspaces and for a
- * mutating command's run against its own pre-invocation state.
+ * nothing else (H-6), from the walk itself: for a compare that excludes it
+ * whatever ran — the determinism protocol's — where every other compare
+ * classifies its own pair (helpers/snapshot.ts `lockPathExclusion`).
  */
 export const EXCLUDE_LOCK_PATH: SnapshotOptions = Object.freeze({
   exclude: isLockPathBytes,

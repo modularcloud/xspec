@@ -88,6 +88,7 @@ import {
   assertSnapshotsEqual,
   describeEntry,
   displaySnapshotPath,
+  lockPathExclusion,
   snapshotDirectory,
   snapshotKeyBytes,
 } from "../../helpers/snapshot.js";
@@ -572,7 +573,13 @@ export function isDerivedScope(rel: string): boolean {
  * snapshots: every entry in `completed` — the writes preceding the refused
  * one — holds the twin's post-operation state (a removal's absence
  * included), and every other entry holds its pre-invocation state (no later
- * write attempted).
+ * write attempted). Each entry is compared under H-6's lock-path exclusion
+ * of its pair (helpers/snapshot.ts `lockPathExclusion`): against the twin's
+ * state, a comparison across workspaces, the lock path is left out; against
+ * the pre-invocation state, the lock path of the mutating command's run that
+ * acted between the two snapshots is — acquisition's and release's writes
+ * there count as no modification, and a residue a refused release deletion
+ * leaves there is T13.5-7's own assertion (13.5).
  */
 export function assertPinnedState(
   before: DirectorySnapshot,
@@ -582,8 +589,11 @@ export function assertPinnedState(
   context: string,
 ): void {
   const completedSet = new Set(completed);
+  const againstTwin = lockPathExclusion(after, twinAfter);
+  const againstBefore = lockPathExclusion(before, after);
   for (const key of unionKeys(before, after, twinAfter)) {
     const isCompleted = completedSet.has(key);
+    if ((isCompleted ? againstTwin : againstBefore).excludes(key)) continue;
     const expected = isCompleted
       ? twinAfter.entries.get(key)
       : before.entries.get(key);
@@ -605,7 +615,10 @@ export function assertPinnedState(
 /**
  * SPEC 13.5's weaker law where the write order is unpinned (a regeneration's
  * derived-file writes): every entry in `scope` holds either its prior state
- * or its complete new content — the twin's — never a partial write.
+ * or its complete new content — the twin's — never a partial write. H-6's
+ * lock-path exclusion of either pair leaves an entry out (as in
+ * `assertPinnedState`; no scope here reaches the lock path, which is neither
+ * a derived file nor graph data, 13.4).
  */
 export function assertEachWriteComplete(
   before: DirectorySnapshot,
@@ -614,8 +627,11 @@ export function assertEachWriteComplete(
   scope: (rel: string) => boolean,
   context: string,
 ): void {
+  const againstTwin = lockPathExclusion(after, twinAfter);
+  const againstBefore = lockPathExclusion(before, after);
   for (const key of unionKeys(before, after, twinAfter)) {
     if (!scope(key)) continue;
+    if (againstTwin.excludes(key) || againstBefore.excludes(key)) continue;
     const actual = after.entries.get(key);
     if (sameEntry(actual, before.entries.get(key))) continue;
     if (sameEntry(actual, twinAfter.entries.get(key))) continue;
@@ -1408,7 +1424,11 @@ export async function journalCommitPointArm(
   }
 }
 
-/** The snapshot restricted to the entries `scope` admits. */
+/**
+ * The snapshot restricted to the entries `scope` admits, its root, real
+ * root, and acquisition mark carried over (H-6's classification of its
+ * compares, helpers/snapshot.ts `lockPathExclusion`).
+ */
 function restrictSnapshot(
   snapshot: DirectorySnapshot,
   scope: (rel: string) => boolean,
@@ -1417,7 +1437,7 @@ function restrictSnapshot(
   for (const [key, entry] of snapshot.entries) {
     if (scope(key)) entries.set(key, entry);
   }
-  return { root: snapshot.root, entries };
+  return { ...snapshot, entries };
 }
 
 /** Sources and the journal: the writes 13.5 orders for a rename or move. */

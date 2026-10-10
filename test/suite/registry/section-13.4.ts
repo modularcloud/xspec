@@ -459,12 +459,17 @@ function filteredEntries(
   return kept;
 }
 
-/** View a filtered entry map as a snapshot for `assertSnapshotsEqual`. */
+/**
+ * View a filtered entry map of `source` as a snapshot for
+ * `assertSnapshotsEqual`: `source`'s root, real root, and acquisition mark
+ * carried over, so the compare is classified as `source`'s (H-6,
+ * helpers/snapshot.ts `lockPathExclusion`).
+ */
 function asSnapshot(
-  root: string,
+  source: DirectorySnapshot,
   entries: ReadonlyMap<string, SnapshotEntry>,
 ): DirectorySnapshot {
-  return { root, entries };
+  return { ...source, entries };
 }
 
 /** A snapshot's regular-file entries (the T13.4-1 round-trip compare set). */
@@ -694,8 +699,8 @@ const T13_4_1 = defineProductTest({
         // are outside the compare — SPEC 13.4 constrains files).
         const w2 = await snapshotDirectory(workspace.root, options);
         assertSnapshotsEqual(
-          asSnapshot(workspace.root, fileEntries(w1)),
-          asSnapshot(workspace.root, fileEntries(w2)),
+          asSnapshot(w1, fileEntries(w1)),
+          asSnapshot(w2, fileEntries(w2)),
           "T13.4-1: the workspace's regular files after commit + clean " +
             "checkout vs before — every file xspec writes survives a git " +
             "round trip byte-exactly (SPEC 13.4)",
@@ -749,8 +754,8 @@ const T13_4_1 = defineProductTest({
         );
         const w3 = await snapshotDirectory(workspace.root, options);
         assertSnapshotsEqual(
-          asSnapshot(workspace.root, fileEntries(w1)),
-          asSnapshot(workspace.root, fileEntries(w3)),
+          asSnapshot(w1, fileEntries(w1)),
+          asSnapshot(w3, fileEntries(w3)),
           "T13.4-1: the workspace's regular files after the post-checkout " +
             "rebuild vs before the round trip — builds round-trip (SPEC " +
             "13.4, 12.0, 12.1)",
@@ -1123,13 +1128,13 @@ async function walkOrphanBoundary(
         return !bDerived.includes(key);
       });
       assertSnapshotsEqual(
-        asSnapshot(workspace.root, expected),
+        asSnapshot(s3, expected),
         s4,
         `${tag}: the workspace after deleting the strays and rebuilding — ` +
           `the manually deleted orphans stay gone and nothing else changes ` +
           `(SPEC 13.4, 12.0)`,
       );
-      return asSnapshot(workspace.root, graphDataEntries(s2));
+      return asSnapshot(s2, graphDataEntries(s2));
     },
   );
 }
@@ -1755,9 +1760,9 @@ const T13_4_5 = defineProductTest({
 
         // The durable byte state under protection: the journal plus
         // everything under .xspec/reviews/.
-        const durablesBefore = filteredEntries(
-          (await snapshotDirectory(workspace.root)).entries,
-          (key) => isDurableKey(key),
+        const stagedState = await snapshotDirectory(workspace.root);
+        const durablesBefore = filteredEntries(stagedState.entries, (key) =>
+          isDurableKey(key),
         );
         const journalEntry = durablesBefore.get(JOURNAL_REL);
         const sessionEntry = durablesBefore.get(sessionRel("s"));
@@ -1829,13 +1834,13 @@ const T13_4_5 = defineProductTest({
           const context = `T13.4-5 ${probe.what}`;
           const result = await runCli(product, workspace, probe.argv);
           assertExitCode(result, probe.exit, context);
-          const durablesNow = filteredEntries(
-            (await snapshotDirectory(workspace.root)).entries,
-            (key) => isDurableKey(key),
+          const now = await snapshotDirectory(workspace.root);
+          const durablesNow = filteredEntries(now.entries, (key) =>
+            isDurableKey(key),
           );
           assertSnapshotsEqual(
-            asSnapshot(workspace.root, durablesBefore),
-            asSnapshot(workspace.root, durablesNow),
+            asSnapshot(stagedState, durablesBefore),
+            asSnapshot(now, durablesNow),
             `${context}: the journal and session files after the command — ` +
               `never modified, deleted, or added to by \`build\` or a read ` +
               `command (SPEC 13.4, 6.1, 10.4)`,
