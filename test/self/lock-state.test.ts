@@ -12,13 +12,15 @@
 //
 // - the count half: an entry present (its name bytes, content, and mode
 //   returned), absent, or doubled; the lock path missing or no directory; a
-//   directory, a symbolic link, or a FIFO in the lock directory counted as
-//   no entry, failing beside the entries unless the harness staged it;
+//   directory, a symbolic link (to a directory or to a plain file, never
+//   followed), or a FIFO in the lock directory counted as no entry, failing
+//   beside the entries unless the harness staged it;
 // - the byte half: a change to `.xspec/graph.json`, to another path in
 //   `.xspec`, to a source, or under a nested root's lock path caught — the
 //   root's lock path alone excluded, never the area whole; `.xspec` itself
 //   accepted as new only where the baseline had none; a baseline retaken
-//   during the hold;
+//   during the hold; the lock path never walked, so a directory there the
+//   harness cannot list fails the count half, diagnosed, never the walk;
 // - occupants the harness staged in the lock directory (a dead run's entry
 //   copied in, a directory, a FIFO, a link) counted apart from entries and
 //   required in place, a change or a removal caught;
@@ -29,10 +31,10 @@
 // - the inclusion check around a command acquiring nothing.
 //
 // The Linux leg's (FIFOs, names that are not valid UTF-8, permission
-// removals). The mode-0o000 entry's refusal is verified on this process
-// before it is read through the grant, so that test fails as root by design
-// (CAP_DAC_OVERRIDE reads a mode-0o000 file), never passing vacuously (E-1,
-// H-11).
+// removals). The mode-0o000 entry's refused read and the `-wx` directory's
+// refused listing are verified on this process before they are relied on,
+// so those two tests fail as root by design (CAP_DAC_OVERRIDE reads and
+// lists through any mode), never passing vacuously (E-1, H-11).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -190,13 +192,18 @@ test("the count half: exactly one plain-file entry per held run, returned with i
   expectDiagnosed(await held(1), countHalf, /found no entry$/);
   expect(await held(0)).toBeNull();
 
-  // A directory, a symbolic link, and a FIFO: none is an entry.
+  // A directory, symbolic links to a directory and to a plain file (never
+  // followed: T13.5-10(e)'s replacing occupants), and a FIFO: no entries.
   const others = [
     await stageLeftover(
       workspace,
       ".xspec/lock/d",
       LEFTOVER_TREE.entries[0].node,
     ),
+    await stageLeftover(workspace, ".xspec/lock/filelink", {
+      kind: "symlink",
+      target: { kind: "file", content: "x\n" },
+    }),
     await stageLeftover(workspace, ".xspec/lock/link", {
       kind: "symlink",
       target: { kind: "dir" },
@@ -207,6 +214,7 @@ test("the count half: exactly one plain-file entry per held run, returned with i
     await held(1),
     /found no entry, and beside the entries:/,
     /"\.xspec\/lock\/d": a directory — no entry \(an entry is a plain file\), and nothing the harness staged/,
+    /"\.xspec\/lock\/filelink": a symbolic link — no entry/,
     /"\.xspec\/lock\/link": a symbolic link — no entry/,
     /"\.xspec\/lock\/pipe": a FIFO — no entry/,
   );
@@ -214,7 +222,7 @@ test("the count half: exactly one plain-file entry per held run, returned with i
   expect(await held(0, others)).toBeNull();
   expectDiagnosed(
     await held(1, others),
-    /besides the occupants the harness staged there \("\.xspec\/lock\/d", "\.xspec\/lock\/link", "\.xspec\/lock\/pipe"\), exactly 1 entry/,
+    /besides the occupants the harness staged there \("\.xspec\/lock\/d", "\.xspec\/lock\/filelink", "\.xspec\/lock\/link", "\.xspec\/lock\/pipe"\), exactly 1 entry/,
     /found no entry$/,
   );
 
@@ -741,4 +749,43 @@ test("the inclusion check around a command acquiring nothing: whatever occupied 
     ),
   ).toBeNull();
   expect((await captureLockPath(obstructed.root)).tree.size).toBe(0);
+}, 60_000);
+
+test("the byte half never walks the lock path: a directory there that the harness cannot list (mode -wx, verified first) fails the count half, diagnosed, when nothing staged it — never a harness error at the walk — and, declared staged, its in-place check is refused until the test restores its mode (TEST-SPEC §13.5's preamble; T13.5-10(c)'s -wx leftovers; E-1)", async () => {
+  const workspace = await makeWorkspace();
+  const baseline = await snapshotDirectory(workspace.root);
+  await writeEntry(workspace, ascii("entry"));
+  const left = await stageLeftover(
+    workspace,
+    ".xspec/lock/left",
+    LEFTOVER_TREE.entries[0].node,
+  );
+  const dir = workspace.path(".xspec/lock/left");
+  const held = (staged: readonly StagedLeftover[]): Promise<unknown> =>
+    rejectionOf(
+      assertHeldState(
+        workspace.root,
+        { baseline, heldRuns: 1, staged },
+        "probe",
+      ),
+    );
+  await fsp.chmod(dir, 0o300);
+  try {
+    // E-1: the harness's own listing is refused (as root it is not).
+    const listing = (await rejectionOf(fsp.readdir(dir))) as {
+      code?: string;
+    } | null;
+    expect(listing?.code).toBe("EACCES");
+    expectDiagnosed(
+      await held([]),
+      /found 1 entry \("\.xspec\/lock\/entry"\), and beside the entries:\n {2}- "\.xspec\/lock\/left": a directory — no entry/,
+    );
+    expectMisuse(
+      await held([left]),
+      /cannot list .* a test restores its own staging's permissions before inspecting it/,
+    );
+  } finally {
+    await fsp.chmod(dir, 0o755);
+  }
+  expect(await held([left])).toBeNull();
 }, 60_000);
