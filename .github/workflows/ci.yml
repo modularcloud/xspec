@@ -4,22 +4,33 @@
 #
 #   harness-self   Linux. Harness self-tests and certification only (TEST-SPEC
 #                  17, C-1: certification results are part of the harness's CI
-#                  output). This is the signal that must be green before the
-#                  product exists (red-green): product-facing tests may still
-#                  fail while this job passes.
+#                  output), run through the same wrapper as suite-linux. This
+#                  is the signal that must be green before the product exists
+#                  (red-green): product-facing tests may still fail while this
+#                  job passes.
 #
 #   suite-linux    Linux. The full suite — sections 1–17, certification
-#                  included (E-1) — run with network access disabled after
-#                  dependency installation and as an unprivileged identity
-#                  (.github/scripts/run-without-network.sh), so product
-#                  invocations run with network denied and the permission-
-#                  based stagings of environment refusals (T13.5-7, T14-9,
-#                  T14-10) take effect; the harness verifies each staging on
-#                  itself and reports a privileged runner as a harness error.
-#                  Expected red until the product conforms to SPEC.md; green
-#                  is required from then on.
+#                  included (E-1) — run through
+#                  .github/scripts/run-without-network.sh: with network access
+#                  disabled after dependency installation, so product
+#                  invocations run with network denied; as the runner's own
+#                  unprivileged identity, so the permission-based stagings of
+#                  environment refusals (T13.5-7, T13.5-10(d), T14-9, T14-10)
+#                  take effect, the harness verifying each on itself and
+#                  reporting a privileged runner as a harness error; and with
+#                  the job's administrative access (passwordless sudo) kept
+#                  for the harness, which makes 13.5's machine-wide stagings
+#                  with it — T13.5-9's second user and second mount,
+#                  T13.5-10(e)-(g)'s fresh process-identifier namespaces —
+#                  outside every product invocation (E-1, H-2). Workspaces
+#                  land in /tmp on the image's ext4 root filesystem (TMPDIR
+#                  stays unset), whose name-hash listing order T13.5-10(c)'s
+#                  bracketing arm needs. Expected red until the product
+#                  conforms to SPEC.md; green is required from then on.
 #
-#   suite-windows  Windows. The E-6 platform-sensitive subset. The E-6
+#   suite-windows  Windows. The E-6 platform-sensitive subset, the
+#                  representative fixture's exclusion probe (13.5's busy
+#                  refusal, dead-run takeover, and release) among it. The E-6
 #                  byte-identity comparison reads the Linux leg's
 #                  representative-fixture outputs from the e6-linux-outputs
 #                  artifact, exchanged through XSPEC_E6_EXCHANGE_DIR (written
@@ -64,7 +75,7 @@ jobs:
         run: npm run typecheck
       - name: Build the product
         run: npm run build
-      - name: Run harness self-tests and certification (network disabled, unprivileged)
+      - name: Run harness self-tests and certification (network disabled, unprivileged, administrative access kept)
         run: bash .github/scripts/run-without-network.sh npm run test:self
 
   suite-linux:
@@ -80,7 +91,7 @@ jobs:
       - run: npm ci
       - name: Build the product
         run: npm run build
-      - name: Run the full suite (network disabled after setup, unprivileged, E-1)
+      - name: Run the full suite (network disabled after setup, unprivileged, administrative access kept; E-1)
         run: bash .github/scripts/run-without-network.sh npm test
         env:
           XSPEC_E6_EXCHANGE_DIR: ${{ github.workspace }}/.e6-exchange
