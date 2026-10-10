@@ -54,12 +54,29 @@
 //   every exit-2 error — the 12.7 error document, its `code` and `path`
 //   `configuration-error` and SPEC 14's concerned path for a configuration
 //   error, `null`/`null` for a plain usage error (UsageError).
-// - Exclusivity (SPEC 13.5): a lock file in the OS temp directory keyed by
-//   the workspace root's realpath, holding the owner's PID. A second mutating
-//   command finds a live owner and fails promptly with a usage error; a dead
-//   owner (abnormal termination) is stale and is cleaned, so exclusivity ends
-//   with the process. The lock lives outside the workspace, so holding it
-//   changes no workspace byte (T13.5-1's byte-identical-while-held compare).
+// - Exclusivity (SPEC 13.5): the lock directory `.xspec/lock` under the
+//   graph-data area, transient (13.4); see acquireExclusivity. Acquisition
+//   examines `.xspec` and the lock path without following a link — anything
+//   but a directory at `.xspec`, or anything but a directory or a plain file
+//   at the lock path, obstructs (`write-failure`, 14.24), and a plain file
+//   at the lock path is a leftover, removed — brings the area's directory
+//   and the lock directory into existence where absent, adds the run's entry
+//   (an empty plain file named `<pid>-<16 random hex digits>`), lists the
+//   lock directory, and judges each other plain file in that form by the
+//   identifier its name records: one this process's process list (`/proc`)
+//   lists, other than its own, refuses (`workspace-busy`, 14.26, concerning
+//   `.xspec/lock`) with nothing removed; otherwise every leftover goes — a
+//   directory with all it holds, a symbolic link itself, a FIFO unopened, no
+//   content read, names handled as the bytes listed. A refused read or write
+//   there is `read-failure` or `write-failure` (14.25, 14.24) concerning
+//   `.xspec/lock` (`.xspec` for the area's own path). Release, on every
+//   normal end — acquisition's own failures included — deletes the entry,
+//   then the lock directory, then the area's directory where this
+//   acquisition created it, each only once it holds nothing else, reading
+//   nothing; a killed run leaves its entry, a leftover the next acquisition
+//   removes once the run's identifier is no longer listed. Concurrent
+//   acquisitions tolerate one another's creations and deletions (the
+//   overlapping acquisitions of CONF-RACE's scope).
 // - `--test-hold` (SPEC 13.5): immediately after acquiring exclusivity and
 //   before modifying anything, an empty file is created at the given path
 //   with O_EXCL (anything already there — a symbolic link included — fails
@@ -89,12 +106,13 @@
 //   nothing — durable files are touched only by their owning commands.
 //
 // Determinism (SPEC 12.0): no wall clock, no randomness, no absolute paths
-// in any output, generated file, or stored data; all JSON is serialized with
+// in any output, generated file, or stored data — the lock directory's
+// entries aside, coordination state outside 12.0's determinism whose random
+// names no output carries (13.4) — and all JSON is serialized with
 // byte-sorted keys (SPEC 13.4).
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import * as fsp from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -107,10 +125,13 @@ import { setTimeout as sleep } from "node:timers/promises";
  * content; with JSON output in effect the 12.7 error document is the
  * entire stdout. `code`/`path` are the error finding's stable code and
  * concerned path — set for configuration errors (14.14:
- * `configuration-error` plus the concerned path, SPEC 14), `null` for plain
- * usage errors (SPEC 12.7, 14), 13.5's exclusivity and hold-file errors and
- * the unreadable baseline of 6.3 among them. This scope reports no write or
- * read failure (14.24, 14.25).
+ * `configuration-error` plus the concerned path, SPEC 14) and for
+ * acquisition's write failure, read failure, and busy refusal (14.24–14.26:
+ * `write-failure`, `read-failure`, `workspace-busy`, concerning
+ * `.xspec/lock`, or `.xspec` for the area's own path; SPEC 13.5,
+ * acquireExclusivity), `null` for plain usage errors (SPEC 12.7, 14), the
+ * hold-file error of 13.5 and the unreadable baseline of 6.3 among them.
+ * This scope reports no other write or read failure (14.24, 14.25).
  */
 class UsageError extends Error {
   /** @param {string} message
@@ -1407,8 +1428,75 @@ function mapIdentityForward(identity, entries) {
 }
 
 // ---------------------------------------------------------------------------
-// Workspace exclusivity (SPEC 13.5): live-PID lock, dies with the process
+// Workspace exclusivity (SPEC 13.5): the lock directory `.xspec/lock`
 // ---------------------------------------------------------------------------
+
+/** The graph-data area's own path and the lock path (SPEC 11.6, 13.4, 13.5). */
+const AREA_REL = ".xspec";
+const LOCK_REL = ".xspec/lock";
+
+/**
+ * This conformer's entry form (SPEC 13.5: a plain file whose name records
+ * the acquiring process's identifier and distinguishes the run, in a form
+ * otherwise left open): `<identifier>-<16 lowercase hex digits>`, the digits
+ * drawn at random for each run, so no other run's entry ever bears the name
+ * even where two runs' processes share an identifier (separate
+ * process-identifier namespaces, TEST-SPEC T13.5-10(f)). Entries are empty.
+ * Their names are coordination state outside 12.0's determinism (13.4), and
+ * no diagnostic names one.
+ */
+const ENTRY_NAME = /^([1-9][0-9]*)-[0-9a-f]{16}$/;
+
+function newEntryName() {
+  return `${String(process.pid)}-${randomBytes(8).toString("hex")}`;
+}
+
+/**
+ * The identifier a lock-directory name records in this conformer's entry
+ * form, judged on the name's bytes (a name that is not ASCII matches
+ * nothing), or `null` where it is in no such form.
+ */
+function recordedIdentifier(nameBytes) {
+  const match = ENTRY_NAME.exec(nameBytes.toString("latin1"));
+  return match === null ? null : Number(match[1]);
+}
+
+/**
+ * How many times one acquisition examines afresh after a concurrent run's
+ * creation or deletion moved a path under it (an `EEXIST`, `ENOENT`, or
+ * `ENOTDIR` of a creation; the lock directory vanishing before the listing).
+ * Each retry follows another run's release or creation, so overlapping
+ * acquisitions settle long before this bound; reaching it is a fixture
+ * crash (exit 70), never a product outcome.
+ */
+const ACQUISITION_ATTEMPTS = 64;
+
+/** Creation errors that mean a concurrent run moved a path: examine again. */
+const RACED_CREATION = new Set(["EEXIST", "ENOENT", "ENOTDIR"]);
+
+/**
+ * The acquiring process's process list (SPEC 13.5: a run is alive on this
+ * machine when the identifier its entry records is listed there) as a
+ * judge: the numeric entries of `/proc` — processes, never threads, those of
+ * this process's own process-identifier namespace where `/proc` is mounted
+ * for it — read once per acquisition, and only when a name records an
+ * identifier. Where `/proc` cannot be listed or does not list this process
+ * itself, a signal-0 probe stands in (`EPERM`: listed).
+ */
+async function processListJudge() {
+  let names = [];
+  try {
+    names = await fsp.readdir("/proc");
+  } catch {
+    // No process list to read: the probe below stands in.
+  }
+  const listed = new Set();
+  for (const name of names) {
+    if (/^[1-9][0-9]*$/.test(name)) listed.add(Number(name));
+  }
+  if (!listed.has(process.pid)) return pidAlive;
+  return (pid) => listed.has(pid);
+}
 
 function pidAlive(pid) {
   try {
@@ -1419,64 +1507,387 @@ function pidAlive(pid) {
   }
 }
 
+/** Whether `error` is a filesystem error Node reports for a system call. */
+function isSystemError(error) {
+  return (
+    error instanceof Error &&
+    typeof error.code === "string" &&
+    typeof error.syscall === "string"
+  );
+}
+
 /**
- * Acquire workspace exclusivity. The lock file lives in the OS temp
- * directory keyed by the workspace root's realpath: workspace-scoped (H-1
- * isolation across workspaces), outside the workspace bytes, and released
- * by unlink on completion — or by death detection when the holder was
- * killed (SPEC 13.5: exclusivity ends when the process terminates).
+ * Acquisition's write failure (14.24) or read failure (14.25) — a usage
+ * error concerning `concerned`: the lock path, or `.xspec` for the area's
+ * own path (SPEC 14). The message names the step and the error's code alone,
+ * never an absolute path or an entry's name (12.0 determinism; TEST-SPEC
+ * T13.5-10(d)'s determinism arms). Anything but a system error is a fixture
+ * crash, rethrown as itself.
+ */
+function acquisitionFailure(kind, concerned, what, error) {
+  if (!isSystemError(error)) return error;
+  const condition = kind === "write" ? "14.24" : "14.25";
+  return new UsageError(
+    `${kind} failure at acquisition: cannot ${what} (${error.code}; SPEC 13.5, ${condition})`,
+    { code: CODE_TOKENS[condition], path: concerned },
+  );
+}
+
+const OCCUPANT_KINDS = {
+  file: "a plain file",
+  symlink: "a symbolic link",
+  other: "an occupant that is neither a directory nor a plain file",
+};
+
+/**
+ * An obstruction acquisition does not remove (SPEC 13.5, 13.4): the area's
+ * own path holding anything but a directory, or the lock path anything but
+ * a directory or a plain file — the write failure of 14.24 concerning that
+ * path, the occupant left for manual deletion.
+ */
+function acquisitionObstructed(concerned, kind) {
+  return new UsageError(
+    `write failure at acquisition: ${concerned} is occupied by ${OCCUPANT_KINDS[kind]}, which acquisition does not remove — delete it manually while no mutating command runs (SPEC 13.5, 13.4, 14.24)`,
+    { code: CODE_TOKENS["14.24"], path: concerned },
+  );
+}
+
+/** The busy refusal of 14.26, concerning the lock path. */
+function workspaceBusy() {
+  return new UsageError(
+    `workspace busy: an entry in the lock directory ${LOCK_REL} records an identifier this machine's process list lists, so another run holds exclusivity in this workspace (SPEC 13.5, 14.26)`,
+    { code: CODE_TOKENS["14.26"], path: LOCK_REL },
+  );
+}
+
+/**
+ * The kind of `abs`'s occupant, examined without following a link:
+ * `absent`, `directory`, `file`, `symlink`, or `other`. A refused
+ * examination throws the system error.
+ */
+async function occupantKind(abs) {
+  let stats;
+  try {
+    stats = await fsp.lstat(abs);
+  } catch (error) {
+    if (error?.code === "ENOENT") return "absent";
+    throw error;
+  }
+  if (stats.isDirectory()) return "directory";
+  if (stats.isFile()) return "file";
+  if (stats.isSymbolicLink()) return "symlink";
+  return "other";
+}
+
+/** `dir`'s child `name` as a byte path: names are handled as listed. */
+function childPath(dir, name) {
+  return Buffer.concat([dir, Buffer.from("/"), name]);
+}
+
+/** A deletion of release: refused or not, it changes no outcome (13.5). */
+async function deleteQuietly(deletion) {
+  try {
+    await deletion();
+  } catch {
+    // SPEC 13.5, 14.24: a deletion the environment refuses at release
+    // changes no outcome and is no write failure; one finding nothing,
+    // interference's doing, likewise.
+  }
+}
+
+/**
+ * Acquire workspace exclusivity (SPEC 13.5) in the lock directory
+ * `.xspec/lock`: establish this run's entry (establishEntry), list the lock
+ * directory, and judge it (judgeLockDirectory) — refused by a live run's
+ * entry, else removing every leftover. Returns `{ release }`: release
+ * deletes this run's entry, then the lock directory, then the area's
+ * directory where this acquisition created it — each deletion succeeding
+ * only where the directory then holds nothing else, so release reads
+ * nothing — and every deletion refused or finding nothing changes no
+ * outcome. Acquisition's own failures release before they throw (13.5: a
+ * command failed at acquisition releases), so the caller releases only
+ * what an acquisition returned.
  */
 async function acquireExclusivity(root) {
-  const real = await fsp.realpath(root);
-  const lockPath = path.join(
-    os.tmpdir(),
-    `xspec-conf-core-${sha256Hex(real).slice(0, 32)}.lock`,
-  );
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      const handle = await fsp.open(lockPath, "wx");
-      await handle.writeFile(String(process.pid));
-      await handle.close();
-      return {
-        release: async () => {
-          await fsp.rm(lockPath, { force: true });
-        },
-      };
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      if (deviations.staleLockBlocks) {
-        // VIOL-CORE-STALELOCK (CERTIFICATIONS.md): workspace exclusivity is
-        // not released by abnormal termination — an existing lock file
-        // refuses the command outright, with no holder-liveness detection
-        // and no stale-lock cleanup, so after a mutating command's process
-        // is killed every later mutating command in that workspace is
-        // refused with the usage error of 13.5/12.0. Normal completion
-        // still releases (the completing command unlinks the lock file in
-        // release(), unchanged), so only a killed holder leaves this
-        // refusing state behind; everything else is exactly the conformer's
-        // behavior.
-        throw new UsageError(
-          "another mutating command is running in this workspace (SPEC 13.5, 12.0)",
-        );
-      }
-      let holder = Number.NaN;
-      try {
-        holder = Number.parseInt(await fsp.readFile(lockPath, "utf8"), 10);
-      } catch {
-        // Unreadable lock: treat as stale below.
-      }
-      if (Number.isInteger(holder) && holder > 0 && pidAlive(holder)) {
-        throw new UsageError(
-          "another mutating command is running in this workspace (SPEC 13.5, 12.0)",
-        );
-      }
-      // A terminated holder never blocks later commands (SPEC 13.5).
-      await fsp.rm(lockPath, { force: true });
+  const areaAbs = path.join(root, AREA_REL);
+  const lockAbs = path.join(root, LOCK_REL);
+  /** What this acquisition brought into existence or found, for release. */
+  const held = { createdArea: false, lockDirectory: false, entry: null };
+  const release = async () => {
+    if (held.entry !== null) {
+      const entry = path.join(lockAbs, held.entry);
+      await deleteQuietly(() => fsp.unlink(entry));
     }
+    if (held.lockDirectory) await deleteQuietly(() => fsp.rmdir(lockAbs));
+    if (held.createdArea) await deleteQuietly(() => fsp.rmdir(areaAbs));
+  };
+  try {
+    for (let attempt = 1; ; attempt += 1) {
+      if (attempt > ACQUISITION_ATTEMPTS) {
+        throw new Error(
+          `acquisition did not settle in ${String(ACQUISITION_ATTEMPTS)} attempts`,
+        );
+      }
+      if (!(await establishEntry(areaAbs, lockAbs, held))) continue;
+      let names;
+      try {
+        names = await fsp.readdir(Buffer.from(lockAbs), { encoding: "buffer" });
+      } catch (error) {
+        if (error?.code !== "ENOENT") {
+          throw acquisitionFailure(
+            "read",
+            LOCK_REL,
+            `list the lock directory ${LOCK_REL}`,
+            error,
+          );
+        }
+        // Interference (13.5): the lock directory, this run's entry with
+        // it, is gone since the entry was added — examine afresh.
+        held.entry = null;
+        held.lockDirectory = false;
+        continue;
+      }
+      await judgeLockDirectory(Buffer.from(lockAbs), names, held.entry);
+      return { release };
+    }
+  } catch (error) {
+    await release();
+    throw error;
   }
-  throw new UsageError(
-    "could not acquire workspace exclusivity (SPEC 13.5, 12.0)",
-  );
+}
+
+/**
+ * One pass of acquisition's establishment (SPEC 13.5): the area's own path
+ * examined — anything but a directory, a symbolic link included, obstructs
+ * (write failure concerning `.xspec`); the lock path examined — a plain file
+ * there is a leftover, removed, and anything but a directory or a plain file
+ * obstructs (write failure concerning `.xspec/lock`); the area's directory
+ * and the lock directory brought into existence where absent; then this
+ * run's entry added. Returns false where a concurrent run's creation or
+ * deletion moved a path under it, or a leftover plain file at the lock path
+ * was removed, so that the caller examines afresh; records in `held` what
+ * release must delete.
+ */
+async function establishEntry(areaAbs, lockAbs, held) {
+  let area;
+  try {
+    area = await occupantKind(areaAbs);
+  } catch (error) {
+    throw acquisitionFailure("read", AREA_REL, `examine ${AREA_REL}`, error);
+  }
+  if (area === "absent") {
+    try {
+      await fsp.mkdir(areaAbs);
+    } catch (error) {
+      if (RACED_CREATION.has(error?.code)) return false;
+      throw acquisitionFailure(
+        "write",
+        AREA_REL,
+        `create the graph-data area ${AREA_REL}`,
+        error,
+      );
+    }
+    // Only the run that created the area's directory deletes it (13.5).
+    held.createdArea = true;
+  } else if (area !== "directory") {
+    throw acquisitionObstructed(AREA_REL, area);
+  }
+  let lock;
+  try {
+    lock = await occupantKind(lockAbs);
+  } catch (error) {
+    throw acquisitionFailure("read", LOCK_REL, `examine ${LOCK_REL}`, error);
+  }
+  if (lock === "file") {
+    // A plain file at the lock path is a leftover, which acquisition
+    // removes (13.5) — its content unread.
+    try {
+      await fsp.unlink(lockAbs);
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        let now = "file";
+        try {
+          now = await occupantKind(lockAbs);
+        } catch {
+          // The refusal below stands.
+        }
+        // Still the plain file: the refusal stands (14.24); anything else
+        // there is a concurrent run's doing — examine afresh.
+        if (now === "file") {
+          throw acquisitionFailure(
+            "write",
+            LOCK_REL,
+            `remove the leftover plain file at ${LOCK_REL}`,
+            error,
+          );
+        }
+      }
+    }
+    return false;
+  }
+  if (lock === "absent") {
+    try {
+      await fsp.mkdir(lockAbs);
+    } catch (error) {
+      if (RACED_CREATION.has(error?.code)) return false;
+      throw acquisitionFailure(
+        "write",
+        LOCK_REL,
+        `create the lock directory ${LOCK_REL}`,
+        error,
+      );
+    }
+  } else if (lock !== "directory") {
+    throw acquisitionObstructed(LOCK_REL, lock);
+  }
+  held.lockDirectory = true;
+  const name = newEntryName();
+  try {
+    const handle = await fsp.open(path.join(lockAbs, name), "wx");
+    await handle.close();
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
+      // The lock directory vanished: a concurrent run's release deleted it
+      // once emptied — examine afresh.
+      held.lockDirectory = false;
+      return false;
+    }
+    throw acquisitionFailure(
+      "write",
+      LOCK_REL,
+      `add this run's entry to the lock directory ${LOCK_REL}`,
+      error,
+    );
+  }
+  held.entry = name;
+  return true;
+}
+
+/**
+ * Judge the lock directory's listing (SPEC 13.5): each name but this run's
+ * own entry examined for its kind alone; a plain file whose name records an
+ * identifier in this conformer's entry form — other than the acquiring
+ * process's own — that the process list lists is a live run's entry (or one
+ * in 13.5's gap), refusing acquisition with the busy error of 14.26 before
+ * anything is removed or any other directory listed; failing one, every
+ * leftover — everything else in the lock directory — is removed
+ * (removeLeftover). No file's content is read.
+ *
+ * VIOL-CORE-NOLOCK (CERTIFICATIONS.md, `noMutualExclusion`): a live run's
+ * entry does not refuse acquisition — every entry whose recorded identifier
+ * the process list lists is left in place, unaltered, the other leftovers
+ * removed, and acquisition proceeds, so mutating commands never exclude one
+ * another; entries, the hold file, leftover removal, acquisition's write and
+ * read failures, and release are unchanged.
+ *
+ * VIOL-CORE-STALELOCK (CERTIFICATIONS.md, `staleLockBlocks`): abnormal
+ * termination does not end exclusivity — any entry, a plain file named in
+ * this conformer's entry form, refuses acquisition by its presence alone,
+ * whatever identifier its name records, so a killed run's entry refuses
+ * every later mutating command while it stands; the removal of every
+ * leftover that is no entry, and release, are unchanged.
+ */
+async function judgeLockDirectory(lockBytes, names, ownName) {
+  const own = Buffer.from(ownName);
+  const leftovers = [];
+  let listed = null;
+  for (const name of names) {
+    if (name.equals(own)) continue;
+    const abs = childPath(lockBytes, name);
+    let kind;
+    try {
+      kind = await occupantKind(abs);
+    } catch (error) {
+      throw acquisitionFailure(
+        "read",
+        LOCK_REL,
+        `examine an occupant of the lock directory ${LOCK_REL}`,
+        error,
+      );
+    }
+    // Gone since the listing: a concurrent run's release or removal.
+    if (kind === "absent") continue;
+    const identifier = kind === "file" ? recordedIdentifier(name) : null;
+    if (identifier !== null) {
+      if (deviations.staleLockBlocks) throw workspaceBusy();
+      if (identifier !== process.pid) {
+        listed ??= await processListJudge();
+        if (listed(identifier)) {
+          if (deviations.noMutualExclusion) continue;
+          throw workspaceBusy();
+        }
+      }
+    }
+    leftovers.push({ abs, kind });
+  }
+  for (const leftover of leftovers) {
+    await removeLeftover(leftover.abs, leftover.kind);
+  }
+}
+
+/**
+ * Remove one leftover (SPEC 13.5): a directory with all it holds, at every
+ * depth — listed, each occupant examined and removed, then the emptied
+ * directory — and anything else by unlinking it: a symbolic link itself,
+ * never its target; a FIFO unopened; a plain file unread, whatever its mode.
+ * Names are the bytes the filesystem lists, whatever their first byte and
+ * whether or not they are valid UTF-8. A removal finding nothing is done; a
+ * refused listing or examination is the read failure of 14.25, a refused
+ * removal the write failure of 14.24, each concerning the lock path.
+ */
+async function removeLeftover(abs, kind) {
+  if (kind === "directory") {
+    let names;
+    try {
+      names = await fsp.readdir(abs, { encoding: "buffer" });
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      throw acquisitionFailure(
+        "read",
+        LOCK_REL,
+        `list a leftover directory in ${LOCK_REL}`,
+        error,
+      );
+    }
+    for (const name of names) {
+      const child = childPath(abs, name);
+      let childKind;
+      try {
+        childKind = await occupantKind(child);
+      } catch (error) {
+        throw acquisitionFailure(
+          "read",
+          LOCK_REL,
+          `examine an occupant of a leftover directory in ${LOCK_REL}`,
+          error,
+        );
+      }
+      if (childKind !== "absent") await removeLeftover(child, childKind);
+    }
+    try {
+      await fsp.rmdir(abs);
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      throw acquisitionFailure(
+        "write",
+        LOCK_REL,
+        `remove a leftover directory in ${LOCK_REL}`,
+        error,
+      );
+    }
+    return;
+  }
+  try {
+    await fsp.unlink(abs);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw acquisitionFailure(
+      "write",
+      LOCK_REL,
+      `remove a leftover in ${LOCK_REL}`,
+      error,
+    );
+  }
 }
 
 /**
@@ -1992,7 +2403,10 @@ function emitJsonOnly(io, doc) {
 // SPEC 14's stable code tokens by condition ordinal ("14.N" → token). The
 // JSON report carries the token string alone (SPEC 12.7, 14); the ordinal
 // orders findings and is no part of the value. Only the conditions this
-// conformer's scope reports appear.
+// conformer's scope reports appear: its findings' conditions, and
+// acquisition's write failure, read failure, and busy refusal (14.24–14.26,
+// SPEC 13.5), which arrive in the exit-2 error document of 12.7 alone, never
+// as findings (acquireExclusivity).
 const CODE_TOKENS = {
   14.1: "missing-id",
   14.2: "invalid-structural-id",
@@ -2003,6 +2417,9 @@ const CODE_TOKENS = {
   14.19: "invalid-source-path",
   "14.20": "unparseable-source",
   14.21: "corrupt-session",
+  14.24: "write-failure",
+  14.25: "read-failure",
+  14.26: "workspace-busy",
 };
 
 /** A condition's ordinal (the `N` of `14.N`), ordering findings (SPEC 12.7). */
@@ -2647,8 +3064,11 @@ function refuseUnservedFlags(spelled, synopsis, flags) {
  * included, is what the refresh and the operation act on) — then, for the
  * mutating `review` subcommands (`refreshesGraphData`), the refresh of
  * 13.3, then the operation's own validation and writes (`operate`);
- * exclusivity ends with the command — released on every path, a killed
- * process releasing by dying (the next command detects the dead holder).
+ * exclusivity ends with the command — released as every normal end comes
+ * (completion, refusal, and failure alike; an acquisition that fails
+ * releases before it throws), while a killed process leaves its entry, a
+ * leftover the next acquisition removes once its identifier is no longer
+ * listed (acquireExclusivity).
  * Acquisition and the hold precede every later check (SPEC 13.5; T13.5-8),
  * so an invocation a later check refuses or the gate turns back creates the
  * hold file too and exits with its own outcome only after the hold's
@@ -2684,13 +3104,14 @@ async function runMutating(
   if (deviations.refreshBeforeExclusivity) {
     // VIOL-CORE-EARLYREFRESH (CERTIFICATIONS.md): the 13.3 refresh a
     // mutating `review` subcommand performs on a stale workspace runs here,
-    // before workspace exclusivity is acquired — before the lock and the
+    // before workspace exclusivity is acquired — before acquisition and the
     // hold — so stale graph data is rewritten before the hold file is
     // created; the refresh after the hold (below) becomes a no-op, so the
-    // refresh runs exactly once, at this position. Everything else — the
-    // lock; the hold file created after exclusivity and before every other
-    // write (the session write, `rename`/`move`'s edits, journal appends,
-    // the finishing regeneration of 6.4/6.5); the refresh's own bytes — is
+    // refresh runs exactly once, at this position. Everything else —
+    // acquisition; the hold file created after exclusivity and before every
+    // other write (the session write, `rename`/`move`'s edits, journal
+    // appends, the finishing regeneration of 6.4/6.5); the refresh's own
+    // bytes — is
     // exactly the conformer's behavior, and a workspace whose graph data is
     // current is refreshed by nothing, where the deviation is unobservable —
     // as is a workspace failing `build`'s validations, on which the refresh
@@ -2708,17 +3129,13 @@ async function runMutating(
     refreshAfterHold = async () => {};
   }
   // Workspace exclusivity (SPEC 13.5), acquired at the conformer's position
-  // below — before the hold and every later check; released on every path
-  // (a lock never acquired releases nothing).
+  // below — before the hold and every later check — and released in the
+  // `finally` below as every normal end comes; an acquisition that fails
+  // releases on its own before it throws, so `lock` stays the no-op.
+  // VIOL-CORE-NOLOCK and VIOL-CORE-STALELOCK deviate inside acquisition's
+  // judgment of the lock directory (judgeLockDirectory).
   let lock = { release: async () => {} };
   const acquire = async () => {
-    // VIOL-CORE-NOLOCK (CERTIFICATIONS.md): mutating commands do not exclude
-    // one another — exclusivity is neither acquired nor checked, so a second
-    // mutating command started while another runs or is held proceeds
-    // normally instead of failing with the usage error of 13.5/12.0.
-    // Everything else, the hold file created before any modification and
-    // honored included, is exactly the conformer's behavior.
-    if (deviations.noMutualExclusion) return;
     lock = await acquireExclusivity(config.root);
   };
   const holdIfRequested = async () => {
@@ -4061,8 +4478,12 @@ async function commandReview(io, cwd, sub, args) {
  * conformer. Module state is safe here: each bin*.mjs entry runs exactly one
  * invocation per process.
  *
- * - `noMutualExclusion` (VIOL-CORE-NOLOCK): mutating commands do not exclude
- *   one another; see runMutating.
+ * - `noMutualExclusion` (VIOL-CORE-NOLOCK): a live run's entry does not
+ *   refuse acquisition — acquisition adds its entry and lists the lock
+ *   directory, leaves every entry whose recorded identifier the process
+ *   list lists in place, unaltered, removes the other leftovers, and
+ *   acquires, so mutating commands never exclude one another; see
+ *   judgeLockDirectory.
  * - `lateAcquisition` (VIOL-CORE-LATELOCK): workspace exclusivity is
  *   acquired — and the hold file created — only once the argument checks of
  *   12.0 and baseline resolution (6.3) have passed, instead of before them —
@@ -4080,9 +4501,12 @@ async function commandReview(io, cwd, sub, args) {
  *   workspace exclusivity is acquired, so stale graph data is rewritten
  *   before the hold file is created; the hold file is still created after
  *   exclusivity and before every other write; see runMutating.
- * - `staleLockBlocks` (VIOL-CORE-STALELOCK): workspace exclusivity is not
- *   released by abnormal termination — a lock file left by a killed holder
- *   refuses every later mutating command; see acquireExclusivity.
+ * - `staleLockBlocks` (VIOL-CORE-STALELOCK): abnormal termination does not
+ *   end exclusivity — any entry in the conformer's entry form refuses
+ *   acquisition by its presence alone, whatever identifier its name
+ *   records, so a killed run's entry refuses every later mutating command
+ *   while it stands; leftovers that are no entry are still removed, and
+ *   release is unchanged; see judgeLockDirectory.
  * - `partialDerivedWrites` (VIOL-CORE-PARTIALWRITE): derived-file writes
  *   expose a sustained strict-prefix interval before the complete content
  *   appears; durable files are unaffected; see regenerate.

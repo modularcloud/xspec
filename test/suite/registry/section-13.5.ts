@@ -74,10 +74,14 @@
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - "Proceeds only once the file is deleted" (T13.5-1): the deterministic
-//   check is the whole-root byte snapshot while held (nothing modified) —
+//   check is the held-state comparison while held (TEST-SPEC §13.5's
+//   preamble; helpers/lock-state.ts `assertHeldState`: every workspace path
+//   but the lock path byte-identical to the pre-invocation state — nothing
+//   modified — and `.xspec/lock` holding the held run's one entry) —
 //   certified via VIOL-CORE-EARLYWRITE — plus: the process is still running
-//   after that snapshot's full-tree read completes, and exits 0 only after
-//   the harness deletes the hold file.
+//   after that comparison's reads complete, and exits 0 only after the
+//   harness deletes the hold file. T13.5-8's seam-ordering arms
+//   (`refusedSeamArm`) make the same comparison while held.
 // - Seam neutrality (T13.5-1): one identical twin workspace replays each
 //   held arm's operation without `--test-hold` and the two whole trees —
 //   sources, journal, sessions, derived files, graph data — are compared
@@ -137,6 +141,10 @@ import {
   decodeSessionStatusReport,
 } from "../../helpers/adapters/index.js";
 import {
+  GRAPH_DATA_AREA_PATH,
+  isGraphDataKey,
+} from "../../helpers/adapters/record-staging.js";
+import {
   assertBytesEqual,
   assertExitCode,
   describeByteDifference,
@@ -144,10 +152,12 @@ import {
   HarnessAssertionError,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { assertHeldState } from "../../helpers/lock-state.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
+import type { SnapshotOptions } from "../../helpers/snapshot.js";
 import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
@@ -408,23 +418,23 @@ const T13_5_1_A_EDITED = stagedMdx(
 );
 
 /**
- * Snapshot scope "graph data alone": everything under `.xspec/` except the
- * durable files there — the journal (`.xspec/journal`, SPEC 6.1) and the
- * review sessions (`.xspec/reviews/`, SPEC 10.1) — with everything outside
- * `.xspec/` pruned. SPEC 13.3 leaves graph data's layout unenumerated, so
- * the scope is the graph-data area (11.6) minus its durable occupants; in a
+ * Snapshot scope "graph data alone" — T13.3-2's operational path set, judged
+ * by the suite's one graph-data predicate (`isGraphDataKey`): everything
+ * under `.xspec/` but the durable files there — the journal
+ * (`.xspec/journal`, SPEC 6.1) and the review sessions (`.xspec/reviews/`,
+ * SPEC 10.1) — and the transient lock path `.xspec/lock` with everything
+ * under it (SPEC 13.4: no graph data), with everything outside `.xspec/`
+ * pruned; the area's directory itself is kept, so the walk descends into
+ * it. SPEC 13.3 leaves graph data's layout unenumerated, so the scope is the
+ * graph-data area (11.6) minus its durable and transient occupants; in a
  * harness-staged workspace nothing foreign lives there.
  */
-function excludeAllButGraphData(relPathBytes: Uint8Array): boolean {
-  const rel = Buffer.from(relPathBytes).toString("latin1");
-  if (rel === ".xspec") return false;
-  if (!rel.startsWith(".xspec/")) return true;
-  return (
-    rel === ".xspec/journal" ||
-    rel === ".xspec/reviews" ||
-    rel.startsWith(".xspec/reviews/")
-  );
-}
+const GRAPH_DATA_ALONE: SnapshotOptions = Object.freeze({
+  exclude: (relPathBytes: Uint8Array): boolean => {
+    const key = Buffer.from(relPathBytes).toString("latin1");
+    return key !== GRAPH_DATA_AREA_PATH && !isGraphDataKey(key);
+  },
+});
 
 /**
  * T13.5-1's stale-workspace arm (SPEC 13.5: the hold precedes every
@@ -479,12 +489,14 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
           twinBuild,
           "T13.5-1 stale arm build twin `build` on the edited sources",
         );
-        const staleGraphData = await snapshotDirectory(workspace.root, {
-          exclude: excludeAllButGraphData,
-        });
-        const builtGraphData = await snapshotDirectory(twinBuild.root, {
-          exclude: excludeAllButGraphData,
-        });
+        const staleGraphData = await snapshotDirectory(
+          workspace.root,
+          GRAPH_DATA_ALONE,
+        );
+        const builtGraphData = await snapshotDirectory(
+          twinBuild.root,
+          GRAPH_DATA_ALONE,
+        );
         if (diffSnapshots(staleGraphData, builtGraphData).length === 0) {
           fail(
             `${context}: staging premise — after the edit the workspace's ` +
@@ -496,10 +508,9 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
           );
         }
 
-        // Pre-invocation state: every workspace file, `.xspec/` included —
-        // the lock path aside, which the held run's acquisition writes (H-6:
-        // every snapshot compare spanning a mutating command's run leaves
-        // it out, helpers/snapshot.ts).
+        // Pre-invocation state, the held-state comparison's baseline: a
+        // snapshot of the whole root, `.xspec/` included — graph data among
+        // it (TEST-SPEC §13.5's preamble; helpers/lock-state.ts).
         const before = await snapshotDirectory(workspace.root);
         const hold = holdPathFor(workspace, "hold-stale.tmp");
         const running = await startProduct(product, {
@@ -509,18 +520,18 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
         try {
           await awaitHoldFile(running, hold, context);
           await assertEmptyHoldFile(hold, context);
-          const whileHeld = await snapshotDirectory(workspace.root);
-          assertSnapshotsEqual(
-            before,
-            whileHeld,
-            `${context}: the workspace while held vs before the command ` +
-              `started — graph data (.xspec/graph.json, the one file the ` +
-              `pending 13.3 refresh changes) and every other workspace ` +
-              `file but the lock path (H-6): the hold is created after ` +
-              `acquiring exclusivity and ` +
-              `before every modification, the refresh included, so a ` +
-              `product that refreshes before acquiring exclusivity fails ` +
-              `here (SPEC 13.5, 13.3)`,
+          // The held-state comparison: its byte half excludes the lock path
+          // alone, so graph data (.xspec/graph.json, the one file the
+          // pending 13.3 refresh changes) is compared like every other
+          // path — the hold is created after acquiring exclusivity and
+          // before every modification, the refresh included, so a product
+          // that refreshes before acquiring exclusivity fails here — and its
+          // count half finds the held run's one entry (SPEC 13.5, 13.3).
+          await assertHeldState(
+            workspace.root,
+            { baseline: before, heldRuns: 1 },
+            `${context} while held, against the workspace before the ` +
+              `command started`,
           );
           if (running.hasExited()) {
             fail(
@@ -590,13 +601,13 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
           workspace.root,
           twinBuild.root,
           `${context} vs its build twin, graph data alone (everything ` +
-            `under .xspec/ but the journal and .xspec/reviews/): after ` +
-            `release the 13.3 refresh has run, writing exactly what ` +
-            `\`build\` writes on an identically edited twin — the recorded ` +
-            `derived-file paths, which the edit leaves unchanged, excepted ` +
-            `(SPEC 13.3, 13.5; T10.1-1; a product-to-itself comparison ` +
-            `under H-4/H-6)`,
-          { exclude: excludeAllButGraphData },
+            `under .xspec/ but the journal, .xspec/reviews/, and the lock ` +
+            `path .xspec/lock): after release the 13.3 refresh has run, ` +
+            `writing exactly what \`build\` writes on an identically edited ` +
+            `twin — the recorded derived-file paths, which the edit leaves ` +
+            `unchanged, excepted (SPEC 13.3, 13.5; T10.1-1; a ` +
+            `product-to-itself comparison under H-4/H-6)`,
+          GRAPH_DATA_ALONE,
         );
       });
     });
@@ -606,7 +617,7 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
 const T13_5_1 = defineProductTest({
   id: "T13.5-1",
   title:
-    "each mutating command (`rename`, file-form `move`, `review create/resolve/split`) with `--test-hold` creates an empty file at the path after acquiring exclusivity and before modifying anything (workspace byte-identical while held), proceeds only once the file is deleted, and completes normally, the held-then-released run's final workspace state — sources, journal, sessions, derived files, and graph data — byte-identical to the same operation run without `--test-hold` on an identical twin workspace (seam neutrality: the seam changes no other behavior; H-4/H-6); on a workspace whose graph data is stale (a section's text edited after `build`, the workspace still valid) `review create --strategy audit --test-hold` leaves graph data and every other workspace file byte-identical while held — the hold precedes the 13.3 refresh too — and after release creates the session and refreshes the graph data to what `build` writes on an identical twin; anything at the hold path — file, directory, or symlink — fails the command exit 2 without modifying anything; `build` and `query` given `--test-hold` fail exit 2 as an unknown flag, and `build --test-hold --json` — the flag value-taking by name on every command — consumes `--json` as the hold path and leaves JSON out of effect: exit 2, stdout empty, no hold file (SPEC 13.5, 13.3, 12.0)",
+    "each mutating command (`rename`, file-form `move`, `review create/resolve/split`) with `--test-hold` creates an empty file at the path after acquiring exclusivity and before modifying anything (the held-state comparison holding while held: every workspace path but the lock path `.xspec/lock` byte-identical to the pre-invocation state, and `.xspec/lock` a directory holding exactly the held run's entry, a plain file), proceeds only once the file is deleted, and completes normally, the held-then-released run's final workspace state — sources, journal, sessions, derived files, and graph data — byte-identical to the same operation run without `--test-hold` on an identical twin workspace (seam neutrality: the seam changes no other behavior; H-4/H-6); on a workspace whose graph data is stale (a section's text edited after `build`, the workspace still valid) `review create --strategy audit --test-hold` leaves graph data and every other workspace file but the lock path byte-identical while held — the hold precedes the 13.3 refresh too — and after release creates the session and refreshes the graph data to what `build` writes on an identical twin; anything at the hold path — file, directory, or symlink — fails the command exit 2 without modifying anything; `build` and `query` given `--test-hold` fail exit 2 as an unknown flag, and `build --test-hold --json` — the flag value-taking by name on every command — consumes `--json` as the hold path and leaves JSON out of effect: exit 2, stdout empty, no hold file (SPEC 13.5, 13.3, 12.0)",
   run: async (product) => {
     // Every arm below stages itself on a freshly built workspace with no
     // refresh pending (CERTIFICATIONS.md §CONF-CORE's freshness constraint);
@@ -647,14 +658,16 @@ const T13_5_1 = defineProductTest({
           try {
             await awaitHoldFile(running, hold, context);
             await assertEmptyHoldFile(hold, context);
-            const whileHeld = await snapshotDirectory(workspace.root);
-            assertSnapshotsEqual(
-              before,
-              whileHeld,
-              `${context}: the workspace while held vs before the command ` +
-                `started — the hold file is created after acquiring ` +
-                `exclusivity and before modifying anything, so the workspace ` +
-                `is byte-identical while held (SPEC 13.5)`,
+            // The held-state comparison (TEST-SPEC §13.5's preamble): the
+            // hold file is created after acquiring exclusivity and before
+            // modifying anything, so every path but the lock path is
+            // byte-identical while held, and the lock directory holds the
+            // held run's one entry (SPEC 13.5).
+            await assertHeldState(
+              workspace.root,
+              { baseline: before, heldRuns: 1 },
+              `${context} while held, against the workspace before the ` +
+                `command started`,
             );
             if (running.hasExited()) {
               fail(
@@ -1930,8 +1943,9 @@ function assertGateFindings(
  * when the command exits before creating it, as a product acquiring late
  * does, reporting the refusal at once with no hold file (§CONF-CORE's
  * justification; H-8, H-9: never a pass on the command's exit or on a
- * timeout) — the workspace is byte-identical while held, the command is
- * still running after the while-held snapshot, and only once the harness
+ * timeout) — the held-state comparison holds while held (every path but the
+ * lock path byte-identical, the held run's one entry in `.xspec/lock`), the
+ * command is still running after it, and only once the harness
  * deletes the hold file does it exit, with `expectedExit` and nothing
  * modified. Returns the run for the caller's own report assertions.
  */
@@ -1959,13 +1973,16 @@ async function refusedSeamArm(
         `ever creating the hold file`,
     );
     await assertEmptyHoldFile(hold, context);
-    const whileHeld = await snapshotDirectory(workspace.root);
-    assertSnapshotsEqual(
-      before,
-      whileHeld,
-      `${context}: the workspace while held vs before the command started — ` +
-        `byte-identical: the hold precedes every later check and every ` +
-        `modification, and a refused invocation modifies nothing (SPEC 13.5)`,
+    // The held-state comparison (TEST-SPEC §13.5's preamble): the hold
+    // precedes every later check and every modification, and a refused
+    // invocation modifies nothing, so every path but the lock path is
+    // byte-identical while held, the lock directory holding the held run's
+    // one entry (SPEC 13.5).
+    await assertHeldState(
+      workspace.root,
+      { baseline: before, heldRuns: 1 },
+      `${context} while held, against the workspace before the command ` +
+        `started`,
     );
     if (running.hasExited()) {
       fail(
@@ -2063,6 +2080,10 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
     const context1 =
       "T13.5-8 command 1 `review resolve s <leaf item> --status skipped " +
       "--test-hold <path>` on the failing workspace";
+    // Command 1's pre-invocation state: what the gate's turning it back must
+    // leave the workspace as, the lock path aside (H-6: acquisition's and
+    // release's writes there count as no modification, SPEC 13.5).
+    const before1 = await snapshotDirectory(workspace.root);
     const running = await startProduct(product, {
       cwd: workspace.root,
       argv: [
@@ -2153,10 +2174,12 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
           `13.3, 13.5)`,
       );
       assertSnapshotsEqual(
-        heldBaseline,
+        before1,
         await snapshotDirectory(workspace.root),
-        `${context1}: the gate writes nothing — the session file unchanged, ` +
-          `no refresh on a failing workspace (SPEC 13.3)`,
+        `${context1}: the gate writes nothing — the workspace byte-identical ` +
+          `to its state before command 1 started, the session file ` +
+          `unchanged, no refresh on a failing workspace, the lock path ` +
+          `aside (SPEC 13.3, 13.5; H-6)`,
       );
     } finally {
       running.kill();
@@ -2166,9 +2189,9 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
     // Seam ordering at the gate (SPEC 13.3: for a mutating `review`
     // subcommand, exclusivity acquisition precedes the gate's report; 13.5):
     // with no other holder, `review create --strategy audit --name n` on the
-    // failing workspace creates the hold file first, holds the workspace
-    // byte-identical, and only after the hold's deletion exits 1 with the
-    // condition-20 finding, creating no session.
+    // failing workspace creates the hold file first, the held-state
+    // comparison holding while it holds, and only after the hold's deletion
+    // exits 1 with the condition-20 finding, creating no session.
     const gateContext =
       "T13.5-8 (seam ordering at the gate: `review create --strategy audit " +
       "--name n --json --test-hold <path>` on the failing workspace)";
@@ -2312,7 +2335,7 @@ async function validWorkspaceArms(product: ProductBinding): Promise<void> {
 const T13_5_8 = defineProductTest({
   id: "T13.5-8",
   title:
-    "acquisition precedes every later check: while `review resolve --test-hold` is held on a workspace failing `build`'s validations (a second spec source beginning with a byte-order mark, 14.20), `review create --strategy audit --name n`, `review resolve s <item> --status skipped`, and `rename specs/A.mdx a b` each fail promptly with the exclusion usage error, exit 2 — never the gate's or the precondition's exit 1 — modifying nothing; under `--test-hold` with no other holder, `rename specs/A.mdx nope x` (a nonexistent old ID, 12.0), `review create --base <unresolvable-ref> --name n` (6.3, the workspace in no repository), and, on the failing workspace, `review create --strategy audit --name n` (13.3's gate) each create the hold file first — the wait failing loud when the command exits without creating it — the workspace byte-identical while held, and exit 2, 2, and 1 with their own usage error or the condition-20 finding only after the hold's deletion, nothing modified; the non-mutating boundary: `rename specs/A.mdx nope x --preview` exits 2 at once acquiring nothing, and `--test-hold` beside `--preview` is exit 2 creating no hold file (SPEC 13.5, 13.3, 6.3, 6.4, 6.6, 12.0, 14)",
+    "acquisition precedes every later check: while `review resolve --test-hold` is held on a workspace failing `build`'s validations (a second spec source beginning with a byte-order mark, 14.20), `review create --strategy audit --name n`, `review resolve s <item> --status skipped`, and `rename specs/A.mdx a b` each fail promptly with the exclusion usage error, exit 2 — never the gate's or the precondition's exit 1 — modifying nothing; under `--test-hold` with no other holder, `rename specs/A.mdx nope x` (a nonexistent old ID, 12.0), `review create --base <unresolvable-ref> --name n` (6.3, the workspace in no repository), and, on the failing workspace, `review create --strategy audit --name n` (13.3's gate) each create the hold file first — the wait failing loud when the command exits without creating it — the held-state comparison holding while held (every workspace path but the lock path `.xspec/lock` byte-identical, `.xspec/lock` holding the held run's one entry), and exit 2, 2, and 1 with their own usage error or the condition-20 finding only after the hold's deletion, nothing modified; the non-mutating boundary: `rename specs/A.mdx nope x --preview` exits 2 at once acquiring nothing, and `--test-hold` beside `--preview` is exit 2 creating no hold file (SPEC 13.5, 13.3, 6.3, 6.4, 6.6, 12.0, 14)",
   run: async (product) => {
     await failingWorkspaceArms(product);
     await validWorkspaceArms(product);

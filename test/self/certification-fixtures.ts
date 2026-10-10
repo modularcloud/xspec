@@ -107,11 +107,14 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       "T13.5-8",
     ],
     [
-      // VIOL-CORE-NOLOCK: mutating commands do not exclude one another — the
-      // hold file is still created before any modification and honored, but
-      // a second mutating command started while another runs or is held
-      // proceeds normally instead of failing with the usage error of SPEC
-      // 13.5/12.0.
+      // VIOL-CORE-NOLOCK: a live run's entry does not refuse acquisition —
+      // acquisition adds its own entry and lists the lock directory as SPEC
+      // 13.5 directs, but leaves every entry recording an identifier its
+      // process list lists in place, unaltered, removes the other leftovers,
+      // and acquires, so mutating commands never exclude one another (the
+      // busy refusal of 14.26 dropped); entries, the hold file (still
+      // created before any modification and honored), leftover removal,
+      // acquisition's write and read failures, and release are unchanged.
       violator("VIOL-CORE-NOLOCK", "conf-core/bin-nolock.mjs", [
         "T13.5-2",
         "T13.5-8",
@@ -136,10 +139,14 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       violator("VIOL-CORE-EARLYREFRESH", "conf-core/bin-earlyrefresh.mjs", [
         "T13.5-1",
       ]),
-      // VIOL-CORE-STALELOCK: workspace exclusivity is not released by
-      // abnormal termination — after a mutating command's process is killed,
-      // every later mutating command in that workspace is refused with the
-      // usage error of SPEC 13.5/12.0. Normal completion still releases.
+      // VIOL-CORE-STALELOCK: abnormal termination does not end exclusivity —
+      // an entry whose run has terminated refuses acquisition as a live
+      // run's entry does (14.26), its presence alone judged, whatever
+      // identifier its name records, so once a mutating command's process
+      // is killed every later mutating command in that workspace is refused
+      // `workspace-busy` while the dead run's entry stands. Release on every
+      // normal end, and the removal of every leftover that is no entry, are
+      // unchanged.
       violator("VIOL-CORE-STALELOCK", "conf-core/bin-stalelock.mjs", [
         "T13.5-3",
       ]),
