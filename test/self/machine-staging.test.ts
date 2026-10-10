@@ -24,10 +24,11 @@
 //   cannot express is refused;
 // - through a stand-in launcher: a launched run is spawned by the launcher's
 //   command line with the driver's environment, leads its own process group,
-//   is captured like any run, refuses `kill`, and is killed through the
-//   launcher — by `killGroup`, whose confirmation also waits for a
-//   descendant that left the group, and by the hang guard, whose failing
-//   kill settles the run with a harness error.
+//   is captured like any run — its JSON stdout walked as T12.7-1 asks —
+//   refuses `kill`, and is killed through the launcher — by `killGroup`,
+//   whose confirmation also waits for a descendant that left the group, and
+//   by the hang guard, whose failing kill settles the run with a harness
+//   error.
 
 import { Buffer } from "node:buffer";
 import { execFile } from "node:child_process";
@@ -394,7 +395,8 @@ test("prlimit's raw lines become the options restoring each limit; a line of ano
 // with and exits 7; `group`, `escape`, and `hang` start a grandchild — in the
 // stand-in's process group, sharing its streams (`group`, `hang`), or in a
 // group of its own with no stream of the run (`escape`) — record its
-// identifier, then (`group`, `escape`) write the hold file, and idle.
+// identifier, then (`group`, `escape`) write the hold file, and idle; `emit`
+// prints `XSPEC_EMIT` and exits 0.
 const STANDIN_SOURCE = `import { spawn } from "node:child_process";
 import fs from "node:fs";
 
@@ -427,6 +429,9 @@ switch (mode) {
   case "hang":
     grandchild(args[0], false);
     idle();
+    break;
+  case "emit":
+    process.stdout.write(process.env.XSPEC_EMIT ?? "");
     break;
   default:
     idle();
@@ -623,6 +628,31 @@ test("killGroup kills a launched run through its launcher, collects the exit as 
   expect((lingering as ProcessGroupLingerError).stage).toBe("listed");
   expect((lingering as ProcessGroupLingerError).lingering).toEqual([escaped]);
   expect(launcher.kills).toEqual([leader, escaping.pid]);
+}, 60_000);
+
+test("a launched run's captured stdout is walked like any run's with JSON output in effect (T12.7-1): a near-marker rejects it with the walk's diagnosed failure, naming the launched command line", async () => {
+  const { workspace, binding } = await standin();
+  const nearMarker = `${JSON.stringify({
+    findings: [],
+    nodes: [{ identity: "specs/A.mdx", tags: { unavailable: false } }],
+  })}\n`;
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["emit", "--json"],
+    env: { XSPEC_EMIT: nearMarker },
+    launcher: fakeLauncher(),
+  });
+  reapAtEnd(running);
+  const walked = await rejectionOf(running.waitForExit());
+  expect(walked).toBeInstanceOf(HarnessAssertionError);
+  const message = (walked as Error).message;
+  expect(message).toContain(
+    "T12.7-1, the driver's walk over every captured JSON document",
+  );
+  expect(message).toContain(
+    "at $.nodes[0].tags: expected no object of any form other than the unavailability marker",
+  );
+  expect(message).toContain("through the self-test's stand-in launcher");
 }, 60_000);
 
 test("the hang guard kills a launched run's whole group through its launcher; a kill the launcher fails settles the run with a harness error, never a timeout or an assertion failure", async () => {
