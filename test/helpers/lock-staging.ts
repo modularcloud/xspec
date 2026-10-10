@@ -61,7 +61,11 @@
 //   T13.5-10(a), (b), P-15), and `assertFifosIntact` (each staged FIFO still
 //   a FIFO in place). Nothing here ever opens a staged FIFO: whether a
 //   product opens one is observed by its promptness (a reader opening a FIFO
-//   with no writer blocks; T13.5-10, P-15).
+//   with no writer blocks; T13.5-10, P-15). The reader behind the records
+//   and the checks (`readLockPathTree` over the whole lock path) and the
+//   byte-state compare (`describeTreeDifferences`) also serve
+//   helpers/lock-state.ts's lock-path assertions, so one machinery reads and
+//   compares the lock path wherever a test inspects it.
 // - Dead runs' entries (T13.5-3; T13.5-10(b), (c), T13.4-12, T11.6-3,
 //   T13.5-11(d)). `killHeldRun` starts a mutating command — a held `rename`
 //   succeeding there — under `--test-hold` in a process group of its own,
@@ -875,6 +879,30 @@ async function captureTree(
   return tree;
 }
 
+/**
+ * The state of the lock path `.xspec/lock` and of everything under it in the
+ * workspace at `root`, keyed as a staging's record is (workspace-relative
+ * keys) and read by the same reader its record and checks use, so a record
+ * and a later reading compare like for like (helpers/lock-state.ts's
+ * lock-path assertions): never following a link or opening a FIFO, a plain
+ * file's content read whole under H-4's grant. Nothing at the lock path —
+ * `.xspec` absent, or no directory — reads as an empty tree. A listing the
+ * environment refuses is a harness error: a test restores its own
+ * staging's permissions before inspecting the lock path.
+ */
+export async function readLockPathTree(root: string): Promise<LeftoverTree> {
+  const rootBytes = Buffer.from(root);
+  try {
+    await fsp.lstat(joinBytes(rootBytes, LOCK_BYTES));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // ENOTDIR: `.xspec` is no directory, so nothing lies at the lock path.
+    if (code === "ENOENT" || code === "ENOTDIR") return new Map();
+    throw error;
+  }
+  return await captureTree(rootBytes, LOCK_BYTES, true);
+}
+
 async function captureInto(
   base: Buffer,
   rel: Buffer,
@@ -942,13 +970,15 @@ async function readPlainFile(abs: Buffer): Promise<Buffer> {
 /**
  * Every difference between two trees, in bytewise key order: added and
  * removed paths, kind changes, content and link-target changes, and — where
- * `modes` — permission changes.
+ * `modes` — permission changes. `label` names the first tree's side in a
+ * content difference ("staged", or "captured" for an earlier reading).
  */
 function diffTrees(
   before: LeftoverTree,
   after: LeftoverTree,
   modes: boolean,
   render: (key: string) => string,
+  label = "staged",
 ): string[] {
   const keys = [...new Set([...before.keys(), ...after.keys()])].sort();
   const lines: string[] = [];
@@ -960,11 +990,27 @@ function diffTrees(
     } else if (was !== undefined && now === undefined) {
       lines.push(`removed ${render(key)}: was ${describeState(was)}`);
     } else if (was !== undefined && now !== undefined) {
-      const detail = describeStateChange(was, now, modes);
+      const detail = describeStateChange(was, now, modes, label);
       if (detail !== undefined) lines.push(`changed ${render(key)}: ${detail}`);
     }
   }
   return lines;
+}
+
+/**
+ * Every difference between an expected tree and an actual one, keyed alike
+ * (workspace-relative keys, as `readLockPathTree` and a staging's record
+ * key them): paths added and removed, kind changes, content and link-target
+ * changes — byte state, modes aside (H-4) — one line each, byte names
+ * rendered readably. `label` names the expected side in a content
+ * difference. Shared with helpers/lock-state.ts's lock-path assertions.
+ */
+export function describeTreeDifferences(
+  expected: LeftoverTree,
+  actual: LeftoverTree,
+  label = "staged",
+): string[] {
+  return diffTrees(expected, actual, false, renderRel, label);
 }
 
 function describeState(state: LeftoverState): string {
@@ -986,6 +1032,7 @@ function describeStateChange(
   was: LeftoverState,
   now: LeftoverState,
   modes: boolean,
+  label: string,
 ): string | undefined {
   if (was.kind !== now.kind) {
     return `kind changed: ${describeState(was)} → ${describeState(now)}`;
@@ -995,7 +1042,7 @@ function describeStateChange(
     now.kind === "file" &&
     !was.bytes.equals(now.bytes)
   ) {
-    return `content changed: ${describeByteDifference(now.bytes, was.bytes, "now", "staged")}`;
+    return `content changed: ${describeByteDifference(now.bytes, was.bytes, "now", label)}`;
   }
   if (
     was.kind === "symlink" &&
@@ -1279,8 +1326,12 @@ function renderBytes(bytes: Buffer): string {
   return segments.join("/");
 }
 
-/** A workspace-relative path (bytes, or a latin1 key's bytes) rendered. */
-function renderRel(rel: Buffer | string): string {
+/**
+ * A workspace-relative path (bytes, or a key's latin1 bytes) rendered for a
+ * diagnosis, quoted: each `/`-separated segment as text, or as its hex where
+ * it is not valid UTF-8 (shared with helpers/lock-state.ts).
+ */
+export function renderRel(rel: Buffer | string): string {
   const bytes = typeof rel === "string" ? Buffer.from(rel, "latin1") : rel;
   return JSON.stringify(renderBytes(bytes));
 }
@@ -1301,7 +1352,11 @@ function outsideRenderer(dir: string): (key: string) => string {
       : JSON.stringify(`${dir}/${renderBytes(Buffer.from(key, "latin1"))}`);
 }
 
-function renderLines(lines: readonly string[]): string {
+/**
+ * Diagnosis lines as an indented list, continuation lines indented further
+ * (shared with helpers/lock-state.ts).
+ */
+export function renderLines(lines: readonly string[]): string {
   return lines
     .map((line) => `  - ${line.split("\n").join("\n    ")}`)
     .join("\n");
