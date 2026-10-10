@@ -519,6 +519,10 @@ let lastResolvedRoot = null;
  * (CERTIFICATIONS.md §CONF-CORE); `specs` is required (SPEC 7). Every
  * failure is a configuration error (14.14), its error finding carrying
  * `configuration-error` and SPEC 14's concerned path.
+ *
+ * VIOL-CORE-READERENTRY (CERTIFICATIONS.md, `readersAddEntries`): once the
+ * configuration is loaded, `build` and the read commands add their own
+ * entry where a lock directory stands (addReaderEntry).
  */
 async function loadConfig(cwd, configFlag) {
   const configPath = await findConfigPath(cwd, configFlag);
@@ -539,6 +543,9 @@ async function loadConfig(cwd, configFlag) {
   }
   const root = path.dirname(configPath);
   lastResolvedRoot = root;
+  if (deviations.readersAddEntries && buildOrReadInvocation) {
+    await addReaderEntry(root);
+  }
   return { root, groups };
 }
 
@@ -4603,19 +4610,35 @@ async function commandReview(io, cwd, sub, args) {
  *   seam, straight after acquiring — then dwells for a sustained interval
  *   and proceeds with the rest of the command outside exclusivity,
  *   releasing nothing further; see runMutating.
+ * - `readersAddEntries` (VIOL-CORE-READERENTRY): while a directory — never a
+ *   symbolic link to one — occupies the lock path, `build` and the read
+ *   commands each add to it an entry of their own, in this conformer's
+ *   entry form recording the reader's own process identifier, and leave it
+ *   there as they end; they list no lock directory, judge no entry, and are
+ *   refused by none; see addReaderEntry.
  */
 let deviations = {};
 
 /**
- * VIOL-CORE-CHATTYREADS (CERTIFICATIONS.md): the invocations that append the
- * fixed line — `build` and the read commands of SPEC 13.3 (for `review`,
- * exactly the read subcommands; the mutating `create`/`resolve`/`split` are
- * unchanged, as are `rename` and `move`). The command and subcommand are
- * the first two non-flag tokens of the invocation read under 12.0's grammar
- * (readInvocation's `words`), exactly as dispatchCommand identifies them, so
- * the switch reads nothing of argv beyond what the conformer reads.
+ * Whether this invocation is `build` or a read command
+ * (isBuildOrReadInvocation), set once by runXspec before dispatch (module
+ * state; each bin*.mjs entry runs exactly one invocation per process).
+ * Consumed only by the VIOL-CORE-CHATTYREADS deviation in runXspec and the
+ * VIOL-CORE-READERENTRY deviation in loadConfig.
  */
-const CHATTY_READ_COMMANDS = new Set([
+let buildOrReadInvocation = false;
+
+/**
+ * The invocations VIOL-CORE-CHATTYREADS and VIOL-CORE-READERENTRY
+ * (CERTIFICATIONS.md) deviate on — `build` and the read commands of SPEC
+ * 13.3 (for `review`, exactly the read subcommands; the mutating
+ * `create`/`resolve`/`split` are unchanged, as are `rename` and `move` and
+ * their previews). The command and subcommand are the first two non-flag
+ * tokens of the invocation read under 12.0's grammar (readInvocation's
+ * `words`), exactly as dispatchCommand identifies them, so neither switch
+ * reads anything of argv beyond what the conformer reads.
+ */
+const BUILD_AND_READ_COMMANDS = new Set([
   "build",
   "check",
   "ids",
@@ -4624,7 +4647,7 @@ const CHATTY_READ_COMMANDS = new Set([
   "coverage",
   "impact",
 ]);
-const CHATTY_REVIEW_READ_SUBCOMMANDS = new Set([
+const REVIEW_READ_SUBCOMMANDS = new Set([
   "list",
   "status",
   "next",
@@ -4632,10 +4655,46 @@ const CHATTY_REVIEW_READ_SUBCOMMANDS = new Set([
   "export",
 ]);
 
-function isChattyReadInvocation(words) {
+function isBuildOrReadInvocation(words) {
   const [command, subcommand] = words;
-  if (CHATTY_READ_COMMANDS.has(command)) return true;
-  return command === "review" && CHATTY_REVIEW_READ_SUBCOMMANDS.has(subcommand);
+  if (BUILD_AND_READ_COMMANDS.has(command)) return true;
+  return command === "review" && REVIEW_READ_SUBCOMMANDS.has(subcommand);
+}
+
+/**
+ * VIOL-CORE-READERENTRY (CERTIFICATIONS.md, `readersAddEntries`): `build` or
+ * a read command, once its configuration is located and loaded — the
+ * workspace root known (loadConfig) — adds an entry of its own to the lock
+ * directory where a directory, never a symbolic link to one, occupies the
+ * lock path (the area's own path a directory too, so the write traverses no
+ * link): an empty plain file named in this conformer's entry form
+ * (newEntryName: the reader's own process identifier and random digits),
+ * created exclusively, and left there as the reader ends — a dead run's
+ * leftover once the reader has exited, which a mutating command's
+ * acquisition removes as any leftover, though one meeting the reader still
+ * running refuses on its entry as on any live run's (judgeLockDirectory,
+ * unchanged). The reader lists no lock directory, judges no entry, and is
+ * refused by none: where nothing, or anything but a directory, is at the
+ * lock path, or the environment refuses the creation, it adds nothing and
+ * proceeds as the conformer does. At most one entry per invocation.
+ */
+let readerEntryAdded = false;
+
+async function addReaderEntry(root) {
+  if (readerEntryAdded) return;
+  readerEntryAdded = true;
+  try {
+    const area = await fsp.lstat(path.join(root, AREA_REL));
+    if (!area.isDirectory()) return;
+    const lockAbs = path.join(root, LOCK_REL);
+    const lock = await fsp.lstat(lockAbs);
+    if (!lock.isDirectory()) return;
+    const handle = await fsp.open(path.join(lockAbs, newEntryName()), "wx");
+    await handle.close();
+  } catch {
+    // Nothing at the lock path, or a creation the environment refused: the
+    // reader adds nothing (the deviation's own precondition).
+  }
 }
 
 /**
@@ -4670,12 +4729,9 @@ export async function runXspec(argv, cwd, options = {}) {
     stderr: (text) => process.stderr.write(text),
   };
   const invocation = readInvocation(argv);
+  buildOrReadInvocation = isBuildOrReadInvocation(invocation.words);
   const code = await dispatchCommand(io, cwd, invocation);
-  if (
-    deviations.chattyReads &&
-    code !== 2 &&
-    isChattyReadInvocation(invocation.words)
-  ) {
+  if (deviations.chattyReads && code !== 2 && buildOrReadInvocation) {
     // VIOL-CORE-CHATTYREADS (CERTIFICATIONS.md): the append happens after
     // the command's own work, against the root the command actually resolved
     // (set by loadConfig on every path that reaches a non-exit-2 outcome; the

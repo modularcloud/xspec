@@ -28,8 +28,13 @@
 // fixed fractions of its twin's lift-to-exit span, on fresh copies of one
 // built workspace, a kill short of the twin's final state finding the dead
 // run's entry and a run exiting first ending as its twin), T13.5-4 (readers
-// during mutation + build/query storm), T13.5-5 (atomic visibility via a polling
-// reader), T13.5-6 (workspace isolation), T13.5-7 (interrupted or
+// during mutation: while a `rename` holds, each read from the 13.3 read
+// surface exits 0 with its pre-hold stdout, `check --json` clean with
+// nothing for the lock path, no read reporting `workspace-busy`, and once
+// each has exited the held-state comparison and the inclusion check — the
+// holder's entry alone, byte-identical; then the build/query storm),
+// T13.5-5 (atomic visibility via a polling reader), T13.5-6 (workspace
+// isolation), T13.5-7 (interrupted or
 // write-refused mutation: the pinned write order — the refusal arms (a)–(f)
 // composed from write-refusal-staging.ts, and the kill arm), T13.5-8 (acquisition before every later check: the
 // exclusion-first refusals on a failing workspace, the hold seam engaging on
@@ -112,13 +117,18 @@
 // - T13.5-4's storm arm asserts termination only — the storm commands' exit
 //   codes are deliberately unasserted — plus the final `build`'s
 //   byte-equality to a clean build; its held-phase reads run while the
-//   mutator is held (§VIOL-CORE-PARTIALWRITE's expected-failure analysis
-//   depends on exactly this shape). The clean-build compare excludes the
-//   journal — durable, not derived (SPEC 13.4): the 13.5 tests assert hold,
-//   exclusion, and derived-file behavior, never journal bytes
-//   (§VIOL-CORE-CHATTYREADS's expected-failure analysis depends on exactly
-//   that); whether `build` and read commands modify the journal is T6.1-1's
-//   and T13.4-5's charter.
+//   mutator is held, one at a time, none overlapping a `build`
+//   (§VIOL-CORE-PARTIALWRITE's expected-failure analysis depends on exactly
+//   this shape), each drawn from §CONF-CORE's read surface — no `inventory`
+//   and no preview — over a session holding no resolution
+//   (§VIOL-CORE-PERSISTREADS), and each followed, once it has exited, by
+//   the held-state comparison — whose byte half covers the journal, where
+//   §VIOL-CORE-CHATTYREADS fails T13.5-4, and whose count half covers the
+//   lock directory, where §VIOL-CORE-READERENTRY does — and the inclusion
+//   check (H-6). The storm's clean-build compare excludes the journal —
+//   durable, not derived (SPEC 13.4): whether `build` and read commands
+//   modify the journal is T6.1-1's and T13.4-5's charter, and during a hold
+//   that of the held-state comparisons above.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - "Proceeds only once the file is deleted" (T13.5-1): the deterministic
@@ -160,7 +170,13 @@
 // - "Observe the prior state" (T13.5-4): each read command's exit code and
 //   stdout bytes while the rename is held equal the same invocation's from
 //   before the rename started (SPEC 12.0 byte-determinism: identical
-//   workspace bytes, identical answers).
+//   workspace bytes, identical answers). "Reporting nothing for the lock
+//   path": `check --json`'s report clean, and, where it holds findings, none
+//   concerning `.xspec/lock` or a path under it (its `path` or a location's
+//   `file`). "No read command reporting the busy condition": no read's
+//   stdout — its report, answer, or error document — carries 14.26's
+//   stable code `workspace-busy` (T14-4: 14.26 delivered by the refused
+//   mutating command alone), stderr's wording left free (H-3).
 // - "Never a partial file" (T13.5-5): every distinct content the polling
 //   reader observes must byte-equal one of the completed builds' contents
 //   for the polled path (the set of post-build reads), and no absence may
@@ -201,6 +217,8 @@ import type {
 import {
   decodeFindingsReport,
   decodeSessionStatusReport,
+  pathValueBytes,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
   GRAPH_DATA_AREA_PATH,
@@ -219,14 +237,16 @@ import {
   applyReuseCheck,
   runVoidableTrial,
 } from "../../helpers/kill-discipline.js";
-import { LOCK_PATH } from "../../helpers/lock-path.js";
+import { isLockPathBytes, LOCK_PATH } from "../../helpers/lock-path.js";
 import type { LockEntry } from "../../helpers/lock-staging.js";
 import { killHeldRun } from "../../helpers/lock-staging.js";
 import {
   assertHeldState,
   assertLockDirectoryEntries,
   assertLockPathAbsent,
+  assertLockPathAsCaptured,
   assertOnlyEntry,
+  captureLockPath,
 } from "../../helpers/lock-state.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -2296,23 +2316,182 @@ const STORM_QUERIES = 4;
 
 /**
  * Snapshot exclusion for the storm arm's clean-build compare: omit the
- * journal — durable, not derived (SPEC 13.4). T13.5-4's charter is that any
- * derived-file inconsistency is resolved by the final `build`; whether
- * `build` and read commands modify the journal is T6.1-1's and T13.4-5's,
- * and CERTIFICATIONS.md's §VIOL-CORE-CHATTYREADS expected-failure set
- * depends on the 13.5 tests asserting derived-file behavior, never journal
- * bytes.
+ * journal — durable, not derived (SPEC 13.4). The storm's charter is that
+ * any derived-file inconsistency is resolved by the final `build`; whether
+ * `build` and read commands modify the journal is T6.1-1's and T13.4-5's
+ * charter, and, during a hold, that of the held-state comparisons made after
+ * T13.5-4's reads (their byte half covering the journal:
+ * §VIOL-CORE-CHATTYREADS fails T13.5-4 there). The storm compares as it did
+ * before those comparisons existed (§VIOL-CORE-READERENTRY's expected
+ * failure: the storm "terminates and compares as before").
  */
 function excludeJournalFile(relPathBytes: Uint8Array): boolean {
   return Buffer.from(relPathBytes).toString("latin1") === ".xspec/journal";
 }
 
+/**
+ * A read command T13.5-4 runs before the hold and again while the `rename`
+ * holds: drawn from §CONF-CORE's read surface — no `inventory` and no
+ * preview, whose busy-free answers during a hold T11.6-3 and T6.6-3 assert
+ * (the scope's staging constraint) — over the workspace's one spec group
+ * and its audit session `s`, which holds no resolution, so no read meets a
+ * stale one (§VIOL-CORE-PERSISTREADS's constraint); none overlaps a `build`
+ * (§VIOL-CORE-PARTIALWRITE's constraint).
+ */
+interface HeldRead {
+  readonly argv: readonly string[];
+  readonly what: string;
+  /** `check --json`: its findings report clean, nothing for the lock path. */
+  readonly checkReport?: true;
+}
+
+const T13_5_4_READS: readonly HeldRead[] = [
+  { argv: ["check"], what: "`check`" },
+  { argv: ["check", "--json"], what: "`check --json`", checkReport: true },
+  { argv: ["ids", "--json"], what: "`ids --json`" },
+  {
+    argv: ["show", "specs/A.mdx#a", "--json"],
+    what: "`show specs/A.mdx#a --json`",
+  },
+  { argv: ["query", "nodes"], what: "`query nodes`" },
+  { argv: ["coverage", "--json"], what: "`coverage --json`" },
+  { argv: ["review", "list", "--json"], what: "`review list --json`" },
+  {
+    argv: ["review", "status", "s", "--json"],
+    what: "`review status s --json`",
+  },
+];
+
+/** 14.26's stable code (SPEC 14): the busy condition's token. */
+const WORKSPACE_BUSY = "workspace-busy";
+
+/** Whether a finding concerns the lock path or a path under it. */
+function concernsLockPath(finding: Finding): boolean {
+  const paths = [finding.path, ...finding.locations.map((at) => at.file)];
+  return paths.some(
+    (value) => value !== null && isLockPathBytes(pathValueBytes(value)),
+  );
+}
+
+/**
+ * `check --json`'s findings report names nothing at or under the lock path
+ * (TEST-SPEC T13.5-4: `check` clean on a clean workspace, "reporting
+ * nothing for the lock path"): judged on an exit-1 report, the only exit
+ * whose report holds findings — a clean one (exit 0) is asserted empty by
+ * `assertCleanCheckReport`, any other exit diagnosed by the exit check.
+ */
+function assertNoLockPathFinding(result: RunResult, context: string): void {
+  if (result.exitCode !== 1) return;
+  const { findings } = decodeFindingsReport(
+    parseJsonStdout(result, context),
+    context,
+  );
+  const there = findings.filter(concernsLockPath);
+  if (there.length === 0) return;
+  fail(
+    `${context}: \`check\` reports nothing for the lock path ${LOCK_PATH} — ` +
+      `coordination state, transient, and no workspace content (SPEC 13.4, ` +
+      `13.5; TEST-SPEC T13.5-4) — yet ${String(there.length)} of its ` +
+      `${String(findings.length)} finding(s) concern it: ` +
+      there
+        .map(
+          (finding) =>
+            `${finding.code ?? "<no code>"} at ` +
+            `${renderPathValue(finding.path)}: ${finding.message}`,
+        )
+        .join("; "),
+  );
+}
+
+/**
+ * `check --json` clean: exactly `{"findings": []}` (SPEC 12.7: a
+ * finding-free report's array is empty; 12.0: exit 0, asserted by the
+ * caller first).
+ */
+function assertCleanCheckReport(result: RunResult, context: string): void {
+  const { findings } = decodeFindingsReport(
+    parseJsonStdout(result, context),
+    context,
+  );
+  assertSameJson(
+    findings,
+    [],
+    `${context}: \`check\` is clean on a clean workspace — exactly ` +
+      `{"findings": []} (SPEC 12.7, 12.0; TEST-SPEC T13.5-4)`,
+  );
+}
+
+/**
+ * One read while T13.5-4's `rename` holds, judged once it has exited
+ * (TEST-SPEC T13.5-4). It runs bounded — a read waiting the hold out fails
+ * diagnosed at the bound (H-8; the bound a hang guard, H-10); its stdout
+ * carries no busy condition — 14.26's stable code, which the refused
+ * mutating command alone reports (T14-4) — and it exits 0; for `check
+ * --json`, no finding concerns the lock path and the report is clean; its
+ * stdout is byte-identical to the same read's before the `rename` started:
+ * it observes the prior state (SPEC 12.0 byte-determinism: identical
+ * workspace bytes, identical answers). Then the held-state comparison
+ * against the `rename`'s pre-invocation state — every path but the lock
+ * path byte-identical (the journal, sessions, and graph data among them),
+ * `.xspec/lock` holding the holder's entry alone — and the inclusion check
+ * (H-6; the machinery every lock-path inclusion shares): whatever occupied
+ * the lock path as the read started — the holder's entry — occupies it
+ * byte-identical, name and content, nothing added beside it, a read
+ * acquiring nothing and writing nothing there (SPEC 13.4).
+ */
+async function readWhileHeld(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  read: HeldRead,
+  reference: RunResult,
+  preInvocation: DirectorySnapshot,
+): Promise<void> {
+  const context = `T13.5-4 ${read.what} while the rename is held`;
+  const lockPath = await captureLockPath(workspace.root);
+  const result = await runBounded(product, workspace.root, read.argv, context);
+  if (Buffer.from(result.stdoutBytes).includes(WORKSPACE_BUSY)) {
+    fail(
+      `${context}: no read command reports the busy condition — the stable ` +
+        `code "${WORKSPACE_BUSY}" of 14.26, which the refused mutating ` +
+        `command alone reports (SPEC 13.5, 14.26; TEST-SPEC T14-4) — yet ` +
+        `its stdout carries it: ${summarizeResult(result)}`,
+    );
+  }
+  if (read.checkReport === true) assertNoLockPathFinding(result, context);
+  assertExitCode(
+    result,
+    0,
+    `${context}: read commands still run while a mutating command is held, ` +
+      `exiting as they did before it (SPEC 13.5: every command but the ` +
+      `mutating ones may run concurrently with them)`,
+  );
+  if (read.checkReport === true) assertCleanCheckReport(result, context);
+  assertBytesEqual(
+    result.stdoutBytes,
+    reference.stdoutBytes,
+    `${context}: observes the prior state — stdout byte-identical to the ` +
+      `same read before the mutation started (SPEC 13.5; 12.0 ` +
+      `byte-determinism: identical workspace bytes, identical answers)`,
+  );
+  await assertHeldState(
+    workspace.root,
+    { baseline: preInvocation, heldRuns: 1 },
+    `${context}, once it has exited, against the rename's pre-invocation ` +
+      `state (a read acquires nothing and writes nothing: SPEC 13.5, 13.4)`,
+  );
+  await assertLockPathAsCaptured(
+    lockPath,
+    `${context}, once it has exited: the holder's entry byte-identical, name ` +
+      `and content, nothing added beside it`,
+  );
+}
+
 const T13_5_4 = defineProductTest({
   id: "T13.5-4",
   title:
-    "while a mutating command is held, read commands still run and observe the prior state (exit codes and stdout bytes equal the pre-hold runs); non-mutating commands run concurrently with each other — a parallel build/query storm on one workspace terminates, and one final `build` resolves any derived-file inconsistency, byte-equal to a clean build (SPEC 13.5, 12.0)",
+    "while a mutating command (`rename specs/A.mdx a a2 --test-hold <path>`, on a freshly built valid workspace) is held, read commands drawn from the 13.3 read surface — no `inventory`, no preview — still run and observe the prior state: each exits 0 with stdout byte-identical to the same read's before the hold, `check --json` clean with no finding concerning the lock path, and no read's stdout carrying the busy condition's code `workspace-busy` (14.26); once each has exited, the held-state comparison holds against the rename's pre-invocation state — every path but the lock path byte-identical, `.xspec/lock` holding the holder's entry alone — and the lock path is byte-identical to its state as the read started, the holder's entry unchanged in name and content, nothing added beside it; non-mutating commands run concurrently with each other — a parallel build/query storm on one workspace terminates, and one final `build` resolves any derived-file inconsistency, byte-equal to a clean build (SPEC 13.5, 13.4, 14.26, 12.0, H-6)",
   run: async (product) => {
-    // --- Held-phase reads: prior state ---
+    // --- Held-phase reads: prior state; held-state comparison after each ---
     await withWorkspace(CORE_DECL, async (workspace) => {
       await buildOk(product, workspace, "T13.5-4 staging `build`");
       await expectExit(
@@ -2323,21 +2502,23 @@ const T13_5_4 = defineProductTest({
         "T13.5-4 staging `review create --strategy audit --name s`",
       );
 
-      // Representative read commands over the 13.3 read surface (§CONF-CORE).
-      const reads: readonly (readonly [readonly string[], string])[] = [
-        [["check"], "`check`"],
-        [["ids", "--json"], "`ids --json`"],
-        [["show", "specs/A.mdx#a", "--json"], "`show specs/A.mdx#a --json`"],
-        [["query", "nodes"], "`query nodes`"],
-        [["coverage", "--json"], "`coverage --json`"],
-        [["review", "list", "--json"], "`review list --json`"],
-      ];
       const before = new Map<string, RunResult>();
-      for (const [argv, what] of reads) {
-        const result = await runCli(product, workspace, argv);
-        assertExitCode(result, 0, `T13.5-4 pre-hold ${what}`);
-        before.set(what, result);
+      for (const read of T13_5_4_READS) {
+        const context = `T13.5-4 pre-hold ${read.what}`;
+        const result = await runCli(product, workspace, read.argv);
+        assertExitCode(result, 0, context);
+        if (read.checkReport === true) {
+          assertCleanCheckReport(
+            result,
+            `${context} on the freshly built valid workspace`,
+          );
+        }
+        before.set(read.what, result);
       }
+      // The held rename's pre-invocation state: the held-state comparison's
+      // baseline (TEST-SPEC §13.5's preamble), taken once every pre-hold read
+      // has exited.
+      const preInvocation = await snapshotDirectory(workspace.root);
 
       const hold = holdPathFor(workspace, "hold-reads.tmp");
       const contextHeld =
@@ -2348,31 +2529,17 @@ const T13_5_4 = defineProductTest({
       });
       try {
         await awaitHoldFile(running, hold, contextHeld);
-        for (const [argv, what] of reads) {
-          const context = `T13.5-4 ${what} while the rename is held`;
-          const result = await runBounded(
-            product,
-            workspace.root,
-            argv,
-            context,
-          );
-          assertExitCode(
-            result,
-            0,
-            `${context}: read commands still run while a mutating command ` +
-              `is held (SPEC 13.5)`,
-          );
-          const reference = before.get(what);
+        for (const read of T13_5_4_READS) {
+          const reference = before.get(read.what);
           if (reference === undefined) {
-            throw new Error(`T13.5-4 internal error: no pre-hold ${what}`);
+            throw new Error(`T13.5-4 internal error: no pre-hold ${read.what}`);
           }
-          assertBytesEqual(
-            result.stdoutBytes,
-            reference.stdoutBytes,
-            `${context}: observes the prior state — stdout byte-identical ` +
-              `to the same read before the mutation started (SPEC 13.5; ` +
-              `12.0 byte-determinism: identical workspace bytes, identical ` +
-              `answers)`,
+          await readWhileHeld(
+            product,
+            workspace,
+            read,
+            reference,
+            preInvocation,
           );
         }
         await releaseHoldFile(hold);
@@ -2390,8 +2557,9 @@ const T13_5_4 = defineProductTest({
         assertExitCode(
           result,
           0,
-          `${contextHeld}: completes normally after release, so the ` +
-            `held-phase observations are attributable to the hold (SPEC 13.5)`,
+          `${contextHeld}: completes normally once its hold is lifted, so ` +
+            `the held-phase observations are attributable to the hold (SPEC ` +
+            `13.5)`,
         );
       } finally {
         running.kill();

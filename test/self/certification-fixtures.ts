@@ -163,9 +163,12 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // journal — each such invocation that is not refused as a usage or
       // configuration error (exit 2) appends one fixed line to
       // `.xspec/journal`, creating the file when absent. Mutating commands,
-      // and the entries `rename`/`move` append, are unchanged.
+      // and the entries `rename`/`move` append, are unchanged. Fails T13.4-5
+      // (its journal byte-compares) and T13.5-4 (the held-state comparisons
+      // once its reads during the hold have exited, the journal grown).
       violator("VIOL-CORE-CHATTYREADS", "conf-core/bin-chattyreads.mjs", [
         "T13.4-5",
+        "T13.5-4",
       ]),
       // VIOL-CORE-PERSISTREADS: review reads persist read-time invalidation —
       // when `status`, `next`, `show`, or `export` computes that a resolved
@@ -212,6 +215,20 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // conformer's does. Fails T13.5-1 on its dangling-link arm alone,
       // through the arm's hang detection (S-3).
       violator("VIOL-CORE-HOLDLINK", "conf-core/bin-holdlink.mjs", ["T13.5-1"]),
+      // VIOL-CORE-READERENTRY: while a directory — never a symbolic link to
+      // one — occupies the lock path, `build` and the read commands each add
+      // to it an entry of their own (a plain file named as a mutating run's
+      // entry is, recording the reader's process identifier) and leave it
+      // there as they end; where no directory occupies the lock path, they
+      // add nothing. They acquire nothing — list no lock directory, judge no
+      // entry, are refused by none — and a mutating command's acquisition
+      // removes a reader's entry as any dead run's. Fails T13.5-4: once each
+      // read run during the hold has exited, the lock directory holds its
+      // entry beside the holder's, where the held-state comparison's count
+      // half asserts the holder's entry alone.
+      violator("VIOL-CORE-READERENTRY", "conf-core/bin-readerentry.mjs", [
+        "T13.5-4",
+      ]),
     ],
   ),
   // CONF-VALID (§CONF-VALID): segment and tag validity — `build` with the
