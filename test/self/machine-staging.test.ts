@@ -433,6 +433,9 @@ switch (mode) {
 }
 `;
 
+/** The variable the stand-in launcher adds, marking a run it started. */
+const LAUNCH_MARK = "XSPEC_STAND_IN_LAUNCHED";
+
 interface FakeLauncher extends RunLauncher {
   /** The groups the launcher was asked to kill, in order. */
   readonly kills: number[];
@@ -456,6 +459,7 @@ function fakeLauncher(failKills = false): FakeLauncher {
         "-i",
         "--",
         ...Object.entries(env).map(([name, value]) => `${name}=${value}`),
+        `${LAUNCH_MARK}=1`,
         invocation.command,
         ...invocation.args,
       ],
@@ -551,7 +555,13 @@ test("a launched run is spawned by the launcher's command line with exactly the 
     pid: number;
     pgrp: number;
   };
-  expect(launchedReport.env).toEqual(directReport.env);
+  // The launcher's command line ran it (its mark), with exactly the
+  // environment the driver built — the spawn's own never reaching it.
+  expect(launchedReport.env).toEqual({
+    ...directReport.env,
+    [LAUNCH_MARK]: "1",
+  });
+  expect(directReport.env[LAUNCH_MARK]).toBeUndefined();
   expect(launchedReport.argv).toEqual(["a b", "x=y"]);
   expect(launchedReport.pid).toBe(launched.pid);
   expect(launchedReport.pgrp).toBe(launched.pid);

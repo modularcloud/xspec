@@ -17,11 +17,14 @@
 //   harness's own primary group — the group they share. `ensureSecondUser`
 //   makes it idempotently: an existing account is reused as found, a missing
 //   one is made with `useradd` (no home, no group of its own, no login
-//   shell), and a concurrent instance making it first is tolerated (after a
-//   failed `useradd` the account is looked up again, and `useradd` retried,
-//   bounded, while it is still missing). It is never removed. An account
-//   bearing the harness's or root's uid, or sharing no group with the
-//   harness, is a staging error (mode `second-user`).
+//   shell). Concurrent makers — other suite instances on the machine — are
+//   serialized by `flock` on `SECOND_USER_LOCK`, the check and the creation
+//   one step under it: `useradd` checks the name before it locks the account
+//   files, so two unserialized makers may both add it, the later
+//   overwriting the earlier's uid (seen on a hosted runner). A failed step
+//   is retried, bounded, while the account is still missing. It is never
+//   removed. An account bearing the harness's or root's uid, or sharing no
+//   group with the harness, is a staging error (mode `second-user`).
 // - Group access (T13.5-9): `stageGroupAccess` makes a workspace reachable
 //   through the shared group — its plain files group-readable and
 //   group-writable, its directories group-listable, group-writable, and
@@ -98,6 +101,17 @@ export const DEFAULT_SUDO = "sudo";
 
 /** Bound on one administrative or lookup command. */
 const COMMAND_TIMEOUT_MS = 60_000;
+/**
+ * The lock serializing the second user's check-and-create across every
+ * harness instance on the machine (E-3). `useradd` checks the name before it
+ * locks the account files, so two makers running at once may both add it,
+ * the later overwriting the earlier's uid under a reader's feet (seen on a
+ * hosted runner: makers read uids 1003 and 1004). A root-owned file in the
+ * machine's lock directory, made by `flock` on first use, never removed.
+ */
+export const SECOND_USER_LOCK = "/run/lock/xspec-second-user.lock";
+/** Bound on waiting for {@link SECOND_USER_LOCK}. */
+const SECOND_USER_LOCK_WAIT_SECONDS = 60;
 /** `useradd` attempts before a missing second user is a staging error. */
 const USERADD_ATTEMPTS = 5;
 /** `umount` attempts before a busy second mount is a staging error. */
@@ -334,9 +348,12 @@ async function judgeSecondUser(account: {
 
 /**
  * T13.5-9's second user, made idempotently (E-3): an existing account is
- * judged and reused, a missing one made with `sudo -n useradd`, a concurrent
- * maker tolerated; never removed. Unmemoized — `ensureSecondUser` is the
- * memoized entry; this one is what a self-test runs concurrently.
+ * judged and reused; a missing one is made by `sudo -n flock
+ * SECOND_USER_LOCK sh -c 'getent passwd … || useradd …'`, the check and the
+ * creation one step under a lock every harness instance on the machine
+ * takes, so concurrent makers never both add it; never removed. Unmemoized
+ * — `ensureSecondUser` is the memoized entry; this one is what a self-test
+ * runs concurrently.
  */
 export async function createSecondUser(): Promise<SecondUser> {
   requireLinux("second-user", SECOND_USER_NAME);
@@ -354,20 +371,20 @@ export async function createSecondUser(): Promise<SecondUser> {
       );
     }
     const outcome = await runAdministrative([
-      "useradd",
-      "--no-create-home",
-      "--no-user-group",
-      "--gid",
-      String(gid),
-      "--shell",
-      "/usr/sbin/nologin",
-      "--comment",
-      "xspec harness second user",
+      "flock",
+      "--wait",
+      String(SECOND_USER_LOCK_WAIT_SECONDS),
+      SECOND_USER_LOCK,
+      "/bin/sh",
+      "-c",
+      'getent passwd "$1" > /dev/null || exec useradd --no-create-home --no-user-group --gid "$2" --shell /usr/sbin/nologin --comment "xspec harness second user" "$1"',
+      "sh",
       SECOND_USER_NAME,
+      String(gid),
     ]);
     if (outcome.code === 0) continue;
-    // A concurrent instance made it first (useradd refuses the existing
-    // name) or held the account files' lock: look again after a pause.
+    // The lock not taken in time, or the account files' own lock held by
+    // another tool: look again after a pause.
     failures.push(`attempt ${String(attempt)}: ${describeOutcome(outcome)}`);
     await sleep(100 * attempt);
   }
