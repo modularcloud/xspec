@@ -277,6 +277,17 @@ test("the count half: exactly one plain-file entry per held run, returned with i
     /SPEC 13\.5: each run's entry is a plain file in the lock directory; anything else there is no entry; found 1 entry/,
   );
 
+  // Many entries: the first ten named, the rest counted.
+  for (let index = 0; index < 11; index += 1) {
+    await writeEntry(workspace, ascii(`x${String(index).padStart(2, "0")}`));
+  }
+  expectDiagnosed(
+    await held(1, others),
+    new RegExp(
+      `found 12 entries \\(${ODD_SHOWN}, "\\.xspec/lock/x00", .*"\\.xspec/lock/x08", … and 2 more\\)$`,
+    ),
+  );
+
   // Misuse: no count of entries.
   expectMisuse(await held(-1), /-1 is no number of entries/);
   expectMisuse(await held(1.5), /1\.5 is no number of entries/);

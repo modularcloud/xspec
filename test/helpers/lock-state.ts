@@ -96,6 +96,7 @@ const DOT = 0x2e;
 const LOCK_BYTES = Buffer.from(LOCK_PATH, "latin1");
 const LOCK_PREFIX = Buffer.from(`${LOCK_PATH}/`, "latin1");
 const MAX_RENDERED_LINES = 25;
+const MAX_NAMED_ENTRIES = 10;
 /** The lock directory's own state in an expected tree (modes are aside). */
 const LOCK_DIRECTORY: LeftoverState = { kind: "dir", mode: 0o755 };
 
@@ -335,11 +336,17 @@ async function checkLockDirectory(
     }
   }
   if (found.length !== count || beside.length > 0) {
+    const named = found
+      .slice(0, MAX_NAMED_ENTRIES)
+      .map((entry) => renderRel(entryRel(entry.name)));
+    if (found.length > named.length) {
+      named.push(`… and ${String(found.length - named.length)} more`);
+    }
     const listed =
       found.length === 0
         ? "no entry"
         : `${String(found.length)} ${found.length === 1 ? "entry" : "entries"} ` +
-          `(${found.map((entry) => renderRel(entryRel(entry.name))).join(", ")})`;
+          `(${named.join(", ")})`;
     fail(
       `${context}: ${expectation}; found ${listed}` +
         (beside.length === 0
@@ -696,7 +703,9 @@ async function describeLockPath(root: string, known?: Stats): Promise<string> {
     );
   }
   if (names.length === 0) return `an empty directory is at ${LOCK_PATH}`;
-  const shown = names.slice(0, 10).map((name) => renderRel(entryRel(name)));
+  const shown = names
+    .slice(0, MAX_NAMED_ENTRIES)
+    .map((name) => renderRel(entryRel(name)));
   if (names.length > shown.length) {
     shown.push(`… and ${String(names.length - shown.length)} more`);
   }
