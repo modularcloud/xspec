@@ -38,6 +38,17 @@
 //   in the process list (Linux), returning the identifiers the group's
 //   processes bore for the reuse check; on such a run the hang guard and
 //   the capture limit kill the whole group too.
+// - H-2's controlled identity and namespace, for 13.5's machine-wide
+//   stagings alone (T13.5-9, T13.5-10(e)–(g); E-1): a run started with a
+//   `launcher` (the run option; helpers/machine-staging.ts builds them) is
+//   spawned through the launcher's command line — `sudo` dropping to the
+//   second user, the run's environment passed explicitly — while every hook
+//   here sees the product's own argv and working directory, so T12.7-1's
+//   walk, T6.5-22(a)'s check, H-6's notes, and the undeclared-staging guard
+//   apply unchanged, and its exit code and streams are captured as any
+//   run's. Such a run always leads a process group of its own, and every
+//   signal to it — the guards' kills, `killGroup` — goes through the
+//   launcher: the harness's own identity may not signal its processes.
 // - Environment policy (conservative choice): the child inherits the ambient
 //   environment minus variables that would let the machine leak into
 //   fixture-observable behavior — `GIT_*` and `EMAIL` (the product shells out
@@ -125,6 +136,7 @@ import type { GroupGoneOptions } from "./kill-discipline.js";
 import {
   confirmGroupGone,
   DEFAULT_GROUP_GONE_TIMEOUT_MS,
+  descendantsOf,
   processGroupMembers,
   ProcessGroupLingerError,
   VoidedTrialsExhaustedError,
@@ -331,6 +343,34 @@ export function builtProductBinding(): ProductBinding {
  */
 export type ArgvValue = string | Uint8Array;
 
+/**
+ * Starts a run under an identity or in a namespace the harness controls —
+ * H-2's channel for 13.5's reach and identifier stagings alone (T13.5-9,
+ * T13.5-10(e)–(g); E-1), built by helpers/machine-staging.ts — through a
+ * command line of its own, whose processes the harness's own identity may
+ * not be permitted to signal.
+ */
+export interface RunLauncher {
+  /** How the run is launched, appended to its command line in diagnoses. */
+  readonly label: string;
+  /**
+   * The spawn that starts `invocation` — the command and arguments the
+   * driver resolved, the command an absolute path — with exactly `env` as
+   * its environment, in the working directory the spawn is given. Throws a
+   * plain `Error`, nothing spawned, for an invocation it cannot express.
+   */
+  wrap(
+    invocation: { readonly command: string; readonly args: readonly string[] },
+    env: Readonly<Record<string, string>>,
+  ): { command: string; args: string[]; env: Record<string, string> };
+  /**
+   * SIGKILL to every process of process group `groupId`. Resolves once the
+   * signal was sent, or once no process of the group is left to receive it;
+   * rejects when neither holds.
+   */
+  killGroup(groupId: number): Promise<void>;
+}
+
 export interface RunOptions {
   /** Per-test working directory — required and absolute (H-1, H-2). */
   readonly cwd: string;
@@ -353,6 +393,13 @@ export interface RunOptions {
    * the harness's own process group, as every run did before.
    */
   readonly processGroup?: boolean;
+  /**
+   * Start the run through a launcher ({@link RunLauncher}; H-2): such a run
+   * always leads a process group of its own (`processGroup` may not be
+   * `false` beside it), `kill` is refused on it, and the guards' kills and
+   * `killGroup` signal it through the launcher. POSIX only.
+   */
+  readonly launcher?: RunLauncher;
 }
 
 /**
@@ -398,7 +445,11 @@ export async function startProduct(
     ...(binding.prefixArgs ?? []),
     ...(options.argv ?? []),
   ];
-  const commandLine = describeCommand(binding, fullArgs, options.cwd);
+  const launcher = options.launcher;
+  const commandLine =
+    launcher === undefined
+      ? describeCommand(binding, fullArgs, options.cwd)
+      : `${describeCommand(binding, fullArgs, options.cwd)} ${launcher.label}`;
 
   if (!path.isAbsolute(options.cwd)) {
     throw new Error(
@@ -416,10 +467,16 @@ export async function startProduct(
       `working directory is not a directory: ${options.cwd}; command: ${commandLine}`,
     );
   }
-  const processGroup = options.processGroup ?? false;
+  if (launcher !== undefined && options.processGroup === false) {
+    throw new Error(
+      `a run started through a launcher always leads a process group of its own (H-2; TEST-SPEC T13.5-3), so \`processGroup: false\` cannot stand beside it; command: ${commandLine}`,
+    );
+  }
+  const processGroup =
+    launcher !== undefined || (options.processGroup ?? false);
   if (processGroup && process.platform === "win32") {
     throw new Error(
-      `a process group of its own is POSIX-only staging (TEST-SPEC T13.5-3); E-6's Windows leg terminates as E-6 states; command: ${commandLine}`,
+      `a process group of its own — and a launcher, which implies one — is POSIX-only staging (TEST-SPEC T13.5-3, H-2); E-6's Windows leg terminates as E-6 states; command: ${commandLine}`,
     );
   }
   for (const required of binding.requiredFiles ?? []) {
@@ -431,6 +488,13 @@ export async function startProduct(
   }
 
   const invocation = resolveInvocation(binding.command, fullArgs, commandLine);
+  const env = childEnvironment(binding, options);
+  // H-2 (module header): a launched run's spawn is the launcher's command
+  // line, built before anything is noted, so a refused one notes nothing.
+  const spawned =
+    launcher === undefined
+      ? { command: invocation.command, args: invocation.args, env }
+      : launcher.wrap(invocation, env);
   // T6.5-22(a) (module header): a performed move's pre-operation sources,
   // read before anything is spawned.
   const addedImportCheck = await prepareAddedImportCheck(
@@ -451,9 +515,9 @@ export async function startProduct(
   const acquiringRun = await noteAcquiringRun(options.cwd, options.argv ?? []);
   let child: ChildProcess;
   try {
-    child = spawn(invocation.command, invocation.args, {
+    child = spawn(spawned.command, spawned.args, {
       cwd: options.cwd,
-      env: childEnvironment(binding, options),
+      env: spawned.env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       // T13.5-3 (module header): a process group of its own, on request.
@@ -474,6 +538,7 @@ export async function startProduct(
     jsonOutputInEffect(options.argv ?? []),
     acquiringRun,
     processGroup,
+    launcher,
   );
 }
 
@@ -552,6 +617,13 @@ export class RunningProduct {
   #groupKilled = false;
   /** The one group kill `killGroup` makes, once made. */
   #groupKill: Promise<KilledGroup> | undefined;
+  /** The launcher the run was started through (H-2), if any. */
+  readonly #launcher: RunLauncher | undefined;
+  /**
+   * Settles the run with a harness error: a guard's kill through the
+   * launcher failed, so the run would otherwise never settle.
+   */
+  #abandon: (error: Error) => void = () => undefined;
 
   /** @internal — obtain instances via `startProduct`. */
   constructor(
@@ -563,10 +635,12 @@ export class RunningProduct {
     walkCapturedJson = false,
     acquiringRun?: AcquiringRun,
     processGroup = false,
+    launcher?: RunLauncher,
   ) {
     this.#child = child;
     this.commandLine = commandLine;
     this.#processGroup = processGroup;
+    this.#launcher = launcher;
 
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
@@ -604,6 +678,11 @@ export class RunningProduct {
         // killed) before any awaiter takes its next snapshot.
         acquiringRun?.ended();
         complete();
+      };
+      this.#abandon = (error) => {
+        settle(() => {
+          reject(error);
+        });
       };
       child.once("error", (error) => {
         settle(() =>
@@ -690,18 +769,41 @@ export class RunningProduct {
     return this.#settled;
   }
 
-  /** Terminate the process (T13.5-3/7 kill choreography). Idempotent. */
+  /**
+   * Terminate the process (T13.5-3/7 kill choreography). Idempotent. Refused
+   * on a run started through a launcher (H-2), whose processes the harness's
+   * own identity may not signal: `killGroup` kills such a run.
+   */
   kill(signal: NodeJS.Signals = "SIGKILL"): void {
+    if (this.#launcher !== undefined) {
+      throw new Error(
+        `kill: ${this.commandLine} was started through a launcher, whose processes the harness's own identity may not signal (H-2); kill it with killGroup`,
+      );
+    }
     this.#child.kill(signal);
   }
 
   /**
    * The guards' kill (the hang guard's, the capture limit's): SIGKILL to the
    * whole group of a run leading one, so no process it started outlives the
-   * kill; to the started process otherwise.
+   * kill — through the launcher for a run started through one, a failure of
+   * which settles the run with that harness error (H-11) rather than leave
+   * it unsettled; to the started process otherwise.
    */
   #guardKill(): void {
     const groupId = this.#child.pid;
+    if (this.#launcher !== undefined) {
+      if (groupId === undefined) return;
+      this.#launcher.killGroup(groupId).catch((error: unknown) => {
+        this.#abandon(
+          new Error(
+            `harness error (H-11): the guard's kill of ${this.commandLine} through its launcher failed, so the run may still be running: ${describeCause(error)}`,
+            { cause: error },
+          ),
+        );
+      });
+      return;
+    }
     if (this.#processGroup && groupId !== undefined) {
       try {
         process.kill(-groupId, "SIGKILL");
@@ -729,7 +831,11 @@ export class RunningProduct {
    * collected, or a process of the group still listed, within `timeoutMs`
    * (default 30 s) is the harness error `ProcessGroupLingerError` (H-11). A
    * run started without `processGroup` is refused, nothing signalled. The
-   * kill is made once: a later call settles as the first did.
+   * kill is made once: a later call settles as the first did. A run started
+   * through a launcher (H-2) is killed through it, and every descendant its
+   * started process had when the kill began counts as a member: one that
+   * left the group, out of the group SIGKILL's reach, stays listed and so
+   * fails the confirmation, never surviving unnoticed.
    */
   async killGroup(options: GroupGoneOptions = {}): Promise<KilledGroup> {
     this.#groupKill ??= this.#killGroupOnce(options);
@@ -750,9 +856,17 @@ export class RunningProduct {
     }
     const timeoutMs = options.timeoutMs ?? DEFAULT_GROUP_GONE_TIMEOUT_MS;
     const started = Date.now();
+    // Read before the members: once the started process is reaped its
+    // number may name another process, whose descendants are not the run's.
+    const reapedBefore =
+      this.#child.exitCode !== null || this.#child.signalCode !== null;
     const members = (await processGroupMembers(groupId)).map(
       (member) => member.pid,
     );
+    const descendants =
+      this.#launcher !== undefined && !reapedBefore
+        ? await descendantsOf(groupId)
+        : [];
     this.#groupKilled = true;
     // The group's ID is the run's own while the started process is unreaped
     // (Node records its exit as it reaps it) or a member of the group is
@@ -761,11 +875,15 @@ export class RunningProduct {
     const reaped =
       this.#child.exitCode !== null || this.#child.signalCode !== null;
     if (!reaped || members.length > 0) {
-      try {
-        process.kill(-groupId, "SIGKILL");
-      } catch (error) {
-        // ESRCH: every process of the group had already ended.
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      if (this.#launcher !== undefined) {
+        await this.#launcher.killGroup(groupId);
+      } else {
+        try {
+          process.kill(-groupId, "SIGKILL");
+        } catch (error) {
+          // ESRCH: every process of the group had already ended.
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        }
       }
     }
     if (!(await settlesWithin(this.#exit, timeoutMs))) {
@@ -780,7 +898,7 @@ export class RunningProduct {
     }
     const identifiers = await confirmGroupGone(
       groupId,
-      [groupId, ...members],
+      [groupId, ...members, ...descendants],
       this.commandLine,
       {
         timeoutMs: Math.max(0, timeoutMs - (Date.now() - started)),

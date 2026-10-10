@@ -39,8 +39,13 @@
 //   retried. A `TrialVoided` escaping every runner is a harness error too: it
 //   is no `HarnessAssertionError`.
 // - Processes started through `sudo` (T13.5-9, T13.5-10(e)–(g)) may be owned
-//   by root, so signalling them is the machine stagings' concern; this module
-//   reads the process list and signals nothing.
+//   by root, so signalling them is the machine stagings' concern
+//   (helpers/machine-staging.ts, through the subprocess driver's launcher
+//   run option); this module reads the process list and signals nothing.
+//   `descendantsOf` reads a process's descendants, so a group kill made
+//   through a launcher also waits for any process that left the group,
+//   which the group's SIGKILL never reached: one still listed is
+//   `ProcessGroupLingerError`, never a silent survivor.
 
 import * as fsp from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -140,6 +145,34 @@ export async function processGroupMembers(
   return listed
     .filter((entry): entry is ListedProcess => entry?.pgrp === groupId)
     .sort((a, b) => a.pid - b.pid);
+}
+
+/**
+ * Every listed descendant of process `pid` — its children, theirs, and so
+ * on — ascending, as the process list's parent links read now: a process
+ * orphaned since was reparented and no longer counts.
+ */
+export async function descendantsOf(pid: number): Promise<number[]> {
+  const listed = await Promise.all(
+    [...(await readProcessList())].map((id) => readListedProcess(id)),
+  );
+  const children = new Map<number, number[]>();
+  for (const entry of listed) {
+    if (entry === undefined) continue;
+    const siblings = children.get(entry.ppid) ?? [];
+    siblings.push(entry.pid);
+    children.set(entry.ppid, siblings);
+  }
+  const found = new Set<number>();
+  const pending = [pid];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    for (const child of children.get(next) ?? []) {
+      if (found.has(child) || child === pid) continue;
+      found.add(child);
+      pending.push(child);
+    }
+  }
+  return ascending(found);
 }
 
 /** Which of `identifiers` the process list lists now, ascending. */

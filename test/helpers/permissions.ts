@@ -67,11 +67,17 @@ import * as path from "node:path";
  * the builder's undeclared-staging guard (`undeclared-staging`: a plain `.mdx`
  * staging after a product invocation, which S-7's sweep never reaches and
  * so must be a staged-source record; helpers/workspace.ts,
- * helpers/product-invocations.ts), and the lock-path leftover and
+ * helpers/product-invocations.ts), the lock-path leftover and
  * obstruction stagings (`lock-path-leftover`, helpers/lock-staging.ts: a
  * staged tree not reading back as declared, a permission removal on a
  * leftover file the harness's own read reaches, `mkfifo` failing, a platform
- * that is not the Linux leg's).
+ * that is not the Linux leg's), and 13.5's machine-wide stagings
+ * (helpers/machine-staging.ts; TEST-SPEC E-1, T13.5-9): the administrative
+ * access they are made with (`administrative-access`: `sudo` missing,
+ * refusing, or not silent), the second user (`second-user`: its creation, a
+ * launch through it, or its verification failing), the shared group's
+ * access to a workspace (`group-access`), and the second mount
+ * (`second-mount`: not made, not verified, or not removed).
  */
 export type StagingMode =
   | "write-refusal"
@@ -81,7 +87,11 @@ export type StagingMode =
   | "mdx-derivability"
   | "ts-derivability"
   | "undeclared-staging"
-  | "lock-path-leftover";
+  | "lock-path-leftover"
+  | "administrative-access"
+  | "second-user"
+  | "group-access"
+  | "second-mount";
 
 /**
  * An ineffective or impossible staging: a permission staging (E-1, H-11)
@@ -97,7 +107,9 @@ export type StagingMode =
  * ledger the S-9 self-test judges before any product exists
  * (`undeclared-staging`, helpers/workspace.ts), or a lock-path leftover or
  * obstruction staging that did not take effect as declared
- * (`lock-path-leftover`, helpers/lock-staging.ts). Never a
+ * (`lock-path-leftover`, helpers/lock-staging.ts), or one of 13.5's
+ * machine-wide stagings not made or not verified — a runner withholding
+ * administrative access among them (helpers/machine-staging.ts; E-1). Never a
  * `HarnessAssertionError`: nothing here is a product verdict — it is a
  * harness error, never a diagnosed product failure and never a skip.
  */
