@@ -53,6 +53,10 @@ import {
   parseJsonStdout,
 } from "../helpers/assertions.js";
 import type * as CaptureWalkModule from "../helpers/capture-walk.js";
+import {
+  ProcessGroupLingerError,
+  VoidedTrialsExhaustedError,
+} from "../helpers/kill-discipline.js";
 import type * as MdxDerivabilityModule from "../helpers/mdx-derivability.js";
 import {
   builtProductBinding,
@@ -630,9 +634,11 @@ test("waitForFile surfaces a capture-limit kill as the driver's ProductRunOutput
   expect(settled).toBe(error);
 });
 
-test("rethrowHarnessError rethrows exactly the harness errors — the capture-limit error and a failed in-run evaluation — unchanged, and returns for every other rejection a helper converts (H-11)", () => {
+test("rethrowHarnessError rethrows exactly the harness errors — the capture-limit error, a failed in-run evaluation, a group kill that could not confirm its group gone, and an exhausted voidable trial — unchanged, and returns for every other rejection a helper converts (H-11)", () => {
   for (const harnessError of [
     new ProductRunOutputOverflowError("capture limit"),
+    new ProcessGroupLingerError("stand-in", 4242, "listed", 30_000, [], [4243]),
+    new VoidedTrialsExhaustedError("stand-in trial", ["reused identifier"]),
     new HarnessEvaluationError(
       "stand-in move",
       "verify",

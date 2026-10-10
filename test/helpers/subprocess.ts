@@ -30,6 +30,14 @@
 // - 13.5 support: background start (`startProduct`), hold-file choreography
 //   (`createHoldFile` / `RunningProduct.waitForFile` / `releaseHoldFile`),
 //   process kill, and concurrent invocations (every run is independent).
+//   T13.5-3's exit-collection discipline (helpers/kill-discipline.ts): a run
+//   started with `processGroup` leads a process group of its own (POSIX),
+//   and `RunningProduct.killGroup` kills that whole group with SIGKILL,
+//   collects the started process's exit — a kill by request, never
+//   relabelled a hang — and confirms no process of the group still listed
+//   in the process list (Linux), returning the identifiers the group's
+//   processes bore for the reuse check; on such a run the hang guard and
+//   the capture limit kill the whole group too.
 // - Environment policy (conservative choice): the child inherits the ambient
 //   environment minus variables that would let the machine leak into
 //   fixture-observable behavior — `GIT_*` and `EMAIL` (the product shells out
@@ -113,6 +121,14 @@ import type { AddedImportCheck } from "./added-import-identifiers.js";
 import { HarnessAssertionError } from "./assertions.js";
 import { walkCapturedJsonDocument } from "./capture-walk.js";
 import { jsonOutputInEffect } from "./invocation-grammar.js";
+import type { GroupGoneOptions } from "./kill-discipline.js";
+import {
+  confirmGroupGone,
+  DEFAULT_GROUP_GONE_TIMEOUT_MS,
+  processGroupMembers,
+  ProcessGroupLingerError,
+  VoidedTrialsExhaustedError,
+} from "./kill-discipline.js";
 import { noteProductInvocation } from "./product-invocations.js";
 
 /** Hang guard applied to every invocation unless overridden (H-8). */
@@ -247,8 +263,11 @@ export class HarnessEvaluationError extends Error {
 /**
  * H-11 at a conversion of a driver rejection: rethrow `error` unchanged when
  * it is a harness error — the capture limit killed the run
- * ({@link ProductRunOutputOverflowError}), or the driver's in-run
- * evaluation of the answer failed ({@link HarnessEvaluationError}) — and
+ * ({@link ProductRunOutputOverflowError}), the driver's in-run
+ * evaluation of the answer failed ({@link HarnessEvaluationError}), a group
+ * kill could not confirm its group gone (`ProcessGroupLingerError`), or
+ * every attempt of a voidable trial was voided
+ * (`VoidedTrialsExhaustedError`; both helpers/kill-discipline.ts) — and
  * return otherwise. A helper that turns a rejected run — the hang-guard
  * kill, a premature exit, a spawn failure, a T6.5-22(a) breach, a T12.7-1
  * near-marker — into a diagnosed failure (H-8) calls it first, so a
@@ -258,7 +277,9 @@ export class HarnessEvaluationError extends Error {
 export function rethrowHarnessError(error: unknown): void {
   if (
     error instanceof ProductRunOutputOverflowError ||
-    error instanceof HarnessEvaluationError
+    error instanceof HarnessEvaluationError ||
+    error instanceof ProcessGroupLingerError ||
+    error instanceof VoidedTrialsExhaustedError
   ) {
     throw error;
   }
@@ -324,6 +345,14 @@ export interface RunOptions {
   readonly timeoutMs?: number;
   /** Runaway-output guard (combined stdout+stderr bytes). */
   readonly maxOutputBytes?: number;
+  /**
+   * Start the product as the leader of a process group of its own — POSIX
+   * only (Node's `detached`: a new session and process group whose ID is the
+   * started process's identifier) — for T13.5-3's exit-collection
+   * discipline (`RunningProduct.killGroup`). Default false: the child joins
+   * the harness's own process group, as every run did before.
+   */
+  readonly processGroup?: boolean;
 }
 
 /**
@@ -387,6 +416,12 @@ export async function startProduct(
       `working directory is not a directory: ${options.cwd}; command: ${commandLine}`,
     );
   }
+  const processGroup = options.processGroup ?? false;
+  if (processGroup && process.platform === "win32") {
+    throw new Error(
+      `a process group of its own is POSIX-only staging (TEST-SPEC T13.5-3); E-6's Windows leg terminates as E-6 states; command: ${commandLine}`,
+    );
+  }
   for (const required of binding.requiredFiles ?? []) {
     if (!(await pathExists(required))) {
       throw new Error(
@@ -421,6 +456,8 @@ export async function startProduct(
       env: childEnvironment(binding, options),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      // T13.5-3 (module header): a process group of its own, on request.
+      detached: processGroup,
     });
   } catch (error) {
     acquiringRun?.ended();
@@ -436,6 +473,7 @@ export async function startProduct(
     // when its argv puts JSON output in effect (SPEC 12.0).
     jsonOutputInEffect(options.argv ?? []),
     acquiringRun,
+    processGroup,
   );
 }
 
@@ -471,6 +509,27 @@ export async function runProduct(
 }
 
 /**
+ * What `RunningProduct.killGroup` leaves once T13.5-3's discipline is
+ * complete: the group killed, the started process's exit collected, and no
+ * process of the group listed in the process list.
+ */
+export interface KilledGroup {
+  /** The group's ID: the started process's identifier. */
+  readonly groupId: number;
+  /**
+   * Every identifier the group's processes bore — the started process's
+   * among them — ascending: what T13.5-3's reuse check looks for
+   * (`applyReuseCheck`, helpers/kill-discipline.ts).
+   */
+  readonly identifiers: readonly number[];
+  /**
+   * The started process's exit as collected: signal `SIGKILL` where the
+   * kill ended it, its own exit where it had ended first.
+   */
+  readonly result: RunResult;
+}
+
+/**
  * A started invocation. `waitForExit` resolves with the run result (normal
  * exits and requested kills alike) and rejects, diagnosed, on timeout,
  * spawn failure, a near-marker in the captured stdout of a run with JSON
@@ -484,9 +543,15 @@ export class RunningProduct {
 
   readonly #child: ChildProcess;
   readonly #exit: Promise<RunResult>;
+  /** Started as the leader of a process group of its own (T13.5-3). */
+  readonly #processGroup: boolean;
   #settled = false;
   /** The capture limit killed the child (its exit may not be seen yet). */
   #overflowed = false;
+  /** `killGroup` killed the group: the hang guard never relabels that kill. */
+  #groupKilled = false;
+  /** The one group kill `killGroup` makes, once made. */
+  #groupKill: Promise<KilledGroup> | undefined;
 
   /** @internal — obtain instances via `startProduct`. */
   constructor(
@@ -497,9 +562,11 @@ export class RunningProduct {
     addedImportCheck?: AddedImportCheck,
     walkCapturedJson = false,
     acquiringRun?: AcquiringRun,
+    processGroup = false,
   ) {
     this.#child = child;
     this.commandLine = commandLine;
+    this.#processGroup = processGroup;
 
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
@@ -511,7 +578,7 @@ export class RunningProduct {
       totalBytes += chunk.length;
       if (totalBytes > maxOutputBytes && !this.#overflowed) {
         this.#overflowed = true;
-        child.kill("SIGKILL");
+        this.#guardKill();
       }
     };
     child.stdout?.on("data", capture(stdoutChunks));
@@ -519,10 +586,11 @@ export class RunningProduct {
 
     const timer = setTimeout(() => {
       // The capture limit's kill came first: the run settles as that
-      // harness error (H-11), never relabelled a hang.
-      if (this.#overflowed) return;
+      // harness error (H-11), never relabelled a hang — nor is the kill
+      // `killGroup` made by request, which bounds its own wait.
+      if (this.#overflowed || this.#groupKilled) return;
       timedOut = true;
-      child.kill("SIGKILL");
+      this.#guardKill();
     }, timeoutMs);
 
     const exit = new Promise<RunResult>((resolve, reject) => {
@@ -628,6 +696,101 @@ export class RunningProduct {
   }
 
   /**
+   * The guards' kill (the hang guard's, the capture limit's): SIGKILL to the
+   * whole group of a run leading one, so no process it started outlives the
+   * kill; to the started process otherwise.
+   */
+  #guardKill(): void {
+    const groupId = this.#child.pid;
+    if (this.#processGroup && groupId !== undefined) {
+      try {
+        process.kill(-groupId, "SIGKILL");
+        return;
+      } catch {
+        // Nothing of the group left to signal (ESRCH): the started process
+        // below, whose kill is then a no-op.
+      }
+    }
+    this.#child.kill("SIGKILL");
+  }
+
+  /**
+   * T13.5-3's exit-collection discipline (helpers/kill-discipline.ts) for a
+   * run started with `processGroup`, on the Linux leg: read the group's
+   * members, kill the whole group with SIGKILL, collect the exit of the
+   * process started — the run settling as killed by request, never
+   * relabelled a hang — and confirm that no process of the group remains
+   * listed in the process list, a zombie counting as listed. Resolves, once
+   * the group is gone, with the identifiers its processes bore and the
+   * collected result: a run that had already ended reports its own exit,
+   * any process of its group still listed killed all the same. A rejection
+   * of the run — a spawn failure, a hang-guard kill that came first,
+   * T12.7-1's walk — propagates once the group is gone. The exit not
+   * collected, or a process of the group still listed, within `timeoutMs`
+   * (default 30 s) is the harness error `ProcessGroupLingerError` (H-11). A
+   * run started without `processGroup` is refused, nothing signalled. The
+   * kill is made once: a later call settles as the first did.
+   */
+  async killGroup(options: GroupGoneOptions = {}): Promise<KilledGroup> {
+    this.#groupKill ??= this.#killGroupOnce(options);
+    return await this.#groupKill;
+  }
+
+  async #killGroupOnce(options: GroupGoneOptions): Promise<KilledGroup> {
+    if (!this.#processGroup) {
+      throw new Error(
+        `killGroup: ${this.commandLine} was not started with \`processGroup: true\`, so it leads no process group of its own (TEST-SPEC T13.5-3); nothing was signalled`,
+      );
+    }
+    const groupId = this.#child.pid;
+    if (groupId === undefined) {
+      // Never spawned: the run rejects with its start failure (H-8).
+      await this.#exit;
+      throw new Error(`killGroup: ${this.commandLine} was never spawned`);
+    }
+    const timeoutMs = options.timeoutMs ?? DEFAULT_GROUP_GONE_TIMEOUT_MS;
+    const started = Date.now();
+    const members = (await processGroupMembers(groupId)).map(
+      (member) => member.pid,
+    );
+    this.#groupKilled = true;
+    // The group's ID is the run's own while the started process is unreaped
+    // (Node records its exit as it reaps it) or a member of the group is
+    // listed; with neither, nothing is left to signal — and the number may
+    // since name another group.
+    const reaped =
+      this.#child.exitCode !== null || this.#child.signalCode !== null;
+    if (!reaped || members.length > 0) {
+      try {
+        process.kill(-groupId, "SIGKILL");
+      } catch (error) {
+        // ESRCH: every process of the group had already ended.
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+    }
+    if (!(await settlesWithin(this.#exit, timeoutMs))) {
+      throw new ProcessGroupLingerError(
+        this.commandLine,
+        groupId,
+        "exit",
+        Date.now() - started,
+        [],
+        [],
+      );
+    }
+    const identifiers = await confirmGroupGone(
+      groupId,
+      [groupId, ...members],
+      this.commandLine,
+      {
+        timeoutMs: Math.max(0, timeoutMs - (Date.now() - started)),
+        pollIntervalMs: options.pollIntervalMs,
+      },
+    );
+    return { groupId, identifiers, result: await this.#exit };
+  }
+
+  /**
    * The run's outcome. Resolves for normal exits and requested kills; rejects
    * with a diagnosed error on timeout or spawn failure, with the harness
    * error `ProductRunOutputOverflowError` on output overflow (H-11), with a
@@ -687,6 +850,30 @@ export class RunningProduct {
       }
       await sleep(pollIntervalMs);
     }
+  }
+}
+
+/** Whether `pending` settles — resolved or rejected — within `ms`. */
+async function settlesWithin(
+  pending: Promise<unknown>,
+  ms: number,
+): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(false);
+    }, ms);
+  });
+  try {
+    return await Promise.race([
+      pending.then(
+        () => true,
+        () => true,
+      ),
+      expired,
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
