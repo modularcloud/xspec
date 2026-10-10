@@ -2395,11 +2395,13 @@ async function commandIds(io, cwd, flags, json) {
   return 0;
 }
 
-// The graph-data area and its durable paths (SPEC 13.3, 6.1, 10.1), reported
-// by `inventory` (11.6); this conformer never writes under the area.
+// The graph-data area, its durable paths (SPEC 13.3, 6.1, 10.1), and the
+// lock path (13.5), reported by `inventory` (11.6) — the lock path
+// unconditionally; this conformer never writes under the area.
 const GRAPH_DATA_AREA = ".xspec";
 const JOURNAL_PATH = ".xspec/journal";
 const SESSION_DIRECTORY = ".xspec/reviews";
+const LOCK_PATH = ".xspec/lock";
 
 /**
  * Whether the workspace-relative `rel` is occupied by anything at all:
@@ -2428,8 +2430,9 @@ async function occupiedUnderRoot(rootAbs, rel) {
  * order, the derived-file map (the module `X.xspec.ts` and, while emission
  * is enabled, `X.md` beside each `.mdx` spec source; both structurally
  * absent for a spec-group file without the extension, 14.19/13.1), the
- * recorded derived paths, the graph-data area, the journal's occupancy, and
- * the session files. It parses
+ * recorded derived paths, the graph-data area, the journal's occupancy, the
+ * session files, and the lock path (13.5, reported unconditionally — this
+ * conformer runs no mutating command and never creates it). It parses
  * no source, so it answers whatever the sources' validity — configuration
  * errors keep their precedence (14.14) — and it writes nothing. This
  * conformer keeps no graph data, so the record is empty (11.6: empty
@@ -2498,6 +2501,7 @@ async function commandInventory(io, cwd, flags) {
       occupied: await occupiedUnderRoot(config.root, JOURNAL_PATH),
     },
     sessions: [],
+    lock: LOCK_PATH,
   };
   emitJsonOnly(io, doc);
   return 0;

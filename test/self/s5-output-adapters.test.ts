@@ -815,15 +815,17 @@ const GOOD_RESOLVED_INVENTORY = {
   graphData: ".xspec",
 };
 
-// The full ten-member inventory document (SPEC 12.7; T11.6-3's frame): the
-// resolved-map control plus a non-empty byte-ordered record, the journal
-// status, and session file paths in byte order of file name ("S.json"
-// before "ancien.json": 0x53 < 0x61 — inverted by case folding).
+// The full eleven-member inventory document (SPEC 12.7; T11.6-3's frame):
+// the resolved-map control plus a non-empty byte-ordered record, the journal
+// status, session file paths in byte order of file name ("S.json" before
+// "ancien.json": 0x53 < 0x61 — inverted by case folding), and the lock path
+// (SPEC 11.6, 13.5).
 const GOOD_INVENTORY_DOCUMENT = {
   ...GOOD_RESOLVED_INVENTORY,
   recorded: ["specs/core/a.md", "specs/core/a.xspec.ts"],
   journal: { path: ".xspec/journal", occupied: false },
   sessions: [".xspec/reviews/S.json", ".xspec/reviews/ancien.json"],
+  lock: ".xspec/lock",
 };
 
 // --- decoder table -----------------------------------------------------------
@@ -4033,11 +4035,11 @@ const DECODERS: readonly DecoderSpec[] = [
   },
   {
     // The full inventory document decode (SPEC 11.6, 12.7; T11.6-3's
-    // frame): the top level carries exactly the ten pinned members, decoded
-    // through the scoped decoders plus the recorded/graphData/journal/
-    // sessions forms — `recorded` a three-state datum in byte order,
-    // `journal` {"path","occupied"} exactly, `sessions` in byte order of
-    // file name.
+    // frame): the top level carries exactly the eleven pinned members,
+    // decoded through the scoped decoders plus the recorded/graphData/
+    // journal/sessions/lock forms — `recorded` a three-state datum in byte
+    // order, `journal` {"path","occupied"} exactly, `sessions` in byte order
+    // of file name, `lock` a required path value.
     name: "11.6 inventory (document)",
     decode: decodeInventoryDocument,
     good: GOOD_INVENTORY_DOCUMENT,
@@ -4062,6 +4064,7 @@ const DECODERS: readonly DecoderSpec[] = [
         ".xspec/reviews/S.json",
         ".xspec/reviews/ancien.json",
       ]);
+      expect(decoded.lock).toBe(".xspec/lock");
     },
     alsoGood: [
       {
@@ -4090,9 +4093,27 @@ const DECODERS: readonly DecoderSpec[] = [
     bad: [
       {
         label:
-          "an extra top-level member (the form carries exactly the ten " +
+          "an extra top-level member (the form carries exactly the eleven " +
           "pinned members, SPEC 12.7)",
         doc: put(GOOD_INVENTORY_DOCUMENT, ".xspec", "area"),
+      },
+      {
+        label:
+          "absent lock member (the lock path is reported unconditionally, " +
+          "SPEC 11.6, 12.7)",
+        doc: omit(GOOD_INVENTORY_DOCUMENT, "lock"),
+      },
+      {
+        label:
+          "null lock (reported unconditionally: null never stands for the " +
+          "lock path, SPEC 11.6, 12.7)",
+        doc: put(GOOD_INVENTORY_DOCUMENT, null, "lock"),
+      },
+      {
+        label:
+          "a non-string lock (a 12.7 path value is a string or the marked " +
+          "byte form, SPEC 12.7)",
+        doc: put(GOOD_INVENTORY_DOCUMENT, 7, "lock"),
       },
       {
         label: "absent graphData member (null is never omission, SPEC 12.7)",

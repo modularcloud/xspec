@@ -25,9 +25,9 @@
 //     {"unavailable": true} (11.4, 12.7)
 //   - the scoped inventory decodes: the `recorded` datum, the `findings`
 //     member, the `root`/`config` anchoring, and the resolved
-//     configuration/sources/derived map (11.6), plus the full ten-member
+//     configuration/sources/derived map (11.6), plus the full eleven-member
 //     inventory document decode composing them with the `graphData`,
-//     `journal`, and `sessions` forms (T11.6-3)
+//     `journal`, `sessions`, and `lock` forms (T11.6-3)
 //   - the tag-set and kind-set value forms of the configured sets those
 //     views carry (7.4, 7.5, 11.6): tag strings in byte order with
 //     duplicates collapsed; dependency-kind tokens in 5.2's order
@@ -1169,7 +1169,7 @@ export function decodeInventoryResolvedMap(
  * The complete decoded inventory document (SPEC 11.6, 12.7 — the surface the
  * T11.6-* tests pin together): every member of the pinned form
  * `{"findings", "root", "config", "configuration", "sources", "derived",
- * "recorded", "graphData", "journal", "sessions"}`.
+ * "recorded", "graphData", "journal", "sessions", "lock"}`.
  */
 export interface InventoryDocument {
   readonly findings: readonly Finding[];
@@ -1182,9 +1182,11 @@ export interface InventoryDocument {
   readonly graphData: PathValue;
   readonly journal: InventoryJournalStatus;
   readonly sessions: readonly PathValue[];
+  /** The lock path (SPEC 11.6, 13.5), reported unconditionally. */
+  readonly lock: PathValue;
 }
 
-/** The ten members of the inventory document form, exactly (SPEC 12.7). */
+/** The eleven members of the inventory document form, exactly (SPEC 12.7). */
 const INVENTORY_DOCUMENT_MEMBERS = [
   "findings",
   "root",
@@ -1196,6 +1198,7 @@ const INVENTORY_DOCUMENT_MEMBERS = [
   "graphData",
   "journal",
   "sessions",
+  "lock",
 ] as const;
 
 /** The file-name bytes of a 12.7 path value (its bytes after the last `/`). */
@@ -1227,16 +1230,18 @@ function decodeInventoryJournalStatus(
 /**
  * Full decode of the inventory document (SPEC 11.6, 12.7; the T11.6-3 entry
  * completes the member set the T11.6-* tests pin): the top level carries
- * exactly the ten members of the pinned form — `null` never omission, no
+ * exactly the eleven members of the pinned form — `null` never omission, no
  * member outside the form — decoded through the scoped decoders above (one
  * code path per member form) plus the `recorded`, `graphData`, `journal`,
- * and `sessions` members: `recorded` the three-state record-supplied datum
- * (byte-ordered paths, or the unavailability marker, 14.23); `graphData` a
- * path value (the `.xspec` spelling is the caller's byte-exact value
- * assertion); `journal` `{"path", "occupied"}`; `sessions` the session file
- * paths in byte order of file name with no duplicate (11.6 pins that order;
- * decoder-enforced). Form-exact (H-3): never adjustable to a product's
- * shape.
+ * `sessions`, and `lock` members: `recorded` the three-state record-supplied
+ * datum (byte-ordered paths, or the unavailability marker, 14.23);
+ * `graphData` a path value (the `.xspec` spelling is the caller's byte-exact
+ * value assertion); `journal` `{"path", "occupied"}`; `sessions` the session
+ * file paths in byte order of file name with no duplicate (11.6 pins that
+ * order; decoder-enforced); `lock` the lock path (13.5), a path value
+ * reported unconditionally — required, never `null` (the `.xspec/lock`
+ * spelling is the caller's byte-exact value assertion, T11.6-1, T11.6-3).
+ * Form-exact (H-3): never adjustable to a product's shape.
  */
 export function decodeInventoryDocument(
   doc: unknown,
@@ -1288,6 +1293,11 @@ export function decodeInventoryDocument(
     }
   }
 
+  const lock = decodePathValue(
+    requiredKey(obj, "lock", site),
+    at(site, "lock"),
+  );
+
   return {
     findings,
     root: anchoring.root,
@@ -1299,6 +1309,7 @@ export function decodeInventoryDocument(
     graphData,
     journal,
     sessions,
+    lock,
   };
 }
 

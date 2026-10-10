@@ -11,7 +11,7 @@
 // forms carry the same information, SPEC 11) and its stdout decodes through
 // the scoped form-exact decoders `decodeInventoryAnchoring`,
 // `decodeInventoryFindings`, and `decodeInventoryResolvedMap` (T11.6-1/-2)
-// and the full ten-member `decodeInventoryDocument` (T11.6-3 — its entry
+// and the full eleven-member `decodeInventoryDocument` (T11.6-3 — its entry
 // completes the member set, so its arms pin the whole document form).
 //
 // T11.6-1 — anchoring (SPEC 11.6, 12.0). The workspace root and the
@@ -193,13 +193,14 @@
 //   against ONE expected document, both inside a single whole-root
 //   modifies-nothing compare (byte-compare; no refresh — graph data absent
 //   before and after, where every refreshing read would create it or die on
-//   the invalid sources): the COMPLETE ten-member document asserted exactly
-//   — every discovered source listed with its membership, the unparseable
-//   and non-`.mdx` files included; the derived map determined by
-//   configuration and discovery alone (the unparseable source's module and
-//   Markdown paths present — a product computing the map through parsing
-//   dies here); `recorded` [] (the failed build modified nothing, 12.1);
-//   the journal occupied; the corrupt session listed by name — and
+//   the invalid sources): the COMPLETE eleven-member document asserted
+//   exactly — every discovered source listed with its membership, the
+//   unparseable and non-`.mdx` files included; the derived map determined
+//   by configuration and discovery alone (the unparseable source's module
+//   and Markdown paths present — a product computing the map through
+//   parsing dies here); `recorded` [] (the failed build modified nothing,
+//   12.1); the journal occupied; the corrupt session listed by name; the
+//   lock path `.xspec/lock` (reported unconditionally, 11.6, 13.5) — and
 //   `findings` [] at exit 0: the staged findings are reported where their
 //   conditions assign them (the premise build; T13.3-3, T10.1-4, T12.2-2),
 //   never here, which IS the parses-no-sources/reads-no-content observation.
@@ -1635,13 +1636,16 @@ export default defineConfig({
 /** The journal's workspace-relative path (SPEC 6.1). */
 const JOURNAL_PATH = `${GRAPH_DATA_AREA_PATH}/journal`;
 
+/** The lock path, reported unconditionally (SPEC 11.6, 13.5). */
+const LOCK_PATH = `${GRAPH_DATA_AREA_PATH}/lock`;
+
 /**
  * Run `inventory` and assert the finding-free full-document frame (T11.6-3;
  * reused by T11.6-4's imperfect-workspace arm and intact-record premise):
  * exit 0 exactly (a complete, finding-free answer — the inventory parses no
  * sources, reads no journal or session content, and the calling arm has not
  * corrupted the record; SPEC 11.6, 12.0; H-5); exactly one JSON document as
- * the entire stdout (JSON-only, SPEC 11); the full ten-member 12.7 inventory
+ * the entire stdout (JSON-only, SPEC 11); the full eleven-member 12.7 inventory
  * document form (H-3); `findings` [] — which IS the no-14.13/no-14.21
  * observation on the occupancy and session stagings. Returns the decoded
  * document and the raw run for the callers' value assertions and byte scans.
@@ -2671,7 +2675,7 @@ async function expectFlaglessInventoryConfigurationError(
 }
 
 /**
- * An inventory document's eight members apart from the record-supplied
+ * An inventory document's nine members apart from the record-supplied
  * `recorded` datum and the `findings` that report its state — the "every
  * other member emitted in full" projection of SPEC 14.23, built in the
  * decoded document's member order so `assertSameJson` compares exactly.
@@ -2688,6 +2692,7 @@ function inventoryApartFromRecordSupplied(
     graphData: document.graphData,
     journal: document.journal,
     sessions: document.sessions,
+    lock: document.lock,
   };
 }
 
@@ -2704,7 +2709,7 @@ const T11_6_4_RECORD_SEUL = stagedMdx(
 const T11_6_4 = defineProductTest({
   id: "T11.6-4",
   title:
-    "inventory no parse, no write, one finding: on a workspace whose sources fail every validation family — an unparseable file included, the premise `build --json` exiting 1 with exactly one finding per staged construct (14.1–14.9, 14.11, 14.15–14.20 across MDX and TS, plus the garbage journal line's 14.13; no 14.21 — build reads no sessions) — with a garbage journal line and a corrupt session staged, `inventory` answers in full, finding-free, exit 0, modifying nothing (whole-root byte-compare; no refresh — graph data absent throughout): the complete ten-member document asserted exactly in the flag-less and `--json` forms against one expectation — every discovered source listed with its membership (the unparseable and non-`.mdx` files included), the derived map determined by configuration and discovery alone (the unparseable source's module and Markdown paths present), `recorded` [], the journal occupied, the corrupt session listed by name — those findings reported where their conditions assign them, never here; configuration errors keep precedence: missing and invalid configuration each exit 2 with the single 12.7 error document as the entire stdout (stable code `configuration-error`, concerned path present, stderr naming the configuration), flag-less — a JSON-only surface — and with `--json` alike, no inventory beside the error member; the one finding it ever carries: with the record corrupted shape-blind (T6.6-6's staging) after a pinned readable-record premise, `recorded` is exactly the unavailability marker — never read as empty — beside exactly one condition-23 finding (stable code `unreadable-record`, concerned path the graph-data area, locations []: no path inside the area is named), exit 1, every other member emitted in full (deep-equal to the intact-record answer), the corrupt state left unmodified in a whole-root compare (SPEC 11.6, 14.23, 14.14, 14, 12.7, 12.0, 13.3, 12.1, 11)",
+    "inventory no parse, no write, one finding: on a workspace whose sources fail every validation family — an unparseable file included, the premise `build --json` exiting 1 with exactly one finding per staged construct (14.1–14.9, 14.11, 14.15–14.20 across MDX and TS, plus the garbage journal line's 14.13; no 14.21 — build reads no sessions) — with a garbage journal line and a corrupt session staged, `inventory` answers in full, finding-free, exit 0, modifying nothing (whole-root byte-compare; no refresh — graph data absent throughout): the complete eleven-member document asserted exactly in the flag-less and `--json` forms against one expectation — every discovered source listed with its membership (the unparseable and non-`.mdx` files included), the derived map determined by configuration and discovery alone (the unparseable source's module and Markdown paths present), `recorded` [], the journal occupied, the corrupt session listed by name, `lock` the lock path `.xspec/lock` — those findings reported where their conditions assign them, never here; configuration errors keep precedence: missing and invalid configuration each exit 2 with the single 12.7 error document as the entire stdout (stable code `configuration-error`, concerned path present, stderr naming the configuration), flag-less — a JSON-only surface — and with `--json` alike, no inventory beside the error member; the one finding it ever carries: with the record corrupted shape-blind (T6.6-6's staging) after a pinned readable-record premise, `recorded` is exactly the unavailability marker — never read as empty — beside exactly one condition-23 finding (stable code `unreadable-record`, concerned path the graph-data area, locations []: no path inside the area is named), exit 1, every other member emitted in full (deep-equal to the intact-record answer), the corrupt state left unmodified in a whole-root compare (SPEC 11.6, 14.23, 14.14, 14, 12.7, 12.0, 13.3, 12.1, 11)",
   run: async (product) => {
     // --- arm A: the imperfect workspace ------------------------------------
     const imperfect = await TestWorkspace.create({
@@ -2829,6 +2834,9 @@ const T11_6_4 = defineProductTest({
         // Selected by name alone — the corrupt content is never read, no
         // 14.21 from the inventory (SPEC 11.6, 10.1).
         sessions: [CORRUPT_SESSION_PATH],
+        // Reported unconditionally — no mutating command has run here
+        // (SPEC 11.6, 13.5, 12.7).
+        lock: LOCK_PATH,
       };
 
       // Both output forms inside ONE whole-root modifies-nothing compare:
@@ -2858,11 +2866,12 @@ const T11_6_4 = defineProductTest({
             assertSameJson(
               document,
               expectedImperfect,
-              `${context} — the complete ten-member document, exactly: ` +
+              `${context} — the complete eleven-member document, exactly: ` +
                 `every discovered source with its membership (unparseable ` +
                 `and non-.mdx files included), the configuration-determined ` +
                 `derived map, recorded [], the occupied journal, the ` +
-                `corrupt session listed by name (SPEC 11.6, 12.7)`,
+                `corrupt session listed by name, the lock path ` +
+                `(SPEC 11.6, 12.7, 13.5)`,
             );
           }
         },
@@ -3047,8 +3056,9 @@ const T11_6_4 = defineProductTest({
               inventoryApartFromRecordSupplied(intact.document),
               `${context} — every other member emitted in full: the ` +
                 `anchoring, configuration, sources, derived map, area, ` +
-                `journal, and sessions equal to the intact-record answer ` +
-                `on this same workspace (SPEC 14.23, 11.6)`,
+                `journal, sessions, and lock path equal to the ` +
+                `intact-record answer on this same workspace (SPEC 14.23, ` +
+                `11.6)`,
             );
           }
         },

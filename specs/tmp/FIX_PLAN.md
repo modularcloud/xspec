@@ -74,7 +74,7 @@ Why the harness changes: the documents moved after the harness was last green (t
 - *Foundations (no certification change).*
   - Task 1 (D-1, V): C-1 count pins 9/30. Independent. Done: `EXPECTED_CONFORMERS = 9`, `EXPECTED_VIOLATORS = 30`, title to match; the count test passes, the mirror and registration tests fail byte-identically to bb3081a; self project 2 failed / 4313 passed (4315, 28 files, 122.30 s), certification lines 154 PASS / 38 FAIL, 0 error, 0 hang.
   - Task 2 (V1): AGENTS.md — Node 22 on `PATH` in the `claude` wrapper recipe. Independent. Done: the recipe's `bash -c` string begins `export PATH=/opt/node22/bin:$PATH` (`node --version` through it prints v22.22.2; without the export v20.20.2, `/usr/local/bin/node`); the bullet says the whole self project runs through it once a test needs administrative access, and that its log is Vitest's colored default reporter (sudo drops `CLAUDECODE`/`AI_AGENT`), to be stripped before grepping; self project 2 failed / 4313 passed (4315, 28 files) both under `unshare --map-user` (127.48 s) and through the amended recipe (123.64 s), certification lines 154 PASS / 38 FAIL, 0 error, 0 hang.
-  - Task 3 (A-G4, B-G1, C-G6b): inventory form's `lock` member; CONF-DISC emits it. Independent.
+  - Task 3 (A-G4, B-G1, C-G6b): inventory form's `lock` member; CONF-DISC emits it. Independent. Done: `decodeInventoryDocument` requires `lock` as a 12.7 path value in its 12.7 position (`InventoryDocument.lock`; the comments and T11.6-4's title count eleven members); S-5's good document carries `"lock": ".xspec/lock"` and three new vectors (absent, `null`, the number 7) are rejected — red against bb3081a's decoder (the good document at `$.lock`, the absent vector accepted) and under one-point breaks of the new one (no path-value decode: the number vector; `null` admitted: the `null` vector); CONF-DISC emits `lock` (with the decoder change alone T7-4 fails at `$.lock` against all four of its fixtures — the conformer, SYMLINK, and DERIVED verifications red, DIALECT passing only vacuously; with both, all four pass: 2.37 s, 2.61 s, 2.54 s, 1.38 s); T11.6-4's whole-document expectation and 14.23 projection carry `lock` (forced by the type; live under the stand-in's wrong-value modes); against the built product T6.1-1, T7-2, T7-4, T10.1-6, T11.6-3, T11.6-4, T14-10 now fail diagnosed at `$.lock`, and all seven pass through the inventory-lock stand-in (AGENTS.md, the bullet after the stand-in recipe); self project 2 failed / 4313 passed (4315, 28 files, 141.89 s), certification lines 154 PASS / 38 FAIL, 0 error, 0 hang.
   - Task 4 (B-G2, C-G6a): stable code `workspace-busy` (14.26). Independent.
   - Task 5 (C-G7, B-G4, A-G3): lock-path predicate and H-4 grant-and-restore. Independent.
   - Task 6 (B-G6, B-G27 part): graph data never includes the lock path. After 5.
@@ -129,26 +129,6 @@ Why the harness changes: the documents moved after the harness was last green (t
   - Task 50: confirm locally and in CI; record timings; delete this plan. After every task above.
 
 ## Tasks
-
-### Task 3 — The inventory form's `lock` member, and the fixture that serves `inventory` (A-G4, B-G1, C-G6b)
-
-**Requirement.** SPEC 12.7 (from SPEC.md line 730): the inventory document's members end `…, "sessions", "lock"`, `lock` a 12.7 path value; SPEC 11.6 (line 663). TEST-SPEC H-3 (line 21: form-exact decoding — a missing required member fails, an unknown one fails), S-5 (line 636). The value assertions (`lock` exactly `".xspec/lock"`) belong to T11.6-1/T11.6-3 (Tasks 37, 36), not to the decoder.
-
-**State at bb3081a.** `test/helpers/adapters/forms.ts`: `INVENTORY_DOCUMENT_MEMBERS` (about line 1188) lists ten members; `decodeInventoryDocument` (about line 1248) rejects `lock` through `expectOnlyMembers` (`at $.lock: expected no member "lock"`); the decoded `InventoryDocument` type has no `lock`. S-5's `GOOD_INVENTORY_DOCUMENT` (`test/self/s5-output-adapters.test.ts`, line 822) and its rejection vectors (about lines 4043–4140). Consumers of the full decode: T6.1-1 (`section-6.1.ts` 479), T7-2 (`section-7-basics.ts` 1576, 1638, 1726), T7-4 (`section-7-discovery.ts` 683, 789), T10.1-6 (`section-10.1.ts` 1845, 2027), T11.6-3 (`section-11.6.ts` 1664, 3000), T14-10 (`section-14-ii.ts` 1849, 1965, 2171, 2185, 2309).
-- *Planner's finding:* CONF-DISC serves `inventory` and its in-scope T7-4 decodes the full form, so once `lock` is required its conformer and three violators would fail T7-4. Its document is built in `test/fixtures/conf-disc/product.mjs` (about lines 2480–2502: `graphData: GRAPH_DATA_AREA`, `journal`, `sessions: []`) with no `lock`.
-
-**Change.**
-- Decoder: `lock` required, decoded as a 12.7 path value in its 12.7 position, exposed on `InventoryDocument`; adjust any count or member list the change forces (keep the decoders' S-8 capacity walks working).
-- S-5: `GOOD_INVENTORY_DOCUMENT` gains `"lock": ".xspec/lock"`; add rejection vectors for a missing `lock` and a non-string `lock`.
-- CONF-DISC: its inventory document gains `lock: ".xspec/lock"` after `sessions` (CONF-DISC conforms to SPEC within its scope, and 12.7's form is part of it). Grep every other fixture under `test/fixtures/` for an emitted inventory document (`graphData`); at bb3081a only CONF-DISC emits one.
-
-**Verify.**
-- Red check (AGENTS.md bullet beginning "Red-checking a new self-test vector"): the new S-5 vectors fail against bb3081a's decoder and pass after.
-- Certification: the CONF-DISC family's four verifications pass (they would fail with the decoder change alone — show it once, then add the fixture change); every other verification unchanged.
-- Against the built product (no `lock` member): T6.1-1, T7-2, T7-4, T10.1-6, T11.6-3, T14-10 — and any other test the run shows decoding the full inventory — now fail, each diagnosed at `$.lock`; through the inventory-lock stand-in (Run mechanics) each passes again, proving the member is the only cause. Record both lists.
-- Self project: the accepted red only.
-
-**Done when.** The checks hold, the commit message lists the newly failing product tests, and the commit is pushed.
 
 ### Task 4 — The stable code `workspace-busy` (14.26) (B-G2, C-G6a)
 
