@@ -6,15 +6,32 @@
 //
 // Scope implemented (see CERTIFICATIONS.md §CONF-CORE):
 // - Workspaces with one configured spec group of `.mdx` sources without
-//   imports, embeddings, `d` props, or tags; no `code`, `markdown`,
-//   `coverage`, or `policy` keys; no git.
+//   imports, embeddings, `d` props, or tags; no `markdown`, `coverage`, or
+//   `policy` keys; no git; and no code group but in T13.5-8's workspaces,
+//   as its wrong-kind and first-discovery arms stage one — code groups are
+//   parsed and their sources discovered, each an edgeless whole-file code
+//   location judged on 14.20's accepting side alone (its content never
+//   read), recorded in graph data by path.
+// - Configuration and discovery (SPEC 7, 12.0, 13.5), each met before
+//   acquisition and reported in 12.7's error document: an unknown key in
+//   the configuration's top-level object, and a file both a spec glob and
+//   a code glob match, the configuration error of 14.14 concerning the
+//   configuration file; a refused listing of a directory discovery lists,
+//   the read failure of 14.25 concerning that directory; and a mutating
+//   command's second discovery once exclusivity is held — the sources every
+//   later check and read consults — reporting either error it meets there.
 // - `build`; the 13.3 read commands per 12.0 (`check` with no findings on
 //   valid state, `ids`, `show`, `query`, `coverage` reporting zero profiles,
 //   the `review` read subcommands; `impact --base` without git is the exit-2
 //   unreadable-baseline case of SPEC 6.3/12.0).
 // - `rename` and file-form `move` with journal append (SPEC 6.1, 6.2),
-//   their argument checks of 12.0 and valid-workspace precondition (6.4,
-//   6.5) judged after acquisition and the hold; `rename --preview` only as
+//   their argument checks of 12.0 (a nonexistent old ID or origin file, and
+//   a wrong-kind origin — a discovered code source — each a usage error) and
+//   valid-workspace precondition (6.4, 6.5) judged after acquisition, the
+//   hold, and the second discovery; `move`'s section form only to its
+//   argument checks — a nonexistent origin ID a usage error, exit 2, after
+//   acquisition and the hold — a performable section move lying outside
+//   this surface (exit 70); `rename --preview` only as
 //   T13.5-8's non-mutating boundary drives it — the refused form (a
 //   nonexistent old ID's usage error) acquiring nothing and creating no
 //   hold file (SPEC 6.6), `--test-hold` beside `--preview` the
@@ -33,10 +50,12 @@
 //   before its own writes, writing graph data byte-identical to what
 //   `build` writes (T13.5-1's stale-workspace arm, T10.1-1).
 // - SPEC 13.4 durable protection and SPEC 13.5 in full, `--test-hold`
-//   included: acquisition and the hold precede every later check — the
-//   argument checks of 12.0, baseline resolution (6.3), the gate and refresh
-//   of 13.3, and the operation's own validation (T13.5-8) — so the seam
-//   engages on an invocation a later check refuses or the gate turns back.
+//   included: acquisition follows the configuration's load and the first
+//   discovery, and acquisition and the hold precede the second discovery
+//   and every later check — the argument checks of 12.0, baseline
+//   resolution (6.3), the gate and refresh of 13.3, and the operation's own
+//   validation (T13.5-8) — so the seam engages on an invocation a later
+//   check refuses or the gate turns back.
 //
 // Key mechanisms:
 // - Invocation grammar (SPEC 12.0; CERTIFICATIONS.md preamble): the
@@ -54,6 +73,16 @@
 //   every exit-2 error — the 12.7 error document, its `code` and `path`
 //   `configuration-error` and SPEC 14's concerned path for a configuration
 //   error, `null`/`null` for a plain usage error (UsageError).
+// - Discovery (SPEC 7, 13.4, 14.25; see discover): a walk from the
+//   workspace root listing only directories some configured glob can reach
+//   into — never the graph-data area `.xspec`, whose files no group holds
+//   (13.4) — never following or traversing a symbolic link; a listing the
+//   environment refuses is `read-failure` concerning that directory, one
+//   found absent lists nothing. Every command that loads the configuration
+//   discovers before any error consulting configuration or discovery
+//   (12.0); a mutating command discovers once before acquisition and again
+//   once it holds exclusivity, past the hold, the second discovery's
+//   sources fixing what every later check and read consults (runMutating).
 // - Exclusivity (SPEC 13.5): the lock directory `.xspec/lock` under the
 //   graph-data area, transient (13.4); see acquireExclusivity. Acquisition
 //   examines `.xspec` and the lock path without following a link — anything
@@ -129,9 +158,11 @@ import { setTimeout as sleep } from "node:timers/promises";
  * acquisition's write failure, read failure, and busy refusal (14.24–14.26:
  * `write-failure`, `read-failure`, `workspace-busy`, concerning
  * `.xspec/lock`, or `.xspec` for the area's own path; SPEC 13.5,
- * acquireExclusivity), `null` for plain usage errors (SPEC 12.7, 14), the
- * hold-file error of 13.5 and the unreadable baseline of 6.3 among them.
- * This scope reports no other write or read failure (14.24, 14.25).
+ * acquireExclusivity), for discovery's read failure (14.25: `read-failure`
+ * concerning the directory whose listing was refused; discover), `null` for
+ * plain usage errors (SPEC 12.7, 14), the hold-file error of 13.5 and the
+ * unreadable baseline of 6.3 among them. This scope reports no other write
+ * or read failure (14.24, 14.25).
  */
 class UsageError extends Error {
   /** @param {string} message
@@ -514,8 +545,11 @@ class LiteralParser {
 let lastResolvedRoot = null;
 
 /**
- * Load and validate the configuration; returns the workspace root and the
- * spec groups. The in-scope shape is one spec group and no other keys
+ * Load and validate the configuration; returns the workspace root, the spec
+ * groups, and the code groups, with the invocation's working directory and
+ * the configuration file's path (a configuration error discovery meets
+ * concerns that file, 14.14). The in-scope shape is one spec group, no
+ * other key but, in T13.5-8's workspaces alone, `code`
  * (CERTIFICATIONS.md §CONF-CORE); `specs` is required (SPEC 7). Every
  * failure is a configuration error (14.14), its error finding carrying
  * `configuration-error` and SPEC 14's concerned path.
@@ -546,40 +580,38 @@ async function loadConfig(cwd, configFlag) {
   if (deviations.readersAddEntries && buildOrReadInvocation) {
     await addReaderEntry(root);
   }
-  return { root, groups };
+  return { root, ...groups, cwd, configPath };
 }
 
 /**
- * The post-location half of {@link loadConfig}: read, parse, and validate
- * the located configuration file; returns its spec groups.
+ * The top-level keys SPEC 7 defines: `specs` and, in T13.5-8's workspaces,
+ * `code` are served; `markdown`, `coverage`, and `policy` lie outside
+ * §CONF-CORE's workspaces — refused loudly (exit 70), never half-read —
+ * and every other key is unknown, a configuration error (14.14), as
+ * T13.5-8's acquisition-after arm stages it (CERTIFICATIONS.md §CONF-CORE's
+ * staging constraint: a configuration made invalid by an unknown key in its
+ * top-level object).
  */
-async function readConfigGroups(configPath) {
-  let text;
-  try {
-    text = await fsp.readFile(configPath, "utf8");
-  } catch (error) {
+const SERVED_CONFIG_KEYS = new Set(["specs", "code"]);
+const UNSERVED_CONFIG_KEYS = new Set(["markdown", "coverage", "policy"]);
+
+/**
+ * Validate one group map (SPEC 7.1 spec groups, 7.2 code groups — one glob
+ * grammar on both sides): each group a list of glob strings, none spelling
+ * a pattern outside the workspace root.
+ */
+function validatedGroups(map, kind, section) {
+  if (map === null || typeof map !== "object" || Array.isArray(map)) {
     throw new UsageError(
-      `configuration error: cannot read ${CONFIG_NAME}: ${error.message}`,
-    );
-  }
-  const data = parseConfigSource(text);
-  const specs = data.specs;
-  if (
-    specs === undefined ||
-    specs === null ||
-    typeof specs !== "object" ||
-    Array.isArray(specs)
-  ) {
-    throw new UsageError(
-      "configuration error: `specs` is required and must be a map of groups (SPEC 7)",
+      `configuration error: \`${kind === "spec" ? "specs" : "code"}\` must be a map of groups (SPEC ${section})`,
     );
   }
   /** @type {Record<string, string[]>} */
   const groups = {};
-  for (const [name, globs] of Object.entries(specs)) {
+  for (const [name, globs] of Object.entries(map)) {
     if (!Array.isArray(globs) || globs.some((g) => typeof g !== "string")) {
       throw new UsageError(
-        `configuration error: spec group ${name} must be a list of glob strings (SPEC 7.1)`,
+        `configuration error: ${kind} group ${name} must be a list of glob strings (SPEC ${section})`,
       );
     }
     for (const glob of globs) {
@@ -592,6 +624,48 @@ async function readConfigGroups(configPath) {
     groups[name] = globs;
   }
   return groups;
+}
+
+/**
+ * The post-location half of {@link loadConfig}: read, parse, and validate
+ * the located configuration file; returns its spec groups and code groups
+ * (none where `code` is absent, SPEC 7).
+ */
+async function readConfigGroups(configPath) {
+  let text;
+  try {
+    text = await fsp.readFile(configPath, "utf8");
+  } catch (error) {
+    throw new UsageError(
+      `configuration error: cannot read ${CONFIG_NAME}: ${error.message}`,
+    );
+  }
+  const data = parseConfigSource(text);
+  const keys = Object.keys(data);
+  for (const key of keys) {
+    if (!SERVED_CONFIG_KEYS.has(key) && !UNSERVED_CONFIG_KEYS.has(key)) {
+      throw new UsageError(
+        `configuration error: unknown key ${JSON.stringify(key)} in the configuration's top-level object (SPEC 7, 14.14)`,
+      );
+    }
+  }
+  for (const key of keys) {
+    if (UNSERVED_CONFIG_KEYS.has(key)) {
+      throw new FixtureScopeError(
+        `the configuration key ${key} lies outside this fixture's workspaces (§CONF-CORE: no markdown, coverage, or policy keys)`,
+      );
+    }
+  }
+  if (data.specs === undefined) {
+    throw new UsageError(
+      "configuration error: `specs` is required and must be a map of groups (SPEC 7)",
+    );
+  }
+  return {
+    specGroups: validatedGroups(data.specs, "spec", "7.1"),
+    codeGroups:
+      data.code === undefined ? {} : validatedGroups(data.code, "code", "7.2"),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -646,30 +720,31 @@ function globMatches(pattern, relPath) {
 }
 
 // ---------------------------------------------------------------------------
-// Discovery (SPEC 7, 13.4): walk plain files, never following symlinks
+// Discovery (SPEC 7, 13.4, 14.14, 14.25): walk plain files, never following
+// symlinks
 // ---------------------------------------------------------------------------
 
-async function walkPlainFiles(rootAbs, relPrefix = "") {
-  /** @type {string[]} */
-  const files = [];
-  let entries;
-  try {
-    entries = await fsp.readdir(path.join(rootAbs, relPrefix), {
-      withFileTypes: true,
-    });
-  } catch {
-    return files;
-  }
-  for (const entry of entries) {
-    const rel = relPrefix === "" ? entry.name : `${relPrefix}/${entry.name}`;
-    if (entry.isSymbolicLink()) continue; // never discovered, never traversed
-    if (entry.isDirectory()) {
-      files.push(...(await walkPlainFiles(rootAbs, rel)));
-    } else if (entry.isFile()) {
-      files.push(rel);
+/**
+ * Whether `pattern` can match a path below the directory whose
+ * workspace-relative segments are `dirSegments` (SPEC 7: `**` spans whole
+ * segments, none included, but never a segment beginning with `.`; any
+ * other pattern segment matches one path segment, a dot segment only where
+ * the pattern segment is written with a leading `.`) — so discovery lists
+ * exactly the directories some configured glob can reach into.
+ */
+function globReachesBelow(pattern, dirSegments) {
+  const patternSegments = pattern.split("/");
+  const reach = (pi, si) => {
+    if (si === dirSegments.length) return pi < patternSegments.length;
+    if (pi === patternSegments.length) return false;
+    const ps = patternSegments[pi];
+    if (ps === "**") {
+      if (reach(pi + 1, si)) return true;
+      return !dirSegments[si].startsWith(".") && reach(pi, si + 1);
     }
-  }
-  return files;
+    return segmentMatches(ps, dirSegments[si]) && reach(pi + 1, si + 1);
+  };
+  return reach(0, 0);
 }
 
 /** Derived files are never sources (SPEC 13.4). */
@@ -680,17 +755,96 @@ function isDerivedPath(rel) {
   );
 }
 
-async function discoverSources(root, groups) {
-  const all = (await walkPlainFiles(root)).sort();
-  const discovered = [];
-  for (const rel of all) {
+/** Whether a configured group of `groups` matches `rel` (SPEC 7). */
+function groupsMatch(groups, rel) {
+  return Object.values(groups).some((globs) =>
+    globs.some((glob) => globMatches(glob, rel)),
+  );
+}
+
+/**
+ * Discover the workspace's sources (SPEC 7, 13.4) under a loaded
+ * configuration: returns `{ spec, code }`, the discovered spec-group and
+ * code-group files' workspace-relative paths, each list sorted. The walk
+ * starts at the workspace root and lists only directories some configured
+ * glob — of either kind — can reach into (globReachesBelow), never the
+ * graph-data area's own path `.xspec` (no file under it belongs to any
+ * group, 13.4 — so neither the lock directory nor the session directory is
+ * ever listed here, whatever occupies them); a symbolic link is never
+ * discovered or traversed, and a derived path is no source (isDerivedPath).
+ * A listing the environment refuses is the read failure of 14.25, a usage
+ * error concerning that directory's workspace-relative path (exit 2, the
+ * command stopping at it — T14-10(g), T13.5-8's acquisition-after arm,
+ * T13.5-12(e)); a directory found absent, removed since its parent was
+ * listed, lists nothing (14.25: nonexistence is never a read failure). A
+ * discovered file both a spec glob and a code glob match is a
+ * configuration error (7.2, 14.14) concerning the configuration file in
+ * the anchoring form (14, 12.7) — met here, when the command discovers its
+ * sources (14.14), so before acquisition at a mutating command's first
+ * discovery and after the hold at its second (13.5; T13.5-8, T13.5-12(d)).
+ * Code sources are edgeless whole-file code locations judged on 14.20's
+ * accepting side alone (§CONF-CORE), so their content is never read.
+ */
+async function discover(config) {
+  const globs = [
+    ...Object.values(config.specGroups).flat(),
+    ...Object.values(config.codeGroups).flat(),
+  ];
+  /** @type {string[]} */
+  const files = [];
+  const walk = async (rel, segments) => {
+    let entries;
+    try {
+      entries = await fsp.readdir(
+        rel === "" ? config.root : path.join(config.root, rel),
+        { withFileTypes: true },
+      );
+    } catch (error) {
+      if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return;
+      if (!isSystemError(error)) throw error;
+      const concerned = rel === "" ? "." : rel;
+      throw new UsageError(
+        `read failure: cannot list the directory ${concerned} (${error.code}; SPEC 7, 14.25)`,
+        { code: CODE_TOKENS["14.25"], path: concerned },
+      );
+    }
+    for (const entry of entries) {
+      const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
+      if (entry.isSymbolicLink()) continue; // never discovered, never traversed
+      if (entry.isDirectory()) {
+        if (childRel === AREA_REL) continue;
+        const childSegments = [...segments, entry.name];
+        if (globs.some((glob) => globReachesBelow(glob, childSegments))) {
+          await walk(childRel, childSegments);
+        }
+      } else if (entry.isFile()) {
+        files.push(childRel);
+      }
+    }
+  };
+  if (globs.some((glob) => globReachesBelow(glob, []))) await walk("", []);
+  files.sort();
+  /** @type {string[]} */
+  const spec = [];
+  /** @type {string[]} */
+  const code = [];
+  for (const rel of files) {
     if (isDerivedPath(rel)) continue;
-    const matched = Object.values(groups).some((globs) =>
-      globs.some((glob) => globMatches(glob, rel)),
-    );
-    if (matched) discovered.push(rel);
+    const specMatched = groupsMatch(config.specGroups, rel);
+    const codeMatched = groupsMatch(config.codeGroups, rel);
+    if (specMatched && codeMatched) {
+      throw new UsageError(
+        `configuration error: ${rel} is matched by both a spec group and a code group (SPEC 7.2, 14.14)`,
+        {
+          code: "configuration-error",
+          path: await anchoringPath(config.cwd, config.configPath),
+        },
+      );
+    }
+    if (specMatched) spec.push(rel);
+    else if (codeMatched) code.push(rel);
   }
-  return discovered;
+  return { spec, code };
 }
 
 // ---------------------------------------------------------------------------
@@ -1103,22 +1257,18 @@ function buildFileModel(rel, text, byteLength, parsed) {
 }
 
 /**
- * Load the workspace graph: discover, parse, validate. Throws FindingsError
- * (exit 1) when validation fails — reads report the errors and answer
- * nothing (SPEC 13.3), build/check report them (SPEC 12.1, 12.2).
- *
- * `afterDiscovery`, when given, is awaited with the root once the sources
- * are discovered and before anything is parsed — the point where a mutating
- * command acquires (SPEC 13.5). Only VIOL-CORE-BUILDWAIT's `build` passes
- * one (awaitNoLiveHolder); every other caller passes none.
+ * Load the workspace graph over the sources a discovery yielded (`discovery`,
+ * from discover): parse and validate the spec sources; the code sources
+ * enter as edgeless whole-file code locations, by path alone
+ * (§CONF-CORE). Throws FindingsError (exit 1) when validation fails —
+ * reads report the errors and answer nothing (SPEC 13.3), build/check
+ * report them (SPEC 12.1, 12.2).
  */
-async function loadGraph(root, groups, afterDiscovery = null) {
-  const sourcePaths = await discoverSources(root, groups);
-  if (afterDiscovery !== null) await afterDiscovery(root);
+async function loadGraph(root, discovery) {
   /** @type {Finding[]} */
   const findings = [];
   const files = [];
-  for (const rel of sourcePaths) {
+  for (const rel of discovery.spec) {
     if (!rel.endsWith(".mdx")) {
       findings.push({
         condition: "14.19",
@@ -1182,6 +1332,8 @@ async function loadGraph(root, groups, afterDiscovery = null) {
   return {
     root,
     files: models,
+    /** The discovered code sources' paths: edgeless whole-file locations. */
+    code: discovery.code,
     byIdentity,
     /** Document index of a node within its file (root = 0). */
     docIndex(node) {
@@ -1228,7 +1380,8 @@ function currentDerivedPaths(graph) {
 
 /**
  * Graph data exactly as `build` writes it (SPEC 13.3, 13.4): per-file
- * section ids, node hashes, and source ranges, plus the recorded derived-file
+ * section ids, node hashes, and source ranges, the discovered code sources'
+ * whole-file locations by path (`code`), plus the recorded derived-file
  * paths — the paths generated now or, for the 13.3 refresh, the stored
  * record left unchanged (`derived`).
  */
@@ -1252,7 +1405,7 @@ function graphDataContent(graph, derived = currentDerivedPaths(graph)) {
       nodes,
     };
   }
-  return canonicalJson({ derived, files: filesData }) + "\n";
+  return canonicalJson({ code: graph.code, derived, files: filesData }) + "\n";
 }
 
 async function readRecordedDerived(root) {
@@ -3067,6 +3220,14 @@ function checkValueSpellings(spelled, flags, operands) {
       return;
     case "move":
       for (const operand of operands) checkIdentitySpelling(spelled, operand);
+      // Operands are classified by spelling alone: one spelling a
+      // `<file>#<id>` pair beside one spelling a file matches neither
+      // synopsis (SPEC 6.5, 12.0).
+      if (operands[0].includes("#") !== operands[1].includes("#")) {
+        throw new UsageError(
+          "move: the operands mix the file form and the section form, matching neither synopsis (SPEC 6.5, 12.0)",
+        );
+      }
       return;
     case "review status":
     case "review next":
@@ -3113,30 +3274,42 @@ function refuseUnservedFlags(spelled, synopsis, flags) {
 const EARLY_RELEASE_DWELL_MS = 1000;
 
 /**
- * Run a mutating command (SPEC 13.5): configuration, then workspace
- * exclusivity, then the `--test-hold` seam, then the checks a command judges
- * ahead of the refresh and its own writes, in the order 12.0 and 13.5 fix —
- * first the usage-class argument checks of 12.0 and baseline resolution,
- * 6.3 (`judgeArguments`: each judged from what it consults — the origin
- * file, the session directory, the configuration, the absent repository —
- * identically on valid and failing workspaces, so they precede source
- * validation), then, over the current sources, the gate of 13.3 binding the
- * mutating `review` subcommands or the valid-workspace precondition of
+ * Run a mutating command (SPEC 13.5): configuration and the first
+ * discovery, then workspace exclusivity, then the `--test-hold` seam, then
+ * the second discovery, then the checks a command judges ahead of the
+ * refresh and its own writes, in the order 12.0 and 13.5 fix — first the
+ * usage-class argument checks of 12.0 and baseline resolution, 6.3
+ * (`judgeArguments`: each judged from what it consults — the origin file
+ * and its kind among the discovered sources, the session directory, the
+ * configuration, the absent repository — identically on valid and failing
+ * workspaces, so they precede source validation), then, over the sources
+ * the second discovery fixed, the gate of 13.3 binding the mutating
+ * `review` subcommands or the valid-workspace precondition of
  * `rename`/`move`, 6.4/6.5 (`judgeWorkspace`; its result, the loaded graph
  * included, is what the refresh and the operation act on) — then, for the
  * mutating `review` subcommands (`refreshesGraphData`), the refresh of
- * 13.3, then the operation's own validation and writes (`operate`);
- * exclusivity ends with the command — released as every normal end comes
- * (completion, refusal, and failure alike; an acquisition that fails
+ * 13.3, then the operation's own validation and writes (`operate`, given
+ * the second discovery as well, whose sources a finishing regeneration
+ * reads); exclusivity ends with the command — released as every normal end
+ * comes (completion, refusal, and failure alike; an acquisition that fails
  * releases before it throws), while a killed process leaves its entry, a
  * leftover the next acquisition removes once its identifier is no longer
  * listed (acquireExclusivity).
- * Acquisition and the hold precede every later check (SPEC 13.5; T13.5-8),
- * so an invocation a later check refuses or the gate turns back creates the
- * hold file too and exits with its own outcome only after the hold's
- * deletion, having written nothing. Acquisition, the hold, the two judged
- * phases, and the refresh are each position-independent so that one
- * deviation can move one of them.
+ * The first discovery (discover) meets, before acquisition, the
+ * configuration error of a file both groups match and a refused listing
+ * (14.14, 14.25; T13.5-8's acquisition-after arms), so those precede
+ * acquisition's outcomes; nothing later consults its sources but
+ * VIOL-CORE-EARLYREFRESH's early refresh and VIOL-CORE-LATELOCK's early
+ * argument checks. The second, once exclusivity is held — past the hold —
+ * fixes the sources every later check and read consults, meeting either
+ * error there, after acquisition's and the hold file's errors and before
+ * every other (13.5, 12.0; T13.5-12(d), (e)).
+ * Acquisition and the hold precede the second discovery and every later
+ * check (SPEC 13.5; T13.5-8), so an invocation a later check refuses or the
+ * gate turns back creates the hold file too and exits with its own outcome
+ * only after the hold's deletion, having written nothing. Acquisition, the
+ * hold, the second discovery, the two judged phases, and the refresh are
+ * each position-independent so that one deviation can move one of them.
  */
 async function runMutating(
   cwd,
@@ -3150,6 +3323,10 @@ async function runMutating(
   },
 ) {
   const config = await loadConfig(cwd, configFlag);
+  // The first discovery (SPEC 13.5: a mutating command acquires once its
+  // configuration is loaded and its sources discovered): the configuration
+  // error and read failures it meets precede acquisition's outcomes (12.0).
+  const firstDiscovery = await discover(config);
   // The 13.3 refresh of stale graph data (CERTIFICATIONS.md §CONF-CORE Scope:
   // "the 13.3 refresh a mutating `review` subcommand performs after the hold
   // and before its own writes, writing graph data byte-identical to what
@@ -3183,7 +3360,7 @@ async function runMutating(
     // conformer's position below (T13.5-8's failing-workspace arms).
     try {
       if (refreshesGraphData) {
-        await refreshIfStale(await loadGraph(config.root, config.groups));
+        await refreshIfStale(await loadGraph(config.root, firstDiscovery));
       }
     } catch (error) {
       if (!(error instanceof FindingsError)) throw error;
@@ -3211,12 +3388,24 @@ async function runMutating(
       );
     }
   };
+  // The second discovery (SPEC 13.5): holding exclusivity, past the hold,
+  // the command discovers its sources again — the sources every later check
+  // and read consults, a configuration error or read failure it meets
+  // reported there (discover) — so the workspace it judges and rewrites is
+  // the one current once it holds exclusivity.
+  const rediscover = async () => await discover(config);
+  // The two judged phases over a discovery's sources, in 12.0's order: the
+  // argument checks and baseline resolution, then the gate or precondition.
+  const judge = async (discovery) => {
+    await judgeArguments(config, discovery);
+    return await judgeWorkspace(config, discovery);
+  };
   // Everything that follows the judged checks, in the conformer's order: the
   // refresh of 13.3 over the graph the gate loaded, then the operation's own
   // validation and writes.
-  const proceed = async (judged) => {
+  const proceed = async (judged, discovery) => {
     await refreshAfterHold(judged.graph);
-    return await operate(config, judged);
+    return await operate(config, judged, discovery);
   };
   try {
     if (deviations.lateAcquisition) {
@@ -3241,11 +3430,15 @@ async function runMutating(
       // precondition turns back — acquires, holds, and proceeds or is
       // refused exactly as the conformer's does (T13.5-8: its two
       // seam-ordering arms refused ahead of the gate fail; every other arm
-      // is conforming).
-      await judgeArguments(config);
+      // is conforming). Judged before acquisition, those two checks consult
+      // the first discovery's sources; the second discovery, past the hold,
+      // fixes the sources the gate, the precondition, and the operation
+      // consult, as the conformer's does.
+      await judgeArguments(config, firstDiscovery);
       await acquire();
       await holdIfRequested();
-      return await proceed(await judgeWorkspace(config));
+      const discovery = await rediscover();
+      return await proceed(await judgeWorkspace(config, discovery), discovery);
     }
     await acquire();
     if (deviations.writesBeforeHold) {
@@ -3254,20 +3447,20 @@ async function runMutating(
       // it acquires exclusivity (above, unchanged), completes the operation's
       // writes (the 13.3 refresh of stale graph data and the journal append
       // included), then creates the hold file, waits for its deletion, and
-      // exits normally with the operation's outcome. The argument checks of
-      // 12.0, baseline resolution (6.3), the gate of 13.3, and the
-      // valid-workspace precondition of rename/move (6.4, 6.5) are judged
-      // after acquisition and before the writes they gate, as the conformer
-      // judges them, while the exit they refuse with is deferred as the
-      // writes' completion is: an invocation they refuse creates the hold
-      // file having written nothing, waits for its deletion, and only then
-      // exits with its error. The hold seam's own semantics (empty file,
-      // occupied path fails exit 2) and everything else are exactly the
-      // conformer's behavior.
+      // exits normally with the operation's outcome. The second discovery
+      // (13.5), the argument checks of 12.0, baseline resolution (6.3), the
+      // gate of 13.3, and the valid-workspace precondition of rename/move
+      // (6.4, 6.5) are judged after acquisition and before the writes they
+      // gate, as the conformer judges them, while the exit they refuse with
+      // is deferred as the writes' completion is: an invocation they refuse
+      // creates the hold file having written nothing, waits for its
+      // deletion, and only then exits with its error. The hold seam's own
+      // semantics (empty file, occupied path fails exit 2) and everything
+      // else are exactly the conformer's behavior.
       let code;
       try {
-        await judgeArguments(config);
-        code = await proceed(await judgeWorkspace(config));
+        const discovery = await rediscover();
+        code = await proceed(await judge(discovery), discovery);
       } catch (error) {
         if (!isRefusedOutcome(error)) throw error;
         await holdIfRequested();
@@ -3296,8 +3489,8 @@ async function runMutating(
       await early.release();
       await sleep(EARLY_RELEASE_DWELL_MS);
     }
-    await judgeArguments(config);
-    return await proceed(await judgeWorkspace(config));
+    const discovery = await rediscover();
+    return await proceed(await judge(discovery), discovery);
   } finally {
     await lock.release();
   }
@@ -3322,13 +3515,13 @@ function isRefusedOutcome(error) {
 
 async function commandBuild(io, cwd, { flags }) {
   const config = await loadConfig(cwd, flags["--config"]);
+  const discovery = await discover(config);
   // VIOL-CORE-BUILDWAIT (CERTIFICATIONS.md, `buildWaitsForHolders`): `build`
-  // waits out other runs' exclusivity once its sources are discovered.
-  const graph = await loadGraph(
-    config.root,
-    config.groups,
-    deviations.buildWaitsForHolders ? awaitNoLiveHolder : null,
-  );
+  // waits out other runs' exclusivity once its sources are discovered —
+  // where a mutating command acquires (SPEC 13.5) — before anything is
+  // parsed.
+  if (deviations.buildWaitsForHolders) await awaitNoLiveHolder(config.root);
+  const graph = await loadGraph(config.root, discovery);
   await regenerate(graph);
   // A `build` report's defined content is findings alone, so a successful
   // build's JSON document is the findings report of 12.7 with none:
@@ -3339,7 +3532,7 @@ async function commandBuild(io, cwd, { flags }) {
 
 async function commandCheck(io, cwd, { flags }) {
   const config = await loadConfig(cwd, flags["--config"]);
-  const graph = await loadGraph(config.root, config.groups);
+  const graph = await loadGraph(config.root, await discover(config));
   /** @type {Finding[]} */
   const findings = [];
   // 14.10: derived files content-identical to what the current sources
@@ -3418,7 +3611,7 @@ async function commandCheck(io, cwd, { flags }) {
 
 async function commandIds(io, cwd, { flags }) {
   const config = await loadConfig(cwd, flags["--config"]);
-  const graph = await loadGraph(config.root, config.groups);
+  const graph = await loadGraph(config.root, await discover(config));
   const doc = {
     files: graph.files.map((model) => ({
       file: model.rel,
@@ -3472,37 +3665,46 @@ function nodeReportDoc(node) {
 
 /**
  * A read 13.3 gates (`show`, `query`, the `review` reads; SPEC 12.0, 13.3):
- * configuration, then the read's argument checks (`judgeArguments`) — each
+ * configuration and discovery — whose configuration error and read
+ * failures precede every error consulting them (12.0) — then the read's
+ * argument checks (`judgeArguments`, given the discovered sources) — each
  * judged from what it consults, identically on valid and failing
  * workspaces, so that a usage-error argument exits 2 whatever findings the
  * workspace carries (12.0) — and only then the gate: the graph loaded over
- * the current sources, a failing workspace's findings reported, exit 1, in
- * place of the answer (13.3).
+ * the discovered sources, a failing workspace's findings reported, exit 1,
+ * in place of the answer (13.3).
  */
 async function loadGatedRead(cwd, flags, judgeArguments) {
   const config = await loadConfig(cwd, flags["--config"]);
-  await judgeArguments(config);
-  return { config, graph: await loadGraph(config.root, config.groups) };
+  const discovery = await discover(config);
+  await judgeArguments(config, discovery);
+  return { config, graph: await loadGraph(config.root, discovery) };
 }
 
 /**
  * The identity checks of a gated read's `<node>` and `<graph-node>`
  * arguments (SPEC 12.0), each judged parse-locally against the named file
  * as 6.4 judges the old ID (judgeOriginFile): the path must be a discovered
- * source — every discovered source is a spec source in this scope
- * (§CONF-CORE: no code groups), and a bare path names its file's root (1.5)
- * — and an `id` must be among the file's spelled identities (11.2,
- * spelledSectionsOf), an unparseable named file masking the check, so that
- * the gate then reports (exit 1). Each spelling holds at most one `#`, a
+ * spec source — a bare path naming its file's root (1.5) — and an `id` must
+ * be among the file's spelled identities (11.2, spelledSectionsOf), an
+ * unparseable named file masking the check, so that the gate then reports
+ * (exit 1). A discovered code source's path names a code location, which
+ * the reads of this surface never name (§CONF-CORE: code groups only in
+ * T13.5-8's workspaces, whose arms drive no such read): refused loudly
+ * (exit 70), never answered. Each spelling holds at most one `#`, a
  * syntax-class check already passed (checkValueSpellings).
  */
 function judgeNodeIdentities(identities) {
-  return async (config) => {
-    const sourcePaths = await discoverSources(config.root, config.groups);
+  return async (config, discovery) => {
     for (const identity of identities) {
       const hash = identity.indexOf("#");
       const file = hash === -1 ? identity : identity.slice(0, hash);
-      if (!sourcePaths.includes(file)) {
+      if (discovery.code.includes(file)) {
+        throw new FixtureScopeError(
+          `${identity} names a code location, which this fixture's reads never name (§CONF-CORE)`,
+        );
+      }
+      if (!discovery.spec.includes(file)) {
         throw new UsageError(
           `unknown node ${identity}: ${file} is not a discovered source (SPEC 11.1, 12.0)`,
         );
@@ -3571,6 +3773,15 @@ async function commandQuery(io, cwd, sub, { flags, positionals }) {
       sub === "reachable" ? [flags["--from"], flags["--to"]] : positionals,
     ),
   );
+  if (sub === "nodes" && graph.code.length > 0) {
+    // Every discovered code source is a graph node (SPEC 5.1, 4.6) this
+    // answer would list; code groups lie in T13.5-8's workspaces alone,
+    // whose arms drive no `query` (§CONF-CORE) — refused loudly, never
+    // answered without them.
+    throw new FixtureScopeError(
+      "query nodes over a workspace with code sources lies outside this fixture's surface (§CONF-CORE)",
+    );
+  }
   const allNodes = graph.files.flatMap((model) => model.nodes);
   if (sub === "node") {
     emitJsonOnly(io, nodeReportDoc(requireNode(graph, positionals[0])));
@@ -3621,6 +3832,9 @@ async function commandQuery(io, cwd, sub, { flags, positionals }) {
 
 async function commandCoverage(io, cwd, { flags, positionals }) {
   const config = await loadConfig(cwd, flags["--config"]);
+  // Discovery precedes every error consulting configuration (12.0): a
+  // refused listing reports before an unknown profile does (T14-10(g)).
+  const discovery = await discover(config);
   if (positionals.length === 1) {
     // `coverage <name>` (SPEC 8.2): this scope configures no profile, so
     // every name is an unknown profile — a usage error judged against the
@@ -3629,7 +3843,7 @@ async function commandCoverage(io, cwd, { flags, positionals }) {
       `unknown coverage profile ${positionals[0]}: no profile is configured (SPEC 8.2, 12.0)`,
     );
   }
-  await loadGraph(config.root, config.groups); // reads answer per current sources
+  await loadGraph(config.root, discovery); // reads answer per current sources
   emitDoc(io, flags["--json"] === true, { profiles: [] }, [
     "coverage: 0 profiles configured",
   ]);
@@ -3638,7 +3852,9 @@ async function commandCoverage(io, cwd, { flags, positionals }) {
 
 async function commandImpact(io, cwd, { flags }) {
   // `--base` is required by the synopsis (checkSynopsis, SPEC 9, 12.0).
-  await loadConfig(cwd, flags["--config"]);
+  // Configuration and discovery precede the baseline, which consults the
+  // workspace (12.0).
+  await discover(await loadConfig(cwd, flags["--config"]));
   // §CONF-CORE scope has no git: a baseline that cannot be read or
   // reconstructed is a usage error (SPEC 6.3, 12.0).
   throw new UsageError(
@@ -3650,22 +3866,28 @@ async function commandImpact(io, cwd, { flags }) {
 
 /**
  * The argument checks of `rename` and `move` over the origin file (SPEC 6.4,
- * 6.5, 12.0) — runMutating's `judgeArguments`: the file must be a discovered
- * spec source (an unknown file a usage error, exit 2) and, for `rename`
- * (`oldId` given), the old id must exist, judged parse-locally over the
- * origin file's spelled identities (11.2): it exists exactly when a section
- * of the file spells it, and an unparseable origin file masks the check —
- * the precondition then reports the file's finding, exit 1. Consulting the
- * discovered paths and the origin file alone, the checks are judged
- * identically on valid and failing workspaces and precede source validation
- * (12.0): T13.5-8's excluded `rename specs/A.mdx a b` on the failing
- * workspace passes them. Every discovered source is a spec source in this
- * scope (§CONF-CORE: no code groups), so no wrong-kind origin arises.
+ * 6.5, 12.0) — runMutating's `judgeArguments`, over the sources a discovery
+ * yielded (the second, past the hold; a preview's one): the file must be a
+ * discovered spec source — a discovered code source is a wrong-kind origin
+ * and any other path an unknown file, each a usage error, exit 2, judged
+ * like existence before any content question (6.4) — and, where an ID is
+ * given (`rename`'s old ID, the section form of `move`'s origin ID), the ID
+ * must exist, judged parse-locally over the origin file's spelled
+ * identities (11.2): it exists exactly when a section of the file spells
+ * it, and an unparseable origin file masks the check — the precondition
+ * then reports the file's finding, exit 1. Consulting the discovered paths
+ * and the origin file alone, the checks are judged identically on valid and
+ * failing workspaces and precede source validation (12.0): T13.5-8's
+ * excluded `rename specs/A.mdx a b` on the failing workspace passes them.
  */
 function judgeOriginFile(file, oldId, section) {
-  return async (config) => {
-    const sourcePaths = await discoverSources(config.root, config.groups);
-    if (!sourcePaths.includes(file)) {
+  return async (config, discovery) => {
+    if (discovery.code.includes(file)) {
+      throw new UsageError(
+        `wrong-kind origin ${file}: a discovered code source, not a spec source (SPEC ${section}, 12.0)`,
+      );
+    }
+    if (!discovery.spec.includes(file)) {
       throw new UsageError(
         `unknown file ${file}: not a discovered spec source (SPEC ${section}, 12.0)`,
       );
@@ -3709,15 +3931,17 @@ async function commandRename(io, cwd, { flags, positionals }) {
     return await previewRename(cwd, flags, file, oldId, newId);
   }
   // The checks judged ahead of the operation, in 12.0's order: first the
-  // argument checks of 12.0 (runMutating's `judgeArguments`: an unknown file
-  // or old id a usage error, exit 2, judged parse-locally over the origin
-  // file — judgeOriginFile), then the valid-workspace precondition of 6.4
-  // (`judgeWorkspace`: the graph loaded over the current sources, findings
-  // exit 1); the origin file and its old-id bearer are then read off the
-  // loaded graph — both exist, the argument checks having passed over the
-  // same file, or the precondition has already reported the file.
-  const judgeWorkspace = async (config) => {
-    const graph = await loadGraph(config.root, config.groups);
+  // argument checks of 12.0 (runMutating's `judgeArguments`: an unknown or
+  // wrong-kind file or an unknown old id a usage error, exit 2, judged over
+  // the discovered sources and parse-locally over the origin file —
+  // judgeOriginFile), then the valid-workspace precondition of 6.4
+  // (`judgeWorkspace`: the graph loaded over the sources the second
+  // discovery fixed, findings exit 1); the origin file and its old-id bearer
+  // are then read off the loaded graph — both exist, the argument checks
+  // having passed over the same file, or the precondition has already
+  // reported the file.
+  const judgeWorkspace = async (config, discovery) => {
+    const graph = await loadGraph(config.root, discovery);
     const model = graph.files.find((candidate) => candidate.rel === file);
     const target = model?.sections.find((section) => section.id === oldId);
     if (model === undefined || target === undefined) {
@@ -3731,7 +3955,7 @@ async function commandRename(io, cwd, { flags, positionals }) {
     cwd,
     flags["--config"],
     flags["--test-hold"],
-    async (config, { model, target }) => {
+    async (config, { model, target }, discovery) => {
       // Validation (SPEC 6.4): new id valid, differs, collides with nothing,
       // structural parent rules remain satisfied.
       const refusal = (message) => new RefusalError(message);
@@ -3795,8 +4019,9 @@ async function commandRename(io, cwd, { flags, positionals }) {
         path: file,
         to: newId,
       });
-      // Finishing regeneration exactly as `build` (SPEC 6.4).
-      const regenerated = await loadGraph(config.root, config.groups);
+      // Finishing regeneration exactly as `build` (SPEC 6.4), over the
+      // sources the second discovery fixed (SPEC 13.5).
+      const regenerated = await loadGraph(config.root, discovery);
       await regenerate(regenerated);
       // The applied mapping in the performed-operation form of 12.7 (SPEC
       // 6.4): exactly {"findings", "mapping"} — `findings` [] and `mapping`
@@ -3830,55 +4055,92 @@ async function commandRename(io, cwd, { flags, positionals }) {
  * class (SPEC 12.0), judged from the arguments alone by checkSynopsis,
  * before configuration is loaded — and it is
  * refused exactly as the real operation would be (6.6): the real rename's
- * argument checks of 12.0 (judgeOriginFile: a nonexistent origin file or
- * old ID, 6.4) exit 2 at once, modifying nothing, judged as the real
- * operation judges them — after configuration, ahead of the valid-workspace
- * precondition of 6.4, so on valid and failing workspaces alike (12.0) —
- * and only then the precondition over the current sources (findings, exit
- * 1). A preview of a performable rename lies outside this surface and is
+ * argument checks of 12.0 (judgeOriginFile: a nonexistent or wrong-kind
+ * origin file or a nonexistent old ID, 6.4) exit 2 at once, modifying
+ * nothing, judged as the real operation judges them — after configuration
+ * and its one discovery, ahead of the valid-workspace precondition of 6.4,
+ * so on valid and failing workspaces alike (12.0) — and only then the
+ * precondition over the discovered sources (findings, exit 1). A preview of a performable rename lies outside this surface and is
  * refused loudly, outside the 12.0 partition, never answered.
  */
 async function previewRename(cwd, flags, file, oldId, newId) {
   const config = await loadConfig(cwd, flags["--config"]);
-  await judgeOriginFile(file, oldId, "6.4")(config);
-  await loadGraph(config.root, config.groups);
+  const discovery = await discover(config);
+  await judgeOriginFile(file, oldId, "6.4")(config, discovery);
+  await loadGraph(config.root, discovery);
   throw new FixtureScopeError(
     `rename --preview of a performable operation (${file} ${oldId} -> ${newId}) lies outside this fixture's certified surface (§CONF-CORE)`,
   );
 }
 
+/**
+ * `move`'s section form (SPEC 6.5), within this fixture's surface only to
+ * its argument checks, as T13.5-8's acquisition-first arms drive it (`move
+ * specs/A.mdx#nope specs/B.mdx#x`; CERTIFICATIONS.md §CONF-CORE): a
+ * mutating command like the file form — the first discovery, acquisition,
+ * the hold, and the second discovery first — whose argument checks of 12.0
+ * judge the origin pair as rename's judge its file and old ID
+ * (judgeOriginFile: a nonexistent or wrong-kind origin file, or a
+ * nonexistent origin ID, a usage error, exit 2, an unparseable origin file
+ * masking the ID check), followed by the valid-workspace precondition
+ * (findings, exit 1). A section move those checks admit — performable, or
+ * refused by its own validation — lies outside this surface: refused loudly
+ * (exit 70), never performed or answered. The target operand takes part in
+ * no check here; every outcome it decides is a refusal (6.5).
+ */
+async function moveSection(cwd, flags, origin, target) {
+  const hash = origin.indexOf("#");
+  const file = origin.slice(0, hash);
+  const id = origin.slice(hash + 1);
+  return await runMutating(
+    cwd,
+    flags["--config"],
+    flags["--test-hold"],
+    async () => {
+      throw new FixtureScopeError(
+        `a section move its argument checks and precondition admit (${origin} -> ${target}) lies outside this fixture's certified surface (§CONF-CORE: the section form only to its argument checks)`,
+      );
+    },
+    {
+      judgeArguments: judgeOriginFile(file, id, "6.5"),
+      judgeWorkspace: async (config, discovery) => ({
+        graph: await loadGraph(config.root, discovery),
+      }),
+    },
+  );
+}
+
 async function commandMove(io, cwd, { flags, positionals }) {
   const [oldPath, newPath] = positionals;
-  // The section form and every preview are outside this fixture's certified
-  // scope (CERTIFICATIONS.md §CONF-CORE: file-form move only; `rename
-  // --preview` alone, as T13.5-8 drives it) — refused loudly only once the
-  // syntax-class checks of 12.0 have passed (dispatchCommand: each operand
-  // holds at most one `#`, and `--test-hold` beside `--preview` is a usage
-  // error), so no scope refusal masks a usage error.
-  if (oldPath.includes("#") || newPath.includes("#")) {
-    throw new FixtureScopeError(
-      "this fixture implements the file form of move only (§CONF-CORE scope)",
-    );
-  }
+  // Every preview is outside this fixture's certified scope
+  // (CERTIFICATIONS.md §CONF-CORE: `rename --preview` alone, as T13.5-8
+  // drives it) — refused loudly only once the syntax-class checks of 12.0
+  // have passed (dispatchCommand: each operand holds at most one `#`, the
+  // two operands spell one form, and `--test-hold` beside `--preview` is a
+  // usage error), so no scope refusal masks a usage error.
   if (flags["--preview"] === true) {
     throw new FixtureScopeError(
       "move --preview lies outside this fixture's certified surface (§CONF-CORE scope)",
     );
   }
+  // The operands spell one form (checkValueSpellings): `<file>#<id>` pairs
+  // are the section form.
+  if (oldPath.includes("#"))
+    return await moveSection(cwd, flags, oldPath, newPath);
   // The checks judged ahead of the operation, in 12.0's order: first the
-  // argument check of 12.0 (runMutating's `judgeArguments`: an unknown file
-  // a usage error, exit 2, judged over the discovered sources —
-  // judgeOriginFile), then the valid-workspace precondition of 6.5
-  // (`judgeWorkspace`: the graph loaded over the current sources, findings
-  // exit 1).
-  const judgeWorkspace = async (config) => ({
-    graph: await loadGraph(config.root, config.groups),
+  // argument check of 12.0 (runMutating's `judgeArguments`: an unknown or
+  // wrong-kind origin file a usage error, exit 2, judged over the discovered
+  // sources — judgeOriginFile), then the valid-workspace precondition of
+  // 6.5 (`judgeWorkspace`: the graph loaded over the sources the second
+  // discovery fixed, findings exit 1).
+  const judgeWorkspace = async (config, discovery) => ({
+    graph: await loadGraph(config.root, discovery),
   });
   return await runMutating(
     cwd,
     flags["--config"],
     flags["--test-hold"],
-    async (config, { graph }) => {
+    async (config, { graph }, discovery) => {
       const refusal = (message) => new RefusalError(message);
       if (await pathOccupied(path.join(config.root, newPath))) {
         throw refusal(
@@ -3890,10 +4152,14 @@ async function commandMove(io, cwd, { flags, positionals }) {
           `move refused: the destination must have the .mdx extension (SPEC 6.5, 14.19)`,
         );
       }
-      const matchesGroup = Object.values(config.groups).some((globs) =>
-        globs.some((glob) => globMatches(glob, newPath)),
-      );
-      if (!matchesGroup || isDerivedPath(newPath)) {
+      // A destination no spec group matches, or a code group matches as
+      // well (a configuration error, 14.14), would not be a valid discovered
+      // spec source after the move: refused-invalid-destination (6.5).
+      if (
+        !groupsMatch(config.specGroups, newPath) ||
+        groupsMatch(config.codeGroups, newPath) ||
+        isDerivedPath(newPath)
+      ) {
         throw refusal(
           `move refused: ${newPath} would not be a valid discovered spec source after the move (SPEC 6.5)`,
         );
@@ -3910,7 +4176,16 @@ async function commandMove(io, cwd, { flags, positionals }) {
         kind: "move",
         to: newPath,
       });
-      const regenerated = await loadGraph(config.root, config.groups);
+      // Finishing regeneration exactly as `build` (SPEC 6.5, 6.4), over the
+      // sources the second discovery fixed (SPEC 13.5), the relocation
+      // applied.
+      const relocated = {
+        spec: discovery.spec
+          .map((rel) => (rel === oldPath ? newPath : rel))
+          .sort(),
+        code: discovery.code,
+      };
+      const regenerated = await loadGraph(config.root, relocated);
       await regenerate(regenerated);
       // The applied mapping in the performed-operation form of 12.7 (SPEC
       // 6.5): one pair per node of the moved file — the root's bare-path
@@ -4088,11 +4363,11 @@ async function reviewCreate(io, cwd, { flags }) {
 /**
  * The workspace check of a mutating `review` subcommand (runMutating's
  * `judgeWorkspace`): exactly the gate of 13.3 — the graph loaded over the
- * current sources, findings exit 1 (SPEC 13.3, 12.0); the subcommand's own
- * validation (10.7) follows the refresh.
+ * sources the second discovery fixed, findings exit 1 (SPEC 13.3, 13.5,
+ * 12.0); the subcommand's own validation (10.7) follows the refresh.
  */
-async function judgeGate(config) {
-  return { graph: await loadGraph(config.root, config.groups) };
+async function judgeGate(config, discovery) {
+  return { graph: await loadGraph(config.root, discovery) };
 }
 
 /**
@@ -4370,7 +4645,8 @@ async function reviewSplit(io, cwd, { flags, positionals }) {
 
 async function reviewList(io, cwd, { flags }) {
   const config = await loadConfig(cwd, flags["--config"]);
-  await loadGraph(config.root, config.groups); // 13.3: reads validate sources
+  // 13.3: reads validate sources.
+  await loadGraph(config.root, await discover(config));
   const sessions = [];
   let anyCorrupt = false;
   for (const name of await listSessionNames(config.root)) {
@@ -4721,7 +4997,8 @@ async function addReaderEntry(root) {
 /**
  * VIOL-CORE-BUILDWAIT (CERTIFICATIONS.md, `buildWaitsForHolders`): `build`,
  * its configuration loaded and its sources discovered — where a mutating
- * command acquires (SPEC 13.5; loadGraph's `afterDiscovery`) — waits out
+ * command acquires (SPEC 13.5; commandBuild, between discover and
+ * loadGraph) — waits out
  * other runs' exclusivity: while a live holder stands (liveHolderStands) it
  * looks again every BUILD_WAIT_POLL_MS, and once none stands it proceeds as
  * the conformer does. It adds no entry, removes nothing, writes nothing at
