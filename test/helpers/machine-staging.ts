@@ -1,7 +1,8 @@
-// 13.5's machine-wide stagings I: the second user, the second mount, and the
-// launcher that starts runs as the second user (TEST-SPEC H-2, E-1, E-3,
-// T13.5-9; H-11). Harness machinery only: no product imports, no test
-// framework dependence.
+// 13.5's machine-wide stagings — I: the second user, the second mount, and
+// the launcher that starts runs as the second user (TEST-SPEC H-2, E-1, E-3,
+// T13.5-9; H-11); II: fresh process-identifier namespaces and the two
+// launchers that start runs in them (T13.5-10(e)–(g), T13.5-3). Harness
+// machinery only: no product imports, no test framework dependence.
 //
 // - Administrative access (E-1). These stagings are made with the
 //   administrative access GitHub's hosted Linux runners grant the job —
@@ -75,22 +76,71 @@
 //   `secondUserCreatesIn` answers, without judging, whether the second user
 //   can create and remove a file in one directory — T13.5-9 asks it again
 //   once the holder is held, where a refusal is no staging error.
+// - Fresh process-identifier namespaces (T13.5-10(e)–(g); E-1, E-3). Made
+//   with `sudo` like the stagings above, outside every product invocation,
+//   each run in one dropping back to the harness's own uid, gid, and
+//   supplementary groups with every capability set empty (`setpriv`), with
+//   the harness's umask and resource limits and exactly the driver's
+//   environment (as the second user's launcher gives them). A namespace has
+//   no path: each is its test's own and ends with it (E-3).
+//   - Launcher A (`freshNamespaceLauncher`; (f), (g)): `unshare --pid --fork
+//     --mount-proc` starts each run as the first process — identifier 1 —
+//     of a fresh namespace with a process list of its own (a fresh `/proc`
+//     in a mount namespace of its own, the working directory kept). It is
+//     verified on the harness once per command before use: a probe started
+//     through it must see itself as identifier 1 and nothing else listed,
+//     as the harness's identity with no capability.
+//   - Launcher B (`openHarnessNamespace`; (e)'s run on another machine): a
+//     namespace made the same way whose first process is the harness's own
+//     — a bash running builtins alone, so it forks nothing and allocates no
+//     identifier there, and, as that namespace's reaper, reaps every orphan
+//     — outliving the commands entered into it with `nsenter` (its
+//     process-identifier and mount namespaces, the working directory
+//     resolved there). It opens verified fresh: the first process alone
+//     listed, the last identifier allocated its own. Through it the harness
+//     reads the namespace's process list and the identifier it allocated
+//     last (`ns_last_pid`) without disturbing either (`observe`); allocation
+//     being cyclic, `hasAllocated` answers (e)'s reuse check from them.
+//   - Observations from the harness's side: a run's in-namespace
+//     identifiers (`inNamespaceIdentifiers`, from `/proc/<pid>/status`'s
+//     NSpid lines: the field one level below the harness's own), and the
+//     harness's own process list (helpers/kill-discipline.ts).
+//   - Kills: a run through either launcher leads its own process group, as
+//     every launched run does, and is killed through `sudo` (SIGKILL to the
+//     group); SIGKILL reaches a namespace's first process from outside,
+//     whose death ends every process in its namespace (T13.5-3); `killGroup`
+//     confirms them all gone, as does the harness namespace's `close`.
+//   - Verifications on the harness (H-11), each `HarnessStagingError` (mode
+//     `pid-namespace`) when ineffective, the void and rerun rules left to
+//     the arms: (e)'s `verifyNamespaceListsNone` (the namespace lists no
+//     identifier the holder's processes bear), (g)'s `verifyListedByHarness`
+//     (the harness's process list lists every in-namespace identifier the
+//     held run's processes bear or bore), and a run lying in no namespace
+//     below the harness's (`inNamespaceIdentifiers`).
 // - Platform: the Linux leg's. On any other platform every staging throws
 //   `HarnessStagingError` at once.
 
 import { Buffer } from "node:buffer";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
-import { listedAmong, processGroupMembers } from "./kill-discipline.js";
+import {
+  confirmGroupGone,
+  DEFAULT_GROUP_GONE_TIMEOUT_MS,
+  descendantsOf,
+  listedAmong,
+  ProcessGroupLingerError,
+  processGroupMembers,
+} from "./kill-discipline.js";
 import { HarnessStagingError } from "./permissions.js";
 import type { StagingMode } from "./permissions.js";
 import { startProduct, summarizeResult } from "./subprocess.js";
-import type { ProductBinding, RunLauncher } from "./subprocess.js";
+import type { ProductBinding, RunLauncher, RunResult } from "./subprocess.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -831,36 +881,15 @@ export function secondUserSpawn(
   invocation: { readonly command: string; readonly args: readonly string[] },
   env: Readonly<Record<string, string>>,
 ): { command: string; args: string[] } {
-  if (
-    !path.isAbsolute(invocation.command) ||
-    invocation.command.includes("=")
-  ) {
-    throw new Error(
-      `the second user's launcher starts an absolute command holding no \`=\` (env -i would read one as an assignment), not ${JSON.stringify(invocation.command)}`,
-    );
-  }
-  const assignments: string[] = [];
-  for (const [name, value] of Object.entries(env)) {
-    if (name === "" || name.includes("=")) {
-      throw new Error(
-        `the second user's launcher cannot pass an environment variable named ${JSON.stringify(name)}`,
-      );
-    }
-    assignments.push(`${name}=${value}`);
-  }
+  const tail = exactEnvironmentStage(
+    "the second user's launcher",
+    invocation,
+    env,
+  );
   return {
     command: plan.sudo,
     args: [
-      "-n",
-      "--",
-      "/bin/sh",
-      "-c",
-      'umask "$1" && shift && exec "$@"',
-      "sh",
-      plan.umask.toString(8).padStart(4, "0"),
-      "prlimit",
-      ...plan.limits,
-      "--",
+      ...rootStage(plan.umask, plan.limits),
       "setpriv",
       `--reuid=${String(plan.user.uid)}`,
       `--regid=${String(plan.user.gid)}`,
@@ -868,19 +897,92 @@ export function secondUserSpawn(
       "--inh-caps=-all",
       "--bounding-set=-all",
       "--",
-      "env",
-      "-i",
-      "--",
-      ...assignments,
-      invocation.command,
-      ...invocation.args,
+      ...tail,
     ],
   };
 }
 
-/** SIGKILL to process group `groupId` through `sudo` (the launcher's kill). */
-async function killGroupThroughSudo(groupId: number): Promise<void> {
-  const outcome = await runAdministrative([
+/**
+ * Every launcher's first stage, `sudo`'s arguments: `-n --`, a `sh` setting
+ * `umask` and execing `prlimit`, which restores `limits` (sudo resets both)
+ * and execs what follows the returned `--`.
+ */
+function rootStage(umask: number, limits: readonly string[]): string[] {
+  return [
+    "-n",
+    "--",
+    "/bin/sh",
+    "-c",
+    'umask "$1" && shift && exec "$@"',
+    "sh",
+    umask.toString(8).padStart(4, "0"),
+    "prlimit",
+    ...limits,
+    "--",
+  ];
+}
+
+/**
+ * Every launcher's last stage: `env -i --` with exactly `env`, then the
+ * command and its arguments verbatim. Throws a plain `Error`, naming `who`,
+ * for what it cannot express: a command that is not absolute or holds `=`
+ * (`env` would read it as an assignment), a variable whose name is empty or
+ * holds `=`.
+ */
+function exactEnvironmentStage(
+  who: string,
+  invocation: { readonly command: string; readonly args: readonly string[] },
+  env: Readonly<Record<string, string>>,
+): string[] {
+  if (
+    !path.isAbsolute(invocation.command) ||
+    invocation.command.includes("=")
+  ) {
+    throw new Error(
+      `${who} starts an absolute command holding no \`=\` (env -i would read one as an assignment), not ${JSON.stringify(invocation.command)}`,
+    );
+  }
+  const assignments: string[] = [];
+  for (const [name, value] of Object.entries(env)) {
+    if (name === "" || name.includes("=")) {
+      throw new Error(
+        `${who} cannot pass an environment variable named ${JSON.stringify(name)}`,
+      );
+    }
+    assignments.push(`${name}=${value}`);
+  }
+  return [
+    "env",
+    "-i",
+    "--",
+    ...assignments,
+    invocation.command,
+    ...invocation.args,
+  ];
+}
+
+/** The harness's own environment, which `sudo` itself is started with. */
+function harnessEnvironment(): Record<string, string> {
+  const environment: Record<string, string> = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value !== undefined) environment[name] = value;
+  }
+  return environment;
+}
+
+/**
+ * SIGKILL to process group `groupId` through `sudo` (every launcher's kill),
+ * a failure while the group still has listed processes the staging error of
+ * `mode`.
+ */
+async function killGroupThroughSudo(
+  groupId: number,
+  sudo: string = DEFAULT_SUDO,
+  mode: StagingMode = "second-user",
+): Promise<void> {
+  const outcome = await runCommand(sudo, [
+    "-n",
+    "--",
     "kill",
     "-s",
     "KILL",
@@ -891,9 +993,9 @@ async function killGroupThroughSudo(groupId: number): Promise<void> {
   // No process of the group left to signal (ESRCH): nothing to do.
   if ((await processGroupMembers(groupId)).length === 0) return;
   throw new HarnessStagingError(
-    "second-user",
+    mode,
     `process group ${String(groupId)}`,
-    `\`sudo -n kill -s KILL -- -${String(groupId)}\` failed (${describeOutcome(outcome)}) while the group still has listed processes`,
+    `\`${sudo} -n kill -s KILL -- -${String(groupId)}\` failed (${describeOutcome(outcome)}) while the group still has listed processes`,
   );
 }
 
@@ -915,14 +1017,11 @@ export async function secondUserLauncher(
   };
   return {
     label: `as the second user ${user.name} (uid ${String(user.uid)}, gid ${String(user.gid)}) through sudo (H-2; TEST-SPEC T13.5-9)`,
-    wrap: (invocation, env) => {
-      const sudoEnv: Record<string, string> = {};
-      for (const [name, value] of Object.entries(process.env)) {
-        if (value !== undefined) sudoEnv[name] = value;
-      }
-      return { ...secondUserSpawn(plan, invocation, env), env: sudoEnv };
-    },
-    killGroup: killGroupThroughSudo,
+    wrap: (invocation, env) => ({
+      ...secondUserSpawn(plan, invocation, env),
+      env: harnessEnvironment(),
+    }),
+    killGroup: (groupId) => killGroupThroughSudo(groupId),
   };
 }
 
@@ -1283,4 +1382,939 @@ export async function secondUserCreatesIn(
     );
   }
   return { ok: outcome.created && outcome.removed, code: outcome.code };
+}
+
+// ---------------------------------------------------------------------------
+// Fresh process-identifier namespaces (T13.5-10(e)–(g), T13.5-3; H-2, E-1,
+// E-3, H-11)
+
+/** Bound on a namespace's first process starting, and on each answer. */
+const NAMESPACE_TIMEOUT_MS = 60_000;
+/** Bound on the first process's stderr kept for a diagnosis. */
+const NAMESPACE_STDERR_LIMIT = 64 * 1024;
+/** The identifier every namespace gives its first process. */
+const FIRST_IDENTIFIER = 1;
+
+/** The identity every run started into a namespace drops back to (H-2). */
+export interface HarnessIdentity {
+  readonly uid: number;
+  readonly gid: number;
+  /** The supplementary groups, as `getgroups` lists them. */
+  readonly groups: readonly number[];
+}
+
+/** The harness's own identity: its uid, gid, and supplementary groups. */
+function harnessIdentity(): HarnessIdentity {
+  const { uid, gid } = harnessIds();
+  if (process.getgroups === undefined) {
+    throw new Error(
+      `13.5's machine-wide stagings are the Linux leg's (TEST-SPEC E-1); this platform (${process.platform}) has no supplementary groups`,
+    );
+  }
+  return { uid, gid, groups: process.getgroups() };
+}
+
+/** What a namespace launcher starts every run with. */
+export interface NamespaceSpawnPlan {
+  /** The command administrative access is reached through. */
+  readonly sudo: string;
+  /** The identity every run drops back to: the harness's own. */
+  readonly identity: HarnessIdentity;
+  /** The harness's resource limits, as `prlimit` options. */
+  readonly limits: readonly string[];
+  /** The harness's umask. */
+  readonly umask: number;
+}
+
+/** Which command administrative access is reached through. */
+export interface NamespaceOptions {
+  /**
+   * `sudo` by default; a self-test names another command to stage access
+   * withheld without touching `sudo`.
+   */
+  readonly sudo?: string;
+}
+
+/**
+ * `setpriv` back to `identity` — its uid, gid, and supplementary groups —
+ * with the inheritable and bounding capability sets cleared, so no
+ * capability is left (H-2, E-1).
+ */
+function dropStage(identity: HarnessIdentity): string[] {
+  return [
+    "setpriv",
+    `--reuid=${String(identity.uid)}`,
+    `--regid=${String(identity.gid)}`,
+    identity.groups.length === 0
+      ? "--clear-groups"
+      : `--groups=${identity.groups.map(String).join(",")}`,
+    "--inh-caps=-all",
+    "--bounding-set=-all",
+    "--",
+  ];
+}
+
+/**
+ * Launcher A's spawn of `invocation` (module header): the root stage (the
+ * umask, every limit), then `unshare --pid --fork --mount-proc`, whose
+ * forked child — the first process of a fresh process-identifier namespace,
+ * with a process list of its own (a fresh `/proc` in a mount namespace of
+ * its own) — drops back to the plan's identity with no capability and execs
+ * `env -i --` with exactly `env`, then the command and its arguments
+ * verbatim: the command is that first process. Throws a plain `Error` for
+ * an invocation it cannot express (as `secondUserSpawn` does).
+ */
+export function freshNamespaceSpawn(
+  plan: NamespaceSpawnPlan,
+  invocation: { readonly command: string; readonly args: readonly string[] },
+  env: Readonly<Record<string, string>>,
+): { command: string; args: string[] } {
+  const tail = exactEnvironmentStage("a namespace launcher", invocation, env);
+  return {
+    command: plan.sudo,
+    args: [
+      ...rootStage(plan.umask, plan.limits),
+      "unshare",
+      "--pid",
+      "--fork",
+      "--mount-proc",
+      "--",
+      ...dropStage(plan.identity),
+      ...tail,
+    ],
+  };
+}
+
+/**
+ * Launcher B's spawn of `invocation` into the namespace whose first process
+ * the harness's process list lists as `target` (module header): the root
+ * stage, then `nsenter` into that process's process-identifier and mount
+ * namespaces — forking, so the command is a process of the namespace, listed
+ * in its process list — with `cwd` resolved there as the working directory
+ * (entering a mount namespace resets it), then as launcher A. Throws a plain
+ * `Error` for an invocation it cannot express or a `cwd` that is not
+ * absolute.
+ */
+export function namespaceEntrySpawn(
+  plan: NamespaceSpawnPlan,
+  target: number,
+  invocation: { readonly command: string; readonly args: readonly string[] },
+  env: Readonly<Record<string, string>>,
+  cwd: string,
+): { command: string; args: string[] } {
+  if (!Number.isInteger(target) || target < 1) {
+    throw new Error(
+      `a namespace launcher enters the namespace of a listed process, not ${String(target)}`,
+    );
+  }
+  if (!path.isAbsolute(cwd)) {
+    throw new Error(
+      `a namespace launcher sets an absolute working directory inside the namespace, not ${JSON.stringify(cwd)}`,
+    );
+  }
+  const tail = exactEnvironmentStage("a namespace launcher", invocation, env);
+  return {
+    command: plan.sudo,
+    args: [
+      ...rootStage(plan.umask, plan.limits),
+      "nsenter",
+      `--target=${String(target)}`,
+      "--pid",
+      "--mount",
+      `--wdns=${cwd}`,
+      "--",
+      ...dropStage(plan.identity),
+      ...tail,
+    ],
+  };
+}
+
+/** The plan every run `sudo` starts into a namespace follows. */
+async function namespacePlan(sudo: string): Promise<NamespaceSpawnPlan> {
+  return {
+    sudo,
+    identity: harnessIdentity(),
+    limits: await harnessLimitOptions(),
+    umask: process.umask(),
+  };
+}
+
+// The probe launcher A's verification runs (CommonJS, no dependency):
+// prints, as one JSON document, its own identifier, its status' NSpid line,
+// the process list it sees (the numeric entries of `/proc`), its identity,
+// and its capability sets, and exits 0.
+const NAMESPACE_PROBE_SOURCE = `"use strict";
+const fs = require("node:fs");
+const field = (name) => {
+  const line = fs
+    .readFileSync("/proc/self/status", "latin1")
+    .split("\\n")
+    .find((candidate) => candidate.startsWith(name + ":"));
+  return line === undefined ? null : line.slice(name.length + 1).trim();
+};
+process.stdout.write(
+  JSON.stringify({
+    pid: process.pid,
+    nspid: field("NSpid"),
+    listed: fs
+      .readdirSync("/proc")
+      .filter((name) => /^[1-9][0-9]*$/.test(name))
+      .map(Number)
+      .sort((a, b) => a - b),
+    uid: process.getuid(),
+    gid: process.getgid(),
+    groups: process.getgroups(),
+    caps: ["CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"].map(field),
+  }),
+);
+`;
+
+/** What launcher A's probe reported. */
+interface NamespaceProbeReport {
+  readonly pid: number;
+  readonly nspid: string | null;
+  readonly listed: readonly number[];
+  readonly uid: number;
+  readonly gid: number;
+  readonly groups: readonly number[];
+  readonly caps: readonly (string | null)[];
+}
+
+function sameNumbers(a: readonly number[], b: readonly number[]): boolean {
+  const left = ascending(new Set(a));
+  const right = ascending(new Set(b));
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+function ascending(values: Iterable<number>): number[] {
+  return [...values].sort((a, b) => a - b);
+}
+
+/**
+ * Launcher A's verification on the harness itself (E-1, H-11): a probe
+ * started through it must run as the first process of a namespace whose
+ * process list lists it alone — its own identifier 1, its NSpid line `1`
+ * (the `/proc` it sees is its namespace's) — as the harness's uid, gid, and
+ * supplementary groups with every capability set empty, and end with exit 0
+ * and an empty stderr. Anything else is `HarnessStagingError` (mode
+ * `pid-namespace`).
+ */
+async function verifyFreshNamespaceLauncher(
+  launcher: RunLauncher,
+  sudo: string,
+): Promise<void> {
+  const scratch = await fsp.mkdtemp(
+    path.join(os.tmpdir(), "xspec-namespace-probe-"),
+  );
+  try {
+    const script = path.join(scratch, "probe.cjs");
+    await fsp.writeFile(script, NAMESPACE_PROBE_SOURCE);
+    const binding: ProductBinding = {
+      label: "a fresh namespace's probe (harness machinery)",
+      command: process.execPath,
+      prefixArgs: [script],
+    };
+    const running = await startProduct(binding, {
+      cwd: scratch,
+      launcher,
+      timeoutMs: NAMESPACE_TIMEOUT_MS,
+    });
+    let result: RunResult;
+    try {
+      result = await running.waitForExit();
+    } catch (error) {
+      throw new HarnessStagingError(
+        "pid-namespace",
+        sudo,
+        `the probe started as the first process of a fresh process-identifier namespace did not run to its end: ${describeError(error)}`,
+      );
+    } finally {
+      if (!running.hasExited()) {
+        await running.killGroup().catch(() => undefined);
+      }
+    }
+    if (result.exitCode !== 0 || result.stderrBytes.length > 0) {
+      throw new HarnessStagingError(
+        "pid-namespace",
+        sudo,
+        `the probe started as the first process of a fresh process-identifier namespace ended ${summarizeResult(result)}`,
+      );
+    }
+    const report = JSON.parse(result.stdout) as NamespaceProbeReport;
+    const identity = harnessIdentity();
+    const problems: string[] = [];
+    if (report.pid !== FIRST_IDENTIFIER || report.nspid !== "1") {
+      problems.push(
+        `the probe bore identifier ${String(report.pid)} (NSpid ${JSON.stringify(report.nspid)}), not the first process's 1 in a process list of its own namespace`,
+      );
+    }
+    if (!sameNumbers(report.listed, [FIRST_IDENTIFIER])) {
+      problems.push(
+        `the probe's process list listed ${report.listed.slice(0, 20).join(", ")}${report.listed.length > 20 ? ", …" : ""}, not the probe alone`,
+      );
+    }
+    if (report.uid !== identity.uid || report.gid !== identity.gid) {
+      problems.push(
+        `the probe ran as uid ${String(report.uid)}, gid ${String(report.gid)}, not the harness's uid ${String(identity.uid)}, gid ${String(identity.gid)}`,
+      );
+    }
+    if (!sameNumbers(report.groups, identity.groups)) {
+      problems.push(
+        `the probe's supplementary groups were ${report.groups.join(",")}, not the harness's ${identity.groups.join(",")}`,
+      );
+    }
+    if (!report.caps.every((set) => set !== null && /^0+$/.test(set))) {
+      problems.push(
+        `the probe kept capabilities (CapInh, CapPrm, CapEff, CapBnd, CapAmb: ${report.caps.map(String).join(", ")})`,
+      );
+    }
+    if (problems.length > 0) {
+      throw new HarnessStagingError(
+        "pid-namespace",
+        sudo,
+        `the fresh process-identifier namespace staging is ineffective (H-11): ${problems.join("; ")}`,
+      );
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+const freshNamespaceChecks = new Map<string, () => Promise<void>>();
+
+/**
+ * Launcher A (module header), the subprocess driver's launcher starting each
+ * run as the first process of a fresh process-identifier namespace with a
+ * process list of its own, as the harness's identity with no capability
+ * (T13.5-10(f), (g); H-2, E-1). Checks administrative access first, then
+ * verifies the launcher on the harness itself once per command (a success
+ * remembered, a failure asked again): `HarnessStagingError`, never a skip.
+ * Its kills — the guards', `killGroup` — go through `sudo`, SIGKILL reaching
+ * the namespace's first process from outside (T13.5-3).
+ */
+export async function freshNamespaceLauncher(
+  options: NamespaceOptions = {},
+): Promise<RunLauncher> {
+  const sudo = options.sudo ?? DEFAULT_SUDO;
+  requireLinux("pid-namespace", "a fresh process-identifier namespace");
+  await requireAdministrativeAccess({ sudo });
+  const plan = await namespacePlan(sudo);
+  const launcher: RunLauncher = {
+    label: `as the first process of a fresh process-identifier namespace with a process list of its own, through ${sudo} (H-2; TEST-SPEC T13.5-10(f), (g))`,
+    wrap: (invocation, env) => ({
+      ...freshNamespaceSpawn(plan, invocation, env),
+      env: harnessEnvironment(),
+    }),
+    killGroup: (groupId) =>
+      killGroupThroughSudo(groupId, sudo, "pid-namespace"),
+  };
+  let check = freshNamespaceChecks.get(sudo);
+  if (check === undefined) {
+    check = memoized(() => verifyFreshNamespaceLauncher(launcher, sudo));
+    freshNamespaceChecks.set(sudo, check);
+  }
+  await check();
+  return launcher;
+}
+
+/**
+ * The identifiers `/proc/<pid>/status`'s `NSpid` line records for a process
+ * (Linux 4.1+): one per process-identifier namespace from the one the
+ * process list belongs to down to the process's own, outermost first. A
+ * status without that line, or a line of another shape, throws.
+ */
+export function parseNSpid(status: string): number[] {
+  const line = status
+    .split("\n")
+    .find((candidate) => candidate.startsWith("NSpid:"));
+  if (line === undefined) {
+    throw new Error(
+      "the process status has no NSpid line (Linux 4.1+), so in-namespace identifiers cannot be read",
+    );
+  }
+  const fields = line.slice("NSpid:".length).trim().split(/\s+/);
+  if (!fields.every((field) => /^[1-9][0-9]*$/.test(field))) {
+    throw new Error(
+      `the process status' NSpid line does not read as identifiers: ${JSON.stringify(line)}`,
+    );
+  }
+  return fields.map(Number);
+}
+
+/** `pid`'s NSpid identifiers as its status reads now; undefined once gone. */
+export async function readNSpid(pid: number): Promise<number[] | undefined> {
+  let status: string;
+  try {
+    status = await fsp.readFile(`/proc/${String(pid)}/status`, "latin1");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ESRCH") return undefined;
+    throw error;
+  }
+  return parseNSpid(status);
+}
+
+/**
+ * How many process-identifier namespaces the harness's own NSpid line
+ * spans: a process whose line spans more lies in a namespace below the
+ * harness's, its identifier there the field at this index.
+ */
+const harnessNamespaceDepth = memoized(async (): Promise<number> => {
+  const own = await readNSpid(process.pid);
+  if (own === undefined || own.length === 0) {
+    throw new Error("the harness cannot read its own NSpid line");
+  }
+  return own.length;
+});
+
+/** A process lying in a namespace below the harness's own. */
+export interface NamespacedProcess {
+  /** Its identifier in the harness's own process list. */
+  readonly pid: number;
+  /** Its identifier in the namespace one level below the harness's. */
+  readonly inNamespace: number;
+}
+
+/**
+ * The processes of the run started as `startedPid` — it and its descendants,
+ * as the process list's parent links read now — that lie in a namespace
+ * below the harness's own, ascending by in-namespace identifier.
+ */
+export async function namespacedProcessesOf(
+  startedPid: number,
+): Promise<NamespacedProcess[]> {
+  requireLinux("pid-namespace", `process ${String(startedPid)}`);
+  const depth = await harnessNamespaceDepth();
+  const found: NamespacedProcess[] = [];
+  for (const pid of [startedPid, ...(await descendantsOf(startedPid))]) {
+    const nspid = await readNSpid(pid);
+    const inNamespace = nspid?.[depth];
+    if (inNamespace !== undefined) found.push({ pid, inNamespace });
+  }
+  return found.sort((a, b) => a.inNamespace - b.inNamespace || a.pid - b.pid);
+}
+
+/**
+ * The in-namespace identifiers a run's processes bear now, ascending
+ * (T13.5-10(f): compared across two runs; (g): verified listed in the
+ * harness's own process list). `HarnessStagingError` (mode `pid-namespace`,
+ * H-11) when no process of the run lies in a namespace below the harness's:
+ * the staging did not take effect.
+ */
+export async function inNamespaceIdentifiers(run: {
+  readonly pid: number | undefined;
+  readonly commandLine: string;
+}): Promise<number[]> {
+  if (run.pid === undefined) {
+    throw new Error(`${run.commandLine} was never spawned`);
+  }
+  const processes = await namespacedProcessesOf(run.pid);
+  if (processes.length === 0) {
+    throw new HarnessStagingError(
+      "pid-namespace",
+      run.commandLine,
+      "no process of the run lies in a process-identifier namespace below the harness's own: the namespace staging did not take effect (H-11; TEST-SPEC T13.5-10(e)–(g))",
+    );
+  }
+  return ascending(new Set(processes.map((entry) => entry.inNamespace)));
+}
+
+/**
+ * T13.5-10(g)'s verification on the harness itself (H-11): every one of
+ * `identifiers` — the in-namespace identifiers the held run's processes bear
+ * or bore — is listed in the harness's own process list, so the dead run's
+ * entry lies in 13.5's gap. A missing one is `HarnessStagingError` (mode
+ * `pid-namespace`) naming it; `what` names the run.
+ */
+export async function verifyListedByHarness(
+  identifiers: Iterable<number>,
+  what: string,
+): Promise<void> {
+  const wanted = ascending(new Set(identifiers));
+  if (wanted.length === 0) {
+    throw new Error(`verifyListedByHarness(${what}): no identifier to verify`);
+  }
+  const listed = new Set(await listedAmong(wanted));
+  const missing = wanted.filter((identifier) => !listed.has(identifier));
+  if (missing.length > 0) {
+    throw new HarnessStagingError(
+      "pid-namespace",
+      what,
+      `T13.5-10(g)'s staging is ineffective (H-11): identifier(s) ${missing.join(", ")}, which ${what} bear(s) or bore in its namespace, are not listed in the harness's own process list, so its entry would not lie in 13.5's gap`,
+    );
+  }
+}
+
+/** A namespace's state, as its first process reads it (launcher B). */
+export interface NamespaceObservation {
+  /** The namespace's process list, ascending: every identifier in it. */
+  readonly listed: readonly number[];
+  /** The identifier the namespace allocated last (`ns_last_pid`). */
+  readonly lastAllocated: number;
+}
+
+/**
+ * The first process's answer to `observe` — `observed <last allocated>
+ * <listed>…` — as a {@link NamespaceObservation}; an answer of another
+ * shape is `HarnessStagingError` (mode `pid-namespace`).
+ */
+export function parseNamespaceObservation(line: string): NamespaceObservation {
+  const match = /^observed ([1-9][0-9]*)((?: [1-9][0-9]*)+)$/.exec(line);
+  if (match === null) {
+    throw new HarnessStagingError(
+      "pid-namespace",
+      "the namespace's first process",
+      `its answer does not read as \`observed <last allocated> <listed>…\`: ${JSON.stringify(line.slice(0, 300))}`,
+    );
+  }
+  return {
+    lastAllocated: Number(match[1]),
+    listed: ascending(new Set((match[2] ?? "").trim().split(" ").map(Number))),
+  };
+}
+
+/**
+ * T13.5-10(e)'s reuse check, by `observation`: whether the namespace has
+ * allocated an identifier as large as `identifier`. Allocation is cyclic
+ * (T13.5-3): identifiers rise from 1 until they wrap at the maximum, so the
+ * namespace has allocated one that large when its last allocated is, or
+ * when it lists one above its last allocated — allocation has then wrapped,
+ * having passed every identifier below the maximum. A wrap whose every
+ * identifier above the last allocated was since freed reads as none: it
+ * takes as many allocations as the maximum allows, out of reach within a
+ * trial.
+ */
+export function hasAllocated(
+  observation: NamespaceObservation,
+  identifier: number,
+): boolean {
+  return (
+    observation.lastAllocated >= identifier ||
+    observation.listed.some((listed) => listed > observation.lastAllocated)
+  );
+}
+
+/**
+ * T13.5-10(e)'s other-machine verification on the harness itself, through
+ * the namespace's first process (H-11): its process list lists none of
+ * `identifiers` — those the held run's processes bear in the harness's
+ * process list. A listed one is `HarnessStagingError` (mode
+ * `pid-namespace`) naming it; `what` names the held run. Resolves with the
+ * observation made.
+ */
+export async function verifyNamespaceListsNone(
+  namespace: HarnessNamespace,
+  identifiers: Iterable<number>,
+  what: string,
+): Promise<NamespaceObservation> {
+  const wanted = ascending(new Set(identifiers));
+  if (wanted.length === 0) {
+    throw new Error(
+      `verifyNamespaceListsNone(${what}): no identifier to verify`,
+    );
+  }
+  const observation = await namespace.observe();
+  const listed = wanted.filter((identifier) =>
+    observation.listed.includes(identifier),
+  );
+  if (listed.length > 0) {
+    throw new HarnessStagingError(
+      "pid-namespace",
+      what,
+      `T13.5-10(e)'s other-machine staging is ineffective (H-11): the namespace's process list, read through its first process, lists identifier(s) ${listed.join(", ")} that ${what} bear(s) in the harness's process list`,
+    );
+  }
+  return observation;
+}
+
+/** The shell a harness namespace's first process runs. */
+const NAMESPACE_SHELL = "/bin/bash";
+/** The environment it runs with. */
+const NAMESPACE_SHELL_ENV: Readonly<Record<string, string>> = {
+  LC_ALL: "C",
+  PATH: "/usr/bin:/bin",
+};
+
+/**
+ * The script a harness namespace's first process runs (module header):
+ * bash builtins alone, so answering forks nothing and allocates no
+ * identifier in the namespace. It prints `ready`, then answers each
+ * `observe` line on its stdin with `observed <ns_last_pid> <listed>…` — the
+ * identifier the namespace allocated last, then every numeric entry of the
+ * `/proc` it sees, the namespace's own — and any other line with `unknown`,
+ * and ends at the end of its stdin. As the namespace's first process it
+ * adopts every orphan in the namespace, and bash's SIGCHLD handler reaps
+ * every child, adopted or not, so a killed command leaves no zombie listed
+ * there.
+ */
+export const NAMESPACE_FIRST_PROCESS_SCRIPT = [
+  "printf 'ready\\n'",
+  "while IFS= read -r request; do",
+  '  if [ "$request" = observe ]; then',
+  "    last=",
+  "    IFS= read -r last < /proc/sys/kernel/ns_last_pid",
+  "    listed=",
+  "    for entry in /proc/[0-9]*; do",
+  '      listed="$listed ${entry#/proc/}"',
+  "    done",
+  '    printf \'observed %s%s\\n\' "$last" "$listed"',
+  "  else",
+  "    printf 'unknown\\n'",
+  "  fi",
+  "done",
+  "",
+].join("\n");
+
+/**
+ * The arguments the namespace's shell runs its script with. `--norc`: the
+ * harness's pipes to it are sockets, and a non-interactive bash whose stdin
+ * is a socket would otherwise take itself for a remote shell and run the
+ * user's `~/.bashrc` — commands of no one's choosing in the namespace,
+ * allocating identifiers there.
+ */
+export const NAMESPACE_SHELL_ARGS: readonly string[] = [
+  "--norc",
+  "-c",
+  NAMESPACE_FIRST_PROCESS_SCRIPT,
+  "xspec-namespace",
+];
+
+/**
+ * A fresh process-identifier namespace with a process list of its own whose
+ * first process is the harness's own, outliving the commands entered into it
+ * (launcher B; T13.5-10(e)'s run on another machine). Its test closes it.
+ */
+export interface HarnessNamespace {
+  /** The first process's identifier in the harness's own process list. */
+  readonly firstPid: number;
+  /**
+   * The subprocess driver's launcher entering each run into the namespace,
+   * as the harness's identity with no capability; its kills go through
+   * `sudo`.
+   */
+  readonly launcher: RunLauncher;
+  /**
+   * The namespace's process list and the identifier it allocated last, read
+   * through its first process, which forks nothing to read them. An answer
+   * not given within the bound, or not of its shape, is
+   * `HarnessStagingError` (mode `pid-namespace`).
+   */
+  observe(): Promise<NamespaceObservation>;
+  /**
+   * Ends the namespace under T13.5-3's discipline: its first process's
+   * group killed through `sudo` — SIGKILL reaching the first process from
+   * outside, the kernel then killing every process in the namespace — its
+   * exit collected, and none of its processes left listed. Idempotent.
+   */
+  close(): Promise<void>;
+}
+
+/** Whether `pending` settles within `ms`. */
+async function settlesWithin(
+  pending: Promise<unknown>,
+  ms: number,
+): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(false);
+    }, ms);
+  });
+  try {
+    return await Promise.race([
+      pending.then(
+        () => true,
+        () => true,
+      ),
+      expired,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** A harness namespace's first process, as the harness drives it. */
+class FirstProcess implements HarnessNamespace {
+  readonly #child: ChildProcess;
+  readonly #plan: NamespaceSpawnPlan;
+  #firstPid: number | undefined;
+  #launcher: RunLauncher | undefined;
+  /** Its stdout read so far past the last whole line. */
+  #partial = "";
+  /** Whole lines of its stdout not yet taken. */
+  readonly #lines: string[] = [];
+  /** Its stdout ended, or it never started: no more lines. */
+  #ended = false;
+  #stderr = "";
+  #spawnError: Error | undefined;
+  #wake: (() => void) | undefined;
+  /** Requests are answered one at a time, in order. */
+  #queue: Promise<unknown> = Promise.resolve();
+  #closing: Promise<void> | undefined;
+  /** Settles once the started process has exited, or failed to start. */
+  readonly #exited: Promise<void>;
+
+  constructor(child: ChildProcess, plan: NamespaceSpawnPlan) {
+    this.#child = child;
+    this.#plan = plan;
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      this.#partial += chunk;
+      for (
+        let at = this.#partial.indexOf("\n");
+        at >= 0;
+        at = this.#partial.indexOf("\n")
+      ) {
+        this.#lines.push(this.#partial.slice(0, at));
+        this.#partial = this.#partial.slice(at + 1);
+      }
+      this.#notify();
+    });
+    child.stdout?.on("end", () => {
+      this.#ended = true;
+      this.#notify();
+    });
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string) => {
+      if (this.#stderr.length < NAMESPACE_STDERR_LIMIT) this.#stderr += chunk;
+    });
+    // A write to a first process that has ended fails (EPIPE); its end is
+    // reported where an answer is awaited.
+    child.stdin?.on("error", () => undefined);
+    this.#exited = new Promise<void>((resolve) => {
+      child.once("exit", () => {
+        resolve();
+      });
+      child.once("error", (error) => {
+        this.#spawnError = error;
+        this.#ended = true;
+        this.#notify();
+        resolve();
+      });
+    });
+  }
+
+  get firstPid(): number {
+    if (this.#firstPid === undefined) {
+      throw new Error("the harness namespace's first process is not located");
+    }
+    return this.#firstPid;
+  }
+
+  get launcher(): RunLauncher {
+    if (this.#launcher === undefined) {
+      throw new Error("the harness namespace's first process is not located");
+    }
+    return this.#launcher;
+  }
+
+  /**
+   * Waits for `ready`, locates the first process in the harness's process
+   * list — the started process's one descendant bearing identifier 1 in a
+   * namespace below the harness's — and verifies on itself that the
+   * namespace is fresh, with a process list of its own: its first process
+   * alone listed, the last identifier allocated its own. Anything else is
+   * `HarnessStagingError` (mode `pid-namespace`, H-11).
+   */
+  async start(): Promise<void> {
+    const ready = await this.#nextLine("reporting `ready`");
+    if (ready !== "ready") {
+      throw this.#failure(
+        `reported ${JSON.stringify(ready.slice(0, 300))} where \`ready\` was due`,
+      );
+    }
+    const startedPid = this.#child.pid;
+    if (startedPid === undefined) throw this.#failure("was never spawned");
+    const firsts = (await namespacedProcessesOf(startedPid)).filter(
+      (entry) => entry.inNamespace === FIRST_IDENTIFIER,
+    );
+    const first = firsts[0];
+    if (first === undefined || firsts.length !== 1) {
+      throw this.#failure(
+        `was not found as the one descendant of the started process (${String(startedPid)}) bearing identifier 1 in a namespace below the harness's: found ${firsts.map((entry) => String(entry.pid)).join(", ") || "none"}`,
+      );
+    }
+    const observation = await this.observe();
+    if (
+      observation.lastAllocated !== FIRST_IDENTIFIER ||
+      !sameNumbers(observation.listed, [FIRST_IDENTIFIER])
+    ) {
+      throw new HarnessStagingError(
+        "pid-namespace",
+        "a harness namespace",
+        `the namespace is not fresh with a process list of its own (H-11): its first process, just started, read its process list as ${observation.listed.slice(0, 20).join(", ")} and the last identifier allocated as ${String(observation.lastAllocated)}, where itself alone, identifier 1, is due`,
+      );
+    }
+    const firstPid = first.pid;
+    const plan = this.#plan;
+    this.#firstPid = firstPid;
+    this.#launcher = {
+      label: `entered into a fresh process-identifier namespace whose first process (${String(firstPid)}) is the harness's own, through ${plan.sudo} (H-2; TEST-SPEC T13.5-10(e))`,
+      wrap: (invocation, env, cwd) => {
+        if (this.#closing !== undefined) {
+          throw new Error(
+            `the harness namespace whose first process is ${String(firstPid)} is closed: nothing can be entered into it`,
+          );
+        }
+        return {
+          ...namespaceEntrySpawn(plan, firstPid, invocation, env, cwd),
+          env: harnessEnvironment(),
+        };
+      },
+      killGroup: (groupId) =>
+        killGroupThroughSudo(groupId, plan.sudo, "pid-namespace"),
+    };
+  }
+
+  async observe(): Promise<NamespaceObservation> {
+    return await this.#serialized(async () => {
+      if (this.#closing !== undefined) {
+        throw new Error("observe: the harness namespace is closed");
+      }
+      this.#child.stdin?.write("observe\n");
+      return parseNamespaceObservation(
+        await this.#nextLine("answering `observe`"),
+      );
+    });
+  }
+
+  async close(): Promise<void> {
+    this.#closing ??= this.#closeOnce();
+    await this.#closing;
+  }
+
+  async #closeOnce(): Promise<void> {
+    const what = "a harness namespace's first process";
+    const groupId = this.#child.pid;
+    try {
+      if (groupId === undefined) {
+        await this.#exited;
+        return;
+      }
+      // As RunningProduct.killGroup (T13.5-3's discipline): read before the
+      // members, since a reaped process's number may name another process.
+      const reapedBefore =
+        this.#child.exitCode !== null || this.#child.signalCode !== null;
+      const members = (await processGroupMembers(groupId)).map(
+        (member) => member.pid,
+      );
+      const descendants = reapedBefore ? [] : await descendantsOf(groupId);
+      const reaped =
+        this.#child.exitCode !== null || this.#child.signalCode !== null;
+      if (!reaped || members.length > 0) {
+        await killGroupThroughSudo(groupId, this.#plan.sudo, "pid-namespace");
+      }
+      const started = Date.now();
+      if (!(await settlesWithin(this.#exited, DEFAULT_GROUP_GONE_TIMEOUT_MS))) {
+        throw new ProcessGroupLingerError(
+          what,
+          groupId,
+          "exit",
+          Date.now() - started,
+          [],
+          [],
+        );
+      }
+      await confirmGroupGone(
+        groupId,
+        [groupId, ...members, ...descendants],
+        what,
+      );
+    } finally {
+      this.#child.stdin?.destroy();
+      this.#child.stdout?.destroy();
+      this.#child.stderr?.destroy();
+    }
+  }
+
+  #serialized<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.#queue.then(operation, operation);
+    this.#queue = result.catch(() => undefined);
+    return result;
+  }
+
+  #notify(): void {
+    const wake = this.#wake;
+    this.#wake = undefined;
+    wake?.();
+  }
+
+  /** The first process's next whole stdout line, bounded. */
+  async #nextLine(what: string): Promise<string> {
+    const deadline = Date.now() + NAMESPACE_TIMEOUT_MS;
+    for (;;) {
+      const line = this.#lines.shift();
+      if (line !== undefined) return line;
+      if (this.#ended) throw this.#failure(`ended before ${what}`);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw this.#failure(
+          `gave no answer within ${String(NAMESPACE_TIMEOUT_MS)} ms ${what}`,
+        );
+      }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, remaining);
+        this.#wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+      this.#wake = undefined;
+    }
+  }
+
+  #failure(detail: string): HarnessStagingError {
+    const spawnError =
+      this.#spawnError === undefined
+        ? ""
+        : ` (${describeError(this.#spawnError)})`;
+    return new HarnessStagingError(
+      "pid-namespace",
+      "a harness namespace's first process",
+      `the first process of a fresh process-identifier namespace ${detail}${spawnError}; its stderr: ${JSON.stringify(this.#stderr.slice(0, 2000))}`,
+    );
+  }
+}
+
+/**
+ * Launcher B (module header): opens a fresh process-identifier namespace
+ * with a process list of its own whose first process is the harness's own —
+ * a bash running {@link NAMESPACE_FIRST_PROCESS_SCRIPT} as the harness's
+ * identity with no capability — verified fresh on the harness itself, and
+ * hands back its launcher and its observations (T13.5-10(e); H-2, E-1, E-3).
+ * Checks administrative access first; any failure is `HarnessStagingError`,
+ * never a skip, nothing left running. The test closes it.
+ */
+export async function openHarnessNamespace(
+  options: NamespaceOptions = {},
+): Promise<HarnessNamespace> {
+  const sudo = options.sudo ?? DEFAULT_SUDO;
+  requireLinux("pid-namespace", "a harness namespace");
+  await requireAdministrativeAccess({ sudo });
+  const plan = await namespacePlan(sudo);
+  const spawned = freshNamespaceSpawn(
+    plan,
+    {
+      command: NAMESPACE_SHELL,
+      args: NAMESPACE_SHELL_ARGS,
+    },
+    NAMESPACE_SHELL_ENV,
+  );
+  const child = spawn(spawned.command, spawned.args, {
+    cwd: "/",
+    env: harnessEnvironment(),
+    stdio: ["pipe", "pipe", "pipe"],
+    detached: true,
+  });
+  const namespace = new FirstProcess(child, plan);
+  try {
+    await namespace.start();
+  } catch (error) {
+    await namespace.close().catch(() => undefined);
+    throw error;
+  }
+  return namespace;
 }

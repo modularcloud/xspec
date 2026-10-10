@@ -72,12 +72,15 @@ import * as path from "node:path";
  * staged tree not reading back as declared, a permission removal on a
  * leftover file the harness's own read reaches, `mkfifo` failing, a platform
  * that is not the Linux leg's), and 13.5's machine-wide stagings
- * (helpers/machine-staging.ts; TEST-SPEC E-1, T13.5-9): the administrative
- * access they are made with (`administrative-access`: `sudo` missing,
- * refusing, or not silent), the second user (`second-user`: its creation, a
- * launch through it, or its verification failing), the shared group's
- * access to a workspace (`group-access`), and the second mount
- * (`second-mount`: not made, not verified, or not removed).
+ * (helpers/machine-staging.ts; TEST-SPEC E-1, T13.5-9, T13.5-10(e)–(g)):
+ * the administrative access they are made with (`administrative-access`:
+ * `sudo` missing, refusing, or not silent), the second user (`second-user`:
+ * its creation, a launch through it, or its verification failing), the
+ * shared group's access to a workspace (`group-access`), the second mount
+ * (`second-mount`: not made, not verified, or not removed), and the fresh
+ * process-identifier namespaces (`pid-namespace`: a namespace not made, its
+ * first process not answering, a run not lying in it, or one of
+ * T13.5-10(e)–(g)'s verifications on the harness failing).
  */
 export type StagingMode =
   | "write-refusal"
@@ -91,7 +94,8 @@ export type StagingMode =
   | "administrative-access"
   | "second-user"
   | "group-access"
-  | "second-mount";
+  | "second-mount"
+  | "pid-namespace";
 
 /**
  * An ineffective or impossible staging: a permission staging (E-1, H-11)

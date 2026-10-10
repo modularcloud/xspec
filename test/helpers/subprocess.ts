@@ -42,13 +42,15 @@
 //   stagings alone (T13.5-9, T13.5-10(e)–(g); E-1): a run started with a
 //   `launcher` (the run option; helpers/machine-staging.ts builds them) is
 //   spawned through the launcher's command line — `sudo` dropping to the
-//   second user, the run's environment passed explicitly — while every hook
-//   here sees the product's own argv and working directory, so T12.7-1's
-//   walk, T6.5-22(a)'s check, H-6's notes, and the undeclared-staging guard
-//   apply unchanged, and its exit code and streams are captured as any
-//   run's. Such a run always leads a process group of its own, and every
-//   signal to it — the guards' kills, `killGroup` — goes through the
-//   launcher: the harness's own identity may not signal its processes.
+//   second user, or starting the run in a fresh process-identifier
+//   namespace, the run's environment and working directory passed
+//   explicitly — while every hook here sees the product's own argv and
+//   working directory, so T12.7-1's walk, T6.5-22(a)'s check, H-6's notes,
+//   and the undeclared-staging guard apply unchanged, and its exit code and
+//   streams are captured as any run's. Such a run always leads a process
+//   group of its own, and every signal to it — the guards' kills,
+//   `killGroup` — goes through the launcher: the harness's own identity may
+//   not signal its processes.
 // - Environment policy (conservative choice): the child inherits the ambient
 //   environment minus variables that would let the machine leak into
 //   fixture-observable behavior — `GIT_*` and `EMAIL` (the product shells out
@@ -356,12 +358,16 @@ export interface RunLauncher {
   /**
    * The spawn that starts `invocation` — the command and arguments the
    * driver resolved, the command an absolute path — with exactly `env` as
-   * its environment, in the working directory the spawn is given. Throws a
-   * plain `Error`, nothing spawned, for an invocation it cannot express.
+   * its environment, in the working directory the spawn is given: `cwd`,
+   * the run's own, absolute, which a launcher whose spawn resets it
+   * (entering a mount namespace resets it to that namespace's root) sets
+   * again itself. Throws a plain `Error`, nothing spawned, for an
+   * invocation it cannot express.
    */
   wrap(
     invocation: { readonly command: string; readonly args: readonly string[] },
     env: Readonly<Record<string, string>>,
+    cwd: string,
   ): { command: string; args: string[]; env: Record<string, string> };
   /**
    * SIGKILL to every process of process group `groupId`. Resolves once the
@@ -494,7 +500,7 @@ export async function startProduct(
   const spawned =
     launcher === undefined
       ? { command: invocation.command, args: invocation.args, env }
-      : launcher.wrap(invocation, env);
+      : launcher.wrap(invocation, env, options.cwd);
   // T6.5-22(a) (module header): a performed move's pre-operation sources,
   // read before anything is spawned.
   const addedImportCheck = await prepareAddedImportCheck(
