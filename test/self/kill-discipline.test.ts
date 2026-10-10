@@ -93,12 +93,14 @@ switch (mode) {
 }
 `;
 
-// A zombie maker: `sleep 0.3` in the background, its identifier recorded,
+// A zombie maker: `sleep 1` in the background, its identifier recorded,
 // then the shell execs `sleep 300`, which never reaps the background child,
 // so that child stays a zombie of the run's group until the group's leader
-// dies and the zombie's new parent reaps it.
+// dies and the zombie's new parent reaps it. The second's margin keeps the
+// child alive past the `mv`, which the shell, waiting for any child, would
+// otherwise reap it during.
 const ZOMBIE_SCRIPT =
-  'sleep 0.3 & echo "$!" > "$1.tmp" && mv "$1.tmp" "$1"; exec sleep 300';
+  'sleep 1 & echo "$!" > "$1.tmp" && mv "$1.tmp" "$1"; exec sleep 300';
 
 interface Standin {
   readonly workspace: TestWorkspace;
@@ -266,7 +268,7 @@ test("on a run leading its own group, the hang guard kills the whole group: no p
     cwd: workspace.root,
     argv: ["hang-group", pidFile],
     processGroup: true,
-    timeoutMs: 2_000,
+    timeoutMs: 5_000,
   });
   killGroupAtEnd(running);
   await running.waitForFile(pidFile);
