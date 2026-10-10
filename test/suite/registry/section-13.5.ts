@@ -371,12 +371,12 @@ import {
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
 // other keys — the CONF-CORE workspace shape (CERTIFICATIONS.md). A
-// staged-source record: T13.5-1, T13.5-4, T13.5-6, and T13.5-8 stage it in
-// workspaces created after a product invocation (CORE_DECL, ISO_TWO_DECL),
-// as T6.6-3's runs-while-held arm does (S-9's timing clause;
+// staged-source record: T13.5-1, T13.5-4, T13.5-6, T13.5-8, and T13.5-10
+// stage it in workspaces created after a product invocation (CORE_DECL,
+// ISO_TWO_DECL), as T6.6-3's runs-while-held arm does (S-9's timing clause;
 // test/self/s9-staged-sources.test.ts).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.6-3/T13.5-1/T13.5-4/T13.5-6/T13.5-8 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's and ISO_TWO_DECL's)",
+  "T6.6-3/T13.5-1/T13.5-4/T13.5-6/T13.5-8/T13.5-10 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's and ISO_TWO_DECL's)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -406,13 +406,14 @@ const A_MDX = [
 ].join("\n");
 // The source is staged in workspaces created after a body's first product
 // invocation (T13.5-1's stale arm, T13.5-4's storm pair, T13.5-6's serial and
-// concurrent pairs, T13.5-8's valid-workspace arms, T6.6-3's scheduling
-// workspace) and, byte for byte, by section-13.4.ts's tests (its later
-// workspaces included), so it is one staged-source record made from the
-// string (S-9's before-any-product clause; helpers/staged-mdx.ts) — the
-// string stays for the staleness edit below — staged wherever the bytes are.
+// concurrent pairs, T13.5-8's valid-workspace arms, T13.5-10's per-arm
+// workspaces and twins, T6.6-3's scheduling workspace) and, byte for byte,
+// by section-13.4.ts's tests (its later workspaces included), so it is one
+// staged-source record made from the string (S-9's before-any-product
+// clause; helpers/staged-mdx.ts) — the string stays for the staleness edit
+// below — staged wherever the bytes are.
 export const CORE_A_STAGED = stagedMdx(
-  "T6.6-3/T13.4-1/T13.4-2/T13.4-3/T13.4-4/T13.4-5/T13.4-6/T13.5-1/T13.5-2/T13.5-3/T13.5-4/T13.5-6/T13.5-8 specs/A.mdx (the CONF-CORE-shaped source: a holding a.k, then g; T13.4-6's specs/one/A.mdx too)",
+  "T6.6-3/T13.4-1/T13.4-2/T13.4-3/T13.4-4/T13.4-5/T13.4-6/T13.5-1/T13.5-2/T13.5-3/T13.5-4/T13.5-6/T13.5-8/T13.5-10 specs/A.mdx (the CONF-CORE-shaped source: a holding a.k, then g; T13.4-6's specs/one/A.mdx too)",
   A_MDX,
 );
 
@@ -1429,7 +1430,7 @@ const T13_5_2_COMMAND_1: readonly string[] = [
  * The audit session `s`'s two items the `resolve` and `split` of T13.5-2 and
  * T13.5-3 name.
  */
-interface SessionItems {
+export interface SessionItems {
   /** `g`'s item, unblocked, so `resolve` applies (SPEC 10.6, 10.7). */
   readonly leaf: string;
   /** `a`'s item, its scope root holding a child, so `split` applies (10.7). */
@@ -1441,7 +1442,7 @@ interface SessionItems {
  * description, and its arguments, naming the session's items where it needs
  * them.
  */
-interface SessionOperation {
+export interface SessionOperation {
   readonly what: string;
   /** Its arguments, naming the session's items where it needs them. */
   readonly argv: (items: SessionItems) => readonly string[];
@@ -1520,9 +1521,12 @@ interface RefusedRun {
  * §VIOL-CORE-BUILDWAIT's passing sides lean on); every mutating command
  * either test starts then starts on a freshly built workspace with no
  * refresh pending (§CONF-CORE's freshness constraint, which
- * §VIOL-CORE-EARLYREFRESH's passing side leans on).
+ * §VIOL-CORE-EARLYREFRESH's passing side leans on). T13.5-10 stages each of
+ * its arms, and each unstaged twin, on the same sequence
+ * (section-13.5-ii.ts: "a freshly built valid workspace holding an `audit`
+ * session `s` created while it was valid").
  */
-async function stageSessionWorkspace(
+export async function stageSessionWorkspace(
   product: ProductBinding,
   workspace: TestWorkspace,
   context: string,
