@@ -126,6 +126,7 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // exits normally.
       violator("VIOL-CORE-EARLYWRITE", "conf-core/bin-earlywrite.mjs", [
         "T13.5-1",
+        "T13.5-2",
         "T13.5-4",
       ]),
       // VIOL-CORE-EARLYREFRESH: the 13.3 refresh a mutating `review`

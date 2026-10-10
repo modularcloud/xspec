@@ -10,7 +10,15 @@
 // the non-mutating unknown-flag arm, and `build --test-hold --json`
 // consuming `--json` as the hold path — the flag value-taking by name on
 // every command, JSON out of effect, stdout empty),
-// T13.5-2 (mutual exclusion),
+// T13.5-2 (mutual exclusion: while command 1 holds — the held-state
+// comparison against its pre-invocation state — each other mutating command
+// refused promptly with exit 2, modifying nothing, once under `--json` with
+// the busy error document of 14.26 and once without, stdout empty, command
+// 1's entry standing alone after each refusal; each refused operation
+// succeeding on an unheld twin and once command 1 has completed; the
+// refused `--json` runs repeated on fresh content-identical workspaces held
+// by separate holder processes — recreated at the same absolute path, and
+// at a different one — byte-identically),
 // T13.5-3 (exclusivity ends with the process), T13.5-4 (readers during
 // mutation + build/query storm), T13.5-5 (atomic visibility via a polling
 // reader), T13.5-6 (workspace isolation), T13.5-7 (interrupted or
@@ -59,7 +67,13 @@
 // - T13.5-2's excluded commands carry no `--test-hold` (§VIOL-CORE-NOLOCK),
 //   and its modifies-nothing compare brackets each excluded command alone,
 //   with the baseline snapshot taken while command 1 is already held
-//   (§VIOL-CORE-EARLYWRITE).
+//   (§VIOL-CORE-EARLYWRITE); the held-state comparison while command 1
+//   holds is the only ground on which §VIOL-CORE-EARLYWRITE fails it; its
+//   items are learned by a read before anything is held, and no `build` or
+//   read runs on any of its workspaces while a lock directory stands
+//   (§CONF-CORE; §VIOL-CORE-READERENTRY's and §VIOL-CORE-BUILDWAIT's passing
+//   sides); and its second commands start once command 1 has exited
+//   (§VIOL-CORE-EARLYRELEASE's passing side).
 // - T13.5-8's failing workspace is a second spec source beginning with a
 //   byte-order mark (14.20 at offset 0), added after the valid `build` and
 //   the audit session's creation, masked and never an operand; the `build`
@@ -168,9 +182,13 @@ import {
   HarnessAssertionError,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { assertRunOutcomesEqual } from "../../helpers/determinism.js";
+import { LOCK_PATH } from "../../helpers/lock-path.js";
+import type { LockEntry } from "../../helpers/lock-staging.js";
 import {
   assertHeldState,
   assertLockPathAbsent,
+  assertOnlyEntry,
 } from "../../helpers/lock-state.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -204,8 +222,10 @@ import { assertOutsideAnyRepository } from "./section-6.3.js";
 import {
   assertConditionCounts,
   assertFindingLocated,
+  assertSameJson,
   buildFindings,
   buildOk,
+  expectErrorDocument,
   expectExit,
   runCli,
   runJson,
@@ -1267,136 +1287,446 @@ const T13_5_1 = defineProductTest({
 // T13.5-2 — mutual exclusion
 // ---------------------------------------------------------------------------
 
+/** T13.5-2's command 1: `rename specs/A.mdx a a2`, held at the seam. */
+const T13_5_2_COMMAND_1: readonly string[] = [
+  "rename",
+  "specs/A.mdx",
+  "a",
+  "a2",
+];
+
+/** The audit session `s`'s two items T13.5-2's `resolve` and `split` name. */
+interface SessionItems {
+  /** `g`'s item, unblocked, so `resolve` applies (SPEC 10.6, 10.7). */
+  readonly leaf: string;
+  /** `a`'s item, its scope root holding a child, so `split` applies (10.7). */
+  readonly parent: string;
+}
+
+/**
+ * One of T13.5-2's other mutating commands: an operation valid in its own
+ * right on the staged workspace — succeeding on an unheld twin — and
+ * composing with command 1 — succeeding once command 1 has run — so that its
+ * exit 2 while command 1 holds is the exclusion's alone (TEST-SPEC T13.5-2,
+ * as in T13.5-10(e)). None carries `--test-hold` (§VIOL-CORE-NOLOCK's
+ * staging constraint: given one at the holding command's hold path, that
+ * violator's runs would fail exit 2 on the occupied path, modifying nothing,
+ * and its expected failure would never materialize).
+ */
+interface ExcludedOperation {
+  readonly what: string;
+  /** Its arguments, naming the session's items where it needs them. */
+  readonly argv: (items: SessionItems) => readonly string[];
+}
+
+/**
+ * T13.5-2's five other mutating commands (SPEC 13.5: `rename`, `move`, and
+ * the mutating `review` subcommands), each from CONF-CORE's surface —
+ * file-form `move`, `review create` under `--strategy audit` (§CONF-CORE) —
+ * in the order they run. Once command 1 has run, each also composes with
+ * those before it: the session's items stay addressable by their `id`s
+ * across `g`'s rename and the file's move (SPEC 10.2: an item stays
+ * actionable after its nodes are moved), the leaf's item is resolved before
+ * the parent's split, and the parent's scope root keeps its child (10.7).
+ */
+const T13_5_2_EXCLUDED: readonly ExcludedOperation[] = [
+  {
+    what: "`rename specs/A.mdx g g2`",
+    argv: () => ["rename", "specs/A.mdx", "g", "g2"],
+  },
+  {
+    what: "`move specs/A.mdx specs/B.mdx`",
+    argv: () => ["move", "specs/A.mdx", "specs/B.mdx"],
+  },
+  {
+    what: "`review create --strategy audit --name t`",
+    argv: () => ["review", "create", "--strategy", "audit", "--name", "t"],
+  },
+  {
+    what: "`review resolve s <leaf item> --status no-change`",
+    argv: (items) => [
+      "review",
+      "resolve",
+      "s",
+      items.leaf,
+      "--status",
+      "no-change",
+    ],
+  },
+  {
+    what: "`review split s <parent item>`",
+    argv: (items) => ["review", "split", "s", items.parent],
+  },
+];
+
+/** One refused `--json` run of T13.5-2's first round, kept for determinism. */
+interface RefusedRun {
+  readonly what: string;
+  /** The operation's arguments, `--json` aside. */
+  readonly argv: readonly string[];
+  readonly result: RunResult;
+}
+
+/**
+ * T13.5-2's staging, the same command sequence on every workspace the test
+ * uses — the held one, its determinism repeats, and the unheld twins — so
+ * that they are content-identical: a fresh CONF-CORE-shaped workspace,
+ * `build`, `review create --strategy audit --name s`, and the session's
+ * items learned by `review status s --json`, a read run before anything is
+ * held, no lock directory standing (§CONF-CORE: on T13.5-2 no `build` or read
+ * command runs inside a bracket or while a lock directory stands — the quiet
+ * §VIOL-CORE-READERENTRY's and §VIOL-CORE-BUILDWAIT's passing sides lean
+ * on); every mutating command the test starts then starts on a freshly built
+ * workspace with no refresh pending (§CONF-CORE's freshness constraint, which
+ * §VIOL-CORE-EARLYREFRESH's passing side leans on).
+ */
+async function stageT13_5_2(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<SessionItems> {
+  await buildOk(product, workspace, `${context} staging \`build\``);
+  await expectExit(
+    product,
+    workspace,
+    ["review", "create", "--strategy", "audit", "--name", "s"],
+    0,
+    `${context} staging \`review create --strategy audit --name s\``,
+  );
+  const status = await sessionStatus(
+    product,
+    workspace,
+    "s",
+    `${context} staging`,
+  );
+  return {
+    leaf: requireRowByScope(
+      status,
+      "specs/A.mdx#g",
+      `${context} staging (leaf item)`,
+    ).id,
+    parent: requireRowByScope(
+      status,
+      "specs/A.mdx#a",
+      `${context} staging (parent item)`,
+    ).id,
+  };
+}
+
+/**
+ * Run `body` while T13.5-2's command 1 holds `workspace` — `rename
+ * specs/A.mdx a a2 --test-hold <path>`, the hold path outside the workspace,
+ * its hold file awaited — then lift the hold and require command 1 to
+ * complete normally, exit 0 (SPEC 13.5), so the refusals `body` observed are
+ * attributable to the held command alone. A wait the run never ends is a
+ * diagnosed failure (H-8); a harness error propagates as itself (H-11).
+ */
+async function whileCommand1Holds<T>(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  holdName: string,
+  context: string,
+  body: (command1: RunningProduct) => Promise<T>,
+): Promise<T> {
+  const hold = holdPathFor(workspace, holdName);
+  const command1 = await startProduct(product, {
+    cwd: workspace.root,
+    argv: [...T13_5_2_COMMAND_1, "--test-hold", hold],
+  });
+  try {
+    await awaitHoldFile(command1, hold, context);
+    const value = await body(command1);
+    await releaseHoldFile(hold);
+    let result: RunResult;
+    try {
+      result = await command1.waitForExit();
+    } catch (error) {
+      rethrowHarnessError(error);
+      return fail(
+        `${context}: command 1 must complete normally once its hold file is ` +
+          `deleted (SPEC 13.5) — ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    assertExitCode(
+      result,
+      0,
+      `${context}: completes normally once its hold is lifted, so the ` +
+        `refusals while it held are attributable to it alone (SPEC 13.5)`,
+    );
+    return value;
+  } finally {
+    command1.kill();
+    await releaseHoldFile(hold);
+  }
+}
+
+/**
+ * One run of an excluded operation while command 1 holds (T13.5-2): it fails
+ * promptly — bounded (the hang guard of `runBounded`, never an assertion
+ * input, H-10), and exiting while command 1 still holds — with exit 2 (SPEC
+ * 13.5: the busy refusal of 14.26, a usage error, 12.0); under `--json` its
+ * stdout is exactly the 12.7 error document, `code` `"workspace-busy"`,
+ * `path` `".xspec/lock"`, `locations` `[]` (`message` and `identities`
+ * informational, 12.7; the decode form-exact), and without it stdout is
+ * empty (12.0); it modifies nothing — the compare bracketing this run alone,
+ * its baseline taken while command 1 already holds (§CONF-CORE's bracketing
+ * constraint, which §VIOL-CORE-EARLYWRITE's passing side leans on), the lock
+ * path left out (H-6: the run reaches acquisition, whose writes and
+ * release's count as no modification) — and command 1's entry stands
+ * byte-identical, name and content, the lock directory's only entry (SPEC
+ * 13.5: no acquisition or release removes or alters a live run's entry, and
+ * the refused run's release deletes its own). Returns the run.
+ */
+async function assertRefusedWhileHeld(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  command1: RunningProduct,
+  holder: LockEntry,
+  argv: readonly string[],
+  json: boolean,
+  context: string,
+): Promise<RunResult> {
+  const before = await snapshotDirectory(workspace.root);
+  const result = await runBounded(
+    product,
+    workspace.root,
+    json ? [...argv, "--json"] : argv,
+    context,
+  );
+  assertExitCode(
+    result,
+    2,
+    `${context}: a mutating command meeting another live run's entry at ` +
+      `acquisition fails there promptly, modifying nothing, with the usage ` +
+      `error of 14.26 (SPEC 13.5, 14.26, 12.0)`,
+  );
+  if (command1.hasExited()) {
+    fail(
+      `${context}: command 1 must still hold when the excluded command ` +
+        `exits — the refusal is prompt, never a wait for command 1's ` +
+        `exclusivity to end (SPEC 13.5) — ${await describeExit(command1)}`,
+    );
+  }
+  if (json) {
+    const finding = expectErrorDocument(result, context);
+    assertSameJson(
+      { code: finding.code, path: finding.path, locations: finding.locations },
+      { code: "workspace-busy", path: LOCK_PATH, locations: [] },
+      `${context}: the busy refusal's error document carries the stable ` +
+        `code "workspace-busy", the concerned path "${LOCK_PATH}", and no ` +
+        `locations (SPEC 14.26, 12.7; \`message\` and \`identities\` ` +
+        `informational) — message: ${JSON.stringify(finding.message)}`,
+    );
+  } else if (result.stdoutBytes.length !== 0) {
+    fail(
+      `${context}: without --json a usage error's stdout is empty (SPEC ` +
+        `12.0); got ${String(result.stdoutBytes.length)} bytes — ` +
+        summarizeResult(result),
+    );
+  }
+  assertSnapshotsEqual(
+    before,
+    await snapshotDirectory(workspace.root),
+    `${context}: modifies nothing — journal, sessions, and sources ` +
+      `byte-identical, the compare bracketing this command alone, its ` +
+      `baseline taken while command 1 already held (SPEC 13.5)`,
+  );
+  await assertOnlyEntry(
+    workspace.root,
+    holder,
+    `${context}: after the refusal, command 1's entry`,
+  );
+  return result;
+}
+
+/**
+ * Recreate `workspace` at its own absolute path — T13.5-2's determinism arm,
+ * "the workspace recreated there": its root removed whole and made again,
+ * holding the CONF-CORE staging's own files afresh (CORE_DECL's records),
+ * ready for the staging commands the original ran.
+ */
+async function recreateAtSamePath(workspace: TestWorkspace): Promise<void> {
+  await fsp.rm(workspace.root, { recursive: true, force: true });
+  await fsp.mkdir(workspace.root);
+  for (const [rel, contents] of Object.entries(CORE_DECL.files ?? {})) {
+    await workspace.file(rel, contents);
+  }
+}
+
+/**
+ * T13.5-2's determinism arm on one repeat workspace (12.0; 12.7: `message`
+ * and `identities` deterministic, informational though they are; H-6):
+ * staged as the held workspace was, and held by a separate holder process —
+ * command 1 started afresh, whose entry therefore records another process
+ * identifier (cyclic allocation, T13.5-3) — each refused command's `--json`
+ * run repeated with the first run's arguments (the busy refusal precedes the
+ * item checks, SPEC 13.5, 12.0: the same invocation, whatever the repeat's
+ * own items), its exit, standard output, and standard error byte-identical to
+ * the first run's: failing a product whose diagnostic names a process
+ * identifier, an entry, or the workspace's absolute path.
+ */
+async function repeatRefusals(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  where: string,
+  holdName: string,
+  firstRuns: readonly RefusedRun[],
+): Promise<void> {
+  const context = `T13.5-2 determinism (${where})`;
+  await stageT13_5_2(product, workspace, context);
+  await whileCommand1Holds(
+    product,
+    workspace,
+    holdName,
+    `${context} command 1 \`rename specs/A.mdx a a2 --test-hold <path>\``,
+    async () => {
+      for (const first of firstRuns) {
+        const label = `${context} ${first.what} --json while command 1 holds`;
+        const result = await runBounded(
+          product,
+          workspace.root,
+          [...first.argv, "--json"],
+          label,
+        );
+        assertRunOutcomesEqual(
+          result,
+          first.result,
+          `${label}: repeated on a fresh content-identical workspace held ` +
+            `by a separate holder process, ${where}, it answers ` +
+            `byte-identically — no process identifier, entry, or absolute ` +
+            `path in its diagnostic (SPEC 12.0, 12.7, 13.4; H-6)`,
+          `the repeat ${where}`,
+          "the first run",
+        );
+      }
+    },
+  );
+}
+
 const T13_5_2 = defineProductTest({
   id: "T13.5-2",
   title:
-    "while a mutating command is held, each other mutating command (`rename`, file-form `move`, `review create/resolve/split`) fails promptly with exit 2 and modifies nothing — journal, sessions, and sources byte-identical, the compare bracketing each excluded command alone with its baseline taken while command 1 is already held; after command 1 completes, the second command succeeds (SPEC 13.5, 12.0)",
+    'while command 1 (`rename specs/A.mdx a a2 --test-hold <path>`) holds — the held-state comparison holding against its pre-invocation state — each other mutating command (`rename`, file-form `move`, `review create/resolve/split`), each an operation succeeding on an unheld twin and composing with command 1, fails promptly, exiting while command 1 still holds, with exit 2 and modifies nothing (journal, sessions, and sources byte-identical, the compare bracketing each excluded command alone, its baseline taken while command 1 already holds); each is run once under `--json`, its stdout exactly the error document with `code` `"workspace-busy"`, `path` `".xspec/lock"`, and `locations` `[]`, and once without, stdout empty; after each refusal command 1\'s entry is byte-identical, name and content, and the lock directory\'s only entry; after command 1 completes, each second command succeeds; determinism: each refused `--json` run is repeated on a fresh content-identical workspace held by a separate holder process — recreated at the same absolute path, and at a different one — its stdout and stderr byte-identical across the three runs (SPEC 13.5, 14.26, 12.7, 12.0, H-6)',
   run: async (product) => {
+    const firstRuns: RefusedRun[] = [];
     await withWorkspace(CORE_DECL, async (workspace) => {
-      await buildOk(product, workspace, "T13.5-2 staging `build`");
-      await expectExit(
+      const items = await stageT13_5_2(product, workspace, "T13.5-2");
+      // Command 1's pre-invocation state: the held-state comparison's
+      // baseline (TEST-SPEC §13.5's preamble).
+      const preInvocation = await snapshotDirectory(workspace.root);
+      await whileCommand1Holds(
         product,
         workspace,
-        ["review", "create", "--strategy", "audit", "--name", "s"],
-        0,
-        "T13.5-2 staging `review create --strategy audit --name s`",
-      );
-      const status = await sessionStatus(
-        product,
-        workspace,
-        "s",
-        "T13.5-2 staging",
-      );
-      const gItem = requireRowByScope(
-        status,
-        "specs/A.mdx#g",
-        "T13.5-2 staging (leaf item)",
-      );
-      const aItem = requireRowByScope(
-        status,
-        "specs/A.mdx#a",
-        "T13.5-2 staging (parent item)",
-      );
-
-      const hold = holdPathFor(workspace, "hold-primary.tmp");
-      const context1 =
-        "T13.5-2 command 1 `rename specs/A.mdx a a2 --test-hold <path>`";
-      const running = await startProduct(product, {
-        cwd: workspace.root,
-        argv: ["rename", "specs/A.mdx", "a", "a2", "--test-hold", hold],
-      });
-      try {
-        await awaitHoldFile(running, hold, context1);
-        // Staging constraint (§VIOL-CORE-EARLYWRITE): the baseline snapshot
-        // is taken while command 1 is already held, so each excluded
-        // command's compare brackets that command alone.
-        const heldBaseline = await snapshotDirectory(workspace.root);
-
-        // Each other mutating command, valid in its own right (so exit 2 is
-        // attributable to the exclusion alone) and carrying no --test-hold
-        // (§VIOL-CORE-NOLOCK staging constraint).
-        const excluded: readonly (readonly [readonly string[], string])[] = [
-          [["rename", "specs/A.mdx", "g", "g2"], "`rename specs/A.mdx g g2`"],
-          [
-            ["move", "specs/A.mdx", "specs/B.mdx"],
-            "`move specs/A.mdx specs/B.mdx`",
-          ],
-          [
-            ["review", "create", "--strategy", "audit", "--name", "t"],
-            "`review create --strategy audit --name t`",
-          ],
-          [
-            ["review", "resolve", "s", gItem.id, "--status", "no-change"],
-            "`review resolve s <leaf item> --status no-change`",
-          ],
-          [
-            ["review", "split", "s", aItem.id],
-            "`review split s <parent item>`",
-          ],
-        ];
-        for (const [argv, what] of excluded) {
-          const context = `T13.5-2 excluded ${what} while command 1 is held`;
-          const result = await runBounded(
-            product,
+        "hold-primary.tmp",
+        "T13.5-2 command 1 `rename specs/A.mdx a a2 --test-hold <path>`",
+        async (command1) => {
+          // The held-state comparison while command 1 holds, against its
+          // pre-invocation state: every path but the lock path
+          // byte-identical, `.xspec/lock` holding command 1's one entry — on
+          // T13.5-2 the only ground on which §VIOL-CORE-EARLYWRITE, command
+          // 1's operation written before its hold, fails (CERTIFICATIONS.md
+          // §CONF-CORE's justification).
+          const [holder] = await assertHeldState(
             workspace.root,
-            argv,
-            context,
+            { baseline: preInvocation, heldRuns: 1 },
+            "T13.5-2 while command 1 holds, against its pre-invocation state",
           );
-          assertExitCode(
-            result,
-            2,
-            `${context}: a mutating command refused because another is ` +
-              `running is a usage error (SPEC 13.5, 12.0)`,
-          );
-          if (running.hasExited()) {
-            fail(
-              `${context}: command 1 must still be held when the excluded ` +
-                `command exits — the refusal is prompt, not a wait for ` +
-                `command 1 (SPEC 13.5) — ${await describeExit(running)}`,
+          if (holder === undefined) {
+            throw new Error(
+              "T13.5-2: assertHeldState returned no entry for one held run",
             );
           }
-          const now = await snapshotDirectory(workspace.root);
-          assertSnapshotsEqual(
-            heldBaseline,
-            now,
-            `${context}: modifies nothing — journal, sessions, and sources ` +
-              `byte-identical (SPEC 13.5)`,
-          );
-        }
+          for (const operation of T13_5_2_EXCLUDED) {
+            const argv = operation.argv(items);
+            const context = `T13.5-2 excluded ${operation.what} while command 1 holds`;
+            const result = await assertRefusedWhileHeld(
+              product,
+              workspace,
+              command1,
+              holder,
+              argv,
+              true,
+              `${context} (under --json)`,
+            );
+            firstRuns.push({ what: operation.what, argv, result });
+            await assertRefusedWhileHeld(
+              product,
+              workspace,
+              command1,
+              holder,
+              argv,
+              false,
+              `${context} (without --json)`,
+            );
+          }
+        },
+      );
 
-        await releaseHoldFile(hold);
-        let result1: RunResult;
-        try {
-          result1 = await running.waitForExit();
-        } catch (error) {
-          rethrowHarnessError(error);
-          return fail(
-            `${context1}: command 1 must complete normally once the hold ` +
-              `file is deleted (SPEC 13.5) — ` +
-              `${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-        assertExitCode(
-          result1,
+      // After command 1 completes, the second command succeeds (SPEC 13.5:
+      // exclusivity ends with command 1's normal completion): each excluded
+      // operation in turn, started once command 1 has exited
+      // (§VIOL-CORE-EARLYRELEASE's passing side leans on that), exits 0 —
+      // each composing with command 1 and with those before it.
+      for (const operation of T13_5_2_EXCLUDED) {
+        await expectExit(
+          product,
+          workspace,
+          operation.argv(items),
           0,
-          `${context1}: completes normally after release, so the exclusions ` +
-            `above are attributable to the held command alone (SPEC 13.5)`,
+          `T13.5-2 ${operation.what} once command 1 has completed — the ` +
+            `second command succeeds, exclusivity having ended with command ` +
+            `1's normal completion (SPEC 13.5)`,
         );
-      } finally {
-        running.kill();
-        await releaseHoldFile(hold);
       }
 
-      // After command 1 completes, the second command succeeds.
-      await expectExit(
+      // Determinism: the workspace recreated at the same absolute path, then
+      // a content-identical one at a different path — made while this one
+      // still exists, so the two paths differ. Each repeat workspace, like
+      // the first round's one held workspace, serves all five refused
+      // commands under its own fresh holder: a refused run modifies nothing
+      // (asserted above for each), so each command's repeat meets a fresh
+      // content-identical workspace held by a separate holder process.
+      await recreateAtSamePath(workspace);
+      await repeatRefusals(
         product,
         workspace,
-        ["review", "create", "--strategy", "audit", "--name", "t"],
-        0,
-        "T13.5-2 `review create --strategy audit --name t` after command 1 " +
-          "completed — exclusivity ended with normal completion (SPEC 13.5)",
+        "at the same absolute path, the workspace recreated there",
+        "hold-repeat-same-path.tmp",
+        firstRuns,
       );
+      await withWorkspace(CORE_DECL, async (other) => {
+        await repeatRefusals(
+          product,
+          other,
+          "at a different absolute path",
+          "hold-repeat-other-path.tmp",
+          firstRuns,
+        );
+      });
     });
+
+    // The unheld twins: each excluded operation, on a fresh workspace staged
+    // as the held one with nothing held, exits 0 — in the state it met while
+    // command 1 held (the hold precedes every modification, SPEC 13.5), so
+    // its exit 2 then was the exclusion's alone. Its operands name the twin's
+    // own items — the same operation by item scope, never an assumed
+    // cross-directory identifier equality (H-4).
+    for (const operation of T13_5_2_EXCLUDED) {
+      await withWorkspace(CORE_DECL, async (twin) => {
+        const context = `T13.5-2 unheld twin for ${operation.what}`;
+        const twinItems = await stageT13_5_2(product, twin, context);
+        await expectExit(
+          product,
+          twin,
+          operation.argv(twinItems),
+          0,
+          `${context}: the operation succeeds where nothing is held (SPEC ` +
+            `13.5), so its exit 2 while command 1 held is the exclusion's ` +
+            `alone`,
+        );
+      });
+    }
   },
 });
 
