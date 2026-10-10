@@ -519,8 +519,8 @@ function assertSingleUnitFormFinding(
 /**
  * The graph-data entries of a whole-root snapshot, viewed as a snapshot —
  * T13.3-2's operational path set (every path under `.xspec/` except the
- * durable journal and reviews paths; the predicate's one home is the H-3
- * adapter layer). Used only for whole comparison against the product's own
+ * durable journal and reviews paths and the transient lock path with
+ * everything under it; the predicate's one home is the H-3 adapter layer). Used only for whole comparison against the product's own
  * earlier bytes (H-4: graph-data content is opaque; the self-comparison
  * carve-out).
  */
@@ -1440,11 +1440,11 @@ const T12_2_2 = defineProductTest({
 
         // Missing arm — on the freshly built, otherwise clean workspace,
         // delete the graph data (T13.3-2's operational definition: every
-        // path under .xspec/ except the durable journal and reviews
-        // paths). Every generated file stays present and matching, and the
-        // absent record leaves the recorded-file form nothing to report —
-        // so exactly one condition-10 finding, the unit form,
-        // discriminates a product that treats absent graph data as
+        // path under .xspec/ except the durable journal and reviews paths
+        // and the transient lock path). Every generated file stays present
+        // and matching, and the absent record leaves the recorded-file form
+        // nothing to report — so exactly one condition-10 finding, the unit
+        // form, discriminates a product that treats absent graph data as
         // nothing to verify.
         await deleteGraphData(
           workspace,
@@ -1848,7 +1848,8 @@ const T12_2_3 = defineProductTest({
           fail(
             "T12.2-3 (missing) staging premise: deleting the graph data — " +
               "every path under .xspec/ except the durable journal and " +
-              "reviews paths (T13.3-2's operational definition) — must " +
+              "reviews paths and the transient lock path (T13.3-2's " +
+              "operational definition) — must " +
               "leave none; found " +
               JSON.stringify([...missingBefore.entries.keys()].sort()),
           );

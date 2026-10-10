@@ -65,6 +65,7 @@ import {
   decodeFindingsReport,
   decodeImpactReport,
   decodeSessionStatusReport,
+  isGraphDataKey,
   pathValueBytes,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
@@ -520,16 +521,23 @@ function unionKeys(...snapshots: readonly DirectorySnapshot[]): string[] {
   return [...keys].sort();
 }
 
-/** The graph-data area or anything beneath it (SPEC 11.6, 13.3). */
+/**
+ * The graph-data area or anything beneath it (SPEC 11.6, 13.3) — the
+ * transient lock path included, which lies in the area though it is no
+ * graph data (13.4), so no derived scope below ever holds it.
+ */
 export function isAreaPath(rel: string): boolean {
   return rel === GRAPH_DATA_AREA || rel.startsWith(`${GRAPH_DATA_AREA}/`);
 }
 
-/** Graph data: the area minus its durable occupants — journal and sessions. */
+/**
+ * Graph data: the area itself and T13.3-2's operational path set beneath it
+ * (`isGraphDataKey`) — the area minus its durable occupants, journal and
+ * sessions, and minus the transient lock path with everything under it
+ * (SPEC 13.4: no graph data, bearing on no comparison of graph data).
+ */
 export function isGraphDataPath(rel: string): boolean {
-  if (rel === JOURNAL_PATH) return false;
-  if (rel === REVIEWS_DIR || rel.startsWith(`${REVIEWS_DIR}/`)) return false;
-  return isAreaPath(rel);
+  return rel === GRAPH_DATA_AREA || isGraphDataKey(rel);
 }
 
 /** A source of either fixture: the configuration, spec sources, code sources. */

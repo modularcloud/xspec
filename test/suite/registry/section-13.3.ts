@@ -13,7 +13,9 @@
 // Operational definitions and conservative choices (noted per H-3/H-4):
 // - "The graph data", operationally (T13.3-2, binding here and for T13.4-3):
 //   every path under `.xspec/` except the durable `.xspec/journal` and
-//   `.xspec/reviews/` (SPEC 13.4). Tests only ever remove or compare it whole.
+//   `.xspec/reviews/` and the transient lock path `.xspec/lock` with
+//   everything under it (SPEC 13.4: no graph data, bearing on no comparison
+//   of graph data). Tests only ever remove or compare it whole.
 // - "Rewritten as `build` would write it" is asserted, in the source-edit
 //   arm, as byte equality against graph data an actual `build` of the
 //   identical workspace state wrote (12.0/13.3 byte determinism makes that
@@ -247,7 +249,8 @@ async function withWorkspace<T>(
 
 // Whether a snapshot key (a `/`-separated workspace-relative path) is graph
 // data: under `.xspec/`, excluding the durable `.xspec/journal` and
-// `.xspec/reviews/` (SPEC 13.3, 13.4; TEST-SPEC T13.3-2). The predicate's
+// `.xspec/reviews/` and the transient lock path `.xspec/lock` with
+// everything under it (SPEC 13.3, 13.4; TEST-SPEC T13.3-2). The predicate's
 // home is the H-3 adapter layer (record-staging.ts, whose shape-blind
 // corruption shares the operational path set); re-exported here for the
 // suite modules sharing T13.3-2's operational definition — T6.6-5's
@@ -296,7 +299,7 @@ export function assertGraphDataPresent(
       `${context}: expected graph data under .xspec/ (SPEC 13.3: xspec ` +
         `maintains graph data under .xspec/, and \`build\` writes it, ` +
         `12.1); found no entry under .xspec/ outside the durable journal ` +
-        `and reviews/ paths`,
+        `and reviews/ paths and the transient lock path`,
     );
   }
 }
@@ -327,19 +330,16 @@ function assertEmptyRecord(
   );
 }
 
-/** The durable names inside `.xspec/` — no part of the graph data (SPEC 13.4). */
-const DURABLE_AREA_NAMES: readonly Buffer[] = [
-  Buffer.from("journal", "utf8"),
-  Buffer.from("reviews", "utf8"),
-];
-
 /**
  * Delete the graph data per the T13.3-2 operational definition: every path
- * under `.xspec/` except `.xspec/journal` and `.xspec/reviews/`. The area is
- * listed by raw name bytes and every other entry removed at its exact byte
- * path, so each name the product chose goes — one that is not ASCII, or not
- * valid UTF-8, included (graph data's layout is the product's, SPEC 13.3; a
- * name read through a lossy UTF-8 decode would be missed without an error).
+ * under `.xspec/` except `.xspec/journal` and `.xspec/reviews/` and the
+ * transient lock path `.xspec/lock` with everything under it (SPEC 13.4:
+ * no graph data — spared, whatever occupies it). The area is listed by raw
+ * name bytes, each name judged by {@link isGraphDataKey}, and every entry
+ * of the set removed at its exact byte path, so each name the product chose
+ * goes — one that is not ASCII, or not valid UTF-8, included (graph data's
+ * layout is the product's, SPEC 13.3; a name read through a lossy UTF-8
+ * decode would be missed without an error).
  * Exported for the suite modules sharing T13.3-2's operational definition:
  * T6.6-5's record-deleted arm (section-6.6.ts), T13.4-10's obstruction arms
  * (section-13.4.ts), and T12.2-2's and T12.2-3's missing-graph-data arms
@@ -357,7 +357,10 @@ export async function deleteGraphData(
     );
   }
   for (const name of await workspace.readdirBytes(".xspec")) {
-    if (DURABLE_AREA_NAMES.some((durable) => durable.equals(name))) continue;
+    // The durable journal and reviews paths and the transient lock path are
+    // no graph data (T13.3-2): left as they are.
+    const key = `.xspec/${Buffer.from(name).toString("latin1")}`;
+    if (!isGraphDataKey(key)) continue;
     await fsp.rm(
       workspace.bytePath(Buffer.concat([Buffer.from(".xspec/"), name])),
       { recursive: true, force: true },
@@ -945,7 +948,7 @@ const T13_3_2_RECORD_A = ALPHA_ON_BETA_SOURCE;
 const T13_3_2 = defineProductTest({
   id: "T13.3-2",
   title:
-    "deleting the graph data (every path under .xspec/ except the durable journal and reviews/) or editing a source makes each of ids, show, coverage, impact, review status, query, occurrences, view, at answer from current sources and rewrite graph data as `build` would write it — while no TypeScript or Markdown is generated or removed and the recorded derived-file paths stay unchanged (a stale module stays stale, `check` reports 14.10; a later `build` removes the recorded orphan); an absent record stays absent — after a refreshing read on the deletion arm `inventory` reports `recorded` [] and, every derived file still matching, `check` is clean; with the record corrupted shape-blind instead, each refreshing read answers finding-free at exit 0, leaving the corrupt state neither read, repaired, nor replaced — `inventory` still reports `recorded` unavailable — until a successful `build` replaces the state (SPEC 13.3, 13.4, 11.6, 12.1, 14.10, 14.23)",
+    "deleting the graph data (every path under .xspec/ except the durable journal and reviews/ and the transient lock path .xspec/lock with everything under it) or editing a source makes each of ids, show, coverage, impact, review status, query, occurrences, view, at answer from current sources and rewrite graph data as `build` would write it — while no TypeScript or Markdown is generated or removed and the recorded derived-file paths stay unchanged (a stale module stays stale, `check` reports 14.10; a later `build` removes the recorded orphan); an absent record stays absent — after a refreshing read on the deletion arm `inventory` reports `recorded` [] and, every derived file still matching, `check` is clean; with the record corrupted shape-blind instead, each refreshing read answers finding-free at exit 0, leaving the corrupt state neither read, repaired, nor replaced — `inventory` still reports `recorded` unavailable — until a successful `build` replaces the state (SPEC 13.3, 13.4, 11.6, 12.1, 14.10, 14.23)",
   run: async (product) => {
     await withWorkspace(
       {

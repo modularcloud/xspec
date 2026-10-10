@@ -80,10 +80,12 @@
 //   exactly one finding" (c) are the findings-only document `{"findings":
 //   […]}` (12.7: a report whose defined content is findings alone), decoded
 //   form-exact.
-// - Arm (f)'s "every path under `.xspec/` other than the journal and the
-//   session directory staged unreadable" is every plain file in T13.3-2's
-//   operational path set (`isGraphDataKey`), recursively, at mode 0o200,
-//   each reached at its exact name bytes (the names are the product's,
+// - Arm (f)'s "every path under `.xspec/` other than the journal, the
+//   session directory, and the lock path staged unreadable" is every plain
+//   file in T13.3-2's operational path set (`isGraphDataKey`, through the
+//   adapter layer's `collectGraphDataFiles`: the lock path and everything
+//   under it never staged, 13.4), recursively, at mode 0o200, each
+//   reached at its exact name bytes (the names are the product's,
 //   13.3); directories keep their listing and write permission so the
 //   regeneration `ids` owes (13.3) is never itself refused, whatever the
 //   product's layout. A staged file the regeneration has since removed is
@@ -109,6 +111,7 @@ import type {
   OccurrencesReport,
 } from "../../helpers/adapters/index.js";
 import {
+  collectGraphDataFiles,
   decodeAtReport,
   decodeFindingsReport,
   decodeIdsReport,
@@ -117,7 +120,6 @@ import {
   decodePreviewReport,
   decodeSessionListReport,
   decodeViewReport,
-  isGraphDataKey,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
@@ -1424,39 +1426,6 @@ function recordsIn(report: OccurrencesReport, file: string): number {
 }
 
 /**
- * Every plain file under `rel` that is graph data (T13.3-2's operational
- * path set: under `.xspec/`, outside the durable journal and the session
- * directory), recursively, as snapshot keys (helpers/snapshot.ts: the exact
- * relative path bytes, held latin1-encoded — for an ASCII path, the path
- * itself). Names are listed as raw bytes and each entry classified by
- * `lstat` at its exact byte path: graph data's layout is the product's
- * (SPEC 13.3), so a name that is not ASCII, or not valid UTF-8, is collected
- * like any other, where a UTF-8 listing would misname it.
- */
-async function collectGraphDataFiles(
-  workspace: TestWorkspace,
-  rel: string,
-): Promise<string[]> {
-  const collected: string[] = [];
-  const names = (
-    await fsp.readdir(workspace.bytePath(snapshotKeyBytes(rel)), {
-      encoding: "buffer",
-    })
-  ).sort(Buffer.compare);
-  for (const name of names) {
-    const key = `${rel}/${name.toString("latin1")}`;
-    if (!isGraphDataKey(key)) continue;
-    const stats = await fsp.lstat(workspace.bytePath(snapshotKeyBytes(key)));
-    if (stats.isDirectory()) {
-      collected.push(...(await collectGraphDataFiles(workspace, key)));
-    } else if (stats.isFile()) {
-      collected.push(key);
-    }
-  }
-  return collected;
-}
-
-/**
  * Restore each staging whose object still exists — a regeneration may have
  * replaced or removed a staged file, and a replaced file's mode is its own
  * (nothing to reinstate on an absent path). Reverse order of staging.
@@ -1471,30 +1440,32 @@ async function restoreSurviving(
 }
 
 /**
- * Arm (f)'s staging: every plain file under `.xspec/` other than the journal
- * and the session directory unreadable (mode 0o200, each verified). Files
- * only — directories keep their listing and write permission, so the
- * regeneration a refreshing read owes (13.3) is never itself refused,
- * whatever the product's layout. Each file is staged at its exact name
- * bytes, whatever the name the product chose (SPEC 13.3). At least one file
- * must exist: the staging applies to record files the product itself wrote
- * (H-3), and staging nothing would be no staging (H-11).
+ * Arm (f)'s staging: every plain file under `.xspec/` other than the
+ * journal, the session directory, and the lock path unreadable (mode 0o200,
+ * each verified) — T13.3-2's operational path set, listed by the adapter
+ * layer's `collectGraphDataFiles` (anything but a plain file or a directory
+ * in the set is skipped, the lock path and everything under it never
+ * staged: no graph data, 13.4). Files only — directories keep their listing
+ * and write permission, so the regeneration a refreshing read owes (13.3)
+ * is never itself refused, whatever the product's layout. Each file is
+ * staged at its exact name bytes, whatever the name the product chose (SPEC
+ * 13.3). At least one file must exist: the staging applies to record files
+ * the product itself wrote (H-3), and staging nothing would be no staging
+ * (H-11).
  */
 async function stageGraphDataUnreadable(
   workspace: TestWorkspace,
   context: string,
 ): Promise<PermissionStaging[]> {
-  const files = (
-    await collectGraphDataFiles(workspace, GRAPH_DATA_AREA)
-  ).sort();
+  const files = await collectGraphDataFiles(workspace.root);
   if (files.length === 0) {
     throw new HarnessStagingError(
       "read-refusal-of-file",
       workspace.path(GRAPH_DATA_AREA),
       `${context}: no graph-data file found under ${GRAPH_DATA_AREA}/ ` +
-        `outside the journal and the session directory — the staging ` +
-        `applies to record files the product itself wrote after a ` +
-        `successful build (SPEC 13.3, 12.1)`,
+        `outside the journal, the session directory, and the lock path — ` +
+        `the staging applies to record files the product itself wrote ` +
+        `after a successful build (SPEC 13.3, 12.1)`,
     );
   }
   const stagings: PermissionStaging[] = [];

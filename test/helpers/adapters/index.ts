@@ -20,8 +20,10 @@
 //                      requires its absence
 //   session-staging.ts T10.1-4 corruption transformations (shape-aware,
 //                      value-blind, over product-written session files)
-//   record-staging.ts  T6.6-6's shape-blind corrupt-record staging (garbage
-//                      over T13.3-2's operational path set, product-written
+//   record-staging.ts  T13.3-2's operational path set (its predicate, the
+//                      lock path excluded, and the collector of its plain
+//                      files) and T6.6-6's shape-blind corrupt-record
+//                      staging (garbage over that set, product-written
 //                      files only), shared by the other 14.23 stagings
 //   sorted-keys.ts     T13.4-1 byte-sorted-keys assertion (shape/value-blind)
 //

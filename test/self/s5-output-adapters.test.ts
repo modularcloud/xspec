@@ -39,6 +39,7 @@ import {
   assertReportOmits,
   assertUnavailabilityMarkerForms,
   classifyIgnoredReasons,
+  collectGraphDataFiles,
   compareFindings,
   conditionMention,
   corruptGraphDataShapeBlind,
@@ -6208,6 +6209,150 @@ test.runIf(process.platform === "linux")(
     }
   },
 );
+
+test("S-5: T13.3-2's operational path set is every path under .xspec/ but the durable journal and reviews paths and the transient lock path with everything under it", () => {
+  // Graph data (SPEC 13.3): under the area, near misses of the excluded
+  // names included — the lock path's exclusion reaches `.xspec/lock` and
+  // the paths beginning `.xspec/lock/`, nothing beside them.
+  for (const key of [
+    ".xspec/graph.json",
+    ".xspec/cache/part-a.bin",
+    ".xspec/lockx",
+    ".xspec/lock.tmp",
+    ".xspec/locks/a",
+    ".xspec/journal.tmp",
+    ".xspec/reviewsx",
+  ]) {
+    expect(isGraphDataKey(key), key).toBe(true);
+  }
+  // No graph data: the area's own path, the durable journal and session
+  // directory (SPEC 13.4), the transient lock path and everything under it
+  // (13.4: no graph data, bearing on no comparison of graph data), and any
+  // path outside the area (keys are workspace-relative, so a nested
+  // workspace's area is no part of this one's).
+  for (const key of [
+    ".xspec",
+    ".xspec/journal",
+    ".xspec/reviews",
+    ".xspec/reviews/s1.json",
+    ".xspec/lock",
+    ".xspec/lock/x",
+    ".xspec/lock/d/f",
+    "x/.xspec/lock",
+    "x/.xspec/graph.json",
+    ".xspecx/graph.json",
+    "specs/A.mdx",
+  ]) {
+    expect(isGraphDataKey(key), key).toBe(false);
+  }
+});
+
+test("S-5: corrupt-record staging spares the transient lock path — entries under the lock directory, and a plain file or a symbolic link at the lock path, untouched and never refused", async () => {
+  // A run's entries in the lock directory (SPEC 13.5: coordination state,
+  // 13.4: no graph data): neither corrupted nor listed.
+  const held = await TestWorkspace.create({
+    files: {
+      ".xspec/graph.json": '{"nodes": []}\n',
+      ".xspec/lock/x": "entry\n",
+      ".xspec/lock/d/f": "nested\n",
+    },
+  });
+  onTestFinished(() => held.dispose());
+  const heldBefore = await snapshotDirectory(held.root);
+  expect(
+    await corruptGraphDataShapeBlind(held.root, "S-5 record staging (lock)"),
+  ).toEqual([".xspec/graph.json"]);
+  const heldAfter = await snapshotDirectory(held.root);
+  expect([...heldAfter.entries.keys()]).toEqual([...heldBefore.entries.keys()]);
+  for (const key of [
+    ".xspec/lock",
+    ".xspec/lock/x",
+    ".xspec/lock/d",
+    ".xspec/lock/d/f",
+  ]) {
+    expect(
+      describeEntryDifference(
+        heldBefore.entries.get(key) as SnapshotEntry,
+        heldAfter.entries.get(key) as SnapshotEntry,
+      ),
+      key,
+    ).toBeUndefined();
+  }
+
+  // Whatever occupies the lock path is skipped, as the durable paths are: a
+  // plain file there (13.4: a leftover acquisition removes) is never
+  // corrupted, and a symbolic link there is no occupant of the record's set
+  // — never a loud refusal, its target never reached.
+  const occupants: readonly {
+    label: string;
+    files: Readonly<Record<string, string>>;
+    symlinks?: Readonly<Record<string, string>>;
+  }[] = [
+    {
+      label: "a plain file at the lock path",
+      files: { ".xspec/lock": "leftover\n" },
+    },
+    {
+      label: "a symbolic link at the lock path",
+      files: { "elsewhere/f": "target\n" },
+      symlinks: { ".xspec/lock": "../elsewhere" },
+    },
+  ];
+  for (const { label, files, symlinks } of occupants) {
+    const workspace = await TestWorkspace.create({
+      files: { ...files, ".xspec/graph.json": '{"nodes": []}\n' },
+      symlinks,
+    });
+    onTestFinished(() => workspace.dispose());
+    const before = await snapshotDirectory(workspace.root);
+    expect(
+      await corruptGraphDataShapeBlind(workspace.root, `S-5 (${label})`),
+      label,
+    ).toEqual([".xspec/graph.json"]);
+    const after = await snapshotDirectory(workspace.root);
+    expect([...after.entries.keys()], label).toEqual([
+      ...before.entries.keys(),
+    ]);
+    for (const [key, entry] of after.entries) {
+      if (key === ".xspec/graph.json") continue;
+      expect(
+        describeEntryDifference(
+          before.entries.get(key) as SnapshotEntry,
+          entry,
+        ),
+        `${label}: ${key}`,
+      ).toBeUndefined();
+    }
+  }
+});
+
+test("S-5: the graph-data file collector lists the operational path set's plain files in byte order, nothing at or under the lock path, any other occupant handed to the caller or skipped", async () => {
+  // The one collector behind the corruption and T14-10(f)'s unreadable
+  // staging: the durable paths and the lock path are no part of the set,
+  // a symbolic link in the set is no plain file — the corruption refuses it
+  // through `onOther`, a caller passing no handler skips it.
+  const workspace = await TestWorkspace.create({
+    files: {
+      ".xspec/journal": "j\n",
+      ".xspec/reviews/s1.json": "{}",
+      ".xspec/graph.json": "{}",
+      ".xspec/cache/b": "b",
+      ".xspec/cache/a": "a",
+      ".xspec/lock/x": "entry\n",
+    },
+    symlinks: { ".xspec/link.json": "graph.json" },
+  });
+  onTestFinished(() => workspace.dispose());
+  const expected = [".xspec/cache/a", ".xspec/cache/b", ".xspec/graph.json"];
+  expect(await collectGraphDataFiles(workspace.root)).toEqual(expected);
+  const others: string[] = [];
+  expect(
+    await collectGraphDataFiles(workspace.root, (key) => {
+      others.push(key);
+    }),
+  ).toEqual(expected);
+  expect(others).toEqual([".xspec/link.json"]);
+});
 
 // --- T13.4-1 sorted-keys assertion --------------------------------------------
 

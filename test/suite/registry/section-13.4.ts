@@ -285,6 +285,7 @@ import {
   decodeFindingsReport,
   decodeInventoryRecordedDatum,
   decodeSessionStatusReport,
+  isGraphDataKey,
   judgeManualDeletionCorrection,
   pathValueBytes,
   renderPathValue,
@@ -404,19 +405,6 @@ async function withWorkspace<T>(
 /** Snapshot exclusion pruning the top-level `.git` subtree. */
 function excludeGitDir(relPathBytes: Uint8Array): boolean {
   return Buffer.from(relPathBytes).toString("latin1") === ".git";
-}
-
-/**
- * Whether a snapshot key (a `/`-separated workspace-relative path) is graph
- * data: under `.xspec/`, excluding the durable `.xspec/journal` and
- * `.xspec/reviews/` (SPEC 13.3, 13.4; TEST-SPEC T13.3-2's operational
- * definition, binding for T13.4-3 too).
- */
-function isGraphDataKey(key: string): boolean {
-  if (!key.startsWith(".xspec/")) return false;
-  if (key === JOURNAL_REL) return false;
-  if (key === REVIEWS_REL || key.startsWith(`${REVIEWS_REL}/`)) return false;
-  return true;
 }
 
 /** Whether a snapshot key is a durable path: the journal or a session. */
@@ -799,8 +787,9 @@ const T13_4_2 = defineProductTest({
         // The mutation targets: every derived file of every class. Module
         // and companions all carry the `A.xspec.` stem (SPEC 13.1), the
         // emitted Markdown is specs/A.md (SPEC 13.2, 7.3), graph data is
-        // everything under .xspec/ (SPEC 13.3; no journal or session exists
-        // here).
+        // everything under .xspec/ (SPEC 13.3; no journal, session, or lock
+        // path exists here — T13.3-2's operational definition excludes
+        // them).
         const targets = [
           ...filteredEntries(s0.entries, (key, entry) => {
             if (entry.kind !== "file") return false;
@@ -1152,10 +1141,11 @@ const T13_4_3 = defineProductTest({
   run: async (product) => {
     // The missing half: destroy the graph data — and with it the recorded
     // derived-file paths (T13.3-2's operational definition: everything
-    // under .xspec/ except the durable journal and reviews/; neither
-    // exists here) — through T13.3-2's own `deleteGraphData`, which lists
-    // .xspec/ by raw name bytes and removes each entry at its exact bytes,
-    // so every name the product chose goes (SPEC 13.3).
+    // under .xspec/ except the durable journal and reviews/ and the
+    // transient lock path; none exists here) — through T13.3-2's own
+    // `deleteGraphData`, which lists .xspec/ by raw name bytes and removes
+    // each entry of the set at its exact bytes, so every name the product
+    // chose goes (SPEC 13.3).
     const missing = await walkOrphanBoundary(product, {
       label: "missing record",
       disturbRecord: async (workspace, tag) => {

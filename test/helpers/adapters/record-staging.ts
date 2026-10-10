@@ -5,11 +5,15 @@
 // Graph-data content is opaque (H-4) and its layout deliberately unenumerated
 // (SPEC 13.3, 11.6), so the only shape knowledge that exists for the record
 // is T13.3-2's operational path set: every path under `.xspec/` except the
-// durable `.xspec/journal` and `.xspec/reviews/`. That predicate lives here
-// (`isGraphDataKey`; the T13.3-2 machinery in
-// test/suite/registry/section-13.3.ts re-exports it), and the corruption is
-// shape-blind — TEST-SPEC T6.6-6: "truncation or garbage over T13.3-2's
-// operational path set" — realized as a garbage overwrite of every
+// durable `.xspec/journal` and `.xspec/reviews/` and the transient lock path
+// `.xspec/lock` with everything under it (13.4: no graph data). That
+// predicate lives here (`isGraphDataKey`, the lock path judged by
+// helpers/lock-path.ts; the T13.3-2 machinery in
+// test/suite/registry/section-13.3.ts re-exports it), beside the one
+// collector of the set's plain files (`collectGraphDataFiles`, shared with
+// T14-10(f)'s unreadable staging), and the corruption is shape-blind —
+// TEST-SPEC T6.6-6: "truncation or garbage over T13.3-2's operational path
+// set" — realized as a garbage overwrite of every
 // product-written plain file in the set, staging "recorded state that exists
 // but cannot be read as a record" (SPEC 14.23): the files stay present (an
 // absent record is the different, nothing-recorded success path, T6.6-5)
@@ -31,6 +35,7 @@ import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { fail } from "../assertions.js";
+import { isLockPathKey } from "../lock-path.js";
 import { displaySnapshotPath, snapshotKeyBytes } from "../snapshot.js";
 
 /**
@@ -44,9 +49,13 @@ export const GRAPH_DATA_AREA_PATH = ".xspec";
 /**
  * Whether a workspace-relative, `/`-separated path is graph data: under
  * `.xspec/`, excluding the durable `.xspec/journal` and `.xspec/reviews/`
- * (SPEC 13.3, 13.4; TEST-SPEC T13.3-2's operational definition — the whole
- * shape SPEC.md gives the record). One home for the predicate: the suite's
- * graph-data machinery (section-13.3.ts) re-exports it.
+ * and the transient lock path `.xspec/lock` with everything under it (SPEC
+ * 13.3, 13.4: the lock directory is no graph data, bearing on no comparison
+ * of graph data; TEST-SPEC T13.3-2's operational definition, binding for
+ * T13.4-3 and T14-10(f) — the whole shape SPEC.md gives the record). One
+ * home for the predicate: the suite's graph-data machinery
+ * (section-13.3.ts) re-exports it, and every graph-data classifier of the
+ * suite judges a path through it.
  */
 export function isGraphDataKey(key: string): boolean {
   if (!key.startsWith(`${GRAPH_DATA_AREA_PATH}/`)) return false;
@@ -57,6 +66,7 @@ export function isGraphDataKey(key: string): boolean {
   ) {
     return false;
   }
+  if (isLockPathKey(key)) return false;
   return true;
 }
 
@@ -96,18 +106,38 @@ function keyPath(rootBytes: Buffer, key: string): Buffer {
 }
 
 /**
- * Recursively collect the graph-data plain files under `rel` (see above), as
- * snapshot keys (helpers/snapshot.ts: the exact relative path bytes, held
- * latin1-encoded). Names are listed as raw bytes and each entry classified
- * by `lstat` at its exact byte path — graph data's layout is the product's
- * (SPEC 13.3), so a name that is not ASCII, or not valid UTF-8, is collected
- * like any other, where a UTF-8 listing would misname it. For an ASCII name
- * the key is the path itself.
+ * Every plain file of T13.3-2's operational path set (`isGraphDataKey`) in
+ * the workspace rooted at `rootAbs`, walked recursively from the graph-data
+ * area, as snapshot keys in byte order (helpers/snapshot.ts: the exact
+ * relative path bytes, held latin1-encoded — for an ASCII name, the
+ * workspace-relative path itself). Names are listed as raw bytes and each
+ * entry classified by `lstat` at its exact byte path — graph data's layout
+ * is the product's (SPEC 13.3), so a name that is not ASCII, or not valid
+ * UTF-8, is collected like any other, where a UTF-8 listing would misname
+ * it. A path outside the set — the durable journal and reviews paths, the
+ * transient lock path — is skipped entirely, whatever occupies it, and
+ * nothing under it is listed. An entry in the set that is neither a plain
+ * file nor a directory (a symbolic link, never followed) is handed to
+ * `onOther` — the corruption refuses it there — or, with no handler,
+ * skipped. The area must be a listable directory (the caller's premise);
+ * a listing the environment refuses throws as is.
  */
-async function collectGraphDataFiles(
+export async function collectGraphDataFiles(
+  rootAbs: string,
+  onOther?: (key: string) => void,
+): Promise<string[]> {
+  const files = await collectGraphDataFilesUnder(
+    Buffer.from(rootAbs),
+    GRAPH_DATA_AREA_PATH,
+    onOther,
+  );
+  return files.sort();
+}
+
+async function collectGraphDataFilesUnder(
   rootBytes: Buffer,
   rel: string,
-  context: string,
+  onOther: ((key: string) => void) | undefined,
 ): Promise<string[]> {
   const collected: string[] = [];
   const names = (
@@ -115,23 +145,19 @@ async function collectGraphDataFiles(
   ).sort(Buffer.compare);
   for (const name of names) {
     const key = `${rel}/${name.toString("latin1")}`;
-    // The durable journal and reviews paths are no part of the record
-    // (T13.3-2): skipped entirely, whatever occupies them.
+    // The durable journal and reviews paths and the transient lock path are
+    // no part of the record (T13.3-2): skipped entirely, whatever occupies
+    // them.
     if (!isGraphDataKey(key)) continue;
     const stats = await fsp.lstat(keyPath(rootBytes, key));
     if (stats.isDirectory()) {
-      collected.push(...(await collectGraphDataFiles(rootBytes, key, context)));
+      collected.push(
+        ...(await collectGraphDataFilesUnder(rootBytes, key, onOther)),
+      );
     } else if (stats.isFile()) {
       collected.push(key);
     } else {
-      stagingFail(
-        context,
-        `${displaySnapshotPath(key)} is not a plain file or directory — ` +
-          `every file xspec writes is a plain file and its writes never ` +
-          `traverse a symbolic link (SPEC 13.4), so this occupant is not a ` +
-          `product-written record file and the harness will not write ` +
-          `through it`,
-      );
+      onOther?.(key);
     }
   }
   return collected;
@@ -140,13 +166,14 @@ async function collectGraphDataFiles(
 /**
  * Corrupt the product-written graph data shape-blind (TEST-SPEC T6.6-6):
  * overwrite every plain file of T13.3-2's operational path set — every path
- * under `.xspec/` except the durable journal and reviews paths — with
- * {@link RECORD_GARBAGE_BYTES}, leaving every path present (no path is
- * created or removed; directories keep their structure). Fails loudly, with
- * nothing modified, when the graph-data area is missing or not a real
- * directory, when the set holds no plain file (nothing product-written to
- * corrupt — run a successful `build` first), or when it holds a
- * non-plain-file entry (SPEC 13.4). Every file is reached and overwritten
+ * under `.xspec/` except the durable journal and reviews paths and the
+ * transient lock path with everything under it, which stay untouched
+ * whatever occupies them — with {@link RECORD_GARBAGE_BYTES}, leaving every
+ * path present (no path is created or removed; directories keep their
+ * structure). Fails loudly, with nothing modified, when the graph-data area
+ * is missing or not a real directory, when the set holds no plain file
+ * (nothing product-written to corrupt — run a successful `build` first), or
+ * when it holds a non-plain-file entry (SPEC 13.4). Every file is reached and overwritten
  * at its exact name bytes, whatever the name the product chose (SPEC 13.3:
  * graph data's layout is unenumerated). Returns the corrupted files as
  * snapshot keys in byte order (helpers/snapshot.ts: the exact relative path
@@ -177,16 +204,23 @@ export async function corruptGraphDataShapeBlind(
     );
   }
   const rootBytes = Buffer.from(rootAbs);
-  const files = (
-    await collectGraphDataFiles(rootBytes, GRAPH_DATA_AREA_PATH, context)
-  ).sort();
+  const files = await collectGraphDataFiles(rootAbs, (key) =>
+    stagingFail(
+      context,
+      `${displaySnapshotPath(key)} is not a plain file or directory — ` +
+        `every file xspec writes is a plain file and its writes never ` +
+        `traverse a symbolic link (SPEC 13.4), so this occupant is not a ` +
+        `product-written record file and the harness will not write ` +
+        `through it`,
+    ),
+  );
   if (files.length === 0) {
     stagingFail(
       context,
       `found no graph-data file to corrupt under ${GRAPH_DATA_AREA_PATH}/ ` +
-        `(outside the durable journal and reviews paths) — the corruption ` +
-        `applies to record files the product itself wrote, so run a ` +
-        `successful \`build\` first (SPEC 12.1, 13.3)`,
+        `(outside the durable journal and reviews paths and the lock ` +
+        `path) — the corruption applies to record files the product ` +
+        `itself wrote, so run a successful \`build\` first (SPEC 12.1, 13.3)`,
     );
   }
   for (const key of files) {
