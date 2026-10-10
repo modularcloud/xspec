@@ -72,7 +72,7 @@ Why the harness changes: the documents moved after the harness was last green (t
 
 **Order.** Take the topmost task unless told otherwise; the dependencies named are hard. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement. When a task is done, its commit removes it and adds a one-line summary to its bullet here.
 - *Foundations (no certification change).*
-  - Task 1 (D-1, V): C-1 count pins 9/30. Independent.
+  - Task 1 (D-1, V): C-1 count pins 9/30. Independent. Done: `EXPECTED_CONFORMERS = 9`, `EXPECTED_VIOLATORS = 30`, title to match; the count test passes, the mirror and registration tests fail byte-identically to bb3081a; self project 2 failed / 4313 passed (4315, 28 files, 122.30 s), certification lines 154 PASS / 38 FAIL, 0 error, 0 hang.
   - Task 2 (V1): AGENTS.md — Node 22 on `PATH` in the `claude` wrapper recipe. Independent.
   - Task 3 (A-G4, B-G1, C-G6b): inventory form's `lock` member; CONF-DISC emits it. Independent.
   - Task 4 (B-G2, C-G6a): stable code `workspace-busy` (14.26). Independent.
@@ -129,18 +129,6 @@ Why the harness changes: the documents moved after the harness was last green (t
   - Task 50: confirm locally and in CI; record timings; delete this plan. After every task above.
 
 ## Tasks
-
-### Task 1 — C-1 count pins to the document's 9 conformers and 30 violators (D-1, V)
-
-**Requirement.** C-1 (TEST-SPEC.md line 630). CERTIFICATIONS.md now defines 9 `## CONF-…` and 30 `### VIOL-…` entries (headings at lines 9–287).
-
-**State at bb3081a.** `test/self/certification-document.test.ts`: `EXPECTED_CONFORMERS = 6` and `EXPECTED_VIOLATORS = 21` (lines 34–35) and the title "CERTIFICATIONS.md defines exactly 6 conformers and 21 violators (C-1 whole-document gate)" (line 268) — the first of the three failing self-tests.
-
-**Change.** Set the pins to 9 and 30 and the title to match. Nothing else: the manifest mirror (the test at line 287) stays red until Task 49 and the registration check (the test at line 304) until Tasks 32 and 45.
-
-**Verify.** Run that file alone: the count test passes; the other two fail exactly as at bb3081a (the mirror's diff; `§CONF-RACE: T13.5-13` and `§CONF-LEFTOVER: P-15`). Full self project: those two failures only.
-
-**Done when.** The above holds and the commit is pushed.
 
 ### Task 2 — AGENTS.md: the `claude` wrapper recipe runs Node 22 (V1)
 
