@@ -81,7 +81,12 @@ jobs:
   suite-linux:
     name: Full suite (Linux, E-1)
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # The suite's Vitest run took 842 s at 34df333 on one hosted-runner class
+    # and 1375-1403 s at a3196a1 and 113ec73 on another (transform and import
+    # times scaling alike), before the trial-heavy 13.5 arms, P-10's new
+    # arms, and the new P-14 and P-15 are implemented; 60 minutes leaves room
+    # for both classes.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
