@@ -1846,6 +1846,22 @@ const DECODERS: readonly DecoderSpec[] = [
       },
       {
         label:
+          "a busy workspace inside a findings array (14.26 is a usage error " +
+          "carried only as the exit-2 error document's code, SPEC 14, 12.7)",
+        doc: {
+          findings: [
+            {
+              code: "workspace-busy",
+              message: "workspace busy: another run holds .xspec/lock",
+              locations: [],
+              path: ".xspec/lock",
+              identities: [],
+            },
+          ],
+        },
+      },
+      {
+        label:
           'the condition ordinal spelled as the code ("14.2" is no token — ' +
           "the numeral is no part of the value, SPEC 14)",
         doc: put(GOOD_FINDINGS, "14.2", "findings", 0, "code"),
@@ -3279,6 +3295,25 @@ const DECODERS: readonly DecoderSpec[] = [
           expect(decoded.error.code).toBe("read-failure");
           expect(decoded.error.condition).toBe("14.25");
           expect(decoded.error.path).toBe("specs/sub");
+        },
+      },
+      {
+        label:
+          "a busy workspace: code workspace-busy concerning the lock path " +
+          "(SPEC 14.26, 12.7)",
+        doc: {
+          error: {
+            code: "workspace-busy",
+            message: "workspace busy: another run holds .xspec/lock",
+            locations: [],
+            path: ".xspec/lock",
+            identities: [],
+          },
+        },
+        verify: (decoded: ReturnType<typeof decodeErrorDocument>): void => {
+          expect(decoded.error.code).toBe("workspace-busy");
+          expect(decoded.error.condition).toBe("14.26");
+          expect(decoded.error.path).toBe(".xspec/lock");
         },
       },
     ],
@@ -4772,6 +4807,41 @@ test("S-5: decoder context labels surface in diagnoses (two-document compares st
   expect(failure.message).toContain("second run");
 });
 
+test("S-5: the usage-error conditions 14.24–14.26 decode as the error document's code and are rejected in a findings array as usage errors, never as unknown tokens", () => {
+  // SPEC 14.24–14.26 are usage errors (12.0): each stable code is carried
+  // only as the exit-2 error document's `code` (12.7; T14-6, T12.7-3), in
+  // no findings array. The findings-array rejection must be the
+  // usage-error rule's — a decoder not knowing the token at all rejects it
+  // too, but as an unknown code, and would then also reject the error
+  // document carrying it.
+  const cases = [
+    { code: "write-failure", condition: "14.24", path: ".xspec" },
+    { code: "read-failure", condition: "14.25", path: "specs/sub" },
+    { code: "workspace-busy", condition: "14.26", path: ".xspec/lock" },
+  ] as const;
+  for (const { code, condition, path } of cases) {
+    const finding = {
+      code,
+      message: `a ${code} usage error`,
+      locations: [],
+      path,
+      identities: [],
+    };
+    const decoded = decodeErrorDocument({ error: finding });
+    expect(decoded.error.code).toBe(code);
+    expect(decoded.error.condition).toBe(condition);
+    expect(decoded.error.path).toBe(path);
+    const failure = expectDiagnosed(`${code} in a findings array`, () =>
+      decodeFindingsReport({ findings: [finding] }),
+    );
+    expect(failure.message).toContain("at $.findings[0].code:");
+    expect(failure.message).toContain(
+      "are usage errors carried only as the exit-2 error document's code",
+    );
+    expect(failure.message).toContain(`${code} (${condition})`);
+  }
+});
+
 // --- the pinned 12.7 findings-order comparator ---------------------------------
 
 /** A decoded finding literal for comparator vectors (condition is derived
@@ -4821,13 +4891,33 @@ test("S-5: the findings comparator orders codes numerically, refusals in 14's or
   expect(compareFindings(refusalNinth, refusalTenth)).toBeLessThan(0);
   expect(compareFindings(refusalTenth, refusalEleventh)).toBeLessThan(0);
   // The reversed pairs around refused-exposed-derived-file rank the other
-  // way, and it ranks after the last numbered condition (14.25's token —
+  // way, and it ranks after the last numbered condition (14.26's token —
   // never in a findings array, but the comparator's rank is total).
   expect(compareFindings(refusalNinth, refusalEighth)).toBeGreaterThan(0);
   expect(compareFindings(refusalTenth, refusalNinth)).toBeGreaterThan(0);
   expect(
     compareFindings(findingWith({ code: "read-failure" }), refusalNinth),
   ).toBeLessThan(0);
+  expect(
+    compareFindings(findingWith({ code: "workspace-busy" }), refusalNinth),
+  ).toBeLessThan(0);
+  // The usage-error conditions rank in numeric order like every numbered
+  // condition: 14.23, then 14.24, 14.25, and 14.26 — the last numbered
+  // condition, `workspace-busy` — then the first refusal reason.
+  const c14_25 = findingWith({ code: "read-failure" });
+  const c14_26 = findingWith({ code: "workspace-busy" });
+  expect(
+    compareFindings(
+      findingWith({ code: "unreadable-record" }),
+      findingWith({ code: "write-failure" }),
+    ),
+  ).toBeLessThan(0);
+  expect(
+    compareFindings(findingWith({ code: "write-failure" }), c14_25),
+  ).toBeLessThan(0);
+  expect(compareFindings(c14_25, c14_26)).toBeLessThan(0);
+  expect(compareFindings(c14_26, c14_25)).toBeGreaterThan(0);
+  expect(compareFindings(c14_26, refusalFirst)).toBeLessThan(0);
   // Code-less findings sort last, after the last listed refusal reason.
   expect(
     compareFindings(refusalLater, findingWith({ code: null })),

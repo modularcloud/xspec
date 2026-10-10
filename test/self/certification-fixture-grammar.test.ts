@@ -115,7 +115,8 @@ type StdoutExpectation =
    * The exit-2 error document of 12.7, `{"error": …}` exactly: its finding's
    * `code` and `path` as given — both `null` for a plain usage error, the
    * stable code and concerned path for a configuration, write, or read
-   * failure (14.14, 14.24, 14.25) — and no locations (12.7, 14).
+   * failure or a busy workspace (14.14, 14.24, 14.25, 14.26) — and no
+   * locations (12.7, 14).
    */
   | {
       readonly form: "error-document";

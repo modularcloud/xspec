@@ -3207,7 +3207,7 @@ const T14_6 = defineProductTest({
  * refusal report never carries two findings of one reason (SPEC 14: one
  * finding per reason). No report carries a code outside 14's list: the
  * form-exact decode admits only 14's codes (forms.ts KNOWN_CODE_TOKENS —
- * the 25 condition tokens and the eleven refusal reasons), so an unlisted
+ * the 26 condition tokens and the eleven refusal reasons), so an unlisted
  * code, the retired `refused-unresolvable-reference` included, fails as an
  * H-3 form failure before any count, and the exact multiset excludes every
  * listed code beside the expected ones.

@@ -299,7 +299,7 @@ export function decodeFindingForm(value: unknown, site: DecodeSite): Finding {
       formFail(
         codeSite,
         "a stable code: one of SPEC 14's condition tokens " +
-          "(missing-id … read-failure) or refusal codes " +
+          "(missing-id … workspace-busy) or refusal codes " +
           "(refused-invalid-id … refused-moved-import), or null " +
           "where 14 assigns none",
         codeValue,
@@ -434,8 +434,9 @@ export function compareFindings(a: Finding, b: Finding): number {
 /**
  * Decode a `"findings"` array value in the literal 12.7 form: every element
  * a well-formed finding whose code is a finding's — never 14.24's
- * `write-failure` or 14.25's `read-failure`, usage errors carried only by
- * the exit-2 error document (SPEC 14, 12.7) — the array in the pinned
+ * `write-failure`, 14.25's `read-failure`, or 14.26's `workspace-busy`,
+ * usage errors carried only by the exit-2 error document (SPEC 14, 12.7) —
+ * the array in the pinned
  * findings order, findings identical in every member collapsed to one
  * (adjacent equality is an uncollapsed duplicate; every violation rejects,
  * form-exact per H-3).
@@ -457,9 +458,10 @@ export function decodeFindingsArray(
       formFail(
         at(at(site, index), "code"),
         "a finding's stable code — a numbered condition 14.1–14.23 or a " +
-          "refusal reason; write-failure (14.24) and read-failure (14.25) " +
-          "are usage errors carried only as the exit-2 error document's " +
-          "code, in no findings array (SPEC 14, 12.7)",
+          "refusal reason; write-failure (14.24), read-failure (14.25), " +
+          "and workspace-busy (14.26) are usage errors carried only as " +
+          "the exit-2 error document's code, in no findings array " +
+          "(SPEC 14, 12.7)",
         finding.code,
       );
     }

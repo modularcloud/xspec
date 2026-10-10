@@ -206,9 +206,10 @@ export interface IdsTreeNode {
  * index N-1 holds condition 14.N's token. The numeral is the condition's
  * ordinal — it orders findings (SPEC 12.7) and is no part of the code's
  * value, which is the token string alone (SPEC 14, T14-6). Conditions 1–23
- * are findings; 24 (write failure) and 25 (read failure) are usage errors
- * carried only as the exit-2 error document's `code`, in no findings array
- * (SPEC 14.24, 14.25, 12.7) — `USAGE_ERROR_CONDITION_CODE_TOKENS` below.
+ * are findings; 24 (write failure), 25 (read failure), and 26 (workspace
+ * busy) are usage errors carried only as the exit-2 error document's
+ * `code`, in no findings array (SPEC 14.24, 14.25, 14.26, 12.7) —
+ * `USAGE_ERROR_CONDITION_CODE_TOKENS` below.
  */
 export const CONDITION_CODE_TOKENS = [
   "missing-id", // 14.1
@@ -236,19 +237,23 @@ export const CONDITION_CODE_TOKENS = [
   "unreadable-record", // 14.23
   "write-failure", // 14.24 — a usage error (exit 2), never a finding
   "read-failure", // 14.25 — a usage error (exit 2), never a finding
+  "workspace-busy", // 14.26 — a usage error (exit 2), never a finding
 ] as const;
 export type ConditionCodeToken = (typeof CONDITION_CODE_TOKENS)[number];
 
 /**
  * The numbered conditions SPEC.md 14 reports as usage errors (12.0): a
- * write failure (14.24) and a read failure (14.25). Each carries its stable
- * code only as the exit-2 error document's `code` (12.7, T14-6, T14-9,
- * T14-10) — a finding in a `findings` array never carries either, so the
- * findings-array decode rejects them (forms.ts).
+ * write failure (14.24), a read failure (14.25), and a busy workspace
+ * (14.26, a mutating command refused at acquisition, 13.5). Each carries
+ * its stable code only as the exit-2 error document's `code` (12.7, T14-6,
+ * T12.7-3, T14-9, T14-10, T13.5-2) — a finding in a `findings` array never
+ * carries any of them, so the findings-array decode rejects them
+ * (forms.ts).
  */
 export const USAGE_ERROR_CONDITION_CODE_TOKENS = [
   "write-failure", // 14.24
   "read-failure", // 14.25
+  "workspace-busy", // 14.26
 ] as const satisfies readonly ConditionCodeToken[];
 
 /**
