@@ -3299,11 +3299,10 @@ const EARLY_RELEASE_DWELL_MS = 1000;
  * configuration error of a file both groups match and a refused listing
  * (14.14, 14.25; T13.5-8's acquisition-after arms), so those precede
  * acquisition's outcomes; nothing later consults its sources but
- * VIOL-CORE-EARLYREFRESH's early refresh and VIOL-CORE-LATELOCK's early
- * argument checks. The second, once exclusivity is held — past the hold —
- * fixes the sources every later check and read consults, meeting either
- * error there, after acquisition's and the hold file's errors and before
- * every other (13.5, 12.0; T13.5-12(d), (e)).
+ * VIOL-CORE-EARLYREFRESH's early refresh. The second, once exclusivity is
+ * held — past the hold — fixes the sources every later check and read
+ * consults, meeting either error there, after acquisition's and the hold
+ * file's errors and before every other (13.5, 12.0; T13.5-12(d), (e)).
  * Acquisition and the hold precede the second discovery and every later
  * check (SPEC 13.5; T13.5-8), so an invocation a later check refuses or the
  * gate turns back creates the hold file too and exits with its own outcome
@@ -3408,39 +3407,34 @@ async function runMutating(
     return await operate(config, judged, discovery);
   };
   try {
-    if (deviations.lateAcquisition) {
-      // VIOL-CORE-LATELOCK (CERTIFICATIONS.md): workspace exclusivity is
-      // acquired late — a mutating command acquires it, and creates its hold
-      // file, only once the argument checks of 12.0 and baseline resolution
-      // (6.3) have passed, instead of before them (13.5) — the two checks
-      // 12.0 places ahead of source validation, and the only ones this
-      // deviation moves. A single deviation: 13.5's acquisition point moved
-      // past those two checks and no further; the gate and refresh of 13.3,
+    await acquire();
+    if (deviations.lateHold) {
+      // VIOL-CORE-LATEHOLD (CERTIFICATIONS.md): the hold seam engages late —
+      // the command acquires exclusivity where 13.5 places it (above: once
+      // configuration is loaded and sources discovered, before every later
+      // check), but creates its hold file only once the unknown and
+      // wrong-kind names and files of the usage class and baseline
+      // resolution (12.0, 6.3: `judgeArguments`) have passed, its second
+      // discovery (13.5) preceding them, instead of immediately after
+      // acquiring. A single deviation: the seam's place moved past those
+      // checks and no further; the gate and refresh of 13.3, the item check,
       // the valid-workspace precondition of rename/move (6.4, 6.5), the
-      // operation's own validation, and every modification still follow
-      // acquisition and the hold as 13.5 orders them, a second mutating
-      // command is still refused on acquisition — now after those two
-      // checks — and the hold file still precedes every write. Observable
-      // exactly where an argument check or baseline resolution refuses: such
-      // an invocation exits 2 with that usage error at once, having acquired
-      // nothing and created no hold file, `--test-hold` or not, and, started
-      // while another mutating command is held, is refused for that reason
-      // in the exclusion's place — exit 2 either way; an invocation passing
-      // both checks — every performable one, and every one the gate or the
-      // precondition turns back — acquires, holds, and proceeds or is
-      // refused exactly as the conformer's does (T13.5-8: its two
-      // seam-ordering arms refused ahead of the gate fail; every other arm
-      // is conforming). Judged before acquisition, those two checks consult
-      // the first discovery's sources; the second discovery, past the hold,
-      // fixes the sources the gate, the precondition, and the operation
-      // consult, as the conformer's does.
-      await judgeArguments(config, firstDiscovery);
-      await acquire();
-      await holdIfRequested();
+      // operation's own validation, and every modification still follow the
+      // hold as 13.5 orders them, acquisition's outcomes — the busy refusal
+      // and its write and read failures — still precede every check, and
+      // the hold file still precedes every write. Observable exactly where
+      // such a check refuses: the invocation exits 2 with that usage error,
+      // having acquired and released (the `finally` below) but created no
+      // hold file, `--test-hold` or not; an invocation passing those checks
+      // — every performable one, and every one the gate, the item check, or
+      // the precondition turns back — holds and proceeds or is refused
+      // exactly as the conformer's does (T13.5-8: its four seam-ordering
+      // arms those checks refuse fail; every other arm is conforming).
       const discovery = await rediscover();
+      await judgeArguments(config, discovery);
+      await holdIfRequested();
       return await proceed(await judgeWorkspace(config, discovery), discovery);
     }
-    await acquire();
     if (deviations.writesBeforeHold) {
       // VIOL-CORE-EARLYWRITE (CERTIFICATIONS.md): the mutating command
       // performs its workspace modifications before creating the hold file —
@@ -4847,15 +4841,15 @@ async function commandReview(io, cwd, sub, args) {
  *   list lists in place, unaltered, removes the other leftovers, and
  *   acquires, so mutating commands never exclude one another; see
  *   judgeLockDirectory.
- * - `lateAcquisition` (VIOL-CORE-LATELOCK): workspace exclusivity is
- *   acquired — and the hold file created — only once the argument checks of
- *   12.0 and baseline resolution (6.3) have passed, instead of before them —
- *   the two checks 12.0 places ahead of source validation, and the only ones
- *   moved: the gate of 13.3, the valid-workspace precondition of rename/move
- *   (6.4, 6.5), the refresh, and every modification still follow
- *   acquisition and the hold; an invocation one of the two moved checks
- *   refuses exits 2 at once, having acquired nothing and created no hold
- *   file; see runMutating.
+ * - `lateHold` (VIOL-CORE-LATEHOLD): the hold seam engages late — a
+ *   mutating command acquires exclusivity where 13.5 places it, but creates
+ *   its hold file only once its second discovery and then the unknown and
+ *   wrong-kind names and files of the usage class and baseline resolution
+ *   (12.0, 6.3) have passed, instead of immediately after acquiring; the
+ *   gate and refresh of 13.3, the item check, the valid-workspace
+ *   precondition of rename/move (6.4, 6.5), and every modification still
+ *   follow the hold; an invocation those checks refuse exits 2 having
+ *   acquired and released but created no hold file; see runMutating.
  * - `writesBeforeHold` (VIOL-CORE-EARLYWRITE): a mutating command performs
  *   its workspace modifications before creating the hold file; see
  *   runMutating.

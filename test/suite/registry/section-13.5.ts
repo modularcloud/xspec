@@ -41,14 +41,17 @@
 // isolation), T13.5-7 (interrupted or
 // write-refused mutation: the pinned write order — the refusal arms (a)–(f)
 // composed from write-refusal-staging.ts, and the kill arm), T13.5-8
-// (acquisition before every later check: the acquisition-first arms — each
+// (acquisition's place in the order: the acquisition-first arms — each
 // invocation a later check refuses, on a valid workspace whose code group
 // discovers a code source and on a failing one, run under `--json` beside a
 // held `review resolve`, the busy refusal of 14.26, and with `.xspec/lock` a
 // symbolic link to an outside directory, acquisition's write failure — the
-// hold seam engaging on invocations the 12.0 argument checks, baseline
-// resolution, or the 13.3 gate refuse, and the non-mutating preview
-// boundary).
+// acquisition-after arms in the same two settings — the syntax class, a
+// configuration made invalid, a file both groups match met by the first
+// discovery, and an unlistable discovered directory, each reported in
+// acquisition's place — the hold seam engaging on invocations the 12.0
+// argument checks, baseline resolution, or the 13.3 gate refuse, and the
+// non-mutating preview boundary).
 //
 // All mutual-exclusion choreography goes through the `--test-hold <path>`
 // seam (SPEC 13.5) via the subprocess driver's background-start, hold-file,
@@ -65,9 +68,11 @@
 //   `--strategy audit` (`--base` and `--coverage` only in T13.5-8's arms)
 //   (§CONF-CORE), and the in-scope fixtures stay in CONF-CORE's workspace
 //   shape: one spec group of importless, tagless `.mdx` sources; no `code`
-//   key but in T13.5-8's acquisition-first valid workspace, whose code
-//   group discovers one code source, the wrong-kind origin; no `markdown`,
-//   `coverage`, or `policy` keys; no git.
+//   key but in T13.5-8's valid workspaces, whose code group discovers one
+//   code source, the wrong-kind origin, and matches beside the spec group a
+//   path nothing occupies until the first-discovery arm creates a file
+//   there (T13.5-12(d)'s configuration); no `markdown`, `coverage`, or
+//   `policy` keys; no git.
 // - T13.5-1's seam-neutrality twin drives the exact command sequence of the
 //   held workspace — the staging `build` and the `review status` item
 //   lookup included — with the seam flag alone removed, no `build` or read
@@ -126,11 +131,16 @@
 //   naming a spec module, so nothing in scope presents a finding; and
 //   session `c` stands corrupt only while the run naming it executes, no
 //   other command starting and no hold lifted meanwhile (§CONF-CORE). Its
+//   acquisition-after arms stage only what §CONF-CORE's scope serves — a
+//   configuration made invalid by an unknown top-level key, a file created
+//   at the path both groups match, and a discovered directory made
+//   unlistable (verified on the harness, E-1) — each made just before its
+//   run and undone before anything else starts or any hold is lifted. Its
 //   refused valid-workspace commands start on freshly built workspaces
 //   lying in no repository, where every `--base` ref is unresolvable
 //   (§CONF-CORE); and its waits for a refused invocation's hold file fail
 //   loud, never proceeding on the command's exit or on a timeout
-//   (§VIOL-CORE-LATELOCK).
+//   (§VIOL-CORE-LATEHOLD).
 // - T13.5-3's subsequent mutating command after each kill while held is a
 //   different operation, succeeding whether or not the killed operation's
 //   writes landed, never a retry of it (§VIOL-CORE-EARLYWRITE: its held
@@ -301,6 +311,7 @@ import {
   assertOnlyEntry,
   captureLockPath,
 } from "../../helpers/lock-state.js";
+import { stageReadRefusalOfDirectory } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
@@ -3346,7 +3357,7 @@ const T13_5_7 = defineProductTest({
 
 /** TEST-SPEC §13.5, in canonical ID order (SUITE-48). */
 // ---------------------------------------------------------------------------
-// T13.5-8 — acquisition before every later check
+// T13.5-8 — acquisition's place in the order
 // ---------------------------------------------------------------------------
 
 // The one condition CONF-CORE's failing workspace stages (CERTIFICATIONS.md
@@ -3411,8 +3422,11 @@ function assertGateFindings(
  * timeout) — the held-state comparison holds while held (every path but the
  * lock path byte-identical, the held run's one entry in `.xspec/lock`), the
  * command is still running after it, and only once the harness
- * deletes the hold file does it exit, with `expectedExit` and nothing
- * modified. Returns the run for the caller's own report assertions.
+ * deletes the hold file does it exit, with `expectedExit`, the workspace
+ * then byte-identical to its pre-invocation state (the lock path aside,
+ * H-6) and `.xspec/lock` gone (SPEC 13.5: release deletes the run's entry,
+ * then the emptied lock directory). Returns the run for the caller's own
+ * report assertions.
  */
 async function refusedSeamArm(
   product: ProductBinding,
@@ -3480,11 +3494,38 @@ async function refusedSeamArm(
       `${context}: the refused invocation modifies nothing — before, while ` +
         `held, and after (SPEC 13.5, 12.0)`,
     );
+    await assertLockPathAbsent(
+      workspace.root,
+      `${context}, once it has exited`,
+    );
     return result;
   } finally {
     running.kill();
     await releaseHoldFile(hold);
   }
+}
+
+/**
+ * A seam-ordering run's own usage error (TEST-SPEC T13.5-8: "with their own
+ * errors"): under `--json`, the 12.7 error document as the entire stdout,
+ * its finding a plain usage error — `code` `null` and `path` `null` (12.7;
+ * T12.7-3), never acquisition's busy refusal or write failure, whose codes
+ * a product refusing at acquisition after the hold would report (`message`,
+ * `locations`, and `identities` informational).
+ */
+function assertSeamUsageError(
+  result: RunResult,
+  what: string,
+  context: string,
+): void {
+  const finding = expectErrorDocument(result, context);
+  assertSameJson(
+    { code: finding.code, path: finding.path },
+    { code: null, path: null },
+    `${context}: its own error — ${what}, a plain usage error: \`code\` ` +
+      `null and \`path\` null (SPEC 12.0, 12.7) — message: ` +
+      `${JSON.stringify(finding.message)}`,
+  );
 }
 
 // T13.5-8's acquisition-first arms: each invocation a later check refuses
@@ -3565,6 +3606,47 @@ async function corruptSessionForRun(
   return async () => {
     await fsp.writeFile(abs, original);
   };
+}
+
+/**
+ * What an acquisition-first or acquisition-after run leaves of its setting
+ * once it has exited and its arm's own staging is undone (TEST-SPEC
+ * T13.5-8): beside a holder, the holder's entry the lock directory's only
+ * one, byte-identical, and the held-state comparison holding against the
+ * workspace's state before the holder started — the run neither altered
+ * nor joined the holder's exclusivity; at the obstruction, the link
+ * byte-identical in place and its target untouched, nothing written or
+ * removed through it (T13.5-10(a); SPEC 13.4).
+ */
+async function assertSettingStands(
+  workspace: TestWorkspace,
+  setting: AcquisitionSetting,
+  after: string,
+  context: string,
+): Promise<void> {
+  if (setting.kind === "held") {
+    await assertOnlyEntry(
+      workspace.root,
+      setting.entry,
+      `${context}: after ${after}, the holder's entry`,
+    );
+    await assertHeldState(
+      workspace.root,
+      { baseline: setting.baseline, heldRuns: 1 },
+      `${context}: once it has exited, the held-state comparison against ` +
+        `the workspace before the holder started`,
+    );
+  } else {
+    await assertStagingInPlace(
+      setting.staged,
+      `${context}: the obstruction stays in place, acquisition removing ` +
+        `nothing (SPEC 13.5; T13.5-10(a))`,
+    );
+    await assertOutsideTargetsUntouched(
+      setting.staged,
+      `${context}: nothing written or removed through the link (SPEC 13.4)`,
+    );
+  }
 }
 
 /**
@@ -3654,29 +3736,7 @@ async function acquisitionFirstRun(
   } finally {
     if (restore !== undefined) await restore();
   }
-  if (setting.kind === "held") {
-    await assertOnlyEntry(
-      workspace.root,
-      setting.entry,
-      `${context}: after the refusal, the holder's entry`,
-    );
-    await assertHeldState(
-      workspace.root,
-      { baseline: setting.baseline, heldRuns: 1 },
-      `${context}: once it has exited, the held-state comparison against ` +
-        `the workspace before the holder started`,
-    );
-  } else {
-    await assertStagingInPlace(
-      setting.staged,
-      `${context}: the obstruction stays in place, acquisition removing ` +
-        `nothing (SPEC 13.5; T13.5-10(a))`,
-    );
-    await assertOutsideTargetsUntouched(
-      setting.staged,
-      `${context}: nothing written or removed through the link (SPEC 13.4)`,
-    );
-  }
+  await assertSettingStands(workspace, setting, "the refusal", context);
   if (arm.occupiedHoldPath !== undefined) {
     await assertPlainFileHolds(
       arm.occupiedHoldPath,
@@ -3688,7 +3748,166 @@ async function acquisitionFirstRun(
   }
 }
 
-/** The held `review resolve` of an acquisition-first arm's workspace. */
+// T13.5-8's acquisition-after arms: each invocation an error acquisition
+// follows refuses — the syntax class of 12.0, judged from the arguments
+// alone; the configuration error of 14.14, met where configuration is
+// loaded; and the configuration error of a file both groups match (7.2,
+// 14.14) and a refused listing (14.25), each met by the first discovery —
+// runs under `--json` in the same two settings, each run exiting 2 with
+// that error, never acquisition's, and modifying nothing (SPEC 13.5, 12.0:
+// a mutating command acquires once its configuration is loaded and its
+// sources discovered; of the configuration errors, only one the rediscovery
+// alone meets follows acquisition's).
+
+/**
+ * The change one acquisition-after run is staged on (TEST-SPEC T13.5-8):
+ * made just before the run — in the held setting during the hold, the
+ * holder having started without it — and undone just after it, before
+ * anything else starts and before any hold is lifted.
+ */
+interface AcquisitionAfterStaging {
+  /** Make the change; returns its undoing, restoring the prior state. */
+  readonly make: (
+    workspace: TestWorkspace,
+    context: string,
+  ) => Promise<() => Promise<void>>;
+  /**
+   * The change refuses the harness's own snapshot walk (a directory made
+   * unlistable), so the run's modifies-nothing compare brackets the change
+   * and its undoing too — which restore a directory's mode alone, never a
+   * byte, and leave nothing the run might have written masked.
+   */
+  readonly unlistable?: true;
+}
+
+/** One acquisition-after invocation of T13.5-8. */
+interface AcquisitionAfterArm {
+  /** The invocation as diagnoses name it, with what its arm stages. */
+  readonly what: string;
+  /** The error preceding acquisition that the run meets, for diagnoses. */
+  readonly error: string;
+  /** Its arguments, `--json` aside. */
+  readonly argv: readonly string[];
+  /**
+   * The error document's finding members the arm pins (SPEC 12.7; T12.7-3):
+   * `code` and `path` on every arm, and `locations` `[]` where the
+   * condition carries a concerned path instead of an in-source location
+   * (SPEC 14; a plain usage error's locations stay unpinned, T12.7-3).
+   */
+  readonly finding: {
+    readonly code: string | null;
+    readonly path: string | null;
+    readonly locations?: readonly [];
+  };
+  /** The change the run is staged on, where the arm stages one. */
+  readonly staging?: AcquisitionAfterStaging;
+}
+
+/**
+ * One acquisition-after run (TEST-SPEC T13.5-8): `arm`'s invocation under
+ * `--json`, bounded (`runBounded`: a product blocking instead fails
+ * diagnosed, H-8), its staging made just before it, on a workspace whose
+ * lock path `setting` occupies. It exits 2 with the 12.7 error document
+ * whose one finding carries the arm's own error — the syntax class, the
+ * configuration error, or discovery's read failure — never acquisition's
+ * busy refusal (beside a live holder) or write failure (at the
+ * obstruction), which a product acquiring before the check returns; and it
+ * modifies nothing, the compare bracketing this run alone (§CONF-CORE's
+ * bracketing constraint; the lock path left out, H-6: a mutating
+ * command's run), the staging made before the bracket and undone after it
+ * — or, for a staging the snapshot walk cannot list, made and undone
+ * within it. Beside a holder: the holder still holds as the run exits, and
+ * — the staging undone — the setting stands (assertSettingStands).
+ */
+async function acquisitionAfterRun(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  setting: AcquisitionSetting,
+  arm: AcquisitionAfterArm,
+  where: string,
+): Promise<void> {
+  const held = setting.kind === "held";
+  const context =
+    `T13.5-8 acquisition after: ${arm.what} --json ${where}, ` +
+    (held
+      ? "while the held `review resolve` holds"
+      : `with no holder and ${LOCK_PATH} a symbolic link to a directory ` +
+        `outside the workspace`);
+  const acquisitionOutcome = held
+    ? `the busy refusal of 14.26 ("${WORKSPACE_BUSY}")`
+    : `acquisition's write failure (14.24, "${WRITE_FAILURE_CODE}")`;
+  const outer =
+    arm.staging?.unlistable === true
+      ? await snapshotDirectory(workspace.root)
+      : undefined;
+  const undo =
+    arm.staging === undefined
+      ? undefined
+      : await arm.staging.make(workspace, context);
+  try {
+    const before = outer ?? (await snapshotDirectory(workspace.root));
+    const result = await runBounded(
+      product,
+      workspace.root,
+      [...arm.argv, "--json"],
+      context,
+    );
+    assertExitCode(
+      result,
+      2,
+      `${context}: ${arm.error} precedes acquisition, so the run exits 2 ` +
+        `with it — never ${acquisitionOutcome} (SPEC 13.5, 12.0)`,
+    );
+    if (setting.kind === "held" && setting.holder.hasExited()) {
+      fail(
+        `${context}: the holder must still hold when the run exits — the ` +
+          `run meets ${arm.error} before any acquisition, never waiting ` +
+          `on the holder (SPEC 13.5, 12.0) — ` +
+          (await describeExit(setting.holder)),
+      );
+    }
+    const finding = expectErrorDocument(result, context);
+    assertSameJson(
+      arm.finding.locations === undefined
+        ? { code: finding.code, path: finding.path }
+        : {
+            code: finding.code,
+            path: finding.path,
+            locations: finding.locations,
+          },
+      arm.finding,
+      `${context}: the error document carries ${arm.error}, never ` +
+        `${acquisitionOutcome} — a mutating command acquires only once its ` +
+        `configuration is loaded and its sources discovered (SPEC 13.5, ` +
+        `12.0, 12.7; \`message\` and \`identities\` informational) — ` +
+        `message: ${JSON.stringify(finding.message)}`,
+    );
+    if (outer === undefined) {
+      assertSnapshotsEqual(
+        before,
+        await snapshotDirectory(workspace.root),
+        `${context}: modifies nothing — sources, configuration, journal, ` +
+          `sessions, and graph data byte-identical, the compare bracketing ` +
+          `this run alone (SPEC 13.5, 12.0; H-6)`,
+      );
+    }
+  } finally {
+    if (undo !== undefined) await undo();
+  }
+  if (outer !== undefined) {
+    assertSnapshotsEqual(
+      outer,
+      await snapshotDirectory(workspace.root),
+      `${context}: modifies nothing — sources, configuration, journal, ` +
+        `sessions, and graph data byte-identical, the compare bracketing ` +
+        `this run alone with its staging and the staging's undoing, which ` +
+        `restore a directory's mode alone (SPEC 13.5, 12.0; H-6)`,
+    );
+  }
+  await assertSettingStands(workspace, setting, "the run", context);
+}
+
+/** The held `review resolve` of an acquisition arm's workspace. */
 interface ResolveHolder {
   /** The item of session `s` it resolves, `--status skipped`. */
   readonly item: string;
@@ -3828,25 +4047,27 @@ async function withObstructedLockPath(
 /**
  * Run each arm in both of T13.5-8's settings on `workspace`: while
  * `holder` holds, then — the holder having exited — at the obstructed lock
- * path.
+ * path; in each setting the acquisition-first arms (`first`), then the
+ * acquisition-after arms (`after`).
  */
-async function acquisitionFirstSettings(
+async function acquisitionSettings(
   product: ProductBinding,
   workspace: TestWorkspace,
   holder: ResolveHolder,
-  arms: readonly AcquisitionFirstArm[],
+  first: readonly AcquisitionFirstArm[],
+  after: readonly AcquisitionAfterArm[],
   where: string,
 ): Promise<void> {
-  await whileResolveHolds(product, workspace, holder, async (setting) => {
-    for (const arm of arms) {
+  const runArms = async (setting: AcquisitionSetting): Promise<void> => {
+    for (const arm of first) {
       await acquisitionFirstRun(product, workspace, setting, arm, where);
     }
-  });
-  await withObstructedLockPath(workspace, async (setting) => {
-    for (const arm of arms) {
-      await acquisitionFirstRun(product, workspace, setting, arm, where);
+    for (const arm of after) {
+      await acquisitionAfterRun(product, workspace, setting, arm, where);
     }
-  });
+  };
+  await whileResolveHolds(product, workspace, holder, runArms);
+  await withObstructedLockPath(workspace, runArms);
 }
 
 /**
@@ -3908,7 +4129,7 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
     // (6.5: `move`'s validation mirrors `rename`'s, the valid-workspace
     // precondition included) — each modifying nothing, the compare
     // bracketing each refused run alone (§CONF-CORE, §VIOL-CORE-EARLYWRITE).
-    await acquisitionFirstSettings(
+    await acquisitionSettings(
       product,
       workspace,
       {
@@ -3951,6 +4172,7 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
           argv: ["move", "specs/A.mdx", "specs/C.mdx"],
         },
       ],
+      [],
       "on the failing workspace",
     );
 
@@ -3986,40 +4208,75 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
   });
 }
 
-// The acquisition-first arms' valid workspace (TEST-SPEC T13.5-8;
-// §CONF-CORE's scope: no code group but in T13.5-8's workspaces, as its
-// wrong-kind arms stage one): CORE_DECL's spec group and source beside one
-// code group discovering `src/c.ts` — well-formed TypeScript (14.20)
-// spelling no marker, `text` call, or module-linking form whose specifier
-// names a spec module (SPEC 4, 14.15): a discovered code source, an
-// edgeless whole-file code location (4.6), so nothing in scope presents a
-// finding (§CONF-CORE's staging constraint). Both TypeScript files are
-// staged in a workspace created after the body's first product invocation,
-// so each is a staged-source record S-9 judges well-formed before any
-// product exists (helpers/staged-ts.ts; S-9's timing clause).
+// The valid workspace of T13.5-8's acquisition arms and seam ordering
+// (TEST-SPEC T13.5-8; §CONF-CORE's scope: no code group but in T13.5-8's
+// workspaces, as its wrong-kind and first-discovery arms stage one):
+// CORE_DECL's source and a second spec source under `specs/sub`, the
+// discovered directory the read-failure arm makes unlistable (T14-10(g)'s
+// staging), configured as T13.5-12(d)'s — the spec group matches
+// `specs/**/*.mdx` and `src/*.mdx`, the code group every file directly under
+// `src`, so both match any `.mdx` path directly under `src`, a path nothing
+// occupies until the first-discovery arm creates `src/both.mdx` there (7.2:
+// a file both match is a configuration error, 14.14). The code group
+// discovers `src/c.ts`, the wrong-kind origin — well-formed TypeScript
+// (14.20) spelling no marker, `text` call, or module-linking form whose
+// specifier names a spec module (SPEC 4, 14.15): a discovered code source,
+// an edgeless whole-file code location (4.6), so nothing in scope presents
+// a finding (§CONF-CORE's staging constraint). Every file here is staged in
+// a workspace created after the body's first product invocation, or by an
+// arm after one, so each is a staged-source record S-9 judges before any
+// product exists (helpers/staged-ts.ts, helpers/staged-mdx.ts; S-9's timing
+// clause).
+const CONFIG_PATH = "xspec.config.ts";
 const CODE_SOURCE_PATH = "src/c.ts";
-const T13_5_8_CODE_CONFIG = stagedTs(
-  "T13.5-8 xspec.config.ts — one spec group and one code group (the acquisition-first arms' valid workspace, whose code group discovers src/c.ts)",
+const SUB_DIR = "specs/sub";
+const DOUBLY_MATCHED_PATH = "src/both.mdx";
+const T13_5_8_CONFIG = stagedTs(
+  "T13.5-8 xspec.config.ts — one spec group and one code group, both matching the unoccupied src/*.mdx paths (T13.5-12(d)'s configuration), the code group discovering src/c.ts",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
-    main: ["specs/**/*.mdx"]
+    main: ["specs/**/*.mdx", "src/*.mdx"]
   },
   code: {
-    app: ["src/**/*.ts"]
+    app: ["src/*"]
   }
 })
 `,
 );
+const T13_5_8_INVALID_CONFIG = stagedTs(
+  "T13.5-8 xspec.config.ts made invalid by an unknown top-level key (14.14; the acquisition-after arm's staging, §CONF-CORE's constraint)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx", "src/*.mdx"]
+  },
+  code: {
+    app: ["src/*"]
+  },
+  bogus: true
+})
+`,
+);
 const T13_5_8_CODE_SOURCE = stagedTs(
-  "T13.5-8 src/c.ts — a discovered code source spelling no marker, text call, or specifier naming a spec module (the wrong-kind origin of the acquisition-first arms' rename and move)",
+  "T13.5-8 src/c.ts — a discovered code source spelling no marker, text call, or specifier naming a spec module (the wrong-kind origin of the acquisition-first arms' rename and move and of the seam-ordering move)",
   "export const c = 1\n",
 );
-const ACQUISITION_FIRST_DECL: WorkspaceDecl = {
+const T13_5_8_SUB_SOURCE = stagedMdx(
+  "T13.5-8 specs/sub/S.mdx (the source under specs/sub, the discovered directory the acquisition-after read-failure arm makes unlistable)",
+  ['<S id="sub">', "Sub text.", "</S>", ""].join("\n"),
+);
+const T13_5_8_DOUBLY_MATCHED = stagedMdx(
+  "T13.5-8 src/both.mdx (created at a path both groups match, the acquisition-after arm's configuration error met by the first discovery)",
+  ['<S id="both">', "Both text.", "</S>", ""].join("\n"),
+);
+const ACQUISITION_DECL: WorkspaceDecl = {
   files: {
-    "xspec.config.ts": T13_5_8_CODE_CONFIG,
+    [CONFIG_PATH]: T13_5_8_CONFIG,
     "specs/A.mdx": CORE_A_STAGED,
+    [`${SUB_DIR}/S.mdx`]: T13_5_8_SUB_SOURCE,
     [CODE_SOURCE_PATH]: T13_5_8_CODE_SOURCE,
   },
 };
@@ -4107,25 +4364,148 @@ function validAcquisitionFirstArms(
 }
 
 /**
- * The acquisition-first arms on a valid workspace (TEST-SPEC T13.5-8): a
- * freshly built ACQUISITION_FIRST_DECL workspace lying in no repository
- * (§CONF-CORE's staging constraint on the baseline arm: every ref is
- * unresolvable there, whatever its spelling), holding the audit sessions
- * `s` and `c`, each created while it was valid, their items learned by
- * reads before anything is held (§CONF-CORE: no `build` or read inside a
- * bracket, during a hold, or while a lock directory stands — the quiet
- * §VIOL-CORE-CHATTYREADS's, §VIOL-CORE-READERENTRY's, and
+ * The configuration file made invalid for one run — by an unknown key in
+ * its top-level object (§CONF-CORE's staging constraint; 7, 14.14) — and
+ * restored after it to the record the workspace was staged from.
+ */
+const INVALID_CONFIGURATION: AcquisitionAfterStaging = {
+  make: async (workspace) => {
+    await workspace.file(CONFIG_PATH, T13_5_8_INVALID_CONFIG);
+    return async () => {
+      await workspace.file(CONFIG_PATH, T13_5_8_CONFIG);
+    };
+  },
+};
+
+/**
+ * A file created for one run at a path both groups match (T13.5-12(d)'s
+ * configuration) — nothing occupying it before, a staging premise checked
+ * here, so in the held setting the holder started with the path unoccupied
+ * — and deleted after it.
+ */
+const DOUBLY_MATCHED_FILE: AcquisitionAfterStaging = {
+  make: async (workspace, context) => {
+    const abs = workspace.path(DOUBLY_MATCHED_PATH);
+    const kind = await occupantKindAt(abs);
+    if (kind !== "absent") {
+      fail(
+        `${context}: staging premise — nothing occupies ` +
+          `${DOUBLY_MATCHED_PATH}, the path both groups match, before the ` +
+          `arm creates a file there (T13.5-12(d)'s configuration); found ` +
+          `${kind}`,
+      );
+    }
+    await workspace.file(DOUBLY_MATCHED_PATH, T13_5_8_DOUBLY_MATCHED);
+    return async () => {
+      await fsp.unlink(abs);
+    };
+  },
+};
+
+/**
+ * `specs/sub` — a directory the discovery of 7 lists under the glob
+ * `specs/**\/*.mdx` — made unlistable for one run (T14-10(g)'s staging:
+ * mode 0o100, its search permission kept, verified on the harness's own
+ * process first, E-1; a privileged runner is a harness error, H-11) and
+ * its mode restored after it.
+ */
+const UNLISTABLE_SUB_DIR: AcquisitionAfterStaging = {
+  make: async (workspace) => {
+    const staging = await stageReadRefusalOfDirectory(workspace.path(SUB_DIR));
+    return async () => {
+      await staging.restore();
+    };
+  },
+  unlistable: true,
+};
+
+/**
+ * The acquisition-after arms (TEST-SPEC T13.5-8), each an invocation an
+ * error acquisition follows refuses — never acquisition's error: a surplus
+ * operand, the syntax class of 12.0, judged from the arguments alone; the
+ * configuration made invalid, the configuration error of 14.14 met where
+ * configuration is loaded; a file created at a path both groups match, the
+ * configuration error the first discovery meets (7.2, 14.14; 12.0: of the
+ * configuration errors, only one the rediscovery alone meets follows
+ * acquisition's, T13.5-12(d)), which fails a product checking for such a
+ * file only once it has acquired; and a discovered directory made
+ * unlistable, discovery's read failure (14.25; T14-10(g)). The staged arms
+ * run `rename specs/A.mdx a b`, performable on the workspace as it stands
+ * unstaged, so the staged change is the run's one defect.
+ */
+function acquisitionAfterArms(): readonly AcquisitionAfterArm[] {
+  const performable = ["rename", "specs/A.mdx", "a", "b"];
+  return [
+    {
+      what: "`rename specs/A.mdx a b c` (a surplus operand)",
+      error: "the syntax-class usage error (12.0)",
+      argv: ["rename", "specs/A.mdx", "a", "b", "c"],
+      finding: { code: null, path: null },
+    },
+    {
+      what:
+        `\`rename specs/A.mdx a b\` with ${CONFIG_PATH} made invalid by an ` +
+        `unknown top-level key`,
+      error:
+        "the configuration error of 14.14, concerning the configuration " +
+        "file",
+      argv: performable,
+      finding: {
+        code: "configuration-error",
+        path: CONFIG_PATH,
+        locations: [],
+      },
+      staging: INVALID_CONFIGURATION,
+    },
+    {
+      what:
+        `\`rename specs/A.mdx a b\` with ${DOUBLY_MATCHED_PATH} created, a ` +
+        `path both the spec group and the code group match`,
+      error:
+        "the configuration error of a file both groups match (7.2, 14.14), " +
+        "met by the first discovery and concerning the configuration file " +
+        "(T12.7-3)",
+      argv: performable,
+      finding: {
+        code: "configuration-error",
+        path: CONFIG_PATH,
+        locations: [],
+      },
+      staging: DOUBLY_MATCHED_FILE,
+    },
+    {
+      what:
+        `\`rename specs/A.mdx a b\` with ${SUB_DIR} made unlistable (mode ` +
+        `0o100, T14-10(g)'s staging)`,
+      error: `discovery's read failure (14.25) at ${SUB_DIR}`,
+      argv: performable,
+      finding: { code: "read-failure", path: SUB_DIR, locations: [] },
+      staging: UNLISTABLE_SUB_DIR,
+    },
+  ];
+}
+
+/**
+ * The acquisition-first and acquisition-after arms on a valid workspace
+ * (TEST-SPEC T13.5-8): a freshly built ACQUISITION_DECL workspace lying in
+ * no repository (§CONF-CORE's staging constraint on the baseline arm: every
+ * ref is unresolvable there, whatever its spelling), holding the audit
+ * sessions `s` and `c`, each created while it was valid, their items
+ * learned by reads before anything is held (§CONF-CORE: no `build` or read
+ * inside a bracket, during a hold, or while a lock directory stands — the
+ * quiet §VIOL-CORE-CHATTYREADS's, §VIOL-CORE-READERENTRY's, and
  * §VIOL-CORE-BUILDWAIT's passing sides lean on); then each arm beside the
  * held `review resolve s <leaf item> --status skipped`, which, the
  * workspace freshly built with no refresh pending (§CONF-CORE's freshness
- * constraint), resolves once lifted, exit 0; then each arm again at the
+ * constraint) and every acquisition-after staging undone before its hold
+ * is lifted, resolves once lifted, exit 0; then each arm again at the
  * obstructed lock path.
  */
-async function validWorkspaceAcquisitionFirstArms(
+async function validWorkspaceAcquisitionArms(
   product: ProductBinding,
 ): Promise<void> {
-  await withWorkspace(ACQUISITION_FIRST_DECL, async (workspace) => {
-    const label = "T13.5-8 acquisition-first staging (valid workspace)";
+  await withWorkspace(ACQUISITION_DECL, async (workspace) => {
+    const label = "T13.5-8 acquisition-arm staging (valid workspace)";
     await buildOk(product, workspace, `${label} \`build\``);
     for (const name of ["s", "c"]) {
       await expectExit(
@@ -4161,7 +4541,7 @@ async function validWorkspaceAcquisitionFirstArms(
     );
     const occupied = holdPathFor(workspace, "hold-occupied.tmp");
     await fsp.writeFile(occupied, HOLD_OCCUPANT_BYTES, { flag: "wx" });
-    await acquisitionFirstSettings(
+    await acquisitionSettings(
       product,
       workspace,
       {
@@ -4176,21 +4556,87 @@ async function validWorkspaceAcquisitionFirstArms(
           "refusals while it held are attributable to it alone (SPEC 13.5)",
       },
       validAcquisitionFirstArms(cItem, occupied),
+      acquisitionAfterArms(),
       "on the valid workspace",
     );
   });
 }
 
+/** One seam-ordering invocation of T13.5-8 that a usage-class check refuses. */
+interface SeamOrderingArm {
+  /** Its arguments, `--json` and `--test-hold` aside. */
+  readonly argv: readonly string[];
+  /** What it names that the check refuses, for diagnoses. */
+  readonly why: string;
+  /** The check's ordering against acquisition and the hold. */
+  readonly ordering: string;
+  /** Its own error, for diagnoses. */
+  readonly error: string;
+  /** Its hold file's name in the workspace's temporary directory. */
+  readonly holdName: string;
+}
+
 /**
- * The valid-workspace arms: the seam ordering of the 12.0 argument checks
- * and of baseline resolution (6.3), then the non-mutating boundary of 6.6 —
- * each refused invocation started on a freshly built workspace with no
- * refresh pending (§CONF-CORE's freshness constraint) that lies in no
- * repository (§CONF-CORE's staging constraint on the baseline arm: every
- * ref is unresolvable there, whatever its spelling).
+ * The seam-ordering invocations a check of the usage class refuses
+ * (TEST-SPEC T13.5-8): the unknown and wrong-kind names and files of 12.0
+ * and baseline resolution (6.3) — each judged after acquisition and the
+ * hold, so each creates the hold file first, which a product judging it
+ * before acquiring exclusivity, or creating its hold file only once it has
+ * passed, never does (§VIOL-CORE-LATEHOLD).
+ */
+const SEAM_ORDERING_USAGE_ARMS: readonly SeamOrderingArm[] = [
+  {
+    argv: ["rename", "specs/A.mdx", "nope", "x"],
+    why: "a nonexistent old ID",
+    ordering:
+      "exclusivity is acquired, and the hold engaged, before the argument " +
+      "checks of 12.0 — a nonexistent old ID's usage error (6.4)",
+    error: "the nonexistent old ID's usage error (12.0, 6.4)",
+    holdName: "hold-nope.tmp",
+  },
+  {
+    argv: ["review", "create", "--base", "no-such-ref", "--name", "n"],
+    why: "an unresolvable baseline, the workspace in no repository",
+    ordering:
+      "exclusivity is acquired, and the hold engaged, before baseline " +
+      "resolution — a baseline that cannot be read is a usage error (6.3)",
+    error: "the unreadable baseline's usage error (6.3, 12.0)",
+    holdName: "hold-base.tmp",
+  },
+  {
+    argv: ["review", "create", "--coverage", "nope", "--name", "n"],
+    why: "an unknown profile, none configured",
+    ordering:
+      "exclusivity is acquired, and the hold engaged, before the profile " +
+      "is judged against the loaded configuration — an unknown profile's " +
+      "usage error (12.0)",
+    error: "the unknown profile's usage error (12.0)",
+    holdName: "hold-coverage.tmp",
+  },
+  {
+    argv: ["move", CODE_SOURCE_PATH, "specs/C.mdx"],
+    why: `a wrong-kind origin, ${CODE_SOURCE_PATH} a discovered code source`,
+    ordering:
+      "exclusivity is acquired, and the hold engaged, before the origin's " +
+      "kind is judged against the discovered sources — a wrong-kind " +
+      "origin's usage error (6.5, 12.0)",
+    error: "the wrong-kind origin's usage error (6.5, 12.0)",
+    holdName: "hold-wrong-kind.tmp",
+  },
+];
+
+/**
+ * The valid-workspace arms: the seam ordering of the usage class's unknown
+ * and wrong-kind names and files (12.0) and of baseline resolution (6.3),
+ * then the non-mutating boundary of 6.6 — each refused invocation started
+ * on a freshly built ACQUISITION_DECL workspace, its code group discovering
+ * the wrong-kind origin, with no refresh pending (§CONF-CORE's freshness
+ * constraint) that lies in no repository (§CONF-CORE's staging constraint
+ * on the baseline arm: every ref is unresolvable there, whatever its
+ * spelling).
  */
 async function validWorkspaceArms(product: ProductBinding): Promise<void> {
-  await withWorkspace(CORE_DECL, async (workspace) => {
+  await withWorkspace(ACQUISITION_DECL, async (workspace) => {
     await buildOk(
       product,
       workspace,
@@ -4201,33 +4647,30 @@ async function validWorkspaceArms(product: ProductBinding): Promise<void> {
       "T13.5-8 (seam ordering: `review create --base <unresolvable-ref>`)",
     );
 
-    // A nonexistent old ID: the argument checks of 12.0 refuse it (6.4),
-    // after acquisition and the hold.
-    await refusedSeamArm(
-      product,
-      workspace,
-      ["rename", "specs/A.mdx", "nope", "x"],
-      "hold-nope.tmp",
-      2,
-      "T13.5-8 (seam ordering: `rename specs/A.mdx nope x --test-hold " +
-        "<path>`, a nonexistent old ID)",
-      "exclusivity is acquired before the argument checks of 12.0 — a " +
-        "nonexistent old ID's usage error (6.4)",
-    );
-
-    // An unresolvable baseline: in no repository, no ref can be read — a
-    // usage error (6.3, 12.0), judged after acquisition and the hold.
-    await refusedSeamArm(
-      product,
-      workspace,
-      ["review", "create", "--base", "no-such-ref", "--name", "n"],
-      "hold-base.tmp",
-      2,
-      "T13.5-8 (seam ordering: `review create --base no-such-ref --name n " +
-        "--test-hold <path>`, the workspace in no repository)",
-      "exclusivity is acquired before baseline resolution — a baseline " +
-        "that cannot be read is a usage error (6.3)",
-    );
+    // Each invocation a usage-class check refuses, under `--json` and
+    // `--test-hold` with no other holder and no obstruction: the hold file
+    // created first, the held-state comparison holding while held, and only
+    // after the hold's deletion exit 2 with its own usage error — `code`
+    // `null` — the workspace then byte-identical to its pre-invocation
+    // state, `.xspec/lock` gone (refusedSeamArm).
+    for (const arm of SEAM_ORDERING_USAGE_ARMS) {
+      const context =
+        `T13.5-8 (seam ordering: \`${arm.argv.join(" ")} --json ` +
+        `--test-hold <path>\`, ${arm.why})`;
+      assertSeamUsageError(
+        await refusedSeamArm(
+          product,
+          workspace,
+          [...arm.argv, "--json"],
+          arm.holdName,
+          2,
+          context,
+          arm.ordering,
+        ),
+        arm.error,
+        context,
+      );
+    }
 
     // The non-mutating boundary (SPEC 6.6: a preview acquires no
     // exclusivity and does not take the acquisition-tied seam): the refused
@@ -4298,10 +4741,10 @@ async function validWorkspaceArms(product: ProductBinding): Promise<void> {
 const T13_5_8 = defineProductTest({
   id: "T13.5-8",
   title:
-    "acquisition precedes every later check (SPEC 13.5, 12.0): each acquisition-first invocation, run under `--json` once while `review resolve s <item> --status skipped --test-hold <path>` holds its workspace (an `audit` session `s` created while the workspace was valid; the held-state comparison holding against the workspace before the holder started, while it holds and after each run) and once with no holder and `.xspec/lock` a symbolic link to a directory outside the workspace (the link byte-identical in place and its target untouched after each run), exits 2 promptly with the error document's `code` `\"workspace-busy\"` beside the holder — the holder still holding, its entry the lock directory's only one, byte-identical — and `\"write-failure\"` at the obstruction, each with `path` `\".xspec/lock\"` and `locations` `[]`, modifying nothing (the compare bracketing each run alone), never the later check's outcome: on a valid workspace lying in no repository, whose code group discovers `src/c.ts`, `rename specs/A.mdx nope x` (a nonexistent old ID) and `move specs/A.mdx#nope specs/B.mdx#x` (a nonexistent origin ID) never the unknown-ID usage error, `review create --base <unresolvable-ref> --name n` never the baseline error, `review create --coverage nope --name n` never the unknown-profile usage error, `rename src/c.ts a b` and `move src/c.ts specs/C.mdx` (a wrong-kind origin) never the wrong-kind usage error (`code` `null` each), `review resolve s <unknown-item> --status skipped` never the unknown-item usage error, `review resolve c <item> --status skipped` (session `c` made corrupt — unparseable bytes — for that run alone) never the unknown-item usage error or the corruption's exit 1 (14.21), and `rename specs/A.mdx a a2 --test-hold <occupied path>` never the hold-file usage error, its occupant unchanged; on a workspace failing `build`'s validations (a second spec source beginning with a byte-order mark, 14.20, added after the valid `build` and `s`'s creation), `review create --strategy audit --name n`, `review resolve s <item> --status skipped`, `rename specs/A.mdx a b`, and `move specs/A.mdx specs/C.mdx` never the gate's or the precondition's exit 1, its holder turned back by the gate once lifted, exit 1, writing nothing; each holder awaited to exit, `.xspec/lock` then absent, before the next mutating command; under `--test-hold` with no other holder, `rename specs/A.mdx nope x` (a nonexistent old ID, 12.0), `review create --base <unresolvable-ref> --name n` (6.3, the workspace in no repository), and, on the failing workspace, `review create --strategy audit --name n` (13.3's gate) each create the hold file first — the wait failing loud when the command exits without creating it — the held-state comparison holding while held (every workspace path but the lock path `.xspec/lock` byte-identical, `.xspec/lock` holding the held run's one entry), and exit 2, 2, and 1 with their own usage error or the condition-20 finding only after the hold's deletion, nothing modified; the non-mutating boundary: `rename specs/A.mdx nope x --preview` exits 2 at once acquiring nothing, and `--test-hold` beside `--preview` is exit 2 creating no hold file (SPEC 13.5, 13.3, 12.0, 12.7, 6.3, 6.4, 6.5, 6.6, 10.1, 14.24, 14.26, 14)",
+    "acquisition's place in the order (SPEC 13.5, 12.0): once configuration is loaded and sources discovered, before every later check — each acquisition-first invocation, run under `--json` once while `review resolve s <item> --status skipped --test-hold <path>` holds its workspace (an `audit` session `s` created while the workspace was valid; the held-state comparison holding against the workspace before the holder started, while it holds and after each run) and once with no holder and `.xspec/lock` a symbolic link to a directory outside the workspace (the link byte-identical in place and its target untouched after each run), exits 2 promptly with the error document's `code` `\"workspace-busy\"` beside the holder — the holder still holding, its entry the lock directory's only one, byte-identical — and `\"write-failure\"` at the obstruction, each with `path` `\".xspec/lock\"` and `locations` `[]`, modifying nothing (the compare bracketing each run alone), never the later check's outcome: on a valid workspace lying in no repository, whose code group discovers `src/c.ts`, `rename specs/A.mdx nope x` (a nonexistent old ID) and `move specs/A.mdx#nope specs/B.mdx#x` (a nonexistent origin ID) never the unknown-ID usage error, `review create --base <unresolvable-ref> --name n` never the baseline error, `review create --coverage nope --name n` never the unknown-profile usage error, `rename src/c.ts a b` and `move src/c.ts specs/C.mdx` (a wrong-kind origin) never the wrong-kind usage error (`code` `null` each), `review resolve s <unknown-item> --status skipped` never the unknown-item usage error, `review resolve c <item> --status skipped` (session `c` made corrupt — unparseable bytes — for that run alone) never the unknown-item usage error or the corruption's exit 1 (14.21), and `rename specs/A.mdx a a2 --test-hold <occupied path>` never the hold-file usage error, its occupant unchanged; on a workspace failing `build`'s validations (a second spec source beginning with a byte-order mark, 14.20, added after the valid `build` and `s`'s creation), `review create --strategy audit --name n`, `review resolve s <item> --status skipped`, `rename specs/A.mdx a b`, and `move specs/A.mdx specs/C.mdx` never the gate's or the precondition's exit 1, its holder turned back by the gate once lifted, exit 1, writing nothing; each acquisition-after invocation, run on the valid workspace in the same two settings, exits 2 with its own error, never acquisition's, modifying nothing, the holder still holding and the setting standing as above: `rename specs/A.mdx a b c` (a surplus operand) the syntax-class usage error (`code` and `path` `null`), and `rename specs/A.mdx a b` with `xspec.config.ts` made invalid by an unknown top-level key `code` `\"configuration-error\"` at `xspec.config.ts`, with `src/both.mdx` created at a path both the spec and the code group match (T13.5-12(d)'s configuration; in the held setting during the hold, the holder having started with the path unoccupied) `code` `\"configuration-error\"` at the configuration file's path `xspec.config.ts`, and with `specs/sub` made unlistable (mode 0o100, verified on the harness) `code` `\"read-failure\"` at `specs/sub` (`locations` `[]` each) — each staged change made just before its run and undone before the holder's hold is lifted; each holder awaited to exit, `.xspec/lock` then absent, before the next mutating command; under `--test-hold` with no other holder and no obstruction, `rename specs/A.mdx nope x` (a nonexistent old ID, 12.0), `review create --base <unresolvable-ref> --name n` (6.3, the workspace in no repository), `review create --coverage nope --name n` (an unknown profile), and `move src/c.ts specs/C.mdx` (a wrong-kind origin), each under `--json`, and, on the failing workspace, `review create --strategy audit --name n` (13.3's gate) each create the hold file first — the wait failing loud when the command exits without creating it — the held-state comparison holding while held (every workspace path but the lock path `.xspec/lock` byte-identical, `.xspec/lock` holding the held run's one entry), and exit 2, 2, 2, 2, and 1 with their own usage error (`code` `null`, `path` `null`) or the condition-20 finding only after the hold's deletion, nothing modified and `.xspec/lock` then gone; the non-mutating boundary: `rename specs/A.mdx nope x --preview` exits 2 at once acquiring nothing, and `--test-hold` beside `--preview` is exit 2 creating no hold file (SPEC 13.5, 13.3, 12.0, 12.7, 7, 7.2, 6.3, 6.4, 6.5, 6.6, 10.1, 14.14, 14.24, 14.25, 14.26, 14)",
   run: async (product) => {
     await failingWorkspaceArms(product);
-    await validWorkspaceAcquisitionFirstArms(product);
+    await validWorkspaceAcquisitionArms(product);
     await validWorkspaceArms(product);
   },
 });

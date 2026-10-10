@@ -185,19 +185,23 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       violator("VIOL-CORE-PERSISTREADS", "conf-core/bin-persistreads.mjs", [
         "T10.4-5",
       ]),
-      // VIOL-CORE-LATELOCK: workspace exclusivity is acquired late — a
-      // mutating command acquires it, and creates its hold file, only once
-      // the argument checks of 12.0 and baseline resolution (6.3) have
-      // passed, instead of before them — the two checks 12.0 places ahead of
-      // source validation, and the only ones moved: the gate of 13.3, the
+      // VIOL-CORE-LATEHOLD: the hold seam engages late — a mutating command
+      // acquires exclusivity where 13.5 places it (once configuration is
+      // loaded and sources discovered, before every later check) but creates
+      // its hold file only once the unknown and wrong-kind names and files
+      // of the usage class and baseline resolution (12.0, 6.3) have passed,
+      // its second discovery preceding them, instead of immediately after
+      // acquiring; the gate and refresh of 13.3, the item check, the
       // valid-workspace precondition of rename/move (6.4, 6.5), and every
-      // modification still follow acquisition and the hold. An invocation
-      // one of the two moved checks refuses exits 2 at once having acquired
-      // nothing and created no hold file — T13.5-8's two seam-ordering arms
-      // (`rename specs/A.mdx nope x`, `review create --base <ref> --name n`
-      // under `--test-hold`) — while its failing-workspace arms, whose
-      // commands pass both checks, hold and are excluded as the conformer's.
-      violator("VIOL-CORE-LATELOCK", "conf-core/bin-latelock.mjs", ["T13.5-8"]),
+      // modification still follow the hold. An invocation those checks
+      // refuse exits 2 having acquired and released but created no hold
+      // file — T13.5-8's four seam-ordering arms (`rename specs/A.mdx nope
+      // x`, `review create --base <ref> --name n`, `review create
+      // --coverage nope --name n`, `move <code> specs/C.mdx` under
+      // `--test-hold`), where the wait for a hold file never created fails
+      // loud — while every other arm meets acquisition, or the error
+      // preceding it, exactly as the conformer's does.
+      violator("VIOL-CORE-LATEHOLD", "conf-core/bin-latehold.mjs", ["T13.5-8"]),
       // VIOL-CORE-EARLYRELEASE: a run releases at its hold point instead of
       // as it ends — a mutating command given `--test-hold` releases once its
       // hold is lifted (its entry, then the emptied lock directory and an
