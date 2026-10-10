@@ -188,6 +188,20 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // under `--test-hold`) — while its failing-workspace arms, whose
       // commands pass both checks, hold and are excluded as the conformer's.
       violator("VIOL-CORE-LATELOCK", "conf-core/bin-latelock.mjs", ["T13.5-8"]),
+      // VIOL-CORE-EARLYRELEASE: a run releases at its hold point instead of
+      // as it ends — a mutating command given `--test-hold` releases once its
+      // hold is lifted (its entry, then the emptied lock directory and an
+      // emptied area directory its acquisition created), one without the
+      // seam straight after acquiring — then dwells for a sustained interval
+      // and proceeds with the rest of the command outside exclusivity,
+      // releasing nothing further; acquisition, the hold file, every check,
+      // every write and its order, and every run's outcome are unchanged.
+      // Fails T13.5-3 on its past-the-hold arm alone: kills landing in the
+      // interval find every path the twin's run changes still in its prior
+      // state and `.xspec/lock` absent.
+      violator("VIOL-CORE-EARLYRELEASE", "conf-core/bin-earlyrelease.mjs", [
+        "T13.5-3",
+      ]),
       // VIOL-CORE-HOLDLINK: hold-file creation follows a symbolic link at
       // the hold path — the path's occupancy judged through the link, so a
       // dangling link reads as nothing there and the empty hold file is

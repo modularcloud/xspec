@@ -19,8 +19,16 @@
 // refused `--json` runs repeated on fresh content-identical workspaces held
 // by separate holder processes — recreated at the same absolute path, and
 // at a different one — byte-identically),
-// T13.5-3 (exclusivity ends with the process), T13.5-4 (readers during
-// mutation + build/query storm), T13.5-5 (atomic visibility via a polling
+// T13.5-3 (exclusivity ends with the process: each mutating command in turn
+// held and killed under the exit-collection discipline — its group killed
+// with SIGKILL, its exit collected, no process of the group listed — the
+// dead run's entry the lock directory's one entry, then taken over by a
+// later, different mutating command exiting 0, a busy refusal meeting the
+// reuse check; and past the hold, each command killed after its lift at
+// fixed fractions of its twin's lift-to-exit span, on fresh copies of one
+// built workspace, a kill short of the twin's final state finding the dead
+// run's entry and a run exiting first ending as its twin), T13.5-4 (readers
+// during mutation + build/query storm), T13.5-5 (atomic visibility via a polling
 // reader), T13.5-6 (workspace isolation), T13.5-7 (interrupted or
 // write-refused mutation: the pinned write order — the refusal arms (a)–(f)
 // composed from write-refusal-staging.ts, and the kill arm), T13.5-8 (acquisition before every later check: the
@@ -55,8 +63,9 @@
 //   §VIOL-CORE-EARLYREFRESH's passing side leans on): it stages its own
 //   workspaces, and every other mutating command these tests start —
 //   T13.5-1's basic arms, T13.5-2's held and excluded commands, T13.5-3's
-//   killed and subsequent commands, T13.5-4's held mutator — starts on a
-//   freshly built workspace with no refresh pending (T10.1-1).
+//   killed and subsequent commands and its past-the-hold runs with their
+//   twins (copies of one freshly built workspace), T13.5-4's held mutator —
+//   starts on a freshly built workspace with no refresh pending (T10.1-1).
 // - T13.5-1's dangling-link arm stages the link's target in a directory of
 //   its own outside the workspace, verified writable by the harness's own
 //   process before the run (§CONF-CORE's justification: with that directory
@@ -86,9 +95,20 @@
 //   (§CONF-CORE); and its waits for a refused invocation's hold file fail
 //   loud, never proceeding on the command's exit or on a timeout
 //   (§VIOL-CORE-LATELOCK).
-// - T13.5-3's subsequent mutating command succeeds whether or not the killed
-//   operation's writes landed — `rename specs/A.mdx g g2`, independent of
-//   the killed `a`→`a2` and never a retry of it (§VIOL-CORE-EARLYWRITE).
+// - T13.5-3's subsequent mutating command after each kill while held is a
+//   different operation, succeeding whether or not the killed operation's
+//   writes landed, never a retry of it (§VIOL-CORE-EARLYWRITE: its held
+//   kills leave the completed operation) — each command in
+//   T13_5_3_OPERATIONS followed by the next; no `build` or read runs on its
+//   workspaces while a lock directory stands, between the kill and the later
+//   command included, nor on the copies its past-the-hold arm takes, whose
+//   items are learned on the base before copying (§CONF-CORE); its later
+//   commands start only once the killed run's group is gone, its
+//   past-the-hold runs start none (§VIOL-CORE-NOLOCK's,
+//   §VIOL-CORE-STALELOCK's, and §VIOL-CORE-EARLYRELEASE's analyses); and its
+//   past-the-hold arm asserts, of a run its kill stops short of the twin's
+//   final state, the lock path's state alone — a derived file the kill left
+//   partial is no part of it (§VIOL-CORE-PARTIALWRITE).
 // - T13.5-4's storm arm asserts termination only — the storm commands' exit
 //   codes are deliberately unasserted — plus the final `build`'s
 //   byte-equality to a clean build; its held-phase reads run while the
@@ -125,6 +145,18 @@
 //   error, which the certification runner counts as `error`, C-1) — and for
 //   T13.5-2 the excluded command's exit is observed while command 1 is
 //   still held (asserted: command 1 has not exited).
+// - T13.5-3's past-the-hold kills (E-5): a kill's landing is read from the
+//   collected exit — SIGKILL where the kill, not a normal exit, ended the
+//   run — and "some path the twin's run changed did not yet hold the twin's
+//   final state" from snapshots: the twin's changed paths are the keys at
+//   which its pre-invocation and final snapshots differ (added, removed, or
+//   changed; the lock path aside, H-6), each compared, kind and bytes,
+//   between the killed run's copy and the twin's final state. The spread is
+//   fixed: PAST_THE_HOLD_KILL_FRACTIONS of the twin's measured lift-to-exit
+//   span, each delay counted from the run's own lift — scheduling only, never
+//   an assertion input (H-10). The copies are byte copies of the base's
+//   whole tree (directories, plain files with their modes, links verbatim),
+//   checked against the base before use, a difference a harness error.
 // - "Observe the prior state" (T13.5-4): each read command's exit code and
 //   stdout bytes while the rename is held equal the same invocation's from
 //   before the rename started (SPEC 12.0 byte-determinism: identical
@@ -183,10 +215,16 @@ import {
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { assertRunOutcomesEqual } from "../../helpers/determinism.js";
+import {
+  applyReuseCheck,
+  runVoidableTrial,
+} from "../../helpers/kill-discipline.js";
 import { LOCK_PATH } from "../../helpers/lock-path.js";
 import type { LockEntry } from "../../helpers/lock-staging.js";
+import { killHeldRun } from "../../helpers/lock-staging.js";
 import {
   assertHeldState,
+  assertLockDirectoryEntries,
   assertLockPathAbsent,
   assertOnlyEntry,
 } from "../../helpers/lock-state.js";
@@ -194,15 +232,22 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
-import type { SnapshotOptions } from "../../helpers/snapshot.js";
+import type {
+  DirectorySnapshot,
+  SnapshotEntry,
+  SnapshotOptions,
+} from "../../helpers/snapshot.js";
 import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
   assertSnapshotsEqual,
+  describeEntryDifference,
   diffSnapshots,
+  displaySnapshotPath,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import type {
+  KilledGroup,
   ProductBinding,
   RunGuards,
   RunningProduct,
@@ -1295,7 +1340,10 @@ const T13_5_2_COMMAND_1: readonly string[] = [
   "a2",
 ];
 
-/** The audit session `s`'s two items T13.5-2's `resolve` and `split` name. */
+/**
+ * The audit session `s`'s two items the `resolve` and `split` of T13.5-2 and
+ * T13.5-3 name.
+ */
 interface SessionItems {
   /** `g`'s item, unblocked, so `resolve` applies (SPEC 10.6, 10.7). */
   readonly leaf: string;
@@ -1304,16 +1352,11 @@ interface SessionItems {
 }
 
 /**
- * One of T13.5-2's other mutating commands: an operation valid in its own
- * right on the staged workspace — succeeding on an unheld twin — and
- * composing with command 1 — succeeding once command 1 has run — so that its
- * exit 2 while command 1 holds is the exclusion's alone (TEST-SPEC T13.5-2,
- * as in T13.5-10(e)). None carries `--test-hold` (§VIOL-CORE-NOLOCK's
- * staging constraint: given one at the holding command's hold path, that
- * violator's runs would fail exit 2 on the occupied path, modifying nothing,
- * and its expected failure would never materialize).
+ * A mutating command on the session staging (`stageSessionWorkspace`): its
+ * description, and its arguments, naming the session's items where it needs
+ * them.
  */
-interface ExcludedOperation {
+interface SessionOperation {
   readonly what: string;
   /** Its arguments, naming the session's items where it needs them. */
   readonly argv: (items: SessionItems) => readonly string[];
@@ -1323,13 +1366,21 @@ interface ExcludedOperation {
  * T13.5-2's five other mutating commands (SPEC 13.5: `rename`, `move`, and
  * the mutating `review` subcommands), each from CONF-CORE's surface —
  * file-form `move`, `review create` under `--strategy audit` (§CONF-CORE) —
- * in the order they run. Once command 1 has run, each also composes with
- * those before it: the session's items stay addressable by their `id`s
- * across `g`'s rename and the file's move (SPEC 10.2: an item stays
- * actionable after its nodes are moved), the leaf's item is resolved before
- * the parent's split, and the parent's scope root keeps its child (10.7).
+ * in the order they run. Each is an operation valid in its own right on the
+ * staged workspace — succeeding on an unheld twin — and composing with
+ * command 1 — succeeding once command 1 has run — so that its exit 2 while
+ * command 1 holds is the exclusion's alone (TEST-SPEC T13.5-2, as in
+ * T13.5-10(e)). Once command 1 has run, each also composes with those before
+ * it: the session's items stay addressable by their `id`s across `g`'s
+ * rename and the file's move (SPEC 10.2: an item stays actionable after its
+ * nodes are moved), the leaf's item is resolved before the parent's split,
+ * and the parent's scope root keeps its child (10.7). None carries
+ * `--test-hold` (§VIOL-CORE-NOLOCK's staging constraint: given one at the
+ * holding command's hold path, that violator's runs would fail exit 2 on the
+ * occupied path, modifying nothing, and its expected failure would never
+ * materialize).
  */
-const T13_5_2_EXCLUDED: readonly ExcludedOperation[] = [
+const T13_5_2_EXCLUDED: readonly SessionOperation[] = [
   {
     what: "`rename specs/A.mdx g g2`",
     argv: () => ["rename", "specs/A.mdx", "g", "g2"],
@@ -1368,19 +1419,25 @@ interface RefusedRun {
 }
 
 /**
- * T13.5-2's staging, the same command sequence on every workspace the test
- * uses — the held one, its determinism repeats, and the unheld twins — so
- * that they are content-identical: a fresh CONF-CORE-shaped workspace,
- * `build`, `review create --strategy audit --name s`, and the session's
- * items learned by `review status s --json`, a read run before anything is
- * held, no lock directory standing (§CONF-CORE: on T13.5-2 no `build` or read
- * command runs inside a bracket or while a lock directory stands — the quiet
- * §VIOL-CORE-READERENTRY's and §VIOL-CORE-BUILDWAIT's passing sides lean
- * on); every mutating command the test starts then starts on a freshly built
- * workspace with no refresh pending (§CONF-CORE's freshness constraint, which
+ * The session staging of T13.5-2 and T13.5-3, the same command sequence on
+ * every workspace either test stages — T13.5-2's held one, its determinism
+ * repeats, and its unheld twins; each of T13.5-3's kill-while-held trials,
+ * and the base its past-the-hold arm copies — so that they are
+ * content-identical: a fresh CONF-CORE-shaped workspace, `build`, `review
+ * create --strategy audit --name s` (the audit session `s` created while the
+ * workspace is valid), and the session's items learned by `review status s
+ * --json`, a read run before anything is held, no lock directory standing
+ * (§CONF-CORE: on T13.5-2 and T13.5-3 no `build` or read command runs inside
+ * a bracket or while a lock directory stands — between T13.5-3's kill and its
+ * later command included — nor on the copies T13.5-3's past-the-hold arm
+ * takes, whose items are learned here, before copying: the quiet
+ * §VIOL-CORE-CHATTYREADS's, §VIOL-CORE-READERENTRY's, and
+ * §VIOL-CORE-BUILDWAIT's passing sides lean on); every mutating command
+ * either test starts then starts on a freshly built workspace with no
+ * refresh pending (§CONF-CORE's freshness constraint, which
  * §VIOL-CORE-EARLYREFRESH's passing side leans on).
  */
-async function stageT13_5_2(
+async function stageSessionWorkspace(
   product: ProductBinding,
   workspace: TestWorkspace,
   context: string,
@@ -1574,7 +1631,7 @@ async function repeatRefusals(
   firstRuns: readonly RefusedRun[],
 ): Promise<void> {
   const context = `T13.5-2 determinism (${where})`;
-  await stageT13_5_2(product, workspace, context);
+  await stageSessionWorkspace(product, workspace, context);
   await whileCommand1Holds(
     product,
     workspace,
@@ -1611,7 +1668,7 @@ const T13_5_2 = defineProductTest({
   run: async (product) => {
     const firstRuns: RefusedRun[] = [];
     await withWorkspace(CORE_DECL, async (workspace) => {
-      const items = await stageT13_5_2(product, workspace, "T13.5-2");
+      const items = await stageSessionWorkspace(product, workspace, "T13.5-2");
       // Command 1's pre-invocation state: the held-state comparison's
       // baseline (TEST-SPEC §13.5's preamble).
       const preInvocation = await snapshotDirectory(workspace.root);
@@ -1715,7 +1772,7 @@ const T13_5_2 = defineProductTest({
     for (const operation of T13_5_2_EXCLUDED) {
       await withWorkspace(CORE_DECL, async (twin) => {
         const context = `T13.5-2 unheld twin for ${operation.what}`;
-        const twinItems = await stageT13_5_2(product, twin, context);
+        const twinItems = await stageSessionWorkspace(product, twin, context);
         await expectExit(
           product,
           twin,
@@ -1734,51 +1791,498 @@ const T13_5_2 = defineProductTest({
 // T13.5-3 — exclusivity ends with the process
 // ---------------------------------------------------------------------------
 
-const T13_5_3 = defineProductTest({
-  id: "T13.5-3",
-  title:
-    "killing a held mutating command never blocks later commands: a subsequent mutating command — one that succeeds whether or not the killed operation's writes landed, not a retry of it — exits 0 (SPEC 13.5)",
-  run: async (product) => {
+/**
+ * T13.5-3's mutating commands, each in turn killed while held and, past the
+ * hold, killed after its lift — every one an operation succeeding on the
+ * session staging (`stageSessionWorkspace`), from CONF-CORE's surface:
+ * file-form `move` (never the section form), `review create` under
+ * `--strategy audit` (§CONF-CORE). The command killed while held at index
+ * `i` is followed by the one at `i + 1` (the last by the first): a
+ * different operation, succeeding whether or not the killed one's writes
+ * landed — never a retry of it (§VIOL-CORE-EARLYWRITE's staging
+ * constraint, its kills at the held point leaving the completed operation).
+ * `move` takes the file `rename` rewrote or did not; `review create --name
+ * t` meets the file moved or not; `resolve` names `g`'s item of `s` beside a
+ * session `t` or none; `split` names `a`'s item of `s`, `g`'s resolved or
+ * not (a separate item, SPEC 10.7); and `rename` renames `a`, its item
+ * split or not — a split touches no source.
+ */
+const T13_5_3_OPERATIONS: readonly SessionOperation[] = [
+  {
+    what: "`rename specs/A.mdx a a2`",
+    argv: () => ["rename", "specs/A.mdx", "a", "a2"],
+  },
+  {
+    what: "`move specs/A.mdx specs/B.mdx`",
+    argv: () => ["move", "specs/A.mdx", "specs/B.mdx"],
+  },
+  {
+    what: "`review create --strategy audit --name t`",
+    argv: () => ["review", "create", "--strategy", "audit", "--name", "t"],
+  },
+  {
+    what: "`review resolve s <leaf item> --status no-change`",
+    argv: (items) => [
+      "review",
+      "resolve",
+      "s",
+      items.leaf,
+      "--status",
+      "no-change",
+    ],
+  },
+  {
+    what: "`review split s <parent item>`",
+    argv: (items) => ["review", "split", "s", items.parent],
+  },
+];
+
+/** An error's message, for a diagnosis. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * T13.5-3's kill while held, for one operation, as a voidable trial (E-5):
+ * on a fresh session staging, `operation` is held and killed under the
+ * exit-collection discipline — `killHeldRun` (helpers/lock-staging.ts):
+ * started in a process group of its own, its hold file awaited, the whole
+ * group killed with SIGKILL (a catchable signal would let a product release
+ * on it, as SPEC 13.5 allows an interrupted command), the started process's
+ * exit collected, and no process of the group listed in the process list
+ * before anything follows — after which `.xspec/lock` holds exactly one
+ * entry, a plain file: the dead run's, a leftover (13.5: an abnormal
+ * termination leaves its entry; `killHeldRun` asserts it). No `build` or
+ * read runs then (§CONF-CORE). The later command, `later` under `--json`,
+ * takes that entry over: it exits 0, and `.xspec/lock` is absent once it
+ * ends (T13.5-11). Refused `workspace-busy` (14.26, told by its error
+ * document), it meets the reuse check: an identifier of the killed group
+ * listed again voids the trial — rerun on a fresh workspace by
+ * `runVoidableTrial`, a bounded number of times, exhaustion a harness error
+ * (H-11) — while a refusal with none listed fails the test, diagnosed
+ * (§VIOL-CORE-STALELOCK).
+ */
+async function killWhileHeld(
+  product: ProductBinding,
+  operation: SessionOperation,
+  later: SessionOperation,
+): Promise<void> {
+  const label = `T13.5-3 ${operation.what} killed while held, then ${later.what}`;
+  await runVoidableTrial(label, async (attempt) => {
     await withWorkspace(CORE_DECL, async (workspace) => {
-      await buildOk(product, workspace, "T13.5-3 staging `build`");
-
-      const hold = holdPathFor(workspace, "hold-killed.tmp");
-      const context1 =
-        "T13.5-3 held `rename specs/A.mdx a a2 --test-hold <path>`";
-      const running = await startProduct(product, {
-        cwd: workspace.root,
-        argv: ["rename", "specs/A.mdx", "a", "a2", "--test-hold", hold],
+      const context = `${label} (trial ${String(attempt)})`;
+      const items = await stageSessionWorkspace(product, workspace, context);
+      const dead = await killHeldRun(product, {
+        root: workspace.root,
+        argv: operation.argv(items),
+        holdPath: holdPathFor(workspace, "hold-killed.tmp"),
+        context: `${context}: the held ${operation.what}`,
       });
-      try {
-        await awaitHoldFile(running, hold, context1);
-        running.kill("SIGKILL");
-        // The kill settles the run; the death's shape is not asserted.
-        await running.waitForExit();
-      } finally {
-        running.kill();
-        // Deliberately no hold-file cleanup before the subsequent command:
-        // everything the terminated holder left behind stays exactly as the
-        // kill left it — a terminated holder never blocks (SPEC 13.5).
-      }
-
-      const context2 =
-        "T13.5-3 subsequent `rename specs/A.mdx g g2` after the holder was " +
-        "killed";
+      const laterContext =
+        `${context}: the later ${later.what} --json, started once no ` +
+        `process of the killed group was listed`;
       const result = await runBounded(
         product,
         workspace.root,
-        ["rename", "specs/A.mdx", "g", "g2"],
-        context2,
+        [...later.argv(items), "--json"],
+        laterContext,
       );
+      if (
+        result.exitCode === 2 &&
+        expectErrorDocument(result, laterContext).code === "workspace-busy"
+      ) {
+        // TEST-SPEC T13.5-3's reuse check: the trial void where an
+        // identifier of the killed group is listed again (13.5's gap), a
+        // diagnosed failure where none is.
+        await applyReuseCheck(
+          dead.killed.identifiers,
+          `${laterContext} — ${summarizeResult(result)}`,
+        );
+      }
       assertExitCode(
         result,
         0,
-        `${context2}: a terminated holder never blocks — the subsequent ` +
-          `mutating command succeeds whether or not the killed operation's ` +
-          `writes landed (SPEC 13.5; it renames \`g\`, independent of the ` +
-          `killed \`a\`→\`a2\`, never a retry of it)`,
+        `${laterContext}: a terminated holder never blocks — the later ` +
+          `mutating command takes the dead run's entry over and succeeds, ` +
+          `never refused workspace-busy (14.26) outside 13.5's gap, whether ` +
+          `or not the killed operation's writes landed (SPEC 13.5: an entry ` +
+          `whose run has terminated is a leftover, removed at acquisition)`,
+      );
+      await assertLockPathAbsent(
+        workspace.root,
+        `${laterContext}: once it has ended, the dead run's entry taken ` +
+          `over and its own released`,
       );
     });
+  });
+}
+
+/**
+ * The fixed fractions of a twin's lift-to-exit span at which T13.5-3's
+ * past-the-hold kills land, each after its own run's lift — one fixed rule,
+ * spread, and count per command, in CI as everywhere (E-5). Scheduling
+ * choreography only, never an assertion input (H-10): every assertion of a
+ * kill is conditioned on what the kill found, and holds for a conforming
+ * product under every timing.
+ */
+const PAST_THE_HOLD_KILL_FRACTIONS: readonly number[] = [
+  0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1,
+];
+
+/** A past-the-hold twin: its operation held, lifted, and run to its end. */
+interface PastTheHoldTwin {
+  /** Its run: exit 0. */
+  readonly result: RunResult;
+  /** Its workspace's final state. */
+  readonly final: DirectorySnapshot;
+  /**
+   * The snapshot key of every path its run changed — added, removed, or
+   * changed against its pre-invocation state, the lock path aside (H-6).
+   */
+  readonly changed: readonly string[];
+  /** The span from its lift to its exit, in milliseconds. */
+  readonly spanMs: number;
+}
+
+/** `name` within `dir`, byte for byte. */
+function joinPathBytes(dir: Buffer, name: Buffer): Buffer {
+  return Buffer.concat([dir, Buffer.from("/"), name]);
+}
+
+/**
+ * Copy the tree under `from` into the existing empty directory `to`, byte
+ * for byte: directories (each given its mode once filled), plain files
+ * (bytes and mode), and symbolic links (targets verbatim), names as bytes.
+ * Anything else is a harness error: no such entry is the product's state
+ * here.
+ */
+async function copyTreeBytes(from: Buffer, to: Buffer): Promise<void> {
+  const names = (await fsp.readdir(from, { encoding: "buffer" })).sort(
+    Buffer.compare,
+  );
+  for (const name of names) {
+    const source = joinPathBytes(from, name);
+    const destination = joinPathBytes(to, name);
+    const stats = await fsp.lstat(source);
+    if (stats.isDirectory()) {
+      await fsp.mkdir(destination);
+      await copyTreeBytes(source, destination);
+      await fsp.chmod(destination, stats.mode & 0o7777);
+    } else if (stats.isFile()) {
+      await fsp.copyFile(source, destination, fsp.constants.COPYFILE_EXCL);
+      await fsp.chmod(destination, stats.mode & 0o7777);
+    } else if (stats.isSymbolicLink()) {
+      await fsp.symlink(
+        await fsp.readlink(source, { encoding: "buffer" }),
+        destination,
+      );
+    } else {
+      throw new Error(
+        `harness error: T13.5-3's workspace copy meets ${source.toString()}, ` +
+          `neither a directory, a plain file, nor a symbolic link`,
+      );
+    }
+  }
+}
+
+/**
+ * Run `body` on a fresh workspace holding a byte copy of the whole tree
+ * `base` snapshots — T13.5-3's past-the-hold copies: each kill lands "on a
+ * fresh copy of that workspace", and the twin runs on "an identical
+ * workspace" — then dispose of it. The copy is checked against `base`
+ * before `body` runs (a difference is a harness error, never a product
+ * verdict). Nothing judges it as a staging: its sources were staged, and
+ * judged, in the base (S-9), the rest being the product's own state; and no
+ * command runs on it but the run under test (§CONF-CORE: no `build` or read
+ * on these copies, their items learned on the base before copying).
+ */
+async function withCopyOf<T>(
+  base: DirectorySnapshot,
+  body: (copy: TestWorkspace) => Promise<T>,
+): Promise<T> {
+  return await withWorkspace({}, async (copy) => {
+    await copyTreeBytes(Buffer.from(base.root), Buffer.from(copy.root));
+    const differences = diffSnapshots(base, await snapshotDirectory(copy.root));
+    if (differences.length > 0) {
+      throw new Error(
+        `harness error: T13.5-3's copy of ${base.root} at ${copy.root} ` +
+          `differs from it: ` +
+          differences
+            .slice(0, 10)
+            .map((change) => `${change.change} ${change.path}`)
+            .join(", "),
+      );
+    }
+    return await body(copy);
+  });
+}
+
+/**
+ * Start `argv` under `--test-hold` in `copy` — in a process group of its
+ * own, so that a kill reaches every process the run started (T13.5-3's
+ * discipline) — await its hold file, and lift the hold, deleting it.
+ * Resolves with the run and the instant of its lift (`performance.now()`).
+ * A run never holding fails diagnosed (H-8), its group killed first.
+ */
+async function startHeldAndLift(
+  product: ProductBinding,
+  copy: TestWorkspace,
+  argv: readonly string[],
+  holdName: string,
+  context: string,
+): Promise<{ readonly running: RunningProduct; readonly liftedAt: number }> {
+  const hold = holdPathFor(copy, holdName);
+  const running = await startProduct(product, {
+    cwd: copy.root,
+    argv: [...argv, "--test-hold", hold],
+    processGroup: true,
+  });
+  try {
+    await awaitHoldFile(running, hold, context);
+    await releaseHoldFile(hold);
+    return { running, liftedAt: performance.now() };
+  } catch (error) {
+    await running.killGroup().catch((kill: unknown) => {
+      rethrowHarnessError(kill);
+    });
+    await releaseHoldFile(hold);
+    throw error;
+  }
+}
+
+/**
+ * The past-the-hold twin of `operation` (TEST-SPEC T13.5-3: "the same
+ * operation held and lifted alike on an identical workspace, that span
+ * measured on it"): on a fresh copy of the base, held, lifted as soon as
+ * its hold file appears — as each kill's run is — and run to its end: exit
+ * 0, an operation succeeding there, `.xspec/lock` absent once it ends (SPEC
+ * 13.5: release on every normal end; T13.5-11). The span from its lift to
+ * its exit is measured and the paths its run changed recorded.
+ */
+async function measurePastTheHoldTwin(
+  product: ProductBinding,
+  base: DirectorySnapshot,
+  operation: SessionOperation,
+  items: SessionItems,
+): Promise<PastTheHoldTwin> {
+  const context = `T13.5-3 past the hold: the twin ${operation.what}, held and lifted`;
+  return await withCopyOf(base, async (twin) => {
+    const before = await snapshotDirectory(twin.root);
+    const { running, liftedAt } = await startHeldAndLift(
+      product,
+      twin,
+      operation.argv(items),
+      "hold-twin.tmp",
+      context,
+    );
+    let result: RunResult;
+    try {
+      result = await running.waitForExit();
+    } catch (error) {
+      // Whatever still runs of the group goes before any verdict.
+      await running.killGroup().catch((kill: unknown) => {
+        rethrowHarnessError(kill);
+      });
+      rethrowHarnessError(error);
+      return fail(
+        `${context}: once its hold is lifted the command must proceed and ` +
+          `end on its own (SPEC 13.5; H-8: a hang is a diagnosed failure) — ` +
+          messageOf(error),
+      );
+    }
+    const spanMs = performance.now() - liftedAt;
+    assertExitCode(
+      result,
+      0,
+      `${context}: an operation succeeding on the base workspace (TEST-SPEC ` +
+        `T13.5-3) completes normally once its hold is lifted (SPEC 13.5)`,
+    );
+    await assertLockPathAbsent(
+      twin.root,
+      `${context}: once it has ended (SPEC 13.5: release on every normal ` +
+        `end; T13.5-11)`,
+    );
+    const final = await snapshotDirectory(twin.root);
+    return {
+      result,
+      final,
+      changed: diffSnapshots(before, final).map((change) => change.key),
+      spanMs,
+    };
+  });
+}
+
+/** Whether two snapshot entries (either absent) hold one byte state. */
+function sameEntryState(
+  first: SnapshotEntry | undefined,
+  second: SnapshotEntry | undefined,
+): boolean {
+  if (first === undefined || second === undefined) return first === second;
+  return describeEntryDifference(first, second) === undefined;
+}
+
+/** Snapshot keys rendered for a diagnosis, at most ten. */
+function renderKeys(keys: readonly string[]): string {
+  const shown = keys.slice(0, 10).map(displaySnapshotPath);
+  if (keys.length > shown.length) {
+    shown.push(`… and ${String(keys.length - shown.length)} more`);
+  }
+  return shown.join(", ");
+}
+
+/**
+ * One past-the-hold kill (TEST-SPEC T13.5-3): on a fresh copy of the base,
+ * `operation` is held, lifted, and — `fraction` of its twin's lift-to-exit
+ * span after the lift — killed under the exit-collection discipline
+ * (`killGroup`: the whole group killed with SIGKILL, the started process's
+ * exit collected, no process of the group listed), its group confirmed
+ * gone before the lock path is inspected; no later command runs, the reuse
+ * check aside. The collected exit tells the kill's landing: SIGKILL where
+ * the kill, not a normal exit, ended the run. Where it did, while some path
+ * the twin's run changed — a source, the journal, a session file, a derived
+ * file, or graph data — did not yet hold the twin's final state, the run
+ * had not made its last write, so had not released: `.xspec/lock` holds
+ * exactly one entry, a plain file — the dead run's, a leftover (SPEC 13.5:
+ * a run's entry stands until its release, which comes as the command ends,
+ * after its last write; an abnormal termination leaves it). A kill ending
+ * the run with every such path already in its final state is judged no
+ * further: the run may then have been releasing. A run that exited before
+ * the kill landed ends exactly as its twin — exit code, output, and
+ * workspace byte-equal (H-6: the lock path aside) — with `.xspec/lock`
+ * absent (T13.5-11).
+ */
+async function pastTheHoldKill(
+  product: ProductBinding,
+  base: DirectorySnapshot,
+  operation: SessionOperation,
+  items: SessionItems,
+  twin: PastTheHoldTwin,
+  fraction: number,
+): Promise<void> {
+  const delayMs = fraction * twin.spanMs;
+  const context =
+    `T13.5-3 past the hold: ${operation.what} killed ` +
+    `${delayMs.toFixed(1)} ms after its lift (${String(fraction)} of its ` +
+    `twin's ${twin.spanMs.toFixed(1)} ms lift-to-exit span)`;
+  await withCopyOf(base, async (copy) => {
+    const { running, liftedAt } = await startHeldAndLift(
+      product,
+      copy,
+      operation.argv(items),
+      "hold-kill.tmp",
+      context,
+    );
+    const remainingMs = delayMs - (performance.now() - liftedAt);
+    if (remainingMs > 0) await sleep(remainingMs);
+    let killed: KilledGroup;
+    try {
+      killed = await running.killGroup();
+    } catch (error) {
+      rethrowHarnessError(error);
+      return fail(
+        `${context}: the run must end on its own or by the kill, its exit ` +
+          `collected (SPEC 13.5; H-8) — ${messageOf(error)}`,
+      );
+    }
+    const { result } = killed;
+    const after = await snapshotDirectory(copy.root);
+    if (result.signal === "SIGKILL") {
+      const short = twin.changed.filter(
+        (key) =>
+          !sameEntryState(after.entries.get(key), twin.final.entries.get(key)),
+      );
+      if (short.length > 0) {
+        await assertLockDirectoryEntries(
+          copy.root,
+          { entries: 1 },
+          `${context}: the kill ended the run while ${renderKeys(short)} ` +
+            `did not yet hold the twin's final state, so the run had not ` +
+            `made its last write and had not released — its entry stands, ` +
+            `a dead run's leftover (SPEC 13.5: a run's entry stands until ` +
+            `its release, which comes as the command ends, after its last ` +
+            `write, so its exclusion spans every write it makes; an ` +
+            `abnormal termination leaves its entry)`,
+        );
+      }
+      return;
+    }
+    assertRunOutcomesEqual(
+      result,
+      twin.result,
+      `${context}: the run exited before the kill landed, so it ends ` +
+        `exactly as its twin (TEST-SPEC T13.5-3; H-6)`,
+      "the run",
+      "its twin",
+    );
+    assertSnapshotsEqual(
+      twin.final,
+      after,
+      `${context}: the run exited before the kill landed, so its workspace ` +
+        `is byte-equal to its twin's final state (TEST-SPEC T13.5-3; H-6: ` +
+        `the lock path aside)`,
+    );
+    await assertLockPathAbsent(
+      copy.root,
+      `${context}: the run exited before the kill landed, having released ` +
+        `as it ended (SPEC 13.5; T13.5-11)`,
+    );
+  });
+}
+
+/**
+ * T13.5-3's past-the-hold arm (SPEC 13.5: a run's entry stands until its
+ * release, which comes as the command ends, after its last write, so its
+ * exclusion spans every write it makes): one base workspace — a fresh
+ * session staging, freshly built and valid, holding the audit session `s`
+ * created while it was valid, its items learned, and nothing at
+ * `.xspec/lock` once its staging runs have ended — copied afresh for every
+ * run; for each mutating command in turn, its twin measured, then one kill
+ * at each fixed fraction of the twin's span, each on a fresh copy.
+ * Unsynchronized by design (E-5): it asserts only what a conforming product
+ * meets under every timing, and fails a product releasing at its lift — or
+ * anywhere short of its last write — on the runs whose kills land in that
+ * window (§VIOL-CORE-EARLYRELEASE: on every run).
+ */
+async function pastTheHoldArm(product: ProductBinding): Promise<void> {
+  await withWorkspace(CORE_DECL, async (workspace) => {
+    const context = "T13.5-3 past the hold: the base workspace";
+    const items = await stageSessionWorkspace(product, workspace, context);
+    await assertLockPathAbsent(
+      workspace.root,
+      `${context}, once its staging runs have ended (SPEC 13.5: release on ` +
+        `every normal end; T13.5-11)`,
+    );
+    const base = await snapshotDirectory(workspace.root);
+    for (const operation of T13_5_3_OPERATIONS) {
+      const twin = await measurePastTheHoldTwin(
+        product,
+        base,
+        operation,
+        items,
+      );
+      for (const fraction of PAST_THE_HOLD_KILL_FRACTIONS) {
+        await pastTheHoldKill(product, base, operation, items, twin, fraction);
+      }
+    }
+  });
+}
+
+const T13_5_3 = defineProductTest({
+  id: "T13.5-3",
+  title:
+    "each mutating command in turn (`rename`, file-form `move`, `review create/resolve/split`), held and killed under the exit-collection discipline — started in a process group of its own, the whole group killed with SIGKILL, the started process's exit collected, and no process of the group listed before anything follows — leaves `.xspec/lock` holding exactly one entry, a plain file (the dead run's leftover), which a subsequent mutating command — a different operation, succeeding whether or not the killed operation's writes landed, never a retry of it — takes over, exiting 0, never refused `workspace-busy` outside 13.5's gap, `.xspec/lock` absent once it ends (a busy refusal voids the trial, rerun on a fresh workspace a bounded number of times, where an identifier of the killed group is listed again, and fails the test where none is); past the hold, each command, on fresh copies of a freshly built valid workspace holding an audit session `s`, is held, lifted, and killed at fixed fractions of its twin's lift-to-exit span (the same operation held and lifted alike on an identical copy), its group confirmed gone before the lock path is inspected and no later command running: where the kill ended the run while some path the twin's run changed did not yet hold the twin's final state, `.xspec/lock` holds exactly one entry, a plain file — the dead run's, release coming only after a run's last write — and a run that exited before the kill landed ends exactly as its twin (exit code, output, and workspace byte-equal, H-6), `.xspec/lock` absent (SPEC 13.5, 14.26; E-5)",
+  run: async (product) => {
+    // Kills while held: each mutating command in turn, followed by the next
+    // one in T13_5_3_OPERATIONS (the last by the first).
+    for (const [index, operation] of T13_5_3_OPERATIONS.entries()) {
+      const later = T13_5_3_OPERATIONS[(index + 1) % T13_5_3_OPERATIONS.length];
+      if (later === undefined) {
+        throw new Error("T13.5-3: T13_5_3_OPERATIONS is empty");
+      }
+      await killWhileHeld(product, operation, later);
+    }
+    // Past the hold: kills spread across each twin's lift-to-exit span.
+    await pastTheHoldArm(product);
   },
 });
 

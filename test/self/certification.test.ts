@@ -2,7 +2,7 @@
 //
 // One per-fixture verification is generated below for every entry of the
 // CERTIFICATION_FIXTURES manifest (certification-fixtures.ts) — all six
-// conformers and all twenty-two violators — and the whole-document gate
+// conformers and all twenty-three violators — and the whole-document gate
 // (certification-document.test.ts) proves that manifest equal to
 // specs/CERTIFICATIONS.md, so certification demonstrably runs against each
 // fixture in the document (C-1).

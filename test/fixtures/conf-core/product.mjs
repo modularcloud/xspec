@@ -3087,6 +3087,19 @@ function refuseUnservedFlags(spelled, synopsis, flags) {
 // ---------------------------------------------------------------------------
 
 /**
+ * VIOL-CORE-EARLYRELEASE (CERTIFICATIONS.md): the sustained interval a run
+ * dwells after releasing at its hold point, before the rest of the command.
+ * Long relative to the time the rest of a run otherwise takes (a lifted
+ * `rename`, `move`, or mutating `review` subcommand here exits some 30–45
+ * ms after the lift, the hold file's 15 ms polling included), so it
+ * dominates the lift-to-exit span T13.5-3's past-the-hold arm spreads its
+ * kills across; short against every bound a run it lengthens meets (the
+ * subprocess driver's 30 s hang guard, the 15 s bound of the 13.5 tests'
+ * foreground runs, each test's budget — S-3).
+ */
+const EARLY_RELEASE_DWELL_MS = 1000;
+
+/**
  * Run a mutating command (SPEC 13.5): configuration, then workspace
  * exclusivity, then the `--test-hold` seam, then the checks a command judges
  * ahead of the refresh and its own writes, in the order 12.0 and 13.5 fix —
@@ -3251,6 +3264,25 @@ async function runMutating(
       return code;
     }
     await holdIfRequested();
+    if (deviations.releaseAtHold) {
+      // VIOL-CORE-EARLYRELEASE (CERTIFICATIONS.md): the run releases at its
+      // hold point instead of as it ends — once its hold is lifted (above),
+      // or, without the seam, straight after acquiring — deleting its
+      // entry, then the emptied lock directory and an emptied area
+      // directory its acquisition created, as release does (13.5); it then
+      // dwells for EARLY_RELEASE_DWELL_MS and proceeds with the rest of the
+      // command exactly as the conformer does, outside exclusivity,
+      // releasing nothing further (the `finally` below finds the no-op). A
+      // single deviation: 13.5's release point (as the command ends, after
+      // its last write) moved to the hold point; acquisition, the hold file
+      // — its creation failing on an occupied path, the run then ending at
+      // once with the conformer's release — every check, every write and
+      // its order, and every run's outcome are unchanged.
+      const early = lock;
+      lock = { release: async () => {} };
+      await early.release();
+      await sleep(EARLY_RELEASE_DWELL_MS);
+    }
     await judgeArguments(config);
     return await proceed(await judgeWorkspace(config));
   } finally {
@@ -4566,6 +4598,11 @@ async function commandReview(io, cwd, sub, args) {
  *   path, judged through the link, holds nothing; a link to an existing
  *   file or directory reads as occupied, failing with the conformer's usage
  *   error; see holdAtSeam.
+ * - `releaseAtHold` (VIOL-CORE-EARLYRELEASE): a run releases at its hold
+ *   point instead of as it ends — once its hold is lifted, or, without the
+ *   seam, straight after acquiring — then dwells for a sustained interval
+ *   and proceeds with the rest of the command outside exclusivity,
+ *   releasing nothing further; see runMutating.
  */
 let deviations = {};
 
