@@ -400,9 +400,10 @@ const WORKSPACE_BUSY = "workspace-busy";
 /**
  * `rename specs/A.mdx a a2`: T13.5-10's first mutating command, and (e)'s
  * held `rename` — its unstaged twin's final state the state that `rename`
- * leaves once it completes.
+ * leaves once it completes. Shared with T13.4-12's manual remedy
+ * (section-13.4-ii.ts: the next `rename` once an obstruction is deleted).
  */
-const RENAME_A: SessionOperation = {
+export const RENAME_A: SessionOperation = {
   what: "`rename specs/A.mdx a a2`",
   argv: () => ["rename", "specs/A.mdx", "a", "a2"],
 };
@@ -466,9 +467,10 @@ async function withWorkspace<T>(
  * CONF-CORE-shaped workspace: `stageSessionWorkspace`, then `.xspec/lock`
  * absent once its runs have ended (SPEC 13.5: release on every normal end),
  * so that whatever an arm stages there is the arm's alone. Returns the
- * session's items.
+ * session's items. Shared with T13.4-12's manual remedy (section-13.4-ii.ts),
+ * which stages (a)'s obstructions on it.
  */
-async function stageArmWorkspace(
+export async function stageArmWorkspace(
   product: ProductBinding,
   workspace: TestWorkspace,
   context: string,
@@ -538,7 +540,7 @@ const AREA_OCCUPANT_BYTES =
   "Not the graph-data area: an occupant left for manual deletion.\n";
 
 /** One obstruction (a): its description, its path, and its staging. */
-interface Obstruction {
+export interface Obstruction {
   readonly what: string;
   /** The obstructed path: the write failure's concerned path. */
   readonly path: typeof AREA_PATH | typeof LOCK_PATH;
@@ -657,9 +659,11 @@ async function relocateAreaBehindLink(
  * removes nothing but fails with the write failure of 14.24, leaving the
  * occupant for manual deletion, 13.4). Each link's target lies in a
  * directory of its own outside the workspace (helpers/lock-staging.ts); a
- * link to a directory targets one holding a plain file.
+ * link to a directory targets one holding a plain file. Shared with
+ * T13.4-12's manual remedy (section-13.4-ii.ts: each deleted by hand, the
+ * next `rename` proceeds).
  */
-const OBSTRUCTIONS: readonly Obstruction[] = [
+export const OBSTRUCTIONS: readonly Obstruction[] = [
   {
     what: "`.xspec` a plain file",
     path: AREA_PATH,

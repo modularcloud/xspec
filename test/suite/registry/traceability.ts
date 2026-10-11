@@ -591,6 +591,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // group, and 7.3's emission settings are carriage context with home
   // coverage at T13.3-*/T7-*/T7.3-1.
   "T13.4-11": ["13.4", "12.1", "12.2", "14"],
+  // T13.4-12 asserts 13.4's transient lock path through condition 10's and
+  // condition 22's absence at `check` (its title names both), 14.25's read
+  // failure at the lock path with its stable code, and condition 23's
+  // absence beside an unreadable leftover (14); its `inventory` reads
+  // (11.6), refreshing reads (13.3), the preview's answer fixed by no state
+  // of the lock path (6.6, home coverage at T6.6-3(a)), the dead run's entry
+  // a kill leaves (13.5, T13.5-3), and the manual remedy's next `rename`
+  // (13.5's acquisition, T13.5-10(a)) are carriage context.
+  "T13.4-12": ["13.4", "14"],
   "T13.5-1": ["13.5"],
   "T13.5-2": ["13.5", "14"],
   "T13.5-3": ["13.5", "14"],

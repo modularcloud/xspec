@@ -6,8 +6,11 @@
 // discipline names and keeps the permission it must keep — the directory
 // modes of `stageDirectoryMode` (T13.5-10(d), (h), T13.5-11) included, each
 // declared probe refused or kept as declared; that `restore()` reinstates
-// every recorded mode, idempotently, a directory-mode staging's restoring
-// nothing where its directory was renamed away; that unstageable objects — a
+// every recorded mode, idempotently, restoring nothing where a product's
+// removal took the staged object away or renamed it away (a file read
+// refusal's file removed, a listing refusal's or a directory-mode staging's
+// directory renamed away: H-8, the state left to the checks' diagnosis,
+// never a harness error); that unstageable objects — a
 // directory in the path form, a symbolic link, an absent object for a read
 // refusal — are staging errors, never refusals; that an entry the product
 // named is reached at its exact bytes whatever the name — not valid UTF-8,
@@ -249,7 +252,7 @@ test.runIf(onLinux)(
 );
 
 test.runIf(onLinux)(
-  "read refusal of a file (T14-10): mode 0o200 — the content read refused, a write-open allowed, the holding directory untouched; restore reinstates the mode",
+  "read refusal of a file (T14-10): mode 0o200 — the content read refused, a write-open allowed, the holding directory untouched; restore reinstates the mode, and restores nothing, without throwing, where the file was removed meanwhile (T13.4-12)",
   async () => {
     const workspace = await makeWorkspace();
     const target = workspace.path(".xspec/graph.json");
@@ -268,11 +271,18 @@ test.runIf(onLinux)(
     expect(Buffer.from(await fsp.readFile(target)).toString("utf8")).toBe(
       "{}\n",
     );
+    // A product's removal of the staged file meanwhile: nothing to restore,
+    // its state left to the checks' diagnosis — never a harness error.
+    const removed = tracked(await stageReadRefusalOfFile(target));
+    await fsp.unlink(target);
+    await removed.restore();
+    await removed.restore();
+    expect(await outcome(fsp.lstat(target))).toBe("ENOENT");
   },
 );
 
 test.runIf(onLinux)(
-  "read refusal of a directory (T14-10): mode 0o100 — the listing refused, entries reachable and readable by name, an empty directory stageable too; restore reinstates the mode",
+  "read refusal of a directory (T14-10): mode 0o100 — the listing refused, entries reachable and readable by name, an empty directory stageable too; restore reinstates the mode, and restores nothing, without throwing, where the directory was renamed away meanwhile (T13.4-12)",
   async () => {
     const workspace = await makeWorkspace();
     const dir = workspace.path("specs/b");
@@ -297,6 +307,15 @@ test.runIf(onLinux)(
     expect(await outcome(fsp.readdir(empty))).toBe("EACCES");
     await emptyStaging.restore();
     expect(await fsp.readdir(empty)).toEqual([]);
+    // A product's renaming of the staged directory away meanwhile: nothing
+    // restored, never a harness error.
+    const moved = tracked(await stageReadRefusalOfDirectory(empty));
+    const elsewhere = workspace.path("specs/renamed-listing");
+    await fsp.rename(empty, elsewhere);
+    await moved.restore();
+    expect(await modeOf(elsewhere)).toBe(0o100);
+    expect(await outcome(fsp.lstat(empty))).toBe("ENOENT");
+    await fsp.chmod(elsewhere, 0o755);
   },
 );
 

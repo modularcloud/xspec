@@ -371,12 +371,12 @@ import {
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
 // other keys — the CONF-CORE workspace shape (CERTIFICATIONS.md). A
-// staged-source record: T13.5-1, T13.5-4, T13.5-6, T13.5-8, and T13.5-10
-// stage it in workspaces created after a product invocation (CORE_DECL,
-// ISO_TWO_DECL), as T6.6-3's runs-while-held arm does (S-9's timing clause;
-// test/self/s9-staged-sources.test.ts).
+// staged-source record: T13.4-12, T13.5-1, T13.5-4, T13.5-6, T13.5-8, and
+// T13.5-10 stage it in workspaces created after a product invocation
+// (CORE_DECL, ISO_TWO_DECL), as T6.6-3's runs-while-held arm does (S-9's
+// timing clause; test/self/s9-staged-sources.test.ts).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.6-3/T13.5-1/T13.5-4/T13.5-6/T13.5-8/T13.5-10 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's and ISO_TWO_DECL's)",
+  "T6.6-3/T13.4-12/T13.5-1/T13.5-4/T13.5-6/T13.5-8/T13.5-10 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's and ISO_TWO_DECL's)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -407,13 +407,13 @@ const A_MDX = [
 // The source is staged in workspaces created after a body's first product
 // invocation (T13.5-1's stale arm, T13.5-4's storm pair, T13.5-6's serial and
 // concurrent pairs, T13.5-8's valid-workspace arms, T13.5-10's per-arm
-// workspaces and twins, T6.6-3's scheduling workspace) and, byte for byte,
-// by section-13.4.ts's tests (its later workspaces included), so it is one
-// staged-source record made from the string (S-9's before-any-product
-// clause; helpers/staged-mdx.ts) — the string stays for the staleness edit
-// below — staged wherever the bytes are.
+// workspaces and twins, T6.6-3's scheduling workspace, T13.4-12's per-arm
+// workspaces and twin) and, byte for byte, by section-13.4.ts's tests (its
+// later workspaces included), so it is one staged-source record made from
+// the string (S-9's before-any-product clause; helpers/staged-mdx.ts) — the
+// string stays for the staleness edit below — staged wherever the bytes are.
 export const CORE_A_STAGED = stagedMdx(
-  "T6.6-3/T13.4-1/T13.4-2/T13.4-3/T13.4-4/T13.4-5/T13.4-6/T13.5-1/T13.5-2/T13.5-3/T13.5-4/T13.5-6/T13.5-8/T13.5-10 specs/A.mdx (the CONF-CORE-shaped source: a holding a.k, then g; T13.4-6's specs/one/A.mdx too)",
+  "T6.6-3/T13.4-1/T13.4-2/T13.4-3/T13.4-4/T13.4-5/T13.4-6/T13.4-12/T13.5-1/T13.5-2/T13.5-3/T13.5-4/T13.5-6/T13.5-8/T13.5-10 specs/A.mdx (the CONF-CORE-shaped source: a holding a.k, then g; T13.4-6's specs/one/A.mdx too)",
   A_MDX,
 );
 

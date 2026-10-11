@@ -56,9 +56,13 @@
 //   selected into the Windows subset (E-6).
 //
 // Every staging records the modes it changes and returns a `restore()` that
-// reinstates them (idempotent). The workspace builder's disposal chmods its
-// tree writable before removal regardless, so a staging left unrestored by a
-// failing test never blocks cleanup.
+// reinstates them (idempotent) — each where its object still stands: an
+// object a product's removal took away, or renamed away, restores nothing,
+// its state left to the checks' diagnosis (H-8: a product fault is a
+// diagnosed failure, never a harness error; T13.4-12's unreadable entry and
+// unlistable lock directory, which a product may remove). The workspace
+// builder's disposal chmods its tree writable before removal regardless, so
+// a staging left unrestored by a failing test never blocks cleanup.
 
 import { Buffer } from "node:buffer";
 import { randomBytes } from "node:crypto";
@@ -147,7 +151,11 @@ export interface PermissionStaging {
   readonly mode: StagingMode;
   /** The staged object as given: a path string, or its exact bytes. */
   readonly path: string | Buffer;
-  /** Reinstate every recorded mode, in reverse order of change; idempotent. */
+  /**
+   * Reinstate every recorded mode, in reverse order of change; idempotent.
+   * An object no longer at its path — a product's removal took it away —
+   * restores nothing, its state left to the checks' diagnosis.
+   */
   restore(): Promise<void>;
 }
 
@@ -386,6 +394,11 @@ function makeStaging(
         try {
           await fsp.chmod(record.path, record.mode);
         } catch (thrown) {
+          // Nothing stands there any more — a product's removal took the
+          // object away, or put a non-directory above it: nothing to
+          // restore, its state left to the checks' diagnosis (H-8).
+          const code = errorCode(thrown);
+          if (code === "ENOENT" || code === "ENOTDIR") continue;
           throw new HarnessStagingError(
             mode,
             displayPath(staged),

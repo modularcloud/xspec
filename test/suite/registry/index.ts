@@ -77,6 +77,7 @@ import { section127Tests } from "./section-12.7.js";
 import { section131to132Tests } from "./section-13.1-13.2.js";
 import { section133Tests } from "./section-13.3.js";
 import { section134Tests } from "./section-13.4.js";
+import { section134iiTests } from "./section-13.4-ii.js";
 import { section135Tests } from "./section-13.5.js";
 import { section135iiTests } from "./section-13.5-ii.js";
 import { section14ValidationTests } from "./section-14.js";
@@ -159,6 +160,7 @@ export const productTestSuite = new ProductTestSuite([
   ...section131to132Tests,
   ...section133Tests,
   ...section134Tests,
+  ...section134iiTests,
   ...section135Tests,
   ...section135iiTests,
   ...section14ValidationTests,
