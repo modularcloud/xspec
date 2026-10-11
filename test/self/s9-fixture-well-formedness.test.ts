@@ -48,6 +48,7 @@ import { P7_FORM_VECTORS } from "../suite/registry/section-16-p7.js";
 import { P9_FORM_VECTORS } from "../suite/registry/section-16-p9.js";
 import { P12_FORM_VECTORS } from "../suite/registry/section-16-p12.js";
 import { P13_FORM_VECTORS } from "../suite/registry/section-16-p13.js";
+import { P14_FORM_VECTORS } from "../suite/registry/section-16-p14.js";
 import {
   I3_HALL_MOVED_SOURCE,
   I3_ROOM_MOVED_SOURCE,
@@ -491,6 +492,22 @@ describe("S-9: every form the P-13 rendering composes derives", () => {
     );
   });
   test.each(P13_FORM_VECTORS)("%s", (_name, source) => {
+    expectDerives(source);
+  });
+});
+
+// P-14's spec sources are valid by construction (TEST-SPEC §16 preamble):
+// every form its rendering composes — the import block (`./` and `../`
+// specifiers), the anchor, single and array `d` references and embeddings
+// in the local and external forms, children — spelled over fixed models.
+describe("S-9: every form the P-14 rendering composes derives", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(P14_FORM_VECTORS.length).toBe(5);
+    expect(new Set(P14_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      P14_FORM_VECTORS.length,
+    );
+  });
+  test.each(P14_FORM_VECTORS)("%s", (_name, source) => {
     expectDerives(source);
   });
 });

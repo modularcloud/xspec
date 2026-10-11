@@ -13,7 +13,8 @@
 // them); plain configuration files; a `.tsx` file holding JSX; and the
 // fixed vector set of the forms the §16 generators compose — every
 // property's configuration file, P-7's capture sources, P-13's `c0/U.ts`
-// and `c1/V.ts`, and the fuzz base code source (each draw's own are judged
+// and `c1/V.ts`, P-14's code sources, and the fuzz base code source (each
+// draw's own are judged
 // per draw by the property runner, helpers/property.ts `drawSources`).
 // Every one it declares unparseable is rejected both ways: `010`, `09`,
 // U+1C89 in an identifier, the T7-2 syntax error, and T14-12's staged code
@@ -41,6 +42,7 @@ import { P1_TS_FORM_VECTORS } from "../suite/registry/section-16-p1.js";
 import { P10_TS_FORM_VECTORS } from "../suite/registry/section-16-p10.js";
 import { P12_TS_FORM_VECTORS } from "../suite/registry/section-16-p12.js";
 import { P13_TS_FORM_VECTORS } from "../suite/registry/section-16-p13.js";
+import { P14_TS_FORM_VECTORS } from "../suite/registry/section-16-p14.js";
 import { P15_TS_FORM_VECTORS } from "../suite/registry/section-16-p15.js";
 import { P2_P3_TS_FORM_VECTORS } from "../suite/registry/section-16-p2-p3.js";
 import { P4_TS_FORM_VECTORS } from "../suite/registry/section-16-p4.js";
@@ -596,7 +598,9 @@ describe("S-9 (TypeScript): every code source and configuration T14-12's positiv
 // configuration file (the coverage check below reads the registry) — P-7's
 // and P-13's composed per draw, the rest fixed records also judged
 // by test/self/s9-staged-sources.test.ts — P-7's capture sources, P-13's
-// `c0/U.ts` and `c1/V.ts`, and P-8's and P-11's base code source, each
+// `c0/U.ts` and `c1/V.ts`, P-14's code sources (top-level markers,
+// function units, `src/lib/` specifiers), and P-8's and P-11's base code
+// source, each
 // built from its generator's own templates and constants and judged under
 // the grammar its staged path selects, through the per-draw judgement the
 // property runner applies to each draw (helpers/property.ts `drawSources`).
@@ -618,6 +622,7 @@ const GENERATED_TS_FORM_VECTORS: Readonly<
   "P-10": P10_TS_FORM_VECTORS,
   "P-12": P12_TS_FORM_VECTORS,
   "P-13": P13_TS_FORM_VECTORS,
+  "P-14": P14_TS_FORM_VECTORS,
   "P-15": P15_TS_FORM_VECTORS,
 };
 
@@ -642,7 +647,7 @@ describe("S-9 (TypeScript): every configuration file and code source the §16 ge
     for (const vectors of Object.values(GENERATED_TS_FORM_VECTORS)) {
       expect(vectors.some(([, path]) => path === "xspec.config.ts")).toBe(true);
     }
-    expect(GENERATED_TS_VECTORS.length).toBe(23);
+    expect(GENERATED_TS_VECTORS.length).toBe(28);
     expect(new Set(GENERATED_TS_VECTORS.map(([name]) => name)).size).toBe(
       GENERATED_TS_VECTORS.length,
     );

@@ -100,6 +100,7 @@ import { section16P10Tests } from "./section-16-p10.js";
 import { section16P11Tests } from "./section-16-p11.js";
 import { section16P12Tests } from "./section-16-p12.js";
 import { section16P13Tests } from "./section-16-p13.js";
+import { section16P14Tests } from "./section-16-p14.js";
 import { section16P15Tests } from "./section-16-p15.js";
 
 export const productTestSuite = new ProductTestSuite([
@@ -189,6 +190,7 @@ export const productTestSuite = new ProductTestSuite([
   ...section16P11Tests,
   ...section16P12Tests,
   ...section16P13Tests,
+  ...section16P14Tests,
   ...section16P15Tests,
 ]);
 
