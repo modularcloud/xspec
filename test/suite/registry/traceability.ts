@@ -622,6 +622,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "10.7",
   ],
   "T13.5-8": ["13.5", "13.3", "6.3", "6.4", "6.5", "6.6", "12.0", "14"],
+  // T13.5-9 asserts 13.5's reach — every other run on the machine against
+  // the held workspace refused at acquisition, in any environment, from any
+  // working directory, through any path to the root, by any user who can
+  // write it, modifying nothing, the holder's entry untouched and alone —
+  // and the stable codes of those refusals: `workspace-busy`, and for the
+  // second user `write-failure` or `read-failure` (14). The session
+  // staging, the twins' outcomes, and the holder's completion are carriage
+  // context with home coverage at T10.7-* and T13.5-2.
+  "T13.5-9": ["13.5", "14"],
   // T13.5-10(d) asserts 12.0 beside 13.5: its determinism arms' diagnostics
   // byte-identical (no entry or absolute path named), and its unbuilt arm's
   // acquisition preceding the session check of `resolve` and `split`. Its

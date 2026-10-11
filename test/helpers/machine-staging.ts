@@ -76,6 +76,12 @@
 //   `secondUserCreatesIn` answers, without judging, whether the second user
 //   can create and remove a file in one directory — T13.5-9 asks it again
 //   once the holder is held, where a refusal is no staging error.
+// - Reclaiming (T13.5-9): `reclaimForHarness` gives every entry under a
+//   root to the harness's own uid (`sudo -n chown -R -h`, no link
+//   followed), after each run as the second user and before the
+//   workspace's disposal: a product writing where T13.5-9 requires a
+//   refusal leaves the harness nothing it cannot read or remove, so its
+//   failure stays a diagnosed one (H-8).
 // - Fresh process-identifier namespaces (T13.5-10(e)–(g); E-1, E-3). Made
 //   with `sudo` like the stagings above, outside every product invocation,
 //   each run in one dropping back to the harness's own uid, gid, and
@@ -1382,6 +1388,43 @@ export async function secondUserCreatesIn(
     );
   }
   return { ok: outcome.created && outcome.removed, code: outcome.code };
+}
+
+// ---------------------------------------------------------------------------
+// Reclaiming what the second user's runs made (T13.5-9)
+
+/**
+ * Give every entry under `root`, `root` itself included, to the harness's
+ * own uid (T13.5-9, module header): `sudo -n chown -R -h <uid> -- <root>` —
+ * no symbolic link followed, a link's own owner changed and never its
+ * target's, modes and groups untouched. A run as the second user in a
+ * group-staged workspace makes nothing there when it is refused, as T13.5-9
+ * requires; a product proceeding instead leaves entries the harness's own
+ * identity may neither read nor remove (a file of mode 0600, a directory
+ * the shared group may not write). Reclaimed after each such run and before
+ * the workspace's disposal, they keep every later observation a diagnosed
+ * outcome (H-8) and the disposal possible. A failure is
+ * `HarnessStagingError` (mode `second-user`).
+ */
+export async function reclaimForHarness(root: string): Promise<void> {
+  requireLinux("second-user", root);
+  await requireAdministrativeAccess();
+  const { uid } = harnessIds();
+  const outcome = await runAdministrative([
+    "chown",
+    "-R",
+    "-h",
+    String(uid),
+    "--",
+    root,
+  ]);
+  if (outcome.code !== 0) {
+    throw new HarnessStagingError(
+      "second-user",
+      root,
+      `\`sudo -n chown -R -h ${String(uid)} -- ${root}\` failed (${describeOutcome(outcome)}): what the second user's runs made under the root cannot be reclaimed for the harness`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

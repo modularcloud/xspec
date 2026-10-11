@@ -18,6 +18,8 @@
 //   fails as a harness error where the group cannot reach it; whether the
 //   second user can create and remove a file in a directory is answered
 //   unjudged.
+// - What a run as the second user made is reclaimed for the harness: owned,
+//   read, and removed afterwards, modes kept, no link's target touched.
 // - A launched run's processes, which the harness's own identity may not
 //   signal, are killed through the launcher: `killGroup` reaches the run's
 //   grandchild and leaves nothing listed, and so does the hang guard.
@@ -40,6 +42,7 @@ import {
   ensureSecondUser,
   mountAt,
   parseMountInfo,
+  reclaimForHarness,
   SECOND_USER_NAME,
   secondUserCreatesIn,
   secondUserLauncher,
@@ -89,7 +92,8 @@ async function sharedScratch(): Promise<string> {
 // with and as, and exits 7; `group` and `hang` start a grandchild in the
 // stand-in's own process group sharing its streams, record both identifiers
 // (written whole, then renamed into place), then (`group`) write the hold
-// file, and idle.
+// file, and idle; `make` makes a directory holding a file of mode 0600 and
+// a symbolic link to a file it writes elsewhere, and exits 0.
 const STANDIN_SOURCE = `import { spawn } from "node:child_process";
 import fs from "node:fs";
 
@@ -144,6 +148,13 @@ switch (mode) {
   case "hang":
     recordPids(args[0]);
     idle();
+    break;
+  case "make":
+    fs.mkdirSync(args[0]);
+    fs.writeFileSync(args[0] + "/inner", "made by the second user", { mode: 0o600 });
+    fs.writeFileSync(args[1], "a link's target");
+    fs.symlinkSync(args[1], args[0] + "/link");
+    process.exit(0);
     break;
   default:
     idle();
@@ -328,6 +339,42 @@ test("whether the second user can create and remove a file in a directory is ans
     code: "EACCES",
   });
   expect(await fsp.readdir(writable)).toEqual([]);
+}, 120_000);
+
+test("reclaiming a tree for the harness: what a run as the second user made there — a directory the shared group may not write, holding a file of mode 0600 and a symbolic link — the harness may neither read nor remove before, and owns, reads, and removes once reclaimed, modes kept; the link's target outside the tree keeps its owner (T13.5-9)", async () => {
+  const user = await ensureSecondUser();
+  const { scratch, binding } = await standin();
+  const elsewhere = await sharedScratch();
+  const made = path.join(scratch, "made");
+  const inner = path.join(made, "inner");
+  const link = path.join(made, "link");
+  const target = path.join(elsewhere, "target");
+  const launcher = await secondUserLauncher(user);
+  const result = await runProduct(binding, {
+    cwd: scratch,
+    argv: ["make", made, target],
+    launcher,
+    timeoutMs: 60_000,
+  });
+  expect(result.exitCode, result.stderr).toBe(0);
+  for (const entry of [made, inner, link, target]) {
+    expect((await fsp.lstat(entry)).uid, entry).toBe(user.uid);
+  }
+  const refusedRead = await rejectionOf(fsp.readFile(inner));
+  expect((refusedRead as NodeJS.ErrnoException).code).toBe("EACCES");
+  const refusedRemoval = await rejectionOf(fsp.unlink(inner));
+  expect((refusedRemoval as NodeJS.ErrnoException).code).toBe("EACCES");
+
+  await reclaimForHarness(scratch);
+  for (const entry of [scratch, made, inner, link]) {
+    expect((await fsp.lstat(entry)).uid, entry).toBe(harnessUid());
+  }
+  expect((await fsp.lstat(target)).uid).toBe(user.uid);
+  expect((await fsp.lstat(inner)).mode & 0o777).toBe(0o600);
+  expect(await fsp.readlink(link)).toBe(target);
+  expect(await fsp.readFile(inner, "utf8")).toBe("made by the second user");
+  await fsp.rm(made, { recursive: true });
+  expect(await fsp.readdir(scratch)).toEqual(["standin.mjs"]);
 }, 120_000);
 
 test("a launched run's processes, which the harness's own identity may not signal, are killed through the launcher: killGroup reaches the grandchild, collects the exit as SIGKILL, and leaves nothing listed, and so does the hang guard (T13.5-3's discipline)", async () => {
