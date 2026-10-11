@@ -375,8 +375,9 @@ import {
 // T13.5-6, T13.5-8, T13.5-10, T13.5-11, T13.5-13, T14-6, T14-9, and T14-10
 // stage it in workspaces created after a product invocation (CORE_DECL,
 // section-13.5-vii.ts's ISO_TWO_DECL and NESTED_DECL — at both of its
-// roots — section-13.5-vi.ts's T13_5_13_DECL), as T6.6-3's runs-while-held
-// arm does (S-9's timing clause; test/self/s9-staged-sources.test.ts).
+// roots — section-13.5-vi.ts's T13_5_13_DECL), as T6.6-3's scheduling and
+// acquisition arms do (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
 export const SPECS_ONLY_CONFIG = stagedTs(
   "T6.6-3/T11.6-3/T12.7-3/T13.4-12/T13.5-1/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-13/T14-6/T14-9/T14-10 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's, ISO_TWO_DECL's, NESTED_DECL's at both roots, and T13_5_13_DECL's)",
   `import { defineConfig } from "xspec"
@@ -411,7 +412,8 @@ const A_MDX = [
 // the outer root's source in its nested pair — in section-13.5-vii.ts,
 // T13.5-8's valid-workspace arms, T13.5-10's,
 // T13.5-11's, and T13.5-12's per-arm workspaces and twins — T13.5-12(c)
-// creating it in one during a hold — T6.6-3's scheduling workspace,
+// creating it in one during a hold — T6.6-3's scheduling workspace, its
+// acquisition arms' workspaces and their unobstructed twin,
 // T13.4-12's per-arm workspaces and twin, T13.5-13's trial and twin
 // workspaces, T11.6-3's lock-path arms' workspaces, the busy arms' of
 // T12.7-3 and T14-6, `judgeBusyRefusal`, T14-9's acquisition-write arms'
@@ -428,7 +430,8 @@ export const CORE_A_STAGED = stagedMdx(
 /**
  * The CONF-CORE-shaped staging shared by the 13.5 lock tests — and by
  * T6.6-3's runs-while-held arm, which per CERTIFICATIONS.md shares this
- * drive-during-hold choreography (T13.5-2's staging).
+ * drive-during-hold choreography (T13.5-2's staging), and its acquisition
+ * arms.
  */
 export const CORE_DECL: WorkspaceDecl = {
   files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/A.mdx": CORE_A_STAGED },
@@ -455,10 +458,11 @@ async function withWorkspace<T>(
 }
 
 // The hold-path and hold-await helpers live in write-refusal-staging.ts (the
-// seam-held staging choreography shared with T14-9); re-exported here for
-// T6.6-3, which shares this module's drive-during-hold choreography
-// (CERTIFICATIONS.md).
-export { awaitHoldFile, holdPathFor };
+// seam-held staging choreography shared with T14-9); the hold path's is
+// re-exported here for T6.6-3, which shares this module's drive-during-hold
+// choreography (`whileCommand1Holds`, `nonMutatingRunWhileHeld`;
+// CERTIFICATIONS.md).
+export { holdPathFor };
 
 /** The hold file must be an empty plain file ("creates an empty file"). */
 async function assertEmptyHoldFile(
@@ -1574,8 +1578,12 @@ export async function stageSessionWorkspace(
  * complete normally, exit 0 (SPEC 13.5), so the refusals `body` observed are
  * attributable to the held command alone. A wait the run never ends is a
  * diagnosed failure (H-8); a harness error propagates as itself (H-11).
+ * Shared with T6.6-3's runs-while-held arm (section-6.6.ts; CERTIFICATIONS.md's
+ * Exclusions entry on previews: T13.5-2's staging and drive-during-hold
+ * choreography), whose `body` runs a preview to completion while command 1
+ * holds.
  */
-async function whileCommand1Holds<T>(
+export async function whileCommand1Holds<T>(
   product: ProductBinding,
   workspace: TestWorkspace,
   holdName: string,
@@ -1605,8 +1613,9 @@ async function whileCommand1Holds<T>(
     assertExitCode(
       result,
       0,
-      `${context}: completes normally once its hold is lifted, so the ` +
-        `refusals while it held are attributable to it alone (SPEC 13.5)`,
+      `${context}: completes normally once its hold is lifted, so what ran ` +
+        `while it held met a workspace it held — the refusals then ` +
+        `attributable to it alone (SPEC 13.5)`,
     );
     return value;
   } finally {
@@ -2520,7 +2529,9 @@ export function assertCleanCheckReport(
  * (H-6; the machinery every lock-path inclusion shares): whatever occupied
  * the lock path as the read started — the holder's entry — occupies it
  * byte-identical, name and content, nothing added beside it, a read
- * acquiring nothing and writing nothing there (SPEC 13.4).
+ * acquiring nothing and writing nothing there (SPEC 13.4). The step is
+ * `nonMutatingRunWhileHeld`'s, which `build` during the hold and T6.6-3's
+ * preview while held share.
  */
 async function readWhileHeld(
   product: ProductBinding,
@@ -2530,43 +2541,125 @@ async function readWhileHeld(
   preInvocation: DirectorySnapshot,
 ): Promise<void> {
   const context = `T13.5-4 ${read.what} while the rename is held`;
+  await nonMutatingRunWhileHeld(product, workspace, {
+    argv: read.argv,
+    context,
+    busyRule:
+      `no read command reports the busy condition — the stable code ` +
+      `"${WORKSPACE_BUSY}" of 14.26, which the refused mutating command ` +
+      `alone reports (SPEC 13.5, 14.26; TEST-SPEC T14-4)`,
+    judge: (result) => {
+      if (read.checkReport === true) assertNoLockPathFinding(result, context);
+      assertExitCode(
+        result,
+        0,
+        `${context}: read commands still run while a mutating command is ` +
+          `held, exiting as they did before it (SPEC 13.5: every command ` +
+          `but the mutating ones may run concurrently with them)`,
+      );
+      if (read.checkReport === true) assertCleanCheckReport(result, context);
+      assertBytesEqual(
+        result.stdoutBytes,
+        reference.stdoutBytes,
+        `${context}: observes the prior state — stdout byte-identical to ` +
+          `the same read before the mutation started (SPEC 13.5; 12.0 ` +
+          `byte-determinism: identical workspace bytes, identical answers)`,
+      );
+    },
+    held: "the rename",
+    preInvocation,
+    heldNote: "a read acquires nothing and writes nothing: SPEC 13.5, 13.4",
+  });
+}
+
+/**
+ * One non-mutating command — a read, `build`, or a preview (SPEC 6.6: a
+ * preview invocation is a non-mutating command under 13.5) — run while a
+ * mutating command holds the workspace, as `nonMutatingRunWhileHeld` runs
+ * it.
+ */
+export interface NonMutatingRunWhileHeld {
+  /** Its arguments. */
+  readonly argv: readonly string[];
+  /** Its diagnostic context. */
+  readonly context: string;
+  /**
+   * Why its stdout carries no busy condition: 14.26's stable code is the
+   * refused mutating command's alone (TEST-SPEC T14-4).
+   */
+  readonly busyRule: string;
+  /**
+   * Its outcome judged once it has exited, before the held run and the
+   * workspace are inspected; a failure diagnosed (H-8).
+   */
+  readonly judge: (result: RunResult) => void | Promise<void>;
+  /** The held run's name in diagnoses, e.g. "the rename" or "command 1". */
+  readonly held: string;
+  /**
+   * The held run, where the command is awaited while the hold stands — it
+   * must still be running as the command exits (§VIOL-CORE-BUILDWAIT's
+   * pin) — or `undefined` where no such check is made.
+   */
+  readonly holder?: RunningProduct;
+  /** The held run's pre-invocation state: the held-state comparison's baseline. */
+  readonly preInvocation: DirectorySnapshot;
+  /** Why the workspace stands as before: the held-state comparison's note. */
+  readonly heldNote: string;
+}
+
+/**
+ * T13.5-4's drive-during-hold step — each of its reads and its `build` alike
+ * — shared with T6.6-3's preview while a mutating command is held
+ * (section-6.6.ts; CERTIFICATIONS.md's Exclusions entry on previews: the
+ * same staging and choreography, the wait for the command's exit while the
+ * hold stands certified via VIOL-CORE-BUILDWAIT). The lock path captured as
+ * the command starts; the command run bounded and awaited while the hold
+ * stands — one waiting the hold out fails diagnosed at the bound (H-8; the
+ * bound a hang guard, H-10); its stdout carrying no busy condition
+ * (`busyRule`); `judge`; the held run, where given, still running as the
+ * command exits; then the held-state comparison against the held run's
+ * pre-invocation state — every path but the lock path byte-identical,
+ * `.xspec/lock` holding the holder's entry alone — and the inclusion check
+ * (H-6; the machinery every lock-path inclusion shares, VIOL-CORE-READERENTRY's
+ * note): whatever occupied the lock path as the command started — the
+ * holder's entry — occupies it byte-identical, name and content, nothing
+ * added beside it, a command acquiring nothing writing nothing there (SPEC
+ * 13.4). Returns the command's run.
+ */
+export async function nonMutatingRunWhileHeld(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  run: NonMutatingRunWhileHeld,
+): Promise<RunResult> {
+  const { context } = run;
   const lockPath = await captureLockPath(workspace.root);
-  const result = await runBounded(product, workspace.root, read.argv, context);
+  const result = await runBounded(product, workspace.root, run.argv, context);
   if (Buffer.from(result.stdoutBytes).includes(WORKSPACE_BUSY)) {
     fail(
-      `${context}: no read command reports the busy condition — the stable ` +
-        `code "${WORKSPACE_BUSY}" of 14.26, which the refused mutating ` +
-        `command alone reports (SPEC 13.5, 14.26; TEST-SPEC T14-4) — yet ` +
-        `its stdout carries it: ${summarizeResult(result)}`,
+      `${context}: ${run.busyRule} — yet its stdout carries it: ` +
+        summarizeResult(result),
     );
   }
-  if (read.checkReport === true) assertNoLockPathFinding(result, context);
-  assertExitCode(
-    result,
-    0,
-    `${context}: read commands still run while a mutating command is held, ` +
-      `exiting as they did before it (SPEC 13.5: every command but the ` +
-      `mutating ones may run concurrently with them)`,
-  );
-  if (read.checkReport === true) assertCleanCheckReport(result, context);
-  assertBytesEqual(
-    result.stdoutBytes,
-    reference.stdoutBytes,
-    `${context}: observes the prior state — stdout byte-identical to the ` +
-      `same read before the mutation started (SPEC 13.5; 12.0 ` +
-      `byte-determinism: identical workspace bytes, identical answers)`,
-  );
+  await run.judge(result);
+  if (run.holder !== undefined && run.holder.hasExited()) {
+    fail(
+      `${context}: ${run.held} must still hold when the command exits — its ` +
+        `hold file is deleted only once the command has exited (SPEC 13.5) ` +
+        `— ${await describeExit(run.holder)}`,
+    );
+  }
   await assertHeldState(
     workspace.root,
-    { baseline: preInvocation, heldRuns: 1 },
-    `${context}, once it has exited, against the rename's pre-invocation ` +
-      `state (a read acquires nothing and writes nothing: SPEC 13.5, 13.4)`,
+    { baseline: run.preInvocation, heldRuns: 1 },
+    `${context}, once it has exited, against ${run.held}'s pre-invocation ` +
+      `state (${run.heldNote})`,
   );
   await assertLockPathAsCaptured(
     lockPath,
     `${context}, once it has exited: the holder's entry byte-identical, name ` +
       `and content, nothing added beside it`,
   );
+  return result;
 }
 
 /** The `rename` T13.5-4's `build` arm holds, and its twin holds alike. */
@@ -2599,6 +2692,8 @@ const T13_5_4_HELD_BUILD: readonly string[] = ["build", "--json"];
  * holding the holder's entry alone — and the inclusion check: the holder's
  * entry byte-identical, name and content, nothing added beside it (H-6;
  * SPEC 13.4: `build` acquires nothing and writes nothing at the lock path).
+ * The step is `nonMutatingRunWhileHeld`'s, shared with the reads and with
+ * T6.6-3's preview while held.
  */
 async function buildWhileHeld(
   product: ProductBinding,
@@ -2607,47 +2702,30 @@ async function buildWhileHeld(
   preInvocation: DirectorySnapshot,
 ): Promise<void> {
   const context = "T13.5-4 `build --json` while the rename is held";
-  const lockPath = await captureLockPath(workspace.root);
-  const result = await runBounded(
-    product,
-    workspace.root,
-    T13_5_4_HELD_BUILD,
+  await nonMutatingRunWhileHeld(product, workspace, {
+    argv: T13_5_4_HELD_BUILD,
     context,
-  );
-  if (Buffer.from(result.stdoutBytes).includes(WORKSPACE_BUSY)) {
-    fail(
-      `${context}: \`build\` is never refused for a held mutating command — ` +
-        `the stable code "${WORKSPACE_BUSY}" of 14.26 is the refused ` +
-        `mutating command's alone (SPEC 13.5, 14.26; TEST-SPEC T14-4) — yet ` +
-        `its stdout carries it: ${summarizeResult(result)}`,
-    );
-  }
-  assertExitCode(
-    result,
-    0,
-    `${context}: \`build\` runs during a hold, exiting 0 while the hold ` +
-      `stands, neither refused nor waiting the hold out (SPEC 13.5: every ` +
-      `command but the mutating ones may run concurrently with them)`,
-  );
-  if (holder.hasExited()) {
-    fail(
-      `${context}: the rename must still hold when \`build\` exits — its ` +
-        `hold file is deleted only once \`build\` has exited (SPEC 13.5) — ` +
-        `${await describeExit(holder)}`,
-    );
-  }
-  await assertHeldState(
-    workspace.root,
-    { baseline: preInvocation, heldRuns: 1 },
-    `${context}, once it has exited, against the rename's pre-invocation ` +
-      `state (its regeneration reproducing the workspace's bytes; \`build\` ` +
-      `acquires nothing and writes nothing at the lock path: SPEC 13.5, 13.4)`,
-  );
-  await assertLockPathAsCaptured(
-    lockPath,
-    `${context}, once it has exited: the holder's entry byte-identical, name ` +
-      `and content, nothing added beside it`,
-  );
+    busyRule:
+      `\`build\` is never refused for a held mutating command — the stable ` +
+      `code "${WORKSPACE_BUSY}" of 14.26 is the refused mutating command's ` +
+      `alone (SPEC 13.5, 14.26; TEST-SPEC T14-4)`,
+    judge: (result) => {
+      assertExitCode(
+        result,
+        0,
+        `${context}: \`build\` runs during a hold, exiting 0 while the hold ` +
+          `stands, neither refused nor waiting the hold out (SPEC 13.5: ` +
+          `every command but the mutating ones may run concurrently with ` +
+          `them)`,
+      );
+    },
+    held: "the rename",
+    holder,
+    preInvocation,
+    heldNote:
+      "its regeneration reproducing the workspace's bytes; `build` acquires " +
+      "nothing and writes nothing at the lock path: SPEC 13.5, 13.4",
+  });
 }
 
 /** A held `rename`'s outcome and its workspace's final state. */

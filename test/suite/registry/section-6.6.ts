@@ -92,18 +92,65 @@
 //   first (T6.4-4's protocol), and every sweep sits inside a whole-root
 //   modifies-nothing compare (SPEC 12.0).
 // - T6.6-3 scheduling: the runs-while-held arm shares T13.5-2's staging and
-//   the 13.5 suite's drive-during-hold choreography (section-13.5.ts
-//   exports; CERTIFICATIONS.md's Exclusions note binds exactly this
-//   sharing) — the same second command T13.5-2 asserts is refused exit 2
-//   without `--preview` here runs to completion exit 0 with it while
-//   command 1 is held. "Takes no exclusivity" is operationalized as that
-//   observable (SPEC 6.6: completes while another mutating command holds
-//   exclusivity — never the mutual-exclusion refusal, never blocked; a
-//   blocking product is killed at the hang bound and fails diagnosed,
-//   H-8/H-10), plus the held-baseline snapshot equality (the preview writes
-//   nothing while held). `--test-hold` + `--preview` is asserted for both
-//   operations and both flag orders: exit 2, the 12.7 error document under
-//   --json, no hold file created, nothing modified.
+//   the 13.5 suite's drive-during-hold choreography (CERTIFICATIONS.md's
+//   Exclusions note binds exactly this sharing): command 1 held through
+//   T13.5-2's own `whileCommand1Holds`, the preview run through the step
+//   T13.5-4's reads and `build` take while held (`nonMutatingRunWhileHeld`,
+//   section-13.5.ts; the wait for the command's exit while the hold stands
+//   certified via VIOL-CORE-BUILDWAIT) — the same second command T13.5-2
+//   asserts is refused exit 2 without `--preview` here runs to completion
+//   exit 0 with it while command 1 is held. "Takes no exclusivity" is
+//   operationalized as that observable (SPEC 6.6: completes while another
+//   mutating command holds exclusivity — never the mutual-exclusion
+//   refusal, never blocked; a blocking product is killed at the hang bound
+//   and fails diagnosed, H-8/H-10), plus the held-state comparison against
+//   command 1's pre-invocation state once it holds and again once the
+//   preview has exited, and the inclusion check around the preview (H-6:
+//   the holder's entry byte-identical and alone, nothing added beside it) —
+//   helpers/lock-state.ts's machinery, which reads the held run's entry
+//   under H-4's grant and walks every other path with the lock path pruned,
+//   so an entry its product made unreadable is read, its mode restored at
+//   once. `--test-hold` + `--preview` is asserted for both operations and
+//   both flag orders: exit 2, the 12.7 error document under --json, no hold
+//   file created, nothing modified.
+// - T6.6-3's acquisition arms (SPEC 6.6: acquisition and its every outcome
+//   apply to the real operation only), each on a fresh CORE_DECL workspace,
+//   freshly built, nothing at `.xspec/lock` before its staging, the preview
+//   (`rename specs/A.mdx a a2 --preview --json`) run first and the real
+//   operation (`rename specs/A.mdx a a2 --json`) second on the same staging
+//   — the real operation's release can clear it (T13.5-10(d)). An
+//   unobstructed twin, freshly built, answers the preview (exit 0, findings
+//   [], its plan non-null) and then the real operation (exit 0: a premise,
+//   so each arm's exit 2 is its staging's alone). (a) `.xspec/lock` a
+//   symbolic link to a directory outside the workspace holding a file
+//   (helpers/lock-staging.ts `stageLeftover`); an empty leftover lock
+//   directory `r-x`; one `-wx`; and a lock directory holding a subdirectory
+//   holding a file, the subdirectory `-wx` (helpers/acquisition-staging.ts,
+//   T13.5-10(d)'s stagings, each verified on the harness itself, E-1): the
+//   preview exits 0, its stdout byte-identical to the twin's; its staging's
+//   modes restored, the lock path holds exactly the staging's record,
+//   nothing added beside it (`assertLockPathHolds`), every link's target
+//   untouched, every other path byte-identical; then, the modes changed
+//   again and verified anew (`reapply`), the real operation exits 2 with the
+//   error document's `code` `"write-failure"` (the first two) or
+//   `"read-failure"` (the last two) and `path` `".xspec/lock"`, every path
+//   but the lock path byte-identical (H-6, the lock path pruned from both
+//   walks). (b) `.xspec` a plain file (section-13.5-ii.ts `obstructArea`):
+//   the preview exits 1 with exactly T10.1-6's condition-22 finding
+//   concerning `.xspec`, `locations` [], `mapping`, `files`, and `delta`
+//   `null`; the real operation exits 2, `"write-failure"` at `".xspec"`;
+//   nothing modified across both, the plain file byte-unchanged. (c) a
+//   plain file at `.xspec/lock`, and separately a directory holding a file
+//   and a FIFO in a lock directory: the preview exits 0, its stdout
+//   byte-identical to the twin's; then — in the lock directory, the
+//   held-state comparison's count half first (the staged occupants and no
+//   entry) — the inclusion check against the lock path captured before the
+//   preview (`captureLockPath`/`assertLockPathAsCaptured`, the machinery
+//   VIOL-CORE-READERENTRY's note names), each staging in place, each FIFO a
+//   FIFO, every other path byte-identical; then the real operation exits 0,
+//   nothing left at `.xspec/lock` (T13.5-10(b): acquisition removes the
+//   leftovers). Every run is bounded (`runBounded`): a product opening the
+//   staged FIFO blocks and fails diagnosed at the hang guard (H-8).
 // - T6.6-4 asserts the preview REPORT's content byte-precisely: expected
 //   `mapping` and `files` are composed as complete exact lists from the
 //   staged fixture bytes alone — locator helpers compute byte offsets from
@@ -248,6 +295,29 @@
 //   sole element, in 1.5's form over the rename's file (SPEC 14, 1.5).
 
 import { Buffer } from "node:buffer";
+import type { AcquisitionStaging } from "../../helpers/acquisition-staging.js";
+import {
+  stageUnlistableLeftoverDirectory,
+  stageUnlistableLockDirectory,
+  stageUnwritableLockDirectory,
+} from "../../helpers/acquisition-staging.js";
+import { EXCLUDE_LOCK_PATH, LOCK_PATH } from "../../helpers/lock-path.js";
+import type { StagedLeftover } from "../../helpers/lock-staging.js";
+import {
+  AREA_PATH,
+  assertFifosIntact,
+  assertOutsideTargetsUntouched,
+  assertStagingInPlace,
+  stageLeftover,
+} from "../../helpers/lock-staging.js";
+import {
+  assertHeldState,
+  assertLockDirectoryEntries,
+  assertLockPathAbsent,
+  assertLockPathAsCaptured,
+  assertLockPathHolds,
+  captureLockPath,
+} from "../../helpers/lock-state.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
 import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
@@ -272,6 +342,7 @@ import {
   renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
+  assertBytesEqual,
   assertExitCode,
   assertFileBytes,
   fail,
@@ -291,13 +362,7 @@ import type {
   ProductBinding,
   RunResult,
 } from "../../helpers/subprocess.js";
-import {
-  pathExists,
-  releaseHoldFile,
-  rethrowHarnessError,
-  runProduct,
-  startProduct,
-} from "../../helpers/subprocess.js";
+import { pathExists, runProduct } from "../../helpers/subprocess.js";
 import { IDENTIFIER_RUN_SOURCE } from "../../helpers/ts-identifiers.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -365,12 +430,13 @@ import {
   deleteGraphData,
   isGraphDataKey,
 } from "./section-13.3.js";
+import { obstructArea } from "./section-13.5-ii.js";
 import {
   CORE_DECL,
-  awaitHoldFile,
-  describeExit,
   holdPathFor,
+  nonMutatingRunWhileHeld,
   runBounded,
+  whileCommand1Holds,
 } from "./section-13.5.js";
 import {
   assertAppliedMapping,
@@ -951,13 +1017,898 @@ async function runSoloUsageArm(
   );
 }
 
+// ---------------------------------------------------------------------------
+// T6.6-3 — scheduling: the equivalence is over workspace state, never
+// scheduling
+// ---------------------------------------------------------------------------
+
+/**
+ * The second command T13.5-2 asserts is refused exit 2 while its command 1
+ * holds, here as a preview under `--json`: it runs to completion (SPEC 6.6,
+ * 13.5).
+ */
+const SCHEDULING_PREVIEW: readonly string[] = [
+  "rename",
+  "specs/A.mdx",
+  "g",
+  "g2",
+  "--preview",
+  "--json",
+];
+
+/**
+ * T6.6-3's scheduling arms (module header), on one fresh CORE_DECL
+ * workspace, freshly built. The runs-while-held arm: T13.5-2's command 1
+ * (`rename specs/A.mdx a a2 --test-hold <path>`) held through T13.5-2's own
+ * choreography (section-13.5.ts `whileCommand1Holds`: its hold awaited,
+ * then lifted, command 1 completing exit 0), the held-state comparison made
+ * once it holds against its pre-invocation state; then the preview run as
+ * T13.5-4's reads and `build` run while held (section-13.5.ts
+ * `nonMutatingRunWhileHeld`: the lock path captured, the preview bounded
+ * and awaited while the hold stands, no busy condition on its stdout, exit
+ * 0 with its full successful report, command 1 still running as it exits,
+ * then the held-state comparison and the inclusion check — every path but
+ * the lock path byte-identical, the holder's entry byte-identical and the
+ * lock directory's only one, read under H-4's grant). Then `--test-hold`
+ * combined with `--preview`, both operations and both flag orders: exit 2,
+ * the 12.7 error document, no hold file created, nothing modified. Exported
+ * for scratch probes.
+ */
+export async function runT663SchedulingArms(
+  product: ProductBinding,
+): Promise<void> {
+  const workspace = await TestWorkspace.create(CORE_DECL);
+  try {
+    await buildOk(product, workspace, "T6.6-3 scheduling staging `build`");
+    // Command 1's pre-invocation state: the held-state comparison's
+    // baseline (TEST-SPEC §13.5's preamble).
+    const preInvocation = await snapshotDirectory(workspace.root);
+    const context1 =
+      "T6.6-3 held command 1 `rename specs/A.mdx a a2 --test-hold <path>` " +
+      "(T13.5-2's staging)";
+    await whileCommand1Holds(
+      product,
+      workspace,
+      "hold-t663-primary.tmp",
+      context1,
+      async (command1) => {
+        await assertHeldState(
+          workspace.root,
+          { baseline: preInvocation, heldRuns: 1 },
+          `${context1}, once it holds, against its pre-invocation state`,
+        );
+        // The same second command T13.5-2 asserts is refused exit 2
+        // without `--preview` runs to completion with it (SPEC 6.6, 13.5).
+        const context = `T6.6-3 \`${SCHEDULING_PREVIEW.join(" ")}\` while command 1 is held`;
+        await nonMutatingRunWhileHeld(product, workspace, {
+          argv: SCHEDULING_PREVIEW,
+          context,
+          busyRule:
+            `a preview never meets the mutual-exclusion refusal — the ` +
+            `stable code "workspace-busy" of 14.26 is the refused mutating ` +
+            `command's alone (SPEC 6.6, 13.5, 14.26; TEST-SPEC T14-4)`,
+          judge: (result) => {
+            assertExitCode(
+              result,
+              0,
+              `${context}: a preview invocation is a non-mutating command ` +
+                `under 13.5 — it takes no exclusivity, so while another ` +
+                `mutating command is held it runs to completion, never ` +
+                `meeting the mutual-exclusion refusal (exit 2) T13.5-2 ` +
+                `asserts for the same second command without --preview, ` +
+                `and never blocking (SPEC 6.6, 13.5)`,
+            );
+            const report = decodePreviewReport(
+              parseJsonStdout(result, context),
+              context,
+            );
+            assertSameJson(
+              report.findings,
+              [],
+              `${context}: the preview runs to completion with its full ` +
+                `successful report — findings [] (SPEC 6.6)`,
+            );
+            if (
+              report.mapping === null ||
+              report.files === null ||
+              report.delta === null
+            ) {
+              fail(
+                `${context}: the completed preview reports its plan — ` +
+                  `\`mapping\`, \`files\`, and \`delta\` non-null (SPEC ` +
+                  `6.6, 12.7)`,
+              );
+            }
+          },
+          held: "command 1",
+          holder: command1,
+          preInvocation,
+          heldNote:
+            "a preview acquires nothing and writes nothing: SPEC 6.6, 13.5, " +
+            "13.4",
+        });
+      },
+    );
+
+    // `--test-hold` combined with `--preview` is a usage error (SPEC 6.6:
+    // a preview acquires no exclusivity and does not take the
+    // acquisition-tied test seam; 12.0): exit 2, the 12.7 error document
+    // under --json, no hold file created, nothing modified. Both
+    // operations, both flag orders; the operands stay valid (command 1's
+    // rename completed above, leaving `a2` and the untouched `g`), so the
+    // exit 2 is attributable to the flag combination alone.
+    const combinedArms: readonly {
+      readonly name: string;
+      readonly build: (holdPath: string) => readonly string[];
+    }[] = [
+      {
+        name: "rename, `--preview --test-hold`",
+        build: (holdPath) => [
+          "rename",
+          "specs/A.mdx",
+          "g",
+          "g2",
+          "--preview",
+          "--test-hold",
+          holdPath,
+        ],
+      },
+      {
+        name: "move, `--test-hold … --preview`",
+        build: (holdPath) => [
+          "move",
+          "specs/A.mdx",
+          "specs/Moved.mdx",
+          "--test-hold",
+          holdPath,
+          "--preview",
+        ],
+      },
+    ];
+    let combinedIndex = 0;
+    for (const arm of combinedArms) {
+      combinedIndex += 1;
+      const holdPath = holdPathFor(
+        workspace,
+        `hold-t663-combined-${String(combinedIndex)}.tmp`,
+      );
+      const argv = arm.build(holdPath);
+      const context = `T6.6-3 (${arm.name}) \`${argv.join(" ")} --json\``;
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          const result = await runBounded(
+            product,
+            workspace.root,
+            [...argv, "--json"],
+            context,
+          );
+          assertExitCode(
+            result,
+            2,
+            `${context}: supplying --test-hold together with --preview is ` +
+              `a usage error — a preview acquires no exclusivity and does ` +
+              `not take the acquisition-tied test seam (SPEC 6.6, 13.5, ` +
+              `12.0)`,
+          );
+          expectErrorDocument(
+            result,
+            `${context}: under --json, the exit-2 error document is the ` +
+              `entire stdout (SPEC 12.0, 12.7, H-5)`,
+          );
+          if (result.stderrBytes.length === 0) {
+            fail(
+              `${context}: usage error messages are standard-error ` +
+                `content (SPEC 12.0), but stderr is empty`,
+            );
+          }
+          if (await pathExists(holdPath)) {
+            fail(
+              `${context}: no hold file may be created at the path — the ` +
+                `flag combination is refused, not honored (SPEC 6.6, 13.5)`,
+            );
+          }
+        },
+        `${context}: the usage error modifies nothing (SPEC 12.0)`,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T6.6-3 — acquisition's every other outcome lies outside the equivalence
+// ---------------------------------------------------------------------------
+
+/**
+ * The operation every acquisition arm previews and then performs: CORE_DECL's
+ * `rename specs/A.mdx a a2` (T13.5-2's command 1, T13.5-10's first command),
+ * succeeding on the unobstructed twin.
+ */
+const ACQUISITION_RENAME: readonly string[] = [
+  "rename",
+  "specs/A.mdx",
+  "a",
+  "a2",
+];
+
+/** Its preview under `--json`: the 12.7 preview document (SPEC 6.6). */
+const ACQUISITION_PREVIEW: readonly string[] = [
+  ...ACQUISITION_RENAME,
+  "--preview",
+  "--json",
+];
+
+/** The real operation under `--json`: an exit-2 answer's error document. */
+const ACQUISITION_REAL: readonly string[] = [...ACQUISITION_RENAME, "--json"];
+
+/** 14.24's stable code: a write acquisition makes, refused (SPEC 14). */
+const WRITE_FAILURE_CODE = "write-failure";
+
+/** 14.25's stable code: a read acquisition makes, refused (SPEC 14). */
+const READ_FAILURE_CODE = "read-failure";
+
+/** What each plain file the acquisition arms stage as a leftover holds. */
+const ACQUISITION_LEFTOVER_FILE_BYTES = "A leftover the harness staged.\n";
+
+/** What the plain file (b) stages at `.xspec` holds. */
+const AREA_OCCUPANT_FILE_BYTES =
+  "Not the graph-data area: an occupant left for manual deletion.\n";
+
+/** Stage a fresh CORE_DECL workspace, run `body`, dispose (H-1). */
+async function withCoreWorkspace<T>(
+  body: (workspace: TestWorkspace) => Promise<T>,
+): Promise<T> {
+  const workspace = await TestWorkspace.create(CORE_DECL);
+  try {
+    return await body(workspace);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * A freshly built valid workspace: `build` on CORE_DECL's staging, exit 0,
+ * and nothing at `.xspec/lock` once it has run (SPEC 13.4: no write but
+ * acquisition and release touches the lock path) — so whatever an arm
+ * stages there is the arm's alone.
+ */
+async function buildLeftoverFree(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  await buildOk(product, workspace, `${context} staging \`build\``);
+  await assertLockPathAbsent(
+    workspace.root,
+    `${context}: once \`build\` has run, before anything is staged (SPEC ` +
+      `13.4: no write but acquisition and release touches the lock path)`,
+  );
+}
+
+/** The unobstructed twin's answer each arm's preview is compared with. */
+export interface T663UnobstructedTwin {
+  /** `rename specs/A.mdx a a2 --preview --json` there: exit 0. */
+  readonly preview: RunResult;
+}
+
+/**
+ * The unobstructed twin (TEST-SPEC T6.6-3(a), (c)): a fresh CORE_DECL
+ * workspace, freshly built, nothing at the lock path. The preview — exit 0,
+ * the form-exact 12.7 preview document, findings [], its plan non-null —
+ * whose stdout each arm's preview must equal byte for byte (12.0: identical
+ * workspace bytes, identical answers; H-6 across directories, the document's
+ * paths workspace-relative); then the real operation, exit 0 — a staging
+ * premise: the operation succeeds where nothing occupies the lock path, so
+ * each arm's exit 2 is its staging's alone — and nothing at `.xspec/lock`
+ * once it has ended (SPEC 13.5: release on every normal end). Exported for
+ * scratch probes.
+ */
+export async function t663UnobstructedTwin(
+  product: ProductBinding,
+): Promise<T663UnobstructedTwin> {
+  return await withCoreWorkspace(async (workspace) => {
+    const context = "T6.6-3 the unobstructed twin";
+    await buildLeftoverFree(product, workspace, context);
+    const previewContext = `${context}: \`${ACQUISITION_PREVIEW.join(" ")}\``;
+    const preview = await runBounded(
+      product,
+      workspace.root,
+      ACQUISITION_PREVIEW,
+      previewContext,
+    );
+    assertExitCode(
+      preview,
+      0,
+      `${previewContext}: staging premise — the preview of an operation ` +
+        `succeeding there succeeds (SPEC 6.6, 6.4)`,
+    );
+    const report = decodePreviewReport(
+      parseJsonStdout(preview, previewContext),
+      previewContext,
+    );
+    assertSameJson(
+      report.findings,
+      [],
+      `${previewContext}: a preview whose real operation would proceed ` +
+        `reports findings [] (SPEC 6.6, 12.7)`,
+    );
+    if (
+      report.mapping === null ||
+      report.files === null ||
+      report.delta === null
+    ) {
+      fail(
+        `${previewContext}: a successful preview reports its plan — ` +
+          `\`mapping\`, \`files\`, and \`delta\` non-null (SPEC 6.6, 12.7)`,
+      );
+    }
+    const realContext = `${context}: \`${ACQUISITION_REAL.join(" ")}\``;
+    const real = await runBounded(
+      product,
+      workspace.root,
+      ACQUISITION_REAL,
+      realContext,
+    );
+    assertExitCode(
+      real,
+      0,
+      `${realContext}: staging premise — the real operation succeeds where ` +
+        `nothing occupies the lock path, so each arm's exit 2 is its ` +
+        `staging's alone (SPEC 6.4, 13.5)`,
+    );
+    await assertLockPathAbsent(
+      workspace.root,
+      `${realContext}, once it has ended (SPEC 13.5: release on every ` +
+        `normal end)`,
+    );
+    return { preview };
+  });
+}
+
+/** One staging of (a) in effect: its record, its modes' undoing and redoing. */
+interface OutcomeStaging {
+  /** What was staged at the lock path or in the lock directory. */
+  readonly leftover: StagedLeftover;
+  /** Reinstate every mode the staging changed; idempotent. */
+  restore(): Promise<void>;
+  /** Change them again, verified anew (helpers/acquisition-staging.ts). */
+  reapply(): Promise<void>;
+}
+
+/** One staging of (a): its description, its refusal's code, its staging. */
+export interface T663AcquisitionOutcomeArm {
+  readonly what: string;
+  /**
+   * The real operation's stable code at `.xspec/lock` (SPEC 14.24, 14.25):
+   * a write or a read of acquisition the environment refuses.
+   */
+  readonly code: typeof WRITE_FAILURE_CODE | typeof READ_FAILURE_CODE;
+  /**
+   * Stage it on a freshly built workspace, verified on the harness itself
+   * (E-1, H-11: an ineffective staging is a harness error, never a pass or a
+   * skip).
+   */
+  readonly stage: (workspace: TestWorkspace) => Promise<OutcomeStaging>;
+}
+
+/** An acquisition staging's record, which (a)'s stagings each make. */
+function outcomeStaging(
+  staging: AcquisitionStaging,
+  what: string,
+): OutcomeStaging {
+  const { leftover } = staging;
+  if (leftover === undefined) {
+    throw new Error(`T6.6-3(a): the staging of ${what} recorded no leftover`);
+  }
+  return {
+    leftover,
+    restore: () => staging.restore(),
+    reapply: () => staging.reapply(),
+  };
+}
+
+/**
+ * (a)'s stagings, each made separately (TEST-SPEC T6.6-3(a)): the first two
+ * a write failure at `.xspec/lock` (SPEC 13.5: a link at the lock path is
+ * removed by nothing, 14.24; the entry's addition refused, 14.24), the last
+ * two a read failure there (the lock directory's listing refused once the
+ * entry is added; the leftover's listing refused at its removal — 14.25),
+ * the stagings T13.5-10(a) and (d) make (helpers/lock-staging.ts,
+ * helpers/acquisition-staging.ts). Exported for scratch probes.
+ */
+export const T6_6_3_ACQUISITION_OUTCOME_ARMS: readonly T663AcquisitionOutcomeArm[] =
+  [
+    {
+      what:
+        "`.xspec/lock` a symbolic link to a directory outside the " +
+        "workspace holding a file",
+      code: WRITE_FAILURE_CODE,
+      stage: async (workspace) => ({
+        leftover: await stageLeftover(workspace, LOCK_PATH, {
+          kind: "symlink",
+          target: { kind: "dir" },
+        }),
+        // No mode changed: nothing to restore or reapply.
+        restore: async () => undefined,
+        reapply: async () => undefined,
+      }),
+    },
+    {
+      what:
+        "an empty leftover lock directory refusing writes (`r-x`, T14-9's " +
+        "discipline)",
+      code: WRITE_FAILURE_CODE,
+      stage: async (workspace) =>
+        outcomeStaging(
+          await stageUnwritableLockDirectory(workspace),
+          "an `r-x` lock directory",
+        ),
+    },
+    {
+      what:
+        "an empty leftover lock directory unlistable but writable (`-wx`, " +
+        "T14-10's discipline)",
+      code: READ_FAILURE_CODE,
+      stage: async (workspace) =>
+        outcomeStaging(
+          await stageUnlistableLockDirectory(workspace),
+          "a `-wx` lock directory",
+        ),
+    },
+    {
+      what:
+        "a lock directory holding a subdirectory that holds a file, the " +
+        "subdirectory unlistable (`-wx`, T13.5-10(d))",
+      code: READ_FAILURE_CODE,
+      stage: async (workspace) =>
+        outcomeStaging(
+          await stageUnlistableLeftoverDirectory(workspace),
+          "a `-wx` subdirectory in a lock directory",
+        ),
+    },
+  ];
+
+/**
+ * One staging of (a) (TEST-SPEC T6.6-3(a)), on a fresh workspace, freshly
+ * built, the staging made and verified. The preview first, bounded (one
+ * blocking on the staging fails diagnosed at the hang guard, H-8): exit 0,
+ * its stdout byte-identical to the unobstructed twin's — a read of
+ * acquisition the environment refuses applies to the real operation only
+ * (SPEC 6.6), so a product whose preview examines the lock directory and
+ * reports the refusal (14.25), as `inventory`, `check`, and `ids` may
+ * (T13.4-12), fails the read-failure pair — and the staging untouched: its
+ * modes restored, the lock path holds exactly what was staged — kind, name,
+ * content, and a link's target alike — nothing added beside it (H-6's
+ * inclusion, against the staging's record: helpers/lock-state.ts
+ * `assertLockPathHolds`), every link's target outside the workspace
+ * untouched, and every other path byte-identical (SPEC 6.6: a preview
+ * modifies nothing). Then, its modes changed again and verified anew, the
+ * real operation second — its release can clear the staging (T13.5-10(d)) —
+ * exit 2, its error document's `code` the arm's and `path` `".xspec/lock"`
+ * (SPEC 13.5, 14.24, 14.25), and every path but the lock path byte-identical
+ * (H-6: acquisition's and release's writes there are no modification; the
+ * lock path pruned from both walks, an unlistable staging admitting none).
+ * Exported for scratch probes.
+ */
+export async function runT663AcquisitionOutcomeArm(
+  product: ProductBinding,
+  twin: T663UnobstructedTwin,
+  arm: T663AcquisitionOutcomeArm,
+): Promise<void> {
+  await withCoreWorkspace(async (workspace) => {
+    const root = workspace.root;
+    const context = `T6.6-3(a) ${arm.what}`;
+    await buildLeftoverFree(product, workspace, context);
+    const staging = await arm.stage(workspace);
+    try {
+      const before = await snapshotDirectory(root, EXCLUDE_LOCK_PATH);
+
+      const previewContext =
+        `${context}: \`${ACQUISITION_PREVIEW.join(" ")}\`, run first on ` +
+        `the staging`;
+      const preview = await runBounded(
+        product,
+        root,
+        ACQUISITION_PREVIEW,
+        previewContext,
+      );
+      await staging.restore();
+      assertExitCode(
+        preview,
+        0,
+        `${previewContext}: the preview answers as the real operation ` +
+          `would once holding exclusivity — acquisition and its every ` +
+          `outcome, a read or write of acquisition the environment refuses ` +
+          `included, apply to the real operation only (SPEC 6.6, 13.5, ` +
+          `14.24, 14.25) — so it succeeds as on the unobstructed twin, exit 0`,
+      );
+      assertBytesEqual(
+        preview.stdoutBytes,
+        twin.preview.stdoutBytes,
+        `${previewContext}: its answer byte-identical to the same preview's ` +
+          `on the unobstructed twin — the counterfactual of 6.6 yields the ` +
+          `twin's answer whatever the lock path holds, coordination state ` +
+          `no validation or planning consults (SPEC 6.6, 13.4, 13.5; 12.0)`,
+      );
+      await assertLockPathHolds(
+        root,
+        { staged: [staging.leftover] },
+        `${previewContext}, once it has exited, its staging's modes ` +
+          `restored to inspect it: the staging untouched — a preview ` +
+          `acquires nothing and writes nothing (SPEC 6.6, 13.4; H-6)`,
+      );
+      await assertOutsideTargetsUntouched(
+        [staging.leftover],
+        `${previewContext}: nothing written, removed, or added through a ` +
+          `link (SPEC 13.4)`,
+      );
+      assertSnapshotsEqual(
+        before,
+        await snapshotDirectory(root, EXCLUDE_LOCK_PATH),
+        `${previewContext}: modifies nothing — every path but the lock ` +
+          `path byte-identical (SPEC 6.6)`,
+      );
+
+      await staging.reapply();
+      const realContext =
+        `${context}: \`${ACQUISITION_REAL.join(" ")}\`, run second on the ` +
+        `same staging`;
+      const real = await runBounded(
+        product,
+        root,
+        ACQUISITION_REAL,
+        realContext,
+      );
+      await staging.restore();
+      assertExitCode(
+        real,
+        2,
+        `${realContext}: the real operation meets acquisition's ` +
+          `${arm.code === WRITE_FAILURE_CODE ? "write" : "read"} failure ` +
+          `there — a usage error, exit 2 (SPEC 13.5, ` +
+          `${arm.code === WRITE_FAILURE_CODE ? "14.24" : "14.25"}, 12.0)`,
+      );
+      const finding = expectErrorDocument(real, realContext);
+      assertSameJson(
+        { code: finding.code, path: finding.path },
+        { code: arm.code, path: LOCK_PATH },
+        `${realContext}: the error document carries acquisition's ` +
+          `${arm.code === WRITE_FAILURE_CODE ? "write" : "read"} failure — ` +
+          `the stable code "${arm.code}" and the concerned path ` +
+          `"${LOCK_PATH}" (SPEC 13.5, 12.7, ` +
+          `${arm.code === WRITE_FAILURE_CODE ? "14.24" : "14.25"}) — ` +
+          `message: ${JSON.stringify(finding.message)}`,
+      );
+      assertSnapshotsEqual(
+        before,
+        await snapshotDirectory(root, EXCLUDE_LOCK_PATH),
+        `${realContext}: modifies nothing — every path but the lock path ` +
+          `byte-identical (SPEC 13.5, 12.0; H-6: acquisition's and ` +
+          `release's writes there are no modification)`,
+      );
+    } finally {
+      await staging.restore();
+    }
+  });
+}
+
+/**
+ * (b) (TEST-SPEC T6.6-3(b)), on a fresh workspace, freshly built, `.xspec` a
+ * plain file in place of the area's directory (section-13.5-ii.ts
+ * `obstructArea`, T13.5-10(a)'s staging). The preview first: it answers as
+ * the real operation would once holding exclusivity — the invalid-workspace
+ * refusal (SPEC 6.4, 6.6), its gate meeting graph data's write path
+ * obstructed: exit 1, the form-exact 12.7 preview document with `mapping`,
+ * `files`, and `delta` `null`, its findings exactly T10.1-6's condition-22
+ * finding concerning `.xspec`, `locations` [] (SPEC 14.22, 13.4) — nothing
+ * modified, the plain file byte-unchanged. Then the real operation: exit 2,
+ * `code` `"write-failure"`, `path` `".xspec"` (SPEC 13.5, 14.24: acquisition
+ * fails at the area's own occupant), nothing written, the plain file
+ * byte-unchanged — the pair pinning the boundary. Exported for scratch
+ * probes.
+ */
+export async function runT663AreaArm(product: ProductBinding): Promise<void> {
+  await withCoreWorkspace(async (workspace) => {
+    const root = workspace.root;
+    const context = "T6.6-3(b) `.xspec` a plain file";
+    await buildLeftoverFree(product, workspace, context);
+    const staged = await obstructArea(
+      workspace,
+      { kind: "file", content: AREA_OCCUPANT_FILE_BYTES },
+      context,
+    );
+    const before = await snapshotDirectory(root);
+
+    const previewContext =
+      `${context}: \`${ACQUISITION_PREVIEW.join(" ")}\`, run first on the ` +
+      `staging`;
+    const preview = await runBounded(
+      product,
+      root,
+      ACQUISITION_PREVIEW,
+      previewContext,
+    );
+    assertExitCode(
+      preview,
+      1,
+      `${previewContext}: the preview answers as the real operation would ` +
+        `once holding exclusivity — the invalid-workspace refusal, exit 1 ` +
+        `(SPEC 6.6, 6.4, 14.22, 12.0) — never acquisition's write failure, ` +
+        `which applies to the real operation only`,
+    );
+    const report = decodePreviewReport(
+      parseJsonStdout(preview, previewContext),
+      `${previewContext} — a refused preview keeps the 12.7 preview ` +
+        `document form (SPEC 12.7, H-3)`,
+    );
+    if (
+      report.mapping !== null ||
+      report.files !== null ||
+      report.delta !== null
+    ) {
+      fail(
+        `${previewContext}: a refused preview reports the refusal findings ` +
+          `alone — its \`mapping\`, \`files\`, and \`delta\` are null ` +
+          `(SPEC 6.6, 12.7); got mapping ` +
+          `${report.mapping === null ? "null" : "present"}, files ` +
+          `${report.files === null ? "null" : "present"}, delta ` +
+          `${report.delta === null ? "null" : "present"}`,
+      );
+    }
+    const findingsContext =
+      `${previewContext}: its findings exactly T10.1-6's condition-22 ` +
+      `finding concerning ${GRAPH_DATA_AREA_PATH} — a directory component ` +
+      `of graph data's write path occupied by a non-directory (SPEC 14.22, ` +
+      `13.4)`;
+    assertConditionCounts(report.findings, { "14.22": 1 }, findingsContext);
+    const [finding] = report.findings;
+    if (finding === undefined) {
+      throw new Error("T6.6-3(b): assertConditionCounts admitted no finding");
+    }
+    assertFindingConcernsPath(finding, GRAPH_DATA_AREA_PATH, findingsContext);
+    assertSameJson(
+      finding.locations,
+      [],
+      `${findingsContext}: a path-concerned condition is unlocated — ` +
+        `locations [] (SPEC 12.7)`,
+    );
+    assertSnapshotsEqual(
+      before,
+      await snapshotDirectory(root),
+      `${previewContext}: modifies nothing (SPEC 6.6)`,
+    );
+    await assertStagingInPlace(
+      [staged],
+      `${previewContext}: the plain file at ${AREA_PATH} byte-unchanged`,
+    );
+
+    const realContext =
+      `${context}: \`${ACQUISITION_REAL.join(" ")}\`, run second on the ` +
+      `same staging`;
+    const real = await runBounded(product, root, ACQUISITION_REAL, realContext);
+    assertExitCode(
+      real,
+      2,
+      `${realContext}: acquisition removes nothing and fails with the write ` +
+        `failure of 14.24 where the area's own path holds anything but a ` +
+        `directory — a usage error, exit 2 (SPEC 13.5, 13.4, 12.0)`,
+    );
+    const error = expectErrorDocument(real, realContext);
+    assertSameJson(
+      { code: error.code, path: error.path },
+      { code: WRITE_FAILURE_CODE, path: AREA_PATH },
+      `${realContext}: the error document carries acquisition's write ` +
+        `failure — the stable code "${WRITE_FAILURE_CODE}" and the ` +
+        `concerned path "${AREA_PATH}" (SPEC 13.5, 12.7, 14.24) — message: ` +
+        JSON.stringify(error.message),
+    );
+    assertSnapshotsEqual(
+      before,
+      await snapshotDirectory(root),
+      `${realContext}: nothing written (SPEC 13.5, 12.0)`,
+    );
+    await assertStagingInPlace(
+      [staged],
+      `${realContext}: the plain file at ${AREA_PATH} byte-unchanged, left ` +
+        `for manual deletion (SPEC 13.5, 13.4)`,
+    );
+  });
+}
+
+/** One leftover staging of (c): its description and its staging. */
+export interface T663SurvivingLeftover {
+  readonly what: string;
+  /**
+   * Whether the leftovers are the lock directory's occupants (each at
+   * `.xspec/lock/<name>`), counted apart from entries.
+   */
+  readonly inLockDirectory: boolean;
+  /** Stage it on a freshly built workspace, verified on the harness itself. */
+  readonly stage: (
+    workspace: TestWorkspace,
+  ) => Promise<readonly StagedLeftover[]>;
+}
+
+/**
+ * (c)'s leftovers (TEST-SPEC T6.6-3(c)), each recording no identifier —
+ * outside 13.5's gap — and each one acquisition removes (SPEC 13.5: a plain
+ * file at the lock path; in the lock directory, anything that is no entry,
+ * a directory with all it holds; T13.5-10(b)). No plain file of the
+ * harness's own naming lies at the lock directory's top level
+ * (helpers/lock-staging.ts refuses one). Exported for scratch probes.
+ */
+export const T6_6_3_SURVIVING_LEFTOVERS: readonly T663SurvivingLeftover[] = [
+  {
+    what: "a plain file at `.xspec/lock`",
+    inLockDirectory: false,
+    stage: async (workspace) => [
+      await stageLeftover(workspace, LOCK_PATH, {
+        kind: "file",
+        content: ACQUISITION_LEFTOVER_FILE_BYTES,
+      }),
+    ],
+  },
+  {
+    what: "a directory holding a file, and a FIFO, in a lock directory",
+    inLockDirectory: true,
+    stage: async (workspace) => [
+      await stageLeftover(workspace, `${LOCK_PATH}/leftover-directory`, {
+        kind: "dir",
+        entries: [
+          {
+            name: "file",
+            node: { kind: "file", content: ACQUISITION_LEFTOVER_FILE_BYTES },
+          },
+        ],
+      }),
+      await stageLeftover(workspace, `${LOCK_PATH}/leftover-fifo`, {
+        kind: "fifo",
+      }),
+    ],
+  },
+];
+
+/**
+ * One leftover staging of (c) (TEST-SPEC T6.6-3(c)), on a fresh workspace,
+ * freshly built, the leftover staged and verified, the lock path captured.
+ * The preview first, bounded (a preview opening the FIFO — an open with no
+ * writer blocks — fails diagnosed at the hang guard, H-8; the harness never
+ * opens one): exit 0, its stdout byte-identical to the unobstructed twin's
+ * — the leftover-free twin's (SPEC 6.6, 13.4) — and every leftover
+ * byte-untouched, acquiring nothing and so removing nothing: in a lock
+ * directory, the count half of the held-state comparison — the staged
+ * occupants as staged and no entry beside them — then, everywhere, the
+ * inclusion check (H-6; the lock-path inclusion VIOL-CORE-READERENTRY's
+ * note names, helpers/lock-state.ts `assertLockPathAsCaptured`): the lock
+ * path as captured, kind, name, and content alike, nothing added beside it;
+ * each staging in place and each FIFO a FIFO; every other path
+ * byte-identical (SPEC 6.6). Then the real operation second, on the same
+ * leftovers: exit 0, acquisition removing every leftover (SPEC 13.5;
+ * T13.5-10(b)), and nothing at `.xspec/lock` once it has ended (release on
+ * every normal end) — where a product acquiring for previews would already
+ * have removed them. Exported for scratch probes.
+ */
+export async function runT663LeftoverArm(
+  product: ProductBinding,
+  twin: T663UnobstructedTwin,
+  leftover: T663SurvivingLeftover,
+): Promise<void> {
+  await withCoreWorkspace(async (workspace) => {
+    const root = workspace.root;
+    const context = `T6.6-3(c) ${leftover.what}`;
+    await buildLeftoverFree(product, workspace, context);
+    const staged = await leftover.stage(workspace);
+    const before = await snapshotDirectory(root, EXCLUDE_LOCK_PATH);
+    const capture = await captureLockPath(root);
+
+    const previewContext =
+      `${context}: \`${ACQUISITION_PREVIEW.join(" ")}\`, run first on the ` +
+      `leftovers`;
+    const preview = await runBounded(
+      product,
+      root,
+      ACQUISITION_PREVIEW,
+      previewContext,
+    );
+    assertExitCode(
+      preview,
+      0,
+      `${previewContext}: the preview answers as on the leftover-free twin, ` +
+        `exit 0 — a run holding exclusivity has removed every leftover, so ` +
+        `no staged state of the lock path survives into the counterfactual ` +
+        `of 6.6 (SPEC 6.6, 13.5, 13.4)`,
+    );
+    assertBytesEqual(
+      preview.stdoutBytes,
+      twin.preview.stdoutBytes,
+      `${previewContext}: its answer byte-identical to the same preview's ` +
+        `on the leftover-free twin (SPEC 6.6, 13.4; 12.0)`,
+    );
+    if (leftover.inLockDirectory) {
+      await assertLockDirectoryEntries(
+        root,
+        { entries: 0, staged },
+        `${previewContext}, once it has exited: the lock directory holds ` +
+          `the staged leftovers as staged and no entry beside them — a ` +
+          `preview acquires nothing, so it removes nothing and adds nothing ` +
+          `(SPEC 6.6, 13.5, 13.4)`,
+      );
+    }
+    await assertLockPathAsCaptured(
+      capture,
+      `${previewContext}, once it has exited: every leftover byte-untouched ` +
+        `— a preview acquires nothing and so removes nothing, where a ` +
+        `product acquiring for previews removes them (SPEC 6.6, 13.5; ` +
+        `T13.5-10(b))`,
+    );
+    await assertStagingInPlace(
+      staged,
+      `${previewContext}: each leftover in place, byte-identical`,
+    );
+    await assertFifosIntact(
+      staged,
+      `${previewContext}: each staged FIFO still a FIFO in place`,
+    );
+    assertSnapshotsEqual(
+      before,
+      await snapshotDirectory(root, EXCLUDE_LOCK_PATH),
+      `${previewContext}: modifies nothing — every path but the lock path ` +
+        `byte-identical (SPEC 6.6)`,
+    );
+
+    const realContext =
+      `${context}: \`${ACQUISITION_REAL.join(" ")}\`, run second on the ` +
+      `same leftovers`;
+    const real = await runBounded(product, root, ACQUISITION_REAL, realContext);
+    assertExitCode(
+      real,
+      0,
+      `${realContext}: acquisition removes every leftover and proceeds — a ` +
+        `leftover recording no identifier lies outside 13.5's gap and MUST ` +
+        `NOT block later commands (SPEC 13.5; T13.5-10(b)) — so the ` +
+        `operation succeeds as on the unobstructed twin`,
+    );
+    await assertLockPathAbsent(
+      root,
+      `${realContext}, once it has ended: the leftovers removed at ` +
+        `acquisition and the run released (SPEC 13.5; T13.5-10(b))`,
+    );
+  });
+}
+
+/**
+ * Acquisition's every other outcome, each arm staged beside the real
+ * operation, its preview run first (TEST-SPEC T6.6-3; module header): the
+ * unobstructed twin, then (a)'s four stagings, (b), and (c)'s two leftover
+ * stagings, each on a fresh workspace. Exported for scratch probes.
+ */
+export async function runT663AcquisitionArms(
+  product: ProductBinding,
+): Promise<void> {
+  const twin = await t663UnobstructedTwin(product);
+  for (const arm of T6_6_3_ACQUISITION_OUTCOME_ARMS) {
+    await runT663AcquisitionOutcomeArm(product, twin, arm);
+  }
+  await runT663AreaArm(product);
+  for (const leftover of T6_6_3_SURVIVING_LEFTOVERS) {
+    await runT663LeftoverArm(product, twin, leftover);
+  }
+}
+
 const T6_6_3 = defineProductTest({
   id: "T6.6-3",
   title:
-    "refusal and scheduling equivalence: each refusal of T6.4-3, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, and T6.5-21 — the invalid-workspace precondition, the exact self-move of either form (the file form refused as identity-unchanged alone, never `refused-destination-exists` beside it), the same-file after-removal collision, every `refused-invalid-rewrite` and `refused-moved-import` arm with the reasons reported beside it, T6.5-16's alone arms, and T6.5-21's two-reason move included — staged identically (T6.5-6's post-move workspace staged directly from the bytes it asserts; T6.5-16's, T6.5-17's, T6.5-20's, and T6.5-21's arms from their exported tables — T6.5-20's companion legs read as its home test reads them, each T6.5-20 and T6.5-21 staging before any build or after a `build` as its home test stages it), the `--preview` invocation exits 1 reporting the same findings (same stable codes, locations, concerned paths, identities) in the form-exact 12.7 preview document with `mapping`, `files`, and `delta` null, modifying nothing; each usage error of T6.4-4/T6.5-5 — the U+FFFD destination operands of either leg and the Linux leg's non-UTF-8 operand included — exits 2 identically under `--preview` (argument checks precede either way — asserted beside unrelated validation errors and beside a spells-no-identity origin's findings, nothing modified); the equivalence is over workspace state, never scheduling: while another mutating command is held (`--test-hold`, T13.5-2's staging), a `--preview` invocation runs to completion with its full successful report — it takes no exclusivity and never meets the mutual-exclusion refusal — and `--test-hold` combined with `--preview` is a usage error, exit 2, creating no hold file (SPEC 6.6, 6.4, 6.5, 13.5, 12.0, 12.7, 14)",
+    "refusal and scheduling equivalence: each refusal of T6.4-3, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, and T6.5-21 — the invalid-workspace precondition, the exact self-move of either form (the file form refused as identity-unchanged alone, never `refused-destination-exists` beside it), the same-file after-removal collision, every `refused-invalid-rewrite` and `refused-moved-import` arm with the reasons reported beside it, T6.5-16's alone arms, and T6.5-21's two-reason move included — staged identically (T6.5-6's post-move workspace staged directly from the bytes it asserts; T6.5-16's, T6.5-17's, T6.5-20's, and T6.5-21's arms from their exported tables — T6.5-20's companion legs read as its home test reads them, each T6.5-20 and T6.5-21 staging before any build or after a `build` as its home test stages it), the `--preview` invocation exits 1 reporting the same findings (same stable codes, locations, concerned paths, identities) in the form-exact 12.7 preview document with `mapping`, `files`, and `delta` null, modifying nothing; each usage error of T6.4-4/T6.5-5 — the U+FFFD destination operands of either leg and the Linux leg's non-UTF-8 operand included — exits 2 identically under `--preview` (argument checks precede either way — asserted beside unrelated validation errors and beside a spells-no-identity origin's findings, nothing modified); the equivalence is over workspace state, never scheduling: while another mutating command is held (`--test-hold`, T13.5-2's staging), a `--preview` invocation runs to completion with its full successful report — it takes no exclusivity and never meets the mutual-exclusion refusal; the held-state comparison holds once command 1 holds and again once the preview has exited, the holder's entry byte-identical and alone (read under H-4's grant), nothing added beside it — and `--test-hold` combined with `--preview` is a usage error, exit 2, creating no hold file; acquisition's every other outcome lies outside the equivalence likewise, each arm staged beside the real operation (`rename specs/A.mdx a a2`), its preview run first: (a) with, each staged separately, `.xspec/lock` a symbolic link to a directory, an empty leftover lock directory `r-x`, one `-wx`, and a lock directory holding a subdirectory that holds a file, the subdirectory `-wx` (each verified on the harness itself), the `--preview` answers byte-identically to its run on an unobstructed twin, exit 0, the staging untouched, while the real operation exits 2, `path` `\".xspec/lock\"`, `code` `\"write-failure\"` under the first two and `\"read-failure\"` under the last two; (b) with `.xspec` a plain file, the preview gives the invalid-workspace refusal — exit 1, exactly T10.1-6's condition-22 finding concerning `.xspec`, `mapping`, `files`, and `delta` `null` — while the real operation exits 2, `code` `\"write-failure\"`, `path` `\".xspec\"`; (c) with a plain file at `.xspec/lock`, and separately a directory and a FIFO in a lock directory, the preview answers as on the leftover-free twin and leaves every leftover byte-untouched, no entry added (H-6's inclusion), while the real operation then succeeds, removing them (SPEC 6.6, 6.4, 6.5, 13.4, 13.5, 12.0, 12.7, 14, 14.22, 14.24, 14.25)",
   // The twins of T6.5-16's and T6.5-17's arms add some fifty stagings, each
-  // with its premise `build` and two invocations: a wider hang guard (H-8).
-  timeoutMs: 240_000,
+  // with its premise `build` and two invocations, and the acquisition arms
+  // eight more fresh workspaces: a wider hang guard (H-8). The whole body
+  // took about 176 s locally alone against a reference passing it (the
+  // built product for all but the 13.5 runs, AGENTS.md's timings bullet),
+  // and before the acquisition arms 175 s locally alone, 103 s in CI, where
+  // 240 s ran out under a local load average of 4–7.
+  timeoutMs: 420_000,
   run: async (product) => {
     // --- Refusal equivalence: T6.4-3's cases, staged identically ---
     await withWorkspace(
@@ -1346,192 +2297,12 @@ const T6_6_3 = defineProductTest({
 
     // --- Scheduling: the equivalence is over workspace state, never
     // scheduling (SPEC 6.6) — T13.5-2's staging and choreography ---
-    const workspace = await TestWorkspace.create(CORE_DECL);
-    try {
-      await buildOk(product, workspace, "T6.6-3 scheduling staging `build`");
+    await runT663SchedulingArms(product);
 
-      const hold = holdPathFor(workspace, "hold-t663-primary.tmp");
-      const context1 =
-        "T6.6-3 held command 1 `rename specs/A.mdx a a2 --test-hold <path>` " +
-        "(T13.5-2's staging)";
-      const running = await startProduct(product, {
-        cwd: workspace.root,
-        argv: ["rename", "specs/A.mdx", "a", "a2", "--test-hold", hold],
-      });
-      try {
-        await awaitHoldFile(running, hold, context1);
-        const heldBaseline = await snapshotDirectory(workspace.root);
-
-        // The same second command T13.5-2 asserts is refused exit 2 without
-        // `--preview` runs to completion with it (SPEC 6.6, 13.5).
-        const previewArgv = [
-          "rename",
-          "specs/A.mdx",
-          "g",
-          "g2",
-          "--preview",
-          "--json",
-        ];
-        const context = `T6.6-3 \`${previewArgv.join(" ")}\` while command 1 is held`;
-        const result = await runBounded(
-          product,
-          workspace.root,
-          previewArgv,
-          context,
-        );
-        assertExitCode(
-          result,
-          0,
-          `${context}: a preview invocation is a non-mutating command under ` +
-            `13.5 — it takes no exclusivity, so while another mutating ` +
-            `command is held it runs to completion, never meeting the ` +
-            `mutual-exclusion refusal (exit 2) T13.5-2 asserts for the same ` +
-            `second command without --preview, and never blocking ` +
-            `(SPEC 6.6, 13.5)`,
-        );
-        const report = decodePreviewReport(
-          parseJsonStdout(result, context),
-          context,
-        );
-        assertSameJson(
-          report.findings,
-          [],
-          `${context}: the preview runs to completion with its full ` +
-            `successful report — findings [] (SPEC 6.6)`,
-        );
-        if (
-          report.mapping === null ||
-          report.files === null ||
-          report.delta === null
-        ) {
-          fail(
-            `${context}: the completed preview reports its plan — ` +
-              `\`mapping\`, \`files\`, and \`delta\` non-null (SPEC 6.6, ` +
-              `12.7)`,
-          );
-        }
-        if (running.hasExited()) {
-          fail(
-            `${context}: command 1 must still be held when the preview ` +
-              `completes — otherwise the completion is not attributable to ` +
-              `the preview's taking no exclusivity (SPEC 6.6, 13.5) — ` +
-              `${await describeExit(running)}`,
-          );
-        }
-        assertSnapshotsEqual(
-          heldBaseline,
-          await snapshotDirectory(workspace.root),
-          `${context}: the preview modifies nothing while another command ` +
-            `is held (SPEC 6.6)`,
-        );
-        await releaseHoldFile(hold);
-        let result1: RunResult;
-        try {
-          result1 = await running.waitForExit();
-        } catch (error) {
-          rethrowHarnessError(error);
-          return fail(
-            `${context1}: command 1 must complete normally once the hold ` +
-              `file is deleted (SPEC 13.5) — ` +
-              `${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-        assertExitCode(
-          result1,
-          0,
-          `${context1}: completes normally after release — it really held ` +
-            `workspace exclusivity throughout the preview's run (SPEC 13.5)`,
-        );
-      } finally {
-        running.kill();
-        await releaseHoldFile(hold);
-      }
-
-      // `--test-hold` combined with `--preview` is a usage error (SPEC 6.6:
-      // a preview acquires no exclusivity and does not take the
-      // acquisition-tied test seam; 12.0): exit 2, the 12.7 error document
-      // under --json, no hold file created, nothing modified. Both
-      // operations, both flag orders; the operands stay valid (command 1's
-      // rename completed above, leaving `a2` and the untouched `g`), so the
-      // exit 2 is attributable to the flag combination alone.
-      const combinedArms: readonly {
-        readonly name: string;
-        readonly build: (holdPath: string) => readonly string[];
-      }[] = [
-        {
-          name: "rename, `--preview --test-hold`",
-          build: (holdPath) => [
-            "rename",
-            "specs/A.mdx",
-            "g",
-            "g2",
-            "--preview",
-            "--test-hold",
-            holdPath,
-          ],
-        },
-        {
-          name: "move, `--test-hold … --preview`",
-          build: (holdPath) => [
-            "move",
-            "specs/A.mdx",
-            "specs/Moved.mdx",
-            "--test-hold",
-            holdPath,
-            "--preview",
-          ],
-        },
-      ];
-      let combinedIndex = 0;
-      for (const arm of combinedArms) {
-        combinedIndex += 1;
-        const holdPath = holdPathFor(
-          workspace,
-          `hold-t663-combined-${String(combinedIndex)}.tmp`,
-        );
-        const argv = arm.build(holdPath);
-        const context = `T6.6-3 (${arm.name}) \`${argv.join(" ")} --json\``;
-        await assertLeavesUnchanged(
-          workspace.root,
-          async () => {
-            const result = await runBounded(
-              product,
-              workspace.root,
-              [...argv, "--json"],
-              context,
-            );
-            assertExitCode(
-              result,
-              2,
-              `${context}: supplying --test-hold together with --preview is ` +
-                `a usage error — a preview acquires no exclusivity and does ` +
-                `not take the acquisition-tied test seam (SPEC 6.6, 13.5, ` +
-                `12.0)`,
-            );
-            expectErrorDocument(
-              result,
-              `${context}: under --json, the exit-2 error document is the ` +
-                `entire stdout (SPEC 12.0, 12.7, H-5)`,
-            );
-            if (result.stderrBytes.length === 0) {
-              fail(
-                `${context}: usage error messages are standard-error ` +
-                  `content (SPEC 12.0), but stderr is empty`,
-              );
-            }
-            if (await pathExists(holdPath)) {
-              fail(
-                `${context}: no hold file may be created at the path — the ` +
-                  `flag combination is refused, not honored (SPEC 6.6, 13.5)`,
-              );
-            }
-          },
-          `${context}: the usage error modifies nothing (SPEC 12.0)`,
-        );
-      }
-    } finally {
-      await workspace.dispose();
-    }
+    // --- Acquisition's every other outcome lies outside the equivalence
+    // likewise (SPEC 6.6), each arm staged beside the real operation, its
+    // preview run first ---
+    await runT663AcquisitionArms(product);
   },
 });
 

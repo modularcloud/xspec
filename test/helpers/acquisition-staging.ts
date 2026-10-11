@@ -56,7 +56,10 @@
 //   and its entry, and lists the lock directory alone (SPEC 13.5).
 //
 // Every staging's `restore()` reinstates the modes it changed (idempotent),
-// before the harness snapshots the workspace or reads the lock path. The two
+// before the harness snapshots the workspace or reads the lock path, and its
+// `reapply()` changes them again, verified anew, once the harness has
+// inspected the staging between two invocations that meet it in turn
+// (TEST-SPEC T6.6-3(a): a preview, then the real operation). The two
 // subdirectory stagings' restore finds the leftover wherever the lock
 // directory then holds it: a removal may first rename the leftover within
 // the lock directory, which Linux permits without permission on the leftover
@@ -113,6 +116,39 @@ export interface AcquisitionStaging {
   readonly leftover?: StagedLeftover;
   /** Reinstate every mode the staging changed; idempotent. */
   restore(): Promise<void>;
+  /**
+   * Change the same modes again, verified anew on the harness itself (E-1,
+   * H-11), once `restore()` has run and the harness has inspected the
+   * staging — for a staging two invocations meet in turn (TEST-SPEC
+   * T6.6-3(a): a preview, then the real operation), what it staged still in
+   * place as staged. `restore()` then reinstates them again.
+   */
+  reapply(): Promise<void>;
+}
+
+/** A staging's mode changes, reapplicable (`AcquisitionStaging`). */
+type ModeChanges = Pick<AcquisitionStaging, "restore" | "reapply">;
+
+/**
+ * The mode changes `apply` makes (and verifies), made now: `restore`
+ * reinstates them and then runs `afterRestore`; `reapply` reinstates them
+ * where they are still in effect (idempotent) and makes them afresh.
+ */
+async function modeChanges(
+  apply: () => Promise<PermissionStaging>,
+  afterRestore: () => Promise<void> = async () => undefined,
+): Promise<ModeChanges> {
+  let current = await apply();
+  return {
+    restore: async () => {
+      await current.restore();
+      await afterRestore();
+    },
+    reapply: async () => {
+      await current.restore();
+      current = await apply();
+    },
+  };
 }
 
 /** The subdirectory holding a plain file, as the leftover stagings stage it. */
@@ -147,17 +183,6 @@ async function requireNothingAt(
     throw error;
   }
   throw new Error(`${caller}: ${what} must hold nothing at ${abs}`);
-}
-
-/** Restore a directory-mode staging, then every directory in the lock directory. */
-function leftoverRestore(
-  root: string,
-  permissions: PermissionStaging,
-): () => Promise<void> {
-  return async () => {
-    await permissions.restore();
-    await restoreLockDirectoryListings(root);
-  };
 }
 
 /**
@@ -197,15 +222,13 @@ export async function stageUnlistableLockDirectory(
   workspace: StagingWorkspace,
 ): Promise<AcquisitionStaging> {
   const leftover = await stageLeftover(workspace, LOCK_PATH, { kind: "dir" });
-  const permissions = await stageDirectoryMode(
-    lockAbs(workspace.root),
-    UNLISTABLE_MODE,
-    [
+  const changes = await modeChanges(() =>
+    stageDirectoryMode(lockAbs(workspace.root), UNLISTABLE_MODE, [
       { attempt: "list", refused: true },
       { attempt: "create", refused: false },
-    ],
+    ]),
   );
-  return { leftover, restore: () => permissions.restore() };
+  return { leftover, ...changes };
 }
 
 /**
@@ -217,15 +240,13 @@ export async function stageUnwritableLockDirectory(
   workspace: StagingWorkspace,
 ): Promise<AcquisitionStaging> {
   const leftover = await stageLeftover(workspace, LOCK_PATH, { kind: "dir" });
-  const permissions = await stageDirectoryMode(
-    lockAbs(workspace.root),
-    UNWRITABLE_MODE,
-    [
+  const changes = await modeChanges(() =>
+    stageDirectoryMode(lockAbs(workspace.root), UNWRITABLE_MODE, [
       { attempt: "create", refused: true },
       { attempt: "list", refused: false },
-    ],
+    ]),
   );
-  return { leftover, restore: () => permissions.restore() };
+  return { leftover, ...changes };
 }
 
 /**
@@ -239,15 +260,15 @@ export async function stageUnlistableLeftoverDirectory(
 ): Promise<AcquisitionStaging> {
   const at = `${LOCK_PATH}/${LEFTOVER_DIRECTORY_NAME}`;
   const leftover = await stageLeftover(workspace, at, LEFTOVER_DIRECTORY);
-  const permissions = await stageDirectoryMode(
-    path.join(workspace.root, at),
-    UNLISTABLE_MODE,
-    [
-      { attempt: "list", refused: true },
-      { attempt: "examine", name: LEFTOVER_FILE_NAME, refused: false },
-    ],
+  const changes = await modeChanges(
+    () =>
+      stageDirectoryMode(path.join(workspace.root, at), UNLISTABLE_MODE, [
+        { attempt: "list", refused: true },
+        { attempt: "examine", name: LEFTOVER_FILE_NAME, refused: false },
+      ]),
+    () => restoreLockDirectoryListings(workspace.root),
   );
-  return { leftover, restore: leftoverRestore(workspace.root, permissions) };
+  return { leftover, ...changes };
 }
 
 /**
@@ -262,17 +283,17 @@ export async function stageUnwritableLeftoverDirectory(
 ): Promise<AcquisitionStaging> {
   const at = `${LOCK_PATH}/${LEFTOVER_DIRECTORY_NAME}`;
   const leftover = await stageLeftover(workspace, at, LEFTOVER_DIRECTORY);
-  const permissions = await stageDirectoryMode(
-    path.join(workspace.root, at),
-    UNWRITABLE_MODE,
-    [
-      { attempt: "remove", name: LEFTOVER_FILE_NAME },
-      { attempt: "create", refused: true },
-      { attempt: "list", refused: false },
-      { attempt: "examine", name: LEFTOVER_FILE_NAME, refused: false },
-    ],
+  const changes = await modeChanges(
+    () =>
+      stageDirectoryMode(path.join(workspace.root, at), UNWRITABLE_MODE, [
+        { attempt: "remove", name: LEFTOVER_FILE_NAME },
+        { attempt: "create", refused: true },
+        { attempt: "list", refused: false },
+        { attempt: "examine", name: LEFTOVER_FILE_NAME, refused: false },
+      ]),
+    () => restoreLockDirectoryListings(workspace.root),
   );
-  return { leftover, restore: leftoverRestore(workspace.root, permissions) };
+  return { leftover, ...changes };
 }
 
 /**
@@ -285,8 +306,7 @@ export async function stageReadOnlyArea(
 ): Promise<AcquisitionStaging> {
   const target = lockAbs(workspace.root);
   await requireNothingAt(target, "the lock path", "stageReadOnlyArea");
-  const permissions = await stageWriteRefusal(target);
-  return { restore: () => permissions.restore() };
+  return await modeChanges(() => stageWriteRefusal(target));
 }
 
 /**
@@ -302,8 +322,10 @@ export async function stageUnremovableLockFile(
     kind: "file",
     content: ACQUISITION_LEFTOVER_BYTES,
   });
-  const permissions = await stageWriteRefusal(lockAbs(workspace.root));
-  return { leftover, restore: () => permissions.restore() };
+  const changes = await modeChanges(() =>
+    stageWriteRefusal(lockAbs(workspace.root)),
+  );
+  return { leftover, ...changes };
 }
 
 /** What an unsearchable `.xspec` holds at the lock path. */
@@ -329,18 +351,16 @@ export async function stageUnsearchableArea(
       "stageUnsearchableArea",
     );
   }
-  const permissions = await stageDirectoryMode(
-    areaAbs(workspace.root),
-    UNSEARCHABLE_MODE,
-    [
+  const changes = await modeChanges(() =>
+    stageDirectoryMode(areaAbs(workspace.root), UNSEARCHABLE_MODE, [
       { attempt: "examine", name: "lock", refused: true },
       { attempt: "create", refused: true },
       { attempt: "list", refused: false },
-    ],
+    ]),
   );
   return {
     ...(leftover === undefined ? {} : { leftover }),
-    restore: () => permissions.restore(),
+    ...changes,
   };
 }
 
@@ -357,16 +377,14 @@ export async function stageUnsearchableLockDirectory(
     kind: "dir",
     entries: [{ name: LEFTOVER_DIRECTORY_NAME, node: LEFTOVER_DIRECTORY }],
   });
-  const permissions = await stageDirectoryMode(
-    lockAbs(workspace.root),
-    UNSEARCHABLE_MODE,
-    [
+  const changes = await modeChanges(() =>
+    stageDirectoryMode(lockAbs(workspace.root), UNSEARCHABLE_MODE, [
       { attempt: "examine", name: LEFTOVER_DIRECTORY_NAME, refused: true },
       { attempt: "create", refused: true },
       { attempt: "list", refused: false },
-    ],
+    ]),
   );
-  return { leftover, restore: () => permissions.restore() };
+  return { leftover, ...changes };
 }
 
 /**
@@ -383,8 +401,7 @@ export async function stageReadOnlyRoot(
     "an unbuilt workspace's area",
     "stageReadOnlyRoot",
   );
-  const permissions = await stageWriteRefusal(target);
-  return { restore: () => permissions.restore() };
+  return await modeChanges(() => stageWriteRefusal(target));
 }
 
 /**
@@ -401,15 +418,12 @@ export async function stageUnlistableArea(
     "the lock path",
     "stageUnlistableArea",
   );
-  const permissions = await stageDirectoryMode(
-    areaAbs(workspace.root),
-    UNLISTABLE_MODE,
-    [
+  return await modeChanges(() =>
+    stageDirectoryMode(areaAbs(workspace.root), UNLISTABLE_MODE, [
       { attempt: "list", refused: true },
       { attempt: "create", refused: false },
-    ],
+    ]),
   );
-  return { restore: () => permissions.restore() };
 }
 
 function describeOccupant(key: string, state: LeftoverState): string {

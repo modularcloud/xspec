@@ -1322,7 +1322,11 @@ const ACQUISITION_WRITE_ARMS: readonly AcquisitionWriteArm[] = [
         { kind: "file", content: AREA_OCCUPANT_BYTES },
         context,
       );
-      return { restore: async () => undefined };
+      // No mode changed: nothing to restore or reapply.
+      return {
+        restore: async () => undefined,
+        reapply: async () => undefined,
+      };
     },
     remedy: async (workspace) => {
       await fsp.unlink(path.join(workspace.root, AREA_PATH));
