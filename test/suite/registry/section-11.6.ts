@@ -129,16 +129,21 @@
 // and the exit code is 0 (SPEC 12.0, 11.6) — T11.6-1's workspaces being
 // valid, and T11.6-2's 14.19 staging never being the inventory's finding.
 //
-// T11.6-3 — record, area, durables, order (SPEC 11.6, 13.3, 13.1, 6.1,
-// 10.1, 12.7, 7.2, 7.4, 7.5). Three workspaces:
+// T11.6-3 — record, area, durables, order, lock path (SPEC 11.6, 13.3,
+// 13.1, 6.1, 10.1, 12.7, 7.2, 7.4, 7.5, 13.4, 13.5, 14.23). Three
+// workspaces, then the lock-path arms:
 //
 // - record/area/journal workspace (emission enabled; two spec groups `zz`
 //   before `aa` so configuration order has teeth): before any build,
 //   `recorded` is [] (empty before any generation — never null, never
 //   unavailable), `graphData` is exactly ".xspec" (reported unconditionally,
 //   no trailing separator), `journal` is {".xspec/journal", occupied: false}
-//   (an absent journal is an empty journal, 6.1), `sessions` [] — flag-less
-//   and `--json` forms against the same expectation (SPEC 11). After a
+//   (an absent journal is an empty journal, 6.1), `sessions` [], and `lock`
+//   exactly ".xspec/lock" though `.xspec` is absent (a premise before the
+//   first run; after each, the inventory's write-nothing contract) —
+//   flag-less and `--json` forms against the same expectation (SPEC 11).
+//   Every finding-free answer of T11.6-3 and T11.6-4 pins `lock` alike
+//   (the shared frame, `expectInventoryDocument`). After a
 //   `build`: `recorded` lists the recorded derived paths — both generated
 //   modules and both emitted Markdown files pinned present, and every
 //   further entry attributable to a discovered source through the 13.1
@@ -178,6 +183,33 @@
 //   source's two memberships in configuration order, flag-less and
 //   `--json` forms against one expectation: a product listing groups,
 //   profiles, or rules by name bytes, or reversed, fails here.
+//
+// - lock-path arms (SPEC 11.6, 12.7, 13.4, 13.5, 14.23), each on a fresh
+//   CONF-CORE-shaped workspace (CORE_DECL, section-13.5.ts), freshly built,
+//   `inventory` run bounded (a product opening a staged FIFO fails
+//   diagnosed at the bound, H-8): `.xspec` a plain file, and a symbolic link
+//   to the workspace's own area relocated outside it (graph data, a
+//   journal, the valid session `s`; T13.5-10(a)'s stagings,
+//   section-13.5-ii.ts) — exit 1 with T10.1-6's condition-23 finding alone,
+//   concerning `.xspec`, `locations` []; a plain file at `.xspec/lock`; a
+//   lock directory holding a directory (`reviews`, holding `s.json`) and a
+//   FIFO (`t.json`) — session-file names, so a product selecting sessions
+//   anywhere under the area lists them; a dead run's entry (a held `rename`
+//   killed under T13.5-3's discipline, helpers/lock-staging.ts
+//   `killHeldRun`), alone and then beside that directory and FIFO; and,
+//   while `rename specs/A.mdx a a2` is held at 13.5's seam, the inventory
+//   run once it holds — each but the area arms finding-free, exit 0. Every
+//   answer reports `lock` exactly ".xspec/lock" and lists nothing at or
+//   under the lock path in `sources`, the derived map, `recorded`, or
+//   `sessions`; after each, the held arm's held-state comparison against
+//   the `rename`'s pre-invocation state, then H-6's inclusion check
+//   (helpers/lock-state.ts `captureLockPath` then
+//   `assertLockPathAsCaptured`: whatever occupied the lock path — nothing,
+//   a leftover, or the holder's entry — occupies it byte-identical, nothing
+//   added beside it), and each staging in place, a link's target untouched,
+//   a FIFO a FIFO. The arms needing the product's own exclusivity in
+//   `.xspec/lock` — the dead entry and the hold — run last; the held
+//   `rename`, its hold lifted, completes, exit 0.
 //
 // T11.6-4 — no parse, no write, one finding (SPEC 11.6, 14.23, 14.14, 12.7,
 // 12.0, 13.3). Three arm groups, three workspaces:
@@ -235,11 +267,18 @@
 // Certification note: CERTIFICATIONS.md's Exclusions list T11.6-1 through
 // T11.6-4 ("`inventory` and `version`"), so no fixture executes these
 // bodies; the anchoring, resolved-configuration, derived-map, occupancy,
-// and listing arms are positive and byte-asserted per that entry, T11.6-4's
+// and listing arms are positive and byte-asserted per that entry — the
+// `lock` member among them, ".xspec/lock" exactly whatever occupies the
+// lock path and while a command is held (T11.6-3) — T11.6-4's
 // no-parse/no-write negatives ride the certified compare-around machinery,
 // and every broken state T11.6-4 must ignore is positively reported from
 // the same staging by its home reporter (its premise build in-test;
-// T13.3-3, T10.1-4, T12.2-2 on their own stagings).
+// T13.3-3, T10.1-4, T12.2-2 on their own stagings). T11.6-3's lock-path
+// inclusions, its held arm's above all, share the comparison machinery
+// VIOL-CORE-READERENTRY certifies (that violator's note: the held-state
+// comparison and `assertLockPathAsCaptured`, T13.5-4's sequence after each
+// read); its leftover stagings verify themselves on the harness before use
+// (helpers/lock-staging.ts; E-1, H-11).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -271,9 +310,30 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { isLockPathBytes, LOCK_PATH } from "../../helpers/lock-path.js";
+import type {
+  LeftoverNode,
+  StagedLeftover,
+} from "../../helpers/lock-staging.js";
+import {
+  assertFifosIntact,
+  assertOutsideTargetsUntouched,
+  assertStagingInPlace,
+  killHeldRun,
+  stageLeftover,
+} from "../../helpers/lock-staging.js";
+import {
+  assertHeldState,
+  assertLockPathAsCaptured,
+  captureLockPath,
+} from "../../helpers/lock-state.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
-import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import type { DirectorySnapshot } from "../../helpers/snapshot.js";
+import {
+  assertLeavesUnchanged,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type {
@@ -283,6 +343,9 @@ import type {
 } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import { CORE_DECL, runBounded } from "./section-13.5.js";
+import { obstructArea, relocateAreaBehindLink } from "./section-13.5-ii.js";
+import { liftAndWait, withHeldRun } from "./section-13.5-iii.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
@@ -293,6 +356,7 @@ import {
   expectErrorDocument,
   expectExit,
 } from "./support.js";
+import { holdPathFor } from "./write-refusal-staging.js";
 
 // --- fixture ------------------------------------------------------------------
 //
@@ -1636,9 +1700,6 @@ export default defineConfig({
 /** The journal's workspace-relative path (SPEC 6.1). */
 const JOURNAL_PATH = `${GRAPH_DATA_AREA_PATH}/journal`;
 
-/** The lock path, reported unconditionally (SPEC 11.6, 13.5). */
-const LOCK_PATH = `${GRAPH_DATA_AREA_PATH}/lock`;
-
 /**
  * Run `inventory` and assert the finding-free full-document frame (T11.6-3;
  * reused by T11.6-4's imperfect-workspace arm and intact-record premise):
@@ -1647,8 +1708,10 @@ const LOCK_PATH = `${GRAPH_DATA_AREA_PATH}/lock`;
  * corrupted the record; SPEC 11.6, 12.0; H-5); exactly one JSON document as
  * the entire stdout (JSON-only, SPEC 11); the full eleven-member 12.7 inventory
  * document form (H-3); `findings` [] — which IS the no-14.13/no-14.21
- * observation on the occupancy and session stagings. Returns the decoded
- * document and the raw run for the callers' value assertions and byte scans.
+ * observation on the occupancy and session stagings; and `lock` exactly
+ * `.xspec/lock`, the lock path reported unconditionally (SPEC 11.6, 12.7,
+ * 13.5; T11.6-3). Returns the decoded document and the raw run for the
+ * callers' value assertions and byte scans.
  */
 async function expectInventoryDocument(
   product: ProductBinding,
@@ -1683,7 +1746,76 @@ async function expectInventoryDocument(
         `${JSON.stringify(document.findings[0]?.message)}`,
     );
   }
+  assertLockMember(document.lock, context);
   return { document, result };
+}
+
+/**
+ * The lock member: exactly `.xspec/lock`, the lock path's workspace-relative
+ * spelling with no trailing separator — reported unconditionally, whatever
+ * occupies the lock path or the area's own path, before any build and while
+ * a mutating command is held alike (SPEC 11.6, 12.7, 13.5).
+ */
+function assertLockMember(actual: PathValue, context: string): void {
+  if (actual === LOCK_PATH) return;
+  fail(
+    `${context}: the lock path is reported unconditionally as exactly ` +
+      `${JSON.stringify(LOCK_PATH)} — its workspace-relative path, no ` +
+      `trailing separator — whatever occupies it or the area's own path ` +
+      `(SPEC 11.6, 12.7, 13.5); got ${renderPathValue(actual)}`,
+  );
+}
+
+/**
+ * Nothing at or under the lock path appears in any other member that lists
+ * paths: `sources` (files under `.xspec/` are excluded from every group,
+ * 13.4), the derived map (per discovered spec source), `recorded` where the
+ * record-supplied datum is a list (the lock path bears on no record, 13.4),
+ * and `sessions` (entries directly under `.xspec/reviews` alone, 10.1). The
+ * lock path, transient and xspec's alone, is reported as `lock` and nowhere
+ * else (SPEC 11.6, 13.4, 13.5).
+ */
+function assertNoLockPathListed(
+  document: InventoryDocument,
+  context: string,
+): void {
+  const listed: (readonly [string, PathValue])[] = [];
+  for (const source of document.sources) listed.push(["sources", source.path]);
+  for (const entry of document.derived) {
+    listed.push(["derived", entry.source]);
+    if (entry.module !== null) listed.push(["derived", entry.module]);
+    if (entry.markdown !== null) listed.push(["derived", entry.markdown]);
+  }
+  if (document.recorded.state === "value") {
+    for (const recorded of document.recorded.value) {
+      listed.push(["recorded", recorded]);
+    }
+  }
+  for (const session of document.sessions) listed.push(["sessions", session]);
+  const offending = listed.filter(([, value]) =>
+    isLockPathBytes(pathValueBytes(value)),
+  );
+  if (offending.length === 0) return;
+  fail(
+    `${context}: nothing at or under the lock path ${LOCK_PATH} appears in ` +
+      `any other member — it is reported as \`lock\` alone, transient and ` +
+      `xspec's: never a source (files under .xspec/ are excluded from every ` +
+      `group, 13.4), a derived or recorded path (the lock path bears on no ` +
+      `record, 13.4), or a session (10.1) (SPEC 11.6, 13.4, 13.5); found ` +
+      offending
+        .map(([member, value]) => `${member}: ${renderPathValue(value)}`)
+        .join(", "),
+  );
+}
+
+/** Nothing at `.xspec` in the workspace, else a diagnosed failure. */
+async function assertAreaAbsent(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const kind = await workspace.kind(GRAPH_DATA_AREA_PATH);
+  if (kind === "absent") return;
+  fail(`${context}; found ${kind} at ${GRAPH_DATA_AREA_PATH}`);
 }
 
 /** The graph-data area: exactly `.xspec`, no trailing separator (11.6). */
@@ -2008,10 +2140,426 @@ function assertConfigurationOrder(
   );
 }
 
+// --- T11.6-3's lock-path arms ---------------------------------------------
+//
+// The lock path is reported unconditionally (SPEC 11.6, 12.7, 13.5). The
+// record workspace's first answers pin `lock` before any build, `.xspec`
+// absent, and every finding-free answer of T11.6-3 and T11.6-4 pins it
+// through the shared frame (`expectInventoryDocument`). The arms below
+// stage the area's own path or the lock path, each on a fresh
+// CONF-CORE-shaped workspace (CORE_DECL, section-13.5.ts: one spec group,
+// `specs/A.mdx` holding `a` with its child `a.k`, then `g` — staged-source
+// records, these workspaces being created after the body's first product
+// invocation), freshly built, and judge `inventory` there
+// (`expectLockPathInventory`). They run last in the body, the dead-entry and
+// held arms last of all: those two need the product's own exclusivity — an
+// entry a held `rename` adds to `.xspec/lock` — which a product keeping its
+// exclusion state elsewhere fails at their staging, diagnosed (`killHeldRun`
+// finding nothing at `.xspec/lock`, or the held-state comparison's count),
+// every arm before them staged by the harness alone. Each runner is
+// exported so a scratch probe can run it alone.
+
+/** `inventory`, flag-less: a JSON-only surface (SPEC 11, 12.0). */
+const LOCK_ARM_INVENTORY: readonly string[] = ["inventory"];
+
+/**
+ * The mutating command the dead-entry and held arms hold: `rename
+ * specs/A.mdx a a2`, an operation succeeding on CORE_DECL's staging (SPEC
+ * 6.4), held at 13.5's test seam.
+ */
+const HELD_RENAME: readonly string[] = ["rename", "specs/A.mdx", "a", "a2"];
+
+/** The audit session `s` the area arms' area holds (SPEC 10.1, 10.6). */
+const AREA_SESSION_CREATE: readonly string[] = [
+  "review",
+  "create",
+  "--strategy",
+  "audit",
+  "--name",
+  "s",
+];
+
+/** What the plain file staged at `.xspec` holds. */
+const AREA_FILE_BYTES =
+  "Not the graph-data area: a plain file occupying .xspec.\n";
+
+/** What the plain file staged at `.xspec/lock` holds: no entry, no record. */
+const LOCK_FILE_BYTES = "A leftover the harness staged at the lock path.\n";
+
+/** What the plain file in the staged directory under the lock path holds. */
+const LOCK_DIRECTORY_FILE_BYTES =
+  "A leftover the harness staged under the lock path.\n";
+
+/**
+ * The lock directory's harness-staged occupants — alone, and beside a dead
+ * run's entry: a directory holding a plain file, and a FIFO. They are named
+ * as the review-session directory and session files are (`reviews`,
+ * `s.json`; `t.json`), so a product selecting sessions by name anywhere
+ * under the area, rather than directly under `.xspec/reviews` (SPEC 10.1,
+ * 11.6), lists them and fails. No plain file of the harness's own naming
+ * lies at the lock directory's top level (helpers/lock-staging.ts refuses
+ * one: the entry form is the product's own, 13.5).
+ */
+const LOCK_DIRECTORY_OCCUPANTS: readonly {
+  readonly name: string;
+  readonly node: LeftoverNode;
+}[] = [
+  {
+    name: "reviews",
+    node: {
+      kind: "dir",
+      entries: [
+        {
+          name: "s.json",
+          node: { kind: "file", content: LOCK_DIRECTORY_FILE_BYTES },
+        },
+      ],
+    },
+  },
+  { name: "t.json", node: { kind: "fifo" } },
+];
+
+/**
+ * What a lock-path arm's `inventory` answers: finding-free at exit 0, or —
+ * `.xspec` holding no directory — T10.1-6's one condition-23 finding at
+ * exit 1.
+ */
+type LockArmAnswer = "finding-free" | "area-occupied";
+
+/** Stage a fresh CORE_DECL workspace, run `body`, dispose. */
+async function withCoreWorkspace(
+  body: (workspace: TestWorkspace) => Promise<void>,
+): Promise<void> {
+  const workspace = await TestWorkspace.create(CORE_DECL);
+  try {
+    await body(workspace);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * One lock-path arm's `inventory` (TEST-SPEC T11.6-3), run bounded
+ * (`runBounded`: a product opening a staged FIFO — an open with no writer
+ * blocks — fails diagnosed at the bound, H-8; the harness never opens one,
+ * helpers/lock-staging.ts). The answer first: exit 0 and finding-free, or,
+ * where `.xspec` holds no directory, exit 1 with T10.1-6's condition-23
+ * finding alone — concerning `.xspec`, `locations` [] (SPEC 11.6, 14.23);
+ * `lock` exactly `.xspec/lock`; nothing at or under the lock path in any
+ * other member. Then, where a run holds (`heldBaseline`, its pre-invocation
+ * state), the held-state comparison — every path but the lock path
+ * byte-identical, the holder's entry the lock directory's only one — and
+ * in every arm H-6's inclusion check: `inventory` acquires nothing, so
+ * whatever occupied the lock path as it started — nothing, a leftover, or a
+ * held run's entry — occupies it byte-identical, nothing added beside it
+ * (SPEC 13.4); T13.5-4's sequence after each read, the comparison
+ * machinery VIOL-CORE-READERENTRY certifies (CERTIFICATIONS.md). Last, each
+ * staging in place — the occupant at the area's own path among them — every
+ * link's target untouched, every FIFO a FIFO.
+ */
+async function expectLockPathInventory(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  answer: LockArmAnswer,
+  staged: readonly StagedLeftover[],
+  context: string,
+  heldBaseline?: DirectorySnapshot,
+): Promise<void> {
+  const capture = await captureLockPath(workspace.root);
+  const result = await runBounded(
+    product,
+    workspace.root,
+    LOCK_ARM_INVENTORY,
+    context,
+  );
+  const areaOccupied = answer === "area-occupied";
+  assertExitCode(
+    result,
+    areaOccupied ? 1 : 0,
+    areaOccupied
+      ? `${context}: the area's own path holds no directory, so the ` +
+          `record-supplied datum meets condition 23 — an answer carrying a ` +
+          `finding exits 1 (SPEC 11.6, 14.23, 12.0; T10.1-6)`
+      : `${context}: whatever occupies the lock path, the inventory answers ` +
+          `finding-free, exit 0 — the lock path bears on no record and is no ` +
+          `part of condition 23's state (SPEC 11.6, 13.4, 14.23)`,
+  );
+  const document = decodeInventoryDocument(
+    parseJsonStdout(
+      result,
+      `${context} — inventory is JSON-only: a single JSON document is its ` +
+        `only output form (SPEC 11, 12.0)`,
+    ),
+    context,
+  );
+  if (areaOccupied) {
+    assertConditionCounts(
+      document.findings,
+      { "14.23": 1 },
+      `${context} — T10.1-6's condition-23 finding alone (stable code ` +
+        `unreadable-record): the only finding an inventory answer ever ` +
+        `carries (SPEC 11.6, 14.23)`,
+    );
+    const finding = document.findings[0]!;
+    assertFindingConcernsPath(
+      finding,
+      GRAPH_DATA_AREA_PATH,
+      `${context} — the condition-23 finding concerns the area's own path ` +
+        `(SPEC 14.23, 11.6; T10.1-6)`,
+    );
+    assertSameJson(
+      finding.locations,
+      [],
+      `${context} — a path-concerned condition is unlocated: locations [] ` +
+        `(SPEC 12.7)`,
+    );
+  } else {
+    assertSameJson(
+      document.findings,
+      [],
+      `${context} — finding-free: never a condition-23 finding (the lock ` +
+        `path with everything under it is no part of the record, SPEC 13.4, ` +
+        `14.23) nor any other (SPEC 11.6)`,
+    );
+  }
+  assertLockMember(document.lock, context);
+  assertNoLockPathListed(document, context);
+  if (heldBaseline !== undefined) {
+    await assertHeldState(
+      workspace.root,
+      { baseline: heldBaseline, heldRuns: 1 },
+      `${context}, once it has exited, against the held run's ` +
+        `pre-invocation state (an inventory acquires nothing and writes ` +
+        `nothing: SPEC 11.6, 13.4)`,
+    );
+  }
+  await assertLockPathAsCaptured(
+    capture,
+    `${context}, once it has exited (H-6: a command acquiring nothing ` +
+      `leaves the lock path as it found it)`,
+  );
+  await assertStagingInPlace(
+    staged,
+    `${context}: each staged occupant untouched — the inventory never ` +
+      `writes anything (SPEC 11.6, 13.4; H-6)`,
+  );
+  await assertOutsideTargetsUntouched(
+    staged,
+    `${context}: nothing written, removed, or added through a link (SPEC ` +
+      `11.6, 13.4)`,
+  );
+  await assertFifosIntact(staged, `${context}: each staged FIFO in place`);
+}
+
+/** One area arm: what occupies `.xspec`, and its staging. */
+interface AreaArm {
+  readonly what: string;
+  readonly stage: (
+    workspace: TestWorkspace,
+    context: string,
+  ) => Promise<StagedLeftover>;
+}
+
+/**
+ * The area arms' occupants of `.xspec` — T10.1-6's two, staged as
+ * T13.5-10(a) stages them (section-13.5-ii.ts): a plain file in place of
+ * the area's directory, and a symbolic link to the workspace's own area
+ * relocated outside it, a directory holding graph data, a journal, and the
+ * valid session `s`.
+ */
+const AREA_ARMS: readonly AreaArm[] = [
+  {
+    what: "`.xspec` a plain file",
+    stage: (workspace, context) =>
+      obstructArea(
+        workspace,
+        { kind: "file", content: AREA_FILE_BYTES },
+        context,
+      ),
+  },
+  {
+    what:
+      "`.xspec` a symbolic link to a directory holding a journal and a " +
+      "valid session (the workspace's own area relocated outside it)",
+    stage: (workspace, context) => relocateAreaBehindLink(workspace, context),
+  },
+];
+
+/**
+ * T11.6-3's area arms: on a freshly built workspace holding the audit
+ * session `s`, each occupant of `.xspec` staged in turn (`AREA_ARMS`), then
+ * `inventory`: exit 1 with T10.1-6's one condition-23 finding, `lock`
+ * exactly `.xspec/lock`, nothing at or under the lock path listed, the
+ * occupant byte-identical in place and a link's target untouched.
+ */
+export async function runT1163AreaArms(product: ProductBinding): Promise<void> {
+  for (const arm of AREA_ARMS) {
+    await withCoreWorkspace(async (workspace) => {
+      const context = `T11.6-3 [${arm.what}]`;
+      await buildOk(
+        product,
+        workspace,
+        `${context} \`build\` — the staged workspace is valid (SPEC 12.1)`,
+      );
+      await expectExit(
+        product,
+        workspace,
+        AREA_SESSION_CREATE,
+        0,
+        `${context} \`review create --strategy audit --name s\` — the valid ` +
+          `session the area then holds (SPEC 10.1, 10.7)`,
+      );
+      const staged = await arm.stage(workspace, context);
+      await expectLockPathInventory(
+        product,
+        workspace,
+        "area-occupied",
+        [staged],
+        `${context}: \`inventory\``,
+      );
+    });
+  }
+}
+
+/**
+ * T11.6-3's leftover arms, in turn on one freshly built workspace, each
+ * leftover deleted by hand before the next (the manual remedy of 13.4): a
+ * plain file at `.xspec/lock`; a lock directory holding a directory and a
+ * FIFO (`LOCK_DIRECTORY_OCCUPANTS`); a dead run's entry — a held `rename`
+ * killed under T13.5-3's discipline (`killHeldRun`: its own process group,
+ * SIGKILL, its exit collected, the group confirmed gone; the lock
+ * directory's one entry left) — alone, then with the directory and the FIFO
+ * staged beside it. After each, `inventory` answers finding-free, exit 0,
+ * `lock` exactly `.xspec/lock`, nothing at or under the lock path listed,
+ * the leftover untouched.
+ */
+export async function runT1163LeftoverArms(
+  product: ProductBinding,
+): Promise<void> {
+  await withCoreWorkspace(async (workspace) => {
+    const context = "T11.6-3 [leftovers at and under the lock path]";
+    await buildOk(
+      product,
+      workspace,
+      `${context} \`build\` — the staged workspace is valid (SPEC 12.1)`,
+    );
+    const lockAbs = path.join(workspace.root, LOCK_PATH);
+
+    const plainFile = await stageLeftover(workspace, LOCK_PATH, {
+      kind: "file",
+      content: LOCK_FILE_BYTES,
+    });
+    await expectLockPathInventory(
+      product,
+      workspace,
+      "finding-free",
+      [plainFile],
+      `${context} a plain file at ${LOCK_PATH}: \`inventory\``,
+    );
+    await fsp.rm(lockAbs);
+
+    const lockDirectory = await stageLeftover(workspace, LOCK_PATH, {
+      kind: "dir",
+      entries: LOCK_DIRECTORY_OCCUPANTS,
+    });
+    await expectLockPathInventory(
+      product,
+      workspace,
+      "finding-free",
+      [lockDirectory],
+      `${context} a lock directory holding a directory and a FIFO: ` +
+        `\`inventory\``,
+    );
+    await fsp.rm(lockAbs, { recursive: true });
+
+    await killHeldRun(product, {
+      root: workspace.root,
+      argv: HELD_RENAME,
+      holdPath: holdPathFor(workspace, "hold-killed.tmp"),
+      context:
+        `${context} the held \`rename specs/A.mdx a a2\`, killed under ` +
+        `T13.5-3's discipline`,
+    });
+    await expectLockPathInventory(
+      product,
+      workspace,
+      "finding-free",
+      [],
+      `${context} a dead run's entry in a lock directory: \`inventory\``,
+    );
+
+    const beside: StagedLeftover[] = [];
+    for (const occupant of LOCK_DIRECTORY_OCCUPANTS) {
+      beside.push(
+        await stageLeftover(
+          workspace,
+          `${LOCK_PATH}/${occupant.name}`,
+          occupant.node,
+        ),
+      );
+    }
+    await expectLockPathInventory(
+      product,
+      workspace,
+      "finding-free",
+      beside,
+      `${context} a dead run's entry, a directory, and a FIFO in a lock ` +
+        `directory: \`inventory\``,
+    );
+  });
+}
+
+/**
+ * T11.6-3's held arm: on a freshly built workspace, `rename specs/A.mdx a
+ * a2` held at 13.5's seam (`withHeldRun`, section-13.5-iii.ts: the
+ * held-state comparison made once it holds), then `inventory` while it
+ * holds — finding-free, exit 0, `lock` exactly `.xspec/lock`, nothing at or
+ * under the lock path listed; the held-state comparison again and H-6's
+ * inclusion once it has exited, the holder's entry byte-identical and alone
+ * — then the hold lifted, the `rename` completing, exit 0.
+ */
+export async function runT1163HeldArm(product: ProductBinding): Promise<void> {
+  await withCoreWorkspace(async (workspace) => {
+    const context = "T11.6-3 [while a `rename` is held]";
+    await buildOk(
+      product,
+      workspace,
+      `${context} \`build\` — the staged workspace is valid (SPEC 12.1)`,
+    );
+    const preInvocation = await snapshotDirectory(workspace.root);
+    await withHeldRun(
+      product,
+      workspace,
+      HELD_RENAME,
+      `${context} the held \`rename specs/A.mdx a a2\``,
+      async (held) => {
+        await expectLockPathInventory(
+          product,
+          workspace,
+          "finding-free",
+          [],
+          `${context}: \`inventory\` while it holds`,
+          preInvocation,
+        );
+        const lifted = await liftAndWait(
+          held,
+          `${context} the held \`rename\`, its hold lifted`,
+        );
+        assertExitCode(
+          lifted,
+          0,
+          `${context}: the held \`rename\`, an operation succeeding there, ` +
+            `completes once its hold is lifted (SPEC 13.5, 6.4)`,
+        );
+      },
+    );
+  });
+}
+
 const T11_6_3 = defineProductTest({
   id: "T11.6-3",
   title:
-    'inventory record, area, durables, order: `recorded` is [] before any generation (never null, never unavailable) and after a build lists the recorded derived paths in byte order — generated modules and emitted Markdown pinned present, every further entry a companion attributable to its source through the 13.1 naming scheme — and after a configuration change without rebuild it lags, reported as recorded, not as configured (emission flipped off: `derived[*].markdown` null while the previously emitted `.md` paths stay recorded); the graph-data area is reported unconditionally — before any build — as ".xspec" with no trailing separator; a foreign file placed under `.xspec/` appears in no inventory list and is never claimed (its name absent from the document bytes); `journal` is {".xspec/journal", occupied} with occupancy by presence alone — absent false; a garbage-content plain file, a directory, and a broken symbolic link each true, content unread, no 14.13 from inventory, the answer finding-free; sessions are selected by name alone — a product-written session, a garbage-content S.json, and a directory named S2.json all listed (content unread, no 14.21 here) in byte order of file name ("S.json" < "S2.json" < "ancien.json", inverting under case folding), while notes.txt and .foo.json are never listed; groups, profiles, and rules stay in configuration order — the record workspace\'s spec groups `zz` before `aa`, and an order workspace declaring two spec groups, two code groups, two coverage profiles, and two policy rules, each pair against name byte order (`zspec`/`aspec`, `zcode`/`acode`, `zprofil`/`aprofil`, `zregle`/`aregle`), reporting all four lists in configuration order as whole resolved entries with every default and inferred kind explicit, form-exact — `zcode`\'s globs and a two-code-group file\'s memberships in configuration order too; every answer complete and finding-free at exit 0, the pre-build state and the order workspace asserted in the flag-less and `--json` forms against one expectation (SPEC 11.6, 13.3, 13.1, 13.2, 6.1, 10.1, 12.7, 12.0, 11, 7.2, 7.4, 7.5)',
+    'inventory record, area, durables, order, lock path: `recorded` is [] before any generation (never null, never unavailable) and after a build lists the recorded derived paths in byte order — generated modules and emitted Markdown pinned present, every further entry a companion attributable to its source through the 13.1 naming scheme — and after a configuration change without rebuild it lags, reported as recorded, not as configured (emission flipped off: `derived[*].markdown` null while the previously emitted `.md` paths stay recorded); the graph-data area is reported unconditionally — before any build — as ".xspec" with no trailing separator; a foreign file placed under `.xspec/` appears in no inventory list and is never claimed (its name absent from the document bytes); `journal` is {".xspec/journal", occupied} with occupancy by presence alone — absent false; a garbage-content plain file, a directory, and a broken symbolic link each true, content unread, no 14.13 from inventory, the answer finding-free; sessions are selected by name alone — a product-written session, a garbage-content S.json, and a directory named S2.json all listed (content unread, no 14.21 here) in byte order of file name ("S.json" < "S2.json" < "ancien.json", inverting under case folding), while notes.txt and .foo.json are never listed; groups, profiles, and rules stay in configuration order — the record workspace\'s spec groups `zz` before `aa`, and an order workspace declaring two spec groups, two code groups, two coverage profiles, and two policy rules, each pair against name byte order (`zspec`/`aspec`, `zcode`/`acode`, `zprofil`/`aprofil`, `zregle`/`aregle`), reporting all four lists in configuration order as whole resolved entries with every default and inferred kind explicit, form-exact — `zcode`\'s globs and a two-code-group file\'s memberships in configuration order too; the lock path reported unconditionally as exactly ".xspec/lock" — before any build with `.xspec` absent, in every finding-free answer, with `.xspec` a plain file and a symbolic link to the workspace\'s own area relocated outside it (exit 1, T10.1-6\'s condition-23 finding concerning `.xspec` alone), with a plain file at `.xspec/lock`, a lock directory holding a directory and a FIFO, and a dead run\'s entry (a held `rename` killed under T13.5-3\'s discipline) alone and beside that directory and FIFO, and while a `rename` is held — nothing at or under the lock path listed in `sources`, the derived map, `recorded`, or `sessions`, each staged occupant untouched and the held run\'s entry byte-identical and alone afterwards (H-6\'s inclusion); every other answer complete and finding-free at exit 0, the pre-build state and the order workspace asserted in the flag-less and `--json` forms against one expectation (SPEC 11.6, 13.3, 13.1, 13.2, 6.1, 10.1, 12.7, 12.0, 11, 7.2, 7.4, 7.5, 13.4, 13.5, 14.23)',
   run: async (product) => {
     // --- record / area / journal workspace ---------------------------------
     const workspace = await TestWorkspace.create({
@@ -2023,18 +2571,37 @@ const T11_6_3 = defineProductTest({
     });
     try {
       // Before any build: the record is empty, the area is already reported,
-      // the absent journal is unoccupied, no sessions exist — flag-less and
-      // `--json` forms against the same expectation (JSON-only, SPEC 11).
+      // the absent journal is unoccupied, no sessions exist, and the lock
+      // path is reported though `.xspec` is absent (`lock` exactly
+      // ".xspec/lock", asserted by the shared frame; nothing at or under it
+      // listed) — flag-less and `--json` forms against the same expectation
+      // (JSON-only, SPEC 11). `.xspec` absent is a staging premise before
+      // the first run and, after each, the inventory's own write-nothing
+      // contract (SPEC 11.6), so each run meets the area absent.
+      if ((await workspace.kind(GRAPH_DATA_AREA_PATH)) !== "absent") {
+        throw new Error(
+          "harness error: T11.6-3's fresh record workspace holds " +
+            `${GRAPH_DATA_AREA_PATH} before any product invocation`,
+        );
+      }
       for (const argv of [["inventory"], ["inventory", "--json"]] as const) {
         const context =
           `T11.6-3 — \`${argv.join(" ")}\` before any build: recorded [], ` +
-          `graphData ".xspec", journal unoccupied, sessions [] (SPEC 11.6)`;
+          `graphData ".xspec", journal unoccupied, sessions [], lock ` +
+          `".xspec/lock" with .xspec absent (SPEC 11.6)`;
         const { document } = await expectInventoryDocument(
           product,
           workspace.root,
           argv,
           context,
         );
+        await assertAreaAbsent(
+          workspace,
+          `${context} — the inventory never refreshes or writes anything ` +
+            `(SPEC 11.6): no graph-data area, and no lock directory in it, ` +
+            `comes into existence`,
+        );
+        assertNoLockPathListed(document, context);
         assertSameJson(
           document.recorded,
           { state: "value", value: [] },
@@ -2459,6 +3026,13 @@ const T11_6_3 = defineProductTest({
     } finally {
       await order.dispose();
     }
+
+    // --- the lock path (SPEC 11.6, 12.7, 13.4, 13.5, 14.23) ----------------
+    // The area arms, the leftover arms — a dead run's entry last among them
+    // — and the held arm, in that order (the lock-path arms' fixtures above).
+    await runT1163AreaArms(product);
+    await runT1163LeftoverArms(product);
+    await runT1163HeldArm(product);
   },
 });
 

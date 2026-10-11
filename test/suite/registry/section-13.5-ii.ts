@@ -580,9 +580,10 @@ async function requireAreaDirectory(
 /**
  * Stage `node` at `.xspec` in place of the area's directory, which is
  * removed first, with all it holds (T13.5-10(a): the area's own path
- * occupied by anything but a directory).
+ * occupied by anything but a directory). Shared with T11.6-3's area arms
+ * (section-11.6.ts).
  */
-async function obstructArea(
+export async function obstructArea(
   workspace: TestWorkspace,
   node: LeftoverNode,
   context: string,
@@ -635,9 +636,10 @@ async function declareDirectory(abs: Buffer): Promise<OutsideChild[]> {
  * runs write none: `rename` and `move` alone write one, SPEC 6.1), and the
  * area's directory then removed. A product following the link would meet
  * a workspace's whole area there, every command able to proceed through
- * it; the target is recorded, and judged untouched, as staged.
+ * it; the target is recorded, and judged untouched, as staged. Shared with
+ * T11.6-3's area arms (section-11.6.ts).
  */
-async function relocateAreaBehindLink(
+export async function relocateAreaBehindLink(
   workspace: TestWorkspace,
   context: string,
 ): Promise<StagedLeftover> {

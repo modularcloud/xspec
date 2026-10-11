@@ -453,9 +453,12 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T11.6-2": ["11.6", "14"],
   // T11.6-3: the occupancy and listing arms assert findings [] beside a
   // garbage journal and garbage session files — no 14.13, no 14.21 from the
-  // inventory (11.6) — so "14" joins the home passage; 13.3/13.1/6.1/10.1/
-  // 12.7 are carriage context with home coverage at T13.3-*/T13.1-*/
-  // T6.1-*/T10.1-*/T12.7-*.
+  // inventory (11.6) — and its lock-path area arms assert T10.1-6's
+  // condition-23 finding where `.xspec` holds no directory (14.23), so "14"
+  // joins the home passage; 13.3/13.1/6.1/10.1/12.7 are carriage context
+  // with home coverage at T13.3-*/T13.1-*/T6.1-*/T10.1-*/T12.7-*, as are
+  // its lock-path arms' 13.4/13.5 (the transient lock path, its leftovers,
+  // the held and the killed `rename`) at T13.4-*/T13.5-*.
   "T11.6-3": ["11.6", "14"],
   // T11.6-4: asserts numbered conditions — the premise build's
   // every-family multiset and the condition-23 finding (TEST-SPEC 14's
