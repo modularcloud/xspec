@@ -297,6 +297,7 @@ import {
   runVoidableTrial,
 } from "../../helpers/kill-discipline.js";
 import { isLockPathBytes, LOCK_PATH } from "../../helpers/lock-path.js";
+import { PathPoller, polledStateKey } from "../../helpers/path-poller.js";
 import type { LockEntry, StagedLeftover } from "../../helpers/lock-staging.js";
 import {
   assertOutsideTargetsUntouched,
@@ -3030,40 +3031,14 @@ const T13_5_5 = defineProductTest({
       async (workspace) => {
         const moduleAbs = workspace.path(POLL_MODULE);
 
-        // The polling reader: a tight read loop recording every distinct
-        // observed content (deduplicated byte-exactly) and the absence
-        // bookkeeping the validation rules need. It never throws — errors
-        // are recorded and diagnosed after the loop (H-8).
-        let stop = false;
-        let observationCount = 0;
-        let firstContentIndex = -1;
-        let lastAbsentIndex = -1;
-        let pollError: string | undefined;
-        const distinctContents = new Map<
-          string,
-          { readonly bytes: Uint8Array; readonly firstIndex: number }
-        >();
-        const poller = (async () => {
-          while (!stop) {
-            const index = observationCount;
-            observationCount += 1;
-            try {
-              const bytes: Uint8Array = await fsp.readFile(moduleAbs);
-              if (firstContentIndex === -1) firstContentIndex = index;
-              const key = Buffer.from(bytes).toString("latin1");
-              if (!distinctContents.has(key)) {
-                distinctContents.set(key, { bytes, firstIndex: index });
-              }
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-                lastAbsentIndex = index;
-              } else {
-                pollError ??= `observation #${String(index)}: ${(error as Error).message}`;
-              }
-            }
-            await sleep(1);
-          }
-        })();
+        // The polling reader (helpers/path-poller.ts, shared with P-10): a
+        // tight read loop over the derived file, one observation per cycle,
+        // recording every distinct observed state (contents deduplicated
+        // byte-exactly) and the absence bookkeeping the validation rules
+        // need. It never throws — errors are recorded and diagnosed after
+        // the loop (H-8).
+        const poller = new PathPoller([moduleAbs]);
+        poller.start();
 
         // The legitimate complete contents: the polled path's bytes after
         // each completed build (SPEC 12.0 byte-determinism makes each state's
@@ -3082,11 +3057,11 @@ const T13_5_5 = defineProductTest({
               );
             }
             const bytes = await workspace.readBytes(POLL_MODULE);
-            legit.set(Buffer.from(bytes).toString("latin1"), bytes);
+            legit.set(polledStateKey({ kind: "content", bytes }), bytes);
           };
 
           await buildAndRecord("T13.5-5 `build` #1 (state one)");
-          buildOneDoneCount = observationCount;
+          buildOneDoneCount = poller.cycles;
           for (let i = 0; i < POLL_ALTERNATIONS; i += 1) {
             const stateTwo = i % 2 === 0;
             await workspace.file(
@@ -3098,10 +3073,13 @@ const T13_5_5 = defineProductTest({
             );
           }
         } finally {
-          stop = true;
-          await poller;
+          await poller.stop();
         }
 
+        const pollError = poller.error;
+        const observationCount = poller.cycles;
+        const firstContentIndex = poller.firstContentIndex(moduleAbs);
+        const lastAbsentIndex = poller.lastAbsentIndex(moduleAbs);
         if (pollError !== undefined) {
           fail(
             `T13.5-5: the polling reader hit an unexpected filesystem ` +
@@ -3120,8 +3098,9 @@ const T13_5_5 = defineProductTest({
 
         // Rule 1: every distinct observed content is a completed build's
         // content — never a partial file.
-        for (const [key, observed] of distinctContents) {
-          if (legit.has(key)) continue;
+        for (const [key, { state, firstIndex }] of poller.distinct(moduleAbs)) {
+          if (state.kind === "absent" || legit.has(key)) continue;
+          const observed = { bytes: state.bytes, firstIndex };
           const completeSizes = [...legit.values()]
             .map((bytes) => String(bytes.length))
             .join(", ");
