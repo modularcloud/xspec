@@ -423,9 +423,11 @@ const FILE_MOVE: SessionOperation = {
  * the session staging (`stageSessionWorkspace`) and from CONF-CORE's
  * surface — file-form `move`, `review create` under `--strategy audit` —
  * `resolve` and `split` naming `s`'s items as that workspace's own `review
- * status s --json` read them.
+ * status s --json` read them. Shared with T13.5-11 (section-13.5-iii.ts:
+ * each mutating command's success, its usage errors past acquisition, the
+ * busy refusal, and (c) and (d) with each command in turn).
  */
-const T13_5_10_OPERATIONS: readonly SessionOperation[] = [
+export const T13_5_10_OPERATIONS: readonly SessionOperation[] = [
   RENAME_A,
   FILE_MOVE,
   {
@@ -2575,9 +2577,9 @@ function onlyHeldEntry(entries: readonly LockEntry[]): LockEntry {
 /**
  * A held run's exit once its hold is lifted: a wait it never ends — killed
  * at its hang guard — a diagnosed failure (H-8, H-10); a harness error
- * propagates as itself (H-11).
+ * propagates as itself (H-11). Shared with T13.5-11 (section-13.5-iii.ts).
  */
-async function exitOnceLifted(
+export async function exitOnceLifted(
   running: RunningProduct,
   context: string,
 ): Promise<RunResult> {

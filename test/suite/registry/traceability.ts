@@ -630,6 +630,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // operation proceeds (6.6) and its refresh or finishing regeneration
   // writes graph data in that state (13.3).
   "T13.5-10": ["13.5", "13.4", "13.3", "12.0", "6.6", "14"],
+  // T13.5-11 asserts release (13.5) and the stable codes of its endings —
+  // the busy refusal's `workspace-busy` and (c)'s `read-failure` — and the
+  // absence of a write failure where release's deletion is refused (14).
+  // The outcomes of the endings it observes — each command's success, its
+  // usage errors (12.0), the refusals of 6.4, 6.5, 10.7, 13.3, and 14.21 —
+  // are carriage context with home coverage at the tests (a) names.
+  "T13.5-11": ["13.5", "14"],
   "T14-1": ["14"],
   "T14-2": ["14", "2.4", "4.5"],
   "T14-3": ["14"],
