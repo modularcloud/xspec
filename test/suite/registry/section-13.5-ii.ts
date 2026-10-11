@@ -487,7 +487,7 @@ export async function stageArmWorkspace(
 }
 
 /** An operation's run on its unstaged twin, and the twin's final state. */
-interface UnstagedTwin {
+export interface UnstagedTwin {
   readonly operation: SessionOperation;
   /** Its run under `--json`: exit 0. */
   readonly result: RunResult;
@@ -499,14 +499,16 @@ interface UnstagedTwin {
  * The unstaged twin of `operation` (TEST-SPEC T13.5-10: each command an
  * operation succeeding on an unstaged twin): the session staging, nothing
  * staged beside it, and the operation under `--json`, bounded — exit 0,
- * `.xspec/lock` absent once it ends.
+ * `.xspec/lock` absent once it ends. Shared with P-15 (section-16-p15.ts:
+ * each draw's leftover-free twin), `test` naming the test in its diagnoses.
  */
-async function unstagedTwin(
+export async function unstagedTwin(
   product: ProductBinding,
   operation: SessionOperation,
+  test = "T13.5-10",
 ): Promise<UnstagedTwin> {
   return await withWorkspace(CORE_DECL, async (workspace) => {
-    const context = `T13.5-10: the unstaged twin of ${operation.what} --json`;
+    const context = `${test}: the unstaged twin of ${operation.what} --json`;
     const items = await stageArmWorkspace(product, workspace, context);
     const result = await runBounded(
       product,
@@ -517,7 +519,7 @@ async function unstagedTwin(
     assertExitCode(
       result,
       0,
-      `${context}: each command T13.5-10 runs is an operation succeeding on ` +
+      `${context}: each command ${test} runs is an operation succeeding on ` +
         `an unstaged twin — the same staging, nothing staged beside it ` +
         `(SPEC 13.5)`,
     );
@@ -907,9 +909,13 @@ const LEFTOVERS: readonly Leftover[] = [
  * workspaces); `.xspec/lock` absent once it ends; every staged link's
  * target outside the workspace byte-identical, nothing removed or written
  * through a link (SPEC 13.5: a symbolic link itself, never its target;
- * 13.4: writes never traverse symbolic links).
+ * 13.4: writes never traverse symbolic links). Shared with P-15
+ * (section-16-p15.ts), whose drawn leftover trees (b)'s fixed trees anchor:
+ * one outcome machinery, which VIOL-LEFTOVER-FOLLOWLINK's certification of
+ * P-15 exercises (CERTIFICATIONS.md's Exclusions entry for T13.5-9 through
+ * T13.5-12: (b)'s link staging rides that certification).
  */
-async function assertTakeover(
+export async function assertTakeover(
   root: string,
   result: RunResult,
   twin: UnstagedTwin,

@@ -7,7 +7,12 @@
 // workspaces, behavior, and command surface, as T13.5-13 drives them) is this
 // module run deviation-free from an executable of its own,
 // `../conf-race/bin.mjs`, and its violator VIOL-RACE-LISTFIRST one switch of
-// it (`listBeforeEntry`, below).
+// it (`listBeforeEntry`, below); likewise the CONF-READERS conformer (as P-10
+// drives them; `../conf-readers/bin.mjs`), its violator VIOL-READERS-CLAIM
+// one switch (`readersHoldClaims`), and the CONF-LEFTOVER conformer (as P-15
+// drives them; `../conf-leftover/bin.mjs`), its violators
+// VIOL-LEFTOVER-FOLLOWLINK, -DOTNAMES, and -BYTENAMES one switch each
+// (`followLinksAtRemoval`, `hideDotNames`, `namesAsText`).
 //
 // Scope implemented (see CERTIFICATIONS.md §CONF-CORE):
 // - Workspaces with one configured spec group of `.mdx` sources without
@@ -1849,7 +1854,7 @@ async function acquireExclusivity(root) {
       if (!(await establishEntry(areaAbs, lockAbs, held))) continue;
       let names;
       try {
-        names = await fsp.readdir(Buffer.from(lockAbs), { encoding: "buffer" });
+        names = await listNames(Buffer.from(lockAbs));
       } catch (error) {
         if (error?.code !== "ENOENT") {
           throw acquisitionFailure(
@@ -2136,39 +2141,23 @@ async function acquireListingFirst(areaAbs, lockAbs, held) {
  * directory — and anything else by unlinking it: a symbolic link itself,
  * never its target; a FIFO unopened; a plain file unread, whatever its mode.
  * Names are the bytes the filesystem lists, whatever their first byte and
- * whether or not they are valid UTF-8. A removal finding nothing is done; a
- * refused listing or examination is the read failure of 14.25, a refused
- * removal the write failure of 14.24, each concerning the lock path.
+ * whether or not they are valid UTF-8 (listNames). A removal finding nothing
+ * is done; a refused listing or examination is the read failure of 14.25, a
+ * refused removal the write failure of 14.24, each concerning the lock path.
+ *
+ * VIOL-LEFTOVER-FOLLOWLINK (CERTIFICATIONS.md, `followLinksAtRemoval`): the
+ * removal of a symbolic link to a directory — at the lock directory's top
+ * level or at any depth below it — follows the link: everything the
+ * targeted directory holds is removed through the link, recursing as into
+ * a directory, at every depth (removeHeldContent), and then the link itself
+ * is unlinked, the targeted directory left in place, empty. A link to a
+ * file, a dangling link, and every other leftover are removed as the
+ * conformer removes them; the deletion through the link (a write that
+ * traverses a link, 13.4) is that single deviation itself.
  */
 async function removeLeftover(abs, kind) {
   if (kind === "directory") {
-    let names;
-    try {
-      names = await fsp.readdir(abs, { encoding: "buffer" });
-    } catch (error) {
-      if (error?.code === "ENOENT") return;
-      throw acquisitionFailure(
-        "read",
-        LOCK_REL,
-        `list a leftover directory in ${LOCK_REL}`,
-        error,
-      );
-    }
-    for (const name of names) {
-      const child = childPath(abs, name);
-      let childKind;
-      try {
-        childKind = await occupantKind(child);
-      } catch (error) {
-        throw acquisitionFailure(
-          "read",
-          LOCK_REL,
-          `examine an occupant of a leftover directory in ${LOCK_REL}`,
-          error,
-        );
-      }
-      if (childKind !== "absent") await removeLeftover(child, childKind);
-    }
+    if (!(await removeHeldContent(abs))) return;
     try {
       await fsp.rmdir(abs);
     } catch (error) {
@@ -2182,6 +2171,13 @@ async function removeLeftover(abs, kind) {
     }
     return;
   }
+  if (
+    deviations.followLinksAtRemoval &&
+    kind === "symlink" &&
+    (await linksToDirectory(abs))
+  ) {
+    await removeHeldContent(abs);
+  }
   try {
     await fsp.unlink(abs);
   } catch (error) {
@@ -2193,6 +2189,100 @@ async function removeLeftover(abs, kind) {
       error,
     );
   }
+}
+
+/**
+ * Remove everything the directory at `abs` holds — listed (listNames), each
+ * occupant examined without following a link and removed (removeLeftover) —
+ * leaving the directory itself. Returns false where the directory is gone
+ * before its listing (`ENOENT`), a concurrent run's removal: nothing to do.
+ */
+async function removeHeldContent(abs) {
+  let names;
+  try {
+    names = await listNames(abs);
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw acquisitionFailure(
+      "read",
+      LOCK_REL,
+      `list a leftover directory in ${LOCK_REL}`,
+      error,
+    );
+  }
+  for (const name of names) {
+    const child = childPath(abs, name);
+    let childKind;
+    try {
+      childKind = await occupantKind(child);
+    } catch (error) {
+      throw acquisitionFailure(
+        "read",
+        LOCK_REL,
+        `examine an occupant of a leftover directory in ${LOCK_REL}`,
+        error,
+      );
+    }
+    if (childKind !== "absent") await removeLeftover(child, childKind);
+  }
+  return true;
+}
+
+/**
+ * VIOL-LEFTOVER-FOLLOWLINK's test (removeLeftover): whether the symbolic
+ * link at `abs` resolves to a directory, judged through the link (`stat`,
+ * which follows it). A dangling link, a loop, or a refused examination is
+ * no link to a directory: removed as the conformer removes it.
+ */
+async function linksToDirectory(abs) {
+  try {
+    return (await fsp.stat(abs)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** The first byte of a name a dot-hiding listing hides: `.`. */
+const DOT_BYTE = 0x2e;
+
+/**
+ * List a directory acquisition judges or removes — the lock directory, or a
+ * leftover directory in it (SPEC 13.5) — as the names the filesystem lists,
+ * byte for byte: every name, whatever its first byte and whether or not it
+ * is valid UTF-8, so that every leftover is removed. A refused listing
+ * throws the system error.
+ *
+ * VIOL-LEFTOVER-DOTNAMES (CERTIFICATIONS.md, `hideDotNames`): the listing
+ * hides names beginning with `.`, as glob-style enumeration does by default,
+ * so a leftover so named is never removed. One in the lock directory itself
+ * stays, with all below it, and the run acquires as the conformer's does,
+ * its release then leaving the lock directory, whose deletion the
+ * environment refuses while it holds that leftover (13.5: a refusal that
+ * changes no outcome); one in a directory acquisition lists to remove
+ * leaves that directory unemptied, its removal refused — the write failure
+ * of 14.24 concerning the lock path (removeLeftover), the run attempting no
+ * later removal and its release leaving the lock directory standing.
+ *
+ * VIOL-LEFTOVER-BYTENAMES (CERTIFICATIONS.md, `namesAsText`): the listing
+ * decodes names as UTF-8 text, each ill-formed sequence decoded to U+FFFD,
+ * and every later examination and removal addresses a leftover by its
+ * decoded name (re-encoded, as a text path is) — so one whose name is not
+ * valid UTF-8 is addressed by a name that designates nothing, the
+ * examination finding nothing there taken for done, as the conformer takes
+ * a leftover gone since the listing, and it stays, with the consequences
+ * VIOL-LEFTOVER-DOTNAMES' hidden names have. Every other name is unchanged
+ * by the round trip.
+ */
+async function listNames(dirBytes) {
+  if (deviations.namesAsText) {
+    const decoded = await fsp.readdir(dirBytes, { encoding: "utf8" });
+    return decoded.map((name) => Buffer.from(name, "utf8"));
+  }
+  const names = await fsp.readdir(dirBytes, { encoding: "buffer" });
+  if (deviations.hideDotNames) {
+    return names.filter((name) => name[0] !== DOT_BYTE);
+  }
+  return names;
 }
 
 /**
@@ -5065,6 +5155,22 @@ async function commandReview(io, cwd, sub, args) {
  *   deletes the entry, the emptied lock directory, and an emptied area
  *   directory it created; acquisition judges a reader's entry as any run's,
  *   a live reader's refusing it (14.26); see holdReaderClaim.
+ * - `followLinksAtRemoval` (VIOL-LEFTOVER-FOLLOWLINK, one of the
+ *   CONF-LEFTOVER conformer's three violators — that conformer runs this
+ *   module deviation-free from `../conf-leftover/bin.mjs`): acquisition's
+ *   removal of a leftover symbolic link to a directory, at any depth,
+ *   follows the link — everything the targeted directory holds removed
+ *   through it, at every depth, then the link itself, the targeted
+ *   directory left in place, empty; see removeLeftover.
+ * - `hideDotNames` (VIOL-LEFTOVER-DOTNAMES, CONF-LEFTOVER's): acquisition's
+ *   listings — of the lock directory and of each directory it removes —
+ *   hide names beginning with `.`, so a leftover so named is never removed;
+ *   see listNames.
+ * - `namesAsText` (VIOL-LEFTOVER-BYTENAMES, CONF-LEFTOVER's): acquisition's
+ *   listings decode names as UTF-8 text (U+FFFD for each ill-formed
+ *   sequence) and its examinations and removals address each leftover by
+ *   its decoded name, so a leftover whose name is not valid UTF-8 is never
+ *   removed; see listNames.
  */
 let deviations = {};
 

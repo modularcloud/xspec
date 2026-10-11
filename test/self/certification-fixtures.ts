@@ -306,6 +306,47 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       violator("VIOL-READERS-CLAIM", "conf-readers/bin-claim.mjs", ["P-10"]),
     ],
   ),
+  // CONF-LEFTOVER (§CONF-LEFTOVER): acquisition's removal of leftover trees —
+  // CONF-CORE's workspaces, behavior, and mutating surface as P-15 drives
+  // them, without the seam, run from an executable of its own
+  // (conf-leftover/bin.mjs runs the CONF-CORE product deviation-free): P-15's
+  // runs must complete promptly, and VIOL-CORE-EARLYRELEASE's unheld runs sit
+  // through its sustained interval, so P-15 could not join CONF-CORE's
+  // in-scope set.
+  conformer(
+    "CONF-LEFTOVER",
+    "conf-leftover/bin.mjs",
+    ["P-15"],
+    [
+      // VIOL-LEFTOVER-FOLLOWLINK: acquisition's removal of a leftover
+      // symbolic link to a directory, at any depth, follows the link — it
+      // removes everything the targeted directory holds, recursing through
+      // the link at every depth, then the link itself, the target left in
+      // place, empty. Fails P-15 on each draw holding a link to a directory
+      // outside the workspace: the target's content deleted, the command
+      // still exiting 0 with its twin's result and `.xspec/lock` absent.
+      violator("VIOL-LEFTOVER-FOLLOWLINK", "conf-leftover/bin-followlink.mjs", [
+        "P-15",
+      ]),
+      // VIOL-LEFTOVER-DOTNAMES: acquisition's listings hide names beginning
+      // with `.`, so a leftover so named is never removed. Fails P-15 on
+      // each draw holding one: `.xspec/lock` stands once the command ends;
+      // where the name lies in a directory acquisition lists to remove, the
+      // directory's removal is refused besides — `write-failure` at
+      // `.xspec/lock`, exit 2.
+      violator("VIOL-LEFTOVER-DOTNAMES", "conf-leftover/bin-dotnames.mjs", [
+        "P-15",
+      ]),
+      // VIOL-LEFTOVER-BYTENAMES: acquisition's listings decode names as
+      // UTF-8 text (U+FFFD for each ill-formed sequence) and address each
+      // leftover by its decoded name, so a leftover whose name is not valid
+      // UTF-8 is never removed. Fails P-15 on each draw holding one, as
+      // DOTNAMES fails it on names beginning with `.`.
+      violator("VIOL-LEFTOVER-BYTENAMES", "conf-leftover/bin-bytenames.mjs", [
+        "P-15",
+      ]),
+    ],
+  ),
   // CONF-VALID (§CONF-VALID): segment and tag validity — `build` with the
   // 14.1–14.4 error reporting and `query node`/`query nodes` reporting
   // identity, tags, and metadataHash, over `.mdx` workspaces whose sections

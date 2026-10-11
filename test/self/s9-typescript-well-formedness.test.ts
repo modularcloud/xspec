@@ -41,12 +41,14 @@ import { P1_TS_FORM_VECTORS } from "../suite/registry/section-16-p1.js";
 import { P10_TS_FORM_VECTORS } from "../suite/registry/section-16-p10.js";
 import { P12_TS_FORM_VECTORS } from "../suite/registry/section-16-p12.js";
 import { P13_TS_FORM_VECTORS } from "../suite/registry/section-16-p13.js";
+import { P15_TS_FORM_VECTORS } from "../suite/registry/section-16-p15.js";
 import { P2_P3_TS_FORM_VECTORS } from "../suite/registry/section-16-p2-p3.js";
 import { P4_TS_FORM_VECTORS } from "../suite/registry/section-16-p4.js";
 import { P5_P6_TS_FORM_VECTORS } from "../suite/registry/section-16-p5-p6.js";
 import { P7_TS_FORM_VECTORS } from "../suite/registry/section-16-p7.js";
 import { P8_P11_TS_FORM_VECTORS } from "../suite/registry/section-16-p8.js";
 import { P9_TS_FORM_VECTORS } from "../suite/registry/section-16-p9.js";
+import { productTestSuite } from "../suite/registry/index.js";
 
 const cp = (code: number): string => String.fromCodePoint(code);
 
@@ -590,8 +592,9 @@ describe("S-9 (TypeScript): every code source and configuration T14-12's positiv
 // configuration file the document declares well-formed, generated form
 // included, is judged before any product exists; the §16 preamble: every
 // generated workspace is valid by construction, no draw declared
-// unparseable). The fixed vector set: every property's configuration file
-// — P-7's and P-13's composed per draw, the rest fixed records also judged
+// unparseable). The fixed vector set: every registered property's
+// configuration file (the coverage check below reads the registry) — P-7's
+// and P-13's composed per draw, the rest fixed records also judged
 // by test/self/s9-staged-sources.test.ts — P-7's capture sources, P-13's
 // `c0/U.ts` and `c1/V.ts`, and P-8's and P-11's base code source, each
 // built from its generator's own templates and constants and judged under
@@ -615,6 +618,7 @@ const GENERATED_TS_FORM_VECTORS: Readonly<
   "P-10": P10_TS_FORM_VECTORS,
   "P-12": P12_TS_FORM_VECTORS,
   "P-13": P13_TS_FORM_VECTORS,
+  "P-15": P15_TS_FORM_VECTORS,
 };
 
 const GENERATED_TS_VECTORS = Object.entries(GENERATED_TS_FORM_VECTORS).flatMap(
@@ -630,12 +634,15 @@ describe("S-9 (TypeScript): every configuration file and code source the §16 ge
       key.split("/"),
     );
     expect(covered.sort()).toEqual(
-      Array.from({ length: 13 }, (_, i) => `P-${String(i + 1)}`).sort(),
+      productTestSuite
+        .ids()
+        .filter((id) => id.startsWith("P-"))
+        .sort(),
     );
     for (const vectors of Object.values(GENERATED_TS_FORM_VECTORS)) {
       expect(vectors.some(([, path]) => path === "xspec.config.ts")).toBe(true);
     }
-    expect(GENERATED_TS_VECTORS.length).toBe(22);
+    expect(GENERATED_TS_VECTORS.length).toBe(23);
     expect(new Set(GENERATED_TS_VECTORS.map(([name]) => name)).size).toBe(
       GENERATED_TS_VECTORS.length,
     );
