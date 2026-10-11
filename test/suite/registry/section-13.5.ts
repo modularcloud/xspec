@@ -37,8 +37,7 @@
 // — followed by the same two checks, the rename then ending exactly as on a
 // twin held and lifted alike with no concurrent `build`; then the
 // build/query storm),
-// T13.5-5 (atomic visibility via a polling reader), T13.5-6 (workspace
-// isolation), T13.5-7 (interrupted or
+// T13.5-5 (atomic visibility via a polling reader), T13.5-7 (interrupted or
 // write-refused mutation: the pinned write order — the refusal arms (a)–(f)
 // composed from write-refusal-staging.ts, and the kill arm), T13.5-8
 // (acquisition's place in the order: the acquisition-first arms — each
@@ -51,7 +50,8 @@
 // discovery, and an unlistable discovered directory, each reported in
 // acquisition's place — the hold seam engaging on invocations the 12.0
 // argument checks, baseline resolution, or the 13.3 gate refuse, and the
-// non-mutating preview boundary).
+// non-mutating preview boundary). T13.5-6 (workspace isolation: sibling and
+// nested workspace pairs) lives in section-13.5-vii.ts.
 //
 // All mutual-exclusion choreography goes through the `--test-hold <path>`
 // seam (SPEC 13.5) via the subprocess driver's background-start, hold-file,
@@ -242,13 +242,6 @@
 //   completed. A build's "new content" is thus its completed content — the
 //   only enumerable reading of "prior content, complete new content, or
 //   absence-before-first-write" from the observer side.
-// - T13.5-6 stages two *differing* workspaces (different file names, IDs,
-//   and texts), so cross-workspace interference cannot cancel out: a
-//   held-overlap probe (workspace 2's mutating command succeeds while
-//   workspace 1's is held — exclusion is per workspace) plus a
-//   concurrent-vs-serial compare of a six-command script (per-step exit
-//   codes and stdout bytes, and the final workspace trees, H-6
-//   two-directory style).
 // - T13.5-7's refusal arms stage each 14.24 refusal by permission removal
 //   while the command is held at the seam (after acquisition, before any
 //   modification — seam neutrality) and read every rewritten-byte
@@ -287,7 +280,6 @@ import {
   assertExitCode,
   describeByteDifference,
   fail,
-  HarnessAssertionError,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { assertRunOutcomesEqual } from "../../helpers/determinism.js";
@@ -373,11 +365,12 @@ import {
 // other keys — the CONF-CORE workspace shape (CERTIFICATIONS.md). A
 // staged-source record: T13.4-12, T13.5-1, T13.5-4, T13.5-6, T13.5-8,
 // T13.5-10, T13.5-11, and T13.5-13 stage it in workspaces created after a
-// product invocation (CORE_DECL, ISO_TWO_DECL, section-13.5-vi.ts's
-// T13_5_13_DECL), as T6.6-3's runs-while-held arm does (S-9's timing clause;
+// product invocation (CORE_DECL, section-13.5-vii.ts's ISO_TWO_DECL and
+// NESTED_DECL — at both of its roots — section-13.5-vi.ts's T13_5_13_DECL),
+// as T6.6-3's runs-while-held arm does (S-9's timing clause;
 // test/self/s9-staged-sources.test.ts).
 export const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.6-3/T13.4-12/T13.5-1/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-13 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's, ISO_TWO_DECL's, and T13_5_13_DECL's)",
+  "T6.6-3/T13.4-12/T13.5-1/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-13 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's, ISO_TWO_DECL's, NESTED_DECL's at both roots, and T13_5_13_DECL's)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -406,8 +399,9 @@ const A_MDX = [
   "",
 ].join("\n");
 // The source is staged in workspaces created after a body's first product
-// invocation (T13.5-1's stale arm, T13.5-4's storm pair, T13.5-6's serial and
-// concurrent pairs, T13.5-8's valid-workspace arms, T13.5-10's,
+// invocation (T13.5-1's stale arm, T13.5-4's storm pair, T13.5-6's pairs —
+// the outer root's source in its nested pair — in section-13.5-vii.ts,
+// T13.5-8's valid-workspace arms, T13.5-10's,
 // T13.5-11's, and T13.5-12's per-arm workspaces and twins — T13.5-12(c)
 // creating it in one during a hold — T6.6-3's scheduling workspace,
 // T13.4-12's per-arm workspaces and twin, T13.5-13's trial and twin
@@ -3087,258 +3081,6 @@ const T13_5_5 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T13.5-6 — workspace isolation
-// ---------------------------------------------------------------------------
-
-// The second workspace differs from the first in file name, IDs, and texts,
-// so cross-workspace interference cannot cancel out. The serial and
-// concurrent pairs are created after the held-overlap probe's invocations,
-// so the source is a staged-source record (S-9's before-any-product clause;
-// helpers/staged-mdx.ts), the probe's workspace 2 staging it too.
-const ISO_TWO_MDX = stagedMdx(
-  "T13.5-6 workspace 2 specs/B.mdx (b holding b.k, then h: the held-overlap probe's, the serial run's, and the concurrent run's)",
-  [
-    '<S id="b">',
-    "Bravo isolated text.",
-    '<S id="b.k">',
-    "Bravo kid text.",
-    "</S>",
-    "</S>",
-    "",
-    '<S id="h">',
-    "Hotel isolated text.",
-    "</S>",
-    "",
-  ].join("\n"),
-);
-
-const ISO_TWO_DECL: WorkspaceDecl = {
-  files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/B.mdx": ISO_TWO_MDX },
-};
-
-interface ScriptStep {
-  readonly argv: readonly string[];
-  readonly what: string;
-}
-
-/** The six-command scenario each "harness instance" drives. */
-function scriptSteps(file: string, top: string): readonly ScriptStep[] {
-  return [
-    { argv: ["build"], what: "`build`" },
-    {
-      argv: ["review", "create", "--strategy", "audit", "--name", "s"],
-      what: "`review create --strategy audit --name s`",
-    },
-    {
-      argv: ["rename", file, top, `${top}2`],
-      what: `\`rename ${file} ${top} ${top}2\``,
-    },
-    {
-      argv: ["review", "status", "s", "--json"],
-      what: "`review status s --json`",
-    },
-    { argv: ["ids", "--json"], what: "`ids --json`" },
-    { argv: ["check"], what: "`check`" },
-  ];
-}
-
-async function runScript(
-  product: ProductBinding,
-  workspace: TestWorkspace,
-  steps: readonly ScriptStep[],
-  contextPrefix: string,
-): Promise<readonly RunResult[]> {
-  const results: RunResult[] = [];
-  for (const step of steps) {
-    const result = await runCli(product, workspace, step.argv);
-    assertExitCode(result, 0, `${contextPrefix} ${step.what}`);
-    results.push(result);
-  }
-  return results;
-}
-
-const T13_5_6 = defineProductTest({
-  id: "T13.5-6",
-  title:
-    "two workspaces driven concurrently by parallel harness instances never interfere: a mutating command in workspace 2 succeeds while workspace 1's is held (exclusion is per workspace), and a concurrently driven command script's outputs and final workspace trees equal serial runs (SPEC 13.5, H-1)",
-  run: async (product) => {
-    const stepsOne = scriptSteps("specs/A.mdx", "a");
-    const stepsTwo = scriptSteps("specs/B.mdx", "b");
-    const disposables: TestWorkspace[] = [];
-    const create = async (decl: WorkspaceDecl): Promise<TestWorkspace> => {
-      const workspace = await TestWorkspace.create(decl);
-      disposables.push(workspace);
-      return workspace;
-    };
-    try {
-      // --- Held-overlap probe: exclusion is per workspace ---
-      const heldOne = await create(CORE_DECL);
-      const heldTwo = await create(ISO_TWO_DECL);
-      await buildOk(product, heldOne, "T13.5-6 workspace 1 staging `build`");
-      await buildOk(product, heldTwo, "T13.5-6 workspace 2 staging `build`");
-      const hold = holdPathFor(heldOne, "hold-iso.tmp");
-      const contextHeld =
-        "T13.5-6 workspace 1 held `rename specs/A.mdx a a2 --test-hold <path>`";
-      const running = await startProduct(product, {
-        cwd: heldOne.root,
-        argv: ["rename", "specs/A.mdx", "a", "a2", "--test-hold", hold],
-      });
-      try {
-        await awaitHoldFile(running, hold, contextHeld);
-        const context =
-          "T13.5-6 `rename specs/B.mdx b b2` in workspace 2 while " +
-          "workspace 1's rename is held";
-        const result = await runBounded(
-          product,
-          heldTwo.root,
-          ["rename", "specs/B.mdx", "b", "b2"],
-          context,
-        );
-        assertExitCode(
-          result,
-          0,
-          `${context}: instances operating on different workspaces never ` +
-            `interfere — mutual exclusion is per workspace (SPEC 13.5, H-1)`,
-        );
-        if (running.hasExited()) {
-          fail(
-            `${context}: workspace 1's held command must still be running ` +
-              `when workspace 2's completes — otherwise the success is not ` +
-              `attributable to per-workspace exclusion (SPEC 13.5) — ` +
-              `${await describeExit(running)}`,
-          );
-        }
-        await releaseHoldFile(hold);
-        let result1: RunResult;
-        try {
-          result1 = await running.waitForExit();
-        } catch (error) {
-          rethrowHarnessError(error);
-          return fail(
-            `${contextHeld}: workspace 1's rename must complete normally ` +
-              `once the hold file is deleted (SPEC 13.5) — ` +
-              `${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-        assertExitCode(
-          result1,
-          0,
-          `${contextHeld}: completes normally after release (SPEC 13.5)`,
-        );
-      } finally {
-        running.kill();
-        await releaseHoldFile(hold);
-      }
-
-      // --- Concurrent runs equal serial runs ---
-      const serialOne = await create(CORE_DECL);
-      const serialTwo = await create(ISO_TWO_DECL);
-      const serialResultsOne = await runScript(
-        product,
-        serialOne,
-        stepsOne,
-        "T13.5-6 serial workspace 1",
-      );
-      const serialResultsTwo = await runScript(
-        product,
-        serialTwo,
-        stepsTwo,
-        "T13.5-6 serial workspace 2",
-      );
-
-      const concurrentOne = await create(CORE_DECL);
-      const concurrentTwo = await create(ISO_TWO_DECL);
-      const settled = await Promise.allSettled([
-        runScript(
-          product,
-          concurrentOne,
-          stepsOne,
-          "T13.5-6 concurrent workspace 1",
-        ),
-        runScript(
-          product,
-          concurrentTwo,
-          stepsTwo,
-          "T13.5-6 concurrent workspace 2",
-        ),
-      ]);
-      // A harness error in either script — an exhausted capture limit, a
-      // failed in-run evaluation — is the harness's own failure (H-11),
-      // reported ahead of any diagnosed one.
-      for (const outcome of settled) {
-        if (outcome.status === "rejected") {
-          rethrowHarnessError(outcome.reason);
-        }
-      }
-      for (const outcome of settled) {
-        if (outcome.status === "rejected") {
-          const reason = outcome.reason as unknown;
-          if (reason instanceof HarnessAssertionError) throw reason;
-          fail(
-            `T13.5-6 concurrent phase: ` +
-              `${reason instanceof Error ? reason.message : String(reason)}`,
-          );
-        }
-      }
-      const [concurrentResultsOne, concurrentResultsTwo] = settled.map(
-        (outcome) =>
-          (outcome as PromiseFulfilledResult<readonly RunResult[]>).value,
-      );
-
-      const compareRuns = (
-        concurrent: readonly RunResult[] | undefined,
-        serial: readonly RunResult[],
-        steps: readonly ScriptStep[],
-        which: string,
-      ): void => {
-        if (concurrent === undefined) {
-          throw new Error("T13.5-6 internal error: missing concurrent runs");
-        }
-        for (let i = 0; i < steps.length; i += 1) {
-          const step = steps[i] as ScriptStep;
-          assertBytesEqual(
-            (concurrent[i] as RunResult).stdoutBytes,
-            (serial[i] as RunResult).stdoutBytes,
-            `T13.5-6 ${which} ${step.what}: the concurrently driven run's ` +
-              `stdout equals the serial run's byte-for-byte — concurrent ` +
-              `results equal serial runs (SPEC 13.5, 12.0)`,
-          );
-        }
-      };
-      compareRuns(
-        concurrentResultsOne,
-        serialResultsOne,
-        stepsOne,
-        "workspace 1",
-      );
-      compareRuns(
-        concurrentResultsTwo,
-        serialResultsTwo,
-        stepsTwo,
-        "workspace 2",
-      );
-
-      await assertDirectoriesEqual(
-        concurrentOne.root,
-        serialOne.root,
-        "T13.5-6 workspace 1: the concurrently driven workspace's final " +
-          "byte tree vs the serial run's — never interferes (SPEC 13.5, H-1)",
-      );
-      await assertDirectoriesEqual(
-        concurrentTwo.root,
-        serialTwo.root,
-        "T13.5-6 workspace 2: the concurrently driven workspace's final " +
-          "byte tree vs the serial run's — never interferes (SPEC 13.5, H-1)",
-      );
-    } finally {
-      for (const workspace of disposables) {
-        await workspace.dispose();
-      }
-    }
-  },
-});
-
-// ---------------------------------------------------------------------------
 // T13.5-7 — interrupted or write-refused mutation: the pinned write order
 // ---------------------------------------------------------------------------
 
@@ -4780,7 +4522,6 @@ export const section135Tests: readonly ProductTestEntry[] = [
   T13_5_3,
   T13_5_4,
   T13_5_5,
-  T13_5_6,
   T13_5_7,
   T13_5_8,
 ];
