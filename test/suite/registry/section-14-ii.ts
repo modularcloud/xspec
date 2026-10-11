@@ -17,12 +17,14 @@
 // Staging discipline (E-1, Linux leg): permission removal alone, applied at
 // the seam of 13.5 for a mutating command (`runHeldWithStaging`: after
 // acquisition, before any modification) and before the invocation for
-// `build` and the reads (`runStaged`), each staging verified on the
-// harness's own process first — an ineffective one, a privileged runner, is
-// a `HarnessStagingError` (H-11), never a pass or a skip (H-9). Elsewhere
-// the arms are not staged (the NU3_STAGED pattern of section-11.5, here
-// `WRITE_REFUSALS_STAGED`), and the Windows subset (E-6) selects T14-9
-// nowhere.
+// `build` and the reads (`runStaged`) — and for acquisition's own writes,
+// whose stagings precede the invocation too (T13.5-10(a), (d): the shared
+// stagings of helpers/acquisition-staging.ts and section-13.5-ii.ts's area
+// obstruction) — each staging verified on the harness's own process first —
+// an ineffective one, a privileged runner, is a `HarnessStagingError`
+// (H-11), never a pass or a skip (H-9). Elsewhere the arms are not staged
+// (the NU3_STAGED pattern of section-11.5, here `WRITE_REFUSALS_STAGED`),
+// and the Windows subset (E-6) selects T14-9 nowhere.
 //
 // Conservative operationalizations (H-3):
 // - Arm (a)'s rename is `b.k` → `b.k2` in `specs/b/B.mdx` — the child
@@ -40,7 +42,39 @@
 //   (13.3: no TypeScript or Markdown is generated or removed), and the
 //   mutating `review create` refreshes before its session write (13.5), so
 //   on the stale workspace with `.xspec` unwritable the area is the first
-//   refused write of each — never a path inside it (14.24, 11.6).
+//   refused write of each — never a path inside it (14.24, 11.6). The reads
+//   take no hold and meet the staging from their invocation on; `review
+//   create`, a mutating command, meets it at the seam, after acquisition —
+//   staged before its invocation, `.xspec` read-only would refuse
+//   acquisition's own writes in `.xspec/lock` first, the lock path then
+//   concerned (13.5). The area-form staging then covers the lock directory
+//   and the held run's entry as well, so release's deletions are refused,
+//   which changes no outcome (13.5, 14.24); the entry left behind is a
+//   leftover, bearing on neither the recovery `build` nor `check` (13.4:
+//   the lock path bears on no comparison of graph data, and neither
+//   acquires).
+// - Acquisition's writes, one arm each (T14-9: the entry's addition, a
+//   leftover's removal, and the lock directory's creation concerning
+//   `.xspec/lock`, no entry ever named; the area directory's creation and
+//   an occupant of the area's own path concerning `.xspec`), run on
+//   T13.5-10's session staging — a fresh CONF-CORE-shaped workspace, built,
+//   holding the audit session `s` — or, for the area directory's creation,
+//   an unbuilt one, so the CONF-CORE reference can run them; each with one
+//   of T13.5-10's five mutating commands, in turn (the sixth arm's wrapping
+//   to the first), so every mutating command reports one of acquisition's
+//   refused writes — each an operation succeeding on T13.5-10's unstaged
+//   twin, but for `review split` on the unbuilt workspace, which names the
+//   absent session `s`, acquisition preceding that check (12.0). A
+//   leftover's removal is staged both ways T13.5-10(d) stages it: a
+//   subdirectory refusing writes in a writable lock directory, and a plain
+//   file at the lock path under T14-9's full discipline. Beyond the
+//   contract each arm asserts nothing modified — every path but the lock
+//   path byte-identical, H-6 leaving out the lock path a mutating run
+//   touched (its residue is T13.5-10(d)'s subject), `.xspec` itself
+//   compared — and recovery: the permissions restored, or, for the
+//   occupant of the area's own path, the occupant deleted by hand (13.4:
+//   the remedy for an occupant obstructing acquisition), `build` exits 0
+//   and `check` is clean.
 // - The never-reporter `check` on that state asserts condition 10 alone,
 //   every finding concerning a path with `locations` `[]` and instructing
 //   rebuilding — its message names `build` (14.10; no recorded file
@@ -106,6 +140,14 @@
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import type { AcquisitionStaging } from "../../helpers/acquisition-staging.js";
+import {
+  stageReadOnlyArea,
+  stageReadOnlyRoot,
+  stageUnremovableLockFile,
+  stageUnwritableLeftoverDirectory,
+  stageUnwritableLockDirectory,
+} from "../../helpers/acquisition-staging.js";
 import type {
   Finding,
   OccurrencesReport,
@@ -126,6 +168,8 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { LOCK_PATH } from "../../helpers/lock-path.js";
+import { AREA_PATH } from "../../helpers/lock-staging.js";
 import type { PermissionStaging } from "../../helpers/permissions.js";
 import {
   HarnessStagingError,
@@ -147,6 +191,14 @@ import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { pathExists } from "../../helpers/subprocess.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { SessionOperation } from "./section-13.5.js";
+import { CORE_DECL } from "./section-13.5.js";
+import {
+  ABSENT_SESSION_ITEMS,
+  T13_5_10_OPERATIONS,
+  obstructArea,
+  stageArmWorkspace,
+} from "./section-13.5-ii.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
@@ -727,8 +779,11 @@ function expectPlainUsageError(
  * Graph data, the reporter set, the never-reporters, and the check-first
  * precedence, all on one state: the built precedence fixture holding an
  * audit session and a git baseline, B text-edited (stale, valid), `.xspec`
- * staged unwritable before each invocation (the reads take no hold). Every
- * refreshing read of 13.3 and the mutating `review create` exit 2 with the
+ * staged unwritable before each read's invocation (the reads take no hold)
+ * and, for the mutating `review create`, at the seam of 13.5 — after
+ * acquisition, before any modification (T14-9; `runHeldWithStaging`), the
+ * staging otherwise refusing acquisition's own writes in `.xspec/lock`
+ * first. Every refreshing read of 13.3 and `review create` exit 2 with the
  * error document concerning `.xspec` (14.24: a graph-data write concerns
  * the area); `check` exits 1 with the staleness alone — every finding
  * condition 10 concerning a path with `locations` `[]` and instructing
@@ -769,26 +824,16 @@ async function reportersArm(product: ProductBinding): Promise<void> {
         ["occurrences"],
         ["view", RENAME_A_PATH],
         ["at", RENAME_A_PATH, "0"],
-        [
-          "review",
-          "create",
-          "--strategy",
-          "audit",
-          "--name",
-          NEW_SESSION,
-          "--json",
-        ],
       ];
       for (const argv of reporters) {
         const label = `${context} \`${argv.join(" ")}\``;
         expectRefusal(
           await runSettled(product, workspace, argv, label),
           [GRAPH_DATA_AREA],
-          `${label} — a refreshing read of 13.3, or a review mutator ` +
-            `refreshing before its session write (13.5), whose graph-data ` +
-            `write the environment refuses reports the write failure ` +
-            `concerning the graph-data area, never a path inside it, and ` +
-            `answers nothing (SPEC 14.24, 11.6, 13.3)`,
+          `${label} — a refreshing read of 13.3 whose graph-data write the ` +
+            `environment refuses reports the write failure concerning the ` +
+            `graph-data area, never a path inside it, and answers nothing ` +
+            `(SPEC 14.24, 11.6, 13.3)`,
         );
       }
 
@@ -894,13 +939,46 @@ async function reportersArm(product: ProductBinding): Promise<void> {
     } finally {
       await staging.restore();
     }
+
+    // The mutating `review create` on the same state, the same staging
+    // applied at the seam (T14-9: after acquisition, before any
+    // modification), restored once it exits.
+    const createArgv = [
+      "review",
+      "create",
+      "--strategy",
+      "audit",
+      "--name",
+      NEW_SESSION,
+      "--json",
+    ];
+    const createLabel = `${context} \`${createArgv.join(" ")}\` held at the seam`;
+    expectRefusal(
+      await runHeldWithStaging(
+        product,
+        workspace,
+        createArgv,
+        "hold-t14-9-reporters.tmp",
+        refusalUnder(GRAPH_DATA_AREA),
+        createLabel,
+      ),
+      [GRAPH_DATA_AREA],
+      `${createLabel} — a review mutator refreshes before its session write ` +
+        `(13.5): with \`.xspec\` staged unwritable once it has acquired, its ` +
+        `refused graph-data write reports the write failure concerning the ` +
+        `graph-data area, never a path inside it — nor the lock path, ` +
+        `release's refused deletions there changing no outcome — and no ` +
+        `session is created (SPEC 14.24, 11.6, 13.3, 13.5)`,
+    );
     assertSnapshotsEqual(
       staged,
       await snapshotWorkspace(workspace.root),
-      `${context}: nothing in the workspace changes around the sweep — a ` +
-        `refresh writes graph data alone (refused), a preview writes ` +
-        `nothing, and the usage errors precede every write (SPEC 13.3, ` +
-        `6.6, 12.0)`,
+      `${context}: nothing in the workspace changes around the sweep and ` +
+        `the held \`review create\` — a refresh writes graph data alone ` +
+        `(refused), a preview writes nothing, the usage errors precede every ` +
+        `write, and a session is written last, never once a write is refused ` +
+        `(SPEC 13.3, 6.6, 12.0, 13.5; H-6: the lock path, which the held ` +
+        `run's acquisition and release touch, left out)`,
     );
     await assertRecovers(product, workspace, context);
   } finally {
@@ -1095,15 +1173,230 @@ async function holdFileArm(product: ProductBinding): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Acquisition's writes (SPEC 13.5, 14.24), staged before the invocation
+// ---------------------------------------------------------------------------
+
+/** What the plain file an arm stages at `.xspec` holds. */
+const AREA_OCCUPANT_BYTES =
+  "Not the graph-data area: an occupant T14-9 deletes by hand.\n";
+
+/**
+ * One of acquisition's writes refused (TEST-SPEC T14-9; SPEC 13.5, 14.24):
+ * the write, the staging refusing it — T13.5-10(a)'s or (d)'s, applied
+ * before the invocation and verified on the harness itself — the concerned
+ * path, and the mutating command run against it.
+ */
+interface AcquisitionWriteArm {
+  /** The write the staging refuses, as T14-9 names it. */
+  readonly write: string;
+  /** The staging, as T13.5-10 words it. */
+  readonly staging: string;
+  /**
+   * The concerned path (SPEC 14.24): the lock path for a write of
+   * acquisition, never an entry's or a leftover's own path; the area's own
+   * path for the write producing the area's directory and for one its
+   * occupant obstructs.
+   */
+  readonly path: typeof LOCK_PATH | typeof AREA_PATH;
+  /** The mutating command run against it: its index in T13.5-10's five. */
+  readonly operation: number;
+  /**
+   * Staged on an unbuilt workspace — no `.xspec`, no session — rather than
+   * on T13.5-10's session staging (`stageArmWorkspace`).
+   */
+  readonly unbuilt?: true;
+  /**
+   * Stage it before the invocation, verified on the harness itself; its
+   * `restore()` reinstates every mode the staging changed (idempotent).
+   */
+  readonly stage: (
+    workspace: TestWorkspace,
+    context: string,
+  ) => Promise<AcquisitionStaging>;
+  /**
+   * Its undoing beyond the permissions, before recovery: the occupant of
+   * the area's own path deleted by hand (SPEC 13.4: the remedy for an
+   * occupant obstructing acquisition, T13.4-12).
+   */
+  readonly remedy?: (workspace: TestWorkspace) => Promise<void>;
+}
+
+/**
+ * T14-9's acquisition-write arms, one per write (two stagings for a
+ * leftover's removal, as T13.5-10(d) stages it), each with the next of
+ * T13.5-10's mutating commands — `rename`, `move`, `review create`,
+ * `resolve`, `split`, the sixth arm's wrapping to `rename` — so that each
+ * reports one of acquisition's refused writes.
+ */
+const ACQUISITION_WRITE_ARMS: readonly AcquisitionWriteArm[] = [
+  {
+    write: "the entry's addition",
+    staging: "an empty leftover lock directory refusing writes (`r-x`)",
+    path: LOCK_PATH,
+    operation: 0,
+    stage: (workspace) => stageUnwritableLockDirectory(workspace),
+  },
+  {
+    write: "a leftover's removal",
+    staging:
+      "a lock directory holding a subdirectory that holds a file, the " +
+      "subdirectory refusing writes (`r-x`)",
+    path: LOCK_PATH,
+    operation: 1,
+    stage: (workspace) => stageUnwritableLeftoverDirectory(workspace),
+  },
+  {
+    write: "a leftover's removal",
+    staging:
+      "a plain file at `.xspec/lock` with `.xspec` read-only and the file " +
+      "unwritable (T14-9's full discipline)",
+    path: LOCK_PATH,
+    operation: 2,
+    stage: (workspace) => stageUnremovableLockFile(workspace),
+  },
+  {
+    write: "the lock directory's creation",
+    staging: "a read-only `.xspec` holding no `lock`",
+    path: LOCK_PATH,
+    operation: 3,
+    stage: (workspace) => stageReadOnlyArea(workspace),
+  },
+  {
+    write: "the area directory's creation",
+    staging:
+      "an unbuilt workspace, its root read-only (`review split` naming the " +
+      "absent session `s`, acquisition preceding that check, 12.0)",
+    path: AREA_PATH,
+    operation: 4,
+    unbuilt: true,
+    stage: (workspace) => stageReadOnlyRoot(workspace),
+  },
+  {
+    write: "an occupant of the area's own path",
+    staging: "`.xspec` a plain file",
+    path: AREA_PATH,
+    operation: 0,
+    stage: async (workspace, context) => {
+      await obstructArea(
+        workspace,
+        { kind: "file", content: AREA_OCCUPANT_BYTES },
+        context,
+      );
+      return { restore: async () => undefined };
+    },
+    remedy: async (workspace) => {
+      await fsp.unlink(path.join(workspace.root, AREA_PATH));
+    },
+  },
+];
+
+/** T13.5-10's mutating command at `index` (a harness error where none). */
+function acquisitionOperation(index: number): SessionOperation {
+  const operation = T13_5_10_OPERATIONS[index];
+  if (operation === undefined) {
+    throw new Error(
+      `T14-9: T13.5-10 runs no mutating command at index ${String(index)}`,
+    );
+  }
+  return operation;
+}
+
+/**
+ * One acquisition-write arm (TEST-SPEC T14-9): on a fresh CONF-CORE-shaped
+ * workspace — T13.5-10's session staging, or unbuilt where the arm says so
+ * (`resolve` and `split` then naming the absent session `s`) — the arm
+ * staged before the invocation, verified on the harness itself; its
+ * command under `--json`, settled; the staging's modes restored once it
+ * exits → the 14.24 contract (`expectRefusal`: exit 2, the error document
+ * as stdout, `code` `"write-failure"`, `path` the arm's concerned path
+ * exactly, a non-empty stderr); nothing modified — every path but the lock
+ * path byte-identical, the compare bracketing this run alone (H-6: the lock
+ * path a mutating run touched left out, its residue T13.5-10(d)'s subject;
+ * `.xspec` itself compared); and recovery — the arm's remedy where it has
+ * one, then `build` exits 0 and `check` is clean (12.1, 13.4).
+ */
+async function acquisitionWriteRun(
+  product: ProductBinding,
+  arm: AcquisitionWriteArm,
+): Promise<void> {
+  const operation = acquisitionOperation(arm.operation);
+  const context =
+    `T14-9 acquisition's writes: ${operation.what} --json with ` +
+    `${arm.staging} — ${arm.write} refused`;
+  const workspace = await TestWorkspace.create(CORE_DECL);
+  try {
+    const items =
+      arm.unbuilt === true
+        ? ABSENT_SESSION_ITEMS
+        : await stageArmWorkspace(product, workspace, context);
+    const staging = await arm.stage(workspace, context);
+    let before: DirectorySnapshot;
+    let result: RunResult;
+    try {
+      before = await snapshotWorkspace(workspace.root);
+      result = await runSettled(
+        product,
+        workspace,
+        [...operation.argv(items), "--json"],
+        context,
+      );
+    } finally {
+      await staging.restore();
+    }
+    expectRefusal(
+      result,
+      [arm.path],
+      arm.path === LOCK_PATH
+        ? `${context} — a write of acquisition the environment refuses ` +
+            `concerns the lock path \`${LOCK_PATH}\`, never an entry's or ` +
+            `a leftover's own path, its entries' names being opaque (SPEC ` +
+            `14.24, 13.5, 13.4)`
+        : `${context} — a write of acquisition producing the area's ` +
+            `directory, or obstructed by the area's own path holding ` +
+            `anything but a directory, concerns that path, ` +
+            `\`${AREA_PATH}\` (SPEC 14.24, 13.5)`,
+    );
+    assertSnapshotsEqual(
+      before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: modifies nothing — acquisition precedes every ` +
+        `modification and the command stops at the refused write, so every ` +
+        `path but the lock path is byte-identical, the area's own path ` +
+        `included (SPEC 13.5, 14.24; H-6: the lock path, which acquisition ` +
+        `and release touch, left out)`,
+    );
+    if (arm.remedy !== undefined) await arm.remedy(workspace);
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * T14-9's acquisition-write arms, in turn (TEST-SPEC T14-9: acquisition's
+ * writes, staged before the invocation, T13.5-10(a), (d)). Exported so
+ * scratch probes can run them alone, against the CONF-CORE reference among
+ * others; Linux leg only, as T14-9's other arms (E-1).
+ */
+export async function runT149AcquisitionArms(
+  product: ProductBinding,
+): Promise<void> {
+  for (const arm of ACQUISITION_WRITE_ARMS) {
+    await acquisitionWriteRun(product, arm);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // T14-9 — write failures (14.24)
 // ---------------------------------------------------------------------------
 
 const T14_9 = defineProductTest({
   id: "T14-9",
   title:
-    "write failures (14.24): a write the environment refuses is a usage error — exit 2, the error document (`code` `write-failure`, `path` the concerned path) on stdout, the diagnostic on stderr, never a finding — from every command making the write and met only at the write it refuses; one arm per concerned path through T13.5-7's stagings: a derived path under specs/b/ (`build`), an emitted Markdown file under out/specs (`move`), the rewritten source specs/b/B.mdx and the journal (`rename`), the session file (`review resolve`), a relocation's origin removal and destination production (`move`), and the graph-data area `.xspec` from every refreshing read of 13.3 and `review create` on a stale workspace — while `check` exits 1 with the staleness, `inventory` and `version` exit 0, and a `--preview` exits 0 writing nothing; precedence: the invalid-flag-value and unknown-node usage errors (`code` null), the failing twin's findings (`ids` exit 1), a validation refusal under (a)'s staging (exit 1, no write), and a hold file in a read-only directory (13.5's usage error, `code` null); after every arm, permissions restored, `build` exits 0 and `check` is clean (SPEC 14.24, 12.0, 12.7, 13.3, 13.5)",
-  // A hang guard only (H-10): eleven workspaces, each built, renamed,
-  // checked, committed, and driven — generous under a saturated box.
+    "write failures (14.24): a write the environment refuses is a usage error — exit 2, the error document (`code` `write-failure`, `path` the concerned path) on stdout, the diagnostic on stderr, never a finding — from every command making the write and met only at the write it refuses; one arm per concerned path through T13.5-7's stagings: a derived path under specs/b/ (`build`), an emitted Markdown file under out/specs (`move`), the rewritten source specs/b/B.mdx and the journal (`rename`), the session file (`review resolve`), a relocation's origin removal and destination production (`move`), and the graph-data area `.xspec` from every refreshing read of 13.3 and `review create` (staged at the seam) on a stale workspace — while `check` exits 1 with the staleness, `inventory` and `version` exit 0, and a `--preview` exits 0 writing nothing; acquisition's writes through T13.5-10's stagings, each staged before the invocation, each mutating command in turn: the entry's addition, a leftover's removal (an `r-x` leftover directory; a plain file at the lock path under the full discipline), and the lock directory's creation concerning `.xspec/lock`, never an entry's path, and the area directory's creation (an unbuilt workspace, its root read-only) and an occupant of the area's own path (`.xspec` a plain file) concerning `.xspec`, each modifying nothing; precedence: the invalid-flag-value and unknown-node usage errors (`code` null), the failing twin's findings (`ids` exit 1), a validation refusal under (a)'s staging (exit 1, no write), and a hold file in a read-only directory (13.5's usage error, `code` null); after every arm, permissions restored (an occupant of the area's own path deleted by hand), `build` exits 0 and `check` is clean (SPEC 14.24, 12.0, 12.7, 13.3, 13.5)",
+  // A hang guard only (H-10): seventeen workspaces — eleven built, renamed,
+  // checked, committed, and driven, and six CONF-CORE-shaped ones for
+  // acquisition's writes — generous under a saturated box.
   timeoutMs: 600_000,
   run: async (product) => {
     // E-1: permission stagings belong to the Linux leg; elsewhere the arms
@@ -1121,6 +1414,7 @@ const T14_9 = defineProductTest({
     await failingTwinArm(product);
     await validationRefusalArm(product);
     await holdFileArm(product);
+    await runT149AcquisitionArms(product);
   },
 });
 
