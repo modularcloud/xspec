@@ -3775,9 +3775,11 @@ async function acquisitionFirstRun(
  * The change one acquisition-after run is staged on (TEST-SPEC T13.5-8):
  * made just before the run — in the held setting during the hold, the
  * holder having started without it — and undone just after it, before
- * anything else starts and before any hold is lifted.
+ * anything else starts and before any hold is lifted. T13.5-11(a) makes
+ * two of them during a mutating command's own hold, undone once that
+ * command has ended (section-13.5-iii.ts).
  */
-interface AcquisitionAfterStaging {
+export interface AcquisitionAfterStaging {
   /** Make the change; returns its undoing, restoring the prior state. */
   readonly make: (
     workspace: TestWorkspace,
@@ -4238,13 +4240,16 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
 // a workspace created after the body's first product invocation, or by an
 // arm after one, so each is a staged-source record S-9 judges before any
 // product exists (helpers/staged-ts.ts, helpers/staged-mdx.ts; S-9's timing
-// clause).
-const CONFIG_PATH = "xspec.config.ts";
+// clause). T13.5-11(a) stages the same workspace, session-staged, for its
+// failures past acquisition, making the same two changes during a mutating
+// command's hold instead, where the rediscovery meets them
+// (section-13.5-iii.ts; TEST-SPEC T13.5-12(d), (e)).
+export const CONFIG_PATH = "xspec.config.ts";
 const CODE_SOURCE_PATH = "src/c.ts";
-const SUB_DIR = "specs/sub";
-const DOUBLY_MATCHED_PATH = "src/both.mdx";
+export const SUB_DIR = "specs/sub";
+export const DOUBLY_MATCHED_PATH = "src/both.mdx";
 const T13_5_8_CONFIG = stagedTs(
-  "T13.5-8 xspec.config.ts — one spec group and one code group, both matching the unoccupied src/*.mdx paths (T13.5-12(d)'s configuration), the code group discovering src/c.ts",
+  "T13.5-8/T13.5-11 xspec.config.ts — one spec group and one code group, both matching the unoccupied src/*.mdx paths (T13.5-12(d)'s configuration), the code group discovering src/c.ts",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -4273,18 +4278,18 @@ export default defineConfig({
 `,
 );
 const T13_5_8_CODE_SOURCE = stagedTs(
-  "T13.5-8 src/c.ts — a discovered code source spelling no marker, text call, or specifier naming a spec module (the wrong-kind origin of the acquisition-first arms' rename and move and of the seam-ordering move)",
+  "T13.5-8/T13.5-11 src/c.ts — a discovered code source spelling no marker, text call, or specifier naming a spec module (the wrong-kind origin of T13.5-8's acquisition-first arms' rename and move and of its seam-ordering move)",
   "export const c = 1\n",
 );
 const T13_5_8_SUB_SOURCE = stagedMdx(
-  "T13.5-8 specs/sub/S.mdx (the source under specs/sub, the discovered directory the acquisition-after read-failure arm makes unlistable)",
+  "T13.5-8/T13.5-11 specs/sub/S.mdx (the source under specs/sub, the discovered directory T13.5-8's acquisition-after read-failure arm, and T13.5-11(a)'s read failure past acquisition during a hold, make unlistable)",
   ['<S id="sub">', "Sub text.", "</S>", ""].join("\n"),
 );
 const T13_5_8_DOUBLY_MATCHED = stagedMdx(
-  "T13.5-8 src/both.mdx (created at a path both groups match, the acquisition-after arm's configuration error met by the first discovery)",
+  "T13.5-8/T13.5-11 src/both.mdx (created at a path both groups match: T13.5-8's acquisition-after configuration error, met by the first discovery, and T13.5-11(a)'s, created during a hold and met by the rediscovery)",
   ['<S id="both">', "Both text.", "</S>", ""].join("\n"),
 );
-const ACQUISITION_DECL: WorkspaceDecl = {
+export const ACQUISITION_DECL: WorkspaceDecl = {
   files: {
     [CONFIG_PATH]: T13_5_8_CONFIG,
     "specs/A.mdx": CORE_A_STAGED,
@@ -4393,9 +4398,11 @@ const INVALID_CONFIGURATION: AcquisitionAfterStaging = {
  * A file created for one run at a path both groups match (T13.5-12(d)'s
  * configuration) — nothing occupying it before, a staging premise checked
  * here, so in the held setting the holder started with the path unoccupied
- * — and deleted after it.
+ * — and deleted after it. Shared with T13.5-11(a) (section-13.5-iii.ts),
+ * which creates it during a mutating command's hold: the configuration
+ * error the rediscovery meets (T13.5-12(d)).
  */
-const DOUBLY_MATCHED_FILE: AcquisitionAfterStaging = {
+export const DOUBLY_MATCHED_FILE: AcquisitionAfterStaging = {
   make: async (workspace, context) => {
     const abs = workspace.path(DOUBLY_MATCHED_PATH);
     const kind = await occupantKindAt(abs);
@@ -4419,9 +4426,11 @@ const DOUBLY_MATCHED_FILE: AcquisitionAfterStaging = {
  * `specs/**\/*.mdx` — made unlistable for one run (T14-10(g)'s staging:
  * mode 0o100, its search permission kept, verified on the harness's own
  * process first, E-1; a privileged runner is a harness error, H-11) and
- * its mode restored after it.
+ * its mode restored after it. Shared with T13.5-11(a) (section-13.5-iii.ts),
+ * which makes it unlistable during a mutating command's hold: a read
+ * failure past acquisition, met by the rediscovery (T13.5-12(e)).
  */
-const UNLISTABLE_SUB_DIR: AcquisitionAfterStaging = {
+export const UNLISTABLE_SUB_DIR: AcquisitionAfterStaging = {
   make: async (workspace) => {
     const staging = await stageReadRefusalOfDirectory(workspace.path(SUB_DIR));
     return async () => {

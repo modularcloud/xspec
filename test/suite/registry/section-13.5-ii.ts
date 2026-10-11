@@ -2074,8 +2074,9 @@ const READ_FAILURE_CODE = "read-failure";
  * itself absent (TEST-SPEC T13.5-10(d): `resolve` and `split` there naming
  * the absent session `s`, acquisition preceding that check, 12.0; SPEC 10.7:
  * an unknown session or item is a usage error, judged past acquisition).
+ * Shared with T13.5-11(a)'s run of (d)'s unbuilt arm (section-13.5-iii.ts).
  */
-const ABSENT_SESSION_ITEMS: SessionItems = {
+export const ABSENT_SESSION_ITEMS: SessionItems = {
   leaf: "xspec-harness-no-such-item",
   parent: "xspec-harness-no-such-item",
 };

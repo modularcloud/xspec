@@ -1,12 +1,12 @@
 // TEST-SPEC §13.5 (concurrency and isolation), part iii — SUITE-48:
 // T13.5-11 (release), registered with (b), (c), and (d) whole and with
-// these of (a)'s endings: each mutating command's success, its usage errors
-// past acquisition, the exit-1 refusals (a) lists, and the busy refusal.
-// (a)'s other endings — a read failure past acquisition and a configuration
-// error the rediscovery meets (T13.5-12(e), (d)), acquisition's own read and
-// write failures outside the residue cases (T13.5-10(d)), and T13.5-7's
-// write failures but (b)'s — are not yet observed here (FIX_PLAN Tasks 29b
-// and 29c add them).
+// every one of (a)'s endings but one: each mutating command's success, its
+// usage errors past acquisition, the exit-1 refusals (a) lists, a read
+// failure past acquisition and a configuration error the rediscovery meets
+// (T13.5-12(e), (d)), acquisition's own read and write failures outside the
+// residue cases (T13.5-10(d)), and the busy refusal. (a)'s remaining ending
+// — T13.5-7's write failures but (b)'s — is not yet observed here (FIX_PLAN
+// Task 29c adds it).
 //
 // Release (SPEC 13.5): a command ending normally — completed, refused, or
 // failed, at acquisition or at a refused write or read included — deletes
@@ -15,8 +15,9 @@
 // release reads nothing, and a deletion the environment refuses changes no
 // outcome and is no write failure (14.24).
 //
-// Every arm but (b)'s starts from the session staging on a fresh
-// CONF-CORE-shaped workspace (section-13.5-ii.ts `stageArmWorkspace`:
+// Every arm but (b)'s and (a)'s unbuilt one starts from the session staging
+// on a fresh CONF-CORE-shaped workspace — T13.5-8's valid workspace for
+// (a)'s failures past acquisition — (section-13.5-ii.ts `stageArmWorkspace`:
 // `build`, `review create --strategy audit --name s`, the session's items
 // read by `review status s --json`, `.xspec/lock` checked absent once those
 // runs have ended — itself release after a success); every command runs
@@ -58,6 +59,35 @@
 //   byte-order mark staged last (T13.5-8's failing workspace), `review create
 //   --strategy audit --name n`, the gate turning it back (T10.7-1, 13.3) —
 //   each met past acquisition, release following it alike (13.5).
+// - A failure past acquisition, with each command in turn held on a session
+//   staging of T13.5-8's valid workspace (section-13.5.ts `ACQUISITION_DECL`,
+//   configured as T13.5-12(d)'s: the spec group and the code group both
+//   matching the unoccupied `src/*.mdx` paths), a change made during its
+//   hold — before the second discovery, the hold engaging before it (13.5)
+//   — and undone once it has ended: `specs/sub`, a directory discovery
+//   lists, made unlistable (`--x`, T14-10's discipline, verified on the
+//   harness itself) — the rediscovery's read failure, exit 2, `code`
+//   `"read-failure"`, `path` `"specs/sub"` (14.25; T13.5-12(e)); and a file
+//   created at `src/both.mdx`, a path both groups match — the configuration
+//   error the rediscovery meets, exit 2, `code` `"configuration-error"`,
+//   `path` `"xspec.config.ts"` (7.2, 14.14; T13.5-12(d), T12.7-3; 12.0: after
+//   acquisition's and the hold file's errors, before every other).
+// - Acquisition's own read and write failures, with each command in turn on
+//   a fresh session staging, staged before the run as T13.5-10(d) stages
+//   them (helpers/acquisition-staging.ts, each staging verified on the
+//   harness itself) — its stagings whose stated residue is no
+//   `.xspec/lock`: an empty leftover lock directory unlistable (`-wx`,
+//   `"read-failure"`) and one refusing writes (`r-x`, `"write-failure"`), a
+//   read-only `.xspec` holding no `lock` (`"write-failure"`), and `.xspec`
+//   unsearchable (`rw-`) holding no `lock` (either code), each `path`
+//   `".xspec/lock"`; and, on an unbuilt workspace, its root read-only
+//   (`"write-failure"`, `path` `".xspec"`; `resolve` and `split` there naming
+//   the absent session `s`) — nothing at `.xspec/lock` afterwards. Not the
+//   residue cases T13.5-10 states: (a)'s obstructions, (d)'s subdirectory
+//   arms, its unremovable plain file, its unsearchable `.xspec` holding an
+//   empty lock directory, and its unsearchable lock directory.
+//   Each failure's ending — exit 2, its code and path — is asserted as its
+//   arm's premise, then (the staging undone) `.xspec/lock` absent.
 // - The busy refusal: while `rename specs/A.mdx a a2` holds, each command is
 //   refused, exit 2, `code` `"workspace-busy"`, `path` `".xspec/lock"`, and
 //   `.xspec/lock` then holds exactly the holder's entry — byte-identical,
@@ -125,6 +155,14 @@
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import type { AcquisitionStaging } from "../../helpers/acquisition-staging.js";
+import {
+  stageReadOnlyArea,
+  stageReadOnlyRoot,
+  stageUnlistableLockDirectory,
+  stageUnsearchableArea,
+  stageUnwritableLockDirectory,
+} from "../../helpers/acquisition-staging.js";
 import { assertExitCode, fail } from "../../helpers/assertions.js";
 import { assertRunOutcomesEqual } from "../../helpers/determinism.js";
 import {
@@ -158,17 +196,28 @@ import {
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
+  ABSENT_SESSION_ITEMS,
   exitOnceLifted,
   RENAME_A,
   stageArmWorkspace,
   T13_5_10_OPERATIONS,
 } from "./section-13.5-ii.js";
-import type { SessionItems, SessionOperation } from "./section-13.5.js";
+import type {
+  AcquisitionAfterStaging,
+  SessionItems,
+  SessionOperation,
+} from "./section-13.5.js";
 import {
+  ACQUISITION_DECL,
+  CONFIG_PATH,
   CORE_DECL,
   corruptSessionForRun,
+  DOUBLY_MATCHED_FILE,
+  DOUBLY_MATCHED_PATH,
   runBounded,
+  SUB_DIR,
   T13_5_8_BOM,
+  UNLISTABLE_SUB_DIR,
 } from "./section-13.5.js";
 import { assertSameJson, expectErrorDocument } from "./support.js";
 import {
@@ -184,6 +233,9 @@ const WORKSPACE_BUSY = "workspace-busy";
 
 /** The stable code of 14.25, the read failure. */
 const READ_FAILURE_CODE = "read-failure";
+
+/** The stable code of 14.14, the configuration error. */
+const CONFIGURATION_ERROR_CODE = "configuration-error";
 
 /** An item no session holds (harness-prefixed: never a product's own). */
 const NO_SUCH_ITEM = "xspec-harness-no-such-item";
@@ -641,6 +693,275 @@ async function refusalArms(product: ProductBinding): Promise<void> {
         "it back with the findings, exit 1 (SPEC 13.3, 10.7; T10.7-1)",
     );
   });
+}
+
+/**
+ * A failure ending of (a), the arm's premise: exit 2 with the 12.7 error
+ * document as the entire stdout, its `code` among `expected.codes` and its
+ * `path` `expected.path` (`message` and `identities` informational) — the
+ * ending whose release the absence of `.xspec/lock` that follows observes.
+ */
+function assertFailureEnding(
+  result: RunResult,
+  expected: { readonly codes: readonly string[]; readonly path: string },
+  context: string,
+  rule: string,
+): void {
+  assertExitCode(result, 2, `${context}: ${rule}`);
+  const finding = expectErrorDocument(result, context);
+  const codes = expected.codes.map((code) => `"${code}"`).join(" or ");
+  assertSameJson(
+    { code: finding.code, path: finding.path },
+    {
+      code:
+        expected.codes.find((code) => code === finding.code) ??
+        expected.codes[0],
+      path: expected.path,
+    },
+    `${context}: ${rule} — the stable code ${codes}, the concerned path ` +
+      `"${expected.path}" (SPEC 12.7, 14) — message: ` +
+      JSON.stringify(finding.message),
+  );
+}
+
+/**
+ * A failure the rediscovery meets (TEST-SPEC T13.5-11(a): "after a read
+ * failure past acquisition (T13.5-12(e)) and a configuration error the
+ * rediscovery meets (T13.5-12(d))"): a change made during a mutating
+ * command's hold — so before its second discovery, the hold engaging
+ * before it (SPEC 13.5) — and undone once the command has ended: T13.5-8's
+ * acquisition-after staging (section-13.5.ts), made past acquisition here.
+ */
+interface RediscoveryFailureArm {
+  /** The change, for diagnoses. */
+  readonly what: string;
+  readonly staging: AcquisitionAfterStaging;
+  /** The ending's `code` (one) and `path` (SPEC 12.7, 14). */
+  readonly codes: readonly string[];
+  readonly path: string;
+  /** Why the command so ends, for diagnoses. */
+  readonly rule: string;
+}
+
+/**
+ * (a)'s failures past acquisition, in TEST-SPEC's order, each on a session
+ * staging of T13.5-8's valid workspace (`ACQUISITION_DECL`, configured as
+ * T13.5-12(d)'s: the spec group and the code group both matching the
+ * unoccupied `src/*.mdx` paths): `specs/sub`, a directory discovery lists,
+ * made unlistable (`--x`, T14-10's discipline, verified on the harness
+ * itself) — the rediscovery's read failure at that directory; and a file
+ * created at `src/both.mdx` — the configuration error the rediscovery meets,
+ * concerning the configuration file (T12.7-3).
+ */
+const REDISCOVERY_FAILURE_ARMS: readonly RediscoveryFailureArm[] = [
+  {
+    what:
+      `${SUB_DIR}, a directory discovery lists, made unlistable during the ` +
+      `hold (mode \`--x\`, T14-10's discipline)`,
+    staging: UNLISTABLE_SUB_DIR,
+    codes: [READ_FAILURE_CODE],
+    path: SUB_DIR,
+    rule:
+      "a read failure past acquisition — the rediscovery's refused listing " +
+      "of a directory it lists — exit 2 (SPEC 13.5: holding exclusivity, " +
+      "the command discovers its sources again, past the hold; 14.25; " +
+      "T13.5-12(e))",
+  },
+  {
+    what:
+      `a file created during the hold at ${DOUBLY_MATCHED_PATH}, a path the ` +
+      `spec group and the code group both match`,
+    staging: DOUBLY_MATCHED_FILE,
+    codes: [CONFIGURATION_ERROR_CODE],
+    path: CONFIG_PATH,
+    rule:
+      "the configuration error the rediscovery meets — a file both groups " +
+      "match — concerning the configuration file, exit 2 (SPEC 13.5, 7.2, " +
+      "14.14, 12.0: after acquisition's and the hold file's errors, before " +
+      "every other; T13.5-12(d), T12.7-3)",
+  },
+];
+
+/**
+ * One failure past acquisition (TEST-SPEC T13.5-11(a)) with `operation`,
+ * an operation otherwise succeeding (T13.5-12: "(d) and (e) run likewise
+ * with each other mutating command"), on a fresh session staging of
+ * `ACQUISITION_DECL`: held (`withHeldRun`: the held-state comparison once
+ * it holds), `arm`'s change made during the hold, the hold lifted, the
+ * change undone once the run has exited; its ending — exit 2, `arm`'s code
+ * and path — asserted as the arm's premise, then `.xspec/lock` absent.
+ */
+async function rediscoveryFailureRun(
+  product: ProductBinding,
+  operation: SessionOperation,
+  arm: RediscoveryFailureArm,
+): Promise<void> {
+  await withWorkspace(ACQUISITION_DECL, async (workspace) => {
+    const context =
+      `T13.5-11(a) ${operation.what} --json --test-hold <path> on a freshly ` +
+      `built valid workspace configured as T13.5-12(d)'s, with ${arm.what}`;
+    const items = await stageArmWorkspace(product, workspace, context);
+    await withHeldRun(
+      product,
+      workspace,
+      [...operation.argv(items), "--json"],
+      context,
+      async (held) => {
+        let undo: (() => Promise<void>) | undefined;
+        let result: RunResult;
+        try {
+          undo = await arm.staging.make(workspace, context);
+          result = await liftAndWait(held, context);
+        } finally {
+          if (undo !== undefined) await undo();
+        }
+        assertFailureEnding(result, arm, context, arm.rule);
+        await assertLockPathAbsent(
+          workspace.root,
+          `${context}: once it has failed, exit 2, the change undone — its ` +
+            `acquisition made, release following the failure alike ` +
+            `(${RELEASE_RULE})`,
+        );
+      },
+    );
+  });
+}
+
+/**
+ * One of acquisition's own failures whose staging leaves nothing behind
+ * (TEST-SPEC T13.5-11(a): "after acquisition's own read and write failures,
+ * save where its staging leaves an occupant acquisition could not remove or
+ * release could not delete"; T13.5-10(d) states each residue): staged
+ * before the invocation and verified on the harness itself — the staging
+ * T13.5-10(d) runs (helpers/acquisition-staging.ts).
+ */
+interface AcquisitionFailureArm {
+  readonly what: string;
+  /** Staged on an unbuilt workspace — no session staging, no `.xspec`. */
+  readonly unbuilt?: true;
+  /** The codes a conforming acquisition reports (14.24, 14.25). */
+  readonly codes: readonly string[];
+  /** The concerned path (SPEC 12.7, 14). */
+  readonly path: string;
+  readonly stage: (workspace: TestWorkspace) => Promise<AcquisitionStaging>;
+  /** Why nothing remains at `.xspec/lock`, for diagnoses. */
+  readonly why: string;
+}
+
+/**
+ * (a)'s acquisition failures, in T13.5-10(d)'s order — its stagings whose
+ * stated residue is no `.xspec/lock` (never its subdirectory arms, its
+ * unremovable plain file, its unsearchable `.xspec` holding an empty lock
+ * directory, or its unsearchable lock directory, whose residues T13.5-10
+ * states, nor (a)'s obstructions).
+ */
+const ACQUISITION_FAILURE_ARMS: readonly AcquisitionFailureArm[] = [
+  {
+    what: "an empty leftover lock directory unlistable but writable (mode `-wx`)",
+    codes: [READ_FAILURE_CODE],
+    path: LOCK_PATH,
+    stage: stageUnlistableLockDirectory,
+    why:
+      "release deletes the run's entry and then the emptied directory, " +
+      "which needs only `.xspec`'s write permission",
+  },
+  {
+    what: "an empty leftover lock directory refusing writes (mode `r-x`)",
+    codes: [WRITE_FAILURE_CODE],
+    path: LOCK_PATH,
+    stage: stageUnwritableLockDirectory,
+    why: "no entry added, release deletes the empty directory all the same",
+  },
+  {
+    what: "a read-only `.xspec` holding no `lock`",
+    codes: [WRITE_FAILURE_CODE],
+    path: LOCK_PATH,
+    stage: stageReadOnlyArea,
+    why: "the lock directory's creation refused",
+  },
+  {
+    what: "`.xspec` unsearchable (mode `rw-`) holding no `lock`",
+    codes: [READ_FAILURE_CODE, WRITE_FAILURE_CODE],
+    path: LOCK_PATH,
+    stage: (workspace) => stageUnsearchableArea(workspace, "nothing"),
+    why:
+      "acquisition meets the refusal at its examination of the lock path " +
+      "or at a write it attempts there first, creating nothing there, and " +
+      "release's deletions are refused alike, which changes no outcome",
+  },
+  {
+    what: "an unbuilt workspace, its root read-only",
+    unbuilt: true,
+    codes: [WRITE_FAILURE_CODE],
+    path: AREA_PATH,
+    stage: stageReadOnlyRoot,
+    why: "the write producing the area's directory refused, nothing created",
+  },
+];
+
+/**
+ * One of acquisition's own failures (TEST-SPEC T13.5-11(a)) with
+ * `operation`: on a fresh session staging — or a fresh unbuilt workspace
+ * where the arm says so, `resolve` and `split` there naming the absent
+ * session `s` (T13.5-10(d)) — `arm` staged, `operation` under `--json`,
+ * bounded, the staging's modes restored once it has ended; its ending —
+ * exit 2, `arm`'s code and path — asserted as the arm's premise, then
+ * `.xspec/lock` absent.
+ */
+async function acquisitionFailureRun(
+  product: ProductBinding,
+  operation: SessionOperation,
+  arm: AcquisitionFailureArm,
+): Promise<void> {
+  await withWorkspace(CORE_DECL, async (workspace) => {
+    const context = `T13.5-11(a) ${operation.what} --json with ${arm.what}`;
+    const items =
+      arm.unbuilt === true
+        ? ABSENT_SESSION_ITEMS
+        : await stageArmWorkspace(product, workspace, context);
+    const staging = await arm.stage(workspace);
+    let result: RunResult;
+    try {
+      result = await runBounded(
+        product,
+        workspace.root,
+        [...operation.argv(items), "--json"],
+        context,
+      );
+    } finally {
+      await staging.restore();
+    }
+    assertFailureEnding(
+      result,
+      arm,
+      context,
+      "acquisition's refused read or write, exit 2 — the command stopping " +
+        "there and releasing (SPEC 13.5, 14.24, 14.25, 12.0; T13.5-10(d))",
+    );
+    await assertLockPathAbsent(
+      workspace.root,
+      `${context}: once it has failed at acquisition, exit 2, the staging's ` +
+        `modes restored — ${arm.why} (${RELEASE_RULE})`,
+    );
+  });
+}
+
+/**
+ * (a)'s failures past acquisition, then acquisition's own failures, each
+ * with each mutating command in turn, each run on a fresh workspace and a
+ * staging of its own.
+ */
+async function failureArms(product: ProductBinding): Promise<void> {
+  for (const arm of REDISCOVERY_FAILURE_ARMS) {
+    for (const operation of T13_5_10_OPERATIONS) {
+      await rediscoveryFailureRun(product, operation, arm);
+    }
+  }
+  for (const arm of ACQUISITION_FAILURE_ARMS) {
+    for (const operation of T13_5_10_OPERATIONS) {
+      await acquisitionFailureRun(product, operation, arm);
+    }
+  }
 }
 
 /**
@@ -1200,21 +1521,22 @@ async function unwritableLockDirectoryRun(
 const T13_5_11 = defineProductTest({
   id: "T13.5-11",
   title:
-    "release, arms (b), (c), and (d) and four of (a)'s endings so far ((a)'s read failure and configuration error past acquisition, acquisition's own read and write failures, and T13.5-7's write failures not yet implemented) — a command ending normally deletes its entry, then the lock directory when that holds nothing else, then `.xspec` when its acquisition created it and it then holds nothing else, release reading nothing, a deletion the environment refuses changing no outcome: (a) `.xspec/lock` absent after each mutating command's success (`rename specs/A.mdx a a2`, `move specs/A.mdx specs/B.mdx`, `review create --strategy audit --name t`, `review resolve s <item> --status no-change`, `review split s <item>`, each on a freshly built valid workspace holding an `audit` session `s`, exit 0), after its usage errors past acquisition (each command's `--test-hold` path occupied; an unknown old ID, origin file, profile, session, or item — exit 2, `code` `null`), and after each refusal (a `rename` refused by validation, a `move` refused for a 6.5 reason, a `review create` naming an existing session and one the gate turns back, a `resolve` of a blocked item, a `split` of an item of another kind, a `resolve` and a `split` naming a corrupt session — exit 1); after a busy refusal of each command while `rename specs/A.mdx a a2` holds (exit 2, `code` `\"workspace-busy\"`, `path` `\".xspec/lock\"`) the lock directory holds exactly the holder's entry, byte-identical, and once the holder completes `.xspec/lock` is absent; (b) `rename specs/A.mdx nope x` failing its argument check on an unbuilt workspace leaves no `.xspec`, also with `.xspec` made `-wx` during its hold (exit 2 with its unstaged twin's output); with an empty `.xspec` beforehand it leaves `.xspec` present and empty; with the root alone made `r-x` during its hold it exits 2 with the twin's output, no `write-failure`, leaving `.xspec` present and empty; with an empty `.xspec/lock` beforehand, no `.xspec/lock`; (c) with each command held and the lock directory made `-wx` during its hold → its unstaged twin's outcome (exit code, standard output and error byte-equal) or exit 2 with `code` `\"read-failure\"`, `path` `\".xspec/lock\"`, and no `.xspec/lock` either way; (d) with each command held and the lock directory made `r-x` during its hold → its unstaged twin's outcome, exit 0, no `write-failure`, its entry remaining under its name, the lock directory's only one; the permissions restored and the run's process group confirmed gone, `review create --strategy audit --name u` takes the entry over, exit 0, `.xspec/lock` absent (a `workspace-busy` refusal meeting T13.5-3's reuse check); each held run's held-state comparison made once it holds, each staging verified on the harness itself (SPEC 13.5, 14.24, 14.25, 14.26)",
-  // A hang guard (H-10): 109 product invocations — ~8 s against the
-  // CONF-CORE conformer, which passes it whole, and ~35 s for a product at
+    'release, arms (b), (c), and (d) and every one of (a)\'s endings but T13.5-7\'s write failures (not yet implemented) — a command ending normally deletes its entry, then the lock directory when that holds nothing else, then `.xspec` when its acquisition created it and it then holds nothing else, release reading nothing, a deletion the environment refuses changing no outcome: (a) `.xspec/lock` absent after each mutating command\'s success (`rename specs/A.mdx a a2`, `move specs/A.mdx specs/B.mdx`, `review create --strategy audit --name t`, `review resolve s <item> --status no-change`, `review split s <item>`, each on a freshly built valid workspace holding an `audit` session `s`, exit 0), after its usage errors past acquisition (each command\'s `--test-hold` path occupied; an unknown old ID, origin file, profile, session, or item — exit 2, `code` `null`), and after each refusal (a `rename` refused by validation, a `move` refused for a 6.5 reason, a `review create` naming an existing session and one the gate turns back, a `resolve` of a blocked item, a `split` of an item of another kind, a `resolve` and a `split` naming a corrupt session — exit 1); after a read failure past acquisition and a configuration error the rediscovery meets, each command held on a freshly built valid workspace configured as T13.5-12(d)\'s (`specs/sub` made `--x` during its hold → exit 2, `code` `"read-failure"`, `path` `"specs/sub"`; a file created during its hold at `src/both.mdx`, a path both groups match → exit 2, `code` `"configuration-error"`, `path` `"xspec.config.ts"`); after acquisition\'s own read and write failures, with each command (an empty leftover lock directory made `-wx` → `"read-failure"`, or `r-x` → `"write-failure"`; a read-only `.xspec` holding no `lock` → `"write-failure"`; `.xspec` made `rw-` holding no `lock` → either code; each `path` `".xspec/lock"`; an unbuilt workspace\'s root made read-only → `"write-failure"`, `path` `".xspec"`) — each failure\'s ending asserted first; after a busy refusal of each command while `rename specs/A.mdx a a2` holds (exit 2, `code` `"workspace-busy"`, `path` `".xspec/lock"`) the lock directory holds exactly the holder\'s entry, byte-identical, and once the holder completes `.xspec/lock` is absent; (b) `rename specs/A.mdx nope x` failing its argument check on an unbuilt workspace leaves no `.xspec`, also with `.xspec` made `-wx` during its hold (exit 2 with its unstaged twin\'s output); with an empty `.xspec` beforehand it leaves `.xspec` present and empty; with the root alone made `r-x` during its hold it exits 2 with the twin\'s output, no `write-failure`, leaving `.xspec` present and empty; with an empty `.xspec/lock` beforehand, no `.xspec/lock`; (c) with each command held and the lock directory made `-wx` during its hold → its unstaged twin\'s outcome (exit code, standard output and error byte-equal) or exit 2 with `code` `"read-failure"`, `path` `".xspec/lock"`, and no `.xspec/lock` either way; (d) with each command held and the lock directory made `r-x` during its hold → its unstaged twin\'s outcome, exit 0, no `write-failure`, its entry remaining under its name, the lock directory\'s only one; the permissions restored and the run\'s process group confirmed gone, `review create --strategy audit --name u` takes the entry over, exit 0, `.xspec/lock` absent (a `workspace-busy` refusal meeting T13.5-3\'s reuse check); each held run\'s held-state comparison made once it holds, each staging verified on the harness itself (SPEC 13.5, 14.14, 14.24, 14.25, 14.26)',
+  // A hang guard (H-10): 234 product invocations — ~16 s against the
+  // CONF-CORE conformer, which passes it whole, and ~70 s for a product at
   // the built product's speed (~0.3 s a run; AGENTS.md): ample margin.
-  timeoutMs: 300_000,
+  timeoutMs: 600_000,
   run: async (product) => {
     // (a) Each mutating command's success — the unstaged twins of (c) and
-    // (d) — then its usage errors past acquisition, the refusals, and the
-    // busy refusal.
+    // (d) — then its usage errors past acquisition, the refusals, the
+    // failures past acquisition and acquisition's own, and the busy refusal.
     const twins: SuccessTwin[] = [];
     for (const operation of T13_5_10_OPERATIONS) {
       twins.push(await successRun(product, operation));
     }
     await usageErrorArms(product);
     await refusalArms(product);
+    await failureArms(product);
     await busyRefusalArm(product);
     // (b) The area's directory.
     await areaArms(product);
