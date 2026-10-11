@@ -2130,19 +2130,30 @@ function joinPathBytes(dir: Buffer, name: Buffer): Buffer {
  * for byte: directories (each given its mode once filled), plain files
  * (bytes and mode), and symbolic links (targets verbatim), names as bytes.
  * Anything else is a harness error: no such entry is the product's state
- * here.
+ * here. `exclude`, judged on each entry's relative byte path
+ * (`/`-separated, as `SnapshotOptions.exclude` is), leaves an entry out —
+ * a directory's whole subtree unread: P-10's reader-free twins leave the
+ * lock path out (`isLockPathBytes`; TEST-SPEC P-10: copied "the lock path
+ * aside"), whose entries a product may make unreadable (H-4).
  */
-async function copyTreeBytes(from: Buffer, to: Buffer): Promise<void> {
+export async function copyTreeBytes(
+  from: Buffer,
+  to: Buffer,
+  exclude?: (relPathBytes: Uint8Array) => boolean,
+  rel: Buffer = Buffer.alloc(0),
+): Promise<void> {
   const names = (await fsp.readdir(from, { encoding: "buffer" })).sort(
     Buffer.compare,
   );
   for (const name of names) {
+    const childRel = rel.length === 0 ? name : joinPathBytes(rel, name);
+    if (exclude?.(childRel) === true) continue;
     const source = joinPathBytes(from, name);
     const destination = joinPathBytes(to, name);
     const stats = await fsp.lstat(source);
     if (stats.isDirectory()) {
       await fsp.mkdir(destination);
-      await copyTreeBytes(source, destination);
+      await copyTreeBytes(source, destination, exclude, childRel);
       await fsp.chmod(destination, stats.mode & 0o7777);
     } else if (stats.isFile()) {
       await fsp.copyFile(source, destination, fsp.constants.COPYFILE_EXCL);
@@ -2154,7 +2165,7 @@ async function copyTreeBytes(from: Buffer, to: Buffer): Promise<void> {
       );
     } else {
       throw new Error(
-        `harness error: T13.5-3's workspace copy meets ${source.toString()}, ` +
+        `harness error: a workspace copy meets ${source.toString()}, ` +
           `neither a directory, a plain file, nor a symbolic link`,
       );
     }

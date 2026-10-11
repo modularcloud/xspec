@@ -14,10 +14,11 @@
 // table of rows through the subprocess driver against the conformer's
 // binding from CERTIFICATION_FIXTURES. A violator runs its conformer's
 // `product.mjs` with one deviation switch, so the conformer's reader is its
-// violators' too; and the CONF-RACE conformer runs CONF-CORE's `product.mjs`
-// deviation-free (`test/fixtures/conf-race/bin.mjs`, its violator
-// VIOL-RACE-LISTFIRST one switch of it), so CONF-CORE's table pins its
-// reader as well.
+// violators' too; and the CONF-RACE and CONF-READERS conformers run
+// CONF-CORE's `product.mjs` deviation-free (`test/fixtures/conf-race/bin.mjs`
+// and `test/fixtures/conf-readers/bin.mjs`, their violators
+// VIOL-RACE-LISTFIRST and VIOL-READERS-CLAIM one switch of it each), so
+// CONF-CORE's table pins their readers as well.
 //
 // A row names an argv and the outcome SPEC fixes for it — derived from 12.0,
 // 12.7, and 14, its clause quoted in the row, never read off a fixture's

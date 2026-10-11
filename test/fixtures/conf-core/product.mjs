@@ -562,9 +562,17 @@ let lastResolvedRoot = null;
  * VIOL-CORE-READERENTRY (CERTIFICATIONS.md, `readersAddEntries`): once the
  * configuration is loaded, `build` and the read commands add their own
  * entry where a lock directory stands (addReaderEntry).
+ *
+ * VIOL-READERS-CLAIM (CERTIFICATIONS.md, `readersHoldClaims`): once the
+ * configuration file is located — before it is read — `build` and the read
+ * commands each add a claim to the lock directory and dwell
+ * (holdReaderClaim), releasing it as they end (runXspec).
  */
 async function loadConfig(cwd, configFlag) {
   const configPath = await findConfigPath(cwd, configFlag);
+  if (deviations.readersHoldClaims && buildOrReadInvocation) {
+    await holdReaderClaim(path.dirname(configPath));
+  }
   let groups;
   try {
     groups = await readConfigGroups(configPath);
@@ -1263,9 +1271,11 @@ function buildFileModel(rel, text, byteLength, parsed) {
 
 /**
  * Load the workspace graph over the sources a discovery yielded (`discovery`,
- * from discover): parse and validate the spec sources; the code sources
- * enter as edgeless whole-file code locations, by path alone
- * (§CONF-CORE). Throws FindingsError (exit 1) when validation fails —
+ * from discover): parse and validate the spec sources — one found absent
+ * when its content is read, removed or relocated since discovery, reading
+ * as undiscovered (SPEC 14.25) — the code sources entering as edgeless
+ * whole-file code locations, by path alone (§CONF-CORE). Throws
+ * FindingsError (exit 1) when validation fails —
  * reads report the errors and answer nothing (SPEC 13.3), build/check
  * report them (SPEC 12.1, 12.2).
  */
@@ -1290,7 +1300,17 @@ async function loadGraph(root, discovery) {
       });
       continue;
     }
-    const bytes = await fsp.readFile(path.join(root, rel));
+    let bytes;
+    try {
+      bytes = await fsp.readFile(path.join(root, rel));
+    } catch (error) {
+      // SPEC 14.25: a discovered source found absent when its content is
+      // read — removed or relocated since discovery (13.5), by a `move`
+      // running beside this command among others (TEST-SPEC P-10's readers)
+      // — reads as undiscovered, as though discovery had not yielded it.
+      if (error?.code === "ENOENT" || error?.code === "ENOTDIR") continue;
+      throw error;
+    }
     let text;
     try {
       // A leading byte-order mark is kept (ignoreBOM), so it is seen below
@@ -1572,10 +1592,31 @@ async function readJournal(root) {
   return { entries, lineCount: lines.length, plain: true, exists: true };
 }
 
+/**
+ * Append one entry to the journal (SPEC 6.1), atomic in its observable
+ * effect (13.5): the journal's prior bytes and the new line are written to a
+ * temporary file renamed over the journal (writeFileAtomic), so the path
+ * holds its prior state — absence included — or the complete new content at
+ * every moment, never the empty file an in-place append's creation exposes
+ * before its write lands (TEST-SPEC P-10's polling reader observes the
+ * journal). The conformer appends only under exclusivity (13.5), so the
+ * read and the replacement race no other append; VIOL-CORE-CHATTYREADS'
+ * reads append outside it, where a line a concurrent append overwrites
+ * changes none of that violator's outcomes (its reads modify the journal
+ * either way).
+ */
 async function appendJournal(root, entry) {
   const abs = path.join(root, JOURNAL_REL);
-  await fsp.mkdir(path.dirname(abs), { recursive: true });
-  await fsp.appendFile(abs, canonicalJson(entry) + "\n");
+  let prior = Buffer.alloc(0);
+  try {
+    prior = await fsp.readFile(abs);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  await writeFileAtomic(
+    abs,
+    Buffer.concat([prior, Buffer.from(canonicalJson(entry) + "\n")]),
+  );
 }
 
 /** Map an identity forward through journal entries (SPEC 6.3, 10.4). */
@@ -5013,6 +5054,17 @@ async function commandReview(io, cwd, sub, args) {
  *   there as the conformer is, and otherwise, after a sustained interval,
  *   adds its entry, removes the leftovers its listing found, and acquires,
  *   never listing again; see acquireListingFirst.
+ * - `readersHoldClaims` (VIOL-READERS-CLAIM, the CONF-READERS conformer's
+ *   one violator — that conformer runs this module deviation-free from
+ *   `../conf-readers/bin.mjs`): `build` and the read commands each hold a
+ *   claim while they run — having located the configuration file, each
+ *   adds an entry of its own in this conformer's entry form (the area's
+ *   directory and the lock directory brought into existence where absent,
+ *   nothing added where either path holds anything else), dwells for a
+ *   sustained interval, proceeds as the conformer does, and as it ends
+ *   deletes the entry, the emptied lock directory, and an emptied area
+ *   directory it created; acquisition judges a reader's entry as any run's,
+ *   a live reader's refusing it (14.26); see holdReaderClaim.
  */
 let deviations = {};
 
@@ -5021,19 +5073,19 @@ let deviations = {};
  * (isBuildOrReadInvocation), set once by runXspec before dispatch (module
  * state; each bin*.mjs entry runs exactly one invocation per process).
  * Consumed only by the VIOL-CORE-CHATTYREADS deviation in runXspec and the
- * VIOL-CORE-READERENTRY deviation in loadConfig.
+ * VIOL-CORE-READERENTRY and VIOL-READERS-CLAIM deviations in loadConfig.
  */
 let buildOrReadInvocation = false;
 
 /**
- * The invocations VIOL-CORE-CHATTYREADS and VIOL-CORE-READERENTRY
- * (CERTIFICATIONS.md) deviate on — `build` and the read commands of SPEC
- * 13.3 (for `review`, exactly the read subcommands; the mutating
- * `create`/`resolve`/`split` are unchanged, as are `rename` and `move` and
- * their previews). The command and subcommand are the first two non-flag
- * tokens of the invocation read under 12.0's grammar (readInvocation's
- * `words`), exactly as dispatchCommand identifies them, so neither switch
- * reads anything of argv beyond what the conformer reads.
+ * The invocations VIOL-CORE-CHATTYREADS, VIOL-CORE-READERENTRY, and
+ * VIOL-READERS-CLAIM (CERTIFICATIONS.md) deviate on — `build` and the read
+ * commands of SPEC 13.3 (for `review`, exactly the read subcommands; the
+ * mutating `create`/`resolve`/`split` are unchanged, as are `rename` and
+ * `move` and their previews). The command and subcommand are the first two
+ * non-flag tokens of the invocation read under 12.0's grammar
+ * (readInvocation's `words`), exactly as dispatchCommand identifies them, so
+ * no switch reads anything of argv beyond what the conformer reads.
  */
 const BUILD_AND_READ_COMMANDS = new Set([
   "build",
@@ -5092,6 +5144,115 @@ async function addReaderEntry(root) {
     // Nothing at the lock path, or a creation the environment refused: the
     // reader adds nothing (the deviation's own precondition).
   }
+}
+
+/**
+ * VIOL-READERS-CLAIM (CERTIFICATIONS.md, `readersHoldClaims`): the sustained
+ * interval a reader's claim stands before the reader proceeds — long
+ * relative to the span from a reader's start to the acquisition of a
+ * mutating command started once that reader is confirmed running (65–92 ms
+ * measured on an idle 4-core machine, the held command's hold file bounding
+ * its acquisition), yet far short of every hang guard a run it lengthens
+ * meets (S-3; the driver's 30 s default, P-10's included).
+ */
+const READER_CLAIM_DWELL_MS = 3000;
+
+/** The claim this invocation holds, once added; null where none stands. */
+let readerClaim = null;
+let readerClaimTried = false;
+
+/**
+ * VIOL-READERS-CLAIM (CERTIFICATIONS.md, `readersHoldClaims`): `build` or a
+ * read command, having located its configuration file (loadConfig, before
+ * reading it), adds to the lock directory an entry of its own — an empty
+ * plain file named in this conformer's entry form (newEntryName: the
+ * reader's own process identifier and random digits), created exclusively —
+ * where the area's own path and the lock path each hold a directory or
+ * nothing, the area's directory and the lock directory brought into
+ * existence where absent, as acquisition brings them (SPEC 13.5); where
+ * either holds anything else, or the environment refuses an examination or
+ * a creation, it adds nothing (and removes a directory it created for the
+ * claim). A concurrent creation or deletion moving a path under it is
+ * examined afresh, bounded as acquisition is. It then dwells for
+ * READER_CLAIM_DWELL_MS and proceeds as the conformer does; as it ends,
+ * releaseReaderClaim deletes the claim as release deletes an entry. The
+ * reader lists no lock directory, judges no entry, removes no leftover, and
+ * is refused by none; acquisition judges its entry as any run's — one whose
+ * reader is alive refuses (14.26; judgeLockDirectory, unchanged).
+ */
+async function holdReaderClaim(root) {
+  if (readerClaimTried) return;
+  readerClaimTried = true;
+  const areaAbs = path.join(root, AREA_REL);
+  const lockAbs = path.join(root, LOCK_REL);
+  let createdArea = false;
+  let createdLock = false;
+  const undo = async () => {
+    if (createdLock) await deleteQuietly(() => fsp.rmdir(lockAbs));
+    if (createdArea) await deleteQuietly(() => fsp.rmdir(areaAbs));
+  };
+  try {
+    for (let attempt = 1; attempt <= ACQUISITION_ATTEMPTS; attempt += 1) {
+      const area = await occupantKind(areaAbs);
+      if (area === "absent") {
+        try {
+          await fsp.mkdir(areaAbs);
+          createdArea = true;
+        } catch (error) {
+          if (RACED_CREATION.has(error?.code)) continue;
+          throw error;
+        }
+      } else if (area !== "directory") {
+        break;
+      }
+      const lock = await occupantKind(lockAbs);
+      if (lock === "absent") {
+        try {
+          await fsp.mkdir(lockAbs);
+          createdLock = true;
+        } catch (error) {
+          if (RACED_CREATION.has(error?.code)) continue;
+          throw error;
+        }
+      } else if (lock !== "directory") {
+        break;
+      }
+      const entryAbs = path.join(lockAbs, newEntryName());
+      try {
+        const handle = await fsp.open(entryAbs, "wx");
+        await handle.close();
+      } catch (error) {
+        if (RACED_CREATION.has(error?.code)) {
+          createdLock = false;
+          continue;
+        }
+        throw error;
+      }
+      readerClaim = { entryAbs, lockAbs, areaAbs, createdArea };
+      break;
+    }
+  } catch {
+    // An examination or a creation the environment refused: no claim.
+  }
+  if (readerClaim === null) await undo();
+  await sleep(READER_CLAIM_DWELL_MS);
+}
+
+/**
+ * VIOL-READERS-CLAIM: as the reader ends (runXspec, every normal end), its
+ * claim is released as release deletes an entry (SPEC 13.5): the entry,
+ * then the lock directory where it then holds nothing else, then the
+ * area's directory where the claim brought it into existence and it then
+ * holds nothing else — each deletion refused or finding nothing changing
+ * no outcome. A reader killed leaves its entry, a dead run's leftover.
+ */
+async function releaseReaderClaim() {
+  const claim = readerClaim;
+  if (claim === null) return;
+  readerClaim = null;
+  await deleteQuietly(() => fsp.unlink(claim.entryAbs));
+  await deleteQuietly(() => fsp.rmdir(claim.lockAbs));
+  if (claim.createdArea) await deleteQuietly(() => fsp.rmdir(claim.areaAbs));
 }
 
 /**
@@ -5180,6 +5341,10 @@ export async function runXspec(argv, cwd, options = {}) {
   const invocation = readInvocation(argv);
   buildOrReadInvocation = isBuildOrReadInvocation(invocation.words);
   const code = await dispatchCommand(io, cwd, invocation);
+  // VIOL-READERS-CLAIM (CERTIFICATIONS.md): a reader's claim, where one
+  // stands, is released as the reader ends — every normal end, since
+  // dispatchCommand returns from every outcome (holdReaderClaim).
+  await releaseReaderClaim();
   if (deviations.chattyReads && code !== 2 && buildOrReadInvocation) {
     // VIOL-CORE-CHATTYREADS (CERTIFICATIONS.md): the append happens after
     // the command's own work, against the root the command actually resolved

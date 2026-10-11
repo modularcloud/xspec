@@ -41,7 +41,7 @@
 //      into a diagnosed failure — 13.5's runBounded and describeExit, the
 //      write-refusal staging's awaitHoldFile, runSettled, and
 //      runHeldWithStaging, P-10's runHeldRead, settleStraddleRead, and
-//      settleKilled: their capture cap lowered against a flooding
+//      settleMutatingRun: their capture cap lowered against a flooding
 //      stand-in, each lets the driver's ProductRunOutputOverflowError
 //      through unchanged, while the hang-guard kill (for a hold-file wait,
 //      a premature exit) stays a diagnosed failure. S-3 pins the driver's
@@ -55,12 +55,12 @@
 //      with the harness error HarnessEvaluationError (S-3), which every
 //      shared helper through which a move can run — 13.5's runBounded and
 //      describeExit, the write-refusal staging's awaitHoldFile, runSettled,
-//      and runHeldWithStaging, P-10's settleStraddleRead and settleKilled —
-//      lets through unchanged, never converted into a HarnessAssertionError
-//      — and P-10's property runner reports it as a harness error naming
-//      the seed. (P-10's runHeldRead runs only its fixed read menu, which
-//      never prepares the check; it calls `rethrowHarnessError` all the
-//      same.)
+//      and runHeldWithStaging, P-10's settleStraddleRead and
+//      settleMutatingRun — lets through unchanged, never converted into a
+//      HarnessAssertionError — and P-10's property runner reports it as a
+//      harness error naming the seed. (P-10's runHeldRead runs only its
+//      fixed read menu, which never prepares the check; it calls
+//      `rethrowHarnessError` all the same.)
 
 import { Buffer } from "node:buffer";
 import { once } from "node:events";
@@ -133,7 +133,7 @@ import { canonicalizeJson } from "../suite/registry/section-12.0-i.js";
 import { describeExit, runBounded } from "../suite/registry/section-13.5.js";
 import {
   runHeldRead,
-  settleKilled,
+  settleMutatingRun,
   settleStraddleRead,
 } from "../suite/registry/section-16-p10.js";
 import {
@@ -1179,11 +1179,11 @@ test("S-8: an exhausted capture limit propagates as a harness error out of every
         ),
     },
     {
-      helper: "P-10's settleKilled",
+      helper: "P-10's settleMutatingRun",
       overflow: async () =>
-        await settleKilled(await start("flood", capped), context),
+        await settleMutatingRun(await start("flood", capped), context),
       diagnosed: async () =>
-        await settleKilled(await start("hang", guarded), context),
+        await settleMutatingRun(await start("hang", guarded), context),
     },
   ];
   for (const { helper, overflow, diagnosed } of helpers) {
@@ -1290,10 +1290,11 @@ test("S-8: a failure of the driver's in-run evaluation — T6.5-22(a)'s check of
         ),
     },
     {
-      // A mutator that completed before its kill landed is judged as any
-      // completed move is.
-      helper: "P-10's settleKilled",
-      run: async () => await settleKilled(await startMove("complete"), context),
+      // A mutating command's run, ended on its own — or before its kill
+      // landed — is settled as any completed move is.
+      helper: "P-10's settleMutatingRun",
+      run: async () =>
+        await settleMutatingRun(await startMove("complete"), context),
     },
   ];
   for (const { helper, run } of helpers) {
@@ -1317,7 +1318,7 @@ test("S-8: a failure of the driver's in-run evaluation — T6.5-22(a)'s check of
       "P-10 evaluation vector",
       () => null,
       async () => {
-        await settleKilled(await startMove("complete"), context);
+        await settleMutatingRun(await startMove("complete"), context);
       },
       {
         runs: 1,

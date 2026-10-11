@@ -282,6 +282,30 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       ]),
     ],
   ),
+  // CONF-READERS (§CONF-READERS): readers at a mutating command's
+  // acquisition — CONF-CORE's workspaces, behavior, and command surface as
+  // P-10 drives them, run from an executable of its own
+  // (conf-readers/bin.mjs runs the CONF-CORE product deviation-free): P-10's
+  // kills past the hold have no deterministic outcome under
+  // VIOL-CORE-EARLYRELEASE, so P-10 could not join CONF-CORE's in-scope set.
+  conformer(
+    "CONF-READERS",
+    "conf-readers/bin.mjs",
+    ["P-10"],
+    [
+      // VIOL-READERS-CLAIM: `build` and the read commands each hold a claim
+      // while they run — having located the configuration file, each adds an
+      // entry of its own to the lock directory (the area's directory and the
+      // lock directory brought into existence where absent), dwells for a
+      // sustained interval (3000 ms, long against a later command's
+      // start-up), proceeds as the conformer does, and deletes the claim as
+      // it ends. Fails P-10 on every run: a command started while a claiming
+      // reader runs is refused `workspace-busy` where P-10 asserts it never
+      // refused (and a lock path inspected after a kill holds the reader's
+      // entry beside the dead run's).
+      violator("VIOL-READERS-CLAIM", "conf-readers/bin-claim.mjs", ["P-10"]),
+    ],
+  ),
   // CONF-VALID (§CONF-VALID): segment and tag validity — `build` with the
   // 14.1–14.4 error reporting and `query node`/`query nodes` reporting
   // identity, tags, and metadataHash, over `.mdx` workspaces whose sections

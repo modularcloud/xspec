@@ -4,118 +4,111 @@
 // seeded, reproducible generator (helpers/property.ts, H-10; fixed seed set
 // in CI, E-5) produces randomized schedules of episodes over one workspace —
 // each episode exactly one mutating command (`rename`, file-form `move`, or
-// `review resolve`), choreographed through the `--test-hold` seam via the
-// subprocess driver's background-start, hold-file, and kill support
-// (helpers/subprocess.ts, HARNESS-02) — with concurrent readers throughout:
-// drawn read commands during the held phase and straddling the
-// release-to-exit commit window, plus a continuous polling reader over every
-// file path the schedule's mutating commands ever write. P-10's two invariant
-// families are asserted post-hoc:
+// `review resolve`), under `--json`, held at the `--test-hold` seam or not,
+// and concurrent readers beside it:
 //
-//   * readers observe only prior-or-complete file states (SPEC 13.5, cited
-//     via T13.5-5 — CERTIFICATIONS.md: P-10's reader half shares T13.5-5's
-//     polling machinery): every distinct content the poller observes at a
-//     path must byte-equal one of that path's settled states — the states
-//     captured in quiescence after staging and after each episode — with
-//     absence a state like any other. The settled list enumerates every
-//     legitimate complete state because each episode's mutator writes each
-//     polled path at most once (a rename rewrites the source in place and
-//     regenerates its module, 6.4; a file move deletes the origin and
-//     creates the destination, 6.5; a resolve rewrites the session, 10.7;
-//     a journaled operation appends one self-contained entry, 6.1) and no
-//     concurrent reader writes any polled path (the journal and sessions
-//     are written only by their owning commands, 6.1/10.4/13.4; sources by
-//     nothing but rename/move; generated modules only by build-style
-//     regeneration — and the read menu deliberately excludes `build`, whose
-//     concurrent module writes 13.5 last-write-wins would legitimize).
-//     The journal is additionally order-checked: successive observations
-//     prefix-monotone (append-only, 6.1) and never absent after content
-//     (never deleted, 6.1/13.4).
-//   * mutual exclusion never loses a journal append or a resolution,
-//     accounted post-hoc at each quiescent point: journal lines = successful
-//     `rename`/`move` operations — the journal's only writers (6.1) — as
-//     exactly one appended entry per completed journaled episode (previous
-//     bytes a strict prefix), byte-identity across every resolve episode and
-//     every held-point kill, and a zero-entry journal before the first one;
-//     session statuses = successful resolves — the item-id set never changes
-//     after `create` and every item's status equals the status set by its
-//     last completed resolve (`unresolved` before any), read back after
-//     every episode and cross-checked at the end against `review list`'s
-//     stored-status counts (10.7), with every bracketing read asserted to
-//     leave journal and session bytes untouched (10.4, 13.4).
+//   * pre-start readers, started before the mutating command at drawn leads
+//     and still running as it starts — the harness confirming, just before
+//     starting it, that at least one of them has not exited (listed in the
+//     process list, never a zombie, its exit unseen), starting another where
+//     none has: P-10's reader rule discriminates only where a command really
+//     starts while readers run (CERTIFICATIONS.md §CONF-READERS; its
+//     violator VIOL-READERS-CLAIM certifies that the schedules do);
+//   * held reads, run to completion while the command holds, each exit 0:
+//     the workspace is valid, built, and unmodified while held;
+//   * straddle reads, started just before the hold is lifted or the command
+//     killed (an unheld command's, just after it starts), settled once it
+//     has ended — as are the pre-start readers — each exit 0 or 1, never a
+//     crash or a hang (H-8): a read overlapping a commit can see a moving
+//     file at neither or both paths, so a transient validation failure is
+//     legitimate, never a usage error;
+//   * and a polling reader (helpers/path-poller.ts, T13.5-5's machinery)
+//     over the episode's fixed path set — the journal, the session file,
+//     the spec source and a move's destination, and their generated modules
+//     — never the lock path.
 //
-// Kill model (SPEC 13.5 "exclusivity ends when the holding command's process
-// terminates, normally or abnormally"):
-//   * held-point kills for every mutating kind: the hold precedes all
-//     modification (T13.5-1), so the settled workspace must be byte-identical
-//     across the episode on every polled path — the deterministic no-op that
-//     keeps kill/success interleavings exactly accountable. Every episode
-//     after a kill also exercises the terminated-holder clause: the next
-//     mutating command must reach its own hold and complete.
-//   * post-release kills (a drawn delay after hold release, then SIGKILL)
-//     for resolve episodes only. Conservative operationalization (H-3/H-4,
-//     noted): a post-release-killed rename/move can leave sources invalid,
-//     after which 13.3 entitles every review read to refuse (exit 1) and the
-//     session accounting would become unassertable — that regime belongs to
-//     T13.5-7's disjunctive `check` contract. A killed resolve touches only
-//     the session file (10.7, 13.4), so sources stay valid, reads stay
-//     asserted, and the kill outcome is exactly two-valued: the target
-//     item's status is its prior value or the attempted one — whichever the
-//     next quiescent read observes is adopted (the session holds a definite
-//     state once the process is dead; atomic visibility excludes anything
-//     else) and accounting continues exactly.
-//   * kill delays come from a fixed list — scheduling choreography only,
-//     never an assertion input (H-10): every assertion is delay-independent.
+// Each episode's command ends one of three ways: run to its end (held and
+// lifted, or unheld); killed while held; or killed past its hold, at a fixed
+// fraction of its twin's lift-to-exit span after its own lift. Every kill
+// follows T13.5-3's exit-collection discipline (`RunningProduct.killGroup`:
+// the command started in a process group of its own, the whole group killed
+// with SIGKILL, the started process's exit collected, no process of the
+// group listed) before anything later runs. Each command has a reader-free
+// twin: the workspace copied — the lock path aside — as the command starts,
+// the same operation run there with no reader beside it, held and lifted
+// alike when the command is held (its lift-to-exit span measured): an
+// operation valid by construction, so the twin exits 0 (§CONF-READERS'
+// staging constraint: every mutating command an operation succeeding on its
+// reader-free twin). P-10's invariant families are asserted per episode:
 //
-// Concurrent read commands (the menu: `check`, `ids --json`, `query nodes`,
-// `review status s --json`, `review list --json` — fixed valid argv, none
-// writes a polled path):
-//   * held-phase reads run to completion while the mutator is held and must
-//     exit 0: the workspace is valid, built, and unmodified while held
-//     (T13.5-4's premise). Graph data is fresh at every held point: the
-//     quiescent accounting read between episodes refreshes it (13.3) after
-//     any commit-window read/mutator write race left it stale.
-//   * straddle reads start immediately before the release (or kill) and are
-//     awaited after the mutator settles: asserted to terminate without
-//     signal death and to exit 0 or 1 — a read overlapping a move's commit
-//     window can see the file at neither or both paths (per-path atomicity
-//     promises nothing across paths), so transient validation failures are
-//     legitimate, but usage errors are not (argv and configuration are fixed
-//     valid) and neither is a crash or hang (H-8, 12.0).
+//   * readers observe only prior-or-complete file states (SPEC 13.5;
+//     T13.5-5's protocol) at every path but the lock path — where 13.5's
+//     atomicity admits no discriminating observation (TEST-SPEC P-10,
+//     recorded there as T6.5-6 records its unstageable clauses), so it is
+//     never polled: every distinct state polled at a path is its state
+//     before the episode or after it — the episode's one mutating command
+//     writes each polled path at most once (a rename rewrites the source,
+//     appends one journal entry, and regenerates the module, 6.4; a file
+//     move relocates the source and its module, 6.5; a resolve writes the
+//     session once, last, 13.5) and no reader writes one (the read menu
+//     leaves out `build`; a reader's refresh writes graph data alone, 13.3);
+//     the journal's observations are prefix-monotone (append-only, 6.1) and
+//     never absent after content (never deleted);
+//   * mutual exclusion never loses a journal append or a resolution (post
+//     hoc, per run; `rename` and `move` the journal's only writers, 6.1):
+//     each `rename`/`move` exiting 0 added exactly one journal line, each
+//     killed one at most one; each resolve exiting 0 recorded its status
+//     (the status ledger, read back by a quiescent `review status` after
+//     every episode and cross-checked against `review list` at the end),
+//     each killed one either recorded it or left the session file
+//     byte-unchanged;
+//   * a run the kill ended (its collected exit SIGKILL), held or past its
+//     hold, whose sources, journal, or session files differ from those its
+//     twin leaves had not made its last write, so had not released (13.5):
+//     `.xspec/lock` holds exactly one entry, a plain file — the dead run's —
+//     inspected at once, readers possibly still running (T13.5-3's
+//     past-the-hold judgement);
+//   * readers never exclude a mutating command (13.5; 14.26: only another
+//     run's entry, or a leftover in the gap, refuses, and a reader makes
+//     none, 13.4): each command not killed is never refused `workspace-busy`
+//     — but where T13.5-3's reuse check voids the trial after a kill: an
+//     identifier of a killed group listed again, the trial rerun on a fresh
+//     workspace a bounded number of times, exhaustion a harness error — and
+//     ends exactly as its twin: exit code, standard output, and the sources,
+//     journal, and session files it leaves byte-equal (H-6), derived files
+//     and graph data, which readers' refreshes may rewrite last-write-wins
+//     (13.3, 13.5), not compared; `.xspec/lock` is then absent.
 //
-// Validity discipline (every completed mutating command must exit 0):
-//   * `rename` targets a top-level id that exists in the generator's file
-//     model with a fresh valid name; file-form `move` targets a fresh
-//     `specs/M<n>.mdx` destination (never an existing path). The model
-//     evolves only on *completed* rename/move draws, so generation and
-//     replay stay deterministic under kills: held-point kills modify
-//     nothing, and post-release kills apply only to resolves, which never
-//     touch sources (the P-9 concretization pattern).
-//   * `resolve` targets only unblocked items — picked by rank from the
-//     immediately preceding quiescent `review status` read, with nothing
-//     running in between (execution-time rank resolution, the P-9 pattern:
-//     item ids are product-assigned, so the generator cannot name them).
+// Validity discipline (every twin exits 0): `rename` targets a top-level ID
+// the generator's file model holds, with a fresh name; file-form `move` a
+// fresh `specs/M<n>.mdx`; `resolve` an unblocked item, picked by rank from
+// the preceding quiescent `review status` read (execution-time resolution,
+// the P-9 pattern: item IDs are the product's), with a status other than the
+// item's stored one, so that every operation changes what it writes. The
+// model applies a `rename` or `move` that completes or is killed past its
+// hold and no other: a command killed while held modified nothing (the hold
+// precedes all modification, 13.5), and after a `rename` or `move` killed
+// past its hold the schedule continues on its twin's workspace — the
+// operation complete there, whatever the kill left — so no later operation
+// meets a partly applied one; after any other kill it continues on the same
+// workspace, whose dead entry the next command takes over. No source edit
+// happens and completed renames and moves are pure (6.2), so nothing is
+// ever invalidated (10.4) and every presented status equals its stored one.
 //
-// Invalidation cannot occur in these schedules — no source edits happen,
-// completed renames/moves are pure (6.2: they leave every hash byte-stable
-// and by themselves invalidate nothing, 10.4), and killed mutators either
-// modified nothing (held point) or touched only the session — so recorded
-// hashes always match the current graph and every presented status equals
-// the stored status (10.4): the status accounting reads exactly what
-// resolves stored. P-10 is outside every CERTIFICATIONS.md fixture scope
-// (its preamble), so this body binds only to the real product surface.
-//
-// The initial workspace is fixed (one importless spec file; audit session
-// `s` — no baseline, no git, T10.6-1): P-10's search space is the schedule
-// interleavings; workspace-shape search belongs to P-1…P-9. An
-// implementation-time dry-run over the committed default seeds at the
-// registered 3 runs per seed verified the fixed trial set covers the full
-// menu: both journal writers, all three fates (held kills of all three
-// kinds, post-release kills at several delays), all three resolve statuses,
-// and every read command in both held and straddle position.
+// Certification: §CONF-READERS (P-10 in scope; the CONF-CORE product run
+// deviation-free from test/fixtures/conf-readers/bin.mjs) and
+// VIOL-READERS-CLAIM (bin-claim.mjs: each reader holds a claim, an entry in
+// the lock directory, through a sustained interval spanning a later
+// command's start-up), which fails P-10 at the first command it starts
+// while a claiming reader runs — certifying that the schedules start
+// commands while readers run. The workspace is fixed (one importless spec
+// file and the audit session `s` — no baseline, no git, T10.6-1): P-10's
+// search space is the schedule; workspace shapes belong to P-1…P-9. Leads,
+// kill fractions, and every other delay are choreography only, never an
+// assertion input (H-10): every assertion holds for a conforming product
+// under every timing (E-5).
 
 import { Buffer } from "node:buffer";
-import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type {
@@ -133,17 +126,48 @@ import {
   describeByteDifference,
   fail,
 } from "../../helpers/assertions.js";
+import {
+  applyReuseCheck,
+  readListedProcess,
+  runVoidableTrial,
+} from "../../helpers/kill-discipline.js";
+import { isLockPathBytes } from "../../helpers/lock-path.js";
+import {
+  assertLockDirectoryEntries,
+  assertLockPathAbsent,
+} from "../../helpers/lock-state.js";
+import type { PolledState } from "../../helpers/path-poller.js";
+import {
+  describePolledState,
+  PathPoller,
+  polledStateKey,
+  readPolledState,
+} from "../../helpers/path-poller.js";
 import type { Choices, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type {
+  DirectorySnapshot,
+  SnapshotEntry,
+} from "../../helpers/snapshot.js";
+import {
+  assertSnapshotsEqual,
+  describeEntryDifference,
+  diffSnapshots,
+  displaySnapshotPath,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
+import type {
+  KilledGroup,
   ProductBinding,
   RunGuards,
   RunningProduct,
   RunResult,
 } from "../../helpers/subprocess.js";
 import {
+  DEFAULT_WAIT_FOR_FILE_TIMEOUT_MS,
+  pathExists,
   releaseHoldFile,
   rethrowHarnessError,
   runProduct,
@@ -153,7 +177,14 @@ import {
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { buildOk, expectExit, runJson } from "./support.js";
+import { copyTreeBytes } from "./section-13.5.js";
+import {
+  buildOk,
+  expectErrorDocument,
+  expectExit,
+  runJson,
+} from "./support.js";
+import { startHeldAndLift } from "./write-refusal-staging.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. Audit
 // sessions need no code group and no git (SPEC 10.6).
@@ -195,7 +226,8 @@ export const P10_TS_FORM_VECTORS: ReadonlyArray<
 // The fixed initial spec file (module header): importless and tagless, one
 // top-level section with a child plus a second top-level leaf — the audit
 // session holds four items (file root, `a`, `a.k`, `g`; SPEC 10.6) with a
-// non-trivial `blockedBy` chain, and both `a` and `g` are rename targets.
+// non-trivial `blockedBy` chain, and both `a` and `g` are rename targets: a
+// workspace of CONF-CORE's shapes (§CONF-READERS' staging constraint).
 // A staged-source record (helpers/staged-mdx.ts): every trial stages it
 // afresh, from the second trial on after the body's first product invocation
 // — an initial file S-7's sweep never reaches, so the ledger self-test judges
@@ -222,6 +254,7 @@ const A_MDX = stagedMdx(
 const SESSION_NAME = "s";
 const JOURNAL_REL = ".xspec/journal";
 const SESSION_REL = `.xspec/reviews/${SESSION_NAME}.json`;
+const WORKSPACE_BUSY = "workspace-busy";
 
 /** `NAME.mdx` generates `NAME.xspec.ts` beside it (SPEC 13.1). */
 function moduleRelOf(sourceRel: string): string {
@@ -233,14 +266,23 @@ function moduleRelOf(sourceRel: string): string {
 
 /** Statuses `resolve --status` accepts (SPEC 10.7). */
 export type ResolveStatus = "no-change" | "skipped" | "updated";
-
-/** How a mutating episode ends; `releaseKill` is resolve-only (module header). */
-export type P10Fate = "complete" | "heldKill" | "releaseKill";
+const RESOLVE_STATUSES: readonly ResolveStatus[] = [
+  "no-change",
+  "skipped",
+  "updated",
+];
 
 /**
- * The concurrent-read menu (module header). Fixed valid argv; none writes a
- * polled path (`build` deliberately excluded — its concurrent module writes
- * are legitimate under 13.5 last-write-wins and would break enumerability).
+ * How an episode's mutating command ends (module header): run to its end,
+ * killed while held, or killed past its hold.
+ */
+export type P10Fate = "complete" | "heldKill" | "pastHoldKill";
+
+/**
+ * The concurrent-read menu (module header): CONF-CORE's read commands
+ * (§CONF-READERS), fixed valid argv. `build` is left out: its module writes,
+ * legitimate beside a mutating command under 13.5's last-write-wins, would
+ * add states the polling reader's oracle does not enumerate.
  */
 const READ_MENU: readonly {
   readonly argv: readonly string[];
@@ -256,37 +298,60 @@ const READ_MENU: readonly {
   { argv: ["review", "list", "--json"], what: "`review list --json`" },
 ];
 
-/** Post-release kill delays in ms — choreography only, never asserted (H-10). */
-const KILL_DELAYS_MS = [0, 3, 10, 30] as const;
+/**
+ * How long before the mutating command a pre-start reader starts, in ms —
+ * choreography only, never an assertion input (H-10). A reader's own
+ * start-up (65–92 ms from its start to the acquisition of a command started
+ * once it is confirmed running, CONF-CORE on an idle machine) overlaps the
+ * command's start at every lead, so a longer lead only puts the reader
+ * further into its run as the command starts.
+ */
+const PRE_READER_LEADS_MS = [0, 25, 60] as const;
 
-interface EpisodeReads {
-  /** Indices into READ_MENU, run to completion while the mutator is held. */
+/**
+ * The fixed fractions of a twin's lift-to-exit span at which past-the-hold
+ * kills land, each after its own run's lift — T13.5-3's rule and spread
+ * (E-5), drawn per episode.
+ */
+const PAST_THE_HOLD_KILL_FRACTIONS = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1];
+
+/** A pre-start reader: its menu read and its lead. */
+export interface PreReader {
+  readonly menuIndex: number;
+  readonly leadMs: number;
+}
+
+interface EpisodeShape {
+  readonly fate: P10Fate;
+  /** Held at the seam (always, but where the command runs to its end). */
+  readonly held: boolean;
+  /** Past-the-hold kills only: the fraction of the twin's span; else 0. */
+  readonly killFraction: number;
+  /** At least one; started before the command at their leads. */
+  readonly preReaders: readonly PreReader[];
+  /** Indices into READ_MENU, run to completion while the command holds. */
   readonly heldReads: readonly number[];
-  /** Indices into READ_MENU, started just before the release or kill. */
+  /** Indices into READ_MENU, started just before the lift or the kill. */
   readonly straddleReads: readonly number[];
 }
 
 export type P10Episode =
   | ({
       readonly kind: "resolve";
-      readonly fate: P10Fate;
       readonly rank: number;
       readonly status: ResolveStatus;
-      readonly killDelayMs: number;
-    } & EpisodeReads)
+    } & EpisodeShape)
   | ({
       readonly kind: "rename";
-      readonly fate: "complete" | "heldKill";
       readonly file: string;
       readonly oldId: string;
       readonly newId: string;
-    } & EpisodeReads)
+    } & EpisodeShape)
   | ({
       readonly kind: "move";
-      readonly fate: "complete" | "heldKill";
       readonly from: string;
       readonly to: string;
-    } & EpisodeReads);
+    } & EpisodeShape);
 
 export interface P10Trial {
   readonly episodes: readonly P10Episode[];
@@ -300,75 +365,81 @@ const genReadSet: Gen<readonly number[]> = listOf(
   { max: 2 },
 );
 
+const genPreReaders: Gen<readonly PreReader[]> = listOf(
+  (c: Choices) => ({
+    menuIndex: c.intInclusive(0, READ_MENU.length - 1),
+    leadMs: c.pick(PRE_READER_LEADS_MS),
+  }),
+  { min: 1, max: 3, continueProbability: 0.5 },
+);
+
 /** The trial generator (module header). Exported for dry-run instrumentation. */
 export const genP10Trial: Gen<P10Trial> = (choices) => {
   // The evolving concretization model: the single spec file's current path
-  // and top-level ids. Mutated only by *completed* rename/move draws, so the
-  // body's execution reproduces it exactly (module header).
+  // and top-level IDs. Mutated only by renames and moves the model applies
+  // (completed or killed past the hold — module header), so the body's
+  // execution reproduces it exactly.
   let filePath = INITIAL_SOURCE_REL;
   const topIds: string[] = [...INITIAL_TOP_IDS];
   let fresh = 1;
 
   const genEpisode = (): P10Episode => {
+    const preReaders = genPreReaders(choices);
     const heldReads = genReadSet(choices);
     const straddleReads = genReadSet(choices);
-    // Simplest first (shrinking): a completed resolve is one command with no
-    // journal traffic and no model change.
+    // Simplest first (shrinking): a resolve run to its end, unheld.
     const kind = choices.weightedPick<"resolve" | "rename" | "move">([
       [3, "resolve"],
       [3, "rename"],
       [2, "move"],
     ]);
+    // Kill-leaning weights for `move` (only a handful of move episodes
+    // occur across the fixed trial set, and these weights let it hold every
+    // kind with every fate — a dry run over the committed seeds confirmed
+    // it; weights shape generation only, never replay, so shrinking still
+    // prefers the first-listed `complete`).
+    const fate = choices.weightedPick<P10Fate>([
+      [kind === "move" ? 2 : 3, "complete"],
+      [kind === "move" ? 4 : 2, "heldKill"],
+      [kind === "move" ? 2 : 3, "pastHoldKill"],
+    ]);
+    const held = fate !== "complete" || choices.boolean(0.6);
+    const killFraction =
+      fate === "pastHoldKill" ? choices.pick(PAST_THE_HOLD_KILL_FRACTIONS) : 0;
+    const shape: EpisodeShape = {
+      fate,
+      held,
+      killFraction,
+      preReaders,
+      heldReads: held ? heldReads : [],
+      straddleReads,
+    };
     if (kind === "resolve") {
-      const fate = choices.weightedPick<P10Fate>([
-        [3, "complete"],
-        [1, "heldKill"],
-        [2, "releaseKill"],
-      ]);
       return {
         kind,
-        fate,
         rank: choices.intInclusive(0, 7),
         status: choices.weightedPick<ResolveStatus>([
           [2, "no-change"],
           [2, "updated"],
           [1, "skipped"],
         ]),
-        killDelayMs: fate === "releaseKill" ? choices.pick(KILL_DELAYS_MS) : 0,
-        heldReads,
-        straddleReads,
+        ...shape,
       };
     }
-    // heldKill-leaning weights for `move` (only a handful of move episodes
-    // occur across the fixed trial set, and flatter splits left held-killed
-    // moves uncovered on the fixed seeds — weights shape random-mode
-    // distribution only, never replay, so shrinking still prefers the
-    // first-listed `complete`).
-    const fate = choices.weightedPick<"complete" | "heldKill">([
-      [kind === "move" ? 2 : 3, "complete"],
-      [kind === "move" ? 3 : 2, "heldKill"],
-    ]);
+    const applied = fate !== "heldKill";
     if (kind === "rename") {
       const index = choices.intInclusive(0, topIds.length - 1);
       const oldId = topIds[index];
       const newId = `r${String(fresh)}`;
       fresh += 1;
-      if (fate === "complete") topIds[index] = newId;
-      return {
-        kind,
-        fate,
-        file: filePath,
-        oldId,
-        newId,
-        heldReads,
-        straddleReads,
-      };
+      if (applied) topIds[index] = newId;
+      return { kind, file: filePath, oldId, newId, ...shape };
     }
     const from = filePath;
     const to = `specs/M${String(fresh)}.mdx`;
     fresh += 1;
-    if (fate === "complete") filePath = to;
-    return { kind, fate, from, to, heldReads, straddleReads };
+    if (applied) filePath = to;
+    return { kind, from, to, ...shape };
   };
 
   const episodes: P10Episode[] = [];
@@ -384,34 +455,45 @@ export const genP10Trial: Gen<P10Trial> = (choices) => {
 function describeReads(episode: P10Episode): string {
   const names = (indices: readonly number[]): string =>
     indices.map((i) => READ_MENU[i].what).join(", ");
+  const pre = episode.preReaders
+    .map(
+      (reader) =>
+        `${READ_MENU[reader.menuIndex].what}@-${String(reader.leadMs)}ms`,
+    )
+    .join(", ");
   const held =
     episode.heldReads.length > 0 ? ` held:[${names(episode.heldReads)}]` : "";
   const straddle =
     episode.straddleReads.length > 0
       ? ` straddle:[${names(episode.straddleReads)}]`
       : "";
-  return `${held}${straddle}`;
+  return ` pre:[${pre}]${held}${straddle}`;
+}
+
+function describeFate(episode: P10Episode): string {
+  const seam = episode.held ? "held" : "unheld";
+  return episode.fate === "pastHoldKill"
+    ? `${seam}, pastHoldKill at ${String(episode.killFraction)} of the twin's span`
+    : `${seam}, ${episode.fate}`;
 }
 
 function describeEpisode(episode: P10Episode): string {
   switch (episode.kind) {
-    case "resolve": {
-      const delay =
-        episode.fate === "releaseKill"
-          ? ` +${String(episode.killDelayMs)}ms`
-          : "";
+    case "resolve":
       return (
         `resolve rank ${String(episode.rank)} --status ${episode.status} ` +
-        `(${episode.fate}${delay})${describeReads(episode)}`
+        `(${describeFate(episode)})${describeReads(episode)}`
       );
-    }
     case "rename":
       return (
         `rename ${episode.file} ${episode.oldId}->${episode.newId} ` +
-        `(${episode.fate})${describeReads(episode)}`
+        `(${describeFate(episode)})${describeReads(episode)}`
       );
     case "move":
-      return `move ${episode.from} -> ${episode.to} (${episode.fate})${describeReads(episode)}`;
+      return (
+        `move ${episode.from} -> ${episode.to} ` +
+        `(${describeFate(episode)})${describeReads(episode)}`
+      );
   }
 }
 
@@ -420,243 +502,8 @@ export function renderP10Trial(trial: P10Trial): string {
   return JSON.stringify(trial.episodes.map(describeEpisode));
 }
 
-/** Every path the schedule's mutating commands can ever write (module header). */
-function polledPathsOf(trial: P10Trial): readonly string[] {
-  const sources = new Set<string>([INITIAL_SOURCE_REL]);
-  for (const episode of trial.episodes) {
-    if (episode.kind === "move") sources.add(episode.to);
-  }
-  const paths = [JOURNAL_REL, SESSION_REL];
-  for (const source of sources) {
-    paths.push(source, moduleRelOf(source));
-  }
-  return paths;
-}
-
 // ---------------------------------------------------------------------------
-// Path states, the polling reader, and settled-state bookkeeping
-
-type PathState =
-  | { readonly kind: "absent" }
-  | { readonly kind: "content"; readonly bytes: Uint8Array };
-
-const ABSENT: PathState = { kind: "absent" };
-
-function stateKey(state: PathState): string {
-  return state.kind === "absent"
-    ? "absent"
-    : `c:${Buffer.from(state.bytes).toString("latin1")}`;
-}
-
-function describeState(state: PathState): string {
-  return state.kind === "absent"
-    ? "absent"
-    : `${String(state.bytes.length)} bytes`;
-}
-
-async function readPathState(abs: string): Promise<PathState> {
-  try {
-    return { kind: "content", bytes: await fsp.readFile(abs) };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return ABSENT;
-    throw error;
-  }
-}
-
-function isPrefix(prefix: Uint8Array, whole: Uint8Array): boolean {
-  return (
-    prefix.length <= whole.length &&
-    bytesEqual(whole.subarray(0, prefix.length), prefix)
-  );
-}
-
-/**
- * Journal entries in a path state: one entry per line (SPEC 6.1). The line
- * terminator is not byte-pinned by 6.1 (H-4: line-oriented form only), so an
- * unterminated final line still counts — any line-oriented representation
- * counts identically.
- */
-function journalEntryCount(state: PathState): number {
-  if (state.kind === "absent" || state.bytes.length === 0) return 0;
-  let lines = 0;
-  for (const byte of state.bytes) {
-    if (byte === 0x0a) lines += 1;
-  }
-  if (state.bytes[state.bytes.length - 1] !== 0x0a) lines += 1;
-  return lines;
-}
-
-interface DistinctObservation {
-  readonly state: PathState;
-  readonly firstIndex: number;
-}
-
-/**
- * The continuous polling reader (T13.5-5's machinery generalized to a fixed
- * path set): a tight loop reading every polled path each cycle, recording
- * distinct states per path plus the journal's order bookkeeping. It never
- * throws — violations and errors are recorded and diagnosed post-hoc (H-8).
- */
-class PollingReader {
-  readonly distinct = new Map<string, Map<string, DistinctObservation>>();
-  observationCycles = 0;
-  pollError: string | undefined;
-  journalOrderViolation: string | undefined;
-
-  readonly #workspace: TestWorkspace;
-  readonly #paths: readonly string[];
-  #stop = false;
-  #task: Promise<void> | undefined;
-  #lastJournal: PathState | undefined;
-
-  constructor(workspace: TestWorkspace, paths: readonly string[]) {
-    this.#workspace = workspace;
-    this.#paths = paths;
-    for (const rel of paths) this.distinct.set(rel, new Map());
-  }
-
-  start(): void {
-    this.#task = (async () => {
-      while (!this.#stop) {
-        const cycle = this.observationCycles;
-        this.observationCycles += 1;
-        for (const rel of this.#paths) {
-          let state: PathState;
-          try {
-            state = await readPathState(this.#workspace.path(rel));
-          } catch (error) {
-            this.pollError ??= `cycle #${String(cycle)} reading ${rel}: ${(error as Error).message}`;
-            continue;
-          }
-          const perPath = this.distinct.get(rel);
-          if (perPath !== undefined) {
-            const key = stateKey(state);
-            if (!perPath.has(key)) {
-              perPath.set(key, { state, firstIndex: cycle });
-            }
-          }
-          if (rel === JOURNAL_REL) this.#checkJournalOrder(state, cycle);
-        }
-        await sleep(1);
-      }
-    })();
-  }
-
-  /**
-   * Journal order bookkeeping (SPEC 6.1: append-only, never deleted): each
-   * observation extends the previous one — absence reads as the empty
-   * journal, and absence after content is a deletion.
-   */
-  #checkJournalOrder(state: PathState, cycle: number): void {
-    const previous = this.#lastJournal;
-    this.#lastJournal = state;
-    if (previous === undefined || this.journalOrderViolation !== undefined) {
-      return;
-    }
-    if (previous.kind === "content" && state.kind === "absent") {
-      this.journalOrderViolation =
-        `cycle #${String(cycle)}: the journal was observed absent after ` +
-        `content had been observed (${describeState(previous)}) — the ` +
-        `journal is never deleted (SPEC 6.1, 13.4)`;
-      return;
-    }
-    if (previous.kind !== "content" || state.kind !== "content") return;
-    if (!isPrefix(previous.bytes, state.bytes)) {
-      this.journalOrderViolation =
-        `cycle #${String(cycle)}: a journal observation did not extend the ` +
-        `previous one — the journal is append-only, so successive reads ` +
-        `are prefix-monotone (SPEC 6.1, 13.5)\n` +
-        describeByteDifference(
-          state.bytes,
-          previous.bytes,
-          "later observation",
-          "earlier observation",
-        );
-    }
-  }
-
-  async stop(): Promise<void> {
-    this.#stop = true;
-    await (this.#task ?? Promise.resolve());
-  }
-}
-
-/**
- * Settled-state bookkeeping: the per-path set of legitimate complete states,
- * captured in quiescence (no product process running) after staging and
- * after each episode. `latest` backs the per-episode byte accounting.
- */
-class SettledStates {
-  readonly keys = new Map<string, Set<string>>();
-  readonly samples = new Map<string, PathState[]>();
-  latest = new Map<string, PathState>();
-
-  readonly #workspace: TestWorkspace;
-  readonly #paths: readonly string[];
-
-  constructor(workspace: TestWorkspace, paths: readonly string[]) {
-    this.#workspace = workspace;
-    this.#paths = paths;
-    for (const rel of paths) {
-      this.keys.set(rel, new Set());
-      this.samples.set(rel, []);
-    }
-  }
-
-  /** Read every polled path, record the states, and return the snapshot. */
-  async capture(): Promise<ReadonlyMap<string, PathState>> {
-    const snapshot = new Map<string, PathState>();
-    for (const rel of this.#paths) {
-      const state = await readPathState(this.#workspace.path(rel));
-      snapshot.set(rel, state);
-      const keys = this.keys.get(rel);
-      const samples = this.samples.get(rel);
-      if (keys !== undefined && samples !== undefined) {
-        const key = stateKey(state);
-        if (!keys.has(key)) {
-          keys.add(key);
-          samples.push(state);
-        }
-      }
-    }
-    this.latest = snapshot;
-    return snapshot;
-  }
-}
-
-function requireState(
-  snapshot: ReadonlyMap<string, PathState>,
-  rel: string,
-): PathState {
-  const state = snapshot.get(rel);
-  if (state === undefined) {
-    throw new Error(`P-10 harness defect: ${rel} missing from a snapshot`);
-  }
-  return state;
-}
-
-function assertSameState(
-  before: ReadonlyMap<string, PathState>,
-  after: ReadonlyMap<string, PathState>,
-  rel: string,
-  context: string,
-): void {
-  const stateBefore = requireState(before, rel);
-  const stateAfter = requireState(after, rel);
-  if (stateKey(stateBefore) === stateKey(stateAfter)) return;
-  let difference = "";
-  if (stateBefore.kind === "content" && stateAfter.kind === "content") {
-    difference = `\n${describeByteDifference(stateAfter.bytes, stateBefore.bytes, "after", "before")}`;
-  }
-  fail(
-    `${context} — ${rel}: expected byte-identical state, found ` +
-      `${describeState(stateBefore)} before vs ${describeState(stateAfter)} ` +
-      `after${difference}`,
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Read-command execution
+// Read commands beside a mutating command
 
 /**
  * Run one menu read to completion under the driver's hang guard, converting
@@ -695,16 +542,18 @@ export async function runHeldRead(
   );
 }
 
+/** A read command started beside a mutating command. */
 export interface StraddleRead {
   readonly running: RunningProduct;
   readonly what: string;
 }
 
 /**
- * Await a straddle read: terminated, no signal death, exit 0 or 1. A
- * rejected run fails diagnosed (H-8), except a harness error — an exhausted
- * capture limit, a failure of the driver's in-run evaluation — which
- * propagates as itself (H-11).
+ * Await a read started beside a mutating command — a pre-start reader or a
+ * straddle read: terminated, no signal death, exit 0 or 1. A rejected run
+ * fails diagnosed (H-8), except a harness error — an exhausted capture
+ * limit, a failure of the driver's in-run evaluation — which propagates as
+ * itself (H-11).
  */
 export async function settleStraddleRead(
   read: StraddleRead,
@@ -716,10 +565,10 @@ export async function settleStraddleRead(
   } catch (error) {
     rethrowHarnessError(error);
     return fail(
-      `${context} straddling ${read.what}: a read command running across a ` +
-        `mutating command's commit window must terminate (SPEC 13.5; H-8: ` +
-        `hangs are failures) — ` +
-        `${error instanceof Error ? error.message : String(error)}`,
+      `${context} ${read.what}, run beside a mutating command: a read ` +
+        `command running across a mutating command's acquisition or ` +
+        `commit window must terminate (SPEC 13.5; H-8: hangs are ` +
+        `failures) — ${error instanceof Error ? error.message : String(error)}`,
     );
   }
   if (
@@ -727,12 +576,422 @@ export async function settleStraddleRead(
     (result.exitCode !== 0 && result.exitCode !== 1)
   ) {
     fail(
-      `${context} straddling ${read.what}: a read overlapping the commit ` +
-        `window may see transient states (a moving file at neither or both ` +
-        `paths), so exit 1 is legitimate — but never a crash or any other ` +
-        `code: argv and configuration are fixed valid (SPEC 13.5, 12.0); ` +
-        `got ${summarizeResult(result)}`,
+      `${context} ${read.what}, run beside a mutating command: a read ` +
+        `overlapping a commit may see transient states (a moving file at ` +
+        `neither or both paths), so exit 1 is legitimate — but never a ` +
+        `crash or any other code: argv and configuration are fixed valid ` +
+        `(SPEC 13.5, 12.0); got ${summarizeResult(result)}`,
     );
+  }
+}
+
+async function startRead(
+  product: ProductBinding,
+  cwd: string,
+  menuIndex: number,
+): Promise<StraddleRead> {
+  const read = READ_MENU[menuIndex];
+  return {
+    running: await startProduct(product, { cwd, argv: read.argv }),
+    what: read.what,
+  };
+}
+
+/**
+ * Whether a started read has not exited: its exit unseen and its process
+ * listed in the process list, never a zombie (helpers/kill-discipline.ts
+ * `readListedProcess`).
+ */
+async function stillRunning(read: StraddleRead): Promise<boolean> {
+  if (read.running.hasExited()) return false;
+  const pid = read.running.pid;
+  if (pid === undefined) return false;
+  const listed = await readListedProcess(pid);
+  return (
+    listed !== undefined && listed.state !== "Z" && !read.running.hasExited()
+  );
+}
+
+/**
+ * At most this many further reads are started, one at a time, where none
+ * of an episode's pre-start readers is confirmed running as its command is
+ * to start; none confirmed then is a harness error (H-11) — a read runs far
+ * longer than the instant between its start and that check.
+ */
+const EXTRA_PRE_START_READS = 3;
+
+/**
+ * Start an episode's pre-start readers, each its lead before the command
+ * (in descending lead order, the harness sleeping the differences), and
+ * confirm — immediately before the command starts — that at least one has
+ * not exited (TEST-SPEC P-10: "the harness confirming, before starting it,
+ * that they have not exited"), starting another where none has. Returns
+ * every read started and how many were confirmed running.
+ */
+async function startPreReaders(
+  product: ProductBinding,
+  cwd: string,
+  episode: P10Episode,
+  context: string,
+): Promise<{ readonly reads: StraddleRead[]; readonly confirmed: number }> {
+  const ordered = [...episode.preReaders].sort((a, b) => b.leadMs - a.leadMs);
+  const reads: StraddleRead[] = [];
+  for (const [index, reader] of ordered.entries()) {
+    reads.push(await startRead(product, cwd, reader.menuIndex));
+    const gap = reader.leadMs - (ordered[index + 1]?.leadMs ?? 0);
+    if (gap > 0) await sleep(gap);
+  }
+  let confirmed = 0;
+  for (const read of reads) {
+    if (await stillRunning(read)) confirmed += 1;
+  }
+  for (let extra = 0; confirmed === 0; extra += 1) {
+    if (extra >= EXTRA_PRE_START_READS) {
+      throw new Error(
+        `harness error (H-11): ${context}: no pre-start reader could be ` +
+          `confirmed running as the mutating command was to start, after ` +
+          `${String(EXTRA_PRE_START_READS)} further reads — P-10 starts its ` +
+          `commands while readers run (TEST-SPEC P-10)`,
+      );
+    }
+    const read = await startRead(product, cwd, ordered[0].menuIndex);
+    reads.push(read);
+    if (await stillRunning(read)) confirmed = 1;
+  }
+  return { reads, confirmed };
+}
+
+// ---------------------------------------------------------------------------
+// The mutating command's run
+
+/**
+ * Await a mutating command's exit. A rejected run — a hang, killed at the
+ * guard — fails diagnosed (H-8), except a harness error — an exhausted
+ * capture limit, a failure of the driver's in-run evaluation (T6.5-22(a)'s
+ * check of a performed move) — which propagates as itself (H-11). Shared
+ * with S-8's capacity vectors.
+ */
+export async function settleMutatingRun(
+  running: RunningProduct,
+  context: string,
+): Promise<RunResult> {
+  try {
+    return await running.waitForExit();
+  } catch (error) {
+    rethrowHarnessError(error);
+    return fail(
+      `${context}: the mutating command must end on its own (SPEC 13.5; ` +
+        `H-8) — ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
+ * Kill a mutating command under T13.5-3's exit-collection discipline
+ * (`RunningProduct.killGroup`: the whole group SIGKILLed, the started
+ * process's exit collected, no process of the group listed), converting a
+ * rejection into a diagnosed failure but a harness error (H-8, H-11).
+ */
+async function killMutatingRun(
+  running: RunningProduct,
+  context: string,
+): Promise<KilledGroup> {
+  try {
+    return await running.killGroup();
+  } catch (error) {
+    rethrowHarnessError(error);
+    return fail(
+      `${context}: the run must end on its own or by the kill, its exit ` +
+        `collected (SPEC 13.5; H-8) — ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
+ * Await a held command's hold file — true once it appears — or the
+ * command's exit before it — false (a refusal at acquisition, judged as any
+ * run's end). Neither within the driver's hold-file bound fails diagnosed
+ * (H-8).
+ */
+async function holdsOrExits(
+  running: RunningProduct,
+  hold: string,
+  context: string,
+): Promise<boolean> {
+  const deadline = Date.now() + DEFAULT_WAIT_FOR_FILE_TIMEOUT_MS;
+  for (;;) {
+    if (await pathExists(hold)) return true;
+    if (running.hasExited()) return false;
+    if (Date.now() >= deadline) {
+      fail(
+        `${context}: the mutating command neither created its hold file ` +
+          `nor exited within ${String(DEFAULT_WAIT_FOR_FILE_TIMEOUT_MS)} ms ` +
+          `— it creates the hold file immediately after acquiring workspace ` +
+          `exclusivity, or is refused there promptly (SPEC 13.5; H-8)`,
+      );
+    }
+    await sleep(5);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// What P-10 compares: sources, the journal, and session files
+
+/**
+ * Whether a snapshot key is among what P-10 compares with a twin and judges
+ * a killed run by — sources (and the configuration), the journal, and the
+ * session files, the directories holding them included: under `.xspec/`,
+ * exactly the journal and the session directory with everything in it;
+ * elsewhere, everything but a derived file, whose name carries `.xspec.`
+ * (SPEC 13.1). Graph data and derived files, which readers' refreshes may
+ * rewrite last-write-wins (13.3, 13.5), are left out, and so is the lock
+ * path (H-6).
+ */
+function isComparedKey(key: string): boolean {
+  if (key === ".xspec") return false;
+  if (key.startsWith(".xspec/")) {
+    return (
+      key === JOURNAL_REL ||
+      key === ".xspec/reviews" ||
+      key.startsWith(".xspec/reviews/")
+    );
+  }
+  return !path.posix.basename(key).includes(".xspec.");
+}
+
+/** A snapshot's view holding only what P-10 compares (isComparedKey). */
+function comparedView(snapshot: DirectorySnapshot): DirectorySnapshot {
+  const entries = new Map<string, SnapshotEntry>();
+  for (const [key, entry] of snapshot.entries) {
+    if (isComparedKey(key)) entries.set(key, entry);
+  }
+  return { ...snapshot, entries };
+}
+
+/** The compared keys at which two views hold different byte states. */
+function differingKeys(
+  first: DirectorySnapshot,
+  second: DirectorySnapshot,
+): string[] {
+  const keys = new Set([...first.entries.keys(), ...second.entries.keys()]);
+  return [...keys].sort().filter((key) => {
+    const a = first.entries.get(key);
+    const b = second.entries.get(key);
+    if (a === undefined || b === undefined) return a !== b;
+    return describeEntryDifference(a, b) !== undefined;
+  });
+}
+
+function fileBytesAt(view: DirectorySnapshot, rel: string): Uint8Array | null {
+  const entry = view.entries.get(rel);
+  return entry?.kind === "file" ? entry.bytes : null;
+}
+
+/**
+ * Journal entries in a journal's bytes: one entry per line (SPEC 6.1). The
+ * line terminator is not byte-pinned by 6.1 (H-4: line-oriented form only),
+ * so an unterminated final line still counts.
+ */
+function journalEntryCount(bytes: Uint8Array | null): number {
+  if (bytes === null || bytes.length === 0) return 0;
+  let lines = 0;
+  for (const byte of bytes) {
+    if (byte === 0x0a) lines += 1;
+  }
+  if (bytes[bytes.length - 1] !== 0x0a) lines += 1;
+  return lines;
+}
+
+function isPrefix(prefix: Uint8Array, whole: Uint8Array): boolean {
+  return (
+    prefix.length <= whole.length &&
+    bytesEqual(whole.subarray(0, prefix.length), prefix)
+  );
+}
+
+/**
+ * The journal a run left against the one it started with: the start's
+ * bytes a prefix of the end's, and `appended` entries more — or, where
+ * `appended` is "at most one", none or one (SPEC 6.1: append-only, one
+ * self-contained entry per journaled operation; TEST-SPEC P-10).
+ */
+function assertJournalAppended(
+  start: DirectorySnapshot,
+  end: DirectorySnapshot,
+  appended: 0 | 1 | "at most one",
+  context: string,
+): void {
+  const before = fileBytesAt(start, JOURNAL_REL) ?? new Uint8Array(0);
+  const after = fileBytesAt(end, JOURNAL_REL) ?? new Uint8Array(0);
+  if (!isPrefix(before, after)) {
+    fail(
+      `${context}: the journal is append-only — the bytes it held as the ` +
+        `command started must be a prefix of those it holds as it ends ` +
+        `(SPEC 6.1)\n` +
+        describeByteDifference(after, before, "as it ended", "as it started"),
+    );
+  }
+  const added = journalEntryCount(after) - journalEntryCount(before);
+  const allowed = appended === "at most one" ? [0, 1] : [appended];
+  if (!allowed.includes(added)) {
+    fail(
+      `${context}: mutual exclusion never loses a journal append — ` +
+        `\`rename\` and \`move\` are the journal's only writers (SPEC 6.1), ` +
+        `each exiting 0 adding exactly one entry and each killed one at ` +
+        `most one (TEST-SPEC P-10) — expected ` +
+        `${appended === "at most one" ? "0 or 1" : String(appended)} ` +
+        `entr${appended === 1 ? "y" : "ies"} added, found ${String(added)}`,
+    );
+  }
+}
+
+/**
+ * The walk's exclusion for a compared snapshot: everything isComparedKey
+ * leaves out is pruned before it is examined — the area walked only for the
+ * journal and the session directory — so a snapshot taken while readers
+ * still run never meets a refresh's transient files, nor reads anything
+ * under the lock path.
+ */
+function excludeUncompared(relPathBytes: Uint8Array): boolean {
+  const key = Buffer.from(relPathBytes).toString("latin1");
+  return key !== ".xspec" && !isComparedKey(key);
+}
+
+/** The compared view of the workspace at `root`, taken now. */
+async function comparedSnapshot(root: string): Promise<DirectorySnapshot> {
+  return comparedView(
+    await snapshotDirectory(root, { exclude: excludeUncompared }),
+  );
+}
+
+/** Snapshot keys rendered for a diagnosis, at most ten. */
+function renderKeys(keys: readonly string[]): string {
+  const shown = keys.slice(0, 10).map(displaySnapshotPath);
+  if (keys.length > shown.length) {
+    shown.push(`… and ${String(keys.length - shown.length)} more`);
+  }
+  return shown.join(", ");
+}
+
+// ---------------------------------------------------------------------------
+// The reader-free twin
+
+/** A command's reader-free twin (module header). */
+interface EpisodeTwin {
+  /** The twin's workspace, holding its final state. */
+  readonly workspace: TestWorkspace;
+  /** Its run: exit 0. */
+  readonly result: RunResult;
+  /** The compared view of the copy as the twin started — the command's own start. */
+  readonly start: DirectorySnapshot;
+  /** The compared view once the twin ended. */
+  readonly final: DirectorySnapshot;
+  /** A held twin's span from its lift to its exit, in ms; 0 unheld. */
+  readonly spanMs: number;
+}
+
+/**
+ * The reader-free twin of a command about to start on `from` (TEST-SPEC
+ * P-10: "a reader-free twin copied from the workspace, the lock path aside,
+ * as it starts"): `from` copied byte for byte into a fresh workspace, the
+ * lock path left out unread (a difference from `from`, lock path aside, a
+ * harness error), and `argv` run there with no reader beside it — held,
+ * lifted as soon as its hold file appears, and its lift-to-exit span
+ * measured, where the command is held (T13.5-3's twin), else unheld. Nothing
+ * writes `from`'s sources, journal, or session files between the copy and
+ * the command's start (only mutating commands do, and the command is the
+ * episode's one), so the copy is the command's start for every compared
+ * path. The twin is an operation valid by construction (the module header's
+ * validity discipline; §CONF-READERS' staging constraint): it exits 0, and
+ * `.xspec/lock` is absent once it ends (13.5: release on every normal end).
+ * The caller owns the returned workspace.
+ */
+async function runTwin(
+  product: ProductBinding,
+  from: TestWorkspace,
+  argv: readonly string[],
+  held: boolean,
+  context: string,
+): Promise<EpisodeTwin> {
+  const copy = await TestWorkspace.create({});
+  try {
+    await copyTreeBytes(
+      Buffer.from(from.root),
+      Buffer.from(copy.root),
+      isLockPathBytes,
+    );
+    const source = await snapshotDirectory(from.root);
+    const copied = await snapshotDirectory(copy.root);
+    const differences = diffSnapshots(source, copied);
+    if (differences.length > 0) {
+      throw new Error(
+        `harness error: ${context}: the twin's copy of ${from.root} at ` +
+          `${copy.root} differs from it (the lock path aside): ` +
+          differences
+            .slice(0, 10)
+            .map((change) => `${change.change} ${change.path}`)
+            .join(", "),
+      );
+    }
+    let result: RunResult;
+    let spanMs = 0;
+    if (held) {
+      const { running, liftedAt } = await startHeldAndLift(
+        product,
+        copy,
+        argv,
+        "hold-twin.tmp",
+        `${context} (held, then lifted)`,
+      );
+      try {
+        result = await running.waitForExit();
+      } catch (error) {
+        await running.killGroup().catch((kill: unknown) => {
+          rethrowHarnessError(kill);
+        });
+        rethrowHarnessError(error);
+        return fail(
+          `${context}: once its hold is lifted the twin must proceed and ` +
+            `end on its own (SPEC 13.5; H-8) — ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      spanMs = performance.now() - liftedAt;
+    } else {
+      try {
+        result = await runProduct(product, { cwd: copy.root, argv });
+      } catch (error) {
+        rethrowHarnessError(error);
+        return fail(
+          `${context}: the twin must end on its own (SPEC 13.5; H-8) — ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    assertExitCode(
+      result,
+      0,
+      `${context}: the operation is valid by construction — an existing ` +
+        `target, a fresh name or destination, an unblocked item with a ` +
+        `new status — so with no reader beside it it succeeds (SPEC 13.5, ` +
+        `6.4, 6.5, 10.7)`,
+    );
+    await assertLockPathAbsent(
+      copy.root,
+      `${context}: once the twin has ended (SPEC 13.5: release on every ` +
+        `normal end; T13.5-11)`,
+    );
+    return {
+      workspace: copy,
+      result,
+      start: comparedView(copied),
+      final: await comparedSnapshot(copy.root),
+      spanMs,
+    };
+  } catch (error) {
+    await copy.dispose();
+    throw error;
   }
 }
 
@@ -745,21 +1004,21 @@ async function bracketedQuiescentRead<T>(
   body: () => Promise<T>,
   context: string,
 ): Promise<T> {
-  const journalBefore = await readPathState(workspace.path(JOURNAL_REL));
-  const sessionBefore = await readPathState(workspace.path(SESSION_REL));
+  const journalBefore = await readPolledState(workspace.path(JOURNAL_REL));
+  const sessionBefore = await readPolledState(workspace.path(SESSION_REL));
   const value = await body();
-  const journalAfter = await readPathState(workspace.path(JOURNAL_REL));
-  const sessionAfter = await readPathState(workspace.path(SESSION_REL));
-  if (stateKey(journalBefore) !== stateKey(journalAfter)) {
+  const journalAfter = await readPolledState(workspace.path(JOURNAL_REL));
+  const sessionAfter = await readPolledState(workspace.path(SESSION_REL));
+  if (polledStateKey(journalBefore) !== polledStateKey(journalAfter)) {
     fail(
       `${context}: the read changed ${JOURNAL_REL} from ` +
-        `${describeState(journalBefore)} to ${describeState(journalAfter)} — ` +
-        `the journal is written only by \`rename\` and \`move\` (SPEC 6.1, ` +
-        `13.4), so P-10's journal accounting requires reads to leave it ` +
-        `untouched`,
+        `${describePolledState(journalBefore)} to ` +
+        `${describePolledState(journalAfter)} — the journal is written only ` +
+        `by \`rename\` and \`move\` (SPEC 6.1, 13.4), so P-10's journal ` +
+        `accounting requires reads to leave it untouched`,
     );
   }
-  if (stateKey(sessionBefore) !== stateKey(sessionAfter)) {
+  if (polledStateKey(sessionBefore) !== polledStateKey(sessionAfter)) {
     fail(
       `${context}: the read changed ${SESSION_REL} — reads never write the ` +
         `session file (SPEC 10.4, 13.5), so P-10's status accounting ` +
@@ -769,24 +1028,25 @@ async function bracketedQuiescentRead<T>(
   return value;
 }
 
-/** The status ledger: expected stored status per item id (module header). */
+/** The status ledger: expected stored status per item ID (module header). */
 interface StatusLedger {
-  /** Item ids learned at the post-`create` read; never changes after. */
+  /** Item IDs learned at the post-`create` read; never changes after. */
   ids: readonly string[];
   readonly expected: Map<string, ItemStatus>;
   /**
-   * A post-release-killed resolve whose landing is not yet observed: the
-   * target's status is two-valued until the next quiescent read adopts
-   * whichever the settled session holds.
+   * A resolve killed past its hold whose landing the next quiescent read
+   * adopts: its target's status is the prior one or the attempted one.
    */
   pendingKill: { readonly id: string; readonly status: ResolveStatus } | null;
 }
 
 /**
  * The quiescent accounting read (module header): `review status --json`,
- * bracketed, exit 0, decoded; the item-id set must equal the created set and
+ * bracketed, exit 0, decoded; the item-ID set must equal the created set and
  * every status must match the ledger — a lost resolution (or a phantom one,
- * an invalidation, a lost or duplicated item) fails here.
+ * an invalidation, a lost or duplicated item) fails here. It also refreshes
+ * graph data a reader's refresh left stale (13.3), so every episode starts
+ * on fresh graph data.
  */
 async function accountingRead(
   product: ProductBinding,
@@ -814,7 +1074,7 @@ async function accountingRead(
   const expectedIds = [...ledger.ids].sort();
   if (JSON.stringify(observedIds) !== JSON.stringify(expectedIds)) {
     fail(
-      `${label}: the item-id set must never change after \`create\` in ` +
+      `${label}: the item-ID set must never change after \`create\` in ` +
         `these schedules — no edits happen, completed renames/moves are ` +
         `pure and identity mappings duplicate no item (SPEC 6.2, 10.4), ` +
         `and re-derivation over the unchanged workspace matches every ` +
@@ -832,12 +1092,12 @@ async function accountingRead(
       const attempted = ledger.pendingKill.status;
       if (row.status !== expected && row.status !== attempted) {
         fail(
-          `${label}: item ${row.id} was the target of a post-release-killed ` +
-            `resolve, so its stored status is exactly two-valued — the ` +
-            `prior ${JSON.stringify(expected)} (the kill landed first) or ` +
-            `the attempted ${JSON.stringify(attempted)} (the write landed ` +
-            `first); atomic visibility excludes anything else (SPEC 13.5, ` +
-            `10.7) — got ${JSON.stringify(row.status)}`,
+          `${label}: item ${row.id} was the target of a resolve killed ` +
+            `past its hold, so its stored status is exactly two-valued — ` +
+            `the prior ${JSON.stringify(expected)} (the kill landed first) ` +
+            `or the attempted ${JSON.stringify(attempted)} (the write ` +
+            `landed first); atomic visibility excludes anything else (SPEC ` +
+            `13.5, 10.7) — got ${JSON.stringify(row.status)}`,
         );
       }
       ledger.expected.set(row.id, row.status);
@@ -857,35 +1117,11 @@ async function accountingRead(
   return report;
 }
 
-// ---------------------------------------------------------------------------
-// Episode execution
-
-const HOLD_APPEAR_CONTEXT =
-  "the mutating command must create the hold file immediately after " +
-  "acquiring workspace exclusivity and before modifying anything (SPEC 13.5)";
-
-function mutatorArgv(episode: P10Episode, resolveTargetId: string): string[] {
-  switch (episode.kind) {
-    case "resolve":
-      return [
-        "review",
-        "resolve",
-        SESSION_NAME,
-        resolveTargetId,
-        "--status",
-        episode.status,
-      ];
-    case "rename":
-      return ["rename", episode.file, episode.oldId, episode.newId];
-    case "move":
-      return ["move", episode.from, episode.to];
-  }
-}
-
 /**
  * Pick the drawn resolve target from the last quiescent status rows: the
  * rank-picked unblocked item (SPEC 10.7 refuses blocked targets; re-resolving
- * a resolved item is valid). Nothing runs between that read and the resolve.
+ * a resolved item is valid). Nothing runs between that read and the resolve
+ * but its twin, on a copy.
  */
 function resolveTarget(
   rows: readonly SessionStatusRow[],
@@ -905,232 +1141,585 @@ function resolveTarget(
   return unblocked[rank % unblocked.length];
 }
 
-interface EpisodeOutcome {
-  /** True when a completed resolve's status write is known to have landed. */
-  readonly resolveCompleted: boolean;
+/**
+ * The status a resolve records: the drawn one, unless the target already
+ * holds it — then the next in RESOLVE_STATUSES — so that every resolve
+ * changes the session file, and a resolve killed while held always leaves
+ * it short of its twin's (module header).
+ */
+function newStatusFor(
+  drawn: ResolveStatus,
+  current: ItemStatus,
+): ResolveStatus {
+  if (drawn !== current) return drawn;
+  const index = RESOLVE_STATUSES.indexOf(drawn);
+  return RESOLVE_STATUSES[(index + 1) % RESOLVE_STATUSES.length];
 }
 
-/** Run one episode: mutator + held reads + straddle reads + fate. */
-async function runEpisode(
-  product: ProductBinding,
-  workspace: TestWorkspace,
+// ---------------------------------------------------------------------------
+// Episodes
+
+/** What one trial's execution holds as its episodes run. */
+interface TrialState {
+  /** The workspace the schedule runs on; a twin's replaces it (module header). */
+  workspace: TestWorkspace;
+  /** The spec file's current path (the generator's model, reproduced). */
+  currentFile: string;
+  /**
+   * Identifiers of the groups killed on this workspace since a command last
+   * ran to its end there — what T13.5-3's reuse check looks for.
+   */
+  killed: number[];
+  /** The last quiescent status read's rows. */
+  rows: readonly SessionStatusRow[];
+  readonly ledger: StatusLedger;
+}
+
+/** An episode's operation, made concrete at execution time. */
+interface EpisodeOperation {
+  /** Its arguments, `--json` included, `--test-hold` aside. */
+  readonly argv: readonly string[];
+  /** A resolve's target and the status it records; null otherwise. */
+  readonly resolve: {
+    readonly id: string;
+    readonly status: ResolveStatus;
+  } | null;
+}
+
+function operationOf(
   episode: P10Episode,
-  episodeIndex: number,
-  resolveTargetId: string,
+  state: TrialState,
   context: string,
-): Promise<EpisodeOutcome> {
-  const hold = path.join(
-    workspace.tempRoot,
-    `hold-${String(episodeIndex)}.tmp`,
-  );
-  const argv = [...mutatorArgv(episode, resolveTargetId), "--test-hold", hold];
-  const running = await startProduct(product, {
-    cwd: workspace.root,
-    argv,
-  });
-  const straddle: StraddleRead[] = [];
-  try {
-    try {
-      await running.waitForFile(hold);
-    } catch (error) {
-      rethrowHarnessError(error);
-      fail(
-        `${context}: ${HOLD_APPEAR_CONTEXT} — ` +
-          `${error instanceof Error ? error.message : String(error)}`,
-      );
+): EpisodeOperation {
+  switch (episode.kind) {
+    case "resolve": {
+      const target = resolveTarget(state.rows, episode.rank, context);
+      const current = state.ledger.expected.get(target.id) ?? "unresolved";
+      const status = newStatusFor(episode.status, current);
+      return {
+        argv: [
+          "review",
+          "resolve",
+          SESSION_NAME,
+          target.id,
+          "--status",
+          status,
+          "--json",
+        ],
+        resolve: { id: target.id, status },
+      };
     }
-
-    // Held-phase reads: concurrent with the held mutator, sequential among
-    // themselves, each asserted exit 0 (module header).
-    for (const menuIndex of episode.heldReads) {
-      await runHeldRead(product, workspace.root, menuIndex, `${context} held`);
-    }
-    if (running.hasExited()) {
-      const outcome = await running
-        .waitForExit()
-        .then(summarizeResult, (error: unknown) => {
-          rethrowHarnessError(error);
-          return error instanceof Error ? error.message : String(error);
-        });
-      fail(
-        `${context}: the mutating command must proceed only once the hold ` +
-          `file is deleted, but it exited while still held (SPEC 13.5) — ` +
-          `${outcome}`,
-      );
-    }
-
-    // Straddle reads: started before the release or kill, so they overlap
-    // the commit window (or the kill) — settled after the mutator.
-    for (const menuIndex of episode.straddleReads) {
-      straddle.push({
-        running: await startProduct(product, {
-          cwd: workspace.root,
-          argv: READ_MENU[menuIndex].argv,
-        }),
-        what: READ_MENU[menuIndex].what,
-      });
-    }
-
-    let resolveCompleted = false;
-    if (episode.fate === "heldKill") {
-      // The hold file is never deleted: the kill lands at the held point,
-      // before any modification (SPEC 13.5; T13.5-1).
-      running.kill("SIGKILL");
-      await settleKilled(running, context);
-    } else {
-      await releaseHoldFile(hold);
-      if (episode.fate === "releaseKill") {
-        if (episode.killDelayMs > 0) await sleep(episode.killDelayMs);
-        running.kill("SIGKILL");
-        await settleKilled(running, context);
-      } else {
-        let result: RunResult;
-        try {
-          result = await running.waitForExit();
-        } catch (error) {
-          rethrowHarnessError(error);
-          fail(
-            `${context}: once the hold file is deleted the mutating command ` +
-              `must proceed and complete (SPEC 13.5; H-8) — ` +
-              `${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-        assertExitCode(
-          result,
-          0,
-          `${context}: the drawn operation is valid by construction — an ` +
-            `existing target, a fresh name or destination, an unblocked ` +
-            `item — and a mutating command that reached its hold and was ` +
-            `released completes it (SPEC 13.5, 6.4, 6.5, 10.7). Every ` +
-            `episode after a kill also proves the terminated holder ` +
-            `released exclusivity (SPEC 13.5)`,
+    case "rename":
+      if (episode.file !== state.currentFile) {
+        throw new Error(
+          `P-10 harness defect: the generator's file model (${episode.file}) ` +
+            `and the execution's (${state.currentFile}) diverged`,
         );
-        resolveCompleted = episode.kind === "resolve";
       }
-    }
-
-    for (const read of straddle) {
-      await settleStraddleRead(read, context);
-    }
-    return { resolveCompleted };
-  } finally {
-    running.kill();
-    for (const read of straddle) read.running.kill();
-    await releaseHoldFile(hold);
+      return {
+        argv: ["rename", episode.file, episode.oldId, episode.newId, "--json"],
+        resolve: null,
+      };
+    case "move":
+      if (episode.from !== state.currentFile) {
+        throw new Error(
+          `P-10 harness defect: the generator's file model (${episode.from}) ` +
+            `and the execution's (${state.currentFile}) diverged`,
+        );
+      }
+      return {
+        argv: ["move", episode.from, episode.to, "--json"],
+        resolve: null,
+      };
   }
 }
 
 /**
- * Settle a killed mutator; the death's shape is not asserted. A rejected run
- * fails diagnosed (H-8), except a harness error — an exhausted capture
- * limit, a failure of the driver's in-run evaluation (T6.5-22(a)'s check of
- * a move) — which propagates as itself (H-11).
+ * The episode's polled paths (module header): the journal, the session
+ * file, the spec source and a move's destination, and their generated
+ * modules — every path the episode's command may write but graph data,
+ * never the lock path.
  */
-export async function settleKilled(
-  running: RunningProduct,
+function polledRelsOf(episode: P10Episode, currentFile: string): string[] {
+  const sources = [currentFile];
+  if (episode.kind === "move") sources.push(episode.to);
+  const rels = [JOURNAL_REL, SESSION_REL];
+  for (const source of sources) rels.push(source, moduleRelOf(source));
+  return rels;
+}
+
+/**
+ * The journal's order bookkeeping over the poller's observations (SPEC 6.1:
+ * append-only, never deleted): each observation extends the previous one —
+ * absence reads as the empty journal, and absence after content is a
+ * deletion.
+ */
+class JournalOrder {
+  violation: string | undefined;
+  #last: PolledState | undefined;
+
+  observe(state: PolledState, cycle: number): void {
+    const previous = this.#last;
+    this.#last = state;
+    if (previous === undefined || this.violation !== undefined) return;
+    if (previous.kind === "content" && state.kind === "absent") {
+      this.violation =
+        `cycle #${String(cycle)}: the journal was observed absent after ` +
+        `content had been observed (${describePolledState(previous)}) — the ` +
+        `journal is never deleted (SPEC 6.1, 13.4)`;
+      return;
+    }
+    if (previous.kind !== "content" || state.kind !== "content") return;
+    if (!isPrefix(previous.bytes, state.bytes)) {
+      this.violation =
+        `cycle #${String(cycle)}: a journal observation did not extend the ` +
+        `previous one — the journal is append-only, so successive reads ` +
+        `are prefix-monotone (SPEC 6.1, 13.5)\n` +
+        describeByteDifference(
+          state.bytes,
+          previous.bytes,
+          "later observation",
+          "earlier observation",
+        );
+    }
+  }
+}
+
+/**
+ * The polling reader's verdict (module header): no read error, at least one
+ * cycle, the journal's order kept, and every distinct state observed at a
+ * path its state before the episode or after it — prior or complete, never
+ * partial (SPEC 13.5; T13.5-5's protocol).
+ */
+async function judgePolledStates(
+  poller: PathPoller,
+  order: JournalOrder,
+  polled: readonly { readonly rel: string; readonly abs: string }[],
+  startStates: ReadonlyMap<string, PolledState>,
   context: string,
 ): Promise<void> {
-  try {
-    await running.waitForExit();
-  } catch (error) {
-    rethrowHarnessError(error);
+  if (poller.error !== undefined) {
     fail(
-      `${context}: the killed mutating command must settle (H-8) — ` +
-        `${error instanceof Error ? error.message : String(error)}`,
+      `${context}: the polling reader hit an unexpected filesystem error — ` +
+        poller.error,
+    );
+  }
+  if (order.violation !== undefined) fail(`${context}: ${order.violation}`);
+  if (poller.cycles === 0) {
+    fail(
+      `${context} staging premise: the polling reader completed zero ` +
+        `cycles across the episode — the polling cadence is broken`,
+    );
+  }
+  for (const { rel, abs } of polled) {
+    const start = startStates.get(abs);
+    if (start === undefined) {
+      throw new Error(`P-10 harness defect: no start state for ${rel}`);
+    }
+    const end = await readPolledState(abs);
+    const legit = new Set([polledStateKey(start), polledStateKey(end)]);
+    for (const [key, { state, firstIndex }] of poller.distinct(abs)) {
+      if (legit.has(key)) continue;
+      let nearest: PolledState | undefined;
+      for (const candidate of [start, end]) {
+        if (candidate.kind !== "content" || state.kind !== "content") continue;
+        if (
+          nearest?.kind !== "content" ||
+          Math.abs(candidate.bytes.length - state.bytes.length) <
+            Math.abs(nearest.bytes.length - state.bytes.length)
+        ) {
+          nearest = candidate;
+        }
+      }
+      fail(
+        `${context}: polling cycle #${String(firstIndex)} observed ${rel} ` +
+          `in a state that is neither its state before the episode nor its ` +
+          `state after it — a concurrent reader only ever observes the ` +
+          `prior state or the complete new content, never a partial write ` +
+          `(SPEC 13.5; T13.5-5's protocol; the episode's one mutating ` +
+          `command writes each polled path at most once). Observed ` +
+          `${describePolledState(state)}; before ${describePolledState(start)}, ` +
+          `after ${describePolledState(end)}.` +
+          (nearest?.kind === "content" && state.kind === "content"
+            ? `\n${describeByteDifference(state.bytes, nearest.bytes, "observed", "nearest")}`
+            : ""),
+      );
+    }
+  }
+}
+
+/** Whether an exit-2 run under `--json` was refused `workspace-busy`. */
+function isBusyRefusal(result: RunResult, context: string): boolean {
+  if (result.exitCode !== 2) return false;
+  try {
+    return expectErrorDocument(result, context).code === WORKSPACE_BUSY;
+  } catch {
+    // No well-formed error document: the exit-code assertion diagnoses it.
+    return false;
+  }
+}
+
+function sameBytes(a: Uint8Array | null, b: Uint8Array | null): boolean {
+  if (a === null || b === null) return a === b;
+  return bytesEqual(a, b);
+}
+
+/**
+ * What a command writes beside its own durable files, judged on its own
+ * workspace (SPEC 6.1, 10.7, 13.4): a resolve writes the session file alone
+ * — never the journal (6.1), never a source — and `rename` and `move` never
+ * write review sessions (identity mappings are applied at read time, 10.4).
+ */
+function assertWritesItsOwnFilesAlone(
+  episode: P10Episode,
+  start: DirectorySnapshot,
+  end: DirectorySnapshot,
+  context: string,
+): void {
+  if (episode.kind === "resolve") {
+    const others = differingKeys(start, end).filter(
+      (key) => key !== SESSION_REL,
+    );
+    if (others.length > 0) {
+      fail(
+        `${context}: a \`review resolve\` writes the session file alone — ` +
+          `never the journal (its only writers are \`rename\` and ` +
+          `\`move\`, SPEC 6.1), never a source (10.7, 13.4) — yet ` +
+          `${renderKeys(others)} changed`,
+      );
+    }
+    return;
+  }
+  if (
+    !sameBytes(fileBytesAt(start, SESSION_REL), fileBytesAt(end, SESSION_REL))
+  ) {
+    fail(
+      `${context}: \`rename\` and \`move\` never write review sessions — ` +
+        `identity mappings are applied at read time, not persisted into ` +
+        `sessions (SPEC 10.4, 13.4) — yet ${SESSION_REL} changed`,
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// Per-episode byte accounting over settled snapshots
-
-function assertJournalAppended(
-  before: ReadonlyMap<string, PathState>,
-  after: ReadonlyMap<string, PathState>,
+/**
+ * Judge a run the kill ended (module header): at most one journal entry
+ * added; a resolve recorded its status — the session its twin leaves — or
+ * left the session file byte-unchanged; nothing written beside its own
+ * files; and, wherever its sources, journal, or session files differ from
+ * those its twin leaves, `.xspec/lock` holding exactly one entry, a plain
+ * file — inspected now, readers possibly still running.
+ */
+async function judgeKilledRun(
+  workspace: TestWorkspace,
+  twin: EpisodeTwin,
+  after: DirectorySnapshot,
+  episode: P10Episode,
   context: string,
-): void {
-  const stateBefore = requireState(before, JOURNAL_REL);
-  const stateAfter = requireState(after, JOURNAL_REL);
-  if (stateAfter.kind !== "content") {
+): Promise<void> {
+  assertJournalAppended(
+    twin.start,
+    after,
+    episode.kind === "resolve" ? 0 : "at most one",
+    context,
+  );
+  assertWritesItsOwnFilesAlone(episode, twin.start, after, context);
+  if (episode.kind === "resolve") {
+    const now = fileBytesAt(after, SESSION_REL);
+    if (
+      !sameBytes(now, fileBytesAt(twin.start, SESSION_REL)) &&
+      !sameBytes(now, fileBytesAt(twin.final, SESSION_REL))
+    ) {
+      fail(
+        `${context}: a killed resolve either recorded its status — the ` +
+          `session file its reader-free twin leaves — or left the session ` +
+          `file byte-unchanged: the session is written once, last, each ` +
+          `write complete (SPEC 13.5; TEST-SPEC P-10)`,
+      );
+    }
+  }
+  const short = differingKeys(after, twin.final);
+  if (short.length === 0) return;
+  await assertLockDirectoryEntries(
+    workspace.root,
+    { entries: 1 },
+    `${context}: what it left at ${renderKeys(short)} differs from what ` +
+      `its reader-free twin leaves, so the run had not made its last write ` +
+      `and had not released — \`.xspec/lock\` holds exactly one entry, a ` +
+      `plain file: the dead run's, a leftover, until a later mutating ` +
+      `command takes it over, readers adding none (SPEC 13.5: a run's ` +
+      `entry stands until its release, which comes as the command ends, ` +
+      `after its last write; an abnormal termination leaves it; 13.4; ` +
+      `TEST-SPEC P-10, T13.5-3's past-the-hold judgement)`,
+  );
+}
+
+/**
+ * Judge a run that ended on its own (module header): never refused
+ * `workspace-busy` — a refusal after a kill on this workspace meets T13.5-3's
+ * reuse check, voiding the trial where a killed group's identifier is listed
+ * again — and ending exactly as its reader-free twin: exit code, standard
+ * output, and the sources, journal, and session files it leaves; one journal
+ * entry added by a `rename` or `move`, none by a resolve; and `.xspec/lock`
+ * absent once it has ended.
+ */
+async function judgeEndedRun(
+  state: TrialState,
+  twin: EpisodeTwin,
+  after: DirectorySnapshot,
+  result: RunResult,
+  episode: P10Episode,
+  context: string,
+): Promise<void> {
+  if (isBusyRefusal(result, context)) {
+    const refusal = `${context} — ${summarizeResult(result)}`;
+    if (state.killed.length > 0) {
+      await applyReuseCheck(state.killed, refusal);
+    }
     fail(
-      `${context}: after a completed journaled operation the journal exists ` +
-        `at ${JOURNAL_REL} (SPEC 6.1: the file comes into existence with ` +
-        `the first journaled operation); found ${describeState(stateAfter)}`,
+      `${refusal}: refused workspace-busy (14.26) with readers beside it and ` +
+        `no killed run's entry standing — readers never exclude a mutating ` +
+        `command (SPEC 13.5: every command but the mutating ones may run ` +
+        `concurrently with them; 14.26: only another run's entry, or a ` +
+        `leftover in the gap, refuses, and a reader makes none, 13.4; ` +
+        `TEST-SPEC P-10)`,
     );
   }
-  const bytesBefore =
-    stateBefore.kind === "content" ? stateBefore.bytes : new Uint8Array(0);
-  if (!isPrefix(bytesBefore, stateAfter.bytes)) {
+  assertExitCode(
+    result,
+    0,
+    `${context}: whatever readers run beside it, a mutating command ends ` +
+      `exactly as its reader-free twin, which exited 0 (SPEC 13.5; ` +
+      `TEST-SPEC P-10)`,
+  );
+  if (!bytesEqual(result.stdoutBytes, twin.result.stdoutBytes)) {
     fail(
-      `${context}: the journal is append-only — the pre-episode bytes must ` +
-        `be a prefix of the post-episode bytes (SPEC 6.1)\n` +
+      `${context}: its standard output must be byte-equal to its ` +
+        `reader-free twin's (TEST-SPEC P-10; H-6)\n` +
         describeByteDifference(
-          stateAfter.bytes,
-          bytesBefore,
-          "after",
-          "before",
+          result.stdoutBytes,
+          twin.result.stdoutBytes,
+          "the command's",
+          "its twin's",
         ),
     );
   }
-  const countBefore = journalEntryCount(stateBefore);
-  const countAfter = journalEntryCount(stateAfter);
-  if (countAfter !== countBefore + 1) {
-    fail(
-      `${context}: exactly one self-contained entry per completed rename or ` +
-        `move — journal lines = successful \`rename\`/\`move\` operations ` +
-        `(SPEC 6.1; P-10 accounting) — expected ` +
-        `${String(countBefore + 1)} entries, got ${String(countAfter)}`,
-    );
-  }
+  assertJournalAppended(
+    twin.start,
+    after,
+    episode.kind === "resolve" ? 0 : 1,
+    context,
+  );
+  assertWritesItsOwnFilesAlone(episode, twin.start, after, context);
+  assertSnapshotsEqual(
+    twin.final,
+    after,
+    `${context}: the sources, journal, and session files it leaves must be ` +
+      `byte-equal to those its reader-free twin leaves (TEST-SPEC P-10; ` +
+      `H-6 — derived files and graph data, which readers' refreshes may ` +
+      `rewrite, not compared)`,
+  );
+  await assertLockPathAbsent(
+    state.workspace.root,
+    `${context}: once it has ended, released (SPEC 13.5: release on every ` +
+      `normal end; T13.5-11), readers adding no entry (13.4)`,
+  );
 }
 
-function settledAccounting(
+/**
+ * Run one episode (module header) on the trial's workspace: its operation
+ * made concrete, its reader-free twin run first (on a copy), then the
+ * polling reader started, the pre-start readers started and confirmed
+ * running, the command started — in a process group of its own — held or
+ * not, its held and straddle reads, and its fate; the run judged at once as
+ * it ends, the readers then settled, the polled states judged; the ledger
+ * and the file model updated, and — after a `rename` or `move` killed past
+ * its hold — the trial continued on the twin's workspace.
+ */
+async function runEpisode(
+  product: ProductBinding,
+  state: TrialState,
   episode: P10Episode,
-  before: ReadonlyMap<string, PathState>,
-  after: ReadonlyMap<string, PathState>,
-  polled: readonly string[],
+  index: number,
   context: string,
-): void {
-  if (episode.fate === "heldKill") {
-    // The strongest accounting: a held-point kill modified nothing.
-    for (const rel of polled) {
-      assertSameState(
-        before,
-        after,
-        rel,
-        `${context}: a mutating command killed at the held point modified ` +
-          `nothing — the hold precedes all modification, and its exclusivity ` +
-          `died with the process (SPEC 13.5)`,
-      );
-    }
-    return;
-  }
-  if (episode.kind === "resolve") {
-    // Completed or post-release-killed resolve: the session file is its
-    // only legitimate write among the polled paths.
-    for (const rel of polled) {
-      if (rel === SESSION_REL) continue;
-      assertSameState(
-        before,
-        after,
-        rel,
-        `${context}: a \`review resolve\` writes the session file alone — ` +
-          `never the journal (its only writers are \`rename\` and \`move\`, ` +
-          `SPEC 6.1), never sources or generated modules (SPEC 10.7, 13.4)`,
-      );
-    }
-    return;
-  }
-  // Completed rename or move: one appended journal entry; sessions untouched.
-  assertJournalAppended(before, after, context);
-  assertSameState(
-    before,
-    after,
-    SESSION_REL,
-    `${context}: \`rename\` and \`move\` never write review sessions — ` +
-      `identity mappings are applied at read time, not persisted into ` +
-      `sessions (SPEC 10.4, 13.4)`,
+): Promise<void> {
+  const operation = operationOf(episode, state, context);
+  const workspace = state.workspace;
+  const twin = await runTwin(
+    product,
+    workspace,
+    operation.argv,
+    episode.held,
+    `${context}: the reader-free twin`,
   );
+  let adopted = false;
+  try {
+    const polled = polledRelsOf(episode, state.currentFile).map((rel) => ({
+      rel,
+      abs: workspace.path(rel),
+    }));
+    const startStates = new Map<string, PolledState>();
+    for (const { abs } of polled) {
+      startStates.set(abs, await readPolledState(abs));
+    }
+    const journalAbs = workspace.path(JOURNAL_REL);
+    const order = new JournalOrder();
+    const poller = new PathPoller(
+      polled.map(({ abs }) => abs),
+      (abs, polledState, cycle) => {
+        if (abs === journalAbs) order.observe(polledState, cycle);
+      },
+    );
+    const hold = path.join(workspace.tempRoot, `hold-${String(index)}.tmp`);
+    const reads: StraddleRead[] = [];
+    let running: RunningProduct | undefined;
+    let ended = false;
+    let killedRun = false;
+    poller.start();
+    try {
+      const pre = await startPreReaders(
+        product,
+        workspace.root,
+        episode,
+        context,
+      );
+      reads.push(...pre.reads);
+      const runContext =
+        `${context}: the command (${String(pre.confirmed)} pre-start ` +
+        `reader(s) confirmed running as it started)`;
+      running = await startProduct(product, {
+        cwd: workspace.root,
+        argv: episode.held
+          ? [...operation.argv, "--test-hold", hold]
+          : operation.argv,
+        processGroup: true,
+      });
+      let killed: KilledGroup | undefined;
+      let exited: RunResult | undefined;
+      if (episode.held && (await holdsOrExits(running, hold, runContext))) {
+        for (const menuIndex of episode.heldReads) {
+          await runHeldRead(
+            product,
+            workspace.root,
+            menuIndex,
+            `${runContext}, held read`,
+          );
+        }
+        if (running.hasExited()) {
+          const outcome = await running
+            .waitForExit()
+            .then(summarizeResult, (error: unknown) => {
+              rethrowHarnessError(error);
+              return error instanceof Error ? error.message : String(error);
+            });
+          fail(
+            `${runContext}: the mutating command must proceed only once its ` +
+              `hold file is deleted, but it exited while still held (SPEC ` +
+              `13.5) — ${outcome}`,
+          );
+        }
+        for (const menuIndex of episode.straddleReads) {
+          reads.push(await startRead(product, workspace.root, menuIndex));
+        }
+        if (episode.fate === "heldKill") {
+          killed = await killMutatingRun(
+            running,
+            `${runContext}, killed while held`,
+          );
+        } else {
+          await releaseHoldFile(hold);
+          const liftedAt = performance.now();
+          if (episode.fate === "pastHoldKill") {
+            const remainingMs =
+              episode.killFraction * twin.spanMs -
+              (performance.now() - liftedAt);
+            if (remainingMs > 0) await sleep(remainingMs);
+            killed = await killMutatingRun(
+              running,
+              `${runContext}, killed past its hold`,
+            );
+          } else {
+            exited = await settleMutatingRun(running, runContext);
+          }
+        }
+      } else {
+        if (!episode.held) {
+          for (const menuIndex of episode.straddleReads) {
+            reads.push(await startRead(product, workspace.root, menuIndex));
+          }
+        }
+        exited = await settleMutatingRun(running, runContext);
+      }
+      ended = true;
+      const result = killed?.result ?? exited;
+      if (result === undefined) {
+        throw new Error("P-10 harness defect: the command's end was lost");
+      }
+      killedRun = killed !== undefined && result.signal === "SIGKILL";
+      const after = await comparedSnapshot(workspace.root);
+      if (killed !== undefined && killedRun) {
+        await judgeKilledRun(
+          workspace,
+          twin,
+          after,
+          episode,
+          `${runContext}, the run the kill ended (${episode.fate})`,
+        );
+        state.killed.push(...killed.identifiers);
+      } else {
+        await judgeEndedRun(
+          state,
+          twin,
+          after,
+          result,
+          episode,
+          `${runContext}, ended on its own`,
+        );
+        state.killed = [];
+      }
+      for (const read of reads) {
+        await settleStraddleRead(read, `${context}: the reader`);
+      }
+    } finally {
+      if (running !== undefined && !ended) {
+        await running.killGroup().catch(() => undefined);
+      }
+      for (const read of reads) {
+        if (!read.running.hasExited()) read.running.kill();
+      }
+      await Promise.allSettled(reads.map((read) => read.running.waitForExit()));
+      await releaseHoldFile(hold);
+      await poller.stop();
+    }
+    await judgePolledStates(poller, order, polled, startStates, context);
+
+    if (operation.resolve !== null) {
+      if (!killedRun) {
+        state.ledger.expected.set(
+          operation.resolve.id,
+          operation.resolve.status,
+        );
+      } else if (episode.fate === "pastHoldKill") {
+        state.ledger.pendingKill = operation.resolve;
+      }
+    }
+    if (episode.kind === "move" && episode.fate !== "heldKill") {
+      state.currentFile = episode.to;
+    }
+    if (
+      killedRun &&
+      episode.fate === "pastHoldKill" &&
+      episode.kind !== "resolve"
+    ) {
+      // The operation complete on the twin's workspace (module header): the
+      // schedule continues there, no dead entry standing.
+      await workspace.dispose();
+      state.workspace = twin.workspace;
+      state.killed = [];
+      adopted = true;
+    }
+  } finally {
+    if (!adopted) await twin.workspace.dispose();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1139,38 +1728,39 @@ function settledAccounting(
 async function runP10Trial(
   product: ProductBinding,
   trial: P10Trial,
+  attempt: number,
 ): Promise<void> {
-  const workspace = await TestWorkspace.create({
-    files: {
-      "xspec.config.ts": SPECS_ONLY_CONFIG,
-      [INITIAL_SOURCE_REL]: A_MDX,
-    },
-  });
-  const polled = polledPathsOf(trial);
-  const settled = new SettledStates(workspace, polled);
-  const poller = new PollingReader(workspace, polled);
+  const label = attempt > 1 ? `P-10 (attempt ${String(attempt)})` : "P-10";
+  const state: TrialState = {
+    workspace: await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [INITIAL_SOURCE_REL]: A_MDX,
+      },
+    }),
+    currentFile: INITIAL_SOURCE_REL,
+    killed: [],
+    rows: [],
+    ledger: { ids: [], expected: new Map(), pendingKill: null },
+  };
   try {
     // --- Staging: build, create the audit session, learn the item set ---
+    const workspace = state.workspace;
     await buildOk(
       product,
       workspace,
-      "P-10 staging `build` (the fixed workspace is valid)",
+      `${label} staging \`build\` (the fixed workspace is valid)`,
     );
     await expectExit(
       product,
       workspace,
       ["review", "create", "--strategy", "audit", "--name", SESSION_NAME],
       0,
-      `P-10 staging \`review create --strategy audit --name ${SESSION_NAME}\` ` +
-        `(a fresh valid name; audit needs no baseline, SPEC 10.6)`,
+      `${label} staging \`review create --strategy audit --name ` +
+        `${SESSION_NAME}\` (a fresh valid name; audit needs no baseline, ` +
+        `SPEC 10.6)`,
     );
-
-    const ledger: StatusLedger = {
-      ids: [],
-      expected: new Map(),
-      pendingKill: null,
-    };
-    const initialLabel = "P-10 after `review create`";
+    const initialLabel = `${label} after \`review create\` — \`review status ${SESSION_NAME} --json\``;
     const initialReport = decodeSessionStatusReport(
       await bracketedQuiescentRead(
         workspace,
@@ -1179,11 +1769,11 @@ async function runP10Trial(
             product,
             workspace,
             ["review", "status", SESSION_NAME, "--json"],
-            `${initialLabel} — \`review status ${SESSION_NAME} --json\``,
+            initialLabel,
           ),
-        `${initialLabel} — \`review status ${SESSION_NAME} --json\``,
+        initialLabel,
       ),
-      `${initialLabel} — \`review status ${SESSION_NAME} --json\``,
+      initialLabel,
     );
     if (initialReport.items.length === 0) {
       fail(
@@ -1192,11 +1782,11 @@ async function runP10Trial(
           `(SPEC 10.6), but \`status\` reports none`,
       );
     }
-    ledger.ids = initialReport.items.map((row) => row.id);
-    if (new Set(ledger.ids).size !== ledger.ids.length) {
+    state.ledger.ids = initialReport.items.map((row) => row.id);
+    if (new Set(state.ledger.ids).size !== state.ledger.ids.length) {
       fail(
-        `${initialLabel}: item ids must be unique within the session ` +
-          `(SPEC 10.1, 10.2) — got ${JSON.stringify(ledger.ids)}`,
+        `${initialLabel}: item IDs must be unique within the session ` +
+          `(SPEC 10.1, 10.2) — got ${JSON.stringify(state.ledger.ids)}`,
       );
     }
     for (const row of initialReport.items) {
@@ -1207,136 +1797,52 @@ async function runP10Trial(
             `reports ${JSON.stringify(row.status)}`,
         );
       }
-      ledger.expected.set(row.id, "unresolved");
+      state.ledger.expected.set(row.id, "unresolved");
     }
-
-    // --- Initial settled capture; the poller runs from here on ---
-    let previous = await settled.capture();
-    const initialJournal = requireState(previous, JOURNAL_REL);
-    if (journalEntryCount(initialJournal) !== 0) {
+    state.rows = initialReport.items;
+    const initialJournal = await readPolledState(workspace.path(JOURNAL_REL));
+    if (
+      journalEntryCount(
+        initialJournal.kind === "content" ? initialJournal.bytes : null,
+      ) !== 0
+    ) {
       fail(
-        `P-10 accounting baseline: before any \`rename\` or \`move\` the ` +
-          `journal has zero entries — it is written only by those commands ` +
-          `and comes into existence with the first journaled operation ` +
-          `(SPEC 6.1) — found ${describeState(initialJournal)} at ` +
-          `${JOURNAL_REL}`,
+        `${label} accounting baseline: before any \`rename\` or \`move\` ` +
+          `the journal has zero entries — it is written only by those ` +
+          `commands and comes into existence with the first journaled ` +
+          `operation (SPEC 6.1) — found ${describePolledState(initialJournal)} ` +
+          `at ${JOURNAL_REL}`,
       );
     }
-    poller.start();
 
     // --- The schedule ---
-    let rows: readonly SessionStatusRow[] = initialReport.items;
-    try {
-      for (let index = 0; index < trial.episodes.length; index += 1) {
-        const episode = trial.episodes[index];
-        const context = `P-10 episode ${String(index + 1)}/${String(trial.episodes.length)} [${describeEpisode(episode)}]`;
-
-        let targetId = "";
-        if (episode.kind === "resolve") {
-          const target = resolveTarget(rows, episode.rank, context);
-          targetId = target.id;
-          if (episode.fate === "releaseKill") {
-            ledger.pendingKill = { id: targetId, status: episode.status };
-          }
-        }
-
-        const outcome = await runEpisode(
+    for (const [index, episode] of trial.episodes.entries()) {
+      const context =
+        `${label} episode ${String(index + 1)}/` +
+        `${String(trial.episodes.length)} [${describeEpisode(episode)}]`;
+      await runEpisode(product, state, episode, index, context);
+      state.rows = (
+        await accountingRead(
           product,
-          workspace,
-          episode,
-          index,
-          targetId,
-          context,
-        );
-        if (outcome.resolveCompleted && episode.kind === "resolve") {
-          ledger.expected.set(targetId, episode.status);
-        }
-
-        const now = await settled.capture();
-        settledAccounting(episode, previous, now, polled, context);
-        previous = now;
-
-        rows = (
-          await accountingRead(
-            product,
-            workspace,
-            ledger,
-            `${context} — post-episode accounting`,
-          )
-        ).items;
-      }
-    } finally {
-      await poller.stop();
-    }
-
-    // --- Post-hoc poller validation (T13.5-5's protocol, module header) ---
-    if (poller.pollError !== undefined) {
-      fail(
-        `P-10: the polling reader hit an unexpected filesystem error — ` +
-          poller.pollError,
-      );
-    }
-    if (poller.journalOrderViolation !== undefined) {
-      fail(`P-10: ${poller.journalOrderViolation}`);
-    }
-    if (poller.observationCycles === 0) {
-      fail(
-        "P-10 staging premise: the polling reader completed zero cycles " +
-          "across the whole schedule — the polling cadence is broken",
-      );
-    }
-    for (const rel of polled) {
-      const observed = poller.distinct.get(rel);
-      const legitimate = settled.keys.get(rel);
-      const samples = settled.samples.get(rel);
-      if (
-        observed === undefined ||
-        legitimate === undefined ||
-        samples === undefined
-      ) {
-        throw new Error(`P-10 harness defect: no bookkeeping for ${rel}`);
-      }
-      for (const [key, observation] of observed) {
-        if (legitimate.has(key)) continue;
-        let nearest: PathState | undefined;
-        if (observation.state.kind === "content") {
-          for (const candidate of samples) {
-            if (candidate.kind !== "content") continue;
-            if (
-              nearest === undefined ||
-              nearest.kind !== "content" ||
-              Math.abs(
-                candidate.bytes.length - observation.state.bytes.length,
-              ) <
-                Math.abs(nearest.bytes.length - observation.state.bytes.length)
-            ) {
-              nearest = candidate;
-            }
-          }
-        }
-        fail(
-          `P-10: cycle #${String(observation.firstIndex)} observed ${rel} in ` +
-            `a state matching no settled state of that path — a concurrent ` +
-            `reader only ever observes the prior state or the complete new ` +
-            `content, never a partial write (SPEC 13.5; T13.5-5's protocol). ` +
-            `Observed ${describeState(observation.state)}; settled states: ` +
-            `${samples.map(describeState).join(", ")}.` +
-            (nearest !== undefined &&
-            nearest.kind === "content" &&
-            observation.state.kind === "content"
-              ? `\n${describeByteDifference(observation.state.bytes, nearest.bytes, "observed", "nearest settled")}`
-              : ""),
-        );
-      }
+          state.workspace,
+          state.ledger,
+          `${context} — post-episode accounting`,
+        )
+      ).items;
     }
 
     // --- Final cross-check: stored-status counts via `review list` ---
-    const listLabel = "P-10 final `review list --json`";
+    const listLabel = `${label} final \`review list --json\``;
     const listed = decodeSessionListReport(
       await bracketedQuiescentRead(
-        workspace,
+        state.workspace,
         () =>
-          runJson(product, workspace, ["review", "list", "--json"], listLabel),
+          runJson(
+            product,
+            state.workspace,
+            ["review", "list", "--json"],
+            listLabel,
+          ),
         listLabel,
       ),
       listLabel,
@@ -1358,17 +1864,17 @@ async function runP10Trial(
       );
     }
     const expectedCounts: Record<string, number> = {};
-    for (const status of ledger.expected.values()) {
+    for (const status of state.ledger.expected.values()) {
       expectedCounts[status] = (expectedCounts[status] ?? 0) + 1;
     }
     const reportedTotal = Object.values(entry.counts).reduce(
       (sum, count) => sum + count,
       0,
     );
-    if (reportedTotal !== ledger.ids.length) {
+    if (reportedTotal !== state.ledger.ids.length) {
       fail(
         `${listLabel}: stored-status counts must cover exactly the ` +
-          `session's ${String(ledger.ids.length)} items (SPEC 10.7) — ` +
+          `session's ${String(state.ledger.ids.length)} items (SPEC 10.7) — ` +
           `reported ${JSON.stringify(entry.counts)} (total ` +
           `${String(reportedTotal)})`,
       );
@@ -1395,8 +1901,7 @@ async function runP10Trial(
       }
     }
   } finally {
-    await poller.stop();
-    await workspace.dispose();
+    await state.workspace.dispose();
   }
 }
 
@@ -1406,19 +1911,22 @@ async function runP10Trial(
 const P_10 = defineProductTest({
   id: "P-10",
   title:
-    "concurrency under randomized schedules of concurrent readers and one mutating command via --test-hold and process kills (TEST-SPEC §16 P-10): episodes of `rename`, file-form `move`, and `review resolve` — completed, killed at the held point, or (resolves) killed after release — with read commands during the held phase and straddling the commit window and a continuous polling reader over the journal, the session file, sources, and generated modules; readers observe only prior-or-complete file states (every distinct polled observation byte-equals a settled state, the journal prefix-monotone and never deleted, T13.5-5's protocol); and post-hoc accounting loses nothing: journal lines = successful rename/move operations (exactly one appended entry each, byte-identity across resolves and held-point kills, zero entries at baseline, SPEC 6.1), session statuses = successful resolves (stable item-id set, per-item status equal to the last completed resolve with killed resolves exactly two-valued, `review list` stored-status counts matching, SPEC 10.4, 10.7), with every bracketing read leaving journal and session bytes untouched (SPEC 13.4, 13.5)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), up to 5
-  // episodes per trial, each episode costing a handful of product
-  // invocations (the mutator, up to four reads, the accounting read).
+    "concurrency under randomized schedules of concurrent readers and one mutating command via --test-hold and process kills (TEST-SPEC §16 P-10): episodes of `rename`, file-form `move`, and `review resolve` under `--json`, held or not, run to their end, killed while held, or killed past their hold at fixed fractions of their twin's lift-to-exit span, each kill under T13.5-3's exit-collection discipline (the command's process group SIGKILLed, its exit collected, the group gone) before anything later runs; readers started before each command at drawn leads, at least one confirmed still running (listed, never a zombie) as it starts, plus reads while it holds and straddling its lift or kill, and a polling reader over the journal, the session file, the source, and its module, never the lock path; each command's reader-free twin copied from the workspace, the lock path aside, as it starts and run alone, exit 0. Readers observe only prior-or-complete states (every polled state the path's before or after the episode; the journal prefix-monotone, never deleted; T13.5-5's protocol); nothing is lost (each `rename`/`move` exiting 0 adds exactly one journal line, each killed one at most one; each resolve exiting 0 records its status — read back by quiescent `review status` and `review list` — each killed one records it or leaves the session byte-unchanged); a killed run whose sources, journal, or session files differ from its twin's leaves `.xspec/lock` holding exactly one plain-file entry (T13.5-3's past-the-hold judgement); and readers never exclude a mutating command: each one not killed is never refused (a refusal after a kill voids the trial where a killed group's identifier is listed again, T13.5-3's reuse check) and ends exactly as its twin — exit code, standard output, and the sources, journal, and session files byte-equal (H-6; derived files and graph data not compared), `.xspec/lock` then absent (SPEC 6.1, 10.7, 13.4, 13.5; E-5)",
+  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), two to five
+  // episodes per trial, each a twin and a command plus up to eight reads.
   timeoutMs: 600_000,
   run: async (product) => {
     await checkProperty(
       "P-10 concurrency schedules",
       genP10Trial,
       async (trial) => {
-        await runP10Trial(product, trial);
+        // T13.5-3's reuse check voids a trial (E-5), rerun on a fresh
+        // workspace a bounded number of times, exhaustion a harness error.
+        await runVoidableTrial("P-10 schedule", async (attempt) => {
+          await runP10Trial(product, trial, attempt);
+        });
       },
-      { runs: 3, maxShrinkExecutions: 25, render: renderP10Trial },
+      { runs: 3, maxShrinkExecutions: 4, render: renderP10Trial },
     );
   },
 });

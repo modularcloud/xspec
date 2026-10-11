@@ -1,8 +1,8 @@
 // Certification of CERTIFICATIONS.md fixtures (TEST-SPEC 17 C-1, C-2).
 //
 // One per-fixture verification is generated below for every entry of the
-// CERTIFICATION_FIXTURES manifest (certification-fixtures.ts) — all seven
-// conformers and all twenty-six violators — and the whole-document gate
+// CERTIFICATION_FIXTURES manifest (certification-fixtures.ts) — all eight
+// conformers and all twenty-seven violators — and the whole-document gate
 // (certification-document.test.ts) proves that manifest equal to
 // specs/CERTIFICATIONS.md, so certification demonstrably runs against each
 // fixture in the document (C-1).
