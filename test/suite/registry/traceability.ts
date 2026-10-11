@@ -691,7 +691,8 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T14-5": ["14"],
   // T14-6: 12.7 (the JSON report form pinning `code`) and 12.0 (the exit-2
   // error document carriage) are context with home coverage at
-  // T12.7-*/T12.0-*.
+  // T12.7-*/T12.0-*, and 13.5's exclusion (the 14.26 arm's held `rename`,
+  // staged as T13.5-2 stages it) at T13.5-2.
   "T14-6": ["14"],
   // T14-7: 6.4/6.5/5.3 (the staged operations and the cycle rule),
   // 12.7/12.0 (report carriage; 12.0's unknown-identity usage error on an

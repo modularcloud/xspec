@@ -10,9 +10,10 @@
 // masking by unparseable files and by configuration errors (T14-3), the
 // reporter matrix — which of `build`/`check`/`review`/the machine-interface
 // surfaces reports which condition (T14-4) — grammar selection by file
-// name (T14-5), the stable-code contract — each of the 23 conditions'
-// exact token as the finding's `code`, `null` where 14 assigns none
-// (T14-6) — the refusal-reason contract: each stable refusal code with
+// name (T14-5), the stable-code contract — each of the 26 conditions'
+// exact token, conditions 1–23 as the finding's `code` and the usage
+// errors 24–26 as the exit-2 error document's, `null` where 14 assigns
+// none (T14-6) — the refusal-reason contract: each stable refusal code with
 // its concerned file, range, or identity, every applicable reason together,
 // and the invalid-workspace refusal reporting numbered findings alone
 // (T14-7) — and the location-cardinality contract: a condition several
@@ -165,21 +166,34 @@
 // - T14-6 stages each condition via its primary test's fixture — the same
 //   minimal home-form stagings T14-4 sweeps, plus the five specially
 //   reported conditions' stagings (14.10, 14.12, 14.14, 14.21, 14.23),
-//   hoisted below and shared with T14-4's dedicated arms — and reads it
-//   from ONE stated reporter of T14-4's matrix: `build` for every
-//   both-reporter condition, `check` for 14.10/14.12/14.21, the exit-2
-//   error document for 14.14, `inventory` for 14.23. Its assertion is the
-//   code value alone: at least one finding, every finding carrying the
+//   hoisted below and shared with T14-4's dedicated arms, and the three
+//   usage errors' stagings: 14.24 as T14-9 (f) stages it (a stale
+//   workspace, its graph-data area `.xspec` unwritable) and 14.25 as
+//   T14-10 (g) does (a discovery directory unlistable) — both
+//   permission-staged, Linux leg — and 14.26 as T13.5-2 does
+//   (section-13.5.ts's `judgeBusyRefusal`: a `rename` held at 13.5's
+//   seam, a second `rename` run under `--json` while it holds). Each is
+//   read from ONE stated reporter of T14-4's matrix: `build` for every
+//   both-reporter condition, `check` for 14.10/14.12/14.21, `inventory`
+//   for 14.23, and the exit-2 error document for 14.14, 14.24, and 14.25
+//   (`build`'s) and for 14.26 (the refused `rename`'s). Its assertion is
+//   the code value alone: at least one finding, every finding carrying the
 //   staged condition's exact token — sound because every staging stages
 //   exactly one condition (T14-4 pins the counts; 14.3's per-occurrence
 //   tolerance and several stale files under 14.10 both collapse into
-//   "every finding carries the one staged token"). Count precision,
-//   reporter breadth, and the concern data of these identical stagings
-//   (locations' files, concerned paths, identities) and their correction
-//   information (14.2's expected form, 14.10's rebuild instruction) stay
-//   T14-4's and the home tests' subject; the `code`-null arms mirror
-//   T12.7-3's plain-usage-error and T12.7-1's review-refusal stagings, per
-//   T14-6's own citations.
+//   "every finding carries the one staged token"); an error document's one
+//   finding is decoded form-exact, the document carrying no `findings`
+//   member, so the usage errors' codes appear in no findings array (12.7).
+//   The 14.26 arm runs last in the body: it needs the product's own
+//   exclusion (13.5), so a product predating 14.26 meets every other arm
+//   first. Count precision, reporter breadth, and the concern data of
+//   these identical stagings (locations' files, concerned paths,
+//   identities) and their correction information (14.2's expected form,
+//   14.10's rebuild instruction) stay T14-4's and the home tests' subject
+//   — the usage errors' concerned paths T12.7-3's, T14-9's, and T14-10's,
+//   and the rest of the busy refusal's contract T13.5-2's; the `code`-null
+//   arms mirror T12.7-3's plain-usage-error and T12.7-1's review-refusal
+//   stagings, per T14-6's own citations.
 // - T14-7 stages the refusal reasons via the home fixtures — T6.4-3's and
 //   T6.5-4's exported staging and case tables (TEST-SPEC §14 preamble: the
 //   refusal reasons are staged at T6.4-3, T6.5-4, T6.5-6, T6.6-3) — and
@@ -470,6 +484,7 @@ import {
   T12_2_4_VIOLATION_IDENTITIES,
   VALID_A1_SOURCE,
 } from "./section-12.1-12.2.js";
+import { judgeBusyRefusal } from "./section-13.5.js";
 import { SELF_DEPENDS_STAGED } from "./section-5.1-5.3.js";
 import type {
   BearerLocationExpectation,
@@ -2909,10 +2924,50 @@ const READ_REFUSAL_DECL: WorkspaceDecl = {
   },
 };
 
+/**
+ * T14-6's 14.26 arm (SPEC 14.26, 13.5, 12.0, 12.7): the busy workspace's
+ * `workspace-busy` — a usage error, never a finding — carried as the `code`
+ * of the exit-2 error document, the busy refusal staged as T13.5-2 stages
+ * it (section-13.5.ts's `judgeBusyRefusal`: a freshly built
+ * CONF-CORE-shaped workspace, T13.5-2's command 1 `rename specs/A.mdx a
+ * a2` held at 13.5's seam, `rename specs/A.mdx g g2 --json` run once while
+ * it holds — command 1 still running as that run exits — and the same
+ * operation succeeding once command 1 has completed, so the refusal was
+ * the busy workspace's alone). The run exits 2, its stdout exactly the
+ * error document, decoded form-exact — one finding, no `findings` member,
+ * so the code appears in no findings array (12.7) — whose finding carries
+ * the exact token `workspace-busy`, the token string alone (SPEC 14). The
+ * concerned path is T12.7-3's assertion, the rest of the exclusion's
+ * contract T13.5-2's. Platform-independent (no permission staging), and
+ * last in T14-6's body: it needs the product's own exclusion (13.5), so a
+ * product predating 14.26 meets every other arm first. Exported so a
+ * scratch probe can run it alone.
+ */
+export async function runStableCodeBusyArm(
+  product: ProductBinding,
+): Promise<void> {
+  await judgeBusyRefusal(product, "T14-6 (14.26)", (result) => {
+    const context =
+      "T14-6 (14.26) `rename specs/A.mdx g g2 --json` while a held " +
+      "`rename` holds the workspace";
+    assertExitCode(
+      result,
+      2,
+      `${context} — a busy workspace is a usage error, exit 2, never a ` +
+        `finding (SPEC 14.26, 13.5, 12.0)`,
+    );
+    assertExactCodeToken(
+      [expectErrorDocument(result, context)],
+      26,
+      `${context} — the error document's finding`,
+    );
+  });
+}
+
 const T14_6 = defineProductTest({
   id: "T14-6",
   title:
-    "stable codes: for each of the 25 conditions, staged via its primary test's fixture and read from its stated reporter: conditions 1–23 carry the exact token 14 lists (`missing-id` … `unreadable-record`) as the `code` of their finding in the JSON report form, and conditions 24 and 25 — usage errors, never findings — carry `write-failure` and `read-failure` as the `code` of the exit-2 error document, appearing in no findings array (environment refusals staged by permission removal, Linux leg) — the value is the token string alone, the ordinal numeral no part of it — so a product omitting or misspelling a code fails even where exit class and located information are right; a plain usage error and a review-operation refusal carry no stable code — `code` null (SPEC 14, 12.7, 12.0)",
+    "stable codes: for each of the 26 conditions, staged via its primary test's fixture and read from its stated reporter: conditions 1–23 carry the exact token 14 lists (`missing-id` … `unreadable-record`) as the `code` of their finding in the JSON report form, and conditions 24–26 — usage errors, never findings — carry `write-failure`, `read-failure`, and `workspace-busy` as the `code` of the exit-2 error document, appearing in no findings array (the environment refusals staged by permission removal, Linux leg; the busy workspace staged as T13.5-2 stages it: a `rename` held at the seam, a second `rename` under `--json` while it holds) — the value is the token string alone, the ordinal numeral no part of it — so a product omitting or misspelling a code fails even where exit class and located information are right; a plain usage error and a review-operation refusal carry no stable code — `code` null (SPEC 14, 12.7, 12.0, 13.5)",
   timeoutMs: 300_000,
   run: async (product) => {
     // --- The 18 conditions `build` reports, staged as T14-4 sweeps them
@@ -3180,6 +3235,13 @@ const T14_6 = defineProductTest({
         assertCodeNull(finding, "a review-operation refusal", context);
       }
     });
+
+    // --- 14.26 `workspace-busy`: a usage error, never a finding (SPEC
+    // 14.26, 12.0) — its stable code the exit-2 error document's `code`, in
+    // no findings array (12.7) — the busy workspace staged as T13.5-2
+    // stages it. Last in the body (`runStableCodeBusyArm`): it needs the
+    // product's own exclusion (13.5).
+    await runStableCodeBusyArm(product);
   },
 });
 
