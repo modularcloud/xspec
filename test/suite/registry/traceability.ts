@@ -784,15 +784,18 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "P-11": ["11.2", "11.4", "12.7"],
   "P-12": ["5.7", "11.5"],
   "P-13": ["7.4", "8", "8.1", "8.2"],
-  // P-14 (its read arms) asserts 14.25's absence rule — a source vanished
-  // between a read's discovery and its content read, removed or relocated
-  // since discovery (13.5), reads as undiscovered: never a `read-failure`
-  // for it, never condition 20 for it at offset 0 (14; TEST-SPEC §14's
-  // index lists P-14 under 14.25) — and, for a read naming it, the
-  // unknown-file usage error with it absent, exit 2, `code` null (12.0;
-  // 11.4, 11.5). The reads' own answers (11.1, 11.3, 12.3) are compared
-  // with the product's quiescent ones, carriage context with home coverage
-  // at T11-*, T11.3-*, and T12.3-*.
+  // P-14 asserts 14.25's absence rule — a source vanished between a
+  // command's discovery (for a mutating command, its rediscovery under
+  // exclusivity, 13.5) and its content read, removed or relocated since
+  // discovery, reads as undiscovered: never a `read-failure` for it, never
+  // condition 20 for it at offset 0 (14; TEST-SPEC §14's index lists P-14
+  // under 14.25) — and, for a read naming it, the unknown-file usage error
+  // with it absent, exit 2, `code` null (12.0; 11.4, 11.5). The reads' own
+  // answers (11.1, 11.3, 12.3), and the outcomes of `build`, `check`, the
+  // `rename`, and `review create` driven alone (12.1, 12.2, 6.4, 10.7) —
+  // their output and the files they leave — are compared with the
+  // product's quiescent ones, carriage context with home coverage at
+  // T11-*, T11.3-*, T12.3-*, T12.1-*, T12.2-*, T6.4-*, and T10.7-*.
   "P-14": ["11.4", "11.5", "12.0", "13.5", "14"],
   "P-15": ["13.4", "13.5"],
 };

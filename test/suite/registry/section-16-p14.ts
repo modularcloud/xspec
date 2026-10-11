@@ -49,7 +49,9 @@
 //
 // Each trial (`runP14Trial`): the workspace is created fresh and built
 // quiescently with F present (`build`, exit 0 — a `build` failure on a valid
-// draw is a product failure, reported with its seed). The refreshing reads
+// draw is a product failure, reported with its seed), and that built state
+// is kept, a byte copy outside the root (`keepBuiltState`), for the commands
+// driven alone below. First the reads' arm. The refreshing reads
 // (SPEC 13.3) of the series' menu (`readMenu`) — `ids --json`, `query
 // nodes`, `occurrences`, and `view` of another spec source, and, in the
 // spec-source series, `view` of F and `at` of F at a within-file offset,
@@ -83,21 +85,55 @@
 // takes the file's absence for a refused read. Such a failure depends on a
 // flip landing in that window, so it may show on some runs only — the
 // product's failure, never flakiness (E-5): every assertion holds for a
-// conforming product under every timing. A falsified trial is shrunk
-// within P14_MAX_SHRINK_EXECUTIONS whole trials, a candidate whose re-run
-// does not meet the window again being no counterexample (P-10's budget
-// rule); a read's hang declines shrinking (each re-observation would cost
-// a full hang guard). The bodies count, per trial, the reads that met F
-// present and absent (those whose two references differ), for scratch
-// probes (`P14Observation`); the registered body observes nothing.
+// conforming product under every timing.
 //
-// Not yet here: `build` and `check`, each run alone while F flips, and the
-// mutating commands (a `rename` of the drawn section, and `review create
-// --strategy audit --name n`), each run alone on a fresh copy of the built
-// workspace while F flips — P-14's remaining arms, which the property test
-// gains in a later task (FIX_PLAN Task 47). The drawn `rename` target is
-// part of the draw already, so the draws stay as they are when those arms
-// arrive.
+// Then the commands driven alone (`soloArm`; TEST-SPEC P-14: "`build` and
+// `check` are driven likewise", and "The mutating commands are driven
+// likewise, as T13.5-12 defers to this property"), in this order: `build`,
+// `check`, the drawn `rename` — `rename <file> <id> w`, a top-level
+// section of a spec source other than F, so a section in another file —
+// and `review create --strategy audit --name n` (`soloCommands`), each
+// under `--json`, so a refusal's error document is standard-output content
+// (SPEC 12.0). Every run of them is alone — no other xspec command beside
+// it — on a fresh byte copy of the kept built state, F present: twice
+// quiescently, with F present and with F parked as the trial parks it,
+// the references; then P14_SOLO_RUNS times while the flipper flips F every
+// drawn period, F restored once the run has ended. A run's outcome is its
+// exit code and standard output and — for all but `check`, which writes
+// nothing (SPEC 12.2, 13.3) — the files it leaves: every file of the copy
+// but the paths the harness flips (F's discovered path and, relocated,
+// its park) and the lock path (H-6), so `build`'s derived files and graph
+// data (every other file the copy's own, which `build` never writes: SPEC
+// 12.1, 13.4) and the mutating commands' sources, journal, session,
+// derived files, and graph data. The references' premises: with F present
+// each exits 0 (on the valid workspace `build` just generated, `check`
+// finds nothing; SPEC 12.1, 12.2, 6.4, 10.7); with F absent `check` exits
+// 1 — the graph data built with F present no longer matches the sources,
+// staleness (12.2, 13.3, 14.10) — and the others 0; and F's presence
+// shows: the two references differ (F changes `build`'s graph data and the
+// graph data the `rename` regenerates, TEST-SPEC P-14; `review create`
+// first refreshes the stale graph data, 13.3), so no product passes
+// vacuously. Each run while F flips must leave, together, one reference's
+// outcome — never a `read-failure` for the vanished file, never condition
+// 20 for it, never a crash (TEST-SPEC P-14; SPEC 14.25): a mutating
+// command's content reads follow its rediscovery under exclusivity (13.5),
+// so F may be present at one discovery and absent at the other, and either
+// way the run reads as one quiescent run does. So P-14 fails a product
+// whose `build`, `check`, `rename`, or `review create` takes a source
+// vanished between its discovery and its content read for an unreadable
+// one, or leaves state mixing the two references' — derived files of one,
+// graph data of the other — again on the runs whose flips meet the window
+// (E-5).
+//
+// A falsified trial is shrunk within P14_MAX_SHRINK_EXECUTIONS whole
+// trials, a candidate whose re-run does not meet the window again being no
+// counterexample (P-10's budget rule); a run's hang declines shrinking
+// (each re-observation would cost a full hang guard). The bodies count,
+// per trial, the reads that met F present and absent (those whose two
+// references differ) and, per command driven alone, the runs that met
+// each reference, for scratch probes (`P14Observation`, `P14Arms`
+// selecting the arms run); the registered body observes nothing and runs
+// every arm.
 //
 // Uncertified (CERTIFICATIONS.md, P-14's exclusion note): no conformer here
 // serves `at` or code groups whose markers change `occurrences`' answer.
@@ -113,10 +149,16 @@ import {
   fail,
   HarnessAssertionError,
 } from "../../helpers/assertions.js";
+import { EXCLUDE_LOCK_PATH, isLockPathBytes } from "../../helpers/lock-path.js";
 import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { diffSnapshots, snapshotDirectory } from "../../helpers/snapshot.js";
+import type {
+  DirectorySnapshot,
+  SnapshotChange,
+} from "../../helpers/snapshot.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { summarizeResult } from "../../helpers/subprocess.js";
@@ -125,7 +167,7 @@ import {
   TestWorkspace,
   tsPathsOf,
 } from "../../helpers/workspace.js";
-import { runBounded } from "./section-13.5.js";
+import { copyTreeBytes, runBounded } from "./section-13.5.js";
 
 // ---------------------------------------------------------------------------
 // Configurations (staged-source records: every trial stages its
@@ -195,10 +237,17 @@ export const P14_WORKERS = 3;
 export const P14_ROUNDS = 2;
 /** Trials per fixed seed, per series (E-5). */
 export const P14_RUNS_PER_SEED = 2;
+/**
+ * Runs of each command driven alone while F flips, per trial (E-5's fixed
+ * count; the drawn period its spread).
+ */
+export const P14_SOLO_RUNS = 3;
 /** Shrink budget, in trials (helpers/property.ts): each costs a whole trial. */
 const P14_MAX_SHRINK_EXECUTIONS = 4;
-/** Each read's hang guard (H-8, H-10): far past any read under this load. */
-const READ_TIMEOUT_MS = 60_000;
+/** Each run's hang guard (H-8, H-10): far past any run under this load. */
+const RUN_TIMEOUT_MS = 60_000;
+/** The `review create` arm's session name (TEST-SPEC P-14: `--name n`). */
+const SESSION_NAME = "n";
 
 // ---------------------------------------------------------------------------
 // The draw model
@@ -838,13 +887,18 @@ class SourceFlipper {
       await rename(from, to);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        // Only the flipper moves F, and no read writes a source (SPEC
-        // 13.3: a refresh writes graph data alone): F's absence where it
-        // was left is the product's doing.
+        // Only the flipper moves F, and no command P-14 runs beside it
+        // writes a source but the drawn `rename`, which rewrites no
+        // flipped path: F's absence where it was left is the product's
+        // doing.
         fail(
           `P-14: the flipped source is gone from ${from}, where the harness ` +
-            `left it — a read removed or relocated a source, which no read ` +
-            `may do (SPEC 13.3, 13.4)`,
+            `left it — the command running beside the flipper removed or ` +
+            `relocated a source, which none of P-14's may: a read, ` +
+            `\`build\`, or \`check\` writes no source, \`review create\` ` +
+            `its session and a refresh alone, and the drawn \`rename\` ` +
+            `rewrites no flipped path (SPEC 13.3, 13.4, 12.1, 12.2, 10.7, ` +
+            `6.4)`,
         );
       }
       throw error;
@@ -871,6 +925,27 @@ export interface P14Observation {
   readonly metAbsent: number;
   /** Concurrent reads whose two references are identical. */
   readonly indistinct: number;
+  /** The commands driven alone, in the order run (module header). */
+  readonly solo: readonly P14SoloObservation[];
+}
+
+/** What a scratch probe learns of one command driven alone. */
+export interface P14SoloObservation {
+  readonly command: P14SoloKind;
+  /** Runs while F flipped whose outcome is F present's. */
+  readonly metPresent: number;
+  /** Runs while F flipped whose outcome is F absent's. */
+  readonly metAbsent: number;
+  /** Changes the flipper made during each of those runs. */
+  readonly flips: readonly number[];
+}
+
+/** Which arms a trial runs (scratch probes; the registered body: all). */
+export interface P14Arms {
+  /** The concurrent reads' arm (default: run). */
+  readonly reads?: boolean;
+  /** The commands driven alone (default: every one, in their order). */
+  readonly solo?: readonly P14SoloKind[];
 }
 
 /** Exit code (or signal) and standard output equal (TEST-SPEC P-14). */
@@ -893,7 +968,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 function characterize(result: RunResult, flipped: string): string | null {
   if (result.signal !== null) {
-    return `the process died by signal ${result.signal} — a crash`;
+    return `a crash, its process killed by signal ${result.signal}`;
   }
   let doc: unknown;
   try {
@@ -939,16 +1014,19 @@ const ABSENCE_RULE =
   "error (SPEC 14.25, 13.5, 12.0; 11.4, 11.5)";
 
 /**
- * One P-14 trial (module header): the workspace built with F present; the
+ * One P-14 trial (module header): the workspace built with F present, its
+ * built state kept for the commands driven alone; the reads' arm — the
  * quiescent references with F present and absent, and their premises; the
  * concurrent phase while F flips; every read judged against the two
- * references. `observe` (scratch probes) receives the trial's counts once
- * every read has been judged.
+ * references — then each command driven alone (`soloArm`). `observe`
+ * (scratch probes) receives the trial's counts once every run has been
+ * judged; `arms` (scratch probes) selects the arms run.
  */
 export async function runP14Trial(
   product: ProductBinding,
   draw: P14Draw,
   observe?: (observation: P14Observation) => void,
+  arms: P14Arms = {},
 ): Promise<void> {
   const config = draw.series === "spec" ? P14_SPEC_CONFIG : P14_CODE_CONFIG;
   const sources = renderP14Sources(draw);
@@ -966,35 +1044,19 @@ export async function runP14Trial(
       `P-14 (the ${draw.series}-source series; F ${draw.flipped}, ` +
       `${draw.park === "removed" ? "removed from the workspace" : `relocated to ${RELOCATION_DIR}/`} ` +
       `and restored every ${String(draw.flipPeriodMs)} ms)`;
-    const basename = path.posix.basename(draw.flipped);
-    let parked: string;
-    if (draw.park === "removed") {
-      parked = path.join(workspace.tempRoot, "parked", basename);
-      await mkdir(path.dirname(parked), { recursive: true });
-    } else {
-      await workspace.dir(RELOCATION_DIR);
-      parked = workspace.path(`${RELOCATION_DIR}/${basename}`);
-    }
     const flipper = new SourceFlipper(
       workspace.path(draw.flipped),
-      parked,
+      await parkedPathIn(workspace, draw),
       draw.flipPeriodMs,
     );
     // Each run under its hang guard; a hang — runBounded's one diagnosed
     // failure — declines shrinking: each re-observation would cost a full
     // hang guard (helpers/assertions.ts `shrinkable`).
-    const run = async (
-      argv: readonly string[],
-      what: string,
-    ): Promise<RunResult> => {
+    const runIn: P14Run = async (cwd, argv, what) => {
       try {
-        return await runBounded(
-          product,
-          workspace.root,
-          argv,
-          `${context} ${what}`,
-          { timeoutMs: READ_TIMEOUT_MS },
-        );
+        return await runBounded(product, cwd, argv, `${context} ${what}`, {
+          timeoutMs: RUN_TIMEOUT_MS,
+        });
       } catch (error) {
         if (error instanceof HarnessAssertionError) {
           fail(error.message, { shrinkable: false });
@@ -1002,6 +1064,8 @@ export async function runP14Trial(
         throw error;
       }
     };
+    const run = (argv: readonly string[], what: string): Promise<RunResult> =>
+      runIn(workspace.root, argv, what);
 
     const build = await run(["build"], "quiescent `build` with F present");
     if (build.signal !== null || build.exitCode !== 0) {
@@ -1012,36 +1076,135 @@ export async function runP14Trial(
           summarizeResult(build),
       );
     }
+    const built = await keepBuiltState(workspace);
 
-    const menu = readMenu(draw);
-    const present: RunResult[] = [];
-    for (const read of menu) {
-      present.push(await run(read.argv, `${read.what} (quiescent, F present)`));
-    }
-    await flipper.park();
-    const absent: RunResult[] = [];
-    try {
+    let reads: Omit<P14Observation, "solo"> = {
+      series: draw.series,
+      flipped: draw.flipped,
+      park: draw.park,
+      flipPeriodMs: draw.flipPeriodMs,
+      flips: 0,
+      reads: 0,
+      metPresent: 0,
+      metAbsent: 0,
+      indistinct: 0,
+    };
+    if (arms.reads !== false) {
+      const menu = readMenu(draw);
+      const present: RunResult[] = [];
       for (const read of menu) {
-        absent.push(await run(read.argv, `${read.what} (quiescent, F absent)`));
+        present.push(
+          await run(read.argv, `${read.what} (quiescent, F present)`),
+        );
       }
-    } finally {
-      await flipper.restore();
-    }
-    assertReferences(context, draw, menu, present, absent);
+      await flipper.park();
+      const absent: RunResult[] = [];
+      try {
+        for (const read of menu) {
+          absent.push(
+            await run(read.argv, `${read.what} (quiescent, F absent)`),
+          );
+        }
+      } finally {
+        await flipper.restore();
+      }
+      assertReferences(context, draw, menu, present, absent);
 
-    const answers = await concurrentPhase(draw, menu, flipper, run);
-    const observation = judgeAnswers(
-      context,
-      draw,
-      menu,
-      present,
-      absent,
-      answers,
-      flipper.flips,
-    );
-    observe?.(observation);
+      const answers = await concurrentPhase(draw, menu, flipper, run);
+      reads = judgeAnswers(
+        context,
+        draw,
+        menu,
+        present,
+        absent,
+        answers,
+        flipper.flips,
+      );
+    }
+
+    const solo: P14SoloObservation[] = [];
+    for (const command of soloCommands(draw)) {
+      if (arms.solo !== undefined && !arms.solo.includes(command.kind)) {
+        continue;
+      }
+      solo.push(await soloArm(context, draw, command, built, runIn));
+    }
+    observe?.({ ...reads, solo });
   } finally {
     await workspace.dispose();
+  }
+}
+
+/** A run under its hang guard, in `cwd` (`runP14Trial`'s `runIn`). */
+type P14Run = (
+  cwd: string,
+  argv: readonly string[],
+  what: string,
+) => Promise<RunResult>;
+
+/**
+ * Where F parks in `workspace` (module header): renamed into the
+ * workspace's temporary directory, outside its root, or into
+ * RELOCATION_DIR under the root, outside every group's globs — each
+ * directory brought into existence first (in a copy of a built workspace,
+ * RELOCATION_DIR already stands: the trial makes it before its `build`).
+ */
+async function parkedPathIn(
+  workspace: TestWorkspace,
+  draw: P14Draw,
+): Promise<string> {
+  const basename = path.posix.basename(draw.flipped);
+  if (draw.park === "removed") {
+    const parked = path.join(workspace.tempRoot, "parked", basename);
+    await mkdir(path.dirname(parked), { recursive: true });
+    return parked;
+  }
+  await workspace.dir(RELOCATION_DIR);
+  return workspace.path(`${RELOCATION_DIR}/${basename}`);
+}
+
+/**
+ * The state every command driven alone starts from (TEST-SPEC P-14: "the
+ * workspace built quiescently with the source present"): a byte copy of
+ * the trial's workspace taken as its quiescent `build` left it, before any
+ * read could refresh its graph data (SPEC 13.3), kept in the workspace's
+ * temporary directory, outside its root; the lock path aside (H-6), where
+ * a `build`, acquiring nothing, leaves nothing. A copy differing from the
+ * workspace is a harness error, never a product verdict.
+ */
+async function keepBuiltState(
+  workspace: TestWorkspace,
+): Promise<DirectorySnapshot> {
+  const kept = path.join(workspace.tempRoot, "built");
+  await mkdir(kept);
+  await copyTreeBytes(
+    Buffer.from(workspace.root),
+    Buffer.from(kept),
+    isLockPathBytes,
+  );
+  const built = await snapshotDirectory(kept);
+  assertCopyEqual(
+    await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
+    built,
+  );
+  return built;
+}
+
+/** A copy's byte state equals its origin's, or the harness erred. */
+function assertCopyEqual(
+  origin: DirectorySnapshot,
+  copy: DirectorySnapshot,
+): void {
+  const differences = diffSnapshots(origin, copy);
+  if (differences.length > 0) {
+    throw new Error(
+      `harness error: P-14's copy of ${origin.root} at ${copy.root} ` +
+        `differs from it: ` +
+        differences
+          .slice(0, 10)
+          .map((change) => `${change.change} ${change.path}`)
+          .join(", "),
+    );
   }
 }
 
@@ -1180,7 +1343,7 @@ function judgeAnswers(
   absent: readonly RunResult[],
   answers: readonly ConcurrentAnswer[],
   flips: number,
-): P14Observation {
+): Omit<P14Observation, "solo"> {
   let metPresent = 0;
   let metAbsent = 0;
   let indistinct = 0;
@@ -1231,6 +1394,402 @@ function judgeAnswers(
     metAbsent,
     indistinct,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The commands driven alone
+
+/** The commands P-14 drives alone while F flips, in their order. */
+export const P14_SOLO_KINDS = [
+  "build",
+  "check",
+  "rename",
+  "review create",
+] as const;
+
+/** One of P14_SOLO_KINDS. */
+export type P14SoloKind = (typeof P14_SOLO_KINDS)[number];
+
+/** A quiescent exit code a reference must answer, and why. */
+interface P14Exit {
+  readonly code: number;
+  readonly why: string;
+}
+
+/** One command P-14 drives alone (module header). */
+interface P14Solo {
+  readonly kind: P14SoloKind;
+  readonly argv: readonly string[];
+  readonly what: string;
+  /**
+   * Whether the files it leaves join its outcome — every file of the copy
+   * but the paths the harness flips and the lock path (H-6). `check`
+   * writes nothing (SPEC 12.2, 13.3): its exit code and standard output
+   * alone are compared.
+   */
+  readonly leavesFiles: boolean;
+  /** The references' premises: the quiescent exit codes, F present and absent. */
+  readonly exits: { readonly present: P14Exit; readonly absent: P14Exit };
+  /** Why the two references must differ (a premise: F's presence shows). */
+  readonly differsBecause: string;
+}
+
+const VALID_WORKSPACE =
+  "the workspace is valid by construction, nothing referencing F, so with " +
+  "F present or absent";
+
+/**
+ * The commands driven alone, under `--json` so a refusal's error document
+ * is standard-output content (SPEC 12.0): `build`, `check`, the drawn
+ * `rename` (a section in a spec source other than F), and `review create
+ * --strategy audit --name n` (TEST-SPEC P-14).
+ */
+function soloCommands(draw: P14Draw): P14Solo[] {
+  const { file, id, to } = draw.rename;
+  return [
+    {
+      kind: "build",
+      argv: ["build", "--json"],
+      what: "`build --json`",
+      leavesFiles: true,
+      exits: {
+        present: {
+          code: 0,
+          why: `${VALID_WORKSPACE} \`build\` succeeds (SPEC 12.1)`,
+        },
+        absent: {
+          code: 0,
+          why: `${VALID_WORKSPACE} \`build\` succeeds (SPEC 12.1)`,
+        },
+      },
+      differsBecause:
+        "F's presence changes `build`'s graph data (TEST-SPEC P-14; SPEC " +
+        "12.1, 13.3) — and, in the spec-source series, the derived files it " +
+        "generates or removes (13.1, 13.4)",
+    },
+    {
+      kind: "check",
+      argv: ["check", "--json"],
+      what: "`check --json`",
+      leavesFiles: false,
+      exits: {
+        present: {
+          code: 0,
+          why:
+            "on the workspace `build` just generated, every derived file and " +
+            "the graph data match the sources: no finding (SPEC 12.2)",
+        },
+        absent: {
+          code: 1,
+          why:
+            "with F absent, the graph data the `build` wrote with F present " +
+            "no longer matches the sources — staleness, a `check` finding " +
+            "(SPEC 12.2, 13.3, 14.10)",
+        },
+      },
+      differsBecause:
+        "with F absent the graph data `build` wrote with F present is stale " +
+        "(SPEC 12.2, 13.3, 14.10)",
+    },
+    {
+      kind: "rename",
+      argv: ["rename", file, id, to, "--json"],
+      what: `\`rename ${file} ${id} ${to} --json\``,
+      leavesFiles: true,
+      exits: {
+        present: {
+          code: 0,
+          why: `${VALID_WORKSPACE} the \`rename\` of an existing section to a fresh ID succeeds (SPEC 6.4)`,
+        },
+        absent: {
+          code: 0,
+          why: `${VALID_WORKSPACE} the \`rename\` of an existing section to a fresh ID succeeds (SPEC 6.4)`,
+        },
+      },
+      differsBecause:
+        "F's presence changes the graph data the `rename`'s finishing " +
+        "regeneration writes (TEST-SPEC P-14; SPEC 6.4, 12.1, 13.3)",
+    },
+    {
+      kind: "review create",
+      argv: [
+        "review",
+        "create",
+        "--strategy",
+        "audit",
+        "--name",
+        SESSION_NAME,
+        "--json",
+      ],
+      what: `\`review create --strategy audit --name ${SESSION_NAME} --json\``,
+      leavesFiles: true,
+      exits: {
+        present: {
+          code: 0,
+          why: `${VALID_WORKSPACE} \`review create\` of a new audit session succeeds (SPEC 10.6, 10.7)`,
+        },
+        absent: {
+          code: 0,
+          why: `${VALID_WORKSPACE} \`review create\` of a new audit session succeeds (SPEC 10.6, 10.7)`,
+        },
+      },
+      differsBecause:
+        "with F absent the graph data `build` wrote with F present is " +
+        "stale, and `review create` refreshes it before deriving its items " +
+        "(SPEC 13.3, 10.6, 10.7)",
+    },
+  ];
+}
+
+/** One run of a command driven alone, as P-14 compares it. */
+interface SoloOutcome {
+  readonly result: RunResult;
+  /**
+   * The files it leaves — the flipped paths and the lock path aside (H-6);
+   * `null` where they are not compared (`check`).
+   */
+  readonly files: DirectorySnapshot | null;
+  /** Changes the flipper made during the run (none for a reference). */
+  readonly flips: number;
+}
+
+/** The differences between the files two runs leave (none when uncompared). */
+function fileChanges(
+  reference: SoloOutcome,
+  outcome: SoloOutcome,
+): SnapshotChange[] {
+  if (reference.files === null || outcome.files === null) return [];
+  return diffSnapshots(reference.files, outcome.files);
+}
+
+/** Exit code, standard output, and the files left, together equal. */
+function sameOutcome(a: SoloOutcome, b: SoloOutcome): boolean {
+  return sameAnswer(a.result, b.result) && fileChanges(a, b).length === 0;
+}
+
+/**
+ * The snapshot keys of the paths the harness flips (TEST-SPEC P-14: "the
+ * paths the harness flips aside"): F's discovered path and, relocated, its
+ * park under the root.
+ */
+function flippedKeys(draw: P14Draw): ReadonlySet<string> {
+  const keys = new Set([draw.flipped]);
+  if (draw.park === "relocated") {
+    keys.add(`${RELOCATION_DIR}/${path.posix.basename(draw.flipped)}`);
+  }
+  return keys;
+}
+
+/**
+ * One run of `solo`, alone, on a fresh byte copy of the built state
+ * (`keepBuiltState`): with F present, with F parked as the trial parks it,
+ * or while the flipper flips F every drawn period — F restored once the
+ * run has ended, before the files it leaves are captured.
+ */
+async function soloRun(
+  draw: P14Draw,
+  solo: P14Solo,
+  built: DirectorySnapshot,
+  mode: "present" | "absent" | "flipping",
+  runIn: P14Run,
+  what: string,
+): Promise<SoloOutcome> {
+  const copy = await TestWorkspace.create();
+  try {
+    await copyTreeBytes(Buffer.from(built.root), Buffer.from(copy.root));
+    assertCopyEqual(built, await snapshotDirectory(copy.root));
+    const flipper = new SourceFlipper(
+      copy.path(draw.flipped),
+      await parkedPathIn(copy, draw),
+      draw.flipPeriodMs,
+    );
+    let result: RunResult;
+    if (mode === "flipping") {
+      flipper.start();
+      try {
+        result = await runIn(copy.root, solo.argv, what);
+      } finally {
+        await flipper.stop();
+      }
+    } else {
+      if (mode === "absent") await flipper.park();
+      try {
+        result = await runIn(copy.root, solo.argv, what);
+      } finally {
+        await flipper.restore();
+      }
+    }
+    const flipped = flippedKeys(draw);
+    const files = solo.leavesFiles
+      ? await snapshotDirectory(copy.root, {
+          exclude: (rel) =>
+            isLockPathBytes(rel) ||
+            flipped.has(Buffer.from(rel).toString("latin1")),
+        })
+      : null;
+    return { result, files, flips: flipper.flips };
+  } finally {
+    await copy.dispose();
+  }
+}
+
+/** The rule every run of a command driven alone is held to (TEST-SPEC P-14). */
+const SOLO_RULE =
+  "a discovered source found absent when its content is read — removed or " +
+  "relocated since discovery, for a mutating command since its rediscovery " +
+  "under exclusivity — reads as undiscovered, so `build`, `check`, a " +
+  "`rename`, and `review create`, each run alone while it flips, leave " +
+  "what one quiescent run leaves with it present or with it absent: never " +
+  "a `read-failure` for it, never a crash (SPEC 14.25, 13.5, 12.1, 12.2, " +
+  "6.4, 10.7; H-6)";
+
+/**
+ * A command driven alone (module header): its two quiescent references,
+ * their premises, then P14_SOLO_RUNS runs while F flips, each outcome
+ * equal to one reference's — the first deviant run failing at once.
+ */
+async function soloArm(
+  context: string,
+  draw: P14Draw,
+  solo: P14Solo,
+  built: DirectorySnapshot,
+  runIn: P14Run,
+): Promise<P14SoloObservation> {
+  const present = await soloRun(
+    draw,
+    solo,
+    built,
+    "present",
+    runIn,
+    `${solo.what} (alone, quiescent, F present)`,
+  );
+  const absent = await soloRun(
+    draw,
+    solo,
+    built,
+    "absent",
+    runIn,
+    `${solo.what} (alone, quiescent, F absent)`,
+  );
+  assertSoloReferences(context, draw, solo, present, absent);
+  let metPresent = 0;
+  const flips: number[] = [];
+  for (let index = 0; index < P14_SOLO_RUNS; index += 1) {
+    const outcome = await soloRun(
+      draw,
+      solo,
+      built,
+      "flipping",
+      runIn,
+      `${solo.what} (alone while F flips, run ${String(index + 1)} of ${String(P14_SOLO_RUNS)})`,
+    );
+    flips.push(outcome.flips);
+    if (sameOutcome(outcome, present)) {
+      metPresent += 1;
+    } else if (!sameOutcome(outcome, absent)) {
+      failSolo(context, draw, solo, index, outcome, present, absent);
+    }
+  }
+  return {
+    command: solo.kind,
+    metPresent,
+    metAbsent: P14_SOLO_RUNS - metPresent,
+    flips,
+  };
+}
+
+/** The premises of a command's two references (module header). */
+function assertSoloReferences(
+  context: string,
+  draw: P14Draw,
+  solo: P14Solo,
+  present: SoloOutcome,
+  absent: SoloOutcome,
+): void {
+  for (const [side, outcome] of [
+    ["present", present],
+    ["absent", absent],
+  ] as const) {
+    const expected = solo.exits[side];
+    const { result } = outcome;
+    if (result.signal !== null || result.exitCode !== expected.code) {
+      const shown = characterize(result, draw.flipped);
+      fail(
+        `${context}: ${solo.what}, run alone and quiescent on a fresh copy ` +
+          `of the built workspace with F ${side}, must answer exit ` +
+          `${String(expected.code)} — ${expected.why}` +
+          `${shown === null ? "" : `; it answered ${shown}`}: ` +
+          summarizeResult(result),
+      );
+    }
+  }
+  if (sameOutcome(present, absent)) {
+    fail(
+      `${context}: ${solo.what}, run alone and quiescent with F present and ` +
+        `with F absent, leaves byte-identical outcomes — exit code, standard ` +
+        `output${solo.leavesFiles ? ", and the files it leaves" : ""} — so ` +
+        `F's presence does not show in it, though ${solo.differsBecause}: ` +
+        summarizeResult(present.result),
+    );
+  }
+}
+
+/** At most ten differences, each with its detail. */
+function renderSoloChanges(changes: readonly SnapshotChange[]): string {
+  const shown = changes
+    .slice(0, 10)
+    .map((change) => `${change.change} ${change.path} (${change.detail})`);
+  if (changes.length > 10) {
+    shown.push(`… ${String(changes.length - 10)} more`);
+  }
+  return shown.join("; ");
+}
+
+/** A run while F flipped whose outcome is neither reference's (diagnosed). */
+function failSolo(
+  context: string,
+  draw: P14Draw,
+  solo: P14Solo,
+  index: number,
+  outcome: SoloOutcome,
+  present: SoloOutcome,
+  absent: SoloOutcome,
+): never {
+  const against = (label: string, reference: SoloOutcome): string => {
+    const parts: string[] = [];
+    if (sameAnswer(outcome.result, reference.result)) {
+      parts.push("its exit code and standard output equal that run's");
+    } else {
+      parts.push(
+        `that run exited ${String(reference.result.exitCode)}; standard ` +
+          `output: ${describeByteDifference(outcome.result.stdoutBytes, reference.result.stdoutBytes, "this run", label)}`,
+      );
+    }
+    if (solo.leavesFiles) {
+      const changes = fileChanges(reference, outcome);
+      parts.push(
+        changes.length === 0
+          ? "the files it leaves equal that run's"
+          : `${String(changes.length)} difference(s) in the files it ` +
+              `leaves: ${renderSoloChanges(changes)}`,
+      );
+    }
+    return `against the quiescent run with ${label}: ${parts.join("; ")}`;
+  };
+  const shown = characterize(outcome.result, draw.flipped);
+  fail(
+    `${context}: ${solo.what}, run alone on a fresh copy of the built ` +
+      `workspace while F flipped (run ${String(index + 1)} of ` +
+      `${String(P14_SOLO_RUNS)}, ${String(outcome.flips)} flips during it), ` +
+      `left an outcome — its exit code, standard output` +
+      `${solo.leavesFiles ? ", and the files it leaves, together" : ""} — ` +
+      `equal to neither quiescent run's` +
+      `${shown === null ? "" : `; it answered ${shown}`}: ` +
+      `${summarizeResult(outcome.result)}\n` +
+      `${against("F present", present)}\n` +
+      `${against("F absent", absent)}\n` +
+      `(${SOLO_RULE})`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1387,15 +1946,21 @@ export const P14_TS_FORM_VECTORS: ReadonlyArray<
 const P_14 = defineProductTest({
   id: "P-14",
   title:
-    "sources vanishing under reads (TEST-SPEC §16 P-14), its read arms — `build`, `check`, and the mutating commands to come: random valid workspaces holding a spec source no other file references and, in a second series, a code source a configured code group matches that no other file imports, holding markers on sections of spec sources, the flipped source referencing nothing in the drawn `rename` target's subtree; built quiescently with it present, the refreshing reads (`ids --json`, `query nodes`, `occurrences`, `view` of another spec source, and, in the spec-source series, `view` of the flipped source and `at` of it at a within-file offset) run quiescently with the source present and with it absent — a read naming it answering, absent, the unknown-file usage error (exit 2, `code` null), never condition 20 for it at offset 0 — and then repeatedly and concurrently while the source is repeatedly removed from the workspace or relocated outside every group's globs and restored, each change one atomic rename: each read's exit code and standard output equal those of the quiescent run with the source present or of the one with it absent — never a `read-failure` for the vanished file, never condition 20 for it, never a crash (SPEC 14.25, 13.5, 12.0, 11.4, 11.5; E-5)",
+    "sources vanishing under reads (TEST-SPEC §16 P-14): random valid workspaces holding a spec source no other file references and, in a second series, a code source a configured code group matches that no other file imports, holding markers on sections of spec sources, the flipped source referencing nothing in the drawn `rename` target's subtree; built quiescently with it present, the refreshing reads (`ids --json`, `query nodes`, `occurrences`, `view` of another spec source, and, in the spec-source series, `view` of the flipped source and `at` of it at a within-file offset) run quiescently with the source present and with it absent — a read naming it answering, absent, the unknown-file usage error (exit 2, `code` null), never condition 20 for it at offset 0 — and then repeatedly and concurrently while the source is repeatedly removed from the workspace or relocated outside every group's globs and restored, each change one atomic rename: each read's exit code and standard output equal those of the quiescent run with the source present or of the one with it absent; and `build`, `check`, a `rename` of a section in another file, and `review create --strategy audit --name n`, each run alone on a fresh copy of the workspace as built, quiescently with the source present and with it absent and then while it flips: each run's exit code, standard output, and — but for `check`, which writes nothing — the files it leaves (sources, journal, session, derived files, graph data; the flipped paths aside, the lock path excluded, H-6) together equal those of one quiescent run of the same command with the source present or with it absent — never a `read-failure` for the vanished file, never condition 20 for it, never a crash (SPEC 14.25, 13.5, 12.0, 11.4, 11.5; E-5)",
   // Wall-clock hang guard only (H-10): two series, each P14_RUNS_PER_SEED
   // trials at each of the three fixed seeds (E-5), plus up to
-  // P14_MAX_SHRINK_EXECUTIONS shrink trials on a falsification; each
-  // read's own guard is READ_TIMEOUT_MS. Measured under the unprivileged
-  // namespace: ~101–106 s passing against a P-14-conforming stand-in (the
-  // built product re-running a read its own race answer spoiled), ~37–40 s
-  // failing against the built product, its four shrink trials included.
-  timeoutMs: 600_000,
+  // P14_MAX_SHRINK_EXECUTIONS shrink trials on a falsification; each run's
+  // own guard is RUN_TIMEOUT_MS. Measured under the unprivileged namespace:
+  // ~231 s passing against a P-14-conforming stand-in (the built product
+  // re-running any run its own race answer spoiled, a command driven alone
+  // from the state the spoiled run started in): the spec-source series
+  // ~122 s, the code-source series ~108 s, 17–22 s a trial (a fresh
+  // workspace and its `build`; the reads' arm, 12 quiescent and 36
+  // concurrent reads in the spec-source series, 8 and 24 in the other; and
+  // 2 + P14_SOLO_RUNS runs of each command driven alone). Failing against
+  // the built product, its four shrink trials included: ~40 s, at the
+  // reads' arm.
+  timeoutMs: 900_000,
   run: async (product) => {
     await checkProperty(
       "P-14 sources vanishing under reads — the spec-source series",
