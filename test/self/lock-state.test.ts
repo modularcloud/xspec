@@ -54,6 +54,7 @@ import {
   assertHeldState,
   assertLockDirectoryEntries,
   assertLockPathAbsent,
+  assertLockPathAfterKill,
   assertLockPathAsCaptured,
   assertLockPathHolds,
   assertLockPathUntouchedAround,
@@ -686,6 +687,111 @@ test("the lock path absent — `.xspec` absent or no directory included — and 
       assertLockPathHolds(obstructed.root, { staged: [obstruction] }, "probe"),
     ),
     /the staging at "\.xspec" lies outside the lock path \.xspec\/lock/,
+  );
+}, 60_000);
+
+test("the lock path after a kill — T13.5-3's past-the-hold judgement, shared with T13.5-7's kill arm: the kill ending the run while a path the twin's run changed is short of the twin's final state requires exactly one plain-file entry (nothing, two entries, or a directory beside one failing, diagnosed); a kill finding every such path final is judged no further; a run that ended before the kill landed — its own exit or another signal — requires nothing at `.xspec/lock` (anything there failing, diagnosed) (SPEC 13.5; T13.5-3, T13.5-7, T13.5-11)", async () => {
+  const FINAL: Readonly<Record<string, string>> = {
+    "specs/a.txt": "source, rewritten\n",
+    ".xspec/graph.json": '{"g":2}\n',
+    ".xspec/journal": "j\nk\n",
+  };
+  const twinWorkspace = await makeWorkspace(FINAL);
+  const twin = {
+    final: await snapshotDirectory(twinWorkspace.root),
+    // As helpers/snapshot.ts `diffSnapshots` lists them: sorted keys.
+    changed: [".xspec/graph.json", ".xspec/journal", "specs/a.txt"],
+  };
+  const killed = { exitCode: null, signal: "SIGKILL" } as const;
+  const exited = { exitCode: 0, signal: null } as const;
+  const terminated = { exitCode: null, signal: "SIGTERM" } as const;
+  // The prior state: every path the twin's run changed short of its final.
+  const stopped = await makeWorkspace();
+  const lockPath = stopped.path(".xspec/lock");
+  const judge = async (
+    workspace: TestWorkspace,
+    exit: {
+      readonly exitCode: number | null;
+      readonly signal: NodeJS.Signals | null;
+    },
+  ): Promise<unknown> => {
+    const after = await snapshotDirectory(workspace.root);
+    return await assertLockPathAfterKill(
+      workspace.root,
+      exit,
+      after,
+      twin,
+      "probe",
+    ).catch((thrown: unknown) => thrown);
+  };
+  const shortRule =
+    /probe: the kill ended the run while \.xspec\/graph\.json, \.xspec\/journal, specs\/a\.txt did not yet hold the twin's final state, so the run had not made its last write and had not released/;
+
+  // Short: the dead run's entry, alone, stands.
+  await writeEntry(stopped, ascii("dead"));
+  expect(await judge(stopped, killed)).toBe("short");
+  await fsp.rm(entryPath(stopped, ascii("dead")));
+  expectDiagnosed(
+    await judge(stopped, killed),
+    shortRule,
+    /exactly 1 entry, each a plain file, and nothing else .*; found no entry$/,
+  );
+  await fsp.rm(lockPath, { recursive: true });
+  expectDiagnosed(
+    await judge(stopped, killed),
+    shortRule,
+    /; found nothing at \.xspec\/lock$/,
+  );
+  await writeEntry(stopped, ascii("dead"));
+  await writeEntry(stopped, ascii("other"));
+  expectDiagnosed(
+    await judge(stopped, killed),
+    shortRule,
+    /; found 2 entries \("\.xspec\/lock\/dead", "\.xspec\/lock\/other"\)$/,
+  );
+  await fsp.rm(entryPath(stopped, ascii("other")));
+  await fsp.mkdir(entryPath(stopped, ascii("sub")));
+  expectDiagnosed(
+    await judge(stopped, killed),
+    shortRule,
+    /"\.xspec\/lock\/sub": a directory — no entry/,
+  );
+  await fsp.rm(lockPath, { recursive: true });
+
+  // One path short is enough, and only the short ones are named.
+  const partly = await makeWorkspace({
+    ...FINAL,
+    ".xspec/journal": BUILT[".xspec/journal"]!,
+  });
+  expectDiagnosed(
+    await judge(partly, killed),
+    /probe: the kill ended the run while \.xspec\/journal did not yet hold/,
+    /; found nothing at \.xspec\/lock$/,
+  );
+
+  // Final: judged no further, whatever the lock path holds.
+  const completed = await makeWorkspace(FINAL);
+  expect(await judge(completed, killed)).toBe("final");
+  await writeEntry(completed, ascii("dead"));
+  expect(await judge(completed, killed)).toBe("final");
+
+  // Ended before the kill landed: nothing at the lock path.
+  const ended = await makeWorkspace(FINAL);
+  expect(await judge(ended, exited)).toBe("exited");
+  expect(await judge(ended, terminated)).toBe("exited");
+  // Its paths' states are no part of this judgement.
+  expect(await judge(stopped, exited)).toBe("exited");
+  await fsp.mkdir(ended.path(".xspec/lock"));
+  expectDiagnosed(
+    await judge(ended, exited),
+    /probe: the run ended before the kill landed \(exit code 0\), having released as it ended \(SPEC 13\.5; T13\.5-11\): nothing must be at \.xspec\/lock once every run has ended/,
+    /but an empty directory is at \.xspec\/lock$/,
+  );
+  await writeEntry(ended, ascii("left"));
+  expectDiagnosed(
+    await judge(ended, terminated),
+    /probe: the run ended before the kill landed \(signal SIGTERM\)/,
+    /holding "\.xspec\/lock\/left"$/,
   );
 }, 60_000);
 

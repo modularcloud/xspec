@@ -77,6 +77,13 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { killHeldRun } from "../../helpers/lock-staging.js";
+import type { KilledRunTwin } from "../../helpers/lock-state.js";
+import {
+  assertLockDirectoryEntries,
+  assertLockPathAbsent,
+  assertLockPathAfterKill,
+} from "../../helpers/lock-state.js";
 import type { PermissionStaging } from "../../helpers/permissions.js";
 import {
   stageWriteRefusal,
@@ -90,6 +97,7 @@ import {
   assertLeavesUnchanged,
   assertSnapshotsEqual,
   describeEntry,
+  diffSnapshots,
   displaySnapshotPath,
   lockPathExclusion,
   snapshotDirectory,
@@ -98,6 +106,7 @@ import {
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type {
+  KilledGroup,
   ProductBinding,
   RunGuards,
   RunningProduct,
@@ -163,6 +172,41 @@ export async function awaitHoldFile(
         `before modifying anything (SPEC 13.5) — ` +
         `${error instanceof Error ? error.message : String(error)}`,
     );
+  }
+}
+
+/**
+ * Start `argv` under `--test-hold` in `workspace` — in a process group of
+ * its own, so that a kill reaches every process the run started (TEST-SPEC
+ * T13.5-3's exit-collection discipline, `RunningProduct.killGroup`) — await
+ * its hold file, and lift the hold, deleting it: the start of T13.5-3's
+ * past-the-hold kills and their twins, and of T13.5-7's kill arm. Resolves
+ * with the run and the instant of its lift (`performance.now()`). A run
+ * never holding fails diagnosed (H-8), its group killed first.
+ */
+export async function startHeldAndLift(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  holdName: string,
+  context: string,
+): Promise<{ readonly running: RunningProduct; readonly liftedAt: number }> {
+  const hold = holdPathFor(workspace, holdName);
+  const running = await startProduct(product, {
+    cwd: workspace.root,
+    argv: [...argv, "--test-hold", hold],
+    processGroup: true,
+  });
+  try {
+    await awaitHoldFile(running, hold, context);
+    await releaseHoldFile(hold);
+    return { running, liftedAt: performance.now() };
+  } catch (error) {
+    await running.killGroup().catch((kill: unknown) => {
+      rethrowHarnessError(kill);
+    });
+    await releaseHoldFile(hold);
+    throw error;
   }
 }
 
@@ -794,6 +838,33 @@ export async function runStaged(
   }
 }
 
+/**
+ * Nothing at `.xspec/lock` once a staged command has ended (TEST-SPEC
+ * T13.5-7: every arm but (b), whose read-only `.xspec` keeps the emptied
+ * lock directory, ends with `.xspec/lock` absent; T13.5-11). `acquiring`: a
+ * mutating command, whose release — no staging covering `.xspec`, the lock
+ * directory's parent — deletes its entry, then the emptied lock directory;
+ * otherwise `build` or a refreshing read, which acquires nothing, no write
+ * but acquisition and release touching the lock path (SPEC 13.5, 13.4).
+ */
+async function assertNoLockPathAfter(
+  workspace: TestWorkspace,
+  acquiring: boolean,
+  context: string,
+): Promise<void> {
+  await assertLockPathAbsent(
+    workspace.root,
+    acquiring
+      ? `${context}: once it has ended — no staging covers \`.xspec\`, the ` +
+          `lock directory's parent, so its release deletes its entry, then ` +
+          `the emptied lock directory, a stop never withholding either ` +
+          `deletion (SPEC 13.5, 14.24; T13.5-11)`
+      : `${context}: it acquires nothing (SPEC 13.5: \`build\` and the ` +
+          `reads take no exclusivity), and no write but acquisition and ` +
+          `release touches the lock path (13.4)`,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // The 14.24 contract and the states `check` reports
 // ---------------------------------------------------------------------------
@@ -1293,6 +1364,7 @@ export async function sourceEditsArm(
       context,
     );
     expectWriteFailure(result, [RENAME_B_PATH], context);
+    await assertNoLockPathAfter(workspace, true, context);
     const after = await snapshotWorkspace(workspace.root);
     assertPinnedState(
       prepared.before,
@@ -1341,7 +1413,11 @@ export async function sourceEditsArm(
  * staleness for B's module and companions and the graph-data unit form;
  * once restored, `impact --base <pre-rename ref>` reports the old identity
  * deleted and the new one added (manual restructuring, 6.7) and the next
- * `build` leaves `check` clean.
+ * `build` leaves `check` clean. Release meets the staging too: the
+ * read-only `.xspec` refuses the deletion of the emptied lock directory,
+ * which remains, empty — no outcome changed, no write failure reported
+ * (13.5, 14.24) — until a mutating command run once the permissions are
+ * restored proceeds unrefused and removes it (T13.5-11).
  */
 export async function journalCommitPointArm(
   product: ProductBinding,
@@ -1366,6 +1442,20 @@ export async function journalCommitPointArm(
       context,
     );
     expectWriteFailure(result, [JOURNAL_PATH], context);
+    // Release, refused at the lock directory (the staging restored by now):
+    // the run's entry deleted, the read-only `.xspec` refusing the deletion
+    // of the emptied lock directory — a residue changing no outcome, no
+    // write failure reported, the error document above concerning the
+    // journal alone (SPEC 13.5, 14.24).
+    await assertLockDirectoryEntries(
+      workspace.root,
+      { entries: 0 },
+      `${context}: release's residue — the run's entry deleted, the read-only ` +
+        `\`.xspec\` refusing the deletion of the emptied lock directory, ` +
+        `which remains, empty, no outcome changed and no write failure ` +
+        `reported (SPEC 13.5: a deletion the environment refuses changes no ` +
+        `outcome and is no write failure; 14.24)`,
+    );
     const after = await snapshotWorkspace(workspace.root);
     assertPinnedState(
       prepared.before,
@@ -1422,6 +1512,33 @@ export async function journalCommitPointArm(
       ["check"],
       0,
       `${context}: after the next \`build\`, \`check\` is clean (SPEC 12.2, 13.5)`,
+    );
+    // The residue stands until a mutating command run once the permissions
+    // are restored proceeds and removes it: `check`, `impact`, and `build`
+    // acquire nothing, and no write but acquisition and release touches the
+    // lock path (SPEC 13.5, 13.4).
+    await assertLockDirectoryEntries(
+      workspace.root,
+      { entries: 0 },
+      `${context}: the residue still stands, empty, after \`check\`, ` +
+        `\`impact\`, and \`build\`, which acquire nothing (SPEC 13.4: no ` +
+        `write but acquisition and release touches the lock path)`,
+    );
+    const remover = ["review", "create", "--strategy", "audit", "--name", "r"];
+    const removerContext = `${context}: \`${remover.join(" ")}\`, a mutating command run once the permissions are restored`;
+    await expectExit(
+      product,
+      workspace,
+      remover,
+      0,
+      `${removerContext}, proceeds unrefused — the emptied lock directory ` +
+        `holds no entry, so nothing there refuses its acquisition (SPEC 13.5)`,
+    );
+    await assertLockPathAbsent(
+      workspace.root,
+      `${removerContext}, removes the residue: its acquisition adds its ` +
+        `entry to the emptied lock directory and its release deletes that ` +
+        `entry, then the lock directory (SPEC 13.5; T13.5-11)`,
     );
   } finally {
     await workspace.dispose();
@@ -1500,6 +1617,7 @@ export async function afterAppendArm(
       context,
     );
     expectWriteFailure(result, MOVE_MARKDOWN_WRITES, context);
+    await assertNoLockPathAfter(workspace, true, context);
     const after = await snapshotWorkspace(workspace.root);
     assertPinnedState(
       restrictSnapshot(prepared.before, isOrderedWritePath),
@@ -1606,6 +1724,7 @@ export async function relocationArm(
       context,
     );
     expectWriteFailure(result, [MOVE_ORIGIN], context);
+    await assertNoLockPathAfter(workspace, true, context);
     const after = await snapshotWorkspace(workspace.root);
     assertPinnedState(
       before,
@@ -1786,6 +1905,7 @@ export async function reviewMutatorsArm(
       [SESSION_FILE],
       resolveContext,
     );
+    await assertNoLockPathAfter(workspace, true, resolveContext);
     const afterResolve = await snapshotWorkspace(workspace.root);
     assertSameEntry(
       afterResolve,
@@ -1860,6 +1980,7 @@ export async function reviewMutatorsArm(
       [NEW_SESSION_FILE],
       createContext,
     );
+    await assertNoLockPathAfter(workspace, true, createContext);
     const afterCreate = await snapshotWorkspace(workspace.root);
     if (afterCreate.entries.has(NEW_SESSION_FILE)) {
       fail(
@@ -1889,6 +2010,7 @@ export async function reviewMutatorsArm(
       [SESSION_FILE],
       splitContext,
     );
+    await assertNoLockPathAfter(workspace, true, splitContext);
     assertSameEntry(
       await snapshotWorkspace(workspace.root),
       staged,
@@ -1965,6 +2087,7 @@ export async function buildArm(product: ProductBinding): Promise<void> {
       `${context} — the first \`specs/b/\` write in the product's order, a ` +
         `derived path (B's module or a companion), is the refused one`,
     );
+    await assertNoLockPathAfter(workspace, false, context);
     const after = await snapshotWorkspace(workspace.root);
     assertSnapshotsEqual(
       restrictSnapshot(staged, isOrderedWritePath),
@@ -2056,6 +2179,7 @@ export async function refreshingReadsArm(
             `environment refuses concerns the graph-data area, never a ` +
             `path inside it, and answers nothing (SPEC 14.24, 13.3, 11.2)`,
         );
+        await assertNoLockPathAfter(workspace, false, label);
       }
       const checkLabel = `${context} \`check --json\``;
       const checkResult = await runSettled(
@@ -2132,30 +2256,51 @@ export async function refreshingReadsArm(
   }
 }
 
-// Post-release kill delays in milliseconds — scheduling choreography only,
-// never an assertion input (H-10): the operative assertion is
-// delay-independent and disjunctive exactly as 13.5 admits.
+// Post-lift kill delays in milliseconds — scheduling choreography only,
+// never an assertion input (H-10): every assertion of a kill is conditioned
+// on what the kill found — the collected exit and the workspace — and holds
+// for a conforming product under every timing; one fixed spread, in CI as
+// everywhere (E-5).
 const KILL_DELAYS_MS: readonly number[] = [0, 2, 5, 10, 20, 40, 80, 160];
 
 /**
  * The kill arm, a robustness check only — a kill lands nondeterministically,
- * the refused write being the deterministic seam: a kill at the held point
- * leaves the workspace consistent (`check` exits 0: the hold precedes all
- * modification), and across a spread of post-release kill timings on (a)'s
- * rename `check` never crashes and reports exactly a state 13.5 admits —
- * clean, or condition 5–7 findings alone (a partly applied rewrite), or
- * condition 10 findings alone (the journal appended, derived files not yet
- * regenerated) — while the journal is byte-equal either to its prior bytes
- * or to the twin's post-operation bytes (13.5: each write complete).
- * Platform-safe: no permission staging.
+ * the refused write being the deterministic seam. Each kill is made under
+ * TEST-SPEC T13.5-3's exit-collection discipline without the reuse check:
+ * the rename started in a process group of its own, the whole group killed
+ * with SIGKILL, the started process's exit collected, and no process of the
+ * group listed before `check` runs, no mutating command following. A kill
+ * at the held point (T13.5-3's kill while held, `killHeldRun`) leaves
+ * `.xspec/lock` holding exactly one entry, a plain file — the dead run's
+ * (13.5: an abnormal termination leaves its entry) — and the workspace
+ * consistent (`check` exits 0: the hold precedes all modification). Across
+ * a spread of kill timings after the lift on (a)'s rename, the lock path's
+ * state is T13.5-3's past-the-hold arm's, judged by its shared machinery
+ * (helpers/lock-state.ts `assertLockPathAfterKill`, against the rename
+ * twin's final state and the paths its run changed): one plain-file entry
+ * wherever the kill stopped the run short of the twin's final state,
+ * nothing where the run ended first; the journal is byte-equal either to
+ * its prior bytes or to the twin's post-operation bytes (13.5: each write
+ * complete); and `check` never crashes and reports exactly a state 13.5
+ * admits — clean, or condition 5–7 findings alone (a partly applied
+ * rewrite), or condition 10 findings alone (the journal appended, derived
+ * files not yet regenerated). No permission staging; the process list and
+ * process groups are the Linux leg's (the Windows subset selects T13.5-7
+ * nowhere).
  */
 export async function runKillArm(
   product: ProductBinding,
   twin: TwinOutcome,
 ): Promise<void> {
+  // The past-the-hold judgement's basis: the twin's final state and every
+  // path its run changed, the lock path aside (H-6).
+  const judgedAgainst: KilledRunTwin = {
+    final: twin.after,
+    changed: diffSnapshots(twin.before, twin.after).map((change) => change.key),
+  };
   const probe = async (delayMs: number | null): Promise<void> => {
     const label =
-      delayMs === null ? "held point" : `${String(delayMs)} ms after release`;
+      delayMs === null ? "held point" : `${String(delayMs)} ms after its lift`;
     const context = `T13.5-7 (kill, ${label}) \`rename specs/b/B.mdx b b2 --test-hold <path>\``;
     const prepared = await prepareRefusalWorkspace(
       product,
@@ -2165,30 +2310,48 @@ export async function runKillArm(
     const { workspace } = prepared;
     try {
       assertTwinsIdentical(prepared.before, twin.before, context);
-      const hold = holdPathFor(workspace, "hold-kill.tmp");
-      const running = await startProduct(product, {
-        cwd: workspace.root,
-        argv: [...RENAME_ARGV, "--test-hold", hold],
-      });
-      try {
-        await awaitHoldFile(running, hold, context);
-        if (delayMs === null) {
-          // Held-point kill: the hold file is never deleted.
-          running.kill("SIGKILL");
-        } else {
-          await releaseHoldFile(hold);
-          if (delayMs > 0) await sleep(delayMs);
-          running.kill("SIGKILL");
+      let after: DirectorySnapshot;
+      if (delayMs === null) {
+        // T13.5-3's kill while held: `killHeldRun` asserts the run killed
+        // while held and the lock directory's one entry, a plain file.
+        await killHeldRun(product, {
+          root: workspace.root,
+          argv: RENAME_ARGV,
+          holdPath: holdPathFor(workspace, "hold-kill.tmp"),
+          context,
+        });
+        after = await snapshotWorkspace(workspace.root);
+      } else {
+        const { running, liftedAt } = await startHeldAndLift(
+          product,
+          workspace,
+          RENAME_ARGV,
+          "hold-kill.tmp",
+          context,
+        );
+        const remainingMs = delayMs - (performance.now() - liftedAt);
+        if (remainingMs > 0) await sleep(remainingMs);
+        let killed: KilledGroup;
+        try {
+          killed = await running.killGroup();
+        } catch (error) {
+          rethrowHarnessError(error);
+          return fail(
+            `${context}: the run must end on its own or by the kill, its ` +
+              `exit collected (SPEC 13.5; H-8) — ` +
+              `${error instanceof Error ? error.message : String(error)}`,
+          );
         }
-        // The run settles for kills and for completions that beat the kill
-        // alike; the death's shape is not asserted (a post-release kill
-        // lands nondeterministically).
-        await running.waitForExit();
-      } finally {
-        running.kill();
-        await releaseHoldFile(hold);
+        after = await snapshotWorkspace(workspace.root);
+        await assertLockPathAfterKill(
+          workspace.root,
+          killed.result,
+          after,
+          judgedAgainst,
+          `${context}: the lock path's state after the kill, T13.5-3's ` +
+            `past-the-hold arm's`,
+        );
       }
-      const after = await snapshotWorkspace(workspace.root);
       const journal = after.entries.get(JOURNAL_PATH);
       if (
         !sameEntry(journal, prepared.before.entries.get(JOURNAL_PATH)) &&
@@ -2201,7 +2364,7 @@ export async function runKillArm(
             renderEntry(journal),
         );
       }
-      const checkContext = `${context} \`check --json\` after the kill`;
+      const checkContext = `${context} \`check --json\` after the kill, its group gone`;
       const result = await runSettled(
         product,
         workspace,

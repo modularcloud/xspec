@@ -39,7 +39,8 @@
 // build/query storm),
 // T13.5-5 (atomic visibility via a polling reader), T13.5-7 (interrupted or
 // write-refused mutation: the pinned write order — the refusal arms (a)–(f)
-// composed from write-refusal-staging.ts, and the kill arm), T13.5-8
+// composed from write-refusal-staging.ts, release's state after each, and
+// the kill arm), T13.5-8
 // (acquisition's place in the order: the acquisition-first arms — each
 // invocation a later check refuses, on a valid workspace whose code group
 // discovers a code source and on a failing one, run under `--json` beside a
@@ -247,14 +248,22 @@
 //   modification — seam neutrality) and read every rewritten-byte
 //   expectation from a twin on which the same operation ran unrefused
 //   (H-6); the states are asserted entry by entry against 13.5's pinned
-//   per-command write order (write-refusal-staging.ts). Its kill-timing
-//   spread is a fixed delay list — kill scheduling is choreography, never
-//   an assertion input (H-10); the operative assertion is delay-independent
-//   and disjunctive exactly as 13.5 admits: after a post-release kill,
-//   `check` exits 0 or 1 (never a signal death, never another code — the
-//   configuration is intact, so the exit-2 class is not stageable) with
+//   per-command write order (write-refusal-staging.ts), each arm then
+//   asserting release's state: (b)'s residue — the emptied lock directory
+//   its read-only `.xspec` keeps, until a later mutating command removes it
+//   — and every other arm's absence of `.xspec/lock`. Its kills follow
+//   T13.5-3's exit-collection discipline without the reuse check (the
+//   group gone before `check` runs, no mutating command following); its
+//   kill-timing spread is a fixed delay list — kill scheduling is
+//   choreography, never an assertion input (H-10); the operative assertions
+//   are delay-independent and disjunctive exactly as 13.5 admits: after a
+//   post-lift kill, the lock path is in T13.5-3's past-the-hold state
+//   (helpers/lock-state.ts `assertLockPathAfterKill`, the shared machinery)
+//   and `check` exits 0 or 1 (never a signal death, never another code —
+//   the configuration is intact, so the exit-2 class is not stageable) with
 //   condition 5–7 findings alone or condition 10 findings alone, and after
-//   a held-point kill it exits 0 (the hold precedes all modification).
+//   a held-point kill the dead run's entry stands and `check` exits 0 (the
+//   hold precedes all modification).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -295,10 +304,11 @@ import {
   killHeldRun,
   stageLeftover,
 } from "../../helpers/lock-staging.js";
+import type { KilledRunTwin } from "../../helpers/lock-state.js";
 import {
   assertHeldState,
-  assertLockDirectoryEntries,
   assertLockPathAbsent,
+  assertLockPathAfterKill,
   assertLockPathAsCaptured,
   assertOnlyEntry,
   captureLockPath,
@@ -310,16 +320,13 @@ import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type {
   DirectorySnapshot,
-  SnapshotEntry,
   SnapshotOptions,
 } from "../../helpers/snapshot.js";
 import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
   assertSnapshotsEqual,
-  describeEntryDifference,
   diffSnapshots,
-  displaySnapshotPath,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import type {
@@ -357,6 +364,7 @@ import {
   renameTwin,
   runKillArm,
   runWriteRefusalArms,
+  startHeldAndLift,
   WRITE_FAILURE_CODE,
   WRITE_REFUSALS_STAGED,
 } from "./write-refusal-staging.js";
@@ -2015,17 +2023,15 @@ const PAST_THE_HOLD_KILL_FRACTIONS: readonly number[] = [
   0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1,
 ];
 
-/** A past-the-hold twin: its operation held, lifted, and run to its end. */
-interface PastTheHoldTwin {
+/**
+ * A past-the-hold twin: its operation held, lifted, and run to its end —
+ * its final state and the paths its run changed being the basis of the
+ * shared post-kill judgement (helpers/lock-state.ts
+ * `assertLockPathAfterKill`, T13.5-7's kill arm's too).
+ */
+interface PastTheHoldTwin extends KilledRunTwin {
   /** Its run: exit 0. */
   readonly result: RunResult;
-  /** Its workspace's final state. */
-  readonly final: DirectorySnapshot;
-  /**
-   * The snapshot key of every path its run changed — added, removed, or
-   * changed against its pre-invocation state, the lock path aside (H-6).
-   */
-  readonly changed: readonly string[];
   /** The span from its lift to its exit, in milliseconds. */
   readonly spanMs: number;
 }
@@ -2104,39 +2110,6 @@ async function withCopyOf<T>(
 }
 
 /**
- * Start `argv` under `--test-hold` in `copy` — in a process group of its
- * own, so that a kill reaches every process the run started (T13.5-3's
- * discipline) — await its hold file, and lift the hold, deleting it.
- * Resolves with the run and the instant of its lift (`performance.now()`).
- * A run never holding fails diagnosed (H-8), its group killed first.
- */
-async function startHeldAndLift(
-  product: ProductBinding,
-  copy: TestWorkspace,
-  argv: readonly string[],
-  holdName: string,
-  context: string,
-): Promise<{ readonly running: RunningProduct; readonly liftedAt: number }> {
-  const hold = holdPathFor(copy, holdName);
-  const running = await startProduct(product, {
-    cwd: copy.root,
-    argv: [...argv, "--test-hold", hold],
-    processGroup: true,
-  });
-  try {
-    await awaitHoldFile(running, hold, context);
-    await releaseHoldFile(hold);
-    return { running, liftedAt: performance.now() };
-  } catch (error) {
-    await running.killGroup().catch((kill: unknown) => {
-      rethrowHarnessError(kill);
-    });
-    await releaseHoldFile(hold);
-    throw error;
-  }
-}
-
-/**
  * The past-the-hold twin of `operation` (TEST-SPEC T13.5-3: "the same
  * operation held and lifted alike on an identical workspace, that span
  * measured on it"): on a fresh copy of the base, held, lifted as soon as
@@ -2198,24 +2171,6 @@ async function measurePastTheHoldTwin(
   });
 }
 
-/** Whether two snapshot entries (either absent) hold one byte state. */
-function sameEntryState(
-  first: SnapshotEntry | undefined,
-  second: SnapshotEntry | undefined,
-): boolean {
-  if (first === undefined || second === undefined) return first === second;
-  return describeEntryDifference(first, second) === undefined;
-}
-
-/** Snapshot keys rendered for a diagnosis, at most ten. */
-function renderKeys(keys: readonly string[]): string {
-  const shown = keys.slice(0, 10).map(displaySnapshotPath);
-  if (keys.length > shown.length) {
-    shown.push(`… and ${String(keys.length - shown.length)} more`);
-  }
-  return shown.join(", ");
-}
-
 /**
  * One past-the-hold kill (TEST-SPEC T13.5-3): on a fresh copy of the base,
  * `operation` is held, lifted, and — `fraction` of its twin's lift-to-exit
@@ -2223,8 +2178,10 @@ function renderKeys(keys: readonly string[]): string {
  * (`killGroup`: the whole group killed with SIGKILL, the started process's
  * exit collected, no process of the group listed), its group confirmed
  * gone before the lock path is inspected; no later command runs, the reuse
- * check aside. The collected exit tells the kill's landing: SIGKILL where
- * the kill, not a normal exit, ended the run. Where it did, while some path
+ * check aside. The lock path is judged by the shared post-kill judgement
+ * (helpers/lock-state.ts `assertLockPathAfterKill`, T13.5-7's kill arm's
+ * too): the collected exit tells the kill's landing, SIGKILL where the
+ * kill, not a normal exit, ended the run. Where it did, while some path
  * the twin's run changed — a source, the journal, a session file, a derived
  * file, or graph data — did not yet hold the twin's final state, the run
  * had not made its last write, so had not released: `.xspec/lock` holds
@@ -2233,9 +2190,9 @@ function renderKeys(keys: readonly string[]): string {
  * after its last write; an abnormal termination leaves it). A kill ending
  * the run with every such path already in its final state is judged no
  * further: the run may then have been releasing. A run that exited before
- * the kill landed ends exactly as its twin — exit code, output, and
- * workspace byte-equal (H-6: the lock path aside) — with `.xspec/lock`
- * absent (T13.5-11).
+ * the kill landed has `.xspec/lock` absent (T13.5-11) and ends exactly as
+ * its twin — exit code, output, and workspace byte-equal (H-6: the lock
+ * path aside).
  */
 async function pastTheHoldKill(
   product: ProductBinding,
@@ -2272,26 +2229,14 @@ async function pastTheHoldKill(
     }
     const { result } = killed;
     const after = await snapshotDirectory(copy.root);
-    if (result.signal === "SIGKILL") {
-      const short = twin.changed.filter(
-        (key) =>
-          !sameEntryState(after.entries.get(key), twin.final.entries.get(key)),
-      );
-      if (short.length > 0) {
-        await assertLockDirectoryEntries(
-          copy.root,
-          { entries: 1 },
-          `${context}: the kill ended the run while ${renderKeys(short)} ` +
-            `did not yet hold the twin's final state, so the run had not ` +
-            `made its last write and had not released — its entry stands, ` +
-            `a dead run's leftover (SPEC 13.5: a run's entry stands until ` +
-            `its release, which comes as the command ends, after its last ` +
-            `write, so its exclusion spans every write it makes; an ` +
-            `abnormal termination leaves its entry)`,
-        );
-      }
-      return;
-    }
+    const landing = await assertLockPathAfterKill(
+      copy.root,
+      result,
+      after,
+      twin,
+      context,
+    );
+    if (landing !== "exited") return;
     assertRunOutcomesEqual(
       result,
       twin.result,
@@ -2306,11 +2251,6 @@ async function pastTheHoldKill(
       `${context}: the run exited before the kill landed, so its workspace ` +
         `is byte-equal to its twin's final state (TEST-SPEC T13.5-3; H-6: ` +
         `the lock path aside)`,
-    );
-    await assertLockPathAbsent(
-      copy.root,
-      `${context}: the run exited before the kill landed, having released ` +
-        `as it ended (SPEC 13.5; T13.5-11)`,
     );
   });
 }
@@ -3090,11 +3030,17 @@ const T13_5_5 = defineProductTest({
 // kill arm read their expectations from it), the refusal arms on the Linux
 // leg (E-1: permission stagings are Linux-only; elsewhere they are not
 // staged — the NU3_STAGED pattern of section-11.5 — and the Windows subset
-// selects T13.5-7 nowhere), then the platform-safe kill arm.
+// selects T13.5-7 nowhere), each ending with release's state asserted —
+// (b)'s residue, the emptied lock directory its read-only `.xspec` keeps
+// until a later mutating command removes it, and every other arm's absence
+// of `.xspec/lock` — then the kill arm, its kills under T13.5-3's
+// exit-collection discipline and the lock path after each judged by
+// T13.5-3's past-the-hold machinery (helpers/lock-state.ts
+// `assertLockPathAfterKill`; CERTIFICATIONS.md's Exclusions).
 const T13_5_7 = defineProductTest({
   id: "T13.5-7",
   title:
-    "interrupted or write-refused mutation: a write the environment refuses stops the command at that write — exit 2 with the error document (`write-failure`, the concerned path) — leaving every earlier write of 13.5's pinned per-command order complete and no later one attempted, each state read from a twin on which the same operation ran unrefused: (a) source edits first in preview `files` order, (b) the journal append as the commit point, (c) the identity effect complete once appended, (d) a relocation's two writes, (e) `review` mutators writing the session file once, last, after the refresh, (f) `build` and a refresh each file complete with the order unpinned, and a refreshing read refused at its graph-data write; the kill arm: `check` never crashes and reports exactly a state 13.5 admits (SPEC 13.5, 14.24, 12.0, 12.7, 6.4, 6.7, 13.3)",
+    "interrupted or write-refused mutation: a write the environment refuses stops the command at that write — exit 2 with the error document (`write-failure`, the concerned path) — leaving every earlier write of 13.5's pinned per-command order complete and no later one attempted, each state read from a twin on which the same operation ran unrefused: (a) source edits first in preview `files` order, (b) the journal append as the commit point, (c) the identity effect complete once appended, (d) a relocation's two writes, (e) `review` mutators writing the session file once, last, after the refresh, (f) `build` and a refresh each file complete with the order unpinned, and a refreshing read refused at its graph-data write; release: (b)'s read-only `.xspec` refuses the deletion of the emptied lock directory, which remains, empty — no outcome changed, no write failure reported — until a mutating command run once the permissions are restored proceeds unrefused and removes it, and every other arm ends with `.xspec/lock` absent; the kill arm, each kill under T13.5-3's exit-collection discipline (the group killed with SIGKILL, its exit collected, and no process of it listed before `check` runs; no reuse check, no mutating command following): `check` never crashes and reports exactly a state 13.5 admits, the journal holds its prior bytes or the twin's, and the lock path is in T13.5-3's past-the-hold state — one plain-file entry, the dead run's, where the kill stopped the run short of its twin's final state (or at the held point), nothing where the run ended first (SPEC 13.5, 14.24, 12.0, 12.7, 6.4, 6.7, 13.3, 13.4)",
   // A hang guard only (H-10): some twenty workspaces, each built, renamed,
   // checked, and driven — generous under a saturated box.
   timeoutMs: 600_000,

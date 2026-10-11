@@ -38,6 +38,12 @@
 //   release complete, T13.5-11) and `assertLockPathHolds` (exactly a given
 //   tree — stagings as staged and entries by name and content, nothing added
 //   beside them: T13.4-12, T13.5-10(c), (d), T13.5-11).
+// - The lock path's state after a kill (`assertLockPathAfterKill`):
+//   T13.5-3's past-the-hold judgement, shared with T13.5-7's kill arm
+//   (CERTIFICATIONS.md's Exclusions) — where the kill ended the run while
+//   some path its twin's run changed was short of the twin's final state,
+//   exactly one entry, a plain file (the dead run's); where the run ended
+//   before the kill landed, nothing at `.xspec/lock`.
 // - The inclusion check for commands that acquire nothing (H-6): around
 //   `build`, `check`, `version`, a preview, or a read command, no other run
 //   acquiring, releasing, or being killed meanwhile, whatever occupied the
@@ -82,7 +88,7 @@ import {
   renderLines,
   renderRel,
 } from "./lock-staging.js";
-import type { DirectorySnapshot } from "./snapshot.js";
+import type { DirectorySnapshot, SnapshotEntry } from "./snapshot.js";
 import {
   describeEntry,
   describeEntryDifference,
@@ -572,6 +578,114 @@ function expectedTree(
     );
   }
   return tree;
+}
+
+// ---------------------------------------------------------------------------
+// The lock path's state after a kill (T13.5-3's past-the-hold judgement)
+
+/**
+ * The twin a kill is judged against (TEST-SPEC T13.5-3's past-the-hold arm):
+ * the same operation run to its end on an identical workspace.
+ */
+export interface KilledRunTwin {
+  /** The twin's workspace once its run ended. */
+  readonly final: DirectorySnapshot;
+  /**
+   * The snapshot key of every path the twin's run changed — added, removed,
+   * or changed against its pre-invocation state, the lock path aside (H-6;
+   * helpers/snapshot.ts `diffSnapshots`): a source, the journal, a session
+   * file, a derived file, or graph data.
+   */
+  readonly changed: readonly string[];
+}
+
+/**
+ * How a kill landed, as the collected exit and the workspace tell it:
+ * `"short"`, the kill ended the run while some path the twin's run changed
+ * did not yet hold the twin's final state; `"final"`, the kill ended it with
+ * every such path in its final state; `"exited"`, the run had ended on its
+ * own before the kill landed.
+ */
+export type KillLanding = "short" | "final" | "exited";
+
+/**
+ * T13.5-3's past-the-hold judgement of the lock path after a kill — the run
+ * killed under the exit-collection discipline (`RunningProduct.killGroup`:
+ * the whole group killed with SIGKILL, the started process's exit
+ * collected, no process of the group listed), no later command having run
+ * — shared with T13.5-7's kill arm (CERTIFICATIONS.md's Exclusions: the lock
+ * path's state after T13.5-7's kills is T13.5-3's past-the-hold arm's,
+ * certified via VIOL-CORE-EARLYRELEASE). `exit` is the collected exit,
+ * signal SIGKILL where the kill, not a normal exit, ended the run; `after`
+ * the workspace's snapshot once the group is gone. Where the kill ended the
+ * run while some path `twin.changed` names did not yet hold the twin's
+ * final state, the run had not made its last write, so had not released:
+ * `.xspec/lock` holds exactly one entry, a plain file — the dead run's, a
+ * leftover (SPEC 13.5: a run's entry stands until its release, which comes
+ * as the command ends, after its last write; an abnormal termination leaves
+ * its entry). A kill ending the run with every such path already final is
+ * judged no further: the run may then have been releasing. A run that
+ * ended before the kill landed released as it ended: nothing at
+ * `.xspec/lock` (T13.5-11). Returns the landing, for what a caller judges
+ * beside the lock path (T13.5-3: a run exiting first ends exactly as its
+ * twin).
+ */
+export async function assertLockPathAfterKill(
+  root: string,
+  exit: {
+    readonly exitCode: number | null;
+    readonly signal: NodeJS.Signals | null;
+  },
+  after: DirectorySnapshot,
+  twin: KilledRunTwin,
+  context: string,
+): Promise<KillLanding> {
+  if (exit.signal !== "SIGKILL") {
+    const ended =
+      exit.signal === null
+        ? `exit code ${String(exit.exitCode)}`
+        : `signal ${exit.signal}`;
+    await assertLockPathAbsent(
+      root,
+      `${context}: the run ended before the kill landed (${ended}), ` +
+        `having released as it ended (SPEC 13.5; T13.5-11)`,
+    );
+    return "exited";
+  }
+  const short = twin.changed.filter(
+    (key) =>
+      !sameEntryState(after.entries.get(key), twin.final.entries.get(key)),
+  );
+  if (short.length === 0) return "final";
+  await assertLockDirectoryEntries(
+    root,
+    { entries: 1 },
+    `${context}: the kill ended the run while ${renderKeys(short)} did not ` +
+      `yet hold the twin's final state, so the run had not made its last ` +
+      `write and had not released — its entry stands, a dead run's ` +
+      `leftover (SPEC 13.5: a run's entry stands until its release, which ` +
+      `comes as the command ends, after its last write, so its exclusion ` +
+      `spans every write it makes; an abnormal termination leaves its entry)`,
+  );
+  return "short";
+}
+
+/** Whether two snapshot entries (either absent) hold one byte state. */
+function sameEntryState(
+  first: SnapshotEntry | undefined,
+  second: SnapshotEntry | undefined,
+): boolean {
+  if (first === undefined || second === undefined) return first === second;
+  return describeEntryDifference(first, second) === undefined;
+}
+
+/** Snapshot keys rendered for a diagnosis, at most ten. */
+function renderKeys(keys: readonly string[]): string {
+  const shown = keys.slice(0, MAX_NAMED_ENTRIES).map(displaySnapshotPath);
+  if (keys.length > shown.length) {
+    shown.push(`… and ${String(keys.length - shown.length)} more`);
+  }
+  return shown.join(", ");
 }
 
 // ---------------------------------------------------------------------------
