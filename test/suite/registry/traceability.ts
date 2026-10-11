@@ -634,12 +634,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // the busy refusal's `workspace-busy`, (c)'s `read-failure`, and (a)'s
   // failures' `read-failure`, `configuration-error`, and `write-failure` —
   // and the absence of a write failure where release's deletion is refused
-  // (14). The outcomes of the endings it observes — each command's success,
-  // its usage errors (12.0), the refusals of 6.4, 6.5, 10.7, 13.3, and
-  // 14.21, the rediscovery's failures (7.2), and acquisition's own — are
-  // carriage context with home coverage at the tests (a) names (T13.5-12,
-  // T13.5-10).
-  "T13.5-11": ["13.5", "14"],
+  // (14); and, after T13.5-7's `build` and refreshing reads refused at their
+  // writes, which acquire nothing, `.xspec/lock` absent all the same: no
+  // write but acquisition and release touches the lock path (13.4). The
+  // outcomes of the endings it observes — each command's success, its usage
+  // errors (12.0), the refusals of 6.4, 6.5, 10.7, 13.3, and 14.21, the
+  // rediscovery's failures (7.2), acquisition's own, and the states T13.5-7's
+  // refused writes leave — are carriage context with home coverage at the
+  // tests (a) names (T13.5-12, T13.5-10, T13.5-7).
+  "T13.5-11": ["13.5", "13.4", "14"],
   "T14-1": ["14"],
   "T14-2": ["14", "2.4", "4.5"],
   "T14-3": ["14"],

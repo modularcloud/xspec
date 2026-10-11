@@ -1,7 +1,10 @@
 // TEST-SPEC T13.5-7 / T14-9 — the write-refusal stagings (a)–(f) and the
 // choreography that applies them while a mutating command is held at the
 // seam of SPEC 13.5, shared by T13.5-7 (the per-command states a refused
-// write leaves; section-13.5.ts) and T14-9 (the 14.24 contract; section-14).
+// write leaves; section-13.5.ts), T14-9 (the 14.24 contract; section-14),
+// and T13.5-11(a) (release after each of T13.5-7's refused writes but
+// (b)'s; section-13.5-iii.ts, which stages them through the fixtures,
+// appliers, and constants exported here).
 //
 // Staging discipline (TEST-SPEC T14-9, E-1): an environment refusal is staged
 // by permission removal alone through helpers/permissions.ts — the directory
@@ -185,13 +188,14 @@ export interface RefusalFixture {
 // after its body's first, so the `.mdx` sources of both fixtures are
 // staged-source records (S-9's before-any-product clause;
 // helpers/staged-mdx.ts) named with every test that prepares the fixture —
-// T13.5-7, and T14-9 and T14-10 (section-14-ii.ts; their
+// T13.5-7, T13.5-11 (section-13.5-iii.ts, its (a) after each of T13.5-7's
+// refused writes but (b)'s), and T14-9 and T14-10 (section-14-ii.ts; their
 // `PRECEDENCE_FIXTURE` and `LISTING_FIXTURE` spread the rename fixture's
 // files too) — and their configurations and code source are TypeScript
 // staged-source records (helpers/staged-ts.ts; S-9's TypeScript and timing
 // clauses), named likewise.
 const RENAME_CONFIG = stagedTs(
-  "T13.5-7/T14-9/T14-10 the rename fixture xspec.config.ts (one spec group, Markdown emission next to sources)",
+  "T13.5-7/T13.5-11/T14-9/T14-10 the rename fixture xspec.config.ts (one spec group, Markdown emission next to sources)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -203,7 +207,7 @@ export default defineConfig({
 `,
 );
 const RENAME_A = stagedMdx(
-  "T13.5-7/T14-9/T14-10 the rename fixture specs/a/A.mdx (a d reference to b0)",
+  "T13.5-7/T13.5-11/T14-9/T14-10 the rename fixture specs/a/A.mdx (a d reference to b0)",
   [
     'import B from "../b/B.xspec"',
     "",
@@ -214,7 +218,7 @@ const RENAME_A = stagedMdx(
   ].join("\n"),
 );
 const RENAME_B = stagedMdx(
-  "T13.5-7/T14-9/T14-10 the rename fixture specs/b/B.mdx (b0 holding b0.k)",
+  "T13.5-7/T13.5-11/T14-9/T14-10 the rename fixture specs/b/B.mdx (b0 holding b0.k)",
   [
     '<S id="b0">',
     "Beta text.",
@@ -226,7 +230,7 @@ const RENAME_B = stagedMdx(
   ].join("\n"),
 );
 const RENAME_C = stagedMdx(
-  "T13.5-7/T14-9/T14-10 the rename fixture specs/c/C.mdx (an embedding of b0)",
+  "T13.5-7/T13.5-11/T14-9/T14-10 the rename fixture specs/c/C.mdx (an embedding of b0)",
   [
     'import B from "../b/B.xspec"',
     "",
@@ -278,7 +282,7 @@ export const RENAME_FIXTURE: RefusalFixture = {
 // writes). The prior journaled rename `oth0` → `oth` in `docs/Other.mdx`
 // makes the workspace journal-bearing.
 const MOVE_CONFIG = stagedTs(
-  "T13.5-7/T14-9 the move fixture xspec.config.ts (spec groups specs/** and docs/**, code group src/**/*.ts, Markdown emission under outDir out)",
+  "T13.5-7/T13.5-11/T14-9 the move fixture xspec.config.ts (spec groups specs/** and docs/**, code group src/**/*.ts, Markdown emission under outDir out)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -293,11 +297,11 @@ export default defineConfig({
 `,
 );
 const MOVE_OTHER = stagedMdx(
-  "T13.5-7/T14-9 the move fixture docs/Other.mdx (oth0)",
+  "T13.5-7/T13.5-11/T14-9 the move fixture docs/Other.mdx (oth0)",
   ['<S id="oth0">', "Other text.", "</S>", ""].join("\n"),
 );
 const MOVE_A = stagedMdx(
-  "T13.5-7/T14-9 the move fixture specs/A.mdx (importing docs/Other.mdx, a d reference to oth0)",
+  "T13.5-7/T13.5-11/T14-9 the move fixture specs/A.mdx (importing docs/Other.mdx, a d reference to oth0)",
   [
     'import Other from "../docs/Other.xspec"',
     "",
@@ -308,7 +312,7 @@ const MOVE_A = stagedMdx(
   ].join("\n"),
 );
 const MOVE_APP = stagedTs(
-  "T13.5-7/T14-9 the move fixture src/app.ts (the importer of specs/A.mdx's module whose specifier the move rewrites)",
+  "T13.5-7/T13.5-11/T14-9 the move fixture src/app.ts (the importer of specs/A.mdx's module whose specifier the move rewrites)",
   ['import A from "../specs/A.xspec";', "", "A.a;", ""].join("\n"),
 );
 
@@ -1664,16 +1668,22 @@ function isOutsideArea(rel: string): boolean {
   return !isAreaPath(rel);
 }
 
-const SESSION = "s";
-const NEW_SESSION = "n";
-const SESSION_FILE = `${REVIEWS_DIR}/${SESSION}.json`;
-const NEW_SESSION_FILE = `${REVIEWS_DIR}/${NEW_SESSION}.json`;
+// (e)'s staging, exported for T13.5-11(a) (section-13.5-iii.ts), which
+// observes release after each of T13.5-7's refused writes but (b)'s on
+// stagings made exactly as here.
+/** (e)'s session, created on the prepared workspace (SPEC 10.7). */
+export const SESSION = "s";
+/** The session (e)'s `review create` names, never created. */
+export const NEW_SESSION = "n";
+export const SESSION_FILE = `${REVIEWS_DIR}/${SESSION}.json`;
+export const NEW_SESSION_FILE = `${REVIEWS_DIR}/${NEW_SESSION}.json`;
 /** An unblocked leaf item's scope (SPEC 10.6) — not the edited source's. */
-const RESOLVE_SCOPE = "specs/c/C.mdx#c";
+export const RESOLVE_SCOPE = "specs/c/C.mdx#c";
 /** A parent item's scope, its node holding a child subtree (`split`). */
-const SPLIT_SCOPE = "specs/b/B.mdx#b";
-const E_EDIT_FROM = "Alpha text.";
-const E_EDIT_TO = "Alpha text, edited.";
+export const SPLIT_SCOPE = "specs/b/B.mdx#b";
+/** (e)'s staleness edit of A's text, made after `build`. */
+export const E_EDIT_FROM = "Alpha text.";
+export const E_EDIT_TO = "Alpha text, edited.";
 
 /**
  * (e) `review` mutators write the session file once, last: on a stale,
@@ -1891,8 +1901,9 @@ export async function reviewMutatorsArm(
   }
 }
 
-const F_EDIT_FROM = "Beta text.";
-const F_EDIT_TO = "Beta text, edited.";
+/** (f)'s edit of B's text, the workspace valid (exported for T13.5-11(a)). */
+export const F_EDIT_FROM = "Beta text.";
+export const F_EDIT_TO = "Beta text, edited.";
 
 /**
  * (f) `build` and a refresh, each file complete, the order unpinned: a built
