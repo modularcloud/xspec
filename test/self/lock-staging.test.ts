@@ -39,7 +39,12 @@
 //   name bytes, content read through H-4's grant, and mode — and fails,
 //   diagnosed, when the run leaves nothing at `.xspec/lock`, a plain file
 //   there, several entries, an entry that is no plain file, never holds, or
-//   ends on its own before the kill.
+//   ends on its own before the kill; given a launcher (H-2; a pass-through
+//   one here: the fresh-namespace launchers need administrative access,
+//   T13.5-10(f), (g)), it starts the run through it and kills it through
+//   it, and given an observation, it calls it once the run holds, before
+//   the kill, what it throws propagating once the group is gone and the
+//   hold file removed.
 //
 // The Linux leg's (FIFOs, byte names, the process list); the permission
 // removals verify themselves on this process, so the test staging them
@@ -73,7 +78,7 @@ import {
   verifyContentReadRefused,
 } from "../helpers/lock-staging.js";
 import { HarnessStagingError } from "../helpers/permissions.js";
-import type { ProductBinding } from "../helpers/subprocess.js";
+import type { ProductBinding, RunLauncher } from "../helpers/subprocess.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 
 const ascii = (text: string): Buffer => Buffer.from(text, "latin1");
@@ -1099,3 +1104,83 @@ test("killHeldRun fails, diagnosed, when the killed run leaves nothing at .xspec
   );
   expect((taken as Error).message).toMatch(/is occupied/);
 }, 120_000);
+
+test("killHeldRun starts the run through a given launcher and kills it through it, and calls a given observation once the run holds, before the kill — what the observation throws propagating once the group is gone and the hold file removed (H-2; T13.5-3, T13.5-10(f), (g))", async () => {
+  const bind = await holdStandin();
+  const label = "through a pass-through launcher (lock-staging self-test)";
+  const kills: number[] = [];
+  const launcher: RunLauncher = {
+    label,
+    wrap: (invocation, env) => ({
+      command: invocation.command,
+      args: [...invocation.args],
+      env: { ...env },
+    }),
+    killGroup: async (groupId) => {
+      kills.push(groupId);
+      try {
+        process.kill(-groupId, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+      await Promise.resolve();
+    },
+  };
+  const workspace = await makeWorkspace();
+  const holdPath = path.join(workspace.tempRoot, "launched.hold");
+  const seen: {
+    readonly running: boolean;
+    readonly holdFile: string;
+    readonly commandLine: string;
+    readonly pid: number | undefined;
+  }[] = [];
+  const dead = await killHeldRun(bind("entry"), {
+    root: workspace.root,
+    argv: RENAME_ARGV,
+    holdPath,
+    context: "stand-in (launched)",
+    launcher,
+    whileHeld: async (running) => {
+      seen.push({
+        running: !running.hasExited(),
+        holdFile: await outcome(fsp.lstat(holdPath)),
+        commandLine: running.commandLine,
+        pid: running.pid,
+      });
+    },
+  });
+  expect(seen).toHaveLength(1);
+  expect(seen[0]?.running).toBe(true);
+  expect(seen[0]?.holdFile).toBe("allowed");
+  expect(seen[0]?.commandLine).toContain(label);
+  expect(seen[0]?.pid).toBe(dead.killed.groupId);
+  expect(kills).toEqual([dead.killed.groupId]);
+  expect(dead.killed.result.signal).toBe("SIGKILL");
+  expect(await listedAmong(dead.killed.identifiers)).toEqual([]);
+  expect(await outcome(fsp.lstat(holdPath))).toBe("ENOENT");
+  expect(dead.entry.content).toEqual(ascii(`${String(dead.killed.groupId)}\n`));
+
+  // The observation's failure propagates as itself, once the group is gone
+  // and the hold file removed.
+  const other = await makeWorkspace();
+  const otherHold = path.join(other.tempRoot, "observed.hold");
+  let observed: number | undefined;
+  const failure = new Error("the observation failed");
+  const thrown = await rejectionOf(
+    killHeldRun(bind("entry"), {
+      root: other.root,
+      argv: RENAME_ARGV,
+      holdPath: otherHold,
+      context: "stand-in (observation fails)",
+      whileHeld: async (running) => {
+        observed = running.pid;
+        await Promise.resolve();
+        throw failure;
+      },
+    }),
+  );
+  expect(thrown).toBe(failure);
+  expect(observed).toBeDefined();
+  expect(await listedAmong([observed ?? 0])).toEqual([]);
+  expect(await outcome(fsp.lstat(otherHold))).toBe("ENOENT");
+}, 60_000);

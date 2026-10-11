@@ -73,7 +73,11 @@
 //   discipline (`RunningProduct.killGroup`, helpers/kill-discipline.ts), and
 //   returns the lock directory's one entry, a plain file — its name bytes,
 //   content (read under H-4's grant), and mode — with the killed group, whose
-//   identifiers T13.5-3's reuse check looks for. Anything else at
+//   identifiers T13.5-3's reuse check looks for. A caller may start the run
+//   through a launcher (H-2: as the first process of a fresh
+//   process-identifier namespace, T13.5-10(f), (g); its kill then goes
+//   through the launcher) and observe it while it holds, before the kill
+//   (its in-namespace identifiers, T13.5-10(f), (g)). Anything else at
 //   `.xspec/lock` after the kill — nothing, no directory, no entry or
 //   several, an entry that is no plain file — fails, diagnosed (13.5:
 //   abnormal termination leaves its entry). `copyEntryIn` carries such an
@@ -95,7 +99,13 @@ import { describeByteDifference, fail } from "./assertions.js";
 import { isLockPathBytes, LOCK_PATH, withOwnerGrant } from "./lock-path.js";
 import { HarnessStagingError } from "./permissions.js";
 import type { StagingMode } from "./permissions.js";
-import type { ArgvValue, KilledGroup, ProductBinding } from "./subprocess.js";
+import type {
+  ArgvValue,
+  KilledGroup,
+  ProductBinding,
+  RunLauncher,
+  RunningProduct,
+} from "./subprocess.js";
 import {
   pathExists,
   releaseHoldFile,
@@ -277,6 +287,19 @@ export interface HeldRunOptions {
   readonly holdPath: string;
   /** Names the run in every diagnosis. */
   readonly context: string;
+  /**
+   * Start the run through this launcher (H-2; helpers/machine-staging.ts) —
+   * as the first process of a fresh process-identifier namespace, say
+   * (TEST-SPEC T13.5-10(f), (g)) — its kill then going through it.
+   */
+  readonly launcher?: RunLauncher;
+  /**
+   * Called once the run holds, before the kill, with the held run (TEST-SPEC
+   * T13.5-10(f), (g): its in-namespace identifiers read while it is held).
+   * What it throws propagates once the run's group is killed and its hold
+   * file removed — a harness error of that kill propagating instead.
+   */
+  readonly whileHeld?: (running: RunningProduct) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1167,10 +1190,12 @@ export async function assertFifosIntact(
 
 /**
  * Start `options.argv` — a mutating command succeeding in the workspace,
- * under `--test-hold <holdPath>` — in a process group of its own, await its
- * hold file, and kill it under T13.5-3's exit-collection discipline
- * (`killGroup`: SIGKILL to the whole group, its exit collected, no process
- * of the group still listed); the hold file is removed afterwards. Returns
+ * under `--test-hold <holdPath>` — in a process group of its own (through
+ * `options.launcher` where given), await its hold file, call
+ * `options.whileHeld` where given, and kill it under T13.5-3's
+ * exit-collection discipline (`killGroup`: SIGKILL to the whole group —
+ * through the launcher where given — its exit collected, no process of the
+ * group still listed); the hold file is removed afterwards. Returns
  * the lock directory's one entry, a plain file — its name bytes, its
  * content read under H-4's grant, its mode — and the killed group. Fails
  * diagnosed when the run never holds (it exits first, or the wait runs
@@ -1197,6 +1222,7 @@ export async function killHeldRun(
     cwd: root,
     argv: [...options.argv, "--test-hold", holdPath],
     processGroup: true,
+    launcher: options.launcher,
   });
   let killed: KilledGroup;
   try {
@@ -1214,6 +1240,17 @@ export async function killHeldRun(
           `the file is deleted (SPEC 13.5), so that it can be killed while ` +
           `held — ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+    if (options.whileHeld !== undefined) {
+      try {
+        await options.whileHeld(running);
+      } catch (error) {
+        // The group goes before what the observation threw propagates.
+        await running.killGroup().catch((kill: unknown) => {
+          rethrowHarnessError(kill);
+        });
+        throw error;
+      }
     }
     killed = await running.killGroup();
   } finally {

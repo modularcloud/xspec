@@ -140,6 +140,8 @@ Why the harness changes: the documents moved after the harness was last green (t
 
 **Done when.** The checks hold and the commit is pushed.
 
+**In progress (2026-10-11).** The arms are implemented (`test/suite/registry/section-13.5-ii.ts`: `otherMachineRun`, `ownIdentifierRun`, `gapRun`, run last in the body by `machineArms`; `runT13510MachineArms` runs them alone; `killHeldRun` takes a `launcher` and a `whileHeld` observation). Under the administrative-access directive they are verified in CI only, through the temporary probe `test/self/zz-t26-machine-arms.admin.test.ts` (CONF-CORE, four one-deviation stand-ins, the built product; every result printed to the harness-self job's log). This task's last commit deletes that probe; if this note is still here, read the probe's CI output, then delete the probe before finishing the task.
+
 ### Task 27 — T13.5-10(h): acquisition lists no directory but those 13.5 names (B-G21 part)
 
 **Requirement.** T13.5-10(h) (TEST-SPEC.md line 580) in full: `.xspec`, holding no `lock`, made unlistable but searchable and writable before the invocation (`-wx`; the harness's own listing refused and its own creation and removal of a file in it permitted, verified first), under a configuration whose globs reach nothing under `.xspec`; each mutating command whose operation leaves no orphan — `rename`, a section-form `move`, `review create`, `resolve`, `split` — proceeds: exit 0, stdout byte-equal to its unstaged twin's, every path outside `.xspec` and the journal and session files byte-equal to the twin's, `.xspec/lock` absent once it ends; once `.xspec`'s permissions are restored, `build` exits 0 and `check` is clean. Graph data is compared nowhere here, and the file form of `move` is not run.
