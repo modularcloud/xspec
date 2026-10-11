@@ -1,11 +1,11 @@
 // TEST-SPEC §13.5 (concurrency and isolation), part ii — SUITE-48: T13.5-10
-// (acquisition), registered with three of its eight arms so far: (a)
-// obstruction, (b) leftover takeover, and (c) the busy refusal among
-// bracketing leftovers and over a live entry unreadable or altered. Arms
-// (d) to (h) — acquisition's refused reads and writes, interference and
+// (acquisition), registered with four of its eight arms so far: (a)
+// obstruction, (b) leftover takeover, (c) the busy refusal among bracketing
+// leftovers and over a live entry unreadable or altered, and (d)
+// acquisition's refused reads and writes. Arms (e) to (h) — interference and
 // another machine's holder, the acquirer's own identifier, the gap and its
 // manual remedy, and acquisition listing no directory but those 13.5 names
-// — are not yet implemented (FIX_PLAN Tasks 24 to 27 add them).
+// — are not yet implemented (FIX_PLAN Tasks 25 to 27 add them).
 //
 // Every arm is staged on a freshly built valid workspace holding an `audit`
 // session `s` created while it was valid — section-13.5.ts's session staging
@@ -113,6 +113,42 @@
 // byte-identical as altered — and once the holder completes, exit 0,
 // `.xspec/lock` is absent.
 //
+// (d) Refused reads and writes (SPEC 13.5, 14.24, 14.25; T13.5-11): each
+// staging made before the invocation and verified on the harness itself
+// (helpers/acquisition-staging.ts: T14-9's discipline, or a directory's
+// stated mode, each refusal and each kept permission probed as T14-10
+// verifies its stagings), its modes restored once the run ends. Each command
+// exits 2 with the error document's `code` `"read-failure"` or
+// `"write-failure"` as stated, `path` `".xspec/lock"` — never a nested path
+// — or `".xspec"`, `locations` `[]`; it modifies nothing (every path but the
+// lock path byte-identical, the compare bracketing that run alone) and
+// releases after the failure, leaving exactly the residue stated: an empty
+// leftover lock directory unlistable but writable (`-wx`) → read failure, no
+// `.xspec/lock` afterwards; a lock directory holding a subdirectory that
+// holds a file, the subdirectory unlistable (`-wx`) → read failure; an empty
+// leftover lock directory refusing writes (`r-x`) → write failure, no
+// `.xspec/lock` afterwards; the subdirectory refusing writes (`r-x`) → write
+// failure; after either subdirectory arm the lock directory holding exactly
+// one occupant, a directory holding exactly the staged file under whatever
+// name (a removal may first rename the leftover within the writable lock
+// directory), and no entry; a read-only `.xspec` holding no `lock` → write
+// failure, no `.xspec/lock` afterwards; a plain file at `.xspec/lock` under
+// T14-9's full discipline → write failure, the file byte-identical in place;
+// `.xspec` unsearchable (`rw-`) holding no `lock` and, separately, an empty
+// lock directory, under CORE_DECL's configuration (its globs reach nothing
+// under `.xspec`) → either code, `.xspec` with all it holds byte-identical
+// once its mode is restored; a lock directory unsearchable (`rw-`) holding a
+// directory that holds a file → either code, the lock directory holding
+// exactly the staged directory and its file, no entry; and on an unbuilt
+// workspace, its root read-only → write failure at `.xspec`, no `.xspec`
+// afterwards, `resolve` and `split` there naming the absent session `s`
+// (acquisition preceding that check, 12.0). The two empty leftover lock
+// directories' arms are determinism arms: each command runs twice on its
+// workspace and once more on a byte copy of it at a different absolute
+// path, each run on its own staging, standard output and standard error
+// byte-identical (H-6; 12.0: no diagnostic naming an entry or an absolute
+// path).
+//
 // CERTIFICATIONS.md: T13.5-10 lies in no certification scope (the
 // Exclusions entry for T13.5-9 through T13.5-12 and T13.4-12): its stagings
 // verify themselves on the harness before use, an ineffective staging a
@@ -127,6 +163,19 @@
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import type { AcquisitionStaging } from "../../helpers/acquisition-staging.js";
+import {
+  assertLeftoverDirectoryStands,
+  stageReadOnlyArea,
+  stageReadOnlyRoot,
+  stageUnlistableLeftoverDirectory,
+  stageUnlistableLockDirectory,
+  stageUnremovableLockFile,
+  stageUnsearchableArea,
+  stageUnsearchableLockDirectory,
+  stageUnwritableLeftoverDirectory,
+  stageUnwritableLockDirectory,
+} from "../../helpers/acquisition-staging.js";
 import { assertExitCode, fail } from "../../helpers/assertions.js";
 import { assertRunOutcomesEqual } from "../../helpers/determinism.js";
 import {
@@ -910,7 +959,7 @@ async function copyTree(
       );
     } else {
       throw new Error(
-        `harness error: T13.5-10(b)'s workspace copy meets ` +
+        `harness error: T13.5-10's workspace copy meets ` +
           `${source.toString()}, neither a directory, a plain file, nor a ` +
           `symbolic link`,
       );
@@ -948,7 +997,7 @@ async function copyWholeWorkspace(
   ];
   if (lines.length > 0) {
     throw new Error(
-      `harness error: T13.5-10(b)'s copy of ${fromRoot} at ${toRoot} ` +
+      `harness error: T13.5-10's copy of ${fromRoot} at ${toRoot} ` +
         `differs from it: ${lines.slice(0, 10).join("; ")}`,
     );
   }
@@ -1854,14 +1903,385 @@ async function alterationRun(
 }
 
 // ---------------------------------------------------------------------------
+// (d) Refused reads and writes
+// ---------------------------------------------------------------------------
+
+/** The stable code of 14.25, the read failure. */
+const READ_FAILURE_CODE = "read-failure";
+
+/**
+ * The items `review resolve` and `review split` name on (d)'s unbuilt
+ * workspace, which holds no session: harness-prefixed names, the session `s`
+ * itself absent (TEST-SPEC T13.5-10(d): `resolve` and `split` there naming
+ * the absent session `s`, acquisition preceding that check, 12.0; SPEC 10.7:
+ * an unknown session or item is a usage error, judged past acquisition).
+ */
+const ABSENT_SESSION_ITEMS: SessionItems = {
+  leaf: "xspec-harness-no-such-item",
+  parent: "xspec-harness-no-such-item",
+};
+
+/** One staging of (d), and what every command meets there. */
+interface RefusalArm {
+  readonly what: string;
+  /**
+   * Staged on an unbuilt workspace — no session staging, no `.xspec` —
+   * rather than on the session staging (`stageArmWorkspace`).
+   */
+  readonly unbuilt?: true;
+  /**
+   * The codes a conforming acquisition reports: one, or either where it may
+   * meet the refusal first at a read or at a write (14.25, 14.24).
+   */
+  readonly codes: readonly string[];
+  /** The concerned path (12.7, 14). */
+  readonly path: typeof AREA_PATH | typeof LOCK_PATH;
+  /**
+   * A determinism arm: run twice, and once more on a content-identical
+   * workspace at a different absolute path, each run on its own staging,
+   * standard output and standard error byte-identical (H-6; SPEC 12.0).
+   */
+  readonly determinism?: true;
+  /** Stage it, verified on the harness itself (helpers/acquisition-staging.ts). */
+  readonly stage: (workspace: TestWorkspace) => Promise<AcquisitionStaging>;
+  /** The residue it leaves, judged once the staging's modes are restored. */
+  readonly residue: Residue;
+}
+
+/** A (d) arm's residue check, judged once its staging's modes are restored. */
+type Residue = (
+  root: string,
+  staging: AcquisitionStaging,
+  context: string,
+) => Promise<void>;
+
+/** The leftover a staging's record holds (a harness error where none). */
+function stagedLeftoverOf(staging: AcquisitionStaging): StagedLeftover {
+  if (staging.leftover === undefined) {
+    throw new Error(
+      "T13.5-10(d): the arm's residue compares a staged leftover its " +
+        "staging did not stage",
+    );
+  }
+  return staging.leftover;
+}
+
+/**
+ * No `.xspec/lock` afterwards (SPEC 13.5: a command failed at acquisition
+ * releases — its entry deleted, then the emptied lock directory; T13.5-11).
+ */
+function noLockPathAfterwards(why: string): Residue {
+  return (root, _staging, context) =>
+    assertLockPathAbsent(
+      root,
+      `${context}: no ${LOCK_PATH} afterwards — ${why} (SPEC 13.5: a ` +
+        `command failed at acquisition releases; T13.5-11)`,
+    );
+}
+
+/** The lock path holding exactly the staged leftover, byte-identical. */
+function stagingStandsAlone(why: string): Residue {
+  return (root, staging, context) =>
+    assertLockPathHolds(
+      root,
+      { staged: [stagedLeftoverOf(staging)] },
+      `${context}: ${LOCK_PATH} holds exactly what was staged there, ` +
+        `byte-identical, and no entry — ${why} (SPEC 13.5, 14.24)`,
+    );
+}
+
+/** The subdirectory arms' residue (`assertLeftoverDirectoryStands`). */
+async function leftoverDirectoryStands(
+  root: string,
+  staging: AcquisitionStaging,
+  context: string,
+): Promise<void> {
+  await assertLeftoverDirectoryStands(
+    root,
+    stagedLeftoverOf(staging),
+    `${context}: afterwards — release deleting the run's entry, the lock ` +
+      `directory still holding something`,
+  );
+}
+
+/** No `.xspec` afterwards on the unbuilt workspace. */
+async function noAreaAfterwards(
+  root: string,
+  _staging: AcquisitionStaging,
+  context: string,
+): Promise<void> {
+  try {
+    await fsp.lstat(path.join(root, AREA_PATH));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  fail(
+    `${context}: no ${AREA_PATH} afterwards — the write producing the ` +
+      `area's directory refused, the command stopping there (SPEC 13.5, ` +
+      `14.24) — but ${AREA_PATH} exists`,
+  );
+}
+
+/**
+ * (d)'s stagings (TEST-SPEC T13.5-10(d); SPEC 13.5, 14.24, 14.25), each
+ * staged before the invocation and verified on the harness itself
+ * (helpers/acquisition-staging.ts: T14-9's and T14-10's disciplines), with
+ * the residue each leaves — a product skipping release after a failure at
+ * acquisition leaves its entry or the emptied lock directory behind.
+ */
+const REFUSAL_ARMS: readonly RefusalArm[] = [
+  {
+    what: "an empty leftover lock directory unlistable but writable (mode `-wx`)",
+    codes: [READ_FAILURE_CODE],
+    path: LOCK_PATH,
+    determinism: true,
+    stage: stageUnlistableLockDirectory,
+    residue: noLockPathAfterwards(
+      "release deletes the run's entry and then the emptied directory, " +
+        "which needs only `.xspec`'s write permission",
+    ),
+  },
+  {
+    what:
+      "a lock directory holding a subdirectory that holds a file, the " +
+      "subdirectory unlistable (`-wx`)",
+    codes: [READ_FAILURE_CODE],
+    path: LOCK_PATH,
+    stage: stageUnlistableLeftoverDirectory,
+    residue: leftoverDirectoryStands,
+  },
+  {
+    what: "an empty leftover lock directory refusing writes (`r-x`)",
+    codes: [WRITE_FAILURE_CODE],
+    path: LOCK_PATH,
+    determinism: true,
+    stage: stageUnwritableLockDirectory,
+    residue: noLockPathAfterwards(
+      "no entry added, release deletes the empty directory all the same",
+    ),
+  },
+  {
+    what:
+      "a lock directory holding a subdirectory that holds a file, the " +
+      "subdirectory refusing writes (`r-x`), so the leftover's removal is " +
+      "refused",
+    codes: [WRITE_FAILURE_CODE],
+    path: LOCK_PATH,
+    stage: stageUnwritableLeftoverDirectory,
+    residue: leftoverDirectoryStands,
+  },
+  {
+    what: "a read-only `.xspec` holding no `lock`",
+    codes: [WRITE_FAILURE_CODE],
+    path: LOCK_PATH,
+    stage: stageReadOnlyArea,
+    residue: noLockPathAfterwards("the lock directory's creation refused"),
+  },
+  {
+    what:
+      "a plain file at `.xspec/lock` with `.xspec` read-only and the file " +
+      "unwritable (T14-9's full discipline)",
+    codes: [WRITE_FAILURE_CODE],
+    path: LOCK_PATH,
+    stage: stageUnremovableLockFile,
+    residue: stagingStandsAlone(
+      "the leftover's removal refused, the command stopping there (14.24)",
+    ),
+  },
+  {
+    what: "`.xspec` unsearchable (mode `rw-`) holding no `lock`",
+    codes: [READ_FAILURE_CODE, WRITE_FAILURE_CODE],
+    path: LOCK_PATH,
+    stage: (workspace) => stageUnsearchableArea(workspace, "nothing"),
+    residue: noLockPathAfterwards(
+      "the lock path's examination refused, release's deletions refused " +
+        "alike, which changes no outcome",
+    ),
+  },
+  {
+    what: "`.xspec` unsearchable (mode `rw-`) holding an empty lock directory",
+    codes: [READ_FAILURE_CODE, WRITE_FAILURE_CODE],
+    path: LOCK_PATH,
+    stage: (workspace) =>
+      stageUnsearchableArea(workspace, "an empty lock directory"),
+    residue: stagingStandsAlone(
+      "the lock path's examination refused, release's deletions refused " +
+        "alike, which changes no outcome",
+    ),
+  },
+  {
+    what:
+      "a lock directory unsearchable (`rw-`) holding a directory that " +
+      "holds a file",
+    codes: [READ_FAILURE_CODE, WRITE_FAILURE_CODE],
+    path: LOCK_PATH,
+    stage: stageUnsearchableLockDirectory,
+    residue: stagingStandsAlone(
+      "its occupants' kinds refused, as is every write and listing below it",
+    ),
+  },
+  {
+    what: "an unbuilt workspace, its root read-only",
+    unbuilt: true,
+    codes: [WRITE_FAILURE_CODE],
+    path: AREA_PATH,
+    stage: stageReadOnlyRoot,
+    residue: noAreaAfterwards,
+  },
+];
+
+/**
+ * One (d) run: `arm` staged (verified on the harness itself), `operation`
+ * under `--json`, bounded, and the staging's modes restored once it ends →
+ * exit 2; the error document's `code` among `arm.codes`, `path`
+ * `arm.path`, `locations` `[]`; the residue `arm.residue` states; and
+ * nothing else modified — every path but the lock path byte-identical, the
+ * compare bracketing this run and its staging alone (the lock path, judged
+ * by the residue, pruned; modes aside, H-4). Returns the run's result.
+ */
+async function refusalRun(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  items: SessionItems,
+  operation: SessionOperation,
+  arm: RefusalArm,
+  context: string,
+): Promise<RunResult> {
+  const before = await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH);
+  const staging = await arm.stage(workspace);
+  let result: RunResult;
+  try {
+    result = await runBounded(
+      product,
+      workspace.root,
+      [...operation.argv(items), "--json"],
+      context,
+    );
+  } finally {
+    await staging.restore();
+  }
+  assertExitCode(
+    result,
+    2,
+    `${context}: acquisition's refused read or write is a usage error — ` +
+      `exit 2 — the command stopping there and releasing (SPEC 13.5, 14.24, ` +
+      `14.25, 12.0)`,
+  );
+  const finding = expectErrorDocument(result, context);
+  const codes = arm.codes.map((code) => `"${code}"`).join(" or ");
+  assertSameJson(
+    { code: finding.code, path: finding.path, locations: finding.locations },
+    {
+      code: arm.codes.find((code) => code === finding.code) ?? arm.codes[0],
+      path: arm.path,
+      locations: [],
+    },
+    `${context}: the error document carries acquisition's failure — the ` +
+      `stable code ${codes}, the concerned path "${arm.path}"` +
+      (arm.path === LOCK_PATH
+        ? ` (anything under the lock path concerning the lock path, never ` +
+          `a nested path)`
+        : ` (the write producing the area's directory)`) +
+      `, and no locations (SPEC 13.5, 12.7, 14.24, 14.25; \`message\` and ` +
+      `\`identities\` informational) — message: ` +
+      JSON.stringify(finding.message),
+  );
+  await arm.residue(workspace.root, staging, context);
+  assertSnapshotsEqual(
+    before,
+    await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
+    `${context}: modifies nothing — every path but the lock path ` +
+      `byte-identical once the staging's modes are restored, the compare ` +
+      `bracketing this run alone (SPEC 13.5, 12.0; H-6: the lock path, ` +
+      `judged apart, left out)`,
+  );
+  return result;
+}
+
+/**
+ * `arm` with `operation` (TEST-SPEC T13.5-10(d)): on a fresh session
+ * staging — or a fresh unbuilt workspace where the arm says so, `resolve`
+ * and `split` there naming the absent session `s` — one run
+ * (`refusalRun`); a determinism arm runs twice there, each on its own
+ * staging, and once more on a byte copy of the workspace made before its
+ * first staging (content-identical, at a different absolute path, verified
+ * before use), standard output and standard error byte-identical across the
+ * three (H-6; SPEC 12.0: no diagnostic naming an entry or an absolute path).
+ */
+async function refusalArmRuns(
+  product: ProductBinding,
+  operation: SessionOperation,
+  arm: RefusalArm,
+): Promise<void> {
+  const label = `T13.5-10(d) ${operation.what} --json with ${arm.what}`;
+  await withWorkspace(CORE_DECL, async (workspace) => {
+    const items =
+      arm.unbuilt === true
+        ? ABSENT_SESSION_ITEMS
+        : await stageArmWorkspace(product, workspace, label);
+    if (arm.determinism !== true) {
+      await refusalRun(product, workspace, items, operation, arm, label);
+      return;
+    }
+    await withWorkspace({}, async (copy) => {
+      await copyWholeWorkspace(workspace.root, copy.root);
+      const first = await refusalRun(
+        product,
+        workspace,
+        items,
+        operation,
+        arm,
+        `${label} (a determinism arm's first run)`,
+      );
+      const second = await refusalRun(
+        product,
+        workspace,
+        items,
+        operation,
+        arm,
+        `${label} (a determinism arm's second run, on its own staging)`,
+      );
+      const third = await refusalRun(
+        product,
+        copy,
+        items,
+        operation,
+        arm,
+        `${label} (a determinism arm's run on a content-identical workspace ` +
+          `at a different absolute path, on its own staging)`,
+      );
+      const context =
+        `${label}: a determinism arm — standard output and standard error ` +
+        `byte-identical across its runs (H-6; SPEC 12.0: no diagnostic ` +
+        `naming an entry or an absolute path)`;
+      assertRunOutcomesEqual(
+        second,
+        first,
+        context,
+        "its second run",
+        "its first run",
+      );
+      assertRunOutcomesEqual(
+        third,
+        first,
+        context,
+        "its run at the other path",
+        "its first run",
+      );
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // T13.5-10
 // ---------------------------------------------------------------------------
 
 const T13_5_10 = defineProductTest({
   id: "T13.5-10",
   title:
-    "13.5's acquisition, arms (a), (b), and (c) of eight so far ((d)–(h) not yet implemented): each arm staged afresh, on a fresh workspace, for each mutating command in turn (`rename specs/A.mdx a a2`, `move specs/A.mdx specs/B.mdx`, `review create --strategy audit --name t`, `review resolve s <item> --status no-change`, `review split s <item>`; each an operation succeeding on an unstaged twin, exit 0, `.xspec/lock` absent once it ends), on a freshly built valid workspace holding an `audit` session `s` created while it was valid, run under `--json` and completing promptly, no FIFO opened: (a) obstruction — `.xspec` a plain file, a symbolic link to a directory holding a journal and sessions (the workspace's own area relocated outside it), a dangling symbolic link, or a FIFO → exit 2, `code` `\"write-failure\"`, `path` `\".xspec\"`; `.xspec/lock` a symbolic link to a directory outside the workspace holding a file, a symbolic link to a file, a dangling symbolic link, or a FIFO → exit 2, `code` `\"write-failure\"`, `path` `\".xspec/lock\"` (`locations` `[]` each) — nothing modified, the occupant byte-identical in place, a link's target untouched and nothing written through a link; (b) leftover takeover — a plain file at `.xspec/lock`, and one with every permission removed; in a lock directory a directory holding a file, a directory tree two levels deep (a directory holding a directory that holds a plain file, a symbolic link to a directory outside the workspace holding a file, a dangling symbolic link, and a FIFO), a symbolic link to a directory outside the workspace holding a file, and a FIFO; a dead run's entry (a held `rename` killed under T13.5-3's discipline), and one with every permission removed; and a dead run's entry carried into another workspace by a copy of the whole workspace made after the kill → exit 0, its result (exit code, standard output and error, and final workspace) byte-equal to its unstaged twin's (H-6), `.xspec/lock` absent once it ends, every link's target outside the workspace byte-identical — a busy refusal over a dead run's entry meeting T13.5-3's reuse check, the trial void where a killed identifier is listed again; (c) a busy refusal — during a held `review resolve`'s hold (`review resolve s <item> --status skipped --test-hold <path>`), staged afresh for each command: dead runs' entries (twins' held `rename`s killed under T13.5-3's discipline before the holder starts and while it holds, copied in, name and content) and leftovers of the harness's naming (directories holding a file or a FIFO, made `-wx` once filled, the harness's own listing of each refused) bracketing the holder's entry — at least one of each kind before it and one after it, in byte order of name and in the filesystem's listing order, its name observed, never pinned, further stagings each a bounded number, exhaustion voiding the trial, rerun with a fresh holder — → exit 2, `code` `\"workspace-busy\"`, `path` `\".xspec/lock\"`, `locations` `[]`, never `\"read-failure\"`, exiting while the holder holds, nothing modified, every staged leftover and dead entry byte-identical in place (permissions restored first) and the holder's entry byte-identical, name and content; once the holder completes (exit 0), `.xspec/lock` holds exactly the staged leftovers, and the command run once more removes them all, `.xspec/lock` absent once it ends; with no leftover staged, the holder's entry given no permission (its name and content recorded first, the harness's own read refused) → refused alike, the entry still the only one under the same name, its content byte-identical once its permissions are restored, `.xspec/lock` absent after the holder; and the holder's entry altered in place (truncated, overwritten with ill-formed UTF-8 garbage of another length, or with a dead run's entry's content; its name recorded before, its content after) → refused alike, the altered entry byte-identical as altered and the only entry, the holder completing exit 0, `.xspec/lock` absent (SPEC 13.5, 13.4, 14.24, 14.26)",
-  timeoutMs: 900_000,
+    '13.5\'s acquisition, arms (a), (b), (c), and (d) of eight so far ((e)–(h) not yet implemented): each arm staged afresh, on a fresh workspace, for each mutating command in turn (`rename specs/A.mdx a a2`, `move specs/A.mdx specs/B.mdx`, `review create --strategy audit --name t`, `review resolve s <item> --status no-change`, `review split s <item>`; each an operation succeeding on an unstaged twin, exit 0, `.xspec/lock` absent once it ends), on a freshly built valid workspace holding an `audit` session `s` created while it was valid, run under `--json` and completing promptly, no FIFO opened: (a) obstruction — `.xspec` a plain file, a symbolic link to a directory holding a journal and sessions (the workspace\'s own area relocated outside it), a dangling symbolic link, or a FIFO → exit 2, `code` `"write-failure"`, `path` `".xspec"`; `.xspec/lock` a symbolic link to a directory outside the workspace holding a file, a symbolic link to a file, a dangling symbolic link, or a FIFO → exit 2, `code` `"write-failure"`, `path` `".xspec/lock"` (`locations` `[]` each) — nothing modified, the occupant byte-identical in place, a link\'s target untouched and nothing written through a link; (b) leftover takeover — a plain file at `.xspec/lock`, and one with every permission removed; in a lock directory a directory holding a file, a directory tree two levels deep (a directory holding a directory that holds a plain file, a symbolic link to a directory outside the workspace holding a file, a dangling symbolic link, and a FIFO), a symbolic link to a directory outside the workspace holding a file, and a FIFO; a dead run\'s entry (a held `rename` killed under T13.5-3\'s discipline), and one with every permission removed; and a dead run\'s entry carried into another workspace by a copy of the whole workspace made after the kill → exit 0, its result (exit code, standard output and error, and final workspace) byte-equal to its unstaged twin\'s (H-6), `.xspec/lock` absent once it ends, every link\'s target outside the workspace byte-identical — a busy refusal over a dead run\'s entry meeting T13.5-3\'s reuse check, the trial void where a killed identifier is listed again; (c) a busy refusal — during a held `review resolve`\'s hold (`review resolve s <item> --status skipped --test-hold <path>`), staged afresh for each command: dead runs\' entries (twins\' held `rename`s killed under T13.5-3\'s discipline before the holder starts and while it holds, copied in, name and content) and leftovers of the harness\'s naming (directories holding a file or a FIFO, made `-wx` once filled, the harness\'s own listing of each refused) bracketing the holder\'s entry — at least one of each kind before it and one after it, in byte order of name and in the filesystem\'s listing order, its name observed, never pinned, further stagings each a bounded number, exhaustion voiding the trial, rerun with a fresh holder — → exit 2, `code` `"workspace-busy"`, `path` `".xspec/lock"`, `locations` `[]`, never `"read-failure"`, exiting while the holder holds, nothing modified, every staged leftover and dead entry byte-identical in place (permissions restored first) and the holder\'s entry byte-identical, name and content; once the holder completes (exit 0), `.xspec/lock` holds exactly the staged leftovers, and the command run once more removes them all, `.xspec/lock` absent once it ends; with no leftover staged, the holder\'s entry given no permission (its name and content recorded first, the harness\'s own read refused) → refused alike, the entry still the only one under the same name, its content byte-identical once its permissions are restored, `.xspec/lock` absent after the holder; and the holder\'s entry altered in place (truncated, overwritten with ill-formed UTF-8 garbage of another length, or with a dead run\'s entry\'s content; its name recorded before, its content after) → refused alike, the altered entry byte-identical as altered and the only entry, the holder completing exit 0, `.xspec/lock` absent; (d) refused reads and writes — each staging verified on the harness itself, its modes restored once the run ends: an empty leftover lock directory `-wx` → `"read-failure"`, or `r-x` → `"write-failure"`, no `.xspec/lock` afterwards (determinism arms: each run twice, and once more on a content-identical workspace at a different absolute path, each on its own staging, standard output and standard error byte-identical); a lock directory holding a subdirectory that holds a file, the subdirectory `-wx` → `"read-failure"`, or `r-x` → `"write-failure"`, the lock directory then holding exactly one occupant, a directory (its name unasserted) holding exactly the staged file, and no entry; a read-only `.xspec` holding no `lock` → `"write-failure"`, no `.xspec/lock` afterwards; a plain file at `.xspec/lock` with `.xspec` read-only and the file unwritable → `"write-failure"`, the file byte-identical in place; `.xspec` unsearchable (`rw-`) holding no `lock`, or an empty lock directory → `"read-failure"` or `"write-failure"`, `.xspec` with all it holds byte-identical; a lock directory unsearchable (`rw-`) holding a directory that holds a file → either code, exactly the staged directory and its file remaining, no entry; and an unbuilt workspace, its root read-only → `"write-failure"` at `".xspec"`, no `.xspec` afterwards, `resolve` and `split` there naming the absent session `s` — each exit 2, `path` `".xspec/lock"` but where stated, never a nested path, `locations` `[]`, nothing else modified (SPEC 13.5, 13.4, 12.0, 14.24, 14.25, 14.26)',
+  timeoutMs: 1_200_000,
   run: async (product) => {
     const twins: UnstagedTwin[] = [];
     for (const operation of T13_5_10_OPERATIONS) {
@@ -1899,6 +2319,13 @@ const T13_5_10 = defineProductTest({
     for (const alteration of ALTERATIONS) {
       for (const operation of T13_5_10_OPERATIONS) {
         await alterationRun(product, operation, alteration);
+      }
+    }
+    // (d) Refused reads and writes: each staging with each command in turn,
+    // the two empty leftover lock directories' arms also determinism arms.
+    for (const arm of REFUSAL_ARMS) {
+      for (const operation of T13_5_10_OPERATIONS) {
+        await refusalArmRuns(product, operation, arm);
       }
     }
   },

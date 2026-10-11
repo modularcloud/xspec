@@ -22,6 +22,15 @@
 //   symbolic links and non-directory components are never involved: a
 //   staging naming an absent, symlinked, or otherwise unstageable object is a
 //   staging error, not a refusal.
+// - Directory modes (T13.5-10(d), (h), T13.5-11, T14-9's and T14-10's
+//   acquisition arms): a directory given a stated mode — a lock directory,
+//   a leftover in it, or `.xspec` made unlistable but writable (`-wx`),
+//   unwritable (`r-x`), or unsearchable (`rw-`) — whose effect TEST-SPEC
+//   states probe by probe: its listing, a creation in it, the examination of
+//   an entry's kind, an entry's removal, each refused or kept as declared
+//   (`stageDirectoryMode`). Its restore reinstates the recorded mode where
+//   the directory still stands, a directory a product's removal took away or
+//   renamed being left to the checks' diagnosis.
 // - E-1 self-verification: before returning, every staging verifies itself
 //   in the harness's own process — its own attempt at the staged object must
 //   be refused (`EACCES`/`EPERM`), and the permission it keeps must still be
@@ -60,7 +69,9 @@ import * as path from "node:path";
 
 /**
  * The staging modes, named in every `HarnessStagingError`: the permission
- * stagings of this module, the workspace builder's S-9 derivability check
+ * stagings of this module (`directory-mode` among them: a directory given a
+ * stated mode, each declared probe verified), the workspace builder's S-9
+ * derivability check
  * of a staged MDX source (`mdx-derivability`, helpers/workspace.ts), its
  * TypeScript check of a staged code source or configuration file
  * (`ts-derivability`, helpers/workspace.ts and helpers/ts-derivability.ts),
@@ -87,6 +98,7 @@ export type StagingMode =
   | "write-refusal-under"
   | "read-refusal-of-file"
   | "read-refusal-of-directory"
+  | "directory-mode"
   | "mdx-derivability"
   | "ts-derivability"
   | "undeclared-staging"
@@ -744,4 +756,190 @@ export async function stageReadRefusalOfDirectory(
   return verified(makeStaging(mode, dir, records), () =>
     verifyReadRefusalOfDirectory(dir, knownEntry),
   );
+}
+
+// --- directory modes --------------------------------------------------------
+
+/**
+ * One verification of a directory-mode staging (`stageDirectoryMode`),
+ * attempted in this process on the staged directory once its mode is set
+ * (E-1): each declared refusal must be refused (`EACCES`/`EPERM`), each
+ * declared kept permission granted.
+ */
+export type DirectoryModeProbe =
+  /** Listing the directory (`readdir`). */
+  | { readonly attempt: "list"; readonly refused: boolean }
+  /**
+   * Creating in it: refused, a fresh file (`wx`) and a fresh directory each
+   * refused; kept, a fresh file created and removed again.
+   */
+  | { readonly attempt: "create"; readonly refused: boolean }
+  /**
+   * Examining the kind of its entry `name` (`lstat`, never following a
+   * link) — a name or its exact bytes; an entry declared examinable must
+   * stand there, one declared refused may be absent (the refusal comes
+   * first).
+   */
+  | {
+      readonly attempt: "examine";
+      readonly name: StagedPath;
+      readonly refused: boolean;
+    }
+  /**
+   * Removing its entry `name`, a plain file: renaming a fresh sibling over
+   * it and unlinking it, each refused (T14-9's removal and replacement).
+   */
+  | { readonly attempt: "remove"; readonly name: StagedPath };
+
+/**
+ * E-1 verification of a directory-mode staging (exported for the self-test,
+ * which runs it on an unstaged directory to see the ineffective-staging
+ * report fire): every probe attempted in this process, in order.
+ */
+export async function verifyDirectoryMode(
+  target: StagedPath,
+  probes: readonly DirectoryModeProbe[],
+): Promise<void> {
+  const mode: StagingMode = "directory-mode";
+  const dir = toFsPath(target);
+  const shown = displayPath(dir);
+  for (const probe of probes) {
+    switch (probe.attempt) {
+      case "list": {
+        const attempt: Attempt = async () => {
+          await fsp.readdir(dir);
+          return async () => undefined;
+        };
+        if (probe.refused) {
+          await expectRefused(mode, shown, `listing ${shown}`, attempt);
+        } else {
+          await expectAllowed(mode, shown, `listing ${shown}`, attempt);
+        }
+        break;
+      }
+      case "create": {
+        if (probe.refused) {
+          await probeCreation(mode, shown, dir);
+          break;
+        }
+        const file = joinPath(dir, freshName());
+        await expectAllowed(
+          mode,
+          shown,
+          `creating and removing ${displayPath(file)}`,
+          async () => {
+            const handle = await fsp.open(file, "wx");
+            await handle.close();
+            await fsp.unlink(file);
+            return async () => undefined;
+          },
+        );
+        break;
+      }
+      case "examine": {
+        const entry = joinPath(dir, toFsPath(probe.name));
+        const attempt: Attempt = async () => {
+          await fsp.lstat(entry);
+          return async () => undefined;
+        };
+        const description = `examining ${displayPath(entry)}`;
+        if (probe.refused) {
+          await expectRefused(mode, shown, description, attempt);
+        } else {
+          await expectAllowed(mode, shown, description, attempt);
+        }
+        break;
+      }
+      case "remove":
+        await probeReplaceAndRemove(
+          mode,
+          shown,
+          joinPath(dir, toFsPath(probe.name)),
+          true,
+        );
+        break;
+    }
+  }
+}
+
+/**
+ * Give the directory `target` the mode `bits` — e.g. 0o300 (`-wx`: its
+ * listing refused, its writes and search kept), 0o500 (`r-x`: creation and
+ * removal in it refused), 0o600 (`rw-`: its entries' examination refused) —
+ * and verify on this process each of `probes` (E-1), at least one. The
+ * directory must be a plain directory (no symbolic link), a `remove` probe's
+ * entry a plain file and a kept `examine` probe's entry present, judged
+ * before anything changes. Its restore reinstates the recorded mode where a
+ * directory still stands at `target` — one a product's removal took away or
+ * renamed restores nothing, its state left to the checks' diagnosis — and is
+ * idempotent.
+ */
+export async function stageDirectoryMode(
+  target: StagedPath,
+  bits: number,
+  probes: readonly DirectoryModeProbe[],
+): Promise<PermissionStaging> {
+  const mode: StagingMode = "directory-mode";
+  const dir = toFsPath(target);
+  assertLinux(mode, dir);
+  const shown = displayPath(dir);
+  await assertPlainDirectory(mode, shown, dir, "the target");
+  if (!Number.isInteger(bits) || bits < 0 || bits > MODE_BITS) {
+    throw new HarnessStagingError(mode, shown, `${String(bits)} is no mode`);
+  }
+  if (probes.length === 0) {
+    throw new HarnessStagingError(
+      mode,
+      shown,
+      "a directory-mode staging verifies at least one probe (E-1)",
+    );
+  }
+  for (const probe of probes) {
+    const entry =
+      probe.attempt === "remove" ||
+      (probe.attempt === "examine" && !probe.refused)
+        ? joinPath(dir, toFsPath(probe.name))
+        : undefined;
+    if (entry === undefined) continue;
+    const kind = await kindOf(entry);
+    const wanted =
+      probe.attempt === "remove" ? kind === "file" : kind !== "absent";
+    if (!wanted) {
+      throw new HarnessStagingError(
+        mode,
+        shown,
+        `the ${probe.attempt} probe's entry ${displayPath(entry)} is ${kind}` +
+          (probe.attempt === "remove" ? ", not a plain file" : ""),
+      );
+    }
+  }
+  const prior = await modeOf(dir);
+  await fsp.chmod(dir, bits);
+  let restored = false;
+  const staging: PermissionStaging = {
+    mode,
+    path: dir,
+    async restore(): Promise<void> {
+      if (restored) return;
+      restored = true;
+      let kind: EntryKind;
+      try {
+        kind = await kindOf(dir);
+      } catch (thrown) {
+        if (errorCode(thrown) === "ENOTDIR") return;
+        throw thrown;
+      }
+      if (kind !== "directory") return;
+      try {
+        await fsp.chmod(dir, prior);
+      } catch (thrown) {
+        throw new HarnessStagingError(
+          mode,
+          shown,
+          `restoring mode ${prior.toString(8)} failed with ${describeError(thrown) || String(thrown)}`,
+        );
+      }
+    },
+  };
+  return verified(staging, () => verifyDirectoryMode(dir, probes));
 }

@@ -613,7 +613,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "10.7",
   ],
   "T13.5-8": ["13.5", "13.3", "6.3", "6.4", "6.5", "6.6", "12.0", "14"],
-  "T13.5-10": ["13.5", "13.4", "14"],
+  // T13.5-10(d) asserts 12.0 beside 13.5: its determinism arms' diagnostics
+  // byte-identical (no entry or absolute path named), and its unbuilt arm's
+  // acquisition preceding the session check of `resolve` and `split`.
+  "T13.5-10": ["13.5", "13.4", "12.0", "14"],
   "T14-1": ["14"],
   "T14-2": ["14", "2.4", "4.5"],
   "T14-3": ["14"],

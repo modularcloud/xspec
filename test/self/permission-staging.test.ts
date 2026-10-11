@@ -3,8 +3,11 @@
 // removal and verifies each staging on the harness's own process before any
 // product is invoked (E-1). This self-test asserts, on the Linux leg: that
 // each mode refuses this process's own attempt at exactly the operations the
-// discipline names and keeps the permission it must keep; that `restore()`
-// reinstates every recorded mode, idempotently; that unstageable objects — a
+// discipline names and keeps the permission it must keep — the directory
+// modes of `stageDirectoryMode` (T13.5-10(d), (h), T13.5-11) included, each
+// declared probe refused or kept as declared; that `restore()` reinstates
+// every recorded mode, idempotently, a directory-mode staging's restoring
+// nothing where its directory was renamed away; that unstageable objects — a
 // directory in the path form, a symbolic link, an absent object for a read
 // refusal — are staging errors, never refusals; that an entry the product
 // named is reached at its exact bytes whatever the name — not valid UTF-8,
@@ -31,16 +34,21 @@ import { expect, onTestFinished, test } from "vitest";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import {
   HarnessStagingError,
+  stageDirectoryMode,
   stageReadRefusalOfDirectory,
   stageReadRefusalOfFile,
   stageWriteRefusal,
   stageWriteRefusalUnder,
+  verifyDirectoryMode,
   verifyReadRefusalOfDirectory,
   verifyReadRefusalOfFile,
   verifyWriteRefusal,
   verifyWriteRefusalUnder,
 } from "../helpers/permissions.js";
-import type { PermissionStaging } from "../helpers/permissions.js";
+import type {
+  DirectoryModeProbe,
+  PermissionStaging,
+} from "../helpers/permissions.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 
 const onLinux = process.platform === "linux";
@@ -292,6 +300,132 @@ test.runIf(onLinux)(
   },
 );
 
+test.runIf(onLinux)(
+  "directory modes (T13.5-10(d), (h), T13.5-11): `-wx`, `r-x`, and `rw-` each refuse exactly the probes declared refused — the listing, a creation, an entry's examination, an entry's removal — and keep those declared kept, the probes leaving nothing behind; restore reinstates the recorded mode, idempotently, and restores nothing where the directory was renamed away",
+  async () => {
+    const workspace = await makeWorkspace();
+    // `-wx` on an empty directory: its listing refused, creation kept.
+    const empty = workspace.path("specs/empty");
+    const unlistable = tracked(
+      await stageDirectoryMode(empty, 0o300, [
+        { attempt: "list", refused: true },
+        { attempt: "create", refused: false },
+      ]),
+    );
+    expect(unlistable.mode).toBe("directory-mode");
+    expect(unlistable.path).toBe(empty);
+    expect(await modeOf(empty)).toBe(0o300);
+    expect(await outcome(fsp.readdir(empty))).toBe("EACCES");
+    await openAndClose(path.join(empty, "e"), "wx");
+    await fsp.unlink(path.join(empty, "e"));
+    await unlistable.restore();
+    expect(await modeOf(empty)).toBe(0o755);
+    expect(await fsp.readdir(empty)).toEqual([]);
+    await unlistable.restore();
+    expect(await modeOf(empty)).toBe(0o755);
+
+    // `r-x` on a directory holding a file: creation and the file's removal
+    // refused, the listing and the file's examination kept.
+    const sub = workspace.path("specs/b/sub");
+    const subFile = path.join(sub, "C.mdx");
+    const unwritable = tracked(
+      await stageDirectoryMode(sub, 0o500, [
+        { attempt: "create", refused: true },
+        { attempt: "remove", name: "C.mdx" },
+        { attempt: "list", refused: false },
+        { attempt: "examine", name: "C.mdx", refused: false },
+      ]),
+    );
+    expect(await modeOf(sub)).toBe(0o500);
+    expect(await outcome(openAndClose(path.join(sub, "D.mdx"), "wx"))).toBe(
+      "EACCES",
+    );
+    expect(await outcome(fsp.unlink(subFile))).toBe("EACCES");
+    expect(await fsp.readdir(sub)).toEqual(["C.mdx"]);
+    await unwritable.restore();
+    expect(await modeOf(sub)).toBe(0o755);
+    expect(Buffer.from(await fsp.readFile(subFile)).toString("utf8")).toBe(
+      FILES["specs/b/sub/C.mdx"],
+    );
+
+    // `rw-` on a directory holding a directory: an entry's examination —
+    // of one present and of one absent — and creation refused, the listing
+    // kept.
+    const dir = workspace.path("specs/b");
+    const unsearchable = tracked(
+      await stageDirectoryMode(dir, 0o600, [
+        { attempt: "examine", name: "sub", refused: true },
+        { attempt: "examine", name: "absent", refused: true },
+        { attempt: "create", refused: true },
+        { attempt: "list", refused: false },
+      ]),
+    );
+    expect(await modeOf(dir)).toBe(0o600);
+    expect(await outcome(fsp.lstat(sub))).toBe("EACCES");
+    expect((await fsp.readdir(dir)).sort()).toEqual(B_LISTING);
+    await unsearchable.restore();
+    expect(await modeOf(dir)).toBe(0o755);
+    expect((await fsp.readdir(dir)).sort()).toEqual(B_LISTING);
+
+    // A directory renamed away meanwhile — as a removal may rename a
+    // leftover first: the restore leaves it alone and does not throw.
+    const moved = tracked(
+      await stageDirectoryMode(empty, 0o300, [
+        { attempt: "list", refused: true },
+      ]),
+    );
+    const elsewhere = workspace.path("specs/renamed");
+    await fsp.rename(empty, elsewhere);
+    await moved.restore();
+    expect(await modeOf(elsewhere)).toBe(0o300);
+    expect(await outcome(fsp.lstat(empty))).toBe("ENOENT");
+    await fsp.chmod(elsewhere, 0o755);
+  },
+);
+
+test.runIf(onLinux)(
+  "E-1 for directory modes: each probe declared refused, attempted on a directory whose mode refuses nothing, is an ineffective staging — its own attempt undone — and each declared kept that the mode refuses is a removal beyond the mode, each a HarnessStagingError; a staging whose verification fails reinstates the prior mode",
+  async () => {
+    const workspace = await makeWorkspace();
+    const dir = workspace.path("specs/b");
+    const target = workspace.path("specs/b/B.mdx");
+    const notRefused: readonly (readonly DirectoryModeProbe[])[] = [
+      [{ attempt: "list", refused: true }],
+      [{ attempt: "create", refused: true }],
+      [{ attempt: "examine", name: "sub", refused: true }],
+      [{ attempt: "remove", name: "B.mdx" }],
+    ];
+    for (const probes of notRefused) {
+      const error = await stagingError(verifyDirectoryMode(dir, probes));
+      expect(error.mode).toBe("directory-mode");
+      expect(error.path).toBe(dir);
+      expect(error.message).toContain("was not refused");
+      expect(error.message).toContain("privileged runner");
+    }
+    // Every probe undid its effect: the listing and the bytes are unchanged.
+    expect((await fsp.readdir(dir)).sort()).toEqual(B_LISTING);
+    expect(Buffer.from(await fsp.readFile(target)).toString("utf8")).toBe(
+      B_MDX,
+    );
+    await fsp.chmod(dir, 0o000);
+    const keptRefused: readonly (readonly DirectoryModeProbe[])[] = [
+      [{ attempt: "list", refused: false }],
+      [{ attempt: "create", refused: false }],
+      [{ attempt: "examine", name: "sub", refused: false }],
+    ];
+    for (const probes of keptRefused) {
+      const error = await stagingError(verifyDirectoryMode(dir, probes));
+      expect(error.message).toContain("removed more than it may");
+    }
+    await fsp.chmod(dir, 0o755);
+    const failed = await stagingError(
+      stageDirectoryMode(dir, 0o700, [{ attempt: "list", refused: true }]),
+    );
+    expect(failed.message).toContain("was not refused");
+    expect(await modeOf(dir)).toBe(0o755);
+  },
+);
+
 // Names a product may choose (SPEC 13.1, 13.3; permissions.ts: Names), built
 // from bytes and code points: "a" then 0xFF — no valid UTF-8 — and "d" then
 // U+00E9, valid UTF-8 but not ASCII.
@@ -420,6 +554,52 @@ test.runIf(onLinux)(
         () => stageReadRefusalOfDirectory(workspace.path("gone")),
       ],
       ["relative path", () => stageWriteRefusal("specs/b/B.mdx")],
+      [
+        "file as directory, directory mode",
+        () =>
+          stageDirectoryMode(workspace.path("specs/b/B.mdx"), 0o300, [
+            { attempt: "list", refused: true },
+          ]),
+      ],
+      [
+        "symlink as directory, directory mode",
+        () =>
+          stageDirectoryMode(workspace.path("specs/link.mdx"), 0o300, [
+            { attempt: "list", refused: true },
+          ]),
+      ],
+      [
+        "absent directory, directory mode",
+        () =>
+          stageDirectoryMode(workspace.path("gone"), 0o300, [
+            { attempt: "list", refused: true },
+          ]),
+      ],
+      [
+        "directory mode without a probe",
+        () => stageDirectoryMode(workspace.path("specs/b"), 0o300, []),
+      ],
+      [
+        "directory mode beyond the mode bits",
+        () =>
+          stageDirectoryMode(workspace.path("specs/b"), 0o10000, [
+            { attempt: "list", refused: true },
+          ]),
+      ],
+      [
+        "directory mode removing a directory",
+        () =>
+          stageDirectoryMode(workspace.path("specs/b"), 0o500, [
+            { attempt: "remove", name: "sub" },
+          ]),
+      ],
+      [
+        "directory mode examining an absent entry it keeps",
+        () =>
+          stageDirectoryMode(workspace.path("specs/b"), 0o500, [
+            { attempt: "examine", name: "gone", refused: false },
+          ]),
+      ],
     ];
     for (const [label, call] of cases) {
       const error = await stagingError(call());
@@ -511,6 +691,11 @@ test("the platform guard (E-1): presented a non-Linux platform, every staging th
     ["write-refusal-under", () => stageWriteRefusalUnder(target)],
     ["read-refusal-of-file", () => stageReadRefusalOfFile(target)],
     ["read-refusal-of-directory", () => stageReadRefusalOfDirectory(target)],
+    [
+      "directory-mode",
+      () =>
+        stageDirectoryMode(target, 0o300, [{ attempt: "list", refused: true }]),
+    ],
   ] as const;
   for (const platform of FOREIGN_PLATFORMS) {
     Object.defineProperty(process, "platform", {
