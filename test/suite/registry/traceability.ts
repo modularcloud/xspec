@@ -643,6 +643,20 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // refused writes leave — are carriage context with home coverage at the
   // tests (a) names (T13.5-12, T13.5-10, T13.5-7).
   "T13.5-11": ["13.5", "13.4", "14"],
+  // T13.5-12 asserts 13.5's rediscovery: each change made during a hold met
+  // by the second discovery — a created or deleted source, the origin file,
+  // a file both groups match, a directory made unlistable — and the order
+  // 12.0 fixes for what it meets: the configuration error past acquisition
+  // and the hold file's errors, before the unknown-ID usage error, and the
+  // unknown-file usage error (`code` `null`) judged over the sources it
+  // fixed; the stable codes `configuration-error` and `read-failure` of its
+  // endings, and no `read-failure` for a source deleted during the hold
+  // (14); and, as its arms' premise, a twin's `rename` rewriting the `d`
+  // reference and the TypeScript marker it is given to `A.a2` in place
+  // (6.4). The audit session's scope (10.6), the configuration error's
+  // rule (7.2), and the twins' outcomes are carriage context with home
+  // coverage at T10.6-*, T7-*, and T6.4-*.
+  "T13.5-12": ["13.5", "12.0", "6.4", "14"],
   "T14-1": ["14"],
   "T14-2": ["14", "2.4", "4.5"],
   "T14-3": ["14"],

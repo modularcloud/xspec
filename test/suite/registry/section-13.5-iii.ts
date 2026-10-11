@@ -340,8 +340,11 @@ async function withWorkspace<T>(
   }
 }
 
-/** A run held at the seam of 13.5, and the entry it holds by. */
-interface HeldRun {
+/**
+ * A run held at the seam of 13.5, and the entry it holds by. Shared with
+ * T13.5-12 (section-13.5-iv.ts).
+ */
+export interface HeldRun {
   readonly running: RunningProduct;
   /** Its hold file's absolute path, outside the workspace. */
   readonly hold: string;
@@ -358,9 +361,11 @@ interface HeldRun {
  * `.xspec` itself where the invocation found none, byte-identical, and
  * `.xspec/lock` a directory holding exactly the held run's entry, a plain
  * file. Then run `body` with the held run. Whatever happens, the run is
- * killed (a no-op once it has exited) and its hold file removed.
+ * killed (a no-op once it has exited) and its hold file removed. Shared
+ * with T13.5-12 (section-13.5-iv.ts), whose changes during the hold the
+ * held-state comparison brackets.
  */
-async function withHeldRun<T>(
+export async function withHeldRun<T>(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
@@ -387,7 +392,7 @@ async function withHeldRun<T>(
     const [entry] = entries;
     if (entry === undefined || entries.length !== 1) {
       throw new Error(
-        `T13.5-11: assertHeldState returned ${String(entries.length)} ` +
+        `withHeldRun: assertHeldState returned ${String(entries.length)} ` +
           `entries for one held run`,
       );
     }
@@ -403,8 +408,14 @@ function entryRel(name: Buffer): Buffer {
   return Buffer.concat([Buffer.from(`${LOCK_PATH}/`), name]);
 }
 
-/** Lift `held`'s hold and await its exit (`exitOnceLifted`). */
-async function liftAndWait(held: HeldRun, context: string): Promise<RunResult> {
+/**
+ * Lift `held`'s hold and await its exit (`exitOnceLifted`). Shared with
+ * T13.5-12 (section-13.5-iv.ts).
+ */
+export async function liftAndWait(
+  held: HeldRun,
+  context: string,
+): Promise<RunResult> {
   await releaseHoldFile(held.hold);
   return await exitOnceLifted(held.running, context);
 }
@@ -414,9 +425,9 @@ async function liftAndWait(held: HeldRun, context: string): Promise<RunResult> {
  * document as the entire stdout, its `code` `null` — the usage class
  * carries no stable code (SPEC 14), unlike acquisition's own failures
  * (14.24–14.26), which a product judging the name before acquiring would
- * not reach either.
+ * not reach either. Shared with T13.5-12 (section-13.5-iv.ts).
  */
-function assertUsageError(
+export function assertUsageError(
   result: RunResult,
   context: string,
   rule: string,
@@ -765,8 +776,10 @@ async function refusalArms(product: ProductBinding): Promise<void> {
  * document as the entire stdout, its `code` among `expected.codes` and its
  * `path` `expected.path` (`message` and `identities` informational) — the
  * ending whose release the absence of `.xspec/lock` that follows observes.
+ * Shared with T13.5-12 (section-13.5-iv.ts), whose (d) and (e) assert the
+ * same endings beside nothing modified.
  */
-function assertFailureEnding(
+export function assertFailureEnding(
   result: RunResult,
   expected: { readonly codes: readonly string[]; readonly path: string },
   context: string,
