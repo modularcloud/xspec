@@ -808,6 +808,9 @@ class SourceFlipper {
   start(): void {
     if (this.#loop !== undefined) throw new Error("P-14 flipper started twice");
     this.#loop = this.#run();
+    // A failed change is reported by `stop`, which awaits the loop; until
+    // then the rejection must not count as unhandled.
+    this.#loop.catch(() => undefined);
   }
 
   /** End the loop, then restore F; a failed change is rethrown here. */
@@ -1120,6 +1123,7 @@ interface ConcurrentAnswer {
   readonly read: number;
   readonly worker: number;
   readonly round: number;
+  readonly step: number;
   readonly result: RunResult;
 }
 
@@ -1146,7 +1150,7 @@ async function concurrentPhase(
           entry.argv,
           `${entry.what} (concurrent, worker ${String(index)}, round ${String(round)})`,
         );
-        answers.push({ read, worker: index, round, result });
+        answers.push({ read, worker: index, round, step, result });
       }
     }
   };
@@ -1193,7 +1197,7 @@ function judgeAnswers(
   }
   if (deviant.length > 0) {
     const ordered = [...deviant].sort(
-      (a, b) => a.worker - b.worker || a.round - b.round || a.read - b.read,
+      (a, b) => a.worker - b.worker || a.round - b.round || a.step - b.step,
     );
     const first = ordered[0] as ConcurrentAnswer;
     const read = menu[first.read] as P14Read;
@@ -1387,8 +1391,11 @@ const P_14 = defineProductTest({
   // Wall-clock hang guard only (H-10): two series, each P14_RUNS_PER_SEED
   // trials at each of the three fixed seeds (E-5), plus up to
   // P14_MAX_SHRINK_EXECUTIONS shrink trials on a falsification; each
-  // read's own guard is READ_TIMEOUT_MS.
-  timeoutMs: 900_000,
+  // read's own guard is READ_TIMEOUT_MS. Measured under the unprivileged
+  // namespace: ~101–106 s passing against a P-14-conforming stand-in (the
+  // built product re-running a read its own race answer spoiled), ~37–40 s
+  // failing against the built product, its four shrink trials included.
+  timeoutMs: 600_000,
   run: async (product) => {
     await checkProperty(
       "P-14 sources vanishing under reads — the spec-source series",
