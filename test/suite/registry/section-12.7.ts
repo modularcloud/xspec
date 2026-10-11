@@ -256,6 +256,21 @@
 //   its sole one (the T7-2 attribution discipline): a product that wrongly
 //   proceeds exits 0 with a real answer and fails the exit-code assertion
 //   attributably, never exits 2 for a side reason.
+// - The busy workspace (14.26) is staged as T13.5-2 stages it, through
+//   section-13.5.ts's `judgeBusyRefusal`: on a freshly built CONF-CORE-shaped
+//   workspace, `rename specs/A.mdx g g2 --json` runs while T13.5-2's command
+//   1, `rename specs/A.mdx a a2`, is held at 13.5's seam (its hold path
+//   outside the workspace), bounded by a hang guard (H-10); command 1 still
+//   running as the run exits, the run is judged while it holds — exit 2,
+//   stderr diagnostics, stdout exactly the error document `{"code":
+//   "workspace-busy", "path": ".xspec/lock"}`, locations [] (SPEC 14.26: the
+//   concerned path is the lock path, no entry named) — and once the hold is
+//   lifted command 1 completes (exit 0) and the same operation succeeds
+//   (exit 0), so the refusal was the busy workspace's alone (the T7-2
+//   discipline above). The rest of the exclusion's contract — every
+//   mutating command refused, modifying nothing, the holder's entry
+//   untouched, determinism — is T13.5-2's. The arm runs on every platform,
+//   last in the body: it needs the product's own exclusion (13.5).
 
 import { Buffer } from "node:buffer";
 import type {
@@ -286,6 +301,7 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { LOCK_PATH } from "../../helpers/lock-path.js";
 import {
   stageReadRefusalOfDirectory,
   stageWriteRefusalUnder,
@@ -304,6 +320,7 @@ import {
   D21_TWO_REASON_MOVE,
   runD21RefusedStaging,
 } from "./section-6.5-iv.js";
+import { judgeBusyRefusal } from "./section-13.5.js";
 import {
   assertConditionCounts,
   assertFindingMentionsLocation,
@@ -2786,28 +2803,57 @@ async function expectAnchoredConfigurationError(
 }
 
 /**
- * Assert an environment refusal's error document (SPEC 14.24, 14.25, 12.0,
- * 12.7; T14-9 and T14-10 pin the per-command contracts and states): exit 2
- * exactly — a usage error, never a finding and never an internal error —
- * stderr diagnostics present, and stdout exactly the single 12.7 error
- * document whose one finding carries the stable code `expectedCode`,
- * locations [] (write and read conditions carry no in-source location,
- * SPEC 14), and the concerned path exactly `expectedPath`.
+ * The usage errors carrying a stable code (SPEC 14: conditions 24–26, each
+ * reported by the refused command as a usage error, 12.0, never a finding):
+ * each code's condition and the rule its exit 2 cites.
  */
-function assertEnvironmentRefusalDocument(
+const CODED_USAGE_ERRORS = {
+  "write-failure": {
+    condition: "14.24",
+    rule:
+      "a write the environment refuses is a usage error: the command stops " +
+      "at it and exits 2",
+    ruleRefs: "14.24, 12.0",
+  },
+  "read-failure": {
+    condition: "14.25",
+    rule:
+      "a read the environment refuses is a usage error: the command stops " +
+      "at it and exits 2",
+    ruleRefs: "14.25, 12.0",
+  },
+  "workspace-busy": {
+    condition: "14.26",
+    rule:
+      "a mutating command meeting another live run's entry at acquisition " +
+      "is refused there with a usage error, exit 2",
+    ruleRefs: "14.26, 13.5, 12.0",
+  },
+} as const;
+
+/**
+ * Assert a coded usage error's error document — an environment refusal
+ * (SPEC 14.24, 14.25; T14-9 and T14-10 pin the per-command contracts and
+ * states) or the busy refusal (14.26; T13.5-2 pins the exclusion's
+ * contract), 12.0, 12.7: exit 2 exactly — a usage error, never a finding
+ * and never an internal error — stderr diagnostics present, and stdout
+ * exactly the single 12.7 error document whose one finding carries the
+ * stable code `expectedCode`, locations [] (none of the three carries an
+ * in-source location, SPEC 14), and the concerned path exactly
+ * `expectedPath`.
+ */
+function assertCodedErrorDocument(
   result: RunResult,
-  expectedCode: "write-failure" | "read-failure",
+  expectedCode: keyof typeof CODED_USAGE_ERRORS,
   expectedPath: string,
   context: string,
 ): void {
-  const condition = expectedCode === "write-failure" ? "14.24" : "14.25";
-  const access = expectedCode === "write-failure" ? "write" : "read";
+  const { condition, rule, ruleRefs } = CODED_USAGE_ERRORS[expectedCode];
   assertExitCode(
     result,
     2,
-    `${context} — a ${access} the environment refuses is a usage error: ` +
-      `the command stops at it and exits 2, never a finding, never an ` +
-      `internal error (SPEC ${condition}, 12.0)`,
+    `${context} — ${rule}, never a finding, never an internal error (SPEC ` +
+      `${ruleRefs})`,
   );
   assertStderrDiagnostic(result, context);
   const finding = expectErrorDocument(result, context);
@@ -3336,12 +3382,7 @@ async function runErrorEnvironmentRefusalArms(
           cwd: workspace.root,
           argv: ["build", "--json"],
         });
-        assertEnvironmentRefusalDocument(
-          result,
-          "write-failure",
-          ".xspec",
-          context,
-        );
+        assertCodedErrorDocument(result, "write-failure", ".xspec", context);
       } finally {
         await staging.restore();
       }
@@ -3365,17 +3406,40 @@ async function runErrorEnvironmentRefusalArms(
           cwd: workspace.root,
           argv: ["build", "--json"],
         });
-        assertEnvironmentRefusalDocument(
-          result,
-          "read-failure",
-          "specs/sub",
-          context,
-        );
+        assertCodedErrorDocument(result, "read-failure", "specs/sub", context);
       } finally {
         await staging.restore();
       }
     },
   );
+}
+
+/**
+ * Arm: the busy workspace's error document (SPEC 14.26, 13.5, 12.0, 12.7):
+ * a mutating command run under `--json` while another run holds the
+ * workspace — staged as T13.5-2 stages it (`judgeBusyRefusal`,
+ * section-13.5.ts: a freshly built CONF-CORE-shaped workspace, a `rename`
+ * held at 13.5's seam, `rename specs/A.mdx g g2 --json` while it holds, the
+ * same operation succeeding once the holder has completed) — exits 2 with
+ * diagnostics on stderr and stdout exactly the error document
+ * `{"code": "workspace-busy", "path": ".xspec/lock"}`, locations []: the
+ * busy refusal concerns the lock path, no entry named (SPEC 14.26).
+ * Platform-independent, and last in the body: it needs the product's own
+ * exclusion, so a product predating 14.26 meets every other arm first.
+ * Exported so a scratch probe can run it alone.
+ */
+export async function runErrorBusyWorkspaceArm(
+  product: ProductBinding,
+): Promise<void> {
+  await judgeBusyRefusal(product, "T12.7-3 (14.26)", (result) => {
+    assertCodedErrorDocument(
+      result,
+      "workspace-busy",
+      LOCK_PATH,
+      "T12.7-3 `rename specs/A.mdx g g2 --json` while a held `rename` " +
+        "holds the workspace",
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3417,8 +3481,12 @@ const T12_7_3 = defineProductTest({
     ".xspec unwritable on a stale workspace — is " +
     '{"code": "write-failure", "path": ".xspec"} and a read it refuses — ' +
     'specs/sub unlistable — is {"code": "read-failure", "path": ' +
-    '"specs/sub"}, each locations [] with diagnostics on stderr (SPEC 12.0, ' +
-    "12.7, 14, 11.6, 7, 12.1, 14.24, 14.25)",
+    '"specs/sub"}, each locations [] with diagnostics on stderr; and a busy ' +
+    "workspace — `rename specs/A.mdx g g2 --json` while a held `rename` " +
+    "holds it (T13.5-2's staging), the operation succeeding once the " +
+    'holder has completed — is {"code": "workspace-busy", "path": ' +
+    '".xspec/lock"}, locations [], with diagnostics on stderr (SPEC 12.0, ' +
+    "12.7, 14, 11.6, 7, 12.1, 14.24, 14.25, 14.26, 13.5)",
   run: async (product) => {
     await runErrorConfigPathsArm(product);
     await runErrorSearchFailureArm(product);
@@ -3428,6 +3496,7 @@ const T12_7_3 = defineProductTest({
       await runErrorSymlinkWorkingDirectoryArm(product);
       await runErrorEnvironmentRefusalArms(product);
     }
+    await runErrorBusyWorkspaceArm(product);
   },
 });
 

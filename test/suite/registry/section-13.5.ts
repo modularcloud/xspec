@@ -371,14 +371,14 @@ import {
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
 // other keys — the CONF-CORE workspace shape (CERTIFICATIONS.md). A
-// staged-source record: T11.6-3, T13.4-12, T13.5-1, T13.5-4, T13.5-6,
-// T13.5-8, T13.5-10, T13.5-11, and T13.5-13 stage it in workspaces created
-// after a product invocation (CORE_DECL, section-13.5-vii.ts's ISO_TWO_DECL
-// and NESTED_DECL — at both of its roots — section-13.5-vi.ts's
+// staged-source record: T11.6-3, T12.7-3, T13.4-12, T13.5-1, T13.5-4,
+// T13.5-6, T13.5-8, T13.5-10, T13.5-11, and T13.5-13 stage it in workspaces
+// created after a product invocation (CORE_DECL, section-13.5-vii.ts's
+// ISO_TWO_DECL and NESTED_DECL — at both of its roots — section-13.5-vi.ts's
 // T13_5_13_DECL), as T6.6-3's runs-while-held arm does (S-9's timing
 // clause; test/self/s9-staged-sources.test.ts).
 export const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.6-3/T11.6-3/T13.4-12/T13.5-1/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-13 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's, ISO_TWO_DECL's, NESTED_DECL's at both roots, and T13_5_13_DECL's)",
+  "T6.6-3/T11.6-3/T12.7-3/T13.4-12/T13.5-1/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-13 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's, ISO_TWO_DECL's, NESTED_DECL's at both roots, and T13_5_13_DECL's)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -413,13 +413,14 @@ const A_MDX = [
 // T13.5-11's, and T13.5-12's per-arm workspaces and twins — T13.5-12(c)
 // creating it in one during a hold — T6.6-3's scheduling workspace,
 // T13.4-12's per-arm workspaces and twin, T13.5-13's trial and twin
-// workspaces, T11.6-3's lock-path arms' workspaces) and, byte for byte, by
+// workspaces, T11.6-3's lock-path arms' workspaces, the busy arm's of
+// T12.7-3, `judgeBusyRefusal`) and, byte for byte, by
 // section-13.4.ts's tests (its later workspaces included), so it is one
 // staged-source record made from the string (S-9's before-any-product
 // clause; helpers/staged-mdx.ts) — the string stays for the staleness edit
 // below — staged wherever the bytes are.
 export const CORE_A_STAGED = stagedMdx(
-  "T6.6-3/T11.6-3/T13.4-1/T13.4-2/T13.4-3/T13.4-4/T13.4-5/T13.4-6/T13.4-12/T13.5-1/T13.5-2/T13.5-3/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-12/T13.5-13 specs/A.mdx (the CONF-CORE-shaped source: a holding a.k, then g; T13.4-6's specs/one/A.mdx too; T13.5-12(c)'s, created during a hold)",
+  "T6.6-3/T11.6-3/T12.7-3/T13.4-1/T13.4-2/T13.4-3/T13.4-4/T13.4-5/T13.4-6/T13.4-12/T13.5-1/T13.5-2/T13.5-3/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-12/T13.5-13 specs/A.mdx (the CONF-CORE-shaped source: a holding a.k, then g; T13.4-6's specs/one/A.mdx too; T13.5-12(c)'s, created during a hold)",
   A_MDX,
 );
 
@@ -1754,6 +1755,77 @@ async function repeatRefusals(
       }
     },
   );
+}
+
+/**
+ * The operation the busy refusal staged for tests outside §13.5 refuses
+ * (`judgeBusyRefusal`): T13.5-2's first excluded operation, `rename
+ * specs/A.mdx g g2` — succeeding on CORE_DECL's staging and composing with
+ * command 1, `g` a top-level leaf apart from command 1's `a` (SPEC 6.4).
+ */
+const BUSY_OPERATION: readonly string[] = ["rename", "specs/A.mdx", "g", "g2"];
+
+/**
+ * The busy refusal (SPEC 13.5, 14.26) staged as T13.5-2 stages it, for the
+ * tests asserting its answer outside §13.5 — T12.7-3's error document ("a
+ * busy workspace → `code` `"workspace-busy"` and `path` `".xspec/lock"`
+ * (T13.5-2)") and T14-6's stable code. On a fresh CONF-CORE-shaped
+ * workspace (CORE_DECL), freshly built, T13.5-2's command 1 (`rename
+ * specs/A.mdx a a2`) is held at the seam (`whileCommand1Holds`, its hold
+ * path outside the workspace) and `rename specs/A.mdx g g2 --json` runs
+ * once while it holds, bounded (`runBounded`: a product waiting for the
+ * exclusivity to end fails diagnosed at the hang guard, H-8, H-10). Command
+ * 1 must still be running as that run exits, so the answer `judge` then
+ * receives — while command 1 still holds — met a workspace another run
+ * held; once the hold is lifted command 1 must complete normally (exit 0)
+ * and the same operation, run again, must succeed (exit 0): the run judged
+ * was refused for the busy workspace alone, never for a defect of its own
+ * operation (the T7-2 attribution discipline). The exclusion's full
+ * contract — every mutating command, the refused run modifying nothing,
+ * the holder's entry untouched, determinism — is T13.5-2's.
+ */
+export async function judgeBusyRefusal(
+  product: ProductBinding,
+  context: string,
+  judge: (result: RunResult) => void | Promise<void>,
+): Promise<void> {
+  const operation = `\`${BUSY_OPERATION.join(" ")}\``;
+  await withWorkspace(CORE_DECL, async (workspace) => {
+    await buildOk(product, workspace, `${context} staging \`build\``);
+    await whileCommand1Holds(
+      product,
+      workspace,
+      "hold-busy.tmp",
+      `${context} command 1 \`rename specs/A.mdx a a2 --test-hold <path>\``,
+      async (command1) => {
+        const label = `${context} ${operation} under --json while command 1 holds`;
+        const result = await runBounded(
+          product,
+          workspace.root,
+          [...BUSY_OPERATION, "--json"],
+          label,
+        );
+        if (command1.hasExited()) {
+          fail(
+            `${label}: command 1, held at the seam, must still be running ` +
+              `as the run exits — a held run proceeds only once its hold is ` +
+              `lifted (SPEC 13.5) — so the answer met a workspace another ` +
+              `run held; command 1 ended: ${await describeExit(command1)}`,
+          );
+        }
+        await judge(result);
+      },
+    );
+    await expectExit(
+      product,
+      workspace,
+      BUSY_OPERATION,
+      0,
+      `${context} ${operation} once command 1 has completed — the ` +
+        `operation succeeds there (SPEC 13.5, 6.4), so its refusal while ` +
+        `command 1 held was the busy workspace's alone`,
+    );
+  });
 }
 
 const T13_5_2 = defineProductTest({

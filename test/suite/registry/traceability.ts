@@ -548,11 +548,12 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // coverage at T13.3-*/T11.*/T12.6-*/T6.5-*/T6.6-*/T11.6-2.
   "T12.7-2": ["12.7", "14"],
   // T12.7-3: asserts the error document's stable codes — the 14.14
-  // configuration error's, 14.24's `write-failure`, and 14.25's
-  // `read-failure` — so "14" joins the home passage; 12.0 (JSON-in-effect,
-  // stream separation, stderr diagnostics) and 11.6 (the anchoring form)
-  // are carriage context with home coverage at T12.0-2/T11.6-1, and 7's
-  // configuration location/validity at T7-*.
+  // configuration error's, 14.24's `write-failure`, 14.25's
+  // `read-failure`, and 14.26's `workspace-busy` — so "14" joins the home
+  // passage; 12.0 (JSON-in-effect, stream separation, stderr diagnostics)
+  // and 11.6 (the anchoring form) are carriage context with home coverage
+  // at T12.0-2/T11.6-1, 7's configuration location/validity at T7-*, and
+  // 13.5's exclusion (the busy arm's held `rename`) at T13.5-2.
   "T12.7-3": ["12.7", "14"],
   "T13.1-1": ["13.1"],
   "T13.1-2": ["13.1"],
