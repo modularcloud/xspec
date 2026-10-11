@@ -2475,9 +2475,12 @@ function assertNoLockPathFinding(result: RunResult, context: string): void {
 /**
  * `check --json` clean: exactly `{"findings": []}` (SPEC 12.7: a
  * finding-free report's array is empty; 12.0: exit 0, asserted by the
- * caller first).
+ * caller first). Shared with T13.5-10(h) (section-13.5-ii.ts).
  */
-function assertCleanCheckReport(result: RunResult, context: string): void {
+export function assertCleanCheckReport(
+  result: RunResult,
+  context: string,
+): void {
   const { findings } = decodeFindingsReport(
     parseJsonStdout(result, context),
     context,
@@ -2486,7 +2489,7 @@ function assertCleanCheckReport(result: RunResult, context: string): void {
     findings,
     [],
     `${context}: \`check\` is clean on a clean workspace — exactly ` +
-      `{"findings": []} (SPEC 12.7, 12.0; TEST-SPEC T13.5-4)`,
+      `{"findings": []} (SPEC 12.7, 12.0; TEST-SPEC T13.5-4, T13.5-10(h))`,
   );
 }
 

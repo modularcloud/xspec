@@ -1,13 +1,12 @@
 // TEST-SPEC §13.5 (concurrency and isolation), part ii — SUITE-48: T13.5-10
-// (acquisition), registered with seven of its eight arms so far: (a)
-// obstruction, (b) leftover takeover, (c) the busy refusal among bracketing
-// leftovers and over a live entry unreadable or altered, (d) acquisition's
-// refused reads and writes, (e) interference — a held `rename`'s entry
-// deleted or replaced by hand, the lock directory deleted during a hold,
-// and the holder met by a run on another machine — (f) the acquirer's own
-// identifier, and (g) the gap's bound and its manual remedy. Arm (h),
-// acquisition listing no directory but those 13.5 names, is not yet
-// implemented (FIX_PLAN Task 27 adds it).
+// (acquisition), registered with all eight of its arms: (a) obstruction,
+// (b) leftover takeover, (c) the busy refusal among bracketing leftovers and
+// over a live entry unreadable or altered, (d) acquisition's refused reads
+// and writes, (e) interference — a held `rename`'s entry deleted or replaced
+// by hand, the lock directory deleted during a hold, and the holder met by a
+// run on another machine — (f) the acquirer's own identifier, (g) the gap's
+// bound and its manual remedy, and (h) acquisition listing no directory but
+// those 13.5 names.
 //
 // Every arm is staged on a freshly built valid workspace holding an `audit`
 // session `s` created while it was valid — section-13.5.ts's session staging
@@ -17,14 +16,15 @@
 // have ended — and run with each mutating command in turn
 // (`T13_5_10_OPERATIONS`: `rename`, file-form `move`, `review create
 // --strategy audit`, `review resolve`, and `review split`; beside (e)'s held
-// `rename`, `T13_5_10_COMPOSING`, each composing with it), each an
-// operation succeeding on an unstaged twin — the same staging and command
-// on a workspace of its own with nothing staged beside it: exit 0,
-// `.xspec/lock` absent once it ends — under `--json`. Every arm is staged
-// afresh for each command, on a fresh workspace of its own, so no run meets
-// what an earlier run's takeover or release left; and every run is bounded
-// (`runBounded`): it completes promptly, and a product opening a staged
-// FIFO — an open with no writer blocks — fails diagnosed at the bound
+// `rename`, `T13_5_10_COMPOSING`, each composing with it; in (h),
+// `T13_5_10_H_OPERATIONS`, the section form of `move` in the file form's
+// place), each an operation succeeding on an unstaged twin — the same
+// staging and command on a workspace of its own with nothing staged beside
+// it: exit 0, `.xspec/lock` absent once it ends — under `--json`. Every arm
+// is staged afresh for each command, on a fresh workspace of its own, so no
+// run meets what an earlier run's takeover or release left; and every run is
+// bounded (`runBounded`): it completes promptly, and a product opening a
+// staged FIFO — an open with no writer blocks — fails diagnosed at the bound
 // (H-8), the harness itself never opening one (helpers/lock-staging.ts).
 //
 // (a) Obstruction (SPEC 13.5, 13.4, 14.24): `.xspec` a plain file, a
@@ -240,6 +240,36 @@
 // runs first; `runT13510MachineArms` runs them alone, with the twins they
 // need, for a probe where that access is (AGENTS.md).
 //
+// (h) Acquisition lists no directory but those 13.5 names (SPEC 13.5: it
+// examines occupants' kinds and lists the lock directory and each directory
+// it removes). On a fresh session staging under CORE_DECL's configuration,
+// whose one glob reaches nothing under `.xspec` (as T13.5-11(b)'s and
+// (c)'s), `.xspec`, holding no `lock`, is made unlistable but searchable and
+// writable before the invocation (mode `-wx`, T14-10's discipline: the
+// harness's own listing of it refused, and its own creation and removal of
+// a file in it kept, verified first; helpers/acquisition-staging.ts's
+// `stageUnlistableArea`), and each command whose operation leaves no orphan
+// runs in turn — T13.5-10's commands, the section form of `move` (`move
+// specs/A.mdx#g specs/A.mdx#a.g`, its unstaged twin made at its turn) in
+// the file form's place: the file form is not run, removing its orphans
+// relying on the record (13.4), whose readability without a listing of
+// `.xspec` rests on a graph-data layout SPEC.md leaves unenumerated (13.3).
+// Each proceeds: exit 0, its standard output byte-equal to its unstaged
+// twin's, and, `.xspec`'s mode restored once it ends, `.xspec/lock` absent
+// and every path outside `.xspec`, and the journal and the session files,
+// byte-equal to the twin's — graph data compared nowhere; then `build` exits
+// 0 and `check --json` is clean. A conforming acquisition learns the lock
+// path's kind by examining that path, which needs only `.xspec`'s search
+// permission, brings the lock directory and its entry into existence, which
+// needs its write permission, and lists the lock directory alone; a refused
+// listing of `.xspec` anywhere but at acquisition is condition 23's state,
+// never a read failure (14.25): it refuses no real operation (6.6), and a
+// refresh regenerates graph data in it (13.3). A product whose acquisition
+// lists `.xspec` — to learn the lock path's kind from that listing — meets a
+// refused read there, at acquisition a read failure, and fails. (h) needs
+// no administrative access, so it runs before the three arms that do; the
+// section form of `move` lies outside CONF-CORE's surface.
+//
 // CERTIFICATIONS.md: T13.5-10 lies in no certification scope (the
 // Exclusions entry for T13.5-9 through T13.5-12 and T13.4-12): its stagings
 // verify themselves on the harness before use, an ineffective staging a
@@ -259,6 +289,7 @@ import {
   assertLeftoverDirectoryStands,
   stageReadOnlyArea,
   stageReadOnlyRoot,
+  stageUnlistableArea,
   stageUnlistableLeftoverDirectory,
   stageUnlistableLockDirectory,
   stageUnremovableLockFile,
@@ -267,7 +298,11 @@ import {
   stageUnwritableLeftoverDirectory,
   stageUnwritableLockDirectory,
 } from "../../helpers/acquisition-staging.js";
-import { assertExitCode, fail } from "../../helpers/assertions.js";
+import {
+  assertBytesEqual,
+  assertExitCode,
+  fail,
+} from "../../helpers/assertions.js";
 import { assertRunOutcomesEqual } from "../../helpers/determinism.js";
 import {
   applyReuseCheck,
@@ -346,6 +381,7 @@ import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { SessionItems, SessionOperation } from "./section-13.5.js";
 import {
+  assertCleanCheckReport,
   CORE_DECL,
   describeExit,
   runBounded,
@@ -372,6 +408,16 @@ const RENAME_A: SessionOperation = {
 };
 
 /**
+ * The file form of `move`, T13.5-10's second command: its operation leaves
+ * orphans — the origin's derived files — whose removal relies on the record
+ * (SPEC 13.4), so (h) runs the section form in its place (`SECTION_MOVE`).
+ */
+const FILE_MOVE: SessionOperation = {
+  what: "`move specs/A.mdx specs/B.mdx`",
+  argv: () => ["move", "specs/A.mdx", "specs/B.mdx"],
+};
+
+/**
  * T13.5-10's mutating commands, in turn: each an operation succeeding on
  * the session staging (`stageSessionWorkspace`) and from CONF-CORE's
  * surface — file-form `move`, `review create` under `--strategy audit` —
@@ -380,10 +426,7 @@ const RENAME_A: SessionOperation = {
  */
 const T13_5_10_OPERATIONS: readonly SessionOperation[] = [
   RENAME_A,
-  {
-    what: "`move specs/A.mdx specs/B.mdx`",
-    argv: () => ["move", "specs/A.mdx", "specs/B.mdx"],
-  },
+  FILE_MOVE,
   {
     what: "`review create --strategy audit --name t`",
     argv: () => ["review", "create", "--strategy", "audit", "--name", "t"],
@@ -3461,6 +3504,165 @@ async function gapRun(
   });
 }
 
+// ---------------------------------------------------------------------------
+// (h) Acquisition lists no directory but those 13.5 names
+// ---------------------------------------------------------------------------
+
+/**
+ * (h)'s section-form `move` (SPEC 6.5's second form), in the file form's
+ * place: `g`, a top-level leaf, moved within `specs/A.mdx` to become `a.g`,
+ * the last child of `a` — an operation succeeding on the session staging
+ * that leaves no orphan, every file it rewrites standing before it and none
+ * relocated (SPEC 13.4). It lies outside CONF-CORE's surface (the
+ * conformer's admitted section-form move exits 70).
+ */
+const SECTION_MOVE: SessionOperation = {
+  what: "`move specs/A.mdx#g specs/A.mdx#a.g`",
+  argv: () => ["move", "specs/A.mdx#g", "specs/A.mdx#a.g"],
+};
+
+/**
+ * (h)'s mutating commands, in turn: each whose operation leaves no orphan —
+ * T13.5-10's commands, the section form of `move` in the file form's place
+ * (TEST-SPEC T13.5-10(h): the file form is not run, removing its orphans
+ * relying on the record, whose readability without a listing of `.xspec`
+ * rests on a graph-data layout SPEC.md leaves unenumerated, 13.3).
+ */
+const T13_5_10_H_OPERATIONS: readonly SessionOperation[] =
+  T13_5_10_OPERATIONS.map((operation) =>
+    operation === FILE_MOVE ? SECTION_MOVE : operation,
+  );
+
+/** The journal's workspace-relative path (SPEC 6.1, 13.4). */
+const JOURNAL_REL = `${AREA_PATH}/journal`;
+
+/** The session directory's workspace-relative path (SPEC 10.1). */
+const REVIEWS_REL = `${AREA_PATH}/reviews`;
+
+/**
+ * Whether (h) compares the snapshot key `key` with the twin's (TEST-SPEC
+ * T13.5-10(h)): every path outside `.xspec`, and the journal and the session
+ * files — the session directory with all it holds, sessions alone (SPEC
+ * 10.1) — graph data compared nowhere (its layout unenumerated, 13.3), the
+ * lock path judged apart.
+ */
+function comparedInH(key: string): boolean {
+  if (key !== AREA_PATH && !key.startsWith(`${AREA_PATH}/`)) return true;
+  return (
+    key === JOURNAL_REL ||
+    key === REVIEWS_REL ||
+    key.startsWith(`${REVIEWS_REL}/`)
+  );
+}
+
+/** `snapshot` restricted to (h)'s compared paths (`comparedInH`). */
+function comparedInHView(snapshot: DirectorySnapshot): DirectorySnapshot {
+  return {
+    ...snapshot,
+    entries: new Map([...snapshot.entries].filter(([key]) => comparedInH(key))),
+  };
+}
+
+/**
+ * One (h) run for `twin.operation` (TEST-SPEC T13.5-10(h); SPEC 13.5), on a
+ * fresh session staging under CORE_DECL's configuration, whose one glob
+ * reaches nothing under `.xspec` (it reaches `.mdx` files under `specs/`
+ * alone): `.xspec`, holding no `lock`, made unlistable but searchable and
+ * writable before the invocation (`stageUnlistableArea`: mode `-wx`,
+ * T14-10's discipline — the harness's own listing of it refused, its own
+ * creation and removal of a file in it kept, verified first), then the
+ * command under `--json`, bounded, and `.xspec`'s mode restored once it ends
+ * → it proceeds: exit 0; its standard output byte-equal to its unstaged
+ * twin's; `.xspec/lock` absent; every path outside `.xspec`, and the journal
+ * and the session files, byte-equal to the twin's, graph data compared
+ * nowhere (`comparedInH`); then `build` exits 0 and `check --json` is clean.
+ * A conforming acquisition learns the lock path's kind by examining that
+ * path, which needs only `.xspec`'s search permission, brings the lock
+ * directory and its entry into existence, which needs its write permission,
+ * and lists the lock directory alone; a refused listing of `.xspec` anywhere
+ * but at acquisition is condition 23's state, never a read failure (14.25):
+ * it refuses no real operation (6.6), and a refresh regenerates graph data
+ * in it (13.3). A product whose acquisition lists `.xspec` — to learn the
+ * lock path's kind from that listing — meets a refused read there and
+ * fails.
+ */
+async function unlistableAreaRun(
+  product: ProductBinding,
+  twin: UnstagedTwin,
+): Promise<void> {
+  await withWorkspace(CORE_DECL, async (workspace) => {
+    const root = workspace.root;
+    const context =
+      `T13.5-10(h) ${twin.operation.what} --json with \`.xspec\`, holding ` +
+      `no \`lock\`, unlistable but searchable and writable (mode \`-wx\`)`;
+    const items = await stageArmWorkspace(product, workspace, context);
+    const staging = await stageUnlistableArea(workspace);
+    let result: RunResult;
+    try {
+      result = await runBounded(
+        product,
+        root,
+        [...twin.operation.argv(items), "--json"],
+        context,
+      );
+    } finally {
+      await staging.restore();
+    }
+    assertExitCode(
+      result,
+      0,
+      `${context}: acquisition lists no directory but those 13.5 names — ` +
+        `it examines the lock path by name, which needs only \`.xspec\`'s ` +
+        `search permission, brings the lock directory and its entry into ` +
+        `existence, which needs its write permission, and lists the lock ` +
+        `directory alone — so the command proceeds, exit 0 (SPEC 13.5; a ` +
+        `refused listing of \`.xspec\` anywhere but at acquisition is ` +
+        `condition 23's state, never a read failure, 14.25, refusing no ` +
+        `real operation, 6.6)`,
+    );
+    assertBytesEqual(
+      result.stdoutBytes,
+      twin.result.stdoutBytes,
+      `${context}: its standard output is byte-equal to its unstaged twin's ` +
+        `(SPEC 13.5, 12.0)`,
+    );
+    await assertLockPathAbsent(
+      root,
+      `${context}: once it has ended (SPEC 13.5: release deletes its entry, ` +
+        `then the emptied lock directory, neither deletion needing ` +
+        `\`.xspec\`'s read permission)`,
+    );
+    assertSnapshotsEqual(
+      comparedInHView(twin.final),
+      comparedInHView(await snapshotDirectory(root)),
+      `${context}: every path outside \`.xspec\`, and the journal and the ` +
+        `session files, byte-equal to its unstaged twin's once \`.xspec\`'s ` +
+        `mode is restored — graph data compared nowhere (SPEC 13.3: its ` +
+        `layout unenumerated; H-6)`,
+    );
+    const restored = `${context}, once \`.xspec\`'s permissions are restored,`;
+    assertExitCode(
+      await runBounded(product, root, ["build"], `${restored} \`build\``),
+      0,
+      `${restored} \`build\` exits 0 (SPEC 12.1, 13.3: a refresh ` +
+        `regenerates graph data in condition 23's state)`,
+    );
+    const checked = await runBounded(
+      product,
+      root,
+      ["check", "--json"],
+      `${restored} \`check --json\``,
+    );
+    assertExitCode(
+      checked,
+      0,
+      `${restored} \`check --json\` is clean once \`build\` has run — exit 0 ` +
+        `(SPEC 12.0, 13.3)`,
+    );
+    assertCleanCheckReport(checked, `${restored} \`check --json\``);
+  });
+}
+
 /**
  * T13.5-10's arms whose stagings need the administrative access of E-1 —
  * (e)'s other-machine part, (f), and (g) — each command in turn, each
@@ -3525,7 +3727,7 @@ export async function runT13510MachineArms(
 const T13_5_10 = defineProductTest({
   id: "T13.5-10",
   title:
-    '13.5\'s acquisition, arms (a) to (g), seven of eight so far ((h) not yet implemented): each arm staged afresh, on a fresh workspace, for each mutating command in turn (`rename specs/A.mdx a a2`, `move specs/A.mdx specs/B.mdx`, `review create --strategy audit --name t`, `review resolve s <item> --status no-change`, `review split s <item>`; each an operation succeeding on an unstaged twin, exit 0, `.xspec/lock` absent once it ends), on a freshly built valid workspace holding an `audit` session `s` created while it was valid, run under `--json` and completing promptly, no FIFO opened: (a) obstruction — `.xspec` a plain file, a symbolic link to a directory holding a journal and sessions (the workspace\'s own area relocated outside it), a dangling symbolic link, or a FIFO → exit 2, `code` `"write-failure"`, `path` `".xspec"`; `.xspec/lock` a symbolic link to a directory outside the workspace holding a file, a symbolic link to a file, a dangling symbolic link, or a FIFO → exit 2, `code` `"write-failure"`, `path` `".xspec/lock"` (`locations` `[]` each) — nothing modified, the occupant byte-identical in place, a link\'s target untouched and nothing written through a link; (b) leftover takeover — a plain file at `.xspec/lock`, and one with every permission removed; in a lock directory a directory holding a file, a directory tree two levels deep (a directory holding a directory that holds a plain file, a symbolic link to a directory outside the workspace holding a file, a dangling symbolic link, and a FIFO), a symbolic link to a directory outside the workspace holding a file, and a FIFO; a dead run\'s entry (a held `rename` killed under T13.5-3\'s discipline), and one with every permission removed; and a dead run\'s entry carried into another workspace by a copy of the whole workspace made after the kill → exit 0, its result (exit code, standard output and error, and final workspace) byte-equal to its unstaged twin\'s (H-6), `.xspec/lock` absent once it ends, every link\'s target outside the workspace byte-identical — a busy refusal over a dead run\'s entry meeting T13.5-3\'s reuse check, the trial void where a killed identifier is listed again; (c) a busy refusal — during a held `review resolve`\'s hold (`review resolve s <item> --status skipped --test-hold <path>`), staged afresh for each command: dead runs\' entries (twins\' held `rename`s killed under T13.5-3\'s discipline before the holder starts and while it holds, copied in, name and content) and leftovers of the harness\'s naming (directories holding a file or a FIFO, made `-wx` once filled, the harness\'s own listing of each refused) bracketing the holder\'s entry — at least one of each kind before it and one after it, in byte order of name and in the filesystem\'s listing order, its name observed, never pinned, further stagings each a bounded number, exhaustion voiding the trial, rerun with a fresh holder — → exit 2, `code` `"workspace-busy"`, `path` `".xspec/lock"`, `locations` `[]`, never `"read-failure"`, exiting while the holder holds, nothing modified, every staged leftover and dead entry byte-identical in place (permissions restored first) and the holder\'s entry byte-identical, name and content; once the holder completes (exit 0), `.xspec/lock` holds exactly the staged leftovers, and the command run once more removes them all, `.xspec/lock` absent once it ends; with no leftover staged, the holder\'s entry given no permission (its name and content recorded first, the harness\'s own read refused) → refused alike, the entry still the only one under the same name, its content byte-identical once its permissions are restored, `.xspec/lock` absent after the holder; and the holder\'s entry altered in place (truncated, overwritten with ill-formed UTF-8 garbage of another length, or with a dead run\'s entry\'s content; its name recorded before, its content after) → refused alike, the altered entry byte-identical as altered and the only entry, the holder completing exit 0, `.xspec/lock` absent; (d) refused reads and writes — each staging verified on the harness itself, its modes restored once the run ends: an empty leftover lock directory `-wx` → `"read-failure"`, or `r-x` → `"write-failure"`, no `.xspec/lock` afterwards (determinism arms: each run twice, and once more on a content-identical workspace at a different absolute path, each on its own staging, standard output and standard error byte-identical); a lock directory holding a subdirectory that holds a file, the subdirectory `-wx` → `"read-failure"`, or `r-x` → `"write-failure"`, the lock directory then holding exactly one occupant, a directory (its name unasserted) holding exactly the staged file, and no entry; a read-only `.xspec` holding no `lock` → `"write-failure"`, no `.xspec/lock` afterwards; a plain file at `.xspec/lock` with `.xspec` read-only and the file unwritable → `"write-failure"`, the file byte-identical in place; `.xspec` unsearchable (`rw-`) holding no `lock`, or an empty lock directory → `"read-failure"` or `"write-failure"`, `.xspec` with all it holds byte-identical; a lock directory unsearchable (`rw-`) holding a directory that holds a file → either code, exactly the staged directory and its file remaining, no entry; and an unbuilt workspace, its root read-only → `"write-failure"` at `".xspec"`, no `.xspec` afterwards, `resolve` and `split` there naming the absent session `s` — each exit 2, `path` `".xspec/lock"` but where stated, never a nested path, `locations` `[]`, nothing else modified; (e) interference on one machine — during the hold of `rename specs/A.mdx a a2 --test-hold <path>` its entry deleted by hand, or replaced under its name by a directory holding a file, a FIFO, or a symbolic link to a plain file outside the workspace, each command an operation composing with that `rename` (`rename specs/A.mdx g g2` in `rename`\'s place) started under `--test-hold` → it acquires, its hold file created while the `rename` still holds, never refused `"workspace-busy"`, the replacing occupant gone (the link\'s target byte-identical in place, the FIFO unopened), its entry named apart from the `rename`\'s and the lock directory\'s only one; the holds lifted in turn, the `rename`\'s first, each exit 0; once the `rename` completes, the workspace is its unstaged twin\'s (H-6), the command\'s held-state comparison taken against it, its entry byte-identical, name and content, to its state when it created its hold file and the only entry, and a further mutating command refused `"workspace-busy"`, modifying nothing; once both complete, the workspace equals a twin\'s on which the two ran in turn, `.xspec/lock` absent; and `.xspec/lock` and all it holds deleted by hand during each command\'s hold → exit 0, its output and final workspace byte-equal to its unstaged twin\'s (H-6), no `"write-failure"`, nothing at `.xspec/lock` afterwards; (e) on another machine — each composing command started under `--test-hold` in a fresh process-identifier namespace whose first process is the harness\'s own, which lists no identifier the held `rename`\'s processes bear → it takes the holder\'s entry over, its hold file created while the holder holds, its entry alone and named apart; the holds lifted in turn, the holder\'s first, each exit 0; the assertions above following but for the further command — a `"workspace-busy"` refusal voiding the trial only where the namespace has allocated an identifier as large as the least the holder\'s processes bear, failing otherwise; (f) the acquirer\'s own identifier — a held `rename` started as the first process of a fresh process-identifier namespace and killed under T13.5-3\'s discipline, each command started likewise in another (the two runs\' in-namespace identifiers verified equal while held, a mismatch voiding the trial) → it takes the dead entry over, exit 0, `.xspec/lock` absent afterwards, its entry while held named byte-differently from the dead entry, any refusal failing; (g) the gap\'s bound and its manual remedy — the same kill, every in-namespace identifier the `rename`\'s processes bore verified listed in the harness\'s own process list → each command, in the harness\'s namespace, either proceeds (exit 0, its result byte-equal to its unstaged twin\'s, `.xspec/lock` absent) or is refused (exit 2, `code` `"workspace-busy"`, `path` `".xspec/lock"`, nothing modified, the entry byte-identical, name and content), never another outcome; refused, `.xspec/lock` deleted by hand, the same command then proceeding as its twin (SPEC 13.5, 13.4, 12.0, 14.24, 14.25, 14.26)',
+    "13.5's acquisition, arms (a) to (h): each arm staged afresh, on a fresh workspace, for each mutating command in turn (`rename specs/A.mdx a a2`, `move specs/A.mdx specs/B.mdx` (in (h) the section form, `move specs/A.mdx#g specs/A.mdx#a.g`, instead), `review create --strategy audit --name t`, `review resolve s <item> --status no-change`, `review split s <item>`; each an operation succeeding on an unstaged twin, exit 0, `.xspec/lock` absent once it ends), on a freshly built valid workspace holding an `audit` session `s` created while it was valid, run under `--json` and completing promptly, no FIFO opened: (a) obstruction — `.xspec` a plain file, a symbolic link to a directory holding a journal and sessions (the workspace's own area relocated outside it), a dangling symbolic link, or a FIFO → exit 2, `code` `\"write-failure\"`, `path` `\".xspec\"`; `.xspec/lock` a symbolic link to a directory outside the workspace holding a file, a symbolic link to a file, a dangling symbolic link, or a FIFO → exit 2, `code` `\"write-failure\"`, `path` `\".xspec/lock\"` (`locations` `[]` each) — nothing modified, the occupant byte-identical in place, a link's target untouched and nothing written through a link; (b) leftover takeover — a plain file at `.xspec/lock`, and one with every permission removed; in a lock directory a directory holding a file, a directory tree two levels deep (a directory holding a directory that holds a plain file, a symbolic link to a directory outside the workspace holding a file, a dangling symbolic link, and a FIFO), a symbolic link to a directory outside the workspace holding a file, and a FIFO; a dead run's entry (a held `rename` killed under T13.5-3's discipline), and one with every permission removed; and a dead run's entry carried into another workspace by a copy of the whole workspace made after the kill → exit 0, its result (exit code, standard output and error, and final workspace) byte-equal to its unstaged twin's (H-6), `.xspec/lock` absent once it ends, every link's target outside the workspace byte-identical — a busy refusal over a dead run's entry meeting T13.5-3's reuse check, the trial void where a killed identifier is listed again; (c) a busy refusal — during a held `review resolve`'s hold (`review resolve s <item> --status skipped --test-hold <path>`), staged afresh for each command: dead runs' entries (twins' held `rename`s killed under T13.5-3's discipline before the holder starts and while it holds, copied in, name and content) and leftovers of the harness's naming (directories holding a file or a FIFO, made `-wx` once filled, the harness's own listing of each refused) bracketing the holder's entry — at least one of each kind before it and one after it, in byte order of name and in the filesystem's listing order, its name observed, never pinned, further stagings each a bounded number, exhaustion voiding the trial, rerun with a fresh holder — → exit 2, `code` `\"workspace-busy\"`, `path` `\".xspec/lock\"`, `locations` `[]`, never `\"read-failure\"`, exiting while the holder holds, nothing modified, every staged leftover and dead entry byte-identical in place (permissions restored first) and the holder's entry byte-identical, name and content; once the holder completes (exit 0), `.xspec/lock` holds exactly the staged leftovers, and the command run once more removes them all, `.xspec/lock` absent once it ends; with no leftover staged, the holder's entry given no permission (its name and content recorded first, the harness's own read refused) → refused alike, the entry still the only one under the same name, its content byte-identical once its permissions are restored, `.xspec/lock` absent after the holder; and the holder's entry altered in place (truncated, overwritten with ill-formed UTF-8 garbage of another length, or with a dead run's entry's content; its name recorded before, its content after) → refused alike, the altered entry byte-identical as altered and the only entry, the holder completing exit 0, `.xspec/lock` absent; (d) refused reads and writes — each staging verified on the harness itself, its modes restored once the run ends: an empty leftover lock directory `-wx` → `\"read-failure\"`, or `r-x` → `\"write-failure\"`, no `.xspec/lock` afterwards (determinism arms: each run twice, and once more on a content-identical workspace at a different absolute path, each on its own staging, standard output and standard error byte-identical); a lock directory holding a subdirectory that holds a file, the subdirectory `-wx` → `\"read-failure\"`, or `r-x` → `\"write-failure\"`, the lock directory then holding exactly one occupant, a directory (its name unasserted) holding exactly the staged file, and no entry; a read-only `.xspec` holding no `lock` → `\"write-failure\"`, no `.xspec/lock` afterwards; a plain file at `.xspec/lock` with `.xspec` read-only and the file unwritable → `\"write-failure\"`, the file byte-identical in place; `.xspec` unsearchable (`rw-`) holding no `lock`, or an empty lock directory → `\"read-failure\"` or `\"write-failure\"`, `.xspec` with all it holds byte-identical; a lock directory unsearchable (`rw-`) holding a directory that holds a file → either code, exactly the staged directory and its file remaining, no entry; and an unbuilt workspace, its root read-only → `\"write-failure\"` at `\".xspec\"`, no `.xspec` afterwards, `resolve` and `split` there naming the absent session `s` — each exit 2, `path` `\".xspec/lock\"` but where stated, never a nested path, `locations` `[]`, nothing else modified; (e) interference on one machine — during the hold of `rename specs/A.mdx a a2 --test-hold <path>` its entry deleted by hand, or replaced under its name by a directory holding a file, a FIFO, or a symbolic link to a plain file outside the workspace, each command an operation composing with that `rename` (`rename specs/A.mdx g g2` in `rename`'s place) started under `--test-hold` → it acquires, its hold file created while the `rename` still holds, never refused `\"workspace-busy\"`, the replacing occupant gone (the link's target byte-identical in place, the FIFO unopened), its entry named apart from the `rename`'s and the lock directory's only one; the holds lifted in turn, the `rename`'s first, each exit 0; once the `rename` completes, the workspace is its unstaged twin's (H-6), the command's held-state comparison taken against it, its entry byte-identical, name and content, to its state when it created its hold file and the only entry, and a further mutating command refused `\"workspace-busy\"`, modifying nothing; once both complete, the workspace equals a twin's on which the two ran in turn, `.xspec/lock` absent; and `.xspec/lock` and all it holds deleted by hand during each command's hold → exit 0, its output and final workspace byte-equal to its unstaged twin's (H-6), no `\"write-failure\"`, nothing at `.xspec/lock` afterwards; (e) on another machine — each composing command started under `--test-hold` in a fresh process-identifier namespace whose first process is the harness's own, which lists no identifier the held `rename`'s processes bear → it takes the holder's entry over, its hold file created while the holder holds, its entry alone and named apart; the holds lifted in turn, the holder's first, each exit 0; the assertions above following but for the further command — a `\"workspace-busy\"` refusal voiding the trial only where the namespace has allocated an identifier as large as the least the holder's processes bear, failing otherwise; (f) the acquirer's own identifier — a held `rename` started as the first process of a fresh process-identifier namespace and killed under T13.5-3's discipline, each command started likewise in another (the two runs' in-namespace identifiers verified equal while held, a mismatch voiding the trial) → it takes the dead entry over, exit 0, `.xspec/lock` absent afterwards, its entry while held named byte-differently from the dead entry, any refusal failing; (g) the gap's bound and its manual remedy — the same kill, every in-namespace identifier the `rename`'s processes bore verified listed in the harness's own process list → each command, in the harness's namespace, either proceeds (exit 0, its result byte-equal to its unstaged twin's, `.xspec/lock` absent) or is refused (exit 2, `code` `\"workspace-busy\"`, `path` `\".xspec/lock\"`, nothing modified, the entry byte-identical, name and content), never another outcome; refused, `.xspec/lock` deleted by hand, the same command then proceeding as its twin; (h) acquisition lists no directory but those 13.5 names — `.xspec`, holding no `lock`, made unlistable but searchable and writable before the invocation (mode `-wx`; the harness's own listing of it refused, its own creation and removal of a file in it kept, verified first), under a configuration whose glob reaches nothing under `.xspec`, each command whose operation leaves no orphan (`rename`, the section-form `move`, `review create`, `resolve`, `split`; the file form not run) → it proceeds: exit 0, its standard output byte-equal to its unstaged twin's, every path outside `.xspec` and the journal and session files byte-equal to the twin's (graph data compared nowhere), `.xspec/lock` absent once it ends; and once `.xspec`'s permissions are restored, `build` exits 0 and `check` is clean — a refused listing of `.xspec` past acquisition being condition 23's state, never a read failure: no real operation refused there, a refresh regenerating graph data in it (SPEC 13.5, 13.4, 13.3, 12.0, 6.6, 14.24, 14.25, 14.26)",
   timeoutMs: 1_800_000,
   run: async (product) => {
     const twins: UnstagedTwin[] = [];
@@ -3591,6 +3793,17 @@ const T13_5_10 = defineProductTest({
     }
     for (const twin of twins) {
       await lockDirectoryDeletedRun(product, twin);
+    }
+    // (h) Acquisition lists no directory but those 13.5 names: `.xspec`
+    // unlistable before each command whose operation leaves no orphan, the
+    // section form of `move` in the file form's place (its twin made at its
+    // turn) — before the arms needing administrative access, so that every
+    // arm needing none runs first.
+    for (const operation of T13_5_10_H_OPERATIONS) {
+      const twin =
+        twins.find((candidate) => candidate.operation === operation) ??
+        (await unstagedTwin(product, operation));
+      await unlistableAreaRun(product, twin);
     }
     // (e) on another machine, (f), and (g): fresh process-identifier
     // namespaces made with the administrative access of E-1 — run last, so

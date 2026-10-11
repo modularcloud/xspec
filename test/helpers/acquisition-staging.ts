@@ -1,6 +1,7 @@
 // Acquisition's refused reads and writes as shared stagings (TEST-SPEC
 // T13.5-10(d); the stagings T14-9's acquisition-write arms and T14-10's arm
-// (i) reuse; SPEC 13.5, 14.24, 14.25). Harness machinery only: no product
+// (i) reuse; SPEC 13.5, 14.24, 14.25), beside T13.5-10(h)'s unlistable area,
+// under which acquisition proceeds. Harness machinery only: no product
 // imports, no test framework dependence.
 //
 // Each staging is applied before the invocation, on a workspace whose lock
@@ -48,6 +49,11 @@
 // - `stageReadOnlyRoot`: an unbuilt workspace, no `.xspec`, its root
 //   read-only (T14-9's discipline at `.xspec`) — a write failure at the area
 //   directory's creation.
+// - `stageUnlistableArea`: `.xspec` unlistable but searchable and writable
+//   (`-wx`), holding no `lock` (T13.5-10(h)): its listing refused, a
+//   creation and removal in it kept — no refusal a conforming acquisition
+//   meets, which examines the lock path by name, creates the lock directory
+//   and its entry, and lists the lock directory alone (SPEC 13.5).
 //
 // Every staging's `restore()` reinstates the modes it changed (idempotent),
 // before the harness snapshots the workspace or reads the lock path. The two
@@ -378,6 +384,31 @@ export async function stageReadOnlyRoot(
     "stageReadOnlyRoot",
   );
   const permissions = await stageWriteRefusal(target);
+  return { restore: () => permissions.restore() };
+}
+
+/**
+ * `.xspec` unlistable but searchable and writable (`-wx`, T14-10's
+ * discipline), holding nothing at the lock path (TEST-SPEC T13.5-10(h)): the
+ * harness's own listing of it refused, and its own creation and removal of
+ * a file in it kept, verified first.
+ */
+export async function stageUnlistableArea(
+  workspace: StagingWorkspace,
+): Promise<AcquisitionStaging> {
+  await requireNothingAt(
+    lockAbs(workspace.root),
+    "the lock path",
+    "stageUnlistableArea",
+  );
+  const permissions = await stageDirectoryMode(
+    areaAbs(workspace.root),
+    UNLISTABLE_MODE,
+    [
+      { attempt: "list", refused: true },
+      { attempt: "create", refused: false },
+    ],
+  );
   return { restore: () => permissions.restore() };
 }
 
