@@ -666,6 +666,16 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // rule (7.2), and the twins' outcomes are carriage context with home
   // coverage at T10.6-*, T7-*, and T6.4-*.
   "T13.5-12": ["13.5", "12.0", "6.4", "14"],
+  // T13.5-13 asserts 13.5's exclusion among overlapping acquisitions — at
+  // most one of the runs started together acquiring, the others refused,
+  // modifying nothing; the one success's and the serial successes' outcomes
+  // a twin's; `.xspec/lock` absent, an empty `.xspec` the one residue — and
+  // the busy refusal's stable code `workspace-busy` at `.xspec/lock` (14).
+  // The operations' own outcomes (6.4, 10.6, 10.7), the 13.3 refresh a
+  // `review create` makes on the unbuilt workspace, and the twins'
+  // byte-determinism (12.0) are carriage context with home coverage at
+  // T6.4-*, T10.6-*, T10.7-*, T13.3-*, and T12.0-*.
+  "T13.5-13": ["13.5", "14"],
   "T14-1": ["14"],
   "T14-2": ["14", "2.4", "4.5"],
   "T14-3": ["14"],

@@ -10,10 +10,14 @@
 // "the grammar is universal (12.0), so no in-scope usage-error assertion is
 // left to a fixture's own parser". Certification exercises only the
 // spellings its in-scope tests happen to use, so this guard pins the grammar
-// itself: one test per conformer, each running a table of rows through the
-// subprocess driver against the conformer's binding from
-// CERTIFICATION_FIXTURES. A violator runs its conformer's `product.mjs` with
-// one deviation switch, so the conformer's reader is its violators' too.
+// itself: one test per conformer with a reader of its own, each running a
+// table of rows through the subprocess driver against the conformer's
+// binding from CERTIFICATION_FIXTURES. A violator runs its conformer's
+// `product.mjs` with one deviation switch, so the conformer's reader is its
+// violators' too; and the CONF-RACE conformer runs CONF-CORE's `product.mjs`
+// deviation-free (`test/fixtures/conf-race/bin.mjs`, its violator
+// VIOL-RACE-LISTFIRST one switch of it), so CONF-CORE's table pins its
+// reader as well.
 //
 // A row names an argv and the outcome SPEC fixes for it — derived from 12.0,
 // 12.7, and 14, its clause quoted in the row, never read off a fixture's

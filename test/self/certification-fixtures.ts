@@ -256,6 +256,32 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       ]),
     ],
   ),
+  // CONF-RACE (§CONF-RACE): overlapping acquisitions — CONF-CORE's
+  // workspaces, behavior, and command surface as T13.5-13 drives them, run
+  // from an executable of its own (conf-race/bin.mjs runs the CONF-CORE
+  // product deviation-free): its unheld arm has no deterministic outcome
+  // under VIOL-CORE-EARLYRELEASE, so T13.5-13 could not join CONF-CORE's
+  // in-scope set.
+  conformer(
+    "CONF-RACE",
+    "conf-race/bin.mjs",
+    ["T13.5-13"],
+    [
+      // VIOL-RACE-LISTFIRST: acquisition judges the lock directory before
+      // adding its entry — it lists the lock directory (a missing area or
+      // lock directory holding nothing), is refused by another live run's
+      // entry there as the conformer is, and otherwise, after a sustained
+      // interval (long against the spread of runs started together, far
+      // short of every hang guard), adds its entry, removes the leftovers
+      // its listing found, and acquires, never listing again. Fails
+      // T13.5-13's held arm on every trial: runs started together each list
+      // within the others' intervals, so each acquires and more than one
+      // hold file stands where the arm asserts at most one.
+      violator("VIOL-RACE-LISTFIRST", "conf-race/bin-listfirst.mjs", [
+        "T13.5-13",
+      ]),
+    ],
+  ),
   // CONF-VALID (§CONF-VALID): segment and tag validity — `build` with the
   // 14.1–14.4 error reporting and `query node`/`query nodes` reporting
   // identity, tags, and metadataHash, over `.mdx` workspaces whose sections

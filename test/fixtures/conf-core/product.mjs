@@ -3,6 +3,11 @@
 // Scope with the simplest conforming behavior — driven only through the C-2
 // executable/workspace binding, never importing product code (the product and
 // the harness are distinct programs; this fixture is part of the harness).
+// The CONF-RACE conformer (CERTIFICATIONS.md §CONF-RACE: CONF-CORE's
+// workspaces, behavior, and command surface, as T13.5-13 drives them) is this
+// module run deviation-free from an executable of its own,
+// `../conf-race/bin.mjs`, and its violator VIOL-RACE-LISTFIRST one switch of
+// it (`listBeforeEntry`, below).
 //
 // Scope implemented (see CERTIFICATIONS.md §CONF-CORE):
 // - Workspaces with one configured spec group of `.mdx` sources without
@@ -1788,6 +1793,12 @@ async function acquireExclusivity(root) {
     if (held.createdArea) await deleteQuietly(() => fsp.rmdir(areaAbs));
   };
   try {
+    if (deviations.listBeforeEntry) {
+      // VIOL-RACE-LISTFIRST (CERTIFICATIONS.md): the listing that judges the
+      // lock directory comes before this run's entry is added.
+      await acquireListingFirst(areaAbs, lockAbs, held);
+      return { release };
+    }
     for (let attempt = 1; ; attempt += 1) {
       if (attempt > ACQUISITION_ATTEMPTS) {
         throw new Error(
@@ -1954,11 +1965,22 @@ async function establishEntry(areaAbs, lockAbs, held) {
  * leftover that is no entry, and release, are unchanged.
  */
 async function judgeLockDirectory(lockBytes, names, ownName) {
-  const own = Buffer.from(ownName);
+  await removeLeftovers(await judgeListing(lockBytes, names, ownName));
+}
+
+/**
+ * The judgment half of judgeLockDirectory: each listed name but `ownName`
+ * (`null` where this run has no entry yet: VIOL-RACE-LISTFIRST's listing)
+ * examined for its kind and judged — a live run's entry refusing acquisition
+ * with the busy error of 14.26 before anything is removed — and the
+ * leftovers returned, unremoved, for removeLeftovers.
+ */
+async function judgeListing(lockBytes, names, ownName) {
+  const own = ownName === null ? null : Buffer.from(ownName);
   const leftovers = [];
   let listed = null;
   for (const name of names) {
-    if (name.equals(own)) continue;
+    if (own !== null && name.equals(own)) continue;
     const abs = childPath(lockBytes, name);
     let kind;
     try {
@@ -1986,9 +2008,85 @@ async function judgeLockDirectory(lockBytes, names, ownName) {
     }
     leftovers.push({ abs, kind });
   }
+  return leftovers;
+}
+
+/** Remove the leftovers a judged listing found (removeLeftover, in order). */
+async function removeLeftovers(leftovers) {
   for (const leftover of leftovers) {
     await removeLeftover(leftover.abs, leftover.kind);
   }
+}
+
+/**
+ * VIOL-RACE-LISTFIRST's sustained interval between its listing and its
+ * entry's addition: long against the spread of runs started together —
+ * T13.5-13's held arm starts four at once, whose acquisition points this
+ * conformer spreads over 14–38 ms unloaded and 75–140 ms with six busy
+ * loops on four cores (measured for FIX_PLAN Task 32) — yet far short of
+ * every hang guard the arm sets (60 s for a run to exit or hold).
+ */
+const LIST_FIRST_INTERVAL_MS = 3000;
+
+/**
+ * Acquisition under VIOL-RACE-LISTFIRST (CERTIFICATIONS.md,
+ * `listBeforeEntry`): it judges the lock directory before adding its entry —
+ * it lists the lock directory, a missing area or lock directory (or
+ * anything but a directory at the lock path, examined without following a
+ * link) holding nothing there, never a refused read; is refused by another
+ * live run's entry there (14.26), as the conformer is (judgeListing); and
+ * otherwise, after LIST_FIRST_INTERVAL_MS, establishes its entry as the
+ * conformer does (establishEntry: the area's and the lock path's occupants
+ * examined — an obstruction the conformer's write failure, a plain file at
+ * the lock path a leftover removed — the area's directory and the lock
+ * directory brought into existence where absent, examined afresh where a
+ * concurrent run moved a path), removes the leftovers its listing found,
+ * and acquires, never listing again. A single deviation: 13.5's order of
+ * acquisition's addition and listing inverted; the liveness judgment,
+ * leftover removal, the hold seam, and release are unchanged. Runs started
+ * together each list within the others' intervals, before any has added
+ * its entry, so none finds a live run's entry and each acquires.
+ */
+async function acquireListingFirst(areaAbs, lockAbs, held) {
+  const lockBytes = Buffer.from(lockAbs);
+  let kind;
+  try {
+    kind = await occupantKind(lockBytes);
+  } catch (error) {
+    // The area's own path holds no directory: nothing listed there, the
+    // establishment below meeting the occupant as the conformer's does.
+    if (error?.code !== "ENOTDIR") {
+      throw acquisitionFailure("read", LOCK_REL, `examine ${LOCK_REL}`, error);
+    }
+    kind = "absent";
+  }
+  let names = [];
+  if (kind === "directory") {
+    try {
+      names = await fsp.readdir(lockBytes, { encoding: "buffer" });
+    } catch (error) {
+      // Gone since it was examined: a concurrent run's release.
+      if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") {
+        throw acquisitionFailure(
+          "read",
+          LOCK_REL,
+          `list the lock directory ${LOCK_REL}`,
+          error,
+        );
+      }
+    }
+  }
+  const leftovers = await judgeListing(lockBytes, names, null);
+  await sleep(LIST_FIRST_INTERVAL_MS);
+  for (let attempt = 1; ; attempt += 1) {
+    if (attempt > ACQUISITION_ATTEMPTS) {
+      throw new Error(
+        `acquisition did not settle in ${String(ACQUISITION_ATTEMPTS)} attempts`,
+      );
+    }
+    if (await establishEntry(areaAbs, lockAbs, held)) break;
+  }
+  await removeLeftovers(leftovers);
 }
 
 /**
@@ -4830,10 +4928,10 @@ async function commandReview(io, cwd, sub, args) {
 
 /**
  * Deviation switches active for this invocation (CERTIFICATIONS.md
- * VIOL-CORE-* violators). Set once per invocation by runXspec from its
- * `options` argument; with no switch set, every code path behaves as the
- * conformer. Module state is safe here: each bin*.mjs entry runs exactly one
- * invocation per process.
+ * VIOL-CORE-* violators and VIOL-RACE-LISTFIRST). Set once per invocation by
+ * runXspec from its `options` argument; with no switch set, every code path
+ * behaves as the conformer. Module state is safe here: each bin*.mjs entry
+ * runs exactly one invocation per process.
  *
  * - `noMutualExclusion` (VIOL-CORE-NOLOCK): a live run's entry does not
  *   refuse acquisition — acquisition adds its entry and lists the lock
@@ -4907,6 +5005,14 @@ async function commandReview(io, cwd, sub, args) {
  *   lock path, nothing there, and a refused listing hold it back from
  *   nothing; it writes nothing at the lock path, and the read commands are
  *   unchanged; see awaitNoLiveHolder.
+ * - `listBeforeEntry` (VIOL-RACE-LISTFIRST, the CONF-RACE conformer's one
+ *   violator — that conformer runs this module deviation-free from
+ *   `../conf-race/bin.mjs`): acquisition judges the lock directory before
+ *   adding its entry — it lists the lock directory (a missing area or lock
+ *   directory holding nothing), is refused by another live run's entry
+ *   there as the conformer is, and otherwise, after a sustained interval,
+ *   adds its entry, removes the leftovers its listing found, and acquires,
+ *   never listing again; see acquireListingFirst.
  */
 let deviations = {};
 
