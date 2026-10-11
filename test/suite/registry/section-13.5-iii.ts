@@ -342,7 +342,7 @@ async function withWorkspace<T>(
 
 /**
  * A run held at the seam of 13.5, and the entry it holds by. Shared with
- * T13.5-12 (section-13.5-iv.ts).
+ * T13.5-12 (section-13.5-iv.ts) and T14-10(i) (section-14-ii.ts).
  */
 export interface HeldRun {
   readonly running: RunningProduct;
@@ -362,8 +362,8 @@ export interface HeldRun {
  * `.xspec/lock` a directory holding exactly the held run's entry, a plain
  * file. Then run `body` with the held run. Whatever happens, the run is
  * killed (a no-op once it has exited) and its hold file removed. Shared
- * with T13.5-12 (section-13.5-iv.ts), whose changes during the hold the
- * held-state comparison brackets.
+ * with T13.5-12 (section-13.5-iv.ts) and T14-10(i) (section-14-ii.ts),
+ * whose changes during the hold the held-state comparison brackets.
  */
 export async function withHeldRun<T>(
   product: ProductBinding,
@@ -410,7 +410,7 @@ function entryRel(name: Buffer): Buffer {
 
 /**
  * Lift `held`'s hold and await its exit (`exitOnceLifted`). Shared with
- * T13.5-12 (section-13.5-iv.ts).
+ * T13.5-12 (section-13.5-iv.ts) and T14-10(i) (section-14-ii.ts).
  */
 export async function liftAndWait(
   held: HeldRun,

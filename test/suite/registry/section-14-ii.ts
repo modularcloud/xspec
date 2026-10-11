@@ -98,7 +98,11 @@
 // permission kept so a regeneration replacing or rewriting the object is
 // never itself refused; `stageReadRefusalOfDirectory`: mode 0o100, search
 // kept so entries stay reachable by name; nonexistence never staged as a
-// refusal), each staging verified on the harness's own process first.
+// refusal), each staging verified on the harness's own process first —
+// arm (i)'s acquisition arms taking T13.5-10(d)'s stagings instead
+// (helpers/acquisition-staging.ts: the lock directory, or a subdirectory
+// under it, unlistable but writable, `-wx`; `.xspec` or the lock directory
+// unsearchable, `rw-`), each verified on the harness itself alike.
 // Snapshots for the "nothing modified" laws are taken outside the staging
 // windows (a staged object cannot be snapshotted), before staging and after
 // restoring.
@@ -129,13 +133,37 @@
 // - Arm (g)'s "a malformed value" is `at specs/a/A.mdx zz` (an offset
 //   spelled as anything but decimal digits, 11.5 — a syntax-class member,
 //   12.0); "nothing modified" is the whole-tree snapshot around the sweep.
+// - Arm (i)'s acquisition arms run on T13.5-10's session staging — a fresh
+//   CONF-CORE-shaped workspace (`CORE_DECL`), built, holding the audit
+//   session `s`, so the CONF-CORE reference can run them — one of
+//   T13.5-10's five mutating commands each, in turn, so every mutating
+//   command reports one of acquisition's refused reads: the lock directory
+//   unlistable (`rename`), a subdirectory under it unlistable (`move`),
+//   `.xspec` unsearchable holding no `lock` (`review create`) and,
+//   separately, an empty lock directory (`resolve`) — T13.5-10(d)'s two
+//   stagings of it — and the lock directory unsearchable, holding a
+//   directory that holds a file (`split`). "The nested path never named" is
+//   the error document's `path` exactly `.xspec/lock` and its `locations`
+//   `[]` (12.7: none for a condition without in-source locations), the
+//   message's wording free. "Nothing modified" is every path but the lock
+//   path byte-identical, the lock path pruned from both walks (H-6:
+//   acquisition and release touch it; the residue each staging leaves there
+//   is T13.5-10(d)'s subject). The second-discovery arm holds `rename
+//   specs/A.mdx a a2` — the next command in turn, one representative,
+//   T13.5-12(e) running each — on a session staging of T13.5-8's valid
+//   workspace (`ACQUISITION_DECL`), makes `specs/sub` unlistable during the
+//   hold as T13.5-12(e) does, and asserts arm (g)'s contract at that
+//   directory and nothing modified from the state during the hold on.
 // - Unstageable, recorded here as T14-10 records them (and as T6.5-6
 //   records its unstageable clauses): a refused read of a path occupant's
-//   kind — whether a product learns a kind by a separate examination the
-//   environment can refuse or from a listing it already made is its own
-//   (7, 13.4) — and a refused read of a directory above the workspace root,
-//   which the working directory lies beneath and cannot be entered without
-//   traversing. Neither is asserted.
+//   kind — the area's own occupant's at acquisition included (13.5), though
+//   not the lock path's there, which arm (i) stages, a conforming
+//   acquisition taking that kind from no listing (T13.5-10(h)); whether a
+//   product learns a kind by a separate examination the environment can
+//   refuse or from a listing it already made is its own (7, 13.4) — and a
+//   refused read of a directory above the workspace root, which the working
+//   directory lies beneath and cannot be entered without traversing.
+//   Neither is asserted.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -144,7 +172,11 @@ import type { AcquisitionStaging } from "../../helpers/acquisition-staging.js";
 import {
   stageReadOnlyArea,
   stageReadOnlyRoot,
+  stageUnlistableLeftoverDirectory,
+  stageUnlistableLockDirectory,
   stageUnremovableLockFile,
+  stageUnsearchableArea,
+  stageUnsearchableLockDirectory,
   stageUnwritableLeftoverDirectory,
   stageUnwritableLockDirectory,
 } from "../../helpers/acquisition-staging.js";
@@ -168,7 +200,7 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
-import { LOCK_PATH } from "../../helpers/lock-path.js";
+import { EXCLUDE_LOCK_PATH, LOCK_PATH } from "../../helpers/lock-path.js";
 import { AREA_PATH } from "../../helpers/lock-staging.js";
 import type { PermissionStaging } from "../../helpers/permissions.js";
 import {
@@ -183,6 +215,7 @@ import type { DirectorySnapshot } from "../../helpers/snapshot.js";
 import {
   assertSnapshotsEqual,
   displaySnapshotPath,
+  snapshotDirectory,
   snapshotKeyBytes,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
@@ -192,13 +225,19 @@ import { pathExists } from "../../helpers/subprocess.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { SessionOperation } from "./section-13.5.js";
-import { CORE_DECL } from "./section-13.5.js";
+import {
+  ACQUISITION_DECL,
+  CORE_DECL,
+  SUB_DIR as SECOND_DISCOVERY_DIR,
+  UNLISTABLE_SUB_DIR,
+} from "./section-13.5.js";
 import {
   ABSENT_SESSION_ITEMS,
   T13_5_10_OPERATIONS,
   obstructArea,
   stageArmWorkspace,
 } from "./section-13.5-ii.js";
+import { liftAndWait, withHeldRun } from "./section-13.5-iii.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
@@ -230,6 +269,7 @@ import {
   RENAME_FIXTURE,
   RENAME_OLD_IDENTITY,
   REVIEWS_DIR,
+  WRITE_FAILURE_CODE,
   WRITE_REFUSALS_STAGED,
   assertEditedBStalenessConcerns,
   assertStalenessAlone,
@@ -1290,12 +1330,16 @@ const ACQUISITION_WRITE_ARMS: readonly AcquisitionWriteArm[] = [
   },
 ];
 
-/** T13.5-10's mutating command at `index` (a harness error where none). */
+/**
+ * T13.5-10's mutating command at `index` (a harness error where none):
+ * T14-9's acquisition-write arms and T14-10's arm (i) each name theirs so.
+ */
 function acquisitionOperation(index: number): SessionOperation {
   const operation = T13_5_10_OPERATIONS[index];
   if (operation === undefined) {
     throw new Error(
-      `T14-9: T13.5-10 runs no mutating command at index ${String(index)}`,
+      `acquisitionOperation: T13.5-10 runs no mutating command at index ` +
+        String(index),
     );
   }
   return operation;
@@ -2835,15 +2879,298 @@ async function sessionDirectoryArm(product: ProductBinding): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// (i) At acquisition, and at the second discovery of 13.5 — usage errors
+// (SPEC 14.25, 14.24, 13.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * One of acquisition's refused reads (TEST-SPEC T14-10(i)): the staging —
+ * T13.5-10(d)'s, applied before the invocation on T13.5-10's session
+ * staging and verified on the harness itself (helpers/acquisition-
+ * staging.ts) — what it refuses, the codes a conforming acquisition
+ * reports there, and the mutating command run against it.
+ */
+interface AcquisitionReadArm {
+  /** The staging, as T13.5-10(d) words it. */
+  readonly staging: string;
+  /** What the staging refuses, as T14-10(i) words it. */
+  readonly refused: string;
+  /**
+   * The codes a conforming acquisition reports: `read-failure` alone, or
+   * `write-failure` beside it where the product may meet the refusal first
+   * at a write (SPEC 14.24, 14.25).
+   */
+  readonly codes: readonly string[];
+  /** The mutating command run against it: its index in T13.5-10's five. */
+  readonly operation: number;
+  /**
+   * Stage it before the invocation, verified on the harness itself; its
+   * `restore()` reinstates every mode the staging changed (idempotent).
+   */
+  readonly stage: (workspace: TestWorkspace) => Promise<AcquisitionStaging>;
+}
+
+/**
+ * T14-10(i)'s refused reads at acquisition, the lock path's occupant and
+ * everything under it — the lock directory unlistable, a subdirectory under
+ * it unlistable; `.xspec` unsearchable (holding no `lock` and, separately,
+ * an empty lock directory: T13.5-10(d)'s two stagings of it); the lock
+ * directory unsearchable — each with the next of T13.5-10's mutating
+ * commands (`rename`, `move`, `review create`, `resolve`, `split`), so that
+ * every mutating command reports one of acquisition's refused reads.
+ */
+const ACQUISITION_READ_ARMS: readonly AcquisitionReadArm[] = [
+  {
+    staging:
+      "an empty leftover lock directory unlistable but writable (mode `-wx`)",
+    refused: "the lock directory's listing",
+    codes: [READ_FAILURE_CODE],
+    operation: 0,
+    stage: (workspace) => stageUnlistableLockDirectory(workspace),
+  },
+  {
+    staging:
+      "a lock directory holding a subdirectory that holds a file, the " +
+      "subdirectory unlistable (`-wx`)",
+    refused: "the listing of a subdirectory under the lock directory",
+    codes: [READ_FAILURE_CODE],
+    operation: 1,
+    stage: (workspace) => stageUnlistableLeftoverDirectory(workspace),
+  },
+  {
+    staging: "`.xspec` unsearchable (mode `rw-`) holding no `lock`",
+    refused: "the lock path's kind and every write there",
+    codes: [READ_FAILURE_CODE, WRITE_FAILURE_CODE],
+    operation: 2,
+    stage: (workspace) => stageUnsearchableArea(workspace, "nothing"),
+  },
+  {
+    staging:
+      "`.xspec` unsearchable (mode `rw-`) holding an empty lock directory",
+    refused: "the lock path's kind and every write there",
+    codes: [READ_FAILURE_CODE, WRITE_FAILURE_CODE],
+    operation: 3,
+    stage: (workspace) =>
+      stageUnsearchableArea(workspace, "an empty lock directory"),
+  },
+  {
+    staging:
+      "a lock directory unsearchable (`rw-`) holding a directory that holds " +
+      "a file",
+    refused: "its occupants' kinds and every route below it",
+    codes: [READ_FAILURE_CODE, WRITE_FAILURE_CODE],
+    operation: 4,
+    stage: (workspace) => stageUnsearchableLockDirectory(workspace),
+  },
+];
+
+/**
+ * Acquisition's refused read's contract (TEST-SPEC T14-10(i); SPEC 14.25,
+ * 14.24, 13.5): exit 2; the error document as the entire stdout, its
+ * finding's `code` among `codes`, its `path` the lock path `.xspec/lock`
+ * exactly — the lock path's occupant or anything under it concerning the
+ * lock path, so the nested path is never named — and its `locations` `[]`
+ * (12.7: empty for a condition without in-source locations, so no location
+ * names a nested path either); the diagnostic on stderr (12.0).
+ */
+function expectAcquisitionReadFailure(
+  result: RunResult,
+  codes: readonly string[],
+  context: string,
+): Finding {
+  assertExitCode(
+    result,
+    2,
+    `${context} — a read the environment refuses at acquisition is a ` +
+      `usage error: the command stops at that read, attempting nothing ` +
+      `further but release, and exits 2 — never a finding, never an ` +
+      `internal error (SPEC 14.25, 14.24, 13.5, 12.0)`,
+  );
+  const finding = expectErrorDocument(result, context);
+  const admitted = codes.map((code) => JSON.stringify(code)).join(" or ");
+  assertSameJson(
+    { code: finding.code, path: finding.path, locations: finding.locations },
+    {
+      code: codes.find((code) => code === finding.code) ?? codes[0],
+      path: LOCK_PATH,
+      locations: [],
+    },
+    `${context} — the error document's finding carries the stable code ` +
+      `${admitted}` +
+      (codes.length > 1
+        ? ` (SPEC 14.25; 14.24: a write failure where the product meets ` +
+          `the refusal first at a write)`
+        : ` (SPEC 14.25)`) +
+      `, the concerned path the lock path "${LOCK_PATH}" — for the lock ` +
+      `path's occupant or anything under it the lock path, the nested path ` +
+      `never named (SPEC 14.25, 13.5) — and no locations (SPEC 12.7: none ` +
+      `for a condition without in-source locations); message: ` +
+      JSON.stringify(finding.message),
+  );
+  if (result.stderr.trim().length === 0) {
+    fail(
+      `${context} — the diagnostic accompanies the error document on ` +
+        `standard error (SPEC 14.25, 12.0: usage-error messages are ` +
+        `standard-error content); got an empty stderr beside ` +
+        `${JSON.stringify(finding.message)}`,
+    );
+  }
+  return finding;
+}
+
+/**
+ * One of (i)'s refused reads at acquisition (TEST-SPEC T14-10(i)): on a
+ * fresh CONF-CORE-shaped workspace — T13.5-10's session staging
+ * (`stageArmWorkspace`: built, holding the audit session `s`, nothing at
+ * `.xspec/lock`) — the arm staged before the invocation, verified on the
+ * harness itself; its command under `--json`, settled; the staging's modes
+ * restored once it exits → the contract (`expectAcquisitionReadFailure`),
+ * and nothing modified — every path but the lock path byte-identical once
+ * the modes are restored, `.xspec` itself compared, the compare bracketing
+ * this run and its staging alone (H-6: the lock path, which acquisition
+ * and release touch and the staging occupies, pruned from both walks; its
+ * residue T13.5-10(d)'s subject).
+ */
+async function acquisitionReadRun(
+  product: ProductBinding,
+  arm: AcquisitionReadArm,
+): Promise<void> {
+  const operation = acquisitionOperation(arm.operation);
+  const context =
+    `T14-10 (i) at acquisition: ${operation.what} --json with ` +
+    `${arm.staging} — ${arm.refused} refused`;
+  const workspace = await TestWorkspace.create(CORE_DECL);
+  try {
+    const items = await stageArmWorkspace(product, workspace, context);
+    const before = await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH);
+    const staging = await arm.stage(workspace);
+    let result: RunResult;
+    try {
+      result = await runSettled(
+        product,
+        workspace,
+        [...operation.argv(items), "--json"],
+        context,
+      );
+    } finally {
+      await staging.restore();
+    }
+    expectAcquisitionReadFailure(result, arm.codes, context);
+    assertSnapshotsEqual(
+      before,
+      await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
+      `${context}: modifies nothing — acquisition precedes every ` +
+        `modification and the command stops at the refused read, ` +
+        `attempting nothing further but release, so every path but the ` +
+        `lock path is byte-identical once the staging's modes are ` +
+        `restored, \`.xspec\` itself compared (SPEC 13.5, 14.25, 14.24; ` +
+        `H-6: the lock path, which acquisition and release touch, left ` +
+        `out — its residue T13.5-10(d)'s subject)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (i)'s second-discovery arm (TEST-SPEC T14-10(i), T13.5-12(e)): on a fresh
+ * session staging of T13.5-8's valid workspace (section-13.5.ts
+ * `ACQUISITION_DECL`, whose `specs/sub` the discovery of 7 lists),
+ * `rename specs/A.mdx a a2 --json` — an operation otherwise succeeding
+ * there, the next of T13.5-10's commands after (i)'s fifth — held at the
+ * seam (section-13.5-iii.ts `withHeldRun`: its hold path outside the
+ * workspace, the held-state comparison once it holds); `specs/sub` made
+ * unlistable during the hold (`UNLISTABLE_SUB_DIR`: mode `--x`, T14-10's
+ * discipline, verified on the harness itself), the hold lifted, and the
+ * mode restored once the run has ended → the 14.25 contract at that
+ * directory (`expectReadFailure`: exit 2, the error document, `code`
+ * `"read-failure"`, `path` `"specs/sub"`, a non-empty stderr) — the
+ * discovery 13.5 makes again holding exclusivity meeting the refusal, which
+ * the first discovery, before the hold, did not — and nothing modified: the
+ * workspace once the run has ended and the mode is restored byte-identical
+ * to its state during the hold before the change (the change and its
+ * undoing restore a directory's mode alone, never a byte; H-6: the run's
+ * lock path pruned from both walks, the held-state comparison having
+ * judged it once the run held).
+ */
+async function secondDiscoveryRun(product: ProductBinding): Promise<void> {
+  const operation = acquisitionOperation(0);
+  const context =
+    `T14-10 (i) at the second discovery of 13.5: ${operation.what} --json ` +
+    `--test-hold <path> on a freshly built valid workspace holding an ` +
+    `\`audit\` session \`s\`, with ${SECOND_DISCOVERY_DIR}, a directory ` +
+    `discovery lists, made unlistable during the hold (mode \`--x\`)`;
+  const workspace = await TestWorkspace.create(ACQUISITION_DECL);
+  try {
+    const items = await stageArmWorkspace(product, workspace, context);
+    await withHeldRun(
+      product,
+      workspace,
+      [...operation.argv(items), "--json"],
+      context,
+      async (held) => {
+        const before = await snapshotDirectory(
+          workspace.root,
+          EXCLUDE_LOCK_PATH,
+        );
+        const undo = await UNLISTABLE_SUB_DIR.make(workspace, context);
+        let result: RunResult;
+        try {
+          result = await liftAndWait(held, context);
+        } finally {
+          await undo();
+        }
+        expectReadFailure(
+          result,
+          SECOND_DISCOVERY_DIR,
+          `${context} — holding exclusivity, past its hold, the command ` +
+            `discovers its sources again, and that discovery's refused ` +
+            `listing of a directory it lists is a read failure concerning ` +
+            `that directory (SPEC 13.5, 14.25, 7)`,
+        );
+        assertSnapshotsEqual(
+          before,
+          await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
+          `${context}: modifies nothing — the command stops at the ` +
+            `refused read, attempting nothing further but release, so the ` +
+            `workspace once the run has ended and the mode is restored is ` +
+            `byte-identical to its state during the hold before the change, ` +
+            `which with its undoing restores a directory's mode alone (SPEC ` +
+            `14.25, 13.5; H-6: the run's lock path left out)`,
+        );
+      },
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * T14-10's arm (i), in turn: acquisition's refused reads, each staged
+ * before the invocation (T13.5-10(d)'s stagings), then the second
+ * discovery's (T13.5-12(e)'s staging, during a hold). Exported so scratch
+ * probes can run the arm alone, against the CONF-CORE reference among
+ * others; Linux leg only, as T14-10's other arms (E-1).
+ */
+export async function runT1410ArmI(product: ProductBinding): Promise<void> {
+  for (const arm of ACQUISITION_READ_ARMS) {
+    await acquisitionReadRun(product, arm);
+  }
+  await secondDiscoveryRun(product);
+}
+
+// ---------------------------------------------------------------------------
 // T14-10 — read failures (14.25)
 // ---------------------------------------------------------------------------
 
 const T14_10 = defineProductTest({
   id: "T14-10",
   title:
-    "read failures (14.25): the object read decides the outcome, one arm per row, each refusal staged by permission removal alone (a file's content: mode 0o200, its write permission kept; a directory's listing: mode 0o100, search kept; nonexistence never a refusal) — (a) a discovered source's content is condition 20 at `build` and `check`, exit 1, its one location the zero-length range at offset 0, the file masked exactly as an unparseable one (A's reference reports 14.5, nothing inside reports) while `view` serves the other requested file, `occurrences` lists no record for its spellings, and `at` at 0, 7, and 999999 reports the resolution explicitly unavailable, never the out-of-range usage error — a spec source and, separately, a code source; (b) the journal's content is condition 13 concerning .xspec/journal from `build`, `check`, `ids` (answering nothing), and a refused `rename`, while `inventory` reports `journal.occupied` true, finding-free; (c) a session file's content is condition 21 from `check`, `review status` (one finding, nothing modified), and `review list` (the session reported corrupt), `inventory` listing the session; (d) the configuration file's content is condition 14 from `build`, `ids`, `inventory`, and `view` (`code` configuration-error, `path` xspec.config.ts), `version` exiting 0; (e) a generated module's content is one per-file condition-10 finding to `check` while `build` exits 0; (f) every graph-data file unreadable is the state of condition 23 — `inventory` and a `move --preview` report their record-supplied datum unavailable beside the finding, `check` one unit-form condition-10 finding alone, `ids` regenerates and answers (exit 0), and after `build` the inventory reports `recorded` in full; (g) a directory discovery lists, unlistable: `build`, `check`, `ids`, `view`, `inventory`, `review list`, and a `rename` each exit 2 with the error document (`code` read-failure, `path` specs/sub), nothing modified, the read failure preceding a failing source's findings and an unknown profile, the syntax class (`code` null) and an invalid configuration preceding it; (h) the session directory unlistable: `review list`, `inventory`, and `check` exit 2 concerning .xspec/reviews while `build` and `ids` exit 0; two clauses — a refused read of a path occupant's kind, and of a directory above the workspace root — admit no product-independent staging and are recorded so (SPEC 14.25, 14, 11.2, 11.5, 11.6, 13.3, 10.7, 12.0, 12.7)",
+    "read failures (14.25): the object read decides the outcome, one arm per row, each refusal staged by permission removal alone (a file's content: mode 0o200, its write permission kept; a directory's listing: mode 0o100, search kept; nonexistence never a refusal) — (a) a discovered source's content is condition 20 at `build` and `check`, exit 1, its one location the zero-length range at offset 0, the file masked exactly as an unparseable one (A's reference reports 14.5, nothing inside reports) while `view` serves the other requested file, `occurrences` lists no record for its spellings, and `at` at 0, 7, and 999999 reports the resolution explicitly unavailable, never the out-of-range usage error — a spec source and, separately, a code source; (b) the journal's content is condition 13 concerning .xspec/journal from `build`, `check`, `ids` (answering nothing), and a refused `rename`, while `inventory` reports `journal.occupied` true, finding-free; (c) a session file's content is condition 21 from `check`, `review status` (one finding, nothing modified), and `review list` (the session reported corrupt), `inventory` listing the session; (d) the configuration file's content is condition 14 from `build`, `ids`, `inventory`, and `view` (`code` configuration-error, `path` xspec.config.ts), `version` exiting 0; (e) a generated module's content is one per-file condition-10 finding to `check` while `build` exits 0; (f) every graph-data file unreadable is the state of condition 23 — `inventory` and a `move --preview` report their record-supplied datum unavailable beside the finding, `check` one unit-form condition-10 finding alone, `ids` regenerates and answers (exit 0), and after `build` the inventory reports `recorded` in full; (g) a directory discovery lists, unlistable: `build`, `check`, `ids`, `view`, `inventory`, `review list`, and a `rename` each exit 2 with the error document (`code` read-failure, `path` specs/sub), nothing modified, the read failure preceding a failing source's findings and an unknown profile, the syntax class (`code` null) and an invalid configuration preceding it; (h) the session directory unlistable: `review list`, `inventory`, and `check` exit 2 concerning .xspec/reviews while `build` and `ids` exit 0; (i) at acquisition, the lock path's occupant and everything under it refused, each staged before the invocation on a freshly built workspace holding an `audit` session `s`, with `rename`, `move`, `review create`, `resolve`, and `split` in turn — an empty lock directory unlistable (`-wx`) and a subdirectory under it unlistable (`-wx`), each `read-failure`; `.xspec` unsearchable (`rw-`; holding no `lock` and, separately, an empty lock directory) and the lock directory unsearchable (`rw-`, holding a directory that holds a file), each `read-failure` or `write-failure` — each exit 2 with the error document, `path` .xspec/lock, never a nested path, `locations` [], nothing modified; and specs/sub, a directory the second discovery of 13.5 lists, made unlistable (`--x`) during the hold of `rename specs/A.mdx a a2`: exit 2, `code` read-failure, `path` specs/sub, nothing modified; two clauses — a refused read of a path occupant's kind (the area's own occupant's at acquisition included, the lock path's there excepted, which (i) stages), and of a directory above the workspace root — admit no product-independent staging and are recorded so (SPEC 14.25, 14, 11.2, 11.5, 11.6, 13.3, 13.5, 10.7, 12.0, 12.7)",
   // A hang guard only (H-10): nine workspaces, each built, checked, and
-  // driven through a handful of invocations — generous under a saturated box.
+  // driven through a handful of invocations, and arm (i)'s six
+  // CONF-CORE-shaped ones, each built, holding a session, and driven once —
+  // generous under a saturated box.
   timeoutMs: 600_000,
   run: async (product) => {
     // E-1: permission stagings belong to the Linux leg; elsewhere the arms
@@ -2858,6 +3185,7 @@ const T14_10 = defineProductTest({
     await graphDataArm(product);
     await discoveryListingArm(product);
     await sessionDirectoryArm(product);
+    await runT1410ArmI(product);
   },
 });
 

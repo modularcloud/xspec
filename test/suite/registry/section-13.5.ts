@@ -372,13 +372,13 @@ import {
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
 // other keys — the CONF-CORE workspace shape (CERTIFICATIONS.md). A
 // staged-source record: T11.6-3, T12.7-3, T13.4-12, T13.5-1, T13.5-4,
-// T13.5-6, T13.5-8, T13.5-10, T13.5-11, T13.5-13, T14-6, and T14-9 stage it
-// in workspaces created after a product invocation (CORE_DECL,
+// T13.5-6, T13.5-8, T13.5-10, T13.5-11, T13.5-13, T14-6, T14-9, and T14-10
+// stage it in workspaces created after a product invocation (CORE_DECL,
 // section-13.5-vii.ts's ISO_TWO_DECL and NESTED_DECL — at both of its
 // roots — section-13.5-vi.ts's T13_5_13_DECL), as T6.6-3's runs-while-held
 // arm does (S-9's timing clause; test/self/s9-staged-sources.test.ts).
 export const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.6-3/T11.6-3/T12.7-3/T13.4-12/T13.5-1/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-13/T14-6/T14-9 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's, ISO_TWO_DECL's, NESTED_DECL's at both roots, and T13_5_13_DECL's)",
+  "T6.6-3/T11.6-3/T12.7-3/T13.4-12/T13.5-1/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-13/T14-6/T14-9/T14-10 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's, ISO_TWO_DECL's, NESTED_DECL's at both roots, and T13_5_13_DECL's)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -415,13 +415,13 @@ const A_MDX = [
 // T13.4-12's per-arm workspaces and twin, T13.5-13's trial and twin
 // workspaces, T11.6-3's lock-path arms' workspaces, the busy arms' of
 // T12.7-3 and T14-6, `judgeBusyRefusal`, T14-9's acquisition-write arms'
-// workspaces) and, byte for byte, by
+// workspaces, T14-10's arm (i)'s) and, byte for byte, by
 // section-13.4.ts's tests (its later workspaces included), so it is one
 // staged-source record made from the string (S-9's before-any-product
 // clause; helpers/staged-mdx.ts) — the string stays for the staleness edit
 // below — staged wherever the bytes are.
 export const CORE_A_STAGED = stagedMdx(
-  "T6.6-3/T11.6-3/T12.7-3/T13.4-1/T13.4-2/T13.4-3/T13.4-4/T13.4-5/T13.4-6/T13.4-12/T13.5-1/T13.5-2/T13.5-3/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-12/T13.5-13/T14-6/T14-9 specs/A.mdx (the CONF-CORE-shaped source: a holding a.k, then g; T13.4-6's specs/one/A.mdx too; T13.5-12(c)'s, created during a hold)",
+  "T6.6-3/T11.6-3/T12.7-3/T13.4-1/T13.4-2/T13.4-3/T13.4-4/T13.4-5/T13.4-6/T13.4-12/T13.5-1/T13.5-2/T13.5-3/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-12/T13.5-13/T14-6/T14-9/T14-10 specs/A.mdx (the CONF-CORE-shaped source: a holding a.k, then g; T13.4-6's specs/one/A.mdx too; T13.5-12(c)'s, created during a hold)",
   A_MDX,
 );
 
@@ -4008,13 +4008,15 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
 // command's hold instead, where the rediscovery meets them
 // (section-13.5-iii.ts; TEST-SPEC T13.5-12(d), (e)); T13.5-12 stages it for
 // every arm, those two changes during each command's hold among them
-// (section-13.5-iv.ts).
+// (section-13.5-iv.ts); and T14-10 stages it, session-staged, for arm (i)'s
+// second-discovery arm, `specs/sub` made unlistable during a hold
+// (section-14-ii.ts).
 export const CONFIG_PATH = "xspec.config.ts";
 const CODE_SOURCE_PATH = "src/c.ts";
 export const SUB_DIR = "specs/sub";
 export const DOUBLY_MATCHED_PATH = "src/both.mdx";
 const T13_5_8_CONFIG = stagedTs(
-  "T13.5-8/T13.5-11/T13.5-12 xspec.config.ts — one spec group and one code group, both matching the unoccupied src/*.mdx paths (T13.5-12(d)'s configuration), the code group discovering src/c.ts",
+  "T13.5-8/T13.5-11/T13.5-12/T14-10 xspec.config.ts — one spec group and one code group, both matching the unoccupied src/*.mdx paths (T13.5-12(d)'s configuration), the code group discovering src/c.ts",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -4043,11 +4045,11 @@ export default defineConfig({
 `,
 );
 const T13_5_8_CODE_SOURCE = stagedTs(
-  "T13.5-8/T13.5-11/T13.5-12 src/c.ts — a discovered code source spelling no marker, text call, or specifier naming a spec module (the wrong-kind origin of T13.5-8's acquisition-first arms' rename and move and of its seam-ordering move)",
+  "T13.5-8/T13.5-11/T13.5-12/T14-10 src/c.ts — a discovered code source spelling no marker, text call, or specifier naming a spec module (the wrong-kind origin of T13.5-8's acquisition-first arms' rename and move and of its seam-ordering move)",
   "export const c = 1\n",
 );
 const T13_5_8_SUB_SOURCE = stagedMdx(
-  "T13.5-8/T13.5-11/T13.5-12 specs/sub/S.mdx (the source under specs/sub, the discovered directory T13.5-8's acquisition-after read-failure arm, and T13.5-11(a)'s and T13.5-12(e)'s read failures past acquisition during a hold, make unlistable)",
+  "T13.5-8/T13.5-11/T13.5-12/T14-10 specs/sub/S.mdx (the source under specs/sub, the discovered directory T13.5-8's acquisition-after read-failure arm, and T13.5-11(a)'s, T13.5-12(e)'s, and T14-10(i)'s read failures past acquisition during a hold, make unlistable)",
   ['<S id="sub">', "Sub text.", "</S>", ""].join("\n"),
 );
 const T13_5_8_DOUBLY_MATCHED = stagedMdx(
@@ -4191,10 +4193,10 @@ export const DOUBLY_MATCHED_FILE: AcquisitionAfterStaging = {
  * `specs/**\/*.mdx` — made unlistable for one run (T14-10(g)'s staging:
  * mode 0o100, its search permission kept, verified on the harness's own
  * process first, E-1; a privileged runner is a harness error, H-11) and
- * its mode restored after it. Shared with T13.5-11(a) (section-13.5-iii.ts)
- * and T13.5-12(e) (section-13.5-iv.ts), which make it unlistable during a
- * mutating command's hold: a read failure past acquisition, met by the
- * rediscovery.
+ * its mode restored after it. Shared with T13.5-11(a) (section-13.5-iii.ts),
+ * T13.5-12(e) (section-13.5-iv.ts), and T14-10(i) (section-14-ii.ts), which
+ * make it unlistable during a mutating command's hold: a read failure past
+ * acquisition, met by the rediscovery.
  */
 export const UNLISTABLE_SUB_DIR: AcquisitionAfterStaging = {
   make: async (workspace) => {

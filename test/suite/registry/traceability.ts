@@ -725,11 +725,23 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // document (12.7), the corrupt-session reports of `review status`/`list`
   // (10.7), the per-file availability and masking of the refused source
   // (11.2), `at`'s unavailable resolution on it (11.5), the inventory's
-  // journal, session, and record answers (11.6), and the gated and
-  // refreshing reads over the unreadable journal and graph data (13.3);
-  // 6.6/7/14.14's staged surfaces are context with home coverage at
-  // T6.6-6/T7-*/T12.7-3.
-  "T14-10": ["14", "10.7", "11.2", "11.5", "11.6", "12.0", "12.7", "13.3"],
+  // journal, session, and record answers (11.6), the gated and refreshing
+  // reads over the unreadable journal and graph data (13.3), and arm (i)'s
+  // refused reads at acquisition concerning the lock path and at the second
+  // discovery of a held mutating command, each stopping the command with
+  // nothing modified (13.5); 6.6/7/14.14's staged surfaces are context with
+  // home coverage at T6.6-6/T7-*/T12.7-3.
+  "T14-10": [
+    "14",
+    "10.7",
+    "11.2",
+    "11.5",
+    "11.6",
+    "12.0",
+    "12.7",
+    "13.3",
+    "13.5",
+  ],
   // T14-11: the per-condition range rules (home "14") with the byte-offset
   // convention they use (1.7), the `d`-entry, marker, and `text(...)` spans
   // (5.7), the attribute, opening-tag, and import ranges (11.4), and the
