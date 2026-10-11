@@ -225,8 +225,8 @@ function clip(rendered: string, limit = 600): string {
 /**
  * The invariance itself: every member but `root` and `config` of
  * `document` is byte-identical to `reference`'s (the root run's answer,
- * `referenceName` naming it), each differing member named with both values
- * (SPEC 11.6, 1.5; TEST-SPEC T11.6-1).
+ * `referenceName` naming it, e.g. "the root run's answer"), each differing
+ * member named with both values (SPEC 11.6, 1.5; TEST-SPEC T11.6-1).
  */
 export function assertMembersInvariant(
   document: InventoryDocument,
@@ -243,12 +243,14 @@ export function assertMembersInvariant(
     `${context}: every member but \`root\` and \`config\` is invariant ` +
       `under the working directory — 11.6 anchors those two alone, and ` +
       `every other path is workspace-relative in every output (SPEC 11.6, ` +
-      `1.5, 12.0) — so each is byte-identical to ${referenceName}'s; ` +
+      `1.5, 12.0) — so each is byte-identical to its value in ` +
+      `${referenceName}; ` +
       `${differing
         .map(
           (member) =>
-            `\`${member}\` differs: got ${clip(renderMember(document, member))}, ` +
-            `${referenceName} ${clip(renderMember(reference, member))}`,
+            `\`${member}\` differs: got ` +
+            `${clip(renderMember(document, member))}; in ${referenceName}: ` +
+            `${clip(renderMember(reference, member))}`,
         )
         .join("; ")}`,
   );

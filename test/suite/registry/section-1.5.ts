@@ -14,7 +14,11 @@
 //   coverage profile uses `targets: "all"` so the roots' only exclusion
 //   reason is `root node` (SPEC 8.1/8.2) — the leaves-mode reason wording is
 //   T8's business, not this test's. T1.5-1 and T1.5-3 rerun on the Windows
-//   leg via CI-01 (the registry entries are shared; TEST-SPEC E-6).
+//   leg via CI-01 (the registry entries are shared; TEST-SPEC E-6). The
+//   entry's inventory clause cross-references T11.6-1, whose
+//   member-invariance arm (section-11.6.ts; on the Windows leg, its
+//   drive-mismatch arm) holds every inventory member but the anchoring
+//   byte-identical across working directories, so no copy runs here.
 // - T1.5-2's non-UTF-8 arm is staged on the Linux leg per its TEST-SPEC text
 //   ("where file names are byte strings"): other platforms' filesystems
 //   refuse such names outright, so the arm runs exactly where the fixture is

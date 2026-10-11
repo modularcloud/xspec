@@ -429,7 +429,7 @@ async function expectAnchoredInventory(
     assertMembersInvariant(
       document,
       reference,
-      "the root run on this leg",
+      "the root run's answer on this leg",
       context,
     );
   }

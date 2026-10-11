@@ -608,7 +608,12 @@ async function expectAnchoredInventory(
   const document = decodeInventoryDocument(doc, context);
   assertAreaAndLockSpellings(document, context);
   if (reference !== undefined) {
-    assertMembersInvariant(document, reference, "the root run", context);
+    assertMembersInvariant(
+      document,
+      reference,
+      "the root run's answer",
+      context,
+    );
   }
   return { result, document };
 }
