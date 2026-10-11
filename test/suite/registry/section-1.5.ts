@@ -6,16 +6,26 @@
 // (H-4), decodes output through the H-3 adapters, and rejects a product only
 // via diagnosed assertion failures (H-8).
 //
-// - T1.5-1 runs every identity-bearing command (`query`, `show`, `ids`,
-//   `coverage`, `impact`) twice — from the workspace root and from a nested
-//   directory — byte-compares the outputs, and asserts the identities decoded
-//   from them are exactly the workspace-relative, `/`-separated identities of
-//   SPEC 1.5 (a nested `specs/sub/` path keeps the separator at stake). The
-//   coverage profile uses `targets: "all"` so the roots' only exclusion
-//   reason is `root node` (SPEC 8.1/8.2) — the leaves-mode reason wording is
-//   T8's business, not this test's. T1.5-1 and T1.5-3 rerun on the Windows
-//   leg via CI-01 (the registry entries are shared; TEST-SPEC E-6). The
-//   entry's inventory clause cross-references T11.6-1, whose
+// - T1.5-1 runs every identity- and path-bearing command (`query`, `show`,
+//   `ids`, `coverage`, `impact`, and the `occurrences`, `view`, and `at`
+//   documents) twice — from the workspace root and from a nested directory —
+//   byte-compares the outputs, and asserts the identities and file paths
+//   decoded from them are exactly the workspace-relative, `/`-separated forms
+//   of SPEC 1.5 (a nested `specs/sub/` path keeps the separator at stake).
+//   The workspace makes every kind of path appear: `specs/sub/B.mdx` imports
+//   `specs/A.mdx` across directories and references it through the binding
+//   (a view's import target, an occurrence's `file`), and a code group's
+//   nested `src/sub/c.ts` marks a node from a named unit (a code-location
+//   path in `query node`/`show` edges, occurrence records, a covering path,
+//   and impacted code). Both coverage profiles use `targets: "all"` so the
+//   roots' only exclusion reason is `root node` (SPEC 8.1/8.2) — the
+//   leaves-mode reason wording is T8's business, not this test's. `view` and
+//   `at` take workspace-relative `<file>` operands (SPEC 12.0), so one argv
+//   serves both working directories. T1.5-1 and T1.5-3 rerun on the Windows
+//   leg via CI-01 (the registry entries are shared; TEST-SPEC E-6), so every
+//   T1.5-1 staging is an ordinary file and directory, stageable on both legs
+//   (no symbolic link or other POSIX-only feature).
+//   The entry's inventory clause cross-references T11.6-1, whose
 //   member-invariance arm (section-11.6.ts; on the Windows leg, its
 //   drive-mismatch arm) holds every inventory member but the anchoring
 //   byte-identical across working directories, so no copy runs here.
@@ -36,15 +46,25 @@
 //   discriminated by content, not just by echoed identity.
 
 import { Buffer } from "node:buffer";
-import type { Finding } from "../../helpers/adapters/index.js";
+import type {
+  CoverageProfileReport,
+  FileView,
+  Finding,
+  OccurrenceRecord,
+  PathValue,
+  ViewNode,
+} from "../../helpers/adapters/index.js";
 import {
   assertReportMentions,
   classifyIgnoredReasons,
+  decodeAtReport,
   decodeCoverageReport,
   decodeIdsReport,
   decodeImpactReport,
   decodeNodeReport,
   decodeNodeRowsReport,
+  decodeOccurrencesReport,
+  decodeViewReport,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
@@ -59,6 +79,7 @@ import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import { assertImpactedCode } from "./section-9.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -90,14 +111,24 @@ export default defineConfig({
 // T1.5-1
 // ---------------------------------------------------------------------------
 
-// One spec group plus a coverage profile so `coverage` has identities to
-// report. `targets: "all"` keeps the roots' exclusion reasons at exactly
-// `root node` (SPEC 8.1/8.2; see the module header).
-const IDENTITY_CONFIG = `import { defineConfig } from "xspec"
+// One spec group, one code group, and two coverage profiles over the spec
+// group — `p` with the spec group as its boundary, `q` with the code group —
+// so `coverage` reports identities and, in q's covering path, a code
+// location (SPEC 7.2, 7.4, 8.2). `targets: "all"` keeps the roots' exclusion
+// reasons at exactly `root node` (SPEC 8.1/8.2; see the module header). A
+// staged-source record (S-9), like B's sources and the code source; A's
+// source stays plain contents, judged as the builder stages it before the
+// body's first invocation (helpers/staged-mdx.ts).
+const IDENTITY_CONFIG = stagedTs(
+  "T1.5-1 xspec.config.ts — one spec group, one code group, and a coverage profile with each as its boundary",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
   },
   coverage: [
     {
@@ -106,10 +137,18 @@ export default defineConfig({
       targets: "all",
       boundary: "main",
       mode: "direct"
+    },
+    {
+      name: "q",
+      target: "main",
+      targets: "all",
+      boundary: "app",
+      mode: "direct"
     }
   ]
 })
-`;
+`,
+);
 
 const IDENTITY_A_SOURCE = [
   '<S id="alpha" d={["beta"]}>',
@@ -122,28 +161,91 @@ const IDENTITY_A_SOURCE = [
   "",
 ].join("\n");
 
-const IDENTITY_B_BASELINE = [
-  '<S id="gamma">',
-  "Gamma original text.",
-  "</S>",
-  "",
-].join("\n");
+// specs/sub/B.mdx imports specs/A.mdx across directories (`../A.xspec`,
+// SPEC 2.1) and gamma depends on alpha through that binding (2.2): the view
+// of B carries an import whose target is another directory's file, and the
+// `occurrences`, `view`, and `at` documents an occurrence whose `file` is
+// the nested path (5.7, 11.3–11.5). Only gamma's text differs between the
+// baseline commit and the edit `impact --base` measures.
+const B_IMPORT = 'import A from "../A.xspec"';
+const B_GAMMA_OPEN_HEAD = '<S id="gamma" d={';
+const B_REFERENCE = "A.alpha";
+const identityBSource = (gammaText: string): string =>
+  [
+    B_IMPORT,
+    "",
+    `${B_GAMMA_OPEN_HEAD}${B_REFERENCE}}>`,
+    gammaText,
+    "</S>",
+    "",
+  ].join("\n");
 
-const IDENTITY_B_EDITED = [
-  '<S id="gamma">',
-  "Gamma edited text.",
-  "</S>",
-  "",
-].join("\n");
+const B_BASELINE_SOURCE = identityBSource("Gamma original text.");
+const B_EDITED_SOURCE = identityBSource("Gamma edited text.");
 
-// The staged workspace's identities, in the exact form SPEC 1.5 fixes:
-// workspace-relative, `/`-separated (the nested `specs/sub/` path keeps the
-// separator at stake), `#` joining path and ID, bare path for a root.
-const A_ROOT = "specs/A.mdx";
+const IDENTITY_B_BASELINE = stagedMdx(
+  "T1.5-1 specs/sub/B.mdx — the baseline: an import of ../A.xspec and gamma's reference through it",
+  B_BASELINE_SOURCE,
+);
+
+const IDENTITY_B_EDITED = stagedMdx(
+  "T1.5-1 specs/sub/B.mdx — gamma's text edited after the baseline commit",
+  B_EDITED_SOURCE,
+);
+
+// `at`'s offset: inside gamma's reference `A.alpha`, at the first byte of
+// `alpha`, so the resolution carries that occurrence's record (SPEC 11.5) —
+// composed from the parts the source is, and checked against the staged
+// bytes at module load (a harness staging defect, never a product failure).
+const AT_OFFSET = Buffer.byteLength(
+  `${B_IMPORT}\n\n${B_GAMMA_OPEN_HEAD}A.`,
+  "utf8",
+);
+for (const source of [B_BASELINE_SOURCE, B_EDITED_SOURCE]) {
+  const window = Buffer.from(source, "utf8")
+    .subarray(AT_OFFSET - 2, AT_OFFSET + 5)
+    .toString("utf8");
+  if (window !== B_REFERENCE) {
+    throw new Error(
+      `T1.5-1 fixture self-check: the bytes around the \`at\` offset ` +
+        `${String(AT_OFFSET)} read ${JSON.stringify(window)}, not ` +
+        `${JSON.stringify(B_REFERENCE)} (a harness staging defect)`,
+    );
+  }
+}
+
+// A code source in a nested directory of the code group: its named unit
+// `useGamma` marks gamma (SPEC 4.5, 4.6), so the code location
+// `src/sub/c.ts#useGamma` — a path in an identity of no requirement node —
+// enters `query node`'s and `show`'s edges, the occurrence records, profile
+// q's covering path, and impact's impacted code.
+const IDENTITY_CODE_SOURCE = stagedTs(
+  "T1.5-1 src/sub/c.ts — a nested code source whose named unit marks specs/sub/B.mdx#gamma",
+  [
+    'import B from "../../specs/sub/B.xspec"',
+    "",
+    "export function useGamma() {",
+    "  B.gamma",
+    "}",
+    "",
+  ].join("\n"),
+);
+
+// The staged workspace's identities and file paths, in the exact form SPEC
+// 1.5 fixes: workspace-relative, `/`-separated (the nested `specs/sub/` and
+// `src/sub/` paths keep the separator at stake), `#` joining path and ID (or
+// a code unit's name, 4.6), bare path for a root.
+const A_FILE = "specs/A.mdx";
+const B_FILE = "specs/sub/B.mdx";
+const CODE_FILE = "src/sub/c.ts";
+const A_ROOT = A_FILE;
 const ALPHA = "specs/A.mdx#alpha";
 const BETA = "specs/A.mdx#beta";
-const B_ROOT = "specs/sub/B.mdx";
+const B_ROOT = B_FILE;
 const GAMMA = "specs/sub/B.mdx#gamma";
+const CODE_UNIT = "src/sub/c.ts#useGamma";
+// The requirement nodes' identities (`query nodes` rows, impact
+// attribution): the code location is no requirement node (SPEC 5.1, 11.1).
 const KNOWN_IDENTITIES: readonly string[] = [
   A_ROOT,
   ALPHA,
@@ -154,14 +256,16 @@ const KNOWN_IDENTITIES: readonly string[] = [
 
 // The nested working directory for T1.5-1's second run of each command: a
 // real subdirectory holding a source file, so a product reporting
-// cwd-relative paths (`B.mdx`, `../A.mdx`) or native separators diverges.
+// cwd-relative paths (`B.mdx`, `../A.mdx`, `../../src/sub/c.ts`) or native
+// separators diverges.
 const NESTED_DIR = "specs/sub";
 
 /**
  * Run one command from the workspace root and again from the nested
  * directory: both must exit 0 with byte-identical stdout (T1.5-1's protocol —
- * identities in outputs are workspace-relative, independent of the working
- * directory; SPEC 1.5, 12.0). Returns the root run for decoding.
+ * identities and file paths in outputs are workspace-relative, independent
+ * of the working directory; SPEC 1.5, 12.0). Returns the root run for
+ * decoding.
  */
 async function runFromRootAndNested(
   product: ProductBinding,
@@ -188,7 +292,7 @@ async function runFromRootAndNested(
     fromRoot.stdoutBytes,
     `${context}: stdout of the nested-directory run vs the workspace-root run — ` +
       `outputs are byte-identical regardless of the working directory, because ` +
-      `identities are workspace-relative and /-separated (SPEC 1.5, 12.0)`,
+      `identities and file paths are workspace-relative and /-separated (SPEC 1.5, 12.0)`,
   );
   return fromRoot;
 }
@@ -209,24 +313,220 @@ function assertKnownIdentities(
   }
 }
 
+/**
+ * An occurrence record's path- and identity-bearing members (SPEC 5.7,
+ * 12.7): the referencing file, the edge kind, the source graph node's
+ * identity — or the unavailability marker, compared as itself — and the
+ * resolved target's identity. The ranges are T5.7's, T11.3's, and T11.5's
+ * business; the byte comparison of the two runs holds them independent of
+ * the working directory too.
+ */
+interface OccurrencePaths {
+  readonly file: PathValue;
+  readonly kind: string;
+  readonly source: string | { readonly unavailable: true };
+  readonly target: string;
+}
+
+function occurrencePaths(record: OccurrenceRecord): OccurrencePaths {
+  return {
+    file: record.file,
+    kind: record.kind,
+    source:
+      "unavailable" in record.source
+        ? { unavailable: true }
+        : record.source.identity,
+    target: record.target,
+  };
+}
+
+/** A view's positional section tree, projected to its node identities. */
+interface IdentityTree {
+  readonly identity: string | { readonly unavailable: true };
+  readonly children: readonly IdentityTree[];
+}
+
+function identityTree(node: ViewNode): IdentityTree {
+  return {
+    identity: node.identity,
+    children: node.children.map(identityTree),
+  };
+}
+
+/**
+ * A per-file view's path- and identity-bearing members (SPEC 11.4, 12.7):
+ * its `file`, its nodes' identities, each import's binding name and resolved
+ * target, and its occurrence records' paths and identities.
+ */
+interface ViewPaths {
+  readonly file: PathValue;
+  readonly root: IdentityTree;
+  readonly imports: readonly {
+    readonly name: string | null;
+    readonly target: PathValue | { readonly unavailable: true };
+  }[];
+  readonly occurrences: readonly OccurrencePaths[];
+}
+
+function viewPaths(view: FileView): ViewPaths {
+  return {
+    file: view.file,
+    root: identityTree(view.root),
+    imports: view.imports.map((entry) => ({
+      name: entry.name,
+      target: entry.target,
+    })),
+    occurrences: view.occurrences.map(occurrencePaths),
+  };
+}
+
+// The workspace's three occurrences, in occurrence order (SPEC 5.7: by
+// referencing file path bytes, then range start): alpha's local reference to
+// beta, gamma's cross-directory reference to alpha through the import, and
+// the marker in `useGamma`.
+const A_OCCURRENCE: OccurrencePaths = {
+  file: A_FILE,
+  kind: "depends",
+  source: ALPHA,
+  target: BETA,
+};
+const B_OCCURRENCE: OccurrencePaths = {
+  file: B_FILE,
+  kind: "depends",
+  source: GAMMA,
+  target: ALPHA,
+};
+const CODE_OCCURRENCE: OccurrencePaths = {
+  file: CODE_FILE,
+  kind: "references",
+  source: CODE_UNIT,
+  target: GAMMA,
+};
+
+// The two spec sources' views (SPEC 11.4), projected: B's import resolves to
+// A's file across directories.
+const A_VIEW: ViewPaths = {
+  file: A_FILE,
+  root: {
+    identity: A_ROOT,
+    children: [
+      { identity: ALPHA, children: [] },
+      { identity: BETA, children: [] },
+    ],
+  },
+  imports: [],
+  occurrences: [A_OCCURRENCE],
+};
+const B_VIEW: ViewPaths = {
+  file: B_FILE,
+  root: { identity: B_ROOT, children: [{ identity: GAMMA, children: [] }] },
+  imports: [{ name: "A", target: A_FILE }],
+  occurrences: [B_OCCURRENCE],
+};
+
+/** One coverage profile's expected identities (SPEC 8.1, 8.2). */
+interface ProfileExpectation {
+  readonly name: string;
+  readonly counts: {
+    readonly required: number;
+    readonly covered: number;
+    readonly uncovered: number;
+    readonly ignored: number;
+  };
+  /** In identity byte order. */
+  readonly covered: readonly {
+    readonly identity: string;
+    readonly path: readonly string[];
+  }[];
+  /** Sorted. */
+  readonly uncovered: readonly string[];
+  /** How the counts arise, for the diagnosis. */
+  readonly derivation: string;
+}
+
+/**
+ * Assert one profile of a decoded coverage report: its counts, every covered
+ * node with its one covering path (boundary node first — for profile q a
+ * code location), every uncovered node, and the two ignored roots, each a
+ * workspace-relative, `/`-separated identity (SPEC 1.5, 8.2).
+ */
+function assertIdentityProfile(
+  profiles: readonly CoverageProfileReport[],
+  expected: ProfileExpectation,
+  label: string,
+): void {
+  const profile = profiles.find((each) => each.name === expected.name);
+  if (profile === undefined) {
+    fail(
+      `${label}: expected the configured profile ${JSON.stringify(expected.name)} ` +
+        `(SPEC 8.2: \`coverage\` runs all profiles); got ` +
+        JSON.stringify(profiles.map((each) => each.name)),
+    );
+  }
+  const context = `${label} profile ${expected.name}`;
+  assertSameJson(
+    profile.counts,
+    expected.counts,
+    `${context}: counts — ${expected.derivation} (SPEC 8.1, 8.2)`,
+  );
+  assertSameJson(
+    profile.covered
+      .map((node) => ({ identity: node.identity, path: [...node.path] }))
+      .sort((a, b) =>
+        Buffer.compare(
+          Buffer.from(a.identity, "utf8"),
+          Buffer.from(b.identity, "utf8"),
+        ),
+      ),
+    expected.covered,
+    `${context}: each covered node and its one covering path are ` +
+      `workspace-relative identities (SPEC 1.5, 8.2)`,
+  );
+  assertSameJson(
+    [...profile.uncovered].sort(),
+    expected.uncovered,
+    `${context}: uncovered identities are workspace-relative and /-separated`,
+  );
+  assertSameJson(
+    sortedIdentities(profile.ignored),
+    [A_ROOT, B_ROOT],
+    `${context}: the ignored roots are identified by bare workspace-relative path (SPEC 1.5)`,
+  );
+  for (const ignored of profile.ignored) {
+    // Reason spellings are output shape (SPEC 8.2 pins no wording):
+    // classified onto their SPEC 8.2 identities through the coverage
+    // adapter, as T8.2-1 and T1.2-3 do (H-3).
+    assertSameJson(
+      classifyIgnoredReasons(
+        ignored.reasons,
+        `${context} ignored ${ignored.identity}`,
+      ),
+      ["root"],
+      `${context}: ${ignored.identity} exclusion reasons (targets: "all" — the root-node reason and nothing else, SPEC 8.2)`,
+    );
+  }
+}
+
 const T1_5_1 = defineProductTest({
   id: "T1.5-1",
   title:
-    "identities in every output (query, show, ids, coverage, impact) are workspace-relative and /-separated, regardless of the working directory (SPEC 1.5, 12.0)",
+    "identities and file paths in every output (query, show, ids, coverage, impact, and the occurrences, view, and at documents — identities, file members, import targets) are workspace-relative and /-separated, regardless of the working directory (SPEC 1.5, 12.0)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": IDENTITY_CONFIG,
-        "specs/A.mdx": IDENTITY_A_SOURCE,
-        "specs/sub/B.mdx": IDENTITY_B_BASELINE,
+        [A_FILE]: IDENTITY_A_SOURCE,
+        [B_FILE]: IDENTITY_B_BASELINE,
+        [CODE_FILE]: IDENTITY_CODE_SOURCE,
       },
     });
     try {
       // Baseline commit (sources only), then a leaf edit, so `impact --base`
-      // has categories to attribute to identities (SPEC 5.6, 9).
+      // has categories to attribute to identities and a code location to
+      // impact (SPEC 5.6, 9).
       await workspace.gitInit();
       await workspace.gitCommitAll("baseline");
-      await workspace.file("specs/sub/B.mdx", IDENTITY_B_EDITED);
+      await workspace.file(B_FILE, IDENTITY_B_EDITED);
 
       // `query node` (JSON-only surface, SPEC 11).
       const nodeLabel = `T1.5-1 \`query node ${GAMMA}\``;
@@ -254,11 +554,21 @@ const T1_5_1 = defineProductTest({
         `${nodeLabel}: subtree text reflects the current (edited) source`,
       );
       // Edge endpoints are identities too: the structural edge names the
-      // nested root by its bare workspace-relative path (SPEC 1.5, 5.2).
+      // nested root by its bare workspace-relative path, the marker's
+      // `references` edge the code location by its path and unit, and the
+      // `depends` edge crosses directories (SPEC 1.5, 4.6, 5.2).
       assertEdgeSetEqual(
         gamma.incomingEdges,
-        [{ from: B_ROOT, to: GAMMA, kind: "contains" }],
-        `${nodeLabel}: incoming edges name workspace-relative identities`,
+        [
+          { from: B_ROOT, to: GAMMA, kind: "contains" },
+          { from: CODE_UNIT, to: GAMMA, kind: "references" },
+        ],
+        `${nodeLabel}: incoming edges name workspace-relative identities, the code location's included`,
+      );
+      assertEdgeSetEqual(
+        gamma.outgoingEdges,
+        [{ from: GAMMA, to: ALPHA, kind: "depends" }],
+        `${nodeLabel}: outgoing edges name workspace-relative identities`,
       );
 
       // `query nodes`: every row's identity is a known workspace-relative
@@ -290,7 +600,10 @@ const T1_5_1 = defineProductTest({
         }
       }
 
-      // `show`, machine form: identity plus edges by kind (SPEC 12.4).
+      // `show`, machine form: identity plus edges by kind (SPEC 12.4) — for
+      // alpha, whose incoming edges come from its root and, across
+      // directories, from gamma; for gamma, whose incoming edges include the
+      // code location's.
       const showLabel = `T1.5-1 \`show ${ALPHA} --json\``;
       const alpha = decodeNodeReport(
         parseJsonStdout(
@@ -317,12 +630,48 @@ const T1_5_1 = defineProductTest({
       );
       assertEdgeSetEqual(
         alpha.incomingEdges,
-        [{ from: A_ROOT, to: ALPHA, kind: "contains" }],
+        [
+          { from: A_ROOT, to: ALPHA, kind: "contains" },
+          { from: GAMMA, to: ALPHA, kind: "depends" },
+        ],
         `${showLabel}: incoming edges name workspace-relative identities`,
       );
+      const showGammaLabel = `T1.5-1 \`show ${GAMMA} --json\``;
+      const shownGamma = decodeNodeReport(
+        parseJsonStdout(
+          await runFromRootAndNested(
+            product,
+            workspace,
+            ["show", GAMMA, "--json"],
+            showGammaLabel,
+          ),
+          showGammaLabel,
+        ),
+        showGammaLabel,
+      );
+      if (shownGamma.identity !== GAMMA) {
+        fail(
+          `${showGammaLabel}: expected the workspace-relative identity ${JSON.stringify(GAMMA)} ` +
+            `(SPEC 1.5), got ${JSON.stringify(shownGamma.identity)}`,
+        );
+      }
+      assertEdgeSetEqual(
+        shownGamma.incomingEdges,
+        [
+          { from: B_ROOT, to: GAMMA, kind: "contains" },
+          { from: CODE_UNIT, to: GAMMA, kind: "references" },
+        ],
+        `${showGammaLabel}: incoming edges name workspace-relative identities, the code location's included`,
+      );
+      assertEdgeSetEqual(
+        shownGamma.outgoingEdges,
+        [{ from: GAMMA, to: ALPHA, kind: "depends" }],
+        `${showGammaLabel}: outgoing edges name workspace-relative identities`,
+      );
 
-      // `show`, human form: the identity and its edge target are required
-      // information (SPEC 12.4) — robust matching, never exact wording (H-3).
+      // `show`, human form: the identity and its edges' other ends are
+      // required information (SPEC 12.4) — robust matching, never exact
+      // wording (H-3).
       const showHumanLabel = `T1.5-1 \`show ${ALPHA}\` (human report)`;
       assertReportMentions(
         await runFromRootAndNested(
@@ -331,12 +680,24 @@ const T1_5_1 = defineProductTest({
           ["show", ALPHA],
           showHumanLabel,
         ),
-        [ALPHA, BETA],
+        [ALPHA, BETA, GAMMA],
         `${showHumanLabel}: identities appear in their workspace-relative form`,
+      );
+      const showGammaHumanLabel = `T1.5-1 \`show ${GAMMA}\` (human report)`;
+      assertReportMentions(
+        await runFromRootAndNested(
+          product,
+          workspace,
+          ["show", GAMMA],
+          showGammaHumanLabel,
+        ),
+        [GAMMA, ALPHA, CODE_UNIT],
+        `${showGammaHumanLabel}: identities, the code location's included, appear in their workspace-relative form`,
       );
 
       // `ids`: files in byte order of workspace-relative path, IDs in
-      // document order (SPEC 12.3) — fully pinned for this workspace.
+      // document order (SPEC 12.3) — fully pinned for this workspace (the
+      // code source holds no requirement ID).
       const idsLabel = "T1.5-1 `ids --json`";
       const ids = decodeIdsReport(
         parseJsonStdout(
@@ -353,20 +714,21 @@ const T1_5_1 = defineProductTest({
       assertSameJson(
         ids.files,
         [
-          { file: A_ROOT, ids: ["alpha", "beta"] },
-          { file: B_ROOT, ids: ["gamma"] },
+          { file: A_FILE, ids: ["alpha", "beta"] },
+          { file: B_FILE, ids: ["gamma"] },
         ],
         `${idsLabel}: files listed by workspace-relative, /-separated path (SPEC 1.5, 12.3)`,
       );
       const idsHumanLabel = "T1.5-1 `ids` (human report)";
       assertReportMentions(
         await runFromRootAndNested(product, workspace, ["ids"], idsHumanLabel),
-        [A_ROOT, B_ROOT, "alpha", "beta", "gamma"],
+        [A_FILE, B_FILE, "alpha", "beta", "gamma"],
         `${idsHumanLabel}: files appear by workspace-relative path with their IDs`,
       );
 
       // `coverage`: covered/uncovered/ignored identities and the covering
-      // path all carry workspace-relative identities (SPEC 8.2).
+      // paths all carry workspace-relative identities (SPEC 8.2) — profile
+      // q's covering path starts at the code location.
       const coverageLabel = "T1.5-1 `coverage --json`";
       const coverage = decodeCoverageReport(
         parseJsonStdout(
@@ -380,50 +742,40 @@ const T1_5_1 = defineProductTest({
         ),
         coverageLabel,
       );
-      if (
-        coverage.profiles.length !== 1 ||
-        coverage.profiles[0]!.name !== "p"
-      ) {
-        fail(
-          `${coverageLabel}: expected exactly the one configured profile "p" (SPEC 8.2); got ` +
-            JSON.stringify(coverage.profiles.map((profile) => profile.name)),
-        );
-      }
-      const profile = coverage.profiles[0]!;
       assertSameJson(
-        profile.counts,
-        { required: 3, covered: 1, uncovered: 2, ignored: 2 },
-        `${coverageLabel}: counts — required {alpha, beta, gamma}, covered {beta}, ` +
-          `ignored the two roots (SPEC 8.1, 8.2)`,
+        coverage.profiles.map((profile) => profile.name).sort(),
+        ["p", "q"],
+        `${coverageLabel}: exactly the two configured profiles (SPEC 8.2: \`coverage\` runs all profiles)`,
       );
-      assertSameJson(
-        profile.covered,
-        [{ identity: BETA, path: [ALPHA, BETA] }],
-        `${coverageLabel}: the covered node and its covering path are workspace-relative identities`,
+      assertIdentityProfile(
+        coverage.profiles,
+        {
+          name: "p",
+          counts: { required: 3, covered: 2, uncovered: 1, ignored: 2 },
+          covered: [
+            { identity: ALPHA, path: [GAMMA, ALPHA] },
+            { identity: BETA, path: [ALPHA, BETA] },
+          ],
+          uncovered: [GAMMA],
+          derivation:
+            "required {alpha, beta, gamma}, covered {alpha (from gamma), " +
+            "beta (from alpha)}, ignored the two roots",
+        },
+        coverageLabel,
       );
-      assertSameJson(
-        [...profile.uncovered].sort(),
-        [ALPHA, GAMMA],
-        `${coverageLabel}: uncovered identities are workspace-relative and /-separated`,
+      assertIdentityProfile(
+        coverage.profiles,
+        {
+          name: "q",
+          counts: { required: 3, covered: 1, uncovered: 2, ignored: 2 },
+          covered: [{ identity: GAMMA, path: [CODE_UNIT, GAMMA] }],
+          uncovered: [ALPHA, BETA],
+          derivation:
+            "required {alpha, beta, gamma}, covered {gamma (from the code " +
+            "location's marker)}, ignored the two roots",
+        },
+        coverageLabel,
       );
-      assertSameJson(
-        sortedIdentities(profile.ignored),
-        [A_ROOT, B_ROOT],
-        `${coverageLabel}: the ignored roots are identified by bare workspace-relative path (SPEC 1.5)`,
-      );
-      for (const ignored of profile.ignored) {
-        // Reason spellings are output shape (SPEC 8.2 pins no wording):
-        // classified onto their SPEC 8.2 identities through the coverage
-        // adapter, as T8.2-1 and T1.2-3 do (H-3).
-        assertSameJson(
-          classifyIgnoredReasons(
-            ignored.reasons,
-            `${coverageLabel} ignored ${ignored.identity}`,
-          ),
-          ["root"],
-          `${coverageLabel}: ${ignored.identity} exclusion reasons (targets: "all" — the root-node reason and nothing else, SPEC 8.2)`,
-        );
-      }
       const coverageHumanLabel = "T1.5-1 `coverage` (human report)";
       assertReportMentions(
         await runFromRootAndNested(
@@ -432,13 +784,14 @@ const T1_5_1 = defineProductTest({
           ["coverage"],
           coverageHumanLabel,
         ),
-        [ALPHA, BETA, GAMMA],
-        `${coverageHumanLabel}: covered and uncovered identities appear workspace-relative`,
+        [ALPHA, BETA, GAMMA, CODE_UNIT],
+        `${coverageHumanLabel}: covered and uncovered identities and the covering paths appear workspace-relative`,
       );
 
       // `impact --base`: the leaf edit's worked example of SPEC 5.6 — gamma
       // `changed`, its root `descendant-changed` attributed to gamma — with
-      // every identity in the workspace-relative form.
+      // every identity in the workspace-relative form, and the code location
+      // marking gamma directly impacted (SPEC 9.2, 9.3).
       const impactLabel = "T1.5-1 `impact --base HEAD --json`";
       const impact = decodeImpactReport(
         parseJsonStdout(
@@ -509,10 +862,20 @@ const T1_5_1 = defineProductTest({
         `${impactLabel}: the root's category is attributed to the edited leaf's ` +
           `workspace-relative identity (SPEC 5.6)`,
       );
-      assertSameJson(
-        impact.code,
-        { direct: [], transitive: [] },
-        `${impactLabel}: no code groups are configured, so no code location is impacted`,
+      assertImpactedCode(
+        impact,
+        {
+          direct: [
+            {
+              location: CODE_UNIT,
+              edge: { from: CODE_UNIT, to: GAMMA, kind: "references" },
+              path: [GAMMA],
+            },
+          ],
+          transitive: [],
+        },
+        `${impactLabel}: the code location marking the edited leaf is directly ` +
+          `impacted, its location, edge, and path workspace-relative identities`,
       );
       const impactHumanLabel = "T1.5-1 `impact --base HEAD` (human report)";
       assertReportMentions(
@@ -522,8 +885,107 @@ const T1_5_1 = defineProductTest({
           ["impact", "--base", "HEAD"],
           impactHumanLabel,
         ),
-        [GAMMA],
-        `${impactHumanLabel}: the changed node appears by workspace-relative identity`,
+        [GAMMA, CODE_UNIT],
+        `${impactHumanLabel}: the changed node and the impacted code location appear by workspace-relative identity`,
+      );
+
+      // `occurrences` (JSON-only, the 12.7 form, SPEC 11.3): every record's
+      // referencing file, source identity, and target — spec and code
+      // sources alike.
+      const occurrencesLabel = "T1.5-1 `occurrences`";
+      const occurrences = decodeOccurrencesReport(
+        parseJsonStdout(
+          await runFromRootAndNested(
+            product,
+            workspace,
+            ["occurrences"],
+            occurrencesLabel,
+          ),
+          occurrencesLabel,
+        ),
+        occurrencesLabel,
+      );
+      assertSameJson(
+        occurrences.occurrences.map(occurrencePaths),
+        [A_OCCURRENCE, B_OCCURRENCE, CODE_OCCURRENCE],
+        `${occurrencesLabel}: each record's file, source identity, and target ` +
+          `are workspace-relative and /-separated (SPEC 1.5, 5.7, 12.7)`,
+      );
+
+      // `view` (JSON-only, the 12.7 form, SPEC 11.4): every discovered spec
+      // source, then B alone through a workspace-relative `<file>` operand
+      // (SPEC 12.0) — each view's `file`, node identities, import targets,
+      // and occurrence records.
+      const viewLabel = "T1.5-1 `view`";
+      const view = decodeViewReport(
+        parseJsonStdout(
+          await runFromRootAndNested(product, workspace, ["view"], viewLabel),
+          viewLabel,
+        ),
+        { text: false },
+        viewLabel,
+      );
+      assertSameJson(
+        view.views.map(viewPaths),
+        [A_VIEW, B_VIEW],
+        `${viewLabel}: each view's file, identities, import targets, and ` +
+          `occurrence records are workspace-relative and /-separated (SPEC 1.5, 11.4, 12.7)`,
+      );
+      const viewBLabel = `T1.5-1 \`view ${B_FILE}\``;
+      const viewB = decodeViewReport(
+        parseJsonStdout(
+          await runFromRootAndNested(
+            product,
+            workspace,
+            ["view", B_FILE],
+            viewBLabel,
+          ),
+          viewBLabel,
+        ),
+        { text: false },
+        viewBLabel,
+      );
+      assertSameJson(
+        viewB.views.map(viewPaths),
+        [B_VIEW],
+        `${viewBLabel}: the view's file, identities, import target, and ` +
+          `occurrence record are workspace-relative and /-separated (SPEC 1.5, 11.4, 12.7)`,
+      );
+
+      // `at` (JSON-only, the 12.7 form, SPEC 11.5): an offset inside
+      // gamma's reference resolves to gamma and that occurrence's record.
+      const atLabel = `T1.5-1 \`at ${B_FILE} ${String(AT_OFFSET)}\``;
+      const atReport = decodeAtReport(
+        parseJsonStdout(
+          await runFromRootAndNested(
+            product,
+            workspace,
+            ["at", B_FILE, String(AT_OFFSET)],
+            atLabel,
+          ),
+          atLabel,
+        ),
+        atLabel,
+      );
+      const resolution = atReport.resolution;
+      if ("unavailable" in resolution) {
+        fail(
+          `${atLabel}: the resolution of an offset in a parseable file is ` +
+            `available (SPEC 11.5, 11.2); got the unavailability marker`,
+        );
+      }
+      assertSameJson(
+        {
+          section: resolution.section.identity,
+          occurrence:
+            resolution.occurrence === null
+              ? null
+              : occurrencePaths(resolution.occurrence),
+        },
+        { section: GAMMA, occurrence: B_OCCURRENCE },
+        `${atLabel}: the enclosing section's identity and the occurrence ` +
+          `record's file, source identity, and target are workspace-relative ` +
+          `and /-separated (SPEC 1.5, 11.5, 12.7)`,
       );
     } finally {
       await workspace.dispose();
