@@ -99,6 +99,19 @@
 //   too; the code-less refusal's is pinned nowhere — 14 assigns that
 //   refusal no code and no concern datum (SPEC 10.7) — so it is left
 //   unasserted.
+// - Every mutating command fails at acquisition first on each `.xspec`
+//   staging (SPEC 10.1, 13.5, 14.24; T13.5-10(a)): `rename`, file-form
+//   `move`, `review create --strategy audit`, and `resolve` and `split`
+//   naming the items of the session `s` created while the area was a
+//   directory (read by `review status s --json` before it is occupied; the
+//   plain-file staging creates `s` too, its occupant replacing the area
+//   whole), each an operation valid on the staging as it stood before, so
+//   the refusal is the occupied area's alone. Each runs under `--json`:
+//   exit 2, the error document's `code` `"write-failure"`, `path`
+//   `".xspec"`, `locations` `[]`, and a whole-root compare bracketing that
+//   run alone (H-6 leaves out `.xspec/lock`, which no snapshot meets while
+//   `.xspec` is a plain file or a link: the walk never follows a link, and
+//   the link's target `elsewhere-area` is compared whole).
 //
 // Sources staged after a body's first product invocation — the stale arm's
 // and stale twins' edited `specs/A.mdx` (T10.1-1, T10.1-6) and T10.1-5's
@@ -161,6 +174,7 @@ import {
   runFindingsReport,
   runJson,
 } from "./support.js";
+import { WRITE_FAILURE_CODE } from "./write-refusal-staging.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. Every
 // `CORE_FILES` workspace stages it, and T10.1-1's determinism twins, T10.1-4's
@@ -2138,10 +2152,253 @@ async function assertAreaOccupied(
   );
 }
 
+/**
+ * The audit session `s`'s two items the area stagings' `resolve` and
+ * `split` name (SPEC 10.6: one `subtree-coherence` item per requirement
+ * node, each blocked by its child sections' items).
+ */
+export interface T1016Items {
+  /** The leaf section's item, unblocked, so `resolve` applies (10.6, 10.7). */
+  readonly leaf: string;
+  /** `a`'s item, its scope root holding a child, so `split` applies (10.7). */
+  readonly parent: string;
+}
+
+/**
+ * `review status s --json` while the area is still a directory: the items
+ * of `s` scoped at `specs/A.mdx#<leafId>` and at `specs/A.mdx#a`, each
+ * exactly one (SPEC 10.6: audit items are all `subtree-coherence`, so scope
+ * alone is unique), else a diagnosed failure.
+ */
+async function readT1016Items(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  leafId: string,
+  label: string,
+): Promise<T1016Items> {
+  const context =
+    `${label} \`review status s --json\` — the items \`resolve\` and ` +
+    `\`split\` name, read while the area is a directory (SPEC 10.7)`;
+  const status = decodeSessionStatusReport(
+    await runJson(
+      product,
+      workspace,
+      ["review", "status", T10_1_6_SESSION, "--json"],
+      context,
+    ),
+    context,
+  );
+  const itemScopedAt = (scope: string): string => {
+    const rows = status.items.filter((row) => row.scope === scope);
+    if (rows.length !== 1) {
+      fail(
+        `${context}: expected exactly one item scoped at ${scope} — audit ` +
+          `creates one per requirement node (SPEC 10.6); found ` +
+          `${String(rows.length)} among ` +
+          JSON.stringify(status.items.map((row) => row.scope)),
+      );
+    }
+    return rows[0]!.id;
+  };
+  return {
+    leaf: itemScopedAt(`specs/A.mdx#${leafId}`),
+    parent: itemScopedAt("specs/A.mdx#a"),
+  };
+}
+
+/**
+ * T10.1-6's two stagings of the graph-data area's own path, each on a fresh
+ * `CORE_FILES` workspace, built first — the derived files exist and match,
+ * so `check` meets no per-file staleness beside the two findings the
+ * staging pins — and holding the audit session `s`, created while the area
+ * was a directory, its items read before the area is occupied:
+ * - `.xspec` a plain file, replacing the area's directory and all it held;
+ * - `.xspec` a symbolic link to a directory holding a journal and valid
+ *   sessions: a journaled rename (`a.k` to `a.k2`) brings the journal into
+ *   existence (SPEC 6.1) and regenerates, `create` writes `s`, and the area
+ *   is then relocated beside the link, inside the root (`elsewhere-area`).
+ * `arms` runs on each, given the session's items and the staging's label.
+ * Exported for scratch probes that run one arm alone (the CONF-CORE
+ * reference serves the mutating commands but not `inventory` or `view`).
+ */
+export async function withT1016AreaStagings(
+  product: ProductBinding,
+  arms: (
+    workspace: TestWorkspace,
+    items: T1016Items,
+    label: string,
+  ) => Promise<void>,
+): Promise<void> {
+  await withWorkspace(CORE_FILES, async (workspace) => {
+    const label = "T10.1-6 [.xspec: plain file]";
+    await buildOk(product, workspace, `${label} \`build\``);
+    await expectExit(
+      product,
+      workspace,
+      T10_1_6_CREATE_S,
+      0,
+      `${label} \`review create --strategy audit --name s\` — the session ` +
+        `whose items \`resolve\` and \`split\` name (SPEC 10.1)`,
+    );
+    const items = await readT1016Items(product, workspace, "a.k", label);
+    await stageNonDirectoryOccupant(
+      workspace,
+      GRAPH_DATA_AREA_PATH,
+      T10_1_6_PLAIN_FILE,
+    );
+    await arms(workspace, items, label);
+  });
+  await withWorkspace(CORE_FILES, async (workspace) => {
+    const label =
+      "T10.1-6 [.xspec: symbolic link to a directory holding a journal and s.json]";
+    await buildOk(product, workspace, `${label} \`build\``);
+    await expectExit(
+      product,
+      workspace,
+      ["rename", "specs/A.mdx", "a.k", "a.k2"],
+      0,
+      `${label} \`rename specs/A.mdx a.k a.k2\` — the journal the link's ` +
+        `target then holds (SPEC 6.1, 6.4)`,
+    );
+    await expectExit(
+      product,
+      workspace,
+      T10_1_6_CREATE_S,
+      0,
+      `${label} \`review create --strategy audit --name s\` — the valid ` +
+        `session the link's target then holds (SPEC 10.1)`,
+    );
+    const items = await readT1016Items(product, workspace, "a.k2", label);
+    await stageNonDirectoryOccupant(
+      workspace,
+      GRAPH_DATA_AREA_PATH,
+      T10_1_6_AREA_LINK,
+    );
+    await arms(workspace, items, label);
+  });
+}
+
+/** One of T10.1-6's mutating commands: its description and arguments. */
+interface T1016MutatingCommand {
+  readonly what: string;
+  readonly argv: (items: T1016Items) => readonly string[];
+}
+
+/**
+ * Every mutating command (SPEC 13.5: `rename` and `move`, previews
+ * excepted, and the mutating `review` subcommands `create`, `resolve`, and
+ * `split`), each an operation valid on its staging as it stood before the
+ * area was occupied — `rename` of `a` and the file form of `move` of
+ * `specs/A.mdx`, an audit session `n` no session holds, and `resolve` and
+ * `split` naming `s`'s leaf and parent items — so that each refusal is the
+ * occupied area's alone, met at acquisition before any argument check, the
+ * gate, and the refresh (13.5, 12.0).
+ */
+const T10_1_6_MUTATING: readonly T1016MutatingCommand[] = [
+  {
+    what: "`rename specs/A.mdx a a2`",
+    argv: () => ["rename", "specs/A.mdx", "a", "a2"],
+  },
+  {
+    what: "`move specs/A.mdx specs/B.mdx`",
+    argv: () => ["move", "specs/A.mdx", "specs/B.mdx"],
+  },
+  {
+    what: "`review create --strategy audit --name n`",
+    argv: () => [
+      "review",
+      "create",
+      "--strategy",
+      "audit",
+      "--name",
+      T10_1_6_NEW_SESSION,
+    ],
+  },
+  {
+    what: "`review resolve s <leaf item> --status no-change`",
+    argv: (items) => [
+      "review",
+      "resolve",
+      T10_1_6_SESSION,
+      items.leaf,
+      "--status",
+      "no-change",
+    ],
+  },
+  {
+    what: "`review split s <parent item>`",
+    argv: (items) => ["review", "split", T10_1_6_SESSION, items.parent],
+  },
+];
+
+/**
+ * Every mutating command fails at acquisition first on an area path holding
+ * no directory (SPEC 10.1, 13.5: where the area's own path holds anything
+ * but a directory, a symbolic link included, whatever it targets,
+ * acquisition removes nothing but fails with the write failure of 14.24,
+ * leaving the occupant for manual deletion, 13.4; TEST-SPEC T13.5-10(a)):
+ * each of `T10_1_6_MUTATING` under `--json` exits 2 with the error
+ * document's `code` `"write-failure"`, `path` `".xspec"`, `locations` `[]`,
+ * and writes nothing — a whole-root compare bracketing that run alone: the
+ * plain file byte-unchanged, the link and its target (inside the root)
+ * byte-identical, nothing written through the link. Exported with
+ * `withT1016AreaStagings` for scratch probes.
+ */
+export async function assertMutatingCommandsFailAtAcquisition(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  items: T1016Items,
+  label: string,
+): Promise<void> {
+  for (const command of T10_1_6_MUTATING) {
+    const context =
+      `${label} ${command.what} --json — every mutating command fails at ` +
+      `acquisition first on the area's own path holding no directory ` +
+      `(SPEC 10.1, 13.5, 14.24; T13.5-10(a))`;
+    await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        const result = await expectExit(
+          product,
+          workspace,
+          [...command.argv(items), "--json"],
+          2,
+          `${context}: acquisition removes nothing and fails with the write ` +
+            `failure of 14.24 — a usage error, exit 2 — before the argument ` +
+            `checks, the gate, and the refresh, so no mutating command ` +
+            `proceeds without exclusivity (SPEC 13.5, 12.0)`,
+        );
+        const finding = expectErrorDocument(result, context);
+        assertSameJson(
+          {
+            code: finding.code,
+            path: finding.path,
+            locations: finding.locations,
+          },
+          {
+            code: WRITE_FAILURE_CODE,
+            path: GRAPH_DATA_AREA_PATH,
+            locations: [],
+          },
+          `${context}: the error document carries acquisition's write ` +
+            `failure — the stable code "${WRITE_FAILURE_CODE}", the ` +
+            `concerned path "${GRAPH_DATA_AREA_PATH}" (the area's own ` +
+            `path), and no locations (SPEC 13.5, 12.7, 14.24; \`message\` ` +
+            `and \`identities\` informational) — message: ` +
+            JSON.stringify(finding.message),
+        );
+      },
+      `${context}: nothing written — the plain file byte-unchanged, the ` +
+        `link and its target byte-identical, nothing written through the ` +
+        `link (SPEC 13.5, 13.4; the compare bracketing this run alone)`,
+    );
+  }
+}
+
 const T10_1_6 = defineProductTest({
   id: "T10.1-6",
   title:
-    "session-directory and area occupancy; `create`'s ordering: `.xspec/reviews` occupied by a plain file, or by a symbolic link to a directory holding a valid session, holds no sessions (`list` none, `status s` exit 2, `check` clean, `inventory` sessions [], `ids` answers) and `create` is refused with one condition-22 finding concerning `.xspec/reviews`, nothing written; on stale twins the refused `create` — condition 22, the code-less existing-name refusal, or condition 21 in its place — follows the refresh (`check` then reports the edited source's per-file staleness and no unit form; no session written or changed); `.xspec` occupied by a plain file, or by a symbolic link to a directory holding a journal and valid sessions: `inventory` recorded unavailable with the one condition-23 finding, `build`/`ids`/`review list` one condition-22 finding concerning `.xspec`, `check` that finding beside the unreadable-record unit form, `view` finding-free (10.1, 10.7, 11.6, 13.3–13.5, 14.10, 14.21–14.23)",
+    "session-directory and area occupancy; `create`'s ordering: `.xspec/reviews` occupied by a plain file, or by a symbolic link to a directory holding a valid session, holds no sessions (`list` none, `status s` exit 2, `check` clean, `inventory` sessions [], `ids` answers) and `create` is refused with one condition-22 finding concerning `.xspec/reviews`, nothing written; on stale twins the refused `create` — condition 22, the code-less existing-name refusal, or condition 21 in its place — follows the refresh (`check` then reports the edited source's per-file staleness and no unit form; no session written or changed); `.xspec` occupied by a plain file, or by a symbolic link to a directory holding a journal and valid sessions: `inventory` recorded unavailable with the one condition-23 finding, `build`/`ids`/`review list` one condition-22 finding concerning `.xspec`, `check` that finding beside the unreadable-record unit form, `view` finding-free, and every mutating command — `rename`, `move`, `review create`, `resolve`, `split` — failing at acquisition first: exit 2, the error document's `code` `write-failure`, `path` `.xspec`, nothing written, the plain file byte-unchanged, the link and its target byte-identical (10.1, 10.7, 11.6, 13.3–13.5, 14.10, 14.21–14.24)",
   timeoutMs: 360_000,
   run: async (product) => {
     // --- Session-directory occupancy on a freshly built valid workspace --
@@ -2241,48 +2498,19 @@ const T10_1_6 = defineProductTest({
       );
     });
 
-    // --- The graph-data area's own path (SPEC 13.4, 14.22, 14.23) --------
-    // Built first: the derived files exist and match, so `check` meets no
-    // per-file staleness beside the two findings the staging pins.
-    await withWorkspace(CORE_FILES, async (workspace) => {
-      const label = "T10.1-6 [.xspec: plain file]";
-      await buildOk(product, workspace, `${label} \`build\``);
-      await stageNonDirectoryOccupant(
-        workspace,
-        GRAPH_DATA_AREA_PATH,
-        T10_1_6_PLAIN_FILE,
-      );
+    // --- The graph-data area's own path (SPEC 13.4, 13.5, 14.22–14.24) ---
+    // Each staging (`withT1016AreaStagings`: a plain file, and a symbolic
+    // link to the relocated area holding a journal and `s`): the reads'
+    // and `build`'s sweep, then every mutating command refused at
+    // acquisition first.
+    await withT1016AreaStagings(product, async (workspace, items, label) => {
       await assertAreaOccupied(product, workspace, label);
-    });
-    // Symbolic link: a journaled rename brings the journal into existence
-    // (SPEC 6.1) and regenerates; `create` writes the valid session; the
-    // area is then relocated and linked from its path.
-    await withWorkspace(CORE_FILES, async (workspace) => {
-      const label =
-        "T10.1-6 [.xspec: symbolic link to a directory holding a journal and s.json]";
-      await buildOk(product, workspace, `${label} \`build\``);
-      await expectExit(
+      await assertMutatingCommandsFailAtAcquisition(
         product,
         workspace,
-        ["rename", "specs/A.mdx", "a.k", "a.k2"],
-        0,
-        `${label} \`rename specs/A.mdx a.k a.k2\` — the journal the link's ` +
-          `target then holds (SPEC 6.1, 6.4)`,
+        items,
+        label,
       );
-      await expectExit(
-        product,
-        workspace,
-        T10_1_6_CREATE_S,
-        0,
-        `${label} \`review create --strategy audit --name s\` — the valid ` +
-          `session the link's target then holds (SPEC 10.1)`,
-      );
-      await stageNonDirectoryOccupant(
-        workspace,
-        GRAPH_DATA_AREA_PATH,
-        T10_1_6_AREA_LINK,
-      );
-      await assertAreaOccupied(product, workspace, label);
     });
   },
 });
