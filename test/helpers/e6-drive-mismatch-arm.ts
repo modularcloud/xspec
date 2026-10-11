@@ -35,6 +35,20 @@
 // correctly against the actual working directory, which is exactly why
 // TEST-SPEC pins that a substituted mapping suffices to stage the mismatch.
 //
+// Member invariance (T11.6-1's last sentence; SPEC 11.6 anchors `root` and
+// `config` alone, and 1.5 keeps every other path workspace-relative and
+// `/`-joined on every platform): before its first `inventory` the arm stages
+// its workspace through the product as built with Markdown emission
+// enabled, with a journal (a journaled `rename`) and a review session
+// (helpers/inventory-invariance.ts, one code path with the registered
+// body's Linux-leg arm); the same-drive premise run is the root run on this
+// leg, each path-bearing member of its answer carrying content, and each
+// drive-mismatch run reports every member but `root` and `config` —
+// `findings`, `configuration`, `sources`, `derived`, `recorded`,
+// `graphData`, `journal`, `sessions`, `lock` — byte-identical to it,
+// `graphData` exactly `.xspec` and `lock` exactly `.xspec/lock`: the
+// platform-absolute form is the anchoring's alone.
+//
 // Drive letters are machine-global, per-logon-session state: the claim
 // tries free letters until `subst` accepts one, so concurrent harness
 // instances race safely (H-1, E-3) — each claims its own letter and deletes
@@ -44,26 +58,27 @@
 //
 // Failure taxonomy (H-8/H-9 — never a skip, never a vacuous pass),
 // mirroring test/windows/e6-byte-identity.test.ts:
-// - stub or nonconforming product → the same-drive premise arm fails first,
-//   as a diagnosed assertion failure, on any platform (the expected
-//   pre-product red on the Windows leg, and S-7's verdict against the empty
-//   stub);
+// - stub or nonconforming product → the staging (its `build`) or the
+//   same-drive premise arm fails first, as a diagnosed assertion failure,
+//   on any platform (the expected pre-product red on the Windows leg, and
+//   S-7's verdict against the empty stub);
 // - premise passed, platform not Windows → loud error: the product answers
 //   `inventory`, but a substituted drive mapping exists only on Windows —
 //   the arm runs on the Windows leg (E-6), and passing here would be
 //   vacuous;
 // - premise passed, Windows, mapping staged, values differ → diagnosed
 //   assertion failure — the platform-form divergence this arm exists to
-//   catch.
+//   catch, in the anchoring or in any other member.
 
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import type { PathValue } from "./adapters/index.js";
+import type { InventoryDocument, PathValue } from "./adapters/index.js";
 import {
   decodeInventoryAnchoring,
+  decodeInventoryDocument,
   decodeInventoryFindings,
   renderPathValue,
 } from "./adapters/index.js";
@@ -74,6 +89,13 @@ import {
   parseJsonStdout,
 } from "./assertions.js";
 import { ANCHOR_CONFIG, ANCHOR_SOURCE } from "./e6-drive-mismatch.js";
+import type { InvarianceStaging } from "./inventory-invariance.js";
+import {
+  assertAreaAndLockSpellings,
+  assertInvariancePremise,
+  assertMembersInvariant,
+  stageInvarianceWorkspace,
+} from "./inventory-invariance.js";
 import { runProduct } from "./subprocess.js";
 import type { ProductBinding, RunResult } from "./subprocess.js";
 import { TestWorkspace } from "./workspace.js";
@@ -99,10 +121,13 @@ function realpathNative(p: string): Promise<string> {
 
 // --- fixture ------------------------------------------------------------------
 //
-// A minimal valid workspace (the registered T11.6-1 body's staging): the
-// inventory parses no sources (SPEC 11.6), so the anchoring depends on none
-// of this — the staging keeps the workspace valid so every answer is the
-// complete, finding-free, exit-0 case. Its configuration and spec source
+// A minimal valid workspace (the registered T11.6-1 body's staging, Markdown
+// emission enabled): the inventory parses no sources (SPEC 11.6), so the
+// anchoring depends on none of this — the staging keeps the workspace valid
+// so every answer is the complete, finding-free, exit-0 case — and the
+// product's own `build`, journaled `rename`, and `review create` give every
+// path-bearing member content (INVARIANCE_STAGING, below; the
+// member-invariance arm). Its configuration and spec source
 // (`ANCHOR_CONFIG`, `ANCHOR_SOURCE`) are staged-source records of
 // helpers/e6-drive-mismatch.ts, which the S-9 self-test judges before any
 // product exists (TEST-SPEC S-9's timing clause, H-8): the arm stages them
@@ -110,6 +135,18 @@ function realpathNative(p: string): Promise<string> {
 // S-7's sweep reaches that creation only against the empty stub.
 
 const CONFIG_FILE = "xspec.config.ts";
+
+/**
+ * The member-invariance arm's staging of the arm's workspace: the journaled
+ * `rename` of `racine` and the audit session `s`
+ * (helpers/inventory-invariance.ts `stageInvarianceWorkspace`).
+ */
+const INVARIANCE_STAGING: InvarianceStaging = {
+  source: "specs/a.mdx",
+  renameFrom: "racine",
+  renameTo: "ancre",
+  session: "s",
+};
 
 // --- the platform-absolute spelling (harness-side) ----------------------------
 
@@ -334,9 +371,15 @@ function assertAnchoringMember(
  * Run `inventory` from `cwd` and assert the T11.6-1 contract (the registered
  * body's frame): exit 0 exactly (a complete, finding-free answer, SPEC
  * 12.0/11.6; H-5); exactly one JSON document as the entire stdout (JSON-only,
- * SPEC 11); `findings` decoding to [] (form-exact, 12.7); and the
+ * SPEC 11); `findings` decoding to [] (form-exact, 12.7); the
  * `root`/`config` anchoring byte-exact against `expected`, with `form`
- * naming the spelling rule the expectation realizes.
+ * naming the spelling rule the expectation realizes; and the
+ * member-invariance arm's checks over the whole eleven-member document
+ * (`decodeInventoryDocument`, form-exact): `graphData` exactly `.xspec` and
+ * `lock` exactly `.xspec/lock`, and, when `reference` is given (the
+ * drive-mismatch runs, against the root run on this leg), every member but
+ * `root` and `config` byte-identical to the reference's
+ * (helpers/inventory-invariance.ts; SPEC 11.6, 1.5).
  */
 async function expectAnchoredInventory(
   product: ProductBinding,
@@ -345,7 +388,11 @@ async function expectAnchoredInventory(
   expected: { readonly root: string; readonly config: string },
   form: string,
   context: string,
-): Promise<RunResult> {
+  reference?: InventoryDocument,
+): Promise<{
+  readonly result: RunResult;
+  readonly document: InventoryDocument;
+}> {
   const result = await runProduct(product, { cwd, argv });
   assertExitCode(
     result,
@@ -376,7 +423,17 @@ async function expectAnchoredInventory(
     form,
     context,
   );
-  return result;
+  const document = decodeInventoryDocument(doc, context);
+  assertAreaAndLockSpellings(document, context);
+  if (reference !== undefined) {
+    assertMembersInvariant(
+      document,
+      reference,
+      "the root run on this leg",
+      context,
+    );
+  }
+  return { result, document };
 }
 
 // --- the arm ------------------------------------------------------------------
@@ -384,10 +441,11 @@ async function expectAnchoredInventory(
 /**
  * Run T11.6-1's drive-mismatch arm against `product` — the Windows leg's
  * test body and S-7's sweep entry alike (module header): the harness-side
- * self-check of the platform-absolute spelling rule, the same-drive premise
- * on any platform, then, on Windows alone, the substituted-drive mismatch,
- * its anchoring asserted byte-exact twice and compared product-to-itself
- * (SPEC 11.6, 12.0, 11; TEST-SPEC E-6).
+ * self-check of the platform-absolute spelling rule, the member-invariance
+ * staging and the same-drive premise on any platform, then, on Windows
+ * alone, the substituted-drive mismatch, its anchoring asserted byte-exact
+ * twice and compared product-to-itself, every other member byte-identical
+ * to the root run's (SPEC 11.6, 12.0, 11, 1.5; TEST-SPEC E-6).
  */
 export async function runT1161DriveMismatchArm(
   product: ProductBinding,
@@ -400,6 +458,19 @@ export async function runT1161DriveMismatchArm(
     },
   });
   try {
+    // --- the member-invariance arm's staging, any platform
+    // (helpers/inventory-invariance.ts): built with Markdown emission
+    // enabled, a journal (a journaled `rename`), and a review session, so
+    // every path-bearing member carries content. Against a stub or
+    // nonconforming product the staging's `build` fails first, diagnosed.
+    await stageInvarianceWorkspace(
+      product,
+      workspace.root,
+      INVARIANCE_STAGING,
+      "T11.6-1 (E-6 drive-mismatch arm) — the member-invariance arm's " +
+        "workspace",
+    );
+
     // --- same-drive premise arm, any platform: the workspace stages and
     // the product answers `inventory` with the canonical relative
     // anchoring (the registered T11.6-1 body's first arm). Against a stub
@@ -407,8 +478,12 @@ export async function runT1161DriveMismatchArm(
     // platform-only staging is attempted — so the platform gate below can
     // only mean "the product works, the platform cannot stage the arm" —
     // and on the Windows leg it is the arm's discriminating contrast: the
-    // same workspace anchors relatively until the drives differ.
-    await expectAnchoredInventory(
+    // same workspace anchors relatively until the drives differ. Its answer
+    // is the root run on this leg, the member-invariance reference: every
+    // path-bearing member carries content there (the staging premise), and
+    // the drive-mismatch runs below report every member but `root` and
+    // `config` byte-identical to it (SPEC 11.6, 1.5).
+    const rootRun = await expectAnchoredInventory(
       product,
       workspace.root,
       ["inventory"],
@@ -420,6 +495,11 @@ export async function runT1161DriveMismatchArm(
       "T11.6-1 (E-6 drive-mismatch premise) — `inventory` from the " +
         "workspace root: the same-drive anchoring is the relative form " +
         "(SPEC 11.6)",
+    );
+    assertInvariancePremise(
+      rootRun.document,
+      "T11.6-1 (E-6 drive-mismatch premise) — the root run's answer on " +
+        "this leg, the member-invariance arm's reference",
     );
 
     // --- platform gate: the mismatch stages only on Windows (H-9 — a
@@ -479,6 +559,10 @@ export async function runT1161DriveMismatchArm(
         `admits no relative path between them — the sole absolute-path ` +
         `case and the sole output spelling whose separator is the ` +
         `platform's (SPEC 11.6, 12.0; TEST-SPEC E-6)`;
+      // Each drive-mismatch run also reports every member but `root` and
+      // `config` byte-identical to the root run's on this leg — the
+      // platform-absolute form is the anchoring's alone; every other path
+      // stays workspace-relative and `/`-joined (SPEC 11.6, 1.5).
       const context =
         `T11.6-1 (E-6 drive-mismatch arm) — \`inventory --config\` from ` +
         `${drive.root}, the root of a substituted drive, with the ` +
@@ -490,6 +574,7 @@ export async function runT1161DriveMismatchArm(
         { root: expectedRoot, config: expectedConfig },
         form,
         context,
+        rootRun.document,
       );
       const second = await expectAnchoredInventory(
         product,
@@ -498,10 +583,11 @@ export async function runT1161DriveMismatchArm(
         { root: expectedRoot, config: expectedConfig },
         form,
         `${context} — repeated invocation`,
+        rootRun.document,
       );
       assertBytesEqual(
-        second.stdoutBytes,
-        first.stdoutBytes,
+        second.result.stdoutBytes,
+        first.result.stdoutBytes,
         "T11.6-1 (E-6 drive-mismatch arm) — the platform-absolute " +
           "anchoring is invocation-anchored content: a pure function of " +
           "invocation input, deterministic per invocation, so repeating " +

@@ -12,7 +12,9 @@
 // the scoped form-exact decoders `decodeInventoryAnchoring`,
 // `decodeInventoryFindings`, and `decodeInventoryResolvedMap` (T11.6-1/-2)
 // and the full eleven-member `decodeInventoryDocument` (T11.6-3 — its entry
-// completes the member set, so its arms pin the whole document form).
+// completes the member set, so its arms pin the whole document form — and
+// T11.6-1's member-invariance arm, which compares every member but the
+// anchoring across working directories).
 //
 // T11.6-1 — anchoring (SPEC 11.6, 12.0). The workspace root and the
 // configuration file are identified relative to the invocation working
@@ -61,7 +63,26 @@
 //   nothing, and the configuration file enters as its own name under the
 //   root so spelled. Staged with an ordinary directory symlink on every
 //   platform (never a skip); the expected spellings are fixed by the
-//   physical relation alone, so no realpath arithmetic is involved.
+//   physical relation alone, so no realpath arithmetic is involved;
+// - every other member invariant under the working directory (SPEC 11.6
+//   anchors `root` and `config` alone; 1.5: every path in every output is
+//   workspace-relative): the workspace is staged first, through the
+//   product, as built with Markdown emission enabled, with a journal (a
+//   journaled `rename`) and a review session (`review create`), and the
+//   flag-less root run's answer — each path-bearing member carrying
+//   content there, the journal occupied (the staging premise, so no
+//   comparison is vacuous) — is the reference: every later run above (the
+//   `--json` root run, nested `a/b`, the three sibling runs under
+//   `--config`, both unrelated-tree runs, and both link runs) reports
+//   `findings`, `configuration`, `sources`, `derived`, `recorded`,
+//   `graphData`, `journal`, `sessions`, and `lock` byte-identical to it,
+//   and every answer `graphData` exactly `.xspec` and `lock` exactly
+//   `.xspec/lock` — a product relativizing every path to the working
+//   directory (`../../.xspec/lock` from `a/b`), or judging occupancy, the
+//   session listing, or the record through a path resolved against the
+//   working directory, fails (helpers/inventory-invariance.ts, one code
+//   path with the Windows leg's drive-mismatch arm, which holds its
+//   drive-mismatch runs to a root run on that leg).
 //
 // T11.6-2 — configuration, sources, derived map (SPEC 11.6, 12.7, 7.3,
 // 13.1). The resolved configuration view with every default and inferred
@@ -268,7 +289,9 @@
 // T11.6-4 ("`inventory` and `version`"), so no fixture executes these
 // bodies; the anchoring, resolved-configuration, derived-map, occupancy,
 // and listing arms are positive and byte-asserted per that entry — the
-// `lock` member among them, ".xspec/lock" exactly whatever occupies the
+// `lock` member among them, ".xspec/lock" exactly from every working
+// directory (T11.6-1's member-invariance arm, every member but the
+// anchoring byte-identical to the root run's) and whatever occupies the
 // lock path and while a command is held (T11.6-3) — T11.6-4's
 // no-parse/no-write negatives ride the certified compare-around machinery,
 // and every broken state T11.6-4 must ignore is positively reported from
@@ -310,6 +333,13 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import type { InvarianceStaging } from "../../helpers/inventory-invariance.js";
+import {
+  assertAreaAndLockSpellings,
+  assertInvariancePremise,
+  assertMembersInvariant,
+  stageInvarianceWorkspace,
+} from "../../helpers/inventory-invariance.js";
 import { isLockPathBytes, LOCK_PATH } from "../../helpers/lock-path.js";
 import type {
   LeftoverNode,
@@ -360,18 +390,23 @@ import { holdPathFor } from "./write-refusal-staging.js";
 
 // --- fixture ------------------------------------------------------------------
 //
-// A minimal valid workspace: one spec group, one well-formed source. The
-// inventory parses no sources (SPEC 11.6), so the anchoring depends on none
-// of this — the staging keeps the workspace valid so every answer is the
-// complete, finding-free, exit-0 case (T11.6-4 owns the imperfect-workspace
-// arms).
+// A minimal valid workspace: one spec group with Markdown emission enabled,
+// one well-formed source. The inventory parses no sources (SPEC 11.6), so the
+// anchoring depends on none of this — the staging keeps the workspace valid
+// so every answer is the complete, finding-free, exit-0 case (T11.6-4 owns
+// the imperfect-workspace arms). Before the first `inventory`, the
+// member-invariance arm builds it, renames `racine` to `ancre` (a journal),
+// and creates the audit session `s` (ANCHOR_INVARIANCE_STAGING,
+// helpers/inventory-invariance.ts), so every path-bearing member carries
+// content.
 
 const ANCHOR_CONFIG = `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
-  }
+  },
+  markdown: { emit: true }
 })
 `;
 
@@ -385,6 +420,18 @@ const ANCHOR_SOURCE = stagedMdx(
 );
 
 const CONFIG_FILE = "xspec.config.ts";
+
+/**
+ * The member-invariance arm's staging of the anchor workspace: the journaled
+ * `rename` of the anchor source's `racine` and the audit session `s`
+ * (helpers/inventory-invariance.ts `stageInvarianceWorkspace`).
+ */
+const ANCHOR_INVARIANCE_STAGING: InvarianceStaging = {
+  source: "specs/a.mdx",
+  renameFrom: "racine",
+  renameTo: "ancre",
+  session: "s",
+};
 
 // --- SPEC 11.6's canonical relative spelling (harness-side) -------------------
 
@@ -498,13 +545,25 @@ function assertAnchoringMember(
   );
 }
 
+/** One `inventory` run's answer: the raw run and its decoded document. */
+interface AnchoredAnswer {
+  readonly result: RunResult;
+  readonly document: InventoryDocument;
+}
+
 /**
  * Run `inventory` from `cwd` and assert the T11.6-1 contract: exit 0 exactly
  * (a complete, finding-free answer, SPEC 12.0/11.6; H-5); exactly one JSON
  * document as the entire stdout (JSON-only, SPEC 11); `findings` decoding to
- * [] (form-exact, 12.7); and the `root`/`config` anchoring byte-exact.
- * `env`, when given, is merged last into the child's environment: the
- * physical-anchoring arms set `PWD` to the link path a shell would present.
+ * [] (form-exact, 12.7); the `root`/`config` anchoring byte-exact; and the
+ * member-invariance arm's checks over the whole eleven-member document
+ * (`decodeInventoryDocument`, form-exact): `graphData` exactly `.xspec` and
+ * `lock` exactly `.xspec/lock`, and, when `reference` is given (every run
+ * but the flag-less root run, whose answer is the reference), every member
+ * but `root` and `config` byte-identical to the reference's
+ * (helpers/inventory-invariance.ts; SPEC 11.6, 1.5). `env`, when given, is
+ * merged last into the child's environment: the physical-anchoring arms set
+ * `PWD` to the link path a shell would present.
  */
 async function expectAnchoredInventory(
   product: ProductBinding,
@@ -512,8 +571,12 @@ async function expectAnchoredInventory(
   argv: readonly string[],
   expected: AnchoringExpectation,
   context: string,
-  env?: RunOptions["env"],
-): Promise<RunResult> {
+  options: {
+    readonly env?: RunOptions["env"];
+    readonly reference?: InventoryDocument;
+  } = {},
+): Promise<AnchoredAnswer> {
+  const { env, reference } = options;
   const result = await runProduct(product, {
     cwd,
     argv,
@@ -542,7 +605,12 @@ async function expectAnchoredInventory(
   const anchoring = decodeInventoryAnchoring(doc, context);
   assertAnchoringMember(anchoring.root, expected.root, "`root`", context);
   assertAnchoringMember(anchoring.config, expected.config, "`config`", context);
-  return result;
+  const document = decodeInventoryDocument(doc, context);
+  assertAreaAndLockSpellings(document, context);
+  if (reference !== undefined) {
+    assertMembersInvariant(document, reference, "the root run", context);
+  }
+  return { result, document };
 }
 
 // --- T11.6-1 ------------------------------------------------------------------
@@ -550,7 +618,7 @@ async function expectAnchoredInventory(
 const T11_6_1 = defineProductTest({
   id: "T11.6-1",
   title:
-    "inventory anchoring: `root` and `config` are identified relative to the invocation working directory in the canonical spelling — from the workspace root `.` and `xspec.config.ts` (flag-less and `--json` forms carrying the same information, JSON-only), from nested `a/b` `../..` and `../../xspec.config.ts`, from sibling directories with `--config` the ascent-`..`-then-descent form joined with `/` (multi-segment ascent and descent included), no `.` segments, no trailing separator — byte-exact, a pure function of invocation input whatever the `--config` spelling (relative or absolute); drive-mismatch arm, Linux side (E-6): from an unrelated directory tree the anchoring is still the pure relative form — no absolute form ever appears on the Linux leg — and repeated invocations are byte-identical, deterministic per invocation; physical anchoring, Linux leg: from a working directory reached through the symbolic link `R/L` → `R/a/b` inside the root (the link path as working directory and `PWD`) `root` is `../..` and `config` `../../xspec.config.ts` — the physical relation, never the link's lexical `..` — and from `elsewhere/link/a` under a link above both (`elsewhere/link` → `R`) `..` and `../xspec.config.ts`, unchanged, the configuration file entering as its own name under the root so spelled; every answer complete and finding-free at exit 0 (SPEC 11.6, 12.7, 12.0, 11)",
+    "inventory anchoring: `root` and `config` are identified relative to the invocation working directory in the canonical spelling — from the workspace root `.` and `xspec.config.ts` (flag-less and `--json` forms carrying the same information, JSON-only), from nested `a/b` `../..` and `../../xspec.config.ts`, from sibling directories with `--config` the ascent-`..`-then-descent form joined with `/` (multi-segment ascent and descent included), no `.` segments, no trailing separator — byte-exact, a pure function of invocation input whatever the `--config` spelling (relative or absolute); drive-mismatch arm, Linux side (E-6): from an unrelated directory tree the anchoring is still the pure relative form — no absolute form ever appears on the Linux leg — and repeated invocations are byte-identical, deterministic per invocation; physical anchoring, Linux leg: from a working directory reached through the symbolic link `R/L` → `R/a/b` inside the root (the link path as working directory and `PWD`) `root` is `../..` and `config` `../../xspec.config.ts` — the physical relation, never the link's lexical `..` — and from `elsewhere/link/a` under a link above both (`elsewhere/link` → `R`) `..` and `../xspec.config.ts`, unchanged, the configuration file entering as its own name under the root so spelled; every answer complete and finding-free at exit 0; every other member invariant under the working directory: on the workspace built with Markdown emission enabled, a journal (a journaled `rename`), and a review session — every path-bearing member carrying content in the root run's answer, the journal occupied — every run but the flag-less root run (the `--json` root run, nested `a/b`, the siblings under `--config`, the unrelated tree, and each link) reports `findings`, `configuration`, `sources`, `derived`, `recorded`, `graphData`, `journal`, `sessions`, and `lock` byte-identical to the root run's, `graphData` exactly `.xspec` and `lock` exactly `.xspec/lock` in every answer — a product relativizing every path to the working directory (`../../.xspec/lock` from `a/b`) fails (SPEC 11.6, 12.7, 12.0, 11, 1.5)",
   run: async (product) => {
     selfCheckSpellingRule();
     const workspace = await TestWorkspace.create({
@@ -560,17 +628,36 @@ const T11_6_1 = defineProductTest({
       },
     });
     try {
+      // --- the member-invariance arm's staging (helpers/inventory-
+      // invariance.ts): built with Markdown emission enabled, a journal (a
+      // journaled `rename`), and a review session, so every path-bearing
+      // member carries content. Every run below reads this one state — the
+      // inventory writes nothing (SPEC 11.6), and the directories and links
+      // the later arms add lie outside every glob and the area.
+      await stageInvarianceWorkspace(
+        product,
+        workspace.root,
+        ANCHOR_INVARIANCE_STAGING,
+        "T11.6-1 — the member-invariance arm's workspace",
+      );
+
       // --- from the workspace root: `.` / `xspec.config.ts`, both forms.
       // SPEC 11: inventory is JSON-only — the flag-less and `--json`
       // invocations carry the same information; asserting both byte-exactly
       // against the same expected anchoring realizes that parity for the
-      // anchoring members (byte-identity of the two stdouts is not asserted,
-      // SPEC.md not requiring it).
+      // anchoring members, and holding the `--json` run's other members to
+      // the flag-less run's for the rest (byte-identity of the two stdouts
+      // is not asserted, SPEC.md not requiring it). The flag-less root
+      // run's answer is the reference of the member-invariance arm: its
+      // every path-bearing member carries content (the staging premise),
+      // `graphData` is exactly `.xspec` and `lock` exactly `.xspec/lock`,
+      // and every later run reports every member but `root` and `config`
+      // byte-identical to it (SPEC 11.6, 1.5).
       const atRoot: AnchoringExpectation = {
         root: ".",
         config: CONFIG_FILE,
       };
-      await expectAnchoredInventory(
+      const rootRun = await expectAnchoredInventory(
         product,
         workspace.root,
         ["inventory"],
@@ -579,19 +666,29 @@ const T11_6_1 = defineProductTest({
           "working directory itself is spelled `.` and the configuration " +
           "file is the pure descent `xspec.config.ts` (SPEC 11.6)",
       );
+      assertInvariancePremise(
+        rootRun.document,
+        "T11.6-1 — the root run's answer, the member-invariance arm's " +
+          "reference",
+      );
+      const reference = rootRun.document;
       await expectAnchoredInventory(
         product,
         workspace.root,
         ["inventory", "--json"],
         atRoot,
         "T11.6-1 — `inventory --json` from the workspace root: the same " +
-          "anchoring information as the flag-less form (JSON-only, SPEC 11, " +
-          "11.6)",
+          "anchoring information as the flag-less form, and every other " +
+          "member the same as well (JSON-only, SPEC 11, 11.6)",
+        { reference },
       );
 
       // --- from nested `a/b`: `../..` / `../../xspec.config.ts` (the
       // configuration located by upward search from the working directory,
       // SPEC 7; working-directory-dependence is pure invocation input, 12.0).
+      // Every other member as at the root (the member-invariance arm): a
+      // product relativizing every path to the working directory reports
+      // `../../.xspec/lock` here, and fails.
       await workspace.dir("a/b");
       await expectAnchoredInventory(
         product,
@@ -600,6 +697,7 @@ const T11_6_1 = defineProductTest({
         { root: "../..", config: "../../xspec.config.ts" },
         "T11.6-1 — `inventory` from the nested working directory a/b: pure " +
           "ascent, each segment spelled `..`, joined with `/` (SPEC 11.6, 7)",
+        { reference },
       );
 
       // --- from sibling directories with `--config`: ascent `..` segments
@@ -628,6 +726,7 @@ const T11_6_1 = defineProductTest({
         "T11.6-1 — `inventory --config` from a sibling directory: one " +
           "ascent segment then the descent segments, joined with `/`, no " +
           "`.` segments, no trailing separator (SPEC 11.6)",
+        { reference },
       );
       await expectAnchoredInventory(
         product,
@@ -640,6 +739,7 @@ const T11_6_1 = defineProductTest({
         "T11.6-1 — `inventory --config` from a deeper sibling directory: a " +
           "multi-segment `..` ascent run then descent, joined with `/` " +
           "(SPEC 11.6)",
+        { reference },
       );
       // The same working directory with the `--config` value spelled
       // absolutely: the anchoring identifies the same file relative to the
@@ -659,6 +759,7 @@ const T11_6_1 = defineProductTest({
           "sibling: the anchoring stays the canonical relative spelling — " +
           "a function of the working directory and the identified file, " +
           "not of the argument's spelling (SPEC 11.6, 12.0)",
+        { reference },
       );
 
       // --- drive-mismatch arm, Linux side (E-6): an unrelated temporary
@@ -697,6 +798,7 @@ const T11_6_1 = defineProductTest({
           farArgv,
           farExpectation,
           farContext,
+          { reference },
         );
         const second = await expectAnchoredInventory(
           product,
@@ -704,10 +806,11 @@ const T11_6_1 = defineProductTest({
           farArgv,
           farExpectation,
           `${farContext} — repeated invocation`,
+          { reference },
         );
         assertBytesEqual(
-          second.stdoutBytes,
-          first.stdoutBytes,
+          second.result.stdoutBytes,
+          first.result.stdoutBytes,
           "T11.6-1 — the anchoring is invocation-anchored content: a pure " +
             "function of invocation input, deterministic per invocation, so " +
             "repeating the identical invocation from the identical working " +
@@ -748,7 +851,7 @@ const T11_6_1 = defineProductTest({
           "relation between the working directory and the root — `../..` " +
           "and `../../xspec.config.ts` — never the link's lexical `..` " +
           "(SPEC 11.6)",
-        { PWD: insideLink },
+        { env: { PWD: insideLink }, reference },
       );
 
       // (b) a link above both: `elsewhere/link` → `R` (beside the root, in
@@ -772,7 +875,7 @@ const T11_6_1 = defineProductTest({
           "working directory and `PWD`): a link above both changes nothing " +
           "— `..` — and the configuration file enters as its own name " +
           "under the root so spelled, `../xspec.config.ts` (SPEC 11.6)",
-        { PWD: aboveCwd },
+        { env: { PWD: aboveCwd }, reference },
       );
     } finally {
       await workspace.dispose();

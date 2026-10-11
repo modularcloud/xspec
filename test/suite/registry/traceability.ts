@@ -441,7 +441,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T11.5-1": ["11.5"],
   "T11.5-2": ["11.5", "14"],
   "T11.5-3": ["11.5", "12.0", "12.7", "14"],
-  "T11.6-1": ["11.6"],
+  // T11.6-1: its member-invariance arm asserts 1.5 for the inventory — every
+  // path but the anchoring workspace-relative whatever the working
+  // directory — the arm T1.5-1's inventory clause cross-references, so "1.5"
+  // joins the home passage.
+  "T11.6-1": ["11.6", "1.5"],
   // T11.6-2: every answer asserts findings [] beside the staged 14.19
   // sources — an inventory answer carries no finding but condition 23's,
   // the others reported where their conditions assign them (11.6) — so

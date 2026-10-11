@@ -19,20 +19,25 @@
 // A minimal valid workspace (the registered T11.6-1 body's staging): the
 // inventory parses no sources (SPEC 11.6), so the anchoring depends on none
 // of this — the staging keeps the workspace valid so every answer is the
-// complete, finding-free, exit-0 case.
+// complete, finding-free, exit-0 case. Markdown emission is enabled: the
+// arm builds the workspace, renames `racine` (a journal), and creates an
+// audit session before its first `inventory`
+// (helpers/inventory-invariance.ts), so every path-bearing member of the
+// root run's answer carries content for the member-invariance comparison.
 
 import { stagedMdx } from "./staged-mdx.js";
 import { stagedTs } from "./staged-ts.js";
 
-/** The arm's `xspec.config.ts`: a single spec group. */
+/** The arm's `xspec.config.ts`: a single spec group, emission enabled. */
 export const ANCHOR_CONFIG = stagedTs(
-  "T11.6-1 drive-mismatch arm (E-6 Windows leg) xspec.config.ts",
+  "T11.6-1 drive-mismatch arm (E-6 Windows leg) xspec.config.ts — one spec group, Markdown emission enabled",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
-  }
+  },
+  markdown: { emit: true }
 })
 `,
 );
