@@ -56,65 +56,10 @@ The previous plan (written at acfff0b from iteration 59's determination, deleted
 
 **Order.** Take the topmost task unless told otherwise; Task 3 comes last. When a task is done, its commit removes it from the Tasks section and adds a one-line summary to its bullet here.
 - Task 1 (RC-1): `test/self/machine-staging.admin.test.ts` verifies the second user's reach against the harness-owned empty stub, never the built product. Done (06a291c, then the commit recording it): CI run 1216 (ID 38317788073) at 06a291c, harness-self job 115038699006 green in 4 min 38 s of its 20 (still building the product, ~3 s, until Task 2): 39 files, 4444 tests, all passed in 257.48 s; `machine-staging.admin.test.ts` 7 tests passed (3777 ms), the reach test's pinned list (Node executable, the stub readable) among them, so no Fallback; `pid-namespace-staging.admin.test.ts` 3 passed (3792 ms); certification 186 PASS / 50 FAIL / 0 error / 0 hang, 0 discrepancies. Locally (`dist/` absent, the admin files left out): 37 files, 4434 tests, all passed in 360.47 s, the same certification lines.
-- Task 2 (RC-1): CI's harness-self job runs the self project and certification with no product installed, shown red against a probe that restores Task 1's fault.
+- Task 2 (RC-1): CI's harness-self job runs the self project and certification with no product installed, shown red against a probe that restores Task 1's fault. Done (a4dae69, the probe a18abfc, then the commit reverting it): CI run 1218 (ID 38320131733) at the probe, harness-self job 115046306068 red as intended in 4 min 17 s of its 20: no build step, the no-product step succeeded, and the self step failed on the reach test alone, a `HarnessStagingError` (mode `second-user`) reading "the second user cannot read /home/runner/work/xspec/xspec/dist/cli/bin.js (ENOENT)"; 39 files (1 failed), 4444 tests, 1 failed and 4443 passed in 241.54 s; `machine-staging.admin.test.ts` 7 tests, 1 failed (3788 ms), its other six passing; `pid-namespace-staging.admin.test.ts` 3 passed (3660 ms); certification 186 PASS / 50 FAIL / 0 error / 0 hang, 0 discrepancies (`certification.test.ts` 39 tests, 207.7 s); no further H-8 dependence on the product, so no task added. Locally at a4dae69 (`dist/` absent, the admin files left out): 37 files, 4434 tests, all passed in 340.80 s, the same certification lines.
 - Task 3: confirm locally and in CI; record the timings; delete this plan.
 
 ## Tasks
-
-### Task 2 — CI's harness-self job runs the self project and certification with no product installed (RC-1)
-
-**Depends on.** Task 1 (gone from this plan, recorded in the Order section).
-
-**Requirement.** H-8: "Self-tests (17) and certification MUST pass before the product exists." In this repository the product already exists, so that property can be checked only by running the self project and certification with no product installed. The `*.admin.test.ts` files run only in CI, so CI is the only place it can be checked for them. Reviewer C, on RC-1: "the test passes in CI only because the harness-self job runs `npm run build` first". The header comment of `.github/workflows/ci.yml` calls the harness-self job "the signal that must be green before the product exists (red-green)", yet the job builds the product before `npm run test:self`. No CI job runs the self project without the product, so a self-test that needs `dist/` passes in CI unnoticed. TEST-SPEC §18 (E-1) and C-1 ("Certification results are part of the harness's CI output") make this job harness CI.
-
-**State at 2d9cdf6.**
-- `.github/workflows/ci.yml`, job `harness-self` (lines 63–79), runs these steps in order:
-  1. `actions/checkout@v4`;
-  2. `actions/setup-node@v4` (Node 22, npm cache);
-  3. `npm ci`;
-  4. "Typecheck both programs (product and harness)" (`npm run typecheck`, which is `tsc -p src --noEmit && tsc -p test` and emits nothing);
-  5. "Build the product" (`npm run build`, ~4 s);
-  6. "Run harness self-tests and certification (network disabled, unprivileged, administrative access kept)" (`bash .github/scripts/run-without-network.sh npm run test:self`).
-- The header comment's `harness-self` paragraph is lines 5–10.
-- Nothing else would install the product: `dist/` is git-ignored (`.gitignore`), and `package.json` has no lifecycle script that builds on install.
-- The `suite-linux` job's `npm test` runs the self project again with the product built, and keeps doing so.
-- AGENTS.md's CI bullet (beginning "CI: `.github/workflows/ci.yml`") and its self-tests bullet (beginning "Harness self-tests and certification only (TEST-SPEC 17): `npm run test:self`.") say nothing about a build in this job.
-
-**Change.**
-- In the `harness-self` job only, remove the "Build the product" step, and in its place, before the self step, add:
-  ```yaml
-      - name: Confirm no product is installed (H-8; self-tests and certification run before the product exists)
-        run: |
-          if [ -e dist ]; then
-            echo "::error::dist/ exists, but this job runs the harness self-tests and certification with no product installed (TEST-SPEC H-8)"
-            exit 1
-          fi
-  ```
-  (Indented as the job's other steps are. The step name carries no `: `, which a plain YAML scalar cannot hold; a scratch copy of the workflow with this step parses, `<scratchpad>/p9j_2d9/ci-snippet-check.yml`.) Keep every other step, the job's name, and `timeout-minutes: 20` as they are. Leave `suite-linux`, `suite-windows`, `on:`, `concurrency:`, and `release.yml` unchanged: their product-facing tests need the product.
-- Rewrite the header's `harness-self` paragraph. It says the job runs with no product installed: it builds nothing and confirms `dist/` absent first, so a self-test or certification that needs the built product fails here (H-8). It is still "the signal that must be green before the product exists (red-green)", and `suite-linux` runs the self project again with the product built.
-- AGENTS.md:
-  - In the CI bullet, say that the harness-self job installs no product: it does not build, and a step confirms `dist/` absent before the self project and certification run. The full-suite and Windows jobs build it first.
-  - In the self-tests bullet's opening sentence, add that `npm run test:self` needs no product build (H-8), and that CI's harness-self job runs it with no `dist/`.
-
-**Verify: red against a probe, then green.** The probe is a temporary commit that restores Task 1's fault, so the new job is shown failing exactly where a self-test needs the product. On resuming after an interruption, read `git log -3 --format='%h %s'` and `git status` first. If the head is commit A (subject below) with no probe after it, continue at step 2. If the head is this task's probe commit (its subject begins `sdg(phase-9): add a temporary probe`), push it if `git status` shows it unpushed, and continue at step 3. If it is the probe's revert, this task is done.
-1. Commit the change (commit A; subject `sdg(phase-9): run CI's harness-self job with no product installed (FIX_PLAN Task 2)`) after these checks:
-   - `npm run typecheck` and `npm run format:check`;
-   - `python3 -I -c 'import sys, yaml; w = yaml.safe_load(open(sys.argv[1])); print([s.get("name") or s.get("run") or s.get("uses") for s in w["jobs"]["harness-self"]["steps"]])' .github/workflows/ci.yml` parses the workflow and lists the harness-self job's steps: no build, with the no-product step before the self step;
-   - `git diff` touches only the harness-self job, the header paragraph, and AGENTS.md;
-   - the local self project, per Conventions.
-2. Commit the temporary probe (commit P; subject `sdg(phase-9): add a temporary probe: bind the second-user reach self-test to the built product again, with no product installed (FIX_PLAN Task 2)`). In `test/self/machine-staging.admin.test.ts`, change only the reach arm's `binding:` back to `builtProductBinding()`, imported from `../helpers/subprocess.js`. Change nothing else. Typecheck and format must still pass.
-3. Push A and P together, in one push. Read P's run's harness-self job to completion (~6 min) and expect all of the following:
-   - its steps include no build, and the no-product step succeeds;
-   - the self step fails on exactly one test, the reach test;
-   - that test's error is a `HarnessStagingError` whose message contains `the second user cannot read` and `/dist/cli/bin.js (ENOENT)` (read from the job's annotations or its log);
-   - every other test passes (4443, the file's other six tests and `pid-namespace-staging.admin.test.ts` among them);
-   - certification shows 186 PASS / 50 FAIL / 0 error / 0 hang with 0 discrepancies.
-
-   Save the log to `t9j2d9_2/`. If the job ends `cancelled` with no steps (an infrastructure event), re-run that job once (`gh api --method POST repos/modularcloud/xspec/actions/jobs/<job-id>/rerun`). If that is refused, report the refusal and stop. Never push a commit just to retrigger.
-4. If any other test or certification fails in step 3, a further H-8 dependence on the product has been found. Add a task for it to this plan, before Task 3, citing H-8 and the run, and carry on.
-5. Revert the probe as commit R: `git revert --no-commit <P>`, then commit with the convention's subject (`sdg(phase-9): remove the temporary probe; record CI run <N> for the no-product harness-self job (FIX_PLAN Task 2)`), never git's default message. In the same commit, Task 2 leaves this plan, and its Order bullet records P's run (number, ID, the failing test and its diagnosis, the counts, the job's duration). Check that `git diff <A> HEAD -- test .github` is empty, so R's harness tree is A's. Push. Task 3 reads R's run.
-
-**Done when.** The checks hold, A, P, and R are pushed, and their messages record the results.
 
 ### Task 3 — Confirm locally and in CI; record the timings; delete this plan
 

@@ -58,7 +58,6 @@ import {
 import type { SecondMount } from "../helpers/machine-staging.js";
 import { HarnessStagingError } from "../helpers/permissions.js";
 import {
-  builtProductBinding,
   ProductRunTimeoutError,
   runProduct,
   startProduct,
@@ -322,7 +321,7 @@ test("the second user's verification passes on a group-staged workspace — ever
   onTestFinished(() => access.restore());
   const report = await verifySecondUserReach(user, {
     ...reach,
-    binding: builtProductBinding(),
+    binding: emptyStubBinding(),
   });
   expect(report.uid).toBe(user.uid);
   expect(report.walk).toEqual({
