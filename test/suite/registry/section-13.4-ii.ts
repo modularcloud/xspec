@@ -29,16 +29,22 @@
 //   link there to a directory outside the workspace holding a file, a FIFO
 //   there, and a lock directory holding a symbolic link (to a directory
 //   outside the workspace holding a file), a FIFO, and a directory holding
-//   a file (`stageLeftover`, each staging verified on the harness itself).
-//   Then `check --json` is clean, exit 0 — neither condition 10 nor
-//   condition 22; `inventory --json` exits 0, finding-free, its `recorded`
-//   available and equal to the twin's; `build` exits 0; and, the section's
-//   text then edited as on the twin, `check --json` reports exactly the
-//   stale twin's findings (its exit code and its decoded report) and `ids
-//   --json` answers exit 0 with the stale twin's answer (stdout byte-equal).
-//   After each command the inclusion check (H-6; helpers/lock-state.ts
-//   `captureLockPath` then `assertLockPathAsCaptured`, the machinery
-//   VIOL-CORE-READERENTRY certifies): the lock path holds exactly what was
+//   a file, each staged in turn as an occupant at `.xspec/lock/<name>`
+//   (`stageLeftover`, each staging verified on the harness itself). Then
+//   `check --json` is clean, exit 0 — neither condition 10 nor condition
+//   22; `inventory --json` exits 0, finding-free, its `recorded` available
+//   and equal to the twin's; `build` exits 0; and, the section's text then
+//   edited as on the twin, `check --json` reports exactly the stale twin's
+//   findings (its exit code and its decoded report) and `ids --json`
+//   answers exit 0 with the stale twin's answer (stdout byte-equal). After
+//   each command, wherever a directory occupies the lock path (the dead
+//   run's entry, the lock directory's occupants), the count half first
+//   (helpers/lock-state.ts `assertLockDirectoryEntries`, the held-state
+//   comparison's count half, the machinery VIOL-CORE-READERENTRY's
+//   certification exercises): the lock directory holds exactly the dead
+//   run's entry, or its staged occupants in place and no entry, nothing
+//   else. Then the inclusion check (H-6; `captureLockPath` then
+//   `assertLockPathAsCaptured`): the lock path holds exactly what was
 //   staged — kind, name, content, and a link's target alike, a dead entry
 //   by name and content — nothing added beside it; every link's target
 //   outside the workspace byte-identical, every staged FIFO in place.
@@ -71,8 +77,11 @@
 //   decides; T6.6-3(a)). Never `recorded` or `delta` unavailable, a
 //   condition-23 finding, or `check`'s unit form: each falls outside both
 //   admitted outcomes, a diagnosed failure naming it. After each command,
-//   its permission restored, the lock path holds exactly the dead entry,
-//   byte-identical, name and content, the lock directory's only occupant.
+//   its permission restored (and, on a read's exit-2 path, before the
+//   snapshot compare), the count half first — the lock directory holding
+//   exactly one entry, a plain file, nothing beside it — then the lock path
+//   holding exactly the dead entry, byte-identical, name and content, the
+//   lock directory's only occupant (`assertLockPathHolds`).
 // - Manual remedy (13.4): each obstruction of T13.5-10(a) (section-13.5-ii.ts
 //   `OBSTRUCTIONS`, staged on its session staging, `stageArmWorkspace`) —
 //   `.xspec` a plain file, a symbolic link to the workspace's own area
@@ -92,7 +101,11 @@
 // entry for T13.5-9 through T13.5-12 and T13.4-12): its absences of
 // `.xspec/lock` are braced by the staged leftover's kind, name, and content
 // asserted present after each command; its lock-path inclusions share the
-// comparison machinery VIOL-CORE-READERENTRY certifies; its stagings verify
+// comparison machinery VIOL-CORE-READERENTRY certifies — the held-state
+// comparison's count half (helpers/lock-state.ts
+// `assertLockDirectoryEntries`), which VIOL-CORE-READERENTRY's certified
+// failure of T13.5-4 exercises, run first wherever a directory occupies the
+// lock path, the inclusion check following it; its stagings verify
 // themselves on the harness before use, an ineffective staging a harness
 // error (E-1, H-11), never a pass or a skip. A conformer serving it whole
 // would carry `inventory`, `version`, and the preview documents of
@@ -127,8 +140,12 @@ import {
   killHeldRun,
   stageLeftover,
 } from "../../helpers/lock-staging.js";
-import type { LockPathCapture } from "../../helpers/lock-state.js";
+import type {
+  LockDirectoryExpectation,
+  LockPathCapture,
+} from "../../helpers/lock-state.js";
 import {
+  assertLockDirectoryEntries,
   assertLockPathAbsent,
   assertLockPathAsCaptured,
   assertLockPathHolds,
@@ -175,6 +192,17 @@ const INCLUSION_RULE =
   "exactly its staged occupants, its staged directory exactly the file " +
   "staged in it (H-6; SPEC 13.4: the lock path is transient, no write but " +
   "acquisition and release touching it)";
+
+/**
+ * The rule every count half below cites, wherever a directory occupies the
+ * lock path around a command that acquires nothing.
+ */
+const COUNT_RULE =
+  "the count half — the lock directory holds exactly the entries it held " +
+  "once staged, beside any occupants the harness staged there, no entry " +
+  "added and none removed: a command that acquires nothing adds no entry " +
+  "there and removes none (H-6; SPEC 13.4: no write but acquisition and " +
+  "release touches the lock path; 13.5)";
 
 /** The staleness edit's spelling: `g`'s text in CORE_DECL's `specs/A.mdx`. */
 const GAMMA_TEXT = "Gamma text.";
@@ -457,40 +485,59 @@ const GARBAGE_BYTES = Buffer.from([
   0x82, 0x0a,
 ]);
 
+/** One occupant of the last readable staging's lock directory. */
+interface LockDirectoryLeftover {
+  /** Its name in the lock directory: staged at `.xspec/lock/<name>`. */
+  readonly name: string;
+  readonly node: LeftoverNode;
+}
+
 /**
- * The lock directory of the last readable staging: a symbolic link to a
- * directory outside the workspace holding a file, a FIFO, and a directory
- * holding a file — no plain file of the harness's own naming at its top
- * level (the entry form is the product's own, 13.5; helpers/lock-staging.ts
- * refuses one).
+ * The occupants of the last readable staging's lock directory, each staged
+ * in turn at `.xspec/lock/<name>`, beside what the lock directory already
+ * holds (`stageLeftover`, the first creating it; each staging verified on
+ * the harness itself): a symbolic link to a directory outside the workspace
+ * holding a file, a FIFO, and a directory holding a file — no plain file of
+ * the harness's own naming at its top level (the entry form is the
+ * product's own, 13.5; helpers/lock-staging.ts refuses one). Each is a
+ * record of its own, so the count half stands each beside the entries
+ * (helpers/lock-state.ts `assertLockDirectoryEntries` takes occupants
+ * staged at `.xspec/lock/<name>` alone).
  */
-const LOCK_DIRECTORY_LEFTOVERS: LeftoverNode = {
-  kind: "dir",
-  entries: [
-    {
-      name: "leftover-link",
-      node: { kind: "symlink", target: { kind: "dir" } },
+const LOCK_DIRECTORY_LEFTOVERS: readonly LockDirectoryLeftover[] = [
+  {
+    name: "leftover-link",
+    node: { kind: "symlink", target: { kind: "dir" } },
+  },
+  { name: "leftover-fifo", node: { kind: "fifo" } },
+  {
+    name: "leftover-directory",
+    node: {
+      kind: "dir",
+      entries: [
+        { name: "file", node: { kind: "file", content: LEFTOVER_BYTES } },
+      ],
     },
-    { name: "leftover-fifo", node: { kind: "fifo" } },
-    {
-      name: "leftover-directory",
-      node: {
-        kind: "dir",
-        entries: [
-          { name: "file", node: { kind: "file", content: LEFTOVER_BYTES } },
-        ],
-      },
-    },
-  ],
-};
+  },
+];
 
 /** One readable leftover or obstruction (module header). */
 interface ReadableStaging {
   readonly what: string;
   /**
+   * Where the staging leaves a directory at the lock path: the number of
+   * entries it holds beside the occupants the harness staged there — the
+   * dead run's one, or none — which the count half asserts after each
+   * command. Absent where no directory occupies the lock path (a plain
+   * file, a symbolic link, or a FIFO at it).
+   */
+  readonly lockDirectoryEntries?: number;
+  /**
    * Stage it on a freshly built valid workspace. Returns the stagings whose
-   * outside targets and FIFOs are judged beside the inclusion check — none
-   * for a dead run's entry, which the capture holds by name and content.
+   * outside targets and FIFOs are judged beside the inclusion check — in a
+   * lock directory, the occupants the count half stands beside the entries —
+   * none for a dead run's entry, which the capture holds by name and
+   * content.
    */
   readonly stage: (
     product: ProductBinding,
@@ -534,10 +581,17 @@ async function stageDeadEntry(
   return dead;
 }
 
-/** The readable leftovers and obstructions, staged in turn (module header). */
+/**
+ * The readable leftovers and obstructions, staged in turn (module header):
+ * a lock directory — the dead run's entry alone, or the staged occupants
+ * and no entry — under the count half after each command, then the
+ * inclusion check; a plain file, a symbolic link, or a FIFO at the lock
+ * path itself under the inclusion check alone (no directory occupies it).
+ */
 const READABLE_STAGINGS: readonly ReadableStaging[] = [
   {
     what: "a dead run's entry (a held `rename` killed under T13.5-3's discipline)",
+    lockDirectoryEntries: 1,
     stage: async (product, workspace, context) => {
       await stageDeadEntry(product, workspace, context);
       return [];
@@ -573,16 +627,33 @@ const READABLE_STAGINGS: readonly ReadableStaging[] = [
     what:
       "a lock directory holding a symbolic link (to a directory outside the " +
       "workspace holding a file), a FIFO, and a directory holding a file",
-    stage: async (_product, workspace) => [
-      await stageLeftover(workspace, LOCK_PATH, LOCK_DIRECTORY_LEFTOVERS),
-    ],
+    lockDirectoryEntries: 0,
+    stage: async (_product, workspace) => {
+      const staged: StagedLeftover[] = [];
+      for (const leftover of LOCK_DIRECTORY_LEFTOVERS) {
+        staged.push(
+          await stageLeftover(
+            workspace,
+            `${LOCK_PATH}/${leftover.name}`,
+            leftover.node,
+          ),
+        );
+      }
+      return staged;
+    },
   },
 ];
 
 /**
- * A readable arm's command: bounded, then the inclusion check (H-6: the
- * lock path as captured once the staging was made, nothing added beside
- * it), every staged link's target untouched, and every staged FIFO in place.
+ * A readable arm's command: bounded; then, wherever a directory occupies the
+ * lock path (`lockDirectory` given), the count half first — the lock
+ * directory holding exactly `lockDirectory`'s entries beside the occupants
+ * the harness staged there, each in place, nothing else
+ * (helpers/lock-state.ts `assertLockDirectoryEntries`, the half
+ * VIOL-CORE-READERENTRY's certification exercises); then the inclusion
+ * check (H-6: the lock path as captured once the staging was made, nothing
+ * added beside it), every staged link's target untouched, and every staged
+ * FIFO in place.
  */
 async function includedRun(
   product: ProductBinding,
@@ -590,9 +661,17 @@ async function includedRun(
   argv: readonly string[],
   capture: LockPathCapture,
   staged: readonly StagedLeftover[],
+  lockDirectory: LockDirectoryExpectation | undefined,
   context: string,
 ): Promise<RunResult> {
   const result = await runBounded(product, workspace.root, argv, context);
+  if (lockDirectory !== undefined) {
+    await assertLockDirectoryEntries(
+      workspace.root,
+      lockDirectory,
+      `${context}, once it has exited: ${COUNT_RULE}`,
+    );
+  }
   await assertLockPathAsCaptured(
     capture,
     `${context}, once it has exited: ${INCLUSION_RULE}`,
@@ -673,7 +752,8 @@ function judgeStaleCheck(
  * One readable arm (module header): on a fresh workspace, freshly built,
  * `staging` staged, the lock path captured; then `check`, `inventory`,
  * `build`, the staleness edit, `check`, and `ids`, each judged and followed
- * by the inclusion check.
+ * — wherever a directory occupies the lock path — by the count half, then by
+ * the inclusion check.
  */
 async function readableArm(
   product: ProductBinding,
@@ -684,12 +764,24 @@ async function readableArm(
     const context = `T13.4-12 ${staging.what}`;
     await buildFresh(product, workspace, context);
     const staged = await staging.stage(product, workspace, context);
+    const lockDirectory: LockDirectoryExpectation | undefined =
+      staging.lockDirectoryEntries === undefined
+        ? undefined
+        : { entries: staging.lockDirectoryEntries, staged };
     const capture = await captureLockPath(workspace.root);
     const run = async (
       argv: readonly string[],
       label: string,
     ): Promise<RunResult> =>
-      await includedRun(product, workspace, argv, capture, staged, label);
+      await includedRun(
+        product,
+        workspace,
+        argv,
+        capture,
+        staged,
+        lockDirectory,
+        label,
+      );
 
     const checkContext = `${context}: \`check --json\``;
     const check = await run(CHECK, checkContext);
@@ -932,14 +1024,22 @@ async function whileStaged<T>(
 
 /**
  * After each command over an unreadable leftover, its permission restored:
- * the dead run's entry byte-identical, name and content, the lock
- * directory's only occupant (H-6; SPEC 13.4).
+ * the count half first — the lock directory holding exactly one entry, a
+ * plain file, and nothing beside it (helpers/lock-state.ts
+ * `assertLockDirectoryEntries`, the half VIOL-CORE-READERENTRY's
+ * certification exercises) — then the dead run's entry byte-identical, name
+ * and content, the lock directory's only occupant (H-6; SPEC 13.4).
  */
 async function assertDeadEntryAlone(
   root: string,
   dead: DeadRun,
   context: string,
 ): Promise<void> {
+  await assertLockDirectoryEntries(
+    root,
+    { entries: 1 },
+    `${context}, its permissions restored to inspect it: ${COUNT_RULE}`,
+  );
   await assertLockPathHolds(
     root,
     { entries: [dead.entry] },
@@ -1130,7 +1230,7 @@ const T13_4_12 = defineProductTest({
   id: "T13.4-12",
   title:
     "the transient lock path: on a freshly built valid workspace, each readable leftover or obstruction staged in turn — a dead run's entry (a held `rename` killed under T13.5-3's discipline), a plain file at `.xspec/lock` holding garbage, a symbolic link there to a directory outside the workspace holding a file, a FIFO there, and a lock directory holding a symbolic link, a FIFO, and a directory holding a file — `check` is clean, exit 0 (neither condition 10 nor condition 22), `inventory` reports `recorded` available and equal to a leftover-free twin's, finding-free, exit 0, and `build` exits 0; with a section's text then edited, `check` reports exactly the leftover-free stale twin's findings and `ids` answers exit 0 with the twin's answer; each command prompt, the staging byte-untouched — kind, name, content, and a link's target alike — the lock path holding after each command exactly what was staged, nothing added beside it (H-6); clean path: `build` on an unbuilt valid workspace, `review create` of an audit session `s`, then `build`, `check`, `inventory`, `rename --preview` of an operation succeeding there, `ids`, `review status s`, and `version`, and `ids` and `review status s` each on stale graph data (refreshing it before answering) — each exits 0 and leaves nothing at `.xspec/lock`; unreadable leftovers — a dead run's entry with the lock directory unlistable (`--x`) and, separately, the entry unreadable (`-w-------`), each verified on the harness itself: `inventory`, `check`, and `ids` each answer exactly as on the leftover-free twin, exit 0, or exit 2 with the error document's `code` `\"read-failure\"`, `path` `\".xspec/lock\"`, nothing modified; a `move --preview` of an operation succeeding on the twin answers byte-identically to the twin's, its `delta` available, exit 0 — never `recorded` or `delta` unavailable, a condition-23 finding, or `check`'s unit form; the entry byte-identical, name and content, and the lock directory's only occupant (permissions restored to inspect it); manual remedy: each obstruction of T13.5-10(a) deleted by hand while no mutating command runs, the next `rename` exits 0 (SPEC 13.4, 13.5, 13.3, 11.6, 6.6, 14.10, 14.22, 14.23, 14.25)",
-  // About 31 s at the built product's speed for the whole body (its kills
+  // About 38 s at the built product's speed for the whole body (its kills
   // made by the CONF-CORE conformer, AGENTS.md): ample margin.
   timeoutMs: 300_000,
   run: async (product) => {

@@ -50,6 +50,9 @@
 //   lock path before — nothing, a leftover, or a held run's entry — occupies
 //   it afterwards byte-identical, nothing added beside it: `captureLockPath`
 //   then `assertLockPathAsCaptured`, or `assertLockPathUntouchedAround`.
+//   Wherever a directory occupies the lock path, the tests run the count
+//   half first (T13.4-12, T6.6-3(c), T11.6-3's held arm): the half
+//   VIOL-CORE-READERENTRY's certified failure of T13.5-4 exercises.
 // Every reading of the lock path goes through the reader the stagings'
 // records use (helpers/lock-staging.ts `readLockPathTree`), or through H-4's
 // grant for an entry's content (helpers/lock-path.ts `readLockPathFile`):
@@ -235,8 +238,10 @@ export interface LockDirectoryExpectation {
  * `.xspec/lock` a directory holding, besides `expected.staged` — each in
  * place, byte-identical as staged — exactly `expected.entries` entries,
  * each a plain file, and nothing else (the held-state comparison's count
- * half, and a residue's entries, T13.5-11). Returns the entries, in byte
- * order of name: name bytes, content read under H-4's grant, and mode.
+ * half — also wherever a directory occupies the lock path around a command
+ * that acquires nothing, T13.4-12, T6.6-3(c) — and a residue's entries,
+ * T13.5-11). Returns the entries, in byte order of name: name bytes,
+ * content read under H-4's grant, and mode.
  */
 export async function assertLockDirectoryEntries(
   root: string,
