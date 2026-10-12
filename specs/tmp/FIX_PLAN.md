@@ -144,6 +144,8 @@ Why the harness changes: the documents moved after the harness was last green (t
 
 **Done when.** The checks hold, the Windows job's result is recorded, and the commit is pushed.
 
+**Progress (TASK iteration 50).** The probe is implemented at 9f1a8e4 (`test/helpers/e6.ts`, `test/helpers/e6-exclusion.ts`, `test/self/e6-exclusion.test.ts`; AGENTS.md's Windows-leg bullet describes it). A temporary Windows CI probe — `test/windows/zz-e6-exclusion-standin.test.ts` with the stand-in `test/windows/zz-e6-standin.mjs`, no harness part — is committed in the commit that adds this paragraph, so that the Windows leg runs the fixture against a stand-in modelling 13.5's lock directory. If this task is still here: read the CI run of that commit (or of a later head that still carries the probe), `git rm` both probe files, record the Windows job's result (the byte-identity test against the built product must fail diagnosed at the probe's dead-entry assertion, as on Linux; the temporary probe's five tests must pass) in AGENTS.md's Windows-leg bullet and in this task's summary, and drop the task.
+
 ### Task 49 — The C-1 gate whole, and certification's time budget (D-1, D-14 closing)
 
 **Requirement.** C-1 (TEST-SPEC.md line 630): for each fixture in CERTIFICATIONS.md, every in-scope test passes against the conformer and, for each violator, exactly the tests it certifies fail and all other in-scope tests pass; certification results are part of the harness's CI output. D-14's closing criterion: all 39 verifications green, every expected failure a diagnosed `fail` (0 error, 0 hang), in the harness-self CI job and in the local red-green gate (unprivileged, per AGENTS.md).
