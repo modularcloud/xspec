@@ -4,8 +4,11 @@
 // behavioral deviation: `build` and the read commands modify the journal —
 // each such invocation that is not refused as a usage or configuration error
 // (exit 2) appends one fixed line to .xspec/journal, creating the file when
-// absent. Mutating commands, and the entries `rename`/`move` append, are
-// unchanged. Certifies T13.4-5 and T13.5-4 (C-1): exactly they fail against
+// absent. The line is inert to the fixture's own journal handling: read back
+// as neither an identity mapping (5.4) nor a malformed entry (no 14.13, so
+// no later command is gated by it), graph data and every other derived byte
+// independent of how many such lines the journal holds (13.4). Mutating
+// commands, and the entries `rename`/`move` append, are unchanged. Certifies T13.4-5 and T13.5-4 (C-1): exactly they fail against
 // this fixture — T13.4-5's journal byte-compares under `build` and the read
 // commands, and T13.5-4's held-state comparisons once its reads, and its
 // `build`, during a hold have exited, the journal grown past the

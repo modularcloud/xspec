@@ -119,14 +119,27 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
         "T13.5-2",
         "T13.5-8",
       ]),
-      // VIOL-CORE-EARLYWRITE: a mutating command performs its workspace
-      // modifications before creating the hold file — it acquires
-      // exclusivity, completes the operation's writes (journal append
-      // included), then creates the hold file, waits for its deletion, and
-      // exits normally. T13.5-8 fails where its acquisition-first arms run
-      // beside the held `review resolve` on a valid workspace: that
-      // holder's resolution, written before its hold, fails the held-state
-      // comparison made while it holds.
+      // VIOL-CORE-EARLYWRITE: a mutating command given `--test-hold`
+      // performs its workspace modifications before creating the hold file —
+      // it acquires exclusivity, completes the operation's writes (journal
+      // append included), then creates the hold file (creation failing on an
+      // occupied path as 13.5 states, the exit-2 refusal then following the
+      // completed writes), waits for its deletion, and exits normally,
+      // releasing as it ends; without `--test-hold` it creates no hold file
+      // and behaves as the conformer does. The second discovery, the
+      // argument checks of 12.0, baseline resolution (6.3), the gate of 13.3,
+      // and the valid-workspace precondition of rename/move (6.4, 6.5) are
+      // judged after acquisition and before the writes they gate, while the
+      // exit they refuse with is deferred as the writes' completion is: an
+      // invocation they refuse creates the hold file having written nothing,
+      // waits for its deletion, and only then exits with its error. Fails
+      // T13.5-1 (the held-state comparison while held, and its
+      // occupied-hold-path arms, the writes landing before hold creation
+      // fails), T13.5-2 (the held-state comparison while command 1 holds),
+      // T13.5-4 (reads during the hold observe the operation's result), and
+      // T13.5-8 (wherever its arms run beside the held `review resolve` on a
+      // valid workspace, that holder's resolution, written before its hold,
+      // fails the held-state comparison made while it holds).
       violator("VIOL-CORE-EARLYWRITE", "conf-core/bin-earlywrite.mjs", [
         "T13.5-1",
         "T13.5-2",
@@ -139,8 +152,12 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // hold file is created — one ordering rule of 13.5 (the hold precedes
       // every modification, the refresh included) broken for the refresh
       // alone; the hold file is still created after exclusivity and before
-      // every other write, and a workspace whose graph data is current is
-      // refreshed by nothing.
+      // every other write (the session write, rename/move's edits, journal
+      // appends, and the finishing regeneration of 6.4/6.5), and a workspace
+      // whose graph data is current is refreshed by nothing, as one failing
+      // `build`'s validations is (13.3) — the deviation unobservable on
+      // both. Fails T13.5-1 on its stale-workspace arm's while-held
+      // comparison alone.
       violator("VIOL-CORE-EARLYREFRESH", "conf-core/bin-earlyrefresh.mjs", [
         "T13.5-1",
       ]),
@@ -149,30 +166,38 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // run's entry does (14.26), its presence alone judged, whatever
       // identifier its name records, so once a mutating command's process
       // is killed every later mutating command in that workspace is refused
-      // `workspace-busy` while the dead run's entry stands. Release on every
-      // normal end, and the removal of every leftover that is no entry, are
-      // unchanged.
+      // `workspace-busy` while the dead run's entry stands — 13.5's liveness
+      // judgment dropped. Release on every normal end, and the removal of
+      // every leftover that is no entry, are unchanged.
       violator("VIOL-CORE-STALELOCK", "conf-core/bin-stalelock.mjs", [
         "T13.5-3",
       ]),
       // VIOL-CORE-PARTIALWRITE: derived-file writes are not atomic in their
       // observable effect — while a derived file is being written, its path
       // holds a strict prefix of the new content for a sustained interval
-      // (long relative to a concurrent reader's polling cadence) before the
-      // complete content appears. Durable files are unaffected.
+      // (long relative to a concurrent reader's polling cadence, short of
+      // S-3's hang detection) before the complete content appears; every
+      // `build` performs its derived-file writes through this interval,
+      // content already byte-identical on disk rewritten, never skipped, so
+      // each build of T13.5-5's polling loop exposes the partial state, on
+      // an unchanged workspace too. Durable files are unaffected.
       violator("VIOL-CORE-PARTIALWRITE", "conf-core/bin-partialwrite.mjs", [
         "T13.5-5",
       ]),
       // VIOL-CORE-CHATTYREADS: `build` and the read commands modify the
       // journal — each such invocation that is not refused as a usage or
       // configuration error (exit 2) appends one fixed line to
-      // `.xspec/journal`, creating the file when absent. Mutating commands,
-      // and the entries `rename`/`move` append, are unchanged. Fails T13.4-5
-      // (its journal byte-compares) and T13.5-4 (the held-state comparisons
-      // once its reads, and its `build`, during a hold have exited, the
-      // journal grown — at its first read during the hold, before the
-      // `build` arm, whose `rename` would end with the `build`'s line where
-      // its twin's journal holds none).
+      // `.xspec/journal`, creating the file when absent. The line is inert
+      // to the fixture's own journal handling — read back as neither an
+      // identity mapping (5.4) nor a malformed entry (no 14.13, so no later
+      // command is gated by it), graph data and every other derived byte
+      // independent of how many such lines the journal holds (13.4).
+      // Mutating commands, and the entries `rename`/`move` append, are
+      // unchanged. Fails T13.4-5 (its journal byte-compares) and T13.5-4
+      // (the held-state comparisons once its reads, and its `build`, during
+      // a hold have exited, the journal grown — at its first read during the
+      // hold, before the `build` arm, whose `rename` would end with the
+      // `build`'s line where its twin's journal holds none).
       violator("VIOL-CORE-CHATTYREADS", "conf-core/bin-chattyreads.mjs", [
         "T13.4-5",
         "T13.5-4",
@@ -192,10 +217,13 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // of the usage class and baseline resolution (12.0, 6.3) have passed,
       // its second discovery preceding them, instead of immediately after
       // acquiring; the gate and refresh of 13.3, the item check, the
-      // valid-workspace precondition of rename/move (6.4, 6.5), and every
-      // modification still follow the hold. An invocation those checks
-      // refuse exits 2 having acquired and released but created no hold
-      // file — T13.5-8's four seam-ordering arms (`rename specs/A.mdx nope
+      // valid-workspace precondition of rename/move (6.4, 6.5), the
+      // operation's own validation, and every modification still follow the
+      // hold, acquisition's outcomes — the busy refusal and its write and
+      // read failures — still precede every check, and the hold file still
+      // precedes every write. An invocation those checks refuse exits 2
+      // having acquired and released but created no hold file, `--test-hold`
+      // or not — T13.5-8's four seam-ordering arms (`rename specs/A.mdx nope
       // x`, `review create --base <ref> --name n`, `review create
       // --coverage nope --name n`, `move <code> specs/C.mdx` under
       // `--test-hold`), where the wait for a hold file never created fails
@@ -207,8 +235,10 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // hold is lifted (its entry, then the emptied lock directory and an
       // emptied area directory its acquisition created), one without the
       // seam straight after acquiring — then dwells for a sustained interval
-      // and proceeds with the rest of the command outside exclusivity,
-      // releasing nothing further; acquisition, the hold file, every check,
+      // (long relative to the time the rest of the run otherwise takes,
+      // short of S-3's hang detection) and proceeds with the rest of the
+      // command as the conformer does, outside exclusivity, releasing
+      // nothing further; acquisition, the hold file, every check,
       // every write and its order, and every run's outcome are unchanged.
       // Fails T13.5-3 on its past-the-hold arm alone: kills landing in the
       // interval find every path the twin's run changes still in its prior
@@ -223,17 +253,24 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // proceeding only once the hold path, judged through the link, holds
       // nothing; a link to an existing file or directory reads as occupied,
       // so creation fails there with the seam's usage error as the
-      // conformer's does. Fails T13.5-1 on its dangling-link arm alone,
-      // through the arm's hang detection (S-3).
+      // conformer's does, and a path holding no link is judged alike on both
+      // sides. The creation through the link — a write that traverses a
+      // symbolic link (13.4) — is that single deviation itself, not a
+      // second. Fails T13.5-1 on its dangling-link arm alone, through the
+      // arm's hang detection (S-3).
       violator("VIOL-CORE-HOLDLINK", "conf-core/bin-holdlink.mjs", ["T13.5-1"]),
       // VIOL-CORE-READERENTRY: while a directory — never a symbolic link to
       // one — occupies the lock path, `build` and the read commands each add
       // to it an entry of their own (a plain file named as a mutating run's
       // entry is, recording the reader's process identifier) and leave it
-      // there as they end; where no directory occupies the lock path, they
-      // add nothing. They acquire nothing — list no lock directory, judge no
-      // entry, are refused by none — and a mutating command's acquisition
-      // removes a reader's entry as any dead run's. Fails T13.5-4: once each
+      // there as they end, a dead run's leftover once the reader has exited;
+      // where no directory occupies the lock path, they add nothing. One
+      // rule of 13.4 (no write but acquisition and release touches the lock
+      // path) broken for `build` and the reads: they acquire nothing — list
+      // no lock directory, judge no entry, are refused by none — and a
+      // mutating command's acquisition removes a reader's entry as any dead
+      // run's, though one meeting a reader still running refuses on its
+      // entry as on any live run's. Fails T13.5-4: once each
       // read, and the `build`, run during a hold has exited, the lock
       // directory holds its entry beside the holder's, where the held-state
       // comparison's count half asserts the holder's entry alone (at the
@@ -247,7 +284,10 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // holds another live run's entry (judged as acquisition judges one),
       // polls, proceeding as the conformer does once none stands; anything
       // else at the lock path, nothing there, or a refused listing never
-      // holds it back, and it writes nothing there. Fails T13.5-4: the
+      // holds it back. It adds no entry, removes nothing, writes nothing at
+      // the lock path (13.4), and is refused by nothing, and once it
+      // proceeds its outputs, writes, and exit are the conformer's; the read
+      // commands are unchanged. Fails T13.5-4: the
       // `build` it runs during a `rename`'s hold never exits while the hold
       // stands, so the arm — awaiting that exit before it lifts the hold —
       // fails by its hang detection (S-3); its reads arm passes.
@@ -270,10 +310,12 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // VIOL-RACE-LISTFIRST: acquisition judges the lock directory before
       // adding its entry — it lists the lock directory (a missing area or
       // lock directory holding nothing), is refused by another live run's
-      // entry there as the conformer is, and otherwise, after a sustained
-      // interval (long against the spread of runs started together, far
-      // short of every hang guard), adds its entry, removes the leftovers
-      // its listing found, and acquires, never listing again. Fails
+      // entry there (14.26) as the conformer is, and otherwise, after a
+      // sustained interval (long against the spread of runs started
+      // together, far short of every hang guard), adds its entry, removes
+      // the leftovers its listing found, and acquires, never listing again —
+      // 13.5's order of addition and listing inverted; the liveness
+      // judgment, leftover removal, the hold seam, and release unchanged. Fails
       // T13.5-13's held arm on every trial: runs started together each list
       // within the others' intervals, so each acquires and more than one
       // hold file stands where the arm asserts at most one.
@@ -295,11 +337,20 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
     [
       // VIOL-READERS-CLAIM: `build` and the read commands each hold a claim
       // while they run — having located the configuration file, each adds an
-      // entry of its own to the lock directory (the area's directory and the
-      // lock directory brought into existence where absent), dwells for a
-      // sustained interval (3000 ms, long against a later command's
-      // start-up), proceeds as the conformer does, and deletes the claim as
-      // it ends. Fails P-10 on every run: a command started while a claiming
+      // entry of its own to the lock directory (a plain file named as a
+      // mutating run's entry is, recording the reader's process identifier)
+      // where the area's path and the lock path each hold a directory or
+      // nothing, the area's directory and the lock directory brought into
+      // existence where absent, and nothing where either holds anything
+      // else; dwells for a sustained interval (3000 ms, long against a later
+      // command's start-up, short of S-3's hang detection); proceeds as the
+      // conformer does; and as it ends deletes its entry, then the emptied
+      // lock directory and an emptied area directory it brought into
+      // existence, as release does. Acquisition judges a reader's entry as
+      // any run's: a live reader's refuses it (14.26). Readers still list no
+      // lock directory, judge no entry, remove no leftover, and are refused
+      // by none, their answers, other writes, and exits the conformer's.
+      // Fails P-10 on every run: a command started while a claiming
       // reader runs is refused `workspace-busy` where P-10 asserts it never
       // refused (and a lock path inspected after a kill holds the reader's
       // entry beside the dead run's).
@@ -322,26 +373,37 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // symbolic link to a directory, at any depth, follows the link — it
       // removes everything the targeted directory holds, recursing through
       // the link at every depth, then the link itself, the target left in
-      // place, empty. Fails P-15 on each draw holding a link to a directory
+      // place, empty; a link to a file and a dangling link are removed
+      // themselves, every other leftover as the conformer removes it, and
+      // the deletion through the link (a write that traverses a link, 13.4)
+      // is that single deviation itself. Fails P-15 on each draw holding a
+      // link to a directory
       // outside the workspace: the target's content deleted, the command
       // still exiting 0 with its twin's result and `.xspec/lock` absent.
       violator("VIOL-LEFTOVER-FOLLOWLINK", "conf-leftover/bin-followlink.mjs", [
         "P-15",
       ]),
-      // VIOL-LEFTOVER-DOTNAMES: acquisition's listings hide names beginning
-      // with `.`, so a leftover so named is never removed. Fails P-15 on
-      // each draw holding one: `.xspec/lock` stands once the command ends;
-      // where the name lies in a directory acquisition lists to remove, the
-      // directory's removal is refused besides — `write-failure` at
-      // `.xspec/lock`, exit 2.
+      // VIOL-LEFTOVER-DOTNAMES: acquisition's listings — of the lock
+      // directory and of each directory it removes — hide names beginning
+      // with `.`, so a leftover so named, at any depth, is never removed;
+      // links, FIFOs, unreadable files, depth, and a write the environment
+      // refuses are handled as the conformer handles them. Fails P-15 on
+      // each draw holding one: `.xspec/lock` stands once the command ends
+      // (its release unable to delete the lock directory while it holds the
+      // leftover); where the name lies in a directory acquisition lists to
+      // remove, the directory's removal is refused besides —
+      // `write-failure` at `.xspec/lock`, exit 2.
       violator("VIOL-LEFTOVER-DOTNAMES", "conf-leftover/bin-dotnames.mjs", [
         "P-15",
       ]),
       // VIOL-LEFTOVER-BYTENAMES: acquisition's listings decode names as
-      // UTF-8 text (U+FFFD for each ill-formed sequence) and address each
-      // leftover by its decoded name, so a leftover whose name is not valid
-      // UTF-8 is never removed. Fails P-15 on each draw holding one, as
-      // DOTNAMES fails it on names beginning with `.`.
+      // UTF-8 text (U+FFFD for each ill-formed sequence) and its removals
+      // address each leftover by its decoded name, so a leftover whose name
+      // is not valid UTF-8, at any depth, is addressed by a name that
+      // designates nothing — the removal finding nothing there taken for
+      // done, as the conformer takes one (14.24) — and stays; every other
+      // name is handled as the conformer handles it. Fails P-15 on each draw
+      // holding one, as DOTNAMES fails it on names beginning with `.`.
       violator("VIOL-LEFTOVER-BYTENAMES", "conf-leftover/bin-bytenames.mjs", [
         "P-15",
       ]),
@@ -421,12 +483,16 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // U+2028 as whitespace when deciding whether a line is left empty or
       // whitespace-only — consistently in Markdown output and, through SPEC
       // 1.6, in own and subtree text. A line left holding only those code
-      // points after removals is dropped with its terminator.
+      // points after removals is dropped with its terminator. The judgement
+      // of what brace and ESM-block content is whitespace and comments
+      // (14.20) and the ESM block's line terminators are unchanged.
       violator("VIOL-MD-CLASS", "conf-md/bin-class.mjs", ["T3-3", "P-2"]),
       // VIOL-MD-CR: a lone U+000D is not recognized as a line terminator by
       // the line model of SPEC 3 — consistently in Markdown output and,
       // through SPEC 1.6, in own and subtree text. CRLF and lone U+000A
       // remain terminators; a lone U+000D is an ordinary in-line character.
+      // The deletion judgement of 14.20, which ends a line comment at U+000A
+      // or U+000D alike, and the ESM block's line terminators are unchanged.
       violator("VIOL-MD-CR", "conf-md/bin-cr.mjs", ["T3-4", "P-2"]),
     ],
   ),
@@ -456,10 +522,15 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // VIOL-DISC-DERIVED: discovery does not apply the source exclusion of
       // SPEC 13.4 — a path whose file name contains `.xspec.`, a file under
       // `.xspec/`, or a file at an enabled Markdown emit destination, when
-      // matched by a spec-group glob, is treated as an ordinary match. Glob
-      // semantics, the dot-segment rule, link behavior, 14.19 for
-      // non-`.mdx` matches, and the import and empty-map rules are
-      // unchanged.
+      // matched by a spec-group or code-group glob, is treated as an ordinary
+      // match of its group's kind: on the spec side an `.mdx` name parsed as
+      // MDX and any other name reported as 14.19; on the code side a
+      // discovered code source parsed as plain TypeScript (14.20: the
+      // grammar its name selects), an edgeless whole-file location where it
+      // parses (4.6) and a condition-20 finding where it does not. Glob
+      // semantics, the dot-segment rule, link behavior, 14.19 for non-`.mdx`
+      // matches, the parse of a discovered source (14.20), the gate of 13.3,
+      // and the import and empty-map rules are unchanged.
       violator("VIOL-DISC-DERIVED", "conf-disc/bin-derived.mjs", ["T7-6"]),
     ],
   ),
@@ -505,8 +576,9 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // VIOL-AVAIL-NOFILE: `occurrences` does not apply the `--file`
       // restriction — the flag and its argument checks behave as specified
       // (11.3), but the consulted domain is the entire discovered set,
-      // exactly as with the flag absent. `--to` selection, `view`, and
-      // every other behavior are unchanged.
+      // exactly as with the flag absent — the enumeration and the findings
+      // accompanying it (11.2) follow that widened domain. `--to` selection,
+      // `view`, and every other behavior are unchanged.
       violator("VIOL-AVAIL-NOFILE", "conf-avail/bin-nofile.mjs", ["T11.3-4"]),
     ],
   ),

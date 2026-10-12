@@ -30,10 +30,12 @@ import {
   runProductTests,
 } from "./certification-runner.js";
 
-// Generous end-to-end budget: the CONF-CORE set includes concurrency and
-// polling choreography (T13.5-1…5) and the T10.4-5 read sweep, each spawning
-// many fixture subprocesses. A hang guard only, never an assertion input
-// (H-10); the runner's per-test watchdogs bound each body individually.
+// Generous end-to-end budget per verification: the CONF-CORE set includes
+// concurrency and polling choreography (T13.5-1…5, T13.5-8) and the T10.4-5
+// read sweep, and the CONF-RACE, CONF-READERS, and CONF-LEFTOVER sets the
+// repeated or seeded trials of T13.5-13, P-10, and P-15, each spawning many
+// fixture subprocesses. A hang guard only, never an assertion input (H-10);
+// the runner's per-test watchdogs bound each body individually.
 const RUN_TIMEOUT_MS = 600_000;
 
 /**
