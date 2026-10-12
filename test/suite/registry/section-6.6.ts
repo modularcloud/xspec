@@ -60,6 +60,16 @@
 //   contract (H-4). Both arrays come out of the form-exact decode in 12.7's
 //   total findings order, whose keys precede the message tie-break exactly
 //   on the compared members, so element-wise comparison is exact.
+// - T6.6-3 "modifying nothing" over each refusal twin
+//   (expectRefusedPreviewEquivalence): a whole-root compare spans the real
+//   refusal and its preview, the lock path left out — the real operation is
+//   a mutating command's run, its acquisition's and release's writes there
+//   no modification (TEST-SPEC H-6, SPEC 13.5) — and the preview runs
+//   inside its own compare against its pre-invocation state, the state the
+//   real refusal left (its end recorded by then, helpers/acquiring-runs.ts),
+//   which keeps the lock path in: a preview acquires nothing, so whatever
+//   occupied the lock path before it occupies it afterwards byte-identical,
+//   nothing added beside it (H-6, SPEC 6.6, 13.4).
 // - T6.6-3's T6.5-6, T6.5-16, and T6.5-17 twins: the identity-terms
 //   refusals run on T6.5-6's post-move workspace staged directly from the
 //   bytes that test asserts (section-6.5.ts's MOVE_IDENTITY_* exports) —
@@ -90,7 +100,11 @@
 //   so exit 2 across the pair realizes the precedence clause; the
 //   parse-local spells-no-identity arms re-pin their one-14.17 premise
 //   first (T6.4-4's protocol), and every sweep sits inside a whole-root
-//   modifies-nothing compare (SPEC 12.0).
+//   modifies-nothing compare (SPEC 12.0), which leaves the lock path out —
+//   each real invocation is a mutating command's run (TEST-SPEC H-6) — while
+//   each `--preview` invocation runs inside its own compare against the
+//   state the real invocation left, which keeps it in (H-6: a preview
+//   acquires nothing; expectUsageErrorEitherWay).
 // - T6.6-3 scheduling: the runs-while-held arm shares T13.5-2's staging and
 //   the 13.5 suite's drive-during-hold choreography (CERTIFICATIONS.md's
 //   Exclusions note binds exactly this sharing): command 1 held through
@@ -800,13 +814,21 @@ function comparableFinding(finding: Finding): unknown {
 
 /**
  * One T6.6-3 refusal-equivalence arm over a staging where the real operation
- * is refused (its home test's staging, staged identically): inside one whole-root
- * modifies-nothing compare, run the real invocation with `--json` — exit 1,
- * the form-exact 12.7 findings-only report, its per-arm code counts re-pinned
- * — then the `--preview --json` invocation: exit 1, the 12.7 preview document
- * form kept with `mapping`, `files`, and `delta` null (the refusal encoding),
- * and the same findings (module header's projection) as the real refusal
- * (SPEC 6.6, 12.7, 14).
+ * is refused (its home test's staging, staged identically): run the real
+ * invocation with `--json` — exit 1, the form-exact 12.7 findings-only
+ * report, its per-arm code counts re-pinned — then the `--preview --json`
+ * invocation: exit 1, the 12.7 preview document form kept with `mapping`,
+ * `files`, and `delta` null (the refusal encoding), and the same findings
+ * (module header's projection) as the real refusal (SPEC 6.6, 12.7, 14).
+ * Neither modifies anything (module header; TEST-SPEC H-6): one whole-root
+ * compare spans both runs, the lock path left out — the real operation is a
+ * mutating command's run, its acquisition's and release's writes there no
+ * modification (SPEC 13.5) — and the preview runs inside its own compare
+ * against its pre-invocation state, the state the real run left (its end
+ * recorded by then, helpers/acquiring-runs.ts), which keeps the lock path
+ * in: a preview acquires nothing, so whatever occupied the lock path before
+ * it occupies it afterwards byte-identical, nothing added beside it (SPEC
+ * 6.6, 13.4).
  */
 async function expectRefusedPreviewEquivalence(
   product: ProductBinding,
@@ -850,48 +872,62 @@ async function expectRefusedPreviewEquivalence(
 
       // The `--preview` invocation on the identical state: refused exactly
       // when — reporting what, and exiting as — the real operation is
-      // refused (SPEC 6.6).
+      // refused (SPEC 6.6). Its own compare starts from the state the real
+      // run left: no mutating command's run acts between its snapshots, so
+      // the lock path stays in it (H-6).
       const previewArgv = [...argv, "--preview", "--json"];
       const previewCommand = previewArgv.join(" ");
-      const preview = await expectExit(
-        product,
-        workspace,
-        previewArgv,
-        1,
-        `${context}: \`${previewCommand}\` — a preview is refused exactly ` +
-          `when, and exits as, the real operation would be refused ` +
-          `(SPEC 6.6, 12.0)`,
-      );
-      const report = decodePreviewReport(
-        parseJsonStdout(preview, `${context}: \`${previewCommand}\``),
-        `${context}: \`${previewCommand}\` — a refused preview keeps the ` +
-          `12.7 preview document form (SPEC 12.7, H-3)`,
-      );
-      if (
-        report.mapping !== null ||
-        report.files !== null ||
-        report.delta !== null
-      ) {
-        fail(
-          `${context}: a refused preview reports the refusal findings ` +
-            `alone — its \`mapping\`, \`files\`, and \`delta\` are null ` +
-            `(SPEC 6.6, 12.7); got mapping ` +
-            `${report.mapping === null ? "null" : "present"}, files ` +
-            `${report.files === null ? "null" : "present"}, delta ` +
-            `${report.delta === null ? "null" : "present"}`,
-        );
-      }
-      assertSameJson(
-        report.findings.map(comparableFinding),
-        realFindings.map(comparableFinding),
-        `${context}: the refused preview reports the same findings as the ` +
-          `real refusal — same stable codes, locations, concerned paths, ` +
-          `and identities, element-wise in 12.7's total findings order ` +
-          `(message composition unpinned, H-4) (SPEC 6.6, 14, 12.7)`,
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          const preview = await expectExit(
+            product,
+            workspace,
+            previewArgv,
+            1,
+            `${context}: \`${previewCommand}\` — a preview is refused ` +
+              `exactly when, and exits as, the real operation would be ` +
+              `refused (SPEC 6.6, 12.0)`,
+          );
+          const report = decodePreviewReport(
+            parseJsonStdout(preview, `${context}: \`${previewCommand}\``),
+            `${context}: \`${previewCommand}\` — a refused preview keeps ` +
+              `the 12.7 preview document form (SPEC 12.7, H-3)`,
+          );
+          if (
+            report.mapping !== null ||
+            report.files !== null ||
+            report.delta !== null
+          ) {
+            fail(
+              `${context}: a refused preview reports the refusal findings ` +
+                `alone — its \`mapping\`, \`files\`, and \`delta\` are null ` +
+                `(SPEC 6.6, 12.7); got mapping ` +
+                `${report.mapping === null ? "null" : "present"}, files ` +
+                `${report.files === null ? "null" : "present"}, delta ` +
+                `${report.delta === null ? "null" : "present"}`,
+            );
+          }
+          assertSameJson(
+            report.findings.map(comparableFinding),
+            realFindings.map(comparableFinding),
+            `${context}: the refused preview reports the same findings as ` +
+              `the real refusal — same stable codes, locations, concerned ` +
+              `paths, and identities, element-wise in 12.7's total findings ` +
+              `order (message composition unpinned, H-4) (SPEC 6.6, 14, 12.7)`,
+          );
+        },
+        `${context}: \`${previewCommand}\` — the refused preview modifies ` +
+          `nothing, compared against its own pre-invocation state (the ` +
+          `state the real refusal left) with the lock path included: a ` +
+          `preview acquires nothing, so it writes nothing there (SPEC 6.6, ` +
+          `13.4; TEST-SPEC H-6)`,
       );
     },
     `${context}: \`${command}\` — neither the refused operation nor its ` +
-      `refused \`--preview\` modifies anything (SPEC 6.4, 6.5, 6.6)`,
+      `refused \`--preview\` modifies anything across both runs, the lock ` +
+      `path left out: the real operation's acquisition and release count ` +
+      `as no modification (SPEC 6.4, 6.5, 6.6, 13.5; TEST-SPEC H-6)`,
   );
 }
 
@@ -935,8 +971,14 @@ async function expectRefusedArmPreviewTwin(
  * identically): the real invocation and then the `--preview` one, each with
  * `--json` — exit 2 exactly, the single 12.7 error document as the entire
  * stdout (12.0, H-5), and a usage error message on stderr (presence, not
- * wording). Argument checks precede either way (SPEC 6.6, 12.0). Accepts
- * raw-byte argv elements for the Linux-leg non-UTF-8 destination case.
+ * wording). Argument checks precede either way (SPEC 6.6, 12.0). The
+ * `--preview` invocation runs inside its own compare against its
+ * pre-invocation state, the state the real invocation left (its end
+ * recorded by then, helpers/acquiring-runs.ts), which keeps the lock path
+ * in: a preview acquires nothing (TEST-SPEC H-6). Each caller's whole-root
+ * compare around its pairs leaves the lock path out, the real invocations
+ * being mutating commands' runs (H-6). Accepts raw-byte argv elements for
+ * the Linux-leg non-UTF-8 destination case.
  */
 async function expectUsageErrorEitherWay(
   product: ProductBinding,
@@ -944,11 +986,10 @@ async function expectUsageErrorEitherWay(
   argv: readonly ArgvValue[],
   context: string,
 ): Promise<void> {
-  const invocations: readonly (readonly [readonly ArgvValue[], string])[] = [
-    [[...argv, "--json"], "real invocation"],
-    [[...argv, "--preview", "--json"], "`--preview` invocation"],
-  ];
-  for (const [fullArgv, what] of invocations) {
+  const expectUsageError = async (
+    fullArgv: readonly ArgvValue[],
+    what: string,
+  ): Promise<void> => {
     const label = `${context} (${what})`;
     const result = await runProduct(product, {
       cwd: workspace.root,
@@ -971,7 +1012,24 @@ async function expectUsageErrorEitherWay(
           `(SPEC 12.0), but stderr is empty`,
       );
     }
-  }
+  };
+  await expectUsageError([...argv, "--json"], "real invocation");
+  // The preview's own compare starts from the state the real invocation
+  // left: no mutating command's run acts between its snapshots, so the lock
+  // path stays in it (H-6).
+  await assertLeavesUnchanged(
+    workspace.root,
+    () =>
+      expectUsageError(
+        [...argv, "--preview", "--json"],
+        "`--preview` invocation",
+      ),
+    `${context} (\`--preview\` invocation): the usage error modifies ` +
+      `nothing, compared against its own pre-invocation state (the state ` +
+      `the real invocation left) with the lock path included: a preview ` +
+      `acquires nothing, so it writes nothing there (SPEC 12.0, 6.6, 13.4; ` +
+      `TEST-SPEC H-6)`,
+  );
 }
 
 /**
@@ -979,7 +1037,9 @@ async function expectUsageErrorEitherWay(
  * nonexistence, staged identically): pin the one-14.17 premise — a repeated
  * `id` is condition 17, never 14.1, and spells no identity (SPEC 11.2, 14)
  * — then assert the operation and its preview are exit 2 even beside that
- * file's findings, modifying nothing.
+ * file's findings, modifying nothing: a whole-root compare around the pair,
+ * the lock path left out, and the preview's own compare inside it, the lock
+ * path included (expectUsageErrorEitherWay; TEST-SPEC H-6).
  */
 async function runSoloUsageArm(
   product: ProductBinding,
@@ -1904,7 +1964,7 @@ const T6_6_3 = defineProductTest({
   // The twins of T6.5-16's and T6.5-17's arms add some fifty stagings, each
   // with its premise `build` and two invocations, and the acquisition arms
   // eight more fresh workspaces: a wider hang guard (H-8). The whole body
-  // took about 176 s locally alone against a reference passing it (the
+  // took about 171 s locally alone against a reference passing it (the
   // built product for all but the 13.5 runs, AGENTS.md's timings bullet),
   // and before the acquisition arms 175 s locally alone, 103 s in CI, where
   // 240 s ran out under a local load average of 4–7.
