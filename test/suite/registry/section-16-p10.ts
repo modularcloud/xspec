@@ -79,6 +79,14 @@
 //     and graph data, which readers' refreshes may rewrite last-write-wins
 //     (13.3, 13.5), not compared; `.xspec/lock` is then absent.
 //
+// The session files compared and judged are SPEC 10.1's sessions: entries
+// directly under `.xspec/reviews/` named `<session-name>.json` with a valid
+// session name. Any other entry there is no session and is ignored by every
+// command (10.1) — the temporary entry an atomic session write leaves when
+// a kill lands before its rename among them, which stays in the workspace
+// the schedule continues on — so it is neither compared with a twin nor
+// counted as a write beside a command's own files (isComparedKey).
+//
 // Validity discipline (every twin exits 0): `rename` targets a top-level ID
 // the generator's file model holds, with a fresh name; file-form `move` a
 // fresh `specs/M<n>.mdx`; `resolve` an unblocked item, picked by rank from
@@ -253,7 +261,8 @@ const A_MDX = stagedMdx(
 
 const SESSION_NAME = "s";
 const JOURNAL_REL = ".xspec/journal";
-const SESSION_REL = `.xspec/reviews/${SESSION_NAME}.json`;
+const SESSION_DIRECTORY_REL = ".xspec/reviews";
+const SESSION_REL = `${SESSION_DIRECTORY_REL}/${SESSION_NAME}.json`;
 const WORKSPACE_BUSY = "workspace-busy";
 
 /** `NAME.mdx` generates `NAME.xspec.ts` beside it (SPEC 13.1). */
@@ -739,23 +748,46 @@ async function holdsOrExits(
 // What P-10 compares: sources, the journal, and session files
 
 /**
+ * SPEC 10.1's session-name form: one or more ASCII letters, digits, `.`,
+ * `_`, and `-`, never beginning with `.`.
+ */
+const SESSION_NAME_FORM = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
+
+/**
+ * Whether a snapshot key names a session (SPEC 10.1): an entry directly
+ * under the session directory named `<session-name>.json` with a valid
+ * session name, whatever its kind (one that is not a plain file is a corrupt
+ * session, 10.1, 13.4 — still a session). Keys are latin1-decoded byte
+ * paths, so a name holding any byte outside 10.1's ASCII characters fails
+ * the form, as it does in 10.1.
+ */
+function isSessionKey(key: string): boolean {
+  const prefix = `${SESSION_DIRECTORY_REL}/`;
+  if (!key.startsWith(prefix) || !key.endsWith(".json")) return false;
+  return SESSION_NAME_FORM.test(
+    key.slice(prefix.length, key.length - ".json".length),
+  );
+}
+
+/**
  * Whether a snapshot key is among what P-10 compares with a twin and judges
  * a killed run by — sources (and the configuration), the journal, and the
- * session files, the directories holding them included: under `.xspec/`,
- * exactly the journal and the session directory with everything in it;
- * elsewhere, everything but a derived file, whose name carries `.xspec.`
- * (SPEC 13.1). Graph data and derived files, which readers' refreshes may
+ * session files (TEST-SPEC P-10): under `.xspec/`, exactly the journal and
+ * SPEC 10.1's sessions (isSessionKey), the area's and the session
+ * directory's own entries aside; elsewhere, everything but a derived file,
+ * whose name carries `.xspec.` (SPEC 13.1), the directories holding sources
+ * included. Any other entry in the session directory is no session and is
+ * ignored by every command (10.1) — the temporary entry an atomic session
+ * write leaves when a kill lands before its rename among them — so it is
+ * neither compared with a twin nor counted as a write beside a command's
+ * own files. Graph data and derived files, which readers' refreshes may
  * rewrite last-write-wins (13.3, 13.5), are left out, and so is the lock
  * path (H-6).
  */
 function isComparedKey(key: string): boolean {
   if (key === ".xspec") return false;
   if (key.startsWith(".xspec/")) {
-    return (
-      key === JOURNAL_REL ||
-      key === ".xspec/reviews" ||
-      key.startsWith(".xspec/reviews/")
-    );
+    return key === JOURNAL_REL || isSessionKey(key);
   }
   return !path.posix.basename(key).includes(".xspec.");
 }
@@ -849,13 +881,16 @@ function assertJournalAppended(
 /**
  * The walk's exclusion for a compared snapshot: everything isComparedKey
  * leaves out is pruned before it is examined — the area walked only for the
- * journal and the session directory — so a snapshot taken while readers
- * still run never meets a refresh's transient files, nor reads anything
- * under the lock path.
+ * journal and the session directory, the session directory only for its
+ * sessions — so a snapshot taken while readers still run never meets a
+ * refresh's transient files, nor reads anything under the lock path, nor
+ * any entry in the session directory that is no session (SPEC 10.1).
  */
 function excludeUncompared(relPathBytes: Uint8Array): boolean {
   const key = Buffer.from(relPathBytes).toString("latin1");
-  return key !== ".xspec" && !isComparedKey(key);
+  return (
+    key !== ".xspec" && key !== SESSION_DIRECTORY_REL && !isComparedKey(key)
+  );
 }
 
 /** The compared view of the workspace at `root`, taken now. */
@@ -1366,9 +1401,12 @@ function sameBytes(a: Uint8Array | null, b: Uint8Array | null): boolean {
 
 /**
  * What a command writes beside its own durable files, judged on its own
- * workspace (SPEC 6.1, 10.7, 13.4): a resolve writes the session file alone
- * — never the journal (6.1), never a source — and `rename` and `move` never
- * write review sessions (identity mappings are applied at read time, 10.4).
+ * workspace over the compared view (isComparedKey; SPEC 6.1, 10.7, 13.4): a
+ * resolve writes the session file alone — never the journal (6.1), never a
+ * source, never another session — and `rename` and `move` never write
+ * review sessions (identity mappings are applied at read time, 10.4). An
+ * entry in the session directory that is no session (10.1), such as an
+ * atomic write's temporary entry a kill left, is no write judged here.
  */
 function assertWritesItsOwnFilesAlone(
   episode: P10Episode,

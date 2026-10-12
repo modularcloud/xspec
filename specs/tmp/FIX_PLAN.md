@@ -58,7 +58,7 @@ The previous plan (written at 092db72 from iteration 55's determination, carried
 
 **Order.** Take the topmost task unless told otherwise. Task 2 comes last. When a task is done, its commit removes it from the Tasks section and adds a one-line summary to its bullet here.
 - Task 1 (D-1): T6.1-1's never-modifies sweep compares the journal through the compare-around-command machinery VIOL-CORE-CHATTYREADS certifies (`snapshotDirectory` and `assertSnapshotsEqual`). Done: in `section-6.1.ts`, `assertLeavesJournalUnchanged` keeps `readJournal`'s plain-file check as the premise, then snapshots the workspace root (`snapshotDirectory`, no options, `.git` walked) before and after the command, whose exit code `expectExit` asserts first, and compares both snapshots viewed as the journal entry alone (module-local `filteredEntries`, `asSnapshot`, `journalView`) with `assertSnapshotsEqual`; the after-command `readJournal` is gone, and the module header, the helper's doc comment, and the sweep and preview comments name the machinery. Through `t9j59_1/journalappend.mjs` (AGENTS.md), each of the 24 `append:<surface>` variants failed T6.1-1 at that surface's `assertBytesEqual` before and now fails at its snapshot compare (`changed .xspec/journal: file bytes differ`; each preview at its inner journal compare), and `truncate`, `delete`, and `symlink` at `check` moved from `assertBytesEqual`, `readJournal`'s `found absent`, and its `found symlink` to `file bytes differ`, `removed .xspec/journal`, and `kind changed: file → symlink` (table: `t9j59_1/table.txt`), none an error or hang; T6.1-1 passes through `none` (13.4 s before, 14.5 s after) and through the inventory-lock stand-in alone (14.0 s, 14.1 s); against the built product it still fails first at the sweep's `inventory` answer (`$.lock`; 10.5 s, 10.1 s); the self project (37 files, 4434 tests, all passed, 415 s, S-7 green; T6.1-1 against the empty stub still fails at its fresh-workspace `build` exit code) and the certification lines (186 PASS / 50 FAIL / 0 error / 0 hang, 0 discrepancies) unchanged.
-- Task 3 (added by Task 2's first attempt, from CI run 1210's harness-self failure at ffee710; runs before Task 2): P-10's compared view holds the session directory to its sessions (SPEC 10.1), so the temporary entry that a `review resolve` killed inside its atomic session write leaves is no false failure.
+- Task 3 (added by Task 2's first attempt, from CI run 1210's harness-self failure at ffee710; runs before Task 2): P-10's compared view holds the session directory to its sessions (SPEC 10.1), so the temporary entry that a `review resolve` killed inside its atomic session write leaves is no false failure. Done: in `section-16-p10.ts`, `isComparedKey` holds `.xspec/` to the journal and SPEC 10.1's sessions (the new `isSessionKey`: an entry directly under `.xspec/reviews` named `<session-name>.json` with a valid name, whatever its kind), the area's and the session directory's own entries aside, and `excludeUncompared` walks the session directory for its sessions alone, every other entry there pruned unread; the module header and the doc comments of `isComparedKey`, `excludeUncompared`, and `assertWritesItsOwnFilesAlone` say so, and the title and every message stand. Through `t9j59_3/standin.mjs` (AGENTS.md): the conformer itself (`none`) met CI's false failure before the change (seed 161803399, trial 3, episode 1, a resolve killed past its hold leaving `.xspec/reviews/.xspec.tmp-23631-0`; 20.5 s) and passes after (16.9 s); `dwell:1000` failed before at `assertWritesItsOwnFilesAlone` (seed 271828183, trial 1, episode 3, `.xspec.tmp-24795-0`) and passes after (41.3 s); `beside` (seven non-session entries left beside the session) failed before at the same check and passes after (17.3 s); `resolve-journal` (journal accounting), `resolve-source`, `resolve-session2`, and `rename-session` (`assertWritesItsOwnFilesAlone`, at `specs/A.mdx`, `.xspec/reviews/t.1.json`, and `.xspec/reviews/s.json`) fail before and after at the same checks, none an error or hang; against the built product P-10 fails as before (seed 271828183, trial 2 of 3, a resolve killed past its hold, `found nothing at .xspec/lock`; 45.5 s before, 44.6 s after), and against the empty stub still at its staging `build`'s exit code; `-t READERS` passes (CONF-READERS' P-10 passes, VIOL-READERS-CLAIM fails it); P-10 keeps its 600 s `timeoutMs`; the self project (37 files, 4434 tests, all passed, 394.65 s, S-7 green; CONF-READERS 19.2 s, VIOL-READERS-CLAIM 32.5 s) and the certification lines (186 PASS / 50 FAIL / 0 error / 0 hang, 0 discrepancies, the 236 outcomes identical to Task 1's run) unchanged.
 - Task 2: confirm locally and in CI; record the timings; delete this plan. Its first attempt, at ffee710, amended this plan and changed nothing else:
   - Locally, `npm run typecheck` and `npm run format:check` exited 0. The self project passed under the unprivileged recipe with the admin files left out: 37 files, 4434 tests, 428.90 s. Certification was 186 PASS / 50 FAIL / 0 error / 0 hang with 0 discrepancies; CONF-READERS' P-10 passed in 19.0 s.
   - CI run 1210 (ID 38210662888) at ffee710 completed. Its harness-self job (114683916281; 39 files, 4444 tests in 328.80 s, the job 356 s) failed CONF-READERS' P-10 (Task 3).
@@ -67,53 +67,6 @@ The previous plan (written at 092db72 from iteration 55's determination, carried
   - The local suite run and the timings were left for the rerun after Task 3. The logs are in the scratchpad's `t9j59_2/` (`self.log` and `self.json`; `ci1210/hs.log`, `fs.log` and the raw logs).
 
 ## Tasks
-
-### Task 3 — P-10 holds the session directory to its sessions: a killed resolve's temporary entry is no false failure
-
-**Found by.** Task 2's first attempt, reading CI run 1210 (ID 38210662888) at ffee710, the head Task 1 pushed. Its harness-self job (114683916281) failed: 39 files, 4444 tests, 1 failed and 4443 passed (328.80 s; both `*.admin.test.ts` files passed). The one failure is `test/self/certification.test.ts > CONF-READERS conformer: every CERTIFICATIONS.md in-scope test passes against the fixture (C-1)`:
-- P-10 FAIL, `property "P-10 concurrency schedules": falsified with seed 161803399 (trial 3 of 3)`, `(already minimal: no shrink candidate was accepted)`;
-- at episode 1/3, `resolve rank 5 --status no-change (held, pastHoldKill at 0.4 of the twin's span)`;
-- the message: "the run the kill ended (pastHoldKill): a `review resolve` writes the session file alone — never the journal (its only writers are `rename` and `move`, SPEC 6.1), never a source (10.7, 13.4) — yet .xspec/reviews/.xspec.tmp-55126-0 changed".
-
-VERIFY's `p9v59/certcheck.py` on that log finds CONF-READERS' P-10 the only discrepancy. The block appears three times only because the log prints the one report three times: in the test's output, in the failure summary and in the annotation. The cleaned log is the scratchpad's `t9j59_2/ci1210/hs.log` (raw: `hs.raw.log`).
-
-Task 1 changed only `section-6.1.ts`, for T6.1-1, which lies in no certification scope. The same P-10 passed against CONF-READERS in every other run on record:
-- the local self run at ffee710's trees (19.0 s);
-- run 1210's own full-suite job, whose certification run had 0 discrepancies;
-- every harness-self job recorded since CONF-READERS was wired (AGENTS.md's runs 1192 to 1207, and run 1208 per VERIFY).
-
-**Cause.**
-- **How the leftover arises.** CONF-CORE's `writeFileAtomic` (`test/fixtures/conf-core/product.mjs`, which CONF-READERS runs) writes each file through a temporary entry `.xspec.tmp-<pid>-<n>` in the target's directory, then renames it over the target. A kill that lands after that entry exists but before the rename leaves the entry beside an unchanged target. P-10's past-the-hold kill at 0.4 of the twin's span did exactly that to the session write, leaving `.xspec/reviews/.xspec.tmp-55126-0`.
-- **Why P-10 fails on it.** P-10's compared view (`isComparedKey` in `test/suite/registry/section-16-p10.ts`) takes "the session directory with everything in it". `assertWritesItsOwnFilesAlone` then fails a resolve if any compared key other than `SESSION_REL` differs. That check goes beyond TEST-SPEC's letter; it was choice 6 of the 772854b plan's Task 44.
-- **What the specs require.** TEST-SPEC P-10 compares only "the sources, journal, or session files". Of a killed resolve it asks only that it "either recorded it or left the session file byte-unchanged". SPEC 10.1 says: "Only a directory entry directly under it named `<session-name>.json` with a valid session name is a session; any other entry there is not a session and is ignored by every command, `check` included." CONF-CORE's `listSessionNames` ignores such an entry accordingly.
-- **Verdict.** The conformer meets P-10 (C-1). The check fails it only when a kill lands in the window between two adjacent filesystem calls, so it is a flaky false failure (E-5) and a harness defect.
-- **Where the view already copes.** Elsewhere the compared view already leaves such entries out: outside `.xspec/` by its `.xspec.` name rule, and under `.xspec/` by comparing nothing but the journal and the session directory.
-
-**Change.**
-- Hold P-10's comparisons and judgements to the session files TEST-SPEC names: SPEC 10.1's sessions, the session directory's own entry aside. An entry there that is no session is then neither compared with a twin nor counted as a write beside the command's own files. That covers a temporary entry an atomic write left cut short, and anything else not named `<session-name>.json` with a valid name.
-- Keep the rest of the view: sources and the configuration, the journal, and the walk's pruning (`excludeUncompared`). Derived files, graph data and the lock path stay left out.
-- Correct every comment and message the change contradicts: `isComparedKey`'s doc comment, `excludeUncompared`'s, the module header's lines on what P-10 compares, and the test title if they say otherwise.
-- Confirm that no other P-10 judgement of a killed or completed run can fail on such an entry. A killed `rename` or `move`, for example, leaves its entry beside a source or under `.xspec/`, and both are already left out.
-- The method is yours; name any choice the plan leaves open in the commit message.
-
-**Liveness.**
-- Show the change live with a stand-in that reproduces the leftover. Either:
-  - dwell for a sustained interval between the session write's temporary entry and its rename, so that P-10's past-the-hold kills land inside it (this reproduces the CI diagnosis);
-  - or leave a non-session entry beside the session file on every resolve.
-- Against that stand-in, P-10 fails before the change, at a check you state, and passes after it.
-- Show that the narrowed view still catches what it must, red both before and after the change:
-  - a resolve that also writes the journal, a source, or another session file;
-  - a `rename` or `move` that writes the session.
-- Scratch stand-ins live in the scratchpad (`t9j59_3/`). Record in AGENTS.md any recipe a later spawn needs.
-
-**Checks.**
-- `npm run typecheck` and `npm run format:check` exit 0.
-- Run `-t READERS` on `test/self/certification.test.ts`: the conformer passes, and VIOL-READERS-CLAIM fails P-10 as its entry states.
-- Run P-10 against the built product before and after the change, recording its outcome and first diagnosis. At a126add it failed at seed 271828183, trial 3 of 3: a `move` killed while held, with nothing at `.xspec/lock`. In run 1210 it failed at trial 2 of 3; which trial meets the failure first is timing-dependent (E-5).
-- S-7: P-10 against the empty stub still fails as a diagnosed failure.
-- Check P-10's `timeoutMs` against its measured duration.
-- The full self project ends with 0 failures, and the certification lines are unchanged: 186 PASS / 50 FAIL / 0 error / 0 hang, with 0 discrepancies.
-- The commit removes this task and adds its one-line summary to its Order bullet. Then push. Task 2 reads the CI run of this push.
 
 ### Task 2 — Confirm locally and in CI; record the timings; delete this plan
 
