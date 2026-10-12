@@ -1,12 +1,15 @@
 // E-6 Linux-side leg of the cross-platform byte-identity comparison
 // (TEST-SPEC §18 E-6; CI-01). Runs the representative fixture — `version`,
 // `build`, `check`, `query`, `coverage`, `impact`, `occurrences`,
-// `view --text`, `at`, a `move --preview`, a journaled `rename`, a journaled
-// file-form `move`, a journaled section-form `move` (the inserted-terminator
-// probe: its moved text lands before a target parent's closing tag in an
-// existing target file that gains an added import), an `audit` review
-// session, and a nested-working-directory `inventory` — against the built
-// product (helpers/e6.ts), asserting every step's exact exit code, and
+// `view --text`, `at`, a `move --preview`, a journaled `rename` (the
+// exclusion probe: held and killed, then held again over the dead run's
+// leftover while the file-form `move` is refused `workspace-busy`, 13.5), a
+// journaled file-form `move`, a journaled section-form `move` (the
+// inserted-terminator probe: its moved text lands before a target parent's
+// closing tag in an existing target file that gains an added import), an
+// `audit` review session, and a nested-working-directory `inventory` —
+// against the built product (helpers/e6.ts), asserting every step's exact
+// exit code and the lock path's state around the mutating commands, and
 // writes the captured outputs (transcript + final workspace tree) into
 // XSPEC_E6_EXCHANGE_DIR when it is set. The suite-linux CI job sets that
 // variable and uploads the directory as the `e6-linux-outputs` artifact; the
@@ -33,9 +36,9 @@ import {
 } from "../helpers/e6.js";
 import { builtProductBinding } from "../helpers/subprocess.js";
 
-// Generous hang guard for the whole 25-invocation fixture (H-8; each product
-// invocation also carries its own subprocess timeout). Never an assertion
-// input (H-10).
+// Generous hang guard for the whole 27-invocation fixture, its exclusion
+// probe's bounded reruns included (H-8; each product invocation also carries
+// its own subprocess timeout). Never an assertion input (H-10).
 const FIXTURE_TIMEOUT_MS = 300_000;
 
 test(

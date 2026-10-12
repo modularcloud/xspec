@@ -4,20 +4,22 @@
 //
 // One fixture story exercises the E-6 command set — `version`, `build`,
 // `check`, `query`, `coverage`, `impact`, `occurrences`, `view --text`,
-// `at`, a `move --preview`, a journaled `rename`, a journaled file-form
-// `move`, a journaled section-form `move` whose moved text lands before a
-// target parent's closing tag in an existing target file that gains an added
-// import, an `audit` review session (`review create --strategy audit`,
-// `next --json`, a `resolve`, an `export`), and `inventory` invoked from a
-// nested working directory, pinning the relative `/`-joined anchoring (SPEC
-// 11.6) — and captures two kinds of output:
+// `at`, a `move --preview`, a journaled `rename` (the subset's exclusion
+// probe, below), a journaled file-form `move`, a journaled section-form
+// `move` whose moved text lands before a target parent's closing tag in an
+// existing target file that gains an added import, an `audit` review
+// session (`review create --strategy audit`, `next --json`, a `resolve`, an
+// `export`), and `inventory` invoked from a nested working directory,
+// pinning the relative `/`-joined anchoring (SPEC 11.6) — and captures two
+// kinds of output:
 //
-//   - the transcript: every invocation's argv, exit code, and exact
+//   - the transcript: every recorded invocation's argv, exit code, and exact
 //     stdout/stderr bytes — the path- and range-dense occurrence, view, at,
-//     inventory, and preview documents included (reports, 12.0);
-//   - the final workspace tree, `.git/` excluded: move-rewritten sources,
-//     generated files, emitted Markdown, graph data, the journal, and the
-//     session file (stored data, 1.5/13.4).
+//     inventory, and preview documents, and the exclusion probe's refused
+//     `move`'s error document, included (reports, 12.0);
+//   - the final workspace tree, `.git/` and the lock path `.xspec/lock`
+//     excluded: move-rewritten sources, generated files, emitted Markdown,
+//     graph data, the journal, and the session file (stored data, 1.5/13.4).
 //
 // The Linux leg (test/suite/e6-exchange-writer.test.ts) runs the fixture
 // against the built product and, when XSPEC_E6_EXCHANGE_DIR is set, writes
@@ -50,6 +52,42 @@
 // depends on no case-sensitive filesystem, no symlink creation, and no POSIX
 // signal semantics, so it stages identically on both legs.
 //
+// The journaled `rename` is also the subset's exclusion probe (E-6; SPEC
+// 13.5: an entry's run judged alive in the acquiring process's process list,
+// which a product consulting it through a facility Windows lacks misjudges
+// on that leg alone, and release's deletions meeting Windows' own file
+// semantics there). It is first started with `--test-hold` — its hold path
+// beside the workspace root in the workspace's temporary directory, outside
+// the workspace — and, once held, killed under its leg's discipline
+// (helpers/e6-exclusion.ts: on Linux T13.5-3's process-group kill, on
+// Windows the platform's forced termination of the run and every process it
+// started, involving no POSIX signal), after which `.xspec/lock` holds
+// exactly one entry, a plain file: the dead run's leftover. It is then
+// started again with `--test-hold`, takes that leftover over, and while it
+// holds — the held-state comparison holding (TEST-SPEC §13.5's preamble) —
+// the file-form `move` runs under `--json` and exits 2 promptly, the hold
+// still standing, with `code` `"workspace-busy"` and `path` `".xspec/lock"`
+// (14.26), modifying nothing, the held `rename`'s entry again the lock
+// directory's only entry; the hold lifted, the `rename` completes and the
+// fixture proceeds, the `move` then run as before. The second `rename` runs
+// under `--json`, so a refusal is read from its error document: should it
+// be refused `workspace-busy` while an identifier of the killed run is
+// listed again in the leg's process list, the trial is void and rerun from
+// the workspace's copy taken before the kill, a bounded number of times,
+// exhaustion a harness error (T13.5-3's reuse check, H-11); a refusal with
+// none listed fails, as does any other ending before it holds.
+// `.xspec/lock` is absent after each mutating command of the fixture that
+// ends with no other run holding: the `rename`, both journaled `move`s,
+// `review create`, and the `resolve` (T13.5-11). The refused `move`'s error
+// document joins the transcript (step "move-busy", recorded before step
+// "rename", which completes after it), as does the `rename`'s performed
+// operation document (12.7); the second `rename` spells its hold path
+// relative to the workspace root, its working directory (`--test-hold`
+// resolves against it, SPEC 12.0), so its recorded argv is the same on both
+// legs; the killed run, whose ending the two platforms report differently,
+// is no step. The lock path lies outside every comparison across legs
+// (H-6): the final tree is captured without it.
+//
 // Red-green (H-8): every step asserts its exact exit code through the
 // diagnosed-assertion helpers, so against a stub product the fixture fails at
 // its first step as a diagnosed assertion failure on either leg — never a
@@ -64,19 +102,42 @@
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { decodeNextReport } from "./adapters/index.js";
+import { decodeErrorDocument, decodeNextReport } from "./adapters/index.js";
 import {
   assertBytesEqual,
   assertExitCode,
   fail,
   parseJsonStdout,
 } from "./assertions.js";
+import { e6ReuseCheck, killHeldE6Run, settlesWithin } from "./e6-exclusion.js";
+import { runVoidableTrial } from "./kill-discipline.js";
+import { EXCLUDE_LOCK_PATH, isLockPathBytes, LOCK_PATH } from "./lock-path.js";
+import {
+  assertEntriesNamedApart,
+  assertHeldState,
+  assertLockPathAbsent,
+  assertOnlyEntry,
+} from "./lock-state.js";
 import type { DirectorySnapshot } from "./snapshot.js";
-import { assertSnapshotsEqual, snapshotDirectory } from "./snapshot.js";
+import {
+  assertSnapshotsEqual,
+  diffSnapshots,
+  snapshotDirectory,
+} from "./snapshot.js";
 import { stagedMdx } from "./staged-mdx.js";
 import { stagedTs } from "./staged-ts.js";
-import type { ProductBinding, RunResult } from "./subprocess.js";
-import { runProduct } from "./subprocess.js";
+import type {
+  ProductBinding,
+  RunningProduct,
+  RunResult,
+} from "./subprocess.js";
+import {
+  releaseHoldFile,
+  rethrowHarnessError,
+  runProduct,
+  startProduct,
+  summarizeResult,
+} from "./subprocess.js";
 import { TestWorkspace } from "./workspace.js";
 
 /**
@@ -106,7 +167,10 @@ export interface E6StepRecord {
 export interface E6FixtureRun {
   /** Every invocation in fixture order. */
   readonly steps: readonly E6StepRecord[];
-  /** Byte snapshot of the final workspace tree, `.git/` excluded. */
+  /**
+   * Byte snapshot of the final workspace tree, `.git/` and the lock path
+   * `.xspec/lock` excluded (H-6).
+   */
   readonly workspace: DirectorySnapshot;
 }
 
@@ -279,11 +343,21 @@ function assertSectionMoveLanded(targetBytes: Uint8Array): void {
   }
 }
 
-const GIT_DIR_BYTES = Buffer.from(".git", "utf8");
+const GIT_DIR = ".git";
+const GIT_DIR_BYTES = Buffer.from(GIT_DIR, "utf8");
 
 /** Exclude exactly the top-level `.git` tree from workspace snapshots. */
 function excludeGitTree(relPathBytes: Uint8Array): boolean {
   return Buffer.compare(Buffer.from(relPathBytes), GIT_DIR_BYTES) === 0;
+}
+
+/**
+ * Exclude the top-level `.git` tree and the lock path `.xspec/lock` with
+ * everything under it — outside every comparison across legs (H-6) — from
+ * workspace snapshots.
+ */
+function excludeGitTreeAndLockPath(relPathBytes: Uint8Array): boolean {
+  return excludeGitTree(relPathBytes) || isLockPathBytes(relPathBytes);
 }
 
 /**
@@ -335,6 +409,22 @@ export async function runE6RepresentativeFixture(
         stdoutBytes: result.stdoutBytes,
         stderrBytes: result.stderrBytes,
       });
+      return result;
+    };
+    // A mutating command ending with no other run holding releases: nothing
+    // is left at `.xspec/lock` once it exits (SPEC 13.5; TEST-SPEC E-6,
+    // T13.5-11).
+    const mutatingStep = async (
+      name: string,
+      argv: readonly string[],
+      why: string,
+    ): Promise<RunResult> => {
+      const result = await step(name, argv, 0, why);
+      await assertLockPathAbsent(
+        workspace.root,
+        `E-6 representative fixture, step "${name}" (\`${argv.join(" ")}\`), ` +
+          `once it completed with no other run holding`,
+      );
       return result;
     };
 
@@ -449,14 +539,12 @@ export async function runE6RepresentativeFixture(
       "the byte position resolves to the innermost section and its enclosing occurrence (SPEC 11.5)",
     );
 
-    // Journaled rename: rewrites the ID and its references in MDX and
-    // TypeScript sources, appending the mapping to the journal (SPEC 6.4).
-    await step(
-      "rename",
-      ["rename", E6_CORE, "core.mid.leaf", E6_RENAMED_LEAF_ID],
-      0,
-      "a valid rename succeeds and appends to the journal (SPEC 6.4, 6.1)",
-    );
+    // Journaled rename — the subset's exclusion probe (E-6, module header):
+    // held and killed, then held again over the dead run's leftover while the
+    // file-form `move` is refused; once its hold is lifted it rewrites the ID
+    // and its references in MDX and TypeScript sources, appending the
+    // mapping to the journal (SPEC 6.4). Steps "move-busy" and "rename".
+    steps.push(...(await runE6ExclusionProbe(product, workspace)));
 
     // Preview of exactly the move the next step performs: full validation
     // and planning, modifying nothing (SPEC 6.6) — the identity mapping, the
@@ -473,10 +561,9 @@ export async function runE6RepresentativeFixture(
     // Journaled file-form move — the specifier-computation probe (E-6): the
     // moved file's own import and both importers of its generated module are
     // recomputed across the directory change (SPEC 6.5).
-    await step(
+    await mutatingStep(
       "move",
-      ["move", E6_CORE, E6_MOVED],
-      0,
+      E6_MOVE_ARGV,
       "a valid file-form move succeeds and appends to the journal (SPEC 6.5, 6.1)",
     );
     await step(
@@ -497,14 +584,13 @@ export async function runE6RepresentativeFixture(
     // moved text and after an added declaration is U+000A on every platform
     // (SPEC 6.5); the final workspace snapshot carries the rewritten sources
     // across legs.
-    await step(
+    await mutatingStep(
       "move-section",
       [
         "move",
         `${E6_MOVED}#${E6_RENAMED_LEAF_ID}`,
         `${E6_REFS}#${E6_SECTION_TARGET_ID}`,
       ],
-      0,
       "a valid section-form move into an existing target parent succeeds and appends to the journal (SPEC 6.5, 6.1)",
     );
     assertSectionMoveLanded(await workspace.readBytes(E6_REFS));
@@ -519,10 +605,9 @@ export async function runE6RepresentativeFixture(
 
     // Audit review session (SPEC 10): create, next --json, one resolve, and
     // an export; the session file is stored data compared across legs (1.5).
-    await step(
+    await mutatingStep(
       "review-create",
       ["review", "create", "--strategy", "audit", "--name", "r"],
-      0,
       "an audit session over the built workspace is creatable (SPEC 10.7)",
     );
     const nextLabel = "E-6 representative fixture `review next r --json`";
@@ -548,10 +633,9 @@ export async function runE6RepresentativeFixture(
     // The item id is product-derived and deterministic over byte-identical
     // input (SPEC 12.0), so both legs resolve the same item and the recorded
     // argv still compares byte-identical across legs.
-    await step(
+    await mutatingStep(
       "review-resolve",
       ["review", "resolve", "r", next.item.id, "--status", "no-change"],
-      0,
       "resolving the presented item succeeds (SPEC 10.4, 10.7)",
     );
     await step(
@@ -579,12 +663,349 @@ export async function runE6RepresentativeFixture(
     );
 
     const snapshot = await snapshotDirectory(workspace.root, {
-      exclude: excludeGitTree,
+      exclude: excludeGitTreeAndLockPath,
     });
     return { steps, workspace: snapshot };
   } finally {
     await workspace.dispose();
   }
+}
+
+// ---------------------------------------------------------------------------
+// The exclusion probe (E-6; SPEC 13.5; the module header)
+
+/** The journaled `rename` the probe holds and kills, then holds again. */
+const E6_RENAME_ARGV: readonly string[] = [
+  "rename",
+  E6_CORE,
+  "core.mid.leaf",
+  E6_RENAMED_LEAF_ID,
+];
+/** The journaled file-form `move`, refused while the `rename` holds. */
+const E6_MOVE_ARGV: readonly string[] = ["move", E6_CORE, E6_MOVED];
+/**
+ * The hold path: beside the workspace root, in the workspace's temporary
+ * directory — outside the workspace (TEST-SPEC §13.5's preamble) — spelled
+ * relative to the root for the recorded run, so that its argv is the same on
+ * both legs (`--test-hold` resolves against the working directory, SPEC
+ * 12.0).
+ */
+const E6_HOLD_NAME = "e6-hold";
+const E6_HOLD_ARG = `../${E6_HOLD_NAME}`;
+/** The held `rename`'s hang guard (H-8; never an assertion input, H-10). */
+const E6_HELD_RUN_TIMEOUT_MS = 120_000;
+/** Bound on the hold's appearance, the run's start included. */
+const E6_HOLD_WAIT_MS = 30_000;
+/**
+ * The refused `move`'s hang guard: it fails promptly, never waiting for the
+ * holder (SPEC 13.5) — a run that waits fails diagnosed (H-8, H-10).
+ */
+const E6_BUSY_TIMEOUT_MS = 15_000;
+/** Bound, in cleanup, on a held run's exit once its hold is lifted. */
+const E6_STOP_TIMEOUT_MS = 30_000;
+const WORKSPACE_BUSY = "workspace-busy";
+
+/**
+ * The exclusion probe (module header), as a voidable trial: the copy of the
+ * workspace a voided trial reruns from is taken before the kill (TEST-SPEC
+ * E-6). Returns the transcript's two steps, "move-busy" and "rename".
+ */
+async function runE6ExclusionProbe(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<E6StepRecord[]> {
+  const holdAbs = path.join(workspace.tempRoot, E6_HOLD_NAME);
+  if (path.resolve(workspace.root, E6_HOLD_ARG) !== holdAbs) {
+    throw new Error(
+      `E-6 fixture bug: the hold path ${E6_HOLD_ARG}, resolved against the ` +
+        `workspace root ${workspace.root}, is not ${holdAbs} — the ` +
+        `workspace builder's layout changed`,
+    );
+  }
+  const beforeKill = await snapshotDirectory(workspace.root, {
+    exclude: excludeGitTreeAndLockPath,
+  });
+  return await runVoidableTrial(
+    `E-6 representative fixture, the exclusion probe (\`${E6_RENAME_ARGV.join(" ")}\` ` +
+      `held and killed, then held again while \`${E6_MOVE_ARGV.join(" ")} ` +
+      `--json\` is refused)`,
+    async (attempt) => {
+      if (attempt > 1) {
+        await restoreBeforeKill(workspace.root, beforeKill, holdAbs);
+      }
+      return await exclusionTrial(product, workspace.root, holdAbs);
+    },
+  );
+}
+
+/** One trial of the exclusion probe, from the workspace before the kill. */
+async function exclusionTrial(
+  product: ProductBinding,
+  root: string,
+  holdAbs: string,
+): Promise<E6StepRecord[]> {
+  const killed = await killHeldE6Run(product, {
+    root,
+    argv: E6_RENAME_ARGV,
+    holdPath: holdAbs,
+    context:
+      `E-6 representative fixture, the exclusion probe: ` +
+      `\`${E6_RENAME_ARGV.join(" ")} --test-hold <path>\`, killed once held`,
+  });
+  const renameArgv = [...E6_RENAME_ARGV, "--test-hold", E6_HOLD_ARG, "--json"];
+  const context =
+    `E-6 representative fixture, step "rename" (\`${renameArgv.join(" ")}\`), ` +
+    `started again after the kill`;
+  // The held-state comparison's baseline: the run's pre-invocation state
+  // (TEST-SPEC §13.5's preamble), the dead run's leftover in the lock path.
+  const preInvocation = await snapshotDirectory(root, EXCLUDE_LOCK_PATH);
+  const running = await startProduct(product, {
+    cwd: root,
+    argv: renameArgv,
+    timeoutMs: E6_HELD_RUN_TIMEOUT_MS,
+  });
+  let busy: RunResult;
+  try {
+    const exited = await holdOrExit(running, holdAbs, context);
+    if (exited !== undefined) {
+      const refusal = `${context} — ${summarizeResult(exited)}`;
+      if (
+        exited.signal === null &&
+        exited.exitCode === 2 &&
+        decodeErrorDocument(parseJsonStdout(exited, refusal), refusal).error
+          .code === WORKSPACE_BUSY
+      ) {
+        await e6ReuseCheck(killed, refusal);
+      }
+      fail(
+        `${refusal}: a dead run's leftover MUST NOT block a later mutating ` +
+          `command (SPEC 13.5) — the \`rename\` must take it over and hold, ` +
+          `creating its hold file at ${holdAbs}, yet it exited first`,
+      );
+    }
+    const [entry] = await assertHeldState(
+      root,
+      { baseline: preInvocation, heldRuns: 1 },
+      `${context}, once it holds — the dead run's leftover taken over (SPEC 13.5)`,
+    );
+    assertEntriesNamedApart(
+      killed.entry,
+      entry!,
+      `${context}, once it holds: its one entry is its own, never the dead ` +
+        `run's leftover (SPEC 13.5: acquisition adds an entry of its own and ` +
+        `removes every leftover)`,
+    );
+    busy = await refusedMove(product, root, running);
+    const busyContext =
+      `E-6 representative fixture, step "move-busy" ` +
+      `(\`${[...E6_MOVE_ARGV, "--json"].join(" ")}\`), refused while the ` +
+      `\`rename\` holds`;
+    await assertHeldState(
+      root,
+      { baseline: preInvocation, heldRuns: 1 },
+      `${busyContext}: the refused run modifies nothing (SPEC 13.5)`,
+    );
+    await assertOnlyEntry(
+      root,
+      entry!,
+      `${busyContext}: the held \`rename\`'s entry, again the lock ` +
+        `directory's only entry`,
+    );
+  } catch (error) {
+    await stopHeldRun(running, holdAbs);
+    throw error;
+  }
+  await releaseHoldFile(holdAbs);
+  let renamed: RunResult;
+  try {
+    renamed = await running.waitForExit();
+  } catch (error) {
+    rethrowHarnessError(error);
+    return fail(
+      `${context}: once its hold is lifted the held \`rename\` must ` +
+        `complete — ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  assertExitCode(
+    renamed,
+    0,
+    `${context}, its hold lifted — a valid rename succeeds and appends to ` +
+      `the journal (SPEC 6.4, 6.1)`,
+  );
+  await assertLockPathAbsent(
+    root,
+    `${context}, once it completed with no other run holding`,
+  );
+  return [
+    stepRecord("move-busy", [...E6_MOVE_ARGV, "--json"], 2, busy),
+    stepRecord("rename", renameArgv, 0, renamed),
+  ];
+}
+
+/**
+ * Wait until the held run holds — its hold file appears — and resolve
+ * undefined; or, should it exit first, resolve with its result. A run still
+ * running when the wait runs out fails diagnosed (H-8).
+ */
+async function holdOrExit(
+  running: RunningProduct,
+  holdAbs: string,
+  context: string,
+): Promise<RunResult | undefined> {
+  try {
+    await running.waitForFile(holdAbs, { timeoutMs: E6_HOLD_WAIT_MS });
+    return undefined;
+  } catch (error) {
+    rethrowHarnessError(error);
+    const detail = error instanceof Error ? error.message : String(error);
+    if (!running.hasExited()) {
+      fail(
+        `${context}: the \`rename\` must take the dead run's leftover over ` +
+          `and hold, creating its hold file at ${holdAbs} (SPEC 13.5) — ${detail}`,
+      );
+    }
+    try {
+      return await running.waitForExit();
+    } catch (exitError) {
+      rethrowHarnessError(exitError);
+      return fail(
+        `${context}: the \`rename\` must take the dead run's leftover over ` +
+          `and hold (SPEC 13.5) — ${exitError instanceof Error ? exitError.message : String(exitError)}`,
+      );
+    }
+  }
+}
+
+/**
+ * The file-form `move` under `--json` while `holder` holds: it exits 2
+ * promptly, the hold still standing, its error document carrying `code`
+ * `"workspace-busy"` and `path` `".xspec/lock"` (SPEC 13.5, 14.26, 12.7).
+ */
+async function refusedMove(
+  product: ProductBinding,
+  root: string,
+  holder: RunningProduct,
+): Promise<RunResult> {
+  const argv = [...E6_MOVE_ARGV, "--json"];
+  const label =
+    `E-6 representative fixture, step "move-busy" (\`${argv.join(" ")}\`), ` +
+    `run while the held \`rename\` holds`;
+  let result: RunResult;
+  try {
+    result = await runProduct(product, {
+      cwd: root,
+      argv,
+      timeoutMs: E6_BUSY_TIMEOUT_MS,
+    });
+  } catch (error) {
+    rethrowHarnessError(error);
+    return fail(
+      `${label}: it must fail promptly, without waiting for the holder's ` +
+        `exclusivity to end (SPEC 13.5; H-8: hangs become diagnosed ` +
+        `failures) — ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (holder.hasExited()) {
+    const ended = await holder
+      .waitForExit()
+      .then(summarizeResult, (error: unknown) => {
+        rethrowHarnessError(error);
+        return error instanceof Error ? error.message : String(error);
+      });
+    fail(
+      `${label}: the held \`rename\` must still hold as the refused \`move\` ` +
+        `exits — a held run proceeds only once its hold is lifted (SPEC ` +
+        `13.5) — so the refusal met a workspace another run held; it had ` +
+        `ended: ${ended}`,
+    );
+  }
+  assertExitCode(
+    result,
+    2,
+    `${label} — while another run holds exclusivity, a mutating command ` +
+      `fails promptly with the usage error of 14.26 (SPEC 13.5, 12.0)`,
+  );
+  const finding = decodeErrorDocument(
+    parseJsonStdout(result, label),
+    label,
+  ).error;
+  if (finding.code !== WORKSPACE_BUSY || finding.path !== LOCK_PATH) {
+    fail(
+      `${label}: the refusal's error document must carry \`code\` ` +
+        `"${WORKSPACE_BUSY}" and \`path\` "${LOCK_PATH}" (SPEC 14.26, 12.7); ` +
+        `got \`code\` ${JSON.stringify(finding.code)} and \`path\` ` +
+        `${JSON.stringify(finding.path)}`,
+    );
+  }
+  return result;
+}
+
+/**
+ * Cleanup after a failure while a held run may still run: lift its hold and
+ * collect its exit, bounded, killing it should it not end — its own
+ * failures are not the verdict's concern.
+ */
+async function stopHeldRun(
+  running: RunningProduct,
+  holdAbs: string,
+): Promise<void> {
+  await releaseHoldFile(holdAbs);
+  if (await settlesWithin(running.waitForExit(), E6_STOP_TIMEOUT_MS)) return;
+  try {
+    running.kill();
+  } catch {
+    // Nothing left to signal.
+  }
+  await settlesWithin(running.waitForExit(), E6_STOP_TIMEOUT_MS);
+}
+
+/**
+ * Restore the workspace from its copy taken before the kill, for a voided
+ * trial's rerun (TEST-SPEC E-6): every entry of the root but `.git/` — which
+ * nothing of the probe writes — removed, the copy written back, and the
+ * result checked byte-identical to it; a mismatch is a harness error.
+ */
+async function restoreBeforeKill(
+  root: string,
+  beforeKill: DirectorySnapshot,
+  holdAbs: string,
+): Promise<void> {
+  await releaseHoldFile(holdAbs);
+  for (const name of await fsp.readdir(root)) {
+    if (name === GIT_DIR) continue;
+    await fsp.rm(path.join(root, name), { recursive: true, force: true });
+  }
+  await materializeSnapshot(
+    beforeKill,
+    root,
+    "E-6 exclusion probe, restoring the workspace before a rerun",
+  );
+  const restored = await snapshotDirectory(root, { exclude: excludeGitTree });
+  const differences = diffSnapshots(beforeKill, restored);
+  if (differences.length > 0 || restored.entries.has(LOCK_PATH)) {
+    throw new Error(
+      `E-6 exclusion probe: the workspace restored from its copy taken ` +
+        `before the kill is not that copy — ` +
+        `${differences.map((change) => `${change.change} ${change.path}`).join(", ") || `${LOCK_PATH} present`} ` +
+        `— a harness error (H-11)`,
+    );
+  }
+}
+
+/** One recorded invocation of the transcript. */
+function stepRecord(
+  step: string,
+  argv: readonly string[],
+  exitCode: number,
+  result: RunResult,
+): E6StepRecord {
+  return {
+    step,
+    argv,
+    exitCode,
+    stdoutBytes: result.stdoutBytes,
+    stderrBytes: result.stderrBytes,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -641,14 +1062,17 @@ export async function writeE6Exchange(
 }
 
 /**
- * Write a snapshot's entries back out as a directory tree. The E-6 fixture
- * produces plain files and directories only (SPEC 13.4); anything else — or a
- * non-UTF-8 entry name — cannot ride the exchange artifact portably and is a
- * loud harness error, never a silent drop.
+ * Write a snapshot's entries back out as a directory tree: the exchange's
+ * workspace tree, and the workspace's copy a voided exclusion trial reruns
+ * from (`what` names the use in a diagnosis). The E-6 fixture produces plain
+ * files and directories only (SPEC 13.4); anything else — or a non-UTF-8
+ * entry name — cannot ride the exchange artifact portably and is a loud
+ * harness error, never a silent drop.
  */
 async function materializeSnapshot(
   snapshot: DirectorySnapshot,
   destRoot: string,
+  what = "E-6 exchange writer",
 ): Promise<void> {
   await fsp.mkdir(destRoot, { recursive: true });
   for (const [key, entry] of snapshot.entries) {
@@ -658,7 +1082,7 @@ async function materializeSnapshot(
       rel = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     } catch {
       throw new Error(
-        `E-6 exchange writer: workspace entry name is not valid UTF-8 and cannot ` +
+        `${what}: workspace entry name is not valid UTF-8 and cannot ` +
           `ride the exchange artifact portably: <bytes 0x${bytes.toString("hex")}>`,
       );
     }
@@ -670,7 +1094,7 @@ async function materializeSnapshot(
       await fsp.writeFile(abs, entry.bytes);
     } else {
       throw new Error(
-        `E-6 exchange writer: workspace entry ${rel} is a ${entry.kind}, which the ` +
+        `${what}: workspace entry ${rel} is a ${entry.kind}, which the ` +
           `exchange artifact cannot carry portably — the E-6 fixture and a conforming ` +
           `product produce plain files and directories only (SPEC 13.4)`,
       );
@@ -871,7 +1295,8 @@ export async function assertE6RunMatchesExchange(
     run.workspace,
     linuxWorkspace,
     `E-6 byte-identity: final workspace tree (first = this leg's run, second = ` +
-      `the Linux leg's exchanged tree; .git/ excluded) — move-rewritten sources, ` +
+      `the Linux leg's exchanged tree; .git/ and the lock path ${LOCK_PATH} ` +
+      `excluded, H-6) — move-rewritten sources, ` +
       `generated files, emitted Markdown, graph data, journal, and session file ` +
       `are byte-identical across legs (E-6; SPEC 12.0, 1.5)`,
   );
@@ -882,7 +1307,8 @@ async function snapshotExchangeWorkspace(
 ): Promise<DirectorySnapshot> {
   const workspaceDir = path.join(absDir, WORKSPACE_DIR);
   try {
-    return await snapshotDirectory(workspaceDir);
+    // The lock path lies outside every comparison across legs (H-6).
+    return await snapshotDirectory(workspaceDir, EXCLUDE_LOCK_PATH);
   } catch (error) {
     throw new Error(
       `E-6 byte-identity comparison: cannot read the exchanged workspace tree at ` +

@@ -210,8 +210,9 @@ test(
 // exactly as it judges a registered body — a `HarnessAssertionError` a
 // fail, anything else thrown an error, a normal return a pass, a body that
 // never settles a hang. Each entry's budget is its own test's Vitest
-// timeout: the two E-6 fixture tests allow 300 s for the fixture's 25
-// invocations, the Windows leg's probes and arm the registry default.
+// timeout: the two E-6 fixture tests allow 300 s for the fixture's 27
+// invocations (its exclusion probe's reruns aside), the Windows leg's probes
+// and arm the registry default.
 const E6_FIXTURE_BUDGET_MS = 300_000;
 
 const BODIES_OUTSIDE_THE_REGISTRY: readonly ProductTestEntry[] = [
