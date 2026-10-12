@@ -15,9 +15,12 @@
 //   no capability, in the process group `sudo` leads — the run's own — its
 //   exit code, stdout, and stderr observed.
 // - The second user's verification passes on a group-staged workspace and
-//   fails as a harness error where the group cannot reach it; whether the
-//   second user can create and remove a file in a directory is answered
-//   unjudged.
+//   fails as a harness error where the group cannot reach it. The binding it
+//   reaches is the harness-owned empty stub
+//   (test/fixtures/empty-stub/bin.mjs), never the built product, so this
+//   file needs no product build and passes before the product exists (H-8).
+//   Whether the second user can create and remove a file in a directory is
+//   answered unjudged.
 // - What a run as the second user made is reclaimed for the harness: owned,
 //   read, and removed afterwards, modes kept, no link's target touched.
 // - A launched run's processes, which the harness's own identity may not
@@ -30,6 +33,7 @@ import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, onTestFinished, test } from "vitest";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import {
@@ -54,7 +58,6 @@ import {
 import type { SecondMount } from "../helpers/machine-staging.js";
 import { HarnessStagingError } from "../helpers/permissions.js";
 import {
-  builtProductBinding,
   ProductRunTimeoutError,
   runProduct,
   startProduct,
@@ -195,6 +198,26 @@ async function standin(): Promise<{
   };
 }
 
+// The harness-owned empty stub (S-7's sweep target), resolved relative to
+// this module, never to the process cwd, exactly as
+// test/self/s7-red-green-sweep.test.ts resolves it. The verification's reach
+// check binds it in place of the built product, so this file passes before
+// the product exists (H-8). The check tests access alone: the stub is never
+// started here.
+const STUB_BIN = fileURLToPath(
+  new URL("../fixtures/empty-stub/bin.mjs", import.meta.url),
+);
+
+/** The empty stub as a binding: Node its command, the stub its one file. */
+function emptyStubBinding(): ProductBinding {
+  return {
+    label: "empty-stub fixture product (harness-owned; reached, never started)",
+    command: process.execPath,
+    prefixArgs: [STUB_BIN],
+    requiredFiles: [STUB_BIN],
+  };
+}
+
 /** Kill a launched run's group at the test's end, whatever the test did. */
 function killGroupAtEnd(running: RunningProduct): void {
   onTestFinished(async () => {
@@ -273,7 +296,7 @@ test("a run launched as the second user gets exactly the environment, working di
   expect(theirs.pgrp).toBe(running.pid);
 }, 60_000);
 
-test("the second user's verification passes on a group-staged workspace — every directory listed and every file read, a file made and removed in the root and in .xspec, the built product reachable, each identity's process list listing the other's — and fails as HarnessStagingError where the group cannot reach the workspace (T13.5-9, H-11)", async () => {
+test("the second user's verification passes on a group-staged workspace — every directory listed and every file read, a file made and removed in the root and in .xspec, a harness-owned binding reachable (the empty stub: its command executable, its file readable), each identity's process list listing the other's — and fails as HarnessStagingError where the group cannot reach the workspace (T13.5-9, H-11, H-8)", async () => {
   const user = await ensureSecondUser();
   const workspace = await TestWorkspace.create({
     dirs: [".xspec"],
@@ -298,7 +321,7 @@ test("the second user's verification passes on a group-staged workspace — ever
   onTestFinished(() => access.restore());
   const report = await verifySecondUserReach(user, {
     ...reach,
-    binding: builtProductBinding(),
+    binding: emptyStubBinding(),
   });
   expect(report.uid).toBe(user.uid);
   expect(report.walk).toEqual({
@@ -312,7 +335,10 @@ test("the second user's verification passes on a group-staged workspace — ever
     true,
     true,
   ]);
-  expect(report.reach.map((item) => item.ok)).toEqual([true, true]);
+  expect(report.reach).toEqual([
+    { path: process.execPath, execute: true, ok: true, code: null },
+    { path: STUB_BIN, execute: false, ok: true, code: null },
+  ]);
   expect(report.listsHarness).toBe(true);
   expect(report.listedByHarness).toBe(true);
   expect((await fsp.readdir(workspace.root)).sort()).toEqual(
