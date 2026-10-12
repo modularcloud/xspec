@@ -4,10 +4,15 @@
 #
 #   harness-self   Linux. Harness self-tests and certification only (TEST-SPEC
 #                  17, C-1: certification results are part of the harness's CI
-#                  output), run through the same wrapper as suite-linux. This
-#                  is the signal that must be green before the product exists
+#                  output), run through the same wrapper as suite-linux, with
+#                  no product installed: the job builds nothing and confirms
+#                  dist/ absent before they run, so a self-test or
+#                  certification that needs the built product fails here
+#                  (H-8: they must pass before the product exists). This is
+#                  the signal that must be green before the product exists
 #                  (red-green): product-facing tests may still fail while this
-#                  job passes.
+#                  job passes. suite-linux runs the self project again, within
+#                  its full suite, with the product built.
 #
 #   suite-linux    Linux. The full suite — sections 1–17, certification
 #                  included (E-1) — run through
@@ -73,8 +78,12 @@ jobs:
       - run: npm ci
       - name: Typecheck both programs (product and harness)
         run: npm run typecheck
-      - name: Build the product
-        run: npm run build
+      - name: Confirm no product is installed (H-8; self-tests and certification run before the product exists)
+        run: |
+          if [ -e dist ]; then
+            echo "::error::dist/ exists, but this job runs the harness self-tests and certification with no product installed (TEST-SPEC H-8)"
+            exit 1
+          fi
       - name: Run harness self-tests and certification (network disabled, unprivileged, administrative access kept)
         run: bash .github/scripts/run-without-network.sh npm run test:self
 
