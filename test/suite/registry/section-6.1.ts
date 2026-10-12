@@ -24,7 +24,13 @@
 // resolvable `impact --base HEAD`, SPEC 6.3), an `audit` review session
 // (`create`/`split`/`resolve` and the read subcommands, 10.7), the 11.2
 // surfaces (`occurrences`, `view`, `at`), `inventory`, `version`, and the
-// 6.6 previews of both operations.
+// 6.6 previews of both operations. Its never-modified compares — the
+// sweep's, the previews' inner ones included — run through
+// `snapshotDirectory` and `assertSnapshotsEqual` of test/helpers/snapshot.ts,
+// filtered to the journal entry (`assertLeavesJournalUnchanged`): the
+// compare-around-command machinery VIOL-CORE-CHATTYREADS certifies on
+// T13.4-5, on which CERTIFICATIONS.md's Exclusions bullet for T6.1-1 relies,
+// with `readJournal`'s plain-file check as the premise.
 //
 // Conservative operationalizations (noted per H-4):
 // - "One entry per line" + "the journal is written only by rename and move"
@@ -80,7 +86,15 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
-import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import {
+  assertLeavesUnchanged,
+  assertSnapshotsEqual,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
+import type {
+  DirectorySnapshot,
+  SnapshotEntry,
+} from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
@@ -248,12 +262,53 @@ function assertJournalAppend(
   }
 }
 
+/** The entries of a snapshot whose keys satisfy `keep`. */
+function filteredEntries(
+  entries: ReadonlyMap<string, SnapshotEntry>,
+  keep: (key: string) => boolean,
+): Map<string, SnapshotEntry> {
+  const kept = new Map<string, SnapshotEntry>();
+  for (const [key, entry] of entries) {
+    if (keep(key)) kept.set(key, entry);
+  }
+  return kept;
+}
+
 /**
- * Byte-compare the journal around one command (T6.1-1 "never modify it"):
- * read it, run the command asserting the exact exit code (H-5), read it
- * again, assert byte identity — a deleted or replaced journal fails via
- * `readJournal`'s plain-file check. Returns the run so the caller can decode
- * its answer.
+ * View a filtered entry map of `source` as a snapshot for
+ * `assertSnapshotsEqual`: `source`'s root, real root, and acquisition mark
+ * carried over, so the compare is classified as `source`'s (H-6,
+ * helpers/snapshot.ts `lockPathExclusion`).
+ */
+function asSnapshot(
+  source: DirectorySnapshot,
+  entries: ReadonlyMap<string, SnapshotEntry>,
+): DirectorySnapshot {
+  return { ...source, entries };
+}
+
+/** A workspace snapshot viewed as its journal entry alone. */
+function journalView(snapshot: DirectorySnapshot): DirectorySnapshot {
+  return asSnapshot(
+    snapshot,
+    filteredEntries(snapshot.entries, (key) => key === JOURNAL_PATH),
+  );
+}
+
+/**
+ * Byte-compare the journal around one command (T6.1-1 "never modify it")
+ * through the compare-around-command machinery of helpers/snapshot.ts — the
+ * `snapshotDirectory` and `assertSnapshotsEqual` pair VIOL-CORE-CHATTYREADS
+ * certifies over the same journal on T13.4-5 (CERTIFICATIONS.md, its Note
+ * and the Exclusions bullet for T6.1-1). The premise first: the journal goes
+ * in as a plain file (`readJournal`'s check), so the compare never passes
+ * vacuously over an absent journal. Then the workspace root is snapshotted,
+ * the command runs with its exact exit code asserted (H-5), the root is
+ * snapshotted again, and both snapshots, viewed as the journal entry alone,
+ * are compared — the first assertion to meet any change to the journal: an
+ * append or a rewrite (`file bytes differ`), a deletion (`removed`), a
+ * replacement by another kind (`kind changed`). Returns the run so the
+ * caller can decode its answer.
  */
 async function assertLeavesJournalUnchanged(
   product: ProductBinding,
@@ -263,10 +318,8 @@ async function assertLeavesJournalUnchanged(
   context: string,
 ): Promise<RunResult> {
   const command = argv.join(" ");
-  const before = await readJournal(
-    workspace,
-    `${context}: before \`${command}\``,
-  );
+  await readJournal(workspace, `${context}: before \`${command}\``);
+  const before = await snapshotDirectory(workspace.root);
   const result = await expectExit(
     product,
     workspace,
@@ -274,13 +327,10 @@ async function assertLeavesJournalUnchanged(
     exitCode,
     `${context}: \`${command}\``,
   );
-  const after = await readJournal(
-    workspace,
-    `${context}: after \`${command}\``,
-  );
-  assertBytesEqual(
-    after,
-    before,
+  const after = await snapshotDirectory(workspace.root);
+  assertSnapshotsEqual(
+    journalView(before),
+    journalView(after),
     `${context}: \`${command}\` must never modify the journal — it is ` +
       `written only by \`rename\` and \`move\` (byte-compare around the ` +
       `command; SPEC 6.1, 13.4)`,
@@ -378,19 +428,23 @@ const T6_1_1 = defineProductTest({
 
       // Every other command surface never modifies the journal (SPEC 6.1
       // "written only by rename and move"; 13.4): byte-compare it around
-      // each invocation, with the journal present and non-empty so an
-      // append or truncation is visible. Exit codes (H-5) are all 0: the
-      // workspace is valid; `check` finds nothing (rename and move finish by
-      // regenerating derived files exactly as `build` does, SPEC 6.4/6.5,
-      // and the product-written journal is well-formed); `coverage` reports
-      // zero profiles (no `coverage` key, 7.4); `impact --base HEAD`
-      // resolves against the staged baseline commit, the current journal
-      // replaying onto it (6.3); the `review` subcommands drive an `audit`
-      // session (10.6, 10.7); the 11 surfaces answer complete, finding-free
-      // documents; `version` is workspace-independent (12.6); and each
-      // preview succeeds exactly as its real operation would (6.6). Answers
-      // are decoded form-exactly through the adapters (H-3) — no value
-      // assertion is this test's business beyond a normal completion.
+      // each invocation through the snapshot compare
+      // (`assertLeavesJournalUnchanged`: the workspace root snapshotted
+      // before and after, both viewed as the journal entry alone), with the
+      // journal present as a plain, non-empty file so an append, a
+      // truncation, a deletion, or a replacement is visible. Exit codes
+      // (H-5) are all 0: the workspace is valid; `check` finds nothing
+      // (rename and move finish by regenerating derived files exactly as
+      // `build` does, SPEC 6.4/6.5, and the product-written journal is
+      // well-formed); `coverage` reports zero profiles (no `coverage` key,
+      // 7.4); `impact --base HEAD` resolves against the staged baseline
+      // commit, the current journal replaying onto it (6.3); the `review`
+      // subcommands drive an `audit` session (10.6, 10.7); the 11 surfaces
+      // answer complete, finding-free documents; `version` is
+      // workspace-independent (12.6); and each preview succeeds exactly as
+      // its real operation would (6.6). Answers are decoded form-exactly
+      // through the adapters (H-3) — no value assertion is this test's
+      // business beyond a normal completion.
       const sweepContext = "T6.1-1 never-modifies sweep";
       const sweep = async (
         argv: readonly string[],
@@ -480,10 +534,12 @@ const T6_1_1 = defineProductTest({
       await sweepJson(["version"], decodeVersionDocument);
 
       // Previews modify nothing at all (SPEC 6.6: no sources, no journal, no
-      // derived files, no graph data): beyond the journal compare, the whole
-      // workspace tree (the git directory aside — a preview reads no git)
-      // is byte-compared around each. `rename`, the file form of `move`,
-      // and the section form — every operation with a preview.
+      // derived files, no graph data): beyond the journal compare — the
+      // sweep's own, made inside the outer one, so it meets a journal change
+      // first — the whole workspace tree (the git directory aside — a
+      // preview reads no git) is byte-compared around each. `rename`, the
+      // file form of `move`, and the section form — every operation with a
+      // preview.
       const previewArms: readonly (readonly string[])[] = [
         ["rename", "specs/A.mdx", "a3", "a4", "--preview"],
         ["rename", "specs/A.mdx", "a3", "a4", "--preview", "--json"],
