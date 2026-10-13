@@ -38,36 +38,52 @@
 //   row reaches — the sweep bullet below.)
 // - T14-1's human form (T12.0-1's information parity; SPEC 12.0: the JSON
 //   form carries the same information as the human report — here SPEC 14's
-//   actionable report, "the file, location, and correction"): after each of
-//   its two `--json` runs and their assertions, at the same state (a failing
+//   actionable report, "the file, location, and correction", every
+//   reported condition carrying its stable code): after each of its two
+//   `--json` runs and their assertions, at the same state (a failing
 //   `build` modifies nothing, SPEC 12.1; `check` never refreshes and writes
 //   nothing, 13.3, 14.22), the same argv without `--json` exits 1 as well,
 //   and its report mentions what the decoded findings carry (a
 //   product-to-itself comparison, H-4; `assertHumanFindingsReport`, through
-//   helpers/adapters/human.ts): every location's file (an identity-or-path
+//   the shared human-findings check, `assertHumanFindingsMentions` in
+//   human-findings.ts, and helpers/adapters/human.ts): every location's
+//   file, every concerned path, and every identity (an identity-or-path
 //   boundary, so `specs/T.mdx` never counts inside `out/specs/T.mdx`); then,
-//   in a separate call, every location's start and end (whole numbers, SPEC
-//   1.7, matched with the findings' digit-holding data — files, concerned
-//   paths, identities, quoted spellings — blanked out, save a datum that is
-//   itself a whole number, `digitHoldingData` from section-10.7-i.ts; T14-1's
-//   data hold no digit); then the correction in human form — never its
-//   wording (H-3), but the data a message quotes: each staged spelling of
-//   `T14_1_QUOTED_SPELLINGS` (the 14.4 segment `two seg`, the unresolved
-//   targets `absent.dep` and `absent.text`, the element name `div`, the
-//   marker chain `OK.absent`) that some finding's JSON message quotes,
-//   letter-bounded there and in the report (`spellingMention`: `div` counts
-//   in `<div>`, never in `divide`). Limits: no mention is associated with
-//   another, so which file, range, and spelling belong to which finding stay
-//   with the JSON assertions — a file counts wherever the report prints it (a
-//   message may name its own file; `specs/three.mdx` holds two findings); a
-//   message is free text and never blanked, since it may state its location
-//   itself, so a whole number it spells may stand in for an offset of its
-//   value — T14-1's offsets, each at or past its window's start, are 34 or
-//   more, above every number a SPEC citation spells; and a spelling no JSON
-//   message quotes is asked of no report (the built product's 14.1 message
-//   quotes none, and its 14.7 message the resolved identity
-//   `specs/ok.mdx#absent`, not the chain), so a product whose messages quote
-//   none has no message data checked in human form.
+//   in a separate call, every finding's stable code (`codeMention`:
+//   case-insensitive, its words joined by one character that is neither
+//   letter nor digit or by nothing, never where it ends a longer code),
+//   matched with the findings' files, concerned paths, identities, and
+//   quoted spellings blanked out; then every location's start and end
+//   (whole numbers, SPEC 1.7, matched with the digit-holding data among
+//   those blanked out, save a datum that is itself a whole number,
+//   `digitHoldingData` from section-10.7-i.ts; T14-1's data hold no digit);
+//   then the correction in human form — never its wording (H-3), but the
+//   data a message quotes: each staged spelling of `T14_1_QUOTED_SPELLINGS`
+//   (the 14.4 segment `two seg`, the unresolved targets `absent.dep` and
+//   `absent.text`, the element name `div`, the marker chain `OK.absent`)
+//   that some finding's JSON message quotes, letter-bounded there and in the
+//   report (`spellingMention`: `div` counts in `<div>`, never in `divide`).
+//   T14-1's six staged conditions are all located and name no context
+//   entity, so the concerned paths and identities asked are whatever the
+//   decoded findings carry — none on the built product. Limits: no mention
+//   is associated with another, so which file, range, code, and spelling
+//   belong to which finding stay with the JSON assertions — a datum or a
+//   code counts wherever the report prints it (a message may name its own
+//   file; `specs/three.mdx` holds two findings); a message is free text and
+//   never blanked, since it may state its location and spell its code's
+//   words itself (the built product's messages for 14.1, 14.5, 14.6, and
+//   14.16 do: `missing ID`, `unknown dependency`), so a code counts inside a
+//   message too, and a whole number a message spells may stand in for an
+//   offset of its value — T14-1's offsets, each at or past its window's
+//   start, are 34 or more, above every number a SPEC citation spells; a
+//   file, path, or identity holding a character a human report may quote or
+//   escape, or a path in the marked byte form, is not asked
+//   (human-findings.ts; T14-1 stages ASCII paths alone, and a location file
+//   in the marked byte form fails here as a staging defect); and a spelling
+//   no JSON message quotes is asked of no report (the built product's 14.1
+//   message quotes none, and its 14.7 message the resolved identity
+//   `specs/ok.mdx#absent`, not the chain), so a product whose messages
+//   quote none has no message data checked in human form.
 // - MDX-staged conditions locate within the offending element's byte window:
 //   every plausible attribution point — the reference expression, the prop,
 //   the element itself — lies inside it, and every other staged construct
@@ -424,8 +440,6 @@ import {
   decodeOccurrencesReport,
   decodePreviewReport,
   decodeViewFilesReport,
-  identityMention,
-  numberMention,
   renderPathValue,
   spellingMention,
 } from "../../helpers/adapters/index.js";
@@ -520,7 +534,7 @@ import {
   VALID_A1_SOURCE,
 } from "./section-12.1-12.2.js";
 import { judgeBusyRefusal } from "./section-13.5.js";
-import { digitHoldingData } from "./section-10.7-i.js";
+import { assertHumanFindingsMentions } from "./human-findings.js";
 import { SELF_DEPENDS_STAGED } from "./section-5.1-5.3.js";
 import type {
   BearerLocationExpectation,
@@ -879,17 +893,19 @@ function assertCompleteReport(
  * information parity (SPEC 12.0: the JSON form carries the same information
  * as the human report), here SPEC 14's actionable report in human form (the
  * module header): the same argv without `--json` exits 1 as well, and its
- * report mentions, for every finding of the decoded report, every
- * location's file (an identity-or-path boundary); then, in a separate call,
- * every location's start and end (whole numbers, SPEC 1.7, matched with the
- * findings' digit-holding data — files, concerned paths, identities, and
- * quoted spellings — blanked out, save a datum that is itself a whole
- * number, `digitHoldingData`); then the correction's data: each staged
- * spelling of `T14_1_QUOTED_SPELLINGS` that the finding's JSON message
- * quotes, letter-bounded there and in the report (`spellingMention`). A
- * message's wording is never compared, and a message is never blanked (the
- * module header). Robust matching (H-3): presence, never wording, and no
- * mention associated with another.
+ * report mentions what every finding of the decoded report carries — the
+ * shared human-findings check (`assertHumanFindingsMentions`,
+ * human-findings.ts): every location's file, every concerned path, and
+ * every identity (an identity-or-path boundary); then, in a separate call,
+ * every stable code (`codeMention`, matched with those data and the quoted
+ * spellings below blanked out); then every location's start and end (whole
+ * numbers, SPEC 1.7, matched with the digit-holding data among those
+ * blanked out, save a datum that is itself a whole number) — and then the
+ * correction's data: each staged spelling of `T14_1_QUOTED_SPELLINGS` that
+ * the finding's JSON message quotes, letter-bounded there and in the report
+ * (`spellingMention`). A message's wording is never compared, and a message
+ * is never blanked (the module header). Robust matching (H-3): presence,
+ * never wording, and no mention associated with another.
  */
 async function assertHumanFindingsReport(
   product: ProductBinding,
@@ -907,10 +923,7 @@ async function assertHumanFindingsReport(
     `${label} — the same exit code as the \`--json\` run at this state: 1, ` +
       `a report carrying findings (SPEC 12.0, 12.1, 12.2)`,
   );
-  const files = new Set<string>();
-  const offsets = new Set<number>();
   const spellings = new Set<string>();
-  const data: string[] = [];
   for (const finding of findings) {
     for (const location of finding.locations) {
       const file = location.file;
@@ -921,41 +934,16 @@ async function assertHumanFindingsReport(
             `assertions (SPEC 1.5, 12.7)`,
         );
       }
-      files.add(file);
-      offsets.add(location.range.start);
-      offsets.add(location.range.end);
     }
-    if (typeof finding.path === "string") data.push(finding.path);
-    data.push(...finding.identities);
     for (const spelling of T14_1_QUOTED_SPELLINGS) {
       if (spellingMention(spelling).pattern.test(finding.message)) {
         spellings.add(spelling);
       }
     }
   }
-  if (files.size > 0) {
-    assertReportMentions(
-      human,
-      [...files].map(identityMention),
-      `${label}: every location's file — the file each reported error ` +
-        `identifies, as the JSON findings carry it (SPEC 12.0, 14)`,
-    );
-  }
-  if (offsets.size > 0) {
-    assertReportMentions(
-      human,
-      [...offsets].map(numberMention),
-      `${label}: the start and end of every location's range, whole ` +
-        `numbers, matched with the findings' digit-holding data — files, ` +
-        `concerned paths, identities, and quoted spellings — blanked out, ` +
-        `save a datum that is itself a whole number (SPEC 1.7, 12.0, 14)`,
-      {
-        blank: digitHoldingData([
-          ...new Set([...files, ...data, ...spellings]),
-        ]),
-      },
-    );
-  }
+  assertHumanFindingsMentions(human, findings, label, {
+    blank: [...spellings],
+  });
   if (spellings.size > 0) {
     assertReportMentions(
       human,
@@ -971,7 +959,7 @@ async function assertHumanFindingsReport(
 const T14_1 = defineProductTest({
   id: "T14-1",
   title:
-    "a workspace seeded with several independent error conditions across files: `build` and `check` report each of them (not only the first), and every report identifies file and location and states a correction-oriented message — information presence, not wording; and at each `--json` run's state the human `build` and `check` exit 1 alike and carry every finding's location — its file and its range's start and end — and each staged spelling its JSON message quotes (the 14.4 segment, the unresolved targets, the element name, the marker chain) (robust matching, H-3) (SPEC 1.7, 12.0, 14)",
+    "a workspace seeded with several independent error conditions across files: `build` and `check` report each of them (not only the first), and every report identifies file and location and states a correction-oriented message — information presence, not wording; and at each `--json` run's state the human `build` and `check` exit 1 alike and carry every finding's stable code, its location — its file and its range's start and end — its concerned path, and its identities, and each staged spelling its JSON message quotes (the 14.4 segment, the unresolved targets, the element name, the marker chain) (robust matching, H-3) (SPEC 1.7, 12.0, 14)",
   run: async (product) => {
     await withWorkspace({ files: T14_1_FILES }, async (workspace) => {
       const buildContext =
@@ -979,8 +967,9 @@ const T14_1 = defineProductTest({
       const built = await buildFindings(product, workspace, buildContext);
       assertCompleteReport(built, buildContext);
       // The human form at the same state — a failing `build` modifies
-      // nothing (SPEC 12.1) — carries the decoded findings' locations and
-      // the spellings their messages quote (module header).
+      // nothing (SPEC 12.1) — carries the decoded findings' stable codes,
+      // locations, concerned paths, and identities, and the spellings
+      // their messages quote (module header).
       await assertHumanFindingsReport(
         product,
         workspace,
