@@ -55,6 +55,26 @@
 //   (the renamed ID plus the prefix-replaced descendants, nothing else),
 //   listed in `from`-byte order. Any other member set, or the mapping in
 //   another shape or order, fails (T6.4-1).
+// - T6.4-1's human form (T12.0-1's information parity; SPEC 12.0: the JSON
+//   form carries the same information as the human report; 6.4: a
+//   successful rename's report is the applied mapping): the `--json` run
+//   consumes the pre-rename state, so the same `rename` without `--json`
+//   runs first on a byte copy of that state (`withByteCopyOf`:
+//   section-13.5.ts's `copyTreeBytes`, the lock path left out unread, the
+//   copy checked against the original before anything runs there, as
+//   T13.5-3's and P-10's copies are — a difference is a harness error; a
+//   copy composes no source text, so S-9 has nothing to judge) and exits 0
+//   there, as the `--json` run does; once the JSON report's own assertions
+//   have run, the human report must mention every mapped pair's `from` and
+//   `to` identity, taken from the decoded report (a product-to-itself
+//   comparison, H-4; `assertHumanAppliedMapping`, through
+//   helpers/adapters/human.ts) — identity-or-path boundaries, so
+//   `specs/Core.mdx#core.mid` never counts inside
+//   `specs/Core.mdx#core.mid.leaf` (robust matching, H-3: presence, never
+//   wording). Limits: no mention is associated with another, so which
+//   `from` maps to which `to`, and that the report maps nothing else, stay
+//   with the JSON assertions; an identity counts wherever the report
+//   prints it.
 // - T6.4-1 "`check` clean after the rename" (TEST-SPEC T6.4-3 asserts 6.4's
 //   "every rewritten reference resolves by construction" on the success
 //   side of every successful rename): `check --json` runs right after the
@@ -149,6 +169,7 @@ import type {
   PreviewFileEntry,
 } from "../../helpers/adapters/index.js";
 import {
+  assertReportMentions,
   decodeAppliedMappingReport,
   decodeEdgesReport,
   decodeFindingsReport,
@@ -156,6 +177,7 @@ import {
   decodeNodeReport,
   decodeNodeRowsReport,
   decodePreviewReport,
+  identityMention,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
@@ -163,9 +185,12 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { EXCLUDE_LOCK_PATH, isLockPathBytes } from "../../helpers/lock-path.js";
 import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
+  diffSnapshots,
+  snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import type {
   ArgvValue,
@@ -174,6 +199,7 @@ import type {
 } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
+import { copyTreeBytes } from "./section-13.5.js";
 import type {
   BearerLocationExpectation,
   FindingSourceExpectation,
@@ -272,6 +298,89 @@ async function withWorkspace<T>(
   } finally {
     await workspace.dispose();
   }
+}
+
+/**
+ * Run `body` on a fresh workspace holding a byte copy of `workspace` as it
+ * stands — the pre-operation state a performed operation's `--json` run then
+ * consumes on the original (the module header's T6.4-1 human-form bullet) —
+ * then dispose of it. The copy is section-13.5.ts's `copyTreeBytes`
+ * (directories, plain files, and symbolic links, names as bytes), the lock
+ * path left out unread (`isLockPathBytes`: a product may make its entries
+ * unreadable, H-4), and it is checked against the original, the lock path
+ * aside, before `body` runs — a difference is a harness error, never a
+ * product verdict — as T13.5-3's and P-10's copies are. A copy composes no
+ * source text, so S-9 has nothing to judge (P-10's twins likewise).
+ */
+async function withByteCopyOf<T>(
+  workspace: TestWorkspace,
+  context: string,
+  body: (copy: TestWorkspace) => Promise<T>,
+): Promise<T> {
+  const copy = await TestWorkspace.create({});
+  try {
+    await copyTreeBytes(
+      Buffer.from(workspace.root),
+      Buffer.from(copy.root),
+      isLockPathBytes,
+    );
+    const differences = diffSnapshots(
+      await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
+      await snapshotDirectory(copy.root, EXCLUDE_LOCK_PATH),
+    );
+    if (differences.length > 0) {
+      throw new Error(
+        `harness error: ${context}: the byte copy of ${workspace.root} at ` +
+          `${copy.root} differs from it (the lock path aside): ` +
+          differences
+            .slice(0, 10)
+            .map((change) => `${change.change} ${change.path}`)
+            .join(", "),
+      );
+    }
+    return await body(copy);
+  } finally {
+    await copy.dispose();
+  }
+}
+
+/**
+ * The human report of a performed `rename` or `move` against the applied
+ * mapping its `--json` twin reported, after that report's own assertions —
+ * T12.0-1's information parity (SPEC 12.0: the JSON form carries the same
+ * information as the human report; 6.4: a successful rename's report is the
+ * applied mapping, and a move reports its own as rename does, 6.5; the
+ * module header): `human` — the same operation run without `--json` at the
+ * `--json` run's pre-operation state (on a byte copy of it, or on a copy the
+ * test stages and leaves there), its exit code asserted by the caller —
+ * mentions every mapped pair's `from` and `to` identity, taken from the
+ * decoded `mapping` (a product-to-itself comparison, H-4): identity-or-path
+ * boundaries, so a renamed identity never counts inside its descendants',
+ * nor a root's bare path inside its sections' identities. Robust matching
+ * (H-3): presence, never wording, and no mention associated with another —
+ * which `from` maps to which `to` stays with the JSON assertions. An empty
+ * mapping asserts nothing (`assertReportMentions` refuses an empty list; a
+ * successful operation maps at least its subject, 6.6). Exported for
+ * test/suite/registry/section-6.5.ts (T6.5-1's file-form moves run the same
+ * check).
+ */
+export function assertHumanAppliedMapping(
+  human: RunResult,
+  mapping: readonly AppliedMappingPair[],
+  context: string,
+): void {
+  const identities = new Set<string>();
+  for (const pair of mapping) {
+    identities.add(pair.from);
+    identities.add(pair.to);
+  }
+  if (identities.size === 0) return;
+  assertReportMentions(
+    human,
+    [...identities].map(identityMention),
+    `${context}: every mapped pair's \`from\` and \`to\` identity — the ` +
+      `applied mapping the JSON report carries (SPEC 6.4, 6.5, 6.6, 12.0)`,
+  );
 }
 
 /**
@@ -681,7 +790,7 @@ async function assertDependencyEdges(
 const T6_4_1 = defineProductTest({
   id: "T6.4-1",
   title:
-    "rewrites: renaming a mid-tree ID rewrites its `id`, all descendant `id`s by prefix replacement, local string references, external chain references in other files, `text(...)` targets in MDX and TS, and TS markers — `check` clean after the rename (every rewritten reference resolves, no derived output stale), the workspace builds, all edges retarget (query-asserted), the mapping is appended to the journal, and the command's own report is the applied mapping — every journaled identity pair, the information of the preview's `mapping`, carried in JSON per 12.0 in the form-exact performed-operation document of 12.7 (SPEC 6.4, 6.6, 6.1, 12.0, 12.2, 12.7; TEST-SPEC T6.4-3; H-3 form-exact decode)",
+    "rewrites: renaming a mid-tree ID rewrites its `id`, all descendant `id`s by prefix replacement, local string references, external chain references in other files, `text(...)` targets in MDX and TS, and TS markers — `check` clean after the rename (every rewritten reference resolves, no derived output stale), the workspace builds, all edges retarget (query-asserted), the mapping is appended to the journal, and the command's own report is the applied mapping — every journaled identity pair, the information of the preview's `mapping`, carried in JSON per 12.0 in the form-exact performed-operation document of 12.7; and the human `rename`, run on a byte copy of the pre-rename workspace, exits 0 alike and carries that mapping — every pair's `from` and `to` identity (robust matching, H-3) (SPEC 6.4, 6.6, 6.1, 12.0, 12.2, 12.7; TEST-SPEC T6.4-3; H-3 form-exact decode)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -723,6 +832,33 @@ const T6_4_1 = defineProductTest({
           "T6.4-1 pre-rename",
         );
 
+        // The human form's run (T12.0-1's information parity; the module
+        // header): the `--json` run below consumes this pre-rename state, so
+        // the same `rename` without `--json` runs first on a byte copy of
+        // it, exiting 0 as the `--json` run does; its report is matched once
+        // the JSON report's own assertions have run.
+        const renameArgv = [
+          "rename",
+          "specs/Core.mdx",
+          "core.mid",
+          "core.hub",
+        ] as const;
+        const humanRename = await withByteCopyOf(
+          workspace,
+          "T6.4-1 the pre-rename workspace, copied for the human `rename`",
+          async (copy) =>
+            await expectExit(
+              product,
+              copy,
+              renameArgv,
+              0,
+              "T6.4-1 `rename specs/Core.mdx core.mid core.hub` on a byte " +
+                "copy of the pre-rename workspace (human report) — the same " +
+                "exit code as the `--json` run at this state: 0, the rename " +
+                "succeeding (SPEC 6.4, 12.0)",
+            ),
+        );
+
         // The command's own report is the applied mapping — every identity
         // pair the operation journaled, the information of the preview's
         // `mapping` (SPEC 6.4, 6.6) — carried in JSON in the form-exact
@@ -735,11 +871,15 @@ const T6_4_1 = defineProductTest({
         const renameReport = await runJson(
           product,
           workspace,
-          ["rename", "specs/Core.mdx", "core.mid", "core.hub", "--json"],
+          [...renameArgv, "--json"],
           "T6.4-1 `rename specs/Core.mdx core.mid core.hub --json`",
         );
+        const appliedMapping = decodeAppliedMappingReport(
+          renameReport,
+          "T6.4-1",
+        );
         assertAppliedMapping(
-          decodeAppliedMappingReport(renameReport, "T6.4-1"),
+          appliedMapping,
           [
             {
               from: "specs/Core.mdx#core.mid",
@@ -754,6 +894,15 @@ const T6_4_1 = defineProductTest({
             "exactly the identity pairs the operation journaled: the renamed " +
             "node and its descendant, old identity to new (SPEC 6.4, 6.6, " +
             "12.0)",
+        );
+        // The human report carries the same applied mapping: every mapped
+        // pair's `from` and `to` identity, taken from the decoded report
+        // just asserted (module header; H-3, H-4).
+        assertHumanAppliedMapping(
+          humanRename,
+          appliedMapping,
+          "T6.4-1 `rename specs/Core.mdx core.mid core.hub` on the " +
+            "pre-rename copy (human report)",
         );
 
         // The rewrites, per source surface: stale spellings gone, rewritten

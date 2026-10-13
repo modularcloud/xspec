@@ -70,6 +70,26 @@
 //   implicit root included (its identity is the path alone, 1.2, 1.5), IDs
 //   kept and file parts changed — and T6.5-3 the section form's: exactly
 //   the moved subtree's prefix-replaced pairs, no other identity mapped.
+// - T6.5-1's human form (T12.0-1's information parity; SPEC 12.0: the JSON
+//   form carries the same information as the human report; 6.5: a move
+//   reports its applied mapping as rename does, 6.4): the `--json` move
+//   consumes the original's pre-move state, so in each arm the copy staged
+//   and built like the original for the preview — which the preview leaves
+//   at the pre-move state — runs the same `move` without `--json` after the
+//   preview, exiting 0 as the `--json` run does; once that run's own
+//   assertions have run, the human report must mention every mapped pair's
+//   `from` and `to` identity, taken from the decoded report (a
+//   product-to-itself comparison, H-4; section-6.4.ts's
+//   `assertHumanAppliedMapping`, through helpers/adapters/human.ts) —
+//   identity-or-path boundaries, so the root's bare path `specs/A.mdx`
+//   never counts inside its sections' identities (`specs/A.mdx#a`), nor
+//   `specs/A.mdx#a` inside `specs/A.mdx#a.mid` (robust matching, H-3:
+//   presence, never wording). Limits: no mention is associated with
+//   another, so which `from` maps to which `to`, and that the report maps
+//   nothing else, stay with the JSON assertions; an identity counts
+//   wherever the report prints it. The section form's report is the same
+//   applied mapping (6.5: both forms report it as rename does), so T6.5-3
+//   asks its JSON form alone.
 // - T6.5-1/T6.5-3 "finishing regeneration as T6.4-7" is the H-6 two-directory
 //   protocol: a second workspace is seeded with the post-move configuration,
 //   sources, and journal (derived files are reproducible from those,
@@ -289,6 +309,7 @@ import {
   U4_SOLO_SOURCE,
   U4_SOURCE,
   U4_STRAY_SOURCE,
+  assertHumanAppliedMapping,
 } from "./section-6.4.js";
 import type {
   BearerLocationExpectation,
@@ -1725,10 +1746,13 @@ async function assertEdges(
 
 /**
  * One arm of T6.5-1 on its own fresh workspace: the preview's plan read on a
- * copy, the real move's report, the specifier-rewrite byte contract, the
- * untouched files, the journal, `check`, and the node and edge inventories;
- * with `fullProtocol`, the finishing regeneration as T6.4-7 (H-6); and, for
- * an arm closing finding-free, a final `build` with no finding.
+ * copy, and the human `move` run on that copy after the preview (the module
+ * header's human-form bullet); the real move's report, and the human
+ * report's mentions of its applied mapping; the specifier-rewrite byte
+ * contract, the untouched files, the journal, `check`, and the node and
+ * edge inventories; with `fullProtocol`, the finishing regeneration as
+ * T6.4-7 (H-6); and, for an arm closing finding-free, a final `build` with
+ * no finding.
  */
 async function runFileMoveArm(
   product: ProductBinding,
@@ -1775,8 +1799,12 @@ async function runFileMoveArm(
     // read by running the preview on a copy of the fixture, staged and
     // built like the original, whose pre-move state no preview then
     // touches; the preview's `mapping` and complete `files` are pinned
-    // form-exact meanwhile (6.6, 12.7; T6.6-4 (c)).
-    const previewRanges = await withWorkspace(
+    // form-exact meanwhile (6.6, 12.7; T6.6-4 (c)). The copy, still at the
+    // pre-move state after the preview, then serves the human form's run
+    // (the module header): the same `move` without `--json`, exiting 0 as
+    // the `--json` run on the original does, its report matched once that
+    // run's own assertions have run.
+    const { previewRanges, humanMove } = await withWorkspace(
       FULL_CONFIG,
       arm.files,
       async (copy) => {
@@ -1817,7 +1845,7 @@ async function runFileMoveArm(
         );
         assertPreviewFiles(report.files, arm.previewFiles, label);
         const files = report.files;
-        return new Map(
+        const ranges = new Map(
           arm.rewrites.map(
             (rewrite) =>
               [
@@ -1826,6 +1854,17 @@ async function runFileMoveArm(
               ] as const,
           ),
         );
+        const human = await expectExit(
+          product,
+          copy,
+          moveArgv,
+          0,
+          `${context} \`${moveArgv.join(" ")}\` on the copy the preview ` +
+            `left at the pre-move state (human report) — the same exit ` +
+            `code as the \`--json\` run on the original: 0, the move ` +
+            `succeeding (SPEC 6.5, 6.4, 12.0)`,
+        );
+        return { previewRanges: ranges, humanMove: human };
       },
     );
 
@@ -1858,13 +1897,24 @@ async function runFileMoveArm(
       [...moveArgv, "--json"],
       `${context} file-form \`${moveArgv.join(" ")} --json\``,
     );
+    const appliedMapping = decodeAppliedMappingReport(moveReport, context);
     assertAppliedMapping(
-      decodeAppliedMappingReport(moveReport, context),
+      appliedMapping,
       arm.mapping,
       `${context}: the successful file-form move's report is the applied ` +
         `mapping — exactly the identity pairs the operation journaled: ` +
         `every node of the moved file, the implicit root included, its ID ` +
         `kept and its file part changed (SPEC 6.5, 6.4, 6.6, 12.0)`,
+    );
+    // The human report, run on the preview's copy at the pre-move state,
+    // carries the same applied mapping: every mapped pair's `from` and `to`
+    // identity, taken from the decoded report just asserted (module header;
+    // H-3, H-4).
+    assertHumanAppliedMapping(
+      humanMove,
+      appliedMapping,
+      `${context} \`${moveArgv.join(" ")}\` on the preview's copy (human ` +
+        `report)`,
     );
 
     // The file was relocated.
@@ -2041,7 +2091,7 @@ async function assertFreshBuildAgrees(
 const T6_5_1 = defineProductTest({
   id: "T6.5-1",
   title:
-    "file form: `xspec move old.mdx new.mdx` keeps IDs unchanged and changes identities only in their file part; the moved file's own import specifiers and other files' imports of its generated module are rewritten so everything resolves; the mapping is appended to the journal and reported as the form-exact performed-operation document; the finishing regeneration is byte-identical to a fresh build — the specifier-rewrite byte contract of 6.5 byte-asserted, the `import-specifier-rewrite` ranges read from a preview on a copy whose `files` is pinned form-exact, over a move into a subdirectory (the importer's `\"./A.xspec\"` becomes `\"./sub/A.xspec\"`, the moved file's own `'./C.xspec'` `'../C.xspec'` with its single quotes kept), out of one (an ascent lost), and across sibling directories (`\"../x/A.xspec\"`, ascents before descents) — each rewritten literal exactly the kept delimiters around the canonical relative spelling and every other byte unchanged, so a `.` segment, a missing `./` prefix, a stale `..`, a switched quote style, or any rewrite beyond the literals fails — and a relocation within the file's own directory (`specs/A.mdx` → `specs/A2.mdx`) that leaves its canonical `./C.xspec` and non-canonical `.//C.xspec` imports byte-untouched and unreported while the importer's `./A.xspec` becomes `./A2.xspec`, the preview's `files` exactly the relocation entry and the importer's rewrite — and, under `move specs/A.mdx specs/sub/A.mdx`, five import declarations recording no edge or occurrence (the moved file's own `import C from \"./C.xspec\"` and the spec importer's `import A from \"./A.xspec\"`, neither binding referenced, and a code source's `import type T`, `import { type text as t }`, and side-effect `import` of `\"../specs/A.xspec\"`) each rewritten under the same byte contract, its quote style kept, whatever uses its bindings — the preview's `files` the relocation entry and exactly five `import-specifier-rewrite` edits, each spanning its literal — and `check` and `build` exiting 0 with no finding afterward, so a product collecting the specifiers it rewrites from recorded edges, occurrences, or used bindings fails",
+    "file form: `xspec move old.mdx new.mdx` keeps IDs unchanged and changes identities only in their file part; the moved file's own import specifiers and other files' imports of its generated module are rewritten so everything resolves; the mapping is appended to the journal and reported as the form-exact performed-operation document, and the human `move`, run on the preview's copy at the pre-move state, exits 0 alike and carries that mapping — every pair's `from` and `to` identity (robust matching, H-3; SPEC 12.0); the finishing regeneration is byte-identical to a fresh build — the specifier-rewrite byte contract of 6.5 byte-asserted, the `import-specifier-rewrite` ranges read from a preview on a copy whose `files` is pinned form-exact, over a move into a subdirectory (the importer's `\"./A.xspec\"` becomes `\"./sub/A.xspec\"`, the moved file's own `'./C.xspec'` `'../C.xspec'` with its single quotes kept), out of one (an ascent lost), and across sibling directories (`\"../x/A.xspec\"`, ascents before descents) — each rewritten literal exactly the kept delimiters around the canonical relative spelling and every other byte unchanged, so a `.` segment, a missing `./` prefix, a stale `..`, a switched quote style, or any rewrite beyond the literals fails — and a relocation within the file's own directory (`specs/A.mdx` → `specs/A2.mdx`) that leaves its canonical `./C.xspec` and non-canonical `.//C.xspec` imports byte-untouched and unreported while the importer's `./A.xspec` becomes `./A2.xspec`, the preview's `files` exactly the relocation entry and the importer's rewrite — and, under `move specs/A.mdx specs/sub/A.mdx`, five import declarations recording no edge or occurrence (the moved file's own `import C from \"./C.xspec\"` and the spec importer's `import A from \"./A.xspec\"`, neither binding referenced, and a code source's `import type T`, `import { type text as t }`, and side-effect `import` of `\"../specs/A.xspec\"`) each rewritten under the same byte contract, its quote style kept, whatever uses its bindings — the preview's `files` the relocation entry and exactly five `import-specifier-rewrite` edits, each spanning its literal — and `check` and `build` exiting 0 with no finding afterward, so a product collecting the specifiers it rewrites from recorded edges, occurrences, or used bindings fails",
   run: async (product) => {
     for (let i = 0; i < FILE_MOVE_ARMS.length; i += 1) {
       await runFileMoveArm(product, FILE_MOVE_ARMS[i]!, i === 0);
