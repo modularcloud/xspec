@@ -11,10 +11,11 @@
 //
 // The same S-5 discipline covers the rest of the H-3 layer this harness
 // owns: the human-report required-information matchers (with the parity
-// checks' token-bounded data, whole numbers matched after blanking, and
-// SPEC-named tokens, each rejecting an input it cannot form), the T10.1-4
-// session-corruption staging transformations (shape-aware, value-blind,
-// failing loudly — file untouched — on shape mismatch), and the T13.4-1
+// checks' token-bounded data, whole numbers matched after blanking,
+// SPEC-named tokens, and stable codes, each rejecting an input it cannot
+// form), the T10.1-4 session-corruption staging transformations
+// (shape-aware, value-blind, failing loudly — file untouched — on shape
+// mismatch), and the T13.4-1
 // byte-sorted-keys assertion (which must judge the *written* key order, not
 // JavaScript object key order, and byte order, not UTF-16 order).
 
@@ -32,10 +33,13 @@ import type {
   ViewReport,
 } from "../helpers/adapters/index.js";
 import {
+  CONDITION_CODE_TOKENS,
   GRAPH_DATA_AREA_PATH,
   ITEM_STATUSES,
   RECORD_GARBAGE_BYTES,
+  REFUSAL_CODE_TOKENS,
   SPEC_NAMED_TOKENS,
+  STABLE_CODES,
   assertBareEdgeEndpoints,
   assertJsonKeysByteSorted,
   assertNodeEdgeListsBare,
@@ -44,6 +48,7 @@ import {
   assertUnavailabilityMarkerForms,
   blankReportData,
   classifyIgnoredReasons,
+  codeMention,
   collectGraphDataFiles,
   compareFindings,
   conditionMention,
@@ -5529,10 +5534,10 @@ test("S-5: conditionMention distinguishes 14.2 from 14.20 in both directions", (
 
 // The human-report parity matchers (test/helpers/adapters/human.ts's
 // header; TEST-SPEC T12.0-1, H-3): token-bounded literal data, whole numbers
-// matched after blanking, and SPEC-named tokens. Every vector runs through
-// assertReportMentions itself — found, the call returns; not found, it fails
-// diagnosed — and each table reports every vector it gets wrong at once, so
-// a broken boundary rule names each vector it flips.
+// matched after blanking, SPEC-named tokens, and stable codes. Every vector
+// runs through assertReportMentions itself — found, the call returns; not
+// found, it fails diagnosed — and each table reports every vector it gets
+// wrong at once, so a broken boundary rule names each vector it flips.
 
 /** One matcher vector: a report text, a mention, and whether it is found. */
 interface MentionVector {
@@ -5851,6 +5856,125 @@ test("S-5: SPEC_NAMED_TOKENS is a closed vocabulary — distinct, well-formed to
     );
   }
   expectVectors(vectors);
+});
+
+test("S-5: codeMention matches a stable code across case and separators — never inside a longer word or code", () => {
+  expectVectors([
+    ...mentionVectors(
+      codeMention("refused-invalid-id"),
+      [
+        "refused-invalid-id:",
+        "Refused invalid id",
+        "REFUSED_INVALID_ID",
+        "[refused-invalid-id]",
+        // Its words joined by nothing.
+        "RefusedInvalidId",
+      ],
+      [
+        "invalid-id",
+        "unrefused-invalid-id",
+        "refused-invalid",
+        "refused--invalid-id",
+      ],
+    ),
+    ...mentionVectors(
+      codeMention("cycle"),
+      ["cycle:", "Cycle", "cycles"],
+      // Where it ends the longer code refused-cycle, and inside a word.
+      ["refused-cycle", "refused cycle", "Refused_Cycle", "recycle"],
+    ),
+    ...mentionVectors(
+      codeMention("missing-id"),
+      ["missing ID"],
+      ["dismissing-id"],
+    ),
+  ]);
+});
+
+test("S-5: STABLE_CODES is a closed vocabulary — the numbered conditions' codes, then the refusal reasons', distinct, well-formed, none counting inside another's spelling", () => {
+  expect(STABLE_CODES).toEqual([
+    ...CONDITION_CODE_TOKENS,
+    ...REFUSAL_CODE_TOKENS,
+  ]);
+  expect(STABLE_CODES).toHaveLength(37);
+  expect(new Set(STABLE_CODES).size).toBe(STABLE_CODES.length);
+  const vectors: MentionVector[] = [];
+  for (const code of STABLE_CODES) {
+    expect(code).toMatch(/^[a-z]+(?:-[a-z]+)*$/);
+    vectors.push(
+      ...mentionVectors(
+        codeMention(code),
+        [code, `${code.toUpperCase()}:`],
+        STABLE_CODES.filter((other) => other !== code),
+      ),
+    );
+  }
+  expectVectors(vectors);
+});
+
+test("S-5: a report missing a stable code fails diagnosed, naming it", () => {
+  // A 14.9 cycle finding's report asked for the refusal reason
+  // refused-cycle: the shorter code never stands in for the longer.
+  const report = syntheticResult(
+    "specs/T.mdx:12-20: cycle: specs/T.mdx#p depends on itself\n1 finding\n",
+  );
+  const failure = expectDiagnosed('stable code "refused-cycle"', () =>
+    assertReportMentions(
+      report,
+      [codeMention("cycle"), codeMention("refused-cycle")],
+      "cycle finding",
+    ),
+  );
+  expect(failure.message).toContain('Missing: stable code "refused-cycle"\n');
+  expect(failure.message).toContain("cycle finding");
+  expect(failure.message).toContain("stand-in check");
+  // Present, the code passes beside a datum.
+  assertReportMentions(
+    report,
+    [codeMention("cycle"), identityMention("specs/T.mdx#p")],
+    "cycle finding",
+  );
+  // The omission matcher reads a code the same way: refused-cycle spells
+  // no 14.9 cycle, and the cycle finding's report does.
+  assertReportOmits(
+    syntheticResult("specs/T.mdx:12-20: refused-cycle: specs/T.mdx#p\n"),
+    [codeMention("cycle")],
+    "refusal report",
+  );
+  const present = expectDiagnosed("a stable code present", () =>
+    assertReportOmits(report, [codeMention("cycle")], "cycle finding"),
+  );
+  expect(present.message).toContain('Present: stable code "cycle"');
+});
+
+test("S-5: codeMention rejects inputs it cannot form", () => {
+  // Each input, and the problem its diagnosis must name; every input formed
+  // or misdiagnosed is reported.
+  const inputs: readonly (readonly [string, string])[] = [
+    ["", "an empty code"],
+    ["Cycle", "is malformed"],
+    ["refused--cycle", "is malformed"],
+    ["14.1", "is malformed"],
+    // SPEC-named tokens, never stable codes: 14.21's word is `corrupt`, its
+    // code `corrupt-session`.
+    ["no-change", "is no stable code"],
+    ["corrupt", "is no stable code"],
+    ["frobnicated", "is no stable code"],
+  ];
+  const wrong: string[] = [];
+  for (const [code, problem] of inputs) {
+    const label = `codeMention(${JSON.stringify(code)})`;
+    try {
+      codeMention(code);
+      wrong.push(`${label} formed`);
+    } catch (error) {
+      if (!(error instanceof HarnessAssertionError)) throw error;
+      if (!error.message.includes(problem)) {
+        wrong.push(`${label} diagnosed without "${problem}": ${error.message}`);
+      }
+    }
+  }
+  expect(wrong, `wrong inputs:\n${wrong.join("\n")}`).toEqual([]);
 });
 
 test("S-5: a report missing a formed mention fails diagnosed, naming it", () => {

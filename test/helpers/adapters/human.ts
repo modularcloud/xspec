@@ -16,7 +16,7 @@
 // every mention equals what those assertions checked — and match three kinds
 // of mention, each formed here by a pure matcher that fails loudly on an
 // input it cannot form (an empty datum, a number that is not a non-negative
-// integer, an empty, malformed, or unnamed token):
+// integer, an empty, malformed, or unnamed token or code):
 // - literal data, as substrings, token-bounded where a datum can occur
 //   inside a longer one. `identityMention` (an identity or a path): not
 //   preceded by a word character, `-`, `.`, or `/`, and not followed by a
@@ -49,17 +49,27 @@
 //   letter (`blocked` never counts inside `unblocked`), any letters allowed
 //   after it (`direct` counts in `directly`), and never counting where it
 //   ends a longer token SPEC names (`changed` in `metadata changed`,
-//   `descendant-changed`, or `upstream_changed`).
+//   `descendant-changed`, or `upstream_changed`) — and, spelled the same
+//   way over a closed vocabulary of their own, SPEC 14's stable codes
+//   (`codeMention`, `STABLE_CODES`: the numbered conditions' codes, then
+//   the refusal reasons'): `missing-id` counts in `missing ID`,
+//   `refused-invalid-id` in `REFUSED_INVALID_ID`, and a code never counts
+//   where it ends a longer code (`cycle` in `refused-cycle` or
+//   `refused cycle`). The codes stand apart from the tokens because a
+//   token counts inside a code — `corrupt` (14.21's word) inside
+//   `corrupt-session` (14.21's code) — while each closed vocabulary holds
+//   no member counting inside another's spelling; a code's tail exclusion
+//   is judged over the codes alone, a token's over the tokens alone.
 // Letters, digits, and word characters here are ASCII's (`[A-Za-z]`,
 // `[0-9]`, `[A-Za-z0-9_]`): a report may run text in any other script up
 // to a datum (a CJK sentence spaces no Latin word), and the data the suite
-// stages for these checks are ASCII. A token counts wherever its spelling
-// stands, inside a datum too (an identity ending `#blocked`); a check that
-// must not credit a datum's spelling blanks the data first.
+// stages for these checks are ASCII. A token or a code counts wherever its
+// spelling stands, inside a datum too (an identity ending `#blocked`); a
+// check that must not credit a datum's spelling blanks the data first.
 //
 // No mention is associated with another — no "same line", no adjacency, no
-// order: robust matching asks only that each required datum, number, and
-// token appear (H-3). Which count belongs to which status or session, which
+// order: robust matching asks only that each required datum, number, token,
+// and code appear (H-3). Which count belongs to which status or session, which
 // row is blocked, which identity is attributed to which category or lies on
 // which path, which direction of a delta lists a path — all of that stays
 // with the JSON assertions.
@@ -68,16 +78,19 @@ import type { RunResult } from "../subprocess.js";
 import { fail } from "../assertions.js";
 import {
   CHANGE_CATEGORIES,
+  CONDITION_CODE_TOKENS,
   EDGE_KINDS,
   ITEM_KINDS,
   ITEM_STATUSES,
   PREVIEW_EDIT_CLASSES,
+  REFUSAL_CODE_TOKENS,
 } from "./model.js";
 
 /**
  * A mention one of this module's matchers formed (`identityMention`,
- * `nameMention`, `spellingMention`, `numberMention`, `specTokenMention`):
- * the pattern that finds it, and the words a diagnosis names it by.
+ * `nameMention`, `spellingMention`, `numberMention`, `specTokenMention`,
+ * `codeMention`): the pattern that finds it, and the words a diagnosis
+ * names it by.
  */
 export interface FormedMention {
   readonly pattern: RegExp;
@@ -88,7 +101,7 @@ export interface FormedMention {
  * One required piece of information: a literal substring (a text line, a
  * hash, a note), a pattern where a literal would over- or under-match, or a
  * mention this module's matchers formed (token-bounded data, whole numbers,
- * SPEC-named tokens).
+ * SPEC-named tokens, stable codes).
  */
 export type Mention = string | RegExp | FormedMention;
 
@@ -390,7 +403,8 @@ export function numberMention(value: number): FormedMention {
  * code groups' `direct` and `transitive` (9.2: directly and transitively
  * impacted code), the edge kinds (5.2), the preview edit classes (6.6,
  * 12.7), `unavailable` (11.2, 12.7), `absent` (10.7: presented absent), and
- * `corrupt` (14.21).
+ * `corrupt` (14.21). SPEC 14's stable codes are a vocabulary of their own
+ * (`STABLE_CODES`): `corrupt` counts inside `corrupt-session`.
  */
 export const SPEC_NAMED_TOKENS = [
   ...ITEM_STATUSES,
@@ -411,7 +425,10 @@ export const SPEC_NAMED_TOKENS = [
 ] as const;
 export type SpecNamedToken = (typeof SPEC_NAMED_TOKENS)[number];
 
-/** The form of every SPEC-named token: lowercase words joined by hyphens. */
+/**
+ * The form of every SPEC-named token and every stable code: lowercase words
+ * joined by hyphens.
+ */
 const TOKEN_FORM = /^[a-z]+(?:-[a-z]+)*$/;
 
 /** One character between a token's words: neither letter nor digit. */
@@ -420,6 +437,34 @@ const TOKEN_SEPARATOR = `[^${ALNUM}]`;
 /** A token's words, each separated by one separator character or nothing. */
 function spelledWords(words: readonly string[]): string {
   return words.join(`${TOKEN_SEPARATOR}?`);
+}
+
+/**
+ * The pattern of one member of a closed vocabulary — a SPEC-named token
+ * (`specTokenMention`, over `SPEC_NAMED_TOKENS`) or a stable code
+ * (`codeMention`, over `STABLE_CODES`) — once its matcher has validated the
+ * member: case-insensitive, its hyphen-joined words separated by one
+ * separator character or by nothing, not preceded by a letter, any letters
+ * allowed after it, and never where it ends a longer member of the same
+ * vocabulary — that member's leading words and one separator standing
+ * before it. The tail exclusion reads the vocabulary given alone.
+ */
+function vocabularyPattern(
+  member: string,
+  vocabulary: readonly string[],
+): RegExp {
+  const words = member.split("-");
+  const heads = vocabulary
+    .map((other) => other.split("-"))
+    .filter(
+      (other) =>
+        other.length > words.length &&
+        other.slice(other.length - words.length).join("-") === member,
+    )
+    .map((other) => spelledWords(other.slice(0, other.length - words.length)));
+  const notATail =
+    heads.length === 0 ? "" : `(?<!(?:${heads.join("|")})${TOKEN_SEPARATOR})`;
+  return new RegExp(`(?<![A-Za-z])${notATail}${spelledWords(words)}`, "i");
 }
 
 /**
@@ -452,19 +497,63 @@ export function specTokenMention(token: string): FormedMention {
       `specTokenMention: ${JSON.stringify(token)} is no token SPEC.md names among the statuses, strategies, item kinds, blocked state, change categories, deleted, code groups, edge kinds, preview edit classes, unavailable, absent, and corrupt (SPEC_NAMED_TOKENS)`,
     );
   }
-  const words = token.split("-");
-  const heads = SPEC_NAMED_TOKENS.map((named) => named.split("-"))
-    .filter(
-      (named) =>
-        named.length > words.length &&
-        named.slice(named.length - words.length).join("-") === token,
-    )
-    .map((named) => spelledWords(named.slice(0, named.length - words.length)));
-  const notATail =
-    heads.length === 0 ? "" : `(?<!(?:${heads.join("|")})${TOKEN_SEPARATOR})`;
   return Object.freeze({
-    pattern: new RegExp(`(?<![A-Za-z])${notATail}${spelledWords(words)}`, "i"),
+    pattern: vocabularyPattern(token, SPEC_NAMED_TOKENS),
     description: `SPEC-named token ${JSON.stringify(token)}`,
+  });
+}
+
+/**
+ * SPEC.md 14's stable codes, a closed vocabulary (`codeMention` validates
+ * membership): the numbered conditions' codes in ordinal order
+ * (`CONDITION_CODE_TOKENS`, 14.1–14.26, the usage errors' three among
+ * them), then the refusal reasons' in the order 14 lists them
+ * (`REFUSAL_CODE_TOKENS`) — 37 codes, the stable codes covering "exactly
+ * these conditions and the refusal reasons below, and no more" (14). Apart
+ * from `SPEC_NAMED_TOKENS` (the module header): a token counts inside a
+ * code, `corrupt` inside `corrupt-session`.
+ */
+export const STABLE_CODES = [
+  ...CONDITION_CODE_TOKENS,
+  ...REFUSAL_CODE_TOKENS,
+] as const;
+export type StableCode = (typeof STABLE_CODES)[number];
+
+/**
+ * A stable code (SPEC 14; `STABLE_CODES`), spelled as `specTokenMention`
+ * spells a token: case-insensitive, its hyphen-joined words separated by any
+ * one character that is neither letter nor digit, or by nothing
+ * (`refused-invalid-id` counts in `Refused invalid id`,
+ * `REFUSED_INVALID_ID`, and `[refused-invalid-id]`; `missing-id` in
+ * `missing ID`), not preceded by a letter (`refused-invalid-id` never counts
+ * inside `unrefused-invalid-id`, nor `cycle` inside `recycle`), any letters
+ * allowed after it (`cycle` counts in `cycles`). A code never counts where it
+ * ends a longer stable code — that code's leading words and one separator
+ * standing before it: `cycle` (14.9) does not count in `refused-cycle`,
+ * `refused cycle`, or `Refused_Cycle`. Fails diagnosed on an empty code, a
+ * malformed one (not lowercase words joined by single hyphens: `Cycle`,
+ * `14.1`), or one SPEC.md 14 does not list (`no-change`, a SPEC-named
+ * token, is no stable code).
+ */
+export function codeMention(code: string): FormedMention {
+  if (code.length === 0) {
+    fail(
+      "codeMention: an empty code forms no mention — a stable code is one of STABLE_CODES (SPEC 14; H-3)",
+    );
+  }
+  if (!TOKEN_FORM.test(code)) {
+    fail(
+      `codeMention: ${JSON.stringify(code)} is malformed — a stable code is lowercase words joined by single hyphens, as SPEC.md 14 lists it (H-3)`,
+    );
+  }
+  if (!(STABLE_CODES as readonly string[]).includes(code)) {
+    fail(
+      `codeMention: ${JSON.stringify(code)} is no stable code SPEC.md 14 lists among the numbered conditions' codes and the refusal reasons' (STABLE_CODES)`,
+    );
+  }
+  return Object.freeze({
+    pattern: vocabularyPattern(code, STABLE_CODES),
+    description: `stable code ${JSON.stringify(code)}`,
   });
 }
 
