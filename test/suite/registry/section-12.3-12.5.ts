@@ -39,14 +39,32 @@
 //   restricted listing is not fixed by SPEC 12.3, so every listing
 //   comparison first drops entries carrying no IDs/nodes; the surviving
 //   entries — the listing's content — are asserted exactly, order included.
-// - `--json` parity (SPEC 12.0: the JSON form carries the same information
-//   as the report): the JSON document is decoded and asserted in full —
-//   grouping, membership, and both spec-fixed orders — while the human form
-//   is asserted to exit 0 and mention the same distinctive information
-//   (file paths; full IDs in the flat listing; for tree renderings, segment
-//   mentions that both a full-ID and an indented-segment rendering contain).
-//   H-3 forbids wording/line-format assertions, so mention order is not
-//   asserted — the ordered content lives in the JSON assertions.
+// - `--json` parity (T12.0-1's information parity; SPEC 12.0: the JSON form
+//   carries the same information as the human report): the JSON document
+//   is decoded and asserted in full — grouping, membership, and both
+//   spec-fixed orders — and directly after each non-empty decoded listing,
+//   at the same state, its human form (the same argv without `--json`)
+//   exits 0 alike and mentions what the decoded listing carries (a
+//   product-to-itself comparison, H-4; `assertHumanFlatListing` and
+//   `assertHumanTreeListing`, through helpers/adapters/human.ts): the file
+//   of every entry that lists at least one ID, and every listed ID — in a
+//   flat listing as itself; in a tree, each node by its full ID or by its
+//   ID relative to its tree parent (the part after the parent's ID and the
+//   following `.`: `minor` for `zeta.minor` under `zeta`, `par.leaf` for
+//   `grand.par.leaf` under its nearest listed ancestor `grand`), and a node
+//   at its file's top level by its full ID alone, the only spelling that
+//   carries the listed ID there (`solo.kid`). Every spelling is
+//   token-bounded as an identity is (`identityMention`), so `zeta` never
+//   counts inside `zeta.minor`, nor `minor` inside it, nor an ID inside a
+//   file's path. Limits: no mention is associated with another, so
+//   nesting, order, and which ID belongs to which file stay with the JSON
+//   assertions (H-3 forbids wording and line-format assertions); a
+//   relative spelling counts wherever it stands, so two nodes sharing one
+//   (`a.x` and `b.x` under `a` and `b`) can stand in for each other —
+//   T12.3-1's fixtures stage no such pair; the empty listings (the inside
+//   `--file` patterns matching nothing) get no human run, having nothing to
+//   mention; and the listings' files and IDs hold no character a report
+//   may need to quote or escape, so every one is asked.
 // - T12.4-1's primary assertion is the adapter comparison: `show --json` and
 //   `query node --json` for the same node are both decoded by the one node
 //   adapter and compared field by field (the edge-list order, which SPEC
@@ -130,7 +148,7 @@ import {
   numberMention,
   specTokenMention,
 } from "../../helpers/adapters/index.js";
-import type { Mention } from "../../helpers/adapters/index.js";
+import type { FormedMention } from "../../helpers/adapters/index.js";
 import type { GraphEdge } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -281,14 +299,17 @@ function treeListing(report: IdsTreeReport): TreeEntry[] {
     }));
 }
 
-/** Run `ids` with the given flags and assert the exact flat listing. */
+/**
+ * Run `ids` with the given flags, assert the exact flat listing, and return
+ * the decoded report (its human form's mentions: `assertHumanFlatListing`).
+ */
 async function expectFlatListing(
   product: ProductBinding,
   workspace: TestWorkspace,
   flags: readonly string[],
   expected: readonly FlatEntry[],
   context: string,
-): Promise<void> {
+): Promise<IdsReport> {
   const report = decodeIdsReport(
     await runJson(product, workspace, ["ids", ...flags, "--json"], context),
     context,
@@ -300,16 +321,20 @@ async function expectFlatListing(
       `workspace-relative path, IDs within a file in document order ` +
       `(SPEC 12.3; entries carrying no IDs dropped per the module header)`,
   );
+  return report;
 }
 
-/** Run `ids --tree` with the given flags and assert the exact tree. */
+/**
+ * Run `ids --tree` with the given flags, assert the exact tree, and return
+ * the decoded report (its human form's mentions: `assertHumanTreeListing`).
+ */
 async function expectTreeListing(
   product: ProductBinding,
   workspace: TestWorkspace,
   flags: readonly string[],
   expected: readonly TreeEntry[],
   context: string,
-): Promise<void> {
+): Promise<IdsTreeReport> {
   const report = decodeIdsTreeReport(
     await runJson(
       product,
@@ -325,28 +350,162 @@ async function expectTreeListing(
     `${context}: per-file nesting in the same file and document order, tree ` +
       `nodes carrying the full requirement IDs (SPEC 12.3; module header)`,
   );
+  return report;
 }
 
-/** A human-form run: exit 0 plus the distinctive information (H-3). */
+/** The mentions in first-seen order, one per description: a datum asked once. */
+function distinctMentions(mentions: readonly FormedMention[]): FormedMention[] {
+  const byDescription = new Map<string, FormedMention>();
+  for (const mention of mentions) {
+    if (!byDescription.has(mention.description)) {
+      byDescription.set(mention.description, mention);
+    }
+  }
+  return [...byDescription.values()];
+}
+
+/**
+ * A listing's human form — T12.0-1's information parity (SPEC 12.0: the
+ * JSON form carries the same information as the human report; the module
+ * header): `argv`, the argv of the `--json` listing the caller decoded and
+ * asserted, without `--json`, run directly after it — nothing between
+ * them, so at its state — exits 0 alike (an informational report, SPEC
+ * 12.0), and its report mentions every one of `mentions`, which the caller
+ * took from the decoded listing (a product-to-itself comparison, H-4). A
+ * listing with nothing to mention is asked its exit code alone. Robust
+ * matching (H-3): presence, never wording, and no mention associated with
+ * another.
+ */
 async function expectHumanListing(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
-  mentions: readonly Mention[],
+  mentions: readonly FormedMention[],
+  what: string,
   context: string,
 ): Promise<void> {
-  const result = await expectExit(
+  const label = `${context} \`${argv.join(" ")}\` (human report)`;
+  const human = await expectExit(
     product,
     workspace,
     argv,
     0,
-    `${context} — the listing is an informational report, exit 0 (SPEC 12.0)`,
+    `${label} — the same exit code as the \`--json\` listing at this ` +
+      `state: 0, an informational report (SPEC 12.3, 12.0)`,
   );
+  if (mentions.length === 0) return;
   assertReportMentions(
-    result,
+    human,
     mentions,
-    `${context}: the human report carries the same information as the JSON ` +
-      `form (SPEC 12.0; robust matching, never wording — H-3)`,
+    `${label}: ${what} — the information of the JSON listing (SPEC 12.3, ` +
+      `12.0; robust matching, never wording — H-3)`,
+  );
+}
+
+/**
+ * The human `ids` listing beside a decoded flat `ids … --json` listing,
+ * after its JSON assertions (`expectHumanListing`, `flags` the listing's
+ * own): the file of every entry that lists at least one ID (an entry
+ * listing none is no content: the module header) and every listed ID, each
+ * token-bounded as an identity or a path is (`identityMention`), so `zeta`
+ * never counts inside `zeta.minor`, nor `minor` inside it, nor an ID inside
+ * a file's path.
+ */
+async function assertHumanFlatListing(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  flags: readonly string[],
+  report: IdsReport,
+  context: string,
+): Promise<void> {
+  await expectHumanListing(
+    product,
+    workspace,
+    ["ids", ...flags],
+    distinctMentions(
+      flatListing(report).flatMap((entry) =>
+        [entry.file, ...entry.ids].map(identityMention),
+      ),
+    ),
+    "every listed file and every listed ID, requirement IDs grouped by file",
+    context,
+  );
+}
+
+/**
+ * A node's mention in a human tree listing: its full ID, or its ID
+ * relative to its tree parent — the part of its ID after the parent's ID
+ * and the following `.` (`minor` for `zeta.minor` under `zeta`; `par.leaf`
+ * for `grand.par.leaf` nested under its nearest listed ancestor `grand`) —
+ * each spelling token-bounded as `identityMention` bounds it, in one formed
+ * mention whose pattern alternates the two and whose description names
+ * both. A node at its file's top level (no `parent`) has no relative
+ * spelling, nor has a child whose ID does not extend its tree parent's:
+ * either is mentioned by its full ID alone — the only spelling that carries
+ * the listed ID there (`solo.kid`, at the top level of a restricted tree;
+ * SPEC 12.3: the tree contains exactly the listed IDs).
+ */
+function treeNodeMention(
+  node: TreeNode,
+  parent: TreeNode | undefined,
+): FormedMention {
+  const full = identityMention(node.id);
+  if (parent === undefined) return full;
+  const prefix = `${parent.id}.`;
+  if (!node.id.startsWith(prefix) || node.id.length === prefix.length) {
+    return full;
+  }
+  const relativeId = node.id.slice(prefix.length);
+  const relative = identityMention(relativeId);
+  return Object.freeze({
+    pattern: new RegExp(
+      `(?:${full.pattern.source})|(?:${relative.pattern.source})`,
+    ),
+    description:
+      `${full.description}, or ${JSON.stringify(relativeId)} relative to ` +
+      `its tree parent ${JSON.stringify(parent.id)}`,
+  });
+}
+
+/**
+ * The human `ids --tree` listing beside a decoded `ids --tree … --json`
+ * listing, after its JSON assertions (`expectHumanListing`, `flags` the
+ * listing's own): the file of every entry that lists at least one node
+ * (`identityMention`; an entry listing none is no content: the module
+ * header) and every node of each file's tree, by its full ID or by its ID
+ * relative to its tree parent (`treeNodeMention`), walked parents first
+ * through an explicit stack, in document order.
+ */
+async function assertHumanTreeListing(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  flags: readonly string[],
+  report: IdsTreeReport,
+  context: string,
+): Promise<void> {
+  const mentions: FormedMention[] = [];
+  for (const entry of treeListing(report)) {
+    mentions.push(identityMention(entry.file));
+    const pending: { node: TreeNode; parent: TreeNode | undefined }[] = [];
+    for (let index = entry.nodes.length - 1; index >= 0; index -= 1) {
+      pending.push({ node: entry.nodes[index]!, parent: undefined });
+    }
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      mentions.push(treeNodeMention(next.node, next.parent));
+      const { children } = next.node;
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        pending.push({ node: children[index]!, parent: next.node });
+      }
+    }
+  }
+  await expectHumanListing(
+    product,
+    workspace,
+    ["ids", "--tree", ...flags],
+    distinctMentions(mentions),
+    "every listed file and every tree node, by its full ID or by its ID " +
+      "relative to its tree parent, the tree holding exactly the listed IDs",
+    context,
   );
 }
 
@@ -495,7 +654,7 @@ const T12_3_1_APP = stagedTs(
 const T12_3_1 = defineProductTest({
   id: "T12.3-1",
   title:
-    "`ids` groups requirement IDs by file — files in byte order of workspace-relative path (differing from configuration order), IDs within a file in document order (differing from their byte order); `--tree` renders per-file nesting in the same orders; `--file <glob>` restricts by the rules of SPEC 7 — an outside-root pattern by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`) is an invalid flag value, exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding, while an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`, and their twins over `apecs`) is admitted and matches nothing, an empty listing at exit 0; a restricted `--tree` (`--unreferenced`) nests a listed node under its nearest listed ancestor or at its file's top level, containing exactly the listed IDs; the human form carries the same information as `--json` (SPEC 12.3, 7, 12.0)",
+    "`ids` groups requirement IDs by file — files in byte order of workspace-relative path (differing from configuration order), IDs within a file in document order (differing from their byte order); `--tree` renders per-file nesting in the same orders; `--file <glob>` restricts by the rules of SPEC 7 — an outside-root pattern by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`) is an invalid flag value, exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding, while an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`, and their twins over `apecs`) is admitted and matches nothing, an empty listing at exit 0; a restricted `--tree` (`--unreferenced`) nests a listed node under its nearest listed ancestor or at its file's top level, containing exactly the listed IDs; and beside each non-empty listing the human form at the same state exits 0 alike and carries the same information as `--json` — every listed file and ID, a tree node as its full ID or relative to its tree parent (robust matching, H-3) (SPEC 12.3, 7, 12.0)",
   run: async (product) => {
     await withWorkspace(
       T12_3_1_ORDERING_CONFIG,
@@ -507,79 +666,77 @@ const T12_3_1 = defineProductTest({
       async (workspace) => {
         await buildOk(product, workspace, "T12.3-1 `build` (ordering)");
 
-        // Flat listing: both spec-fixed orders, asserted exactly.
-        await expectFlatListing(
+        // Flat listing: both spec-fixed orders, asserted exactly; then, at
+        // the same state, its human form — `--json` parity, every listed
+        // file and ID (module header; H-3), as after each listing below.
+        const flat = await expectFlatListing(
           product,
           workspace,
           [],
           T12_3_1_FLAT,
           "T12.3-1 `ids --json`",
         );
+        await assertHumanFlatListing(
+          product,
+          workspace,
+          [],
+          flat,
+          "T12.3-1 (ordering)",
+        );
 
-        // `--tree`: per-file nesting in the same file and document order.
-        await expectTreeListing(
+        // `--tree`: per-file nesting in the same file and document order;
+        // its human form names every node by its full ID or relative to
+        // its tree parent.
+        const tree = await expectTreeListing(
           product,
           workspace,
           [],
           T12_3_1_TREE,
           "T12.3-1 `ids --tree --json`",
         );
-
-        // `--json` parity: the human forms exit 0 and mention the same
-        // distinctive information (module header; H-3).
-        await expectHumanListing(
+        await assertHumanTreeListing(
           product,
           workspace,
-          ["ids"],
-          [
-            "apecs/M.mdx",
-            "apecs/nested/N.mdx",
-            "zpecs/Z.mdx",
-            "emm",
-            "enn",
-            "zeta.minor",
-            "zeta.aleph",
-            "alpha",
-          ],
-          "T12.3-1 `ids` (human form)",
-        );
-        await expectHumanListing(
-          product,
-          workspace,
-          ["ids", "--tree"],
-          [
-            "apecs/M.mdx",
-            "apecs/nested/N.mdx",
-            "zpecs/Z.mdx",
-            "emm",
-            "enn",
-            "zeta",
-            "minor",
-            "aleph",
-            "alpha",
-          ],
-          "T12.3-1 `ids --tree` (human form)",
+          [],
+          tree,
+          "T12.3-1 (ordering)",
         );
 
         // `--file <glob>` restricts to files the glob matches (the rules of
         // SPEC 7: `**` spans segments, `*` never crosses `/`).
-        await expectFlatListing(
+        const spanFlags = ["--file", "apecs/**/*.mdx"];
+        const spanListing = await expectFlatListing(
           product,
           workspace,
-          ["--file", "apecs/**/*.mdx"],
+          spanFlags,
           [
             { file: "apecs/M.mdx", ids: ["emm"] },
             { file: "apecs/nested/N.mdx", ids: ["enn"] },
           ],
           "T12.3-1 `ids --file apecs/**/*.mdx --json`",
         );
-        await expectFlatListing(
+        await assertHumanFlatListing(
           product,
           workspace,
-          ["--file", "apecs/*.mdx"],
+          spanFlags,
+          spanListing,
+          "T12.3-1 (ordering)",
+        );
+        const singleFlags = ["--file", "apecs/*.mdx"];
+        const singleListing = await expectFlatListing(
+          product,
+          workspace,
+          singleFlags,
           [{ file: "apecs/M.mdx", ids: ["emm"] }],
           "T12.3-1 `ids --file apecs/*.mdx --json` (a single `*` never " +
             "crosses `/`, SPEC 7)",
+        );
+        await assertHumanFlatListing(
+          product,
+          workspace,
+          singleFlags,
+          singleListing,
+          "T12.3-1 (ordering)",
         );
 
         // A `--file` pattern outside the workspace root by its spelling
@@ -643,8 +800,8 @@ const T12_3_1 = defineProductTest({
 
         // Premise: the restriction lists exactly grand, grand.par.leaf, and
         // solo.kid — `grand.par` and `solo` carry incoming `references`
-        // edges from the code markers.
-        await expectFlatListing(
+        // edges from the code markers. Its human form follows it.
+        const unreferenced = await expectFlatListing(
           product,
           workspace,
           ["--unreferenced"],
@@ -656,13 +813,20 @@ const T12_3_1 = defineProductTest({
           ],
           "T12.3-1 `ids --unreferenced --json` (the restriction premise)",
         );
+        await assertHumanFlatListing(
+          product,
+          workspace,
+          ["--unreferenced"],
+          unreferenced,
+          "T12.3-1 (restricted tree)",
+        );
 
         // grand.par.leaf's parent is unlisted, so it nests under its nearest
         // listed ancestor (grand); solo.kid has no listed ancestor, so it
         // sits at the file's top level. Exact equality also asserts "the
         // tree contains exactly the listed IDs" — neither grand.par nor solo
         // appears.
-        await expectTreeListing(
+        const restricted = await expectTreeListing(
           product,
           workspace,
           ["--unreferenced"],
@@ -678,14 +842,15 @@ const T12_3_1 = defineProductTest({
           "T12.3-1 `ids --unreferenced --tree --json` (restricted tree)",
         );
 
-        // Parity for the restricted tree's human form: mentions both a
-        // full-ID and an indented-segment rendering contain (H-3).
-        await expectHumanListing(
+        // Its human form: grand.par.leaf by its full ID or as `par.leaf`
+        // under grand, solo.kid by its full ID alone — at the top level no
+        // other spelling carries the listed ID (module header; H-3).
+        await assertHumanTreeListing(
           product,
           workspace,
-          ["ids", "--unreferenced", "--tree"],
-          ["specs/T.mdx", "grand", "leaf", "kid"],
-          "T12.3-1 `ids --unreferenced --tree` (human form)",
+          ["--unreferenced"],
+          restricted,
+          "T12.3-1 (restricted tree)",
         );
       },
     );
