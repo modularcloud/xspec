@@ -61,7 +61,27 @@
 //     stem and removes the origin's, 6.5, 13.4; a resolve writes the
 //     session once, last, 13.5) and no reader writes one (the read menu
 //     leaves out `build`; a reader's refresh writes graph data alone,
-//     generating no TypeScript, 13.3). Graph data has an oracle of its own:
+//     generating no TypeScript, 13.3). After a run the kill ended, "after"
+//     is the path's state in the reader-free twin's final workspace, read
+//     before the episode starts: every distinct state polled there, and the
+//     state the kill left, is the path's start state or that one. The run
+//     leaves every write it made complete and makes no later one (13.5: "A
+//     mutating command interrupted before completion … leaves the writes
+//     already made, each complete, and makes no later one"), and its one
+//     write to such a path, had it made it, is the twin's: the twin runs the
+//     same operation on a byte copy of the episode's start, whose sources,
+//     configuration, and journal nothing but the command writes during the
+//     episode (a reader's refresh writes graph data alone, above); every
+//     file the operation writes is byte-deterministic for identical input
+//     (12.0: "no wall-clock values, no randomness, no absolute paths, no
+//     environment-dependent content"; 13.4: derived files reproducible from
+//     the sources, the configuration, and the journal); and the operation
+//     writes each such path at most once (above). So a partial write the
+//     kill left — at the journal, a rename's source, a move's origin or
+//     destination, or a module or companion beside them — fails there and
+//     never passes as "after" (and after a `rename` or `move` killed past
+//     its hold the schedule continues on the twin's workspace, so nothing
+//     later looks at what the kill left). Graph data has an oracle of its own:
 //     readers' refreshes write it too, last write wins (13.3, 13.5), so a
 //     graph-data path may pass through complete states that are neither its
 //     state before the episode nor its twin's after it — the product's own
@@ -1830,10 +1850,80 @@ class JournalOrder {
 }
 
 /**
+ * Judge one polled path but graph data of a run the kill ended (module
+ * header): every distinct state the polling reader recorded there, and its
+ * state once the kill had ended the run (`end`: the run makes no write
+ * after the kill, and no reader writes the path), must be its state before
+ * the episode or its state in the reader-free twin's final workspace
+ * (`twinFinal`) — the run leaves every write it made complete and makes no
+ * later one (SPEC 13.5), and its one write to the path, had it made it, is
+ * the twin's (the module header's reasons). Any other state is a partial
+ * write the kill left, which never passes as "after" since the kill decided
+ * the end: diagnosed with the polling cycle that first observed it (none
+ * for an end state the poller never met) and the nearest candidate's byte
+ * difference (nearestContent).
+ */
+function judgeKilledRunPath(
+  poller: PathPoller,
+  rel: string,
+  abs: string,
+  start: PolledState,
+  end: PolledState,
+  twinFinal: PolledState,
+  context: string,
+): void {
+  const observed = new Map<
+    string,
+    { readonly state: PolledState; readonly cycle: number | undefined }
+  >();
+  for (const [key, { state, firstIndex }] of poller.distinct(abs)) {
+    observed.set(key, { state, cycle: firstIndex });
+  }
+  const endKey = polledStateKey(end);
+  if (!observed.has(endKey)) {
+    observed.set(endKey, { state: end, cycle: undefined });
+  }
+  const complete = new Set([polledStateKey(start), polledStateKey(twinFinal)]);
+  for (const [key, { state, cycle }] of observed) {
+    if (complete.has(key)) continue;
+    const nearest = nearestContent(state, [start, twinFinal]);
+    fail(
+      `${context}: ` +
+        (cycle === undefined
+          ? `once the kill had ended the run, ${rel} held`
+          : `polling cycle #${String(cycle)} observed ${rel} in`) +
+        ` a state that is neither its state before the episode nor its ` +
+        `reader-free twin's after the operation, though a run the kill ` +
+        `ended leaves every write it made complete and makes no later one ` +
+        `(SPEC 13.5: "at every moment — concurrent readers and interrupted ` +
+        `commands included — a path xspec writes holds either its prior ` +
+        `state (the previous content, or absence) or the complete new ` +
+        `content, never a partial write"; "A mutating command interrupted ` +
+        `before completion, or stopped by a write the environment refuses ` +
+        `(14.24), leaves the writes already made, each complete, and makes ` +
+        `no later one, release (above) aside"), and the twin's state there ` +
+        `is the complete content of the run's one write to the path (the ` +
+        `same operation on a byte copy of the episode's start, every file ` +
+        `it writes byte-deterministic for identical input, each written at ` +
+        `most once: 12.0, 13.4; TEST-SPEC P-10; T13.5-5's protocol) — so a ` +
+        `partial write the kill left. Observed ` +
+        `${describePolledState(state)}; before ${describePolledState(start)}, ` +
+        `the twin's ${describePolledState(twinFinal)}.` +
+        (nearest !== undefined && state.kind === "content"
+          ? `\n${describeByteDifference(state.bytes, nearest, "observed", "nearest")}`
+          : ""),
+    );
+  }
+}
+
+/**
  * The polling reader's verdict (module header): no read error, at least one
  * cycle, the journal's order kept, and every distinct state observed at a
  * path but graph data its state before the episode or after it — prior or
- * complete, never partial (SPEC 13.5; T13.5-5's protocol) — each graph-data
+ * complete, never partial (SPEC 13.5; T13.5-5's protocol) — where the kill
+ * ended the run (`killedRun`), "after" its state in the reader-free twin's
+ * final workspace (`twinFinalStates`, by workspace-relative path), the
+ * state the kill left judged too (judgeKilledRunPath); each graph-data
  * path, which `graphData.twinFinal` names, judged on its own terms: its
  * start state, its twin's final state, or the product's own graph data for
  * a state of the episode's files (judgeGraphDataPath).
@@ -1843,6 +1933,8 @@ async function judgePolledStates(
   order: JournalOrder,
   polled: readonly { readonly rel: string; readonly abs: string }[],
   startStates: ReadonlyMap<string, PolledState>,
+  twinFinalStates: ReadonlyMap<string, PolledState>,
+  killedRun: boolean,
   graphData: GraphDataOracle,
   context: string,
 ): Promise<void> {
@@ -1877,6 +1969,14 @@ async function judgePolledStates(
         graphData,
         context,
       );
+      continue;
+    }
+    if (killedRun) {
+      const complete = twinFinalStates.get(rel);
+      if (complete === undefined) {
+        throw new Error(`P-10 harness defect: no twin-final state for ${rel}`);
+      }
+      judgeKilledRunPath(poller, rel, abs, start, end, complete, context);
       continue;
     }
     const legit = new Set([polledStateKey(start), polledStateKey(end)]);
@@ -2083,15 +2183,17 @@ async function judgeEndedRun(
 /**
  * Run one episode (module header) on the trial's workspace: its operation
  * made concrete, its reader-free twin run first (on a copy), the derived
- * files beside its sources and its graph data listed from both, then the
- * polling reader started, the pre-start readers started and confirmed
- * running, the command started — in a process group of its own — held or
- * not, its held and straddle reads, and its fate; the run judged at once as
- * it ends, the readers then settled, the polled states judged (graph data's
- * staged states computed then, while the twin's workspace stands, where an
- * observed state needs them); the ledger and the file model updated, and —
- * after a `rename` or `move` killed past its hold — the trial continued on
- * the twin's workspace.
+ * files beside its sources and its graph data listed from both, every
+ * polled path's state read at the start and in the twin's final workspace,
+ * then the polling reader started, the pre-start readers started and
+ * confirmed running, the command started — in a process group of its own —
+ * held or not, its held and straddle reads, and its fate; the run judged at
+ * once as it ends, the readers then settled, the polled states judged (a
+ * run the kill ended against the twin's final states, the state it left
+ * included; graph data's staged states computed then, while the twin's
+ * workspace stands, where an observed state needs them); the ledger and the
+ * file model updated, and — after a `rename` or `move` killed past its hold
+ * — the trial continued on the twin's workspace.
  */
 async function runEpisode(
   product: ProductBinding,
@@ -2155,6 +2257,18 @@ async function runEpisode(
         rel,
         await readPolledState(twin.workspace.path(rel)),
       );
+    }
+    // Every polled path's state in the twin's final workspace, read before
+    // the episode starts — graph data's those just read: what a run the kill
+    // ended is judged against (judgePolledStates; module header).
+    const twinFinalStates = new Map<string, PolledState>(graphDataTwinFinal);
+    for (const { rel } of polled) {
+      if (!twinFinalStates.has(rel)) {
+        twinFinalStates.set(
+          rel,
+          await readPolledState(twin.workspace.path(rel)),
+        );
+      }
     }
     let staged: Promise<StagedGraphData> | undefined;
     const graphData: GraphDataOracle = {
@@ -2303,6 +2417,8 @@ async function runEpisode(
       order,
       polled,
       startStates,
+      twinFinalStates,
+      killedRun,
       graphData,
       context,
     );
@@ -2526,7 +2642,7 @@ async function runP10Trial(
 const P_10 = defineProductTest({
   id: "P-10",
   title:
-    "concurrency under randomized schedules of concurrent readers and one mutating command via --test-hold and process kills (TEST-SPEC §16 P-10): episodes of `rename`, file-form `move`, and `review resolve` under `--json`, held or not, run to their end, killed while held, or killed past their hold at fixed fractions of their twin's lift-to-exit span, each kill under T13.5-3's exit-collection discipline (the command's process group SIGKILLed, its exit collected, the group gone) before anything later runs; readers started before each command at drawn leads, at least one confirmed still running (listed, never a zombie) as it starts, plus reads while it holds and straddling its lift or kill, and a polling reader over the journal, the session file, the source, its module and companions, and graph data, never the lock path; each command's reader-free twin copied from the workspace, the lock path aside, as it starts and run alone, exit 0. Readers observe only prior-or-complete states (every polled state the path's before or after the episode, at a graph-data path also the product's own graph data for a state of the episode's files; the journal prefix-monotone, never deleted; T13.5-5's protocol); nothing is lost (each `rename`/`move` exiting 0 adds exactly one journal line, each killed one at most one; each resolve exiting 0 records its status — read back by quiescent `review status` and `review list` — each killed one records it or leaves the session byte-unchanged); a killed run whose sources, journal, or session files differ from its twin's leaves `.xspec/lock` holding exactly one plain-file entry (T13.5-3's past-the-hold judgement); and readers never exclude a mutating command: each one not killed is never refused (a refusal after a kill voids the trial where a killed group's identifier is listed again, T13.5-3's reuse check) and ends exactly as its twin — exit code, standard output, and the sources, journal, and session files byte-equal (H-6; derived files and graph data not compared), `.xspec/lock` then absent (SPEC 6.1, 10.7, 13.4, 13.5; E-5)",
+    "concurrency under randomized schedules of concurrent readers and one mutating command via --test-hold and process kills (TEST-SPEC §16 P-10): episodes of `rename`, file-form `move`, and `review resolve` under `--json`, held or not, run to their end, killed while held, or killed past their hold at fixed fractions of their twin's lift-to-exit span, each kill under T13.5-3's exit-collection discipline (the command's process group SIGKILLed, its exit collected, the group gone) before anything later runs; readers started before each command at drawn leads, at least one confirmed still running (listed, never a zombie) as it starts, plus reads while it holds and straddling its lift or kill, and a polling reader over the journal, the session file, the source, its module and companions, and graph data, never the lock path; each command's reader-free twin copied from the workspace, the lock path aside, as it starts and run alone, exit 0. Readers observe only prior-or-complete states (every polled state the path's before or after the episode — after a kill, the path's before it or its reader-free twin's after the operation, the state the kill left included — at a graph-data path also the product's own graph data for a state of the episode's files; the journal prefix-monotone, never deleted; T13.5-5's protocol); nothing is lost (each `rename`/`move` exiting 0 adds exactly one journal line, each killed one at most one; each resolve exiting 0 records its status — read back by quiescent `review status` and `review list` — each killed one records it or leaves the session byte-unchanged); a killed run whose sources, journal, or session files differ from its twin's leaves `.xspec/lock` holding exactly one plain-file entry (T13.5-3's past-the-hold judgement); and readers never exclude a mutating command: each one not killed is never refused (a refusal after a kill voids the trial where a killed group's identifier is listed again, T13.5-3's reuse check) and ends exactly as its twin — exit code, standard output, and the sources, journal, and session files byte-equal (H-6; derived files and graph data not compared), `.xspec/lock` then absent (SPEC 6.1, 10.7, 13.4, 13.5; E-5)",
   // Wall-clock hang guard only (H-10): three fixed seeds (E-5), two to five
   // episodes per trial, each a twin and a command plus up to eight reads,
   // and, where an observed graph-data state needs them, up to sixteen

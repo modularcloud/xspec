@@ -18,11 +18,13 @@
 // error. Its oracles — which states are legitimate, when absence is — are
 // the callers' own: T13.5-5 judges its derived file against the completed
 // builds' contents, P-10 each polled path against its states before and
-// after each episode, and each graph-data path also against the product's
-// own graph data for every state of the episode's files
-// (section-16-p10.ts). No caller ever polls the lock path `.xspec/lock` or
-// anything under it (P-10's paths are named explicitly, listed in its spec
-// sources' directories by 13.1's `NAME.xspec.` prefix, or collected by
+// after each episode — after a kill, against its state before the episode
+// and its reader-free twin's after the operation, the state the kill left
+// included — and each graph-data path also against the product's own graph
+// data for every state of the episode's files (section-16-p10.ts). No
+// caller ever polls the lock path `.xspec/lock` or anything under it
+// (P-10's paths are named explicitly, listed in its spec sources'
+// directories by 13.1's `NAME.xspec.` prefix, or collected by
 // `collectGraphDataFiles`, which skips the lock path).
 
 import { Buffer } from "node:buffer";
