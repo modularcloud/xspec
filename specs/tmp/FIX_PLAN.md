@@ -76,7 +76,7 @@ The previous plan (written at d0c8039, deleted at 43c9a5e) is `git show 43c9a5e^
 - Reviewers A, C, and D and VERIFY found nothing to plan. Every item of the previous plans' lists of the same name still holds (`git show 43c9a5e^:specs/tmp/FIX_PLAN.md`, and the lists it carries forward) — save the d0c8039 plan's "The planner's own" item (1) on refused operations' and gated reads' findings, which reviewer B's RB-4 now overrides (Tasks 4–7).
 
 **Order.** Take the topmost task unless told otherwise. Tasks 1, 2, and 3 are independent of each other and of the rest. Task 4 precedes Task 5, which precedes Tasks 6 and 7; Task 7 comes after Task 6 (its header note names T14-7's site); Task 8 comes last. When a task is done, its commit removes it from the Tasks section and adds a one-line summary to its bullet here.
-- Task 1 (RB-1): T12.4-1 asserts the human `show` report in full, at both arms.
+- Task 1 (RB-1): T12.4-1 asserts the human `show` report in full, at both arms. Done: `section-12.3-12.5.ts` gains the module-private `assertHumanShowReport`, which runs the human `show <node>` at a decoded `show --json` report's state, asserts exit 0, and matches, from the report, the identity and every incoming and outgoing edge's `from` and `to` (`identityMention`), each tag and the coverage value where the node has them, every trimmed non-blank line of the own and subtree text (`nonBlankLines`, now exported from `section-10.7-ii.ts`, its doc comment naming T12.4-1), and the four hashes (plain strings) in one call, each distinct edge kind (`specTokenMention`) in a second call blanking all of those data, and the range's start and end (`numberMention`) in a third blanking their digit-holding data (`digitHoldingData`, the hashes); T12.4-1 calls it after the path#id arm's JSON assertions, in place of the hard-coded check, and, new, after the root arm's. The module header's T12.4-1 bullet records these checks and their limits (which endpoint lies on which edge, of which kind and direction, which line belongs to which text, and which number starts or ends the range stay with the adapter compare; a datum counts wherever the report prints it; a root's absent tags and coverage attribute are carried by the JSON assertions; blanking is by spelling, and the fixture's data spell no edge kind but `embedS`, hold digits in the hashes alone, and hold no escapable character), and the title gains the human-form clause and 12.0. Checks: typecheck and format clean; the self project alone under the namespace, `dist/` absent and the admin files left out, 37 files and 4442 tests, all passed (391.97 s); certification 186 PASS / 50 FAIL / 0 error / 0 hang, 0 discrepancies; T12.4-1, run alone through `test/self/zz-t9j43c1.test.ts` (deleted), passes against the built product (3.41 s of test; HEAD's 2.17 s) and `b-review/m/p13` (2.98 s), fails diagnosed against `b-review/m/show-human` (the star arm's kind call: `contains`, `depends`, `embeds`; 1.80 s), `t9j43c1-nokinds` (the same three, 1.85 s; with the kind call's `blank` option removed in a scratch edit, `contains` and `depends` alone, `embeds` found inside `src/app.ts#embedStar`, 1.57 s), `t9j43c1-noranges` (`number 0`, `number 141`; 1.52 s), `t9j43c1-noidline` (`specs/S.mdx#star`; 1.46 s), `t9j43c1-noincoming` (`specs/S.mdx`, `src/app.ts#embedStar`; 1.67 s), and `t9j43c1-rootempty` (the root arm alone, every datum; 2.75 s), and, with the change stashed, `show-human` passes (the gap; 2.32 s). The specs are scratchpad `t9j43c_1/specs/<name>.json`, written by `t9j43c_1/tools/make_specs.py`; the run logs `t9j43c_1/runs/`.
 - Task 2 (RB-2): T12.3-1 asserts every listed file and ID of each human listing.
 - Task 3 (RB-3): T8.2-1 asserts the human coverage report at every run.
 - Task 4 (RB-4): the stable-code matcher `codeMention` and its S-5 vectors.
@@ -86,43 +86,6 @@ The previous plan (written at d0c8039, deleted at 43c9a5e) is `git show 43c9a5e^
 - Task 8: confirm locally and in CI; record the timings; delete this plan.
 
 ## Tasks
-
-### Task 1 — T12.4-1 asserts the human `show` report in full, at both arms (RB-1)
-
-**Requirement.** The conventions' requirement, and TEST-SPEC T12.4-1: "Accepts `path#id` and bare `path` (root); prints the full 12.4 enumeration — identity, source range (1.7), own and subtree text, hashes, tags, coverage attribute, and edges by kind; each field equals the corresponding `query node` field for the same node (adapter-compared)". SPEC 12.4: "Prints one requirement for human reading: identity, source range (1.7), own and subtree text, hashes, tags and coverage attribute (both absent for a root node, 11), and edges by kind." SPEC 1.7: a source range is "a pair of byte offsets". T12.0-1's parity site for `show` is T12.4-1 (the header of `section-12.0-i.ts`). Reviewer B's G1: the human check never asks the range or an edge kind, its plain substrings find `specs/S.mdx#star` inside `specs/S.mdx#star.point`, and the root arm runs no human form; `b-review/m/show-human` passes T12.4-1.
-
-**Departures from reviewer B's proposal.** Two additions: the edge kinds are matched with every literal datum blanked (conventions item 3: `src/app.ts#embedStar` spells `embedS`, which `embeds` matches case-insensitively, so without blanking a build printing no kind word would still be credited `embeds`); and the tags and the coverage value stay plain mentions, now taken from the decoded document.
-
-**State at 43c9a5e** (`test/suite/registry/section-12.3-12.5.ts`).
-- T12.4-1 (line 879): `decodeBoth` (line 890) decodes `show <node> --json` and `query node <node> --json` and compares them field by field; the path#id arm (line 939) pins the tags and `coverage="none"`; the bare-path root arm (line 967) pins the absent coverage attribute and runs no human form.
-- The one human run (lines 976–1011): `show specs/S.mdx#star`, exit 0, then `assertReportMentions` over hard-coded plain substrings — the identity, the three tags, `none`, `specs/S.mdx#star.point`, `specs/S.mdx#peer`, `src/app.ts#embedStar`, three text lines, and `star.query`'s four hashes. No range offset, no edge kind, and not the root endpoint `specs/S.mdx` of star's incoming `contains` edge.
-- The module header's T12.4-1 bullet (lines 50–69) closes: "source-range presence is carried by the adapter compare, since bare digits are not distinctive mentions" — but that compare reads no human report.
-- The module imports `assertReportMentions` and the type `Mention` alone from the adapters. `nonBlankLines` (trimmed non-blank lines of a text value) is module-private in `section-10.7-ii.ts` (line 1670); `digitHoldingData` is exported by `section-10.7-i.ts` (line 497).
-
-**Change.**
-1. Export `nonBlankLines` from `section-10.7-ii.ts` (unchanged otherwise; its doc comment names T12.4-1 as a caller).
-2. A module-private `assertHumanShowReport(product, workspace, report: NodeReport, context)` in `section-12.3-12.5.ts` runs `show <report.identity>` without `--json` — exit 0, an informational report (SPEC 12.0) — and asks, from the decoded report:
-   - in one call: `identityMention` of the identity and of the `from` and `to` of every incoming and outgoing edge (distinct); each tag where `tags` is not `null`, and the coverage value where it is defined (plain strings); every trimmed non-blank line of `ownText` and `subtreeText` (plain strings, `nonBlankLines`); the four hashes (plain strings);
-   - in a second call, each distinct kind among the edges (`specTokenMention`), with every literal datum of the first call blanked;
-   - in a third call, `numberMention` of `sourceRange.start` and `sourceRange.end`, with the digit-holding literal data of the first call blanked (`digitHoldingData` from `./section-10.7-i.js`; the hashes hold digits).
-3. Call it in the path#id arm on `star.show`, in place of the hard-coded check, and in the root arm on `root.show`, each after that arm's JSON assertions.
-4. The module header's T12.4-1 bullet: replace its closing human-form sentences with these checks and their limits — which endpoint lies on which edge, of which kind and direction, which line belongs to the own or the subtree text, and which number starts or ends the range stay with the adapter compare; a datum counts wherever the report prints it; a root's absent tags and coverage attribute are pinned in JSON alone. The title gains the human-form clause (and 12.0).
-
-**Verify.**
-- The common checks (typecheck, format, the self project at 37 files and 4442 tests, the certification lines).
-- T12.4-1 passes against the built product and against `b-review/m/p13`.
-- Red checks (builds `t9j43c1-<name>` from specs in `<scratchpad>/t9j43c_1/specs/`, over `src/cli/commands/show.ts`; record each outcome and time). A diagnosis names the missing mentions of the first call that misses any — the calls run in the order above, and a failing call ends the test — so a build gutting several classes is named by its earliest:
-  - `b-review/m/show-human`: T12.4-1 fails diagnosed at the path#id arm's kind call, naming the three kinds (its missing range is `t9j43c1-noranges`' to show);
-  - `t9j43c1-nokinds` (edge lines without the kind word — `show-human`'s second replacement alone): fails naming `contains`, `depends`, and `embeds` — `embeds` only because the kind call blanks the data: run it once with that `blank` option removed in a scratch edit to confirm `embeds` is then found inside `src/app.ts#embedStar`, and restore it;
-  - `t9j43c1-noranges` (no `source range:` line — `show-human`'s first replacement alone): fails naming both offsets;
-  - `t9j43c1-noidline` (`renderNodeHuman` without its identity line): fails at the path#id arm naming `specs/S.mdx#star`, which HEAD's plain mention found inside `specs/S.mdx#star.point`;
-  - `t9j43c1-noincoming` (no incoming edge lines): fails naming `specs/S.mdx` and `src/app.ts#embedStar`;
-  - `t9j43c1-rootempty` (`renderNodeHuman` returning the empty string for a root, an identity holding no `#`): fails at the root arm alone;
-  - with the change stashed, `b-review/m/show-human` passes (the gap).
-- AGENTS.md: the task's sentence.
-- Commit (subject `sdg(phase-9): assert the human show report in full at both arms of T12.4-1 (FIX_PLAN Task 1)`) and push.
-
-**Done when.** The checks hold, and the commit is pushed with a message recording the results.
 
 ### Task 2 — T12.3-1 asserts every listed file and ID of each human listing (RB-2)
 

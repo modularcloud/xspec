@@ -62,11 +62,35 @@
 //   case-insensitively, or case-folding fails on either surface — the last
 //   one, when both surfaces share it, at the literal pin alone (TEST-SPEC
 //   T11.4-3's `query node`/`show --json` clause, T12.7-1).
-//   The human form is asserted for distinctive information presence,
-//   including the four hash values as reported by `query node` (12.4 prints
-//   hashes; an abbreviation is not the same information) — source-range
-//   presence is carried by the adapter compare, since bare digits are not
-//   distinctive mentions.
+//   The human form (T12.0-1's information parity; SPEC 12.0): at each arm,
+//   after its JSON assertions and at the same state, `show <node>` without
+//   `--json` exits 0 as well, and its report mentions what the decoded
+//   `show --json` report carries (a product-to-itself comparison, H-4;
+//   `assertHumanShowReport`, through helpers/adapters/human.ts), in three
+//   calls: the identity and every incoming and outgoing edge's `from` and
+//   `to` (identity boundaries, so star's identity never counts inside
+//   `specs/S.mdx#star.point`, nor the root's `specs/S.mdx` inside its
+//   sections' identities), each tag and the coverage value where the node
+//   has them, every trimmed non-blank line of the own and the subtree text,
+//   and the four hashes in full (plain strings; 12.4 prints hashes, and an
+//   abbreviation is not the same information); then each distinct kind
+//   among the edges (SPEC-named tokens), with all of those data blanked out
+//   — so `embeds` never counts inside `src/app.ts#embedStar`, which spells
+//   `embedS`; then the source range's start and end (whole numbers), with
+//   the digit-holding data among them — the hashes — blanked out. Limits:
+//   no mention is associated with another, so which endpoint lies on which
+//   edge, of which kind and direction, which line belongs to the own or the
+//   subtree text, and which number starts or ends the range stay with the
+//   adapter compare; a datum counts wherever the report prints it — a line
+//   of the own text in the subtree text, an endpoint on another edge, an
+//   offset in any whole number the report prints outside the blanked data;
+//   and a root's absent tags and coverage attribute are not asked of the
+//   human report (robust matching asks presence): the JSON assertions carry
+//   them — the coverage attribute's absence pinned on the `show` side, the
+//   tags' through the adapter compare. Blanking is by spelling: T12.4-1's
+//   data spell no edge kind but `src/app.ts#embedStar`'s `embedS`, hold
+//   digits in the hashes alone, and hold no character a report may need to
+//   quote or escape, so every datum is asked.
 // - T12.5-1's dispatch arms are minimal exit-0 probes — each named command
 //   dispatches into its section's specified outcome on a small valid fixture
 //   (deep behavior is covered in sections 8, 9, 10, 11, 6, per TEST-SPEC) —
@@ -102,6 +126,9 @@ import {
   decodeOccurrencesReport,
   decodeSessionListReport,
   decodeViewFilesReport,
+  identityMention,
+  numberMention,
+  specTokenMention,
 } from "../../helpers/adapters/index.js";
 import type { Mention } from "../../helpers/adapters/index.js";
 import type { GraphEdge } from "../../helpers/adapters/index.js";
@@ -113,6 +140,8 @@ import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import { digitHoldingData } from "./section-10.7-i.js";
+import { nonBlankLines } from "./section-10.7-ii.js";
 import {
   BESIDE_ROOT_FILE_PATTERN_DECOY,
   INSIDE_NO_MATCH_FILE_PATTERNS,
@@ -876,10 +905,98 @@ const T12_4_1_ROOT = "specs/S.mdx";
 // mixed-case member kept as spelled (SPEC 12.7, 2.6).
 const T12_4_1_STAR_TAGS = ["Zeta", "amber", "vital"];
 
+/**
+ * The human `show <node>` at the state of a decoded `show <node> --json`
+ * report, after that arm's own JSON assertions — T12.0-1's information
+ * parity (SPEC 12.0: the JSON form carries the same information as the
+ * human report; the module header): the same argv without `--json` exits 0
+ * (an informational report, SPEC 12.0), and its report mentions the full
+ * 12.4 enumeration the decoded report carries, in three calls. First, its
+ * literal data: the identity and the `from` and `to` of every incoming and
+ * outgoing edge (identity boundaries, so `specs/S.mdx#star` never counts
+ * inside `specs/S.mdx#star.point`, nor the root's `specs/S.mdx` inside its
+ * sections' identities), each tag where the node has tags and the coverage
+ * value where it has one, every trimmed non-blank line of the own and the
+ * subtree text, and the four hashes (plain strings). Second, each distinct
+ * kind among the edges (SPEC-named tokens, SPEC 5.2), matched with every
+ * literal datum of the first call blanked out, so a kind's spelling inside a
+ * datum — `embeds` in `src/app.ts#embedStar`, case-insensitively — never
+ * stands in for it. Third, the source range's start and end (whole numbers,
+ * SPEC 1.7), matched with the first call's digit-holding data — the hashes
+ * among them — blanked out, save a datum that is itself a whole number
+ * (`digitHoldingData` from section-10.7-i.ts). A call with nothing to ask
+ * is skipped. Robust matching (H-3): presence, never wording, and no mention
+ * associated with another.
+ */
+async function assertHumanShowReport(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  report: NodeReport,
+  context: string,
+): Promise<void> {
+  const label = `${context} \`show ${report.identity}\` (human report)`;
+  const human = await expectExit(
+    product,
+    workspace,
+    ["show", report.identity],
+    0,
+    `${label} — the same exit code as the \`--json\` report at this state: ` +
+      `0, an informational report (SPEC 12.4, 12.0)`,
+  );
+  const edges = [...report.incomingEdges, ...report.outgoingEdges];
+  const identities = new Set<string>([report.identity]);
+  for (const edge of edges) {
+    identities.add(edge.from);
+    identities.add(edge.to);
+  }
+  const plain = new Set<string>([
+    ...(report.tags ?? []),
+    ...(report.coverage === undefined ? [] : [report.coverage]),
+    ...nonBlankLines(report.ownText),
+    ...nonBlankLines(report.subtreeText),
+    report.hashes.ownHash,
+    report.hashes.subtreeHash,
+    report.hashes.effectiveHash,
+    report.hashes.metadataHash,
+  ]);
+  const literal = [...new Set([...identities, ...plain])];
+  assertReportMentions(
+    human,
+    [...[...identities].map(identityMention), ...plain],
+    `${label}: the full 12.4 enumeration's data — the identity, every ` +
+      `incoming and outgoing edge's endpoints, the tags and the coverage ` +
+      `value where the node has them, every line of the own and the ` +
+      `subtree text, and the four hashes — the information of the JSON ` +
+      `report (SPEC 12.4, 1.6, 5.5, 11, 12.0)`,
+  );
+  const kinds = [...new Set(edges.map((edge) => edge.kind))];
+  if (kinds.length > 0) {
+    assertReportMentions(
+      human,
+      kinds.map(specTokenMention),
+      `${label}: every edge kind the report's edges carry — edges by kind, ` +
+        `matched with the report's identities, tags, coverage value, text ` +
+        `lines, and hashes blanked out (SPEC 12.4, 5.2, 12.0)`,
+      { blank: literal },
+    );
+  }
+  assertReportMentions(
+    human,
+    [...new Set([report.sourceRange.start, report.sourceRange.end])].map(
+      numberMention,
+    ),
+    `${label}: the source range's start and end, whole numbers, matched ` +
+      `with the report's digit-holding data — the hashes among them — ` +
+      `blanked out, save a datum that is itself a whole number (SPEC 12.4, ` +
+      `1.7, 12.0)`,
+    { blank: digitHoldingData(literal) },
+  );
+}
+
 const T12_4_1 = defineProductTest({
   id: "T12.4-1",
   title:
-    '`show` accepts `path#id` and bare `path` (root) and prints the full 12.4 enumeration — identity, source range, own and subtree text, hashes, tags, coverage attribute, and edges by kind — each field equal to the corresponding `query node` field for the same node (adapter-compared); the staged tags — spelled out of byte order, with a duplicate and a mixed-case member — are pinned in 12.7\'s tag-set form (byte order, duplicates collapsed, never case-folded) on both `show` and `query node`, coverage="none" is pinned on the `show` side, and the root arm reports the coverage attribute absent (SPEC 12.4, 11, 1.7, 12.7, 2.6)',
+    "`show` accepts `path#id` and bare `path` (root) and prints the full 12.4 enumeration — identity, source range, own and subtree text, hashes, tags, coverage attribute, and edges by kind — each field equal to the corresponding `query node` field for the same node (adapter-compared); the staged tags — spelled out of byte order, with a duplicate and a mixed-case member — are pinned in 12.7's tag-set form (byte order, duplicates collapsed, never case-folded) on both `show` and `query node`, coverage=\"none\" is pinned on the `show` side, and the root arm reports the coverage attribute absent; and at each arm the human `show` at the same state exits 0 alike and mentions the identity, every edge's endpoints and kind, the tags and coverage value where the node has them, every line of its own and subtree text, the four hashes, and the source range's start and end (robust matching, H-3) (SPEC 12.4, 11, 1.7, 12.7, 2.6, 12.0)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -961,6 +1078,16 @@ const T12_4_1 = defineProductTest({
               `${star.show.coverage === undefined ? "absent" : JSON.stringify(star.show.coverage)}`,
           );
         }
+        // Human form, at the same state: the full enumeration the decoded
+        // report carries — star's data, its edges' endpoints and kinds
+        // across the workspace, its expanded texts (1.6), and its range
+        // (module header; H-3).
+        await assertHumanShowReport(
+          product,
+          workspace,
+          star.show,
+          "T12.4-1 (path#id arm)",
+        );
 
         // bare-path (root) arm: the coverage attribute is reported absent
         // (SPEC 12.4: absent for a root node, 11).
@@ -972,42 +1099,14 @@ const T12_4_1 = defineProductTest({
               `${JSON.stringify(root.show.coverage)}`,
           );
         }
-
-        // Human form: exit 0 with the enumeration's distinctive information
-        // — identity, tags, the coverage value, edge peers across the four
-        // kinds, text fragments (the embedding expanded, 1.6), and the four
-        // hash values as reported by `query node` (module header; H-3).
-        const humanContext = `T12.4-1 \`show ${T12_4_1_STAR}\` (human form)`;
-        const human = await expectExit(
+        // Human form, at the same state: the root's enumeration — no tags
+        // and no coverage value to ask, its `contains` edges' endpoints and
+        // kind, its texts, hashes, and the whole file's range.
+        await assertHumanShowReport(
           product,
           workspace,
-          ["show", T12_4_1_STAR],
-          0,
-          `${humanContext} — an informational report, exit 0 (SPEC 12.0)`,
-        );
-        assertReportMentions(
-          human,
-          [
-            T12_4_1_STAR,
-            "amber",
-            "vital",
-            "Zeta",
-            "none",
-            "specs/S.mdx#star.point",
-            "specs/S.mdx#peer",
-            "src/app.ts#embedStar",
-            "Star intro.",
-            "Point line.",
-            "Peer line.",
-            star.query.hashes.ownHash,
-            star.query.hashes.subtreeHash,
-            star.query.hashes.effectiveHash,
-            star.query.hashes.metadataHash,
-          ],
-          `${humanContext}: the full 12.4 enumeration's distinctive ` +
-            `information — identity, tags, coverage value, edge endpoints ` +
-            `by kind, expanded text (1.6), and the four hashes \`query ` +
-            `node\` reports (SPEC 12.4; robust matching, never wording — H-3)`,
+          root.show,
+          "T12.4-1 (bare-path root arm)",
         );
       },
     );

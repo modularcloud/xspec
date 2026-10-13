@@ -1665,9 +1665,10 @@ const T10_7_7 = defineProductTest({
 /**
  * The non-blank lines of a text value, each trimmed — the form a human
  * report's text mentions take (helpers/adapters/human.ts: literal data, each
- * line a plain substring); none for an absent value.
+ * line a plain substring); none for an absent value. Exported for
+ * section-12.3-12.5.ts' human `show` check (T12.4-1).
  */
-function nonBlankLines(text: string | undefined): readonly string[] {
+export function nonBlankLines(text: string | undefined): readonly string[] {
   if (text === undefined) return [];
   return text
     .split(/\r\n|\r|\n/)
