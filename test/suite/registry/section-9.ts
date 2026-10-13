@@ -30,14 +30,52 @@
 //   (SPEC 9.2), and the reported edge is the one targeting the chosen path's
 //   first node (9.3), so it runs from the location itself.
 // - Requirement-level entries are T9.1-1's and T5.6-*'s business; the T9.2-*
-//   bodies assert the code groups only.
+//   bodies assert the code groups only — in JSON: their human-form checks
+//   (below) ask the human report for every entry of the decoded document,
+//   requirement entries included.
 // - T9-1's no-difference arms assert the empty report through the suite's
 //   fixed T1.5-1 convention (SPEC 9.3 groups output by category, so an
 //   uncategorized node appears under none — `requirements` empty) plus empty
-//   code groups. Its human (non-`--json`) runs assert exit 0 (impact is
-//   informational, SPEC 9.3) and, with differences present, that the report
-//   on stdout mentions the changed node's identity (12.0: reports are
-//   standard-output content; H-3 robust matching, never wording).
+//   code groups, and their human (non-`--json`) run asserts exit 0 (impact
+//   is informational, SPEC 9.3); with differences present, the human form
+//   is the next bullet's check.
+// - The human form (T12.0-1's information parity; SPEC 12.0: the JSON form
+//   carries the same information as the human report): after each `impact
+//   --base <ref> --json` read with differences and its assertions — T9-1's,
+//   T9.1-1's two, and each T9.2 body's — at the same state (nothing runs
+//   between the two reads, and a read past a build has nothing to refresh,
+//   SPEC 13.3), the same argv without `--json` exits 0 as well
+//   (informational, SPEC 9.3), and its report mentions what the decoded
+//   report carries (a product-to-itself comparison, H-4;
+//   `assertHumanImpactReport`, through helpers/adapters/human.ts): every
+//   requirement entry's nodes and each identity a category is attributed to
+//   (SPEC 5.6, 9.1), and every impacted-code entry's location, witness edge
+//   source and target, and witness path nodes (9.2, 9.3) — identity-or-path
+//   boundaries, so `specs/Embed.mdx#em` never counts inside
+//   `specs/Embed.mdx#em.kid`, nor a root's path inside its sections'
+//   identities; then, in a separate call with all of those identities
+//   blanked out, each entry's categories, `deleted` where an entry is
+//   deleted (9.3), each code entry's edge kind (5.2), and `direct` and
+//   `transitive` wherever the respective group is non-empty (SPEC-named
+//   tokens; robust matching, H-3: presence, never wording). The blanking
+//   keeps a token's spelling inside an identity from standing in for the
+//   token: without it, a report naming no directly impacted group passes
+//   T9.2-4 on `specs/Direct.mdx`, and one naming no `embeds` kind passes
+//   T9.2-1 on `src/embeds.ts` (FIX_PLAN Task 8's scratch builds
+//   `t9jd0c8-nodirect` and `t9jd0c8-noembeds`, which fail both with it).
+//   Limits: no mention is associated with another, so which category,
+//   attribution, or deletion belongs to which entry, which group lists which
+//   location, and which edge kind, target, and path belong to which location
+//   stay with the JSON assertions. An identity counts wherever the report
+//   prints it, and each attribution names an originating node (5.6) and
+//   each path node one whose subtreeHash or effectiveHash changed (9.3) —
+//   each itself some entry's node — while each edge's target is its path's
+//   first node (9.3): a report dropping its attributions, its edge targets,
+//   or its witness paths passes every T9.x test (the scratch builds
+//   `t9jd0c8-noattrib`, `t9jd0c8-notargets`, `t9jd0c8-nopaths`), what they
+//   add beyond those identities — their association — asked in JSON alone.
+//   The resolved baseline commit a product may echo is no information 9.3
+//   defines for the report, and is not asked.
 //
 // Sources staged after a body's first product invocation are staged-source
 // records (helpers/staged-mdx.ts, S-9: judged before any product exists)
@@ -49,8 +87,13 @@ import * as fsp from "node:fs/promises";
 import type {
   ImpactReport,
   ImpactedCodeEntry,
+  SpecNamedToken,
 } from "../../helpers/adapters/index.js";
-import { assertReportMentions } from "../../helpers/adapters/index.js";
+import {
+  assertReportMentions,
+  identityMention,
+  specTokenMention,
+} from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -143,6 +186,89 @@ export function assertImpactedCode(
 }
 
 /**
+ * The human `impact --base <ref>` at the state of a decoded `impact --base
+ * <ref> --json` report, after that report's own assertions — T12.0-1's
+ * information parity (SPEC 12.0: the JSON form carries the same information
+ * as the human report; the module header): the same argv without `--json`
+ * exits 0 as well (informational, SPEC 9.3), and its report mentions, for
+ * every entry of the decoded report, each requirement entry's nodes and each
+ * identity a category is attributed to (SPEC 5.6, 9.1), and each
+ * impacted-code entry's location, its witness edge's source and target, and
+ * every node of its witness path (9.2, 9.3) — identity-or-path boundaries;
+ * then, in a separate call with every one of those identities blanked out
+ * (so a token's spelling inside an identity — `direct` in
+ * `specs/Direct.mdx`, `embeds` in `src/embeds.ts` — never stands in for the
+ * token), each entry's categories, `deleted` wherever an entry is deleted
+ * (9.3), each code entry's edge kind, and `direct` and `transitive` wherever
+ * the respective group is non-empty (SPEC-named tokens). Robust matching
+ * (H-3): presence, never wording, and no mention associated with another.
+ * A report with no entries asserts the exit code alone. Exported for
+ * test/suite/registry/section-9.3.ts (the T9.3 bodies run the same check).
+ */
+export async function assertHumanImpactReport(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  ref: string,
+  report: ImpactReport,
+  context: string,
+): Promise<void> {
+  const label = `${context} \`impact --base <ref>\` (human report)`;
+  const human = await expectExit(
+    product,
+    workspace,
+    ["impact", "--base", ref],
+    0,
+    `${label} — the same exit code as the \`--json\` report at this state: ` +
+      `0, impact is informational whether or not differences exist (SPEC ` +
+      `9.3, 12.0)`,
+  );
+  const identities = new Set<string>();
+  const tokens = new Set<SpecNamedToken>();
+  for (const entry of report.requirements) {
+    for (const node of entry.nodes) identities.add(node);
+    if (entry.deleted) tokens.add("deleted");
+    for (const category of entry.categories) {
+      tokens.add(category.category);
+      for (const attributed of category.attributedTo) {
+        identities.add(attributed);
+      }
+    }
+  }
+  for (const group of ["direct", "transitive"] as const) {
+    const entries = report.code[group];
+    if (entries.length > 0) tokens.add(group);
+    for (const entry of entries) {
+      identities.add(entry.location);
+      identities.add(entry.edge.from);
+      identities.add(entry.edge.to);
+      tokens.add(entry.edge.kind);
+      for (const node of entry.path) identities.add(node);
+    }
+  }
+  if (identities.size > 0) {
+    assertReportMentions(
+      human,
+      [...identities].map(identityMention),
+      `${label}: every requirement entry's nodes and attribution ` +
+        `identities, and every impacted-code entry's location, witness ` +
+        `edge source and target, and witness path nodes — the information ` +
+        `of the JSON report (SPEC 5.6, 9.1, 9.2, 9.3, 12.0)`,
+    );
+  }
+  if (tokens.size > 0) {
+    assertReportMentions(
+      human,
+      [...tokens].map(specTokenMention),
+      `${label}: every entry's categories, \`deleted\` where an entry is ` +
+        `deleted, every code entry's edge kind, and \`direct\` and ` +
+        `\`transitive\` where the group is non-empty, matched with the ` +
+        `report's identities blanked out (SPEC 5.2, 5.6, 9.2, 9.3, 12.0)`,
+      { blank: [...identities] },
+    );
+  }
+}
+
+/**
  * Read a workspace source file as UTF-8 text, failing diagnosed (H-8) when
  * the path does not hold a plain file. Exported for
  * test/suite/registry/section-9.3.ts (T9.3-3 stages manual edits on
@@ -195,7 +321,7 @@ const T9_1_ALPHA_V2 = stagedMdx(
 const T9_1 = defineProductTest({
   id: "T9-1",
   title:
-    "baseline plumbing: `impact --base <ref>` on a git fixture reconstructs the baseline at the ref (6.3) and exits 0 with differences and without (informational); `--json` is available — the empty report before any edit (commit hash and symbolic ref alike), the edited node's `changed` entry with its cascade after (SPEC 9, 9.3, 6.3, 12.0)",
+    "baseline plumbing: `impact --base <ref>` on a git fixture reconstructs the baseline at the ref (6.3) and exits 0 with differences and without (informational); `--json` is available — the empty report before any edit (commit hash and symbolic ref alike), the edited node's `changed` entry with its cascade after; and at the edited state the human `impact` exits 0 alike and carries every entry the `--json` report holds — its nodes, categories, and attribution identities (robust matching, H-3) (SPEC 9, 9.3, 5.6, 6.3, 12.0)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -260,34 +386,20 @@ const T9_1 = defineProductTest({
           `${headLabel}: no code groups are configured (SPEC 9.2)`,
         );
 
-        // With differences: still exit 0; the human report carries the
-        // changed node's identity, and the JSON report the 5.6 categories —
-        // the difference is computed against the ref's content, not the
-        // working tree (SPEC 6.3).
+        // With differences: still exit 0; the JSON report carries the 5.6
+        // categories — the difference is computed against the ref's content,
+        // not the working tree (SPEC 6.3) — and the human report, at the
+        // same state, the same information (module header).
         await workspace.file(P1_MAIN, T9_1_ALPHA_V2);
         await buildOk(
           product,
           workspace,
           "T9-1 `build` over the edited workspace",
         );
-        const plain = await expectExit(
-          product,
-          workspace,
-          ["impact", "--base", base],
-          0,
-          "T9-1 `impact --base <hash>` with differences — informational, " +
-            "exit 0 (SPEC 9.3)",
-        );
-        assertReportMentions(
-          plain,
-          [P1_ALPHA],
-          "T9-1 human `impact` report with differences: the report must " +
-            "mention the changed node's identity (SPEC 9.3; 12.0: the report " +
-            "is standard-output content; H-3 robust matching)",
-        );
         const diffLabel = "T9-1 `impact --base <hash> --json` with differences";
+        const diff = await impactAgainst(product, workspace, base, diffLabel);
         assertImpactCategories(
-          await impactAgainst(product, workspace, base, diffLabel),
+          diff,
           [
             {
               identity: P1_ALPHA,
@@ -302,6 +414,13 @@ const T9_1 = defineProductTest({
             { identity: P1_BETA, categories: [] },
           ],
           diffLabel,
+        );
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          base,
+          diff,
+          "T9-1 with differences",
         );
       },
     );
@@ -324,7 +443,7 @@ const T9_1_1_DEPS_EDITED = stagedMdx(
 const T9_1_1 = defineProductTest({
   id: "T9.1-1",
   title:
-    "categories: requirement-level `impact` output equals the categories and attributions of 5.6, over fixtures shared with T5.6-* — the worked-example leaf edit (changed / descendant-changed / upstream-changed with exact attribution) against one baseline, then a `d`-target edit on the same fixture (metadata-changed with its upstream cascade attributed to D) against a second (SPEC 9.1, 5.6)",
+    "categories: requirement-level `impact` output equals the categories and attributions of 5.6, over fixtures shared with T5.6-* — the worked-example leaf edit (changed / descendant-changed / upstream-changed with exact attribution) against one baseline, then a `d`-target edit on the same fixture (metadata-changed with its upstream cascade attributed to D) against a second; and at each `--json` read's state the human `impact` exits 0 alike and carries every entry the report holds — its nodes, categories, and attribution identities (robust matching, H-3) (SPEC 9.1, 5.6, 12.0)",
   run: async (product) => {
     const wx = workedExample;
     await withWorkspace(
@@ -353,10 +472,23 @@ const T9_1_1 = defineProductTest({
         const leafLabel =
           "T9.1-1 `impact --base <baseline> --json` after the leaf edit " +
           "(fixture and expectation table shared with T5.6-1)";
+        const leafReport = await impactAgainst(
+          product,
+          workspace,
+          leafBase,
+          leafLabel,
+        );
         assertImpactCategories(
-          await impactAgainst(product, workspace, leafBase, leafLabel),
+          leafReport,
           workedExampleLeafEditExpectations(),
           leafLabel,
+        );
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          leafBase,
+          leafReport,
+          "T9.1-1 after the leaf edit",
         );
 
         // Arm B: onmid.dep's `d` list gains Tree.top.other on the same
@@ -374,8 +506,9 @@ const T9_1_1 = defineProductTest({
         const dLabel =
           "T9.1-1 `impact --base <leaf-edited> --json` after the d-target " +
           "edit on the shared fixture";
+        const dReport = await impactAgainst(product, workspace, dBase, dLabel);
         assertImpactCategories(
-          await impactAgainst(product, workspace, dBase, dLabel),
+          dReport,
           [
             // The one originating node: its `d` target set changed. Its own
             // edge additions are excluded from `upstream-changed` ("other
@@ -414,6 +547,13 @@ const T9_1_1 = defineProductTest({
             { identity: ids.other, categories: [] },
           ],
           dLabel,
+        );
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          dBase,
+          dReport,
+          "T9.1-1 after the d-target edit",
         );
       },
     );
@@ -501,7 +641,7 @@ const C1_ADDED_TS_SOURCE = [
 const T9_2_1 = defineProductTest({
   id: "T9.2-1",
   title:
-    "directly impacted: a code location with an impact edge (in either graph) to a node whose subtreeHash changed is directly impacted — a `references` edge to an edited node, an `embeds` edge to a node with an edited descendant, an edge present only in the baseline (marker deleted, node deleted), and an edge present only in the current graph (marker added, node added); added/deleted nodes count as changed in both hashes, and none of these locations is transitively impacted (SPEC 9.2, 9.3)",
+    "directly impacted: a code location with an impact edge (in either graph) to a node whose subtreeHash changed is directly impacted — a `references` edge to an edited node, an `embeds` edge to a node with an edited descendant, an edge present only in the baseline (marker deleted, node deleted), and an edge present only in the current graph (marker added, node added); added/deleted nodes count as changed in both hashes, and none of these locations is transitively impacted; and at the `--json` read's state the human `impact` exits 0 alike and carries every entry the report holds — each requirement entry's nodes, categories, attribution identities, and deletion, and each code entry's location, edge kind and target, witness path, and group (robust matching, H-3) (SPEC 9.2, 9.3, 5.6, 12.0)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -530,8 +670,9 @@ const T9_2_1 = defineProductTest({
         );
 
         const label = "T9.2-1 `impact --base <baseline> --json`";
+        const report = await impactAgainst(product, workspace, base, label);
         assertImpactedCode(
-          await impactAgainst(product, workspace, base, label),
+          report,
           {
             direct: [
               // The edited target itself: single-node path (SPEC 9.3).
@@ -574,6 +715,13 @@ const T9_2_1 = defineProductTest({
           },
           label,
         );
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          base,
+          report,
+          "T9.2-1",
+        );
       },
     );
   },
@@ -613,7 +761,7 @@ const C2_APP_TS_SOURCE = [
 const T9_2_2 = defineProductTest({
   id: "T9.2-2",
   title:
-    "transitively impacted: a location whose impact-edge target changed only in effectiveHash (upstream dependency edit) is transitively impacted, not directly — the directly impacted group is empty and the transitive witness path runs from the target through the dependency edge to the edited upstream node (SPEC 9.2, 9.3)",
+    "transitively impacted: a location whose impact-edge target changed only in effectiveHash (upstream dependency edit) is transitively impacted, not directly — the directly impacted group is empty and the transitive witness path runs from the target through the dependency edge to the edited upstream node; and at the `--json` read's state the human `impact` exits 0 alike and carries every entry the report holds — each requirement entry's nodes, categories, and attribution identities, and each code entry's location, edge kind and target, witness path, and group (robust matching, H-3) (SPEC 9.2, 9.3, 5.6, 12.0)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -634,8 +782,9 @@ const T9_2_2 = defineProductTest({
         );
 
         const label = "T9.2-2 `impact --base <baseline> --json`";
+        const report = await impactAgainst(product, workspace, base, label);
         assertImpactedCode(
-          await impactAgainst(product, workspace, base, label),
+          report,
           {
             // `tgt`'s subtreeHash did not change (a dependency target's text
             // is no part of its own content, SPEC 5.5), so the location is
@@ -653,6 +802,13 @@ const T9_2_2 = defineProductTest({
             ],
           },
           label,
+        );
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          base,
+          report,
+          "T9.2-2",
         );
       },
     );
@@ -679,7 +835,7 @@ const C3_GONE_TS_SOURCE = [
 const T9_2_3 = defineProductTest({
   id: "T9.2-3",
   title:
-    "deleted code location: a code location absent from the current graph (its file deleted) is reported under its baseline identity — its baseline impact edge to the since-edited node makes it directly impacted (SPEC 9.2, 9.3)",
+    "deleted code location: a code location absent from the current graph (its file deleted) is reported under its baseline identity — its baseline impact edge to the since-edited node makes it directly impacted; and at the `--json` read's state the human `impact` exits 0 alike and carries every entry the report holds — each requirement entry's nodes, categories, and attribution identities, and the deleted location's baseline identity with its edge kind and target, witness path, and group (robust matching, H-3) (SPEC 9.2, 9.3, 5.6, 12.0)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -700,8 +856,9 @@ const T9_2_3 = defineProductTest({
         );
 
         const label = "T9.2-3 `impact --base <baseline> --json`";
+        const report = await impactAgainst(product, workspace, base, label);
         assertImpactedCode(
-          await impactAgainst(product, workspace, base, label),
+          report,
           {
             direct: [
               {
@@ -715,6 +872,13 @@ const T9_2_3 = defineProductTest({
             transitive: [],
           },
           label,
+        );
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          base,
+          report,
+          "T9.2-3",
         );
       },
     );
@@ -771,7 +935,7 @@ const C4_BOTH_TS_SOURCE = [
 const T9_2_4 = defineProductTest({
   id: "T9.2-4",
   title:
-    "category independence: one code location with two impact edges — one to a node whose subtreeHash changed, one to a node whose effectiveHash alone changed — appears in both the directly and the transitively impacted group, each entry's edge and path minimized per category: the direct entry reports the subtree-changed target's edge with its all-`contains` path, the transitive entry the other edge with its effectiveHash path (SPEC 9.2, 9.3)",
+    "category independence: one code location with two impact edges — one to a node whose subtreeHash changed, one to a node whose effectiveHash alone changed — appears in both the directly and the transitively impacted group, each entry's edge and path minimized per category: the direct entry reports the subtree-changed target's edge with its all-`contains` path, the transitive entry the other edge with its effectiveHash path; and at the `--json` read's state the human `impact` exits 0 alike and carries every entry the report holds — each requirement entry's nodes, categories, and attribution identities, and each code entry's location, edge kind and target, witness path, and both groups (robust matching, H-3) (SPEC 9.2, 9.3, 5.6, 12.0)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -794,8 +958,9 @@ const T9_2_4 = defineProductTest({
         );
 
         const label = "T9.2-4 `impact --base <baseline> --json`";
+        const report = await impactAgainst(product, workspace, base, label);
         assertImpactedCode(
-          await impactAgainst(product, workspace, base, label),
+          report,
           {
             direct: [
               {
@@ -819,6 +984,13 @@ const T9_2_4 = defineProductTest({
             ],
           },
           label,
+        );
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          base,
+          report,
+          "T9.2-4",
         );
       },
     );
@@ -845,7 +1017,7 @@ const C5_APP_TS_SOURCE = [
 const T9_2_5 = defineProductTest({
   id: "T9.2-5",
   title:
-    "impact edges mapped through the journal: after a journaled `rename alpha→beta` and a text edit to the renamed node, the code location whose marker was rewritten appears in the directly impacted group exactly once — its witness edge targeting the current identity `beta` with the single-node path — and not in the transitively impacted group: the baseline edge (old identity) and the current edge (new identity) unify into one impact edge to one changed node; the positive counterpart of T6.2-1's emptiness arm (SPEC 9.2, 9.3, 6.3)",
+    "impact edges mapped through the journal: after a journaled `rename alpha→beta` and a text edit to the renamed node, the code location whose marker was rewritten appears in the directly impacted group exactly once — its witness edge targeting the current identity `beta` with the single-node path — and not in the transitively impacted group: the baseline edge (old identity) and the current edge (new identity) unify into one impact edge to one changed node; the positive counterpart of T6.2-1's emptiness arm; and at the `--json` read's state the human `impact` exits 0 alike and carries every entry the report holds — each requirement entry's nodes, categories, and attribution identities, and the code entry's location, edge kind and target, witness path, and group (robust matching, H-3) (SPEC 9.2, 9.3, 5.6, 6.3, 12.0)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -919,8 +1091,9 @@ const T9_2_5 = defineProductTest({
         );
 
         const label = "T9.2-5 `impact --base <pre-rename ref> --json`";
+        const report = await impactAgainst(product, workspace, base, label);
         assertImpactedCode(
-          await impactAgainst(product, workspace, base, label),
+          report,
           {
             // Exactly one direct entry: the baseline edge (to old `alpha`,
             // mapped through the journal) and the current edge (to `beta`)
@@ -938,6 +1111,13 @@ const T9_2_5 = defineProductTest({
             transitive: [],
           },
           label,
+        );
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          base,
+          report,
+          "T9.2-5",
         );
       },
     );

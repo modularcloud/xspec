@@ -31,6 +31,32 @@
 //   requires one consistent deleted flag), so its second arm asserts the raw
 //   entries: exactly two name the identity, one flagged deleted and one not,
 //   each covering it alone, each `changed` only (SPEC 5.6).
+// - The human form (T12.0-1's information parity; SPEC 12.0): after each
+//   `impact --base <ref> --json` read and its assertions — T9.3-1's,
+//   T9.3-2's two (the selection arms and the metadata terminus), and
+//   T9.3-3's two arms' — at the same state, section-9.ts's
+//   `assertHumanImpactReport` runs the same argv without `--json` (exit 0)
+//   and asks its report for what the decoded report carries: every
+//   requirement entry's nodes and attribution identities and every code
+//   entry's location, edge source and target, and path nodes (identity-or-
+//   path boundaries, so a chain member `specs/Chain.mdx#a.b.c` never counts
+//   inside `specs/Chain.mdx#a.b.c.d`), then, with those identities blanked
+//   out, the entries' categories, `deleted` where an entry is deleted, each
+//   code entry's edge kind, and the non-empty groups' `direct` and
+//   `transitive` (SPEC-named tokens; robust matching, H-3; section-9.ts's
+//   module header states the check). Limits, beside that header's: no
+//   mention is associated with another or counted, so which nodes one entry
+//   covers — the collapsing itself (T9.3-1) — which edge and path a
+//   location's minimization selected and that the reported kind is the
+//   preferred `embeds` for that location (T9.3-2: the human report is asked
+//   for `embeds` and `references` both, wherever they stand), which entry is
+//   deleted, and that an identity appears twice, once deleted and once added
+//   (T9.3-3), stay with the JSON assertions; the scratch builds of FIX_PLAN
+//   Task 8 that drop the `embeds` kind word, the `deleted` marker, the
+//   directly impacted group's word, the edge kinds, or the code sections
+//   fail T9.3-2's selection arms (and, the `deleted` marker, T9.3-3's first
+//   arm), and those dropping attributions, edge targets, or paths pass
+//   every T9.3 test, as in section-9.ts.
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -52,6 +78,7 @@ import {
 } from "./section-5.6.js";
 import {
   SPEC_AND_CODE_CONFIG,
+  assertHumanImpactReport,
   assertImpactedCode,
   readSourceText,
 } from "./section-9.js";
@@ -287,7 +314,7 @@ const T1_ORIGINATORS = [A1_LEAF, A1_AB, B1_LEAFA, B1_PS];
 const T9_3_1 = defineProductTest({
   id: "T9.3-1",
   title:
-    "ancestor collapsing: a maximal chain of ancestors whose only category is `descendant-changed` with identical attribution appears as one entry covering the chain — two-node fragments below and above each breaker — while an ancestor additionally carrying another category (a tags-edited, metadata-changed ancestor) and an ancestor with different attribution (a second originating subtree joining the cascade partway up) each break the chain and are covered alone (SPEC 9.3, 5.6)",
+    "ancestor collapsing: a maximal chain of ancestors whose only category is `descendant-changed` with identical attribution appears as one entry covering the chain — two-node fragments below and above each breaker — while an ancestor additionally carrying another category (a tags-edited, metadata-changed ancestor) and an ancestor with different attribution (a second originating subtree joining the cascade partway up) each break the chain and are covered alone; and at the `--json` read's state the human `impact` exits 0 alike and carries every entry the report holds — each chain's and each lone entry's nodes, categories, and attribution identities (robust matching, H-3) (SPEC 9.3, 5.6, 12.0)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -412,6 +439,13 @@ const T9_3_1 = defineProductTest({
           ],
           [A1_LEAF, A1_AB, B1_LEAFA, B1_PS],
           label,
+        );
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          base,
+          report,
+          "T9.3-1",
         );
       },
     );
@@ -603,7 +637,7 @@ const S2_META_TS_SOURCE = [
 const T9_3_2 = defineProductTest({
   id: "T9.3-2",
   title:
-    "witness edge and path: the reported path runs from the edge's target to a node whose own edit explains the change, edge and path minimized together over all qualifying edges — a shorter path through a second edge wins, equal-length candidates resolve by 12.0 element-wise byte comparison, `embeds` is reported over `references` targeting the chosen first node, and an edited/added/deleted edge target yields the single-node path; metadata terminus: after an edit only to D's `d` list no node is `changed`, and the transitively impacted location's path runs from its edge target X and ends at the metadata-changed D, every node on it with changed effectiveHash (SPEC 9.3, 9.2, 12.0, 5.6)",
+    "witness edge and path: the reported path runs from the edge's target to a node whose own edit explains the change, edge and path minimized together over all qualifying edges — a shorter path through a second edge wins, equal-length candidates resolve by 12.0 element-wise byte comparison, `embeds` is reported over `references` targeting the chosen first node, and an edited/added/deleted edge target yields the single-node path; metadata terminus: after an edit only to D's `d` list no node is `changed`, and the transitively impacted location's path runs from its edge target X and ends at the metadata-changed D, every node on it with changed effectiveHash; and at each `--json` read's state the human `impact` exits 0 alike and carries every entry the report holds — each requirement entry's nodes, categories, attribution identities, and deletion, and each code entry's location, edge kind and target, witness path, and group (robust matching, H-3) (SPEC 9.3, 9.2, 12.0, 5.6)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -649,13 +683,14 @@ const T9_3_2 = defineProductTest({
         );
         const selectionLabel =
           "T9.3-2 `impact --base <baseline> --json` over the witness-selection arms";
+        const selectionReport = await impactAgainst(
+          product,
+          workspace,
+          selectionBase,
+          selectionLabel,
+        );
         assertImpactedCode(
-          await impactAgainst(
-            product,
-            workspace,
-            selectionBase,
-            selectionLabel,
-          ),
+          selectionReport,
           {
             direct: [
               // Minimize-together: the qualifying path from `deep` has three
@@ -709,6 +744,13 @@ const T9_3_2 = defineProductTest({
           },
           selectionLabel,
         );
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          selectionBase,
+          selectionReport,
+          "T9.3-2 over the witness-selection arms",
+        );
 
         // Metadata terminus: edit only `dd`'s `d` list against the second
         // baseline.
@@ -759,6 +801,13 @@ const T9_3_2 = defineProductTest({
             ],
           },
           metaLabel,
+        );
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          metaBase,
+          metaReport,
+          "T9.3-2 after the d-target-only edit (metadata terminus)",
         );
       },
     );
@@ -838,7 +887,7 @@ const D2_REINTRODUCED_BLOCK = [
 const T9_3_3 = defineProductTest({
   id: "T9.3-3",
   title:
-    "deletion identities: a node deleted after a journaled rename reports as deleted under its baseline identity mapped forward through the journal — the new identity, the old one appearing nowhere; and when a deleted node's mapped identity is now borne by a distinct new node (5.4: a fresh section journal-renamed into the vacated identity), the identity appears twice — once as deleted, once as added (SPEC 9.3, 6.3, 5.4, 5.6)",
+    "deletion identities: a node deleted after a journaled rename reports as deleted under its baseline identity mapped forward through the journal — the new identity, the old one appearing nowhere; and when a deleted node's mapped identity is now borne by a distinct new node (5.4: a fresh section journal-renamed into the vacated identity), the identity appears twice — once as deleted, once as added; and at each arm's `--json` read's state the human `impact` exits 0 alike and carries every entry the report holds — its nodes, categories, attribution identities, and deletion (robust matching, H-3) (SPEC 9.3, 6.3, 5.4, 5.6, 12.0)",
   run: async (product) => {
     // Arm 1 — mapped deletion.
     await withWorkspace(
@@ -880,8 +929,9 @@ const T9_3_3 = defineProductTest({
         // any entry mentioning the pre-rename `#old` fails the phantom guard:
         // the deleted node reports under its journal-mapped identity
         // (SPEC 9.3, 6.3), and the root's cascade attributes to it likewise.
+        const report = await impactAgainst(product, workspace, base, label);
         assertImpactCategories(
-          await impactAgainst(product, workspace, base, label),
+          report,
           [
             {
               identity: D1_NEW,
@@ -898,6 +948,13 @@ const T9_3_3 = defineProductTest({
             { identity: D1_KEEP, categories: [] },
           ],
           label,
+        );
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          base,
+          report,
+          "T9.3-3 arm 1",
         );
       },
     );
@@ -1084,6 +1141,13 @@ const T9_3_3 = defineProductTest({
             );
           }
         }
+        await assertHumanImpactReport(
+          product,
+          workspace,
+          base,
+          report,
+          "T9.3-3 arm 2",
+        );
       },
     );
   },
