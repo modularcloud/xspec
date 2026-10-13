@@ -63,64 +63,12 @@ The previous plan (written at 2d9cdf6, deleted at f50cf9f) is `git show f50cf9f^
 - Reviewers B and D and VERIFY found nothing to plan. Every item of the previous plans' lists of the same name still holds (`git show f50cf9f^:specs/tmp/FIX_PLAN.md`, and the lists it carries forward).
 
 **Order.** Take the topmost task unless told otherwise; Task 4 comes last; Task 3 follows Task 2 (it extends Task 2's changes). When a task is done, its commit removes it from the Tasks section and adds a one-line summary to its bullet here.
-- Task 1 (RA-1): T5.3-1's cross-file arm asserts the dependency cycle's full path under `check` — both `d` spellings at their occurrence spans, the co-staged import cycle within its declarations, nothing else.
+- Task 1 (RA-1): T5.3-1's cross-file arm asserts the dependency cycle's full path under `check` — both `d` spellings at their occurrence spans, the co-staged import cycle within its declarations, nothing else. Done: in `section-5.1-5.3.ts`, the arm's two records are module constants (`CROSS_FILE_A_STAGED`, `CROSS_FILE_B_STAGED`: the same names and bytes, registered in the same order), and its `crossFilePath` (`CROSS_FILE_CYCLE_PATH`: `B.b` at `specs/A.mdx` [40, 43), `A.a` at `specs/B.mdx` [40, 43), each import declaration's window [0, 26]) is computed at module load (`locateSpelling`, now shared with the in-file arms, and `byteWindow("", declaration)`), self-checked before any product invocation (`checkCrossFileCyclePathFixture`), and asserted after `assertDependencyCycleFindings` by `assertCrossFileCyclePath`: across the 14.9 findings together, (a) no location but a `d` span exactly or one within a declaration's window, (b) each `d` span located exactly, (c) each declaration located within its window; the module header, the two doc comments, and the title say so. Against the built product T5.3-1 passes (2.2 s alone). Through the stand-in `t9jf50_1/standin.mjs` over that build, `pass`, `split-all` (four findings), and `line-granular` (imports at [0, 26)) pass; `importonly` and `drop-b` fail diagnosed naming `B.b`'s span, `stray` naming the opening tag `specs/A.mdx` [27, 45), and `drop-import-b` naming specs/B.mdx's declaration (each ~0.4 s), every one of which passed with HEAD's module. Self project (`dist/` absent, the admin files left out): 37 files, 4434 tests, all passed in 363.49 s; certification 186 PASS / 50 FAIL / 0 error / 0 hang, 0 discrepancies.
 - Task 2 (RC-1 (a)): P-10 polls the derived files beside each episode's sources — the generated modules' companions — under the existing before/after judgement.
 - Task 3 (RC-1 (b)): P-10 polls graph data, judged against the product's own complete graph-data states for the episode.
 - Task 4: confirm locally and in CI; record the timings; delete this plan.
 
 ## Tasks
-
-### Task 1 — T5.3-1's cross-file arm asserts the dependency cycle's full path under `check` (RA-1)
-
-**Requirement.** TEST-SPEC §5.3, T5.3-1: "`check` detects and reports, with the full cycle path: a `depends` cycle A→B→A across files; … Exit 1." SPEC 5.3: validation "MUST detect and report cycles … including the full cycle path"; SPEC 14, condition 9: "a dependency cycle (with the full path) or a spec import cycle"; SPEC 14's location rule: "a cycle locates its full path in source, every reference spelling recording a participating dependency edge, or each participating import declaration of a spec import cycle". Reviewer A's G1: the cross-file arm asserts no path. A `check` that misses the cross-file dependency cycle and reports only the co-staged import cycle, once per file, passes it. No other test checks a cross-file dependency cycle's path under `check`: T14-8 drives `build` alone, T5.3-2 stages a same-file cycle, and T12.2-2's cycles family a self-`depends`.
-
-**State at f50cf9f** (`test/suite/registry/section-5.1-5.3.ts`).
-- The first entry of `T5_3_1_ARMS` (line 632) is the cross-file arm. Its two records are created inline:
-  - `"T5.3-1 cross-file depends cycle specs/A.mdx"`: `import B from "./B.xspec"`, a blank line, `<S id="a" d={B.b}>`, `A behavior.`, `</S>`, each line terminated by U+000A;
-  - `"T5.3-1 cross-file depends cycle specs/B.mdx"`: the same with `import A from "./A.xspec"` and `<S id="b" d={A.a}>`, `B behavior.`.
-  - The arm declares `cycle: ["specs/A.mdx#a", "specs/B.mdx#b"]`, `importCycleFiles: ["specs/A.mdx", "specs/B.mdx"]`, and no `fullPath`.
-- Byte offsets in each record (63 bytes, ASCII): the import declaration [0, 25); the opening tag [27, 45); the `d` reference `B.b` (resp. `A.a`) [40, 43).
-- The body `T5_3_1` (line 778) first self-checks each in-file arm's `fullPath` (`checkCyclePathFixture`, line 496). For each arm it then runs `check --json` (`checkFindings`, exit 1), then `assertDependencyCycleFindings` (line 186), then, for the in-file arms, `assertFullCyclePath` (line 530).
-  - `assertDependencyCycleFindings` requires every finding to be 14.9 and between 2 and 4 findings for this arm (each staged cycle once, or at most once per participating file). It requires at least one location per finding, every location in a participating file, and every participating file named somewhere. It requires no location at any `d` spelling.
-- Helpers to reuse: `stagedBytes` (line 420), `CycleSpellingDecl` and `inFileCyclePath`'s way of locating `before + spelling` exactly once (line 434), `sliceCheck` (line 465). `byteWindow(prefix, construct)` in `./support.js` (line 500) gives a construct's range end-widened by one byte, T2.1-5's window for an import-cycle participant.
-- Comments that say the cross-file arm's path is someone else's:
-  - the module header's "What is asserted where" bullets (lines 27–43), ending "the cross-file arm's full path is T14-8's (section-14.ts: …)";
-  - `assertDependencyCycleFindings`'s doc comment ("T14-8 for a cross-file cycle");
-  - `CycleArm.fullPath`'s doc comment ("absent for the cross-file arm (its full path is T14-8's; see the module header)").
-- The title says only what the in-file arms assert about locations.
-- T14-8 (`section-14.ts`, line 4899 on) asserts its own cross-file cycle under `build --json`, exactly two 14.9 findings, each within its constructs' windows; it is not touched.
-
-**Change.** In `test/suite/registry/section-5.1-5.3.ts` only, plus AGENTS.md:
-1. Hoist the cross-file arm's two records into module constants, keeping each record's name and bytes. The arm stages the same record objects, so its staged bytes are the ones the spans are computed from (S-9's ledger is unchanged: same names, same bytes).
-2. Add a cross-file path for that arm, computed at module load from the records' bytes. Per participating file it holds the file's path, its record, its `d` spelling, and its import declaration:
-   - the `d` spelling is located exactly as `inFileCyclePath` locates a spelling: `before` `d={` and spelling `B.b` in `specs/A.mdx`, `A.a` in `specs/B.mdx` — the span its occurrence occupies (SPEC 5.7: a `d` reference's own expression);
-   - the import declaration (`import B from "./B.xspec"`, `import A from "./A.xspec"`) is located with `before` `""`, its window being `byteWindow("", declaration)`.
-   Give `CycleArm` an optional member for it beside `fullPath` (any clear name). At f50cf9f's bytes the expected values are `B.b` at `specs/A.mdx` [40, 43), `A.a` at `specs/B.mdx` [40, 43), and each declaration's window [0, 26].
-3. Self-check it before any product invocation, beside the in-file arms' check in the `T5_3_1` body: each `d` span slices back to its spelling, and each declaration slices back at [0, its length) (`sliceCheck`; a failure is a harness error naming the arm, as for the in-file arms).
-4. Add the cross-file assertion and run it for that arm after `assertDependencyCycleFindings`, whose count tolerance and file identification stay as they are. Across all of the report's 14.9 findings, taken together:
-   - (a) every location either equals one of the two `d` spans exactly (file, start, end), or lies in that file within its import declaration's window;
-   - (b) each `d` span is located exactly by at least one finding;
-   - (c) each import declaration is located, within its window, by at least one finding.
-   Each failure is a diagnosed `fail` naming the missing or stray location, the full expectation, and the findings. Quote SPEC 14's location rule above and 5.7's "a `d` reference occurrence spans that one reference's own expression". A report of the import cycle alone then fails (b), one missing a `d` spelling fails (b), and a location anywhere else — a section tag, the whole `d` attribute — fails (a).
-5. Correct the comments: the module header's bullets and the two doc comments named above. The header now says the cross-file arm's dependency-cycle path is asserted here under `check` — both spellings exactly, the co-staged import cycle's participants within their declarations (T2.1-5's convention), nothing else located. T14-8 keeps the strict one-finding-per-cycle cardinality under `build`, and T5.3-2's entry still asks for no path.
-6. Title: after the in-file clause, add the cross-file arm's: its 14.9 findings together locate exactly its two `d` reference spellings — `B.b` in specs/A.mdx and `A.a` in specs/B.mdx, each at its occurrence span — and, within each import declaration, the co-staged import cycle's participants, and nothing else.
-
-**Departure from reviewer A's proposal.** Reviewer A proposed pinning the two import declarations "by its own characters" too. SPEC 14 states no range rule of its own for a 14.9 import-cycle participant beyond "each participating import declaration". The import cycle's home test (T2.1-5) and T14-8 judge such participants within the declaration's window, and the import cycle is not T5.3-1's subject. Task 1 therefore pins the dependency cycle's spellings exactly, as the in-file arms pin theirs, and windows the declarations. Every wrong report the reviewer named still fails.
-
-**Verify.**
-- `npm run typecheck`, `npm run format:check`.
-- The self project (Run mechanics), `dist/` absent: 37 files, 4434 tests, all passed; certification 186 / 50 / 0 / 0, 0 discrepancies. S-7's sweep meets T5.3-1 failing diagnosed against the empty stub (the fixture self-check passes before the first invocation).
-- Against the built product outside the checkout (Run mechanics; `T5.3-1` alone): passes.
-- Red checks through a stand-in wrapper over that build (AGENTS.md's "Red-checking a strengthened product test against the built product (Phase 9)"). Write it in `<scratchpad>/t9jf50_1/`: it runs the product with the invocation's argv and cwd, and rewrites only a `check --json` answer that exits 1 in a workspace holding `specs/B.mdx` (the cross-file arm's), re-serializing it and exiting with the product's code. Modes:
-  - `pass`: unchanged — passes;
-  - `importonly`: the dependency-cycle finding (the one locating [40, 43)) dropped and the import-cycle finding split into one finding per location, in 12.7 order — fails diagnosed, naming `B.b`'s span. With this task's change stashed (`git stash`, then `git stash pop`), HEAD's module passes it: the gap, shown closed;
-  - `drop-b`: the `specs/A.mdx` [40, 43) location removed from the dependency-cycle finding — fails, naming `B.b`;
-  - `stray`: the dependency-cycle finding given a further location, `specs/A.mdx` [27, 45) (the opening tag), in location order — fails, naming the stray location.
-  Record each outcome and its run time.
-- AGENTS.md: one bullet recording the T5.3-1 red-check recipe (the wrapper's modes and outcomes) and the built product's verdict.
-- Commit (subject `sdg(phase-9): assert T5.3-1's cross-file dependency cycle's full path under check (FIX_PLAN Task 1)`) and push.
-
-**Done when.** The checks hold, and the commit is pushed with a message recording the results.
 
 ### Task 2 — P-10 polls the derived files beside each episode's sources (RC-1 (a))
 

@@ -37,17 +37,28 @@
 //     (start, then end), and no other location; each range is located in
 //     the staged bytes at module load and re-sliced by a fixture self-check
 //     before any product invocation (the T5.7-2 discipline);
-//   - the cross-file arm's full path is T14-8's (section-14.ts: its own
-//     cross-file cycle, every participating `d` spelling and import
-//     declaration within its construct's byte window), and T5.3-2's entry
-//     asks for no path.
+//   - T5.3-1's cross-file arm asserts its dependency cycle's full path here,
+//     under `check` (`assertCrossFileCyclePath`): its 14.9 findings, taken
+//     together, locate both `d` reference spellings exactly — `B.b` in
+//     specs/A.mdx and `A.a` in specs/B.mdx, each at the span its
+//     occurrence occupies — and the co-staged import cycle's participants
+//     each within its import declaration (T2.1-5's convention, below), and
+//     nothing else; the spans and windows are computed from the staged
+//     records' bytes at module load and self-checked before any product
+//     invocation, as the in-file arms' ranges are. T14-8 (section-14.ts)
+//     keeps the strict one-finding-per-cycle cardinality over its own
+//     cross-file cycle under `build`, and T5.3-2's entry still asks for no
+//     path.
 // - The cross-file `depends` arm of T5.3-1 necessarily co-stages a spec
 //   import cycle: a cross-file `depends` edge needs an external reference
 //   (the local string form is same-file only, SPEC 2.2), external references
 //   need imports (2.1), and A→B→A therefore needs mutual imports — itself an
-//   invalid import cycle (2.1, 14.9). The assertion accounts for it per the
+//   invalid import cycle (2.1, 14.9). The assertions account for it per the
 //   T2.1-5 convention (section-2.1.ts): reported once, or at most once per
-//   participating file, identifying every participating file.
+//   participating file, identifying every participating file, each
+//   participant located within its import declaration's byte window,
+//   `byteWindow("", declaration)` (the declaration begins its file; the
+//   one-byte end-widening tolerates a line-granular location).
 // - Exact finding accounting: every cycle fixture parses, resolves every
 //   reference, and is checked without ever having been built — no derived
 //   file and no recorded graph data exists, and invalid sources generate
@@ -59,12 +70,14 @@
 import { Buffer } from "node:buffer";
 import type {
   Finding,
+  FindingLocation,
   GraphEdge,
   SourceRange,
 } from "../../helpers/adapters/index.js";
 import {
   decodeEdgesReport,
   decodeFindingsReport,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -80,6 +93,7 @@ import {
   assertEdgeSetEqual,
   buildFindings,
   buildOk,
+  byteWindow,
   expectExit,
   runJson,
 } from "./support.js";
@@ -179,9 +193,9 @@ interface CycleExpectation {
  * participating file is identified through located files, message, or
  * identity context (identification at file level; T2.1-5's own helper
  * requires a location within each participating import declaration of its
- * import cycles instead). The byte-precise path is
- * asserted beside it: `assertFullCyclePath` for T5.3-1's in-file arms,
- * T14-8 for a cross-file cycle (see the module header).
+ * import cycles instead). The byte-precise path is asserted beside it:
+ * `assertFullCyclePath` for T5.3-1's in-file arms, `assertCrossFileCyclePath`
+ * for its cross-file arm (see the module header).
  */
 function assertDependencyCycleFindings(
   findings: readonly Finding[],
@@ -387,9 +401,10 @@ const T5_2_1 = defineProductTest({
 // ---------------------------------------------------------------------------
 
 /**
- * One participating reference spelling of an in-file cycle (SPEC 14: a
- * cycle locates its full path in source, every reference spelling recording
- * a participating dependency edge) and the byte range its occurrence
+ * One participating reference spelling of a cycle — an in-file arm's, or
+ * one file's `d` reference of the cross-file arm (SPEC 14: a cycle locates
+ * its full path in source, every reference spelling recording a
+ * participating dependency edge) — and the byte range its occurrence
  * occupies (5.7, 1.7), located at module load in the staged bytes — never
  * from product output — as the one staged occurrence of `before` followed
  * by the spelling, `before` the staged context pinning which spelling of
@@ -430,6 +445,28 @@ interface CycleSpellingDecl {
   readonly spelling: string;
 }
 
+/**
+ * Locate one declared spelling in a record's bytes (module load): the
+ * spelling's byte range when `before` + `spelling` is staged exactly once,
+ * else `{start: -1, end: -1}`, which the fixture self-check fails.
+ */
+function locateSpelling(
+  bytes: Buffer,
+  { what, before, spelling }: CycleSpellingDecl,
+): CycleSpelling {
+  const needle = Buffer.from(before + spelling, "utf8");
+  const at = bytes.indexOf(needle);
+  const once = at !== -1 && bytes.indexOf(needle, at + 1) === -1;
+  const start = at + Buffer.byteLength(before, "utf8");
+  return {
+    what,
+    spelling,
+    range: once
+      ? { start, end: start + Buffer.byteLength(spelling, "utf8") }
+      : { start: -1, end: -1 },
+  };
+}
+
 /** Locate each participating spelling in `staged`'s bytes (module load). */
 function inFileCyclePath(
   file: string,
@@ -440,19 +477,64 @@ function inFileCyclePath(
   return {
     file,
     staged,
-    spellings: spellings.map(({ what, before, spelling }) => {
-      const needle = Buffer.from(before + spelling, "utf8");
-      const at = bytes.indexOf(needle);
-      const once = at !== -1 && bytes.indexOf(needle, at + 1) === -1;
-      const start = at + Buffer.byteLength(before, "utf8");
-      return {
-        what,
-        spelling,
-        range: once
-          ? { start, end: start + Buffer.byteLength(spelling, "utf8") }
-          : { start: -1, end: -1 },
-      };
-    }),
+    spellings: spellings.map((declared) => locateSpelling(bytes, declared)),
+  };
+}
+
+/**
+ * One participating file of the cross-file arm's full path (SPEC 14: "a
+ * cycle locates its full path in source, every reference spelling recording
+ * a participating dependency edge, or each participating import declaration
+ * of a spec import cycle"): the file, its staged record (the self-check
+ * ground), its `d` reference spelling — located as an in-file arm's
+ * spelling is, at the span its occurrence occupies (5.7: "a `d` reference
+ * occurrence spans that one reference's own expression") — and its import
+ * declaration, the co-staged import cycle's participant, which begins the
+ * file (prefix "") and is judged within its byte window
+ * `byteWindow("", declaration)`, T2.1-5's window for an import-cycle
+ * participant.
+ */
+interface CrossFileCycleParticipant {
+  readonly file: string;
+  readonly staged: StagedMdx;
+  readonly dependency: CycleSpelling;
+  readonly declaration: string;
+  readonly declarationWindow: { readonly start: number; readonly end: number };
+}
+
+/**
+ * The cross-file arm's full path: one participant per participating file,
+ * declared in file-path byte order.
+ */
+interface CrossFileCyclePath {
+  readonly participants: readonly CrossFileCycleParticipant[];
+}
+
+/** A cross-file participant as the arm declares it. */
+interface CrossFileCycleParticipantDecl {
+  readonly file: string;
+  readonly staged: StagedMdx;
+  readonly dependency: CycleSpellingDecl;
+  readonly declaration: string;
+}
+
+/**
+ * Locate each participant's `d` spelling in its record's bytes and give
+ * its import declaration its window (module load).
+ */
+function crossFileCyclePath(
+  participants: readonly CrossFileCycleParticipantDecl[],
+): CrossFileCyclePath {
+  return {
+    participants: participants.map(
+      ({ file, staged, dependency, declaration }) => ({
+        file,
+        staged,
+        dependency: locateSpelling(stagedBytes(staged), dependency),
+        declaration,
+        declarationWindow: byteWindow("", declaration),
+      }),
+    ),
   };
 }
 
@@ -512,6 +594,36 @@ function checkCyclePathFixture(arm: string, path: InFileCyclePath): void {
       );
     }
     previous = range;
+  }
+}
+
+/**
+ * Self-check the cross-file arm's full path (harness-side, before any
+ * product invocation; the T5.7-2 discipline): each `d` span slices back out
+ * of its file's staged bytes to its spelling, and each import declaration
+ * slices back at [0, its length) — it begins its file, so its window
+ * `byteWindow("", declaration)` is its own characters end-widened by one
+ * byte. A failure is a staging defect of this test, thrown as a harness
+ * error naming the arm, never a product result.
+ */
+function checkCrossFileCyclePathFixture(
+  arm: string,
+  path: CrossFileCyclePath,
+): void {
+  for (const { file, staged, dependency, declaration } of path.participants) {
+    const bytes = stagedBytes(staged);
+    sliceCheck(
+      bytes,
+      dependency.range,
+      dependency.spelling,
+      `${arm}: ${dependency.what}`,
+    );
+    sliceCheck(
+      bytes,
+      { start: 0, end: Buffer.byteLength(declaration, "utf8") },
+      declaration,
+      `${arm}: ${file}'s import declaration, which begins its file`,
+    );
   }
 }
 
@@ -584,15 +696,164 @@ function assertFullCyclePath(
   });
 }
 
+/** Whether a location is exactly `range` in `file` (file, start, end). */
+function locatesExactly(
+  location: FindingLocation,
+  file: string,
+  range: SourceRange,
+): boolean {
+  return (
+    location.file === file &&
+    location.range.start === range.start &&
+    location.range.end === range.end
+  );
+}
+
+/** Whether a location lies in `file` within `window` (T2.1-5's test). */
+function locatesWithin(
+  location: FindingLocation,
+  file: string,
+  window: { readonly start: number; readonly end: number },
+): boolean {
+  return (
+    location.file === file &&
+    location.range.start >= window.start &&
+    location.range.end <= window.end
+  );
+}
+
+/** A location as diagnostics render it: file, then its half-open range. */
+function renderLocation(location: FindingLocation): string {
+  return (
+    `${renderPathValue(location.file)} [${String(location.range.start)}, ` +
+    `${String(location.range.end)})`
+  );
+}
+
+/**
+ * Assert the cross-file arm's full path (SPEC 5.3: reported with the full
+ * cycle path; 14: "a cycle locates its full path in source, every reference
+ * spelling recording a participating dependency edge, or each participating
+ * import declaration of a spec import cycle", ranges exact per condition, a
+ * reference spelling located by the span its occurrence occupies; 5.7: "a
+ * `d` reference occurrence spans that one reference's own expression"),
+ * across all of the report's 14.9 findings taken together — their count
+ * tolerance and file identification stay `assertDependencyCycleFindings`'s,
+ * run first:
+ * (a) every location either equals one participating file's `d` span
+ *     exactly (file, start, end) or lies in that file within its import
+ *     declaration's window, so a section tag, the whole `d` attribute, or
+ *     any other construct located fails;
+ * (b) each `d` span is located exactly by at least one finding, so a report
+ *     of the co-staged import cycle alone, or one missing a spelling, fails;
+ * (c) each import declaration is located, within its window, by at least
+ *     one finding — the import cycle's participants judged within their
+ *     declarations (T2.1-5's convention), the dependency cycle's spellings
+ *     pinned exactly.
+ */
+function assertCrossFileCyclePath(
+  findings: readonly Finding[],
+  path: CrossFileCyclePath,
+  context: string,
+): void {
+  const expectation =
+    `expected, across the 14.9 findings taken together, exactly each ` +
+    `participating file's \`d\` reference spelling at its occurrence span ` +
+    `and, within each import declaration's byte window, the co-staged ` +
+    `import cycle's participant, nothing else: ` +
+    JSON.stringify(
+      path.participants.map(
+        ({ file, dependency, declaration, declarationWindow }) => ({
+          file,
+          dependency: {
+            spelling: dependency.spelling,
+            range: dependency.range,
+          },
+          importDeclaration: { declaration, window: declarationWindow },
+        }),
+      ),
+    );
+  const rule =
+    `SPEC 14: "a cycle locates its full path in source, every reference ` +
+    `spelling recording a participating dependency edge, or each ` +
+    `participating import declaration of a spec import cycle"; 5.7: "a ` +
+    `\`d\` reference occurrence spans that one reference's own expression"`;
+  const report = `findings: ${JSON.stringify(findings)}`;
+
+  // (a) Nothing else is located.
+  for (const finding of findings) {
+    for (const location of finding.locations) {
+      const accounted = path.participants.some(
+        ({ file, dependency, declarationWindow }) =>
+          locatesExactly(location, file, dependency.range) ||
+          locatesWithin(location, file, declarationWindow),
+      );
+      if (!accounted) {
+        fail(
+          `${context}: the stray location ${renderLocation(location)} is ` +
+            `neither a participating \`d\` reference spelling's occurrence ` +
+            `span nor within a participating import declaration (${rule}); ` +
+            `${expectation}; ${report}`,
+        );
+      }
+    }
+  }
+
+  // (b) Each `d` spelling is located exactly.
+  for (const { file, dependency } of path.participants) {
+    const located = findings.some((finding) =>
+      finding.locations.some((location) =>
+        locatesExactly(location, file, dependency.range),
+      ),
+    );
+    if (!located) {
+      fail(
+        `${context}: the missing location ${file} ` +
+          `[${String(dependency.range.start)}, ${String(dependency.range.end)}) ` +
+          `— ${dependency.what}, ${JSON.stringify(dependency.spelling)} at ` +
+          `the span its occurrence occupies — must be located exactly by a ` +
+          `14.9 finding, the dependency cycle's full path (${rule}); ` +
+          `${expectation}; ${report}`,
+      );
+    }
+  }
+
+  // (c) Each import declaration is located within its window.
+  for (const { file, declaration, declarationWindow } of path.participants) {
+    const located = findings.some((finding) =>
+      finding.locations.some((location) =>
+        locatesWithin(location, file, declarationWindow),
+      ),
+    );
+    if (!located) {
+      fail(
+        `${context}: the missing location of ${file}'s import declaration ` +
+          `${JSON.stringify(declaration)} — the co-staged spec import ` +
+          `cycle's participant — must be located by a 14.9 finding within ` +
+          `its byte window [${String(declarationWindow.start)}, ` +
+          `${String(declarationWindow.end)}] (${rule}); ${expectation}; ` +
+          `${report}`,
+      );
+    }
+  }
+}
+
 /** One cycle fixture: its files plus the CycleExpectation it stages. */
 interface CycleArm extends CycleExpectation {
   readonly name: string;
   readonly files: Readonly<Record<string, InitialFileContents>>;
   /**
    * An in-file arm's full cycle path, asserted exactly; absent for the
-   * cross-file arm (its full path is T14-8's; see the module header).
+   * cross-file arm, whose path is `crossFilePath`.
    */
   readonly fullPath?: InFileCyclePath;
+  /**
+   * The cross-file arm's full cycle path — per participating file, its `d`
+   * reference spelling, asserted exactly, and its import declaration, the
+   * co-staged import cycle's participant, judged within its window
+   * (`assertCrossFileCyclePath`); absent for the in-file arms.
+   */
+  readonly crossFilePath?: CrossFileCyclePath;
 }
 
 // The self-`depends` arm's source, exported: T14-4's and T14-6's sweeps
@@ -625,6 +886,64 @@ function inFileArm(arm: {
   };
 }
 
+// The cross-file arm's import declarations, each beginning its file (prefix
+// ""): the co-staged import cycle's participants, whose `byteWindow` every
+// import-cycle location in that file must fall within (T2.1-5's convention).
+const CROSS_FILE_A_IMPORT = 'import B from "./B.xspec"';
+const CROSS_FILE_B_IMPORT = 'import A from "./A.xspec"';
+
+// The cross-file arm's two records, module constants so that its full path
+// is computed from the very bytes the arm stages (created here, before the
+// in-file arms' records, in arm order as before).
+const CROSS_FILE_A_STAGED = stagedMdx(
+  "T5.3-1 cross-file depends cycle specs/A.mdx",
+  [
+    CROSS_FILE_A_IMPORT,
+    "",
+    '<S id="a" d={B.b}>',
+    "A behavior.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+const CROSS_FILE_B_STAGED = stagedMdx(
+  "T5.3-1 cross-file depends cycle specs/B.mdx",
+  [
+    CROSS_FILE_B_IMPORT,
+    "",
+    '<S id="b" d={A.a}>',
+    "B behavior.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+// The cross-file arm's full path, located in the records' bytes at module
+// load: each file's `d` reference, after `d={` as the in-file arms' `d`
+// spellings are, and its import declaration's window.
+const CROSS_FILE_CYCLE_PATH = crossFileCyclePath([
+  {
+    file: "specs/A.mdx",
+    staged: CROSS_FILE_A_STAGED,
+    dependency: {
+      what: "a's `d` reference to B.b",
+      before: "d={",
+      spelling: "B.b",
+    },
+    declaration: CROSS_FILE_A_IMPORT,
+  },
+  {
+    file: "specs/B.mdx",
+    staged: CROSS_FILE_B_STAGED,
+    dependency: {
+      what: "b's `d` reference to A.a",
+      before: "d={",
+      spelling: "A.a",
+    },
+    declaration: CROSS_FILE_B_IMPORT,
+  },
+]);
+
 // Every arm past the first stages its files after the first arm's `check`:
 // the `.mdx` entries are staged-source records, judged before any product
 // exists (S-9, test/self/s9-staged-sources.test.ts); the first arm's are
@@ -637,31 +956,12 @@ const T5_3_1_ARMS: readonly CycleArm[] = [
       "a `depends` cycle A→B→A across files (with its unavoidable mutual-" +
       "import spec import cycle)",
     files: {
-      "specs/A.mdx": stagedMdx(
-        "T5.3-1 cross-file depends cycle specs/A.mdx",
-        [
-          'import B from "./B.xspec"',
-          "",
-          '<S id="a" d={B.b}>',
-          "A behavior.",
-          "</S>",
-          "",
-        ].join("\n"),
-      ),
-      "specs/B.mdx": stagedMdx(
-        "T5.3-1 cross-file depends cycle specs/B.mdx",
-        [
-          'import A from "./A.xspec"',
-          "",
-          '<S id="b" d={A.a}>',
-          "B behavior.",
-          "</S>",
-          "",
-        ].join("\n"),
-      ),
+      "specs/A.mdx": CROSS_FILE_A_STAGED,
+      "specs/B.mdx": CROSS_FILE_B_STAGED,
     },
     cycle: ["specs/A.mdx#a", "specs/B.mdx#b"],
     importCycleFiles: ["specs/A.mdx", "specs/B.mdx"],
+    crossFilePath: CROSS_FILE_CYCLE_PATH,
   },
   inFileArm({
     // p contains p.q; p.q embeds x; x embeds p — mixed through `contains`
@@ -778,14 +1078,18 @@ const T5_3_1_ARMS: readonly CycleArm[] = [
 const T5_3_1 = defineProductTest({
   id: "T5.3-1",
   title:
-    "`check` detects and reports, with the full cycle path, each staged dependency cycle — a `depends` cycle A→B→A across files, a mixed cycle through `contains` + `embeds`, a self-`depends` and a self-`embeds` of length one, and a section depending on / embedding its own ancestor — at exit 1; each in-file arm's one 14.9 finding locates exactly every participating reference spelling at its occurrence span in specs/A.mdx (a `d` reference's own expression, an embedding's braced container; no `contains` edge located), in 12.7 order, and nothing else (SPEC 5.3, 14.9, 14, 5.7, 12.7)",
+    "`check` detects and reports, with the full cycle path, each staged dependency cycle — a `depends` cycle A→B→A across files, a mixed cycle through `contains` + `embeds`, a self-`depends` and a self-`embeds` of length one, and a section depending on / embedding its own ancestor — at exit 1; each in-file arm's one 14.9 finding locates exactly every participating reference spelling at its occurrence span in specs/A.mdx (a `d` reference's own expression, an embedding's braced container; no `contains` edge located), in 12.7 order, and nothing else; the cross-file arm's 14.9 findings together locate exactly its two `d` reference spellings — `B.b` in specs/A.mdx and `A.a` in specs/B.mdx, each at its occurrence span — and, within each import declaration, the co-staged import cycle's participants, and nothing else (SPEC 5.3, 14.9, 14, 5.7, 12.7)",
   run: async (product) => {
-    // Fixture self-checks (T5.7-2 discipline): every in-file arm's located
-    // spellings slice back out of its staged bytes, in 12.7 order, before
-    // any product invocation.
+    // Fixture self-checks (T5.7-2 discipline), before any product
+    // invocation: every in-file arm's located spellings slice back out of
+    // its staged bytes, in 12.7 order, and the cross-file arm's `d` spans
+    // and import declarations slice back out of their files' staged bytes.
     for (const arm of T5_3_1_ARMS) {
       if (arm.fullPath !== undefined) {
         checkCyclePathFixture(arm.name, arm.fullPath);
+      }
+      if (arm.crossFilePath !== undefined) {
+        checkCrossFileCyclePathFixture(arm.name, arm.crossFilePath);
       }
     }
     for (const arm of T5_3_1_ARMS) {
@@ -795,6 +1099,9 @@ const T5_3_1 = defineProductTest({
         assertDependencyCycleFindings(findings, arm, context);
         if (arm.fullPath !== undefined) {
           assertFullCyclePath(findings, arm.fullPath, context);
+        }
+        if (arm.crossFilePath !== undefined) {
+          assertCrossFileCyclePath(findings, arm.crossFilePath, context);
         }
       });
     }
