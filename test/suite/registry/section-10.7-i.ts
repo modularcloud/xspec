@@ -491,7 +491,7 @@ function assertStoredCounts(
  * product) from a count of its value, so blanking it would erase that count
  * wherever the report prints it and fail a conforming report (the module
  * header). Exported for section-10.7-ii.ts' human `show` check (T10.7-8,
- * T10.7-12).
+ * T10.7-12) and section-14.ts' human findings check (T14-1).
  */
 export function digitHoldingData(data: readonly string[]): readonly string[] {
   return data.filter((datum) => /[0-9]/.test(datum) && !/^[0-9]+$/.test(datum));

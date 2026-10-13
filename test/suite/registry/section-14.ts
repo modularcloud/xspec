@@ -36,6 +36,38 @@
 //   machine-decidable (H-3). (14.2's assertable "expected form" statement is
 //   T1.3-2's subject, and T14-4's 14.2 sweep row's at every reporter the
 //   row reaches — the sweep bullet below.)
+// - T14-1's human form (T12.0-1's information parity; SPEC 12.0: the JSON
+//   form carries the same information as the human report — here SPEC 14's
+//   actionable report, "the file, location, and correction"): after each of
+//   its two `--json` runs and their assertions, at the same state (a failing
+//   `build` modifies nothing, SPEC 12.1; `check` never refreshes and writes
+//   nothing, 13.3, 14.22), the same argv without `--json` exits 1 as well,
+//   and its report mentions what the decoded findings carry (a
+//   product-to-itself comparison, H-4; `assertHumanFindingsReport`, through
+//   helpers/adapters/human.ts): every location's file (an identity-or-path
+//   boundary, so `specs/T.mdx` never counts inside `out/specs/T.mdx`); then,
+//   in a separate call, every location's start and end (whole numbers, SPEC
+//   1.7, matched with the findings' digit-holding data — files, concerned
+//   paths, identities, quoted spellings — blanked out, save a datum that is
+//   itself a whole number, `digitHoldingData` from section-10.7-i.ts; T14-1's
+//   data hold no digit); then the correction in human form — never its
+//   wording (H-3), but the data a message quotes: each staged spelling of
+//   `T14_1_QUOTED_SPELLINGS` (the 14.4 segment `two seg`, the unresolved
+//   targets `absent.dep` and `absent.text`, the element name `div`, the
+//   marker chain `OK.absent`) that some finding's JSON message quotes,
+//   letter-bounded there and in the report (`spellingMention`: `div` counts
+//   in `<div>`, never in `divide`). Limits: no mention is associated with
+//   another, so which file, range, and spelling belong to which finding stay
+//   with the JSON assertions — a file counts wherever the report prints it (a
+//   message may name its own file; `specs/three.mdx` holds two findings); a
+//   message is free text and never blanked, since it may state its location
+//   itself, so a whole number it spells may stand in for an offset of its
+//   value — T14-1's offsets, each at or past its window's start, are 34 or
+//   more, above every number a SPEC citation spells; and a spelling no JSON
+//   message quotes is asked of no report (the built product's 14.1 message
+//   quotes none, and its 14.7 message the resolved identity
+//   `specs/ok.mdx#absent`, not the chain), so a product whose messages quote
+//   none has no message data checked in human form.
 // - MDX-staged conditions locate within the offending element's byte window:
 //   every plausible attribution point — the reference expression, the prop,
 //   the element itself — lies inside it, and every other staged construct
@@ -392,7 +424,10 @@ import {
   decodeOccurrencesReport,
   decodePreviewReport,
   decodeViewFilesReport,
+  identityMention,
+  numberMention,
   renderPathValue,
+  spellingMention,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
@@ -485,6 +520,7 @@ import {
   VALID_A1_SOURCE,
 } from "./section-12.1-12.2.js";
 import { judgeBusyRefusal } from "./section-13.5.js";
+import { digitHoldingData } from "./section-10.7-i.js";
 import { SELF_DEPENDS_STAGED } from "./section-5.1-5.3.js";
 import type {
   BearerLocationExpectation,
@@ -705,27 +741,52 @@ const T14_1_ONE_CONSTRUCT = "<S>\nMissing id.\n</S>";
 
 // specs/two.mdx — 14.4: an invalid segment (whitespace inside).
 const T14_1_TWO_PREFIX = '<S id="ok2">\nValid sibling.\n</S>\n\n';
-const T14_1_TWO_CONSTRUCT = '<S id="two seg">\nInvalid segment.\n</S>';
+const T14_1_TWO_SEGMENT = "two seg";
+const T14_1_TWO_CONSTRUCT =
+  `<S id="${T14_1_TWO_SEGMENT}">\n` + "Invalid segment.\n</S>";
 
 // specs/three.mdx — 14.5 and 14.6 in one file ("not only the first" within a
 // file): an unresolved local `d` reference and an unresolved local `text`
 // target, each in its own element.
 const T14_1_THREE_PREFIX =
   "Preamble prose keeps the offending constructs off offset zero.\n\n";
+const T14_1_THREE_D_TARGET = "absent.dep";
 const T14_1_THREE_D_CONSTRUCT =
-  '<S id="t1" d={"absent.dep"}>\nUnknown dependency target.\n</S>';
+  `<S id="t1" d={"${T14_1_THREE_D_TARGET}"}>\n` +
+  "Unknown dependency target.\n</S>";
 const T14_1_THREE_MID = "\n\n";
+const T14_1_THREE_TEXT_TARGET = "absent.text";
 const T14_1_THREE_TEXT_CONSTRUCT =
-  '<S id="t2">\nUnknown text target:\n\n{text("absent.text")}\n</S>';
+  '<S id="t2">\nUnknown text target:\n\n' +
+  `{text("${T14_1_THREE_TEXT_TARGET}")}\n</S>`;
 
 // specs/four.mdx — 14.16: a JSX element other than `<S>`/`<Spec>`.
 const T14_1_FOUR_PREFIX = '<S id="ok4">\nValid sibling.\n</S>\n\n';
-const T14_1_FOUR_CONSTRUCT = "<div>Not a section.</div>";
+const T14_1_FOUR_ELEMENT = "div";
+const T14_1_FOUR_CONSTRUCT =
+  `<${T14_1_FOUR_ELEMENT}>` + "Not a section." + `</${T14_1_FOUR_ELEMENT}>`;
 
 // src/five.ts — 14.7: an unresolved TypeScript marker (the import target
 // `specs/ok.mdx` is valid, so the reference is the file's only defect).
 const T14_1_FIVE_PREFIX = 'import OK from "../specs/ok.xspec";\n\n';
-const T14_1_FIVE_CONSTRUCT = "OK.absent;";
+const T14_1_FIVE_MARKER = "OK.absent";
+const T14_1_FIVE_CONSTRUCT = `${T14_1_FIVE_MARKER};`;
+
+/**
+ * The spellings T14-1's staged conditions carry as data — the 14.4 segment,
+ * the unresolved `d` and `text` targets (14.5, 14.6), the element name
+ * (14.16), and the marker chain (14.7): what a correction-oriented message
+ * may quote of its offending construct beside its free wording (the module
+ * header). The human-form check asks the human report for each one that
+ * some finding's JSON message quotes.
+ */
+const T14_1_QUOTED_SPELLINGS: readonly string[] = [
+  T14_1_TWO_SEGMENT,
+  T14_1_THREE_D_TARGET,
+  T14_1_THREE_TEXT_TARGET,
+  T14_1_FOUR_ELEMENT,
+  T14_1_FIVE_MARKER,
+];
 
 const T14_1_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPEC_AND_CODE_CONFIG,
@@ -812,24 +873,134 @@ function assertCompleteReport(
   }
 }
 
+/**
+ * The human `build` or `check` at the state of its decoded `--json` findings,
+ * after their own assertions (`assertCompleteReport`) — T12.0-1's
+ * information parity (SPEC 12.0: the JSON form carries the same information
+ * as the human report), here SPEC 14's actionable report in human form (the
+ * module header): the same argv without `--json` exits 1 as well, and its
+ * report mentions, for every finding of the decoded report, every
+ * location's file (an identity-or-path boundary); then, in a separate call,
+ * every location's start and end (whole numbers, SPEC 1.7, matched with the
+ * findings' digit-holding data — files, concerned paths, identities, and
+ * quoted spellings — blanked out, save a datum that is itself a whole
+ * number, `digitHoldingData`); then the correction's data: each staged
+ * spelling of `T14_1_QUOTED_SPELLINGS` that the finding's JSON message
+ * quotes, letter-bounded there and in the report (`spellingMention`). A
+ * message's wording is never compared, and a message is never blanked (the
+ * module header). Robust matching (H-3): presence, never wording, and no
+ * mention associated with another.
+ */
+async function assertHumanFindingsReport(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  command: "build" | "check",
+  findings: readonly Finding[],
+  context: string,
+): Promise<void> {
+  const label = `${context} \`${command}\` (human report)`;
+  const human = await expectExit(
+    product,
+    workspace,
+    [command],
+    1,
+    `${label} — the same exit code as the \`--json\` run at this state: 1, ` +
+      `a report carrying findings (SPEC 12.0, 12.1, 12.2)`,
+  );
+  const files = new Set<string>();
+  const offsets = new Set<number>();
+  const spellings = new Set<string>();
+  const data: string[] = [];
+  for (const finding of findings) {
+    for (const location of finding.locations) {
+      const file = location.file;
+      if (typeof file !== "string") {
+        fail(
+          `${label}: a location's file ${renderPathValue(file)} is no plain ` +
+            `path — T14-1 stages ASCII paths alone, each pinned by the JSON ` +
+            `assertions (SPEC 1.5, 12.7)`,
+        );
+      }
+      files.add(file);
+      offsets.add(location.range.start);
+      offsets.add(location.range.end);
+    }
+    if (typeof finding.path === "string") data.push(finding.path);
+    data.push(...finding.identities);
+    for (const spelling of T14_1_QUOTED_SPELLINGS) {
+      if (spellingMention(spelling).pattern.test(finding.message)) {
+        spellings.add(spelling);
+      }
+    }
+  }
+  if (files.size > 0) {
+    assertReportMentions(
+      human,
+      [...files].map(identityMention),
+      `${label}: every location's file — the file each reported error ` +
+        `identifies, as the JSON findings carry it (SPEC 12.0, 14)`,
+    );
+  }
+  if (offsets.size > 0) {
+    assertReportMentions(
+      human,
+      [...offsets].map(numberMention),
+      `${label}: the start and end of every location's range, whole ` +
+        `numbers, matched with the findings' digit-holding data — files, ` +
+        `concerned paths, identities, and quoted spellings — blanked out, ` +
+        `save a datum that is itself a whole number (SPEC 1.7, 12.0, 14)`,
+      {
+        blank: digitHoldingData([
+          ...new Set([...files, ...data, ...spellings]),
+        ]),
+      },
+    );
+  }
+  if (spellings.size > 0) {
+    assertReportMentions(
+      human,
+      [...spellings].map(spellingMention),
+      `${label}: the correction's data — each staged spelling (the 14.4 ` +
+        `segment, the unresolved \`d\` and \`text\` targets, the element ` +
+        `name, the marker chain) that a finding's JSON message quotes; the ` +
+        `message's wording is never compared (SPEC 12.0, 14; H-3)`,
+    );
+  }
+}
+
 const T14_1 = defineProductTest({
   id: "T14-1",
   title:
-    "a workspace seeded with several independent error conditions across files: `build` and `check` report each of them (not only the first), and every report identifies file and location and states a correction-oriented message — information presence, not wording (SPEC 14)",
+    "a workspace seeded with several independent error conditions across files: `build` and `check` report each of them (not only the first), and every report identifies file and location and states a correction-oriented message — information presence, not wording; and at each `--json` run's state the human `build` and `check` exit 1 alike and carry every finding's location — its file and its range's start and end — and each staged spelling its JSON message quotes (the 14.4 segment, the unresolved targets, the element name, the marker chain) (robust matching, H-3) (SPEC 1.7, 12.0, 14)",
   run: async (product) => {
     await withWorkspace({ files: T14_1_FILES }, async (workspace) => {
       const buildContext =
         "T14-1 `build --json` over six independent conditions in five files";
-      assertCompleteReport(
-        await buildFindings(product, workspace, buildContext),
-        buildContext,
+      const built = await buildFindings(product, workspace, buildContext);
+      assertCompleteReport(built, buildContext);
+      // The human form at the same state — a failing `build` modifies
+      // nothing (SPEC 12.1) — carries the decoded findings' locations and
+      // the spellings their messages quote (module header).
+      await assertHumanFindingsReport(
+        product,
+        workspace,
+        "build",
+        built,
+        "T14-1",
       );
       const checkContext =
         "T14-1 `check --json` over the same workspace (counted exactly, " +
         "14.10 included: never built, so no record; see the module header)";
-      assertCompleteReport(
-        await checkFindings(product, workspace, checkContext),
-        checkContext,
+      const checked = await checkFindings(product, workspace, checkContext);
+      assertCompleteReport(checked, checkContext);
+      // And `check`'s, at the same state: `check` never refreshes and writes
+      // nothing (SPEC 13.3, 14.22).
+      await assertHumanFindingsReport(
+        product,
+        workspace,
+        "check",
+        checked,
+        "T14-1",
       );
     });
   },
