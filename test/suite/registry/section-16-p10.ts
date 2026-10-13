@@ -24,8 +24,11 @@
 //     legitimate, never a usage error;
 //   * and a polling reader (helpers/path-poller.ts, T13.5-5's machinery)
 //     over the episode's fixed path set — the journal, the session file,
-//     the spec source and a move's destination, and their generated modules
-//     — never the lock path.
+//     the spec source and a move's destination, their generated modules,
+//     and the companions beside them (SPEC 13.1: the files beside each
+//     source named `NAME.xspec.` plus a suffix, listed from the workspace
+//     and from the twin's final state before the episode starts; none for a
+//     product writing none) — never the lock path.
 //
 // Each episode's command ends one of three ways: run to its end (held and
 // lifted, or unheld); killed while held; or killed past its hold, at a fixed
@@ -48,12 +51,15 @@
 //     never polled: every distinct state polled at a path is its state
 //     before the episode or after it — the episode's one mutating command
 //     writes each polled path at most once (a rename rewrites the source,
-//     appends one journal entry, and regenerates the module, 6.4; a file
-//     move relocates the source and its module, 6.5; a resolve writes the
+//     appends one journal entry, and regenerates the module and its
+//     companions, 6.4; a file move relocates the source, and its finishing
+//     regeneration writes the module and companions at the destination's
+//     stem and removes the origin's, 6.5, 13.4; a resolve writes the
 //     session once, last, 13.5) and no reader writes one (the read menu
-//     leaves out `build`; a reader's refresh writes graph data alone, 13.3);
-//     the journal's observations are prefix-monotone (append-only, 6.1) and
-//     never absent after content (never deleted);
+//     leaves out `build`; a reader's refresh writes graph data alone,
+//     generating no TypeScript, 13.3); the journal's observations are
+//     prefix-monotone (append-only, 6.1) and never absent after content
+//     (never deleted);
 //   * mutual exclusion never loses a journal append or a resolution (post
 //     hoc, per run; `rename` and `move` the journal's only writers, 6.1):
 //     each `rename`/`move` exiting 0 added exactly one journal line, each
@@ -289,9 +295,10 @@ export type P10Fate = "complete" | "heldKill" | "pastHoldKill";
 
 /**
  * The concurrent-read menu (module header): CONF-CORE's read commands
- * (§CONF-READERS), fixed valid argv. `build` is left out: its module writes,
- * legitimate beside a mutating command under 13.5's last-write-wins, would
- * add states the polling reader's oracle does not enumerate.
+ * (§CONF-READERS), fixed valid argv. `build` is left out: its module and
+ * companion writes, legitimate beside a mutating command under 13.5's
+ * last-write-wins, would add states the polling reader's oracle does not
+ * enumerate.
  */
 const READ_MENU: readonly {
   readonly argv: readonly string[];
@@ -1269,17 +1276,89 @@ function operationOf(
   }
 }
 
+/** An episode's spec sources: its current file and a move's destination. */
+function episodeSourcesOf(episode: P10Episode, currentFile: string): string[] {
+  return episode.kind === "move" ? [currentFile, episode.to] : [currentFile];
+}
+
+/**
+ * The derived files beside a spec source in a workspace (SPEC 13.1): the
+ * plain files — an lstat-kind file, never a link or a directory — in the
+ * source's directory whose names begin with `NAME.xspec.`, `NAME` the
+ * source's file name without `.mdx`: the generated module `NAME.xspec.ts`
+ * and its companions, every companion named `NAME.xspec.` plus a suffix.
+ * Returned as workspace-relative paths in byte order; none where the
+ * directory is absent. Names are read as bytes, and a matching name that is
+ * not valid UTF-8 is a harness error naming the limitation (the polling
+ * reader reads string paths), never a silently unpolled path.
+ */
+async function derivedFilesBeside(
+  workspace: TestWorkspace,
+  sourceRel: string,
+  context: string,
+): Promise<string[]> {
+  const directory = path.posix.dirname(sourceRel);
+  const prefix = Buffer.from(
+    `${path.posix.basename(sourceRel, ".mdx")}.xspec.`,
+  );
+  let names: Uint8Array[];
+  try {
+    names = await workspace.readdirBytes(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const rels: string[] = [];
+  for (const name of names) {
+    const bytes = Buffer.from(name);
+    if (!bytes.subarray(0, prefix.length).equals(prefix)) continue;
+    let decoded: string;
+    try {
+      decoded = new TextDecoder("utf-8", {
+        fatal: true,
+        ignoreBOM: true,
+      }).decode(bytes);
+    } catch {
+      throw new Error(
+        `harness error: ${context}: the entry <name bytes ` +
+          `${bytes.toString("hex")}> beside ${sourceRel} in ` +
+          `${workspace.root} has a derived file's name shape (\`` +
+          `${prefix.toString("utf8")}\` plus a suffix, SPEC 13.1) but is ` +
+          `not valid UTF-8 — the polling reader reads string paths, so ` +
+          `P-10 cannot poll it`,
+      );
+    }
+    const rel = directory === "." ? decoded : `${directory}/${decoded}`;
+    if ((await workspace.kind(rel)) === "file") rels.push(rel);
+  }
+  return rels;
+}
+
 /**
  * The episode's polled paths (module header): the journal, the session
- * file, the spec source and a move's destination, and their generated
- * modules — every path the episode's command may write but graph data,
- * never the lock path.
+ * file, the spec source and a move's destination, their generated modules,
+ * and the companions beside them — `derivedRels`, the files beside each of
+ * those sources named `NAME.xspec.` plus a suffix (SPEC 13.1;
+ * derivedFilesBeside), listed from the workspace and from the twin's final
+ * state before the episode starts (none for a product writing none), added
+ * without duplicates. The module stays named, so one absent from both
+ * listings is still polled. These are every path the episode's command may
+ * write but graph data, never the lock path: its one mutating command
+ * writes each module and companion at most once (6.4, 6.5), and no reader
+ * writes one (13.3: a refresh generates no TypeScript).
  */
-function polledRelsOf(episode: P10Episode, currentFile: string): string[] {
-  const sources = [currentFile];
-  if (episode.kind === "move") sources.push(episode.to);
+function polledRelsOf(
+  episode: P10Episode,
+  currentFile: string,
+  derivedRels: readonly string[],
+): string[] {
   const rels = [JOURNAL_REL, SESSION_REL];
-  for (const source of sources) rels.push(source, moduleRelOf(source));
+  for (const source of episodeSourcesOf(episode, currentFile)) {
+    rels.push(source, moduleRelOf(source));
+  }
+  for (const rel of derivedRels) {
+    if (!rels.includes(rel)) rels.push(rel);
+  }
   return rels;
 }
 
@@ -1565,13 +1644,14 @@ async function judgeEndedRun(
 
 /**
  * Run one episode (module header) on the trial's workspace: its operation
- * made concrete, its reader-free twin run first (on a copy), then the
- * polling reader started, the pre-start readers started and confirmed
- * running, the command started — in a process group of its own — held or
- * not, its held and straddle reads, and its fate; the run judged at once as
- * it ends, the readers then settled, the polled states judged; the ledger
- * and the file model updated, and — after a `rename` or `move` killed past
- * its hold — the trial continued on the twin's workspace.
+ * made concrete, its reader-free twin run first (on a copy), the derived
+ * files beside its sources listed from both, then the polling reader
+ * started, the pre-start readers started and confirmed running, the
+ * command started — in a process group of its own — held or not, its held
+ * and straddle reads, and its fate; the run judged at once as it ends, the
+ * readers then settled, the polled states judged; the ledger and the file
+ * model updated, and — after a `rename` or `move` killed past its hold —
+ * the trial continued on the twin's workspace.
  */
 async function runEpisode(
   product: ProductBinding,
@@ -1591,7 +1671,21 @@ async function runEpisode(
   );
   let adopted = false;
   try {
-    const polled = polledRelsOf(episode, state.currentFile).map((rel) => ({
+    // The derived files beside the episode's sources, listed before it
+    // starts: from its start and from the twin's final state, which holds a
+    // move's destination's (polledRelsOf). No name met mid-episode is
+    // polled (an atomic write's temporary entry is no path P-10 judges).
+    const derivedRels = new Set<string>();
+    for (const listed of [workspace, twin.workspace]) {
+      for (const source of episodeSourcesOf(episode, state.currentFile)) {
+        for (const rel of await derivedFilesBeside(listed, source, context)) {
+          derivedRels.add(rel);
+        }
+      }
+    }
+    const polled = polledRelsOf(episode, state.currentFile, [
+      ...derivedRels,
+    ]).map((rel) => ({
       rel,
       abs: workspace.path(rel),
     }));
@@ -1949,7 +2043,7 @@ async function runP10Trial(
 const P_10 = defineProductTest({
   id: "P-10",
   title:
-    "concurrency under randomized schedules of concurrent readers and one mutating command via --test-hold and process kills (TEST-SPEC §16 P-10): episodes of `rename`, file-form `move`, and `review resolve` under `--json`, held or not, run to their end, killed while held, or killed past their hold at fixed fractions of their twin's lift-to-exit span, each kill under T13.5-3's exit-collection discipline (the command's process group SIGKILLed, its exit collected, the group gone) before anything later runs; readers started before each command at drawn leads, at least one confirmed still running (listed, never a zombie) as it starts, plus reads while it holds and straddling its lift or kill, and a polling reader over the journal, the session file, the source, and its module, never the lock path; each command's reader-free twin copied from the workspace, the lock path aside, as it starts and run alone, exit 0. Readers observe only prior-or-complete states (every polled state the path's before or after the episode; the journal prefix-monotone, never deleted; T13.5-5's protocol); nothing is lost (each `rename`/`move` exiting 0 adds exactly one journal line, each killed one at most one; each resolve exiting 0 records its status — read back by quiescent `review status` and `review list` — each killed one records it or leaves the session byte-unchanged); a killed run whose sources, journal, or session files differ from its twin's leaves `.xspec/lock` holding exactly one plain-file entry (T13.5-3's past-the-hold judgement); and readers never exclude a mutating command: each one not killed is never refused (a refusal after a kill voids the trial where a killed group's identifier is listed again, T13.5-3's reuse check) and ends exactly as its twin — exit code, standard output, and the sources, journal, and session files byte-equal (H-6; derived files and graph data not compared), `.xspec/lock` then absent (SPEC 6.1, 10.7, 13.4, 13.5; E-5)",
+    "concurrency under randomized schedules of concurrent readers and one mutating command via --test-hold and process kills (TEST-SPEC §16 P-10): episodes of `rename`, file-form `move`, and `review resolve` under `--json`, held or not, run to their end, killed while held, or killed past their hold at fixed fractions of their twin's lift-to-exit span, each kill under T13.5-3's exit-collection discipline (the command's process group SIGKILLed, its exit collected, the group gone) before anything later runs; readers started before each command at drawn leads, at least one confirmed still running (listed, never a zombie) as it starts, plus reads while it holds and straddling its lift or kill, and a polling reader over the journal, the session file, the source, and its module and companions, never the lock path; each command's reader-free twin copied from the workspace, the lock path aside, as it starts and run alone, exit 0. Readers observe only prior-or-complete states (every polled state the path's before or after the episode; the journal prefix-monotone, never deleted; T13.5-5's protocol); nothing is lost (each `rename`/`move` exiting 0 adds exactly one journal line, each killed one at most one; each resolve exiting 0 records its status — read back by quiescent `review status` and `review list` — each killed one records it or leaves the session byte-unchanged); a killed run whose sources, journal, or session files differ from its twin's leaves `.xspec/lock` holding exactly one plain-file entry (T13.5-3's past-the-hold judgement); and readers never exclude a mutating command: each one not killed is never refused (a refusal after a kill voids the trial where a killed group's identifier is listed again, T13.5-3's reuse check) and ends exactly as its twin — exit code, standard output, and the sources, journal, and session files byte-equal (H-6; derived files and graph data not compared), `.xspec/lock` then absent (SPEC 6.1, 10.7, 13.4, 13.5; E-5)",
   // Wall-clock hang guard only (H-10): three fixed seeds (E-5), two to five
   // episodes per trial, each a twin and a command plus up to eight reads.
   timeoutMs: 600_000,

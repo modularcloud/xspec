@@ -19,7 +19,9 @@
 // the callers' own: T13.5-5 judges its derived file against the completed
 // builds' contents, P-10 each polled path against its states before and
 // after each mutating command. No caller ever polls the lock path
-// `.xspec/lock` or anything under it (P-10's paths are named explicitly).
+// `.xspec/lock` or anything under it (P-10's paths are named explicitly,
+// or listed in its spec sources' directories by 13.1's `NAME.xspec.`
+// prefix).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
