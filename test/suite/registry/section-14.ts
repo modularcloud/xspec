@@ -248,7 +248,9 @@
 //   asserts the reporting contract alone: exit 1, the form-exact 12.7
 //   findings-only report, the exact finding multiset (one finding per
 //   applicable reason, none beside), and each finding's stable code with
-//   its concerned file/range/identity. The modifies-nothing compares,
+//   its concerned file/range/identity — and, at each refusal's state, the
+//   same information in its human form (the human-form note closing this
+//   bullet). The modifies-nothing compares,
 //   journal discipline, and preview equivalence stay the home tests'
 //   subject (T6.4-3, T6.5-4, T6.6-3), save the link-and-target compare of
 //   T6.5-4's symbolic-link arms, T14-7's own clause (the re-descent arms,
@@ -356,6 +358,44 @@
 //   refused-invalid-destination beside it. Every expectation stating a
 //   `path` also asserts `locations` `[]`: a reason concerning a path
 //   carries it as the finding's `path` with `locations` `[]` (14, 12.7).
+//   The human form (T12.0-1's information parity; SPEC 12.0: the JSON form
+//   carries the same information as the human report — here 14's refusal
+//   data, each reason's stable code with the file, source range, path, or
+//   identity it concerns, the invalid-workspace refusal's numbered finding
+//   alike): after each refusal's JSON assertions, at the same state (a
+//   refused operation modifies nothing, SPEC 6.4, 6.5), the same argv
+//   without `--json` exits 1 as well, and its report mentions what the
+//   decoded findings carry (a product-to-itself comparison, H-4;
+//   `assertRefusalReport`, through the shared human-findings check,
+//   `assertHumanFindingsMentions` in human-findings.ts, and
+//   helpers/adapters/human.ts): every location's file, every concerned
+//   path, and every identity (an identity-or-path boundary, so
+//   `specs/B.mdx#x y` never counts inside `specs/B.mdx#x y.sub`, nor
+//   `specs/B.mdx` inside `specs/B.mdx#y`); then, in a separate call, every
+//   finding's stable code (`codeMention`: case-insensitive, its words
+//   joined by one character that is neither letter nor digit or by
+//   nothing, never where it ends a longer code), matched with those data
+//   blanked out; then every location's start and end (whole numbers, SPEC
+//   1.7, matched with the digit-holding data among those blanked out). Every
+//   arm takes it, the symbolic-link arms' human run inside their
+//   link-and-target compare as their JSON run is. Limits: no mention is
+//   associated with another, so which code, location, path, and identity
+//   belong to which finding stay with the JSON assertions — a datum or a
+//   code counts wherever the report prints it; a message is free text,
+//   never blanked and never compared, so the data it names count there —
+//   the built product's refusal messages quote a refused path (`invalid
+//   destination "…"`), a target parent's identity, and the files a
+//   collision or a cycle concerns — as do its code's words where it spells
+//   them (the 14.5 message's `unknown dependency`; no refusal message
+//   spells a `refused` word), and a whole number it spells may stand in for
+//   an offset of its value (a citation's `6.4` holds a `4`); the
+//   barred-character arms' identities and paths — T6.4-3's and T6.5-4's
+//   `"`, `'`, `\`, U+000A, U+000D, U+2028, and U+2029 arms — hold
+//   characters a human report may quote or escape and are not asked, their
+//   codes still are, while `&`, which no report need escape, is asked; and
+//   a path in the marked byte form would not be asked (human-findings.ts),
+//   none arising here: T14-7's operands are valid UTF-8 (12.0) and its
+//   staged paths ASCII.
 // - T14-8 owns the every-participant strictness the home tests SOME-quantify
 //   (T1.3-5's per-occurrence, T2.1-3's and T4-2's per-import, and T2.1-5's
 //   per-file tolerance, T5.3-1's file-dimension binding, T14-7's cycle
@@ -3422,17 +3462,32 @@ const T14_6 = defineProductTest({
  * exactly that set — every colliding bearer or would-be cycle participant,
  * none beside (SPEC 14); a
  * reason concerning a path (`path` stated) carries it as the finding's
- * `path` with `locations` `[]` (SPEC 14, 12.7). The modifies-nothing
- * compares are the home tests' subject (T6.4-3, T6.5-4); the symbolic-link
- * arms' link-and-target compare wraps this contract
- * (`assertLinkAndTargetUnchanged`). Per-reason concern lookup is by counting key, total because a
+ * `path` with `locations` `[]` (SPEC 14, 12.7). Then, at the same state (a
+ * refused operation modifies nothing, SPEC 6.4, 6.5), the human form —
+ * T12.0-1's information parity (SPEC 12.0: the JSON form carries the same
+ * information as the human report; the module header's T14-7 human-form
+ * note): the same argv without `--json` exits 1 as well, and its report
+ * mentions what every decoded finding carries — the shared human-findings
+ * check (`assertHumanFindingsMentions`, human-findings.ts): every
+ * location's file, every concerned path, and every identity (an
+ * identity-or-path boundary); then, in a separate call, every stable code
+ * (`codeMention`, matched with those data blanked out); then every
+ * location's start and end (whole numbers, SPEC 1.7, matched with the
+ * digit-holding data among those blanked out) — a datum holding a character
+ * a human report may quote or escape, or a path in the marked byte form,
+ * not asked; a message never blanked and never compared (H-3). The
+ * modifies-nothing compares are the home tests' subject (T6.4-3, T6.5-4);
+ * the symbolic-link arms' link-and-target compare wraps this contract
+ * (`assertLinkAndTargetUnchanged`), so their human run sits inside it, as
+ * the `--json` run does. Per-reason concern lookup is by counting key, total because a
  * refusal report never carries two findings of one reason (SPEC 14: one
  * finding per reason). No report carries a code outside 14's list: the
  * form-exact decode admits only 14's codes (forms.ts KNOWN_CODE_TOKENS —
  * the 26 condition tokens and the eleven refusal reasons), so an unlisted
  * code, the retired `refused-unresolvable-reference` included, fails as an
  * H-3 form failure before any count, and the exact multiset excludes every
- * listed code beside the expected ones.
+ * listed code beside the expected ones. Robust matching (H-3): presence,
+ * never wording, and no mention associated with another.
  */
 async function assertRefusalReport(
   product: ProductBinding,
@@ -3524,6 +3579,20 @@ async function assertRefusalReport(
       }
     }
   }
+  // The human form at the same state — a refused operation modifies nothing
+  // (SPEC 6.4, 6.5) — carries what the decoded findings carry: every
+  // reason's stable code with the location, path, and identities it
+  // concerns (the module header's T14-7 human-form note).
+  const label = `${context}: \`${command}\` (human report)`;
+  const human = await expectExit(
+    product,
+    workspace,
+    argv,
+    1,
+    `${label} — the same exit code as the \`--json\` run at this state: 1, ` +
+      `a refusal being a validation failure (SPEC 6.4, 6.5, 12.0)`,
+  );
+  assertHumanFindingsMentions(human, findings, label);
 }
 
 /**
@@ -4459,8 +4528,8 @@ async function runT147ExposedDerivedFileArms(
 const T14_7 = defineProductTest({
   id: "T14-7",
   title:
-    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it: `[\"specs/A.mdx#a.then\"]` for `rename specs/A.mdx a a.then` (the top-level `a`, holding `a.mid` and `a.sib`, made the two-segment `a.then`, no refused-structural-parent beside it) and `[\"specs/B.mdx#x y\"]` for `move specs/A.mdx#x 'specs/B.mdx#x y'` (`x` holding `x.sub`, never `specs/B.mdx#x y.sub`) (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's full path in pre-operation coordinates — a dependency cycle's participating `d` spelling; a spec import cycle's existing import declaration by its own characters and, for the import the move would add, the local reference spelling whose rewrite requires it, exactly those two, never a range for the import that does not yet exist; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included — occupancy judged in discovered-path form alone: a destination spelled `./a.mdx` for the origin `a.mdx`, `specs//b.mdx`, or `specs/../specs/b.mdx`, each naming an occupied path were it normalized, is refused-invalid-destination alone concerning the path as spelled, never reported occupied, and a section-form target path so spelled likewise; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination, and in T6.5-4's symbolic-link arms a link to a directory at a component of the destination path, of a created target file's path, and of the `outDir` emit destination, the link and its target byte-identical after each refusal — and so do T6.5-4's barred path characters and T6.5-20's derived-path relations and module-linking designation, over T6.5-20's exported refused stagings; refused-exposed-derived-file over T6.5-21's exported refused stagings — `path` the origin's emit destination, `locations` `[]`, `identities` `[]`, the two-reason move's refused-invalid-destination beside it; every reason concerning a path carrying it as the finding's `path` with `locations` `[]`; the eleven reasons 14 lists (refused-exposed-derived-file, refused-invalid-rewrite, and refused-moved-import, T6.5-21's, T6.5-16's, and T6.5-17's subjects, included) are the whole refusal vocabulary — a code 14 does not list never appears in any report, the form-exact decode admitting only 14's codes (no unresolvable-reference reason exists); every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them; refused-invalid-rewrite and refused-moved-import re-asserted over T6.5-16's and T6.5-17's exported arms — the former locating the moved construct and, for an addition no offset admits, the spellings rooted at its binding, its identities the concerned files' paths in byte order; the latter locating each moved declaration by the import range of 11.4, its identities empty — `path` null for both, every reason the entry pins beside reported together; identities over invalid paths: `move specs/A.mdx#x 'specs/new.txt#x y'` reports refused-invalid-destination (`path` `specs/new.txt`) beside refused-invalid-id with identities exactly `[\"specs/new.txt#x y\"]`, and `move specs/A.mdx#x specs/new.txt#p.y` refused-invalid-destination beside refused-missing-target-parent with `[\"specs/new.txt#p\"]` — each a plain string over the path as spelled, defining no node: `query node` on it is a usage error, exit 2; and the spec import cycle's sibling arm — `A` imports a third module `C`, the moved text carries `d={C.foo}`, `C` imports `B` — locating `C`'s existing import of `B` and the chain's spelling in `A`, the located set the spellings rooted at the added binding, independent of whether each appears as a reference-rewrite (SPEC 14, 6.4, 6.5, 4, 5.3, 5.7, 1.5, 7, 11.4, 12.0, 12.7, 13.4)",
-  timeoutMs: 300_000,
+    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it: `[\"specs/A.mdx#a.then\"]` for `rename specs/A.mdx a a.then` (the top-level `a`, holding `a.mid` and `a.sib`, made the two-segment `a.then`, no refused-structural-parent beside it) and `[\"specs/B.mdx#x y\"]` for `move specs/A.mdx#x 'specs/B.mdx#x y'` (`x` holding `x.sub`, never `specs/B.mdx#x y.sub`) (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's full path in pre-operation coordinates — a dependency cycle's participating `d` spelling; a spec import cycle's existing import declaration by its own characters and, for the import the move would add, the local reference spelling whose rewrite requires it, exactly those two, never a range for the import that does not yet exist; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included — occupancy judged in discovered-path form alone: a destination spelled `./a.mdx` for the origin `a.mdx`, `specs//b.mdx`, or `specs/../specs/b.mdx`, each naming an occupied path were it normalized, is refused-invalid-destination alone concerning the path as spelled, never reported occupied, and a section-form target path so spelled likewise; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination, and in T6.5-4's symbolic-link arms a link to a directory at a component of the destination path, of a created target file's path, and of the `outDir` emit destination, the link and its target byte-identical after each refusal — and so do T6.5-4's barred path characters and T6.5-20's derived-path relations and module-linking designation, over T6.5-20's exported refused stagings; refused-exposed-derived-file over T6.5-21's exported refused stagings — `path` the origin's emit destination, `locations` `[]`, `identities` `[]`, the two-reason move's refused-invalid-destination beside it; every reason concerning a path carrying it as the finding's `path` with `locations` `[]`; the eleven reasons 14 lists (refused-exposed-derived-file, refused-invalid-rewrite, and refused-moved-import, T6.5-21's, T6.5-16's, and T6.5-17's subjects, included) are the whole refusal vocabulary — a code 14 does not list never appears in any report, the form-exact decode admitting only 14's codes (no unresolvable-reference reason exists); every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them; refused-invalid-rewrite and refused-moved-import re-asserted over T6.5-16's and T6.5-17's exported arms — the former locating the moved construct and, for an addition no offset admits, the spellings rooted at its binding, its identities the concerned files' paths in byte order; the latter locating each moved declaration by the import range of 11.4, its identities empty — `path` null for both, every reason the entry pins beside reported together; identities over invalid paths: `move specs/A.mdx#x 'specs/new.txt#x y'` reports refused-invalid-destination (`path` `specs/new.txt`) beside refused-invalid-id with identities exactly `[\"specs/new.txt#x y\"]`, and `move specs/A.mdx#x specs/new.txt#p.y` refused-invalid-destination beside refused-missing-target-parent with `[\"specs/new.txt#p\"]` — each a plain string over the path as spelled, defining no node: `query node` on it is a usage error, exit 2; and the spec import cycle's sibling arm — `A` imports a third module `C`, the moved text carries `d={C.foo}`, `C` imports `B` — locating `C`'s existing import of `B` and the chain's spelling in `A`, the located set the spellings rooted at the added binding, independent of whether each appears as a reference-rewrite; and at each refusal's `--json` state the human form — the same argv without `--json` — exits 1 alike and carries every finding's stable code, its location — its file and its range's start and end — its concerned path, and its identities, data a human report may quote or escape excepted (robust matching, H-3) (SPEC 14, 6.4, 6.5, 4, 5.3, 5.7, 1.5, 1.7, 7, 11.4, 12.0, 12.7, 13.4)",
+  timeoutMs: 600_000,
   run: async (product) => {
     // --- The rename reasons, staged via T6.4-3's exported fixture: the
     // 1.4-invalid new IDs (refused-invalid-id concerning the invalid
