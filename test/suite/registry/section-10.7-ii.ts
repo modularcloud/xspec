@@ -32,6 +32,26 @@
 // - The human fully-resolved report (T10.7-7) is asserted for information
 //   presence via /resolv/i: SPEC fixes the fact reported ("fully resolved"),
 //   never wording — any phrasing reporting resolution qualifies (H-3).
+// - T10.7-7's human `next` (T12.0-1's information parity; SPEC 12.0: the
+//   JSON form carries the same information as the human report): after
+//   each of the eight `next --json` reads that return an item — the order
+//   arm's four (p.a's, p.b's, p's, then the root's item) and the payload
+//   arm's four (a.k's, a's, the code location's, and that item again after
+//   the code file's deletion) — and their assertions, at the same state,
+//   `review next s` without `--json` exits 0 as well, and its report names
+//   the returned item by its id (a product-to-itself comparison, H-4;
+//   `assertHumanNextItem`, through helpers/adapters/human.ts: an item-id
+//   boundary, so `item-1` never counts inside `item-10`). Limits: the human
+//   `next` is asked only to identify its item — SPEC 10.7 requires the
+//   self-contained payload of `next --json` alone ("With `--json`, the
+//   payload MUST be self-contained"), and `show` reports the full item in
+//   both forms (T10.7-8) — so its kind, scope, status, and payload are not
+//   asserted there; no mention is associated with another, so the id
+//   counts wherever the report prints it — in another item's `blockedBy`
+//   too (the root's blocked item lists p's item there) — and which item the
+//   report presents as the one returned stays with the JSON assertions; an
+//   id that is itself a whole number may be matched by any number of its
+//   value the report prints.
 // - Payload texts are byte-compared against `query node` captures taken at
 //   the pinned graph states (own/subtree text per SPEC 1.6, source ranges per
 //   1.7 — the same values T11-1 fixes for `query node`), with distinctness
@@ -110,6 +130,7 @@ import {
   decodeNextReport,
   decodeNodeReport,
   decodeSessionStatusReport,
+  nameMention,
 } from "../../helpers/adapters/index.js";
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -1059,10 +1080,47 @@ async function expectFullyResolvedBothForms(
   // carrying an item, so reaching here pins "no item in the JSON payload".
 }
 
+/**
+ * The human `review next <name>` at the state of a decoded `review next
+ * <name> --json` read that returned an item, after that read's own
+ * assertions — T12.0-1's information parity (SPEC 12.0: the JSON form
+ * carries the same information as the human report; the module header):
+ * the same argv without `--json` exits 0, and its report names the item
+ * `next` returns by its id (an item-id boundary, so `item-1` never counts
+ * inside `item-10`; SPEC 10.2, 10.7). The human `next` is asked only to
+ * identify its item: SPEC 10.7 requires the self-contained payload of
+ * `next --json` alone, and `show` reports the full item in both forms
+ * (T10.7-8). Robust matching (H-3): presence, never wording.
+ */
+async function assertHumanNextItem(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  item: ReviewItem,
+  context: string,
+): Promise<void> {
+  const label = `${context} \`review next ${name}\` (human report)`;
+  const human = await expectExit(
+    product,
+    workspace,
+    ["review", "next", name],
+    0,
+    `${label} — the same exit code as the \`--json\` read at this state ` +
+      `(SPEC 10.7, 12.0)`,
+  );
+  assertReportMentions(
+    human,
+    [nameMention(item.id)],
+    `${label}: the id of the item \`next --json\` returned at this state — ` +
+      `the first needing-review unblocked item in item order, identified ` +
+      `(SPEC 10.2, 10.7, 12.0)`,
+  );
+}
+
 const T10_7_7 = defineProductTest({
   id: "T10.7-7",
   title:
-    "`review next`: returns the first needing-review unblocked item in item order — in an audit session with blocked root and parent items it returns the first leaf, then the second, then moves backward in item order to the meanwhile-unblocked parent and root; when all items are resolved, and for a session with no items, it exits 0 and reports fully resolved in the human and `--json` forms with no item in the JSON payload; the `--json` payload is self-contained — scope text, context texts, origin before/after texts, source ranges for every present node, requirement node and present code location alike (scope, context, and origin entries; the code-impact scope's named-unit construct range byte-asserted against precomputed offsets) and none for absent nodes (after the code file's deletion the same item's scope presents identity and absence alone — no text, no range), and the recorded `baseline` and `current` hashes (asserted against distinct `query node` captures at the baseline and creation moments) (SPEC 1.7, 4.6, 9.2, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7)",
+    "`review next`: returns the first needing-review unblocked item in item order — in an audit session with blocked root and parent items it returns the first leaf, then the second, then moves backward in item order to the meanwhile-unblocked parent and root; when all items are resolved, and for a session with no items, it exits 0 and reports fully resolved in the human and `--json` forms with no item in the JSON payload; the `--json` payload is self-contained — scope text, context texts, origin before/after texts, source ranges for every present node, requirement node and present code location alike (scope, context, and origin entries; the code-impact scope's named-unit construct range byte-asserted against precomputed offsets) and none for absent nodes (after the code file's deletion the same item's scope presents identity and absence alone — no text, no range), and the recorded `baseline` and `current` hashes (asserted against distinct `query node` captures at the baseline and creation moments); and wherever `next --json` returns an item, the human `review next` at the same state exits 0 and names that item by its id (robust matching, H-3) (SPEC 1.7, 4.6, 9.2, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 12.0)",
   timeoutMs: 360_000,
   run: async (product) => {
     // --- arm 1: order walking and the fully-resolved report -----------------
@@ -1114,6 +1172,15 @@ const T10_7_7 = defineProductTest({
                 `${expected}, got ${item.id}`,
             );
           }
+          // The human form at the same state names the item returned
+          // (T12.0-1, SPEC 12.0; the module header).
+          await assertHumanNextItem(
+            product,
+            workspace,
+            "s",
+            item,
+            `${prefix} ${why}`,
+          );
         };
 
         await expectNextId(
@@ -1355,6 +1422,10 @@ const T10_7_7 = defineProductTest({
           "the baseline subtreeHash",
           `${prefix} payload \`current\``,
         );
+        // The human form at the same state names the item returned
+        // (T12.0-1, SPEC 12.0; the module header) — at each of the arm's
+        // four reads, before anything mutates the session.
+        await assertHumanNextItem(product, workspace, "s", item, prefix);
 
         // Walk to the code-impact item (item order: the two spec items
         // precede the code location's, whose file path sorts after
@@ -1389,6 +1460,13 @@ const T10_7_7 = defineProductTest({
           { node: N7_A, text: aNow.ownText, sourceRange: aNow.sourceRange },
           `${prefix} second scope (parent-consistency scope text is the ` +
             `scope node's own text)`,
+        );
+        await assertHumanNextItem(
+          product,
+          workspace,
+          "s",
+          second,
+          `${prefix} second`,
         );
         await resolveOk(
           product,
@@ -1462,6 +1540,13 @@ const T10_7_7 = defineProductTest({
           akAtCreate.sourceRange,
           `${codeLabel} origin entry a.k`,
         );
+        await assertHumanNextItem(
+          product,
+          workspace,
+          "s",
+          codeItem,
+          `${prefix} code item`,
+        );
 
         // None for absent nodes (SPEC 10.7, 1.7): delete the code file —
         // the location leaves the current graph while the workspace stays
@@ -1518,6 +1603,13 @@ const T10_7_7 = defineProductTest({
           goneOrigin,
           akAtCreate.sourceRange,
           `${goneLabel} origin entry a.k`,
+        );
+        await assertHumanNextItem(
+          product,
+          workspace,
+          "s",
+          goneItem,
+          `${prefix} deleted`,
         );
       },
     );
