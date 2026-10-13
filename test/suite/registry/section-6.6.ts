@@ -211,8 +211,10 @@
 //   nested inside it, the latter reported exactly when the chosen binding
 //   changes the spelling, SPEC 6.5), the receiving and other files
 //   byte-asserted against T6.5-13's composed forms. Delta content is
-//   T6.6-5's business — asserted here only as the decode's success
-//   encoding (non-null beside `mapping` and `files`).
+//   T6.6-5's business — asserted here, in JSON, only as the decode's
+//   success encoding (non-null beside `mapping` and `files`); the
+//   human-form check (the last bullet) asks the human report for every
+//   delta path the decoded document carries.
 // - T6.6-5 asserts the delta's content record-based, every expected set
 //   composed from the `recorded` set the inventory reports right after
 //   each premise build — before graph data is deleted or the configuration
@@ -295,18 +297,67 @@
 //   inside it named (the record's layout is deliberately unenumerated,
 //   13.3) — and a path-concerned condition is an unlocated one (T12.7-1:
 //   `locations` [] for unlocated conditions, `path` the concerned path).
-//   Both corrupt-state previews — the full move preview and the refused
-//   identity-unchanged rename preview — run inside ONE whole-root
-//   modifies-nothing compare (a preview writes nothing and never refreshes
-//   the record, SPEC 6.6/13.3, so the corrupt state persists byte for
-//   byte), which makes the subsequent real move run on literally "the same
-//   state"; its exit-0 success, applied mapping, and `check` exit 0 realize
-//   "not refused — it proceeds, its finishing regeneration replacing the
-//   corrupt record" (SPEC 6.6, 6.4, 14.10; T12.2-2's protocol). The
-//   refused preview's one finding, `refused-identity-unchanged`, is
-//   asserted with the identity it concerns (TEST-SPEC line 9's rule): its
-//   `identities` exactly the unchanged identity `specs/Origin.mdx#org`, the
-//   sole element, in 1.5's form over the rename's file (SPEC 14, 1.5).
+//   Both corrupt-state previews — the full move preview (its human form
+//   beside it, the next bullet) and the refused identity-unchanged rename
+//   preview — run inside ONE whole-root modifies-nothing compare (a preview
+//   writes nothing and never refreshes the record, SPEC 6.6/13.3, so the
+//   corrupt state persists byte for byte), which makes the subsequent real
+//   move run on literally "the same state"; its exit-0 success, applied
+//   mapping, and `check` exit 0 realize "not refused — it proceeds, its
+//   finishing regeneration replacing the corrupt record" (SPEC 6.6, 6.4,
+//   14.10; T12.2-2's protocol). The refused preview's one finding,
+//   `refused-identity-unchanged`, is asserted with the identity it concerns
+//   (TEST-SPEC line 9's rule): its `identities` exactly the unchanged
+//   identity `specs/Origin.mdx#org`, the sole element, in 1.5's form over
+//   the rename's file (SPEC 14, 1.5).
+// - T6.6-4's, T6.6-5's, and T6.6-6's human form (T12.0-1's information
+//   parity; SPEC 12.0: the JSON form carries the same information as the
+//   human report; 6.6: a preview reports the complete identity mapping,
+//   every file the operation would rewrite, relocate, or create with every
+//   edit classed and located, and the derived-file delta): every successful
+//   preview the three tests decode — each `runPreviewJson` run, and
+//   T6.6-6's corrupt-record move preview — is followed directly, at the
+//   same state and inside whatever modifies-nothing compare the caller
+//   holds, by the same argv without `--json`, which exits as the `--json`
+//   run does (0; 1 at T6.6-6's corrupt record, the answer carrying its
+//   condition-23 finding). Once the test's JSON assertions on the document
+//   have run — for T6.6-4(e), once the whole plan is asserted past the real
+//   operation — the human report must mention what the decoded document
+//   carries (a product-to-itself comparison, H-4;
+//   `assertHumanPreviewReport`, through helpers/adapters/human.ts): every
+//   mapping pair's `from` and `to` identity, every file entry's path, and
+//   every delta path in either direction (identity-or-path boundaries, so
+//   the Markdown path `specs/Mv.md` never counts inside `specs/Mv.mdx`, nor
+//   a root's path inside its sections' identities); then, in a separate
+//   call with every identity and path the document carries blanked out
+//   (the findings' concerned paths, location files, and identities among
+//   them), every edit's class (the preview edit classes, SPEC-named tokens)
+//   and, where the delta is explicitly unavailable, `unavailable` (14.23);
+//   then, in a third, the start and end of every edit's range (whole
+//   numbers, SPEC 1.7, matched with the document's digit-holding data
+//   blanked out — identities and paths, T6.6-5's `specs/sub/Mv2.mdx` and
+//   `pal2` among them, and the findings' message lines — save a datum that
+//   is itself a whole number, `digitHoldingData` from section-10.7-i.ts).
+//   A finding's message is free text, never compared (H-3), and blanked for
+//   the numbers alone, so its citation digits (the built product's
+//   condition-23 message cites `SPEC 14.23, 13.3`) never stand in for an
+//   offset: unlike T14-1's findings, a successful preview's one possible
+//   finding is unlocated (condition 23, locations []), so no offset of its
+//   own is asked. The delta's direction words are no SPEC-named tokens and
+//   are not asked, and T6.6-6's refused preview, a refusal, reports
+//   findings alone (findings parity is T14-1's). Limits: no mention is
+//   associated with another, so which file holds which edit, which class
+//   and range belong together, which `from` maps to which `to`, and which
+//   delta direction lists a path stay with the JSON assertions; an identity
+//   counts wherever the report prints it; a message the report rewords is
+//   not blanked, so its digits may then stand in for an offset; and a token
+//   counts wherever it stands outside the blanked data, a finding's message
+//   included — the built product's condition-23 message says the recorded
+//   derived-file paths are "unavailable", and robust matching cannot tell
+//   which line carries the token, so a report dropping its delta lines
+//   passes T6.6-6 (FIX_PLAN Task 10's scratch build `t9jd0c10-nodelta`),
+//   while T6.6-4 (at its file-form arm) and T6.6-5 (at its first arm) fail
+//   it, naming the delta paths.
 
 import { Buffer } from "node:buffer";
 import type { AcquisitionStaging } from "../../helpers/acquisition-staging.js";
@@ -339,21 +390,27 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import type {
   AppliedMappingPair,
   Finding,
+  PathValue,
   PreviewDeltaDatum,
   PreviewEdit,
   PreviewEditClass,
   PreviewFileEntry,
   PreviewReport,
   SourceRange,
+  SpecNamedToken,
 } from "../../helpers/adapters/index.js";
 import {
   GRAPH_DATA_AREA_PATH,
+  assertReportMentions,
   corruptGraphDataShapeBlind,
   decodeFindingsReport,
   decodeInventoryRecordedDatum,
   decodePerformedOperationReport,
   decodePreviewReport,
+  identityMention,
+  numberMention,
   renderPathValue,
+  specTokenMention,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
@@ -439,6 +496,7 @@ import {
   runD20RefusedStaging,
   runD21RefusedStaging,
 } from "./section-6.5-iv.js";
+import { digitHoldingData } from "./section-10.7-i.js";
 import {
   assertGraphDataPresent,
   deleteGraphData,
@@ -2640,20 +2698,38 @@ function assertPreviewPlanContent(
 }
 
 /**
+ * A successful preview's two forms at one state (`runPreviewJson`): the
+ * decoded `--json` document, and the human run of the same argv without
+ * `--json` that followed it directly — matched against the document by
+ * `assertHumanPreviewReport` once the caller's JSON assertions on it have
+ * run (the module header's human-form bullet).
+ */
+interface PreviewRuns {
+  readonly report: PreviewReport;
+  readonly human: RunResult;
+}
+
+/**
  * Run `<operation> --preview --json`: exit 0 (the staging's premise `build`
  * passed, so the real operation would proceed and the preview succeeds with
  * it, SPEC 6.6), a single JSON document as the entire stdout (12.0), decoded
  * as the form-exact 12.7 preview document (H-3) — the decode also enforcing
  * the full 12.7 edit comparator, range start, then range end, then
  * class-name bytes, over whatever edits are emitted (T6.6-4's comparator
- * assertion; arm (e) pins the tie-break's observations).
+ * assertion; arm (e) pins the tie-break's observations). Then, directly —
+ * at the same state, nothing mutating in between, inside whatever
+ * modifies-nothing compare the caller holds — the human preview, the same
+ * argv without `--json`: exit 0 as well (SPEC 12.0: the output form never
+ * changes an exit code). Returns both; the caller matches the human report
+ * against the document after its own JSON assertions
+ * (`assertHumanPreviewReport`).
  */
 async function runPreviewJson(
   product: ProductBinding,
   workspace: TestWorkspace,
   operationArgv: readonly string[],
   context: string,
-): Promise<PreviewReport> {
+): Promise<PreviewRuns> {
   const argv = [...operationArgv, "--preview", "--json"];
   const result = await expectExit(
     product,
@@ -2664,7 +2740,7 @@ async function runPreviewJson(
       `the real operation would proceed, and this staging's premise build ` +
       `passed (SPEC 6.6, 12.0)`,
   );
-  return decodePreviewReport(
+  const report = decodePreviewReport(
     parseJsonStdout(
       result,
       `${context}: \`${argv.join(" ")}\` — a single JSON document as the ` +
@@ -2672,6 +2748,141 @@ async function runPreviewJson(
     ),
     context,
   );
+  const humanArgv = [...operationArgv, "--preview"];
+  const human = await expectExit(
+    product,
+    workspace,
+    humanArgv,
+    0,
+    `${context}: \`${humanArgv.join(" ")}\` (human report) — the same exit ` +
+      `code as the \`--json\` preview at this state: 0, the preview ` +
+      `succeeding (SPEC 6.6, 12.0)`,
+  );
+  return { report, human };
+}
+
+/** A finding message's non-blank lines, trimmed (blanked, never compared). */
+function messageLines(message: string): readonly string[] {
+  return message
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+/**
+ * The human preview at the state of a decoded `--preview --json` document,
+ * after that document's own assertions — T12.0-1's information parity (SPEC
+ * 12.0: the JSON form carries the same information as the human report;
+ * 6.6: a preview reports the complete identity mapping, every file the
+ * operation would rewrite, relocate, or create with every edit classed and
+ * located, and the derived-file delta, both directions one datum; the
+ * module header): `human` — the same argv without `--json`, run directly
+ * after the `--json` one at the same state, its exit code asserted there —
+ * mentions every mapping pair's `from` and `to` identity, every file
+ * entry's path, and every delta path in either direction (identity-or-path
+ * boundaries, so `specs/Mv.md` never counts inside `specs/Mv.mdx`, nor a
+ * root's path inside its sections' identities); then, in a separate call
+ * with every identity and path the document carries blanked out — those,
+ * and the findings' concerned paths, location files, and identities — every
+ * edit's class (a preview edit class, 6.6, 12.7) and `unavailable` where the
+ * delta is explicitly unavailable (14.23; SPEC-named tokens), so a token's
+ * spelling inside an identity never stands in for the token; then, in a
+ * third, the start and end of every edit's range (whole numbers, SPEC 1.7,
+ * matched with the document's digit-holding data blanked out — those
+ * identities and paths and the findings' message lines — save a datum that
+ * is itself a whole number, `digitHoldingData`). A message is free text,
+ * never compared (H-3); it is blanked for the numbers alone, so its
+ * citation digits never stand in for an edit's offset. Robust matching
+ * (H-3): presence, never wording, and no mention associated with another.
+ * Fails diagnosed on a null plan (the callers assert the plan first) and on
+ * a file entry's or delta path in the marked byte form (every path these
+ * previews concern is ASCII, and a valid-UTF-8 path is never presented in
+ * that form, SPEC 12.0).
+ */
+function assertHumanPreviewReport(
+  human: RunResult,
+  report: PreviewReport,
+  context: string,
+): void {
+  const label = `${context} (human preview report)`;
+  const plan = requirePreviewPlan(report, label);
+  const plainPath = (value: PathValue, what: string): string => {
+    if (typeof value !== "string") {
+      fail(
+        `${label}: ${what} ${renderPathValue(value)} is no plain path — ` +
+          `every path these previews concern is ASCII, and a valid-UTF-8 ` +
+          `path is never presented in the marked byte form (SPEC 12.0, 12.7)`,
+      );
+    }
+    return value;
+  };
+  const identities = new Set<string>();
+  for (const pair of plan.mapping) {
+    identities.add(pair.from);
+    identities.add(pair.to);
+  }
+  const tokens = new Set<SpecNamedToken>();
+  const offsets = new Set<number>();
+  for (const entry of plan.files) {
+    identities.add(plainPath(entry.file, "a file entry's path"));
+    for (const edit of entry.edits) {
+      tokens.add(edit.class);
+      offsets.add(edit.range.start);
+      offsets.add(edit.range.end);
+    }
+  }
+  if ("unavailable" in plan.delta) {
+    tokens.add("unavailable");
+  } else {
+    for (const path of [...plan.delta.generated, ...plan.delta.removed]) {
+      identities.add(plainPath(path, "a delta path"));
+    }
+  }
+  const findingData: string[] = [];
+  const findingMessageLines: string[] = [];
+  for (const finding of report.findings) {
+    for (const location of finding.locations) {
+      if (typeof location.file === "string") findingData.push(location.file);
+    }
+    if (typeof finding.path === "string") findingData.push(finding.path);
+    findingData.push(...finding.identities);
+    findingMessageLines.push(...messageLines(finding.message));
+  }
+  if (identities.size > 0) {
+    assertReportMentions(
+      human,
+      [...identities].map(identityMention),
+      `${label}: every mapping pair's \`from\` and \`to\` identity, every ` +
+        `file entry's path, and every delta path in either direction — the ` +
+        `plan the JSON document carries (SPEC 6.6, 12.0, 12.7)`,
+    );
+  }
+  const literalData = [...new Set([...identities, ...findingData])];
+  if (tokens.size > 0) {
+    assertReportMentions(
+      human,
+      [...tokens].map(specTokenMention),
+      `${label}: every edit's class, and \`unavailable\` where the delta is ` +
+        `explicitly unavailable, matched with the document's identities ` +
+        `and paths blanked out (SPEC 6.6, 12.0, 12.7, 14.23)`,
+      { blank: literalData },
+    );
+  }
+  if (offsets.size > 0) {
+    assertReportMentions(
+      human,
+      [...offsets].map(numberMention),
+      `${label}: the start and end of every edit's range, whole numbers, ` +
+        `matched with the document's digit-holding data — identities, ` +
+        `paths, and the findings' message lines — blanked out, save a ` +
+        `datum that is itself a whole number (SPEC 1.7, 6.6, 12.0, 12.7)`,
+      {
+        blank: digitHoldingData([
+          ...new Set([...literalData, ...findingMessageLines]),
+        ]),
+      },
+    );
+  }
 }
 
 function escapeRegExp(text: string): string {
@@ -3647,7 +3858,7 @@ async function readRewrittenText(
 const T6_6_4 = defineProductTest({
   id: "T6.6-4",
   title:
-    "report content: byte-precise fixtures asserted against precomputed pre-operation offsets, form-exact per 12.7 — (a) a rename preview reports the complete identity mapping (the renamed ID and every descendant) ordered by `from` bytes — the descendants `core.mid.z` and `core.mid.c` standing in document order opposite to byte order, so a product emitting document order fails — and, per rewritten file, `id-rewrite` edits spanning each rewritten `id` attribute's own characters and `reference-rewrite` edits spanning each affected occurrence's span (5.7) across MDX and TS; (b) a section-move preview into an existing target file reports the `origin-deletion` as one contiguous range (the construct's own characters extended over the adjunct-dropped leftover whitespace and line terminator), the re-identification's `id-rewrite` edits and the moved text's reference rewrites nested inside that range, `target-insertion` zero-length at the insertion offset, `target-parent-rewrite` spanning the self-closing target parent's tag, `import-addition` zero-length at the exact offset the real operation then uses (byte-asserted by running the operation on the preview-pinned state), and `import-removal` spanning the declaration plus its adjunct drops; (c) a file-form move preview reports `import-specifier-rewrite` edits spanning the specifier literals and `file-relocation` spanning the entire moved file under its pre-operation path; (d) a created-target section-move preview reports exactly one `file-creation` edit at the new file's start — the insertion and import additions there subsumed — with the moved text's own rewrites inside the origin deletion; every edit class-plus-range only, every class one of the ten 12.7 names, and the full 12.7 edit comparator asserted over every emitted edit list — its final tie-break, class-name bytes between zero-length insertion points, pinned as an observation by (e), T6.5-13's stagings restaged byte for byte: the self-closing target parent's tag end (b) and the end of a paragraph-ended file, terminated or not (d), where `import-addition` orders before `target-insertion` at one offset, and (g), two `import-addition` entries adjacent at one offset, their count asserted — the real operation on the preview-pinned state then byte-asserted against the composed forms (SPEC 6.6, 12.7, 6.4, 6.5, 5.7, 1.7, 2.1, 3; H-3, H-4)",
+    "report content: byte-precise fixtures asserted against precomputed pre-operation offsets, form-exact per 12.7 — (a) a rename preview reports the complete identity mapping (the renamed ID and every descendant) ordered by `from` bytes — the descendants `core.mid.z` and `core.mid.c` standing in document order opposite to byte order, so a product emitting document order fails — and, per rewritten file, `id-rewrite` edits spanning each rewritten `id` attribute's own characters and `reference-rewrite` edits spanning each affected occurrence's span (5.7) across MDX and TS; (b) a section-move preview into an existing target file reports the `origin-deletion` as one contiguous range (the construct's own characters extended over the adjunct-dropped leftover whitespace and line terminator), the re-identification's `id-rewrite` edits and the moved text's reference rewrites nested inside that range, `target-insertion` zero-length at the insertion offset, `target-parent-rewrite` spanning the self-closing target parent's tag, `import-addition` zero-length at the exact offset the real operation then uses (byte-asserted by running the operation on the preview-pinned state), and `import-removal` spanning the declaration plus its adjunct drops; (c) a file-form move preview reports `import-specifier-rewrite` edits spanning the specifier literals and `file-relocation` spanning the entire moved file under its pre-operation path; (d) a created-target section-move preview reports exactly one `file-creation` edit at the new file's start — the insertion and import additions there subsumed — with the moved text's own rewrites inside the origin deletion; every edit class-plus-range only, every class one of the ten 12.7 names, and the full 12.7 edit comparator asserted over every emitted edit list — its final tie-break, class-name bytes between zero-length insertion points, pinned as an observation by (e), T6.5-13's stagings restaged byte for byte: the self-closing target parent's tag end (b) and the end of a paragraph-ended file, terminated or not (d), where `import-addition` orders before `target-insertion` at one offset, and (g), two `import-addition` entries adjacent at one offset, their count asserted — the real operation on the preview-pinned state then byte-asserted against the composed forms; and at every preview's state the human preview — the same argv without `--json` — exits 0 alike and carries the plan its JSON document reports: every mapping pair's `from` and `to` identity, every file entry's path, every edit's class and its range's start and end, and every delta path (robust matching, H-3) (SPEC 6.6, 12.0, 12.7, 6.4, 6.5, 5.7, 1.7, 2.1, 3; H-3, H-4)",
   run: async (product) => {
     // --- Arm (a): rename preview across MDX and TS ---
     await withWorkspace(
@@ -3665,13 +3876,14 @@ const T6_6_4 = defineProductTest({
           `${context}: staging premise \`build\` — the workspace is valid, ` +
             `so the rename would proceed and its preview succeeds (SPEC 6.4, 6.6)`,
         );
-        const report = await runPreviewJson(
+        const { report, human } = await runPreviewJson(
           product,
           workspace,
           A4_RENAME_ARGV,
           context,
         );
         assertPreviewPlanContent(report, armAPlan(), context);
+        assertHumanPreviewReport(human, report, context);
       },
     );
 
@@ -3698,13 +3910,14 @@ const T6_6_4 = defineProductTest({
         const additionOffset = await assertLeavesUnchanged(
           workspace.root,
           async () => {
-            const report = await runPreviewJson(
+            const { report, human } = await runPreviewJson(
               product,
               workspace,
               B4_MOVE_ARGV,
               context,
             );
             const captured = assertPreviewPlanContent(report, plan, context);
+            assertHumanPreviewReport(human, report, context);
             const offset = captured.get(B4_THIRD);
             if (offset === undefined) {
               throw new Error(
@@ -3760,13 +3973,14 @@ const T6_6_4 = defineProductTest({
           workspace,
           `${context}: staging premise \`build\` (SPEC 6.5, 6.6)`,
         );
-        const report = await runPreviewJson(
+        const { report, human } = await runPreviewJson(
           product,
           workspace,
           C4_MOVE_ARGV,
           context,
         );
         assertPreviewPlanContent(report, armCPlan(), context);
+        assertHumanPreviewReport(human, report, context);
       },
     );
 
@@ -3781,13 +3995,14 @@ const T6_6_4 = defineProductTest({
           workspace,
           `${context}: staging premise \`build\` (SPEC 6.5, 6.6)`,
         );
-        const report = await runPreviewJson(
+        const { report, human } = await runPreviewJson(
           product,
           workspace,
           D4_MOVE_ARGV,
           context,
         );
         assertPreviewPlanContent(report, armDPlan(), context);
+        assertHumanPreviewReport(human, report, context);
       },
     );
 
@@ -3803,8 +4018,10 @@ const T6_6_4 = defineProductTest({
         );
         // The preview inside a whole-root modifies-nothing compare: the
         // real run below then executes on the byte-identical pre-operation
-        // state (TEST-SPEC's "running the operation on a copy", H-4).
-        const report = await assertLeavesUnchanged(
+        // state (TEST-SPEC's "running the operation on a copy", H-4). Its
+        // human form runs inside it too, and is matched against the
+        // document once the whole plan is asserted below.
+        const { report, human } = await assertLeavesUnchanged(
           workspace.root,
           async () => runPreviewJson(product, workspace, arm.argv, context),
           `${context}: the preview modifies nothing (SPEC 6.6) — pinning ` +
@@ -3850,6 +4067,7 @@ const T6_6_4 = defineProductTest({
           );
         }
         assertPreviewPlanContent(report, tieBreakPlan(arm, idents), context);
+        assertHumanPreviewReport(human, report, context);
         await expectExit(
           product,
           workspace,
@@ -4198,7 +4416,7 @@ function assertDeltaContent(
 const T6_6_5 = defineProductTest({
   id: "T6.6-5",
   title:
-    "delta: after a build, a file-form move preview reports the derived-file delta both directions — under `generated` the destination's module, companion, and (emission enabled) Markdown paths, nothing being recorded there, and under `removed` the recorded pre-move module, companions, and Markdown the operation would leave no longer generated; a rename preview on the same workspace reports [] in both directions (regeneration rewrites recorded paths in place); the created-target move of T6.6-4(d) reports the new file's derived paths under `generated`; record-based, not presence-based: with graph data deleted (T13.3-2's operational definition) the same move preview's `generated` is the full post-move regeneration set and its `removed` [] — nothing being recorded, presence on disk deciding neither direction — and the preview still writes nothing: no refresh, graph data still absent afterward; lagging-record counterpart: with emission enabled in the configuration after the build and no rebuild, the same preview's `generated` is exactly the destination's module, companions, and Markdown together with every other discovered spec source's Markdown emit destination — the paths the current configuration generates that the stale record lacks — and its `removed` exactly the recorded pre-move module and companions, the preview writing nothing and the record left lagging (SPEC 6.6, 12.7, 13.1, 13.2, 13.3, 7.3, 12.1; H-3, H-4)",
+    "delta: after a build, a file-form move preview reports the derived-file delta both directions — under `generated` the destination's module, companion, and (emission enabled) Markdown paths, nothing being recorded there, and under `removed` the recorded pre-move module, companions, and Markdown the operation would leave no longer generated; a rename preview on the same workspace reports [] in both directions (regeneration rewrites recorded paths in place); the created-target move of T6.6-4(d) reports the new file's derived paths under `generated`; record-based, not presence-based: with graph data deleted (T13.3-2's operational definition) the same move preview's `generated` is the full post-move regeneration set and its `removed` [] — nothing being recorded, presence on disk deciding neither direction — and the preview still writes nothing: no refresh, graph data still absent afterward; lagging-record counterpart: with emission enabled in the configuration after the build and no rebuild, the same preview's `generated` is exactly the destination's module, companions, and Markdown together with every other discovered spec source's Markdown emit destination — the paths the current configuration generates that the stale record lacks — and its `removed` exactly the recorded pre-move module and companions, the preview writing nothing and the record left lagging; and at every preview's state the human preview exits 0 alike and carries the plan its JSON document reports — every mapping pair's identities, every file entry's path, every edit's class and range offsets, and every delta path in either direction (robust matching, H-3) (SPEC 6.6, 12.0, 12.7, 13.1, 13.2, 13.3, 7.3, 12.1; H-3, H-4)",
   run: async (product) => {
     // --- File-form move, rename, and the record-deleted arm: one
     // Markdown-emitting workspace (arm (c)'s sources) ---
@@ -4254,7 +4472,7 @@ const T6_6_5 = defineProductTest({
           workspace.root,
           async () => {
             const armContext = `${context} (record present)`;
-            const report = await runPreviewJson(
+            const { report, human } = await runPreviewJson(
               product,
               workspace,
               C4_MOVE_ARGV,
@@ -4265,6 +4483,7 @@ const T6_6_5 = defineProductTest({
               { generated: destinationDerived, removed: originDerived },
               armContext,
             );
+            assertHumanPreviewReport(human, report, armContext);
           },
           `${context} (record present): the preview modifies nothing ` +
             `(SPEC 6.6)`,
@@ -4278,7 +4497,7 @@ const T6_6_5 = defineProductTest({
           workspace.root,
           async () => {
             const renameContext = `${context}, rename \`${F5_RENAME_ARGV.join(" ")}\``;
-            const report = await runPreviewJson(
+            const { report, human } = await runPreviewJson(
               product,
               workspace,
               F5_RENAME_ARGV,
@@ -4289,6 +4508,7 @@ const T6_6_5 = defineProductTest({
               { generated: [], removed: [] },
               renameContext,
             );
+            assertHumanPreviewReport(human, report, renameContext);
           },
           `${context}, rename arm: the preview modifies nothing (SPEC 6.6)`,
         );
@@ -4313,7 +4533,7 @@ const T6_6_5 = defineProductTest({
         await assertLeavesUnchanged(
           workspace.root,
           async () => {
-            const report = await runPreviewJson(
+            const { report, human } = await runPreviewJson(
               product,
               workspace,
               C4_MOVE_ARGV,
@@ -4324,6 +4544,7 @@ const T6_6_5 = defineProductTest({
               { generated: fullRegenerationSet, removed: [] },
               deletedContext,
             );
+            assertHumanPreviewReport(human, report, deletedContext);
           },
           `${deletedContext}: the preview still writes nothing — no ` +
             `refresh, no record rebuild (SPEC 6.6, 13.3)`,
@@ -4382,7 +4603,7 @@ const T6_6_5 = defineProductTest({
         await assertLeavesUnchanged(
           workspace.root,
           async () => {
-            const report = await runPreviewJson(
+            const { report, human } = await runPreviewJson(
               product,
               workspace,
               D4_MOVE_ARGV,
@@ -4393,6 +4614,7 @@ const T6_6_5 = defineProductTest({
               { generated: madeDerived, removed: [] },
               context,
             );
+            assertHumanPreviewReport(human, report, context);
           },
           `${context}: the preview modifies nothing (SPEC 6.6)`,
         );
@@ -4472,13 +4694,14 @@ const T6_6_5 = defineProductTest({
         await assertLeavesUnchanged(
           workspace.root,
           async () => {
-            const report = await runPreviewJson(
+            const { report, human } = await runPreviewJson(
               product,
               workspace,
               C4_MOVE_ARGV,
               context,
             );
             assertDeltaContent(report, { generated, removed }, context);
+            assertHumanPreviewReport(human, report, context);
           },
           `${context}: the preview writes nothing — the record stays ` +
             `lagging, never refreshed by a preview (SPEC 6.6, 13.3)`,
@@ -4571,7 +4794,7 @@ function requirePreviewPlan(
 const T6_6_6 = defineProductTest({
   id: "T6.6-6",
   title:
-    "unreadable record: with the product-written graph data corrupted shape-blind (garbage over T13.3-2's operational path set; H-3 record-staging adapter), a move `--preview` whose plan is otherwise valid exits 1 emitting the full preview — `mapping` and `files` complete: the exact journaled mapping, the files deep-equal to the intact-record run on the identical sources — with `delta` explicitly unavailable as one datum, never read as an empty record, and the condition-23 finding (`unreadable-record`, concerned path the graph-data area `.xspec`, no path inside it named: locations []) in `findings`; the real operation on the same state is not refused — it proceeds, its applied mapping the previewed mapping, its finishing regeneration replacing the corrupt record (`check` clean afterward, T12.2-2) — and a refused preview staged on the same corrupt-record state (an identity-unchanged rename) reports the refusal finding alone — `refused-identity-unchanged`, its `identities` exactly the unchanged identity `specs/Origin.mdx#org` in 1.5's form over the rename's file — with `mapping`/`files`/`delta` null, never a condition-23 finding (SPEC 6.6, 6.4, 6.5, 14, 14.23, 14.10, 1.5, 11.6, 12.0, 12.7, 13.3; H-3, H-4)",
+    "unreadable record: with the product-written graph data corrupted shape-blind (garbage over T13.3-2's operational path set; H-3 record-staging adapter), a move `--preview` whose plan is otherwise valid exits 1 emitting the full preview — `mapping` and `files` complete: the exact journaled mapping, the files deep-equal to the intact-record run on the identical sources — with `delta` explicitly unavailable as one datum, never read as an empty record, and the condition-23 finding (`unreadable-record`, concerned path the graph-data area `.xspec`, no path inside it named: locations []) in `findings`; the real operation on the same state is not refused — it proceeds, its applied mapping the previewed mapping, its finishing regeneration replacing the corrupt record (`check` clean afterward, T12.2-2) — and a refused preview staged on the same corrupt-record state (an identity-unchanged rename) reports the refusal finding alone — `refused-identity-unchanged`, its `identities` exactly the unchanged identity `specs/Origin.mdx#org` in 1.5's form over the rename's file — with `mapping`/`files`/`delta` null, never a condition-23 finding; and at each full preview's state its human form — the intact-record run's exiting 0, the corrupt-record run's exiting 1 alike — carries the plan its JSON document reports: every mapping pair's identities, every file entry's path, every edit's class and range offsets, and every delta path, at the corrupt record `unavailable` in their place (robust matching, H-3) (SPEC 6.6, 6.4, 6.5, 14, 14.23, 14.10, 1.5, 11.6, 12.0, 12.7, 13.3; H-3, H-4)",
   run: async (product) => {
     await withWorkspace(
       SPECS_MD_CONFIG,
@@ -4594,19 +4817,21 @@ const T6_6_6 = defineProductTest({
         // Intact-record reference run of the same preview: exit 0, findings
         // [], delta a plain value — pinning the plan the corrupt-state run
         // must still emit in full. Wrapped in its own modifies-nothing
-        // compare, so the two runs' inputs differ in the record bytes alone.
+        // compare, so the two runs' inputs differ in the record bytes alone;
+        // its human form runs inside it too (module header).
         const intactContext = `${context} (record intact)`;
-        const intactReport = await assertLeavesUnchanged(
-          workspace.root,
-          async () =>
-            await runPreviewJson(
-              product,
-              workspace,
-              R6_MOVE_ARGV,
-              intactContext,
-            ),
-          `${intactContext}: the preview modifies nothing (SPEC 6.6)`,
-        );
+        const { report: intactReport, human: intactHuman } =
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () =>
+              await runPreviewJson(
+                product,
+                workspace,
+                R6_MOVE_ARGV,
+                intactContext,
+              ),
+            `${intactContext}: the preview modifies nothing (SPEC 6.6)`,
+          );
         assertSameJson(
           intactReport.findings,
           [],
@@ -4635,6 +4860,7 @@ const T6_6_6 = defineProductTest({
             `and the target file (SPEC 6.5, 6.6, 12.7), so the ` +
             `completeness equality on the corrupt-record run has content`,
         );
+        assertHumanPreviewReport(intactHuman, intactReport, intactContext);
 
         // Corrupt the product-written record shape-blind (TEST-SPEC
         // T6.6-6; H-3 adapter — garbage over T13.3-2's operational path
@@ -4671,6 +4897,20 @@ const T6_6_6 = defineProductTest({
                   `stdout (SPEC 12.0)`,
               ),
               corruptContext,
+            );
+            // Directly, at the same state: the human preview (module
+            // header), matched against the document once its assertions
+            // below have run.
+            const humanArgv = [...R6_MOVE_ARGV, "--preview"];
+            const human = await expectExit(
+              product,
+              workspace,
+              humanArgv,
+              1,
+              `${corruptContext}: \`${humanArgv.join(" ")}\` (human report) ` +
+                `— the same exit code as the \`--json\` preview at this ` +
+                `state: 1, the full answer still emitted beside its finding ` +
+                `and explicitly-unavailable data (SPEC 14.23, 12.0)`,
             );
             assertConditionCounts(
               report.findings,
@@ -4722,6 +4962,7 @@ const T6_6_6 = defineProductTest({
                   `${JSON.stringify(plan.delta)}`,
               );
             }
+            assertHumanPreviewReport(human, report, corruptContext);
 
             // (2) A refused preview staged on the same corrupt-record
             // state: the identity-unchanged rename reports its refusal
