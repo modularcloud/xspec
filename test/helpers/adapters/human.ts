@@ -37,7 +37,11 @@
 //   (`assertReportMentions`' `blank` option, `blankReportData`: every
 //   occurrence one space, longest datum first), so a digit inside an id, an
 //   identity, a path, a hash, a name, or a text line never stands in for a
-//   count or an offset;
+//   count or an offset — save a datum that is itself a whole number (an item
+//   id `4`), which a caller leaves unblanked: substring blanking cannot tell
+//   it from a count or an offset of its value, so blanking it would erase
+//   those wherever the report prints them, and the two may then stand in for
+//   each other;
 // - SPEC-named tokens (`specTokenMention`, the closed `SPEC_NAMED_TOKENS`):
 //   case-insensitive, the token's hyphen-joined words separated by any one
 //   character that is neither letter nor digit, or by nothing (`no-change`
@@ -130,9 +134,10 @@ export interface MentionOptions {
   /**
    * Literal data blanked out of the report before any mention is matched
    * (`blankReportData`: every occurrence one space, longest datum first) —
-   * for whole numbers, every datum of the document that holds a digit (the
-   * module header). Every mention of the call is matched in the blanked
-   * text, so a call naming a blanked datum's own mention never finds it.
+   * for whole numbers, every datum of the document that holds a digit, save
+   * one that is itself a whole number (the module header). Every mention of
+   * the call is matched in the blanked text, so a call naming a blanked
+   * datum's own mention never finds it.
    */
   readonly blank?: readonly string[];
 }

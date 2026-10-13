@@ -90,6 +90,28 @@
 //   "corrupt", and hold digits, so those mentions do not tell the session's
 //   own entry from the finding — which session is corrupt is the JSON
 //   listing's assertion too.
+// - T10.7-6's human form (T12.0-1's information parity; SPEC 12.0): after
+//   each of its four stages' `--json` status reads and their assertions, at
+//   the same state, `review status s` without `--json` exits 0 as well, and
+//   its report mentions what the decoded report carries (a product-to-itself
+//   comparison, H-4; `assertHumanSessionStatus`, through
+//   helpers/adapters/human.ts): every row's id (an item-id boundary, so
+//   `item-1` never counts inside `item-10`) and scope (an identity boundary,
+//   so the root's `specs/T.mdx` never counts inside `specs/T.mdx#p`), its
+//   kind and status (SPEC-named tokens), `blocked` wherever some row is
+//   blocked (10.3), every status with a nonzero total, and each nonzero total
+//   (a whole number, matched with the digit-holding ids and scopes blanked
+//   out: item ids are the product's own and may hold digits). A datum that
+//   is itself a whole number — an id `4` — stays unblanked here, as in
+//   T10.7-5's count check (`digitHoldingData`): substring blanking cannot
+//   tell it from a total of its value, so blanking it would fail a
+//   conforming report that prints both; such an id and a total of its value
+//   may then stand in for each other. Limits: no mention is associated
+//   with another, so which row has which id, scope, kind, and status, which
+//   row is blocked (a report may spell the token for unblocked rows too),
+//   and which total labels which status stay with the JSON assertions — a
+//   status token found on a row also satisfies a total's, and a report may
+//   name every status beside a zero count.
 // - Workspaces are git-less wherever no baseline is involved (T10.7-2,
 //   T10.7-4, T10.7-6): coverage and audit sessions require no git.
 // - Every fixture edit is followed by an explicit `build` before any read,
@@ -134,6 +156,7 @@ import {
   decodeNodeReport,
   decodeSessionListReport,
   decodeSessionStatusReport,
+  identityMention,
   nameMention,
   numberMention,
   specTokenMention,
@@ -461,6 +484,19 @@ function assertStoredCounts(
 }
 
 /**
+ * The data a human-form check blanks out of a report before matching its
+ * whole numbers (helpers/adapters/human.ts' `blank` option): each datum that
+ * holds a digit, save one that is itself a whole number — substring blanking
+ * cannot tell such a datum (an item id `4`, which SPEC 10.2 leaves to the
+ * product) from a count of its value, so blanking it would erase that count
+ * wherever the report prints it and fail a conforming report (the module
+ * header).
+ */
+function digitHoldingData(data: readonly string[]): readonly string[] {
+  return data.filter((datum) => /[0-9]/.test(datum) && !/^[0-9]+$/.test(datum));
+}
+
+/**
  * The human `review list` at the state of a decoded `review list --json`
  * listing, after that listing's own assertions — T12.0-1's information
  * parity (SPEC 12.0: the JSON form carries the same information as the
@@ -525,10 +561,82 @@ async function assertHumanSessionList(
       `${label}: each nonzero stored count, a whole number, matched with ` +
         `the listing's digit-holding session names blanked out (SPEC 10.7, ` +
         `12.0)`,
+      { blank: digitHoldingData(listing.sessions.map((entry) => entry.name)) },
+    );
+  }
+}
+
+/**
+ * The human `review status <name>` at the state of a decoded `review status
+ * <name> --json` report, after that report's own assertions — T12.0-1's
+ * information parity (SPEC 12.0: the JSON form carries the same information
+ * as the human report; the module header): the same argv without `--json`
+ * exits 0, and its report mentions, for every row of the decoded report, the
+ * item's id (an item-id boundary), its scope (an identity boundary), and its
+ * kind and status (SPEC-named tokens); the token `blocked` wherever some row
+ * is blocked (SPEC 10.3); and every status with a nonzero total (a
+ * SPEC-named token) and each nonzero total (a whole number, matched with the
+ * digit-holding ids and scopes — and the session's name, should it hold a
+ * digit — blanked out, since item ids are the product's own and may hold
+ * digits; `digitHoldingData` leaves a datum that is itself a whole number
+ * unblanked). Robust matching (H-3): presence, never wording, and no mention
+ * associated with another. A report with no rows and no nonzero total
+ * asserts the exit code alone.
+ */
+async function assertHumanSessionStatus(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  report: SessionStatusReport,
+  context: string,
+): Promise<void> {
+  const label = `${context} \`review status ${name}\` (human report)`;
+  const human = await expectExit(
+    product,
+    workspace,
+    ["review", "status", name],
+    0,
+    `${label} — the same exit code as the \`--json\` report at this state ` +
+      `(SPEC 10.7, 12.0)`,
+  );
+  const data: Mention[] = [];
+  const tokens = new Set<string>();
+  for (const row of report.items) {
+    data.push(nameMention(row.id), identityMention(row.scope));
+    tokens.add(row.kind);
+    tokens.add(row.status);
+    if (row.blocked) tokens.add("blocked");
+  }
+  const totals = new Set<number>();
+  for (const status of ITEM_STATUSES) {
+    const total = report.totals[status] ?? 0;
+    if (total > 0) {
+      tokens.add(status);
+      totals.add(total);
+    }
+  }
+  const mentions = [...data, ...[...tokens].map(specTokenMention)];
+  if (mentions.length > 0) {
+    assertReportMentions(
+      human,
+      mentions,
+      `${label}: every row's id, scope, kind, and status, \`blocked\` where ` +
+        `a row is blocked, and every status with a nonzero total — the ` +
+        `information of the JSON report (SPEC 10.3, 10.7, 12.0)`,
+    );
+  }
+  if (totals.size > 0) {
+    assertReportMentions(
+      human,
+      [...totals].map(numberMention),
+      `${label}: each nonzero total by status, a whole number, matched with ` +
+        `the digit-holding ids, scopes, and session name blanked out, save ` +
+        `a datum that is itself a whole number (SPEC 10.7, 12.0)`,
       {
-        blank: listing.sessions
-          .map((entry) => entry.name)
-          .filter((name) => /[0-9]/.test(name)),
+        blank: digitHoldingData([
+          name,
+          ...report.items.flatMap((row) => [row.id, row.scope]),
+        ]),
       },
     );
   }
@@ -2149,7 +2257,7 @@ const T10_7_6_T_PA_EDITED = stagedMdx(
 const T10_7_6 = defineProductTest({
   id: "T10.7-6",
   title:
-    "`review status`: items are reported in item order, each with id, kind, scope, status, and blocked state, plus totals by status — asserted through an audit session's lifecycle: all-unresolved with the parent items blocked; after resolving the leaves the parent unblocks; after resolving the parent `updated` (a re-derivation that changes nothing) the root unblocks and every id survives; and after an edit under two resolved items' scopes the read-time invalidation is applied to rows and totals alike — the stale resolutions read `invalidated` (their stored statuses no longer appear in the totals), the invalidated blocker re-blocks its dependents, and the untouched resolved item keeps its status (SPEC 10.3, 10.4, 10.6, 10.7)",
+    "`review status`: items are reported in item order, each with id, kind, scope, status, and blocked state, plus totals by status — asserted through an audit session's lifecycle: all-unresolved with the parent items blocked; after resolving the leaves the parent unblocks; after resolving the parent `updated` (a re-derivation that changes nothing) the root unblocks and every id survives; and after an edit under two resolved items' scopes the read-time invalidation is applied to rows and totals alike — the stale resolutions read `invalidated` (their stored statuses no longer appear in the totals), the invalidated blocker re-blocks its dependents, and the untouched resolved item keeps its status; and at every stage the human `review status` at the same state exits 0 and carries the report's information — every row's id, scope, kind, and status, `blocked` where a row is blocked, and each status with a nonzero total and that total (robust matching, H-3) (SPEC 10.3, 10.4, 10.6, 10.7, 12.0)",
   timeoutMs: 300_000,
   run: async (product) => {
     await withWorkspace(
@@ -2214,6 +2322,16 @@ const T10_7_6 = defineProductTest({
           },
           `${prefix} stage A`,
         );
+        // The human form at the same state carries the report's
+        // information — rows, blocked state, and totals — at every stage
+        // (T12.0-1, SPEC 12.0; the module header).
+        await assertHumanSessionStatus(
+          product,
+          workspace,
+          "s",
+          fresh,
+          `${prefix} stage A`,
+        );
 
         // Stage B — the leaves resolve (no-change and skipped are both
         // resolved statuses, SPEC 10.3): p unblocks, the root stays blocked
@@ -2257,6 +2375,13 @@ const T10_7_6 = defineProductTest({
           },
           `${prefix} stage B`,
         );
+        await assertHumanSessionStatus(
+          product,
+          workspace,
+          "s",
+          stageB,
+          `${prefix} stage B`,
+        );
 
         // Stage C — p resolves `updated`: the re-derivation over the
         // unchanged workspace changes nothing, every id survives, and the
@@ -2291,6 +2416,13 @@ const T10_7_6 = defineProductTest({
             "no-change": 1,
             skipped: 1,
           },
+          `${prefix} stage C`,
+        );
+        await assertHumanSessionStatus(
+          product,
+          workspace,
+          "s",
+          stageC,
           `${prefix} stage C`,
         );
 
@@ -2362,6 +2494,13 @@ const T10_7_6 = defineProductTest({
           },
           `${prefix} stage D (totals with read-time invalidation applied — ` +
             `the stored updated and no-change count under invalidated)`,
+        );
+        await assertHumanSessionStatus(
+          product,
+          workspace,
+          "s",
+          stageD,
+          `${prefix} stage D`,
         );
       },
     );
