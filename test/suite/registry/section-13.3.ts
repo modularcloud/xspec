@@ -59,6 +59,10 @@
 //   read exits 0, SPEC 12.0) with the single stdout JSON document decodable
 //   as the findings report (H-3) — the same report shape a failing `build`
 //   emits ("report the validation errors ... like a failed build", 13.3).
+//   A gated invocation's human form (the human-form note below) is asked
+//   its exit code, 1, and the findings' information, never that its report
+//   hold nothing else — robust matching asks presence (H-3) — so its
+//   "answers nothing" rests on the exit code alone.
 // - T13.3-3 probes the six refreshing reads with the exact staged findings
 //   multiset (one 14.1, naming the broken file): a failed refresh reports
 //   build validation errors, and `build` over these sources yields exactly
@@ -110,7 +114,8 @@
 //   echoing the garbage text or citing line/entry 2 — a journal condition
 //   carries the concerned journal path and no in-source location (SPEC 14,
 //   12.7), so each gated read's finding is asserted with that path and
-//   empty `locations`, the line named in the message alone. The
+//   empty `locations`, the line named in the message alone (and, in human
+//   form, anywhere in the report: the human-form note below). The
 //   never-gated contrast (`occurrences`, `view`, `at` answering
 //   per 11.2, `inventory` answering whatever the sources' validity, SPEC
 //   11.6) is asserted at this module's identity/membership altitude, each
@@ -119,6 +124,48 @@
 //   domain files — so those answers are complete and finding-free at exit
 //   0, whatever journal or write-path state the workspace holds (SPEC
 //   11.2), and nothing is modified.
+// - T13.3-3's human form (T12.0-1's information parity; SPEC 12.0: the JSON
+//   form carries the same information as the human report — here the
+//   gate's report, exactly the findings a `build` would report, 13.3, each
+//   with its stable code and the location, path, and identities it
+//   concerns, 14): after each gated invocation's JSON assertions, at its
+//   state and inside its modifies-nothing compare, the same argv without
+//   `--json` exits 1 as well, and its report mentions what the decoded
+//   findings carry (a product-to-itself comparison, H-4;
+//   `assertHumanGateReport`, through the shared human-findings check,
+//   `assertHumanFindingsMentions` in human-findings.ts, and
+//   helpers/adapters/human.ts): every location's file, every concerned
+//   path, and every identity (an identity-or-path boundary, so `mdout`
+//   never counts inside `mdout/specs/A.md`); then, in a separate call,
+//   every finding's stable code (`codeMention`: case-insensitive, its words
+//   joined by one character that is neither letter nor digit or by
+//   nothing, never where it ends a longer code), matched with those data
+//   blanked out; then every location's start and end (whole numbers, SPEC
+//   1.7, matched with the digit-holding data among those blanked out). It
+//   runs at the invalid-sources workspace's six reads but `query` and at
+//   its five mutating `review` subcommands — each mutating subcommand's
+//   human run inside the same compare as its JSON run, so it too creates
+//   no session, records no status, and decomposes nothing — and at every
+//   whole-gate read but `query`; in the garbage-journal staging each human
+//   report must also name the garbage line, as the JSON message must (one
+//   predicate over both texts, `namesGarbageLine`). `query nodes` takes no
+//   human run: `query` is a JSON-only surface (SPEC 11, 12.0), its bare
+//   form the very document the probe decodes; nor does the lenient `check`
+//   probe (`check`'s human findings are T14-1's). Limits: no mention is
+//   associated with another, so which code, location, path, and identity
+//   belong to which finding stay with the JSON assertions — a datum, a
+//   code, or the line naming counts wherever the report prints it; a
+//   message is free text, never blanked and never compared, so a gate
+//   finding's message may spell its code's words and name its concerned
+//   path, and those count there (the built product's do: `missing ID`,
+//   `journal error: the entry on line 2 of .xspec/journal …`, `obstructed
+//   write path: … component mdout …`), and a whole number it spells may
+//   stand in for an offset of its value — the 14.1 location's `0` and `3`
+//   for a citation's digits (the built product's 14.1 message cites `SPEC
+//   1.3`, whose `3` stands in for the location's end); and no datum here
+//   holds a character a human report may quote or escape, nor does a path
+//   arise in the marked byte form (the staged paths are ASCII), so every
+//   datum is asked.
 // - T13.3-2's record-discipline arm (record corrupted shape-blind, T6.6-6's
 //   staging via the H-3 record-staging adapter): SPEC 13.3 pins the record —
 //   the recorded derived-file paths — as neither read, repaired, nor
@@ -185,9 +232,10 @@ import {
   snapshotDirectory,
   snapshotKeyBytes,
 } from "../../helpers/snapshot.js";
-import type { ProductBinding } from "../../helpers/subprocess.js";
+import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import { assertHumanFindingsMentions } from "./human-findings.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
@@ -2306,16 +2354,65 @@ function journalLineCount(bytes: Uint8Array): number {
 }
 
 /**
- * Does a 14.13 finding's message name the garbage line (line 2)? T6.1-3's
- * H-4 operationalization: the message echoing the garbage line's text or
- * citing line/entry 2. A journal condition carries the journal path it
- * concerns and no in-source location (SPEC 14, 12.7) — the journal
- * whole-gate arm asserts both — so the line is named in the message alone.
+ * Does a text name the garbage line (line 2)? T6.1-3's H-4
+ * operationalization: the text echoing the garbage line's text, citing
+ * line/entry 2, or spelling `journal:2`. The journal whole-gate arm applies
+ * it to two texts: each gated read's 14.13 finding's JSON message — a
+ * journal condition carries the journal path it concerns and no in-source
+ * location (SPEC 14, 12.7), the arm asserting both, so the line is named in
+ * the message alone — and that read's human report, which carries the same
+ * information (T12.0-1; SPEC 12.0; the module header's T13.3-3 human-form
+ * note).
  */
-function findingNamesGarbageLine(finding: Finding): boolean {
-  if (finding.message.includes(GATE_GARBAGE_LINE)) return true;
-  if (/\b(?:line|entry)\s*#?\s*2\b/i.test(finding.message)) return true;
-  return finding.message.includes("journal:2");
+function namesGarbageLine(text: string): boolean {
+  if (text.includes(GATE_GARBAGE_LINE)) return true;
+  if (/\b(?:line|entry)\s*#?\s*2\b/i.test(text)) return true;
+  return text.includes("journal:2");
+}
+
+/**
+ * A gated invocation's human form, run after its `--json` run's own
+ * assertions, at that run's state and inside the caller's modifies-nothing
+ * compare — T12.0-1's information parity (SPEC 12.0: the JSON form carries
+ * the same information as the human report; the module header's T13.3-3
+ * human-form note): the same argv without `--json` exits 1 as well, the
+ * gate reporting the findings a `build` would report without answering
+ * (SPEC 13.3), and its report mentions what the decoded findings carry —
+ * the shared human-findings check (`assertHumanFindingsMentions`,
+ * human-findings.ts): every location's file, every concerned path, and
+ * every identity (an identity-or-path boundary); then, in a separate call,
+ * every stable code (`codeMention`, matched with those data blanked out);
+ * then every location's start and end (whole numbers, SPEC 1.7, matched
+ * with the digit-holding data among those blanked out) — a message never
+ * blanked and never compared (H-3). `verifyHuman`, where given, asks the
+ * report more (the garbage-journal staging: the line named, as its JSON
+ * message names it). A `query` probe takes no human run: `query` is a
+ * JSON-only surface (SPEC 11, 12.0), its bare form being the very document
+ * the probe decodes. Robust matching (H-3): presence, never wording, and no
+ * mention associated with another.
+ */
+async function assertHumanGateReport(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  findings: readonly Finding[],
+  context: string,
+  verifyHuman?: (human: RunResult, context: string) => void,
+): Promise<void> {
+  if (argv[0] === "query") return;
+  const humanArgv = argv.filter((token) => token !== "--json");
+  const label = `${context} — its human form \`${humanArgv.join(" ")}\``;
+  const human = await expectExit(
+    product,
+    workspace,
+    humanArgv,
+    1,
+    `${label} — the same exit code as the \`--json\` run at this state: 1, ` +
+      `the gate reporting the findings a \`build\` would report without ` +
+      `answering (SPEC 13.3, 12.0)`,
+  );
+  assertHumanFindingsMentions(human, findings, label);
+  verifyHuman?.(human, label);
 }
 
 /**
@@ -2326,6 +2423,9 @@ function findingNamesGarbageLine(finding: Finding): boolean {
  * obstructed-write staging alone, against a commit taken before the
  * obstruction was staged; the journal-error staging supplies none, `impact`
  * being absent from it by necessity (TEST-SPEC T13.3-3; module header).
+ * Each is a `--json` run but `query nodes` (a JSON-only surface, SPEC 11),
+ * so `probeWholeGate` runs each other's human form as the same argv
+ * without `--json`.
  */
 function gatedReadInvocations(
   alpha: string,
@@ -2357,8 +2457,12 @@ function gatedReadInvocations(
  * One whole-gate probe (SPEC 13.3): the gated read reports exactly the
  * staged gate finding, exits 1, answers nothing (stdout is the findings
  * report, like a failed build — the module's T13.3-3 operationalization),
- * and modifies nothing: journal, sessions, derived files, graph data, and
- * `.git/` byte-identical around the invocation.
+ * and its human form — the same argv without `--json`, run after those
+ * assertions at the same state (`assertHumanGateReport`; none for `query`,
+ * a JSON-only surface) — exits 1 as well and mentions what the decoded
+ * findings carry, `verifyHuman` asking it more where given; and the two
+ * runs modify nothing: journal, sessions, derived files, graph data, and
+ * `.git/` byte-identical around them.
  */
 async function probeWholeGate(
   product: ProductBinding,
@@ -2367,6 +2471,7 @@ async function probeWholeGate(
   counts: Readonly<Record<string, number>>,
   verifyFinding: (finding: Finding, context: string) => void,
   context: string,
+  verifyHuman?: (human: RunResult, context: string) => void,
 ): Promise<void> {
   await assertLeavesUnchanged(
     workspace.root,
@@ -2390,9 +2495,17 @@ async function probeWholeGate(
           `failed build (SPEC 13.3, 14)`,
       );
       verifyFinding(findings[0] as Finding, context);
+      await assertHumanGateReport(
+        product,
+        workspace,
+        argv,
+        findings,
+        context,
+        verifyHuman,
+      );
     },
     `${context} — journal, sessions, derived files, and graph data must be ` +
-      `byte-identical around the gated read (SPEC 13.3)`,
+      `byte-identical around the gated read and its human form (SPEC 13.3)`,
   );
 }
 
@@ -2514,7 +2627,7 @@ async function assertNeverGatedAnswers(
 const T13_3_3 = defineProductTest({
   id: "T13.3-3",
   title:
-    "with invalid sources, each read command and each mutating review subcommand (create under --base/--strategy audit/--coverage, resolve, split) reports the validation errors, exits 1, answers nothing, and modifies nothing — no session created, and session file, journal, derived files, and graph data byte-identical; the gate is over every finding a `build` would report: with a garbage journal line staged, ids, show, coverage, review status, and query each report exactly the journal error (14.13) naming the line — `impact` absent from that staging by necessity, a garbage line meeting baseline resolution first (exit 2, T6.3-4) — and with an obstructed write path staged, the same five and `impact --base` against a commit taken before the obstruction (its baseline resolving) each report exactly the refused write (14.22) naming its offending component — exit 1, answer nothing, and modify nothing, while on the same workspaces occurrences, view, and at answer per file finding-free at exit 0 and inventory answers, none of them modifying anything (SPEC 13.3, 11.2, 11.6, 12.0, 14)",
+    "with invalid sources, each read command and each mutating review subcommand (create under --base/--strategy audit/--coverage, resolve, split) reports the validation errors, exits 1, answers nothing, and modifies nothing — no session created, and session file, journal, derived files, and graph data byte-identical; the gate is over every finding a `build` would report: with a garbage journal line staged, ids, show, coverage, review status, and query each report exactly the journal error (14.13) naming the line — `impact` absent from that staging by necessity, a garbage line meeting baseline resolution first (exit 2, T6.3-4) — and with an obstructed write path staged, the same five and `impact --base` against a commit taken before the obstruction (its baseline resolving) each report exactly the refused write (14.22) naming its offending component — exit 1, answer nothing, and modify nothing, while on the same workspaces occurrences, view, and at answer per file finding-free at exit 0 and inventory answers, none of them modifying anything; and at each gated `--json` run's state but `query`'s (a JSON-only surface) the human form — the same argv without `--json`, a mutating review subcommand's inside the same modifies-nothing compare — exits 1 alike and carries every finding's stable code, its location — its file and its range's start and end — its concerned path, and its identities, and in the garbage-journal staging names the line as the JSON message does (robust matching, H-3) (SPEC 13.3, 11.2, 11.6, 12.0, 14, 1.7)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -2596,9 +2709,14 @@ const T13_3_3 = defineProductTest({
 
         /**
          * Run one probe: exit 1, stdout is the findings report carrying
-         * exactly the staged validation error (naming specs/B.mdx), and the
-         * whole workspace — session file, journal, derived files, graph
-         * data, `.git/` — is byte-identical around the command.
+         * exactly the staged validation error (naming specs/B.mdx); then,
+         * at the same state, its human form — the same argv without
+         * `--json` (`assertHumanGateReport`; none for `query`, a JSON-only
+         * surface) — exits 1 as well and mentions what the decoded
+         * findings carry; and the whole workspace — session file, journal,
+         * derived files, graph data, `.git/` — is byte-identical around the
+         * two runs (a mutating `review` subcommand's human form included:
+         * no session created, no status recorded, no decomposition).
          */
         const probeFailedRefresh = async (
           argv: readonly string[],
@@ -2631,6 +2749,13 @@ const T13_3_3 = defineProductTest({
                 { file: "specs/B.mdx" },
                 `${context} — the validation error identifies the broken ` +
                   `source (SPEC 14)`,
+              );
+              await assertHumanGateReport(
+                product,
+                workspace,
+                argv,
+                findings,
+                context,
               );
             },
             context,
@@ -2815,7 +2940,10 @@ const T13_3_3 = defineProductTest({
         // Each gated read's one 14.13 finding: the concerned journal path,
         // the garbage line named in the message, and empty `locations` — a
         // journal condition has no in-source location (SPEC 14, 12.7), so a
-        // location never stands in for the message's line naming.
+        // location never stands in for the message's line naming. Its
+        // human form names the line too, as the JSON message must (the
+        // same predicate, `namesGarbageLine`; the module header's T13.3-3
+        // human-form note).
         for (const probe of gatedReadInvocations(ALPHA)) {
           await probeWholeGate(
             product,
@@ -2829,7 +2957,7 @@ const T13_3_3 = defineProductTest({
                 `${findingContext} — a journal condition carries the ` +
                   `journal path it concerns (SPEC 14, 12.7)`,
               );
-              if (!findingNamesGarbageLine(finding)) {
+              if (!namesGarbageLine(finding.message)) {
                 fail(
                   `${findingContext}: the 14.13 finding's message must ` +
                     `name the malformed line — the garbage on line 2 (SPEC ` +
@@ -2848,6 +2976,24 @@ const T13_3_3 = defineProductTest({
               );
             },
             `${context} ${probe.what}`,
+            (human, humanContext) => {
+              if (!namesGarbageLine(human.stdout)) {
+                fail(
+                  `${humanContext}: the human report must name the ` +
+                    `malformed line as the 14.13 finding's JSON message ` +
+                    `does — the garbage on line 2 (SPEC 14.13 "naming the ` +
+                    `lines"; 12.0: the JSON form carries the same ` +
+                    `information as the human report): the garbage line's ` +
+                    `text or a line/entry-2 citation, anywhere in the ` +
+                    `report (robust matching, H-3); got stdout of ` +
+                    `${human.commandLine}: ` +
+                    `${JSON.stringify(human.stdout.slice(0, 2048))}` +
+                    (human.stdout.length > 2048
+                      ? `… (${String(human.stdout.length)} chars total)`
+                      : ""),
+                );
+              }
+            },
           );
         }
 

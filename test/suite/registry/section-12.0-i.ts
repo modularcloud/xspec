@@ -37,12 +37,16 @@
 //   information the JSON form carries there (robust matching, H-3;
 //   helpers/adapters/human.ts): `coverage` in T8.2-1; `ids` and `show` in
 //   T12.3-1 and T12.4-1; `review list`, `status`, `next`, and `show` in
-//   T10.7-5, T10.7-6, T10.7-7, T10.7-8, and T10.7-12; the `build` and
-//   `check` findings in T14-1; `impact` in the T9 tests (T9-1, T9.1-1,
-//   T9.2-1 through T9.2-5, T9.3-1 through T9.3-3); a performed `rename` and
-//   `move` in T6.4-1 and T6.5-1; and the `rename`/`move` previews in
-//   T6.6-4, T6.6-5, and T6.6-6. The JSON-only surfaces' parity is T12.0-1's
-//   own (the next bullet).
+//   T10.7-5, T10.7-6, T10.7-7, T10.7-8, and T10.7-12; the findings reports
+//   — `build`'s and `check`'s in T14-1, a refused `rename`'s and `move`'s
+//   in T14-7, and, on a failing workspace, the gate reports of the gated
+//   reads and of the mutating `review` subcommands in T13.3-3 — each asking
+//   every finding's stable code, locations, concerned path, and identities
+//   (the shared human-findings check, human-findings.ts); `impact` in the
+//   T9 tests (T9-1, T9.1-1, T9.2-1 through T9.2-5, T9.3-1 through T9.3-3);
+//   a performed `rename` and `move` in T6.4-1 and T6.5-1; and the
+//   `rename`/`move` previews in T6.6-4, T6.6-5, and T6.6-6. The JSON-only
+//   surfaces' parity is T12.0-1's own (the next bullet).
 // - T12.0-1's JSON-only parity arms: the JSON-only surfaces of 10.7, 11, and
 //   12.6 — review export; the query subcommands, occurrences, view, at, and
 //   inventory; version — emit the same single document with the flag as
