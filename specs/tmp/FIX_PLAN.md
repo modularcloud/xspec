@@ -1,0 +1,346 @@
+# FIX_PLAN — Phase 9 (test harness), 13.5 re-descent, determination at 43c9a5e
+
+Written 2026-10-13 at 43c9a5e (branch `claude/xspec-ui-apis-4df8fa`, standing in for `patch/external-ui-apis`). It plans from the compliance determination at 43c9a5e — the first since the d0c8039 plan's tasks ran — which was not clean:
+- A (TEST-SPEC's T1–T6 tests): compliant;
+- B (T7 onward): 4 gaps, cited here as RB-1 … RB-4 (reviewer B's G1 … G4) — RB-1 is Task 1, RB-2 Task 2, RB-3 Task 3, RB-4 Tasks 4–7;
+- C (everything outside the T-numbered tests): compliant;
+- D (CERTIFICATIONS.md): compliant;
+- V (VERIFY): green.
+
+Reviewer B's report is saved verbatim in the scratchpad `/tmp/claude-0/-home-user-xspec/08a79bea-e066-52cf-ac19-1be1615496b4/scratchpad/` (`<scratchpad>` below) as `p9j_43c/report_B.txt`. Read it when a task's text leaves a detail open, but take every exact spelling from the spec documents or the harness code, never from a report. Where this plan departs from a reviewer's proposed fix, the task says so and why.
+
+Governing IP: `specs/patches/0001-external-ui-apis.md` (Stage: Tests Specified); no task changes its stage. No Bug Report applies. No problems file exists. The specs have not moved since the previous plan was written: SPEC.md as of 7f9ac70, TEST-SPEC.md as of e8d1140, CERTIFICATIONS.md as of a3196a1. The Developer's settled choice of 13.5's reach (option B: every user and environment on one machine; the lock directory `.xspec/lock` in the workspace) is not reopened by any task.
+
+The previous plan (written at d0c8039, deleted at 43c9a5e) is `git show 43c9a5e^:specs/tmp/FIX_PLAN.md`; its Order section records what each of its tasks did — its Tasks 2–10 built the human-report parity checks this plan extends, and its conventions (the "Human-report parity conventions" paragraph) still bind. The plans before it are `git show d0c8039^:specs/tmp/FIX_PLAN.md`, `git show f50cf9f^:specs/tmp/FIX_PLAN.md`, `git show 1418ab9^:specs/tmp/FIX_PLAN.md`, `git show a126add^:specs/tmp/FIX_PLAN.md`, and `git show 9583e3b^:specs/tmp/FIX_PLAN.md`.
+
+## Preamble — read before any task
+
+**Phase goal and scope guards (Phase 9).** The harness must adhere to `specs/TEST-SPEC.md` and `specs/CERTIFICATIONS.md`. Every harness self-test and every certification passes: each certified test passes against its conformer and fails against each of its violators exactly as the violator's entry states. Product tests may fail, but only as diagnosed assertion failures (H-8): never a harness error, crash, hang, or false pass. Never modify product code (`src/`; `dist/` is built from it). The tasks here are harness work: `test/suite/registry/section-12.3-12.5.ts` (Tasks 1, 2); `test/suite/registry/section-10.7-ii.ts` (Task 1: one export and its doc comment); `test/suite/registry/section-8.ts` (Task 3); `test/helpers/adapters/human.ts` and `test/self/s5-output-adapters.test.ts` (Task 4); the new module `test/suite/registry/human-findings.ts` and `test/suite/registry/section-14.ts` (Tasks 5, 6); `test/suite/registry/section-13.3.ts` and the module header of `test/suite/registry/section-12.0-i.ts` (Task 7); and `AGENTS.md` (build/run knowledge only). None of the tests touched is certified (CERTIFICATIONS.md's in-scope sets hold none of T8.2-1, T12.3-1, T12.4-1, T13.3-3, T14-1, T14-7), and the certification fixtures under `test/fixtures/` stay unchanged: every mutant build, spec file, or temporary runner a task uses lives in the scratchpad or is deleted before committing. If a task meets a spec defect (a contradiction, an impossible requirement), stop, log it in the matching problems file under `specs/tmp/`, commit, push, and end with `OUTCOME: PROBLEM`; never work around it.
+
+**Known state at 43c9a5e.**
+- `specs/tmp/` held only `.gitkeep` before this plan. 43c9a5e changed AGENTS.md and deleted the previous plan, so the harness and product trees are e9a530a's. `src/` has not changed since 6b79462.
+- The checkout has `node_modules` (`npm ci` restores it if it goes missing) and no `dist/`. The product is not built in the checkout, so a local self-project run is a run with no product installed (H-8). No task builds the product in the checkout; keep `dist/` absent there. A product-facing check uses a build outside the checkout (Run mechanics).
+- CI run 1237 (ID 38415507040) at 43c9a5e:
+  - harness-self job 115358746249: green with no product installed; 39 files, 4452 tests, all passed (277.76 s; the job ~300 s); certification 186 PASS / 50 FAIL / 0 error / 0 hang, 0 discrepancies (`compare_cert.py` over the cleaned log `<scratchpad>/p9j_43c/ci1237-harness-self.clean.log`);
+  - full-suite job 115358746910: 127 files, 4805 tests, 29 failed and 4776 passed in 1506.77 s (the job 25 min 23 s), every failure a `HarnessAssertionError` in the suite project, the same 29 IDs as runs 1225 and 1236 (`analyze_suite.py` against `<scratchpad>/p9j_d0c/ci1225/suite.clean.log`: none in one log only) — the E-6 writer, P-10, P-14, P-15, T6.1-1, T6.6-3, T7-2, T7-4, T10.1-6, T11.6-1, T11.6-3, T11.6-4, T12.7-3, T13.4-12, T13.5-1 through T13.5-4, T13.5-6 through T13.5-13, T14-6, T14-9, and T14-10. Its cleaned log: `<scratchpad>/p9j_43c/ci1237-suite.clean.log`. In run 1236 (the same trees) T14-7 took 92.2 s of its 300 s timeout, T13.3-3 16.6 s, T12.3-1 6.3 s, T8.2-1 3.6 s, T12.4-1 1.9 s, T14-1 1.9 s; in reviewer B's local 40-file suite run under load (`<scratchpad>/b-review/suite-run.log`) T14-7 took 158.0 s and T13.3-3 34.9 s;
+  - Windows leg 115371760880: its 2 diagnosed failures, as in runs 1225 and 1236 (E-6 byte identity at the exclusion probe; T11.6-1's drive-mismatch premise).
+- Locally at 43c9a5e (this determination's VERIFY, `<scratchpad>/verify-XrBexD/logs/self.clean.log`; the unprivileged recipe, the admin files left out, `dist/` absent): 37 files, 4442 tests, all passed in 614.33 s (other agents shared the machine; the previous plan's tasks measured 368–404 s alone); certification 186 / 50 / 0 / 0, 0 discrepancies.
+- **The built product's human forms** (`<scratchpad>/engineer-verify/xspec/dist/cli/bin.js`, a build of HEAD's `src/`; hand-probed for this plan in `<scratchpad>/p9j_43c/probe/`). These are facts about one product, never assertion inputs (H-4): no matcher may key on them.
+  - `show <node>` prints the identity line, `source range: bytes START-END`, `tags: …` and `coverage: …` (both omitted for a root), a `hashes:` block of four lines, an `edges:` block with `incoming:` lines `KIND from X` and `outgoing:` lines `KIND to Y`, then `own text:` and `subtree text:` blocks whose lines are indented. On T12.4-1's fixture `specs/S.mdx#star` spans 0–141 and the root `specs/S.mdx` 0–173; star's edges are incoming `contains` from `specs/S.mdx` and `embeds` from `src/app.ts#embedStar`, outgoing `contains` to `specs/S.mdx#star.point` and `depends` and `embeds` to `specs/S.mdx#peer`; the root's are outgoing `contains` to `specs/S.mdx#peer` and `specs/S.mdx#star`.
+  - `ids` prints each file's path, then its IDs indented: the flat listing one level deep, the tree by nesting depth, every node by its full ID (`zeta`, then `zeta.minor` one level deeper).
+  - `coverage` prints, per profile, `profile NAME`, a `required: N, covered: N, uncovered: N, ignored: N` line, `covered:` rows each followed by `path: A -> B`, `uncovered:` rows, and `ignored:` rows `IDENTITY: REASON; REASON`; `--check` prints the same report.
+  - Every findings report — a failing `build`/`check`, a refused `rename`/`move`, a gated read — goes through `renderFindingLine` in `src/cli/report.ts`: `[FILE:START-END: | PATH: ]CODE: MESSAGE[ (also at …)][ [IDENTITIES]]` per finding (the path prefix only where a finding has no location), then a count line `N finding(s)`. Its messages cite SPEC sections (`(SPEC 1.3, 14.1)`, `(SPEC 6.4, 6.5, 14)`), so they spell whole numbers. A numbered condition's message spells its code's words and names its concerned path (`missing ID: …`; `journal error: the entry on line 2 of .xspec/journal …`; `obstructed write path: … component mdout …`); a refusal's message spells no `refused` word (`invalid new ID: "a.then" …`, `ID collision: …`, `identity unchanged: …`, `invalid destination "specs/new.txt": …`, which quotes its path). On T13.3-3's invalid-sources workspace the 14.1 finding is located at `specs/B.mdx` 0–3; on a hand-staged rename collision at 46–70.
+- **Red-check builds** (each answers `version`; bin path `<build>/dist/cli/bin.js`):
+  - Reviewer B's, this determination's (`<scratchpad>/b-review/m/<name>`, each HEAD's `src/` plus `revB-d0c/specs/base.json` — the inventory `lock` member, always applied — plus the 13.5 port `revB-d0c/specs/p13.json` plus `b-review/specs/<name>.json`): `p13` (the port alone, which passes every T7–T15 test reviewer B ran; its `src/` is byte-identical to `revB-d0c/m/p13`'s); `show-human` (human `show` with no `source range:` line and no kind word on edge lines); `ids-human` (the flat listing skips every ID that has a listed descendant; the tree prints no node that has children); `cov-human` (human `coverage` drops every ignored root row and every reason); `findings-countonly` (every human findings report but `build`'s and `check`'s reduced to the line `N finding(s)`); and `findings-codeonly` (each human finding line of a listed code reduced to `CODE: corrupt` — T14-1's six codes are not in its list).
+  - The previous plan's (`<scratchpad>/revB-d0c/m/<name>`): `findings-fileonly` (each human finding line its first location's file, or its concerned path), `t9jd0c7-nomessage` (`renderFindingLine` keeping the location, code, and identities, dropping the message), `t9jd0c7-nooffsets` (`renderLocation` printing the file alone), `t9jd0c7-checkcount` (the human `check` printing its count line alone).
+  - A task's own build: `python3 -I <scratchpad>/b-review/mutate.py <name> <scratchpad>/revB-d0c/specs/p13.json <spec.json>` copies the checkout's `src/` to `<scratchpad>/b-review/m/<name>/`, applies `base.json`, then each named spec, compiles, and prints the bin path. A spec is a JSON list of `{"file", "old", "new"}` exact replacements under `src/` (`old` occurring exactly once unless a `count` is given). It refuses a name already built (`EXISTS …`, exit 5) and removes nothing, so pick a fresh name with the task's prefix (`t9j43c1-noranges`); keep the task's specs in its own scratch directory (`<scratchpad>/t9j43c_<N>/specs/`). Do not use `revB-d0c/mutate.py`: it deletes an existing build of the same name.
+- Node v22.22.0 locally (`/opt/node22/bin/node`), Vitest 4.1.10, TypeScript 5.9.3; PyYAML 6.0.1 under `python3 -I`; 4 cores.
+
+**Run mechanics (AGENTS.md holds the recipes; read the bullets a task names before running anything).**
+- Confirm `git status` is clean on `claude/xspec-ui-apis-4df8fa` before editing, and read `git log -3 --format='%h %s'`: a task interrupted after a push resumes where its text says. Never fetch or merge `main` (its newer scaffold commit 63bcb3f is not adopted in this run). Push with `git push -u origin claude/xspec-ui-apis-4df8fa`, retrying network errors with backoff (2 s, 4 s, 8 s, 16 s); never force-push, reset a pushed commit, or rewrite history; check `git log -1` before every push.
+- Permission refusals (Developer's standing constraint): if the permission system refuses any action, stop that line of work and report the refusal verbatim; never retry it or seek the same result another way. GitHub's "GraphQL is not available" 403 is not a refusal: read GitHub through REST (`gh api repos/modularcloud/xspec/...`) or the GitHub MCP tools.
+- Removals (Developer's standing constraint): name every removal target by an absolute, literal path; never put `rm` after a `cd` in the same command; never remove a relative path or a glob; never build a removal target from a shell variable. For a clean scratch workspace, create a new directory with `mktemp -d` under the scratchpad instead of clearing an old one. Inside `/home/user/xspec`, remove only files created in the same spawn (a temporary runner: `rm /home/user/xspec/test/self/zz-t9j43c<N>.test.ts`), or go through git. A refused removal is a refusal: stop that line of work and report it verbatim.
+- Administrative access (Developer's standing constraint): nothing needing administrative access runs locally — no user account, mount, PID namespace, or other-user process, no `sudo` beyond AGENTS.md's documented recipe, and no inspection of `sudo`, sudoers, accounts, or credentials, directly or through a test, staging, or script. Tests needing it (`test/self/*.admin.test.ts`, T13.5-9, T13.5-10(e)–(g)) are verified only in CI; local command lines leave those files out (never skip them in code). No task here touches them.
+- The self project: `unshare --map-user=1000 --map-group=1000 -- env -u NODE_OPTIONS npx vitest run --config test/vitest.config.ts --project self --exclude 'test/self/**/*.admin.test.ts'` (AGENTS.md's bullet beginning "The self project — and, once the Linux-leg tests"), run from `/home/user/xspec`, redirected to a log in the scratchpad; grep the log for `×` and the `Tests` summary, never cap it with `head`. Run it alone, checking the load first (other agents may share the machine); a failure seen only while harness runs overlap is not a task failure: rerun alone.
+- Certification lines against the document: `python3 -I <scratchpad>/engineer-verify/compare_cert.py specs/CERTIFICATIONS.md <log>` (VERIFY's; read its docstring; a CI log must be cleaned first, below) prints the PASS / FAIL / ERROR / HANG totals, the totals the document expects (186 / 50 / 0 / 0), and every discrepancy.
+- **The built product, outside the checkout.** `<scratchpad>/engineer-verify/xspec/dist/cli/bin.js` is a build of `src/` identical to HEAD's: confirm first that `diff -rq <scratchpad>/engineer-verify/xspec/src /home/user/xspec/src` prints nothing and that the file exists. If either check fails, build a scratch copy instead: `mkdir -p <scratchpad>/t9j43c_build && git -C /home/user/xspec archive HEAD | tar -x -C <scratchpad>/t9j43c_build && cp -a /home/user/xspec/node_modules <scratchpad>/t9j43c_build/ && npm --prefix <scratchpad>/t9j43c_build run build`, then use `<scratchpad>/t9j43c_build/dist/cli/bin.js`. Never run `npm run build` in the checkout. AGENTS.md's first bullets explain hand-staging a scratch workspace against it, which is the quickest way to see a human form before asserting on it.
+- **Running selected product tests against a binding** (the built product or a mutant build): AGENTS.md's bullets beginning "To run a selection of product tests against one fixture executable" and "Red-checking a strengthened product test against the built product (Phase 9)". Put a temporary `/home/user/xspec/test/self/zz-t9j43c<N>.test.ts` in place, copying the pattern of reviewer B's `<scratchpad>/b-copy-oIKggI/test/self/zz-b.test.ts` (it takes the bin path, the IDs, an output file, and the concurrency from `RB_BIN`, `RB_IDS`, `RB_OUT`, `RB_CONC`, calls `runProductTests(binding, productTestSuite.select(ids), { concurrency })`, and prints each result's outcome and diagnosis through `console.info`) — copy its pattern, never its harness tree, and never commit anything from `b-copy-oIKggI/`. The binding is `{ label, command: process.execPath, prefixArgs: [<bin>], requiredFiles: [<bin>] }`. Run it alone under the namespace from the checkout: `cd /home/user/xspec && RB_BIN=<bin> RB_IDS=<ids> RB_OUT=<scratch json> unshare --map-user=1000 --map-group=1000 -- env -u NODE_OPTIONS npx vitest run --config test/vitest.config.ts --project self test/self/zz-t9j43c<N>.test.ts --disable-console-intercept > <log> 2>&1`. Delete the file before committing (Removals); `git status --short` must not list it. With a task's change stashed (`git stash`, then `git stash pop`), the untracked runner stays in place, so the same file runs HEAD's modules.
+- Reading CI: AGENTS.md's bullet beginning "Reading a CI run from this sandbox" (`gh api` for runs, jobs, steps, and check-run annotations — annotations are capped, so read the job's log for the full failing set; the GitHub MCP `get_job_logs` tool, loaded through ToolSearch, returns the log's download URL, which `curl -sS -o <file> '<url>'` fetches). Strip a CI log's timestamps and colour escapes before reading it: `sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z //; s/\x1b\[[0-9;]*m//g' <raw> > <clean>`. VERIFY's `python3 -I <scratchpad>/engineer-verify/analyze_suite.py <clean log> [<baseline clean log>]` lists each failing test with its error class and, given a baseline, the IDs failing in one log only. A push cancels the branch's run in progress; a job cancelled with no steps is an infrastructure event, not a verdict (AGENTS.md). CI runs on pushes to the branch; PR #7 gets no `pull_request` runs. **Wait for a CI result in the foreground**: a spawn that waits by going idle on a background monitor is handed back before the result arrives. Poll with repeated foreground Bash calls, each a bounded in-process loop inside the tool's 10-minute limit, e.g. `timeout 540 bash -c 'until [ "$(gh api repos/modularcloud/xspec/actions/runs/<run-id> --jq .status)" = completed ]; do sleep 30; done'` (a bare foreground `sleep` is blocked; a `sleep` inside `bash -c` under `timeout` is the AGENTS.md pattern). Repeat the call until the run completes.
+- The scratchpad is shared across spawns: use task-specific directories (`t9j43c_<N>/`). This plan's references (`p9j_43c/`: reviewer B's report, run 1237's cleaned logs, and the hand probes), reviewer B's (`b-review/`, `b-copy-oIKggI/`), the previous plan's (`p9j_d0c/`, `revB-d0c/`, `t9jd0c_*`), and VERIFY's (`engineer-verify/`, `verify-XrBexD/`) files live there. Run Python with `python3 -I`. If `/FIX_PLAN.md.before` exists outside the checkout, leave it exactly as it is (Liaison directive, 2026-10-11; absent at 43c9a5e). Set every shell variable a command uses within that same command, and never write or copy through a path built from a variable that might be empty.
+
+**Human-report parity conventions.** The requirement every task serves: TEST-SPEC T12.0-1 — "`--json` emits exactly one JSON document as the entire standard output, carrying the same information as the human report (adapter-verified per command in the sections above; …)"; SPEC 12.0 — "Where this specification defines report content, the JSON form MUST contain the same information"; H-3 — "Human-readable reports are asserted only for required information (via robust matching), never exact wording." The previous plan's conventions bind unchanged (`git show 43c9a5e^:specs/tmp/FIX_PLAN.md`, the paragraph of this name, items 1–5; the matchers' module header in `test/helpers/adapters/human.ts` restates them). In brief, with this plan's additions:
+1. *Where.* A test runs the command's human form — the same argv without `--json` — at the same workspace state as a `--json` run whose document it already decodes, directly after that run (nothing mutating between; a refused operation and a gated read modify nothing), asserting the same exit code.
+2. *What.* The mentions are the information the command's SPEC section defines for the report, taken from the decoded document after the test's own JSON assertions have run (a product-to-itself comparison, H-4), covering every entry of the document, never a sample. Free text — a finding's message, an ignored node's reasons, an item's `reason` — is never compared as wording.
+3. *How.* Through `assertReportMentions` and the matchers of `human.ts`: identities, paths, and IDs as `identityMention`s; session and profile names and item ids as `nameMention`s; other literal data (a text value's trimmed non-blank lines, a hash, a tag) as plain strings; counts and range offsets as `numberMention`s in a separate call whose `blank` option names the document's digit-holding literal data (`digitHoldingData` in `section-10.7-i.ts`, which leaves a datum that is itself a whole number unblanked); SPEC-named tokens as `specTokenMention`s, and (Task 4 on) stable codes as `codeMention`s, each in a call whose `blank` option names the document's literal data — identities, paths, IDs, names, text lines — so a token's or a code's spelling inside a datum never stands in for it (the previous plan's Task 8 found `embeds` spelled inside `src/embeds.ts`; here `src/app.ts#embedStar` spells it, case-insensitively). An empty mention list is never passed (`assertReportMentions` refuses one); a call with nothing to ask is skipped.
+4. *Escapable data (new).* SPEC fixes no human spelling, and a human report may quote or escape a character a line or a quoted spelling cannot carry as it stands. A literal datum holding `"`, `'`, `\`, a C0 control character (U+0000–U+001F), DEL, a C1 control character (U+0080–U+009F), U+2028, or U+2029 — T14-7's barred-character arms spell such identities and paths — is not asked of a human report, nor is a path the JSON form carries in the marked byte form (12.0, 12.7); each module header records the limit. Such data are still blanked as spelled.
+5. *Limits.* No mention is associated with another — no "same line", no adjacency, no order (H-3). Which datum belongs to which entry, row, profile, edge, or finding stays with the JSON assertions; a datum, token, or code counts wherever the report prints it (a message's own words and numbers included). Each touched module's header records its human-form checks and their limits in its conservative-operationalizations list.
+6. *Red checks.* Each task runs its changed tests against the built product (they pass: Known state), against `b-review/m/p13` (they pass), against the gutted-renderer builds it names (each fails diagnosed, naming a missing mention of the gutted class), and, with the task's change stashed, against one of those builds (it passes: the gap, shown closed), recording every outcome and its run time.
+
+**Spellings.** Take every exact spelling — command lines, paths, quoted requirement text — from the TEST-SPEC.md or SPEC.md text the task cites or from the harness code it names, never from a review report. Keep the existing em dashes (U+2014) of any title or comment you edit; never type a character as a backslash-u escape into an edit or a Bash payload (build one from its code point in code, as the barred-character arms do).
+
+**Conventions for changed code.**
+- *Product verdicts.* Every test Tasks 1–3 and 5–7 strengthen passes against the built product before and after its task (its human renderers carry the information: Known state). The suite's failing set therefore stays run 1237's 29, every failure a `HarnessAssertionError`, and S-7's sweep (`test/self/s7-red-green-sweep.test.ts`) still meets every registered test failing diagnosed against the empty stub — no task adds a product invocation before a body's first. A different outcome is explained before the task goes on: a real product deviation the stronger check now reaches is recorded (task commit and AGENTS.md); a harness false failure is fixed.
+- *Shared helpers.* A helper a task changes keeps its behavior for every other caller (Task 4's refactor of `specTokenMention`'s internals included: its S-5 vectors pass unchanged). No import cycle among registry modules: `section-14.ts` imports `section-12.1-12.2.ts`, which imports `section-13.3.ts`, so `section-13.3.ts` must never import `section-14.ts` (an ES-module cycle evaluates one module before the other's bindings exist) — the reason Task 5's shared check gets a module of its own.
+- *Comments and titles.* Every doc comment, module-header note, and test title a change contradicts is corrected in the same task; each strengthened test's title gains its human-form clause.
+- *AGENTS.md* gets only build/run knowledge a later spawn needs (a recipe, a count or timing a later check relies on, a corrected fact), never a task narrative. Each task appends one sentence to the bullet beginning "The human-report parity checks" (the test, the human runs added or changed, the red-check builds and outcomes, the times); Task 4 also updates the counts in the bullet beginning "Harness self-tests and certification only".
+- *Temporary files.* Every temporary runner, spec file, and log lives in the scratchpad or is deleted before committing; `git status --short` before each commit lists only the task's own files.
+- *Every task ends with:* `npm run typecheck` and `npm run format:check` exiting 0; the checks it names, with every outcome; the self project (Run mechanics) with 0 failures and its counts unchanged (37 files, 4442 tests until Task 4; Task 4 records its new count, which later tasks keep), and the certification lines unchanged (186 PASS / 50 FAIL / 0 error / 0 hang, 0 discrepancies); a commit (`sdg(phase-9): <imperative summary> (FIX_PLAN Task N)`, ending with the two trailer lines the session requires) stating honest results; and a push. Each task's commit also removes the finished task from the Tasks section and adds its one-line summary to its bullet in the Order section.
+
+**Standing rulings.** Two Liaison rulings stand for this run: AGENTS.md's "Known residual 14.20 location gaps" and "Known SPEC 6.5 gap, deferred to a future SPEC revision (accepted for this run by ruling)" bullets. No task addresses them, and none may be added for them.
+
+**Deleting this plan.** Only Task 8 deletes this file, with `git rm`, once no other task remains (`specs/tmp/.gitkeep` stays). If the permission system refuses the deletion, stop there: leave the file in place, commit nothing further for it, and report the refusal. Never move, rename, empty, or otherwise work around a refused deletion.
+
+**Considered and not planned (do not re-raise).**
+- *From reviewer B.* (1) RB-3's ignored-node reasons: prose naming no SPEC-named token (reviewer B's own exclusion); they stay with the JSON assertions (`classifyIgnoredReasons`), and Task 3 only blanks them. (2) Review-operation refusals (10.7): they carry no code and no pinned content (14), so nothing robust is asked (reviewer B's own exclusion). (3) The four `/corrupt/i` checks (T10.1-4, T14-4, T13.4-6, T12.0-10), which reviewer B cites as context: they ask 14.21's token where TEST-SPEC asks that corruption be reported, and `findings-countonly` fails all four; the findings parity of a report is asked at the findings sites (T14-1, T14-7, T13.3-3), not repeated per staging.
+- *The planner's own.* (1) T10.1-5's gated `review` subcommands on a failing workspace: the same gate report T13.3-3 (Task 7) asks in human form, its mutating `review` subcommands included. (2) T12.3-2's `--unreferenced` listing and coverage run, and T12.3-1's empty listings: T12.3-1 and T8.2-1 are the parity sites of `ids` and `coverage` (the header of `section-12.0-i.ts`), and an empty listing's human form has nothing to mention. (3) T13.3-3's lenient `check` probe: `check`'s human findings are T14-1's. (4) Asserting a root's absent tags and coverage attribute in human form (T12.4-1): presence is what robust matching asks (H-3); the absence is pinned in JSON. (5) Association across mentions (conventions item 5).
+- Reviewers A, C, and D and VERIFY found nothing to plan. Every item of the previous plans' lists of the same name still holds (`git show 43c9a5e^:specs/tmp/FIX_PLAN.md`, and the lists it carries forward) — save the d0c8039 plan's "The planner's own" item (1) on refused operations' and gated reads' findings, which reviewer B's RB-4 now overrides (Tasks 4–7).
+
+**Order.** Take the topmost task unless told otherwise. Tasks 1, 2, and 3 are independent of each other and of the rest. Task 4 precedes Task 5, which precedes Tasks 6 and 7; Task 7 comes after Task 6 (its header note names T14-7's site); Task 8 comes last. When a task is done, its commit removes it from the Tasks section and adds a one-line summary to its bullet here.
+- Task 1 (RB-1): T12.4-1 asserts the human `show` report in full, at both arms.
+- Task 2 (RB-2): T12.3-1 asserts every listed file and ID of each human listing.
+- Task 3 (RB-3): T8.2-1 asserts the human coverage report at every run.
+- Task 4 (RB-4): the stable-code matcher `codeMention` and its S-5 vectors.
+- Task 5 (RB-4): the shared human-findings check; T14-1 asks codes, concerned paths, and identities.
+- Task 6 (RB-4): T14-7 asserts the human report of every refused `rename` and `move`.
+- Task 7 (RB-4): T13.3-3 asserts the gated reads' human reports; `section-12.0-i.ts`'s header names the findings sites.
+- Task 8: confirm locally and in CI; record the timings; delete this plan.
+
+## Tasks
+
+### Task 1 — T12.4-1 asserts the human `show` report in full, at both arms (RB-1)
+
+**Requirement.** The conventions' requirement, and TEST-SPEC T12.4-1: "Accepts `path#id` and bare `path` (root); prints the full 12.4 enumeration — identity, source range (1.7), own and subtree text, hashes, tags, coverage attribute, and edges by kind; each field equals the corresponding `query node` field for the same node (adapter-compared)". SPEC 12.4: "Prints one requirement for human reading: identity, source range (1.7), own and subtree text, hashes, tags and coverage attribute (both absent for a root node, 11), and edges by kind." SPEC 1.7: a source range is "a pair of byte offsets". T12.0-1's parity site for `show` is T12.4-1 (the header of `section-12.0-i.ts`). Reviewer B's G1: the human check never asks the range or an edge kind, its plain substrings find `specs/S.mdx#star` inside `specs/S.mdx#star.point`, and the root arm runs no human form; `b-review/m/show-human` passes T12.4-1.
+
+**Departures from reviewer B's proposal.** Two additions: the edge kinds are matched with every literal datum blanked (conventions item 3: `src/app.ts#embedStar` spells `embedS`, which `embeds` matches case-insensitively, so without blanking a build printing no kind word would still be credited `embeds`); and the tags and the coverage value stay plain mentions, now taken from the decoded document.
+
+**State at 43c9a5e** (`test/suite/registry/section-12.3-12.5.ts`).
+- T12.4-1 (line 879): `decodeBoth` (line 890) decodes `show <node> --json` and `query node <node> --json` and compares them field by field; the path#id arm (line 939) pins the tags and `coverage="none"`; the bare-path root arm (line 967) pins the absent coverage attribute and runs no human form.
+- The one human run (lines 976–1011): `show specs/S.mdx#star`, exit 0, then `assertReportMentions` over hard-coded plain substrings — the identity, the three tags, `none`, `specs/S.mdx#star.point`, `specs/S.mdx#peer`, `src/app.ts#embedStar`, three text lines, and `star.query`'s four hashes. No range offset, no edge kind, and not the root endpoint `specs/S.mdx` of star's incoming `contains` edge.
+- The module header's T12.4-1 bullet (lines 50–69) closes: "source-range presence is carried by the adapter compare, since bare digits are not distinctive mentions" — but that compare reads no human report.
+- The module imports `assertReportMentions` and the type `Mention` alone from the adapters. `nonBlankLines` (trimmed non-blank lines of a text value) is module-private in `section-10.7-ii.ts` (line 1670); `digitHoldingData` is exported by `section-10.7-i.ts` (line 497).
+
+**Change.**
+1. Export `nonBlankLines` from `section-10.7-ii.ts` (unchanged otherwise; its doc comment names T12.4-1 as a caller).
+2. A module-private `assertHumanShowReport(product, workspace, report: NodeReport, context)` in `section-12.3-12.5.ts` runs `show <report.identity>` without `--json` — exit 0, an informational report (SPEC 12.0) — and asks, from the decoded report:
+   - in one call: `identityMention` of the identity and of the `from` and `to` of every incoming and outgoing edge (distinct); each tag where `tags` is not `null`, and the coverage value where it is defined (plain strings); every trimmed non-blank line of `ownText` and `subtreeText` (plain strings, `nonBlankLines`); the four hashes (plain strings);
+   - in a second call, each distinct kind among the edges (`specTokenMention`), with every literal datum of the first call blanked;
+   - in a third call, `numberMention` of `sourceRange.start` and `sourceRange.end`, with the digit-holding literal data of the first call blanked (`digitHoldingData` from `./section-10.7-i.js`; the hashes hold digits).
+3. Call it in the path#id arm on `star.show`, in place of the hard-coded check, and in the root arm on `root.show`, each after that arm's JSON assertions.
+4. The module header's T12.4-1 bullet: replace its closing human-form sentences with these checks and their limits — which endpoint lies on which edge, of which kind and direction, which line belongs to the own or the subtree text, and which number starts or ends the range stay with the adapter compare; a datum counts wherever the report prints it; a root's absent tags and coverage attribute are pinned in JSON alone. The title gains the human-form clause (and 12.0).
+
+**Verify.**
+- The common checks (typecheck, format, the self project at 37 files and 4442 tests, the certification lines).
+- T12.4-1 passes against the built product and against `b-review/m/p13`.
+- Red checks (builds `t9j43c1-<name>` from specs in `<scratchpad>/t9j43c_1/specs/`, over `src/cli/commands/show.ts`; record each outcome and time). A diagnosis names the missing mentions of the first call that misses any — the calls run in the order above, and a failing call ends the test — so a build gutting several classes is named by its earliest:
+  - `b-review/m/show-human`: T12.4-1 fails diagnosed at the path#id arm's kind call, naming the three kinds (its missing range is `t9j43c1-noranges`' to show);
+  - `t9j43c1-nokinds` (edge lines without the kind word — `show-human`'s second replacement alone): fails naming `contains`, `depends`, and `embeds` — `embeds` only because the kind call blanks the data: run it once with that `blank` option removed in a scratch edit to confirm `embeds` is then found inside `src/app.ts#embedStar`, and restore it;
+  - `t9j43c1-noranges` (no `source range:` line — `show-human`'s first replacement alone): fails naming both offsets;
+  - `t9j43c1-noidline` (`renderNodeHuman` without its identity line): fails at the path#id arm naming `specs/S.mdx#star`, which HEAD's plain mention found inside `specs/S.mdx#star.point`;
+  - `t9j43c1-noincoming` (no incoming edge lines): fails naming `specs/S.mdx` and `src/app.ts#embedStar`;
+  - `t9j43c1-rootempty` (`renderNodeHuman` returning the empty string for a root, an identity holding no `#`): fails at the root arm alone;
+  - with the change stashed, `b-review/m/show-human` passes (the gap).
+- AGENTS.md: the task's sentence.
+- Commit (subject `sdg(phase-9): assert the human show report in full at both arms of T12.4-1 (FIX_PLAN Task 1)`) and push.
+
+**Done when.** The checks hold, and the commit is pushed with a message recording the results.
+
+### Task 2 — T12.3-1 asserts every listed file and ID of each human listing (RB-2)
+
+**Requirement.** The conventions' requirement, and TEST-SPEC T12.3-1: "IDs grouped by file … `--tree` renders per-file nesting in the same file and document order; … restricted `--tree` (12.3): … the tree contains exactly the listed IDs; `--json` parity." SPEC 12.3: `ids` "Lists requirement IDs grouped by file"; "`--tree` renders each file's IDs as a tree following section nesting"; "the tree contains exactly the listed IDs". Reviewer B's G2: the mentions are hard-coded — the flat listing's leave out the listed `zeta`, the tree's `zeta` is a plain substring found inside `zeta.minor`, and the restricted tree's `grand`, `leaf`, `kid` are all found in `grand.par.leaf` and `solo.kid`; `b-review/m/ids-human` passes T12.3-1.
+
+**Departures from reviewer B's proposal.** (1) The tree mention accepts a node's full ID or its ID relative to its tree parent — the part of its ID after the parent's ID and the following `.` — rather than "a segment": under a restricted tree a node nests under its nearest listed ancestor, so its relative spelling can hold several segments (`par.leaf` under `grand`), and a node at its file's top level has no relative spelling (`solo.kid`), the full ID being the only spelling that carries the listed ID there. (2) Human runs beside every non-empty decoded listing of T12.3-1 — three more than today (the two `--file` listings and the `--unreferenced` flat premise), so each listing the test decodes has its human twin, as the previous plan's tasks gave every decoded read one.
+
+**State at 43c9a5e** (`section-12.3-12.5.ts`).
+- `expectFlatListing` (line 256) and `expectTreeListing` (line 277) decode `ids … --json` and assert the exact listing; neither returns the decoded report. `expectHumanListing` (line 302) runs a human form (exit 0) and matches a given mention list.
+- T12.3-1 (line 466) decodes six non-empty listings: the ordering workspace's `ids --json` (line 482), `ids --tree --json` (line 491), `ids --file apecs/**/*.mdx --json` (line 537), and `ids --file apecs/*.mdx --json` (line 547); the restricted-tree workspace's `ids --unreferenced --json` (line 618) and `ids --unreferenced --tree --json` (line 636). Its empty `--file` listings (line 580) decode `files` exactly `[]`.
+- Its three human runs (lines 499–533 and 652–660) match the hard-coded plain mentions reviewer B lists.
+- The module header's `--json` parity bullet (lines 42–49) describes them ("file paths; full IDs in the flat listing; for tree renderings, segment mentions that both a full-ID and an indented-segment rendering contain").
+
+**Change.**
+1. `expectFlatListing` and `expectTreeListing` return their decoded reports (their assertions unchanged).
+2. A module-private human-listing check (one helper for both kinds, or one per kind) runs the listing's argv without `--json` — exit 0 — and asks, from the decoded report:
+   - the file of every entry that lists at least one ID (`identityMention`; an entry listing none is no content, the module header);
+   - flat: every listed ID (`identityMention`, so `zeta` never counts inside `zeta.minor`, nor `minor` inside it, nor an ID inside a path);
+   - tree: every node by its full ID or by its ID relative to its tree parent, each spelling bounded as `identityMention` bounds it — one formed mention per node, a `FormedMention` (`human.ts`) whose pattern alternates the two bounded spellings and whose description names both; a node at its file's top level by its full ID alone, and a child whose ID does not extend its tree parent's likewise.
+3. Call it directly after each of the six JSON listings, in place of the three hard-coded human runs (drop `expectHumanListing` if nothing else calls it).
+4. The module header's `--json` parity bullet: the new mentions and their limits — nesting, order, and which ID belongs to which file stay with the JSON assertions; a relative spelling counts wherever it stands, so two nodes sharing one (`a.x` and `b.x` under `a` and `b`) can stand in for each other — T12.3-1's fixtures stage no such pair; the empty listings get no human run. The title's parity clause gains "every listed file and ID, a tree node as its full ID or relative to its tree parent".
+
+**Verify.**
+- The common checks.
+- T12.3-1 passes against the built product and against `b-review/m/p13`.
+- Red checks (builds `t9j43c2-<name>` from specs in `<scratchpad>/t9j43c_2/specs/`, over `renderFlatHuman` and `renderTreeHuman` in `src/cli/commands/ids.ts`; record each outcome and time):
+  - `b-review/m/ids-human`: fails diagnosed at the ordering workspace's flat listing, naming `zeta`;
+  - `t9j43c2-treeleaves` (the tree prints only nodes without children — `ids-human`'s second replacement alone): fails at the ordering tree, naming `zeta`;
+  - `t9j43c2-treerelative` (each nested node printed relative to its tree parent: `minor` under `zeta`, `par.leaf` under `grand`, top-level nodes in full — a conforming rendering): passes (no false failure);
+  - `t9j43c2-treelastsegment` (each nested node printed by its last segment alone: `leaf` under `grand`): passes the ordering tree and fails the restricted tree, naming `grand.par.leaf` — the listed ID such a rendering loses (SPEC 12.3);
+  - with the change stashed, `b-review/m/ids-human` passes (the gap).
+- AGENTS.md: the task's sentence.
+- Commit (subject `sdg(phase-9): assert every listed file and ID of T12.3-1's human listings (FIX_PLAN Task 2)`) and push.
+
+**Done when.** The checks hold, and the commit is pushed with a message recording the results.
+
+### Task 3 — T8.2-1 asserts the human coverage report at every run (RB-3)
+
+**Requirement.** The conventions' requirement, and TEST-SPEC T8.2-1: "counts of required/covered/uncovered/ignored; identity of every covered, uncovered, and ignored node; one shortest covering path per covered node …; `--json` carries the same information (adapter-asserted equality of information)". SPEC 8.2: "The report includes: counts of required, covered, uncovered, and ignored nodes; the identity of every covered, uncovered, and ignored node; and for each covered node one shortest covering path (12.0)." T12.0-1's parity site for `coverage` is T8.2-1. Reviewer B's G3: `REPORT_HUMAN_MENTIONS` never names the ignored root `tgt/T.mdx`, and its plain `tgt/T.mdx#combo` is found inside the uncovered `tgt/T.mdx#combo.kid`; `b-review/m/cov-human` passes T8.2-1.
+
+**Departures from reviewer B's proposal.** Two additions: the profile names are bounded (`nameMention`, so `prof-main` never counts inside a longer name), and the check runs at each of T8.2-1's human runs — today's `coverage`, its two `coverage --check` runs (exit only, today), and a new human `coverage prof-aux` beside `coverage prof-aux --json` — so each decoded report has its human twin.
+
+**State at 43c9a5e** (`test/suite/registry/section-8.ts`).
+- T8.2-1 (line 1386) decodes `coverage --json` (`full`, line 1404), `coverage prof-aux --json` (`one`, line 1441), and `coverage --check --json` (line 1464, decoded inline inside its `assertSameJson`), and, in the covered fixture, `coverage --check --json` (`green`, line 1519).
+- Its human runs: `coverage --check` (line 1484, exit 1 asserted alone), `coverage` (lines 1493–1511, matched against `REPORT_HUMAN_MENTIONS`), and the covered fixture's `coverage --check` (line 1543, exit 0 asserted alone). None beside `coverage prof-aux --json`.
+- `REPORT_HUMAN_MENTIONS` (lines 1302–1318): the two profile names, five identities as plain substrings, and `/\b1\b/` through `/\b4\b/`.
+- The module header's T8.2-1 bullet (lines 43–50) describes it ("the count digits (identities and profile names in the fixture are digit-free, so digits in the report render counts)").
+
+**Change.**
+1. A module-private `assertHumanCoverageReport(product, workspace, argv, report, exitCode, context)` runs `argv` (no `--json`), asserts `exitCode`, and asks, from the decoded report, for every profile:
+   - in one call: its name (`nameMention`); every covered identity and every node of its covering path, every uncovered identity, and every ignored identity (`identityMention`, so the root `tgt/T.mdx` never counts inside `tgt/T.mdx#win`, nor `tgt/T.mdx#combo` inside `tgt/T.mdx#combo.kid`);
+   - in a second call, each nonzero count (`numberMention`), with the report's digit-holding data blanked (`digitHoldingData` from `./section-10.7-i.js` over the names, identities, path nodes, and the ignored reasons' strings — free text, never compared, blanked only so their digits never stand in for a count).
+2. Call it: on `full` at the human `coverage` (exit 0), in place of `REPORT_HUMAN_MENTIONS` (deleted); on `one` at a new human `coverage prof-aux` (exit 0) directly after its JSON run; on the decoded `coverage --check --json` document (kept in a variable) at the existing human `coverage --check` (exit 1); and on `green` at the covered fixture's human `coverage --check` (exit 0). The existing human runs may keep their places: nothing between them and their JSON runs mutates.
+3. The module header's T8.2-1 bullet: these checks and their limits — which identity belongs to which profile and row kind, which count labels which number, and the reasons and their order stay with the JSON assertions (the reasons are prose naming no SPEC-named token); an identity counts wherever the report prints it. The title gains the human-form clause.
+
+**Verify.**
+- The common checks.
+- T8.2-1 passes against the built product and against `b-review/m/p13`.
+- Red checks (builds `t9j43c3-<name>` from specs in `<scratchpad>/t9j43c_3/specs/`, over `src/cli/commands/coverage.ts`; record each outcome and time):
+  - `b-review/m/cov-human`: fails diagnosed at the human `coverage`, naming `tgt/T.mdx`;
+  - `t9j43c3-noignored` (no ignored rows): fails naming `tgt/T.mdx` and `tgt/T.mdx#combo`, the latter found by HEAD's plain mention inside `tgt/T.mdx#combo.kid`;
+  - `t9j43c3-nocounts` (no counts line): fails naming the counts;
+  - `t9j43c3-nopaths` (no `path:` lines): fails naming `bnd/B.mdx#first`;
+  - `t9j43c3-checkempty` (the human report written only without `--check`): fails at the first human `coverage --check`, naming every mention of its first call — each human run without `--check` before it passing;
+  - with the change stashed, `b-review/m/cov-human` passes (the gap).
+- AGENTS.md: the task's sentence.
+- Commit (subject `sdg(phase-9): assert the human coverage report at every run of T8.2-1 (FIX_PLAN Task 3)`) and push.
+
+**Done when.** The checks hold, and the commit is pushed with a message recording the results.
+
+### Task 4 — The stable-code matcher `codeMention` and its S-5 vectors (RB-4)
+
+**Requirement.** SPEC 14: "Every reported condition carries a stable machine-readable code identifying which numbered condition it is — a code's value is its token as listed"; "Stable codes cover exactly these conditions and the refusal reasons below". SPEC 6.4 (and 6.5, "as rename does"): every validation failure "refuses the rename (exit 1), each distinct refusal reason carrying its stable code and location (14)". Reviewer B's G4 asks the human refusal report for "each reason's code token". H-3's robust matching, and TEST-SPEC §17 S-5: each adapter — `human.ts` is the adapter layer's human side (`test/helpers/adapters/index.ts`) — rejects input missing required information rather than defaulting, fed synthetic inputs, before any product exists (H-8).
+
+**Why a matcher of its own.** `specTokenMention`'s vocabulary is closed, and its S-5 test "SPEC_NAMED_TOKENS is a closed vocabulary — distinct, well-formed tokens, none counting inside another's spelling" (`test/self/s5-output-adapters.test.ts`, line 5840) holds every member to that invariant. `corrupt` (14.21's word, a member) counts inside `corrupt-session` (14.21's code), so the codes cannot join that vocabulary; a closed vocabulary of the stable codes beside it keeps both invariants.
+
+**State at 43c9a5e.** `test/helpers/adapters/human.ts`: `SPEC_NAMED_TOKENS` (line 395), `TOKEN_FORM`, `spelledWords`, and `specTokenMention` (lines 425–469: case-insensitive, separators, the letter bound, the longer-token tail exclusion, the diagnosed rejections). `test/helpers/adapters/model.ts`: `CONDITION_CODE_TOKENS` (26, the three usage-error codes among them) and `REFUSAL_CODE_TOKENS` (11). The human-matcher S-5 tests are lines 5599–5958 (`specTokenMention`'s at 5776, the closed-vocabulary test at 5840, the missing-mention test at 5856, the rejected-inputs test at 5902).
+
+**Change.**
+1. In `human.ts` (exported through `adapters/index.ts` as the rest is):
+   - `STABLE_CODES`: model.ts's `CONDITION_CODE_TOKENS` then `REFUSAL_CODE_TOKENS` (37 codes);
+   - `codeMention(code)`: a stable code, matched as `specTokenMention` matches a token — case-insensitive, its hyphen-joined words separated by one character that is neither letter nor digit or by nothing, not preceded by a letter, letters allowed after it — and never counting where it ends a longer stable code (`cycle` in `refused-cycle` or `refused cycle`); description `stable code "…"`; a diagnosed `fail` on an empty code, a malformed one (not lowercase words joined by single hyphens — `Cycle`, `14.1`), or one `STABLE_CODES` lacks (`no-change`, a SPEC-named token, is no stable code). Build both matchers' patterns through one private builder over a vocabulary, `specTokenMention`'s behavior unchanged.
+   - The module header (the third kind of mention, and the reason the codes are a vocabulary of their own) and `FormedMention`'s doc comment name it.
+2. S-5 vectors in `s5-output-adapters.test.ts`, after the closed-vocabulary test, each table listing every vector it gets wrong:
+   - `codeMention("refused-invalid-id")` found in `refused-invalid-id:`, `Refused invalid id`, `REFUSED_INVALID_ID`, and `[refused-invalid-id]`; not found in `invalid-id`, `unrefused-invalid-id`, `refused-invalid`, or `refused--invalid-id`;
+   - `codeMention("cycle")` found in `cycle:`, `Cycle`, and `cycles`; not found in `refused-cycle`, `refused cycle`, `Refused_Cycle`, or `recycle`;
+   - `codeMention("missing-id")` found in `missing ID`; not found in `dismissing-id`;
+   - `STABLE_CODES` distinct and well-formed, none counting inside another code's spelling;
+   - a report missing a code fails diagnosed, naming `stable code "refused-cycle"`;
+   - `codeMention` of `""`, `"Cycle"`, `"refused--cycle"`, `"14.1"`, `"no-change"`, and `"frobnicated"` each diagnosed, naming its problem.
+3. AGENTS.md: the human-report parity bullet gains a sentence for `codeMention` (its vocabulary, its spelling rule, why it is apart from `SPEC_NAMED_TOKENS`); the bullet beginning "Harness self-tests and certification only" gains the new counts (locally 37 files and 4442 tests plus the tests added; CI's harness-self 39 files and 4452 plus them; `npm test` 127 files and 4805 plus them).
+
+**Verify.**
+- `npm run typecheck`, `npm run format:check`.
+- The self project, `dist/` absent: 0 failures; 37 files, and 4442 tests plus those added. Record the count; later tasks expect it. The certification lines are unchanged.
+- Red-check the vectors (AGENTS.md's bullet beginning "Red-checking a new self-test vector"; the previous plan's `<scratchpad>/t9jd0c_2/redcheck.py` is a working pattern — copy it into `<scratchpad>/t9j43c_4/`, never edit it in place): with each rule removed in turn from a scratch copy of `human.ts` — case-insensitivity, the separator, the letter bound, the tail exclusion, the vocabulary check — exactly its own vectors fail; with `human.ts` stashed, the new tests fail and the file's others pass.
+- Commit (subject `sdg(phase-9): add the stable-code matcher codeMention and its S-5 vectors (FIX_PLAN Task 4)`) and push.
+
+**Done when.** The checks hold, and the commit is pushed with a message recording the results.
+
+### Task 5 — The shared human-findings check; T14-1 asks codes, concerned paths, and identities (RB-4)
+
+**Depends on.** Task 4.
+
+**Requirement.** The conventions' requirement; SPEC 14's data of every reported condition — its stable code, "for each offending construct, the containing file and a source range (1.7)", for a condition without an in-source location "the file or path they concern", and the identity data a condition names ("An entity a condition names as context … is identity data on the finding"); SPEC 6.4/6.5's refusal reasons, each "carrying its stable code and location (14)"; TEST-SPEC T14-1: "every report identifies file and location and states a correction-oriented message (information presence, not wording)". This task builds the check Tasks 6 and 7 apply (reviewer B's G4).
+
+**Departure (the planner's addition).** T14-1 adopts the shared check, so its human `build` and `check` are asked each finding's code, concerned path, and identities as well as its locations: SPEC 14 binds every reported condition, and one findings check asking one set of information at every site is what the parity requires; T14-1's quoted-spelling call stays its own.
+
+**State at 43c9a5e** (`test/suite/registry/section-14.ts`).
+- `assertHumanFindingsReport` (lines 876–969) runs T14-1's human `build` or `check` (exit 1) and asks every location's file (`identityMention`), then every location's start and end (`numberMention`, blanking the digit-holding files, concerned paths, identities, and spellings through `digitHoldingData`), then each staged spelling of `T14_1_QUOTED_SPELLINGS` that some JSON message quotes (`spellingMention`). It never asks a code, a concerned path, or an identity, and fails as a staging defect on a location file that is no plain string.
+- The module header's T14-1 bullet (lines 38–65) records its checks and limits (a message never blanked, since it may state its location itself; T14-1's offsets all 34 or more).
+- No other test reads a human findings report beyond a file (T12.0-2) or the word `corrupt`.
+
+**Change.**
+1. A new module `test/suite/registry/human-findings.ts`. Its header says what it holds and why it is a module of its own (the import-graph rule of the Preamble's shared-helpers convention). It exports `assertHumanFindingsMentions(human: RunResult, findings: readonly Finding[], context: string, options?: { readonly blank?: readonly string[] })`, which asks, over every finding of the decoded report:
+   - in one call: `identityMention` of every location's file, every concerned path, and every identity — each that is a plain string and holds no escapable character (conventions item 4);
+   - in a second call: `codeMention` of every non-null code, with every file, concerned path, identity, and `options.blank` datum blanked;
+   - in a third call: `numberMention` of every location's start and end, with the digit-holding data among those blanked (`digitHoldingData` from `./section-10.7-i.js`). A message is never blanked (T14-1's rule, which the module header restates).
+   It skips a call with nothing to ask and runs no command: each caller runs its human form and asserts its exit code first.
+2. `assertHumanFindingsReport` keeps its human run, its location-file premise, and its spellings call, and replaces its files and offsets calls with `assertHumanFindingsMentions(human, findings, label, { blank: <the spellings its findings' messages quote> })`.
+3. Its doc comment and the module header's T14-1 bullet: codes, concerned paths, and identities now asked; the limits — a numbered condition's message may spell its code's words (the built product's do: `missing ID`), so a code counts there too; a datum counts wherever the report prints it; escapable data are not asked. The title gains each finding's stable code, concerned path, and identities.
+
+**Verify.**
+- The common checks.
+- T14-1 passes against the built product and against `b-review/m/p13`.
+- Red checks (builds `t9j43c5-<name>` from specs in `<scratchpad>/t9j43c_5/specs/`, over `renderFindingLine` in `src/cli/report.ts`; record each outcome and time; Tasks 6 and 7 reuse these builds). As in Task 1, a diagnosis names the missing mentions of the first call that misses any:
+  - `revB-d0c/m/findings-fileonly`: T14-1 fails diagnosed, as before — record which call fails and what it names (the identity call, if a T14-1 finding carries an identity; else the code call);
+  - `t9j43c5-nolabel` (`renderFindingLine` without its code label): record whether T14-1 fails, naming the codes whose words no T14-1 message spells, or passes because every message spells its code's words (the recorded limit); with the change stashed it passes T14-1 (codes were never asked);
+  - `t9j43c5-noidentities` (no identities bracket): record whether T14-1 fails, naming an identity some T14-1 finding carries and its message does not spell, or passes because no such identity exists.
+- AGENTS.md: the task's sentence (the new module, its three calls, T14-1's adoption, the builds).
+- Commit (subject `sdg(phase-9): add the shared human-findings check; ask T14-1's codes, paths, and identities (FIX_PLAN Task 5)`) and push.
+
+**Done when.** The checks hold, and the commit is pushed with a message recording the results.
+
+### Task 6 — T14-7 asserts the human report of every refused `rename` and `move` (RB-4)
+
+**Depends on.** Task 5.
+
+**Requirement.** The conventions' requirement; SPEC 6.4: every validation failure "refuses the rename (exit 1), each distinct refusal reason carrying its stable code and location (14)" (6.5's move likewise); SPEC 14's refusal-reason data (the concerned identity as the sole element of `identities`, the concerned path, the located participants); TEST-SPEC T14-7: "Staged refusals asserting each stable code with its concerned file, range, or identity (14)". Reviewer B's G4: T14-7 asserts each reason in JSON alone, and `b-review/m/findings-countonly` passes T14-7.
+
+**State at 43c9a5e** (`section-14.ts`).
+- Every T14-7 arm goes through `assertRefusalReport` (lines 3423–3538): the rename cases and `runIntrinsicInvalidIdArm`, the move cases (the link cases inside `assertLinkAndTargetUnchanged`, which wraps the whole call), the derived-path, destination-component, multi-reason, destination-spelling, and import-cycle arms, and the runners `runT147LinkArms`, `runT147SiblingCycleArm`, `runT147DerivedPathRelationArms`, `runT147ExposedDerivedFileArms`, `runT147InvalidRewriteArms`, `runT147MovedImportArms`, and `runT147InvalidPathArms`. It runs `argv --json` (exit 1), decodes the form-exact findings report, and asserts the exact multiset and each reason's concern. No human run.
+- T14-7 (line 4470) has `timeoutMs: 300_000`; AGENTS.md records ~15 s for one T14-7 run alone (the bullet beginning "Red-checking a strengthened product test"); run 1236 took 92.2 s and reviewer B's loaded local suite run 158.0 s (Known state).
+
+**Change.**
+1. In `assertRefusalReport`, after its JSON assertions, at the same state (a refused operation modifies nothing, SPEC 6.4, 6.5): run `argv` without `--json` — exit 1, the same exit code — and `assertHumanFindingsMentions(human, findings, <context>)`. The link cases' human run thus sits inside their link-and-target compare, as the JSON run does.
+2. Raise T14-7's `timeoutMs` to `600_000`: the human runs roughly double its product invocations, and under load it already took 158 s of its 300 s. Record its time run alone before and after.
+3. `assertRefusalReport`'s doc comment, the module header's T14-7 bullet (the human form and its limits: a refusal's message may quote its path — the built product's `invalid destination "…"` does — so a path counts there; the barred-character arms' identities and paths hold escapable characters and are not asked, their codes still are; a message's citation digits may stand in for an offset of their value), and the title gain the human-form clause.
+
+**Verify.**
+- The common checks.
+- T14-7 passes against the built product and against `b-review/m/p13`; record both times and HEAD's.
+- Red checks (record each outcome and time):
+  - `b-review/m/findings-countonly`: fails diagnosed at the first rename arm (`rename … a.mid a.then`), naming its identity — the first call's;
+  - `t9j43c5-nolabel`: fails at the first rename arm's code call, naming `refused-invalid-id` (refusal messages spell no `refused` word);
+  - `t9j43c5-noidentities`: fails at the first rename arm, naming its identity (its message quotes the ID `a.then`, never the identity);
+  - `revB-d0c/m/t9jd0c7-nooffsets`: fails at the first located arm, naming its offsets — or passes there where its message's citation digits stand in (record which);
+  - with the change stashed, `b-review/m/findings-countonly` passes T14-7 (the gap).
+- AGENTS.md: the task's sentence (and T14-7's new times beside the bullet's ~15 s).
+- Commit (subject `sdg(phase-9): assert the human report of every refused rename and move in T14-7 (FIX_PLAN Task 6)`) and push.
+
+**Done when.** The checks hold, and the commit is pushed with a message recording the results.
+
+### Task 7 — T13.3-3 asserts the gated reads' human reports; `section-12.0-i.ts`'s header names the findings sites (RB-4)
+
+**Depends on.** Tasks 5 and 6.
+
+**Requirement.** The conventions' requirement; SPEC 13.3 (a gated read on a failing workspace reports the findings `build` would report, like a failed `build`, and answers nothing; the gate covers "source validation errors, journal errors, and refused writes alike"); SPEC 14's data of every reported condition (Task 5); SPEC 14.13: a journal error "naming the lines"; TEST-SPEC T13.3-3: each gated read "reports the validation errors, exits 1, answers nothing, and modifies nothing", and in the whole-gate stagings "reports that finding — the journal error (14.13) naming the line, the refused write (14.22) its offending component". Reviewer B's G4: T13.3-3 drives the gated reads in JSON alone, and `b-review/m/findings-countonly` passes it.
+
+**Departures from reviewer B's proposal.** (1) Beside the reads reviewer B names (`ids`, `show`, `coverage`, `impact`, `review status`), the mutating `review` subcommands T13.3-3 probes (`create` under its three modes, `resolve`, `split`) get their human runs too: the same gate report, run inside the same modifies-nothing compare. (2) The journal error's line naming is asked of the human report as of the JSON message.
+
+**State at 43c9a5e** (`test/suite/registry/section-13.3.ts`).
+- T13.3-3 (line 2514). In the invalid-sources workspace, `probeFailedRefresh` (lines 2597–2638) runs each argv inside `assertLeavesUnchanged`, asserting exit 1, exactly one 14.1 finding, and its location in `specs/B.mdx`. Its sites are the six reads (lines 2641–2656: `ids --json`, `show specs/A.mdx#alpha --json`, `coverage --json`, `impact --base <ref> --json`, `review status s --json`, `query nodes`) and the five mutating `review` subcommands (lines 2708–2739).
+- `probeWholeGate` (lines 2363–2397) does the same over `gatedReadInvocations` (lines 2330–2354) in the garbage-journal staging (lines 2753–2862: exactly one 14.13 concerning `.xspec/journal`, `locations` `[]`, its message naming the garbage line through `findingNamesGarbageLine`, lines 2315–2319) and in the obstructed-write staging (lines 2873–2959: exactly one 14.22 concerning `mdout`, `impact --base` included).
+- `query` is JSON-only (SPEC 11), so `query nodes`' bare form is the document the probe already decodes. No human form runs anywhere in T13.3-3.
+- The header of `section-12.0-i.ts` (its T12.0-1 bullet, lines 32–45) names the per-command parity sites, the findings among them as "the `build` and `check` findings in T14-1".
+
+**Change.**
+1. In `probeFailedRefresh` and `probeWholeGate`, inside their compares, after their JSON assertions, for every probe but `query nodes`: run the same argv without `--json` — exit 1 — and `assertHumanFindingsMentions(human, findings, <context>)`.
+2. In the garbage-journal staging, also ask the human report to name the garbage line as the JSON message must: split `findingNamesGarbageLine` into a text predicate — the garbage line's text, a line/entry-2 citation, or `journal:2` — applied to the message (unchanged) and to the human stdout.
+3. The module header's T13.3-3 bullets and the title: the human-form checks and their limits — a gate finding's message may spell its code's words and name its concerned path (the built product's do), so those count there; the 14.1 location's `0` and `3` may be stood in for by citation digits (`SPEC 1.3`) — and the mutating subcommands' human runs inside the compare.
+4. `section-12.0-i.ts`'s T12.0-1 header bullet names the findings sites: `build` and `check` in T14-1, a refused `rename`/`move` in T14-7, and the gated reads' and the mutating `review` subcommands' gate reports in T13.3-3, each asking every finding's code, locations, concerned path, and identities (`human-findings.ts`).
+
+**Verify.**
+- The common checks.
+- T13.3-3 passes against the built product and against `b-review/m/p13`; record both times and HEAD's.
+- Red checks (record each outcome and time):
+  - `b-review/m/findings-countonly`: fails diagnosed at the invalid-sources workspace's human `ids`, naming `specs/B.mdx` — the first call's;
+  - `revB-d0c/m/t9jd0c7-nomessage` (each finding line keeps its path or location and its code, dropping the message): passes the invalid-sources sites and fails at the garbage-journal staging's first read, naming the garbage line;
+  - `revB-d0c/m/t9jd0c7-nooffsets`: fails at the invalid-sources human `ids`, naming `number 0` — record whether `3` was stood in for;
+  - `t9j43c5-nolabel`: record (expected to pass: the built product's gate messages spell `missing ID`, `journal error`, and `obstructed write path` — the recorded limit);
+  - with the change stashed, `b-review/m/findings-countonly` passes T13.3-3 (the gap).
+- AGENTS.md: the task's sentence.
+- Commit (subject `sdg(phase-9): assert the gated reads' human reports in T13.3-3; name the findings parity sites (FIX_PLAN Task 7)`) and push.
+
+**Done when.** The checks hold, and the commit is pushed with a message recording the results.
+
+### Task 8 — Confirm locally and in CI; record the timings; delete this plan
+
+**Depends on.** Tasks 1–7 (gone from this plan once done, recorded in the Order section).
+
+**Change and checks.**
+- *Self project and certification.* Run the self project per Run mechanics, with `dist/` absent and the admin files left out. Expect:
+  - 0 failures, at Task 4's recorded counts;
+  - the counts in AGENTS.md's bullet beginning "Harness self-tests and certification only" matching the run;
+  - the certification lines 186 PASS / 50 FAIL / 0 error / 0 hang, with 0 discrepancies against the document (`compare_cert.py`).
+- *CI.* Before committing, find the run on the head Task 7 pushed (`gh api 'repos/modularcloud/xspec/actions/runs?branch=claude/xspec-ui-apis-4df8fa&per_page=3'`). Wait for it to complete by polling in the foreground (Run mechanics). If a job ends `cancelled` with no steps (an infrastructure event), re-run that job once (`gh api --method POST repos/modularcloud/xspec/actions/jobs/<job-id>/rerun`); if that is refused, report the refusal and stop. Never push a commit just to retrigger. Expect:
+  - the harness-self job green with no product installed: 39 files, the admin files included, and Task 4's CI count of tests, all passed; certification with 0 discrepancies;
+  - the full-suite job failing only on run 1237's 29 diagnosed product tests, plus any real product deviation a task recorded, every one a `HarnessAssertionError`, its self-project half green (`analyze_suite.py` against `<scratchpad>/p9j_43c/ci1237-suite.clean.log`). The tests Tasks 1–3 and 5–7 strengthened (T12.4-1, T12.3-1, T8.2-1, T14-1, T14-7, T13.3-3) pass; record T14-7's and T13.3-3's times;
+  - the Windows leg's 2 diagnosed failures, as in run 1237.
+  Explain any difference before going further.
+- *No local suite run.* Tasks 1–7 ran their changed product tests against the built product locally, so CI's full-suite job is the suite-wide check. Say so in the commit message.
+- *Timings.* Add this run's figures to AGENTS.md's timings bullet (the bullet beginning "Timings on a 4-core machine"), in its style, replacing what they supersede:
+  - the local self project;
+  - the harness-self job: its self project, `certification.test.ts`, and the whole job against its 20 minutes;
+  - the full-suite job, and T14-7's time within it against its new 600 s timeout;
+  - the Windows leg.
+- *Delete this plan.* Once no other task remains in `specs/tmp/FIX_PLAN.md`, delete it with `git rm` in the same commit, under the Preamble's "Deleting this plan" rule.
+- Commit (subject `sdg(phase-9): confirm the harness locally and in CI; record the timings; delete the finished plan (FIX_PLAN Task 8)`) and push.
+
+**Done when.** The checks hold, the commit message records them, the plan is deleted (or its refused deletion reported), and the commit is pushed.
