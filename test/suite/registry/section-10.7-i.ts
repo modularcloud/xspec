@@ -490,9 +490,10 @@ function assertStoredCounts(
  * cannot tell such a datum (an item id `4`, which SPEC 10.2 leaves to the
  * product) from a count of its value, so blanking it would erase that count
  * wherever the report prints it and fail a conforming report (the module
- * header).
+ * header). Exported for section-10.7-ii.ts' human `show` check (T10.7-8,
+ * T10.7-12).
  */
-function digitHoldingData(data: readonly string[]): readonly string[] {
+export function digitHoldingData(data: readonly string[]): readonly string[] {
   return data.filter((datum) => /[0-9]/.test(datum) && !/^[0-9]+$/.test(datum));
 }
 

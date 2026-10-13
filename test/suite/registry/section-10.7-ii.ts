@@ -52,6 +52,43 @@
 //   report presents as the one returned stays with the JSON assertions; an
 //   id that is itself a whole number may be matched by any number of its
 //   value the report prints.
+// - T10.7-8's and T10.7-12's human `show` (T12.0-1's information parity; SPEC
+//   12.0): after each `show --json` read and its assertions — T10.7-8's x.k
+//   item (the item `next` returns) and the root's item, blocked by x's (a
+//   `show --json` read this check adds, asserted against SPEC 10.6's
+//   blocking), and T10.7-12's per-item reads of sub-fixtures A and C and
+//   sub-fixture B's two provenance reads at each stage — at the same state,
+//   `review show <name> <item-id>` without `--json` exits 0 as well, and its
+//   report mentions what the decoded item carries (a product-to-itself
+//   comparison, H-4; `assertHumanShowItem`, through
+//   helpers/adapters/human.ts): the item's id and each `blockedBy` id
+//   (item-id boundaries), its kind and status, `blocked` where it is blocked,
+//   and `absent` wherever it presents a node or an origin side absent
+//   (SPEC-named tokens; 10.7: "presented absent"), its scope, context, and
+//   origin identities (identity boundaries), every non-blank line of every
+//   text it carries — scope, context, and origin before and after — and of
+//   its note (trimmed), and, where the test supplies `query node` captures
+//   (T10.7-8's x.k item, captured at that state), each captured hash its
+//   `baseline` or `current` holds as a string leaf; then, in a separate call,
+//   the start and end of every source range it carries (whole numbers,
+//   matched with the item's digit-holding data blanked out — ids, identities,
+//   text and note lines, the `reason`, and the recorded states' string leaves
+//   and member names — save a datum that is itself a whole number,
+//   `digitHoldingData` from section-10.7-i.ts). The `reason` is free text,
+//   never compared (H-3): it is only blanked, so its digits (a `SPEC 10.6`
+//   citation) never stand in for an offset. Limits: no mention is associated
+//   with another, so which text, range, or presence belongs to which payload
+//   node, and to which side of an origin pair, stays with the JSON
+//   assertions, as do which recorded state holds a hash and whether the item
+//   is blocked (a report may spell `blocked` for an unblocked item: the built
+//   product prints `blocked: false`); a text line counts wherever the report
+//   prints it — a node's own text recurs in its ancestors' subtree texts, and
+//   a short line (the embedding's trailing `line.`) inside a longer one — and
+//   an identity in the `reason` too; recorded hashes are asked only where
+//   captured, since `baseline` and `current` are product-shaped (H-4); a
+//   `reason` the report rewords is not blanked, so its digits may then stand
+//   in for an offset; and a datum that is itself a whole number stays
+//   unblanked, so it and an offset of its value may stand in for each other.
 // - Payload texts are byte-compared against `query node` captures taken at
 //   the pinned graph states (own/subtree text per SPEC 1.6, source ranges per
 //   1.7 — the same values T11-1 fixes for `query node`), with distinctness
@@ -115,6 +152,7 @@ import type {
   ExportReport,
   ItemKind,
   ItemStatus,
+  Mention,
   NextReport,
   NodeReport,
   OriginEntry,
@@ -130,7 +168,10 @@ import {
   decodeNextReport,
   decodeNodeReport,
   decodeSessionStatusReport,
+  identityMention,
   nameMention,
+  numberMention,
+  specTokenMention,
 } from "../../helpers/adapters/index.js";
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -140,6 +181,7 @@ import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
+import { digitHoldingData } from "./section-10.7-i.js";
 import {
   assertSameJson,
   buildOk,
@@ -1620,6 +1662,177 @@ const T10_7_7 = defineProductTest({
 // T10.7-8 — show/export
 // ---------------------------------------------------------------------------
 
+/**
+ * The non-blank lines of a text value, each trimmed — the form a human
+ * report's text mentions take (helpers/adapters/human.ts: literal data, each
+ * line a plain substring); none for an absent value.
+ */
+function nonBlankLines(text: string | undefined): readonly string[] {
+  if (text === undefined) return [];
+  return text
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+/**
+ * Every string leaf and every member name of a decoded JSON value — the
+ * literal data a product-shaped recorded state (`baseline`, `current`;
+ * H-4) carries, its hashes and the identities it keys nodes by alike.
+ */
+function stringLeavesAndMemberNames(value: unknown): readonly string[] {
+  // H-11: an explicit stack, never native recursion per nesting level.
+  const into: string[] = [];
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (typeof current === "string") {
+      into.push(current);
+    } else if (Array.isArray(current)) {
+      for (const element of current) stack.push(element);
+    } else if (current !== null && typeof current === "object") {
+      for (const [member, element] of Object.entries(current)) {
+        into.push(member);
+        stack.push(element);
+      }
+    }
+  }
+  return into;
+}
+
+/**
+ * The human `review show <name> <item-id>` at the state of a decoded `review
+ * show <name> <item-id> --json` item, after that item's own assertions —
+ * T12.0-1's information parity (SPEC 12.0: the JSON form carries the same
+ * information as the human report; the module header): the same argv
+ * without `--json` exits 0, and its report mentions what the decoded item
+ * carries (SPEC 10.2, 10.7: every 10.2 field plus the self-contained text
+ * payload) — its id and each `blockedBy` id (item-id boundaries, so
+ * `item-1` never counts inside `item-10`), its kind and status, `blocked`
+ * where it is blocked, and `absent` wherever it presents a node or an origin
+ * side absent (SPEC-named tokens; 10.3, 10.7: "presented absent"), its
+ * scope, context, and origin identities (identity boundaries, so the root's
+ * `specs/X.mdx` never counts inside `specs/X.mdx#x`), every non-blank line
+ * of every text it carries — scope, context, and origin before and after —
+ * and of its note (trimmed), and each hash of the given `query node`
+ * captures that its `baseline` or `current` holds as a string leaf
+ * (product-to-itself, no hash pinned: the recorded state is product-shaped,
+ * H-4); then, in a separate call, the start and end of every source range
+ * it carries (whole numbers, matched with the item's digit-holding data
+ * blanked out — the session name, ids, identities, text and note lines, the
+ * `reason`'s lines, and every string leaf and member name of `baseline` and
+ * `current`, whose hashes and node identities a report may print — save a
+ * datum that is itself a whole number, `digitHoldingData`). The `reason`
+ * is free text and never compared (H-3); it is only blanked, so its digits
+ * (a `SPEC 10.6` citation) never stand in for an offset. Robust matching
+ * (H-3): presence, never wording, and no mention associated with another.
+ */
+async function assertHumanShowItem(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  item: ReviewItem,
+  context: string,
+  captures: readonly NodeReport[] = [],
+): Promise<void> {
+  const label = `${context} \`review show ${name} ${item.id}\` (human report)`;
+  const human = await expectExit(
+    product,
+    workspace,
+    ["review", "show", name, item.id],
+    0,
+    `${label} — the same exit code as the \`--json\` read at this state ` +
+      `(SPEC 10.7, 12.0)`,
+  );
+  const identities = new Set<string>([
+    item.scope.node,
+    ...item.context.map((state) => state.node),
+    ...item.origin.map((entry) => entry.node),
+  ]);
+  const texts: string[] = [];
+  const offsets = new Set<number>();
+  let absent = false;
+  for (const state of [item.scope, ...item.context]) {
+    if (!state.present) absent = true;
+    if (state.text !== undefined) texts.push(state.text);
+    if (state.sourceRange !== undefined) {
+      offsets.add(state.sourceRange.start);
+      offsets.add(state.sourceRange.end);
+    }
+  }
+  for (const entry of item.origin) {
+    for (const side of [entry.before, entry.after]) {
+      if (side.present) texts.push(side.text);
+      else absent = true;
+    }
+    if (entry.sourceRange !== undefined) {
+      offsets.add(entry.sourceRange.start);
+      offsets.add(entry.sourceRange.end);
+    }
+  }
+  const lines = new Set(texts.flatMap(nonBlankLines));
+  const noteLines = nonBlankLines(item.note);
+  const recorded = [
+    ...collectStringLeaves(item.baseline),
+    ...collectStringLeaves(item.current),
+  ];
+  const hashes = new Set<string>();
+  for (const capture of captures) {
+    for (const hash of Object.values(capture.hashes)) {
+      if (recorded.includes(hash)) hashes.add(hash);
+    }
+  }
+  const tokens = new Set<string>([item.kind, item.status]);
+  if (item.blocked) tokens.add("blocked");
+  if (absent) tokens.add("absent");
+  const mentions: Mention[] = [
+    nameMention(item.id),
+    ...[...new Set(item.blockedBy)].map(nameMention),
+    ...[...identities].map(identityMention),
+    ...lines,
+    ...noteLines,
+    ...hashes,
+    ...[...tokens].map(specTokenMention),
+  ];
+  assertReportMentions(
+    human,
+    mentions,
+    `${label}: the full item — its id, kind, and status, \`blocked\` where ` +
+      `it is blocked and each \`blockedBy\` id, its note, its scope, ` +
+      `context, and origin identities, \`absent\` wherever it presents a ` +
+      `node or an origin side absent, every line of the texts it carries, ` +
+      `and the captured hashes its \`baseline\` and \`current\` hold — the ` +
+      `information of the JSON item (SPEC 10.2, 10.3, 10.7, 12.0)`,
+  );
+  if (offsets.size > 0) {
+    assertReportMentions(
+      human,
+      [...offsets].map(numberMention),
+      `${label}: the start and end of every source range the item carries, ` +
+        `whole numbers, matched with the item's digit-holding data — the ` +
+        `session name, ids, identities, text and note lines, the reason, ` +
+        `and the recorded states' string leaves and member names — blanked ` +
+        `out, save a datum that is itself a whole number (SPEC 1.7, 10.7, ` +
+        `12.0)`,
+      {
+        blank: digitHoldingData([
+          ...new Set([
+            name,
+            item.id,
+            ...item.blockedBy,
+            ...identities,
+            ...lines,
+            ...noteLines,
+            ...nonBlankLines(item.reason),
+            ...stringLeavesAndMemberNames(item.baseline),
+            ...stringLeavesAndMemberNames(item.current),
+          ]),
+        ]),
+      },
+    );
+  }
+}
+
 const E8_FILE = "specs/X.mdx";
 const E8_X = "specs/X.mdx#x";
 const E8_XK = "specs/X.mdx#x.k";
@@ -1647,7 +1860,7 @@ const T10_7_8_X_KAY_V1 = stagedMdx(
 const T10_7_8 = defineProductTest({
   id: "T10.7-8",
   title:
-    "`review show <name> <item-id>` reports the full item — the 10.2 fields plus the identical self-contained text payload as `next --json` (compared whole against the item `next` returns); an unknown item ID, including the id of an item removed by `split`, is exit 2; `review export <name>` emits one JSON document as its only output form — byte-parsed and information-identical with and without `--json` — containing the session's name, strategy, recorded creation parameters, recorded decompositions (holding the split item's scope-node identity), and every item in item order with its fields, blocked state, payload, and read-time invalidation applied (a stored `no-change` under an edited scope exports as `invalidated`, re-blocking its dependents) (SPEC 10.2, 10.4, 10.6, 10.7, 12.0)",
+    "`review show <name> <item-id>` reports the full item — the 10.2 fields plus the identical self-contained text payload as `next --json` (compared whole against the item `next` returns); an unknown item ID, including the id of an item removed by `split`, is exit 2; `review export <name>` emits one JSON document as its only output form — byte-parsed and information-identical with and without `--json` — containing the session's name, strategy, recorded creation parameters, recorded decompositions (holding the split item's scope-node identity), and every item in item order with its fields, blocked state, payload, and read-time invalidation applied (a stored `no-change` under an edited scope exports as `invalidated`, re-blocking its dependents); and the human `review show` at the same state as a `show --json` read — of the item `next` returns and of the root's item, blocked by its child's — exits 0 and mentions the item's id, kind, and status, `blocked` where it is blocked, each `blockedBy` id, its scope and context identities, every line of its texts, its source ranges' offsets, and the recorded hashes `query node` captured (robust matching, H-3) (SPEC 1.7, 10.2, 10.3, 10.4, 10.6, 10.7, 12.0)",
   timeoutMs: 360_000,
   run: async (product) => {
     await withWorkspace(
@@ -1686,9 +1899,24 @@ const T10_7_8 = defineProductTest({
             `every 10.2 field plus the same self-contained text payload as ` +
             `\`next --json\` (SPEC 10.7)`,
         );
+        // The human form at the same state (T12.0-1, SPEC 12.0; the module
+        // header): x.k's item, with a `query node` capture of x.k taken at
+        // this state for the hashes its recorded state holds.
+        const xkNow = await queryNode(
+          product,
+          workspace,
+          E8_XK,
+          `${prefix} capture of x.k`,
+        );
+        await assertHumanShowItem(
+          product,
+          workspace,
+          "s",
+          shown,
+          `${prefix} x.k's item`,
+          [xkNow],
+        );
 
-        // Stage the decomposition: resolve x.k's item so nothing blocks x's,
-        // then split x's item (x has the one child x.k).
         const status = await sessionStatus(product, workspace, "s", prefix);
         const idRoot = requireRow(
           status,
@@ -1698,6 +1926,54 @@ const T10_7_8 = defineProductTest({
         ).id;
         const idX = requireRow(status, "subtree-coherence", E8_X, prefix).id;
         const idXK = requireRow(status, "subtree-coherence", E8_XK, prefix).id;
+
+        // The root's item at the same state — nothing has mutated since the
+        // reads above — through `show --json`, then its human form: an item
+        // that is blocked, with a non-empty `blockedBy` (x's item, the
+        // root's one child section's, unresolved: SPEC 10.3, 10.6).
+        const rootLabel = `${prefix} root's item`;
+        const rootShown = await showItem(
+          product,
+          workspace,
+          "s",
+          idRoot,
+          rootLabel,
+        );
+        assertSameJson(
+          {
+            id: rootShown.id,
+            kind: rootShown.kind,
+            scope: rootShown.scope.node,
+            status: rootShown.status,
+            blocked: rootShown.blocked,
+          },
+          {
+            id: idRoot,
+            kind: "subtree-coherence",
+            scope: E8_FILE,
+            status: "unresolved",
+            blocked: true,
+          },
+          `${rootLabel}: \`show\` reports the root's audit item — ` +
+            `unresolved, and blocked while its child x's item is unresolved ` +
+            `(SPEC 10.2, 10.3, 10.6, 10.7)`,
+        );
+        assertBlockedBy(
+          rootShown,
+          [idX],
+          `${rootLabel} — an audit item is blocked by its child sections' ` +
+            `items, here x's (SPEC 10.6)`,
+        );
+        await assertHumanShowItem(
+          product,
+          workspace,
+          "s",
+          rootShown,
+          rootLabel,
+        );
+
+        // Stage the decomposition: resolve x.k's item so nothing blocks x's,
+        // then split x's item (x has the one child x.k).
         await resolveOk(
           product,
           workspace,
@@ -3243,7 +3519,7 @@ const U12_SOURCE = stagedMdx(
 const T10_7_12 = defineProductTest({
   id: "T10.7-12",
   title:
-    "payload text contract: a baseline fixture generating every built-in kind (a coverage session supplying `uncovered-requirement`), texts byte-asserted against `query node` captures in `export`, identically via `show` per item, and identically in `next --json` through a full walk of each session (one payload rule), with an embedding inside asserted texts to pin 1.6 expansion (the expanded target's bytes present, the unexpanded `text(` spelling absent); scope text by kind — the scope root's subtree text for `subtree-coherence`, the scope node's subtree text for `uncovered-requirement`, the scope node's own text (differing from its subtree text by fixture) for `parent-consistency`, `dependency-consistency`, and `metadata-consistency`, and a `code-impact` scope as identity, presence, and — when present — its source range, with no text (review payloads are one of the two range-presenting outputs for code locations: the present location is a named unit whose construct range is byte-asserted against precomputed offsets, and a deleted location's entry carries none); context text — own text for ancestor-chain contexts (`subtree-coherence`, `uncovered-requirement`), subtree text otherwise (`parent-consistency` branch children; `dependency-consistency`, `metadata-consistency`, and `code-impact` targets); origin text — a before/after pair of own text, before from the item's baseline and after from the current graph (an originating node re-edited after `create` differs on both sides from the create-time value), with the before side absent (no text) for a node added since the baseline and the after side absent for a since-deleted node; source ranges on present requirement nodes byte-equal to `query node`'s and absent on absent nodes; absent-node provenance — a node edited between the baseline and `create`, recorded into an item's scope or context at `create`, then deleted, presents the create-time text (not the differing baseline value) and still does after an `updated` resolve re-derives the session without it, while a node deleted since the baseline and never seen by a mutating derivation with newer text presents its baseline value (SPEC 1.6, 1.7, 4.6, 5.6, 9.2, 10.2, 10.4, 10.5, 10.7)",
+    "payload text contract: a baseline fixture generating every built-in kind (a coverage session supplying `uncovered-requirement`), texts byte-asserted against `query node` captures in `export`, identically via `show` per item, and identically in `next --json` through a full walk of each session (one payload rule), with an embedding inside asserted texts to pin 1.6 expansion (the expanded target's bytes present, the unexpanded `text(` spelling absent); scope text by kind — the scope root's subtree text for `subtree-coherence`, the scope node's subtree text for `uncovered-requirement`, the scope node's own text (differing from its subtree text by fixture) for `parent-consistency`, `dependency-consistency`, and `metadata-consistency`, and a `code-impact` scope as identity, presence, and — when present — its source range, with no text (review payloads are one of the two range-presenting outputs for code locations: the present location is a named unit whose construct range is byte-asserted against precomputed offsets, and a deleted location's entry carries none); context text — own text for ancestor-chain contexts (`subtree-coherence`, `uncovered-requirement`), subtree text otherwise (`parent-consistency` branch children; `dependency-consistency`, `metadata-consistency`, and `code-impact` targets); origin text — a before/after pair of own text, before from the item's baseline and after from the current graph (an originating node re-edited after `create` differs on both sides from the create-time value), with the before side absent (no text) for a node added since the baseline and the after side absent for a since-deleted node; source ranges on present requirement nodes byte-equal to `query node`'s and absent on absent nodes; absent-node provenance — a node edited between the baseline and `create`, recorded into an item's scope or context at `create`, then deleted, presents the create-time text (not the differing baseline value) and still does after an `updated` resolve re-derives the session without it, while a node deleted since the baseline and never seen by a mutating derivation with newer text presents its baseline value; and at every `show` read — each item of the matrix and coverage sessions, and both provenance reads at either stage — the human `review show` at the same state exits 0 and mentions the item's id, kind, and status, `blocked` where it is blocked, each `blockedBy` id, its scope, context, and origin identities, `absent` for each node or origin side presented absent, every line of its texts, and its source ranges' offsets (robust matching, H-3) (SPEC 1.6, 1.7, 4.6, 5.6, 9.2, 10.2, 10.3, 10.4, 10.5, 10.7, 12.0)",
   timeoutMs: 600_000,
   run: async (product) => {
     // --- sub-fixture A: the per-kind matrix over a path-blocks session -------
@@ -3798,7 +4074,9 @@ const T10_7_12 = defineProductTest({
 
         // One payload rule (SPEC 10.7): `show` presents each item with the
         // identical payload, and a full `next` walk returns every item once
-        // with the identical payload.
+        // with the identical payload. Each `show` read is followed by the
+        // human `show` at the same state (T12.0-1, SPEC 12.0; the module
+        // header), before the walk resolves anything.
         for (const item of exported.items) {
           const shown = await showItem(
             product,
@@ -3813,6 +4091,13 @@ const T10_7_12 = defineProductTest({
             `${prefix}: \`show\` of item ${item.id} (${item.kind} ` +
               `${item.scope.node}) presents the same self-contained text ` +
               `payload as \`export\` (SPEC 10.7)`,
+          );
+          await assertHumanShowItem(
+            product,
+            workspace,
+            "s",
+            shown,
+            `${prefix} ${shown.kind}(${shown.scope.node})`,
           );
         }
         await walkNextAgainstReference(
@@ -3959,6 +4244,23 @@ const T10_7_12 = defineProductTest({
             `${prefix} ${stage}: \`export\` presents dm's item with the ` +
               `same payload as \`show\` (SPEC 10.7)`,
           );
+          // The human form of both `show` reads at the same state, only
+          // reads having run since (T12.0-1, SPEC 12.0; the module header):
+          // px.x's absent scope and yq.y's absent context entry.
+          await assertHumanShowItem(
+            product,
+            workspace,
+            "s",
+            xItem,
+            `${prefix} ${stage}, px.x's item`,
+          );
+          await assertHumanShowItem(
+            product,
+            workspace,
+            "s",
+            dmItem,
+            `${prefix} ${stage}, dm's item`,
+          );
         };
 
         await assertProvenance("after the px.x deletion");
@@ -4076,15 +4378,28 @@ const T10_7_12 = defineProductTest({
         );
 
         // One payload rule over the coverage session too: show per item and
-        // the full next walk.
+        // the full next walk — each `show` read followed by the human `show`
+        // at the same state (T12.0-1, SPEC 12.0; the module header).
         for (const item of exported.items) {
+          const shown = await showItem(
+            product,
+            workspace,
+            "c",
+            item.id,
+            prefix,
+          );
           assertSameInformation(
-            payloadProjection(
-              await showItem(product, workspace, "c", item.id, prefix),
-            ),
+            payloadProjection(shown),
             payloadProjection(item),
             `${prefix}: \`show\` of item ${item.id} presents the same ` +
               `payload as \`export\` (SPEC 10.7)`,
+          );
+          await assertHumanShowItem(
+            product,
+            workspace,
+            "c",
+            shown,
+            `${prefix} ${shown.kind}(${shown.scope.node})`,
           );
         }
         await walkNextAgainstReference(
