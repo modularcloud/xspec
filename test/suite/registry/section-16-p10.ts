@@ -25,10 +25,14 @@
 //   * and a polling reader (helpers/path-poller.ts, T13.5-5's machinery)
 //     over the episode's fixed path set — the journal, the session file,
 //     the spec source and a move's destination, their generated modules,
-//     and the companions beside them (SPEC 13.1: the files beside each
-//     source named `NAME.xspec.` plus a suffix, listed from the workspace
-//     and from the twin's final state before the episode starts; none for a
-//     product writing none) — never the lock path.
+//     the companions beside them (SPEC 13.1: the files beside each source
+//     named `NAME.xspec.` plus a suffix, listed from the workspace and from
+//     the twin's final state before the episode starts; none for a product
+//     writing none), and graph data (13.3: the plain files of T13.3-2's
+//     operational path set, collected likewise from the workspace and from
+//     the twin's final state, which leaves out the journal, the reviews
+//     directory, and the lock path with everything under it) — never the
+//     lock path.
 //
 // Each episode's command ends one of three ways: run to its end (held and
 // lifted, or unheld); killed while held; or killed past its hold, at a fixed
@@ -48,18 +52,36 @@
 //     T13.5-5's protocol) at every path but the lock path — where 13.5's
 //     atomicity admits no discriminating observation (TEST-SPEC P-10,
 //     recorded there as T6.5-6 records its unstageable clauses), so it is
-//     never polled: every distinct state polled at a path is its state
-//     before the episode or after it — the episode's one mutating command
-//     writes each polled path at most once (a rename rewrites the source,
-//     appends one journal entry, and regenerates the module and its
+//     never polled: every distinct state polled at a path but graph data is
+//     its state before the episode or after it — the episode's one mutating
+//     command writes each such path at most once (a rename rewrites the
+//     source, appends one journal entry, and regenerates the module and its
 //     companions, 6.4; a file move relocates the source, and its finishing
 //     regeneration writes the module and companions at the destination's
 //     stem and removes the origin's, 6.5, 13.4; a resolve writes the
 //     session once, last, 13.5) and no reader writes one (the read menu
 //     leaves out `build`; a reader's refresh writes graph data alone,
-//     generating no TypeScript, 13.3); the journal's observations are
-//     prefix-monotone (append-only, 6.1) and never absent after content
-//     (never deleted);
+//     generating no TypeScript, 13.3). Graph data has an oracle of its own:
+//     readers' refreshes write it too, last write wins (13.3, 13.5), so a
+//     graph-data path may pass through complete states that are neither its
+//     state before the episode nor its twin's after it — the product's own
+//     graph data for some state of the episode's files (derived files are
+//     reproducible from the sources, the configuration, and the journal,
+//     13.4, 5.4; graph data byte-deterministic, 12.0): each source the
+//     operation writes at its start or end state independently (a read can
+//     meet a moving file at both paths or at neither), the journal at
+//     either (one atomic append), and the recorded derived-file paths as
+//     the start's or the twin's graph data holds them (a refresh keeps the
+//     record it reads, 13.3). So every state polled at a graph-data path,
+//     and its state after the episode, is its start state, its twin's final
+//     state, or its state in a staged copy of the twin's final workspace
+//     holding one such combination once a refreshing read (`ids --json`)
+//     has run there alone: the product's own outputs, a product-to-itself
+//     comparison (H-4) pinning no graph-data byte — staged lazily, only
+//     once some observed state is neither the start's nor the twin's, and
+//     reached only by products whose reads refresh (the CONF-CORE
+//     product's never do); the journal's observations are prefix-monotone
+//     (append-only, 6.1) and never absent after content (never deleted);
 //   * mutual exclusion never loses a journal append or a resolution (post
 //     hoc, per run; `rename` and `move` the journal's only writers, 6.1):
 //     each `rename`/`move` exiting 0 added exactly one journal line, each
@@ -123,6 +145,7 @@
 // under every timing (E-5).
 
 import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type {
@@ -131,8 +154,10 @@ import type {
   SessionStatusRow,
 } from "../../helpers/adapters/index.js";
 import {
+  collectGraphDataFiles,
   decodeSessionListReport,
   decodeSessionStatusReport,
+  GRAPH_DATA_AREA_PATH,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
@@ -152,6 +177,7 @@ import {
 } from "../../helpers/lock-state.js";
 import type { PolledState } from "../../helpers/path-poller.js";
 import {
+  ABSENT_STATE,
   describePolledState,
   PathPoller,
   polledStateKey,
@@ -167,10 +193,12 @@ import type {
 } from "../../helpers/snapshot.js";
 import {
   assertSnapshotsEqual,
+  describeEntry,
   describeEntryDifference,
   diffSnapshots,
   displaySnapshotPath,
   snapshotDirectory,
+  snapshotKeyBytes,
 } from "../../helpers/snapshot.js";
 import type {
   KilledGroup,
@@ -296,9 +324,10 @@ export type P10Fate = "complete" | "heldKill" | "pastHoldKill";
 /**
  * The concurrent-read menu (module header): CONF-CORE's read commands
  * (§CONF-READERS), fixed valid argv. `build` is left out: its module and
- * companion writes, legitimate beside a mutating command under 13.5's
- * last-write-wins, would add states the polling reader's oracle does not
- * enumerate.
+ * companion writes, and its graph data recording the derived files it
+ * generates — a record no refresh writes (13.3) — legitimate beside a
+ * mutating command under 13.5's last-write-wins, would add states the
+ * polling reader's oracle does not enumerate.
  */
 const READ_MENU: readonly {
   readonly argv: readonly string[];
@@ -1337,29 +1366,430 @@ async function derivedFilesBeside(
 /**
  * The episode's polled paths (module header): the journal, the session
  * file, the spec source and a move's destination, their generated modules,
- * and the companions beside them — `derivedRels`, the files beside each of
+ * the companions beside them — `derivedRels`, the files beside each of
  * those sources named `NAME.xspec.` plus a suffix (SPEC 13.1;
  * derivedFilesBeside), listed from the workspace and from the twin's final
- * state before the episode starts (none for a product writing none), added
- * without duplicates. The module stays named, so one absent from both
- * listings is still polled. These are every path the episode's command may
- * write but graph data, never the lock path: its one mutating command
- * writes each module and companion at most once (6.4, 6.5), and no reader
- * writes one (13.3: a refresh generates no TypeScript).
+ * state before the episode starts (none for a product writing none) — and
+ * graph data — `graphDataRels`, the plain files of T13.3-2's operational
+ * path set, collected likewise (graphDataRelsOf) — added without
+ * duplicates. The module stays named, so one absent from both listings is
+ * still polled. These are every path the episode's command may write, never
+ * the lock path: its one mutating command writes each module and companion
+ * at most once (6.4, 6.5), and no reader writes one (13.3: a refresh
+ * generates no TypeScript); graph data, which readers' refreshes write too,
+ * is judged on its own terms (judgeGraphDataPath).
  */
 function polledRelsOf(
   episode: P10Episode,
   currentFile: string,
   derivedRels: readonly string[],
+  graphDataRels: readonly string[],
 ): string[] {
   const rels = [JOURNAL_REL, SESSION_REL];
   for (const source of episodeSourcesOf(episode, currentFile)) {
     rels.push(source, moduleRelOf(source));
   }
-  for (const rel of derivedRels) {
+  for (const rel of [...derivedRels, ...graphDataRels]) {
     if (!rels.includes(rel)) rels.push(rel);
   }
   return rels;
+}
+
+// ---------------------------------------------------------------------------
+// Graph data: its paths, and the product's own complete states for an episode
+
+/**
+ * The plain files of T13.3-2's operational path set in a workspace
+ * (`collectGraphDataFiles`: every path under `.xspec/` but the durable
+ * journal and reviews paths and the lock path with everything under it), as
+ * snapshot keys in byte order — none where the graph-data area holds no
+ * directory (absent, or anything else, under which nothing lies, 13.4).
+ */
+async function graphDataKeysIn(workspace: TestWorkspace): Promise<string[]> {
+  if ((await workspace.kind(GRAPH_DATA_AREA_PATH)) !== "dir") return [];
+  return await collectGraphDataFiles(workspace.root);
+}
+
+/**
+ * An episode's graph-data paths (module header): the graph-data files
+ * (graphDataKeysIn) of its workspace and of its twin's final one together,
+ * listed once the twin has run and before the episode starts, in byte
+ * order, each as the workspace-relative path string the polling reader
+ * reads — the UTF-8 decoding of the key's exact bytes (`snapshotKeyBytes`),
+ * an ASCII key the path itself. A name that is not valid UTF-8 is a harness
+ * error naming the limitation (the polling reader reads string paths),
+ * never a silently unpolled path: graph data's layout is the product's
+ * (SPEC 13.3).
+ */
+async function graphDataRelsOf(
+  workspaces: readonly TestWorkspace[],
+  context: string,
+): Promise<string[]> {
+  const keys = new Set<string>();
+  for (const listed of workspaces) {
+    for (const key of await graphDataKeysIn(listed)) keys.add(key);
+  }
+  return [...keys].sort().map((key) => {
+    const bytes = snapshotKeyBytes(key);
+    try {
+      return new TextDecoder("utf-8", {
+        fatal: true,
+        ignoreBOM: true,
+      }).decode(bytes);
+    } catch {
+      throw new Error(
+        `harness error: ${context}: the graph-data file <path bytes ` +
+          `${bytes.toString("hex")}> (T13.3-2's operational path set) is ` +
+          `not named in valid UTF-8 — the polling reader reads string ` +
+          `paths, so P-10 cannot poll it (SPEC 13.3 leaves graph data's ` +
+          `layout to the product)`,
+      );
+    }
+  });
+}
+
+/** The staged states of an episode's graph-data paths (stagedGraphDataStates). */
+interface StagedGraphData {
+  /** Each graph-data path's distinct staged states, by state key. */
+  readonly states: ReadonlyMap<string, ReadonlyMap<string, PolledState>>;
+  /** The staged workspaces run: one per combination. */
+  readonly combinations: number;
+}
+
+/** What judges an episode's graph-data paths (judgeGraphDataPath). */
+interface GraphDataOracle {
+  /** Each graph-data path's state in the twin's final workspace. */
+  readonly twinFinal: ReadonlyMap<string, PolledState>;
+  /** The staged states, computed at the first call, at most once. */
+  readonly staged: () => Promise<StagedGraphData>;
+}
+
+/**
+ * The state a staged workspace gives a source path or the journal: its
+ * state in a compared view of the twin — a plain file's bytes, or absence.
+ * Anything else there fails diagnosed: every file xspec writes is a plain
+ * file (SPEC 13.4), and P-10 stages those paths' plain-file and absent
+ * states alone.
+ */
+function stagedStateAt(
+  view: DirectorySnapshot,
+  key: string,
+  side: string,
+  context: string,
+): PolledState {
+  const entry = view.entries.get(key);
+  if (entry === undefined) return ABSENT_STATE;
+  if (entry.kind === "file") return { kind: "content", bytes: entry.bytes };
+  return fail(
+    `${context}: ${displaySnapshotPath(key)} ${side} is ` +
+      `${describeEntry(entry)} — every file xspec writes is a plain file ` +
+      `(SPEC 13.4), so the states P-10 stages for the graph data a reader ` +
+      `meets are a source's and the journal's plain-file and absent states`,
+  );
+}
+
+/** Each distinct state of a list, in list order. */
+function distinctStates(states: readonly PolledState[]): PolledState[] {
+  const keys = new Set<string>();
+  return states.filter((state) => {
+    const key = polledStateKey(state);
+    if (keys.has(key)) return false;
+    keys.add(key);
+    return true;
+  });
+}
+
+/**
+ * Write a file state at a workspace-relative byte path of a staged
+ * workspace — its bytes, parent directories created, or, for absence,
+ * nothing there — through raw filesystem calls: bytes the episode's
+ * workspace held or the product wrote, never harness-composed text.
+ */
+async function stageFileState(
+  copy: TestWorkspace,
+  rel: Uint8Array,
+  state: PolledState,
+): Promise<void> {
+  const abs = copy.bytePath(rel);
+  if (state.kind === "absent") {
+    await fsp.rm(abs, { force: true });
+    return;
+  }
+  const slash = Buffer.from(rel).lastIndexOf(0x2f);
+  if (slash > 0) {
+    await fsp.mkdir(copy.bytePath(rel.subarray(0, slash)), {
+      recursive: true,
+    });
+  }
+  await fsp.writeFile(abs, state.bytes);
+}
+
+/** The refreshing read every staged workspace runs (stagedGraphDataStates). */
+const STAGED_REFRESH_ARGV = ["ids", "--json"] as const;
+
+/**
+ * The graph data a product writes for every state of an episode's files a
+ * concurrent reader can meet (module header): its own outputs over staged
+ * copies of the episode's start and end, a product-to-itself comparison
+ * (H-4) pinning no graph-data byte. D is the source paths the twin's run
+ * changed — compared-view keys outside `.xspec/` whose entries in
+ * `twin.start` and `twin.final` differ, each a plain file in at least one of
+ * them: a rename's source, a move's origin and destination, none for a
+ * resolve; J the journal's states in `twin.start` and `twin.final`; G the
+ * graph-data files' states at the start (`start`, the captured start states)
+ * and in the twin's final workspace (`twinFinal`) — one state, or one set,
+ * where the two are equal. Every combination — each D path at its start or
+ * final state independently, each J, each G: a reader reads each source and
+ * the journal on either side of the command's one write to it, and a
+ * refresh keeps the record it reads, the start's or the regeneration's
+ * (13.3) — gets a fresh workspace holding a byte copy of the twin's final
+ * workspace (the lock path left out, as `runTwin` copies), each D path and
+ * the journal set to the combination's state byte for byte (or removed for
+ * absence), and every graph-data file replaced by G's set: bytes the
+ * workspace held or the product wrote, never harness-composed text, so no
+ * S-9 judgement applies, as none applies to the twin's copy, and each
+ * staged workspace holds only the episode's own files, of CONF-CORE's
+ * shapes (§CONF-READERS' staging constraint). `ids --json`, a refreshing
+ * read on CONF-CORE's surface, then runs there with no reader beside it:
+ * exit 0, or 1 where the combination fails `build`'s validations and
+ * refreshes nothing (13.3); any other end, or a run that does not end on
+ * its own, fails diagnosed (H-8) — a harness error propagating as itself
+ * (H-11). Each graph-data path's state there afterwards (absence where the
+ * copy holds none) is a staged state of that path. For P-10 that is 8
+ * combinations for a rename, 16 for a move, and 1 or 2 for a resolve.
+ */
+async function stagedGraphDataStates(
+  product: ProductBinding,
+  twin: EpisodeTwin,
+  graphDataRels: readonly string[],
+  start: ReadonlyMap<string, PolledState>,
+  twinFinal: ReadonlyMap<string, PolledState>,
+  context: string,
+): Promise<StagedGraphData> {
+  const sources = differingKeys(twin.start, twin.final)
+    .filter((key) => key !== ".xspec" && !key.startsWith(".xspec/"))
+    .filter(
+      (key) =>
+        twin.start.entries.get(key)?.kind === "file" ||
+        twin.final.entries.get(key)?.kind === "file",
+    )
+    .map((key) => ({
+      key,
+      sides: [
+        stagedStateAt(twin.start, key, "as the twin started", context),
+        stagedStateAt(twin.final, key, "as the twin left it", context),
+      ] as const,
+    }));
+  const journals = distinctStates([
+    stagedStateAt(twin.start, JOURNAL_REL, "as the twin started", context),
+    stagedStateAt(twin.final, JOURNAL_REL, "as the twin left it", context),
+  ]);
+  const graphDataSets = graphDataRels.every(
+    (rel) =>
+      polledStateKey(start.get(rel) ?? ABSENT_STATE) ===
+      polledStateKey(twinFinal.get(rel) ?? ABSENT_STATE),
+  )
+    ? [start]
+    : [start, twinFinal];
+  const sideName = (side: number, count: number): string =>
+    count === 1
+      ? "unchanged"
+      : side === 0
+        ? "as it started"
+        : "as the twin left it";
+  const states = new Map<string, Map<string, PolledState>>(
+    graphDataRels.map((rel) => [rel, new Map<string, PolledState>()]),
+  );
+  let combinations = 0;
+  for (let bits = 0; bits < 2 ** sources.length; bits += 1) {
+    const sides = sources.map(
+      (_, index) => (bits >> (sources.length - 1 - index)) & 1,
+    );
+    for (const [journalSide, journal] of journals.entries()) {
+      for (const [setSide, graphData] of graphDataSets.entries()) {
+        combinations += 1;
+        const label =
+          `staged combination ${String(combinations)} — ` +
+          [
+            ...sources.map(
+              (source, index) =>
+                `${displaySnapshotPath(source.key)} ` +
+                `${sideName(sides[index], 2)} ` +
+                `(${describePolledState(source.sides[sides[index]])})`,
+            ),
+            `the journal ${sideName(journalSide, journals.length)}`,
+            `graph data ${sideName(setSide, graphDataSets.length)}`,
+          ].join(", ");
+        const copy = await TestWorkspace.create({});
+        try {
+          await copyTreeBytes(
+            Buffer.from(twin.workspace.root),
+            Buffer.from(copy.root),
+            isLockPathBytes,
+          );
+          for (const [index, source] of sources.entries()) {
+            await stageFileState(
+              copy,
+              snapshotKeyBytes(source.key),
+              source.sides[sides[index]],
+            );
+          }
+          await stageFileState(copy, Buffer.from(JOURNAL_REL), journal);
+          for (const key of await graphDataKeysIn(copy)) {
+            await fsp.rm(copy.bytePath(snapshotKeyBytes(key)));
+          }
+          for (const rel of graphDataRels) {
+            const state = graphData.get(rel) ?? ABSENT_STATE;
+            if (state.kind === "content") {
+              await stageFileState(copy, Buffer.from(rel), state);
+            }
+          }
+          let result: RunResult;
+          try {
+            result = await runProduct(product, {
+              cwd: copy.root,
+              argv: STAGED_REFRESH_ARGV,
+            });
+          } catch (error) {
+            rethrowHarnessError(error);
+            return fail(
+              `${context}: \`ids --json\` over ${label}, run alone, must ` +
+                `end on its own (SPEC 13.3; H-8) — ` +
+                `${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+          if (
+            result.signal !== null ||
+            (result.exitCode !== 0 && result.exitCode !== 1)
+          ) {
+            fail(
+              `${context}: \`ids --json\` over ${label}, run alone, must ` +
+                `answer, exit 0, or — where that state of the episode's ` +
+                `files fails \`build\`'s validations — report their ` +
+                `findings, exit 1, refreshing nothing: a read's argv and ` +
+                `configuration are fixed valid (SPEC 13.3, 12.0; P-10 ` +
+                `stages there the graph data a concurrent reader meets); ` +
+                `got ${summarizeResult(result)}`,
+            );
+          }
+          for (const rel of graphDataRels) {
+            const state = await readPolledState(copy.path(rel));
+            states.get(rel)?.set(polledStateKey(state), state);
+          }
+        } finally {
+          await copy.dispose();
+        }
+      }
+    }
+  }
+  return { states, combinations };
+}
+
+/**
+ * Of the content candidates, the one a diagnosis compares an observed
+ * content state with byte by byte: among the candidates the observed bytes
+ * are a strict prefix of — a partial write's hallmark — if any, else among
+ * them all, the nearest by length (the first of equally near ones); none
+ * for an absent observation.
+ */
+function nearestContent(
+  state: PolledState,
+  candidates: readonly PolledState[],
+): Uint8Array | undefined {
+  if (state.kind !== "content") return undefined;
+  const contents = candidates.flatMap((candidate) =>
+    candidate.kind === "content" ? [candidate.bytes] : [],
+  );
+  const extended = contents.filter(
+    (bytes) =>
+      bytes.length > state.bytes.length && isPrefix(state.bytes, bytes),
+  );
+  let nearest: Uint8Array | undefined;
+  for (const bytes of extended.length > 0 ? extended : contents) {
+    if (
+      nearest === undefined ||
+      Math.abs(bytes.length - state.bytes.length) <
+        Math.abs(nearest.length - state.bytes.length)
+    ) {
+      nearest = bytes;
+    }
+  }
+  return nearest;
+}
+
+/**
+ * Judge one graph-data path's polled states (module header): every distinct
+ * state the polling reader recorded there, and its state after the episode,
+ * must be its start state, its twin's final state, or — once some observed
+ * state is neither, the staged states computed then, at most once per
+ * episode (stagedGraphDataStates) — its state in a staged workspace: the
+ * product's own graph data for a state of the episode's files. Any other
+ * state is a partial write, which a path xspec writes never holds, concurrent
+ * readers and interrupted commands included (SPEC 13.5; T13.5-5's
+ * protocol) — or graph data that is no byte-deterministic function of the
+ * workspace's files (12.0), which the staged states assume: diagnosed with
+ * the polling cycle that first observed it and the nearest candidate's byte
+ * difference (nearestContent).
+ */
+async function judgeGraphDataPath(
+  poller: PathPoller,
+  rel: string,
+  abs: string,
+  start: PolledState,
+  end: PolledState,
+  twinFinal: PolledState,
+  oracle: GraphDataOracle,
+  context: string,
+): Promise<void> {
+  const observed = new Map<
+    string,
+    { readonly state: PolledState; readonly cycle: number | undefined }
+  >();
+  for (const [key, { state, firstIndex }] of poller.distinct(abs)) {
+    observed.set(key, { state, cycle: firstIndex });
+  }
+  const endKey = polledStateKey(end);
+  if (!observed.has(endKey)) {
+    observed.set(endKey, { state: end, cycle: undefined });
+  }
+  const prior = new Set([polledStateKey(start), polledStateKey(twinFinal)]);
+  const beyond = [...observed].filter(([key]) => !prior.has(key));
+  if (beyond.length === 0) return;
+  const { states, combinations } = await oracle.staged();
+  const staged = states.get(rel) ?? new Map<string, PolledState>();
+  for (const [key, { state, cycle }] of beyond) {
+    if (staged.has(key)) continue;
+    const nearest = nearestContent(state, [
+      start,
+      twinFinal,
+      ...staged.values(),
+    ]);
+    fail(
+      `${context}: ` +
+        (cycle === undefined
+          ? `once the episode had ended, ${rel} held`
+          : `polling cycle #${String(cycle)} observed ${rel} in`) +
+        ` a state that is neither its state before the episode, nor its ` +
+        `reader-free twin's after it, nor the graph data the product ` +
+        `writes for any state of the episode's files ` +
+        `(${String(staged.size)} distinct staged state(s) over ` +
+        `${String(combinations)} staged combination(s): each source the ` +
+        `operation writes at its start or end state, the journal at either, ` +
+        `and the start's or the twin's graph data beside them) — a partial ` +
+        `write: a path xspec writes holds its prior state or the complete ` +
+        `new content, concurrent readers and interrupted commands included, ` +
+        `readers' refreshes writing graph data too, last write wins (SPEC ` +
+        `13.5, 13.3; T13.5-5's protocol) — or else graph data that is no ` +
+        `byte-deterministic function of the workspace's files (12.0: the ` +
+        `staged states are the product's own outputs for them). Observed ` +
+        `${describePolledState(state)}; before ` +
+        `${describePolledState(start)}, the twin's ` +
+        `${describePolledState(twinFinal)}.` +
+        (nearest !== undefined && state.kind === "content"
+          ? `\n${describeByteDifference(state.bytes, nearest, "observed", "nearest")}`
+          : ""),
+    );
+  }
 }
 
 /**
@@ -1402,14 +1832,18 @@ class JournalOrder {
 /**
  * The polling reader's verdict (module header): no read error, at least one
  * cycle, the journal's order kept, and every distinct state observed at a
- * path its state before the episode or after it — prior or complete, never
- * partial (SPEC 13.5; T13.5-5's protocol).
+ * path but graph data its state before the episode or after it — prior or
+ * complete, never partial (SPEC 13.5; T13.5-5's protocol) — each graph-data
+ * path, which `graphData.twinFinal` names, judged on its own terms: its
+ * start state, its twin's final state, or the product's own graph data for
+ * a state of the episode's files (judgeGraphDataPath).
  */
 async function judgePolledStates(
   poller: PathPoller,
   order: JournalOrder,
   polled: readonly { readonly rel: string; readonly abs: string }[],
   startStates: ReadonlyMap<string, PolledState>,
+  graphData: GraphDataOracle,
   context: string,
 ): Promise<void> {
   if (poller.error !== undefined) {
@@ -1431,20 +1865,24 @@ async function judgePolledStates(
       throw new Error(`P-10 harness defect: no start state for ${rel}`);
     }
     const end = await readPolledState(abs);
+    const twinFinal = graphData.twinFinal.get(rel);
+    if (twinFinal !== undefined) {
+      await judgeGraphDataPath(
+        poller,
+        rel,
+        abs,
+        start,
+        end,
+        twinFinal,
+        graphData,
+        context,
+      );
+      continue;
+    }
     const legit = new Set([polledStateKey(start), polledStateKey(end)]);
     for (const [key, { state, firstIndex }] of poller.distinct(abs)) {
       if (legit.has(key)) continue;
-      let nearest: PolledState | undefined;
-      for (const candidate of [start, end]) {
-        if (candidate.kind !== "content" || state.kind !== "content") continue;
-        if (
-          nearest?.kind !== "content" ||
-          Math.abs(candidate.bytes.length - state.bytes.length) <
-            Math.abs(nearest.bytes.length - state.bytes.length)
-        ) {
-          nearest = candidate;
-        }
-      }
+      const nearest = nearestContent(state, [start, end]);
       fail(
         `${context}: polling cycle #${String(firstIndex)} observed ${rel} ` +
           `in a state that is neither its state before the episode nor its ` +
@@ -1454,8 +1892,8 @@ async function judgePolledStates(
           `command writes each polled path at most once). Observed ` +
           `${describePolledState(state)}; before ${describePolledState(start)}, ` +
           `after ${describePolledState(end)}.` +
-          (nearest?.kind === "content" && state.kind === "content"
-            ? `\n${describeByteDifference(state.bytes, nearest.bytes, "observed", "nearest")}`
+          (nearest !== undefined && state.kind === "content"
+            ? `\n${describeByteDifference(state.bytes, nearest, "observed", "nearest")}`
             : ""),
       );
     }
@@ -1645,13 +2083,15 @@ async function judgeEndedRun(
 /**
  * Run one episode (module header) on the trial's workspace: its operation
  * made concrete, its reader-free twin run first (on a copy), the derived
- * files beside its sources listed from both, then the polling reader
- * started, the pre-start readers started and confirmed running, the
- * command started — in a process group of its own — held or not, its held
- * and straddle reads, and its fate; the run judged at once as it ends, the
- * readers then settled, the polled states judged; the ledger and the file
- * model updated, and — after a `rename` or `move` killed past its hold —
- * the trial continued on the twin's workspace.
+ * files beside its sources and its graph data listed from both, then the
+ * polling reader started, the pre-start readers started and confirmed
+ * running, the command started — in a process group of its own — held or
+ * not, its held and straddle reads, and its fate; the run judged at once as
+ * it ends, the readers then settled, the polled states judged (graph data's
+ * staged states computed then, while the twin's workspace stands, where an
+ * observed state needs them); the ledger and the file model updated, and —
+ * after a `rename` or `move` killed past its hold — the trial continued on
+ * the twin's workspace.
  */
 async function runEpisode(
   product: ProductBinding,
@@ -1671,10 +2111,11 @@ async function runEpisode(
   );
   let adopted = false;
   try {
-    // The derived files beside the episode's sources, listed before it
-    // starts: from its start and from the twin's final state, which holds a
-    // move's destination's (polledRelsOf). No name met mid-episode is
-    // polled (an atomic write's temporary entry is no path P-10 judges).
+    // The derived files beside the episode's sources and its graph data,
+    // listed before it starts: from its start and from the twin's final
+    // state, which holds a move's destination's (polledRelsOf). No name met
+    // mid-episode is polled (an atomic write's temporary entry is no path
+    // P-10 judges).
     const derivedRels = new Set<string>();
     for (const listed of [workspace, twin.workspace]) {
       for (const source of episodeSourcesOf(episode, state.currentFile)) {
@@ -1683,9 +2124,16 @@ async function runEpisode(
         }
       }
     }
-    const polled = polledRelsOf(episode, state.currentFile, [
-      ...derivedRels,
-    ]).map((rel) => ({
+    const graphDataRels = await graphDataRelsOf(
+      [workspace, twin.workspace],
+      context,
+    );
+    const polled = polledRelsOf(
+      episode,
+      state.currentFile,
+      [...derivedRels],
+      graphDataRels,
+    ).map((rel) => ({
       rel,
       abs: workspace.path(rel),
     }));
@@ -1693,6 +2141,34 @@ async function runEpisode(
     for (const { abs } of polled) {
       startStates.set(abs, await readPolledState(abs));
     }
+    // Graph data's oracle (judgeGraphDataPath): each path's start state and
+    // its twin's final state, read beside the start states, and the staged
+    // states, computed only once an observed state is neither.
+    const graphDataStart = new Map<string, PolledState>();
+    const graphDataTwinFinal = new Map<string, PolledState>();
+    for (const rel of graphDataRels) {
+      graphDataStart.set(
+        rel,
+        startStates.get(workspace.path(rel)) ?? ABSENT_STATE,
+      );
+      graphDataTwinFinal.set(
+        rel,
+        await readPolledState(twin.workspace.path(rel)),
+      );
+    }
+    let staged: Promise<StagedGraphData> | undefined;
+    const graphData: GraphDataOracle = {
+      twinFinal: graphDataTwinFinal,
+      staged: () =>
+        (staged ??= stagedGraphDataStates(
+          product,
+          twin,
+          graphDataRels,
+          graphDataStart,
+          graphDataTwinFinal,
+          `${context}: graph data's staged states`,
+        )),
+    };
     const journalAbs = workspace.path(JOURNAL_REL);
     const order = new JournalOrder();
     const poller = new PathPoller(
@@ -1822,7 +2298,14 @@ async function runEpisode(
       await releaseHoldFile(hold);
       await poller.stop();
     }
-    await judgePolledStates(poller, order, polled, startStates, context);
+    await judgePolledStates(
+      poller,
+      order,
+      polled,
+      startStates,
+      graphData,
+      context,
+    );
 
     if (operation.resolve !== null) {
       if (!killedRun) {
@@ -2043,9 +2526,11 @@ async function runP10Trial(
 const P_10 = defineProductTest({
   id: "P-10",
   title:
-    "concurrency under randomized schedules of concurrent readers and one mutating command via --test-hold and process kills (TEST-SPEC §16 P-10): episodes of `rename`, file-form `move`, and `review resolve` under `--json`, held or not, run to their end, killed while held, or killed past their hold at fixed fractions of their twin's lift-to-exit span, each kill under T13.5-3's exit-collection discipline (the command's process group SIGKILLed, its exit collected, the group gone) before anything later runs; readers started before each command at drawn leads, at least one confirmed still running (listed, never a zombie) as it starts, plus reads while it holds and straddling its lift or kill, and a polling reader over the journal, the session file, the source, and its module and companions, never the lock path; each command's reader-free twin copied from the workspace, the lock path aside, as it starts and run alone, exit 0. Readers observe only prior-or-complete states (every polled state the path's before or after the episode; the journal prefix-monotone, never deleted; T13.5-5's protocol); nothing is lost (each `rename`/`move` exiting 0 adds exactly one journal line, each killed one at most one; each resolve exiting 0 records its status — read back by quiescent `review status` and `review list` — each killed one records it or leaves the session byte-unchanged); a killed run whose sources, journal, or session files differ from its twin's leaves `.xspec/lock` holding exactly one plain-file entry (T13.5-3's past-the-hold judgement); and readers never exclude a mutating command: each one not killed is never refused (a refusal after a kill voids the trial where a killed group's identifier is listed again, T13.5-3's reuse check) and ends exactly as its twin — exit code, standard output, and the sources, journal, and session files byte-equal (H-6; derived files and graph data not compared), `.xspec/lock` then absent (SPEC 6.1, 10.7, 13.4, 13.5; E-5)",
+    "concurrency under randomized schedules of concurrent readers and one mutating command via --test-hold and process kills (TEST-SPEC §16 P-10): episodes of `rename`, file-form `move`, and `review resolve` under `--json`, held or not, run to their end, killed while held, or killed past their hold at fixed fractions of their twin's lift-to-exit span, each kill under T13.5-3's exit-collection discipline (the command's process group SIGKILLed, its exit collected, the group gone) before anything later runs; readers started before each command at drawn leads, at least one confirmed still running (listed, never a zombie) as it starts, plus reads while it holds and straddling its lift or kill, and a polling reader over the journal, the session file, the source, its module and companions, and graph data, never the lock path; each command's reader-free twin copied from the workspace, the lock path aside, as it starts and run alone, exit 0. Readers observe only prior-or-complete states (every polled state the path's before or after the episode, at a graph-data path also the product's own graph data for a state of the episode's files; the journal prefix-monotone, never deleted; T13.5-5's protocol); nothing is lost (each `rename`/`move` exiting 0 adds exactly one journal line, each killed one at most one; each resolve exiting 0 records its status — read back by quiescent `review status` and `review list` — each killed one records it or leaves the session byte-unchanged); a killed run whose sources, journal, or session files differ from its twin's leaves `.xspec/lock` holding exactly one plain-file entry (T13.5-3's past-the-hold judgement); and readers never exclude a mutating command: each one not killed is never refused (a refusal after a kill voids the trial where a killed group's identifier is listed again, T13.5-3's reuse check) and ends exactly as its twin — exit code, standard output, and the sources, journal, and session files byte-equal (H-6; derived files and graph data not compared), `.xspec/lock` then absent (SPEC 6.1, 10.7, 13.4, 13.5; E-5)",
   // Wall-clock hang guard only (H-10): three fixed seeds (E-5), two to five
-  // episodes per trial, each a twin and a command plus up to eight reads.
+  // episodes per trial, each a twin and a command plus up to eight reads,
+  // and, where an observed graph-data state needs them, up to sixteen
+  // staged refreshing reads.
   timeoutMs: 600_000,
   run: async (product) => {
     await checkProperty(
