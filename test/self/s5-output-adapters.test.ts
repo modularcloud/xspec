@@ -10,7 +10,9 @@
 // output through.
 //
 // The same S-5 discipline covers the rest of the H-3 layer this harness
-// owns: the human-report required-information matcher, the T10.1-4
+// owns: the human-report required-information matchers (with the parity
+// checks' token-bounded data, whole numbers matched after blanking, and
+// SPEC-named tokens, each rejecting an input it cannot form), the T10.1-4
 // session-corruption staging transformations (shape-aware, value-blind,
 // failing loudly — file untouched — on shape mismatch), and the T13.4-1
 // byte-sorted-keys assertion (which must judge the *written* key order, not
@@ -26,18 +28,21 @@ import type { RunResult } from "../helpers/subprocess.js";
 import type {
   Finding,
   ManualDeletionVerdict,
+  Mention,
   ViewReport,
 } from "../helpers/adapters/index.js";
 import {
   GRAPH_DATA_AREA_PATH,
   ITEM_STATUSES,
   RECORD_GARBAGE_BYTES,
+  SPEC_NAMED_TOKENS,
   assertBareEdgeEndpoints,
   assertJsonKeysByteSorted,
   assertNodeEdgeListsBare,
   assertReportMentions,
   assertReportOmits,
   assertUnavailabilityMarkerForms,
+  blankReportData,
   classifyIgnoredReasons,
   collectGraphDataFiles,
   compareFindings,
@@ -78,9 +83,14 @@ import {
   decodeViewFilesReport,
   decodeViewReport,
   expectNonNegativeInteger,
+  identityMention,
   isGraphDataKey,
   judgeManualDeletionCorrection,
+  nameMention,
+  numberMention,
   rootSite,
+  specTokenMention,
+  spellingMention,
   stageBlockedByAbsentItem,
   stageBlockedByCycle,
   stageDeleteItemField,
@@ -5515,6 +5525,457 @@ test("S-5: conditionMention distinguishes 14.2 from 14.20 in both directions", (
   expect(conditionMention("14.20").test("error 14.20: encoding")).toBe(true);
   expect(conditionMention("14.20").test("error 14.2: structure")).toBe(false);
   expectDiagnosed("not a condition identity", () => conditionMention("15.1"));
+});
+
+// The human-report parity matchers (test/helpers/adapters/human.ts's
+// header; TEST-SPEC T12.0-1, H-3): token-bounded literal data, whole numbers
+// matched after blanking, and SPEC-named tokens. Every vector runs through
+// assertReportMentions itself — found, the call returns; not found, it fails
+// diagnosed — and each table reports every vector it gets wrong at once, so
+// a broken boundary rule names each vector it flips.
+
+/** One matcher vector: a report text, a mention, and whether it is found. */
+interface MentionVector {
+  readonly text: string;
+  readonly mention: Mention;
+  readonly found: boolean;
+  readonly blank?: readonly string[];
+}
+
+/** One mention's vectors: the texts it is found in, and those it is not. */
+function mentionVectors(
+  mention: Mention,
+  foundIn: readonly string[],
+  notFoundIn: readonly string[],
+  blank?: readonly string[],
+): MentionVector[] {
+  return [
+    ...foundIn.map((text) => ({ text, mention, found: true, blank })),
+    ...notFoundIn.map((text) => ({ text, mention, found: false, blank })),
+  ];
+}
+
+function mentionLabel(mention: Mention): string {
+  if (typeof mention === "string") return JSON.stringify(mention);
+  if (mention instanceof RegExp) return mention.toString();
+  return mention.description;
+}
+
+/** Every vector whose outcome differs from its expectation, described. */
+function wrongVectors(vectors: readonly MentionVector[]): string[] {
+  const wrong: string[] = [];
+  for (const vector of vectors) {
+    let found = true;
+    try {
+      assertReportMentions(
+        vector.text,
+        [vector.mention],
+        "matcher vector",
+        vector.blank === undefined ? {} : { blank: vector.blank },
+      );
+    } catch (error) {
+      if (!(error instanceof HarnessAssertionError)) throw error;
+      found = false;
+    }
+    if (found !== vector.found) {
+      wrong.push(
+        `${mentionLabel(vector.mention)} ${found ? "found" : "not found"} in ` +
+          JSON.stringify(vector.text) +
+          (vector.blank === undefined
+            ? ""
+            : ` with ${JSON.stringify(vector.blank)} blanked`),
+      );
+    }
+  }
+  return wrong;
+}
+
+/** Assert every vector's outcome, the failure listing each wrong one. */
+function expectVectors(vectors: readonly MentionVector[]): void {
+  const wrong = wrongVectors(vectors);
+  expect(wrong, `wrong vectors:\n${wrong.join("\n")}`).toEqual([]);
+}
+
+test("S-5: identityMention bounds an identity or path — never inside a longer identity or path", () => {
+  expectVectors([
+    ...mentionVectors(
+      identityMention("specs/T.mdx#p"),
+      [
+        "x specs/T.mdx#p y",
+        "(specs/T.mdx#p)",
+        // A sentence may end on an identity.
+        "specs/T.mdx#p.",
+        "the scope is specs/T.mdx#p.",
+        "specs/T.mdx#p",
+        "[specs/T.mdx#p]",
+        "specs/T.mdx#p: changed",
+        "scope: specs/T.mdx#p (present)\n",
+        "specs/T.mdx#p, specs/T.mdx#q",
+        // A bounded occurrence after an unbounded one still counts.
+        "specs/T.mdx#pa specs/T.mdx#p",
+      ],
+      [
+        // A descendant's identity, a sibling segment's.
+        "specs/T.mdx#p.a",
+        "specs/T.mdx#p-b",
+        "specs/T.mdx#pa",
+        "specs/T.mdx#p_a",
+        "specs/T.mdx#p9",
+        "specs/T.mdx#p/x",
+        "specs/T.mdx#p#x",
+        // Inside a longer path or word.
+        "xspecs/T.mdx#p",
+        "out/specs/T.mdx#p",
+        ".specs/T.mdx#p",
+        "-specs/T.mdx#p",
+        "_specs/T.mdx#p",
+        "9specs/T.mdx#p",
+        "",
+      ],
+    ),
+    ...mentionVectors(
+      identityMention("specs/T.mdx"),
+      [
+        "specs/T.mdx:",
+        "specs/T.mdx:40-78: message",
+        "root specs/T.mdx\n",
+        '"specs/T.mdx"',
+      ],
+      [
+        // A root's bare path inside its sections' identities.
+        "specs/T.mdx#p",
+        "out/specs/T.mdx",
+        "specs/T.mdx/x",
+        "specs/T.mdx.bak",
+        "specs/T.mdx-x",
+        "specs/T.mdxx",
+      ],
+    ),
+  ]);
+});
+
+test("S-5: nameMention bounds a session name or item id — never inside a longer name or id", () => {
+  expectVectors([
+    ...mentionVectors(
+      nameMention("a"),
+      [
+        "a audit",
+        "a",
+        "(a)",
+        "a: corrupt",
+        "name=a",
+        "session a.",
+        "B\na\na2\n",
+      ],
+      [
+        "a2",
+        "ba",
+        "path",
+        "a-b",
+        "b-a",
+        "a_b",
+        "_a",
+        "a.b",
+        "audit path-blocks",
+      ],
+    ),
+    ...mentionVectors(
+      nameMention("item-1"),
+      [
+        "item-1",
+        "item item-1\n",
+        "blockedBy: item-1, item-2",
+        "[item-1]",
+        "item-1.",
+      ],
+      ["item-10", "item-12", "xitem-1", "item-1-2", "item-1.5", "item-1_x"],
+    ),
+  ]);
+});
+
+test("S-5: spellingMention bounds a quoted spelling by letters and digits", () => {
+  expectVectors([
+    ...mentionVectors(
+      spellingMention("div"),
+      ["<div>", "element div.", "`div`", "div"],
+      ["divide", "adiv", "div2", "2div", "Xdiv"],
+    ),
+    ...mentionVectors(
+      spellingMention("two seg"),
+      ['segment "two seg" holds whitespace', "two seg"],
+      ["two segs", "atwo seg", "two seg2"],
+    ),
+    ...mentionVectors(
+      spellingMention("absent.dep"),
+      ["target absent.dep is not found", "(absent.dep)"],
+      ["absent.depth", "xabsent.dep", "absent.dep1"],
+    ),
+    ...mentionVectors(
+      spellingMention("OK.absent"),
+      ["text(OK.absent)"],
+      ["BOOK.absent", "OK.absently"],
+    ),
+  ]);
+});
+
+test("S-5: numberMention matches a whole number, after blanking the data that hold digits", () => {
+  expectVectors([
+    ...mentionVectors(
+      numberMention(4),
+      ["unresolved=4", "(4)", "4", "range: 4-12", "4 items"],
+      ["14", "40", "404", "", "four"],
+    ),
+    ...mentionVectors(
+      numberMention(0),
+      ["no-change=0", "0-7"],
+      ["10", "01", "100"],
+    ),
+    // A digit inside a blanked datum never stands in for the number.
+    ...mentionVectors(
+      numberMention(4),
+      ["item-4 unresolved=4"],
+      ["item-4 unresolved"],
+      ["item-4"],
+    ),
+    // Longest datum first: `item-10` is blanked whole, never as `item-1`
+    // leaving its `0`.
+    ...mentionVectors(
+      numberMention(0),
+      ["item-10 updated=0"],
+      ["item-10 unresolved"],
+      ["item-1", "item-10"],
+    ),
+    // One space per occurrence: the text on either side stays apart, so
+    // no two digits join into one number.
+    ...mentionVectors(numberMention(12), ["12"], ["1a2"], ["a"]),
+  ]);
+
+  // The pure blanking: every occurrence one space, longest datum first.
+  expect(blankReportData("item-10 item-1 x", ["item-1", "item-10"])).toBe(
+    "    x",
+  );
+  expect(blankReportData("a1 b a1", ["a1"])).toBe("  b  ");
+  expect(blankReportData("unchanged", [])).toBe("unchanged");
+
+  // The diagnosis names the run, the data blanked, and the report as given.
+  const blanked = expectDiagnosed("a count only inside a blanked id", () =>
+    assertReportMentions(
+      syntheticResult("item-4 unresolved\n"),
+      [numberMention(4)],
+      "blanked count",
+      { blank: ["item-4"] },
+    ),
+  );
+  expect(blanked.message).toContain("blanked count");
+  expect(blanked.message).toContain("Missing: number 4");
+  expect(blanked.message).toContain('1 datum ("item-4") blanked out');
+  expect(blanked.message).toContain(JSON.stringify("item-4 unresolved\n"));
+  expect(blanked.message).toContain("stand-in check");
+});
+
+test("S-5: specTokenMention matches a SPEC-named token across case and separators — never inside a longer word or token", () => {
+  expectVectors([
+    ...mentionVectors(
+      specTokenMention("no-change"),
+      [
+        "no-change",
+        "No change",
+        "no_change",
+        "NOCHANGE",
+        "no-change=0",
+        "status: No-Change",
+      ],
+      ["ano-change", "no--change", "no  change", "no-chang", "on-change"],
+    ),
+    ...mentionVectors(
+      specTokenMention("blocked"),
+      ["blocked=true", "Blocked:", "(blocked)", "blocked"],
+      ["unblocked", "isblocked", "block"],
+    ),
+    ...mentionVectors(
+      specTokenMention("changed"),
+      [
+        "changed:",
+        "Changed",
+        "descendant-changed, changed",
+        "changed, upstream-changed",
+      ],
+      [
+        "descendant-changed",
+        "metadata changed",
+        "upstream_changed",
+        "unchanged",
+        "Metadata-Changed:",
+        "DescendantChanged",
+      ],
+    ),
+    ...mentionVectors(
+      specTokenMention("direct"),
+      ["directly impacted", "direct"],
+      ["indirectly"],
+    ),
+    ...mentionVectors(
+      specTokenMention("transitive"),
+      ["transitively impacted code:"],
+      ["intransitive"],
+    ),
+    ...mentionVectors(
+      specTokenMention("subtree-coherence"),
+      [
+        "subtree coherence",
+        "subtree-coherence",
+        "SubtreeCoherence",
+        "subtree_coherence",
+      ],
+      ["subtree", "coherence", "subtree: coherence"],
+    ),
+    ...mentionVectors(
+      specTokenMention("metadata-changed"),
+      ["metadata changed", "metadata-changed: specs/T.mdx#p"],
+      ["metadata", "changed"],
+    ),
+  ]);
+});
+
+test("S-5: SPEC_NAMED_TOKENS is a closed vocabulary — distinct, well-formed tokens, none counting inside another's spelling", () => {
+  expect(new Set(SPEC_NAMED_TOKENS).size).toBe(SPEC_NAMED_TOKENS.length);
+  const vectors: MentionVector[] = [];
+  for (const token of SPEC_NAMED_TOKENS) {
+    expect(token).toMatch(/^[a-z]+(?:-[a-z]+)*$/);
+    vectors.push(
+      ...mentionVectors(
+        specTokenMention(token),
+        [token, `${token.toUpperCase()}:`],
+        SPEC_NAMED_TOKENS.filter((other) => other !== token),
+      ),
+    );
+  }
+  expectVectors(vectors);
+});
+
+test("S-5: a report missing a formed mention fails diagnosed, naming it", () => {
+  const report = syntheticResult(
+    "item-2 subtree-coherence specs/T.mdx#q unresolved\n",
+  );
+  const cases: readonly (readonly [Mention, string])[] = [
+    [identityMention("specs/T.mdx#p"), 'identity or path "specs/T.mdx#p"'],
+    [nameMention("item-1"), 'session name or item id "item-1"'],
+    [spellingMention("div"), 'spelling "div"'],
+    [numberMention(4), "number 4"],
+    [specTokenMention("no-change"), 'SPEC-named token "no-change"'],
+  ];
+  for (const [mention, named] of cases) {
+    const failure = expectDiagnosed(named, () =>
+      assertReportMentions(
+        report,
+        [identityMention("specs/T.mdx#q"), mention],
+        "item row",
+      ),
+    );
+    expect(failure.message).toContain(`Missing: ${named}\n`);
+    expect(failure.message).toContain("item row");
+    expect(failure.message).toContain("stand-in check");
+  }
+  // Present, every formed kind passes beside the others.
+  assertReportMentions(
+    report,
+    [
+      identityMention("specs/T.mdx#q"),
+      nameMention("item-2"),
+      spellingMention("item"),
+      numberMention(2),
+      specTokenMention("subtree-coherence"),
+      specTokenMention("unresolved"),
+    ],
+    "item row",
+  );
+  // The omission matcher reads formed mentions the same way.
+  assertReportOmits(report, [identityMention("specs/T.mdx")], "root unnamed");
+  const present = expectDiagnosed("a formed mention present", () =>
+    assertReportOmits(report, [specTokenMention("subtree-coherence")], "kind"),
+  );
+  expect(present.message).toContain(
+    'Present: SPEC-named token "subtree-coherence"',
+  );
+});
+
+test("S-5: the parity matchers reject inputs they cannot form", () => {
+  // Each malformed input, the matcher call on it, and the problem its
+  // diagnosis must name; every input formed or misdiagnosed is reported.
+  const inputs: (readonly [string, () => unknown, string])[] = [
+    ['identityMention("")', () => identityMention(""), "an empty datum"],
+    ['nameMention("")', () => nameMention(""), "an empty datum"],
+    ['spellingMention("")', () => spellingMention(""), "an empty datum"],
+  ];
+  for (const value of [
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    2 ** 53,
+  ]) {
+    inputs.push([
+      `numberMention(${String(value)})`,
+      () => numberMention(value),
+      "is not a non-negative integer",
+    ]);
+  }
+  inputs.push([
+    'specTokenMention("")',
+    () => specTokenMention(""),
+    "an empty token",
+  ]);
+  for (const token of [
+    "No-Change",
+    "no--change",
+    "-blocked",
+    "blocked-",
+    "no change",
+    "no_change",
+    "blocked2",
+  ]) {
+    inputs.push([
+      `specTokenMention(${JSON.stringify(token)})`,
+      () => specTokenMention(token),
+      "is malformed",
+    ]);
+  }
+  inputs.push(
+    [
+      'specTokenMention("frobnicated")',
+      () => specTokenMention("frobnicated"),
+      "is no token SPEC.md names",
+    ],
+    [
+      "the blank option holding an empty datum",
+      () =>
+        assertReportMentions(
+          "unresolved=4",
+          [numberMention(4)],
+          "blank option",
+          { blank: ["item-4", ""] },
+        ),
+      "datum 1 is empty",
+    ],
+    [
+      'blankReportData("x", [""])',
+      () => blankReportData("x", [""]),
+      "datum 0 is empty",
+    ],
+  );
+  const wrong: string[] = [];
+  for (const [label, run, problem] of inputs) {
+    try {
+      run();
+      wrong.push(`${label} formed`);
+    } catch (error) {
+      if (!(error instanceof HarnessAssertionError)) throw error;
+      if (!error.message.includes(problem)) {
+        wrong.push(`${label} diagnosed without "${problem}": ${error.message}`);
+      }
+    }
+  }
+  expect(wrong, `wrong inputs:\n${wrong.join("\n")}`).toEqual([]);
 });
 
 // T13.4-10's correction judge (TEST-SPEC T13.4-10, §0 H-3; SPEC 14.10):

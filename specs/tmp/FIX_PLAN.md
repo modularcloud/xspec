@@ -72,7 +72,7 @@ The previous plan (written at f50cf9f, deleted at d0c8039) is `git show d0c8039^
 
 **Order.** Take the topmost task unless told otherwise. Task 1 is independent of the rest. Task 2 precedes Tasks 3–10, which use its matchers; Task 10 comes last among them (its header note names Tasks 3–9's tests); Task 11 comes last. When a task is done, its commit removes it from the Tasks section and adds a one-line summary to its bullet here.
 - Task 1 (RC-1): P-10 judges each polled path of a run the kill ended against its start and its reader-free twin's final state. Done: in `section-16-p10.ts`, `runEpisode` reads every polled path's state in the twin's final workspace before the episode starts (`twinFinalStates`, graph data's the states its oracle already reads), and `judgePolledStates`, told whether the kill ended the run (`killedRun`), hands each other path of such a run to `judgeKilledRunPath`: every state polled there, and the state the kill left, must be its start state or its twin-final state, else a diagnosed `fail` naming the path and the first observing cycle (or the state once the kill had ended the run), quoting 13.5's two sentences, with `nearestContent`'s byte difference against [start, twin final]; ended runs, graph data's judgement, `judgeKilledRun`, and `JournalOrder` are unchanged. The module header's prior-or-complete bullet (why the twin's final state is the complete one: the same operation on a byte copy of the start, 12.0's byte-determinism with no absolute paths, 13.4, each such path written at most once), `judgePolledStates`' and `runEpisode`'s doc comments, the title, and `path-poller.ts`'s header say so; AGENTS.md gains the killed-run judgement bullet, and the companion-polling bullet a corrected clause. Checks: typecheck and format clean; the self project, `dist/` absent, 37 files and 4434 tests passed (390.4 s), certification 186 / 50 / 0 / 0, 0 discrepancies; the scratchpad injection (`t9jd0c_1/inject.py`) fired with the module before the task and P-10 passed against CONF-READERS (the gap, 17.2 s), and with the task's module it failed P-10 diagnosed at seed 271828183's trial 2, `specs/M3.xspec.ts` at 324 of the twin's 648 bytes (13.4 s; a first run never fired, a pass); uninjected, P-10 passes against CONF-READERS (16.9 s) and `revB-d0c/m/p13` (80.0 s; 76.7 s before), fails against the built product at a killed run's `found nothing at .xspec/lock` (53.3 s), and VIOL-READERS-CLAIM fails it as before (32.4 s).
-- Task 2 (RB-1): the human-report matchers — token-bounded data, whole numbers after blanking, spec-named tokens — with their S-5 vectors.
+- Task 2 (RB-1): the human-report matchers — token-bounded data, whole numbers after blanking, spec-named tokens — with their S-5 vectors. Done: `human.ts` gains `identityMention`, `nameMention`, and `spellingMention` (the conventions' three boundary kinds), `numberMention`, and `specTokenMention` over the closed `SPEC_NAMED_TOKENS` (model.ts's statuses, item kinds, change categories, edge kinds, and preview edit classes, plus the strategies, `blocked`, `deleted`, `direct`, `transitive`, `unavailable`, `absent`, `corrupt`; any other token fails loudly; a token never counts where it ends a longer one, which gives `changed`'s `metadata`/`descendant`/`upstream` exclusion), each a `FormedMention` (a third `Mention` variant whose `description` names it in a diagnosis: `identity or path "…"`, `number 4`, `SPEC-named token "…"`), plus `assertReportMentions`' `{ blank }` option and the pure `blankReportData` (every occurrence one space, longest first; the diagnosis lists the data blanked and excerpts the report as given). Every matcher fails diagnosed on an empty datum, a number that is not a non-negative safe integer, an empty, malformed, or unnamed token, or an empty blanked datum. The module header states the conventions and their limits (ASCII classes; no association). Eight S-5 tests after `conditionMention`'s carry the plan's vectors and more, each table listing every vector it gets wrong. Checks: typecheck and format clean; the self project, `dist/` absent, 37 files and **4442 tests** passed (388.11 s and 360.34 s, two runs, the second on the committed tree; CI's harness-self count becomes 39 files and 4452 tests, the full suite's 127 files and 4805 tests), certification 186 / 50 / 0 / 0, 0 discrepancies; the red check (scratchpad `t9jd0c_2/redcheck.py`, its outcomes in `t9jd0c_2/redcheck2-vectors.txt`): 37 one-point breaks of `human.ts` — each boundary class and lookaround, the blanking's order, space, and option, the token's letter bound, separator, case, and tail exclusion, every input check, and both diagnoses — each failed only its own test(s), flipping exactly the vectors aimed at its rule (~3.3 s a run); with `human.ts` stashed the 8 failed and the other 109 passed; a probe applied the matchers, mentions taken from the built product's JSON documents, to its human `review list`, `review status`, `impact`, rename preview, performed rename, and `check` findings over a hand-staged workspace: every mention found.
 - Task 3 (RB-1): T10.7-5 asserts `review list`'s human form.
 - Task 4 (RB-1): T10.7-6 asserts `review status`'s human form.
 - Task 5 (RB-1): T10.7-7 asserts that the human `review next` names the item it returns.
@@ -84,48 +84,6 @@ The previous plan (written at f50cf9f, deleted at d0c8039) is `git show d0c8039^
 - Task 11: confirm locally and in CI; record the timings; delete this plan.
 
 ## Tasks
-
-### Task 2 — The human-report matchers and their S-5 vectors (RB-1)
-
-**Requirement.** H-3's robust matching (the conventions' three kinds: token-bounded data, whole numbers after blanking, spec-named tokens). TEST-SPEC §17 S-5: each adapter — and `human.ts` is the adapter layer's human side (`test/helpers/adapters/index.ts`) — rejects input missing required information rather than defaulting, fed synthetic inputs, before any product exists (H-8).
-
-**State at d0c8039.** `test/helpers/adapters/human.ts` holds `assertReportMentions` (each mention a literal substring or a RegExp, all required; a diagnosed failure listing the missing ones with an excerpt of the report), `assertReportOmits`, `conditionMention` (a standalone `14.<n>` pattern), and the 14.10 manual-deletion judge. Their S-5 vectors are in `test/self/s5-output-adapters.test.ts` (lines ~5400–5520). No helper bounds a datum, matches a whole number, blanks data, or matches a spec-named token.
-
-**Change.**
-1. In `human.ts` (exported through `adapters/index.ts` as the rest is; any clear names):
-   - a token-bounded mention of a literal datum, with the conventions' boundary kinds: identity or path; session name or item id; and a letter-bounded spelling (not adjacent to a letter or digit; Task 7's spellings);
-   - a whole-number mention;
-   - a spec-named-token mention;
-   - matching after blanking: an option on `assertReportMentions` (or a sibling function) taking the data to blank — every occurrence replaced by a space, longest datum first — before its mentions are matched. Its diagnosis still names the run and shows the unblanked excerpt.
-   Each matcher is pure and fails loudly — a diagnosed `fail` — on an input it cannot form: an empty datum, a number that is not a non-negative integer, an empty or malformed token.
-2. S-5 vectors in `s5-output-adapters.test.ts`, beside the existing human vectors, each with its positive and negative case:
-   - identity boundaries:
-     - `specs/T.mdx#p` is found in `x specs/T.mdx#p y`, in `(specs/T.mdx#p)`, and in `specs/T.mdx#p.` at a sentence's end;
-     - it is not found in `specs/T.mdx#p.a`, `specs/T.mdx#p-b`, or `specs/T.mdx#pa`;
-     - `specs/T.mdx` is not found in `specs/T.mdx#p`, and is found in `specs/T.mdx:`;
-   - name and id boundaries: `a` is found in `a audit` and not in `a2`, `ba`, or `path`; `item-1` is not found in `item-10`;
-   - numbers:
-     - `4` is found in `unresolved=4` and `(4)`, and not in `14` or `40`;
-     - with `item-4` blanked, `4` is not found in `item-4 unresolved` and is found in `item-4 unresolved=4`;
-   - spec tokens:
-     - `no-change` is found in `no-change`, `No change`, `no_change`, and `NOCHANGE`;
-     - `blocked` is found in `blocked=true` and `Blocked:`, and not in `unblocked`;
-     - `changed` is found in `changed:` and `Changed`, and not in `descendant-changed`, `metadata changed`, `upstream_changed`, or `unchanged`;
-     - `direct` is found in `directly impacted`;
-     - `subtree-coherence` is found in `subtree coherence`;
-   - a report missing a mention of each kind fails diagnosed (`expectDiagnosed`), naming the mention;
-   - each malformed input above is diagnosed.
-3. AGENTS.md:
-   - one bullet for the human-report parity checks: the conventions in brief, the matchers' names, the red-check builds of Known state, and `mutate.py`'s command. Tasks 3–10 append their outcomes to it;
-   - the new self-project counts in the bullet beginning "Harness self-tests and certification only".
-
-**Verify.**
-- `npm run typecheck`, `npm run format:check`.
-- The self project, `dist/` absent: 0 failures; 37 files, and 4434 tests plus the vectors added. Record the count; later tasks expect it. The certification lines are unchanged.
-- Red-check the vectors (AGENTS.md's bullet beginning "Red-checking a new self-test vector"): with each boundary rule removed in turn from a scratch copy of `human.ts`, its negative vectors fail. Record which.
-- Commit (subject `sdg(phase-9): add the human-report parity matchers and their S-5 vectors (FIX_PLAN Task 2)`) and push.
-
-**Done when.** The checks hold, and the commit is pushed with a message recording the results.
 
 ### Task 3 — T10.7-5 asserts `review list`'s human form (RB-1)
 
