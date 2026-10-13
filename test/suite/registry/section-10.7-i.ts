@@ -71,6 +71,25 @@
 //   and is asserted too; the code-less existing-name refusal's is pinned
 //   nowhere — 14 assigns that refusal no code and no concern datum (SPEC
 //   10.7) — so it is left unasserted (H-4).
+// - T10.7-5's human form (T12.0-1's information parity; SPEC 12.0: the JSON
+//   form carries the same information as the human report): after each of
+//   its two `--json` listings and their assertions, at the same state, the
+//   same argv without `--json` exits alike — 0 for the clean listing, 1 with
+//   `c` corrupt — and its report mentions what the decoded listing carries
+//   (a product-to-itself comparison, H-4; `assertHumanSessionList`, through
+//   helpers/adapters/human.ts): every session's name (a session-name
+//   boundary, so `a` never counts inside `a2`), each healthy session's
+//   strategy and every status it has a nonzero stored count under
+//   (SPEC-named tokens), each nonzero count (a whole number, matched with the
+//   digit-holding names — `a2` — blanked out), and `corrupt` for the corrupt
+//   session (robust matching, H-3: presence, never wording). Limits: no
+//   mention is associated with another, so which count belongs to which
+//   session and status, and that a corrupt session's fields are absent, stay
+//   with the JSON assertions; at the corrupt state the report also carries
+//   condition 21's finding (14.21), which may itself name the session, say
+//   "corrupt", and hold digits, so those mentions do not tell the session's
+//   own entry from the finding — which session is corrupt is the JSON
+//   listing's assertion too.
 // - Workspaces are git-less wherever no baseline is involved (T10.7-2,
 //   T10.7-4, T10.7-6): coverage and audit sessions require no git.
 // - Every fixture edit is followed by an explicit `build` before any read,
@@ -100,6 +119,7 @@ import type {
   Finding,
   ItemKind,
   ItemStatus,
+  Mention,
   NodeReport,
   ReviewItem,
   SessionListEntry,
@@ -109,10 +129,14 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   ITEM_STATUSES,
+  assertReportMentions,
   decodeExportReport,
   decodeNodeReport,
   decodeSessionListReport,
   decodeSessionStatusReport,
+  nameMention,
+  numberMention,
+  specTokenMention,
   stageUnknownItemStatus,
 } from "../../helpers/adapters/index.js";
 import {
@@ -433,6 +457,80 @@ function assertStoredCounts(
           `${status}, got ${String(actual)}`,
       );
     }
+  }
+}
+
+/**
+ * The human `review list` at the state of a decoded `review list --json`
+ * listing, after that listing's own assertions — T12.0-1's information
+ * parity (SPEC 12.0: the JSON form carries the same information as the
+ * human report; the module header): the same argv without `--json` exits
+ * with the listing's exit code, and its report mentions, for every entry of
+ * the decoded listing, the session's name (a session-name boundary) and
+ * either its strategy, each status it stores items under, and each nonzero
+ * stored count (a whole number, matched with the listing's digit-holding
+ * session names blanked out), or — a corrupt session — the token `corrupt`
+ * (SPEC 10.7, 14.21). Robust matching (H-3): presence, never wording, and no
+ * mention associated with another. A listing with no entries asserts the
+ * exit code alone.
+ */
+async function assertHumanSessionList(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  listing: SessionListReport,
+  exitCode: number,
+  context: string,
+): Promise<void> {
+  const label = `${context} \`review list\` (human report)`;
+  const human = await expectExit(
+    product,
+    workspace,
+    ["review", "list"],
+    exitCode,
+    `${label} — the same exit code as the \`--json\` listing at this ` +
+      `state: 1 iff a session is corrupt, else 0 (SPEC 10.7, 12.0, 14.21)`,
+  );
+  const names: Mention[] = [];
+  const tokens = new Set<string>();
+  const counts = new Set<number>();
+  for (const entry of listing.sessions) {
+    names.push(nameMention(entry.name));
+    if (entry.corrupt) {
+      tokens.add("corrupt");
+      continue;
+    }
+    tokens.add(entry.strategy);
+    for (const status of ITEM_STATUSES) {
+      const count = entry.counts[status] ?? 0;
+      if (count > 0) {
+        tokens.add(status);
+        counts.add(count);
+      }
+    }
+  }
+  if (names.length > 0) {
+    assertReportMentions(
+      human,
+      [...names, ...[...tokens].map(specTokenMention)],
+      `${label}: every session's name, each healthy session's strategy and ` +
+        `every status it stores items under, and \`corrupt\` for a corrupt ` +
+        `session — the information of the JSON listing (SPEC 10.7, 12.0, ` +
+        `14.21)`,
+    );
+  }
+  if (counts.size > 0) {
+    assertReportMentions(
+      human,
+      [...counts].map(numberMention),
+      `${label}: each nonzero stored count, a whole number, matched with ` +
+        `the listing's digit-holding session names blanked out (SPEC 10.7, ` +
+        `12.0)`,
+      {
+        blank: listing.sessions
+          .map((entry) => entry.name)
+          .filter((name) => /[0-9]/.test(name)),
+      },
+    );
   }
 }
 
@@ -1801,7 +1899,7 @@ const T10_7_5_W_EDITED = stagedMdx(
 const T10_7_5 = defineProductTest({
   id: "T10.7-5",
   title:
-    "`review list`: every session is reported in byte order of session name — created `a2`, then `a`, then `B`, listed `B`, `a`, `a2`, an order differing from both creation order and ASCII-case-folded order — each with its name, strategy (the spec-fixed strategy names `coverage`, `path-blocks`, `audit`), and item counts by stored status with no read-time invalidation applied: a resolved item whose scope was edited afterward reads as invalidated in `status` yet still counts under its stored `no-change`; a corrupt session (unparseable bytes over a product-written session file) is reported by name as corrupt in place of those fields; `list` exits 1 iff any corrupt session exists, else 0 (SPEC 10.1, 10.4, 10.7, 12.0, 14.21)",
+    "`review list`: every session is reported in byte order of session name — created `a2`, then `a`, then `B`, listed `B`, `a`, `a2`, an order differing from both creation order and ASCII-case-folded order — each with its name, strategy (the spec-fixed strategy names `coverage`, `path-blocks`, `audit`), and item counts by stored status with no read-time invalidation applied: a resolved item whose scope was edited afterward reads as invalidated in `status` yet still counts under its stored `no-change`; a corrupt session (unparseable bytes over a product-written session file) is reported by name as corrupt in place of those fields; `list` exits 1 iff any corrupt session exists, else 0; and the human `review list` at each listing's state exits alike and carries the listing's information — every session's name, each healthy session's strategy, the statuses it stores items under, and its nonzero counts, and `corrupt` beside the corrupt session's name (robust matching, H-3) (SPEC 10.1, 10.4, 10.7, 12.0, 14.21)",
   timeoutMs: 300_000,
   run: async (product) => {
     await withWorkspace(
@@ -1928,6 +2026,10 @@ const T10_7_5 = defineProductTest({
           },
           `${prefix} session a2 (stored statuses, no read-time invalidation)`,
         );
+        // The human form at the same state carries the listing's
+        // information: names, strategies, stored statuses, and counts
+        // (T12.0-1, SPEC 12.0; the module header).
+        await assertHumanSessionList(product, workspace, clean, 0, prefix);
 
         // A fourth session, then corrupt it: unparseable bytes written over
         // the session file the product itself wrote — the shape-independent
@@ -1987,6 +2089,16 @@ const T10_7_5 = defineProductTest({
           },
           `${corruptContext} session a2 — fields unchanged beside the ` +
             `corrupt entry`,
+        );
+        // The human form at the same state: exit 1 as well, the healthy
+        // sessions' information, and the corrupt session's name beside the
+        // token `corrupt` (T12.0-1, SPEC 12.0; the module header).
+        await assertHumanSessionList(
+          product,
+          workspace,
+          corrupt,
+          1,
+          `${prefix} (session c corrupt)`,
         );
       },
     );
