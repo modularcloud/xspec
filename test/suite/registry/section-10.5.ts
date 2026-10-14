@@ -31,13 +31,23 @@
 //   walking the session (repeated `next` + `resolve --status no-change`),
 //   which visits items in item order because every blocker in these fixtures
 //   precedes its dependents.
-// - The absent-scope ordering key exercised is scope-node identity, staged
-//   discriminatingly (recorded document order opposite to identity order).
-//   The final `item id` tiebreak needs two same-kind absent items with equal
-//   identity strings — same kind forces distinct scope nodes (10.5), and
-//   distinct nodes' identity strings only collide via journaled-rename
-//   reintroduction (5.4), a staging that belongs to T10.4-4 — so it is not
-//   independently staged here.
+// - The absent-scope ordering keys exercised are scope-node identity, staged
+//   discriminatingly (recorded document order opposite to identity order),
+//   and the final item `id` tiebreak. The tiebreak needs two same-kind
+//   absent items with equal identity strings: same kind forces distinct
+//   scope nodes (10.5: at most one item per kind and scope node), and
+//   distinct nodes present one identity only through reintroduction after a
+//   journaled rename or move (5.4: the reintroducing node starts a new
+//   canonical chain; 10.4: reads map each recorded identity forward through
+//   the journal). T10.5-4's tie sub-fixture stages it with two file roots
+//   and two journaled file moves onto one path, each root deleted after its
+//   move, and asserts the two rows in item-id byte order (12.0) in
+//   `status`, `export`, and the `next` walk, reading the ids from the
+//   product. A root, not a section, carries the tie in path-blocks:
+//   authoring a section changes its parent's own content (5.5, 5.6), so the
+//   parent is `changed` and the new section's own item is skipped under it
+//   (10.5's skipping rule), whereas a new file's root has no parent and
+//   enters as its own changed node.
 // - A resolved item whose recorded context set changes is expected
 //   `invalidated` on reads even after a re-derivation updates its context
 //   set (SPEC 10.5: a matched item whose context set changed "is updated
@@ -50,22 +60,27 @@
 // - Staged-source records (helpers/staged-mdx.ts, S-9: judged before any
 //   product exists): every `.mdx` edit a body stages after its first product
 //   invocation — T10.5-1's extended- and chain-fixture edits, T10.5-4's
-//   deletion of v.e and v.f, T10.5-5's p.b edit, r.c revert, and both
-//   decomposition edits, T10.5-6's par.s edit — is the same template call
-//   moved to module level as a record, as is the initial `.mdx` file of
-//   every workspace created after the body's first `build` (T10.5-1's
-//   extended and chain fixtures, T10.5-5's decomposition sub-fixture). A
+//   deletion of v.e and v.f and its tie sub-fixture's two specs/X.mdx
+//   stagings, T10.5-5's p.b edit, r.c revert, and both decomposition edits,
+//   T10.5-6's par.s edit — is the same template call moved to module level
+//   as a record, as is the initial `.mdx` file of every workspace created
+//   after the body's first `build` (T10.5-1's extended and chain fixtures,
+//   T10.5-4's tie sub-fixture, T10.5-5's decomposition sub-fixture). A
 //   staging that precedes a body's first `build` (each fixture's first edit,
 //   between `gitCommitAll` and that `build`) stays plain, as do each body's
 //   first workspace's initial `files` entries (S-7's sweep reaches them
-//   against the stub).
+//   against the stub). The tie sub-fixture's deletions are plain removals
+//   of files (`fsp.rm`), which S-9 does not judge.
 // - The configuration of every workspace created after a body's first
-//   `build` (T10.5-1's extended and chain fixtures, T10.5-5's decomposition
-//   sub-fixture) is `SPECS_ONLY_CONFIG`, a TypeScript staged-source record
+//   `build` (T10.5-1's extended and chain fixtures, T10.5-4's tie
+//   sub-fixture, T10.5-5's decomposition sub-fixture) is
+//   `SPECS_ONLY_CONFIG`, a TypeScript staged-source record
 //   (helpers/staged-ts.ts; S-9's TypeScript and timing clauses),
 //   well-formed, staged wherever that configuration is; `SPECS_CODE_CONFIG`
 //   serves only bodies' first workspaces and stays plain.
 
+import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
 import type {
   ExportReport,
   ItemStatus,
@@ -95,7 +110,7 @@ import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T10.5-1/T10.5-5 xspec.config.ts — one spec group",
+  "T10.5-1/T10.5-4/T10.5-5 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1664,10 +1679,70 @@ const T10_5_4_A_WITHOUT_VEF = stagedMdx(
   oASpec(false),
 );
 
+// The item-id tie sub-fixture (SPEC 10.5's last ordering key): two file
+// roots that come to share one path. The baseline holds specs/A.mdx alone;
+// specs/X.mdx is added (its root, an added node, is `changed`, SPEC 5.6, and
+// its one section is skipped under it), so the session holds that root's
+// subtree-coherence item alone; a journaled file move takes the root to
+// specs/Y.mdx; a new root authored at the vacated specs/X.mdx starts a new
+// canonical chain (SPEC 5.4) and enters through an `updated` resolve's
+// re-derivation; specs/Y.mdx is deleted; a second journaled move takes the
+// new root to specs/Y.mdx, which is deleted too. Both items' scope nodes are
+// then absent and presented under specs/Y.mdx — recorded identities mapped
+// forward through the journal (SPEC 10.4) — tied on depth, kind, file path,
+// presence, and identity, so only the item `id` key orders them. The
+// workspace is created after the body's first `build`, so its initial
+// `.mdx` file and both later specs/X.mdx stagings are staged-source records
+// (helpers/staged-mdx.ts, S-9), as is its configuration (SPECS_ONLY_CONFIG).
+const O_TIE_A_FILE = "specs/A.mdx";
+const O_TIE_X_FILE = "specs/X.mdx";
+const O_TIE_Y_FILE = "specs/Y.mdx";
+
+const T10_5_4_TIE_A_INITIAL = stagedMdx(
+  "T10.5-4 item-id tie sub-fixture specs/A.mdx (the baseline's one section, the tie sub-fixture's initial source)",
+  ['<S id="k">', "Kay text.", "</S>", ""].join("\n"),
+);
+const T10_5_4_TIE_X_FIRST = stagedMdx(
+  "T10.5-4 item-id tie sub-fixture specs/X.mdx (the first root, added after the baseline)",
+  ['<S id="x">', "Ex text.", "</S>", ""].join("\n"),
+);
+const T10_5_4_TIE_X_SECOND = stagedMdx(
+  "T10.5-4 item-id tie sub-fixture specs/X.mdx (the second root, authored at the path the first move vacated)",
+  ['<S id="x">', "New ex text.", "</S>", ""].join("\n"),
+);
+
+/** UTF-8 byte order of two strings (SPEC 12.0: IDs compare byte-wise). */
+function compareUtf8Bytes(a: string, b: string): number {
+  return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
+
+/**
+ * Staging premise of a file move (SPEC 6.5: the file form relocates the
+ * source file): the old path vacated, the new one a file — diagnosed, so the
+ * deletion or authoring that follows at either path never meets a missing
+ * or occupied path as a harness error (H-8).
+ */
+async function assertFileMoved(
+  workspace: TestWorkspace,
+  from: string,
+  to: string,
+  context: string,
+): Promise<void> {
+  const fromKind = await workspace.kind(from);
+  const toKind = await workspace.kind(to);
+  if (fromKind !== "absent" || toKind !== "file") {
+    fail(
+      `${context}: the file form of \`move\` relocates the source file ` +
+        `(SPEC 6.5) — expected ${from} absent and ${to} a file, got ${from} ` +
+        `${fromKind} and ${to} ${toKind}`,
+    );
+  }
+}
+
 const T10_5_4 = defineProductTest({
   id: "T10.5-4",
   title:
-    "total item order across two spec files and two code locations: requirement-scoped items first by scope-node depth deepest-first, then kind order subtree-coherence, metadata-consistency, dependency-consistency, parent-consistency (kind precedes file path: an A.mdx metadata-consistency item follows a B.mdx subtree-coherence item of the same depth), then scope-node file path bytes, then document order; code-impact items last by location identity bytes; after deleting two scope sections the absent-scope items order after the same group's present one, by scope-node identity — the reverse of their former document order, discriminating the identity key from stale document positions; `status` and `export` present the full order and `next` presents it as the walk order of repeated next-plus-resolve rounds (SPEC 10.4, 10.5)",
+    "total item order across two spec files and two code locations: requirement-scoped items first by scope-node depth deepest-first, then kind order subtree-coherence, metadata-consistency, dependency-consistency, parent-consistency (kind precedes file path: an A.mdx metadata-consistency item follows a B.mdx subtree-coherence item of the same depth), then scope-node file path bytes, then document order; code-impact items last by location identity bytes; after deleting two scope sections the absent-scope items order after the same group's present one, by scope-node identity — the reverse of their former document order, discriminating the identity key from stale document positions; `status` and `export` present the full order and `next` presents it as the walk order of repeated next-plus-resolve rounds; and two absent-scope items tied on every earlier key — the subtree-coherence items of two file roots, each moved onto specs/Y.mdx by a journaled file `move` (the second authored at the path the first vacated, a new node on a new canonical chain, its item entering through an `updated` resolve's re-derivation) and then deleted, both presented absent under specs/Y.mdx — order by item `id` bytes, the ids the product's own, in `status`, `export`, and the `next` walk (SPEC 5.4, 6.5, 10.4, 10.5, 12.0)",
   timeoutMs: 420_000,
   run: async (product) => {
     await withWorkspace(
@@ -1813,6 +1888,285 @@ const T10_5_4 = defineProductTest({
           fail(
             `${doneLabel}: every item is resolved, so \`next\` reports the ` +
               `session fully resolved (SPEC 10.7)`,
+          );
+        }
+      },
+    );
+
+    // --- the absent-scope item-id tie: two roots moved onto one path --------
+    // SPEC 10.5's last key: absent-scope items tied on depth, kind, file
+    // path, presence, and scope-node identity order by item `id`, byte-wise
+    // (12.0). The ids are the product's own: the expected order is read
+    // from them, never spelled.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [O_TIE_A_FILE]: T10_5_4_TIE_A_INITIAL },
+      async (workspace) => {
+        const prefix = "T10.5-4 item-id tie";
+        await workspace.gitInit();
+        const base = await workspace.gitCommitAll("baseline");
+        await workspace.file(O_TIE_X_FILE, T10_5_4_TIE_X_FIRST);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after adding ${O_TIE_X_FILE}`,
+        );
+        await createBaseSession(product, workspace, base, "s", prefix);
+        const created = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          `${prefix} after \`create\``,
+        );
+        assertSameJson(
+          kindScopeSequence(created.items),
+          [`subtree-coherence ${O_TIE_X_FILE}`],
+          `${prefix} staging premise after \`create\`: the added file's ` +
+            `root is the one changed node without a changed ancestor — an ` +
+            `added node is changed, its section is skipped under it, and a ` +
+            `root has no ancestor to review — so the session holds exactly ` +
+            `that root's subtree-coherence item (SPEC 5.6, 10.5)`,
+        );
+        const firstId = created.items[0].id;
+
+        // The first root moves away through a journaled file move; a new
+        // root authored at the vacated path is a new node, starting a new
+        // canonical chain (SPEC 5.4), and enters the session through an
+        // `updated` resolve's re-derivation (SPEC 10.5).
+        await expectExit(
+          product,
+          workspace,
+          ["move", O_TIE_X_FILE, O_TIE_Y_FILE],
+          0,
+          `${prefix} the first \`move ${O_TIE_X_FILE} ${O_TIE_Y_FILE}\``,
+        );
+        await assertFileMoved(
+          workspace,
+          O_TIE_X_FILE,
+          O_TIE_Y_FILE,
+          `${prefix} the first \`move ${O_TIE_X_FILE} ${O_TIE_Y_FILE}\``,
+        );
+        await workspace.file(O_TIE_X_FILE, T10_5_4_TIE_X_SECOND);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after authoring the second ${O_TIE_X_FILE}`,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          firstId,
+          "updated",
+          `${prefix} \`resolve s ${firstId} --status updated\` (the ` +
+            `re-derivation adding the second root's item, SPEC 10.5)`,
+        );
+        const rederived = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          `${prefix} after the re-derivation`,
+        );
+        assertSameJson(
+          kindScopeSet(rederived),
+          [
+            `subtree-coherence ${O_TIE_X_FILE}`,
+            `subtree-coherence ${O_TIE_Y_FILE}`,
+          ].sort(),
+          `${prefix} staging premise after the \`updated\` resolve: the ` +
+            `moved root's item, presented under ${O_TIE_Y_FILE} (its ` +
+            `recorded identity mapped forward through the journal), and the ` +
+            `new root's item at ${O_TIE_X_FILE} — distinct nodes, so ` +
+            `distinct items (SPEC 5.4, 10.4, 10.5)`,
+        );
+        const movedId = requireRow(
+          rederived,
+          "subtree-coherence",
+          O_TIE_Y_FILE,
+          prefix,
+        ).id;
+        const newId = requireRow(
+          rederived,
+          "subtree-coherence",
+          O_TIE_X_FILE,
+          prefix,
+        ).id;
+        if (movedId === newId) {
+          fail(
+            `${prefix} staging premise after the \`updated\` resolve: the ` +
+              `moved root's item and the new root's item must carry distinct ` +
+              `ids (SPEC 10.2: unique within the session); both are ` +
+              JSON.stringify(movedId),
+          );
+        }
+
+        // The moved root is deleted; the new root moves onto the same path
+        // through a second journaled file move and is deleted too. Both
+        // scope nodes are now absent, each presented under specs/Y.mdx —
+        // its recorded identity mapped forward through the journal (SPEC
+        // 10.4).
+        await fsp.rm(workspace.path(O_TIE_Y_FILE));
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after deleting the first root's ${O_TIE_Y_FILE}`,
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["move", O_TIE_X_FILE, O_TIE_Y_FILE],
+          0,
+          `${prefix} the second \`move ${O_TIE_X_FILE} ${O_TIE_Y_FILE}\``,
+        );
+        await assertFileMoved(
+          workspace,
+          O_TIE_X_FILE,
+          O_TIE_Y_FILE,
+          `${prefix} the second \`move ${O_TIE_X_FILE} ${O_TIE_Y_FILE}\``,
+        );
+        await fsp.rm(workspace.path(O_TIE_Y_FILE));
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after deleting the second root's ${O_TIE_Y_FILE}`,
+        );
+
+        const tiedLabel = `${prefix} after both deletions`;
+        const tiedStatus = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          tiedLabel,
+        );
+        const tiedExport = await exportSession(
+          product,
+          workspace,
+          "s",
+          tiedLabel,
+        );
+        assertSameJson(
+          tiedExport.items.map((item) => item.id).sort(),
+          [movedId, newId].sort(),
+          `${tiedLabel} staging premise (\`export\`): the session holds ` +
+            `exactly the two items — items that no longer generate remain, ` +
+            `and only an \`updated\` resolve re-derives, none having followed ` +
+            `the one above (SPEC 10.5)`,
+        );
+        assertSameJson(
+          tiedExport.items.map((item) => [
+            item.kind,
+            item.scope.node,
+            item.scope.present,
+          ]),
+          [
+            ["subtree-coherence", O_TIE_Y_FILE, false],
+            ["subtree-coherence", O_TIE_Y_FILE, false],
+          ],
+          `${tiedLabel} staging premise (\`export\`'s scopes): both items' ` +
+            `scope nodes are absent and presented under ${O_TIE_Y_FILE} — ` +
+            `each recorded identity mapped forward through the journal (SPEC ` +
+            `10.4) — so the two subtree-coherence items tie on depth (roots ` +
+            `are 0), kind, file path, presence, and scope-node identity (SPEC ` +
+            `10.5)`,
+        );
+
+        const [lowId, highId] = [movedId, newId].sort(compareUtf8Bytes);
+        const tieKey =
+          `SPEC 10.5: among items tied on every earlier key, those with ` +
+          `absent scope nodes follow, ordered by scope-node identity, then by ` +
+          `item \`id\`; 12.0: IDs compare byte-wise — ${lowId} before ` +
+          `${highId}; ${movedId} is the moved root's item, ${newId} the new ` +
+          `root's`;
+        assertSameJson(
+          tiedStatus.items.map((row) => [row.id, row.kind, row.scope]),
+          [
+            [lowId, "subtree-coherence", O_TIE_Y_FILE],
+            [highId, "subtree-coherence", O_TIE_Y_FILE],
+          ],
+          `${tiedLabel} \`status\`: the two tied absent-scope items in ` +
+            `item-id byte order (${tieKey})`,
+        );
+        assertSameJson(
+          tiedExport.items.map((item) => item.id),
+          [lowId, highId],
+          `${tiedLabel} \`export\` presents the same item-id order ` +
+            `(${tieKey}; SPEC 10.7)`,
+        );
+
+        // `next` presents the tie as its walk order. Premise: both items
+        // need review and neither is blocked — path-blocks gives
+        // subtree-coherence items no blockers; the moved root's item,
+        // resolved `updated` while its scope node was present, is
+        // invalidated by the presence change, and the new root's item was
+        // never resolved (SPEC 10.3, 10.4, 10.5).
+        for (const row of tiedStatus.items) {
+          if (
+            row.blocked ||
+            (row.status !== "unresolved" && row.status !== "invalidated")
+          ) {
+            fail(
+              `${tiedLabel} staging premise: both tied items need review ` +
+                `unblocked, so \`next\` must choose between them by item ` +
+                `order (SPEC 10.3, 10.4, 10.7); item ${row.id} is ` +
+                `${row.status}${row.blocked ? ", blocked" : ""}`,
+            );
+          }
+        }
+        const walk = [lowId, highId];
+        for (let index = 0; index < walk.length; index += 1) {
+          const stepLabel =
+            `${prefix} \`review next s --json\` walk step ` +
+            `${String(index + 1)} of ${String(walk.length)}`;
+          const next = decodeNextReport(
+            await runJson(
+              product,
+              workspace,
+              ["review", "next", "s", "--json"],
+              stepLabel,
+            ),
+            stepLabel,
+          );
+          if (next.fullyResolved || next.item === undefined) {
+            fail(
+              `${stepLabel}: needing-review items remain, so \`next\` must ` +
+                `return one (SPEC 10.7)`,
+            );
+          }
+          if (next.item.id !== walk[index]) {
+            fail(
+              `${stepLabel}: \`next\` returns the first needing-review ` +
+                `unblocked item in item order (SPEC 10.7; ${tieKey}) — ` +
+                `expected ${walk[index]}, got ${next.item.id}` +
+                (index === 1 && next.item.id === lowId
+                  ? ` — the item just resolved \`no-change\` with its scope ` +
+                    `node absent, which stays resolved while the node stays ` +
+                    `absent (SPEC 10.4)`
+                  : ""),
+            );
+          }
+          await resolveOk(
+            product,
+            workspace,
+            "s",
+            next.item.id,
+            "no-change",
+            `${stepLabel} — \`resolve --status no-change\` to advance the walk`,
+          );
+        }
+        const tieDoneLabel = `${prefix} \`review next s --json\` after the walk`;
+        const tieDone = decodeNextReport(
+          await runJson(
+            product,
+            workspace,
+            ["review", "next", "s", "--json"],
+            tieDoneLabel,
+          ),
+          tieDoneLabel,
+        );
+        if (!tieDone.fullyResolved) {
+          fail(
+            `${tieDoneLabel}: both items are resolved, so \`next\` reports ` +
+              `the session fully resolved (SPEC 10.7)`,
           );
         }
       },
