@@ -118,6 +118,21 @@
 //   exactly one finding" (c) are the findings-only document `{"findings":
 //   […]}` (12.7: a report whose defined content is findings alone), decoded
 //   form-exact.
+// - Arm (c)'s three reporters assert one concern contract (TEST-SPEC line
+//   9's rule for an error report): `check`'s and `review status s`'s
+//   reports and the `review list` listing each hold exactly one finding,
+//   condition 21 — its exact stable code `corrupt-session`, which the
+//   condition count reads — concerning the session file
+//   `.xspec/reviews/s.json` as its 12.7 `path`, with no in-source location
+//   (`locations` []: a session condition has none; SPEC 14, 12.7). The
+//   listing's finding comes from the decoded listing's `"findings"` member,
+//   with no invocation of its own: `list` reports condition 21 for each
+//   corrupt session (14.21, exit 1) under that member (12.7), which the
+//   decoder requires while a session is listed corrupt (H-3). Exactly one
+//   from each reporter: the one staged corruption is a refused content
+//   read — no session content is read, so no invariant violation stands
+//   beside it as a distinct finding — and `s` is the workspace's only
+//   session.
 // - Arm (f)'s "every path under `.xspec/` other than the journal, the
 //   session directory, and the lock path staged unreadable" is every plain
 //   file in T13.3-2's operational path set (`isGraphDataKey`, through the
@@ -2205,11 +2220,45 @@ async function journalContentArm(product: ProductBinding): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Arm (c)'s one corruption report, asked of each of its three reporters
+ * (TEST-SPEC line 9's rule for an error report; the module header): exactly
+ * one finding, condition 21 — its exact stable code `corrupt-session`, which
+ * the condition count reads (the derived 14.21) — concerning the session
+ * file `.xspec/reviews/s.json` as its 12.7 `path`, with no in-source
+ * location (`locations` []; SPEC 14, 12.7). `label` names the reporter and
+ * the staging.
+ */
+function assertSessionCorruptionAlone(
+  findings: readonly Finding[],
+  label: string,
+): void {
+  assertConditionCounts(
+    findings,
+    { "14.21": 1 },
+    `${label} — exactly one finding, \`corrupt-session\` (SPEC 14.21, 10.1)`,
+  );
+  const finding = findings[0]!;
+  assertFindingConcernsPath(
+    finding,
+    SESSION_FILE,
+    `${label} — the session file is the concerned path (SPEC 14, 14.21)`,
+  );
+  assertSameJson(
+    finding.locations,
+    [],
+    `${label} — a session condition has no in-source location: ` +
+      `\`locations\` [] (SPEC 14, 12.7)`,
+  );
+}
+
+/**
  * The audit session `s` created, its file staged unreadable: `check` and
  * `review status s` each report exactly one condition-21 finding concerning
- * the session file, exit 1, nothing modified; `review list` reports the
- * session corrupt by name, exit 1; `inventory` lists the session, finding-
- * free, exit 0 (selected by name alone, content unread).
+ * the session file with no location, exit 1, nothing modified; `review
+ * list` reports the session corrupt by name, exit 1, its listing carrying
+ * that one `corrupt-session` finding likewise; `inventory` lists the
+ * session, finding-free, exit 0 (selected by name alone, content unread).
+ * Each of the three reports is judged by `assertSessionCorruptionAlone`.
  */
 async function sessionContentArm(product: ProductBinding): Promise<void> {
   const context = "T14-10 (c) a session file's content";
@@ -2245,16 +2294,7 @@ async function sessionContentArm(product: ProductBinding): Promise<void> {
             `\`review\` subcommand naming it, exit 1, the findings-only ` +
             `document (SPEC 14.25, 14.21, 10.1, 12.7)`,
         );
-        assertConditionCounts(
-          findings,
-          { "14.21": 1 },
-          `${label} — exactly one finding, \`corrupt-session\` (SPEC 14.21, 10.1)`,
-        );
-        assertFindingConcernsPath(
-          findings[0]!,
-          SESSION_FILE,
-          `${label} — the session file is the concerned path (SPEC 14, 14.21)`,
-        );
+        assertSessionCorruptionAlone(findings, label);
       }
       const listLabel = `${context} \`review list --json\` with ${SESSION_FILE} unreadable`;
       const list = decodeSessionListReport(
@@ -2273,6 +2313,25 @@ async function sessionContentArm(product: ProductBinding): Promise<void> {
         [{ name: SESSION, corrupt: true }],
         `${listLabel} — the session reported corrupt by name, in place of ` +
           `its fields (SPEC 10.7, 14.21)`,
+      );
+      // The listing's condition 21, with no invocation of its own: `list`
+      // reports the corrupt session (SPEC 14.21, exit 1) and carries its
+      // finding under the document's "findings" member (12.7), which the
+      // decoder requires while a session is listed corrupt — as `s` now
+      // is. Exactly one finding, `corrupt-session` concerning the session
+      // file with `locations` [], as `check` and `review status` report it
+      // (the module header).
+      const listFindings = list.findings;
+      if (listFindings === undefined) {
+        fail(
+          `${listLabel} — the listing must carry the corrupt session's ` +
+            `condition 21 under its "findings" member (SPEC 14.21, 12.7); ` +
+            `the decoded document carries no such member`,
+        );
+      }
+      assertSessionCorruptionAlone(
+        listFindings,
+        `${listLabel} — the listing's findings`,
       );
       const invLabel = `${context} \`inventory\` with ${SESSION_FILE} unreadable`;
       const inventory = decodeInventoryDocument(
@@ -3170,7 +3229,7 @@ export async function runT1410ArmI(product: ProductBinding): Promise<void> {
 const T14_10 = defineProductTest({
   id: "T14-10",
   title:
-    "read failures (14.25): the object read decides the outcome, one arm per row, each refusal staged by permission removal alone (a file's content: mode 0o200, its write permission kept; a directory's listing: mode 0o100, search kept; nonexistence never a refusal) — (a) a discovered source's content is condition 20 at `build` and `check`, exit 1, its one location the zero-length range at offset 0, the file masked exactly as an unparseable one (A's reference reports 14.5, nothing inside reports) while `view` serves the other requested file, `occurrences` lists no record for its spellings, and `at` at 0, 7, and 999999 reports the resolution explicitly unavailable, never the out-of-range usage error — a spec source and, separately, a code source; (b) the journal's content is condition 13 concerning .xspec/journal from `build`, `check`, `ids` (answering nothing), and a refused `rename`, while `inventory` reports `journal.occupied` true, finding-free; (c) a session file's content is condition 21 from `check`, `review status` (one finding, nothing modified), and `review list` (the session reported corrupt), `inventory` listing the session; (d) the configuration file's content is condition 14 from `build`, `ids`, `inventory`, and `view` (`code` configuration-error, `path` xspec.config.ts), `version` exiting 0; (e) a generated module's content is one per-file condition-10 finding to `check` while `build` exits 0; (f) every graph-data file unreadable is the state of condition 23 — `inventory` and a `move --preview` report their record-supplied datum unavailable beside the finding, `check` one unit-form condition-10 finding alone, `ids` regenerates and answers (exit 0), and after `build` the inventory reports `recorded` in full; (g) a directory discovery lists, unlistable: `build`, `check`, `ids`, `view`, `inventory`, `review list`, and a `rename` each exit 2 with the error document (`code` read-failure, `path` specs/sub), nothing modified, the read failure preceding a failing source's findings and an unknown profile, the syntax class (`code` null) and an invalid configuration preceding it; (h) the session directory unlistable: `review list`, `inventory`, and `check` exit 2 concerning .xspec/reviews while `build` and `ids` exit 0; (i) at acquisition, the lock path's occupant and everything under it refused, each staged before the invocation on a freshly built workspace holding an `audit` session `s`, with `rename`, `move`, `review create`, `resolve`, and `split` in turn — an empty lock directory unlistable (`-wx`) and a subdirectory under it unlistable (`-wx`), each `read-failure`; `.xspec` unsearchable (`rw-`; holding no `lock` and, separately, an empty lock directory) and the lock directory unsearchable (`rw-`, holding a directory that holds a file), each `read-failure` or `write-failure` — each exit 2 with the error document, `path` .xspec/lock, never a nested path, `locations` [], nothing modified; and specs/sub, a directory the second discovery of 13.5 lists, made unlistable (`--x`) during the hold of `rename specs/A.mdx a a2`: exit 2, `code` read-failure, `path` specs/sub, nothing modified; two clauses — a refused read of a path occupant's kind (the area's own occupant's at acquisition included, the lock path's there excepted, which (i) stages), and of a directory above the workspace root — admit no product-independent staging and are recorded so (SPEC 14.25, 14, 11.2, 11.5, 11.6, 13.3, 13.5, 10.7, 12.0, 12.7)",
+    "read failures (14.25): the object read decides the outcome, one arm per row, each refusal staged by permission removal alone (a file's content: mode 0o200, its write permission kept; a directory's listing: mode 0o100, search kept; nonexistence never a refusal) — (a) a discovered source's content is condition 20 at `build` and `check`, exit 1, its one location the zero-length range at offset 0, the file masked exactly as an unparseable one (A's reference reports 14.5, nothing inside reports) while `view` serves the other requested file, `occurrences` lists no record for its spellings, and `at` at 0, 7, and 999999 reports the resolution explicitly unavailable, never the out-of-range usage error — a spec source and, separately, a code source; (b) the journal's content is condition 13 concerning .xspec/journal from `build`, `check`, `ids` (answering nothing), and a refused `rename`, while `inventory` reports `journal.occupied` true, finding-free; (c) a session file's content is condition 21 from `check`, `review status` (nothing modified), and `review list` (the session reported corrupt), each reporting one `corrupt-session` finding concerning the session file with no location, `inventory` listing the session; (d) the configuration file's content is condition 14 from `build`, `ids`, `inventory`, and `view` (`code` configuration-error, `path` xspec.config.ts), `version` exiting 0; (e) a generated module's content is one per-file condition-10 finding to `check` while `build` exits 0; (f) every graph-data file unreadable is the state of condition 23 — `inventory` and a `move --preview` report their record-supplied datum unavailable beside the finding, `check` one unit-form condition-10 finding alone, `ids` regenerates and answers (exit 0), and after `build` the inventory reports `recorded` in full; (g) a directory discovery lists, unlistable: `build`, `check`, `ids`, `view`, `inventory`, `review list`, and a `rename` each exit 2 with the error document (`code` read-failure, `path` specs/sub), nothing modified, the read failure preceding a failing source's findings and an unknown profile, the syntax class (`code` null) and an invalid configuration preceding it; (h) the session directory unlistable: `review list`, `inventory`, and `check` exit 2 concerning .xspec/reviews while `build` and `ids` exit 0; (i) at acquisition, the lock path's occupant and everything under it refused, each staged before the invocation on a freshly built workspace holding an `audit` session `s`, with `rename`, `move`, `review create`, `resolve`, and `split` in turn — an empty lock directory unlistable (`-wx`) and a subdirectory under it unlistable (`-wx`), each `read-failure`; `.xspec` unsearchable (`rw-`; holding no `lock` and, separately, an empty lock directory) and the lock directory unsearchable (`rw-`, holding a directory that holds a file), each `read-failure` or `write-failure` — each exit 2 with the error document, `path` .xspec/lock, never a nested path, `locations` [], nothing modified; and specs/sub, a directory the second discovery of 13.5 lists, made unlistable (`--x`) during the hold of `rename specs/A.mdx a a2`: exit 2, `code` read-failure, `path` specs/sub, nothing modified; two clauses — a refused read of a path occupant's kind (the area's own occupant's at acquisition included, the lock path's there excepted, which (i) stages), and of a directory above the workspace root — admit no product-independent staging and are recorded so (SPEC 14.25, 14, 11.2, 11.5, 11.6, 13.3, 13.5, 10.7, 12.0, 12.7)",
   // A hang guard only (H-10): nine workspaces, each built, checked, and
   // driven through a handful of invocations, and arm (i)'s six
   // CONF-CORE-shaped ones, each built, holding a session, and driven once —
