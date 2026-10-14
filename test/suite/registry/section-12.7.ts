@@ -104,7 +104,7 @@
 //   and the invalid-workspace refusal reports numbered findings alone), and a
 //   code-less finding arises only in review-refusal reports, where it is the
 //   only finding class (10.7, 14). The test stages each stageable class's
-//   internal order by value — numbered conditions across six codes whose
+//   internal order by value — numbered conditions across seven codes whose
 //   numeric order inverts both the token-alphabetical order (`cycle` <
 //   `missing-id`) and the ordinal-decimal-string order ("15" < "3"), and two
 //   multi-reason refusals (T14-7) whose listed order inverts the
@@ -116,22 +116,35 @@
 //   9th, between it and `refused-invalid-rewrite`) — while the full pinned
 //   comparator, cross-class ranks included, is enforced over every findings
 //   array the suite captures (`decodeFindingsArray`, S-5-guarded).
-// - The locations proper-prefix rule, the `null`-before-path rule, and the
-//   message tie-break admit no product-independent discriminating fixture:
-//   two same-code findings agreeing on every earlier key while differing
-//   exactly there cannot be staged — located conditions carry `path` null and
-//   path-level conditions carry `locations` [] (so a same-code pair differing
-//   in path-nullity already differs at the locations key), no condition
-//   yields two findings sharing code, locations, path, AND identities, and
-//   messages are unpinned wording (12.7) — the T6.6-4 tie-break precedent:
-//   the harness asserts the full comparator over whatever arrays are emitted.
+// - The `null`-before-path rule and the message tie-break admit no
+//   product-independent discriminating fixture: two same-code findings
+//   agreeing on every earlier key while differing exactly there cannot be
+//   staged — located conditions carry `path` null and path-level conditions
+//   carry `locations` [] (so a same-code pair differing in path-nullity
+//   already differs at the locations key), no condition yields two findings
+//   sharing code, locations, path, AND identities, and messages are
+//   unpinned wording (12.7) — the T6.6-4 tie-break precedent: the harness
+//   asserts the full comparator over whatever arrays are emitted.
 //   The staged tie-break levels: locations element-wise (three missing-id
 //   findings — range-start order inside one file, then file-byte order
-//   across files), concerned path (the 14.19s in one byte order — on the
-//   Linux leg a marked byte-form path sorting BEFORE the plain strings,
-//   failing any plain-first partition), and identities element-wise (two
-//   policy findings identical to each other except the rule name, declared
-//   in the opposite configuration order).
+//   across files — and the proper-prefix rule: specs/P.mdx's one element
+//   `<S id={"x"} id="y">` yields two condition-17 findings, the braced `id`
+//   value's located at its one attribute and the repeated `id`'s at both
+//   spellings, so the one-location sequence, a proper prefix of the
+//   two-location one, sorts first), concerned path (the 14.19s in one byte
+//   order — on the Linux leg a marked byte-form path sorting BEFORE the
+//   plain strings, failing any plain-first partition), and identities
+//   element-wise (two policy findings identical to each other except the
+//   rule name, declared in the opposite configuration order). The
+//   proper-prefix pair is product-independent: SPEC 14 reports each
+//   condition present and fixes both findings' locations — the braced value
+//   breaks 2.7's value-form rule on its own, one offending attribute located
+//   by its own characters (the attribute range of 11.4), while the
+//   repetition is located at every spelling of the name ("a repeated prop
+//   locates every attribute spelling the name"; "Ranges are exact per
+//   condition"). The arm pins both location sequences exactly, as a premise
+//   before the order compare, so a product's location defect is reported as
+//   one, never as an order defect.
 // - The duplicate-collapse staging: one defect file discovered through two
 //   spec groups (membership pinned via the inventory's `sources` entry —
 //   SPEC 7 allows a file in two same-kind groups). A per-group-iterating
@@ -275,6 +288,7 @@
 import { Buffer } from "node:buffer";
 import type {
   Finding,
+  FindingLocation,
   NodeRow,
   OccurrenceRecord,
   PathValue,
@@ -1618,7 +1632,7 @@ async function runUnpinnedRangesArm(product: ProductBinding): Promise<void> {
 // T12.7-2 arm A — findings-array ordering by value, and duplicate collapse
 // ---------------------------------------------------------------------------
 //
-// One workspace stages six numbered conditions whose numeric order inverts
+// One workspace stages seven numbered conditions whose numeric order inverts
 // both the token-alphabetical and the ordinal-decimal-string orders (module
 // header note), each condition its files' sole defect:
 //   14.1  missing-id          x3 — two id-less sections in E1.mdx (range-start
@@ -1633,6 +1647,12 @@ async function runUnpinnedRangesArm(product: ProductBinding): Promise<void> {
 //   14.15 invalid-import      x1 — a named-only (non-default) import in M.mdx,
 //                                  designating the existing OK.mdx so the
 //                                  binding form is the declaration's one defect
+//   14.17 invalid-prop        x2 — P.mdx's one element `<S id={"x"} id="y">`:
+//                                  the braced `id` value located at its one
+//                                  attribute, the repeated `id` at both
+//                                  spellings — the one-location sequence a
+//                                  proper prefix of the two-location one, so
+//                                  sorting first (SPEC 12.7, 14, 2.7)
 //   14.19 invalid-source-path x2 (x3 Linux) — `#`-containing paths ha#1/ha#2
 //                                  and, Linux, a non-UTF-8 name whose marked
 //                                  byte form sorts BEFORE the plain strings
@@ -1685,6 +1705,27 @@ const ORD_OK_FILE = "specs/OK.mdx";
 // record rather than a second spelling of its bytes.
 const ORD_OK_SOURCE = OK_SOURCE;
 
+// The proper-prefix staging (module header note): one element spelling `id`
+// twice, its first value braced, composed from its parts so both attribute
+// ranges are known before any invocation. SPEC 2.7: a braced `id` value is
+// invalid on its own (14.17), and no prop may occur twice on one element
+// (14.17); SPEC 14: an attribute condition locates the attribute's own
+// characters, and a repeated prop locates every attribute spelling the name.
+// So the braced value's finding locates `id={"x"}` alone and the
+// repetition's locates `id={"x"}` then `id="y"` — the first sequence a
+// proper prefix of the second. (`IDS_FILE`, arm C, names the same path in
+// that arm's own workspace: no clash.)
+const ORD_P_FILE = "specs/P.mdx";
+const ORD_P = new ByteFixture();
+ORD_P.add("<S ");
+const ORD_P_BRACED_ID_TEXT = 'id={"x"}';
+const ORD_P_BRACED_ID_RANGE = ORD_P.add(ORD_P_BRACED_ID_TEXT);
+ORD_P.add(" ");
+const ORD_P_QUOTED_ID_TEXT = 'id="y"';
+const ORD_P_QUOTED_ID_RANGE = ORD_P.add(ORD_P_QUOTED_ID_TEXT);
+ORD_P.add(">\nT.\n</S>\n");
+const ORD_P_SOURCE = ORD_P.source;
+
 const ORD_HASH1_FILE = "specs/ha#1.mdx";
 const ORD_HASH2_FILE = "specs/ha#2.mdx";
 const ORD_HASH1_SOURCE = '<S id="v1">\nValid content one.\n</S>\n';
@@ -1710,6 +1751,8 @@ const ORD_EXPECTED_FINDINGS: readonly FindingFormExpectation[] = [
   { code: "unknown-dependency", path: null, locations: [ORD_K_FILE] },
   { code: "cycle", path: null, locations: [ORD_IA_FILE, ORD_IB_FILE] },
   { code: "invalid-import", path: null, locations: [ORD_M_FILE] },
+  { code: "invalid-prop", path: null, locations: [ORD_P_FILE] },
+  { code: "invalid-prop", path: null, locations: [ORD_P_FILE, ORD_P_FILE] },
   ...(NON_UTF8_STAGED
     ? [
         {
@@ -1729,8 +1772,64 @@ const ORD_EXPECTED_COUNTS: Readonly<Record<string, number>> = {
   "14.5": 1,
   "14.9": 1,
   "14.15": 1,
+  "14.17": 2,
   "14.19": NON_UTF8_STAGED ? 3 : 2,
 };
+
+/**
+ * The proper-prefix pair's location sequences, exactly (SPEC 14: an
+ * attribute condition locates the attribute's own characters, ranges exact
+ * per condition; a repeated prop locates every attribute spelling the name):
+ * the braced `id` value's finding at its one attribute, the repetition's at
+ * both spellings in source order. Composed from the staged parts.
+ */
+const ORD_P_LOCATION_SEQUENCES: readonly (readonly FindingLocation[])[] = [
+  [{ file: ORD_P_FILE, range: ORD_P_BRACED_ID_RANGE }],
+  [
+    { file: ORD_P_FILE, range: ORD_P_BRACED_ID_RANGE },
+    { file: ORD_P_FILE, range: ORD_P_QUOTED_ID_RANGE },
+  ],
+];
+
+/**
+ * The premise of the proper-prefix order compare, independent of the two
+ * condition-17 findings' order: their location sequences, the two sorted by
+ * length, are exactly {@link ORD_P_LOCATION_SEQUENCES}. That exactness is
+ * what makes the one-location sequence a proper prefix of the two-location
+ * one, so a product's location defect is reported here as one, never as an
+ * order defect at the array compare that follows.
+ */
+function assertProperPrefixPair(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  const pair = findings.filter((finding) => finding.condition === "14.17");
+  const sequences = pair
+    .map((finding) =>
+      finding.locations.map((location) => ({
+        file: location.file,
+        range: { start: location.range.start, end: location.range.end },
+      })),
+    )
+    .sort((a, b) => a.length - b.length);
+  assertSameJson(
+    sequences,
+    ORD_P_LOCATION_SEQUENCES,
+    `${context} — the proper-prefix pair's premise: ${ORD_P_FILE}'s two ` +
+      `condition-17 findings (messages ` +
+      `${JSON.stringify(pair.map((finding) => finding.message))}) locate, ` +
+      `in either order, the braced \`id\` value at its one attribute ` +
+      `${JSON.stringify(ORD_P_BRACED_ID_TEXT)} alone (SPEC 2.7: a braced ` +
+      `\`id\` value is invalid on its own) and the repeated \`id\` at both ` +
+      `spellings, ${JSON.stringify(ORD_P_BRACED_ID_TEXT)} then ` +
+      `${JSON.stringify(ORD_P_QUOTED_ID_TEXT)} (SPEC 14: a repeated prop ` +
+      `locates every attribute spelling the name; an attribute condition ` +
+      `locates the attribute's own characters, ranges exact per condition) ` +
+      `— the exactness that makes the first sequence a proper prefix of ` +
+      `the second, so a location defect is reported here as one, never as ` +
+      `an order defect (SPEC 14, 2.7, 12.7)`,
+  );
+}
 
 function assertOrderedFindings(
   findings: readonly Finding[],
@@ -1743,6 +1842,7 @@ function assertOrderedFindings(
       `two-group file's defect reported once (identically-staged duplicate ` +
       `findings collapse to one; SPEC 12.7, 14)`,
   );
+  assertProperPrefixPair(findings, context);
   assertSameJson(
     findings.map(projectFindingForm),
     ORD_EXPECTED_FINDINGS,
@@ -1751,7 +1851,9 @@ function assertOrderedFindings(
       `though alphabetically last; invalid-import(15) after cycle(9) ` +
       `though "15" < "9" as decimal strings), then by locations ` +
       `element-wise (both E1 findings before dual/D's — file-byte order — ` +
-      `and C's two in-file locations riding one finding), then by ` +
+      `C's two in-file locations riding one finding, and a proper prefix ` +
+      `sorting first: P's one-location invalid-prop finding before its ` +
+      `two-location one), then by ` +
       `concerned path in ONE byte order over both presentation forms ` +
       `(the marked byte-form path before the plain "specs/ha#…" strings ` +
       `on the Linux leg), null-path located findings carrying path null ` +
@@ -1789,6 +1891,18 @@ async function runConditionOrderingArm(product: ProductBinding): Promise<void> {
     ORD_E1_SECOND_TEXT,
     "E1's second id-less construct",
   );
+  sliceCheck(
+    ORD_P_SOURCE,
+    ORD_P_BRACED_ID_RANGE,
+    ORD_P_BRACED_ID_TEXT,
+    "P's braced `id` attribute",
+  );
+  sliceCheck(
+    ORD_P_SOURCE,
+    ORD_P_QUOTED_ID_RANGE,
+    ORD_P_QUOTED_ID_TEXT,
+    "P's quoted `id` attribute",
+  );
 
   const workspace = await TestWorkspace.create({
     files: {
@@ -1801,14 +1915,17 @@ async function runConditionOrderingArm(product: ProductBinding): Promise<void> {
       [ORD_IB_FILE]: ORD_IB_SOURCE,
       [ORD_M_FILE]: ORD_M_SOURCE,
       [ORD_OK_FILE]: ORD_OK_SOURCE,
+      [ORD_P_FILE]: ORD_P_SOURCE,
       [ORD_HASH1_FILE]: ORD_HASH1_SOURCE,
       [ORD_HASH2_FILE]: ORD_HASH2_SOURCE,
     },
   });
   try {
-    // This staging precedes T12.7-2's first product invocation (this arm's
-    // `build` below is the body's first), so S-7's sweep reaches it against
-    // the stub: plain contents, no ledger record (helpers/staged-mdx.ts).
+    // This staging — the initial files above (P.mdx's among them) and the
+    // non-UTF-8-named file below — precedes T12.7-2's first product
+    // invocation (this arm's `build` below is the body's first), so S-7's
+    // sweep reaches it against the stub: plain contents, no ledger record
+    // (helpers/staged-mdx.ts), judged by the workspace builder at staging.
     if (NON_UTF8_STAGED) {
       await workspace.file(ORD_NU_PATH_BYTES, ORD_NU_SOURCE);
     }
@@ -3250,7 +3367,9 @@ const T12_7_2 = defineProductTest({
     "conditions in NUMERIC order (missing-id first though alphabetically " +
     "last, invalid-import(15) after cycle(9) though before it as decimal " +
     "strings) — then by locations element-wise (range-start order between " +
-    "one file's findings, file-byte order across files), then by concerned " +
+    "one file's findings, file-byte order across files), a proper prefix " +
+    "sorting first (a braced `id` value's one-location 14.17 finding " +
+    "before the repeated `id`'s two-location one), then by concerned " +
     "path in one byte order over marked byte-form and plain paths alike " +
     "(Linux leg), with identically-staged duplicate findings collapsed to " +
     "one (a defect file discovered through two spec groups reports once); " +
