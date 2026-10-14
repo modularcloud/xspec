@@ -153,15 +153,24 @@
 //   staging holding a recorded file that obstructs a rebuild write — the
 //   one form instructed to be deleted manually instead.
 // - T14-4's 14.21 arm asserts matrix membership — exit 1 with /corrupt/i on
-//   stdout, the T10.1-4 operationalization — for one subcommand naming the
-//   session (`review status`) and for `review list`; the all-subcommands
-//   breadth and the fields-level list contract are T10.1-4's subject. The
-//   failing-workspace half likewise asserts membership alone — `check`
-//   reports 14.21 beside the gate's findings while `build`, `review status`,
-//   and `review list` report exactly the gate's findings (the `--json`
-//   findings report of the refusing reads, 12.7/13.3) — the every-subcommand
-//   breadth, modifies-nothing compares, and bytes-untouched assertions being
-//   T10.1-5's subject.
+//   stdout, the operationalization of T10.1-4's flag-less runs — for one
+//   subcommand naming the session (`review status`) and for `review list`,
+//   and beside those membership checks decodes the passing workspace's
+//   `review status bad --json` (TEST-SPEC's error-assertion rule: the exact
+//   code string and the concern SPEC 14 requires): exit 1, the
+//   findings-only report (12.7) holding exactly one finding, condition
+//   21's `corrupt-session`, concerning the session file
+//   `.xspec/reviews/bad.json` with `locations` [] — exactly one, since
+//   `check` counts one condition-21 finding on the same staging and the
+//   garbage bytes violate nothing but parseability. The all-subcommands
+//   breadth (every naming subcommand's report decoded under `--json`, in
+//   every corrupt state) and the fields-level list contract are T10.1-4's
+//   subject. The failing-workspace half likewise asserts membership alone
+//   — `check` reports 14.21 beside the gate's findings while `build`,
+//   `review status`, and `review list` report exactly the gate's findings
+//   (the `--json` findings report of the refusing reads, 12.7/13.3) — the
+//   every-subcommand breadth, modifies-nothing compares, and
+//   bytes-untouched assertions being T10.1-5's subject.
 // - T14-4's 14.23 arm asserts reporter membership by exact condition counts:
 //   `inventory` (the scoped `decodeInventoryFindings` decode) and a
 //   `rename --preview` each carry exactly the one condition-23 finding;
@@ -2330,7 +2339,7 @@ function assertSweepFindings(
 const T14_4 = defineProductTest({
   id: "T14-4",
   title:
-    "the reporter matrix: 14.10 and 14.12 reported by `check` only (a stale workspace `build`s successfully by regenerating; a policy-violating workspace `build`s successfully); 14.21 reported by `check`, by `review` subcommands naming the session, and by `review list` — not by `build`, and on a workspace failing `build`'s validations by `check` alone, beside the gate's findings; 14.23 reported by `inventory` and `rename`/`move` previews only — `check` reports the state as 14.10's unit form, and `build` and the refreshing reads never do; 14.14 as the every-command usage error — never `version`; 14.13 and 14.22 reported by `build`, `check`, and the gated reads, yet accompanying no `occurrences`/`view`/`at` answer; every other condition reported by both `build` and `check`, and as a domain file's finding accompanying the answers of each of `occurrences`/`view`/`at` whose domain can hold its staged file — all three for a spec-source staging, `occurrences` alone for a code-source one (SPEC 14, 12.1, 12.2, 10.1, 13.3, 11.2, 11.3-11.6, 6.6, 12.6)",
+    "the reporter matrix: 14.10 and 14.12 reported by `check` only (a stale workspace `build`s successfully by regenerating; a policy-violating workspace `build`s successfully); 14.21 reported by `check`, by `review` subcommands naming the session, and by `review list` — not by `build`, and on a workspace failing `build`'s validations by `check` alone, beside the gate's findings — on the passing workspace, `review status --json` emitting the findings-only report of exactly one `corrupt-session` finding, concerning the session file with `locations` []; 14.23 reported by `inventory` and `rename`/`move` previews only — `check` reports the state as 14.10's unit form, and `build` and the refreshing reads never do; 14.14 as the every-command usage error — never `version`; 14.13 and 14.22 reported by `build`, `check`, and the gated reads, yet accompanying no `occurrences`/`view`/`at` answer; every other condition reported by both `build` and `check`, and as a domain file's finding accompanying the answers of each of `occurrences`/`view`/`at` whose domain can hold its staged file — all three for a spec-source staging, `occurrences` alone for a code-source one (SPEC 14, 12.1, 12.2, 12.7, 10.1, 13.3, 11.2, 11.3-11.6, 6.6, 12.6)",
   timeoutMs: 480_000,
   run: async (product) => {
     // --- 14.10: check-only. A stale workspace `build`s successfully by
@@ -2507,6 +2516,48 @@ const T14_4 = defineProductTest({
             `content, 12.0; information presence, never exact wording, H-3)`,
         );
       }
+
+      // The same `review status` under `--json` (TEST-SPEC's
+      // error-assertion rule: the exact code string and the concern SPEC 14
+      // requires): exit 1, the findings-only report (12.7) holding exactly
+      // one finding — condition 21, its stable code `corrupt-session`
+      // exactly (the count reads the code) — concerning the session file
+      // itself with no in-source location (SPEC 14: a session condition
+      // carries the file it concerns; 12.7: its `path`, `locations` []).
+      // Exactly one: `check` counts one condition-21 finding on this
+      // staging, and the garbage bytes violate nothing but parseability
+      // (the module header; every naming subcommand's report decoded, in
+      // every corrupt state, is T10.1-4's).
+      const statusContext = "T14-4 (14.21) `review status bad --json`";
+      const statusResult = await expectExit(
+        product,
+        workspace,
+        ["review", "status", "bad", "--json"],
+        1,
+        `${statusContext} — a review subcommand naming a corrupt session ` +
+          `reports the corruption and exits 1, with JSON output in effect ` +
+          `as without (SPEC 14.21, 10.1, 12.0)`,
+      );
+      const statusFindings = decodeFindingsReport(
+        parseJsonStdout(statusResult, statusContext),
+        statusContext,
+      ).findings;
+      assertConditionCounts(
+        statusFindings,
+        { "14.21": 1 },
+        `${statusContext} — the findings-only report holds exactly the ` +
+          `corrupt session's one finding, its code \`corrupt-session\` ` +
+          `exactly: \`check\` counts one condition-21 finding on this ` +
+          `staging, and the garbage bytes violate nothing but ` +
+          `parseability (TEST-SPEC's error-assertion rule; SPEC 14, 14.21, ` +
+          `12.7)`,
+      );
+      assertConcernedPathAlone(
+        statusFindings[0]!,
+        GARBAGE_SESSION_PATH,
+        statusContext,
+        "SPEC 14, 14.21, 10.1, 12.7",
+      );
 
       // On a workspace failing `build`'s validations, 14.21 is reported
       // by `check` alone, beside the gate's findings: no session is read
