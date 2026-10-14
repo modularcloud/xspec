@@ -3,7 +3,9 @@
 // product-facing test, the registry's entries and the bodies outside the
 // registry alike, must fail with a diagnosed assertion failure (a
 // `HarnessAssertionError`, helpers/assertions.ts), and the sweep must
-// complete with no harness error, no hang, and no false pass.
+// complete with no harness error, no hang, and no false pass. H-8's other
+// half, a run with no product installed, holds the same bodies to the same
+// verdict (layer 5).
 //
 // The sweep target is the harness-owned stub fixture
 // (test/fixtures/empty-stub/bin.mjs), deliberately not src/'s pre-product
@@ -11,7 +13,7 @@
 // to the placeholder would lose its subject the moment Phase 10 implements
 // the product. This file keeps S-7 green in every phase.
 //
-// Four layers, so the sweep's premise is pinned even while the registry is
+// Five layers, so the sweep's premise is pinned even while the registry is
 // still being populated:
 //   1. the stub fixture's own contract (unexpected exit code, silence,
 //      no filesystem effects) is asserted directly;
@@ -38,14 +40,33 @@
 //      T11.6-1's drive-mismatch arm (`runT1161DriveMismatchArm`,
 //      helpers/e6-drive-mismatch-arm.ts, the body of
 //      test/windows/e6-drive-mismatch.test.ts). Each must reach the stub and
-//      fail there, diagnosed, exactly as a registered body must.
+//      fail there, diagnosed, exactly as a registered body must;
+//   5. H-8's no-product half: layer 2's probe, the registry's entries, and
+//      layer 4's bodies run through the same runner against
+//      `builtProductBindingAt(<absent>)` (helpers/subprocess.ts) — the
+//      built product's binding shape, whose missing artifact is H-8's
+//      missing product, at a path inside a fresh temporary directory the
+//      test creates and nothing writes into. The artifact is absent
+//      whatever the checkout's `dist/` holds, so this half means the same
+//      locally, in CI's harness-self job (no product installed), and in its
+//      full-suite job (the product built), and, like the stub, keeps its
+//      subject in every phase. Each body must fail diagnosed, its diagnosis
+//      naming the absent artifact: the driver's pre-flight refuses the
+//      body's first product invocation, before anything is spawned. The
+//      probe also runs against an unflagged binding of the certification
+//      fixtures' shape over the same absent path, which must end a harness
+//      error: an unbuilt fixture is a harness defect, never a certified
+//      failure (C-1).
 
 import { expect, onTestFinished, test } from "vitest";
+import * as fsp from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertExitCode } from "../helpers/assertions.js";
 import { defineProductTest } from "../helpers/registry.js";
 import type { ProductTestEntry } from "../helpers/registry.js";
-import { runProduct } from "../helpers/subprocess.js";
+import { builtProductBindingAt, runProduct } from "../helpers/subprocess.js";
 import type { ProductBinding } from "../helpers/subprocess.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 // Layer 4's bodies outside the registry. helpers/e6.ts and the drive-mismatch
@@ -309,5 +330,148 @@ test(
       { concurrency: BODIES_OUTSIDE_THE_REGISTRY.length },
     );
     expectEveryBodyFailedAtTheStub(report);
+  },
+);
+
+// Layer 5 (module header): H-8's no-product half — the same bodies against
+// the built product's binding shape at an artifact path guaranteed absent,
+// never the checkout's `dist/cli/bin.js`, so they meet exactly what a run
+// with no product installed meets, whatever this checkout or CI job built.
+
+/** Layer 5's binding and the absent artifact its diagnoses must name. */
+interface NoProductStaging {
+  /** `builtProductBindingAt(artifact)`: the flagged built-product shape. */
+  readonly binding: ProductBinding;
+  /** The absent artifact path. */
+  readonly artifact: string;
+  /** The fresh directory the path lies in, which nothing may write into. */
+  readonly directory: string;
+}
+
+/**
+ * Create a fresh temporary directory, removed when the test finishes, and
+ * bind the built product's shape at `dist/cli/bin.js` inside it — a path
+ * nothing creates, so the artifact is absent however the checkout's own
+ * `dist/` stands.
+ */
+async function noProductStaging(): Promise<NoProductStaging> {
+  const directory = await fsp.mkdtemp(
+    path.join(os.tmpdir(), "xspec-s7-no-product-"),
+  );
+  onTestFinished(() => fsp.rm(directory, { recursive: true, force: true }));
+  const artifact = path.join(directory, "dist", "cli", "bin.js");
+  return { binding: builtProductBindingAt(artifact), artifact, directory };
+}
+
+/**
+ * Layer 5's verdict (H-8: no product installed): every body failed as a
+ * diagnosed assertion failure whose diagnosis names the absent artifact —
+ * the driver's pre-flight refused the body's first product invocation,
+ * nothing spawned — never a harness error, a hang, or a pass. Any other
+ * outcome is named by test ID, with the runner's report.
+ */
+function expectEveryBodyFailedAtTheMissingProduct(
+  report: FixtureRunReport,
+  artifact: string,
+  where: string,
+): void {
+  const offenders = report.results.filter(
+    (result) =>
+      result.outcome !== "fail" || !(result.diagnosis ?? "").includes(artifact),
+  );
+  if (offenders.length > 0) {
+    const named = offenders
+      .map(
+        (result) =>
+          `${result.id} (${
+            result.outcome === "fail"
+              ? "a diagnosis not naming the absent artifact"
+              : result.outcome
+          })`,
+      )
+      .join(", ");
+    throw new Error(
+      `H-8's no-product sweep violated ${where}: ${offenders.length} of ` +
+        `${report.results.length} product-facing body(ies) — ${named} — did ` +
+        `not fail as a diagnosed assertion failure naming the absent ` +
+        `artifact ${artifact} (H-8: with no product installed, a pass is a ` +
+        `false pass; an error or hang is a harness defect).\n` +
+        renderFixtureReport(report),
+    );
+  }
+  expect(report.counts).toEqual({
+    pass: 0,
+    fail: report.results.length,
+    error: 0,
+    hang: 0,
+  });
+}
+
+test("H-8, no product installed: a registry-convention body fails diagnosed against the built product's binding shape at an absent artifact, its diagnosis naming the artifact, and ends a harness error against the certification fixtures' unflagged shape over the same path (the no-product premise, via the certification runner; C-1: an unbuilt fixture is a harness defect)", async () => {
+  const { binding, artifact, directory } = await noProductStaging();
+  const report = await runProductTests(binding, [SWEEP_PREMISE_PROBE]);
+  expect(report.counts).toEqual({ pass: 0, fail: 1, error: 0, hang: 0 });
+  expect(report.results[0]!.diagnosis).toContain(artifact);
+
+  // The certification fixtures' binding shape (certification-fixtures.ts),
+  // its executable unbuilt: `missingFilesFailDiagnosed` left unset.
+  const unbuiltFixture: ProductBinding = {
+    label: "unbuilt fixture product (the certification fixtures' shape)",
+    command: process.execPath,
+    prefixArgs: [artifact],
+    requiredFiles: [artifact],
+  };
+  const fixtureReport = await runProductTests(unbuiltFixture, [
+    SWEEP_PREMISE_PROBE,
+  ]);
+  expect(fixtureReport.counts).toEqual({
+    pass: 0,
+    fail: 0,
+    error: 1,
+    hang: 0,
+  });
+  // The harness error is the pre-flight's, naming the same artifact.
+  expect(fixtureReport.results[0]!.diagnosis).toContain(artifact);
+  expect(await fsp.readdir(directory)).toEqual([]);
+});
+
+test(
+  "H-8, no product installed: every product-facing test in the registry fails as a diagnosed assertion failure naming the absent artifact, against the built product's binding shape at it — the sweep completes with no false pass, harness error, or hang",
+  { timeout: SWEEP_TIMEOUT_MS },
+  async () => {
+    const entries = productTestSuite.all();
+    if (entries.length === 0) {
+      // Vacuously satisfied over an empty manifest, as the stub sweep is.
+      return;
+    }
+    const { binding, artifact, directory } = await noProductStaging();
+    // Every body fails at its first product invocation's pre-flight,
+    // nothing spawned: the stub sweep's lane count is as safe here.
+    const report = await runProductTests(binding, entries, {
+      concurrency: 8,
+    });
+    expectEveryBodyFailedAtTheMissingProduct(
+      report,
+      artifact,
+      "in the registry",
+    );
+    expect(await fsp.readdir(directory)).toEqual([]);
+  },
+);
+
+test(
+  "H-8, no product installed: every product-facing body outside the registry — the E-6 representative fixture, the Windows leg's four single-casing probes (T7-4, T10.1-2, T10.1-3, T12.0-6), and T11.6-1's drive-mismatch arm — fails as a diagnosed assertion failure naming the absent artifact, against the built product's binding shape at it, with no false pass, harness error, or hang",
+  { timeout: SWEEP_TIMEOUT_MS },
+  async () => {
+    const { binding, artifact, directory } = await noProductStaging();
+    const report = await runProductTests(binding, BODIES_OUTSIDE_THE_REGISTRY, {
+      concurrency: BODIES_OUTSIDE_THE_REGISTRY.length,
+    });
+    expectEveryBodyFailedAtTheMissingProduct(
+      report,
+      artifact,
+      "outside the registry",
+    );
+    expect(await fsp.readdir(directory)).toEqual([]);
   },
 );

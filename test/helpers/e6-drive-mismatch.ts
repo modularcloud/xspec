@@ -7,9 +7,10 @@
 // body, where the undeclared-staging guard cannot refuse its staging
 // (helpers/workspace.ts: outside a body context a creation never refuses),
 // and S-7's sweep (test/self/s7-red-green-sweep.test.ts) reaches the
-// creation only against the empty stub. S-9 wants both files judged before
-// any product exists, so they are staged-source records, defined in this
-// module of records alone so that the S-9 self-test
+// creation only where no product runs: against the empty stub, and against
+// an absent built-product artifact (its layer 5). S-9 wants both files
+// judged before any product exists, so they are staged-source records,
+// defined in this module of records alone so that the S-9 self-test
 // (test/self/s9-staged-sources.test.ts) can import it BEFORE the registry
 // manifest seals the ledgers and judge both records there, as it judges
 // the E-6 exchange fixture's (helpers/e6.ts); S-7's sweep imports the arm,
