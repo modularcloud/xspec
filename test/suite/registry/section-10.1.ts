@@ -31,23 +31,34 @@
 //   H-3, H-5), and so is `export`'s flag-less run: `export`'s only output
 //   form is that single JSON document, with or without `--json` (SPEC
 //   10.7; H-5's JSON-only clause), and its two decoded documents are
-//   deep-equal, array order significant (T12.0-1's JSON-only parity). Every
-//   decoded report holds at least one finding, and every finding carries
-//   what TEST-SPEC line 9 asks of an error report: condition 21's exact
-//   stable code `corrupt-session` (SPEC 14), the session file itself as its
-//   12.7 `path` — a symbolic link there by its own path, never its
-//   target's (10.1, 13.4) — and `locations` [] (a session condition has no
-//   in-source location; SPEC 14, 12.7). At least one finding, not exactly
-//   one: SPEC pins one finding for `create`'s refusal alone (10.7), and a
-//   state violating two invariants at once (the duplicate-item-ids state:
-//   unique item ids, and one item per kind and scope node) may be reported
-//   as two distinct condition-21 findings (12.7 collapses only findings
-//   identical in every member). The flag-less runs of the other five
-//   subcommands are human reports, asserted as exit 1 with stdout matching
-//   /corrupt/i (information presence, never exact wording, H-3): the human
-//   parity of a findings report is asked at the findings sites (T14-1,
-//   T14-7, T13.3-3), not per staging. Each state's `check --json` arm
-//   asserts the same concern information over its condition-21 findings.
+//   deep-equal, array order significant (T12.0-1's JSON-only parity).
+//   `review list --json` reports the session corrupt in place of its
+//   fields (10.7) and carries its condition 21 (14.21: reported by `review
+//   list`, exit 1) under the listing's `"findings"` member (12.7: wherever
+//   a document carries findings they form that member; the decoder
+//   requires it while a session is listed corrupt, H-3): the listing's
+//   findings are judged as the naming subcommands' reports are, with no
+//   invocation of their own. Every decoded report — the listing's findings
+//   included — holds at least one finding, and every finding carries what
+//   TEST-SPEC line 9 asks of an error report: condition 21's exact stable
+//   code `corrupt-session` (SPEC 14), the session file itself as its 12.7
+//   `path` — a symbolic link there by its own path, never its target's
+//   (10.1, 13.4) — and `locations` [] (a session condition has no
+//   in-source location; SPEC 14, 12.7). The staged session is the only
+//   corrupt one (the symbolic-link state's `real` beside the link is valid
+//   and reports none), so every finding of the listing concerns it. At
+//   least one finding, not exactly one, from a naming subcommand and from
+//   `list` alike: SPEC pins one finding for `create`'s refusal alone
+//   (10.7), and a state violating two invariants at once (the
+//   duplicate-item-ids state: unique item ids, and one item per kind and
+//   scope node) may be reported as two distinct condition-21 findings (12.7
+//   collapses only findings identical in every member). The flag-less runs
+//   of the other five subcommands are human reports, asserted as exit 1
+//   with stdout matching /corrupt/i (information presence, never exact
+//   wording, H-3): the human parity of a findings report is asked at the
+//   findings sites (T14-1, T14-7, T13.3-3), not per staging. Each state's
+//   `check --json` arm asserts the same concern information over its
+//   condition-21 findings.
 // - "modifies nothing" is a whole-workspace snapshot compare around each
 //   command — for T10.1-4's naming subcommands, one compare around both of
 //   a subcommand's runs, flag-less and with `--json` (H-4); the compares
@@ -963,15 +974,17 @@ const CORRUPT_SESSION_CODE = "corrupt-session";
 
 /**
  * A decoded corruption report's findings (T10.1-4; TEST-SPEC line 9's rule
- * for an error report): at least one finding, and every one condition 21 —
- * its exact stable code `corrupt-session` (SPEC 14; the derived condition
- * 14.21) — concerning the corrupt session's own file
- * `.xspec/reviews/<name>.json` as its 12.7 `path` (for a symbolic link
- * occupying it, the link's own path, never its target's: an occupant is
- * judged, never read through; SPEC 10.1, 13.4), with no in-source location
- * (`locations` []; SPEC 14, 12.7). At least one, not exactly one: see the
- * module header. `label` names the state and the argv; each diagnosis adds
- * the offending finding's code, path, and message.
+ * for an error report) — a naming subcommand's report, the listing's
+ * `"findings"` member, or `check`'s condition-21 findings: at least one
+ * finding, and every one condition 21 — its exact stable code
+ * `corrupt-session` (SPEC 14; the derived condition 14.21) — concerning
+ * the corrupt session's own file `.xspec/reviews/<name>.json` as its 12.7
+ * `path` (for a symbolic link occupying it, the link's own path, never its
+ * target's: an occupant is judged, never read through; SPEC 10.1, 13.4),
+ * with no in-source location (`locations` []; SPEC 14, 12.7). At least
+ * one, not exactly one: see the module header. `label` names the state and
+ * the argv; each diagnosis adds the offending finding's code, path, and
+ * message.
  */
 function assertCorruptSessionReport(
   findings: readonly Finding[],
@@ -1027,12 +1040,16 @@ function assertCorruptSessionReport(
  * concerning the session file (`assertCorruptSessionReport`), `export`'s
  * two documents the same (T12.0-1's JSON-only parity); the other flag-less
  * runs match /corrupt/i (see the module header). `list` reports the
- * session corrupt in place of its fields and exits 1; `check` reports
- * condition 14.21, every condition-21 finding carrying the same concern
- * information (TEST-SPEC line 9's rule): `locations` [] and, as its 12.7
- * `path`, the session file `.xspec/reviews/<name>.json` itself — for a
- * symbolic link occupying it, the link's own path, never its target's
- * (SPEC 14, 12.7, 10.1, 13.4). Each failure names the state.
+ * session corrupt in place of its fields and exits 1, and the listing's
+ * findings — its `"findings"` member, which carries condition 21 (SPEC
+ * 14.21, 12.7) — are judged as the naming subcommands' reports are
+ * (`assertCorruptSessionReport`: at least one finding, every one condition
+ * 21 concerning the session file); `check` reports condition 14.21, every
+ * condition-21 finding carrying the same concern information (TEST-SPEC
+ * line 9's rule): `locations` [] and, as its 12.7 `path`, the session file
+ * `.xspec/reviews/<name>.json` itself — for a symbolic link occupying it,
+ * the link's own path, never its target's (SPEC 14, 12.7, 10.1, 13.4).
+ * Each failure names the state.
  */
 async function assertCorruptSessionContract(
   product: ProductBinding,
@@ -1145,6 +1162,28 @@ async function assertCorruptSessionContract(
           `corrupt in place of its fields, sessions in byte order of name ` +
           `(SPEC 10.1, 10.7; the adapter refuses fields on a corrupt entry)`,
       );
+      // The listing's findings: `review list` reports condition 21 (SPEC
+      // 14.21, exit 1) under the document's "findings" member (12.7), which
+      // the decoder requires while a session is listed corrupt — as the
+      // staged one now is — so the member is present here. They are judged
+      // as the naming subcommands' reports are (TEST-SPEC line 9's rule):
+      // at least one finding (a state breaking two invariants may report
+      // two, see the module header), every one condition 21 concerning the
+      // corrupt session's own file — the link's own path in the
+      // symbolic-link state, whose valid `real` reports none — with
+      // `locations` [].
+      const listFindings = report.findings;
+      if (listFindings === undefined) {
+        fail(
+          `${listContext}: the listing must carry the corrupt session's ` +
+            `condition 21 under its "findings" member (SPEC 14.21, 12.7); ` +
+            `the decoded document carries no such member`,
+        );
+      }
+      assertCorruptSessionReport(
+        listFindings,
+        `${listContext} — the listing's findings`,
+      );
     },
     `${listContext} — a read leaves the workspace unchanged (SPEC 10.4, 13.5)`,
   );
@@ -1180,7 +1219,8 @@ async function assertCorruptSessionContract(
       // occupant is judged, never read through (13.4). Every condition-21
       // finding concerns it, since the staged session is the only corrupt
       // one (the symbolic-link state's `real` beside it is valid). The
-      // naming subcommands' reports are judged by the same helper.
+      // naming subcommands' reports and the listing's findings are judged
+      // by the same helper.
       assertCorruptSessionReport(
         corrupt,
         `${checkContext} — its condition-21 findings`,
@@ -1216,7 +1256,7 @@ const ADAPTER_STATES: readonly (readonly [
 const T10_1_4 = defineProductTest({
   id: "T10.1-4",
   title:
-    "each corrupt session state — unparseable bytes (garbage and truncation), missing 10.2 field, unknown status, duplicate item ids, blockedBy at an absent item, a blockedBy cycle, duplicate kind+scope, malformed recorded creation parameters, malformed recorded decompositions (garbled over a product-performed `split`'s durable record), and a directory or symlink at the session path — makes every review subcommand naming the session report corruption, exit 1, and modify nothing, its report under `--json` (and `export`'s without the flag, its only output form, the same document) the findings-only document of at least one finding, every one condition 21 `corrupt-session` concerning the session's own file (a symlink there by its own path) with `locations` []; `list` reports it corrupt in place of its fields (exit 1); `check` reports 14.21; shape-dependent states are staged via the H-3 adapter over product-written files (SPEC 10.1, 10.7, 12.7, 13.4, 14.21)",
+    "each corrupt session state — unparseable bytes (garbage and truncation), missing 10.2 field, unknown status, duplicate item ids, blockedBy at an absent item, a blockedBy cycle, duplicate kind+scope, malformed recorded creation parameters, malformed recorded decompositions (garbled over a product-performed `split`'s durable record), and a directory or symlink at the session path — makes every review subcommand naming the session report corruption, exit 1, and modify nothing, its report under `--json` (and `export`'s without the flag, its only output form, the same document) the findings-only document of at least one finding, every one condition 21 `corrupt-session` concerning the session's own file (a symlink there by its own path) with `locations` []; `list` reports it corrupt in place of its fields (exit 1), the listing's findings likewise at least one, every one condition 21 `corrupt-session` concerning the session's own file with `locations` []; `check` reports 14.21; shape-dependent states are staged via the H-3 adapter over product-written files (SPEC 10.1, 10.7, 12.7, 13.4, 14.21)",
   timeoutMs: 360_000,
   run: async (product) => {
     // --- Shape-dependent states via the adapter, over an audit session ---
