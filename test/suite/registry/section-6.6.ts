@@ -345,7 +345,9 @@
 //   finding is unlocated (condition 23, locations []), so no offset of its
 //   own is asked. The delta's direction words are no SPEC-named tokens and
 //   are not asked, and T6.6-6's refused preview, a refusal, reports
-//   findings alone (findings parity is T14-1's). Limits: no mention is
+//   findings alone (findings parity is T14-7's: a refused preview reports
+//   exactly the refused operation's findings, SPEC 14, whose human parity
+//   T14-7 asks for a refused `rename` and `move`). Limits: no mention is
 //   associated with another, so which file holds which edit, which class
 //   and range belong together, which `from` maps to which `to`, and which
 //   delta direction lists a path stay with the JSON assertions; an identity
