@@ -93,6 +93,19 @@
 //   fixture session holds no stale resolution while the `build`-and-read
 //   byte-compares run — the one resolve is the last staging step and no
 //   source changes afterward, so read-time invalidation computes nothing.
+//   The never-regenerated arm after the byte-compare loop is the session
+//   file's alone — TEST-SPEC's T13.4-5 parenthetical: the session file
+//   deleted, `review` naming it exits 2, `build` leaves it absent — and
+//   journal-neutral: it asserts nothing of the journal, so
+//   §VIOL-CORE-CHATTYREADS (`build` and the reads append to the journal,
+//   creating it when absent) fails T13.4-5 only at the loop's journal
+//   byte-compares, as its Expected failures state ("its session-file
+//   compares and its never-regenerated arm are untouched"). The loop alone
+//   carries that certification — the compare-around-command machinery
+//   CERTIFICATIONS.md's Exclusions bullet for T6.1-1 leans on. The
+//   journal's never-regenerated half (SPEC 6.1: written only by `rename`
+//   and `move`, the file coming into existence with a journaled operation;
+//   13.4) is T6.1-1's deleted-journal arm (section-6.1.ts).
 // - T13.4-6 refusal arm: the symlinked write-path component is staged as
 //   `markdown.outDir` naming a symlink to a real directory inside the
 //   workspace root (no outside-root confound, 14.14). With one source file,
@@ -1728,7 +1741,7 @@ const T13_4_4 = defineProductTest({
 const T13_4_5 = defineProductTest({
   id: "T13.4-5",
   title:
-    "`build` and the read commands never modify or delete the journal or session files (byte-compare around each command), and durable files are never regenerated: a deleted session file stays absent — `review` naming it exits 2 unknown session — and a deleted journal stays absent (SPEC 13.4, 6.1, 10.1, 12.0)",
+    "`build` and the read commands never modify or delete the journal or session files (byte-compare around each command), and durable files are never regenerated: a deleted session file stays absent — `review` naming it exits 2 unknown session (SPEC 13.4, 6.1, 10.1, 12.0)",
   run: async (product) => {
     await withWorkspace(
       { files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/A.mdx": A_MDX } },
@@ -1862,9 +1875,12 @@ const T13_4_5 = defineProductTest({
           );
         }
 
-        // Durable files are never regenerated. Deleting the session file:
-        // xspec does not recreate it, and `review` naming it is exit 2
-        // (unknown session, SPEC 10.1/12.0).
+        // Durable files are never regenerated — TEST-SPEC's parenthetical,
+        // the session file's: deleting it, xspec does not recreate it, and
+        // `review` naming it is exit 2 (unknown session, SPEC 10.1/12.0).
+        // The arm is journal-neutral (module header): the journal is
+        // compared by the loop above alone, and its never-regenerated half
+        // is T6.1-1's deleted-journal arm (SPEC 6.1).
         await fsp.rm(workspace.path(sessionRel("s")));
         await expectExit(
           product,
@@ -1888,42 +1904,15 @@ const T13_4_5 = defineProductTest({
               `13.4); found ${sessionKind} at ${sessionRel("s")}`,
           );
         }
-        assertBytesEqual(
-          await readFileDiagnosed(
-            workspace,
-            JOURNAL_REL,
-            "T13.4-5 the journal after the session-deletion arm",
-          ),
-          journalEntry.bytes,
-          "T13.4-5: the journal across the session-deletion arm — still " +
-            "byte-identical (SPEC 13.4, 6.1)",
-        );
-
-        // Deleting the journal: also never regenerated (an absent journal
-        // is a valid empty journal, SPEC 6.1).
-        await fsp.rm(workspace.path(JOURNAL_REL));
-        await buildOk(
-          product,
-          workspace,
-          "T13.4-5 `build` after deleting the journal (SPEC 12.1, 6.1)",
-        );
-        const journalKind = await workspace.kind(JOURNAL_REL);
-        if (journalKind !== "absent") {
-          fail(
-            "T13.4-5: the deleted journal must stay absent — the journal " +
-              "cannot be regenerated from source and comes into existence " +
-              "only with a journaled operation (SPEC 13.4, 6.1); found " +
-              journalKind,
-          );
-        }
+        // `check` closes the arm: the rebuilt, sessionless workspace is
+        // clean (SPEC 12.2).
         await expectExit(
           product,
           workspace,
           ["check"],
           0,
-          "T13.4-5 `check` after the deletion arms — the rebuilt, " +
-            "sessionless workspace with an empty journal is clean (SPEC " +
-            "12.2, 6.1)",
+          "T13.4-5 `check` after the session-deletion arm — the rebuilt, " +
+            "sessionless workspace is clean (SPEC 12.2)",
         );
       },
     );

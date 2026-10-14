@@ -32,6 +32,23 @@
 // T13.4-5, on which CERTIFICATIONS.md's Exclusions bullet for T6.1-1 relies,
 // with `readJournal`'s plain-file check as the premise.
 //
+// T6.1-1's deleted-journal arm (SPEC 6.1: the journal is written only by
+// `rename` and `move`, the file coming into existence with a journaled
+// operation; 13.4: a durable record, never regenerated) runs first, in its
+// own fresh CONF-CORE-shaped workspace (`withCoreWorkspace`), so a product
+// failing the sweep below still meets it: `build`, `rename specs/A.mdx a
+// a2`, the journal read as a plain file at `.xspec/journal`
+// (`readJournal`), the journal deleted, `build` exit 0, and then nothing
+// may stand at `.xspec/journal`. The plain-file read is the positive at the
+// same path that braces the absence check, as the Exclusions bullet reads
+// T6.1-1's first negative: a mislocated absence check fails loud there
+// rather than passing silently. The arm lives here, the journal's home,
+// not in T13.4-5, whose never-regenerated arm is the session file's alone
+// and journal-neutral (section-13.4.ts): T13.4-5's certification by
+// VIOL-CORE-CHATTYREADS, whose `build` would recreate a deleted journal,
+// rests on its byte-compare loop alone — the machinery the paragraph above
+// leans on.
+//
 // Conservative operationalizations (noted per H-4):
 // - "One entry per line" + "the journal is written only by rename and move"
 //   (SPEC 6.1) pin the line count: after N journaled operations the journal
@@ -52,14 +69,19 @@
 //   the line, fails — the discrimination the TEST-SPEC asks for.
 //
 // Staged-source records (TEST-SPEC S-9's before-any-product clause;
-// helpers/staged-mdx.ts): T6.1-3's directory- and symlink-occupant arms
-// create their workspaces after the garbage-line arm's invocations, so
-// `CORE_FILES`'s two `.mdx` entries are ledger records — judged by
-// test/self/s9-staged-sources.test.ts before any product exists — named
-// with every body that stages the map (T6.1-1's sweep workspace and
-// T6.1-2's two directories precede any invocation and would not need them).
+// helpers/staged-mdx.ts, helpers/staged-ts.ts): T6.1-3's directory- and
+// symlink-occupant arms create their workspaces after the garbage-line
+// arm's invocations, and T6.1-1's sweep workspace after the deleted-journal
+// arm's, so `CORE_FILES`'s entries — the configuration and the two `.mdx`
+// sources — are ledger records, judged by
+// test/self/s9-staged-sources.test.ts before any product exists; the two
+// sources' records are named with every body that stages the map, the
+// configuration's with the two that stage it after an invocation (T6.1-1's
+// deleted-journal workspace and T6.1-2's two directories precede any
+// invocation and would not need them).
 
 import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
 import type { Finding } from "../../helpers/adapters/index.js";
 import {
   decodeAtReport,
@@ -108,12 +130,12 @@ import {
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
-// other keys — the CONF-CORE workspace shape. T6.1-3's later arms stage it in
-// workspaces created after the body's first invocation, so it is a
-// staged-source record (S-9's timing clause;
+// other keys — the CONF-CORE workspace shape. T6.1-1's sweep workspace and
+// T6.1-3's later arms stage it in workspaces created after the body's first
+// invocation, so it is a staged-source record (S-9's timing clause;
 // test/self/s9-staged-sources.test.ts).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.1-3 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape",
+  "T6.1-1/T6.1-3 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -345,8 +367,49 @@ async function assertLeavesJournalUnchanged(
 const T6_1_1 = defineProductTest({
   id: "T6.1-1",
   title:
-    "no journal exists after `build` in a fresh workspace; the file appears at .xspec/journal with the first rename/move; each subsequent operation appends exactly one line-oriented entry and rewrites nothing above it (byte-prefix asserted); every other command surface — build, check, ids, show, coverage, impact, review (reads and create/split/resolve alike), query, occurrences, view, at, inventory, version, and rename/move --preview — never modifies it (byte-compare around each on the journal-bearing workspace; the previews leave the whole workspace byte-identical) (SPEC 6.1, 6.6, 13.4)",
+    "no journal exists after `build` in a fresh workspace; the file appears at .xspec/journal with the first rename/move; each subsequent operation appends exactly one line-oriented entry and rewrites nothing above it (byte-prefix asserted); every other command surface — build, check, ids, show, coverage, impact, review (reads and create/split/resolve alike), query, occurrences, view, at, inventory, version, and rename/move --preview — never modifies it (byte-compare around each on the journal-bearing workspace; the previews leave the whole workspace byte-identical); and a journal deleted after a journaled operation stays absent across `build` — never regenerated (SPEC 6.1, 6.6, 13.4)",
   run: async (product) => {
+    // The deleted-journal arm (module header): its own fresh workspace,
+    // before the sweep workspace, so a product failing the sweep still
+    // meets it.
+    await withCoreWorkspace(async (workspace) => {
+      const context = "T6.1-1 deleted-journal arm";
+      await buildOk(
+        product,
+        workspace,
+        `${context}: \`build\` in a fresh workspace`,
+      );
+      await expectExit(
+        product,
+        workspace,
+        ["rename", "specs/A.mdx", "a", "a2"],
+        0,
+        `${context}: \`rename specs/A.mdx a a2\` — the journal comes into ` +
+          `existence with the first journaled operation (SPEC 6.1)`,
+      );
+      // The positive at the same path, bracing the absence check below: the
+      // journal stands as a plain file at .xspec/journal before it is
+      // deleted.
+      await readJournal(workspace, `${context}: after the rename`);
+      await fsp.rm(workspace.path(JOURNAL_PATH));
+      await buildOk(
+        product,
+        workspace,
+        `${context}: \`build\` after deleting the journal (SPEC 12.1, 6.1)`,
+      );
+      const kindAfterDeletion = await workspace.kind(JOURNAL_PATH);
+      if (kindAfterDeletion !== "absent") {
+        fail(
+          `${context}: the deleted journal must stay absent across ` +
+            `\`build\` — the journal is written only by \`rename\` and ` +
+            `\`move\`, the file coming into existence with a journaled ` +
+            `operation (SPEC 6.1), and as a durable record it cannot be ` +
+            `regenerated from source and is never regenerated (SPEC 13.4); ` +
+            `found ${kindAfterDeletion} at ${JOURNAL_PATH}`,
+        );
+      }
+    });
+
     await withSweepWorkspace(async (workspace) => {
       // Fresh workspace: `build` succeeds and creates no journal.
       await buildOk(
