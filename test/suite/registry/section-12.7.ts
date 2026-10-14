@@ -236,6 +236,25 @@
 //   with no `--config` concerning the working directory itself, spelled `.`
 //   — from the root and from a nested cwd equally (the search starts at the
 //   invocation working directory).
+// - The physical-resolution arm (Linux leg; SPEC 11.6: the working
+//   directory enters the anchoring spelling as a physical directory path,
+//   every symbolic link among its components resolved) stages its linked
+//   working directory as T11.6-1's physical-anchoring arms and T13.4-6 do:
+//   from `R/L`, a symbolic link to `R/a/b`, with `--config
+//   ./../xspec.config.ts` naming the malformed `R/a/xspec.config.ts`, the
+//   link path is given as the child's working directory AND as `PWD`,
+//   exactly as a shell that `cd`ed through the link presents the
+//   invocation. The kernel resolves the child's working directory
+//   physically, and the child would otherwise inherit the harness's own,
+//   unrelated `PWD`, so without it the link path never reaches the product
+//   and neither forbidden answer could arise. With it, a product spelling
+//   the concerned path's relation from `PWD` reports `../a/xspec.config.ts`,
+//   and one resolving `--config` lexically from `PWD` finds nothing at
+//   `R/xspec.config.ts` and echoes the argument as given,
+//   `./../xspec.config.ts` — each failing the pinned `../xspec.config.ts`,
+//   the physical relation (SPEC 14, 11.6). Only this arm sets `PWD`: the
+//   other configuration-error arms run from directories that are no links,
+//   where it adds nothing the entry asks.
 // - The failed-search premise is T7-1's: the workspace is a fresh unique
 //   temporary directory (H-1) whose filesystem ancestors (the OS temp
 //   directory and its parents) hold no `xspec.config.ts`, so the upward
@@ -2889,7 +2908,10 @@ function assertStderrDiagnostic(result: RunResult, context: string): void {
  * locations [] (SPEC 14: configuration conditions carry no in-source
  * location), and the concerned path exactly `expectedPath` — the anchoring
  * form of 11.6, identified relative to the invocation working directory
- * (SPEC 14, 12.7).
+ * (SPEC 14, 12.7). `env`, when given, is merged last into the child's
+ * environment (`RunOptions.env`, over the sanitized base,
+ * helpers/subprocess.ts): the physical-resolution arm sets `PWD` to the link
+ * path a shell would present; every other arm passes none.
  */
 async function expectAnchoredConfigurationError(
   product: ProductBinding,
@@ -2897,8 +2919,13 @@ async function expectAnchoredConfigurationError(
   argv: readonly string[],
   expectedPath: string,
   context: string,
+  env?: Readonly<Record<string, string>>,
 ): Promise<void> {
-  const result = await runProduct(product, { cwd, argv });
+  const result = await runProduct(product, {
+    cwd,
+    argv,
+    ...(env === undefined ? {} : { env }),
+  });
   assertExitCode(
     result,
     2,
@@ -3417,12 +3444,19 @@ const T12_7_2 = defineProductTest({
  * existing file, so the concerned path is its canonical anchoring spelling
  * over the PHYSICAL relation between the working directory and the file:
  * `../xspec.config.ts` (SPEC 11.6: the working directory enters the spelling
- * with every symbolic link among its components resolved). Never
- * `../a/xspec.config.ts`, the relation spelled from the link's lexical
- * position, and never the argument as given, `./../xspec.config.ts` — the
- * form reserved for a path nothing occupies (SPEC 14), which a product
- * resolving the argument lexically from `R/L` (finding nothing at
- * `R/xspec.config.ts`) would report.
+ * with every symbolic link among its components resolved). The link path is
+ * given as the child's working directory AND as `PWD`, exactly as a shell
+ * that `cd`ed through the link presents the invocation (T11.6-1's
+ * physical-anchoring staging; module header): the kernel resolves the
+ * child's working directory physically, so without `PWD` naming the link —
+ * the child would inherit the harness's own, unrelated one — the link path
+ * never reaches the product and neither forbidden answer could arise.
+ * Never `../a/xspec.config.ts`, the relation spelled from the link's lexical
+ * position, which a product spelling the relation from `PWD` reports; and
+ * never the argument as given, `./../xspec.config.ts` — the form reserved
+ * for a path nothing occupies (SPEC 14) — which a product resolving the
+ * argument lexically from `PWD` echoes, finding nothing at
+ * `R/xspec.config.ts`.
  */
 async function runErrorSymlinkWorkingDirectoryArm(
   product: ProductBinding,
@@ -3436,15 +3470,19 @@ async function runErrorSymlinkWorkingDirectoryArm(
       symlinks: { L: "a/b" },
     },
     async (workspace) => {
+      // The link path as working directory and as `PWD` (doc comment).
+      const linkCwd = workspace.path("L");
       await expectAnchoredConfigurationError(
         product,
-        workspace.path("L"),
+        linkCwd,
         ["build", "--json", "--config", "./../xspec.config.ts"],
         "../xspec.config.ts",
         "T12.7-3 `build --json --config ./../xspec.config.ts` from the " +
-          "working directory R/L, a symbolic link to R/a/b (the malformed " +
+          "working directory R/L, a symbolic link to R/a/b (the link path " +
+          "given as working directory and as `PWD`; the malformed " +
           "configuration at R/a/xspec.config.ts: the physical relation " +
           "between the working directory and the file, SPEC 11.6)",
+        { PWD: linkCwd },
       );
     },
   );
@@ -3593,9 +3631,10 @@ const T12_7_3 = defineProductTest({
     "byte-for-byte and an absolute path — while the same spellings naming " +
     "the malformed existing file report the canonical " +
     "../cfg/xspec.config.ts; (Linux leg) from a working directory R/L that " +
-    "is a symbolic link to R/a/b, --config ./../xspec.config.ts naming the " +
-    "malformed R/a/xspec.config.ts reports ../xspec.config.ts, the physical " +
-    "relation, never ../a/xspec.config.ts and never the spelling as given; " +
+    "is a symbolic link to R/a/b (the link path given as working directory " +
+    "and as `PWD`), --config ./../xspec.config.ts naming the malformed " +
+    "R/a/xspec.config.ts reports ../xspec.config.ts, the physical relation, " +
+    "never ../a/xspec.config.ts and never the spelling as given; " +
     "(Linux leg, permission-staged) a write the environment refuses — " +
     ".xspec unwritable on a stale workspace — is " +
     '{"code": "write-failure", "path": ".xspec"} and a read it refuses — ' +
