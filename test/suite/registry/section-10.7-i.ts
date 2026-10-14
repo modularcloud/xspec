@@ -70,7 +70,18 @@
 //   symbolic link there the link's own path, never its target's (13.4) —
 //   and is asserted too; the code-less existing-name refusal's is pinned
 //   nowhere — 14 assigns that refusal no code and no concern datum (SPEC
-//   10.7) — so it is left unasserted (H-4).
+//   10.7) — so it is left unasserted (H-4). T10.7-5's corrupt listing asks
+//   its condition-21 finding the same way — identity (its exact stable code
+//   `corrupt-session`, TEST-SPEC line 9), count, empty locations, and
+//   concerned path, the session's own file `.xspec/reviews/c.json` — with
+//   no invocation of its own: `list` reports condition 21 for each corrupt
+//   session (14.21, exit 1) under the listing's `"findings"` member (12.7),
+//   which the decoder requires while a session is listed corrupt (H-3).
+//   Exactly one finding, where T10.1-4 reads at least one across its
+//   states: the unparseable bytes violate nothing but parseability — no
+//   invariant is read from bytes that do not parse, so no second violation
+//   stands beside it as a distinct finding (T14-4's reading of its garbage
+//   session) — and the three other sessions are healthy.
 // - T10.7-5's human form (T12.0-1's information parity; SPEC 12.0: the JSON
 //   form carries the same information as the human report): after each of
 //   its two `--json` listings and their assertions, at the same state, the
@@ -2008,10 +2019,86 @@ const T10_7_5_W_EDITED = stagedMdx(
   c5Spec("Dub text v1."),
 );
 
+/** Condition 21's stable code (SPEC 14: 21 `corrupt-session`; 12.7). */
+const CORRUPT_SESSION_CODE = "corrupt-session";
+
+/**
+ * The corrupt listing's condition 21 (T10.7-5; TEST-SPEC line 9's rule for
+ * an error report): `review list` reports condition 21 for each corrupt
+ * session (SPEC 14.21, exit 1) under the listing's `"findings"` member
+ * (12.7), which the decoder requires while a session is listed corrupt.
+ * With one session's file overwritten by unparseable bytes and every other
+ * session healthy, the listing holds exactly one finding (the module
+ * header), asked as T10.7-1's refusals ask theirs: its exact stable code
+ * `corrupt-session` (SPEC 14; the derived condition 14.21), the corrupt
+ * session's own file `.xspec/reviews/<name>.json` as its 12.7 `path` (SPEC
+ * 14, 12.7, 10.1), and no in-source location (`locations` []). `label`
+ * names the listing; each diagnosis adds every offending finding's code,
+ * path, and message.
+ */
+function assertListingCorruptFinding(
+  listing: SessionListReport,
+  concernedPath: string,
+  label: string,
+): void {
+  const findings = listing.findings;
+  if (findings === undefined) {
+    fail(
+      `${label}: the listing must carry the corrupt session's condition 21 ` +
+        `under its "findings" member (SPEC 14.21, 12.7); the decoded ` +
+        `document carries no such member`,
+    );
+  }
+  const describe = (finding: Finding): string =>
+    `code ${JSON.stringify(finding.code)}, path ` +
+    `${JSON.stringify(finding.path)}, message ` +
+    JSON.stringify(finding.message);
+  if (findings.length !== 1) {
+    fail(
+      `${label}: the listing's findings must hold the corrupt session's ` +
+        `condition 21 as exactly one finding \`${CORRUPT_SESSION_CODE}\` — ` +
+        `one session's file holds unparseable bytes, every other session ` +
+        `is healthy (SPEC 10.7, 14, 14.21, 12.7); got ` +
+        (findings.length === 0
+          ? "no findings"
+          : `${String(findings.length)}: ` +
+            findings
+              .map(
+                (finding, index) =>
+                  `(${String(index + 1)}) ${describe(finding)}`,
+              )
+              .join("; ")),
+    );
+  }
+  const finding = findings[0];
+  const which = `${label}: the listing's finding (${describe(finding)})`;
+  if (finding.code !== CORRUPT_SESSION_CODE) {
+    fail(
+      `${which}: a corrupt session is condition 21, carrying its exact ` +
+        `stable code ${JSON.stringify(CORRUPT_SESSION_CODE)} (TEST-SPEC line ` +
+        `9: the exact code string; SPEC 14, 14.21, 12.7)`,
+    );
+  }
+  if (finding.path !== concernedPath) {
+    fail(
+      `${which}: a session condition carries the session file it concerns ` +
+        `as its 12.7 path — the corrupt session's own path ` +
+        `${JSON.stringify(concernedPath)} (SPEC 14, 12.7, 10.1)`,
+    );
+  }
+  if (finding.locations.length !== 0) {
+    fail(
+      `${which}: a session condition has no in-source location — ` +
+        `locations [] (SPEC 14, 12.7); got ` +
+        JSON.stringify(finding.locations),
+    );
+  }
+}
+
 const T10_7_5 = defineProductTest({
   id: "T10.7-5",
   title:
-    "`review list`: every session is reported in byte order of session name — created `a2`, then `a`, then `B`, listed `B`, `a`, `a2`, an order differing from both creation order and ASCII-case-folded order — each with its name, strategy (the spec-fixed strategy names `coverage`, `path-blocks`, `audit`), and item counts by stored status with no read-time invalidation applied: a resolved item whose scope was edited afterward reads as invalidated in `status` yet still counts under its stored `no-change`; a corrupt session (unparseable bytes over a product-written session file) is reported by name as corrupt in place of those fields; `list` exits 1 iff any corrupt session exists, else 0; and the human `review list` at each listing's state exits alike and carries the listing's information — every session's name, each healthy session's strategy, the statuses it stores items under, and its nonzero counts, and `corrupt` beside the corrupt session's name (robust matching, H-3) (SPEC 10.1, 10.4, 10.7, 12.0, 14.21)",
+    "`review list`: every session is reported in byte order of session name — created `a2`, then `a`, then `B`, listed `B`, `a`, `a2`, an order differing from both creation order and ASCII-case-folded order — each with its name, strategy (the spec-fixed strategy names `coverage`, `path-blocks`, `audit`), and item counts by stored status with no read-time invalidation applied: a resolved item whose scope was edited afterward reads as invalidated in `status` yet still counts under its stored `no-change`; a corrupt session (unparseable bytes over a product-written session file) is reported by name as corrupt in place of those fields, the corrupt listing carrying condition 21's one finding — `corrupt-session`, concerning the session's own file `.xspec/reviews/c.json`, with no location (`locations` []); `list` exits 1 iff any corrupt session exists, else 0; and the human `review list` at each listing's state exits alike and carries the listing's information — every session's name, each healthy session's strategy, the statuses it stores items under, and its nonzero counts, and `corrupt` beside the corrupt session's name (robust matching, H-3) (SPEC 10.1, 10.4, 10.7, 12.0, 12.7, 14, 14.21)",
   timeoutMs: 300_000,
   run: async (product) => {
     await withWorkspace(
@@ -2189,6 +2276,18 @@ const T10_7_5 = defineProductTest({
             `corrupt in place of its fields — the adapter refuses strategy ` +
             `and counts on a corrupt entry — while the healthy sessions ` +
             `keep theirs, all in byte order of name (SPEC 10.1, 10.7)`,
+        );
+        // The listing's condition 21, with no invocation of its own: `list`
+        // reports the corrupt session (SPEC 14.21, exit 1) and carries its
+        // finding under the document's "findings" member (12.7), which the
+        // decoder requires while a session is listed corrupt — as `c` now
+        // is. Exactly one finding, `corrupt-session` concerning c's own
+        // file with `locations` [] (the module header: one session holds
+        // unparseable bytes, the three others are healthy).
+        assertListingCorruptFinding(
+          corrupt,
+          sessionRel,
+          `${corruptContext} — the listing's findings`,
         );
         assertStoredCounts(
           corrupt.sessions[2],
