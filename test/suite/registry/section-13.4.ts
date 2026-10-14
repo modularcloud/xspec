@@ -132,20 +132,35 @@
 //   target is the product's own healthy session file beside it, so a product
 //   that reads or writes through the link sees a valid durable file and
 //   proceeds; the exit-code and whole-workspace byte-compares then fail it
-//   ("never read, appended, or replaced"). The 14.13/14.21 condition
-//   identities are asserted through `build --json` / `check --json` /
-//   /corrupt/i vocabulary, leniently per the T6.1-3 and T10.1-4 precedents
-//   (the staged condition present; cascades unpinned), and on the JSON
-//   reports so is the concern information SPEC 14 requires: a journal or
-//   session condition has no in-source location and carries the path it
-//   concerns (SPEC 14, 12.7), so every 14.13 finding of `build --json` and
-//   `check --json` carries the one journal's path, `.xspec/journal` (SPEC
-//   6.1), and every 14.21 finding of `check --json` the session-named path
-//   the link occupies, `.xspec/reviews/fake.json` (SPEC 10.1) — never the
-//   link's target `real.json` — each with empty `locations`. The mutating
-//   attempts' refusal report content is left unasserted: their condition
-//   and its concern information are the ones those JSON reports assert on
-//   the identical staging.
+//   ("never read, appended, or replaced"). On `build --json` and `check
+//   --json` the 14.13/14.21 condition identities are asserted leniently per
+//   the T6.1-3 and T10.1-4 precedents (the staged condition present;
+//   cascades unpinned), and so is the concern information SPEC 14 requires:
+//   a journal or session condition has no in-source location and carries
+//   the path it concerns (SPEC 14, 12.7), so every 14.13 finding of `build
+//   --json` and `check --json` carries the one journal's path,
+//   `.xspec/journal` (SPEC 6.1), and every 14.21 finding of `check --json`
+//   the session-named path the link occupies, `.xspec/reviews/fake.json`
+//   (SPEC 10.1) — never the link's target `real.json` — each with empty
+//   `locations`. The refused attempts' reports are decoded under `--json`
+//   too, each run inside the compare around its flag-less twin (TEST-SPEC
+//   line 9's rule for an error report; `requireDurableRefusalReport`): the
+//   journaled `rename`'s report is the invalid-workspace refusal, which
+//   reports the workspace's findings alone (SPEC 6.4), and the workspace's
+//   one failing validation is the occupied journal — sources and
+//   configuration valid, derived files current from the `build` before the
+//   occupant, no session — so it holds at least one finding, every one
+//   `journal-error` (condition 13) concerning `.xspec/journal` with empty
+//   `locations`, and a 14.22, a refusal reason, or a code-less refusal
+//   fails it; `review status fake --json` and `review resolve fake <item>
+//   --status no-change --json` each report the one corruption the occupant
+//   is, its content never read (SPEC 13.4) — exactly one `corrupt-session`
+//   finding (condition 21) concerning the link's own path
+//   `.xspec/reviews/fake.json`, never `real.json`, with empty `locations`
+//   (SPEC 10.1, 14, 12.7), as T14-10(c) pins one finding for its unreadable
+//   session. The flag-less runs keep exit 1 and, for `review status`,
+//   /corrupt/i: a human report's findings parity is asked at the findings
+//   sites (T14-1, T14-7, T13.3-3).
 // - T13.4-6 positive arm: the product is driven with its working directory
 //   given as a symbolic link (created beside the workspace root) resolving
 //   to the real root, with `PWD` naming the link path — path components
@@ -2005,6 +2020,83 @@ function requireDurableCondition(
 }
 
 /**
+ * Assert the decoded findings-only report of an attempt refused over an
+ * occupied durable path holds the durable condition alone (TEST-SPEC line
+ * 9's rule for an error report; the module header): every finding carries
+ * the condition's exact stable code — `journal-error` (condition 13) for
+ * the journaled `rename`'s invalid-workspace refusal, `corrupt-session`
+ * (condition 21) for a `review` subcommand naming the occupied session
+ * (SPEC 14, 12.7) — the occupied durable path as its 12.7 `path`, a
+ * symbolic link there by its own path, never its target's (SPEC 14, 12.7,
+ * 13.4), and empty `locations`: a durable condition has no in-source
+ * location (SPEC 14, 12.7). `cardinality` is the module header's reading:
+ * at least one finding for the rename, exactly one for each review
+ * attempt. Every diagnosis names `durablePath`, its `occupant`, and the
+ * offending findings' codes, paths, and messages; `context` names the argv
+ * and `why` gives the report's SPEC reason.
+ */
+function requireDurableRefusalReport(
+  findings: readonly Finding[],
+  code: "journal-error" | "corrupt-session",
+  cardinality: "at least one" | "exactly one",
+  durablePath: string,
+  occupant: string,
+  why: string,
+  context: string,
+): void {
+  const where = `${context} (${durablePath} occupied by ${occupant})`;
+  const describe = (finding: Finding): string =>
+    `code ${JSON.stringify(finding.code)}, path ` +
+    `${renderPathValue(finding.path)}, message ` +
+    JSON.stringify(finding.message);
+  if (
+    findings.length === 0 ||
+    (cardinality === "exactly one" && findings.length !== 1)
+  ) {
+    fail(
+      `${where}: the report must hold ${cardinality} finding, ` +
+        `\`${code}\` — ${why}; got ` +
+        (findings.length === 0
+          ? "no findings"
+          : `${String(findings.length)}: ` +
+            findings
+              .map(
+                (finding, index) =>
+                  `(${String(index + 1)}) ${describe(finding)}`,
+              )
+              .join("; ")),
+    );
+  }
+  for (const [index, finding] of findings.entries()) {
+    const which =
+      `${where}: finding ${String(index + 1)} of ` +
+      `${String(findings.length)} (${describe(finding)})`;
+    if (finding.code !== code) {
+      fail(
+        `${which}: every finding of the report is the durable condition, ` +
+          `carrying its exact stable code ${JSON.stringify(code)} — ${why} ` +
+          `(TEST-SPEC line 9: the exact code string; SPEC 14, 12.7)`,
+      );
+    }
+    if (finding.path !== durablePath) {
+      fail(
+        `${which}: a durable condition carries the path it concerns as its ` +
+          `12.7 path — the occupied durable path ` +
+          `${JSON.stringify(durablePath)}, a symbolic link there by its own ` +
+          `path, never its target's (SPEC 14, 12.7, 13.4)`,
+      );
+    }
+    if (finding.locations.length !== 0) {
+      fail(
+        `${which}: a durable condition has no in-source location — ` +
+          `locations [] (SPEC 14, 12.7); got ` +
+          JSON.stringify(finding.locations),
+      );
+    }
+  }
+}
+
+/**
  * Assert a findings report carries exactly one condition-22 finding per
  * staged offending component, each finding's concerned path that component's
  * workspace-relative path (SPEC 14.22: one finding per distinct offending
@@ -2105,7 +2197,7 @@ async function expectObstructionReport(
 const T13_4_6 = defineProductTest({
   id: "T13.4-6",
   title:
-    "a write path with a symbolic link at a workspace-relative directory component is refused before anything is modified (14.22, exit 1, workspace byte-identical; `check` reports it without writing); a plain file occupying a directory component of a `build` write path — a first emission's `outDir` component, and a deeper component below it, no move operand involved — is refused identically, concerned path that component; one occupant under which two derived files would be written is one finding and two distinct offending components are two, via `check`; a durable path occupied by a symlink or non-plain file is a journal error (14.13) / corrupt session (14.21), never read, appended, or replaced; path components above the workspace root are unrestricted — a root reached through a symlink builds, mutates, and `check`s normally (SPEC 13.4, 14.13, 14.21, 14.22)",
+    "a write path with a symbolic link at a workspace-relative directory component is refused before anything is modified (14.22, exit 1, workspace byte-identical; `check` reports it without writing); a plain file occupying a directory component of a `build` write path — a first emission's `outDir` component, and a deeper component below it, no move operand involved — is refused identically, concerned path that component; one occupant under which two derived files would be written is one finding and two distinct offending components are two, via `check`; a durable path occupied by a symlink or non-plain file is a journal error (14.13) / corrupt session (14.21), never read, appended, or replaced — under `--json` the refused `rename`'s report every finding `journal-error` concerning the journal path, and `review status` and `review resolve` naming the occupied session each one `corrupt-session` finding concerning the link's own path, never its target's, `locations` `[]` throughout; path components above the workspace root are unrestricted — a root reached through a symlink builds, mutates, and `check`s normally (SPEC 6.4, 10.1, 12.7, 13.4, 14.13, 14.21, 14.22)",
   run: async (product) => {
     // --- Refusal arm: the Markdown emit destination's directory component
     // is a symbolic link (module header: exactly one write path traverses
@@ -2276,23 +2368,50 @@ const T13_4_6 = defineProductTest({
         await workspace.symlink(JOURNAL_REL, "../journal-target");
 
         const occupantProbe = async (occupant: string): Promise<void> => {
+          const occupantKind =
+            occupant === "symlink" ? "a symbolic link" : "a directory";
+          const renameArgv = ["rename", A_ROOT, "a", "a2"] as const;
           const renameContext = `T13.4-6 (journal ${occupant}) \`rename specs/A.mdx a a2\``;
+          const renameJsonContext = `T13.4-6 (journal ${occupant}) \`rename specs/A.mdx a a2 --json\``;
           await assertLeavesUnchanged(
             workspace.root,
             async () => {
               await expectExit(
                 product,
                 workspace,
-                ["rename", A_ROOT, "a", "a2"],
+                renameArgv,
                 1,
                 `${renameContext}: a journal path occupied by anything ` +
                   `other than a plain file is a journal error — the ` +
                   `journaled operation is refused (SPEC 13.4, 14.13, 6.4)`,
               );
+              // The same refusal under --json (module header): the
+              // invalid-workspace refusal's findings-only report, every
+              // finding the journal error concerning the journal path.
+              requireDurableRefusalReport(
+                await runFindingsReport(
+                  product,
+                  workspace,
+                  [...renameArgv, "--json"],
+                  1,
+                  `${renameJsonContext}: the refused operation exits 1, ` +
+                    `under --json the form-exact findings-only report as ` +
+                    `the entire stdout (SPEC 6.4, 12.0, 12.7; H-5)`,
+                ),
+                "journal-error",
+                "at least one",
+                JOURNAL_REL,
+                occupantKind,
+                `an invalid-workspace refusal reports the workspace's ` +
+                  `findings alone, no refusal reason beside them (SPEC 6.4, ` +
+                  `14), and this workspace's one failing validation is the ` +
+                  `occupied journal, a journal error (SPEC 13.4, 14.13)`,
+                renameJsonContext,
+              );
             },
-            `${renameContext}: the occupied journal is never read, ` +
-              `appended to, or replaced, and nothing else is modified — ` +
-              `occupant and target byte-identical (SPEC 13.4)`,
+            `${renameContext}, then with --json: the occupied journal is ` +
+              `never read, appended to, or replaced, and nothing else is ` +
+              `modified — occupant and target byte-identical (SPEC 13.4)`,
           );
           for (const argv of [
             ["build", "--json"],
@@ -2316,7 +2435,7 @@ const T13_4_6 = defineProductTest({
                   ).findings,
                   "14.13",
                   JOURNAL_REL,
-                  occupant === "symlink" ? "a symbolic link" : "a directory",
+                  occupantKind,
                   `the journal error concerns the occupied journal path: a ` +
                     `journal condition carries the path it concerns, and ` +
                     `the workspace has one journal, at ${JOURNAL_REL} ` +
@@ -2363,6 +2482,36 @@ const T13_4_6 = defineProductTest({
           "T13.4-6 (session occupant) item lookup",
         ).id;
         await workspace.symlink(sessionRel("fake"), "real.json");
+        const sessionOccupant = `a symbolic link resolving to the healthy ${sessionRel("real")}`;
+
+        // A review attempt's report under --json (module header): the
+        // findings-only report holding exactly one finding — the one
+        // corruption the occupant is — concerning the link's own path.
+        const expectCorruptSessionReport = async (
+          argv: readonly string[],
+          spelled: string,
+          why: string,
+        ): Promise<void> => {
+          const context = `T13.4-6 (session occupant) \`${spelled}\``;
+          requireDurableRefusalReport(
+            await runFindingsReport(
+              product,
+              workspace,
+              argv,
+              1,
+              `${context}: a review subcommand naming the corrupt session ` +
+                `reports the corruption and exits 1, under --json the ` +
+                `form-exact findings-only report as the entire stdout ` +
+                `(SPEC 10.1, 14.21, 12.0, 12.7; H-5)`,
+            ),
+            "corrupt-session",
+            "exactly one",
+            sessionRel("fake"),
+            sessionOccupant,
+            why,
+            context,
+          );
+        };
 
         const statusContext = "T13.4-6 (session occupant) `review status fake`";
         await assertLeavesUnchanged(
@@ -2388,9 +2537,16 @@ const T13_4_6 = defineProductTest({
                 `corrupt (SPEC 10.1/14.21 vocabulary; information ` +
                 `presence, never exact wording, H-3)`,
             );
+            await expectCorruptSessionReport(
+              ["review", "status", "fake", "--json"],
+              "review status fake --json",
+              `a session file that is not a plain file is corrupt, one ` +
+                `corruption whose content is never read, and the healthy ` +
+                `\`real\` beside it reports none (SPEC 13.4, 10.1, 14.21)`,
+            );
           },
-          `${statusContext}: modifies nothing — link and target ` +
-            `byte-identical (SPEC 13.4, 10.1)`,
+          `${statusContext}, then with --json: modifies nothing — link and ` +
+            `target byte-identical (SPEC 13.4, 10.1)`,
         );
 
         const resolveContext =
@@ -2407,10 +2563,27 @@ const T13_4_6 = defineProductTest({
               `${resolveContext}: the mutating subcommand naming the ` +
                 `corrupt session reports and exits 1 (SPEC 10.1, 14.21)`,
             );
+            await expectCorruptSessionReport(
+              [
+                "review",
+                "resolve",
+                "fake",
+                itemId,
+                "--status",
+                "no-change",
+                "--json",
+              ],
+              "review resolve fake <item> --status no-change --json",
+              `a session file that is not a plain file is corrupt, one ` +
+                `corruption whose content is never read, and an item ID ` +
+                `named beside the session is masked by the corruption ` +
+                `(SPEC 13.4, 10.1, 14.21, 12.0)`,
+            );
           },
-          `${resolveContext}: the occupied session path is never appended ` +
-            `to or replaced, and nothing is written through the link — the ` +
-            `healthy target session included (SPEC 13.4, 10.1)`,
+          `${resolveContext}, then with --json: the occupied session path is ` +
+            `never appended to or replaced, and nothing is written through ` +
+            `the link — the healthy target session included (SPEC 13.4, ` +
+            `10.1)`,
         );
 
         const checkContext = "T13.4-6 (session occupant) `check --json`";
@@ -2434,7 +2607,7 @@ const T13_4_6 = defineProductTest({
               ).findings,
               "14.21",
               sessionRel("fake"),
-              `a symbolic link resolving to the healthy ${sessionRel("real")}`,
+              sessionOccupant,
               `the corrupt session concerns the session-named path the link ` +
                 `occupies, never the target it resolves to: a session ` +
                 `condition carries the session file it concerns, and a ` +
