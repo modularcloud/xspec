@@ -849,9 +849,16 @@ export interface PreviewReport {
   readonly delta: PreviewDeltaDatum | null;
 }
 
-/** `review list` (T10.7-5): sessions in byte order of name. */
+/**
+ * `review list` (T10.7-5): sessions in byte order of name, plus the
+ * listing's findings — the 12.7 findings array of the document's
+ * `"findings"` member, which the document must carry while any session is
+ * listed corrupt (SPEC 14.21, 14, 12.7; H-3) and may omit otherwise.
+ */
 export interface SessionListReport {
   readonly sessions: readonly SessionListEntry[];
+  /** Present exactly when the document carries the member (review.ts). */
+  readonly findings?: readonly Finding[];
 }
 export type SessionListEntry =
   | { readonly name: string; readonly corrupt: true }

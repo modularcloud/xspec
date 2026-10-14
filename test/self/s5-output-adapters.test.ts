@@ -695,6 +695,10 @@ const REFUSED_PREVIEW = {
   delta: null,
 };
 
+// A listing of a healthy and a corrupt session: the corrupt session's
+// condition-21 finding in the listing's `findings` member, in the 12.7
+// finding form — `path` the session file, `locations` [] (a session
+// condition has no in-source location; SPEC 10.1, 14.21, 12.7).
 const GOOD_SESSION_LIST = {
   sessions: [
     {
@@ -704,6 +708,43 @@ const GOOD_SESSION_LIST = {
       counts: { unresolved: 2, updated: 1 },
     },
     { name: "a", corrupt: true },
+  ],
+  findings: [
+    {
+      code: "corrupt-session", // 14.21
+      message: "review session a cannot be parsed",
+      locations: [],
+      path: ".xspec/reviews/a.json",
+      identities: [],
+    },
+  ],
+};
+
+/** The healthy session alone — a listing with nothing to report. */
+const CLEAN_SESSION_LIST = omit(
+  omit(GOOD_SESSION_LIST, "findings"),
+  "sessions",
+  1,
+);
+
+/**
+ * Two corrupt sessions, their condition-21 findings — equal in code and
+ * locations — in the pinned 12.7 order: by concerned path bytes.
+ */
+const TWO_CORRUPT_SESSION_LIST = {
+  sessions: [
+    { name: "a", corrupt: true },
+    { name: "c", corrupt: true },
+  ],
+  findings: [
+    GOOD_SESSION_LIST.findings[0],
+    {
+      code: "corrupt-session", // 14.21
+      message: "review session c is not a plain file",
+      locations: [],
+      path: ".xspec/reviews/c.json",
+      identities: [],
+    },
   ],
 };
 
@@ -4509,9 +4550,129 @@ const DECODERS: readonly DecoderSpec[] = [
         counts: { unresolved: 2, updated: 1 },
       });
       expect(decoded.sessions[1]).toEqual({ name: "a", corrupt: true });
+      // The listing's findings decode in the literal 12.7 form, the
+      // condition identity derived from the stable code (H-3).
+      expect(decoded.findings).toEqual([
+        {
+          code: "corrupt-session",
+          message: "review session a cannot be parsed",
+          locations: [],
+          path: ".xspec/reviews/a.json",
+          identities: [],
+          condition: "14.21",
+        },
+      ]);
     },
+    alsoGood: [
+      {
+        label:
+          "a clean listing omitting findings — SPEC fixes no member for " +
+          "this unpinned listing with nothing to report — decodes no findings",
+        doc: CLEAN_SESSION_LIST,
+        verify: (decoded: ReturnType<typeof decodeSessionListReport>) => {
+          expect(decoded.sessions).toEqual([
+            {
+              name: "B",
+              corrupt: false,
+              strategy: "audit",
+              counts: { unresolved: 2, updated: 1 },
+            },
+          ]);
+          expect(Object.hasOwn(decoded, "findings")).toBe(false);
+        },
+      },
+      {
+        label: "a clean listing carrying findings [] decodes to []",
+        doc: put(CLEAN_SESSION_LIST, [], "findings"),
+        verify: (decoded: ReturnType<typeof decodeSessionListReport>) => {
+          expect(decoded.sessions).toHaveLength(1);
+          expect(decoded.findings).toEqual([]);
+        },
+      },
+      {
+        label: "no session at all, no findings member",
+        doc: { sessions: [] },
+        verify: (decoded: ReturnType<typeof decodeSessionListReport>) => {
+          expect(decoded.sessions).toEqual([]);
+          expect(Object.hasOwn(decoded, "findings")).toBe(false);
+        },
+      },
+      {
+        label:
+          "two corrupt sessions: two condition-21 findings in the 12.7 " +
+          "order (equal code and locations: by concerned path bytes)",
+        doc: TWO_CORRUPT_SESSION_LIST,
+        verify: (decoded: ReturnType<typeof decodeSessionListReport>) => {
+          expect(decoded.sessions).toEqual([
+            { name: "a", corrupt: true },
+            { name: "c", corrupt: true },
+          ]);
+          expect(
+            decoded.findings?.map((finding) => [
+              finding.code,
+              finding.condition,
+              finding.path,
+            ]),
+          ).toEqual([
+            ["corrupt-session", "14.21", ".xspec/reviews/a.json"],
+            ["corrupt-session", "14.21", ".xspec/reviews/c.json"],
+          ]);
+        },
+      },
+    ],
     bad: [
       { label: "missing sessions list", doc: {} },
+      {
+        label:
+          "a session listed corrupt without findings (its condition-21 " +
+          "finding withheld: SPEC 14.21, 14, 12.7; required information " +
+          "absent, H-3)",
+        doc: omit(GOOD_SESSION_LIST, "findings"),
+      },
+      {
+        label:
+          "null findings on the corrupt listing (null never encodes " +
+          "emptiness, SPEC 12.7)",
+        doc: put(GOOD_SESSION_LIST, null, "findings"),
+      },
+      {
+        label:
+          "null findings on a clean listing (judged as a findings array, " +
+          "never read as absent)",
+        doc: put(CLEAN_SESSION_LIST, null, "findings"),
+      },
+      {
+        label: "findings an object keyed by session (never adapted, H-3)",
+        doc: put(
+          GOOD_SESSION_LIST,
+          { a: GOOD_SESSION_LIST.findings[0] },
+          "findings",
+        ),
+      },
+      {
+        label: "a finding missing its path member (12.7: null, never omitted)",
+        doc: omit(GOOD_SESSION_LIST, "findings", 0, "path"),
+      },
+      {
+        label: "a finding whose code is no SPEC 14 token",
+        doc: put(GOOD_SESSION_LIST, "session-corrupt", "findings", 0, "code"),
+      },
+      {
+        label:
+          "a read-failure finding (a usage error's code, carried in no " +
+          "findings array: SPEC 14, 12.7)",
+        doc: put(GOOD_SESSION_LIST, "read-failure", "findings", 0, "code"),
+      },
+      {
+        label:
+          "two findings out of the 12.7 order (equal code and locations, " +
+          "concerned paths descending)",
+        doc: put(
+          TWO_CORRUPT_SESSION_LIST,
+          [...structuredClone(TWO_CORRUPT_SESSION_LIST.findings)].reverse(),
+          "findings",
+        ),
+      },
       {
         label: "session missing name",
         doc: omit(GOOD_SESSION_LIST, "sessions", 0, "name"),

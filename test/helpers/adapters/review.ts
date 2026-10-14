@@ -16,7 +16,17 @@
 //   review list →
 //     { "sessions": [ { "name", "corrupt": true }
 //                   | { "name", "corrupt": false, "strategy",
-//                       "counts": { <status>: n, ... } } ] }
+//                       "counts": { <status>: n, ... } } ],
+//       "findings"?: [Finding] }
+//     ("findings" required while any session is listed corrupt: `list`
+//     reports each corrupt session's condition 21 (SPEC 14.21) with its
+//     stable code (14), and wherever a document carries findings they form
+//     the array member "findings" (12.7). Its top-level placement is the
+//     assumed shape here; its member name, the 12.7 finding form, and the
+//     pinned findings order are universal value forms (H-3), decoded
+//     literally — `decodeFindingsArray`, forms.ts — never adapted. A
+//     listing with no corrupt session may omit it. The findings' content —
+//     count, code, concerned path, locations — is the tests' to assert.)
 //   review status →
 //     { "items": [ { "id", "kind", "scope", "status", "blocked" } ],
 //       "totals": { <status>: n, ... } }
@@ -63,6 +73,7 @@ import { ITEM_KINDS, ITEM_STATUSES } from "./model.js";
 import type { DecodeSite } from "./decode.js";
 import {
   at,
+  decodeFail,
   expectArray,
   expectBoolean,
   expectNonEmptyString,
@@ -76,7 +87,7 @@ import {
   requiredKey,
   requiredMember,
 } from "./decode.js";
-import { documentRootSite } from "./forms.js";
+import { decodeFindingsArray, documentRootSite } from "./forms.js";
 import { decodeSourceRange } from "./query.js";
 
 /** Counts keyed by status: every value a non-negative integer. */
@@ -126,7 +137,23 @@ function decodeSessionListEntry(
 /**
  * `review list` (T10.7-5): every session in byte order of name — name,
  * strategy, and item counts by stored status; corrupt sessions by name as
- * corrupt.
+ * corrupt — plus the listing's findings. `list` reports each corrupt
+ * session's condition 21 (SPEC 14.21, exit 1) with the stable code SPEC 14
+ * requires, and wherever a document carries findings they form the array
+ * member `"findings"` (12.7): the member's name, the finding form, and the
+ * findings order are universal value forms (H-3), so whenever the key
+ * exists its value — `null` included, which never encodes emptiness (12.7)
+ * — is decoded literally as a 12.7 findings array (`decodeFindingsArray`:
+ * every finding form-exact, no usage-error code, the pinned order), never
+ * adapted; and the key is required while any session is listed corrupt,
+ * since the listing then withholds the condition-21 finding — required
+ * information absent, which fails loudly (H-3). Only the member's top-level
+ * placement is assumed shape (the module header). A listing with no corrupt
+ * session may omit the member — SPEC fixes no member for this unpinned 10.7
+ * payload with nothing to report — and the decoded `findings` is then
+ * absent: present exactly when the document carries the member. Value-blind
+ * (H-3): the findings' content — count, code, concerned path, locations —
+ * is the tests' to assert, never this adapter's.
  */
 export function decodeSessionListReport(
   doc: unknown,
@@ -141,6 +168,26 @@ export function decodeSessionListReport(
   ).map((element, index) =>
     decodeSessionListEntry(element, at(sessionsSite, index)),
   );
+  const findingsSite = at(site, "findings");
+  if (Object.hasOwn(obj, "findings")) {
+    return {
+      sessions,
+      findings: decodeFindingsArray(obj["findings"], findingsSite),
+    };
+  }
+  const corrupt = sessions.find((entry) => entry.corrupt);
+  if (corrupt !== undefined) {
+    decodeFail(
+      findingsSite,
+      `a "findings" member while session ${JSON.stringify(corrupt.name)} ` +
+        `is listed corrupt — \`review list\` reports each corrupt ` +
+        `session's condition 21 (SPEC 14.21) with its stable code (SPEC ` +
+        `14), and wherever a document carries findings they form the array ` +
+        `member "findings" in the 12.7 finding form (SPEC 12.7, TEST-SPEC ` +
+        `H-3: required information absent)`,
+      undefined,
+    );
+  }
   return { sessions };
 }
 
