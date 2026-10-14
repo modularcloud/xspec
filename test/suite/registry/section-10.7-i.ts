@@ -45,10 +45,25 @@
 //   §10.2/§10.6 operationalization).
 // - The T10.7-4 absent-scope ordering keys exercised are presence grouping
 //   and scope-node identity, staged discriminatingly (recorded document
-//   order opposite to identity order). The final `item id` tiebreak needs
-//   two same-kind absent items with equal identity strings, which only arise
-//   via journaled-rename reintroduction (5.4) — T10.4-4's staging — so it is
-//   not independently staged here (same decision as §10.5/§10.6).
+//   order opposite to identity order), and the final item `id` tiebreak.
+//   The tiebreak needs two same-kind absent items with equal identity
+//   strings: same kind forces distinct scope nodes (10.5: at most one item
+//   per kind and scope node), and distinct nodes present one identity only
+//   through reintroduction after a journaled rename or move (5.4: the
+//   reintroducing node starts a new canonical chain; 10.4: reads map each
+//   recorded identity forward through the journal). T10.7-4's item-id tie
+//   sub-fixture stages it with two leaves of one file: the original a,
+//   renamed to b by a journaled `rename` and deleted by manual edit, and a
+//   new leaf a — authored after that rename, its item entering through an
+//   `updated` resolve's re-derivation, which re-runs the generators with the
+//   session's recorded profile (10.5, 10.7) — renamed to b in turn and
+//   deleted. Both items then present their scope absent under
+//   specs/A.mdx#b, and the sub-fixture asserts them after the file's
+//   present-scope item in item-id byte order (12.0) in `status`, `export`,
+//   and the `next` walk, reading the ids from the product. In coverage, as
+//   in audit (T10.6-2), a section carries the tie — every uncovered required
+//   node has its item, so the new leaf's enters in its own right — where
+//   path-blocks needs two file roots (T10.5-4).
 // - "Modifying nothing" (T10.7-3) is the compare-around-command protocol
 //   over the whole workspace root, `.git/` included: the failing command
 //   reads git but writes nothing anywhere (SPEC 6.3, 10.7; the `.git/`
@@ -129,23 +144,31 @@
 //   so no read relies on the 13.3 refresh path (T13.3-*'s business).
 // - Staged-source records (helpers/staged-mdx.ts, S-9: judged before any
 //   product exists): every `.mdx` edit a body stages after its first product
-//   invocation — T10.7-2's B.mdx and extra/N.mdx additions (N.mdx is the
-//   same call in both arms: one record), T10.7-3's par edit, T10.7-4's two
-//   deletions, T10.7-5's w edit, T10.7-6's p.a edit — is the same template
-//   call moved to module level as a record, as are the initial `.mdx` files
-//   of the workspaces created after a body's first invocation — T10.7-1's
-//   corrupt-session workspaces (`W1_SOURCE`, the one record serving the
-//   body's first workspace too) and T10.7-2's audit arm (leaf a, the
-//   coverage arm's same call: one record staged in both); every other
-//   initial `files` entry, a body's first workspace's, stays plain;
-//   T10.7-1's and T10.7-5's corrupt-session bytes stage no `.mdx` path.
+//   invocation over the harness's own bytes — T10.7-2's B.mdx and
+//   extra/N.mdx additions (N.mdx is the same call in both arms: one
+//   record), T10.7-3's par edit, T10.7-4's two deletions, T10.7-5's w edit,
+//   T10.7-6's p.a edit — is the same template call moved to module level as
+//   a record, as are the initial `.mdx` files of the workspaces created
+//   after a body's first invocation — T10.7-1's corrupt-session workspaces
+//   (`W1_SOURCE`, the one record serving the body's first workspace too),
+//   T10.7-2's audit arm (leaf a, the coverage arm's same call: one record
+//   staged in both), and T10.7-4's item-id tie sub-fixture (its
+//   specs/A.mdx); every other initial `files` entry, a body's first
+//   workspace's, stays plain; T10.7-1's and T10.7-5's corrupt-session bytes
+//   stage no `.mdx` path. The tie sub-fixture's three edits follow a
+//   `rename` and change bytes the product rewrote, which no harness constant
+//   equals, so each is an anchored `workspace.edit()`, its anchor's
+//   uniqueness diagnosed first (SPEC 6.4 fixes the rewritten form), as
+//   T10.4-4's reintroduction arm stages.
 // - TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
 //   and timing clauses), every one well-formed: the configurations of those
 //   later workspaces — `COVERAGE_CONFIG` (T10.7-1's corrupt-session
-//   workspaces) and `SPECS_ONLY_CONFIG` (T10.7-2's audit arm), each staged
-//   wherever that configuration is — and T10.7-2's two post-create
-//   configuration edits (`C2_CONFIG_EDITED`, `A2_CONFIG_EDITED`).
+//   workspaces and T10.7-4's item-id tie sub-fixture) and
+//   `SPECS_ONLY_CONFIG` (T10.7-2's audit arm), each staged wherever that
+//   configuration is — and T10.7-2's two post-create configuration edits
+//   (`C2_CONFIG_EDITED`, `A2_CONFIG_EDITED`).
 
+import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import type {
   ExportReport,
@@ -164,6 +187,7 @@ import {
   ITEM_STATUSES,
   assertReportMentions,
   decodeExportReport,
+  decodeNextReport,
   decodeNodeReport,
   decodeSessionListReport,
   decodeSessionStatusReport,
@@ -215,7 +239,7 @@ export default defineConfig({
 // group serving as its own boundary, a leaf is covered exactly when some
 // non-root node has a single dependency edge to it (SPEC 8).
 const COVERAGE_CONFIG = stagedTs(
-  "T10.7-1 xspec.config.ts — one spec group and the coverage profile p",
+  "T10.7-1/T10.7-4 xspec.config.ts — one spec group and the coverage profile p",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1789,10 +1813,121 @@ const T10_7_4_K_WITHOUT_U2_U1 = stagedMdx(
 
 const C4_Z_SOURCE = ['<S id="z">', "Zee text.", "</S>", ""].join("\n");
 
+// The item-id tie sub-fixture (SPEC 10.5's last ordering key, which the
+// coverage order inherits, 10.7): two leaves of one file that come to share
+// one identity. specs/A.mdx holds uncovered top-level leaves a and s, and
+// the coverage session gives each its `uncovered-requirement` item. A
+// journaled `rename` takes a to b; a new leaf a authored after it is a new
+// node starting a new canonical chain (SPEC 5.4) — uncovered and required
+// like the original — and enters the session through an `updated` resolve's
+// re-derivation, which re-runs the generators with the session's recorded
+// profile (SPEC 10.5, 10.7); b — the original a — is deleted by manual edit;
+// a second journaled `rename` takes the new a to b, which is deleted too.
+// Both items' scope nodes are then absent and presented under
+// specs/A.mdx#b — recorded identities mapped forward through the journal
+// (SPEC 10.4) — tied on file path, presence, and scope-node identity, so
+// only the item `id` key orders them. The workspace is created after the
+// body's first `build`, so its initial specs/A.mdx is a staged-source record
+// (helpers/staged-mdx.ts, S-9), as is its configuration (COVERAGE_CONFIG);
+// the edits after the renames change bytes the product rewrote, which no
+// harness constant equals, so each is an anchored `workspace.edit()`
+// (`editRewritten`).
+const C4_TIE_FILE = "specs/A.mdx";
+const C4_TIE_A = "specs/A.mdx#a";
+const C4_TIE_B = "specs/A.mdx#b";
+const C4_TIE_S = "specs/A.mdx#s";
+
+const T10_7_4_TIE_INITIAL = stagedMdx(
+  "T10.7-4 item-id tie sub-fixture specs/A.mdx (uncovered top-level leaves a and s, the sub-fixture's initial source)",
+  [
+    '<S id="a">',
+    "Alpha text.",
+    "</S>",
+    "",
+    '<S id="s">',
+    "Ess text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+// The three edits' anchors: byte runs as SPEC 6.4's minimal in-place
+// rewrites leave them — in this file a rename rewrites the renamed section's
+// `id` attribute and nothing else. s's run, after which the new leaf a is
+// authored; the original a's run as the first rename leaves it (`id="b"`),
+// with the blank line after it, deleted; the new a's run as the second
+// rename leaves it, with the blank line before it, deleted.
+const C4_TIE_S_RUN = ['<S id="s">', "Ess text.", "</S>", ""].join("\n");
+const C4_TIE_NEW_A_SECTION = [
+  "",
+  '<S id="a">',
+  "New alpha text.",
+  "</S>",
+  "",
+].join("\n");
+const C4_TIE_FIRST_B_RUN = ['<S id="b">', "Alpha text.", "</S>", "", ""].join(
+  "\n",
+);
+const C4_TIE_SECOND_B_RUN = [
+  "",
+  '<S id="b">',
+  "New alpha text.",
+  "</S>",
+  "",
+].join("\n");
+
+/** UTF-8 byte order of two strings (SPEC 12.0: IDs compare byte-wise). */
+function compareUtf8Bytes(a: string, b: string): number {
+  return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
+
+/**
+ * Diagnose that `search` occurs exactly once in the product-rewritten
+ * `content` before `edit()` stages a manual edit at it: SPEC 6.4 fixes the
+ * rewritten form (minimal in-place edits), so a missing or ambiguous anchor
+ * is a diagnosed assertion failure about the product's rewriting, never
+ * `edit()`'s plain refusal (H-8).
+ */
+function anchorOnce(content: string, search: string, context: string): void {
+  const first = content.indexOf(search);
+  if (first === -1) {
+    fail(
+      `${context}: expected the rewritten source to contain ` +
+        `${JSON.stringify(search)} exactly once (SPEC 6.4 fixes the rewritten ` +
+        `form), but it does not appear; source: ${JSON.stringify(content)}`,
+    );
+  }
+  if (content.includes(search, first + search.length)) {
+    fail(
+      `${context}: the anchor ${JSON.stringify(search)} appears more than once, ` +
+        `so the manual edit cannot be staged unambiguously; source: ` +
+        JSON.stringify(content),
+    );
+  }
+}
+
+/**
+ * Stage a manual edit of bytes the product rewrote (a rename's output, SPEC
+ * 6.4): `anchor` replaced by `replacement` through `workspace.edit()` — the
+ * staging of product-written bytes, judged at staging time — once the
+ * anchor's uniqueness is diagnosed (`anchorOnce`).
+ */
+async function editRewritten(
+  workspace: TestWorkspace,
+  rel: string,
+  anchor: string,
+  replacement: string,
+  context: string,
+): Promise<void> {
+  const current = Buffer.from(await workspace.readBytes(rel)).toString("utf8");
+  anchorOnce(current, anchor, context);
+  await workspace.edit(rel, anchor, replacement);
+}
+
 const T10_7_4 = defineProductTest({
   id: "T10.7-4",
   title:
-    "coverage sessions: `create --coverage` derives one `uncovered-requirement` item per uncovered required node of the recorded profile — the covered leaf, the branch node, and the root nodes get none — each item scoping exactly the node with the node's ancestor chain as context and empty origin and blockedBy (so every item is unblocked); item order is scope-node file path then document order (u2 before u1, their declaration order, not identity order); after deleting an uncovered node's section the absent-scope item orders after the same file's present-scope items — not last globally: the later file's item still follows it — and after deleting both, the two absent items order by scope-node identity, u1 before u2, the reverse of their former document order; items keep their ids and the deletions alone change no membership (SPEC 8, 8.1, 10.2, 10.4, 10.5, 10.7)",
+    "coverage sessions: `create --coverage` derives one `uncovered-requirement` item per uncovered required node of the recorded profile — the covered leaf, the branch node, and the root nodes get none — each item scoping exactly the node with the node's ancestor chain as context and empty origin and blockedBy (so every item is unblocked); item order is scope-node file path then document order (u2 before u1, their declaration order, not identity order); after deleting an uncovered node's section the absent-scope item orders after the same file's present-scope items — not last globally: the later file's item still follows it — and after deleting both, the two absent items order by scope-node identity, u1 before u2, the reverse of their former document order; items keep their ids and the deletions alone change no membership; and two absent-scope items tied on every earlier key — the uncovered-requirement items of an original leaf a, renamed to b by a journaled `rename` and deleted by manual edit, and of a new leaf a authored after that rename (a new node on a new canonical chain, its item entering through an `updated` resolve's re-derivation under the recorded profile), renamed to b in turn and deleted, both presented absent under specs/A.mdx#b — order after the file's present-scope item by item `id` bytes, the ids the product's own, in `status`, `export`, and the `next` walk (SPEC 5.4, 6.4, 8, 8.1, 10.2, 10.4, 10.5, 10.7, 12.0)",
   timeoutMs: 300_000,
   run: async (product) => {
     await withWorkspace(
@@ -1959,8 +2094,8 @@ const T10_7_4 = defineProductTest({
         // document order, so a product ordering absents by recorded
         // document position fails (SPEC 10.5, 10.7). The final item-id
         // tiebreak needs two absent items with equal identity strings,
-        // which only arise via journaled-rename reintroduction — T10.4-4's
-        // staging — so it is not staged here.
+        // which only arise through reintroduction after a journaled rename
+        // or move (SPEC 5.4): the item-id tie sub-fixture below stages it.
         await workspace.file(C4_K, T10_7_4_K_WITHOUT_U2_U1);
         await buildOk(
           product,
@@ -1994,6 +2129,302 @@ const T10_7_4 = defineProductTest({
                 `expected ${ids[scope]}, got ${row.id}`,
             );
           }
+        }
+      },
+    );
+
+    // --- the absent-scope item-id tie: two leaves renamed onto one identity -
+    // SPEC 10.5's last key, which the coverage order inherits (10.7):
+    // absent-scope items tied on file path, presence, and scope-node
+    // identity order by item `id`, byte-wise (12.0). The ids are the
+    // product's own: the expected order is read from them, never spelled.
+    await withWorkspace(
+      COVERAGE_CONFIG,
+      { [C4_TIE_FILE]: T10_7_4_TIE_INITIAL },
+      async (workspace) => {
+        const prefix = "T10.7-4 item-id tie";
+        await buildOk(product, workspace, `${prefix} \`build\``);
+        await createCoverageSession(product, workspace, "p", "c", prefix);
+        const created = await sessionStatus(
+          product,
+          workspace,
+          "c",
+          `${prefix} after \`create\``,
+        );
+        assertSameJson(
+          rowSequence(created),
+          [
+            `uncovered-requirement ${C4_TIE_A} unresolved`,
+            `uncovered-requirement ${C4_TIE_S} unresolved`,
+          ],
+          `${prefix} staging premise after \`create\`: one ` +
+            `uncovered-requirement item per uncovered required node — the ` +
+            `two leaves, the root never required — in document order (SPEC ` +
+            `8.1, 10.7)`,
+        );
+        const firstAId = requireRow(
+          created,
+          "uncovered-requirement",
+          C4_TIE_A,
+          prefix,
+        ).id;
+        const sId = requireRow(
+          created,
+          "uncovered-requirement",
+          C4_TIE_S,
+          prefix,
+        ).id;
+
+        // The original a leaves its identity through a journaled rename; a
+        // new leaf a authored after it is a new node on a new canonical
+        // chain (SPEC 5.4), uncovered and required, and enters the session
+        // through an `updated` resolve's re-derivation — the generators
+        // re-run with the recorded profile (SPEC 10.5, 10.7).
+        await expectExit(
+          product,
+          workspace,
+          ["rename", C4_TIE_FILE, "a", "b"],
+          0,
+          `${prefix} the first \`rename ${C4_TIE_FILE} a b\``,
+        );
+        await editRewritten(
+          workspace,
+          C4_TIE_FILE,
+          C4_TIE_S_RUN,
+          C4_TIE_S_RUN + C4_TIE_NEW_A_SECTION,
+          `${prefix} authoring the new leaf a after the rename-rewritten s`,
+        );
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after authoring the new leaf a`,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "c",
+          sId,
+          "updated",
+          `${prefix} \`resolve c ${sId} --status updated\` (the ` +
+            `re-derivation adding the new leaf a's item under the recorded ` +
+            `profile, SPEC 10.5, 10.7)`,
+        );
+        const rederived = await sessionStatus(
+          product,
+          workspace,
+          "c",
+          `${prefix} after the re-derivation`,
+        );
+        const newAId = requireRow(
+          rederived,
+          "uncovered-requirement",
+          C4_TIE_A,
+          `${prefix} after the re-derivation`,
+        ).id;
+        if ([firstAId, sId].includes(newAId)) {
+          fail(
+            `${prefix} staging premise after the \`updated\` resolve: the ` +
+              `new leaf a's item enters as a distinct item with a fresh id ` +
+              `(SPEC 5.4: the reintroduced identity starts a new canonical ` +
+              `chain, so the original a's item never matches it; 10.2); got ` +
+              `the existing id ${newAId}`,
+          );
+        }
+        assertSameJson(
+          rederived.items
+            .map((row) => [row.id, row.kind, row.scope, row.status])
+            .sort(),
+          [
+            [firstAId, "uncovered-requirement", C4_TIE_B, "unresolved"],
+            [sId, "uncovered-requirement", C4_TIE_S, "updated"],
+            [newAId, "uncovered-requirement", C4_TIE_A, "unresolved"],
+          ].sort(),
+          `${prefix} staging premise after the \`updated\` resolve: exactly ` +
+            `three items — the original a's item keeping its id, presented ` +
+            `under ${C4_TIE_B} (its recorded identity mapped forward through ` +
+            `the journal), and the new leaf a's item entering unresolved ` +
+            `beside it (SPEC 5.4, 10.2, 10.4, 10.5, 10.7)`,
+        );
+
+        // The original a — now b — is deleted by manual edit; a second
+        // journaled rename takes the new a to b, which is deleted too. Both
+        // scope nodes are now absent, each presented under specs/A.mdx#b —
+        // its recorded identity mapped forward through the journal (SPEC
+        // 10.4).
+        await editRewritten(
+          workspace,
+          C4_TIE_FILE,
+          C4_TIE_FIRST_B_RUN,
+          "",
+          `${prefix} deleting b's section (the original a, renamed)`,
+        );
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after deleting the renamed original a`,
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["rename", C4_TIE_FILE, "a", "b"],
+          0,
+          `${prefix} the second \`rename ${C4_TIE_FILE} a b\``,
+        );
+        await editRewritten(
+          workspace,
+          C4_TIE_FILE,
+          C4_TIE_SECOND_B_RUN,
+          "",
+          `${prefix} deleting b's section (the new leaf a, renamed)`,
+        );
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after deleting the renamed new leaf a`,
+        );
+
+        const tiedLabel = `${prefix} after both deletions`;
+        const tiedStatus = await sessionStatus(
+          product,
+          workspace,
+          "c",
+          tiedLabel,
+        );
+        const tiedExport = await exportSession(
+          product,
+          workspace,
+          "c",
+          tiedLabel,
+        );
+        assertSameJson(
+          tiedExport.items
+            .map((item) => [
+              item.id,
+              item.kind,
+              item.scope.node,
+              item.scope.present,
+            ])
+            .sort(),
+          [
+            [sId, "uncovered-requirement", C4_TIE_S, true],
+            [firstAId, "uncovered-requirement", C4_TIE_B, false],
+            [newAId, "uncovered-requirement", C4_TIE_B, false],
+          ].sort(),
+          `${tiedLabel} staging premise (\`export\`): exactly the three ` +
+            `items — items that no longer generate remain, and only an ` +
+            `\`updated\` resolve re-derives, none having followed the one ` +
+            `above (SPEC 10.5) — s's scope node present, and exactly two ` +
+            `items scoped ${C4_TIE_B}, both uncovered-requirement, both ` +
+            `absent: the original a's and the new leaf a's, each recorded ` +
+            `identity mapped forward through the journal (SPEC 10.4), so ` +
+            `they tie on file path, presence, and scope-node identity (SPEC ` +
+            `10.5, 10.7)`,
+        );
+
+        const [lowId, highId] = [firstAId, newAId].sort(compareUtf8Bytes);
+        const tieKey =
+          `SPEC 10.5: among items tied on every earlier key, those with ` +
+          `absent scope nodes follow, ordered by scope-node identity, then by ` +
+          `item \`id\`; 12.0: IDs compare byte-wise — ${lowId} before ` +
+          `${highId}; ${firstAId} is the original a's item, ${newAId} the ` +
+          `new leaf a's`;
+        const tiedOrder = [
+          [sId, "uncovered-requirement", C4_TIE_S],
+          [lowId, "uncovered-requirement", C4_TIE_B],
+          [highId, "uncovered-requirement", C4_TIE_B],
+        ];
+        assertSameJson(
+          tiedStatus.items.map((row) => [row.id, row.kind, row.scope]),
+          tiedOrder,
+          `${tiedLabel} \`status\`: the file's present-scope item — s's — ` +
+            `and then the two tied absent-scope items in item-id byte order ` +
+            `(the 10.5 absent-scope rule applies to the coverage order, ` +
+            `SPEC 10.7; ${tieKey})`,
+        );
+        assertSameJson(
+          tiedExport.items.map((item) => [item.id, item.kind, item.scope.node]),
+          tiedOrder,
+          `${tiedLabel} \`export\` presents the same item order (${tieKey}; ` +
+            `SPEC 10.7)`,
+        );
+
+        // `next` presents the tie as its walk order. Premise: s's item is
+        // resolved (the trigger's `updated`) and both tied items need review
+        // unblocked — a coverage item's blockedBy is empty, and neither tied
+        // item was ever resolved (SPEC 10.3, 10.7).
+        assertSameJson(
+          tiedStatus.items
+            .map((row) => [row.id, row.status, row.blocked])
+            .sort(),
+          [
+            [sId, "updated", false],
+            [firstAId, "unresolved", false],
+            [newAId, "unresolved", false],
+          ].sort(),
+          `${tiedLabel} staging premise for the walk (compared as a set, ` +
+            `the order asserted above and by the walk itself): s's item ` +
+            `resolved and both tied items needing review unblocked, so ` +
+            `\`next\` must choose between them by item order (SPEC 10.3, ` +
+            `10.7)`,
+        );
+        const walk = [lowId, highId];
+        for (let index = 0; index < walk.length; index += 1) {
+          const stepLabel =
+            `${prefix} \`review next c --json\` walk step ` +
+            `${String(index + 1)} of ${String(walk.length)}`;
+          const next = decodeNextReport(
+            await runJson(
+              product,
+              workspace,
+              ["review", "next", "c", "--json"],
+              stepLabel,
+            ),
+            stepLabel,
+          );
+          if (next.fullyResolved || next.item === undefined) {
+            fail(
+              `${stepLabel}: needing-review items remain, so \`next\` must ` +
+                `return one (SPEC 10.7)`,
+            );
+          }
+          if (next.item.id !== walk[index]) {
+            fail(
+              `${stepLabel}: \`next\` returns the first needing-review ` +
+                `unblocked item in item order (SPEC 10.7; ${tieKey}) — ` +
+                `expected ${walk[index]}, got ${next.item.id} ` +
+                `(${next.item.kind} ${next.item.scope.node})` +
+                (index === 1 && next.item.id === lowId
+                  ? ` — the item just resolved \`no-change\` with its scope ` +
+                    `node absent, which stays resolved while the node stays ` +
+                    `absent (SPEC 10.4)`
+                  : ""),
+            );
+          }
+          await resolveOk(
+            product,
+            workspace,
+            "c",
+            next.item.id,
+            "no-change",
+            `${stepLabel} — \`resolve --status no-change\` to advance the walk`,
+          );
+        }
+        const doneLabel = `${prefix} \`review next c --json\` after the walk`;
+        const done = decodeNextReport(
+          await runJson(
+            product,
+            workspace,
+            ["review", "next", "c", "--json"],
+            doneLabel,
+          ),
+          doneLabel,
+        );
+        if (!done.fullyResolved) {
+          fail(
+            `${doneLabel}: every item is resolved — s's \`updated\`, both ` +
+              `tied items \`no-change\` — so \`next\` reports the session ` +
+              `fully resolved (SPEC 10.7)`,
+          );
         }
       },
     );
