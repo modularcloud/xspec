@@ -113,9 +113,16 @@
 //   * a run the kill ended (its collected exit SIGKILL), held or past its
 //     hold, whose sources, journal, or session files differ from those its
 //     twin leaves had not made its last write, so had not released (13.5):
-//     `.xspec/lock` holds exactly one entry, a plain file — the dead run's —
-//     inspected at once, readers possibly still running (T13.5-3's
-//     past-the-hold judgement);
+//     `.xspec/lock` holds exactly one entry, a plain file — the dead run's
+//     (T13.5-3's past-the-hold judgement) — inspected once every read the
+//     episode started has been settled, its readers exited: readers write
+//     nothing at the lock path (13.4) and no mutating command runs between
+//     the run's end and the inspection, so the dead run's entry still
+//     stands there alone (until a later mutating command takes it over),
+//     while a claim a reader holds only while it runs is gone by then — the
+//     inspection sees what a reader leaves behind, never what it holds while
+//     it runs, which the reader rule (below) alone observes, at a command's
+//     acquisition;
 //   * readers never exclude a mutating command (13.5; 14.26: only another
 //     run's entry, or a leftover in the gap, refuses, and a reader makes
 //     none, 13.4): each command not killed is never refused `workspace-busy`
@@ -125,7 +132,9 @@
 //     ends exactly as its twin: exit code, standard output, and the sources,
 //     journal, and session files it leaves byte-equal (H-6), derived files
 //     and graph data, which readers' refreshes may rewrite last-write-wins
-//     (13.3, 13.5), not compared; `.xspec/lock` is then absent.
+//     (13.3, 13.5), not compared; `.xspec/lock` is absent once the
+//     episode's readers have exited — inspected then, as a killed run's is
+//     (above): a released run leaves nothing there (13.5, T13.5-11).
 //
 // The session files compared and judged are SPEC 10.1's sessions: entries
 // directly under `.xspec/reviews/` named `<session-name>.json` with a valid
@@ -155,14 +164,20 @@
 // deviation-free from test/fixtures/conf-readers/bin.mjs) and
 // VIOL-READERS-CLAIM (bin-claim.mjs: each reader holds a claim, an entry in
 // the lock directory, through a sustained interval spanning a later
-// command's start-up), which fails P-10 at the first command it starts
-// while a claiming reader runs — certifying that the schedules start
-// commands while readers run. The workspace is fixed (one importless spec
-// file and the audit session `s` — no baseline, no git, T10.6-1): P-10's
-// search space is the schedule; workspace shapes belong to P-1…P-9. Leads,
-// kill fractions, and every other delay are choreography only, never an
-// assertion input (H-10): every assertion holds for a conforming product
-// under every timing (E-5).
+// command's start-up), which fails P-10 at a refusal alone: a command
+// started while a claiming reader runs, refused `workspace-busy` at its
+// acquisition. Both lock-path inspections wait for the episode's readers to
+// exit, by when every claim is gone, so the certification rests on the
+// schedules starting commands while readers run — certifying that they do:
+// a harness whose schedules never started a command while a reader runs
+// would pass P-10 against the violator (a red check confirmed it, every
+// pre-start reader awaited to exit before its command started and an
+// unheld command's straddle reads started only once the command's entry
+// stood). The workspace is fixed (one importless spec file and the audit
+// session `s` — no baseline, no git, T10.6-1): P-10's search space is the
+// schedule; workspace shapes belong to P-1…P-9. Leads, kill fractions, and
+// every other delay are choreography only, never an assertion input (H-10):
+// every assertion holds for a conforming product under every timing (E-5).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -2057,20 +2072,33 @@ function assertWritesItsOwnFilesAlone(
 }
 
 /**
- * Judge a run the kill ended (module header): at most one journal entry
- * added; a resolve recorded its status — the session its twin leaves — or
- * left the session file byte-unchanged; nothing written beside its own
- * files; and, wherever its sources, journal, or session files differ from
- * those its twin leaves, `.xspec/lock` holding exactly one entry, a plain
- * file — inspected now, readers possibly still running.
+ * A lock-path inspection a run's judgement leaves pending (judgeKilledRun,
+ * judgeEndedRun): runEpisode makes it only once every read the episode
+ * started has been settled (module header).
  */
-async function judgeKilledRun(
+type PendingLockPathInspection = () => Promise<void>;
+
+/**
+ * Judge a run the kill ended (module header), at once: at most one journal
+ * entry added; a resolve recorded its status — the session its twin leaves
+ * — or left the session file byte-unchanged; nothing written beside its own
+ * files; and whether its sources, journal, or session files differ from
+ * those its twin leaves. Where they do, the run had not released, and the
+ * lock-path inspection — `.xspec/lock` holding exactly one entry, a plain
+ * file: the dead run's — is returned pending, for runEpisode to make once
+ * the episode's readers have exited: a conforming product's readers write
+ * nothing at the lock path (13.4) and no mutating command runs meanwhile,
+ * so the dead run's entry still stands there alone, while a claim a reader
+ * holds only while it runs is gone by then. Where they do not, nothing is
+ * left to inspect.
+ */
+function judgeKilledRun(
   workspace: TestWorkspace,
   twin: EpisodeTwin,
   after: DirectorySnapshot,
   episode: P10Episode,
   context: string,
-): Promise<void> {
+): PendingLockPathInspection | undefined {
   assertJournalAppended(
     twin.start,
     after,
@@ -2093,29 +2121,36 @@ async function judgeKilledRun(
     }
   }
   const short = differingKeys(after, twin.final);
-  if (short.length === 0) return;
-  await assertLockDirectoryEntries(
-    workspace.root,
-    { entries: 1 },
-    `${context}: what it left at ${renderKeys(short)} differs from what ` +
-      `its reader-free twin leaves, so the run had not made its last write ` +
-      `and had not released — \`.xspec/lock\` holds exactly one entry, a ` +
-      `plain file: the dead run's, a leftover, until a later mutating ` +
-      `command takes it over, readers adding none (SPEC 13.5: a run's ` +
-      `entry stands until its release, which comes as the command ends, ` +
-      `after its last write; an abnormal termination leaves it; 13.4; ` +
-      `TEST-SPEC P-10, T13.5-3's past-the-hold judgement)`,
-  );
+  if (short.length === 0) return undefined;
+  return async () => {
+    await assertLockDirectoryEntries(
+      workspace.root,
+      { entries: 1 },
+      `${context}: what it left at ${renderKeys(short)} differs from what ` +
+        `its reader-free twin leaves, so the run had not made its last ` +
+        `write and had not released — \`.xspec/lock\` holds exactly one ` +
+        `entry, a plain file: the dead run's, a leftover, until a later ` +
+        `mutating command takes it over, the episode's readers, every one ` +
+        `exited now, having added none (SPEC 13.5: a run's entry stands ` +
+        `until its release, which comes as the command ends, after its last ` +
+        `write; an abnormal termination leaves it; 13.4; TEST-SPEC P-10, ` +
+        `T13.5-3's past-the-hold judgement)`,
+    );
+  };
 }
 
 /**
- * Judge a run that ended on its own (module header): never refused
+ * Judge a run that ended on its own (module header), at once: never refused
  * `workspace-busy` — a refusal after a kill on this workspace meets T13.5-3's
  * reuse check, voiding the trial where a killed group's identifier is listed
  * again — and ending exactly as its reader-free twin: exit code, standard
  * output, and the sources, journal, and session files it leaves; one journal
- * entry added by a `rename` or `move`, none by a resolve; and `.xspec/lock`
- * absent once it has ended.
+ * entry added by a `rename` or `move`, none by a resolve. The lock-path
+ * inspection — `.xspec/lock` absent, the run released — is returned
+ * pending, for runEpisode to make once the episode's readers have exited: a
+ * conforming product's readers write nothing at the lock path (13.4) and no
+ * mutating command runs meanwhile, so nothing stands there then, while a
+ * claim a reader holds only while it runs is gone by then.
  */
 async function judgeEndedRun(
   state: TrialState,
@@ -2124,7 +2159,7 @@ async function judgeEndedRun(
   result: RunResult,
   episode: P10Episode,
   context: string,
-): Promise<void> {
+): Promise<PendingLockPathInspection> {
   if (isBusyRefusal(result, context)) {
     const refusal = `${context} — ${summarizeResult(result)}`;
     if (state.killed.length > 0) {
@@ -2173,11 +2208,15 @@ async function judgeEndedRun(
       `H-6 — derived files and graph data, which readers' refreshes may ` +
       `rewrite, not compared)`,
   );
-  await assertLockPathAbsent(
-    state.workspace.root,
-    `${context}: once it has ended, released (SPEC 13.5: release on every ` +
-      `normal end; T13.5-11), readers adding no entry (13.4)`,
-  );
+  const root = state.workspace.root;
+  return async () => {
+    await assertLockPathAbsent(
+      root,
+      `${context}: once it has ended, released (SPEC 13.5: release on ` +
+        `every normal end; T13.5-11), the episode's readers, every one ` +
+        `exited now, having added no entry (13.4)`,
+    );
+  };
 }
 
 /**
@@ -2188,12 +2227,18 @@ async function judgeEndedRun(
  * then the polling reader started, the pre-start readers started and
  * confirmed running, the command started — in a process group of its own —
  * held or not, its held and straddle reads, and its fate; the run judged at
- * once as it ends, the readers then settled, the polled states judged (a
- * run the kill ended against the twin's final states, the state it left
- * included; graph data's staged states computed then, while the twin's
- * workspace stands, where an observed state needs them); the ledger and the
- * file model updated, and — after a `rename` or `move` killed past its hold
- * — the trial continued on the twin's workspace.
+ * once as it ends, all but the lock path; the readers then settled — every
+ * pre-start and straddle read the episode started, its held reads having
+ * run to completion while it held — and only then the lock path inspected
+ * (judgeEndedRun's and judgeKilledRun's pending inspections: its state once
+ * the readers have exited is the one the run left, a conforming product's
+ * readers writing nothing there, 13.4, and no mutating command running
+ * meanwhile); then the polled states judged (a run the kill ended against
+ * the twin's final states, the state it left included; graph data's staged
+ * states computed then, while the twin's workspace stands, where an
+ * observed state needs them); the ledger and the file model updated, and —
+ * after a `rename` or `move` killed past its hold — the trial continued on
+ * the twin's workspace.
  */
 async function runEpisode(
   product: ProductBinding,
@@ -2378,8 +2423,9 @@ async function runEpisode(
       }
       killedRun = killed !== undefined && result.signal === "SIGKILL";
       const after = await comparedSnapshot(workspace.root);
+      let inspectLockPath: PendingLockPathInspection | undefined;
       if (killed !== undefined && killedRun) {
-        await judgeKilledRun(
+        inspectLockPath = judgeKilledRun(
           workspace,
           twin,
           after,
@@ -2388,7 +2434,7 @@ async function runEpisode(
         );
         state.killed.push(...killed.identifiers);
       } else {
-        await judgeEndedRun(
+        inspectLockPath = await judgeEndedRun(
           state,
           twin,
           after,
@@ -2401,6 +2447,10 @@ async function runEpisode(
       for (const read of reads) {
         await settleStraddleRead(read, `${context}: the reader`);
       }
+      // The lock path is inspected only now, every read the episode started
+      // settled (module header): what a reader leaves there is seen, never a
+      // claim it holds only while it runs.
+      if (inspectLockPath !== undefined) await inspectLockPath();
     } finally {
       if (running !== undefined && !ended) {
         await running.killGroup().catch(() => undefined);
@@ -2642,7 +2692,7 @@ async function runP10Trial(
 const P_10 = defineProductTest({
   id: "P-10",
   title:
-    "concurrency under randomized schedules of concurrent readers and one mutating command via --test-hold and process kills (TEST-SPEC §16 P-10): episodes of `rename`, file-form `move`, and `review resolve` under `--json`, held or not, run to their end, killed while held, or killed past their hold at fixed fractions of their twin's lift-to-exit span, each kill under T13.5-3's exit-collection discipline (the command's process group SIGKILLed, its exit collected, the group gone) before anything later runs; readers started before each command at drawn leads, at least one confirmed still running (listed, never a zombie) as it starts, plus reads while it holds and straddling its lift or kill, and a polling reader over the journal, the session file, the source, its module and companions, and graph data, never the lock path; each command's reader-free twin copied from the workspace, the lock path aside, as it starts and run alone, exit 0. Readers observe only prior-or-complete states (every polled state the path's before or after the episode — after a kill, the path's before it or its reader-free twin's after the operation, the state the kill left included — at a graph-data path also the product's own graph data for a state of the episode's files; the journal prefix-monotone, never deleted; T13.5-5's protocol); nothing is lost (each `rename`/`move` exiting 0 adds exactly one journal line, each killed one at most one; each resolve exiting 0 records its status — read back by quiescent `review status` and `review list` — each killed one records it or leaves the session byte-unchanged); a killed run whose sources, journal, or session files differ from its twin's leaves `.xspec/lock` holding exactly one plain-file entry (T13.5-3's past-the-hold judgement); and readers never exclude a mutating command: each one not killed is never refused (a refusal after a kill voids the trial where a killed group's identifier is listed again, T13.5-3's reuse check) and ends exactly as its twin — exit code, standard output, and the sources, journal, and session files byte-equal (H-6; derived files and graph data not compared), `.xspec/lock` then absent (SPEC 6.1, 10.7, 13.4, 13.5; E-5)",
+    "concurrency under randomized schedules of concurrent readers and one mutating command via --test-hold and process kills (TEST-SPEC §16 P-10): episodes of `rename`, file-form `move`, and `review resolve` under `--json`, held or not, run to their end, killed while held, or killed past their hold at fixed fractions of their twin's lift-to-exit span, each kill under T13.5-3's exit-collection discipline (the command's process group SIGKILLed, its exit collected, the group gone) before anything later runs; readers started before each command at drawn leads, at least one confirmed still running (listed, never a zombie) as it starts, plus reads while it holds and straddling its lift or kill, and a polling reader over the journal, the session file, the source, its module and companions, and graph data, never the lock path; each command's reader-free twin copied from the workspace, the lock path aside, as it starts and run alone, exit 0. Readers observe only prior-or-complete states (every polled state the path's before or after the episode — after a kill, the path's before it or its reader-free twin's after the operation, the state the kill left included — at a graph-data path also the product's own graph data for a state of the episode's files; the journal prefix-monotone, never deleted; T13.5-5's protocol); nothing is lost (each `rename`/`move` exiting 0 adds exactly one journal line, each killed one at most one; each resolve exiting 0 records its status — read back by quiescent `review status` and `review list` — each killed one records it or leaves the session byte-unchanged); a killed run whose sources, journal, or session files differ from its twin's leaves `.xspec/lock` holding exactly one plain-file entry once the episode's readers have exited (T13.5-3's past-the-hold judgement); and readers never exclude a mutating command: each one not killed is never refused (a refusal after a kill voids the trial where a killed group's identifier is listed again, T13.5-3's reuse check) and ends exactly as its twin — exit code, standard output, and the sources, journal, and session files byte-equal (H-6; derived files and graph data not compared), `.xspec/lock` absent once the episode's readers have exited (SPEC 6.1, 10.7, 13.4, 13.5; E-5)",
   // Wall-clock hang guard only (H-10): three fixed seeds (E-5), two to five
   // episodes per trial, each a twin and a command plus up to eight reads,
   // and, where an observed graph-data state needs them, up to sixteen
