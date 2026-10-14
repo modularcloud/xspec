@@ -62,7 +62,9 @@
 // failure whose every re-observation costs a full hang guard — an
 // invocation the subprocess driver killed (P-8's and P-11's termination
 // clauses) — would otherwise turn a bounded shrink into hours, past the
-// body's own hang guard.
+// body's own hang guard. The driver's missing-product failure declines too
+// (helpers/subprocess.ts, `missingFilesFailDiagnosed`; H-8): no draw can
+// change it, so a shrink would only report an arbitrary counterexample.
 //
 // S-9's per-draw check (TEST-SPEC 16 preamble, 17 S-9): a property whose
 // generator composes sources names the files a draw stages through
@@ -340,9 +342,9 @@ export class PropertyFalsifiedError extends HarnessAssertionError {
   }) {
     const shrinkTally = `${String(details.shrinkSteps)} accepted shrink steps, ${String(details.shrinkExecutions)} property executions`;
     const shrinkNote = details.shrinkDeclined
-      ? "\n  (reported as drawn: this failure declines shrinking — each re-observation would cost a full hang guard)"
+      ? "\n  (reported as drawn: this failure declines shrinking — re-observing it would cost a full hang guard, or no draw could change it)"
       : details.shrinkStopped
-        ? `\n  shrunk from: ${details.renderedInitialValue}\n  (${shrinkTally}; shrinking stopped at this counterexample because its failure declines shrinking: each re-observation would cost a full hang guard)`
+        ? `\n  shrunk from: ${details.renderedInitialValue}\n  (${shrinkTally}; shrinking stopped at this counterexample because its failure declines shrinking: re-observing it would cost a full hang guard, or no draw could change it)`
         : details.shrinkSteps > 0
           ? `\n  shrunk from: ${details.renderedInitialValue}\n  (${shrinkTally})`
           : "\n  (already minimal: no shrink candidate was accepted)";
@@ -834,11 +836,12 @@ interface ShrinkResult<T> {
  * shrinking. A candidate is accepted iff it replays to a strictly
  * shortlex-smaller tape (termination) and the property rejects its value
  * with a `HarnessAssertionError` again — one that declines shrinking
- * (`shrinkable` false: P-8's and P-11's hang-guard kills) included, since
- * it is a genuine falsification on a strictly smaller tape. Such a
- * candidate ends the shrink at once (`stoppedAtDeclined`): re-observing it,
- * or anything after it, could cost a full hang guard per candidate, so no
- * further candidate is replayed or executed. A candidate the generator
+ * (`shrinkable` false: P-8's and P-11's hang-guard kills, the driver's
+ * missing-product failure) included, since it is a genuine falsification on
+ * a strictly smaller tape. Such a candidate ends the shrink at once
+ * (`stoppedAtDeclined`): re-observing it, or anything after it, could cost
+ * a full hang guard per candidate, so no further candidate is replayed or
+ * executed. A candidate the generator
  * cannot replay (its tape runs out, or an entry exceeds its draw's bound) is
  * discarded; anything else the generator throws on a candidate, an S-9
  * refusal of a candidate's staged sources, and anything but a
@@ -937,9 +940,10 @@ async function shrinkFalsification<T>(
         });
       }
       // Accepted: a strictly smaller falsification. One that declines
-      // shrinking (a hang-guard kill) is accepted too — it is genuine — but
-      // ends the shrink here: each further candidate could cost another full
-      // hang guard, so it is the reported counterexample.
+      // shrinking (a hang-guard kill, or the product missing) is accepted
+      // too — it is genuine — but ends the shrink here: each further
+      // candidate could cost another full hang guard, or fail no
+      // differently, so it is the reported counterexample.
       current = { trial: replayed, error };
       steps += 1;
       if (!error.shrinkable) stoppedAtDeclined = true;

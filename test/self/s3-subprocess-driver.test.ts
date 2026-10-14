@@ -5,8 +5,11 @@
 // byte-verbatim stdout/stderr separation (H-5), enforced per-test working
 // directories, controlled environment, argv fidelity without shell
 // interpretation, timeout-as-failure for hangs (reported as failures, never
-// skips — H-8), diagnosed failures for missing executables, and the 13.5
-// machinery: background start, hold-file choreography, kill, concurrency.
+// skips — H-8), missing executables — the built product's missing artifact
+// a diagnosed failure declining shrinking (H-8's no-product run), a missing
+// command or any other binding's missing file a harness error (C-1: an
+// unbuilt fixture is a harness defect) — and the 13.5 machinery: background
+// start, hold-file choreography, kill, concurrency.
 // The capture limit (H-11) is pinned here too: an overflow is a loud
 // `ProductRunOutputOverflowError`, never a truncation, which the hold-file
 // wait surfaces as itself and `rethrowHarnessError` — the first call of
@@ -60,6 +63,7 @@ import {
 import type * as MdxDerivabilityModule from "../helpers/mdx-derivability.js";
 import {
   builtProductBinding,
+  builtProductBindingAt,
   createHoldFile,
   HarnessEvaluationError,
   pathExists,
@@ -441,24 +445,14 @@ test("converts a hanging child into a diagnosed timeout failure and kills it (H-
   ).rejects.toThrow(/timed out/);
 });
 
-test("a missing executable or required build artifact fails diagnosed, not as a harness crash (H-8)", async () => {
-  const { workspace } = await standin();
-  const missingCommand = path.join(workspace.tempRoot, "no-such-binary");
-  const spawnError = await runProduct(
-    { label: "missing executable", command: missingCommand },
-    { cwd: workspace.root },
-  ).then(
-    () => null,
-    (error: unknown) => error as Error,
-  );
-  expect(spawnError).not.toBeNull();
-  expect(spawnError!.message).toContain("failed to start");
-  expect(spawnError!.message).toContain(missingCommand);
-
+test("a missing `command` and an unflagged binding's missing required file reject as harness errors — a plain `Error`, never a `HarnessAssertionError` — each naming its path, the latter its binding's label too, the run going on (H-8; C-1: an unbuilt fixture is a harness defect, never a certified failure)", async () => {
+  const { workspace, binding } = await standin();
+  // The certification fixtures' binding shape, its executable unbuilt: the
+  // binding leaves `missingFilesFailDiagnosed` unset.
   const missingArtifact = path.join(workspace.tempRoot, "not-built.js");
   const artifactError = await runProduct(
     {
-      label: "unbuilt product",
+      label: "unbuilt fixture",
       command: process.execPath,
       prefixArgs: [missingArtifact],
       requiredFiles: [missingArtifact],
@@ -468,14 +462,90 @@ test("a missing executable or required build artifact fails diagnosed, not as a 
     () => null,
     (error: unknown) => error as Error,
   );
-  expect(artifactError).not.toBeNull();
-  expect(artifactError!.message).toContain("required file missing");
-  expect(artifactError!.message).toContain(missingArtifact);
-  expect(artifactError!.message).toContain("npm run build");
+  expect(artifactError).toBeInstanceOf(Error);
+  expect(artifactError).not.toBeInstanceOf(HarnessAssertionError);
+  expect(artifactError!.name).toBe("Error");
+  expect(artifactError!.message).toContain(
+    `unbuilt fixture: required file missing: ${missingArtifact}`,
+  );
+  expect(artifactError!.message).toContain("harness error");
+  // A pre-flight refusal: nothing noted (the undeclared-staging guard's
+  // mark, helpers/product-invocations.ts), nothing spawned.
+  expect(workspace.productInvoked).toBe(false);
+
+  const missingCommand = path.join(workspace.tempRoot, "no-such-binary");
+  const spawnError = await runProduct(
+    { label: "missing executable", command: missingCommand },
+    { cwd: workspace.root },
+  ).then(
+    () => null,
+    (error: unknown) => error as Error,
+  );
+  expect(spawnError).toBeInstanceOf(Error);
+  expect(spawnError).not.toBeInstanceOf(HarnessAssertionError);
+  expect(spawnError!.name).toBe("Error");
+  expect(spawnError!.message).toContain("failed to start");
+  expect(spawnError!.message).toContain(missingCommand);
+  expect(spawnError!.message).toContain("harness error");
+
+  // Neither stopped the driver: the next run in the same workspace runs.
+  const next = await runProduct(binding, {
+    cwd: workspace.root,
+    argv: ["exit", "3"],
+  });
+  expect(next.exitCode).toBe(3);
 });
 
-test("builtProductBinding names the built executable absolutely, independent of the process cwd (C-2 default binding)", () => {
+test("the built product's missing artifact fails every run diagnosed — a `HarnessAssertionError` declining shrinking, naming the artifact and `npm run build` — before anything is spawned (H-8: no product installed)", async () => {
+  const absentRoot = await fsp.mkdtemp(
+    path.join(os.tmpdir(), "xspec-s3-no-product-"),
+  );
+  onTestFinished(() => fsp.rm(absentRoot, { recursive: true, force: true }));
+  const missingArtifact = path.join(absentRoot, "dist", "cli", "bin.js");
+  const binding = builtProductBindingAt(missingArtifact);
+  const workspace = await TestWorkspace.create();
+  onTestFinished(() => workspace.dispose());
+
+  const attempts: readonly (readonly [string, () => Promise<unknown>])[] = [
+    [
+      "runProduct",
+      () =>
+        runProduct(binding, { cwd: workspace.root, argv: ["build", "--json"] }),
+    ],
+    [
+      "startProduct",
+      () =>
+        startProduct(binding, {
+          cwd: workspace.root,
+          argv: ["build", "--json"],
+        }),
+    ],
+  ];
+  for (const [what, attempt] of attempts) {
+    const rejection = await attempt().then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(rejection, what).toBeInstanceOf(HarnessAssertionError);
+    const failure = rejection as HarnessAssertionError;
+    expect(failure.name, what).toBe("HarnessAssertionError");
+    expect(failure.shrinkable, what).toBe(false);
+    expect(failure.message, what).toContain(
+      `built xspec product: required file missing: ${missingArtifact}`,
+    );
+    expect(failure.message, what).toContain("npm run build");
+  }
+  // Nothing was noted (the undeclared-staging guard's mark,
+  // helpers/product-invocations.ts) or spawned: the run's working directory
+  // holds nothing, and nothing appeared beside the absent artifact.
+  expect(workspace.productInvoked).toBe(false);
+  expect(await fsp.readdir(workspace.root)).toEqual([]);
+  expect(await fsp.readdir(absentRoot)).toEqual([]);
+});
+
+test("builtProductBinding names the built executable absolutely, independent of the process cwd, its missing artifact marked the missing product; builtProductBindingAt is that shape at another path (C-2 default binding; H-8)", () => {
   const binding = builtProductBinding();
+  expect(binding.label).toBe("built xspec product");
   expect(binding.command).toBe(process.execPath);
   expect(binding.prefixArgs).toHaveLength(1);
   const binJs = binding.prefixArgs![0]!;
@@ -484,6 +554,21 @@ test("builtProductBinding names the built executable absolutely, independent of 
   // The pre-flight check targets exactly the executable artifact, so an
   // unbuilt product fails diagnosed (H-8) rather than as a confusing spawn.
   expect(binding.requiredFiles).toEqual([binJs]);
+  expect(binding.missingFilesFailDiagnosed).toBe(true);
+
+  const elsewhere = path.join(
+    os.tmpdir(),
+    "xspec-s3-elsewhere",
+    "dist",
+    "cli",
+    "bin.js",
+  );
+  expect(builtProductBindingAt(elsewhere)).toStrictEqual({
+    ...binding,
+    prefixArgs: [elsewhere],
+    requiredFiles: [elsewhere],
+  });
+  expect(builtProductBindingAt(binJs)).toStrictEqual(binding);
 });
 
 test("background start with hold-file choreography: await creation, hold, release, completion (13.5 seam support)", async () => {

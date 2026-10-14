@@ -16,9 +16,16 @@
 //   the exact exit code and stdout/stderr as separated byte streams (H-5).
 //   stdin is closed — SPEC.md commands are argv-driven.
 // - Robustness (H-8): a hanging child is killed and converted into a
-//   diagnosed timeout failure (never a skip, never a harness hang); a missing
-//   executable or working directory is a diagnosed per-test failure, not a
-//   harness crash; runaway output is capped and killed, surfacing as a loud
+//   diagnosed timeout failure (never a skip, never a harness hang); the
+//   built product's missing artifact — no product installed — fails every
+//   run, before anything is noted or spawned, with a diagnosed
+//   `HarnessAssertionError` that declines shrinking (the binding's
+//   `missingFilesFailDiagnosed`, which `builtProductBindingAt` alone sets),
+//   whereas a missing `command`, any other binding's missing required file
+//   (an unbuilt fixture or helper program: a defect in the harness, never a
+//   certified failure, C-1), and a missing working directory reject as
+//   per-test harness errors, never a crash of the run; runaway output is
+//   capped and killed, surfacing as a loud
 //   `ProductRunOutputOverflowError` — an exhausted capture limit is a
 //   harness error, never a silent truncation (H-11) — and a failure of the
 //   driver's own in-run evaluation of an answer (T6.5-22(a)'s check and
@@ -182,10 +189,25 @@ export interface ProductBinding {
   readonly env?: Readonly<Record<string, string>>;
   /**
    * Files that must exist for the binding to be invocable, checked before
-   * each run: a missing build artifact fails the test with a diagnosis
-   * instead of a confusing spawn error (H-8).
+   * each run, before anything is noted or spawned, so a missing one is named
+   * instead of surfacing as a confusing spawn error. How a missing one fails
+   * is {@link missingFilesFailDiagnosed}'s: the built product's artifact as a
+   * diagnosed failure (H-8), any other binding's file as a harness error.
    */
   readonly requiredFiles?: readonly string[];
+  /**
+   * Whether a missing {@link requiredFiles} entry is H-8's missing product —
+   * no product installed, so every product-facing test fails there with a
+   * diagnosed assertion failure (`HarnessAssertionError`, declining
+   * shrinking) — rather than a harness error (a plain `Error`), the default.
+   * Only the built product's binding sets it ({@link builtProductBindingAt}).
+   * Every other binding — a CERTIFICATIONS.md fixture, the S-7 empty stub, a
+   * compiled consumer program, a stand-in, a temporary runner's build — must
+   * leave it unset: a missing fixture executable is a defect in the harness,
+   * never a certified failure (C-1: a violator whose certified tests are its
+   * whole in-scope set would otherwise certify without ever running).
+   */
+  readonly missingFilesFailDiagnosed?: boolean;
 }
 
 /**
@@ -324,15 +346,31 @@ const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 /**
  * The default binding: the built product executable (`dist/cli/bin.js`, see
- * AGENTS.md), resolved relative to this module — never to the process cwd.
+ * AGENTS.md), resolved relative to this module — never to the process cwd —
+ * in the built product's binding shape ({@link builtProductBindingAt}), so
+ * running a product-facing test before the product is built fails it
+ * diagnosed (H-8).
  */
 export function builtProductBinding(): ProductBinding {
-  const binJs = path.join(repoRoot, "dist", "cli", "bin.js");
+  return builtProductBindingAt(path.join(repoRoot, "dist", "cli", "bin.js"));
+}
+
+/**
+ * The built product's binding shape at the artifact path `binJs`: Node runs
+ * it, it is the one required file, and its absence is H-8's missing product
+ * — every run failing diagnosed, declining shrinking
+ * ({@link ProductBinding.missingFilesFailDiagnosed}). Product-facing tests
+ * take {@link builtProductBinding}; the path parameter exists for checks of
+ * the no-product run, which need the artifact absent whatever the
+ * checkout's `dist/` holds (S-3's missing-artifact vector).
+ */
+export function builtProductBindingAt(binJs: string): ProductBinding {
   return {
     label: "built xspec product",
     command: process.execPath,
     prefixArgs: [binJs],
     requiredFiles: [binJs],
+    missingFilesFailDiagnosed: true,
   };
 }
 
@@ -438,10 +476,14 @@ export interface RunResult {
 /**
  * Start an invocation in the background (13.5 choreography: the caller
  * coordinates via hold files, kills, or concurrent invocations, then awaits
- * `waitForExit`). Pre-flight problems — relative/missing working directory,
- * missing required files — throw diagnosed errors before anything is spawned.
- * A failure of T6.5-22(a)'s pre-operation reading rejects with the harness
- * error {@link HarnessEvaluationError} (H-11), nothing spawned.
+ * `waitForExit`). Pre-flight problems reject, naming the problem, before
+ * anything is noted or spawned: a relative or missing working directory,
+ * and a missing required file of any binding but the built product's, as
+ * harness errors (plain `Error`s); the built product's missing artifact as
+ * H-8's diagnosed failure, a `HarnessAssertionError` declining shrinking
+ * ({@link ProductBinding.missingFilesFailDiagnosed}). A failure of
+ * T6.5-22(a)'s pre-operation reading rejects with the harness error
+ * {@link HarnessEvaluationError} (H-11), nothing spawned.
  */
 export async function startProduct(
   binding: ProductBinding,
@@ -486,11 +528,19 @@ export async function startProduct(
     );
   }
   for (const required of binding.requiredFiles ?? []) {
-    if (!(await pathExists(required))) {
-      throw new Error(
-        `${binding.label}: required file missing: ${required}. The harness drives the product strictly as a subprocess (TEST-SPEC H-2); if this is the built product, run \`npm run build\` first (AGENTS.md). H-8: a missing executable is a diagnosed per-test failure — the harness itself keeps running.`,
+    if (await pathExists(required)) continue;
+    if (binding.missingFilesFailDiagnosed === true) {
+      // H-8's missing product: every product-facing test fails here,
+      // diagnosed. No draw can change the failure, so it declines shrinking
+      // — a shrink would only report an arbitrary counterexample.
+      throw new HarnessAssertionError(
+        `${binding.label}: required file missing: ${required} — the product is not installed, so every product-facing test fails here, diagnosed (TEST-SPEC H-8; the harness drives the product strictly as a subprocess, H-2). Build it with \`npm run build\` first (AGENTS.md). Nothing was spawned.`,
+        { shrinkable: false },
       );
     }
+    throw new Error(
+      `${binding.label}: required file missing: ${required} — a harness error: only the built product's missing artifact is H-8's diagnosed missing product, and any other binding's missing file (an unbuilt fixture or helper program) is a defect in the harness, never a certified failure (TEST-SPEC C-1). Nothing was spawned.`,
+    );
   }
 
   const invocation = resolveInvocation(binding.command, fullArgs, commandLine);
@@ -602,12 +652,14 @@ export interface KilledGroup {
 
 /**
  * A started invocation. `waitForExit` resolves with the run result (normal
- * exits and requested kills alike) and rejects, diagnosed, on timeout,
- * spawn failure, a near-marker in the captured stdout of a run with JSON
- * output in effect (T12.7-1), or a performed move's breach of T6.5-22(a) —
- * and with a harness error (H-11): `ProductRunOutputOverflowError` on
- * output overflow, `HarnessEvaluationError` when T12.7-1's walk or
- * T6.5-22(a)'s check itself fails.
+ * exits and requested kills alike) and rejects, diagnosed, on timeout, a
+ * near-marker in the captured stdout of a run with JSON output in effect
+ * (T12.7-1), or a performed move's breach of T6.5-22(a) — and with a
+ * harness error: a plain `Error` on spawn failure (H-8: for that test
+ * alone, never a crash of the run), and (H-11)
+ * `ProductRunOutputOverflowError` on output overflow,
+ * `HarnessEvaluationError` when T12.7-1's walk or T6.5-22(a)'s check itself
+ * fails.
  */
 export class RunningProduct {
   readonly commandLine: string;
@@ -694,7 +746,7 @@ export class RunningProduct {
         settle(() =>
           reject(
             new Error(
-              `failed to start ${commandLine}: ${error.message} — is the executable present and invocable? H-8: a missing executable is a diagnosed per-test failure, not a harness crash.`,
+              `failed to start ${commandLine}: ${error.message} — is the executable present and invocable? A harness error, for this test alone and never a crash of the run (H-8): the built product's command is the running Node binary, so only another binding's or a launcher's command can fail to start.`,
             ),
           ),
         );

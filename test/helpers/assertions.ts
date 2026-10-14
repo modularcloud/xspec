@@ -38,16 +38,19 @@ import { summarizeResult } from "./subprocess.js";
 export class HarnessAssertionError extends Error {
   /**
    * Whether a property this failure falsifies is shrunk further before it is
-   * reported (helpers/property.ts `checkProperty`); default true. Shrinking
-   * is bounded in property executions, and that bound stops bounding wall
-   * clock when every re-observation of the failure costs a full hang guard —
-   * an invocation the subprocess driver killed (P-8's and P-11's
-   * termination clauses, TEST-SPEC §16): such a failure declines shrinking.
-   * On a drawn trial, the drawn counterexample is reported as is; on a
-   * shrink candidate (met while shrinking another failure), that candidate
-   * ends the shrink as the reported counterexample. Either way the report
-   * names the seed (H-10), and a shrink re-observes such a failure at most
-   * once.
+   * reported (helpers/property.ts `checkProperty`); default true. A failure
+   * declines shrinking for one of two reasons. Shrinking is bounded in
+   * property executions, and that bound stops bounding wall clock when every
+   * re-observation of the failure costs a full hang guard — an invocation
+   * the subprocess driver killed (P-8's and P-11's termination clauses,
+   * TEST-SPEC §16). And a failure no draw can change — the built product
+   * missing, which the subprocess driver reports before anything is spawned
+   * (helpers/subprocess.ts, `missingFilesFailDiagnosed`; H-8) — would only
+   * shrink to an arbitrary counterexample. On a drawn trial, the drawn
+   * counterexample is reported as is; on a shrink candidate (met while
+   * shrinking another failure), that candidate ends the shrink as the
+   * reported counterexample. Either way the report names the seed (H-10),
+   * and a shrink re-observes such a failure at most once.
    */
   readonly shrinkable: boolean;
 

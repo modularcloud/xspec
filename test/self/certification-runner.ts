@@ -12,9 +12,12 @@
 //   fail   the body threw `HarnessAssertionError` — a diagnosed assertion
 //          failure, the only legitimate way a test rejects a product; this is
 //          what C-1's "fails against a violator" and the S-7 sweep's
-//          "diagnosed assertion failure" mean;
+//          "diagnosed assertion failure" mean, and what H-8's no-product run
+//          yields: the built product's missing artifact fails every body
+//          diagnosed (helpers/subprocess.ts, `missingFilesFailDiagnosed`);
 //   error  the body threw anything else — a harness defect (or an unbuilt
-//          fixture), never a certified failure;
+//          fixture, whose binding never marks its missing executable as
+//          the missing product), never a certified failure;
 //   hang   the body did not settle within its budget — the runner records the
 //          hang, leaves the abandoned body observed (a late rejection cannot
 //          crash the run), and completes: a hanging test never hangs the
