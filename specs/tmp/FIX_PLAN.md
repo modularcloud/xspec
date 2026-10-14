@@ -73,7 +73,7 @@ The previous plan (written at 43c9a5e, deleted at affd85f) is `git show affd85f^
 - Reviewer D and VERIFY found nothing to plan. Every item of the previous plans' lists of the same name still holds (`git show affd85f^:specs/tmp/FIX_PLAN.md`, and the lists it carries forward) — save the 43c9a5e plan's "From reviewer B" item (3), which this plan narrows as stated above.
 
 **Order.** Take the topmost task unless told otherwise. Tasks 1, 2, 3, and 6 are independent of each other and of the rest. Task 4 precedes Task 5. Task 7 comes last. When a task is done, its commit removes it from the Tasks section and adds a one-line summary to its bullet here.
-- Task 1 (RA-1): T1.5-1 asks its human reports every identity and path, token-bounded.
+- Task 1 (RA-1): T1.5-1 asks its human reports every identity and path, token-bounded. Done: `section-1.5.ts` gains the module-private `assertHumanIdentities` (one `assertReportMentions` call on the root run, each distinct identity or path an `identityMention`) and four collectors over the decoded documents — `nodeReportIdentities` (the node's identity and every incoming and outgoing edge's `from` and `to`), `idsReportIdentities` (the file of every entry listing an ID, and every listed ID), `coverageReportIdentities` (every profile's covered identities and covering-path nodes, uncovered identities, and ignored identities), and `impactReportIdentities` (requirement nodes, attribution identities, and every impacted-code entry's location, witness edge endpoints, and path nodes, collected as `assertHumanImpactReport` collects them); T1.5-1's five human runs call it in place of the hard-coded plain-substring lists, each after its document's JSON assertions, so the `contains` edges' roots and coverage's ignored roots are asked too. The module header's T1.5-1 bullet records the human-form checks and their limits (why token-bounded; no association; ASCII data, no escapable character), the inline comments say so, and the title gains the human-form clause. Checks: typecheck and format clean; the self project alone under the namespace, `dist/` absent and the admin files left out, 37 files and 4446 tests, all passed (352.67 s); certification 186 PASS / 50 FAIL / 0 error / 0 hang, 0 discrepancies; T1.5-1, run alone through `test/self/zz-t9jaff1.test.ts` (deleted), passes against the built product (11.79 s of test; HEAD's 12.79 s) and `b-review/m/p13` (11.47 s), and, through `revA-af/tools/absprefix.mjs` bound before the built product's bin, fails diagnosed in mode `all` at the human `show specs/A.mdx#alpha` (naming `specs/A.mdx#alpha`, `specs/A.mdx`, `specs/sub/B.mdx#gamma`, and `specs/A.mdx#beta`; 3.55 s), in mode `ids` at the human `ids` (`specs/A.mdx`, `specs/sub/B.mdx`; 6.64 s), in mode `coverage` at the human `coverage` (its six identities; 7.90 s), and in mode `impact` at the human `impact --base HEAD` (`specs/sub/B.mdx`, `specs/sub/B.mdx#gamma`, `src/sub/c.ts#useGamma`; 9.91 s), passes in mode `none` (12.71 s), and, with the change stashed, passes in mode `all` (the gap; 12.46 s). AGENTS.md's human-report parity bullet gains the task's sentence. The run logs are scratchpad `t9jaff_1/`.
 - Task 2 (RB-1): T10.1-4 decodes every naming subcommand's corruption report under `--json`, and `export`'s without the flag.
 - Task 3 (RB-1): T14-4's 14.21 row decodes `review status bad --json`.
 - Task 4 (RC-1): the built product's missing artifact fails diagnosed, non-shrinkable; the S-3 vectors.
@@ -82,42 +82,6 @@ The previous plan (written at 43c9a5e, deleted at affd85f) is `git show affd85f^
 - Task 7: confirm locally and in CI; record the timings; delete this plan.
 
 ## Tasks
-
-### Task 1 — T1.5-1 asks its human reports every identity and path, token-bounded (RA-1)
-
-**Requirement.** TEST-SPEC T1.5-1: "Identities and file paths in every output (`query`, `show`, `ids`, coverage, impact, and the `occurrences`, `view`, and `at` documents — their identities, `file` members, and import targets; the inventory's members, T11.6-1) are workspace-relative and `/`-separated, regardless of the working directory the command runs from (run from a nested directory and from the root; compare outputs byte-wise)." SPEC 1.5: "File paths in identities, outputs, and stored data are always workspace-relative and always use `/` as the path separator, on every platform." H-3: human-readable reports "are asserted only for required information (via robust matching), never exact wording." Reviewer A's G1: T1.5-1's five human runs byte-compare their two working directories, then ask identities and paths as plain substrings, which cannot tell `specs/A.mdx#alpha` from `/tmp/…/specs/A.mdx#alpha` or `./specs/A.mdx#alpha`; a product printing every path of these reports under the absolute workspace root (reviewer A's stand-in, mode `all`) passes T1.5-1, its two runs still byte-identical.
-
-**Departures from reviewer A's proposal.** (1) The listed IDs are `identityMention`s (reviewer A offered `nameMention` or `identityMention`): T12.3-1's listing check asks them so (the 43c9a5e plan's Task 2), and an ID never counts inside a path that way. (2) The mentions come from the decoded `--json` documents — every identity and path each carries — rather than today's hard-coded lists (the previous plan's conventions, item 2), so the `contains` edges' root endpoints (`specs/A.mdx`, `specs/sub/B.mdx`) and coverage's ignored roots, absent from today's lists, are asked too.
-
-**State at affd85f** (`test/suite/registry/section-1.5.ts`).
-- `runFromRootAndNested` (lines 263–298): one argv from the workspace root and from `specs/sub`, exit 0 each, stdouts byte-equal; it returns the root run.
-- T1.5-1 (lines 510–994) decodes `show specs/A.mdx#alpha --json` (`alpha`, line 608), `show specs/sub/B.mdx#gamma --json` (`shownGamma`, line 640), `ids --json` (`ids`, line 702), `coverage --json` (`coverage`, line 733), and `impact --base HEAD --json` (`impact`, line 796), and runs each command's human form through `runFromRootAndNested`, matching plain-string mentions: `show` alpha `[ALPHA, BETA, GAMMA]` (lines 672–685), `show` gamma `[GAMMA, ALPHA, CODE_UNIT]` (686–696), `ids` `[A_FILE, B_FILE, "alpha", "beta", "gamma"]` (722–727), `coverage` `[ALPHA, BETA, GAMMA, CODE_UNIT]` (779–789), `impact` `[GAMMA, CODE_UNIT]` (880–890). Every one counts inside a longer path, and none names a root but `ids`' files.
-- The module imports `assertReportMentions` but no matcher of `human.ts` (lines 57–68). The module header's T1.5-1 bullet is lines 9–31, the title line 513.
-- Nothing mutates between the decoded runs and the human runs (all reads), so each human run is at its document's state.
-
-**Change.**
-1. A module-private helper — e.g. `assertHumanIdentities(human: RunResult, identities: Iterable<string>, label: string)` — asking `identityMention` of each distinct identity or path (helpers/adapters/human.ts: not preceded by a word character, `-`, `.`, or `/`; not followed by a word character, `-`, `#`, `/`, or `.` and a word character) in one `assertReportMentions` call on the root run (byte-equal to the nested run).
-2. In place of the five hard-coded calls, each after its document's JSON assertions, with the mentions taken from the decoded document:
-   - `show` alpha and gamma: the node's identity and every incoming and outgoing edge's `from` and `to` (`alpha`, `shownGamma`);
-   - `ids`: the `file` of every entry listing at least one ID, and every listed ID;
-   - `coverage`: every profile's covered identities, every node of each covering path, every uncovered identity, and every ignored identity;
-   - `impact`: every requirement entry's `nodes` and every category's `attributedTo`, and every impacted-code entry's `location`, `edge.from`, `edge.to`, and every node of its `path` (the identities `assertHumanImpactReport` in `section-9.ts` asks in its first call, collected the same way; that helper runs from the root alone, so it is not reused).
-3. The module header's T1.5-1 bullet gains the human-form sentence: which reports, what each is asked, and why token-bounded — a report printing its paths under a prefix the working directory does not change (the absolute workspace root, `./`) fails though both runs agree byte for byte; the limits — no mention is associated with another, so which identity lies on which edge, row, or entry stays with the JSON assertions; the fixture's data are ASCII and hold no escapable character. The title gains the human-form clause (the human `show`, `ids`, `coverage`, and `impact` reports naming each identity and path token-bounded).
-
-**Verify.**
-- The common checks (typecheck, format, the self project at the last recorded counts, the certification lines).
-- T1.5-1 passes against the built product (record its time; HEAD's too) and against `b-review/m/p13`.
-- Red checks through reviewer A's stand-in bound before the built product's bin (Known state; record each outcome and time). A diagnosis names the missing mentions of the first human run that misses any (the runs go `show` alpha, `show` gamma, `ids`, `coverage`, `impact`):
-  - mode `all`: fails diagnosed at the human `show specs/A.mdx#alpha`, naming `specs/A.mdx#alpha`, `specs/A.mdx`, `specs/sub/B.mdx#gamma`, and `specs/A.mdx#beta`;
-  - mode `ids`: fails at the human `ids`, naming `specs/A.mdx` and `specs/sub/B.mdx` (its IDs found: the stand-in rewrites paths alone);
-  - mode `coverage`: fails at the human `coverage`, naming its six identities (`specs/A.mdx#alpha`, `specs/A.mdx#beta`, `specs/sub/B.mdx#gamma`, `src/sub/c.ts#useGamma`, `specs/A.mdx`, `specs/sub/B.mdx`);
-  - mode `impact`: fails at the human `impact --base HEAD`, naming `specs/sub/B.mdx#gamma`, `specs/sub/B.mdx`, and `src/sub/c.ts#useGamma`;
-  - mode `none`: passes (no false failure);
-  - with the change stashed, mode `all` passes (the gap).
-- AGENTS.md: one sentence appended to the bullet beginning "The human-report parity checks" (T1.5-1's human runs and what they ask, the stand-in's modes and outcomes, the times).
-- Commit (subject `sdg(phase-9): ask T1.5-1's human reports every identity and path, token-bounded (FIX_PLAN Task 1)`) and push.
-
-**Done when.** The checks hold, and the commit is pushed with a message recording the results.
 
 ### Task 2 — T10.1-4 decodes every naming subcommand's corruption report under `--json`, and `export`'s without the flag (RB-1)
 

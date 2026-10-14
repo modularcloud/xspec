@@ -29,6 +29,29 @@
 //   member-invariance arm (section-11.6.ts; on the Windows leg, its
 //   drive-mismatch arm) holds every inventory member but the anchoring
 //   byte-identical across working directories, so no copy runs here.
+//   The human (non-`--json`) reports of `show` (of alpha and of gamma),
+//   `ids`, `coverage`, and `impact --base HEAD` run the same two-directory
+//   protocol, each directly after its `--json` document's assertions (every
+//   run is a read, so each report is at its document's state), and each
+//   must name every identity and file path that document carries
+//   (`assertHumanIdentities`): `show` the node's identity and every
+//   incoming and outgoing edge's endpoints, the `contains` edges' roots
+//   included; `ids` the file of every entry listing an ID and every listed
+//   ID; `coverage` every profile's covered identities and covering-path
+//   nodes, its uncovered identities, and its ignored roots; `impact` every
+//   requirement entry's nodes and attribution identities and every
+//   impacted-code entry's location, witness edge endpoints, and witness
+//   path nodes. Each is an `identityMention` (helpers/adapters/human.ts),
+//   bounded as a token rather than matched as a plain substring: the byte
+//   comparison cannot see a path printed under a prefix the working
+//   directory does not change (the absolute workspace root, `./`), and a
+//   substring finds `specs/A.mdx#alpha` inside such a prefixed spelling,
+//   so a report printing its paths that way fails though both runs agree
+//   byte for byte. Limits (H-3: robust matching, never wording): no
+//   mention is associated with another, so which identity lies on which
+//   edge, row, path, or entry stays with the JSON assertions; and the
+//   fixture's data are ASCII and hold no escapable character, so no datum
+//   goes unasked.
 // - T1.5-2's non-UTF-8 arm is staged on the Linux leg per its TEST-SPEC text
 //   ("where file names are byte strings"): other platforms' filesystems
 //   refuse such names outright, so the arm runs exactly where the fixture is
@@ -48,8 +71,12 @@
 import { Buffer } from "node:buffer";
 import type {
   CoverageProfileReport,
+  CoverageReport,
   FileView,
   Finding,
+  IdsReport,
+  ImpactReport,
+  NodeReport,
   OccurrenceRecord,
   PathValue,
   ViewNode,
@@ -65,6 +92,7 @@ import {
   decodeNodeRowsReport,
   decodeOccurrencesReport,
   decodeViewReport,
+  identityMention,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
@@ -297,6 +325,101 @@ async function runFromRootAndNested(
   return fromRoot;
 }
 
+/**
+ * A human report of T1.5-1 — the root run of `runFromRootAndNested`,
+ * byte-equal to the nested run — names every identity and file path its
+ * decoded `--json` document carries (after that document's own
+ * assertions), each distinct one an `identityMention`, all in one call.
+ * The mention is token-bounded (helpers/adapters/human.ts): not preceded by
+ * a word character, `-`, `.`, or `/`, and not followed by a word character,
+ * `-`, `#`, `/`, or `.` and a word character. So a path printed under a
+ * prefix the working directory does not change — the absolute workspace
+ * root, `./` — is no mention, though both runs agree byte for byte (SPEC
+ * 1.5); nor does a root's bare path count inside its sections' identities,
+ * nor an ID inside a path. Robust matching (H-3): presence, never wording,
+ * and no mention associated with another.
+ */
+function assertHumanIdentities(
+  human: RunResult,
+  identities: Iterable<string>,
+  label: string,
+): void {
+  assertReportMentions(
+    human,
+    [...new Set(identities)].map(identityMention),
+    `${label}: every identity and file path the \`--json\` document carries ` +
+      `appears token-bounded, workspace-relative and /-separated — never ` +
+      `under a prefix such as the absolute workspace root or \`./\` (SPEC ` +
+      `1.5, 12.0; robust matching, never wording — H-3)`,
+  );
+}
+
+/**
+ * A decoded `show` report's identities (SPEC 12.4): the node's own and
+ * every incoming and outgoing edge's `from` and `to` — the roots of its
+ * `contains` edges and a code location included.
+ */
+function nodeReportIdentities(report: NodeReport): string[] {
+  return [
+    report.identity,
+    ...[...report.incomingEdges, ...report.outgoingEdges].flatMap((edge) => [
+      edge.from,
+      edge.to,
+    ]),
+  ];
+}
+
+/**
+ * A decoded `ids` listing's paths and IDs (SPEC 12.3): the file of every
+ * entry listing at least one ID, and every listed ID.
+ */
+function idsReportIdentities(report: IdsReport): string[] {
+  return report.files
+    .filter((entry) => entry.ids.length > 0)
+    .flatMap((entry) => [entry.file, ...entry.ids]);
+}
+
+/**
+ * A decoded `coverage` report's identities (SPEC 8.2): every profile's
+ * covered identities and every node of each covering path, every uncovered
+ * identity, and every ignored identity.
+ */
+function coverageReportIdentities(report: CoverageReport): string[] {
+  return report.profiles.flatMap((profile) => [
+    ...profile.covered.flatMap((row) => [row.identity, ...row.path]),
+    ...profile.uncovered,
+    ...profile.ignored.map((row) => row.identity),
+  ]);
+}
+
+/**
+ * A decoded `impact` report's identities (SPEC 5.6, 9.1–9.3) — those
+ * section-9.ts's `assertHumanImpactReport` asks in its first call, collected
+ * the same way: every requirement entry's nodes and every category's
+ * attribution identities, and every impacted-code entry's location, witness
+ * edge `from` and `to`, and witness path nodes.
+ */
+function impactReportIdentities(report: ImpactReport): string[] {
+  const identities: string[] = [];
+  for (const entry of report.requirements) {
+    identities.push(...entry.nodes);
+    for (const category of entry.categories) {
+      identities.push(...category.attributedTo);
+    }
+  }
+  for (const group of ["direct", "transitive"] as const) {
+    for (const entry of report.code[group]) {
+      identities.push(
+        entry.location,
+        entry.edge.from,
+        entry.edge.to,
+        ...entry.path,
+      );
+    }
+  }
+  return identities;
+}
+
 /** Every reported identity must be one of the staged workspace's (SPEC 1.5). */
 function assertKnownIdentities(
   identities: readonly string[],
@@ -510,7 +633,7 @@ function assertIdentityProfile(
 const T1_5_1 = defineProductTest({
   id: "T1.5-1",
   title:
-    "identities and file paths in every output (query, show, ids, coverage, impact, and the occurrences, view, and at documents — identities, file members, import targets) are workspace-relative and /-separated, regardless of the working directory (SPEC 1.5, 12.0)",
+    "identities and file paths in every output (query, show, ids, coverage, impact, and the occurrences, view, and at documents — identities, file members, import targets) are workspace-relative and /-separated, regardless of the working directory; and the human show, ids, coverage, and impact reports name every identity and path their --json documents carry, token-bounded, so none counts under a prefix such as the absolute workspace root (robust matching, H-3) (SPEC 1.5, 12.0)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -669,30 +792,32 @@ const T1_5_1 = defineProductTest({
         `${showGammaLabel}: outgoing edges name workspace-relative identities`,
       );
 
-      // `show`, human form: the identity and its edges' other ends are
-      // required information (SPEC 12.4) — robust matching, never exact
-      // wording (H-3).
+      // `show`, human form: the identity and every edge's endpoints are
+      // required information (SPEC 12.4), each taken from the decoded
+      // `--json` report above — the `contains` edges' roots and the code
+      // location included — and asked token-bounded (`assertHumanIdentities`;
+      // robust matching, never exact wording, H-3).
       const showHumanLabel = `T1.5-1 \`show ${ALPHA}\` (human report)`;
-      assertReportMentions(
+      assertHumanIdentities(
         await runFromRootAndNested(
           product,
           workspace,
           ["show", ALPHA],
           showHumanLabel,
         ),
-        [ALPHA, BETA, GAMMA],
-        `${showHumanLabel}: identities appear in their workspace-relative form`,
+        nodeReportIdentities(alpha),
+        `${showHumanLabel}: the node's identity and every incoming and outgoing edge's endpoints`,
       );
       const showGammaHumanLabel = `T1.5-1 \`show ${GAMMA}\` (human report)`;
-      assertReportMentions(
+      assertHumanIdentities(
         await runFromRootAndNested(
           product,
           workspace,
           ["show", GAMMA],
           showGammaHumanLabel,
         ),
-        [GAMMA, ALPHA, CODE_UNIT],
-        `${showGammaHumanLabel}: identities, the code location's included, appear in their workspace-relative form`,
+        nodeReportIdentities(shownGamma),
+        `${showGammaHumanLabel}: the node's identity and every incoming and outgoing edge's endpoints, the code location's included`,
       );
 
       // `ids`: files in byte order of workspace-relative path, IDs in
@@ -719,11 +844,14 @@ const T1_5_1 = defineProductTest({
         ],
         `${idsLabel}: files listed by workspace-relative, /-separated path (SPEC 1.5, 12.3)`,
       );
+      // `ids`, human form: the file of every entry listing an ID and every
+      // listed ID, from the decoded listing, token-bounded (an ID never
+      // counts inside a path).
       const idsHumanLabel = "T1.5-1 `ids` (human report)";
-      assertReportMentions(
+      assertHumanIdentities(
         await runFromRootAndNested(product, workspace, ["ids"], idsHumanLabel),
-        [A_FILE, B_FILE, "alpha", "beta", "gamma"],
-        `${idsHumanLabel}: files appear by workspace-relative path with their IDs`,
+        idsReportIdentities(ids),
+        `${idsHumanLabel}: every listed file by its workspace-relative path, and every listed ID`,
       );
 
       // `coverage`: covered/uncovered/ignored identities and the covering
@@ -776,16 +904,18 @@ const T1_5_1 = defineProductTest({
         },
         coverageLabel,
       );
+      // `coverage`, human form: every identity the decoded report carries —
+      // the ignored roots included — token-bounded.
       const coverageHumanLabel = "T1.5-1 `coverage` (human report)";
-      assertReportMentions(
+      assertHumanIdentities(
         await runFromRootAndNested(
           product,
           workspace,
           ["coverage"],
           coverageHumanLabel,
         ),
-        [ALPHA, BETA, GAMMA, CODE_UNIT],
-        `${coverageHumanLabel}: covered and uncovered identities and the covering paths appear workspace-relative`,
+        coverageReportIdentities(coverage),
+        `${coverageHumanLabel}: every profile's covered identities and covering-path nodes, uncovered identities, and ignored identities`,
       );
 
       // `impact --base`: the leaf edit's worked example of SPEC 5.6 — gamma
@@ -877,16 +1007,20 @@ const T1_5_1 = defineProductTest({
         `${impactLabel}: the code location marking the edited leaf is directly ` +
           `impacted, its location, edge, and path workspace-relative identities`,
       );
+      // `impact --base`, human form: every identity the decoded report
+      // carries — the categorized nodes, the attribution identities, and the
+      // impacted code's location, witness edge, and witness path —
+      // token-bounded.
       const impactHumanLabel = "T1.5-1 `impact --base HEAD` (human report)";
-      assertReportMentions(
+      assertHumanIdentities(
         await runFromRootAndNested(
           product,
           workspace,
           ["impact", "--base", "HEAD"],
           impactHumanLabel,
         ),
-        [GAMMA, CODE_UNIT],
-        `${impactHumanLabel}: the changed node and the impacted code location appear by workspace-relative identity`,
+        impactReportIdentities(impact),
+        `${impactHumanLabel}: every requirement entry's nodes and attribution identities, and every impacted-code entry's location, witness edge endpoints, and witness path nodes`,
       );
 
       // `occurrences` (JSON-only, the 12.7 form, SPEC 11.3): every record's
