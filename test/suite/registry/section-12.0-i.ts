@@ -65,9 +65,11 @@
 //   product that dedupes repeated identical values). Each doubled run's argv
 //   minus one repetition is exactly the paired normal step that follows, so
 //   exit 2 is attributable to the repetition alone. The repeated-`--json` arm
-//   asserts the exit code only: whether that ill-formed invocation still
-//   counts as "under --json" for the empty-stdout rule is exactly what is
-//   ill-formed about it, so the arm does not over-assert the stream.
+//   asserts the exit code alone (T12.0-4's own clause: a repeated flag is
+//   exit 2); its stream — JSON output in effect, the plain usage error's
+//   document as the entire stdout (H-5) — is T12.0-14's assertion (its
+//   repeated-`--json` arm, section-12.0-iii.ts) and T12.0-10's syntax-class
+//   row's, which runs the same argv (section-12.0-ii.ts).
 // - T12.0-2 asserts non-empty stderr on the exit-2 arms (the test's own text:
 //   usage/configuration errors *print diagnostics* to standard error) and
 //   leaves stderr unasserted on the exit-1 arms (12.0 lets diagnostic text
@@ -1061,8 +1063,10 @@ const T12_0_4 = defineProductTest({
           `is the entire stdout (SPEC 12.0, 12.7, H-5)`,
       );
 
-      // A repeated boolean flag (`--json --json`): exit code only — see the
-      // module header on why the stream stays unasserted here.
+      // A repeated boolean flag (`--json --json`): the exit code alone here —
+      // its stream (JSON output in effect, the plain usage error's document
+      // as the entire stdout, H-5) is T12.0-14's assertion and T12.0-10's
+      // syntax-class row's (see the module header).
       const jsonRepeated = await runCli(product, workspace, [
         "ids",
         "--json",
