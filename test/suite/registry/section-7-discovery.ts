@@ -57,12 +57,16 @@
 // while a path in no configured group, an excluded derived path above all,
 // is unknown to `--from`: the usage error of 12.0, judged after
 // configuration loading and before the 13.3 gate, exit 2 with the 12.7
-// error document (the CONF-DISC staging constraint for that arm). Its
-// invalid-source arm and that arm's control observe through `check --json`
-// (12.2) alone, each over a workspace staged from scratch that fails
-// `build`'s validations and on which no `build` runs — so no record exists
-// (13.3) and `check` reports exactly the validation findings (CONF-DISC's
-// constraint for those two).
+// error document (the CONF-DISC staging constraint for that arm). Before
+// that arm's `build` every file its code globs match is well-formed
+// TypeScript — nothing occupies the emit destination until `build` emits
+// it — so its workspace passes `build`'s validations with 13.4's exclusion
+// lifted as well, and a product lifting it fails those observations, never
+// that `build`. Its invalid-source arm and that arm's control observe
+// through `check --json` (12.2) alone, each over a workspace staged from
+// scratch that fails `build`'s validations and on which no `build` runs —
+// so no record exists (13.3) and `check` reports exactly the validation
+// findings (CONF-DISC's constraint for those two).
 //
 // Conservative operationalizations (H-3/H-4):
 // - Listing comparisons sort both sides bytewise by file path: these tests
@@ -1171,8 +1175,9 @@ const EXCLUSION_EXPECTED: readonly ListingEntry[] = [
 //                      `.xspec/*.ts` (the dot segment spelled literally):
 //                      excluded
 //   specs/A.md         specs/A.mdx's enabled Markdown emit destination
-//                      (7.3) — user-authored before `build`, emitted by it
-//                      — matched by `specs/*.md`: excluded
+//                      (7.3) — emitted by `build` (13.2), nothing
+//                      occupying it before — matched by `specs/*.md`:
+//                      excluded
 //
 // and no spec-group file: `specs/*.md` does not match `specs/A.mdx`, so
 // 14.14's both-groups rule stays dormant; `specs/*.ts` also matches
@@ -1186,6 +1191,21 @@ const EXCLUSION_EXPECTED: readonly ListingEntry[] = [
 // showing the group live. The arm's configuration and its two staged `.ts`
 // files are staged-source records (module header): T7-6 stages them after
 // its first product invocation.
+//
+// Nothing occupies specs/A.md before the `build`: the CONF-DISC staging
+// constraint asks those refusals "on a workspace passing `build`'s
+// validations", and before the `build` no file a code glob matches is
+// anything but well-formed TypeScript, so the workspace passes `build`'s
+// validations under a product lifting 13.4's exclusion too.
+// VIOL-DISC-DERIVED thus meets the `query edges --from` observations its
+// entry names — each excluded path, now discovered, answering exit 0 where
+// every discovered file parses, or every query, the control included,
+// exit 1 at the 13.3 gate where a derived file does not (14.20), never the
+// asserted exit 2 — instead of a failing `build` (a non-TypeScript
+// occupant of the destination would be discovered as a code source,
+// 14.20), which reaches none of them. The classification of a never-emitted
+// destination by configuration alone (7.3) stays the invalid-source arm's
+// on the code side (specs/a'b.md, below) and arm (a)'s on the spec side.
 const CODE_EXCLUSION_CONFIG = stagedTs(
   "T7-6 xspec.config.ts (code-group exclusion)",
   `import { defineConfig } from "xspec"
@@ -1436,16 +1456,18 @@ const T7_6 = defineProductTest({
     );
 
     // (a') Code-group exclusion, observed through `query edges --from`
-    // (11.1): after `build`, the discovered code source answers exit 0 with
-    // its empty edge enumeration, while each excluded path the code globs
-    // match is unknown — exit 2 with the 12.7 error document, no finding,
-    // nothing modified.
+    // (11.1): nothing occupies specs/A.md until `build` emits it, so the
+    // workspace passes `build`'s validations whether or not a product
+    // excludes derived files (fixture comment above); after `build`, the
+    // discovered code source answers exit 0 with its empty edge
+    // enumeration, while each excluded path the code globs match is
+    // unknown — exit 2 with the 12.7 error document, no finding, nothing
+    // modified.
     await withWorkspace(
       {
         files: {
           "xspec.config.ts": CODE_EXCLUSION_CONFIG,
           "specs/A.mdx": SECTION_A_SOURCE,
-          "specs/A.md": "User-authored file at the emit destination.\n",
           "src/plain.ts": PLAIN_TS,
           ".xspec/staged.ts": STAGED_UNDER_XSPEC_TS,
         },
