@@ -198,7 +198,8 @@ export function writeFailure(
  * path `.xspec`, and — each concerning the lock path `.xspec/lock`, its
  * entries' names being opaque (13.4) — the lock directory's creation, the
  * run's entry's addition, and a leftover's removal: the plain file at the
- * lock path, or one in the lock directory (SPEC 14.24).
+ * lock path, or one in the lock directory or in a leftover directory below
+ * it, never named (SPEC 14.24).
  */
 export type AcquisitionWrite =
   "area" | "lock-directory" | "entry" | "lock-path-leftover" | "leftover";
@@ -250,6 +251,47 @@ export function acquisitionWriteFailure(
         `modifying nothing — ${remedy}, then rerun the command (SPEC 14.24, ` +
         `13.5, 13.4)`,
       write === "area" ? GRAPH_DATA_AREA : LOCK_PATH,
+    ),
+  );
+}
+
+/**
+ * A read of acquisition inside the lock directory (SPEC 13.5), as its read
+ * failure's diagnostic names it: the kind of an occupant there or in a
+ * leftover directory below it, and the listing of a leftover directory
+ * acquisition removes — each concerning the lock path `.xspec/lock`, never
+ * the nested path (SPEC 14.25: the lock path's occupant and everything
+ * under it concern the lock path).
+ */
+export type AcquisitionRead = "occupant-kind" | "leftover-listing";
+
+/**
+ * The SPEC 14.25 read failure for a read inside the lock directory the
+ * environment refused at acquisition (SPEC 13.5): it stops the command at
+ * acquisition, release following. Static (SPEC 12.0): the concerned path,
+ * the filesystem's error code, and the SPEC sections — never a nested path,
+ * an entry's name, or an absolute path (13.4).
+ */
+export function acquisitionReadFailure(
+  read: AcquisitionRead,
+  cause: NodeJS.ErrnoException,
+): EnvironmentRefusal {
+  const code = cause.code ?? "an unknown error";
+  const lock = renderPathText(LOCK_PATH);
+  const what =
+    read === "occupant-kind"
+      ? `to read what occupies a path in the lock directory ${lock}`
+      : `to read the entries of a leftover directory in the lock ` +
+        `directory ${lock}`;
+  return new EnvironmentRefusal(
+    pathFinding(
+      25,
+      `the environment refused ${what} (${code}) as this command acquired ` +
+        `workspace exclusivity; the command stopped at acquisition, ` +
+        `modifying nothing — make what the lock directory holds readable, ` +
+        `or delete ${lock} by hand while no mutating command runs, then ` +
+        `rerun the command (SPEC 14.25, 13.5, 13.4)`,
+      LOCK_PATH,
     ),
   );
 }

@@ -51,21 +51,34 @@
 //    still listed is 13.5's gap, which refuses as a live one does, as 13.5
 //    permits. Anything in the lock directory but a plain file is no entry
 //    and records no identifier, whatever its name: it never refuses.
-// 6. Failing a live entry, the leftovers among the names step 4 returned —
+// 6. Failing a live entry, every leftover among the names step 4 returned —
 //    never a name it did not return, so a run whose entry was added since
-//    is untouched — are removed: here the plain files, each unopened.
-//    Anything else in the lock directory is left in place.
+//    is untouched — is removed, in byte order of name: "everything in the
+//    lock directory but its own entry … anything that is no entry, a
+//    directory with all it holds and a symbolic link itself, never its
+//    target". Each occupant's kind is examined without following a link
+//    (13.4: writes never traverse symbolic links); a directory is listed and
+//    everything it holds removed the same way, depth first, before the
+//    directory itself; anything else — a plain file, a symbolic link, a
+//    FIFO, a socket, a device — is unlinked, never opened. Names are the
+//    bytes listed, never decoded, so a name beginning with `.` or not valid
+//    UTF-8 is removed like any other. A leftover directory is listed only
+//    here, once every name has been judged: a busy refusal lists no
+//    directory but the lock directory.
 //
 // Acquisition's refusals (13.5, 14.24, 14.25): a refused examination of the
 // area's own occupant is the read failure concerning `.xspec`, and the area
 // directory's refused creation the write failure concerning it; every other
 // refused read — the lock path's kind, the lock directory's listing, a
-// listed name's kind — is the read failure concerning `.xspec/lock`, and
-// every other refused write — the lock directory's creation, the entry's
-// addition, a leftover's removal — the write failure concerning
-// `.xspec/lock`. Each is thrown (workspace/environment-refusal.ts) and stops
-// the command at acquisition, release following; cli/main.ts renders it,
-// exit 2. Acquisition reads nothing else: it examines the lock path itself
+// listed name's kind, and, inside a leftover directory, an occupant's kind
+// or a directory's listing — is the read failure concerning `.xspec/lock`,
+// never a nested path, and every other refused write — the lock
+// directory's creation, the entry's addition, a leftover's removal at any
+// depth — the write failure concerning `.xspec/lock`. Each is thrown
+// (workspace/environment-refusal.ts) and stops the command at acquisition,
+// every removal already made kept, release following; cli/main.ts renders
+// it, exit 2. Acquisition reads nothing else: it examines the lock path
+// itself, lists the lock directory and each leftover directory it removes,
 // and never lists `.xspec`.
 //
 // Overlap: adding the entry before listing gives 13.5's "of runs whose
@@ -103,9 +116,13 @@ import * as path from "node:path";
 import * as process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 import { GRAPH_DATA_AREA, LOCK_PATH } from "../core/graph-data.js";
-import type { AcquisitionWrite } from "./environment-refusal.js";
+import type {
+  AcquisitionRead,
+  AcquisitionWrite,
+} from "./environment-refusal.js";
 import {
   acquisitionObstruction,
+  acquisitionReadFailure,
   acquisitionWriteFailure,
   isAbsenceFailure,
   isFilesystemFailure,
@@ -192,6 +209,17 @@ function refusedRead(
   read: "listing" | "kind",
 ): never {
   if (isFilesystemFailure(error)) throw readFailure(concerned, read, error);
+  throw error;
+}
+
+/**
+ * Turn a read inside the lock directory the environment refused at
+ * acquisition — an occupant's kind there or below it, a leftover
+ * directory's listing — into its read failure, concerning the lock path,
+ * never the nested path (SPEC 14.25, 13.5); anything else propagates.
+ */
+function refusedLockRead(error: unknown, read: AcquisitionRead): never {
+  if (isFilesystemFailure(error)) throw acquisitionReadFailure(read, error);
   throw error;
 }
 
@@ -311,6 +339,25 @@ async function addEntry(paths: LockPaths, held: Established): Promise<Step> {
 }
 
 /**
+ * The kind of an occupant in the lock directory or below it, examined
+ * without following a symbolic link (SPEC 13.4): `absent` when it is gone
+ * since its directory was listed. A kind read the environment refuses is
+ * the read failure concerning the lock path (SPEC 14.25, 13.5).
+ */
+async function memberKind(
+  absolute: Buffer,
+): Promise<"absent" | "directory" | "file" | "other"> {
+  try {
+    const stats = await fsp.lstat(absolute);
+    if (stats.isDirectory()) return "directory";
+    return stats.isFile() ? "file" : "other";
+  } catch (error) {
+    if (isAbsenceFailure(error)) return "absent";
+    refusedLockRead(error, "occupant-kind");
+  }
+}
+
+/**
  * The kind of a name the lock directory's listing returned: from the
  * listing itself, or — where the filesystem reports no type — examined
  * without following a link, `absent` when it is gone since (SPEC 13.5:
@@ -332,14 +379,58 @@ async function listedKind(
   ) {
     return "other";
   }
-  const kind = await occupantKind(childPath(lock, listed.name), LOCK_PATH);
+  const kind = await memberKind(childPath(lock, listed.name));
   if (kind === "absent") return "absent";
   return kind === "file" ? "file" : "other";
 }
 
-/** A lock-directory member's absolute path, as bytes (non-UTF-8 names). */
-function childPath(lock: string, name: Buffer): Buffer {
-  return Buffer.concat([Buffer.from(lock), SLASH, name]);
+/**
+ * The absolute path of a name a directory under the lock path holds, as
+ * bytes, so that a name that is not valid UTF-8 is reached exactly as
+ * listed, never decoded.
+ */
+function childPath(directory: string | Buffer, name: Buffer): Buffer {
+  const parent =
+    typeof directory === "string" ? Buffer.from(directory) : directory;
+  return Buffer.concat([parent, SLASH, name]);
+}
+
+/**
+ * Remove one leftover the lock directory holds (SPEC 13.5: "everything in
+ * the lock directory but its own entry … anything that is no entry, a
+ * directory with all it holds and a symbolic link itself, never its
+ * target"). Its kind is examined afresh without following a link (13.4:
+ * writes never traverse symbolic links): a directory is listed, everything
+ * it holds removed the same way — depth first, in byte order of name, every
+ * name as the bytes listed — and then the directory itself; anything else —
+ * a plain file, a symbolic link, a FIFO, a socket, a device — is unlinked,
+ * never opened ("Acquisition reads no file's content"). Something gone
+ * since it was listed is gone already. A refused kind read or listing is
+ * the read failure, and a refused removal the write failure, concerning the
+ * lock path, never the nested path (14.25, 14.24): the command stops there,
+ * every removal already made kept, release following.
+ */
+async function removeLeftover(absolute: Buffer): Promise<void> {
+  const kind = await memberKind(absolute);
+  if (kind === "absent") return;
+  if (kind === "directory") {
+    let names: Buffer[];
+    try {
+      names = await fsp.readdir(absolute, { encoding: "buffer" });
+    } catch (error) {
+      if (isAbsenceFailure(error)) return;
+      refusedLockRead(error, "leftover-listing");
+    }
+    names.sort(Buffer.compare);
+    for (const name of names) await removeLeftover(childPath(absolute, name));
+  }
+  try {
+    if (kind === "directory") await fsp.rmdir(absolute);
+    else await fsp.unlink(absolute);
+  } catch (error) {
+    // Gone already: removed since it was examined.
+    if (!isAbsenceFailure(error)) refusedWrite(error, "leftover");
+  }
 }
 
 /**
@@ -372,8 +463,9 @@ function listedInProcessList(identifier: number): boolean {
  * Steps 4–6 (SPEC 13.5): list the lock directory once, judge every name
  * but this run's own — a plain file recording another identifier still
  * listed refuses acquisition, the busy refusal of 14.26, before anything
- * is removed — then remove the plain-file leftovers among the names that
- * listing returned (module header).
+ * is removed or any other directory listed — then remove every leftover
+ * among the names that listing returned, a directory with all it holds
+ * (module header).
  */
 async function settleLockDirectory(
   paths: LockPaths,
@@ -399,26 +491,28 @@ async function settleLockDirectory(
   for (const listed of listing) {
     if (Buffer.compare(listed.name, own) === 0) continue;
     const kind = await listedKind(paths.lock, listed);
-    if (kind !== "file") continue;
-    const identifier = recordedIdentifier(listed.name);
-    if (
-      identifier !== null &&
-      identifier !== process.pid &&
-      listedInProcessList(identifier)
-    ) {
-      // SPEC 13.5, 14.26: another run's entry, alive on this machine (or
-      // in 13.5's gap) — refused promptly, no leftover removed.
-      throw workspaceBusy();
+    if (kind === "absent") continue;
+    // SPEC 13.5: anything in the lock directory but a plain file is no
+    // entry and records no identifier, whatever its name — a leftover.
+    if (kind === "file") {
+      const identifier = recordedIdentifier(listed.name);
+      if (
+        identifier !== null &&
+        identifier !== process.pid &&
+        listedInProcessList(identifier)
+      ) {
+        // SPEC 13.5, 14.26: another run's entry, alive on this machine (or
+        // in 13.5's gap) — refused promptly, no leftover removed.
+        throw workspaceBusy();
+      }
     }
     leftovers.push(listed.name);
   }
+  // In byte order of name, so that which refusal a tree meets first is the
+  // workspace's alone, never the filesystem's listing order (SPEC 12.0).
+  leftovers.sort(Buffer.compare);
   for (const name of leftovers) {
-    try {
-      await fsp.unlink(childPath(paths.lock, name));
-    } catch (error) {
-      // Gone already: another run removed it meanwhile.
-      if (!isAbsenceFailure(error)) refusedWrite(error, "leftover");
-    }
+    await removeLeftover(childPath(paths.lock, name));
   }
   return "done";
 }
