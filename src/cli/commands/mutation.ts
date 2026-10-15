@@ -38,11 +38,12 @@ import { testHoldSpecOf, usageError } from "./common.js";
 /**
  * Run a mutating command's operation (module header): discover the
  * sources, report a discovery-level configuration error (exit 2), then —
- * when `exclusive` — acquire workspace exclusivity, failing promptly with
- * the usage error while another mutating command holds it (SPEC 13.5,
- * 12.0), and run `operation` over the classification. A `--preview`
- * passes `exclusive` false: it acquires nothing and takes no seam
- * (SPEC 6.6), in the same order otherwise.
+ * when `exclusive` — acquire workspace exclusivity, failing promptly while
+ * another mutating command holds it with the busy refusal of 14.26, thrown
+ * at acquisition and rendered by cli/main.ts (exit 2, `workspace-busy`,
+ * `.xspec/lock`; SPEC 13.5, 12.0), and run `operation` over the
+ * classification. A `--preview` passes `exclusive` false: it acquires
+ * nothing and takes no seam (SPEC 6.6), in the same order otherwise.
  */
 export async function runMutatingCommand(
   invocation: Invocation,

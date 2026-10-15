@@ -19,7 +19,7 @@
 // then dispatch, exactly as before.
 
 import type { ExitCode } from "../core/findings.js";
-import { EnvironmentRefusal } from "../workspace/environment-refusal.js";
+import { CodedRefusal } from "../workspace/environment-refusal.js";
 import { locateWorkspace } from "../workspace/locate.js";
 import type { Invocation } from "./args.js";
 import { COMMAND_PATHS, jsonOutputInEffect, parseArgv } from "./args.js";
@@ -27,8 +27,8 @@ import { tryFastAt } from "./commands/at-fast.js";
 import { tryFastQuery } from "./commands/query-fast.js";
 import type { CliWriter, CommandContext } from "./io.js";
 import {
+  emitCodedRefusal,
   emitConfigurationErrors,
-  emitEnvironmentRefusal,
   emitErrorDocument,
   usageErrorFinding,
 } from "./report.js";
@@ -268,16 +268,20 @@ export async function main(
       stderr,
     );
   } catch (error) {
-    // SPEC 14.24/12.0: a write the environment refuses stops the command at
-    // that write — thrown there by the workspace write layer, so no later
-    // write was attempted and every earlier one stands complete (13.5) —
-    // and is a usage error, not a finding: exit 2, the diagnostic on
-    // standard error and, with JSON output in effect, the 12.7 error
-    // document carrying `write-failure` and the concerned path as the
-    // entire standard output. Every writing command answers only after its
-    // writes, so nothing of an answer precedes the document.
-    if (error instanceof EnvironmentRefusal) {
-      emitEnvironmentRefusal(
+    // SPEC 14.24–14.26/12.0: a write or a read the environment refuses
+    // stops the command at that write or read — thrown there by the
+    // workspace layer, so nothing later was attempted and every earlier
+    // write stands complete (13.5) — and a mutating command refused at
+    // acquisition, its workspace busy, stops there, modifying nothing
+    // (13.5). Each is a usage error, not a finding: exit 2, the diagnostic
+    // on standard error and, with JSON output in effect, the 12.7 error
+    // document carrying the stable code (`write-failure`, `read-failure`,
+    // `workspace-busy`) and the concerned path as the entire standard
+    // output. Every writing command answers only after its writes, and a
+    // mutating command acquires before it answers anything, so nothing of
+    // an answer precedes the document.
+    if (error instanceof CodedRefusal) {
+      emitCodedRefusal(
         { stdout, stderr },
         jsonOutputInEffect(result.invocation),
         error.finding,

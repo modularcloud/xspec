@@ -23,7 +23,11 @@
 import type { ResolvedOccurrence } from "../core/availability.js";
 import { canonicalJson } from "../core/canonical-json.js";
 import type { JsonObject, JsonValue } from "../core/canonical-json.js";
-import type { Finding, FindingLocation } from "../core/findings.js";
+import type {
+  Finding,
+  FindingCode,
+  FindingLocation,
+} from "../core/findings.js";
 import { orderFindings } from "../core/findings.js";
 import type { IdentityMapping } from "../core/journal.js";
 import { pathTextJson, renderPathText } from "../core/path-text.js";
@@ -355,31 +359,52 @@ export function renderConfigurationError(finding: Finding): string {
 }
 
 /**
- * SPEC 14.24/12.0: render the environment's refusal of a write as a
- * diagnostic line — a usage error, standard-error content — naming the
- * concerned path, as a configuration error's line does.
+ * The diagnostic label of a coded refusal's condition (SPEC 14.24–14.26):
+ * each condition's own, so the stderr line names which one stopped the
+ * command.
  */
-export function renderEnvironmentRefusal(finding: Finding): string {
-  const label = finding.code === "read-failure" ? "read" : "write";
-  const location =
-    finding.path === null ? "" : `${renderPathText(finding.path)}: `;
-  return `xspec: ${label} failure: ${location}${finding.message}\n`;
+function codedRefusalLabel(code: FindingCode | null): string {
+  switch (code) {
+    case "write-failure":
+      return "write failure"; // 14.24
+    case "read-failure":
+      return "read failure"; // 14.25
+    case "workspace-busy":
+      return "workspace busy"; // 14.26
+    default:
+      return "usage error"; // unreachable: no other code is thrown (12.0)
+  }
 }
 
 /**
- * Report a write the environment refused (SPEC 14.24) the way every command
- * must: a usage error (12.0), not a finding — the diagnostic on standard
- * error and, when JSON output is in effect, the exit-2 error document of
- * 12.0/12.7 as the entire standard output, its one finding carrying the
- * condition's stable code and concerned path; without JSON output standard
- * output stays empty. The caller exits 2.
+ * SPEC 14.24–14.26/12.0: render a coded refusal — the environment's
+ * refusal of a write or a read, or a mutating command refused at
+ * acquisition, its workspace busy — as a diagnostic line, a usage error's
+ * standard-error content, under its condition's own label and naming the
+ * concerned path, as a configuration error's line does.
  */
-export function emitEnvironmentRefusal(
+export function renderCodedRefusal(finding: Finding): string {
+  const label = codedRefusalLabel(finding.code);
+  const location =
+    finding.path === null ? "" : `${renderPathText(finding.path)}: `;
+  return `xspec: ${label}: ${location}${finding.message}\n`;
+}
+
+/**
+ * Report a coded refusal — a write or a read the environment refused (SPEC
+ * 14.24, 14.25), or the busy refusal at acquisition (14.26) — the way every
+ * command must: a usage error (12.0), not a finding — the diagnostic on
+ * standard error and, when JSON output is in effect, the exit-2 error
+ * document of 12.0/12.7 as the entire standard output, its one finding
+ * carrying the condition's stable code and concerned path; without JSON
+ * output standard output stays empty. The caller exits 2.
+ */
+export function emitCodedRefusal(
   io: CommandIo,
   jsonInEffect: boolean,
   finding: Finding,
 ): void {
-  io.stderr.write(renderEnvironmentRefusal(finding));
+  io.stderr.write(renderCodedRefusal(finding));
   if (jsonInEffect) {
     emitErrorDocument(io.stdout, finding);
   }

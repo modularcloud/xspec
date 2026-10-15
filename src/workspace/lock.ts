@@ -4,8 +4,11 @@
 // exclusion. SPEC 13.5: commands that modify sources or durable files —
 // `rename`, `move`, and the mutating `review` subcommands (`create`,
 // `resolve`, `split`) — are mutually exclusive per workspace: while one
-// runs, another MUST fail promptly with a usage error (12.0) without
-// modifying anything. Exclusivity ends when the holding command's process
+// runs, another MUST fail promptly without modifying anything, with the
+// usage error (12.0) of 14.26 — the busy refusal, thrown here as
+// `WorkspaceBusyRefusal` (workspace/environment-refusal.ts) and rendered by
+// cli/main.ts: stable code `workspace-busy`, concerned path the lock path
+// `.xspec/lock`. Exclusivity ends when the holding command's process
 // terminates, normally or abnormally; a terminated holder MUST NOT block
 // later commands. All other commands never touch this module.
 //
@@ -36,8 +39,9 @@
 //   attempts exactly one wins the rename (the others see ENOENT and
 //   re-evaluate); the winner re-verifies the displaced content before
 //   proceeding and restores a lock it displaced wrongly. Acquisition is
-//   bounded: it either acquires, or fails promptly with the usage error —
-//   it never blocks (SPEC 13.5, 12.0).
+//   bounded: it either acquires, or fails promptly with the busy refusal
+//   (or, its location unusable, the usage error below) — it never blocks
+//   (SPEC 13.5, 12.0).
 // - An unusable lock location — the temporary directory missing, not a
 //   directory, unwritable, or full, or the lock's path occupied by
 //   something other than a plain file — fails the command with a usage
@@ -70,12 +74,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
-
-/** SPEC 13.5/12.0: the prompt refusal while another mutating command runs. */
-const HELD_MESSAGE =
-  "another mutating command is running in this workspace — `rename`, " +
-  "`move`, and the mutating `review` subcommands are mutually exclusive " +
-  "per workspace; retry once it completes (SPEC 13.5)";
+import { workspaceBusy } from "./environment-refusal.js";
 
 /**
  * SPEC 13.5/12.0: the usage error when the lock cannot be kept where it
@@ -253,13 +252,15 @@ async function removeQuietly(filePath: string): Promise<void> {
 
 /**
  * Acquire workspace exclusivity for a mutating command (SPEC 13.5), or
- * fail promptly — never block — with the usage-error message (12.0) when
- * another mutating command holds the workspace. Callers acquire before
- * modifying any source or durable file and release on completion; a killed
- * holder releases by dying (the next acquirer detects the dead process and
- * takes the lock over). A lock location the environment makes unusable is
- * the same usage error class with its own message (module header): every
- * outcome stays within 12.0's exit partition.
+ * fail promptly — never block — when another mutating command holds the
+ * workspace, throwing the busy refusal of 14.26 (`workspaceBusy`: a usage
+ * error, 12.0, with the stable code `workspace-busy` and the lock path as
+ * its concerned path). Callers acquire before modifying any source or
+ * durable file and release on completion; a killed holder releases by
+ * dying (the next acquirer detects the dead process and takes the lock
+ * over). A lock location the environment makes unusable is a code-less
+ * usage error with its own message (module header): every outcome stays
+ * within 12.0's exit partition.
  */
 export async function acquireMutationLock(
   root: string,
@@ -272,10 +273,11 @@ export async function acquireMutationLock(
   }
   const entry = `${String(process.pid)}\n`;
   // The refusal to report should every bounded attempt fail: the last
-  // obstacle met — a holder (pathological contention) or an unusable
-  // location. An unusable location is retried within the bound, since a
-  // refusal can be momentary (a name whose removal is still pending).
-  let refusal = HELD_MESSAGE;
+  // obstacle met — a holder (pathological contention: the busy refusal) or
+  // an unusable location. An unusable location is retried within the
+  // bound, since a refusal can be momentary (a name whose removal is still
+  // pending).
+  let lastObstacle: "busy" | "unusable" = "busy";
   for (let attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt += 1) {
     let handle: fsp.FileHandle;
     try {
@@ -283,7 +285,7 @@ export async function acquireMutationLock(
       handle = await fsp.open(lockPath, "wx");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-        refusal = UNUSABLE_MESSAGE; // the directory refuses the creation
+        lastObstacle = "unusable"; // the directory refuses the creation
         await delay(UNREADABLE_GRACE_MS);
         continue;
       }
@@ -297,23 +299,24 @@ export async function acquireMutationLock(
       }
       if (holder === "absent") continue; // released meanwhile: retry
       if (holder === "unusable") {
-        refusal = UNUSABLE_MESSAGE; // no lock there, and nothing to displace
+        lastObstacle = "unusable"; // no lock there, nothing to displace
         await delay(UNREADABLE_GRACE_MS);
         continue;
       }
       if (heldByLiveRival(holder)) {
-        // SPEC 13.5: fail promptly with a usage error, modifying nothing.
-        return { ok: false, usageMessage: HELD_MESSAGE };
+        // SPEC 13.5, 14.26: fail promptly with the busy refusal, modifying
+        // nothing.
+        throw workspaceBusy();
       }
       // A terminated holder MUST NOT block later commands (SPEC 13.5).
-      // A freed path is progress, not an obstacle: the refusal stays the
-      // last obstacle met (an entry-less claim of this command's own, say).
+      // A freed path is progress, not an obstacle: the last obstacle stays
+      // the one met before (an entry-less claim of this command's own, say).
       const stolen = await stealStaleLock(lockPath);
       if (stolen === "unusable") {
-        refusal = UNUSABLE_MESSAGE;
+        lastObstacle = "unusable";
         await delay(UNREADABLE_GRACE_MS);
       } else if (stolen === "retry") {
-        refusal = HELD_MESSAGE; // a rival moved first: contention
+        lastObstacle = "busy"; // a rival moved first: contention
       }
       continue;
     }
@@ -322,7 +325,7 @@ export async function acquireMutationLock(
       // file is left as it is — removing it by path could remove a rival's
       // fresh lock — and is judged a crash remnant after the grace, then
       // taken over (by the next attempt here, or by a later command).
-      refusal = UNUSABLE_MESSAGE;
+      lastObstacle = "unusable";
       await delay(UNREADABLE_GRACE_MS);
       continue;
     }
@@ -342,8 +345,10 @@ export async function acquireMutationLock(
       },
     };
   }
-  // Still prompt: the bound reached, never a block (SPEC 13.5).
-  return { ok: false, usageMessage: refusal };
+  // Still prompt: the bound reached, never a block (SPEC 13.5) — the busy
+  // refusal of 14.26 after contention, else the unusable location's.
+  if (lastObstacle === "busy") throw workspaceBusy();
+  return { ok: false, usageMessage: UNUSABLE_MESSAGE };
 }
 
 /**
@@ -441,13 +446,14 @@ export type ExclusiveRunResult<T> =
 
 /**
  * Run a mutating command's operation under workspace exclusivity (SPEC
- * 13.5): acquire the workspace's mutation lock — failing promptly with the
- * usage error when another mutating command runs — then, when `--test-hold`
- * was given, create the hold file and proceed only once it has been
- * deleted, then run `body`, releasing the lock on every completion path.
- * A failure to create the hold file releases the lock and returns the
- * usage error with nothing modified. The hold file itself is never deleted
- * here: its deletion is the external release signal.
+ * 13.5): acquire the workspace's mutation lock — failing promptly when
+ * another mutating command runs, with the busy refusal of 14.26 thrown
+ * (`acquireMutationLock`) — then, when `--test-hold` was given, create the
+ * hold file and proceed only once it has been deleted, then run `body`,
+ * releasing the lock on every completion path. A failure to create the
+ * hold file releases the lock and returns the code-less usage error with
+ * nothing modified. The hold file itself is never deleted here: its
+ * deletion is the external release signal.
  */
 export async function withMutationExclusivity<T>(
   root: string,

@@ -22,7 +22,7 @@ import { comparePathTexts } from "./path-text.js";
  */
 export type ExitCode = 0 | 1 | 2;
 
-/** SPEC 14: the defined error conditions, numbered 1–25. */
+/** SPEC 14: the defined error conditions, numbered 1–26. */
 export type ConditionNumber =
   | 1
   | 2
@@ -48,7 +48,8 @@ export type ConditionNumber =
   | 22
   | 23
   | 24
-  | 25;
+  | 25
+  | 26;
 
 /**
  * SPEC 14: the numbered conditions' stable code tokens, listed in condition
@@ -82,6 +83,7 @@ export const CONDITION_CODES = [
   "unreadable-record", // 14.23
   "write-failure", // 14.24 — a usage error (exit 2), never a finding
   "read-failure", // 14.25 — a usage error (exit 2), never a finding
+  "workspace-busy", // 14.26 — a usage error (exit 2), never a finding
 ] as const;
 export type ConditionCode = (typeof CONDITION_CODES)[number];
 
@@ -140,8 +142,8 @@ export interface FindingLocation {
  *   bytes, then range start, then range end; empty for conditions without
  *   in-source locations (SPEC 14, 12.7).
  * - `path`: the concerned file or path for non-located conditions
- *   (configuration, path-level, journal, session, and record conditions);
- *   null for located ones (SPEC 14). A `PathText`: a non-UTF-8 concerned
+ *   (configuration, path-level, journal, session, record, write, read, and
+ *   busy-workspace conditions); null for located ones (SPEC 14). A `PathText`: a non-UTF-8 concerned
  *   path (SPEC 14.19) carries its exact bytes, presented in the marked
  *   byte form (SPEC 12.0, 12.7).
  * - `identities`: the identities or other context strings the condition
@@ -179,9 +181,10 @@ export function locatedFinding(
 
 /**
  * A finding without in-source locations, concerning a file or path (SPEC
- * 14: configuration, path-level, journal, session, and record conditions
- * carry the file or path they concern) — or, for conditions carrying
- * context identities alone (14.12), no path either.
+ * 14: configuration, path-level, journal, session, record, write, read,
+ * and busy-workspace conditions carry the file or path they concern) — or,
+ * for conditions carrying context identities alone (14.12), no path
+ * either.
  */
 export function pathFinding(
   condition: ConditionNumber,
@@ -215,14 +218,17 @@ export function codeOrdinal(code: FindingCode | null): number {
 /**
  * The exit class of a command reporting a finding with this code (SPEC
  * 12.0): 2 for condition 14, a usage error preceding all source analysis
- * (SPEC 14.14), and for conditions 24 and 25, the environment's refusal of
- * a write or a read — usage errors, never findings (SPEC 14.24, 14.25); 1
- * for every other finding, refusals and code-less findings included.
+ * (SPEC 14.14); for conditions 24 and 25, the environment's refusal of a
+ * write or a read (SPEC 14.24, 14.25); and for condition 26, a mutating
+ * command refused at acquisition, its workspace busy (SPEC 14.26, 13.5) —
+ * usage errors, never findings; 1 for every other finding, refusals and
+ * code-less findings included.
  */
 export function codeExitClass(code: FindingCode | null): 1 | 2 {
   return code === "configuration-error" ||
     code === "write-failure" ||
-    code === "read-failure"
+    code === "read-failure" ||
+    code === "workspace-busy"
     ? 2
     : 1;
 }

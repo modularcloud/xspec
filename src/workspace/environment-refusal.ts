@@ -1,6 +1,7 @@
-// Environment refusals — a write (SPEC 14.24) or a read (SPEC 14.25) the
-// environment refuses, carried from the operation that meets it to the
-// CLI's exit-2 report.
+// Coded refusals — a write (SPEC 14.24) or a read (SPEC 14.25) the
+// environment refuses, and a mutating command refused at acquisition, its
+// workspace busy (SPEC 14.26) — carried from the operation that meets one
+// to the CLI's exit-2 report.
 //
 // SPEC 14.24: a write xspec makes — a file's creation, replacement, append,
 // relocation, or removal (13.4, 12.1) — that the environment refuses
@@ -25,7 +26,13 @@
 // 14.14, a derived file's 14.10 to `check`, graph data's 14.23 state) are
 // their readers' to report, never raised through here.
 //
-// Either refusal travels as the typed error below, thrown at the operation
+// SPEC 14.26: a mutating command refused at acquisition by an entry in the
+// lock directory other than its own — another live run's, or a leftover in
+// 13.5's gap — is reported by the refused command as a usage error (12.0),
+// not a finding, concerning the lock path `.xspec/lock` (13.5): it fails
+// there promptly, modifying nothing.
+//
+// Each refusal travels as a typed error below, thrown at the operation
 // itself so nothing after it runs, and carrying the condition as data — the
 // 12.7 finding form with its stable code and concerned path (IMPLEMENTATION
 // cross-cutting rules) — which the CLI renders once, as the stderr
@@ -35,26 +42,84 @@
 // Messages stay byte-deterministic (SPEC 12.0): the concerned path, the
 // filesystem's error code (`EACCES`, `EROFS`, `ENOSPC`, `EIO`, …), and
 // static text — never the filesystem's own message, which carries absolute
-// and temporary paths.
+// and temporary paths, and never a lock entry's name or a process
+// identifier, coordination state outside 12.0's determinism (13.4).
 
 import type { Finding } from "../core/findings.js";
 import { pathFinding } from "../core/findings.js";
+import { LOCK_PATH } from "../core/graph-data.js";
 import type { PathText } from "../core/path-text.js";
 import { renderPathText } from "../core/path-text.js";
+
+/**
+ * A usage error carrying its condition's stable code and concerned path,
+ * thrown at the operation that meets it (SPEC 12.0, 12.7: the exit-2 error
+ * document holds, for a write failure, a read failure, or a busy workspace,
+ * "its stable code and concerned path"): an environment refusal (14.24,
+ * 14.25) or the busy refusal (14.26). Its one finding — stable code,
+ * message, and concerned path, no locations — is what the CLI renders
+ * (cli/main.ts). Configuration errors (14.14), the remaining coded usage
+ * errors, are reported where the configuration is loaded and the sources
+ * discovered, never thrown.
+ */
+export abstract class CodedRefusal extends Error {
+  readonly finding: Finding;
+
+  protected constructor(finding: Finding) {
+    super(finding.message);
+    this.finding = finding;
+  }
+}
 
 /**
  * A write (SPEC 14.24) or a read (SPEC 14.25) the environment refused, as
  * the one finding of the exit-2 error document (SPEC 12.7): stable code,
  * message, and concerned path, no locations.
  */
-export class EnvironmentRefusal extends Error {
-  readonly finding: Finding;
-
+export class EnvironmentRefusal extends CodedRefusal {
   constructor(finding: Finding) {
-    super(finding.message);
+    super(finding);
     this.name = "EnvironmentRefusal";
-    this.finding = finding;
   }
+}
+
+/**
+ * The busy refusal's diagnostic (SPEC 14.26). Static (SPEC 12.0): no
+ * process identifier, entry name, or absolute path — a lock entry's name is
+ * coordination state outside 12.0's determinism (13.4). Actionable (SPEC
+ * 14): retry once the holder completes; with no mutating command running,
+ * an entry in 13.5's gap — its recorded identifier still listed — is what
+ * blocks, and the lock path may be deleted by hand, 13.4's remedy for a
+ * leftover that blocks.
+ */
+const WORKSPACE_BUSY_MESSAGE =
+  "another mutating command (`rename`, `move`, or a mutating `review` " +
+  "subcommand) holds this workspace's exclusivity, so this command was " +
+  "refused at acquisition and modified nothing; retry once that command " +
+  "completes. If no mutating command is running, a leftover entry whose " +
+  "recorded process identifier is still listed blocks acquisition: delete " +
+  `${LOCK_PATH} by hand, then retry (SPEC 14.26, 13.5, 13.4)`;
+
+/**
+ * SPEC 14.26: a mutating command refused at acquisition by an entry in the
+ * lock directory other than its own, as the one finding of the exit-2
+ * error document (SPEC 12.7): the stable code `workspace-busy`, the static
+ * message above, and the lock path `.xspec/lock` as the concerned path, no
+ * entry named, no locations.
+ */
+export class WorkspaceBusyRefusal extends CodedRefusal {
+  constructor() {
+    super(pathFinding(26, WORKSPACE_BUSY_MESSAGE, LOCK_PATH));
+    this.name = "WorkspaceBusyRefusal";
+  }
+}
+
+/**
+ * The SPEC 14.26 busy refusal, thrown at acquisition so the refused command
+ * stops there, modifying nothing (SPEC 13.5).
+ */
+export function workspaceBusy(): WorkspaceBusyRefusal {
+  return new WorkspaceBusyRefusal();
 }
 
 /**
