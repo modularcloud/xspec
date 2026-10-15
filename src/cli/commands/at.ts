@@ -28,8 +28,9 @@
 // - An offset greater than the file's byte length is a usage error; equal
 //   (the EOF caret) resolves to the root (SPEC 11.5). The byte length is a
 //   property of the file's bytes, not of its parse, so the bound is judged
-//   on unparseable files too — read from the parse where one exists, from
-//   the filesystem otherwise.
+//   on unparseable files too — on the bytes the analysis read, never on a
+//   second read, so the answer never mixes two states of a file found
+//   absent or changed since (SPEC 14.25).
 //
 // Resolution is by range containment and total over the file (SPEC 11.5):
 // every within-file offset resolves through the same positional tree the
@@ -53,10 +54,7 @@ import type { SpecFileAnalysis } from "../../core/graph.js";
 import type { SpecSection } from "../../core/mdx.js";
 import { definedIdentitySections } from "../../core/mdx.js";
 import { pathTextKey } from "../../core/path-text.js";
-import {
-  finishAvailabilityRefresh,
-  readSourceByteLength,
-} from "../../workspace/availability.js";
+import { finishAvailabilityRefresh } from "../../workspace/availability.js";
 import type { Invocation } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { analyzeAnalysisForAvailability } from "../prepare.js";
@@ -145,13 +143,14 @@ export async function atCommand(
   // --- the offset bound (SPEC 11.5): greater than the file's byte length
   // is a usage error; equal resolves to the root. The length is the parsed
   // root's construct end (the entire file, SPEC 1.7) or, for a file the
-  // analysis holds no parse for, the file's bytes read directly — with
-  // unreadable content there is no byte length to judge against, and the
-  // resolution below is explicitly unavailable regardless.
+  // analysis holds no parse for, the length of the bytes the analysis read
+  // — with content the environment refused there is no byte length to
+  // judge against, and the resolution below is explicitly unavailable
+  // regardless.
   const byteLength =
     requested !== undefined
       ? requested.spec.document.root.range.end
-      : await readSourceByteLength(context.workspace, file);
+      : (analysis.sourceByteLengths.get(key) ?? null);
   if (byteLength !== null && offset > byteLength) {
     return usageError(
       invocation,

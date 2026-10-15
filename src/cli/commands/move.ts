@@ -96,12 +96,14 @@ import type {
   DiscoveredSource,
   SourceClassification,
 } from "../../core/discovery.js";
+import { editedCandidates } from "../../core/discovery.js";
 import { orderSourceWrites } from "../../core/edits.js";
 import type { ExitCode } from "../../core/findings.js";
 import type { SpecFileAnalysis } from "../../core/graph.js";
 import { appendedJournalBytes } from "../../core/journal.js";
 import type { MoveFilePlan, MoveSectionPlan } from "../../core/move.js";
 import { planMoveFile, planMoveSection } from "../../core/move.js";
+import { pathTextOf } from "../../core/path-text.js";
 import type {
   DestinationPathAssessment,
   DestinationProbe,
@@ -125,7 +127,7 @@ import type { WorkspaceAnalysis } from "../../workspace/pipeline.js";
 import {
   analyzeWorkspace,
   analyzeWorkspaceContent,
-  SOURCE_VANISHED,
+  unheldSource,
 } from "../../workspace/pipeline.js";
 import {
   nonDirectoryComponents,
@@ -137,7 +139,10 @@ import { flagPresent, isValidUtf8ArgumentValue } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { emitAppliedMappingReport } from "../report.js";
 import { usageError } from "./common.js";
-import { runMutatingCommand } from "./mutation.js";
+import {
+  reportAnalysisConfigurationErrors,
+  runMutatingCommand,
+} from "./mutation.js";
 import { emitSuccessfulPreview } from "./preview.js";
 import {
   emitFindingsRefusal,
@@ -260,6 +265,18 @@ async function runMove(
   const destination = parseMoveArgument(destinationArg);
 
   const analysis = await analyzeWorkspace(workspace, discovered);
+  // SPEC 14.25, 14.14: a source found absent at its content read reads as
+  // undiscovered, and a configuration error the classification made
+  // without it meets is reported as the discovery's own (./mutation.ts).
+  if (
+    reportAnalysisConfigurationErrors(
+      invocation,
+      context,
+      analysis.configurationErrors,
+    )
+  ) {
+    return 2;
+  }
 
   // SPEC 6.5 → 12.0: the argument existence checks precede source
   // validation. The origin file must name a discovered spec source
@@ -538,6 +555,11 @@ async function reanalyzeMoved(
     // A valid workspace discovers none (SPEC 14.19 gates move, 6.5).
     invalidSources: analysis.classification.invalidSources,
     findings: [],
+    candidates: editedCandidates(
+      analysis.classification.candidates,
+      [originPath],
+      [destination],
+    ),
   };
   // SPEC 6.4, 5.4: the journal as validated — the bytes this analysis
   // loaded (null for an absent journal, SPEC 6.1) — plus the new entry on
@@ -551,10 +573,10 @@ async function reanalyzeMoved(
   );
   return analyzeWorkspaceContent(workspace.configuration, {
     classification,
-    readSource: (rel) => Promise.resolve(byPath.get(rel) ?? SOURCE_VANISHED),
+    readSource: (rel) => Promise.resolve(byPath.get(rel) ?? unheldSource(rel)),
     // A valid workspace discovers no invalid-path sources (SPEC 14.19
     // gates move, 6.5), so this reanalysis is never asked for one.
-    readInvalidSource: () => Promise.resolve(SOURCE_VANISHED),
+    readInvalidSource: (bytes) => unheldSource(pathTextOf(bytes)),
     loadJournal: () => Promise.resolve(journalFromBytes(journalBytes)),
   });
 }
@@ -747,6 +769,11 @@ async function reanalyzeSectionMoved(
       // A valid workspace discovers none (SPEC 14.19 gates move, 6.5).
       invalidSources: analysis.classification.invalidSources,
       findings: analysis.classification.findings,
+      candidates: editedCandidates(
+        analysis.classification.candidates,
+        [],
+        [targetPath],
+      ),
     };
   }
   // SPEC 6.4, 5.4: the journal as validated — the bytes this analysis
@@ -761,10 +788,10 @@ async function reanalyzeSectionMoved(
   );
   return analyzeWorkspaceContent(workspace.configuration, {
     classification,
-    readSource: (rel) => Promise.resolve(byPath.get(rel) ?? SOURCE_VANISHED),
+    readSource: (rel) => Promise.resolve(byPath.get(rel) ?? unheldSource(rel)),
     // A valid workspace discovers no invalid-path sources (SPEC 14.19
     // gates move, 6.5), so this reanalysis is never asked for one.
-    readInvalidSource: () => Promise.resolve(SOURCE_VANISHED),
+    readInvalidSource: (bytes) => unheldSource(pathTextOf(bytes)),
     loadJournal: () => Promise.resolve(journalFromBytes(journalBytes)),
   });
 }

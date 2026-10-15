@@ -46,7 +46,7 @@
 // answer the real operation would give once holding exclusivity.
 
 import type { SourceClassification } from "../../core/discovery.js";
-import type { ExitCode } from "../../core/findings.js";
+import type { ExitCode, Finding } from "../../core/findings.js";
 import { withMutationExclusivity } from "../../workspace/lock.js";
 import {
   discoverWorkspace,
@@ -126,7 +126,29 @@ function reportConfigurationErrors(
   context: CommandContext,
   classification: SourceClassification,
 ): boolean {
-  const configurationErrors = discoveryConfigurationErrors(classification);
+  return reportAnalysisConfigurationErrors(
+    invocation,
+    context,
+    discoveryConfigurationErrors(classification),
+  );
+}
+
+/**
+ * Report the discovery-level configuration errors an operation's analysis
+ * met (`WorkspaceAnalysis.configurationErrors`) exactly as the discovery's
+ * own (`reportConfigurationErrors`): sources found absent at their content
+ * reads read as undiscovered (SPEC 14.25), and the classification made
+ * without them can meet an error the discovery did not — a vanished spec
+ * source's emit destination (7.3) matched by both a spec and a code group
+ * (7.2 → 14.14) — met, like the second discovery's, past acquisition and
+ * before every other check (SPEC 13.5, 12.0). True when there was one to
+ * report: the command then exits 2, no source analyzed (SPEC 14).
+ */
+export function reportAnalysisConfigurationErrors(
+  invocation: Invocation,
+  context: CommandContext,
+  configurationErrors: readonly Finding[],
+): boolean {
   if (configurationErrors.length === 0) {
     return false;
   }

@@ -61,6 +61,7 @@ import type { SourceClassification } from "../../core/discovery.js";
 import { orderSourceWrites } from "../../core/edits.js";
 import type { ExitCode } from "../../core/findings.js";
 import { appendedJournalBytes } from "../../core/journal.js";
+import { pathTextOf } from "../../core/path-text.js";
 import { evaluateRenameRefusals } from "../../core/refusal.js";
 import type { RenamePlan } from "../../core/rename.js";
 import { planRename } from "../../core/rename.js";
@@ -75,7 +76,7 @@ import type { WorkspaceAnalysis } from "../../workspace/pipeline.js";
 import {
   analyzeWorkspace,
   analyzeWorkspaceContent,
-  SOURCE_VANISHED,
+  unheldSource,
 } from "../../workspace/pipeline.js";
 import { performSourceWrites } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
@@ -83,7 +84,10 @@ import { flagPresent } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { emitAppliedMappingReport } from "../report.js";
 import { usageError } from "./common.js";
-import { runMutatingCommand } from "./mutation.js";
+import {
+  reportAnalysisConfigurationErrors,
+  runMutatingCommand,
+} from "./mutation.js";
 import { emitSuccessfulPreview } from "./preview.js";
 import {
   emitFindingsRefusal,
@@ -111,6 +115,18 @@ async function runRename(
 ): Promise<ExitCode> {
   const { workspace, stdout } = context;
   const analysis = await analyzeWorkspace(workspace, discovered);
+  // SPEC 14.25, 14.14: a source found absent at its content read reads as
+  // undiscovered, and a configuration error the classification made
+  // without it meets is reported as the discovery's own (./mutation.ts).
+  if (
+    reportAnalysisConfigurationErrors(
+      invocation,
+      context,
+      analysis.configurationErrors,
+    )
+  ) {
+    return 2;
+  }
 
   // SPEC 6.4 → 12.0: the argument existence checks precede source
   // validation. `<file>` must name a discovered spec source
@@ -280,10 +296,10 @@ async function reanalyzeRewritten(
   );
   return analyzeWorkspaceContent(workspace.configuration, {
     classification: analysis.classification,
-    readSource: (rel) => Promise.resolve(byPath.get(rel) ?? SOURCE_VANISHED),
+    readSource: (rel) => Promise.resolve(byPath.get(rel) ?? unheldSource(rel)),
     // A valid workspace discovers no invalid-path sources (SPEC 14.19
     // gates rename, 6.4), so this reanalysis is never asked for one.
-    readInvalidSource: () => Promise.resolve(SOURCE_VANISHED),
+    readInvalidSource: (bytes) => unheldSource(pathTextOf(bytes)),
     loadJournal: () => Promise.resolve(journalFromBytes(journalBytes)),
   });
 }

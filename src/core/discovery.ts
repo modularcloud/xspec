@@ -225,6 +225,17 @@ export interface SourceClassification {
    * only 14.19 findings appears in `invalidSources`.
    */
   readonly findings: readonly Finding[];
+  /**
+   * The candidate files this classification classifies — the walk's
+   * workspace-relative byte paths of plain files (or any other
+   * symlink-free listing), byte-ordered — so that a discovered source found
+   * absent when its content is read can be dropped and the rest classified
+   * again, as though discovery had not yielded it (SPEC 14.25;
+   * `classifyWithout`). For an in-memory classification of a would-be
+   * workspace (a move's reanalysis, SPEC 6.5), that workspace's listing
+   * (`editedCandidates`).
+   */
+  readonly candidates: readonly Uint8Array[];
 }
 
 /** Three-way lexicographic comparison of two byte arrays (SPEC 12.0). */
@@ -699,5 +710,65 @@ export function classifySources(
       codeSources.push({ path: decoded, groups: candidate.codeGroups });
     }
   }
-  return { specSources, codeSources, invalidSources, findings };
+  return {
+    specSources,
+    codeSources,
+    invalidSources,
+    findings,
+    candidates: sorted,
+  };
+}
+
+/**
+ * SPEC 14.25, 13.5: the classification as though discovery had not yielded
+ * the `absent` files — discovered sources found absent when their content
+ * was read, removed or relocated since discovery, which read as
+ * undiscovered. The classification's candidates are classified again
+ * without them, so everything discovery decides follows the reduced
+ * listing: a vanished source's 14.19 findings go with it, a vanished spec
+ * source's emit destination (7.3) is no longer excluded — a file there a
+ * group matches is yielded — and a configuration error that listing meets
+ * (7.2 → 14.14) is met.
+ */
+export function classifyWithout(
+  classification: SourceClassification,
+  absent: readonly Uint8Array[],
+  configuration: Configuration,
+): SourceClassification {
+  const dropped = new Set(absent.map(byteKey));
+  return classifySources(
+    classification.candidates.filter(
+      (candidate) => !dropped.has(byteKey(candidate)),
+    ),
+    configuration,
+  );
+}
+
+/**
+ * A candidate listing (`SourceClassification.candidates`) with the files at
+ * the `removed` paths gone and files at the `added` paths present,
+ * byte-ordered — the listing an in-memory classification of a would-be
+ * workspace stands for: a move's relocated or created spec source
+ * (SPEC 6.5), whose workspace-relative paths are plain strings (SPEC 7).
+ */
+export function editedCandidates(
+  candidates: readonly Uint8Array[],
+  removed: readonly string[],
+  added: readonly string[],
+): Uint8Array[] {
+  const gone = new Set(
+    removed.map((path) => byteKey(utf8Encoder.encode(path))),
+  );
+  const edited = candidates.filter(
+    (candidate) => !gone.has(byteKey(candidate)),
+  );
+  const present = new Set(edited.map(byteKey));
+  for (const path of added) {
+    const bytes = utf8Encoder.encode(path);
+    if (!present.has(byteKey(bytes))) {
+      present.add(byteKey(bytes));
+      edited.push(bytes);
+    }
+  }
+  return edited.sort(compareByteArrays);
 }
