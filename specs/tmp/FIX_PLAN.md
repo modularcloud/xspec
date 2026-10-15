@@ -53,7 +53,7 @@ VERIFY's 31 failures at `6694886`: 29 on `suite-linux` (27 locally; T13.5-9 and 
 | T11.6-1 | section-11.6 | 1 (landed: passes) | `inventory` has no `lock` member |
 | T11.6-3 | section-11.6 | 1 (landed), 3 | likewise; since Task 1, its lock-directory arms: after the held `rename specs/A.mdx a a2` is killed, nothing at `.xspec/lock` |
 | T11.6-4 | section-11.6 | 1 (landed: passes) | likewise |
-| T12.7-3 | section-12.7 | 2 (landed: passes) | its last arm: the busy refusal's error document has `code` and `path` null, expected `"workspace-busy"` and `".xspec/lock"` |
+| T12.7-3 | section-12.7 | 2 (landed: passes) | its last arm: the busy refusal's error document has `code` and `path` null, expected `"workspace-busy"` and `".xspec/lock"`; passes in CI run 1278 at `3c0a8ca` (`suite-linux` 22 failed / 4796 passed, exactly this index's remaining rows, T13.5-9, T13.5-10, and T13.5-13 at their recorded first failures; `suite-windows` 1 failed / 8 passed, the failure E-6 byte identity's exclusion probe; `harness-self` green) |
 | T13.4-12 | section-13.4-ii | 1 (landed), 3 | the leftover-free twin's `inventory` has no `lock` member; since Task 1, the staged dead entry: after the held `rename specs/A.mdx a a2` is killed, nothing at `.xspec/lock` |
 | T13.5-1 | section-13.5 | 3 | the held `review create --strategy audit --name s`: nothing at `.xspec/lock` while it holds |
 | T13.5-2 | section-13.5 | 2 (landed), 3 | nothing at `.xspec/lock` while command 1 holds (unchanged since Task 2) |
@@ -67,7 +67,7 @@ VERIFY's 31 failures at `6694886`: 29 on `suite-linux` (27 locally; T13.5-9 and 
 | T13.5-11 | section-13.5-iii | 3, 5 | (a): the held `rename` whose `specs/sub` is made unlistable during the hold: nothing at `.xspec/lock` while it holds |
 | T13.5-12 | section-13.5-iv | 3, 5, 6 | (c): the held `rename specs/A.mdx a b`, `specs/A.mdx` created during the hold: nothing at `.xspec/lock` while it holds |
 | T13.5-13 | section-13.5-vi | 2 (landed), 3 | the held arm, trial 1: a refused run's error document has `code` and `path` null; since Task 2 the refused runs' documents pass and the held-state comparison while one run holds fails: nothing at `.xspec/lock` |
-| T14-6 | section-14 | 2 (landed: passes) | the 14.26 arm: `code` null, expected `"workspace-busy"` |
+| T14-6 | section-14 | 2 (landed: passes) | the 14.26 arm: `code` null, expected `"workspace-busy"`; passes in CI run 1278 at `3c0a8ca` (T12.7-3's row) |
 | T14-9 | section-14-ii | 3, 4 | acquisition's writes: `rename specs/A.mdx a a2 --json` beside an empty `r-x` leftover lock directory exits 0, expected 2 with `write-failure` at `.xspec/lock` |
 | T14-10 | section-14-ii | 1 (landed), 3, 4, 5 | (b): `inventory` has no `lock` member; since Task 1, (i) at acquisition: `rename specs/A.mdx a a2 --json` beside an empty `-wx` leftover lock directory exits 0, expected 2 with `read-failure` |
 
