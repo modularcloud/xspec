@@ -167,23 +167,20 @@ export interface StoredSourceInput {
 }
 
 /**
- * The recorded derivation inputs (SPEC 13.3). The snapshot is a pure
- * function of the current sources, configuration, and journal (SPEC 12.0
- * determinism), so these fingerprints — the configuration file's content
- * hash with its parsed form, the journal's content hash, and every
- * discovered source's content hash — certify the stored snapshot for
- * byte-identical current inputs. The store-backed read fast path
- * (workspace/fast-read.ts) answers from a store whose recorded inputs all
- * match without re-deriving; any mismatch falls back to the full pipeline,
- * whose compare-and-refresh behavior is unchanged.
+ * The recorded derivation inputs (SPEC 13.3): the configuration file's
+ * content hash with its parsed form, the journal's content hash, and every
+ * discovered source's content hash — part of what `build` writes, compared
+ * byte for byte with everything else on a refresh. They certify nothing: a
+ * store is current only when its whole content equals what this build
+ * derives from the current sources and configuration
+ * (`graphDataMatchesCurrent`), so no read answers from a store on the
+ * strength of matching recorded inputs (SPEC 13.3: read results never come
+ * from stale data).
  */
 export interface StoredInputs {
   /** SHA-256 (hex) of the configuration file's exact bytes. */
   readonly configHash: string;
-  /**
-   * The parsed configuration's plain form (core/config-data.ts) — the
-   * recorded parse the fast path recovers instead of re-parsing.
-   */
+  /** The parsed configuration's plain form (core/config-data.ts). */
   readonly config: JsonValue;
   /**
    * SHA-256 (hex) of the journal file's exact bytes — null when the
@@ -463,10 +460,7 @@ function requirementToJson(node: StoredRequirementNode): JsonValue {
     range: { start: node.range.start, end: node.range.end },
     coverage: node.coverage,
     // SPEC 12.7: a tag set — byte order (SPEC 12.0), duplicates collapsed.
-    // The snapshot already carries it (core/mdx.ts forms the set);
-    // serializing the normal form also makes a store that records tags in
-    // any other order non-canonical, so the store-backed fast path
-    // (workspace/fast-read.ts, step 1) falls back instead of serving it.
+    // The snapshot already carries it (core/mdx.ts forms the set).
     tags: [...new Set(node.tags)].sort(compareBytes),
     hashes: {
       ownHash: node.hashes.ownHash,
@@ -600,9 +594,9 @@ function parseInputs(value: unknown): StoredInputs | null {
   ) {
     return null;
   }
-  // The recorded parse (`config`) is structurally validated at use
-  // (core/config-data.ts `configurationFromStored`); here it must only be
-  // JSON data, which a parsed JSON document's field always is.
+  // The recorded parse (`config`) is never read back (core/config-data.ts);
+  // here it must only be JSON data, which a parsed JSON document's field
+  // always is.
   return {
     configHash,
     config: value["config"] as JsonValue,

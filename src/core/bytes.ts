@@ -65,17 +65,6 @@ export function byteOrderedSet(items: readonly string[]): string[] {
   return [...new Set(items)].sort(compareBytes);
 }
 
-/**
- * Whether `items` is already in its set form (`byteOrderedSet`): strictly
- * ascending in byte order, so no element repeats.
- */
-export function isByteOrderedSet(items: readonly string[]): boolean {
-  for (let index = 1; index < items.length; index += 1) {
-    if (compareBytes(items[index - 1]!, items[index]!) >= 0) return false;
-  }
-  return true;
-}
-
 /** The length in bytes of one code point's UTF-8 encoding. */
 function utf8CodePointLength(codePoint: number): number {
   if (codePoint <= 0x7f) return 1;

@@ -21,9 +21,8 @@
 // file's parse — identically on valid and failing workspaces (SPEC 12.0).
 // On a valid workspace a spelled identity is a defined identity and a named
 // unit a code location (SPEC 11.2, 12.1), so these judgments agree exactly
-// with the graph-based resolution the answer then runs (query-core.ts) —
-// and they share its message builders, so the store-backed fast path
-// (query-fast.ts), which judges against the verified store, reports
+// with the graph-based resolution the answer then runs (query-core.ts),
+// whose message builders they share, so either judgment reports
 // byte-identically (SPEC 12.0).
 
 import type { CodeAnalysis } from "../../core/code-analysis.js";

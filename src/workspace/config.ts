@@ -16,11 +16,9 @@
 // sole absolute form).
 //
 // This module statically imports the TypeScript-based parser, so it is
-// loaded on demand (cli/main.ts imports it dynamically): the store-backed
-// read fast path (./fast-read.ts) answers without it, recovering the parsed
-// configuration recorded in the graph data under the configuration file's
-// content hash instead (SPEC 12.0 determinism — identical bytes parse
-// identically).
+// loaded on demand (cli/main.ts imports it dynamically, once the
+// configuration is located): `version` (SPEC 12.6), which consults no
+// configuration, and a failed location never load the compiler.
 
 import type { Configuration, ConfigurationResult } from "../core/config.js";
 import { parseConfiguration } from "../core/config.js";
@@ -58,8 +56,9 @@ export interface LoadedWorkspace {
    */
   readonly rootAnchor: string;
   /**
-   * SHA-256 (hex) of the configuration file's exact bytes — the graph
-   * data's recorded-parse key (SPEC 13.3; ./fast-read.ts).
+   * SHA-256 (hex) of the configuration file's exact bytes — recorded in
+   * the graph data among its derivation inputs (./pipeline.ts
+   * `workspaceInputsOf`; graph data's content is opaque, SPEC 13.3).
    */
   readonly configHash: string;
   readonly configuration: Configuration;

@@ -1,10 +1,7 @@
 // The configured groups as `query nodes` flag validation reads them
-// (SPEC 11; ./query-core.ts `GroupsView`) — one projection for both read
-// paths: the full path projects the parsed configuration, the fast path
-// the configuration reconstructed from the store's recorded parse
-// (core/config-data.ts), so `--group` validation cannot drift between
-// them. Type-only configuration import: loading this module never loads
-// the TypeScript-based parser.
+// (SPEC 11; ./query-core.ts `GroupsView`): the projection of the parsed
+// configuration (SPEC 7). Type-only configuration import: loading this
+// module never loads the TypeScript-based parser.
 
 import type { Configuration } from "../../core/config.js";
 import type { GroupsView } from "./query-core.js";

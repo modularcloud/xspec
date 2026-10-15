@@ -29,9 +29,9 @@
 // write paths, 14.22), the gate of 13.3 (./refresh.ts), and the
 // invalid-workspace refusal of `rename` and `move` (6.4, 6.5: "the
 // workspace's findings alone", 14) — and, through `refusedWriteFindings`,
-// by the surfaces that refresh only where `build` would succeed (the
-// availability refresh of 11.2, ./availability.ts; the store-backed fast
-// path, ./fast-read.ts). The examination makes kind reads only — nothing
+// by the surface that refreshes only where `build` would succeed (the
+// availability refresh of 11.2, ./availability.ts). The examination makes
+// kind reads only — nothing
 // is modified (SPEC 12.1: a failing `build` modifies nothing) — and a kind
 // read the environment refuses stops the command at that read (SPEC
 // 14.25, ./writes.ts).

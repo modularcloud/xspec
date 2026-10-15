@@ -44,12 +44,6 @@
 // file's refused content read is invalid configuration instead (14.14).
 // Nonexistence is never a refusal: it is the missing configuration of
 // 14.14.
-//
-// The store-backed read fast path (./fast-read.ts) starts from this
-// module's result: with the configuration file's exact bytes in hand, a
-// stored parse recorded under the same content hash substitutes for
-// re-parsing (SPEC 12.0 determinism — identical bytes parse identically),
-// which is what lets a fresh-store read skip the parser module entirely.
 
 import type { Stats } from "node:fs";
 import * as fsp from "node:fs/promises";

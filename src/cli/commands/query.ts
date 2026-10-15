@@ -1,15 +1,15 @@
-// `xspec query` (SPEC 11): set-level, JSON-only access to the graph — the
-// full read path.
+// `xspec query` (SPEC 11): set-level, JSON-only access to the graph.
 //
 // A single JSON document is `query`'s only output form, with or without
 // `--json` (SPEC 11, 12.0) — including the findings report of a failed
 // refresh (SPEC 13.3), which is standard-output content like a failed
 // `build`'s. The six subcommands' validation, ordering, and rendering live
-// in ./query-core.ts, shared byte for byte with the store-backed fast path
-// (./query-fast.ts): this handler is the SPEC 13.3 refresh-on-read side —
-// it runs when no verified store can answer (cli/main.ts tries the fast
-// path first), prepares the refreshed analysis, and answers through the
-// analysis-backed view (./analysis-view.ts).
+// in ./query-core.ts. SPEC 13.3: read results never come from stale data —
+// this handler analyzes the current sources, compares the stored graph
+// data with what `build` would write for them and refreshes it on a
+// passing workspace, and answers from that analysis through the
+// analysis-backed view (./analysis-view.ts); the store's content never
+// stands in for the derivation.
 //
 // SPEC 12.0: the argument checks precede the invalid-workspace report of
 // 13.3 — the configuration-level flag checks of `query nodes`

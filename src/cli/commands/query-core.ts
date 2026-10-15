@@ -1,18 +1,11 @@
-// `xspec query` answering (SPEC 11) over an abstract graph view — the one
-// implementation behind both read paths.
+// `xspec query` answering (SPEC 11) over an abstract graph view.
 //
-// The full path (./query.ts) answers from the refreshed workspace analysis
-// (SPEC 13.3); the store-backed fast path (./query-fast.ts over
-// workspace/fast-read.ts) answers from stored graph data whose recorded
-// derivation inputs all match the current workspace bytes. Both wrap their
-// data as a `QueryView` and call `answerQuery`, so the two paths cannot
-// drift: every subcommand's validation, ordering, and rendering is this
-// module's, once (SPEC 12.0 byte determinism — identical workspaces answer
-// identically on either path).
-//
-// This module's import chain is deliberately light — no analysis pipeline,
-// no TypeScript compiler, no MDX parser — so the fast path loads none of
-// them (the point of answering from the store; see fast-read.ts).
+// `query` (./query.ts) answers from the refreshed workspace analysis
+// (SPEC 13.3: read results never come from stale data), wrapped as a
+// `QueryView` (./analysis-view.ts), through `answerQuery`; `show --json`
+// emits the same node report (./show.ts, `nodeReportOf`). Every
+// subcommand's validation, ordering, and rendering is this module's, once
+// (SPEC 12.0 byte determinism).
 
 import type { ByteRange } from "../../core/bytes.js";
 import type { JsonObject } from "../../core/canonical-json.js";
@@ -61,8 +54,7 @@ export interface QueryRow {
 
 /**
  * The graph as the query subcommands read it (SPEC 11) — implemented over
- * the live analysis (./query.ts) and over verified stored graph data
- * (./query-fast.ts).
+ * the refreshed live analysis (./analysis-view.ts).
  */
 export interface QueryView {
   /**

@@ -9,22 +9,20 @@
 //
 // Command modules load on demand (dynamic import per dispatch), and the
 // configuration parser (workspace/config.ts, on the TypeScript compiler)
-// loads only when a command actually re-parses: `query` first tries the
-// store-backed fast path (commands/query-fast.ts), which answers from
-// stored graph data whose recorded derivation inputs match the current
-// workspace bytes (SPEC 13.3; workspace/fast-read.ts) — identical bytes
-// parse and derive identically (SPEC 12.0), so the recorded parse
-// substitutes for re-parsing. Every other command — and any `query` whose
-// store does not verify — takes the full path: parse the configuration,
-// then dispatch, exactly as before.
+// loads once the configuration is located. Every workspace-bound command
+// takes the one path: parse and validate the configuration (SPEC 7, 14.14),
+// then dispatch. No read answers from stored graph data on the strength of
+// recorded inputs: `query` and `at` analyze the current sources and compare
+// the store with what this build derives from them, refreshing it on a
+// passing workspace before answering (SPEC 13.3, 11.2: read results never
+// come from stale data — a comparison of content, which no recorded input
+// fingerprint or recorded parse can stand in for).
 
 import type { ExitCode } from "../core/findings.js";
 import { CodedRefusal } from "../workspace/environment-refusal.js";
 import { locateWorkspace } from "../workspace/locate.js";
 import type { Invocation } from "./args.js";
 import { COMMAND_PATHS, jsonOutputInEffect, parseArgv } from "./args.js";
-import { tryFastAt } from "./commands/at-fast.js";
-import { tryFastQuery } from "./commands/query-fast.js";
 import type { CliWriter, CommandContext } from "./io.js";
 import {
   emitCodedRefusal,
@@ -203,11 +201,6 @@ const HANDLERS: ReadonlyMap<string, () => Promise<CommandHandler>> = new Map(
   ),
 );
 
-/** Whether the invocation is a `query` subcommand (SPEC 11). */
-function isQueryCommand(command: string): boolean {
-  return command.startsWith("query ");
-}
-
 /**
  * The CLI entry: parse per SPEC 12.0, dispatch per SPEC 12.5, return the
  * exit code. All output goes through the given writers; the working
@@ -294,8 +287,7 @@ export async function main(
 
 /**
  * The workspace-bound part of an invocation: locate and load the
- * configuration, then answer from a verified store or dispatch to the
- * command's handler.
+ * configuration, then dispatch to the command's handler.
  */
 async function dispatchInWorkspace(
   invocation: Invocation,
@@ -321,36 +313,9 @@ async function dispatchInWorkspace(
     return 2;
   }
 
-  // SPEC 13.3: `query` answers from the store when it verifies against the
-  // current workspace bytes (module header) — the recorded configuration
-  // parse stands in for re-parsing, so a fast answer never needs the
-  // parser. Anything unverified falls through to the full path below.
-  if (isQueryCommand(invocation.command)) {
-    const fast = await tryFastQuery(
-      invocation,
-      location.located,
-      stdout,
-      stderr,
-    );
-    if (fast !== null) {
-      return fast;
-    }
-  }
-
-  // SPEC 13.3/11.2: `at` likewise answers from a verified store — the
-  // store already matches the current sources and configuration, so its
-  // refresh participation would write nothing and the answer equals the
-  // full path's byte for byte (SPEC 12.0). Anything unverified falls
-  // through to the full path below.
-  if (invocation.command === "at") {
-    const fast = await tryFastAt(invocation, location.located, stdout, stderr);
-    if (fast !== null) {
-      return fast;
-    }
-  }
-
-  // The full path: parse the configuration (a parse failure is the same
-  // exit-2 configuration error as before), then dispatch.
+  // SPEC 7/14.14: parse and validate the configuration — an invalid one is
+  // a configuration error (exit 2) preceding all source analysis — then
+  // dispatch.
   const { parseLocatedWorkspace } = await import("../workspace/config.js");
   const loaded = parseLocatedWorkspace(location.located);
   if (!loaded.ok) {

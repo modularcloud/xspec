@@ -205,23 +205,56 @@ function lineOf(node: tst.Node, sourceFile: tst.SourceFile): number {
 
 /**
  * SPEC 7/14.14: "a configuration file that is not well-formed TypeScript".
- * `ts.transpileModule` with `reportDiagnostics` surfaces the file's
- * syntactic diagnostics through the public compiler API without building a
- * program (and without executing anything). Returns false when any error
- * was reported.
+ * The file's syntactic diagnostics through the public compiler API, read
+ * off a single-file, in-memory program over the file's one parse — no lib,
+ * no module resolution, no file system, nothing executed, nothing emitted:
+ * the parse's diagnostics under the grammar the file name selects (with
+ * the added syntactic ones of a JavaScript-grammar name) and the program's
+ * option-level diagnostics, which no input text changes — the diagnostics
+ * `ts.transpileModule` reports for the same text and name, without the
+ * JavaScript emit it performs, which no check reads (and which fails
+ * outright for a declaration-file or JSON name). Returns false when any
+ * error was reported.
  */
 function checkSyntax(
   text: string,
   fileName: string,
   findings: ConfigFindings,
 ): boolean {
-  const output = ts.transpileModule(text, {
+  const sourceFile = ts.createSourceFile(
     fileName,
-    reportDiagnostics: true,
-    compilerOptions: { target: ts.ScriptTarget.Latest },
-  });
+    text,
+    ts.ScriptTarget.Latest,
+  );
+  const host: tst.CompilerHost = {
+    // The program's one file, under whatever spelling it normalizes the
+    // root name to: with no lib and no resolution nothing else is read.
+    getSourceFile: () => sourceFile,
+    getDefaultLibFileName: () => "lib.d.ts",
+    writeFile: () => undefined,
+    getCurrentDirectory: () => "",
+    getCanonicalFileName: (name) => name,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    fileExists: () => true,
+    readFile: () => undefined,
+  };
+  const program = ts.createProgram(
+    [fileName],
+    {
+      noLib: true,
+      noResolve: true,
+      noEmit: true,
+      allowNonTsExtensions: true,
+      target: ts.ScriptTarget.Latest,
+    },
+    host,
+  );
   let wellFormed = true;
-  for (const diagnostic of output.diagnostics ?? []) {
+  for (const diagnostic of [
+    ...program.getSyntacticDiagnostics(sourceFile),
+    ...program.getOptionsDiagnostics(),
+  ]) {
     if (diagnostic.category !== ts.DiagnosticCategory.Error) continue;
     wellFormed = false;
     const line =
