@@ -60,7 +60,10 @@ run at `6694886`, under load from concurrent runs, took 327 s (1.27
 times). Scaled from 476.7 s:
 ~272–500 s in CI at the observed ratios, ~606 s in a loaded local full run,
 and ~667 s at the ~1.4 times a quiet local run that CI has shown for other
-tests — past the guard.
+tests — past the guard. Observed with the fast path retired (this entry's
+commit `5a4617c`, CI run 1288): `suite-linux` ran P-12 in 492.3 s — 82% of
+the guard, 1.03 times the quiet local 476.7 s — passing, every other test
+passing too (127 files, 4818 tests, in 1986.08 s).
 
 **Why it is a test-system problem:** P-12's subject is the at ≡ view
 equivalence and occurrence order, not latency, and its 600 s is a hang
