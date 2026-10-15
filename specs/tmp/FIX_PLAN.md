@@ -41,20 +41,20 @@ VERIFY's 31 failures at `6694886`: 29 on `suite-linux` (27 locally; T13.5-9 and 
 |---|---|---|---|
 | E-6 Linux leg | `test/suite/e6-exchange-writer.test.ts` | 3 | the exclusion probe: after the held `rename specs/Core.mdx core.mid.leaf core.mid.tip --test-hold <path>` is killed, nothing at `.xspec/lock` (expected exactly one entry, the dead run's) |
 | E-6 byte identity (suite-windows) | `test/windows/e6-byte-identity.test.ts` | 3 | the same exclusion probe on the Windows leg |
-| T11.6-1 drive-mismatch arm (suite-windows) | `test/windows/e6-drive-mismatch.test.ts` | 1 | its premise's `inventory` answer has no `lock` member |
+| T11.6-1 drive-mismatch arm (suite-windows) | `test/windows/e6-drive-mismatch.test.ts` | 1 (landed) | its premise's `inventory` answer has no `lock` member; since Task 1, the premise passes locally (on Linux the test then fails loudly by design at `subst`) — CI's `suite-windows` is the judge |
 | P-10 | section-16-p10 | 3 | falsified at seed 271828183, trial 2 of 3: a `review resolve` killed past its hold, before its last write, leaves nothing at `.xspec/lock` |
 | P-14 | section-16-p14 | 6 (its mutating-command draws also 3 and 5) | falsified at seed 271828183, trial 1 of 2, the spec-source series: `view specs/sub/Zo.mdx` answered condition 20 for the vanished file at offset 0, exit 1 — expected the answer with it present (exit 0) or the unknown-file usage error (exit 2) |
 | P-15 | section-16-p15 | 3, 4 | falsified at seed 271828183, trial 1 of 4: `rename specs/A.mdx a a2 --json` leaves the staged `leftover-0` (an empty directory) in `.xspec/lock` |
-| T6.1-1 | section-6.1 | 1 | the never-modifies sweep's `inventory` answer has no `lock` member |
+| T6.1-1 | section-6.1 | 1 (landed: passes) | the never-modifies sweep's `inventory` answer has no `lock` member |
 | T6.6-3 | section-6.6 | 3, 4 | the held command 1 (T13.5-2's staging): nothing at `.xspec/lock` while it holds; past it, the acquisition arms' real operations (A4) |
-| T7-2 | section-7-basics | 1 | `inventory --json` has no `lock` member |
-| T7-4 | section-7-discovery | 1 | likewise |
-| T10.1-6 | section-10.1 | 1, 3 | likewise; past it, `.xspec` a plain file must fail every mutating command at acquisition (`write-failure`, `.xspec`), where they report condition 22 (exit 1) |
-| T11.6-1 | section-11.6 | 1 | `inventory` has no `lock` member |
-| T11.6-3 | section-11.6 | 1, 3 | likewise; past it, its lock-directory arms (a killed run's entry) |
-| T11.6-4 | section-11.6 | 1 | likewise |
+| T7-2 | section-7-basics | 1 (landed: passes) | `inventory --json` has no `lock` member |
+| T7-4 | section-7-discovery | 1 (landed: passes) | likewise |
+| T10.1-6 | section-10.1 | 1 (landed), 3 | likewise; since Task 1, `.xspec` a plain file must fail every mutating command at acquisition (`write-failure`, `.xspec`), where `rename specs/A.mdx a a2 --json` reports condition 22 (exit 1) |
+| T11.6-1 | section-11.6 | 1 (landed: passes) | `inventory` has no `lock` member |
+| T11.6-3 | section-11.6 | 1 (landed), 3 | likewise; since Task 1, its lock-directory arms: after the held `rename specs/A.mdx a a2` is killed, nothing at `.xspec/lock` |
+| T11.6-4 | section-11.6 | 1 (landed: passes) | likewise |
 | T12.7-3 | section-12.7 | 2, 3 | its last arm: the busy refusal's error document has `code` and `path` null, expected `"workspace-busy"` and `".xspec/lock"` |
-| T13.4-12 | section-13.4-ii | 1, 3 | the leftover-free twin's `inventory` has no `lock` member; past it, the staged dead entry and obstructions |
+| T13.4-12 | section-13.4-ii | 1 (landed), 3 | the leftover-free twin's `inventory` has no `lock` member; since Task 1, the staged dead entry: after the held `rename specs/A.mdx a a2` is killed, nothing at `.xspec/lock` |
 | T13.5-1 | section-13.5 | 3 | the held `review create --strategy audit --name s`: nothing at `.xspec/lock` while it holds |
 | T13.5-2 | section-13.5 | 2, 3 | nothing at `.xspec/lock` while command 1 holds |
 | T13.5-3 | section-13.5 | 3 | after a held `rename` is killed, nothing at `.xspec/lock` |
@@ -69,19 +69,7 @@ VERIFY's 31 failures at `6694886`: 29 on `suite-linux` (27 locally; T13.5-9 and 
 | T13.5-13 | section-13.5-vi | 2, 3 | the held arm, trial 1: a refused run's error document has `code` and `path` null |
 | T14-6 | section-14 | 2, 3 | the 14.26 arm: `code` null, expected `"workspace-busy"` |
 | T14-9 | section-14-ii | 3, 4 | acquisition's writes: `rename specs/A.mdx a a2 --json` beside an empty `r-x` leftover lock directory exits 0, expected 2 with `write-failure` at `.xspec/lock` |
-| T14-10 | section-14-ii | 1, 3, 4, 5 | (b): `inventory` has no `lock` member; past it, (i)'s acquisition read failures and the second discovery's |
-
-## Task 1 — `inventory` reports the lock path (SPEC 11.6, 12.7; A3, B8)
-
-**Requirement.** SPEC 11.6's "Lock directory" bullet: the inventory reports "the lock path (13.5), `.xspec/lock`, reported unconditionally". SPEC 12.7's inventory form is `{"findings", "root", "config", "configuration", "sources", "derived", "recorded", "graphData", "journal", "sessions", "lock"}`, `lock` the lock path. Unconditionally means before any build, with `.xspec` absent or a non-directory, whatever occupies the lock path, and beside a condition-23 finding alike; the inventory still reads and writes nothing there (11.6).
-
-**Observed.** `inventory --json` carries no `lock` member. The harness's 11.6 adapter fails at `$.lock` ("expected required key "lock" … the key is absent"): the first failure of T6.1-1, T7-2, T7-4, T10.1-6, T11.6-1, T11.6-3, T11.6-4, T13.4-12, T14-10 (b), and suite-windows' T11.6-1 drive-mismatch premise.
-
-**Location.** The document assembled at the end of `src/cli/commands/inventory.ts` (its comment calls the form "ten-member"); `GRAPH_DATA_AREA` lives in `src/core/graph-data.ts`.
-
-**Change.** Add `lock: ".xspec/lock"` to the document from one shared constant (e.g. `LOCK_PATH` beside `GRAPH_DATA_AREA`), which Task 3's lock module will use too; update the comment to the eleven-member form. The inventory is JSON-only (12.0), so there is no human form to extend.
-
-**Verification.** T6.1-1, T7-2, T7-4, T11.6-1, and T11.6-4 pass (reviewer B, patching only this member into a scratch build, saw exactly these pass); T10.1-6, T11.6-3, T13.4-12, and T14-10 then first fail at lock-directory arms (Tasks 3–5). Run `section-6.1`, `section-7-basics`, `section-7-discovery`, `section-11.6`, `section-10.1`, `section-13.4-ii`, and `section-14-ii`, and confirm the new first failures are lock-directory arms; `npm run test:windows` (partial on Linux).
+| T14-10 | section-14-ii | 1 (landed), 3, 4, 5 | (b): `inventory` has no `lock` member; since Task 1, (i) at acquisition: `rename specs/A.mdx a a2 --json` beside an empty `-wx` leftover lock directory exits 0, expected 2 with `read-failure` |
 
 ## Task 2 — The busy refusal carries condition 26's stable code and the lock path (SPEC 14.26, 14, 12.7, 12.0; B3)
 
@@ -118,7 +106,7 @@ VERIFY's 31 failures at `6694886`: 29 on `suite-linux` (27 locally; T13.5-9 and 
 - `.xspec/lock` a symbolic link to a directory, an empty `r-x` lock directory, and an empty `-wx` one: the real `rename` exits 0 and renames, expected `write-failure`, `write-failure`, and `read-failure` at `.xspec/lock` (A4, B4 (b), B6; T14-9's first failure is the `r-x` arm). The preview halves of these stagings already meet 6.6 and must stay so: previews acquire nothing and read nothing at the lock path (T6.6-3, T13.4-12).
 - A plain file at `.xspec/lock`, and a lock directory holding `12345-run`, stay untouched (B5).
 
-**Location.** `src/workspace/lock.ts`, the whole module but the seam (`mutationLockPath`, `acquireMutationLock`, `readLockHolder`, `stealStaleLock`, `heldByLiveRival`, the temporary-directory messages, and the header's "Reach" conflict note), and its one caller `runMutatingCommand` (`src/cli/commands/mutation.ts`). Keep `createTestHoldFile`, `awaitTestHoldRelease`, and `TestHoldSpec`. The coded exit-2 path is `EnvironmentRefusal`, `writeFailure`, and `readFailure` (`src/workspace/environment-refusal.ts`), caught in `src/cli/main.ts`.
+**Location.** `src/workspace/lock.ts`, the whole module but the seam (`mutationLockPath`, `acquireMutationLock`, `readLockHolder`, `stealStaleLock`, `heldByLiveRival`, the temporary-directory messages, and the header's "Reach" conflict note), and its one caller `runMutatingCommand` (`src/cli/commands/mutation.ts`). Keep `createTestHoldFile`, `awaitTestHoldRelease`, and `TestHoldSpec`. The lock path's constant is `LOCK_PATH` in `src/core/graph-data.ts` (Task 1, which the inventory reports): use it. The coded exit-2 path is `EnvironmentRefusal`, `writeFailure`, and `readFailure` (`src/workspace/environment-refusal.ts`), caught in `src/cli/main.ts`.
 
 **Change.** Replace the temporary-directory lock with the mechanism above, in the workspace layer, dropping every `os.tmpdir()` use and the uid-keyed name. A workable shape: one acquisition routine returning a handle that records what it established (the area created or not, the lock directory found or made, the entry's name), with `withMutationExclusivity` running acquisition inside the `try` whose `finally` releases, so a refusal thrown mid-acquisition still releases what was made. Name entries as the process identifier, a separator, and a random token (e.g. `${process.pid}-${randomBytes(16).toString("hex")}`), create them with `O_CREAT|O_EXCL` (`"wx"`), and recognize them by an exact pattern. List and examine names as Buffers (`readdir(…, { encoding: "buffer" })`, `lstat` on Buffer paths), never as decoded strings, so Task 4's non-UTF-8 names need no second design. Keep messages static, naming the concerned path, the errno code, and the SPEC sections only (T13.5-2's and T13.5-10(d)'s determinism arms compare stdout and stderr across runs and workspace paths). `process.kill(pid, 0)` is Node's liveness probe on Linux and Windows alike (E-6 runs the exclusion probe on Windows), so no platform branch is needed. Rewrite the module header (13.5's paragraphs cited) and AGENTS.md's "Hand-probing SPEC 13.5's mutation lock" bullet for the new mechanism: how to stage occupants at `.xspec` and `.xspec/lock`, how to make a dead entry (`kill -9` of a held run), and the timings. If the task proves too large, land location, entry, liveness, and release first and the refusal mapping as `3a`.
 

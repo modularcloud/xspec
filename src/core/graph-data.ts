@@ -81,6 +81,16 @@ import type { WorkspaceTextModel } from "./text-model.js";
 export const GRAPH_DATA_AREA = ".xspec";
 
 /**
+ * SPEC 13.5/11.6: the lock path — the workspace's lock directory under the
+ * graph-data area, where mutating commands keep their exclusivity,
+ * spelled as its workspace-relative path with no trailing separator.
+ * Transient (SPEC 13.4) and xspec's alone, with everything under it; the
+ * inventory reports it unconditionally (SPEC 11.6, 12.7) and it is the
+ * concerned path of acquisition's refusals (SPEC 13.5, 14.24–14.26).
+ */
+export const LOCK_PATH = ".xspec/lock";
+
+/**
  * SPEC 13.3/13.4: the workspace-relative path of the graph data proper —
  * the snapshot with its derivation inputs, the part a refresh writes.
  */

@@ -2,14 +2,16 @@
 //
 // Reports the machine-readable shape of the workspace — anchoring, resolved
 // configuration, discovered sources, the derived-file map, the recorded
-// derived paths, the graph-data area, and the durable files — as a single
-// JSON document in the 12.7 inventory form. JSON-only (SPEC 11): the
-// document is its only output form, with or without `--json`.
+// derived paths, the graph-data area, the durable files, and the lock path
+// — as a single JSON document in the 12.7 inventory form. JSON-only (SPEC
+// 11): the document is its only output form, with or without `--json`.
 //
 // The inventory parses no sources, so it answers whatever the sources'
 // validity: it runs discovery (the walk and classification — glob-driven,
 // never parse-driven) but no per-file analysis, reads no journal or session
-// content, and never refreshes or writes anything (SPEC 11.6, 13.3).
+// content, never refreshes or writes anything (SPEC 11.6, 13.3), and reads
+// and writes nothing at the lock path, which it reports unconditionally
+// (SPEC 11.6, 13.5).
 // Configuration errors keep their precedence (SPEC 14.14): a missing or
 // invalid configuration exits 2 upstream of this handler, and a
 // discovery-level configuration error (a file matched by both a spec and a
@@ -29,6 +31,7 @@ import type { ExitCode } from "../../core/findings.js";
 import { codeExitClass, orderFindings } from "../../core/findings.js";
 import {
   GRAPH_DATA_AREA,
+  LOCK_PATH,
   unreadableRecordFinding,
 } from "../../core/graph-data.js";
 import { JOURNAL_PATH } from "../../core/journal.js";
@@ -227,11 +230,16 @@ export async function inventoryCommand(
         ? [] // SPEC 11.6: a missing record is an empty record.
         : unavailableJson();
 
-  // SPEC 12.7: the ten-member inventory document form. The anchoring is
+  // SPEC 12.7: the eleven-member inventory document form. The anchoring is
   // pure invocation input (SPEC 11.6, 12.0): the workspace root and the
   // configuration file relative to the invocation working directory in the
   // canonical spelling (workspace/anchor.ts), each spelled once when the
-  // configuration was located (workspace/locate.ts).
+  // configuration was located (workspace/locate.ts). The graph-data area
+  // and the lock path are reported unconditionally — before any build,
+  // whatever occupies the area's path or the lock path, and beside a
+  // condition-23 finding alike — as constants: neither path is examined to
+  // report it, and nothing at or under the lock path is ever read here
+  // (SPEC 11.6, 13.5).
   const document: JsonValue = {
     findings: findings.map(findingToJson),
     root: workspace.rootAnchor,
@@ -249,6 +257,7 @@ export async function inventoryCommand(
     graphData: GRAPH_DATA_AREA,
     journal: { path: JOURNAL_PATH, occupied },
     sessions,
+    lock: LOCK_PATH,
   };
   context.stdout.write(canonicalJson(document));
   // SPEC 12.0/11.6: an answer carrying a finding or explicitly-unavailable
