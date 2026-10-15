@@ -13,13 +13,17 @@
 //    source analysis — the configuration file's (cli/main.ts) and then
 //    discovery's (a file matched by both a spec and a code group), met
 //    with discovery's refused reads (14.25) before exclusivity is acquired
-//    (SPEC 13.5, 12.0; ./mutation.ts).
+//    (SPEC 13.5, 12.0; ./mutation.ts) — but for those the second
+//    discovery meets, made holding exclusivity (2), which follow
+//    acquisition's and the hold file's errors and precede the rest.
 // 2. Workspace exclusivity (SPEC 13.5): `rename` is a mutating command —
 //    while another one runs, it fails promptly with a usage error (exit 2)
 //    modifying nothing; with `--test-hold <path>`, the hold file is created
 //    immediately after acquiring exclusivity and before modifying anything,
-//    and the command proceeds only once it has been deleted. A preview
-//    acquires nothing (SPEC 6.6).
+//    and the command proceeds only once it has been deleted. Holding
+//    exclusivity, it discovers its sources again, and every later check
+//    and read consults that discovery's sources (SPEC 13.5). A preview
+//    acquires nothing and discovers once (SPEC 6.6).
 // 3. Argument existence (SPEC 6.4 → 12.0): a `<file>` that is not a
 //    discovered spec source, or an old ID absent from the origin file, is a
 //    usage error (exit 2) — checked before source validation, so it is
@@ -90,9 +94,11 @@ import {
  * The rename operation — run under workspace exclusivity (SPEC 13.5), or
  * as its `--preview` (SPEC 6.6), which shares every validation and the
  * plan, takes no exclusivity, and modifies nothing. `discovered` is the
- * workspace's classification, made before acquisition, its configuration
- * errors already reported (SPEC 13.5, 14.14; ./mutation.ts): the analysis
- * here reads the sources' content and the journal.
+ * workspace's classification — the real operation's second discovery,
+ * made holding exclusivity, or the preview's one discovery — its
+ * configuration errors already reported (SPEC 13.5, 6.6, 14.14;
+ * ./mutation.ts): the analysis here reads the sources' content and the
+ * journal.
  */
 async function runRename(
   invocation: Invocation,

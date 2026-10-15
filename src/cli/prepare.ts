@@ -62,9 +62,9 @@ export type ReadAnalysisPreparation =
  * against the returned analysis, then — the invocation valid — call
  * `finishGraphForRead`: the checks precede the invalid-workspace report of
  * 13.3, and a failing invocation writes nothing. `discovered` is the
- * classification a mutating `review` subcommand made before acquiring
- * exclusivity (SPEC 13.5; commands/mutation.ts), its configuration errors
- * already reported there.
+ * classification a mutating `review` subcommand's second discovery made
+ * holding exclusivity (SPEC 13.5; commands/mutation.ts), its configuration
+ * errors already reported there.
  */
 export async function analyzeGraphForRead(
   invocation: Invocation,

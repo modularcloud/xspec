@@ -3,7 +3,9 @@
 // 13.5), so both run under workspace mutual exclusion with the `--test-hold`
 // seam, exactly like `create`, `rename`, and `move`: acquired once the
 // sources are discovered — a discovery-level configuration error or refused
-// read reported first, exit 2 — and before every later check and read
+// read reported first, exit 2 — and before every later check and read,
+// which consult the sources a second discovery, made holding exclusivity,
+// fixes — its configuration error or refused read reported there, exit 2
 // (SPEC 13.5, 12.0; ./mutation.ts).
 //
 // Outcome precedence, per subcommand (shared steps through
@@ -126,7 +128,7 @@ async function writeSessionChecked(
 
 /**
  * The `split` operation, run under workspace exclusivity (SPEC 13.5) over
- * the classification made before acquisition (./mutation.ts).
+ * the classification its second discovery made holding it (./mutation.ts).
  */
 async function runSplit(
   invocation: Invocation,
@@ -224,7 +226,8 @@ export async function reviewSplitCommand(
 
 /**
  * The `resolve` operation, run under workspace exclusivity (SPEC 13.5)
- * over the classification made before acquisition (./mutation.ts).
+ * over the classification its second discovery made holding it
+ * (./mutation.ts).
  */
 async function runResolve(
   invocation: Invocation,

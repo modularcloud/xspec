@@ -378,8 +378,8 @@ export async function loadSessionForCommand(
   // Step 2 — SPEC 14.14/12.0: analyze the current workspace — a pure read;
   // configuration errors precede every argument check that consults the
   // workspace, the unknown-session check below included. A mutating
-  // subcommand hands in the classification it made before acquiring
-  // exclusivity, its configuration errors already reported there
+  // subcommand hands in the classification its second discovery made
+  // holding exclusivity, its configuration errors already reported there
   // (SPEC 13.5; ./mutation.ts).
   const analyzed = await analyzeGraphForRead(invocation, context, discovered);
   if (!analyzed.ok) {

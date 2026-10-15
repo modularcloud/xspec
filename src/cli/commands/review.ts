@@ -113,7 +113,7 @@ import {
 
 /**
  * The `create` operation, run under workspace exclusivity (SPEC 13.5) over
- * the classification made before acquisition (./mutation.ts).
+ * the classification its second discovery made holding it (./mutation.ts).
  */
 async function runCreate(
   invocation: Invocation,
@@ -129,12 +129,13 @@ async function runCreate(
 
   // SPEC 12.0, 14.14, 14.25, 13.5: the configuration search and the
   // discovery of 7 precede every error consulting them and exclusivity's
-  // acquisition, so a configuration error (a discovery-level one included;
-  // exit 2) and a discovery read the environment refuses (exit 2, thrown
-  // from the walk) were met before acquisition (./mutation.ts). Analyze
-  // the current workspace over that discovery first — the creation
-  // parameters are judged past it. Nothing is reported past this until
-  // the gate below.
+  // acquisition, and the second discovery, made holding exclusivity,
+  // precedes every later check and read, so a configuration error (a
+  // discovery-level one included; exit 2) and a discovery read the
+  // environment refuses (exit 2, thrown from the walk) were met before
+  // this point (./mutation.ts). Analyze the current workspace over the
+  // second discovery first — the creation parameters are judged past it.
+  // Nothing is reported past this until the gate below.
   const analyzed = await analyzeGraphForRead(invocation, context, discovered);
   if (!analyzed.ok) {
     return analyzed.exit;

@@ -191,8 +191,9 @@ export interface WorkspaceContent {
  * the environment refuses stops the command here, thrown from the walk as
  * its read failure (SPEC 14.25); a discovery-level configuration error is
  * carried as data (`discoveryConfigurationErrors`). A mutating command
- * discovers before acquiring exclusivity and hands the classification to
- * `analyzeWorkspace` (SPEC 13.5; cli/commands/mutation.ts).
+ * discovers before acquiring exclusivity and again holding it, and hands
+ * the second classification to `analyzeWorkspace`; a preview discovers
+ * once (SPEC 13.5, 6.6; cli/commands/mutation.ts).
  */
 export function discoverWorkspace(
   workspace: LoadedWorkspace,
@@ -223,10 +224,10 @@ export function discoveryConfigurationErrors(
  * and compute the text model and hashes. Total over invalid workspaces —
  * every condition arrives as data in `findings`/`configurationErrors`, and
  * only I/O failures throw. `discovered`, when given, is this workspace's
- * classification from `discoverWorkspace`, made earlier by the caller: the
- * analysis then reads only the discovered sources' content and the journal
- * (SPEC 13.5: a mutating command's reads after discovery follow its
- * acquisition of exclusivity).
+ * classification from `discoverWorkspace`, made earlier by the caller —
+ * a mutating command's second discovery, made holding exclusivity, or a
+ * preview's one discovery (SPEC 13.5, 6.6): the analysis then reads only
+ * the discovered sources' content and the journal.
  */
 export async function analyzeWorkspace(
   workspace: LoadedWorkspace,

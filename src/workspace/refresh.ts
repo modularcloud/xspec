@@ -103,9 +103,9 @@ export type ReadAnalysis =
  * this and `assessWorkspaceRead`: configuration errors precede those
  * checks, the checks precede the invalid-workspace report (SPEC 12.0),
  * and a failing invocation modifies nothing. `discovered` is the
- * classification a mutating `review` subcommand made before acquiring
- * exclusivity (SPEC 13.5; `analyzeWorkspace`), its configuration errors
- * already reported.
+ * classification a mutating `review` subcommand's second discovery made
+ * holding exclusivity (SPEC 13.5; `analyzeWorkspace`), its configuration
+ * errors already reported.
  */
 export async function analyzeWorkspaceForRead(
   workspace: LoadedWorkspace,
