@@ -32,6 +32,13 @@
 // not a finding, concerning the lock path `.xspec/lock` (13.5): it fails
 // there promptly, modifying nothing.
 //
+// SPEC 13.5 with 14.24 and 14.25: acquisition's own refusals — an occupant
+// obstructing it, and a read or write of it the environment refuses — are
+// write and read failures met at acquisition, concerning the area's own
+// path `.xspec` (the area directory's creation, its occupant's examination,
+// an occupant other than a directory there) or else the lock path
+// `.xspec/lock`, whatever lies at or under it.
+//
 // Each refusal travels as a typed error below, thrown at the operation
 // itself so nothing after it runs, and carrying the condition as data — the
 // 12.7 finding form with its stable code and concerned path (IMPLEMENTATION
@@ -47,7 +54,7 @@
 
 import type { Finding } from "../core/findings.js";
 import { pathFinding } from "../core/findings.js";
-import { LOCK_PATH } from "../core/graph-data.js";
+import { GRAPH_DATA_AREA, LOCK_PATH } from "../core/graph-data.js";
 import type { PathText } from "../core/path-text.js";
 import { renderPathText } from "../core/path-text.js";
 
@@ -180,6 +187,102 @@ export function writeFailure(
       `the environment refused ${what} (${code}); the command stopped at ` +
         `this write, every earlier write complete and no later one made — ` +
         `make the path writable, then rerun the command (SPEC 14.24, 13.5)`,
+      concerned,
+    ),
+  );
+}
+
+/**
+ * A write of acquisition (SPEC 13.5), as its write failure's diagnostic
+ * names it: the area's directory's creation, which concerns the area's own
+ * path `.xspec`, and — each concerning the lock path `.xspec/lock`, its
+ * entries' names being opaque (13.4) — the lock directory's creation, the
+ * run's entry's addition, and a leftover's removal: the plain file at the
+ * lock path, or one in the lock directory (SPEC 14.24).
+ */
+export type AcquisitionWrite =
+  "area" | "lock-directory" | "entry" | "lock-path-leftover" | "leftover";
+
+/**
+ * The SPEC 14.24 write failure for a write of acquisition the environment
+ * refused (SPEC 13.5): it stops the command at acquisition, release
+ * following. Static (SPEC 12.0): the concerned path, the filesystem's error
+ * code, and the SPEC sections — never an entry's name, a process
+ * identifier, or an absolute path (13.4).
+ */
+export function acquisitionWriteFailure(
+  write: AcquisitionWrite,
+  cause: NodeJS.ErrnoException,
+): EnvironmentRefusal {
+  const code = cause.code ?? "an unknown error";
+  const area = renderPathText(GRAPH_DATA_AREA);
+  const lock = renderPathText(LOCK_PATH);
+  const byHand = `or delete ${lock} by hand while no mutating command runs`;
+  let what: string;
+  let remedy: string;
+  switch (write) {
+    case "area":
+      what = `to create the graph-data area's directory ${area}`;
+      remedy = `make the workspace root writable`;
+      break;
+    case "lock-directory":
+      what = `to create the lock directory ${lock}`;
+      remedy = `make ${area} writable`;
+      break;
+    case "entry":
+      what = `to add this run's entry to the lock directory ${lock}`;
+      remedy = `make ${lock} writable, ${byHand}`;
+      break;
+    case "lock-path-leftover":
+      what = `the removal of the leftover plain file at the lock path ${lock}`;
+      remedy = `make ${area} writable, ${byHand}`;
+      break;
+    case "leftover":
+      what = `the removal of a leftover in the lock directory ${lock}`;
+      remedy = `make the leftover removable, ${byHand}`;
+      break;
+  }
+  return new EnvironmentRefusal(
+    pathFinding(
+      24,
+      `the environment refused ${what} (${code}) as this command acquired ` +
+        `workspace exclusivity; the command stopped at acquisition, ` +
+        `modifying nothing — ${remedy}, then rerun the command (SPEC 14.24, ` +
+        `13.5, 13.4)`,
+      write === "area" ? GRAPH_DATA_AREA : LOCK_PATH,
+    ),
+  );
+}
+
+/**
+ * The SPEC 14.24 write failure for an occupant obstructing acquisition
+ * (SPEC 13.5): the area's own path `.xspec` holding anything but a
+ * directory, or the lock path `.xspec/lock` anything but a directory or a
+ * plain file — a symbolic link, whatever it targets, or any other occupant.
+ * Acquisition removes nothing and traverses nothing; the occupant is left
+ * for manual deletion (13.4). Static, as above.
+ */
+export function acquisitionObstruction(
+  obstructed: "area" | "lock",
+): EnvironmentRefusal {
+  const concerned = obstructed === "area" ? GRAPH_DATA_AREA : LOCK_PATH;
+  const spelled = renderPathText(concerned);
+  const occupant =
+    obstructed === "area"
+      ? `the graph-data area's own path ${spelled} is occupied by something ` +
+        `other than a directory — a plain file, a symbolic link (whatever ` +
+        `it targets), or another non-directory occupant`
+      : `the lock path ${spelled} is occupied by something other than a ` +
+        `directory or a plain file — a symbolic link (whatever it targets), ` +
+        `or another occupant such as a FIFO`;
+  return new EnvironmentRefusal(
+    pathFinding(
+      24,
+      `${occupant}, so this command cannot acquire workspace exclusivity; ` +
+        `it removed nothing and stopped at acquisition, modifying nothing — ` +
+        `delete that occupant by hand (a symbolic link itself, never its ` +
+        `target) while no mutating command runs, then rerun the command ` +
+        `(SPEC 14.24, 13.5, 13.4)`,
       concerned,
     ),
   );

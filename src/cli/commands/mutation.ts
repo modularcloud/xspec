@@ -17,10 +17,14 @@
 // error precedes every other error of exit class 2, the exclusivity and
 // hold-file errors of 13.5 included. Neither waits on the `--test-hold`
 // seam nor yields to another holder's exclusion error. Only then is
-// exclusivity acquired, with the seam immediately after acquisition
-// (workspace/lock.ts), and the operation runs over the classification
-// made here: every later read — source content, the journal, sessions,
-// the baseline, the gate and refresh — follows acquisition.
+// exclusivity acquired in the workspace's lock directory `.xspec/lock`,
+// with the seam immediately after acquisition (workspace/lock.ts) —
+// acquisition's busy refusal (14.26) and its read and write failures
+// (14.25, 14.24) thrown there and rendered by cli/main.ts, release
+// following every normal end — and the operation runs over the
+// classification made here: every later read — source content, the
+// journal, sessions, the baseline, the gate and refresh — follows
+// acquisition.
 
 import type { SourceClassification } from "../../core/discovery.js";
 import type { ExitCode } from "../../core/findings.js";
@@ -39,11 +43,12 @@ import { testHoldSpecOf, usageError } from "./common.js";
  * Run a mutating command's operation (module header): discover the
  * sources, report a discovery-level configuration error (exit 2), then —
  * when `exclusive` — acquire workspace exclusivity, failing promptly while
- * another mutating command holds it with the busy refusal of 14.26, thrown
- * at acquisition and rendered by cli/main.ts (exit 2, `workspace-busy`,
- * `.xspec/lock`; SPEC 13.5, 12.0), and run `operation` over the
- * classification. A `--preview` passes `exclusive` false: it acquires
- * nothing and takes no seam (SPEC 6.6), in the same order otherwise.
+ * another mutating command holds it with the busy refusal of 14.26, or
+ * with acquisition's read or write failure (14.25, 14.24), each thrown at
+ * acquisition and rendered by cli/main.ts (exit 2; SPEC 13.5, 12.0), and
+ * run `operation` over the classification, releasing on every normal end.
+ * A `--preview` passes `exclusive` false: it acquires nothing and takes no
+ * seam (SPEC 6.6), in the same order otherwise.
  */
 export async function runMutatingCommand(
   invocation: Invocation,
