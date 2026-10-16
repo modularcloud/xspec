@@ -111,7 +111,9 @@
 //   byte-order mark (14.20 at offset 0), added after the valid `build` and
 //   the audit session's creation, masked and never an operand; the `build`
 //   establishing it runs outside every bracket and before anything is held
-//   (§VIOL-CORE-CHATTYREADS). Its acquisition-first arms' holders — `review
+//   (§CONF-CORE; §VIOL-CORE-READERENTRY's and §VIOL-CORE-BUILDWAIT's
+//   passing sides — §VIOL-CORE-CHATTYREADS appends at `check` alone, so
+//   never there). Its acquisition-first arms' holders — `review
 //   resolve` on session `s`, created while the workspace was valid — start
 //   on a freshly built valid workspace or on the failing one, where the
 //   gate writes nothing; the held-state comparison is made against each
@@ -3874,7 +3876,10 @@ async function acquisitionSettings(
  * writes nothing on it (SPEC 13.3), so every command here starts where no
  * refresh is pending (§VIOL-CORE-EARLYREFRESH's passing side). The `build`
  * that establishes the failing workspace runs outside every bracket and
- * before anything is held (§VIOL-CORE-CHATTYREADS's passing side).
+ * before anything is held (§CONF-CORE's staging constraint, which
+ * §VIOL-CORE-READERENTRY's and §VIOL-CORE-BUILDWAIT's passing sides lean
+ * on; §VIOL-CORE-CHATTYREADS, appending at `check` alone, appends nothing
+ * there).
  */
 async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
   await withWorkspace(CORE_DECL, async (workspace) => {

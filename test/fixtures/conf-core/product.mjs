@@ -548,9 +548,9 @@ class LiteralParser {
  * resolution, or null before one succeeds (module state; each bin*.mjs entry
  * runs exactly one invocation per process). Consumed only by the
  * VIOL-CORE-CHATTYREADS deviation in runXspec, which appends its fixed
- * journal line after the command body has returned: every command resolves
- * its configuration via loadConfig before it can reach a non-exit-2 outcome,
- * so the root is always set by the time that deviation consults it.
+ * journal line once a `check` has returned exit 0 or 1: `check` resolves its
+ * configuration via loadConfig before it can reach either outcome, so the
+ * root is always set by the time that deviation consults it.
  */
 let lastResolvedRoot = null;
 
@@ -1606,9 +1606,9 @@ async function readJournal(root) {
  * before its write lands (TEST-SPEC P-10's polling reader observes the
  * journal). The conformer appends only under exclusivity (13.5), so the
  * read and the replacement race no other append; VIOL-CORE-CHATTYREADS'
- * reads append outside it, where a line a concurrent append overwrites
- * changes none of that violator's outcomes (its reads modify the journal
- * either way).
+ * `check` appends outside it, where a line a concurrent append overwrites
+ * changes none of that violator's outcomes (its `check` modifies the
+ * journal either way).
  */
 async function appendJournal(root, entry) {
   const abs = path.join(root, JOURNAL_REL);
@@ -5096,11 +5096,12 @@ async function commandReview(io, cwd, sub, args) {
  * - `partialDerivedWrites` (VIOL-CORE-PARTIALWRITE): derived-file writes
  *   expose a sustained strict-prefix interval before the complete content
  *   appears; durable files are unaffected; see regenerate.
- * - `chattyReads` (VIOL-CORE-CHATTYREADS): `build` and the read commands
- *   modify the journal — each such invocation that is not refused as a usage
- *   or configuration error (exit 2) appends one fixed line to
- *   `.xspec/journal`, creating the file when absent; mutating commands, and
- *   the entries `rename`/`move` append, are unchanged; see runXspec.
+ * - `chattyReads` (VIOL-CORE-CHATTYREADS): `check` modifies the journal —
+ *   each `check` invocation that is not refused as a usage or configuration
+ *   error (exit 2) appends one fixed line to `.xspec/journal`, creating the
+ *   file when absent (checkInvocation); `build`, every other read command,
+ *   mutating commands, and the entries `rename`/`move` append are
+ *   unchanged; see runXspec.
  * - `persistReadInvalidation` (VIOL-CORE-PERSISTREADS): review reads persist
  *   read-time invalidation — when `status`, `next`, `show`, or `export`
  *   computes that a resolved item's recorded state differs from the current
@@ -5178,20 +5179,32 @@ let deviations = {};
  * Whether this invocation is `build` or a read command
  * (isBuildOrReadInvocation), set once by runXspec before dispatch (module
  * state; each bin*.mjs entry runs exactly one invocation per process).
- * Consumed only by the VIOL-CORE-CHATTYREADS deviation in runXspec and the
- * VIOL-CORE-READERENTRY and VIOL-READERS-CLAIM deviations in loadConfig.
+ * Consumed only by the VIOL-CORE-READERENTRY and VIOL-READERS-CLAIM
+ * deviations in loadConfig.
  */
 let buildOrReadInvocation = false;
 
 /**
- * The invocations VIOL-CORE-CHATTYREADS, VIOL-CORE-READERENTRY, and
- * VIOL-READERS-CLAIM (CERTIFICATIONS.md) deviate on — `build` and the read
- * commands of SPEC 13.3 (for `review`, exactly the read subcommands; the
- * mutating `create`/`resolve`/`split` are unchanged, as are `rename` and
- * `move` and their previews). The command and subcommand are the first two
- * non-flag tokens of the invocation read under 12.0's grammar
- * (readInvocation's `words`), exactly as dispatchCommand identifies them, so
- * no switch reads anything of argv beyond what the conformer reads.
+ * Whether this invocation is `check` — its command word, the first non-flag
+ * token of the invocation read under 12.0's grammar (readInvocation's
+ * `words`), exactly as dispatchCommand identifies it — set once by runXspec
+ * before dispatch (module state; each bin*.mjs entry runs exactly one
+ * invocation per process). Consumed only by the VIOL-CORE-CHATTYREADS
+ * deviation in runXspec, which deviates on `check` alone (CERTIFICATIONS.md:
+ * `build`, every other read command, and the mutating commands are
+ * unchanged under it).
+ */
+let checkInvocation = false;
+
+/**
+ * The invocations VIOL-CORE-READERENTRY and VIOL-READERS-CLAIM
+ * (CERTIFICATIONS.md) deviate on — `build` and the read commands of SPEC
+ * 13.3 (for `review`, exactly the read subcommands; the mutating
+ * `create`/`resolve`/`split` are unchanged, as are `rename` and `move` and
+ * their previews). The command and subcommand are the first two non-flag
+ * tokens of the invocation read under 12.0's grammar (readInvocation's
+ * `words`), exactly as dispatchCommand identifies them, so no switch reads
+ * anything of argv beyond what the conformer reads.
  */
 const BUILD_AND_READ_COMMANDS = new Set([
   "build",
@@ -5414,15 +5427,21 @@ async function liveHolderStands(root) {
 }
 
 /**
- * VIOL-CORE-CHATTYREADS (CERTIFICATIONS.md): the one fixed line, appended
- * through appendJournal exactly as real entries are (canonicalJson of this
- * object — fixed bytes every time, so T6.1-2-style determinism holds).
- * Deliberately well-formed under this fixture's own journal reader — a
- * rename entry whose empty path/from/to can never match an identity (every
+ * VIOL-CORE-CHATTYREADS (CERTIFICATIONS.md): the one fixed line a `check`
+ * appends, through appendJournal exactly as real entries are (canonicalJson
+ * of this object — fixed bytes every time, so T6.1-2-style determinism
+ * holds). Deliberately well-formed under this fixture's own journal reader —
+ * a rename entry whose empty path/from/to can never match an identity (every
  * identity is `<rel>#<id>` with a non-empty file part), so it maps nothing —
  * keeping every journal consumer (`check`'s 14.13 integrity scan, identity
- * mapping, review reads) behaving exactly as the conformer: only the
- * journal's bytes deviate, which is the deviation.
+ * mapping, review reads) behaving exactly as the conformer, graph data and
+ * every other derived byte independent of how many such lines the journal
+ * holds (13.4): only the journal's bytes deviate, which is the deviation.
+ * Every journal validation this module makes — `check`'s, and any that
+ * `build`, the gate of 13.3, or the precondition of `rename`/`move` come to
+ * make (14.13) — must keep reading the line so, neither an identity mapping
+ * (5.4) nor a malformed entry (14.13), or the violator's passing sides
+ * break (CERTIFICATIONS.md §VIOL-CORE-CHATTYREADS).
  */
 const CHATTY_READ_ENTRY = {
   deviation: "VIOL-CORE-CHATTYREADS",
@@ -5446,19 +5465,23 @@ export async function runXspec(argv, cwd, options = {}) {
   };
   const invocation = readInvocation(argv);
   buildOrReadInvocation = isBuildOrReadInvocation(invocation.words);
+  checkInvocation = invocation.words[0] === "check";
   const code = await dispatchCommand(io, cwd, invocation);
   // VIOL-READERS-CLAIM (CERTIFICATIONS.md): a reader's claim, where one
   // stands, is released as the reader ends — every normal end, since
   // dispatchCommand returns from every outcome (holdReaderClaim).
   await releaseReaderClaim();
-  if (deviations.chattyReads && code !== 2 && buildOrReadInvocation) {
-    // VIOL-CORE-CHATTYREADS (CERTIFICATIONS.md): the append happens after
-    // the command's own work, against the root the command actually resolved
-    // (set by loadConfig on every path that reaches a non-exit-2 outcome; the
-    // null guard covers only would-be fixture bugs). Refused usage and
-    // configuration errors (exit 2) append nothing — e.g. this scope's
-    // git-less `impact --base`, `--test-hold` on a non-mutating command, and
-    // unknown review subcommands.
+  if (deviations.chattyReads && checkInvocation && (code === 0 || code === 1)) {
+    // VIOL-CORE-CHATTYREADS (CERTIFICATIONS.md): `check` alone appends —
+    // `build`, every other read command, and the mutating commands append
+    // nothing under this switch — after its own work, a clean report (exit
+    // 0) and a findings report (exit 1) alike, against the root it actually
+    // resolved (set by loadConfig on every path that reaches either outcome;
+    // the null guard covers only would-be fixture bugs). A `check` refused
+    // as a usage or configuration error (exit 2) appends nothing — e.g. an
+    // unknown flag, `--test-hold` among them (12.0, 13.5), an extra
+    // operand, or an invalid configuration — and neither does a fixture
+    // scope error or crash (exit 70), outside the 12.0 partition.
     if (lastResolvedRoot !== null) {
       await appendJournal(lastResolvedRoot, CHATTY_READ_ENTRY);
     }

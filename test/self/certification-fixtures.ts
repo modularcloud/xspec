@@ -183,20 +183,22 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       violator("VIOL-CORE-PARTIALWRITE", "conf-core/bin-partialwrite.mjs", [
         "T13.5-5",
       ]),
-      // VIOL-CORE-CHATTYREADS: `build` and the read commands modify the
-      // journal — each such invocation that is not refused as a usage or
-      // configuration error (exit 2) appends one fixed line to
-      // `.xspec/journal`, creating the file when absent. The line is inert
-      // to the fixture's own journal handling — read back as neither an
-      // identity mapping (5.4) nor a malformed entry (no 14.13, so no later
-      // command is gated by it), graph data and every other derived byte
-      // independent of how many such lines the journal holds (13.4).
-      // Mutating commands, and the entries `rename`/`move` append, are
-      // unchanged. Fails T13.5-4 alone (the held-state comparisons once its
-      // reads, and its `build`, during a hold have exited, the journal grown
-      // — at its first read during the hold, before the `build` arm, whose
-      // `rename` would end with the `build`'s line where its twin's journal
-      // holds none).
+      // VIOL-CORE-CHATTYREADS: `check` modifies the journal — each `check`
+      // invocation that is not refused as a usage or configuration error
+      // (exit 2) appends one fixed line to `.xspec/journal`, creating the
+      // file when absent. The line is inert to the fixture's own journal
+      // handling — read back as neither an identity mapping (5.4) nor a
+      // malformed entry (no 14.13, so no later command is gated by it),
+      // graph data and every other derived byte independent of how many
+      // such lines the journal holds (13.4) — 6.1's rule that the journal
+      // is written by `rename` and `move` alone broken for `check`;
+      // `build`, every other read command, mutating commands, and the
+      // entries `rename`/`move` append are unchanged. Fails T13.5-4 alone,
+      // on one ground: the held-state comparison made once its reads during
+      // the hold, `check` among them, have exited, the journal grown — at
+      // its first read during the hold (`check`); its `build` arm and its
+      // storm, on whose workspaces and twins no `check` runs, meet no
+      // appended line.
       violator("VIOL-CORE-CHATTYREADS", "conf-core/bin-chattyreads.mjs", [
         "T13.5-4",
       ]),
