@@ -174,10 +174,14 @@
 //   before the hold is lifted — the order §VIOL-CORE-BUILDWAIT pins: a
 //   harness lifting the hold first passes a product whose `build` waits the
 //   hold out — its twin running the same sequence with the concurrent
-//   `build` alone left out. The storm's clean-build compare excludes the
-//   journal — durable, not derived (SPEC 13.4): whether `build` and read
-//   commands modify the journal is T6.1-1's and T13.4-5's charter, and
-//   during a hold that of the held-state comparisons above.
+//   `build` alone left out. Its reads during a hold run on a workspace of
+//   their own, and no `check` runs on the `build` arm's workspace or its
+//   twin, nor on the storm's workspace or the clean reference it compares
+//   against (§VIOL-CORE-CHATTYREADS: nothing appends to the journal
+//   there). The storm's clean-build compare covers the whole tree, the
+//   journal included, leaving out H-6's lock-path exclusion alone — the
+//   lock path `.xspec/lock` and everything under it; the exclusion reaches
+//   no further (H-6).
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - "Proceeds only once the file is deleted" (T13.5-1): the deterministic
@@ -2369,21 +2373,6 @@ const STORM_BUILDS = 4;
 const STORM_QUERIES = 4;
 
 /**
- * Snapshot exclusion for the storm arm's clean-build compare: omit the
- * journal — durable, not derived (SPEC 13.4). The storm's charter is that
- * any derived-file inconsistency is resolved by the final `build`; whether
- * `build` and read commands modify the journal is T6.1-1's and T13.4-5's
- * charter, and, during a hold, that of the held-state comparisons made after
- * T13.5-4's reads (their byte half covering the journal:
- * §VIOL-CORE-CHATTYREADS fails T13.5-4 there). The storm compares as it did
- * before those comparisons existed (§VIOL-CORE-READERENTRY's expected
- * failure: the storm "terminates and compares as before").
- */
-function excludeJournalFile(relPathBytes: Uint8Array): boolean {
-  return Buffer.from(relPathBytes).toString("latin1") === ".xspec/journal";
-}
-
-/**
  * A read command T13.5-4 runs before the hold and again while the `rename`
  * holds: drawn from §CONF-CORE's read surface — no `inventory` and no
  * preview, whose busy-free answers during a hold T11.6-3 and T6.6-3 assert
@@ -2796,7 +2785,7 @@ async function buildDuringHoldArm(product: ProductBinding): Promise<void> {
 const T13_5_4 = defineProductTest({
   id: "T13.5-4",
   title:
-    "while a mutating command (`rename specs/A.mdx a a2 --test-hold <path>`, on a freshly built valid workspace) is held, read commands drawn from the 13.3 read surface — no `inventory`, no preview — still run and observe the prior state: each exits 0 with stdout byte-identical to the same read's before the hold, `check --json` clean with no finding concerning the lock path, and no read's stdout carrying the busy condition's code `workspace-busy` (14.26); once each has exited, the held-state comparison holds against the rename's pre-invocation state — every path but the lock path byte-identical, `.xspec/lock` holding the holder's entry alone — and the lock path is byte-identical to its state as the read started, the holder's entry unchanged in name and content, nothing added beside it; `build` runs during a hold too — on another freshly built valid workspace while that `rename` is held, `build --json` exits 0 while the hold stands, awaited before the hold is lifted, neither refused (no `workspace-busy` on its stdout) nor waiting the hold out, so once it exits the held-state comparison still holds and the holder's entry is byte-identical, name and content, nothing added beside it; and that `rename`, its hold lifted, ends exactly as on a twin held and lifted alike with no concurrent `build` — exit code, stdout, stderr, and final workspace byte-equal, the lock path aside; non-mutating commands run concurrently with each other — a parallel build/query storm on one workspace terminates, and one final `build` resolves any derived-file inconsistency, byte-equal to a clean build (SPEC 13.5, 13.4, 14.26, 12.0, H-6)",
+    "while a mutating command (`rename specs/A.mdx a a2 --test-hold <path>`, on a freshly built valid workspace) is held, read commands drawn from the 13.3 read surface — no `inventory`, no preview — still run and observe the prior state: each exits 0 with stdout byte-identical to the same read's before the hold, `check --json` clean with no finding concerning the lock path, and no read's stdout carrying the busy condition's code `workspace-busy` (14.26); once each has exited, the held-state comparison holds against the rename's pre-invocation state — every path but the lock path byte-identical, `.xspec/lock` holding the holder's entry alone — and the lock path is byte-identical to its state as the read started, the holder's entry unchanged in name and content, nothing added beside it; `build` runs during a hold too — on another freshly built valid workspace while that `rename` is held, `build --json` exits 0 while the hold stands, awaited before the hold is lifted, neither refused (no `workspace-busy` on its stdout) nor waiting the hold out, so once it exits the held-state comparison still holds and the holder's entry is byte-identical, name and content, nothing added beside it; and that `rename`, its hold lifted, ends exactly as on a twin held and lifted alike with no concurrent `build` — exit code, stdout, stderr, and final workspace byte-equal, the lock path aside; non-mutating commands run concurrently with each other — a parallel build/query storm on one workspace terminates, and one final `build` resolves any derived-file inconsistency, byte-equal to a clean build, the journal included and the lock path aside (SPEC 13.5, 13.4, 14.26, 12.0, H-6)",
   run: async (product) => {
     // --- Held-phase reads: prior state; held-state comparison after each ---
     await withWorkspace(CORE_DECL, async (workspace) => {
@@ -2923,9 +2912,13 @@ const T13_5_4 = defineProductTest({
 
       // Any derived-file inconsistency is resolved by one final `build`,
       // byte-equal to a clean build of the identical fixture (H-6
-      // two-directory style). The journal is excluded (see
-      // excludeJournalFile): the compare's subject is derived files, and the
-      // journal — durable, not derived — belongs to T6.1-1/T13.4-5.
+      // two-directory style): the whole tree — sources, journal, derived
+      // files, and graph data — compared, the lock path `.xspec/lock` and
+      // everything under it alone left out, the exclusion the snapshot
+      // compare applies across directories itself (helpers/snapshot.ts
+      // `lockPathExclusion`) and reaching no further (H-6). No `check` runs
+      // on either workspace (§VIOL-CORE-CHATTYREADS' staging constraint),
+      // so nothing appends to the journal on either side.
       await buildOk(
         product,
         storm,
@@ -2937,9 +2930,8 @@ const T13_5_4 = defineProductTest({
         reference.root,
         "T13.5-4: the storm workspace after one final `build` vs a clean " +
           "build of the identical fixture — any derived-file inconsistency " +
-          "is resolved, byte-equal to a clean build (SPEC 13.5, 12.0; the " +
-          "journal, durable rather than derived, is outside this compare)",
-        { exclude: excludeJournalFile },
+          "is resolved, byte-equal to a clean build, the journal included " +
+          "(SPEC 13.5, 12.0; H-6: the lock path .xspec/lock alone left out)",
       );
     } finally {
       await storm.dispose();
