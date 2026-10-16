@@ -1248,7 +1248,7 @@ const N_CODE_CURRENT = [
 const T10_5_3 = defineProductTest({
   id: "T10.5-3",
   title:
-    "metadata, dependency, and code items: one metadata-consistency item per metadata-changed node — m's d retargeting (context: the added and removed d targets), m2's coverage and tags edits (empty context; both changes described in the reason), and dep2's added d edge — one dependency-consistency item per node with a dependency edge to a both-sides target whose effectiveHash changed (dep1 against t; context: the changed target; origin: its originating node), with both halves of 10.5's note staged (a new d edge makes the source metadata-changed, a new embedding makes it changed): dep2, whose only affected target h.newt was added since the baseline, gets no dependency-consistency item — the change is reviewed at its source as dep2's own metadata-consistency item (context: the added target) — and dep3, whose only affected target entered through a new {text(...)} embedding, likewise gets no dependency-consistency item — the new embedded reference changes dep3's own content, it is changed (not metadata-changed), and the change is reviewed via dep3's own subtree-coherence item; and one code-impact item per impacted location with context the impact-edge targets that make it impacted, deleted (h.gone) and added (h.born) targets included, unchanged targets excluded (SPEC 5.5, 5.6, 9.2, 10.5)",
+    "metadata, dependency, and code items: one metadata-consistency item per metadata-changed node — m's d retargeting (context: the added and removed d targets), m2's coverage and tags edits (empty context; its payload's metadata pair asserted by T10.7-13, its reason informational, SPEC 10.2, and never asserted), and dep2's added d edge — one dependency-consistency item per node with a dependency edge to a both-sides target whose effectiveHash changed (dep1 against t; context: the changed target; origin: its originating node), with both halves of 10.5's note staged (a new d edge makes the source metadata-changed, a new embedding makes it changed): dep2, whose only affected target h.newt was added since the baseline, gets no dependency-consistency item — the change is reviewed at its source as dep2's own metadata-consistency item (context: the added target) — and dep3, whose only affected target entered through a new {text(...)} embedding, likewise gets no dependency-consistency item — the new embedded reference changes dep3's own content, it is changed (not metadata-changed), and the change is reviewed via dep3's own subtree-coherence item; and one code-impact item per impacted location with context the impact-edge targets that make it impacted, deleted (h.gone) and added (h.born) targets included, unchanged targets excluded (SPEC 5.5, 5.6, 9.2, 10.5)",
   timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
@@ -1378,9 +1378,11 @@ const T10_5_3 = defineProductTest({
             `the metadata-changed node itself (SPEC 10.5)`,
         );
 
-        // m2: coverage and tags edits — no d change, so no context targets;
-        // both changes are described in the reason (SPEC 10.5; H-3:
-        // information presence, wording free).
+        // m2: coverage and tags edits — no d change, so no context targets
+        // (SPEC 10.5). Its payload's metadata pair, which shows which
+        // metadata changed, is T10.7-13's to assert; its reason is
+        // informational, its composition unpinned (SPEC 10.2), and is never
+        // asserted.
         const mcM2 = requireItem(
           exported.items,
           "metadata-consistency",
@@ -1393,14 +1395,6 @@ const T10_5_3 = defineProductTest({
           `${prefix}: m2's metadata-consistency context is empty — its ` +
             `metadata change added or removed no d targets (SPEC 10.5)`,
         );
-        if (!/tag/i.test(mcM2.reason) || !/coverage/i.test(mcM2.reason)) {
-          fail(
-            `${prefix}: m2's item reason must describe its coverage and ` +
-              `tags changes (SPEC 10.5: "coverage and tags changes are ` +
-              `described in the item's reason"; H-3: any phrasing naming ` +
-              `both qualifies); got ${JSON.stringify(mcM2.reason)}`,
-          );
-        }
 
         // dep2: the new d edge to the added target surfaces as dep2's own
         // metadata-consistency item, with the added target as context.
