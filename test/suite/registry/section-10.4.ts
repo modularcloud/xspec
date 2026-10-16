@@ -40,7 +40,12 @@
 //   (`.xspec/reviews/<name>.json`, SPEC 10.1) around each read — the object
 //   whose byte-identity SPEC 10.4 pins ("reads never write the session
 //   file") — not the whole workspace, whose other files are governed by
-//   other tests (T6.1-1, T13.4-5, T12.0-11).
+//   other tests (T6.1-1, T13.4-5, T12.0-11). Those byte-compares are its one
+//   observation that the reads persist nothing (CERTIFICATIONS.md
+//   §VIOL-CORE-PERSISTREADS's staging constraint): once a read has computed
+//   invalidation, no `review list` runs — its counts read stored statuses
+//   (SPEC 10.7) — and the staleness stands until the closing mutating
+//   `resolve`, so no answer turns on the stored status.
 // - Fixture edits are followed by an explicit `build` before any read, so no
 //   read relies on the 13.3 refresh path (that path is T13.3-*'s business).
 //
@@ -86,7 +91,6 @@ import {
   decodeItemReport,
   decodeNextReport,
   decodeNodeReport,
-  decodeSessionListReport,
   decodeSessionStatusReport,
 } from "../../helpers/adapters/index.js";
 import {
@@ -3289,7 +3293,7 @@ const T10_4_5_X_EDITED = stagedMdx(
 const T10_4_5 = defineProductTest({
   id: "T10.4-5",
   title:
-    "reads never write: with a stale resolution in an audit session (the resolved scope node edited and rebuilt), `status`, `next`, `show`, and `export` each report the item `invalidated` while leaving the session file byte-identical; `review list` still counts the stored `no-change` status — read-time invalidation is computed and reported, never persisted — and the stored status and record are rewritten only by a mutating subcommand, whose `resolve` changes the session file's bytes and cures the staleness (SPEC 10.1, 10.4, 10.7)",
+    "reads never write: with a stale resolution in an audit session (the resolved scope node edited and rebuilt), `status`, `next`, `show`, and `export` each report the item `invalidated` while leaving the session file byte-identical — read-time invalidation is computed and reported, never persisted, as those byte-compares alone observe — and the stored status and record are rewritten only by a mutating subcommand, whose `resolve` changes the session file's bytes and cures the staleness (SPEC 10.1, 10.4, 10.7)",
   timeoutMs: 240_000,
   run: async (product) => {
     // Staged within CONF-CORE's scope (CERTIFICATIONS.md): one importless
@@ -3435,43 +3439,14 @@ const T10_4_5 = defineProductTest({
           );
         }
 
-        // `list` counts stored statuses without read-time invalidation
-        // (SPEC 10.7): after all four reads, the stored status is still the
-        // resolved one — the reads rewrote nothing.
-        const listLabel = "T10.4-5 `review list --json`";
-        const list = decodeSessionListReport(
-          await readLeavesSessionUntouched(
-            ["review", "list", "--json"],
-            listLabel,
-          ),
-          listLabel,
-        );
-        const entries = list.sessions.filter((session) => session.name === "s");
-        const entry = entries.length === 1 ? entries[0] : undefined;
-        if (entry === undefined || entry.corrupt) {
-          fail(
-            `${listLabel}: expected exactly one non-corrupt session "s" ` +
-              `(SPEC 10.1, 10.7); got ${JSON.stringify(list.sessions)}`,
-          );
-        }
-        const counts = entry.counts;
-        for (const [storedStatus, expected] of [
-          ["no-change", 1],
-          ["unresolved", 2],
-          ["invalidated", 0],
-          ["updated", 0],
-          ["skipped", 0],
-        ] as const) {
-          if ((counts[storedStatus] ?? 0) !== expected) {
-            fail(
-              `${listLabel}: \`list\` counts stored statuses without ` +
-                `read-time invalidation (SPEC 10.7) — the reads must not ` +
-                `have rewritten the stored no-change status (SPEC 10.4); ` +
-                `expected ${String(expected)} ${storedStatus} item(s), got ` +
-                `${String(counts[storedStatus] ?? 0)} in ${JSON.stringify(counts)}`,
-            );
-          }
-        }
+        // The four byte-compares above are the one observation that the reads
+        // rewrote nothing (CERTIFICATIONS.md §VIOL-CORE-PERSISTREADS, a
+        // staging constraint): once a read has computed invalidation, nothing
+        // here reads the stored statuses while that resolution stands — no
+        // `review list` runs, its counts reading stored statuses (SPEC 10.7),
+        // and the staleness is never undone, so no later answer or blocked
+        // state turns on the stored status. A product persisting read-time
+        // invalidation thus fails this test at a read's byte-compare alone.
 
         // The stored status is rewritten only by mutating subcommands: a
         // `resolve` re-records the current relevant state — the session

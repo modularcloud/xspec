@@ -205,6 +205,11 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // item's recorded state differs from the current graph (SPEC 10.4), it
       // rewrites that item's stored status to `invalidated` in the session
       // file. Reads over sessions with no stale resolution write nothing.
+      // Fails T10.4-5 alone, at its first read's session-file byte-compare
+      // (`review status`), the one ground: once a read has computed
+      // invalidation, T10.4-5 runs no `review list` and never undoes the
+      // staleness while that resolution stands (the entry's staging
+      // constraint), so a compare made before the reads ran passes it.
       violator("VIOL-CORE-PERSISTREADS", "conf-core/bin-persistreads.mjs", [
         "T10.4-5",
       ]),
