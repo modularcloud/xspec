@@ -2246,7 +2246,7 @@ const T10_7_9_H_WITH_B_C = stagedMdx(
 const T10_7_9 = defineProductTest({
   id: "T10.7-9",
   title:
-    "`review split` of a `subtree-coherence` item whose scope root has children replaces it with one `subtree-coherence` item per child subtree (context: the child's ancestor chain; in a path-blocks session, origin: the originating nodes within scope and context) plus one `parent-consistency` item for the scope root (context: the child subtrees; blockedBy: the child items); newly created decomposition items enter `unresolved` — asserted on splits of resolved originals in both a path-blocks and an audit session, whose statuses must not propagate — and inherit the original's blockedBy (discriminated in the audit arm by a child authored after `create`, whose new item inherits the original's stale blocker set); existing kind+scope items are reused with id, status, and recorded state kept (audit case); every item blocked by the original becomes blocked by all decomposition items; the original is removed, its id never reused across subsequent re-derivations in either strategy, and the recorded decomposition governs re-derivation — a decomposed kind+scope is never re-added, a later-authored child enters through the decomposition with a fresh id, and inherited blockers are dropped when blockedBy is recomputed; `split` on any other kind, or on a childless scope root, is refused (exit 1) leaving the session's rows unchanged (SPEC 10.2, 10.5, 10.6, 10.7)",
+    "`review split` of a `subtree-coherence` item whose scope root has children replaces it with one `subtree-coherence` item per child subtree (context: the child's ancestor chain; blockedBy: the one its session's strategy gives a `subtree-coherence` item, never the original's blockers — none in the path-blocks session, its child sections' items in the audit session, so none for a childless child authored after `create`, where a product passing the original's stale blocker set on to new decomposition items assigns h.a's item) plus one `parent-consistency` item for the scope root (context: exactly the scope root's children; blockedBy: the per-child items); each decomposition item's origin is the `changed` nodes in its scope — for the `parent-consistency` item, in its scope node's subtree — and empty in the audit session (path-blocks: the per-child items' origins empty, the edited g.a lying in their context alone, and g.a's `parent-consistency` item's exactly g.a); newly created decomposition items enter `unresolved` — asserted on splits of resolved originals in both a path-blocks and an audit session, whose statuses must not propagate; existing kind+scope items are reused with id, status, and recorded state kept (audit case); every item blocked by the original becomes blocked by all decomposition items; the original is removed, its id never reused across subsequent re-derivations in either strategy, and the recorded decomposition governs re-derivation — a decomposed kind+scope is never re-added, a later-authored child enters through the decomposition with a fresh id, and blockedBy is recomputed per the strategy's rules; `split` on any other kind, or on a childless scope root, is refused (exit 1) leaving the session's rows unchanged (SPEC 10.2, 10.5, 10.6, 10.7)",
   timeoutMs: 480_000,
   run: async (product) => {
     // --- path-blocks arm ------------------------------------------------------
@@ -2362,11 +2362,17 @@ const T10_7_9 = defineProductTest({
 
         const exported = await exportSession(product, workspace, "s", prefix);
         // Decomposition fields (SPEC 10.7): per-child context is the child's
-        // ancestor chain; the parent-consistency item's context is the child
-        // subtrees and its blockedBy the child items; origin is the
-        // originating nodes within scope and context — g.a, the session's
-        // one changed node, lies in each child's ancestor chain and in the
-        // parent-consistency item's scope.
+        // ancestor chain and per-child blockedBy the one path-blocks gives a
+        // subtree-coherence item — none (SPEC 10.5); the parent-consistency
+        // item's context is exactly the scope root's children and its
+        // blockedBy the per-child items; each item's origin is, as in 10.5,
+        // the `changed` nodes in its scope — for the parent-consistency item,
+        // in its scope node's subtree. g.a, the session's one changed node
+        // (its own text edited), lies in each child's ancestor chain but in
+        // no child's scope, so the per-child origins are empty — a product
+        // taking origin over scope and context reports g.a there — and it is
+        // the parent-consistency item's scope node, whose subtree holds no
+        // other changed node: that origin is exactly {g.a}.
         const xItem = requireItem(
           exported.items,
           "subtree-coherence",
@@ -2407,22 +2413,40 @@ const T10_7_9 = defineProductTest({
           pcGAItem,
           [scX, scY],
           `${prefix}: the scope root's parent-consistency item is blocked ` +
-            `by the child items (the original's blockedBy was empty, so ` +
-            `inheritance adds nothing here — the audit arm discriminates it)`,
+            `by exactly the per-child items (SPEC 10.7)`,
         );
         for (const [item, what] of [
           [xItem, "g.a.x's"],
           [yItem, "g.a.y's"],
-          [pcGAItem, "g.a's parent-consistency"],
+        ] as const) {
+          assertBlockedBy(
+            item,
+            [],
+            `${prefix}: ${what} per-child item's blockedBy is the one ` +
+              `path-blocks gives a subtree-coherence item — none in a ` +
+              `baseline session (SPEC 10.5, 10.7)`,
+          );
+        }
+        for (const [item, what] of [
+          [xItem, "g.a.x's"],
+          [yItem, "g.a.y's"],
         ] as const) {
           assertSameJson(
             identitySet(item.origin),
-            [S9_GA],
-            `${prefix}: ${what} decomposition item's origin is the ` +
-              `originating nodes within its scope and context — the changed ` +
-              `g.a (SPEC 5.6, 10.7)`,
+            [],
+            `${prefix}: ${what} per-child item's origin is the changed ` +
+              `nodes in its scope — none: the edited g.a lies in its ` +
+              `context alone (SPEC 5.6, 10.5, 10.7; a product taking origin ` +
+              `over scope and context reports g.a here)`,
           );
         }
+        assertSameJson(
+          identitySet(pcGAItem.origin),
+          [S9_GA],
+          `${prefix}: g.a's parent-consistency item's origin is the changed ` +
+            `nodes in its scope node's subtree — exactly the edited g.a ` +
+            `(SPEC 5.6, 10.5, 10.7)`,
+        );
         // Every item blocked by the original becomes blocked by all
         // decomposition items (SPEC 10.7).
         assertBlockedBy(
@@ -2584,8 +2608,10 @@ const T10_7_9 = defineProductTest({
 
         // Author h.b after create: no re-derivation, so no item exists for
         // it and h's item's blockedBy still names only h.a's item — the
-        // discriminating stale blocker set the split's inheritance rule is
-        // asserted against.
+        // original's stale blocker set, which a product passing the
+        // original's blockers on to new decomposition items assigns to h.b's
+        // new item, where the audit strategy gives it its child sections'
+        // items: none, h.b being childless (SPEC 10.6, 10.7).
         await workspace.file(S9_H_FILE, T10_7_9_H_WITH_B);
         await buildOk(
           product,
@@ -2608,9 +2634,10 @@ const T10_7_9 = defineProductTest({
 
         // Split h's resolved item: one item per CURRENT child subtree —
         // h.a's existing item is reused (id, status, recorded state kept),
-        // h.b's is newly created (unresolved, inheriting the original's
-        // blockedBy [h.a's item]) — plus h's parent-consistency item
-        // (blockedBy: the child items; origin empty in audit).
+        // h.b's is newly created (unresolved; blockedBy its child sections'
+        // items, none — never the original's [h.a's item]) — plus h's
+        // parent-consistency item (blockedBy: the per-child items; origin
+        // empty in audit).
         await expectExit(
           product,
           workspace,
@@ -2671,11 +2698,13 @@ const T10_7_9 = defineProductTest({
         }
         assertBlockedBy(
           hbItem,
-          [idHA],
-          `${prefix}: h.b's newly created decomposition item inherits the ` +
-            `original's blockedBy — h.a's item, the original's stale ` +
-            `blocker set from before h.b existed (SPEC 10.7; a product not ` +
-            `inheriting reports an empty blockedBy here)`,
+          [],
+          `${prefix}: h.b's newly created per-child item's blockedBy is the ` +
+            `one the audit strategy gives a subtree-coherence item — its ` +
+            `child sections' items, none for the childless h.b — never the ` +
+            `original's blockers (SPEC 10.6, 10.7; a product passing them ` +
+            `on to new decomposition items assigns h.a's item, the ` +
+            `original's stale blocker set from before h.b existed)`,
         );
         const pcH = requireItem(
           afterSplit.items,
@@ -2692,8 +2721,8 @@ const T10_7_9 = defineProductTest({
         assertBlockedBy(
           pcH,
           [idHA, hbItem.id],
-          `${prefix}: h's parent-consistency item is blocked by the child ` +
-            `items (SPEC 10.7)`,
+          `${prefix}: h's parent-consistency item is blocked by exactly the ` +
+            `per-child items (SPEC 10.7)`,
         );
         for (const item of [hbItem, pcH]) {
           assertSameJson(
@@ -2714,10 +2743,11 @@ const T10_7_9 = defineProductTest({
 
         // Re-derivation in the audit session (SPEC 10.5 holds for every
         // strategy): author h.c, then resolve h.b's item `updated` (it is
-        // unblocked: h.a's item is resolved). The decomposed kind+scope for
+        // unblocked: its blockedBy is empty). The decomposed kind+scope for
         // h is never re-added; h.c's item enters with a fresh id; blockedBy
-        // is recomputed per the audit rule — h.b's inherited blocker is
-        // dropped — with decomposed references replaced by the decomposition.
+        // is recomputed per the audit rule — the childless h.b's item stays
+        // unblocked — with decomposed references replaced by the
+        // decomposition.
         await workspace.file(S9_H_FILE, T10_7_9_H_WITH_B_C);
         await buildOk(
           product,
@@ -2771,8 +2801,8 @@ const T10_7_9 = defineProductTest({
           requireItemById(derived.items, hbItem.id, prefix),
           [],
           `${prefix} after the re-derivation: blockedBy is recomputed per ` +
-            `the audit rule — the childless h.b's item's inherited blocker ` +
-            `is dropped (SPEC 10.5, 10.6)`,
+            `the audit rule — the childless h.b's item has no child ` +
+            `sections' items, so its blockedBy stays empty (SPEC 10.5, 10.6)`,
         );
         assertBlockedBy(
           requireItemById(derived.items, pcH.id, prefix),
