@@ -50,9 +50,9 @@
 //   5.7/11.3 with `source` withheld as ONE datum where undefined; the
 //   `--file` domain restriction and `--to` selection of 11.3; the raw
 //   attribute and import data of 11.4; findings per 11.2/14 with stable
-//   codes and located ranges for the staged conditions (14.1, 14.3, 14.4,
-//   14.5, 14.6, 14.9, 14.15, 14.16, 14.17, and 14.20 at offset 0 for the
-//   byte-order-mark file); and the exit discipline of 11.2
+//   codes and located ranges for the staged conditions (14.1, 14.2, 14.3,
+//   14.4, 14.5, 14.6, 14.9, 14.15, 14.16, 14.17, and 14.20 at offset 0 for
+//   the byte-order-mark file); and the exit discipline of 11.2
 //   (any finding or explicitly-unavailable datum in the emitted answer →
 //   exit 1 with the full answer still emitted; complete and finding-free →
 //   exit 0). Graph data and refresh behavior are out of scope: the two
@@ -102,9 +102,14 @@
 //   datum, never null, never a picked bearer), and `target`. A
 //   non-resolving spelling records nothing and is reported by its finding
 //   (14.5 for `d`, 14.6 for `text(...)`, located at the reference).
-// - Cycles (5.3, 14.9): strongly connected components over the recorded
-//   reference edges (self-loops included); one finding per cycle, locating
-//   every participating reference spelling.
+// - Cycles (5.3, 14.9): strongly connected components over the combined
+//   graph of `contains`, `depends`, and `embeds` edges over requirement
+//   nodes — every parsed file's positional tree (parent to child, the root
+//   to its top-level sections; 5.2, 11.4) beside the recorded reference
+//   edges, self-loops included — so a section depending on or embedding
+//   its own ancestor is a cycle (5.3); one finding per cycle, locating
+//   every reference spelling recording a participating dependency edge (a
+//   `contains` edge is located by no spelling, 14).
 // - Text (11.2, 1.6, 3): own and subtree text ride the CONF-MD fixture's
 //   attributed line-model compile — removals (import declarations by FORM,
 //   section tags, MDX comments) deleted in place, embedding containers
@@ -1975,9 +1980,16 @@ async function loadWorkspace(cwd, configFlag) {
   }
 
   // --- Cycles (SPEC 5.3, 14.9): strongly connected components over the
-  // recorded reference edges — one finding per cycle (a self-loop, or an
-  // SCC of two or more nodes), locating every participating reference
-  // spelling in file/range order.
+  // combined graph of `contains`, `depends`, and `embeds` edges over
+  // requirement nodes (5.3) — every parsed file's positional tree, parent
+  // to child and the root to its top-level sections (5.2, 11.4), beside the
+  // recorded reference edges — so a section depending on or embedding its
+  // own ancestor closes a cycle through the `contains` path down to it. One
+  // finding per cycle (a self-loop, or an SCC of two or more nodes),
+  // locating every reference spelling recording a participating dependency
+  // edge, in file/range order (SPEC 14); a `contains` edge is located by no
+  // spelling, and every cycle holds a dependency edge, the positional trees
+  // being acyclic.
   {
     const nodeKeys = new Map();
     const keyOf = (rec, node) => {
@@ -1994,20 +2006,39 @@ async function loadWorkspace(cwd, configFlag) {
       return key;
     };
     const adjacency = new Map();
-    const edges = records.map((occurrence) => {
-      const from = keyOf(occurrence.sourceRecord, occurrence.sourceNode);
-      const to = keyOf(occurrence.targetRecord, occurrence.targetNode);
+    /** Each edge with its occurrence, `null` for a `contains` edge. */
+    const edges = [];
+    const addEdge = (from, to, occurrence) => {
       const list = adjacency.get(from) ?? [];
       list.push(to);
       adjacency.set(from, list);
-      return { from, to, occurrence };
-    });
+      edges.push({ from, to, occurrence });
+    };
+    for (const occurrence of records) {
+      addEdge(
+        keyOf(occurrence.sourceRecord, occurrence.sourceNode),
+        keyOf(occurrence.targetRecord, occurrence.targetNode),
+        occurrence,
+      );
+    }
+    // `contains` (SPEC 5.2): parent section → child section over the
+    // positional tree, a section inside an invalid element parenting to its
+    // innermost enclosing section construct (11.4); an unparseable file
+    // contributes no tree (14.20 masks it).
+    for (const record of files.values()) {
+      if (record.failure !== null) continue;
+      for (const section of record.parsed.sections) {
+        addEdge(keyOf(record, section.parent), keyOf(record, section), null);
+      }
+    }
     // Tarjan's SCC over the touched nodes.
     const index = new Map();
     const low = new Map();
     const onStack = new Set();
     const stack = [];
     const sccOf = new Map();
+    /** Each SCC's member count, by SCC number. */
+    const sccSizes = [];
     let counter = 0;
     let sccCount = 0;
     const strongConnect = (v) => {
@@ -2033,6 +2064,7 @@ async function loadWorkspace(cwd, configFlag) {
           if (w === v) break;
         }
         for (const member of members) sccOf.set(member, sccCount);
+        sccSizes.push(members.length);
         sccCount += 1;
       }
     };
@@ -2046,11 +2078,13 @@ async function loadWorkspace(cwd, configFlag) {
     }
     const cyclic = new Map();
     for (const edge of edges) {
-      const same = sccOf.get(edge.from) === sccOf.get(edge.to);
-      const cycleEdge =
-        edge.from === edge.to || (same && sccSize(sccOf, edge.from) > 1);
-      if (!cycleEdge) continue;
+      // A participating `contains` edge spells nothing to locate (SPEC 14).
+      if (edge.occurrence === null) continue;
       const scc = sccOf.get(edge.from);
+      const cycleEdge =
+        edge.from === edge.to ||
+        (scc === sccOf.get(edge.to) && sccSizes[scc] > 1);
+      if (!cycleEdge) continue;
       const list = cyclic.get(scc) ?? [];
       list.push(edge.occurrence);
       cyclic.set(scc, list);
@@ -2069,23 +2103,13 @@ async function loadWorkspace(cwd, configFlag) {
         );
       addFinding(
         "14.9",
-        "cycle: the reference spellings below form a dependency cycle (SPEC 5.3, 14.9)",
+        "cycle: the reference spellings below record the dependency edges of a cycle over contains, depends, and embeds edges (SPEC 5.3, 14.9)",
         locations,
       );
     }
   }
 
   return { config, files, codeSources, findings, records, nodeIdentity };
-}
-
-/** The size of a key's SCC (helper for the cycle pass above). */
-function sccSize(sccOf, key) {
-  const target = sccOf.get(key);
-  let size = 0;
-  for (const value of sccOf.values()) {
-    if (value === target) size += 1;
-  }
-  return size;
 }
 
 // ---------------------------------------------------------------------------
