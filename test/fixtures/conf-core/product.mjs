@@ -33,7 +33,9 @@
 // - `build`; the 13.3 read commands per 12.0 (`check` with no findings on
 //   valid state, `ids`, `show`, `query`, `coverage` reporting zero profiles,
 //   the `review` read subcommands; `impact --base` without git is the exit-2
-//   unreadable-baseline case of SPEC 6.3/12.0).
+//   unreadable-baseline case of SPEC 6.3/12.0, its resolution reading the
+//   current journal first, a journal error there the exit-2 error document's
+//   `journal-error` concerning `.xspec/journal` — resolveBaseline).
 // - `rename` and file-form `move` with journal append (SPEC 6.1, 6.2),
 //   their argument checks of 12.0 (a nonexistent old ID or origin file, and
 //   a wrong-kind origin — a discovered code source — each a usage error) and
@@ -47,11 +49,18 @@
 //   hold file (SPEC 6.6), `--test-hold` beside `--preview` the
 //   syntax-class usage error of 12.0 — a performable preview lying outside
 //   this surface (a fixture scope error, exit 70).
-// - Validation within scope: the one condition an in-scope failing workspace
-//   stages — a spec source beginning with a byte-order mark (SPEC 14.20,
-//   1.6), its finding the zero-length range at offset 0 (SPEC 14) — is
-//   detected and reported by `build`, `check`, the gate of 13.3, and the
-//   precondition of `rename`/`move`, exit 1, nothing written.
+// - Validation within scope: the one condition each in-scope failing
+//   workspace stages — a journal error (SPEC 14.13: a line that is no entry,
+//   or a journal path occupied by anything but a plain file), its finding
+//   concerning `.xspec/journal` with `locations` [] (journalFindings), and a
+//   spec source beginning with a byte-order mark (SPEC 14.20, 1.6), its
+//   finding the zero-length range at offset 0 (SPEC 14) — is detected and
+//   reported, beside any other finding, by `build`, `check`, the gate of
+//   13.3, and the precondition of `rename`/`move`, exit 1, nothing written
+//   (loadGraph); a given baseline's resolution (`review create --base`,
+//   `impact --base`) reads the current journal first and fails on a journal
+//   error as the exit-2 usage error carrying its code and concerned path
+//   (SPEC 6.3; resolveBaseline).
 // - `review` with the `audit` strategy (SPEC 10.6) through `create`,
 //   `resolve`, `split`, and the read subcommands, including read-time
 //   invalidation over the recorded state of SPEC 10.4, and — on a workspace
@@ -82,7 +91,9 @@
 //   `--json`; it then carries every answer, every findings report, and
 //   every exit-2 error — the 12.7 error document, its `code` and `path`
 //   `configuration-error` and SPEC 14's concerned path for a configuration
-//   error, `null`/`null` for a plain usage error (UsageError).
+//   error, `journal-error` and `.xspec/journal` for a journal error failing
+//   a given baseline's resolution, `null`/`null` for a plain usage error
+//   (UsageError).
 // - Discovery (SPEC 7, 13.4, 14.25; see discover): a walk from the
 //   workspace root listing only directories some configured glob can reach
 //   into — never the graph-data area `.xspec`, whose files no group holds
@@ -139,7 +150,9 @@
 // - Journal (SPEC 6.1): one JSON entry per line, appended only by `rename`
 //   and `move`; recorded review-node identities are mapped forward through
 //   the journal suffix appended since their recording (SPEC 6.3, 10.4), so
-//   reads present recorded nodes under current identities.
+//   reads present recorded nodes under current identities. Its validation
+//   (14.13, journalFindings) is one of `build`'s, made wherever they are
+//   (loadGraph) and first by a given baseline's resolution (resolveBaseline).
 // - Reads never write (SPEC 10.4, 13.3, 13.4): every read command computes
 //   its answer from the sources and stored files in memory and writes
 //   nothing — durable files are touched only by their owning commands.
@@ -169,10 +182,12 @@ import { setTimeout as sleep } from "node:timers/promises";
  * `write-failure`, `read-failure`, `workspace-busy`, concerning
  * `.xspec/lock`, or `.xspec` for the area's own path; SPEC 13.5,
  * acquireExclusivity), for discovery's read failure (14.25: `read-failure`
- * concerning the directory whose listing was refused; discover), `null` for
- * plain usage errors (SPEC 12.7, 14), the hold-file error of 13.5 and the
- * unreadable baseline of 6.3 among them. This scope reports no other write
- * or read failure (14.24, 14.25).
+ * concerning the directory whose listing was refused; discover), and for a
+ * journal error failing a given baseline's resolution (14.13:
+ * `journal-error` concerning `.xspec/journal`, SPEC 6.3; resolveBaseline),
+ * `null` for plain usage errors (SPEC 12.7, 14), the hold-file error of 13.5
+ * and the unreadable baseline of 6.3 among them. This scope reports no other
+ * write or read failure (14.24, 14.25).
  */
 class UsageError extends Error {
   /** @param {string} message
@@ -1276,15 +1291,21 @@ function buildFileModel(rel, text, byteLength, parsed) {
 
 /**
  * Load the workspace graph over the sources a discovery yielded (`discovery`,
- * from discover): parse and validate the spec sources — one found absent
- * when its content is read, removed or relocated since discovery, reading
- * as undiscovered (SPEC 14.25) — the code sources entering as edgeless
- * whole-file code locations, by path alone (§CONF-CORE). Throws
- * FindingsError (exit 1) when validation fails —
- * reads report the errors and answer nothing (SPEC 13.3), build/check
- * report them (SPEC 12.1, 12.2).
+ * from discover), making `build`'s validations (SPEC 12.1, 14): parse and
+ * validate the spec sources — one found absent when its content is read,
+ * removed or relocated since discovery, reading as undiscovered (SPEC
+ * 14.25) — the code sources entering as edgeless whole-file code locations,
+ * by path alone (§CONF-CORE), and then the journal's validation (14.13,
+ * journalFindings), its findings reported beside the sources' (SPEC 14:
+ * each condition reported, not only the first). Throws FindingsError (exit
+ * 1) when validation fails — `build` reports the errors and writes nothing
+ * (12.1), the gate of 13.3 turns back every gated read and mutating `review`
+ * subcommand (13.3), and the valid-workspace precondition of `rename`/`move`
+ * refuses (6.4, 6.5), each modifying nothing. `check`, which reports the
+ * journal's findings beside its own staleness and session findings (12.2),
+ * makes the journal's validation itself (`judgeJournal: false`).
  */
-async function loadGraph(root, discovery) {
+async function loadGraph(root, discovery, { judgeJournal = true } = {}) {
   /** @type {Finding[]} */
   const findings = [];
   const files = [];
@@ -1350,6 +1371,7 @@ async function loadGraph(root, discovery) {
     findings.push(...validateSections(rel, parsed.sections));
     files.push({ rel, text, bytes, parsed });
   }
+  if (judgeJournal) findings.push(...(await journalFindings(root)));
   if (findings.length > 0) throw new FindingsError(findings);
 
   const models = files.map((file) =>
@@ -1590,11 +1612,84 @@ async function readJournal(root) {
       if (entry && (entry.kind === "rename" || entry.kind === "move"))
         return entry;
     } catch {
-      // Malformed entries surface through `check` (14.13); mapping skips them.
+      // Malformed entries surface as journal errors (14.13, journalFindings);
+      // mapping skips them.
     }
     return null;
   });
   return { entries, lineCount: lines.length, plain: true, exists: true };
+}
+
+/**
+ * The journal's validation (SPEC 14.13; 6.1, 13.4): one of `build`'s
+ * validations (12.1), so made wherever they are — by `build`, by the gate of
+ * 13.3 over every gated read and mutating `review` subcommand, and by the
+ * valid-workspace precondition of `rename`/`move` (6.4, 6.5), each through
+ * loadGraph, and by `check` (12.2) — and first by a given baseline's
+ * resolution (6.3, resolveBaseline). A journal path occupied by anything
+ * other than a plain file (13.4) is one finding, the journal never read;
+ * otherwise every line readJournal reads as no entry — not a JSON object of
+ * the `rename` or `move` kind — is one, naming its line (14.13). Each
+ * concerns the journal path, `.xspec/journal`, and has no in-source location
+ * (SPEC 14: `locations` [], `path` the journal path; T6.1-3). An absent
+ * journal is empty (6.1) and meets none. The line VIOL-CORE-CHATTYREADS'
+ * `check` appends (CHATTY_READ_ENTRY) reads as an entry — a rename mapping
+ * nothing — so it meets none either and gates nothing (CERTIFICATIONS.md
+ * §VIOL-CORE-CHATTYREADS).
+ * @returns {Promise<Finding[]>}
+ */
+async function journalFindings(root) {
+  const journal = await readJournal(root);
+  if (!journal.plain) {
+    return [
+      {
+        condition: "14.13",
+        message: `journal error: ${JOURNAL_REL} is occupied by something other than a plain file (SPEC 13.4)`,
+        file: JOURNAL_REL,
+      },
+    ];
+  }
+  /** @type {Finding[]} */
+  const findings = [];
+  journal.entries.forEach((entry, index) => {
+    if (entry === null) {
+      findings.push({
+        condition: "14.13",
+        message: `journal error: malformed entry on line ${String(index + 1)} of ${JOURNAL_REL}`,
+        file: JOURNAL_REL,
+      });
+    }
+  });
+  return findings;
+}
+
+/**
+ * A given baseline's resolution (SPEC 6.3) — `impact --base` (9) and `review
+ * create --base` (10.7) — in this git-less scope, where it never resolves:
+ * it reads the current journal before any other cause can fail it (6.3,
+ * 12.0), and a journal error there (14.13, journalFindings), whatever its
+ * form, fails it as the usage error carrying condition 13's stable code and
+ * concerned path — the exit-2 error document's `code` `journal-error`,
+ * `path` `.xspec/journal`, `locations` [] (12.7), one error however many
+ * lines offend, never the gate's finding (6.3: a given baseline is never so
+ * masked); otherwise the ref cannot be read, the configuration file lying in
+ * no repository — the plain usage error of 6.3, `code` and `path` null.
+ * Never made at workspace load: `review create` resolves its baseline among
+ * runMutating's `judgeArguments`, past acquisition and the hold (13.5;
+ * T13.5-8), and `impact`, which acquires nothing, at the same point, past
+ * its configuration and discovery (commandImpact).
+ */
+async function resolveBaseline(root, ref) {
+  const findings = await journalFindings(root);
+  if (findings.length > 0) {
+    throw new UsageError(
+      `cannot resolve the baseline ${ref}: its resolution reads the current journal first, and that journal has a journal error (journal-error, ${JOURNAL_REL}) — ${findings.map((finding) => finding.message).join("; ")} (SPEC 6.3, 14.13)`,
+      { code: CODE_TOKENS["14.13"], path: JOURNAL_REL },
+    );
+  }
+  throw new UsageError(
+    `cannot read the baseline ${ref}: the workspace has no git repository (SPEC 6.3, 12.0)`,
+  );
 }
 
 /**
@@ -2834,10 +2929,12 @@ function emitJsonOnly(io, doc) {
 // SPEC 14's stable code tokens by condition ordinal ("14.N" → token). The
 // JSON report carries the token string alone (SPEC 12.7, 14); the ordinal
 // orders findings and is no part of the value. Only the conditions this
-// conformer's scope reports appear: its findings' conditions, and
+// conformer's scope reports appear: its findings' conditions — the journal
+// error among them, which a given baseline's resolution reports in the
+// exit-2 error document of 12.7 instead (SPEC 6.3; resolveBaseline) — and
 // acquisition's write failure, read failure, and busy refusal (14.24–14.26,
-// SPEC 13.5), which arrive in the exit-2 error document of 12.7 alone, never
-// as findings (acquireExclusivity).
+// SPEC 13.5), which arrive in that document alone, never as findings
+// (acquireExclusivity).
 const CODE_TOKENS = {
   14.1: "missing-id",
   14.2: "invalid-structural-id",
@@ -3510,14 +3607,16 @@ const EARLY_RELEASE_DWELL_MS = 1000;
  * usage-class argument checks of 12.0 and baseline resolution, 6.3
  * (`judgeArguments`: each judged from what it consults — the origin file
  * and its kind among the discovered sources, the session directory, the
- * configuration, the absent repository — identically on valid and failing
- * workspaces, so they precede source validation), then, over the sources
- * the second discovery fixed, the gate of 13.3 binding the mutating
- * `review` subcommands or the valid-workspace precondition of
- * `rename`/`move`, 6.4/6.5 (`judgeWorkspace`; its result, the loaded graph
- * included, is what the refresh and the operation act on) — then, for the
- * mutating `review` subcommands (`refreshesGraphData`), the refresh of
- * 13.3, then the operation's own validation and writes (`operate`, given
+ * configuration, the current journal and the absent repository
+ * (resolveBaseline) — identically on valid and failing workspaces, so they
+ * precede source validation), then, over the sources the second discovery
+ * fixed and the journal, the gate of 13.3 binding the mutating `review`
+ * subcommands or the valid-workspace precondition of `rename`/`move`,
+ * 6.4/6.5 (`judgeWorkspace`, `build`'s validations through loadGraph; its
+ * result, the loaded graph included, is what the refresh and the operation
+ * act on) — then, for the mutating `review` subcommands
+ * (`refreshesGraphData`), the refresh of 13.3, then the operation's own
+ * validation and writes (`operate`, given
  * the second discovery as well, whose sources a finishing regeneration
  * reads); exclusivity ends with the command — released as every normal end
  * comes (completion, refusal, and failure alike; an acquisition that fails
@@ -3643,9 +3742,10 @@ async function runMutating(
       // configuration is loaded and sources discovered, before every later
       // check), but creates its hold file only once the unknown and
       // wrong-kind names and files of the usage class and baseline
-      // resolution (12.0, 6.3: `judgeArguments`) have passed, its second
-      // discovery (13.5) preceding them, instead of immediately after
-      // acquiring. A single deviation: the seam's place moved past those
+      // resolution, its journal read included (12.0, 6.3: `judgeArguments`,
+      // resolveBaseline), have passed, its second discovery (13.5)
+      // preceding them, instead of immediately after acquiring. A single
+      // deviation: the seam's place moved past those
       // checks and no further; the gate and refresh of 13.3, the item check,
       // the valid-workspace precondition of rename/move (6.4, 6.5), the
       // operation's own validation, and every modification still follow the
@@ -3755,7 +3855,22 @@ async function commandBuild(io, cwd, { flags }) {
 
 async function commandCheck(io, cwd, { flags }) {
   const config = await loadConfig(cwd, flags["--config"]);
-  const graph = await loadGraph(config.root, await discover(config));
+  // `build`'s validations (SPEC 12.2): the sources' through loadGraph, the
+  // journal's (14.13, journalFindings) made here — reported beside the
+  // sources' findings where those fail, as `build` reports them, and beside
+  // the staleness and session findings below otherwise.
+  let graph;
+  try {
+    graph = await loadGraph(config.root, await discover(config), {
+      judgeJournal: false,
+    });
+  } catch (error) {
+    if (!(error instanceof FindingsError)) throw error;
+    throw new FindingsError([
+      ...error.findings,
+      ...(await journalFindings(config.root)),
+    ]);
+  }
   /** @type {Finding[]} */
   const findings = [];
   // 14.10: derived files content-identical to what the current sources
@@ -3794,25 +3909,8 @@ async function commandCheck(io, cwd, { flags }) {
       });
     }
   }
-  // 14.13: journal well-formed and replayable.
-  const journal = await readJournal(config.root);
-  if (!journal.plain) {
-    findings.push({
-      condition: "14.13",
-      message: `journal error: ${JOURNAL_REL} is occupied by something other than a plain file (SPEC 13.4)`,
-      file: JOURNAL_REL,
-    });
-  } else {
-    journal.entries.forEach((entry, index) => {
-      if (entry === null) {
-        findings.push({
-          condition: "14.13",
-          message: `journal error: malformed entry on line ${String(index + 1)} of ${JOURNAL_REL}`,
-          file: JOURNAL_REL,
-        });
-      }
-    });
-  }
+  // 14.13: journal well-formed and replayable (journalFindings).
+  findings.push(...(await journalFindings(config.root)));
   // 14.21: review sessions not internally corrupt.
   for (const name of await listSessionNames(config.root)) {
     const loaded = await loadSession(config.root, name);
@@ -3893,9 +3991,9 @@ function nodeReportDoc(node) {
  * argument checks (`judgeArguments`, given the discovered sources) — each
  * judged from what it consults, identically on valid and failing
  * workspaces, so that a usage-error argument exits 2 whatever findings the
- * workspace carries (12.0) — and only then the gate: the graph loaded over
- * the discovered sources, a failing workspace's findings reported, exit 1,
- * in place of the answer (13.3).
+ * workspace carries (12.0) — and only then the gate: `build`'s validations
+ * over the discovered sources and the journal (loadGraph), a failing
+ * workspace's findings reported, exit 1, in place of the answer (13.3).
  */
 async function loadGatedRead(cwd, flags, judgeArguments) {
   const config = await loadConfig(cwd, flags["--config"]);
@@ -4076,12 +4174,16 @@ async function commandCoverage(io, cwd, { flags, positionals }) {
 async function commandImpact(io, cwd, { flags }) {
   // `--base` is required by the synopsis (checkSynopsis, SPEC 9, 12.0).
   // Configuration and discovery precede the baseline, which consults the
-  // workspace (12.0).
-  await discover(await loadConfig(cwd, flags["--config"]));
-  // §CONF-CORE scope has no git: a baseline that cannot be read or
-  // reconstructed is a usage error (SPEC 6.3, 12.0).
-  throw new UsageError(
-    `cannot read the baseline ${flags["--base"]}: the workspace has no git repository (SPEC 6.3, 12.0)`,
+  // workspace (12.0), and its resolution precedes the gate of 13.3 (12.0),
+  // never reached in this git-less scope: the current journal read first, a
+  // journal error failing it as the usage error carrying condition 13's
+  // code and concerned path, otherwise a baseline that cannot be read or
+  // reconstructed, a plain usage error (SPEC 6.3, 12.0; resolveBaseline).
+  const config = await loadConfig(cwd, flags["--config"]);
+  await discover(config);
+  await resolveBaseline(config.root, flags["--base"]);
+  throw new Error(
+    "fixture invariant: a baseline resolved in this git-less scope (resolveBaseline always fails)",
   );
 }
 
@@ -4158,11 +4260,11 @@ async function commandRename(io, cwd, { flags, positionals }) {
   // wrong-kind file or an unknown old id a usage error, exit 2, judged over
   // the discovered sources and parse-locally over the origin file —
   // judgeOriginFile), then the valid-workspace precondition of 6.4
-  // (`judgeWorkspace`: the graph loaded over the sources the second
-  // discovery fixed, findings exit 1); the origin file and its old-id bearer
-  // are then read off the loaded graph — both exist, the argument checks
-  // having passed over the same file, or the precondition has already
-  // reported the file.
+  // (`judgeWorkspace`: `build`'s validations over the sources the second
+  // discovery fixed and the journal, loadGraph, findings exit 1, nothing
+  // written); the origin file and its old-id bearer are then read off the
+  // loaded graph — both exist, the argument checks having passed over the
+  // same file, or the precondition has already reported the file.
   const judgeWorkspace = async (config, discovery) => {
     const graph = await loadGraph(config.root, discovery);
     const model = graph.files.find((candidate) => candidate.rel === file);
@@ -4354,8 +4456,9 @@ async function commandMove(io, cwd, { flags, positionals }) {
   // argument check of 12.0 (runMutating's `judgeArguments`: an unknown or
   // wrong-kind origin file a usage error, exit 2, judged over the discovered
   // sources — judgeOriginFile), then the valid-workspace precondition of
-  // 6.5 (`judgeWorkspace`: the graph loaded over the sources the second
-  // discovery fixed, findings exit 1).
+  // 6.5 (`judgeWorkspace`: `build`'s validations over the sources the second
+  // discovery fixed and the journal, loadGraph, findings exit 1, nothing
+  // written).
   const judgeWorkspace = async (config, discovery) => ({
     graph: await loadGraph(config.root, discovery),
   });
@@ -4496,18 +4599,20 @@ async function reviewCreate(io, cwd, { flags }) {
   }
   // The checks judged ahead of the refresh, in 12.0's order: first baseline
   // resolution (SPEC 6.3) and the profile name under `--coverage` (SPEC 7.4,
-  // 12.0) — runMutating's `judgeArguments`, consulting the workspace's
-  // absent repository and the configuration, judged after acquisition and
-  // the hold and before the gate and refresh of 13.3 (SPEC 13.5, 12.0;
-  // T13.5-8's baseline arm); in this git-less scope no ref can be read — the
-  // exit-2 unreadable-baseline case of 6.3, as `impact --base` is — and no
-  // coverage profile is configured — then the gate of 13.3 (`judgeWorkspace`,
-  // judgeGate): the graph loaded over the current sources, findings exit 1.
-  const judgeArguments = async () => {
+  // 12.0) — runMutating's `judgeArguments`, consulting the current journal,
+  // the workspace's absent repository, and the configuration, judged after
+  // acquisition and the hold and before the gate and refresh of 13.3 (SPEC
+  // 13.5, 12.0; T13.5-8's baseline arms); in this git-less scope the
+  // resolution reads the journal first — a journal error there the exit-2
+  // `journal-error` concerning `.xspec/journal`, never the gate's finding —
+  // and otherwise no ref can be read — the exit-2 unreadable-baseline case
+  // of 6.3, as `impact --base` is (resolveBaseline) — and no coverage
+  // profile is configured — then the gate of 13.3 (`judgeWorkspace`,
+  // judgeGate): `build`'s validations over the current sources and the
+  // journal, findings exit 1.
+  const judgeArguments = async (config) => {
     if (flags["--base"] !== undefined) {
-      throw new UsageError(
-        `cannot read the baseline ${flags["--base"]}: the workspace has no git repository (SPEC 6.3, 12.0)`,
-      );
+      await resolveBaseline(config.root, flags["--base"]);
     }
     if (flags["--coverage"] !== undefined) {
       throw new UsageError(
@@ -4585,9 +4690,11 @@ async function reviewCreate(io, cwd, { flags }) {
 
 /**
  * The workspace check of a mutating `review` subcommand (runMutating's
- * `judgeWorkspace`): exactly the gate of 13.3 — the graph loaded over the
- * sources the second discovery fixed, findings exit 1 (SPEC 13.3, 13.5,
- * 12.0); the subcommand's own validation (10.7) follows the refresh.
+ * `judgeWorkspace`): exactly the gate of 13.3 — `build`'s validations over
+ * the sources the second discovery fixed and the journal (loadGraph: source
+ * validation errors and journal errors alike), findings exit 1, no session
+ * file read (SPEC 13.3, 13.5, 12.0, 10.7); the subcommand's own validation
+ * (10.7) follows the refresh.
  */
 async function judgeGate(config, discovery) {
   return { graph: await loadGraph(config.root, discovery) };
@@ -5073,8 +5180,9 @@ async function commandReview(io, cwd, sub, args) {
  * - `lateHold` (VIOL-CORE-LATEHOLD): the hold seam engages late — a
  *   mutating command acquires exclusivity where 13.5 places it, but creates
  *   its hold file only once its second discovery and then the unknown and
- *   wrong-kind names and files of the usage class and baseline resolution
- *   (12.0, 6.3) have passed, instead of immediately after acquiring; the
+ *   wrong-kind names and files of the usage class and baseline resolution,
+ *   its journal read included (12.0, 6.3), have passed, instead of
+ *   immediately after acquiring; the
  *   gate and refresh of 13.3, the item check, the valid-workspace
  *   precondition of rename/move (6.4, 6.5), and every modification still
  *   follow the hold; an invocation those checks refuse exits 2 having
@@ -5437,11 +5545,12 @@ async function liveHolderStands(root) {
  * mapping, review reads) behaving exactly as the conformer, graph data and
  * every other derived byte independent of how many such lines the journal
  * holds (13.4): only the journal's bytes deviate, which is the deviation.
- * Every journal validation this module makes — `check`'s, and any that
- * `build`, the gate of 13.3, or the precondition of `rename`/`move` come to
- * make (14.13) — must keep reading the line so, neither an identity mapping
- * (5.4) nor a malformed entry (14.13), or the violator's passing sides
- * break (CERTIFICATIONS.md §VIOL-CORE-CHATTYREADS).
+ * The journal's one validation (journalFindings, 14.13) — made by `check`,
+ * `build`, the gate of 13.3, the precondition of `rename`/`move`, and a
+ * given baseline's resolution — must keep reading the line so, neither an
+ * identity mapping (5.4) nor a malformed entry (14.13), or the violator's
+ * passing sides break (CERTIFICATIONS.md §VIOL-CORE-CHATTYREADS: no later
+ * command is gated by it, 13.3).
  */
 const CHATTY_READ_ENTRY = {
   deviation: "VIOL-CORE-CHATTYREADS",
