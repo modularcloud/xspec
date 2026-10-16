@@ -162,21 +162,30 @@
 // - Reads never write (SPEC 10.4, 13.3, 13.4): every read command computes
 //   its answer from the sources and stored files in memory and writes
 //   nothing — durable files are touched only by their owning commands.
-// - Audit review (SPEC 10.5, 10.6, 10.7; rederive, auditDerivation): one
-//   derivation places every item a session gains — `create` derives the
-//   empty session, an `updated` resolve re-derives it, and `split` records
-//   its decomposition (the original's kind and scope node), removes the
-//   original, and ends by re-deriving it. The derivation runs with the
-//   recorded decompositions applied (a decomposed item never added back,
-//   its per-child items and the scope node's `parent-consistency` item in
-//   its place, recursively, over the children the node has now), matches
-//   existing items by kind and scope node — identities mapped forward
-//   through the journal (10.4) — adds the rest with current state, and
-//   blocks each generated item by its child sections' items, a decomposed
-//   one's replaced by all items of its decomposition; `split`'s
-//   decomposition items, reused where they exist, take its scope, context,
-//   origin, and reason, and every item the original blocked is blocked by
-//   all of them.
+// - Audit review (SPEC 10.4, 10.5, 10.6, 10.7; rederive, auditDerivation,
+//   reviewResolve): one derivation places every item a session gains —
+//   `create` derives the empty session, an `updated` resolve re-derives it,
+//   and `split` records its decomposition (the original's kind and scope
+//   node), removes the original, and ends by re-deriving it. The derivation
+//   runs with the recorded decompositions applied (a decomposed item never
+//   added back, its per-child items and the scope node's
+//   `parent-consistency` item in its place, recursively, over the children
+//   the node has now), matches existing items by kind and scope node —
+//   identities mapped forward through the journal (10.4) — each match
+//   keeping its `id`, status, note, and recorded state and taking the
+//   generated scope, context, origin, and reason, adds the rest with
+//   current state, and blocks each generated item by its child sections'
+//   items, a decomposed one's replaced by all items of its decomposition;
+//   every item the original of a `split` blocked is blocked by all items of
+//   its decomposition. `resolve` sets the status and the note (none without
+//   `--note`), re-derives first where the status is `updated`, and then
+//   assigns the item its current context set as `context` and records its
+//   state (10.4). Reads present an item's current context set as its
+//   `context` — the generator's, or, for an item no longer generated, the
+//   context last assigned — every recorded node under its current identity,
+//   and an absent node's text from the most recent graph state that
+//   contained it among those under which the item was derived or resolved
+//   (10.7's provenance rule; archiveTexts).
 //
 // Determinism (SPEC 12.0): no wall clock, no randomness, no absolute paths
 // in any output, generated file, or stored data — the lock directory's
@@ -2583,6 +2592,7 @@ function sessionInvariantsHold(session, name) {
     }
     if (!recordedStateWellFormed(item.baseline)) return false;
     if (!recordedStateWellFormed(item.current)) return false;
+    if (!provenanceWellFormed(item.provenance)) return false;
   }
   // The recorded decompositions well-formed (SPEC 10.1, 10.7): each the
   // original's kind and scope node, its spelling's journal position beside
@@ -2647,6 +2657,23 @@ function recordedStateWellFormed(state) {
   );
 }
 
+/**
+ * An item's text archive's form (archiveTexts): a text per node, keyed by
+ * spellings at the archive's own journal position.
+ */
+function provenanceWellFormed(provenance) {
+  return (
+    provenance !== null &&
+    typeof provenance === "object" &&
+    Number.isInteger(provenance.journalAt) &&
+    provenance.journalAt >= 0 &&
+    provenance.texts !== null &&
+    typeof provenance.texts === "object" &&
+    !Array.isArray(provenance.texts) &&
+    Object.values(provenance.texts).every((text) => typeof text === "string")
+  );
+}
+
 async function writeSession(root, session) {
   await writeFileAtomic(
     path.join(root, sessionRel(session.name)),
@@ -2671,12 +2698,14 @@ function relevantHashes(kind, role, node) {
 
 /**
  * Record the relevant state of an item against the current graph (SPEC
- * 10.4): relevant hashes per kind, presence for every scope/context/origin
- * node, plus the text values the payload provenance rule may need later.
- * Keys are the item's spellings as they stand, and the state carries their
- * journal position (`journalAt`, the item's at recording): lookups map them
- * forward through the journal suffix appended since then, so a state keeps
- * its meaning when the item later takes newer spellings (adoptGenerated).
+ * 10.4): relevant hashes per kind and presence for every scope, context, and
+ * origin node, an absent node's hashes the absent marker; the texts 10.7's
+ * provenance rule presents are archived apart (archiveTexts). Keys are the
+ * item's spellings as they stand, and the state carries their journal
+ * position (`journalAt`, the item's at recording): lookups map them forward
+ * through the journal suffix appended since then, so a state keeps its
+ * meaning when the item later takes newer spellings (adoptGenerated,
+ * assignCurrentContext).
  */
 function recordState(item, graph, journalEntries) {
   const suffix = journalEntries.slice(item.journalAt);
@@ -2692,10 +2721,6 @@ function recordState(item, graph, journalEntries) {
     nodes[spelling] = {
       hashes: relevantHashes(item.kind, role, node),
       present: true,
-      text:
-        role === "scope" && item.kind !== "subtree-coherence"
-          ? node.ownText
-          : node.subtreeText,
     };
   };
   for (const spelling of item.scopeNodes) record(spelling, "scope");
@@ -2730,15 +2755,10 @@ function isStale(item, graph, journalEntries) {
       if (node[hashName] !== value) return true;
     }
   }
-  // Context-set comparison (SPEC 10.4): the item's current context set —
-  // the context the generator assigns it now (generatorContext), or, for an
-  // item it no longer produces, its `context` as last assigned — against its
-  // recorded context set, the context nodes its `current` state records.
-  const suffix = journalEntries.slice(item.journalAt);
-  const currentSet = new Set(
-    generatorContext(item, graph, suffix) ??
-      item.contextNodes.map((spelling) => mapIdentityForward(spelling, suffix)),
-  );
+  // Context-set comparison (SPEC 10.4): the item's current context set
+  // (currentContextSet) against its recorded context set, the context nodes
+  // its `current` state records.
+  const currentSet = new Set(currentContextSet(item, graph, journalEntries));
   const recordedSet = new Set(
     item.current.context.map((spelling) =>
       mapIdentityForward(spelling, recordedSuffix),
@@ -2767,6 +2787,43 @@ function generatorContext(item, graph, journalSuffix) {
     return node.children.map((child) => child.identity);
   }
   return null;
+}
+
+/**
+ * An item's current context set (SPEC 10.4), as current identities: the
+ * context the generator assigns it against the current workspace
+ * (generatorContext), or, for an item the generators no longer produce, its
+ * `context` as last assigned — by `create`, a re-derivation, a `split`, or a
+ * resolve — mapped forward through the journal. Reads present it as the
+ * item's `context` (itemPayload), invalidation compares it with the recorded
+ * context set (isStale), and a resolve assigns it (assignCurrentContext).
+ */
+function currentContextSet(item, graph, journalEntries) {
+  const suffix = journalEntries.slice(item.journalAt);
+  return (
+    generatorContext(item, graph, suffix) ??
+    item.contextNodes.map((spelling) => mapIdentityForward(spelling, suffix))
+  );
+}
+
+/**
+ * Assign an item its current context set as `context` (SPEC 10.4: resolving
+ * an item does so, then records — an `updated` resolve once its
+ * re-derivation is done, against the item as re-derived): the item's
+ * spellings move to the current journal position, its scope, origin, and
+ * `reason` kept as last assigned and its `context` the current identities
+ * currentContextSet names; its `baseline`, `current`, and text archive keep
+ * theirs, each carrying its own position (recordState, archiveTexts).
+ */
+function assignCurrentContext(item, graph, journal) {
+  const suffix = journal.entries.slice(item.journalAt);
+  const context = currentContextSet(item, graph, journal.entries);
+  const forward = (spelling) => mapIdentityForward(spelling, suffix);
+  item.journalAt = journal.lineCount;
+  item.scopeRoot = forward(item.scopeRoot);
+  item.scopeNodes = item.scopeNodes.map(forward);
+  item.originNodes = item.originNodes.map(forward);
+  item.contextNodes = context;
 }
 
 /** Proper ancestors, nearest first, ending at the file root (SPEC 10.6). */
@@ -2887,73 +2944,135 @@ function orderedItems(session, graph, journalEntries) {
 }
 
 /**
- * The text a recorded state (recordState) holds for the node whose current
- * identity is `identity` — SPEC 10.7's provenance rule for an absent node —
- * its spellings mapped forward from the state's own journal position, or
- * undefined where it records no text for that node.
+ * A node's text value as an item of `kind` presents it in `role` (SPEC
+ * 10.7): scope text is the scope root's subtree text for subtree-coherence
+ * and the scope node's own text for parent-consistency; context text is own
+ * text for an ancestor chain (subtree-coherence) and subtree text otherwise
+ * (a parent-consistency item's children).
  */
-function recordedTextOf(state, identity, journalEntries) {
-  const suffix = journalEntries.slice(state.journalAt);
-  for (const [spelling, entry] of Object.entries(state.nodes)) {
-    if (
-      typeof entry?.text === "string" &&
-      mapIdentityForward(spelling, suffix) === identity
-    ) {
-      return entry.text;
+function presentedText(kind, role, node) {
+  if (kind === "subtree-coherence") {
+    return role === "scope" ? node.subtreeText : node.ownText;
+  }
+  return role === "scope" ? node.ownText : node.subtreeText;
+}
+
+/**
+ * Archive, in the item's `provenance`, the text each of its present scope and
+ * context nodes holds under the current graph (SPEC 10.7's provenance rule),
+ * wherever a mutating subcommand derives or resolves the item: as it enters
+ * the session (its baseline state, rederive), at each derivation producing
+ * it (rederive: `create`, an `updated` resolve's re-derivation, and the one
+ * `split` ends with), and at each resolve (reviewResolve). A node absent now
+ * keeps the text archived when last present, so an absent node presents its
+ * value in the most recent of those graph states that contained it, and a
+ * node contained in none has no text (archivedTextOf). The archive's keys are
+ * spellings at its own journal position, all moved to the current one here.
+ */
+function archiveTexts(item, graph, journal) {
+  /** @type {Record<string, string>} */
+  const texts = {};
+  if (item.provenance !== undefined) {
+    const archived = journal.entries.slice(item.provenance.journalAt);
+    for (const [spelling, text] of Object.entries(item.provenance.texts)) {
+      texts[mapIdentityForward(spelling, archived)] = text;
     }
+  }
+  const suffix = journal.entries.slice(item.journalAt);
+  const archive = (spelling, role) => {
+    const identity = mapIdentityForward(spelling, suffix);
+    const node = graph.byIdentity.get(identity);
+    if (node !== undefined)
+      texts[identity] = presentedText(item.kind, role, node);
+  };
+  for (const spelling of item.scopeNodes) archive(spelling, "scope");
+  for (const spelling of item.contextNodes) archive(spelling, "context");
+  item.provenance = { journalAt: journal.lineCount, texts };
+}
+
+/**
+ * The text the item's archive (archiveTexts) holds for the node whose current
+ * identity is `identity` — SPEC 10.7's provenance rule for an absent node —
+ * its spellings mapped forward from the archive's own journal position, or
+ * undefined where no graph state the item was derived or resolved under
+ * contained that node among the item's nodes.
+ */
+function archivedTextOf(item, identity, journalEntries) {
+  const suffix = journalEntries.slice(item.provenance.journalAt);
+  for (const [spelling, text] of Object.entries(item.provenance.texts)) {
+    if (mapIdentityForward(spelling, suffix) === identity) return text;
   }
   return undefined;
 }
 
-/** Present a recorded node in a payload (SPEC 10.7): NodeState shape. */
-function nodeState(item, spelling, role, graph, journalEntries) {
-  const mapped = mapIdentityForward(
-    spelling,
-    journalEntries.slice(item.journalAt),
-  );
-  const node = graph.byIdentity.get(mapped);
+/**
+ * Present an item's node in a payload (SPEC 10.7): NodeState shape, the node
+ * named by its current identity (10.4) — a present node with its source range
+ * and its text read from the current graph, an absent one with its archived
+ * text (archivedTextOf), none where the archive holds none.
+ */
+function nodeState(item, identity, role, graph, journalEntries) {
+  const node = graph.byIdentity.get(identity);
   if (node === undefined) {
-    const recordedText =
-      recordedTextOf(item.current, mapped, journalEntries) ??
-      recordedTextOf(item.baseline, mapped, journalEntries);
-    const state = { node: mapped, present: false };
-    if (typeof recordedText === "string") state.text = recordedText;
+    const archivedText = archivedTextOf(item, identity, journalEntries);
+    const state = { node: identity, present: false };
+    if (typeof archivedText === "string") state.text = archivedText;
     return state;
   }
-  // Text per SPEC 10.7: scope text is subtree text for subtree-coherence and
-  // own text for parent-consistency; context text is own text for ancestor
-  // chains (subtree-coherence) and subtree text otherwise.
-  const text =
-    item.kind === "subtree-coherence"
-      ? role === "scope"
-        ? node.subtreeText
-        : node.ownText
-      : role === "scope"
-        ? node.ownText
-        : node.subtreeText;
   return {
-    node: mapped,
+    node: identity,
     present: true,
     sourceRange: { end: node.sourceRange.end, start: node.sourceRange.start },
-    text,
+    text: presentedText(item.kind, role, node),
   };
 }
 
-/** The full item payload of `next --json`, `show`, and `export` (SPEC 10.7). */
+/**
+ * A recorded state (recordState) as reads present it (SPEC 10.2: as
+ * recorded, its nodes presented per 10.4): every recorded node, and the
+ * recorded context set, under its current identity — each spelling mapped
+ * forward from the state's own journal position.
+ */
+function presentedState(state, journalEntries) {
+  const suffix = journalEntries.slice(state.journalAt);
+  /** @type {Record<string, unknown>} */
+  const nodes = {};
+  for (const [spelling, entry] of Object.entries(state.nodes)) {
+    nodes[mapIdentityForward(spelling, suffix)] = entry;
+  }
+  return {
+    context: state.context.map((spelling) =>
+      mapIdentityForward(spelling, suffix),
+    ),
+    nodes,
+  };
+}
+
+/**
+ * The full item payload of `next --json`, `show`, and `export` (SPEC 10.7):
+ * its `context` the item's current context set (10.4: computed, never
+ * persisted, so context-set invalidation waits for no re-derivation), its
+ * scope, origin, `reason`, and `blockedBy` as last assigned, every node
+ * under its current identity.
+ */
 function itemPayload(item, session, graph, journalEntries) {
+  const scope = mapIdentityForward(
+    item.scopeRoot,
+    journalEntries.slice(item.journalAt),
+  );
   const payload = {
-    baseline: item.baseline,
+    baseline: presentedState(item.baseline, journalEntries),
     blocked: isBlocked(item, session, graph, journalEntries),
     blockedBy: [...item.blockedBy],
-    context: item.contextNodes.map((spelling) =>
-      nodeState(item, spelling, "context", graph, journalEntries),
+    context: currentContextSet(item, graph, journalEntries).map((identity) =>
+      nodeState(item, identity, "context", graph, journalEntries),
     ),
-    current: item.current,
+    current: presentedState(item.current, journalEntries),
     id: item.id,
     kind: item.kind,
     origin: [],
     reason: item.reason,
-    scope: nodeState(item, item.scopeRoot, "scope", graph, journalEntries),
+    scope: nodeState(item, scope, "scope", graph, journalEntries),
     status: effectiveStatus(item, graph, journalEntries),
   };
   if (typeof item.note === "string") payload.note = item.note;
@@ -5035,13 +5154,25 @@ async function reviewResolve(io, cwd, { flags, positionals }) {
           `review resolve refused: item ${itemId} is blocked (SPEC 10.3, 10.7)`,
         );
       }
+      // `resolve` replaces the item's status, note, and recorded state
+      // (SPEC 10.7): the note is the `--note` text, an earlier note removed
+      // when `--note` is not given.
       item.status = status;
-      if (flags["--note"] !== undefined) item.note = flags["--note"];
-      // Resolving records the current relevant state (SPEC 10.4).
-      item.current = recordState(item, graph, journal.entries);
+      if (flags["--note"] === undefined) delete item.note;
+      else item.note = flags["--note"];
+      // An `updated` resolve re-derives the session first (SPEC 10.5), the
+      // item, where still generated, taking the generated scope, context,
+      // origin, and reason (rederive); then — for every resolve, against the
+      // item as re-derived where it was — the item is assigned its current
+      // context set as `context` and its relevant state is recorded, the
+      // context nodes so recorded forming its recorded context set, which is
+      // thus the context a read of the same workspace presents (10.4).
       if (status === "updated") {
         rederive(session, graph, journal);
       }
+      assignCurrentContext(item, graph, journal);
+      item.current = recordState(item, graph, journal.entries);
+      archiveTexts(item, graph, journal);
       // Past all of them: the refresh of 13.3 where graph data is stale,
       // then the session file, once, last (SPEC 10.7, 13.5).
       await refreshBeforeSessionWrite();
@@ -5069,16 +5200,20 @@ async function reviewResolve(io, cwd, { flags, positionals }) {
  * over the children its scope node has now — standing in its place. A
  * generated item whose kind and scope node match an existing item, the
  * existing item's scope mapped forward through the journal (10.4), is that
- * item: it keeps its `id`, status, note, and recorded state; one whose key is
- * in `adopt` (split's decomposition items, 10.7) also takes the generated
- * scope, context, origin, and `reason` (adoptGenerated), every other keeping
- * them. Every other generated item is added with current state (10.2), in
- * generation order, under the next item `id` (never one reused). `blockedBy`
- * is recomputed for every generated item, any reference to a decomposed item
- * replaced by all items of its decomposition; items no longer generated
- * remain and keep theirs. Returns the session's item for each generated key.
+ * item: it keeps its `id`, status, note, and recorded state and takes the
+ * generated scope, context, origin, and `reason` (adoptGenerated) — `split`'s
+ * decomposition items among them (10.7) — so 10.4 alone, against the
+ * recorded state, decides whether it then reads `invalidated`. Every other
+ * generated item is added with current state (10.2), in generation order,
+ * under the next item `id` (never one reused). `blockedBy` is recomputed for
+ * every generated item, any reference to a decomposed item replaced by all
+ * items of its decomposition; items no longer generated remain and keep their
+ * fields, `blockedBy` included. Each generated item's present scope and
+ * context nodes have their texts archived under the derivation's graph state
+ * (archiveTexts; 10.7's provenance rule). Returns the session's item for each
+ * generated key.
  */
-function rederive(session, graph, journal, { adopt = new Set() } = {}) {
+function rederive(session, graph, journal) {
   const generated = auditDerivation(
     graph,
     decomposedIdentities(session, journal),
@@ -5117,9 +5252,10 @@ function rederive(session, graph, journal, { adopt = new Set() } = {}) {
       item.baseline = recorded;
       item.current = recorded;
       session.items.push(item);
-    } else if (adopt.has(key)) {
+    } else {
       adoptGenerated(item, spec, journal);
     }
+    archiveTexts(item, graph, journal);
     produced.set(key, item);
   }
   for (const [key, spec] of generated) {
@@ -5133,12 +5269,14 @@ function rederive(session, graph, journal, { adopt = new Set() } = {}) {
 /**
  * A kept item taking a generated item's scope, context, origin, and `reason`
  * (SPEC 10.5, 10.7) — the scope node it already has, under its current
- * identity — while keeping its `id`, status, note, and recorded state: its
- * spellings move to the current journal position, the fields it takes naming
- * current identities, and its `baseline` and `current` keep theirs, each
- * carrying its own position (recordState), so the move changes no recorded
- * node, presence, hash, text, or recorded context set (10.4: a context it
- * takes reads against the one recorded, as a resolve left it).
+ * identity — while keeping its `id`, status, note, and recorded state, as
+ * every item a derivation matches does (rederive): its spellings move to the
+ * current journal position, the fields it takes naming current identities,
+ * and its `baseline`, `current`, and text archive keep theirs, each carrying
+ * its own position (recordState, archiveTexts), so the move changes no
+ * recorded node, presence, hash, or recorded context set (10.4: a context it
+ * takes reads against the one recorded, as a resolve left it, and a node
+ * joining it has no recorded presence until a resolve records it).
  */
 function adoptGenerated(item, spec, journal) {
   item.journalAt = journal.lineCount;
@@ -5199,19 +5337,18 @@ async function reviewSplit(io, cwd, { flags, positionals }) {
       // of the decomposition not already in the session, with current
       // state; one that already exists is that item, keeping its `id`,
       // status, note, and recorded state and taking the decomposition's
-      // scope, context, origin (empty in an audit session), and reason
-      // (`adopt`), so `split` in an audit session reuses the children's
-      // existing items; and it recomputes `blockedBy` for every generated
-      // item against the current graph — a per-child item blocked by its
-      // child sections' items (10.6), the `parent-consistency` item by the
-      // per-child items or the items standing in for them, and each item
-      // the original blocked by all items of the decomposition in its place
-      // — so blocking stays acyclic (10.1). Items no longer generated keep
-      // their `blockedBy` (10.5); any of them the original blocked becomes
-      // blocked by all items of the decomposition (below).
-      const produced = rederive(session, graph, journal, {
-        adopt: new Set(decomposition),
-      });
+      // scope, context, origin (empty in an audit session), and reason, as
+      // every item the re-derivation matches takes the generated ones, so
+      // `split` in an audit session reuses the children's existing items;
+      // and it recomputes `blockedBy` for every generated item against the
+      // current graph — a per-child item blocked by its child sections'
+      // items (10.6), the `parent-consistency` item by the per-child items
+      // or the items standing in for them, and each item the original
+      // blocked by all items of the decomposition in its place — so blocking
+      // stays acyclic (10.1). Items no longer generated keep their
+      // `blockedBy` (10.5); any of them the original blocked becomes blocked
+      // by all items of the decomposition (below).
+      const produced = rederive(session, graph, journal);
       const decompositionIds = decomposition.map((key) => produced.get(key).id);
       for (const item of session.items) {
         if (item.blockedBy.includes(original.id)) {
@@ -5384,10 +5521,18 @@ async function reviewExport(io, cwd, { flags, positionals }) {
   const session = await requireSession(config.root, positionals[0]);
   const journal = await readJournal(config.root);
   return await withReadInvalidationPersistence(config.root, session, () => {
-    // A single JSON document is export's only output form (SPEC 10.7).
+    // A single JSON document is export's only output form (SPEC 10.7), the
+    // recorded decompositions among its contents, each scope node under its
+    // current identity (10.4).
     emitJsonOnly(io, {
       creationParameters: null,
-      decompositions: session.decompositions,
+      decompositions: session.decompositions.map((entry) => ({
+        kind: entry.kind,
+        scope: mapIdentityForward(
+          entry.scope,
+          journal.entries.slice(entry.journalAt),
+        ),
+      })),
       items: orderedItems(session, graph, journal.entries).map(({ item }) =>
         itemPayload(item, session, graph, journal.entries),
       ),
