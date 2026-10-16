@@ -105,16 +105,27 @@
 //   "byte-unchanged", "byte-identical", "nothing written through it").
 //   Symbolic links are never followed by the snapshot (helpers/snapshot.ts),
 //   so a product writing through the link changes the target's entries.
-// - "graph data has been refreshed" is observed the way SPEC.md defines it
-//   (13.3, 14.10): `check` afterwards reports no graph-data unit form —
-//   graph-data content is opaque (H-4), so its bytes are never compared.
-//   The per-file staleness `check` reports is the edited source's: every
-//   14.10 finding concerns a derived path of `specs/A.mdx` — `specs/A.xspec.`
-//   plus a suffix, the module and its companions (SPEC 13.1) — and the
-//   module itself is among them, since it embeds the edited text (SPEC 4.2).
-//   Each such finding instructs rebuilding — its message names `build`
-//   (SPEC 14.10): a text edit leaves no recorded file obstructing a path
-//   the rebuild writes.
+// - `create`'s ordering on a stale twin (SPEC 10.7, 13.5: `create` examines
+//   the session directory past the gate and before any write, the refresh
+//   of 13.3 included, and the outcome it meets there ends it, modifying
+//   nothing — stale graph data stays stale): one whole-root compare around
+//   the refused `create` admits no change at all, H-6 leaving out the lock
+//   path alone (acquisition's and release's writes there counting as no
+//   modification). T13.3-2's operational path set is compared with the
+//   rest — graph-data bytes only against the product's own bytes of a
+//   moment before, never pinned (H-4) — and a change there is diagnosed as
+//   the refresh a product makes before it examines the session directory
+//   (`isGraphDataKey`, the record-staging adapter layer's one predicate).
+//   `check` afterwards braces the compare the way SPEC.md defines
+//   staleness (13.3, 14.10): graph data still stale, so the graph-data unit
+//   form is reported — exactly one condition-10 finding concerning
+//   `.xspec`, locations [] — beside the edited source's per-file staleness:
+//   every other 14.10 finding concerns a derived path of `specs/A.mdx` —
+//   `specs/A.xspec.` plus a suffix, the module and its companions (SPEC
+//   13.1) — and the module itself is among them, since it embeds the edited
+//   text (SPEC 4.2). Each finding, the unit form included, instructs
+//   rebuilding — its message names `build` (SPEC 14.10): a text edit leaves
+//   no recorded file obstructing a path the rebuild writes.
 // - `review status s` against the occupied session directory is an unknown
 //   session — a plain usage error, so the exit-2 error document's `code` and
 //   `path` are `null` (SPEC 12.0, 12.7).
@@ -161,6 +172,7 @@ import {
   decodeSessionListReport,
   decodeSessionStatusReport,
   decodeViewReport,
+  isGraphDataKey,
   stageBlockedByAbsentItem,
   stageBlockedByCycle,
   stageDeleteItemField,
@@ -1866,22 +1878,26 @@ function assertExactlyOneFinding(
 }
 
 /**
- * `check`'s report once a refused `create` has refreshed graph data on the
- * edited-source twin (SPEC 13.5, 13.3): every condition-10 finding is per
- * file, concerning a derived path of `specs/A.mdx` — `specs/A.xspec.` plus
- * a suffix (SPEC 13.1) — with the module itself among them (it embeds the
- * edited text, SPEC 4.2), and none is the graph-data unit form, whose
- * concerned path would be `.xspec` (SPEC 14.10). Every such finding
- * instructs rebuilding (`assertFindingInstructsRebuilding`: its message
- * names `build`), the correction SPEC 14.10 requires of a per-file
- * finding: each twin's state is a text edit, so every stale derived file
- * is one the rebuild regenerates in place, and no recorded file obstructs
- * a path the rebuild writes — the one condition-10 form whose correction
- * is its manual deletion instead (SPEC 14.10, 13.4, 14.22; T13.4-10's
- * judge). Beside the staleness, exactly `beside` (counted by identity)
- * and nothing else.
+ * `check`'s report once a refused `create` has left the edited-source twin
+ * as it found it (SPEC 10.7, 13.5: stale graph data stays stale). Graph
+ * data is still stale, so exactly one condition-10 finding is the
+ * graph-data unit form — concerned path the area `.xspec`, no path inside
+ * it named, locations [] (SPEC 14.10, 11.6, 13.3) — where a product
+ * refreshing before it examines the session directory leaves graph data
+ * refreshed and no unit form reported. Every other condition-10 finding is
+ * per file, concerning a derived path of `specs/A.mdx` — `specs/A.xspec.`
+ * plus a suffix (SPEC 13.1) — with the module itself among them (it embeds
+ * the edited text, SPEC 4.2). Every condition-10 finding, the unit form
+ * included, instructs rebuilding (`assertFindingInstructsRebuilding`: its
+ * message names `build`), the correction SPEC 14.10 requires of the unit
+ * form and of a per-file finding: each twin's state is a text edit, so
+ * every stale derived file is one the rebuild regenerates in place, and no
+ * recorded file obstructs a path the rebuild writes — the one condition-10
+ * form whose correction is its manual deletion instead (SPEC 14.10, 13.4,
+ * 14.22; T13.4-10's judge). Beside the staleness, exactly `beside` (counted
+ * by identity) and nothing else.
  */
-function assertPerFileStalenessOfA(
+function assertStaleTwinStillStale(
   findings: readonly Finding[],
   beside: Readonly<Record<string, number>>,
   context: string,
@@ -1890,28 +1906,57 @@ function assertPerFileStalenessOfA(
   assertConditionCounts(
     findings.filter((finding) => finding.condition !== "14.10"),
     beside,
-    `${context} — beside the per-file staleness, exactly the expected ` +
-      `findings and nothing else (SPEC 14, 12.2)`,
+    `${context} — beside the staleness, exactly the expected findings and ` +
+      `nothing else (SPEC 14, 12.2)`,
   );
-  if (stale.length === 0) {
+  const unitForms = stale.filter(
+    (finding) => finding.path === GRAPH_DATA_AREA_PATH,
+  );
+  if (unitForms.length !== 1) {
+    fail(
+      `${context}: the refused \`create\` modified nothing, so graph data is ` +
+        `still stale and \`check\` reports the graph-data unit form — ` +
+        `exactly one condition-10 finding concerning the area ` +
+        `${GRAPH_DATA_AREA_PATH} (SPEC 10.7, 13.5, 13.3, 14.10) — where a ` +
+        `product refreshing before it examines the session directory ` +
+        `leaves graph data refreshed and no unit form reported; got ` +
+        `${String(unitForms.length)} among the condition-10 findings ` +
+        `concerning ${JSON.stringify(stale.map((finding) => finding.path))}`,
+    );
+  }
+  const unitForm = unitForms[0]!;
+  assertSameJson(
+    unitForm.locations,
+    [],
+    `${context}: the graph-data unit form names no path inside the area — ` +
+      `the record's layout is unenumerated (SPEC 14.10, 13.3) — and a ` +
+      `path-concerned condition is unlocated: locations [] (SPEC 12.7)`,
+  );
+  assertFindingInstructsRebuilding(
+    unitForm,
+    `${context}: the graph-data unit form — stale graph data, which the ` +
+      `rebuild regenerates — instructs rebuilding (SPEC 14.10)`,
+  );
+  const perFile = stale.filter((finding) => finding !== unitForm);
+  if (perFile.length === 0) {
     fail(
       `${context}: the edited source's generated module no longer matches ` +
         `what the current sources generate — its documentation comment ` +
         `embeds the edited text (SPEC 4.2) — so \`check\` reports per-file ` +
-        `staleness (SPEC 14.10, 12.2); got no condition-10 finding`,
+        `staleness beside the unit form (SPEC 14.10, 12.2); got no per-file ` +
+        `condition-10 finding`,
     );
   }
-  for (const finding of stale) {
+  for (const finding of perFile) {
     if (
       typeof finding.path !== "string" ||
       !finding.path.startsWith(T10_1_6_A_DERIVED_PREFIX)
     ) {
       fail(
-        `${context}: graph data was refreshed before the refusal (SPEC ` +
-          `13.5, 13.3), so no graph-data unit form is reported and every ` +
-          `condition-10 finding is per file, concerning a derived path of ` +
-          `specs/A.mdx — ${T10_1_6_A_DERIVED_PREFIX}* (SPEC 13.1, 14.10); ` +
-          `got a condition-10 finding concerning ` +
+        `${context}: beside the graph-data unit form every condition-10 ` +
+          `finding is per file, concerning a derived path of specs/A.mdx — ` +
+          `${T10_1_6_A_DERIVED_PREFIX}* (SPEC 13.1, 14.10); got a ` +
+          `condition-10 finding concerning ` +
           `${JSON.stringify(finding.path)} (message: ` +
           `${JSON.stringify(finding.message)})`,
       );
@@ -1931,7 +1976,7 @@ function assertPerFileStalenessOfA(
         `the finding instructs rebuilding (SPEC 14.10)`,
     );
   }
-  if (!stale.some((finding) => finding.path === T10_1_6_A_MODULE)) {
+  if (!perFile.some((finding) => finding.path === T10_1_6_A_MODULE)) {
     fail(
       `${context}: the module ${T10_1_6_A_MODULE} itself is stale — it ` +
         `embeds the edited text (SPEC 4.2, 13.1) — so a condition-10 ` +
@@ -2074,20 +2119,48 @@ interface ExpectedRefusal {
 }
 
 /**
- * `create`'s ordering on a stale twin (SPEC 13.5, 14.22): a section's text
- * is edited after `build`, then `create --name <name>` is refused — the one
- * finding of `expected` (condition 22, the code-less existing-name refusal,
- * or condition 21 in its place), exit 1. The refusal follows the gate and
- * refresh of 13.3, so graph data has been refreshed: the compare around
- * `create` confines every change to `.xspec/` outside `.xspec/reviews/`
- * (the refresh's opaque writes, H-4 — nothing outside the area, the
- * occupant and every session file byte-unchanged, no session file
- * written), and `check` afterwards reports the edited source's per-file
- * staleness beside exactly `besideStaleness` and no graph-data unit form —
- * where a product examining the session directory before refreshing leaves
- * graph data stale (the unit form then reported).
+ * Where a change around a refused `create` falls, for its diagnosis: graph
+ * data — T13.3-2's operational path set (`isGraphDataKey`, the
+ * record-staging adapter layer's one predicate), which the refresh of 13.3
+ * writes — the session directory (a session file written or changed, or
+ * the occupant altered), or the rest of the workspace.
  */
-async function assertCreateFollowsRefresh(
+function refusedCreateChangeClass(key: string): string {
+  if (isGraphDataKey(key)) {
+    return (
+      "graph data (T13.3-2's operational path set): the refresh of 13.3, " +
+      "made before the examination of the session directory"
+    );
+  }
+  if (key === REVIEWS_DIR || key.startsWith(`${REVIEWS_DIR}/`)) {
+    return (
+      "the session directory: a session file written or changed, or the " +
+      "occupant altered"
+    );
+  }
+  return "outside graph data and the session directory";
+}
+
+/**
+ * `create`'s ordering on a stale twin (SPEC 10.7, 13.5, 14.22): a section's
+ * text is edited after `build`, no read run since, then `create --name
+ * <name>` is refused — the one finding of `expected` (condition 22, the
+ * code-less existing-name refusal, or condition 21 in its place), exit 1.
+ * `create` examines the session directory past the gate and before any
+ * write, the refresh of 13.3 included, and the outcome it meets there ends
+ * it, modifying nothing: the whole-root compare around `create` admits no
+ * change, H-6 leaving out the lock path alone — graph data (T13.3-2's
+ * operational path set) byte-identical and so still stale, no session file
+ * written or changed, the occupant byte-unchanged — each change diagnosed
+ * by where it falls (`refusedCreateChangeClass`), a graph-data change as
+ * the refresh a product makes before it examines the session directory.
+ * `check` afterwards reports the graph-data unit form, the edited source's
+ * per-file staleness, and exactly `besideStaleness` beside them, exit 1
+ * (`assertStaleTwinStillStale`) — where a product refreshing before it
+ * examines the session directory leaves graph data refreshed (no unit form
+ * then reported).
+ */
+async function assertCreateRefusedStaleStaysStale(
   product: ProductBinding,
   workspace: TestWorkspace,
   name: string,
@@ -2107,8 +2180,8 @@ async function assertCreateFollowsRefresh(
   ];
   const createContext =
     `${label} \`${argv.join(" ")}\` on the stale twin — exit 1 with the ` +
-    `one refusal finding, judged after the gate and refresh (SPEC 13.5, ` +
-    `14.22, 10.7, 14.21, 10.1)`;
+    `one refusal finding, met at the examination of the session directory ` +
+    `past the gate and before any write (SPEC 10.7, 14.22, 14.21, 10.1)`;
   const before = await snapshotDirectory(workspace.root);
   const findings = await runFindingsReport(
     product,
@@ -2124,32 +2197,40 @@ async function assertCreateFollowsRefresh(
     expected.concernedPath,
     createContext,
   );
-  for (const change of diffSnapshots(before, after)) {
-    const underArea =
-      change.key === GRAPH_DATA_AREA_PATH ||
-      change.key.startsWith(`${GRAPH_DATA_AREA_PATH}/`);
-    const underReviews =
-      change.key === REVIEWS_DIR || change.key.startsWith(`${REVIEWS_DIR}/`);
-    if (!underArea || underReviews) {
-      fail(
-        `${label}: the refused \`create\` on a stale twin writes nothing ` +
-          `but the 13.3 refresh, confined to .xspec/ outside ` +
-          `.xspec/reviews/ — no session file written or changed, the ` +
-          `occupant byte-unchanged, nothing outside the area touched ` +
-          `(SPEC 13.5, 13.3, 14.22); found ${change.change} ` +
-          `${change.path}: ${change.detail}`,
-      );
-    }
+  const changes = diffSnapshots(before, after);
+  if (changes.length > 0) {
+    const refreshed = changes.some((change) => isGraphDataKey(change.key));
+    fail(
+      `${label}: the refused \`create\` on a stale twin modifies nothing — ` +
+        `it examines the session directory past the gate and before any ` +
+        `write, the refresh of 13.3 included, and the outcome it meets ` +
+        `there ends it (SPEC 10.7, 13.5, 13.3, 14.22): graph data ` +
+        `(T13.3-2's operational path set) byte-identical and still stale, ` +
+        `no session file written or changed, the occupant byte-unchanged` +
+        (refreshed
+          ? ` — graph data changed: a product refreshing before it ` +
+            `examines the session directory leaves graph data refreshed`
+          : "") +
+        `; found ${String(changes.length)} change(s), H-6 leaving out the ` +
+        `lock path alone:\n` +
+        changes
+          .map(
+            (change) =>
+              `  ${change.change} ${change.path} ` +
+              `[${refusedCreateChangeClass(change.key)}]: ${change.detail}`,
+          )
+          .join("\n"),
+    );
   }
   const checkContext = `${label} \`check --json\` after the refused \`create\``;
-  assertPerFileStalenessOfA(
+  assertStaleTwinStillStale(
     await runFindingsReport(
       product,
       workspace,
       ["check", "--json"],
       1,
-      `${checkContext} — the edited source's generated module is stale, ` +
-        `so \`check\` exits 1 (SPEC 12.2, 14.10)`,
+      `${checkContext} — graph data and the edited source's generated ` +
+        `module are stale, so \`check\` exits 1 (SPEC 12.2, 14.10)`,
     ),
     besideStaleness,
     checkContext,
@@ -2549,7 +2630,7 @@ export async function assertMutatingCommandsFailAtAcquisition(
 const T10_1_6 = defineProductTest({
   id: "T10.1-6",
   title:
-    "session-directory and area occupancy; `create`'s ordering: `.xspec/reviews` occupied by a plain file, or by a symbolic link to a directory holding a valid session, holds no sessions (`list` none, `status s` exit 2, `check` clean, `inventory` sessions [], `ids` answers) and `create` is refused with one condition-22 finding concerning `.xspec/reviews`, nothing written; on stale twins the refused `create` — condition 22, the code-less existing-name refusal, or condition 21 in its place — follows the refresh (`check` then reports the edited source's per-file staleness and no unit form; no session written or changed); `.xspec` occupied by a plain file, or by a symbolic link to a directory holding a journal and valid sessions: `inventory` recorded unavailable with the one condition-23 finding, `build`/`ids`/`review list` one condition-22 finding concerning `.xspec`, `check` that finding beside the unreadable-record unit form, `view` finding-free, and every mutating command — `rename`, `move`, `review create`, `resolve`, `split` — failing at acquisition first: exit 2, the error document's `code` `write-failure`, `path` `.xspec`, nothing written, the plain file byte-unchanged, the link and its target byte-identical (10.1, 10.7, 11.6, 13.3–13.5, 14.10, 14.21–14.24)",
+    "session-directory and area occupancy; `create`'s ordering: `.xspec/reviews` occupied by a plain file, or by a symbolic link to a directory holding a valid session, holds no sessions (`list` none, `status s` exit 2, `check` clean, `inventory` sessions [], `ids` answers) and `create` is refused with one condition-22 finding concerning `.xspec/reviews`, nothing written; on stale twins the refused `create` — condition 22, the code-less existing-name refusal, or condition 21 in its place — is met at the examination of the session directory past the gate and before any write, the refresh included, and modifies nothing: stale graph data stays stale (graph data byte-identical around it, `check` then reporting the edited source's per-file staleness beside the graph-data unit form; no session written or changed); `.xspec` occupied by a plain file, or by a symbolic link to a directory holding a journal and valid sessions: `inventory` recorded unavailable with the one condition-23 finding, `build`/`ids`/`review list` one condition-22 finding concerning `.xspec`, `check` that finding beside the unreadable-record unit form, `view` finding-free, and every mutating command — `rename`, `move`, `review create`, `resolve`, `split` — failing at acquisition first: exit 2, the error document's `code` `write-failure`, `path` `.xspec`, nothing written, the plain file byte-unchanged, the link and its target byte-identical (10.1, 10.7, 11.6, 13.3–13.5, 14.10, 14.21–14.24)",
   timeoutMs: 360_000,
   run: async (product) => {
     // --- Session-directory occupancy on a freshly built valid workspace --
@@ -2588,8 +2669,10 @@ const T10_1_6 = defineProductTest({
       await assertSessionDirectoryOccupied(product, workspace, label);
     });
 
-    // --- Ordering: `create` examines the session directory only past the
-    // gate and refresh of 13.3 (SPEC 13.5) — three stale twins.
+    // --- Ordering: `create` examines the session directory past the gate
+    // and before any write, the refresh of 13.3 included, and the outcome
+    // it meets there ends it, modifying nothing (SPEC 10.7, 13.5) — three
+    // stale twins, each one's graph data staying stale.
     await withWorkspace(CORE_FILES, async (workspace) => {
       const label = "T10.1-6 [stale twin, .xspec/reviews: plain file]";
       await buildOk(product, workspace, `${label} \`build\``);
@@ -2598,7 +2681,7 @@ const T10_1_6 = defineProductTest({
         REVIEWS_DIR,
         T10_1_6_PLAIN_FILE,
       );
-      await assertCreateFollowsRefresh(
+      await assertCreateRefusedStaleStaysStale(
         product,
         workspace,
         T10_1_6_NEW_SESSION,
@@ -2617,7 +2700,7 @@ const T10_1_6 = defineProductTest({
         0,
         `${label} \`review create --strategy audit --name s\` (SPEC 10.1)`,
       );
-      await assertCreateFollowsRefresh(
+      await assertCreateRefusedStaleStaysStale(
         product,
         workspace,
         T10_1_6_SESSION,
@@ -2639,7 +2722,7 @@ const T10_1_6 = defineProductTest({
       // Shape-independent corruption (module header): unparseable bytes
       // over the product-written session (SPEC 14.21).
       await workspace.file(sessionRel(T10_1_6_SESSION), NON_SESSION_GARBAGE);
-      await assertCreateFollowsRefresh(
+      await assertCreateRefusedStaleStaysStale(
         product,
         workspace,
         T10_1_6_SESSION,
