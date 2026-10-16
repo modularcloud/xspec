@@ -162,6 +162,21 @@
 // - Reads never write (SPEC 10.4, 13.3, 13.4): every read command computes
 //   its answer from the sources and stored files in memory and writes
 //   nothing — durable files are touched only by their owning commands.
+// - Audit review (SPEC 10.5, 10.6, 10.7; rederive, auditDerivation): one
+//   derivation places every item a session gains — `create` derives the
+//   empty session, an `updated` resolve re-derives it, and `split` records
+//   its decomposition (the original's kind and scope node), removes the
+//   original, and ends by re-deriving it. The derivation runs with the
+//   recorded decompositions applied (a decomposed item never added back,
+//   its per-child items and the scope node's `parent-consistency` item in
+//   its place, recursively, over the children the node has now), matches
+//   existing items by kind and scope node — identities mapped forward
+//   through the journal (10.4) — adds the rest with current state, and
+//   blocks each generated item by its child sections' items, a decomposed
+//   one's replaced by all items of its decomposition; `split`'s
+//   decomposition items, reused where they exist, take its scope, context,
+//   origin, and reason, and every item the original blocked is blocked by
+//   all of them.
 //
 // Determinism (SPEC 12.0): no wall clock, no randomness, no absolute paths
 // in any output, generated file, or stored data — the lock directory's
@@ -2566,8 +2581,23 @@ function sessionInvariantsHold(session, name) {
       )
         return false;
     }
-    if (typeof item.baseline !== "object" || typeof item.current !== "object")
+    if (!recordedStateWellFormed(item.baseline)) return false;
+    if (!recordedStateWellFormed(item.current)) return false;
+  }
+  // The recorded decompositions well-formed (SPEC 10.1, 10.7): each the
+  // original's kind and scope node, its spelling's journal position beside
+  // it (reviewSplit).
+  for (const entry of session.decompositions) {
+    if (
+      entry === null ||
+      typeof entry !== "object" ||
+      entry.kind !== "subtree-coherence" ||
+      typeof entry.scope !== "string" ||
+      !Number.isInteger(entry.journalAt) ||
+      entry.journalAt < 0
+    ) {
       return false;
+    }
   }
   for (const item of session.items) {
     if (item.blockedBy.some((id) => !ids.has(id))) return false;
@@ -2599,6 +2629,24 @@ function sessionInvariantsHold(session, name) {
   return true;
 }
 
+/**
+ * A recorded state's form (recordState): its nodes, its recorded context
+ * set, and their journal position.
+ */
+function recordedStateWellFormed(state) {
+  return (
+    state !== null &&
+    typeof state === "object" &&
+    Number.isInteger(state.journalAt) &&
+    state.journalAt >= 0 &&
+    state.nodes !== null &&
+    typeof state.nodes === "object" &&
+    !Array.isArray(state.nodes) &&
+    Array.isArray(state.context) &&
+    state.context.every((spelling) => typeof spelling === "string")
+  );
+}
+
 async function writeSession(root, session) {
   await writeFileAtomic(
     path.join(root, sessionRel(session.name)),
@@ -2625,8 +2673,10 @@ function relevantHashes(kind, role, node) {
  * Record the relevant state of an item against the current graph (SPEC
  * 10.4): relevant hashes per kind, presence for every scope/context/origin
  * node, plus the text values the payload provenance rule may need later.
- * Keys are the item's recorded spellings; lookups map them forward through
- * the journal suffix appended since the item's recording.
+ * Keys are the item's spellings as they stand, and the state carries their
+ * journal position (`journalAt`, the item's at recording): lookups map them
+ * forward through the journal suffix appended since then, so a state keeps
+ * its meaning when the item later takes newer spellings (adoptGenerated).
  */
 function recordState(item, graph, journalEntries) {
   const suffix = journalEntries.slice(item.journalAt);
@@ -2651,57 +2701,60 @@ function recordState(item, graph, journalEntries) {
   for (const spelling of item.scopeNodes) record(spelling, "scope");
   for (const spelling of item.contextNodes) record(spelling, "context");
   for (const spelling of item.originNodes) record(spelling, "origin");
-  return { nodes };
+  // The context nodes so recorded form the item's recorded context set
+  // (SPEC 10.4), kept apart from its `context` as later assigned.
+  return { context: [...item.contextNodes], journalAt: item.journalAt, nodes };
 }
 
 /**
  * Read-time invalidation (SPEC 10.4): a resolved item is stale when its
  * recorded state differs from the current graph — a recorded hash changed,
- * a node's presence changed in either direction, or the generator-assigned
- * context set changed. Computed on read, never persisted.
+ * a node's presence changed in either direction, or its current context set
+ * differs from its recorded context set. Computed on read, never persisted.
+ * The recorded spellings map forward from the state's own journal position
+ * (recordState), and each recorded hash — those of its node's role
+ * (relevantHashes) — is compared with the node's current value of the hash
+ * it names.
  */
 function isStale(item, graph, journalEntries) {
-  const recorded = item.current?.nodes ?? {};
-  const suffix = journalEntries.slice(item.journalAt);
-  const role = (spelling) =>
-    item.scopeNodes.includes(spelling)
-      ? "scope"
-      : item.contextNodes.includes(spelling)
-        ? "context"
-        : "origin";
-  for (const [spelling, state] of Object.entries(recorded)) {
-    const mapped = mapIdentityForward(spelling, suffix);
+  const recordedSuffix = journalEntries.slice(item.current.journalAt);
+  for (const [spelling, state] of Object.entries(item.current.nodes)) {
+    const mapped = mapIdentityForward(spelling, recordedSuffix);
     const node = graph.byIdentity.get(mapped);
     const present = node !== undefined;
     if (present !== state.present) return true; // presence changed either way
     if (!present) continue; // absent then and now: no invalidation (10.4)
-    const currentHashes = relevantHashes(item.kind, role(spelling), node);
     for (const [hashName, value] of Object.entries(
       state.hashes === "absent" ? {} : state.hashes,
     )) {
-      if (currentHashes[hashName] !== value) return true;
+      if (node[hashName] !== value) return true;
     }
   }
-  // Context-set comparison against the generator-assigned set (SPEC 10.4).
-  const generated = generatorContext(item, graph, suffix);
-  if (generated !== null) {
-    const recordedSet = new Set(
+  // Context-set comparison (SPEC 10.4): the item's current context set —
+  // the context the generator assigns it now (generatorContext), or, for an
+  // item it no longer produces, its `context` as last assigned — against its
+  // recorded context set, the context nodes its `current` state records.
+  const suffix = journalEntries.slice(item.journalAt);
+  const currentSet = new Set(
+    generatorContext(item, graph, suffix) ??
       item.contextNodes.map((spelling) => mapIdentityForward(spelling, suffix)),
-    );
-    if (
-      generated.length !== recordedSet.size ||
-      generated.some((identity) => !recordedSet.has(identity))
-    ) {
-      return true;
-    }
-  }
-  return false;
+  );
+  const recordedSet = new Set(
+    item.current.context.map((spelling) =>
+      mapIdentityForward(spelling, recordedSuffix),
+    ),
+  );
+  return (
+    currentSet.size !== recordedSet.size ||
+    [...currentSet].some((identity) => !recordedSet.has(identity))
+  );
 }
 
 /**
  * The context set the audit generator (with recorded decompositions)
  * assigns to this item against the current workspace, or null when the
- * generators no longer produce it (the item then retains its recorded set).
+ * generators no longer produce it (its `context` as last assigned then being
+ * its current context set, SPEC 10.4).
  */
 function generatorContext(item, graph, journalSuffix) {
   const mappedScope = mapIdentityForward(item.scopeRoot, journalSuffix);
@@ -2833,6 +2886,25 @@ function orderedItems(session, graph, journalEntries) {
   return keyed;
 }
 
+/**
+ * The text a recorded state (recordState) holds for the node whose current
+ * identity is `identity` — SPEC 10.7's provenance rule for an absent node —
+ * its spellings mapped forward from the state's own journal position, or
+ * undefined where it records no text for that node.
+ */
+function recordedTextOf(state, identity, journalEntries) {
+  const suffix = journalEntries.slice(state.journalAt);
+  for (const [spelling, entry] of Object.entries(state.nodes)) {
+    if (
+      typeof entry?.text === "string" &&
+      mapIdentityForward(spelling, suffix) === identity
+    ) {
+      return entry.text;
+    }
+  }
+  return undefined;
+}
+
 /** Present a recorded node in a payload (SPEC 10.7): NodeState shape. */
 function nodeState(item, spelling, role, graph, journalEntries) {
   const mapped = mapIdentityForward(
@@ -2842,8 +2914,8 @@ function nodeState(item, spelling, role, graph, journalEntries) {
   const node = graph.byIdentity.get(mapped);
   if (node === undefined) {
     const recordedText =
-      item.current?.nodes?.[spelling]?.text ??
-      item.baseline?.nodes?.[spelling]?.text;
+      recordedTextOf(item.current, mapped, journalEntries) ??
+      recordedTextOf(item.baseline, mapped, journalEntries);
     const state = { node: mapped, present: false };
     if (typeof recordedText === "string") state.text = recordedText;
     return state;
@@ -2888,19 +2960,90 @@ function itemPayload(item, session, graph, journalEntries) {
   return payload;
 }
 
-/** Audit generation (SPEC 10.6): one subtree-coherence item per node. */
-function auditGenerate(graph) {
-  const generated = [];
+/** An item's key: its kind and scope node (SPEC 10.1, 10.5). */
+function itemKey(kind, identity) {
+  return `${kind} ${identity}`;
+}
+
+/**
+ * The current identities of the scope nodes whose `subtree-coherence` item
+ * the session records as decomposed (SPEC 10.7), each recorded scope mapped
+ * forward through the journal appended since its recording: decomposition
+ * matching compares canonical identities, never spellings (10.4).
+ */
+function decomposedIdentities(session, journal) {
+  return new Set(
+    session.decompositions.map((entry) =>
+      mapIdentityForward(entry.scope, journal.entries.slice(entry.journalAt)),
+    ),
+  );
+}
+
+/**
+ * The items standing for a node's `subtree-coherence` item (SPEC 10.5,
+ * 10.7), as keys (itemKey), given the decomposed scope nodes' identities
+ * (decomposedIdentities): the item itself, or, where it is recorded as
+ * decomposed, all items of its decomposition — one `subtree-coherence` item
+ * per child subtree the node has now, each itself replaced by its
+ * decomposition where one is recorded, recursively, then the node's
+ * `parent-consistency` item.
+ */
+function standInOf(decomposed) {
+  const standIn = (node) =>
+    decomposed.has(node.identity)
+      ? [
+          ...node.children.flatMap(standIn),
+          itemKey("parent-consistency", node.identity),
+        ]
+      : [itemKey("subtree-coherence", node.identity)];
+  return standIn;
+}
+
+/**
+ * The audit derivation (SPEC 10.6) over the current graph with the session's
+ * recorded decompositions applied (10.5, 10.7; `decomposed`, from
+ * decomposedIdentities): for each node, files in discovery order and nodes
+ * in document order, its `subtree-coherence` item — scope: the node and all
+ * its current descendants; context: its ancestor chain; origin empty — or,
+ * where that item is recorded as decomposed, the node's `parent-consistency`
+ * item in its place — scope: the node, reviewed against its own text;
+ * context: its children — audit generating every node's item, so this walk
+ * over every node yields each item of every decomposition (standInOf) once.
+ * Each item is blocked by its child sections' items (10.6) — a
+ * `parent-consistency` item by those child items (10.7) — a decomposed
+ * child's item replaced by all items of its decomposition, recursively
+ * (10.5, 10.7). Blocking thus points from each item to items scoped strictly
+ * below its scope node, so it stays acyclic (10.1). Returns the generated
+ * items keyed by kind and current scope identity (itemKey), each with its
+ * `blockers` as keys.
+ */
+function auditDerivation(graph, decomposed) {
+  const standIn = standInOf(decomposed);
+  const generated = new Map();
   for (const model of graph.files) {
     for (const node of model.nodes) {
-      generated.push({
-        kind: "subtree-coherence",
-        scopeRoot: node.identity,
-        scopeNodes: [node.identity, ...descendantIdentities(node)],
-        contextNodes: ancestorChain(node).map((ancestor) => ancestor.identity),
-        childIdentities: node.children.map((child) => child.identity),
-        reason: `audit: review the subtree rooted at ${node.identity} (SPEC 10.6)`,
-      });
+      const blockers = node.children.flatMap(standIn);
+      if (decomposed.has(node.identity)) {
+        generated.set(itemKey("parent-consistency", node.identity), {
+          blockers,
+          contextNodes: node.children.map((child) => child.identity),
+          kind: "parent-consistency",
+          reason: `split: review the own text of ${node.identity} against its child subtrees (SPEC 10.7)`,
+          scopeNodes: [node.identity],
+          scopeRoot: node.identity,
+        });
+      } else {
+        generated.set(itemKey("subtree-coherence", node.identity), {
+          blockers,
+          contextNodes: ancestorChain(node).map(
+            (ancestor) => ancestor.identity,
+          ),
+          kind: "subtree-coherence",
+          reason: `audit: review the subtree rooted at ${node.identity} (SPEC 10.6)`,
+          scopeNodes: [node.identity, ...descendantIdentities(node)],
+          scopeRoot: node.identity,
+        });
+      }
     }
   }
   return generated;
@@ -4796,39 +4939,11 @@ async function reviewCreate(io, cwd, { flags }) {
         nextId: 1,
         strategy: "audit",
       };
-      const itemsByScope = new Map();
-      for (const generated of auditGenerate(graph)) {
-        const item = {
-          baseline: null,
-          blockedBy: [],
-          contextNodes: generated.contextNodes,
-          current: null,
-          id: `i${String(session.nextId)}`,
-          journalAt: journal.lineCount,
-          kind: generated.kind,
-          originNodes: [],
-          reason: generated.reason,
-          scopeNodes: generated.scopeNodes,
-          scopeRoot: generated.scopeRoot,
-          status: "unresolved",
-        };
-        session.nextId += 1;
-        session.items.push(item);
-        itemsByScope.set(generated.scopeRoot, { item, generated });
-      }
-      for (const { item, generated } of itemsByScope.values()) {
-        // Audit blocking (SPEC 10.6): each item is blocked by its child
-        // sections' items, so leaves are unblocked and review is bottom-up.
-        item.blockedBy = generated.childIdentities.map(
-          (identity) => itemsByScope.get(identity).item.id,
-        );
-        // `baseline` is fixed when the item enters an audit session: the
-        // values in the current graph at that moment; `current` is recorded
-        // at creation the same way (SPEC 10.2, 10.4).
-        const recorded = recordState(item, graph, journal.entries);
-        item.baseline = recorded;
-        item.current = recorded;
-      }
+      // The audit strategy's items (SPEC 10.6), as the derivation of the
+      // empty session (rederive): one `subtree-coherence` item per node,
+      // each blocked by its child sections' items, so leaves are unblocked
+      // and review is bottom-up, each entering with current state (10.2).
+      rederive(session, graph, journal);
       // Past every outcome 10.7 orders before it: the refresh of 13.3 where
       // graph data is stale, then the session file, once, last (SPEC 10.7,
       // 13.5).
@@ -4945,68 +5060,93 @@ async function reviewResolve(io, cwd, { flags, positionals }) {
 }
 
 /**
- * Re-derivation on an `updated` resolve (SPEC 10.5 rules via 10.6's
- * generator): matched items keep id/status/record; missing items are added
- * with current state; decomposed kind+scope pairs apply their recorded
- * decomposition instead; blockedBy is recomputed for generated items.
+ * Derive the session against the current workspace (SPEC 10.5's rules, which
+ * hold for every strategy, over audit's generator, 10.6; auditDerivation) —
+ * the derivation `create` makes of the empty session, and the re-derivation
+ * an `updated` resolve triggers and every `split` ends with (10.5, 10.7).
+ * The generator runs with the session's recorded decompositions applied, so
+ * an item recorded as decomposed is never added back, its decomposition —
+ * over the children its scope node has now — standing in its place. A
+ * generated item whose kind and scope node match an existing item, the
+ * existing item's scope mapped forward through the journal (10.4), is that
+ * item: it keeps its `id`, status, note, and recorded state; one whose key is
+ * in `adopt` (split's decomposition items, 10.7) also takes the generated
+ * scope, context, origin, and `reason` (adoptGenerated), every other keeping
+ * them. Every other generated item is added with current state (10.2), in
+ * generation order, under the next item `id` (never one reused). `blockedBy`
+ * is recomputed for every generated item, any reference to a decomposed item
+ * replaced by all items of its decomposition; items no longer generated
+ * remain and keep theirs. Returns the session's item for each generated key.
  */
-function rederive(session, graph, journal) {
-  const decomposed = new Set(
-    session.decompositions.map((entry) => `${entry.kind} ${entry.scope}`),
+function rederive(session, graph, journal, { adopt = new Set() } = {}) {
+  const generated = auditDerivation(
+    graph,
+    decomposedIdentities(session, journal),
   );
-  const byMappedScope = new Map();
+  const existing = new Map();
   for (const item of session.items) {
     const mapped = mapIdentityForward(
       item.scopeRoot,
       journal.entries.slice(item.journalAt),
     );
-    byMappedScope.set(`${item.kind} ${mapped}`, item);
+    existing.set(itemKey(item.kind, mapped), item);
   }
-  const generatedItems = new Map();
-  for (const generated of auditGenerate(graph)) {
-    const key = `${generated.kind} ${generated.scopeRoot}`;
-    if (decomposed.has(key)) continue; // the decomposition applies instead
-    let item = byMappedScope.get(key);
+  const produced = new Map();
+  for (const [key, spec] of generated) {
+    let item = existing.get(key);
     if (item === undefined) {
       item = {
         baseline: null,
         blockedBy: [],
-        contextNodes: generated.contextNodes,
+        contextNodes: spec.contextNodes,
         current: null,
         id: `i${String(session.nextId)}`,
         journalAt: journal.lineCount,
-        kind: generated.kind,
+        kind: spec.kind,
         originNodes: [],
-        reason: generated.reason,
-        scopeNodes: generated.scopeNodes,
-        scopeRoot: generated.scopeRoot,
+        reason: spec.reason,
+        scopeNodes: spec.scopeNodes,
+        scopeRoot: spec.scopeRoot,
         status: "unresolved",
       };
       session.nextId += 1;
+      // `baseline` is fixed as the item enters a session without a baseline
+      // — the current graph at that moment — and `current` is recorded at
+      // creation the same way (SPEC 10.2, 10.4).
       const recorded = recordState(item, graph, journal.entries);
       item.baseline = recorded;
       item.current = recorded;
       session.items.push(item);
-      byMappedScope.set(key, item);
+    } else if (adopt.has(key)) {
+      adoptGenerated(item, spec, journal);
     }
-    generatedItems.set(key, { item, generated });
+    produced.set(key, item);
   }
-  for (const { item, generated } of generatedItems.values()) {
-    item.blockedBy = generated.childIdentities.flatMap((identity) => {
-      const childKey = `subtree-coherence ${identity}`;
-      if (decomposed.has(childKey)) {
-        const decomposition = session.decompositions.find(
-          (entry) => `${entry.kind} ${entry.scope}` === childKey,
-        );
-        return decomposition.children.flatMap((child) => {
-          const childItem = byMappedScope.get(`${child.kind} ${child.scope}`);
-          return childItem === undefined ? [] : [childItem.id];
-        });
-      }
-      const childItem = generatedItems.get(childKey);
-      return childItem === undefined ? [] : [childItem.item.id];
-    });
+  for (const [key, spec] of generated) {
+    produced.get(key).blockedBy = spec.blockers.map(
+      (blocker) => produced.get(blocker).id,
+    );
   }
+  return produced;
+}
+
+/**
+ * A kept item taking a generated item's scope, context, origin, and `reason`
+ * (SPEC 10.5, 10.7) — the scope node it already has, under its current
+ * identity — while keeping its `id`, status, note, and recorded state: its
+ * spellings move to the current journal position, the fields it takes naming
+ * current identities, and its `baseline` and `current` keep theirs, each
+ * carrying its own position (recordState), so the move changes no recorded
+ * node, presence, hash, text, or recorded context set (10.4: a context it
+ * takes reads against the one recorded, as a resolve left it).
+ */
+function adoptGenerated(item, spec, journal) {
+  item.journalAt = journal.lineCount;
+  item.scopeRoot = spec.scopeRoot;
+  item.scopeNodes = spec.scopeNodes;
+  item.contextNodes = spec.contextNodes;
+  item.originNodes = [];
+  item.reason = spec.reason;
 }
 
 async function reviewSplit(io, cwd, { flags, positionals }) {
@@ -5037,84 +5177,42 @@ async function reviewSplit(io, cwd, { flags, positionals }) {
           "review split refused: only a subtree-coherence item whose scope root has children can be split (SPEC 10.7)",
         );
       }
-      const byMappedScope = new Map();
-      for (const item of session.items) {
-        const mapped = mapIdentityForward(
-          item.scopeRoot,
-          journal.entries.slice(item.journalAt),
-        );
-        byMappedScope.set(`${item.kind} ${mapped}`, item);
-      }
-      const decompositionChildren = [];
-      const childItemIds = [];
-      const newItems = [];
-      const makeItem = (kind, node) => {
-        const item = {
-          baseline: null,
-          blockedBy: [],
-          contextNodes:
-            kind === "subtree-coherence"
-              ? ancestorChain(node).map((ancestor) => ancestor.identity)
-              : node.children.map((child) => child.identity),
-          current: null,
-          id: `i${String(session.nextId)}`,
-          journalAt: journal.lineCount,
-          kind,
-          originNodes: [],
-          reason:
-            kind === "subtree-coherence"
-              ? `audit: review the subtree rooted at ${node.identity} (SPEC 10.6)`
-              : `split: review the own text of ${node.identity} against its child subtrees (SPEC 10.7)`,
-          scopeNodes:
-            kind === "subtree-coherence"
-              ? [node.identity, ...descendantIdentities(node)]
-              : [node.identity],
-          scopeRoot: node.identity,
-          status: "unresolved",
-        };
-        session.nextId += 1;
-        const recorded = recordState(item, graph, journal.entries);
-        item.baseline = recorded;
-        item.current = recorded;
-        return item;
-      };
-      for (const child of scopeNode.children) {
-        const key = `subtree-coherence ${child.identity}`;
-        let childItem = byMappedScope.get(key);
-        if (childItem === undefined || childItem === original) {
-          childItem = makeItem("subtree-coherence", child);
-          newItems.push(childItem);
-          byMappedScope.set(key, childItem);
-        }
-        childItemIds.push(childItem.id);
-        decompositionChildren.push({
-          kind: "subtree-coherence",
-          scope: child.identity,
-        });
-      }
-      const parentKey = `parent-consistency ${mappedScope}`;
-      let parentItem = byMappedScope.get(parentKey);
-      if (parentItem === undefined) {
-        parentItem = makeItem("parent-consistency", scopeNode);
-        parentItem.blockedBy = [...childItemIds];
-        newItems.push(parentItem);
-        byMappedScope.set(parentKey, parentItem);
-      }
-      decompositionChildren.push({
-        kind: "parent-consistency",
+      // The decomposition (SPEC 10.7) — the original's kind and scope node,
+      // under its current identity, with that spelling's journal position —
+      // is recorded durably and governs the re-derivation `split` ends with
+      // (10.5). The original leaves the session, its `id` never reused (the
+      // next item `id` only grows).
+      session.decompositions.push({
+        journalAt: journal.lineCount,
+        kind: original.kind,
         scope: mappedScope,
       });
-      // Newly created decomposition items inherit the original's blockedBy.
-      for (const item of newItems) {
-        item.blockedBy = [
-          ...new Set([...item.blockedBy, ...original.blockedBy]),
-        ];
-      }
-      // Every item blocked by the original becomes blocked by the whole
-      // decomposition; the original is removed and its id never reused.
-      const decompositionIds = decompositionChildren.map(
-        (child) => byMappedScope.get(`${child.kind} ${child.scope}`).id,
+      session.items = session.items.filter((item) => item !== original);
+      // The decomposition's items: one `subtree-coherence` item per child
+      // subtree the scope root has, each replaced by its own decomposition
+      // where one is recorded — its items standing in for it, recursively —
+      // plus the scope root's `parent-consistency` item (10.7; standInOf).
+      const decomposition = standInOf(decomposedIdentities(session, journal))(
+        scopeNode,
       );
+      // The re-derivation `split` ends with (10.5, 10.7): it adds each item
+      // of the decomposition not already in the session, with current
+      // state; one that already exists is that item, keeping its `id`,
+      // status, note, and recorded state and taking the decomposition's
+      // scope, context, origin (empty in an audit session), and reason
+      // (`adopt`), so `split` in an audit session reuses the children's
+      // existing items; and it recomputes `blockedBy` for every generated
+      // item against the current graph — a per-child item blocked by its
+      // child sections' items (10.6), the `parent-consistency` item by the
+      // per-child items or the items standing in for them, and each item
+      // the original blocked by all items of the decomposition in its place
+      // — so blocking stays acyclic (10.1). Items no longer generated keep
+      // their `blockedBy` (10.5); any of them the original blocked becomes
+      // blocked by all items of the decomposition (below).
+      const produced = rederive(session, graph, journal, {
+        adopt: new Set(decomposition),
+      });
+      const decompositionIds = decomposition.map((key) => produced.get(key).id);
       for (const item of session.items) {
         if (item.blockedBy.includes(original.id)) {
           item.blockedBy = [
@@ -5123,16 +5221,6 @@ async function reviewSplit(io, cwd, { flags, positionals }) {
           ];
         }
       }
-      session.items = [
-        ...session.items.filter((item) => item !== original),
-        ...newItems,
-      ];
-      session.decompositions.push({
-        children: decompositionChildren,
-        journalAt: journal.lineCount,
-        kind: original.kind,
-        scope: mappedScope,
-      });
       // Past all of them: the refresh of 13.3 where graph data is stale,
       // then the session file, once, last (SPEC 10.7, 13.5).
       await refreshBeforeSessionWrite();
