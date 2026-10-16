@@ -29,9 +29,15 @@
 // per-command write order, which `assertPinnedState` asserts entry by entry;
 // where 13.5 leaves an order unpinned (a regeneration's derived-file writes)
 // `assertEachWriteComplete` asserts the weaker law — each entry is its prior
-// state or its complete new content — and `check`'s expected staleness set
-// is computed by comparison with the twin (`derivedPathsDifferingFrom`,
-// `graphDataDiffers`; TEST-SPEC T13.5-7 (b), (f)).
+// state or its complete new content. `check`'s expected staleness set is
+// computed by comparison (`derivedPathsDifferingFrom`, `graphDataDiffers`):
+// with a build twin of the same edit where no operation ran (TEST-SPEC
+// T13.5-7 (e), (f)), and, for the state a rename stopped at its journal
+// append leaves, with a `build` on a copy of that state, permissions
+// restored (`stalenessAgainstRebuiltCopy`; T13.5-7 (b)) — never with the
+// twin's post-operation derived files, the twin's journal holding the entry
+// the stopped state lacks (SPEC 13.4: derived files are reproducible from
+// sources, configuration, and the journal, 5.4).
 //
 // Product-chosen names are compared by their exact bytes: a companion's
 // suffix is the product's choice (SPEC 13.1), so a derived path under
@@ -77,6 +83,7 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { excludingLockPath } from "../../helpers/lock-path.js";
 import { killHeldRun } from "../../helpers/lock-staging.js";
 import type { KilledRunTwin } from "../../helpers/lock-state.js";
 import {
@@ -119,6 +126,7 @@ import {
   startProduct,
   summarizeResult,
 } from "../../helpers/subprocess.js";
+import { copyTreeBytes } from "../../helpers/tree-copy.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -694,7 +702,9 @@ export function assertEachWriteComplete(
 }
 
 /**
- * Derived paths whose occupant differs from the twin's derived state, as
+ * Derived paths whose occupant differs from a reference state's — a build
+ * twin's (T13.5-7 (e), (f)) or a rebuilt copy's
+ * (`stalenessAgainstRebuiltCopy`) — absent on one side included, as
  * snapshot keys (`assertStalenessAlone`'s `perFile` form).
  */
 export function derivedPathsDifferingFrom(
@@ -711,7 +721,10 @@ export function derivedPathsDifferingFrom(
   return paths;
 }
 
-/** Whether graph data differs from the twin's (the 14.10 unit form's premise). */
+/**
+ * Whether graph data differs from a reference state's — a build twin's or a
+ * rebuilt copy's (the 14.10 unit form's premise).
+ */
 export function graphDataDiffers(
   after: DirectorySnapshot,
   twinAfter: DirectorySnapshot,
@@ -721,6 +734,88 @@ export function graphDataDiffers(
       isGraphDataPath(key) &&
       !sameEntry(after.entries.get(key), twinAfter.entries.get(key)),
   );
+}
+
+/** What `check` must find stale on a state (`stalenessAgainstRebuiltCopy`). */
+export interface RebuiltCopyStaleness {
+  /**
+   * Every derived path at which the state's occupant differs from the one
+   * a `build` leaves on a copy of it, absent on one side included, as
+   * snapshot keys (`assertStalenessAlone`'s `perFile` form).
+   */
+  readonly perFile: readonly string[];
+  /** Whether graph data differs from the rebuilt copy's (the unit form's premise). */
+  readonly graphDataDiffers: boolean;
+}
+
+/**
+ * A state's staleness by comparison with a `build` on a copy of it,
+ * permissions restored (TEST-SPEC T13.5-7 (b), a stopped rename's state;
+ * (g) and T13.3-5 (c) compute their sets "as T13.5-7(b) does"): the state
+ * `workspace` holds is copied into a fresh workspace (helpers/tree-copy.ts
+ * `copyTreeBytes`) — every entry of the root but the harness's own `.git`
+ * and the lock path, transient and bearing on no comparison of derived
+ * files or graph data (SPEC 13.4; H-6) — and the copy, checked against the
+ * original before anything runs there (a difference is a harness error,
+ * never a product verdict), is built: exit 0 required — the caller's state
+ * is valid, so a `build` succeeds there (SPEC 12.1), a diagnosed failure
+ * naming the copy's findings otherwise. `perFile` is then every derived
+ * path at which the state's occupant differs from the rebuilt copy's,
+ * compared byte for byte over the paths either tree holds
+ * (`derivedPathsDifferingFrom`), and `graphDataDiffers` whether graph data
+ * differs (`graphDataDiffers`). Never a twin's post-operation derived
+ * files: a twin that completed the operation holds the journal entry a
+ * state stopped before the append lacks, and derived files are
+ * reproducible from sources, configuration, and the journal (SPEC 13.4,
+ * 5.4), so only a `build` of this very state says what is stale on it —
+ * whether generated content depends on the journal is never assumed. The
+ * caller restores every staging first (the copy carries each entry's
+ * mode); the copy is disposed whatever happens.
+ */
+export async function stalenessAgainstRebuiltCopy(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<RebuiltCopyStaleness> {
+  const options = excludingLockPath({ exclude: excludeGitTree });
+  const stopped = await snapshotDirectory(workspace.root, options);
+  const copy = await TestWorkspace.create();
+  try {
+    await copyTreeBytes(
+      Buffer.from(workspace.root),
+      Buffer.from(copy.root),
+      options.exclude,
+    );
+    const differences = diffSnapshots(
+      stopped,
+      await snapshotDirectory(copy.root, options),
+    );
+    if (differences.length > 0) {
+      throw new Error(
+        `harness error: ${context}: the copy of ${workspace.root} at ` +
+          `${copy.root} differs from it (\`.git\` and the lock path aside): ` +
+          differences
+            .slice(0, 10)
+            .map((change) => `${change.change} ${change.path}`)
+            .join(", "),
+      );
+    }
+    await buildOk(
+      product,
+      copy,
+      `${context}: \`build\` on a copy of this state, permissions restored — ` +
+        `the workspace is valid, so the build succeeds, leaving what the ` +
+        `current sources, configuration, and journal generate (SPEC 12.1, ` +
+        `13.4)`,
+    );
+    const rebuilt = await snapshotDirectory(copy.root, options);
+    return {
+      perFile: derivedPathsDifferingFrom(stopped, rebuilt),
+      graphDataDiffers: graphDataDiffers(stopped, rebuilt),
+    };
+  } finally {
+    await copy.dispose();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1409,15 +1504,20 @@ export async function sourceEditsArm(
  * unwritable (`.xspec` read-only, graph data untouched) every source edit is
  * made (A, B, C byte-equal to the twin's), no journal entry is appended, and
  * derived files and graph data are byte-unchanged; the error document
- * concerns `.xspec/journal`; `check` reports condition 10 alone — per-file
- * staleness for B's module and companions and the graph-data unit form;
- * once restored, `impact --base <pre-rename ref>` reports the old identity
- * deleted and the new one added (manual restructuring, 6.7) and the next
- * `build` leaves `check` clean. Release meets the staging too: the
- * read-only `.xspec` refuses the deletion of the emptied lock directory,
- * which remains, empty — no outcome changed, no write failure reported
- * (13.5, 14.24) — until a mutating command run once the permissions are
- * restored proceeds unrefused and removes it (T13.5-11).
+ * concerns `.xspec/journal`; `check` reports condition 10 alone — the
+ * graph-data unit form and one per-file finding for each derived path
+ * whose occupant differs from the one a `build` leaves on a copy of this
+ * state, permissions restored (`stalenessAgainstRebuiltCopy`; B's module
+ * certainly among them, SPEC 4.1), never computed from the twin's
+ * post-operation derived files, the twin's journal holding the entry this
+ * state lacks (13.4, 5.4); once restored, `impact --base <pre-rename ref>`
+ * reports the old identity deleted and the new one added (manual
+ * restructuring, 6.7) and the next `build` leaves `check` clean. Release
+ * meets the staging too: the read-only `.xspec` refuses the deletion of the
+ * emptied lock directory, which remains, empty — no outcome changed, no
+ * write failure reported (13.5, 14.24) — until a mutating command run once
+ * the permissions are restored proceeds unrefused and removes it
+ * (T13.5-11).
  */
 export async function journalCommitPointArm(
   product: ProductBinding,
@@ -1467,32 +1567,42 @@ export async function journalCommitPointArm(
         `byte-unchanged), derived files and graph data byte-unchanged (the ` +
         `finishing regeneration follows the append)`,
     );
-    const perFile = derivedPathsDifferingFrom(after, twin.after);
-    if (!perFile.includes(RENAME_B_MODULE)) {
+    // The expected per-file set: what a `build` on a copy of this state,
+    // permissions restored, leaves — never the twin's derived files, the
+    // twin's journal holding the entry this state lacks (SPEC 13.4, 5.4).
+    const expected = await stalenessAgainstRebuiltCopy(
+      product,
+      workspace,
+      context,
+    );
+    if (!expected.perFile.includes(RENAME_B_MODULE)) {
       fail(
         `${context}: B's generated module ${RENAME_B_MODULE} must differ ` +
-          `from the twin's regenerated one — the rename changed the ` +
-          `identities it exports (SPEC 13.1) — so it is certainly among the ` +
-          `stale derived paths; differing: ` +
-          JSON.stringify(perFile.map(displaySnapshotPath)),
+          `from the one a \`build\` leaves on a copy of this state — its ` +
+          `nodes' properties are named by ID segment (SPEC 4.1) and the ` +
+          `rename made \`b\` \`b2\` — so it is certainly among the stale ` +
+          `derived paths; differing: ` +
+          JSON.stringify(expected.perFile.map(displaySnapshotPath)),
       );
     }
-    if (!graphDataDiffers(after, twin.after)) {
+    if (!expected.graphDataDiffers) {
       fail(
-        `${context}: graph data must differ from the twin's regenerated ` +
-          `graph data — it carries the identities the rename changed (SPEC ` +
-          `13.3) — so the unit form is certainly reported; found it ` +
-          `byte-identical`,
+        `${context}: graph data must differ from the graph data a \`build\` ` +
+          `leaves on a copy of this state — it carries the identities the ` +
+          `rename changed (SPEC 13.3) — so the unit form is certainly ` +
+          `reported; found it byte-identical`,
       );
     }
     assertStalenessAlone(
       await checkFindings(product, workspace, context),
-      { perFile, unit: true },
+      { perFile: expected.perFile, unit: true },
       `${context}: \`check\` after the refused append — condition 10 alone: ` +
-        `per-file staleness for the derived paths whose occupant differs ` +
-        `from the twin's regenerated state (B's module and companions) and ` +
-        `the graph-data unit form, the workspace being valid and ` +
-        `consistently rewritten (SPEC 13.5, 14.10)`,
+        `the graph-data unit form (graph data no longer matches the ` +
+        `rewritten sources, SPEC 13.3) and one per-file finding for each ` +
+        `derived path whose occupant differs from the one a \`build\` ` +
+        `leaves on a copy of this state, permissions restored (B's module ` +
+        `certainly among them), the workspace being valid and consistently ` +
+        `rewritten (SPEC 13.5, 14.10, 13.4)`,
     );
     // Recovery, the permissions restored (SPEC 6.7, 12.1).
     assertManualRestructuring(

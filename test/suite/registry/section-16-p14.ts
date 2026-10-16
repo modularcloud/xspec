@@ -162,12 +162,13 @@ import type {
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { summarizeResult } from "../../helpers/subprocess.js";
+import { copyTreeBytes } from "../../helpers/tree-copy.js";
 import {
   mdxPathsOf,
   TestWorkspace,
   tsPathsOf,
 } from "../../helpers/workspace.js";
-import { copyTreeBytes, runBounded } from "./section-13.5.js";
+import { runBounded } from "./section-13.5.js";
 
 // ---------------------------------------------------------------------------
 // Configurations (staged-source records: every trial stages its

@@ -253,8 +253,8 @@ import {
 } from "../../helpers/subprocess.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
+import { copyTreeBytes } from "../../helpers/tree-copy.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { copyTreeBytes } from "./section-13.5.js";
 import {
   buildOk,
   expectErrorDocument,

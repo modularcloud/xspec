@@ -60,8 +60,8 @@
 //   successful rename's report is the applied mapping): the `--json` run
 //   consumes the pre-rename state, so the same `rename` without `--json`
 //   runs first on a byte copy of that state (`withByteCopyOf`:
-//   section-13.5.ts's `copyTreeBytes`, the lock path left out unread, the
-//   copy checked against the original before anything runs there, as
+//   helpers/tree-copy.ts's `copyTreeBytes`, the lock path left out unread,
+//   the copy checked against the original before anything runs there, as
 //   T13.5-3's and P-10's copies are — a difference is a harness error; a
 //   copy composes no source text, so S-9 has nothing to judge) and exits 0
 //   there, as the `--json` run does; once the JSON report's own assertions
@@ -197,9 +197,9 @@ import type {
   ProductBinding,
   RunResult,
 } from "../../helpers/subprocess.js";
+import { copyTreeBytes } from "../../helpers/tree-copy.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
-import { copyTreeBytes } from "./section-13.5.js";
 import type {
   BearerLocationExpectation,
   FindingSourceExpectation,
@@ -304,7 +304,7 @@ async function withWorkspace<T>(
  * Run `body` on a fresh workspace holding a byte copy of `workspace` as it
  * stands — the pre-operation state a performed operation's `--json` run then
  * consumes on the original (the module header's T6.4-1 human-form bullet) —
- * then dispose of it. The copy is section-13.5.ts's `copyTreeBytes`
+ * then dispose of it. The copy is helpers/tree-copy.ts's `copyTreeBytes`
  * (directories, plain files, and symbolic links, names as bytes), the lock
  * path left out unread (`isLockPathBytes`: a product may make its entries
  * unreadable, H-4), and it is checked against the original, the lock path

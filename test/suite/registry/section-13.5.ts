@@ -345,6 +345,7 @@ import {
   startProduct,
   summarizeResult,
 } from "../../helpers/subprocess.js";
+import { copyTreeBytes } from "../../helpers/tree-copy.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { assertOutsideAnyRepository } from "./section-6.3.js";
@@ -2121,68 +2122,17 @@ interface PastTheHoldTwin extends KilledRunTwin {
   readonly spanMs: number;
 }
 
-/** `name` within `dir`, byte for byte. */
-function joinPathBytes(dir: Buffer, name: Buffer): Buffer {
-  return Buffer.concat([dir, Buffer.from("/"), name]);
-}
-
-/**
- * Copy the tree under `from` into the existing empty directory `to`, byte
- * for byte: directories (each given its mode once filled), plain files
- * (bytes and mode), and symbolic links (targets verbatim), names as bytes.
- * Anything else is a harness error: no such entry is the product's state
- * here. `exclude`, judged on each entry's relative byte path
- * (`/`-separated, as `SnapshotOptions.exclude` is), leaves an entry out —
- * a directory's whole subtree unread: P-10's reader-free twins leave the
- * lock path out (`isLockPathBytes`; TEST-SPEC P-10: copied "the lock path
- * aside"), whose entries a product may make unreadable (H-4).
- */
-export async function copyTreeBytes(
-  from: Buffer,
-  to: Buffer,
-  exclude?: (relPathBytes: Uint8Array) => boolean,
-  rel: Buffer = Buffer.alloc(0),
-): Promise<void> {
-  const names = (await fsp.readdir(from, { encoding: "buffer" })).sort(
-    Buffer.compare,
-  );
-  for (const name of names) {
-    const childRel = rel.length === 0 ? name : joinPathBytes(rel, name);
-    if (exclude?.(childRel) === true) continue;
-    const source = joinPathBytes(from, name);
-    const destination = joinPathBytes(to, name);
-    const stats = await fsp.lstat(source);
-    if (stats.isDirectory()) {
-      await fsp.mkdir(destination);
-      await copyTreeBytes(source, destination, exclude, childRel);
-      await fsp.chmod(destination, stats.mode & 0o7777);
-    } else if (stats.isFile()) {
-      await fsp.copyFile(source, destination, fsp.constants.COPYFILE_EXCL);
-      await fsp.chmod(destination, stats.mode & 0o7777);
-    } else if (stats.isSymbolicLink()) {
-      await fsp.symlink(
-        await fsp.readlink(source, { encoding: "buffer" }),
-        destination,
-      );
-    } else {
-      throw new Error(
-        `harness error: a workspace copy meets ${source.toString()}, ` +
-          `neither a directory, a plain file, nor a symbolic link`,
-      );
-    }
-  }
-}
-
 /**
  * Run `body` on a fresh workspace holding a byte copy of the whole tree
  * `base` snapshots — T13.5-3's past-the-hold copies: each kill lands "on a
  * fresh copy of that workspace", and the twin runs on "an identical
- * workspace" — then dispose of it. The copy is checked against `base`
- * before `body` runs (a difference is a harness error, never a product
- * verdict). Nothing judges it as a staging: its sources were staged, and
- * judged, in the base (S-9), the rest being the product's own state; and no
- * command runs on it but the run under test (§CONF-CORE: no `build` or read
- * on these copies, their items learned on the base before copying).
+ * workspace" — then dispose of it. The copy is helpers/tree-copy.ts's
+ * `copyTreeBytes`, checked against `base` before `body` runs (a difference
+ * is a harness error, never a product verdict). Nothing judges it as a
+ * staging: its sources were staged, and judged, in the base (S-9), the rest
+ * being the product's own state; and no command runs on it but the run
+ * under test (§CONF-CORE: no `build` or read on these copies, their items
+ * learned on the base before copying).
  */
 async function withCopyOf<T>(
   base: DirectorySnapshot,
@@ -3183,7 +3133,7 @@ const T13_5_5 = defineProductTest({
 const T13_5_7 = defineProductTest({
   id: "T13.5-7",
   title:
-    "interrupted or write-refused mutation: a write the environment refuses stops the command at that write — exit 2 with the error document (`write-failure`, the concerned path) — leaving every earlier write of 13.5's pinned per-command order complete and no later one attempted, each state read from a twin on which the same operation ran unrefused: (a) source edits first in preview `files` order, (b) the journal append as the commit point, (c) the identity effect complete once appended, (d) a relocation's two writes, (e) `review` mutators writing the session file once, last, after the refresh, (f) `build` and a refresh each file complete with the order unpinned, and a refreshing read refused at its graph-data write; release: (b)'s read-only `.xspec` refuses the deletion of the emptied lock directory, which remains, empty — no outcome changed, no write failure reported — until a mutating command run once the permissions are restored proceeds unrefused and removes it, and every other arm ends with `.xspec/lock` absent; the kill arm, each kill under T13.5-3's exit-collection discipline (the group killed with SIGKILL, its exit collected, and no process of it listed before `check` runs; no reuse check, no mutating command following): `check` never crashes and reports exactly a state 13.5 admits, the journal holds its prior bytes or the twin's, and the lock path is in T13.5-3's past-the-hold state — one plain-file entry, the dead run's, where the kill stopped the run short of its twin's final state (or at the held point), nothing where the run ended first (SPEC 13.5, 14.24, 12.0, 12.7, 6.4, 6.7, 13.3, 13.4)",
+    "interrupted or write-refused mutation: a write the environment refuses stops the command at that write — exit 2 with the error document (`write-failure`, the concerned path) — leaving every earlier write of 13.5's pinned per-command order complete and no later one attempted, each state read from a twin on which the same operation ran unrefused: (a) source edits first in preview `files` order, (b) the journal append as the commit point, `check` then reporting the graph-data unit form and one per-file finding for each derived path whose occupant differs from the one a `build` leaves on a copy of the stopped state, permissions restored — a set computed by comparison, never from the twin's derived files, the twin's journal holding the entry the stopped state lacks — (c) the identity effect complete once appended, (d) a relocation's two writes, (e) `review` mutators writing the session file once, last, after the refresh, (f) `build` and a refresh each file complete with the order unpinned, and a refreshing read refused at its graph-data write; release: (b)'s read-only `.xspec` refuses the deletion of the emptied lock directory, which remains, empty — no outcome changed, no write failure reported — until a mutating command run once the permissions are restored proceeds unrefused and removes it, and every other arm ends with `.xspec/lock` absent; the kill arm, each kill under T13.5-3's exit-collection discipline (the group killed with SIGKILL, its exit collected, and no process of it listed before `check` runs; no reuse check, no mutating command following): `check` never crashes and reports exactly a state 13.5 admits, the journal holds its prior bytes or the twin's, and the lock path is in T13.5-3's past-the-hold state — one plain-file entry, the dead run's, where the kill stopped the run short of its twin's final state (or at the held point), nothing where the run ended first (SPEC 13.5, 14.24, 12.0, 12.7, 6.4, 6.7, 13.3, 13.4)",
   // A hang guard only (H-10): some twenty workspaces, each built, renamed,
   // checked, and driven — generous under a saturated box.
   timeoutMs: 600_000,
