@@ -65,9 +65,11 @@
 //   `resolve`, `split`, and the read subcommands, including read-time
 //   invalidation over the recorded state of SPEC 10.4, and — on a workspace
 //   whose graph data is stale but whose sources are valid — the SPEC 13.3
-//   refresh a mutating `review` subcommand performs after the hold and
-//   before its own writes, writing graph data byte-identical to what
-//   `build` writes (T13.5-1's stale-workspace arm, T10.1-1).
+//   refresh a mutating `review` subcommand performs after the hold, past
+//   every outcome 10.7 orders before it, and before its session write,
+//   writing graph data byte-identical to what `build` writes (T13.5-1's
+//   stale-workspace arm, T10.1-1); a run one of those outcomes turns back
+//   refreshes nothing (10.7: stale graph data stays stale).
 // - SPEC 13.4 durable protection and SPEC 13.5 in full, `--test-hold`
 //   included: acquisition follows the configuration's load and the first
 //   discovery, and acquisition and the hold precede the second discovery
@@ -132,12 +134,16 @@
 //   with O_EXCL (anything already there — a symbolic link included — fails
 //   the command exit 2 without modifying anything); the command proceeds
 //   only once that file has been deleted.
-// - 13.3 refresh (SPEC 13.3): a mutating `review` subcommand, after the hold
-//   and before its own writes, compares the stored graph data against the
+// - 13.3 refresh (SPEC 13.3, 10.7): a mutating `review` subcommand, after the
+//   hold and once every outcome 10.7 orders past the gate has passed — the
+//   session read, `create`'s session-directory examination, the item check,
+//   and the refusals of a blocked item and of an unsplittable one — just
+//   before its session write, compares the stored graph data against the
 //   current sources (the recorded derived-file paths excluded) and rewrites
 //   stale graph data alone, exactly as `build` writes it — see
-//   refreshStaleGraphData; `rename` and `move` regenerate every derived file
-//   at their end instead (SPEC 6.4, 6.5).
+//   refreshStaleGraphData; a run those outcomes turn back writes nothing.
+//   `rename` and `move` regenerate every derived file at their end instead
+//   (SPEC 6.4, 6.5).
 // - Atomic visibility (SPEC 13.5): every derived and durable write goes
 //   through a temp file in the target's directory renamed over the target,
 //   so a concurrent reader observes prior content, complete new content, or
@@ -1556,11 +1562,15 @@ async function readGraphDataRecord(root) {
  * The 13.3 refresh of stale graph data, as a mutating `review` subcommand
  * performs it (CERTIFICATIONS.md §CONF-CORE Scope: "on a workspace whose
  * graph data is stale but whose sources are valid … the 13.3 refresh a
- * mutating `review` subcommand performs after the hold and before its own
- * writes, writing graph data byte-identical to what `build` writes (13.3,
- * T10.1-1), as T13.5-1's stale-workspace arm observes it"). Graph data is
- * stale when it is missing or does not match the current sources — a
- * comparison from which the recorded derived-file paths are excluded — and
+ * mutating `review` subcommand performs after the hold, past every outcome
+ * 10.7 orders before it, and before its session write, writing graph data
+ * byte-identical to what `build` writes (13.3, T10.1-1), as T13.5-1's
+ * stale-workspace arm observes it"). The subcommand's operation calls it —
+ * runMutating hands it over — just before the session write, once every
+ * outcome 10.7 orders past the gate has passed, so a run one of them turns
+ * back never reaches it (SPEC 10.7: stale graph data stays stale). Graph
+ * data is stale when it is missing or does not match the current sources —
+ * a comparison from which the recorded derived-file paths are excluded — and
  * is then rewritten exactly as `build` writes it, except that no module is
  * generated or removed and the recorded derived-file paths are left
  * unchanged (SPEC 13.3); nothing else is written. Current graph data is
@@ -3602,8 +3612,8 @@ const EARLY_RELEASE_DWELL_MS = 1000;
 /**
  * Run a mutating command (SPEC 13.5): configuration and the first
  * discovery, then workspace exclusivity, then the `--test-hold` seam, then
- * the second discovery, then the checks a command judges ahead of the
- * refresh and its own writes, in the order 12.0 and 13.5 fix — first the
+ * the second discovery, then the checks a command judges ahead of its
+ * operation, in the order 12.0 and 13.5 fix — first the
  * usage-class argument checks of 12.0 and baseline resolution, 6.3
  * (`judgeArguments`: each judged from what it consults — the origin file
  * and its kind among the discovered sources, the session directory, the
@@ -3613,12 +3623,17 @@ const EARLY_RELEASE_DWELL_MS = 1000;
  * fixed and the journal, the gate of 13.3 binding the mutating `review`
  * subcommands or the valid-workspace precondition of `rename`/`move`,
  * 6.4/6.5 (`judgeWorkspace`, `build`'s validations through loadGraph; its
- * result, the loaded graph included, is what the refresh and the operation
- * act on) — then, for the mutating `review` subcommands
- * (`refreshesGraphData`), the refresh of 13.3, then the operation's own
- * validation and writes (`operate`, given
- * the second discovery as well, whose sources a finishing regeneration
- * reads); exclusivity ends with the command — released as every normal end
+ * result, the loaded graph included, is what the operation and the refresh
+ * act on) — then the operation (`operate`, given the second discovery as
+ * well, whose sources a finishing regeneration reads, and the refresh of
+ * 13.3 over the graph the gate loaded): its own outcomes and writes, a
+ * mutating `review` subcommand (`refreshesGraphData`) meeting first every
+ * outcome 10.7 orders past the gate — the session read, `create`'s
+ * session-directory examination, the item check, and the refusals of a
+ * blocked item and of an unsplittable one — and only past all of them
+ * refreshing, just before its session write, so a run they turn back
+ * refreshes nothing (10.7: stale graph data stays stale); exclusivity ends
+ * with the command — released as every normal end
  * comes (completion, refusal, and failure alike; an acquisition that fails
  * releases before it throws), while a killed process leaves its entry, a
  * leftover the next acquisition removes once its identifier is no longer
@@ -3636,7 +3651,8 @@ const EARLY_RELEASE_DWELL_MS = 1000;
  * gate turns back creates the hold file too and exits with its own outcome
  * only after the hold's deletion, having written nothing. Acquisition, the
  * hold, the second discovery, the two judged phases, and the refresh are
- * each position-independent so that one deviation can move one of them.
+ * each position-independent so that one deviation can move one of them —
+ * the refresh a closure the operation calls (`refreshBeforeSessionWrite`).
  */
 async function runMutating(
   cwd,
@@ -3655,25 +3671,29 @@ async function runMutating(
   // error and read failures it meets precede acquisition's outcomes (12.0).
   const firstDiscovery = await discover(config);
   // The 13.3 refresh of stale graph data (CERTIFICATIONS.md §CONF-CORE Scope:
-  // "the 13.3 refresh a mutating `review` subcommand performs after the hold
-  // and before its own writes, writing graph data byte-identical to what
-  // `build` writes"): only the mutating `review` subcommands refresh —
-  // `rename` and file-form `move` finish with a full regeneration instead
-  // (SPEC 6.4, 6.5) — and the conformer runs it below, after exclusivity is
-  // acquired and the hold has been released, before the operation's writes,
-  // over the graph the gate loaded. The closure is position-independent so
-  // that one deviation can move it.
+  // "the 13.3 refresh a mutating `review` subcommand performs after the
+  // hold, past every outcome 10.7 orders before it, and before its session
+  // write, writing graph data byte-identical to what `build` writes"): only
+  // the mutating `review` subcommands refresh — `rename` and file-form
+  // `move` finish with a full regeneration instead (SPEC 6.4, 6.5) — and
+  // the conformer runs it through the operation (`proceed` below hands it
+  // over), after exclusivity is acquired and the hold has been released,
+  // once every outcome 10.7 orders past the gate has passed, just before the
+  // session write, over the graph the gate loaded; a run those outcomes turn
+  // back never calls it. The closure is position-independent so that one
+  // deviation can move it.
   const refreshIfStale = async (graph) => {
     if (refreshesGraphData) await refreshStaleGraphData(config, graph);
   };
-  let refreshAfterHold = refreshIfStale;
+  let refreshBeforeSessionWrite = refreshIfStale;
   if (deviations.refreshBeforeExclusivity) {
     // VIOL-CORE-EARLYREFRESH (CERTIFICATIONS.md): the 13.3 refresh a
     // mutating `review` subcommand performs on a stale workspace runs here,
     // before workspace exclusivity is acquired — before acquisition and the
     // hold — so stale graph data is rewritten before the hold file is
-    // created; the refresh after the hold (below) becomes a no-op, so the
-    // refresh runs exactly once, at this position. Everything else —
+    // created; the refresh the operation makes before its session write
+    // (below) becomes a no-op, so the refresh runs exactly once, at this
+    // position. Everything else —
     // acquisition; the hold file created after exclusivity and before every
     // other write (the session write, `rename`/`move`'s edits, journal
     // appends, the finishing regeneration of 6.4/6.5); the refresh's own
@@ -3692,7 +3712,7 @@ async function runMutating(
     } catch (error) {
       if (!(error instanceof FindingsError)) throw error;
     }
-    refreshAfterHold = async () => {};
+    refreshBeforeSessionWrite = async () => {};
   }
   // Workspace exclusivity (SPEC 13.5), acquired at the conformer's position
   // below — before the hold and every later check — and released in the
@@ -3728,12 +3748,14 @@ async function runMutating(
     return await judgeWorkspace(config, discovery);
   };
   // Everything that follows the judged checks, in the conformer's order: the
-  // refresh of 13.3 over the graph the gate loaded, then the operation's own
-  // validation and writes.
-  const proceed = async (judged, discovery) => {
-    await refreshAfterHold(judged.graph);
-    return await operate(config, judged, discovery);
-  };
+  // operation's own outcomes and writes, handed the refresh of 13.3 over the
+  // graph the gate loaded — which a mutating `review` subcommand calls only
+  // once every outcome 10.7 orders past the gate has passed, just before its
+  // session write, so a run they turn back writes nothing (10.7, 13.5).
+  const proceed = async (judged, discovery) =>
+    await operate(config, judged, discovery, async () => {
+      await refreshBeforeSessionWrite(judged.graph);
+    });
   try {
     await acquire();
     if (deviations.lateHold) {
@@ -3772,12 +3794,14 @@ async function runMutating(
       // included), then creates the hold file, waits for its deletion, and
       // exits normally with the operation's outcome. The second discovery
       // (13.5), the argument checks of 12.0, baseline resolution (6.3), the
-      // gate of 13.3, and the valid-workspace precondition of rename/move
-      // (6.4, 6.5) are judged after acquisition and before the writes they
-      // gate, as the conformer judges them, while the exit they refuse with
-      // is deferred as the writes' completion is: an invocation they refuse
-      // creates the hold file having written nothing, waits for its
-      // deletion, and only then exits with its error. The hold seam's own
+      // gate of 13.3 and the outcomes 10.7 orders past it (the refresh among
+      // the writes they gate, made just before the session write), and the
+      // valid-workspace precondition of rename/move (6.4, 6.5) are judged
+      // after acquisition and before the writes they gate, as the conformer
+      // judges them, while the exit they refuse with is deferred as the
+      // writes' completion is: an invocation they refuse creates the hold
+      // file having written nothing, waits for its deletion, and only then
+      // exits with its error. The hold seam's own
       // semantics (empty file, occupied path fails exit 2) and everything
       // else are exactly the conformer's behavior.
       let code;
@@ -4597,19 +4621,21 @@ async function reviewCreate(io, cwd, { flags }) {
       `unknown strategy ${flags["--strategy"]} (SPEC 10.7, 12.0)`,
     );
   }
-  // The checks judged ahead of the refresh, in 12.0's order: first baseline
-  // resolution (SPEC 6.3) and the profile name under `--coverage` (SPEC 7.4,
-  // 12.0) — runMutating's `judgeArguments`, consulting the current journal,
-  // the workspace's absent repository, and the configuration, judged after
-  // acquisition and the hold and before the gate and refresh of 13.3 (SPEC
-  // 13.5, 12.0; T13.5-8's baseline arms); in this git-less scope the
-  // resolution reads the journal first — a journal error there the exit-2
-  // `journal-error` concerning `.xspec/journal`, never the gate's finding —
-  // and otherwise no ref can be read — the exit-2 unreadable-baseline case
-  // of 6.3, as `impact --base` is (resolveBaseline) — and no coverage
-  // profile is configured — then the gate of 13.3 (`judgeWorkspace`,
-  // judgeGate): `build`'s validations over the current sources and the
-  // journal, findings exit 1.
+  // The checks judged ahead of the operation, in 12.0's order: first
+  // baseline resolution (SPEC 6.3) and the profile name under `--coverage`
+  // (SPEC 7.4, 12.0) — runMutating's `judgeArguments`, consulting the
+  // current journal, the workspace's absent repository, and the
+  // configuration, judged after acquisition and the hold and before the
+  // gate and refresh of 13.3 (SPEC 13.5, 12.0; T13.5-8's baseline arms); in
+  // this git-less scope the resolution reads the journal first — a journal
+  // error there the exit-2 `journal-error` concerning `.xspec/journal`,
+  // never the gate's finding — and otherwise no ref can be read — the exit-2
+  // unreadable-baseline case of 6.3, as `impact --base` is (resolveBaseline)
+  // — and no coverage profile is configured — then the gate of 13.3
+  // (`judgeWorkspace`, judgeGate): `build`'s validations over the current
+  // sources and the journal, findings exit 1. The operation then meets the
+  // examination of the session directory (10.7) and only past it refreshes
+  // and writes the session.
   const judgeArguments = async (config) => {
     if (flags["--base"] !== undefined) {
       await resolveBaseline(config.root, flags["--base"]);
@@ -4624,9 +4650,12 @@ async function reviewCreate(io, cwd, { flags }) {
     cwd,
     flags["--config"],
     flags["--test-hold"],
-    async (config, { graph }) => {
-      // Create-time restriction (SPEC 10.1): a name matching an existing
-      // session's name ignoring ASCII case is refused.
+    async (config, { graph }, _discovery, refreshBeforeSessionWrite) => {
+      // The examination of the session directory (SPEC 10.7: the outcome
+      // `create` meets past the gate), within this scope its create-time
+      // restriction (SPEC 10.1): a name matching an existing session's name
+      // ignoring ASCII case is refused, writing nothing (10.7: stale graph
+      // data stays stale).
       const existing = await listSessionNames(config.root);
       if (
         existing.some(
@@ -4678,6 +4707,10 @@ async function reviewCreate(io, cwd, { flags }) {
         item.baseline = recorded;
         item.current = recorded;
       }
+      // Past every outcome 10.7 orders before it: the refresh of 13.3 where
+      // graph data is stale, then the session file, once, last (SPEC 10.7,
+      // 13.5).
+      await refreshBeforeSessionWrite();
       await writeSession(config.root, session);
       emitDoc(io, flags["--json"] === true, { name, ok: true }, [
         `review: created session ${name} (${String(session.items.length)} items)`,
@@ -4693,8 +4726,10 @@ async function reviewCreate(io, cwd, { flags }) {
  * `judgeWorkspace`): exactly the gate of 13.3 — `build`'s validations over
  * the sources the second discovery fixed and the journal (loadGraph: source
  * validation errors and journal errors alike), findings exit 1, no session
- * file read (SPEC 13.3, 13.5, 12.0, 10.7); the subcommand's own validation
- * (10.7) follows the refresh.
+ * file read (SPEC 13.3, 13.5, 12.0, 10.7); the subcommand's own outcomes
+ * (10.7: the session read, `create`'s session-directory examination, the
+ * item check, and the refusals) follow it, in the operation, and the refresh
+ * of 13.3 follows them, just before the session write.
  */
 async function judgeGate(config, discovery) {
   return { graph: await loadGraph(config.root, discovery) };
@@ -4711,11 +4746,14 @@ async function judgeGate(config, discovery) {
  * its form (10.1) is of 12.0's syntax class, judged from the arguments
  * alone before configuration is loaded (checkValueSpellings), so the form
  * test here never refuses. The session file itself is read only past the
- * gate — and, for the mutating subcommands, the refresh — (requireSession),
- * where its corruption is reported (13.3, 14.21) and an item id judged
- * (12.0: "One check runs past the gate"). T13.5-8's held `review resolve` on
- * the failing workspace names an existing session, so it passes here and
- * holds ahead of the gate.
+ * gate (requireSession) — for the mutating subcommands ahead of the refresh,
+ * which follows every outcome 10.7 orders past the gate — where its
+ * corruption is reported (13.3, 14.21) and an item id judged (12.0: "Two
+ * usage-class checks run past the gate, each turning on a session's content,
+ * where 10.7 orders them: an item ID, and a session's recorded baseline"; no
+ * session of this scope records one). T13.5-8's held `review resolve` on the
+ * failing workspace names an existing session, so it passes here and holds
+ * ahead of the gate.
  */
 function judgeSessionName(name) {
   return async (config) => {
@@ -4746,7 +4784,12 @@ async function reviewResolve(io, cwd, { flags, positionals }) {
     cwd,
     flags["--config"],
     flags["--test-hold"],
-    async (config, { graph }) => {
+    async (config, { graph }, _discovery, refreshBeforeSessionWrite) => {
+      // The outcomes 10.7 orders past the gate, in its order, each ending
+      // the subcommand writing nothing (10.7: stale graph data stays stale):
+      // the session read (its corruption, 14.21), the item check (an
+      // unknown item ID, 12.0), and the refusal of a blocked item, judged
+      // against the current workspace (10.3, 10.4).
       const session = await requireSession(config.root, name);
       const item = requireItem(session, itemId);
       const journal = await readJournal(config.root);
@@ -4762,6 +4805,9 @@ async function reviewResolve(io, cwd, { flags, positionals }) {
       if (status === "updated") {
         rederive(session, graph, journal);
       }
+      // Past all of them: the refresh of 13.3 where graph data is stale,
+      // then the session file, once, last (SPEC 10.7, 13.5).
+      await refreshBeforeSessionWrite();
       await writeSession(config.root, session);
       emitDoc(io, flags["--json"] === true, { ok: true }, [
         `review: resolved ${itemId} as ${status}`,
@@ -4847,7 +4893,13 @@ async function reviewSplit(io, cwd, { flags, positionals }) {
     cwd,
     flags["--config"],
     flags["--test-hold"],
-    async (config, { graph }) => {
+    async (config, { graph }, _discovery, refreshBeforeSessionWrite) => {
+      // The outcomes 10.7 orders past the gate, in its order, each ending
+      // the subcommand writing nothing (10.7: stale graph data stays stale):
+      // the session read (its corruption, 14.21), the item check (an
+      // unknown item ID, 12.0), and the refusal of an item of another kind
+      // or of one whose scope root has no children, judged against the
+      // current workspace (10.5).
       const session = await requireSession(config.root, name);
       const original = requireItem(session, itemId);
       const journal = await readJournal(config.root);
@@ -4959,6 +5011,9 @@ async function reviewSplit(io, cwd, { flags, positionals }) {
         kind: original.kind,
         scope: mappedScope,
       });
+      // Past all of them: the refresh of 13.3 where graph data is stale,
+      // then the session file, once, last (SPEC 10.7, 13.5).
+      await refreshBeforeSessionWrite();
       await writeSession(config.root, session);
       emitDoc(io, flags["--json"] === true, { ok: true }, [
         `review: split ${itemId} into ${String(decompositionIds.length)} items`,

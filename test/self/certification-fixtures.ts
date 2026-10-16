@@ -126,12 +126,14 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // completed writes), waits for its deletion, and exits normally,
       // releasing as it ends; without `--test-hold` it creates no hold file
       // and behaves as the conformer does. The second discovery, the
-      // argument checks of 12.0, baseline resolution (6.3), the gate of 13.3,
-      // and the valid-workspace precondition of rename/move (6.4, 6.5) are
-      // judged after acquisition and before the writes they gate, while the
-      // exit they refuse with is deferred as the writes' completion is: an
-      // invocation they refuse creates the hold file having written nothing,
-      // waits for its deletion, and only then exits with its error. Fails
+      // argument checks of 12.0, baseline resolution (6.3), the gate of 13.3
+      // and the outcomes 10.7 orders past it, and the valid-workspace
+      // precondition of rename/move (6.4, 6.5) are judged after acquisition
+      // and before the writes they gate (the 13.3 refresh among them, made
+      // just before the session write), while the exit they refuse with is
+      // deferred as the writes' completion is: an invocation they refuse
+      // creates the hold file having written nothing, waits for its
+      // deletion, and only then exits with its error. Fails
       // T13.5-1 (the held-state comparison while held, and its
       // occupied-hold-path arms, the writes landing before hold creation
       // fails), T13.5-2 (the held-state comparison while command 1 holds),
