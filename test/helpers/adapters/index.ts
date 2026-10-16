@@ -22,9 +22,10 @@
 //                      value-blind, over product-written session files)
 //   record-staging.ts  T13.3-2's operational path set (its predicate, the
 //                      lock path excluded, and the collector of its plain
-//                      files) and T6.6-6's shape-blind corrupt-record
-//                      staging (garbage over that set, product-written
-//                      files only), shared by the other 14.23 stagings
+//                      files and directories) and T6.6-6's shape-blind
+//                      corrupt-record staging (garbage over that set,
+//                      product-written files only), shared by the other
+//                      14.23 stagings
 //   sorted-keys.ts     T13.4-1 byte-sorted-keys assertion (shape/value-blind)
 //
 // The adapter modules are the only place aware of concrete output shape; they

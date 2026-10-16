@@ -9,9 +9,10 @@
 // `.xspec/lock` with everything under it (13.4: no graph data). That
 // predicate lives here (`isGraphDataKey`, the lock path judged by
 // helpers/lock-path.ts; the T13.3-2 machinery in
-// test/suite/registry/section-13.3.ts re-exports it), beside the one
-// collector of the set's plain files (`collectGraphDataFiles`, shared with
-// T14-10(f)'s unreadable staging), and the corruption is shape-blind —
+// test/suite/registry/section-13.3.ts re-exports it), beside the one walk
+// of the set (`collectGraphDataEntries`: its plain files and its
+// directories, for T14-10(f)'s unreadable staging; `collectGraphDataFiles`:
+// its plain files alone), and the corruption is shape-blind —
 // TEST-SPEC T6.6-6: "truncation or garbage over T13.3-2's operational path
 // set" — realized as a garbage overwrite of every
 // product-written plain file in the set, staging "recorded state that exists
@@ -106,40 +107,73 @@ function keyPath(rootBytes: Buffer, key: string): Buffer {
 }
 
 /**
- * Every plain file of T13.3-2's operational path set (`isGraphDataKey`) in
- * the workspace rooted at `rootAbs`, walked recursively from the graph-data
- * area, as snapshot keys in byte order (helpers/snapshot.ts: the exact
- * relative path bytes, held latin1-encoded — for an ASCII name, the
- * workspace-relative path itself). Names are listed as raw bytes and each
- * entry classified by `lstat` at its exact byte path — graph data's layout
- * is the product's (SPEC 13.3), so a name that is not ASCII, or not valid
- * UTF-8, is collected like any other, where a UTF-8 listing would misname
- * it. A path outside the set — the durable journal and reviews paths, the
- * transient lock path — is skipped entirely, whatever occupies it, and
- * nothing under it is listed. An entry in the set that is neither a plain
- * file nor a directory (a symbolic link, never followed) is handed to
- * `onOther` — the corruption refuses it there — or, with no handler,
- * skipped. The area must be a listable directory (the caller's premise);
- * a listing the environment refuses throws as is.
+ * T13.3-2's operational path set as one walk finds it: its plain files and
+ * its directories, each as snapshot keys in byte order.
+ */
+export interface GraphDataEntries {
+  readonly files: readonly string[];
+  /**
+   * Every directory of the set — a directory under `.xspec/` that is
+   * neither the session directory nor at or under the lock path; never the
+   * area's own directory `.xspec`, which is no path under it.
+   */
+  readonly directories: readonly string[];
+}
+
+/**
+ * Every plain file and every directory of T13.3-2's operational path set
+ * (`isGraphDataKey`) in the workspace rooted at `rootAbs`, walked
+ * recursively from the graph-data area, as snapshot keys in byte order
+ * (helpers/snapshot.ts: the exact relative path bytes, held latin1-encoded
+ * — for an ASCII name, the workspace-relative path itself). Names are listed
+ * as raw bytes and each entry classified by `lstat` at its exact byte path
+ * — graph data's layout is the product's (SPEC 13.3: files directly in the
+ * area or in directories of its own below it), so a name that is not
+ * ASCII, or not valid UTF-8, is collected like any other, where a UTF-8
+ * listing would misname it. A path outside the set — the durable journal
+ * and reviews paths, the transient lock path — is skipped entirely,
+ * whatever occupies it, and nothing under it is listed. An entry in the set
+ * that is neither a plain file nor a directory (a symbolic link, never
+ * followed) is handed to `onOther` — the corruption refuses it there — or,
+ * with no handler, skipped. The area and every directory of the set must be
+ * listable (the caller's premise); a listing the environment refuses throws
+ * as is.
+ */
+export async function collectGraphDataEntries(
+  rootAbs: string,
+  onOther?: (key: string) => void,
+): Promise<GraphDataEntries> {
+  const files: string[] = [];
+  const directories: string[] = [];
+  await walkGraphData(
+    Buffer.from(rootAbs),
+    GRAPH_DATA_AREA_PATH,
+    onOther,
+    files,
+    directories,
+  );
+  return { files: files.sort(), directories: directories.sort() };
+}
+
+/**
+ * Every plain file of T13.3-2's operational path set, as
+ * {@link collectGraphDataEntries} walks it — the same keys, order, `onOther`
+ * calls, and refusals — its directories left out.
  */
 export async function collectGraphDataFiles(
   rootAbs: string,
   onOther?: (key: string) => void,
 ): Promise<string[]> {
-  const files = await collectGraphDataFilesUnder(
-    Buffer.from(rootAbs),
-    GRAPH_DATA_AREA_PATH,
-    onOther,
-  );
-  return files.sort();
+  return [...(await collectGraphDataEntries(rootAbs, onOther)).files];
 }
 
-async function collectGraphDataFilesUnder(
+async function walkGraphData(
   rootBytes: Buffer,
   rel: string,
   onOther: ((key: string) => void) | undefined,
-): Promise<string[]> {
-  const collected: string[] = [];
+  files: string[],
+  directories: string[],
+): Promise<void> {
   const names = (
     await fsp.readdir(keyPath(rootBytes, rel), { encoding: "buffer" })
   ).sort(Buffer.compare);
@@ -151,16 +185,14 @@ async function collectGraphDataFilesUnder(
     if (!isGraphDataKey(key)) continue;
     const stats = await fsp.lstat(keyPath(rootBytes, key));
     if (stats.isDirectory()) {
-      collected.push(
-        ...(await collectGraphDataFilesUnder(rootBytes, key, onOther)),
-      );
+      directories.push(key);
+      await walkGraphData(rootBytes, key, onOther, files, directories);
     } else if (stats.isFile()) {
-      collected.push(key);
+      files.push(key);
     } else {
       onOther?.(key);
     }
   }
-  return collected;
 }
 
 /**

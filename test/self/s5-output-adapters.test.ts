@@ -49,6 +49,7 @@ import {
   blankReportData,
   classifyIgnoredReasons,
   codeMention,
+  collectGraphDataEntries,
   collectGraphDataFiles,
   compareFindings,
   conditionMention,
@@ -7072,11 +7073,15 @@ test("S-5: corrupt-record staging spares the transient lock path — entries und
   }
 });
 
-test("S-5: the graph-data file collector lists the operational path set's plain files in byte order, nothing at or under the lock path, any other occupant handed to the caller or skipped", async () => {
-  // The one collector behind the corruption and T14-10(f)'s unreadable
-  // staging: the durable paths and the lock path are no part of the set,
-  // a symbolic link in the set is no plain file — the corruption refuses it
-  // through `onOther`, a caller passing no handler skips it.
+test("S-5: the graph-data collector lists the operational path set's plain files, and beside them its directories, in byte order, nothing at or under the lock path, any other occupant handed to the caller or skipped", async () => {
+  // The one walk behind the corruption and T14-10(f)'s unreadable staging:
+  // the durable paths and the lock path are no part of the set, a symbolic
+  // link in the set is neither a plain file nor a directory, whatever it
+  // points at — the corruption refuses it through `onOther`, a caller
+  // passing no handler skips it — and the set's directories, nested and
+  // empty ones included, come beside its files (T14-10(f) stages each
+  // `-wx`), never the area's own directory or one at or under an excluded
+  // path.
   const workspace = await TestWorkspace.create({
     files: {
       ".xspec/journal": "j\n",
@@ -7084,12 +7089,20 @@ test("S-5: the graph-data file collector lists the operational path set's plain 
       ".xspec/graph.json": "{}",
       ".xspec/cache/b": "b",
       ".xspec/cache/a": "a",
+      ".xspec/cache/deep/c": "c",
       ".xspec/lock/x": "entry\n",
+      ".xspec/lock/d/f": "nested\n",
     },
-    symlinks: { ".xspec/link.json": "graph.json" },
+    dirs: [".xspec/empty", ".xspec/reviews/sub"],
+    symlinks: { ".xspec/link.json": "graph.json", ".xspec/linkdir": "cache" },
   });
   onTestFinished(() => workspace.dispose());
-  const expected = [".xspec/cache/a", ".xspec/cache/b", ".xspec/graph.json"];
+  const expected = [
+    ".xspec/cache/a",
+    ".xspec/cache/b",
+    ".xspec/cache/deep/c",
+    ".xspec/graph.json",
+  ];
   expect(await collectGraphDataFiles(workspace.root)).toEqual(expected);
   const others: string[] = [];
   expect(
@@ -7097,7 +7110,31 @@ test("S-5: the graph-data file collector lists the operational path set's plain 
       others.push(key);
     }),
   ).toEqual(expected);
-  expect(others).toEqual([".xspec/link.json"]);
+  expect(others).toEqual([".xspec/link.json", ".xspec/linkdir"]);
+  const entries = await collectGraphDataEntries(workspace.root);
+  expect(entries.files).toEqual(expected);
+  expect(entries.directories).toEqual([
+    ".xspec/cache",
+    ".xspec/cache/deep",
+    ".xspec/empty",
+  ]);
+  for (const key of [...entries.files, ...entries.directories]) {
+    expect(isGraphDataKey(key), key).toBe(true);
+  }
+  // A layout with no directory below the area: files alone, an empty
+  // directory list (T14-10(f) then stages files alone).
+  const flat = await TestWorkspace.create({
+    files: {
+      ".xspec/journal": "j\n",
+      ".xspec/b.json": "{}",
+      ".xspec/a.json": "{}",
+    },
+  });
+  onTestFinished(() => flat.dispose());
+  expect(await collectGraphDataEntries(flat.root)).toEqual({
+    files: [".xspec/a.json", ".xspec/b.json"],
+    directories: [],
+  });
 });
 
 // --- T13.4-1 sorted-keys assertion --------------------------------------------

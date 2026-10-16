@@ -99,10 +99,13 @@
 // never itself refused; `stageReadRefusalOfDirectory`: mode 0o100, search
 // kept so entries stay reachable by name; nonexistence never staged as a
 // refusal), each staging verified on the harness's own process first —
-// arm (i)'s acquisition arms taking T13.5-10(d)'s stagings instead
-// (helpers/acquisition-staging.ts: the lock directory, or a subdirectory
-// under it, unlistable but writable, `-wx`; `.xspec` or the lock directory
-// unsearchable, `rw-`), each verified on the harness itself alike.
+// arm (f)'s graph-data directories taking mode 0o300 instead
+// (`stageDirectoryMode`, `-wx`: the listing refused, write and search kept,
+// so a regeneration's writes there are never refused), and arm (i)'s
+// acquisition arms T13.5-10(d)'s stagings (helpers/acquisition-staging.ts:
+// the lock directory, or a subdirectory under it, unlistable but writable,
+// `-wx`; `.xspec` or the lock directory unsearchable, `rw-`), each verified
+// on the harness itself alike.
 // Snapshots for the "nothing modified" laws are taken outside the staging
 // windows (a staged object cannot be snapshotted), before staging and after
 // restoring.
@@ -134,17 +137,26 @@
 //   beside it as a distinct finding — and `s` is the workspace's only
 //   session.
 // - Arm (f)'s "every path under `.xspec/` other than the journal, the
-//   session directory, and the lock path staged unreadable" is every plain
-//   file in T13.3-2's operational path set (`isGraphDataKey`, through the
-//   adapter layer's `collectGraphDataFiles`: the lock path and everything
-//   under it never staged, 13.4), recursively, at mode 0o200, each
-//   reached at its exact name bytes (the names are the product's,
-//   13.3); directories keep their listing and write permission so the
+//   session directory, and the lock path staged unreadable" is T13.3-2's
+//   operational path set (`isGraphDataKey`, walked by the adapter layer's
+//   `collectGraphDataEntries`: the lock path and everything under it never
+//   staged, 13.4), recursively, each path reached at its exact name bytes
+//   (the names are the product's, 13.3): every plain file at mode 0o200
+//   (`-w-------`) and every directory by its read permission alone removed
+//   (0o300, `-wx`: its listing refused, its write and search kept — never
+//   the discipline's `--x`), so only reads are refused and the
 //   regeneration `ids` owes (13.3) is never itself refused, whatever the
-//   product's layout. A staged file the regeneration has since removed is
-//   not restored (nothing to reinstate). The preview is the file-form
-//   `move specs/c/C.mdx specs/c/D.mdx` — same directory, C imported nowhere
-//   — a plan valid on the readable record.
+//   product's layout; `.xspec` itself is no path under it and keeps its
+//   mode. Where graph data holds no directory, files alone are staged, and
+//   the staging's description — quoted by every diagnosis under it — says
+//   so. A staged path the regeneration has since removed is not restored
+//   (nothing to reinstate). After `build` exits 0 nothing is asserted about
+//   the record it wrote, neither an `inventory` nor a recovery `check`:
+//   what a later read meets turns on the modes `build`'s writes leave,
+//   which SPEC.md fixes nowhere (a successful build's replacement of an
+//   unreadable record is T12.2-2's, staged shape-blind). The preview is the
+//   file-form `move specs/c/C.mdx specs/c/D.mdx` — same directory, C
+//   imported nowhere — a plan valid on the readable record.
 // - Arm (g)'s "a malformed value" is `at specs/a/A.mdx zz` (an offset
 //   spelled as anything but decimal digits, 11.5 — a syntax-class member,
 //   12.0); "nothing modified" is the whole-tree snapshot around the sweep.
@@ -200,7 +212,7 @@ import type {
   OccurrencesReport,
 } from "../../helpers/adapters/index.js";
 import {
-  collectGraphDataFiles,
+  collectGraphDataEntries,
   decodeAtReport,
   decodeFindingsReport,
   decodeIdsReport,
@@ -220,6 +232,7 @@ import { AREA_PATH } from "../../helpers/lock-staging.js";
 import type { PermissionStaging } from "../../helpers/permissions.js";
 import {
   HarnessStagingError,
+  stageDirectoryMode,
   stageReadRefusalOfDirectory,
   stageReadRefusalOfFile,
   stageWriteRefusal,
@@ -1784,8 +1797,9 @@ function recordsIn(report: OccurrencesReport, file: string): number {
 
 /**
  * Restore each staging whose object still exists — a regeneration may have
- * replaced or removed a staged file, and a replaced file's mode is its own
- * (nothing to reinstate on an absent path). Reverse order of staging.
+ * replaced or removed a staged file or directory: a path occupied again
+ * gets its recorded mode back, an absent one has nothing to reinstate.
+ * Reverse order of staging.
  */
 async function restoreSurviving(
   stagings: readonly PermissionStaging[],
@@ -1797,24 +1811,62 @@ async function restoreSurviving(
 }
 
 /**
- * Arm (f)'s staging: every plain file under `.xspec/` other than the
- * journal, the session directory, and the lock path unreadable (mode 0o200,
- * each verified) — T13.3-2's operational path set, listed by the adapter
- * layer's `collectGraphDataFiles` (anything but a plain file or a directory
- * in the set is skipped, the lock path and everything under it never
- * staged: no graph data, 13.4). Files only — directories keep their listing
- * and write permission, so the regeneration a refreshing read owes (13.3)
- * is never itself refused, whatever the product's layout. Each file is
- * staged at its exact name bytes, whatever the name the product chose (SPEC
- * 13.3). At least one file must exist: the staging applies to record files
- * the product itself wrote (H-3), and staging nothing would be no staging
- * (H-11).
+ * Arm (f)'s directory mode, `-wx`: a graph-data directory's read permission
+ * alone removed — its listing refused, its write and search permission kept
+ * (TEST-SPEC T14-10(f): never the discipline's `--x`).
+ */
+const GRAPH_DATA_DIRECTORY_MODE = 0o300;
+
+/** How many staged paths of each kind arm (f)'s description names. */
+const STAGED_PATHS_NAMED = 6;
+
+/** Arm (f)'s staging in effect: its stagings, and what it staged. */
+interface GraphDataUnreadable {
+  /** Every file's staging, then every directory's, each kind in byte order. */
+  readonly stagings: readonly PermissionStaging[];
+  /** What was staged, quoted by every diagnosis made under the staging. */
+  readonly staged: string;
+}
+
+/** A count of staged paths and their names — the first few, then a count. */
+function describeStagedPaths(
+  keys: readonly string[],
+  noun: readonly [one: string, many: string],
+  mode: string,
+): string {
+  const named = keys.slice(0, STAGED_PATHS_NAMED).map(displaySnapshotPath);
+  const rest = keys.length - named.length;
+  return (
+    `${String(keys.length)} ${keys.length === 1 ? noun[0] : noun[1]} at ` +
+    `${mode} (${named.join(", ")}${rest > 0 ? `, and ${String(rest)} more` : ""})`
+  );
+}
+
+/**
+ * Arm (f)'s staging: every path under `.xspec/` other than the journal, the
+ * session directory, and the lock path unreadable — T13.3-2's operational
+ * path set, walked by the adapter layer's `collectGraphDataEntries`
+ * (anything but a plain file or a directory in the set is skipped, the
+ * lock path and everything under it never staged: no graph data, 13.4).
+ * Every plain file at mode 0o200 (`-w-------`, its write permission kept)
+ * and then every directory of the set by its read permission alone removed
+ * ({@link GRAPH_DATA_DIRECTORY_MODE}, `-wx`: the harness's own listing of it
+ * refused, its own creation and removal of a file in it kept), so only
+ * reads are refused and the regeneration a refreshing read owes (13.3) is
+ * never itself refused, whatever layout graph data takes; `.xspec` itself
+ * is no path under it and keeps its mode. Every staging is verified on the
+ * harness itself (E-1) and reaches its object at its exact name bytes,
+ * whatever the name the product chose (SPEC 13.3). Where graph data holds
+ * no directory, files alone are staged, and the description says so. At
+ * least one file must exist: the staging applies to record files the
+ * product itself wrote (H-3), and staging nothing would be no staging
+ * (H-11). A staging that fails restores every one made before it.
  */
 async function stageGraphDataUnreadable(
   workspace: TestWorkspace,
   context: string,
-): Promise<PermissionStaging[]> {
-  const files = await collectGraphDataFiles(workspace.root);
+): Promise<GraphDataUnreadable> {
+  const { files, directories } = await collectGraphDataEntries(workspace.root);
   if (files.length === 0) {
     throw new HarnessStagingError(
       "read-refusal-of-file",
@@ -1832,11 +1884,30 @@ async function stageGraphDataUnreadable(
         await stageReadRefusalOfFile(workspace.bytePath(snapshotKeyBytes(key))),
       );
     }
+    for (const key of directories) {
+      stagings.push(
+        await stageDirectoryMode(
+          workspace.bytePath(snapshotKeyBytes(key)),
+          GRAPH_DATA_DIRECTORY_MODE,
+          [
+            { attempt: "list", refused: true },
+            { attempt: "create", refused: false },
+          ],
+        ),
+      );
+    }
   } catch (error) {
     await restoreSurviving(stagings).catch(() => undefined);
     throw error;
   }
-  return stagings;
+  const fileText = describeStagedPaths(files, ["file", "files"], "-w-------");
+  const staged =
+    directories.length === 0
+      ? `graph data unreadable: ${fileText}; graph data holds no directory ` +
+        `under ${GRAPH_DATA_AREA}/, so files alone are staged`
+      : `graph data unreadable: ${fileText} and ` +
+        describeStagedPaths(directories, ["directory", "directories"], "-wx");
+  return { stagings, staged };
 }
 
 // ---------------------------------------------------------------------------
@@ -2522,13 +2593,17 @@ async function derivedContentArm(product: ProductBinding): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Every graph-data file staged unreadable: `inventory` reports `recorded`
+ * Graph data staged unreadable (`stageGraphDataUnreadable`: its files
+ * `-w-------`, its directories `-wx`): `inventory` reports `recorded`
  * unavailable with the condition-23 finding concerning `.xspec`, exit 1; a
  * `move --preview` reports its `delta` unavailable likewise; `check`
  * reports one condition-10 finding in the unit form alone; `ids` exits 0
- * with its answer, regenerating the data rather than failing; `build` exits
- * 0, `inventory` then reporting `recorded` in full — the same paths as
- * before the staging.
+ * with its answer, regenerating the data rather than failing; and `build`
+ * exits 0 — nothing asserted about the record it wrote, neither under the
+ * staging nor after it: what a later read meets turns on the modes
+ * `build`'s writes leave, which SPEC.md fixes nowhere (a successful
+ * build's replacement of an unreadable record is T12.2-2's, staged
+ * shape-blind).
  */
 async function graphDataArm(product: ProductBinding): Promise<void> {
   const context = "T14-10 (f) graph data";
@@ -2551,9 +2626,12 @@ async function graphDataArm(product: ProductBinding): Promise<void> {
           `(SPEC 11.6, 13.3); got state ${intact.recorded.state}`,
       );
     }
-    const stagings = await stageGraphDataUnreadable(workspace, context);
+    const { stagings, staged } = await stageGraphDataUnreadable(
+      workspace,
+      context,
+    );
     try {
-      const invLabel = `${context} \`inventory\` with every graph-data file unreadable`;
+      const invLabel = `${context} \`inventory\` [${staged}]`;
       const inventory = decodeInventoryDocument(
         await stagedDocument(
           product,
@@ -2596,7 +2674,7 @@ async function graphDataArm(product: ProductBinding): Promise<void> {
         "--preview",
         "--json",
       ];
-      const previewLabel = `${context} \`${previewArgv.join(" ")}\` with every graph-data file unreadable`;
+      const previewLabel = `${context} \`${previewArgv.join(" ")}\` [${staged}]`;
       const preview = decodePreviewReport(
         await stagedDocument(
           product,
@@ -2639,7 +2717,7 @@ async function graphDataArm(product: ProductBinding): Promise<void> {
         );
       }
 
-      const checkLabel = `${context} \`check --json\` with every graph-data file unreadable`;
+      const checkLabel = `${context} \`check --json\` [${staged}]`;
       assertStalenessAlone(
         await stagedFindings(
           product,
@@ -2656,7 +2734,7 @@ async function graphDataArm(product: ProductBinding): Promise<void> {
           `14.10, 14.25)`,
       );
 
-      const idsLabel = `${context} \`ids --json\` with every graph-data file unreadable`;
+      const idsLabel = `${context} \`ids --json\` [${staged}]`;
       decodeIdsReport(
         await stagedDocument(
           product,
@@ -2670,47 +2748,23 @@ async function graphDataArm(product: ProductBinding): Promise<void> {
         idsLabel,
       );
 
-      const buildLabel = `${context} \`build\` after the refreshing read`;
+      // The arm's last assertion: no read of the record `build` writes is
+      // asserted, under the staging or after it — what that read meets
+      // turns on the modes `build`'s writes leave, which SPEC.md fixes
+      // nowhere (a successful build's replacement of an unreadable record
+      // is T12.2-2's, staged shape-blind).
+      const buildLabel = `${context} \`build\` after the refreshing read [${staged}]`;
       assertExitCode(
         await runSettled(product, workspace, ["build"], buildLabel),
         0,
-        `${buildLabel} — \`build\` replaces the record, unreadable state ` +
-          `included: exit 0 (SPEC 12.1, 13.4, 14.23)`,
-      );
-      const afterLabel = `${context} \`inventory\` after the build`;
-      const after = decodeInventoryDocument(
-        await stagedDocument(
-          product,
-          workspace,
-          ["inventory"],
-          0,
-          `${afterLabel} — the rebuilt record is readable: a complete, ` +
-            `finding-free answer, exit 0 (SPEC 12.1, 11.6)`,
-        ),
-        afterLabel,
-      );
-      assertSameJson(
-        after.findings,
-        [],
-        `${afterLabel} — finding-free (SPEC 11.6)`,
-      );
-      assertSameJson(
-        after.recorded,
-        intact.recorded,
-        `${afterLabel} — \`recorded\` in full: the rebuilt record lists ` +
-          `the same derived paths as the intact one — the same sources and ` +
-          `configuration generate the same set (SPEC 12.1, 11.6, 13.3)`,
+        `${buildLabel} — \`build\` regenerates graph data whatever state it ` +
+          `finds there, and the staging refuses reads alone, every write ` +
+          `and search kept, so the regeneration is never itself refused: ` +
+          `exit 0 (SPEC 12.1, 13.4, 14.25)`,
       );
     } finally {
       await restoreSurviving(stagings);
     }
-    await expectExit(
-      product,
-      workspace,
-      ["check"],
-      0,
-      `${context}: recovery — after the rebuild, \`check\` is clean (SPEC 12.2)`,
-    );
   } finally {
     await workspace.dispose();
   }
@@ -3229,7 +3283,7 @@ export async function runT1410ArmI(product: ProductBinding): Promise<void> {
 const T14_10 = defineProductTest({
   id: "T14-10",
   title:
-    "read failures (14.25): the object read decides the outcome, one arm per row, each refusal staged by permission removal alone (a file's content: mode 0o200, its write permission kept; a directory's listing: mode 0o100, search kept; nonexistence never a refusal) — (a) a discovered source's content is condition 20 at `build` and `check`, exit 1, its one location the zero-length range at offset 0, the file masked exactly as an unparseable one (A's reference reports 14.5, nothing inside reports) while `view` serves the other requested file, `occurrences` lists no record for its spellings, and `at` at 0, 7, and 999999 reports the resolution explicitly unavailable, never the out-of-range usage error — a spec source and, separately, a code source; (b) the journal's content is condition 13 concerning .xspec/journal from `build`, `check`, `ids` (answering nothing), and a refused `rename`, while `inventory` reports `journal.occupied` true, finding-free; (c) a session file's content is condition 21 from `check`, `review status` (nothing modified), and `review list` (the session reported corrupt), each reporting one `corrupt-session` finding concerning the session file with no location, `inventory` listing the session; (d) the configuration file's content is condition 14 from `build`, `ids`, `inventory`, and `view` (`code` configuration-error, `path` xspec.config.ts), `version` exiting 0; (e) a generated module's content is one per-file condition-10 finding to `check` while `build` exits 0; (f) every graph-data file unreadable is the state of condition 23 — `inventory` and a `move --preview` report their record-supplied datum unavailable beside the finding, `check` one unit-form condition-10 finding alone, `ids` regenerates and answers (exit 0), and after `build` the inventory reports `recorded` in full; (g) a directory discovery lists, unlistable: `build`, `check`, `ids`, `view`, `inventory`, `review list`, and a `rename` each exit 2 with the error document (`code` read-failure, `path` specs/sub), nothing modified, the read failure preceding a failing source's findings and an unknown profile, the syntax class (`code` null) and an invalid configuration preceding it; (h) the session directory unlistable: `review list`, `inventory`, and `check` exit 2 concerning .xspec/reviews while `build` and `ids` exit 0; (i) at acquisition, the lock path's occupant and everything under it refused, each staged before the invocation on a freshly built workspace holding an `audit` session `s`, with `rename`, `move`, `review create`, `resolve`, and `split` in turn — an empty lock directory unlistable (`-wx`) and a subdirectory under it unlistable (`-wx`), each `read-failure`; `.xspec` unsearchable (`rw-`; holding no `lock` and, separately, an empty lock directory) and the lock directory unsearchable (`rw-`, holding a directory that holds a file), each `read-failure` or `write-failure` — each exit 2 with the error document, `path` .xspec/lock, never a nested path, `locations` [], nothing modified; and specs/sub, a directory the second discovery of 13.5 lists, made unlistable (`--x`) during the hold of `rename specs/A.mdx a a2`: exit 2, `code` read-failure, `path` specs/sub, nothing modified; two clauses — a refused read of a path occupant's kind (the area's own occupant's at acquisition included, the lock path's there excepted, which (i) stages), and of a directory above the workspace root — admit no product-independent staging and are recorded so (SPEC 14.25, 14, 11.2, 11.5, 11.6, 13.3, 13.5, 10.7, 12.0, 12.7)",
+    "read failures (14.25): the object read decides the outcome, one arm per row, each refusal staged by permission removal alone (a file's content: mode 0o200, its write permission kept; a directory's listing: mode 0o100, search kept; nonexistence never a refusal) — (a) a discovered source's content is condition 20 at `build` and `check`, exit 1, its one location the zero-length range at offset 0, the file masked exactly as an unparseable one (A's reference reports 14.5, nothing inside reports) while `view` serves the other requested file, `occurrences` lists no record for its spellings, and `at` at 0, 7, and 999999 reports the resolution explicitly unavailable, never the out-of-range usage error — a spec source and, separately, a code source; (b) the journal's content is condition 13 concerning .xspec/journal from `build`, `check`, `ids` (answering nothing), and a refused `rename`, while `inventory` reports `journal.occupied` true, finding-free; (c) a session file's content is condition 21 from `check`, `review status` (nothing modified), and `review list` (the session reported corrupt), each reporting one `corrupt-session` finding concerning the session file with no location, `inventory` listing the session; (d) the configuration file's content is condition 14 from `build`, `ids`, `inventory`, and `view` (`code` configuration-error, `path` xspec.config.ts), `version` exiting 0; (e) a generated module's content is one per-file condition-10 finding to `check` while `build` exits 0; (f) graph data unreadable — every file under .xspec/ but the journal, the session directory, and the lock path at mode 0o200 and every directory among them at 0o300 (`-wx`, its write and search kept) — is the state of condition 23: `inventory` and a `move --preview` report their record-supplied datum unavailable beside the finding, `check` one unit-form condition-10 finding alone, `ids` regenerates and answers (exit 0), and `build` exits 0, no later read of the record it wrote asserted; (g) a directory discovery lists, unlistable: `build`, `check`, `ids`, `view`, `inventory`, `review list`, and a `rename` each exit 2 with the error document (`code` read-failure, `path` specs/sub), nothing modified, the read failure preceding a failing source's findings and an unknown profile, the syntax class (`code` null) and an invalid configuration preceding it; (h) the session directory unlistable: `review list`, `inventory`, and `check` exit 2 concerning .xspec/reviews while `build` and `ids` exit 0; (i) at acquisition, the lock path's occupant and everything under it refused, each staged before the invocation on a freshly built workspace holding an `audit` session `s`, with `rename`, `move`, `review create`, `resolve`, and `split` in turn — an empty lock directory unlistable (`-wx`) and a subdirectory under it unlistable (`-wx`), each `read-failure`; `.xspec` unsearchable (`rw-`; holding no `lock` and, separately, an empty lock directory) and the lock directory unsearchable (`rw-`, holding a directory that holds a file), each `read-failure` or `write-failure` — each exit 2 with the error document, `path` .xspec/lock, never a nested path, `locations` [], nothing modified; and specs/sub, a directory the second discovery of 13.5 lists, made unlistable (`--x`) during the hold of `rename specs/A.mdx a a2`: exit 2, `code` read-failure, `path` specs/sub, nothing modified; two clauses — a refused read of a path occupant's kind (the area's own occupant's at acquisition included, the lock path's there excepted, which (i) stages), and of a directory above the workspace root — admit no product-independent staging and are recorded so (SPEC 14.25, 14, 11.2, 11.5, 11.6, 13.3, 13.5, 10.7, 12.0, 12.7)",
   // A hang guard only (H-10): nine workspaces, each built, checked, and
   // driven through a handful of invocations, and arm (i)'s six
   // CONF-CORE-shaped ones, each built, holding a session, and driven once —
