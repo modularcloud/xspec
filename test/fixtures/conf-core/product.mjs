@@ -3642,17 +3642,21 @@ const EARLY_RELEASE_DWELL_MS = 1000;
  * configuration error of a file both groups match and a refused listing
  * (14.14, 14.25; T13.5-8's acquisition-after arms), so those precede
  * acquisition's outcomes; nothing later consults its sources but
- * VIOL-CORE-EARLYREFRESH's early refresh. The second, once exclusivity is
- * held — past the hold — fixes the sources every later check and read
- * consults, meeting either error there, after acquisition's and the hold
- * file's errors and before every other (13.5, 12.0; T13.5-12(d), (e)).
+ * VIOL-CORE-EARLYREFRESH's foresight and early refresh, which judge the
+ * workspace as it stands before acquisition (foreseeSessionWrite). The
+ * second, once exclusivity is held — past the hold — fixes the sources
+ * every later check and read consults, meeting either error there, after
+ * acquisition's and the hold file's errors and before every other (13.5,
+ * 12.0; T13.5-12(d), (e)).
  * Acquisition and the hold precede the second discovery and every later
  * check (SPEC 13.5; T13.5-8), so an invocation a later check refuses or the
  * gate turns back creates the hold file too and exits with its own outcome
  * only after the hold's deletion, having written nothing. Acquisition, the
  * hold, the second discovery, the two judged phases, and the refresh are
  * each position-independent so that one deviation can move one of them —
- * the refresh a closure the operation calls (`refreshBeforeSessionWrite`).
+ * the refresh a closure the operation calls (`refreshBeforeSessionWrite`),
+ * and a mutating `review` subcommand's operation, which only reads and
+ * judges before that call, runnable up to it alone (foreseeSessionWrite).
  */
 async function runMutating(
   cwd,
@@ -3686,34 +3690,6 @@ async function runMutating(
     if (refreshesGraphData) await refreshStaleGraphData(config, graph);
   };
   let refreshBeforeSessionWrite = refreshIfStale;
-  if (deviations.refreshBeforeExclusivity) {
-    // VIOL-CORE-EARLYREFRESH (CERTIFICATIONS.md): the 13.3 refresh a
-    // mutating `review` subcommand performs on a stale workspace runs here,
-    // before workspace exclusivity is acquired — before acquisition and the
-    // hold — so stale graph data is rewritten before the hold file is
-    // created; the refresh the operation makes before its session write
-    // (below) becomes a no-op, so the refresh runs exactly once, at this
-    // position. Everything else —
-    // acquisition; the hold file created after exclusivity and before every
-    // other write (the session write, `rename`/`move`'s edits, journal
-    // appends, the finishing regeneration of 6.4/6.5); the refresh's own
-    // bytes — is
-    // exactly the conformer's behavior, and a workspace whose graph data is
-    // current is refreshed by nothing, where the deviation is unobservable —
-    // as is a workspace failing `build`'s validations, on which the refresh
-    // writes nothing early or late (SPEC 13.3): the early refresh's gate
-    // findings are set aside here, and the gate's findings, like every usage
-    // error, are reported only after acquisition and the hold, at the
-    // conformer's position below (T13.5-8's failing-workspace arms).
-    try {
-      if (refreshesGraphData) {
-        await refreshIfStale(await loadGraph(config.root, firstDiscovery));
-      }
-    } catch (error) {
-      if (!(error instanceof FindingsError)) throw error;
-    }
-    refreshBeforeSessionWrite = async () => {};
-  }
   // Workspace exclusivity (SPEC 13.5), acquired at the conformer's position
   // below — before the hold and every later check — and released in the
   // `finally` below as every normal end comes; an acquisition that fails
@@ -3756,6 +3732,50 @@ async function runMutating(
     await operate(config, judged, discovery, async () => {
       await refreshBeforeSessionWrite(judged.graph);
     });
+  if (deviations.refreshBeforeExclusivity && refreshesGraphData) {
+    // VIOL-CORE-EARLYREFRESH (CERTIFICATIONS.md): the 13.3 refresh a
+    // mutating `review` subcommand performs on a stale workspace runs here,
+    // before workspace exclusivity is acquired — before acquisition and the
+    // hold — so stale graph data is rewritten before the hold file is
+    // created, "wherever the subcommand's later checks, judged on the
+    // workspace as it stands then, let it reach its session write; a run
+    // they turn back refreshes nothing, early or late, as the conformer's
+    // does (10.7: stale graph data stays stale)". The foresight
+    // (foreseeSessionWrite) judges, reading alone, every outcome the run
+    // meets ahead of its session write — acquisition's and the hold file's,
+    // the argument checks of 12.0 and baseline resolution (6.3), the gate of
+    // 13.3, and the outcomes 10.7 orders past it — over the workspace as it
+    // stands now, the first discovery's sources standing for the second's;
+    // where none turns the run back, the refresh runs here, over the graph
+    // the foreseen gate loaded, and the one the operation makes before its
+    // session write (below) becomes a no-op, so the refresh runs exactly
+    // once, at this position. A run the foresight turns back refreshes
+    // nothing here and keeps the conformer's refresh, which it reaches only
+    // should the workspace have changed by then to let it through. Everything
+    // else — acquisition; the hold file created after exclusivity and before
+    // every other write (the session write, `rename`/`move`'s edits, journal
+    // appends, the finishing regeneration of 6.4/6.5); every check and its
+    // outcome; the refresh's own bytes — is exactly the conformer's
+    // behavior, and a workspace whose graph data is current is refreshed by
+    // nothing, where the deviation is unobservable — as is a workspace
+    // failing `build`'s validations, which the foreseen gate turns back, so
+    // the refresh writes nothing early or late (SPEC 13.3), the gate's
+    // findings, like every usage error, reported only after acquisition and
+    // the hold, at the conformer's position below (T13.5-8's
+    // failing-workspace arms).
+    const foreseen = await foreseeSessionWrite(
+      config,
+      cwd,
+      holdFlag,
+      firstDiscovery,
+      judge,
+      operate,
+    );
+    if (foreseen !== null) {
+      await refreshIfStale(foreseen);
+      refreshBeforeSessionWrite = async () => {};
+    }
+  }
   try {
     await acquire();
     if (deviations.lateHold) {
@@ -3854,6 +3874,108 @@ function isRefusedOutcome(error) {
     error instanceof FindingsError ||
     error instanceof RefusalError
   );
+}
+
+/**
+ * The stop VIOL-CORE-EARLYREFRESH's foresight puts at the session write
+ * (foreseeSessionWrite): thrown by its stand-in for the refresh closure a
+ * mutating `review` subcommand's operation calls just before writing its
+ * session, so the operation stops there, its session never written.
+ */
+class SessionWriteReached extends Error {}
+
+/**
+ * VIOL-CORE-EARLYREFRESH's foresight (CERTIFICATIONS.md
+ * §VIOL-CORE-EARLYREFRESH: the refresh runs before exclusivity is acquired
+ * "wherever the subcommand's later checks, judged on the workspace as it
+ * stands then, let it reach its session write; a run they turn back
+ * refreshes nothing, early or late, as the conformer's does (10.7: stale
+ * graph data stays stale)"): whether a mutating `review` subcommand's run,
+ * judged before acquisition on the workspace and the invocation as they
+ * stand, reaches its session write. Every outcome it meets ahead of that
+ * write is judged by reading alone, in the conformer's order (12.0, 10.7):
+ * acquisition's (acquisitionForeseenRefused: an obstruction, a live run's
+ * entry, a refused examination or listing — 14.24, 14.26, 14.25) and the
+ * hold file's (anything at the `--test-hold` path, 13.5); then, over
+ * `discovery` — the first discovery's sources, which the second finds on
+ * the workspace as it stands — the argument checks of 12.0 and baseline
+ * resolution, 6.3, and the gate of 13.3 (`judge`); then the outcomes 10.7
+ * orders past the gate — the session read, `create`'s session-directory
+ * examination, the item check, and the refusals — met by the operation
+ * itself (`operate`), run up to its session write and stopped there by the
+ * closure it calls in the refresh's place (SessionWriteReached). The
+ * operation reads, judges, and builds its session in memory before that
+ * call, so the foresight writes nothing and emits nothing; a write the
+ * environment would refuse — acquisition's creations, the hold file's — is
+ * met only at that write (12.0), never foreseen. Returns the graph the
+ * foreseen gate loaded where the run reaches its session write, else null:
+ * an outcome turning it back — a usage error, findings, a refusal, a scope
+ * error, or a system error — refreshes nothing early, the run meeting it at
+ * the conformer's position once it has acquired and held; anything else is
+ * a fixture crash, rethrown.
+ */
+async function foreseeSessionWrite(
+  config,
+  cwd,
+  holdFlag,
+  discovery,
+  judge,
+  operate,
+) {
+  let judged;
+  try {
+    if (await acquisitionForeseenRefused(config.root)) return null;
+    if (
+      holdFlag !== undefined &&
+      (await occupantKind(path.resolve(cwd, holdFlag))) !== "absent"
+    ) {
+      return null;
+    }
+    judged = await judge(discovery);
+    await operate(config, judged, discovery, async () => {
+      throw new SessionWriteReached();
+    });
+  } catch (error) {
+    if (error instanceof SessionWriteReached) return judged.graph;
+    if (
+      isRefusedOutcome(error) ||
+      error instanceof FixtureScopeError ||
+      isSystemError(error)
+    ) {
+      return null;
+    }
+    throw error;
+  }
+  throw new Error(
+    "a mutating review subcommand's operation returned without reaching its session write",
+  );
+}
+
+/**
+ * VIOL-CORE-EARLYREFRESH's foresight of acquisition (foreseeSessionWrite):
+ * whether acquireExclusivity, judged by reading alone on the workspace as
+ * it stands, refuses the run — the area's own path holding anything but a
+ * directory, or the lock path anything but a directory or a plain file (an
+ * obstruction acquisition does not remove, 14.24), or the lock directory's
+ * listing holding a live run's entry (the busy refusal of 14.26,
+ * judgeListing; this run has added no entry, so one recording its own
+ * identifier is a leftover, as acquisition judges one). A missing area or
+ * lock directory, which acquisition brings into existence, and a plain file
+ * at the lock path, a leftover it removes, refuse nothing here; a refused
+ * examination or listing (14.25) throws, as acquisition's does. Nothing is
+ * created or removed.
+ */
+async function acquisitionForeseenRefused(root) {
+  const area = await occupantKind(path.join(root, AREA_REL));
+  if (area === "absent") return false;
+  if (area !== "directory") return true;
+  const lockAbs = path.join(root, LOCK_REL);
+  const lock = await occupantKind(lockAbs);
+  if (lock === "absent" || lock === "file") return false;
+  if (lock !== "directory") return true;
+  const lockBytes = Buffer.from(lockAbs);
+  await judgeListing(lockBytes, await listNames(lockBytes), null);
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -5248,8 +5370,12 @@ async function commandReview(io, cwd, sub, args) {
  * - `refreshBeforeExclusivity` (VIOL-CORE-EARLYREFRESH): the 13.3 refresh a
  *   mutating `review` subcommand performs on a stale workspace runs before
  *   workspace exclusivity is acquired, so stale graph data is rewritten
- *   before the hold file is created; the hold file is still created after
- *   exclusivity and before every other write; see runMutating.
+ *   before the hold file is created — wherever the run's later checks,
+ *   judged on the workspace as it stands then, let it reach its session
+ *   write; a run they turn back refreshes nothing, early or late, as the
+ *   conformer's does (10.7); the hold file is still created after
+ *   exclusivity and before every other write; see runMutating and
+ *   foreseeSessionWrite.
  * - `staleLockBlocks` (VIOL-CORE-STALELOCK): abnormal termination does not
  *   end exclusivity — any entry in the conformer's entry form refuses
  *   acquisition by its presence alone, whatever identifier its name

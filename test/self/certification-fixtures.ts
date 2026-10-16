@@ -150,15 +150,18 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // VIOL-CORE-EARLYREFRESH: the 13.3 refresh a mutating `review`
       // subcommand performs on a stale workspace runs before workspace
       // exclusivity is acquired, so stale graph data is rewritten before the
-      // hold file is created — one ordering rule of 13.5 (the hold precedes
-      // every modification, the refresh included) broken for the refresh
-      // alone; the hold file is still created after exclusivity and before
-      // every other write (the session write, rename/move's edits, journal
-      // appends, and the finishing regeneration of 6.4/6.5), and a workspace
-      // whose graph data is current is refreshed by nothing, as one failing
-      // `build`'s validations is (13.3) — the deviation unobservable on
-      // both. Fails T13.5-1 on its stale-workspace arm's while-held
-      // comparison alone.
+      // hold file is created — wherever the subcommand's later checks,
+      // judged on the workspace as it stands then, let it reach its session
+      // write; a run they turn back refreshes nothing, early or late, as the
+      // conformer's does (10.7: stale graph data stays stale). One ordering
+      // rule of 13.5 (the hold precedes every modification, the refresh
+      // included) broken for the refresh alone; the hold file is still
+      // created after exclusivity and before every other write (the session
+      // write, rename/move's edits, journal appends, and the finishing
+      // regeneration of 6.4/6.5), and a workspace whose graph data is
+      // current is refreshed by nothing, as one failing `build`'s
+      // validations is (13.3) — the deviation unobservable on both. Fails
+      // T13.5-1 on its stale-workspace arm's while-held comparison alone.
       violator("VIOL-CORE-EARLYREFRESH", "conf-core/bin-earlyrefresh.mjs", [
         "T13.5-1",
       ]),
