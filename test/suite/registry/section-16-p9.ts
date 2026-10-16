@@ -1345,10 +1345,6 @@ const P_9 = defineProductTest({
   id: "P-9",
   title:
     "review session invariants under random sequences of valid review operations interleaved with workspace edits (TEST-SPEC §16 P-9): audit sessions driven through create, resolve (re-derive triggers included: --status updated), split, and reads, with prose edits, section additions, and section deletions (each followed by `build`) in between — after every operation the session holds at most one item per kind and scope node; blockedBy is acyclic and names only present items, with every item's blocked state consistent with its blockers' reported statuses; ids retired by split never reappear (and items leave the session only through split); `next` returns an unblocked needing-review item consistent with an adjacent export, or reports fully resolved exactly when no item needs review; reads (status/next/show/export/list) never change session bytes; and stored sessions always re-read as non-corrupt plain files, with `review list` reporting exactly the created sessions, none corrupt (SPEC 10.1-10.7, 13.4, 14.21)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), up to 6
-  // operations per trial, each operation costing a handful of product
-  // invocations (the op itself plus the per-session export/next/list sweep).
-  timeoutMs: 600_000,
   run: async (product) => {
     await checkProperty(
       "P-9 review session invariants",

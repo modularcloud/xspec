@@ -1926,9 +1926,6 @@ async function runSiblingDestinationStaging(
 
 const T6_2_3 = defineProductTest({
   id: "T6.2-3",
-  // Fourteen stagings (~90 CLI invocations, ~22 s alone): headroom for a
-  // saturated box.
-  timeoutMs: 240_000,
   title:
     "section move impurity: on a clean-boundary fixture every moved node keeps ownHash, subtreeHash, and metadataHash, the origin and target parents are each `changed` with ordinary cascades attributed to them, and no other node is `changed`; a moved section with an impure origin boundary (SPEC 6.2's worked case) is itself additionally `changed` with the 5.6 cascades attributed to it, its metadataHash still unchanged — in each of the three impure stagings (the worked shape with spaces before its closing tag, the both-sided U+000B/U+000C spelling, the `body</S>` variant with such a remainder), moved to top level and into a flow-position parent alike, the bytes named gone from its own text at the destination; and a sibling with bytes on the deletion's merged line or on the line the insertion splits is `changed` exactly when the drop rule of 3 decides that line differently, the moved node keeping its hashes and carrying no category (SPEC 6.2, 3, 1.4, 5.6, 6.5)",
   run: async (product) => {
@@ -2729,9 +2726,6 @@ async function runChangedTwinStaging(product: ProductBinding): Promise<void> {
 
 const T6_2_4 = defineProductTest({
   id: "T6.2-4",
-  // Three stagings (~40 CLI invocations, ~12 s alone): headroom for a
-  // saturated box.
-  timeoutMs: 180_000,
   title:
     "same-parent final-position move: moving a parent's last child onto itself (same parent, same final position, new ID) is pure in effect exactly when the re-insertion reproduces the parent's own content sequence — in the two pinned shapes (a flow-form last child whose tags, and its parent's closing tag, stand alone on their lines; T6.5-13(f)'s top-level shape) the composed file is byte-exact, no hash in the workspace changes (full sweep), and `impact --base <pre-move ref>` reports no categories apart from the identity mapping; in the `changed` twin (T6.5-13(e)'s shape) the coincident parent alone is `changed`, its ownHash with it and its metadataHash kept, with the 5.6 cascades attributed to it, the moved node and the root keeping their content (SPEC 6.2, 6.5, 3, 5.4, 5.6)",
   run: async (product) => {

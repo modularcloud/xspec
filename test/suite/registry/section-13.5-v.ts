@@ -173,13 +173,6 @@ const WRITE_FAILURE = "write-failure";
 const READ_FAILURE = "read-failure";
 
 /**
- * The holder's hang guard: its hold spans five second runs and, in (d),
- * the second user's probes (H-10: a hang guard, never an assertion input;
- * a holder hanging once lifted fails diagnosed at it).
- */
-const HOLDER_TIMEOUT_MS = 300_000;
-
-/**
  * A second run's hang guard (H-10): a refusal is prompt, so a run still
  * going at the bound — sudo's start included for the second user's — is a
  * product blocking or hanging, killed and diagnosed (H-8).
@@ -257,7 +250,6 @@ async function withHolder<T>(
     cwd: workspace.root,
     argv: [...holderArgv(items), "--test-hold", hold],
     env,
-    timeoutMs: HOLDER_TIMEOUT_MS,
   });
   try {
     await awaitHoldFile(running, hold, context);
@@ -840,7 +832,6 @@ const T13_5_9 = defineProductTest({
   id: "T13.5-9",
   title:
     '13.5\'s reach: while a `review resolve s <item> --status skipped --test-hold <path>` started by the harness\'s own identity, from the workspace root, in the harness\'s environment, is held — the held-state comparison holding once it holds — each mutating command in turn (`rename specs/A.mdx a a2`, `move specs/A.mdx specs/B.mdx`, `review create --strategy audit --name t`, `review resolve s <item> --status no-change`, `review split s <item>`; each an operation succeeding on an unheld twin, exit 0) runs as a second run in each situation, under `--json`, and fails promptly, exiting while the hold stands, with exit 2 and nothing modified, the holder\'s entry byte-identical, name and content, and again the lock directory\'s only entry once the second run has exited: (a) a different environment — `TMPDIR`, `HOME`, and `XDG_RUNTIME_DIR` each set, for the holder and the second run, to different existing directories, unrelated variables added to the second run\'s; (b) a different working directory — the root\'s subdirectory `specs`, and a directory outside the root with the configuration named through `--config` (each given as `PWD` too); (c) a different path to the root — through a symbolic link above the root, and through a second mount of the root (a bind mount) — each of (a)–(c) with `code` `"workspace-busy"`, `path` `".xspec/lock"`, `locations` `[]`; (d) a different user who can write the workspace (an unprivileged identity distinct from the harness\'s, sharing its group, the workspace group-readable and group-writable, its directories group-searchable) — `"workspace-busy"`, or `"write-failure"` or `"read-failure"`, at `".xspec/lock"`, never success; and (d) again with `.xspec/lock` made by the harness before the holder starts, an empty directory the shared group may list, write, and search — exactly `"workspace-busy"` at `".xspec/lock"`, the second user\'s creation and removal of a file there verified before the holder starts (a failure an ineffective staging) and again once it holds (a failure leaving the lenient expectation); the holder completing, exit 0; the mount and the second user made with E-1\'s administrative access and verified on the harness before use — a file created through either path appearing through the other, the two paths distinct mount points; the second user\'s uid not the harness\'s, every directory listed and every file read by it, a file created and removed by it in the root and in `.xspec`, each identity\'s process list listing the other\'s — an ineffective staging a harness error, never a pass or a skip (SPEC 13.5, 14.24, 14.25, 14.26, 12.0, H-6)',
-  timeoutMs: 600_000,
   run: async (product) => {
     await runT1359PlainArms(product);
     await runT1359MachineArms(product);

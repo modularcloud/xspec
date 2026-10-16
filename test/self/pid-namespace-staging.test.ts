@@ -470,4 +470,4 @@ test("an ineffective namespace staging — a stand-in sudo granting access but s
   const started = (await fsp.readFile(record, "utf8")).trim().split("\n");
   expect(started).toHaveLength(1);
   expect(await listedAmong(started.map(Number))).toEqual([]);
-}, 60_000);
+});

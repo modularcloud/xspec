@@ -978,7 +978,6 @@ const T10_7_1 = defineProductTest({
   id: "T10.7-1",
   title:
     "`review create` flag exclusivity: exactly one of `--base`, `--strategy audit`, `--coverage` is required — supplying none, any two, all three, or `--strategy` with any other value (`path-blocks`, `coverage`, garbage) is a usage error, exit 2, as is a missing `--name`; `--coverage` naming no configured profile is exit 2 (an unknown profile named in arguments) with nothing created — no session file exists and `list` reports no such session; `create` with an existing session's exact name is refused: exit 1 with exactly one code-less finding, nothing modified; naming an existing corrupt session — unparseable bytes, an invariant violation staged through the H-3 adapter over the product-written file, a directory or a symbolic link at the session path (T10.1-4's stagings) — reports the corruption in the refusal's place: exactly one finding, condition 21 `corrupt-session`, no code-less refusal beside it, exit 1, nothing modified (SPEC 10.1, 10.7, 12.0, 13.4, 14.21)",
-  timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
       COVERAGE_CONFIG,
@@ -1244,7 +1243,6 @@ const T10_7_2 = defineProductTest({
   id: "T10.7-2",
   title:
     "recorded creation parameters: a coverage session records the profile definition with group names replaced by glob lists (the recorded definition holds the group's configured glob, and the reported record is unchanged by later configuration edits) — after `create`, renaming the profile away and editing its group's glob list change nothing about session behavior: reads and the `updated`-resolve re-derivation still run the recorded globs against the currently discovered sources, so a new file matching the recorded globs enters on re-derivation while a newly-grouped file outside them never does, and a file no longer in any configured group leaves the session's view exactly as if deleted (its item's scope presents absent, the item is retained); an audit session records none — its generators run against the current workspace under the current configuration, so a configuration edit adding sources is reflected in its re-derivation (a baseline session's recorded commit is T10.5-6's business) (SPEC 7, 10.2, 10.4, 10.5, 10.7)",
-  timeoutMs: 360_000,
   run: async (product) => {
     // --- coverage arm: the profile definition is recorded, resolved ---------
     await withWorkspace(
@@ -1585,7 +1583,6 @@ const T10_7_3 = defineProductTest({
   id: "T10.7-3",
   title:
     "unresolvable baseline: `review create --base` with an unresolvable ref (a nonexistent branch name; a full hex commit id absent from the repository) fails per 6.3 as exit 2, modifying nothing — the whole workspace, `.git/` included, stays byte-identical and no session file appears; and once a session's recorded baseline commit can no longer be reconstructed (the repository is re-created, so the recorded commit's objects are gone while the old `--base` spelling resolves to a different commit), every later `review` command that runs the session — `status`, `next`, `show`, `export`, `resolve`, `split`, each staged so the baseline is its only failure — fails as exit 2, modifying nothing, while `list`, which reports stored statuses without the read-time invalidation, still exits 0 and reports the session with its fields (an unresolvable recorded baseline is a usage error, not the 14.21 corruption) (SPEC 6.3, 10.4, 10.7, 12.0)",
-  timeoutMs: 300_000,
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -1928,7 +1925,6 @@ const T10_7_4 = defineProductTest({
   id: "T10.7-4",
   title:
     "coverage sessions: `create --coverage` derives one `uncovered-requirement` item per uncovered required node of the recorded profile — the covered leaf, the branch node, and the root nodes get none — each item scoping exactly the node with the node's ancestor chain as context and empty origin and blockedBy (so every item is unblocked); item order is scope-node file path then document order (u2 before u1, their declaration order, not identity order); after deleting an uncovered node's section the absent-scope item orders after the same file's present-scope items — not last globally: the later file's item still follows it — and after deleting both, the two absent items order by scope-node identity, u1 before u2, the reverse of their former document order; items keep their ids and the deletions alone change no membership; and two absent-scope items tied on every earlier key — the uncovered-requirement items of an original leaf a, renamed to b by a journaled `rename` and deleted by manual edit, and of a new leaf a authored after that rename (a new node on a new canonical chain, its item entering through an `updated` resolve's re-derivation under the recorded profile), renamed to b in turn and deleted, both presented absent under specs/A.mdx#b — order after the file's present-scope item by item `id` bytes, the ids the product's own, in `status`, `export`, and the `next` walk (SPEC 5.4, 6.4, 8, 8.1, 10.2, 10.4, 10.5, 10.7, 12.0)",
-  timeoutMs: 300_000,
   run: async (product) => {
     await withWorkspace(
       COVERAGE_CONFIG,
@@ -2530,7 +2526,6 @@ const T10_7_5 = defineProductTest({
   id: "T10.7-5",
   title:
     "`review list`: every session is reported in byte order of session name — created `a2`, then `a`, then `B`, listed `B`, `a`, `a2`, an order differing from both creation order and ASCII-case-folded order — each with its name, strategy (the spec-fixed strategy names `coverage`, `path-blocks`, `audit`), and item counts by stored status with no read-time invalidation applied: a resolved item whose scope was edited afterward reads as invalidated in `status` yet still counts under its stored `no-change`; a corrupt session (unparseable bytes over a product-written session file) is reported by name as corrupt in place of those fields, the corrupt listing carrying condition 21's one finding — `corrupt-session`, concerning the session's own file `.xspec/reviews/c.json`, with no location (`locations` []); `list` exits 1 iff any corrupt session exists, else 0; and the human `review list` at each listing's state exits alike and carries the listing's information — every session's name, each healthy session's strategy, the statuses it stores items under, and its nonzero counts, and `corrupt` beside the corrupt session's name (robust matching, H-3) (SPEC 10.1, 10.4, 10.7, 12.0, 12.7, 14, 14.21)",
-  timeoutMs: 300_000,
   run: async (product) => {
     await withWorkspace(
       COVERAGE_CONFIG,
@@ -2792,7 +2787,6 @@ const T10_7_6 = defineProductTest({
   id: "T10.7-6",
   title:
     "`review status`: items are reported in item order, each with id, kind, scope, status, and blocked state, plus totals by status — asserted through an audit session's lifecycle: all-unresolved with the parent items blocked; after resolving the leaves the parent unblocks; after resolving the parent `updated` (a re-derivation that changes nothing) the root unblocks and every id survives; and after an edit under two resolved items' scopes the read-time invalidation is applied to rows and totals alike — the stale resolutions read `invalidated` (their stored statuses no longer appear in the totals), the invalidated blocker re-blocks its dependents, and the untouched resolved item keeps its status; and at every stage the human `review status` at the same state exits 0 and carries the report's information — every row's id, scope, kind, and status, `blocked` where a row is blocked, and each status with a nonzero total and that total (robust matching, H-3) (SPEC 10.3, 10.4, 10.6, 10.7, 12.0)",
-  timeoutMs: 300_000,
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,

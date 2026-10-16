@@ -10,10 +10,12 @@
 // performed move (helpers/added-import-identifiers.ts), and H-6's
 // classification of the harness's compares (helpers/acquiring-runs.ts:
 // whether an invocation is a mutating command's, SPEC 13.5, and the
-// `--config` path that places its workspace, SPEC 7). The self-test
-// test/self/p8-fixed-seed-draws.test.ts pins {@link jsonOutputInEffect};
-// test/self/lock-path-exclusion.test.ts pins {@link invocationAcquires} and
-// {@link configPathArgument}.
+// `--config` path that places its workspace, SPEC 7), and the driver's hold
+// rule for hang guards (the `--test-hold` path a run holds at, SPEC 13.5;
+// TEST-SPEC S-3). The self-test test/self/p8-fixed-seed-draws.test.ts pins
+// {@link jsonOutputInEffect}; test/self/lock-path-exclusion.test.ts pins
+// {@link invocationAcquires} and {@link configPathArgument};
+// test/self/s3-subprocess-driver.test.ts pins {@link holdPathArgument}.
 
 import { Buffer, isUtf8 } from "node:buffer";
 import type { ArgvValue } from "./subprocess.js";
@@ -158,5 +160,18 @@ export function configPathArgument(
   argv: readonly ArgvValue[],
 ): ArgvValue | undefined {
   const value = readInvocation(argv).flags.get("config");
+  return value === true ? undefined : value;
+}
+
+/**
+ * The value of an invocation's `--test-hold <path>` flag read as a flag —
+ * the path at which the run creates its hold file once it holds workspace
+ * exclusivity (SPEC 13.5) — or undefined when the invocation gives none (or
+ * gives the flag without its value).
+ */
+export function holdPathArgument(
+  argv: readonly ArgvValue[],
+): ArgvValue | undefined {
+  const value = readInvocation(argv).flags.get("test-hold");
   return value === true ? undefined : value;
 }

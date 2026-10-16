@@ -544,7 +544,6 @@ const T10_6_1 = defineProductTest({
   id: "T10.6-1",
   title:
     "audit generation in a git-less workspace: `review create --strategy audit` needs no baseline — the whole fixture (build, create, status, export, query) runs in a workspace that is not a git repository and has no enclosing one — and derives exactly one subtree-coherence item per requirement node across the entire workspace, root nodes included (two files, six nodes, six items); each item's context is the node's ancestor chain (empty for the two root items), its origin is empty, and its scope is the node plus all descendants — the scope root is the node and its scope text is the scope root's subtree text, asserted where subtree and own text differ (a root and a branch node) (SPEC 1.2, 10.5, 10.6, 10.7)",
-  timeoutMs: 180_000,
   run: async (product) => {
     await withWorkspace(
       { [G_FILE]: G_SOURCE, [H_FILE]: H_SOURCE },
@@ -872,7 +871,6 @@ const T10_6_2 = defineProductTest({
   id: "T10.6-2",
   title:
     "audit order and blocking: items order by scope-node file path bytes (specs/B.mdx before specs/a.mdx — the reverse of case-insensitive order), then document order within the file with the root item first; each item's blockedBy is exactly its child sections' items (the root's holds its top-level sections' items — the grandchild a.b's item blocks only its parent's), so leaves are unblocked and repeated next+resolve walks the session bottom-up in item order; after deleting two scoped sections by manual edit their items order after the same file's present-scope items by scope-node identity — e before f, the reverse of their former document order and ahead of the other file's items — with blockedBy untouched, and the walk visits them in that order; after a `split` of a branch item the blockers of every item blocked by it are the decomposition items — the reused child item, the fresh parent-consistency item — with the original removed and the decomposition items taking the scope nodes' places in item order; and two absent-scope items tied on every earlier key — the subtree-coherence items of an original section a, renamed to b by a journaled `rename` and deleted by manual edit, and of a new section a authored after that rename (a new node on a new canonical chain, its item entering through an `updated` resolve's re-derivation), renamed to b in turn and deleted, both presented absent under specs/A.mdx#b — order after the file's present-scope items by item `id` bytes, the ids the product's own, in `status`, `export`, and the `next` walk, the root's item blocked by both until they resolve (SPEC 1.2, 5.4, 6.4, 10.3, 10.4, 10.5, 10.6, 10.7, 12.0)",
-  timeoutMs: 420_000,
   run: async (product) => {
     // --- sub-fixture 1: order, blocking, walk, absent scopes ------------------
     await withWorkspace(
@@ -1458,7 +1456,6 @@ const T10_6_3 = defineProductTest({
   id: "T10.6-3",
   title:
     "audit re-derivation on `updated` (the 10.5 resolve-time re-derivation holds for every strategy; audit's generators run with no creation parameters against the current workspace): after authoring a new section p.b, resolving an unblocked item `no-change` adds no item (the control — the new node's item enters only through an `updated` resolve), while resolving an unblocked item `updated` re-derives — p.b's subtree-coherence item appears at its place in audit item order, created `unresolved` (the trigger's status does not propagate) with a fresh id and current state (its recorded current and baseline hold p.b's entry-time subtreeHash and metadataHash, and a later p.b edit leaves the reported record identical — recorded at entry, not recomputed), its context is its ancestor chain with empty origin, its parent p's item's blockedBy is recomputed to include it (the root's stays its child sections' items), and every existing item keeps its id, status, and recorded state (baseline and current byte-informationally unchanged across the re-derivation; the trigger keeps `updated`, the control keeps `no-change`) (SPEC 10.2, 10.4, 10.5, 10.6, 10.7)",
-  timeoutMs: 300_000,
   run: async (product) => {
     await withWorkspace({ [R_FILE]: rSpec(undefined) }, async (workspace) => {
       const prefix = "T10.6-3";

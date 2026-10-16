@@ -64,6 +64,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertExitCode } from "../helpers/assertions.js";
+import { NO_SPAN_GUARD } from "../helpers/hang-guards.js";
 import { defineProductTest } from "../helpers/registry.js";
 import type { ProductTestEntry } from "../helpers/registry.js";
 import { builtProductBindingAt, runProduct } from "../helpers/subprocess.js";
@@ -107,10 +108,10 @@ function emptyStubBinding(): ProductBinding {
   };
 }
 
-// Wall-clock ceiling for the full sweep. Against the stub every product
-// invocation exits immediately, so bodies fail fast; this budget is purely a
-// hang guard for the whole run (H-8), never an assertion input (H-10).
-const SWEEP_TIMEOUT_MS = 600_000;
+// No guard of its own per sweep (TEST-SPEC S-3, helpers/hang-guards.ts): a
+// sweep is a span over the bodies it runs, each stub invocation in them
+// bounded by its own hang guard — against the stub every one exits at once,
+// so bodies fail fast.
 
 test("the empty-stub fixture exits with an unexpected code and writes nothing, whatever the command (the S-7 stub contract)", async () => {
   const workspace = await TestWorkspace.create();
@@ -188,7 +189,7 @@ test("a registry-convention body fails diagnosed against the committed stub via 
 
 test(
   "S-7: every product-facing test in the registry fails as a diagnosed assertion failure against the empty stub — the sweep completes with no false pass, harness error, or hang (H-8)",
-  { timeout: SWEEP_TIMEOUT_MS },
+  { timeout: NO_SPAN_GUARD },
   async () => {
     const entries = productTestSuite.all();
     if (entries.length === 0) {
@@ -229,19 +230,15 @@ test(
 // each wrapped as a synthetic entry in the reserved section-99 ID space
 // (never part of the manifest), so the certification runner judges each
 // exactly as it judges a registered body — a `HarnessAssertionError` a
-// fail, anything else thrown an error, a normal return a pass, a body that
-// never settles a hang. Each entry's budget is its own test's Vitest
-// timeout: the two E-6 fixture tests allow 300 s for the fixture's 27
-// invocations (its exclusion probe's reruns aside), the Windows leg's probes
-// and arm the registry default.
-const E6_FIXTURE_BUDGET_MS = 300_000;
+// fail, the driver's hang-guard kill a hang, anything else thrown an error,
+// a normal return a pass. Like a registered entry, each carries no time
+// budget of its own (TEST-SPEC S-3), nor do the tests running them.
 
 const BODIES_OUTSIDE_THE_REGISTRY: readonly ProductTestEntry[] = [
   defineProductTest({
     id: "T99.7-2",
     title:
       "the E-6 representative fixture (`runE6RepresentativeFixture`, helpers/e6.ts), run first by test/suite/e6-exchange-writer.test.ts and test/windows/e6-byte-identity.test.ts",
-    timeoutMs: E6_FIXTURE_BUDGET_MS,
     run: async (product) => {
       await runE6RepresentativeFixture(product);
     },
@@ -320,7 +317,7 @@ function expectEveryBodyFailedAtTheStub(report: FixtureRunReport): void {
 
 test(
   "S-7: every product-facing body outside the registry — the E-6 representative fixture, the Windows leg's four single-casing probes (T7-4, T10.1-2, T10.1-3, T12.0-6), and T11.6-1's drive-mismatch arm — fails as a diagnosed assertion failure at the empty stub's answer, with no false pass, harness error, or hang (H-8)",
-  { timeout: SWEEP_TIMEOUT_MS },
+  { timeout: NO_SPAN_GUARD },
   async () => {
     // Six bodies, each exiting at its first invocation against the stub:
     // one lane apiece.
@@ -437,7 +434,7 @@ test("H-8, no product installed: a registry-convention body fails diagnosed agai
 
 test(
   "H-8, no product installed: every product-facing test in the registry fails as a diagnosed assertion failure naming the absent artifact, against the built product's binding shape at it — the sweep completes with no false pass, harness error, or hang",
-  { timeout: SWEEP_TIMEOUT_MS },
+  { timeout: NO_SPAN_GUARD },
   async () => {
     const entries = productTestSuite.all();
     if (entries.length === 0) {
@@ -461,7 +458,7 @@ test(
 
 test(
   "H-8, no product installed: every product-facing body outside the registry — the E-6 representative fixture, the Windows leg's four single-casing probes (T7-4, T10.1-2, T10.1-3, T12.0-6), and T11.6-1's drive-mismatch arm — fails as a diagnosed assertion failure naming the absent artifact, against the built product's binding shape at it, with no false pass, harness error, or hang",
-  { timeout: SWEEP_TIMEOUT_MS },
+  { timeout: NO_SPAN_GUARD },
   async () => {
     const { binding, artifact, directory } = await noProductStaging();
     const report = await runProductTests(binding, BODIES_OUTSIDE_THE_REGISTRY, {

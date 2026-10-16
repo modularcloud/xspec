@@ -21,7 +21,15 @@
 // - A body rejects a product only by throwing `HarnessAssertionError`
 //   (helpers/assertions.ts) — the diagnosed assertion failure of H-8. Any
 //   other exception is a harness error: the certification runner and the S-7
-//   sweep classify it as a defect, never as a legitimate test failure.
+//   sweep classify it as a defect, never as a legitimate test failure — but
+//   the subprocess driver's hang-guard kill, which the runner records as the
+//   test's hang (helpers/hang-guards.ts).
+// - A body carries no time budget of its own (TEST-SPEC S-3; module
+//   helpers/hang-guards.ts): a test is a span over the invocations and
+//   harness steps it runs, bounded by their own guards — each product
+//   invocation carries the driver's hang guard (helpers/subprocess.ts) — so
+//   an entry names no timeout, and neither its Vitest declaration nor the
+//   certification runner applies one.
 //
 // A `ProductTestSuite` is the registry: entries keyed by test ID, duplicates
 // rejected, named subsets resolved loudly (an in-scope test named by
@@ -40,25 +48,14 @@ import type { ProductBinding } from "./subprocess.js";
 export type ProductTestBody = (product: ProductBinding) => Promise<void>;
 
 /**
- * Default wall-clock budget for one run of one test body — used as the Vitest
- * per-test timeout and as the certification runner's hang watchdog alike (one
- * code path). Purely a hang guard (H-8); never part of an assertion (H-10).
- * Bodies normally terminate far earlier: every product invocation carries its
- * own subprocess timeout (helpers/subprocess.ts).
+ * Declaration accepted by {@link defineProductTest}. It names no time budget:
+ * the body is bounded by the own guards of what it runs (module header).
  */
-export const DEFAULT_PRODUCT_TEST_TIMEOUT_MS = 120_000;
-
-/** Declaration accepted by {@link defineProductTest}. */
 export interface ProductTestSpec {
   /** Stable TEST-SPEC ID: `T<section>-<n>` (e.g. `T13.5-2`) or `P-<n>`. */
   readonly id: string;
   /** Human summary shown in Vitest titles and certification output. */
   readonly title: string;
-  /**
-   * Wall-clock budget for one run of the body, overriding the default (e.g.
-   * property tests running many product invocations per body).
-   */
-  readonly timeoutMs?: number;
   readonly run: ProductTestBody;
 }
 
@@ -66,8 +63,6 @@ export interface ProductTestSpec {
 export interface ProductTestEntry {
   readonly id: string;
   readonly title: string;
-  /** Effective wall-clock budget for one run of the body. */
-  readonly timeoutMs: number;
   readonly run: ProductTestBody;
 }
 
@@ -81,8 +76,8 @@ const PRODUCT_TEST_ID =
   /^(?:T[1-9]\d*(?:\.(?:0|[1-9]\d*))?-[1-9]\d*|P-[1-9]\d*)$/;
 
 /**
- * Validate and freeze a product-test declaration. Malformed IDs, empty
- * titles, and non-positive budgets are registration-time errors.
+ * Validate and freeze a product-test declaration. Malformed IDs and empty
+ * titles are registration-time errors.
  */
 export function defineProductTest(spec: ProductTestSpec): ProductTestEntry {
   if (!PRODUCT_TEST_ID.test(spec.id)) {
@@ -96,16 +91,9 @@ export function defineProductTest(spec: ProductTestSpec): ProductTestEntry {
       `product test ${spec.id}: title must be a non-empty human summary.`,
     );
   }
-  const timeoutMs = spec.timeoutMs ?? DEFAULT_PRODUCT_TEST_TIMEOUT_MS;
-  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
-    throw new Error(
-      `product test ${spec.id}: timeoutMs must be a positive integer, got ${String(spec.timeoutMs)}.`,
-    );
-  }
   return Object.freeze({
     id: spec.id,
     title: spec.title,
-    timeoutMs,
     run: spec.run,
   });
 }

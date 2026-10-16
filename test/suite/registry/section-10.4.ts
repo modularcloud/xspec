@@ -1014,7 +1014,6 @@ const T10_4_1 = defineProductTest({
   id: "T10.4-1",
   title:
     "per-kind relevant-hash sensitivity: for each built-in kind every relevant hash of SPEC 10.4 is exercised as an invalidating case with query-node hash premises bracketing the edit, plus a non-invalidating control touching none of the item's relevant state — subtree-coherence (subtree text edit; metadata-only edit on the scope root and, separately, on a descendant, which changes no subtreeHash and MUST still invalidate; control outside the subtree), parent-consistency (own-text and metadata edits of the scope node; deep text edit under a context child; sibling-subtree control), dependency-consistency (own-text and metadata edits of the scope node; text edit under the upstream target in context; unrelated-node control), metadata-consistency (metadata edit invalidates; a text edit of the scope node does not), code-impact (target text edit; upstream edit changing only the target's effectiveHash; control on a node that is no impact-edge target and upstream of none), uncovered-requirement (scope-subtree text edit; scope metadata edit; control elsewhere) (SPEC 5.5, 10.4, 10.5, 10.7)",
-  timeoutMs: 480_000,
   run: async (product) => {
     // --- subtree-coherence -------------------------------------------------
     await withWorkspace(
@@ -1804,7 +1803,6 @@ const T10_4_2 = defineProductTest({
   id: "T10.4-2",
   title:
     "presence changes: deleting a scope node after resolve invalidates the resolution (presence recorded present, node now absent); the item stays resolvable against absence, and a node already absent at resolve time does not invalidate by remaining absent across an unrelated edit — deletion review stays resolvable; restoring the node invalidates the resolution recorded against absence (presence changed in the other direction); non-scope presence recordings (presence is recorded for every scope, context, and origin node), each arm pure — no recorded relevant hash of the item and no generated context set changes, so only the named node's presence divergence can invalidate and a product recording presence for scope nodes alone reports the item still resolved: context arm (metadata-consistency) — baseline D bears a `d` reference to sibling T, one edit removes the reference and deletes T's section, `review create --base` derives D's item with the removed target T as context, recorded absent at resolve; re-authoring T reads the item `invalidated` through the context node's absent-to-present flip alone (D's metadataHash and the context set unchanged); origin arm (dependency-consistency) — baseline X depends on T, T depends on D (a section in its own file); a d-list edit on D derives X's item (scope X, context {T}, origin {D}); after resolve, one edit removes T's reference to D and deletes D's section — X's ownHash and metadataHash and T's subtreeHash unchanged (d-prop edits touch no own content, SPEC 1.6/5.5) and the context set stays {T} (T's effectiveHash still changed against the baseline), so the item reads `invalidated` through the origin node's present-to-absent flip alone (SPEC 1.6, 5.5, 5.6, 10.2, 10.3, 10.4, 10.5)",
-  timeoutMs: 360_000,
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -2354,7 +2352,6 @@ const T10_4_3 = defineProductTest({
   id: "T10.4-3",
   title:
     "context-set change invalidates without any recorded hash changing: after resolving a parent-consistency item whose context is one changed branch, a text edit in a sibling branch under its scope makes the generators derive a two-branch context set — the item is reported invalidated although the scope node's ownHash and metadataHash and the recorded context node's subtreeHash are all byte-unchanged (asserted as premises via query node), while the sibling branch's own resolved item stays resolved (SPEC 5.5, 10.4, 10.5)",
-  timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -2650,7 +2647,6 @@ const T10_4_4 = defineProductTest({
   id: "T10.4-4",
   title:
     "rename immunity: `xspec rename` on scoped and context nodes duplicates no item, loses no status, and invalidates nothing by the identity mapping alone — reads present recorded nodes under current identities, mapped forward through the journal, for present and absent nodes alike (a post-rename manual deletion presents the recorded node absent under its mapped identity); a journaled file `move` that flips which of two same-kind items' scope file paths sorts first flips their order in `status`, `next`, and `export` with statuses and recorded state intact; reintroduction arm: after resolving a's item, renaming a to b, authoring a new top-level section a, and resolving s's item `updated` (re-derivation), the item recorded against old-a keeps its id and resolved status under scope b, new-a's item enters as a distinct unresolved item, and the root item's blockedBy gains it — canonical identities with the journal-position pairing, never walked-back identity strings (SPEC 5.4, 6.2, 6.4, 6.5, 10.2, 10.4, 10.5, 10.6)",
-  timeoutMs: 360_000,
   run: async (product) => {
     // --- rename on scoped and context nodes, present and absent -------------
     await withWorkspace(
@@ -3294,7 +3290,6 @@ const T10_4_5 = defineProductTest({
   id: "T10.4-5",
   title:
     "reads never write: with a stale resolution in an audit session (the resolved scope node edited and rebuilt), `status`, `next`, `show`, and `export` each report the item `invalidated` while leaving the session file byte-identical — read-time invalidation is computed and reported, never persisted, as those byte-compares alone observe — and the stored status and record are rewritten only by a mutating subcommand, whose `resolve` changes the session file's bytes and cures the staleness (SPEC 10.1, 10.4, 10.7)",
-  timeoutMs: 240_000,
   run: async (product) => {
     // Staged within CONF-CORE's scope (CERTIFICATIONS.md): one importless
     // spec group, no tags/d/embeddings, no git, an audit-strategy session.

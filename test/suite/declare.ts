@@ -11,6 +11,7 @@
 // outright.
 
 import { test } from "vitest";
+import { NO_SPAN_GUARD } from "../helpers/hang-guards.js";
 import { runProductTestBody } from "../helpers/product-invocations.js";
 import type { ProductTestEntry } from "../helpers/registry.js";
 import { builtProductBinding } from "../helpers/subprocess.js";
@@ -18,11 +19,13 @@ import { productTestSuite } from "./registry/index.js";
 
 /**
  * Declare registered product-facing tests as Vitest tests against the built
- * product. The entry's own budget is the Vitest timeout — the same budget the
- * certification runner uses as its hang watchdog. Each body runs inside its
- * own invocation context (helpers/product-invocations.ts), as it does under
- * the certification runner, so the workspace builder's undeclared-staging
- * guard sees the body's first product invocation wherever it happens.
+ * product. Each is declared with no Vitest timeout ({@link NO_SPAN_GUARD};
+ * TEST-SPEC S-3): a test is a span over its invocations and harness steps,
+ * bounded by their own guards — the certification runner applies none
+ * either. Each body runs inside its own invocation context
+ * (helpers/product-invocations.ts), as it does under the certification
+ * runner, so the workspace builder's undeclared-staging guard sees the
+ * body's first product invocation wherever it happens.
  */
 export function declareProductTests(
   entries: readonly ProductTestEntry[],
@@ -38,14 +41,10 @@ export function declareProductTests(
           `and the S-7 red-green sweep would never see it (C-1, C-2).`,
       );
     }
-    test(
-      `${entry.id} ${entry.title}`,
-      { timeout: entry.timeoutMs },
-      async () => {
-        await runProductTestBody(entry.id, () =>
-          entry.run(builtProductBinding()),
-        );
-      },
-    );
+    test(`${entry.id} ${entry.title}`, { timeout: NO_SPAN_GUARD }, async () => {
+      await runProductTestBody(entry.id, () =>
+        entry.run(builtProductBinding()),
+      );
+    });
   }
 }

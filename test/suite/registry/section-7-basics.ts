@@ -712,10 +712,6 @@ const T7_1 = defineProductTest({
     "it, and a found or named entry that is a directory or a symbolic " +
     "link is 14.14 for every command but version, the concerned path that " +
     "entry, never read through (SPEC 7, 12.0, 12.6, 12.7, 14.14)",
-  // Four sweeps of every configuration-loading command (~26 invocations
-  // each) join the location arms; the default budget is kept only for
-  // margin under suite contention.
-  timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
       { files: LOCATION_FILES, dirs: [SEARCH_CWD] },
@@ -1392,7 +1388,6 @@ const T7_2 = defineProductTest({
     "and an empty group, profile, or rule name are configuration errors; " +
     "comments anywhere contribute nothing (inventory's configuration " +
     "byte-identical to the comment-free twin's)",
-  timeoutMs: 240_000,
   run: async (product) => {
     for (const arm of FORM_VIOLATIONS) {
       await expectConfigRefused(product, arm.config, `T7-2 (${arm.label})`);

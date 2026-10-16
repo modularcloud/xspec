@@ -23,7 +23,9 @@
 //   * H-8 classification — generator defects (on a trial's draw or on a
 //     shrink candidate's replayed choices alike) and non-assertion property
 //     errors surface as plain harness errors (with the seed for
-//     reproduction), never as diagnosed assertion failures.
+//     reproduction), never as diagnosed assertion failures; a hang-guard
+//     kill a body lets through (`ProductRunTimeoutError`) is reported as the
+//     hang it is, with the seed, unshrunk, the kill its cause (S-3).
 //   * S-9 per-draw check (TEST-SPEC 16 preamble) — a draw whose staged MDX
 //     does not derive, or whose staged code source or configuration file is
 //     not well-formed TypeScript (a `TS_DEFAULT_SUFFIXES` name, or an entry
@@ -43,6 +45,7 @@
 import { Buffer } from "node:buffer";
 import { expect, test } from "vitest";
 import { fail, HarnessAssertionError } from "../helpers/assertions.js";
+import { isHangGuardKill } from "../helpers/hang-guards.js";
 import { HarnessStagingError } from "../helpers/permissions.js";
 import {
   checkProperty,
@@ -53,6 +56,7 @@ import {
   resolveSeedPlan,
   type Choices,
 } from "../helpers/property.js";
+import { ProductRunTimeoutError } from "../helpers/subprocess.js";
 
 /** A moderately rich generator exercising every primitive draw. */
 function demoValue(choices: Choices): unknown {
@@ -399,6 +403,59 @@ test("non-assertion property errors are harness errors carrying the seed (H-8)",
   expect(error.message).toContain("H-8");
   expect(error.message).toContain(`${PROPERTY_SEED_ENV}=7`);
   expect(error.cause).toBeInstanceOf(TypeError);
+});
+
+test("a hang-guard kill a body lets through ends the property at once, reported as a hang with the seed and the input, unshrunk, the kill its cause (S-3, H-10)", async () => {
+  let executions = 0;
+  const thrown = await captureRejection(
+    checkProperty(
+      "hanging body",
+      (choices) => choices.intInclusive(0, 9),
+      () => {
+        executions += 1;
+        throw new ProductRunTimeoutError("stand-in run timed out");
+      },
+      { runs: 3, seeds: [7], env: {}, render: (value) => `value ${value}` },
+    ),
+  );
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(executions).toBe(1);
+  expect(error.message).toContain(
+    "did not terminate within its own hang guard while running trial 1 of 3 with seed 7",
+  );
+  expect(error.message).toContain(
+    "a hang, which ends the property, reported unshrunk",
+  );
+  expect(error.message).toContain("input: value ");
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=7`);
+  expect(error.cause).toBeInstanceOf(ProductRunTimeoutError);
+  expect(isHangGuardKill(error)).toBe(true);
+
+  // A shrink candidate's kill ends the shrink — and the property — where it
+  // stands: the drawn trial fails diagnosed, and the first candidate's run
+  // hangs.
+  let propertyExecutions = 0;
+  const shrinking = await captureRejection(
+    checkProperty(
+      "hanging shrink candidate",
+      (choices) => choices.intInclusive(0, 1000),
+      (value) => {
+        propertyExecutions += 1;
+        if (propertyExecutions === 1) fail(`drawn failure: ${String(value)}`);
+        throw new ProductRunTimeoutError("candidate hung");
+      },
+      { runs: 1, seeds: [7], env: {} },
+    ),
+  );
+  expect(shrinking).not.toBeInstanceOf(HarnessAssertionError);
+  const shrinkError = shrinking as Error;
+  expect(shrinkError.message).toContain(
+    "did not terminate within its own hang guard while shrinking (on a shrunk input) with seed 7",
+  );
+  expect(shrinkError.cause).toBeInstanceOf(ProductRunTimeoutError);
+  expect(propertyExecutions).toBe(2);
 });
 
 test("generator defects are harness errors, never diagnosed failures (H-8)", async () => {

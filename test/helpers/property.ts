@@ -48,7 +48,13 @@
 // candidate's choices alike — is a harness defect: `checkProperty` rethrows
 // it as a plain `Error` (never a diagnosed assertion failure) with the seed
 // attached for reproduction, matching the certification runner's and the
-// S-7 sweep's outcome taxonomy (H-8).
+// S-7 sweep's outcome taxonomy (H-8). The one exception is the subprocess
+// driver's hang-guard kill (`ProductRunTimeoutError`) a body lets through:
+// a product invocation that did not terminate within its own guard, which
+// ends its test, a property's reported with its seed, unshrunk (TEST-SPEC
+// S-3) — rethrown as a plain `Error` naming the hang, the seed, and the
+// input, the kill its `cause`, so the certification runner records the
+// test's hang (helpers/hang-guards.ts `isHangGuardKill`).
 //
 // A failure may decline shrinking (`fail(message, { shrinkable: false })`,
 // helpers/assertions.ts). A drawn trial's declining failure is reported as
@@ -58,11 +64,13 @@
 // ends the shrink at once as the reported counterexample, the report saying
 // so: no further candidate is replayed or executed. So a shrink re-observes
 // such a failure at most once. The shrink budget is counted in property
-// executions, so it bounds wall clock only while an execution is cheap; a
-// failure whose every re-observation costs a full hang guard — an
-// invocation the subprocess driver killed (P-8's and P-11's termination
-// clauses) — would otherwise turn a bounded shrink into hours, past the
-// body's own hang guard. The driver's missing-product failure declines too
+// executions — a count bounding work, never a time guard: no guard of its
+// own bounds a shrink phase, which is bounded by its executions' own guards
+// (TEST-SPEC S-3, helpers/hang-guards.ts) — so it bounds wall clock only
+// while an execution is cheap; a failure whose every re-observation costs a
+// full hang guard — an invocation the subprocess driver killed (P-8's and
+// P-11's termination clauses) — would otherwise turn a bounded shrink into
+// hours. The driver's missing-product failure declines too
 // (helpers/subprocess.ts, `missingFilesFailDiagnosed`; H-8): no draw can
 // change it, so a shrink would only report an arbitrary counterexample.
 //
@@ -85,6 +93,7 @@
 // as a harness error naming the seed and the refused staging.
 
 import { HarnessAssertionError } from "./assertions.js";
+import { isHangGuardKill } from "./hang-guards.js";
 import { deriveMdx } from "./mdx-derivability.js";
 import { HarnessStagingError } from "./permissions.js";
 import { TS_DEFAULT_SUFFIXES, judgeTsDeclaration } from "./workspace.js";
@@ -224,8 +233,9 @@ export interface PropertyOptions<T> {
   readonly seeds?: readonly number[];
   /**
    * Cap on property executions spent shrinking (default
-   * {@link DEFAULT_MAX_SHRINK_EXECUTIONS}). Product-driving properties
-   * should size this against their test's time budget.
+   * {@link DEFAULT_MAX_SHRINK_EXECUTIONS}): a count bounding work, never a
+   * time guard (TEST-SPEC S-3). Product-driving properties should size it
+   * against what one execution costs.
    */
   readonly maxShrinkExecutions?: number;
   /** Counterexample renderer (default JSON; output truncated for messages). */
@@ -505,16 +515,17 @@ export async function checkProperty<T>(
         continue;
       } catch (error) {
         if (!(error instanceof HarnessAssertionError)) {
-          throw harnessError({
-            name,
-            seed,
-            phase: nonAssertionPhase(
-              `running trial ${String(trial)} of ${String(runs)}`,
-              error,
-            ),
-            cause: error,
-            renderedInput: renderValue(generated.value, options.render),
-          });
+          const phase = `running trial ${String(trial)} of ${String(runs)}`;
+          const renderedInput = renderValue(generated.value, options.render);
+          throw isHangGuardKill(error)
+            ? hangReport({ name, seed, phase, cause: error, renderedInput })
+            : harnessError({
+                name,
+                seed,
+                phase: nonAssertionPhase(phase, error),
+                cause: error,
+                renderedInput,
+              });
         }
         const shrunk: ShrinkResult<T> = error.shrinkable
           ? await shrinkFalsification(
@@ -927,17 +938,28 @@ async function shrinkFalsification<T>(
     } catch (error) {
       if (!(error instanceof HarnessAssertionError)) {
         // The body crashed on a shrunk input: a harness defect (H-8) — always
-        // surfaced, never swallowed into "candidate rejected".
-        throw harnessError({
-          name: context.name,
-          seed: context.seed,
-          phase: nonAssertionPhase(
-            "shrinking (the property threw a non-assertion error on a shrunk input)",
-            error,
-          ),
-          cause: error,
-          renderedInput: renderValue(replayed.value, context.render),
-        });
+        // surfaced, never swallowed into "candidate rejected" — or a product
+        // invocation outlasted its own hang guard on it, which ends the
+        // test where it is (TEST-SPEC S-3).
+        const renderedInput = renderValue(replayed.value, context.render);
+        throw isHangGuardKill(error)
+          ? hangReport({
+              name: context.name,
+              seed: context.seed,
+              phase: "shrinking (on a shrunk input)",
+              cause: error,
+              renderedInput,
+            })
+          : harnessError({
+              name: context.name,
+              seed: context.seed,
+              phase: nonAssertionPhase(
+                "shrinking (the property threw a non-assertion error on a shrunk input)",
+                error,
+              ),
+              cause: error,
+              renderedInput,
+            });
       }
       // Accepted: a strictly smaller falsification. One that declines
       // shrinking (a hang-guard kill, or the product missing) is accepted
@@ -1061,6 +1083,28 @@ function harnessError(details: {
   return new Error(
     `property ${JSON.stringify(details.name)}: harness error while ${details.phase} with seed ${String(details.seed)} — ` +
       `a defect in the harness, not a diagnosed assertion failure (H-8): ${describeCause(details.cause)}${input}\n` +
+      `  reproduce with ${PROPERTY_SEED_ENV}=${String(details.seed)}`,
+    { cause: details.cause },
+  );
+}
+
+/**
+ * The report of a hang-guard kill a property body let through (module
+ * header; TEST-SPEC S-3): a product invocation did not terminate within its
+ * own guard, which ends the test — the property reported with its seed and
+ * the input, unshrunk, the kill its `cause` (helpers/hang-guards.ts
+ * `isHangGuardKill`). Never a diagnosed assertion failure.
+ */
+function hangReport(details: {
+  readonly name: string;
+  readonly seed: number;
+  readonly phase: string;
+  readonly cause: unknown;
+  readonly renderedInput: string;
+}): Error {
+  return new Error(
+    `property ${JSON.stringify(details.name)}: a product invocation did not terminate within its own hang guard while ${details.phase} with seed ${String(details.seed)} — ` +
+      `a hang, which ends the property, reported unshrunk (TEST-SPEC S-3; H-10): ${describeCause(details.cause)}\n  input: ${details.renderedInput}\n` +
       `  reproduce with ${PROPERTY_SEED_ENV}=${String(details.seed)}`,
     { cause: details.cause },
   );

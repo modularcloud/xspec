@@ -34,7 +34,7 @@
 // with the rest of the registry.
 
 import { test } from "vitest";
-import { DEFAULT_PRODUCT_TEST_TIMEOUT_MS } from "../helpers/registry.js";
+import { NO_SPAN_GUARD } from "../helpers/hang-guards.js";
 import { builtProductBinding } from "../helpers/subprocess.js";
 import type { ProductBinding } from "../helpers/subprocess.js";
 import { declareProductTests } from "../suite/declare.js";
@@ -75,7 +75,7 @@ const PROBES: readonly (readonly [
 ];
 
 for (const [title, probe] of PROBES) {
-  test(title, { timeout: DEFAULT_PRODUCT_TEST_TIMEOUT_MS }, async () => {
+  test(title, { timeout: NO_SPAN_GUARD }, async () => {
     await probe(builtProductBinding());
   });
 }

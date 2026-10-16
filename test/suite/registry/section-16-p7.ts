@@ -1347,10 +1347,6 @@ const P_7 = defineProductTest({
     "capture values, to-expansion agreement, captures never spanning `/` or " +
     "matching empty — equals the oracle via `check` findings (SPEC 7, 7.5; " +
     "TEST-SPEC §16 P-7)",
-  // Wall-clock hang guard only (H-10): two properties over three fixed seeds
-  // (E-5); one workspace and one to three subprocess runs per trial, plus the
-  // shrink budgets on falsification.
-  timeoutMs: 420_000,
   run: async (product) => {
     await checkProperty(
       "P-7 glob matching (discovery)",

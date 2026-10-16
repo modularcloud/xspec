@@ -34,6 +34,21 @@
 //   helper that converts a run's rejection into a diagnosed failure lets
 //   both through unchanged (`rethrowHarnessError`), the driver's own
 //   `waitForFile` included.
+// - Hang guards (TEST-SPEC S-3, helpers/hang-guards.ts): every invocation
+//   carries its own guard (`RunOptions.timeoutMs`, default
+//   `DEFAULT_TIMEOUT_MS`), the one place the clock reaches a verdict (H-10).
+//   A held run's guard covers its own work, never the hold: from the moment
+//   the harness finds the run's own hold standing — the file at the
+//   `--test-hold` path its argv names (helpers/invocation-grammar.ts
+//   `holdPathArgument`), unoccupied as the run started — through
+//   `waitForFile` or `holdFileStands`, until it lifts that hold with
+//   `releaseHoldFile`, the run waits on the harness, whose own invocations
+//   and steps in the meantime are bounded by their own guards, so the
+//   guard is suspended there and resumes with what is left of it once the
+//   hold is lifted. A guard spanning what the harness drives during a hold
+//   would be a span guard fixed apart from what it spans; a run the harness
+//   never finds holding, or whose hold path was occupied as it started (a
+//   hold path staged occupied), keeps its guard running throughout.
 // - 13.5 support: background start (`startProduct`), hold-file choreography
 //   (`createHoldFile` / `RunningProduct.waitForFile` / `releaseHoldFile`),
 //   process kill, and concurrent invocations (every run is independent).
@@ -140,7 +155,7 @@ import { noteAcquiringRun } from "./acquiring-runs.js";
 import type { AddedImportCheck } from "./added-import-identifiers.js";
 import { HarnessAssertionError } from "./assertions.js";
 import { walkCapturedJsonDocument } from "./capture-walk.js";
-import { jsonOutputInEffect } from "./invocation-grammar.js";
+import { holdPathArgument, jsonOutputInEffect } from "./invocation-grammar.js";
 import type { GroupGoneOptions } from "./kill-discipline.js";
 import {
   confirmGroupGone,
@@ -425,7 +440,12 @@ export interface RunOptions {
    * `undefined` removes the variable from the child's environment.
    */
   readonly env?: Readonly<Record<string, string | undefined>>;
-  /** Hang guard: the child is killed and the run fails diagnosed (H-8). */
+  /**
+   * Hang guard: the run's own guard (TEST-SPEC S-3) — at its expiry the
+   * child is killed and the run rejects with `ProductRunTimeoutError` (H-8).
+   * Suspended while the harness keeps the run's own hold standing (module
+   * header).
+   */
   readonly timeoutMs?: number;
   /** Runaway-output guard (combined stdout+stderr bytes). */
   readonly maxOutputBytes?: number;
@@ -551,6 +571,9 @@ export async function startProduct(
     launcher === undefined
       ? { command: invocation.command, args: invocation.args, env }
       : launcher.wrap(invocation, env, options.cwd);
+  // S-3's held runs (module header): the run's own hold path, where its
+  // argv names one that nothing occupies as it starts.
+  const ownHold = await unoccupiedHoldPath(options.cwd, options.argv ?? []);
   // T6.5-22(a) (module header): a performed move's pre-operation sources,
   // read before anything is spawned.
   const addedImportCheck = await prepareAddedImportCheck(
@@ -595,8 +618,42 @@ export async function startProduct(
     acquiringRun,
     processGroup,
     launcher,
+    ownHold,
   );
 }
+
+/**
+ * The run's own hold path (module header; TEST-SPEC S-3): the `--test-hold`
+ * value its argv gives (helpers/invocation-grammar.ts `holdPathArgument`), a
+ * string, resolved against its working directory, when nothing occupies that
+ * path as the run starts — so a file found there later is the hold the run
+ * created. Undefined otherwise: no such flag, a byte-element value, an
+ * occupant (a staged file, directory, or link, a dangling one included), or
+ * a path the harness cannot examine (a refused `lstat`).
+ */
+async function unoccupiedHoldPath(
+  cwd: string,
+  argv: readonly ArgvValue[],
+): Promise<string | undefined> {
+  const value = holdPathArgument(argv);
+  if (typeof value !== "string") return undefined;
+  const absPath = path.resolve(cwd, value);
+  try {
+    await fsp.lstat(absPath);
+    return undefined;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? absPath
+      : undefined;
+  }
+}
+
+/**
+ * The runs whose hang guards stand suspended for their own holds (module
+ * header), by hold path: each entry resumes its run's guard once
+ * `releaseHoldFile` lifts the hold there.
+ */
+const suspendedForHold = new Map<string, Set<() => void>>();
 
 /**
  * T6.5-22(a)'s check for an invocation (helpers/added-import-identifiers.ts),
@@ -677,6 +734,20 @@ export class RunningProduct {
   #groupKill: Promise<KilledGroup> | undefined;
   /** The launcher the run was started through (H-2), if any. */
   readonly #launcher: RunLauncher | undefined;
+  /** The run's own hold path (module header; S-3), if it has one. */
+  readonly #ownHold: string | undefined;
+  /** The hang guard's timer, while armed. */
+  #guardTimer: NodeJS.Timeout | undefined;
+  /** What is left of the run's own guard. */
+  #guardLeftMs: number;
+  /** When the guard was last armed (`performance.now()`). */
+  #guardArmedAt = 0;
+  /** The guard expired: the child was killed for it. */
+  #timedOut = false;
+  /** The guard's resumption, while it stands suspended for the own hold. */
+  #resume: (() => void) | undefined;
+  /** The guard was suspended for the own hold at least once. */
+  #wasHeld = false;
   /**
    * Settles the run with a harness error: a guard's kill through the
    * launcher failed, so the run would otherwise never settle.
@@ -694,16 +765,18 @@ export class RunningProduct {
     acquiringRun?: AcquiringRun,
     processGroup = false,
     launcher?: RunLauncher,
+    ownHold?: string,
   ) {
     this.#child = child;
     this.commandLine = commandLine;
     this.#processGroup = processGroup;
     this.#launcher = launcher;
+    this.#ownHold = ownHold;
+    this.#guardLeftMs = timeoutMs;
 
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     let totalBytes = 0;
-    let timedOut = false;
 
     const capture = (sink: Buffer[]) => (chunk: Buffer) => {
       sink.push(chunk);
@@ -716,14 +789,7 @@ export class RunningProduct {
     child.stdout?.on("data", capture(stdoutChunks));
     child.stderr?.on("data", capture(stderrChunks));
 
-    const timer = setTimeout(() => {
-      // The capture limit's kill came first: the run settles as that
-      // harness error (H-11), never relabelled a hang — nor is the kill
-      // `killGroup` made by request, which bounds its own wait.
-      if (this.#overflowed || this.#groupKilled) return;
-      timedOut = true;
-      this.#guardKill();
-    }, timeoutMs);
+    this.#armGuard();
 
     const exit = new Promise<RunResult>((resolve, reject) => {
       let done = false;
@@ -731,7 +797,7 @@ export class RunningProduct {
         if (done) return;
         done = true;
         this.#settled = true;
-        clearTimeout(timer);
+        this.#disarmGuard();
         // H-6: a mutating command's run has ended (released, refused, or
         // killed) before any awaiter takes its next snapshot.
         acquiringRun?.ended();
@@ -753,10 +819,13 @@ export class RunningProduct {
       });
       child.once("close", (exitCode, signal) => {
         settle(() => {
-          if (timedOut) {
+          if (this.#timedOut) {
+            const after = this.#wasHeld
+              ? `timed out after ${timeoutMs} ms of its own hang guard, suspended while the harness kept its hold standing (TEST-SPEC S-3), and was killed`
+              : `timed out after ${timeoutMs} ms and was killed`;
             reject(
               new ProductRunTimeoutError(
-                `${commandLine} timed out after ${timeoutMs} ms and was killed (H-8: hangs are failures, never skips). Partial stdout: ${excerpt(Buffer.concat(stdoutChunks))}; partial stderr: ${excerpt(Buffer.concat(stderrChunks))}`,
+                `${commandLine} ${after} (H-8: hangs are failures, never skips). Partial stdout: ${excerpt(Buffer.concat(stdoutChunks))}; partial stderr: ${excerpt(Buffer.concat(stderrChunks))}`,
               ),
             );
             return;
@@ -825,6 +894,82 @@ export class RunningProduct {
   /** True once the process has exited (or failed to spawn). */
   hasExited(): boolean {
     return this.#settled;
+  }
+
+  /** Arm the hang guard for what is left of it (module header; S-3). */
+  #armGuard(): void {
+    this.#guardArmedAt = performance.now();
+    this.#guardTimer = setTimeout(() => {
+      this.#guardTimer = undefined;
+      // The capture limit's kill came first: the run settles as that
+      // harness error (H-11), never relabelled a hang — nor is the kill
+      // `killGroup` made by request, which bounds its own wait.
+      if (this.#overflowed || this.#groupKilled) return;
+      this.#timedOut = true;
+      this.#guardKill();
+    }, this.#guardLeftMs);
+  }
+
+  /** The run settled: no guard stays armed or suspended for it. */
+  #disarmGuard(): void {
+    clearTimeout(this.#guardTimer);
+    this.#guardTimer = undefined;
+    this.#forgetSuspension();
+  }
+
+  /** Drop the run from the suspended runs, its resumption unset. */
+  #forgetSuspension(): void {
+    const resume = this.#resume;
+    if (resume === undefined || this.#ownHold === undefined) return;
+    this.#resume = undefined;
+    const waiting = suspendedForHold.get(this.#ownHold);
+    waiting?.delete(resume);
+    if (waiting?.size === 0) suspendedForHold.delete(this.#ownHold);
+  }
+
+  /**
+   * The harness found a file at `absPath` while the run was going (module
+   * header; S-3): where that is the run's own hold, the hold stands, and the
+   * guard is suspended — what is left of it kept — until `releaseHoldFile`
+   * lifts the hold there, when it is armed again for the rest.
+   */
+  #noteFileFound(absPath: string): void {
+    const ownHold = this.#ownHold;
+    if (ownHold === undefined || path.resolve(absPath) !== ownHold) return;
+    if (this.#settled || this.#resume !== undefined) return;
+    if (this.#guardTimer === undefined) return; // the guard already expired
+    clearTimeout(this.#guardTimer);
+    this.#guardTimer = undefined;
+    this.#guardLeftMs = Math.max(
+      0,
+      this.#guardLeftMs - (performance.now() - this.#guardArmedAt),
+    );
+    this.#wasHeld = true;
+    const resume = (): void => {
+      if (this.#resume !== resume) return;
+      this.#forgetSuspension();
+      if (!this.#settled) this.#armGuard();
+    };
+    this.#resume = resume;
+    let waiting = suspendedForHold.get(ownHold);
+    if (waiting === undefined) {
+      waiting = new Set();
+      suspendedForHold.set(ownHold, waiting);
+    }
+    waiting.add(resume);
+  }
+
+  /**
+   * Whether a file stands at `absPath` now — one look of `waitForFile`'s
+   * (the hold-file handshake of SPEC 13.5), for a harness polling a run's
+   * hold beside other conditions — where it is the run's own hold, the
+   * guard suspended from here as `waitForFile`'s finding suspends it
+   * (module header; TEST-SPEC S-3).
+   */
+  async holdFileStands(absPath: string): Promise<boolean> {
+    if (!(await pathExists(absPath))) return false;
+    this.#noteFileFound(absPath);
+    return true;
   }
 
   /**
@@ -982,7 +1127,10 @@ export class RunningProduct {
 
   /**
    * Poll until a file appears at `absPath` — the hold-file handshake of
-   * SPEC.md 13.5 (`--test-hold`). Fails diagnosed, never hangs (H-8): rejects
+   * SPEC.md 13.5 (`--test-hold`); where that is the run's own hold, the
+   * run's hang guard is suspended from here until the hold is lifted
+   * (`releaseHoldFile`; module header, TEST-SPEC S-3). Fails diagnosed,
+   * never hangs (H-8): rejects
    * when the process exits first without creating it (the red-green path for
    * stub products, carrying the run outcome), and on timeout while the
    * process is still running. A run the capture limit killed, or whose
@@ -1002,7 +1150,7 @@ export class RunningProduct {
     const pollIntervalMs = options.pollIntervalMs ?? 10;
     const deadline = Date.now() + timeoutMs;
     for (;;) {
-      if (await pathExists(absPath)) return;
+      if (await this.holdFileStands(absPath)) return;
       // A capture-limit kill counts as the exit at once: the run settles
       // with that error, which propagates as itself (H-11) — as does a
       // failure of T12.7-1's walk or T6.5-22(a)'s check, settled once the
@@ -1061,9 +1209,16 @@ export async function createHoldFile(absPath: string): Promise<void> {
   await fsp.writeFile(absPath, "", { flag: "wx" });
 }
 
-/** Release a hold: delete the file at the path. Idempotent. */
+/**
+ * Release a hold: delete the file at the path, then resume the hang guard of
+ * every run suspended for its own hold there (module header; TEST-SPEC S-3).
+ * Idempotent.
+ */
 export async function releaseHoldFile(absPath: string): Promise<void> {
   await fsp.rm(absPath, { force: true });
+  const waiting = suspendedForHold.get(path.resolve(absPath));
+  if (waiting === undefined) return;
+  for (const resume of [...waiting]) resume();
 }
 
 /**

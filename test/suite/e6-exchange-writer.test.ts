@@ -34,16 +34,16 @@ import {
   runE6RepresentativeFixture,
   writeE6Exchange,
 } from "../helpers/e6.js";
+import { NO_SPAN_GUARD } from "../helpers/hang-guards.js";
 import { builtProductBinding } from "../helpers/subprocess.js";
 
-// Generous hang guard for the whole 27-invocation fixture, its exclusion
-// probe's bounded reruns included (H-8; each product invocation also carries
-// its own subprocess timeout). Never an assertion input (H-10).
-const FIXTURE_TIMEOUT_MS = 300_000;
+// No guard of its own (TEST-SPEC S-3, helpers/hang-guards.ts): the test is a
+// span over the fixture's 27 invocations, its exclusion probe's bounded
+// reruns included, each bounded by its own hang guard.
 
 test(
   "E-6 Linux leg: the representative fixture runs against the built product; its outputs are written to XSPEC_E6_EXCHANGE_DIR for the Windows leg when set (TEST-SPEC E-6)",
-  { timeout: FIXTURE_TIMEOUT_MS },
+  { timeout: NO_SPAN_GUARD },
   async () => {
     const run = await runE6RepresentativeFixture(builtProductBinding());
     const exchangeDir = process.env[E6_EXCHANGE_ENV];

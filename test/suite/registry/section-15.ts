@@ -224,7 +224,6 @@ const T15_1 = defineProductTest({
   id: "T15-1",
   title:
     "canonical walkthrough: SPEC 15's exact workspace (specs/SPEC.mdx, specs/DERIVED.mdx, src/hello.ts, matching configuration) — the six listed graph edges exactly; a transitive coverage profile targeting print.hello with `src` as code boundary satisfied via hello → derived.hello → print.hello; after editing print.hello's text the listed categories (print.hello changed; print and the SPEC root descendant-changed via print.hello; derived.hello, derived, and the DERIVED root upstream-changed; hello.ts#hello transitively impacted); a default path-blocks session containing exactly the four listed items; and after `xspec rename` of print.hello instead, a journal mapping plus an impact run against the pre-rename baseline reporting no changes (SPEC 15, 5.6, 8, 9.2, 9.3, 10.5, 6.1–6.4, 11)",
-  timeoutMs: 240_000,
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {

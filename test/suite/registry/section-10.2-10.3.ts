@@ -550,7 +550,6 @@ const T10_2_1 = defineProductTest({
   id: "T10.2-1",
   title:
     "`show` and `export` present every 10.2 field — id, kind, scope, context, reason, origin, baseline, current, status, note (after a `--note` resolve), blockedBy — for representative items of every built-in kind: a `--base` session deriving subtree-coherence, parent-consistency, metadata-consistency, dependency-consistency, and code-impact items, plus a coverage session's uncovered-requirement items; per item the kind, scope, context/origin identity sets, blockedBy, status, and blocked state are the spec-derived values, and `export`'s items carry the same information as `show`'s (SPEC 10.2, 10.5, 10.7)",
-  timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
       FULL_CONFIG,
@@ -947,7 +946,6 @@ const T10_2_2 = defineProductTest({
   id: "T10.2-2",
   title:
     "item `baseline` is fixed when the item enters the session: in a `--base` session it holds the scope node's relevant-hash values at the recorded baseline commit — not at creation time, and unchanged by further edits (byte-distinct `query node` captures at each moment discriminate); in audit and coverage sessions it holds the values of the current graph at item entry, likewise untouched by later edits (SPEC 10.2, 10.4, 10.7)",
-  timeoutMs: 240_000,
   run: async (product) => {
     // --- `--base` arm: baseline-commit values, not creation-time values ---
     await withWorkspace(
@@ -1412,7 +1410,6 @@ const T10_2_4 = defineProductTest({
   id: "T10.2-4",
   title:
     "`current` is reported as recorded, never recomputed: an item recording R1 at creation, resolved `no-change` at R2, then edited to R3 (R1/R2/R3 pairwise-distinct `query node` captures) is reported `invalidated` by `show`, `next --json`, and `export` with `current` holding R2's relevant hashes — not R1, not R3; a never-resolved sibling receiving the same edits stays `unresolved` with `current` equal to its create-time R1; after a re-resolve, deleting the scope node presents it absent while `current` still carries the resolve-time recording unchanged (SPEC 10.2, 10.4, 10.7)",
-  timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -1726,7 +1723,6 @@ const T10_3_1 = defineProductTest({
   id: "T10.3-1",
   title:
     "`resolve --status` accepts exactly `updated`, `no-change`, `skipped`; any other value (unknown token, wrong case, the non-resolve statuses `unresolved`/`invalidated`, empty) is a usage error — exit 2, the 12.7 error document as the entire stdout under `--json`, nothing modified; items with `unresolved` or `invalidated` status need review and appear in `next`, resolved ones do not (`next` walks the audit items to fully-resolved, and an edit re-surfaces the invalidated item) (SPEC 10.3, 10.4, 10.7, 12.0)",
-  timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,

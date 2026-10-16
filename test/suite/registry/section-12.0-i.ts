@@ -574,7 +574,6 @@ const T12_0_1 = defineProductTest({
   id: "T12.0-1",
   title:
     "`--json` everywhere: every command and subcommand — build, check, ids, show, coverage, impact, all six query subcommands, occurrences, view, at, inventory, version, all eight review subcommands, rename, and file-form move — accepts the flag and emits exactly one JSON document as the entire standard output at its specified exit code; the JSON-only surfaces of 10.7, 11, and 12.6 (review export; the query subcommands, occurrences, view, at, and inventory; version) emit the same single document with the flag as without — same information at the same exit code, one JSON document as the entire stdout each way; byte-identity between the two forms is not asserted (TEST-SPEC §11); information parity with the human report is adapter-verified per command by the per-section tests (SPEC 12.0, 11, 12.6, 10.7)",
-  timeoutMs: 240_000,
   run: async (product) => {
     const { workspace, state } = await createSweepWorkspace();
     try {
@@ -847,7 +846,6 @@ const T12_0_3 = defineProductTest({
   id: "T12.0-3",
   title:
     "every command accepts `--config <path>`, swept across the full command surface with a working-directory-relative path; a relative path resolves against the working directory, not the workspace root — from a subdirectory `../xspec.config.ts` reaches the root configuration and a bare `xspec.config.ts` is a missing-configuration error even though the workspace root holds one; the named file is the configuration actually used and its directory is the workspace root (SPEC 12.0, 7, 14.14)",
-  timeoutMs: 240_000,
   run: async (product) => {
     // Acceptance sweep: the full command surface, each invocation carrying a
     // cwd-relative --config naming the root configuration.
@@ -953,7 +951,6 @@ const T12_0_4 = defineProductTest({
   id: "T12.0-4",
   title:
     "a flag may be given at most once per invocation: repeating a flag on any command is a usage error, exit 2 — swept across the full command surface by doubling `--config` (each paired single-`--config` run proving the argv otherwise valid) plus repeated value (`--tag`) and boolean (`--json`) flags — while list-valued flags take one comma-separated value: `--kinds depends,embeds` is accepted and repeating `--kinds` exits 2 (SPEC 12.0, 11)",
-  timeoutMs: 240_000,
   run: async (product) => {
     const { workspace, state } = await createSweepWorkspace();
     try {

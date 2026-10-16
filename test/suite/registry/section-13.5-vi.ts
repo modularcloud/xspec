@@ -334,13 +334,6 @@ const HELD_TRIALS = 4;
 const UNHELD_SPREAD_FRACTIONS: readonly number[] = [0, 0.1, 0.25, 0.5, 0.75, 1];
 
 /**
- * A held run's hang guard: it stands until the harness lifts its hold, past
- * every other run's settling and the held-state comparison (H-10: a guard,
- * never an assertion input; a run killed at it fails diagnosed, H-8).
- */
-const HELD_RUN_TIMEOUT_MS = 120_000;
-
-/**
  * The bound on every held-arm run's exiting or creating its hold file: a
  * run doing neither by then is waiting on another's exclusivity, or hung —
  * where 13.5 requires a run reaching acquisition to fail there promptly —
@@ -348,7 +341,15 @@ const HELD_RUN_TIMEOUT_MS = 120_000;
  */
 const SETTLE_TIMEOUT_MS = 60_000;
 
-/** An unheld run's, a twin's, and a staging command's hang guard. */
+/**
+ * Every run's own hang guard — a held run's, an unheld run's, a twin's, and
+ * a staging command's. A held run's covers its own work alone: from the
+ * moment the harness finds it holding until it lifts the hold, the guard
+ * stands suspended, the run waiting on the harness (helpers/subprocess.ts;
+ * TEST-SPEC S-3) — so no guard spans every other run's settling and the
+ * held-state comparison (H-10: a guard, never an assertion input; a run
+ * killed at it fails diagnosed, H-8).
+ */
 const RUN_TIMEOUT_MS = 60_000;
 
 /** The settling poll's interval (scheduling only, H-10). */
@@ -675,7 +676,13 @@ async function awaitExitedOrHolding(
     const pending: StartedRun[] = [];
     for (const run of runs) {
       if (run.running.hasExited()) continue;
-      if (run.hold !== undefined && (await pathExists(run.hold))) continue;
+      // A run found holding waits on the harness from here: its own hang
+      // guard stands suspended until its hold is lifted (TEST-SPEC S-3).
+      if (
+        run.hold !== undefined &&
+        (await run.running.holdFileStands(run.hold))
+      )
+        continue;
       pending.push(run);
     }
     if (pending.length === 0) return;
@@ -730,17 +737,15 @@ async function heldTrial(
         offsetMs: 0,
       };
     });
-    const runs = await startRuns(
-      product,
-      workspace,
-      plans,
-      HELD_RUN_TIMEOUT_MS,
-    );
+    const runs = await startRuns(product, workspace, plans, RUN_TIMEOUT_MS);
     try {
       await awaitExitedOrHolding(runs, context);
       const holding: StartedRun[] = [];
       for (const run of runs) {
-        if (run.hold !== undefined && (await pathExists(run.hold))) {
+        if (
+          run.hold !== undefined &&
+          (await run.running.holdFileStands(run.hold))
+        ) {
           holding.push(run);
         }
       }
@@ -991,11 +996,6 @@ const T13_5_13 = defineProductTest({
   id: "T13.5-13",
   title:
     'overlapping acquisitions (property-style loop; unsynchronized by design, a fixed trial count, rule, and spread, E-5): held — repeatedly, on a freshly built workspace and on an unbuilt one, `rename specs/A.mdx g g2`, `rename specs/B.mdx b b2`, `review create --strategy audit --name t`, and `review create --strategy audit --name u` (each succeeding alone, composing in any order), each with its own hold path and under `--json`, are started together; every hold file stands until each run has exited or created its hold file, and then at most one hold file exists, each run that created none has exited 2 with `code` `"workspace-busy"`, `path` `".xspec/lock"`, `locations` `[]`, modifying nothing (the held-state comparison while the one holds), the run that created one exits 0 once its hold is lifted — a trial with no success acceptable — and afterwards the journal and the session files are exactly the success\'s, the workspace equals a twin\'s on which that operation alone ran (or the workspace as staged, absent a success), and `.xspec/lock` is absent, save that the unbuilt workspace without a success may keep an empty `.xspec` and nothing else; unheld — repeatedly, on a freshly built valid workspace, renames each of a section in a file of its own, and separately `review resolve s <item> --status no-change` of three leaf items of an `audit` session `s`, each under `--json` with no `--test-hold`, started at offsets from simultaneous to staggered across the span one takes alone, each exits 0 or exits 2 with `code` `"workspace-busy"` and `path` `".xspec/lock"`, and once all have exited `.xspec/lock` is absent and the workspace equals a twin\'s on which the successful runs\' operations ran one after another in one of their orders, the harness trying each (SPEC 13.5, 14.26, 12.0, H-6)',
-  // Measured for FIX_PLAN Task 32: 6.5 s against the CONF-RACE conformer
-  // (~80 ms a run); a conforming product at the built product's ~0.35 s a
-  // run would take ~100 s — staging, runs, and up to 38 twins — and ~300 s
-  // at three times the load: the budget leaves twice that.
-  timeoutMs: 600_000,
   run: async (product) => {
     const twins = new TwinCache(product);
     await runT13513HeldArm(product, twins);

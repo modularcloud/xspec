@@ -465,15 +465,14 @@ export async function runAvailabilityCommand(
     });
   } catch (error) {
     // The hang-guard kill is reported unshrunk (`shrinkable: false`): a
-    // shrink candidate can re-observe it only by waiting out the guard
-    // again — one full guard per candidate — so shrinking's execution
-    // budget would stop bounding the body's wall clock (the entry's
-    // `timeoutMs` below). A drawn trial's kill reports the drawn trial, at
-    // most three mutations and four invocations, as the counterexample; a
-    // shrink candidate's kill (met while shrinking another failure) ends the
-    // shrink as the reported counterexample (helpers/property.ts). So a
-    // diagnosis waits out at most one guard, and its seed replays it
-    // (H-10).
+    // tripped guard ends its test, a property's reported with its seed,
+    // unshrunk (TEST-SPEC S-3) — a shrink candidate could re-observe it only
+    // by waiting out the guard again, one full guard per candidate. A drawn
+    // trial's kill reports the drawn trial, at most three mutations and four
+    // invocations, as the counterexample; a shrink candidate's kill (met
+    // while shrinking another failure) ends the shrink as the reported
+    // counterexample (helpers/property.ts). So a diagnosis waits out at most
+    // one guard, and its seed replays it (H-10).
     if (error instanceof ProductRunTimeoutError) {
       fail(
         `P-11: every invocation of the availability surfaces must terminate ` +
@@ -682,25 +681,6 @@ const P_11 = defineProductTest({
     "argument errors), answer in the three-state 12.7 datum forms, and exit " +
     "1 exactly when the answer carries a finding or an unavailable datum " +
     "(SPEC 11.2, 11.4, 12.7; TEST-SPEC §16 P-11)",
-  // Wall-clock hang guard on the body only (H-10), sized to the diagnosis
-  // path, never an assertion input. The sweep is three fixed seeds (E-5) ×
-  // 12 trials × 2–4 invocations, ≤ 144, each bounded by
-  // FUZZ_COMMAND_TIMEOUT_MS and with no staging build. A conforming product
-  // answers within the measured scale that guard is derived from — ≤ 17 s
-  // for a `view --text` arm at the staged maximum, ≤ 1.5 s for any other arm
-  // at tower scale (the pinned seeds draw 18 `view --text` answer arms, 2 of
-  // them over towers, and 5 tower trials in all; dry run at 20ee9fd) — so a
-  // sweep whose every text arm reached the maximum runs ≈ 8.5 min; a
-  // slow-but-terminating product then fails as one hang-guard kill on top,
-  // unshrunk (≈ 10.5 min in all), and 20 min doubles that for CI runners:
-  // the failure is the guard's diagnosis of one invocation, never this body
-  // timeout. Shrinking any other failure class costs answer time plus at
-  // most one 120 s guard, since a hanging shrink candidate ends the shrink
-  // (≤ 100 executions at ≤ 17 s per maximal-scale text arm). The
-  // adversarial bound — every invocation just under the guard — is ≈ 4.8 h,
-  // past the 45-minute CI job ceiling governing the whole suite; no body
-  // budget can cover it.
-  timeoutMs: 1_200_000,
   run: async (product) => {
     await checkProperty(
       "P-11 availability robustness",

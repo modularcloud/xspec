@@ -400,7 +400,7 @@ test("a declared tree holding every kind, with `.`-names and names that are not 
   await assertStagingInPlace(staged, "fresh staging");
   await assertOutsideTargetsUntouched(staged, "fresh staging");
   await assertFifosIntact(staged, "fresh staging");
-}, 30_000);
+});
 
 test("plain files with every permission removed stage at mode 0o000, refuse the harness's own read — verified by the staging itself — and read back byte-exactly through H-4's grant, their mode restored (T13.5-10(b), P-15; E-1)", async () => {
   // In a lock directory, below its top level: a `.`-name and a name that is
@@ -476,7 +476,7 @@ test("plain files with every permission removed stage at mode 0o000, refuse the 
   expect((ineffective as HarnessStagingError).mode).toBe("lock-path-leftover");
   expect((ineffective as Error).message).toMatch(/privileged runner/);
   expect(ineffective).not.toBeInstanceOf(HarnessAssertionError);
-}, 30_000);
+});
 
 /**
  * A fresh workspace holding EVERY_KIND at the lock path, `mutate` applied,
@@ -575,7 +575,7 @@ test("assertStagingInPlace catches each change in place — content, an entry ad
     /removed "\.xspec\/lock": was directory/,
     /removed "\.xspec\/lock\/sub\/custom": was symbolic link/,
   );
-}, 60_000);
+});
 
 test("assertOutsideTargetsUntouched catches a write, an addition, or a removal through any link — a dangling link's target created included — and passes once the links alone are removed (SPEC 13.4, 13.5; T13.5-10(a), (b), P-15)", async () => {
   const at = (workspace: TestWorkspace, link: string): Buffer =>
@@ -637,7 +637,7 @@ test("assertOutsideTargetsUntouched catches a write, an addition, or a removal t
     /added ".*\/absent": plain file/,
     /the target of the link "\.xspec\/lock\/dangling"/,
   );
-}, 60_000);
+});
 
 test("a staged FIFO lstat-checks as a FIFO, at the lock path and inside a lock directory; assertFifosIntact fails, diagnosed, once one is replaced or removed", async () => {
   const workspace = await makeWorkspace();
@@ -673,7 +673,7 @@ test("a staged FIFO lstat-checks as a FIFO, at the lock path and inside a lock d
     await rejectionOf(assertFifosIntact(atLock, "removed")),
     /"\.xspec\/lock": nothing there/,
   );
-}, 30_000);
+});
 
 test("stagings at the lock path itself, at the area's own path, and beside a lock directory's occupants create the parents they need and never replace an occupant; misplaced stagings, a directory at the area's path, a link to a directory holding no plain file, and a plain file of the harness's own naming at the lock directory's top level are refused (T13.5-10(a), (b), (c), (e), T13.4-12, P-15)", async () => {
   // A plain file holding garbage at the lock path of a workspace with no
@@ -880,7 +880,7 @@ test("stagings at the lock path itself, at the area's own path, and beside a loc
       hex(ascii("work")),
     ]);
   }
-}, 60_000);
+});
 
 test("copyEntryIn carries an entry in under its exact name, content, and mode — creating the lock directory where absent, beside what it holds — and its record checks like any staging's (T13.5-10(c), (b); H-4)", async () => {
   const workspace = await makeWorkspace();
@@ -922,7 +922,7 @@ test("copyEntryIn carries an entry in under its exact name, content, and mode �
       `changed "\\.xspec/lock/<bytes ${hex(BYTE_NAME)}>": content changed`,
     ),
   );
-}, 30_000);
+});
 
 // A known-behavior stand-in honoring `--test-hold <path>` (SPEC 13.5's seam)
 // in the workspace it runs in. Its mode — the binding's first argument —
@@ -1043,7 +1043,7 @@ test("killHeldRun kills a held run under T13.5-3's discipline — its group gone
     bytes: dead.entry.content,
     mode: 0,
   });
-}, 60_000);
+});
 
 test("killHeldRun fails, diagnosed, when the killed run leaves nothing at .xspec/lock, a plain file there, several entries, or an entry that is no plain file, and when the run never holds or ends on its own before the kill (SPEC 13.5; T13.5-3)", async () => {
   const bind = await holdStandin();
@@ -1103,7 +1103,7 @@ test("killHeldRun fails, diagnosed, when the killed run leaves nothing at .xspec
     }),
   );
   expect((taken as Error).message).toMatch(/is occupied/);
-}, 120_000);
+});
 
 test("killHeldRun starts the run through a given launcher and kills it through it, and calls a given observation once the run holds, before the kill — what the observation throws propagating once the group is gone and the hold file removed (H-2; T13.5-3, T13.5-10(f), (g))", async () => {
   const bind = await holdStandin();
@@ -1183,4 +1183,4 @@ test("killHeldRun starts the run through a given launcher and kills it through i
   expect(observed).toBeDefined();
   expect(await listedAmong([observed ?? 0])).toEqual([]);
   expect(await outcome(fsp.lstat(otherHold))).toBe("ENOENT");
-}, 60_000);
+});

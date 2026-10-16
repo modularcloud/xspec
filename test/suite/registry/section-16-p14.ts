@@ -1948,20 +1948,6 @@ const P_14 = defineProductTest({
   id: "P-14",
   title:
     "sources vanishing under reads (TEST-SPEC §16 P-14): random valid workspaces holding a spec source no other file references and, in a second series, a code source a configured code group matches that no other file imports, holding markers on sections of spec sources, the flipped source referencing nothing in the drawn `rename` target's subtree; built quiescently with it present, the refreshing reads (`ids --json`, `query nodes`, `occurrences`, `view` of another spec source, and, in the spec-source series, `view` of the flipped source and `at` of it at a within-file offset) run quiescently with the source present and with it absent — a read naming it answering, absent, the unknown-file usage error (exit 2, `code` null), never condition 20 for it at offset 0 — and then repeatedly and concurrently while the source is repeatedly removed from the workspace or relocated outside every group's globs and restored, each change one atomic rename: each read's exit code and standard output equal those of the quiescent run with the source present or of the one with it absent; and `build`, `check`, a `rename` of a section in another file, and `review create --strategy audit --name n`, each run alone on a fresh copy of the workspace as built, quiescently with the source present and with it absent and then while it flips: each run's exit code, standard output, and — but for `check`, which writes nothing — the files it leaves (sources, journal, session, derived files, graph data; the flipped paths aside, the lock path excluded, H-6) together equal those of one quiescent run of the same command with the source present or with it absent — never a `read-failure` for the vanished file, never condition 20 for it, never a crash (SPEC 14.25, 13.5, 12.0, 11.4, 11.5; E-5)",
-  // Wall-clock hang guard only (H-10): two series, each P14_RUNS_PER_SEED
-  // trials at each of the three fixed seeds (E-5), plus up to
-  // P14_MAX_SHRINK_EXECUTIONS shrink trials on a falsification; each run's
-  // own guard is RUN_TIMEOUT_MS. Measured under the unprivileged namespace:
-  // ~231 s passing against a P-14-conforming stand-in (the built product
-  // re-running any run its own race answer spoiled, a command driven alone
-  // from the state the spoiled run started in): the spec-source series
-  // ~122 s, the code-source series ~108 s, 17–22 s a trial (a fresh
-  // workspace and its `build`; the reads' arm, 12 quiescent and 36
-  // concurrent reads in the spec-source series, 8 and 24 in the other; and
-  // 2 + P14_SOLO_RUNS runs of each command driven alone). Failing against
-  // the built product, its four shrink trials included: ~40 s, at the
-  // reads' arm.
-  timeoutMs: 900_000,
   run: async (product) => {
     await checkProperty(
       "P-14 sources vanishing under reads — the spec-source series",

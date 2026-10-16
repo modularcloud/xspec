@@ -122,7 +122,7 @@ test("E-1's access check fails as HarnessStagingError — never a skip or an ass
   await requireAdministrativeAccess({ sudo: flaky });
   await expect(fsp.stat(mark)).rejects.toThrow(/ENOENT/);
   await requireAdministrativeAccess({ sudo: "/bin/true" });
-}, 30_000);
+});
 
 test("mountinfo lines read exactly: escapes decoded, path bytes kept, the mount at a point the last listed, the containing mount the longest prefix", () => {
   const text = [
@@ -583,7 +583,7 @@ test("a launched run is spawned by the launcher's command line with exactly the 
   expect((refused as Error).message).toMatch(
     /always leads a process group of its own.*`processGroup: false` cannot stand beside it/,
   );
-}, 60_000);
+});
 
 test("killGroup kills a launched run through its launcher, collects the exit as SIGKILL, and confirms the group gone; a descendant that left the group fails the confirmation as ProcessGroupLingerError naming it", async () => {
   const setup = await standin();
@@ -628,7 +628,7 @@ test("killGroup kills a launched run through its launcher, collects the exit as 
   expect((lingering as ProcessGroupLingerError).stage).toBe("listed");
   expect((lingering as ProcessGroupLingerError).lingering).toEqual([escaped]);
   expect(launcher.kills).toEqual([leader, escaping.pid]);
-}, 60_000);
+});
 
 test("a launched run's captured stdout is walked like any run's with JSON output in effect (T12.7-1): a near-marker rejects it with the walk's diagnosed failure, naming the launched command line", async () => {
   const { workspace, binding } = await standin();
@@ -653,7 +653,7 @@ test("a launched run's captured stdout is walked like any run's with JSON output
     "at $.nodes[0].tags: expected no object of any form other than the unavailability marker",
   );
   expect(message).toContain("through the self-test's stand-in launcher");
-}, 60_000);
+});
 
 test("the hang guard kills a launched run's whole group through its launcher; a kill the launcher fails settles the run with a harness error, never a timeout or an assertion failure", async () => {
   const { workspace, binding } = await standin();
@@ -689,4 +689,4 @@ test("the hang guard kills a launched run's whole group through its launcher; a 
   );
   expect(refusing.kills).toEqual([stuck.pid]);
   expect(await listedAmong([stuck.pid!])).toEqual([stuck.pid]);
-}, 60_000);
+});

@@ -692,8 +692,6 @@ const E6_MOVE_ARGV: readonly string[] = ["move", E6_CORE, E6_MOVED];
  */
 const E6_HOLD_NAME = "e6-hold";
 const E6_HOLD_ARG = `../${E6_HOLD_NAME}`;
-/** The held `rename`'s hang guard (H-8; never an assertion input, H-10). */
-const E6_HELD_RUN_TIMEOUT_MS = 120_000;
 /** Bound on the hold's appearance, the run's start included. */
 const E6_HOLD_WAIT_MS = 30_000;
 /**
@@ -759,10 +757,12 @@ async function exclusionTrial(
   // The held-state comparison's baseline: the run's pre-invocation state
   // (TEST-SPEC §13.5's preamble), the dead run's leftover in the lock path.
   const preInvocation = await snapshotDirectory(root, EXCLUDE_LOCK_PATH);
+  // The held `rename` carries the driver's own guard, suspended once it is
+  // found holding (helpers/subprocess.ts; TEST-SPEC S-3): no guard of its
+  // spans the refused `move` and the checks made while it holds.
   const running = await startProduct(product, {
     cwd: root,
     argv: renameArgv,
-    timeoutMs: E6_HELD_RUN_TIMEOUT_MS,
   });
   let busy: RunResult;
   try {

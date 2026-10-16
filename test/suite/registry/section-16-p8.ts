@@ -1586,10 +1586,10 @@ export async function runFuzzCommand(
     });
   } catch (error) {
     // The hang-guard kill is reported unshrunk (`shrinkable: false`), as
-    // P-11's is: a shrink candidate can re-observe it only by waiting out
-    // the guard again — one full guard per candidate — so shrinking's
-    // execution budget would stop bounding the body's wall clock (the
-    // entry's `timeoutMs`). A drawn trial's kill reports the drawn trial —
+    // P-11's is: a tripped guard ends its test, a property's reported with
+    // its seed, unshrunk (TEST-SPEC S-3) — a shrink candidate could
+    // re-observe it only by waiting out the guard again, one full guard per
+    // candidate. A drawn trial's kill reports the drawn trial —
     // at most three mutations and, after the staging build, 19 invocations:
     // the fixed `build --json` and six drawn forms, a review composite three
     // at most — as the counterexample; a shrink candidate's kill (met while
@@ -1795,21 +1795,6 @@ const P_8 = defineProductTest({
     "nesting, pathological line terminators), every command terminates, never emits a " +
     "partial JSON document under --json, always exits 0, 1, or 2, and failing " +
     "`build`s modify nothing (SPEC 12.0, 12.1; TEST-SPEC §16 P-8)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), one staging
-  // build plus the fixed `build --json` arm and 2–6 drawn forms (a review
-  // composite up to three invocations) with per-arm snapshots per trial,
-  // plus the shrink budget on falsification. A conforming sweep runs ~123 s
-  // against the built product on a 4-core machine (alone, under the
-  // unprivileged namespace; ~3.4 s a trial, 162 picks of the 54 menu forms
-  // running 210 drawn-form invocations); a hang's diagnosis adds one
-  // per-invocation guard (`FUZZ_COMMAND_TIMEOUT_MS`, 60 s), unshrunk —
-  // ~185 s in all — and a falsification at most the 100 shrink executions,
-  // each a trial at most as large as the falsified one (~340 s at the mean
-  // trial), plus at most one 60 s guard, since a shrink candidate the guard
-  // kills ends the shrink (helpers/property.ts) — ~525 s in all. This
-  // budget leaves CI runners 3× headroom over the hang's diagnosis and
-  // keeps the shrink budget inside it.
-  timeoutMs: 600_000,
   run: async (product) => {
     await checkProperty(
       "P-8 parser robustness",

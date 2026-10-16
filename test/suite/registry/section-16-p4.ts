@@ -2322,10 +2322,6 @@ const P_4 = defineProductTest({
     "changed; ownHash insensitive to embedded-target edits; effectiveHash propagating over " +
     "the dependency closure — and identical workspaces hash identically " +
     "(SPEC 5.5, 5.4, 1.6, 11; TEST-SPEC §16 P-4)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), two
-  // workspaces, up to four builds and ~5·|nodes| `query node` invocations
-  // per trial, plus the shrink budget on falsification.
-  timeoutMs: 420_000,
   run: async (product) => {
     await checkProperty(
       "P-4 hash laws",

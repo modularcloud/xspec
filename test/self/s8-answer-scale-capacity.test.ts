@@ -706,7 +706,7 @@ test("S-8: every H-3/12.7 decoder and answer-document walk succeeds at the synth
     "S-8 error",
   );
   expect(error.error.locations).toHaveLength(flat);
-}, 120_000);
+});
 
 // ---------------------------------------------------------------------------
 // 3. The capture gate: the largest synthetic document through the H-2 path
@@ -932,7 +932,7 @@ test("S-8: capture gate — the largest synthetic document (`view --text` blowup
     BLOWUP_TOWERS * decodedSubtreeLength(BLOWUP_DEPTH, 1),
   );
   expect(summary.containsTargets).toHaveLength(BLOWUP_TOWERS);
-}, 600_000);
+});
 
 /**
  * Stand-in for the two driver kills a fuzz command run can meet (header
@@ -1030,7 +1030,7 @@ test("S-8: an exhausted capture limit in a P-8 or P-11 command run is a harness 
       "hang guard killed it",
     );
   }
-}, 60_000);
+});
 
 /**
  * Stand-in for the conversion vectors (header items 5 and 6). Its mode rides
@@ -1201,7 +1201,7 @@ test("S-8: an exhausted capture limit propagates as a harness error out of every
   );
   expect(described).toBeInstanceOf(ProductRunOutputOverflowError);
   expect(await describeExit(await start("exit"))).toContain("exit code 3");
-}, 60_000);
+});
 
 /** The module the driver loads on demand for T6.5-22(a)'s check. */
 const CHECK_MODULE = "../helpers/added-import-identifiers.js";
@@ -1334,4 +1334,4 @@ test("S-8: a failure of the driver's in-run evaluation — T6.5-22(a)'s check of
     `harness error while running trial 1 of 1 with seed ${String(GUARD_VECTOR_SEED)}`,
   );
   expect((reported as Error).cause).toBeInstanceOf(HarnessEvaluationError);
-}, 60_000);
+});

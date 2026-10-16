@@ -5,8 +5,10 @@
 // subset resolution (a CERTIFICATIONS.md in-scope test that is not
 // implemented must be a hard error, never a vacuous pass), and canonical
 // ordering; and the runner's per-test-ID attribution, its H-8 outcome
-// taxonomy (diagnosed assertion failure vs harness error vs hang), its
-// completion guarantees, and its per-fixture report rendering.
+// taxonomy (diagnosed assertion failure vs harness error vs hang — a hang
+// being a product invocation's own hang guard tripped, TEST-SPEC S-3), its
+// completion guarantees with no guard of its own, and its per-fixture report
+// rendering.
 //
 // Ground truth comes from known-behavior stand-in products written into a
 // fresh TestWorkspace (the builder is certified by S-2; the subprocess driver
@@ -26,13 +28,12 @@ import {
   assertStderrEmpty,
 } from "../helpers/assertions.js";
 import {
-  DEFAULT_PRODUCT_TEST_TIMEOUT_MS,
   ProductTestSuite,
   compareProductTestIds,
   defineProductTest,
 } from "../helpers/registry.js";
 import type { ProductTestEntry } from "../helpers/registry.js";
-import { runProduct } from "../helpers/subprocess.js";
+import { ProductRunTimeoutError, runProduct } from "../helpers/subprocess.js";
 import type { ProductBinding } from "../helpers/subprocess.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 import { declareProductTests } from "../suite/declare.js";
@@ -43,14 +44,25 @@ import {
   runProductTests,
 } from "./certification-runner.js";
 
-// Conformer stand-in: fixed observable behavior for the `report` command.
-const CONFORMER_SOURCE = `const [mode] = process.argv.slice(2);
+// Conformer stand-in: fixed observable behavior for the `report` command;
+// `pause <ms>` reports likewise after a fixed delay, and `hang` never
+// terminates (the hang-guard probes).
+const CONFORMER_SOURCE = `const [mode, arg] = process.argv.slice(2);
 if (mode === "report") {
   process.stdout.write("ok\\n");
   process.exit(0);
 }
-process.stderr.write("unknown mode\\n");
-process.exit(99);
+if (mode === "pause") {
+  setTimeout(() => {
+    process.stdout.write("ok\\n");
+    process.exit(0);
+  }, Number(arg));
+} else if (mode === "hang") {
+  setInterval(() => {}, 60000);
+} else {
+  process.stderr.write("unknown mode\\n");
+  process.exit(99);
+}
 `;
 
 // Stub stand-in with the pre-product placeholder's shape (FIX_PLAN baseline,
@@ -144,12 +156,35 @@ const THROWS_NON_ERROR = defineProductTest({
   },
 });
 
-function hangingEntry(id: string, timeoutMs?: number): ProductTestEntry {
+/**
+ * A body whose one product invocation never terminates, under an own hang
+ * guard of `guardMs` (S-3): the driver kills it there, and the body lets the
+ * kill propagate — or, with `wrapped`, throws an error naming it as its
+ * cause, as a property's report does (helpers/property.ts).
+ */
+function hangingEntry(
+  id: string,
+  guardMs: number,
+  wrapped = false,
+): ProductTestEntry {
   return defineProductTest({
     id,
-    title: "body never settles (hang-watchdog probe)",
-    timeoutMs,
-    run: () => new Promise<never>(() => {}),
+    title: `stand-in invocation never terminates (hang-guard probe${wrapped ? ", the kill wrapped" : ""})`,
+    run: async (product) => {
+      const workspace = await TestWorkspace.create();
+      try {
+        await runProduct(product, {
+          cwd: workspace.root,
+          argv: ["hang"],
+          timeoutMs: guardMs,
+        });
+      } catch (error) {
+        if (!wrapped) throw error;
+        throw new Error("a wrapper's report of the kill", { cause: error });
+      } finally {
+        await workspace.dispose();
+      }
+    },
   });
 }
 
@@ -194,35 +229,15 @@ test("defineProductTest enforces the TEST-SPEC ID grammar", () => {
   }
 });
 
-test("defineProductTest applies the shared default budget, freezes entries, and rejects empty titles and bad budgets", () => {
-  const entry = defineProductTest({
-    id: "T99-8",
-    title: "budget default probe",
-    run: async () => {},
-  });
-  expect(entry.timeoutMs).toBe(DEFAULT_PRODUCT_TEST_TIMEOUT_MS);
+test("defineProductTest freezes entries, carries no time budget (S-3: a test is a span bounded by its invocations' and steps' own guards), and rejects empty titles", () => {
+  const run = async () => {};
+  const entry = defineProductTest({ id: "T99-8", title: "entry probe", run });
   expect(Object.isFrozen(entry)).toBe(true);
-  expect(
-    defineProductTest({
-      id: "T99-8",
-      title: "budget override probe",
-      timeoutMs: 300_000,
-      run: async () => {},
-    }).timeoutMs,
-  ).toBe(300_000);
+  expect(Object.keys(entry).sort()).toEqual(["id", "run", "title"]);
+  expect(entry).toEqual({ id: "T99-8", title: "entry probe", run });
   expect(() =>
     defineProductTest({ id: "T99-8", title: "   ", run: async () => {} }),
   ).toThrow(/title/);
-  for (const timeoutMs of [0, -5, 1.5, Number.NaN]) {
-    expect(() =>
-      defineProductTest({
-        id: "T99-8",
-        title: "t",
-        timeoutMs,
-        run: async () => {},
-      }),
-    ).toThrow(/timeoutMs/);
-  }
 });
 
 test("ProductTestSuite rejects duplicate IDs (stable, never-reused keys)", () => {
@@ -326,7 +341,7 @@ test("the runner distinguishes harness errors from diagnosed assertion failures 
   expect(report.counts).toEqual({ pass: 0, fail: 0, error: 2, hang: 0 });
 });
 
-test("a body exceeding its own budget is recorded as a hang and the run completes (H-8: never a harness hang)", async () => {
+test("a body whose product invocation outlasts its own hang guard is recorded as a hang, the test ending at that guard, and the run completes (S-3, H-8: never a harness hang)", async () => {
   const { conformer } = await standins();
   const report = await runProductTests(
     conformer,
@@ -335,22 +350,86 @@ test("a body exceeding its own budget is recorded as a hang and the run complete
   );
   expect(report.results[0]!.outcome).toBe("hang");
   expect(report.results[0]!.diagnosis).toContain(
-    "did not settle within its 150 ms budget",
+    "did not terminate within its own hang guard",
+  );
+  expect(report.results[0]!.diagnosis).toContain(
+    "timed out after 150 ms and was killed",
   );
   // The run continued past the hang: later tests still execute and attribute.
   expect(report.results[1]).toMatchObject({ id: "T99-1", outcome: "pass" });
   expect(report.counts).toEqual({ pass: 1, fail: 0, error: 0, hang: 1 });
 });
 
-test("options.testTimeoutMs overrides every entry's own budget for the run", async () => {
+test("a body throwing an error whose cause is the hang-guard kill is recorded as a hang too (a property's report of it, helpers/property.ts)", async () => {
   const { conformer } = await standins();
-  // The entry's own (default) budget is 120 s; the run-level override makes
-  // the watchdog fire in milliseconds — proving the override is in force.
-  const report = await runProductTests(conformer, [hangingEntry("T99-6")], {
-    testTimeoutMs: 100,
-  });
+  const report = await runProductTests(conformer, [
+    hangingEntry("T99-6", 150, true),
+  ]);
   expect(report.results[0]!.outcome).toBe("hang");
-  expect(report.results[0]!.diagnosis).toContain("100 ms budget");
+  expect(report.results[0]!.diagnosis).toContain(
+    "a wrapper's report of the kill",
+  );
+  expect(report.counts).toEqual({ pass: 0, fail: 0, error: 0, hang: 1 });
+  // A plain error carrying no kill stays a harness error.
+  const plain = defineProductTest({
+    id: "T99-6",
+    title: "a plain error with an unrelated cause",
+    run: async () => {
+      throw new Error("plain", { cause: new TypeError("unrelated") });
+    },
+  });
+  expect((await runProductTests(conformer, [plain])).counts).toEqual({
+    pass: 0,
+    fail: 0,
+    error: 1,
+    hang: 0,
+  });
+  expect(new ProductRunTimeoutError("probe").name).toBe(
+    "ProductRunTimeoutError",
+  );
+});
+
+test("the runner applies no guard of its own (S-3): a body spanning stand-in invocations whose delays together exceed one invocation's own guard passes", async () => {
+  const { conformer } = await standins();
+  // Four invocations of 1 s each, each well inside its own 3 s guard: the
+  // span outlasts any one guard, so a guard of the runner's own fixed below
+  // the sum of what the body spans would fire here.
+  const span = defineProductTest({
+    id: "T99-9",
+    title: "four delayed stand-in invocations in one body",
+    run: async (product) => {
+      const workspace = await TestWorkspace.create();
+      try {
+        for (let i = 0; i < 4; i += 1) {
+          const result = await runProduct(product, {
+            cwd: workspace.root,
+            argv: ["pause", "1000"],
+            timeoutMs: 3_000,
+          });
+          assertExitCode(result, 0, `T99-9 pause ${String(i)}`);
+          assertBytesEqual(
+            result.stdoutBytes,
+            "ok\n",
+            `T99-9 stdout ${String(i)}`,
+          );
+        }
+      } finally {
+        await workspace.dispose();
+      }
+    },
+  });
+  const started = performance.now();
+  const report = await runProductTests(conformer, [span]);
+  expect(report.results).toEqual([
+    {
+      id: "T99-9",
+      title: "four delayed stand-in invocations in one body",
+      outcome: "pass",
+      diagnosis: null,
+    },
+  ]);
+  // The premise: the span did outlast one invocation's own guard.
+  expect(performance.now() - started).toBeGreaterThan(3_000);
 });
 
 test("bounded concurrency preserves selection order in the results (deterministic reports, E-5)", async () => {
@@ -380,9 +459,6 @@ test("the runner refuses empty and duplicated selections (C-1 vacuity guard) and
   await expect(
     runProductTests(stub, [PASSES_ON_CONFORMER], { concurrency: 0 }),
   ).rejects.toThrow(/concurrency/);
-  await expect(
-    runProductTests(stub, [PASSES_ON_CONFORMER], { testTimeoutMs: -1 }),
-  ).rejects.toThrow(/testTimeoutMs/);
 });
 
 test("renderFixtureReport is per-fixture, per-test-ID legible, one line per test, no wall-clock content (C-1)", async () => {

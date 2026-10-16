@@ -3794,11 +3794,6 @@ const P_5 = defineProductTest({
     "the 5.6 cascades with their attributions; every import a drawn move adds passes " +
     "T6.5-22(a), the spec basenames drawn from 6.5's barred classes (SPEC 2.1, 3, 5.4-5.6, " +
     "6.1-6.5, 9, 12.2; TEST-SPEC §16 P-5)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5); per purity
-  // trial up to 3 operations x (sweep of every node + impact against every
-  // prior commit), 8 section-move trials per seed (each one build + move +
-  // check + impact), plus the shrink budget on falsification.
-  timeoutMs: 600_000,
   run: async (product) => {
     await checkProperty(
       "P-5 rename/file-move purity sequences",
@@ -3838,10 +3833,6 @@ const P_6 = defineProductTest({
     "identities mapped through the journal suffix — per-node category sets exact, added nodes " +
     "`changed` only, attributions within the originating nodes, no impacted code " +
     "(SPEC 5.5, 5.6, 6.3, 6.4, 6.5, 9; TEST-SPEC §16 P-6)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), up to 6
-  // steps and one impact run per historical baseline per trial, plus the
-  // shrink budget on falsification.
-  timeoutMs: 600_000,
   run: async (product) => {
     await checkProperty(
       "P-6 baseline replay",

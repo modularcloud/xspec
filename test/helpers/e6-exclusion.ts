@@ -367,8 +367,6 @@ function describeWindowsProcess(entry: WindowsProcess): string {
 
 /** Bound on a hold's appearance: the run's start included. */
 const WINDOWS_HOLD_WAIT_MS = 30_000;
-/** Hang guard of the held run: never an assertion input (H-10). */
-const WINDOWS_HELD_RUN_TIMEOUT_MS = 120_000;
 /** taskkill's exit code for a process it did not find. */
 const TASKKILL_NOT_FOUND = 128;
 
@@ -387,10 +385,12 @@ async function killHeldWindowsRun(
   if (await pathExists(holdPath)) {
     throw new Error(`killHeldE6Run: the hold path ${holdPath} is occupied`);
   }
+  // The held run carries the driver's own guard, suspended once it is found
+  // holding (helpers/subprocess.ts; TEST-SPEC S-3): no guard of its spans
+  // the harness's reads and the kill while it holds.
   const running = await startProduct(product, {
     cwd: root,
     argv: [...options.argv, "--test-hold", holdPath],
-    timeoutMs: WINDOWS_HELD_RUN_TIMEOUT_MS,
   });
   let tree: WindowsProcess[] = [];
   try {

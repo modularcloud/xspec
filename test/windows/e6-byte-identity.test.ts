@@ -41,16 +41,17 @@ import {
   requireE6ExchangeDir,
   runE6RepresentativeFixture,
 } from "../helpers/e6.js";
+import { NO_SPAN_GUARD } from "../helpers/hang-guards.js";
 import { builtProductBinding } from "../helpers/subprocess.js";
 
-// Generous hang guard for the 27-invocation fixture, its exclusion probe's
-// bounded reruns included, plus the comparison (H-8); never an assertion
-// input (H-10).
-const FIXTURE_TIMEOUT_MS = 300_000;
+// No guard of its own (TEST-SPEC S-3, helpers/hang-guards.ts): the test is a
+// span over the fixture's 27 invocations, its exclusion probe's bounded
+// reruns included, and the comparison, each invocation bounded by its own
+// hang guard.
 
 test(
   "E-6 byte-identity: the representative fixture's reports, rewritten sources, generated files, emitted Markdown, graph data, journal, and session file are byte-identical to the Linux leg's outputs from XSPEC_E6_EXCHANGE_DIR (TEST-SPEC E-6)",
-  { timeout: FIXTURE_TIMEOUT_MS },
+  { timeout: NO_SPAN_GUARD },
   async () => {
     // Run the fixture first: against a stub product this fails diagnosed
     // before any exchange is consulted, so the missing-exchange error below

@@ -542,7 +542,6 @@ const T10_5_1 = defineProductTest({
   id: "T10.5-1",
   title:
     "path-blocks generation: SPEC 15's worked change (a leaf text edit to print.hello) yields exactly the four listed items — print.hello's subtree-coherence item (context: its ancestor chain; origin: itself), print's parent-consistency item blocked by it (context/origin: print.hello), derived.hello's dependency-consistency item (context/origin: print.hello), and a code-impact item for src/hello.ts#hello (context: derived.hello, the impact-edge target that makes it impacted; origin: print.hello) — and the extended fixture pins the skipping rule (a changed node with a changed ancestor generates no own item; the ancestor's single subtree-coherence item carries both changed nodes as origin and its scope covers the node plus all descendants, its scope text the scope root's subtree text) and the shared-ancestor union (two changed leaves under one unchanged ancestor yield one parent-consistency item whose context and origin are the union of changed branches) and the two-levels-deep chain (a > a.b > a.b.c with only a.b.c changed: a's parent-consistency item's context is exactly {a.b} — the branch head, a's child on the changed branch, each changed branch entering as one context node — never the changed node a.b.c, while a.b's item's context is exactly {a.b.c}, the identities asserted, both items' origin the changed node) (SPEC 5.6, 9.2, 10.5, 15)",
-  timeoutMs: 300_000,
   run: async (product) => {
     // --- SPEC 15's worked change ---------------------------------------------
     await withWorkspace(
@@ -978,7 +977,6 @@ const T10_5_2 = defineProductTest({
   id: "T10.5-2",
   title:
     "blocking chains: a's parent-consistency item is blocked by, per changed branch, the child's subtree-coherence item where the child is the changed node (a.k) or the child's parent-consistency item for a deeper change (a.b, whose own item is blocked by a.b.c's subtree-coherence item — the chain extends to the last non-root ancestor); only those two kinds block parent-consistency items (the fixture's metadata-consistency, dependency-consistency, and code-impact items appear in no blockedBy), and metadata-consistency, dependency-consistency, and code-impact items have empty blockedBy; blocked flags in `status` reflect exactly the parent-consistency items (SPEC 10.3, 10.5)",
-  timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
       SPECS_CODE_CONFIG,
@@ -1249,7 +1247,6 @@ const T10_5_3 = defineProductTest({
   id: "T10.5-3",
   title:
     "metadata, dependency, and code items: one metadata-consistency item per metadata-changed node — m's d retargeting (context: the added and removed d targets), m2's coverage and tags edits (empty context; its payload's metadata pair asserted by T10.7-13, its reason informational, SPEC 10.2, and never asserted), and dep2's added d edge — one dependency-consistency item per node with a dependency edge to a both-sides target whose effectiveHash changed (dep1 against t; context: the changed target; origin: its originating node), with both halves of 10.5's note staged (a new d edge makes the source metadata-changed, a new embedding makes it changed): dep2, whose only affected target h.newt was added since the baseline, gets no dependency-consistency item — the change is reviewed at its source as dep2's own metadata-consistency item (context: the added target) — and dep3, whose only affected target entered through a new {text(...)} embedding, likewise gets no dependency-consistency item — the new embedded reference changes dep3's own content, it is changed (not metadata-changed), and the change is reviewed via dep3's own subtree-coherence item; and one code-impact item per impacted location with context the impact-edge targets that make it impacted, deleted (h.gone) and added (h.born) targets included, unchanged targets excluded (SPEC 5.5, 5.6, 9.2, 10.5)",
-  timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
       SPECS_CODE_CONFIG,
@@ -1737,7 +1734,6 @@ const T10_5_4 = defineProductTest({
   id: "T10.5-4",
   title:
     "total item order across two spec files and two code locations: requirement-scoped items first by scope-node depth deepest-first, then kind order subtree-coherence, metadata-consistency, dependency-consistency, parent-consistency (kind precedes file path: an A.mdx metadata-consistency item follows a B.mdx subtree-coherence item of the same depth), then scope-node file path bytes, then document order; code-impact items last by location identity bytes; after deleting two scope sections the absent-scope items order after the same group's present one, by scope-node identity — the reverse of their former document order, discriminating the identity key from stale document positions; `status` and `export` present the full order and `next` presents it as the walk order of repeated next-plus-resolve rounds; and two absent-scope items tied on every earlier key — the subtree-coherence items of two file roots, each moved onto specs/Y.mdx by a journaled file `move` (the second authored at the path the first vacated, a new node on a new canonical chain, its item entering through an `updated` resolve's re-derivation) and then deleted, both presented absent under specs/Y.mdx — order by item `id` bytes, the ids the product's own, in `status`, `export`, and the `next` walk (SPEC 5.4, 6.5, 10.4, 10.5, 12.0)",
-  timeoutMs: 420_000,
   run: async (product) => {
     await withWorkspace(
       SPECS_CODE_CONFIG,
@@ -2277,7 +2273,6 @@ const T10_5_5 = defineProductTest({
   id: "T10.5-5",
   title:
     "re-derivation on `updated`: resolving with no-change/skipped does not re-derive — after a sibling-subtree edit the item set is unchanged and the edit surfaces as read-time invalidation of the resolved parent-consistency item (context-set change with hash premises), not as new items; an `updated` resolve re-derives with the recorded baseline — the newly changed sibling's subtree-coherence item appears in item order created `unresolved` (the trigger's `updated` does not propagate), a matching kind+scope item keeps its id, status, and recorded state, and blockedBy is recomputed; items no longer generated (after reverting their edit) remain with their blockedBy and retain their recorded context set, presented unchanged by show/export after the re-derivation; after two nested `split`s a decomposed kind+scope is never re-added — its decomposition applies recursively, covering a child authored after the splits — and every blockedBy reference to a decomposed item is replaced by all items of its decomposition (SPEC 10.4, 10.5, 10.7)",
-  timeoutMs: 480_000,
   run: async (product) => {
     // --- sub-fixture A: derivation basics ------------------------------------
     await withWorkspace(
@@ -2835,7 +2830,6 @@ const T10_5_6 = defineProductTest({
   id: "T10.5-6",
   title:
     "baseline recording: the session records the commit identity `--base` resolved to at creation — after the session is created against a branch, the branch is renamed away and a decoy branch reusing the name is planted at a later commit (and HEAD moves past the reviewed edit), yet re-derivation on an `updated` resolve still diffs against the recorded commit: the parent-consistency item's recomputed context and blockedBy cover both changed branches (the pre-decoy edit included), where a product re-resolving the ref spelling or using HEAD would see only the newer edit (SPEC 6.3, 10.5, 10.7)",
-  timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,

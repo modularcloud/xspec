@@ -1207,10 +1207,6 @@ const P_13 = defineProductTest({
     "independent oracle implementing 8.1's required set and 8's " +
     "reachability over the generator's own graph model (SPEC 8, 8.1, 8.2, " +
     "7.4, 12.0; TEST-SPEC §16 P-13)",
-  // Wall-clock hang guard only (H-10): 8 trials per seed over the 3 fixed
-  // seeds (E-5), two product invocations per trial (build + coverage), with
-  // the shrink budget sized against whole-trial re-execution cost.
-  timeoutMs: 300_000,
   run: async (product) => {
     await checkProperty(
       "P-13 coverage oracle",

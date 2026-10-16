@@ -312,9 +312,6 @@ const NO_SUCH_ITEM = "xspec-harness-no-such-item";
 /** A session no workspace here holds (well-formed under SPEC 10.1). */
 const NO_SUCH_SESSION = "xspec-harness-no-such-session";
 
-/** The hang guard of a held run (H-10: never an assertion input). */
-const HELD_RUN_TIMEOUT_MS = 120_000;
-
 /** `-wx`: unlistable, searchable and writable. */
 const UNLISTABLE_MODE = 0o300;
 
@@ -383,7 +380,6 @@ export async function withHeldRun<T>(
   const running = await startProduct(product, {
     cwd: root,
     argv: [...argv, "--test-hold", hold],
-    timeoutMs: HELD_RUN_TIMEOUT_MS,
     processGroup: options.processGroup === true,
   });
   try {
@@ -1952,14 +1948,6 @@ const T13_5_11 = defineProductTest({
   id: "T13.5-11",
   title:
     'release, arms (a) to (d) — a command ending normally deletes its entry, then the lock directory when that holds nothing else, then `.xspec` when its acquisition created it and it then holds nothing else, release reading nothing, a deletion the environment refuses changing no outcome: (a) `.xspec/lock` absent after each mutating command\'s success (`rename specs/A.mdx a a2`, `move specs/A.mdx specs/B.mdx`, `review create --strategy audit --name t`, `review resolve s <item> --status no-change`, `review split s <item>`, each on a freshly built valid workspace holding an `audit` session `s`, exit 0), after its usage errors past acquisition (each command\'s `--test-hold` path occupied; an unknown old ID, origin file, profile, session, or item — exit 2, `code` `null`), and after each refusal (a `rename` refused by validation, a `move` refused for a 6.5 reason, a `review create` naming an existing session and one the gate turns back, a `resolve` of a blocked item, a `split` of an item of another kind, a `resolve` and a `split` naming a corrupt session — exit 1); after a read failure past acquisition and a configuration error the rediscovery meets, each command held on a freshly built valid workspace configured as T13.5-12(d)\'s (`specs/sub` made `--x` during its hold → exit 2, `code` `"read-failure"`, `path` `"specs/sub"`; a file created during its hold at `src/both.mdx`, a path both groups match → exit 2, `code` `"configuration-error"`, `path` `"xspec.config.ts"`); after each write failure of T13.5-7 but (b)\'s, each of its arms on a freshly built, valid, journal-bearing workspace of its own staged as T13.5-7 stages it (`rename specs/b/B.mdx b b2` held, `specs/b` made unwritable during its hold; the file-form `move specs/A.mdx specs/sub/B.mdx` held, `out/specs` made unwritable, and, `specs/sub` present, `specs` and the origin; `review resolve s <item> --status no-change`, `review create --strategy audit --name n`, and `review split s <item>` each held on a stale workspace holding `s`, `.xspec/reviews` and the session file made unwritable; on a workspace whose `specs/b/B.mdx` is edited, `build` with `specs/b` made unwritable and `query nodes` and `view specs/a/A.mdx` with `.xspec` made unwritable by T14-9\'s graph-data staging (the journal, the session directory, and the lock path keeping their modes), before the invocation, which acquire nothing) — each exit 2, `code` `"write-failure"`, its concerned path, asserted first; after acquisition\'s own read and write failures, with each command (an empty leftover lock directory made `-wx` → `"read-failure"`, or `r-x` → `"write-failure"`; a read-only `.xspec` holding no `lock` → `"write-failure"`; `.xspec` made `rw-` holding no `lock` → either code; each `path` `".xspec/lock"`; an unbuilt workspace\'s root made read-only → `"write-failure"`, `path` `".xspec"`) — each failure\'s ending asserted first; after a busy refusal of each command while `rename specs/A.mdx a a2` holds (exit 2, `code` `"workspace-busy"`, `path` `".xspec/lock"`) the lock directory holds exactly the holder\'s entry, byte-identical, and once the holder completes `.xspec/lock` is absent; (b) `rename specs/A.mdx nope x` failing its argument check on an unbuilt workspace leaves no `.xspec`, also with `.xspec` made `-wx` during its hold (exit 2 with its unstaged twin\'s output); with an empty `.xspec` beforehand it leaves `.xspec` present and empty; with the root alone made `r-x` during its hold it exits 2 with the twin\'s output, no `write-failure`, leaving `.xspec` present and empty; with an empty `.xspec/lock` beforehand, no `.xspec/lock`; (c) with each command held and the lock directory made `-wx` during its hold → its unstaged twin\'s outcome (exit code, standard output and error byte-equal) or exit 2 with `code` `"read-failure"`, `path` `".xspec/lock"`, and no `.xspec/lock` either way; (d) with each command held and the lock directory made `r-x` during its hold → its unstaged twin\'s outcome, exit 0, no `write-failure`, its entry remaining under its name, the lock directory\'s only one; the permissions restored and the run\'s process group confirmed gone, `review create --strategy audit --name u` takes the entry over, exit 0, `.xspec/lock` absent (a `workspace-busy` refusal meeting T13.5-3\'s reuse check); each held run\'s held-state comparison made once it holds, each staging verified on the harness itself (SPEC 13.4, 13.5, 14.14, 14.24, 14.25, 14.26)',
-  // A hang guard (H-10): 263 product invocations — the 234 of arms (a) to
-  // (d) on CONF-CORE-shaped workspaces, ~16 s against the CONF-CORE
-  // conformer, which passes them, and the 29 of (a)'s write failures on
-  // T13.5-7's workspaces, outside CONF-CORE's surface (the conformer refuses
-  // their first `build`, exit 70), ~13 s against the built product inside a
-  // lock-directory stand-in; ~85 s for a product at the built product's
-  // speed (~0.3 s a run; AGENTS.md): ample margin.
-  timeoutMs: 600_000,
   run: async (product) => {
     // (a) Each mutating command's success — the unstaged twins of (c) and
     // (d) — then its usage errors past acquisition, the refusals, the

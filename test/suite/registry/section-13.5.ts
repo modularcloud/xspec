@@ -204,8 +204,8 @@
 // - "Fails promptly" (T13.5-1 occupied path, T13.5-2): a bounded foreground
 //   run — a product that blocks instead of failing is killed at the bound
 //   and fails diagnosed (H-8; the bound is a hang guard, never an assertion
-//   input, H-10; the driver's own timeout, unconverted, would be a harness
-//   error, which the certification runner counts as `error`, C-1) — and for
+//   input, H-10; the driver's own timeout, unconverted, would end the test a
+//   hang, which the certification runner counts as `hang`, C-1) — and for
 //   T13.5-2 the excluded command's exit is observed while command 1 is
 //   still held (asserted: command 1 has not exited).
 // - T13.5-3's past-the-hold kills (E-5): a kill's landing is read from the
@@ -1054,9 +1054,9 @@ const HOLD_PATH_OCCUPANTS: readonly HoldPathOccupant[] = [
  * link's arm — nothing at the link's target. Each run is bounded
  * (`runBounded`): a product creating the hold file through the dangling
  * link holds at its target instead of exiting 2, and the bound's expiry is
- * that arm's diagnosed failure within the test's budget (H-8, S-3) — the
- * driver's own timeout, unconverted, is a harness error, which the
- * certification runner counts as `error` (C-1; §VIOL-CORE-HOLDLINK).
+ * that arm's diagnosed failure (H-8, S-3) — the driver's own timeout,
+ * unconverted, would end the test a hang, which the certification runner
+ * counts as `hang`, never a certified failure (C-1; §VIOL-CORE-HOLDLINK).
  */
 async function occupiedHoldPathArms(
   product: ProductBinding,
@@ -3128,9 +3128,6 @@ const T13_5_7 = defineProductTest({
   id: "T13.5-7",
   title:
     "interrupted or write-refused mutation: a write the environment refuses stops the command at that write — exit 2 with the error document (`write-failure`, the concerned path) — leaving every earlier write of 13.5's pinned per-command order complete and no later one attempted, each state read from a twin on which the same operation ran unrefused: (a) source edits first in preview `files` order, (b) the journal append as the commit point, `check` then reporting the graph-data unit form and one per-file finding for each derived path whose occupant differs from the one a `build` leaves on a copy of the stopped state, permissions restored — a set computed by comparison, never from the twin's derived files, the twin's journal holding the entry the stopped state lacks — (c) the identity effect complete once appended, (d) a relocation's two writes, (e) `review` mutators writing the session file once, last, after the refresh, (f) `build` and a refresh each file complete with the order unpinned, and a refreshing read refused at its graph-data write under T14-9's graph-data staging (`.xspec` and every directory of T13.3-2's operational path set read-only, every file of it unwritable, the journal, the session directory, and the lock path keeping their modes); release: (b)'s read-only `.xspec` refuses the deletion of the emptied lock directory, which remains, empty — no outcome changed, no write failure reported — until a mutating command run once the permissions are restored proceeds unrefused and removes it, and every other arm ends with `.xspec/lock` absent; the kill arm, each kill under T13.5-3's exit-collection discipline (the group killed with SIGKILL, its exit collected, and no process of it listed before `check` runs; no reuse check, no mutating command following): `check` never crashes and reports exactly a state 13.5 admits, the journal holds its prior bytes or the twin's, and the lock path is in T13.5-3's past-the-hold state — one plain-file entry, the dead run's, where the kill stopped the run short of its twin's final state (or at the held point), nothing where the run ended first (SPEC 13.5, 14.24, 12.0, 12.7, 6.4, 6.7, 13.3, 13.4)",
-  // A hang guard only (H-10): some twenty workspaces, each built, renamed,
-  // checked, and driven — generous under a saturated box.
-  timeoutMs: 600_000,
   run: async (product) => {
     const rename = await renameTwin(product);
     if (WRITE_REFUSALS_STAGED) {

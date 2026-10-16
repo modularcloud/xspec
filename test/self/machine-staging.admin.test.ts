@@ -246,7 +246,7 @@ test("the second user is made idempotently under its fixed name — makers runni
   expect(user.uid).not.toBe(harnessUid());
   expect(user.uid).not.toBe(0);
   expect(user.gid).toBe(harnessGid());
-}, 120_000);
+});
 
 test("a run launched as the second user gets exactly the environment, working directory, argv, umask, and resource limits a run started directly gets, as the second user's uid and the shared group with no capability, in the process group sudo leads; its exit code, stdout, and stderr observed (H-2)", async () => {
   const user = await ensureSecondUser();
@@ -294,7 +294,7 @@ test("a run launched as the second user gets exactly the environment, working di
   // sudo forked the stand-in into the group it leads: the run's own.
   expect(theirs.ppid).toBe(running.pid);
   expect(theirs.pgrp).toBe(running.pid);
-}, 60_000);
+});
 
 test("the second user's verification passes on a group-staged workspace — every directory listed and every file read, a file made and removed in the root and in .xspec, a harness-owned binding reachable (the empty stub: its command executable, its file readable), each identity's process list listing the other's — and fails as HarnessStagingError where the group cannot reach the workspace (T13.5-9, H-11, H-8)", async () => {
   const user = await ensureSecondUser();
@@ -345,7 +345,7 @@ test("the second user's verification passes on a group-staged workspace — ever
     [".xspec", "a.txt", "link", "specs"].sort(),
   );
   expect(await fsp.readdir(workspace.path(".xspec"))).toEqual([]);
-}, 120_000);
+});
 
 test("whether the second user can create and remove a file in a directory is answered unjudged: yes where the shared group may write, no (EACCES) where it may not", async () => {
   const user = await ensureSecondUser();
@@ -365,7 +365,7 @@ test("whether the second user can create and remove a file in a directory is ans
     code: "EACCES",
   });
   expect(await fsp.readdir(writable)).toEqual([]);
-}, 120_000);
+});
 
 test("reclaiming a tree for the harness: what a run as the second user made there — a directory the shared group may not write, holding a file of mode 0600 and a symbolic link — the harness may neither read nor remove before, and owns, reads, and removes once reclaimed, modes kept; the link's target outside the tree keeps its owner (T13.5-9)", async () => {
   const user = await ensureSecondUser();
@@ -401,7 +401,7 @@ test("reclaiming a tree for the harness: what a run as the second user made ther
   expect(await fsp.readFile(inner, "utf8")).toBe("made by the second user");
   await fsp.rm(made, { recursive: true });
   expect(await fsp.readdir(scratch)).toEqual(["standin.mjs"]);
-}, 120_000);
+});
 
 test("a launched run's processes, which the harness's own identity may not signal, are killed through the launcher: killGroup reaches the grandchild, collects the exit as SIGKILL, and leaves nothing listed, and so does the hang guard (T13.5-3's discipline)", async () => {
   const user = await ensureSecondUser();
@@ -449,7 +449,7 @@ test("a launched run's processes, which the harness's own identity may not signa
     [hanging.pid!, hung.self, hung.grandchild],
     "the hanging stand-in",
   );
-}, 120_000);
+});
 
 test("the second mount: a bind mount of the root at a path under the workspace's own temporary directory, verified — the same tree through either path, distinct mounts — and removed, after which the path no longer verifies (T13.5-9, E-3)", async () => {
   const workspace = await TestWorkspace.create({ files: { "a.txt": "a" } });
@@ -479,4 +479,4 @@ test("the second mount: a bind mount of the root at a path under the workspace's
   expect(unmounted).toBeInstanceOf(HarnessStagingError);
   expect((unmounted as HarnessStagingError).mode).toBe("second-mount");
   expect(await fsp.readFile(workspace.path("a.txt"), "utf8")).toBe("a");
-}, 120_000);
+});

@@ -862,11 +862,6 @@ const P_12 = defineProductTest({
     "file path bytes, range start, range end — total, duplicate-free " +
     "(identical spans never occur), and byte-identical across repeated " +
     "runs (SPEC 11.5, 11.4, 11.3, 11.2, 5.7, 12.0; TEST-SPEC §16 P-12)",
-  // Wall-clock hang guard only (H-10): the per-trial at sweep is exhaustive
-  // over every staged byte offset, so trials are few (3 per seed × 3 fixed
-  // seeds, E-5) and small by generator construction, and the shrink budget
-  // is sized against whole-trial re-execution cost.
-  timeoutMs: 600_000,
   run: async (product) => {
     await checkProperty(
       "P-12 at ≡ view; occurrence order",

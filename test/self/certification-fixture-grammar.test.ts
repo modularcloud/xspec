@@ -3558,12 +3558,6 @@ const CORE_TABLE: GrammarTable = {
 
 // --- the tests ----------------------------------------------------------------
 
-/**
- * A hang guard only (H-10): a table runs a few dozen fixture invocations,
- * each bounded by the driver's own hang guard.
- */
-const TABLE_TIMEOUT_MS = 120_000;
-
 const GRAMMAR_TABLES: readonly GrammarTable[] = [
   DISC_TABLE,
   AVAIL_TABLE,
@@ -3579,8 +3573,9 @@ for (const table of GRAMMAR_TABLES) {
       "grammar and reports usage errors in the 12.7 error document " +
       "(CERTIFICATIONS.md preamble)",
     async () => {
+      // No guard of its own (TEST-SPEC S-3, helpers/hang-guards.ts): the
+      // table's few dozen fixture invocations each carry the driver's.
       await runGrammarTable(table);
     },
-    TABLE_TIMEOUT_MS,
   );
 }

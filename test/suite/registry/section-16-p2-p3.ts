@@ -2318,9 +2318,6 @@ const P_2 = defineProductTest({
     "boundary-code-point-weighted content) compile to Markdown byte-equal to the harness's " +
     "SPEC 3 oracle, deterministically across directories, preserving content bytes outside " +
     "removed constructs (SPEC 3, 1.4, 1.6, 7.3; TEST-SPEC §16 P-2)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), two
-  // workspaces and two builds per trial, plus the shrink budget.
-  timeoutMs: 300_000,
   run: async (product) => {
     await checkProperty(
       "P-2 Markdown compilation",
@@ -2346,9 +2343,6 @@ const P_3 = defineProductTest({
     "subtree texts of the children its `contains` edges name, in document order, N children " +
     "yielding N + 1 runs — asserted as internal consistency of the product's reported values " +
     "(SPEC 1.6, 5.2, 3; TEST-SPEC §16 P-3)",
-  // Wall-clock hang guard only (H-10): one build plus one `query node` per
-  // requirement node per trial, three fixed seeds (E-5), plus shrinking.
-  timeoutMs: 300_000,
   run: async (product) => {
     await checkProperty(
       "P-3 text algebra",

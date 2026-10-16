@@ -1209,7 +1209,6 @@ const T12_2_2 = defineProductTest({
   id: "T12.2-2",
   title:
     "one workspace per finding family, each reported by `check` with exit 1: build validations re-validated from the current sources against persisting derived state; stale generated output and orphaned recorded derived files (14.10) after hand-editing, hand-deleting, editing a source, and disabling emission, plus the occupant-kind arms — the per-file comparison judges the path's occupant itself, never traversing a symbolic link: a generated module's path occupied by a symlink whose target holds byte-identical generated content, and by a directory, each stale; the graph-data unit form, missing and mismatch arms each positively isolated — exactly one condition-10 finding, concerned path the graph-data area, no path inside it named, no per-file finding beside it; the unreadable-record unit form (14.23) reported alone, a successful `build` replacing the state (`check` clean afterward, `inventory` reports `recorded` again); unresolved/non-static references; cycles; journal integrity (14.13); policy (14.12); corrupt sessions (14.21) (SPEC 12.2, 13.3, 13.4, 11.6, 14)",
-  timeoutMs: 300_000,
   run: async (product) => {
     // Family 1 — build validations, re-validated from the current sources.
     // Derived state from a prior valid build persists while the sources are

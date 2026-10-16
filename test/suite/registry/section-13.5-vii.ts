@@ -277,9 +277,6 @@ export const T13_5_6_PAIRS: readonly IsolationPair[] = [SIBLINGS, NESTED];
 // Runs and the session staging
 // ---------------------------------------------------------------------------
 
-/** A held run's hang guard: its hold spans the other workspace's runs. */
-const HELD_RUN_TIMEOUT_MS = 120_000;
-
 /**
  * Run `argv` in `root` to completion under `runBounded`'s hang guard — a run
  * that blocks or waits instead of exiting, killed there, a diagnosed failure
@@ -511,7 +508,6 @@ export async function runT1356HeldArm(
     const running = await startProduct(product, {
       cwd: heldRoot,
       argv: [...argv, "--test-hold", hold],
-      timeoutMs: HELD_RUN_TIMEOUT_MS,
     });
     try {
       await awaitHoldFile(running, hold, heldContext);
@@ -833,7 +829,6 @@ const T13_5_6 = defineProductTest({
   id: "T13.5-6",
   title:
     "workspace isolation (SPEC 13.5, H-1): exclusion is per workspace, for sibling workspaces and for an inner root `R/in` within the outer root `R` alike, each configuration globbing `specs/**/*.mdx` under its own root so that neither discovers the other's sources nor reads or writes a path the other writes — a mutating command held in either workspace (`rename <file> <top> <top>2 --test-hold <path>`, the hold path outside both; the held-state comparison holding once it holds and again once the other workspace's commands have ended, as their writes changed it, its entry the lock directory's only one, unchanged) leaves each mutating command in the other — `rename`, file-form `move`, `review create --strategy audit`, `review resolve`, and `review split`, in turn — prompt and unrefused, exit 0 while the hold stands, the held command still running after each and `.xspec/lock` absent in the other workspace once each has ended, the held command exiting 0 once lifted; and concurrent mutations in the two workspaces leave each exactly as serial runs do — for both pairs, two scripts of `build`, the five mutating commands, and `review status`, `ids`, and `check` reads, started together and at fixed offsets of a third of a script's run either way (E-5), each step ending as in the serial reference (exit code, stdout, and stderr byte-identical), the final trees equal to the serial ones (H-6 across directories, every lock path aside), and `.xspec/lock` absent afterwards",
-  timeoutMs: 600_000,
   run: async (product) => {
     for (const pair of T13_5_6_PAIRS) {
       await runT1356HeldArm(product, pair, 0);

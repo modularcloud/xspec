@@ -21,6 +21,7 @@
 // (C-1), and the full report accompanies any failure diagnosis.
 
 import { expect, test } from "vitest";
+import { NO_SPAN_GUARD } from "../helpers/hang-guards.js";
 import type { ProductBinding } from "../helpers/subprocess.js";
 import { productTestSuite } from "../suite/registry/index.js";
 import { CERTIFICATION_FIXTURES } from "./certification-fixtures.js";
@@ -30,13 +31,12 @@ import {
   runProductTests,
 } from "./certification-runner.js";
 
-// Generous end-to-end budget per verification: the CONF-CORE set includes
-// concurrency and polling choreography (T13.5-1…5, T13.5-8) and the T10.4-5
-// read sweep, and the CONF-RACE, CONF-READERS, and CONF-LEFTOVER sets the
-// repeated or seeded trials of T13.5-13, P-10, and P-15, each spawning many
-// fixture subprocesses. A hang guard only, never an assertion input (H-10);
-// the runner's per-test watchdogs bound each body individually.
-const RUN_TIMEOUT_MS = 600_000;
+// No guard of its own per verification (TEST-SPEC S-3,
+// helpers/hang-guards.ts): a verification is a span over the in-scope tests'
+// bodies — the CONF-CORE set's concurrency and polling choreography
+// (T13.5-1…5, T13.5-8) and T10.4-5's read sweep, the repeated or seeded
+// trials of T13.5-13, P-10, and P-15 — each fixture invocation in them
+// bounded by its own hang guard, the runner adding none.
 
 /**
  * Verify one conformer (CERTIFICATIONS.md preamble): run its in-scope tests
@@ -128,7 +128,7 @@ function prettyIdList(ids: readonly string[]): string {
 for (const conformerEntry of CERTIFICATION_FIXTURES) {
   test(
     `${conformerEntry.name} conformer: every CERTIFICATIONS.md in-scope test passes against the fixture (C-1)`,
-    { timeout: RUN_TIMEOUT_MS },
+    { timeout: NO_SPAN_GUARD },
     async () => {
       await verifyConformerAllPass(
         conformerEntry.binding(),
@@ -141,7 +141,7 @@ for (const conformerEntry of CERTIFICATION_FIXTURES) {
     test(
       `${violatorEntry.name} violator: exactly ${prettyIdList(violatorEntry.certifies)} ${fails}, ` +
         `every other §${conformerEntry.name} in-scope test passes (C-1)`,
-      { timeout: RUN_TIMEOUT_MS },
+      { timeout: NO_SPAN_GUARD },
       async () => {
         await verifyViolatorExpectedFailures(
           violatorEntry.binding(),

@@ -519,13 +519,6 @@ const P_15 = defineProductTest({
   id: "P-15",
   title:
     "leftover trees (TEST-SPEC §16 P-15): seeded random leftover trees staged in `.xspec/lock` on a freshly built valid workspace holding an `audit` session `s` created while it was valid — varied depth and breadth; names beginning with `.`, names that are not valid UTF-8 (the Linux leg), and names of other first bytes; plain files below the top level, some with every permission removed; symbolic links to directories outside the workspace (each holding a plain file), to plain files outside it, and dangling ones; and FIFOs — the lock directory's top level holding no plain file and every directory listable, searchable, and writable; each draw runs one mutating command (`rename`, file-form `move`, `review create --strategy audit`, `review resolve`, or `review split`), an operation succeeding on its leftover-free twin, under `--json`: it completes promptly, no FIFO opened, and exits 0 with its result (exit code, standard output and error, and final workspace, H-6) byte-equal to the twin's, `.xspec/lock` absent once it ends, every link's target outside the workspace byte-identical afterward and nothing written through a link — acquisition removing every leftover, a directory with all it holds at every depth and a symbolic link itself, never its target, reading no file's content (SPEC 13.5, 13.4; T13.5-10(b)'s fixed trees anchor it; E-5)",
-  // Wall-clock hang guard only (H-10): five twins, then three fixed seeds
-  // (E-5) of P15_RUNS_PER_SEED draws, each four product runs, plus up to
-  // P15_MAX_SHRINK_EXECUTIONS shrink draws on a falsification — measured
-  // ~5 s passing against the CONF-LEFTOVER conformer and ~12 s failing
-  // against the built product; a product blocking on a FIFO spends
-  // `runBounded`'s 15 s guard on each such draw, shrinking included.
-  timeoutMs: 600_000,
   run: async (product) => {
     const twins: UnstagedTwin[] = [];
     for (const operation of T13_5_10_OPERATIONS) {

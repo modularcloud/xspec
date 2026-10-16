@@ -1444,7 +1444,6 @@ const T6_3_5 = defineProductTest({
   id: "T6.3-5",
   title:
     "repository and path of the baseline: a workspace rooted in a repository subdirectory reports an edit against the baseline reconstructed from `sub/` at the ref — the configuration read from `sub/xspec.config.ts` in that tree, identities workspace-relative to `sub/` — from `R/sub` and from `R` with `--config` alike; with nested repositories (a nested repository and a submodule, both tagged `v1` at differing trees) `impact --base v1 --config inner/xspec.config.ts` from `R` resolves `v1` in the inner repository — the extra section on neither side — and `review create --base v1` records the inner commit; a configuration outside any working tree makes `impact --base HEAD` exit 2, as does a ref whose tree holds no file at the configuration's repository-relative path, each with an actionable error, nothing modified (SPEC 6.3, 7, 10.7, 12.0; T10.5-6)",
-  timeoutMs: 240_000,
   run: async (product) => {
     // --- (a) A workspace rooted in a repository subdirectory ---
     await withWorkspace(

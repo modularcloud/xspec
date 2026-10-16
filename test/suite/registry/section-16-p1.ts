@@ -985,10 +985,6 @@ const P_1 = defineProductTest({
     "satisfies 1.4 with `.` allowed, zero tokens behaving as an omitted prop; " +
     "each draw spelled in the quote kind its content admits, one holding both " +
     "never staged (SPEC 1.3, 1.4, 2.6, 2.7; TEST-SPEC §16 P-1)",
-  // Wall-clock hang guard only (H-10): two properties, three fixed seeds each
-  // (E-5), one workspace and one build subprocess per trial, plus the shrink
-  // budget on falsification.
-  timeoutMs: 240_000,
   run: async (product) => {
     await checkProperty(
       "P-1 segment validity",

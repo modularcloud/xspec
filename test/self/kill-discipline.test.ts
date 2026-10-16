@@ -188,7 +188,7 @@ test("a run started with processGroup leads a process group of its own; one star
   expect(refused).not.toBeInstanceOf(HarnessAssertionError);
   expect(plain.hasExited()).toBe(false);
   expect(await listedAmong([plain.pid!])).toEqual([plain.pid]);
-}, 60_000);
+});
 
 test("killGroup kills the whole group, collects the started process's exit as a SIGKILL death, and resolves only once no process of the group is listed, returning every identifier it bore (T13.5-3)", async () => {
   const { running, grandchild } = await heldGroup(
@@ -214,7 +214,7 @@ test("killGroup kills the whole group, collects the started process's exit as a 
   // a later call settles as the first did, signalling nothing.
   expect((await running.waitForExit()).signal).toBe("SIGKILL");
   expect(await running.killGroup()).toBe(killed);
-}, 60_000);
+});
 
 test("a zombie counts as listed: the process list lists an unreaped child, and killGroup waits until its new parent has reaped it (T13.5-3)", async () => {
   const { workspace } = await standin();
@@ -244,7 +244,7 @@ test("a zombie counts as listed: the process list lists an unreaped child, and k
   );
   expect(killed.result.signal).toBe("SIGKILL");
   expect(await listedAmong([running.pid!, zombie])).toEqual([]);
-}, 60_000);
+});
 
 test("killGroup on a run that had already ended reports that run's own exit and leaves nothing of its group listed", async () => {
   const { workspace, binding } = await standin();
@@ -259,7 +259,7 @@ test("killGroup on a run that had already ended reports that run's own exit and 
   expect(killed.result.signal).toBeNull();
   expect(killed.identifiers).toContain(running.pid);
   expect(await listedAmong(killed.identifiers)).toEqual([]);
-}, 60_000);
+});
 
 test("on a run leading its own group, the hang guard kills the whole group: no process it started outlives the timeout", async () => {
   const { workspace, binding } = await standin();
@@ -288,7 +288,7 @@ test("on a run leading its own group, the hang guard kills the whole group: no p
   );
   expect(gone).toContain(grandchild);
   expect(await listedAmong([running.pid!, grandchild])).toEqual([]);
-}, 60_000);
+});
 
 /** The identifiers a void reason names as listed again. */
 function listedAgainIn(reason: string): number[] {
@@ -336,7 +336,7 @@ test("the reuse check voids the trial when a killed identifier is listed again, 
   });
   expect(verdict).toBe("verdict");
   expect(attempts).toEqual([1, 2]);
-}, 60_000);
+});
 
 test("runVoidableTrial reruns a voided trial and returns the verdict of the first attempt reaching one", async () => {
   const attempts: number[] = [];

@@ -292,7 +292,7 @@ test("the count half: exactly one plain-file entry per held run, returned with i
   // Misuse: no count of entries.
   expectMisuse(await held(-1), /-1 is no number of entries/);
   expectMisuse(await held(1.5), /1\.5 is no number of entries/);
-}, 60_000);
+});
 
 test("the byte half excludes the root's lock path alone: a change to `.xspec/graph.json`, to another path in `.xspec`, to a source, or under a nested root's lock path is caught; `.xspec` itself is accepted as new only where the baseline had none, and nothing more under it; a baseline retaken during the hold serves (TEST-SPEC §13.5's preamble; CERTIFICATIONS.md CONF-CORE's justification)", async () => {
   const workspace = await makeWorkspace();
@@ -382,7 +382,7 @@ test("the byte half excludes the root's lock path alone: a change to `.xspec/gra
     await held(fresh),
     /assertHeldState: the baseline is a snapshot of .*, not of the workspace/,
   );
-}, 60_000);
+});
 
 test("occupants the harness staged in the lock directory — a dead run's entry copied in, a directory holding a file, a FIFO, a symbolic link — are counted apart from the entries and required in place: a change to one, or its removal, is caught (TEST-SPEC §13.5's preamble; T13.5-10(c), (e))", async () => {
   const workspace = await makeWorkspace();
@@ -472,7 +472,7 @@ test("occupants the harness staged in the lock directory — a dead run's entry 
     /the staging at "\.xspec\/lock" is no occupant of the lock directory/,
   );
   expectMisuse(await held([whole]), /lies outside the workspace/);
-}, 60_000);
+});
 
 test("a mode-0o000 entry is read through H-4's grant, its mode restored; an entry's identity across a span — name and content, its mode aside — and the lock directory's only entry are checked, and two runs' entries named apart (H-4; SPEC 13.5; E-1)", async () => {
   const workspace = await makeWorkspace();
@@ -575,7 +575,7 @@ test("a mode-0o000 entry is read through H-4's grant, its mode restored; an entr
     /probe: two runs' entries must bear byte-different names/,
     new RegExp(`both are named ${ODD_SHOWN}$`),
   );
-}, 60_000);
+});
 
 test("the lock path absent — `.xspec` absent or no directory included — and the lock path holding exactly a given tree: stagings as staged and entries by name and content (a mode-0o000 one read through the grant), nothing added beside them (SPEC 13.5; T13.5-11, T13.4-12, T13.5-10(c))", async () => {
   const workspace = await makeWorkspace({ "specs/a.txt": "source\n" });
@@ -688,7 +688,7 @@ test("the lock path absent — `.xspec` absent or no directory included — and 
     ),
     /the staging at "\.xspec" lies outside the lock path \.xspec\/lock/,
   );
-}, 60_000);
+});
 
 test("the lock path after a kill — T13.5-3's past-the-hold judgement, shared with T13.5-7's kill arm: the kill ending the run while a path the twin's run changed is short of the twin's final state requires exactly one plain-file entry (nothing, two entries, or a directory beside one failing, diagnosed); a kill finding every such path final is judged no further; a run that ended before the kill landed — its own exit or another signal — requires nothing at `.xspec/lock` (anything there failing, diagnosed) (SPEC 13.5; T13.5-3, T13.5-7, T13.5-11)", async () => {
   const FINAL: Readonly<Record<string, string>> = {
@@ -793,7 +793,7 @@ test("the lock path after a kill — T13.5-3's past-the-hold judgement, shared w
     /probe: the run ended before the kill landed \(signal SIGTERM\)/,
     /holding "\.xspec\/lock\/left"$/,
   );
-}, 60_000);
+});
 
 test("the inclusion check around a command acquiring nothing: whatever occupied the lock path before — nothing, a leftover, a held run's entry (mode 0o000 read through the grant), nothing under an obstruction at `.xspec` — occupies it afterwards byte-identical, nothing added beside it; an addition, a removal, or a change is caught, a mode change alone is none (H-6; SPEC 13.4; T13.4-12, T13.5-4)", async () => {
   const workspace = await makeWorkspace();
@@ -866,7 +866,7 @@ test("the inclusion check around a command acquiring nothing: whatever occupied 
     ),
   ).toBeNull();
   expect((await captureLockPath(obstructed.root)).tree.size).toBe(0);
-}, 60_000);
+});
 
 test("the byte half never walks the lock path: a directory there that the harness cannot list (mode -wx, verified first) fails the count half, diagnosed, when nothing staged it — never a harness error at the walk — and, declared staged, its in-place check is refused until the test restores its mode (TEST-SPEC §13.5's preamble; T13.5-10(c)'s -wx leftovers; E-1)", async () => {
   const workspace = await makeWorkspace();
@@ -905,4 +905,4 @@ test("the byte half never walks the lock path: a directory there that the harnes
     await fsp.chmod(dir, 0o755);
   }
   expect(await held([left])).toBeNull();
-}, 60_000);
+});

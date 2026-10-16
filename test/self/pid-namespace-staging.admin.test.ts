@@ -234,7 +234,7 @@ test("launcher A: a run is the first process of a fresh namespace with a process
     "0000000000000000",
     "0000000000000000",
   ]);
-}, 120_000);
+});
 
 test("two launcher-A runs of the same stand-in bear the same in-namespace identifiers; a group kill through sudo reaches each namespace's first process from outside, collects the exit as SIGKILL, and empties the namespace, and so does the hang guard (T13.5-3; T13.5-10(f), (g))", async () => {
   const { scratch, binding } = await standin();
@@ -302,7 +302,7 @@ test("two launcher-A runs of the same stand-in bear the same in-namespace identi
     "the hanging stand-in",
   );
   expect(await listedAmong([hanging.pid!, ...namespaced])).toEqual([]);
-}, 120_000);
+});
 
 test("launcher B: a namespace whose first process is the harness's own opens fresh and lists only its own processes once a run is entered — the run seeing that same list and the working directory it was given — T13.5-10(e)'s verification passing on the harness's identifiers and failing as a harness error on one the namespace lists; a group kill of the entered run empties it but for its first process; closing it leaves nothing listed", async () => {
   const { scratch, binding } = await standin();
@@ -374,4 +374,4 @@ test("launcher B: a namespace whose first process is the harness's own opens fre
       launcher: namespace.launcher,
     }),
   ).rejects.toThrow(/is closed: nothing can be entered into it/);
-}, 120_000);
+});

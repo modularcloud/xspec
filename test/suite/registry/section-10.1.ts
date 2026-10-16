@@ -1269,7 +1269,6 @@ const T10_1_4 = defineProductTest({
   id: "T10.1-4",
   title:
     "each corrupt session state — unparseable bytes (garbage and truncation), missing 10.2 field, unknown status, duplicate item ids, blockedBy at an absent item, a blockedBy cycle, duplicate kind+scope, malformed recorded creation parameters, malformed recorded decompositions (garbled over a product-performed `split`'s durable record), and a directory or symlink at the session path — makes every review subcommand naming the session report corruption, exit 1, and modify nothing, its report under `--json` (and `export`'s without the flag, its only output form, the same document) the findings-only document of at least one finding, every one condition 21 `corrupt-session` concerning the session's own file (a symlink there by its own path) with `locations` []; `list` reports it corrupt in place of its fields (exit 1), the listing's findings likewise at least one, every one condition 21 `corrupt-session` concerning the session's own file with `locations` []; `check` reports 14.21; shape-dependent states are staged via the H-3 adapter over product-written files (SPEC 10.1, 10.7, 12.7, 13.4, 14.21)",
-  timeoutMs: 360_000,
   run: async (product) => {
     // --- Shape-dependent states via the adapter, over an audit session ---
     for (const [state, corrupt] of ADAPTER_STATES) {
@@ -2631,7 +2630,6 @@ const T10_1_6 = defineProductTest({
   id: "T10.1-6",
   title:
     "session-directory and area occupancy; `create`'s ordering: `.xspec/reviews` occupied by a plain file, or by a symbolic link to a directory holding a valid session, holds no sessions (`list` none, `status s` exit 2, `check` clean, `inventory` sessions [], `ids` answers) and `create` is refused with one condition-22 finding concerning `.xspec/reviews`, nothing written; on stale twins the refused `create` — condition 22, the code-less existing-name refusal, or condition 21 in its place — is met at the examination of the session directory past the gate and before any write, the refresh included, and modifies nothing: stale graph data stays stale (graph data byte-identical around it, `check` then reporting the edited source's per-file staleness beside the graph-data unit form; no session written or changed); `.xspec` occupied by a plain file, or by a symbolic link to a directory holding a journal and valid sessions: `inventory` recorded unavailable with the one condition-23 finding, `build`/`ids`/`review list` one condition-22 finding concerning `.xspec`, `check` that finding beside the unreadable-record unit form, `view` finding-free, and every mutating command — `rename`, `move`, `review create`, `resolve`, `split` — failing at acquisition first: exit 2, the error document's `code` `write-failure`, `path` `.xspec`, nothing written, the plain file byte-unchanged, the link and its target byte-identical (10.1, 10.7, 11.6, 13.3–13.5, 14.10, 14.21–14.24)",
-  timeoutMs: 360_000,
   run: async (product) => {
     // --- Session-directory occupancy on a freshly built valid workspace --
     // Plain file: no session has been created, so `.xspec/reviews` is

@@ -34,7 +34,14 @@
 // killed by request included; a run without JSON output in effect, or
 // whose stdout is no one JSON document, passes untouched; and a crash of
 // the walk, armed through a pass-through mock of its module, is the
-// harness error `HarnessEvaluationError` (stage `walk`).
+// harness error `HarnessEvaluationError` (stage `walk`). The hold rule for
+// hang guards (TEST-SPEC S-3) is pinned against a stand-in holding at its
+// `--test-hold` path: its own guard stands suspended from the moment the
+// harness finds its hold — through `waitForFile` or `holdFileStands` —
+// until `releaseHoldFile` lifts it, so a hold kept past the guard passes
+// and a run hanging once lifted is killed for what is left of its guard;
+// a hold path occupied as the run started, and a file found at another
+// path, suspend nothing.
 //
 // The stand-in is a tiny argv-driven Node script written into a fresh
 // TestWorkspace per test (the builder itself is certified by S-2) and driven
@@ -48,6 +55,7 @@ import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { expect, onTestFinished, test, vi } from "vitest";
 import type * as AddedImportCheckModule from "../helpers/added-import-identifiers.js";
 import { judgeAddedImportsOfFile } from "../helpers/added-import-identifiers.js";
@@ -56,6 +64,7 @@ import {
   parseJsonStdout,
 } from "../helpers/assertions.js";
 import type * as CaptureWalkModule from "../helpers/capture-walk.js";
+import { holdPathArgument } from "../helpers/invocation-grammar.js";
 import {
   ProcessGroupLingerError,
   VoidedTrialsExhaustedError,
@@ -147,6 +156,24 @@ switch (mode) {
         clearInterval(poll);
         process.stdout.write("released");
         process.exit(0);
+      }
+    }, 10);
+    break;
+  }
+  case "held": {
+    // held <after> --test-hold <path>: the hold file created at <path>, the
+    // run waits until it is deleted, then exits 0 (after "exit") or never
+    // terminates (after "hang").
+    const hold = args[args.indexOf("--test-hold") + 1];
+    fs.writeFileSync(hold, "");
+    const poll = setInterval(() => {
+      if (!fs.existsSync(hold)) {
+        clearInterval(poll);
+        if (args[0] === "exit") {
+          process.stdout.write("released");
+          process.exit(0);
+        }
+        setInterval(() => {}, 60000);
       }
     }, 10);
     break;
@@ -654,6 +681,128 @@ test("waitForFile times out diagnosed against a live child that never creates th
   ).rejects.toThrow(/timed out after 200 ms waiting for/);
   running.kill();
   await running.waitForExit();
+});
+
+test("holdPathArgument reads a `--test-hold <path>` flag as SPEC 12.0's grammar reads it: anywhere among the flags, its first occurrence, never after `--`, never another flag's value, never without its value", () => {
+  expect(holdPathArgument(["rename", "a", "b", "--test-hold", "/h"])).toBe(
+    "/h",
+  );
+  expect(holdPathArgument(["--test-hold", "/h", "rename", "a", "b"])).toBe(
+    "/h",
+  );
+  expect(
+    holdPathArgument(["--test-hold", "/a", "rename", "--test-hold", "/b"]),
+  ).toBe("/a");
+  expect(holdPathArgument(["rename", "--", "--test-hold", "/h"])).toBe(
+    undefined,
+  );
+  expect(
+    holdPathArgument(["review", "resolve", "--note", "--test-hold", "x"]),
+  ).toBe(undefined);
+  expect(holdPathArgument(["rename", "a", "b", "--test-hold"])).toBe(undefined);
+  expect(holdPathArgument(["rename", "a", "b"])).toBe(undefined);
+});
+
+test("a held run's own hang guard stands suspended while the harness keeps its hold standing, and resumes for what is left of it once the hold is lifted (TEST-SPEC S-3): held past its guard, found through waitForFile or holdFileStands, the run completes once lifted; hanging once lifted, it is killed at its own guard", async () => {
+  const { workspace, binding } = await standin();
+  const guardMs = 1_000;
+  const heldMs = 2_500;
+
+  // Found through waitForFile, held 2.5 s past a 1 s guard.
+  const hold1 = path.join(workspace.tempRoot, "hold-waited");
+  const waited = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["held", "exit", "--test-hold", hold1],
+    timeoutMs: guardMs,
+  });
+  await waited.waitForFile(hold1);
+  await sleep(heldMs);
+  expect(waited.hasExited()).toBe(false);
+  await releaseHoldFile(hold1);
+  const completed = await waited.waitForExit();
+  expect(completed.exitCode).toBe(0);
+  expect(completed.stdout).toBe("released");
+
+  // Found through holdFileStands, polled as a harness polls beside other
+  // conditions (T13.5-13, P-10).
+  const hold2 = path.join(workspace.tempRoot, "hold-polled");
+  const polled = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["held", "exit", "--test-hold", hold2],
+    timeoutMs: guardMs,
+  });
+  while (!(await polled.holdFileStands(hold2))) {
+    expect(polled.hasExited()).toBe(false);
+    await sleep(10);
+  }
+  await sleep(heldMs);
+  expect(polled.hasExited()).toBe(false);
+  await releaseHoldFile(hold2);
+  expect((await polled.waitForExit()).exitCode).toBe(0);
+
+  // Hanging once lifted: the guard, armed again for what is left of it,
+  // kills the run, its diagnosis naming the suspension.
+  const hold3 = path.join(workspace.tempRoot, "hold-hangs");
+  const hangs = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["held", "hang", "--test-hold", hold3],
+    timeoutMs: guardMs,
+  });
+  await hangs.waitForFile(hold3);
+  await sleep(heldMs);
+  expect(hangs.hasExited()).toBe(false);
+  await releaseHoldFile(hold3);
+  const killed = await hangs.waitForExit().then(
+    () => undefined,
+    (thrown: unknown) => thrown,
+  );
+  expect(killed).toBeInstanceOf(ProductRunTimeoutError);
+  expect((killed as Error).message).toContain(
+    `timed out after ${String(guardMs)} ms of its own hang guard, suspended while the harness kept its hold standing (TEST-SPEC S-3), and was killed`,
+  );
+});
+
+test("a hold path occupied as the run started, and a file found at another path than the run's own hold, suspend nothing: the run's own guard kills it there (TEST-SPEC S-3)", async () => {
+  const { workspace, binding } = await standin();
+
+  // Occupied as the run started: the occupant is no hold of the run's.
+  const occupied = path.join(workspace.tempRoot, "occupied-hold");
+  await createHoldFile(occupied);
+  const atOccupied = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["hang", "--test-hold", occupied],
+    timeoutMs: 300,
+  });
+  await atOccupied.waitForFile(occupied);
+  expect(await atOccupied.holdFileStands(occupied)).toBe(true);
+  const occupiedKill = await atOccupied.waitForExit().then(
+    () => undefined,
+    (thrown: unknown) => thrown as Error,
+  );
+  expect(occupiedKill).toBeInstanceOf(ProductRunTimeoutError);
+  expect(occupiedKill!.message).toContain(
+    "timed out after 300 ms and was killed (H-8",
+  );
+
+  // A file found at another path than the run's own hold path.
+  const other = path.join(workspace.tempRoot, "other-file");
+  const own = path.join(workspace.tempRoot, "own-hold");
+  const elsewhere = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["hold", other, "--test-hold", own],
+    timeoutMs: 300,
+  });
+  await elsewhere.waitForFile(other);
+  const elsewhereKill = await elsewhere.waitForExit().then(
+    () => undefined,
+    (thrown: unknown) => thrown as Error,
+  );
+  await releaseHoldFile(other);
+  expect(elsewhereKill).toBeInstanceOf(ProductRunTimeoutError);
+  expect(elsewhereKill!.message).toContain(
+    "timed out after 300 ms and was killed (H-8",
+  );
+  expect(await pathExists(own)).toBe(false);
 });
 
 test("concurrent invocations stay isolated: each returns its own argv, output, and exit code (13.5 support)", async () => {

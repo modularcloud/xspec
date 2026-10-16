@@ -42,15 +42,45 @@ import { defineConfig } from "vitest/config";
 // keeps that dependency the harness's own, independent of the product's
 // `typescript`; harness code imports `typescript-5.9.3`, never `typescript`.
 //
+// Hang guards (TEST-SPEC S-3; test/helpers/hang-guards.ts): no test carries a
+// framework timeout of its own — every project's `testTimeout` is 0, under
+// which Vitest arms no timer — since a test is a span over the invocations
+// and harness steps it runs, bounded by their own guards, and a fixed
+// per-test timeout would be a span guard fixed apart from what it spans.
+//
 // Paths below are relative to the repository root: the npm scripts are the
 // canonical entry points and always run from the package root.
 export default defineConfig({
   test: {
     projects: [
-      { test: { name: "suite", include: ["test/suite/**/*.test.ts"] } },
-      { test: { name: "self", include: ["test/self/**/*.test.ts"] } },
-      { test: { name: "windows", include: ["test/windows/**/*.test.ts"] } },
-      { test: { name: "local", include: ["test/local/**/*.test.ts"] } },
+      {
+        test: {
+          name: "suite",
+          include: ["test/suite/**/*.test.ts"],
+          testTimeout: 0,
+        },
+      },
+      {
+        test: {
+          name: "self",
+          include: ["test/self/**/*.test.ts"],
+          testTimeout: 0,
+        },
+      },
+      {
+        test: {
+          name: "windows",
+          include: ["test/windows/**/*.test.ts"],
+          testTimeout: 0,
+        },
+      },
+      {
+        test: {
+          name: "local",
+          include: ["test/local/**/*.test.ts"],
+          testTimeout: 0,
+        },
+      },
     ],
   },
 });

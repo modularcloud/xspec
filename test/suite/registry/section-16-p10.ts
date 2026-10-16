@@ -244,7 +244,6 @@ import type {
 } from "../../helpers/subprocess.js";
 import {
   DEFAULT_WAIT_FOR_FILE_TIMEOUT_MS,
-  pathExists,
   releaseHoldFile,
   rethrowHarnessError,
   runProduct,
@@ -801,7 +800,9 @@ async function holdsOrExits(
 ): Promise<boolean> {
   const deadline = Date.now() + DEFAULT_WAIT_FOR_FILE_TIMEOUT_MS;
   for (;;) {
-    if (await pathExists(hold)) return true;
+    // Found holding, the run waits on the harness from here: its own hang
+    // guard stands suspended until its hold is lifted (TEST-SPEC S-3).
+    if (await running.holdFileStands(hold)) return true;
     if (running.hasExited()) return false;
     if (Date.now() >= deadline) {
       fail(
@@ -2693,11 +2694,6 @@ const P_10 = defineProductTest({
   id: "P-10",
   title:
     "concurrency under randomized schedules of concurrent readers and one mutating command via --test-hold and process kills (TEST-SPEC §16 P-10): episodes of `rename`, file-form `move`, and `review resolve` under `--json`, held or not, run to their end, killed while held, or killed past their hold at fixed fractions of their twin's lift-to-exit span, each kill under T13.5-3's exit-collection discipline (the command's process group SIGKILLed, its exit collected, the group gone) before anything later runs; readers started before each command at drawn leads, at least one confirmed still running (listed, never a zombie) as it starts, plus reads while it holds and straddling its lift or kill, and a polling reader over the journal, the session file, the source, its module and companions, and graph data, never the lock path; each command's reader-free twin copied from the workspace, the lock path aside, as it starts and run alone, exit 0. Readers observe only prior-or-complete states (every polled state the path's before or after the episode — after a kill, the path's before it or its reader-free twin's after the operation, the state the kill left included — at a graph-data path also the product's own graph data for a state of the episode's files; the journal prefix-monotone, never deleted; T13.5-5's protocol); nothing is lost (each `rename`/`move` exiting 0 adds exactly one journal line, each killed one at most one; each resolve exiting 0 records its status — read back by quiescent `review status` and `review list` — each killed one records it or leaves the session byte-unchanged); a killed run whose sources, journal, or session files differ from its twin's leaves `.xspec/lock` holding exactly one plain-file entry once the episode's readers have exited (T13.5-3's past-the-hold judgement); and readers never exclude a mutating command: each one not killed is never refused (a refusal after a kill voids the trial where a killed group's identifier is listed again, T13.5-3's reuse check) and ends exactly as its twin — exit code, standard output, and the sources, journal, and session files byte-equal (H-6; derived files and graph data not compared), `.xspec/lock` absent once the episode's readers have exited (SPEC 6.1, 10.7, 13.4, 13.5; E-5)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), two to five
-  // episodes per trial, each a twin and a command plus up to eight reads,
-  // and, where an observed graph-data state needs them, up to sixteen
-  // staged refreshing reads.
-  timeoutMs: 600_000,
   run: async (product) => {
     await checkProperty(
       "P-10 concurrency schedules",
