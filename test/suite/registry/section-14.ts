@@ -234,7 +234,8 @@
 //   reported conditions' stagings (14.10, 14.12, 14.14, 14.21, 14.23),
 //   hoisted below and shared with T14-4's dedicated arms, and the three
 //   usage errors' stagings: 14.24 as T14-9 (f) stages it (a stale
-//   workspace, its graph-data area `.xspec` unwritable) and 14.25 as
+//   workspace, its graph-data area `.xspec` unwritable by T14-9's
+//   graph-data staging, `stageGraphDataWriteRefusal`) and 14.25 as
 //   T14-10 (g) does (a discovery directory unlistable) — both
 //   permission-staged, Linux leg — and 14.26 as T13.5-2 does
 //   (section-13.5.ts's `judgeBusyRefusal`: a `rename` held at 13.5's
@@ -508,9 +509,9 @@ import {
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import {
+  stageGraphDataWriteRefusal,
   stageReadRefusalOfDirectory,
   stageReadRefusalOfFile,
-  stageWriteRefusalUnder,
 } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -3419,7 +3420,9 @@ const T14_6 = defineProductTest({
     // runner — as a harness error, never a pass or a skip (H-9, H-11).
     if (ENVIRONMENT_REFUSALS_STAGED) {
       // 14.24, T14-9 (f)'s staging: a stale workspace whose graph-data area
-      // `.xspec` is unwritable — `build` (14.24's first-listed reporter)
+      // `.xspec` is unwritable by T14-9's graph-data staging (`.xspec` and
+      // every directory of T13.3-2's operational path set read-only, every
+      // file of it unwritable) — `build` (14.24's first-listed reporter)
       // regenerates the derived files under the writable `specs/` and is
       // refused at its graph-data write, whatever its write order: the
       // command stops at the refused write and exits 2 (12.0: met only at
@@ -3432,9 +3435,7 @@ const T14_6 = defineProductTest({
           "T14-6 (14.24) staging `build` (SPEC 12.1)",
         );
         await workspace.file("specs/a.mdx", STALE_EDIT);
-        const staging = await stageWriteRefusalUnder(
-          path.join(workspace.root, ".xspec"),
-        );
+        const staging = await stageGraphDataWriteRefusal(workspace.root);
         try {
           const context =
             "T14-6 (14.24) `build --json` with `.xspec` unwritable on the " +

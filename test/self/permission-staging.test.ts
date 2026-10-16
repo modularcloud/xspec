@@ -5,21 +5,25 @@
 // each mode refuses this process's own attempt at exactly the operations the
 // discipline names and keeps the permission it must keep — the directory
 // modes of `stageDirectoryMode` (T13.5-10(d), (h), T13.5-11) included, each
-// declared probe refused or kept as declared; that `restore()` reinstates
-// every recorded mode, idempotently, restoring nothing where a product's
-// removal took the staged object away or renamed it away (a file read
-// refusal's file removed, a listing refusal's or a directory-mode staging's
-// directory renamed away: H-8, the state left to the checks' diagnosis,
-// never a harness error); that unstageable objects — a
-// directory in the path form, a symbolic link, an absent object for a read
-// refusal — are staging errors, never refusals; that an entry the product
-// named is reached at its exact bytes whatever the name — not valid UTF-8,
-// or not ASCII (SPEC 13.1, 13.3) — by every staging that reaches entries the
-// harness does not name, its diagnoses rendering such a name readably; and
-// that the E-1 ineffective-staging report fires: the exported verification
-// functions run on an unstaged path see their own attempts succeed, undo
-// them, and throw `HarnessStagingError`, which is not a
-// `HarnessAssertionError` (H-8, H-11).
+// declared probe refused or kept as declared, and T14-9's graph-data staging
+// (`stageGraphDataWriteRefusal`) over a hand-made area holding graph data
+// in a file directly in it and in directories of its own below it beside
+// the journal, the session directory, and the lock directory — every
+// graph-data write refused, the three keeping their modes and writable;
+// that `restore()` reinstates every recorded mode, idempotently, restoring
+// nothing where a product's removal took the staged object away or renamed
+// it away (a file read refusal's file removed, a listing refusal's or a
+// directory-mode staging's directory renamed away: H-8, the state left to
+// the checks' diagnosis, never a harness error); that unstageable objects —
+// a directory in the path form, a symbolic link, an absent object for a read
+// refusal, a graph-data area absent or a symbolic link — are staging errors,
+// never refusals; that an entry the product named is reached at its exact
+// bytes whatever the name — not valid UTF-8, or not ASCII (SPEC 13.1, 13.3)
+// — by every staging that reaches entries the harness does not name, its
+// diagnoses rendering such a name readably; and that the E-1
+// ineffective-staging report fires: the exported verification functions run
+// on an unstaged path see their own attempts succeed, undo them, and throw
+// `HarnessStagingError`, which is not a `HarnessAssertionError` (H-8, H-11).
 //
 // On a privileged runner (root: CAP_DAC_OVERRIDE) the staging tests below
 // fail with that same error by design (H-9: never a pass or a skip); CI runs
@@ -38,11 +42,13 @@ import { HarnessAssertionError } from "../helpers/assertions.js";
 import {
   HarnessStagingError,
   stageDirectoryMode,
+  stageGraphDataWriteRefusal,
   stageReadRefusalOfDirectory,
   stageReadRefusalOfFile,
   stageWriteRefusal,
   stageWriteRefusalUnder,
   verifyDirectoryMode,
+  verifyGraphDataWriteRefusal,
   verifyReadRefusalOfDirectory,
   verifyReadRefusalOfFile,
   verifyWriteRefusal,
@@ -248,6 +254,238 @@ test.runIf(onLinux)(
       expect(await modeOf(workspace.path(file))).toBe(0o644);
     }
     await openAndClose(workspace.path("specs/b/sub/D.mdx"), "wx");
+  },
+);
+
+// T14-9's graph-data staging over a hand-made area: graph data in a file
+// directly in the area and in directories of its own below it (SPEC 13.3),
+// beside the durable journal and session directory and the transient lock
+// directory holding a held run's entry (13.4, 13.5).
+const LOCK_ENTRY = ".xspec/lock/1234-run";
+const GRAPH_DATA_WORKSPACE_FILES: Readonly<Record<string, string>> = {
+  ".xspec/graph.json": "{}\n",
+  ".xspec/d/x.json": "x\n",
+  ".xspec/d/e/y.json": "y\n",
+  ".xspec/journal": "entry\n",
+  ".xspec/reviews/s.json": "{}\n",
+  [LOCK_ENTRY]: "",
+};
+/** The area and the directories of T13.3-2's set: made read-only. */
+const GRAPH_DATA_DIRS = [".xspec", ".xspec/d", ".xspec/d/e"];
+/** The files of T13.3-2's set: made unwritable. */
+const GRAPH_DATA_FILES = [
+  ".xspec/graph.json",
+  ".xspec/d/x.json",
+  ".xspec/d/e/y.json",
+];
+/** The session directory and the lock directory: keeping their modes. */
+const KEPT_DIRS = [".xspec/reviews", ".xspec/lock"];
+/** The journal, a session file, and a held run's entry: keeping theirs. */
+const KEPT_FILES = [".xspec/journal", ".xspec/reviews/s.json", LOCK_ENTRY];
+
+/** The hand-made area, every mode pinned to a known prior. */
+async function makeGraphDataWorkspace(): Promise<TestWorkspace> {
+  const workspace = await TestWorkspace.create({
+    files: GRAPH_DATA_WORKSPACE_FILES,
+  });
+  onTestFinished(() => workspace.dispose());
+  for (const dir of [...GRAPH_DATA_DIRS, ...KEPT_DIRS]) {
+    await fsp.chmod(workspace.path(dir), 0o755);
+  }
+  for (const file of [...GRAPH_DATA_FILES, ...KEPT_FILES]) {
+    await fsp.chmod(workspace.path(file), 0o644);
+  }
+  return workspace;
+}
+
+test.runIf(onLinux)(
+  "graph-data write refusal (T14-9's graph-data staging): `.xspec` and every directory of T13.3-2's operational path set read-only and every file of it unwritable — creation in each directory and writing, replacing, and removing each file refused wherever graph data lies, reads kept — while the journal, the session directory, and the lock path keep their modes and stay writable, a held run's release deleting its entry but refused the emptied lock directory's deletion; restore reinstates every recorded mode, idempotently",
+  async () => {
+    const workspace = await makeGraphDataWorkspace();
+    const at = (rel: string): string => workspace.path(rel);
+    const staging = tracked(await stageGraphDataWriteRefusal(workspace.root));
+    expect(staging.mode).toBe("graph-data-write-refusal");
+    expect(staging.path).toBe(at(".xspec"));
+    for (const dir of GRAPH_DATA_DIRS) {
+      expect(await modeOf(at(dir)), dir).toBe(0o555);
+    }
+    for (const file of GRAPH_DATA_FILES) {
+      expect(await modeOf(at(file)), file).toBe(0o444);
+    }
+    for (const dir of KEPT_DIRS) {
+      expect(await modeOf(at(dir)), dir).toBe(0o755);
+    }
+    for (const file of KEPT_FILES) {
+      expect(await modeOf(at(file)), file).toBe(0o644);
+    }
+    // This process's own attempts at every graph-data write, in the area and
+    // in the directories below it.
+    for (const dir of GRAPH_DATA_DIRS) {
+      expect(
+        await outcome(openAndClose(path.join(at(dir), "n.json"), "wx")),
+        dir,
+      ).toBe("EACCES");
+      expect(await outcome(fsp.mkdir(path.join(at(dir), "n"))), dir).toBe(
+        "EACCES",
+      );
+    }
+    for (const file of GRAPH_DATA_FILES) {
+      expect(await outcome(openAndClose(at(file), "r+")), file).toBe("EACCES");
+      expect(await outcome(openAndClose(at(file), "a")), file).toBe("EACCES");
+      expect(await outcome(fsp.unlink(at(file))), file).toBe("EACCES");
+    }
+    expect(
+      await outcome(fsp.rename(at(".xspec/d/e/y.json"), at(".xspec/d/z.json"))),
+    ).toBe("EACCES");
+    expect(
+      await outcome(
+        fsp.rename(at(".xspec/reviews/s.json"), at(".xspec/graph.json")),
+      ),
+    ).toBe("EACCES");
+    // Reads and listings are kept.
+    expect(
+      Buffer.from(await fsp.readFile(at(".xspec/d/e/y.json"))).toString("utf8"),
+    ).toBe("y\n");
+    expect((await fsp.readdir(at(".xspec/d"))).sort()).toEqual(["e", "x.json"]);
+    // The journal appended to; a session rewritten in place and replaced by
+    // renaming; a fresh session created and removed — none refused.
+    await fsp.appendFile(at(".xspec/journal"), "entry 2\n");
+    expect(
+      Buffer.from(await fsp.readFile(at(".xspec/journal"))).toString("utf8"),
+    ).toBe("entry\nentry 2\n");
+    await fsp.writeFile(at(".xspec/reviews/s.json"), "{ }\n");
+    await fsp.writeFile(at(".xspec/reviews/s.json.next"), "{}\n");
+    await fsp.rename(
+      at(".xspec/reviews/s.json.next"),
+      at(".xspec/reviews/s.json"),
+    );
+    await fsp.chmod(at(".xspec/reviews/s.json"), 0o644);
+    await openAndClose(at(".xspec/reviews/t.json"), "wx");
+    await fsp.unlink(at(".xspec/reviews/t.json"));
+    // A held run's release: its entry deleted, then the emptied lock
+    // directory's deletion — an entry of the read-only area — refused, which
+    // changes no outcome (SPEC 13.5, 14.24).
+    await fsp.unlink(at(LOCK_ENTRY));
+    expect(await outcome(fsp.rmdir(at(".xspec/lock")))).toBe("EACCES");
+    await fsp.writeFile(at(LOCK_ENTRY), "");
+    await fsp.chmod(at(LOCK_ENTRY), 0o644);
+    // Restoration reinstates the recorded modes and is idempotent.
+    await staging.restore();
+    for (const dir of [...GRAPH_DATA_DIRS, ...KEPT_DIRS]) {
+      expect(await modeOf(at(dir)), dir).toBe(0o755);
+    }
+    for (const file of [...GRAPH_DATA_FILES, ...KEPT_FILES]) {
+      expect(await modeOf(at(file)), file).toBe(0o644);
+    }
+    await openAndClose(at(".xspec/d/e/n.json"), "wx");
+    await fsp.unlink(at(".xspec/d/e/n.json"));
+    await staging.restore();
+    expect(await modeOf(at(".xspec"))).toBe(0o755);
+  },
+);
+
+test.runIf(onLinux)(
+  "graph-data write refusal over an area holding no graph data: `.xspec` alone made read-only, graph data's creation refused; a journal and a session directory whose own modes withhold writing keep those modes, the staging verifying no permission they lack; restore reinstates the area's mode",
+  async () => {
+    const workspace = await TestWorkspace.create({
+      dirs: [".xspec/lock"],
+      files: { ".xspec/journal": "entry\n", ".xspec/reviews/s.json": "{}\n" },
+    });
+    onTestFinished(() => workspace.dispose());
+    const at = (rel: string): string => workspace.path(rel);
+    for (const dir of [".xspec", ".xspec/lock"]) {
+      await fsp.chmod(at(dir), 0o755);
+    }
+    await fsp.chmod(at(".xspec/reviews/s.json"), 0o644);
+    await fsp.chmod(at(".xspec/reviews"), 0o555);
+    await fsp.chmod(at(".xspec/journal"), 0o444);
+    const staging = tracked(await stageGraphDataWriteRefusal(workspace.root));
+    expect(await modeOf(at(".xspec"))).toBe(0o555);
+    expect(await modeOf(at(".xspec/journal"))).toBe(0o444);
+    expect(await modeOf(at(".xspec/reviews"))).toBe(0o555);
+    expect(await modeOf(at(".xspec/reviews/s.json"))).toBe(0o644);
+    expect(await modeOf(at(".xspec/lock"))).toBe(0o755);
+    expect(await outcome(openAndClose(at(".xspec/graph.json"), "wx"))).toBe(
+      "EACCES",
+    );
+    expect(await outcome(fsp.mkdir(at(".xspec/d")))).toBe("EACCES");
+    expect((await fsp.readdir(at(".xspec"))).sort()).toEqual([
+      "journal",
+      "lock",
+      "reviews",
+    ]);
+    await staging.restore();
+    expect(await modeOf(at(".xspec"))).toBe(0o755);
+    expect(await modeOf(at(".xspec/journal"))).toBe(0o444);
+    expect(await modeOf(at(".xspec/reviews"))).toBe(0o555);
+    await fsp.chmod(at(".xspec/reviews"), 0o755);
+  },
+);
+
+test.runIf(onLinux)(
+  "E-1 for the graph-data write refusal: its verification, run on an unstaged workspace, sees its own attempts succeed, undoes them, and reports a privileged runner; under the staging, a graph-data file or directory below the area left writable is reported; a walk the environment refuses is a staging error, nothing changed",
+  async () => {
+    const workspace = await makeGraphDataWorkspace();
+    const at = (rel: string): string => workspace.path(rel);
+    const unstaged = await stagingError(
+      verifyGraphDataWriteRefusal(workspace.root),
+    );
+    expect(unstaged.mode).toBe("graph-data-write-refusal");
+    expect(unstaged.path).toBe(at(".xspec"));
+    expect(unstaged.message).toContain(`creating ${at(".xspec")}/`);
+    expect(unstaged.message).toContain("was not refused");
+    expect(unstaged.message).toContain("privileged runner");
+    // Every probe undid its effect: the listings and the bytes are unchanged.
+    expect((await fsp.readdir(at(".xspec"))).sort()).toEqual([
+      "d",
+      "graph.json",
+      "journal",
+      "lock",
+      "reviews",
+    ]);
+    expect((await fsp.readdir(at(".xspec/d"))).sort()).toEqual(["e", "x.json"]);
+    for (const [rel, contents] of Object.entries(GRAPH_DATA_WORKSPACE_FILES)) {
+      expect(
+        Buffer.from(await fsp.readFile(at(rel))).toString("utf8"),
+        rel,
+      ).toBe(contents);
+    }
+
+    const staging = tracked(await stageGraphDataWriteRefusal(workspace.root));
+    // A file of the set, in a directory below the area, left writable.
+    await fsp.chmod(at(".xspec/d/e/y.json"), 0o644);
+    const fileError = await stagingError(
+      verifyGraphDataWriteRefusal(workspace.root),
+    );
+    expect(fileError.message).toContain(
+      `opening ${at(".xspec/d/e/y.json")} with "r+" was not refused`,
+    );
+    await fsp.chmod(at(".xspec/d/e/y.json"), 0o444);
+    // A directory of the set left writable: a creation in it unrefused.
+    await fsp.chmod(at(".xspec/d/e"), 0o755);
+    const dirError = await stagingError(
+      verifyGraphDataWriteRefusal(workspace.root),
+    );
+    expect(dirError.message).toContain(`creating ${at(".xspec/d/e")}/`);
+    expect(dirError.message).toContain("was not refused");
+    await fsp.chmod(at(".xspec/d/e"), 0o555);
+    // Restaged as staged, the verification holds.
+    await verifyGraphDataWriteRefusal(workspace.root);
+    await staging.restore();
+    expect(await fsp.readdir(at(".xspec/d/e"))).toEqual(["y.json"]);
+
+    // A walk the environment refuses — a graph-data directory unlistable —
+    // is a staging error, and nothing is changed.
+    await fsp.chmod(at(".xspec/d"), 0o300);
+    const walkError = await stagingError(
+      stageGraphDataWriteRefusal(workspace.root),
+    );
+    expect(walkError.message).toContain(
+      "walking T13.3-2's operational path set failed with EACCES",
+    );
+    expect(await modeOf(at(".xspec"))).toBe(0o755);
+    expect(await modeOf(at(".xspec/graph.json"))).toBe(0o644);
+    await fsp.chmod(at(".xspec/d"), 0o755);
   },
 );
 
@@ -534,9 +772,57 @@ test.runIf(onLinux)(
 );
 
 test.runIf(onLinux)(
-  "unstageable objects are staging errors, never refusals: a directory in the path form, a symbolic link, an absent holding directory, nonexistence for a read refusal, a file for a listing refusal, a relative path — nothing changed",
+  "byte paths, graph-data staging: graph data under names the product chose — not valid UTF-8, or not ASCII, a file in the area and a directory below it — is reached at its exact bytes by the graph-data staging and its E-1 verification, a diagnosis rendering such a name's segment as hex; restore reinstates every mode",
+  async () => {
+    const workspace = await makeGraphDataWorkspace();
+    const rel = (...parts: Buffer[]): Buffer =>
+      Buffer.concat([Buffer.from(".xspec/"), ...parts]);
+    const fileRel = rel(NOT_UTF8_NAME);
+    const subRel = rel(NOT_ASCII_NAME);
+    const subFileRel = rel(NOT_ASCII_NAME, Buffer.from("/f"));
+    await workspace.file(fileRel, "x\n");
+    await workspace.file(subFileRel, "f\n");
+    const file = workspace.bytePath(fileRel);
+    const sub = workspace.bytePath(subRel);
+    const subFile = workspace.bytePath(subFileRel);
+    await fsp.chmod(sub, 0o755);
+    for (const target of [file, subFile]) await fsp.chmod(target, 0o644);
+
+    const staging = tracked(await stageGraphDataWriteRefusal(workspace.root));
+    expect(await modeOf(file)).toBe(0o444);
+    expect(await modeOf(sub)).toBe(0o555);
+    expect(await modeOf(subFile)).toBe(0o444);
+    expect(await modeOf(workspace.path(".xspec/journal"))).toBe(0o644);
+    expect(await outcome(openAndClose(file, "a"))).toBe("EACCES");
+    expect(await outcome(openAndClose(subFile, "r+"))).toBe("EACCES");
+    expect(
+      await outcome(
+        openAndClose(Buffer.concat([sub, Buffer.from("/g")]), "wx"),
+      ),
+    ).toBe("EACCES");
+    // That one file left writable is an ineffective staging E-1 reports.
+    await fsp.chmod(file, 0o644);
+    const error = await stagingError(
+      verifyGraphDataWriteRefusal(workspace.root),
+    );
+    expect(error.path).toBe(workspace.path(".xspec"));
+    expect(error.message).toContain(
+      `opening ${workspace.path(".xspec")}/<bytes ${NOT_UTF8_NAME.toString("hex")}> with "r+" was not refused`,
+    );
+    await staging.restore();
+    expect(await modeOf(file)).toBe(0o644);
+    expect(await modeOf(sub)).toBe(0o755);
+    expect(await modeOf(subFile)).toBe(0o644);
+    expect(await modeOf(workspace.path(".xspec"))).toBe(0o755);
+  },
+);
+
+test.runIf(onLinux)(
+  "unstageable objects are staging errors, never refusals: a directory in the path form, a symbolic link, an absent holding directory, nonexistence for a read refusal, a file for a listing refusal, a graph-data area absent or a symbolic link, a relative path — nothing changed",
   async () => {
     const workspace = await makeWorkspace();
+    // A root whose graph-data area is a symbolic link (to a directory).
+    await workspace.symlink("specs/empty/.xspec", "../b", "dir");
     // Thunks: a rejection must not precede its await (an unhandled rejection).
     const cases: Array<[string, () => Promise<unknown>]> = [
       ["directory target", () => stageWriteRefusal(workspace.path("specs/b"))],
@@ -619,11 +905,27 @@ test.runIf(onLinux)(
             { attempt: "examine", name: "gone", refused: false },
           ]),
       ],
+      [
+        "graph-data area absent",
+        () => stageGraphDataWriteRefusal(workspace.path("specs")),
+      ],
+      [
+        "graph-data area a symbolic link",
+        () => stageGraphDataWriteRefusal(workspace.path("specs/empty")),
+      ],
+      ["graph-data root relative", () => stageGraphDataWriteRefusal("work")],
     ];
     for (const [label, call] of cases) {
       const error = await stagingError(call());
       expect(error.message, label).toContain("staging of ");
     }
+    const areaError = await stagingError(
+      stageGraphDataWriteRefusal(workspace.path("specs/empty")),
+    );
+    expect(areaError.mode).toBe("graph-data-write-refusal");
+    expect(areaError.message).toContain("the graph-data area");
+    expect(areaError.message).toContain("is symlink, not a directory");
+    expect(await modeOf(workspace.path("specs/empty"))).toBe(0o755);
     const directoryError = await stagingError(
       stageWriteRefusal(workspace.path("specs/b")),
     );
@@ -708,6 +1010,7 @@ test("the platform guard (E-1): presented a non-Linux platform, every staging th
   const stagings = [
     ["write-refusal", () => stageWriteRefusal(target)],
     ["write-refusal-under", () => stageWriteRefusalUnder(target)],
+    ["graph-data-write-refusal", () => stageGraphDataWriteRefusal(target)],
     ["read-refusal-of-file", () => stageReadRefusalOfFile(target)],
     ["read-refusal-of-directory", () => stageReadRefusalOfDirectory(target)],
     [

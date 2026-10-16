@@ -336,8 +336,8 @@ import {
 } from "../../helpers/assertions.js";
 import { LOCK_PATH } from "../../helpers/lock-path.js";
 import {
+  stageGraphDataWriteRefusal,
   stageReadRefusalOfDirectory,
-  stageWriteRefusalUnder,
 } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -3502,9 +3502,12 @@ const ERR_SUB_SOURCE = stagedMdx(
  * permission-staging helpers — T14-6's stagings, the documents here asserted
  * form-exact on code AND concerned path (T14-9 and T14-10 pin the
  * per-command contracts and the states left):
- * - 14.24: a stale workspace whose graph-data area `.xspec` is unwritable —
- *   `build --json` regenerates the derived files under the writable `specs/`
- *   and is refused at its graph-data write, whatever its write order — the
+ * - 14.24: a stale workspace whose graph-data area `.xspec` is unwritable
+ *   by T14-9's graph-data staging (`stageGraphDataWriteRefusal`: `.xspec`
+ *   and every directory of T13.3-2's operational path set read-only, every
+ *   file of it unwritable, whatever layout graph data takes) — `build
+ *   --json` regenerates the derived files under the writable `specs/` and
+ *   is refused at its graph-data write, whatever its write order — the
  *   error document `{"code": "write-failure", "path": ".xspec"}`: a write of
  *   graph data concerns the graph-data area, no path inside it named (SPEC
  *   14.24, 11.6);
@@ -3530,7 +3533,7 @@ async function runErrorEnvironmentRefusalArms(
         "T12.7-3 (14.24) staging `build` (SPEC 12.1)",
       );
       await workspace.file("specs/A.mdx", T12_7_3_A_EDITED);
-      const staging = await stageWriteRefusalUnder(workspace.path(".xspec"));
+      const staging = await stageGraphDataWriteRefusal(workspace.root);
       try {
         const context =
           "T12.7-3 `build --json` with the graph-data area .xspec " +
@@ -3636,7 +3639,8 @@ const T12_7_3 = defineProductTest({
     "R/a/xspec.config.ts reports ../xspec.config.ts, the physical relation, " +
     "never ../a/xspec.config.ts and never the spelling as given; " +
     "(Linux leg, permission-staged) a write the environment refuses — " +
-    ".xspec unwritable on a stale workspace — is " +
+    ".xspec unwritable by T14-9's graph-data staging on a stale workspace " +
+    "— is " +
     '{"code": "write-failure", "path": ".xspec"} and a read it refuses — ' +
     'specs/sub unlistable — is {"code": "read-failure", "path": ' +
     '"specs/sub"}, each locations [] with diagnostics on stderr; and a busy ' +

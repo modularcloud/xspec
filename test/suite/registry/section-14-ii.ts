@@ -41,18 +41,23 @@
 //   graph-data area `.xspec` exactly: a refresh writes graph data alone
 //   (13.3: no TypeScript or Markdown is generated or removed), and the
 //   mutating `review create` refreshes before its session write (13.5), so
-//   on the stale workspace with `.xspec` unwritable the area is the first
-//   refused write of each — never a path inside it (14.24, 11.6). The reads
-//   take no hold and meet the staging from their invocation on; `review
-//   create`, a mutating command, meets it at the seam, after acquisition —
-//   staged before its invocation, `.xspec` read-only would refuse
-//   acquisition's own writes in `.xspec/lock` first, the lock path then
-//   concerned (13.5). The area-form staging then covers the lock directory
-//   and the held run's entry as well, so release's deletions are refused,
-//   which changes no outcome (13.5, 14.24); the entry left behind is a
-//   leftover, bearing on neither the recovery `build` nor `check` (13.4:
-//   the lock path bears on no comparison of graph data, and neither
-//   acquires).
+//   on the stale workspace with `.xspec` unwritable — T14-9's graph-data
+//   staging (write-refusal-staging.ts `graphDataRefusal`: `.xspec` itself
+//   and every directory of T13.3-2's operational path set read-only and
+//   every file of it unwritable, whatever layout graph data takes; the
+//   journal, the session directory, and the lock path keeping their modes)
+//   — the area is the first refused write of each, never a path inside it
+//   (14.24, 11.6). The reads take no hold and meet the staging from their
+//   invocation on; `review create`, a mutating command, meets it at the
+//   seam, after acquisition — staged before its invocation, the read-only
+//   `.xspec` would refuse acquisition's creation of the lock directory
+//   first, the lock path then concerned (13.5). The lock directory and the
+//   held run's entry keep their modes, so release deletes the entry; its
+//   deletion of the emptied lock directory, an entry of the read-only area,
+//   is refused, which changes no outcome (13.5, 14.24); the empty lock
+//   directory left behind is a leftover, bearing on neither the recovery
+//   `build` nor `check` (13.4: the lock path bears on no comparison of
+//   graph data, and neither acquires).
 // - Acquisition's writes, one arm each (T14-9: the entry's addition, a
 //   leftover's removal, and the lock directory's creation concerning
 //   `.xspec/lock`, no entry ever named; the area directory's creation and
@@ -302,6 +307,7 @@ import {
   assertEditedBStalenessConcerns,
   assertStalenessAlone,
   expectWriteFailure,
+  graphDataRefusal,
   isDerivedFile,
   prepareRefusalWorkspace,
   refusalAt,
@@ -847,11 +853,14 @@ function expectPlainUsageError(
  * Graph data, the reporter set, the never-reporters, and the check-first
  * precedence, all on one state: the built precedence fixture holding an
  * audit session and a git baseline, B text-edited (stale, valid), `.xspec`
- * staged unwritable before each read's invocation (the reads take no hold)
- * and, for the mutating `review create`, at the seam of 13.5 — after
- * acquisition, before any modification (T14-9; `runHeldWithStaging`), the
- * staging otherwise refusing acquisition's own writes in `.xspec/lock`
- * first. Every refreshing read of 13.3 and `review create` exit 2 with the
+ * staged unwritable by T14-9's graph-data staging (`graphDataRefusal`: the
+ * area and every path of T13.3-2's operational path set, the journal, the
+ * session directory, and the lock path keeping their modes) before each
+ * read's invocation (the reads take no hold) and, for the mutating `review
+ * create`, at the seam of 13.5 — after acquisition, before any
+ * modification (T14-9; `runHeldWithStaging`), the staging otherwise
+ * refusing acquisition's creation of the lock directory first. Every
+ * refreshing read of 13.3 and `review create` exit 2 with the
  * error document concerning `.xspec` (14.24: a graph-data write concerns
  * the area); `check` exits 1 with the staleness alone — every finding
  * condition 10 concerning a path with `locations` `[]` and instructing
@@ -880,7 +889,7 @@ async function reportersArm(product: ProductBinding): Promise<void> {
     );
     await workspace.edit(RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
     const staged = await snapshotWorkspace(workspace.root);
-    const staging = await refusalUnder(GRAPH_DATA_AREA)(workspace.root);
+    const staging = await graphDataRefusal()(workspace.root);
     try {
       const reporters: readonly (readonly string[])[] = [
         ["ids", "--json"],
@@ -1027,7 +1036,7 @@ async function reportersArm(product: ProductBinding): Promise<void> {
         workspace,
         createArgv,
         "hold-t14-9-reporters.tmp",
-        refusalUnder(GRAPH_DATA_AREA),
+        graphDataRefusal(),
         createLabel,
       ),
       [GRAPH_DATA_AREA],
@@ -1035,8 +1044,9 @@ async function reportersArm(product: ProductBinding): Promise<void> {
         `(13.5): with \`.xspec\` staged unwritable once it has acquired, its ` +
         `refused graph-data write reports the write failure concerning the ` +
         `graph-data area, never a path inside it — nor the lock path, ` +
-        `release's refused deletions there changing no outcome — and no ` +
-        `session is created (SPEC 14.24, 11.6, 13.3, 13.5)`,
+        `release's refused deletion of the emptied lock directory changing ` +
+        `no outcome — and no session is created (SPEC 14.24, 11.6, 13.3, ` +
+        `13.5)`,
     );
     assertSnapshotsEqual(
       staged,
@@ -1058,9 +1068,10 @@ async function reportersArm(product: ProductBinding): Promise<void> {
  * Precedence, the failing twin: an identically prepared workspace whose
  * sources also fail validation (A's `d` reference respelled to resolve
  * nowhere, 14.5) beside the staleness edit — with `.xspec` staged
- * unwritable, `ids` exits 1 with the findings: nothing is written on a
- * failing workspace (13.3), so no write is refused, and a product
- * attempting the refresh first fails here.
+ * unwritable by T14-9's graph-data staging (`graphDataRefusal`), `ids`
+ * exits 1 with the findings: nothing is written on a failing workspace
+ * (13.3), so no write is refused, and a product attempting the refresh
+ * first fails here.
  */
 async function failingTwinArm(product: ProductBinding): Promise<void> {
   const context =
@@ -1079,7 +1090,7 @@ async function failingTwinArm(product: ProductBinding): Promise<void> {
       product,
       workspace,
       ["ids", "--json"],
-      refusalUnder(GRAPH_DATA_AREA),
+      graphDataRefusal(),
       context,
     );
     assertExitCode(
@@ -1469,7 +1480,7 @@ export async function runT149AcquisitionArms(
 const T14_9 = defineProductTest({
   id: "T14-9",
   title:
-    "write failures (14.24): a write the environment refuses is a usage error — exit 2, the error document (`code` `write-failure`, `path` the concerned path) on stdout, the diagnostic on stderr, never a finding — from every command making the write and met only at the write it refuses; one arm per concerned path through T13.5-7's stagings: a derived path under specs/b/ (`build`), an emitted Markdown file under out/specs (`move`), the rewritten source specs/b/B.mdx and the journal (`rename`), the session file (`review resolve`), a relocation's origin removal and destination production (`move`), and the graph-data area `.xspec` from every refreshing read of 13.3 and `review create` (staged at the seam) on a stale workspace — while `check` exits 1 with the staleness, `inventory` and `version` exit 0, and a `--preview` exits 0 writing nothing; acquisition's writes through T13.5-10's stagings, each staged before the invocation, each mutating command in turn: the entry's addition, a leftover's removal (an `r-x` leftover directory; a plain file at the lock path under the full discipline), and the lock directory's creation concerning `.xspec/lock`, never an entry's path, and the area directory's creation (an unbuilt workspace, its root read-only) and an occupant of the area's own path (`.xspec` a plain file) concerning `.xspec`, each modifying nothing; precedence: the invalid-flag-value and unknown-node usage errors (`code` null), the failing twin's findings (`ids` exit 1), a validation refusal under (a)'s staging (exit 1, no write), and a hold file in a read-only directory (13.5's usage error, `code` null); after every arm, permissions restored (an occupant of the area's own path deleted by hand), `build` exits 0 and `check` is clean (SPEC 14.24, 12.0, 12.7, 13.3, 13.5)",
+    "write failures (14.24): a write the environment refuses is a usage error — exit 2, the error document (`code` `write-failure`, `path` the concerned path) on stdout, the diagnostic on stderr, never a finding — from every command making the write and met only at the write it refuses; one arm per concerned path through T13.5-7's stagings: a derived path under specs/b/ (`build`), an emitted Markdown file under out/specs (`move`), the rewritten source specs/b/B.mdx and the journal (`rename`), the session file (`review resolve`), a relocation's origin removal and destination production (`move`), and the graph-data area `.xspec` from every refreshing read of 13.3 and `review create` (staged at the seam) on a stale workspace under the graph-data staging (`.xspec` and every directory of T13.3-2's operational path set read-only, every file of it unwritable, the journal, the session directory, and the lock path keeping their modes) — while `check` exits 1 with the staleness, `inventory` and `version` exit 0, and a `--preview` exits 0 writing nothing; acquisition's writes through T13.5-10's stagings, each staged before the invocation, each mutating command in turn: the entry's addition, a leftover's removal (an `r-x` leftover directory; a plain file at the lock path under the full discipline), and the lock directory's creation concerning `.xspec/lock`, never an entry's path, and the area directory's creation (an unbuilt workspace, its root read-only) and an occupant of the area's own path (`.xspec` a plain file) concerning `.xspec`, each modifying nothing; precedence: the invalid-flag-value and unknown-node usage errors (`code` null), the failing twin's findings (`ids` exit 1), a validation refusal under (a)'s staging (exit 1, no write), and a hold file in a read-only directory (13.5's usage error, `code` null); after every arm, permissions restored (an occupant of the area's own path deleted by hand), `build` exits 0 and `check` is clean (SPEC 14.24, 12.0, 12.7, 13.3, 13.5)",
   // A hang guard only (H-10): seventeen workspaces — eleven built, renamed,
   // checked, committed, and driven, and six CONF-CORE-shaped ones for
   // acquisition's writes — generous under a saturated box.

@@ -9,10 +9,24 @@
 //   refused whatever write strategy the product uses (14.24 pins the effect,
 //   never the mechanism). `stageWriteRefusal` is that discipline for one
 //   path; `stageWriteRefusalUnder` applies it to every path beneath a
-//   directory whose contents the harness does not know by name (graph data
-//   under `.xspec`, the derived files under `specs/b/`) while leaving the
-//   directory's own parent untouched, so a product's exclusivity state,
-//   wherever in the workspace it keeps it, never meets the staging.
+//   directory whose contents the harness does not know by name (the derived
+//   files under `specs/b/`, emitted Markdown under `out/specs`) while
+//   leaving the directory's own parent untouched, so a product's
+//   exclusivity state, wherever in the workspace it keeps it, never meets
+//   the staging. Graph data's is T14-9's graph-data staging,
+//   `stageGraphDataWriteRefusal`, wherever a test refuses a graph-data write
+//   by staging `.xspec` unwritable: graph data's paths are unenumerated
+//   (SPEC 13.3: files directly in the area or in directories of its own
+//   below it), so it covers the area and every path of T13.3-2's
+//   operational path set, as T14-10(f) stages graph data's refused reads —
+//   `.xspec` itself and every directory of the set made read-only and every
+//   file of it unwritable (the adapter layer's `collectGraphDataEntries`
+//   walks the set), so every graph-data write is refused whatever layout
+//   graph data takes — while the journal, the session directory, and the
+//   lock path keep their modes: neither a journal append, a session write,
+//   nor a held run's own entry meets the staging (release's deletion of the
+//   emptied lock directory, an entry of the read-only area, is refused,
+//   which changes no outcome — SPEC 13.5, 14.24).
 // - T14-10 (read refusals): a refused content read is the file's read
 //   permission removed with its write permission kept (mode `-w-------`,
 //   0o200), so a regeneration that replaces or rewrites the object is never
@@ -46,11 +60,12 @@
 //   product's to choose — graph data under `.xspec`, a companion's suffix
 //   under `specs/b` — and need be neither ASCII nor even valid UTF-8 (Linux).
 //   So wherever a staging reaches entries the harness does not name (the
-//   area form's walk, a listing refusal's by-name probe) it lists them as
-//   raw bytes and acts on each at its exact byte path, never through a UTF-8
-//   decode, which would misname such an entry and so skip or miss it; a
-//   caller holding such a path passes it as bytes (`StagedPath`). A
-//   diagnosis renders a path segment that is not valid UTF-8 as its hex.
+//   area form's walk, the graph-data staging's, a listing refusal's by-name
+//   probe) it lists them as raw bytes and acts on each at its exact byte
+//   path, never through a UTF-8 decode, which would misname such an entry
+//   and so skip or miss it; a caller holding such a path passes it as bytes
+//   (`StagedPath`). A diagnosis renders a path segment that is not valid
+//   UTF-8 as its hex.
 // - Platform: the Linux leg's (E-1). On any other platform every staging
 //   throws `HarnessStagingError` at once; the Linux-leg tests are never
 //   selected into the Windows subset (E-6).
@@ -70,11 +85,19 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { GraphDataEntries } from "./adapters/record-staging.js";
+import {
+  collectGraphDataEntries,
+  GRAPH_DATA_AREA_PATH,
+} from "./adapters/record-staging.js";
+import { snapshotKeyBytes } from "./snapshot.js";
 
 /**
  * The staging modes, named in every `HarnessStagingError`: the permission
  * stagings of this module (`directory-mode` among them: a directory given a
- * stated mode, each declared probe verified), the workspace builder's S-9
+ * stated mode, each declared probe verified; and
+ * `graph-data-write-refusal`: T14-9's graph-data staging, the area and
+ * T13.3-2's operational path set), the workspace builder's S-9
  * derivability check
  * of a staged MDX source (`mdx-derivability`, helpers/workspace.ts), its
  * TypeScript check of a staged code source or configuration file
@@ -100,6 +123,7 @@ import * as path from "node:path";
 export type StagingMode =
   | "write-refusal"
   | "write-refusal-under"
+  | "graph-data-write-refusal"
   | "read-refusal-of-file"
   | "read-refusal-of-directory"
   | "directory-mode"
@@ -637,10 +661,12 @@ export async function verifyWriteRefusalUnder(
 
 /**
  * Stage a write refusal of every path beneath `directory` — T14-9's
- * discipline for an area whose write paths the harness cannot name (`.xspec`,
- * `specs/b`): the directory and every directory beneath it made read-only,
- * every regular file beneath made unwritable, symbolic links left alone, and
- * the directory's own parent untouched. Every entry is reached at its exact
+ * discipline for an area whose write paths the harness cannot name
+ * (`specs/b`, `out/specs`; never the graph-data area, whose durable and
+ * transient occupants keep their modes under `stageGraphDataWriteRefusal`):
+ * the directory and every directory beneath it made read-only, every
+ * regular file beneath made unwritable, symbolic links left alone, and the
+ * directory's own parent untouched. Every entry is reached at its exact
  * bytes, whatever name the product chose (module header: Names). Verified
  * before returning (E-1).
  */
@@ -660,6 +686,169 @@ export async function stageWriteRefusalUnder(
   return verified(makeStaging(mode, area, records), () =>
     verifyWriteRefusalUnder(area),
   );
+}
+
+// --- the graph-data write refusal -------------------------------------------
+
+/** The area's durable occupants, no graph data (SPEC 13.4, 6.1, 10.7). */
+const JOURNAL_NAME = "journal";
+const SESSION_DIRECTORY_NAME = "reviews";
+/** The owner's bits a kept path's own mode must grant for it to be probed. */
+const OWNER_WRITE = 0o200;
+const OWNER_WRITE_AND_SEARCH = 0o300;
+
+/** T13.3-2's operational path set as the graph-data staging reaches it. */
+interface GraphDataPaths {
+  /** Every directory of the set, never the area itself, in byte order. */
+  readonly dirs: Buffer[];
+  /** Every plain file of the set, in byte order. */
+  readonly files: Buffer[];
+}
+
+/**
+ * Every directory and plain file of T13.3-2's operational path set in the
+ * workspace rooted at `root` — every path under `.xspec/` but the durable
+ * journal and session directory and the transient lock path, each with
+ * everything under it — as the adapter layer's one walk of the set finds
+ * them (`collectGraphDataEntries`: names listed as raw bytes, each entry
+ * classified by `lstat`, symbolic links and other kinds left out), each as
+ * its exact byte path (module header: Names). A walk that fails — the area
+ * absent, or a listing the environment refuses — is a staging error.
+ */
+async function graphDataPaths(
+  mode: StagingMode,
+  root: string,
+  area: string,
+): Promise<GraphDataPaths> {
+  let entries: GraphDataEntries;
+  try {
+    entries = await collectGraphDataEntries(root);
+  } catch (thrown) {
+    throw new HarnessStagingError(
+      mode,
+      area,
+      `walking T13.3-2's operational path set failed with ${describeError(thrown) || String(thrown)}`,
+    );
+  }
+  const rootBytes = pathBytes(root);
+  const at = (key: string): Buffer =>
+    joinBytes(rootBytes, snapshotKeyBytes(key));
+  return { dirs: entries.directories.map(at), files: entries.files.map(at) };
+}
+
+/**
+ * The permissions the graph-data staging keeps, attempted in this process
+ * and required granted (E-1): the journal, where a plain file whose mode
+ * grants its owner writing, opens for appending (no byte written), and the
+ * session directory, where a plain directory whose mode grants its owner
+ * writing and search, admits a fresh file, created and removed again — the
+ * read-only area refusing neither (SPEC 6.1, 10.7, 13.5). A path absent, of
+ * another kind, or whose own mode withholds the permission holds none the
+ * staging keeps and is not probed; nor is the lock path, a held run's
+ * (13.5), where the harness never makes an entry.
+ */
+async function probeGraphDataStagingKeeps(
+  mode: StagingMode,
+  area: string,
+): Promise<void> {
+  const journal = path.join(area, JOURNAL_NAME);
+  if (
+    (await kindOf(journal)) === "file" &&
+    ((await modeOf(journal)) & OWNER_WRITE) !== 0
+  ) {
+    await expectAllowed(
+      mode,
+      area,
+      `opening ${journal} for appending`,
+      async () => {
+        const handle = await fsp.open(journal, "a");
+        return () => handle.close();
+      },
+    );
+  }
+  const sessions = path.join(area, SESSION_DIRECTORY_NAME);
+  if (
+    (await kindOf(sessions)) === "directory" &&
+    ((await modeOf(sessions)) & OWNER_WRITE_AND_SEARCH) ===
+      OWNER_WRITE_AND_SEARCH
+  ) {
+    const file = path.join(sessions, freshName());
+    await expectAllowed(
+      mode,
+      area,
+      `creating and removing ${file}`,
+      async () => {
+        const handle = await fsp.open(file, "wx");
+        await handle.close();
+        await fsp.unlink(file);
+        return async () => undefined;
+      },
+    );
+  }
+}
+
+/**
+ * E-1 verification of T14-9's graph-data staging in the workspace rooted at
+ * `root` (exported for the self-test, which runs it on an unstaged
+ * workspace to see the ineffective-staging report fire): creation is
+ * attempted in `.xspec` and in every directory of T13.3-2's operational
+ * path set, a write-open on every file of the set, a rename into `.xspec`,
+ * and the replacement and removal of the set's first file — each refused,
+ * each entry reached at its exact bytes — and the permissions the staging
+ * keeps are attempted, each required granted
+ * (`probeGraphDataStagingKeeps`).
+ */
+export async function verifyGraphDataWriteRefusal(root: string): Promise<void> {
+  const mode: StagingMode = "graph-data-write-refusal";
+  const area = path.join(root, GRAPH_DATA_AREA_PATH);
+  const { dirs, files } = await graphDataPaths(mode, root, area);
+  for (const dir of [area, ...dirs]) await probeCreation(mode, area, dir);
+  for (const file of files) await probeWriteOpen(mode, area, file);
+  await probeReplaceAndRemove(mode, area, joinPath(area, freshName()), false);
+  if (files.length > 0) {
+    await probeReplaceAndRemove(mode, area, files[0]!, true);
+  }
+  await probeGraphDataStagingKeeps(mode, area);
+}
+
+/**
+ * Stage T14-9's graph-data write refusal in the workspace rooted at `root`
+ * — the discipline wherever a test refuses a graph-data write by staging
+ * `.xspec` unwritable. Graph data's paths are unenumerated (SPEC 13.3: a
+ * product may keep it in files directly in the area or in directories of
+ * its own below it), so the staging covers the area and every path of
+ * T13.3-2's operational path set, as T14-10(f) stages graph data's refused
+ * reads: `.xspec` itself and every directory of the set made read-only and
+ * every plain file of it unwritable, each reached at its exact name bytes
+ * (module header: Names), symbolic links and other kinds left alone — so
+ * every graph-data write is refused whatever layout graph data takes, where
+ * `.xspec` alone made read-only would leave a file in a directory below it
+ * replaceable. The journal, the session directory, and the lock path, each
+ * with everything under it, keep their modes. `.xspec` must be a plain
+ * directory; graph data may be absent, its creation refused by the area's
+ * mode. Verified before returning (E-1, `verifyGraphDataWriteRefusal`); a
+ * staging that fails part-way, or whose verification fails, reinstates
+ * every mode it changed.
+ */
+export async function stageGraphDataWriteRefusal(
+  root: string,
+): Promise<PermissionStaging> {
+  const mode: StagingMode = "graph-data-write-refusal";
+  assertLinux(mode, root);
+  const area = path.join(root, GRAPH_DATA_AREA_PATH);
+  await assertPlainDirectory(mode, area, area, "the graph-data area");
+  const { dirs, files } = await graphDataPaths(mode, root, area);
+  const records: ModeRecord[] = [];
+  const staging = makeStaging(mode, area, records);
+  try {
+    for (const entry of [area, ...dirs, ...files]) {
+      await setMode(records, entry, (prior) => prior & ~WRITE_BITS);
+    }
+  } catch (thrown) {
+    await staging.restore().catch(() => undefined);
+    throw thrown;
+  }
+  return verified(staging, () => verifyGraphDataWriteRefusal(root));
 }
 
 // --- read-refusal probes ----------------------------------------------------

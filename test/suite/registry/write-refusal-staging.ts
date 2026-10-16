@@ -11,7 +11,11 @@
 // holding the concerned path made read-only and its occupant, where one
 // exists, unwritable — so creation, replacement in place or by renaming,
 // appending, and removal are all refused whatever write strategy the product
-// uses; each staging verifies itself on the harness's own process before the
+// uses — a graph-data write by T14-9's graph-data staging (`graphDataRefusal`:
+// `.xspec` itself and every directory of T13.3-2's operational path set
+// read-only and every file of it unwritable, whatever layout graph data
+// takes, the journal, the session directory, and the lock path keeping their
+// modes); each staging verifies itself on the harness's own process before the
 // product proceeds and throws `HarnessStagingError` (a harness error, never a
 // diagnosed failure or a skip, H-9/H-11) when the runner is privileged. For a
 // mutating command the staging is applied while the command is held at the
@@ -93,6 +97,7 @@ import {
 } from "../../helpers/lock-state.js";
 import type { PermissionStaging } from "../../helpers/permissions.js";
 import {
+  stageGraphDataWriteRefusal,
   stageWriteRefusal,
   stageWriteRefusalUnder,
 } from "../../helpers/permissions.js";
@@ -830,9 +835,27 @@ export function refusalAt(rel: string): StagingApplier {
   return async (root) => await stageWriteRefusal(path.join(root, rel));
 }
 
-/** T14-9's area-form discipline beneath a workspace-relative directory. */
+/**
+ * T14-9's area-form discipline beneath a workspace-relative directory (the
+ * derived files under `specs/b/`, emitted Markdown under `out/specs`, a
+ * relocation's directory) — never the graph-data area, whose writes take
+ * {@link graphDataRefusal}.
+ */
 export function refusalUnder(rel: string): StagingApplier {
   return async (root) => await stageWriteRefusalUnder(path.join(root, rel));
+}
+
+/**
+ * T14-9's graph-data staging (helpers/permissions.ts
+ * `stageGraphDataWriteRefusal`), wherever a test refuses a graph-data write
+ * by staging `.xspec` unwritable: `.xspec` itself and every directory of
+ * T13.3-2's operational path set read-only and every file of it unwritable,
+ * so every graph-data write is refused whatever layout graph data takes,
+ * the journal, the session directory, and the lock path keeping their
+ * modes — each staging verified on the harness itself (E-1).
+ */
+export function graphDataRefusal(): StagingApplier {
+  return async (root) => await stageGraphDataWriteRefusal(root);
 }
 
 /**
@@ -1213,10 +1236,11 @@ function assertStaleFindingsConcernAndCorrection(
  * A never-reporter `check`'s staleness on the B-edited workspace — T13.5-7
  * (f)'s refreshing-read state and T14-9's reporter-set state, each a built
  * workspace whose `specs/b/B.mdx` text was edited without rebuilding, with
- * `.xspec` unwritable (SPEC 14.10, 14, 12.7): every condition-10 finding —
- * a per-file finding or the graph-data unit form — has no in-source
- * location and carries the derived path (or the graph-data area) it
- * concerns as its 12.7 `path`: `path` non-null, `locations` `[]`; and
+ * `.xspec` unwritable by T14-9's graph-data staging (SPEC 14.10, 14, 12.7):
+ * every condition-10 finding — a per-file finding or the graph-data unit
+ * form — has no in-source location and carries the derived path (or the
+ * graph-data area) it concerns as its 12.7 `path`: `path` non-null,
+ * `locations` `[]`; and
  * every finding instructs rebuilding (`assertFindingInstructsRebuilding`:
  * its message names `build`), the correction SPEC 14.10 requires of each
  * per-file finding and of the unit form — the staging is a text edit of a
@@ -2249,15 +2273,19 @@ export async function buildArm(product: ProductBinding): Promise<void> {
 
 /**
  * (f), the refreshing reads: on the same edited-but-not-rebuilt workspace
- * with `.xspec` staged unwritable, `query nodes` and `view specs/a/A.mdx`
- * each exit 2 with the error document concerning `.xspec` (14.24: a
- * graph-data write concerns the area), stdout exactly that document and no
- * answer (13.3, 11.2), while `check` on the same state exits 1 reporting the
- * staleness (never a 14.24 reporter) — condition 10 alone, every finding
- * concerning a path with `locations` `[]` and instructing rebuilding, B's
- * generated module `specs/b/B.xspec.ts` among them (14.10, 14, 12.7;
- * `assertEditedBStalenessConcerns`) — and a `move --preview` exits 0
- * writing nothing (6.6).
+ * with `.xspec` staged unwritable by T14-9's graph-data staging, which
+ * covers the area and every path of T13.3-2's operational path set
+ * (`stageGraphDataWriteRefusal`: `.xspec` and every directory of the set
+ * read-only, every file of it unwritable, the journal, the session
+ * directory, and the lock path keeping their modes), `query nodes` and
+ * `view specs/a/A.mdx` each exit 2 with the error document concerning
+ * `.xspec` (14.24: a graph-data write concerns the area), stdout exactly
+ * that document and no answer (13.3, 11.2), while `check` on the same state
+ * exits 1 reporting the staleness (never a 14.24 reporter) — condition 10
+ * alone, every finding concerning a path with `locations` `[]` and
+ * instructing rebuilding, B's generated module `specs/b/B.xspec.ts` among
+ * them (14.10, 14, 12.7; `assertEditedBStalenessConcerns`) — and a `move
+ * --preview` exits 0 writing nothing (6.6).
  */
 export async function refreshingReadsArm(
   product: ProductBinding,
@@ -2273,9 +2301,7 @@ export async function refreshingReadsArm(
   try {
     await workspace.edit(RENAME_B_PATH, F_EDIT_FROM, F_EDIT_TO);
     const staged = await snapshotWorkspace(workspace.root);
-    const staging = await stageWriteRefusalUnder(
-      path.join(workspace.root, GRAPH_DATA_AREA),
-    );
+    const staging = await graphDataRefusal()(workspace.root);
     try {
       for (const argv of [
         ["query", "nodes", "--json"],
