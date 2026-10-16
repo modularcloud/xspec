@@ -90,12 +90,14 @@ jobs:
   suite-linux:
     name: Full suite (Linux, E-1)
     runs-on: ubuntu-24.04
-    # The suite's Vitest run took 842 s at 34df333 on one hosted-runner class
-    # and 1375-1403 s at a3196a1 and 113ec73 on another (transform and import
-    # times scaling alike), before the trial-heavy 13.5 arms, P-10's new
-    # arms, and the new P-14 and P-15 are implemented; 60 minutes leaves room
-    # for both classes.
-    timeout-minutes: 60
+    # A limit of the CI service, not a harness guard (TEST-SPEC S-3). The
+    # suite's Vitest run took 1099.5 s at 3bb3df8 on one hosted-runner class
+    # and 1951.3-2015.5 s at 80b83aa and f22cc77 on another (transform and
+    # import times scaling alike; the job up to 34 minutes), before the
+    # refined TEST-SPEC's twenty new tests, P-16, and the new arms of
+    # existing tests (T13.3-5(a)'s seeded tampering trials among them) are
+    # implemented; 90 minutes leaves room for both classes.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
