@@ -98,7 +98,6 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
     [
       "T6.1-2",
       "T10.4-5",
-      "T13.4-5",
       "T13.5-1",
       "T13.5-2",
       "T13.5-3",
@@ -193,13 +192,12 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // command is gated by it), graph data and every other derived byte
       // independent of how many such lines the journal holds (13.4).
       // Mutating commands, and the entries `rename`/`move` append, are
-      // unchanged. Fails T13.4-5 (its journal byte-compares) and T13.5-4
-      // (the held-state comparisons once its reads, and its `build`, during
-      // a hold have exited, the journal grown — at its first read during the
-      // hold, before the `build` arm, whose `rename` would end with the
-      // `build`'s line where its twin's journal holds none).
+      // unchanged. Fails T13.5-4 alone (the held-state comparisons once its
+      // reads, and its `build`, during a hold have exited, the journal grown
+      // — at its first read during the hold, before the `build` arm, whose
+      // `rename` would end with the `build`'s line where its twin's journal
+      // holds none).
       violator("VIOL-CORE-CHATTYREADS", "conf-core/bin-chattyreads.mjs", [
-        "T13.4-5",
         "T13.5-4",
       ]),
       // VIOL-CORE-PERSISTREADS: review reads persist read-time invalidation —
@@ -547,7 +545,7 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
   conformer(
     "CONF-AVAIL",
     "conf-avail/bin.mjs",
-    ["T11.2-2", "T11.2-4", "T11.3-4", "T11.4-1", "T11.4-3", "T11.4-4"],
+    ["T11.2-2", "T11.2-4", "T11.3-4", "T11.4-3", "T11.4-4"],
     [
       // VIOL-AVAIL-NULLMARKER: the unavailability marker is never emitted —
       // every datum the rules of SPEC 11.2 leave undefined is carried as
@@ -569,7 +567,6 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       violator("VIOL-AVAIL-OMIT", "conf-avail/bin-omit.mjs", [
         "T11.2-2",
         "T11.2-4",
-        "T11.4-1",
         "T11.4-3",
         "T11.4-4",
       ]),

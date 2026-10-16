@@ -28,9 +28,12 @@
 // sweep's, the previews' inner ones included — run through
 // `snapshotDirectory` and `assertSnapshotsEqual` of test/helpers/snapshot.ts,
 // filtered to the journal entry (`assertLeavesJournalUnchanged`): the
-// compare-around-command machinery VIOL-CORE-CHATTYREADS certifies on
-// T13.4-5, on which CERTIFICATIONS.md's Exclusions bullet for T6.1-1 relies,
-// with `readJournal`'s plain-file check as the premise.
+// compare-around-command machinery VIOL-CORE-CHATTYREADS certifies over the
+// same journal on T13.5-4 — its held-state comparison, made once its reads
+// have exited, captures the workspace through the same `snapshotDirectory`
+// and compares each entry through the same `describeEntryDifference` — on
+// which CERTIFICATIONS.md's Exclusions bullet for T6.1-1 relies, with
+// `readJournal`'s plain-file check as the premise.
 //
 // T6.1-1's deleted-journal arm (SPEC 6.1: the journal is written only by
 // `rename` and `move`, the file coming into existence with a journaled
@@ -44,10 +47,7 @@
 // T6.1-1's first negative: a mislocated absence check fails loud there
 // rather than passing silently. The arm lives here, the journal's home,
 // not in T13.4-5, whose never-regenerated arm is the session file's alone
-// and journal-neutral (section-13.4.ts): T13.4-5's certification by
-// VIOL-CORE-CHATTYREADS, whose `build` would recreate a deleted journal,
-// rests on its byte-compare loop alone — the machinery the paragraph above
-// leans on.
+// and journal-neutral (section-13.4.ts).
 //
 // Conservative operationalizations (noted per H-4):
 // - "One entry per line" + "the journal is written only by rename and move"
@@ -320,17 +320,19 @@ function journalView(snapshot: DirectorySnapshot): DirectorySnapshot {
 /**
  * Byte-compare the journal around one command (T6.1-1 "never modify it")
  * through the compare-around-command machinery of helpers/snapshot.ts — the
- * `snapshotDirectory` and `assertSnapshotsEqual` pair VIOL-CORE-CHATTYREADS
- * certifies over the same journal on T13.4-5 (CERTIFICATIONS.md, its Note
- * and the Exclusions bullet for T6.1-1). The premise first: the journal goes
- * in as a plain file (`readJournal`'s check), so the compare never passes
- * vacuously over an absent journal. Then the workspace root is snapshotted,
- * the command runs with its exact exit code asserted (H-5), the root is
- * snapshotted again, and both snapshots, viewed as the journal entry alone,
- * are compared — the first assertion to meet any change to the journal: an
- * append or a rewrite (`file bytes differ`), a deletion (`removed`), a
- * replacement by another kind (`kind changed`). Returns the run so the
- * caller can decode its answer.
+ * `snapshotDirectory` and `assertSnapshotsEqual` pair, whose capture and
+ * per-entry compare (`describeEntryDifference`) VIOL-CORE-CHATTYREADS
+ * certifies over the same journal on T13.5-4's held-state comparison
+ * (CERTIFICATIONS.md, its Note and the Exclusions bullet for T6.1-1). The
+ * premise first: the journal goes in as a plain file (`readJournal`'s
+ * check), so the compare never passes vacuously over an absent journal.
+ * Then the workspace root is snapshotted, the command runs with its exact
+ * exit code asserted (H-5), the root is snapshotted again, and both
+ * snapshots, viewed as the journal entry alone, are compared — the first
+ * assertion to meet any change to the journal: an append or a rewrite
+ * (`file bytes differ`), a deletion (`removed`), a replacement by another
+ * kind (`kind changed`). Returns the run so the caller can decode its
+ * answer.
  */
 async function assertLeavesJournalUnchanged(
   product: ProductBinding,

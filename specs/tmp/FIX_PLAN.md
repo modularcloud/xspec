@@ -241,6 +241,8 @@ Governing IP: `specs/patches/0001-external-ui-apis.md` (Stage: Tests Specified);
 
 ### Task 1 — The C-1 manifest mirrors CERTIFICATIONS.md; CI's harness-self job green (RD-G1, V)
 
+**Status.** The change and its local checks landed in the commit `sdg(phase-9): mirror CERTIFICATIONS.md's in-scope and certified sets in the C-1 manifest (FIX_PLAN Task 1)`, which also corrected the registry comments that claimed T13.4-5 or T11.4-1 certified (`section-6.1.ts`, `section-13.4.ts`, `section-11.4.ts`). What remains is the CI check below and its follow-up commit, which removes this task.
+
 **Gap.** TEST-SPEC C-1; CERTIFICATIONS.md §CONF-CORE "In-scope tests" (T6.1-2, T10.4-5, T13.5-1–T13.5-5, T13.5-8), §VIOL-CORE-CHATTYREADS "Certifies" (T13.5-4), §CONF-AVAIL "In-scope tests" (T11.2-2, T11.2-4, T11.3-4, T11.4-3, T11.4-4), §VIOL-AVAIL-OMIT "Certifies" (T11.2-2, T11.2-4, T11.4-3, T11.4-4); 7226090 took T13.4-5 and T11.4-1 out of these scopes (T13.4-5 now sits under Exclusions, "T6.1-1 and T13.4-5"). `test/self/certification-fixtures.ts` still lists T13.4-5 in CONF-CORE's in-scope set (line 101) and in CHATTYREADS' certified set (line 202), and T11.4-1 in CONF-AVAIL's in-scope set (line 550) and in OMIT's certified set (line 572). `test/self/certification-document.test.ts` ("the fixture manifest equals CERTIFICATIONS.md: every fixture wired with the document's ID sets (C-1)", line 301) fails locally and in CI run 1337 (harness-self job 116963771808) — the gate's only red.
 
 **Change.**

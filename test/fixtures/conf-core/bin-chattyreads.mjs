@@ -8,14 +8,13 @@
 // as neither an identity mapping (5.4) nor a malformed entry (no 14.13, so
 // no later command is gated by it), graph data and every other derived byte
 // independent of how many such lines the journal holds (13.4). Mutating
-// commands, and the entries `rename`/`move` append, are unchanged. Certifies T13.4-5 and T13.5-4 (C-1): exactly they fail against
-// this fixture — T13.4-5's journal byte-compares under `build` and the read
-// commands, and T13.5-4's held-state comparisons once its reads, and its
-// `build`, during a hold have exited, the journal grown past the
-// pre-invocation bytes they assert (the first read during the hold fails
-// it, before the `build` arm, whose `rename` would end with the `build`'s
-// line where its twin's journal holds none); every other §CONF-CORE
-// in-scope test passes.
+// commands, and the entries `rename`/`move` append, are unchanged.
+// Certifies T13.5-4 (C-1): exactly it fails against this fixture — its
+// held-state comparisons once its reads, and its `build`, during a hold
+// have exited, the journal grown past the pre-invocation bytes they assert
+// (the first read during the hold fails it, before the `build` arm, whose
+// `rename` would end with the `build`'s line where its twin's journal holds
+// none); every other §CONF-CORE in-scope test passes.
 import { runXspec } from "./product.mjs";
 
 const code = await runXspec(process.argv.slice(2), process.cwd(), {

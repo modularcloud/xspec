@@ -364,41 +364,25 @@
 //   element's bytes lie in NO span — a construct matching no removal rule's
 //   form is content (SPEC 11.2).
 //
-// Certification (CERTIFICATIONS.md CONF-AVAIL): T11.4-1, T11.4-3, and
-// T11.4-4 are IN scope (the fixture family lands with the
-// certification-manifest task), so those bodies obey the scope's staging
-// constraints exactly: workspaces of `.mdx` spec sources at valid-UTF-8
-// `#`-free paths, imports as the fixtures stage them — T11.4-4's masked
-// target a byte-order-mark file (its 14.20 the zero-length range at offset
-// 0) and its code group the one the scope admits, its glob matching one
-// `.mdx` file no spec glob matches, whose content no invocation reads;
-// every command driven is drawn from the enumerated surface — T11.4-1's
-// bare whole-domain `view`, T11.4-4's bare `view` plus two `<file>`-operand
-// `view`s, T11.4-3's two bare `view`s plus one `<file>`-operand `view`,
-// never `occurrences` or `at` — with NO gate-reference `build` (each
-// answer's own findings member is the staging integrity) and NO snapshot
-// compare (graph-data and refresh behavior are expressly out of CONF-AVAIL
-// scope), and every staged condition drawn from the scope's stated set
-// (T11.4-3 stages 14.17 alone; T11.4-4 stages 14.15, 14.6, and 14.20 at
-// offset 0). T11.4-1's list-order arm stages several imports, comments,
-// and references in one file, as the scope admits — comments in the
-// `{/* … */}` form, embeddings spelling nothing beside the call, every import
-// a default binding of a discovered spec source, no import cycle, and no
-// finding. T11.4-1's fixtures stage NO undefined datum — every
-// node identity defined under 11.2's chain conditions, the invalid-element
-// arm keeping every spelled identity defined, every import target and
-// occurrence source of the list-order arm defined — so its answers carry the
-// unavailability marker nowhere: the marker-free ground
-// VIOL-AVAIL-NULLMARKER's passing side stands on (nothing undefined, so the
-// deviation touches nothing), while the stated `null`s the answers DO carry
-// (each root's `tags`/`coverage`; `closing` on self-closing sections;
-// `opening`/`closing` on roots) make the decode fail under VIOL-AVAIL-OMIT
-// exactly as certified (`null` is never omission — decodeViewReport rejects
-// the absent members). T11.4-3 is the per-node unavailability carrier the
-// document names: under VIOL-AVAIL-NULLMARKER its identity, tags, and
-// coverage unavailability arms — the shared fixture's bare-name `tags`
-// among them — read `null` where the test asserts the marker literally (a
-// `null` identity fails the form-exact decode outright; `null`
+// Certification (CERTIFICATIONS.md CONF-AVAIL): T11.4-3 and T11.4-4 are IN
+// scope, so those bodies obey the scope's staging constraints exactly:
+// workspaces of `.mdx` spec sources at valid-UTF-8 `#`-free paths, imports
+// as the fixtures stage them — T11.4-4's masked target a byte-order-mark
+// file (its 14.20 the zero-length range at offset 0) and its code group the
+// one the scope admits, its glob matching one `.mdx` file no spec glob
+// matches, whose content no invocation reads; every command driven is drawn
+// from the enumerated surface — T11.4-4's bare `view` plus two
+// `<file>`-operand `view`s, T11.4-3's two bare `view`s plus one
+// `<file>`-operand `view`, never `occurrences` or `at` — with NO
+// gate-reference `build` (each answer's own findings member is the staging
+// integrity) and NO snapshot compare (graph-data and refresh behavior are
+// expressly out of CONF-AVAIL scope), and every staged condition drawn from
+// the scope's stated set (T11.4-3 stages 14.17 alone; T11.4-4 stages 14.15,
+// 14.6, and 14.20 at offset 0). T11.4-3 is the per-node unavailability
+// carrier the document names: under VIOL-AVAIL-NULLMARKER its identity,
+// tags, and coverage unavailability arms — the shared fixture's bare-name
+// `tags` among them — read `null` where the test asserts the marker
+// literally (a `null` identity fails the form-exact decode outright; `null`
 // tags/coverage fail the tree compare against the expected marker);
 // under VIOL-AVAIL-OMIT every stated-`null` member its answers carry (each
 // root's `tags`/`coverage`, every finding's `null` path, the spread entry's
@@ -416,6 +400,14 @@
 // no-default declarations' `null` name) is absent and the decode rejects
 // the omission; under VIOL-AVAIL-NOFILE it passes untouched — T11.4-4
 // drives `view` alone.
+// T11.4-1 is NOT in scope (CERTIFICATIONS.md's CONF-AVAIL Justification):
+// TEST-SPEC runs its whole-domain arm on T11.6-3's order fixture, which the
+// scope does not serve, and its trees, ranges, and list orders are positive
+// observations, byte-asserted against precomputed offsets and form-exact,
+// failing loud — the datum decode it rides is certified on the in-scope
+// `view` tests. Its body's comments still note where its stagings keep to
+// CONF-AVAIL's shapes (one bare whole-domain `view`, no gate-reference
+// `build`, no snapshot compare); the scope no longer binds them.
 // T11.4-2, T11.4-5, and T11.4-6 are NOT in scope: CERTIFICATIONS.md's
 // Exclusions name the argument, spelling, and domain-and-exit matrices of
 // the machine-interface surfaces (T11.2-5, T11.3-2/3, T11.4-2, T11.5-2) and

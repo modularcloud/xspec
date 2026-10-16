@@ -83,29 +83,27 @@
 //   explicitly unavailable — T11.6-4's pin; 11.6: neither refreshing nor
 //   writing), so the configuration change is known to find the record
 //   unreadable and untouched.
-// - T13.4-5 stays inside CERTIFICATIONS.md §CONF-CORE's scope (the test is
-//   in-scope there): one spec group of importless, tagless `.mdx` sources;
-//   no `code`, `markdown`, `coverage`, or `policy` keys; no git; mutating
-//   commands drawn from `rename` and `review` under `--strategy audit`. In
-//   this git-less scope `impact --base HEAD` is the exit-2
-//   unreadable-baseline case (SPEC 6.3, 12.0) — asserted as such, durables
-//   still untouched. Staging constraint (§VIOL-CORE-PERSISTREADS): the
-//   fixture session holds no stale resolution while the `build`-and-read
-//   byte-compares run — the one resolve is the last staging step and no
-//   source changes afterward, so read-time invalidation computes nothing.
-//   The never-regenerated arm after the byte-compare loop is the session
-//   file's alone — TEST-SPEC's T13.4-5 parenthetical: the session file
-//   deleted, `review` naming it exits 2, `build` leaves it absent — and
-//   journal-neutral: it asserts nothing of the journal, so
-//   §VIOL-CORE-CHATTYREADS (`build` and the reads append to the journal,
-//   creating it when absent) fails T13.4-5 only at the loop's journal
-//   byte-compares, as its Expected failures state ("its session-file
-//   compares and its never-regenerated arm are untouched"). The loop alone
-//   carries that certification — the compare-around-command machinery
-//   CERTIFICATIONS.md's Exclusions bullet for T6.1-1 leans on. The
-//   journal's never-regenerated half (SPEC 6.1: written only by `rename`
-//   and `move`, the file coming into existence with a journaled operation;
-//   13.4) is T6.1-1's deleted-journal arm (section-6.1.ts).
+// - T13.4-5 lies outside every certification scope (CERTIFICATIONS.md
+//   §Exclusions, "T6.1-1 and T13.4-5"). Its fixture: one spec group of
+//   importless, tagless `.mdx` sources; no `code`, `markdown`, `coverage`,
+//   or `policy` keys; no git; mutating commands drawn from `rename` and
+//   `review` under `--strategy audit`. In this git-less fixture `impact
+//   --base HEAD` is the exit-2 unreadable-baseline case (SPEC 6.3, 12.0) —
+//   asserted as such, durables still untouched. The fixture session holds
+//   no stale resolution while the `build`-and-read byte-compares run — the
+//   one resolve is the last staging step and no source changes afterward,
+//   so read-time invalidation computes nothing. The byte-compare loop runs
+//   through `snapshotDirectory` and `assertSnapshotsEqual`
+//   (test/helpers/snapshot.ts), the compare-around-command machinery the
+//   Exclusions bullet leans on: VIOL-CORE-CHATTYREADS certifies its capture
+//   and per-entry compare over the same journal on T13.5-4. The
+//   never-regenerated arm after the loop is the session file's alone —
+//   TEST-SPEC's T13.4-5 parenthetical: the session file deleted, `review`
+//   naming it exits 2, `build` leaves it absent — and journal-neutral: it
+//   asserts nothing of the journal. The journal's never-regenerated half
+//   (SPEC 6.1: written only by `rename` and `move`, the file coming into
+//   existence with a journaled operation; 13.4) is T6.1-1's deleted-journal
+//   arm (section-6.1.ts).
 // - T13.4-6 refusal arm: the symlinked write-path component is staged as
 //   `markdown.outDir` naming a symlink to a real directory inside the
 //   workspace root (no outside-root confound, 14.14). With one source file,
@@ -1735,7 +1733,7 @@ const T13_4_4 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T13.4-5 — durable protection (CONF-CORE in-scope)
+// T13.4-5 — durable protection
 // ---------------------------------------------------------------------------
 
 const T13_4_5 = defineProductTest({
@@ -1746,10 +1744,9 @@ const T13_4_5 = defineProductTest({
     await withWorkspace(
       { files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/A.mdx": A_MDX } },
       async (workspace) => {
-        // Staging (inside CONF-CORE's scope; see the module header): build,
-        // one journaled rename, an audit session, one resolve of an
-        // unblocked leaf — the last staging step, so no resolution is stale
-        // when the byte-compares below run (§VIOL-CORE-PERSISTREADS).
+        // Staging (see the module header): build, one journaled rename, an
+        // audit session, one resolve of an unblocked leaf — the last staging
+        // step, so no resolution is stale when the byte-compares below run.
         await buildOk(product, workspace, "T13.4-5 `build` (SPEC 12.1)");
         await expectExit(
           product,
@@ -1804,7 +1801,7 @@ const T13_4_5 = defineProductTest({
 
         // `build` and every read command: exact exit codes (H-5), and the
         // durable files byte-identical after each command. In this git-less
-        // scope `impact --base HEAD` is the exit-2 unreadable-baseline case
+        // fixture `impact --base HEAD` is the exit-2 unreadable-baseline case
         // (SPEC 6.3, 12.0) — even a refused command touches no durable.
         const probes: readonly {
           readonly argv: readonly string[];
