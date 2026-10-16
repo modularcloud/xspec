@@ -26,7 +26,7 @@ Governing IP: `specs/patches/0001-external-ui-apis.md` (Stage: Tests Specified);
 - Locally (VERIFY, under load from four parallel reviewers): 37 files (the two `*.admin.test.ts` files left out), 4455 tests, 1 failed (C-1), 577.89 s; log `<scratchpad>/verify-T4wEX8/self.clean.log`. AGENTS.md's unloaded figure is about 350 s.
 - Certification: 9 conformers, 30 violators. The manifest at HEAD yields 236 pairs (186 PASS / 50 FAIL / 0 error / 0 hang); the document expects 219 (171 PASS / 48 FAIL / 0 / 0). `<scratchpad>/p9j_2a2/pairs-expected-after-task1.txt` holds the 219 expected per-pair lines (`<fixture>: <OUTCOME> <test>`, VERIFY's observed lines minus the T13.4-5 and T11.4-1 pairs, every outcome as observed). Every task from Task 1 on must leave the certification lines at exactly these. From Task 1 (a909c5d) on, the manifest yields the document's 219, locally and in run 1339.
 - The built product passes every product test at HEAD (run 1337). Arms this plan adds may fail it — that is Phase 10's work — but only diagnosed (H-8).
-- No build of HEAD's `src/` exists in the scratchpad (`<scratchpad>/engineer-verify/xspec/` is stale). Run mechanics says how to make one.
+- A build of HEAD's `src/` exists at `<scratchpad>/p9j_2a2/build/` (made at Task 2 by Run mechanics' recipe; `<scratchpad>/engineer-verify/xspec/` is stale). Run mechanics says how to check it and, if it fails the check, make another.
 - Node v22.22.0 (`/opt/node22/bin/node`), Vitest 4.1.10, TypeScript 5.9.3; Python under `python3 -I`; 4 cores.
 
 **Run mechanics (AGENTS.md holds the recipes; read the bullets a task names before running anything).**
@@ -75,7 +75,7 @@ Governing IP: `specs/patches/0001-external-ui-apis.md` (Stage: Tests Specified);
 - Task 1 (RD-G1, V): the C-1 manifest mirrors CERTIFICATIONS.md; CI's harness-self job green. Done: T13.4-5 left CONF-CORE's in-scope and VIOL-CORE-CHATTYREADS' certified sets, and T11.4-1 CONF-AVAIL's and VIOL-AVAIL-OMIT's (a909c5d); the CHATTYREADS, OMIT, and NULLMARKER headers and the registry comments that called either test certified (`section-6.1.ts`, `section-13.4.ts`, `section-11.4.ts`) corrected, no behavior changed; local self 37 files / 4455 tests passed (446.09 s); CI run 1339's harness-self job green (39 files / 4465 tests, 327.05 s); certification 171 PASS / 48 FAIL / 0 / 0, 0 discrepancies, the per-pair lines as expected.
 
 *Assertions the revised TEST-SPEC contradicts (each can fail a conforming product), and D's T10.4-5 staging constraint.*
-- Task 2 (RA-11): T4.1-3 admits a string token carrying no requirement text.
+- Task 2 (RA-11): T4.1-3 admits a string token carrying no requirement text. Done: the string-node failure and the probe report's `kinds` removed (contract `{ seen, capped }`); the walk brought to the revised text — every value it reaches, primitives included, walked once (a primitive's own and inherited keys read through its wrapper with the primitive itself as receiver, so a string token's inherited `String.prototype` accessor is read for that token; without it such a leaking accessor passed once the ban went) and a throwing walk operation recording nothing (it had pushed bracketed marker strings); the fixture already met the distinctiveness premise, unchanged; comments, cap message, title, and AGENTS.md's T4.1-3 red-check bullet corrected; T4.1-3 passes the built product (2.96 s), string-token stand-ins pass, leaking ones fail at the leak assertion, a fresh-object getter still errors with `OpaqueWalkCapError`; local self 37 files / 4455 tests passed (442.26 s); certification 171 PASS / 48 FAIL / 0 / 0, 0 discrepancies, the per-pair lines as expected.
 - Task 3 (RB-1): T10.1-6's refused `create` on a stale twin refreshes nothing.
 - Task 4 (RB-2): T10.7-9's new per-child items take their strategy's `blockedBy`, never the original's.
 - Task 5 (RB-3): T10.5-3 asserts no `reason`.
@@ -239,17 +239,6 @@ Governing IP: `specs/patches/0001-external-ui-apis.md` (Stage: Tests Specified);
 - Task 139: confirm locally and in CI; record the timings; delete this plan.
 
 ## Tasks
-
-### Task 2 — T4.1-3 admits a string token carrying no requirement text (RA-11)
-
-**Gap.** TEST-SPEC §4.1, T4.1-3 (revised): "An opaque token may be prototype-less, circular, guarded by throwing accessors, or a primitive — a string token carrying no requirement text included — 4.1 fixing no runtime representation …"; the clause "the harness asserts the value is not a string" was deleted. `judgeOpaqueProbeReport` in `test/suite/registry/section-4.1-4.2.ts` still fails any node whose `typeof` is `"string"` (the `stringNodes` check), so a conforming product whose tokens are strings carrying no requirement text fails.
-
-**Change** (`test/suite/registry/section-4.1-4.2.ts`):
-- Remove the `stringNodes` failure. Keep the sentinel-leak check (no observed string contains any node's own or subtree text — the walk's observation, string tokens themselves included, so a string token carrying requirement text still fails there) and the H-11 cap error (`OpaqueWalkCapError`). The probe consumer may keep reporting `kinds`; if nothing reads them any more, drop them from the consumer contract and from `isOpaqueProbeReport` together.
-- Confirm the fixture meets the revised text's distinctiveness premise — every node, the root and every parent included, has a non-empty own text carrying a token of its own that no ID segment, path, or identifier spells, its subtree text and every ancestor's carrying it too — and that a throwing walk operation contributes nothing and never errors the harness; bring the fixture or the walk to it where it does not, stating which in the commit message.
-- Comments, title: the probe consumer's block comment ("no node value may be a string"), `judgeOpaqueProbeReport`'s doc comment, and the title ("finds no such value a string") lose the string ban and gain the revised clause (a node may be a primitive, a string token carrying no requirement text included).
-
-**Checks.** T4.1-3 against the built product passes (record the time); a red check by stand-in is not needed for a removed assertion, but run the probe consumer's judgement against a hand-made report whose `kinds` are all `"string"` and whose `seen` holds no sentinel (a scratch `.mts` importing nothing from the product, or a temporary self-test vector deleted before committing): it passes; with a sentinel-bearing string in `seen` it fails diagnosed.
 
 ### Task 3 — T10.1-6's refused `create` on a stale twin refreshes nothing (RB-1)
 
