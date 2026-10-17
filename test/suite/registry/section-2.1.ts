@@ -7,24 +7,42 @@
 //
 // SPEC 2.1: the only imports permitted in an xspec source file are other spec
 // modules, as a single default binding of a relative `./`/`../` specifier
-// ending in `.xspec` whose designated `.mdx` file is a discovered source of a
-// configured spec group; any other specifier, target, or binding form is
-// invalid (14.15), import cycles are invalid (14.9), and an unused import is
-// valid and records no edges.
+// ending in `.xspec`, resolved lexically against the importing file's
+// directory (a specifier whose depth falls below zero designates nothing),
+// whose designated `.mdx` file is a discovered source of a configured spec
+// group; any other specifier, target, or binding form is invalid (14.15),
+// import cycles are invalid (14.9), and an unused import is valid and records
+// no edges. An identifier two imports bind roots no resolving chain (2.4).
 //
-// Location assertions: every offending import statement is staged at the very
-// start of its file (prefix ""), all pure ASCII, so string indices are byte
-// offsets and the 14.15 finding — or, for T2.1-5's spec import cycles, each
-// 14.9 location — must fall within the import statement's own byte window
-// (end-widened by one byte for line-granular locations, see support.ts
-// byteWindow); every other staged construct lies beyond the following blank
-// line, outside the widened window.
+// Location assertions: everything staged is pure ASCII, so string lengths
+// are byte offsets. Every offending import statement of the single-import
+// arms is staged at the very start of its file (prefix ""), and the 14.15
+// finding — or, for T2.1-5's spec import cycles, each 14.9 location — must
+// fall within the import statement's own byte window (end-widened by one
+// byte for line-granular locations, see support.ts byteWindow); every other
+// staged construct lies beyond the following blank line, outside the
+// widened window. The arms the revised TEST-SPEC text adds — T2.1-2's
+// case-only `./B.XSPEC` and root-re-entering arms, T2.1-3's
+// colliding-identifier chain — are pinned form-exact instead (`findingForm`):
+// each finding's stable code, every location's exact range against
+// precomputed offsets (SPEC 14: an import declaration by its own characters,
+// the import range of 11.4; a `d` entry by its own characters; an embedding
+// by its full braced container), and `path` `null`.
 
-import type { Finding, ViewNode } from "../../helpers/adapters/index.js";
+import * as path from "node:path";
+import type {
+  Finding,
+  FindingLocation,
+  PathValue,
+  SourceRange,
+  ViewImportEntry,
+  ViewNode,
+} from "../../helpers/adapters/index.js";
 import {
   DEPENDENCY_EDGE_KINDS,
   decodeEdgesReport,
   decodeNodeReport,
+  decodeOccurrencesReport,
   decodeViewReport,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
@@ -32,6 +50,7 @@ import {
   assertBytesEqual,
   assertFileBytes,
   fail,
+  parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -40,7 +59,10 @@ import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import {
+  TestWorkspace,
+  WORKSPACE_ROOT_DIRECTORY_NAME,
+} from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
@@ -50,7 +72,9 @@ import {
   buildFindings,
   buildOk,
   byteWindow,
+  expectExit,
   expectFindingFreeReport,
+  runFindingsReport,
   runJson,
   stageBesideRoot,
 } from "./support.js";
@@ -113,6 +137,68 @@ async function withWorkspace<T>(
   }
 }
 
+/**
+ * A finding's asserted form, the form-exact arms' projection (the T11.2-3
+ * discipline): its stable code, every location — the file and the exact
+ * byte range, in 12.7's within-finding order (file bytes, then start, then
+ * end) — and its concerned path, `null` for a located condition (SPEC 14,
+ * 12.7). Message and identities stay unpinned (informational for every
+ * condition these arms stage, 12.7).
+ */
+interface FindingForm {
+  readonly code: string | null;
+  readonly locations: readonly FindingLocation[];
+  readonly path: PathValue | null;
+}
+
+function findingForm(finding: Finding): FindingForm {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+  };
+}
+
+/**
+ * A located condition's expected form: `code`, one location in `file` per
+ * range (given in 12.7's within-finding order), `path` `null` (SPEC 12.7).
+ */
+function locatedFindingForm(
+  code: string,
+  file: string,
+  ranges: readonly SourceRange[],
+): FindingForm {
+  return {
+    code,
+    locations: ranges.map((range) => ({ file, range })),
+    path: null,
+  };
+}
+
+/**
+ * A staged source composed from its parts, each part's byte range recorded
+ * as it is appended (the T11.4-* pattern), so every pinned offset derives
+ * from the very strings the file is built from.
+ */
+class ByteFixture {
+  private readonly parts: string[] = [];
+  private bytes = 0;
+
+  get source(): string {
+    return this.parts.join("");
+  }
+
+  add(segment: string): SourceRange {
+    const start = this.bytes;
+    this.parts.push(segment);
+    this.bytes += Buffer.byteLength(segment, "utf8");
+    return { start, end: this.bytes };
+  }
+}
+
+/** The 12.7 unavailability marker, as decoded (one-datum state). */
+const UNAVAILABLE = { unavailable: true } as const;
+
 // The importing file's body after its import statement(s): a blank separator
 // line plus one ordinary section. It starts two bytes past the last import
 // line's end, so it lies outside every import's end-widened byte window — and
@@ -153,6 +239,15 @@ interface InvalidImportArm {
    * `outside/BASE.mdx`, which resolution must never reach (SPEC 2.1).
    */
   readonly outsideFiles?: Readonly<Record<string, string>>;
+  /**
+   * An arm the revised TEST-SPEC text adds, pinned form-exact (module
+   * header): the one 14.15's code `invalid-import`, its one location the
+   * import declaration by its own characters — the import range of 11.4,
+   * the whole staged import line — and `path` `null` (SPEC 14, 12.7), where
+   * the older arms assert the location within the declaration's
+   * end-widened byte window.
+   */
+  readonly formExact?: true;
 }
 
 /** An invalid-import arm with its staged `specs/A.mdx` as a record. */
@@ -185,7 +280,9 @@ function invalidImportStagings(
 /**
  * Run one invalid-import arm: `build --json` exits 1 with exactly one
  * finding, condition 14.15, located within the import statement's own byte
- * window in the importing file (SPEC 14: errors identify file and location).
+ * window in the importing file (SPEC 14: errors identify file and location)
+ * — or, for a form-exact arm, located exactly at the import declaration's
+ * own characters, its code and `path` pinned (SPEC 14, 12.7).
  */
 async function runInvalidImportArm(
   product: ProductBinding,
@@ -202,6 +299,23 @@ async function runInvalidImportArm(
       await stageBesideRoot(workspace, arm.outsideFiles ?? {});
       const findings = await buildFindings(product, workspace, context);
       assertConditionCounts(findings, { "14.15": 1 }, context);
+      if (arm.formExact === true) {
+        // The import line opens the file (prefix ""), so its own
+        // characters span bytes 0 through its length.
+        const declaration: SourceRange = {
+          start: 0,
+          end: Buffer.byteLength(arm.importLine, "utf8"),
+        };
+        assertSameJson(
+          findings.map(findingForm),
+          [locatedFindingForm("invalid-import", "specs/A.mdx", [declaration])],
+          `${context}: the one 14.15, form-exact — code \`invalid-import\`, ` +
+            `its one location the import declaration by its own characters ` +
+            `(the import range of 11.4) in specs/A.mdx, \`path\` null ` +
+            `(SPEC 14, 12.7)`,
+        );
+        return;
+      }
       assertFindingLocated(
         findings[0]!,
         { file: "specs/A.mdx", window: byteWindow("", arm.importLine) },
@@ -303,6 +417,24 @@ const INVALID_SPECIFIER_ARMS: readonly InvalidImportArm[] = [
     extraFiles: VALID_BASE_FILES,
   },
   {
+    // `./B.XSPEC` beside a discovered `specs/B.mdx`: its ending differs
+    // from `.xspec` in case alone, and paths compare byte-wise and
+    // case-sensitively, no case folding anywhere (SPEC 12.0), so the
+    // specifier does not end in `.xspec` (2.1) — a single-casing arm: a
+    // product folding case in the suffix test resolves it to the
+    // discovered `specs/B.mdx`, its binding unused, and builds clean.
+    name: "a relative specifier whose ending differs from `.xspec` in case alone (`./B.XSPEC` beside a discovered `specs/B.mdx`)",
+    importLine: 'import B from "./B.XSPEC"',
+    extraFiles: {
+      ...VALID_BASE_FILES,
+      "specs/B.mdx": stagedMdx(
+        "T2.1-2 case-only arm specs/B.mdx (the discovered source `./B.XSPEC` would name under case folding)",
+        '<S id="b">\nB behavior.\n</S>\n',
+      ),
+    },
+    formExact: true,
+  },
+  {
     // `../docs/EXTRA.xspec` from `specs/` designates `docs/EXTRA.mdx`, which
     // exists on disk but is matched by no configured spec group.
     name: "a specifier designating a file that exists but is not a discovered source of any configured spec group",
@@ -386,12 +518,17 @@ const PARENT_SPECIFIER_IMPORTER = [
 
 // T2.1-2, lexical positives (SPEC 2.1: resolution is lexical — a `.` or
 // empty segment designates the same directory and `..` the parent — and no
-// spelling is required to be canonical). Four importers in `specs/`, each
+// spelling is required to be canonical). Five importers in `specs/`, each
 // spelling `specs/BASE.mdx` non-canonically, share one workspace that holds
-// no `specs/sub/` at all, so `./sub/../BASE.xspec` resolves only lexically —
-// a product resolving through the filesystem, or requiring the canonical
-// spelling, fails that arm. Each import line is its file's only import
-// declaration.
+// no `specs/sub/` and no `specs/**` at all, so `./sub/../BASE.xspec` resolves
+// only lexically — a product resolving through the filesystem, or requiring
+// the canonical spelling, fails that arm — and `./**/../../specs/BASE.xspec`
+// only under 2.1's depth rule, `**` an entry name raising the depth by one
+// like any other segment (starting at 1 for `specs/`, the depth reads 1, 2,
+// 1, 0, 1, 2 after the six segments — never below zero): a product counting
+// the depth by 7's glob rule, under which a `**` segment leaves it
+// unchanged, finds it below zero at the second `..` and reports 14.15. Each
+// import line is its file's only import declaration.
 const LEXICAL_IMPORTERS: readonly {
   readonly file: string;
   readonly section: string;
@@ -401,6 +538,11 @@ const LEXICAL_IMPORTERS: readonly {
   { file: "specs/P2.mdx", section: "p2", specifier: ".//BASE.xspec" },
   { file: "specs/P3.mdx", section: "p3", specifier: "././BASE.xspec" },
   { file: "specs/P4.mdx", section: "p4", specifier: "../specs/BASE.xspec" },
+  {
+    file: "specs/P5.mdx",
+    section: "p5",
+    specifier: "./**/../../specs/BASE.xspec",
+  },
 ];
 
 function lexicalImporterSource(importer: {
@@ -418,7 +560,7 @@ function lexicalImporterSource(importer: {
 }
 
 // The lexical workspace is created after the `../` arm's invocations, so
-// its four importers are staged-source records, computed once at module
+// its five importers are staged-source records, computed once at module
 // load from the table above (S-9's timing clause).
 const LEXICAL_IMPORTER_FILES: Readonly<Record<string, StagedMdx>> =
   Object.fromEntries(
@@ -431,9 +573,186 @@ const LEXICAL_IMPORTER_FILES: Readonly<Record<string, StagedMdx>> =
     ]),
   );
 
+// T2.1-2, the root-re-entering arm (SPEC 2.1). From `specs/` the depth
+// starts at 1 and the two `..` segments lower it to -1 — the ascent passes
+// above the workspace root — before `<R>/specs/BASE.xspec` raises it again,
+// so the specifier designates nothing (14.15), though read as a filesystem
+// path its position is the discovered `specs/BASE.mdx` itself: `<R>` is the
+// root's own directory name, the builder's `WORKSPACE_ROOT_DIRECTORY_NAME`
+// (helpers/workspace.ts), checked against the created workspace before the
+// arm's first invocation. The discriminator against a product resolving
+// specifiers to absolute paths and relativizing them against the root,
+// which the above-root arm's undiscovered `outside/BASE.mdx` rejects by
+// accident: such a product resolves this import to `specs/BASE.mdx`, which
+// holds `a`, so `d={BASE.a}` resolves — an edge, an occurrence, a clean
+// build. Here the `d` entry names no target, its import designating
+// nothing, so it does not resolve: no occurrence (5.7), and its own 14.5
+// beside the import's 14.15 (SPEC 11.2: each `d` entry resolves or not on
+// its own — an occurrence, or a finding (14.5) — and the two surfaces
+// jointly locate every reference spelling of a parseable file; 14: a
+// condition goes unreported only where another error makes it
+// undetectable, and the entry's non-resolution is detectable whatever the
+// import's invalidity). Both are pinned form-exact: the 14.15 at the
+// declaration's own characters, the 14.5 at the entry's (SPEC 14). The
+// arm's workspace is created after the body's first invocation, so both
+// sources are staged-source records (S-9's timing clause).
+const REENTERING_FILE = "specs/A.mdx";
+const REENTERING = new ByteFixture();
+const REENTERING_DECLARATION = REENTERING.add(
+  `import BASE from "../../${WORKSPACE_ROOT_DIRECTORY_NAME}/specs/BASE.xspec"`,
+);
+REENTERING.add('\n\n<S id="s" d={');
+const REENTERING_REFERENCE = REENTERING.add("BASE.a");
+REENTERING.add("}>\nDepends through the re-entering specifier.\n</S>\n");
+const REENTERING_SOURCE = stagedMdx(
+  "T2.1-2 root-re-entering arm specs/A.mdx",
+  REENTERING.source,
+);
+const REENTERING_TARGET = stagedMdx(
+  "T2.1-2 root-re-entering arm specs/BASE.mdx (holding the `a` a relativizing product would resolve)",
+  '<S id="a">\nBehavior a.\n</S>\n',
+);
+
+/**
+ * The importing file's findings, in 12.7's order — numbered conditions by
+ * ordinal, so the `d` entry's 14.5 before the import's 14.15 — each
+ * form-exact (SPEC 14, 12.7).
+ */
+const REENTERING_FINDINGS: readonly FindingForm[] = [
+  locatedFindingForm("unknown-dependency", REENTERING_FILE, [
+    REENTERING_REFERENCE,
+  ]),
+  locatedFindingForm("invalid-import", REENTERING_FILE, [
+    REENTERING_DECLARATION,
+  ]),
+];
+
+/**
+ * The root-re-entering arm (module comment above): `build --json` exits 1
+ * with exactly the two findings; `view specs/A.mdx` carries them and lists
+ * the declaration with its target explicitly unavailable (SPEC 11.4, 11.2;
+ * T11.4-4); and `occurrences --file specs/A.mdx` carries them and lists no
+ * record — the `d` entry through the import records none (5.7, 11.2).
+ */
+async function runReenteringSpecifierArm(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(
+    {
+      "specs/BASE.mdx": REENTERING_TARGET,
+      [REENTERING_FILE]: REENTERING_SOURCE,
+    },
+    async (workspace) => {
+      const rootName = path.basename(workspace.root);
+      if (rootName !== WORKSPACE_ROOT_DIRECTORY_NAME) {
+        throw new Error(
+          `T2.1-2 fixture self-check: the root-re-entering specifier spells ` +
+            `the root's directory name ` +
+            `${JSON.stringify(WORKSPACE_ROOT_DIRECTORY_NAME)}, but the ` +
+            `workspace root is named ${JSON.stringify(rootName)}`,
+        );
+      }
+      const context =
+        "T2.1-2 the root-re-entering specifier " +
+        `\`../../${WORKSPACE_ROOT_DIRECTORY_NAME}/specs/BASE.xspec\` from ` +
+        "specs/ (its depth below zero)";
+
+      const buildContext = `${context} — \`build --json\``;
+      const findings = await buildFindings(product, workspace, buildContext);
+      assertConditionCounts(
+        findings,
+        { "14.5": 1, "14.15": 1 },
+        `${buildContext} — the import designates nothing (14.15), and the ` +
+          `\`d\` entry through its binding, naming no target, does not ` +
+          `resolve: its own 14.5 locates it beside the 14.15 — no other ` +
+          `error makes its non-resolution undetectable (SPEC 2.1, 11.2: ` +
+          `each \`d\` entry resolves or not on its own, an occurrence or a ` +
+          `finding (14.5); 14)`,
+      );
+      assertSameJson(
+        findings.map(findingForm),
+        REENTERING_FINDINGS,
+        `${buildContext} — the findings form-exact in 12.7's order: the 14.5 ` +
+          `at the \`d\` entry's own characters, then the 14.15 at the import ` +
+          `declaration's own characters (the import range of 11.4), each ` +
+          `\`path\` null (SPEC 14, 12.7)`,
+      );
+
+      const viewContext = `${context} — \`view ${REENTERING_FILE}\``;
+      const viewResult = await expectExit(
+        product,
+        workspace,
+        ["view", REENTERING_FILE],
+        1,
+        `${viewContext} — the answer carries its domain's findings and an ` +
+          `explicitly-unavailable datum, so exit 1 with the full answer ` +
+          `document emitted (SPEC 11.2, 11.4)`,
+      );
+      const view = decodeViewReport(
+        parseJsonStdout(viewResult, viewContext),
+        { text: false },
+        viewContext,
+      );
+      assertSameJson(
+        view.findings.map(findingForm),
+        REENTERING_FINDINGS,
+        `${viewContext} — the requested file's findings accompany the ` +
+          `answer, form-exact (SPEC 11.2, 11.4)`,
+      );
+      const expectedImports: readonly ViewImportEntry[] = [
+        { range: REENTERING_DECLARATION, name: "BASE", target: UNAVAILABLE },
+      ];
+      assertSameJson(
+        view.views.map((entry) => ({
+          file: entry.file,
+          imports: entry.imports,
+        })),
+        [{ file: REENTERING_FILE, imports: expectedImports }],
+        `${viewContext} — the one view lists the declaration with its range ` +
+          `and binding name, its resolved target exactly the unavailability ` +
+          `marker: the specifier designates nothing, so discovery defines no ` +
+          `target — never the plain "specs/BASE.mdx" its position names, ` +
+          `never null (SPEC 2.1, 11.2, 11.4; T11.4-4)`,
+      );
+
+      const occContext = `${context} — \`occurrences --file ${REENTERING_FILE}\``;
+      const occResult = await expectExit(
+        product,
+        workspace,
+        ["occurrences", "--file", REENTERING_FILE],
+        1,
+        `${occContext} — the answer carries its domain's findings, so exit 1 ` +
+          `with the full answer document (SPEC 11.2, 11.3)`,
+      );
+      const occurrences = decodeOccurrencesReport(
+        parseJsonStdout(
+          occResult,
+          `${occContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        occContext,
+      );
+      assertSameJson(
+        occurrences.findings.map(findingForm),
+        REENTERING_FINDINGS,
+        `${occContext} — the admitted file's findings accompany the answer, ` +
+          `form-exact (SPEC 11.2, 11.3)`,
+      );
+      assertSameJson(
+        occurrences.occurrences,
+        [],
+        `${occContext} — no record for the \`d={BASE.a}\` entry through the ` +
+          `import: it does not resolve, so it records no occurrence, its ` +
+          `position reaching consumers through its finding's range alone ` +
+          `(SPEC 5.7, 11.2, 11.3)`,
+      );
+    },
+  );
+}
+
 const T2_1_2 = defineProductTest({
   id: "T2.1-2",
-  title: `\`../\` specifiers resolve against the importing file's directory, and resolution is lexical: \`./sub/../BASE.xspec\` (no \`sub/\` on disk), \`.//BASE.xspec\`, \`././BASE.xspec\`, and \`../specs/BASE.xspec\` each designate specs/BASE.mdx — the import valid, the reference through it resolving, \`view\` reporting the resolved target; absolute, bare, non-\`.xspec\`, undiscovered-target (an \`.mdx\` matched by no group; one matched only by a code group), nonexistent-target, above-the-root (a real \`outside/BASE.mdx\` at the root's parent), and escape-spelled ("./B${BACKSLASH}u0041SE.xspec", read verbatim) specifiers each fail with 14.15 (SPEC 2.1, 2.4, 14.15; T11.4-4)`,
+  title: `\`../\` specifiers resolve against the importing file's directory, and resolution is lexical: \`./sub/../BASE.xspec\` (no \`sub/\` on disk), \`.//BASE.xspec\`, \`././BASE.xspec\`, \`../specs/BASE.xspec\`, and \`./**/../../specs/BASE.xspec\` (no \`specs/**\` on disk — \`**\` an entry name raising the depth by one, never 7's depth-neutral glob segment) each designate specs/BASE.mdx — the import valid, the reference through it resolving, \`view\` reporting the resolved target; absolute, bare, non-\`.xspec\` (\`./BASE.mdx\`; \`./B.XSPEC\` beside a discovered specs/B.mdx, its ending differing in case alone — byte-wise and case-sensitive, its 14.15 form-exact), undiscovered-target (an \`.mdx\` matched by no group; one matched only by a code group), nonexistent-target, above-the-root (a real \`outside/BASE.mdx\` at the root's parent), root-re-entering (\`../../<R>/specs/BASE.xspec\`, \`<R>\` the root's own directory name: its depth below zero, it designates nothing though its position is the discovered specs/BASE.mdx — \`build\` reporting exactly its 14.15 at the declaration and the 14.5 of the \`d={BASE.a}\` entry through it, form-exact, \`view\` its target explicitly unavailable, \`occurrences --file\` no record), and escape-spelled ("./B${BACKSLASH}u0041SE.xspec", read verbatim) specifiers each fail with 14.15 (SPEC 2.1, 2.4, 5.7, 11.2, 11.3, 11.4, 12.0, 14.5, 14.15; T11.4-4)`,
   run: async (product) => {
     await withWorkspace(
       {
@@ -470,17 +789,20 @@ const T2_1_2 = defineProductTest({
         );
       },
     );
-    // Lexical positives: one workspace, four non-canonical spellings of
-    // specs/BASE.mdx, no specs/sub/ on disk (module comment above).
+    // Lexical positives: one workspace, five non-canonical spellings of
+    // specs/BASE.mdx, no specs/sub/ and no specs/** on disk (module comment
+    // above).
     await withWorkspace(
       { ...VALID_BASE_FILES, ...LEXICAL_IMPORTER_FILES },
       async (workspace) => {
         await buildOk(
           product,
           workspace,
-          "T2.1-2 `build` with four non-canonical specifiers of " +
-            "specs/BASE.mdx (`./sub/../`, `.//`, `././`, `../specs/`; no " +
-            "specs/sub/ on disk) — each import is valid (SPEC 2.1)",
+          "T2.1-2 `build` with five non-canonical specifiers of " +
+            "specs/BASE.mdx (`./sub/../`, `.//`, `././`, `../specs/`, " +
+            "`./**/../../specs/`; no specs/sub/ and no specs/** on disk) — " +
+            "each import is valid, `**` an entry name raising the depth by " +
+            "one (SPEC 2.1)",
         );
         for (const importer of LEXICAL_IMPORTERS) {
           const node = `${importer.file}#${importer.section}`;
@@ -504,7 +826,7 @@ const T2_1_2 = defineProductTest({
         }
         // `view` reports each import's resolved target — the designated
         // file, never the specifier's spelling (SPEC 11.4; T11.4-4). One
-        // bare whole-domain `view`: the five discovered sources in byte
+        // bare whole-domain `view`: the six discovered sources in byte
         // order of path, BASE first.
         const viewContext = "T2.1-2 bare `view` over the lexical workspace";
         const report = decodeViewReport(
@@ -543,6 +865,7 @@ const T2_1_2 = defineProductTest({
     for (const staging of INVALID_SPECIFIER_STAGINGS) {
       await runInvalidImportArm(product, staging, "T2.1-2");
     }
+    await runReenteringSpecifierArm(product);
   },
 });
 
@@ -692,7 +1015,9 @@ const DUP_BINDING_B2 = stagedMdx(
  * collision or one per import — every one of them must be 14.15, name the
  * file, and point at one of the two import statements — because TEST-SPEC
  * assigns the every-participant cardinality to T14-8 and the exact ranges to
- * T14-11 (its §14 preamble), which assert them strictly.
+ * T14-11 (its §14 preamble), which assert them strictly; the
+ * colliding-chain arms below pin both, their revised text requiring the
+ * collision's one finding to locate both declarations.
  */
 async function runDuplicateBindingArm(
   product: ProductBinding,
@@ -747,10 +1072,174 @@ async function runDuplicateBindingArm(
   );
 }
 
+// T2.1-3, the colliding-identifier chain (SPEC 2.4: an identifier two
+// imports bind roots no resolving chain — the language names no single
+// binding, so a chain rooted at it names no target: no edge and no
+// occurrence (5.7, 11.2), its spellings reporting as unresolved — 14.5 for
+// the `d` entry, 14.6 for the embedding — beside the collision's 14.15,
+// which locates every colliding declaration, each by its own characters
+// (2.1; 14)). `specs/A.mdx` and `specs/B.mdx` each hold `a`, so either
+// binding alone would resolve `X.a`: a product rooting the chain at either
+// declaration records the edges and the occurrences and reports neither
+// 14.5 nor 14.6. The two declarations stand in separate ESM blocks (a blank
+// line between, 2.7) of `specs/C.mdx`, staged in both declaration orders,
+// beside `<S id="s" d={X.a}>` holding `{text(X.a)}`; every finding is pinned
+// form-exact against offsets composed from the staged parts. Each arm's
+// workspace is created after the body's first invocation, so its sources
+// are staged-source records (S-9's timing clause), the importing file's
+// carrying S-9's `duplicate-import-binding` allowance (the stock parser
+// judges every ESM block of a file as one module, `duplicateBindingArm`).
+const CHAIN_FILE = "specs/C.mdx";
+const CHAIN_TARGET_FILES = {
+  "specs/A.mdx": stagedMdx(
+    "T2.1-3 colliding-chain arms specs/A.mdx (holding `a`)",
+    '<S id="a">\nBehavior a of A.\n</S>\n',
+  ),
+  "specs/B.mdx": stagedMdx(
+    "T2.1-3 colliding-chain arms specs/B.mdx (holding `a`)",
+    '<S id="a">\nBehavior a of B.\n</S>\n',
+  ),
+} as const;
+const CHAIN_IMPORT_A = 'import X from "./A.xspec"';
+const CHAIN_IMPORT_B = 'import X from "./B.xspec"';
+
+/** One declaration order of the colliding-chain staging. */
+interface CollidingChainArm {
+  readonly name: string;
+  /** The staged `specs/C.mdx`. */
+  readonly source: StagedMdx;
+  /** Its findings in 12.7's order, form-exact (SPEC 14, 12.7). */
+  readonly findings: readonly FindingForm[];
+}
+
+/**
+ * Compose one declaration order: the two declarations, then the section
+ * whose `d` entry and embedding each spell `X.a`, recording every
+ * construct's byte range as the file is built. Findings order by ordinal —
+ * 14.5, 14.6, 14.15 — and the collision's two locations by start (12.7).
+ */
+function collidingChainArm(
+  name: string,
+  first: string,
+  second: string,
+): CollidingChainArm {
+  const file = new ByteFixture();
+  const firstDeclaration = file.add(first);
+  file.add("\n\n");
+  const secondDeclaration = file.add(second);
+  file.add('\n\n<S id="s" d={');
+  const reference = file.add("X.a");
+  file.add("}>\n");
+  const embedding = file.add("{text(X.a)}");
+  file.add("\n</S>\n");
+  return {
+    name,
+    source: stagedMdx(
+      `T2.1-3 colliding-chain arm specs/C.mdx, ${name}`,
+      file.source,
+      { allowances: ["duplicate-import-binding"] },
+    ),
+    findings: [
+      locatedFindingForm("unknown-dependency", CHAIN_FILE, [reference]),
+      locatedFindingForm("unknown-text-target", CHAIN_FILE, [embedding]),
+      locatedFindingForm("invalid-import", CHAIN_FILE, [
+        firstDeclaration,
+        secondDeclaration,
+      ]),
+    ],
+  };
+}
+
+const COLLIDING_CHAIN_ARMS: readonly CollidingChainArm[] = [
+  collidingChainArm("A's declaration first", CHAIN_IMPORT_A, CHAIN_IMPORT_B),
+  collidingChainArm("B's declaration first", CHAIN_IMPORT_B, CHAIN_IMPORT_A),
+];
+
+/**
+ * One colliding-chain arm: `build --json`, then `check --json` on the
+ * never-built workspace — whose mismatch forms of 14.10 are undetectable
+ * while `build`'s validations fail, and whose record forms cannot arise
+ * with no record written, so its findings are `build`'s exactly (14.10) —
+ * each exit 1 with exactly the 14.5, the 14.6, and the 14.15 locating both
+ * declarations, form-exact; and `occurrences --file specs/C.mdx` carries
+ * those findings and lists no record (SPEC 11.2, 11.3; T5.7-4).
+ */
+async function runCollidingChainArm(
+  product: ProductBinding,
+  arm: CollidingChainArm,
+): Promise<void> {
+  await withWorkspace(
+    { ...CHAIN_TARGET_FILES, [CHAIN_FILE]: arm.source },
+    async (workspace) => {
+      const context = `T2.1-3 the chain rooted at the colliding identifier X, ${arm.name}`;
+      for (const command of ["build", "check"] as const) {
+        const commandContext = `${context} — \`${command} --json\``;
+        const findings = await runFindingsReport(
+          product,
+          workspace,
+          [command, "--json"],
+          1,
+          `${commandContext} — the findings make the report exit 1 (SPEC ` +
+            `12.0, ${command === "build" ? "12.1" : "12.2"})`,
+        );
+        assertConditionCounts(
+          findings,
+          { "14.5": 1, "14.6": 1, "14.15": 1 },
+          `${commandContext} — the collision's one 14.15, and the chain ` +
+            `rooted at X resolving nowhere: the \`d\` entry's 14.5 and the ` +
+            `embedding's 14.6, never an edge from either declaration (SPEC ` +
+            `2.1, 2.4, 14)`,
+        );
+        assertSameJson(
+          findings.map(findingForm),
+          arm.findings,
+          `${commandContext} — the findings form-exact in 12.7's order: the ` +
+            `14.5 at the \`d\` entry's own characters, the 14.6 at the ` +
+            `embedding's full braced container, and the 14.15 locating both ` +
+            `declarations, each by its own characters, in start order — one ` +
+            `finding, no representative chosen (SPEC 14, 12.7)`,
+        );
+      }
+
+      const occContext = `${context} — \`occurrences --file ${CHAIN_FILE}\``;
+      const occResult = await expectExit(
+        product,
+        workspace,
+        ["occurrences", "--file", CHAIN_FILE],
+        1,
+        `${occContext} — the answer carries its domain's findings, so exit 1 ` +
+          `with the full answer document (SPEC 11.2, 11.3)`,
+      );
+      const report = decodeOccurrencesReport(
+        parseJsonStdout(
+          occResult,
+          `${occContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        occContext,
+      );
+      assertSameJson(
+        report.findings.map(findingForm),
+        arm.findings,
+        `${occContext} — the admitted file's findings accompany the answer, ` +
+          `form-exact (SPEC 11.2, 11.3)`,
+      );
+      assertSameJson(
+        report.occurrences,
+        [],
+        `${occContext} — no record for the \`d\` entry or the embedding: a ` +
+          `chain rooted at an identifier two imports bind names no target, ` +
+          `so it records no occurrence, each spelling positioned by its ` +
+          `finding's range alone (SPEC 2.4, 5.7, 11.2)`,
+      );
+    },
+  );
+}
+
 const T2_1_3 = defineProductTest({
   id: "T2.1-3",
   title:
-    "named, namespace, and side-effect-only imports, duplicate-identifier bindings (in one ESM block and in separate blocks — 14.15 in a well-formed file, never 14.20), and bindings of `S`/`Spec`/`text` each fail with 14.15; two imports binding one module under different names are valid (SPEC 2.1, 14.15, 14.20)",
+    'named, namespace, and side-effect-only imports, duplicate-identifier bindings (in one ESM block and in separate blocks — 14.15 in a well-formed file, never 14.20), and bindings of `S`/`Spec`/`text` each fail with 14.15; two imports binding one module under different names are valid; and a chain rooted at a colliding identifier resolves nowhere — with specs/A.mdx and specs/B.mdx each holding `a`, `import X from "./A.xspec"` and `import X from "./B.xspec"` in separate blocks, in both declaration orders, beside `<S id="s" d={X.a}>` holding `{text(X.a)}`: `build` and `check` each exit 1 with exactly the 14.5 for the `d` entry, the 14.6 for the embedding, and the 14.15 collision locating both declarations, form-exact, and `occurrences --file` lists no record beside those findings — failing a product that roots the chain at either declaration (SPEC 2.1, 2.4, 5.7, 11.2, 11.3, 14.5, 14.6, 14.15, 14.20)',
   run: async (product) => {
     for (const staging of INVALID_BINDING_STAGINGS) {
       await runInvalidImportArm(product, staging, "T2.1-3");
@@ -801,6 +1290,12 @@ const T2_1_3 = defineProductTest({
     // separate blocks — 14.15 under both, never 14.20.
     for (const arm of DUPLICATE_BINDING_ARMS) {
       await runDuplicateBindingArm(product, arm);
+    }
+
+    // The chain rooted at a colliding identifier resolves nowhere, in both
+    // declaration orders.
+    for (const arm of COLLIDING_CHAIN_ARMS) {
+      await runCollidingChainArm(product, arm);
     }
   },
 });

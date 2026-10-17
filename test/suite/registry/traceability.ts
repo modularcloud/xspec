@@ -188,8 +188,16 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T1.7-1": ["1.7"],
   "T1.7-2": ["1.7", "4.6"],
   "T2.1-1": ["2.1"],
-  "T2.1-2": ["2.1", "2.4", "11.4", "14"],
-  "T2.1-3": ["2.1", "14"],
+  // T2.1-2: its case-only arm's byte-wise, case-sensitive suffix test
+  // (12.0); its root-re-entering arm's `d` entry recording no occurrence
+  // (5.7, 11.3's `occurrences --file`), its own 14.5 beside the import's
+  // 14.15 (11.2's per-spelling resolution), and the import's target
+  // explicitly unavailable in `view` (11.2, 11.4).
+  "T2.1-2": ["2.1", "2.4", "5.7", "11.2", "11.3", "11.4", "12.0", "14"],
+  // T2.1-3: its chain rooted at a colliding identifier, resolving nowhere
+  // (2.4, 11.2), recording no occurrence (5.7, 11.3's `occurrences
+  // --file`).
+  "T2.1-3": ["2.1", "2.4", "5.7", "11.2", "11.3", "14"],
   "T2.1-4": ["2.1"],
   "T2.1-5": ["2.1", "14"],
   "T2.1-6": ["2.1", "1.6", "3", "11.4", "14"],

@@ -443,6 +443,14 @@ export const GIT_FIXTURE_PERSON: GitPerson = {
 /** Pinned timestamp base: commit N of a workspace gets base + 60·N seconds. */
 export const GIT_FIXTURE_EPOCH_SECONDS = 1_700_000_000;
 
+/**
+ * The workspace root's own directory name: every root is this subdirectory
+ * of its workspace's unique temporary directory (module header) — the `<R>`
+ * a fixture spells to re-enter the root from above it (TEST-SPEC T2.1-2's
+ * `../../<R>/specs/BASE.xspec`).
+ */
+export const WORKSPACE_ROOT_DIRECTORY_NAME = "work";
+
 export type EntryKind = "file" | "dir" | "symlink" | "other" | "absent";
 
 export class TestWorkspace {
@@ -496,7 +504,7 @@ export class TestWorkspace {
     const tempRoot = await fsp.mkdtemp(
       path.join(os.tmpdir(), "xspec-harness-"),
     );
-    const root = path.join(tempRoot, "work");
+    const root = path.join(tempRoot, WORKSPACE_ROOT_DIRECTORY_NAME);
     await fsp.mkdir(root);
     // Registered under the root and its realpath while the workspace lives
     // (helpers/product-invocations.ts): an invocation anywhere under either
