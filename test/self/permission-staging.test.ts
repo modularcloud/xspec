@@ -5,7 +5,11 @@
 // each mode refuses this process's own attempt at exactly the operations the
 // discipline names and keeps the permission it must keep — the directory
 // modes of `stageDirectoryMode` (T13.5-10(d), (h), T13.5-11) included, each
-// declared probe refused or kept as declared, and T14-9's graph-data staging
+// declared probe refused or kept as declared, its mode 000 among them
+// (T14-10(k), (l), T11.2-6, T6.3-6(e): the listing, every examination, and
+// every read of a file below the directory refused alike, a read probe's
+// file a plain file judged before anything changes), and T14-9's
+// graph-data staging
 // (`stageGraphDataWriteRefusal`) over a hand-made area holding graph data
 // in a file directly in it and in directories of its own below it beside
 // the journal, the session directory, and the lock directory — every
@@ -680,6 +684,126 @@ test.runIf(onLinux)(
     );
     expect(failed.message).toContain("was not refused");
     expect(await modeOf(dir)).toBe(0o755);
+  },
+);
+
+test.runIf(onLinux)(
+  "mode 000 (T14-10(k), (l), T11.2-6, T6.3-6(e)): read, write, and search all removed — the listing, the examination of an entry present or absent, the read of a file directly in it and of one nested below it (a string or its exact bytes), and a creation in it each refused on the harness, the probes leaving nothing behind; restore reinstates the recorded mode, idempotently, an empty directory stageable too",
+  async () => {
+    const workspace = await makeWorkspace();
+    const dir = workspace.path("specs/b");
+    const staging = tracked(
+      await stageDirectoryMode(dir, 0o000, [
+        { attempt: "list", refused: true },
+        { attempt: "examine", name: "sub", refused: true },
+        { attempt: "examine", name: "xspec.config.ts", refused: true },
+        { attempt: "read", name: "B.mdx", refused: true },
+        { attempt: "read", name: "sub/C.mdx", refused: true },
+        { attempt: "read", name: Buffer.from("sub/C.mdx"), refused: true },
+        { attempt: "create", refused: true },
+      ]),
+    );
+    expect(staging.mode).toBe("directory-mode");
+    expect(staging.path).toBe(dir);
+    expect(await modeOf(dir)).toBe(0o000);
+    expect(await outcome(fsp.readdir(dir))).toBe("EACCES");
+    expect(await outcome(fsp.lstat(path.join(dir, "sub")))).toBe("EACCES");
+    expect(await outcome(fsp.readFile(path.join(dir, "sub", "C.mdx")))).toBe(
+      "EACCES",
+    );
+    expect(await outcome(openAndClose(path.join(dir, "fresh.mdx"), "wx"))).toBe(
+      "EACCES",
+    );
+    await staging.restore();
+    expect(await modeOf(dir)).toBe(0o755);
+    expect((await fsp.readdir(dir)).sort()).toEqual(B_LISTING);
+    expect(await fsp.readdir(path.join(dir, "sub"))).toEqual(["C.mdx"]);
+    expect(
+      Buffer.from(await fsp.readFile(path.join(dir, "sub", "C.mdx"))).toString(
+        "utf8",
+      ),
+    ).toBe(FILES["specs/b/sub/C.mdx"]);
+    await staging.restore();
+    expect(await modeOf(dir)).toBe(0o755);
+
+    // T14-10(k)'s working directory holds nothing: its listing and a
+    // lookup there refused all the same.
+    const empty = workspace.path("specs/empty");
+    const emptied = tracked(
+      await stageDirectoryMode(empty, 0o000, [
+        { attempt: "list", refused: true },
+        { attempt: "examine", name: "xspec.config.ts", refused: true },
+      ]),
+    );
+    expect(await modeOf(empty)).toBe(0o000);
+    await emptied.restore();
+    expect(await modeOf(empty)).toBe(0o755);
+    expect(await fsp.readdir(empty)).toEqual([]);
+  },
+);
+
+test.runIf(onLinux)(
+  "E-1 for mode 000: on an unstaged twin each of its probes — the listing, an entry's examination, a file's read — is an ineffective staging, its own attempt undone, a HarnessStagingError; under mode 000 a read declared kept is a removal beyond the mode; a read probe naming no plain file — absent, a directory, a symbolic link, a path through a file — is a staging error before anything changes; a mode-000 staging whose verification fails reinstates the prior mode",
+  async () => {
+    const workspace = await makeWorkspace();
+    const dir = workspace.path("specs/b");
+    const notRefused: readonly (readonly [DirectoryModeProbe, string])[] = [
+      [{ attempt: "list", refused: true }, `listing ${dir}`],
+      [
+        { attempt: "examine", name: "sub", refused: true },
+        `examining ${path.join(dir, "sub")}`,
+      ],
+      [
+        { attempt: "read", name: "sub/C.mdx", refused: true },
+        `reading ${path.join(dir, "sub", "C.mdx")}`,
+      ],
+    ];
+    for (const [probe, description] of notRefused) {
+      const error = await stagingError(verifyDirectoryMode(dir, [probe]));
+      expect(error.mode).toBe("directory-mode");
+      expect(error.path).toBe(dir);
+      expect(error.message).toContain(`${description} was not refused`);
+      expect(error.message).toContain("privileged runner");
+    }
+    expect((await fsp.readdir(dir)).sort()).toEqual(B_LISTING);
+    expect(await modeOf(dir)).toBe(0o755);
+
+    await fsp.chmod(dir, 0o000);
+    const kept = await stagingError(
+      verifyDirectoryMode(dir, [
+        { attempt: "read", name: "B.mdx", refused: false },
+      ]),
+    );
+    expect(kept.message).toContain(
+      `reading ${path.join(dir, "B.mdx")} failed with EACCES: the staging removed more than it may`,
+    );
+    await fsp.chmod(dir, 0o755);
+
+    const unreadable: readonly (readonly [string, string])[] = [
+      ["absent.mdx", "is absent, not a plain file"],
+      ["sub", "is directory, not a plain file"],
+      ["link.mdx", "is symlink, not a plain file"],
+      ["B.mdx/x", "cannot be examined: ENOTDIR"],
+    ];
+    for (const [name, why] of unreadable) {
+      const error = await stagingError(
+        stageDirectoryMode(dir, 0o000, [
+          { attempt: "list", refused: true },
+          { attempt: "read", name, refused: true },
+        ]),
+      );
+      expect(error.message).toContain(
+        `the read probe's entry ${path.join(dir, name)} ${why}`,
+      );
+      expect(await modeOf(dir)).toBe(0o755);
+    }
+
+    const failed = await stagingError(
+      stageDirectoryMode(dir, 0o000, [{ attempt: "list", refused: false }]),
+    );
+    expect(failed.message).toContain("removed more than it may");
+    expect(await modeOf(dir)).toBe(0o755);
+    expect((await fsp.readdir(dir)).sort()).toEqual(B_LISTING);
   },
 );
 

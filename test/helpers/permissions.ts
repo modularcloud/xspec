@@ -41,8 +41,19 @@
 //   a leftover in it, or `.xspec` made unlistable but writable (`-wx`),
 //   unwritable (`r-x`), or unsearchable (`rw-`) — whose effect TEST-SPEC
 //   states probe by probe: its listing, a creation in it, the examination of
-//   an entry's kind, an entry's removal, each refused or kept as declared
-//   (`stageDirectoryMode`). Its restore reinstates the recorded mode where
+//   an entry's kind, an entry's removal, the read of a file below it, each
+//   refused or kept as declared (`stageDirectoryMode`). Mode `000` — read,
+//   write, and search all removed — is the form for a directory both of
+//   whose routes TEST-SPEC refuses alike (T14-10(k)'s working directory,
+//   entered first — helpers/subprocess.ts `runProductInEnteredDirectory` —
+//   and (l)'s directories holding the journal, a session file, and the
+//   configuration; T11.2-6's emit directory `out`; T6.3-6(e)'s object store
+//   and inner `.git`): its listing, the examination of every kind below it,
+//   and every read below it are refused, spelled relative to it or walked
+//   absolutely, so a product meets a refusal whatever its route; the
+//   staging verifies on this process the listing, the examination of the
+//   entry the test names, and, where the test names a file below it, that
+//   file's read. Its restore reinstates the recorded mode where
 //   the directory still stands, a directory a product's removal took away or
 //   renamed being left to the checks' diagnosis.
 // - E-1 self-verification: before returning, every staging verifies itself
@@ -1000,7 +1011,19 @@ export type DirectoryModeProbe =
    * Removing its entry `name`, a plain file: renaming a fresh sibling over
    * it and unlinking it, each refused (T14-9's removal and replacement).
    */
-  | { readonly attempt: "remove"; readonly name: StagedPath };
+  | { readonly attempt: "remove"; readonly name: StagedPath }
+  /**
+   * Reading the file `name` below it — an entry, or a relative path through
+   * its subdirectories (T6.3-6(e)'s object file under the object store), a
+   * string or its exact bytes — opened for reading; the file must stand
+   * there, a plain file, judged before anything changes, so a refusal
+   * declared is a real file's.
+   */
+  | {
+      readonly attempt: "read";
+      readonly name: StagedPath;
+      readonly refused: boolean;
+    };
 
 /**
  * E-1 verification of a directory-mode staging (exported for the self-test,
@@ -1069,6 +1092,20 @@ export async function verifyDirectoryMode(
           true,
         );
         break;
+      case "read": {
+        const file = joinPath(dir, toFsPath(probe.name));
+        const attempt: Attempt = async () => {
+          const handle = await fsp.open(file, "r");
+          return () => handle.close();
+        };
+        const description = `reading ${displayPath(file)}`;
+        if (probe.refused) {
+          await expectRefused(mode, shown, description, attempt);
+        } else {
+          await expectAllowed(mode, shown, description, attempt);
+        }
+        break;
+      }
     }
   }
 }
@@ -1076,14 +1113,16 @@ export async function verifyDirectoryMode(
 /**
  * Give the directory `target` the mode `bits` — e.g. 0o300 (`-wx`: its
  * listing refused, its writes and search kept), 0o500 (`r-x`: creation and
- * removal in it refused), 0o600 (`rw-`: its entries' examination refused) —
- * and verify on this process each of `probes` (E-1), at least one. The
- * directory must be a plain directory (no symbolic link), a `remove` probe's
- * entry a plain file and a kept `examine` probe's entry present, judged
- * before anything changes. Its restore reinstates the recorded mode where a
- * directory still stands at `target` — one a product's removal took away or
- * renamed restores nothing, its state left to the checks' diagnosis — and is
- * idempotent.
+ * removal in it refused), 0o600 (`rw-`: its entries' examination refused),
+ * 0o000 (read, write, and search removed: its listing, every examination
+ * and read below it, and creation in it refused, by whatever route; module
+ * header, Directory modes) — and verify on this process each of `probes`
+ * (E-1), at least one. The directory must be a plain directory (no symbolic
+ * link), a `remove` or `read` probe's entry a plain file and a kept
+ * `examine` probe's entry present, judged before anything changes. Its
+ * restore reinstates the recorded mode where a directory still stands at
+ * `target` — one a product's removal took away or renamed restores nothing,
+ * its state left to the checks' diagnosis — and is idempotent.
  */
 export async function stageDirectoryMode(
   target: StagedPath,
@@ -1106,21 +1145,29 @@ export async function stageDirectoryMode(
     );
   }
   for (const probe of probes) {
+    const plainFile = probe.attempt === "remove" || probe.attempt === "read";
     const entry =
-      probe.attempt === "remove" ||
-      (probe.attempt === "examine" && !probe.refused)
+      plainFile || (probe.attempt === "examine" && !probe.refused)
         ? joinPath(dir, toFsPath(probe.name))
         : undefined;
     if (entry === undefined) continue;
-    const kind = await kindOf(entry);
-    const wanted =
-      probe.attempt === "remove" ? kind === "file" : kind !== "absent";
+    let kind: EntryKind;
+    try {
+      kind = await kindOf(entry);
+    } catch (thrown) {
+      throw new HarnessStagingError(
+        mode,
+        shown,
+        `the ${probe.attempt} probe's entry ${displayPath(entry)} cannot be examined: ${describeError(thrown) || String(thrown)}`,
+      );
+    }
+    const wanted = plainFile ? kind === "file" : kind !== "absent";
     if (!wanted) {
       throw new HarnessStagingError(
         mode,
         shown,
         `the ${probe.attempt} probe's entry ${displayPath(entry)} is ${kind}` +
-          (probe.attempt === "remove" ? ", not a plain file" : ""),
+          (plainFile ? ", not a plain file" : ""),
       );
     }
   }

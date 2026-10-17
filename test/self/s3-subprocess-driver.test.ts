@@ -41,7 +41,19 @@
 // until `releaseHoldFile` lifts it, so a hold kept past the guard passes
 // and a run hanging once lifted is killed for what is left of its guard;
 // a hold path occupied as the run started, and a file found at another
-// path, suspend nothing. A wait beside a run carries no bound of its own:
+// path, suspend nothing. A run from a working directory entered before its
+// staging (`runProductInEnteredDirectory`; TEST-SPEC T14-10(k), (l)(iii))
+// is pinned against the stand-in too: run from a directory staged mode 000
+// once the harness's wrapper stands there, the stand-in has it as its cwd
+// and finds its own listing of it and a lookup there refused, by either
+// route, while its exit code, streams, argv, environment, and parent — the
+// harness, the wrapper replaced — are any run's and it holds file
+// descriptors 0–2 alone; a staging failing ends the run with that very
+// error, the product never started; the run's own guard covers its product
+// alone; its stdout is walked; and the wrapper's own failures, a failed
+// exec included, are harness errors, never the product's outcome — the
+// staging undone after every run. A wait beside a run carries no bound of
+// its own:
 // `waitForFile` against a live run that never creates its file ends with
 // the run, killed at its own guard, the kill the rejection's cause, and a
 // wait for another path while the run stands held rejects at once. The
@@ -93,26 +105,35 @@ import {
 } from "../helpers/kill-discipline.js";
 import type * as MdxDerivabilityModule from "../helpers/mdx-derivability.js";
 import {
+  HarnessStagingError,
+  stageDirectoryMode,
+} from "../helpers/permissions.js";
+import {
   builtProductBinding,
   builtProductBindingAt,
   createHoldFile,
   HarnessEvaluationError,
   pathExists,
+  productEnvironment,
   ProductRunOutputOverflowError,
   ProductRunTimeoutError,
   releaseHoldFile,
   rethrowHarnessError,
   runProduct,
+  runProductInEnteredDirectory,
   startProduct,
 } from "../helpers/subprocess.js";
 import type {
   ArgvValue,
+  EnteredDirectoryStaging,
   ProductBinding,
+  RunLauncher,
   RunResult,
 } from "../helpers/subprocess.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 
 const onPosix = process.platform !== "win32";
+const onLinux = process.platform === "linux";
 
 const hex = (data: Uint8Array): string => Buffer.from(data).toString("hex");
 
@@ -204,6 +225,41 @@ switch (mode) {
     const chunk = "x".repeat(1024);
     for (let i = 0; i < 1024; i += 1) process.stdout.write(chunk);
     setInterval(() => {}, 60000);
+    break;
+  }
+  case "mark": {
+    fs.writeFileSync(args[0], "marked");
+    process.exit(0);
+    break;
+  }
+  case "entered": {
+    // entered <code> <args...>: the run's own view of its working directory
+    // and of itself, its argv after <code>, its parent, and its environment;
+    // then a fixed stderr and <code>.
+    const attempt = (operation) => {
+      try {
+        operation();
+        return "allowed";
+      } catch (error) {
+        return error.code ?? "unknown";
+      }
+    };
+    const cwd = process.cwd();
+    process.stdout.write(
+      JSON.stringify({
+        cwd,
+        list: attempt(() => fs.readdirSync(".")),
+        lookup: attempt(() => fs.lstatSync("xspec.config.ts")),
+        dot: attempt(() => fs.statSync(".")),
+        absoluteList: attempt(() => fs.readdirSync(cwd)),
+        absoluteLookup: attempt(() => fs.lstatSync(cwd + "/xspec.config.ts")),
+        argv: args.slice(1),
+        ppid: process.ppid,
+        env: process.env,
+      }),
+    );
+    process.stderr.write(Buffer.from([0x65, 0x6e, 0x74, 0xff, 0x0d, 0x0a]));
+    process.exit(Number(args[0]));
     break;
   }
   default: {
@@ -1808,3 +1864,336 @@ test("a failure of the driver's walk itself rejects runProduct and waitForExit w
   expect(plain.exitCode).toBe(1);
   expect(walked).toHaveLength(2);
 });
+
+// Runs from a working directory entered before its staging (TEST-SPEC
+// T14-10(k), (l)(iii); H-2; helpers/subprocess.ts
+// `runProductInEnteredDirectory`, its wrapper
+// helpers/entered-directory-wrapper.mjs): the harness's wrapper enters the
+// directory, the caller's staging is made once it stands there, and the
+// wrapper replaces itself with the product, which is then the very process
+// the driver spawned. The mode-000 vector needs an unprivileged runner, as
+// every permission staging does (helpers/permissions.ts, E-1: as root its
+// staging fails as HarnessStagingError by design); the vectors whose
+// staging is a stand-in staging run on any POSIX runner.
+
+/** A path's mode bits. */
+async function modeOf(target: string): Promise<number> {
+  return (await fsp.stat(target)).mode & 0o7777;
+}
+
+/** A stand-in staging that stages nothing and counts its undoings. */
+function countedStaging(): EnteredDirectoryStaging & {
+  readonly restored: () => number;
+} {
+  let restored = 0;
+  return {
+    restore: async () => {
+      restored += 1;
+    },
+    restored: () => restored,
+  };
+}
+
+/** What the stand-in's `entered` mode reports. */
+interface EnteredView {
+  readonly cwd: string;
+  readonly list: string;
+  readonly lookup: string;
+  readonly dot: string;
+  readonly absoluteList: string;
+  readonly absoluteLookup: string;
+  readonly argv: readonly string[];
+  readonly ppid: number;
+  readonly env: Readonly<Record<string, string>>;
+}
+
+test.runIf(onLinux)(
+  "an entered-directory run (TEST-SPEC T14-10(k), (l)(iii); H-2): a stand-in run from a working directory it entered before the harness staged it mode 000 has that directory as its cwd and finds its own listing of it, a lookup of xspec.config.ts there, and an examination of `.` refused, spelled relative to it and walked absolutely alike — the staging made once the wrapper stands there, verified on the harness, and undone once the run has ended — while its exit code, byte-exact streams, argv, environment, and parent are any run's",
+  async () => {
+    const { workspace, binding } = await standin();
+    await workspace.dir("tools");
+    const tools = workspace.path("tools");
+    await fsp.chmod(tools, 0o755);
+    const entered = await fsp.realpath(tools);
+    const argv = ["entered", "7", "a b", "", "$HOME", "*.mdx", '"quoted"'];
+    // A name no shell keeps among its variables, and the ambient PWD,
+    // which no shell rewrote: the environment is exactly the driver's.
+    const env = { XSPEC_S3_ENTERED: "yes", "XSPEC_S3-ENTERED.NAME": "kept" };
+    const modesAtStaging: number[] = [];
+    const result = await runProductInEnteredDirectory(
+      binding,
+      { cwd: tools, argv, env },
+      async () => {
+        modesAtStaging.push(await modeOf(tools));
+        return await stageDirectoryMode(tools, 0o000, [
+          { attempt: "list", refused: true },
+          { attempt: "examine", name: "xspec.config.ts", refused: true },
+        ]);
+      },
+    );
+    // Staged once, the directory as the test left it until then.
+    expect(modesAtStaging).toEqual([0o755]);
+    expect(result.exitCode).toBe(7);
+    expect(result.signal).toBeNull();
+    const seen = JSON.parse(result.stdout) as EnteredView;
+    expect(seen.cwd).toBe(entered);
+    expect([
+      seen.list,
+      seen.lookup,
+      seen.dot,
+      seen.absoluteList,
+      seen.absoluteLookup,
+    ]).toEqual(["EACCES", "EACCES", "EACCES", "EACCES", "EACCES"]);
+    expect(seen.argv).toEqual(argv.slice(2));
+    // The product is the very process the driver spawned: the harness's
+    // child, the wrapper replaced.
+    expect(seen.ppid).toBe(process.pid);
+    expect(seen.env).toEqual(productEnvironment(binding, env));
+    expect(hex(result.stdoutBytes)).toBe(
+      hex(Buffer.from(result.stdout, "utf8")),
+    );
+    expect(hex(result.stderrBytes)).toBe("656e74ff0d0a");
+    expect(result.commandLine).toContain(
+      "from its working directory, entered before the harness staged it",
+    );
+    // Undone once the run has ended.
+    expect(await modeOf(tools)).toBe(0o755);
+    expect(await fsp.readdir(tools)).toEqual([]);
+  },
+);
+
+test.runIf(onLinux)(
+  "an entered-directory run's product holds file descriptors 0–2 alone, as a run spawned directly does — its wrapper's control channel never inherited — and its staging is undone once, after the run",
+  async () => {
+    const { workspace } = await standin();
+    const lister: ProductBinding = {
+      label: "S-3 file-descriptor lister",
+      command: "/bin/ls",
+      prefixArgs: ["-l", "/proc/self/fd"],
+    };
+    // Each open descriptor and what it is, socket and pipe numbers and the
+    // lister's own process identifier left out.
+    const descriptors = (result: RunResult): string[] =>
+      result.stdout
+        .split("\n")
+        .flatMap((line) => {
+          const found = / (\d+) -> (.+)$/.exec(line);
+          return found === null ? [] : [`${found[1]} ${found[2]}`];
+        })
+        .map((entry) =>
+          entry
+            .replace(/^(\d+ [a-z]+):\[\d+\]$/, "$1")
+            .replace(/\/proc\/\d+\//, "/proc/<pid>/"),
+        );
+    const direct = await runProduct(lister, { cwd: workspace.root });
+    expect(direct.exitCode).toBe(0);
+    // The premise: a run spawned directly holds 0–2 (stdin closed onto
+    // /dev/null) and the lister's own listing handle.
+    const listed = descriptors(direct);
+    expect(listed.map((entry) => entry.split(" ")[0])).toEqual([
+      "0",
+      "1",
+      "2",
+      "3",
+    ]);
+    expect(listed[0]).toBe("0 /dev/null");
+    expect(listed[3]).toBe("3 /proc/<pid>/fd");
+    const staging = countedStaging();
+    const entered = await runProductInEnteredDirectory(
+      lister,
+      { cwd: workspace.root },
+      async () => staging,
+    );
+    expect(entered.exitCode).toBe(0);
+    expect(descriptors(entered)).toEqual(descriptors(direct));
+    expect(entered.stderr).toBe("");
+    expect(staging.restored()).toBe(1);
+  },
+);
+
+test.runIf(onPosix)(
+  "an entered-directory run whose staging fails ends before its product starts, rejecting with that very error — a HarnessStagingError as itself — the wrapper killed; pre-flight refusals — a launcher, a relative command, a command no executable regular file — are plain Errors, nothing staged or spawned",
+  async () => {
+    const { workspace, binding } = await standin();
+    const marker = path.join(workspace.tempRoot, "marked");
+    const run = (
+      stage: () => Promise<EnteredDirectoryStaging>,
+      over: Partial<ProductBinding> = {},
+      launcher?: RunLauncher,
+    ): Promise<RunResult> =>
+      runProductInEnteredDirectory(
+        { ...binding, ...over },
+        { cwd: workspace.root, argv: ["mark", marker], launcher },
+        stage,
+      );
+    const ineffective = new HarnessStagingError(
+      "directory-mode",
+      workspace.root,
+      "S-3: an ineffective staging",
+    );
+    expect(
+      await rejectionOf(
+        run(async () => {
+          throw ineffective;
+        }),
+      ),
+    ).toBe(ineffective);
+    const failed = new Error("S-3: the staging failed");
+    expect(
+      await rejectionOf(
+        run(async () => {
+          throw failed;
+        }),
+      ),
+    ).toBe(failed);
+    expect(await pathExists(marker)).toBe(false);
+
+    let staged = 0;
+    const counting = async (): Promise<EnteredDirectoryStaging> => {
+      staged += 1;
+      return { restore: async () => undefined };
+    };
+    const launcher: RunLauncher = {
+      label: "(S-3 launcher)",
+      wrap: (invocation, env) => ({
+        command: invocation.command,
+        args: [...invocation.args],
+        env: { ...env },
+      }),
+      killGroup: async () => undefined,
+    };
+    const refusals: readonly (readonly [Promise<RunResult>, RegExp])[] = [
+      [run(counting, {}, launcher), /takes no launcher/],
+      [run(counting, { command: "node" }), /takes an absolute command/],
+      [
+        run(counting, { command: workspace.path("standin.mjs") }),
+        /takes an executable regular file/,
+      ],
+    ];
+    for (const [pending, pattern] of refusals) {
+      const error = await rejectionOf(pending);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(HarnessAssertionError);
+      expect((error as Error).message).toMatch(pattern);
+      expect((error as Error).message).toContain("nothing was spawned");
+    }
+    expect(staged).toBe(0);
+    expect(await pathExists(marker)).toBe(false);
+    // With nothing amiss the same run starts its product.
+    const marked = await run(counting);
+    expect(marked.exitCode).toBe(0);
+    expect(staged).toBe(1);
+    expect(await fsp.readFile(marker, "utf8")).toBe("marked");
+  },
+);
+
+test.runIf(onPosix)(
+  "an entered-directory run's own hang guard covers its product alone (TEST-SPEC S-3): a staging outlasting that guard passes, the guard armed once the product starts, and a product that never ends is killed at its own guard — a ProductRunTimeoutError, the hang guard's kill — its staging undone once the run has ended",
+  async () => {
+    const { workspace, binding } = await standin();
+    const guardMs = 2000;
+    const slow = countedStaging();
+    const passed = await runProductInEnteredDirectory(
+      binding,
+      { cwd: workspace.root, argv: ["exit", "0"], timeoutMs: guardMs },
+      async () => {
+        await sleep(guardMs + 500);
+        return slow;
+      },
+    );
+    expect(passed.exitCode).toBe(0);
+    expect(slow.restored()).toBe(1);
+    const hanging = countedStaging();
+    const hangGuardMs = 400;
+    const started = performance.now();
+    const error = await rejectionOf(
+      runProductInEnteredDirectory(
+        binding,
+        { cwd: workspace.root, argv: ["hang"], timeoutMs: hangGuardMs },
+        async () => hanging,
+      ),
+    );
+    expect(error).toBeInstanceOf(ProductRunTimeoutError);
+    expect(isHangGuardKill(error)).toBe(true);
+    expect((error as Error).message).toContain(
+      `timed out after ${String(hangGuardMs)} ms`,
+    );
+    expect(performance.now() - started).toBeGreaterThanOrEqual(
+      hangGuardMs - 50,
+    );
+    expect(hanging.restored()).toBe(1);
+  },
+);
+
+test.runIf(onPosix)(
+  "the entered-directory wrapper's own failures are harness errors, never the product's outcome: a command no longer executable once staged, which the wrapper reports, and an exec the kernel refuses, which aborts it — each a plain Error, the staging undone",
+  async () => {
+    const { workspace } = await standin();
+    await workspace.file("tool.sh", "#!/bin/sh\nexit 0\n");
+    const tool = workspace.path("tool.sh");
+    await fsp.chmod(tool, 0o755);
+    const unexecutable = countedStaging();
+    const reported = await rejectionOf(
+      runProductInEnteredDirectory(
+        { label: "S-3 tool", command: tool },
+        { cwd: workspace.root },
+        async () => {
+          await fsp.chmod(tool, 0o644);
+          return unexecutable;
+        },
+      ),
+    );
+    expect(reported).toBeInstanceOf(Error);
+    expect(reported).not.toBeInstanceOf(HarnessAssertionError);
+    expect(reported).not.toBeInstanceOf(ProductRunTimeoutError);
+    expect((reported as Error).message).toMatch(
+      /^harness error \(H-11\): .*the harness's entered-directory wrapper ended before starting the product/,
+    );
+    expect((reported as Error).message).toContain(
+      `the command ${tool} is not executable`,
+    );
+    expect(unexecutable.restored()).toBe(1);
+
+    // No shebang and no binary format: the kernel refuses the exec
+    // (ENOEXEC), past every check the wrapper and the driver make.
+    await workspace.file("garbage", "S-3: no executable format\n");
+    const garbage = workspace.path("garbage");
+    await fsp.chmod(garbage, 0o755);
+    const refusedExec = countedStaging();
+    const aborted = await rejectionOf(
+      runProductInEnteredDirectory(
+        { label: "S-3 garbage", command: garbage },
+        { cwd: workspace.root },
+        async () => refusedExec,
+      ),
+    );
+    expect(aborted).toBeInstanceOf(Error);
+    expect(aborted).not.toBeInstanceOf(HarnessAssertionError);
+    expect((aborted as Error).message).toContain(
+      "failed to replace itself with the product",
+    );
+    expect((aborted as Error).message).toContain("ENOEXEC");
+    expect(refusedExec.restored()).toBe(1);
+  },
+);
+
+test.runIf(onPosix)(
+  "an entered-directory run's captured stdout is walked as any run's (T12.7-1): a near-marker under --json rejects it with the walk's diagnosed failure, its staging undone before the rejection surfaces",
+  async () => {
+    const { workspace, binding } = await emitStandin();
+    const staging = countedStaging();
+    const error = await rejectionOf(
+      runProductInEnteredDirectory(
+        binding,
+        {
+          cwd: workspace.root,
+          argv: ["ids", "--json"],
+          env: emitting(NEAR_MARKER_DOCUMENT),
+        },
+        async () => staging,
+      ),
+    );
+    expectWalkDiagnosis(error, "$.nodes[0].tags", "ids --json");
+    expect(staging.restored()).toBe(1);
+  },
+);

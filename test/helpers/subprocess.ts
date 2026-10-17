@@ -78,6 +78,30 @@
 //   group of its own, and every signal to it — the guards' kills,
 //   `killGroup` — goes through the launcher: the harness's own identity may
 //   not signal its processes.
+// - H-2's controlled working directory, entered before its staging
+//   (TEST-SPEC T14-10(k), (l)(iii): "a process keeps a working directory
+//   it entered before the permissions went, as a wrapper may arrange
+//   between changing directory and running the product"):
+//   `runProductInEnteredDirectory` spawns the harness's wrapper
+//   (helpers/entered-directory-wrapper.mjs, harness code, never product
+//   code) with the run's working directory, which the spawn enters, and an
+//   empty environment of its own; once the wrapper reports itself running
+//   there, the caller's staging of that directory is made — a mode-000
+//   staging (helpers/permissions.ts `stageDirectoryMode`), verified on the
+//   harness itself (E-1) — and the wrapper then replaces itself with the
+//   product (`process.execve`), which so inherits the entered directory and
+//   is the very process the driver spawned: its argv and environment
+//   exactly the driver's, its file descriptors 0–2 alone, its exit code,
+//   signal, and streams captured as any run's, and every hook here applying
+//   unchanged (the notes, T12.7-1's walk, T6.5-22(a)'s check). The
+//   wrapper's start, the staging, and the exec are harness steps under
+//   guards of their own (helpers/step-guards.ts), the run's own hang guard
+//   armed once the product starts (S-3: it covers the product's work alone);
+//   a staging that fails ends the run with that very error, and anything
+//   else ending the run before its product starts — the wrapper's failure,
+//   a failed exec — is a harness error, never the product's outcome. The
+//   staging is undone once the run has ended, however it ended, before the
+//   driver's evaluations of its answer.
 // - Environment policy (conservative choice): the child inherits the ambient
 //   environment minus variables that would let the machine leak into
 //   fixture-observable behavior — `GIT_*` and `EMAIL` (the product shells out
@@ -156,6 +180,8 @@ import type { ChildProcess } from "node:child_process";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { Duplex } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import type { AcquiringRun } from "./acquiring-runs.js";
@@ -531,15 +557,150 @@ export async function startProduct(
   binding: ProductBinding,
   options: RunOptions,
 ): Promise<RunningProduct> {
+  return await launchProduct(binding, options, undefined);
+}
+
+/**
+ * A staging the harness makes on the working directory of a run that has
+ * entered it ({@link runProductInEnteredDirectory}) — a mode-000 directory
+ * staging, helpers/permissions.ts `stageDirectoryMode`, whose
+ * `PermissionStaging` is one — and its undoing, which the driver calls once
+ * the run has ended.
+ */
+export interface EnteredDirectoryStaging {
+  /** Undo the staging; idempotent. */
+  restore(): Promise<void>;
+}
+
+/**
+ * The harness's entered-directory wrapper (module header): harness code,
+ * never product code, beside this module.
+ */
+const ENTERED_DIRECTORY_WRAPPER = fileURLToPath(
+  new URL("./entered-directory-wrapper.mjs", import.meta.url),
+);
+
+/**
+ * What Node.js writes to standard error as a failed `process.execve` aborts
+ * the process (the wrapper's own last resort writes it too): an
+ * entered-directory run ending so is the wrapper's failure, never the
+ * product's outcome (module header).
+ */
+const FAILED_EXEC_MARK = "process.execve failed";
+
+/**
+ * Run an invocation from a working directory it entered before `stage`
+ * staged it, to completion (TEST-SPEC T14-10(k), (l)(iii); H-2; module
+ * header): the harness's wrapper is spawned with `options.cwd` — the spawn
+ * enters it — and once it reports itself running there `stage` is called,
+ * which stages the directory (mode 000, `stageDirectoryMode`) and verifies
+ * the staging on the harness itself (E-1) before it resolves; the wrapper
+ * then replaces itself with the product, which so inherits the entered
+ * directory, and the run proceeds as {@link runProduct}'s, every guarantee
+ * of it kept — the sanitized environment, argv verbatim, the exact exit
+ * code and signal, separated byte-exact streams, its own hang guard (armed
+ * as the product starts), T12.7-1's walk, and T6.5-22(a)'s check. The
+ * staging `stage` resolved with is undone once the run has ended, however
+ * it ended, before those evaluations, in a `finally`'s manner: a failed
+ * undoing rejects a run that resolved. Rejects as `runProduct` does and,
+ * before its product starts, with what `stage` rejected with (its
+ * `HarnessStagingError` among them: a privileged runner's staging is
+ * ineffective), the wrapper killed and the product never started, or with
+ * a harness error (`HarnessStepTimeoutError` for a step's tripped guard, a
+ * plain `Error` otherwise): the wrapper failing to start or to start the
+ * product, a failed exec. Pre-flight refusals, before anything is noted or
+ * spawned, beside `startProduct`'s: a launcher (the run is H-2's working
+ * directory channel alone), Windows, a Node.js without `process.execve`
+ * (Node.js 22.15 and later have it), and a command — the binding's, or the
+ * byte-argv trampoline's `/bin/sh` — that is not an absolute path to an
+ * executable regular file (the exec searches no `PATH`), each a plain
+ * `Error`.
+ */
+export async function runProductInEnteredDirectory(
+  binding: ProductBinding,
+  options: RunOptions,
+  stage: () => Promise<EnteredDirectoryStaging>,
+): Promise<RunResult> {
+  const running = await launchProduct(binding, options, stage);
+  return await running.waitForExit();
+}
+
+/**
+ * Pre-flight of an entered-directory run (`runProductInEnteredDirectory`):
+ * every refusal a plain `Error`, before anything is noted or spawned.
+ */
+async function assertEnterable(
+  command: string,
+  launcher: RunLauncher | undefined,
+  commandLine: string,
+): Promise<void> {
+  const refuse = (why: string): never => {
+    throw new Error(
+      `an entered-directory run (TEST-SPEC T14-10(k), (l)(iii)) ${why}; nothing was spawned; command: ${commandLine}`,
+    );
+  };
+  if (launcher !== undefined) {
+    refuse(
+      "takes no launcher: it is H-2's working-directory channel alone, its wrapper the process the launcher would start",
+    );
+  }
+  if (process.platform === "win32") {
+    refuse(
+      "is POSIX-only staging: its wrapper replaces itself with the product through process.execve, which Windows lacks, and the stagings it serves are the Linux leg's (E-1)",
+    );
+  }
+  if (typeof process.execve !== "function") {
+    refuse(
+      `needs process.execve (Node.js 22.15 and later), which this Node.js ${process.version} lacks`,
+    );
+  }
+  if (!path.isAbsolute(command)) {
+    refuse(
+      `takes an absolute command, its exec searching no PATH; got ${JSON.stringify(command)}`,
+    );
+  }
+  const commandStats = await fsp.stat(command).catch(() => undefined);
+  const executable =
+    commandStats?.isFile() === true &&
+    (await fsp.access(command, fsp.constants.X_OK).then(
+      () => true,
+      () => false,
+    ));
+  if (!executable) {
+    refuse(
+      `takes an executable regular file as its command; ${command} is not one`,
+    );
+  }
+  if (!(await pathExists(ENTERED_DIRECTORY_WRAPPER))) {
+    refuse(
+      `needs the harness's wrapper ${ENTERED_DIRECTORY_WRAPPER}, which is missing — a defect in the harness`,
+    );
+  }
+}
+
+/**
+ * `startProduct`'s launch, or, given `stage`, an entered-directory run's
+ * (`runProductInEnteredDirectory`): every pre-flight check, note, and hook
+ * the same, the spawn its wrapper's.
+ */
+async function launchProduct(
+  binding: ProductBinding,
+  options: RunOptions,
+  stage: (() => Promise<EnteredDirectoryStaging>) | undefined,
+): Promise<RunningProduct> {
   const fullArgs: readonly ArgvValue[] = [
     ...(binding.prefixArgs ?? []),
     ...(options.argv ?? []),
   ];
   const launcher = options.launcher;
-  const commandLine =
+  const described =
     launcher === undefined
       ? describeCommand(binding, fullArgs, options.cwd)
       : `${describeCommand(binding, fullArgs, options.cwd)} ${launcher.label}`;
+  const commandLine =
+    stage === undefined
+      ? described
+      : `${described} [from its working directory, entered before the harness staged it]`;
 
   if (!path.isAbsolute(options.cwd)) {
     throw new Error(
@@ -586,6 +747,9 @@ export async function startProduct(
   }
 
   const invocation = resolveInvocation(binding.command, fullArgs, commandLine);
+  if (stage !== undefined) {
+    await assertEnterable(invocation.command, launcher, commandLine);
+  }
   const env = productEnvironment(binding, options.env);
   // H-2 (module header): a launched run's spawn is the launcher's command
   // line, built before anything is noted, so a refused one notes nothing.
@@ -616,14 +780,32 @@ export async function startProduct(
   const acquiringRun = await noteAcquiringRun(options.cwd, options.argv ?? []);
   let child: ChildProcess;
   try {
-    child = spawn(spawned.command, spawned.args, {
-      cwd: options.cwd,
-      env: spawned.env,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-      // T13.5-3 (module header): a process group of its own, on request.
-      detached: processGroup,
-    });
+    child =
+      stage === undefined
+        ? spawn(spawned.command, spawned.args, {
+            cwd: options.cwd,
+            env: spawned.env,
+            stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true,
+            // T13.5-3 (module header): a process group of its own, on request.
+            detached: processGroup,
+          })
+        : // An entered-directory run (module header): its wrapper, in the
+          // run's working directory, with an environment of its own — the
+          // product's travels in its job — and its control channel as file
+          // descriptor 3; stdin, stdout, and stderr the product's, as it
+          // inherits them.
+          spawn(
+            process.execPath,
+            ["--no-warnings", ENTERED_DIRECTORY_WRAPPER],
+            {
+              cwd: options.cwd,
+              env: {},
+              stdio: ["ignore", "pipe", "pipe", "pipe"],
+              windowsHide: true,
+              detached: processGroup,
+            },
+          );
   } catch (error) {
     acquiringRun?.ended();
     throw error;
@@ -641,7 +823,173 @@ export async function startProduct(
     processGroup,
     launcher,
     ownHold,
+    stage === undefined
+      ? undefined
+      : {
+          control: child.stdio[3],
+          job: {
+            command: spawned.command,
+            args: spawned.args,
+            env: spawned.env,
+          },
+          stage,
+        },
   );
+}
+
+/**
+ * An entered-directory run's wrapper protocol, as `launchProduct` hands it
+ * to the run (`runProductInEnteredDirectory`, module header).
+ */
+interface EnteredRun {
+  /** The driver's end of the wrapper's file descriptor 3. */
+  readonly control: Readable | Writable | null | undefined;
+  /** What the wrapper replaces itself with: exactly the driver's spawn. */
+  readonly job: {
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly env: Readonly<Record<string, string>>;
+  };
+  /** The caller's staging of the entered directory. */
+  readonly stage: () => Promise<EnteredDirectoryStaging>;
+}
+
+/** A parsed control line that is an object (not an array). */
+function isControlRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The driver's end of an entered-directory run's control channel, its
+ * wrapper's file descriptor 3 (helpers/entered-directory-wrapper.mjs),
+ * read line by line as the wrapper writes: `ready` once it runs in the
+ * entered directory, `exec` just before it replaces itself with the product
+ * — taken as the line arrives, the product starting from there — and
+ * `failed` with the reason it cannot. Anything else, `exec` before the job
+ * was sent, or the channel's end before the product starts ends both waits
+ * as the wrapper's failure.
+ */
+class EnteredDirectoryControl {
+  /** Resolves once the wrapper runs in the entered directory. */
+  readonly ready: Promise<void>;
+  /** Resolves once the wrapper starts the product. */
+  readonly started: Promise<void>;
+  /** The wrapper has started the product: set as its `exec` line arrives. */
+  hasStarted = false;
+  readonly #socket: Duplex | undefined;
+  readonly #onStarted: () => void;
+  #settleReady: { resolve(): void; reject(error: Error): void } = {
+    resolve: () => undefined,
+    reject: () => undefined,
+  };
+  #settleStarted: { resolve(): void; reject(error: Error): void } = {
+    resolve: () => undefined,
+    reject: () => undefined,
+  };
+  #jobSent = false;
+  #buffered: Buffer = Buffer.alloc(0);
+
+  constructor(
+    socket: Readable | Writable | null | undefined,
+    onStarted: () => void,
+  ) {
+    this.#onStarted = onStarted;
+    this.ready = new Promise<void>((resolve, reject) => {
+      this.#settleReady = { resolve, reject };
+    });
+    this.started = new Promise<void>((resolve, reject) => {
+      this.#settleStarted = { resolve, reject };
+    });
+    // Observed even before anything awaits them (an early failure).
+    this.ready.catch(() => undefined);
+    this.started.catch(() => undefined);
+    this.#socket = socket instanceof Duplex ? socket : undefined;
+    if (this.#socket === undefined) {
+      this.abandon(
+        new Error("the wrapper was spawned with no control channel"),
+      );
+      return;
+    }
+    this.#socket.on("data", (chunk: Buffer) => {
+      this.#receive(chunk);
+    });
+    this.#socket.on("error", (error: Error) => {
+      this.abandon(
+        new Error(`its control channel failed: ${error.message}`, {
+          cause: error,
+        }),
+      );
+    });
+    this.#socket.on("close", () => {
+      this.abandon(
+        new Error(
+          "the wrapper closed its control channel before starting the product",
+        ),
+      );
+    });
+  }
+
+  /** Hand the wrapper its job, once. */
+  sendJob(job: EnteredRun["job"]): void {
+    if (this.#jobSent || this.#socket === undefined) return;
+    this.#jobSent = true;
+    this.#socket.write(`${JSON.stringify(job)}\n`);
+  }
+
+  /** End the waits still pending with `error`; settled ones stay as they are. */
+  abandon(error: Error): void {
+    this.#settleReady.reject(error);
+    this.#settleStarted.reject(error);
+  }
+
+  #receive(chunk: Buffer): void {
+    let pending = Buffer.concat([this.#buffered, chunk]);
+    for (
+      let newline = pending.indexOf(0x0a);
+      newline !== -1;
+      newline = pending.indexOf(0x0a)
+    ) {
+      this.#line(pending.subarray(0, newline).toString("utf8"));
+      pending = pending.subarray(newline + 1);
+    }
+    this.#buffered = Buffer.from(pending);
+  }
+
+  #line(line: string): void {
+    let message: unknown;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      message = undefined;
+    }
+    if (isControlRecord(message)) {
+      if (message["ready"] === true) {
+        this.#settleReady.resolve();
+        return;
+      }
+      if (message["exec"] === true && this.#jobSent) {
+        if (!this.hasStarted) {
+          this.hasStarted = true;
+          this.#onStarted();
+        }
+        this.#settleStarted.resolve();
+        return;
+      }
+      if (typeof message["failed"] === "string") {
+        this.abandon(
+          new Error(
+            `the wrapper could not start the product: ${message["failed"]}`,
+          ),
+        );
+        return;
+      }
+    }
+    this.abandon(
+      new Error(
+        `the wrapper wrote a control line out of its protocol: ${JSON.stringify(line)}`,
+      ),
+    );
+  }
 }
 
 /**
@@ -743,7 +1091,9 @@ export interface KilledGroup {
  * alone, never a crash of the run), and (H-11)
  * `ProductRunOutputOverflowError` on output overflow,
  * `HarnessEvaluationError` when T12.7-1's walk or T6.5-22(a)'s check itself
- * fails.
+ * fails. An entered-directory run's (`runProductInEnteredDirectory`) also
+ * rejects, before its product starts, with its staging's own error or a
+ * harness error, and settles once its staging is undone.
  */
 export class RunningProduct {
   readonly commandLine: string;
@@ -780,6 +1130,18 @@ export class RunningProduct {
    * launcher failed, so the run would otherwise never settle.
    */
   #abandon: (error: Error) => void = () => undefined;
+  /**
+   * An entered-directory run's start (module header): settled once its
+   * wrapper has started the product or the harness has given the start up,
+   * never rejecting. Resolved at once for every other run.
+   */
+  #enterDone: Promise<void> = Promise.resolve();
+  /** The staging an entered-directory run's `stage` resolved with. */
+  #enteredStaging: EnteredDirectoryStaging | undefined;
+  /** What ended an entered-directory run's start, if anything did. */
+  #enteredFailure: unknown;
+  /** That failure is the run's `stage` rejecting (its own error). */
+  #stagingFailed = false;
 
   /** @internal — obtain instances via `startProduct`. */
   constructor(
@@ -793,6 +1155,7 @@ export class RunningProduct {
     processGroup = false,
     launcher?: RunLauncher,
     ownHold?: string,
+    entered?: EnteredRun,
   ) {
     this.#child = child;
     this.commandLine = commandLine;
@@ -816,7 +1179,20 @@ export class RunningProduct {
     child.stdout?.on("data", capture(stdoutChunks));
     child.stderr?.on("data", capture(stderrChunks));
 
-    this.#armGuard();
+    // An entered-directory run's own guard covers its product alone (module
+    // header; S-3): armed as its wrapper starts the product, the steps
+    // before that each under a guard of their own (`#enter`).
+    const control =
+      entered === undefined
+        ? undefined
+        : new EnteredDirectoryControl(entered.control, () => {
+            if (!this.#settled) this.#armGuard();
+          });
+    if (entered === undefined || control === undefined) {
+      this.#armGuard();
+    } else {
+      this.#enterDone = this.#enter(entered, control);
+    }
 
     const exit = new Promise<RunResult>((resolve, reject) => {
       let done = false;
@@ -836,6 +1212,9 @@ export class RunningProduct {
         });
       };
       child.once("error", (error) => {
+        control?.abandon(
+          new Error(`the wrapper failed to start: ${error.message}`),
+        );
         settle(() =>
           reject(
             new Error(
@@ -845,6 +1224,35 @@ export class RunningProduct {
         );
       });
       child.once("close", (exitCode, signal) => {
+        if (
+          control !== undefined &&
+          (!control.hasStarted || this.#enteredFailure !== undefined)
+        ) {
+          // An entered-directory run that ended before its product started,
+          // or whose start the harness gave up (module header): a harness
+          // error, never the product's outcome — settled once `#enter` has
+          // settled, its reason then known.
+          const stdoutBytes = Buffer.concat(stdoutChunks);
+          const stderrBytes = Buffer.concat(stderrChunks);
+          const ended = summarizeResult({
+            exitCode,
+            signal,
+            stdout: stdoutBytes.toString("utf8"),
+            stderr: stderrBytes.toString("utf8"),
+            stdoutBytes,
+            stderrBytes,
+            commandLine,
+          });
+          control.abandon(
+            new Error(`the wrapper ended before starting the product`),
+          );
+          void this.#enterDone.then(() => {
+            settle(() => {
+              reject(this.#notStartedError(ended));
+            });
+          });
+          return;
+        }
         settle(() => {
           if (this.#timedOut) {
             const after = this.#wasHeld
@@ -867,6 +1275,19 @@ export class RunningProduct {
           }
           const stdoutBytes = Buffer.concat(stdoutChunks);
           const stderrBytes = Buffer.concat(stderrChunks);
+          if (
+            control !== undefined &&
+            signal === "SIGABRT" &&
+            stderrBytes.includes(FAILED_EXEC_MARK)
+          ) {
+            // The wrapper's exec failed past its checks (module header).
+            reject(
+              new Error(
+                `harness error (H-11): ${commandLine}: the harness's entered-directory wrapper failed to replace itself with the product — killed by signal SIGABRT, its standard error: ${excerpt(stderrBytes)} — never the product's outcome`,
+              ),
+            );
+            return;
+          }
           resolve({
             exitCode,
             signal,
@@ -879,6 +1300,9 @@ export class RunningProduct {
         });
       });
     });
+    // An entered-directory run's staging is undone once the run has ended,
+    // however it ended, before the evaluations of its answer (module header).
+    const ended = control === undefined ? exit : this.#undoneAfter(exit);
     // T12.7-1: the marker walk over the captured stdout of a run with JSON
     // output in effect, once it has exited — however it ended — and before
     // any awaiter sees the result (module header); a near-marker rejects
@@ -887,7 +1311,7 @@ export class RunningProduct {
     // The walk is a harness step under its own guard (TEST-SPEC S-3,
     // helpers/step-guards.ts): synchronous, bounded by the capture limit.
     const walked = walkCapturedJson
-      ? exit.then((result) => {
+      ? ended.then((result) => {
           try {
             guardSyncStep(`T12.7-1's marker walk over ${commandLine}`, () => {
               walkCapturedJsonDocument(result);
@@ -897,7 +1321,7 @@ export class RunningProduct {
           }
           return result;
         })
-      : exit;
+      : ended;
     // T6.5-22(a): a performed move's added imports, judged once it exits 0
     // and before any awaiter sees the result (helpers/subprocess.ts header);
     // a failure of the judgement itself is the harness error
@@ -930,6 +1354,90 @@ export class RunningProduct {
   /** True once the process has exited (or failed to spawn). */
   hasExited(): boolean {
     return this.#settled;
+  }
+
+  /**
+   * An entered-directory run's start (module header): its wrapper's start
+   * in the entered directory, `stage`, and the wrapper's start of the
+   * product, each a harness step under a guard of its own (S-3); never
+   * rejects. Whatever ends it first is kept as the run's failure and the
+   * wrapper, or what it started, is killed; a staging that resolves only
+   * once its step's guard has tripped is undone as it arrives.
+   */
+  async #enter(
+    entered: EnteredRun,
+    control: EnteredDirectoryControl,
+  ): Promise<void> {
+    let staging: Promise<EnteredDirectoryStaging> | undefined;
+    try {
+      await guardStep(
+        `${this.commandLine}: the harness's wrapper starting in the working directory it entered`,
+        () => control.ready,
+      );
+      try {
+        const pending = entered.stage();
+        staging = pending;
+        this.#enteredStaging = await guardStep(
+          `${this.commandLine}: staging the working directory its wrapper entered`,
+          () => pending,
+        );
+      } catch (error) {
+        this.#stagingFailed = true;
+        throw error;
+      }
+      control.sendJob(entered.job);
+      await guardStep(
+        `${this.commandLine}: the harness's wrapper starting the product`,
+        () => control.started,
+      );
+    } catch (error) {
+      if (staging !== undefined && this.#enteredStaging === undefined) {
+        staging.then((late) => late.restore()).catch(() => undefined);
+      }
+      this.#enteredFailure = error;
+      this.#guardKill();
+    }
+  }
+
+  /**
+   * The rejection of an entered-directory run that ended before its product
+   * started, or whose start the harness gave up (module header): the
+   * staging's own error, or a step's tripped guard, as itself; anything
+   * else a harness error naming how the wrapper ended — `ended`, its exit
+   * and streams — never the product's outcome.
+   */
+  #notStartedError(ended: string): unknown {
+    const failure = this.#enteredFailure;
+    if (this.#stagingFailed || failure instanceof HarnessStepTimeoutError) {
+      return failure;
+    }
+    const why = failure === undefined ? "" : `: ${describeCause(failure)}`;
+    return new Error(
+      `harness error (H-11): ${this.commandLine}: the harness's entered-directory wrapper ended before starting the product — ${ended}${why}; never the product's outcome`,
+      failure === undefined ? {} : { cause: failure },
+    );
+  }
+
+  /**
+   * An entered-directory run's outcome once its staging is undone (module
+   * header): however the run ended, once its start has settled; a failed
+   * undoing rejects a run that resolved, and leaves a rejection as it was.
+   */
+  async #undoneAfter(exit: Promise<RunResult>): Promise<RunResult> {
+    let result: RunResult;
+    try {
+      result = await exit;
+    } catch (error) {
+      await this.#undoStaging().catch(() => undefined);
+      throw error;
+    }
+    await this.#undoStaging();
+    return result;
+  }
+
+  async #undoStaging(): Promise<void> {
+    await this.#enterDone;
+    await this.#enteredStaging?.restore();
   }
 
   /** Arm the hang guard for what is left of it (module header; S-3). */
