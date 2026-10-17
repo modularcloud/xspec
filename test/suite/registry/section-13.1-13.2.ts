@@ -6,12 +6,19 @@
 // asserts exact exit codes (H-5) and exact bytes where SPEC.md fixes bytes
 // (H-4), and rejects a product only via diagnosed assertion failures (H-8).
 // Consumer-side contracts run under standard TypeScript tooling with no xspec
-// runtime dependency (SPEC 13.1) through helpers/tooling.ts, on its NodeNext
-// path (that module's header): consumer files compile and run in CommonJS
-// mode beside the sources, where the spec-fixed `./NAME.xspec` specifier
-// resolves by Node's extension lookup — until FIX_PLAN Task 26 of the plan
-// written at 2a2b94e moves T13.1-2 onto TEST-SPEC H-2's two fixed
-// configurations, as the §4 consumers are (section-4.ts).
+// runtime dependency (SPEC 13.1) through helpers/tooling.ts, in TEST-SPEC
+// H-2's two fixed configurations as section-4.ts describes: every
+// type-checking verdict, hover, and definition is asserted under the
+// CommonJS configuration and then the ES-module configuration, with the same
+// expectation — a clean verdict over the whole program, the generated
+// modules and the companions they reach included; a type-error assertion
+// expecting the program's diagnostics at the consumer reference under test
+// alone — and the runtime arm runs under the CommonJS configuration alone,
+// compiled to CommonJS JavaScript written outside the workspace and run
+// there under plain Node; the ES-module configuration's output is
+// type-checked and served, never executed. H-2 supplies no `@types/node`,
+// so the consumer writing to standard output declares the one `process`
+// member it uses itself.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - T13.1-1's generated-file sweep diffs a whole-workspace byte snapshot
@@ -35,19 +42,28 @@
 //   staged beside the generated modules so the import is the spec-quoted
 //   literal `import SPEC, { text } from "./NAME.xspec"` (SPEC 4, 13.1),
 //   exercises representatives of every consumer-side contract end to end
-//   under standard TypeScript tooling only — resolution and 4.1 type
-//   checking (clean strict compile of node chains; a missing-path sibling
-//   program failing at the consumer reference), 4.2 hover and
-//   go-to-definition into the source `.mdx`, and 4.3–4.5 runtime behavior in
+//   under standard TypeScript tooling only. In each of H-2's configurations
+//   in turn: resolution and 4.1 type checking — the consumer's whole
+//   program, both generated modules and every companion they reach
+//   included, type-checks with no diagnostic, so a module form either
+//   configuration rejects (an export or import assignment under the
+//   ES-module configuration's ECMAScript-module output, a type re-exported
+//   through `export { … } from` without a `type` modifier under its
+//   `isolatedModules`) fails here whatever the other accepts; a
+//   missing-path sibling program fails with its diagnostics at the consumer
+//   reference alone — and 4.2 hover and go-to-definition into the source
+//   `.mdx`. In the CommonJS configuration alone, 4.3–4.5 runtime behavior in
 //   one compiled program: byte-exact `text` values, a second module consumed
 //   through an aliased `text` export (4.4's aliasing rule, positive side),
 //   and a dependency marker harmless at runtime (the begin/end frame plus
 //   exact stdout show the program behaves as if the marker line were
 //   absent). The consumer files are matched by no configured group (the §4
-//   preamble arrangement), and the compiled program runs under plain Node
-//   with NODE_PATH dropped (helpers/tooling.ts): "no xspec runtime
-//   dependency", observed structurally. Per-contract negative matrices and
-//   edge cases remain with T4-1…T4.6-4.
+//   preamble arrangement), and the compiled program — the compiler's output
+//   alone, written outside the workspace — runs under plain Node with
+//   NODE_PATH dropped and no package named `xspec` resolvable
+//   (helpers/tooling.ts): "no xspec runtime dependency", observed
+//   structurally. Per-contract negative matrices and edge cases remain with
+//   T4-1…T4.6-4.
 // - T13.2-1 asserts placement and exact bytes together ("content per section
 //   3", hand-derived from the removal/replacement/line-drop rules): default
 //   emission lands `NAME.md` next to each source, `outDir` emission lands it
@@ -78,13 +94,15 @@ import {
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import {
-  assertCompileErrorAt,
-  assertNoCompileErrors,
+  assertTypeChecksClean,
+  assertTypeErrorsAt,
+  COMMONJS_CONFIGURATION,
   ConsumerProject,
-  formatConsumerDiagnostic,
-  runConsumer,
+  forEachConfiguration,
+  withCompiledConsumer,
 } from "../../helpers/tooling.js";
 import type {
+  ConsumerSources,
   FileOffset,
   SourceDefinitionTarget,
 } from "../../helpers/tooling.js";
@@ -295,10 +313,15 @@ const LIB_UTIL_SUBTREE = "LIB-UTIL-TEXT prose.\n";
 // module's `text` export is aliased on import (SPEC 4.4). `report` holds a
 // dependency marker (a bare requirement reference as an expression statement,
 // SPEC 4.5) followed by a `text` call, so the marker's runtime harmlessness
-// is observable inside an executing function.
+// is observable inside an executing function. The program writes through
+// Node.js's `process.stdout`, whose one member it uses it declares itself —
+// H-2's configurations supply no `@types/node` (module-scoped, the file
+// holding imports) — so it is valid under both configurations.
 const UMBRELLA_CONSUMER = [
   'import SPEC, { text } from "./MAIN.xspec";',
   'import LIB, { text as libText } from "./LIB.xspec";',
+  "",
+  "declare const process: { readonly stdout: { write(chunk: string): boolean } };",
   "",
   "function report(): string {",
   "  SPEC.alpha.beta;",
@@ -324,7 +347,8 @@ const UMBRELLA_STDOUT =
   "end\n";
 
 // Negative arm of 4.1 type checking: a chain naming a missing requirement
-// path is a TypeScript type error against the generated module.
+// path is a TypeScript type error at the consumer reference, the program's
+// diagnostics there alone (H-2's type-error assertion).
 const UMBRELLA_MISSING_CONSUMER = [
   'import SPEC from "./MAIN.xspec";',
   "",
@@ -388,7 +412,7 @@ function assertHoverDocumentation(
 const T13_1_2 = defineProductTest({
   id: "T13.1-2",
   title:
-    'standalone consumption — the section-4 umbrella E2E: in a consumer project under standard TypeScript tooling only (no xspec runtime dependency), `import SPEC, { text } from "./NAME.xspec"` resolves; type checking (4.1), hover and go-to-definition into the source .mdx (4.2), and runtime text/markers (4.3–4.5) all work (SPEC 13.1, 4)',
+    "standalone consumption — the section-4 umbrella E2E: in a consumer project under standard TypeScript tooling only (no xspec runtime dependency), in each of H-2's configurations, `import SPEC, { text } from \"./NAME.xspec\"` resolves, the consumer's program — the generated modules and every companion they reach included — type-checks with no diagnostic (a module form either configuration rejects failing whatever the other accepts), and type checking (4.1) and hover and go-to-definition into the source .mdx (4.2) work; and, in H-2's CommonJS configuration, runtime text/markers (4.3–4.5) work, the consumer compiled outside the workspace (SPEC 13.1, 4)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -405,41 +429,14 @@ const T13_1_2 = defineProductTest({
           "T13.1-2 `build` over the two spec sources (SPEC 12.1, 13.1)",
         );
 
-        // (a) Resolution and 4.1 type checking, positive: the spec-quoted
-        // `./NAME.xspec` imports resolve and the whole program — node
-        // chains, `text` calls, the aliased second module, the marker —
-        // compiles cleanly under strict standard tooling.
-        const app = await ConsumerProject.load({
+        const appSources: ConsumerSources = {
           rootDir: workspace.root,
           rootFiles: ["specs/app.ts"],
-        });
-        assertNoCompileErrors(
-          app,
-          "T13.1-2 the standalone consumer program: `import SPEC, { text } " +
-            'from "./MAIN.xspec"` and the aliased second module resolve ' +
-            "and type-check (SPEC 13.1, 4, 4.1, 4.4)",
-        );
+        };
 
-        // (b) 4.1 type checking, negative: a missing requirement path is a
-        // TypeScript type error at the consumer reference.
-        const missing = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["specs/missing.ts"],
-        });
-        assertCompileErrorAt(
-          missing,
-          missing.locate("specs/missing.ts", "SPEC.alpha.nope", {
-            charOffset: "SPEC.alpha.".length,
-          }),
-          {},
-          "T13.1-2 a chain naming a missing requirement path (`nope` under " +
-            "`alpha`) must be a TypeScript type error at the consumer " +
-            "reference (SPEC 4.1, 13.1)",
-        );
-
-        // (c) 4.2 navigation and hover on the checking program. Section
-        // construct spans in the pure-ASCII source (SPEC 1.7): opening tag
-        // through closing tag; alpha's own span excludes nested beta's.
+        // The targets (c) expects: section construct spans in the
+        // pure-ASCII source (SPEC 1.7), opening tag through closing tag;
+        // alpha's own span excludes nested beta's.
         const alphaStart = MAIN_SOURCE.indexOf('<S id="alpha">');
         const betaStart = MAIN_SOURCE.indexOf('<S id="alpha.beta">');
         const betaEnd = MAIN_SOURCE.indexOf("</S>") + "</S>".length;
@@ -449,87 +446,134 @@ const T13_1_2 = defineProductTest({
         const inAlphaOwn = (offset: number): boolean =>
           offset >= alphaStart && offset < alphaEnd && !inBeta(offset);
 
-        const rootRef = app.locate("specs/app.ts", "text(SPEC)", {
-          charOffset: "text(".length,
-        });
-        const alphaRef = app.locate("specs/app.ts", "  SPEC.alpha.beta;", {
-          charOffset: "  SPEC.".length,
-        });
-        const betaRef = app.locate("specs/app.ts", "  SPEC.alpha.beta;", {
-          charOffset: "  SPEC.alpha.".length,
-        });
-
-        assertSomeDefinition(
-          app.sourceDefinitionsAt(betaRef),
-          (target) =>
-            target.file === "specs/MAIN.mdx" && inBeta(target.start.offset),
-          `in specs/MAIN.mdx within \`alpha.beta\`'s \`<S>\` construct ` +
-            `[${String(betaStart)}, ${String(betaEnd)})`,
-          "T13.1-2 go-to-definition on the marker's `beta` reference",
-        );
-        assertSomeDefinition(
-          app.sourceDefinitionsAt(alphaRef),
-          (target) =>
-            target.file === "specs/MAIN.mdx" && inAlphaOwn(target.start.offset),
-          `in specs/MAIN.mdx within \`alpha\`'s own \`<S>\` construct ` +
-            `[${String(alphaStart)}, ${String(alphaEnd)}) excluding the ` +
-            `nested \`alpha.beta\` construct`,
-          "T13.1-2 go-to-definition on the mid-chain `alpha` reference",
-        );
-        assertSomeDefinition(
-          app.sourceDefinitionsAt(rootRef),
-          (target) =>
-            target.file === "specs/MAIN.mdx" && target.start.offset === 0,
-          "in specs/MAIN.mdx at the start of the file (offset 0 — the root " +
-            "has no `<S>` section, SPEC 1.2, 4.2)",
-          "T13.1-2 go-to-definition on the root reference (default export)",
-        );
-
-        assertHoverDocumentation(
-          app,
-          rootRef,
-          "MAIN-ROOT-TEXT",
-          "T13.1-2 hover on the root reference",
-        );
-        assertHoverDocumentation(
-          app,
-          alphaRef,
-          "MAIN-ALPHA-TEXT",
-          "T13.1-2 hover on the `alpha` reference",
-        );
-        assertHoverDocumentation(
-          app,
-          betaRef,
-          "MAIN-BETA-TEXT",
-          "T13.1-2 hover on the `beta` reference",
-        );
-
-        // (d) 4.3–4.5 runtime: compile with standard tooling, run under
-        // plain Node (NODE_PATH dropped — no xspec runtime dependency), and
-        // byte-compare the program's whole stdout: `text` returns the
-        // subtree texts through both modules (the second via its alias) and
-        // the marker line contributes nothing.
-        const emitted = app.emit();
-        if (emitted.emitSkipped) {
-          fail(
-            "T13.1-2: consumer emit was skipped; diagnostics:\n" +
-              emitted.diagnostics
-                .map(
-                  (diagnostic) => `  ${formatConsumerDiagnostic(diagnostic)}`,
-                )
-                .join("\n"),
+        // (a)–(c) under each of H-2's configurations in turn — the CommonJS
+        // configuration, then the ES-module configuration — with the same
+        // expectation, every diagnosis naming its configuration (TEST-SPEC
+        // H-2, §4's opening paragraph).
+        await forEachConfiguration(async (configuration) => {
+          // (a) Resolution and 4.1 type checking, positive: the spec-quoted
+          // `./NAME.xspec` imports resolve and the consumer's whole program
+          // — node chains, `text` calls, the aliased second module, the
+          // marker, and both generated modules with every companion they
+          // reach — carries no diagnostic under strict standard tooling, so
+          // a module form this configuration rejects fails here whatever
+          // the other accepts (H-2).
+          const app = await ConsumerProject.load({
+            ...appSources,
+            configuration,
+          });
+          assertTypeChecksClean(
+            app,
+            "T13.1-2 the standalone consumer program: `import SPEC, { text } " +
+              'from "./MAIN.xspec"` and the aliased second module resolve ' +
+              "and the whole program type-checks (SPEC 13.1, 4, 4.1, 4.4)",
           );
-        }
-        const run = await runConsumer({
-          dir: workspace.root,
-          entry: "specs/app.js",
+
+          // (b) 4.1 type checking, negative: a missing requirement path is
+          // a TypeScript type error at the consumer reference, the
+          // program's only diagnosed position (H-2's type-error assertion).
+          const missing = await ConsumerProject.load({
+            rootDir: workspace.root,
+            rootFiles: ["specs/missing.ts"],
+            configuration,
+          });
+          assertTypeErrorsAt(
+            missing,
+            [
+              {
+                at: missing.locate("specs/missing.ts", "SPEC.alpha.nope", {
+                  charOffset: "SPEC.alpha.".length,
+                }),
+              },
+            ],
+            "T13.1-2 a chain naming a missing requirement path (`nope` " +
+              "under `alpha`) must be a TypeScript type error at the " +
+              "consumer reference, and nothing else diagnosed (SPEC 4.1, " +
+              "13.1)",
+          );
+
+          // (c) 4.2 navigation and hover on the checking program.
+          const rootRef = app.locate("specs/app.ts", "text(SPEC)", {
+            charOffset: "text(".length,
+          });
+          const alphaRef = app.locate("specs/app.ts", "  SPEC.alpha.beta;", {
+            charOffset: "  SPEC.".length,
+          });
+          const betaRef = app.locate("specs/app.ts", "  SPEC.alpha.beta;", {
+            charOffset: "  SPEC.alpha.".length,
+          });
+
+          assertSomeDefinition(
+            app.sourceDefinitionsAt(betaRef),
+            (target) =>
+              target.file === "specs/MAIN.mdx" && inBeta(target.start.offset),
+            `in specs/MAIN.mdx within \`alpha.beta\`'s \`<S>\` construct ` +
+              `[${String(betaStart)}, ${String(betaEnd)})`,
+            "T13.1-2 go-to-definition on the marker's `beta` reference",
+          );
+          assertSomeDefinition(
+            app.sourceDefinitionsAt(alphaRef),
+            (target) =>
+              target.file === "specs/MAIN.mdx" &&
+              inAlphaOwn(target.start.offset),
+            `in specs/MAIN.mdx within \`alpha\`'s own \`<S>\` construct ` +
+              `[${String(alphaStart)}, ${String(alphaEnd)}) excluding the ` +
+              `nested \`alpha.beta\` construct`,
+            "T13.1-2 go-to-definition on the mid-chain `alpha` reference",
+          );
+          assertSomeDefinition(
+            app.sourceDefinitionsAt(rootRef),
+            (target) =>
+              target.file === "specs/MAIN.mdx" && target.start.offset === 0,
+            "in specs/MAIN.mdx at the start of the file (offset 0 — the " +
+              "root has no `<S>` section, SPEC 1.2, 4.2)",
+            "T13.1-2 go-to-definition on the root reference (default export)",
+          );
+
+          assertHoverDocumentation(
+            app,
+            rootRef,
+            "MAIN-ROOT-TEXT",
+            "T13.1-2 hover on the root reference",
+          );
+          assertHoverDocumentation(
+            app,
+            alphaRef,
+            "MAIN-ALPHA-TEXT",
+            "T13.1-2 hover on the `alpha` reference",
+          );
+          assertHoverDocumentation(
+            app,
+            betaRef,
+            "MAIN-BETA-TEXT",
+            "T13.1-2 hover on the `beta` reference",
+          );
         });
+
+        // (d) 4.3–4.5 runtime, under H-2's CommonJS configuration alone: the
+        // consumer program, compiled to CommonJS JavaScript written into a
+        // fresh directory outside the workspace — the compiler's output
+        // alone — runs there under plain Node (NODE_PATH dropped, no package
+        // named `xspec` resolvable: no xspec runtime dependency), and the
+        // program's whole stdout is byte-compared: `text` returns the
+        // subtree texts through both modules (the second via its alias) and
+        // the marker line contributes nothing. The ES-module configuration's
+        // output is type-checked and served above, never executed (H-2).
+        const run = await withCompiledConsumer(
+          await ConsumerProject.load({
+            ...appSources,
+            configuration: COMMONJS_CONFIGURATION,
+          }),
+          "T13.1-2 the standalone consumer program",
+          async (compiled) => await compiled.run("specs/app.ts"),
+        );
         assertExitCode(
           run,
           0,
-          "T13.1-2 the compiled consumer under plain Node — runtime `text` " +
-            "and the marker work with no additional tooling installed " +
-            "(SPEC 4.3, 4.5, 13.1)",
+          "T13.1-2 the compiled consumer under plain Node, compiled under " +
+            "H-2's CommonJS configuration outside the workspace — runtime " +
+            "`text` and the marker work with no additional tooling " +
+            "installed (SPEC 4.3, 4.5, 13.1)",
         );
         assertBytesEqual(
           run.stdoutBytes,
