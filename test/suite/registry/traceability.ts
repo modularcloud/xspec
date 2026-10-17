@@ -278,7 +278,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T4.5-9": ["4.5", "2.4", "5.7", "11.2", "14"],
   "T4.6-1": ["4.6"],
   "T4.6-2": ["4.6"],
-  "T4.6-3": ["4.5", "4.6", "2.4", "12.2", "14"],
+  // T4.6-3: its one-file and declaration-file arms' occurrence records
+  // (5.7, `occurrences`, 11.3) pin each attributed unit's own range (1.7);
+  // its single-casing controls the byte-wise, case-sensitive file-name test
+  // of 4.6's declaration-file rule (12.0).
+  "T4.6-3": ["4.5", "4.6", "1.7", "2.4", "5.7", "11.3", "12.0", "12.2", "14"],
   "T4.6-4": ["4.6"],
   "T5.2-1": ["5", "5.1", "5.2"],
   "T5.3-1": ["5.3", "14"],
