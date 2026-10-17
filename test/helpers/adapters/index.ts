@@ -18,6 +18,13 @@
 //   human.ts           robust information matching on human reports — the
 //                      required information present, or absent where SPEC
 //                      requires its absence
+//   human-reports.ts   the human-report decoders (H-3's report forms,
+//                      T12.0-15): a findings report and an exit-2
+//                      standard-error message decoded onto the
+//                      information model — each finding's code,
+//                      locations, concerned path, and identities; an
+//                      error's code and concerned path — and compared
+//                      with the --json twin's
 //   session-staging.ts T10.1-4 corruption transformations (shape-aware,
 //                      value-blind, over product-written session files)
 //   record-staging.ts  T13.3-2's operational path set (its predicate, the
@@ -43,6 +50,7 @@ export * from "./reports.js";
 export * from "./operations.js";
 export * from "./review.js";
 export * from "./human.js";
+export * from "./human-reports.js";
 export * from "./session-staging.js";
 export * from "./record-staging.js";
 export * from "./sorted-keys.js";

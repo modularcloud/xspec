@@ -352,6 +352,37 @@ export interface ErrorDocument {
 }
 
 /**
+ * The information one finding carries in every report form (TEST-SPEC
+ * T12.0-15, H-3; SPEC 12.0, 14): its stable code (`null` for a code-less
+ * finding — a review-operation refusal, 10.7), every location as its file
+ * and its range's two byte offsets (1.7), its concerned path, and its
+ * identities. A finding's `message` is wording, never asked of any form
+ * (H-3, T12.0-15), and the order of a report's findings and of a finding's
+ * locations is the JSON form's alone (12.7) — a human report's is free.
+ * The `--json` side projects a decoded {@link Finding} onto it
+ * (`findingInformation`, adapters/human-reports.ts); the human side's
+ * decoder produces it.
+ */
+export interface FindingInformation {
+  readonly code: string | null;
+  readonly locations: readonly FindingLocation[];
+  readonly path: PathValue | null;
+  readonly identities: readonly string[];
+}
+
+/**
+ * The information an exit-2 error's report carries (TEST-SPEC T12.0-15,
+ * H-5; SPEC 12.0, 14): its stable code and its concerned path, each `null`
+ * where 14 defines none — a plain usage error carries neither. With JSON
+ * output in effect it is the error document's (12.7); without, the
+ * standard-error message, the error's only report, carries it.
+ */
+export interface ErrorInformation {
+  readonly code: string | null;
+  readonly path: PathValue | null;
+}
+
+/**
  * The `version` document — `{"product", "interface"}` exactly (SPEC.md 12.6,
  * 12.7): the product version and the machine-interface version, both
  * strings. The reported machine-interface value is the string form of 12.6's

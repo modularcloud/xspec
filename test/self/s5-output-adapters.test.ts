@@ -27,6 +27,7 @@ import {
 } from "../helpers/assertions.js";
 import type { RunResult } from "../helpers/subprocess.js";
 import type {
+  ErrorInformation,
   Finding,
   ManualDeletionVerdict,
   Mention,
@@ -41,6 +42,10 @@ import {
   SPEC_NAMED_TOKENS,
   STABLE_CODES,
   assertBareEdgeEndpoints,
+  assertHumanErrorCarries,
+  assertHumanErrorMessageCarries,
+  assertHumanFindingsCarry,
+  assertHumanFindingsReportCarries,
   assertJsonKeysByteSorted,
   assertNodeEdgeListsBare,
   assertReportMentions,
@@ -62,6 +67,8 @@ import {
   decodeErrorDocument,
   decodeExportReport,
   decodeFindingsReport,
+  decodeHumanErrorMessage,
+  decodeHumanFindingsReport,
   decodeIdsReport,
   decodeIdsTreeReport,
   decodeImpactReport,
@@ -89,6 +96,7 @@ import {
   decodeViewFilesReport,
   decodeViewReport,
   expectNonNegativeInteger,
+  findingInformation,
   identityMention,
   isGraphDataKey,
   judgeManualDeletionCorrection,
@@ -6457,6 +6465,838 @@ test("S-5: ignored-reason classifier maps SPEC 8.2 reason spellings in order and
   // A reason matching more than one pattern is ambiguous — equally rejected.
   expectDiagnosed("ambiguous reason", () =>
     classifyIgnoredReasons(["root has none"], "ambiguous token"),
+  );
+});
+
+// --- human-report decoders (human-reports.ts) ---------------------------------
+//
+// TEST-SPEC H-3's report forms and T12.0-15: a human findings report and an
+// exit-2 standard-error message decoded onto the information model — each
+// finding's code, locations, concerned path, and identities; an error's
+// code and concerned path — and compared with the `--json` twin's decoded
+// document. The synthetic reports below take the built product's layout
+// (human-reports.ts' header); every one either decodes to exactly the
+// modeled information or fails diagnosed — a report missing a code, a
+// location's offsets, a concerned path, or an identity, and a non-UTF-8
+// path printed raw or unmarked, each rejected loudly (S-5).
+
+/** U+FFFD REPLACEMENT CHARACTER, built from its code point. */
+const REPLACEMENT = String.fromCodePoint(0xfffd);
+
+/** The bytes of `specs/A<FF>.mdx`, a non-UTF-8 path (SPEC 12.0, 14.19). */
+const NON_UTF8_PATH_BYTES = Buffer.concat([
+  Buffer.from("specs/A", "utf8"),
+  Buffer.from([0xff]),
+  Buffer.from(".mdx", "utf8"),
+]);
+const NON_UTF8_PATH_HEX = NON_UTF8_PATH_BYTES.toString("hex");
+
+/** The built product's mark for that path (human-reports.ts' header). */
+const NON_UTF8_PATH_MARK = `<bytes ${NON_UTF8_PATH_HEX}>`;
+
+/** A synthetic run whose streams are the given bytes, exactly. */
+function syntheticBytesResult(
+  stdoutBytes: Uint8Array,
+  stderrBytes: Uint8Array,
+  exitCode: number,
+): RunResult {
+  return {
+    exitCode,
+    signal: null,
+    stdout: Buffer.from(stdoutBytes).toString("utf8"),
+    stderr: Buffer.from(stderrBytes).toString("utf8"),
+    stdoutBytes,
+    stderrBytes,
+    commandLine: "`stand-in build` [synthetic result]",
+  };
+}
+
+/** One decoded `--json` finding's members (12.7), for the twin documents. */
+function jsonFinding(
+  code: string | null,
+  locations: readonly {
+    readonly file: string | { readonly bytes: string };
+    readonly start: number;
+    readonly end: number;
+  }[],
+  path: string | { readonly bytes: string } | null,
+  identities: readonly string[],
+): Record<string, unknown> {
+  return {
+    code,
+    message: "a free-text message, never asked (H-3)",
+    locations: locations.map(({ file, start, end }) => ({
+      file,
+      range: { start, end },
+    })),
+    path,
+    identities,
+  };
+}
+
+/**
+ * The `--json` twin of HUMAN_FINDINGS_REPORT: one finding of every kind a
+ * build or check report carries — located, located several times, at a
+ * concerned path, with identities, with identities alone, at a marked
+ * location file and a marked concerned path, at a plain U+FFFD path — in
+ * the pinned 12.7 order, decoded form-exact.
+ */
+const JSON_FINDINGS_TWIN = decodeFindingsReport(
+  {
+    findings: [
+      jsonFinding(
+        "missing-id",
+        [{ file: "specs/A.mdx", start: 18, end: 21 }],
+        null,
+        [],
+      ),
+      jsonFinding(
+        "missing-id",
+        [{ file: { bytes: NON_UTF8_PATH_HEX }, start: 17, end: 20 }],
+        null,
+        [],
+      ),
+      jsonFinding(
+        "duplicate-id",
+        [
+          { file: "specs/A.mdx", start: 123, end: 131 },
+          { file: "specs/A.mdx", start: 146, end: 154 },
+        ],
+        null,
+        [],
+      ),
+      jsonFinding("stale-output", [], ".xspec", []),
+      jsonFinding(
+        "cross-module-text",
+        [{ file: "src/app.ts", start: 97, end: 115 }],
+        null,
+        ["specs/bravo.mdx"],
+      ),
+      jsonFinding("policy-violation", [], null, [
+        "no-hi-to-lo",
+        "hi/H.mdx#h1",
+        "depends",
+        "lo/L.mdx#l1",
+      ]),
+      jsonFinding("invalid-source-path", [], { bytes: NON_UTF8_PATH_HEX }, []),
+      jsonFinding("invalid-source-path", [], `specs/B${REPLACEMENT}.mdx`, []),
+    ],
+  },
+  "the human decoders' --json twin",
+).findings;
+
+/** The human report's lines, in an order of their own (T12.0-15). */
+const HUMAN_FINDING_LINES: readonly string[] = [
+  'specs/A.mdx:123-131: duplicate-id: duplicate ID "dup": 2 sections bear this ID — rename all but one (SPEC 1.3, 14.3) (also at specs/A.mdx:146-154)',
+  `${NON_UTF8_PATH_MARK}:17-20: missing-id: missing ID: every non-root section must have an id prop (SPEC 1.3, 14.1)`,
+  "specs/A.mdx:18-21: missing-id: missing ID: every non-root section must have an id prop (SPEC 1.3, 14.1)",
+  ".xspec: stale-output: stale generated output: run `xspec build` (SPEC 14.10, 13.3)",
+  'src/app.ts:97-115: cross-module-text: cross-module text call: the argument is a node of module "specs/alpha.mdx" (SPEC 4.4, 14.11) [specs/bravo.mdx]',
+  'policy-violation: policy violation: rule "no-hi-to-lo": the depends edge hi/H.mdx#h1 -> lo/L.mdx#l1 violates the rule (SPEC 14.12) [no-hi-to-lo, hi/H.mdx#h1, depends, lo/L.mdx#l1]',
+  `${NON_UTF8_PATH_MARK}: invalid-source-path: the workspace-relative path is not valid UTF-8 (SPEC 7, 14.19)`,
+  `specs/B${REPLACEMENT}.mdx: invalid-source-path: the workspace-relative path contains U+FFFD (SPEC 7, 12.0, 14.19)`,
+];
+
+function humanReport(lines: readonly string[], count?: string): Buffer {
+  const counted = count ?? `${String(lines.length)} findings`;
+  return Buffer.from(
+    [...lines, ...(lines.length === 0 ? [] : [counted])]
+      .map((line) => `${line}\n`)
+      .join(""),
+    "utf8",
+  );
+}
+
+/** The well-formed synthetic report: every line, then its count line. */
+const HUMAN_FINDINGS_REPORT = humanReport(HUMAN_FINDING_LINES);
+
+/** HUMAN_FINDING_LINES with line `index` replaced by `line`. */
+function withLine(index: number, line: string): string[] {
+  return HUMAN_FINDING_LINES.map((original, at) =>
+    at === index ? line : original,
+  );
+}
+
+test("S-5: the human findings decoder decodes a well-formed report onto the information model, order free", () => {
+  const decoded = decodeHumanFindingsReport(
+    HUMAN_FINDINGS_REPORT,
+    "well-formed",
+  );
+  expect(
+    decoded.findings.map(({ code, locations, path, identities, line }) => ({
+      code,
+      locations,
+      path,
+      identities,
+      line,
+    })),
+  ).toEqual([
+    {
+      code: "duplicate-id",
+      locations: [
+        { file: "specs/A.mdx", range: { start: 123, end: 131 } },
+        { file: "specs/A.mdx", range: { start: 146, end: 154 } },
+      ],
+      path: null,
+      identities: [],
+      line: 1,
+    },
+    {
+      code: "missing-id",
+      locations: [
+        { file: { bytes: NON_UTF8_PATH_HEX }, range: { start: 17, end: 20 } },
+      ],
+      path: null,
+      identities: [],
+      line: 2,
+    },
+    {
+      code: "missing-id",
+      locations: [{ file: "specs/A.mdx", range: { start: 18, end: 21 } }],
+      path: null,
+      identities: [],
+      line: 3,
+    },
+    {
+      code: "stale-output",
+      locations: [],
+      path: ".xspec",
+      identities: [],
+      line: 4,
+    },
+    {
+      code: "cross-module-text",
+      locations: [{ file: "src/app.ts", range: { start: 97, end: 115 } }],
+      path: null,
+      identities: ["specs/bravo.mdx"],
+      line: 5,
+    },
+    {
+      code: "policy-violation",
+      locations: [],
+      path: null,
+      identities: ["no-hi-to-lo", "hi/H.mdx#h1", "depends", "lo/L.mdx#l1"],
+      line: 6,
+    },
+    {
+      code: "invalid-source-path",
+      locations: [],
+      path: { bytes: NON_UTF8_PATH_HEX },
+      identities: [],
+      line: 7,
+    },
+    {
+      code: "invalid-source-path",
+      locations: [],
+      path: `specs/B${REPLACEMENT}.mdx`,
+      identities: [],
+      line: 8,
+    },
+  ]);
+  // The report carries its twin's information, its own order free.
+  assertHumanFindingsCarry(
+    decoded,
+    JSON_FINDINGS_TWIN.map(findingInformation),
+    "well-formed",
+  );
+  // The run form reads stdout (12.0: reports are standard-output content),
+  // decoding and comparing in one call; stderr is never read.
+  assertHumanFindingsReportCarries(
+    syntheticBytesResult(
+      HUMAN_FINDINGS_REPORT,
+      Buffer.from("specs/A.mdx:1-2: cycle: noise on stderr\n", "utf8"),
+      1,
+    ),
+    JSON_FINDINGS_TWIN,
+    "run form",
+  );
+  // An empty report is no finding; the count line is optional, and any
+  // case or separator spelling of a code decodes to it (human.ts's rule).
+  expect(decodeHumanFindingsReport(Buffer.alloc(0)).findings).toEqual([]);
+  const uncounted = Buffer.from(
+    HUMAN_FINDING_LINES.map((line) => `${line}\n`).join(""),
+    "utf8",
+  );
+  assertHumanFindingsCarry(
+    decodeHumanFindingsReport(uncounted),
+    JSON_FINDINGS_TWIN,
+    "no count line",
+  );
+  // Its words at the code's position are the code (human.ts's convention:
+  // `missing ID` carries `missing-id`), so a message opening with its own
+  // code's words up to a `: ` reads as carrying the code (human-reports.ts'
+  // header).
+  const respelled = decodeHumanFindingsReport(
+    humanReport([
+      "specs/A.mdx:18-21: MISSING_ID: missing ID (SPEC 14.1)",
+      "Policy Violation: rule (SPEC 14.12) [r]",
+      "specs/A.mdx:53-62: unknown dependency: the d reference (SPEC 14.5)",
+    ]),
+  );
+  expect(respelled.findings.map(({ code }) => code)).toEqual([
+    "missing-id",
+    "policy-violation",
+    "unknown-dependency",
+  ]);
+  // A path holding ": " before its finding's code still heads its line.
+  const colon = decodeHumanFindingsReport(
+    humanReport(["specs/a: b.mdx:3-9: missing-id: missing ID (SPEC 14.1)"]),
+  );
+  expect(colon.findings[0]!.locations).toEqual([
+    { file: "specs/a: b.mdx", range: { start: 3, end: 9 } },
+  ]);
+});
+
+test("S-5: the human findings decoder decodes refusals and code-less findings: locations with identities, a concerned path, and the code-less word", () => {
+  const twin = decodeFindingsReport(
+    {
+      findings: [
+        jsonFinding(
+          "refused-id-collision",
+          [
+            { file: "specs/A.mdx", start: 66, end: 116 },
+            { file: "specs/A.mdx", start: 88, end: 111 },
+          ],
+          null,
+          ["specs/A.mdx#a.c", "specs/A.mdx#a.c.x"],
+        ),
+        jsonFinding("refused-destination-exists", [], "specs/B.mdx", []),
+        jsonFinding(null, [], null, ["s", "item-1"]),
+      ],
+    },
+    "refusal twin",
+  ).findings;
+  const report = humanReport([
+    "finding: item 'item-1' of session 's' is blocked (SPEC 10.3, 10.7) [s, item-1]",
+    'specs/B.mdx: refused-destination-exists: destination exists: the destination path "specs/B.mdx" is occupied (SPEC 6.5, 14)',
+    'specs/A.mdx:66-116: refused-id-collision: ID collision: the operation would produce "a.c", "a.c.x" (SPEC 6.4, 6.5, 14) (also at specs/A.mdx:88-111) [specs/A.mdx#a.c, specs/A.mdx#a.c.x]',
+  ]);
+  const decoded = decodeHumanFindingsReport(report, "refusals");
+  expect(decoded.findings.map(({ code }) => code)).toEqual([
+    null,
+    "refused-destination-exists",
+    "refused-id-collision",
+  ]);
+  assertHumanFindingsCarry(decoded, twin, "refusals");
+});
+
+test("S-5: the human findings comparison rejects a report missing a code, a location's offsets, a concerned path, an identity, or a finding — naming the datum", () => {
+  const twin = JSON_FINDINGS_TWIN;
+  const rejected = (
+    label: string,
+    report: Buffer,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanFindingsCarry(
+        decodeHumanFindingsReport(report, label),
+        twin,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  // A code: absent from the line, which then fits no layout.
+  rejected(
+    "no code",
+    humanReport(
+      withLine(
+        2,
+        "specs/A.mdx:18-21: every non-root section must have an id prop (SPEC 1.3, 14.1)",
+      ),
+    ),
+    "no segment of this line spells a stable code",
+    "line 3",
+  );
+  // A code: another one.
+  rejected(
+    "another code",
+    humanReport(
+      withLine(
+        2,
+        "specs/A.mdx:18-21: duplicate-id: missing ID (SPEC 1.3, 14.1)",
+      ),
+    ),
+    "matches no --json finding",
+    "code missing-id",
+  );
+  // A location's offsets: the head names the file alone, or one offset.
+  rejected(
+    "a location without its offsets",
+    humanReport(
+      withLine(2, "specs/A.mdx: missing-id: missing ID (SPEC 1.3, 14.1)"),
+    ),
+    'missing location(s) "specs/A.mdx" 18-21',
+    'a concerned path the --json finding lacks, "specs/A.mdx"',
+  );
+  rejected(
+    "a location with one offset",
+    humanReport(
+      withLine(2, "specs/A.mdx:18: missing-id: missing ID (SPEC 1.3, 14.1)"),
+    ),
+    'missing location(s) "specs/A.mdx" 18-21',
+  );
+  rejected(
+    "a further location without its offsets",
+    humanReport(
+      withLine(
+        0,
+        'specs/A.mdx:123-131: duplicate-id: duplicate ID "dup" (SPEC 1.3, 14.3) (also at specs/A.mdx)',
+      ),
+    ),
+    "every further location in the `(also at …)` list",
+  );
+  rejected(
+    "a further location dropped",
+    humanReport(
+      withLine(
+        0,
+        'specs/A.mdx:123-131: duplicate-id: duplicate ID "dup" (SPEC 1.3, 14.3)',
+      ),
+    ),
+    'missing location(s) "specs/A.mdx" 146-154',
+  );
+  rejected(
+    "a located line listing further locations under a bare path",
+    humanReport(
+      withLine(
+        0,
+        'specs/A.mdx: duplicate-id: duplicate ID "dup" (SPEC 1.3, 14.3) (also at specs/A.mdx:146-154)',
+      ),
+    ),
+    "a first location `<path>:<start>-<end>`",
+  );
+  rejected(
+    "an offset changed",
+    humanReport(
+      withLine(2, "specs/A.mdx:18-22: missing-id: missing ID (SPEC 1.3, 14.1)"),
+    ),
+    'missing location(s) "specs/A.mdx" 18-21',
+    'location(s) the --json finding lacks "specs/A.mdx" 18-22',
+  );
+  rejected(
+    "a range ending before it starts",
+    humanReport(
+      withLine(2, "specs/A.mdx:21-18: missing-id: missing ID (SPEC 1.3, 14.1)"),
+    ),
+    "a range whose end is not before its start",
+  );
+  // A concerned path: absent from the line.
+  rejected(
+    "no concerned path",
+    humanReport(
+      withLine(3, "stale-output: stale generated output (SPEC 14.10, 13.3)"),
+    ),
+    'missing concerned path ".xspec"',
+  );
+  rejected(
+    "another concerned path",
+    humanReport(
+      withLine(
+        3,
+        ".xspec/graph: stale-output: stale generated output (SPEC 14.10)",
+      ),
+    ),
+    'concerned path ".xspec/graph" where the --json finding carries ".xspec"',
+  );
+  // An identity: one dropped, all dropped, or reordered (their positions
+  // carry their roles, 14.12).
+  rejected(
+    "an identity dropped",
+    humanReport(
+      withLine(
+        5,
+        'policy-violation: policy violation: rule "no-hi-to-lo" (SPEC 14.12) [no-hi-to-lo, hi/H.mdx#h1, depends]',
+      ),
+    ),
+    'missing identity ["lo/L.mdx#l1"]',
+  );
+  rejected(
+    "the identities dropped",
+    humanReport(
+      withLine(
+        4,
+        "src/app.ts:97-115: cross-module-text: cross-module text call (SPEC 4.4, 14.11)",
+      ),
+    ),
+    'missing identity ["specs/bravo.mdx"]',
+  );
+  rejected(
+    "the identities reordered",
+    humanReport(
+      withLine(
+        5,
+        "policy-violation: policy violation (SPEC 14.12) [no-hi-to-lo, lo/L.mdx#l1, depends, hi/H.mdx#h1]",
+      ),
+    ),
+    'identities ["no-hi-to-lo","lo/L.mdx#l1","depends","hi/H.mdx#h1"] where the --json finding carries',
+  );
+  // A finding: dropped (the count line kept true), or one too many.
+  rejected(
+    "a finding dropped",
+    humanReport(HUMAN_FINDING_LINES.filter((_line, at) => at !== 3)),
+    "has no counterpart: the human report carries no further finding with its code stale-output",
+  );
+  rejected(
+    "a finding too many",
+    humanReport([
+      ...HUMAN_FINDING_LINES,
+      "specs/C.mdx:1-2: missing-id: missing ID (SPEC 14.1)",
+    ]),
+    "matches no --json finding",
+    'locations ["specs/C.mdx" 1-2]',
+  );
+  // Two findings equal in every datum but their messages (two garbage
+  // journal lines, 14.13) are two findings: printed once, one is missing.
+  const journalTwin = decodeFindingsReport(
+    {
+      findings: [1, 2].map((line) => ({
+        ...jsonFinding("journal-error", [], ".xspec/journal", []),
+        message: `journal error: the entry on line ${String(line)} is not well-formed`,
+      })),
+    },
+    "two journal errors",
+  ).findings;
+  const journalLine = (line: number): string =>
+    `.xspec/journal: journal-error: journal error: the entry on line ${String(line)} is not well-formed (SPEC 14.13)`;
+  assertHumanFindingsCarry(
+    decodeHumanFindingsReport(humanReport([journalLine(2), journalLine(1)])),
+    journalTwin,
+    "two journal errors printed twice",
+  );
+  const once = expectDiagnosed("two equal findings printed once", () =>
+    assertHumanFindingsCarry(
+      decodeHumanFindingsReport(humanReport([journalLine(1)])),
+      journalTwin,
+      "two journal errors printed once",
+    ),
+  );
+  expect(once.message).toContain(
+    "the human report carries no further finding with its code journal-error",
+  );
+  // The count line disagreeing with the lines, an empty line, an
+  // identities list holding an empty identity.
+  rejected(
+    "a count line disagreeing",
+    humanReport(HUMAN_FINDING_LINES, "9 findings"),
+    "it counts 9",
+  );
+  rejected(
+    "an empty line",
+    humanReport(withLine(3, "")),
+    "never an empty line",
+  );
+  rejected(
+    "an empty identity",
+    humanReport(
+      withLine(
+        4,
+        "src/app.ts:97-115: cross-module-text: cross-module text call (SPEC 14.11) [specs/bravo.mdx, ]",
+      ),
+    ),
+    "non-empty identities",
+  );
+});
+
+test("S-5: the human findings decoder tells the marked byte form from a plain path by its mark alone — a non-UTF-8 path printed raw or unmarked rejected", () => {
+  const twin = JSON_FINDINGS_TWIN;
+  const rejected = (label: string, report: Buffer, fragment: string): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanFindingsCarry(
+        decodeHumanFindingsReport(report, label),
+        twin,
+        label,
+      ),
+    );
+    expect(failure.message, label).toContain(fragment);
+  };
+  // Raw: the path's own bytes in the report, which is then no UTF-8 text.
+  const raw = Buffer.from(
+    HUMAN_FINDINGS_REPORT.toString("latin1").replace(
+      NON_UTF8_PATH_MARK,
+      NON_UTF8_PATH_BYTES.toString("latin1"),
+    ),
+    "latin1",
+  );
+  expect(raw.includes(NON_UTF8_PATH_BYTES)).toBe(true);
+  rejected("printed raw", raw, "so these bytes are a path printed raw");
+  // Lossily decoded: U+FFFD substituted for the ill-formed byte, a plain
+  // string where the twin carries the marked form.
+  const lossy = `specs/A${REPLACEMENT}.mdx`;
+  rejected(
+    "printed lossily at a location",
+    humanReport(
+      withLine(1, `${lossy}:17-20: missing-id: missing ID (SPEC 1.3, 14.1)`),
+    ),
+    `missing location(s) the marked byte form of bytes:${NON_UTF8_PATH_HEX} 17-20`,
+  );
+  rejected(
+    "printed lossily as a concerned path",
+    humanReport(
+      withLine(
+        6,
+        `${lossy}: invalid-source-path: not valid UTF-8 (SPEC 7, 14.19)`,
+      ),
+    ),
+    `concerned path ${JSON.stringify(lossy)} where the --json finding carries the marked byte form of bytes:${NON_UTF8_PATH_HEX}`,
+  );
+  // Otherwise unmarked: an escape spelled as text, or a mark the layout
+  // does not use (uppercase digits, an odd digit count) — plain paths all.
+  for (const unmarked of [
+    "specs/A\\xff.mdx",
+    `<bytes ${NON_UTF8_PATH_HEX.toUpperCase()}>`,
+    `<bytes ${NON_UTF8_PATH_HEX}0>`,
+    `bytes:${NON_UTF8_PATH_HEX}`,
+  ]) {
+    rejected(
+      `unmarked as ${unmarked}`,
+      humanReport(
+        withLine(
+          6,
+          `${unmarked}: invalid-source-path: not valid UTF-8 (SPEC 7, 14.19)`,
+        ),
+      ),
+      `concerned path ${JSON.stringify(unmarked)} where the --json finding carries the marked byte form`,
+    );
+  }
+  // A valid-UTF-8 path presented marked differs from its plain twin.
+  const markedPlain = `<bytes ${Buffer.from("specs/A.mdx", "utf8").toString("hex")}>`;
+  rejected(
+    "a valid-UTF-8 path presented marked",
+    humanReport(
+      withLine(
+        2,
+        `${markedPlain}:18-21: missing-id: missing ID (SPEC 1.3, 14.1)`,
+      ),
+    ),
+    'missing location(s) "specs/A.mdx" 18-21',
+  );
+  // The U+FFFD path, valid UTF-8, stays plain: marking it differs too.
+  rejected(
+    "a U+FFFD path presented marked",
+    humanReport(
+      withLine(
+        7,
+        `<bytes ${Buffer.from(`specs/B${REPLACEMENT}.mdx`, "utf8").toString("hex")}>: invalid-source-path: U+FFFD (SPEC 14.19)`,
+      ),
+    ),
+    `where the --json finding carries ${JSON.stringify(`specs/B${REPLACEMENT}.mdx`)}`,
+  );
+  // A marked path decodes to its exact bytes: the model value the --json
+  // marked form decodes to.
+  const marked = decodeHumanFindingsReport(
+    humanReport([`${NON_UTF8_PATH_MARK}: invalid-source-path: x (SPEC 14.19)`]),
+  ).findings[0]!.path;
+  expect(marked).toEqual({ bytes: NON_UTF8_PATH_HEX });
+});
+
+/** The `--json` twin of a configuration error found by the upward search. */
+const JSON_CONFIGURATION_ERROR = decodeErrorDocument(
+  {
+    error: jsonFinding("configuration-error", [], "xspec.config.ts", []),
+  },
+  "configuration-error twin",
+).error;
+
+const CONFIGURATION_ERROR_MESSAGE =
+  "xspec: configuration error: xspec.config.ts: line 7: unknown key " +
+  '"definitelyUnknownKey" in the defineConfig argument (SPEC 7, 14.14)\n';
+
+test("S-5: the exit-2 decoder decodes a standard-error message onto its code and concerned path — or neither, for a plain usage error", () => {
+  const decode = (message: string | Buffer): unknown => {
+    const { code, path } = decodeHumanErrorMessage(
+      typeof message === "string" ? Buffer.from(message, "utf8") : message,
+    );
+    return { code, path };
+  };
+  expect(decode(CONFIGURATION_ERROR_MESSAGE)).toEqual({
+    code: "configuration-error",
+    path: "xspec.config.ts",
+  });
+  // Several defects, one line each, each repeating the code and the path.
+  expect(
+    decode(
+      CONFIGURATION_ERROR_MESSAGE +
+        "xspec: configuration error: xspec.config.ts: line 9: unknown key (SPEC 7.3, 14.14)\n",
+    ),
+  ).toEqual({ code: "configuration-error", path: "xspec.config.ts" });
+  expect(
+    decode(
+      "xspec: configuration error: .: no xspec.config.ts found by upward search (SPEC 7)\n",
+    ),
+  ).toEqual({ code: "configuration-error", path: "." });
+  expect(
+    decode(
+      "xspec: configuration error: ./../cfg//xspec.config.ts: --config ./../cfg//xspec.config.ts: no configuration file exists at this path (SPEC 7, 12.0)\n",
+    ),
+  ).toEqual({ code: "configuration-error", path: "./../cfg//xspec.config.ts" });
+  expect(
+    decode(
+      "xspec: workspace busy: .xspec/lock: another mutating command holds this workspace (SPEC 14.26)\n",
+    ),
+  ).toEqual({ code: "workspace-busy", path: ".xspec/lock" });
+  expect(
+    decode(
+      "xspec: write failure: .xspec: the environment refused a graph-data write (SPEC 14.24)\n",
+    ),
+  ).toEqual({ code: "write-failure", path: ".xspec" });
+  expect(
+    decode(
+      "xspec: journal error: .xspec/journal: the entry on line 1 is not well-formed (SPEC 14.13)\n",
+    ),
+  ).toEqual({ code: "journal-error", path: ".xspec/journal" });
+  // A marked path decodes to its exact bytes.
+  expect(
+    decode(
+      `xspec: read failure: ${NON_UTF8_PATH_MARK}: the environment refused to read ${NON_UTF8_PATH_MARK} (SPEC 14.25)\n`,
+    ),
+  ).toEqual({ code: "read-failure", path: { bytes: NON_UTF8_PATH_HEX } });
+  // A plain usage error carries neither, whatever its message names after
+  // its head; a code first spelled on a later prefixed line still counts.
+  expect(decode("xspec: ids: unexpected argument 'extra'\n")).toEqual({
+    code: null,
+    path: null,
+  });
+  expect(
+    decode(
+      "xspec: impact: cannot map baseline identities — journal error: the entry on line 1 of .xspec/journal is not well-formed (SPEC 14.13)\n",
+    ),
+  ).toEqual({ code: null, path: null });
+  expect(
+    decode(
+      "xspec: impact: the baseline cannot be resolved\nxspec: journal error: .xspec/journal: line 1 (SPEC 14.13)\n",
+    ),
+  ).toEqual({ code: "journal-error", path: ".xspec/journal" });
+  // The comparison: the twin's code and path carried; a code-less twin
+  // asserts neither, whatever the message carries.
+  assertHumanErrorCarries(
+    decodeHumanErrorMessage(Buffer.from(CONFIGURATION_ERROR_MESSAGE, "utf8")),
+    JSON_CONFIGURATION_ERROR,
+    "configuration error",
+  );
+  assertHumanErrorCarries(
+    decodeHumanErrorMessage(Buffer.from(CONFIGURATION_ERROR_MESSAGE, "utf8")),
+    { code: null, path: null },
+    "a plain usage error's twin",
+  );
+  // The run form reads stderr, never stdout.
+  assertHumanErrorMessageCarries(
+    syntheticBytesResult(
+      Buffer.from("xspec: cycle: specs/A.mdx: on stdout\n", "utf8"),
+      Buffer.from(CONFIGURATION_ERROR_MESSAGE, "utf8"),
+      2,
+    ),
+    JSON_CONFIGURATION_ERROR,
+    "run form",
+  );
+  assertHumanErrorMessageCarries(
+    syntheticBytesResult(Buffer.alloc(0), Buffer.alloc(0), 2),
+    { code: null, path: null },
+    "a code-less twin decodes nothing",
+  );
+  // A marked twin path: the same bytes in the same form.
+  assertHumanErrorCarries(
+    decodeHumanErrorMessage(
+      Buffer.from(
+        `xspec: read failure: ${NON_UTF8_PATH_MARK}: refused (SPEC 14.25)\n`,
+        "utf8",
+      ),
+    ),
+    { code: "read-failure", path: { bytes: NON_UTF8_PATH_HEX } },
+    "marked path",
+  );
+});
+
+test("S-5: the exit-2 comparison rejects a standard-error message missing the code or the concerned path, naming another, or unparseable", () => {
+  const rejected = (
+    label: string,
+    message: Buffer | string,
+    fragment: string,
+    twin: ErrorInformation = JSON_CONFIGURATION_ERROR,
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanErrorCarries(
+        decodeHumanErrorMessage(
+          typeof message === "string" ? Buffer.from(message, "utf8") : message,
+          label,
+        ),
+        twin,
+        label,
+      ),
+    );
+    expect(failure.message, label).toContain(fragment);
+  };
+  rejected(
+    "no code",
+    "xspec: xspec.config.ts: line 7: unknown key (SPEC 7, 14.14)\n",
+    "it carries no stable code where the --json twin's error document carries configuration-error",
+  );
+  rejected(
+    "another code",
+    "xspec: read failure: xspec.config.ts: refused (SPEC 14.25)\n",
+    "it carries the code read-failure where the --json twin's error document carries configuration-error",
+  );
+  rejected(
+    "no concerned path, the message after the code",
+    "xspec: configuration error: line 7: unknown key (SPEC 7, 14.14)\n",
+    'it carries the concerned path "line 7" where the --json twin\'s error document carries "xspec.config.ts"',
+  );
+  rejected(
+    "no concerned path, nothing after the code",
+    "xspec: configuration error\n",
+    'it carries no concerned path where the --json twin\'s error document carries "xspec.config.ts"',
+  );
+  rejected(
+    "another concerned path",
+    "xspec: configuration error: ../xspec.config.ts: line 7 (SPEC 7, 14.14)\n",
+    'it carries the concerned path "../xspec.config.ts"',
+  );
+  rejected(
+    "two coded lines disagreeing",
+    CONFIGURATION_ERROR_MESSAGE +
+      "xspec: configuration error: other.config.ts: line 1 (SPEC 14.14)\n",
+    "so which the error's are is ambiguous",
+  );
+  rejected("an empty message", Buffer.alloc(0), "standard error is empty");
+  rejected(
+    "no diagnostic prefix",
+    "configuration error: xspec.config.ts: line 7 (SPEC 14.14)\n",
+    'opening with the product\'s diagnostic prefix "xspec: "',
+  );
+  rejected(
+    "an empty path token",
+    "xspec: configuration error: : line 7 (SPEC 14.14)\n",
+    "a path, never an empty token",
+  );
+  // A non-UTF-8 concerned path printed raw, lossily, or unmarked.
+  const twin: ErrorInformation = {
+    code: "read-failure",
+    path: { bytes: NON_UTF8_PATH_HEX },
+  };
+  rejected(
+    "a non-UTF-8 path printed raw",
+    Buffer.concat([
+      Buffer.from("xspec: read failure: ", "utf8"),
+      NON_UTF8_PATH_BYTES,
+      Buffer.from(": refused (SPEC 14.25)\n", "utf8"),
+    ]),
+    "so these bytes are a path printed raw",
+    twin,
+  );
+  rejected(
+    "a non-UTF-8 path printed lossily",
+    `xspec: read failure: specs/A${REPLACEMENT}.mdx: refused (SPEC 14.25)\n`,
+    `it carries the concerned path ${JSON.stringify(`specs/A${REPLACEMENT}.mdx`)} where the --json twin's error document carries the marked byte form of bytes:${NON_UTF8_PATH_HEX}`,
+    twin,
+  );
+  rejected(
+    "a non-UTF-8 path unmarked",
+    "xspec: read failure: specs/A\\xff.mdx: refused (SPEC 14.25)\n",
+    'it carries the concerned path "specs/A\\\\xff.mdx"',
+    twin,
   );
 });
 

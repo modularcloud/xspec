@@ -19,8 +19,9 @@
 //   2. synthetic conforming-form documents at that scale are built
 //      iteratively (never by recursion — `JSON.stringify` itself overflows
 //      at these depths) and driven through every H-3/12.7 decoder and every
-//      answer-document walk the suite performs, asserting no exception and
-//      the expected datum counts;
+//      answer-document walk the suite performs — the human-report decoders
+//      over the human twins of the flat findings surfaces included —
+//      asserting no exception and the expected datum counts;
 //   3. capture is gated at the same scale through S-3's stand-in mechanism:
 //      a stand-in command streams the largest synthetic document to stdout
 //      through the one ProductBinding/run path product invocations use
@@ -69,12 +70,15 @@ import { expect, onTestFinished, test, vi } from "vitest";
 import type * as AddedImportCheckModule from "../helpers/added-import-identifiers.js";
 import {
   assertBareEdgeEndpoints,
+  assertHumanFindingsCarry,
   assertNodeEdgeListsBare,
   assertUnavailabilityMarkerForms,
   decodeAtReport,
   decodeEdgesReport,
   decodeErrorDocument,
   decodeFindingsReport,
+  decodeHumanErrorMessage,
+  decodeHumanFindingsReport,
   decodeIdsReport,
   decodeIdsTreeReport,
   decodeNodeIdentityRowsReport,
@@ -706,6 +710,53 @@ test("S-8: every H-3/12.7 decoder and answer-document walk succeeds at the synth
     "S-8 error",
   );
   expect(error.error.locations).toHaveLength(flat);
+
+  // The human-report decoders (human-reports.ts; H-3's report forms) at the
+  // same count: the findings-only document's human twin — the 14.1
+  // finding's `flat` locations on one line, its first heading it and the
+  // rest in its further-locations list, then one 14.3 line per bearer —
+  // decoded and compared with that document's findings, and an exit-2
+  // message of `flat` coded lines, one per defect, each repeating the code
+  // and the concerned path.
+  const location = (index: number): string =>
+    `${VIEWED_FILE}:${String(index * 11)}-${String(index * 11 + 10)}`;
+  const humanLines = [
+    `${location(0)}: missing-id: a section spells no id (also at ${Array.from(
+      { length: flat - 1 },
+      (_unused, index) => location(index + 1),
+    ).join(", ")})`,
+    ...Array.from(
+      { length: flat },
+      (_unused, index) => `${location(index)}: duplicate-id: duplicate id g`,
+    ),
+    `${String(flat + 1)} findings`,
+  ];
+  const humanFindings = decodeHumanFindingsReport(
+    Buffer.from(`${humanLines.join("\n")}\n`, "utf8"),
+    "S-8 human findings",
+  );
+  expect(humanFindings.findings).toHaveLength(flat + 1);
+  expect(humanFindings.findings[0]!.locations).toHaveLength(flat);
+  assertHumanFindingsCarry(
+    humanFindings,
+    decodeFindingsReport(findingsOnly, "S-8 findings").findings,
+    "S-8 human findings",
+  );
+  const humanError = decodeHumanErrorMessage(
+    Buffer.from(
+      Array.from(
+        { length: flat },
+        (_unused, index) =>
+          `xspec: configuration error: xspec.config.ts: line ${String(index + 1)}: a defect (SPEC 7, 14.14)\n`,
+      ).join(""),
+      "utf8",
+    ),
+    "S-8 human error",
+  );
+  expect({ code: humanError.code, path: humanError.path }).toEqual({
+    code: "configuration-error",
+    path: "xspec.config.ts",
+  });
 });
 
 // ---------------------------------------------------------------------------
