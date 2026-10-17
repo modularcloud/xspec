@@ -218,7 +218,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T2.4-4": ["2.4", "14"],
   "T2.4-5": ["2.4", "1.4", "2.1", "4.5", "5.7", "11.3", "14"],
   "T2.5-1": ["2.5"],
-  "T2.5-2": ["2.5"],
+  // T2.5-2: its excluded-as-a-target-only arm's covering paths through a
+  // `coverage="none"` boundary node and an ignored intermediate, per mode
+  // (8: roots alone barred from coverage paths).
+  "T2.5-2": ["2.5", "8"],
   "T2.5-3": ["2.5", "2.4", "2.7", "14"],
   "T2.6-1": ["2.6"],
   "T2.6-2": ["2.6"],

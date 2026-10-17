@@ -10,8 +10,10 @@
 // SPEC 2.5: every non-root node without the attribute is coverage-required;
 // `coverage="none"` excludes the node as a coverage target (it can still be a
 // `d` target, still appears in impact reports, and its descendants retain
-// their own coverage behavior); the only defined values are `required`
-// (default) and `none` — anything else is invalid (14.17, 2.7).
+// their own coverage behavior) — as a target only: SPEC 8 bars roots alone
+// from coverage paths, so the node still serves on one as boundary node or
+// intermediate (T2.5-2's second workspace); the only defined values are
+// `required` (default) and `none` — anything else is invalid (14.17, 2.7).
 // SPEC 2.6: `tags` is a whitespace-separated list split on runs of 1.4
 // whitespace with leading/trailing whitespace ignored; duplicates collapse; a
 // value yielding no tags is equivalent to omitting the prop; tags are
@@ -48,6 +50,7 @@ import type {
   SourceRange,
 } from "../../helpers/adapters/index.js";
 import {
+  classifyIgnoredReasons,
   decodeCoverageReport,
   decodeEdgesReport,
   decodeFindingsReport,
@@ -463,12 +466,13 @@ const T2_5_1 = defineProductTest({
 // T2.5-2
 // ---------------------------------------------------------------------------
 
-// One workspace observing every stated consequence of `coverage="none"`
-// (SPEC 2.5): `meta` carries the attribute and has a child (the child's own
-// coverage behavior is unaffected); `user` declares `d={"meta"}` (the node
-// can still be a `d` target); a committed git baseline lets an edit to
-// `meta`'s own text surface in `impact --base` (the node still appears in
-// impact reports when changed).
+// The first workspace observes the four consequences of `coverage="none"`
+// that TEST-SPEC makes observable in one workspace (SPEC 2.5): `meta` carries
+// the attribute and has a child (the child's own coverage behavior is
+// unaffected); `user` declares `d={"meta"}` (the node can still be a `d`
+// target); a committed git baseline lets an edit to `meta`'s own text surface
+// in `impact --base` (the node still appears in impact reports when changed).
+// The excluded-as-a-target-only arm has a second workspace (below).
 const T2_5_2_BASELINE = [
   '<S id="meta" coverage="none">',
   "Meta text.",
@@ -497,10 +501,248 @@ const T2_5_2_META = "specs/A.mdx#meta";
 const T2_5_2_CHILD = "specs/A.mdx#meta.child";
 const T2_5_2_USER = "specs/A.mdx#user";
 
+// The excluded-as-a-target-only arm, on a workspace of its own:
+// `coverage="none"` takes a node out of a profile's required set and out of
+// nothing else of coverage — SPEC 8 bars roots alone from coverage paths, as
+// boundary node, intermediate, or target. Spec groups `base` (base/A.mdx)
+// and `derived` (derived/B.mdx), under two profiles targeting `derived` with
+// boundary `base`, one `direct` and one `transitive`: A's `n`
+// (`coverage="none"`, `d={B.t1}`) is a boundary node whose one edge covers
+// `t1` in both modes; A's `k` (`d={B.m}`) reaches `t2` only through B's `m`
+// (`coverage="none"`, `d={"t2"}`), ignored in both profiles yet an
+// intermediate, so `t2` is covered in `transitive` mode, its path `k` → `m`
+// → `t2`, and uncovered in `direct` mode, its one edge sourced at `m`, no
+// boundary node; `m`, a leaf under no `targetTags` filter, is ignored for
+// the attribute alone (SPEC 8.2). A product dropping `coverage="none"` nodes
+// from the coverage graph rather than from the required set reports `t1`
+// uncovered in both profiles, and `t2` too. Each covering path is the only
+// path to its target, so no 12.0 tie-break is in play. The workspace is
+// created after the body's first invocation, so its initial sources are
+// staged-source records (S-9's timing clause).
+const T2_5_2_TARGET_ONLY_CONFIG = stagedTs(
+  "T2.5-2 xspec.config.ts — the excluded-as-a-target-only arm's `direct` and `transitive` profiles targeting `derived` with boundary `base`",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    base: ["base/**/*.mdx"],
+    derived: ["derived/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "p-direct",
+      target: "derived",
+      boundary: "base",
+      mode: "direct"
+    },
+    {
+      name: "p-transitive",
+      target: "derived",
+      boundary: "base",
+      mode: "transitive"
+    }
+  ]
+})
+`,
+);
+
+const T2_5_2_TARGET_ONLY_A = stagedMdx(
+  'T2.5-2 base/A.mdx — the boundary nodes `n` (`coverage="none"`, `d={B.t1}`) and `k` (`d={B.m}`)',
+  [
+    'import B from "../derived/B.xspec"',
+    "",
+    '<S id="n" coverage="none" d={B.t1}>',
+    "Boundary node excluded as a coverage target.",
+    "</S>",
+    "",
+    '<S id="k" d={B.m}>',
+    "Boundary node depending on the ignored m.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+const T2_5_2_TARGET_ONLY_B = stagedMdx(
+  'T2.5-2 derived/B.mdx — the target leaves `t1`, `t2`, and `m` (`coverage="none"`, `d={"t2"}`)',
+  [
+    '<S id="t1">',
+    "Target leaf covered from the excluded boundary node.",
+    "</S>",
+    "",
+    '<S id="t2">',
+    "Target leaf reached only through m.",
+    "</S>",
+    "",
+    '<S id="m" coverage="none" d={"t2"}>',
+    "Ignored leaf on the covering path to t2.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+const T2_5_2_N = "base/A.mdx#n";
+const T2_5_2_K = "base/A.mdx#k";
+const T2_5_2_DERIVED_ROOT = "derived/B.mdx";
+const T2_5_2_T1 = "derived/B.mdx#t1";
+const T2_5_2_T2 = "derived/B.mdx#t2";
+const T2_5_2_M = "derived/B.mdx#m";
+
+/** One profile's expected report in the excluded-as-a-target-only arm. */
+interface TargetOnlyProfileExpectation {
+  readonly name: string;
+  readonly mode: "direct" | "transitive";
+  readonly counts: {
+    readonly required: number;
+    readonly covered: number;
+    readonly uncovered: number;
+    readonly ignored: number;
+  };
+  /** Covered rows sorted by identity, each with its one covering path. */
+  readonly covered: readonly {
+    readonly identity: string;
+    readonly path: readonly string[];
+  }[];
+  readonly uncovered: readonly string[];
+  /** Why the covered and uncovered rows are what they are (diagnostics). */
+  readonly why: string;
+}
+
+const T2_5_2_TARGET_ONLY_PROFILES: readonly TargetOnlyProfileExpectation[] = [
+  {
+    name: "p-direct",
+    mode: "direct",
+    counts: { required: 2, covered: 1, uncovered: 1, ignored: 2 },
+    covered: [{ identity: T2_5_2_T1, path: [T2_5_2_N, T2_5_2_T1] }],
+    uncovered: [T2_5_2_T2],
+    why:
+      "a single edge from a boundary node covers in `direct` mode — `n` → " +
+      '`t1` covers `t1`, the `coverage="none"` `n` serving as boundary node, ' +
+      "while `t2`'s one edge is sourced at `m`, no boundary node, so `t2` is " +
+      "uncovered (SPEC 2.5, 8)",
+  },
+  {
+    name: "p-transitive",
+    mode: "transitive",
+    counts: { required: 2, covered: 2, uncovered: 0, ignored: 2 },
+    covered: [
+      { identity: T2_5_2_T1, path: [T2_5_2_N, T2_5_2_T1] },
+      { identity: T2_5_2_T2, path: [T2_5_2_K, T2_5_2_M, T2_5_2_T2] },
+    ],
+    uncovered: [],
+    why:
+      "a path of one or more edges from a boundary node covers in " +
+      '`transitive` mode — `n` → `t1` covers `t1` through the `coverage="none"` ' +
+      "boundary node, and `k` → `m` → `t2` covers `t2` through the ignored " +
+      "`m` as intermediate, roots alone barred from coverage paths (SPEC 2.5, 8)",
+  },
+];
+
+/**
+ * T2.5-2's excluded-as-a-target-only arm (the constants above): after a
+ * clean `build` and the premise `depends` edges, one `coverage --json` run
+ * carries both profiles, each asserted whole — its counts, every covered
+ * node with its one covering path, every uncovered node, the ignored nodes
+ * (the root and `m`), and `m`'s reasons, exactly the `coverage="none"` one
+ * (SPEC 8, 8.1, 8.2). The root's reasons are T8.2-1's subject.
+ */
+async function runExcludedAsTargetOnlyArm(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(
+    T2_5_2_TARGET_ONLY_CONFIG,
+    {
+      "base/A.mdx": T2_5_2_TARGET_ONLY_A,
+      "derived/B.mdx": T2_5_2_TARGET_ONLY_B,
+    },
+    async (workspace) => {
+      const arm = "T2.5-2 (excluded as a target only)";
+      await buildOk(product, workspace, `${arm} \`build\``);
+      const edgesLabel = `${arm} \`query edges --kinds depends\``;
+      assertEdgeSetEqual(
+        decodeEdgesReport(
+          await runJson(
+            product,
+            workspace,
+            ["query", "edges", "--kinds", "depends"],
+            edgesLabel,
+          ),
+          edgesLabel,
+        ),
+        [
+          { from: T2_5_2_N, to: T2_5_2_T1, kind: "depends" },
+          { from: T2_5_2_K, to: T2_5_2_M, kind: "depends" },
+          { from: T2_5_2_M, to: T2_5_2_T2, kind: "depends" },
+        ],
+        `${arm} the premise — the complete \`depends\` edge set, every edge ` +
+          'the covering paths need, `coverage="none"` nodes ordinary `d` ' +
+          "sources and targets (SPEC 2.2, 2.5)",
+      );
+
+      const label = `${arm} \`coverage --json\``;
+      const report = decodeCoverageReport(
+        await runJson(product, workspace, ["coverage", "--json"], label),
+        label,
+      );
+      assertSameJson(
+        report.profiles.map((profile) => profile.name).sort(),
+        T2_5_2_TARGET_ONLY_PROFILES.map((profile) => profile.name),
+        `${label}: the report carries each configured profile exactly once ` +
+          "(SPEC 8.2: `xspec coverage` runs all profiles)",
+      );
+      for (const expected of T2_5_2_TARGET_ONLY_PROFILES) {
+        const profile = report.profiles.find(
+          (candidate) => candidate.name === expected.name,
+        )!;
+        const context = `${label} profile ${expected.name} (\`${expected.mode}\` mode)`;
+        assertCoverageCounts(
+          profile,
+          expected.counts,
+          `${context} — \`t1\` and \`t2\` are required and \`m\` and the ` +
+            "root ignored (SPEC 8.1); " +
+            expected.why,
+        );
+        assertSameJson(
+          profile.covered
+            .map((row) => ({ identity: row.identity, path: [...row.path] }))
+            .sort((a, b) => (a.identity < b.identity ? -1 : 1)),
+          expected.covered,
+          `${context}: every covered node with its one covering path, ` +
+            `boundary node to target — ${expected.why}`,
+        );
+        assertSameJson(
+          [...profile.uncovered].sort(),
+          expected.uncovered,
+          `${context}: every uncovered node — ${expected.why}`,
+        );
+        assertSameJson(
+          sortedIdentities(profile.ignored),
+          [T2_5_2_DERIVED_ROOT, T2_5_2_M],
+          `${context}: the ignored nodes are exactly the root and \`m\`, the ` +
+            'target group\'s nodes 8.1 excludes — `coverage="none"` takes ' +
+            "`m` out of the required set alone (SPEC 2.5, 8.1, 8.2)",
+        );
+        const ignoredM = profile.ignored.find(
+          (row) => row.identity === T2_5_2_M,
+        )!;
+        assertSameJson(
+          classifyIgnoredReasons(
+            ignoredM.reasons,
+            `${context} ignored ${T2_5_2_M}`,
+          ),
+          ["coverage-none"],
+          `${context}: \`m\` is reported ignored with the \`coverage="none"\` ` +
+            "reason alone — a leaf under no `targetTags` filter, no other " +
+            "reason applies (SPEC 8.2: all that apply, in the fixed order)",
+        );
+      }
+    },
+  );
+}
+
 const T2_5_2 = defineProductTest({
   id: "T2.5-2",
   title:
-    '`coverage="none"`: the node is excluded from coverage targets (ignored with its reason), can still be a `d` target, still appears in impact reports when changed, and its children remain coverage-required — one workspace (SPEC 2.5, 8.1, 8.2, 9)',
+    '`coverage="none"`: the node is excluded from coverage targets (ignored with its reason), can still be a `d` target, still appears in impact reports when changed, and its children remain coverage-required — one workspace; and it is excluded as a target only — under a `direct` and a `transitive` profile targeting group `derived` with boundary `base`, the `coverage="none"` boundary node `n` covers `t1` in both modes (path `n` → `t1`) and the ignored `coverage="none"` intermediate `m` lies on `t2`\'s covering path in `transitive` mode (`k` → `m` → `t2`), `t2` uncovered in `direct` mode, `m` reported ignored with the `coverage="none"` reason alone (SPEC 2.5, 8, 8.1, 8.2, 9)',
   run: async (product) => {
     await withWorkspace(
       ALL_TARGETS_PROFILE_CONFIG,
@@ -646,6 +888,10 @@ const T2_5_2 = defineProductTest({
         );
       },
     );
+
+    // Excluded as a target only: a `coverage="none"` node still serves as
+    // boundary node and as intermediate on coverage paths (SPEC 2.5, 8).
+    await runExcludedAsTargetOnlyArm(product);
   },
 });
 
