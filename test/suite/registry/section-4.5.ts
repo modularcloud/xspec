@@ -105,6 +105,21 @@
 //   module, so an export declaration binding the import's identifier is the
 //   same early error in one block and across two — 14.20 admits both, each
 //   a finding in a well-formed file (T14-12).
+// - T4.5-8's type-only side: its workspaces are valid, so there `query edges
+//   --from src/app.ts` answers, its edge list empty, beside `occurrences
+//   --file`'s finding-free answer listing no record (11.2, 11.3). The
+//   named-binding arms' `t("x")` — no spec module's `text` call (4.5), which
+//   alone records an `embeds` edge and its occurrence (4.3, 5.7) — is
+//   observed alike, though TEST-SPEC states only its "no 14.8" (the
+//   finding-free reports): the file holds no spelling that could record
+//   anything.
+// - T4.5-8's code arms stage TEST-SPEC's `./A.xspec` specifier from
+//   `src/app.ts` as `../specs/A.xspec`, the spec source living under
+//   `specs/` (the one spec group's glob): both designate `specs/A.mdx`, so
+//   the import is the same spec module import (SPEC 2.1, 4). The type-only
+//   side's `import type SPEC from "../specs/A.xspec";` binds the default
+//   alone, as TEST-SPEC spells it: with the call `text(SPEC.b)` left out,
+//   nothing in the file uses a `text` binding.
 // - T4.5-9 stages `src/t.ts`, a non-spec module exporting a `text`
 //   function, so the `./t` imports of its non-spec and type-only arms name
 //   an existing module — the import's validity is a consumer-side matter
@@ -178,6 +193,7 @@ import {
   buildOk,
   byteWindow,
   expectExit,
+  expectFindingFreeReport,
   runJson,
   sortedIdentities,
 } from "./support.js";
@@ -1861,13 +1877,17 @@ const T4_5_7 = defineProductTest({
 
 // ---------------------------------------------------------------------------
 // T4.5-8 — same-scope collisions: an identifier the import and a value-level
-// declaration of the module scope both bind roots no resolving chain
+// declaration of the module scope both bind roots no resolving chain; the
+// import type-only, the declaration collides with nothing
 // ---------------------------------------------------------------------------
 
 // Sibling targets `a` and `b`: both staged chains (`SPEC.a`, `text(SPEC.b)`)
 // resolve if the import roots them, so the same-scope declaration is each
 // arm's sole defect (SPEC 2.4, 4.5) — a product reporting the chains as
-// unresolved for any other reason has nothing else to point at.
+// unresolved for any other reason has nothing else to point at. On the
+// type-only side the marker-shaped `SPEC.a` would likewise resolve to
+// `specs/A.mdx#a` if the type-only import rooted it, so an edge or an
+// occurrence recorded for it there names a real target.
 // The one source T4.5-8 stages at two paths — `specs/A.mdx` of the code-side
 // arms and `specs/BASE.mdx` of the spec-source arms — as one staged-source
 // record (S-9, test/self/s9-staged-sources.test.ts): every arm's workspace
@@ -1905,7 +1925,10 @@ export interface SameScopeDeclarationArm {
 }
 
 // The colliding forms: a variable, function, class, or enum declaration, or
-// a namespace binding a value (SPEC 2.4). The located construct is the
+// a namespace binding a value (SPEC 2.4) — each a value-level form at module
+// scope, staged once more on the type-only side beside a type-only import,
+// where it collides with nothing (`T4_5_8_TYPE_ONLY_STAGINGS`, its
+// `construct` unused there). The located construct is the
 // variable DECLARATOR (`SPEC = 1`, the `const` statement excluded) or the
 // declaration's own characters (14, 1.7). The further located forms follow
 // 14's declarator and decorator rules as 1.7 reads them: a declarator
@@ -2607,10 +2630,182 @@ async function assertSpecSourceCollision(
   );
 }
 
+// The type-only side (SPEC 2.4, 4, 4.5, 14.15): the declaration collision
+// needs the import's binding value-level — 2.4's "the import's binding
+// being value-level (4)" — unlike the import–import collision, which holds
+// type-only or not (T4-5). Two stagings, one workspace per arm:
+// - the code arms' source with the spec import type-only — `import type
+//   SPEC from "../specs/A.xspec";` — and the call `text(SPEC.b)` left out,
+//   the marker-shaped `SPEC.a;` its one spelling rooted at `SPEC`, beside
+//   each value-level form at module scope (`T4_5_8_COLLIDING_ARMS`, the
+//   further located forms included), one arm each;
+// - for the named-binding modifier, `import { type text as t } from
+//   "../specs/A.xspec";` and the call `t("x");` beside `function t(x:
+//   unknown) {}` and, separately, beside `const t = (x: unknown) => "";`.
+// Every arm collides with nothing: a binding introduced type-only is a
+// type-level name (4), which no value-level declaration meets — the
+// consumer's TypeScript diagnostics, a declaration conflict included, lie
+// outside xspec's validations (T4-4) — and neither `SPEC.a` nor `t("x")` is
+// rooted at a spec module binding at value level (4.5): no edge, no
+// occurrence (5.7), no 14.7, no 14.8, no 14.15. A product extending the
+// import–import rule's indifference to type-only to declarations reports
+// 14.15 on these valid workspaces.
+const T4_5_8_TYPE_ONLY_IMPORT = 'import type SPEC from "../specs/A.xspec";';
+const T4_5_8_TYPE_ONLY_TEXT_IMPORT =
+  'import { type text as t } from "../specs/A.xspec";';
+const T4_5_8_TYPE_ONLY_TEXT_CALL = 't("x")';
+
+/**
+ * The value-level declarations binding `t` beside the type-only `text`
+ * binding, each a line of `src/app.ts` exactly (pure ASCII).
+ */
+const T4_5_8_TYPE_ONLY_TEXT_DECLARATIONS: readonly {
+  /** Which declaration this is (failure diagnostics). */
+  readonly name: string;
+  readonly line: string;
+}[] = [
+  {
+    name: "a function declaration `function t(x: unknown) {}`",
+    line: "function t(x: unknown) {}",
+  },
+  {
+    name: 'a variable declaration `const t = (x: unknown) => ""`',
+    line: 'const t = (x: unknown) => "";',
+  },
+];
+
+/** One type-only-side arm: a `src/app.ts` colliding with nothing. */
+interface TypeOnlySideStaging {
+  /** Which staging this is (failure diagnostics). */
+  readonly name: string;
+  /**
+   * The whole file — the type-only import, a blank line, the declaration,
+   * a blank line, the one spelling's statement — as a staged-source record
+   * (registered at module load, so the arms are staged once, into
+   * `T4_5_8_TYPE_ONLY_STAGINGS`: every arm's workspace is created after the
+   * body's first product invocation, S-9's timing clause).
+   */
+  readonly source: StagedTs;
+}
+
+/**
+ * Lay out one type-only-side arm's `src/app.ts`. It registers a record, so
+ * it runs at module load only.
+ */
+function stageTypeOnlySide(
+  name: string,
+  importDeclaration: string,
+  declaration: string,
+  expression: string,
+): TypeOnlySideStaging {
+  return {
+    name,
+    source: stagedTs(
+      `T4.5-8 src/app.ts, ${name}`,
+      `${importDeclaration}\n\n${declaration}\n\n${expression};\n`,
+    ),
+  };
+}
+
+// The type-only side's arms, staged once, at module load, in TEST-SPEC's
+// order — the type-only import beside each colliding form, in the colliding
+// arms' order, then the named-binding modifier's two declarations.
+const T4_5_8_TYPE_ONLY_STAGINGS: readonly TypeOnlySideStaging[] = [
+  ...T4_5_8_COLLIDING_ARMS.map((arm) =>
+    stageTypeOnlySide(
+      `the spec import type-only (\`${T4_5_8_TYPE_ONLY_IMPORT}\`) beside ${arm.name}`,
+      T4_5_8_TYPE_ONLY_IMPORT,
+      arm.line,
+      T4_5_8_MARKER_CHAIN,
+    ),
+  ),
+  ...T4_5_8_TYPE_ONLY_TEXT_DECLARATIONS.map(({ name, line }) =>
+    stageTypeOnlySide(
+      `\`text\` bound type-only (\`${T4_5_8_TYPE_ONLY_TEXT_IMPORT}\`) with ` +
+        `the call \`${T4_5_8_TYPE_ONLY_TEXT_CALL}\` beside ${name}`,
+      T4_5_8_TYPE_ONLY_TEXT_IMPORT,
+      line,
+      T4_5_8_TYPE_ONLY_TEXT_CALL,
+    ),
+  ),
+];
+
+/**
+ * One type-only-side arm, on a workspace of its own: the workspace is valid
+ * — `build --json`, then `check --json` over the built workspace, each
+ * exactly `{"findings": []}`, exit 0: no 14.15, the binding introduced
+ * type-only meeting no value-level declaration (SPEC 2.4, 4), no 14.7 and
+ * no 14.8 for `SPEC.a`, and no 14.8 for `t("x")` (4.5) — and the one
+ * spelling, rooted at no spec module binding at value level, records
+ * nothing: `query edges --from src/app.ts` lists no edge, and `occurrences
+ * --file src/app.ts`, finding-free, no record (4.5, 5.7, 11.2, 11.3).
+ */
+async function assertTypeOnlySideArm(
+  product: ProductBinding,
+  staging: TypeOnlySideStaging,
+): Promise<void> {
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    { ...T4_5_8_SPEC_FILES, "src/app.ts": staging.source },
+    async (workspace) => {
+      const context = `T4.5-8 type-only side, ${staging.name}`;
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["build", "--json"],
+        `${context} — \`build --json\`: the binding introduced type-only ` +
+          `is a type-level name, so the value-level declaration collides ` +
+          `with nothing (no 14.15), and the spelling rooted at it falls ` +
+          `under no condition (no 14.7, no 14.8) — the workspace valid, the ` +
+          `consumer's TypeScript diagnostics lying outside xspec's ` +
+          `validations (SPEC 2.4, 4, 4.5, 14.15; T4-4)`,
+      );
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        `${context} — \`check --json\` over the built workspace: the same ` +
+          `validations, no finding (SPEC 12.2, 2.4, 4, 4.5)`,
+      );
+      assertEdgeSetEqual(
+        await queryEdgesFrom(product, workspace, "src/app.ts", context),
+        [],
+        `${context}: no edge leaves the file — the spelling is rooted at no ` +
+          `spec module binding at value level, so it is neither a marker ` +
+          `nor a spec module's \`text\` call (SPEC 4, 4.5, 4.3)`,
+      );
+      const occContext = `${context} — \`occurrences --file src/app.ts\``;
+      const report = decodeOccurrencesReport(
+        await runJson(
+          product,
+          workspace,
+          ["occurrences", "--file", "src/app.ts"],
+          `${occContext} — a complete, finding-free answer exits 0 (SPEC ` +
+            `11.2, 11.3)`,
+        ),
+        occContext,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${occContext}: the valid workspace's code file consults ` +
+          `finding-free — no 14.15, no 14.7, no 14.8 (SPEC 11.2, 2.4, 4.5)`,
+      );
+      assertSameJson(
+        report.occurrences.map(occurrenceTuple),
+        [],
+        `${occContext}: no record — a construct that records no edge ` +
+          `records no occurrence, a spelling rooted at a binding introduced ` +
+          `type-only or at a local declaration included (SPEC 5.7, 4.5, 11.3)`,
+      );
+    },
+  );
+}
+
 const T4_5_8 = defineProductTest({
   id: "T4.5-8",
   title:
-    "same-scope collisions: an identifier the spec module import binds that a module-scope `const`, `using`, `await using`, `function`, `class`, `enum`, or value-binding `namespace` declaration also binds at value level roots no resolving chain — `build` and `check` report the condition-15 collision, locating the import by its own characters and the non-import by the construct binding the name, byte-exact (the declarator `SPEC = 1`, the `const` statement excluded; `SPEC = f()` for `using SPEC = f()` and `await using SPEC = f()`, the `using` or `await using` excluded; the further forms `let SPEC;` at `SPEC` alone, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from its `@`, and `export class SPEC {}` / `export function SPEC() {}` from `class` / `function`, the `export` excluded), beside condition 7 for the marker `SPEC.a` and the call `text(SPEC.b)`, each at the span its occurrence would occupy, exit 1; the gated `query edges` reports no edge from the file and `occurrences` no record for the spellings; type-level `interface`, `type`, and value-free `namespace` declarations collide with nothing — edges recorded, no finding, exit 0; and a spec source holding `export const BASE = 1` beside `import BASE` reports 14.16 for the export statement, 14.15 locating the import and the declarator, and 14.5/14.6 for the `d` and `text(...)` spellings rooted at `BASE`, no edge and no occurrence recorded for them — the two declarations in one ESM block and, a second arm, across two blocks, each a finding in a well-formed file, never 14.20 (SPEC 2.4, 4.5, 2.1, 2.7, 5.7, 11.2, 12.7, 13.3, 14, 14.15, 14.20)",
+    'same-scope collisions: an identifier the spec module import binds that a module-scope `const`, `using`, `await using`, `function`, `class`, `enum`, or value-binding `namespace` declaration also binds at value level roots no resolving chain — `build` and `check` report the condition-15 collision, locating the import by its own characters and the non-import by the construct binding the name, byte-exact (the declarator `SPEC = 1`, the `const` statement excluded; `SPEC = f()` for `using SPEC = f()` and `await using SPEC = f()`, the `using` or `await using` excluded; the further forms `let SPEC;` at `SPEC` alone, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from its `@`, and `export class SPEC {}` / `export function SPEC() {}` from `class` / `function`, the `export` excluded), beside condition 7 for the marker `SPEC.a` and the call `text(SPEC.b)`, each at the span its occurrence would occupy, exit 1; the gated `query edges` reports no edge from the file and `occurrences` no record for the spellings; type-level `interface`, `type`, and value-free `namespace` declarations collide with nothing — edges recorded, no finding, exit 0; and a spec source holding `export const BASE = 1` beside `import BASE` reports 14.16 for the export statement, 14.15 locating the import and the declarator, and 14.5/14.6 for the `d` and `text(...)` spellings rooted at `BASE`, no edge and no occurrence recorded for them — the two declarations in one ESM block and, a second arm, across two blocks, each a finding in a well-formed file, never 14.20; and on the type-only side — the spec import type-only (`import type SPEC`), the call `text(SPEC.b)` left out, beside each module-scope value-level form above, one arm each, and `import { type text as t }` with the call `t("x")` beside `function t(x: unknown) {}` and, separately, beside `const t = (x: unknown) => ""` — every arm collides with nothing: `build` and `check` report no finding, exit 0, `query edges` lists no edge from the file and `occurrences` no record, the marker-shaped `SPEC.a` raising no 14.7 and no 14.8 and `t("x")` no 14.8 (SPEC 2.4, 4, 4.5, 2.1, 2.7, 5.7, 11.2, 12.7, 13.3, 14, 14.15, 14.20)',
   run: async (product) => {
     for (const staging of T4_5_8_COLLIDING_STAGINGS) {
       await assertSameScopeCollisionArm(product, staging);
@@ -2620,6 +2815,9 @@ const T4_5_8 = defineProductTest({
     }
     for (const staging of T4_5_8_SPEC_SOURCE_STAGINGS) {
       await assertSpecSourceCollision(product, staging);
+    }
+    for (const staging of T4_5_8_TYPE_ONLY_STAGINGS) {
+      await assertTypeOnlySideArm(product, staging);
     }
   },
 });

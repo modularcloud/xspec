@@ -271,7 +271,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T4.5-5": ["4.5", "14"],
   "T4.5-6": ["4.5"],
   "T4.5-7": ["4.5"],
-  "T4.5-8": ["4.5", "1.7", "2.1", "2.4", "5.7", "14"],
+  // T4.5-8: its type-only side carries 4's type-only imports, a binding
+  // introduced type-only a type-level name that no value-level declaration
+  // collides with (2.4's "the import's binding being value-level (4)").
+  "T4.5-8": ["4.5", "1.7", "2.1", "2.4", "4", "5.7", "14"],
   "T4.5-9": ["4.5", "2.4", "5.7", "11.2", "14"],
   "T4.6-1": ["4.6"],
   "T4.6-2": ["4.6"],
