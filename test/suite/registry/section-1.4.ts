@@ -79,9 +79,9 @@ import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
-  assertCompileErrorAt,
-  assertNoCompileErrors,
-  ConsumerProject,
+  assertTypeChecksClean,
+  assertTypeErrorsAt,
+  forEachConsumerProject,
 } from "../../helpers/tooling.js";
 import { identifierRunAt } from "../../helpers/ts-identifiers.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -574,13 +574,18 @@ const T1_4_2 = defineProductTest({
 
 // A valid non-identifier segment, exposed via bracket notation in the
 // generated module (SPEC 2.4/4.1) — exercised under standard TypeScript
-// tooling with no xspec runtime dependency (SPEC 13.1, HARNESS-05). The
-// bracket consumer must compile cleanly (the property type-checks and
-// resolves); the dot consumer must fail at `login` — `SPEC.login-v2` parses
-// as `(SPEC.login) - v2`, so no dot spelling can name the `login-v2`
-// property, and against a conforming skeleton `login` is no property at all.
-// The pair also discriminates an `any`-typed default export (both consumers
-// would compile, but the dot consumer would carry no error at `login`).
+// tooling with no xspec runtime dependency (SPEC 13.1, HARNESS-05), under
+// each of TEST-SPEC H-2's two configurations. The bracket consumer must
+// type-check clean, its whole program — the generated module and the
+// companions it reaches — included (the property type-checks and resolves);
+// the dot consumer must fail at the dot spelling alone — `SPEC.login-v2`
+// parses as `(SPEC.login) - v2`, so no dot spelling can name the `login-v2`
+// property: against a conforming skeleton `login` is no property at all,
+// and `v2`, the subtraction's right operand, is a name nothing declares, so
+// the program's diagnostics lie at `login` and at `v2`, each an error, and
+// nowhere else (H-2's type-error assertion). The pair also discriminates an
+// `any`-typed default export (the bracket consumer would type-check, but the
+// dot consumer would carry no error at `login`).
 const DASH_SEGMENT_SOURCE = '<S id="login-v2">\nDashed segment.\n</S>\n';
 
 const BRACKET_CONSUMER = stagedTs(
@@ -598,7 +603,7 @@ const DOT_CONSUMER = stagedTs(
 const T1_4_3 = defineProductTest({
   id: "T1.4-3",
   title:
-    'a non-identifier segment like `login-v2` is valid; the generated module exposes it via bracket notation — `SPEC["login-v2"]` type-checks and resolves, dot access is a type error (SPEC 1.4, 2.4, 4.1)',
+    'a non-identifier segment like `login-v2` is valid; the generated module exposes it via bracket notation — under both of H-2\'s configurations `SPEC["login-v2"]` type-checks and resolves, dot access is a type error (SPEC 1.4, 2.4, 4.1)',
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -614,26 +619,36 @@ const T1_4_3 = defineProductTest({
       );
       await workspace.file("consumer.ts", BRACKET_CONSUMER);
       await workspace.file("dot-consumer.ts", DOT_CONSUMER);
-      const bracket = await ConsumerProject.load({
-        rootDir: workspace.root,
-        rootFiles: ["consumer.ts"],
-      });
-      assertNoCompileErrors(
-        bracket,
-        'T1.4-3 consumer accessing SPEC["login-v2"] via bracket notation (SPEC 2.4, 4.1)',
+      await forEachConsumerProject(
+        { rootDir: workspace.root, rootFiles: ["consumer.ts"] },
+        (bracket) =>
+          assertTypeChecksClean(
+            bracket,
+            'T1.4-3 consumer accessing SPEC["login-v2"] via bracket notation (SPEC 2.4, 4.1)',
+          ),
       );
-      const dot = await ConsumerProject.load({
-        rootDir: workspace.root,
-        rootFiles: ["dot-consumer.ts"],
-      });
-      assertCompileErrorAt(
-        dot,
-        dot.locate("dot-consumer.ts", "SPEC.login-v2", {
-          charOffset: "SPEC.".length,
-        }),
-        {},
-        "T1.4-3 dot access to the non-identifier segment (`SPEC.login-v2` cannot name " +
-          "the `login-v2` property — a type error, SPEC 1.4/4.1)",
+      await forEachConsumerProject(
+        { rootDir: workspace.root, rootFiles: ["dot-consumer.ts"] },
+        (dot) =>
+          assertTypeErrorsAt(
+            dot,
+            [
+              {
+                at: dot.locate("dot-consumer.ts", "SPEC.login-v2", {
+                  charOffset: "SPEC.".length,
+                }),
+              },
+              {
+                at: dot.locate("dot-consumer.ts", "SPEC.login-v2", {
+                  charOffset: "SPEC.login-".length,
+                }),
+              },
+            ],
+            "T1.4-3 dot access to the non-identifier segment (`SPEC.login-v2` parses as " +
+              "`(SPEC.login) - v2` and cannot name the `login-v2` property — a type error " +
+              "at `login`, SPEC 1.4/4.1 — its right operand `v2` a name nothing declares, " +
+              "an error at `v2`)",
+          ),
       );
     } finally {
       await workspace.dispose();
@@ -780,11 +795,13 @@ const T1_4_4 = defineProductTest({
 //   and the letter U+00E9 builds and checks clean from a spec source and a
 //   code source alike, the complete `depends`, `embeds`, and `references`
 //   edge set reported; and a consumer compiling the three dot spellings and
-//   the quoted `SPEC["<U+1C89>x"]` type-checks under the tooling driver
-//   (helpers/tooling.ts) at TypeScript 5.9.3 — whose program parses the
-//   generated module too, so a product judging by its runtime's tables
-//   whether a property name needs quoting, and leaving `<U+1C89>x` unquoted
-//   where 5.9.3 cannot parse it, fails the compile (13.1).
+//   the quoted `SPEC["<U+1C89>x"]` type-checks clean under the tooling
+//   driver (helpers/tooling.ts) at TypeScript 5.9.3, under each of H-2's
+//   two configurations — a verdict over the whole program, which parses and
+//   checks the generated module and the companions it reaches too, so a
+//   product judging by its runtime's tables whether a property name needs
+//   quoting, and leaving `<U+1C89>x` unquoted where 5.9.3 cannot parse it,
+//   fails the type check (13.1).
 // - (b) Conversion: section `m`, its `d` array holding the local references
 //   `"delete"`, `"<U+00E9>"`, and `"n.2fa"` to origin nodes outside the moved
 //   subtree, moves out of `specs/a.mdx` into the existing `specs/t.mdx`,
@@ -1205,7 +1222,7 @@ async function runT145ConversionArm(
 const T1_4_5 = defineProductTest({
   id: "T1.4-5",
   title:
-    "identifier by characters at TypeScript 5.9.3 and ESNext: dot access to the reserved words `delete` and `default` and to U+00E9 builds and checks clean from a spec source and a code source, each `depends`, `embeds`, and `references` edge reported, and a consumer compiling them and `SPEC[\"<U+1C89>x\"]` against the generated module type-checks at 5.9.3; a section move into a target lacking the origin's module converts a `d` array's local references to imported form in exactly 6.4's fallback spellings — dot access for `delete`, U+00E9, and U+2EBF0, double-quoted computed access for `2fa` and for U+1C89 then `x` — under T6.5-8's discipline, the target deriving and `build` and `check` clean (SPEC 1.4, 2.4, 4.1, 6.4, 6.5, 14.20)",
+    "identifier by characters at TypeScript 5.9.3 and ESNext: dot access to the reserved words `delete` and `default` and to U+00E9 builds and checks clean from a spec source and a code source, each `depends`, `embeds`, and `references` edge reported, and a consumer compiling them and `SPEC[\"<U+1C89>x\"]` against the generated module type-checks clean at 5.9.3 under both of H-2's configurations; a section move into a target lacking the origin's module converts a `d` array's local references to imported form in exactly 6.4's fallback spellings — dot access for `delete`, U+00E9, and U+2EBF0, double-quoted computed access for `2fa` and for U+1C89 then `x` — under T6.5-8's discipline, the target deriving and `build` and `check` clean (SPEC 1.4, 2.4, 4.1, 6.4, 6.5, 14.20)",
   run: async (product) => {
     // (a) Access.
     const workspace = await TestWorkspace.create({
@@ -1251,13 +1268,13 @@ const T1_4_5 = defineProductTest({
           "4.3, 4.5, 4.6, 5.2)",
       );
       await workspace.file("consumer.ts", T1_4_5_CONSUMER);
-      const consumer = await ConsumerProject.load({
-        rootDir: workspace.root,
-        rootFiles: ["consumer.ts"],
-      });
-      assertNoCompileErrors(
-        consumer,
-        'T1.4-5 (a) consumer compiling `SPEC.delete`, `SPEC.default`, `SPEC.<U+00E9>`, and `SPEC["<U+1C89>x"]` against the generated module at TypeScript 5.9.3 — every identifier-valid segment a dot-accessible property, and the generated module parsing at that release, so `<U+1C89>x`, no identifier there, stands quoted (SPEC 1.4, 2.4, 4.1, 13.1, 14.20)',
+      await forEachConsumerProject(
+        { rootDir: workspace.root, rootFiles: ["consumer.ts"] },
+        (consumer) =>
+          assertTypeChecksClean(
+            consumer,
+            'T1.4-5 (a) consumer compiling `SPEC.delete`, `SPEC.default`, `SPEC.<U+00E9>`, and `SPEC["<U+1C89>x"]` against the generated module at TypeScript 5.9.3 — every identifier-valid segment a dot-accessible property, and the generated module and its companions parsing and checking clean at that release, so `<U+1C89>x`, no identifier there, stands quoted (SPEC 1.4, 2.4, 4.1, 13.1, 14.20)',
+          ),
       );
     } finally {
       await workspace.dispose();

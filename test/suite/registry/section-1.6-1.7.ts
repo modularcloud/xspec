@@ -11,8 +11,11 @@
 // H-3 adapters, and rejects a product only via diagnosed assertion failures
 // (H-8). The `text(node)` runtime arm of T1.6-3 compiles and runs a consumer
 // program under standard TypeScript tooling with no xspec runtime dependency
-// (SPEC 13.1) through helpers/tooling.ts, following the CommonJS-mode
-// arrangement described in section-1.1-1.2.ts.
+// (SPEC 13.1) through helpers/tooling.ts, in TEST-SPEC H-2's fixed
+// configurations as section-1.1-1.2.ts's runtime arm does: type-checked
+// clean under each of the two, the whole program included, then compiled
+// under the CommonJS configuration alone to CommonJS JavaScript written
+// outside the workspace and run there under plain Node.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -49,10 +52,11 @@ import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
-  assertNoCompileErrors,
+  assertTypeChecksClean,
+  COMMONJS_CONFIGURATION,
   ConsumerProject,
-  formatConsumerDiagnostic,
-  runConsumer,
+  forEachConsumerProject,
+  withCompiledConsumer,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -524,11 +528,17 @@ const EXTRA_ID = "specs/A.mdx#summary.extra";
 const REVIEW_SESSION = "expansion";
 
 // `text(node)` at runtime (SPEC 4.3): the compiled consumer prints the
-// expanded subtree text — requirement text reaches it only through `text`.
+// expanded subtree text exactly, no terminator added — requirement text
+// reaches it only through `text` — through Node.js's `process.stdout`, whose
+// one member it uses it declares itself, H-2's configurations supplying no
+// `@types/node` (module-scoped, the file holding an import), so the program
+// is valid under both.
 const EXPANSION_CONSUMER = stagedTs(
   "T1.6-3 main.ts — `text` of the expanded summary, staged after `build`",
   [
     'import SPEC, { text } from "./specs/A.xspec";',
+    "",
+    "declare const process: { readonly stdout: { write(chunk: string): boolean } };",
     "",
     "process.stdout.write(text(SPEC.summary));",
     "",
@@ -569,7 +579,7 @@ function assertContextEntryText(
 const T1_6_3 = defineProductTest({
   id: "T1.6-3",
   title:
-    "with `{text(...)}` embeddings present, own and subtree text via `query`, `show`, and review payloads carry the embedded text fully expanded, and `text(node)` returns expanded subtree text at runtime (SPEC 1.6, 4.3, 10.2, 10.7)",
+    "with `{text(...)}` embeddings present, own and subtree text via `query`, `show`, and review payloads carry the embedded text fully expanded, and `text(node)` returns expanded subtree text at runtime — a consumer type-checking clean under both of H-2's configurations and run compiled under its CommonJS configuration (SPEC 1.6, 4.3, 10.2, 10.7)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -769,33 +779,32 @@ const T1_6_3 = defineProductTest({
         `${nextLabel}: context text — the root ancestor's own text (SPEC 1.6, 10.7)`,
       );
 
-      // `text(node)` at runtime (SPEC 4.3, 13.1): expanded subtree text.
+      // `text(node)` at runtime (SPEC 4.3, 13.1): expanded subtree text. The
+      // consumer type-checks clean under each of H-2's configurations — the
+      // whole program, the generated module and its companions included —
+      // and runs under the CommonJS configuration alone: compiled to
+      // CommonJS JavaScript written outside the workspace and run there
+      // under plain Node, no package named `xspec` resolvable (H-2).
       await workspace.file("main.ts", EXPANSION_CONSUMER);
-      const project = await ConsumerProject.load({
-        rootDir: workspace.root,
-        rootFiles: ["main.ts"],
-      });
-      assertNoCompileErrors(
-        project,
-        "T1.6-3 consumer passing `SPEC.summary` to `text()`",
+      const sources = { rootDir: workspace.root, rootFiles: ["main.ts"] };
+      const consumerContext =
+        "T1.6-3 consumer passing `SPEC.summary` to `text()`";
+      await forEachConsumerProject(sources, (project) =>
+        assertTypeChecksClean(project, consumerContext),
       );
-      const emitted = project.emit();
-      if (emitted.emitSkipped) {
-        fail(
-          "T1.6-3: consumer emit was skipped; diagnostics:\n" +
-            emitted.diagnostics
-              .map((diagnostic) => `  ${formatConsumerDiagnostic(diagnostic)}`)
-              .join("\n"),
-        );
-      }
-      const run = await runConsumer({
-        dir: workspace.root,
-        entry: "main.js",
-      });
+      const run = await withCompiledConsumer(
+        await ConsumerProject.load({
+          ...sources,
+          configuration: COMMONJS_CONFIGURATION,
+        }),
+        consumerContext,
+        async (compiled) => await compiled.run("main.ts"),
+      );
       assertExitCode(
         run,
         0,
-        "T1.6-3 compiled consumer under plain Node (SPEC 13.1)",
+        "T1.6-3 compiled consumer under plain Node, compiled under H-2's " +
+          "CommonJS configuration outside the workspace (SPEC 13.1)",
       );
       assertBytesEqual(
         run.stdoutBytes,
