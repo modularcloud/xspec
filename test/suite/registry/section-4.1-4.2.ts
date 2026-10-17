@@ -23,6 +23,17 @@
 //
 // Conservative operationalizations (noted per H-4 — where SPEC.md fixes the
 // value, assertions are literal):
+// - T4.1-1's built-in-member segments, "child properties like any other",
+//   are observed on both sides of the consumer channel. The chain to each
+//   segment's child `x` type-checks clean, where a node type that drops
+//   the segment, or lets `Object`'s or a function's member of that name
+//   stand in for it, makes the chain a diagnostic. And a runtime consumer
+//   writes `text(SPEC.<segment>)` for each segment, in order, byte-compared
+//   with the subtree texts hand-derived per SPEC 3 and 1.6: an inherited
+//   method or a function's own `name` or `length` reaching `text` in the
+//   child's place yields no node's text. Each node's prose carries a token
+//   naming its own segment, so one node's text standing in for another's
+//   misses the bytes too.
 // - "Documentation comment": a `/** … */` block in the generated module —
 //   the TypeScript form editors surface as hover documentation, which is the
 //   comment's stated purpose (SPEC 4.2). Scanning for spans by the literal
@@ -193,7 +204,8 @@ function assertNoDocComment(
 }
 
 // ---------------------------------------------------------------------------
-// T4.1-1, T4.1-2 — skeleton chains, type errors, readonly
+// T4.1-1, T4.1-2 — skeleton chains, type errors, built-in-member segments,
+// readonly
 // ---------------------------------------------------------------------------
 
 // Three nesting levels plus a top-level segment that is not a TypeScript
@@ -248,22 +260,89 @@ const READONLY_CONSUMER = [
   "",
 ].join("\n");
 
+// T4.1-1's built-in-member segments (TEST-SPEC T4.1-1; SPEC 1.4 forbids
+// none of them): top-level sections named after `Object.prototype`'s
+// methods and a function's own `name` and `length`, in TEST-SPEC's order,
+// each holding a child `x`. Both kinds can shadow a node's child: a plain
+// object inherits the methods, and a function owns `name` and `length`.
+const BUILTIN_MEMBER_SEGMENTS = [
+  "toString",
+  "valueOf",
+  "hasOwnProperty",
+  "name",
+  "length",
+] as const;
+
+// Every node's prose carries a token naming its own segment (`BUILTIN-name`,
+// `BUILTIN-name-x`), so each subtree text is distinct.
+const BUILTIN_SOURCE = [
+  ...BUILTIN_MEMBER_SEGMENTS.flatMap((segment) => [
+    `<S id="${segment}">`,
+    `BUILTIN-${segment} section prose.`,
+    `<S id="${segment}.x">`,
+    `BUILTIN-${segment}-x child prose.`,
+    "</S>",
+    "</S>",
+  ]),
+  "",
+].join("\n");
+
+// Hand-derived per SPEC 3/1.6, in segment order: the tag-only lines drop
+// with their terminators, and the content lines keep theirs, the child's
+// line interleaved after its parent's.
+const BUILTIN_SUBTREE_TEXTS: readonly string[] = BUILTIN_MEMBER_SEGMENTS.map(
+  (segment) =>
+    `BUILTIN-${segment} section prose.\n` +
+    `BUILTIN-${segment}-x child prose.\n`,
+);
+
+// Positive arm, type level: a chain to each segment's child `x` resolves
+// through the segment's own child property. Where the node's type lacks
+// that property, or an `Object` or function member of that name stands in
+// for it, the chain is a diagnostic.
+const BUILTIN_CHAIN_CONSUMER = [
+  'import SPEC from "../specs/BUILTIN.xspec";',
+  "",
+  ...BUILTIN_MEMBER_SEGMENTS.map((segment) => `SPEC.${segment}.x;`),
+  "",
+].join("\n");
+
+// Positive arm, runtime: `text()` on each built-in-member section writes
+// that node's subtree text, in segment order, nothing else written. The
+// consumer declares the one `process` member it uses (module header).
+const BUILTIN_TEXT_CONSUMER = [
+  'import SPEC, { text } from "../specs/BUILTIN.xspec";',
+  "",
+  "declare const process: { readonly stdout: { write(chunk: string): boolean } };",
+  "",
+  ...BUILTIN_MEMBER_SEGMENTS.map(
+    (segment) => `process.stdout.write(text(SPEC.${segment}));`,
+  ),
+  "",
+].join("\n");
+
+const BUILTIN_TEXT_STDOUT = BUILTIN_SUBTREE_TEXTS.join("");
+
 const T4_1_1 = defineProductTest({
   id: "T4.1-1",
   title:
-    "the default export is the root, child sections are properties named by ID segment (bracket notation for a non-identifier segment), a consumer chain to a leaf type-checks clean, and a chain naming a missing requirement path is a TypeScript type error at the consumer reference, the program's diagnostics there alone — each under both of H-2's configurations (SPEC 4.1, 1.4, 13.1)",
+    "the default export is the root, child sections are properties named by ID segment (bracket notation for a non-identifier segment), a consumer chain to a leaf type-checks clean, a chain naming a missing requirement path is a TypeScript type error at the consumer reference, the program's diagnostics there alone, and segments naming built-in members (`toString`, `valueOf`, `hasOwnProperty`, `name`, `length`) are child properties like any other — a chain to each one's child `x` type-checks clean, and `text()` on each returns its subtree text at runtime, byte-exact — every type-checking verdict under both of H-2's configurations, the runtime one compiled under its CommonJS configuration (SPEC 4.1, 1.4, 4.3, 1.6, 13.1)",
   run: async (product) => {
     await withWorkspace(
       {
         "specs/TREE.mdx": TREE_SOURCE,
+        "specs/BUILTIN.mdx": BUILTIN_SOURCE,
         "consumer/chain.ts": CHAIN_CONSUMER,
         "consumer/missing.ts": MISSING_CONSUMER,
+        "consumer/builtin-chain.ts": BUILTIN_CHAIN_CONSUMER,
+        "consumer/builtin-text.ts": BUILTIN_TEXT_CONSUMER,
       },
       async (workspace) => {
         await buildOk(
           product,
           workspace,
-          "T4.1-1 `build` over the nested spec source",
+          "T4.1-1 `build` over the nested spec source and the " +
+            "built-in-member one",
         );
 
         // Under each of H-2's configurations: the chains type-check clean,
@@ -305,6 +384,51 @@ const T4_1_1 = defineProductTest({
                 "(`zeta`) must each be a TypeScript type error at the " +
                 "consumer reference, and nothing else diagnosed (SPEC 4.1)",
             ),
+        );
+
+        // Built-in-member segments are child properties like any other
+        // (SPEC 4.1; 1.4 forbids none of them). Under each of H-2's
+        // configurations the chains to each segment's child `x`
+        // type-check clean, the whole program included. Then the runtime
+        // consumer, type-checked clean under each and compiled under the
+        // CommonJS one, writes each segment's subtree text through `text()`
+        // (T4.3-1's observation), byte-exact.
+        await forEachConsumerProject(
+          { rootDir: workspace.root, rootFiles: ["consumer/builtin-chain.ts"] },
+          (chain) =>
+            assertTypeChecksClean(
+              chain,
+              "T4.1-1 consumer chains to the child `x` of each top-level " +
+                "section named after a built-in member (`SPEC.toString.x`, " +
+                "`SPEC.valueOf.x`, `SPEC.hasOwnProperty.x`, `SPEC.name.x`, " +
+                "`SPEC.length.x`) — each segment a child property like any " +
+                "other, never an inherited or function-own member standing " +
+                "in for the child (SPEC 4.1, 1.4)",
+            ),
+        );
+        const textContext =
+          "T4.1-1 runtime consumer passing each built-in-member section " +
+          "(`SPEC.toString`, `SPEC.valueOf`, `SPEC.hasOwnProperty`, " +
+          "`SPEC.name`, `SPEC.length`) to `text()` (SPEC 4.1, 4.3)";
+        const textRun = await typeCheckAndRunConsumer(
+          workspace,
+          "consumer/builtin-text.ts",
+          textContext,
+        );
+        assertExitCode(
+          textRun,
+          0,
+          `${textContext}: the compiled consumer under plain Node, compiled ` +
+            "under H-2's CommonJS configuration outside the workspace (SPEC " +
+            "13.1)",
+        );
+        assertBytesEqual(
+          textRun.stdoutBytes,
+          BUILTIN_TEXT_STDOUT,
+          `${textContext}: each call returns that section's subtree text, ` +
+            "written in segment order, byte-exact — no inherited method " +
+            "or function's own `name` or `length` in the child's place " +
+            "(SPEC 4.1, 4.3, 1.6, 3)",
         );
       },
     );
