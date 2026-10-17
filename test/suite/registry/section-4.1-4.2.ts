@@ -47,12 +47,19 @@
 //   trailing line terminator included. A comment may hold more than the own
 //   text, but it must hold the own text itself, unbroken — the escaping rule
 //   (one fixed rewrite) only makes sense under literal embedding.
-// - T4.2-2's negative arms are scoped to documentation comments, not the
-//   whole module: `text()` must return subtree text at runtime with no xspec
-//   dependency (SPEC 4.3, 13.1), so the module (or a companion) may
-//   legitimately carry full requirement text as runtime data. What no
-//   documentation comment may carry is the own text beyond its 1000th code
-//   point (SPEC 4.2: truncated to the first 1000 code points).
+// - T4.2-2's and T4.2-3's negative arms are scoped to documentation
+//   comments, not the whole module: `text()` must return subtree text at
+//   runtime with no xspec dependency (SPEC 4.3, 13.1), so the module (or a
+//   companion) may legitimately carry full requirement text as runtime
+//   data. What no documentation comment may carry is the own text beyond
+//   its 1000th code point (SPEC 4.2: truncated to the first 1000 code
+//   points), or any `*/` of it unescaped.
+// - T4.2-3's truncation arms read the emitted text in SPEC 4.2's order: the
+//   own text truncated to its first 1000 code points, `…` appended when
+//   truncated, and each `*/` in that emitted text written `*\/`. The
+//   expected comment text is that escaped form, so the `\` the escape adds
+//   counts toward no cut. Each comment is otherwise read as T4.2-2 reads
+//   truncation.
 // - T4.2-4 "resolve into the source `.mdx` at the corresponding `<S>`
 //   section": some go-to-definition target — as standard editor tooling
 //   presents it, i.e. declaration-map mapped (ConsumerProject
@@ -992,6 +999,34 @@ const LONG_BEYOND_CUT = codePointSlice(LONG_OWN_TEXT, 0, 1001);
 const LONG_SOURCE = `<S id="long">${LONG_OWN_TEXT}</S>`;
 const EXACT_SOURCE = `<S id="exact">${EXACT_OWN_TEXT}</S>`;
 
+/**
+ * Assert no occurrence of `needle` in a documentation comment is followed
+ * by `…` (SPEC 4.2: a node at exactly 1000 code points is not truncated and
+ * gains no `…`). `context` names the needle; the diagnosis continues it.
+ */
+function assertNoEllipsisAfter(
+  spans: readonly string[],
+  needle: string,
+  context: string,
+): void {
+  for (const span of spans) {
+    for (
+      let at = span.indexOf(needle);
+      at !== -1;
+      at = span.indexOf(needle, at + 1)
+    ) {
+      const next = span.slice(at + needle.length, at + needle.length + 1);
+      if (next === HORIZONTAL_ELLIPSIS) {
+        fail(
+          `${context} gained a \`…\` in a documentation comment — a node ` +
+            "at exactly 1000 code points is not truncated and gains no " +
+            "`…` (SPEC 4.2)",
+        );
+      }
+    }
+  }
+}
+
 const T4_2_2 = defineProductTest({
   id: "T4.2-2",
   title:
@@ -1054,33 +1089,18 @@ const T4_2_2 = defineProductTest({
           EXACT_OWN_TEXT,
           "T4.2-2 the exactly-1000-code-point own text, untruncated",
         );
-        for (const span of exactSpans) {
-          for (
-            let at = span.indexOf(EXACT_OWN_TEXT);
-            at !== -1;
-            at = span.indexOf(EXACT_OWN_TEXT, at + 1)
-          ) {
-            const next = span.slice(
-              at + EXACT_OWN_TEXT.length,
-              at + EXACT_OWN_TEXT.length + 1,
-            );
-            if (next === HORIZONTAL_ELLIPSIS) {
-              fail(
-                "T4.2-2: the exactly-1000-code-point own text gained a " +
-                  "`…` in a documentation comment — a node at exactly " +
-                  "1000 code points is not truncated and gains no `…` " +
-                  "(SPEC 4.2)",
-              );
-            }
-          }
-        }
+        assertNoEllipsisAfter(
+          exactSpans,
+          EXACT_OWN_TEXT,
+          "T4.2-2: the exactly-1000-code-point own text",
+        );
       },
     );
   },
 });
 
 // ---------------------------------------------------------------------------
-// T4.2-3 — `*/` escaping
+// T4.2-3 — `*/` escaping, alone and combined with truncation
 // ---------------------------------------------------------------------------
 
 const ESC_OWN_TEXT = "Esc one */ mid */ tail.";
@@ -1088,28 +1108,83 @@ const ESC_SOURCE = `<S id="esc">${ESC_OWN_TEXT}</S>`;
 // Each occurrence of the comment-terminating sequence written `*\/`.
 const ESC_ESCAPED_TEXT = "Esc one *\\/ mid *\\/ tail.";
 
+// Combined with truncation (TEST-SPEC T4.2-3): each node holds one `*/`,
+// before its 1000th code point and after T4.2-2's multi-code-unit
+// characters (FOX), so code points, UTF-16 units, and bytes already count
+// apart where it stands. The escape's `\` makes the escaped text one code
+// point longer: a product escaping before it truncates cuts the
+// exactly-1000-code-point node's last code point and appends `…`, and ends
+// the longer node's text one code point early. Each source is a single-line
+// file in the SPEC 3 inline-tag shape, as T4.2-2's are, so its own text is
+// exactly its staged content.
+const ESC_EXACT_HEAD = "ESCEXACTPROBE" + FOX.repeat(490);
+const ESC_EXACT_TAIL = letterCycle(495);
+// Exactly 1000 code points (1490 UTF-16 units).
+const ESC_EXACT_OWN_TEXT = `${ESC_EXACT_HEAD}*/${ESC_EXACT_TAIL}`;
+// All 1000 code points, the `*/` written `*\/`, and no `…` after them.
+const ESC_EXACT_EMITTED = `${ESC_EXACT_HEAD}*\\/${ESC_EXACT_TAIL}`;
+const ESC_LONG_HEAD = "ESCLONGPROBE" + FOX.repeat(745);
+// 1500 code points; its first 1000 are the head, the `*/`, and 241 letters.
+const ESC_LONG_OWN_TEXT = `${ESC_LONG_HEAD}*/${letterCycle(741)}`;
+// Its first 1000 code points, the `*/` written `*\/`, then `…`.
+const ESC_LONG_EMITTED =
+  `${ESC_LONG_HEAD}*\\/${letterCycle(241)}` + HORIZONTAL_ELLIPSIS;
+// Its first 1001 code points as one run, the `*/` written `*\/`: own text
+// beyond the 1000th code point.
+const ESC_LONG_BEYOND_CUT = `${ESC_LONG_HEAD}*\\/${letterCycle(242)}`;
+// A raw `*/` ends its comment span there (module header), the span then
+// ending with the multi-code-unit character before it.
+const ESC_RAW_AFTER_FOX = `${FOX}*/`;
+const ESC_EXACT_SOURCE = `<S id="exact">${ESC_EXACT_OWN_TEXT}</S>`;
+const ESC_LONG_SOURCE = `<S id="long">${ESC_LONG_OWN_TEXT}</S>`;
+
+// Reaches all three generated modules, so the clean verdict covers each.
 const ESC_CONSUMER = [
   'import SPEC, { text } from "../specs/ESC.xspec";',
+  'import EXACT, { text as exactText } from "../specs/ESCEXACT.xspec";',
+  'import LONG, { text as longText } from "../specs/ESCLONG.xspec";',
   "",
   "text(SPEC.esc);",
+  "exactText(EXACT.exact);",
+  "longText(LONG.long);",
   "",
 ].join("\n");
 
 const T4_2_3 = defineProductTest({
   id: "T4.2-3",
   title:
-    "own text containing `*/` appears in the documentation comment with each occurrence written `*\\/`, and the generated module still parses under standard tooling — a consumer of it type-checking clean, its whole program included, under both of H-2's configurations (SPEC 4.2, 13.1)",
+    "own text containing `*/` appears in the documentation comment with each occurrence written `*\\/`; combined with truncation (the emitted text escaped after the cut), a node of exactly 1000 code points holding `*/` carries all 1000 code points, the `*/` written `*\\/`, and no `…`, and a longer node holding `*/` before its 1000th code point carries its first 1000 code points, the `*/` written `*\\/`, then `…` (multi-code-unit characters staged before each `*/`); and each generated module still parses under standard tooling — a consumer of all three type-checking clean, its whole program included, under both of H-2's configurations (SPEC 4.2, 1.6, 13.1)",
   run: async (product) => {
+    // Fixture arithmetic guard (a failure here is a harness defect, never a
+    // product failure — hence not a HarnessAssertionError).
+    if (
+      [...ESC_EXACT_OWN_TEXT].length !== 1000 ||
+      ESC_EXACT_OWN_TEXT.length !== 1490 ||
+      [...ESC_LONG_OWN_TEXT].length !== 1500 ||
+      codePointSlice(ESC_LONG_OWN_TEXT, 0, 1000) !==
+        `${ESC_LONG_HEAD}*/${letterCycle(241)}` ||
+      ESC_EXACT_OWN_TEXT.split("*/").length !== 2 ||
+      ESC_LONG_OWN_TEXT.split("*/").length !== 2
+    ) {
+      throw new Error(
+        "T4.2-3 fixture arithmetic broke: expected 1000 code points (1490 " +
+          "UTF-16 units) and 1500 code points, each own text holding one " +
+          "`*/` before its 1000th code point — fix the fixture builders in " +
+          "section-4.1-4.2.ts",
+      );
+    }
     await withWorkspace(
       {
         "specs/ESC.mdx": ESC_SOURCE,
+        "specs/ESCEXACT.mdx": ESC_EXACT_SOURCE,
+        "specs/ESCLONG.mdx": ESC_LONG_SOURCE,
         "consumer/esc.ts": ESC_CONSUMER,
       },
       async (workspace) => {
         await buildOk(
           product,
           workspace,
-          "T4.2-3 `build` over the `*/`-bearing spec source",
+          "T4.2-3 `build` over the `*/`-bearing spec sources",
         );
         const spans = docCommentSpans(
           await readGeneratedModule(
@@ -1135,18 +1210,76 @@ const T4_2_3 = defineProductTest({
           "mid */",
           "T4.2-3 the second `*/` occurrence left unescaped",
         );
+
+        // Combined with truncation, the exactly-1000-code-point node: all
+        // 1000 code points, the `*/` written `*\/`, and no `…`.
+        const exactSpans = docCommentSpans(
+          await readGeneratedModule(
+            workspace,
+            "specs/ESCEXACT.xspec.ts",
+            "T4.2-3 generated module for the exactly-1000-code-point node " +
+              "holding `*/`",
+          ),
+        );
+        assertSomeDocComment(
+          exactSpans,
+          ESC_EXACT_EMITTED,
+          "T4.2-3 the exactly-1000-code-point own text holding `*/`, " +
+            "untruncated, its `*/` written `*\\/`",
+        );
+        assertNoDocComment(
+          exactSpans,
+          ESC_RAW_AFTER_FOX,
+          "T4.2-3 the exactly-1000-code-point own text's `*/` left unescaped",
+        );
+        assertNoEllipsisAfter(
+          exactSpans,
+          ESC_EXACT_EMITTED,
+          "T4.2-3: the exactly-1000-code-point own text holding `*/`, its " +
+            "`*/` written `*\\/`,",
+        );
+
+        // The longer node: its first 1000 code points, the `*/` written
+        // `*\/`, then `…`.
+        const longSpans = docCommentSpans(
+          await readGeneratedModule(
+            workspace,
+            "specs/ESCLONG.xspec.ts",
+            "T4.2-3 generated module for the >1000-code-point node holding " +
+              "`*/`",
+          ),
+        );
+        assertSomeDocComment(
+          longSpans,
+          ESC_LONG_EMITTED,
+          "T4.2-3 the >1000-code-point own text holding `*/` before its " +
+            "1000th code point, truncated to exactly its first 1000 code " +
+            "points, its `*/` written `*\\/`, then `…`",
+        );
+        assertNoDocComment(
+          longSpans,
+          ESC_LONG_BEYOND_CUT,
+          "T4.2-3 own text beyond the 1000th code point (the first 1001 " +
+            "code points as one run, the `*/` written `*\\/`)",
+        );
+        assertNoDocComment(
+          longSpans,
+          ESC_RAW_AFTER_FOX,
+          "T4.2-3 the >1000-code-point own text's `*/` left unescaped",
+        );
+
         // "Still parses under standard tooling", asserted as the (stronger,
         // §4-implied) clean type check of a consumer program against the
-        // module under each of H-2's configurations — a verdict over the
-        // whole program, the generated module and its companions included,
-        // so a parse error in either is a diagnostic there.
+        // three modules under each of H-2's configurations — a verdict over
+        // the whole program, the generated modules and their companions
+        // included, so a parse error in any is a diagnostic there.
         await forEachConsumerProject(
           { rootDir: workspace.root, rootFiles: ["consumer/esc.ts"] },
           (project) =>
             assertTypeChecksClean(
               project,
-              "T4.2-3 consumer against the `*/`-bearing generated module " +
-                "(SPEC 4.2: the module still parses under standard tooling)",
+              "T4.2-3 consumer against the `*/`-bearing generated modules " +
+                "(SPEC 4.2: each module still parses under standard tooling)",
             ),
         );
       },
