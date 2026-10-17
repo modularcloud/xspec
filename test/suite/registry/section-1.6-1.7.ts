@@ -1572,16 +1572,18 @@ const T1_7_1 = defineProductTest({
 // T1.7-2
 // ---------------------------------------------------------------------------
 
-// Occurrence records (SPEC 5.7, 11.3) are the surface making every code
-// unit's range reachable (SPEC 1.7): each fixture file below stages one
-// sanctioned TypeScript reference (`deco.ts` two, one per decorated unit;
-// `using.ts` two, one per `using` and `await using` unit of T4.6-1) — a
-// dependency marker (4.5) or a `text(...)` call (4.3) — inside one
-// named-code-unit shape of SPEC 4.6 (TEST-SPEC T1.7-2's further forms
-// included: the constructor, a decorated class and member, the export
-// exclusion, the `default` unit's spellings, a legacy `module`, and a
-// declaration file), and
-// the test asserts the complete `occurrences` document, a form-exact 12.7
+// Occurrence records (SPEC 5.7, 11.3) are one of the two outputs presenting
+// a code location with its source range (SPEC 1.7; review payloads, 10.7,
+// the other — T10.7-12's): each fixture file below stages one sanctioned
+// TypeScript reference (`deco.ts` two, one per decorated unit; `using.ts`
+// two, one per `using` and `await using` unit of T4.6-1) — a dependency
+// marker (4.5) or a `text(...)` call (4.3) — inside one named-code-unit
+// shape of SPEC 4.6 (TEST-SPEC T1.7-2's further forms included: the
+// constructor, a decorated class and member, the property members — one
+// spelling its `;`, its twin spelling none, a decorated one — and their
+// control, a method followed by a stray `;`, the export exclusion, the
+// `default` unit's spellings, a legacy `module`, and a declaration file),
+// and the test asserts the complete `occurrences` document, a form-exact 12.7
 // surface (H-3: no adapter in the path, and a JSON-only surface, so no
 // `--json` flag is passed), against precomputed byte offsets. Every file
 // opens with a multi-byte UTF-8 comment (é: 1 code point, 2 bytes; 🦄: 1 code
@@ -1777,14 +1779,15 @@ const OCC_NAMED_SOURCE =
 
 // src/ns.ts — a dotted namespace (`namespace Outer.Inner`): one named unit
 // per dot-separated name, all sharing the SINGLE namespace declaration's
-// range — the one construct binding them all (SPEC 1.7, 4.6). A unit's range
-// is reachable exactly through the occurrences it sources (1.7), and every
-// position in the dotted declaration's body lies within `Inner`, so the
-// shared construct range is pinned through the reachable unit `Outer.Inner`
-// (`Outer`, deriving from the same declaration, shares this same range by
-// 1.7 but encloses no position outside `Inner` and so sources no occurrence
-// of its own): a product ranging the unit at anything narrower than the
-// whole `namespace Outer.Inner { … }` declaration fails the byte assertion.
+// range — the one construct binding them all (SPEC 1.7, 4.6). An occurrence
+// record presents a unit's range only as its occurrence's source (1.7,
+// 5.7), and every position in the dotted declaration's body lies within
+// `Inner`, so the shared construct range is pinned through the reachable
+// unit `Outer.Inner` (`Outer`, deriving from the same declaration, shares
+// this same range by 1.7 but encloses no position outside `Inner` and so
+// sources no occurrence of its own): a product ranging the unit at
+// anything narrower than the whole `namespace Outer.Inner { … }`
+// declaration fails the byte assertion.
 const OCC_NS_HEAD =
   '// prélude 🦄 ns\nimport SPEC from "../specs/R.xspec";\n\n';
 const OCC_NS_DECL_PRE = "namespace Outer.Inner {\n  ";
@@ -1811,6 +1814,50 @@ const OCC_PAIR_SOURCE =
   OCC_PAIR_SET +
   "\n}\n";
 
+// The member stagings — `prop.ts`, `propbare.ts`, `propdec.ts`, and
+// `stray.ts` — each spell one of TEST-SPEC T1.7-2's one-line classes `C`
+// exactly, in a file of its own, their marker `SPEC.a` (target `a`) in the
+// body of `C`'s one member `m`: a property whose initializer is an arrow
+// function, or a method — either a named unit (SPEC 4.6), `path#C.m`.
+const OCC_MEMBER_CLASS_PRE = "class C { ";
+const OCC_MEMBER_MARKER = "SPEC.a";
+const OCC_PROPERTY_PRE = "m = () => { ";
+/** The property member through its arrow body's closing brace. */
+const OCC_PROPERTY_BODY = OCC_PROPERTY_PRE + OCC_MEMBER_MARKER + " }";
+
+// src/prop.ts — `class C { m = () => { SPEC.a }; }`: a property member's
+// own characters run through the `;` ending it, where it spells one (SPEC
+// 1.7), so `C.m` spans `m = () => { SPEC.a };` — a product ending the
+// property at its initializer fails.
+const OCC_PROP_HEAD =
+  '// prélude 🦄 prop\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_PROP_UNIT = OCC_PROPERTY_BODY + ";";
+const OCC_PROP_SOURCE =
+  OCC_PROP_HEAD + OCC_MEMBER_CLASS_PRE + OCC_PROP_UNIT + " }\n";
+
+// src/propbare.ts — the twin spelling no `;`,
+// `class C { m = () => { SPEC.a } }`: nothing extends the property, so
+// `C.m` ends at its arrow body's closing brace, spanning
+// `m = () => { SPEC.a }` (SPEC 1.7).
+const OCC_PROPBARE_HEAD =
+  '// prélude 🦄 propbare\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_PROPBARE_UNIT = OCC_PROPERTY_BODY;
+const OCC_PROPBARE_SOURCE =
+  OCC_PROPBARE_HEAD + OCC_MEMBER_CLASS_PRE + OCC_PROPBARE_UNIT + " }\n";
+
+// src/propdec.ts — a decorated property,
+// `class C { @dec m = () => { SPEC.a }; }`: its decorator list is part of
+// the member, whose own characters begin at its first decorator and, a
+// property's, run through its `;` (SPEC 1.7), so `C.m` spans
+// `@dec m = () => { SPEC.a };`, from its `@` through its `;`.
+const OCC_PROPDEC_HEAD =
+  '// prélude 🦄 propdec\nimport SPEC from "../specs/R.xspec";\n\n' +
+  OCC_DEC_DECL;
+const OCC_PROPDEC_DECORATOR = "@dec ";
+const OCC_PROPDEC_UNIT = OCC_PROPDEC_DECORATOR + OCC_PROPERTY_BODY + ";";
+const OCC_PROPDEC_SOURCE =
+  OCC_PROPDEC_HEAD + OCC_MEMBER_CLASS_PRE + OCC_PROPDEC_UNIT + " }\n";
+
 // src/spaced.ts — `export   function spaced() {}` (three spaces): the
 // leading `export` and whatever separates it from the construct's first
 // token are excluded, so the unit spans from `function` (SPEC 1.7).
@@ -1821,6 +1868,18 @@ const OCC_SPACED_CONSTRUCT_PRE = "function spaced() {\n  ";
 const OCC_SPACED_CONSTRUCT = OCC_SPACED_CONSTRUCT_PRE + OCC_MARKER + ";\n}";
 const OCC_SPACED_SOURCE =
   OCC_SPACED_HEAD + OCC_SPACED_EXPORT_PRE + OCC_SPACED_CONSTRUCT + "\n";
+
+// src/stray.ts — the control, a METHOD followed by a stray `;`,
+// `class C { m() { SPEC.a }; }`: the `;` is a class element of its own,
+// which 1.7's extension — a property member's alone — never reaches, so
+// `C.m` spans `m() { SPEC.a }`, ending at its closing brace (SPEC 1.7) — a
+// product extending every member through a following `;` fails.
+const OCC_STRAY_HEAD =
+  '// prélude 🦄 stray\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_STRAY_UNIT_PRE = "m() { ";
+const OCC_STRAY_UNIT = OCC_STRAY_UNIT_PRE + OCC_MEMBER_MARKER + " }";
+const OCC_STRAY_SOURCE =
+  OCC_STRAY_HEAD + OCC_MEMBER_CLASS_PRE + OCC_STRAY_UNIT + "; }\n";
 
 // src/top.ts — a top-level marker: no named unit encloses it, so it
 // attributes to the file (SPEC 4.6) and the source node is the whole-file
@@ -1883,12 +1942,13 @@ interface OccurrenceArm {
 
 // The complete expected enumeration, in occurrence order (SPEC 5.7: by
 // referencing file path bytes — anon < arrow < cls < ctor < decdef < decexp
-// < deco < expdec < fn < mod < multi < named < ns < pair < spaced < top <
-// types.d.ts < using — then by range start, which places `deco.ts`'s
+// < deco < expdec < fn < mod < multi < named < ns < pair < prop < propbare
+// < propdec < spaced < stray < top < types.d.ts < using, `prop.ts` first of
+// its three for `.` < `b` — then by range start, which places `deco.ts`'s
 // property embed before the marker in its decorated member, and `using.ts`'s
 // `f` before `g.h`): the spec source stages no `d` prop, no MDX embedding,
 // and no import, and import declarations record no occurrence (5.7), so the
-// twenty-one staged references are the workspace's only occurrences.
+// twenty-five staged references are the workspace's only occurrences.
 const OCC_EXPECTED: readonly OccurrenceArm[] = [
   {
     what:
@@ -2234,6 +2294,79 @@ const OCC_EXPECTED: readonly OccurrenceArm[] = [
   },
   {
     what:
+      "property member spelling its `;` — unit `C.m` (an arrow-function " +
+      "initializer, SPEC 4.6) runs through the `;` ending it, spanning " +
+      "`m = () => { SPEC.a };` (SPEC 1.7)",
+    fileSource: OCC_PROP_SOURCE,
+    occurrenceSpan: OCC_MEMBER_MARKER,
+    unitSpan: OCC_PROP_UNIT,
+    record: {
+      file: "src/prop.ts",
+      range: rangeAfter(
+        OCC_PROP_HEAD + OCC_MEMBER_CLASS_PRE + OCC_PROPERTY_PRE,
+        OCC_MEMBER_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/prop.ts#C.m",
+        range: rangeAfter(OCC_PROP_HEAD + OCC_MEMBER_CLASS_PRE, OCC_PROP_UNIT),
+      },
+      target: OCC_A_ID,
+    },
+  },
+  {
+    what:
+      "property member spelling no `;` — unit `C.m` ends at its arrow " +
+      "body's closing brace, spanning `m = () => { SPEC.a }` (SPEC 1.7)",
+    fileSource: OCC_PROPBARE_SOURCE,
+    occurrenceSpan: OCC_MEMBER_MARKER,
+    unitSpan: OCC_PROPBARE_UNIT,
+    record: {
+      file: "src/propbare.ts",
+      range: rangeAfter(
+        OCC_PROPBARE_HEAD + OCC_MEMBER_CLASS_PRE + OCC_PROPERTY_PRE,
+        OCC_MEMBER_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/propbare.ts#C.m",
+        range: rangeAfter(
+          OCC_PROPBARE_HEAD + OCC_MEMBER_CLASS_PRE,
+          OCC_PROPBARE_UNIT,
+        ),
+      },
+      target: OCC_A_ID,
+    },
+  },
+  {
+    what:
+      "decorated property member — unit `C.m` spans " +
+      "`@dec m = () => { SPEC.a };`, from its `@` through its `;` (SPEC 1.7)",
+    fileSource: OCC_PROPDEC_SOURCE,
+    occurrenceSpan: OCC_MEMBER_MARKER,
+    unitSpan: OCC_PROPDEC_UNIT,
+    record: {
+      file: "src/propdec.ts",
+      range: rangeAfter(
+        OCC_PROPDEC_HEAD +
+          OCC_MEMBER_CLASS_PRE +
+          OCC_PROPDEC_DECORATOR +
+          OCC_PROPERTY_PRE,
+        OCC_MEMBER_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/propdec.ts#C.m",
+        range: rangeAfter(
+          OCC_PROPDEC_HEAD + OCC_MEMBER_CLASS_PRE,
+          OCC_PROPDEC_UNIT,
+        ),
+      },
+      target: OCC_A_ID,
+    },
+  },
+  {
+    what:
       "`export   function spaced() {}` (several spaces) — the leading " +
       "`export` and whatever separates it from the construct are excluded: " +
       "the unit spans from `function` (SPEC 1.7)",
@@ -2255,6 +2388,32 @@ const OCC_EXPECTED: readonly OccurrenceArm[] = [
         ),
       },
       target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "the control: a METHOD followed by a stray `;` — the `;` a class " +
+      "element of its own, which 1.7's extension, a property member's " +
+      "alone, never reaches, so unit `C.m` spans `m() { SPEC.a }`, ending " +
+      "at its closing brace (SPEC 1.7)",
+    fileSource: OCC_STRAY_SOURCE,
+    occurrenceSpan: OCC_MEMBER_MARKER,
+    unitSpan: OCC_STRAY_UNIT,
+    record: {
+      file: "src/stray.ts",
+      range: rangeAfter(
+        OCC_STRAY_HEAD + OCC_MEMBER_CLASS_PRE + OCC_STRAY_UNIT_PRE,
+        OCC_MEMBER_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/stray.ts#C.m",
+        range: rangeAfter(
+          OCC_STRAY_HEAD + OCC_MEMBER_CLASS_PRE,
+          OCC_STRAY_UNIT,
+        ),
+      },
+      target: OCC_A_ID,
     },
   },
   {
@@ -2371,7 +2530,7 @@ function assertStagedSpan(
 const T1_7_2 = defineProductTest({
   id: "T1.7-2",
   title:
-    "code-location ranges via occurrence records: against precomputed byte offsets, the `source` node of a marker or TS `text(...)` occurrence carries the entire file for a whole-file location; the construct binding the name for a function and a class declaration; the unit's own name through its initializer — not the enclosing multi-declaration statement, and for the `using` and `await using` units (`using f = () => { SPEC.a }` spans `f = () => { SPEC.a }`, `await using h = () => { SPEC.b }` in an async `g` spans `h = () => { SPEC.b }`, neither from `using` nor from `await`); the single dotted-namespace declaration's shared range; the named construct's own range vs the whole export declaration under unit `default` for default exports; the second occurrence's construct for `path#unit@2`; and the further forms — the constructor member, a decorated class and member from their first `@`, the export exclusion (`export @dec class`, `@dec export class`, `export   function`), the `default` unit through a spelled `;` or from a leading `@`, a legacy `module A.B`, and a declaration file's whole-file range (SPEC 1.7, 4.6, 5.7, 11.3, 12.7)",
+    "code-location ranges via occurrence records: against precomputed byte offsets, the `source` node of a marker or TS `text(...)` occurrence carries the entire file for a whole-file location; the construct binding the name for a function and a class declaration; the unit's own name through its initializer — not the enclosing multi-declaration statement, and for the `using` and `await using` units (`using f = () => { SPEC.a }` spans `f = () => { SPEC.a }`, `await using h = () => { SPEC.b }` in an async `g` spans `h = () => { SPEC.b }`, neither from `using` nor from `await`); the single dotted-namespace declaration's shared range; the named construct's own range vs the whole export declaration under unit `default` for default exports; the second occurrence's construct for `path#unit@2`; and the further forms — the constructor member, a decorated class and member from their first `@`, a property member through the `;` ending it where it spells one (`m = () => { SPEC.a };`; its twin spelling none ending at its closing brace; a decorated property from its `@` through its `;`), a method followed by a stray `;` ending at its closing brace (`m() { SPEC.a }`), the export exclusion (`export @dec class`, `@dec export class`, `export   function`), the `default` unit through a spelled `;` or from a leading `@`, a legacy `module A.B`, and a declaration file's whole-file range (SPEC 1.7, 4.6, 5.7, 11.3, 12.7)",
   run: async (product) => {
     for (const arm of OCC_EXPECTED) {
       assertStagedSpan(
@@ -2406,7 +2565,11 @@ const T1_7_2 = defineProductTest({
         "src/named.ts": OCC_NAMED_SOURCE,
         "src/ns.ts": OCC_NS_SOURCE,
         "src/pair.ts": OCC_PAIR_SOURCE,
+        "src/prop.ts": OCC_PROP_SOURCE,
+        "src/propbare.ts": OCC_PROPBARE_SOURCE,
+        "src/propdec.ts": OCC_PROPDEC_SOURCE,
         "src/spaced.ts": OCC_SPACED_SOURCE,
+        "src/stray.ts": OCC_STRAY_SOURCE,
         "src/top.ts": OCC_TOP_SOURCE,
         "src/types.d.ts": OCC_DTS_SOURCE,
         "src/using.ts": OCC_USING_SOURCE,
