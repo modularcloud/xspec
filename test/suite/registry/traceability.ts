@@ -163,7 +163,22 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // 6.4's fallback spellings (6.4, 6.5).
   "T1.4-5": ["1.4", "2.4", "4.1", "6.4", "6.5", "14"],
   "T1.5-1": ["1.5"],
-  "T1.5-2": ["1.5", "12.0", "12.7", "14"],
+  // T1.5-2: 14.19 over spec and code paths and their 12.0/12.7
+  // presentations; its code-group arms' occurrence records (5.7, 11.3),
+  // `source` explicitly unavailable over an invalid path (11.2), and the
+  // findings at `check` as at `build` (12.2); its located arm's 14.1 at the
+  // opening-tag range of 11.4.
+  "T1.5-2": [
+    "1.5",
+    "5.7",
+    "11.2",
+    "11.3",
+    "11.4",
+    "12.0",
+    "12.2",
+    "12.7",
+    "14",
+  ],
   "T1.5-3": ["1.5"],
   "T1.6-1": ["1.6"],
   "T1.6-2": ["1.6"],
