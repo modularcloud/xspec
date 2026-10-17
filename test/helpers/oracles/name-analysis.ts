@@ -68,10 +68,15 @@
 // but wherever the comment stands and whatever its kind, where TypeScript
 // itself reads `@jsx` and `@jsxFrag` from block comments among the file's
 // leading comments alone (T6.5-22(b)'s `// @jsx h` and in-function lures).
+//
+// Its evaluation, `analyzeNames`, is a harness step under its own guard
+// (TEST-SPEC S-3, helpers/step-guards.ts): synchronous, bounded by
+// construction over the staged input it evaluates, and measured.
 
 import ts from "typescript-5.9.3";
 import { readMdxTree } from "../mdx-derivability.js";
 import { judgeTypeScript } from "../ts-derivability.js";
+import { guardSyncStep } from "../step-guards.js";
 
 /** The kinds of receiving file SPEC 6.5 distinguishes (14.20). */
 export type ReceivingFileKind = "spec-source" | "typescript" | "tsx";
@@ -277,6 +282,16 @@ class NameCollector {
 
 /** Analyzes a receiving file's decoded content as a file of `kind`. */
 export function analyzeNames(
+  kind: ReceivingFileKind,
+  text: string,
+): NameAnalysis {
+  return guardSyncStep("S-6's name analysis (analyzeNames)", () =>
+    analyzeNamesUnguarded(kind, text),
+  );
+}
+
+/** {@link analyzeNames}'s evaluation, under its guard. */
+function analyzeNamesUnguarded(
   kind: ReceivingFileKind,
   text: string,
 ): NameAnalysis {

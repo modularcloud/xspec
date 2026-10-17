@@ -27,6 +27,7 @@ import * as fsp from "node:fs/promises";
 // An import cycle (forms.ts imports `fail` from here), safe under ESM because
 // neither module calls into the other while it is being evaluated.
 import { assertUnavailabilityMarkerForms } from "./adapters/forms.js";
+import { guardSyncStep } from "./step-guards.js";
 import type { RunResult } from "./subprocess.js";
 import { summarizeResult } from "./subprocess.js";
 
@@ -182,9 +183,19 @@ export function assertStderrEmpty(result: RunResult, context?: string): void {
  * walk (`assertUnavailabilityMarkerForms`, adapters/forms.ts; T12.7-1): an
  * object of any form other than `{"unavailable": true}` carrying a member
  * named `unavailable` fails diagnosed, the message naming its JSON path, the
- * caller's context, and the command line.
+ * caller's context, and the command line. The decode and walk are a harness
+ * step under its own guard (TEST-SPEC S-3, helpers/step-guards.ts):
+ * synchronous, bounded by the capture limit, measured.
  */
 export function parseJsonStdout(result: RunResult, context?: string): unknown {
+  return guardSyncStep(
+    `decoding the stdout of ${result.commandLine} (parseJsonStdout)`,
+    () => decodeJsonStdout(result, context),
+  );
+}
+
+/** {@link parseJsonStdout}'s decode and walk, under its guard. */
+function decodeJsonStdout(result: RunResult, context?: string): unknown {
   const prefix = context === undefined ? "" : `${context}: `;
   let text: string;
   try {

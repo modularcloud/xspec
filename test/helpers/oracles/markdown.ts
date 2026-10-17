@@ -60,6 +60,13 @@
 //   other code point belongs to either class — U+00A0, U+0085, and U+2028
 //   are neither whitespace nor line terminators (SPEC.md 1.4; TEST-SPEC
 //   T3-3 class boundaries).
+//
+// Each of its evaluations — `compileMarkdown` and `compileMarkdownSource` — is
+// a harness step under its own guard (TEST-SPEC S-3, helpers/step-guards.ts):
+// synchronous, bounded by construction over the staged input it evaluates, and
+// measured.
+
+import { guardSyncStep } from "../step-guards.js";
 
 /**
  * One segment of a source document, in document order. The document's source
@@ -138,6 +145,13 @@ export function sourceTextOf(pieces: readonly MarkdownPiece[]): string {
  * failure.
  */
 export function compileMarkdown(pieces: readonly MarkdownPiece[]): string {
+  return guardSyncStep("the Markdown oracle (compileMarkdown)", () =>
+    compileMarkdownUnguarded(pieces),
+  );
+}
+
+/** {@link compileMarkdown}'s evaluation, under its guard. */
+function compileMarkdownUnguarded(pieces: readonly MarkdownPiece[]): string {
   for (const piece of pieces) {
     if (piece.kind !== "content" && isWhitespaceOnly(piece.text)) {
       throw new Error(
@@ -234,6 +248,16 @@ export function compileMarkdown(pieces: readonly MarkdownPiece[]): string {
  * a harness defect).
  */
 export function compileMarkdownSource(
+  source: string,
+  constructs: readonly MarkdownConstructSpan[],
+): string {
+  return guardSyncStep("the Markdown oracle (compileMarkdownSource)", () =>
+    compileMarkdownSourceUnguarded(source, constructs),
+  );
+}
+
+/** {@link compileMarkdownSource}'s evaluation, under its guard. */
+function compileMarkdownSourceUnguarded(
   source: string,
   constructs: readonly MarkdownConstructSpan[],
 ): string {

@@ -16,6 +16,7 @@
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
+import { guardStep } from "./step-guards.js";
 
 /** `name` within `dir`, byte for byte. */
 function joinPathBytes(dir: Buffer, name: Buffer): Buffer {
@@ -31,13 +32,27 @@ function joinPathBytes(dir: Buffer, name: Buffer): Buffer {
  * (`/`-separated, as `SnapshotOptions.exclude` is), leaves an entry out —
  * a directory's whole subtree unread: P-10's reader-free twins leave the
  * lock path out (`isLockPathBytes`; TEST-SPEC P-10: copied "the lock path
- * aside"), whose entries a product may make unreadable (H-4).
+ * aside"), whose entries a product may make unreadable (H-4). The copy is
+ * a harness step under its own guard (TEST-SPEC S-3,
+ * helpers/step-guards.ts).
  */
 export async function copyTreeBytes(
   from: Buffer,
   to: Buffer,
   exclude?: (relPathBytes: Uint8Array) => boolean,
-  rel: Buffer = Buffer.alloc(0),
+): Promise<void> {
+  await guardStep(
+    `copying the tree under ${from.toString()} to ${to.toString()} (copyTreeBytes)`,
+    () => copyTreeLevel(from, to, exclude, Buffer.alloc(0)),
+  );
+}
+
+/** One directory level of {@link copyTreeBytes}, `rel` its relative path. */
+async function copyTreeLevel(
+  from: Buffer,
+  to: Buffer,
+  exclude: ((relPathBytes: Uint8Array) => boolean) | undefined,
+  rel: Buffer,
 ): Promise<void> {
   const names = (await fsp.readdir(from, { encoding: "buffer" })).sort(
     Buffer.compare,
@@ -50,7 +65,7 @@ export async function copyTreeBytes(
     const stats = await fsp.lstat(source);
     if (stats.isDirectory()) {
       await fsp.mkdir(destination);
-      await copyTreeBytes(source, destination, exclude, childRel);
+      await copyTreeLevel(source, destination, exclude, childRel);
       await fsp.chmod(destination, stats.mode & 0o7777);
     } else if (stats.isFile()) {
       await fsp.copyFile(source, destination, fsp.constants.COPYFILE_EXCL);

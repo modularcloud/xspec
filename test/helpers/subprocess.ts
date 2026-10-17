@@ -37,6 +37,11 @@
 // - Hang guards (TEST-SPEC S-3, helpers/hang-guards.ts): every invocation
 //   carries its own guard (`RunOptions.timeoutMs`, default
 //   `DEFAULT_TIMEOUT_MS`), the one place the clock reaches a verdict (H-10).
+//   A wait beside a run — `waitForFile` — carries no bound of its own: it
+//   ends at the latest once the run has exited, one harness step under the
+//   run's own guard. The driver's in-run evaluations — T12.7-1's walk,
+//   T6.5-22(a)'s check — are harness steps under guards of their own
+//   (helpers/step-guards.ts), a tripped one a harness error (H-11).
 //   A held run's guard covers its own work, never the hold: from the moment
 //   the harness finds the run's own hold standing — the file at the
 //   `--test-hold` path its argv names (helpers/invocation-grammar.ts
@@ -166,8 +171,22 @@ import {
   VoidedTrialsExhaustedError,
 } from "./kill-discipline.js";
 import { noteProductInvocation } from "./product-invocations.js";
+import {
+  guardStep,
+  guardSyncStep,
+  HarnessStepTimeoutError,
+} from "./step-guards.js";
 
-/** Hang guard applied to every invocation unless overridden (H-8). */
+/**
+ * Hang guard applied to every invocation unless overridden (H-8; TEST-SPEC
+ * S-3). Sized by the rule every per-invocation guard follows — at least ten
+ * times the longest the invocations it covers take, measured unloaded
+ * against the built product at the largest input their staging admits
+ * (H-11's scales; AGENTS.md, "Hang guards (TEST-SPEC S-3)") — over every
+ * invocation whose call site sizes none of its own: the longest, T1.3-7's
+ * `view` over its 2048-deep chained-id tower, takes 2.3 s; a call site
+ * staging more passes its own (P-8's, P-11's).
+ */
 export const DEFAULT_TIMEOUT_MS = 30_000;
 /**
  * Runaway-output guard: combined stdout+stderr cap per invocation. H-11
@@ -182,8 +201,6 @@ export const DEFAULT_TIMEOUT_MS = 30_000;
  * `ProductRunOutputOverflowError`, never a silent truncation.
  */
 export const DEFAULT_MAX_OUTPUT_BYTES = 512 * 1024 * 1024;
-/** Default bound on hold-file waits (H-8: waits always terminate). */
-export const DEFAULT_WAIT_FOR_FILE_TIMEOUT_MS = 10_000;
 
 /**
  * How to invoke a product — the built `xspec` or a CERTIFICATIONS.md fixture
@@ -316,21 +333,23 @@ export class HarnessEvaluationError extends Error {
  * it is a harness error — the capture limit killed the run
  * ({@link ProductRunOutputOverflowError}), the driver's in-run
  * evaluation of the answer failed ({@link HarnessEvaluationError}), a group
- * kill could not confirm its group gone (`ProcessGroupLingerError`), or
- * every attempt of a voidable trial was voided
- * (`VoidedTrialsExhaustedError`; both helpers/kill-discipline.ts) — and
- * return otherwise. A helper that turns a rejected run — the hang-guard
- * kill, a premature exit, a spawn failure, a T6.5-22(a) breach, a T12.7-1
- * near-marker — into a diagnosed failure (H-8) calls it first, so a
- * harness-side failure always surfaces as the harness error it is, never as
- * a diagnosed product failure.
+ * kill could not confirm its group gone (`ProcessGroupLingerError`), every
+ * attempt of a voidable trial was voided (`VoidedTrialsExhaustedError`;
+ * both helpers/kill-discipline.ts), or a harness step outlasted its own
+ * guard (`HarnessStepTimeoutError`, helpers/step-guards.ts; TEST-SPEC S-3)
+ * — and return otherwise. A helper that turns a rejected run — the
+ * hang-guard kill, a premature exit, a spawn failure, a T6.5-22(a) breach,
+ * a T12.7-1 near-marker — into a diagnosed failure (H-8) calls it first, so
+ * a harness-side failure always surfaces as the harness error it is, never
+ * as a diagnosed product failure.
  */
 export function rethrowHarnessError(error: unknown): void {
   if (
     error instanceof ProductRunOutputOverflowError ||
     error instanceof HarnessEvaluationError ||
     error instanceof ProcessGroupLingerError ||
-    error instanceof VoidedTrialsExhaustedError
+    error instanceof VoidedTrialsExhaustedError ||
+    error instanceof HarnessStepTimeoutError
   ) {
     throw error;
   }
@@ -671,7 +690,12 @@ async function prepareAddedImportCheck(
   try {
     const { prepareAddedImportCheck: prepare } =
       await import("./added-import-identifiers.js");
-    return await prepare(cwd, argv, commandLine);
+    // A harness step under its own guard (TEST-SPEC S-3,
+    // helpers/step-guards.ts): the sources read and analysed.
+    return await guardStep(
+      `T6.5-22(a)'s check reading the pre-operation sources of ${commandLine}`,
+      () => prepare(cwd, argv, commandLine),
+    );
   } catch (error) {
     throw evaluationFailure(error, commandLine, "prepare");
   }
@@ -857,10 +881,14 @@ export class RunningProduct {
     // any awaiter sees the result (module header); a near-marker rejects
     // with the walk's diagnosed failure, a failure of the walk itself with
     // the harness error `HarnessEvaluationError` (H-11).
+    // The walk is a harness step under its own guard (TEST-SPEC S-3,
+    // helpers/step-guards.ts): synchronous, bounded by the capture limit.
     const walked = walkCapturedJson
       ? exit.then((result) => {
           try {
-            walkCapturedJsonDocument(result);
+            guardSyncStep(`T12.7-1's marker walk over ${commandLine}`, () => {
+              walkCapturedJsonDocument(result);
+            });
           } catch (error) {
             throw evaluationFailure(error, commandLine, "walk");
           }
@@ -876,7 +904,12 @@ export class RunningProduct {
         ? walked
         : walked.then(async (result) => {
             try {
-              await addedImportCheck.verify(result);
+              await guardStep(
+                `T6.5-22(a)'s check judging ${commandLine}`,
+                async () => {
+                  await addedImportCheck.verify(result);
+                },
+              );
             } catch (error) {
               throw evaluationFailure(error, commandLine, "verify");
             }
@@ -1129,26 +1162,28 @@ export class RunningProduct {
    * Poll until a file appears at `absPath` — the hold-file handshake of
    * SPEC.md 13.5 (`--test-hold`); where that is the run's own hold, the
    * run's hang guard is suspended from here until the hold is lifted
-   * (`releaseHoldFile`; module header, TEST-SPEC S-3). Fails diagnosed,
-   * never hangs (H-8): rejects
-   * when the process exits first without creating it (the red-green path for
-   * stub products, carrying the run outcome), and on timeout while the
-   * process is still running. A run the capture limit killed, or whose
-   * T12.7-1 walk or T6.5-22(a) check failed, rejects with that
-   * `ProductRunOutputOverflowError` or `HarnessEvaluationError` itself,
-   * never folded into the premature-exit error: both are harness errors
-   * (H-11).
+   * (`releaseHoldFile`; module header, TEST-SPEC S-3). A wait beside the
+   * run (S-3): it carries no bound of its own, ending at the latest once
+   * the run has exited, so it is one harness step under the run's own
+   * guard — a live run that never creates the file is killed at that guard
+   * and the wait then ends with it. Fails diagnosed, never hangs (H-8):
+   * rejects when the process exits first without creating it — the
+   * red-green path for stub products, carrying the run's outcome, a
+   * rejected run's error (the hang guard's kill among them) its `cause`.
+   * A run the capture limit killed, or whose T12.7-1 walk or T6.5-22(a)
+   * check failed, rejects with that `ProductRunOutputOverflowError` or
+   * `HarnessEvaluationError` itself, never folded into the premature-exit
+   * error: both are harness errors (H-11). A wait for another path than
+   * the run's own hold while the run's guard stands suspended for that hold
+   * — a held run, which creates nothing until it is lifted — would be
+   * bounded by nothing, so it looks once and, the file absent, rejects at
+   * once with a plain `Error`, a harness-usage error.
    */
   async waitForFile(
     absPath: string,
-    options: {
-      readonly timeoutMs?: number;
-      readonly pollIntervalMs?: number;
-    } = {},
+    options: { readonly pollIntervalMs?: number } = {},
   ): Promise<void> {
-    const timeoutMs = options.timeoutMs ?? DEFAULT_WAIT_FOR_FILE_TIMEOUT_MS;
     const pollIntervalMs = options.pollIntervalMs ?? 10;
-    const deadline = Date.now() + timeoutMs;
     for (;;) {
       if (await this.holdFileStands(absPath)) return;
       // A capture-limit kill counts as the exit at once: the run settles
@@ -1156,20 +1191,27 @@ export class RunningProduct {
       // failure of T12.7-1's walk or T6.5-22(a)'s check, settled once the
       // run has exited.
       if (this.hasExited() || this.#overflowed) {
+        let cause: unknown;
         const outcome = await this.#exit.then(
           summarizeResult,
           (error: unknown) => {
             rethrowHarnessError(error);
+            cause = error;
             return error instanceof Error ? error.message : String(error);
           },
         );
         throw new Error(
           `${this.commandLine} exited before creating ${absPath} — ${outcome}`,
+          cause === undefined ? {} : { cause },
         );
       }
-      if (Date.now() >= deadline) {
+      if (this.#resume !== undefined) {
         throw new Error(
-          `timed out after ${timeoutMs} ms waiting for ${absPath} to appear; child still running: ${this.commandLine}`,
+          `waitForFile: ${this.commandLine} stands held at its own hold ` +
+            `${String(this.#ownHold)}, its hang guard suspended until the ` +
+            `harness lifts it (TEST-SPEC S-3), so a wait for ${absPath} ` +
+            `would be bounded by nothing — a held run creates nothing ` +
+            `until it is lifted; a harness-usage error`,
         );
       }
       await sleep(pollIntervalMs);

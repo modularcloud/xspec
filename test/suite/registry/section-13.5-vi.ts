@@ -24,9 +24,10 @@
 // outside the workspace and under `--json`, are started together,
 // unsynchronized: every run is spawned before any is awaited
 // (`startRuns`). Every hold file stands until each run has either exited or
-// created its hold file (`awaitExitedOrHolding`, bounded by a hang guard: a
-// run doing neither by then fails diagnosed, H-8), and only then is any
-// deleted. At that point at most one hold file exists; each run that
+// created its hold file (`awaitExitedOrHolding`, a wait beside the runs
+// with no bound of its own, TEST-SPEC S-3: a run doing neither is killed at
+// its own hang guard, and its exit then fails diagnosed, H-8), and only then
+// is any deleted. At that point at most one hold file exists; each run that
 // created none has exited 2 with the 12.7 error document — `code`
 // `"workspace-busy"`, `path` `".xspec/lock"`, `locations` `[]` (14.26) —
 // and the run that created one is still held: the held-state comparison
@@ -332,14 +333,6 @@ const HELD_TRIALS = 4;
  * staggered across the span one run takes alone (1).
  */
 const UNHELD_SPREAD_FRACTIONS: readonly number[] = [0, 0.1, 0.25, 0.5, 0.75, 1];
-
-/**
- * The bound on every held-arm run's exiting or creating its hold file: a
- * run doing neither by then is waiting on another's exclusivity, or hung —
- * where 13.5 requires a run reaching acquisition to fail there promptly —
- * and fails diagnosed (H-8; a hang guard, never an assertion input, H-10).
- */
-const SETTLE_TIMEOUT_MS = 60_000;
 
 /**
  * Every run's own hang guard — a held run's, an unheld run's, a twin's, and
@@ -664,14 +657,17 @@ async function describeRun(run: StartedRun): Promise<string> {
 
 /**
  * Wait until each run has either exited or created its hold file (TEST-SPEC
- * T13.5-13: every hold file stands until then), bounded by
- * SETTLE_TIMEOUT_MS: a run doing neither by then fails diagnosed (H-8).
+ * T13.5-13: every hold file stands until then). A wait beside the runs
+ * (TEST-SPEC S-3): it carries no bound of its own, ending at the latest once
+ * every run not found holding has exited, so the runs' own guards bound it
+ * — a run doing neither, waiting on another's exclusivity or hung, where
+ * 13.5 requires a run reaching acquisition to fail there promptly, is
+ * killed at its own guard (RUN_TIMEOUT_MS), and its exit then fails
+ * diagnosed (`exitOf`; H-8).
  */
 async function awaitExitedOrHolding(
   runs: readonly StartedRun[],
-  context: string,
 ): Promise<void> {
-  const deadline = performance.now() + SETTLE_TIMEOUT_MS;
   for (;;) {
     const pending: StartedRun[] = [];
     for (const run of runs) {
@@ -686,18 +682,6 @@ async function awaitExitedOrHolding(
       pending.push(run);
     }
     if (pending.length === 0) return;
-    if (performance.now() >= deadline) {
-      const states = await Promise.all(runs.map(describeRun));
-      fail(
-        `${context}: each run, started together with the others, either ` +
-          `exits or creates its hold file — a run reaching acquisition while ` +
-          `another holds fails there promptly, never waiting for that ` +
-          `holder's exclusivity to end (SPEC 13.5; H-8) — but after ` +
-          `${String(SETTLE_TIMEOUT_MS)} ms ` +
-          `${pending.map((run) => run.op.what).join(", ")} did neither:\n` +
-          states.join("\n"),
-      );
-    }
     await sleep(SETTLE_POLL_MS);
   }
 }
@@ -739,7 +723,7 @@ async function heldTrial(
     });
     const runs = await startRuns(product, workspace, plans, RUN_TIMEOUT_MS);
     try {
-      await awaitExitedOrHolding(runs, context);
+      await awaitExitedOrHolding(runs);
       const holding: StartedRun[] = [];
       for (const run of runs) {
         if (

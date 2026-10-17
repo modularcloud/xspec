@@ -365,8 +365,6 @@ function describeWindowsProcess(entry: WindowsProcess): string {
 // ---------------------------------------------------------------------------
 // The Windows leg's kill
 
-/** Bound on a hold's appearance: the run's start included. */
-const WINDOWS_HOLD_WAIT_MS = 30_000;
 /** taskkill's exit code for a process it did not find. */
 const TASKKILL_NOT_FOUND = 128;
 
@@ -395,7 +393,9 @@ async function killHeldWindowsRun(
   let tree: WindowsProcess[] = [];
   try {
     try {
-      await running.waitForFile(holdPath, { timeoutMs: WINDOWS_HOLD_WAIT_MS });
+      // A wait beside the run (TEST-SPEC S-3): no bound of its own, the
+      // run's own hang guard bounding it.
+      await running.waitForFile(holdPath);
     } catch (error) {
       rethrowHarnessError(error);
       fail(

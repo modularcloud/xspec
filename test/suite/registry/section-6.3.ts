@@ -110,6 +110,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
+import { execFileGuardTrip } from "../../helpers/step-guards.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
@@ -1164,13 +1165,22 @@ function assertDistinctTags(
 const execFileAsync = promisify(execFile);
 
 /**
+ * The guard of the premise's `git rev-parse` (TEST-SPEC S-3: a harness
+ * step's own guard, helpers/step-guards.ts): `execFile`'s timeout, which
+ * kills it.
+ */
+const GIT_PREMISE_STEP_GUARD_MS = 60_000;
+
+/**
  * Staging premise for the no-repository arm (c): the workspace must lie
  * inside no repository's working tree. The builder places every workspace
  * under the OS temporary directory; should that directory itself lie inside
  * a repository, the arm cannot be staged, and the premise fails as a harness
  * condition (a plain error, never a product verdict). Checked through git
  * itself under the product's isolation — ambient `GIT_*` dropped, no
- * ceiling — the way the product's own git reads discover a repository.
+ * ceiling — the way the product's own git reads discover a repository. A
+ * `git` killed at its guard is that harness step's tripped guard
+ * (`HarnessStepTimeoutError`), never a premise holding.
  */
 export async function assertOutsideAnyRepository(
   root: string,
@@ -1189,11 +1199,17 @@ export async function assertOutsideAnyRepository(
     const { stdout } = await execFileAsync(
       "git",
       ["-C", root, "rev-parse", "--show-toplevel"],
-      { env, timeout: 60_000 },
+      { env, timeout: GIT_PREMISE_STEP_GUARD_MS },
     );
     toplevel = stdout.trim();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") throw error;
+    const tripped = execFileGuardTrip(
+      `${context}: the staging premise's \`git -C ${root} rev-parse --show-toplevel\``,
+      GIT_PREMISE_STEP_GUARD_MS,
+      error,
+    );
+    if (tripped !== undefined) throw tripped;
     return; // git finds no working tree enclosing the root: the premise holds
   }
   throw new Error(

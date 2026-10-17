@@ -164,11 +164,12 @@ export function holdPathFor(workspace: TestWorkspace, name: string): string {
 
 /**
  * Await the hold file's appearance, converting the driver's diagnosed
- * rejection (the process exited first, or the wait timed out) into a
- * diagnosed assertion failure (H-8). A harness error is never converted: a
- * run the capture limit killed (`ProductRunOutputOverflowError`) or whose
- * T6.5-22(a) check failed (`HarnessEvaluationError`) propagates as itself
- * (H-11).
+ * rejection (the process exited first — its own hang guard's kill
+ * included: the wait beside it carries no bound of its own, TEST-SPEC S-3)
+ * into a diagnosed assertion failure (H-8). A harness error is never
+ * converted: a run the capture limit killed
+ * (`ProductRunOutputOverflowError`) or whose T6.5-22(a) check failed
+ * (`HarnessEvaluationError`) propagates as itself (H-11).
  */
 export async function awaitHoldFile(
   running: RunningProduct,

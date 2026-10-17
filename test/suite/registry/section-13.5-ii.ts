@@ -2949,9 +2949,10 @@ async function harnessIdentifiersOf(
 
 /**
  * Await `running`'s hold file at `holdPath`: undefined once it appears, or
- * the run's result should it exit first. A run still running when the wait
- * runs out fails, diagnosed under `rule` (H-8); a harness error propagates
- * as itself (H-11).
+ * the run's result should it exit first, a run its own hang guard killed
+ * failing diagnosed under `rule` (H-8) — the wait beside it carries no
+ * bound of its own (TEST-SPEC S-3); a harness error propagates as itself
+ * (H-11).
  */
 async function holdOrExit(
   running: RunningProduct,

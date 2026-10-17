@@ -109,7 +109,7 @@ import {
   fail,
   parseJsonStdout,
 } from "./assertions.js";
-import { e6ReuseCheck, killHeldE6Run, settlesWithin } from "./e6-exclusion.js";
+import { e6ReuseCheck, killHeldE6Run } from "./e6-exclusion.js";
 import { runVoidableTrial } from "./kill-discipline.js";
 import { EXCLUDE_LOCK_PATH, isLockPathBytes, LOCK_PATH } from "./lock-path.js";
 import {
@@ -692,15 +692,11 @@ const E6_MOVE_ARGV: readonly string[] = ["move", E6_CORE, E6_MOVED];
  */
 const E6_HOLD_NAME = "e6-hold";
 const E6_HOLD_ARG = `../${E6_HOLD_NAME}`;
-/** Bound on the hold's appearance, the run's start included. */
-const E6_HOLD_WAIT_MS = 30_000;
 /**
  * The refused `move`'s hang guard: it fails promptly, never waiting for the
  * holder (SPEC 13.5) — a run that waits fails diagnosed (H-8, H-10).
  */
 const E6_BUSY_TIMEOUT_MS = 15_000;
-/** Bound, in cleanup, on a held run's exit once its hold is lifted. */
-const E6_STOP_TIMEOUT_MS = 30_000;
 const WORKSPACE_BUSY = "workspace-busy";
 
 /**
@@ -844,8 +840,10 @@ async function exclusionTrial(
 
 /**
  * Wait until the held run holds — its hold file appears — and resolve
- * undefined; or, should it exit first, resolve with its result. A run still
- * running when the wait runs out fails diagnosed (H-8).
+ * undefined; or, should it exit first, resolve with its result, a run its
+ * own hang guard killed failing diagnosed (H-8). A wait beside the run
+ * (TEST-SPEC S-3; `waitForFile`): no bound of its own, the run's own guard
+ * bounding it.
  */
 async function holdOrExit(
   running: RunningProduct,
@@ -853,7 +851,7 @@ async function holdOrExit(
   context: string,
 ): Promise<RunResult | undefined> {
   try {
-    await running.waitForFile(holdAbs, { timeoutMs: E6_HOLD_WAIT_MS });
+    await running.waitForFile(holdAbs);
     return undefined;
   } catch (error) {
     rethrowHarnessError(error);
@@ -942,21 +940,17 @@ async function refusedMove(
 
 /**
  * Cleanup after a failure while a held run may still run: lift its hold and
- * collect its exit, bounded, killing it should it not end — its own
- * failures are not the verdict's concern.
+ * collect its exit — its own failures are not the verdict's concern. A wait
+ * beside the run (TEST-SPEC S-3): no bound of its own, the run's own hang
+ * guard — resumed for what is left of it as the hold is lifted, or never
+ * suspended — bounding it, a run it kills collected like any other.
  */
 async function stopHeldRun(
   running: RunningProduct,
   holdAbs: string,
 ): Promise<void> {
   await releaseHoldFile(holdAbs);
-  if (await settlesWithin(running.waitForExit(), E6_STOP_TIMEOUT_MS)) return;
-  try {
-    running.kill();
-  } catch {
-    // Nothing left to signal.
-  }
-  await settlesWithin(running.waitForExit(), E6_STOP_TIMEOUT_MS);
+  await running.waitForExit().catch(() => undefined);
 }
 
 /**

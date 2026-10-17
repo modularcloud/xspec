@@ -54,8 +54,14 @@
 // Pattern *resolution* — upward config search, paths resolving outside the
 // workspace root (14.14) — is out of scope: the oracle decides matches of
 // already workspace-relative patterns against workspace-relative paths.
+//
+// Each of its evaluations — `globMatches`, `matchFromPattern`, and
+// `matchToPattern` — is a harness step under its own guard (TEST-SPEC S-3,
+// helpers/step-guards.ts): synchronous, bounded by construction over the
+// staged input it evaluates, and measured.
 
 import { Buffer } from "node:buffer";
+import { guardSyncStep } from "../step-guards.js";
 
 /** Pattern or path bytes: strings are matched as their UTF-8 bytes. */
 export type GlobInput = string | Uint8Array;
@@ -344,6 +350,13 @@ function matchSegments(
  * selectors (SPEC.md 7.5).
  */
 export function globMatches(pattern: GlobInput, path: GlobInput): boolean {
+  return guardSyncStep("the glob oracle (globMatches)", () =>
+    globMatchesUnguarded(pattern, path),
+  );
+}
+
+/** {@link globMatches}'s evaluation, under its guard. */
+function globMatchesUnguarded(pattern: GlobInput, path: GlobInput): boolean {
   const state: MatchState = {
     dollar: "literal",
     values: new Map(),
@@ -365,6 +378,16 @@ export function globMatches(pattern: GlobInput, path: GlobInput): boolean {
  * oracle has no semantics for: it throws.
  */
 export function matchFromPattern(
+  pattern: GlobInput,
+  path: GlobInput,
+): ReadonlyMap<number, Uint8Array> | null {
+  return guardSyncStep("the glob oracle (matchFromPattern)", () =>
+    matchFromPatternUnguarded(pattern, path),
+  );
+}
+
+/** {@link matchFromPattern}'s evaluation, under its guard. */
+function matchFromPatternUnguarded(
   pattern: GlobInput,
   path: GlobInput,
 ): ReadonlyMap<number, Uint8Array> | null {
@@ -403,6 +426,17 @@ export function matchFromPattern(
  * for: it throws.
  */
 export function matchToPattern(
+  pattern: GlobInput,
+  path: GlobInput,
+  captures: CaptureValues,
+): boolean {
+  return guardSyncStep("the glob oracle (matchToPattern)", () =>
+    matchToPatternUnguarded(pattern, path, captures),
+  );
+}
+
+/** {@link matchToPattern}'s evaluation, under its guard. */
+function matchToPatternUnguarded(
   pattern: GlobInput,
   path: GlobInput,
   captures: CaptureValues,

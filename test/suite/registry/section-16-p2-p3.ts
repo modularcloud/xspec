@@ -155,6 +155,7 @@ import { compileMarkdown } from "../../helpers/oracles/markdown.js";
 import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
+import { guardSyncStep } from "../../helpers/step-guards.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
@@ -322,9 +323,18 @@ function materializePieces(
  * contributes its interior bytes exactly; a block section with own-line tags
  * contributes its compiled interior — the drop rule is line-local, so whole
  * interior lines compile identically in isolation (validated against T3-2's
- * hand-derived expansions).
+ * hand-derived expansions). The oracle's evaluation is a harness step under
+ * its own guard (TEST-SPEC S-3, helpers/step-guards.ts): synchronous,
+ * bounded by construction over the draw, measured.
  */
 export function specSubtreeTexts(doc: GeneratedDoc): Map<string, string> {
+  return guardSyncStep("P-2/P-3's subtree-text oracle (specSubtreeTexts)", () =>
+    subtreeTextsOf(doc),
+  );
+}
+
+/** {@link specSubtreeTexts}' evaluation, under its guard. */
+function subtreeTextsOf(doc: GeneratedDoc): Map<string, string> {
   const subtreeOf = new Map<string, string>();
   for (const [key, shape] of doc.targets) {
     switch (shape.kind) {

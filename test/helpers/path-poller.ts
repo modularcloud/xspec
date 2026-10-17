@@ -30,6 +30,7 @@
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
+import { guardStep } from "./step-guards.js";
 
 /** One observed state of a polled path. */
 export type PolledState =
@@ -150,10 +151,20 @@ export class PathPoller {
     this.#task = this.#loop();
   }
 
-  /** Stop polling and wait for the cycle in progress to finish. */
+  /**
+   * Stop polling and wait for the cycle in progress to finish — a harness
+   * step under its own guard (TEST-SPEC S-3, helpers/step-guards.ts): a read
+   * the environment blocks, as an open of a FIFO left at a polled path,
+   * trips it rather than hanging the test. The polling itself is a loop
+   * beside the invocations it observes, with no bound of its own: its
+   * caller stops it once they have ended.
+   */
   async stop(): Promise<void> {
     this.#stop = true;
-    await (this.#task ?? Promise.resolve());
+    await guardStep(
+      "the polling reader's last cycle (PathPoller.stop)",
+      () => this.#task ?? Promise.resolve(),
+    );
   }
 
   #record(absPath: string): PathRecord {

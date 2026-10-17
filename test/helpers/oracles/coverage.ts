@@ -72,8 +72,13 @@
 // and no edge targets a code location); a root carrying tags or a coverage
 // attribute (5.5: roots have neither); an empty `edgeKinds` or `targetTags`
 // list (a configuration error, 14.14 — coverage never evaluates it).
+//
+// Its evaluation, `computeCoverage`, is a harness step under its own guard
+// (TEST-SPEC S-3, helpers/step-guards.ts): synchronous, bounded by
+// construction over the staged input it evaluates, and measured.
 
 import { Buffer } from "node:buffer";
+import { guardSyncStep } from "../step-guards.js";
 
 // ---------------------------------------------------------------------------
 // Input and output model
@@ -299,6 +304,15 @@ function guardAcyclic(
  * plus the four counts.
  */
 export function computeCoverage(
+  input: CoverageOracleInput,
+): CoverageOracleResult {
+  return guardSyncStep("the coverage oracle (computeCoverage)", () =>
+    computeCoverageUnguarded(input),
+  );
+}
+
+/** {@link computeCoverage}'s evaluation, under its guard. */
+function computeCoverageUnguarded(
   input: CoverageOracleInput,
 ): CoverageOracleResult {
   const { nodes, edges, profile } = input;

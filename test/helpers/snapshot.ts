@@ -64,6 +64,7 @@ import {
   HarnessAssertionError,
 } from "./assertions.js";
 import { isLockPathBytes, LOCK_PATH, withOwnerGrant } from "./lock-path.js";
+import { guardStep } from "./step-guards.js";
 
 /** One directory entry as captured by a snapshot. */
 export type SnapshotEntry =
@@ -121,10 +122,22 @@ export interface SnapshotChange {
  * Capture the byte state of the directory tree at `absDir`. The root must
  * exist and be a directory — anything else is a harness-usage error, thrown
  * as a plain `Error` (this is machinery misuse, not a product observation).
+ * The snapshot is a harness step under its own guard (TEST-SPEC S-3,
+ * helpers/step-guards.ts).
  */
 export async function snapshotDirectory(
   absDir: string,
   options: SnapshotOptions = {},
+): Promise<DirectorySnapshot> {
+  return await guardStep(`snapshotting ${absDir} (snapshotDirectory)`, () =>
+    takeSnapshot(absDir, options),
+  );
+}
+
+/** {@link snapshotDirectory}'s walk, under its guard. */
+async function takeSnapshot(
+  absDir: string,
+  options: SnapshotOptions,
 ): Promise<DirectorySnapshot> {
   // Taken first: a run noted while the walk proceeds counts as after it.
   const mark = acquisitionMark();

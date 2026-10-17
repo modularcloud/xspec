@@ -121,9 +121,16 @@
 // emptiness enters the drop decision (a non-empty expansion keeps its line
 // regardless of content), and the P-5 generator stages no empty subtree
 // texts, so the before-side expansion decides both sides.
+//
+// Each of its evaluations — `sectionMoveSourceText`,
+// `predictSectionMoveImpact`, and `composeSectionMoveTexts` — is a harness
+// step under its own guard (TEST-SPEC S-3, helpers/step-guards.ts):
+// synchronous, bounded by construction over the staged input it evaluates, and
+// measured.
 
 import { compileMarkdown } from "./markdown.js";
 import type { MarkdownPiece } from "./markdown.js";
+import { guardSyncStep } from "../step-guards.js";
 
 // ---------------------------------------------------------------------------
 // Input model
@@ -282,6 +289,15 @@ function isWhitespaceOnly(text: string): boolean {
 
 /** The source text a piece list concatenates to (tags and bodies included). */
 export function sectionMoveSourceText(
+  pieces: readonly SectionMovePiece[],
+): string {
+  return guardSyncStep("the section-move oracle (sectionMoveSourceText)", () =>
+    sectionMoveSourceTextUnguarded(pieces),
+  );
+}
+
+/** {@link sectionMoveSourceText}'s evaluation, under its guard. */
+function sectionMoveSourceTextUnguarded(
   pieces: readonly SectionMovePiece[],
 ): string {
   let text = "";
@@ -1029,6 +1045,16 @@ function parentDottedOf(dotted: string): string | null {
 export function predictSectionMoveImpact(
   input: SectionMoveInput,
 ): SectionMovePrediction {
+  return guardSyncStep(
+    "the section-move oracle (predictSectionMoveImpact)",
+    () => predictSectionMoveImpactUnguarded(input),
+  );
+}
+
+/** {@link predictSectionMoveImpact}'s evaluation, under its guard. */
+function predictSectionMoveImpactUnguarded(
+  input: SectionMoveInput,
+): SectionMovePrediction {
   const { origin, movedId, newId } = input;
   const { targetDocument, targetPath, coincident } = moveFilesOf(input);
   const created = targetDocument === null;
@@ -1624,6 +1650,16 @@ function movedTextOf(
  * (test/self/s6-section-move-oracle.test.ts).
  */
 export function composeSectionMoveTexts(
+  input: SectionMoveInput,
+): SectionMoveComposedFile[] {
+  return guardSyncStep(
+    "the section-move oracle (composeSectionMoveTexts)",
+    () => composeSectionMoveTextsUnguarded(input),
+  );
+}
+
+/** {@link composeSectionMoveTexts}'s evaluation, under its guard. */
+function composeSectionMoveTextsUnguarded(
   input: SectionMoveInput,
 ): SectionMoveComposedFile[] {
   const { origin, movedId, newId } = input;

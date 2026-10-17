@@ -99,6 +99,7 @@ import { describeByteDifference, fail } from "./assertions.js";
 import { isLockPathBytes, LOCK_PATH, withOwnerGrant } from "./lock-path.js";
 import { HarnessStagingError } from "./permissions.js";
 import type { StagingMode } from "./permissions.js";
+import { execFileGuardTrip } from "./step-guards.js";
 import type {
   ArgvValue,
   KilledGroup,
@@ -115,6 +116,13 @@ import {
 } from "./subprocess.js";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * The guard of one `mkfifo` the staging runs (TEST-SPEC S-3: a harness
+ * step's own guard, helpers/step-guards.ts): `execFile`'s timeout, which
+ * kills it.
+ */
+const MKFIFO_STEP_GUARD_MS = 60_000;
 
 /** The graph-data area's own path, workspace-relative (SPEC 13.3, 13.4). */
 export const AREA_PATH = ".xspec";
@@ -674,12 +682,18 @@ async function makeFifo(
   const made = path.join(scratch, "fifo");
   try {
     try {
-      await execFileAsync("mkfifo", [
-        "-m",
-        mode.toString(8).padStart(4, "0"),
-        made,
-      ]);
+      await execFileAsync(
+        "mkfifo",
+        ["-m", mode.toString(8).padStart(4, "0"), made],
+        { timeout: MKFIFO_STEP_GUARD_MS },
+      );
     } catch (error) {
+      const tripped = execFileGuardTrip(
+        `\`mkfifo\` staging a FIFO at ${renderAbs(abs)}`,
+        MKFIFO_STEP_GUARD_MS,
+        error,
+      );
+      if (tripped !== undefined) throw tripped;
       throw new HarnessStagingError(
         STAGING,
         renderAbs(abs),
@@ -1198,8 +1212,9 @@ export async function assertFifosIntact(
  * group still listed); the hold file is removed afterwards. Returns
  * the lock directory's one entry, a plain file — its name bytes, its
  * content read under H-4's grant, its mode — and the killed group. Fails
- * diagnosed when the run never holds (it exits first, or the wait runs
- * out), ends on its own before the kill, or leaves anything at
+ * diagnosed when the run never holds (it exits first — killed at its own
+ * hang guard included: the wait beside it carries no bound of its own,
+ * TEST-SPEC S-3), ends on its own before the kill, or leaves anything at
  * `.xspec/lock` but a directory holding exactly one entry, a plain file
  * (SPEC 13.5: abnormal termination leaves its entry; TEST-SPEC T13.5-3).
  * Harness errors (a lingering group, the capture limit) propagate as such.

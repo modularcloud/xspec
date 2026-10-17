@@ -427,17 +427,22 @@ export function renderAvailabilityTrial(trial: AvailabilityTrial): string {
  * (bare `view --text` over the same workspace 16.5 s; the same input with
  * LF → U+0020, 9.3 s; the other surfaces at that scale — `view`,
  * `occurrences`, `at` — 1.0–1.5 s; any arm over an unmutated-scale draw
- * ~0.3 s). 120 s is 7× that maximum: the ≥ 4× margin a conforming product
- * is owed over its measured answer time, plus headroom for the up-to-3.5×
- * larger `\u2028` spelling and slower CI runners. So a conforming product
- * is never killed while still emitting its answer (H-11: an exhausted
- * harness limit is a harness defect, never a diagnosed product failure),
- * and a genuinely hanging one costs one guard per diagnosis, reported
- * unshrunk (runAvailabilityCommand). Re-measure with a temporary self-test
- * staging `FUZZ_BASE_FILES` with `sectionTowerSource(4096, true)` appended
- * twice to `specs/A.mdx` and every LF rewritten to U+2028 (see AGENTS.md).
+ * ~0.3 s); against later products it emits 125.8 MB, in 25.4 s at the
+ * re-descent's second plan's FIX_PLAN Task 11 and 16.0–16.4 s, unloaded,
+ * at the plan written at 2a2b94e's FIX_PLAN Task 19. 300 s is at least ten
+ * times the longest of those — the sizing rule every per-invocation guard
+ * follows (TEST-SPEC S-3: generous margin for the loaded local and CI runs
+ * E-5 covers; AGENTS.md, "Hang guards (TEST-SPEC S-3)"), with headroom for
+ * the up-to-3.5× larger `\u2028` spelling and the product's speed at scale
+ * moving. So a conforming product is never killed while still emitting its
+ * answer (H-11: an exhausted harness limit is a harness defect, never a
+ * diagnosed product failure), and a genuinely hanging one costs one guard
+ * per diagnosis, reported unshrunk (runAvailabilityCommand). Re-measure
+ * with a temporary self-test staging `FUZZ_BASE_FILES` with
+ * `sectionTowerSource(4096, true)` appended twice to `specs/A.mdx` and
+ * every LF rewritten to U+2028 (see AGENTS.md).
  */
-const FUZZ_COMMAND_TIMEOUT_MS = 120_000;
+const FUZZ_COMMAND_TIMEOUT_MS = 300_000;
 
 /**
  * Run one availability invocation, converting the hang-guard kill — exactly

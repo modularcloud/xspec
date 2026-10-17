@@ -178,6 +178,7 @@ import {
 } from "./product-invocations.js";
 import { StagedMdx } from "./staged-mdx.js";
 import { StagedTs, tsGrammarOf } from "./staged-ts.js";
+import { execFileGuardTrip, guardStep } from "./step-guards.js";
 import {
   type TsDeclaration,
   judgeTypeScript,
@@ -185,6 +186,13 @@ import {
 } from "./ts-derivability.js";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * The guard of one git command the builder scripts (TEST-SPEC S-3: a
+ * harness step's own guard, helpers/step-guards.ts): `execFile`'s timeout,
+ * which kills it — fixture repositories commit a handful of small files.
+ */
+const GIT_STEP_GUARD_MS = 60_000;
 
 const SLASH = 0x2f; // "/"
 const DOT = 0x2e; // "."
@@ -196,6 +204,13 @@ const DOT = 0x2e; // "."
  * are byte strings (TEST-SPEC T1.5-2).
  */
 export type RelPath = string | Uint8Array;
+
+/** A workspace-relative path rendered for a step's label. */
+function describeRel(rel: RelPath): string {
+  return typeof rel === "string"
+    ? rel
+    : `<path bytes 0x${Buffer.from(rel).toString("hex")}>`;
+}
 
 /**
  * Declared file contents. Strings are encoded as UTF-8 exactly as written —
@@ -467,6 +482,15 @@ export class TestWorkspace {
    * as it is written (a contradiction throws `HarnessStagingError`).
    */
   static async create(decl: WorkspaceDecl = {}): Promise<TestWorkspace> {
+    // A harness step under its own guard (TEST-SPEC S-3,
+    // helpers/step-guards.ts).
+    return await guardStep("staging a workspace (TestWorkspace.create)", () =>
+      TestWorkspace.stageNew(decl),
+    );
+  }
+
+  /** `create`'s staging, under its guard. */
+  private static async stageNew(decl: WorkspaceDecl): Promise<TestWorkspace> {
     const mdxDeclarations = resolveMdxDeclaration(decl.mdx ?? {});
     const tsDeclarations = resolveTsDeclaration(decl.ts ?? {});
     const tempRoot = await fsp.mkdtemp(
@@ -575,6 +599,19 @@ export class TestWorkspace {
     rel: RelPath,
     contents: FileContents | StagedMdx | StagedTs,
     options: FileOptions = {},
+  ): Promise<void> {
+    // A harness step under its own guard (TEST-SPEC S-3,
+    // helpers/step-guards.ts).
+    await guardStep(`staging ${describeRel(rel)} (TestWorkspace.file)`, () =>
+      this.stageFile(rel, contents, options),
+    );
+  }
+
+  /** `file`'s staging, under its guard. */
+  private async stageFile(
+    rel: RelPath,
+    contents: FileContents | StagedMdx | StagedTs,
+    options: FileOptions,
   ): Promise<void> {
     let data: Uint8Array;
     let declaration = options.mdx;
@@ -953,6 +990,19 @@ export class TestWorkspace {
    * not contain is a harness staging error, never a product verdict.
    */
   async edit(rel: string, from: string, to: string): Promise<void> {
+    // A harness step under its own guard (TEST-SPEC S-3,
+    // helpers/step-guards.ts).
+    await guardStep(`editing ${rel} (TestWorkspace.edit)`, () =>
+      this.stageEdit(rel, from, to),
+    );
+  }
+
+  /** `edit`'s staging, under its guard. */
+  private async stageEdit(
+    rel: string,
+    from: string,
+    to: string,
+  ): Promise<void> {
     const current = Buffer.from(await this.readBytes(rel)).toString("utf8");
     if (!current.includes(from)) {
       throw new Error(
@@ -987,6 +1037,20 @@ export class TestWorkspace {
     source: TestWorkspace,
     rel: RelPath,
     destRel: RelPath = rel,
+  ): Promise<void> {
+    // A harness step under its own guard (TEST-SPEC S-3,
+    // helpers/step-guards.ts).
+    await guardStep(
+      `copying ${describeRel(rel)} into ${describeRel(destRel)} (TestWorkspace.copyFrom)`,
+      () => this.stageCopy(source, rel, destRel),
+    );
+  }
+
+  /** `copyFrom`'s staging, under its guard. */
+  private async stageCopy(
+    source: TestWorkspace,
+    rel: RelPath,
+    destRel: RelPath,
   ): Promise<void> {
     const data = await source.readBytes(rel);
     if (!source.productInvoked) {
@@ -1074,9 +1138,17 @@ export class TestWorkspace {
     await fsp.symlink(target, abs, kind);
   }
 
-  /** Read a file's exact bytes (follows symlinks, like the product would). */
+  /**
+   * Read a file's exact bytes (follows symlinks, like the product would) —
+   * a harness step under its own guard (TEST-SPEC S-3,
+   * helpers/step-guards.ts): an open the environment blocks, as on a FIFO
+   * a product left, trips it rather than hanging the test.
+   */
   async readBytes(rel: RelPath): Promise<Uint8Array> {
-    return await fsp.readFile(this.resolve(rel));
+    return await guardStep(
+      `reading ${describeRel(rel)} (TestWorkspace.readBytes)`,
+      () => fsp.readFile(this.resolve(rel)),
+    );
   }
 
   /** Directory entry names as raw bytes, sorted bytewise (deterministic). */
@@ -1229,19 +1301,25 @@ export class TestWorkspace {
       const { stdout, stderr } = await execFileAsync("git", args, {
         cwd: this.root,
         env,
-        timeout: 60_000,
+        timeout: GIT_STEP_GUARD_MS,
         maxBuffer: 16 * 1024 * 1024,
       });
       return { stdout, stderr };
     } catch (error) {
+      const tripped = execFileGuardTrip(
+        `\`git ${args.join(" ")}\` in ${this.root}`,
+        GIT_STEP_GUARD_MS,
+        error,
+      );
+      if (tripped !== undefined) throw tripped;
       const failure = error as {
         stderr?: string;
         code?: number | string;
-        killed?: boolean;
       };
-      const reason = failure.killed
-        ? "killed (timeout)"
-        : `exit ${String(failure.code ?? "unknown")}`;
+      const reason =
+        typeof failure.code === "number"
+          ? `exit ${String(failure.code)}`
+          : String(failure.code ?? "unknown");
       throw new Error(
         `git ${args.join(" ")} failed in ${this.root} (${reason}): ${failure.stderr ?? String(error)}`,
       );

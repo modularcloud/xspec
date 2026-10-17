@@ -172,7 +172,12 @@ const SECOND_USER_LOCK_WAIT_SECONDS = 60;
 const USERADD_ATTEMPTS = 5;
 /** `umount` attempts before a busy second mount is a staging error. */
 const UMOUNT_ATTEMPTS = 10;
-/** Bound on the second user's probe reporting, and on its release. */
+/**
+ * Bound on the second user's probe's own wait for its release, inside the
+ * probe; the probe run's own hang guard is twice it, covering its reporting
+ * and that wait (TEST-SPEC S-3: the harness's wait for the report carries
+ * no bound of its own, that guard bounding it).
+ */
 const PROBE_TIMEOUT_MS = 60_000;
 const SLASH = Buffer.from("/");
 const SLASH_BYTE = 0x2f;
@@ -1237,7 +1242,7 @@ export async function runSecondUserProbe(
     });
     try {
       try {
-        await running.waitForFile(resultFile, { timeoutMs: PROBE_TIMEOUT_MS });
+        await running.waitForFile(resultFile);
       } catch (error) {
         throw new HarnessStagingError(
           "second-user",

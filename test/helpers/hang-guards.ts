@@ -12,6 +12,16 @@
 //   `DEFAULT_TIMEOUT_MS`), which kills the run and rejects it with
 //   `ProductRunTimeoutError`. The suite's margin for product speed lives in
 //   these guards, where generosity costs detection nothing.
+// - Every step of the harness's own work between invocations — staging,
+//   copying, git scripting, snapshotting, decoding, evaluation, generation
+//   — carries a guard of its own (helpers/step-guards.ts), its tripping the
+//   harness error `HarnessStepTimeoutError` (H-11), never a product failure.
+// - A wait or loop the harness runs only beside given invocations — a hold
+//   file's appearance (`waitForFile`, `holdFileStands` polls), each run's
+//   exit, the readers' confirmation, the polling reader, P-14's flips —
+//   carries no bound of its own: it ends at the latest once those
+//   invocations have exited, so it is one harness step under their own
+//   guards, never a span.
 // - A span — a test, a trial loop, a property and its shrink phase, a
 //   certification verification, a sweep — carries no guard of its own, as
 //   S-3 admits ("a span may carry none beyond those own guards"): no

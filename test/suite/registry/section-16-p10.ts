@@ -243,7 +243,6 @@ import type {
   RunResult,
 } from "../../helpers/subprocess.js";
 import {
-  DEFAULT_WAIT_FOR_FILE_TIMEOUT_MS,
   releaseHoldFile,
   rethrowHarnessError,
   runProduct,
@@ -695,7 +694,8 @@ async function stillRunning(read: StraddleRead): Promise<boolean> {
  * At most this many further reads are started, one at a time, where none
  * of an episode's pre-start readers is confirmed running as its command is
  * to start; none confirmed then is a harness error (H-11) — a read runs far
- * longer than the instant between its start and that check.
+ * longer than the instant between its start and that check. A count
+ * bounding work, never a guard (TEST-SPEC S-3).
  */
 const EXTRA_PRE_START_READS = 3;
 
@@ -705,7 +705,10 @@ const EXTRA_PRE_START_READS = 3;
  * confirm — immediately before the command starts — that at least one has
  * not exited (TEST-SPEC P-10: "the harness confirming, before starting it,
  * that they have not exited"), starting another where none has. Returns
- * every read started and how many were confirmed running.
+ * every read started and how many were confirmed running. The
+ * confirmation is a check beside the readers (TEST-SPEC S-3): one look at
+ * each read, no wait and no bound of its own, so it ends at once — each
+ * read, and each further one, bounded by its own hang guard.
  */
 async function startPreReaders(
   product: ProductBinding,
@@ -789,29 +792,21 @@ async function killMutatingRun(
 
 /**
  * Await a held command's hold file — true once it appears — or the
- * command's exit before it — false (a refusal at acquisition, judged as any
- * run's end). Neither within the driver's hold-file bound fails diagnosed
- * (H-8).
+ * command's exit before it — false (a refusal at acquisition, or a run its
+ * own hang guard killed, judged as any run's end: `settleMutatingRun` fails
+ * the kill diagnosed, H-8). A wait beside the run (TEST-SPEC S-3): it
+ * carries no bound of its own, ending at the latest once the run has
+ * exited, so the run's own guard bounds it.
  */
 async function holdsOrExits(
   running: RunningProduct,
   hold: string,
-  context: string,
 ): Promise<boolean> {
-  const deadline = Date.now() + DEFAULT_WAIT_FOR_FILE_TIMEOUT_MS;
   for (;;) {
     // Found holding, the run waits on the harness from here: its own hang
     // guard stands suspended until its hold is lifted (TEST-SPEC S-3).
     if (await running.holdFileStands(hold)) return true;
     if (running.hasExited()) return false;
-    if (Date.now() >= deadline) {
-      fail(
-        `${context}: the mutating command neither created its hold file ` +
-          `nor exited within ${String(DEFAULT_WAIT_FOR_FILE_TIMEOUT_MS)} ms ` +
-          `— it creates the hold file immediately after acquiring workspace ` +
-          `exclusivity, or is refused there promptly (SPEC 13.5; H-8)`,
-      );
-    }
     await sleep(5);
   }
 }
@@ -2363,7 +2358,7 @@ async function runEpisode(
       });
       let killed: KilledGroup | undefined;
       let exited: RunResult | undefined;
-      if (episode.held && (await holdsOrExits(running, hold, runContext))) {
+      if (episode.held && (await holdsOrExits(running, hold))) {
         for (const menuIndex of episode.heldReads) {
           await runHeldRead(
             product,

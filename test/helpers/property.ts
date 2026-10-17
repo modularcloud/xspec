@@ -48,7 +48,10 @@
 // candidate's choices alike — is a harness defect: `checkProperty` rethrows
 // it as a plain `Error` (never a diagnosed assertion failure) with the seed
 // attached for reproduction, matching the certification runner's and the
-// S-7 sweep's outcome taxonomy (H-8). The one exception is the subprocess
+// S-7 sweep's outcome taxonomy (H-8) — a harness step's tripped guard
+// (`HarnessStepTimeoutError`, helpers/step-guards.ts; TEST-SPEC S-3) among
+// them: drawing a trial, its S-9 check, and replaying a shrink candidate are
+// steps under guards of their own. The one exception is the subprocess
 // driver's hang-guard kill (`ProductRunTimeoutError`) a body lets through:
 // a product invocation that did not terminate within its own guard, which
 // ends its test, a property's reported with its seed, unshrunk (TEST-SPEC
@@ -96,6 +99,7 @@ import { HarnessAssertionError } from "./assertions.js";
 import { isHangGuardKill } from "./hang-guards.js";
 import { deriveMdx } from "./mdx-derivability.js";
 import { HarnessStagingError } from "./permissions.js";
+import { guardSyncStep } from "./step-guards.js";
 import { TS_DEFAULT_SUFFIXES, judgeTsDeclaration } from "./workspace.js";
 
 /** Environment variable selecting the seed mode (E-5); see the module header. */
@@ -794,16 +798,24 @@ class ChoiceSource implements Choices {
   }
 }
 
+/**
+ * Draw one trial — a harness step under its own guard (TEST-SPEC S-3,
+ * helpers/step-guards.ts): synchronous, bounded by the generator's own
+ * bounds, measured.
+ */
 function generateTrial<T>(generator: Gen<T>, rng: Mulberry32): Trial<T> {
-  const source = ChoiceSource.recording(rng);
-  const value = generator(source);
-  return { tape: source.finish(), value };
+  return guardSyncStep("a property's generation of a trial", () => {
+    const source = ChoiceSource.recording(rng);
+    const value = generator(source);
+    return { tape: source.finish(), value };
+  });
 }
 
 /**
  * Replay the generator on a candidate tape; null when the candidate is
  * unsatisfiable. The returned tape is the consumed prefix (unread tail
- * dropped), so accepted candidates stay canonical.
+ * dropped), so accepted candidates stay canonical. The replay is a harness
+ * step under its own guard (TEST-SPEC S-3, helpers/step-guards.ts).
  */
 function replayTrial<T>(
   generator: Gen<T>,
@@ -812,7 +824,9 @@ function replayTrial<T>(
   const source = ChoiceSource.replaying(tape);
   let value: T;
   try {
-    value = generator(source);
+    value = guardSyncStep("a property's replay of a shrink candidate", () =>
+      generator(source),
+    );
   } catch (error) {
     if (error instanceof ReplayUnsatisfiable) return null;
     throw error;
@@ -1120,13 +1134,24 @@ const UTF8 = new TextEncoder();
  * the first code source or configuration file that is not well-formed
  * TypeScript throws the builder's own `ts-derivability` refusal of a
  * `per-draw` staging (`judgeTsDeclaration`, one code path), which names the
- * generator as the defect.
+ * generator as the defect. The check is a harness step under its own guard
+ * (TEST-SPEC S-3, helpers/step-guards.ts).
  */
 function checkDrawSources<T>(
   value: T,
   drawSources: ((value: T) => Iterable<DrawSource>) | undefined,
 ): void {
   if (drawSources === undefined) return;
+  guardSyncStep("a draw's S-9 check of the sources it stages", () => {
+    judgeDrawSources(value, drawSources);
+  });
+}
+
+/** {@link checkDrawSources}' judgement, under its guard. */
+function judgeDrawSources<T>(
+  value: T,
+  drawSources: (value: T) => Iterable<DrawSource>,
+): void {
   for (const [path, contents, label, role] of drawSources(value)) {
     const where = label === undefined ? path : `${path} (${label})`;
     if (path.endsWith(".mdx")) checkDrawMdx(where, contents);

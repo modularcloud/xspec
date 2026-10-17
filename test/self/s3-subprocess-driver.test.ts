@@ -41,7 +41,17 @@
 // until `releaseHoldFile` lifts it, so a hold kept past the guard passes
 // and a run hanging once lifted is killed for what is left of its guard;
 // a hold path occupied as the run started, and a file found at another
-// path, suspend nothing.
+// path, suspend nothing. A wait beside a run carries no bound of its own:
+// `waitForFile` against a live run that never creates its file ends with
+// the run, killed at its own guard, the kill the rejection's cause, and a
+// wait for another path while the run stands held rejects at once. The
+// harness-step guards (helpers/step-guards.ts) are pinned on stand-in
+// steps: an asynchronous step still pending past its guard, or settling
+// past it after a synchronous stretch, and a synchronous step returning
+// past it, each end in `HarnessStepTimeoutError`, a harness error never a
+// diagnosed failure, while a step within its guard settles as itself; a
+// harness subprocess killed at `execFile`'s timeout reads as such a trip,
+// and nothing else does.
 //
 // The stand-in is a tiny argv-driven Node script written into a fresh
 // TestWorkspace per test (the builder itself is certified by S-2) and driven
@@ -64,7 +74,15 @@ import {
   parseJsonStdout,
 } from "../helpers/assertions.js";
 import type * as CaptureWalkModule from "../helpers/capture-walk.js";
+import { isHangGuardKill } from "../helpers/hang-guards.js";
 import { holdPathArgument } from "../helpers/invocation-grammar.js";
+import {
+  DEFAULT_STEP_GUARD_MS,
+  execFileGuardTrip,
+  guardStep,
+  guardSyncStep,
+  HarnessStepTimeoutError,
+} from "../helpers/step-guards.js";
 import {
   ProcessGroupLingerError,
   VoidedTrialsExhaustedError,
@@ -668,19 +686,55 @@ test("waitForFile fails diagnosed when the child exits without creating the file
   expect((await running.waitForExit()).exitCode).toBe(86);
 });
 
-test("waitForFile times out diagnosed against a live child that never creates the file", async () => {
+test("waitForFile against a live child that never creates the file carries no bound of its own: the child's own hang guard kills it, and the wait ends with it, rejecting with the premature-exit error naming the kill, the kill its cause (TEST-SPEC S-3: a wait beside a run ends at the latest once the run has exited)", async () => {
   const { workspace, binding } = await standin();
+  const guardMs = 400;
   const running = await startProduct(binding, {
     cwd: workspace.root,
     argv: ["hang"],
+    timeoutMs: guardMs,
   });
-  await expect(
-    running.waitForFile(path.join(workspace.tempRoot, "never"), {
-      timeoutMs: 200,
-    }),
-  ).rejects.toThrow(/timed out after 200 ms waiting for/);
-  running.kill();
-  await running.waitForExit();
+  const never = path.join(workspace.tempRoot, "never");
+  const started = performance.now();
+  const error = await rejectionOf(running.waitForFile(never));
+  const waitedMs = performance.now() - started;
+  expect(error).toBeInstanceOf(Error);
+  expect(error).not.toBeInstanceOf(HarnessAssertionError);
+  const message = (error as Error).message;
+  expect(message).toContain(`exited before creating ${never}`);
+  expect(message).toContain(`timed out after ${String(guardMs)} ms`);
+  const cause = (error as Error).cause;
+  expect(cause).toBeInstanceOf(ProductRunTimeoutError);
+  expect(isHangGuardKill(error)).toBe(true);
+  // The wait ended with the run, at its guard — never before it.
+  expect(waitedMs).toBeGreaterThanOrEqual(guardMs - 50);
+  expect(running.hasExited()).toBe(true);
+});
+
+test("waitForFile for another path than a held run's own hold, its guard suspended for that hold, rejects at once with a plain Error — a wait bounded by nothing is a harness-usage error — the hold and the run unchanged (TEST-SPEC S-3)", async () => {
+  const { workspace, binding } = await standin();
+  const hold = path.join(workspace.tempRoot, "own-hold");
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["held", "exit", "--test-hold", hold],
+    timeoutMs: 1_000,
+  });
+  await running.waitForFile(hold);
+  const elsewhere = path.join(workspace.tempRoot, "elsewhere");
+  const error = await rejectionOf(running.waitForFile(elsewhere));
+  expect(error).toBeInstanceOf(Error);
+  expect(error).not.toBeInstanceOf(HarnessAssertionError);
+  expect((error as Error).message).toContain(
+    `stands held at its own hold ${hold}`,
+  );
+  expect((error as Error).message).toContain(`a wait for ${elsewhere}`);
+  expect(running.hasExited()).toBe(false);
+  // Its own hold, waited for again, is found at once.
+  await running.waitForFile(hold);
+  await releaseHoldFile(hold);
+  const result = await running.waitForExit();
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toBe("released");
 });
 
 test("holdPathArgument reads a `--test-hold <path>` flag as SPEC 12.0's grammar reads it: anywhere among the flags, its first occurrence, never after `--`, never another flag's value, never without its value", () => {
@@ -868,11 +922,12 @@ test("waitForFile surfaces a capture-limit kill as the driver's ProductRunOutput
   expect(settled).toBe(error);
 });
 
-test("rethrowHarnessError rethrows exactly the harness errors — the capture-limit error, a failed in-run evaluation, a group kill that could not confirm its group gone, and an exhausted voidable trial — unchanged, and returns for every other rejection a helper converts (H-11)", () => {
+test("rethrowHarnessError rethrows exactly the harness errors — the capture-limit error, a failed in-run evaluation, a group kill that could not confirm its group gone, an exhausted voidable trial, and a harness step's tripped guard — unchanged, and returns for every other rejection a helper converts (H-11; TEST-SPEC S-3)", () => {
   for (const harnessError of [
     new ProductRunOutputOverflowError("capture limit"),
     new ProcessGroupLingerError("stand-in", 4242, "listed", 30_000, [], [4243]),
     new VoidedTrialsExhaustedError("stand-in trial", ["reused identifier"]),
+    new HarnessStepTimeoutError("a stand-in step", 100, "took 150 ms, past"),
     new HarnessEvaluationError(
       "stand-in move",
       "verify",
@@ -903,6 +958,193 @@ test("rethrowHarnessError rethrows exactly the harness errors — the capture-li
       rethrowHarnessError(other);
     }).not.toThrow();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Harness-step guards (TEST-SPEC S-3, helpers/step-guards.ts): each step of
+// the harness's own work carries a guard of its own, its tripping the
+// harness error HarnessStepTimeoutError — never a diagnosed product failure.
+
+/** Busy-wait `ms` on the main thread: a synchronous stretch no timer interrupts. */
+function spin(ms: number): void {
+  const until = performance.now() + ms;
+  while (performance.now() < until) {
+    // a synchronous stretch
+  }
+}
+
+test("guardStep settles as its step does within its guard — a value, a diagnosed failure, or a plain error passing through unchanged — and the default guard is the one AGENTS.md sizes (TEST-SPEC S-3)", async () => {
+  expect(DEFAULT_STEP_GUARD_MS).toBe(120_000);
+  expect(await guardStep("a stand-in step", async () => 42)).toBe(42);
+  const diagnosed = new HarnessAssertionError("diagnosed");
+  expect(
+    await rejectionOf(
+      guardStep("a stand-in step", async () => {
+        await sleep(10);
+        throw diagnosed;
+      }),
+    ),
+  ).toBe(diagnosed);
+  const plain = new Error("plain");
+  expect(
+    await rejectionOf(
+      guardStep(
+        "a stand-in step",
+        async () => {
+          throw plain;
+        },
+        1_000,
+      ),
+    ),
+  ).toBe(plain);
+});
+
+test("guardStep rejects a step still pending past its guard with HarnessStepTimeoutError — never a HarnessAssertionError — naming the step and its guard, at its guard, the step's own later outcome observed and dropped (TEST-SPEC S-3; H-11)", async () => {
+  const guardMs = 200;
+  let rejectLater: (error: Error) => void = () => undefined;
+  const started = performance.now();
+  const error = await rejectionOf(
+    guardStep(
+      "a stand-in step that never settles",
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          rejectLater = reject;
+        }),
+      guardMs,
+    ),
+  );
+  const waitedMs = performance.now() - started;
+  expect(error).toBeInstanceOf(HarnessStepTimeoutError);
+  expect(error).not.toBeInstanceOf(HarnessAssertionError);
+  expect((error as HarnessStepTimeoutError).step).toBe(
+    "a stand-in step that never settles",
+  );
+  expect((error as HarnessStepTimeoutError).guardMs).toBe(guardMs);
+  expect((error as Error).message).toMatch(
+    /^harness error \(H-11\): a stand-in step that never settles was still pending after \d+ ms, past its own guard of 200 ms \(TEST-SPEC S-3/,
+  );
+  expect(waitedMs).toBeGreaterThanOrEqual(guardMs - 20);
+  expect(waitedMs).toBeLessThan(guardMs + 2_000);
+  // The step's own rejection, once the guard has tripped, is observed: no
+  // unhandled rejection reaches the run.
+  rejectLater(new Error("the stuck step's late failure"));
+  await sleep(20);
+});
+
+test("guardStep measures its step as it settles: a synchronous stretch outlasting the guard, which no timer interrupts, trips it too, the step's own rejection the error's cause (TEST-SPEC S-3)", async () => {
+  const resolved = await rejectionOf(
+    guardStep(
+      "a stand-in step spinning past its guard",
+      async () => {
+        spin(150);
+        return "done";
+      },
+      50,
+    ),
+  );
+  expect(resolved).toBeInstanceOf(HarnessStepTimeoutError);
+  expect((resolved as Error).message).toMatch(
+    /a stand-in step spinning past its guard took \d+ ms, past its own guard of 50 ms/,
+  );
+  const own = new Error("its own failure");
+  const rejected = await rejectionOf(
+    guardStep(
+      "a stand-in step spinning, then failing",
+      async () => {
+        spin(150);
+        throw own;
+      },
+      50,
+    ),
+  );
+  expect(rejected).toBeInstanceOf(HarnessStepTimeoutError);
+  expect((rejected as Error).cause).toBe(own);
+});
+
+test("guardSyncStep runs a synchronous step to completion and checks it: within its guard it returns or throws as the step does, past its guard it throws HarnessStepTimeoutError, what the step threw its cause (TEST-SPEC S-3: bounded construction, measured)", () => {
+  expect(guardSyncStep("a stand-in sync step", () => 7)).toBe(7);
+  const diagnosed = new HarnessAssertionError("diagnosed");
+  expect(() =>
+    guardSyncStep("a stand-in sync step", () => {
+      throw diagnosed;
+    }),
+  ).toThrow(diagnosed);
+  let late: unknown;
+  try {
+    guardSyncStep(
+      "a stand-in sync step spinning past its guard",
+      () => {
+        spin(120);
+        return 1;
+      },
+      40,
+    );
+  } catch (thrown) {
+    late = thrown;
+  }
+  expect(late).toBeInstanceOf(HarnessStepTimeoutError);
+  expect(late).not.toBeInstanceOf(HarnessAssertionError);
+  expect((late as Error).message).toMatch(
+    /a stand-in sync step spinning past its guard took \d+ ms, past its own guard of 40 ms/,
+  );
+  let lateFailure: unknown;
+  try {
+    guardSyncStep(
+      "a stand-in sync step spinning, then failing",
+      () => {
+        spin(120);
+        throw diagnosed;
+      },
+      40,
+    );
+  } catch (thrown) {
+    lateFailure = thrown;
+  }
+  expect(lateFailure).toBeInstanceOf(HarnessStepTimeoutError);
+  expect((lateFailure as Error).cause).toBe(diagnosed);
+});
+
+test("execFileGuardTrip reads a harness subprocess killed at execFile's timeout as its step's tripped guard, and nothing else — an exit, a spawn failure, or an exhausted maxBuffer — as one (TEST-SPEC S-3)", async () => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileAsync = promisify(execFile);
+  const killed = await rejectionOf(
+    execFileAsync(process.execPath, ["-e", "setInterval(() => {}, 60000)"], {
+      timeout: 200,
+    }),
+  );
+  const tripped = execFileGuardTrip("a stand-in subprocess", 200, killed);
+  expect(tripped).toBeInstanceOf(HarnessStepTimeoutError);
+  expect(tripped?.cause).toBe(killed);
+  expect(tripped?.message).toContain(
+    "a stand-in subprocess was killed at its own guard of 200 ms",
+  );
+  const exited = await rejectionOf(
+    execFileAsync(process.execPath, ["-e", "process.exit(3)"], {
+      timeout: 60_000,
+    }),
+  );
+  expect(execFileGuardTrip("a stand-in subprocess", 60_000, exited)).toBe(
+    undefined,
+  );
+  const overflowed = await rejectionOf(
+    execFileAsync(
+      process.execPath,
+      ["-e", "process.stdout.write('x'.repeat(4096))"],
+      { timeout: 60_000, maxBuffer: 16 },
+    ),
+  );
+  expect(execFileGuardTrip("a stand-in subprocess", 60_000, overflowed)).toBe(
+    undefined,
+  );
+  const missing = await rejectionOf(
+    execFileAsync(path.join(os.tmpdir(), "xspec-s3-no-such-command"), [], {
+      timeout: 60_000,
+    }),
+  );
+  expect(execFileGuardTrip("a stand-in subprocess", 60_000, missing)).toBe(
+    undefined,
+  );
 });
 
 // ---------------------------------------------------------------------------

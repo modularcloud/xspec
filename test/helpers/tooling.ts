@@ -39,6 +39,10 @@
 //   throw diagnosed errors instead of yielding empty results a test could
 //   mistake for green. An import the product failed to make resolvable is a
 //   diagnosed compile error (TS2307) — the red path for section 4 tests.
+// - Each answer — diagnostics, go-to-definition, hover, a module skeleton,
+//   emit — is a harness step under its own guard (TEST-SPEC S-3,
+//   helpers/step-guards.ts): synchronous, bounded by construction over the
+//   consumer program it reads, and measured.
 //
 // Conservative defaults where IMPLEMENTATION.md is silent (overridable per
 // project via `compilerOptions`): consumers compile `strict` for modern Node
@@ -58,6 +62,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript-5.9.3";
 import { fail } from "./assertions.js";
+import { guardSyncStep } from "./step-guards.js";
 import type { ProductBinding, RunResult } from "./subprocess.js";
 import { runProduct } from "./subprocess.js";
 
@@ -358,10 +363,12 @@ export class ConsumerProject {
 
   /** All pre-emit diagnostics (syntactic, semantic, options), sorted. */
   diagnostics(): readonly ConsumerDiagnostic[] {
-    const raw = ts.getPreEmitDiagnostics(this.#program());
-    return raw
-      .map((diagnostic) => this.#convertDiagnostic(diagnostic))
-      .sort(compareDiagnostics);
+    return this.#step("diagnostics", () => {
+      const raw = ts.getPreEmitDiagnostics(this.#program());
+      return raw
+        .map((diagnostic) => this.#convertDiagnostic(diagnostic))
+        .sort(compareDiagnostics);
+    });
   }
 
   /** Error-category diagnostics only. */
@@ -423,6 +430,12 @@ export class ConsumerProject {
 
   /** Go-to-definition targets at a position (empty when there are none). */
   definitionsAt(position: FileOffset): readonly DefinitionTarget[] {
+    return this.#step("go-to-definition", () =>
+      this.#definitionsAtUnguarded(position),
+    );
+  }
+
+  #definitionsAtUnguarded(position: FileOffset): readonly DefinitionTarget[] {
     const abs = this.#absPath(position.file);
     const infos =
       this.#service.getDefinitionAtPosition(abs, position.offset) ?? [];
@@ -457,6 +470,14 @@ export class ConsumerProject {
    * rather than erroring when a product provides no mapping (H-8).
    */
   sourceDefinitionsAt(position: FileOffset): readonly SourceDefinitionTarget[] {
+    return this.#step("declaration-mapped go-to-definition", () =>
+      this.#sourceDefinitionsAtUnguarded(position),
+    );
+  }
+
+  #sourceDefinitionsAtUnguarded(
+    position: FileOffset,
+  ): readonly SourceDefinitionTarget[] {
     const raws = this.definitionsAt(position);
     if (raws.length === 0) return [];
     const mapper = this.#sourceMapper();
@@ -488,6 +509,10 @@ export class ConsumerProject {
 
   /** Hover (quick info) at a position, or undefined when there is none. */
   hoverAt(position: FileOffset): HoverInfo | undefined {
+    return this.#step("hover", () => this.#hoverAtUnguarded(position));
+  }
+
+  #hoverAtUnguarded(position: FileOffset): HoverInfo | undefined {
     const abs = this.#absPath(position.file);
     const info = this.#service.getQuickInfoAtPosition(abs, position.offset);
     if (!info) return undefined;
@@ -521,6 +546,15 @@ export class ConsumerProject {
    * that is no module, fails diagnosed (H-8).
    */
   moduleSkeleton(
+    moduleFile: string,
+    options: ModuleSkeletonOptions,
+  ): ModuleSkeleton {
+    return this.#step("module skeleton", () =>
+      this.#moduleSkeletonUnguarded(moduleFile, options),
+    );
+  }
+
+  #moduleSkeletonUnguarded(
     moduleFile: string,
     options: ModuleSkeletonOptions,
   ): ModuleSkeleton {
@@ -639,6 +673,10 @@ export class ConsumerProject {
    * diagnostics separately.
    */
   emit(): EmitResult {
+    return this.#step("emit", () => this.#emitUnguarded());
+  }
+
+  #emitUnguarded(): EmitResult {
     const written: string[] = [];
     const result = this.#program().emit(
       undefined,
@@ -659,6 +697,18 @@ export class ConsumerProject {
         .map((diagnostic) => this.#convertDiagnostic(diagnostic))
         .sort(compareDiagnostics),
     };
+  }
+
+  /**
+   * One answer of the tooling, a harness step under its own guard
+   * (TEST-SPEC S-3, helpers/step-guards.ts): synchronous, bounded by the
+   * consumer program it reads, measured.
+   */
+  #step<T>(what: string, work: () => T): T {
+    return guardSyncStep(
+      `the TypeScript tooling's ${what} over ${this.rootDir} (ConsumerProject)`,
+      work,
+    );
   }
 
   #program(): ts.Program {

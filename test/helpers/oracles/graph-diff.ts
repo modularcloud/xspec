@@ -63,6 +63,12 @@
 // graphs (a child or walked dependency-edge target with no node on its
 // side), contains or dependency cycles (5.3), and an `ownKey` that fails
 // to cover the child reference tokens.
+//
+// Its evaluation, `computeGraphDiff`, is a harness step under its own guard
+// (TEST-SPEC S-3, helpers/step-guards.ts): synchronous, bounded by
+// construction over the staged input it evaluates, and measured.
+
+import { guardSyncStep } from "../step-guards.js";
 
 // ---------------------------------------------------------------------------
 // Input and output model
@@ -172,6 +178,16 @@ function strictDescendants(
  * attribution bound, and the added and deleted identity sets.
  */
 export function computeGraphDiff(
+  before: GraphDiffSide,
+  after: GraphDiffSide,
+): GraphDiff {
+  return guardSyncStep("the graph-diff oracle (computeGraphDiff)", () =>
+    computeGraphDiffUnguarded(before, after),
+  );
+}
+
+/** {@link computeGraphDiff}'s evaluation, under its guard. */
+function computeGraphDiffUnguarded(
   before: GraphDiffSide,
   after: GraphDiffSide,
 ): GraphDiff {
