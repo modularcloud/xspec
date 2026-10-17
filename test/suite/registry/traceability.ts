@@ -246,7 +246,12 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // (12.0, 13.4).
   "T4-2": ["4", "2.1", "2.4", "4.5", "5.7", "6.5", "6.6", "12.0", "13.4", "14"],
   "T4-3": ["4"],
-  "T4-4": ["4", "14"],
+  // T4-4: 4's type-only imports, their bindings type-level names; its mixed
+  // arms a call through a type-only `text` binding — no spec module's
+  // `text` call, its ordinary argument outside 4.5's sanctioned uses
+  // (14.18) — recording no occurrence (5.7) in the answer `occurrences
+  // --file` gives on the failing workspace (11.2).
+  "T4-4": ["4", "4.5", "5.7", "11.2", "14"],
   "T4-5": ["4", "2.1", "2.4", "4.5", "5.7", "11.2", "14"],
   "T4.1-1": ["4.1"],
   "T4.1-2": ["4.1"],
