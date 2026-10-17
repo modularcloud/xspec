@@ -32,22 +32,35 @@
 //   names no spec module binding and records nothing.
 // - T4.3-2 arms stage exactly one defect each — the string/dynamic/arity
 //   form. The dynamic arms' chains would resolve to existing nodes if read
-//   statically (`SPEC[key]` with key = "a"; `` SPEC[`a`] `` read as
-//   `SPEC["a"]`; `SPEC.a?.b` with `a.b` staged), so a product cannot
+//   statically (`SPEC[key]` with key = "a"; `SPEC[1]` read as `SPEC["1"]`,
+//   as TypeScript type-checks it, with a top-level `1` staged; `` SPEC[`a`] ``
+//   read as `SPEC["a"]`; `SPEC.a?.b` with `a.b` staged; `(SPEC.a)`,
+//   `(SPEC).a`, and `SPEC[("a")]` read through their parentheses as
+//   `SPEC.a`, as TypeScript's checker types each), so a product cannot
 //   legitimately reclassify them as unresolved references (14.7): the sole
-//   present condition is 14.8 (SPEC 2.4, 4.3, 4.5). The arity arms mirror
-//   T2.4-3's MDX staging in this language's valid argument form: the
-//   two-argument call passes two static, resolvable
-//   node chains (`SPEC.a`, `SPEC.a.b` — never strings, each themselves 14.8
-//   in TypeScript, which would stage further defects), and the zero-argument
-//   call has nothing to resolve, so in each the arity is the sole defect —
-//   exactly one 14.8, at the call — and a product tolerating the arity
-//   builds clean, failing the exit-1 expectation. A node argument of the
-//   wrong-arity call is still a direct argument to its own module's `text`
-//   export, so no 14.18 is present (SPEC 14.18's entry sanctions direct
-//   `text` arguments; 2.4 assigns any other arity to 14.8). Each finding
-//   must fall within the offending statement's byte window (support.ts
-//   byteWindow).
+//   present condition is 14.8 (SPEC 2.4, 4.3, 4.5) — never 14.18, a
+//   non-static `text(...)` argument being an invalid argument, not
+//   unsupported usage (4.5), which the exact count {"14.8": 1} asserts.
+//   The arity arms mirror T2.4-3's MDX staging in this language's valid
+//   argument form: the two-argument call passes two static, resolvable node
+//   chains (TEST-SPEC's `text(SPEC.a, SPEC.b)`, both nodes of the callee's
+//   own module — never strings, each themselves 14.8 in TypeScript, which
+//   would stage further defects), and the zero-argument call has nothing to
+//   resolve, so in each the arity is the sole defect — exactly one 14.8, at
+//   the call — and a product tolerating the arity builds clean, failing the
+//   exit-1 expectation. Every argument of a spec module's `text` call is a
+//   sanctioned use, so no 14.18 stands beside the 14.8 (SPEC 4.5, 14.18; 2.4
+//   assigns any other arity to 14.8): a product sanctioning a sole argument
+//   alone reports 14.18 at the second, failing the exact count. The
+//   two-argument call's cross-module variant `text(SPEC.a, B.b)`, `B`
+//   another spec module's default binding (`specs/B.mdx`, holding the `b`
+//   the chain names, so the argument resolves), is condition 8 alone,
+//   neither 14.18 nor 14.11: a call condition 8 reports for its argument
+//   count is that condition alone (SPEC 14.11). TEST-SPEC names `build` and
+//   `check` for both two-argument calls, so `check` runs on the same
+//   never-built failing workspace, its condition counted exactly as T4.4-1
+//   counts it (below), 14.10 included. Each finding must fall within the
+//   offending statement's byte window (support.ts byteWindow).
 // - T4.3-2's TypeScript-only arms (`SPEC.a!`, `SPEC.a as X`, `<X>SPEC.a`,
 //   `SPEC.a satisfies X` as the `text` argument) are dynamic references in a
 //   TypeScript source — 14.8 at the call, the file well-formed — never a
@@ -56,7 +69,7 @@
 //   form parses only as plain TypeScript, which the `.ts` file name selects
 //   (SPEC 2.4, 14.20).
 // - T4.3-2's "no edge, no occurrence" attaches to the dynamic node-form
-//   list (the seven arms marked `dynamicNodeForm`). `query edges` refuses
+//   list (the eleven arms marked `dynamicNodeForm`). `query edges` refuses
 //   to answer on a failing workspace (13.3), so the occurrence record is
 //   the edge's witness (SPEC 5.7, 11.2), as in T4.4-1: after each such
 //   arm's `build`, `occurrences` on the same failing workspace must exit 1
@@ -139,6 +152,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
@@ -397,15 +411,31 @@ const T4_3_1 = defineProductTest({
 // T4.3-2 — string and dynamic text arguments in TypeScript are 14.8
 // ---------------------------------------------------------------------------
 
-// One spec source with a nested `a.b`, shared by every arm, so each dynamic
-// chain would resolve if read statically — the form is each arm's sole
-// defect.
-// Staged in every arm's fresh workspace — past the first, after a product
-// invocation: a staged-source record (S-9, test/self/s9-staged-sources.test.ts).
+// One spec source shared by every arm: `a` with a nested `a.b`, so each
+// dynamic chain would resolve if read statically — the form is each arm's
+// sole defect — beside the top-level `b` the two-argument call's second
+// argument names and the top-level `1` (a valid segment, SPEC 1.4) a product
+// reading `SPEC[1]` as `SPEC["1"]` resolves to. Staged in every arm's fresh
+// workspace — past the first, after a product invocation: a staged-source
+// record (S-9, test/self/s9-staged-sources.test.ts).
 const T4_3_2_SPEC_FILES = {
   "specs/A.mdx": stagedMdx(
     "T4.3-2 specs/A.mdx",
-    '<S id="a">\nAlpha behavior.\n<S id="a.b">\nBeta behavior.\n</S>\n</S>\n',
+    '<S id="a">\nAlpha behavior.\n<S id="a.b">\nBeta behavior.\n</S>\n</S>\n\n' +
+      '<S id="b">\nBravo behavior.\n</S>\n\n' +
+      '<S id="1">\nSection one behavior.\n</S>\n',
+  ),
+} as const;
+
+// The cross-module arm's other spec module, the one `B` binds: it holds the
+// `b` that arm's second argument names, so the argument resolves — a product
+// judging it a cross-module `text` argument despite the arity reports 14.11
+// (SPEC 14.11). Staged beside the shared source in that arm's workspace
+// alone; a staged-source record, as the shared source is (S-9).
+const T4_3_2_CROSS_SPEC_FILES = {
+  "specs/B.mdx": stagedMdx(
+    "T4.3-2 specs/B.mdx — the cross-module arm's other module",
+    '<S id="b">\nOther module bravo behavior.\n</S>\n',
   ),
 } as const;
 
@@ -424,6 +454,25 @@ interface InvalidTextArgumentArm {
    * arms, which that clause does not cover (module header).
    */
   readonly dynamicNodeForm: boolean;
+  /**
+   * Whether `check --json` must report the same single finding as `build`
+   * on the same never-built failing workspace — TEST-SPEC T4.3-2 names
+   * both surfaces for the two-argument call and its cross-module variant
+   * (module header).
+   */
+  readonly atCheck: boolean;
+  /**
+   * What the exact count {"14.8": 1} rules out beside the finding where
+   * TEST-SPEC names it for a call that is no dynamic node form (failure
+   * diagnostics; a dynamic node form's is 14.18, `t432CountContext`).
+   */
+  readonly excludes?: string;
+  /**
+   * Spec sources staged beside the shared `specs/A.mdx`
+   * (`T4_3_2_SPEC_FILES`) — staged-source records, as every arm's workspace
+   * past the body's first is created after a product invocation (S-9).
+   */
+  readonly extraSpecFiles?: Readonly<Record<string, StagedMdx>>;
 }
 
 const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
@@ -432,6 +481,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
     lines: ['import { text } from "../specs/A.xspec";', "", 'text("a");'],
     offending: 'text("a");',
     dynamicNodeForm: false,
+    atCheck: false,
   },
   {
     name:
@@ -445,6 +495,27 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
     ],
     offending: "text(SPEC[key]);",
     dynamicNodeForm: true,
+    atCheck: false,
+  },
+  // TEST-SPEC's `text(SPEC[1])`, `SPEC`'s module holding a top-level section
+  // `1`: a numeric literal is no static string literal (SPEC 2.4), though
+  // TypeScript type-checks the call as `text(SPEC["1"])`, so a product
+  // reading the index as the string `"1"` resolves the chain, records the
+  // edge, and reports nothing — failing the exit-1 and exact {"14.8": 1}
+  // expectations.
+  {
+    name:
+      "a computed index by numeric literal as the `text` argument, `SPEC`'s " +
+      "module holding a top-level section `1` (a numeric literal is no " +
+      "static string literal, SPEC 2.4)",
+    lines: [
+      'import SPEC, { text } from "../specs/A.xspec";',
+      "",
+      "text(SPEC[1]);",
+    ],
+    offending: "text(SPEC[1]);",
+    dynamicNodeForm: true,
+    atCheck: false,
   },
   // TEST-SPEC's `` text(SPEC[`a`]) ``, `SPEC`'s module holding `a`: template
   // literals are not static (SPEC 2.4), so a product reading the
@@ -462,6 +533,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
     ],
     offending: "text(SPEC[`a`]);",
     dynamicNodeForm: true,
+    atCheck: false,
   },
   {
     name:
@@ -474,6 +546,56 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
     ],
     offending: "text(SPEC.a?.b);",
     dynamicNodeForm: true,
+    atCheck: false,
+  },
+  // TEST-SPEC's parenthesized chain, whole (`text((SPEC.a))`) and partly
+  // parenthesized (`text((SPEC).a)`): parentheses applied to the chain make
+  // the reference dynamic (SPEC 2.4), though TypeScript's checker types each
+  // argument as `SPEC.a`, so a product reading through the parentheses
+  // resolves `a`, records the edge, and reports nothing.
+  {
+    name:
+      "a parenthesized chain `(SPEC.a)` as the `text` argument (parentheses " +
+      "applied to the chain make the reference dynamic, SPEC 2.4)",
+    lines: [
+      'import SPEC, { text } from "../specs/A.xspec";',
+      "",
+      "text((SPEC.a));",
+    ],
+    offending: "text((SPEC.a));",
+    dynamicNodeForm: true,
+    atCheck: false,
+  },
+  {
+    name:
+      "a partly parenthesized chain `(SPEC).a` as the `text` argument " +
+      "(parentheses applied to the chain make the reference dynamic, SPEC " +
+      "2.4)",
+    lines: [
+      'import SPEC, { text } from "../specs/A.xspec";',
+      "",
+      "text((SPEC).a);",
+    ],
+    offending: "text((SPEC).a);",
+    dynamicNodeForm: true,
+    atCheck: false,
+  },
+  // TEST-SPEC's parenthesized index `text(SPEC[("a")])`: no static string
+  // literal indexes it (SPEC 2.4), though the checker types the argument as
+  // `SPEC.a`, so a product reading the parenthesized literal as the index
+  // resolves `a`, records the edge, and reports nothing.
+  {
+    name:
+      'a parenthesized index `SPEC[("a")]` as the `text` argument (no ' +
+      "static string literal indexes it, SPEC 2.4)",
+    lines: [
+      'import SPEC, { text } from "../specs/A.xspec";',
+      "",
+      'text(SPEC[("a")]);',
+    ],
+    offending: 'text(SPEC[("a")]);',
+    dynamicNodeForm: true,
+    atCheck: false,
   },
   // The four TypeScript-only forms SPEC 2.4 makes dynamic in a TypeScript
   // source — never a parse failure there (the spec-source counterparts are
@@ -494,6 +616,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
     ],
     offending: "text(SPEC.a!);",
     dynamicNodeForm: true,
+    atCheck: false,
   },
   {
     name:
@@ -507,6 +630,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
     ],
     offending: "text(SPEC.a as X);",
     dynamicNodeForm: true,
+    atCheck: false,
   },
   {
     name:
@@ -521,6 +645,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
     ],
     offending: "text(<X>SPEC.a);",
     dynamicNodeForm: true,
+    atCheck: false,
   },
   {
     name:
@@ -534,26 +659,84 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
     ],
     offending: "text(SPEC.a satisfies X);",
     dynamicNodeForm: true,
+    atCheck: false,
   },
   {
     name: "a zero-argument `text()` call (arity, SPEC 2.4)",
     lines: ['import { text } from "../specs/A.xspec";', "", "text();"],
     offending: "text();",
     dynamicNodeForm: false,
+    atCheck: false,
   },
+  // TEST-SPEC's `text(SPEC.a, SPEC.b)`, both nodes of the callee's own
+  // module: every argument of a spec module's `text` call is a sanctioned
+  // use (SPEC 4.5, 14.18), so `build` and `check` each report the one 14.8
+  // and no 14.18 beside it — a product sanctioning a sole argument alone
+  // reports 14.18 at the second.
   {
     name:
-      "a two-argument `text(...)` call (arity, SPEC 2.4) — both arguments " +
-      "static resolvable node chains, so the arity is the sole defect",
+      "a two-argument `text(SPEC.a, SPEC.b)` call (arity, SPEC 2.4) — both " +
+      "arguments static chains resolving to nodes of the callee's own " +
+      "module, so the arity is the sole defect",
     lines: [
       'import SPEC, { text } from "../specs/A.xspec";',
       "",
-      "text(SPEC.a, SPEC.a.b);",
+      "text(SPEC.a, SPEC.b);",
     ],
-    offending: "text(SPEC.a, SPEC.a.b);",
+    offending: "text(SPEC.a, SPEC.b);",
     dynamicNodeForm: false,
+    atCheck: true,
+    excludes:
+      "no 14.18 beside it: every argument of a spec module's `text` call " +
+      "is a sanctioned use (SPEC 4.5, 14.18)",
+  },
+  // Its cross-module variant `text(SPEC.a, B.b)`, `B` another spec module's
+  // default binding: a call condition 8 reports for its argument count is
+  // that condition alone (SPEC 14.11), so `build` and `check` each report
+  // the one 14.8, neither 14.18 nor 14.11 beside it. `B`'s module holds the
+  // `b` the chain names (`T4_3_2_CROSS_SPEC_FILES`), so the argument
+  // resolves: a product judging it a cross-module `text` argument despite
+  // the arity reports 14.11.
+  {
+    name:
+      "the two-argument call's cross-module variant `text(SPEC.a, B.b)`, " +
+      "`B` another spec module's default binding (arity, SPEC 2.4: " +
+      "condition 8 alone, SPEC 14.11)",
+    lines: [
+      'import SPEC, { text } from "../specs/A.xspec";',
+      'import B from "../specs/B.xspec";',
+      "",
+      "text(SPEC.a, B.b);",
+    ],
+    offending: "text(SPEC.a, B.b);",
+    dynamicNodeForm: false,
+    atCheck: true,
+    excludes:
+      "neither 14.18 nor 14.11: every argument of a spec module's `text` " +
+      "call is a sanctioned use, and a call condition 8 reports for its " +
+      "argument count is that condition alone (SPEC 4.5, 14.11, 14.18)",
+    extraSpecFiles: T4_3_2_CROSS_SPEC_FILES,
   },
 ];
+
+/**
+ * An arm's exact-count context, naming what TEST-SPEC T4.3-2 rules out
+ * beside the one 14.8: 14.18 for a dynamic node form — a non-static `text`
+ * argument is an invalid argument, not unsupported usage (SPEC 4.5) — and
+ * the arm's own `excludes` for a call that is none.
+ */
+function t432CountContext(
+  arm: InvalidTextArgumentArm,
+  context: string,
+): string {
+  if (arm.dynamicNodeForm) {
+    return (
+      `${context} — never 14.18: a non-static \`text(...)\` argument is an ` +
+      `invalid argument, not unsupported usage (SPEC 4.5, 14.8)`
+    );
+  }
+  return arm.excludes === undefined ? context : `${context} — ${arm.excludes}`;
+}
 
 /**
  * An invalid `text` argument arm laid out at module load: its `src/app.ts`
@@ -580,7 +763,7 @@ const T4_3_2_LAID_OUT_ARMS: readonly LaidOutTextArgumentArm[] = T4_3_2_ARMS.map(
 const T4_3_2 = defineProductTest({
   id: "T4.3-2",
   title:
-    "a string argument to `text` in a TypeScript file fails with 14.8; so does a dynamic node-form argument there — a computed index by variable, a computed index by template literal (`` text(SPEC[`a`]) ``, the module holding `a`: template literals are not static), an optional-chaining chain, and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`text(SPEC.a!)`, `text(SPEC.a as X)`, `text(<X>SPEC.a)` in a `.ts` file, `text(SPEC.a satisfies X)`), each as the `text` argument, the file well-formed — each dynamic form 14.8 located at the call with no edge and no occurrence: `occurrences` on the failing workspace exits 1 with its full answer, the one 14.8 finding accompanying it located as `build`'s is, and lists no record; and so do a zero-argument and a two-argument `text(...)` call: 14.8's arity clause holds in either language, the MDX arms being T2.4-3 (SPEC 4.3, 2.4, 4.5, 5.7, 11.2, 11.3)",
+    "a string argument to `text` in a TypeScript file fails with 14.8; so does a dynamic node-form argument there — a computed index by variable, a computed index by numeric literal (`text(SPEC[1])`, the module holding a top-level section `1`), a computed index by template literal (`` text(SPEC[`a`]) ``, the module holding `a`: template literals are not static), an optional-chaining chain, a parenthesized chain (`text((SPEC.a))` and the partly parenthesized `text((SPEC).a)`), and a parenthesized index (`text(SPEC[(\"a\")])`), never 14.18: a non-static `text(...)` argument is an invalid argument, not unsupported usage — and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`text(SPEC.a!)`, `text(SPEC.a as X)`, `text(<X>SPEC.a)` in a `.ts` file, `text(SPEC.a satisfies X)`), each as the `text` argument, the file well-formed — each dynamic form 14.8 located at the call with no edge and no occurrence: `occurrences` on the failing workspace exits 1 with its full answer, the one 14.8 finding accompanying it located as `build`'s is, and lists no record; and so do a zero-argument and a two-argument `text(...)` call: 14.8's arity clause holds in either language, the MDX arms being T2.4-3; every argument of a spec module's `text` call is a sanctioned use: for `text(SPEC.a, SPEC.b)`, both nodes of the callee's own module, `build` and `check` each report exactly one finding, 14.8 located at the call, no 14.18 beside it, and for its cross-module variant `text(SPEC.a, B.b)`, `B` another spec module's default binding, the same single finding, neither 14.18 nor 14.11 — a call condition 8 reports for its argument count is that condition alone (SPEC 4.3, 2.4, 4.5, 5.7, 11.2, 11.3, 14.11, 14.18)",
   run: async (product) => {
     for (const { arm, app } of T4_3_2_LAID_OUT_ARMS) {
       const at = arm.lines.indexOf(arm.offending);
@@ -601,15 +784,49 @@ const T4_3_2 = defineProductTest({
       const context = `T4.3-2 \`build --json\` over ${arm.name}`;
       await withWorkspace(
         SPEC_AND_CODE_CONFIG,
-        { ...T4_3_2_SPEC_FILES, "src/app.ts": app },
+        { ...T4_3_2_SPEC_FILES, ...arm.extraSpecFiles, "src/app.ts": app },
         async (workspace) => {
           const findings = await buildFindings(product, workspace, context);
-          assertConditionCounts(findings, { "14.8": 1 }, context);
+          assertConditionCounts(
+            findings,
+            { "14.8": 1 },
+            t432CountContext(arm, context),
+          );
           assertFindingLocated(
             findings[0]!,
             { file: "src/app.ts", window },
             `${context}: the 14.8 finding`,
           );
+          if (arm.atCheck) {
+            // `check` performs all build validations (SPEC 12.2); on the
+            // same never-built failing workspace the condition is counted
+            // exactly, 14.10 included (module header).
+            const checkContext = `T4.3-2 \`check --json\` over ${arm.name}`;
+            const checked = await runFindingsReport(
+              product,
+              workspace,
+              ["check", "--json"],
+              1,
+              `${checkContext} — \`check\` performs all build validations ` +
+                `and exits 1 on any finding (SPEC 12.2, 14.8)`,
+            );
+            assertConditionCounts(
+              checked,
+              { "14.8": 1 },
+              t432CountContext(
+                arm,
+                `${checkContext} — the call's finding and nothing beside ` +
+                  `it: the never-built failing workspace holds no record, ` +
+                  `and 14.10's mismatch forms go unreported there (SPEC ` +
+                  `12.2, 14.10)`,
+              ),
+            );
+            assertFindingLocated(
+              checked[0]!,
+              { file: "src/app.ts", window },
+              `${checkContext}: the 14.8 finding, located as \`build\`'s is`,
+            );
+          }
           if (arm.dynamicNodeForm) {
             // "No edge, no occurrence": `query edges` refuses to answer on a
             // failing workspace (13.3), so the occurrence record is the
