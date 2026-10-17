@@ -144,9 +144,10 @@
 //   that reads or writes through the link sees a valid durable file and
 //   proceeds; the exit-code and whole-workspace byte-compares then fail it
 //   ("never read, appended, or replaced"). On `build --json` and `check
-//   --json` the 14.13/14.21 condition identities are asserted leniently per
-//   the T6.1-3 and T10.1-4 precedents (the staged condition present;
-//   cascades unpinned), and so is the concern information SPEC 14 requires:
+//   --json` the 14.13/14.21 condition identities are asserted leniently
+//   (the staged condition present; cascades unpinned — the T10.1-4
+//   precedent; T6.1-3 pins exactly the one journal finding on its own
+//   stagings), and so is the concern information SPEC 14 requires:
 //   a journal or session condition has no in-source location and carries
 //   the path it concerns (SPEC 14, 12.7), so every 14.13 finding of `build
 //   --json` and `check --json` carries the one journal's path,

@@ -62,11 +62,14 @@
 //   citing line/entry 2 (`line 2`, `entry 2`, or a `journal:2` file:line
 //   form). A journal condition has no in-source location and carries the
 //   path it concerns (SPEC 14, 12.7), and the workspace has one journal
-//   (SPEC 6.1): in every arm, each 14.13 finding carries `.xspec/journal` as
-//   its `path` and empty `locations`, so the line is named in the message
-//   alone. The garbage sits on line 2 (one legitimate entry precedes it), so
-//   a finding naming only line 1, or the journal as a whole without naming
-//   the line, fails — the discrimination the TEST-SPEC asks for.
+//   (SPEC 6.1): in every arm, the one 14.13 finding each of `check`,
+//   `build`, and the gated `ids` reports — the journal error being the
+//   workspace's one defect (`assertReportsJournalError`) — carries
+//   `.xspec/journal` as its `path` and empty `locations`, so the line is
+//   named in the message alone, at each of the three. The garbage sits on
+//   line 2 (one legitimate entry precedes it), so a finding naming only
+//   line 1, or the journal as a whole without naming the line, fails — the
+//   discrimination the TEST-SPEC asks for.
 //
 // Staged-source records (TEST-SPEC S-9's before-any-product clause;
 // helpers/staged-mdx.ts, helpers/staged-ts.ts): T6.1-3's directory- and
@@ -87,7 +90,6 @@ import {
   decodeAtReport,
   decodeCoverageReport,
   decodeExportReport,
-  decodeFindingsReport,
   decodeIdsReport,
   decodeImpactReport,
   decodeInventoryDocument,
@@ -123,10 +125,11 @@ import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
-  assertFindingConcernsPath,
+  assertConditionCounts,
   assertSameJson,
   buildOk,
   expectExit,
+  runFindingsReport,
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
@@ -714,7 +717,7 @@ const T6_1_2 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T6.1-3 — integrity (14.13 at `check`)
+// T6.1-3 — integrity (14.13 at `check`, `build`, and a gated `ids`)
 // ---------------------------------------------------------------------------
 
 // Deliberately structureless bytes no conforming entry format accepts — the
@@ -724,60 +727,105 @@ const T6_1_2 = defineProductTest({
 const GARBAGE_LINE = "?? harness-injected garbage: not a journal entry ??";
 
 /**
- * `check --json` over a workspace staged with a journal error: exit 1 with
- * at least one condition-14.13 finding (SPEC 12.2, 14.13), each carrying the
- * journal path `.xspec/journal` as its 12.7 `path` and empty `locations` — a
- * journal condition has no in-source location and carries the path it
- * concerns (SPEC 14, 12.7), and the workspace has one journal (SPEC 6.1), so
- * every journal error concerns it. Other findings are tolerated — whether
- * the journal error masks or cascades into further findings is not pinned
- * here. Returns the 14.13 findings.
+ * The three commands T6.1-3 drives over each journal-error staging, in its
+ * TEST-SPEC order, each under `--json`: `check` (SPEC 12.2: every build
+ * validation, journal errors included), `build` (SPEC 14: each condition is
+ * reported by `build` and `check` unless its entry states otherwise, and
+ * 14.13's states nothing), and the gated read `ids` (SPEC 13.3: on a
+ * workspace failing `build`'s validations, journal errors included, the
+ * gate reports exactly the findings a `build` would now report, and the
+ * read exits 1 without answering). Every report is the 12.7 findings-only
+ * document, `ids`' too — a refusing read's findings are its whole report
+ * (SPEC 12.7, 13.3) — so an `ids` answer beside the findings fails the
+ * form-exact decode.
  */
-async function checkReportsJournalError(
+const JOURNAL_ERROR_COMMANDS: readonly (readonly string[])[] = [
+  ["check", "--json"],
+  ["build", "--json"],
+  ["ids", "--json"],
+];
+
+/**
+ * One command's report over a workspace staged with a journal error and no
+ * other defect: exit 1 (SPEC 12.0: findings), and as its entire stdout the
+ * 12.7 findings-only document, decoded form-exact (H-3;
+ * `runFindingsReport`), holding exactly one finding, the journal error
+ * (`{ "14.13": 1 }` over the pinned token table, so its code is exactly
+ * `journal-error`). Nothing else is reportable there: the sources and the
+ * configuration are valid, so the journal error is the one validation
+ * `build` fails (SPEC 12.1, 14), and `check`'s staleness stays silent — on
+ * a workspace failing `build`'s validations 14.10's mismatch forms are
+ * undetectable, and the record, readable and listing only paths still
+ * generated, raises neither of the forms reported whatever the sources'
+ * validity (SPEC 14.10) — so a phantom finding beside it, or the one error
+ * reported twice, fails (SPEC 14: each present condition is reported; the
+ * gate's one finding is T13.3-3's reading too). The finding is asserted
+ * form-exact (TEST-SPEC T6.1-3; SPEC 12.7): `code` `"journal-error"`,
+ * `path` exactly `".xspec/journal"` — 14.13's concerned path is the journal
+ * path, and the workspace has one journal (SPEC 6.1) — and `locations`
+ * `[]`: a journal condition has no in-source location (SPEC 14), so a
+ * product reporting the bad line as a location in `.xspec/journal` with
+ * `path` `null` fails. Returns the finding.
+ */
+async function assertReportsJournalError(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<Finding> {
+  const label = `${context}: \`${argv.join(" ")}\``;
+  const findings = await runFindingsReport(
+    product,
+    workspace,
+    argv,
+    1,
+    `${label} — a journal error is a finding at \`check\`, at \`build\`, ` +
+      `and at the gate of \`ids\`, which answers nothing: exit 1, the ` +
+      `findings-only report as the entire stdout (SPEC 12.0, 12.7, 13.3, ` +
+      `14.13)`,
+  );
+  assertConditionCounts(
+    findings,
+    { "14.13": 1 },
+    `${label} — exactly the staged journal error, the workspace's one ` +
+      `defect, is reported (SPEC 14, 14.13, 13.3)`,
+  );
+  const finding = findings[0] as Finding;
+  assertSameJson(
+    { code: finding.code, path: finding.path, locations: finding.locations },
+    { code: "journal-error", path: JOURNAL_PATH, locations: [] },
+    `${label} — the journal error's finding, form-exact: code ` +
+      `"journal-error", the journal path ".xspec/journal" as its concerned ` +
+      `path, and empty locations — a journal condition has no in-source ` +
+      `location, so the line is named, never located (SPEC 12.7, 14, ` +
+      `14.13); its message: ${JSON.stringify(finding.message)}`,
+  );
+  return finding;
+}
+
+/**
+ * T6.1-3's three commands over one staged journal error, one after another
+ * on the same workspace — a conforming run of each modifies nothing (SPEC
+ * 12.1: a failing `build`; 13.3: the gate; 12.2: `check` reports, never
+ * refreshes), so each meets the same staged state — each report asserted by
+ * `assertReportsJournalError`; `verifyFinding`, where given, asks each
+ * command's finding more (the garbage-line arm: the line named).
+ */
+async function assertJournalErrorAtEachCommand(
   product: ProductBinding,
   workspace: TestWorkspace,
   context: string,
-): Promise<readonly Finding[]> {
-  const label = `${context}: \`check --json\``;
-  const result = await expectExit(
-    product,
-    workspace,
-    ["check", "--json"],
-    1,
-    label,
-  );
-  const findings = decodeFindingsReport(
-    parseJsonStdout(result, label),
-    label,
-  ).findings;
-  const journalFindings = findings.filter(
-    (finding) => finding.condition === "14.13",
-  );
-  if (journalFindings.length === 0) {
-    fail(
-      `${context}: \`check\` must report the journal error with condition ` +
-        `14.13 (SPEC 12.2, 13.4, 14.13); reported conditions: ` +
-        `${JSON.stringify(findings.map((finding) => finding.condition))}`,
+  verifyFinding?: (finding: Finding, label: string) => void,
+): Promise<void> {
+  for (const argv of JOURNAL_ERROR_COMMANDS) {
+    const finding = await assertReportsJournalError(
+      product,
+      workspace,
+      argv,
+      context,
     );
+    verifyFinding?.(finding, `${context}: \`${argv.join(" ")}\``);
   }
-  for (const [index, finding] of journalFindings.entries()) {
-    const findingContext =
-      `${context}: 14.13 finding ${String(index + 1)} of ` +
-      `${String(journalFindings.length)}`;
-    assertFindingConcernsPath(
-      finding,
-      JOURNAL_PATH,
-      `${findingContext} — a journal condition carries the journal path it ` +
-        `concerns, and the workspace has one journal (SPEC 14, 12.7, 6.1)`,
-    );
-    assertSameJson(
-      finding.locations,
-      [],
-      `${findingContext} — a journal condition has no in-source location, ` +
-        `so its locations are empty (SPEC 14, 12.7)`,
-    );
-  }
-  return journalFindings;
 }
 
 /**
@@ -785,7 +833,7 @@ async function checkReportsJournalError(
  * operationalization, see the module header): the message echoing the
  * garbage line or citing line/entry 2. A journal condition carries the
  * journal path it concerns and no in-source location (SPEC 14, 12.7) —
- * `checkReportsJournalError` asserts both — so the line is named in the
+ * `assertReportsJournalError` asserts both — so the line is named in the
  * message alone.
  */
 function findingNamesGarbageLine(finding: Finding): boolean {
@@ -797,7 +845,7 @@ function findingNamesGarbageLine(finding: Finding): boolean {
 const T6_1_3 = defineProductTest({
   id: "T6.1-3",
   title:
-    "`check` reports a malformed journal (garbage line) with 14.13, naming the line, and reports a journal path occupied by a directory or by a symbolic link as a journal error 14.13 (SPEC 6.1, 12.2, 13.4, 14.13)",
+    "`check`, `build`, and a gated `ids` (answering nothing) each report a malformed journal (garbage line) with 14.13, naming the line, and a journal path occupied by a directory or by a symbolic link as a journal error 14.13 — each exit 1 with exactly that one finding, form-exact: code `journal-error`, path `.xspec/journal`, locations [] (SPEC 6.1, 12.1, 12.2, 12.7, 13.3, 13.4, 14.13)",
   run: async (product) => {
     // --- Garbage line: one legitimate entry, then harness-appended garbage
     // on line 2 ---
@@ -835,20 +883,22 @@ const T6_1_3 = defineProductTest({
       ]);
       await workspace.file(JOURNAL_PATH, tampered);
 
-      const journalFindings = await checkReportsJournalError(
+      await assertJournalErrorAtEachCommand(
         product,
         workspace,
         context,
+        (finding, label) => {
+          if (!findingNamesGarbageLine(finding)) {
+            fail(
+              `${label}: the 14.13 finding must name the malformed line — ` +
+                `the garbage on line 2 (SPEC 14.13 "naming the lines") — ` +
+                `in its message, a journal condition having no in-source ` +
+                `location (SPEC 14, 12.7): the garbage line's text or a ` +
+                `line/entry-2 citation; got ${JSON.stringify(finding)}`,
+            );
+          }
+        },
       );
-      if (!journalFindings.some(findingNamesGarbageLine)) {
-        fail(
-          `${context}: the 14.13 finding must name the malformed line — the ` +
-            `garbage on line 2 (SPEC 14.13 "naming the lines") — in its ` +
-            `message, a journal condition having no in-source location ` +
-            `(SPEC 14, 12.7): the garbage line's text or a line/entry-2 ` +
-            `citation; got ${JSON.stringify(journalFindings)}`,
-        );
-      }
     });
 
     // --- Journal path occupied by a directory ---
@@ -860,14 +910,19 @@ const T6_1_3 = defineProductTest({
         `${context}: \`build\` before occupying the journal path`,
       );
       await workspace.dir(JOURNAL_PATH);
-      await checkReportsJournalError(product, workspace, context);
+      await assertJournalErrorAtEachCommand(product, workspace, context);
     });
 
     // --- Journal path occupied by a symbolic link ---
     // The link resolves to an empty plain file — an empty journal is a valid
     // journal, so a product that follows the link instead of treating the
     // occupied path as a journal error (13.4: never read through it) sees
-    // nothing wrong and fails this arm.
+    // nothing wrong and fails this arm. The target lies at the workspace
+    // root, outside the graph-data area `.xspec/` — whose layout is
+    // unenumerated (SPEC 13.3), so nothing staged inside it could be told
+    // apart from graph data — and matches no configured group, so nothing
+    // discovers it (SPEC 7): the journal error stays the workspace's one
+    // defect.
     await withCoreWorkspace(async (workspace) => {
       const context = "T6.1-3 symlink-occupant arm";
       await buildOk(
@@ -875,9 +930,9 @@ const T6_1_3 = defineProductTest({
         workspace,
         `${context}: \`build\` before occupying the journal path`,
       );
-      await workspace.file(".xspec/journal-target", "");
-      await workspace.symlink(JOURNAL_PATH, "journal-target");
-      await checkReportsJournalError(product, workspace, context);
+      await workspace.file("journal-target", "");
+      await workspace.symlink(JOURNAL_PATH, "../journal-target");
+      await assertJournalErrorAtEachCommand(product, workspace, context);
     });
   },
 });
