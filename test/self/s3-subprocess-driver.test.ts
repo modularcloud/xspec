@@ -51,7 +51,11 @@
 // past it, each end in `HarnessStepTimeoutError`, a harness error never a
 // diagnosed failure, while a step within its guard settles as itself; a
 // harness subprocess killed at `execFile`'s timeout reads as such a trip,
-// and nothing else does.
+// and nothing else does. S-3's pre-product checks over spans — the delayed
+// span and the never-terminating invocation run as registered bodies, the
+// registry's declarations, the scan holding every limit the harness sets to
+// an own guard, properties, trial loops, spans counted only once staged, a
+// held run's span — are test/self/s3-hang-guards.test.ts's.
 //
 // The stand-in is a tiny argv-driven Node script written into a fresh
 // TestWorkspace per test (the builder itself is certified by S-2) and driven

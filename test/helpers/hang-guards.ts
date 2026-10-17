@@ -51,6 +51,17 @@
 //   the test's hang ({@link isHangGuardKill}).
 // - Time limits the CI service imposes on a job or runner (E-1) are no
 //   guards of the harness and lie outside this rule.
+// - The rule is checked before any product exists (S-3's pre-product
+//   checks, test/self/s3-hang-guards.test.ts): stand-in spans run through
+//   each machinery a span runs through, at fixed and at staged counts; the
+//   declaration every registered entry receives, walked; and a scan of the
+//   harness's own TypeScript holding every limit it sets to an own guard
+//   (its `OWN_GUARD_SITES`: the per-invocation guard, the step guards, the
+//   bounds of harness steps after a kill, of harness subprocesses, and of
+//   the harness's own helper processes) and every hold it keeps standing to
+//   the driver's `waitForFile`, `holdFileStands`, and `releaseHoldFile` — so
+//   a timer, race, or clock comparison added anywhere else in the span
+//   machinery fails there.
 
 import { ProductRunTimeoutError } from "./subprocess.js";
 
