@@ -6,12 +6,20 @@
 // asserts exact exit codes (H-5) and exact bytes where SPEC.md fixes bytes
 // (H-4), and rejects a product only via diagnosed assertion failures (H-8).
 // Consumer-side contracts run under standard TypeScript tooling with no xspec
-// runtime dependency (SPEC 13.1) through helpers/tooling.ts, in the
-// CommonJS-mode arrangement described in section-4.ts. Consumer files live
-// under `consumer/`, matched by no configured group: this section's tests are
-// "compiled and run under standard TypeScript tooling only" (TEST-SPEC §4
-// preamble), so the staged type errors and probe code are never analyzed by
-// the product and can trigger no xspec finding.
+// runtime dependency (SPEC 13.1) through helpers/tooling.ts, in TEST-SPEC
+// H-2's two fixed configurations as section-4.ts describes: every
+// type-checking verdict, hover, and definition is asserted under each of
+// the two in turn — a clean verdict over the whole program, the generated
+// module and the companions it reaches included; a type-error assertion
+// expecting the program's diagnostics at the consumer references under
+// test alone — and every runtime arm runs under the CommonJS configuration
+// alone, compiled to CommonJS JavaScript written outside the workspace.
+// Consumer files live under `consumer/`, matched by no configured group:
+// this section's tests are "compiled under standard TypeScript tooling
+// only" (TEST-SPEC §4's opening paragraph), so the staged type errors and
+// probe code are never analyzed by the product and can trigger no xspec
+// finding. H-2 supplies no `@types/node`, so a consumer writing to standard
+// output declares the one `process` member it uses itself.
 //
 // Conservative operationalizations (noted per H-4 — where SPEC.md fixes the
 // value, assertions are literal):
@@ -54,17 +62,20 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import type { RunResult } from "../../helpers/subprocess.js";
 import {
-  assertCompileErrorAt,
-  assertNoCompileErrors,
+  assertTypeChecksClean,
+  assertTypeErrorsAt,
+  COMMONJS_CONFIGURATION,
   ConsumerProject,
-  formatConsumerDiagnostic,
+  forEachConsumerProject,
+  withCompiledConsumer,
 } from "../../helpers/tooling.js";
 import type {
+  ConsumerSources,
   FileOffset,
   SourceDefinitionTarget,
 } from "../../helpers/tooling.js";
-import { runConsumer } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { buildOk, readGeneratedModule } from "./support.js";
 
@@ -94,17 +105,33 @@ async function withWorkspace<T>(
   }
 }
 
-/** Emit a consumer project's JavaScript, failing diagnosed when skipped. */
-function emitConsumer(project: ConsumerProject, context: string): void {
-  const emitted = project.emit();
-  if (emitted.emitSkipped) {
-    fail(
-      `${context}: consumer emit was skipped; diagnostics:\n` +
-        emitted.diagnostics
-          .map((diagnostic) => `  ${formatConsumerDiagnostic(diagnostic)}`)
-          .join("\n"),
-    );
-  }
+/**
+ * A runtime consumer under H-2 (module header): its program type-checks
+ * clean under each of H-2's configurations, the whole program included, and
+ * its root file, compiled under the CommonJS configuration alone to
+ * CommonJS JavaScript written outside the workspace, is run there under
+ * plain Node; the run's result is returned for the caller's assertions.
+ */
+async function typeCheckAndRunConsumer(
+  workspace: TestWorkspace,
+  rootFile: string,
+  context: string,
+): Promise<RunResult> {
+  const sources: ConsumerSources = {
+    rootDir: workspace.root,
+    rootFiles: [rootFile],
+  };
+  await forEachConsumerProject(sources, (project) =>
+    assertTypeChecksClean(project, context),
+  );
+  return await withCompiledConsumer(
+    await ConsumerProject.load({
+      ...sources,
+      configuration: COMMONJS_CONFIGURATION,
+    }),
+    context,
+    async (compiled) => await compiled.run(rootFile),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +251,7 @@ const READONLY_CONSUMER = [
 const T4_1_1 = defineProductTest({
   id: "T4.1-1",
   title:
-    "the default export is the root, child sections are properties named by ID segment (bracket notation for a non-identifier segment), a consumer chain to a leaf type-checks, and a chain naming a missing requirement path is a TypeScript type error at the consumer reference (SPEC 4.1, 1.4, 13.1)",
+    "the default export is the root, child sections are properties named by ID segment (bracket notation for a non-identifier segment), a consumer chain to a leaf type-checks clean, and a chain naming a missing requirement path is a TypeScript type error at the consumer reference, the program's diagnostics there alone — each under both of H-2's configurations (SPEC 4.1, 1.4, 13.1)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -239,39 +266,45 @@ const T4_1_1 = defineProductTest({
           "T4.1-1 `build` over the nested spec source",
         );
 
-        const chain = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["consumer/chain.ts"],
-        });
-        assertNoCompileErrors(
-          chain,
-          "T4.1-1 consumer chains from the default export to the leaves — " +
-            "segment-named properties, bracket notation for the " +
-            "non-identifier segment `dash-leaf` (SPEC 4.1, 1.4)",
+        // Under each of H-2's configurations: the chains type-check clean,
+        // the whole program — the generated module and its companions —
+        // included, and the missing paths are type errors at the two
+        // consumer references under test alone (H-2).
+        await forEachConsumerProject(
+          { rootDir: workspace.root, rootFiles: ["consumer/chain.ts"] },
+          (chain) =>
+            assertTypeChecksClean(
+              chain,
+              "T4.1-1 consumer chains from the default export to the leaves — " +
+                "segment-named properties, bracket notation for the " +
+                "non-identifier segment `dash-leaf` (SPEC 4.1, 1.4)",
+            ),
         );
 
-        const missing = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["consumer/missing.ts"],
-        });
-        assertCompileErrorAt(
-          missing,
-          missing.locate("consumer/missing.ts", "SPEC.alpha.beta.nope", {
-            charOffset: "SPEC.alpha.beta.".length,
-          }),
-          {},
-          "T4.1-1 a chain naming a missing leaf (`nope` under " +
-            "`alpha.beta`) must be a TypeScript type error at the consumer " +
-            "reference (SPEC 4.1)",
-        );
-        assertCompileErrorAt(
-          missing,
-          missing.locate("consumer/missing.ts", "SPEC.zeta", {
-            charOffset: "SPEC.".length,
-          }),
-          {},
-          "T4.1-1 a chain naming a missing top-level path (`zeta`) must be " +
-            "a TypeScript type error at the consumer reference (SPEC 4.1)",
+        await forEachConsumerProject(
+          { rootDir: workspace.root, rootFiles: ["consumer/missing.ts"] },
+          (missing) =>
+            assertTypeErrorsAt(
+              missing,
+              [
+                {
+                  at: missing.locate(
+                    "consumer/missing.ts",
+                    "SPEC.alpha.beta.nope",
+                    { charOffset: "SPEC.alpha.beta.".length },
+                  ),
+                },
+                {
+                  at: missing.locate("consumer/missing.ts", "SPEC.zeta", {
+                    charOffset: "SPEC.".length,
+                  }),
+                },
+              ],
+              "T4.1-1 a chain naming a missing leaf (`nope` under " +
+                "`alpha.beta`) and one naming a missing top-level path " +
+                "(`zeta`) must each be a TypeScript type error at the " +
+                "consumer reference, and nothing else diagnosed (SPEC 4.1)",
+            ),
         );
       },
     );
@@ -281,7 +314,7 @@ const T4_1_1 = defineProductTest({
 const T4_1_2 = defineProductTest({
   id: "T4.1-2",
   title:
-    "node properties are readonly: assigning to a node property is a TypeScript type error at the assignment target (SPEC 4.1, 13.1)",
+    "node properties are readonly: assigning to a node property is a TypeScript type error at the assignment target, the program's diagnostics there alone, under both of H-2's configurations (SPEC 4.1, 13.1)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -294,30 +327,35 @@ const T4_1_2 = defineProductTest({
           workspace,
           "T4.1-2 `build` over the nested spec source",
         );
-        const project = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["consumer/readonly.ts"],
-        });
-        assertCompileErrorAt(
-          project,
-          project.locate("consumer/readonly.ts", "SPEC.alpha = SPEC.alpha;", {
-            charOffset: "SPEC.".length,
-          }),
-          {},
-          "T4.1-2 assigning to a root child property (`SPEC.alpha = …`) " +
-            "must be a TypeScript type error (readonly, SPEC 4.1)",
-        );
-        assertCompileErrorAt(
-          project,
-          project.locate(
-            "consumer/readonly.ts",
-            "SPEC.alpha.beta = SPEC.alpha.beta;",
-            { charOffset: "SPEC.alpha.".length },
-          ),
-          {},
-          "T4.1-2 assigning to a nested node property " +
-            "(`SPEC.alpha.beta = …`) must be a TypeScript type error " +
-            "(readonly, SPEC 4.1)",
+        // Under each of H-2's configurations, the two assignment targets
+        // are the program's only diagnosed positions (H-2's type-error
+        // assertion).
+        await forEachConsumerProject(
+          { rootDir: workspace.root, rootFiles: ["consumer/readonly.ts"] },
+          (project) =>
+            assertTypeErrorsAt(
+              project,
+              [
+                {
+                  at: project.locate(
+                    "consumer/readonly.ts",
+                    "SPEC.alpha = SPEC.alpha;",
+                    { charOffset: "SPEC.".length },
+                  ),
+                },
+                {
+                  at: project.locate(
+                    "consumer/readonly.ts",
+                    "SPEC.alpha.beta = SPEC.alpha.beta;",
+                    { charOffset: "SPEC.alpha.".length },
+                  ),
+                },
+              ],
+              "T4.1-2 assigning to a root child property (`SPEC.alpha = …`) " +
+                "and to a nested node property (`SPEC.alpha.beta = …`) must " +
+                "each be a TypeScript type error at the assignment target, " +
+                "and nothing else diagnosed (readonly, SPEC 4.1)",
+            ),
         );
       },
     );
@@ -373,9 +411,12 @@ const OPAQ_ACCEPT_STDOUT =
 
 // The value obtained by each supported child-access operation (and the root
 // itself) is accepted by `text()`, and the calls return the subtree texts at
-// runtime (SPEC 4.1, 4.3).
+// runtime (SPEC 4.1, 4.3). It declares the one `process` member it uses
+// (module header), as the probe consumer below does.
 const OPAQ_ACCEPT_CONSUMER = [
   'import SPEC, { text } from "../specs/OPAQ.xspec";',
+  "",
+  "declare const process: { readonly stdout: { write(chunk: string): boolean } };",
   "",
   "process.stdout.write(text(SPEC));",
   "process.stdout.write(text(SPEC.alpha));",
@@ -446,6 +487,8 @@ const OPAQ_WALK_CAP = 100_000;
 // a pass.
 const OPAQ_PROBE_CONSUMER = [
   'import SPEC from "../specs/OPAQ.xspec";',
+  "",
+  "declare const process: { readonly stdout: { write(chunk: string): boolean } };",
   "",
   "const nodes: readonly unknown[] = [",
   ...OPAQ_NODE_CHAINS.map((chain) => `  ${chain},`),
@@ -657,7 +700,7 @@ function judgeOpaqueProbeReport(observed: unknown): void {
 const T4_1_3 = defineProductTest({
   id: "T4.1-3",
   title:
-    "nodes are opaque tokens: every value obtained by supported child access is accepted by `text()` and returns its subtree text, while a consumer that never imports `text` observes no requirement text on the values reachable by supported operations, a node free to be any runtime value — a primitive, a string token carrying no requirement text included (SPEC 4.1, 4.3, 13.1)",
+    "nodes are opaque tokens: every value obtained by supported child access is accepted by `text()` and returns its subtree text, while a consumer that never imports `text` observes no requirement text on the values reachable by supported operations, a node free to be any runtime value — a primitive, a string token carrying no requirement text included — each consumer type-checking clean under both of H-2's configurations and run compiled under its CommonJS configuration (SPEC 4.1, 4.3, 13.1)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -673,26 +716,20 @@ const T4_1_3 = defineProductTest({
         );
 
         // Supported operations behave as specified: each node value is
-        // accepted by `text()` (type level) and yields its subtree text
-        // (runtime, byte-exact — SPEC 4.3, 1.6).
-        const accept = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["consumer/accept.ts"],
-        });
-        assertNoCompileErrors(
-          accept,
+        // accepted by `text()` (type level, under each of H-2's
+        // configurations) and yields its subtree text (runtime, under its
+        // CommonJS configuration, byte-exact — SPEC 4.3, 1.6).
+        const acceptRun = await typeCheckAndRunConsumer(
+          workspace,
+          "consumer/accept.ts",
           "T4.1-3 every node value obtained by supported child access " +
             "(root included) is accepted by `text()` (SPEC 4.1)",
         );
-        emitConsumer(accept, "T4.1-3 accept consumer");
-        const acceptRun = await runConsumer({
-          dir: workspace.root,
-          entry: "consumer/accept.js",
-        });
         assertExitCode(
           acceptRun,
           0,
-          "T4.1-3 compiled accept consumer under plain Node (SPEC 13.1)",
+          "T4.1-3 compiled accept consumer under plain Node, compiled under " +
+            "H-2's CommonJS configuration outside the workspace (SPEC 13.1)",
         );
         assertBytesEqual(
           acceptRun.stdoutBytes,
@@ -703,25 +740,19 @@ const T4_1_3 = defineProductTest({
 
         // No text as values: the probe consumer never imports `text`,
         // reaches every node by supported child access, and observes no
-        // requirement text on those values.
-        const probe = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["consumer/probe.ts"],
-        });
-        assertNoCompileErrors(
-          probe,
+        // requirement text on those values — type-checked clean under each
+        // of H-2's configurations and run under its CommonJS configuration.
+        const probeRun = await typeCheckAndRunConsumer(
+          workspace,
+          "consumer/probe.ts",
           "T4.1-3 probe consumer (never imports `text`; supported " +
             "operations plus guarded generic inspection)",
         );
-        emitConsumer(probe, "T4.1-3 probe consumer");
-        const probeRun = await runConsumer({
-          dir: workspace.root,
-          entry: "consumer/probe.js",
-        });
         assertExitCode(
           probeRun,
           0,
-          "T4.1-3 compiled probe consumer under plain Node — supported " +
+          "T4.1-3 compiled probe consumer under plain Node, compiled under " +
+            "H-2's CommonJS configuration outside the workspace — supported " +
             "child accesses are harmless at runtime and every unsupported " +
             "probe is guarded (SPEC 4.1, 4.5)",
         );
@@ -943,7 +974,7 @@ const ESC_CONSUMER = [
 const T4_2_3 = defineProductTest({
   id: "T4.2-3",
   title:
-    "own text containing `*/` appears in the documentation comment with each occurrence written `*\\/`, and the generated module still parses under standard tooling (SPEC 4.2, 13.1)",
+    "own text containing `*/` appears in the documentation comment with each occurrence written `*\\/`, and the generated module still parses under standard tooling — a consumer of it type-checking clean, its whole program included, under both of H-2's configurations (SPEC 4.2, 13.1)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -981,16 +1012,18 @@ const T4_2_3 = defineProductTest({
           "T4.2-3 the second `*/` occurrence left unescaped",
         );
         // "Still parses under standard tooling", asserted as the (stronger,
-        // §4-implied) clean strict compile of a consumer program against the
-        // module — parse errors are compile errors.
-        const project = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["consumer/esc.ts"],
-        });
-        assertNoCompileErrors(
-          project,
-          "T4.2-3 consumer against the `*/`-bearing generated module " +
-            "(SPEC 4.2: the module still parses under standard tooling)",
+        // §4-implied) clean type check of a consumer program against the
+        // module under each of H-2's configurations — a verdict over the
+        // whole program, the generated module and its companions included,
+        // so a parse error in either is a diagnostic there.
+        await forEachConsumerProject(
+          { rootDir: workspace.root, rootFiles: ["consumer/esc.ts"] },
+          (project) =>
+            assertTypeChecksClean(
+              project,
+              "T4.2-3 consumer against the `*/`-bearing generated module " +
+                "(SPEC 4.2: the module still parses under standard tooling)",
+            ),
         );
       },
     );
@@ -1079,7 +1112,7 @@ function assertHoverDocumentation(
 const T4_2_4 = defineProductTest({
   id: "T4.2-4",
   title:
-    "under standard TypeScript tooling, go-to-definition on a consumer's node reference resolves into the source `.mdx`: a non-root reference at its corresponding `<S>` section, the root reference (default export) at the start of the file; hover on the reference shows the documentation (SPEC 4.2, 13.1)",
+    "under standard TypeScript tooling, in each of H-2's configurations, go-to-definition on a consumer's node reference resolves into the source `.mdx`: a non-root reference at its corresponding `<S>` section, the root reference (default export) at the start of the file; hover on the reference shows the documentation (SPEC 4.2, 13.1)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -1091,15 +1124,6 @@ const T4_2_4 = defineProductTest({
           product,
           workspace,
           "T4.2-4 `build` over the navigation spec source",
-        );
-        const project = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["consumer/nav.ts"],
-        });
-        assertNoCompileErrors(
-          project,
-          "T4.2-4 navigation consumer (queries run against a checking " +
-            "program)",
         );
 
         // Section construct spans in the pure-ASCII source (SPEC 1.7:
@@ -1113,59 +1137,78 @@ const T4_2_4 = defineProductTest({
         const inAlphaOwn = (offset: number): boolean =>
           offset >= alphaStart && offset < alphaEnd && !inBeta(offset);
 
-        const rootRef = project.locate("consumer/nav.ts", "text(SPEC);", {
-          charOffset: "text(".length,
-        });
-        const alphaRef = project.locate("consumer/nav.ts", "SPEC.alpha.beta", {
-          charOffset: "SPEC.".length,
-        });
-        const betaRef = project.locate("consumer/nav.ts", "SPEC.alpha.beta", {
-          charOffset: "SPEC.alpha.".length,
-        });
+        // Every verdict, definition, and hover under each of H-2's
+        // configurations in turn, with the same expectation (TEST-SPEC §4's
+        // opening paragraph); a failure names its configuration.
+        await forEachConsumerProject(
+          { rootDir: workspace.root, rootFiles: ["consumer/nav.ts"] },
+          (project) => {
+            assertTypeChecksClean(
+              project,
+              "T4.2-4 navigation consumer (queries run against a checking " +
+                "program)",
+            );
 
-        assertSomeDefinition(
-          project.sourceDefinitionsAt(betaRef),
-          (target) =>
-            target.file === "specs/NAV.mdx" && inBeta(target.start.offset),
-          `in specs/NAV.mdx within \`alpha.beta\`'s \`<S>\` construct ` +
-            `[${String(betaStart)}, ${String(betaEnd)})`,
-          "T4.2-4 go-to-definition on the nested node reference `beta`",
-        );
-        assertSomeDefinition(
-          project.sourceDefinitionsAt(alphaRef),
-          (target) =>
-            target.file === "specs/NAV.mdx" && inAlphaOwn(target.start.offset),
-          `in specs/NAV.mdx within \`alpha\`'s own \`<S>\` construct ` +
-            `[${String(alphaStart)}, ${String(alphaEnd)}) excluding the ` +
-            `nested \`alpha.beta\` construct`,
-          "T4.2-4 go-to-definition on the mid-chain node reference `alpha`",
-        );
-        assertSomeDefinition(
-          project.sourceDefinitionsAt(rootRef),
-          (target) =>
-            target.file === "specs/NAV.mdx" && target.start.offset === 0,
-          "in specs/NAV.mdx at the start of the file (offset 0 — the root " +
-            "has no `<S>` section, SPEC 1.2, 4.2)",
-          "T4.2-4 go-to-definition on the root reference (default export)",
-        );
+            const rootRef = project.locate("consumer/nav.ts", "text(SPEC);", {
+              charOffset: "text(".length,
+            });
+            const alphaRef = project.locate(
+              "consumer/nav.ts",
+              "SPEC.alpha.beta",
+              { charOffset: "SPEC.".length },
+            );
+            const betaRef = project.locate(
+              "consumer/nav.ts",
+              "SPEC.alpha.beta",
+              { charOffset: "SPEC.alpha.".length },
+            );
 
-        assertHoverDocumentation(
-          project,
-          rootRef,
-          "NAV-ROOT-DOC",
-          "T4.2-4 hover on the root reference",
-        );
-        assertHoverDocumentation(
-          project,
-          alphaRef,
-          "NAV-ALPHA-DOC",
-          "T4.2-4 hover on the `alpha` reference",
-        );
-        assertHoverDocumentation(
-          project,
-          betaRef,
-          "NAV-BETA-DOC",
-          "T4.2-4 hover on the `beta` reference",
+            assertSomeDefinition(
+              project.sourceDefinitionsAt(betaRef),
+              (target) =>
+                target.file === "specs/NAV.mdx" && inBeta(target.start.offset),
+              `in specs/NAV.mdx within \`alpha.beta\`'s \`<S>\` construct ` +
+                `[${String(betaStart)}, ${String(betaEnd)})`,
+              "T4.2-4 go-to-definition on the nested node reference `beta`",
+            );
+            assertSomeDefinition(
+              project.sourceDefinitionsAt(alphaRef),
+              (target) =>
+                target.file === "specs/NAV.mdx" &&
+                inAlphaOwn(target.start.offset),
+              `in specs/NAV.mdx within \`alpha\`'s own \`<S>\` construct ` +
+                `[${String(alphaStart)}, ${String(alphaEnd)}) excluding the ` +
+                `nested \`alpha.beta\` construct`,
+              "T4.2-4 go-to-definition on the mid-chain node reference `alpha`",
+            );
+            assertSomeDefinition(
+              project.sourceDefinitionsAt(rootRef),
+              (target) =>
+                target.file === "specs/NAV.mdx" && target.start.offset === 0,
+              "in specs/NAV.mdx at the start of the file (offset 0 — the " +
+                "root has no `<S>` section, SPEC 1.2, 4.2)",
+              "T4.2-4 go-to-definition on the root reference (default export)",
+            );
+
+            assertHoverDocumentation(
+              project,
+              rootRef,
+              "NAV-ROOT-DOC",
+              "T4.2-4 hover on the root reference",
+            );
+            assertHoverDocumentation(
+              project,
+              alphaRef,
+              "NAV-ALPHA-DOC",
+              "T4.2-4 hover on the `alpha` reference",
+            );
+            assertHoverDocumentation(
+              project,
+              betaRef,
+              "NAV-BETA-DOC",
+              "T4.2-4 hover on the `beta` reference",
+            );
+          },
         );
       },
     );

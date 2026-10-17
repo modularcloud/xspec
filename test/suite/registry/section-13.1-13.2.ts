@@ -6,8 +6,12 @@
 // asserts exact exit codes (H-5) and exact bytes where SPEC.md fixes bytes
 // (H-4), and rejects a product only via diagnosed assertion failures (H-8).
 // Consumer-side contracts run under standard TypeScript tooling with no xspec
-// runtime dependency (SPEC 13.1) through helpers/tooling.ts, in the
-// CommonJS-mode arrangement described in section-4.ts.
+// runtime dependency (SPEC 13.1) through helpers/tooling.ts, on its NodeNext
+// path (that module's header): consumer files compile and run in CommonJS
+// mode beside the sources, where the spec-fixed `./NAME.xspec` specifier
+// resolves by Node's extension lookup — until FIX_PLAN Task 26 of the plan
+// written at 2a2b94e moves T13.1-2 onto TEST-SPEC H-2's two fixed
+// configurations, as the §4 consumers are (section-4.ts).
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - T13.1-1's generated-file sweep diffs a whole-workspace byte snapshot

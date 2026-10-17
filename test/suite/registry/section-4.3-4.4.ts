@@ -7,8 +7,16 @@
 // (H-4), decodes reports through the H-3 adapters, and rejects a product only
 // via diagnosed assertion failures (H-8). Consumer-side contracts run under
 // standard TypeScript tooling with no xspec runtime dependency (SPEC 13.1)
-// through helpers/tooling.ts, in the CommonJS-mode arrangement described in
-// section-4.ts. Files under `consumer/` are matched by no configured group
+// through helpers/tooling.ts, in TEST-SPEC H-2's two fixed configurations
+// as section-4.ts describes: every type-checking verdict is made under each
+// of the two in turn — a clean verdict over the whole program, the
+// generated modules and the companions they reach included; a type-error
+// assertion expecting the program's diagnostics at the consumer references
+// under test alone — and every runtime arm runs under the CommonJS
+// configuration alone, compiled to CommonJS JavaScript written outside the
+// workspace and run there under plain Node. A consumer writing to standard
+// output declares the one `process` member it uses (H-2 supplies no
+// `@types/node`). Files under `consumer/` are matched by no configured group
 // (never analyzed by the product); files under `src/` are discovered
 // code-group sources.
 //
@@ -16,10 +24,12 @@
 // the stated observables are asserted):
 // - T4.3-1 "returns the node's subtree text as a `string`" is asserted at the
 //   type level (each call result assigned to a `string`-annotated binding
-//   compiles clean), at runtime (`typeof` is "string"), and on bytes (stdout
-//   equals the hand-derived expansions, SPEC 1.6/3). "From the calling code
-//   location": the calls sit at file top level, so the location is the file
-//   (SPEC 4.6), asserted as the file's complete outgoing edge set.
+//   type-checks clean under each of H-2's configurations), at runtime
+//   (`typeof` is "string"), and on bytes (stdout equals the hand-derived
+//   expansions, SPEC 1.6/3). "From the calling code location": the calls sit
+//   at file top level, so the location is the file (SPEC 4.6), asserted as
+//   the file's complete outgoing edge set — the file's `process` declaration
+//   names no spec module binding and records nothing.
 // - T4.3-2 arms stage exactly one defect each — the string/dynamic/arity
 //   form. The dynamic arms' chains would resolve to existing nodes if read
 //   statically (`SPEC[key]` with key = "a"; `` SPEC[`a`] `` read as
@@ -77,10 +87,14 @@
 //   either); the invalid-called-path arm (the called module discovered as
 //   `specs/B#.mdx`: 14.19 concerning it beside the 14.11 whose `identities`
 //   are exactly `[]`, the record still listed); plus, over an undiscovered
-//   consumer, the TypeScript type error at the consumer reference and the
-//   runtime throw, reached "via the emitted JS" (standard tsc emits despite
-//   the asserted type error — the TEST-SPEC alternative to suppressing it;
-//   either way at the consumer's responsibility). On `check`, the condition
+//   consumer, the TypeScript type error at the consumer reference — the
+//   program's diagnostics there alone, under each of H-2's configurations —
+//   and the runtime throw, reached "via the emitted JS" under H-2's CommonJS
+//   configuration, written outside the workspace (standard tsc emits
+//   despite the asserted type error — the TEST-SPEC alternative to
+//   suppressing it; either way at the consumer's responsibility — and that
+//   error is a semantic diagnostic, no emit diagnostic, so the emit
+//   proceeds). On `check`, the condition
 //   is counted exactly, 14.10 included: the never-built workspace holds no
 //   record (a failing `build` writes nothing, 12.1), so neither
 //   whatever-validity form of 14.10 exists, and on a workspace failing
@@ -97,10 +111,12 @@
 //   1.5). The consumer reports `{ threw, message, rendering }`, the
 //   rendering (`String(error)`) carried for the diagnosis alone.
 // - T4.4-2 "each alias accepts only its own module's nodes": acceptance is
-//   the clean compile of both own-module calls plus their byte-exact runtime
-//   values; "only" is a compile error at each cross-module argument (the
-//   failing location is the consumer reference under test, TEST-SPEC §4
-//   preamble).
+//   the clean type check of both own-module calls, the whole program
+//   included, under each of H-2's configurations, plus their byte-exact
+//   runtime values under its CommonJS configuration; "only" is a type error
+//   at each cross-module argument, the program's diagnostics there alone
+//   (the consumer references under test, TEST-SPEC §4's opening paragraph,
+//   H-2).
 
 import type {
   Finding,
@@ -125,14 +141,16 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { StagedTs } from "../../helpers/staged-ts.js";
-import type { ProductBinding } from "../../helpers/subprocess.js";
+import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import {
-  assertCompileErrorAt,
-  assertNoCompileErrors,
+  assertTypeChecksClean,
+  assertTypeErrorsAt,
+  COMMONJS_CONFIGURATION,
   ConsumerProject,
-  formatConsumerDiagnostic,
-  runConsumer,
+  forEachConsumerProject,
+  withCompiledConsumer,
 } from "../../helpers/tooling.js";
+import type { ConsumerSources } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
@@ -224,17 +242,35 @@ async function queryEdgesFrom(
   );
 }
 
-/** Emit a consumer project's JavaScript, failing diagnosed when skipped. */
-function emitConsumer(project: ConsumerProject, context: string): void {
-  const emitted = project.emit();
-  if (emitted.emitSkipped) {
-    fail(
-      `${context}: consumer emit was skipped; diagnostics:\n` +
-        emitted.diagnostics
-          .map((diagnostic) => `  ${formatConsumerDiagnostic(diagnostic)}`)
-          .join("\n"),
-    );
-  }
+/**
+ * Compile a consumer program under H-2's CommonJS configuration alone to
+ * CommonJS JavaScript written outside the workspace, and run its root file
+ * there under plain Node (module header); the run's result is returned for
+ * the caller's assertions. The program's type-checking verdicts are the
+ * caller's, made under each of H-2's configurations.
+ */
+async function runCompiledConsumer(
+  workspace: TestWorkspace,
+  rootFile: string,
+  context: string,
+): Promise<RunResult> {
+  return await withCompiledConsumer(
+    await ConsumerProject.load({
+      rootDir: workspace.root,
+      rootFiles: [rootFile],
+      configuration: COMMONJS_CONFIGURATION,
+    }),
+    context,
+    async (compiled) => await compiled.run(rootFile),
+  );
+}
+
+/** A consumer program's sources: one root file in the workspace. */
+function consumerSources(
+  workspace: TestWorkspace,
+  rootFile: string,
+): ConsumerSources {
+  return { rootDir: workspace.root, rootFiles: [rootFile] };
 }
 
 // ---------------------------------------------------------------------------
@@ -270,9 +306,12 @@ const T4_3_1_LIB_SUBTREE = "EMBED-PAYLOAD core.";
 // `string` annotations make the declared return type an assertion, and the
 // runtime `typeof` line makes the runtime type one. Storing and passing the
 // call *results* is unrestricted — the 4.5 usage rules bind the spec-module
-// bindings, not the returned strings.
+// bindings, not the returned strings. The file declares the one `process`
+// member it uses (module header).
 const T4_3_1_CONSUMER_SOURCE = [
   'import SPEC, { text } from "../specs/MAIN.xspec";',
+  "",
+  "declare const process: { readonly stdout: { write(chunk: string): boolean } };",
   "",
   "const alpha: string = text(SPEC.alpha);",
   "const lib: string = text(SPEC.lib);",
@@ -288,7 +327,7 @@ const T4_3_1_EXPECTED_STDOUT =
 const T4_3_1 = defineProductTest({
   id: "T4.3-1",
   title:
-    "`text(node)` returns the node's subtree text as a `string` at runtime — byte-compared to the expected expansion — and records an `embeds` edge from the calling code location to the node, observed via `query edges` (SPEC 4.3, 4.6, 1.6, 13.1)",
+    "`text(node)` returns the node's subtree text as a `string` at runtime — byte-compared to the expected expansion, the consumer type-checking clean under both of H-2's configurations and run compiled under its CommonJS configuration — and records an `embeds` edge from the calling code location to the node, observed via `query edges` (SPEC 4.3, 4.6, 1.6, 13.1)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -319,27 +358,28 @@ const T4_3_1 = defineProductTest({
         );
 
         // Under standard tooling (SPEC 13.1): the `string`-annotated
-        // bindings type-check, and the compiled consumer's stdout carries
-        // the runtime `typeof`s plus both subtree texts, byte-exact.
-        const project = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["src/app.ts"],
-        });
-        assertNoCompileErrors(
-          project,
+        // bindings type-check clean under each of H-2's configurations, the
+        // whole program included, and the consumer compiled under its
+        // CommonJS configuration writes the runtime `typeof`s plus both
+        // subtree texts, byte-exact.
+        const consumerContext =
           "T4.3-1 consumer assigning each `text(node)` result to a " +
-            "`string`-annotated binding (SPEC 4.3: returns the subtree text " +
-            "as a `string`)",
+          "`string`-annotated binding (SPEC 4.3: returns the subtree text " +
+          "as a `string`)";
+        await forEachConsumerProject(
+          consumerSources(workspace, "src/app.ts"),
+          (project) => assertTypeChecksClean(project, consumerContext),
         );
-        emitConsumer(project, "T4.3-1 consumer");
-        const run = await runConsumer({
-          dir: workspace.root,
-          entry: "src/app.js",
-        });
+        const run = await runCompiledConsumer(
+          workspace,
+          "src/app.ts",
+          consumerContext,
+        );
         assertExitCode(
           run,
           0,
-          "T4.3-1 compiled consumer under plain Node (SPEC 13.1)",
+          "T4.3-1 compiled consumer under plain Node, compiled under H-2's " +
+            "CommonJS configuration outside the workspace (SPEC 13.1)",
         );
         assertBytesEqual(
           run.stdoutBytes,
@@ -803,7 +843,9 @@ async function occurrencesOnFailingWorkspace(
 // the call carries the expected (asserted) type error, tsc emits regardless,
 // and the emitted JS reports whether the call threw, the thrown value's
 // `message` property when it is a string (the datum SPEC 4.4 binds; null
-// otherwise), and `String(error)` for the diagnosis alone. A staged-source
+// otherwise), and `String(error)` for the diagnosis alone. It declares the
+// one `process` member it uses (module header), so the call's argument is
+// its only diagnostic under either of H-2's configurations. A staged-source
 // record (S-9's timing clause): the consumer facet's workspace is created
 // after the body's first invocation.
 const T4_4_1_CONSUMER_SOURCE = stagedTs(
@@ -811,6 +853,8 @@ const T4_4_1_CONSUMER_SOURCE = stagedTs(
   [
     'import A from "../specs/A.xspec";',
     'import { text as textB } from "../specs/B.xspec";',
+    "",
+    "declare const process: { readonly stdout: { write(chunk: string): boolean } };",
     "",
     "let threw = false;",
     "let message: string | null = null;",
@@ -874,7 +918,7 @@ const T4_4_1_MESSAGE_PATHS = [
 const T4_4_1 = defineProductTest({
   id: "T4.4-1",
   title:
-    "passing a node from module A to module B's `text` export is 14.11: `build` and `check` report exactly one condition-11 finding located at the call, callee through closing parenthesis, `identities` exactly [\"specs/B.mdx\"], exit 1, and the call's `embeds` occurrence stands beside it — `occurrences` on the failing workspace lists exactly one record, source the whole-file location, target specs/A.mdx#a; `textB(A.missing)` is condition 7 alone and `textB(A.a!)` condition 8 alone, no record for either; with the called module discovered as `specs/B#.mdx` the finding's `identities` are exactly [] beside 14.19, the record still listed; at an undiscovered consumer the call is a TypeScript type error and, executed via the emitted JS, throws an error whose message contains both `specs/A.mdx` and `specs/B.mdx` (SPEC 4.4, 14.11, 5.7, 11.2, 1.5, 13.1)",
+    "passing a node from module A to module B's `text` export is 14.11: `build` and `check` report exactly one condition-11 finding located at the call, callee through closing parenthesis, `identities` exactly [\"specs/B.mdx\"], exit 1, and the call's `embeds` occurrence stands beside it — `occurrences` on the failing workspace lists exactly one record, source the whole-file location, target specs/A.mdx#a; `textB(A.missing)` is condition 7 alone and `textB(A.a!)` condition 8 alone, no record for either; with the called module discovered as `specs/B#.mdx` the finding's `identities` are exactly [] beside 14.19, the record still listed; at an undiscovered consumer the call is a TypeScript type error, the program's diagnostics at its argument alone under both of H-2's configurations, and, executed via the JS emitted under H-2's CommonJS configuration, throws an error whose message contains both `specs/A.mdx` and `specs/B.mdx` (SPEC 4.4, 14.11, 5.7, 11.2, 1.5, 13.1)",
   run: async (product) => {
     // Facet 1 — the home-context condition on `build` and `check`, and the
     // occurrence beside it.
@@ -1077,32 +1121,40 @@ const T4_4_1 = defineProductTest({
           workspace,
           "T4.4-1 `build` over the two spec modules",
         );
-        const project = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["consumer/cross.ts"],
-        });
-        assertCompileErrorAt(
-          project,
-          project.locate("consumer/cross.ts", T4_4_1_CROSS_CALL, {
-            charOffset: "textB(".length,
-          }),
-          {},
-          "T4.4-1 passing module A's node to module B's `text` export must " +
-            "be a TypeScript type error at the consumer reference " +
-            "(SPEC 4.4, 14.11)",
+        // Under each of H-2's configurations, the cross-module argument is
+        // the program's one diagnosed position (H-2's type-error
+        // assertion).
+        await forEachConsumerProject(
+          consumerSources(workspace, "consumer/cross.ts"),
+          (project) =>
+            assertTypeErrorsAt(
+              project,
+              [
+                {
+                  at: project.locate("consumer/cross.ts", T4_4_1_CROSS_CALL, {
+                    charOffset: "textB(".length,
+                  }),
+                },
+              ],
+              "T4.4-1 passing module A's node to module B's `text` export " +
+                "must be a TypeScript type error at the consumer reference, " +
+                "and nothing else diagnosed (SPEC 4.4, 14.11)",
+            ),
         );
 
         // "Executed via the emitted JS": standard tsc emits despite the
-        // asserted type error, and the call must throw at runtime.
-        emitConsumer(project, "T4.4-1 cross-module consumer");
-        const run = await runConsumer({
-          dir: workspace.root,
-          entry: "consumer/cross.js",
-        });
+        // asserted type error — compiled under H-2's CommonJS configuration
+        // alone, outside the workspace — and the call must throw at runtime.
+        const run = await runCompiledConsumer(
+          workspace,
+          "consumer/cross.ts",
+          "T4.4-1 cross-module consumer",
+        );
         assertExitCode(
           run,
           0,
-          "T4.4-1 compiled cross-module consumer under plain Node — the " +
+          "T4.4-1 compiled cross-module consumer under plain Node, compiled " +
+            "under H-2's CommonJS configuration outside the workspace — the " +
             "consumer catches the expected throw itself (SPEC 13.1)",
         );
         const outcome = decodeCrossOutcome(
@@ -1146,19 +1198,22 @@ const T4_4_1 = defineProductTest({
 // T4.4-2 — two spec modules in one file, aliased text per module
 // ---------------------------------------------------------------------------
 
-// Acceptance: both own-module calls in one file compile clean and return
-// their own module's subtree texts at runtime.
+// Acceptance: both own-module calls in one file type-check clean and return
+// their own module's subtree texts at runtime. The file declares the one
+// `process` member it uses (module header).
 const T4_4_2_ACCEPT_SOURCE = [
   'import A, { text as textA } from "../specs/A.xspec";',
   'import B, { text as textB } from "../specs/B.xspec";',
+  "",
+  "declare const process: { readonly stdout: { write(chunk: string): boolean } };",
   "",
   "process.stdout.write(textA(A.a));",
   "process.stdout.write(textB(B.b));",
   "",
 ].join("\n");
 
-// "Only": each alias rejects the other module's node — a compile error at
-// each cross-module argument.
+// "Only": each alias rejects the other module's node — a type error at each
+// cross-module argument, and nothing else diagnosed.
 const T4_4_2_REJECT_SOURCE = [
   'import A, { text as textA } from "../specs/A.xspec";',
   'import B, { text as textB } from "../specs/B.xspec";',
@@ -1171,7 +1226,7 @@ const T4_4_2_REJECT_SOURCE = [
 const T4_4_2 = defineProductTest({
   id: "T4.4-2",
   title:
-    "consuming two spec modules in one file with aliased `text` imports: each alias accepts only its own module's nodes — own-module calls compile clean and return their texts, cross-module arguments are TypeScript type errors at the consumer references (SPEC 4.4, 13.1)",
+    "consuming two spec modules in one file with aliased `text` imports: each alias accepts only its own module's nodes — own-module calls type-check clean and return their texts, cross-module arguments are TypeScript type errors at the consumer references, the program's diagnostics there alone — each verdict under both of H-2's configurations, the runtime under its CommonJS configuration (SPEC 4.4, 13.1)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -1187,24 +1242,23 @@ const T4_4_2 = defineProductTest({
           "T4.4-2 `build` over the two spec modules",
         );
 
-        const accept = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["consumer/accept.ts"],
-        });
-        assertNoCompileErrors(
-          accept,
+        const acceptContext =
           "T4.4-2 one file consuming two spec modules with aliased `text` " +
-            "imports: each alias accepts its own module's nodes (SPEC 4.4)",
+          "imports: each alias accepts its own module's nodes (SPEC 4.4)";
+        await forEachConsumerProject(
+          consumerSources(workspace, "consumer/accept.ts"),
+          (accept) => assertTypeChecksClean(accept, acceptContext),
         );
-        emitConsumer(accept, "T4.4-2 accept consumer");
-        const run = await runConsumer({
-          dir: workspace.root,
-          entry: "consumer/accept.js",
-        });
+        const run = await runCompiledConsumer(
+          workspace,
+          "consumer/accept.ts",
+          acceptContext,
+        );
         assertExitCode(
           run,
           0,
-          "T4.4-2 compiled accept consumer under plain Node (SPEC 13.1)",
+          "T4.4-2 compiled accept consumer under plain Node, compiled under " +
+            "H-2's CommonJS configuration outside the workspace (SPEC 13.1)",
         );
         assertBytesEqual(
           run.stdoutBytes,
@@ -1213,27 +1267,31 @@ const T4_4_2 = defineProductTest({
             "text at runtime, byte-exact (SPEC 4.4, 4.3, 1.6)",
         );
 
-        const reject = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["consumer/reject.ts"],
-        });
-        assertCompileErrorAt(
-          reject,
-          reject.locate("consumer/reject.ts", "textA(B.b)", {
-            charOffset: "textA(".length,
-          }),
-          {},
-          "T4.4-2 module B's node passed to module A's aliased `text` must " +
-            "be a TypeScript type error at the consumer reference (SPEC 4.4)",
-        );
-        assertCompileErrorAt(
-          reject,
-          reject.locate("consumer/reject.ts", "textB(A.a)", {
-            charOffset: "textB(".length,
-          }),
-          {},
-          "T4.4-2 module A's node passed to module B's aliased `text` must " +
-            "be a TypeScript type error at the consumer reference (SPEC 4.4)",
+        // Under each of H-2's configurations, the two cross-module
+        // arguments are the program's only diagnosed positions (H-2's
+        // type-error assertion).
+        await forEachConsumerProject(
+          consumerSources(workspace, "consumer/reject.ts"),
+          (reject) =>
+            assertTypeErrorsAt(
+              reject,
+              [
+                {
+                  at: reject.locate("consumer/reject.ts", "textA(B.b)", {
+                    charOffset: "textA(".length,
+                  }),
+                },
+                {
+                  at: reject.locate("consumer/reject.ts", "textB(A.a)", {
+                    charOffset: "textB(".length,
+                  }),
+                },
+              ],
+              "T4.4-2 module B's node passed to module A's aliased `text`, " +
+                "and module A's node to module B's, must each be a " +
+                "TypeScript type error at the consumer reference, and " +
+                "nothing else diagnosed (SPEC 4.4)",
+            ),
         );
       },
     );

@@ -5,20 +5,25 @@
 // asserts exact exit codes (H-5), decodes reports through the H-3 adapters,
 // and rejects a product only via diagnosed assertion failures (H-8). Runtime
 // contracts run under standard TypeScript tooling with no xspec runtime
-// dependency (SPEC 13.1) through helpers/tooling.ts, in the CommonJS-mode
-// arrangement described in section-4.ts. Files under `src/` are discovered
-// code-group sources.
+// dependency (SPEC 13.1) through helpers/tooling.ts, in TEST-SPEC H-2's two
+// fixed configurations as section-4.ts describes: the program type-checks
+// clean under each of the two in turn, its whole program — the generated
+// module and the companions it reaches — included, and runs under the
+// CommonJS configuration alone, compiled to CommonJS JavaScript written
+// outside the workspace. Files under `src/` are discovered code-group
+// sources.
 //
 // Conservative operationalizations (noted per H-4 — wording is free, so only
 // the stated observables are asserted):
 // - T4.5-1 "at runtime the program behaves as if the line were absent
 //   (harmless property read) with no additional tooling installed": the
 //   fixture stages two discovered code files differing in exactly the marker
-//   line; both compile clean under standard tooling, and both compiled
-//   programs run under plain Node (SPEC 13.1 — nothing installed beyond
-//   standard TypeScript tooling) with identical observables: exit 0, stdout
-//   exactly "Hello\n", empty stderr, the marker program's stdout
-//   byte-compared to the marker-free program's.
+//   line; both type-check clean under each of H-2's configurations, and both
+//   programs, compiled under its CommonJS configuration into one directory
+//   outside the workspace, run there under plain Node (SPEC 13.1 — nothing
+//   installed beyond standard TypeScript tooling) with identical
+//   observables: exit 0, stdout exactly "Hello\n", empty stderr, the marker
+//   program's stdout byte-compared to the marker-free program's.
 // - T4.5-2 stages the root marker as the workspace's only dependency edge,
 //   so every asserted value is forced: coverage can only be empty, the
 //   impacted-code witness edge can only be the root-targeted `references`
@@ -144,10 +149,11 @@ import { stagedTs } from "../../helpers/staged-ts.js";
 import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
-  assertNoCompileErrors,
+  assertTypeChecksClean,
+  COMMONJS_CONFIGURATION,
   ConsumerProject,
-  formatConsumerDiagnostic,
-  runConsumer,
+  forEachConsumerProject,
+  withCompiledConsumer,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -273,19 +279,6 @@ async function queryEdgesOfKind(
     ),
     label,
   );
-}
-
-/** Emit a consumer project's JavaScript, failing diagnosed when skipped. */
-function emitConsumer(project: ConsumerProject, context: string): void {
-  const emitted = project.emit();
-  if (emitted.emitSkipped) {
-    fail(
-      `${context}: consumer emit was skipped; diagnostics:\n` +
-        emitted.diagnostics
-          .map((diagnostic) => `  ${formatConsumerDiagnostic(diagnostic)}`)
-          .join("\n"),
-    );
-  }
 }
 
 /** One offending-statement arm: a workspace differing only in src/app.ts. */
@@ -492,7 +485,7 @@ const T4_5_1_EXPECTED_STDOUT = "Hello\n";
 const T4_5_1 = defineProductTest({
   id: "T4.5-1",
   title:
-    "a bare requirement reference as an expression statement is a dependency marker: it records a `references` edge from the enclosing code location, and at runtime the program behaves as if the line were absent — the compiled program under plain Node matches the marker-free control byte for byte (SPEC 4.5, 4.6, 13.1)",
+    "a bare requirement reference as an expression statement is a dependency marker: it records a `references` edge from the enclosing code location, and at runtime the program behaves as if the line were absent — both programs type-checking clean under both of H-2's configurations, the program compiled under its CommonJS configuration and run under plain Node matches the marker-free control byte for byte (SPEC 4.5, 4.6, 13.1)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -532,28 +525,34 @@ const T4_5_1 = defineProductTest({
         );
 
         // Runtime harmlessness under standard tooling only (SPEC 13.1): both
-        // programs compile clean, and the compiled marker program under
-        // plain Node behaves exactly like the marker-free control — exit 0,
+        // programs type-check clean under each of H-2's configurations, the
+        // whole program included, and the marker program — compiled with
+        // the control under the CommonJS configuration alone into one
+        // directory outside the workspace, each run there under plain Node
+        // (H-2) — behaves exactly like the marker-free control: exit 0,
         // stdout "Hello\n", empty stderr, byte-compared.
-        const project = await ConsumerProject.load({
+        const sources = {
           rootDir: workspace.root,
           rootFiles: ["src/app.ts", "src/control.ts"],
-        });
-        assertNoCompileErrors(
-          project,
+        };
+        const programsContext =
           "T4.5-1 the marker program and its marker-free control under " +
-            "standard TypeScript tooling (SPEC 4.5: markers are valid with " +
-            "no additional tooling installed)",
+          "standard TypeScript tooling (SPEC 4.5: markers are valid with " +
+          "no additional tooling installed)";
+        await forEachConsumerProject(sources, (project) =>
+          assertTypeChecksClean(project, programsContext),
         );
-        emitConsumer(project, "T4.5-1 marker and control programs");
-        const appRun = await runConsumer({
-          dir: workspace.root,
-          entry: "src/app.js",
-        });
-        const controlRun = await runConsumer({
-          dir: workspace.root,
-          entry: "src/control.js",
-        });
+        const { appRun, controlRun } = await withCompiledConsumer(
+          await ConsumerProject.load({
+            ...sources,
+            configuration: COMMONJS_CONFIGURATION,
+          }),
+          programsContext,
+          async (compiled) => ({
+            appRun: await compiled.run("src/app.ts"),
+            controlRun: await compiled.run("src/control.ts"),
+          }),
+        );
         for (const [label, run] of [
           ["marker program", appRun],
           ["marker-free control", controlRun],
@@ -561,7 +560,8 @@ const T4_5_1 = defineProductTest({
           assertExitCode(
             run,
             0,
-            `T4.5-1 compiled ${label} under plain Node (SPEC 4.5, 13.1)`,
+            `T4.5-1 compiled ${label} under plain Node, compiled under H-2's ` +
+              "CommonJS configuration outside the workspace (SPEC 4.5, 13.1)",
           );
           assertStderrEmpty(
             run,
