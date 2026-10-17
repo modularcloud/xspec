@@ -86,6 +86,18 @@
 //   is exactly [boundary unit, target]. With each target reached by exactly
 //   one edge, every reported path is forced; the `@2` units must appear as
 //   the boundary members of their targets' paths.
+// - T4.6-4 "same-scope repetition by declaration merging": each pair stands
+//   in a file of its own beside the getter/setter and sibling-scope file,
+//   importing a spec module of its own as `SPEC`, so both pairs spell their
+//   markers `SPEC.a` then `SPEC.b` — as TEST-SPEC spells the class pair —
+//   each marker targeting a section of its own. "Each holding a marker
+//   directly" is staged as the marker being a statement of the namespace
+//   body itself, nested in no other construct; the class's marker is a
+//   statement of its static block, which binds no name (SPEC 4.6), so it
+//   attributes to the class. A product deriving units from TypeScript's
+//   merged symbols sources both markers of a pair at the first unit, and the
+//   complete `references` set, the `@2` units' `--from` answers, and the
+//   covering paths each reject it.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -2190,7 +2202,8 @@ const T4_6_3 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T4.6-4 — duplicate chains: 1-based document-order `@2` suffix
+// T4.6-4 — duplicate chains: 1-based document-order `@2` suffix, declaration
+// merging included
 // ---------------------------------------------------------------------------
 
 // One direct-mode coverage profile over the same groups, so each `@2` unit
@@ -2293,16 +2306,96 @@ const T4_6_4_SECOND_EDGE: GraphEdge = {
   kind: "references",
 };
 
+// Same-scope repetition by declaration merging (SPEC 4.6: a named code unit
+// is a construct, so each declaration is a unit of its own, whatever symbol
+// TypeScript merges the declarations into). Each pair is a file of its own,
+// importing a spec module of its own as `SPEC`, and each marker targets a
+// section of its own:
+// - `src/ns-merge.ts`: two `namespace A` declarations in one scope (the
+//   file's top level), each holding its marker directly — the first
+//   declaration's marker at `#A`, the second's at `#A@2`;
+// - `src/class-ns-merge.ts`: `class C { static { SPEC.a } }` followed by
+//   `namespace C { SPEC.b }` — a static block binds no name, so `SPEC.a`
+//   attributes to its innermost enclosing named unit, the class `#C`, and
+//   the namespace is the chain's second occurrence, `#C@2`.
+// Both files are well-formed TypeScript, read as module code and as script
+// code (14.20; the workspace builder's staging-time judge, S-9): the merging
+// is name binding, which takes no part in well-formedness.
+const T4_6_4_NS_MERGE_SPEC_SOURCE = [
+  '<S id="a">',
+  "Target of the first namespace A declaration's marker.",
+  "</S>",
+  "",
+  '<S id="b">',
+  "Target of the second namespace A declaration's marker.",
+  "</S>",
+  "",
+].join("\n");
+
+const T4_6_4_NS_MERGE_SOURCE = [
+  'import SPEC from "../specs/NS.xspec";',
+  "",
+  "namespace A { SPEC.a }",
+  "",
+  "namespace A { SPEC.b }",
+  "",
+].join("\n");
+
+const T4_6_4_CLASS_NS_MERGE_SPEC_SOURCE = [
+  '<S id="a">',
+  "Target of the class C static block's marker.",
+  "</S>",
+  "",
+  '<S id="b">',
+  "Target of the namespace C declaration's marker.",
+  "</S>",
+  "",
+].join("\n");
+
+const T4_6_4_CLASS_NS_MERGE_SOURCE = [
+  'import SPEC from "../specs/CNS.xspec";',
+  "",
+  "class C { static { SPEC.a } }",
+  "",
+  "namespace C { SPEC.b }",
+  "",
+].join("\n");
+
+const T4_6_4_NS_FIRST_EDGE: GraphEdge = {
+  from: "src/ns-merge.ts#A",
+  to: "specs/NS.mdx#a",
+  kind: "references",
+};
+const T4_6_4_NS_SECOND_EDGE: GraphEdge = {
+  from: "src/ns-merge.ts#A@2",
+  to: "specs/NS.mdx#b",
+  kind: "references",
+};
+const T4_6_4_CLASS_EDGE: GraphEdge = {
+  from: "src/class-ns-merge.ts#C",
+  to: "specs/CNS.mdx#a",
+  kind: "references",
+};
+const T4_6_4_CLASS_NS_EDGE: GraphEdge = {
+  from: "src/class-ns-merge.ts#C@2",
+  to: "specs/CNS.mdx#b",
+  kind: "references",
+};
+
 const T4_6_4 = defineProductTest({
   id: "T4.6-4",
   title:
-    "when the same unit chain occurs more than once in a file — a getter/setter pair, two same-named declarations in sibling scopes — the second occurrence in document order is `path#unit@2` (1-based, the first unsuffixed), asserted via `query edges` and as coverage boundary membership (SPEC 4.6, 8, 11)",
+    "when the same unit chain occurs more than once in a file — a getter/setter pair, two same-named declarations in sibling scopes, and same-scope repetition by declaration merging (two `namespace A { … }` declarations in one scope, each holding a marker directly; `class C { static { SPEC.a } }` followed by `namespace C { SPEC.b }`), each declaration a unit of its own, never one merged symbol — the second occurrence in document order is `path#unit@2` (1-based, the first unsuffixed: `path#A` and `path#A@2`, `path#C` and `path#C@2`), asserted via `query edges` and as coverage boundary membership (SPEC 4.6, 8, 11)",
   run: async (product) => {
     await withWorkspace(
       T4_6_4_CONFIG,
       {
         "specs/D.mdx": T4_6_4_SPEC_SOURCE,
         "src/dup.ts": T4_6_4_APP_SOURCE,
+        "specs/NS.mdx": T4_6_4_NS_MERGE_SPEC_SOURCE,
+        "src/ns-merge.ts": T4_6_4_NS_MERGE_SOURCE,
+        "specs/CNS.mdx": T4_6_4_CLASS_NS_MERGE_SPEC_SOURCE,
+        "src/class-ns-merge.ts": T4_6_4_CLASS_NS_MERGE_SOURCE,
       },
       async (workspace) => {
         await buildOk(
@@ -2312,7 +2405,9 @@ const T4_6_4 = defineProductTest({
         );
 
         // The complete `references` edge set: first occurrences unsuffixed,
-        // each second occurrence carrying the 1-based `@2` suffix.
+        // each second occurrence carrying the 1-based `@2` suffix — the
+        // declaration-merging pairs' included, each declaration its own
+        // unit, so no unit sources both markers of a pair.
         assertEdgeSetEqual(
           await queryEdgesOfKind(product, workspace, "references", "T4.6-4"),
           [
@@ -2320,11 +2415,20 @@ const T4_6_4 = defineProductTest({
             T4_6_4_SETTER_EDGE,
             T4_6_4_FIRST_EDGE,
             T4_6_4_SECOND_EDGE,
+            T4_6_4_NS_FIRST_EDGE,
+            T4_6_4_NS_SECOND_EDGE,
+            T4_6_4_CLASS_EDGE,
+            T4_6_4_CLASS_NS_EDGE,
           ],
           "T4.6-4 duplicate unit chains disambiguate with the 1-based " +
             "document-order suffix: the getter keeps `Pair.value` and the " +
             "setter is `Pair.value@2`; the first sibling-scope `worker` is " +
-            "unsuffixed and the second is `worker@2` (SPEC 4.6)",
+            "unsuffixed and the second is `worker@2`; and by declaration " +
+            "merging in one scope, the first `namespace A` declaration's " +
+            "marker is sourced at `A` and the second's at `A@2`, and " +
+            "`class C`'s static-block marker at `C` and the following " +
+            "`namespace C`'s at `C@2` — a unit is a construct, never a " +
+            "merged symbol (SPEC 4.6)",
         );
 
         // Each `@2` identity is an addressable graph node (SPEC 11:
@@ -2352,6 +2456,30 @@ const T4_6_4 = defineProductTest({
           "T4.6-4 `src/dup.ts#worker@2` addresses the second sibling-scope " +
             "declaration, whose complete edge set is its marker's edge " +
             "(SPEC 4.6, 11)",
+        );
+        assertEdgeSetEqual(
+          await queryEdgesFrom(
+            product,
+            workspace,
+            "src/ns-merge.ts#A@2",
+            "T4.6-4",
+          ),
+          [T4_6_4_NS_SECOND_EDGE],
+          "T4.6-4 `src/ns-merge.ts#A@2` addresses the second `namespace A` " +
+            "declaration of the scope, whose complete edge set is its " +
+            "marker's edge (SPEC 4.6, 11)",
+        );
+        assertEdgeSetEqual(
+          await queryEdgesFrom(
+            product,
+            workspace,
+            "src/class-ns-merge.ts#C@2",
+            "T4.6-4",
+          ),
+          [T4_6_4_CLASS_NS_EDGE],
+          "T4.6-4 `src/class-ns-merge.ts#C@2` addresses the `namespace C` " +
+            "declaration following `class C`, whose complete edge set is " +
+            "its marker's edge (SPEC 4.6, 11)",
         );
 
         // Coverage boundary membership: in the direct-mode profile each
@@ -2385,12 +2513,16 @@ const T4_6_4 = defineProductTest({
             .map((node) => `${node.identity} <= ${node.path.join(" > ")}`)
             .sort(),
           [
+            "specs/CNS.mdx#a <= src/class-ns-merge.ts#C > specs/CNS.mdx#a",
+            "specs/CNS.mdx#b <= src/class-ns-merge.ts#C@2 > specs/CNS.mdx#b",
             "specs/D.mdx#first <= src/dup.ts#worker > specs/D.mdx#first",
             "specs/D.mdx#second <= src/dup.ts#worker@2 > specs/D.mdx#second",
             "specs/D.mdx#viagetter <= src/dup.ts#Pair.value > " +
               "specs/D.mdx#viagetter",
             "specs/D.mdx#viasetter <= src/dup.ts#Pair.value@2 > " +
               "specs/D.mdx#viasetter",
+            "specs/NS.mdx#a <= src/ns-merge.ts#A > specs/NS.mdx#a",
+            "specs/NS.mdx#b <= src/ns-merge.ts#A@2 > specs/NS.mdx#b",
           ],
           `${coverageLabel}: each covered target's one covering path runs ` +
             "from its marker's unit — the `@2` identities appearing as the " +
