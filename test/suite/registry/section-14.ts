@@ -520,9 +520,9 @@ import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
 import { StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
-  assertCompileErrorAt,
-  assertNoCompileErrors,
-  ConsumerProject,
+  assertTypeChecksClean,
+  assertTypeErrorsAt,
+  forEachConsumerProject,
 } from "../../helpers/tooling.js";
 import type {
   InitialFileContents,
@@ -1164,7 +1164,7 @@ const T14_2_ESCAPED_BROKEN = stagedTs(
 const T14_2 = defineProductTest({
   id: "T14-2",
   title:
-    'a `d` reference, a `text(...)` target, and a TypeScript marker and `text` call that do not resolve are 14.5, 14.6, and 14.7 respectively, each locating its reference; the TypeScript case is also a type error against the generated module, asserted while a prior valid generation exists; escape-spelled forms are unresolved likewise, read verbatim — `d={"lo\\u0067in"}` is 14.5 and the marker `BASE.lo\\u0067in` is 14.7 beside the node `login` their interpreted spellings would name, the marker no type error (SPEC 14.5, 14.6, 14.7, 4.1, 2.4)',
+    'a `d` reference, a `text(...)` target, and a TypeScript marker and `text` call that do not resolve are 14.5, 14.6, and 14.7 respectively, each locating its reference; the TypeScript case is also a type error against the generated module under both H-2 configurations, its program diagnosed at the two references alone, asserted while a prior valid generation exists; escape-spelled forms are unresolved likewise, read verbatim — `d={"lo\\u0067in"}` is 14.5 and the marker `BASE.lo\\u0067in` is 14.7 beside the node `login` their interpreted spellings would name, the marker no type error, its program clean under both (SPEC 14.5, 14.6, 14.7, 4.1, 2.4)',
   run: async (product) => {
     await withWorkspace({ files: T14_2_INITIAL_FILES }, async (workspace) => {
       // Prior valid generation: the modules specs/base.xspec.ts and
@@ -1266,50 +1266,55 @@ const T14_2 = defineProductTest({
           `resolves nowhere (SPEC 2.4), never the node \`login\``,
       );
 
-      // The type-error facet: the failed build modified nothing (SPEC
-      // 12.1), so the prior valid generation persists — against it, each
-      // unresolved TypeScript reference is a type error at the reference
-      // (SPEC 14.7: "this is also a type error against the generated
-      // module").
-      const project = await ConsumerProject.load({
-        rootDir: workspace.root,
-        rootFiles: ["src/app.ts"],
-      });
-      assertCompileErrorAt(
-        project,
-        project.locate("src/app.ts", T14_2_APP_MARKER, {
-          charOffset: "BASE.".length,
-        }),
-        {},
-        "T14-2 the unresolved marker must be a TypeScript type error " +
-          "against the generated module (SPEC 14.7, 4.1)",
-      );
-      assertCompileErrorAt(
-        project,
-        project.locate("src/app.ts", T14_2_APP_CALL, {
-          charOffset: "text(BASE.".length,
-        }),
-        {},
-        "T14-2 the unresolved `text` argument must be a TypeScript type " +
-          "error against the generated module (SPEC 14.7, 4.1)",
+      // The type-error facet, under each of H-2's two configurations: the
+      // failed build modified nothing (SPEC 12.1), so the prior valid
+      // generation persists — against it, each unresolved TypeScript
+      // reference is a type error at the reference (SPEC 14.7: "this is
+      // also a type error against the generated module"), and the
+      // program's diagnostics lie at those two references alone (H-2's
+      // type-error assertion), the generated module and its companions
+      // included.
+      await forEachConsumerProject(
+        { rootDir: workspace.root, rootFiles: ["src/app.ts"] },
+        (project) =>
+          assertTypeErrorsAt(
+            project,
+            [
+              {
+                at: project.locate("src/app.ts", T14_2_APP_MARKER, {
+                  charOffset: "BASE.".length,
+                }),
+              },
+              {
+                at: project.locate("src/app.ts", T14_2_APP_CALL, {
+                  charOffset: "text(BASE.".length,
+                }),
+              },
+            ],
+            "T14-2 the unresolved marker `BASE.nomark` and the unresolved " +
+              "`text` argument `BASE.nocall` must each be a TypeScript type " +
+              "error against the generated module, the program's " +
+              "diagnostics at those two references alone (SPEC 14.7, 4.1)",
+          ),
       );
 
       // The escape-spelled marker is no type error: 14.7's type-error
       // clause holds only for a spelling free of escape sequences (SPEC
       // 14.7, 2.4) — TypeScript reads `BASE.lo\u0067in` as `BASE.login`,
       // which the prior valid generation exports, so the consumer file
-      // holding it (and the escape-free control) compiles clean.
-      const escapedProject = await ConsumerProject.load({
-        rootDir: workspace.root,
-        rootFiles: ["src/escaped.ts"],
-      });
-      assertNoCompileErrors(
-        escapedProject,
-        "T14-2 the escape-spelled marker `BASE.lo\\u0067in` must be no " +
-          "type error against the generated module — TypeScript reads the " +
-          "escaped identifier as `login`, which the prior valid generation " +
-          "exports; 14.7's type-error clause holds only for a spelling free " +
-          "of escape sequences (SPEC 14.7, 2.4)",
+      // holding it (and the escape-free control) compiles clean, its whole
+      // program included, under each of H-2's two configurations.
+      await forEachConsumerProject(
+        { rootDir: workspace.root, rootFiles: ["src/escaped.ts"] },
+        (escapedProject) =>
+          assertTypeChecksClean(
+            escapedProject,
+            "T14-2 the escape-spelled marker `BASE.lo\\u0067in` must be no " +
+              "type error against the generated module — TypeScript reads " +
+              "the escaped identifier as `login`, which the prior valid " +
+              "generation exports; 14.7's type-error clause holds only for " +
+              "a spelling free of escape sequences (SPEC 14.7, 2.4)",
+          ),
       );
     });
   },

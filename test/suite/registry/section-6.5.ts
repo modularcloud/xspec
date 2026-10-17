@@ -291,8 +291,8 @@ import type {
   RunResult,
 } from "../../helpers/subprocess.js";
 import {
-  ConsumerProject,
-  assertNoCompileErrors,
+  assertTypeChecksClean,
+  forEachConsumerProject,
 } from "../../helpers/tooling.js";
 import {
   IDENTIFIER_RUN_SOURCE,
@@ -6460,20 +6460,22 @@ const T6_5_8 = defineProductTest({
 // from the origin binding `O` with a digit (the digit is unspecified, so
 // the two smallest counters are both staged) and with an underscore
 // appended, as a local `const`, a `function`, a `class`, a `type` alias,
-// and non-spec import bindings, each used trivially; the file compiles
-// clean before the move under standard tooling (a fixture self-check). Its
-// import declarations — T6.5-8's origin import on line 1, the non-spec
-// lures' on line 2 — head it before every other statement, with no blank
-// line after them, so its line-start admissible offsets are exactly the
-// starts of lines 2 and 3, each directly after one of them (6.5: offset 0
-// follows no statement's end, and an added declaration after the first
-// non-import statement would be untimely for the moved marker, that
-// statement standing between it and `O`'s declaration). After the section
-// move, the diff-isolated added run is asserted as T6.5-8 asserts it,
-// confined to those two offsets (`assertAddedImportInsertion`'s
-// `pinnedOffsets`); through H-2's standard-tooling channel
-// (`test/helpers/tooling.ts`) the rewritten file compiles with no
-// diagnostics — a collision with the `const`, `function`, or `class` is
+// and non-spec import bindings, each used trivially; the file type-checks
+// clean before the move under standard tooling, under each of H-2's two
+// configurations, its whole program — the generated modules and companions it
+// reaches — included (a fixture self-check). Its import declarations —
+// T6.5-8's origin import on line 1, the non-spec lures' on line 2 — head it
+// before every other statement, with no blank line after them, so its
+// line-start admissible offsets are exactly the starts of lines 2 and 3, each
+// directly after one of them (6.5: offset 0 follows no statement's end, and
+// an added declaration after the first non-import statement would be untimely
+// for the moved marker, that statement standing between it and `O`'s
+// declaration). After the section move, the diff-isolated added run is
+// asserted as T6.5-8 asserts it, confined to those two offsets
+// (`assertAddedImportInsertion`'s `pinnedOffsets`); through H-2's
+// standard-tooling channel (`test/helpers/tooling.ts`), under each of its two
+// configurations, the rewritten file compiles with no diagnostics, its whole
+// program clean — a collision with the `const`, `function`, or `class` is
 // TS2440 (import declaration conflicts with local declaration), one with a
 // non-spec import binding TS2300 (duplicate identifier), and an unrewritten
 // or misrooted marker a type error against the regenerated modules — so the
@@ -6840,7 +6842,7 @@ function s9ReferenceRoot(
 const T6_5_9 = defineProductTest({
   id: "T6.5-9",
   title:
-    "fresh identifiers in code: T6.5-8's TS arm re-staged (its `specs/origin.mdx`, the plain `specs/target.mdx`, `move specs/origin.mdx#x specs/target.mdx#y`) with a receiving `src/c.ts` that also declares at module scope — as a local `const`, a `function`, a `class`, a `type` alias, and non-spec import bindings, each used trivially — the identifiers a product would plausibly derive for the added target-module import (the target file's basename as written, lower- and upper-cased, `Spec`- and `SPEC`-suffixed, and capitalized; the origin binding's name with a digit and with an underscore appended), the file compiling clean before the move under standard tooling, its import declarations — the origin's, then the non-spec lures' — heading it with no blank line after them; after the section move the rewritten file compiles with no diagnostics through H-2's standard-tooling channel (a collision with the `const`, `function`, or `class` is TS2440, with a non-spec import binding TS2300, an unrewritten or misrooted marker a type error against the regenerated modules), so the added identifier is none of the value-level pre-empted names, the `type` alias's name left to T6.5-22(a); the diff-isolated added run is asserted as T6.5-8 asserts it — byte-exactly `import <X> from \"../specs/target.xspec\"` followed by U+000A, the fresh identifier read off the rewritten marker, at the start of the line directly after one of the file's import declarations (the start of line 2 or 3, its line-start admissible offsets); `query edges` reports the moved marker's `references` edge to the moved node's new identity and the unmoved marker's through the retained origin binding, and `check` is clean (SPEC 6.5, 2.1, 4, 4.5, 6.4, 3); spec-source arm: a spec target lacking imports of two third modules, `specs/S.mdx` and `specs/text.mdx`, both referenced by the moved text through the origin's bindings, so that a product deriving identifiers from basenames would bind `S` and `text` (14.15) and one deriving them from a fixed stem would bind one identifier twice — after the move `check` is clean, `view` lists the two added declarations under `imports` with distinct `name`s and targets `specs/S.mdx` and `specs/text.mdx`, each moved reference is rooted at the binding of its own module (`query edges` under the new identities), and the declarations stand contiguous in one ESM block (T6.5-13(g)), the single inserted run being byte-exactly the two declarations on contiguous lines, each followed by U+000A, at a line-start offset, in the order the product fixed (SPEC 6.5, 2.1, 11.4)",
+    "fresh identifiers in code: T6.5-8's TS arm re-staged (its `specs/origin.mdx`, the plain `specs/target.mdx`, `move specs/origin.mdx#x specs/target.mdx#y`) with a receiving `src/c.ts` that also declares at module scope — as a local `const`, a `function`, a `class`, a `type` alias, and non-spec import bindings, each used trivially — the identifiers a product would plausibly derive for the added target-module import (the target file's basename as written, lower- and upper-cased, `Spec`- and `SPEC`-suffixed, and capitalized; the origin binding's name with a digit and with an underscore appended), the file compiling clean before the move under standard tooling, under both of H-2's configurations, its import declarations — the origin's, then the non-spec lures' — heading it with no blank line after them; after the section move the rewritten file compiles with no diagnostics, its whole program clean, through H-2's standard-tooling channel under both of its configurations (a collision with the `const`, `function`, or `class` is TS2440, with a non-spec import binding TS2300, an unrewritten or misrooted marker a type error against the regenerated modules), so the added identifier is none of the value-level pre-empted names, the `type` alias's name left to T6.5-22(a); the diff-isolated added run is asserted as T6.5-8 asserts it — byte-exactly `import <X> from \"../specs/target.xspec\"` followed by U+000A, the fresh identifier read off the rewritten marker, at the start of the line directly after one of the file's import declarations (the start of line 2 or 3, its line-start admissible offsets); `query edges` reports the moved marker's `references` edge to the moved node's new identity and the unmoved marker's through the retained origin binding, and `check` is clean (SPEC 6.5, 2.1, 4, 4.5, 6.4, 3); spec-source arm: a spec target lacking imports of two third modules, `specs/S.mdx` and `specs/text.mdx`, both referenced by the moved text through the origin's bindings, so that a product deriving identifiers from basenames would bind `S` and `text` (14.15) and one deriving them from a fixed stem would bind one identifier twice — after the move `check` is clean, `view` lists the two added declarations under `imports` with distinct `name`s and targets `specs/S.mdx` and `specs/text.mdx`, each moved reference is rooted at the binding of its own module (`query edges` under the new identities), and the declarations stand contiguous in one ESM block (T6.5-13(g)), the single inserted run being byte-exactly the two declarations on contiguous lines, each followed by U+000A, at a line-start offset, in the order the product fixed (SPEC 6.5, 2.1, 11.4)",
   run: async (product) => {
     const context = "T6.5-9";
     const lures = A9_VALUE_LURES.map((binding) => binding.name).join(", ");
@@ -6851,19 +6853,22 @@ const T6_5_9 = defineProductTest({
         workspace,
         `${context} \`build\` over the staging`,
       );
-      // Fixture self-check: the pre-empting declarations are valid
-      // TypeScript and the generated origin module resolves, so a later
+      // Fixture self-check, under each of H-2's two configurations: the
+      // pre-empting declarations are valid TypeScript and the generated
+      // origin module resolves, the whole program clean, so a later
       // diagnostic is the move's, not the staging's.
-      assertNoCompileErrors(
-        await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: [A8_CODE],
-        }),
-        `${context} premise: ${A8_CODE} compiles clean before the move ` +
-          `under standard tooling — its pre-empting module-scope ` +
-          `declarations (${lures}, and the \`type\` alias \`targetSPEC\`) ` +
-          `are valid TypeScript and the generated origin module resolves ` +
-          `(SPEC 4, 13.1; a fixture self-check)`,
+      await forEachConsumerProject(
+        { rootDir: workspace.root, rootFiles: [A8_CODE] },
+        (project) =>
+          assertTypeChecksClean(
+            project,
+            `${context} premise: ${A8_CODE} compiles clean before the move ` +
+              `under standard tooling — its pre-empting module-scope ` +
+              `declarations (${lures}, and the \`type\` alias \`targetSPEC\`) ` +
+              `are valid TypeScript and the generated origin module and the ` +
+              `companions it reaches resolve and type-check clean (SPEC 4, ` +
+              `13.1; a fixture self-check)`,
+          ),
       );
 
       await expectExit(
@@ -6880,20 +6885,23 @@ const T6_5_9 = defineProductTest({
       );
 
       // The assertion T6.5-9 names: no diagnostics, whatever identifier the
-      // product chose. A fresh project — the language service snapshots
-      // files on first access, and the move rewrote them.
-      assertNoCompileErrors(
-        await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: [A8_CODE],
-        }),
-        `${context}: ${A8_CODE} after the move compiles with no diagnostics ` +
-          `under standard tooling — the added target-module import binds an ` +
-          `identifier colliding with none of the file's value-level ` +
-          `module-scope bindings (pre-empted: ${lures}; a collision is ` +
-          `TS2440 "Import declaration conflicts with local declaration" or ` +
-          `TS2300 "Duplicate identifier"), and the rewritten marker resolves ` +
-          `against the regenerated modules (SPEC 6.5, 2.1, 4, 4.5)`,
+      // product chose, under each of H-2's two configurations. Fresh
+      // projects — the language service snapshots files on first access,
+      // and the move rewrote them.
+      await forEachConsumerProject(
+        { rootDir: workspace.root, rootFiles: [A8_CODE] },
+        (project) =>
+          assertTypeChecksClean(
+            project,
+            `${context}: ${A8_CODE} after the move compiles with no ` +
+              `diagnostics under standard tooling — the added target-module ` +
+              `import binds an identifier colliding with none of the file's ` +
+              `value-level module-scope bindings (pre-empted: ${lures}; a ` +
+              `collision is TS2440 "Import declaration conflicts with local ` +
+              `declaration" or TS2300 "Duplicate identifier"), and the ` +
+              `rewritten marker resolves against the regenerated modules, ` +
+              `whose program type-checks clean (SPEC 6.5, 2.1, 4, 4.5)`,
+          ),
       );
 
       // T6.5-8's discipline on the diff-isolated run, confined to the file's

@@ -84,11 +84,14 @@
 //   (T6.6-4's business); the origin, target, and third-module files'
 //   post-move bytes are asserted whole as soundness guards, composed from
 //   6.5 and 3 with no latitude, as T6.5-8's arms compose them.
-// - (d)'s discriminating expectation — the standard-tooling compile fails
-//   after the move — is asserted through H-2's tooling channel as at least
-//   one error diagnostic located within the type alias statement's
-//   characters (the vanished binding's error), the file having compiled
-//   clean before the move (a fixture self-check every arm makes).
+// - Every compile verdict rides H-2's tooling channel under each of its two
+//   configurations, the CommonJS and the ES-module one, a clean verdict
+//   covering the whole program — the generated modules and companions it
+//   reaches included. (d)'s discriminating expectation — the
+//   standard-tooling compile fails after the move — is H-2's type-error
+//   assertion: the program's diagnostics lie at the type alias's spelling
+//   of the vanished binding `O` alone, an error there, the file having
+//   compiled clean before the move (a fixture self-check every arm makes).
 
 import { Buffer } from "node:buffer";
 import type {
@@ -112,9 +115,11 @@ import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
-  ConsumerProject,
-  assertNoCompileErrors,
+  assertTypeChecksClean,
+  assertTypeErrorsAt,
+  forEachConsumerProject,
 } from "../../helpers/tooling.js";
+import type { ConsumerProject } from "../../helpers/tooling.js";
 import {
   IDENTIFIER_RUN_SOURCE,
   NO_RUN_BEFORE_SOURCE,
@@ -833,21 +838,25 @@ async function runCallMoveArm(
   const context = `T6.5-11 ${arm.label}`;
   return await withWorkspace(armFiles(arm), async (workspace) => {
     // Premise: the staging is valid and the code file compiles clean under
-    // standard tooling, so a later failure is the move's, not the staging's.
+    // standard tooling — under each of H-2's two configurations, its whole
+    // program included — so a later failure is the move's, not the
+    // staging's.
     await buildOk(
       product,
       workspace,
       `${context} \`build\` over the staging (${arm.summary})`,
     );
-    assertNoCompileErrors(
-      await ConsumerProject.load({
-        rootDir: workspace.root,
-        rootFiles: [CODE],
-      }),
-      `${context} premise: ${CODE} compiles clean before the move under ` +
-        `standard tooling — the origin import resolves against the ` +
-        `generated module and the call's argument is a node (SPEC 4, 13.1; ` +
-        `a fixture self-check)`,
+    await forEachConsumerProject(
+      { rootDir: workspace.root, rootFiles: [CODE] },
+      (project) =>
+        assertTypeChecksClean(
+          project,
+          `${context} premise: ${CODE} compiles clean before the move under ` +
+            `standard tooling — the origin import resolves against the ` +
+            `generated module, the call's argument is a node, and the ` +
+            `generated modules and companions the program reaches type-check ` +
+            `clean (SPEC 4, 13.1; a fixture self-check)`,
+        ),
     );
     await expectExit(
       product,
@@ -975,23 +984,26 @@ async function runCallMoveArm(
     }
 
     // The language service snapshots files on first access, and the move
-    // rewrote them: a fresh project.
-    const project = await ConsumerProject.load({
-      rootDir: workspace.root,
-      rootFiles: [CODE],
-    });
-    if (arm.compile === "clean") {
-      assertNoCompileErrors(
-        project,
-        `${context}: ${CODE} after the move compiles clean under standard ` +
-          `tooling — the added declaration binds fresh identifiers, the ` +
-          `rewritten call's callee is the target module's \`text\` and its ` +
-          `argument a node of that module, and the regenerated modules ` +
-          `resolve (SPEC 6.5, 4.3, 4.5)`,
-      );
-    } else {
-      assertTypeAliasCompileFailure(project, context);
-    }
+    // rewrote them: fresh projects, one under each of H-2's two
+    // configurations.
+    await forEachConsumerProject(
+      { rootDir: workspace.root, rootFiles: [CODE] },
+      (project) => {
+        if (arm.compile === "clean") {
+          assertTypeChecksClean(
+            project,
+            `${context}: ${CODE} after the move compiles clean under ` +
+              `standard tooling — the added declaration binds fresh ` +
+              `identifiers, the rewritten call's callee is the target ` +
+              `module's \`text\` and its argument a node of that module, ` +
+              `and the regenerated modules and the companions they reach ` +
+              `resolve and type-check clean (SPEC 6.5, 4.3, 4.5)`,
+          );
+        } else {
+          assertTypeAliasCompileFailure(project, context);
+        }
+      },
+    );
     return { bindings, offsets: readings.map((reading) => reading.offset) };
   });
 }
@@ -999,36 +1011,33 @@ async function runCallMoveArm(
 /**
  * (d): the removal leaves `type N = typeof O.x` naming the vanished binding
  * — a consumer type error outside xspec's validations (SPEC 6.5, 4.5, 6.4)
- * — so the standard-tooling compile fails with an error located within the
- * type alias statement's characters.
+ * — so the standard-tooling compile fails with the program's diagnostics at
+ * the alias's spelling of `O` alone, an error there: H-2's type-error
+ * assertion, under the configuration `project` is served in. An added
+ * identifier spelled `O` would resolve the alias's `O` and leave an error
+ * at `x` instead, which the assertion reports elsewhere — 6.5's freshness
+ * bars it, `O` being a name the file still references.
  */
 function assertTypeAliasCompileFailure(
   project: ConsumerProject,
   context: string,
 ): void {
-  const errors = project.errors();
-  const alias = project.locate(CODE, TYPE_ALIAS);
-  const within = errors.filter(
-    (diagnostic) =>
-      diagnostic.file === alias.file &&
-      diagnostic.start !== undefined &&
-      diagnostic.start.offset >= alias.offset &&
-      diagnostic.start.offset < alias.offset + TYPE_ALIAS.length,
+  assertTypeErrorsAt(
+    project,
+    [
+      {
+        at: project.locate(CODE, TYPE_ALIAS, {
+          charOffset: TYPE_ALIAS.indexOf("O.x"),
+        }),
+      },
+    ],
+    `${context}: ${CODE} after the move must fail the standard-tooling ` +
+      `compile at ${JSON.stringify(TYPE_ALIAS)}'s \`O\` alone — the origin ` +
+      `import, its bindings' only occurrence moved, is removed while the ` +
+      `type-level spelling keeps no import and now names a vanished ` +
+      `binding, a consumer type error outside xspec's validations, and ` +
+      `nothing else of the program is diagnosed (SPEC 6.5, 4.5, 6.4)`,
   );
-  if (within.length === 0) {
-    fail(
-      `${context}: ${CODE} after the move must fail the standard-tooling ` +
-        `compile at ${JSON.stringify(TYPE_ALIAS)} — the origin import, its ` +
-        `bindings' only occurrence moved, is removed while the type-level ` +
-        `spelling keeps no import and now names a vanished binding, a ` +
-        `consumer type error outside xspec's validations (SPEC 6.5, 4.5, ` +
-        `6.4); ` +
-        (errors.length === 0
-          ? "the file compiled clean"
-          : `the ${String(errors.length)} error(s) lie elsewhere: ` +
-            errors.map((diagnostic) => diagnostic.message).join("; ")),
-    );
-  }
 }
 
 /** The 12.7 edit order: range start, then range end, then class-name bytes. */
@@ -1261,7 +1270,7 @@ async function runPreviewParityArm(
 const T6_5_11 = defineProductTest({
   id: "T6.5-11",
   title:
-    "TypeScript `text(...)` calls across the move: a call whose target the section form carries into another file is rewritten whole — callee through the target module's `text` binding, argument through its default binding — over its occurrence's span, never becoming the cross-module call of 14.11, and imports are added binding exactly the lacked bindings and removed exactly when an occurrence used a binding of theirs before and none after; over `specs/origin.mdx#x` → `specs/target.mdx#y` and `src/c.ts`: (a) `import K from \"../specs/k.xspec\"` heading `import O, { text as t }`, then `f` holding the marker `K.a` and `t(O.x)` — after the move the file compiles clean under standard tooling, `build` and `check` are clean, `query edges` reports the one `embeds` edge from `src/c.ts#f` to `specs/target.mdx#y`, and the bytes are the composed post-move file with the single added run exactly `import <X>, { text as <Y> } from \"../specs/target.xspec\"` (or `{ text }` where the fresh identifier is `text` itself) followed by U+000A where the origin declaration's line stood, directly after `K`'s line, the call's span replaced by `<Y>(<X>.y)`, the origin declaration removed with its line, no other byte changed; (b) the file headed by `import T from \"../specs/target.xspec\"` (used by the marker `T.z`), then the origin import, gains exactly `import { text as <Y> } from …` (or `{ text }`) where the origin declaration's line stood, the argument rewritten through the existing `T`, the origin import removed; (c) a second call `t(O.w)` on an unmoved node keeps the origin declaration byte-for-byte, the moved call alone rewritten; (d) `type N = typeof O.x` keeps no import — the origin import is removed, `build` and `check` are clean, and the standard-tooling compile fails at the alias; (e) the file headed by `import { text as tt } from \"../specs/target.xspec\"`, lacking the default, gains exactly `import <X> from …` where the origin declaration's line stood, the call becoming `tt(<X>.y)`; (f) (a)'s file with `import { text as tt }` appended after `f`, untimely for the callee, gains one declaration binding both, as in (a), the call becoming `<Y>(<X>.y)`, `<Y>` never `tt` — (e) and (f) each clean under `build`, `check`, and the compile, with the one `embeds` edge; and the `--preview` of (a), (e), and (f) reports for `src/c.ts` one `reference-rewrite` over the call's span, one `import-addition` at the origin declaration's removal's start or end, where the real operation then inserts, and one `import-removal` spanning the origin declaration with its adjunct drop (SPEC 6.5, 4.3, 4.5, 4.6, 5.7, 6.6, 12.7)",
+    "TypeScript `text(...)` calls across the move: a call whose target the section form carries into another file is rewritten whole — callee through the target module's `text` binding, argument through its default binding — over its occurrence's span, never becoming the cross-module call of 14.11, and imports are added binding exactly the lacked bindings and removed exactly when an occurrence used a binding of theirs before and none after; over `specs/origin.mdx#x` → `specs/target.mdx#y` and `src/c.ts`: (a) `import K from \"../specs/k.xspec\"` heading `import O, { text as t }`, then `f` holding the marker `K.a` and `t(O.x)` — after the move the file compiles clean under standard tooling, under both of H-2's configurations, `build` and `check` are clean, `query edges` reports the one `embeds` edge from `src/c.ts#f` to `specs/target.mdx#y`, and the bytes are the composed post-move file with the single added run exactly `import <X>, { text as <Y> } from \"../specs/target.xspec\"` (or `{ text }` where the fresh identifier is `text` itself) followed by U+000A where the origin declaration's line stood, directly after `K`'s line, the call's span replaced by `<Y>(<X>.y)`, the origin declaration removed with its line, no other byte changed; (b) the file headed by `import T from \"../specs/target.xspec\"` (used by the marker `T.z`), then the origin import, gains exactly `import { text as <Y> } from …` (or `{ text }`) where the origin declaration's line stood, the argument rewritten through the existing `T`, the origin import removed; (c) a second call `t(O.w)` on an unmoved node keeps the origin declaration byte-for-byte, the moved call alone rewritten; (d) `type N = typeof O.x` keeps no import — the origin import is removed, `build` and `check` are clean, and the standard-tooling compile fails, under both of H-2's configurations, with its diagnostics at the alias's `O` alone; (e) the file headed by `import { text as tt } from \"../specs/target.xspec\"`, lacking the default, gains exactly `import <X> from …` where the origin declaration's line stood, the call becoming `tt(<X>.y)`; (f) (a)'s file with `import { text as tt }` appended after `f`, untimely for the callee, gains one declaration binding both, as in (a), the call becoming `<Y>(<X>.y)`, `<Y>` never `tt` — (e) and (f) each clean under `build`, `check`, and the compile, with the one `embeds` edge; and the `--preview` of (a), (e), and (f) reports for `src/c.ts` one `reference-rewrite` over the call's span, one `import-addition` at the origin declaration's removal's start or end, where the real operation then inserts, and one `import-removal` spanning the origin declaration with its adjunct drop (SPEC 6.5, 4.3, 4.5, 4.6, 5.7, 6.6, 12.7)",
   run: async (product) => {
     for (const arm of CALL_MOVE_ARMS) {
       const real = await runCallMoveArm(product, arm);

@@ -90,27 +90,24 @@
 // output keeps the extensionless specifier, which Node.js's
 // ECMAScript-module loader never resolves: it is type-checked and served,
 // never executed.
-// - Isolation (H-2: no package named `xspec` installed or resolvable;
-//   `types` at its default): before a configured project is served, and
-//   before its runtime output is written, the harness verifies that no
-//   ancestor directory of the project root, or of the output directory —
-//   along its path as spelled and along its physical path — holds an entry
-//   named `node_modules`, and before each run that none of the global
-//   folders Node.js's resolver searches holds an entry named `xspec`; an
-//   isolation unmet or unverified is `HarnessStagingError` (mode
-//   `consumer-isolation`, helpers/permissions.ts), a harness error, never a
-//   verdict. A hand-written fixture project living in this repository is
-//   therefore compiled from a copy under the OS temporary directory, as a
-//   consumer workspace is.
-// - The NodeNext path — a project loaded without a configuration and
-//   compiled under `defaultConsumerCompilerOptions()` (NodeNext,
-//   `skipLibCheck`, this repository's `@types/node`), its verdicts
-//   `assertNoCompileErrors` and `assertCompileErrorAt`, its runtime
-//   `ConsumerProject.emit` beside the sources — predates H-2's fixed
-//   configurations and remains only until every consumer test has moved
-//   onto them (FIX_PLAN Task 27 of the plan written at 2a2b94e removes it).
-//   New code never takes it, and each path's helpers refuse the other's
-//   projects (a plain `Error`: a harness misuse, never a verdict).
+// - Isolation (H-2: no package named `xspec` installed or resolvable; `types`
+//   at its default): before a project is served, and before its runtime
+//   output is written, the harness verifies that no ancestor directory of the
+//   project root, or of the output directory — along its path as spelled and
+//   along its physical path — holds an entry named `node_modules`, and before
+//   each run that none of the global folders Node.js's resolver searches
+//   holds an entry named `xspec`; an isolation unmet or unverified is
+//   `HarnessStagingError` (mode `consumer-isolation`,
+//   helpers/permissions.ts), a harness error, never a verdict. A hand-written
+//   fixture project living in this repository is therefore compiled from a
+//   copy under the OS temporary directory, as a consumer workspace is.
+// - No other configuration is reachable: `ConsumerProject.load` takes one of
+//   the two exactly and no compiler option of its own, refusing anything
+//   else (a plain `Error`: a harness misuse, never a verdict). So no
+//   consumer is compiled, served, or run under `node16` or `nodenext`
+//   resolution, a configuration in which no product could meet SPEC.md 13.1
+//   (above), nor with `skipLibCheck`, `types`, or `typeRoots` set, options
+//   H-2 leaves at the release's default.
 //
 // The standard tooling is TypeScript 5.9.3, the release SPEC.md 14.20 fixes
 // (T1.4-5: never a later one), reached through the harness's own pinned
@@ -122,15 +119,12 @@ import type { Stats } from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import ts from "typescript-5.9.3";
 import { fail, HarnessAssertionError } from "./assertions.js";
 import { HarnessStagingError } from "./permissions.js";
 import { guardStep, guardSyncStep } from "./step-guards.js";
 import type { ProductBinding, RunResult } from "./subprocess.js";
 import { productEnvironment, runProduct } from "./subprocess.js";
-
-const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 /** A position in a consumer project file. */
 export interface SourcePosition {
@@ -225,13 +219,6 @@ export interface HoverInfo {
   /** The hovered span. */
   readonly start: SourcePosition;
   readonly length: number;
-}
-
-export interface EmitResult {
-  readonly emitSkipped: boolean;
-  /** Written files, project-relative, sorted. */
-  readonly emittedFiles: readonly string[];
-  readonly diagnostics: readonly ConsumerDiagnostic[];
 }
 
 /** One member of a module's exposed skeleton (`moduleSkeleton`). */
@@ -436,30 +423,6 @@ export interface CompiledConsumer {
   run(source: string, options?: CompiledRunOptions): Promise<RunResult>;
 }
 
-/**
- * The NodeNext path's compiler options (module header): consumers compiled
- * `strict` for modern Node (target ES2022, module/moduleResolution
- * NodeNext, `skipLibCheck`) with `@types/node` resolved from this
- * repository's own pinned node_modules, emitting LF line endings. This path
- * predates H-2's fixed configurations and awaits removal (FIX_PLAN Task 27
- * of the plan written at 2a2b94e) once every consumer test has moved onto
- * `COMMONJS_CONFIGURATION` and `ES_MODULE_CONFIGURATION`; new code never
- * uses it — H-2 never uses NodeNext resolution. Returned fresh so callers
- * can spread-and-override freely.
- */
-export function defaultConsumerCompilerOptions(): ts.CompilerOptions {
-  return {
-    strict: true,
-    target: ts.ScriptTarget.ES2022,
-    module: ts.ModuleKind.NodeNext,
-    moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    skipLibCheck: true,
-    types: ["node"],
-    typeRoots: [path.join(repoRoot, "node_modules", "@types")],
-    newLine: ts.NewLineKind.LineFeed,
-  };
-}
-
 /** A consumer program's sources: its project root and root files. */
 export interface ConsumerSources {
   /** Absolute path of the consumer project root. */
@@ -474,36 +437,30 @@ export interface ConsumerSources {
 export interface ConsumerProjectOptions extends ConsumerSources {
   /**
    * The H-2 configuration the project is compiled and served in: one of
-   * `CONSUMER_CONFIGURATIONS`, exactly. Absent, the project takes the
-   * NodeNext path (module header), which no new code takes.
+   * `CONSUMER_CONFIGURATIONS`, exactly. Required — H-2 fixes every option,
+   * so a project takes no compiler option of its own.
    */
-  readonly configuration?: ConsumerConfiguration;
-  /**
-   * The NodeNext path's alone: merged over
-   * `defaultConsumerCompilerOptions()`. Refused beside a configuration,
-   * whose options H-2 fixes.
-   */
-  readonly compilerOptions?: ts.CompilerOptions;
+  readonly configuration: ConsumerConfiguration;
 }
+
+/** The keys `ConsumerProject.load` admits — every other one is refused. */
+const CONSUMER_PROJECT_OPTION_KEYS: ReadonlySet<string> = new Set([
+  "rootDir",
+  "rootFiles",
+  "configuration",
+]);
 
 /**
  * A consumer TypeScript project under standard tooling: compile diagnostics,
  * go-to-definition, hover, and emit, all answered by one language service
  * (IMPLEMENTATION.md: compiler API for diagnostics, language-service API for
- * editor guarantees), compiled and served in one of H-2's configurations —
- * or, until its removal, on the NodeNext path (module header).
+ * editor guarantees), compiled and served in one of H-2's configurations.
  */
 export class ConsumerProject {
   readonly rootDir: string;
-  /**
-   * The H-2 configuration the project is served in; `undefined` on the
-   * NodeNext path.
-   */
-  readonly configuration: ConsumerConfiguration | undefined;
-  /**
-   * The options its language service serves: the configuration's exactly,
-   * or the NodeNext path's merged options.
-   */
+  /** The H-2 configuration the project is compiled and served in. */
+  readonly configuration: ConsumerConfiguration;
+  /** The options its language service serves: the configuration's exactly. */
   readonly compilerOptions: ts.CompilerOptions;
 
   readonly #rootFilesAbs: readonly string[];
@@ -513,27 +470,36 @@ export class ConsumerProject {
   /**
    * Validate and open a project. A missing root directory or root file is a
    * diagnosed error here rather than a confusing empty program later (H-8).
-   * A configuration other than H-2's two, or `compilerOptions` beside one,
-   * is refused (a harness misuse); a configured project's root must meet
+   * A configuration other than H-2's two — none included — and any option
+   * beside `rootDir`, `rootFiles`, and `configuration` are refused (a
+   * harness misuse: H-2 fixes every option); the project's root must meet
    * H-2's isolation (module header) — `HarnessStagingError` otherwise.
    */
   static async load(options: ConsumerProjectOptions): Promise<ConsumerProject> {
-    const configuration = options.configuration;
-    if (configuration !== undefined) {
-      if (!CONSUMER_CONFIGURATIONS.includes(configuration)) {
-        throw new Error(
-          `a consumer project is compiled and served in one of H-2's two fixed ` +
-            `configurations exactly — COMMONJS_CONFIGURATION or ` +
-            `ES_MODULE_CONFIGURATION — never another object, got one named ` +
-            `${JSON.stringify(configuration.name)} (TEST-SPEC H-2)`,
-        );
-      }
-      if (options.compilerOptions !== undefined) {
-        throw new Error(
-          `compilerOptions is the NodeNext path's alone: ${configurationLabel(configuration)} ` +
-            `fixes every option (TEST-SPEC H-2; rootDir: ${options.rootDir})`,
-        );
-      }
+    const configuration: unknown = options.configuration;
+    if (
+      !CONSUMER_CONFIGURATIONS.includes(configuration as ConsumerConfiguration)
+    ) {
+      throw new Error(
+        `a consumer project is compiled and served in one of H-2's two fixed ` +
+          `configurations exactly — COMMONJS_CONFIGURATION or ` +
+          `ES_MODULE_CONFIGURATION — never another object or none, got ` +
+          (configuration === undefined
+            ? "none"
+            : `one named ${JSON.stringify((configuration as { readonly name?: unknown }).name)}`) +
+          ` (TEST-SPEC H-2; rootDir: ${String(options.rootDir)})`,
+      );
+    }
+    const foreign = Object.keys(options).filter(
+      (key) => !CONSUMER_PROJECT_OPTION_KEYS.has(key),
+    );
+    if (foreign.length > 0) {
+      throw new Error(
+        `a consumer project takes no option of its own — ` +
+          `${configurationLabel(options.configuration)} fixes every option ` +
+          `— got ${foreign.map((key) => JSON.stringify(key)).join(", ")} ` +
+          `(TEST-SPEC H-2; rootDir: ${String(options.rootDir)})`,
+      );
     }
     if (!path.isAbsolute(options.rootDir)) {
       throw new Error(
@@ -563,23 +529,18 @@ export class ConsumerProject {
         );
       }
     }
-    if (configuration !== undefined) {
-      await verifyConsumerIsolation(
-        options.rootDir,
-        "the consumer project root",
-        `a consumer project under ${configurationLabel(configuration)}`,
-      );
-    }
+    await verifyConsumerIsolation(
+      options.rootDir,
+      "the consumer project root",
+      `a consumer project under ${configurationLabel(options.configuration)}`,
+    );
     return new ConsumerProject(options);
   }
 
   private constructor(options: ConsumerProjectOptions) {
     this.rootDir = options.rootDir;
     this.configuration = options.configuration;
-    this.compilerOptions =
-      options.configuration === undefined
-        ? { ...defaultConsumerCompilerOptions(), ...options.compilerOptions }
-        : { ...options.configuration.compilerOptions };
+    this.compilerOptions = { ...options.configuration.compilerOptions };
     this.#rootFilesAbs = options.rootFiles.map((rel) =>
       path.resolve(options.rootDir, rel),
     );
@@ -624,11 +585,6 @@ export class ConsumerProject {
         .map((diagnostic) => this.#convertDiagnostic(diagnostic))
         .sort(compareDiagnostics);
     });
-  }
-
-  /** Error-category diagnostics only. */
-  errors(): readonly ConsumerDiagnostic[] {
-    return this.diagnostics().filter((d) => d.category === "error");
   }
 
   /**
@@ -922,51 +878,6 @@ export class ConsumerProject {
   }
 
   /**
-   * The NodeNext path's runtime emit (module header): the program's
-   * JavaScript, in place unless the project's compilerOptions direct
-   * otherwise, returning what was written. Emitting is standard tsc
-   * behavior — it proceeds even with type errors; assert diagnostics
-   * separately. Refused under H-2's configurations, whose runtime output is
-   * written outside the workspace (`withCompiledConsumer`).
-   */
-  emit(): EmitResult {
-    if (this.configuration !== undefined) {
-      throw new Error(
-        `ConsumerProject.emit writes JavaScript beside the sources, the NodeNext ` +
-          `path's runtime; a project under ${configurationLabel(this.configuration)} ` +
-          `runs through withCompiledConsumer, its output written outside the ` +
-          `workspace (TEST-SPEC H-2; rootDir: ${this.rootDir})`,
-      );
-    }
-    return this.#step("emit", () => this.#emitUnguarded());
-  }
-
-  #emitUnguarded(): EmitResult {
-    const written: string[] = [];
-    const result = this.#program().emit(
-      undefined,
-      (fileName, data, writeByteOrderMark) => {
-        const abs = path.isAbsolute(fileName)
-          ? fileName
-          : path.resolve(this.rootDir, fileName);
-        fs.mkdirSync(path.dirname(abs), { recursive: true });
-        fs.writeFileSync(
-          abs,
-          writeByteOrderMark ? BYTE_ORDER_MARK + data : data,
-        );
-        written.push(this.#describePath(abs));
-      },
-    );
-    return {
-      emitSkipped: result.emitSkipped,
-      emittedFiles: [...written].sort(),
-      diagnostics: result.diagnostics
-        .map((diagnostic) => this.#convertDiagnostic(diagnostic))
-        .sort(compareDiagnostics),
-    };
-  }
-
-  /**
    * H-2's runtime emit (module header): this program's CommonJS JavaScript,
    * exactly as the compiler emits it under the CommonJS configuration —
    * whose options hold no `outDir`, so each output is written at its
@@ -979,18 +890,15 @@ export class ConsumerProject {
    * reported (`outsideRoot`). Reached through `withCompiledConsumer`, which
    * creates and verifies `outDir` (absolute, outside the project root);
    * refused on the ES-module configuration, whose output H-2 never
-   * executes, and on the NodeNext path.
+   * executes.
    */
   emitTo(outDir: string): RuntimeEmit {
     if (this.configuration !== COMMONJS_CONFIGURATION) {
       throw new Error(
         `ConsumerProject.emitTo is H-2's runtime emit, exercised under its ` +
           `CommonJS configuration alone; this project is served ` +
-          `${this.#servedUnder()}, whose output ` +
-          (this.configuration === undefined
-            ? `the NodeNext path's ConsumerProject.emit writes`
-            : `is type-checked and served, never executed`) +
-          ` (TEST-SPEC H-2; rootDir: ${this.rootDir})`,
+          `${this.#servedUnder()}, whose output is type-checked and served, ` +
+          `never executed (TEST-SPEC H-2; rootDir: ${this.rootDir})`,
       );
     }
     const fromRoot = path.relative(this.rootDir, outDir);
@@ -1066,9 +974,7 @@ export class ConsumerProject {
 
   /** How a diagnosis names where the project is served. */
   #servedUnder(): string {
-    return this.configuration === undefined
-      ? "on the NodeNext path"
-      : `under ${configurationLabel(this.configuration)}`;
+    return `under ${configurationLabel(this.configuration)}`;
   }
 
   #program(): ts.Program {
@@ -1137,8 +1043,8 @@ export class ConsumerProject {
   }
 }
 
-export interface RunConsumerOptions {
-  /** Absolute consumer workspace directory; the run's working directory. */
+interface RunConsumerOptions {
+  /** Absolute output directory; the run's working directory. */
   readonly dir: string;
   /** Compiled entry module, `dir`-relative (or absolute). */
   readonly entry: string;
@@ -1153,14 +1059,11 @@ export interface RunConsumerOptions {
  * Run a compiled consumer program under plain Node (SPEC.md 13.1) via the
  * blackbox subprocess driver: exact exit code, separated stdout/stderr bytes,
  * hang guard. `NODE_PATH` is dropped so module resolution sees only the
- * files of `dir` and the directories above it — under H-2's configurations
- * the compiled output's own directory, outside the workspace and verified
- * isolated (`withCompiledConsumer`); on the NodeNext path the consumer
- * workspace.
+ * files of `dir` and the directories above it — the compiled output's own
+ * directory, outside the workspace and verified isolated. Reached only
+ * through `CompiledConsumer.run` (`withCompiledConsumer`), H-2's runtime.
  */
-export async function runConsumer(
-  options: RunConsumerOptions,
-): Promise<RunResult> {
+async function runConsumer(options: RunConsumerOptions): Promise<RunResult> {
   const entryAbs = path.isAbsolute(options.entry)
     ? options.entry
     : path.resolve(options.dir, options.entry);
@@ -1282,11 +1185,7 @@ export function assertTypeChecksClean(
   project: ConsumerProject,
   context = "consumer project",
 ): void {
-  const configuration = servedConfiguration(
-    project,
-    "assertTypeChecksClean",
-    "assertNoCompileErrors",
-  );
+  const configuration = project.configuration;
   const diagnostics = project.diagnostics();
   if (diagnostics.length > 0) {
     fail(
@@ -1316,11 +1215,7 @@ export function assertTypeErrorsAt(
   expected: readonly ExpectedTypeError[],
   context = "consumer project",
 ): readonly ConsumerDiagnostic[] {
-  const configuration = servedConfiguration(
-    project,
-    "assertTypeErrorsAt",
-    "assertCompileErrorAt",
-  );
+  const configuration = project.configuration;
   if (expected.length === 0) {
     throw new Error(
       `assertTypeErrorsAt needs at least one expected position — a program ` +
@@ -1388,8 +1283,8 @@ export function assertTypeErrorsAt(
  * `body` settles. The compile fails diagnosed when the compiler skips its
  * emit, reports an emit diagnostic, or produces output for a program file
  * outside the project root, which the output directory mirrors. Refused,
- * as a harness misuse, under the ES-module configuration — whose output is
- * type-checked and served, never executed — and on the NodeNext path.
+ * as a harness misuse, under the ES-module configuration, whose output is
+ * type-checked and served, never executed.
  */
 export async function withCompiledConsumer<T>(
   project: ConsumerProject,
@@ -1399,12 +1294,10 @@ export async function withCompiledConsumer<T>(
   if (project.configuration !== COMMONJS_CONFIGURATION) {
     throw new Error(
       `withCompiledConsumer is H-2's runtime, exercised under its CommonJS ` +
-        `configuration alone; ${context}'s project is ` +
-        (project.configuration === undefined
-          ? `on the NodeNext path, whose runtime is ConsumerProject.emit`
-          : `served under ${configurationLabel(project.configuration)}, ` +
-            `whose output is type-checked and served, never executed`) +
-        ` (TEST-SPEC H-2; rootDir: ${project.rootDir})`,
+        `configuration alone; ${context}'s project is served under ` +
+        `${configurationLabel(project.configuration)}, whose output is ` +
+        `type-checked and served, never executed (TEST-SPEC H-2; rootDir: ` +
+        `${project.rootDir})`,
     );
   }
   const label = `${context} (under ${configurationLabel(COMMONJS_CONFIGURATION)})`;
@@ -1512,37 +1405,6 @@ function describeExpected(expectation: ExpectedTypeError): string {
   );
 }
 
-/** The configuration an H-2 helper's project is served in, else refused. */
-function servedConfiguration(
-  project: ConsumerProject,
-  helper: string,
-  nodeNextHelper: string,
-): ConsumerConfiguration {
-  if (project.configuration === undefined) {
-    throw new Error(
-      `${helper} is H-2's verdict, made under one of its two configurations; ` +
-        `a project on the NodeNext path takes ${nodeNextHelper} until that ` +
-        `path's removal (rootDir: ${project.rootDir})`,
-    );
-  }
-  return project.configuration;
-}
-
-/** Refuse a NodeNext-path helper a project served under H-2. */
-function requireNodeNextPath(
-  project: ConsumerProject,
-  helper: string,
-  h2Helper: string,
-): void {
-  if (project.configuration !== undefined) {
-    throw new Error(
-      `${helper} is the NodeNext path's verdict, removed with that path; a ` +
-        `project under ${configurationLabel(project.configuration)} takes ` +
-        `${h2Helper} (TEST-SPEC H-2; rootDir: ${project.rootDir})`,
-    );
-  }
-}
-
 /** The entry H-2's isolation keeps from every directory above a program. */
 const NODE_MODULES = "node_modules";
 
@@ -1558,7 +1420,7 @@ const ISOLATION_RULE =
 type IsolationUnmet = (detail: string) => HarnessStagingError;
 
 /**
- * H-2's isolation of `dir` — a configured project's root, or a runtime
+ * H-2's isolation of `dir` — a consumer project's root, or a runtime
  * output directory (module header): no ancestor directory of it, along its
  * path as spelled and along its physical path, each once, holds an entry
  * named `node_modules` of any kind. `HarnessStagingError` (mode
@@ -1739,75 +1601,6 @@ function isolationEntryKind(stats: Stats): string {
 
 function isolationErrorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * The NodeNext path's clean verdict (module header): the project compiles
- * with zero error diagnostics. Refused under H-2's configurations, whose
- * clean verdict is `assertTypeChecksClean`; removed with the NodeNext path.
- */
-export function assertNoCompileErrors(
-  project: ConsumerProject,
-  context?: string,
-): void {
-  requireNodeNextPath(
-    project,
-    "assertNoCompileErrors",
-    "assertTypeChecksClean",
-  );
-  const errors = project.errors();
-  if (errors.length > 0) {
-    fail(
-      `${context ?? "consumer project"}: expected a clean compile, got ` +
-        `${errors.length} error(s):\n${describeAll(errors)}`,
-    );
-  }
-}
-
-/**
- * The NodeNext path's type-error assertion (module header): compilation
- * fails and some error diagnostic's span covers `position` (and matches
- * `code` when given), whatever else is reported. Returns the matched
- * diagnostic for further assertions. Refused under H-2's configurations,
- * whose exact type-error assertion is `assertTypeErrorsAt`; removed with
- * the NodeNext path.
- */
-export function assertCompileErrorAt(
-  project: ConsumerProject,
-  position: SourcePosition,
-  expected: {
-    readonly code?: number;
-    readonly messageIncludes?: readonly string[];
-  } = {},
-  context?: string,
-): ConsumerDiagnostic {
-  requireNodeNextPath(project, "assertCompileErrorAt", "assertTypeErrorsAt");
-  const errors = project.errors();
-  const matches = errors.filter(
-    (diagnostic) =>
-      coversPosition(diagnostic, position) &&
-      (expected.code === undefined || diagnostic.code === expected.code),
-  );
-  const wanted =
-    `an error${expected.code !== undefined ? ` TS${expected.code}` : ""} at ` +
-    `${position.file}:${position.line}:${position.column} (offset ${position.offset})`;
-  const match = matches[0];
-  if (match === undefined) {
-    fail(
-      `${context ?? "consumer project"}: compilation must fail with ${wanted} ` +
-        `— the failing location is the consumer reference under test ` +
-        `(TEST-SPEC 4). Errors reported:\n${describeAll(errors)}`,
-    );
-  }
-  for (const needle of expected.messageIncludes ?? []) {
-    if (!match.message.includes(needle)) {
-      fail(
-        `${context ?? "consumer project"}: the diagnostic at ${wanted} must ` +
-          `mention ${JSON.stringify(needle)}; got: ${formatConsumerDiagnostic(match)}`,
-      );
-    }
-  }
-  return match;
 }
 
 const SKELETON_STOP_NOTES: Readonly<

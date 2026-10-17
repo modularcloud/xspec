@@ -49,15 +49,14 @@
 // resolvable is a diagnosed compile error (the red path for section 4 tests
 // against the stub product, H-8); marker addressing and project loading
 // fail loudly rather than vacuously green; H-2's isolation is a staging
-// error, never a verdict; and each path's helpers refuse the other's
-// projects. The skeleton reader T1.1-2 compares two generated modules
-// through (`moduleSkeleton`, `skeletonChains`, `diffModuleSkeletons`) is
-// pinned, in each configuration, against a hand-written module in the
-// generated arrangement: its exact member tree, the compare's blindness to
+// error, never a verdict; and a project is loaded under one of H-2's two
+// configurations exactly, with no compiler option of its own, any other
+// load a harness misuse — so no other configuration is reachable. The
+// skeleton reader T1.1-2 compares two generated modules through
+// (`moduleSkeleton`, `skeletonChains`, `diffModuleSkeletons`) is pinned, in
+// each configuration, against a hand-written module in the generated
+// arrangement: its exact member tree, the compare's blindness to
 // declaration names and its topmost differences, and its loud failures.
-// The NodeNext path, which the driver keeps only until every consumer test
-// has moved onto H-2's configurations, keeps two vectors of its own,
-// removed with it.
 
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
@@ -69,8 +68,6 @@ import { describe, expect, onTestFinished, test } from "vitest";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import { HarnessStagingError } from "../helpers/permissions.js";
 import {
-  assertCompileErrorAt,
-  assertNoCompileErrors,
   assertTypeChecksClean,
   assertTypeErrorsAt,
   COMMONJS_CONFIGURATION,
@@ -81,11 +78,13 @@ import {
   ES_MODULE_CONFIGURATION,
   forEachConfiguration,
   forEachConsumerProject,
-  runConsumer,
   skeletonChains,
   withCompiledConsumer,
 } from "../helpers/tooling.js";
-import type { ConsumerConfiguration } from "../helpers/tooling.js";
+import type {
+  ConsumerConfiguration,
+  ConsumerProjectOptions,
+} from "../helpers/tooling.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 import type { WorkspaceDecl } from "../helpers/workspace.js";
 
@@ -894,8 +893,9 @@ test("H-2's two configurations are its options exactly — nothing else set — 
       ...configuration.compilerOptions,
     });
   }
-  // Any other configuration object — a copy of one included — and
-  // compilerOptions beside a configuration are refused, as harness misuse.
+  // Any other configuration object — a copy of one included — no
+  // configuration, and an option of the project's own beside one are
+  // refused, as harness misuse: no other configuration is reachable.
   await expect(
     ConsumerProject.load({
       rootDir: workspace.root,
@@ -903,14 +903,30 @@ test("H-2's two configurations are its options exactly — nothing else set — 
       configuration: { ...COMMONJS_CONFIGURATION },
     }),
   ).rejects.toThrowError(/one of H-2's two fixed configurations exactly/);
-  await expect(
-    ConsumerProject.load({
+  const unconfigured: unknown = await ConsumerProject.load({
+    rootDir: workspace.root,
+    rootFiles: ["greeting.ts", "main.ts"],
+  } as unknown as ConsumerProjectOptions).catch((error: unknown) => error);
+  expect(unconfigured).toBeInstanceOf(Error);
+  expect(unconfigured).not.toBeInstanceOf(HarnessAssertionError);
+  expect((unconfigured as Error).message).toMatch(
+    /one of H-2's two fixed configurations exactly .* got none/,
+  );
+  for (const configuration of CONSUMER_CONFIGURATIONS) {
+    const ownOption: unknown = await ConsumerProject.load({
       rootDir: workspace.root,
       rootFiles: ["greeting.ts", "main.ts"],
-      configuration: ES_MODULE_CONFIGURATION,
-      compilerOptions: { skipLibCheck: true },
-    }),
-  ).rejects.toThrowError(/compilerOptions is the NodeNext path's alone/);
+      configuration,
+      compilerOptions: { strict: false },
+    } as unknown as ConsumerProjectOptions).catch((error: unknown) => error);
+    expect(ownOption).toBeInstanceOf(Error);
+    expect(ownOption).not.toBeInstanceOf(HarnessAssertionError);
+    expect((ownOption as Error).message).toContain(
+      `a consumer project takes no option of its own — ` +
+        `${configurationLabel(configuration)} fixes every option — got ` +
+        `"compilerOptions"`,
+    );
+  }
 });
 
 test("forEachConfiguration runs the CommonJS, then the ES-module configuration, naming the configuration in every diagnosis (H-2)", async () => {
@@ -1110,7 +1126,7 @@ test("the compiled output is the compiler's alone: a hand-written JavaScript fil
   expect(result.stderr).toContain("Cannot find module './shout.js'");
 });
 
-test("each path's helpers refuse the other's projects, and H-2's runtime refuses the ES-module configuration — harness misuse, never a verdict", async () => {
+test("H-2's runtime refuses the ES-module configuration and an output directory inside the project root, and the type-error assertion an empty expectation list — harness misuse, never a verdict", async () => {
   const workspace = await stageFixtureProject();
   const rootFiles = ["greeting.ts", "main.ts"];
   const esModule = await ConsumerProject.load({
@@ -1123,32 +1139,12 @@ test("each path's helpers refuse the other's projects, and H-2's runtime refuses
     rootFiles,
     configuration: COMMONJS_CONFIGURATION,
   });
-  const nodeNext = await ConsumerProject.load({
-    rootDir: fixtureRoot,
-    rootFiles,
-  });
-  expect(nodeNext.configuration).toBeUndefined();
   const misuses: (() => unknown)[] = [
     // H-2's runtime is the CommonJS configuration's alone.
     () => esModule.emitTo(path.join(os.tmpdir(), "never-written")),
-    () => nodeNext.emitTo(path.join(os.tmpdir(), "never-written")),
     // Its output lies outside the project root.
     () => commonJs.emitTo(path.join(workspace.root, "out")),
     () => commonJs.emitTo("relative-out"),
-    // The NodeNext path's helpers refuse a project under H-2.
-    () => commonJs.emit(),
-    () => assertNoCompileErrors(commonJs),
-    () =>
-      assertCompileErrorAt(
-        commonJs,
-        commonJs.locate("main.ts", 'greet("world")'),
-      ),
-    // H-2's helpers refuse the NodeNext path's project.
-    () => assertTypeChecksClean(nodeNext),
-    () =>
-      assertTypeErrorsAt(nodeNext, [
-        { at: nodeNext.locate("main.ts", 'greet("world")') },
-      ]),
     // An empty expectation list is the clean verdict's, never this one's.
     () => assertTypeErrorsAt(commonJs, []),
   ];
@@ -1162,21 +1158,20 @@ test("each path's helpers refuse the other's projects, and H-2's runtime refuses
     expect(thrown).toBeInstanceOf(Error);
     expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
   }
-  for (const project of [esModule, nodeNext]) {
-    const refused: unknown = await withCompiledConsumer(
-      project,
-      "S-4 misuse probe",
-      async () => "entered",
-    ).catch((error: unknown) => error);
-    expect(refused).toBeInstanceOf(Error);
-    expect(refused).not.toBeInstanceOf(HarnessAssertionError);
-  }
-  await expect(
-    withCompiledConsumer(esModule, "S-4 misuse probe", async () => "entered"),
-  ).rejects.toThrowError(/type-checked and served, never executed/);
+  const refused: unknown = await withCompiledConsumer(
+    esModule,
+    "S-4 misuse probe",
+    async () => "entered",
+  ).catch((error: unknown) => error);
+  expect(refused).toBeInstanceOf(Error);
+  expect(refused).not.toBeInstanceOf(HarnessAssertionError);
+  expect((refused as Error).message).toMatch(
+    /type-checked and served, never executed/,
+  );
+  expect(await workspace.readdirNames()).not.toContain("out");
 });
 
-test("H-2's isolation: a configured project whose root has a node_modules entry above it is refused as a staging error — the fixture directory in this repository among them", async () => {
+test("H-2's isolation: a project whose root has a node_modules entry above it is refused as a staging error — the fixture directory in this repository among them", async () => {
   for (const [kind, decl] of [
     ["a directory", { dirs: ["node_modules"] }],
     ["a plain file", { files: { node_modules: "" } }],
@@ -1295,56 +1290,6 @@ test("H-2's isolation: a run whose environment lets Node.js's resolver find a pa
       expect(ran.stdout).toBe("ran\n");
     },
   );
-});
-
-test("the transitional NodeNext path keeps its verdicts until its removal: the fixture project in place, its type error, both collision kinds, and its clean subset", async () => {
-  const load = async (rootFiles: readonly string[]): Promise<ConsumerProject> =>
-    await ConsumerProject.load({ rootDir: fixtureRoot, rootFiles });
-  const typeError = await load(["greeting.ts", "main.ts", "type-error.ts"]);
-  const marker = typeError.locate("type-error.ts", "12345");
-  const diagnostic = assertCompileErrorAt(typeError, marker, {
-    code: 2345,
-    messageIncludes: ["number", "string"],
-  });
-  expect(diagnostic.start).toEqual(marker);
-  expect(typeError.errors()).toHaveLength(1);
-  const conflict = await load(["greeting.ts", "import-conflict.ts"]);
-  expect(() => assertNoCompileErrors(conflict)).toThrowError(/TS2440/);
-  const duplicate = await load([
-    "greeting.ts",
-    "other-greeting.ts",
-    "import-duplicate.ts",
-  ]);
-  expect(() => assertNoCompileErrors(duplicate)).toThrowError(/TS2300/);
-  assertNoCompileErrors(await load(["greeting.ts", "main.ts"]));
-});
-
-test("the transitional NodeNext path keeps its runtime until its removal: emitted beside the sources, run under plain Node", async () => {
-  const workspace = await makeWorkspace({
-    files: {
-      "package.json": '{ "type": "module" }\n',
-      "util.ts":
-        "export function double(n: number): number {\n  return n * 2;\n}\n",
-      "main.ts":
-        'import { double } from "./util.js";\n\nprocess.stdout.write(`double:${double(3)} argv:${process.argv[2] ?? "none"}\\n`);\n',
-    },
-  });
-  const project = await ConsumerProject.load({
-    rootDir: workspace.root,
-    rootFiles: ["main.ts", "util.ts"],
-  });
-  assertNoCompileErrors(project, "runtime consumer");
-  const emitted = project.emit();
-  expect(emitted.emitSkipped).toBe(false);
-  expect(emitted.emittedFiles).toEqual(["main.js", "util.js"]);
-  const result = await runConsumer({
-    dir: workspace.root,
-    entry: "main.js",
-    argv: ["extra"],
-  });
-  expect(result.exitCode).toBe(0);
-  expect(result.stdout).toBe("double:6 argv:extra\n");
-  expect(result.stderr).toBe("");
 });
 
 // `moduleSkeleton`'s fixture (T1.1-2: two generated modules expose the same

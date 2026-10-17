@@ -191,7 +191,9 @@
 //   before the real move, its `import-addition` admitted at the origin
 //   declaration's removal's start or its end, one composed position
 //   (T6.6-4(b)'s latitude); the compile-clean premise and observation ride
-//   the TypeScript tooling driver (H-2) as T6.5-9's do.
+//   the TypeScript tooling driver under each of H-2's two configurations,
+//   the whole program — generated modules and companions included — clean,
+//   as T6.5-9's do.
 // - T6.5-19 rides T6.5-13's arm runner (`runA13Arm`, its diagnoses under
 //   the caller's test ID): (a) is a cross-file arm over T6.5-13's shared
 //   origin and third module (the origin keeps a second use of `X`, so
@@ -239,8 +241,8 @@ import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
 import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import {
-  ConsumerProject,
-  assertNoCompileErrors,
+  assertTypeChecksClean,
+  forEachConsumerProject,
 } from "../../helpers/tooling.js";
 import {
   IDENTIFIER_RUN_SOURCE,
@@ -6680,16 +6682,19 @@ async function runA18Arm(product: ProductBinding, arm: A18Arm): Promise<void> {
         `${context} premise \`check --json\` after that build — clean: the ` +
           `staging is valid and nothing is stale (SPEC 12.2, 14.10)`,
       );
-      // Fixture self-check through H-2's standard-tooling channel: the
-      // staging compiles clean, so a later diagnostic is the move's.
-      assertNoCompileErrors(
-        await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: [A18_APP],
-        }),
-        `${context} premise: ${A18_APP} compiles clean before the move ` +
-          `under standard tooling — ${arm.summary}; the generated modules ` +
-          `resolve (SPEC 4, 13.1; a fixture self-check)`,
+      // Fixture self-check through H-2's standard-tooling channel, under
+      // each of its two configurations: the staging compiles clean, its
+      // whole program included, so a later diagnostic is the move's.
+      await forEachConsumerProject(
+        { rootDir: workspace.root, rootFiles: [A18_APP] },
+        (project) =>
+          assertTypeChecksClean(
+            project,
+            `${context} premise: ${A18_APP} compiles clean before the move ` +
+              `under standard tooling — ${arm.summary}; the generated ` +
+              `modules and the companions they reach resolve and type-check ` +
+              `clean (SPEC 4, 13.1; a fixture self-check)`,
+          ),
       );
       if (arm.before !== undefined) {
         assertEdgeSetEqual(
@@ -6786,15 +6791,18 @@ async function runA18Arm(product: ProductBinding, arm: A18Arm): Promise<void> {
           `move — ${arm.after.why}`,
       );
       await assertCleanAfterMove(product, workspace, arm.clean, context);
-      // A fresh project: the language service snapshots files on first
-      // access, and the move rewrote them.
-      assertNoCompileErrors(
-        await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: [A18_APP],
-        }),
-        `${context}: ${A18_APP} after the move compiles with no ` +
-          `diagnostics under standard tooling — ${arm.compiles}`,
+      // Fresh projects, one under each of H-2's two configurations: the
+      // language service snapshots files on first access, and the move
+      // rewrote them.
+      await forEachConsumerProject(
+        { rootDir: workspace.root, rootFiles: [A18_APP] },
+        (project) =>
+          assertTypeChecksClean(
+            project,
+            `${context}: ${A18_APP} after the move compiles with no ` +
+              `diagnostics under standard tooling, its whole program ` +
+              `clean — ${arm.compiles}`,
+          ),
       );
     },
     SPEC_AND_CODE_CONFIG,
@@ -6804,7 +6812,7 @@ async function runA18Arm(product: ProductBinding, arm: A18Arm): Promise<void> {
 const T6_5_18 = defineProductTest({
   id: "T6.5-18",
   title:
-    "shadow-aware, value-level binding choice: over `specs/origin.mdx` holding `x` and `specs/target.mdx` holding `z`, `move specs/origin.mdx#x specs/target.mdx#y` roots each rewritten spelling in `src/c.ts` at a value-level binding of the target module that no local declaration shadows at the occurrence, and otherwise at the binding of a declaration it adds — four arms, each a valid workspace before the move (`build` and `check` clean, the file compiling clean under standard tooling): the base arm (`import T`, then `import O`, the module-scope marker `T.z`, and `f` holding `const T = 1` beside the marker `O.x`) gains `import <F> from \"../specs/target.xspec\"`, `<F>` never `T`, the marker becoming `<F>.y`, `query edges` reporting `src/c.ts#f` → `specs/target.mdx#y` beside `T.z`'s edge as before; (a) the target's default bound type-only (`import type T`, then `import O`, `let v: typeof T.z`, `O.x`) becomes exactly `import type T`, `import <F>`, `let v: typeof T.z`, `<F>.y`, with the marker's `references` edge from `src/c.ts`; (b) the target's `text` bound type-only (`import T, { type text as tt }`, then `import O, { text as textO }`, `T.z`, `textO(O.x)`) gains exactly `import { text as <Y> } from \"../specs/target.xspec\"` (or `{ text }`), the call becoming `<Y>(T.y)`, with its `embeds` edge from `src/c.ts`; and the callee shadow (`import T, { text as tt }`, then `import O, { text as t }`, `T.z`, and `f` holding `const tt = 1` beside `t(O.x)`) gains the same declaration, the call becoming `<Y>(T.y)`, with its `embeds` edge from `src/c.ts#f` — `<Y>` never `T` or `tt`; in each the origin declaration removed with its line and the single added run exactly the declaration followed by U+000A where that line stood, directly after the target module's declaration — the file's one line-start admissible offset — no other byte changed (T6.5-8's diff-isolated discipline), the origin and target files byte-equal to their compositions, `check` and `build` clean afterward, the file compiling clean (H-2), and the `--preview` taken before the move reporting for `src/c.ts` exactly one `reference-rewrite` spanning the marker or the call, one `import-addition` at the origin declaration's removal's start or end, and one `import-removal` spanning it with its adjunct drop (6.6, 12.7; T6.6-4) — a product rooting at the shadowed or type-only binding writes `T.y` or `tt(T.y)`, adds no import, and fails the byte contract (SPEC 6.5, 4, 4.3, 4.5, 4.6, 2.1, 3, 5.7, 6.6, 12.7)",
+    "shadow-aware, value-level binding choice: over `specs/origin.mdx` holding `x` and `specs/target.mdx` holding `z`, `move specs/origin.mdx#x specs/target.mdx#y` roots each rewritten spelling in `src/c.ts` at a value-level binding of the target module that no local declaration shadows at the occurrence, and otherwise at the binding of a declaration it adds — four arms, each a valid workspace before the move (`build` and `check` clean, the file compiling clean under standard tooling, under both of H-2's configurations): the base arm (`import T`, then `import O`, the module-scope marker `T.z`, and `f` holding `const T = 1` beside the marker `O.x`) gains `import <F> from \"../specs/target.xspec\"`, `<F>` never `T`, the marker becoming `<F>.y`, `query edges` reporting `src/c.ts#f` → `specs/target.mdx#y` beside `T.z`'s edge as before; (a) the target's default bound type-only (`import type T`, then `import O`, `let v: typeof T.z`, `O.x`) becomes exactly `import type T`, `import <F>`, `let v: typeof T.z`, `<F>.y`, with the marker's `references` edge from `src/c.ts`; (b) the target's `text` bound type-only (`import T, { type text as tt }`, then `import O, { text as textO }`, `T.z`, `textO(O.x)`) gains exactly `import { text as <Y> } from \"../specs/target.xspec\"` (or `{ text }`), the call becoming `<Y>(T.y)`, with its `embeds` edge from `src/c.ts`; and the callee shadow (`import T, { text as tt }`, then `import O, { text as t }`, `T.z`, and `f` holding `const tt = 1` beside `t(O.x)`) gains the same declaration, the call becoming `<Y>(T.y)`, with its `embeds` edge from `src/c.ts#f` — `<Y>` never `T` or `tt`; in each the origin declaration removed with its line and the single added run exactly the declaration followed by U+000A where that line stood, directly after the target module's declaration — the file's one line-start admissible offset — no other byte changed (T6.5-8's diff-isolated discipline), the origin and target files byte-equal to their compositions, `check` and `build` clean afterward, the file compiling clean under both of H-2's configurations, and the `--preview` taken before the move reporting for `src/c.ts` exactly one `reference-rewrite` spanning the marker or the call, one `import-addition` at the origin declaration's removal's start or end, and one `import-removal` spanning it with its adjunct drop (6.6, 12.7; T6.6-4) — a product rooting at the shadowed or type-only binding writes `T.y` or `tt(T.y)`, adds no import, and fails the byte contract (SPEC 6.5, 4, 4.3, 4.5, 4.6, 2.1, 3, 5.7, 6.6, 12.7)",
   run: async (product) => {
     for (const arm of A18_ARMS) {
       await runA18Arm(product, arm);
