@@ -40,13 +40,17 @@
 //   asserts (SPEC 5.5, 9.2, 9.3).
 // - T4.5-3 arms stage exactly one defect each — the non-static form. Every
 //   arm's chain would resolve to an existing node if read statically
-//   (`SPEC[key]` with key = "a"; TEST-SPEC's `SPEC?.a`, optional on the
-//   root binding, read as `SPEC.a`, with `a` staged; the `a.b` chains with
-//   `a.b` staged; `` SPEC[`login-v2`] `` read as `SPEC["login-v2"]`, over
-//   its own module holding `login-v2`, as TEST-SPEC pins it), so a product
-//   cannot legitimately reclassify the finding as an unresolved reference
-//   (14.7): the sole present condition is 14.8, and the exact
-//   condition-count assertion simultaneously pins "not 14.18" (SPEC 4.5).
+//   (`SPEC[key]` with key = "a"; TEST-SPEC's `SPEC[1]` read as `SPEC["1"]`,
+//   as TypeScript's checker reads it, over its own module holding the
+//   top-level section `1`; TEST-SPEC's `SPEC?.a`, optional on the root
+//   binding, read as `SPEC.a`, with `a` staged; TEST-SPEC's `(SPEC.a)` and
+//   `(SPEC).a` read through their parentheses as `SPEC.a`, and `SPEC[("a")]`
+//   as `SPEC["a"]`; the `a.b` chains with `a.b` staged; `` SPEC[`login-v2`] ``
+//   read as `SPEC["login-v2"]`, over its own module holding `login-v2`, as
+//   TEST-SPEC pins it), so a product cannot legitimately reclassify the
+//   finding as an unresolved reference (14.7): the sole present condition
+//   is 14.8, and the exact condition-count assertion simultaneously pins
+//   "not 14.18" (SPEC 4.5).
 // - T4.5-3's TypeScript-only arms (`SPEC.a!;`, `SPEC.a as X;`, `<X>SPEC.a;`,
 //   `SPEC.a satisfies X;`) are dynamic references in a TypeScript source —
 //   14.8 at the statement's expression, the file well-formed — never a parse
@@ -61,8 +65,8 @@
 //   witness (SPEC 5.7, 11.2), as in T4.5-4, T4.5-8, and T4.5-9: after each
 //   arm's `build`, `occurrences --file src/app.ts` on the same workspace
 //   must exit 1 with its full answer emitted, its findings exactly
-//   {"14.8": 1}, that finding located in the offending statement's byte
-//   window as `build`'s is, and its record list empty (SPEC 11.2, 11.3).
+//   {"14.8": 1}, that finding located as `build`'s is (the location
+//   assertions below), and its record list empty (SPEC 11.2, 11.3).
 //   The check is T4.5-3's alone (`assertArmFailsWith`'s `noOccurrence`
 //   option): TEST-SPEC gives T4.5-5's 14.18 arms no such clause.
 // - T4.5-5 arms likewise stage exactly one unsanctioned value-level use
@@ -117,7 +121,12 @@
 //   offset in a pure-ASCII `src/app.ts`, so string indices are byte offsets
 //   and each finding must fall within the offending statement's own byte
 //   window (end-widened by one byte for line-granular locations, support.ts
-//   byteWindow).
+//   byteWindow) — save where an arm pins the range (the arm table's
+//   `exactly`): T4.5-3's numeric-literal, parenthesized-chain, and
+//   parenthesized-index arms, whose 14.8 TEST-SPEC locates as the
+//   statement's expression, the parentheses included and the `;` excluded,
+//   are held to exactly that range, one location (SPEC 14; TEST-SPEC T4.5-3,
+//   T14-11) — a window cannot tell `(SPEC.a)` from the `SPEC.a` inside it.
 
 import type {
   CoverageProfileReport,
@@ -290,6 +299,16 @@ interface OffendingStatementArm {
   /** The offending statement — exactly one of the lines. */
   readonly offending: string;
   /**
+   * The characters the arm's finding must locate exactly, where TEST-SPEC
+   * pins the range beyond the statement's window — T4.5-3's numeric-literal,
+   * parenthesized, and parenthesized-index arms: the statement's expression,
+   * the parentheses included and the `;` excluded (SPEC 14: a non-static
+   * reference in expression-statement position is located by the
+   * statement's expression, exclusive of any terminator; TEST-SPEC T4.5-3,
+   * T14-11). It must occur exactly once in `offending`.
+   */
+  readonly exactly?: string;
+  /**
    * The arm's spec sources, when not the shared `a`/`a.b` source
    * (`AB_SPEC_FILES`) — staged-source records, as every arm's workspace
    * past a body's first is created after a product invocation (S-9).
@@ -297,7 +316,7 @@ interface OffendingStatementArm {
   readonly specFiles?: Readonly<Record<string, StagedMdx>>;
 }
 
-/** An arm's staged `src/app.ts` and its offending statement's window. */
+/** An arm's staged `src/app.ts` and where its offending bytes stand. */
 interface StagedOffendingStatement {
   /**
    * The whole file — every line LF-terminated — as a staged-source record
@@ -308,6 +327,11 @@ interface StagedOffendingStatement {
   readonly source: StagedTs;
   /** The offending statement's byte window (support.ts byteWindow). */
   readonly window: { readonly start: number; readonly end: number };
+  /**
+   * The exact byte range (SPEC 1.7) of the arm's `exactly` characters, where
+   * the arm pins one.
+   */
+  readonly exact?: { readonly start: number; readonly end: number };
 }
 
 /** One offending-statement arm paired with its staging. */
@@ -318,10 +342,11 @@ interface OffendingStatementStaging {
 
 /**
  * Lay out an arm's `src/app.ts` and locate its offending statement's byte
- * window. The statement must appear exactly once among the staged lines —
- * otherwise a harness defect (never a product failure). It registers a
- * record, so it runs at module load only (`stageOffendingStatements`,
- * `T4_5_4_CALLEE_STAGED`).
+ * window — and, where the arm pins one, the exact range of its `exactly`
+ * characters. The statement must appear exactly once among the staged
+ * lines, and `exactly` exactly once within it — otherwise a harness defect
+ * (never a product failure). It registers a record, so it runs at module
+ * load only (`stageOffendingStatements`, `T4_5_4_CALLEE_STAGED`).
  */
 function stageOffendingStatement(
   testId: string,
@@ -339,9 +364,27 @@ function stageOffendingStatement(
     .slice(0, at)
     .map((line) => line + "\n")
     .join("");
-  return {
+  const staged = {
     source: stagedTs(`${testId} arm ${arm.name} src/app.ts`, source),
     window: byteWindow(prefix, arm.offending),
+  };
+  if (arm.exactly === undefined) return staged;
+  const within = arm.offending.indexOf(arm.exactly);
+  if (within === -1 || arm.offending.lastIndexOf(arm.exactly) !== within) {
+    throw new Error(
+      `${testId} fixture broke: the exactly located characters ` +
+        `${JSON.stringify(arm.exactly)} must appear exactly once in the ` +
+        `offending statement (${arm.name}) — fix the arm table in ` +
+        `section-4.5.ts`,
+    );
+  }
+  const start = Buffer.byteLength(
+    prefix + arm.offending.slice(0, within),
+    "utf8",
+  );
+  return {
+    ...staged,
+    exact: { start, end: start + Buffer.byteLength(arm.exactly, "utf8") },
   };
 }
 
@@ -360,14 +403,53 @@ function stageOffendingStatements(
 }
 
 /**
+ * Assert an arm's one finding located as the module's arms assert it:
+ * within the offending statement's byte window in `src/app.ts` — or, where
+ * the arm pins a range (`exactly`), at exactly that range, its one location
+ * (SPEC 14: ranges are exact per condition, a non-static reference in
+ * expression-statement position located by the statement's expression,
+ * exclusive of any terminator; TEST-SPEC T4.5-3, T14-11).
+ */
+function assertArmFindingLocated(
+  finding: Finding,
+  arm: OffendingStatementArm,
+  staged: StagedOffendingStatement,
+  context: string,
+): void {
+  const { exact } = staged;
+  if (exact === undefined) {
+    assertFindingLocated(
+      finding,
+      { file: "src/app.ts", window: staged.window },
+      context,
+    );
+    return;
+  }
+  assertSameJson(
+    finding.locations.map((location) => ({
+      file: location.file,
+      range: { start: location.range.start, end: location.range.end },
+    })),
+    [{ file: "src/app.ts", range: { start: exact.start, end: exact.end } }],
+    `${context}: located exactly as the statement's expression ` +
+      `\`${String(arm.exactly)}\` — by its own characters as spelled, any ` +
+      `parentheses included and the \`;\` excluded — one location, its ` +
+      `range \`{"start", "end"}\` as zero-based byte offsets, end-exclusive ` +
+      `(SPEC 14, 1.7; TEST-SPEC T4.5-3, T14-11; message: ` +
+      `${JSON.stringify(finding.message)})`,
+  );
+}
+
+/**
  * Stage one arm over its spec sources — the shared `a`/`a.b` source unless
  * the arm names its own — and assert `build --json` reports exactly one
  * finding of `condition`, located within the offending statement's byte
- * window. The exact condition-count assertion is simultaneously the
- * classification assertion (14.8 vs 14.18, SPEC 4.5). With `noOccurrence`
- * (T4.5-3's "no edge and no occurrence"; T4.5-5 passes no options, its
- * 14.18 arms carrying no such clause), `occurrences --file src/app.ts` on
- * the same failing workspace must then list no record
+ * window, or exactly at the arm's pinned range where it pins one
+ * (`assertArmFindingLocated`). The exact condition-count assertion is
+ * simultaneously the classification assertion (14.8 vs 14.18, SPEC 4.5).
+ * With `noOccurrence` (T4.5-3's "no edge and no occurrence"; T4.5-5 passes
+ * no options, its 14.18 arms carrying no such clause), `occurrences --file
+ * src/app.ts` on the same failing workspace must then list no record
  * (`assertArmRecordsNoOccurrence`).
  */
 async function assertArmFailsWith(
@@ -377,17 +459,17 @@ async function assertArmFailsWith(
   condition: string,
   options: { readonly noOccurrence?: boolean } = {},
 ): Promise<void> {
-  const { source, window } = staged;
   const context = `${testId} \`build --json\` over ${arm.name}`;
   await withWorkspace(
     SPEC_AND_CODE_CONFIG,
-    { ...(arm.specFiles ?? AB_SPEC_FILES), "src/app.ts": source },
+    { ...(arm.specFiles ?? AB_SPEC_FILES), "src/app.ts": staged.source },
     async (workspace) => {
       const findings = await buildFindings(product, workspace, context);
       assertConditionCounts(findings, { [condition]: 1 }, context);
-      assertFindingLocated(
+      assertArmFindingLocated(
         findings[0]!,
-        { file: "src/app.ts", window },
+        arm,
+        staged,
         `${context}: the ${condition} finding`,
       );
       if (options.noOccurrence === true) {
@@ -395,7 +477,7 @@ async function assertArmFailsWith(
           product,
           workspace,
           `${testId} \`occurrences --file src/app.ts\` over ${arm.name}`,
-          window,
+          { arm, staged },
           condition,
         );
       }
@@ -409,15 +491,16 @@ async function assertArmFailsWith(
  * record is the edge's witness (5.7, 11.2): `occurrences --file src/app.ts`
  * answers from the current sources, so it exits 1 with its full answer
  * emitted, the code file's one finding — the one `condition` finding
- * `build` reported, located in the offending statement's byte window as
- * `build`'s is — accompanying it, and lists no record: a dynamic reference
- * spelling records no edge and no occurrence (SPEC 4.5, 5.7, 11.2, 11.3).
+ * `build` reported, located as `build`'s is (in the offending statement's
+ * byte window, or exactly at the arm's pinned range) — accompanying it, and
+ * lists no record: a dynamic reference spelling records no edge and no
+ * occurrence (SPEC 4.5, 5.7, 11.2, 11.3).
  */
 async function assertArmRecordsNoOccurrence(
   product: ProductBinding,
   workspace: TestWorkspace,
   context: string,
-  window: { readonly start: number; readonly end: number },
+  { arm, staged }: OffendingStatementStaging,
   condition: string,
 ): Promise<void> {
   const result = await expectExit(
@@ -441,9 +524,10 @@ async function assertArmRecordsNoOccurrence(
     `${context}: the code file's one finding accompanies the answer, none ` +
       `beside it (SPEC 11.2, 11.3)`,
   );
-  assertFindingLocated(
+  assertArmFindingLocated(
     report.findings[0]!,
-    { file: "src/app.ts", window },
+    arm,
+    staged,
     `${context}: the accompanying ${condition} finding, located as ` +
       `\`build\`'s is (SPEC 11.2, 14)`,
   );
@@ -970,6 +1054,19 @@ const T4_5_3_LOGIN_SPEC_FILES = {
   ),
 } as const;
 
+// The numeric-literal arm's spec source: `SPEC`'s module holding the
+// top-level section `1` (a valid segment, SPEC 1.4), as TEST-SPEC T4.5-3
+// pins it — TypeScript's checker reads `SPEC[1]` as `SPEC["1"]`, so the
+// chain would resolve if read through the checker and the numeric-literal
+// index is the arm's sole defect. A staged-source record, as the arm is not
+// the body's first (S-9, test/self/s9-staged-sources.test.ts).
+const T4_5_3_NUMERIC_SPEC_FILES = {
+  "specs/A.mdx": stagedMdx(
+    "T4.5-3 numeric-literal arm specs/A.mdx — the module holding the top-level section 1",
+    '<S id="1">\nSection one behavior.\n</S>\n',
+  ),
+} as const;
+
 const T4_5_3_ARMS: readonly OffendingStatementArm[] = [
   {
     name:
@@ -977,6 +1074,21 @@ const T4_5_3_ARMS: readonly OffendingStatementArm[] = [
       "(SPEC 2.4, 4.5)",
     lines: [T4_5_3_IMPORT, "", 'const key = "a";', "SPEC[key];"],
     offending: "SPEC[key];",
+  },
+  // TEST-SPEC's `SPEC[1];`: an index other than a static string literal
+  // makes the reference dynamic (SPEC 2.4), though TypeScript's checker
+  // reads it as `SPEC["1"]` — a product resolving through the checker
+  // records the edge to the module's `1` and reports nothing, failing the
+  // exit-1 and exact {"14.8": 1} expectations and the empty record list.
+  {
+    name:
+      "a computed index by numeric literal as a bare expression statement, " +
+      "`SPEC[1];`, `SPEC`'s module holding the top-level section `1` " +
+      "(SPEC 2.4, 4.5)",
+    lines: [T4_5_3_IMPORT, "", "SPEC[1];"],
+    offending: "SPEC[1];",
+    exactly: "SPEC[1]",
+    specFiles: T4_5_3_NUMERIC_SPEC_FILES,
   },
   // TEST-SPEC's pinned optional-chaining spelling, optional on the root
   // binding itself: read statically, `SPEC.a` resolves (the shared source
@@ -995,6 +1107,44 @@ const T4_5_3_ARMS: readonly OffendingStatementArm[] = [
       "(SPEC 2.4, 4.5)",
     lines: [T4_5_3_IMPORT, "", "SPEC.a?.b;"],
     offending: "SPEC.a?.b;",
+  },
+  // TEST-SPEC's parentheses applied to the chain (SPEC 2.4) — the whole
+  // chain parenthesized, `(SPEC.a);`, and a partly parenthesized one,
+  // `(SPEC).a;` — each read through its parentheses as `SPEC.a`, which
+  // resolves (the shared source holds `a`), so a product looking through
+  // parentheses records the edge and reports nothing, or classes the
+  // parenthesized statement as an unsanctioned use (14.18) — failing the
+  // exact {"14.8": 1} expectation. Each 14.8 is located as the statement's
+  // expression, the parentheses included and the `;` excluded, pinned
+  // exactly: a window cannot tell `(SPEC.a)` from the `SPEC.a` it encloses
+  // (SPEC 14; TEST-SPEC T4.5-3, T14-11).
+  {
+    name:
+      "the whole chain parenthesized as a bare expression statement, " +
+      "`(SPEC.a);` (SPEC 2.4, 4.5)",
+    lines: [T4_5_3_IMPORT, "", "(SPEC.a);"],
+    offending: "(SPEC.a);",
+    exactly: "(SPEC.a)",
+  },
+  {
+    name:
+      "a partly parenthesized chain as a bare expression statement, " +
+      "`(SPEC).a;` (SPEC 2.4, 4.5)",
+    lines: [T4_5_3_IMPORT, "", "(SPEC).a;"],
+    offending: "(SPEC).a;",
+    exactly: "(SPEC).a",
+  },
+  // TEST-SPEC's `SPEC[("a")];`: the index is no static string literal,
+  // whatever the parentheses enclose (SPEC 2.4), though TypeScript's checker
+  // reads it as `SPEC["a"]` — the shared source holds `a`, so a product
+  // unwrapping the parentheses records the edge and reports nothing.
+  {
+    name:
+      "a parenthesized computed index as a bare expression statement, " +
+      '`SPEC[("a")];`, `SPEC`\'s module holding `a` (SPEC 2.4, 4.5)',
+    lines: [T4_5_3_IMPORT, "", 'SPEC[("a")];'],
+    offending: 'SPEC[("a")];',
+    exactly: 'SPEC[("a")]',
   },
   {
     name:
@@ -1041,8 +1191,14 @@ const T4_5_3_ARMS: readonly OffendingStatementArm[] = [
     lines: [T4_5_3_IMPORT, "", "type X = unknown;", "SPEC.a satisfies X;"],
     offending: "SPEC.a satisfies X;",
   },
+  // An extra spelling of the parenthesized forms above: parentheses around a
+  // chain prefix, a further segment past them — `(SPEC.a).b`, read through
+  // its parentheses as `SPEC.a.b`, resolves (the shared source holds
+  // `a.b`).
   {
-    name: "a parenthesized chain as a bare expression statement (SPEC 2.4, 4.5)",
+    name:
+      "a parenthesized chain prefix ahead of a further segment as a bare " +
+      "expression statement, `(SPEC.a).b;` (SPEC 2.4, 4.5)",
     lines: [T4_5_3_IMPORT, "", "(SPEC.a).b;"],
     offending: "(SPEC.a).b;",
   },
@@ -1067,7 +1223,7 @@ const T4_5_3_STAGINGS = stageOffendingStatements("T4.5-3", T4_5_3_ARMS);
 const T4_5_3 = defineProductTest({
   id: "T4.5-3",
   title:
-    "a non-static bare reference in expression-statement position — computed index by variable, optional chaining (`SPEC?.a;`, optional on the root binding, and `SPEC.a?.b;`), non-null assertion, parentheses, template-literal index (`` SPEC[`login-v2`]; ``, the module holding `login-v2`: template literals are not static), and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`SPEC.a as X;`, `<X>SPEC.a;` in a `.ts` file, `SPEC.a satisfies X;`) — fails with exactly one located 14.8 finding (invalid argument, not 14.18), the file well-formed, with no edge and no occurrence: `occurrences --file src/app.ts` on the failing workspace exits 1 with its full answer, the one 14.8 finding accompanying it located as `build`'s is, and lists no record (SPEC 4.5, 2.4, 5.7, 11.2, 11.3, 14.8)",
+    "a non-static bare reference in expression-statement position — computed index by variable, numeric-literal index (`SPEC[1];`, the module holding the top-level section `1`), optional chaining (`SPEC?.a;`, optional on the root binding, and `SPEC.a?.b;`), parentheses applied to the chain (the whole chain, `(SPEC.a);`, partly, `(SPEC).a;`, and around a prefix, `(SPEC.a).b;`), parenthesized index (`SPEC[(\"a\")];`, the module holding `a`), non-null assertion, template-literal index (`` SPEC[`login-v2`]; ``, the module holding `login-v2`: template literals are not static), and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`SPEC.a as X;`, `<X>SPEC.a;` in a `.ts` file, `SPEC.a satisfies X;`) — fails with exactly one located 14.8 finding (invalid argument, not 14.18), the file well-formed, located exactly as the statement's expression in the numeric-literal, `(SPEC.a);`, `(SPEC).a;`, and parenthesized-index arms (the parentheses included, the `;` excluded), with no edge and no occurrence: `occurrences --file src/app.ts` on the failing workspace exits 1 with its full answer, the one 14.8 finding accompanying it located as `build`'s is, and lists no record (SPEC 4.5, 2.4, 5.7, 11.2, 11.3, 14, 14.8)",
   run: async (product) => {
     for (const staging of T4_5_3_STAGINGS) {
       await assertArmFailsWith(product, "T4.5-3", staging, "14.8", {
