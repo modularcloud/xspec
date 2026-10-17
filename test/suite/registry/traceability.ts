@@ -210,7 +210,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T2.3-2": ["2.3"],
   "T2.3-3": ["2.3", "2.4", "2.7", "3", "5.7", "11.2", "11.4", "14"],
   "T2.4-1": ["2.4"],
-  "T2.4-2": ["2.4", "14"],
+  // T2.4-2: its numeric-literal and parenthesized index arms recording no
+  // occurrence (5.7, 11.3's `occurrences --file`), the answer on the
+  // failing workspace carrying the file's 14.8 (11.2).
+  "T2.4-2": ["2.4", "5.7", "11.2", "11.3", "14"],
   "T2.4-3": ["2.4", "14"],
   "T2.4-4": ["2.4", "14"],
   "T2.4-5": ["2.4", "1.4", "2.1", "4.5", "5.7", "11.3", "14"],

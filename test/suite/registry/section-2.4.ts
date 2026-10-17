@@ -367,6 +367,18 @@ const T2_4_1 = defineProductTest({
 // making the one offending construct the only condition present (the exact
 // count has teeth).
 //
+// The two index forms a misreading product resolves — a numeric-literal
+// index `BASE[1]` (ECMAScript keys the access `"1"`, so a product reading
+// numeric keys as segments resolves it) and a parenthesized index
+// `BASE[("a")]` (no static string literal, whatever the parentheses
+// enclose, so a product unwrapping them resolves it) — stage BASE's module
+// with the top-level sections `1` (a valid segment, SPEC 1.4) and `a` beside
+// `auth`, and each also records no edge and no occurrence (TEST-SPEC
+// T2.4-2; SPEC 2.4, 5.7): `query edges` refuses to answer on the failing
+// workspace (13.3), so `occurrences --file specs/A.mdx`, which answers there
+// (11.2), is the witness — exit 1, the file's one 14.8 accompanying the
+// answer, no record.
+//
 // Two kinds of arm (SPEC 2.4): a form ECMAScript 2024 derives that makes the
 // reference dynamic is 14.8 — the "another meaning" case `d={BASE.a<X>y}`
 // included: two comparisons, a well-formed container holding no static
@@ -404,14 +416,39 @@ interface DynamicFormArm {
    * the entry fixes that range, rather than within the widened byte window.
    */
   readonly exactExpressionRange?: true;
+  /**
+   * An index form a misreading product resolves (TEST-SPEC T2.4-2): the
+   * top-level section of `specs/BASE.mdx` the misread reference names — `1`
+   * for the numeric-literal index, `a` for the parenthesized one — which the
+   * arm's module holds (`DYNAMIC_ARM_INDEX_BASE_RECORDS`); the arm then
+   * asserts no edge and no occurrence beside its 14.8
+   * (`assertIndexArmRecordsNoOccurrence`).
+   */
+  readonly misreadTarget?: string;
 }
 
 const DYNAMIC_FORM_ARMS: readonly DynamicFormArm[] = [
   { name: "a template literal argument", expression: "`alpha`" },
   { name: "an identifier as index", expression: "BASE[key]" },
   { name: "a call as index", expression: "BASE[getKey()]" },
+  {
+    // ECMAScript keys the access `"1"`: a product reading numeric keys as
+    // segments resolves it to BASE's section `1`, yet an index other than a
+    // static string literal makes the reference dynamic (SPEC 2.4).
+    name: "a numeric-literal index",
+    expression: "BASE[1]",
+    misreadTarget: "1",
+  },
   { name: "optional chaining", expression: "BASE?.auth" },
   { name: "a parenthesized chain", expression: "(BASE.auth)" },
+  {
+    // The index is no static string literal, whatever the parentheses
+    // enclose (SPEC 2.4): a product unwrapping them resolves the reference
+    // to BASE's `a`.
+    name: "a parenthesized index",
+    expression: 'BASE[("a")]',
+    misreadTarget: "a",
+  },
   {
     name: "a conditional expression",
     expression: "true ? BASE.auth : BASE.auth",
@@ -457,6 +494,45 @@ const DYNAMIC_ARM_BASE_RECORDS = {
     '<S id="auth">\nAuth behavior.\n</S>\n',
   ),
 } as const;
+
+// The index arms' module (an arm with a `misreadTarget`): the shared module's
+// `auth` beside the top-level sections `1` (a valid segment, SPEC 1.4) and
+// `a` — the nodes a product misreading the numeric-literal or the
+// parenthesized index resolves the reference to. A staged-source record, as
+// the shared module is (S-9's timing clause); the shared module itself stays
+// as T14-11 re-stages it beside the TypeScript-only forms.
+const DYNAMIC_ARM_INDEX_BASE_SOURCE =
+  '<S id="auth">\nAuth behavior.\n</S>\n\n' +
+  '<S id="1">\nSection one behavior.\n</S>\n\n' +
+  '<S id="a">\nSection a behavior.\n</S>\n';
+const DYNAMIC_ARM_INDEX_BASE_RECORDS = {
+  "specs/BASE.mdx": stagedMdx(
+    "T2.4-2 specs/BASE.mdx — the index arms' module, `1` and `a` beside `auth`",
+    DYNAMIC_ARM_INDEX_BASE_SOURCE,
+  ),
+} as const;
+
+/**
+ * An arm's `specs/BASE.mdx`: the index arms' module where the arm names a
+ * misread target — a harness defect (never a product failure) unless that
+ * module spells the target's section tag — and the shared one otherwise.
+ */
+function dynamicArmBaseRecords(
+  arm: DynamicFormArm,
+): Readonly<Record<string, StagedMdx>> {
+  const { misreadTarget } = arm;
+  if (misreadTarget === undefined) {
+    return DYNAMIC_ARM_BASE_RECORDS;
+  }
+  if (!DYNAMIC_ARM_INDEX_BASE_SOURCE.includes(`<S id="${misreadTarget}">`)) {
+    throw new Error(
+      `T2.4-2 fixture broke: the index arms' module must hold the section ` +
+        `${JSON.stringify(misreadTarget)} (${arm.name}) — fix ` +
+        `DYNAMIC_ARM_INDEX_BASE_SOURCE in section-2.4.ts`,
+    );
+  }
+  return DYNAMIC_ARM_INDEX_BASE_RECORDS;
+}
 
 /** The byte range of `expression` when it follows `prefix` in the file. */
 function expressionRange(
@@ -558,7 +634,8 @@ function syntaxFailureOffset(
  * clause), and the table converts uniformly. A TypeScript-only form's two
  * records are declared unparseable (14.20) — the very records the exported
  * `T2_4_2_UNPARSEABLE_STAGINGS` carries, which T14-11 re-stages after its own
- * invocations.
+ * invocations. Each entry carries the arm's `specs/BASE.mdx`
+ * (`dynamicArmBaseRecords`, its index-module check made here, at load).
  */
 interface DynamicFormStagings {
   readonly arm: DynamicFormArm;
@@ -566,6 +643,8 @@ interface DynamicFormStagings {
   readonly text: RejectedFormStaging;
   /** `d.source` and `text.source` as staged-source records. */
   readonly records: { readonly d: StagedMdx; readonly text: StagedMdx };
+  /** The arm's `specs/BASE.mdx`, staged beside either record. */
+  readonly base: Readonly<Record<string, StagedMdx>>;
 }
 
 const DYNAMIC_FORM_STAGINGS: readonly DynamicFormStagings[] =
@@ -587,6 +666,7 @@ const DYNAMIC_FORM_STAGINGS: readonly DynamicFormStagings[] =
           mdx,
         ),
       },
+      base: dynamicArmBaseRecords(arm),
     };
   });
 
@@ -618,22 +698,113 @@ export const T2_4_2_UNPARSEABLE_STAGINGS: readonly UnparseableStaging[] =
   });
 
 /**
- * Run one dynamic-form arm: `build --json` exits 1 with exactly one finding,
- * condition 14.8, located within the offending construct's own byte window
- * in `specs/A.mdx` (SPEC 14: errors identify file and location) — or, where
- * `exactRange` is given, exactly at that range (SPEC 14; T14-11). `source`
- * is `staging.source` as its staged-source record.
+ * Assert a dynamic-form arm's one 14.8 finding located as the module's arms
+ * assert it: within the offending construct's own byte window in
+ * `specs/A.mdx` (SPEC 14: errors identify file and location) — or, where
+ * `exactRange` is given, exactly at that range (SPEC 14; T14-11).
+ */
+function assertDynamicFindingLocated(
+  finding: Finding,
+  staging: RejectedFormStaging,
+  exactRange: { readonly start: number; readonly end: number } | undefined,
+  context: string,
+): void {
+  if (exactRange === undefined) {
+    assertFindingLocated(
+      finding,
+      { file: "specs/A.mdx", window: staging.window },
+      `${context}: the 14.8 finding`,
+    );
+  } else {
+    assertT242FindingRange(
+      finding,
+      exactRange,
+      `${context}: the 14.8 finding, located at the whole expression ` +
+        `its braces enclose — first token through last, the braces ` +
+        `excluded (SPEC 14; T14-11)`,
+    );
+  }
+}
+
+/**
+ * An index arm's "no edge and no occurrence" on its failing workspace
+ * (TEST-SPEC T2.4-2). `query edges` refuses to answer there (SPEC 13.3), so
+ * the occurrence record is the edge's witness (5.7, 11.2): `occurrences
+ * --file specs/A.mdx` answers from the current sources, so it exits 1 with
+ * its full answer emitted, the file's one finding — the 14.8 `build`
+ * reported, located as `build`'s is — accompanying it, and lists no record,
+ * though `specs/BASE.mdx` holds the section `misreadTarget` a product
+ * misreading the index resolves the reference to (SPEC 2.4, 5.7, 11.2,
+ * 11.3).
+ */
+async function assertIndexArmRecordsNoOccurrence(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  staging: RejectedFormStaging,
+  exactRange: { readonly start: number; readonly end: number } | undefined,
+  misreadTarget: string,
+  context: string,
+): Promise<void> {
+  const result = await expectExit(
+    product,
+    workspace,
+    ["occurrences", "--file", "specs/A.mdx"],
+    1,
+    `${context} — the answer carries the file's finding, so exit 1 with the ` +
+      `full answer document (SPEC 11.2, 11.3)`,
+  );
+  const report = decodeOccurrencesReport(
+    parseJsonStdout(
+      result,
+      `${context} — a single JSON document is the only output form (SPEC 11)`,
+    ),
+    context,
+  );
+  assertConditionCounts(
+    report.findings,
+    { "14.8": 1 },
+    `${context}: the file's one finding accompanies the answer, none beside ` +
+      `it (SPEC 11.2, 11.3)`,
+  );
+  assertDynamicFindingLocated(
+    report.findings[0]!,
+    staging,
+    exactRange,
+    `${context}: the accompanying finding, located as \`build\`'s is (SPEC ` +
+      `11.2)`,
+  );
+  assertSameJson(
+    report.occurrences,
+    [],
+    `${context}: no record — the dynamic spelling records no edge and no ` +
+      `occurrence, its position reported by its finding's range alone, ` +
+      `though specs/BASE.mdx holds the section \`${misreadTarget}\` a ` +
+      `product misreading the index resolves it to (SPEC 2.4, 5.7, 11.2; ` +
+      `TEST-SPEC T2.4-2)`,
+  );
+}
+
+/**
+ * Run one dynamic-form arm in one position — the entry's staging there, as
+ * its staged-source record, beside the arm's `specs/BASE.mdx`: `build
+ * --json` exits 1 with exactly one finding, condition 14.8, located within
+ * the offending construct's own byte window — or exactly at `exactRange`,
+ * where given (`assertDynamicFindingLocated`). An index arm (a
+ * `misreadTarget`) then asserts no edge and no occurrence on the same
+ * failing workspace (`assertIndexArmRecordsNoOccurrence`).
  */
 async function runDynamicFormArm(
   product: ProductBinding,
-  staging: RejectedFormStaging,
-  source: StagedMdx,
+  entry: DynamicFormStagings,
+  position: "d" | "text",
   exactRange: { readonly start: number; readonly end: number } | undefined,
   context: string,
 ): Promise<void> {
+  const staging = entry[position];
+  const { name, misreadTarget } = entry.arm;
   await withWorkspace(
     SPECS_ONLY_CONFIG,
-    { ...DYNAMIC_ARM_BASE_RECORDS, "specs/A.mdx": source },
+    { ...entry.base, "specs/A.mdx": entry.records[position] },
     async (workspace) => {
       const findings = await buildFindings(product, workspace, context);
       assertConditionCounts(
@@ -642,19 +813,16 @@ async function runDynamicFormArm(
         `${context} — a form ECMAScript 2024 derives that makes the ` +
           `reference dynamic: 14.8, never 14.20 (SPEC 2.4)`,
       );
-      if (exactRange === undefined) {
-        assertFindingLocated(
-          findings[0]!,
-          { file: "specs/A.mdx", window: staging.window },
-          `${context}: the 14.8 finding`,
-        );
-      } else {
-        assertT242FindingRange(
-          findings[0]!,
+      assertDynamicFindingLocated(findings[0]!, staging, exactRange, context);
+      if (misreadTarget !== undefined) {
+        const where = position === "d" ? "`d`" : "`text(...)`";
+        await assertIndexArmRecordsNoOccurrence(
+          product,
+          workspace,
+          staging,
           exactRange,
-          `${context}: the 14.8 finding, located at the whole expression ` +
-            `its braces enclose — first token through last, the braces ` +
-            `excluded (SPEC 14; T14-11)`,
+          misreadTarget,
+          `T2.4-2 \`occurrences --file specs/A.mdx\` with ${name} in ${where}`,
         );
       }
     },
@@ -701,20 +869,22 @@ async function runUnparseableFormArm(
 const T2_4_2 = defineProductTest({
   id: "T2.4-2",
   title:
-    'each dynamic form — template literal argument; identifier or call as index; optional chaining; parenthesized chain; conditional expression; the "another meaning" case `BASE.a<X>y`, two comparisons, its `d` finding at the whole expression — fails with 14.8, in `d` and in `text(...)`, in MDX, while TypeScript-only syntax — a non-null assertion, a type assertion — is 14.20 alone at the offset SPEC 14\'s syntax-failure rule fixes (SPEC 2.4, 14.8, 14.20)',
+    'each dynamic form — template literal argument; identifier or call as index; a numeric-literal index `BASE[1]`, BASE\'s module holding the section `1`; optional chaining; parenthesized chain; a parenthesized index `BASE[("a")]`, BASE\'s module holding `a`; conditional expression; the "another meaning" case `BASE.a<X>y`, two comparisons, its `d` finding at the whole expression — fails with 14.8, in `d` and in `text(...)`, in MDX, the two index forms recording no edge and no occurrence (`occurrences --file` on the failing workspace carrying the 14.8 and listing no record), while TypeScript-only syntax — a non-null assertion, a type assertion — is 14.20 alone at the offset SPEC 14\'s syntax-failure rule fixes (SPEC 2.4, 5.7, 11.2, 11.3, 14.8, 14.20)',
   run: async (product) => {
     for (const entry of DYNAMIC_FORM_STAGINGS) {
       // The form in `d` and in `text(...)` (`stageDynamicForm`), each staged
-      // as its record: the TypeScript-only forms' records are the ones the
-      // exported `T2_4_2_UNPARSEABLE_STAGINGS` carries.
+      // as its record beside the arm's `specs/BASE.mdx` (`entry.base`): the
+      // TypeScript-only forms' records are the ones the exported
+      // `T2_4_2_UNPARSEABLE_STAGINGS` carries, and an index form's
+      // no-occurrence check rides each position's `build` workspace.
       const { arm, d: dStaging, text: textStaging, records } = entry;
       const { unparseableAt } = arm;
       const dContext = `T2.4-2 \`build --json\` with ${arm.name} in \`d\``;
       if (unparseableAt === undefined) {
         await runDynamicFormArm(
           product,
-          dStaging,
-          records.d,
+          entry,
+          "d",
           arm.exactExpressionRange === true ? dStaging.expression : undefined,
           dContext,
         );
@@ -731,13 +901,7 @@ const T2_4_2 = defineProductTest({
       if (unparseableAt === undefined) {
         // An embedding's 14.8 is located by its full braced container (SPEC
         // 14), asserted within the construct's window as the sibling arms are.
-        await runDynamicFormArm(
-          product,
-          textStaging,
-          records.text,
-          undefined,
-          textContext,
-        );
+        await runDynamicFormArm(product, entry, "text", undefined, textContext);
       } else {
         await runUnparseableFormArm(
           product,
