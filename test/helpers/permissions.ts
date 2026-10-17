@@ -129,11 +129,16 @@ import { snapshotKeyBytes } from "./snapshot.js";
  * (`second-mount`: not made, not verified, or not removed), and the fresh
  * process-identifier namespaces (`pid-namespace`: a namespace not made, its
  * first process not answering, a run not lying in it, or one of
- * T13.5-10(e)–(g)'s verifications on the harness failing), and H-1's
+ * T13.5-10(e)–(g)'s verifications on the harness failing), H-1's
  * ancestor precondition (`self-contained-root`,
  * helpers/self-contained-root.ts: an ancestor of an arm's staging root
  * holding an entry named `xspec.config.ts`, the root lying inside a git
- * working tree, or either left unverified).
+ * working tree, or either left unverified), and H-2's consumer isolation
+ * (`consumer-isolation`, helpers/tooling.ts: an ancestor of a consumer
+ * program's root, or of the directory its runtime output is written to,
+ * holding an entry named `node_modules`, a package named `xspec` where
+ * Node.js's resolver would find it from that output, or either left
+ * unverified).
  */
 export type StagingMode =
   | "write-refusal"
@@ -151,7 +156,8 @@ export type StagingMode =
   | "group-access"
   | "second-mount"
   | "pid-namespace"
-  | "self-contained-root";
+  | "self-contained-root"
+  | "consumer-isolation";
 
 /**
  * An ineffective or impossible staging: a permission staging (E-1, H-11)
@@ -173,7 +179,11 @@ export type StagingMode =
  * H-1's ancestor precondition unmet: an arm presuming nothing above its
  * staging root whose root has an `xspec.config.ts` above it or lies inside
  * a git working tree, or where either is left unverified
- * (`self-contained-root`, helpers/self-contained-root.ts). Never a
+ * (`self-contained-root`, helpers/self-contained-root.ts), or H-2's consumer
+ * isolation unmet: a consumer program's root or its runtime output with a
+ * `node_modules` entry above it, or a package named `xspec` within reach of
+ * Node.js's resolver from that output, or either left unverified
+ * (`consumer-isolation`, helpers/tooling.ts). Never a
  * `HarnessAssertionError`: nothing here is a product verdict — it is a
  * harness error, never a diagnosed product failure and never a skip.
  */
