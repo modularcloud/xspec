@@ -295,6 +295,9 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T5.5-4": ["5.5"],
   "T5.5-5": ["5.5"],
   "T5.5-6": ["5.5"],
+  // T5.5-7: 5.5's framing, each lure's edit categorized by `impact --base`
+  // (5.6: `changed`, `metadata-changed`).
+  "T5.5-7": ["5.5", "5.6"],
   "T5.6-1": ["5.6"],
   "T5.6-2": ["5.6"],
   "T5.6-3": ["5.6"],

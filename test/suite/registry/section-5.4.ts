@@ -204,15 +204,18 @@ function anchorOnce(content: string, search: string, context: string): void {
 // distinguish references to them: both bearers walk back to the same string
 // `a` (N1: `b` → entry `a→b` extends the chain to `a` at the journal start;
 // N2: the same entry maps `a` away, ending the walk just after it).
-const REINTRO_ROOT = "specs/A.mdx";
-const REINTRO_N1 = "specs/A.mdx#b"; // old-`a`, renamed
-const REINTRO_N2 = "specs/A.mdx#a"; // the reintroduced identity
-const REINTRO_DEP = "specs/A.mdx#dep";
-const REINTRO_E = "specs/A.mdx#e";
-const REINTRO_F = "specs/A.mdx#f";
-const REINTRO_G = "specs/A.mdx#g";
+// T5.5-5's tie-break arm (section-5.5.ts) stages this fixture again — its
+// baseline, the rename, and its state after N2 is authored — so the
+// fixture's path, identities, baseline, and appended authorship are exported.
+export const REINTRO_ROOT = "specs/A.mdx";
+export const REINTRO_N1 = "specs/A.mdx#b"; // old-`a`, renamed
+export const REINTRO_N2 = "specs/A.mdx#a"; // the reintroduced identity
+export const REINTRO_DEP = "specs/A.mdx#dep";
+export const REINTRO_E = "specs/A.mdx#e";
+export const REINTRO_F = "specs/A.mdx#f";
+export const REINTRO_G = "specs/A.mdx#g";
 
-const REINTRO_BASELINE = [
+export const REINTRO_BASELINE = [
   '<S id="a">',
   "Alpha behavior.",
   "</S>",
@@ -236,7 +239,7 @@ const REINTRO_BASELINE = [
 // layout, SPEC 1.6, 3), and `g`, whose own-content runs around its one
 // embedding are byte-identical to `f`'s ("Twin: " and " end.\n") while the
 // embedding targets N2 where `f`'s targets N1.
-const REINTRO_APPENDED = [
+export const REINTRO_APPENDED = [
   "",
   '<S id="a">',
   "Alpha behavior.",
