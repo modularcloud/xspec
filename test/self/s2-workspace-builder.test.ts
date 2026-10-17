@@ -17,7 +17,16 @@
 // (TEST-SPEC S-9's TypeScript clause): a declared-well-formed ill-formed
 // `.ts` file, a declared-unparseable well-formed one, and a text TypeScript
 // 5.9.3 accepts read one way only each throw `HarnessStagingError` (mode
-// `ts-derivability`) before anything is written.
+// `ts-derivability`) before anything is written. H-1's ancestor
+// precondition (`assertSelfContainedRoot`, helpers/self-contained-root.ts:
+// an arm presuming nothing above its staging root runs only once no
+// ancestor of the root holds an entry named `xspec.config.ts` and the root
+// lies inside no git working tree, as git judges it under the product's
+// environment) has its vectors here too: it holds on a fresh workspace, and
+// an `xspec.config.ts` above the root — of any kind, above its spelling or
+// its physical path — a working tree enclosing the root, and either half
+// left unverified each throw `HarnessStagingError` (mode
+// `self-contained-root`), never a `HarnessAssertionError`.
 // Certification cannot exercise builder bugs that make fixtures diverge from
 // their declarations, so this self-test must pass before any fixture is
 // trusted.
@@ -36,6 +45,8 @@ import * as path from "node:path";
 import { expect, onTestFinished, test } from "vitest";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import { HarnessStagingError } from "../helpers/permissions.js";
+import { assertSelfContainedRoot } from "../helpers/self-contained-root.js";
+import type { ProductBinding } from "../helpers/subprocess.js";
 import {
   GIT_FIXTURE_EPOCH_SECONDS,
   GIT_FIXTURE_PERSON,
@@ -96,6 +107,245 @@ test("H-1: every workspace is a fresh, unique, initially empty root in the OS te
     expect(await workspace.readdirNames()).toEqual([]);
   }
 });
+
+// H-1's ancestor precondition (helpers/self-contained-root.ts). The check
+// runs no product; its binding contributes the environment alone.
+const H1_BINDING: ProductBinding = {
+  label: "H-1 precondition vector (never invoked)",
+  command: process.execPath,
+};
+
+/** A configuration file the builder's S-9 TypeScript check accepts. */
+const H1_CONFIG =
+  'export default { specs: { include: ["specs/**/*.mdx"] } };\n';
+
+/**
+ * The rejection of H-1's precondition check on `root`: a
+ * `HarnessStagingError` of mode `self-contained-root` for that root, its
+ * message led by `context` — never a `HarnessAssertionError`.
+ */
+async function unmetPrecondition(
+  binding: ProductBinding,
+  root: string,
+  context: string,
+): Promise<HarnessStagingError> {
+  let caught: unknown;
+  try {
+    await assertSelfContainedRoot(binding, root, context);
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toBeInstanceOf(HarnessStagingError);
+  expect(caught).not.toBeInstanceOf(HarnessAssertionError);
+  const error = caught as HarnessStagingError;
+  expect(error.mode).toBe("self-contained-root");
+  expect(error.path).toBe(root);
+  expect(error.message).toContain(context);
+  return error;
+}
+
+test("H-1's ancestor precondition holds on a fresh workspace's root — an xspec.config.ts at the root itself (the arm's own staging) included, never judged as an ancestor's", async () => {
+  const bare = await makeWorkspace();
+  await expect(
+    assertSelfContainedRoot(H1_BINDING, bare.root, "fresh root"),
+  ).resolves.toBeUndefined();
+  const configured = await makeWorkspace({
+    files: { "xspec.config.ts": H1_CONFIG },
+    dirs: ["nested/inner"],
+  });
+  await expect(
+    assertSelfContainedRoot(H1_BINDING, configured.root, "configured root"),
+  ).resolves.toBeUndefined();
+});
+
+test.runIf(onPosix)(
+  "H-1's ancestor precondition: an entry named xspec.config.ts above the root — a plain file, a directory, a dangling symbolic link, in the root's own temporary directory, above its physical path alone or above its spelling alone — throws HarnessStagingError (mode self-contained-root) naming it, never a HarnessAssertionError",
+  async () => {
+    // A plain file in the parent of the judged root.
+    const file = await makeWorkspace({
+      files: { "xspec.config.ts": H1_CONFIG },
+      dirs: ["work"],
+    });
+    expect(
+      (
+        await unmetPrecondition(
+          H1_BINDING,
+          file.path("work"),
+          "a plain file in the parent",
+        )
+      ).message,
+    ).toContain(file.path("xspec.config.ts"));
+
+    // A directory two levels up, and a dangling link three levels up: SPEC
+    // 7's search stops at whatever occupies the name (`lstat`).
+    const directory = await makeWorkspace({
+      dirs: ["xspec.config.ts", "a/work"],
+    });
+    const dirError = await unmetPrecondition(
+      H1_BINDING,
+      directory.path("a/work"),
+      "a directory two levels up",
+    );
+    expect(dirError.message).toContain(directory.path("xspec.config.ts"));
+    expect(dirError.message).toContain("a directory");
+    const link = await makeWorkspace({
+      dirs: ["a/b/work"],
+      symlinks: { "xspec.config.ts": "missing-target" },
+    });
+    const linkError = await unmetPrecondition(
+      H1_BINDING,
+      link.path("a/b/work"),
+      "a dangling symbolic link three levels up",
+    );
+    expect(linkError.message).toContain(link.path("xspec.config.ts"));
+    expect(linkError.message).toContain("a symbolic link");
+
+    // The workspace's own temporary directory, the root's parent: the first
+    // directory above every arm's root, as the OS temporary directory is the
+    // next.
+    const temp = await makeWorkspace();
+    const tempEntry = path.join(temp.tempRoot, "xspec.config.ts");
+    await fsp.writeFile(tempEntry, "");
+    expect(
+      (
+        await unmetPrecondition(
+          H1_BINDING,
+          temp.root,
+          "the temporary directory",
+        )
+      ).message,
+    ).toContain(tempEntry);
+
+    // The root spelled through a symbolic link: an entry above its physical
+    // path alone (`alias` → `phys/x`), and one above its spelling alone
+    // (`S/L` → `../P`), each found.
+    const physical = await makeWorkspace({
+      files: { "phys/xspec.config.ts": H1_CONFIG },
+      dirs: ["phys/x/work"],
+      symlinks: { alias: "phys/x" },
+    });
+    expect(
+      (
+        await unmetPrecondition(
+          H1_BINDING,
+          physical.path("alias/work"),
+          "above the physical path alone",
+        )
+      ).message,
+    ).toContain(
+      path.join(await fsp.realpath(physical.path("phys")), "xspec.config.ts"),
+    );
+    const spelled = await makeWorkspace({
+      files: { "S/xspec.config.ts": H1_CONFIG },
+      dirs: ["P/work"],
+      symlinks: { "S/L": "../P" },
+    });
+    expect(
+      (
+        await unmetPrecondition(
+          H1_BINDING,
+          spelled.path("S/L/work"),
+          "above the spelling alone",
+        )
+      ).message,
+    ).toContain(spelled.path("S/xspec.config.ts"));
+  },
+);
+
+test("H-1's ancestor precondition: the root inside a git working tree — its top level and a directory below it — throws HarnessStagingError naming the working tree; inside a repository's git directory, or with git missing from the product's PATH, the repository half is unverified, a harness error too", async () => {
+  const repository = await makeWorkspace({ dirs: ["x/work"] });
+  await repository.gitInit();
+  const toplevel = await fsp.realpath(repository.root);
+  for (const root of [repository.root, repository.path("x/work")]) {
+    expect(
+      (await unmetPrecondition(H1_BINDING, root, "inside a working tree"))
+        .message,
+    ).toContain(`the git working tree ${toplevel}`);
+  }
+
+  // A directory inside `.git`: git answers that the operation needs a work
+  // tree — neither a working tree nor "not a git repository".
+  const inGitDirectory = repository.path(".git/xspec-probe/work");
+  await fsp.mkdir(inGitDirectory, { recursive: true });
+  const gitDirError = await unmetPrecondition(
+    H1_BINDING,
+    inGitDirectory,
+    "inside a git directory",
+  );
+  expect(gitDirError.message).toContain("unverified");
+  expect(gitDirError.message).toContain("must be run in a work tree");
+
+  // The product's PATH holding no git: the check runs where the product
+  // would, so git is not found.
+  const fresh = await makeWorkspace({ dirs: ["empty-path"] });
+  const noGit = await unmetPrecondition(
+    {
+      ...H1_BINDING,
+      env: { PATH: fresh.path("empty-path") },
+    },
+    fresh.root,
+    "git missing from the product's PATH",
+  );
+  expect(noGit.message).toContain("git is not on PATH");
+});
+
+test("H-1's ancestor precondition runs under the product's environment: an ambient GIT_DIR is dropped as the driver drops it, and a binding pinning GIT_DIR puts the root in that repository's working tree, as the product's own git reads would", async () => {
+  const repository = await makeWorkspace();
+  await repository.gitInit();
+  const gitDir = repository.path(".git");
+  const judged = await makeWorkspace();
+  const saved = process.env["GIT_DIR"];
+  try {
+    process.env["GIT_DIR"] = gitDir;
+    await expect(
+      assertSelfContainedRoot(H1_BINDING, judged.root, "ambient GIT_DIR"),
+    ).resolves.toBeUndefined();
+  } finally {
+    if (saved === undefined) {
+      delete process.env["GIT_DIR"];
+    } else {
+      process.env["GIT_DIR"] = saved;
+    }
+  }
+  // GIT_DIR without GIT_WORK_TREE: git takes the working directory as the
+  // working tree's top level.
+  expect(
+    (
+      await unmetPrecondition(
+        { ...H1_BINDING, env: { GIT_DIR: gitDir } },
+        judged.root,
+        "a binding pinning GIT_DIR",
+      )
+    ).message,
+  ).toContain(`the git working tree ${await fsp.realpath(judged.root)}`);
+});
+
+test.runIf(onLinux)(
+  "H-1's ancestor precondition: a root whose physical path cannot be read — beneath a directory stripped of its permissions (E-1: an unprivileged identity) — leaves the configuration half unverified, a harness error, never a pass",
+  async () => {
+    const workspace = await makeWorkspace({ dirs: ["locked/work"] });
+    const locked = workspace.path("locked");
+    await fsp.chmod(locked, 0o000);
+    try {
+      const refused = await fsp.readdir(locked).then(
+        () => false,
+        () => true,
+      );
+      expect(
+        refused,
+        "the harness's own listing of the mode-000 directory must be refused (E-1: run unprivileged, AGENTS.md)",
+      ).toBe(true);
+      const error = await unmetPrecondition(
+        H1_BINDING,
+        workspace.path("locked/work"),
+        "an unreadable physical path",
+      );
+      expect(error.message).toContain("physical path cannot be read");
+    } finally {
+      await fsp.chmod(locked, 0o755);
+    }
+  },
+);
 
 test("writes LF, CRLF, and lone-CR string content byte-exactly (no newline translation)", async () => {
   const workspace = await makeWorkspace({

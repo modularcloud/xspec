@@ -140,10 +140,12 @@
 //   unlistable (verified on the harness, E-1) — each made just before its
 //   run and undone before anything else starts or any hold is lifted. Its
 //   refused valid-workspace commands start on freshly built workspaces
-//   lying in no repository, where every `--base` ref is unresolvable
-//   (§CONF-CORE); and its waits for a refused invocation's hold file fail
-//   loud, never proceeding on the command's exit or on a timeout
-//   (§VIOL-CORE-LATEHOLD).
+//   lying in no repository and inside none, where every `--base` ref is
+//   unresolvable, H-1's precondition verified before its baseline arms run
+//   (§CONF-CORE; `assertSelfContainedRoot`,
+//   helpers/self-contained-root.ts); and its waits for a refused
+//   invocation's hold file fail loud, never proceeding on the command's
+//   exit or on a timeout (§VIOL-CORE-LATEHOLD).
 // - T13.5-3's subsequent mutating command after each kill while held is a
 //   different operation, succeeding whether or not the killed operation's
 //   writes landed, never a retry of it (§VIOL-CORE-EARLYWRITE: its held
@@ -323,6 +325,7 @@ import {
 import { stageReadRefusalOfDirectory } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type {
@@ -354,7 +357,6 @@ import {
 import { copyTreeBytes } from "../../helpers/tree-copy.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { assertOutsideAnyRepository } from "./section-6.3.js";
 import {
   assertConditionCounts,
   assertFindingLocated,
@@ -4337,7 +4339,10 @@ async function validWorkspaceAcquisitionArms(
       "specs/A.mdx#g",
       `${label} (c's leaf item)`,
     ).id;
-    await assertOutsideAnyRepository(
+    // H-1's precondition before the baseline arm (§CONF-CORE's staging
+    // constraint: a workspace in no repository and inside none).
+    await assertSelfContainedRoot(
+      product,
       workspace.root,
       `${label} (\`review create --base <unresolvable-ref>\`)`,
     );
@@ -4433,8 +4438,9 @@ const SEAM_ORDERING_USAGE_ARMS: readonly SeamOrderingArm[] = [
  * then the non-mutating boundary of 6.6 — each refused invocation started
  * on a freshly built ACQUISITION_DECL workspace, its code group discovering
  * the wrong-kind origin, with no refresh pending (§CONF-CORE's freshness
- * constraint) that lies in no repository (§CONF-CORE's staging constraint
- * on the baseline arm: every ref is unresolvable there, whatever its
+ * constraint) that lies in no repository and inside none, H-1's
+ * precondition verified before the baseline arm runs (§CONF-CORE's staging
+ * constraint on it: every ref is unresolvable there, whatever its
  * spelling).
  */
 async function validWorkspaceArms(product: ProductBinding): Promise<void> {
@@ -4444,7 +4450,10 @@ async function validWorkspaceArms(product: ProductBinding): Promise<void> {
       workspace,
       "T13.5-8 staging `build` (valid workspace)",
     );
-    await assertOutsideAnyRepository(
+    // H-1's precondition before the baseline arm (§CONF-CORE's staging
+    // constraint: a workspace in no repository and inside none).
+    await assertSelfContainedRoot(
+      product,
       workspace.root,
       "T13.5-8 (seam ordering: `review create --base <unresolvable-ref>`)",
     );

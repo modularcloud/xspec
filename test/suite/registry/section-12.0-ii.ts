@@ -84,10 +84,14 @@
 //   invocation: any change under `.git/` fails (same file set, same bytes),
 //   and every change outside it must be a write the command's own
 //   specification calls for (the session file; nothing for `impact`).
-// - T12.0-12 guards its own staging: the sweep workspace must have no
-//   enclosing git repository (walked to the filesystem root), thrown as a
-//   harness staging error — an ambient repository would mask a product that
-//   wrongly requires git.
+// - T12.0-12 guards its own staging through H-1's ancestor precondition
+//   (`assertSelfContainedRoot`, helpers/self-contained-root.ts), verified
+//   before the sweep's first invocation: git itself, under the environment
+//   the product runs in, finds no working tree enclosing the sweep
+//   workspace's root, and no ancestor of the root holds an entry named
+//   `xspec.config.ts` — an unmet one a harness error (`HarnessStagingError`),
+//   never a product verdict: an ambient repository would mask a product
+//   that wrongly requires git.
 // - T12.0-13 stages the entry's `specs/a#b.mdx` on every platform (`#` is a
 //   legal file-name byte on every filesystem the harness supports — the
 //   T11.2-3 operationalization of the entry's "(Linux leg)" note, which
@@ -144,11 +148,11 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import type { SnapshotChange } from "../../helpers/snapshot.js";
+import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import {
-  pathExists,
   releaseHoldFile,
   rethrowHarnessError,
   runProduct,
@@ -2564,27 +2568,6 @@ const T12_0_11 = defineProductTest({
 // T12.0-12 — git-less operation
 // ---------------------------------------------------------------------------
 
-/**
- * Staging guard: the sweep workspace must sit under no git repository at all
- * (an enclosing repository would mask a product that wrongly requires git).
- * A violation is a harness staging error, not a product observation.
- */
-async function assertNoEnclosingGitRepository(startAbs: string): Promise<void> {
-  let dir = startAbs;
-  for (;;) {
-    if (await pathExists(path.join(dir, ".git"))) {
-      throw new Error(
-        `T12.0-12 staging: ${dir} contains a .git entry — the git-less ` +
-          `sweep needs a workspace that is not a git repository and has no ` +
-          `enclosing repository (harness staging error)`,
-      );
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return;
-    dir = parent;
-  }
-}
-
 const GITLESS_CONFIG = `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -2798,7 +2781,13 @@ const T12_0_12 = defineProductTest({
         },
       },
       async (workspace) => {
-        await assertNoEnclosingGitRepository(workspace.root);
+        // Staging guard (module header): an enclosing repository would mask
+        // a product that wrongly requires git (H-1).
+        await assertSelfContainedRoot(
+          product,
+          workspace.root,
+          "T12.0-12 (the git-less sweep's workspace)",
+        );
         const state: GitlessState = {};
         for (const step of GITLESS_STEPS) {
           const argv = [...step.argv(state), "--json"];

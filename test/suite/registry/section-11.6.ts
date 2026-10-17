@@ -260,9 +260,12 @@
 //
 // - configuration errors keep precedence (14.14): missing configuration (a
 //   bare directory tree with no reachable xspec.config.ts, the T7-1
-//   operationalization) and invalid configuration (garbage TypeScript, a
-//   valid source beside it so the refusal is attributable to the
-//   configuration alone) each → exit 2 with the single 12.7 error document
+//   operationalization, H-1's ancestor precondition verified first —
+//   `assertSelfContainedRoot`, helpers/self-contained-root.ts — so an
+//   `xspec.config.ts` above the temporary root is a harness error, never a
+//   pass or a product failure) and invalid configuration (garbage
+//   TypeScript, a valid source beside it so the refusal is attributable to
+//   the configuration alone) each → exit 2 with the single 12.7 error document
 //   as the entire stdout — asserted in the flag-less form (inventory is a
 //   JSON-only surface, so JSON output is in effect without `--json`, SPEC
 //   12.0) and via `expectConfigurationError`'s `--json` form — the finding
@@ -364,6 +367,7 @@ import {
   assertLeavesUnchanged,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type {
@@ -3568,6 +3572,13 @@ const T11_6_4 = defineProductTest({
     // --- arm B: configuration errors keep precedence (14.14) ---------------
     const missing = await TestWorkspace.create({});
     try {
+      // The upward search exhausts only where nothing above the root holds
+      // an xspec.config.ts (H-1's precondition, module header).
+      await assertSelfContainedRoot(
+        product,
+        missing.root,
+        "T11.6-4 arm B (no configuration reachable by upward search)",
+      );
       await expectFlaglessInventoryConfigurationError(
         product,
         missing.root,

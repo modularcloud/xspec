@@ -91,7 +91,10 @@
 //   (a prompt would be a hang). All of it is overridable: the binding's env
 //   merges over the sanitized base, the invocation's env merges last
 //   (`undefined` removes a variable) — tests that vary the environment
-//   deliberately (T12.0-7) set it explicitly.
+//   deliberately (T12.0-7) set it explicitly. `productEnvironment` is that
+//   construction, exported for the harness's own checks made under the
+//   environment it runs the product in (TEST-SPEC H-1's ancestor
+//   precondition, helpers/self-contained-root.ts).
 // - Undeclared-staging guard (S-9, H-8): right before spawning, every
 //   invocation is noted with its working directory
 //   (helpers/product-invocations.ts), marking the live workspace it runs in
@@ -583,7 +586,7 @@ export async function startProduct(
   }
 
   const invocation = resolveInvocation(binding.command, fullArgs, commandLine);
-  const env = childEnvironment(binding, options);
+  const env = productEnvironment(binding, options.env);
   // H-2 (module header): a launched run's spawn is the launcher's command
   // line, built before anything is noted, so a refused one notes nothing.
   const spawned =
@@ -1391,9 +1394,19 @@ function isDroppedAmbient(name: string): boolean {
   );
 }
 
-function childEnvironment(
+/**
+ * The environment the driver gives an invocation of `binding` (module
+ * header: Environment policy): the ambient environment minus the variables
+ * never passed through implicitly, the pinned git isolation, the binding's
+ * own `env` merged over them, and `overrides` — the invocation's `env`
+ * option — merged last, `undefined` removing a variable. Every run spawns
+ * under exactly this (a launched run hands it to its launcher); the
+ * harness's own checks made "under the environment it runs the product in"
+ * take it from here (TEST-SPEC H-1, helpers/self-contained-root.ts).
+ */
+export function productEnvironment(
   binding: ProductBinding,
-  options: RunOptions,
+  overrides: Readonly<Record<string, string | undefined>> = {},
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(process.env)) {
@@ -1407,7 +1420,7 @@ function childEnvironment(
   env["GIT_CONFIG_GLOBAL"] = os.devNull;
   env["GIT_TERMINAL_PROMPT"] = "0";
   Object.assign(env, binding.env ?? {});
-  for (const [name, value] of Object.entries(options.env ?? {})) {
+  for (const [name, value] of Object.entries(overrides)) {
     if (value === undefined) {
       delete env[name];
     } else {

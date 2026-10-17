@@ -65,10 +65,14 @@
 //   session names the extra section that only the outer `v1` holds.
 // - The no-repository arm's actionable error: stderr must echo the ref
 //   (`HEAD`) or speak of the repository/git — either tells the operator why
-//   no baseline resolves. Its staging premise — the workspace lies inside
-//   no repository's working tree — is checked through git itself under the
-//   product's isolation and reported as a harness condition, never a
-//   product verdict, should the OS temporary directory lie inside one.
+//   no baseline resolves. Its staging premise is H-1's ancestor
+//   precondition (`assertSelfContainedRoot`,
+//   helpers/self-contained-root.ts), verified before the arm's first
+//   invocation: no ancestor of the root holds an entry named
+//   `xspec.config.ts`, and git itself, under the environment the product
+//   runs in, finds no working tree enclosing the root — an unmet one a
+//   harness error (`HarnessStagingError`), never a product verdict, should
+//   the OS temporary directory have either above it.
 // - The absent-configuration arms: the offending file is the configuration
 //   absent at its repository-relative path in the ref's tree, so stderr
 //   must name it (`xspec.config.ts`).
@@ -89,10 +93,7 @@
 // workspace each precede any invocation and stay plain.
 
 import { Buffer } from "node:buffer";
-import { execFile } from "node:child_process";
 import * as fsp from "node:fs/promises";
-import * as os from "node:os";
-import { promisify } from "node:util";
 import type {
   ExportReport,
   ImpactReport,
@@ -108,9 +109,9 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
-import { execFileGuardTrip } from "../../helpers/step-guards.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
@@ -1162,64 +1163,6 @@ function assertDistinctTags(
   );
 }
 
-const execFileAsync = promisify(execFile);
-
-/**
- * The guard of the premise's `git rev-parse` (TEST-SPEC S-3: a harness
- * step's own guard, helpers/step-guards.ts): `execFile`'s timeout, which
- * kills it.
- */
-const GIT_PREMISE_STEP_GUARD_MS = 60_000;
-
-/**
- * Staging premise for the no-repository arm (c): the workspace must lie
- * inside no repository's working tree. The builder places every workspace
- * under the OS temporary directory; should that directory itself lie inside
- * a repository, the arm cannot be staged, and the premise fails as a harness
- * condition (a plain error, never a product verdict). Checked through git
- * itself under the product's isolation — ambient `GIT_*` dropped, no
- * ceiling — the way the product's own git reads discover a repository. A
- * `git` killed at its guard is that harness step's tripped guard
- * (`HarnessStepTimeoutError`), never a premise holding.
- */
-export async function assertOutsideAnyRepository(
-  root: string,
-  context: string,
-): Promise<void> {
-  const env: Record<string, string> = {};
-  for (const [name, value] of Object.entries(process.env)) {
-    if (value === undefined || name.toUpperCase().startsWith("GIT_")) continue;
-    env[name] = value;
-  }
-  env["GIT_CONFIG_NOSYSTEM"] = "1";
-  env["GIT_CONFIG_GLOBAL"] = os.devNull;
-  env["GIT_TERMINAL_PROMPT"] = "0";
-  let toplevel: string;
-  try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["-C", root, "rev-parse", "--show-toplevel"],
-      { env, timeout: GIT_PREMISE_STEP_GUARD_MS },
-    );
-    toplevel = stdout.trim();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw error;
-    const tripped = execFileGuardTrip(
-      `${context}: the staging premise's \`git -C ${root} rev-parse --show-toplevel\``,
-      GIT_PREMISE_STEP_GUARD_MS,
-      error,
-    );
-    if (tripped !== undefined) throw tripped;
-    return; // git finds no working tree enclosing the root: the premise holds
-  }
-  throw new Error(
-    `${context}: staging premise — the workspace root ${root} must lie ` +
-      `inside no repository's working tree, but git finds one at ` +
-      `${toplevel} (the OS temporary directory lies inside a repository; ` +
-      `T6.3-5's no-repository arm cannot be staged on this machine)`,
-  );
-}
-
 /** Merge an impact report's entries per node identity (the SUITE-20 way). */
 function mergeReportByIdentity(
   report: ImpactReport,
@@ -1624,7 +1567,9 @@ const T6_3_5 = defineProductTest({
       },
       async (workspace) => {
         const context = "T6.3-5 (c) no-repository arm";
-        await assertOutsideAnyRepository(workspace.root, context);
+        // H-1's ancestor precondition (module header), before the arm's
+        // first invocation.
+        await assertSelfContainedRoot(product, workspace.root, context);
         await buildOk(product, workspace, `${context}: \`build\``);
         const argv = ["impact", "--base", "HEAD"];
         const result = await assertLeavesUnchanged(

@@ -45,8 +45,11 @@
 // - T12.6-2's no-configuration context pins its staging premise in-test:
 //   `build` in that directory must fail as a 14.14 configuration error
 //   (T7-1's contract) — otherwise a configuration file accidentally
-//   reachable by upward search (H-1 makes the temporary root's ancestors
-//   hold none) would silently weaken the context into a configured one.
+//   reachable by upward search would silently weaken the context into a
+//   configured one. H-1's ancestor precondition, verified first
+//   (`assertSelfContainedRoot`, helpers/self-contained-root.ts), makes the
+//   temporary root's ancestors hold none — an `xspec.config.ts` above it a
+//   harness error, never a pass or a product failure.
 // - T12.6-2's discriminating pair: the invalid-configuration fixture is
 //   proven genuinely invalid by `expectConfigurationError` on `build` (exit
 //   2, stable code `configuration-error`; the shared 14.14 protocol) — the
@@ -62,6 +65,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -370,6 +374,13 @@ const T12_6_2 = defineProductTest({
         files: { "malformed-config.ts": MALFORMED_CONFIG_TARGET },
       },
       async (workspace) => {
+        // H-1's precondition (module header): nothing above the root holds
+        // an xspec.config.ts, and the root lies inside no working tree.
+        await assertSelfContainedRoot(
+          product,
+          workspace.root,
+          "T12.6-2 (the directory with no discoverable configuration)",
+        );
         // Staging premise, pinned in-test: no configuration is reachable
         // here — the other commands exit 2 as a 14.14 configuration error
         // (T7-1). A configuration file accidentally reachable by upward

@@ -258,7 +258,11 @@
 // - The failed-search premise is T7-1's: the workspace is a fresh unique
 //   temporary directory (H-1) whose filesystem ancestors (the OS temp
 //   directory and its parents) hold no `xspec.config.ts`, so the upward
-//   search exhausts without a hit.
+//   search exhausts without a hit — H-1's ancestor precondition, verified
+//   before the arm runs (`assertSelfContainedRoot`,
+//   helpers/self-contained-root.ts: no ancestor of the root holding an
+//   entry of that name, and the root inside no git working tree), an unmet
+//   one a harness error, never a pass or a product failure.
 // - The configuration-error finding pins locations [] beside code and path:
 //   SPEC 14 classes configuration conditions among those "without an
 //   in-source location" (they carry the file or path they concern instead),
@@ -342,6 +346,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
@@ -3217,11 +3222,18 @@ async function runErrorSearchFailureArm(
 ): Promise<void> {
   // The workspace is a fresh unique temporary directory whose filesystem
   // ancestors (the OS temp directory and its parents) hold no
-  // xspec.config.ts — the T7-1 premise — so the upward search exhausts
-  // without a hit.
+  // xspec.config.ts — the T7-1 premise, H-1's precondition verified first
+  // (module header) — so the upward search exhausts without a hit, from the
+  // root and from nested/inner alike (the directories between are the
+  // arm's own staging).
   await withWorkspace(
     { files: { "specs/A.mdx": ERR_SOURCE }, dirs: ["nested/inner"] },
     async (workspace) => {
+      await assertSelfContainedRoot(
+        product,
+        workspace.root,
+        "T12.7-3 (a failed upward search and its `.` concerned path)",
+      );
       await expectAnchoredConfigurationError(
         product,
         workspace.root,

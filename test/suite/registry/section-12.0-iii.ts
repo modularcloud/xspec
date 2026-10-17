@@ -48,7 +48,10 @@
 //   staged in a workspace whose root holds no configuration (the premise:
 //   `build` alone is a configuration error, 14.14), so exit 0 with derived
 //   output written under `cfg/` alone is attributable to the leading
-//   `--config` being read as the global flag with its value.
+//   `--config` being read as the global flag with its value. The premise's
+//   failed upward search presumes nothing above the root: H-1's ancestor
+//   precondition is verified first (`assertSelfContainedRoot`,
+//   helpers/self-contained-root.ts), an unmet one a harness error.
 // - `review create --strategy audit --name -a`: the session file's presence
 //   at `.xspec/reviews/-a.json` (10.1) plus the session answering `next`;
 //   `resolve … --note -x` is observed through `review show … --json`'s
@@ -72,6 +75,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
 import {
   assertLeavesUnchanged,
   diffSnapshots,
@@ -682,6 +686,11 @@ const T12_0_14 = defineProductTest({
     // `build` writing derived output under `cfg/` alone is attributable to
     // the leading flag and its value (SPEC 12.0, 7).
     await withWorkspace({ files: GRAMMAR_CONFIG_FILES }, async (workspace) => {
+      await assertSelfContainedRoot(
+        product,
+        workspace.root,
+        "T12.0-14 (the `--config`-first arm's premise: a failed upward search)",
+      );
       await expectConfigurationError(
         product,
         workspace,

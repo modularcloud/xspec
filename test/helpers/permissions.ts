@@ -118,7 +118,11 @@ import { snapshotKeyBytes } from "./snapshot.js";
  * (`second-mount`: not made, not verified, or not removed), and the fresh
  * process-identifier namespaces (`pid-namespace`: a namespace not made, its
  * first process not answering, a run not lying in it, or one of
- * T13.5-10(e)–(g)'s verifications on the harness failing).
+ * T13.5-10(e)–(g)'s verifications on the harness failing), and H-1's
+ * ancestor precondition (`self-contained-root`,
+ * helpers/self-contained-root.ts: an ancestor of an arm's staging root
+ * holding an entry named `xspec.config.ts`, the root lying inside a git
+ * working tree, or either left unverified).
  */
 export type StagingMode =
   | "write-refusal"
@@ -135,7 +139,8 @@ export type StagingMode =
   | "second-user"
   | "group-access"
   | "second-mount"
-  | "pid-namespace";
+  | "pid-namespace"
+  | "self-contained-root";
 
 /**
  * An ineffective or impossible staging: a permission staging (E-1, H-11)
@@ -153,7 +158,11 @@ export type StagingMode =
  * obstruction staging that did not take effect as declared
  * (`lock-path-leftover`, helpers/lock-staging.ts), or one of 13.5's
  * machine-wide stagings not made or not verified — a runner withholding
- * administrative access among them (helpers/machine-staging.ts; E-1). Never a
+ * administrative access among them (helpers/machine-staging.ts; E-1), or
+ * H-1's ancestor precondition unmet: an arm presuming nothing above its
+ * staging root whose root has an `xspec.config.ts` above it or lies inside
+ * a git working tree, or where either is left unverified
+ * (`self-contained-root`, helpers/self-contained-root.ts). Never a
  * `HarnessAssertionError`: nothing here is a product verdict — it is a
  * harness error, never a diagnosed product failure and never a skip.
  */

@@ -35,7 +35,11 @@
 // - T7-1 "no configuration reachable": the workspace is a fresh unique
 //   temporary directory (H-1) whose filesystem ancestors (the OS temp
 //   directory and its parents) hold no `xspec.config.ts`, so the upward
-//   search exhausts without a hit.
+//   search exhausts without a hit — H-1's ancestor precondition, verified
+//   before the arm runs (`assertSelfContainedRoot`,
+//   helpers/self-contained-root.ts: no ancestor of the root holding an
+//   entry of that name, and the root inside no git working tree), an unmet
+//   one a harness error, never a pass or a product failure.
 // - T7-1 `--config` naming a nonexistent file: run from the location
 //   fixture's root, whose own `xspec.config.ts` the upward search would
 //   find, naming `alt/missing.config.ts` — absent, beside `alt/`'s valid
@@ -213,6 +217,7 @@ import {
   displaySnapshotPath,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
@@ -832,11 +837,17 @@ const T7_1 = defineProductTest({
     );
 
     // No configuration reachable: a fresh temporary workspace with no
-    // xspec.config.ts anywhere on the upward path (module header) — a
-    // configuration error, not a crash and not an empty success.
+    // xspec.config.ts anywhere on the upward path (module header; H-1's
+    // precondition verified first) — a configuration error, not a crash and
+    // not an empty success.
     await withWorkspace(
       { files: { "specs/A.mdx": SECTION_A_SOURCE } },
       async (workspace) => {
+        await assertSelfContainedRoot(
+          product,
+          workspace.root,
+          "T7-1 (no configuration reachable by upward search)",
+        );
         await expectConfigurationError(
           product,
           workspace,
