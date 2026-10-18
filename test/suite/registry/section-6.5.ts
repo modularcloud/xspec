@@ -4141,7 +4141,12 @@ const T6_5_4 = defineProductTest({
     // move refuses (exit 1) before modifying anything. The invalid-workspace
     // refusal reports the workspace's findings themselves — exactly the one
     // 14.5 finding located in the offending file, no refusal reason
-    // evaluated or reported beside it (SPEC 6.5, 6.4, 14).
+    // evaluated or reported beside it (SPEC 6.5, 6.4, 14). The precondition's
+    // refused-writes arm — the file-form `move specs/A.mdx specs/C.mdx` over
+    // an `out` replaced by a plain file, refused with the condition-22
+    // finding alone, never refused-invalid-destination — is staged where
+    // T6.4-6 states it, in T6.4-6 itself (section-6.4.ts's
+    // REFUSED_WRITES_CASES).
     await withWorkspace(
       MOVE_REFUSAL_CONFIG,
       MOVE_PRECONDITION_FILES,

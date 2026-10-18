@@ -326,7 +326,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T6.4-3": ["6.4", "1.4", "14", "12.0", "12.7"],
   "T6.4-4": ["6.4", "12.0", "14"],
   "T6.4-5": ["6.4"],
-  "T6.4-6": ["6.4", "14"],
+  // T6.4-6: its refused-writes arm — refused writes among `build`'s
+  // validations (13.3), the file-form move's mirrored precondition (6.5),
+  // and the condition-22 finding form-exact (12.7).
+  "T6.4-6": ["6.4", "6.5", "12.7", "13.3", "14"],
   "T6.4-7": ["6.4", "14"],
   "T6.5-1": ["6.5", "6.6", "6.4", "2.1", "12.7", "4", "4.5"],
   "T6.5-2": ["6.5", "3"],

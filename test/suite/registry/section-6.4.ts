@@ -133,6 +133,34 @@
 //   T6.4-6's invalid-workspace refusal instead reports the workspace's
 //   numbered findings alone (SPEC 14, 6.4) — exactly its one 14.5 finding
 //   located in the offending file, no refusal reason beside it.
+// - T6.4-6's refused-writes arm (the validations are `build`'s whole,
+//   refused writes included — 13.3: source validation errors, journal
+//   errors, and refused writes alike): a valid workspace whose
+//   `specs/A.mdx` holds a top-level section `a`, under `markdown: { emit:
+//   true, outDir: "out" }`, built — `out` a directory holding the emitted
+//   `out/specs/A.md` (staging premises; SPEC 7.3, 13.2: `outDir` preserves
+//   workspace-relative paths) — then `out` replaced by a plain file, a
+//   directory component of every emit destination occupied by a
+//   non-directory (14.22). A premise `build --json` pins the staged state:
+//   exit 1 with exactly that one condition-22 finding, form-exact as below,
+//   the sources still valid, modifying nothing (12.1). Then a real
+//   `rename specs/A.mdx a b` and a real file-form `move specs/A.mdx
+//   specs/C.mdx` (its would-be emit destination `out/specs/C.md` under
+//   `out`; T6.5-4's precondition arm, staged here as T6.4-6 states it)
+//   each refuse through the T6.4-3 protocol above: exit 1 and exactly one
+//   finding, the condition-22 finding form-exact — `code`
+//   `obstructed-write-path` (pinned through its counting key, the token's
+//   `14.N` identity, helpers/adapters/model.ts), `path` `out` (the
+//   offending component's workspace-relative path), `locations` `[]` (a
+//   path-level condition has no in-source location), `message` and
+//   `identities` informational (SPEC 12.7, 14, 14.22) — so no refusal
+//   reason beside it, `refused-invalid-destination` included (reasons are
+//   evaluated only over a workspace passing `build`'s validations, SPEC
+//   6.4, 6.5, 14), the whole root byte-identical around each: sources,
+//   journal (absent throughout), derived files, and graph data. A product
+//   whose precondition judges source validity alone rewrites (or
+//   relocates) `specs/A.mdx` and appends the journal before it meets the
+//   obstruction, failing the compare.
 // - T6.4-4 exit-2 arms run with `--json`: stdout exactly one 12.7 error
 //   document (12.0: with JSON output in effect, an exit-2 invocation emits
 //   the error document as its entire stdout — no report, no validation
@@ -178,6 +206,7 @@
 //   all included, normalizing nothing.
 
 import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
@@ -550,17 +579,19 @@ function assertRewriteHappened(
  * What a refused rename's report must hold (SPEC 14, 12.7): the arm's one
  * finding — its exact stable code — plus whichever concern §14 assigns the
  * reason: a located bearer/spelling, the exact `identities` where 14 pins
- * them, or nothing further where the concern's rendering is the reason's
- * message alone. Exported for
- * T6.6-3, which stages T6.4-3's refusals identically and asserts the
- * `--preview` invocation's refusal equivalence (TEST-SPEC §6.6).
+ * them, a concerned path, or nothing further where the concern's rendering
+ * is the reason's message alone. T6.4-6's refused-writes arm holds its
+ * file-form `move` (T6.5-4's precondition arm) to the same expectation.
+ * Exported for T6.6-3, which stages T6.4-3's refusals identically and
+ * asserts the `--preview` invocation's refusal equivalence (TEST-SPEC §6.6).
  */
 export interface RefusalExpectation {
   /**
    * The finding's counting key (`assertConditionCounts` vocabulary): a
    * stable refusal code token (`refused-…`), or a `14.N` condition identity
    * for the invalid-workspace refusal, which reports the workspace's
-   * numbered findings alone (SPEC 14, 6.4).
+   * numbered findings alone (SPEC 14, 6.4) — the code token's pinned
+   * identity (helpers/adapters/model.ts), so the count pins the exact code.
    */
   readonly finding: string;
   /** At least one location names this file (and byte window when given). */
@@ -583,16 +614,28 @@ export interface RefusalExpectation {
    * (support.ts assertRefusalIdentities guards both ways).
    */
   readonly identities?: readonly string[];
+  /**
+   * The concerned path of a finding without an in-source location (SPEC 14:
+   * such a condition carries the file or path it concerns): given, the
+   * finding is asserted form-exact beside the exact code its counting key
+   * pins — its 12.7 `path` member exactly this workspace-relative path and
+   * its `locations` `[]` (SPEC 12.7, 14). T6.4-6's refused-writes arm: the
+   * condition-22 finding concerning the offending component, `out` (14.22).
+   */
+  readonly path?: string;
 }
 
 /**
  * A refused rename (SPEC 6.4: every validation failure beyond the argument
- * existence checks refuses with exit 1): run with `--json`, assert exit 1
- * exactly, decode stdout as the form-exact 12.7 findings-only report of a
- * refused operation (SPEC 12.7, H-3), assert the report holds exactly one
- * finding bearing the arm's stable code with its concerned data (SPEC 14,
- * T14-7), and assert the refusal modifies nothing — a whole-workspace-root
- * byte snapshot compare around the command (derived files, sources, and the
+ * existence checks refuses with exit 1) — or T6.4-6's file-form `move`,
+ * whose validation mirrors rename's, the valid-workspace precondition
+ * included (SPEC 6.5): run with `--json`, assert exit 1 exactly, decode
+ * stdout as the form-exact 12.7 findings-only report of a refused operation
+ * (SPEC 12.7, H-3), assert the report holds exactly one finding bearing the
+ * arm's stable code with its concerned data (SPEC 14, T14-7) — a concerned
+ * path form-exact with `locations` `[]` where the expectation states one —
+ * and assert the refusal modifies nothing — a whole-workspace-root byte
+ * snapshot compare around the command (derived files, sources, and the
  * journal's absence all included).
  */
 async function expectRefusalModifiesNothing(
@@ -648,6 +691,18 @@ async function expectRefusalModifiesNothing(
         expected.identities,
         `${context}: the refusal's concerned identity`,
       );
+      if (expected.path !== undefined) {
+        assertSameJson(
+          { path: finding.path, locations: finding.locations },
+          { path: expected.path, locations: [] },
+          `${context}: the finding, form-exact — its exact code pinned by ` +
+            `the count above, its concerned path ` +
+            `${JSON.stringify(expected.path)} as its 12.7 \`path\` member, ` +
+            `and \`locations\` [] — a condition without an in-source ` +
+            `location carries the path it concerns, located nowhere (SPEC ` +
+            `12.7, 14); its message: ${JSON.stringify(finding.message)}`,
+        );
+      }
     },
     `${context}: \`${command}\` refused — modifies nothing (SPEC 6.4)`,
   );
@@ -1756,8 +1811,10 @@ export const TWO_BEARER_COLLISION_CASE: RenameRefusalCase = {
 };
 
 /**
- * One T6.4-3 refusal case: the full rename argv (without `--json`), the one
- * refusal finding the staging isolates (SPEC 14), and its diagnosis context.
+ * One refusal case: the full argv (without `--json`) — a T6.4-3 rename, or
+ * one of T6.4-6's refused-writes commands (its rename and T6.5-4's file-form
+ * `move`) — the one finding the staging isolates (SPEC 14), and its
+ * diagnosis context.
  */
 export interface RenameRefusalCase {
   readonly argv: readonly string[];
@@ -2866,10 +2923,161 @@ const T6_4_6_OTHER_INVALID = stagedMdx(
   P6_OTHER_INVALID,
 );
 
+// The refused-writes arm (TEST-SPEC T6.4-6: "The validations are `build`'s
+// whole, refused writes included (13.3: source validation errors, journal
+// errors, and refused writes alike)"; the module header): a valid
+// workspace whose specs/A.mdx holds a top-level section `a`, emitting
+// Markdown under `outDir: "out"` (SPEC 7.3), so `build` writes
+// out/specs/A.md (13.2: `outDir` preserves workspace-relative paths); then
+// `out` replaced by a plain file — a directory component of every emit
+// destination occupied by a non-directory (14.22), the sources still
+// valid. Its workspace is created after the body's first product
+// invocation (the 14.5 arm runs first), and T6.6-3 may stage it after its
+// own, so the configuration and the source are staged-source records (S-9's
+// timing clause; helpers/staged-ts.ts, helpers/staged-mdx.ts).
+export const REFUSED_WRITES_CONFIG = stagedTs(
+  'T6.4-6 xspec.config.ts — one spec group, Markdown emitted under outDir "out" (the refused-writes arm)',
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "out" }
+})
+`,
+);
+const W6_FILE = "specs/A.mdx";
+export const REFUSED_WRITES_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  [W6_FILE]: stagedMdx(
+    "T6.4-6 refused-writes arm specs/A.mdx",
+    ['<S id="a">', "A text.", "</S>", ""].join("\n"),
+  ),
+};
+// The emit directory, the one Markdown file `build` emits beneath it (SPEC
+// 7.3, 13.2), and the plain file's bytes staged in the directory's place.
+const W6_OUT = "out";
+const W6_EMITTED = "out/specs/A.md";
+const W6_OUT_OCCUPANT = "not a directory\n";
+
+/**
+ * T6.4-6's refused-writes staging (the module header), on a fresh
+ * REFUSED_WRITES_CONFIG + REFUSED_WRITES_FILES workspace — exported with
+ * REFUSED_WRITES_CASES so T6.6-3 can stage it identically for the cases'
+ * `--preview` twins: `build` (exit 0); the staging premises, `out` a
+ * directory holding the emitted out/specs/A.md (SPEC 7.3, 13.2); `out`
+ * replaced by a plain file; and a premise `build --json` pinning the staged
+ * state — exit 1 with exactly the one condition-22 finding, form-exact
+ * (its code pinned by the count, `path` `out`, `locations` `[]`), the
+ * sources still valid, so `build`'s validations fail by the refused write
+ * alone — modifying nothing (SPEC 14.22, 12.1, 12.7).
+ */
+export async function stageRefusedWrites(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  await buildOk(
+    product,
+    workspace,
+    `${context} \`build\` over the staged workspace (Markdown emitted under ` +
+      `outDir out)`,
+  );
+  const outKind = await workspace.kind(W6_OUT);
+  if (outKind !== "dir") {
+    fail(
+      `${context}: staging premise — \`build\` with emission enabled under ` +
+        `markdown.outDir creates the ${W6_OUT}/ directory (SPEC 7.3, 13.2, ` +
+        `13.4); found ${outKind}`,
+    );
+  }
+  const emittedKind = await workspace.kind(W6_EMITTED);
+  if (emittedKind !== "file") {
+    fail(
+      `${context}: staging premise — emission under outDir preserves ` +
+        `workspace-relative paths, so ${W6_FILE} emits ${W6_EMITTED} ` +
+        `(SPEC 7.3, 13.2); found ${emittedKind}`,
+    );
+  }
+  // Obstruct: the directory, with the Markdown it holds, gives way to a
+  // plain file — a directory component of every emit destination now
+  // occupied by a non-directory (SPEC 14.22, 13.4). The deleted emission's
+  // staleness is invisible to `build`, which refuses at the obstruction.
+  await fsp.rm(workspace.path(W6_OUT), { recursive: true });
+  await workspace.file(W6_OUT, W6_OUT_OCCUPANT);
+  const premise = `${context}: premise \`build --json\` over the obstructed workspace`;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const findings = await buildFindings(
+        product,
+        workspace,
+        `${premise} — the refused write fails \`build\`'s validations, exit ` +
+          `1 (SPEC 14.22, 12.0, 12.1)`,
+      );
+      assertConditionCounts(
+        findings,
+        { "14.22": 1 },
+        `${premise} — exactly the one offending component, the sources ` +
+          `still valid (SPEC 14.22: one finding per distinct offending ` +
+          `component)`,
+      );
+      const finding = findings[0]!;
+      assertSameJson(
+        { path: finding.path, locations: finding.locations },
+        { path: W6_OUT, locations: [] },
+        `${premise} — the condition-22 finding, form-exact: its code pinned ` +
+          `by the count above, its concerned path the offending ` +
+          `component's workspace-relative path "${W6_OUT}", and ` +
+          `\`locations\` [] (SPEC 14.22, 12.7, 14); its message: ` +
+          JSON.stringify(finding.message),
+      );
+    },
+    `${premise}: a failing \`build\` modifies nothing — the plain file at ` +
+      `${W6_OUT} untouched, no Markdown written (SPEC 12.1, 14.22)`,
+  );
+}
+
+/**
+ * T6.4-6's refused-writes commands (the module header), each run on the
+ * stageRefusedWrites staging — exported with it for T6.6-3's `--preview`
+ * twins: a real rename of the top-level `a`, and a real file-form move,
+ * T6.5-4's precondition arm, staged here as T6.4-6 states it. Each is
+ * refused by the precondition, reporting the condition-22 finding
+ * concerning `out` alone.
+ */
+export const REFUSED_WRITES_CASES: readonly RenameRefusalCase[] = [
+  {
+    argv: ["rename", W6_FILE, "a", "b"],
+    expected: { finding: "14.22", path: W6_OUT },
+    reason:
+      "refused-writes arm, a real `rename specs/A.mdx a b`: the validations " +
+      "are `build`'s whole, refused writes included — `out`, a directory " +
+      "component of every emit destination, is a plain file (SPEC 14.22), " +
+      "so the rename refuses before modifying anything, reporting exactly " +
+      "the condition-22 finding concerning `out`, no refusal reason beside " +
+      "it (SPEC 6.4, 13.3, 12.7, 14)",
+  },
+  {
+    argv: ["move", W6_FILE, "specs/C.mdx"],
+    expected: { finding: "14.22", path: W6_OUT },
+    reason:
+      "refused-writes arm, a real file-form `move specs/A.mdx specs/C.mdx` " +
+      "(T6.5-4's precondition arm), its would-be emit destination " +
+      "out/specs/C.md under `out`: the precondition refuses first, " +
+      "reporting exactly the condition-22 finding concerning `out` — no " +
+      "refusal reason beside it, refused-invalid-destination included, " +
+      "reasons being evaluated only over a workspace passing `build`'s " +
+      "validations (SPEC 6.5, 6.4, 13.3, 12.7, 14)",
+  },
+];
+
 const T6_4_6 = defineProductTest({
   id: "T6.4-6",
   title:
-    "valid-workspace precondition: with a pre-existing validation error elsewhere, rename refuses (exit 1) before modifying anything — the rename's own arguments are valid, so the refusal is the 6.4 precondition that rename only ever rewrites a valid workspace, and it reports the workspace's numbered findings alone: exactly the one located 14.5 finding, no refusal reason beside it (SPEC 6.4, 12.1, 14)",
+    "valid-workspace precondition: with a pre-existing validation error elsewhere, rename refuses (exit 1) before modifying anything — the rename's own arguments are valid, so the refusal is the 6.4 precondition that rename only ever rewrites a valid workspace, and it reports the workspace's numbered findings alone: exactly the one located 14.5 finding, no refusal reason beside it; the validations are `build`'s whole, refused writes included: on a valid workspace whose `specs/A.mdx` holds a top-level section `a`, under `markdown: { emit: true, outDir: \"out\" }`, built, the directory `out` then replaced by a plain file — a directory component of every emit destination, the sources still valid (a premise `build --json` exits 1 with exactly that one finding, modifying nothing) — a real `rename specs/A.mdx a b` and a real file-form `move specs/A.mdx specs/C.mdx` (its would-be emit destination under `out`; T6.5-4's precondition arm) each exit 1 under `--json` with exactly the condition-22 finding concerning `out`, form-exact (`code` `obstructed-write-path`, `path` `out`, `locations` `[]`), no refusal reason beside it — `refused-invalid-destination` included — sources, journal, derived files, and graph data byte-identical around each (whole-root compare) (SPEC 6.4, 6.5, 12.1, 12.7, 13.3, 14, 14.22)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -2897,6 +3105,34 @@ const T6_4_6 = defineProductTest({
             "rename refuses before modifying anything: no source rewrite, no " +
             "journal entry, no derived-file change)",
         );
+      },
+    );
+
+    // Refused writes are among `build`'s validations (SPEC 13.3, 14.22): on
+    // the obstructed workspace (stageRefusedWrites; the module header), a
+    // real rename and a real file-form move each refuse with exactly the
+    // condition-22 finding concerning `out`, form-exact, no refusal reason
+    // beside it, the whole root byte-identical around each — a product
+    // whose precondition judges source validity alone rewrites sources and
+    // appends the journal before it meets the obstruction (SPEC 6.4, 6.5).
+    await withWorkspace(
+      REFUSED_WRITES_CONFIG,
+      REFUSED_WRITES_FILES,
+      async (workspace) => {
+        await stageRefusedWrites(
+          product,
+          workspace,
+          "T6.4-6 refused-writes arm",
+        );
+        for (const { argv, expected, reason } of REFUSED_WRITES_CASES) {
+          await expectRefusalModifiesNothing(
+            product,
+            workspace,
+            argv,
+            expected,
+            `T6.4-6 (${reason})`,
+          );
+        }
       },
     );
   },
