@@ -146,10 +146,14 @@
 //   refused command
 //   with the pre-refusal `build`'s derived files present (the T6.4-3
 //   protocol); because each arm proves it modified nothing, the arms share
-//   one staged workspace — except the derived-path arm, which stages its
-//   own: it needs `markdown.outDir` emission and a spec glob admitting the
-//   destination `new/b.mdx` (SPEC 7.3, 13.2). The precondition arm's
-//   invalid-workspace refusal
+//   one staged workspace — except those whose staging cannot share it, each
+//   on a workspace of its own: the lacking-`.mdx` clause's single-casing
+//   arm, `move specs/a.mdx specs/B.MDX` under the spec globs `specs/*.mdx`
+//   and `specs/*.MDX` (its destination in a spec group yet lacking `.mdx`
+//   byte-wise, 12.0: no case folding); the outside-root link staging; the
+//   derived-path arm and its link sibling, which need `markdown.outDir`
+//   emission and a spec glob admitting the destination `new/b.mdx` (SPEC
+//   7.3, 13.2); and the precondition arm, whose invalid-workspace refusal
 //   instead reports the workspace's numbered findings alone (SPEC 14, 6.4):
 //   exactly its one 14.5 finding located in the offending file. The 6.5
 //   destination clauses "containing `#`" and "not valid UTF-8" admit no
@@ -2189,6 +2193,21 @@ interface ByteExactArm {
   readonly markdown?: Readonly<Record<string, string>>;
 }
 
+// The self-closing target-parent arms' one expected `specs/P.mdx`: whether
+// the parent is spelled `<Spec id="p" />` or `<Spec id="p" / >`, its `/` and
+// the whitespace immediately before or after it are deleted and `</Spec>`
+// appended after the tag's terminating `>`, the moved text inserted before
+// that closing tag (SPEC 6.5, 1.1) — one string, so the two arms demonstrably
+// expect the same bytes.
+const X2_PAIRED_PARENT_AFTER = [
+  '<Spec id="p">',
+  '<S id="p.mv">',
+  "Moved text.",
+  "</S>",
+  "</Spec>",
+  "",
+].join("\n");
+
 // The terminator-kind arms' characters (SPEC 3), spelled from code points
 // (tool-safe): a CRLF pair is one terminator, a lone CR one too, and U+000A
 // is the terminator every move inserts, whatever terminators the file holds.
@@ -2454,11 +2473,12 @@ const X2_ARMS: readonly ByteExactArm[] = [
   },
   {
     // Self-closing target parent (the TEST-SPEC worked example): its `/` and
-    // the whitespace immediately before it are deleted, `</Spec>` — the
-    // closing tag matching the opening tag's name — is appended immediately
-    // after the tag's terminating `>`, and the insertion rule then applies
-    // before that closing tag: `<Spec id="p" />` becomes `<Spec id="p">` +
-    // U+000A + the moved text + U+000A + `</Spec>` (SPEC 6.5, 1.1).
+    // any whitespace immediately before or after it (here the one space
+    // before it) are deleted, `</Spec>` — the closing tag matching the
+    // opening tag's name — is appended immediately after the tag's
+    // terminating `>`, and the insertion rule then applies before that
+    // closing tag: `<Spec id="p" />` becomes `<Spec id="p">` + U+000A + the
+    // moved text + U+000A + `</Spec>` (SPEC 6.5, 1.1).
     name: "self-closing target parent rewritten to paired form",
     files: {
       [X2_ORIGIN]: X2_ORIGIN_BEFORE,
@@ -2470,14 +2490,29 @@ const X2_ARMS: readonly ByteExactArm[] = [
     argv: ["move", "specs/A.mdx#a.mv", "specs/P.mdx#p.mv"],
     expected: {
       [X2_ORIGIN]: X2_ORIGIN_AFTER,
-      "specs/P.mdx": [
-        '<Spec id="p">',
-        '<S id="p.mv">',
-        "Moved text.",
-        "</S>",
-        "</Spec>",
-        "",
-      ].join("\n"),
+      "specs/P.mdx": X2_PAIRED_PARENT_AFTER,
+    },
+  },
+  {
+    // The self-closing target parent with whitespace on both sides of its
+    // `/`, `<Spec id="p" / >` — a self-closing tag still, deriving (S-9:
+    // the grammar admits whitespace between the `/` and the `>`). The `/`
+    // and the whitespace immediately before and after it are deleted, so
+    // the parent becomes exactly what the `/>` arm's does — never
+    // `<Spec id="p" >`, which a product deleting only the whitespace before
+    // the `/` leaves (SPEC 6.5, 1.1).
+    name: "self-closing target parent with whitespace on both sides of its `/` rewritten to the same paired form",
+    files: {
+      [X2_ORIGIN]: X2_ORIGIN_BEFORE,
+      "specs/P.mdx": stagedMdx(
+        "T6.5-2 self-closing-target-parent arm, whitespace on both sides of its slash, specs/P.mdx",
+        '<Spec id="p" / >\n',
+      ),
+    },
+    argv: ["move", "specs/A.mdx#a.mv", "specs/P.mdx#p.mv"],
+    expected: {
+      [X2_ORIGIN]: X2_ORIGIN_AFTER,
+      "specs/P.mdx": X2_PAIRED_PARENT_AFTER,
     },
   },
   // Terminator-kind arms (SPEC 3, 6.5): one per kind, CRLF and lone CR, in
@@ -2508,7 +2543,7 @@ export const X2_COMPOSED_FORMS: ReadonlyArray<
 const T6_5_2 = defineProductTest({
   id: "T6.5-2",
   title:
-    "section form text edits, byte-exact: moved text spans the opening tag's first character through the closing tag's last; origin deletion drops lines left empty/whitespace-only (rule of 3); insertion immediately before the target parent's closing tag (or end of file for top-level `new-id`), followed by U+000A and preceded by one when the insertion point is not at the start of a line, judged over the composed text — staged over four geometries: a closing tag alone on its line (no terminator added), with its sibling indented on its line, `  </S>` (one added, the two spaces left a line of their own, kept in the compiled Markdown); the end of a file with a final terminator (none added) and without one (one added); and a closing tag sharing its line with preceding content, a text-position parent receiving a single-line in-line section whose line is a paragraph continuation there (one added); target file created when absent; self-closing sections move as exactly their tag's characters and a self-closing target parent is first rewritten to paired form; terminator-kind arms, CRLF and lone CR, origin and target sharing the kind, into a parent and at the end of a file: every terminator the move inserts is U+000A, a line start and the drop rule are judged by 3's terminators (the emptied origin line dropped with its whole terminator, none added before the moved text), and every kept terminator stays byte-for-byte; no other byte changes (SPEC 6.5, 3, 1.1, 14.20)",
+    'section form text edits, byte-exact: moved text spans the opening tag\'s first character through the closing tag\'s last; origin deletion drops lines left empty/whitespace-only (rule of 3); insertion immediately before the target parent\'s closing tag (or end of file for top-level `new-id`), followed by U+000A and preceded by one when the insertion point is not at the start of a line, judged over the composed text — staged over four geometries: a closing tag alone on its line (no terminator added), with its sibling indented on its line, `  </S>` (one added, the two spaces left a line of their own, kept in the compiled Markdown); the end of a file with a final terminator (none added) and without one (one added); and a closing tag sharing its line with preceding content, a text-position parent receiving a single-line in-line section whose line is a paragraph continuation there (one added); target file created when absent; self-closing sections move as exactly their tag\'s characters and a self-closing target parent is first rewritten to paired form, its `/` and the whitespace on either side of it deleted — `<Spec id="p" />` and `<Spec id="p" / >` (whitespace on both sides of its `/`, deriving) alike become `<Spec id="p">` + U+000A + the moved text + U+000A + `</Spec>`, never `<Spec id="p" >`; terminator-kind arms, CRLF and lone CR, origin and target sharing the kind, into a parent and at the end of a file: every terminator the move inserts is U+000A, a line start and the drop rule are judged by 3\'s terminators (the emptied origin line dropped with its whole terminator, none added before the moved text), and every kept terminator stays byte-for-byte; no other byte changes (SPEC 6.5, 3, 1.1, 14.20)',
   run: async (product) => {
     for (const arm of X2_ARMS) {
       await withWorkspace(
@@ -2708,10 +2743,16 @@ const R3_SEED_FILES = [
 // import's fate splits the arms (6.5:
 // removed exactly when its binding had references and the rewrite leaves it
 // with none):
-// - (a) `Org`'s only reference was to the moved node → the own-line
-//   declaration's characters are deleted and its emptied line dropped with
-//   its terminator (6.5, 3); the blank line after it was blank before the
-//   deletion, so it stays — the composed file begins with that U+000A.
+// - (a) the last-reference arm: `Org`'s references are the moved node's
+//   chain spelled twice in one `d` array, `d={[Org.org.mv, Org.org.mv]}` —
+//   one edge, two spellings (5.2) — and the rewrite reaches every spelling
+//   (6.5: all references), so both entries become `<fresh>.tm`, rooted at
+//   the one added binding, and `Org` is left with no reference → the
+//   own-line declaration's characters are deleted and its emptied line
+//   dropped with its terminator (6.5, 3); the blank line after it was blank
+//   before the deletion, so it stays — the composed file begins with that
+//   U+000A. A product rewriting one spelling per edge leaves the second
+//   entry on `Org`, which then keeps a reference and its import.
 // - (b) `th2` keeps `d={Org.org}` through the binding → the declaration
 //   survives byte-for-byte; only the moved reference is rewritten.
 // The rewritten reference keeps its access form — `Org.org.mv` becomes
@@ -2727,16 +2768,25 @@ const R3_THIRD_A_SOURCE = stagedMdx(
   [
     'import Org from "./Origin.xspec"',
     "",
-    '<S id="th" d={Org.org.mv}>',
+    '<S id="th" d={[Org.org.mv, Org.org.mv]}>',
     "Third text.",
     "</S>",
     "",
   ].join("\n"),
 );
 
-/** Arm (a)'s expected post-move bytes without the added import (6.5, 3). */
+/**
+ * Arm (a)'s expected post-move bytes without the added import (6.5, 3):
+ * both entries of the `d` array rewritten, rooted at the one added binding.
+ */
 const R3_THIRD_A_BASE = (root: string): string =>
-  ["", `<S id="th" d={${root}.tm}>`, "Third text.", "</S>", ""].join("\n");
+  [
+    "",
+    `<S id="th" d={[${root}.tm, ${root}.tm]}>`,
+    "Third text.",
+    "</S>",
+    "",
+  ].join("\n");
 
 const R3_THIRD_B_SOURCE = stagedMdx(
   "T6.5-3 third-file arm (b) specs/Third.mdx",
@@ -2799,47 +2849,97 @@ function rewrittenRootPattern(before: string, after: string): RegExp {
   return new RegExp(`${before}(${IDENTIFIER_RUN_SOURCE})${after}`, "g");
 }
 
-/** `<S id="th" d={<root>.tm}>` — the third file's rewritten reference. */
-const R3_THIRD_REWRITTEN = rewrittenRootPattern(
-  String.raw`<S id="th" d=\{`,
-  String.raw`\.tm\}>`,
-);
+/**
+ * The third file's rewritten `th` tag in one arm's shape: `shown` spells it
+ * for diagnosis, `<binding>` standing for each root, and `pattern` matches it
+ * globally, one root captured per spelling of the moved node's chain, group 1
+ * onward — each capture a permissive identifier run, as in
+ * rewrittenRootPattern.
+ */
+interface ThirdFileRewrite {
+  readonly shown: string;
+  readonly pattern: RegExp;
+}
+
+/** `<S id="th" d={<root>.tm}>` — arm (b)'s one rewritten spelling. */
+const R3_THIRD_REWRITTEN_ONCE: ThirdFileRewrite = {
+  shown: '<S id="th" d={<binding>.tm}>',
+  pattern: rewrittenRootPattern(
+    String.raw`<S id="th" d=\{`,
+    String.raw`\.tm\}>`,
+  ),
+};
+
+/**
+ * `<S id="th" d={[<root>.tm, <root>.tm]}>` — arm (a)'s chain spelled twice in
+ * one `d` array, both entries rewritten in place (the `, ` between them kept).
+ */
+const R3_THIRD_REWRITTEN_TWICE: ThirdFileRewrite = {
+  shown: '<S id="th" d={[<binding>.tm, <binding>.tm]}>',
+  pattern: new RegExp(
+    String.raw`<S id="th" d=\{\[` +
+      `(${IDENTIFIER_RUN_SOURCE})` +
+      String.raw`\.tm, ` +
+      `(${IDENTIFIER_RUN_SOURCE})` +
+      String.raw`\.tm\]\}>`,
+    "g",
+  ),
+};
 
 /**
  * The identifier the third file's rewritten reference is rooted at — the
  * value-unpinned fresh binding (SPEC 6.5), read off the one place 6.4's
  * pinned spelling makes it observable, as TypeScript 5.9.3 at ESNext reads
- * an identifier (SPEC 1.4, 14.20); diagnosed when the reference is not so
- * spelled exactly once or its root reads as no identifier.
+ * an identifier (SPEC 1.4, 14.20); diagnosed when the reference is not
+ * spelled in the arm's shape exactly once — every spelling of the moved
+ * node's chain rewritten (6.5: all references) — when its spellings are
+ * rooted at different identifiers (the file lacks one binding, the target
+ * module's default, so the rewrite adds one import binding it, 6.5), or when
+ * its root reads as no identifier.
  */
-function thirdFileReferenceRoot(text: string, context: string): string {
-  const matches = [...text.matchAll(R3_THIRD_REWRITTEN)];
-  const root = matches.length === 1 ? matches[0]?.[1] : undefined;
-  if (root === undefined) {
+function thirdFileReferenceRoot(
+  text: string,
+  rewrite: ThirdFileRewrite,
+  context: string,
+): string {
+  const matches = [...text.matchAll(rewrite.pattern)];
+  const match = matches.length === 1 ? matches[0] : undefined;
+  if (match === undefined) {
     fail(
-      `${context}: ${R3_THIRD} must hold exactly one ` +
-        `\`<S id="th" d={<binding>.tm}>\` — the third file's reference to ` +
-        `the moved node rewritten to the target module under the new ` +
-        `identity, its access form kept (dot access for the ` +
-        `identifier-valid segment; SPEC 6.5, 6.4); found ` +
-        `${String(matches.length)} in ${JSON.stringify(text)}`,
+      `${context}: ${R3_THIRD} must hold exactly one \`${rewrite.shown}\` — ` +
+        `the third file's reference to the moved node rewritten to the ` +
+        `target module under the new identity, every spelling of it ` +
+        `(SPEC 6.5: all references across the workspace), its access form ` +
+        `kept (dot access for the identifier-valid segment; SPEC 6.5, 6.4); ` +
+        `found ${String(matches.length)} in ${JSON.stringify(text)}`,
+    );
+  }
+  const roots = match.slice(1);
+  const root = roots[0]!;
+  if (roots.some((other) => other !== root)) {
+    fail(
+      `${context}: ${R3_THIRD}'s rewritten spellings of the moved node's ` +
+        `chain must all be rooted at one binding — the target module's ` +
+        `default binding, which the file lacks, so the rewrite adds the one ` +
+        `import binding it (SPEC 6.5, 2.1, 4.5); found roots ` +
+        `${JSON.stringify(roots)} in \`${match[0]}\``,
     );
   }
   return expectFreshIdentifier(
     root,
-    `${context}: ${R3_THIRD}'s rewritten reference ` +
-      `\`<S id="th" d={<binding>.tm}>\` must be rooted at the added ` +
-      `import's binding`,
+    `${context}: ${R3_THIRD}'s rewritten reference \`${rewrite.shown}\` ` +
+      `must be rooted at the added import's binding`,
   );
 }
 
 /**
  * One third-file arm: stage the four-file fixture plus `Third.mdx`, run the
  * identical section-form move, and assert the third file's rewrite — the
- * moved reference re-rooted at a fresh binding of the target module, added
- * under 6.5's line discipline; the origin import removed or kept as
- * `originImportKept` says — beside the applied-mapping report, the journal
- * entry, the complete `depends` edge set, and a clean `check`.
+ * moved reference, every spelling of it in the shape `rewritten` gives,
+ * re-rooted at a fresh binding of the target module, added under 6.5's line
+ * discipline; the origin import removed or kept as `originImportKept` says —
+ * beside the applied-mapping report, the journal entry, the complete
+ * `depends` edge set, and a clean `check`.
  */
 async function runThirdFileArm(
   product: ProductBinding,
@@ -2847,6 +2947,7 @@ async function runThirdFileArm(
   arm: {
     readonly label: string;
     readonly source: StagedMdx;
+    readonly rewritten: ThirdFileRewrite;
     readonly base: (root: string) => string;
     readonly originImportKept: boolean;
     readonly thirdEdges: readonly GraphEdge[];
@@ -2878,7 +2979,7 @@ async function runThirdFileArm(
   );
 
   const text = await readSourceText(workspace, R3_THIRD, context);
-  const root = thirdFileReferenceRoot(text, context);
+  const root = thirdFileReferenceRoot(text, arm.rewritten, context);
   if (arm.originImportKept) {
     assertContains(
       text,
@@ -2901,9 +3002,10 @@ async function runThirdFileArm(
       text,
       R3_THIRD,
       "Origin.xspec",
-      "the `Org` binding's only reference was to the moved node, so the " +
-        "rewrite leaves it with none and the import is removed (SPEC 6.5, " +
-        "2.1)",
+      "the `Org` binding's references — the moved node's chain, spelled " +
+        "twice in one `d` array — were all to the moved node, so the " +
+        "rewrite, reaching both spellings, leaves it with none and the " +
+        "import is removed (SPEC 6.5, 2.1)",
       context,
     );
   }
@@ -2958,7 +3060,7 @@ async function runThirdFileArm(
 const T6_5_3 = defineProductTest({
   id: "T6.5-3",
   title:
-    "re-identification and reference conversion: the moved subtree is re-identified by prefix replacement; references convert between local and imported forms; needed spec imports are added binding fresh, non-colliding identifiers and unneeded ones removed exactly (an import unreferenced before the move stays); rewritten content is byte-deterministic across two identical fixtures; the full mapping is appended to the journal and reported as the command's own applied-mapping report — the section form reports as rename does, T6.4-1's protocol (SPEC 6.5, 2.1, 6.1, 6.4, 12.0, 12.1, 14.10; H-3 form-exact decode); third-file arms — a spec source neither origin nor target, importing the origin module and referencing the moved node through a `d` chain, has that reference rewritten to the target module under an import added there (bytes per T6.5-8's discipline: the single inserted run isolated by diff against bytes composed from 6.4/6.5 and 3 is byte-exactly `import <X> from \"./Target.xspec\"` followed by U+000A at a line-start offset, its identifier alone the product's), the origin import removed exactly when the moved reference was its binding's last and kept byte-for-byte when another reference through it remains, `query edges` listing the third file's `depends` edge under the new identity and `check` clean (SPEC 6.5, 2.1, 6.4, 3)",
+    "re-identification and reference conversion: the moved subtree is re-identified by prefix replacement; references convert between local and imported forms; needed spec imports are added binding fresh, non-colliding identifiers and unneeded ones removed exactly (an import unreferenced before the move stays); rewritten content is byte-deterministic across two identical fixtures; the full mapping is appended to the journal and reported as the command's own applied-mapping report — the section form reports as rename does, T6.4-1's protocol (SPEC 6.5, 2.1, 6.1, 6.4, 12.0, 12.1, 14.10; H-3 form-exact decode); third-file arms — a spec source neither origin nor target, importing the origin module and referencing the moved node through a `d` chain, has that reference rewritten to the target module under an import added there (bytes per T6.5-8's discipline: the single inserted run isolated by diff against bytes composed from 6.4/6.5 and 3 is byte-exactly `import <X> from \"./Target.xspec\"` followed by U+000A at a line-start offset, its identifier alone the product's), the origin import removed exactly when the moved reference was its binding's last — that arm spelling the chain twice in one `d` array, `d={[Org.org.mv, Org.org.mv]}`, both entries rewritten at the one added binding and the import still removed, its binding left with no reference — and kept byte-for-byte when another reference through it remains, `query edges` listing the third file's `depends` edge under the new identity and `check` clean (SPEC 6.5, 2.1, 6.4, 3)",
   run: async (product) => {
     const created: TestWorkspace[] = [];
     try {
@@ -3207,11 +3309,13 @@ const T6_5_3 = defineProductTest({
       );
 
       // Third-file arms (SPEC 6.5: all references across the workspace):
-      // (a) the moved reference was the origin binding's last — import
+      // (a) the moved reference, its chain spelled twice in one `d` array,
+      // was the origin binding's last — both entries rewritten, import
       // removed; (b) another reference through it remains — import kept.
       await runThirdFileArm(product, created, {
-        label: "(a) origin import removed",
+        label: "(a) origin import removed, the moved chain spelled twice",
         source: R3_THIRD_A_SOURCE,
+        rewritten: R3_THIRD_REWRITTEN_TWICE,
         base: R3_THIRD_A_BASE,
         originImportKept: false,
         thirdEdges: [
@@ -3221,6 +3325,7 @@ const T6_5_3 = defineProductTest({
       await runThirdFileArm(product, created, {
         label: "(b) origin import kept",
         source: R3_THIRD_B_SOURCE,
+        rewritten: R3_THIRD_REWRITTEN_ONCE,
         base: R3_THIRD_B_BASE,
         originImportKept: true,
         thirdEdges: [
@@ -3873,12 +3978,74 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
       "`specs/plain/**` spec glob, isolating 14.19's extension rule " +
       "(SPEC 6.5, 7.1, 14.19)",
   },
+  // The lacking-`.mdx` clause's single-casing arm, `specs/B.MDX`, needs spec
+  // globs of its own and stages on its own workspace (MOVE_CASING_CASE).
   ...BARRED_DESTINATION_PATH_CASES,
   // The inside-root staging of the link-component arms (V4_LINK_COMPONENT's
   // note): `specs/sub` → `linked/`, staged by stageMoveRefusalOccupants; the
   // whole-root compare sees any write landing through the link.
   ...MOVE_LINK_INSIDE_CASES,
 ];
+
+// The single-casing arm of the lacking-`.mdx` refusal (TEST-SPEC T6.5-4;
+// SPEC 6.5, 7.1, 12.0), on its own workspace: under the spec globs
+// `specs/*.mdx` and `specs/*.MDX`, the file-form destination `specs/B.MDX`
+// belongs to a spec group — the second glob matches it, byte-wise and
+// case-sensitively (7) — yet lacks the `.mdx` extension byte-wise, since no
+// case folding is applied anywhere (12.0), so the move is refused
+// refused-invalid-destination concerning that path and modifies nothing; a
+// product folding case in the extension test sees `.mdx` there and performs
+// the move. No reason applies beside it: the destination is unoccupied, and
+// a spec-group file without the `.mdx` extension generates no derived path
+// at all (13.1), so none can be obstructed. The arm stages on any
+// filesystem: no two staged or spelled paths differ by case alone (the
+// origin is `specs/a.mdx`, and nothing occupies `specs/B.MDX` or a case
+// variant of it). The `specs/*.MDX` glob matches no staged file, so the
+// premise `build` passes and the refusal is the move's own. Its workspace is
+// created after the body's first product invocation, so the configuration
+// and the origin are staged-source records (S-9's timing clause).
+const V4_CASING_CONFIG = stagedTs(
+  "T6.5-4 xspec.config.ts — the casing arm's configuration: spec globs specs/*.mdx and specs/*.MDX",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx", "specs/*.MDX"]
+  }
+})
+`,
+);
+const V4_CASING_ORIGIN = "specs/a.mdx";
+const V4_CASING_DESTINATION = "specs/B.MDX";
+
+/**
+ * T6.5-4's single-casing arm (its own workspace; the V4_CASING_CONFIG
+ * staging note), exported for T6.6-3's `--preview` twin: MOVE_CASING_FILES
+ * under MOVE_CASING_CONFIG, built, then the file-form move to `specs/B.MDX`
+ * — in a spec group through `specs/*.MDX` yet lacking `.mdx` byte-wise —
+ * refused refused-invalid-destination concerning that path alone.
+ */
+export const MOVE_CASING_CONFIG = V4_CASING_CONFIG;
+export const MOVE_CASING_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    [V4_CASING_ORIGIN]: stagedMdx(
+      "T6.5-4 casing arm specs/a.mdx",
+      ['<S id="a">', "Casing arm text.", "</S>", ""].join("\n"),
+    ),
+  };
+export const MOVE_CASING_CASE: MoveRefusalCase = {
+  argv: ["move", V4_CASING_ORIGIN, V4_CASING_DESTINATION],
+  expected: {
+    finding: "refused-invalid-destination",
+    path: V4_CASING_DESTINATION,
+  },
+  reason:
+    "single-casing arm — the file-form `move specs/a.mdx specs/B.MDX` under " +
+    "the spec globs specs/*.mdx and specs/*.MDX: the destination belongs " +
+    "to a spec group yet lacks the `.mdx` extension byte-wise — no case " +
+    "folding is applied anywhere — so a product folding case in the " +
+    "extension test performs the move (SPEC 6.5, 7, 7.1, 12.0, 14.19)",
+};
 
 /**
  * T6.5-4's derived-path arm (its own workspace; the V4_OUTDIR_CONFIG staging
@@ -4007,7 +4174,7 @@ export const MOVE_PRECONDITION_CASE: MoveRefusalCase = {
 const T6_5_4 = defineProductTest({
   id: "T6.5-4",
   title:
-    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, locating the would-be cycle's full path: the spec-import arm, whose participating imports the move would add, by the reference spellings it roots at their bindings — the moved node's `d` spelling on `keep` and `user`'s on `mv` — exactly those two, path null; the dependency arm the participating `d` spelling); file form whose destination exists — occupied by a plain file, by a directory, by a symbolic link, and by a broken symbolic link with its target absent, one arm each, the directory arm discriminating a product probing for a file alone and the broken-link arm discriminating a product probing existence through link-following stat (refused-destination-exists, concerning that path); section form whose target path is occupied by anything other than a discovered spec source — a directory; a symbolic link resolving to a discovered spec source (discovery never yields a symlink); and an existing `.mdx` file outside every configured spec group, the latter refusing under refused-destination-exists and refused-invalid-destination together, one finding per applicable reason; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment; the empty `<new-id>` of destination operand `specs/B.mdx#`, a well-formed 12.0 split with zero id segments, never the exit-2 generalization of 11.3's `--to` spelling rule; one arm per character 1.4's quote-and-escape bullet bars — the double quote, the single quote, the escape character, `&`, U+2028, and U+2029 — each between two letters in a one-segment `<new-id>` (destination operand `specs/B.mdx#a<c>b`), a well-formed argument value no spelling rule decides, so exit 1, never exit 2, the character verbatim in identities — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); destination paths in no configured spec group, in a code group as well, lacking `.mdx`, or containing a character 7.1 bars from spec-source paths — the double quote, the single quote, the backslash, U+000A, U+000D, U+2028, or U+2029 — one file-form arm and one section-form arm creating the target per character (`specs/a<c>b.mdx`, nothing at that path), and for the single quote one arm of each form placing it in a directory component instead (`specs/it's/b.mdx`, `specs/it's` absent: a validator checking the file name alone passes it), under the spec glob `specs/**/*.mdx`, which reaches every such destination, each refused concerning the destination path as spelled, never a usage error — every such spelling is a well-formed argument value (12.0) — and the derived-path arm — emission enabled under `markdown.outDir`, the otherwise-valid destination's emit-destination directory component `mdout/new` occupied by a plain file lying under no current source's write path, refused never 14.22 (refused-invalid-destination, concerning the destination path); the symbolic-link arms of the same clause — a file-form move to `specs/sub/b.mdx` and a section-form move creating the target file `specs/sub/new.mdx`, `specs/sub` a symbolic link to a real, empty directory, staged with the link targeting a directory inside the workspace root and, on its own workspace, one outside it — each refused-invalid-destination concerning the destination path, never 14.22, nothing written through the link inside or outside the workspace (the link and its target directory byte-identical afterward), and the derived-path arm's sibling staging `mdout/new` as such a link instead of a plain file, refused identically — each refusal the form-exact 12.7 findings-only report holding exactly one finding per applicable reason with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 7, 7.1, 7.3, 5.3, 2.1, 1.4, 1.3, 13.1, 13.2, 13.4, 14.14, 14.19, 14.22, 12.0, 12.7, 14)",
+    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, locating the would-be cycle's full path: the spec-import arm, whose participating imports the move would add, by the reference spellings it roots at their bindings — the moved node's `d` spelling on `keep` and `user`'s on `mv` — exactly those two, path null; the dependency arm the participating `d` spelling); file form whose destination exists — occupied by a plain file, by a directory, by a symbolic link, and by a broken symbolic link with its target absent, one arm each, the directory arm discriminating a product probing for a file alone and the broken-link arm discriminating a product probing existence through link-following stat (refused-destination-exists, concerning that path); section form whose target path is occupied by anything other than a discovered spec source — a directory; a symbolic link resolving to a discovered spec source (discovery never yields a symlink); and an existing `.mdx` file outside every configured spec group, the latter refusing under refused-destination-exists and refused-invalid-destination together, one finding per applicable reason; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment; the empty `<new-id>` of destination operand `specs/B.mdx#`, a well-formed 12.0 split with zero id segments, never the exit-2 generalization of 11.3's `--to` spelling rule; one arm per character 1.4's quote-and-escape bullet bars — the double quote, the single quote, the escape character, `&`, U+2028, and U+2029 — each between two letters in a one-segment `<new-id>` (destination operand `specs/B.mdx#a<c>b`), a well-formed argument value no spelling rule decides, so exit 1, never exit 2, the character verbatim in identities — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); destination paths in no configured spec group, in a code group as well, lacking `.mdx` — among them a single-casing arm on its own workspace, the file-form `move specs/a.mdx specs/B.MDX` under the spec globs `specs/*.mdx` and `specs/*.MDX`, its destination in a spec group yet without the `.mdx` extension byte-wise (12.0: no case folding), failing a product that folds case in the extension test — or containing a character 7.1 bars from spec-source paths — the double quote, the single quote, the backslash, U+000A, U+000D, U+2028, or U+2029 — one file-form arm and one section-form arm creating the target per character (`specs/a<c>b.mdx`, nothing at that path), and for the single quote one arm of each form placing it in a directory component instead (`specs/it's/b.mdx`, `specs/it's` absent: a validator checking the file name alone passes it), under the spec glob `specs/**/*.mdx`, which reaches every such destination, each refused concerning the destination path as spelled, never a usage error — every such spelling is a well-formed argument value (12.0) — and the derived-path arm — emission enabled under `markdown.outDir`, the otherwise-valid destination's emit-destination directory component `mdout/new` occupied by a plain file lying under no current source's write path, refused never 14.22 (refused-invalid-destination, concerning the destination path); the symbolic-link arms of the same clause — a file-form move to `specs/sub/b.mdx` and a section-form move creating the target file `specs/sub/new.mdx`, `specs/sub` a symbolic link to a real, empty directory, staged with the link targeting a directory inside the workspace root and, on its own workspace, one outside it — each refused-invalid-destination concerning the destination path, never 14.22, nothing written through the link inside or outside the workspace (the link and its target directory byte-identical afterward), and the derived-path arm's sibling staging `mdout/new` as such a link instead of a plain file, refused identically — each refusal the form-exact 12.7 findings-only report holding exactly one finding per applicable reason with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 7, 7.1, 7.3, 5.3, 2.1, 1.4, 1.3, 13.1, 13.2, 13.4, 14.14, 14.19, 14.22, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       MOVE_REFUSAL_CONFIG,
@@ -4039,6 +4206,32 @@ const T6_5_4 = defineProductTest({
             `T6.5-4 (${reason})`,
           );
         }
+      },
+    );
+
+    // The lacking-`.mdx` clause's single-casing arm, on its own workspace
+    // (V4_CASING_CONFIG's note): `specs/B.MDX` lies in a spec group through
+    // the glob `specs/*.MDX` yet lacks the `.mdx` extension byte-wise (SPEC
+    // 12.0: no case folding), so the file-form move is refused
+    // refused-invalid-destination concerning that path, nothing modified.
+    await withWorkspace(
+      MOVE_CASING_CONFIG,
+      MOVE_CASING_FILES,
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T6.5-4 casing arm `build` over the staged workspace — the glob " +
+            "specs/*.MDX matches no staged file, so the workspace passes " +
+            "`build`'s validations and the refusal below is the move's own",
+        );
+        await expectRefusalModifiesNothing(
+          product,
+          workspace,
+          MOVE_CASING_CASE.argv,
+          MOVE_CASING_CASE.expected,
+          `T6.5-4 (${MOVE_CASING_CASE.reason})`,
+        );
       },
     );
 
