@@ -177,16 +177,19 @@
 //   a one-byte range drift each fail; the rename arm's descendants `z` and
 //   `c` stand in document order opposite to `from`-byte order, so a mapping
 //   in document order fails the decoder's 12.7 order check and the exact
-//   list alike (TEST-SPEC T6.6-4). Judgment calls pinned here (H-4): an
-//   `id`-attribute rewrite spans the attribute's own characters (`id="…"`,
-//   name through closing quote — SPEC 6.6 "the `id` attribute's own
+//   list alike, and its `core.twice` spells one affected reference twice in
+//   one `d` array — one edge (SPEC 2.2), two occurrences (5.7) — so a
+//   product reporting one `reference-rewrite` per edge, or both at one
+//   entry, fails the exact list (TEST-SPEC T6.6-4). Judgment calls pinned here
+//   (H-4): an `id`-attribute rewrite spans the attribute's own characters
+//   (`id="…"`, name through closing quote — SPEC 6.6 "the `id` attribute's own
 //   characters", the construct-spelling reading its sibling clauses use for
 //   the self-closing tag and the specifier literal, quotes included); the
 //   self-closing target parent's insertion point maps to the tag's END in
 //   pre-operation coordinates (every byte the operation adds — the appended
-//   paired closing tag and the inserted text alike — attaches at that
-//   offset, the only stable pre-operation anchor); an import addition's
-//   offset is implementation latitude (SPEC 6.5), so the preview asserts it
+//   paired closing tag and the inserted text alike — attaches at that offset,
+//   the only stable pre-operation anchor); an import addition's offset is
+//   implementation latitude (SPEC 6.5), so the preview asserts it
 //   structurally (exactly one such edit, zero-length, within the file) and
 //   arm (b) pins it against the real operation's bytes by reconstruction:
 //   the preview runs inside a whole-root modifies-nothing compare, the real
@@ -2501,6 +2504,50 @@ function spanWithin(
   return { start, end: start + utf8Length(fragment) };
 }
 
+/**
+ * Byte spans of every occurrence of `fragment` within the unique `container`
+ * within `source`, in document order — for one spelling repeated inside one
+ * construct (a `d` array naming one target twice: one edge, an occurrence
+ * per entry, SPEC 2.2, 5.7), each occurrence located at its own entry.
+ * `count` is the number of occurrences the staging means: any other number,
+ * overlapping ones included, fails loud as a staging defect (harness error,
+ * never a product failure), as {@link uniqueCharIndex}'s do.
+ */
+function spansWithin(
+  source: string,
+  container: string,
+  fragment: string,
+  count: number,
+  where: string,
+): readonly SourceRange[] {
+  const containerStart = utf8Length(
+    source.slice(0, uniqueCharIndex(source, container, `${where} (container)`)),
+  );
+  const indices: number[] = [];
+  for (
+    let at = container.indexOf(fragment);
+    at !== -1;
+    at = container.indexOf(fragment, at + 1)
+  ) {
+    indices.push(at);
+  }
+  const overlapping = indices.some(
+    (at, i) => i > 0 && at < indices[i - 1]! + fragment.length,
+  );
+  if (indices.length !== count || overlapping) {
+    throw new Error(
+      `T6.6-4 staging locator (${where}): fragment ${JSON.stringify(fragment)} ` +
+        `must occur exactly ${String(count)} times, none overlapping, in ` +
+        `${JSON.stringify(container)}; found ${String(indices.length)}` +
+        `${overlapping ? " (overlapping)" : ""}`,
+    );
+  }
+  return indices.map((at) => {
+    const start = containerStart + utf8Length(container.slice(0, at));
+    return { start, end: start + utf8Length(fragment) };
+  });
+}
+
 /** The zero-length insertion-point range at a byte offset (SPEC 6.6, 12.7). */
 function insertionPoint(offset: number): SourceRange {
   return { start: offset, end: offset };
@@ -3091,13 +3138,18 @@ export default defineConfig({
 // --- Arm (a): rename preview — id-rewrites and the four 5.7 occurrence
 // kinds across MDX and TS. `core.mid` (with descendants `core.mid.z` and
 // `core.mid.c`, in that document order) is renamed to `core.hub`; affected
-// references, all through `core.mid.z`: two `d` entries and one MDX
-// embedding in the origin file (string form), a `d` chain and an embedding
-// in a second MDX file (external form), and a marker plus a `text(...)` call
-// in a TS file. Controls that must produce NO edit: `d={"core.plain"}` (its
-// target keeps its identity), every unaffected `id` attribute, and the
-// unrelocated `./Core.xspec` import specifiers. Multi-byte text ("hölder",
-// "ünicode", "Δ") precedes every located construct.
+// references, each to `core.mid` or `core.mid.z`: in the origin file
+// (string form), `core.sib`'s two `d` entries, one per target, and its MDX
+// embedding, and `core.twice`'s `d={["core.mid", "core.mid"]}` — one
+// reference spelled twice in one `d` array, a single edge (SPEC 2.2) but
+// two occurrences (5.7), so two `reference-rewrite` edits, one at each
+// entry: one per occurrence, never one per edge (TEST-SPEC T6.6-4(a)); a
+// `d` chain and an embedding in a second MDX file (external form); and a
+// marker plus a `text(...)` call in a TS file. Controls that must produce
+// NO edit: `d={"core.plain"}` (its target keeps its identity), every
+// unaffected `id` attribute, and the unrelocated `./Core.xspec` import
+// specifiers. Multi-byte text ("hölder", "ünicode", "Δ") precedes every
+// located construct.
 //
 // The mapping-order fixture (TEST-SPEC T6.6-4): the descendants stand in
 // document order (`z` before `c`) opposite to the byte order of their
@@ -3129,6 +3181,10 @@ const A4_CORE_SOURCE = [
   "",
   '<S id="core.sib" d={["core.mid", "core.mid.z"]}>',
   'Sib embeds: {text("core.mid.z")}',
+  "</S>",
+  "",
+  '<S id="core.twice" d={["core.mid", "core.mid"]}>',
+  "Twice text.",
   "</S>",
   "",
   '<S id="core.plain">',
@@ -3202,6 +3258,7 @@ function mappingInFromByteOrder(
 function armAPlan(): ExpectedPreviewPlan {
   const core = A4_CORE_SOURCE;
   const dArray = 'd={["core.mid", "core.mid.z"]}';
+  const twiceArray = 'd={["core.mid", "core.mid"]}';
   return {
     // The complete mapping — the renamed ID and every descendant — in
     // `from`-byte order: `…#core.mid.c` before `…#core.mid.z`, the reverse
@@ -3250,6 +3307,14 @@ function armAPlan(): ExpectedPreviewPlan {
             class: "reference-rewrite",
             range: uniqueSpan(core, '{text("core.mid.z")}', "a: embedding"),
           },
+          // One reference spelled twice in one `d` array (`core.twice`): a
+          // single edge (SPEC 2.2) but two occurrences (5.7), so two
+          // `reference-rewrite` edits, one at each entry, each spanning its
+          // own entry's expression — one per occurrence, never one per edge
+          // (TEST-SPEC T6.6-4(a)).
+          ...spansWithin(core, twiceArray, '"core.mid"', 2, "a: d twice").map(
+            (range): ExpectedEdit => ({ class: "reference-rewrite", range }),
+          ),
         ]),
       },
       {
@@ -3864,7 +3929,7 @@ async function readRewrittenText(
 const T6_6_4 = defineProductTest({
   id: "T6.6-4",
   title:
-    "report content: byte-precise fixtures asserted against precomputed pre-operation offsets, form-exact per 12.7 — (a) a rename preview reports the complete identity mapping (the renamed ID and every descendant) ordered by `from` bytes — the descendants `core.mid.z` and `core.mid.c` standing in document order opposite to byte order, so a product emitting document order fails — and, per rewritten file, `id-rewrite` edits spanning each rewritten `id` attribute's own characters and `reference-rewrite` edits spanning each affected occurrence's span (5.7) across MDX and TS; (b) a section-move preview into an existing target file reports the `origin-deletion` as one contiguous range (the construct's own characters extended over the adjunct-dropped leftover whitespace and line terminator), the re-identification's `id-rewrite` edits and the moved text's reference rewrites nested inside that range, `target-insertion` zero-length at the insertion offset, `target-parent-rewrite` spanning the self-closing target parent's tag, `import-addition` zero-length at the exact offset the real operation then uses (byte-asserted by running the operation on the preview-pinned state), and `import-removal` spanning the declaration plus its adjunct drops; (c) a file-form move preview reports `import-specifier-rewrite` edits spanning the specifier literals and `file-relocation` spanning the entire moved file under its pre-operation path; (d) a created-target section-move preview reports exactly one `file-creation` edit at the new file's start — the insertion and import additions there subsumed — with the moved text's own rewrites inside the origin deletion; every edit class-plus-range only, every class one of the ten 12.7 names, and the full 12.7 edit comparator asserted over every emitted edit list — its final tie-break, class-name bytes between zero-length insertion points, pinned as an observation by (e), T6.5-13's stagings restaged byte for byte: the self-closing target parent's tag end (b) and the end of a paragraph-ended file, terminated or not (d), where `import-addition` orders before `target-insertion` at one offset, and (g), two `import-addition` entries adjacent at one offset, their count asserted — the real operation on the preview-pinned state then byte-asserted against the composed forms; and at every preview's state the human preview — the same argv without `--json` — exits 0 alike and carries the plan its JSON document reports: every mapping pair's `from` and `to` identity, every file entry's path, every edit's class and its range's start and end, and every delta path (robust matching, H-3) (SPEC 6.6, 12.0, 12.7, 6.4, 6.5, 5.7, 1.7, 2.1, 3; H-3, H-4)",
+    "report content: byte-precise fixtures asserted against precomputed pre-operation offsets, form-exact per 12.7 — (a) a rename preview reports the complete identity mapping (the renamed ID and every descendant) ordered by `from` bytes — the descendants `core.mid.z` and `core.mid.c` standing in document order opposite to byte order, so a product emitting document order fails — and, per rewritten file, `id-rewrite` edits spanning each rewritten `id` attribute's own characters and `reference-rewrite` edits spanning each affected occurrence's span (5.7) across MDX and TS — one per occurrence, never one per edge: an affected reference spelled twice in one `d` array (`core.twice`'s, naming `core.mid` at both entries) reports two, one at each entry; (b) a section-move preview into an existing target file reports the `origin-deletion` as one contiguous range (the construct's own characters extended over the adjunct-dropped leftover whitespace and line terminator), the re-identification's `id-rewrite` edits and the moved text's reference rewrites nested inside that range, `target-insertion` zero-length at the insertion offset, `target-parent-rewrite` spanning the self-closing target parent's tag, `import-addition` zero-length at the exact offset the real operation then uses (byte-asserted by running the operation on the preview-pinned state), and `import-removal` spanning the declaration plus its adjunct drops; (c) a file-form move preview reports `import-specifier-rewrite` edits spanning the specifier literals and `file-relocation` spanning the entire moved file under its pre-operation path; (d) a created-target section-move preview reports exactly one `file-creation` edit at the new file's start — the insertion and import additions there subsumed — with the moved text's own rewrites inside the origin deletion; every edit class-plus-range only, every class one of the ten 12.7 names, and the full 12.7 edit comparator asserted over every emitted edit list — its final tie-break, class-name bytes between zero-length insertion points, pinned as an observation by (e), T6.5-13's stagings restaged byte for byte: the self-closing target parent's tag end (b) and the end of a paragraph-ended file, terminated or not (d), where `import-addition` orders before `target-insertion` at one offset, and (g), two `import-addition` entries adjacent at one offset, their count asserted — the real operation on the preview-pinned state then byte-asserted against the composed forms; and at every preview's state the human preview — the same argv without `--json` — exits 0 alike and carries the plan its JSON document reports: every mapping pair's `from` and `to` identity, every file entry's path, every edit's class and its range's start and end, and every delta path (robust matching, H-3) (SPEC 6.6, 12.0, 12.7, 6.4, 6.5, 5.7, 1.7, 2.1, 2.2, 3; H-3, H-4)",
   run: async (product) => {
     // --- Arm (a): rename preview across MDX and TS ---
     await withWorkspace(
