@@ -1,23 +1,68 @@
-// TEST-SPEC §10.7 (review commands), third part: T10.7-14 (the refusal
-// finding form). T10.7-1…T10.7-6 are section-10.7-i.ts's business, and
-// T10.7-7…T10.7-12 section-10.7-ii.ts's.
+// TEST-SPEC §10.7 (review commands), third part: T10.7-13 (the metadata
+// pair) and T10.7-14 (the refusal finding form). T10.7-1…T10.7-6 are
+// section-10.7-i.ts's business, and T10.7-7…T10.7-12 section-10.7-ii.ts's.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
 // asserts exact exit codes (H-5), decodes output through the H-3 adapters,
 // and rejects a product only via diagnosed assertion failures (H-8).
 //
-// SPEC 10.7: `review create` with the name of an existing session — a name
-// matching one ignoring ASCII case counting, at `create`, as that session's
-// (10.1) — `resolve` of a blocked item, and `split` of an item of any other
-// kind or of a `subtree-coherence` item whose scope root has no children are
-// refused, each refusal one finding, exit 1, modifying nothing (13.5). SPEC
-// 14: a review-operation refusal carries no stable code, and neither
-// location nor concerned path — `locations` empty, `path` `null` (12.7); a
-// refused operation's report is the findings-only form `{"findings": […]}`
-// (12.7).
+// SPEC 10.7 (T10.7-13): a `metadata-consistency` item's payload — `next
+// --json`, and identically `show` and `export` — carries its scope node's
+// metadata pair, a before/after pair under the origin-text rule: before,
+// the node's `d` targets, coverage attribute, and tags (5.5) in the item's
+// baseline state (10.2: in a baseline session the recorded baseline graph);
+// after, in the current graph; each `d` target under its current identity
+// (10.4); a side whose graph state lacks the node presented absent, carrying
+// no metadata. The coverage attribute and the tags take 12.7's value forms.
 //
-// Conservative operationalizations (noted per H-3/H-4):
+// Conservative operationalizations for T10.7-13 (noted per H-3/H-4):
+// - The pair decodes through the review adapter (helpers/adapters/review.ts:
+//   required on every `metadata-consistency` item, failing loudly when
+//   absent; its member layout the adapter's assumed shape, H-3), the
+//   coverage attribute and the tags decoded literally there — the string
+//   "required" or "none", a tag set in byte order with duplicates collapsed
+//   (12.7; T12.7-1) — so a product carrying either in another form fails at
+//   the decode. Each side is then asserted exactly: its presence, its `d`
+//   targets compared as a set (10.7 fixes no order for them), its coverage
+//   attribute, and its tags.
+// - Each item is asserted identically through the three surfaces: `export`
+//   (the item found by kind and scope node), `show` of that item's id, and
+//   `next --json`. Where an arm's session holds two items (b), `next` is
+//   walked: whichever item it returns is asserted and resolved `no-change`
+//   (which never re-derives, SPEC 10.5), and the next read must return the
+//   other — so no item order is assumed (10.5's business).
+// - Each arm first asserts, from `export`, the item set its one edit yields —
+//   a staging premise (SPEC 5.5, 5.6, 10.5: metadata-changed nodes alone; no
+//   node changed; no dependency edge to a target whose effectiveHash
+//   changed; a coverage- or tags-only edit propagating nothing) — so `next`
+//   can only return the arm's items.
+// - Three path-blocks workspaces (`review create --base <baseline commit>`),
+//   one session `s` each; every edit is followed by an explicit `build`
+//   before any read, so no read relies on the 13.3 refresh path; (c)'s
+//   `rename` finishes by regenerating derived files as `build` does (6.4).
+//   (a) and (d) share specs/M.mdx's workspace, (d) after (a)'s assertions;
+//   the context is asserted where the entry states it — (a), (b), (c) — and
+//   (d) asserts the pair alone.
+// - Staged-source records (helpers/staged-mdx.ts, helpers/staged-ts.ts;
+//   S-9): the configuration shared by the three workspaces (`M13_CONFIG`),
+//   (d)'s deletion of m's section, and the (b) and (c) workspaces' initial
+//   sources and edits — all staged after the body's first invocation, or as
+//   initial files of a workspace created after it. The first workspace's
+//   initial spec source and (a)'s edit, staged before any invocation (git
+//   staging invokes no product), stay plain strings.
+//
+// SPEC 10.7 (T10.7-14): `review create` with the name of an existing
+// session — a name matching one ignoring ASCII case counting, at `create`,
+// as that session's (10.1) — `resolve` of a blocked item, and `split` of an
+// item of any other kind or of a `subtree-coherence` item whose scope root
+// has no children are refused, each refusal one finding, exit 1, modifying
+// nothing (13.5). SPEC 14: a review-operation refusal carries no stable
+// code, and neither location nor concerned path — `locations` empty, `path`
+// `null` (12.7); a refused operation's report is the findings-only form
+// `{"findings": […]}` (12.7).
+//
+// Conservative operationalizations for T10.7-14 (noted per H-3/H-4):
 // - Every refusal runs through the shared check (support.ts
 //   `expectReviewRefusal`), the one each of the refusal's home tests runs
 //   too (T10.1-2, T10.1-6, T10.3-2, T10.7-1, T10.7-9, T10.7-10): the command
@@ -53,17 +98,29 @@
 //   strings.
 
 import type {
+  CoverageAttributeValue,
+  ExportReport,
   ItemKind,
+  MetadataSide,
+  NextReport,
+  ReviewItem,
   SessionStatusReport,
   SessionStatusRow,
 } from "../../helpers/adapters/index.js";
-import { decodeSessionStatusReport } from "../../helpers/adapters/index.js";
+import {
+  decodeExportReport,
+  decodeItemReport,
+  decodeNextReport,
+  decodeSessionStatusReport,
+} from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertSameJson,
   buildOk,
@@ -71,6 +128,602 @@ import {
   expectReviewRefusal,
   runJson,
 } from "./support.js";
+
+// ---------------------------------------------------------------------------
+// T10.7-13 — metadata pair
+// ---------------------------------------------------------------------------
+
+// Minimal declarative configuration (SPEC 7): exactly one spec group. A
+// staged-source record (S-9): the (b) and (c) workspaces are created after
+// the body's first invocation.
+const M13_CONFIG = stagedTs(
+  "T10.7-13 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+);
+
+/** The session every arm creates, one per workspace (SPEC 10.1). */
+const M13_SESSION = "s";
+
+// Arms (a) and (d): specs/M.mdx — `m` and the unedited targets t1, t2, t3.
+const M13_M_FILE = "specs/M.mdx";
+const M13_M = "specs/M.mdx#m";
+const M13_M_T1 = "specs/M.mdx#t1";
+const M13_M_T2 = "specs/M.mdx#t2";
+const M13_M_T3 = "specs/M.mdx#t3";
+
+/**
+ * specs/M.mdx: at the baseline `m`'s `d` names t1 and t2, and `m` spells no
+ * `coverage` attribute and spells `tags="b a"`; (a)'s one edit makes it name
+ * t2 and t3, spell `coverage="none"`, and spell `tags="c b"` — each tag list
+ * spelled out of byte order; (d) deletes m's section, nothing referencing
+ * it. The targets stay unedited throughout.
+ */
+function m13MSpec(state: "baseline" | "edited" | "deleted"): string {
+  const opening =
+    state === "baseline"
+      ? '<S id="m" d={["t1", "t2"]} tags="b a">'
+      : '<S id="m" d={["t2", "t3"]} coverage="none" tags="c b">';
+  return [
+    ...(state === "deleted" ? [] : [opening, "Em own line.", "</S>", ""]),
+    '<S id="t1">',
+    "Tee one line.",
+    "</S>",
+    "",
+    '<S id="t2">',
+    "Tee two line.",
+    "</S>",
+    "",
+    '<S id="t3">',
+    "Tee three line.",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+// (d)'s deletion follows the body's first invocation: a staged-source record
+// (helpers/staged-mdx.ts, S-9).
+const M13_M_DELETED = stagedMdx(
+  "T10.7-13 specs/M.mdx with m's section deleted by manual edit (arm (d))",
+  m13MSpec("deleted"),
+);
+
+// Arm (b): specs/GH.mdx — `g` (its `d` naming the unedited t1 on both
+// sides), `h`, and t1.
+const M13_GH_FILE = "specs/GH.mdx";
+const M13_G = "specs/GH.mdx#g";
+const M13_H = "specs/GH.mdx#h";
+const M13_GH_T1 = "specs/GH.mdx#t1";
+
+/** specs/GH.mdx: (b)'s edit retags g (`x` to `y`) and gives h `coverage="none"`. */
+function m13GhSpec(edited: boolean): string {
+  return [
+    edited ? '<S id="g" d={"t1"} tags="y">' : '<S id="g" d={"t1"} tags="x">',
+    "Gee own line.",
+    "</S>",
+    "",
+    edited ? '<S id="h" coverage="none">' : '<S id="h">',
+    "Aitch own line.",
+    "</S>",
+    "",
+    '<S id="t1">',
+    "Tee one line.",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+// The (b) workspace is created after the body's first invocation, so its
+// initial source and its edit are staged-source records (S-9).
+const M13_GH_BASELINE = stagedMdx(
+  "T10.7-13 specs/GH.mdx at the baseline (arm (b): g tagged x, h spelling no coverage attribute)",
+  m13GhSpec(false),
+);
+const M13_GH_EDITED = stagedMdx(
+  "T10.7-13 specs/GH.mdx after arm (b)'s edit (g tagged y, h spelling coverage none)",
+  m13GhSpec(true),
+);
+
+// Arm (c): specs/K.mdx — `k` and t4, renamed t9 after `create`.
+const M13_K_FILE = "specs/K.mdx";
+const M13_K = "specs/K.mdx#k";
+const M13_K_T9 = "specs/K.mdx#t9";
+
+/** specs/K.mdx: at the baseline k's `d` names t4; (c)'s edit removes it. */
+function m13KSpec(withReference: boolean): string {
+  return [
+    withReference ? '<S id="k" d={"t4"}>' : '<S id="k">',
+    "Kay own line.",
+    "</S>",
+    "",
+    '<S id="t4">',
+    "Tee four line.",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+// The (c) workspace is created after the body's first invocation: its
+// initial source and its edit are staged-source records (S-9).
+const M13_K_BASELINE = stagedMdx(
+  "T10.7-13 specs/K.mdx at the baseline (arm (c): k's d naming t4)",
+  m13KSpec(true),
+);
+const M13_K_EDITED = stagedMdx(
+  "T10.7-13 specs/K.mdx with k's reference to t4 removed (arm (c), before create)",
+  m13KSpec(false),
+);
+
+/** What one side of a metadata pair must present (SPEC 10.7; T10.7-13). */
+type M13SideExpectation =
+  | { readonly present: false }
+  | {
+      readonly present: true;
+      readonly d: readonly string[];
+      readonly coverage: CoverageAttributeValue;
+      readonly tags: readonly string[];
+    };
+
+/** One `metadata-consistency` item's expected pair (and context). */
+interface M13Expectation {
+  /** The item, for diagnoses (`m`); the context names the arm. */
+  readonly label: string;
+  /** The item's scope node — its current identity (SPEC 10.4). */
+  readonly scope: string;
+  /** The context identity set, where the entry states it (SPEC 10.5). */
+  readonly context?: readonly string[];
+  readonly before: M13SideExpectation;
+  readonly after: M13SideExpectation;
+}
+
+/** A `d` target list as a set (SPEC 10.7 fixes no order for them). */
+function m13TargetSet(targets: readonly string[]): readonly string[] {
+  return [...new Set(targets)].sort();
+}
+
+/** Assert one side of a decoded metadata pair exactly (SPEC 10.7, 12.7). */
+function m13AssertSide(
+  side: MetadataSide,
+  expected: M13SideExpectation,
+  label: "before" | "after",
+  scope: string,
+  where: string,
+): void {
+  const state =
+    label === "before" ? "the item's baseline state" : "the current graph";
+  const what = `the ${label} side of ${scope}'s metadata pair`;
+  if (!expected.present) {
+    if (side.present) {
+      fail(
+        `${where}: ${what} is the absent side — ${state} lacks the node, so ` +
+          `the side is presented absent, carrying no metadata (SPEC 10.7); ` +
+          `got ${JSON.stringify(side)}`,
+      );
+    }
+    return;
+  }
+  if (!side.present) {
+    fail(
+      `${where}: ${what} must be present, carrying the node's metadata in ` +
+        `${state}, which contains the node (SPEC 10.7); got the absent side`,
+    );
+  }
+  assertSameJson(
+    m13TargetSet(side.d),
+    m13TargetSet(expected.d),
+    `${where}: ${what} — the node's \`d\` targets in ${state}, each under ` +
+      `its current identity, compared as a set (SPEC 10.7, 10.4: 10.7 fixes ` +
+      `no order for them)`,
+  );
+  assertSameJson(
+    side.coverage,
+    expected.coverage,
+    `${where}: ${what} — the node's coverage attribute in ${state}, in ` +
+      `12.7's value form: "required" for a section spelling no \`coverage\` ` +
+      `attribute, "none" for one spelling coverage="none" (SPEC 2.5, 10.7, ` +
+      `12.7)`,
+  );
+  assertSameJson(
+    side.tags,
+    expected.tags,
+    `${where}: ${what} — the node's tags in ${state}, a 12.7 tag set in ` +
+      `byte order whatever the spelled order (SPEC 2.6, 10.7, 12.7)`,
+  );
+}
+
+/**
+ * Assert a decoded item is the expected `metadata-consistency` item and
+ * presents the expected context (where stated) and metadata pair, read
+ * through `surface` (SPEC 10.7: one payload rule for `next --json`, `show`,
+ * and `export`).
+ */
+function m13AssertItem(
+  item: ReviewItem,
+  expected: M13Expectation,
+  surface: string,
+  context: string,
+): void {
+  const where = `${context} ${expected.label} [${surface}]`;
+  if (
+    item.kind !== "metadata-consistency" ||
+    item.scope.node !== expected.scope
+  ) {
+    fail(
+      `${where}: expected ${expected.scope}'s metadata-consistency item ` +
+        `(SPEC 10.5: one per metadata-changed node); got the ${item.kind} ` +
+        `item ${item.id} scoped at ${item.scope.node}`,
+    );
+  }
+  if (expected.context !== undefined) {
+    assertSameJson(
+      item.context.map((state) => state.node).sort(),
+      [...expected.context].sort(),
+      `${where}: the item's context — the added and removed \`d\` targets, ` +
+        `each presented under its current identity (SPEC 10.5, 10.7, 10.4)`,
+    );
+  }
+  const pair = item.metadata;
+  if (pair === undefined) {
+    // Unreachable through the adapter, which requires the pair on this kind.
+    fail(
+      `${where}: a metadata-consistency item's payload carries its scope ` +
+        `node's metadata pair (SPEC 10.7)`,
+    );
+  }
+  m13AssertSide(pair.before, expected.before, "before", expected.scope, where);
+  m13AssertSide(pair.after, expected.after, "after", expected.scope, where);
+}
+
+/** `review export s --json`, decoded (SPEC 10.7). */
+async function m13Export(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<ExportReport> {
+  const label = `${context} \`review export ${M13_SESSION} --json\``;
+  return decodeExportReport(
+    await runJson(
+      product,
+      workspace,
+      ["review", "export", M13_SESSION, "--json"],
+      label,
+    ),
+    label,
+  );
+}
+
+/** `review next s --json`, decoded (SPEC 10.7). */
+async function m13Next(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<NextReport> {
+  const label = `${context} \`review next ${M13_SESSION} --json\``;
+  return decodeNextReport(
+    await runJson(
+      product,
+      workspace,
+      ["review", "next", M13_SESSION, "--json"],
+      label,
+    ),
+    label,
+  );
+}
+
+/**
+ * Assert every expected item through `export` and `show`, then through a
+ * `next --json` walk, after asserting from `export` that the session holds
+ * exactly the expected items (the staging premise). The walk asserts
+ * whichever expected item `next` returns and, while another remains,
+ * resolves it `no-change` — which never re-derives (SPEC 10.5) — so no item
+ * order is assumed; the last item returned stays as it was.
+ */
+async function m13AssertSurfaces(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  expectations: readonly M13Expectation[],
+  premise: string,
+  context: string,
+): Promise<void> {
+  const exported = await m13Export(product, workspace, context);
+  assertSameJson(
+    exported.items.map((item) => `${item.kind} ${item.scope.node}`).sort(),
+    expectations
+      .map((expected) => `metadata-consistency ${expected.scope}`)
+      .sort(),
+    `${context} staging premise: the session's items — ${premise}`,
+  );
+  const ids = new Map<string, M13Expectation>();
+  for (const expected of expectations) {
+    const item = exported.items.find(
+      (candidate) => candidate.scope.node === expected.scope,
+    );
+    if (item === undefined) {
+      // Unreachable past the premise, which found every expected item.
+      fail(`${context}: no item scoped at ${expected.scope} in \`export\``);
+    }
+    m13AssertItem(item, expected, "`review export --json`", context);
+    const showLabel = `${context} \`review show ${M13_SESSION} ${item.id} --json\``;
+    m13AssertItem(
+      decodeItemReport(
+        await runJson(
+          product,
+          workspace,
+          ["review", "show", M13_SESSION, item.id, "--json"],
+          showLabel,
+        ),
+        showLabel,
+      ),
+      expected,
+      "`review show --json`",
+      context,
+    );
+    ids.set(item.id, expected);
+  }
+  for (let step = 1; ids.size > 0; step += 1) {
+    const label = `${context} (\`next\` read ${String(step)})`;
+    const next = await m13Next(product, workspace, label);
+    if (next.fullyResolved || next.item === undefined) {
+      fail(
+        `${label}: the session still holds needing-review unblocked items ` +
+          `${JSON.stringify([...ids.keys()])} — metadata-consistency items, ` +
+          `unresolved and blocked by nothing — so \`next\` returns one ` +
+          `(SPEC 10.3, 10.5, 10.7); got the fully-resolved report`,
+      );
+    }
+    const expected = ids.get(next.item.id);
+    if (expected === undefined) {
+      fail(
+        `${label}: \`next\` returned item ${next.item.id}, not one of the ` +
+          `items still needing review ${JSON.stringify([...ids.keys()])} ` +
+          `(SPEC 10.7)`,
+      );
+    }
+    m13AssertItem(next.item, expected, "`review next --json`", context);
+    ids.delete(next.item.id);
+    if (ids.size > 0) {
+      await expectExit(
+        product,
+        workspace,
+        [
+          "review",
+          "resolve",
+          M13_SESSION,
+          next.item.id,
+          "--status",
+          "no-change",
+        ],
+        0,
+        `${label} \`review resolve ${M13_SESSION} ${next.item.id} --status ` +
+          `no-change\` — unblocked, so resolved (SPEC 10.7)`,
+      );
+    }
+  }
+}
+
+/**
+ * Stage a git workspace holding `xspec.config.ts` and one spec source,
+ * commit it as the baseline, apply the arm's one edit, `build`, and create
+ * the path-blocks session `s` against the baseline commit (SPEC 10.7); run
+ * `body`, then dispose (H-1).
+ */
+async function withM13Session(
+  product: ProductBinding,
+  file: string,
+  baseline: InitialFileContents,
+  edit: (workspace: TestWorkspace) => Promise<void>,
+  context: string,
+  body: (workspace: TestWorkspace) => Promise<void>,
+): Promise<void> {
+  const workspace = await TestWorkspace.create({
+    files: { "xspec.config.ts": M13_CONFIG, [file]: baseline },
+  });
+  try {
+    await workspace.gitInit();
+    const base = await workspace.gitCommitAll("baseline");
+    await edit(workspace);
+    await buildOk(product, workspace, `${context} \`build\` after the edit`);
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--base", base, "--name", M13_SESSION],
+      0,
+      `${context} \`review create --base <baseline> --name ${M13_SESSION}\``,
+    );
+    await body(workspace);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/** m's expected before side — its metadata at the baseline — in (a) and (d). */
+const M13_M_BEFORE: M13SideExpectation = {
+  present: true,
+  d: [M13_M_T1, M13_M_T2],
+  coverage: "required",
+  tags: ["a", "b"],
+};
+
+const T10_7_13 = defineProductTest({
+  id: "T10.7-13",
+  title:
+    'metadata pair: a `metadata-consistency` item\'s payload — `next --json`, and identically `show` and `export` — carries its scope node\'s metadata pair, a before/after pair under the origin-text rule: before, the node\'s `d` targets, coverage attribute, and tags in the item\'s baseline state; after, in the current graph; each `d` target under its current identity; a side whose graph state lacks the node presented absent, carrying no metadata; the coverage attribute `"required"` or `"none"` and the tags a tag set in byte order (12.7\'s value forms), the `d` targets compared as a set — (a) m\'s `d` t1 and t2 → t2 and t3, no `coverage` → `coverage="none"`, `tags="b a"` → `tags="c b"`: context exactly {t1, t3}, before `d` {t1, t2}, `"required"`, `["a", "b"]`, after `d` {t2, t3}, `"none"`, `["b", "c"]`; (b) a tags-only edit on g and a coverage-only edit on h: each context empty, g\'s sides differing in tags alone, h\'s in coverage alone; (c) k\'s reference to t4 removed before `create`, t4 then renamed t9 by a journaled `rename`: k\'s context and its before-side `d` targets present t9, never t4; (d) after (a)\'s assertions m\'s section deleted by manual edit: its before side as in (a), its after side absent (SPEC 2.5, 2.6, 5.5, 10.4, 10.5, 10.7, 12.7)',
+  run: async (product) => {
+    // --- (a) and (d): specs/M.mdx --------------------------------------
+    await withM13Session(
+      product,
+      M13_M_FILE,
+      m13MSpec("baseline"),
+      async (workspace) => {
+        // Staged before the body's first invocation (git staging invokes
+        // no product), so a plain string the workspace builder judges.
+        await workspace.file(M13_M_FILE, m13MSpec("edited"));
+      },
+      "T10.7-13 (a)",
+      async (workspace) => {
+        await m13AssertSurfaces(
+          product,
+          workspace,
+          [
+            {
+              label: "m",
+              scope: M13_M,
+              context: [M13_M_T1, M13_M_T3],
+              before: M13_M_BEFORE,
+              after: {
+                present: true,
+                d: [M13_M_T2, M13_M_T3],
+                coverage: "none",
+                tags: ["b", "c"],
+              },
+            },
+          ],
+          "m's metadata-consistency item alone: the one edit makes m " +
+            "metadata-changed and changes no node's own content, and no " +
+            "dependency edge reaches a target whose effectiveHash changed " +
+            "(SPEC 5.5, 5.6, 10.5)",
+          "T10.7-13 (a)",
+        );
+
+        // (d): m's section deleted by manual edit, nothing referencing it.
+        await workspace.file(M13_M_FILE, M13_M_DELETED);
+        await buildOk(
+          product,
+          workspace,
+          "T10.7-13 (d) `build` after m's deletion",
+        );
+        await m13AssertSurfaces(
+          product,
+          workspace,
+          [
+            {
+              label: "m, deleted",
+              scope: M13_M,
+              before: M13_M_BEFORE,
+              after: { present: false },
+            },
+          ],
+          "still m's metadata-consistency item alone: the session changes " +
+            "only through mutating subcommands, re-derived at an `updated` " +
+            "resolve or a `split` alone (SPEC 10.4, 10.5)",
+          "T10.7-13 (d)",
+        );
+      },
+    );
+
+    // --- (b): specs/GH.mdx ---------------------------------------------
+    await withM13Session(
+      product,
+      M13_GH_FILE,
+      M13_GH_BASELINE,
+      async (workspace) => {
+        await workspace.file(M13_GH_FILE, M13_GH_EDITED);
+      },
+      "T10.7-13 (b)",
+      async (workspace) => {
+        await m13AssertSurfaces(
+          product,
+          workspace,
+          [
+            {
+              label: "g",
+              scope: M13_G,
+              context: [],
+              before: {
+                present: true,
+                d: [M13_GH_T1],
+                coverage: "required",
+                tags: ["x"],
+              },
+              after: {
+                present: true,
+                d: [M13_GH_T1],
+                coverage: "required",
+                tags: ["y"],
+              },
+            },
+            {
+              label: "h",
+              scope: M13_H,
+              context: [],
+              before: {
+                present: true,
+                d: [],
+                coverage: "required",
+                tags: [],
+              },
+              after: {
+                present: true,
+                d: [],
+                coverage: "none",
+                tags: [],
+              },
+            },
+          ],
+          "g's and h's metadata-consistency items alone: a tags-only and a " +
+            "coverage-only edit make each metadata-changed and propagate no " +
+            "category (SPEC 5.5, 5.6, 10.5)",
+          "T10.7-13 (b)",
+        );
+      },
+    );
+
+    // --- (c): specs/K.mdx ----------------------------------------------
+    await withM13Session(
+      product,
+      M13_K_FILE,
+      M13_K_BASELINE,
+      async (workspace) => {
+        await workspace.file(M13_K_FILE, M13_K_EDITED);
+      },
+      "T10.7-13 (c)",
+      async (workspace) => {
+        await expectExit(
+          product,
+          workspace,
+          ["rename", M13_K_FILE, "t4", "t9"],
+          0,
+          "T10.7-13 (c) `rename specs/K.mdx t4 t9` after `create` — a " +
+            "journaled rename, regenerating derived files as `build` does " +
+            "(SPEC 6.1, 6.4)",
+        );
+        await m13AssertSurfaces(
+          product,
+          workspace,
+          [
+            {
+              label: "k",
+              scope: M13_K,
+              context: [M13_K_T9],
+              before: {
+                present: true,
+                d: [M13_K_T9],
+                coverage: "required",
+                tags: [],
+              },
+              after: {
+                present: true,
+                d: [],
+                coverage: "required",
+                tags: [],
+              },
+            },
+          ],
+          "k's metadata-consistency item alone: the removed reference makes " +
+            "k metadata-changed, and the journaled rename changes no hash and " +
+            "re-derives nothing (SPEC 5.6, 6.2, 10.5)",
+          "T10.7-13 (c)",
+        );
+      },
+    );
+  },
+});
 
 // ---------------------------------------------------------------------------
 // T10.7-14 — refusal finding form
@@ -375,4 +1028,7 @@ const T10_7_14 = defineProductTest({
 });
 
 /** TEST-SPEC §10.7, third part, in canonical ID order. */
-export const section107iiiTests: readonly ProductTestEntry[] = [T10_7_14];
+export const section107iiiTests: readonly ProductTestEntry[] = [
+  T10_7_13,
+  T10_7_14,
+];

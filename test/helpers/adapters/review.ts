@@ -3,14 +3,17 @@
 //
 // Shape-aware, value-blind, fail-loud (H-3) — see query.ts for the layer's
 // contract: every document entry runs the 12.7 unavailability-marker walk
-// over the whole raw document first (`documentRootSite`, forms.ts), and
-// every source range decodes through the literal 12.7 range form
-// (`decodeSourceRange`) — value forms are never adapted (T12.7-1). Adjust
-// the ASSUMED SHAPE below when the real product's output
-// shape legitimately differs; never adjust values. `baseline`, `current`,
-// `creationParameters`, and `decompositions` are recorded, product-shaped
-// data: the adapter requires their presence and passes their decoded JSON
-// through whole for the tests to compare (T10.2-2/4, T10.7-2).
+// over the whole raw document first (`documentRootSite`, forms.ts), every
+// source range decodes through the literal 12.7 range form
+// (`decodeSourceRange`), and a metadata pair's coverage attribute and tags
+// through 12.7's coverage-attribute and tag-set forms (the string
+// "required" or "none"; `decodeTagSet`) — value forms are never adapted
+// (T12.7-1, T10.7-13). Adjust the ASSUMED SHAPE below when the real
+// product's output shape legitimately differs; never adjust values.
+// `baseline`, `current`, `creationParameters`, and `decompositions` are
+// recorded, product-shaped data: the adapter requires their presence and
+// passes their decoded JSON through whole for the tests to compare
+// (T10.2-2/4, T10.7-2).
 //
 // ASSUMED SHAPE:
 //   review list →
@@ -41,7 +44,11 @@
 //            "scope": NodeState, "context": [NodeState],
 //            "origin": [ { "node", "before": Side, "after": Side,
 //                          "sourceRange"? } ],
+//            "metadata"?: { "before": MetaSide, "after": MetaSide },
 //            "baseline", "current" }
+//     ("metadata" required on a metadata-consistency item — its scope
+//     node's metadata pair, SPEC 10.7, T10.7-13 — and never read on another
+//     kind)
 //   NodeState = { "node", "present": bool, "text"?, "sourceRange"? }
 //     (text optional either way: a present node's text is read from the
 //     current graph, an absent node's is the recorded value of SPEC 10.7's
@@ -50,6 +57,15 @@
 //     an absent node has no current source)
 //   Side = { "present": bool, "text"? }   (text required iff present — the
 //     absent side of an origin before/after pair carries no text, SPEC 10.7)
+//   MetaSide = { "present": false }
+//            | { "present": true, "d": [identity...],
+//                "coverage": "required" | "none", "tags": [tag...] }
+//     (the scope node's metadata, 5.5, in the side's graph state — the
+//     item's baseline state before, the current graph after; a side whose
+//     state lacks the node is the absent side, carrying no metadata, SPEC
+//     10.7. "d" lists the `d` targets, each under its current identity,
+//     10.4, in any order: 10.7 fixes none, so the tests compare them as a
+//     set; "coverage" and "tags" are 12.7 value forms, decoded literally)
 //   An origin entry's "sourceRange" is the node's CURRENT range: the after
 //     side is read from the current graph, so its presence is the node's
 //     current presence, and only a currently-present origin node may carry a
@@ -59,6 +75,8 @@
 
 import type {
   ExportReport,
+  MetadataPair,
+  MetadataSide,
   NextReport,
   NodeTextState,
   OriginEntry,
@@ -69,7 +87,11 @@ import type {
   SessionStatusReport,
   SessionStatusRow,
 } from "./model.js";
-import { ITEM_KINDS, ITEM_STATUSES } from "./model.js";
+import {
+  COVERAGE_ATTRIBUTE_VALUES,
+  ITEM_KINDS,
+  ITEM_STATUSES,
+} from "./model.js";
 import type { DecodeSite } from "./decode.js";
 import {
   at,
@@ -87,7 +109,11 @@ import {
   requiredKey,
   requiredMember,
 } from "./decode.js";
-import { decodeFindingsArray, documentRootSite } from "./forms.js";
+import {
+  decodeFindingsArray,
+  decodeTagSet,
+  documentRootSite,
+} from "./forms.js";
 import { decodeSourceRange } from "./query.js";
 
 /** Counts keyed by status: every value a non-negative integer. */
@@ -336,7 +362,78 @@ function decodeOriginEntry(value: unknown, site: DecodeSite): OriginEntry {
   return entry;
 }
 
-/** Decode one full review item (10.2 fields plus the payload of 10.7). */
+/** The members a present metadata side carries; an absent side carries none. */
+const METADATA_SIDE_MEMBERS = ["d", "coverage", "tags"] as const;
+
+/**
+ * One side of a `metadata-consistency` item's metadata pair (SPEC 10.7,
+ * T10.7-13): the scope node's metadata (5.5) in that side's graph state —
+ * its `d` targets, each under its current identity (10.4), its coverage
+ * attribute, and its tags — all three required while the side is present,
+ * none while it is absent (a side whose graph state lacks the node is
+ * presented absent, carrying no metadata). The coverage attribute and the
+ * tags take 12.7's value forms, decoded literally and never adapted (H-3,
+ * T12.7-1): the string `"required"` or `"none"`, and a tag set in byte
+ * order with duplicates collapsed (`decodeTagSet`, forms.ts), `[]` for a
+ * tagless section. The `d` targets are identities, strings (12.7), passed
+ * through in the product's order — 10.7 fixes none, so the tests compare
+ * them as a set — an empty set the empty array.
+ */
+function decodeMetadataSide(value: unknown, site: DecodeSite): MetadataSide {
+  const obj = expectObject(value, site);
+  const present = expectBoolean(
+    requiredKey(obj, "present", site),
+    at(site, "present"),
+  );
+  if (!present) {
+    for (const member of METADATA_SIDE_MEMBERS) {
+      forbiddenKey(
+        obj,
+        member,
+        site,
+        "an absent side carries no metadata (SPEC 10.7: a side whose graph state lacks the node is presented absent)",
+      );
+    }
+    return { present };
+  }
+  return {
+    present,
+    d: expectNonEmptyStringArray(requiredKey(obj, "d", site), at(site, "d")),
+    coverage: expectToken(
+      requiredKey(obj, "coverage", site),
+      COVERAGE_ATTRIBUTE_VALUES,
+      at(site, "coverage"),
+    ),
+    tags: decodeTagSet(requiredKey(obj, "tags", site), at(site, "tags")),
+  };
+}
+
+/**
+ * A `metadata-consistency` item's metadata pair (SPEC 10.7, T10.7-13): a
+ * before/after pair, both sides required — required information, failing
+ * loudly when absent (H-3).
+ */
+function decodeMetadataPair(value: unknown, site: DecodeSite): MetadataPair {
+  const obj = expectObject(value, site);
+  return {
+    before: decodeMetadataSide(
+      requiredKey(obj, "before", site),
+      at(site, "before"),
+    ),
+    after: decodeMetadataSide(
+      requiredKey(obj, "after", site),
+      at(site, "after"),
+    ),
+  };
+}
+
+/**
+ * Decode one full review item (10.2 fields plus the payload of 10.7): a
+ * `metadata-consistency` item's payload carries its scope node's metadata
+ * pair (SPEC 10.7; T10.7-7, T10.7-13), required on that kind alone — every
+ * `next --json`, `show`, and `export` decode of such an item fails loudly
+ * without it — and never read on another kind.
+ */
 export function decodeReviewItemValue(
   value: unknown,
   site: DecodeSite,
@@ -355,6 +452,7 @@ export function decodeReviewItemValue(
     scope: NodeTextState;
     context: readonly NodeTextState[];
     origin: readonly OriginEntry[];
+    metadata?: MetadataPair;
     baseline: unknown;
     current: unknown;
   } = {
@@ -399,6 +497,21 @@ export function decodeReviewItemValue(
   const note = optionalKey(obj, "note");
   if (note !== undefined) {
     item.note = expectString(note, at(site, "note"));
+  }
+  if (item.kind === "metadata-consistency") {
+    const metadataSite = at(site, "metadata");
+    const pair = optionalKey(obj, "metadata");
+    if (pair === undefined) {
+      decodeFail(
+        metadataSite,
+        `the scope node's metadata pair — a "metadata" member holding its ` +
+          `before and after sides — which a metadata-consistency item's ` +
+          `payload carries (SPEC 10.7; T10.7-7, T10.7-13: required ` +
+          `information absent, H-3)`,
+        obj["metadata"],
+      );
+    }
+    item.metadata = decodeMetadataPair(pair, metadataSite);
   }
   return item;
 }

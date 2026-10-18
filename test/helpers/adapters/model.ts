@@ -950,10 +950,43 @@ export interface OriginEntry {
 }
 
 /**
+ * One side of a `metadata-consistency` item's metadata pair (SPEC.md 10.7;
+ * T10.7-13): the scope node's metadata (5.5) in that side's graph state — the
+ * item's baseline state before, the current graph after — or, where that
+ * state lacks the node, the absent side, carrying no metadata (10.7: under
+ * the origin-text rule).
+ */
+export type MetadataSide =
+  | { readonly present: false }
+  | {
+      readonly present: true;
+      /**
+       * The node's `d` targets, each under its current identity (10.4), in
+       * the order the product lists them: 10.7 fixes none, so tests compare
+       * them as a set (T10.7-13).
+       */
+      readonly d: readonly string[];
+      /** The coverage attribute in 12.7's value form (2.5, 12.7). */
+      readonly coverage: CoverageAttributeValue;
+      /** The tags: a 12.7 tag set — byte order, duplicates collapsed. */
+      readonly tags: readonly string[];
+    };
+
+/**
+ * A `metadata-consistency` item's metadata pair (SPEC.md 10.7; T10.7-13):
+ * a before/after pair of its scope node's `d` targets, coverage attribute,
+ * and tags.
+ */
+export interface MetadataPair {
+  readonly before: MetadataSide;
+  readonly after: MetadataSide;
+}
+
+/**
  * A full review item as presented by `next --json`, `show`, and `export`
- * (SPEC.md 10.2, 10.7; T10.2-1, T10.7-7/8/12). `baseline` and `current` carry
- * the recorded relevant state; their inner structure is product-shaped and
- * compared whole (as decoded JSON) by the tests that assert them.
+ * (SPEC.md 10.2, 10.7; T10.2-1, T10.7-7/8/12/13). `baseline` and `current`
+ * carry the recorded relevant state; their inner structure is product-shaped
+ * and compared whole (as decoded JSON) by the tests that assert them.
  */
 export interface ReviewItem {
   readonly id: string;
@@ -966,6 +999,12 @@ export interface ReviewItem {
   readonly scope: NodeTextState;
   readonly context: readonly NodeTextState[];
   readonly origin: readonly OriginEntry[];
+  /**
+   * The scope node's metadata pair — present exactly on a
+   * `metadata-consistency` item, whose payload requires it (SPEC.md 10.7;
+   * T10.7-7, T10.7-13); never read on another kind.
+   */
+  readonly metadata?: MetadataPair;
   readonly baseline: unknown;
   readonly current: unknown;
 }

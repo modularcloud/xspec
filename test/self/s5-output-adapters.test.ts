@@ -804,6 +804,54 @@ const GOOD_ITEM = {
   current: null, // opaque member: null is a legitimate "none recorded"
 };
 
+// A metadata-consistency item (SPEC 10.7; T10.7-13): its payload carries its
+// scope node's metadata pair — `d` targets (any order: 10.7 fixes none), the
+// coverage attribute, and the tags (12.7's value forms: "required"/"none",
+// a tag set in byte order) before and after. The member layout is the
+// adapter's assumed shape (review.ts).
+const GOOD_METADATA_ITEM = {
+  id: "item-7",
+  kind: "metadata-consistency",
+  status: "unresolved",
+  blocked: false,
+  blockedBy: [],
+  reason: "the metadata of the scope node changed",
+  scope: {
+    node: "specs/A.mdx#m",
+    present: true,
+    text: "Em line.\n",
+    sourceRange: { start: 0, end: 60 },
+  },
+  context: [
+    { node: "specs/A.mdx#t1", present: true, text: "Tee one.\n" },
+    { node: "specs/A.mdx#t3", present: true, text: "Tee three.\n" },
+  ],
+  origin: [
+    {
+      node: "specs/A.mdx#m",
+      before: { present: true, text: "Em line.\n" },
+      after: { present: true, text: "Em line.\n" },
+      sourceRange: { start: 0, end: 60 },
+    },
+  ],
+  metadata: {
+    before: {
+      present: true,
+      d: ["specs/A.mdx#t2", "specs/A.mdx#t1"],
+      coverage: "required",
+      tags: ["a", "b"],
+    },
+    after: {
+      present: true,
+      d: ["specs/A.mdx#t2", "specs/A.mdx#t3"],
+      coverage: "none",
+      tags: ["b", "c"],
+    },
+  },
+  baseline: { recorded: ["opaque"] },
+  current: { recorded: ["opaque"] },
+};
+
 const GOOD_NEXT = { fullyResolved: false, item: GOOD_ITEM };
 const GOOD_NEXT_RESOLVED = { fullyResolved: true };
 
@@ -4904,6 +4952,188 @@ const DECODERS: readonly DecoderSpec[] = [
     ],
   },
   {
+    name: "review show (metadata-consistency item: the metadata pair)",
+    decode: decodeItemReport,
+    good: GOOD_METADATA_ITEM,
+    verify: (decoded: ReturnType<typeof decodeItemReport>) => {
+      expect(decoded.kind).toBe("metadata-consistency");
+      // `d` passes through in the product's order (10.7 fixes none).
+      expect(decoded.metadata).toEqual({
+        before: {
+          present: true,
+          d: ["specs/A.mdx#t2", "specs/A.mdx#t1"],
+          coverage: "required",
+          tags: ["a", "b"],
+        },
+        after: {
+          present: true,
+          d: ["specs/A.mdx#t2", "specs/A.mdx#t3"],
+          coverage: "none",
+          tags: ["b", "c"],
+        },
+      });
+    },
+    alsoGood: [
+      {
+        label:
+          "after side absent: the scope node deleted, the side carrying no metadata (SPEC 10.7; T10.7-13(d))",
+        doc: put(
+          put(
+            omit(GOOD_METADATA_ITEM, "scope", "sourceRange"),
+            false,
+            "scope",
+            "present",
+          ),
+          { present: false },
+          "metadata",
+          "after",
+        ),
+        verify: (decoded: ReturnType<typeof decodeItemReport>) => {
+          expect(decoded.metadata?.after).toEqual({ present: false });
+          expect(decoded.metadata?.before.present).toBe(true);
+        },
+      },
+      {
+        label:
+          "empty `d` set and tagless sides: the empty arrays (SPEC 12.7: `[]` for a tagless section)",
+        doc: put(
+          put(
+            put(GOOD_METADATA_ITEM, [], "metadata", "before", "d"),
+            [],
+            "metadata",
+            "before",
+            "tags",
+          ),
+          [],
+          "metadata",
+          "after",
+          "tags",
+        ),
+        verify: (decoded: ReturnType<typeof decodeItemReport>) => {
+          expect(decoded.metadata?.before).toEqual({
+            present: true,
+            d: [],
+            coverage: "required",
+            tags: [],
+          });
+        },
+      },
+      {
+        label:
+          "another kind: no metadata member required, and one carried is never read (SPEC 10.7: the pair is a metadata-consistency item's)",
+        doc: put(GOOD_ITEM, { before: 42 }, "metadata"),
+        verify: (decoded: ReturnType<typeof decodeItemReport>) => {
+          expect(decoded.kind).toBe("parent-consistency");
+          expect(decoded.metadata).toBeUndefined();
+        },
+      },
+    ],
+    bad: [
+      {
+        label: "metadata-consistency item without its metadata pair",
+        doc: omit(GOOD_METADATA_ITEM, "metadata"),
+      },
+      {
+        label: "metadata pair null (required information, never defaulted)",
+        doc: put(GOOD_METADATA_ITEM, null, "metadata"),
+      },
+      {
+        label: "metadata pair missing its before side",
+        doc: omit(GOOD_METADATA_ITEM, "metadata", "before"),
+      },
+      {
+        label: "metadata pair missing its after side",
+        doc: omit(GOOD_METADATA_ITEM, "metadata", "after"),
+      },
+      {
+        label: "metadata side missing its presence",
+        doc: omit(GOOD_METADATA_ITEM, "metadata", "after", "present"),
+      },
+      {
+        label: "present side missing its `d` targets",
+        doc: omit(GOOD_METADATA_ITEM, "metadata", "before", "d"),
+      },
+      {
+        label: "present side's `d` targets holding a non-identity",
+        doc: put(GOOD_METADATA_ITEM, [7], "metadata", "before", "d"),
+      },
+      {
+        label: "present side missing its coverage attribute",
+        doc: omit(GOOD_METADATA_ITEM, "metadata", "after", "coverage"),
+      },
+      {
+        label:
+          'coverage attribute outside the two tokens (12.7: "required" or "none", asserted literally)',
+        doc: put(
+          GOOD_METADATA_ITEM,
+          "optional",
+          "metadata",
+          "after",
+          "coverage",
+        ),
+      },
+      {
+        label: 'coverage attribute in another casing ("None", never adapted)',
+        doc: put(GOOD_METADATA_ITEM, "None", "metadata", "after", "coverage"),
+      },
+      {
+        label: "coverage attribute as a boolean (never adapted, H-3)",
+        doc: put(GOOD_METADATA_ITEM, false, "metadata", "after", "coverage"),
+      },
+      {
+        label: "present side missing its tags",
+        doc: omit(GOOD_METADATA_ITEM, "metadata", "before", "tags"),
+      },
+      {
+        label:
+          "tag set out of byte order (12.7: a tag set in byte order, never re-sorted)",
+        doc: put(GOOD_METADATA_ITEM, ["b", "a"], "metadata", "before", "tags"),
+      },
+      {
+        label:
+          "tag set repeating a tag (12.7: duplicates collapsed, never de-duplicated)",
+        doc: put(
+          GOOD_METADATA_ITEM,
+          ["b", "b", "c"],
+          "metadata",
+          "after",
+          "tags",
+        ),
+      },
+      {
+        label: "tags null (12.7: null never encodes emptiness)",
+        doc: put(GOOD_METADATA_ITEM, null, "metadata", "after", "tags"),
+      },
+      {
+        label: "absent side carrying `d` targets (contradiction)",
+        doc: put(
+          GOOD_METADATA_ITEM,
+          { present: false, d: ["specs/A.mdx#t2"] },
+          "metadata",
+          "after",
+        ),
+      },
+      {
+        label: "absent side carrying a coverage attribute (contradiction)",
+        doc: put(
+          GOOD_METADATA_ITEM,
+          { present: false, coverage: "required" },
+          "metadata",
+          "after",
+        ),
+      },
+      {
+        label: "absent side carrying tags (contradiction)",
+        doc: put(
+          GOOD_METADATA_ITEM,
+          { present: false, tags: [] },
+          "metadata",
+          "before",
+        ),
+      },
+    ],
+  },
+  {
     name: "review next",
     decode: decodeNextReport,
     good: GOOD_NEXT,
@@ -4920,6 +5150,19 @@ const DECODERS: readonly DecoderSpec[] = [
           expect(decoded.item).toBeUndefined();
         },
       },
+      {
+        label:
+          "a metadata-consistency item carrying its metadata pair (SPEC 10.7; T10.7-7, T10.7-13)",
+        doc: { fullyResolved: false, item: GOOD_METADATA_ITEM },
+        verify: (decoded: ReturnType<typeof decodeNextReport>) => {
+          expect(decoded.item?.metadata?.after).toEqual({
+            present: true,
+            d: ["specs/A.mdx#t2", "specs/A.mdx#t3"],
+            coverage: "none",
+            tags: ["b", "c"],
+          });
+        },
+      },
     ],
     bad: [
       { label: "missing fullyResolved flag", doc: { item: GOOD_ITEM } },
@@ -4932,6 +5175,14 @@ const DECODERS: readonly DecoderSpec[] = [
         doc: { fullyResolved: true, item: GOOD_ITEM },
       },
       { label: "item missing its id", doc: omit(GOOD_NEXT, "item", "id") },
+      {
+        label:
+          "metadata-consistency item without its metadata pair (SPEC 10.7; T10.7-7, T10.7-13)",
+        doc: {
+          fullyResolved: false,
+          item: omit(GOOD_METADATA_ITEM, "metadata"),
+        },
+      },
     ],
   },
   {
@@ -4946,6 +5197,22 @@ const DECODERS: readonly DecoderSpec[] = [
       expect(decoded.items).toHaveLength(1);
       expect(decoded.items[0].id).toBe("item-1");
     },
+    alsoGood: [
+      {
+        label:
+          "a metadata-consistency item carrying its metadata pair beside another kind's item (SPEC 10.7; T10.7-13)",
+        doc: put(GOOD_EXPORT, [GOOD_ITEM, GOOD_METADATA_ITEM], "items"),
+        verify: (decoded: ReturnType<typeof decodeExportReport>) => {
+          expect(decoded.items[0].metadata).toBeUndefined();
+          expect(decoded.items[1].metadata?.before).toEqual({
+            present: true,
+            d: ["specs/A.mdx#t2", "specs/A.mdx#t1"],
+            coverage: "required",
+            tags: ["a", "b"],
+          });
+        },
+      },
+    ],
     bad: [
       { label: "missing name", doc: omit(GOOD_EXPORT, "name") },
       { label: "missing strategy", doc: omit(GOOD_EXPORT, "strategy") },
@@ -4961,6 +5228,15 @@ const DECODERS: readonly DecoderSpec[] = [
       {
         label: "item missing status",
         doc: omit(GOOD_EXPORT, "items", 0, "status"),
+      },
+      {
+        label:
+          "metadata-consistency item without its metadata pair (SPEC 10.7; T10.7-13)",
+        doc: put(
+          GOOD_EXPORT,
+          [GOOD_ITEM, omit(GOOD_METADATA_ITEM, "metadata")],
+          "items",
+        ),
       },
     ],
   },

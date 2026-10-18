@@ -120,12 +120,15 @@
 //   restrictions of 8.1 via coverage runs; T10.7-12 asserts 1.7's
 //   review-payload half of the two-range-presenting-outputs rule (the
 //   code-impact scope's named-unit construct range; TEST-SPEC 1.7 delegates
-//   it there from T1.7-1/T1.7-2); T10.7-14 asserts 12.7's findings-only
-//   form of a refused operation and the finding form it holds; and section
-//   10's body (the review mechanism/strategy split and the three built-in
-//   strategies) is exercised by T10.5-1, T10.6-1 (generation per strategy),
-//   T10.7-1 (strategy selection at `create`), and T10.7-4 (coverage
-//   sessions).
+//   it there from T1.7-1/T1.7-2); T10.7-13 asserts 10.4's current-identity
+//   presentation of a recorded node — its (c) arm's `d` targets and context
+//   presented under a journaled rename's new identity — and 12.7's
+//   coverage-attribute and tag-set value forms on the metadata pair;
+//   T10.7-14 asserts 12.7's findings-only form of a refused operation and
+//   the finding form it holds; and section 10's body (the review
+//   mechanism/strategy split and the three built-in strategies) is
+//   exercised by T10.5-1, T10.6-1 (generation per strategy), T10.7-1
+//   (strategy selection at `create`), and T10.7-4 (coverage sessions).
 //
 // A passage listed for a test is asserted by that test; the map lists each
 // test's primary passage(s), not every rule it touches in passing. S-1 fails
@@ -505,6 +508,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T10.7-10": ["10.7"],
   "T10.7-11": ["10.7"],
   "T10.7-12": ["1.7", "10.7"],
+  "T10.7-13": ["10.7", "10.4", "12.7"],
   "T10.7-14": ["10.7", "12.7", "14"],
   "T11-1": ["11", "11.1"],
   "T11-2": ["11", "11.1", "1.4", "12.0", "12.7", "14"],
