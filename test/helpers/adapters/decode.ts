@@ -228,10 +228,11 @@ export function requiredKey(
 }
 
 /**
- * Read a key that must be present but whose value is opaque, product-shaped
- * data passed through whole (recorded state, creation parameters,
- * decompositions) — `null` is a legitimate encoding of "none recorded" there,
- * so unlike `requiredKey` this only requires the member to exist.
+ * Read a key that must be present but whose value is recorded,
+ * product-shaped data — passed through whole (recorded state, creation
+ * parameters) or decoded further by the caller (the recorded decompositions,
+ * review.ts) — where `null` is a legitimate encoding of "none recorded", so
+ * unlike `requiredKey` this only requires the member to exist.
  */
 export function requiredMember(
   obj: Record<string, unknown>,

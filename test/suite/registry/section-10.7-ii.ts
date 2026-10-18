@@ -111,13 +111,15 @@
 //   {scope, context, origin} payload projection per item id.
 // - `blockedBy` is compared as a sorted id set (SPEC 10.5/10.7 fix which
 //   items block, not an order within the field).
-// - Recorded state (`baseline`/`current`), creation parameters, and
-//   decompositions are product-shaped and opaque (H-4): hash recording is
-//   asserted by string-leaf containment of `query node` captures at the
-//   expected moment (with pairwise-distinct premises and negative arms), the
-//   recorded decomposition by containment of the decomposed item's spec-fixed
-//   scope-node identity, and "state kept" as canonical-JSON equality of the
-//   reported member across the operation (the §10.2/§10.6 style).
+// - Recorded state (`baseline`/`current`) and creation parameters are
+//   product-shaped and opaque (H-4): hash recording is asserted by
+//   string-leaf containment of `query node` captures at the expected moment
+//   (with pairwise-distinct premises and negative arms), and "state kept" as
+//   canonical-JSON equality of the reported member across the operation (the
+//   §10.2/§10.6 style). The recorded decompositions are decoded by the
+//   adapter to each one's kind and scope node (review.ts), and the recorded
+//   decomposition is asserted by the decomposed item's spec-fixed scope-node
+//   identity among their scope nodes.
 // - A refused `split`/`resolve` (T10.7-9, T10.7-10) goes through T10.7-14's
 //   shared check (support.ts `expectReviewRefusal`): run with `--json`, exit
 //   1 with standard output exactly one code-less finding — `code` and `path`
@@ -2032,10 +2034,11 @@ const T10_7_8 = defineProductTest({
             `form — with or without --json, the same information (SPEC 10.7)`,
         );
 
-        // Name, strategy, and the recorded decomposition (opaque shape;
-        // the decomposed item's scope-node identity is a spec-fixed value
-        // the record must hold — SPEC 10.7: the decomposition is the
-        // original's kind and scope node, replaced by its items).
+        // Name, strategy, and the recorded decomposition (the adapter
+        // decodes each one's kind and scope node; the decomposed item's
+        // scope-node identity is a spec-fixed value the record must hold —
+        // SPEC 10.7: the decomposition is the original's kind and scope
+        // node, replaced by its items).
         if (withJson.name !== "s" || withJson.strategy !== "audit") {
           fail(
             `${prefix}: \`export\` carries the session's name and strategy ` +
@@ -2043,14 +2046,16 @@ const T10_7_8 = defineProductTest({
               `strategy ${JSON.stringify(withJson.strategy)}`,
           );
         }
-        if (!collectStringLeaves(withJson.decompositions).includes(E8_X)) {
+        if (!withJson.decompositions.some((entry) => entry.scope === E8_X)) {
           fail(
             `${prefix}: after \`split\` of x's item, the exported recorded ` +
               `decompositions must hold the decomposed item's scope node ` +
               `${JSON.stringify(E8_X)} (SPEC 10.7: the decomposition — the ` +
               `original's kind and scope node, replaced by its items — is ` +
-              `recorded durably); it appears nowhere in ` +
-              canonicalJson(withJson.decompositions),
+              `recorded durably); their scope nodes are ` +
+              canonicalJson(
+                withJson.decompositions.map((entry) => entry.scope),
+              ),
           );
         }
         // `creationParameters` presence is enforced by the adapter decode

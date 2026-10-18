@@ -1019,13 +1019,29 @@ export interface NextReport {
   readonly item?: ReviewItem;
 }
 
+/**
+ * One recorded decomposition as `export` presents it (SPEC.md 10.7): the
+ * decomposed original's kind and scope node — "the original's kind and scope
+ * node, replaced by per-child `subtree-coherence` items and the scope node's
+ * `parent-consistency` item" — the scope node under its current identity,
+ * as every read presents a recorded node (10.4; T10.4-4, T10.7-8).
+ */
+export interface RecordedDecomposition {
+  readonly kind: ItemKind;
+  /** The scope node's identity (a string, 12.7). */
+  readonly scope: string;
+}
+
 /** `review export` (T10.7-8): the whole session, one JSON document. */
 export interface ExportReport {
   readonly name: string;
   readonly strategy: string;
   /** Recorded creation parameters — product-shaped, compared whole. */
   readonly creationParameters: unknown;
-  /** Recorded decompositions — product-shaped, compared whole. */
-  readonly decompositions: unknown;
+  /**
+   * Recorded decompositions, each decoded to its kind and scope node, in the
+   * product's order (10.7 fixes none); none recorded is the empty list.
+   */
+  readonly decompositions: readonly RecordedDecomposition[];
   readonly items: readonly ReviewItem[];
 }

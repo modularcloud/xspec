@@ -10,10 +10,13 @@
 // "required" or "none"; `decodeTagSet`) — value forms are never adapted
 // (T12.7-1, T10.7-13). Adjust the ASSUMED SHAPE below when the real
 // product's output shape legitimately differs; never adjust values.
-// `baseline`, `current`, `creationParameters`, and `decompositions` are
-// recorded, product-shaped data: the adapter requires their presence and
-// passes their decoded JSON through whole for the tests to compare
-// (T10.2-2/4, T10.7-2).
+// `baseline`, `current`, and `creationParameters` are recorded,
+// product-shaped data: the adapter requires their presence and passes their
+// decoded JSON through whole for the tests to compare (T10.2-2/4, T10.7-2).
+// The recorded decompositions are decoded one level further: each one's kind
+// and scope node, both required (SPEC 10.7: a decomposition is "the
+// original's kind and scope node"; T10.4-4, T10.7-8), any other member a
+// product records beside them passed over unread.
 //
 // Item IDs (SPEC 10.2, 12.0; T10.2-1): every item ID the family presents —
 // a `status` row's `id`, an item's `id` at `next`, `show`, and `export`,
@@ -47,8 +50,13 @@
 //     { "fullyResolved": bool, "item"?: Item }   ("item" iff not fully resolved)
 //   review show → Item (the document is the item)
 //   review export →
-//     { "name", "strategy", "creationParameters", "decompositions",
+//     { "name", "strategy", "creationParameters",
+//       "decompositions": [ { "kind", "scope" } ] | null,
 //       "items": [Item] }
+//     (each recorded decomposition the decomposed original's item kind and
+//     its scope node's identity, under the current identity (10.4), in the
+//     product's order — 10.7 fixes none; `null`, like `[]`, none recorded —
+//     decode.ts's `requiredMember` convention for recorded data)
 //   Item = { "id", "kind", "status", "blocked", "blockedBy": [id...],
 //            "reason", "note"?,
 //            "scope": NodeState, "context": [NodeState],
@@ -91,6 +99,7 @@ import type {
   NodeTextState,
   OriginEntry,
   OriginTextSide,
+  RecordedDecomposition,
   ReviewItem,
   SessionListEntry,
   SessionListReport,
@@ -631,9 +640,54 @@ export function decodeNextReport(doc: unknown, context?: string): NextReport {
 }
 
 /**
+ * One recorded decomposition (SPEC 10.7; T10.4-4, T10.7-8): the decomposed
+ * original's kind — an item kind, the spec-fixed vocabulary of 10.4–10.7 —
+ * and its scope node's identity, a non-empty string (12.7: an identity is a
+ * string), presented under the current identity (10.4). Both are required
+ * information, failing loudly when absent (H-3); any other member the
+ * product records beside them is passed over, never read. Value-blind: which
+ * kind and which node are the tests' to assert.
+ */
+function decodeRecordedDecomposition(
+  value: unknown,
+  site: DecodeSite,
+): RecordedDecomposition {
+  const obj = expectObject(value, site);
+  return {
+    kind: expectToken(
+      requiredKey(obj, "kind", site),
+      ITEM_KINDS,
+      at(site, "kind"),
+    ),
+    scope: expectNonEmptyString(
+      requiredKey(obj, "scope", site),
+      at(site, "scope"),
+    ),
+  };
+}
+
+/**
+ * The recorded decompositions `export` presents (SPEC 10.7): a list, each
+ * entry decoded by `decodeRecordedDecomposition`, in the product's order
+ * (10.7 fixes none) — or `null`, none recorded, the encoding decode.ts's
+ * `requiredMember` admits for recorded data, decoded as the empty list.
+ * Any other value fails loudly (H-3).
+ */
+function decodeRecordedDecompositions(
+  value: unknown,
+  site: DecodeSite,
+): readonly RecordedDecomposition[] {
+  if (value === null) return [];
+  return expectArray(value, site).map((element, index) =>
+    decodeRecordedDecomposition(element, at(site, index)),
+  );
+}
+
+/**
  * `review export` (T10.7-8): one JSON document with name, strategy, the
- * recorded creation parameters and decompositions (product-shaped, passed
- * through whole), and every item in item order.
+ * recorded creation parameters (product-shaped, passed through whole) and
+ * decompositions (each decoded to its kind and scope node), and every item
+ * in item order.
  */
 export function decodeExportReport(
   doc: unknown,
@@ -652,7 +706,10 @@ export function decodeExportReport(
       at(site, "strategy"),
     ),
     creationParameters: requiredMember(obj, "creationParameters", site),
-    decompositions: requiredMember(obj, "decompositions", site),
+    decompositions: decodeRecordedDecompositions(
+      requiredMember(obj, "decompositions", site),
+      at(site, "decompositions"),
+    ),
     items: expectArray(requiredKey(obj, "items", site), itemsSite).map(
       (element, index) => decodeReviewItemValue(element, at(itemsSite, index)),
     ),

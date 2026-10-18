@@ -36,9 +36,18 @@
 //   the wrong reason (H-8).
 // - Re-resolves between arms use `--status no-change` (no re-derivation,
 //   SPEC 10.5), so each arm starts from a freshly recorded state matching the
-//   graph; T10.4-2's journal arm and T10.4-4's reintroduction arm are the
-//   places `--status updated` (re-derivation) is staged, exactly as their
-//   TEST-SPEC texts prescribe.
+//   graph; T10.4-2's journal arm and T10.4-4's reintroduction and
+//   decomposition arms are the places `--status updated` (re-derivation) is
+//   staged, exactly as their TEST-SPEC texts prescribe.
+// - T10.4-4's decomposition arm reads the recorded decomposition from
+//   `export`'s recorded decompositions, which the review adapter decodes to
+//   each one's kind and scope node (helpers/adapters/review.ts), and its
+//   split's outcome from `status` and `export` as staging premises; it
+//   resolves the decomposition's two items with distinct statuses before the
+//   rename (`no-change`, `skipped`), so that keeping their statuses is
+//   discriminating, as the rename arm's distinct statuses are, and asserts
+//   the rename's purity (6.2: every hash byte-identical) as a premise, so no
+//   status it asserts turns on a hash.
 // - "Recorded state intact" across a journaled rename/move (T10.4-4) is
 //   asserted as: statuses preserved and not invalidated, plus the reported
 //   `current` record still holding the pre-operation hash values captured via
@@ -71,13 +80,14 @@
 // edit and T10.4-3's a.k1 edit, each between `gitCommitAll` and the first
 // `build`, and each body's first workspace's initial files. The initial
 // `.mdx` files of every later workspace — T10.4-1's five later scenarios,
-// T10.4-2's context, origin, and journal arms, T10.4-4's move and
-// reintroduction arms — are records too, passed as the `files` entries
-// (S-9's before-any-product clause covers a workspace created after the
-// body's first invocation).
-// T10.4-4's reintroduction appends to bytes the rename wrote — no harness
-// constant equals them — so it is an anchored `workspace.edit()` (the tail's
-// uniqueness and end position diagnosed first, SPEC 6.4).
+// T10.4-2's context, origin, and journal arms, T10.4-4's move,
+// reintroduction, and decomposition arms — are records too, passed as the
+// `files` entries (S-9's before-any-product clause covers a workspace created
+// after the body's first invocation).
+// T10.4-4's reintroduction and decomposition arms append a new section a to
+// bytes the rename wrote — no harness constant equals them — so each append
+// is an anchored `workspace.edit()` (the tail's uniqueness and end position
+// diagnosed first, SPEC 6.4).
 //
 // The configurations and the code source of those later workspaces are
 // TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
@@ -90,6 +100,7 @@
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import type {
+  ExportReport,
   ItemStatus,
   NodeHashes,
   NodeReport,
@@ -237,6 +248,25 @@ async function showItem(
       product,
       workspace,
       ["review", "show", name, itemId, "--json"],
+      label,
+    ),
+    label,
+  );
+}
+
+/** `review export <name> --json`, decoded (SPEC 10.7). */
+async function exportSession(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  context: string,
+): Promise<ExportReport> {
+  const label = `${context} \`review export ${name} --json\``;
+  return decodeExportReport(
+    await runJson(
+      product,
+      workspace,
+      ["review", "export", name, "--json"],
       label,
     ),
     label,
@@ -3135,6 +3165,8 @@ const T10_4_3 = defineProductTest({
 
 // Part 1 (rename): p with descendant p.c, plus q — rename p -> pp maps the
 // scoped node of p's item and both a scope and a context node of p.c's item.
+// Parts 2–4 below: the file-move order flip, the reintroduction arm, and
+// the decomposition arm.
 const T4R_FILE = "specs/R.mdx";
 const T4R_ROOT = "specs/R.mdx";
 const T4R_P = "specs/R.mdx#p";
@@ -3256,6 +3288,49 @@ const T4I_NEW_SECTION = [
 // staging is judged at staging time, not a staged-source record.
 const T4I_TAIL = ['<S id="s">', "Ess text.", "</S>", ""].join("\n");
 
+// Part 4 (decomposition): top-level a holding a.x, and a top-level leaf s;
+// a's item split (the decomposition recorded against a), a renamed to b,
+// then a new top-level section reintroducing the identity `a` — a fresh
+// canonical chain the recorded decomposition never applies to (5.4, 10.4).
+const T4D_FILE = "specs/F.mdx";
+const T4D_ROOT = "specs/F.mdx";
+const T4D_A = "specs/F.mdx#a";
+const T4D_AX = "specs/F.mdx#a.x";
+const T4D_B = "specs/F.mdx#b";
+const T4D_BX = "specs/F.mdx#b.x";
+const T4D_S = "specs/F.mdx#s";
+
+const T4D_SOURCE = stagedMdx(
+  "T10.4-4 decomposition arm specs/F.mdx with top-level a holding a.x and a top-level leaf s",
+  [
+    '<S id="a">',
+    "Aye own text.",
+    "",
+    '<S id="a.x">',
+    "Ex text.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="s">',
+    "Ess text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+// The new top-level leaf section a and the anchor its append extends: the
+// rename-rewritten file's tail, s's closing run (SPEC 6.4: minimal in-place
+// edits leave it the file's end) — an anchored `workspace.edit()` of the
+// product's bytes, as the reintroduction arm's.
+const T4D_NEW_SECTION = [
+  "",
+  '<S id="a">',
+  "Fresh reintroduced text.",
+  "</S>",
+  "",
+].join("\n");
+const T4D_TAIL = ['<S id="s">', "Ess text.", "</S>", ""].join("\n");
+
 /**
  * Diagnose that `search` occurs exactly once in the product-rewritten
  * `content` before `edit()` stages the append at it: SPEC 6.4 fixes the
@@ -3281,10 +3356,99 @@ function anchorOnce(content: string, search: string, context: string): void {
   }
 }
 
+/** A `status` report's rows as `[id, kind, scope, status]`, sorted. */
+function statusRowTuples(report: SessionStatusReport): string[][] {
+  return report.items
+    .map((row) => [row.id, row.kind, row.scope, row.status])
+    .sort();
+}
+
+/**
+ * The decomposition arm's recorded decomposition as `export` presents it:
+ * exactly one, a's `subtree-coherence` item's, its scope node under the
+ * current identity `scope` (SPEC 10.4: reads present every recorded node
+ * under its current identity, mapped forward through the journal; 10.7: the
+ * decomposition is the original's kind and scope node, recorded durably) —
+ * read through the review adapter's decode of each recorded decomposition's
+ * kind and scope node.
+ */
+function assertT4dSoleDecomposition(
+  report: ExportReport,
+  scope: string,
+  context: string,
+): void {
+  assertSameJson(
+    report.decompositions,
+    [{ kind: "subtree-coherence", scope }],
+    `${context}: \`export\` presents the session's one recorded ` +
+      `decomposition — a's subtree-coherence item's, recorded by \`split\` — ` +
+      `its scope node under the current identity ${scope} (SPEC 10.4: every ` +
+      `recorded node under its current identity; 10.7)`,
+  );
+}
+
+/**
+ * No `subtree-coherence` item scoped at b: the decomposition recorded
+ * against old-a applies to b, the same canonical identity renamed (SPEC 5.4;
+ * 10.4: decomposition matching compares canonical identities; 10.5: a
+ * generated item whose kind and scope node are recorded as decomposed is
+ * never added back).
+ */
+function assertT4dNoItemAtB(
+  report: SessionStatusReport,
+  context: string,
+): void {
+  const readded = report.items.filter(
+    (row) => row.kind === "subtree-coherence" && row.scope === T4D_B,
+  );
+  if (readded.length === 0) return;
+  fail(
+    `${context}: no subtree-coherence item scoped at b enters — the ` +
+      `decomposition \`split\` recorded against old-a applies to b, the same ` +
+      `canonical identity renamed (SPEC 5.4; 10.4: decomposition matching ` +
+      `compares canonical identities, never spellings; 10.5: a generated ` +
+      `item whose kind and scope node are recorded as decomposed is never ` +
+      `added back) — a product matching decompositions by spelling re-adds ` +
+      `one; found ${JSON.stringify(readded)}`,
+  );
+}
+
+/**
+ * The decomposition's two items as `export` presents them once a is renamed
+ * b: b.x's `subtree-coherence` item (a.x's, reused by the split) scoped at
+ * b.x with context the ancestor chain {root, b}, and b's
+ * `parent-consistency` item scoped at b with context b's children {b.x} —
+ * every recorded node under its current identity, present (SPEC 10.4, 10.6,
+ * 10.7).
+ */
+function assertT4dDecompositionItems(
+  report: ExportReport,
+  axId: string,
+  pcId: string,
+  context: string,
+): void {
+  const bx = requireItem(report.items, axId, context);
+  assertSameJson(
+    [bx.scope.node, bx.scope.present, identitySet(bx.context)],
+    [T4D_BX, true, [T4D_ROOT, T4D_B].sort()],
+    `${context}: b.x's item (a.x's, reused by the split) is presented under ` +
+      `the current identities — scope b.x, present, its context the ` +
+      `ancestor chain {root, b} (SPEC 10.4, 10.6, 10.7)`,
+  );
+  const pc = requireItem(report.items, pcId, context);
+  assertSameJson(
+    [pc.scope.node, pc.scope.present, identitySet(pc.context)],
+    [T4D_B, true, [T4D_BX]],
+    `${context}: b's parent-consistency item (a's, created by the split) is ` +
+      `presented under the current identities — scope b, present, its ` +
+      `context b's children {b.x} (SPEC 10.4, 10.7)`,
+  );
+}
+
 const T10_4_4 = defineProductTest({
   id: "T10.4-4",
   title:
-    "rename immunity: `xspec rename` on scoped and context nodes duplicates no item, loses no status, and invalidates nothing by the identity mapping alone — reads present recorded nodes under current identities, mapped forward through the journal, for present and absent nodes alike (a post-rename manual deletion presents the recorded node absent under its mapped identity); a journaled file `move` that flips which of two same-kind items' scope file paths sorts first flips their order in `status`, `next`, and `export` with statuses and recorded state intact; reintroduction arm: after resolving a's item, renaming a to b, authoring a new top-level section a, and resolving s's item `updated` (re-derivation), the item recorded against old-a keeps its id and resolved status under scope b, new-a's item enters as a distinct unresolved item, and the root item's blockedBy gains it — canonical identities with the journal-position pairing, never walked-back identity strings (SPEC 5.4, 6.2, 6.4, 6.5, 10.2, 10.4, 10.5, 10.6)",
+    "rename immunity: `xspec rename` on scoped and context nodes duplicates no item, loses no status, and invalidates nothing by the identity mapping alone — reads present recorded nodes under current identities, mapped forward through the journal, for present and absent nodes alike (a post-rename manual deletion presents the recorded node absent under its mapped identity); a journaled file `move` that flips which of two same-kind items' scope file paths sorts first flips their order in `status`, `next`, and `export` with statuses and recorded state intact; reintroduction arm: after resolving a's item, renaming a to b, authoring a new top-level section a, and resolving s's item `updated` (re-derivation), the item recorded against old-a keeps its id and resolved status under scope b, new-a's item enters as a distinct unresolved item, and the root item's blockedBy gains it — canonical identities with the journal-position pairing, never walked-back identity strings; decomposition arm: after splitting a's item (a holding a.x), renaming a to b, and resolving s's item `updated`, no subtree-coherence item scoped at b enters — the decomposition recorded against old-a applies to b, its items (b.x's and b's parent-consistency item) keeping their ids and statuses under the current identities, and `export` presents the recorded decomposition's scope node as b — and once a new top-level section a is authored and s's item resolved `updated` again, new-a's subtree-coherence item enters unresolved and the root item's blockedBy gains it — decompositions matched as canonical identities, never by spelling (SPEC 5.4, 6.2, 6.4, 6.5, 10.2, 10.4, 10.5, 10.6, 10.7)",
   run: async (product) => {
     // --- rename on scoped and context nodes, present and absent -------------
     await withWorkspace(
@@ -3887,6 +4051,309 @@ const T10_4_4 = defineProductTest({
           [aId, sId, newARow.id].sort(),
           `${prefix}: the root item's recomputed blockedBy gains new-a's ` +
             `item (SPEC 10.5, 10.6)`,
+        );
+      },
+    );
+
+    // --- decomposition arm ------------------------------------------------------
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [T4D_FILE]: T4D_SOURCE },
+      async (workspace) => {
+        const prefix = "T10.4-4 decomposition arm";
+        await buildOk(product, workspace, `${prefix} \`build\``);
+        await expectExit(
+          product,
+          workspace,
+          ["review", "create", "--strategy", "audit", "--name", "s"],
+          0,
+          `${prefix} \`review create --strategy audit --name s\``,
+        );
+        const created = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          kindScopeSet(created),
+          [
+            `subtree-coherence ${T4D_ROOT}`,
+            `subtree-coherence ${T4D_A}`,
+            `subtree-coherence ${T4D_AX}`,
+            `subtree-coherence ${T4D_S}`,
+          ].sort(),
+          `${prefix}: audit creates one item per node (SPEC 10.6)`,
+        );
+        const rootId = requireRow(
+          created,
+          "subtree-coherence",
+          T4D_ROOT,
+          prefix,
+        ).id;
+        const aId = requireRow(created, "subtree-coherence", T4D_A, prefix).id;
+        const axId = requireRow(
+          created,
+          "subtree-coherence",
+          T4D_AX,
+          prefix,
+        ).id;
+        const sId = requireRow(created, "subtree-coherence", T4D_S, prefix).id;
+
+        // Split a's item (SPEC 10.7): a.x's item reused, a's
+        // parent-consistency item created, the decomposition recorded —
+        // staging premises, read from `status` and `export`.
+        await expectExit(
+          product,
+          workspace,
+          ["review", "split", "s", aId],
+          0,
+          `${prefix} \`review split s <a's item>\``,
+        );
+        const splitContext = `${prefix} after the split`;
+        const afterSplit = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          splitContext,
+        );
+        const pcId = requireRow(
+          afterSplit,
+          "parent-consistency",
+          T4D_A,
+          splitContext,
+        ).id;
+        if ([rootId, aId, axId, sId].includes(pcId)) {
+          fail(
+            `${splitContext}: staging premise — a's parent-consistency item ` +
+              `enters as a new item (SPEC 10.7: the split original's id is ` +
+              `never reused); got the existing id ${pcId}`,
+          );
+        }
+        assertSameJson(
+          statusRowTuples(afterSplit),
+          [
+            [rootId, "subtree-coherence", T4D_ROOT, "unresolved"],
+            [pcId, "parent-consistency", T4D_A, "unresolved"],
+            [axId, "subtree-coherence", T4D_AX, "unresolved"],
+            [sId, "subtree-coherence", T4D_S, "unresolved"],
+          ].sort(),
+          `${splitContext}: staging premise — the split replaced a's ` +
+            `subtree-coherence item by a.x's item, reused, and a's new ` +
+            `parent-consistency item (SPEC 10.7)`,
+        );
+        assertT4dSoleDecomposition(
+          await exportSession(product, workspace, "s", splitContext),
+          T4D_A,
+          `${splitContext} (staging premise)`,
+        );
+
+        // Distinct resolved statuses on the decomposition's two items, so
+        // that keeping them is discriminating: a.x's item (a leaf,
+        // unblocked), then a's parent-consistency item, unblocked once its
+        // one blocker resolved (SPEC 10.3, 10.7).
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          axId,
+          "no-change",
+          `${prefix} resolve of a.x's item`,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          pcId,
+          "skipped",
+          `${prefix} resolve of a's parent-consistency item (unblocked once ` +
+            `a.x's resolved)`,
+        );
+
+        // The rename, with its purity premise (SPEC 6.2: every hash
+        // byte-identical under the new identities), so no status asserted
+        // below turns on a hash.
+        const aHashes = (
+          await queryNode(product, workspace, T4D_A, `${prefix} pre-rename`)
+        ).hashes;
+        const axHashes = (
+          await queryNode(product, workspace, T4D_AX, `${prefix} pre-rename`)
+        ).hashes;
+        await expectExit(
+          product,
+          workspace,
+          ["rename", T4D_FILE, "a", "b"],
+          0,
+          `${prefix} \`rename specs/F.mdx a b\` (SPEC 6.4)`,
+        );
+        const bHashes = (
+          await queryNode(product, workspace, T4D_B, `${prefix} post-rename`)
+        ).hashes;
+        const bxHashes = (
+          await queryNode(product, workspace, T4D_BX, `${prefix} post-rename`)
+        ).hashes;
+        assertSameJson(
+          [bHashes, bxHashes],
+          [aHashes, axHashes],
+          `${prefix}: cross-check with SPEC 6.2 — \`rename\` is pure and ` +
+            `leaves every hash byte-identical: b's and b.x's hashes are a's ` +
+            `and a.x's`,
+        );
+
+        // The first re-derivation: resolve s's item `updated` (SPEC 10.5).
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          sId,
+          "updated",
+          `${prefix} \`review resolve s <s item> --status updated\` — ` +
+            `re-derivation`,
+        );
+        const firstContext = `${prefix} after the first updated-resolve`;
+        const afterFirst = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          firstContext,
+        );
+        assertT4dNoItemAtB(afterFirst, firstContext);
+        const keptRows = [
+          [rootId, "subtree-coherence", T4D_ROOT, "unresolved"],
+          [pcId, "parent-consistency", T4D_B, "skipped"],
+          [axId, "subtree-coherence", T4D_BX, "no-change"],
+          [sId, "subtree-coherence", T4D_S, "updated"],
+        ];
+        assertSameJson(
+          statusRowTuples(afterFirst),
+          [...keptRows].sort(),
+          `${firstContext}: exactly the four items — the decomposition's ` +
+            `items, b.x's and b's parent-consistency item, keep their ids ` +
+            `and statuses, presented under the current identities, nothing ` +
+            `invalidated by the identity mapping (SPEC 10.4, 10.5, 10.7)`,
+        );
+        const firstExport = await exportSession(
+          product,
+          workspace,
+          "s",
+          firstContext,
+        );
+        assertT4dSoleDecomposition(firstExport, T4D_B, firstContext);
+        assertT4dDecompositionItems(firstExport, axId, pcId, firstContext);
+        const rootBlockers = [axId, pcId, sId].sort();
+        assertSameJson(
+          [
+            ...requireItem(firstExport.items, rootId, firstContext).blockedBy,
+          ].sort(),
+          rootBlockers,
+          `${firstContext}: the root item's recomputed blockedBy is its ` +
+            `child sections' items, b's replaced by all items of its ` +
+            `decomposition (SPEC 10.5, 10.6)`,
+        );
+
+        // Author a new top-level leaf section `a`, appended to what the
+        // rename left on disk — a new canonical chain after the journal
+        // entry that vacated the identity (SPEC 5.4) — through an anchored
+        // `edit()` of the product's bytes, the tail's uniqueness and end
+        // position diagnosed first (SPEC 6.4; H-8).
+        const renamed = Buffer.from(
+          await workspace.readBytes(T4D_FILE),
+        ).toString("utf8");
+        const appendContext = `${prefix} appending the new section a after the rename-rewritten s`;
+        anchorOnce(renamed, T4D_TAIL, appendContext);
+        if (!renamed.endsWith(T4D_TAIL)) {
+          fail(
+            `${appendContext}: expected the rewritten source to end with ` +
+              `${JSON.stringify(T4D_TAIL)} (SPEC 6.4: minimal in-place edits ` +
+              `leave the file's tail in place); source: ` +
+              JSON.stringify(renamed),
+          );
+        }
+        await workspace.edit(T4D_FILE, T4D_TAIL, T4D_TAIL + T4D_NEW_SECTION);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after authoring the new section a`,
+        );
+        const premiseContext = `${prefix} before the second updated-resolve`;
+        assertSameJson(
+          statusRowTuples(
+            await sessionStatus(product, workspace, "s", premiseContext),
+          ),
+          [...keptRows].sort(),
+          `${premiseContext}: staging premise — still the four items, ` +
+            `statuses unchanged: new items enter only through re-derivation ` +
+            `(SPEC 10.5), and authoring a changes no recorded state of the ` +
+            `four (SPEC 10.4)`,
+        );
+
+        // The second re-derivation: resolve s's item `updated` again.
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          sId,
+          "updated",
+          `${prefix} second \`review resolve s <s item> --status updated\` — ` +
+            `re-derivation`,
+        );
+        const secondContext = `${prefix} after the second updated-resolve`;
+        const afterSecond = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          secondContext,
+        );
+        const newARows = afterSecond.items.filter(
+          (row) => row.kind === "subtree-coherence" && row.scope === T4D_A,
+        );
+        if (newARows.length !== 1) {
+          fail(
+            `${secondContext}: new-a's subtree-coherence item enters at the ` +
+              `re-derivation, exactly one item scoped at a — the ` +
+              `decomposition recorded against old-a never applies to new-a, ` +
+              `a distinct canonical identity (SPEC 5.4, 10.4, 10.5); a ` +
+              `product matching decompositions by spelling withholds it; ` +
+              `found ${String(newARows.length)} among ` +
+              JSON.stringify(
+                afterSecond.items.map((row) => `${row.kind} ${row.scope}`),
+              ),
+          );
+        }
+        const newARow = newARows[0];
+        if ([rootId, aId, axId, pcId, sId].includes(newARow.id)) {
+          fail(
+            `${secondContext}: new-a's item enters as a distinct item (SPEC ` +
+              `5.4: the reintroduced identity starts a new canonical chain; ` +
+              `10.7: the split original's id is never reused); got the ` +
+              `existing id ${newARow.id}`,
+          );
+        }
+        if (newARow.status !== "unresolved") {
+          fail(
+            `${secondContext}: new-a's item is created unresolved (SPEC ` +
+              `10.2); got ${newARow.status}`,
+          );
+        }
+        assertT4dNoItemAtB(afterSecond, secondContext);
+        assertSameJson(
+          statusRowTuples(afterSecond),
+          [
+            ...keptRows,
+            [newARow.id, "subtree-coherence", T4D_A, "unresolved"],
+          ].sort(),
+          `${secondContext}: exactly five items — the four as they were, ` +
+            `plus new-a's (SPEC 10.4, 10.5)`,
+        );
+        const secondExport = await exportSession(
+          product,
+          workspace,
+          "s",
+          secondContext,
+        );
+        assertT4dSoleDecomposition(secondExport, T4D_B, secondContext);
+        assertSameJson(
+          [
+            ...requireItem(secondExport.items, rootId, secondContext).blockedBy,
+          ].sort(),
+          [...rootBlockers, newARow.id].sort(),
+          `${secondContext}: the root item's recomputed blockedBy gains ` +
+            `new-a's item (SPEC 10.5, 10.6)`,
         );
       },
     );

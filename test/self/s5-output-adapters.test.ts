@@ -5215,6 +5215,36 @@ const DECODERS: readonly DecoderSpec[] = [
           });
         },
       },
+      {
+        label:
+          "recorded decompositions decoded to each one's kind and scope node, in the product's order, another product-shaped member passed over (SPEC 10.7; T10.4-4)",
+        doc: put(
+          GOOD_EXPORT,
+          [
+            {
+              kind: "subtree-coherence",
+              scope: "specs/A.mdx#b",
+              recordedAt: 3,
+            },
+            { kind: "subtree-coherence", scope: "specs/A.mdx#a" },
+          ],
+          "decompositions",
+        ),
+        verify: (decoded: ReturnType<typeof decodeExportReport>) => {
+          expect(decoded.decompositions).toEqual([
+            { kind: "subtree-coherence", scope: "specs/A.mdx#b" },
+            { kind: "subtree-coherence", scope: "specs/A.mdx#a" },
+          ]);
+        },
+      },
+      {
+        label:
+          "recorded decompositions null: none recorded, decoded as the empty list",
+        doc: put(GOOD_EXPORT, null, "decompositions"),
+        verify: (decoded: ReturnType<typeof decodeExportReport>) => {
+          expect(decoded.decompositions).toEqual([]);
+        },
+      },
     ],
     bad: [
       { label: "missing name", doc: omit(GOOD_EXPORT, "name") },
@@ -5226,6 +5256,78 @@ const DECODERS: readonly DecoderSpec[] = [
       {
         label: "missing decompositions member",
         doc: omit(GOOD_EXPORT, "decompositions"),
+      },
+      {
+        label: "recorded decompositions an object, not a list",
+        doc: put(
+          GOOD_EXPORT,
+          { kind: "subtree-coherence", scope: "specs/A.mdx#a" },
+          "decompositions",
+        ),
+      },
+      {
+        label: "recorded decompositions a string",
+        doc: put(GOOD_EXPORT, "specs/A.mdx#a", "decompositions"),
+      },
+      {
+        label: "a recorded decomposition that is a bare identity, no object",
+        doc: put(GOOD_EXPORT, ["specs/A.mdx#a"], "decompositions"),
+      },
+      {
+        label: "a recorded decomposition without its scope node (SPEC 10.7)",
+        doc: put(
+          GOOD_EXPORT,
+          [{ kind: "subtree-coherence" }],
+          "decompositions",
+        ),
+      },
+      {
+        label: "a recorded decomposition whose scope node is null",
+        doc: put(
+          GOOD_EXPORT,
+          [{ kind: "subtree-coherence", scope: null }],
+          "decompositions",
+        ),
+      },
+      {
+        label: "a recorded decomposition whose scope node is no string",
+        doc: put(
+          GOOD_EXPORT,
+          [{ kind: "subtree-coherence", scope: ["specs/A.mdx#a"] }],
+          "decompositions",
+        ),
+      },
+      {
+        label: "a recorded decomposition whose scope node is empty",
+        doc: put(
+          GOOD_EXPORT,
+          [{ kind: "subtree-coherence", scope: "" }],
+          "decompositions",
+        ),
+      },
+      {
+        label: "a recorded decomposition without its kind (SPEC 10.7)",
+        doc: put(GOOD_EXPORT, [{ scope: "specs/A.mdx#a" }], "decompositions"),
+      },
+      {
+        label: "a recorded decomposition whose kind is no item kind",
+        doc: put(
+          GOOD_EXPORT,
+          [{ kind: "subtree", scope: "specs/A.mdx#a" }],
+          "decompositions",
+        ),
+      },
+      {
+        label:
+          "a well-formed recorded decomposition beside one lacking its scope node",
+        doc: put(
+          GOOD_EXPORT,
+          [
+            { kind: "subtree-coherence", scope: "specs/A.mdx#a" },
+            { kind: "subtree-coherence", node: "specs/A.mdx#b" },
+          ],
+          "decompositions",
+        ),
       },
       { label: "missing items", doc: omit(GOOD_EXPORT, "items") },
       {
