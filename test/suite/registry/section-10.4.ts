@@ -20,9 +20,15 @@
 // - Invalidation is observed through `review status --json` rows (read-time
 //   invalidation applies to every read, SPEC 10.4); T10.4-2's journal arm
 //   also reads `show` and `export`, whose payloads present the scope node's
-//   absence, and T10.4-5 pins all four reads — `status`, `next`, `show`,
-//   `export` — on both the invalidated reporting and session-file
-//   byte-identity.
+//   absence; T10.4-3 also reads `show`, `next --json`, and `export`, whose
+//   payloads present the current context set as `context` and `origin`,
+//   `blockedBy`, and `reason` as last assigned, byte-comparing the session
+//   file around each read after its context-set edit; and T10.4-5 pins all
+//   four reads — `status`, `next`, `show`, `export` — on both the
+//   invalidated reporting and session-file byte-identity.
+// - `reason`'s composition is unpinned (SPEC 10.2): T10.4-3 compares it
+//   byte for byte between captures from the same surface, its content never
+//   asserted.
 // - Every sensitivity arm asserts its staging premises via `query node`
 //   captures bracketing the edit: the hashes the arm targets must change and
 //   the hashes it must isolate must not (SPEC 5.5), and every control edit
@@ -30,8 +36,9 @@
 //   the wrong reason (H-8).
 // - Re-resolves between arms use `--status no-change` (no re-derivation,
 //   SPEC 10.5), so each arm starts from a freshly recorded state matching the
-//   graph; T10.4-4's reintroduction arm is the one place `--status updated`
-//   (re-derivation) is staged, exactly as its TEST-SPEC text prescribes.
+//   graph; T10.4-2's journal arm and T10.4-4's reintroduction arm are the
+//   places `--status updated` (re-derivation) is staged, exactly as their
+//   TEST-SPEC texts prescribe.
 // - "Recorded state intact" across a journaled rename/move (T10.4-4) is
 //   asserted as: statuses preserved and not invalidated, plus the reported
 //   `current` record still holding the pre-operation hash values captured via
@@ -61,7 +68,7 @@
 // judged before any product exists), the same template calls moved to module
 // level. A staging that precedes a body's first invocation stays plain (S-7's
 // sweep reaches it against the stub): T10.4-1's subtree-coherence pre-`create`
-// edit and T10.4-3's a.k edit, each between `gitCommitAll` and the first
+// edit and T10.4-3's a.k1 edit, each between `gitCommitAll` and the first
 // `build`, and each body's first workspace's initial files. The initial
 // `.mdx` files of every later workspace — T10.4-1's five later scenarios,
 // T10.4-2's context, origin, and journal arms, T10.4-4's move and
@@ -2697,50 +2704,185 @@ const T10_4_2 = defineProductTest({
 // T10.4-3 — context-set change
 // ---------------------------------------------------------------------------
 
+// Path-blocks fixture — TEST-SPEC's A, K1, and K2 as the top-level section
+// `a` and its children `a.k1` and `a.k2`. a.k1's text is edited before
+// `create --base`, so the session holds a.k1's subtree-coherence item and
+// a's parent-consistency item — context and origin {a.k1}, blockedBy a.k1's
+// item (SPEC 10.5) — and both are resolved `no-change` (no re-derivation,
+// 10.5). a.k2's text is then edited: a new changed branch under a, with no
+// re-derivation, so the generators' context set for a's item becomes
+// {a.k1, a.k2} while no hash the item records changes (10.4). Reads present
+// that current context set as the item's `context` and its other assigned
+// fields — `origin`, `blockedBy`, `reason` — as last assigned at `create`
+// (10.4), though the generators would now give the origin {a.k1, a.k2}.
+// `reason`'s composition is unpinned (10.2): it is compared byte for byte
+// between captures, its content never asserted.
 const T3_FILE = "specs/A.mdx";
 const T3_A = "specs/A.mdx#a";
-const T3_AK = "specs/A.mdx#a.k";
-const T3_AS = "specs/A.mdx#a.s";
+const T3_AK1 = "specs/A.mdx#a.k1";
+const T3_AK2 = "specs/A.mdx#a.k2";
+const T3_SESSION_FILE = ".xspec/reviews/s.json";
 
-function t3Spec(kText: string, sText: string): string {
+function t3Spec(k1Text: string, k2Text: string): string {
   return [
     '<S id="a">',
     "Alpha own text.",
     "",
-    '<S id="a.k">',
-    kText,
+    '<S id="a.k1">',
+    k1Text,
     "</S>",
     "",
-    '<S id="a.s">',
-    sText,
+    '<S id="a.k2">',
+    k2Text,
     "</S>",
     "</S>",
     "",
   ].join("\n");
 }
 
-// T10.4-3's context-set change — the a.s edit, staged after the body's first
-// `build` — is a staged-source record (helpers/staged-mdx.ts, S-9: judged
-// before any product exists); the a.k edit precedes that `build` (staged
-// between `gitCommitAll` and it) and stays plain.
-const T10_4_3_AS_EDITED = stagedMdx(
-  "T10.4-3 specs/A.mdx with the sibling branch a.s at v1 (the context-set change)",
-  t3Spec("Kay text v1.", "Ess text v1."),
+// T10.4-3's context-set change — the a.k2 edit, staged after the body's
+// first `build` — is a staged-source record (helpers/staged-mdx.ts, S-9:
+// judged before any product exists); the a.k1 edit precedes that `build`
+// (staged between `gitCommitAll` and it) and stays plain.
+const T10_4_3_K2_EDITED = stagedMdx(
+  "T10.4-3 specs/A.mdx with the second branch a.k2 at v1 (the context-set change)",
+  t3Spec("Kay one text v1.", "Kay two text v1."),
 );
+
+/**
+ * Run one `review` read after the a.k2 edit and return its document, the
+ * session file byte-identical around it (SPEC 10.4: reads never write the
+ * session file — the current context set and read-time invalidation are
+ * computed and reported, never persisted; TEST-SPEC T10.4-3, T10.4-5).
+ */
+async function t3ReadKeepingSession(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  label: string,
+): Promise<unknown> {
+  const before = await workspace.readBytes(T3_SESSION_FILE);
+  const doc = await runJson(product, workspace, argv, label);
+  assertBytesEqual(
+    await workspace.readBytes(T3_SESSION_FILE),
+    before,
+    `${label} — the read must leave the session file byte-identical: the ` +
+      `current context set and read-time invalidation are computed and ` +
+      `reported, never persisted (SPEC 10.4)`,
+  );
+  return doc;
+}
+
+/** An item's `reason` as `review export s --json` presents it (SPEC 10.7). */
+async function t3ExportedReason(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  itemId: string,
+  context: string,
+): Promise<string> {
+  const label = `${context} \`review export s --json\``;
+  const exported = decodeExportReport(
+    await runJson(
+      product,
+      workspace,
+      ["review", "export", "s", "--json"],
+      label,
+    ),
+    label,
+  );
+  return requireItem(exported.items, itemId, label).reason;
+}
+
+/**
+ * a's item as `show`, `next --json`, or `export` presents it after the a.k2
+ * edit (SPEC 10.4): reported `invalidated`, its `context` the current
+ * context set — exactly {a.k1, a.k2}, the new branch head included — while
+ * its `origin` and `blockedBy` stay as last assigned at `create`: {a.k1}
+ * and a.k1's item alone.
+ */
+function assertT3Presentation(
+  item: ReviewItem,
+  k1Id: string,
+  context: string,
+): void {
+  if (item.status !== "invalidated") {
+    fail(
+      `${context}: a's item must be reported invalidated — its current ` +
+        `context set {a.k1, a.k2} differs from its recorded context set ` +
+        `{a.k1}, though no recorded hash changed (SPEC 10.4); got ` +
+        item.status,
+    );
+  }
+  assertSameJson(
+    identitySet(item.context),
+    [T3_AK1, T3_AK2].sort(),
+    `${context}: a's item's context must be exactly {a.k1, a.k2} — reads ` +
+      `present the item's current context set, the context the generators ` +
+      `assign it against the current workspace, the new branch head a.k2 ` +
+      `included (SPEC 10.4, 10.5); a product presenting the recorded ` +
+      `context set shows {a.k1}`,
+  );
+  assertSameJson(
+    identitySet(item.origin),
+    [T3_AK1],
+    `${context}: a's item's origin must stay {a.k1} — reads present ` +
+      `origin as last assigned, at \`create\` (no re-derivation has run), ` +
+      `though the generators would now give {a.k1, a.k2} (SPEC 10.4); a ` +
+      `product presenting every field as the generators now give them ` +
+      `shows {a.k1, a.k2}`,
+  );
+  assertSameJson(
+    item.blockedBy,
+    [k1Id],
+    `${context}: a's item's blockedBy must stay a.k1's item alone — reads ` +
+      `present blockedBy as last assigned, at \`create\` (SPEC 10.4)`,
+  );
+}
+
+/**
+ * A surface's `reason` for a's item must be byte-identical to that
+ * surface's capture, taken once both resolves were done (SPEC 10.4: reads
+ * present `reason` as last assigned, and a resolve assigns `context`
+ * alone; 10.2: its composition unpinned, so it is compared, never read).
+ */
+function assertT3ReasonAsCaptured(
+  presented: string,
+  captured: string,
+  context: string,
+): void {
+  if (presented === captured) return;
+  fail(
+    `${context}: a's item's reason must be presented byte-identical to ` +
+      `this surface's capture, taken once both resolves were done — reads ` +
+      `present reason as last assigned (at \`create\`; no re-derivation or ` +
+      `split since), and a resolve assigns context alone (SPEC 10.4; its ` +
+      `composition unpinned, 10.2); a product recomputing reason from the ` +
+      `current graph when the item is read fails wherever its text ` +
+      `reflects a.k2's edit. Captured: ${JSON.stringify(captured)}; ` +
+      `presented: ${JSON.stringify(presented)}`,
+  );
+}
 
 const T10_4_3 = defineProductTest({
   id: "T10.4-3",
   title:
-    "context-set change invalidates without any recorded hash changing: after resolving a parent-consistency item whose context is one changed branch, a text edit in a sibling branch under its scope makes the generators derive a two-branch context set — the item is reported invalidated although the scope node's ownHash and metadataHash and the recorded context node's subtreeHash are all byte-unchanged (asserted as premises via query node), while the sibling branch's own resolved item stays resolved (SPEC 5.5, 10.4, 10.5)",
+    "context-set change: a change that alters an item's generator-derived context set invalidates it without any recorded hash changing, and reads present the current context set as the item's `context` while presenting its other assigned fields as last assigned — path-blocks fixture: top-level A with children K1 and K2, K1's text edited before `create --base`; K1's subtree-coherence item and then A's parent-consistency item (context and origin {K1}, blockedBy K1's item) resolved `no-change`; then K2's text edited — a new changed branch under A — with no re-derivation: A's item reads `invalidated` though A's ownHash and metadataHash and K1's subtreeHash are byte-unchanged (premises via `query node`), K1's item staying resolved; `show`, `next --json`, and `export` present A's context as exactly {K1, K2}, the new branch head included, while its origin stays {K1} and its blockedBy K1's item alone — as last assigned, though the generators would now give the origin {K1, K2} — each read leaving the session file byte-identical; A's item's `reason`, captured from `show` and from `export` once both resolves are done, is presented byte-identical by each surface after K2's edit and again once A's item is resolved `no-change` (a resolve assigns `context` alone), its composition unasserted (SPEC 5.5, 5.6, 10.2, 10.4, 10.5, 10.7)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [T3_FILE]: t3Spec("Kay text v0.", "Ess text v0.") },
+      { [T3_FILE]: t3Spec("Kay one text v0.", "Kay two text v0.") },
       async (workspace) => {
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        await workspace.file(T3_FILE, t3Spec("Kay text v1.", "Ess text v0."));
-        await buildOk(product, workspace, "T10.4-3 `build` after the a.k edit");
+        await workspace.file(
+          T3_FILE,
+          t3Spec("Kay one text v1.", "Kay two text v0."),
+        );
+        await buildOk(
+          product,
+          workspace,
+          "T10.4-3 `build` after the a.k1 edit",
+        );
         await expectExit(
           product,
           workspace,
@@ -2751,15 +2893,15 @@ const T10_4_3 = defineProductTest({
         const status = await sessionStatus(product, workspace, "s", "T10.4-3");
         assertSameJson(
           kindScopeSet(status),
-          [`parent-consistency ${T3_A}`, `subtree-coherence ${T3_AK}`].sort(),
-          "T10.4-3: the single changed branch yields a.k's " +
+          [`parent-consistency ${T3_A}`, `subtree-coherence ${T3_AK1}`].sort(),
+          "T10.4-3: the single changed branch yields a.k1's " +
             "subtree-coherence item and a's parent-consistency item " +
             "(SPEC 10.5)",
         );
-        const kId = requireRow(
+        const k1Id = requireRow(
           status,
           "subtree-coherence",
-          T3_AK,
+          T3_AK1,
           "T10.4-3",
         ).id;
         const aId = requireRow(
@@ -2772,9 +2914,9 @@ const T10_4_3 = defineProductTest({
           product,
           workspace,
           "s",
-          kId,
+          k1Id,
           "no-change",
-          "T10.4-3 resolve of the a.k subtree-coherence item (the blocker)",
+          "T10.4-3 resolve of the a.k1 subtree-coherence item (the blocker)",
         );
         await resolveOk(
           product,
@@ -2785,7 +2927,11 @@ const T10_4_3 = defineProductTest({
           "T10.4-3 resolve of the a parent-consistency item",
         );
 
-        // Premise: the recorded context set is the single changed branch.
+        // Premise: a's item as `create` assigned it — context and origin
+        // {a.k1}, blockedBy a.k1's item (SPEC 10.5) — its context the
+        // recorded context set its resolve wrote (10.4). The `reason`
+        // captures, once both resolves are done: `show`'s here, `export`'s
+        // next.
         const resolved = await showItem(
           product,
           workspace,
@@ -2794,10 +2940,23 @@ const T10_4_3 = defineProductTest({
           "T10.4-3 post-resolve read",
         );
         assertSameJson(
-          identitySet(resolved.context),
-          [T3_AK],
+          {
+            context: identitySet(resolved.context),
+            origin: identitySet(resolved.origin),
+            blockedBy: resolved.blockedBy,
+          },
+          { context: [T3_AK1], origin: [T3_AK1], blockedBy: [k1Id] },
           "T10.4-3 staging premise: the resolved parent-consistency item's " +
-            "context is the one changed branch — a's child on it (SPEC 10.5)",
+            "context is the one changed branch — a's child on it — its " +
+            "origin the changed node in a's subtree, and its blockedBy " +
+            "a.k1's subtree-coherence item (SPEC 10.5)",
+        );
+        const shownReason = resolved.reason;
+        const exportedReason = await t3ExportedReason(
+          product,
+          workspace,
+          aId,
+          "T10.4-3 post-resolve read",
         );
 
         // Captures of every recorded relevant hash (SPEC 10.4:
@@ -2806,65 +2965,164 @@ const T10_4_3 = defineProductTest({
         const before = await captureHashes(
           product,
           workspace,
-          [T3_A, T3_AK, T3_AS],
+          [T3_A, T3_AK1, T3_AK2],
           "T10.4-3 pre-edit capture",
         );
 
-        // The context-set change: a new changed branch under a.
-        await workspace.file(T3_FILE, T10_4_3_AS_EDITED);
-        await buildOk(product, workspace, "T10.4-3 `build` after the a.s edit");
+        // The context-set change: a new changed branch under a, with no
+        // re-derivation.
+        await workspace.file(T3_FILE, T10_4_3_K2_EDITED);
+        await buildOk(
+          product,
+          workspace,
+          "T10.4-3 `build` after the a.k2 edit",
+        );
         const after = await captureHashes(
           product,
           workspace,
-          [T3_A, T3_AK, T3_AS],
+          [T3_A, T3_AK1, T3_AK2],
           "T10.4-3 post-edit capture",
         );
         for (const [node, hash] of [
           [T3_A, "ownHash"],
           [T3_A, "metadataHash"],
-          [T3_AK, "subtreeHash"],
+          [T3_AK1, "subtreeHash"],
         ] as const) {
           const beforeValue = before.get(node)?.[hash];
           const afterValue = after.get(node)?.[hash];
           if (beforeValue !== afterValue) {
             fail(
-              `T10.4-3 staging premise: the sibling-branch edit must leave ` +
+              `T10.4-3 staging premise: the a.k2 edit must leave ` +
                 `${node}'s ${hash} unchanged (SPEC 5.5) so the invalidation ` +
                 `can only come from the context-set change; got ` +
                 `${JSON.stringify(beforeValue)} -> ${JSON.stringify(afterValue)}`,
             );
           }
         }
-        if (before.get(T3_AS)?.subtreeHash === after.get(T3_AS)?.subtreeHash) {
+        if (
+          before.get(T3_AK2)?.subtreeHash === after.get(T3_AK2)?.subtreeHash
+        ) {
           fail(
-            "T10.4-3 staging premise: the a.s edit must change a.s's " +
+            "T10.4-3 staging premise: the a.k2 edit must change a.k2's " +
               "subtreeHash (SPEC 5.5) — otherwise no new changed branch " +
               "exists and the arm is vacuous",
           );
         }
 
-        // The item is invalidated purely by the generator-derived context
-        // set gaining the new branch (SPEC 10.4); the sibling branch's own
-        // resolved item is untouched.
-        await expectItemStatus(
+        // `status`: a's item is invalidated purely by the generator-derived
+        // context set gaining the new branch (SPEC 10.4); a.k1's item — its
+        // recorded state and context (its ancestor chain) untouched by the
+        // edit — stays resolved, so a's item stays unblocked.
+        const statusLabel =
+          "T10.4-3 after the a.k2 edit `review status s --json`";
+        const edited = decodeSessionStatusReport(
+          await t3ReadKeepingSession(
+            product,
+            workspace,
+            ["review", "status", "s", "--json"],
+            statusLabel,
+          ),
+          statusLabel,
+        );
+        const aRow = requireRowById(edited, aId, statusLabel);
+        if (aRow.status !== "invalidated") {
+          fail(
+            `${statusLabel}: a change that alters the item's ` +
+              `generator-derived context set invalidates it without any ` +
+              `recorded hash changing (SPEC 10.4) — a's item must be ` +
+              `reported invalidated; got ${aRow.status}`,
+          );
+        }
+        const k1Row = requireRowById(edited, k1Id, statusLabel);
+        if (k1Row.status !== "no-change") {
+          fail(
+            `${statusLabel}: a.k1's item's recorded state and context (its ` +
+              `ancestor chain) are untouched by the a.k2 edit, so it stays ` +
+              `resolved (SPEC 10.4, 10.5); got ${k1Row.status}`,
+          );
+        }
+
+        // `show`, `next --json`, and `export`: the current context set as
+        // `context`; `origin`, `blockedBy`, and `reason` as last assigned.
+        const showLabel =
+          "T10.4-3 after the a.k2 edit `review show s <a item> --json`";
+        const shown = decodeItemReport(
+          await t3ReadKeepingSession(
+            product,
+            workspace,
+            ["review", "show", "s", aId, "--json"],
+            showLabel,
+          ),
+          showLabel,
+        );
+        assertT3Presentation(shown, k1Id, showLabel);
+        assertT3ReasonAsCaptured(shown.reason, shownReason, showLabel);
+
+        const nextLabel = "T10.4-3 after the a.k2 edit `review next s --json`";
+        const next = decodeNextReport(
+          await t3ReadKeepingSession(
+            product,
+            workspace,
+            ["review", "next", "s", "--json"],
+            nextLabel,
+          ),
+          nextLabel,
+        );
+        if (next.item?.id !== aId) {
+          fail(
+            `${nextLabel}: next must present a's item — the first item in ` +
+              `item order that needs review and is unblocked: it reads ` +
+              `invalidated, and its one blocker, a.k1's item, stays resolved ` +
+              `(SPEC 10.3, 10.4, 10.5, 10.7); got ` +
+              (next.item === undefined
+                ? "the fully-resolved report"
+                : `item ${next.item.id}`),
+          );
+        }
+        assertT3Presentation(next.item, k1Id, nextLabel);
+
+        const exportLabel =
+          "T10.4-3 after the a.k2 edit `review export s --json`";
+        const exported = decodeExportReport(
+          await t3ReadKeepingSession(
+            product,
+            workspace,
+            ["review", "export", "s", "--json"],
+            exportLabel,
+          ),
+          exportLabel,
+        );
+        const exportedItem = requireItem(exported.items, aId, exportLabel);
+        assertT3Presentation(exportedItem, k1Id, exportLabel);
+        assertT3ReasonAsCaptured(
+          exportedItem.reason,
+          exportedReason,
+          exportLabel,
+        );
+
+        // A resolve assigns `context` alone (SPEC 10.4): a's item — unblocked,
+        // a.k1's item resolved — resolved `no-change` runs no re-derivation
+        // (10.5), and no `split` intervenes, so each surface still presents
+        // the captured `reason`.
+        await resolveOk(
           product,
           workspace,
           "s",
           aId,
-          "invalidated",
-          "T10.4-3 after the sibling-branch edit — a change that alters the " +
-            "item's generator-derived context set invalidates without any " +
-            "recorded hash changing (SPEC 10.4)",
-        );
-        await expectItemStatus(
-          product,
-          workspace,
-          "s",
-          kId,
           "no-change",
-          "T10.4-3 the a.k item's recorded state and context (its ancestor " +
-            "chain) are untouched by the a.s edit — it stays resolved " +
-            "(SPEC 10.4, 10.5)",
+          "T10.4-3 resolve of the invalidated a item --status no-change " +
+            "(a resolve assigns context alone)",
+        );
+        const reresolved = "T10.4-3 after a's re-resolve";
+        assertT3ReasonAsCaptured(
+          (await showItem(product, workspace, "s", aId, reresolved)).reason,
+          shownReason,
+          `${reresolved} \`review show s <a item> --json\``,
+        );
+        assertT3ReasonAsCaptured(
+          await t3ExportedReason(product, workspace, aId, reresolved),
+          exportedReason,
+          `${reresolved} \`review export s --json\``,
         );
       },
     );
