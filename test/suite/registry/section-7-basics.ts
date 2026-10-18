@@ -1,6 +1,7 @@
-// TEST-SPEC §7 basics (configuration location, declarative form, keys) —
-// SUITE-26: T7-1…T7-3. Discovery (T7-4…T7-6) and the §7.1–7.5 tests belong
-// to later tasks (SUITE-27…SUITE-29), not this module.
+// TEST-SPEC §7 basics (configuration location, declarative form, keys;
+// validation on a built workspace) — SUITE-26: T7-1…T7-3 and T7-7.
+// Discovery (T7-4…T7-6) and the §7.1–7.5 tests belong to later tasks
+// (SUITE-27…SUITE-29), not this module.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -208,34 +209,90 @@
 //   point EF BF BD between two letters — a spec group's and a code group's
 //   string-literal key, a profile name, a rule name — so 14.14's name rule,
 //   never the encoding rule, is at stake; each fixture is otherwise valid.
+// - T7-7 validation on a built workspace (SPEC 7, 7.2, 14.14: the
+//   configuration path's occupant and the sources discovered are judged as
+//   they stand at each invocation, whatever graph data records): one
+//   workspace declaration (`T7_7_WORKSPACE`) — `specs/A.mdx` under the spec
+//   group `main` (`specs/**/*.mdx`), `src/impl.ts` under the code group
+//   `app` (`src/**/*`), and the spec group `inner` (`src/**/*.mdx`)
+//   matching no file, so the spec and code globs overlap on no path
+//   occupied at the build — staged afresh for each arm and built there
+//   (exit 0, graph data left current), then staged: (a) the root's
+//   `xspec.config.ts` deleted and replaced by a symbolic link to a plain
+//   file holding its byte-identical content, the link's target spelled
+//   relative to the root — `config/linked.config.ts`, inside the workspace
+//   at a path no group matches, and separately `../outside/linked.config.ts`,
+//   outside it, in the workspace's own temporary directory
+//   (`stageBesideRoot`); (b) `src/x.mdx` created, matched by `inner` and
+//   `app` alike. Each staging is verified first (H-9): the root entry a
+//   symbolic link storing the target as spelled and resolving to it, the
+//   target a plain file holding the configuration's bytes — an ineffective
+//   staging a harness error; nothing at `src/x.mdx` before it is created —
+//   a staging premise over a tree the product has built, so an occupant is
+//   a diagnosed failure. From the root, each of `build`, `check`, `ids` and
+//   `occurrences` (a read of each family 13.3 names: the gated reads, and
+//   the reads answering from the current sources per 11.2), `inventory`,
+//   `rename specs/A.mdx a a2 --preview`, and `rename specs/A.mdx a a2` is
+//   held under `--json` to the 14.14 contract (`expectConfigurationError`)
+//   with the error document's one finding exactly `code`
+//   `configuration-error`, `path` `xspec.config.ts` — the path the upward
+//   search found, whatever occupies it, in 11.6's anchoring form (SPEC 14;
+//   T12.7-3) — and `locations` [] (an unlocated condition); a whole-root
+//   snapshot compare around each run pins that nothing is modified, the
+//   link among the compared entries (its stored target) and, inside the
+//   root, its target — H-6's classification: around the `rename`, a
+//   mutating command's run, the lock path alone is left out; around every
+//   other command it is compared like any path — the outside target's
+//   directory is compared around each run too, and `.xspec/lock` is
+//   asserted absent once each run has ended. `version --json` answers exit
+//   0 last (12.6: it consults no configuration). The unstaged twin, driven
+//   first on a workspace of its own staged and built alike, is the premise
+//   that gives the exit 2s their meaning: `check --json` exit 0 with the
+//   finding-free report (graph data current), then the `rename --preview`
+//   and the `rename` each exit 0 — the operation the arms drive is one
+//   succeeding on the unstaged twin. A product reading the configuration
+//   through the link loads the valid configuration and answers, and one
+//   reusing a recorded configuration parse while the configuration's bytes
+//   and its recorded sources' hashes match never meets the file both
+//   groups match: each fails an exit-code assertion.
 // - Staged-source records (TEST-SPEC S-9's before-any-product clause;
 //   helpers/staged-mdx.ts): every `.mdx` file a body stages in a workspace
 //   created after its first product invocation — `expectConfigRefused`'s
 //   one staging site (serving every arm, the first included), T7-1's
 //   no-configuration, occupancy, and name-casing workspaces, T7-2's and
-//   T7-3's later arms — is a ledger record, judged by
-//   test/self/s9-staged-sources.test.ts before any product exists. The
-//   minimal `mdxSection("a")` and `mdxSection("b")` sources are staged
+//   T7-3's later arms, T7-7's arm workspaces (each created after the
+//   unstaged twin's invocations) and arm (b)'s `src/x.mdx` — is a ledger
+//   record, judged by test/self/s9-staged-sources.test.ts before any
+//   product exists: `src/x.mdx` is declared well-formed MDX alone, the
+//   configuration error its double match makes preceding all source
+//   analysis (SPEC 14), as section-13.5.ts's `src/both.mdx`. The minimal
+//   `mdxSection("a")` and `mdxSection("b")` sources are staged
 //   byte-identically by this module, section-7-discovery.ts,
 //   section-7.1-7.3.ts, and (the `a`) section-7.4-7.5.ts, so each is ONE
 //   record, exported from here and named with every staging test in ID
 //   order and every path. T7-1's first workspace (`LOCATION_FILES`)
-//   precedes any invocation and stays plain.
+//   precedes any invocation and stays plain; T7-7's first, its unstaged
+//   twin, stages the same records as its arms.
 // - TypeScript staged-source records (TEST-SPEC S-9's TypeScript and
 //   timing clauses; helpers/staged-ts.ts): every configuration file and
 //   code source a body stages in a workspace created after its first
 //   product invocation — `expectConfigRefused`'s one staging site (serving
 //   every arm of every refused-configuration table, the first included:
 //   `refusedConfigArms` makes one record per row at module load), T7-1's
-//   occupancy and name-casing workspaces, T7-2's and T7-3's later arms — is
-//   a ledger record carrying its S-9 declaration (T7-2's syntax-error and
-//   encoding arms and T7-1's `XSPEC.config.ts` holding `)` unparseable,
-//   14.20; every other well-formed), judged by
-//   test/self/s9-staged-sources.test.ts before any product exists. The
-//   canonical `SPECS_ONLY_CONFIG` is one record wherever it is staged,
-//   `LOCATION_FILES` included.
+//   occupancy and name-casing workspaces, T7-2's and T7-3's later arms,
+//   T7-7's arm workspaces and arm (a)'s inside link target — is a ledger
+//   record carrying its S-9 declaration (T7-2's syntax-error and encoding
+//   arms and T7-1's `XSPEC.config.ts` holding `)` unparseable, 14.20;
+//   every other well-formed), judged by test/self/s9-staged-sources.test.ts
+//   before any product exists. The canonical `SPECS_ONLY_CONFIG` is one
+//   record wherever it is staged, `LOCATION_FILES` included; so is T7-7's
+//   configuration (`T7_7_CONFIG`), at `xspec.config.ts` and at the inside
+//   link target, its text the bytes the outside target is written with
+//   beyond the root.
 
 import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
+import * as path from "node:path";
 import type { GraphEdge } from "../../helpers/adapters/index.js";
 import {
   decodeCoverageReport,
@@ -247,9 +304,11 @@ import {
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
+  bytesEqual,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { assertLockPathAbsent } from "../../helpers/lock-state.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import {
@@ -275,8 +334,10 @@ import {
   expectConfigurationError,
   expectErrorDocument,
   expectExit,
+  expectFindingFreeReport,
   REPLACEMENT_CHARACTER,
   runJson,
+  stageBesideRoot,
 } from "./support.js";
 
 // ---------------------------------------------------------------------------
@@ -299,7 +360,7 @@ function mdxSection(id: string): string {
 // every staging test in ID order and every path; the other modules import
 // them (section-7.4-7.5.ts and section-12.6.ts the `a` alone).
 export const SECTION_A_SOURCE = stagedMdx(
-  "T7-1/T7-2/T7-3/T7-4/T7-6/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-5/T12.6-1/T12.6-2 specs/A.mdx (the minimal section a; T7.5-5's tgt/a.mdx)",
+  "T7-1/T7-2/T7-3/T7-4/T7-6/T7-7/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-5/T12.6-1/T12.6-2 specs/A.mdx (the minimal section a; T7.5-5's tgt/a.mdx)",
   mdxSection("a"),
 );
 export const SECTION_B_SOURCE = stagedMdx(
@@ -2641,9 +2702,382 @@ const T7_3 = defineProductTest({
   },
 });
 
-/** TEST-SPEC §7 basics T7-1…T7-3, in canonical ID order (SUITE-26). */
+// ---------------------------------------------------------------------------
+// T7-7 — validation on a built workspace
+// ---------------------------------------------------------------------------
+
+// The workspace every T7-7 arm is staged on, and its unstaged twin (module
+// header): `specs/A.mdx` under the spec group `main`, `src/impl.ts` under
+// the code group `app`, and the spec group `inner`, globbing `src/**/*.mdx`,
+// matching no file — the spec and code globs overlap on no path occupied at
+// the build (TEST-SPEC T7-7(b)). Staged-source records (module header):
+// every arm workspace is created after the body's first product invocation,
+// the twin's, and arm (a) stages the configuration's bytes at its link
+// targets too — inside the root through `file()`, outside it as the
+// record's text.
+const T7_7_CONFIG = stagedTs(
+  "T7-7 xspec.config.ts (the built workspace's configuration: the spec groups main over specs/**/*.mdx and inner over src/**/*.mdx beside the code group app over src/**/*, overlapping on no path occupied at the build; also arm (a)'s inside link target config/linked.config.ts, and its outside one's bytes)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"],
+    inner: ["src/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*"]
+  }
+})
+`,
+);
+const T7_7_CODE_SOURCE = stagedTs(
+  "T7-7 src/impl.ts (the built workspace's one code source, matched by the code group app alone)",
+  "export const impl = 1\n",
+);
+// Arm (b)'s file, created after the build at a path both `inner` and `app`
+// match: a valid single-section source carrying an ID unique in its
+// workspace, so the overlap is the arm's one defect — a product missing it
+// proceeds past configuration load (to exit 0, or a finding's exit 1,
+// whatever it makes of the file) and fails the exit-code assertion either
+// way, never exiting 2 for a side reason (module header; T7.2-1's decoys
+// likewise).
+const T7_7_DOUBLY_MATCHED_SOURCE = stagedMdx(
+  "T7-7 src/x.mdx (arm (b)'s file, created after the build at a path both the spec group inner and the code group app match)",
+  mdxSection("x"),
+);
+
+const T7_7_CONFIG_PATH = "xspec.config.ts";
+const T7_7_DOUBLY_MATCHED_PATH = "src/x.mdx";
+const T7_7_WORKSPACE: WorkspaceDecl = {
+  files: {
+    [T7_7_CONFIG_PATH]: T7_7_CONFIG,
+    "specs/A.mdx": SECTION_A_SOURCE,
+    "src/impl.ts": T7_7_CODE_SOURCE,
+  },
+};
+
+// Arm (a)'s link targets, each a plain file holding the configuration's
+// bytes: inside the workspace at a path no group matches, and outside it —
+// in the workspace's own temporary directory, the root's parent
+// (`stageBesideRoot`), disposed with it. Each link stores its target
+// relative to the link's directory, the root.
+const T7_7_INSIDE_TARGET = "config/linked.config.ts";
+const T7_7_OUTSIDE_DIR = "outside";
+const T7_7_OUTSIDE_TARGET = `${T7_7_OUTSIDE_DIR}/linked.config.ts`;
+
+// The operation the arms' `rename --preview` and `rename` name: one
+// succeeding on the unstaged twin, which asserts it (module header).
+const T7_7_RENAME: readonly string[] = ["rename", "specs/A.mdx", "a", "a2"];
+const T7_7_RENAME_PREVIEW: readonly string[] = [...T7_7_RENAME, "--preview"];
+
+// The commands each arm drives from the root (TEST-SPEC T7-7): `build`,
+// `check`, a read of each family 13.3 names — `ids` (the gated reads) and
+// `occurrences` (the reads answering from the current sources, 11.2) —
+// `inventory`, the preview, and the operation itself. The driver appends
+// `--json`.
+const T7_7_COMMANDS: readonly (readonly string[])[] = [
+  ["build"],
+  ["check"],
+  ["ids"],
+  ["occurrences"],
+  ["inventory"],
+  T7_7_RENAME_PREVIEW,
+  T7_7_RENAME,
+];
+
+/** One T7-7 staging on the built workspace. */
+interface T77Arm {
+  /** What the arm stages, for every diagnosis. */
+  readonly label: string;
+  /**
+   * Stage the arm on the built workspace. Returns the absolute directory
+   * beyond the root holding the arm's link target — compared around each
+   * run beside the root — or `undefined` when the arm stages nothing
+   * outside the root.
+   */
+  readonly stage: (
+    workspace: TestWorkspace,
+    context: string,
+  ) => Promise<string | undefined>;
+}
+
+/**
+ * Arm (a)'s staging: the root's `xspec.config.ts` deleted and replaced by a
+ * symbolic link storing `linkTarget`, which must resolve to the plain file
+ * at `targetAbs`, already holding the configuration's bytes. Verified
+ * before the sweep (H-9): the root entry a symbolic link storing
+ * `linkTarget` and resolving to `targetAbs`, a plain file holding exactly
+ * the configuration's bytes — an ineffective staging is a harness error,
+ * never a pass or a diagnosed product failure.
+ */
+async function replaceConfigurationByLink(
+  workspace: TestWorkspace,
+  linkTarget: string,
+  targetAbs: string,
+  context: string,
+): Promise<void> {
+  await fsp.unlink(workspace.path(T7_7_CONFIG_PATH));
+  await workspace.symlink(T7_7_CONFIG_PATH, linkTarget);
+  const problems: string[] = [];
+  const kind = await workspace.kind(T7_7_CONFIG_PATH);
+  if (kind !== "symlink") {
+    problems.push(`${T7_7_CONFIG_PATH} is ${kind}, no symbolic link`);
+  } else {
+    const stored = await workspace.linkTarget(T7_7_CONFIG_PATH);
+    if (stored !== linkTarget) {
+      problems.push(`the link stores ${JSON.stringify(stored)}`);
+    }
+    const resolved = await fsp.realpath(workspace.path(T7_7_CONFIG_PATH));
+    if (resolved !== (await fsp.realpath(targetAbs))) {
+      problems.push(`the link resolves to ${resolved}`);
+    }
+  }
+  if (!(await fsp.lstat(targetAbs)).isFile()) {
+    problems.push("the target is no plain file");
+  } else if (
+    !bytesEqual(await fsp.readFile(targetAbs), configText(T7_7_CONFIG))
+  ) {
+    problems.push("the target holds bytes other than the configuration's");
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `${context} — harness staging: expected ${T7_7_CONFIG_PATH} to be a ` +
+        `symbolic link storing ${JSON.stringify(linkTarget)} and resolving ` +
+        `to the plain file ${targetAbs}, which holds the configuration's ` +
+        `bytes; ${problems.join("; ")} — the arm cannot run (H-9)`,
+    );
+  }
+}
+
+/** T7-7's arms, each on a freshly built workspace of its own (module header). */
+const T7_7_ARMS: readonly T77Arm[] = [
+  {
+    label:
+      `(a) ${T7_7_CONFIG_PATH} replaced by a symbolic link to ` +
+      `${T7_7_INSIDE_TARGET}, inside the workspace at a path no group ` +
+      `matches, holding its byte-identical content`,
+    stage: async (workspace, context) => {
+      await workspace.file(T7_7_INSIDE_TARGET, T7_7_CONFIG);
+      await replaceConfigurationByLink(
+        workspace,
+        T7_7_INSIDE_TARGET,
+        workspace.path(T7_7_INSIDE_TARGET),
+        context,
+      );
+      return undefined;
+    },
+  },
+  {
+    label:
+      `(a) ${T7_7_CONFIG_PATH} replaced by a symbolic link to ` +
+      `../${T7_7_OUTSIDE_TARGET}, outside the workspace, holding its ` +
+      `byte-identical content`,
+    stage: async (workspace, context) => {
+      await stageBesideRoot(workspace, {
+        [T7_7_OUTSIDE_TARGET]: configText(T7_7_CONFIG),
+      });
+      await replaceConfigurationByLink(
+        workspace,
+        `../${T7_7_OUTSIDE_TARGET}`,
+        path.join(workspace.tempRoot, T7_7_OUTSIDE_TARGET),
+        context,
+      );
+      return path.join(workspace.tempRoot, T7_7_OUTSIDE_DIR);
+    },
+  },
+  {
+    label:
+      `(b) ${T7_7_DOUBLY_MATCHED_PATH} created, a path both the spec group ` +
+      `inner (src/**/*.mdx) and the code group app (src/**/*) match`,
+    stage: async (workspace, context) => {
+      // A staging premise over a tree the product has built: nothing
+      // occupies the path, the globs overlapping on no path occupied at the
+      // build — an occupant is a diagnosed failure.
+      const kind = await workspace.kind(T7_7_DOUBLY_MATCHED_PATH);
+      if (kind !== "absent") {
+        fail(
+          `${context}: staging premise — nothing occupies ` +
+            `${T7_7_DOUBLY_MATCHED_PATH} after the build, the spec and code ` +
+            `globs overlapping on no path occupied at it (TEST-SPEC ` +
+            `T7-7(b)); found ${kind}`,
+        );
+      }
+      await workspace.file(
+        T7_7_DOUBLY_MATCHED_PATH,
+        T7_7_DOUBLY_MATCHED_SOURCE,
+      );
+      return undefined;
+    },
+  },
+];
+
+/**
+ * T7-7's unstaged twin (module header): the arms' workspace, built alike and
+ * staged with nothing — `check --json` reports the finding-free report
+ * (graph data current), and the `rename --preview` and the `rename` the
+ * arms drive each exit 0: the operation is one succeeding on the unstaged
+ * twin, so an arm's exit 2 is its staging's alone.
+ */
+async function runT77UnstagedTwin(product: ProductBinding): Promise<void> {
+  await withWorkspace(T7_7_WORKSPACE, async (workspace) => {
+    const context = "T7-7 unstaged twin (the arms' workspace, nothing staged)";
+    await buildOk(
+      product,
+      workspace,
+      `${context}: \`build\` — the workspace is valid (SPEC 7, 12.1)`,
+    );
+    await expectFindingFreeReport(
+      product,
+      workspace,
+      ["check", "--json"],
+      `${context}: \`check --json\` after the \`build\` — no finding, so ` +
+        `graph data is current (SPEC 12.2, 13.3)`,
+    );
+    for (const argv of [T7_7_RENAME_PREVIEW, T7_7_RENAME]) {
+      await expectExit(
+        product,
+        workspace,
+        [...argv, "--json"],
+        0,
+        `${context}: \`${argv.join(" ")} --json\` — the operation the arms ` +
+          `drive succeeds on the unstaged twin (TEST-SPEC T7-7; SPEC 6.4, ` +
+          `6.6), so each arm's exit 2 is its staging's alone`,
+      );
+    }
+  });
+}
+
+/**
+ * One T7-7 arm (module header): a fresh workspace built (exit 0, graph data
+ * left current), the arm staged, and each command of `T7_7_COMMANDS` run
+ * from the root under `--json`, held to the 14.14 contract with the error
+ * document's one finding exactly `code` `configuration-error`, `path`
+ * `xspec.config.ts`, `locations` []; nothing modified around each run — the
+ * whole root compared, H-6's classification applied, and the directory
+ * holding an outside link target beside it — and `.xspec/lock` absent once
+ * each has ended; `version --json` exit 0 last.
+ */
+async function runT77Arm(product: ProductBinding, arm: T77Arm): Promise<void> {
+  await withWorkspace(T7_7_WORKSPACE, async (workspace) => {
+    const context = `T7-7 ${arm.label}`;
+    await buildOk(
+      product,
+      workspace,
+      `${context}: the \`build\` the arm is staged after — the workspace ` +
+        `valid, its graph data left current (TEST-SPEC T7-7)`,
+    );
+    const outsideDir = await arm.stage(workspace, context);
+    for (const argv of T7_7_COMMANDS) {
+      const label = `${context}: \`${argv.join(" ")} --json\` run from the workspace root`;
+      const before = await snapshotDirectory(workspace.root);
+      const outsideBefore =
+        outsideDir === undefined
+          ? undefined
+          : await snapshotDirectory(outsideDir);
+      const result = await expectConfigurationError(
+        product,
+        workspace,
+        argv,
+        `${label} — 7 and 14.14 bind every command that loads the ` +
+          `configuration in every workspace state, a built one whose graph ` +
+          `data is current included: the configuration path's occupant and ` +
+          `the sources discovered are judged as they stand at the ` +
+          `invocation (SPEC 7, 7.2, 14.14, 12.0)`,
+      );
+      const finding = expectErrorDocument(result, label);
+      assertSameJson(
+        {
+          code: finding.code,
+          path: finding.path,
+          locations: finding.locations.map((location) => location.file),
+        },
+        {
+          code: "configuration-error",
+          path: T7_7_CONFIG_PATH,
+          locations: [],
+        },
+        `${label}: the error document's one finding carries the stable code ` +
+          `"configuration-error", locations [] (an unlocated condition), ` +
+          `and as its concerned path the path the upward search found, ` +
+          `whatever occupies it, in the anchoring form of 11.6 relative to ` +
+          `the invocation working directory — exactly "xspec.config.ts" ` +
+          `(SPEC 14, 12.7, 7; T12.7-3)`,
+      );
+      assertSnapshotsEqual(
+        before,
+        await snapshotDirectory(workspace.root),
+        `${label}: nothing is modified (SPEC 12.0, 12.1, 13.3; H-6) — no ` +
+          `source, derived file, or graph data changes, and the ` +
+          `configuration's entry, what it stores, and every target under ` +
+          `the root stay byte-identical`,
+      );
+      if (outsideDir !== undefined && outsideBefore !== undefined) {
+        assertSnapshotsEqual(
+          outsideBefore,
+          await snapshotDirectory(outsideDir),
+          `${label}: the link's target outside the workspace stays ` +
+            `byte-identical (TEST-SPEC T7-7)`,
+        );
+      }
+      await assertLockPathAbsent(
+        workspace.root,
+        `${label}: once it has ended (SPEC 12.0: the configuration error ` +
+          `precedes acquisition; 13.5)`,
+      );
+    }
+    const versionLabel = `${context}: \`version --json\` run from the workspace root`;
+    const versionRun = await runProduct(product, {
+      cwd: workspace.root,
+      argv: ["version", "--json"],
+    });
+    assertExitCode(
+      versionRun,
+      0,
+      `${versionLabel} — version consults no configuration, so the staged ` +
+        `configuration error is never met: exit 0 with its answer (SPEC ` +
+        `12.6, 14.14)`,
+    );
+    decodeVersionDocument(
+      parseJsonStdout(versionRun, versionLabel),
+      versionLabel,
+    );
+  });
+}
+
+const T7_7 = defineProductTest({
+  id: "T7-7",
+  title:
+    "validation on a built workspace: 7 and 14.14 bind every command that " +
+    "loads the configuration on a workspace whose graph data is current — " +
+    "(a) the root's xspec.config.ts replaced after a `build` by a symbolic " +
+    "link to a file holding its byte-identical content, the target inside " +
+    "the workspace at a path no group matches and separately outside it; " +
+    "(b) src/x.mdx created after a `build` at a path both a spec group " +
+    "(src/**/*.mdx) and a code group (src/**/*) match, the globs " +
+    "overlapping on no path occupied at the build — in each, `build`, " +
+    "`check`, `ids`, `occurrences`, `inventory`, `rename --preview`, and " +
+    "`rename` of an operation succeeding on the unstaged twin each exit 2 " +
+    "with the error document, code configuration-error, path " +
+    "xspec.config.ts, nothing modified, `.xspec/lock` absent afterwards, " +
+    "the link and its target byte-identical; `version` exits 0 (SPEC 7, " +
+    "7.2, 12.6, 12.7, 14.14)",
+  run: async (product) => {
+    // The premise first: the operation the arms drive succeeds on the
+    // unstaged twin, whose built graph data is current.
+    await runT77UnstagedTwin(product);
+    for (const arm of T7_7_ARMS) {
+      await runT77Arm(product, arm);
+    }
+  },
+});
+
+/**
+ * TEST-SPEC §7 basics T7-1…T7-3 and T7-7, in canonical ID order
+ * (SUITE-26).
+ */
 export const section7BasicsTests: readonly ProductTestEntry[] = [
   T7_1,
   T7_2,
   T7_3,
+  T7_7,
 ];

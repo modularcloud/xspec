@@ -412,6 +412,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // code source listed in `inventory`'s `sources` with its group
   // membership (11.6).
   "T7-6": ["7", "11.6", "12.0", "13.4", "14"],
+  // T7-7: its arm (b) the both-groups rule of 7.2 met on a built workspace,
+  // and `version` answering beside the staged configuration error (12.6),
+  // as T7-1's occupancy arms do.
+  "T7-7": ["7", "7.2", "12.6", "14"],
   "T7.1-1": ["7.1", "14"],
   "T7.2-1": ["7.2", "14"],
   "T7.3-1": ["7.3", "14"],
