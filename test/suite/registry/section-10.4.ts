@@ -18,9 +18,11 @@
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - Invalidation is observed through `review status --json` rows (read-time
-//   invalidation applies to every read, SPEC 10.4); T10.4-5 additionally pins
-//   all four reads — `status`, `next`, `show`, `export` — on both the
-//   invalidated reporting and session-file byte-identity.
+//   invalidation applies to every read, SPEC 10.4); T10.4-2's journal arm
+//   also reads `show` and `export`, whose payloads present the scope node's
+//   absence, and T10.4-5 pins all four reads — `status`, `next`, `show`,
+//   `export` — on both the invalidated reporting and session-file
+//   byte-identity.
 // - Every sensitivity arm asserts its staging premises via `query node`
 //   captures bracketing the edit: the hashes the arm targets must change and
 //   the hashes it must isolate must not (SPEC 5.5), and every control edit
@@ -46,8 +48,9 @@
 //   invalidation, no `review list` runs — its counts read stored statuses
 //   (SPEC 10.7) — and the staleness stands until the closing mutating
 //   `resolve`, so no answer turns on the stored status.
-// - Fixture edits are followed by an explicit `build` before any read, so no
-//   read relies on the 13.3 refresh path (that path is T13.3-*'s business).
+// - Fixture edits — T10.4-2's manual deletion of `.xspec/journal` included —
+//   are followed by an explicit `build` before any read, so no read relies
+//   on the 13.3 refresh path (that path is T13.3-*'s business).
 //
 // Sources staged after a body's first product invocation — T10.4-1's
 // sensitivity edits (each scenario's former `write()` closure over mutable
@@ -61,9 +64,10 @@
 // edit and T10.4-3's a.k edit, each between `gitCommitAll` and the first
 // `build`, and each body's first workspace's initial files. The initial
 // `.mdx` files of every later workspace — T10.4-1's five later scenarios,
-// T10.4-2's context and origin arms, T10.4-4's move and reintroduction arms
-// — are records too, passed as the `files` entries (S-9's before-any-product
-// clause covers a workspace created after the body's first invocation).
+// T10.4-2's context, origin, and journal arms, T10.4-4's move and
+// reintroduction arms — are records too, passed as the `files` entries
+// (S-9's before-any-product clause covers a workspace created after the
+// body's first invocation).
 // T10.4-4's reintroduction appends to bytes the rename wrote — no harness
 // constant equals them — so it is an anchored `workspace.edit()` (the tail's
 // uniqueness and end position diagnosed first, SPEC 6.4).
@@ -77,11 +81,13 @@
 // uncovered-requirement scenario).
 
 import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
 import type {
   ItemStatus,
   NodeHashes,
   NodeReport,
   ReviewItem,
+  SessionListEntry,
   SessionStatusReport,
   SessionStatusRow,
 } from "../../helpers/adapters/index.js";
@@ -91,6 +97,7 @@ import {
   decodeItemReport,
   decodeNextReport,
   decodeNodeReport,
+  decodeSessionListReport,
   decodeSessionStatusReport,
 } from "../../helpers/adapters/index.js";
 import {
@@ -1693,11 +1700,35 @@ function t2oDSpec(dAttrs: string | null): string {
   return [...d, '<S id="e">', "Ee text.", "</S>", ""].join("\n");
 }
 
+// Journal arm (SPEC 10.4: a node is also absent when its identity ceases to
+// resolve through the journal): an audit session over top-level leaves `a`
+// and `s`. `rename` a→b journals the mapping (6.1, 6.4), and a's item —
+// presented under b thereafter (10.4) — is resolved `no-change`, recording
+// its scope node as the canonical identity (a, the journal's start) (5.4).
+// Deleting `.xspec/journal` by hand then leaves a valid workspace with an
+// empty journal (6.1), under which b's canonical identity is (b, the
+// journal's start) and the recorded one resolves to no node: reads present
+// the item `invalidated`, its scope node absent under `a` — the recorded
+// identity mapped forward through the now-empty journal (10.4) — and the
+// `updated` resolve of s's item re-derives the session (10.5, 10.6), adding
+// a distinct item scoped at b beside the original, which keeps its id and
+// its stored `no-change` (`list` counts stored statuses, 10.7). A product
+// recording the node by its spelled identity at the resolve (b) reads the
+// item still resolved and adds no item for b. The deletion is a fixture
+// edit like the others, an explicit `build` following it.
+const T2J_FILE = "specs/J.mdx";
+const T2J_ROOT = "specs/J.mdx";
+const T2J_A = "specs/J.mdx#a";
+const T2J_B = "specs/J.mdx#b";
+const T2J_S = "specs/J.mdx#s";
+const T2J_JOURNAL = ".xspec/journal";
+
 // T10.4-2's presence flips — every one staged after the body's first
 // `build` — are staged-source records (helpers/staged-mdx.ts, S-9: judged
 // before any product exists), the same template calls moved to module level;
-// the context and origin arms' initial files (below) are records too, the
-// first arm's X — the body's first workspace — a plain `files` entry.
+// the context, origin, and journal arms' initial files (below) are records
+// too, the first arm's X — the body's first workspace — a plain `files`
+// entry.
 const T10_4_2_X_DELETED = stagedMdx(
   "T10.4-2 specs/X.mdx with the scope node x deleted (y at v0)",
   t2Spec(false, "Wye text v0."),
@@ -1741,6 +1772,19 @@ const T10_4_2_T_INITIAL = stagedMdx(
 const T10_4_2_O_INITIAL = stagedMdx(
   "T10.4-2 specs/O.mdx with d beside e (the origin arm's initial source)",
   t2oDSpec(""),
+);
+const T10_4_2_J_INITIAL = stagedMdx(
+  "T10.4-2 specs/J.mdx with top-level leaves a and s (the journal arm's initial source)",
+  [
+    '<S id="a">',
+    "Aye text.",
+    "</S>",
+    "",
+    '<S id="s">',
+    "Ess text.",
+    "</S>",
+    "",
+  ].join("\n"),
 );
 
 /** Assert an item's context is exactly one node with the given presence. */
@@ -1799,10 +1843,118 @@ function assertSoleOrigin(
   );
 }
 
+/**
+ * The journal arm's `show` and `export` observation: the item reported
+ * `invalidated`, its scope node presented absent under `node` — the
+ * recorded canonical identity, which no longer resolves, mapped forward
+ * through the now-empty journal (SPEC 5.4, 6.1, 10.4, 10.7).
+ */
+function assertInvalidatedAbsentScope(
+  item: ReviewItem,
+  node: string,
+  context: string,
+): void {
+  if (
+    item.status === "invalidated" &&
+    item.scope.node === node &&
+    item.scope.present === false
+  ) {
+    return;
+  }
+  fail(
+    `${context}: expected the item reported invalidated with its scope ` +
+      `node presented absent under ${JSON.stringify(node)} — the identity ` +
+      `its resolve recorded, (a, the journal's start), resolves to no node ` +
+      `once the journal is empty, and reads present it mapped forward ` +
+      `through that journal (SPEC 5.4, 6.1, 10.4, 10.7); got status ` +
+      `${item.status} with scope ${JSON.stringify({
+        node: item.scope.node,
+        present: item.scope.present,
+      })} — a product recording the node by its spelled identity at the ` +
+      `resolve (b) reads the item still resolved`,
+  );
+}
+
+/**
+ * Assert a `status` row's presented scope identity and reported status
+ * (SPEC 10.4, 10.7), `why` naming the rule the expectation follows.
+ */
+function assertRowPresented(
+  report: SessionStatusReport,
+  id: string,
+  scope: string,
+  status: ItemStatus,
+  why: string,
+  context: string,
+): void {
+  const row = requireRowById(report, id, context);
+  if (row.scope === scope && row.status === status) return;
+  fail(
+    `${context}: expected item ${id} reported ${status} with its scope ` +
+      `node presented as ${scope} (${why}); got ${row.status} with scope ` +
+      row.scope,
+  );
+}
+
+/** `review list --json`'s entry for one healthy session (SPEC 10.7). */
+async function listedSession(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  context: string,
+): Promise<Extract<SessionListEntry, { corrupt: false }>> {
+  const label = `${context} \`review list --json\``;
+  const report = decodeSessionListReport(
+    await runJson(product, workspace, ["review", "list", "--json"], label),
+    label,
+  );
+  const entries = report.sessions.filter((entry) => entry.name === name);
+  if (entries.length !== 1) {
+    fail(
+      `${label}: expected exactly one listed session named ` +
+        `${JSON.stringify(name)} (SPEC 10.7: \`list\` reports every ` +
+        `session); found ${String(entries.length)} among ` +
+        JSON.stringify(report.sessions.map((entry) => entry.name)),
+    );
+  }
+  const entry = entries[0];
+  if (entry.corrupt) {
+    fail(
+      `${label}: session ${JSON.stringify(name)} is listed corrupt; the ` +
+        `product wrote it and nothing else touched it, so it must be listed ` +
+        `with its strategy and counts (SPEC 10.1, 10.7)`,
+    );
+  }
+  return entry;
+}
+
+/**
+ * A healthy `list` entry's counts, compared as `counts[status] ?? 0` per
+ * defined status — stored statuses, no read-time invalidation (SPEC 10.4,
+ * 10.7).
+ */
+function assertStoredCounts(
+  entry: Extract<SessionListEntry, { corrupt: false }>,
+  expected: Readonly<Record<ItemStatus, number>>,
+  context: string,
+): void {
+  for (const status of ITEM_STATUSES) {
+    const actual = entry.counts[status] ?? 0;
+    if (actual !== expected[status]) {
+      fail(
+        `${context}: \`review list\` counts session ${entry.name}'s items ` +
+          `by stored status — no read-time invalidation applied (SPEC 10.4, ` +
+          `10.7) — expected ${String(expected[status])} item(s) stored ` +
+          `${status}, got ${String(actual)}`,
+      );
+    }
+  }
+}
+
 const T10_4_2 = defineProductTest({
   id: "T10.4-2",
   title:
-    "presence changes: deleting a scope node after resolve invalidates the resolution (presence recorded present, node now absent); the item stays resolvable against absence, and a node already absent at resolve time does not invalidate by remaining absent across an unrelated edit — deletion review stays resolvable; restoring the node invalidates the resolution recorded against absence (presence changed in the other direction); non-scope presence recordings (presence is recorded for every scope, context, and origin node), each arm pure — no recorded relevant hash of the item and no generated context set changes, so only the named node's presence divergence can invalidate and a product recording presence for scope nodes alone reports the item still resolved: context arm (metadata-consistency) — baseline D bears a `d` reference to sibling T, one edit removes the reference and deletes T's section, `review create --base` derives D's item with the removed target T as context, recorded absent at resolve; re-authoring T reads the item `invalidated` through the context node's absent-to-present flip alone (D's metadataHash and the context set unchanged); origin arm (dependency-consistency) — baseline X depends on T, T depends on D (a section in its own file); a d-list edit on D derives X's item (scope X, context {T}, origin {D}); after resolve, one edit removes T's reference to D and deletes D's section — X's ownHash and metadataHash and T's subtreeHash unchanged (d-prop edits touch no own content, SPEC 1.6/5.5) and the context set stays {T} (T's effectiveHash still changed against the baseline), so the item reads `invalidated` through the origin node's present-to-absent flip alone (SPEC 1.6, 5.5, 5.6, 10.2, 10.3, 10.4, 10.5)",
+    "presence changes: deleting a scope node after resolve invalidates the resolution (presence recorded present, node now absent); the item stays resolvable against absence, and a node already absent at resolve time does not invalidate by remaining absent across an unrelated edit — deletion review stays resolvable; restoring the node invalidates the resolution recorded against absence (presence changed in the other direction); non-scope presence recordings (presence is recorded for every scope, context, and origin node), each arm pure — no recorded relevant hash of the item and no generated context set changes, so only the named node's presence divergence can invalidate and a product recording presence for scope nodes alone reports the item still resolved: context arm (metadata-consistency) — baseline D bears a `d` reference to sibling T, one edit removes the reference and deletes T's section, `review create --base` derives D's item with the removed target T as context, recorded absent at resolve; re-authoring T reads the item `invalidated` through the context node's absent-to-present flip alone (D's metadataHash and the context set unchanged); origin arm (dependency-consistency) — baseline X depends on T, T depends on D (a section in its own file); a d-list edit on D derives X's item (scope X, context {T}, origin {D}); after resolve, one edit removes T's reference to D and deletes D's section — X's ownHash and metadataHash and T's subtreeHash unchanged (d-prop edits touch no own content, SPEC 1.6/5.5) and the context set stays {T} (T's effectiveHash still changed against the baseline), so the item reads `invalidated` through the origin node's present-to-absent flip alone; journal arm (a node is also absent when its identity ceases to resolve through the journal) — in an audit session over top-level leaves a and s, `xspec rename` a→b, a's item (presented under b thereafter) resolved `no-change`, then `.xspec/journal` deleted by hand, leaving a valid workspace with an empty journal under which b's canonical identity is (b, the journal's start) and the recorded one, (a, the journal's start), resolves to no node: `status`, `show`, and `export` present the item `invalidated`, its scope node absent under a — the recorded identity mapped forward through the now-empty journal; once s's item is resolved `updated`, a distinct item scoped at b enters, `unresolved`, the original keeping its id and stored status (`list` counting it `no-change`) — a product recording the node by its spelled identity at the resolve (b) reads the item still resolved and adds no item for b (SPEC 1.6, 5.4, 5.5, 5.6, 6.1, 6.4, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -2307,6 +2459,234 @@ const T10_4_2 = defineProductTest({
           false,
           `${prefix} post-deletion — the origin node is presented under ` +
             `its current (absent) presence`,
+        );
+      },
+    );
+
+    // --- journal arm: a recorded identity that ceases to resolve -----------
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [T2J_FILE]: T10_4_2_J_INITIAL },
+      async (workspace) => {
+        const prefix = "T10.4-2 journal arm";
+        await buildOk(product, workspace, `${prefix} \`build\``);
+        await expectExit(
+          product,
+          workspace,
+          ["review", "create", "--strategy", "audit", "--name", "s"],
+          0,
+          `${prefix} \`review create --strategy audit --name s\``,
+        );
+        const created = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          kindScopeSet(created),
+          [
+            `subtree-coherence ${T2J_ROOT}`,
+            `subtree-coherence ${T2J_A}`,
+            `subtree-coherence ${T2J_S}`,
+          ].sort(),
+          `${prefix}: audit creates one subtree-coherence item per node, ` +
+            `root included (SPEC 10.6)`,
+        );
+        const rootId = requireRow(
+          created,
+          "subtree-coherence",
+          T2J_ROOT,
+          prefix,
+        ).id;
+        const aId = requireRow(created, "subtree-coherence", T2J_A, prefix).id;
+        const sId = requireRow(created, "subtree-coherence", T2J_S, prefix).id;
+
+        // The journaled rename a→b: a's item is presented under b thereafter.
+        await expectExit(
+          product,
+          workspace,
+          ["rename", T2J_FILE, "a", "b"],
+          0,
+          `${prefix} \`rename specs/J.mdx a b\``,
+        );
+        const journalKind = await workspace.kind(T2J_JOURNAL);
+        if (journalKind !== "file") {
+          fail(
+            `${prefix}: staging premise — after the rename \`.xspec/journal\` ` +
+              `must be a plain file holding its entry (SPEC 6.1: the file ` +
+              `comes into existence with the first journaled operation; ` +
+              `SPEC 6.4: rename appends the mapping to the journal), so ` +
+              `deleting it empties the journal; found ${journalKind}`,
+          );
+        }
+        const afterRename = `${prefix} after the rename`;
+        assertRowPresented(
+          await sessionStatus(product, workspace, "s", afterRename),
+          aId,
+          T2J_B,
+          "unresolved",
+          "reads present a recorded node under its current identity, and a " +
+            "journaled rename by itself changes no status (SPEC 10.4)",
+          afterRename,
+        );
+
+        // Resolve a's item: its scope node recorded as the canonical
+        // identity (a, the journal's start) (SPEC 5.4, 10.4).
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          aId,
+          "no-change",
+          `${prefix} \`review resolve s <a's item, presented under b> ` +
+            `--status no-change\``,
+        );
+        const afterResolve = `${prefix} sanity after the resolve`;
+        assertRowPresented(
+          await sessionStatus(product, workspace, "s", afterResolve),
+          aId,
+          T2J_B,
+          "no-change",
+          "the fresh resolution matches the graph, its scope node still " +
+            "presented under b (SPEC 10.4)",
+          afterResolve,
+        );
+
+        // Delete the journal by hand: a workspace without the journal file
+        // has an empty journal and stays valid (SPEC 6.1).
+        await fsp.rm(workspace.path(T2J_JOURNAL));
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after deleting \`.xspec/journal\` — an ` +
+            `empty journal, the workspace valid (SPEC 6.1)`,
+        );
+
+        const afterDeletion = `${prefix} after deleting the journal`;
+        const deleted = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          afterDeletion,
+        );
+        assertRowPresented(
+          deleted,
+          aId,
+          T2J_A,
+          "invalidated",
+          "the identity its resolve recorded, (a, the journal's start), " +
+            "resolves to no node once the journal is empty — a recorded " +
+            "presence that changed — and reads present it mapped forward " +
+            "through that journal (SPEC 5.4, 6.1, 10.4); a product recording " +
+            "the node by its spelled identity at the resolve (b) reads the " +
+            "item still resolved",
+          `${afterDeletion} \`review status\``,
+        );
+        assertSameJson(
+          deleted.items.map((row) => [row.id, row.scope, row.status]).sort(),
+          (
+            [
+              [rootId, T2J_ROOT, "unresolved"],
+              [aId, T2J_A, "invalidated"],
+              [sId, T2J_S, "unresolved"],
+            ] as const
+          )
+            .map((row) => [...row])
+            .sort(),
+          `${afterDeletion}: still the three items — new items enter only ` +
+            `through re-derivation (SPEC 10.5), so b has no item of its own ` +
+            `yet`,
+        );
+        assertInvalidatedAbsentScope(
+          await showItem(product, workspace, "s", aId, afterDeletion),
+          T2J_A,
+          `${afterDeletion} \`review show\``,
+        );
+        const exportLabel = `${afterDeletion} \`review export s --json\``;
+        const exported = decodeExportReport(
+          await runJson(
+            product,
+            workspace,
+            ["review", "export", "s", "--json"],
+            exportLabel,
+          ),
+          exportLabel,
+        );
+        assertInvalidatedAbsentScope(
+          requireItem(exported.items, aId, exportLabel),
+          T2J_A,
+          exportLabel,
+        );
+
+        // The re-derivation: resolve s's item `updated` (SPEC 10.5, 10.6).
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          sId,
+          "updated",
+          `${prefix} \`review resolve s <s item> --status updated\` — ` +
+            `re-derivation`,
+        );
+        const afterRederive = `${prefix} after the updated-resolve`;
+        const rederived = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          afterRederive,
+        );
+        // b's generated item matches no existing item — the original's
+        // recorded identity no longer resolves — so a distinct item enters.
+        // A product matching by the spelled identity it recorded (b) finds
+        // the original here and adds no item for b.
+        const bRow = requireRow(
+          rederived,
+          "subtree-coherence",
+          T2J_B,
+          afterRederive,
+        );
+        if ([rootId, aId, sId].includes(bRow.id)) {
+          fail(
+            `${afterRederive}: the item scoped at b must be a distinct item ` +
+              `that entered at the re-derivation — the original's recorded ` +
+              `identity, (a, the journal's start), matches no generated item ` +
+              `once the journal is empty (SPEC 5.4, 10.4, 10.5) — but the ` +
+              `item scoped at b carries the existing id ${bRow.id}; a ` +
+              `product recording the node by its spelled identity at the ` +
+              `resolve (b) adds no item for b`,
+          );
+        }
+        if (bRow.status !== "unresolved") {
+          fail(
+            `${afterRederive}: the item scoped at b enters unresolved (SPEC ` +
+              `10.2, 10.5); got ${bRow.status}`,
+          );
+        }
+        assertSameJson(
+          rederived.items.map((row) => [row.id, row.scope, row.status]).sort(),
+          (
+            [
+              [rootId, T2J_ROOT, "unresolved"],
+              [aId, T2J_A, "invalidated"],
+              [sId, T2J_S, "updated"],
+              [bRow.id, T2J_B, "unresolved"],
+            ] as const
+          )
+            .map((row) => [...row])
+            .sort(),
+          `${afterRederive}: exactly four items — the original keeps its id, ` +
+            `still presented invalidated under a, beside the new item for b ` +
+            `(items that no longer generate remain in the session, SPEC 10.4, ` +
+            `10.5)`,
+        );
+        assertStoredCounts(
+          await listedSession(product, workspace, "s", afterRederive),
+          {
+            unresolved: 2,
+            updated: 1,
+            "no-change": 1,
+            skipped: 0,
+            invalidated: 0,
+          },
+          `${afterRederive}: the original keeps its stored status — \`list\` ` +
+            `counts it no-change beside the root's and b's unresolved items ` +
+            `and s's updated one`,
         );
       },
     );
