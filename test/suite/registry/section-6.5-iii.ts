@@ -3882,7 +3882,7 @@ const R16_FLOW_ORIGIN_STAGED = stagedMdx(
 );
 /** The text-position parent of (c)'s first arm, as a whole target file. */
 const R16_TEXT_PARENT = 'foo <S id="p">bar</S> baz\n';
-/** That parent as staged — one record (S-9) for (c)'s first parent, (g) terminated, (i), and the alone arms, with their T6.6-3 and T14-7 restagings. */
+/** That parent as staged — one record (S-9) for (c)'s first parent, (g) terminated and twice-spelled, (i), and the alone arms, with their T6.6-3 and T14-7 restagings. */
 const R16_TEXT_PARENT_STAGED = stagedMdx(
   "T6.5-16/T6.6-3/T14-7 specs/b.mdx the text-position parent, terminated",
   R16_TEXT_PARENT,
@@ -4497,7 +4497,9 @@ const R16_F_ARM: R16RefusedArm = {
 // the origin (no removal, 6.5), deriving. The finding locates, beside the
 // construct, the embedding's braced container — the spelling rooted at the
 // lacked binding, by its occurrence span (SPEC 5.7, 14) — both in the
-// origin, in start order (12.7).
+// origin, in start order (12.7); where the moved text spells that embedding
+// twice (`R16_G_TWICE_ARM`), both containers, every spelling rooted at the
+// lacked binding, no representative chosen (SPEC 14).
 const R16_G_THIRD = "specs/x.mdx";
 /** The third module — T6.5-13's byte for byte, staged as that one ledger record (S-9). */
 const R16_G_THIRD_STAGED = A13_THIRD_STAGED;
@@ -4516,9 +4518,16 @@ const R16_G_LOCATIONS: readonly R16Location[] = [
   r16Construct(R16_ORIGIN, R16_G_ORIGIN_KEPT, R16_G_MOVED),
   r16Construct(R16_ORIGIN, `${R16_G_ORIGIN_KEPT}<S id="m">x `, R16_G_CONTAINER),
 ];
-/** (c)'s first parent as the target insertion into `p.n` leaves it, the declaration absent, terminated or not. */
-function r16ComposedIntoP(terminated: boolean): string {
-  return `foo <S id="p">bar\n<S id="p.n">x ${R16_G_CONTAINER}</S>\n</S> baz${terminated ? "\n" : ""}`;
+/**
+ * (c)'s first parent as the target insertion into `p.n` leaves it, the
+ * declaration absent, terminated or not; `body` is the moved section's
+ * body — the one embedding unless an arm spells another.
+ */
+function r16ComposedIntoP(
+  terminated: boolean,
+  body = `x ${R16_G_CONTAINER}`,
+): string {
+  return `foo <S id="p">bar\n<S id="p.n">${body}</S>\n</S> baz${terminated ? "\n" : ""}`;
 }
 
 /**
@@ -4584,6 +4593,68 @@ function r16ArmG(name: string, terminated: boolean): R16RefusedArm {
     },
   };
 }
+
+// The twice-spelled variant: the moved text spells that embedding twice
+// instead, `<S id="m">x {text(X.a)} {text(X.a)}</S>` — one edge (SPEC 5.2),
+// two occurrences (5.7) — into the terminated target, whose offsets are
+// judged as above. The finding locates, beside the construct, both braced
+// containers — every spelling the operation roots at the lacked binding, no
+// representative chosen (SPEC 14) — all three in the origin, in start order
+// (12.7): a product locating one container per edge, or the first spelling
+// as the lacked binding's representative, fails the `locations` compare.
+const R16_G_TWICE_BODY = `x ${R16_G_CONTAINER} ${R16_G_CONTAINER}`;
+const R16_G_TWICE_MOVED = `<S id="m">${R16_G_TWICE_BODY}</S>`;
+const R16_G_TWICE_COMPOSED = r16ComposedIntoP(true, R16_G_TWICE_BODY);
+const R16_G_TWICE_ARM: R16RefusedArm = {
+  key: "(g) the twice-spelled embedding: both containers located",
+  summary:
+    "the target lacks the third module's binding both of the moved text's " +
+    "embeddings are rooted at (one edge, 5.2), and no offset admits the " +
+    "declaration: offset 0 absorbs the paragraph's first line into the " +
+    "block (14.20), the file's end follows a paragraph line, leaving the " +
+    "added line paragraph text, and every other offset splits the " +
+    "paragraph (SPEC 6.5); the finding locates both braced containers " +
+    "beside the construct, every spelling rooted at the lacked binding, no " +
+    "representative chosen (SPEC 14)",
+  files: {
+    [R16_ORIGIN]: stagedMdx(
+      "T6.5-16/T6.6-3/T14-7 (g) specs/a.mdx the origin holding k and m embedding X.a twice",
+      `${R16_G_ORIGIN_KEPT}${R16_G_TWICE_MOVED}\n`,
+    ),
+    [R16_TARGET]: R16_TEXT_PARENT_STAGED,
+    [R16_G_THIRD]: R16_G_THIRD_STAGED,
+  },
+  argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
+  illFormed: {},
+  wellFormed: { [R16_ORIGIN]: R16_G_ORIGIN_KEPT },
+  identities: [R16_TARGET],
+  locations: [
+    r16Construct(R16_ORIGIN, R16_G_ORIGIN_KEPT, R16_G_TWICE_MOVED),
+    r16Construct(
+      R16_ORIGIN,
+      `${R16_G_ORIGIN_KEPT}<S id="m">x `,
+      R16_G_CONTAINER,
+    ),
+    r16Construct(
+      R16_ORIGIN,
+      `${R16_G_ORIGIN_KEPT}<S id="m">x ${R16_G_CONTAINER} `,
+      R16_G_CONTAINER,
+    ),
+  ],
+  noOffset: {
+    file: R16_TARGET,
+    composed: R16_G_TWICE_COMPOSED,
+    probes: [
+      r16Probe("offset 0", R16_G_TWICE_COMPOSED, 0, false),
+      r16Probe(
+        "the file's end",
+        R16_G_TWICE_COMPOSED,
+        R16_G_TWICE_COMPOSED.length,
+        true,
+      ),
+    ],
+  },
+};
 
 // The pseudo-block twin: the same target headed by T6.5-13(l)'s paragraph
 // `// note`, U+000A, `import B from "./B.xspec"`, U+000A, U+000A — content,
@@ -5126,6 +5197,7 @@ export const R16_REFUSED_ARMS: readonly R16RefusedArm[] = [
   R16_F_ARM,
   r16ArmG("terminated", true),
   r16ArmG("unterminated", false),
+  R16_G_TWICE_ARM,
   R16_G_PSEUDO_ARM,
   r16ArmGTop("terminated", A13_D_TERMINATED_STAGED),
   r16ArmGTop("unterminated", A13_D_STAGED),
@@ -5614,7 +5686,7 @@ function r16ReadAddedIdentifier(
 const T6_5_16 = defineProductTest({
   id: "T6.5-16",
   title:
-    'refused-invalid-rewrite: a section-form move whose exact edits would leave a rewritten file other than well-formed MDX — the origin as its deletion leaves it, the target as its parent rewrite and insertion leave it or as its creation composes it, the one file when origin and target coincide — or a file the rewrite must add an import to holding no admissible offset, is refused: exit 1, nothing modified (the workspace byte-compared, the journal absent or byte-unchanged), exactly one `refused-invalid-rewrite` finding per operation, beside every other applicable reason, locating the moved section\'s construct range in the origin file plus, for an addition no offset admits, the reference spelling rooted at its binding by its occurrence span, its `identities` the concerned files\' workspace-relative paths in byte order, its `path` null; each arm\'s would-be text verified underivable, every other rewritten file\'s verified to derive, and each named offset of an addition none admits probed (S-9) from a valid pre-move workspace: (a) the `body</S>` variant — `foo <S id="m">`, then a space, a tab, or nothing, U+000A, `body</S>` — moved to top level; (b) the one-sided U+000C and U+000B spellings of 6.2\'s worked three-line shape; (c) a flow-position section, a self-closing section, and a single-line section holding nothing outside its tags, each moved into `foo <S id="p">bar</S> baz`, into the parent with its closing tag on a later line, and into the self-closing parent after its paired-form rewrite; (d) a deletion leaving a list marker, a setext underline, a flow-position tag, a flow-position expression, or the parent\'s own closing tag at its line\'s start inside a text-position parent, and the insertion-side counterpart leaving `<S id="p.s"> </S>` alone on its line; (e) a top-level insertion at the end of a file whose last line is an ESM block\'s, terminated and unterminated; (f) a section standing in a block quote, its moved text carrying the `>` prefixes of its interior lines; (g) a text-position target lacking the module the moved embedding is rooted at, terminated and unterminated, its pseudo-block twin headed by a paragraph of declarations, its top-level twin into the paragraph-ended `para`, terminated and unterminated, and its origin-side twin whose kept reference needs an import the unterminated origin holds no offset for — the finding locating the construct and the embedding\'s braced container; (h) the same-file variant, one path; (i) two files concerned, one finding, `identities` exactly ["specs/b.mdx", "specs/z.mdx"]; the applicability arms — (c)\'s shape beside `refused-id-collision`, that finding locating its one colliding bearer, the target\'s `p.n`, none beside, `identities` exactly ["specs/b.mdx#p.n"]; a missing target parent beside an origin deletion of shape (d), `identities` the origin alone, and, the origin clean, `refused-missing-target-parent` alone, `identities` exactly ["specs/b.mdx#q"]; (c)\'s shape under `p.then`, `refused-invalid-id` alone, `identities` exactly ["specs/b.mdx#p.then"]; and (a)\'s shape to the absent `specs/new.txt#y`, beside `refused-invalid-destination` with that path, and to `specs/new.mdx#y`, alone, nothing created; with the movable controls performed and byte-asserted, `check` and `build` clean — the in-line section `<S id="m">x</S>` into each of (c)\'s parents, (d)\'s plain-prose remainder ` more` kept as a paragraph-continuation line, (e)\'s declaration followed by the empty line ending its block, and (g)\'s in-line moved text to the top level of `<S id="p">`, `x`, `</S>`, the declaration at the end of the `</S>` line before the moved text and the root `changed` (SPEC 6.5, 6.2, 3, 2.1, 1.5, 1.7, 5.7, 14, 12.7, 14.20)',
+    'refused-invalid-rewrite: a section-form move whose exact edits would leave a rewritten file other than well-formed MDX — the origin as its deletion leaves it, the target as its parent rewrite and insertion leave it or as its creation composes it, the one file when origin and target coincide — or a file the rewrite must add an import to holding no admissible offset, is refused: exit 1, nothing modified (the workspace byte-compared, the journal absent or byte-unchanged), exactly one `refused-invalid-rewrite` finding per operation, beside every other applicable reason, locating the moved section\'s construct range in the origin file plus, for an addition no offset admits, every reference spelling rooted at its binding by its occurrence span, its `identities` the concerned files\' workspace-relative paths in byte order, its `path` null; each arm\'s would-be text verified underivable, every other rewritten file\'s verified to derive, and each named offset of an addition none admits probed (S-9) from a valid pre-move workspace: (a) the `body</S>` variant — `foo <S id="m">`, then a space, a tab, or nothing, U+000A, `body</S>` — moved to top level; (b) the one-sided U+000C and U+000B spellings of 6.2\'s worked three-line shape; (c) a flow-position section, a self-closing section, and a single-line section holding nothing outside its tags, each moved into `foo <S id="p">bar</S> baz`, into the parent with its closing tag on a later line, and into the self-closing parent after its paired-form rewrite; (d) a deletion leaving a list marker, a setext underline, a flow-position tag, a flow-position expression, or the parent\'s own closing tag at its line\'s start inside a text-position parent, and the insertion-side counterpart leaving `<S id="p.s"> </S>` alone on its line; (e) a top-level insertion at the end of a file whose last line is an ESM block\'s, terminated and unterminated; (f) a section standing in a block quote, its moved text carrying the `>` prefixes of its interior lines; (g) a text-position target lacking the module the moved embedding is rooted at, terminated and unterminated, the terminated target receiving the moved text spelling that embedding twice — one edge, both braced containers located beside the construct, no representative chosen — its pseudo-block twin headed by a paragraph of declarations, its top-level twin into the paragraph-ended `para`, terminated and unterminated, and its origin-side twin whose kept reference needs an import the unterminated origin holds no offset for — the finding locating the construct and the braced container of each spelling rooted at the lacked binding; (h) the same-file variant, one path; (i) two files concerned, one finding, `identities` exactly ["specs/b.mdx", "specs/z.mdx"]; the applicability arms — (c)\'s shape beside `refused-id-collision`, that finding locating its one colliding bearer, the target\'s `p.n`, none beside, `identities` exactly ["specs/b.mdx#p.n"]; a missing target parent beside an origin deletion of shape (d), `identities` the origin alone, and, the origin clean, `refused-missing-target-parent` alone, `identities` exactly ["specs/b.mdx#q"]; (c)\'s shape under `p.then`, `refused-invalid-id` alone, `identities` exactly ["specs/b.mdx#p.then"]; and (a)\'s shape to the absent `specs/new.txt#y`, beside `refused-invalid-destination` with that path, and to `specs/new.mdx#y`, alone, nothing created; with the movable controls performed and byte-asserted, `check` and `build` clean — the in-line section `<S id="m">x</S>` into each of (c)\'s parents, (d)\'s plain-prose remainder ` more` kept as a paragraph-continuation line, (e)\'s declaration followed by the empty line ending its block, and (g)\'s in-line moved text to the top level of `<S id="p">`, `x`, `</S>`, the declaration at the end of the `</S>` line before the moved text and the root `changed` (SPEC 6.5, 6.2, 3, 2.1, 1.5, 1.7, 5.7, 14, 12.7, 14.20)',
   run: async (product) => {
     for (const arm of R16_REFUSED_ARMS) {
       await runR16RefusedArm(product, arm);

@@ -551,7 +551,7 @@ describe("S-9: every form T6.5-15 stages or asserts as a move's result derives",
 // the ground of `refused-invalid-rewrite` (SPEC 6.5, 14.20).
 describe("S-9: every form T6.5-16 stages, or asserts as a control's result or a refused rewrite's deriving side, derives", () => {
   test("the vector set is non-empty and uniquely named", () => {
-    expect(R16_FORM_VECTORS.length).toBe(162);
+    expect(R16_FORM_VECTORS.length).toBe(168);
     expect(new Set(R16_FORM_VECTORS.map(([name]) => name)).size).toBe(
       R16_FORM_VECTORS.length,
     );
@@ -618,7 +618,7 @@ describe("S-9: every form T14-12's negative arms stage in a spec source does not
 
 describe("S-9: every would-be text T6.5-16 refuses does not derive", () => {
   test("the vector set is non-empty and uniquely named", () => {
-    expect(R16_REFUSED_VECTORS.length).toBe(38);
+    expect(R16_REFUSED_VECTORS.length).toBe(39);
     expect(new Set(R16_REFUSED_VECTORS.map(([name]) => name)).size).toBe(
       R16_REFUSED_VECTORS.length,
     );
