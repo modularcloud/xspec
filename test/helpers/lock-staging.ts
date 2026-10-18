@@ -27,6 +27,10 @@
 //   replacement-character spelling, leaving the class unreached). Each link
 //   target lies in a directory of its own beside the workspace root, in the
 //   workspace's temporary directory, so it is disposed with the workspace.
+//   `stageFifo(workspace, at)` makes a FIFO the same way at a path those
+//   stagings do not take — a durable file's path, `.xspec/journal`
+//   (T6.3-6(c), T13.4-13) — under an existing directory, never replacing
+//   an occupant nor creating a parent, verified as they are.
 // - Cautions the staging enforces, as usage errors. No plain file of the
 //   harness's own naming at the lock directory's top level (T13.5-10(b),
 //   (c); P-15): the entry form is the product's own (13.5), so such a file
@@ -378,6 +382,123 @@ export async function copyEntryIn(
     { kind: "file", content: entry.content, mode: entry.mode },
     false,
   );
+}
+
+/**
+ * Stage a FIFO of `mode` at `at`, a workspace-relative path the stagings
+ * above do not take — a durable file's path, `.xspec/journal` among them
+ * (TEST-SPEC T6.3-6(c), T13.4-13) — made as a leftover's FIFO is
+ * (`makeFifo`: `mkfifo` in a scratch directory beside the root, then a hard
+ * link at `at`; never opened). Its parent must be an existing directory (no
+ * symbolic link) and `at` unoccupied: this staging never replaces an
+ * occupant nor creates a parent, and the area's own path, the lock path,
+ * and everything under it are `stageLeftover`'s — each a usage error here,
+ * as is a path that is no relative path of names. Verified before it
+ * returns (module header): `at` reads back as a FIFO of `mode`, else
+ * `HarnessStagingError`. Returns the record `assertFifosIntact` takes.
+ */
+export async function stageFifo(
+  workspace: StagingWorkspace,
+  at: LeftoverName,
+  mode: number = DEFAULT_FIFO_MODE,
+): Promise<StagedLeftover> {
+  const atBytes = toBytes(at);
+  const shown = renderRel(atBytes);
+  requireLinux(shown);
+  const parentRel = relativeParent(atBytes, shown);
+  if (atBytes.equals(AREA_BYTES) || isLockPathBytes(atBytes)) {
+    throw new Error(
+      `stageFifo: ${shown} is the area's own path ${AREA_PATH}, the lock ` +
+        `path ${LOCK_PATH}, or lies under it — stage it with stageLeftover`,
+    );
+  }
+  if (!Number.isInteger(mode) || mode < 0 || mode > 0o777) {
+    throw new Error(
+      `stageFifo: ${shown}'s mode ${String(mode)} is no set of permission ` +
+        `bits (0 to 0o777)`,
+    );
+  }
+  if (isInside(workspace.root, path.join(workspace.tempRoot, "fifo-"))) {
+    throw new Error(
+      `stageFifo: ${workspace.tempRoot} lies inside the workspace ` +
+        `${workspace.root}; the FIFO's scratch must lie outside it (a ` +
+        `TestWorkspace's tempRoot, beside the root)`,
+    );
+  }
+  const rootBytes = Buffer.from(workspace.root);
+  const parentAbs =
+    parentRel === undefined ? rootBytes : joinBytes(rootBytes, parentRel);
+  const parent = await lstatOrUndefined(parentAbs);
+  if (parent === undefined || !parent.isDirectory()) {
+    throw new Error(
+      `stageFifo: ${shown}'s parent in ${workspace.root} is ` +
+        `${parent === undefined ? "absent" : kindName(parent)}, not a ` +
+        `directory; this staging creates no parent`,
+    );
+  }
+  const abs = joinBytes(rootBytes, atBytes);
+  if ((await lstatOrUndefined(abs)) !== undefined) {
+    throw new Error(
+      `stageFifo: ${shown} is occupied in ${workspace.root}; a staging ` +
+        `never replaces an occupant (clear it first)`,
+    );
+  }
+  await makeFifo(workspace, abs, mode);
+
+  // Read back: the staging took effect exactly as declared (E-1).
+  const key = atBytes.toString("latin1");
+  const expected = new Map<string, LeftoverState>([
+    [key, { kind: "fifo", mode }],
+  ]);
+  const tree = await captureTree(rootBytes, atBytes, true);
+  const mismatch = diffTrees(expected, tree, true, renderRel);
+  if (mismatch.length > 0) {
+    throw new HarnessStagingError(
+      STAGING,
+      shown,
+      `the staged FIFO does not read back as declared — the staging is ` +
+        `ineffective here (kind, mode):\n` +
+        mismatch.map((line) => `  - ${line}`).join("\n"),
+    );
+  }
+  return {
+    root: workspace.root,
+    at: atBytes,
+    tree,
+    outside: [],
+    fifos: [key],
+    createdParents: [],
+  };
+}
+
+/**
+ * `stageFifo`'s parent of a workspace-relative path of names (`a/b/c` →
+ * `a/b`; undefined for a single name, whose parent is the root): every
+ * `/`-separated segment a name as `nameBytes` judges one — nonempty, no NUL,
+ * never `.` or `..` — so no leading `/`, doubled separator, or ascent; a
+ * usage error otherwise.
+ */
+function relativeParent(rel: Buffer, shown: string): Buffer | undefined {
+  let start = 0;
+  let last = -1;
+  for (let end = 0; end <= rel.length; end += 1) {
+    if (end < rel.length && rel[end] !== SLASH) continue;
+    const segment = rel.subarray(start, end);
+    const invalid =
+      segment.length === 0 ||
+      segment.includes(NUL) ||
+      (segment.length === 1 && segment[0] === DOT) ||
+      (segment.length === 2 && segment[0] === DOT && segment[1] === DOT);
+    if (invalid) {
+      throw new Error(
+        `stageFifo: ${shown} is no workspace-relative path of names (a ` +
+          `segment empty, \`.\`, \`..\`, or holding a NUL byte)`,
+      );
+    }
+    if (end < rel.length) last = end;
+    start = end + 1;
+  }
+  return last < 0 ? undefined : rel.subarray(0, last);
 }
 
 async function stage(

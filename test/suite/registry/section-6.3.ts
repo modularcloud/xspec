@@ -1,8 +1,4 @@
-// TEST-SPEC §6.3 (baseline resolution) — SUITE-23: T6.3-1…T6.3-6. T6.3-6
-// is registered with its arms (a), (b)'s unresolvable-ref and
-// no-repository stagings, and (d); its arms (c) and (e) and (b)'s
-// refused-discovery staging follow at FIX_PLAN Task 48 of the plan
-// written at 2a2b94e.
+// TEST-SPEC §6.3 (baseline resolution) — SUITE-23: T6.3-1…T6.3-6.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -24,7 +20,9 @@
 // cannot be read or reconstructed is a usage error (12.0, exit 2) — a plain
 // one, its 12.7 error document's `code` and `path` `null` (T6.3-4), unlike
 // a journal error the resolution meets reading the current journal first
-// (14.13, T6.3-6) — and baseline resolution precedes source validation
+// (14.13, T6.3-6), and a plain one too where the environment refuses a read
+// of git data, the repository's discovery included, never a read failure
+// (14.25, T6.3-6(e)) — and baseline resolution precedes source validation
 // (12.0).
 //
 // Conservative operationalizations (noted per H-4):
@@ -105,17 +103,18 @@
 // - The absent-configuration arms: the offending file is the configuration
 //   absent at its repository-relative path in the ref's tree, so stderr
 //   must name it (`xspec.config.ts`).
-// - T6.3-6's journal error: T6.1-3's garbage line appended, as its own
-//   line, to the one-line journal the product's `rename specs/A.mdx a
-//   a2` wrote — read as a plain file first (`readJournal`) — on a
-//   workspace whose sources pass `build`. Where the arm's ref is `c1`
-//   ((a), (d)), `c1` is the all-inclusive commit taken before the
-//   append, its tree holding that one-entry journal
-//   (`assertJournalInTree`), so the garbage line is the one entry absent
-//   from the ref's journal: a product reading the current journal only
-//   through 6.3's replay meets it there as an unresolvable mapping, the
-//   code-less usage error the arm fails.
-// - Each T6.3-6 arm runs `impact --base <ref>`, then `review create
+// - T6.3-6's journal error, (a), (b), and (d): T6.1-3's garbage line
+//   appended, as its own line, to the one-line journal the product's
+//   `rename specs/A.mdx a a2` wrote — read as a plain file first
+//   (`readJournal`) — on a workspace whose sources pass `build`. Where
+//   the arm's ref is `c1` ((a), (c), (d)), `c1` is the all-inclusive
+//   commit taken before the append or the journal path's restaging, its
+//   tree holding that one-entry journal (`assertJournalInTree`), so the
+//   garbage line is the one entry absent from the ref's journal: a
+//   product reading the current journal only through 6.3's replay meets
+//   it there as an unresolvable mapping, the code-less usage error the
+//   arm fails.
+// - Each T6.3-6 arm (a)–(d) runs `impact --base <ref>`, then `review create
 //   --base <ref> --name n`, each with `--json` under a whole-root compare
 //   (H-6's lock-path exclusion applied: no session written; sources,
 //   journal, derived files, and graph data byte-identical): exit 2
@@ -136,7 +135,48 @@
 //   beside a commit so the repository is real; the no-repository
 //   staging is T6.3-5(c)'s — a workspace directory that is no
 //   repository, `--base HEAD` — behind H-1's ancestor precondition
-//   (`assertSelfContainedRoot`), verified before its first invocation.
+//   (`assertSelfContainedRoot`), verified before its first invocation;
+//   the refused discovery is (e)'s nested-repository staging, the garbage
+//   line appended to the journal the inner workspace's rename wrote
+//   (`build` and the rename run from `R` with `--config
+//   inner/xspec.config.ts`, as every run there is), `--base v1`.
+// - T6.3-6(c)'s journal-path stagings, each on its own workspace at
+//   `c1` (whose tree holds the journal the product wrote): the journal
+//   replaced by an empty directory; moved to the root's `journal-target`
+//   (out of the graph-data area, no group's file) and linked from the
+//   journal path (`../journal-target`), so a product reading through the
+//   link resolves `c1` normally; replaced by a FIFO
+//   (helpers/lock-staging.ts `stageFifo`, never opened by the harness),
+//   checked still a FIFO in place after each run (`assertFifosIntact`) —
+//   a product opening it blocks, ended by its run's own guard (S-3); and
+//   kept, its read permission removed around each run (T14-10's
+//   discipline, `stageReadRefusalOfFile`, verified on the harness). The
+//   FIFO and the permission removal are the Linux leg's.
+// - T6.3-6(e)'s git data: the object store `.git/objects`
+//   (`stageObjectStoreUnsearchable`, exported for T14-9's and T14-10(j)'s
+//   baseline arms), and the nested repository's inner `.git`, each staged
+//   mode 000 around each run (`stageDirectoryMode`, helpers/permissions.ts
+//   — the harness verifying on itself that its own listing of the
+//   directory and its own read of a file below it, `c1`'s loose object and
+//   `HEAD`, are refused, E-1), the Linux leg's. Each run's error document
+//   is pinned as T6.3-4's are — `code` and `path` `null`, never
+//   `read-failure` — its stderr unasserted (T6.3-6(e) pins no message: git
+//   data is no file 6.3 models, so no offending file is named). The
+//   baseline session `s` is created with `review create --base c1` before
+//   the staging, exit 0 — the premise that `c1` resolves unstaged — so
+//   `review status s` meets the recorded baseline (10.7) refused. Under a
+//   mode-000 git directory git's own discovery passes the directory by and
+//   walks on upward (its probe of a git directory reaches `HEAD`,
+//   `objects/`, and `refs/` inside it), so a product handing discovery to
+//   it finds the outer repository from `inner/` and answers against its
+//   `v1` — the arm's named failure.
+// - Every T6.3-6 staging a run carries — the unreadable journal, a
+//   mode-000 git directory — is made just before the run and restored in
+//   a `finally` once it ends, before anything is asserted on the result
+//   (`runUnderStaging`), inside the run's whole-root compare, whose
+//   snapshots are taken outside it: the harness's own walk, which can
+//   neither list a mode-000 directory nor read a `-w-------` file, never
+//   meets the staging.
 // - T6.3-6(d)'s failing sources: `specs/A.mdx` restaged after `c1` with
 //   the renamed section's unresolved local `d` reference (14.5), the
 //   premise `build --json` exiting 1 with at least one finding before
@@ -155,12 +195,14 @@
 // Staged-source records (TEST-SPEC S-9's before-any-product clause;
 // helpers/staged-mdx.ts, helpers/staged-ts.ts): every workspace a body here
 // creates after its first product invocation — T6.3-2's second arm, T6.3-4's
-// five later arms, T6.3-5's arms (b)–(d), T6.3-6's three stagings after (a)
-// — takes its initial `.mdx` sources and configuration files as ledger
+// five later arms, T6.3-5's arms (b)–(d), T6.3-6's stagings after (a) —
+// takes its initial `.mdx` sources and configuration files as ledger
 // records, judged by test/self/s9-staged-sources.test.ts before any product
 // exists; where a body's first workspace stages the same expression, the
 // record stands there too (converted uniformly). T6.3-6(d)'s failing
-// source, staged by `file()` after the arm's invocations, is a record too.
+// source, staged by `file()` after the arm's invocations, is a record too,
+// as are the nested-repository staging's inner sources T6.3-5 and T6.3-6
+// share (`stageNestedRepositories`).
 // T6.3-1's and T6.3-3's one workspace each precede any invocation and stay
 // plain.
 
@@ -183,6 +225,12 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { assertFifosIntact, stageFifo } from "../../helpers/lock-staging.js";
+import type { PermissionStaging } from "../../helpers/permissions.js";
+import {
+  stageDirectoryMode,
+  stageReadRefusalOfFile,
+} from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
@@ -200,6 +248,7 @@ import {
   buildOk,
   expectErrorDocument,
   expectExit,
+  runCli,
 } from "./support.js";
 
 // Exactly one spec group over specs/ (SPEC 7) — every fixture here except
@@ -245,19 +294,23 @@ async function withWorkspace<T>(
  * Read the journal's exact bytes, failing diagnosed (H-8) when the path does
  * not hold a plain file (SPEC 6.1: the file comes into existence with the
  * first journaled operation; 13.4: durable files are plain files).
+ * `journalPath` is relative to the root the harness built — the root
+ * workspace's journal by default, `inner/.xspec/journal` where the
+ * configuration names a workspace below it (T6.3-6's nested repository).
  */
 async function readJournal(
   workspace: TestWorkspace,
   context: string,
+  journalPath: string = JOURNAL_PATH,
 ): Promise<Uint8Array> {
-  const kind = await workspace.kind(JOURNAL_PATH);
+  const kind = await workspace.kind(journalPath);
   if (kind !== "file") {
     fail(
-      `${context}: expected the journal as a plain file at ${JOURNAL_PATH} ` +
+      `${context}: expected the journal as a plain file at ${journalPath} ` +
         `(SPEC 6.1, 13.4); found ${kind}`,
     );
   }
-  return await workspace.readBytes(JOURNAL_PATH);
+  return await workspace.readBytes(journalPath);
 }
 
 /**
@@ -1425,21 +1478,23 @@ function r5Source(text: string, withExtra: boolean): string {
 // section is ONE record (identical bytes), staged as an initial file at
 // (a)'s and (d)'s `sub/specs/A.mdx` ((a)'s workspace, the body's first,
 // converted uniformly), the submodule arm's `inner/specs/A.mdx`, and (c)'s
-// `specs/A.mdx`, and by `file()` as the nested-repository arm's inner v1;
-// the source with the extra section is that arm's initial
-// `inner/specs/A.mdx`, the outer v1. Arm (a)'s own edit precedes the body's
-// first invocation and stays a plain staging (S-7's sweep reaches it
-// against the stub).
+// `specs/A.mdx`, and by `file()` as the nested-repository staging's inner
+// v1; the source with the extra section is that staging's initial
+// `inner/specs/A.mdx`, the outer v1. T6.3-6's (b) and (e) make the same
+// nested-repository staging (`stageNestedRepositories`) after earlier
+// invocations, so its records name both tests. Arm (a)'s own edit precedes
+// the body's first invocation and stays a plain staging (S-7's sweep
+// reaches it against the stub).
 const T6_3_5_WITHOUT_EXTRA = stagedMdx(
-  "T6.3-5 specs/A.mdx without the extra section: (a) and (d) under sub/, (b) under inner/ (the nested repository's v1, the submodule's initial file), (c) at the root",
+  "T6.3-5/T6.3-6 specs/A.mdx without the extra section: T6.3-5 (a) and (d) under sub/, (b) under inner/ (the nested repository's v1, the submodule's initial file), (c) at the root; T6.3-6 (b) and (e) the nested repository's inner v1",
   r5Source(R5_TEXT_V0, false),
 );
 const T6_3_5_WITH_EXTRA = stagedMdx(
-  "T6.3-5 (b) nested-repository arm: inner/specs/A.mdx with the extra section, the outer repository's v1",
+  "T6.3-5/T6.3-6 nested-repository staging (T6.3-5 (b), T6.3-6 (b) and (e)): inner/specs/A.mdx with the extra section, the outer repository's v1",
   r5Source(R5_TEXT_V0, true),
 );
 const T6_3_5_INNER_EDITED = stagedMdx(
-  "T6.3-5 (b): the current edit of the inner workspace's source",
+  "T6.3-5/T6.3-6 nested-repository and submodule stagings: the current edit of the inner workspace's source",
   r5Source(R5_TEXT_V1, false),
 );
 
@@ -1497,6 +1552,67 @@ function assertDistinctTags(
       `tags must name two distinct commits; got outer ${outerV1}, inner ` +
       `${innerV1}`,
   );
+}
+
+/**
+ * The initial files of T6.3-5(b)'s nested-repository staging
+ * (`stageNestedRepositories`): the inner workspace at `inner/`, its source
+ * holding the extra section the outer repository's `v1` commits.
+ */
+const NESTED_REPOSITORY_FILES: Readonly<Record<string, InitialFileContents>> = {
+  [R5_INNER_CONFIG]: SPECS_ONLY_CONFIG,
+  [R5_INNER_A]: T6_3_5_WITH_EXTRA,
+};
+
+/** The two `v1` commits of a nested-repository staging. */
+interface NestedRepositories {
+  readonly innerV1: string;
+  readonly outerV1: string;
+}
+
+/**
+ * T6.3-5(b)'s nested-repository staging — the nested repository, not the
+ * submodule — on a workspace created with `NESTED_REPOSITORY_FILES` (T6.3-6
+ * stages it too: (b)'s refused discovery and (e)'s git data): the outer
+ * repository at the root commits the inner workspace's files, with the
+ * extra section, and tags `v1` before the inner repository exists; the
+ * inner repository at `inner/` then commits the workspace without the extra
+ * section and tags its own `v1`; the current edit of the inner source
+ * follows. The staging premises — two distinct `v1` commits, the extra
+ * section in the outer `v1`'s tree alone — fail diagnosed when unmet (H-8).
+ * Returns both commits.
+ */
+async function stageNestedRepositories(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<NestedRepositories> {
+  // The outer repository commits the inner workspace's files — with the
+  // extra section — and tags v1, before the inner repository exists.
+  await workspace.gitInit();
+  const outerV1 = await workspace.gitCommitAll(
+    "outer v1: the inner workspace's files, with the extra section",
+  );
+  await workspace.git(["tag", R5_TAG]);
+  // The inner repository's v1: the workspace without the extra section.
+  await workspace.file(R5_INNER_A, T6_3_5_WITHOUT_EXTRA);
+  const innerV1 = await initInnerRepositoryAtV1(workspace, R5_INNER);
+  assertDistinctTags(outerV1, innerV1, context);
+  const outerTree = (await workspace.git(["show", `${R5_TAG}:${R5_INNER_A}`]))
+    .stdout;
+  const innerTree = (
+    await workspace.git(["-C", R5_INNER, "show", `${R5_TAG}:${R5_A}`])
+  ).stdout;
+  if (!outerTree.includes('id="extra"') || innerTree.includes('id="extra"')) {
+    fail(
+      `${context} staging premise: the outer ${R5_TAG} must hold ` +
+        `${R5_INNER_A} with the extra section and the inner ${R5_TAG} ` +
+        `${R5_A} without it; got outer ${JSON.stringify(outerTree)}, ` +
+        `inner ${JSON.stringify(innerTree)}`,
+    );
+  }
+  // The current edit.
+  await workspace.file(R5_INNER_A, T6_3_5_INNER_EDITED);
+  return { innerV1, outerV1 };
 }
 
 /** Merge an impact report's entries per node identity (the SUITE-20 way). */
@@ -1794,54 +1910,20 @@ const T6_3_5 = defineProductTest({
     );
 
     // --- (b) Nested repositories: a nested repository ---
-    await withWorkspace(
-      {
-        [R5_INNER_CONFIG]: SPECS_ONLY_CONFIG,
-        [R5_INNER_A]: T6_3_5_WITH_EXTRA,
-      },
-      async (workspace) => {
-        const context = "T6.3-5 (b) nested-repository arm";
-        // The outer repository commits the inner workspace's files — with
-        // the extra section — and tags v1, before the inner repository
-        // exists.
-        await workspace.gitInit();
-        const outerV1 = await workspace.gitCommitAll(
-          "outer v1: the inner workspace's files, with the extra section",
-        );
-        await workspace.git(["tag", R5_TAG]);
-        // The inner repository's v1: the workspace without the extra
-        // section.
-        await workspace.file(R5_INNER_A, T6_3_5_WITHOUT_EXTRA);
-        const innerV1 = await initInnerRepositoryAtV1(workspace, R5_INNER);
-        assertDistinctTags(outerV1, innerV1, context);
-        const outerTree = (
-          await workspace.git(["show", `${R5_TAG}:${R5_INNER_A}`])
-        ).stdout;
-        const innerTree = (
-          await workspace.git(["-C", R5_INNER, "show", `${R5_TAG}:${R5_A}`])
-        ).stdout;
-        if (
-          !outerTree.includes('id="extra"') ||
-          innerTree.includes('id="extra"')
-        ) {
-          fail(
-            `${context} staging premise: the outer ${R5_TAG} must hold ` +
-              `${R5_INNER_A} with the extra section and the inner ${R5_TAG} ` +
-              `${R5_A} without it; got outer ${JSON.stringify(outerTree)}, ` +
-              `inner ${JSON.stringify(innerTree)}`,
-          );
-        }
-        // The current edit.
-        await workspace.file(R5_INNER_A, T6_3_5_INNER_EDITED);
-        await runNestedRepositoryArm(
-          product,
-          workspace,
-          innerV1,
-          outerV1,
-          context,
-        );
-      },
-    );
+    await withWorkspace(NESTED_REPOSITORY_FILES, async (workspace) => {
+      const context = "T6.3-5 (b) nested-repository arm";
+      const { innerV1, outerV1 } = await stageNestedRepositories(
+        workspace,
+        context,
+      );
+      await runNestedRepositoryArm(
+        product,
+        workspace,
+        innerV1,
+        outerV1,
+        context,
+      );
+    });
 
     // --- (b) Nested repositories: a submodule ---
     await withWorkspace(
@@ -2043,24 +2125,48 @@ const T6_3_5 = defineProductTest({
 // SPEC 6.3: a given baseline's resolution — `impact --base` (9), `review
 // create --base` (10.7) — precedes the gate of 13.3 (12.0) and reads the
 // current journal before any other cause can fail it; a journal error
-// (14.13) there fails it as a usage error carrying condition 13's stable
-// code and concerned path (12.7), never as the gate's finding. Each staging
-// below is a fresh workspace (H-1) whose journal the product wrote — `build`
-// passing, then the journaled `rename specs/A.mdx a a2` — with the garbage
-// line appended to it, and each runs at both commands, every run exiting 2
-// and modifying nothing:
-// (a) on valid sources, `--base c1` — the error document's finding
-//     form-exact, and each command's human form;
-// (b) beside another cause that can fail the resolution, one staging each:
-//     an unresolvable ref (`--base nope`) and a configuration inside no
-//     repository's working tree (T6.3-5(c)'s staging, `--base HEAD`) —
-//     still the journal error, never the code-less error: the journal is
-//     read first;
-// (d) on sources that also fail `build`'s validations, `--base c1` — the
-//     journal error, never the gate's exit 1 (12.0: a given baseline is
-//     never so masked).
-// Arms (c) and (e) and (b)'s refused-discovery staging are not yet
-// registered (module header).
+// (14.13) there, whatever its form, fails it as a usage error carrying
+// condition 13's stable code and concerned path (12.7), never as the gate's
+// finding; and every other read a given or recorded baseline's resolution
+// makes is of git data — the repository's discovery and its stored data —
+// whose refusal leaves the baseline unreadable: a plain usage error, never
+// a read failure (14.25). Each staging below is a fresh workspace (H-1),
+// every run exiting 2 and modifying nothing. Arms (a)–(d) run at both
+// baseline-taking commands on a journal the product wrote — `build`
+// passing, then the journaled `rename specs/A.mdx a a2` — each staging's
+// journal error:
+// (a) the garbage line appended, on valid sources, `--base c1` — the error
+//     document's finding form-exact, and each command's human form;
+// (b) the garbage line beside another cause that can fail the resolution,
+//     one staging each: an unresolvable ref (`--base nope`), a
+//     configuration inside no repository's working tree (T6.3-5(c)'s
+//     staging, `--base HEAD`), and a refused discovery of the repository
+//     ((e)'s nested-repository staging, the garbage line appended to the
+//     inner workspace's journal, `--base v1` from `R` with `--config
+//     inner/xspec.config.ts`) — still the journal error, never the
+//     code-less error: the journal is read first;
+// (c) the journal path holding anything but a plain file, or content the
+//     environment refuses (13.4, 14.25), `--base c1`: a directory; a
+//     symbolic link to a plain file holding the journal the product wrote;
+//     a FIFO, never opened; and the journal, its read permission removed
+//     (T14-10's discipline) — never `read-failure`, never code-less;
+// (d) the garbage line on sources that also fail `build`'s validations,
+//     `--base c1` — the journal error, never the gate's exit 1 (12.0: a
+//     given baseline is never so masked).
+// (e) Git data refused, the sources, configuration, and journal valid and
+//     readable: the repository's object store staged mode 000 — `impact
+//     --base c1`, `review create --base c1 --name n`, and `review status s`
+//     of a baseline session created before the staging — and T6.3-5(b)'s
+//     nested repository with the inner `.git` directory staged mode 000 —
+//     `impact --base v1` and `review create --base v1 --name n` from `R`
+//     with `--config inner/xspec.config.ts` — each the plain usage error,
+//     `code` and `path` `null`: never `read-failure`, and never an answer
+//     computed against the outer repository's `v1` (the inner repository,
+//     whose working tree contains the configuration file, is still the
+//     innermost).
+// The FIFO, the unreadable journal, and the mode-000 git directories are
+// the Linux leg's stagings (`J6_ENVIRONMENT_STAGED`); the rest run on
+// every leg.
 
 // Deliberately structureless bytes no conforming entry format accepts —
 // T6.1-3's garbage line, shape-independent (H-4): never a duplicate or
@@ -2068,11 +2174,12 @@ const T6_3_5 = defineProductTest({
 // product-dependent.
 const J6_GARBAGE_LINE = "?? harness-injected garbage: not a journal entry ??";
 
-// The one source of every T6.3-6 workspace: section `a`, the subject of the
-// journaled rename that writes the journal the garbage line joins. Every
-// workspace after the first is created after the body's earlier
-// invocations, so its initial source is a staged-source record (module
-// header); the first workspace's is the same record, converted uniformly.
+// The one source of every T6.3-6 workspace at the root: section `a`, the
+// subject of the journaled rename that writes the journal the garbage line
+// joins. Every workspace after the first is created after the body's
+// earlier invocations, so its initial source is a staged-source record
+// (module header); the first workspace's is the same record, converted
+// uniformly. The nested-repository stagings take T6.3-5(b)'s records.
 const J6_FILE = "specs/A.mdx";
 const J6_SOURCE = stagedMdx(
   "T6.3-6 specs/A.mdx — every arm's valid source, section a the journaled rename's subject",
@@ -2098,10 +2205,48 @@ const J6_UNRESOLVABLE_REF = "nope";
 // The session name every refused `review create --base` run here asks for.
 const J6_SESSION = "n";
 
+// (e)'s baseline session, created before the staging refuses git data — the
+// session `review status s` names (TEST-SPEC T6.3-6(e)).
+const J6_BASELINE_SESSION = "s";
+
+// The nested-repository stagings' runs, each from `R` naming the inner
+// workspace's configuration (SPEC 7: the workspace root is the
+// configuration file's directory, so the journal the garbage line joins is
+// the inner workspace's).
+const J6_INNER_CONFIG_ARGS: readonly string[] = ["--config", R5_INNER_CONFIG];
+const J6_INNER_JOURNAL = `${R5_INNER}/${JOURNAL_PATH}`;
+
+// (c)'s symbolic link's target: the journal the product wrote, moved to the
+// workspace root (T6.1-3's and T13.4-6's staging) — out of the graph-data
+// area, whose layout is unenumerated (SPEC 13.3), so nothing staged inside
+// it could be told apart from graph data — where no configured group's
+// glob matches it (SPEC 7), the journal path's occupant staying the
+// workspace's one defect.
+const J6_LINK_TARGET = "journal-target";
+
+// (b)'s and (e)'s git directories: read, write, and search all removed
+// (helpers/permissions.ts, Directory modes), so their listing, every
+// examination below them, and every read below them are refused, by
+// whatever route a product takes.
+const J6_UNSEARCHABLE_MODE = 0o000;
+
+/**
+ * Whether T6.3-6's environment stagings run: (c)'s FIFO and unreadable
+ * journal, (b)'s refused discovery, and (e)'s refused git data — FIFOs and
+ * permission removals, the Linux leg's (E-1), each permission staging
+ * verified on the harness itself before any product sees it, an
+ * ineffective one (a privileged runner) a harness error, never a pass or a
+ * skip (H-9, H-11). On any other platform the other stagings alone run
+ * (the NU3_STAGED pattern of section-11.5).
+ */
+const J6_ENVIRONMENT_STAGED = process.platform === "linux";
+
 // The journal error a given baseline's resolution reports (SPEC 6.3, 12.7,
 // 14, 14.13; T12.7-3): condition 13's stable code and its concerned path,
 // the journal path — what the `--json` error document carries and the
-// human form's standard-error message must carry too (T12.0-15).
+// human form's standard-error message must carry too (T12.0-15). The path
+// is workspace-relative, so the nested repository's inner journal is
+// `.xspec/journal` too.
 const J6_JOURNAL_ERROR: ErrorInformation = {
   code: "journal-error",
   path: JOURNAL_PATH,
@@ -2111,43 +2256,53 @@ const J6_JOURNAL_ERROR: ErrorInformation = {
  * T6.3-6's journal staging on a fresh workspace, before the arm's ref is
  * fixed: `build` exit 0 — the sources valid (SPEC 12.1) — then the
  * journaled `rename specs/A.mdx a a2`, the operation that writes the
- * journal (SPEC 6.1).
+ * journal (SPEC 6.1); each run from the root, given `configArgs` (`--config
+ * inner/xspec.config.ts` on the nested repository, whose inner journal the
+ * rename then writes).
  */
 async function buildAndRename(
   product: ProductBinding,
   workspace: TestWorkspace,
   context: string,
+  configArgs: readonly string[] = [],
 ): Promise<void> {
-  await buildOk(
+  const shown = configArgs.length === 0 ? "" : ` ${configArgs.join(" ")}`;
+  await expectExit(
     product,
     workspace,
-    `${context}: \`build\` (staging premise: the sources are valid)`,
+    ["build", ...configArgs],
+    0,
+    `${context}: \`build${shown}\` (staging premise: the sources are valid)`,
   );
   await expectExit(
     product,
     workspace,
-    ["rename", J6_FILE, "a", "a2"],
+    ["rename", J6_FILE, "a", "a2", ...configArgs],
     0,
-    `${context}: \`rename ${J6_FILE} a a2\` (the journaled operation ` +
-      `writing the journal the garbage line joins)`,
+    `${context}: \`rename ${J6_FILE} a a2${shown}\` (the journaled ` +
+      `operation writing the journal the garbage line joins)`,
   );
 }
 
 /**
  * Append the garbage line to the journal the product wrote (module header):
- * the journal read as a plain file at `.xspec/journal` (`readJournal`)
- * holding the one line its rename appended (`assertJournalLines`), then the
- * garbage appended as its own line — the product's final line terminated
- * first if it left the terminator off, so the tampering is a whole-line
- * append under either line convention (T6.1-3's staging).
+ * the journal read as a plain file at `journalPath` (`readJournal`; the
+ * root workspace's by default, the inner workspace's on the nested
+ * repository) holding the one line its rename appended
+ * (`assertJournalLines`), then the garbage appended as its own line — the
+ * product's final line terminated first if it left the terminator off, so
+ * the tampering is a whole-line append under either line convention
+ * (T6.1-3's staging).
  */
 async function appendGarbageLine(
   workspace: TestWorkspace,
   context: string,
+  journalPath: string = JOURNAL_PATH,
 ): Promise<void> {
   const journal = await readJournal(
     workspace,
     `${context}: before appending the garbage line`,
+    journalPath,
   );
   assertJournalLines(
     journal,
@@ -2158,7 +2313,7 @@ async function appendGarbageLine(
   );
   const needsTerminator = journal[journal.length - 1] !== LF;
   await workspace.file(
-    JOURNAL_PATH,
+    journalPath,
     Buffer.concat([
       journal,
       Buffer.from(
@@ -2170,11 +2325,13 @@ async function appendGarbageLine(
 }
 
 /**
- * (a)'s and (d)'s repository: the workspace's git repository initialized,
- * the journal staged (`buildAndRename`), and `c1` — the all-inclusive
- * commit, its tree holding the one-entry journal the rename wrote
- * (`assertJournalInTree`), so the garbage line appended after it is the one
- * entry absent from the ref's journal — returned.
+ * The repository of (a), (c), (d), and (e)'s object-store arm: the
+ * workspace's git repository initialized, the journal staged
+ * (`buildAndRename`), and `c1` — the all-inclusive commit, its tree holding
+ * the one-entry journal the rename wrote (`assertJournalInTree`), so the
+ * garbage line appended after it is the one entry absent from the ref's
+ * journal, and a product reading (c)'s linked journal resolves `c1`
+ * normally — returned.
  */
 async function stageRepositoryAtC1(
   product: ProductBinding,
@@ -2191,18 +2348,56 @@ async function stageRepositoryAtC1(
 }
 
 /**
+ * What a T6.3-6 staging holds around each command's run beyond the
+ * workspace's own state: a staging made just before the run and restored
+ * once it ends (`runUnderStaging`) — so the run's whole-root compare, whose
+ * snapshots are taken outside it, reads what the staging refuses (the
+ * unreadable journal, a mode-000 git directory) — and a check of the
+ * staged occupant once the run has ended (a FIFO still a FIFO in place:
+ * never opened, TEST-SPEC S-3). Neither: the workspace's state alone.
+ */
+interface J6RunStaging {
+  /** Made just before each run; restored once it ends. */
+  readonly stage?: () => Promise<PermissionStaging>;
+  /** Asserted once each run has ended, `label` naming the run. */
+  readonly check?: (label: string) => Promise<void>;
+}
+
+/**
+ * Run `argv` from the workspace root under `staging`'s staging, made just
+ * before the run and restored in a `finally` once it ends — before
+ * anything is asserted on its result, so no assertion meets the staging.
+ */
+async function runUnderStaging(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  staging: J6RunStaging,
+): Promise<RunResult> {
+  let made: PermissionStaging | undefined;
+  try {
+    made = await staging.stage?.();
+    return await runCli(product, workspace, argv);
+  } finally {
+    if (made !== undefined) await made.restore();
+  }
+}
+
+/**
  * T6.3-6's journal error at one baseline-taking command (`argv`, run with
- * `--json` from the workspace root), under a whole-root compare — H-6's
- * lock-path exclusion applied: no session written; sources, journal,
- * derived files, and graph data byte-identical (SPEC 6.3, 10.7, 12.0):
- * exit 2 exactly (a usage error, SPEC 6.3, 12.0; `why` says what the exit
- * code rules out), the single 12.7 error document as the entire stdout —
- * no report, no validation findings (12.0, H-5) — and its finding the
- * journal error, form-exact: `code` `"journal-error"`, `path`
- * `".xspec/journal"`, and `locations` `[]` (12.7, 14, 14.13; T12.7-3) — a
- * journal condition has no in-source location, so the error names the
- * offending line, never locating it — never the code-less baseline error.
- * `message` and `identities` are informational (module header).
+ * `--json` from the workspace root under `staging`), under a whole-root
+ * compare taken outside the staging — H-6's lock-path exclusion applied: no
+ * session written; sources, journal, derived files, and graph data
+ * byte-identical (SPEC 6.3, 10.7, 12.0): exit 2 exactly (a usage error,
+ * SPEC 6.3, 12.0; `why` says what the exit code rules out), the single
+ * 12.7 error document as the entire stdout — no report, no validation
+ * findings (12.0, H-5) — and its finding the journal error, form-exact:
+ * `code` `"journal-error"`, `path` `".xspec/journal"`, and `locations` `[]`
+ * (12.7, 14, 14.13; T12.7-3) — a journal condition has no in-source
+ * location, so the error names the offending line, never locating it —
+ * never the code-less baseline error nor `read-failure`; then the
+ * staging's check. `message` and `identities` are informational (module
+ * header).
  */
 async function expectJournalErrorAt(
   product: ProductBinding,
@@ -2210,15 +2405,20 @@ async function expectJournalErrorAt(
   argv: readonly string[],
   why: string,
   context: string,
+  staging: J6RunStaging = {},
 ): Promise<void> {
   const label = `${context}: \`${[...argv, "--json"].join(" ")}\``;
   await assertLeavesUnchanged(
     workspace.root,
     async () => {
-      const result = await expectExit(
+      const result = await runUnderStaging(
         product,
         workspace,
         [...argv, "--json"],
+        staging,
+      );
+      assertExitCode(
+        result,
         2,
         `${label} — the given baseline's resolution reads the current ` +
           `journal before any other cause can fail it, and a journal error ` +
@@ -2238,12 +2438,13 @@ async function expectJournalErrorAt(
           locations: [],
         },
         `${label}: the error reported is the journal error with its stable ` +
-          `code and concerned path, never the code-less baseline error — ` +
-          `\`code\` "journal-error", \`path\` ".xspec/journal", and empty ` +
-          `\`locations\`, a journal condition having no in-source location ` +
-          `(SPEC 6.3, 12.7, 14, 14.13; T12.7-3) (message: ` +
-          `${JSON.stringify(error.message)})`,
+          `code and concerned path, never the code-less baseline error nor ` +
+          `\`read-failure\` — \`code\` "journal-error", \`path\` ` +
+          `".xspec/journal", and empty \`locations\`, a journal condition ` +
+          `having no in-source location (SPEC 6.3, 12.7, 14, 14.13, 14.25; ` +
+          `T12.7-3) (message: ${JSON.stringify(error.message)})`,
       );
+      await staging.check?.(label);
     },
     `${label}: a given baseline's resolution failing modifies nothing — no ` +
       `session written; sources, journal, derived files, and graph data ` +
@@ -2255,29 +2456,29 @@ async function expectJournalErrorAt(
  * The human form of T6.3-6's journal error at one baseline-taking command
  * (T6.3-6(a); TEST-SPEC T12.0-15, H-5): `argv` without `--json`, run after
  * its `--json` twin on the same state — the twin modified nothing — under
- * its own whole-root compare: exit 2 exactly, standard output empty (SPEC
- * 12.0: with JSON output not in effect, an exit-2 error leaves standard
- * output empty), and the standard-error message, the error's only report,
- * decoded by the exit-2 adapter (`decodeHumanErrorMessage`,
+ * `staging` and its own whole-root compare: exit 2 exactly, standard output
+ * empty (SPEC 12.0: with JSON output not in effect, an exit-2 error leaves
+ * standard output empty), and the standard-error message, the error's only
+ * report, decoded by the exit-2 adapter (`decodeHumanErrorMessage`,
  * helpers/adapters/human-reports.ts) and carrying the code `journal-error`
  * and the concerned path `.xspec/journal` its twin's error document carries
  * (`assertHumanErrorMessageCarries`) — wording free (H-3), a message
- * omitting either failing.
+ * omitting either failing; then the staging's check.
  */
 async function expectHumanJournalErrorAt(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
   context: string,
+  staging: J6RunStaging = {},
 ): Promise<void> {
   const label = `${context}: \`${argv.join(" ")}\` (human form)`;
   await assertLeavesUnchanged(
     workspace.root,
     async () => {
-      const result = await expectExit(
-        product,
-        workspace,
-        argv,
+      const result = await runUnderStaging(product, workspace, argv, staging);
+      assertExitCode(
+        result,
         2,
         `${label} — the output form never changes an exit code: exit 2, as ` +
           `its --json twin (SPEC 12.0, 6.3)`,
@@ -2294,18 +2495,30 @@ async function expectHumanJournalErrorAt(
           `report, carries condition 13's stable code and concerned path ` +
           `(SPEC 12.0, 14, 14.13; TEST-SPEC T12.0-15, H-5)`,
       );
+      await staging.check?.(label);
     },
     `${label}: modifies nothing — no session written; sources, journal, ` +
       `derived files, and graph data byte-identical (SPEC 6.3, 10.7, 12.0)`,
   );
 }
 
+/** How `expectJournalErrorAtBothCommands` runs a staging's commands. */
+interface J6CommandOptions {
+  /** Each command's human form after its `--json` run too ((a)). */
+  readonly human?: boolean;
+  /** Appended to each command: `--config inner/xspec.config.ts` from `R`. */
+  readonly configArgs?: readonly string[];
+  /** Made around each run and checked after it. */
+  readonly staging?: J6RunStaging;
+}
+
 /**
  * One T6.3-6 staging at both baseline-taking commands, from the workspace
  * root: `impact --base <ref>`, then `review create --base <ref> --name n`,
- * each the journal error (`expectJournalErrorAt`) and — `human` set, (a) —
- * then its human form (`expectHumanJournalErrorAt`). `why` says what
- * besides the journal error stands in the workspace.
+ * each given `options.configArgs`, each the journal error
+ * (`expectJournalErrorAt`) under `options.staging` and — `options.human`
+ * set, (a) — then its human form (`expectHumanJournalErrorAt`). `why` says
+ * what besides the journal error stands in the workspace.
  */
 async function expectJournalErrorAtBothCommands(
   product: ProductBinding,
@@ -2313,24 +2526,241 @@ async function expectJournalErrorAtBothCommands(
   ref: string,
   why: string,
   context: string,
-  human: boolean,
+  options: J6CommandOptions = {},
 ): Promise<void> {
+  const configArgs = options.configArgs ?? [];
+  const staging = options.staging ?? {};
   const commands: readonly (readonly string[])[] = [
-    ["impact", "--base", ref],
-    ["review", "create", "--base", ref, "--name", J6_SESSION],
+    ["impact", "--base", ref, ...configArgs],
+    ["review", "create", "--base", ref, "--name", J6_SESSION, ...configArgs],
   ];
   for (const argv of commands) {
-    await expectJournalErrorAt(product, workspace, argv, why, context);
-    if (human) {
-      await expectHumanJournalErrorAt(product, workspace, argv, context);
+    await expectJournalErrorAt(product, workspace, argv, why, context, staging);
+    if (options.human === true) {
+      await expectHumanJournalErrorAt(
+        product,
+        workspace,
+        argv,
+        context,
+        staging,
+      );
     }
   }
+}
+
+/** One of (c)'s journal-path stagings (SPEC 13.4, 14.13, 14.25). */
+interface J6JournalOccupant {
+  /** The arm's context, after "T6.3-6 ". */
+  readonly arm: string;
+  /** What occupies the journal path, for the diagnoses. */
+  readonly what: string;
+  /** A Linux-leg staging (`J6_ENVIRONMENT_STAGED`). */
+  readonly environment: boolean;
+  /**
+   * Stage the occupant on a workspace whose `.xspec/journal` is the plain
+   * file the product wrote (`c1`'s too), returning what each run carries.
+   */
+  readonly occupy: (workspace: TestWorkspace) => Promise<J6RunStaging>;
+}
+
+// (c)'s four stagings, in TEST-SPEC's order: anything but a plain file at
+// the journal path (SPEC 13.4: such a journal a journal error, 14.13), and
+// content the environment refuses (14.25's row for the journal: condition
+// 13). A product following the link reads `c1`'s own journal and resolves
+// normally; one treating any occupant as an absent, empty journal meets a
+// baseline journal that is no prefix of it — the code-less error; one
+// reading the FIFO blocks (no writer), its run's own guard ending it
+// (S-3); one meeting the refused read as condition 25 reports
+// `read-failure`: each fails.
+const J6_JOURNAL_OCCUPANTS: readonly J6JournalOccupant[] = [
+  {
+    arm: "(c) directory arm",
+    what: "a directory occupies the journal path",
+    environment: false,
+    occupy: async (workspace) => {
+      await fsp.rm(workspace.path(JOURNAL_PATH));
+      await workspace.dir(JOURNAL_PATH);
+      return {};
+    },
+  },
+  {
+    arm: "(c) symbolic-link arm",
+    what:
+      `a symbolic link occupies the journal path, to a plain file at ` +
+      `${J6_LINK_TARGET} holding the journal the product wrote — never ` +
+      `read through it (SPEC 13.4)`,
+    environment: false,
+    occupy: async (workspace) => {
+      await fsp.rename(
+        workspace.path(JOURNAL_PATH),
+        workspace.path(J6_LINK_TARGET),
+      );
+      await workspace.symlink(JOURNAL_PATH, `../${J6_LINK_TARGET}`);
+      return {};
+    },
+  },
+  {
+    arm: "(c) FIFO arm",
+    what:
+      "a FIFO occupies the journal path — never opened (TEST-SPEC " +
+      "T13.4-13, S-3)",
+    environment: true,
+    occupy: async (workspace) => {
+      await fsp.rm(workspace.path(JOURNAL_PATH));
+      const staged = await stageFifo(workspace, JOURNAL_PATH);
+      return {
+        check: async (label) =>
+          await assertFifosIntact(
+            staged,
+            `${label}: the FIFO at ${JOURNAL_PATH} still a FIFO in place — ` +
+              `termination and the FIFO in place are all "never opened" ` +
+              `asserts (TEST-SPEC S-3, T13.4-13)`,
+          ),
+      };
+    },
+  },
+  {
+    arm: "(c) unreadable-journal arm",
+    what:
+      "the journal the product wrote has its read permission removed " +
+      "(`-w-------`, T14-10's discipline), content the environment " +
+      "refuses to deliver (SPEC 14.25)",
+    environment: true,
+    occupy: async (workspace) => ({
+      stage: async () =>
+        await stageReadRefusalOfFile(workspace.path(JOURNAL_PATH)),
+    }),
+  },
+];
+
+/**
+ * The loose object file of `commit` below the object store,
+ * `<first two hex digits>/<the rest>` — git's loose-object layout, which
+ * `git commit` writes — the file (e)'s staging reads on the harness itself
+ * (E-1); `stageDirectoryMode` requires a plain file there before the mode
+ * changes, so a packed object is a staging error, never a verdict.
+ */
+function looseObjectPath(commit: string): string {
+  return `${commit.slice(0, 2)}/${commit.slice(2)}`;
+}
+
+/**
+ * A git directory refused (TEST-SPEC T6.3-6(b), (e)): `rel` — `.git/objects`,
+ * or the inner repository's `.git` — staged unreadable and unsearchable,
+ * mode 000, through `stageDirectoryMode` (helpers/permissions.ts,
+ * Directory modes), verified on the harness itself before it returns (E-1,
+ * T14-10's way): its own listing of the directory and its own read of the
+ * file `probe` below it refused. Its restore reinstates the mode where the
+ * directory still stands.
+ */
+async function stageGitDirectoryUnsearchable(
+  workspace: TestWorkspace,
+  rel: string,
+  probe: string,
+): Promise<PermissionStaging> {
+  return await stageDirectoryMode(workspace.path(rel), J6_UNSEARCHABLE_MODE, [
+    { attempt: "list", refused: true },
+    { attempt: "read", name: probe, refused: true },
+  ]);
+}
+
+/**
+ * T6.3-6(e)'s object-store staging, exported for the baseline arms of T14-9
+ * and T14-10(j), which stage the same refusal: the repository's object
+ * store `.git/objects` mode 000 (`stageGitDirectoryUnsearchable`), its
+ * probes the listing and the read of `commit`'s loose object file
+ * (`looseObjectPath`) — a commit the repository holds, written loose by
+ * `git commit`.
+ */
+export async function stageObjectStoreUnsearchable(
+  workspace: TestWorkspace,
+  commit: string,
+): Promise<PermissionStaging> {
+  return await stageGitDirectoryUnsearchable(
+    workspace,
+    ".git/objects",
+    looseObjectPath(commit),
+  );
+}
+
+/**
+ * (b)'s refused discovery and (e)'s nested-repository arm: the inner
+ * repository's `.git` mode 000 (`stageGitDirectoryUnsearchable`, its probes
+ * the listing and the read of `HEAD`), carried by each run — made just
+ * before it and restored once it ends (`runUnderStaging`).
+ */
+function innerGitUnsearchable(workspace: TestWorkspace): J6RunStaging {
+  return {
+    stage: async () =>
+      await stageGitDirectoryUnsearchable(
+        workspace,
+        `${R5_INNER}/.git`,
+        "HEAD",
+      ),
+  };
+}
+
+/**
+ * (e)'s refused git data at one baseline-resolving command (`argv`, run
+ * with `--json` from the workspace root under `staging`), under a
+ * whole-root compare taken outside the staging, H-6's lock-path exclusion
+ * applied: exit 2 exactly — the baseline unreadable, a usage error (SPEC
+ * 6.3, 10.7, 12.0) — the 12.7 error document as the entire stdout, and its
+ * finding the plain usage error, `code` and `path` `null` (12.7; T12.7-3):
+ * never `read-failure` (14.25: git data is no file this specification
+ * models, 6.3) nor any numbered condition's code; nothing modified — no
+ * session written; sources, journal, derived files, graph data, and
+ * `.git/` byte-identical. `why` says what the staging refuses.
+ */
+async function expectGitDataRefusedAt(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  staging: J6RunStaging,
+  why: string,
+  context: string,
+): Promise<void> {
+  const label = `${context}: \`${[...argv, "--json"].join(" ")}\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const result = await runUnderStaging(
+        product,
+        workspace,
+        [...argv, "--json"],
+        staging,
+      );
+      assertExitCode(
+        result,
+        2,
+        `${label} — ${why}: the baseline is unreadable, a usage error ` +
+          `(SPEC 6.3, 10.7, 12.0), never an answer`,
+      );
+      const error = expectErrorDocument(
+        result,
+        `${label} — under --json, the exit-2 error document is the entire ` +
+          `stdout (SPEC 12.0, 12.7, H-5)`,
+      );
+      assertSameJson(
+        { code: error.code, path: error.path },
+        { code: null, path: null },
+        `${label}: refused git data leaves the baseline unreadable, a plain ` +
+          `usage error — the error document's \`code\` and \`path\` ` +
+          `\`null\` (SPEC 6.3, 12.7; T12.7-3), never \`read-failure\` (14.25) ` +
+          `nor another condition's code (message: ` +
+          `${JSON.stringify(error.message)})`,
+      );
+    },
+    `${label}: modifies nothing — no session written; sources, journal, ` +
+      `derived files, graph data, and .git/ byte-identical (SPEC 6.3, 10.7, ` +
+      `12.0)`,
+  );
 }
 
 const T6_3_6 = defineProductTest({
   id: "T6.3-6",
   title:
-    "a given baseline's journal read: `impact --base` and `review create --base … --name n` read the current journal before any other cause can fail the resolution, a journal error there failing it as a usage error that carries condition 13's code and path — a garbage line appended to a journal the product wrote, on valid sources, makes each exit 2 with the error document's `code` `journal-error`, `path` `.xspec/journal`, and `locations` [] (without `--json`: standard output empty, the standard-error message carrying the code and the path); the same journal error beside an unresolvable ref (`--base nope`) and beside a configuration inside no repository's working tree (`--base HEAD`) is still `journal-error`, never the code-less error; and beside sources failing `build`'s validations exits 2 with `journal-error`, never the gate's exit 1 — every run modifying nothing, no session written (SPEC 6.3, 10.7, 12.0, 12.7, 14.13)",
+    "a given baseline's journal read, and git data: `impact --base` and `review create --base … --name n` read the current journal before any other cause can fail the resolution, a journal error there failing it as a usage error that carries condition 13's code and path — a garbage line appended to a journal the product wrote, on valid sources, makes each exit 2 with the error document's `code` `journal-error`, `path` `.xspec/journal`, and `locations` [] (without `--json`: standard output empty, the standard-error message carrying the code and the path); the same journal error beside an unresolvable ref (`--base nope`), beside a configuration inside no repository's working tree (`--base HEAD`), and beside a refused discovery of the repository (a nested repository's inner `.git` mode 000, `--base v1` from the outer root with `--config inner/xspec.config.ts`) is still `journal-error`, never the code-less error; the journal path holding a directory, a symbolic link to the journal the product wrote, or a FIFO (never opened), or the journal unreadable, is `journal-error` too, never `read-failure`; and beside sources failing `build`'s validations each exits 2 with `journal-error`, never the gate's exit 1; while git data refused — the object store mode 000 (`impact --base c1`, `review create --base c1 --name n`, and `review status s` of a baseline session) or a nested repository's inner `.git` mode 000 (`--base v1` from the outer root) — is the plain usage error, exit 2, `code` and `path` null, never `read-failure` and never an answer from the outer repository's `v1` — every run modifying nothing, no session written (SPEC 6.3, 10.7, 12.0, 12.7, 13.4, 14.13, 14.25)",
   run: async (product) => {
     // --- (a) The journal error on valid sources ---
     await withWorkspace(
@@ -2346,7 +2776,7 @@ const T6_3_6 = defineProductTest({
           "the sources and the ref are valid, so the journal error is the " +
             "one cause failing the resolution",
           context,
-          true,
+          { human: true },
         );
       },
     );
@@ -2368,7 +2798,6 @@ const T6_3_6 = defineProductTest({
             `journal is read first — a product resolving the ref before ` +
             `reading the journal reports the code-less error instead`,
           context,
-          false,
         );
       },
     );
@@ -2393,10 +2822,60 @@ const T6_3_6 = defineProductTest({
             "the repository before reading the journal reports the " +
             "code-less error instead",
           context,
-          false,
         );
       },
     );
+
+    // --- (b) The journal error beside a refused discovery of the
+    // repository ((e)'s nested-repository staging; the Linux leg's) ---
+    if (J6_ENVIRONMENT_STAGED) {
+      await withWorkspace(NESTED_REPOSITORY_FILES, async (workspace) => {
+        const context = "T6.3-6 (b) refused-discovery arm";
+        await stageNestedRepositories(workspace, context);
+        await buildAndRename(product, workspace, context, J6_INNER_CONFIG_ARGS);
+        await appendGarbageLine(workspace, context, J6_INNER_JOURNAL);
+        await expectJournalErrorAtBothCommands(
+          product,
+          workspace,
+          R5_TAG,
+          `the inner repository's .git directory is unreadable and ` +
+            `unsearchable (mode 000), so the repository's discovery is ` +
+            `refused (git data, SPEC 6.3), and the journal is read first — ` +
+            `a product discovering the repository before reading the ` +
+            `journal reports the code-less error instead, or, walking on ` +
+            `upward, resolves ${R5_TAG} in the outer repository`,
+          context,
+          {
+            configArgs: J6_INNER_CONFIG_ARGS,
+            staging: innerGitUnsearchable(workspace),
+          },
+        );
+      });
+    }
+
+    // --- (c) The journal path holding anything but a plain file, or
+    // content the environment refuses ---
+    for (const occupant of J6_JOURNAL_OCCUPANTS) {
+      if (occupant.environment && !J6_ENVIRONMENT_STAGED) continue;
+      await withWorkspace(
+        { "xspec.config.ts": SPECS_ONLY_CONFIG, [J6_FILE]: J6_SOURCE },
+        async (workspace) => {
+          const context = `T6.3-6 ${occupant.arm}`;
+          const c1 = await stageRepositoryAtC1(product, workspace, context);
+          const staging = await occupant.occupy(workspace);
+          await expectJournalErrorAtBothCommands(
+            product,
+            workspace,
+            c1,
+            `${occupant.what}: a journal error (SPEC 13.4, 14.13, 14.25), ` +
+              `whatever its form — never \`read-failure\`, never the ` +
+              `code-less error`,
+            context,
+            { staging },
+          );
+        },
+      );
+    }
 
     // --- (d) The journal error beside sources failing `build`'s
     // validations ---
@@ -2430,10 +2909,95 @@ const T6_3_6 = defineProductTest({
             "baseline is never masked by the gate — never exit 1 with its " +
             "findings (SPEC 12.0, 13.3)",
           context,
-          false,
         );
       },
     );
+
+    // --- (e) Git data refused (the Linux leg's) ---
+    if (J6_ENVIRONMENT_STAGED) {
+      // The repository's object store, unreadable and unsearchable.
+      await withWorkspace(
+        { "xspec.config.ts": SPECS_ONLY_CONFIG, [J6_FILE]: J6_SOURCE },
+        async (workspace) => {
+          const context = "T6.3-6 (e) object-store arm";
+          const c1 = await stageRepositoryAtC1(product, workspace, context);
+          await expectExit(
+            product,
+            workspace,
+            ["review", "create", "--base", c1, "--name", J6_BASELINE_SESSION],
+            0,
+            `${context}: \`review create --base c1 --name ` +
+              `${J6_BASELINE_SESSION}\` — the baseline session created ` +
+              `before the staging (premise: c1 resolves on the unstaged ` +
+              `repository, SPEC 6.3, 10.7)`,
+          );
+          const staging: J6RunStaging = {
+            stage: async () =>
+              await stageObjectStoreUnsearchable(workspace, c1),
+          };
+          const commands: readonly (readonly string[])[] = [
+            ["impact", "--base", c1],
+            ["review", "create", "--base", c1, "--name", J6_SESSION],
+            ["review", "status", J6_BASELINE_SESSION],
+          ];
+          for (const argv of commands) {
+            await expectGitDataRefusedAt(
+              product,
+              workspace,
+              argv,
+              staging,
+              "the repository's object store is unreadable and unsearchable " +
+                "(mode 000), the sources, configuration, and journal valid " +
+                "and readable — a given baseline, or the recorded one the " +
+                "baseline session names (SPEC 10.7), unreadable",
+              context,
+            );
+          }
+        },
+      );
+
+      // The repository's discovery: T6.3-5(b)'s nested repository, its
+      // inner `.git` directory unreadable and unsearchable.
+      await withWorkspace(NESTED_REPOSITORY_FILES, async (workspace) => {
+        const context = "T6.3-6 (e) nested-repository arm";
+        await stageNestedRepositories(workspace, context);
+        await expectExit(
+          product,
+          workspace,
+          ["build", ...J6_INNER_CONFIG_ARGS],
+          0,
+          `${context}: \`build ${J6_INNER_CONFIG_ARGS.join(" ")}\` from R ` +
+            `(staging premise: the inner workspace's sources are valid)`,
+        );
+        const staging = innerGitUnsearchable(workspace);
+        const commands: readonly (readonly string[])[] = [
+          ["impact", "--base", R5_TAG, ...J6_INNER_CONFIG_ARGS],
+          [
+            "review",
+            "create",
+            "--base",
+            R5_TAG,
+            "--name",
+            J6_SESSION,
+            ...J6_INNER_CONFIG_ARGS,
+          ],
+        ];
+        for (const argv of commands) {
+          await expectGitDataRefusedAt(
+            product,
+            workspace,
+            argv,
+            staging,
+            `the inner repository's .git directory is unreadable and ` +
+              `unsearchable (mode 000), so its discovery is refused (git ` +
+              `data, SPEC 6.3) — the inner repository, whose working tree ` +
+              `contains the configuration file, still the innermost, never ` +
+              `skipped for the outer repository's ${R5_TAG}`,
+            context,
+          );
+        }
+      });
+    }
   },
 });
 

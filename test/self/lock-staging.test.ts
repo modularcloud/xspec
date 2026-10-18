@@ -25,7 +25,10 @@
 //   addition, or a removal through any link, a dangling target created
 //   included, and passes once the links alone are removed; a staged FIFO
 //   lstat-checks as a FIFO, and `assertFifosIntact` fails once one is
-//   replaced or removed;
+//   replaced or removed; `stageFifo` stages one at a path the leftover
+//   stagings do not take (the journal path, T6.3-6(c)), never replacing an
+//   occupant nor creating a parent, and refuses the area's own path, the
+//   lock path and what lies under it, and a malformed path or mode;
 // - the stagings at the lock path itself, at the area's own path, and beside
 //   a lock directory's occupants create the parents they need, never
 //   replace an occupant, and refuse a misplaced staging, a directory at the
@@ -74,6 +77,7 @@ import {
   DEFAULT_FILE_MODE,
   DIRECTORY_MODE,
   killHeldRun,
+  stageFifo,
   stageLeftover,
   verifyContentReadRefused,
 } from "../helpers/lock-staging.js";
@@ -672,6 +676,89 @@ test("a staged FIFO lstat-checks as a FIFO, at the lock path and inside a lock d
   expectDiagnosed(
     await rejectionOf(assertFifosIntact(atLock, "removed")),
     /"\.xspec\/lock": nothing there/,
+  );
+});
+
+test("stageFifo stages a FIFO at a path the leftover stagings do not take — the journal path, a name that is not valid UTF-8 at the root, a nested source path — read back as a FIFO of its mode, its record serving assertFifosIntact; it never replaces an occupant nor creates a parent, and refuses the area's own path, the lock path and what lies under it, a path that is no relative path of names, and a mode beyond the permission bits, each a usage error staging nothing (T6.3-6(c), T13.4-13)", async () => {
+  const workspace = await makeWorkspace();
+  const root = workspace.root;
+  await fsp.mkdir(path.join(root, ".xspec"));
+  const journal = await stageFifo(workspace, ".xspec/journal");
+  const journalAbs = path.join(root, ".xspec", "journal");
+  expect((await fsp.lstat(journalAbs)).isFIFO()).toBe(true);
+  expect(await modeOf(journalAbs)).toBe(DEFAULT_FIFO_MODE);
+  expect(journal.root).toBe(root);
+  expect(journal.at).toEqual(ascii(".xspec/journal"));
+  expect(journal.fifos).toEqual([".xspec/journal"]);
+  expect([...journal.tree.entries()]).toEqual([
+    [".xspec/journal", { kind: "fifo", mode: DEFAULT_FIFO_MODE }],
+  ]);
+  expect(journal.outside).toEqual([]);
+  expect(journal.createdParents).toEqual([]);
+  await assertFifosIntact(journal, "a FIFO at the journal path");
+
+  const byName = await stageFifo(workspace, PIPE_BYTE_NAME, 0o600);
+  expect((await fsp.lstat(absOf(workspace, PIPE_BYTE_NAME))).isFIFO()).toBe(
+    true,
+  );
+  expect(await modeOf(absOf(workspace, PIPE_BYTE_NAME))).toBe(0o600);
+  await fsp.mkdir(path.join(root, "specs"));
+  const nested = await stageFifo(workspace, ascii("specs/B.mdx"));
+  expect(nested.fifos).toEqual(["specs/B.mdx"]);
+  await assertFifosIntact([journal, byName, nested], "all three");
+
+  // Refusals, each a usage error staging nothing.
+  await fsp.writeFile(path.join(root, "plain"), "");
+  await fsp.symlink("specs", path.join(root, "link"));
+  const refusals: readonly [string, string, RegExp, number?][] = [
+    ["an occupied path", "specs/B.mdx", /is occupied/],
+    ["an absent parent", "absent/x", /parent .* is absent, not a directory/],
+    ["a plain file as parent", "plain/x", /is a plain file, not a directory/],
+    ["a linked parent", "link/x", /is a symbolic link, not a directory/],
+    ["the area's own path", ".xspec", /stage it with stageLeftover/],
+    ["the lock path", ".xspec/lock", /stage it with stageLeftover/],
+    ["under the lock path", ".xspec/lock/x", /stage it with stageLeftover/],
+    ["a leading slash", "/x", /no workspace-relative path of names/],
+    ["a doubled separator", "specs//x", /no workspace-relative path/],
+    ["an ascent", "../x", /no workspace-relative path of names/],
+    ["a `.` segment", "./x", /no workspace-relative path of names/],
+    ["an empty path", "", /no workspace-relative path of names/],
+    ["a mode beyond the bits", "y", /no set of permission bits/, 0o1000],
+  ];
+  for (const [label, at, pattern, mode] of refusals) {
+    const refused = await rejectionOf(stageFifo(workspace, at, mode));
+    expect(refused, label).toBeInstanceOf(Error);
+    expect(refused, label).not.toBeInstanceOf(HarnessAssertionError);
+    expect(refused, label).not.toBeInstanceOf(HarnessStagingError);
+    expect((refused as Error).message, label).toMatch(pattern);
+  }
+  expect((await fsp.lstat(path.join(root, "specs", "B.mdx"))).isFIFO()).toBe(
+    true,
+  );
+  expect(await listing(root)).toEqual(
+    [
+      ascii(".xspec"),
+      PIPE_BYTE_NAME,
+      ascii("link"),
+      ascii("plain"),
+      ascii("specs"),
+    ]
+      .sort(Buffer.compare)
+      .map(hex),
+  );
+  expect(await listing(path.join(root, ".xspec"))).toEqual(
+    [ascii("journal")].map(hex),
+  );
+  expect(await listing(path.join(root, "specs"))).toEqual(
+    [ascii("B.mdx")].map(hex),
+  );
+
+  // The record's check catches the FIFO replaced.
+  await fsp.unlink(journalAbs);
+  await fsp.mkdir(journalAbs);
+  expectDiagnosed(
+    await rejectionOf(assertFifosIntact([journal, nested], "replaced")),
+    /"\.xspec\/journal": a directory/,
   );
 });
 
