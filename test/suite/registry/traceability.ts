@@ -117,15 +117,17 @@
 //   entry.
 // - Other cross-section keys mirror TEST-SPEC's stated coverage: T1.2-3
 //   asserts the root exclusions of 8.1/8.2; T7.4-2 asserts the required-set
-//   restrictions of 8.1 via coverage runs; T10.7-12 asserts 1.7's
-//   review-payload half of the two-range-presenting-outputs rule (the
-//   code-impact scope's named-unit construct range; TEST-SPEC 1.7 delegates
-//   it there from T1.7-1/T1.7-2); T10.7-13 asserts 10.4's current-identity
-//   presentation of a recorded node — its (c) arm's `d` targets and context
-//   presented under a journaled rename's new identity — and 12.7's
-//   coverage-attribute and tag-set value forms on the metadata pair;
-//   T10.7-14 asserts 12.7's findings-only form of a refused operation and
-//   the finding form it holds; and section 10's body (the review
+//   restrictions of 8.1 via coverage runs; T10.2-1 asserts 12.0's
+//   argument-value rule on the item IDs it observes — each a well-formed
+//   argument value naming its item as `review show`'s operand; T10.7-12
+//   asserts 1.7's review-payload half of the two-range-presenting-outputs
+//   rule (the code-impact scope's named-unit construct range; TEST-SPEC 1.7
+//   delegates it there from T1.7-1/T1.7-2); T10.7-13 asserts 10.4's
+//   current-identity presentation of a recorded node — its (c) arm's `d`
+//   targets and context presented under a journaled rename's new identity —
+//   and 12.7's coverage-attribute and tag-set value forms on the metadata
+//   pair; T10.7-14 asserts 12.7's findings-only form of a refused operation
+//   and the finding form it holds; and section 10's body (the review
 //   mechanism/strategy split and the three built-in strategies) is
 //   exercised by T10.5-1, T10.6-1 (generation per strategy), T10.7-1
 //   (strategy selection at `create`), and T10.7-4 (coverage sessions).
@@ -486,7 +488,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "13.5",
     "14",
   ],
-  "T10.2-1": ["10.2"],
+  "T10.2-1": ["10.2", "12.0"],
   "T10.2-2": ["10.2"],
   "T10.2-3": ["10.2"],
   "T10.2-4": ["10.2"],

@@ -15,6 +15,16 @@
 // passes their decoded JSON through whole for the tests to compare
 // (T10.2-2/4, T10.7-2).
 //
+// Item IDs (SPEC 10.2, 12.0; T10.2-1): every item ID the family presents —
+// a `status` row's `id`, an item's `id` at `next`, `show`, and `export`,
+// and each `blockedBy` entry — decodes through `decodeItemId`, which
+// requires a well-formed argument value (12.0): valid UTF-8, so no
+// unpaired surrogate (no UTF-8 encodes one), and free of U+FFFD — the two
+// things 12.0's argument-value rule bars, and 10.2 bounds every item ID by
+// it so that every item is nameable as an `<item-id>` operand. That bound
+// is SPEC's, never a fixture value (H-3), so every test observing an item
+// ID — P-9's draws included — fails loudly on one outside it.
+//
 // ASSUMED SHAPE:
 //   review list →
 //     { "sessions": [ { "name", "corrupt": true }
@@ -115,6 +125,68 @@ import {
   documentRootSite,
 } from "./forms.js";
 import { decodeSourceRange } from "./query.js";
+
+/**
+ * U+FFFD (REPLACEMENT CHARACTER), built from its code point so no tool
+ * layer can decode or normalize the spelling on the way into this file.
+ */
+const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
+
+/**
+ * The UTF-16 index of the first unpaired surrogate in `text` — a code unit
+ * no UTF-8 byte sequence encodes — or `undefined` when every surrogate
+ * belongs to a pair.
+ */
+function firstUnpairedSurrogate(text: string): number | undefined {
+  for (let index = 0; index < text.length; index += 1) {
+    const unit = text.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = text.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        index += 1;
+        continue;
+      }
+      return index;
+    }
+    if (unit >= 0xdc00 && unit <= 0xdfff) return index;
+  }
+  return undefined;
+}
+
+/**
+ * An item ID wherever a `review` output presents one — a `status` row's
+ * `id`, an item's `id`, a `blockedBy` entry (SPEC 10.2; T10.2-1): a
+ * non-empty string that is a well-formed argument value (12.0) — its bytes
+ * valid UTF-8, so no unpaired surrogate, and free of U+FFFD, the two things
+ * 12.0's argument-value rule bars — so that every item is nameable as an
+ * `<item-id>` operand. 10.2 bounds every item ID by that rule, a spec-fixed
+ * bound and not a fixture value (H-3), so an ID outside it fails loudly at
+ * every decode, whichever test observes it.
+ */
+function decodeItemId(value: unknown, site: DecodeSite): string {
+  const id = expectNonEmptyString(value, site);
+  const defects: string[] = [];
+  const replacement = id.indexOf(REPLACEMENT_CHARACTER);
+  if (replacement !== -1) {
+    defects.push(`U+FFFD at UTF-16 index ${String(replacement)}`);
+  }
+  const unpaired = firstUnpairedSurrogate(id);
+  if (unpaired !== undefined) {
+    defects.push(
+      `an unpaired surrogate at UTF-16 index ${String(unpaired)}, which no ` +
+        `UTF-8 encodes`,
+    );
+  }
+  if (defects.length === 0) return id;
+  decodeFail(
+    site,
+    `an item ID that is a well-formed argument value (SPEC 10.2, 12.0: ` +
+      `valid UTF-8 and free of U+FFFD, so that every item is nameable as ` +
+      `an <item-id> operand; TEST-SPEC T10.2-1), not one holding ` +
+      defects.join(" and "),
+    value,
+  );
+}
 
 /** Counts keyed by status: every value a non-negative integer. */
 function decodeCounts(
@@ -220,7 +292,7 @@ export function decodeSessionListReport(
 function decodeStatusRow(value: unknown, site: DecodeSite): SessionStatusRow {
   const obj = expectObject(value, site);
   return {
-    id: expectNonEmptyString(requiredKey(obj, "id", site), at(site, "id")),
+    id: decodeItemId(requiredKey(obj, "id", site), at(site, "id")),
     kind: expectToken(
       requiredKey(obj, "kind", site),
       ITEM_KINDS,
@@ -245,7 +317,8 @@ function decodeStatusRow(value: unknown, site: DecodeSite): SessionStatusRow {
 /**
  * `review status` (T10.7-6): items in item order with id, kind, scope,
  * status, and blocked state, plus totals by status (read-time invalidation
- * applied).
+ * applied). Each row's id is an item ID in 12.0's well-formed form
+ * (`decodeItemId`; T10.2-1).
  */
 export function decodeSessionStatusReport(
   doc: unknown,
@@ -432,13 +505,16 @@ function decodeMetadataPair(value: unknown, site: DecodeSite): MetadataPair {
  * `metadata-consistency` item's payload carries its scope node's metadata
  * pair (SPEC 10.7; T10.7-7, T10.7-13), required on that kind alone — every
  * `next --json`, `show`, and `export` decode of such an item fails loudly
- * without it — and never read on another kind.
+ * without it — and never read on another kind. The item's `id` and each
+ * `blockedBy` entry are item IDs in 12.0's well-formed form
+ * (`decodeItemId`; SPEC 10.2, T10.2-1).
  */
 export function decodeReviewItemValue(
   value: unknown,
   site: DecodeSite,
 ): ReviewItem {
   const obj = expectObject(value, site);
+  const blockedBySite = at(site, "blockedBy");
   const contextSite = at(site, "context");
   const originSite = at(site, "origin");
   const item: {
@@ -456,7 +532,7 @@ export function decodeReviewItemValue(
     baseline: unknown;
     current: unknown;
   } = {
-    id: expectNonEmptyString(requiredKey(obj, "id", site), at(site, "id")),
+    id: decodeItemId(requiredKey(obj, "id", site), at(site, "id")),
     kind: expectToken(
       requiredKey(obj, "kind", site),
       ITEM_KINDS,
@@ -471,10 +547,10 @@ export function decodeReviewItemValue(
       requiredKey(obj, "blocked", site),
       at(site, "blocked"),
     ),
-    blockedBy: expectNonEmptyStringArray(
+    blockedBy: expectArray(
       requiredKey(obj, "blockedBy", site),
-      at(site, "blockedBy"),
-    ),
+      blockedBySite,
+    ).map((element, index) => decodeItemId(element, at(blockedBySite, index))),
     reason: expectNonEmptyString(
       requiredKey(obj, "reason", site),
       at(site, "reason"),

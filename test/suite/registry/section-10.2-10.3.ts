@@ -39,6 +39,15 @@
 // - `status` totals are compared as `totals[status] ?? 0` per defined status:
 //   whether zero-count statuses appear as explicit entries is concrete-shape
 //   territory (H-3).
+// - Item IDs (T10.2-1; SPEC 10.2, 12.0): the review adapter decodes every
+//   item ID it meets — each `status` row's, each item's at `next`, `show`,
+//   and `export`, each `blockedBy` entry — as a well-formed argument value,
+//   failing loudly on U+FFFD or an unpaired surrogate (review.ts
+//   `decodeItemId`), so every ID any test observes is checked, P-9's draws
+//   included. T10.2-1 then names each representative item by its own `id`
+//   (`showRepresentativeItem`): `review show <name> <id>` exits 0 and
+//   presents that item — the id, kind, and scope node its `status` row
+//   reports.
 // - A refused `resolve` on a blocked item (T10.3-2) goes through T10.7-14's
 //   shared check (support.ts `expectReviewRefusal`): run with `--json`, exit
 //   1 (a refused review operation is a findings-class outcome, SPEC
@@ -548,13 +557,44 @@ function assertItemFields(
   }
   // `id`, `reason`, `baseline`, and `current` presence is enforced by the
   // adapter decode itself (H-3 fails loudly when required information is
-  // absent); their semantic content is T10.2-2/T10.2-4 business.
+  // absent), the `id`'s and each `blockedBy` entry's well-formed argument
+  // value (SPEC 10.2, 12.0) with it; `showRepresentativeItem` matches the
+  // `id` to the item named. The recorded states' semantic content is
+  // T10.2-2/T10.2-4 business.
+}
+
+/**
+ * T10.2-1's naming arm: the representative item of the `status` row `row`,
+ * named by its own `id` — `review show <name> <id>`, exit 0 (`runJson`) —
+ * presents that item: the `id`, kind, and scope node its row reports (SPEC
+ * 10.2: every item is nameable as an `<item-id>` operand, 12.0; SPEC 10.7:
+ * `show` reports the full item). The row's `id` already decoded as a
+ * well-formed argument value (12.0), as every item ID the review adapter
+ * meets does (review.ts `decodeItemId`).
+ */
+async function showRepresentativeItem(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  row: SessionStatusRow,
+  context: string,
+): Promise<ReviewItem> {
+  const item = await showItem(product, workspace, name, row.id, context);
+  assertSameJson(
+    { id: item.id, kind: item.kind, scope: item.scope.node },
+    { id: row.id, kind: row.kind, scope: row.scope },
+    `${context}: \`review show ${name} <id>\`, named by the item's own ` +
+      `\`id\`, presents that item — the id, kind, and scope node \`review ` +
+      `status\` reports for it (SPEC 10.2: every item is nameable as an ` +
+      `<item-id> operand, 12.0; SPEC 10.7)`,
+  );
+  return item;
 }
 
 const T10_2_1 = defineProductTest({
   id: "T10.2-1",
   title:
-    "`show` and `export` present every 10.2 field — id, kind, scope, context, reason, origin, baseline, current, status, note (after a `--note` resolve), blockedBy — for representative items of every built-in kind: a `--base` session deriving subtree-coherence, parent-consistency, metadata-consistency, dependency-consistency, and code-impact items, plus a coverage session's uncovered-requirement items; per item the kind, scope, context/origin identity sets, blockedBy, status, and blocked state are the spec-derived values, and `export`'s items carry the same information as `show`'s (SPEC 10.2, 10.5, 10.7)",
+    "`show` and `export` present every 10.2 field — id, kind, scope, context, reason, origin, baseline, current, status, note (after a `--note` resolve), blockedBy — for representative items of every built-in kind: a `--base` session deriving subtree-coherence, parent-consistency, metadata-consistency, dependency-consistency, and code-impact items, plus a coverage session's uncovered-requirement items; per item the kind, scope, context/origin identity sets, blockedBy, status, and blocked state are the spec-derived values, and `export`'s items carry the same information as `show`'s; every item `id` observed — `status` rows, items, `blockedBy` entries, as in every `review` decode, P-9's draws included — is a well-formed argument value, free of U+FFFD and of unpaired surrogates, and each representative item is named by its `id`: `review show <name> <id>` presents that item, exit 0 (SPEC 10.2, 10.5, 10.7, 12.0)",
   run: async (product) => {
     await withWorkspace(
       FULL_CONFIG,
@@ -722,22 +762,18 @@ const T10_2_1 = defineProductTest({
             },
           ],
         ];
+        // Each item named by its own `id` (SPEC 10.2, 12.0): `show`
+        // presents that item, exit 0.
         const shown = new Map<string, ReviewItem>();
         for (const [row, expected] of expectations) {
           const context = `T10.2-1 \`review show pb\` of the ${expected.kind} item`;
-          const decoded = await showItem(
+          const decoded = await showRepresentativeItem(
             product,
             workspace,
             "pb",
-            row.id,
+            row,
             context,
           );
-          if (decoded.id !== row.id) {
-            fail(
-              `${context}: \`show\` must report the item addressed by the ` +
-                `given id (SPEC 10.7); asked for ${row.id}, got ${decoded.id}`,
-            );
-          }
           assertItemFields(decoded, expected, context);
           shown.set(row.id, decoded);
         }
@@ -805,11 +841,11 @@ const T10_2_1 = defineProductTest({
             "T10.2-1 coverage session",
           );
           const context = `T10.2-1 \`review show cov\` of the uncovered-requirement item for ${scope}`;
-          const decoded = await showItem(
+          const decoded = await showRepresentativeItem(
             product,
             workspace,
             "cov",
-            row.id,
+            row,
             context,
           );
           assertItemFields(

@@ -908,6 +908,7 @@ export interface SessionStatusReport {
   readonly totals: Readonly<Record<string, number>>;
 }
 export interface SessionStatusRow {
+  /** An item ID: a well-formed argument value (SPEC.md 10.2, 12.0; T10.2-1). */
   readonly id: string;
   readonly kind: ItemKind;
   readonly scope: string;
@@ -989,10 +990,12 @@ export interface MetadataPair {
  * and compared whole (as decoded JSON) by the tests that assert them.
  */
 export interface ReviewItem {
+  /** An item ID: a well-formed argument value (SPEC.md 10.2, 12.0; T10.2-1). */
   readonly id: string;
   readonly kind: ItemKind;
   readonly status: ItemStatus;
   readonly blocked: boolean;
+  /** Item IDs, each a well-formed argument value (SPEC.md 10.2, 12.0). */
   readonly blockedBy: readonly string[];
   readonly reason: string;
   readonly note?: string;

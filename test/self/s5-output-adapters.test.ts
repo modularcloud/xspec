@@ -5272,6 +5272,147 @@ test("S-5: decoder context labels surface in diagnoses (two-document compares st
   expect(failure.message).toContain("second run");
 });
 
+// --- review item IDs: 12.0's well-formed argument values (T10.2-1) ----------
+
+/**
+ * Every place the `review` family presents an item ID (SPEC 10.2; the
+ * adapter's assumed shape, review.ts): `decode(id)` stages `id` there in a
+ * well-shaped document, decodes it, and returns the decoded value at that
+ * place; `path` is the JSON path a rejection names.
+ */
+const ITEM_ID_SITES: readonly {
+  readonly label: string;
+  readonly path: string;
+  readonly decode: (id: string) => string | undefined;
+}[] = [
+  {
+    label: "a `review status` row's id",
+    path: "$.items[0].id",
+    decode: (id) =>
+      decodeSessionStatusReport(put(GOOD_SESSION_STATUS, id, "items", 0, "id"))
+        .items[0]?.id,
+  },
+  {
+    label: "a `review show` item's id",
+    path: "$.id",
+    decode: (id) => decodeItemReport(put(GOOD_ITEM, id, "id")).id,
+  },
+  {
+    label: "a `review show` item's second blockedBy entry",
+    path: "$.blockedBy[1]",
+    decode: (id) =>
+      decodeItemReport(put(GOOD_ITEM, ["item-0", id], "blockedBy"))
+        .blockedBy[1],
+  },
+  {
+    label: "a `review next` item's id",
+    path: "$.item.id",
+    decode: (id) => decodeNextReport(put(GOOD_NEXT, id, "item", "id")).item?.id,
+  },
+  {
+    label: "a `review next` item's blockedBy entry",
+    path: "$.item.blockedBy[0]",
+    decode: (id) =>
+      decodeNextReport(put(GOOD_NEXT, [id], "item", "blockedBy")).item
+        ?.blockedBy[0],
+  },
+  {
+    label: "a `review export` item's id",
+    path: "$.items[0].id",
+    decode: (id) =>
+      decodeExportReport(put(GOOD_EXPORT, id, "items", 0, "id")).items[0]?.id,
+  },
+  {
+    label: "a `review export` item's blockedBy entry",
+    path: "$.items[0].blockedBy[0]",
+    decode: (id) =>
+      decodeExportReport(put(GOOD_EXPORT, [id], "items", 0, "blockedBy"))
+        .items[0]?.blockedBy[0],
+  },
+];
+
+// The exotic characters, built from their code points (no escape in this
+// file's text): U+FFFD, and the two halves of U+1F600's surrogate pair.
+const ID_REPLACEMENT = String.fromCodePoint(0xfffd);
+const ID_HIGH_SURROGATE = String.fromCharCode(0xd83d);
+const ID_LOW_SURROGATE = String.fromCharCode(0xde00);
+
+/** Item IDs 12.0's argument-value rule bars, each with the defect named. */
+const MALFORMED_ITEM_IDS: readonly {
+  readonly label: string;
+  readonly id: string;
+  readonly defect: string;
+}[] = [
+  {
+    label: "U+FFFD alone",
+    id: ID_REPLACEMENT,
+    defect: "U+FFFD at UTF-16 index 0",
+  },
+  {
+    label: "U+FFFD inside",
+    id: `item-${ID_REPLACEMENT}1`,
+    defect: "U+FFFD at UTF-16 index 5",
+  },
+  {
+    label: "a lone high surrogate at the end",
+    id: `item-1${ID_HIGH_SURROGATE}`,
+    defect: "an unpaired surrogate at UTF-16 index 6",
+  },
+  {
+    label: "a lone low surrogate at the start",
+    id: `${ID_LOW_SURROGATE}item-1`,
+    defect: "an unpaired surrogate at UTF-16 index 0",
+  },
+  {
+    label: "a surrogate pair's halves reversed",
+    id: `item-${ID_LOW_SURROGATE}${ID_HIGH_SURROGATE}`,
+    defect: "an unpaired surrogate at UTF-16 index 5",
+  },
+  {
+    label: "U+FFFD and a lone surrogate",
+    id: `${ID_REPLACEMENT}${ID_HIGH_SURROGATE}`,
+    defect:
+      "U+FFFD at UTF-16 index 0 and an unpaired surrogate at UTF-16 index 1",
+  },
+];
+
+/** Item IDs that are well-formed argument values, however exotic. */
+const WELL_FORMED_ITEM_IDS: readonly {
+  readonly label: string;
+  readonly id: string;
+}[] = [
+  {
+    label: "an astral character, a surrogate pair",
+    id: `item-${ID_HIGH_SURROGATE}${ID_LOW_SURROGATE}`,
+  },
+  {
+    label: "the noncharacter U+FFFF",
+    id: `item-${String.fromCodePoint(0xffff)}`,
+  },
+  {
+    label: "U+FFFC, U+FFFD's neighbor",
+    id: `item-${String.fromCodePoint(0xfffc)}`,
+  },
+];
+
+test("S-5: every review decode of an item ID — a status row's, an item's at show, next, and export, and each blockedBy entry — rejects one that is no well-formed argument value (U+FFFD, an unpaired surrogate) and passes every other through (SPEC 10.2, 12.0; T10.2-1)", () => {
+  for (const site of ITEM_ID_SITES) {
+    for (const { label, id } of WELL_FORMED_ITEM_IDS) {
+      expect(site.decode(id), `${site.label}: ${label}`).toBe(id);
+    }
+    for (const { label, id, defect } of MALFORMED_ITEM_IDS) {
+      const failure = expectDiagnosed(`${site.label}: ${label}`, () =>
+        site.decode(id),
+      );
+      expect(failure.message).toContain(
+        `at ${site.path}: expected an item ID that is a well-formed ` +
+          `argument value (SPEC 10.2, 12.0`,
+      );
+      expect(failure.message).toContain(`not one holding ${defect}`);
+    }
+  }
+});
+
 test("S-5: the usage-error conditions 14.24–14.26 decode as the error document's code and are rejected in a findings array as usage errors, never as unknown tokens", () => {
   // SPEC 14.24–14.26 are usage errors (12.0): each stable code is carried
   // only as the exit-2 error document's `code` (12.7; T14-6, T12.7-3), in
