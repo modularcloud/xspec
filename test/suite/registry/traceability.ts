@@ -420,9 +420,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // refusal its discovery must not meet — 14.25's absence at the read
   // scope's boundary, rule (c); its twin compares and outcomes are 7's.
   "T7-8": ["7", "14"],
-  "T7.1-1": ["7.1", "14"],
+  // T7.1-1: its wrong-case extension arm the byte-wise, case-sensitive
+  // extension test (12.0: no case folding), and `inventory`'s `derived`
+  // entry for the file without `.mdx` (11.6), `module` and `markdown` null
+  // since such a file generates and emits nothing (13.1).
+  "T7.1-1": ["7.1", "11.6", "12.0", "13.1", "14"],
   "T7.2-1": ["7.2", "14"],
-  "T7.3-1": ["7.3", "14"],
+  // T7.3-1: its single-casing `outDir` spellings, compared byte-wise with
+  // no case folding (12.0), valid beside the graph-data area's bar.
+  "T7.3-1": ["7.3", "12.0", "14"],
   "T7.4-1": ["7.4", "14"],
   "T7.4-2": ["7.4", "8.1"],
   "T7.5-1": ["7.5", "14"],

@@ -9,30 +9,37 @@
 // and rejects a product only via diagnosed assertion failures (H-8).
 //
 // SPEC 7.1: spec groups are named glob lists; a file MAY belong to multiple
-// groups; every matched file MUST have the `.mdx` extension, and its
-// workspace-relative path MUST NOT contain U+0022, U+0027, U+005C (the
-// backslash), U+000A, U+000D, U+2028, or U+2029, any other match being
-// invalid (14.19) — a bar binding spec groups alone, 14.19's code-source
-// forms being `#`, U+FFFD, and non-UTF-8. SPEC 7.2: code groups serve as
-// coverage boundaries and as the impacted-code population; a file matched
-// by both a spec and a code group is a configuration error (14.14). SPEC
-// 7.3: `markdown` absent → no emission; when present, `emit` (boolean) is
-// REQUIRED and controls emission; `outDir` redirects emitted files
-// preserving workspace-relative paths and is a directory path relative to
-// the workspace root spelled as one or more non-empty `/`-separated
-// segments, none `.` or `..` — the form of every workspace-relative path
-// (1.5, 7) — so that each emit destination (`outDir` joined by `/` to the
-// default workspace-relative path) is itself a plain workspace-relative
-// path; any other spelling — empty, beginning with `/`, or carrying a `.`,
-// `..`, or empty segment — is a configuration error (14.14), decided by
-// spelling alone, never by where the path would resolve; so is an `outDir`
-// of `.xspec` or beginning with `.xspec/` — no emit destination lies in the
+// groups; every matched file MUST have the `.mdx` extension — compared
+// byte-wise and case-sensitively, no case folding anywhere (12.0), so
+// `A.MDX` has none — and its workspace-relative path MUST NOT contain
+// U+0022, U+0027, U+005C (the backslash), U+000A, U+000D, U+2028, or
+// U+2029, any other match being invalid (14.19) — a bar binding spec groups
+// alone, 14.19's code-source forms being `#`, U+FFFD, and non-UTF-8; a
+// spec-group file without the extension generates and emits nothing, so
+// `inventory`'s `derived` entry for it carries `module` and `markdown`
+// `null` (13.1, 11.6). SPEC 7.2: code groups serve as coverage boundaries
+// and as the impacted-code population; a file matched by both a spec and a
+// code group is a configuration error (14.14). SPEC 7.3: `markdown` absent
+// → no emission; when present, `emit` (a boolean) is REQUIRED and controls
+// emission, and the optional `outDir` (a path) redirects emitted files
+// preserving workspace-relative paths — a well-formed literal of another
+// type for either field being a configuration error (14.14), never
+// coerced. `outDir` is a directory path relative to the workspace root
+// spelled as one or more non-empty `/`-separated segments, none `.` or
+// `..` — the form of every workspace-relative path (1.5, 7) — so that each
+// emit destination (`outDir` joined by `/` to the default
+// workspace-relative path) is itself a plain workspace-relative path; any
+// other spelling — empty, beginning with `/`, or carrying a `.`, `..`, or
+// empty segment — is a configuration error (14.14), decided by spelling
+// alone, never by where the path would resolve; so is an `outDir` of
+// `.xspec` or beginning with `.xspec/` — no emit destination lies in the
 // graph-data area (13.3), so graph data is the only derived file under it
-// (13.1, 13.4; 11.6's claim); the configured emit destinations exist
-// exactly while emission is enabled — with `emit: true` they are the
-// destination paths whether or not emission has yet run, with `markdown`
-// absent or `emit: false` no path is a destination, so the 13.4 exclusion
-// and the import rule of 4 have no Markdown component.
+// (13.1, 13.4; 11.6's claim) — the spelling compared byte-wise, with no
+// case folding (12.0), so `.XSPEC` names no area; the configured emit
+// destinations exist exactly while emission is enabled — with `emit: true`
+// they are the destination paths whether or not emission has yet run, with
+// `markdown` absent or `emit: false` no path is a destination, so the 13.4
+// exclusion and the import rule of 4 have no Markdown component.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — exit
@@ -64,6 +71,35 @@
 //   chain created as real directories (T13.4-8) — so a product testing the
 //   byte prefix `.xspec` without its segment boundary fails a control at
 //   the exit code, and one accepting the area fails its refused arm there.
+//   On the Linux leg the single-casing spellings `".XSPEC"` and
+//   `".XSPEC/md"` join the controls (12.0: compared byte-wise, no case
+//   folding), each valid and asserted the same way, so a product folding
+//   case in the bar fails one at the exit code; they are gated in the body
+//   (`process.platform === "linux"`, T7-6's gate for `.XSPEC/a.ts`): only
+//   there is `.XSPEC` a directory of its own, where a case-insensitive
+//   filesystem makes it the graph-data area itself.
+// - T7.3-1 wrong-type literals (SPEC 7.3, 7): `emit: "true"` (7.3: a
+//   boolean) and `outDir: true` (a path), one arm each, are 14.14 through
+//   the same refusal contract. Each literal is a form 7 admits — a static
+//   string literal, a boolean literal — so the configuration is refused by
+//   type, never by form (T7-2's number-for-boolean arm is refused by
+//   form); `outDir: true` stands beside `emit: true`, so a product coercing
+//   either literal builds the staged source — emitting it next to its
+//   source, or under `true/` — and fails its arm at the exit code.
+// - T7.1-1 wrong-case extension (SPEC 7.1, 12.0, 13.1, 11.6, 14.19):
+//   `specs/A.MDX`, holding `<S id="a">A</S>` and matched by the spec glob
+//   `specs/*.MDX` with emission enabled next to sources, alone in its
+//   workspace with condition-free content, so its one 14.19 finding — the
+//   stable code, `locations` empty, the path as concerned path — is the
+//   exact multiset of `build --json` and of `check --json` after it (the
+//   failed build writes nothing, so no record exists and `check` reports
+//   exactly `build`'s validation findings: SPEC 12.1, 12.2); `inventory
+//   --json` then answers exit 0 — it parses no sources, so it carries no
+//   14.19 (11.6) — listing the file in `sources` under its group and, as
+//   its `derived` entry, exactly `{source, module: null, markdown: null}`.
+//   A product folding case in the extension test builds the file cleanly
+//   (`build` exit 0) or derives its module and Markdown paths, failing at
+//   the exit code or at the derived entry.
 // - T7.1-1 coverage: profiles are looked up by name (T8.2-1 owns report
 //   ordering and the full report contract — counts and the ignored-node
 //   composition are not asserted here); "sees it in both" is asserted as the
@@ -114,26 +150,28 @@
 //   one staging site, T7.1-1's non-`.mdx`-match (its `specs/notes.txt`
 //   included: a spec-group file not named `.mdx` is an MDX source all the
 //   same, invalid by its name yet judged by 14.20, and a record at that
-//   path declares it a well-formed one), path-character (one record staged
-//   at every barred path), and code-source-control workspaces, T7.3-1's
-//   `EMISSION_FILES` (its first workspace's too, the map being shared) and
-//   destination workspaces — is a ledger record, judged by
-//   test/self/s9-staged-sources.test.ts before any product exists: the
-//   minimal `a` and `b` sources are section-7-basics.ts's shared records,
-//   staged byte-identically by the three §7 modules. T7.1-1's two-group
-//   workspace and T7.2-1's overlap workspace, each its body's first,
-//   precede any invocation and stay plain.
+//   path declares it a well-formed one), wrong-case-extension (its
+//   `specs/A.MDX` likewise: `.MDX` is no `.mdx`), path-character (one
+//   record staged at every barred path), and code-source-control
+//   workspaces, T7.3-1's `EMISSION_FILES` (its first workspace's too, the
+//   map being shared) and destination workspaces — is a ledger record,
+//   judged by test/self/s9-staged-sources.test.ts before any product
+//   exists: the minimal `a` and `b` sources are section-7-basics.ts's
+//   shared records, staged byte-identically by the three §7 modules.
+//   T7.1-1's two-group workspace and T7.2-1's overlap workspace, each its
+//   body's first, precede any invocation and stay plain.
 // - TypeScript staged-source records (TEST-SPEC S-9's TypeScript and
 //   timing clauses; helpers/staged-ts.ts): every configuration file and
 //   code source a body stages in a workspace created after its first
 //   product invocation — `expectConfigRefused`'s one staging site (its
-//   arm tables' rows each a record made at module load), T7.1-1's
-//   non-`.mdx`-match and path-character configurations and its
+//   arm tables' rows each a record made at module load: T7.3-1's
+//   wrong-type literals among them), T7.1-1's non-`.mdx`-match,
+//   wrong-case-extension, and path-character configurations and its
 //   code-source control's configuration and code source (the record
 //   staged at `src/it's<U+005C>x.ts`), T7.3-1's emission-matrix variants
 //   (the first's too, the table being one), outDir (its graph-data-area
-//   look-alikes' included), destination, and configuration-alone
-//   workspaces — is a ledger record carrying its S-9
+//   look-alikes' and single-casing spellings' included), destination, and
+//   configuration-alone workspaces — is a ledger record carrying its S-9
 //   declaration, judged by test/self/s9-staged-sources.test.ts before any
 //   product exists: every one well-formed, T7.3-1's destination code
 //   source at `specs/A.md` included (its record makes the path judged, a
@@ -159,6 +197,7 @@ import {
   decodeEdgesReport,
   decodeFindingsReport,
   decodeIdsReport,
+  decodeInventoryDocument,
   decodeViewReport,
 } from "../../helpers/adapters/index.js";
 import {
@@ -197,6 +236,7 @@ import {
   expectExit,
   expectFindingFreeReport,
   runCli,
+  runFindingsReport,
   runJson,
 } from "./support.js";
 
@@ -534,6 +574,137 @@ const NON_MDX_MATCH_NOTES = stagedMdx(
     "well-formed so the 14.19 is the workspace's only condition)",
   mdxSection("n"),
 );
+
+// --- T7.1-1's wrong-case extension arm (SPEC 7.1, 12.0, 13.1, 11.6) ----------
+//
+// `specs/A.MDX`, holding `<S id="a">A</S>` and matched by the spec glob
+// `specs/*.MDX` with emission enabled next to sources, has no `.mdx`
+// extension — 12.0 compares paths byte-wise and case-sensitively, with no
+// case folding anywhere — so it is invalid (14.19); a spec-group file
+// without the extension generates and emits nothing (13.1), so
+// `inventory`'s `derived` entry for it carries `module` and `markdown`
+// `null` (11.6). A single-casing arm, alone in its workspace (module
+// header): a product folding case in the extension test builds the file
+// cleanly, or derives a generated module and a Markdown destination for it.
+
+/** The arm's spec-group file, its extension spelled `.MDX`. */
+const WRONG_CASE_EXTENSION_PATH = "specs/A.MDX";
+
+// The arm's configuration: the one spec group's glob `specs/*.MDX`, and
+// emission enabled next to sources, so a product folding case would derive
+// the file a Markdown destination too. A staged-source record (module
+// header): T7.1-1 stages it after its first product invocation.
+const WRONG_CASE_EXTENSION_CONFIG = stagedTs(
+  "T7.1-1 xspec.config.ts (the wrong-case extension arm: the spec-group " +
+    "glob specs/*.MDX, emission enabled)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.MDX"]
+  },
+  markdown: { emit: true }
+})
+`,
+);
+
+// The arm's file content, exactly as T7.1-1 spells it: well-formed, so the
+// invalid path is the workspace's only condition and the exact
+// `{"14.19": 1}` has teeth. A staged-source record (module header): a
+// record at a path not named `.mdx` declares that path a well-formed MDX
+// source for its own write, so the ledger self-test judges it before any
+// product exists.
+const WRONG_CASE_EXTENSION_SOURCE = stagedMdx(
+  'T7.1-1 specs/A.MDX (<S id="a">A</S>: the wrong-case extension arm, a ' +
+    "spec-group file without .mdx, its content well-formed so the 14.19 is " +
+    "the workspace's only condition)",
+  '<S id="a">A</S>',
+);
+
+/**
+ * T7.1-1's wrong-case extension arm (module header): `build --json`, and
+ * `check --json` after it, report exactly `specs/A.MDX`'s condition-19
+ * finding, concerning its path; `inventory --json` answers exit 0, listing
+ * the file under its spec group, its `derived` entry's `module` and
+ * `markdown` `null` (SPEC 7.1, 12.0, 14.19, 12.1, 12.2, 13.1, 11.6).
+ */
+async function runWrongCaseExtensionArm(
+  product: ProductBinding,
+): Promise<void> {
+  const label =
+    `the spec-group file ${WRONG_CASE_EXTENSION_PATH} matched by ` +
+    `specs/*.MDX, emission enabled`;
+  const expected19 = [invalidPathFinding(WRONG_CASE_EXTENSION_PATH)];
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": WRONG_CASE_EXTENSION_CONFIG,
+        [WRONG_CASE_EXTENSION_PATH]: WRONG_CASE_EXTENSION_SOURCE,
+      },
+    },
+    async (workspace) => {
+      for (const command of ["build", "check"] as const) {
+        const context = `T7.1-1 \`${command} --json\` with ${label}`;
+        const findings = await runFindingsReport(
+          product,
+          workspace,
+          [command, "--json"],
+          1,
+          `${context} — the file has no \`.mdx\` extension (paths compare ` +
+            `byte-wise and case-sensitively, so \`.MDX\` is none), so the ` +
+            `match is invalid, a finding outcome (SPEC 7.1, 12.0, 14.19)` +
+            (command === "check"
+              ? `; \`check\` reports exactly build's validation findings, ` +
+                `the failed build having written nothing (SPEC 12.2, 12.1)`
+              : ""),
+        );
+        assertConditionCounts(findings, { "14.19": 1 }, context);
+        assertSameJson(
+          findings.map(projectPathFinding),
+          expected19,
+          `${context} — one condition-19 finding with the stable code ` +
+            `"invalid-source-path", no in-source locations, and the file's ` +
+            `workspace-relative path as its concerned path (SPEC 7.1, ` +
+            `14.19, 14, 12.7)`,
+        );
+      }
+
+      const inventoryLabel = `T7.1-1 \`inventory --json\` with ${label}`;
+      const inventory = decodeInventoryDocument(
+        await runJson(
+          product,
+          workspace,
+          ["inventory", "--json"],
+          `${inventoryLabel} — the inventory parses no sources, so it ` +
+            `answers whatever their validity and carries no 14.19: a ` +
+            `complete, finding-free answer (SPEC 11.6, 12.0)`,
+        ),
+        inventoryLabel,
+      );
+      assertSameJson(
+        { sources: inventory.sources, derived: inventory.derived },
+        {
+          sources: [
+            {
+              path: WRONG_CASE_EXTENSION_PATH,
+              groups: [{ name: "main", kind: "spec" }],
+            },
+          ],
+          derived: [
+            { source: WRONG_CASE_EXTENSION_PATH, module: null, markdown: null },
+          ],
+        },
+        `${inventoryLabel}: the file is discovered — listed in \`sources\` ` +
+          `under its spec group main — and, without the \`.mdx\` extension ` +
+          `(12.0: byte-wise, case-sensitive), generates and emits nothing, ` +
+          `so its \`derived\` entry carries \`module\` and \`markdown\` ` +
+          `null though emission is enabled — the stated null, never ` +
+          `omission (SPEC 13.1, 11.6, 7.3, 12.7); a product folding case ` +
+          `in the extension test derives both paths for it`,
+      );
+    },
+  );
+}
 
 // --- T7.1-1's path-character arms (SPEC 7.1, 14.19) --------------------------
 //
@@ -880,15 +1051,20 @@ const T7_1_1 = defineProductTest({
   title:
     "spec groups: a file in two spec groups is valid, listed once, and " +
     "coverage and policy see it in both groups; a spec-group match without " +
-    "`.mdx` is invalid; a spec-group file whose path holds U+0022, U+0027, " +
-    "U+005C, U+000A, U+000D, U+2028, or U+2029 — one arm per character in " +
-    "the file name, plus U+0027 in a directory component; the U+0022, " +
-    "U+005C, U+000A, and U+000D arms on the Linux leg — is invalid (14.19), " +
-    "still discovered and reachable: its finding concerns its path and a " +
-    "glob-reached `view` serves its tree with every identity unavailable; " +
-    "control (Linux leg): the code-group file `src/it's<U+005C>x.ts` is " +
-    "valid, `build` and `check` exiting 0 and its marker recording its edge " +
-    "from the whole-file location (SPEC 7.1, 8, 7.5, 14.19, 11.2, 11.4)",
+    "`.mdx` is invalid — the wrong-case extension among them: " +
+    "`specs/A.MDX` under `specs/*.MDX`, emission enabled, is 14.19 from " +
+    "`build` and `check` (12.0: byte-wise, case-sensitive), its " +
+    "`inventory` `derived` entry carrying `module` and `markdown` null; a " +
+    "spec-group file whose path holds U+0022, U+0027, U+005C, U+000A, " +
+    "U+000D, U+2028, or U+2029 — one arm per character in the file name, " +
+    "plus U+0027 in a directory component; the U+0022, U+005C, U+000A, and " +
+    "U+000D arms on the Linux leg — is invalid (14.19), still discovered " +
+    "and reachable: its finding concerns its path and a glob-reached " +
+    "`view` serves its tree with every identity unavailable; control " +
+    "(Linux leg): the code-group file `src/it's<U+005C>x.ts` is valid, " +
+    "`build` and `check` exiting 0 and its marker recording its edge from " +
+    "the whole-file location (SPEC 7.1, 8, 7.5, 12.0, 13.1, 11.6, 14.19, " +
+    "11.2, 11.4)",
   run: async (product) => {
     // A file in two spec groups is valid — and coverage/policy see it in
     // both.
@@ -995,6 +1171,12 @@ const T7_1_1 = defineProductTest({
         }
       },
     );
+
+    // The wrong-case extension among them (SPEC 7.1, 12.0, 13.1, 11.6):
+    // `specs/A.MDX` under `specs/*.MDX`, emission enabled, is 14.19 from
+    // `build` and `check`, and its `inventory` `derived` entry carries
+    // `module` and `markdown` null — a single-casing arm (module header).
+    await runWrongCaseExtensionArm(product);
 
     // Path characters (SPEC 7.1, 14.19): one arm per barred character in
     // the file name plus U+0027 in a directory component, each file alone
@@ -1204,6 +1386,35 @@ const EMIT_REQUIRED_VIOLATIONS: readonly RefusedConfigArm[] = [
   ),
 }));
 
+// A well-formed literal of the wrong type for a scalar field → 14.14, never
+// coerced (SPEC 7.3: `emit` a boolean, `outDir` a path; 7: a configuration
+// that does not conform is a configuration error), one arm each (TEST-SPEC
+// T7.3-1): `emit: "true"` and `outDir: true`. Each literal is a form 7
+// admits — a static string literal, a boolean literal — so each arm is
+// refused by type, never by form (T7-2's number-for-boolean arm is refused
+// by form); `outDir: true` stands beside `emit: true`, so a product
+// coercing either literal builds the staged source and fails its arm at
+// the exit code. Each arm's configuration is a staged-source record made
+// at module load from its row (module header).
+const WRONG_TYPE_VIOLATIONS: readonly RefusedConfigArm[] = [
+  {
+    label: 'markdown: { emit: "true" } (a string where 7.3 requires a boolean)',
+    extra: ',\n  markdown: { emit: "true" }',
+  },
+  {
+    label:
+      "markdown: { emit: true, outDir: true } (a boolean where 7.3 " +
+      "requires a path)",
+    extra: ",\n  markdown: { emit: true, outDir: true }",
+  },
+].map((row) => ({
+  label: row.label,
+  config: stagedTs(
+    `T7.3-1 xspec.config.ts (${row.label})`,
+    specsMainConfig(row.extra),
+  ),
+}));
+
 // `outDir` redirect (SPEC 7.3: emitted files land under outDir, preserving
 // workspace-relative paths; outDir resolves against the workspace root).
 // A staged-source record (module header).
@@ -1285,25 +1496,66 @@ const GRAPH_DATA_AREA_OUTDIRS: readonly {
 // The graph-data area's look-alikes (TEST-SPEC T7.3-1): `.xspec2` and
 // `.xspecs/md` are neither `.xspec` nor begin with `.xspec/` — a product
 // testing the byte prefix `.xspec` without its segment boundary refuses
-// them — so each is a valid `outDir`, and emission writes each destination
-// under it, creating the missing directory chain (SPEC 7.3, 13.4; T13.4-8).
-// `chain` lists every directory the destinations need, `outDir`'s own
-// components first, none of which the arm's staging creates. Each arm's
-// configuration is a staged-source record made at module load from its row
-// (module header).
+// them — and, on the Linux leg, neither are the single-casing spellings
+// `.XSPEC` and `.XSPEC/md` (12.0: compared byte-wise, no case folding) — a
+// product folding case in the bar refuses them; only there is `.XSPEC` a
+// directory of its own, where a case-insensitive filesystem makes it the
+// graph-data area itself (module header). So each is a valid `outDir`, and
+// emission writes each destination under it, creating the missing
+// directory chain (SPEC 7.3, 13.4; T13.4-8). `chain` lists every directory
+// the destinations need, `outDir`'s own components first, none of which
+// the arm's staging creates. Each arm's configuration is a staged-source
+// record made at module load from its row (module header).
 const LOOKALIKE_OUTDIRS: readonly {
   readonly outDir: string;
+  /** What the spelling is beside the area (labels and record names). */
+  readonly what: string;
+  /** Why the spelling names no path of the area (diagnostics). */
+  readonly why: string;
+  /** Staged on the Linux leg alone (module header). */
+  readonly linuxLeg: boolean;
   readonly chain: readonly string[];
   readonly config: StagedTs;
 }[] = [
-  { outDir: ".xspec2", chain: [".xspec2"] },
-  { outDir: ".xspecs/md", chain: [".xspecs", ".xspecs/md"] },
+  {
+    outDir: ".xspec2",
+    what: "a look-alike of the graph-data area",
+    why: "the bar is by segment, never by byte prefix",
+    linuxLeg: false,
+    chain: [".xspec2"],
+  },
+  {
+    outDir: ".xspecs/md",
+    what: "a look-alike of the graph-data area",
+    why: "the bar is by segment, never by byte prefix",
+    linuxLeg: false,
+    chain: [".xspecs", ".xspecs/md"],
+  },
+  {
+    outDir: ".XSPEC",
+    what: "a single-casing spelling of the graph-data area, Linux leg",
+    why: "compared byte-wise, with no case folding: SPEC 12.0",
+    linuxLeg: true,
+    chain: [".XSPEC"],
+  },
+  {
+    outDir: ".XSPEC/md",
+    what:
+      "a single-casing spelling of a path under the graph-data area, " +
+      "Linux leg",
+    why: "compared byte-wise, with no case folding: SPEC 12.0",
+    linuxLeg: true,
+    chain: [".XSPEC", ".XSPEC/md"],
+  },
 ].map((row) => ({
   outDir: row.outDir,
+  what: row.what,
+  why: row.why,
+  linuxLeg: row.linuxLeg,
   chain: [...row.chain, `${row.outDir}/specs`, `${row.outDir}/specs/sub`],
   config: stagedTs(
-    `T7.3-1 xspec.config.ts (outDir ${JSON.stringify(row.outDir)}, a ` +
-      `look-alike of the graph-data area)`,
+    `T7.3-1 xspec.config.ts (outDir ${JSON.stringify(row.outDir)}, ` +
+      `${row.what})`,
     specsMainConfig(
       `,\n  markdown: { emit: true, outDir: ${JSON.stringify(row.outDir)} }`,
     ),
@@ -1453,15 +1705,19 @@ const T7_3_1 = defineProductTest({
   title:
     "markdown configuration: absent and emit:false mean no emission, " +
     "emit:true emits next to each source; markdown without emit is 14.14; " +
-    "outDir redirects preserving workspace-relative paths and must be " +
-    "spelled in plain workspace-relative form — non-empty `/`-separated " +
-    "segments, none `.` or `..` — decided by spelling alone (else 14.14: " +
+    "a well-formed literal of the wrong type for a scalar field (emit: " +
+    '"true", outDir: true) is 14.14, exit 2, never coerced; outDir ' +
+    "redirects preserving workspace-relative paths and must be spelled in " +
+    "plain workspace-relative form — non-empty `/`-separated segments, " +
+    "none `.` or `..` — decided by spelling alone (else 14.14: " +
     '"", "/out", "./out", "out/../x", "out//x", "out/"; "out/sub" valid); ' +
     "an outDir naming the graph-data area or a path under it is 14.14 " +
     '(".xspec", ".xspec/md"), its look-alikes (".xspec2", ".xspecs/md") ' +
-    "valid, emission writing under them; emit-destination classification " +
-    "follows emit — by configuration alone, whether or not emission has " +
-    "yet run (SPEC 7.3, 13.2, 13.3, 13.4, 14.14)",
+    'and, on the Linux leg, its single-casing spellings (".XSPEC", ' +
+    '".XSPEC/md"; 12.0: byte-wise, no case folding) valid, emission ' +
+    "writing under them; emit-destination classification follows emit — " +
+    "by configuration alone, whether or not emission has yet run (SPEC " +
+    "7.3, 7, 12.0, 13.2, 13.3, 13.4, 14.14)",
   run: async (product) => {
     // (a) The emission-scope matrix: absent → none, emit:false → none,
     // emit:true → next to each source. Fresh workspace per variant, so no
@@ -1511,6 +1767,19 @@ const T7_3_1 = defineProductTest({
         arm.config,
         `T7.3-1 (${arm.label}) \`build --json\` — \`emit\` is required when ` +
           `\`markdown\` is present (SPEC 7.3, 14.14)`,
+      );
+    }
+
+    // (b') A well-formed literal of the wrong type for a scalar field →
+    // 14.14 (exit 2, the configuration the concerned path, nothing
+    // modified), never coerced: `emit: "true"`, `outDir: true`.
+    for (const arm of WRONG_TYPE_VIOLATIONS) {
+      await expectConfigRefused(
+        product,
+        arm.config,
+        `T7.3-1 (${arm.label}) \`build --json\` — \`emit\` is a boolean and ` +
+          `\`outDir\` a path: a well-formed literal of another type is ` +
+          `refused by type, never coerced (SPEC 7.3, 7, 14.14)`,
       );
     }
 
@@ -1615,14 +1884,15 @@ const T7_3_1 = defineProductTest({
       );
     }
 
-    // (d''') The look-alikes `.xspec2` and `.xspecs/md` are valid: emission
-    // writes each destination under them, the absent directory chain
-    // created as real directories (13.4; T13.4-8), workspace-relative paths
-    // preserved — and redirects rather than duplicates.
+    // (d''') The look-alikes `.xspec2` and `.xspecs/md` — and, on the Linux
+    // leg, the single-casing spellings `.XSPEC` and `.XSPEC/md` (12.0: no
+    // case folding; module header) — are valid: emission writes each
+    // destination under them, the absent directory chain created as real
+    // directories (13.4; T13.4-8), workspace-relative paths preserved — and
+    // redirects rather than duplicates.
     for (const arm of LOOKALIKE_OUTDIRS) {
-      const label =
-        `T7.3-1 (outDir ${JSON.stringify(arm.outDir)}, a look-alike of the ` +
-        `graph-data area)`;
+      if (arm.linuxLeg && !LINUX_LEG) continue;
+      const label = `T7.3-1 (outDir ${JSON.stringify(arm.outDir)}, ${arm.what})`;
       await withWorkspace(
         { files: { "xspec.config.ts": arm.config, ...EMISSION_FILES } },
         async (workspace) => {
@@ -1630,7 +1900,8 @@ const T7_3_1 = defineProductTest({
             product,
             workspace,
             `${label} \`build\` — neither \`.xspec\` nor beginning with ` +
-              `\`.xspec/\`, the spelling is a valid outDir (SPEC 7.3)`,
+              `\`.xspec/\` (${arm.why}), the spelling is a valid outDir ` +
+              `(SPEC 7.3)`,
           );
           for (const dir of arm.chain) {
             const kind = await workspace.kind(dir);
