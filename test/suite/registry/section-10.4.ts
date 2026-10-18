@@ -1,5 +1,5 @@
 // TEST-SPEC §10.4 (relevant hashes and invalidation) — SUITE-35:
-// T10.4-1…T10.4-6.
+// T10.4-1…T10.4-7.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -28,7 +28,10 @@
 //   invalidated reporting and session-file byte-identity; and T10.4-6 also
 //   reads `show` and `export`, whose payloads present an item the
 //   generators no longer produce with its `context` as last assigned, and
-//   its `reason` as last assigned.
+//   its `reason` as last assigned; T10.4-7 also reads `show` and
+//   `export`, whose payloads present its current context set as `context`
+//   and its `origin` as last assigned, by a re-derivation, each origin
+//   entry's after side under the node's current presence.
 // - `reason`'s composition is unpinned (SPEC 10.2): T10.4-3 and T10.4-6
 //   compare it byte for byte between captures from the same surface, its
 //   content never asserted.
@@ -36,13 +39,14 @@
 //   captures bracketing the edit: the hashes the arm targets must change and
 //   the hashes it must isolate must not (SPEC 5.5), and every control edit
 //   must demonstrably change the edited node — so no arm passes or fails for
-//   the wrong reason (H-8). T10.4-6 checks its hash premises at every
-//   staged state against a capture at the baseline.
+//   the wrong reason (H-8). T10.4-6 and T10.4-7 check their hash premises
+//   at every staged state against a capture at the baseline.
 // - Re-resolves between arms use `--status no-change` (no re-derivation,
 //   SPEC 10.5), so each arm starts from a freshly recorded state matching the
 //   graph; T10.4-2's journal arm, T10.4-4's reintroduction and
-//   decomposition arms, and T10.4-6's (b) are the places `--status updated`
-//   (re-derivation) is staged, exactly as their TEST-SPEC texts prescribe.
+//   decomposition arms, T10.4-6's (b), and T10.4-7's (a) and (b) are the
+//   places `--status updated` (re-derivation) is staged, exactly as their
+//   TEST-SPEC texts prescribe.
 // - T10.4-4's decomposition arm reads the recorded decomposition from
 //   `export`'s recorded decompositions, which the review adapter decodes to
 //   each one's kind and scope node (helpers/adapters/review.ts), and its
@@ -71,24 +75,30 @@
 // - Fixture edits — T10.4-2's manual deletion of `.xspec/journal` included —
 //   are followed by an explicit `build` before any read, so no read relies
 //   on the 13.3 refresh path (that path is T13.3-*'s business).
+// - T10.4-7's fixture is exported for the arms T10.2-2 and T10.7-12 stage
+//   over T10.4-7(a)'s shape: its paths, identities, and initial sources,
+//   d2's source template, and the session and state stagings, which
+//   assert staging premises alone.
 //
 // Sources staged after a body's first product invocation — T10.4-1's
 // sensitivity edits (each scenario's former `write()` closure over mutable
 // version variables enumerated into its successive states, in staging order,
 // every state carrying the earlier edits forward), T10.4-2's presence flips,
 // T10.4-3's context-set edit, T10.4-4's post-rename deletion, T10.4-5's
-// staleness edit, T10.4-6's upstream edits and reverts — are staged-source
-// records (helpers/staged-mdx.ts, S-9: judged before any product exists),
-// the same template calls moved to module level. A staging that precedes a
-// body's first invocation stays plain (S-7's sweep reaches it against the
-// stub): T10.4-1's subtree-coherence pre-`create` edit and T10.4-3's a.k1
-// edit, each between `gitCommitAll` and the first `build`, and each body's
-// first workspace's initial files. The initial `.mdx` files of every later
-// workspace — T10.4-1's five later scenarios, T10.4-2's context, origin, and
-// journal arms, T10.4-4's move, reintroduction, and decomposition arms,
-// T10.4-6's twin — are records too, passed as the `files` entries (S-9's
-// before-any-product clause covers a workspace created after the body's
-// first invocation).
+// staleness edit, T10.4-6's upstream edits and reverts, T10.4-7's upstream
+// edits and removal edit — are staged-source records (helpers/staged-mdx.ts,
+// S-9: judged before any product exists), the same template calls moved to
+// module level. A staging that precedes a body's first invocation stays
+// plain (S-7's sweep reaches it against the stub): T10.4-1's
+// subtree-coherence pre-`create` edit and T10.4-3's a.k1 edit, each between
+// `gitCommitAll` and the first `build`, and each body's first workspace's
+// initial files but T10.4-7's, whose initial sources are exported records
+// its twin shares. The initial `.mdx` files of every later workspace —
+// T10.4-1's five later scenarios, T10.4-2's context, origin, and journal
+// arms, T10.4-4's move, reintroduction, and decomposition arms, T10.4-6's
+// and T10.4-7's twins — are records too, passed as the `files` entries
+// (S-9's before-any-product clause covers a workspace created after the
+// body's first invocation).
 // T10.4-4's reintroduction and decomposition arms append a new section a to
 // bytes the rename wrote — no harness constant equals them — so each append
 // is an anchored `workspace.edit()` (the tail's uniqueness and end position
@@ -97,8 +107,8 @@
 // The configurations and the code source of those later workspaces are
 // TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
 // and timing clauses), every one well-formed and staged wherever it is
-// used: `SPECS_ONLY_CONFIG` (T10.4-1's, T10.4-2's, T10.4-4's, and
-// T10.4-6's later workspaces), `SPECS_CODE_CONFIG` and `CI_CODE_SOURCE`
+// used: `SPECS_ONLY_CONFIG` (T10.4-1's, T10.4-2's, T10.4-4's, T10.4-6's,
+// and T10.4-7's later workspaces), `SPECS_CODE_CONFIG` and `CI_CODE_SOURCE`
 // (T10.4-1's code-impact scenario), and `COVERAGE_CONFIG` (T10.4-1's
 // uncovered-requirement scenario).
 
@@ -139,7 +149,7 @@ import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T10.4-1/T10.4-2/T10.4-4/T10.4-6 xspec.config.ts — one spec group",
+  "T10.4-1/T10.4-2/T10.4-4/T10.4-6/T10.4-7 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -5141,6 +5151,689 @@ const T10_4_6 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T10.4-7 — recording after re-derivation; joined nodes
+// ---------------------------------------------------------------------------
+
+// Path-blocks fixture (TEST-SPEC T10.4-7, T10.4-2's origin-arm shape) —
+// TEST-SPEC's X, T, D1, and D2 as the top-level sections x, t, d1, and d2,
+// each alone in its own file: x depends on T.t, and t on D1.d1 and D2.d2.
+// d1's text is edited before `create --base`: d1 is `changed`, and t and x
+// are `upstream-changed` attributed to it (5.6), so the session holds d1's
+// subtree-coherence item and the dependency-consistency items of t and of
+// x — x's context {t}, the one dependency-edge target of x whose
+// effectiveHash changed, and its origin {d1}, the originating node of t's
+// category (10.5). d2's text is edited after it, with no re-derivation:
+// t's category is then attributed to d2 as well, so a re-derivation gives
+// x's item origin {d1, d2} — d2 joins it (10.5) — while x's context set
+// stays {t} and no hash x's item records changes: x's ownHash and
+// metadataHash and t's subtreeHash (10.4). One edit later removes t's
+// reference to D2.d2 and deletes d2's section, leaving specs/D2.mdx with no
+// section — its implicit root alone (1.2) — and t's import of it in place:
+// an import whose binding is never used is valid and records no edges
+// (2.1), so the reference removal is a pure d-prop edit, touching no own
+// content (1.6, 5.5). x's relevant hashes stay unchanged and t's
+// effectiveHash still differs from the baseline, so x's context set stays
+// {t}: d2's presence alone moves. The hash premises are checked via `query
+// node` at every staged state, against a capture at the baseline. (a)
+// resolves x's item `updated` after d2's edit: the resolve assigns and
+// records once the re-derivation it triggers is done, against the item as
+// re-derived (10.4), so d2's presence is recorded, and d2's deletion then
+// invalidates the item. (b), on a twin, resolves x's item `no-change`
+// before d2's edit, and d1's `updated` resolve re-derives the session
+// after it: d2 joins x's origin after x's `current` was last written, so
+// it has no recorded presence (10.4) — a changed origin by itself
+// invalidates nothing (10.5), and neither does d2's deletion.
+//
+// The fixture is exported for T10.2-2's and T10.7-12's arms over T10.4-7(a)'s
+// shape (`T10_4_7_FILES`, `T10_4_7_NODES`, `T10_4_7_INITIAL_FILES`,
+// `t1047D2Source`, `stageT1047Session`, `stageT1047State`): the stagings
+// assert staging premises alone, every outcome T10.4-7 asserts staying in
+// its body.
+
+/** T10.4-7's source paths — x, t, d1, and d2 each alone in its own file. */
+export const T10_4_7_FILES = {
+  x: "specs/X.mdx",
+  t: "specs/T.mdx",
+  d1: "specs/D1.mdx",
+  d2: "specs/D2.mdx",
+} as const;
+
+/** T10.4-7's node identities (TEST-SPEC's X, T, D1, D2; SPEC 1.5). */
+export const T10_4_7_NODES = {
+  x: "specs/X.mdx#x",
+  t: "specs/T.mdx#t",
+  d1: "specs/D1.mdx#d1",
+  d2: "specs/D2.mdx#d2",
+} as const;
+
+const T7_X = T10_4_7_NODES.x;
+const T7_T = T10_4_7_NODES.t;
+const T7_D1 = T10_4_7_NODES.d1;
+const T7_D2 = T10_4_7_NODES.d2;
+
+// t's `d` list names both D's, or D1.d1 alone once the removal edit drops
+// D2.d2 — both imports staying either way (SPEC 2.1: an import whose
+// binding is never used is valid and records no edges).
+function t7TSource(withD2: boolean): string {
+  return [
+    'import D1 from "./D1.xspec"',
+    'import D2 from "./D2.xspec"',
+    "",
+    withD2 ? '<S id="t" d={[D1.d1, D2.d2]}>' : '<S id="t" d={D1.d1}>',
+    "Tee own text.",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+function t7D1Source(text: string): string {
+  return ['<S id="d1">', text, "</S>", ""].join("\n");
+}
+
+/**
+ * specs/D2.mdx's bytes: d2 alone, holding `text` — or, for `null`, d2's
+ * section deleted, the file left holding no section (its implicit root
+ * alone, SPEC 1.2). Exported so a later arm over T10.4-7(a)'s fixture can
+ * stage a further d2 edit as a staged-source record of its own (S-9).
+ */
+export function t1047D2Source(text: string | null): string {
+  return text === null ? "" : ['<S id="d2">', text, "</S>", ""].join("\n");
+}
+
+// T10.4-7's sources are staged-source records (helpers/staged-mdx.ts, S-9:
+// judged before any product exists): the four initial sources — the twin's
+// workspace is created after the body's first invocation, and an exported
+// staging may stage them in any workspace — and the states staged after a
+// `build`: d1's edit, d2's edit, and the removal edit's two files.
+const T10_4_7_X_SOURCE = stagedMdx(
+  "T10.4-7 specs/X.mdx with x depending on T.t (the fixture's initial source)",
+  [
+    'import T from "./T.xspec"',
+    "",
+    '<S id="x" d={T.t}>',
+    "Ex own text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+const T10_4_7_T_SOURCE = stagedMdx(
+  "T10.4-7 specs/T.mdx with t depending on D1.d1 and D2.d2 (the fixture's initial source)",
+  t7TSource(true),
+);
+const T10_4_7_D1_SOURCE = stagedMdx(
+  "T10.4-7 specs/D1.mdx with d1 at v0 (the fixture's initial source)",
+  t7D1Source("Dee one text v0."),
+);
+const T10_4_7_D2_SOURCE = stagedMdx(
+  "T10.4-7 specs/D2.mdx with d2 at v0 (the fixture's initial source)",
+  t1047D2Source("Dee two text v0."),
+);
+const T10_4_7_D1_EDITED = stagedMdx(
+  "T10.4-7 specs/D1.mdx with d1 at v1 (the edit before `create --base`)",
+  t7D1Source("Dee one text v1."),
+);
+const T10_4_7_D2_EDITED = stagedMdx(
+  "T10.4-7 specs/D2.mdx with d2 at v1 (the edit after `create --base`)",
+  t1047D2Source("Dee two text v1."),
+);
+const T10_4_7_T_WITHOUT_D2 = stagedMdx(
+  "T10.4-7 specs/T.mdx with t's reference to D2.d2 removed, both imports kept (the removal edit)",
+  t7TSource(false),
+);
+const T10_4_7_D2_DELETED = stagedMdx(
+  "T10.4-7 specs/D2.mdx with d2's section deleted, no section left (the removal edit)",
+  t1047D2Source(null),
+);
+
+/**
+ * T10.4-7's initial sources at the baseline, as a workspace declaration's
+ * `files` entries beside a configuration whose one spec group discovers
+ * every `.mdx` file under `specs/` (SPEC 7.1) — records, so a body's first
+ * workspace and any later one stage them alike (S-9).
+ */
+export const T10_4_7_INITIAL_FILES: Readonly<Record<string, StagedMdx>> = {
+  [T10_4_7_FILES.x]: T10_4_7_X_SOURCE,
+  [T10_4_7_FILES.t]: T10_4_7_T_SOURCE,
+  [T10_4_7_FILES.d1]: T10_4_7_D1_SOURCE,
+  [T10_4_7_FILES.d2]: T10_4_7_D2_SOURCE,
+};
+
+/**
+ * T10.4-7's states after the baseline, staged in this order: d1's edit
+ * (before `create --base`), d2's edit (after it), and the removal edit —
+ * t's reference to D2.d2 removed and d2's section deleted, one edit.
+ */
+export type T1047State = "d1-edited" | "d2-edited" | "removed";
+
+/** x's, t's, and d1's hashes, and d2's while it exists, via `query node`. */
+async function t7Capture(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  d2Exists: boolean,
+  context: string,
+): Promise<ReadonlyMap<string, NodeHashes>> {
+  return await captureHashes(
+    product,
+    workspace,
+    d2Exists ? [T7_X, T7_T, T7_D1, T7_D2] : [T7_X, T7_T, T7_D1],
+    context,
+  );
+}
+
+/**
+ * T10.4-7's hash premises at one staged state, against the capture at the
+ * baseline (SPEC 5.5): x's ownHash and metadataHash and t's subtreeHash —
+ * every hash x's item records (10.4) — and t's ownHash keep their baseline
+ * values at every state; t's effectiveHash and d1's ownHash differ from
+ * theirs at every state, so the generators give x's item context {t}
+ * (10.5), d1 `changed` (5.6); t's metadataHash keeps its baseline value
+ * until the removal edit lands on t's `d` list and differs after it, so
+ * until then t is no originating node (5.6) and x's origin is the D's
+ * alone; d2's ownHash keeps its baseline value until d2's edit and
+ * differs after it (d2 `changed`, an originating node of t's category,
+ * 5.6), and once d2's section is deleted d2 is not captured. No assertion
+ * thus turns on a hash (H-8).
+ */
+function assertT7HashPremises(
+  baseline: ReadonlyMap<string, NodeHashes>,
+  current: ReadonlyMap<string, NodeHashes>,
+  state: T1047State,
+  context: string,
+): void {
+  const value = (
+    captures: ReadonlyMap<string, NodeHashes>,
+    node: string,
+    hash: keyof NodeHashes,
+    side: string,
+  ): string => {
+    const hashes = captures.get(node);
+    if (hashes === undefined) {
+      fail(
+        `${context}: harness staging defect — no ${side} \`query node\` ` +
+          `capture exists for ${node}, so its ${hash} premise cannot be ` +
+          `checked`,
+      );
+    }
+    return hashes[hash];
+  };
+  const premises: {
+    readonly node: string;
+    readonly hash: keyof NodeHashes;
+    readonly differs: boolean;
+    readonly why: string;
+  }[] = [
+    {
+      node: T7_X,
+      hash: "ownHash",
+      differs: false,
+      why: "x's item records it (10.4)",
+    },
+    {
+      node: T7_X,
+      hash: "metadataHash",
+      differs: false,
+      why: "x's item records it (10.4)",
+    },
+    {
+      node: T7_T,
+      hash: "subtreeHash",
+      differs: false,
+      why: "x's item records it (10.4); d-prop edits touch no own content (1.6)",
+    },
+    {
+      node: T7_T,
+      hash: "ownHash",
+      differs: false,
+      why: "t is never `changed` (5.6), so its own content originates nothing",
+    },
+    {
+      node: T7_T,
+      hash: "effectiveHash",
+      differs: true,
+      why:
+        "t is the dependency-edge target of x whose effectiveHash changed, " +
+        "so the generators give x's item context {t} (10.5)",
+    },
+    {
+      node: T7_D1,
+      hash: "ownHash",
+      differs: true,
+      why: "d1 is `changed`, an originating node of t's category (5.6)",
+    },
+    {
+      node: T7_T,
+      hash: "metadataHash",
+      differs: state === "removed",
+      why:
+        state === "removed"
+          ? "the removal edit lands on t's `d` list"
+          : "t is no originating node (not `metadata-changed`, 5.6) " +
+            "until the removal edit, so x's origin is the D's alone (10.5)",
+    },
+  ];
+  if (state !== "removed") {
+    premises.push({
+      node: T7_D2,
+      hash: "ownHash",
+      differs: state === "d2-edited",
+      why:
+        state === "d2-edited"
+          ? "d2 is `changed`, an originating node of t's category (5.6), " +
+            "joining x's origin at a re-derivation (10.5)"
+          : "d2 is not `changed` before its edit, so x's origin at " +
+            "`create` is {d1} (5.6, 10.5)",
+    });
+  }
+  for (const premise of premises) {
+    const before = value(baseline, premise.node, premise.hash, "baseline");
+    const now = value(current, premise.node, premise.hash, "current");
+    if ((before !== now) !== premise.differs) {
+      fail(
+        `${context}: staging premise — ${premise.node}'s ${premise.hash} ` +
+          `must ${premise.differs ? "differ from" : "keep"} its baseline ` +
+          `value (SPEC 5.5): ${premise.why}; baseline ` +
+          `${JSON.stringify(before)}, now ${JSON.stringify(now)}`,
+      );
+    }
+  }
+}
+
+/**
+ * Stage one T10.4-7 state — `state`'s fixture edit, then `build` — and
+ * check its hash premises against the baseline capture (staging premises
+ * alone). Exported for T10.2-2's and T10.7-12's arms over T10.4-7(a)'s
+ * fixture.
+ */
+export async function stageT1047State(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  baseline: ReadonlyMap<string, NodeHashes>,
+  state: T1047State,
+  label: string,
+): Promise<void> {
+  if (state === "d1-edited") {
+    await workspace.file(T10_4_7_FILES.d1, T10_4_7_D1_EDITED);
+  } else if (state === "d2-edited") {
+    await workspace.file(T10_4_7_FILES.d2, T10_4_7_D2_EDITED);
+  } else {
+    // One edit: t's reference to D2.d2 removed and d2's section deleted.
+    await workspace.file(T10_4_7_FILES.t, T10_4_7_T_WITHOUT_D2);
+    await workspace.file(T10_4_7_FILES.d2, T10_4_7_D2_DELETED);
+  }
+  await buildOk(product, workspace, `${label} \`build\``);
+  assertT7HashPremises(
+    baseline,
+    await t7Capture(
+      product,
+      workspace,
+      state !== "removed",
+      `${label} capture`,
+    ),
+    state,
+    label,
+  );
+}
+
+/** One origin entry as T10.4-7 asserts it: the node and its after side. */
+interface T7OriginNode {
+  readonly node: string;
+  readonly afterPresent: boolean;
+}
+
+/** An item's origin entries as T10.4-7 compares them, sorted by node. */
+function t7Origin(item: ReviewItem): T7OriginNode[] {
+  return item.origin
+    .map((entry) => ({ node: entry.node, afterPresent: entry.after.present }))
+    .sort((left, right) =>
+      left.node < right.node ? -1 : left.node > right.node ? 1 : 0,
+    );
+}
+
+/** The session T10.4-7's stagings create, and the ids its arms act on. */
+export interface T1047Session {
+  /** The baseline commit `create --base` names. */
+  readonly base: string;
+  /** x's, t's, d1's, and d2's hashes at the baseline (`query node`). */
+  readonly baseline: ReadonlyMap<string, NodeHashes>;
+  /** x's dependency-consistency item. */
+  readonly xId: string;
+  /** t's dependency-consistency item. */
+  readonly tId: string;
+  /** d1's subtree-coherence item. */
+  readonly d1Id: string;
+}
+
+/**
+ * Stage T10.4-7's session `s` in a fresh workspace holding
+ * `T10_4_7_INITIAL_FILES` (SPEC 10.5): the baseline committed, built, and
+ * captured; d1's text edited and built; then `review create --base
+ * <baseline> --name s`, whose session holds exactly d1's subtree-coherence
+ * item and the dependency-consistency items of t and of x — x's context
+ * exactly {t} and its origin exactly {d1} (staging premises from `status`
+ * and `show`). Exported for T10.2-2's and T10.7-12's arms over T10.4-7(a)'s
+ * fixture.
+ */
+export async function stageT1047Session(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<T1047Session> {
+  await workspace.gitInit();
+  const base = await workspace.gitCommitAll("baseline");
+  await buildOk(product, workspace, `${label} \`build\` at the baseline`);
+  const baseline = await t7Capture(
+    product,
+    workspace,
+    true,
+    `${label} baseline capture`,
+  );
+  await stageT1047State(
+    product,
+    workspace,
+    baseline,
+    "d1-edited",
+    `${label} after d1's edit`,
+  );
+  await expectExit(
+    product,
+    workspace,
+    ["review", "create", "--base", base, "--name", "s"],
+    0,
+    `${label} \`review create --base <baseline> --name s\``,
+  );
+  const status = await sessionStatus(product, workspace, "s", label);
+  assertSameJson(
+    kindScopeSet(status),
+    [
+      `dependency-consistency ${T7_T}`,
+      `dependency-consistency ${T7_X}`,
+      `subtree-coherence ${T7_D1}`,
+    ].sort(),
+    `${label} staging premise: d1's edit yields d1's subtree-coherence ` +
+      `item and the dependency-consistency items of t (its target d1 ` +
+      `changed) and of x (its target t's effectiveHash changed), and ` +
+      `nothing else (SPEC 5.6, 10.5)`,
+  );
+  const xId = requireRow(status, "dependency-consistency", T7_X, label).id;
+  const tId = requireRow(status, "dependency-consistency", T7_T, label).id;
+  const d1Id = requireRow(status, "subtree-coherence", T7_D1, label).id;
+  const created = await showItem(
+    product,
+    workspace,
+    "s",
+    xId,
+    `${label} after \`create\``,
+  );
+  assertSameJson(
+    identitySet(created.context),
+    [T7_T],
+    `${label} staging premise: x's dependency-consistency item's context ` +
+      `is exactly {t}, the one dependency-edge target of x whose ` +
+      `effectiveHash changed (SPEC 10.5)`,
+  );
+  assertSameJson(
+    t7Origin(created),
+    [{ node: T7_D1, afterPresent: true }],
+    `${label} staging premise: x's dependency-consistency item's origin ` +
+      `is exactly {d1}, the originating node of t's category, present ` +
+      `(SPEC 5.6, 10.5, 10.7)`,
+  );
+  return { base, baseline, xId, tId, d1Id };
+}
+
+/**
+ * x's item as `show` or `export` presents it (SPEC 10.4, 10.7): reported
+ * `status`, its context exactly {t}, present — the current context set —
+ * and its origin exactly `origin`, as last assigned, each entry's after
+ * side under the node's current presence; `why` names the rule.
+ */
+function assertT7Presented(
+  item: ReviewItem,
+  status: ItemStatus,
+  origin: readonly T7OriginNode[],
+  why: string,
+  context: string,
+): void {
+  if (item.status !== status) {
+    fail(
+      `${context}: x's item must be reported ${status} — ${why}; got ` +
+        item.status,
+    );
+  }
+  assertSameJson(
+    item.context.map((state) => ({ node: state.node, present: state.present })),
+    [{ node: T7_T, present: true }],
+    `${context}: x's item's context must be exactly {t}, present — its ` +
+      `current context set: t is the one dependency-edge target of x ` +
+      `whose effectiveHash changed (SPEC 10.4, 10.5, 10.7)`,
+  );
+  assertSameJson(
+    t7Origin(item),
+    origin,
+    `${context}: x's item's origin must be presented as last assigned, ` +
+      `each entry's after side under the node's current presence (SPEC ` +
+      `10.4, 10.7) — ${why}`,
+  );
+}
+
+/**
+ * Read x's item through `status`, `show`, and `export` (SPEC 10.4, 10.7):
+ * each must report it `status`, and `show` and `export` present it per
+ * `assertT7Presented`.
+ */
+async function t7ReadX(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  xId: string,
+  status: ItemStatus,
+  origin: readonly T7OriginNode[],
+  why: string,
+  label: string,
+): Promise<void> {
+  const report = await sessionStatus(product, workspace, "s", label);
+  const statusLabel = `${label} \`review status s --json\``;
+  const row = requireRowById(report, xId, statusLabel);
+  if (row.status !== status) {
+    fail(
+      `${statusLabel}: x's item must be reported ${status} — ${why}; got ` +
+        row.status,
+    );
+  }
+  assertT7Presented(
+    await showItem(product, workspace, "s", xId, label),
+    status,
+    origin,
+    why,
+    `${label} \`review show s <x item> --json\``,
+  );
+  const exportLabel = `${label} \`review export s --json\``;
+  assertT7Presented(
+    requireItem(
+      (await exportSession(product, workspace, "s", label)).items,
+      xId,
+      exportLabel,
+    ),
+    status,
+    origin,
+    why,
+    exportLabel,
+  );
+}
+
+const T10_4_7 = defineProductTest({
+  id: "T10.4-7",
+  title:
+    "recording after re-derivation; joined nodes: an `updated` resolve assigns and records once the re-derivation it triggers is done, against the item as re-derived; a node that joined the item after `current` was last written has no recorded presence until a resolve records it; and a changed origin by itself invalidates nothing — path-blocks fixture (T10.4-2's origin-arm shape): X depends on T, and T on D1 and D2, each a top-level section in its own file, D1's text edited before `create --base` (X's dependency-consistency item: context {T}, origin {D1}) and D2's after it, X's ownHash and metadataHash and T's ownHash and subtreeHash never changing, T's effectiveHash and D1's ownHash differing from the baseline at every state, T's metadataHash until the removal edit and D2's ownHash until D2's edit keeping their baseline values (premises via `query node` at every state); (a) X's item resolved `updated` after D2's edit: the re-derivation it triggers makes D2 join X's origin, and `status`, `show`, and `export` read the item `updated`, `show` and `export` presenting its context as exactly {T} and its origin as exactly {D1, D2}; one edit then removes T's reference to D2 (the import kept) and deletes D2's section, the context set staying {T}: the three reads report X's item `invalidated` through D2's recorded presence alone, its origin {D1, D2} presenting D2 absent — a product recording before the re-derivation never recorded D2 and reads `updated`; (b) on a twin, X's item resolved `no-change` before D2's edit (premises: it reads `no-change` then and after D2's edit), then D1's subtree-coherence item resolved `updated` after it: its re-derivation makes D2 join X's origin, presented {D1, D2}, and the three reads report X's item still `no-change` — D2 has no recorded presence — and still after the same removal edit, D2 presented absent — a product invalidating on a changed origin, or recording a joined node's presence at the re-derivation, reads `invalidated` (SPEC 1.6, 2.1, 5.5, 5.6, 10.2, 10.4, 10.5, 10.7)",
+  run: async (product) => {
+    const joined: readonly T7OriginNode[] = [
+      { node: T7_D1, afterPresent: true },
+      { node: T7_D2, afterPresent: true },
+    ];
+    const d2Absent: readonly T7OriginNode[] = [
+      { node: T7_D1, afterPresent: true },
+      { node: T7_D2, afterPresent: false },
+    ];
+
+    // (a) Recording after the re-derivation.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      T10_4_7_INITIAL_FILES,
+      async (workspace) => {
+        const label = "T10.4-7 (a)";
+        const { baseline, xId } = await stageT1047Session(
+          product,
+          workspace,
+          label,
+        );
+        await stageT1047State(
+          product,
+          workspace,
+          baseline,
+          "d2-edited",
+          `${label} after d2's edit`,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          xId,
+          "updated",
+          `${label} resolve of x's item --status updated after d2's edit ` +
+            `(the re-derivation, SPEC 10.5)`,
+        );
+        await t7ReadX(
+          product,
+          workspace,
+          xId,
+          "updated",
+          joined,
+          "the re-derivation x's `updated` resolve triggers gives the " +
+            "matched item the generated origin {d1, d2} — d2 joins it — and " +
+            "the resolve assigns and records once that re-derivation is " +
+            "done, against the item as re-derived (SPEC 10.4, 10.5), so its " +
+            "recorded state, d2's presence included, matches the graph and " +
+            "its context set stays {t}",
+          `${label} after x's \`updated\` resolve`,
+        );
+        await stageT1047State(
+          product,
+          workspace,
+          baseline,
+          "removed",
+          `${label} after the removal edit`,
+        );
+        await t7ReadX(
+          product,
+          workspace,
+          xId,
+          "invalidated",
+          d2Absent,
+          "the resolve recorded d2's presence against the item as " +
+            "re-derived, and d2 is now absent: a recorded presence changed " +
+            "(SPEC 10.4), while no hash x's item records changed and its " +
+            "context set stays {t}; a product recording before the " +
+            "re-derivation never recorded d2 and reads updated",
+          `${label} after the removal edit`,
+        );
+      },
+    );
+
+    // (b) A joined node, on a twin.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      T10_4_7_INITIAL_FILES,
+      async (workspace) => {
+        const label = "T10.4-7 (b)";
+        const { baseline, xId, d1Id } = await stageT1047Session(
+          product,
+          workspace,
+          label,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          xId,
+          "no-change",
+          `${label} resolve of x's item --status no-change before d2's ` +
+            `edit (no re-derivation, SPEC 10.5)`,
+        );
+        await expectItemStatus(
+          product,
+          workspace,
+          "s",
+          xId,
+          "no-change",
+          `${label} staging premise after x's resolve — the fresh ` +
+            `resolution matches the graph`,
+        );
+        await stageT1047State(
+          product,
+          workspace,
+          baseline,
+          "d2-edited",
+          `${label} after d2's edit`,
+        );
+        await expectItemStatus(
+          product,
+          workspace,
+          "s",
+          xId,
+          "no-change",
+          `${label} staging premise after d2's edit — no re-derivation has ` +
+            `run, no hash x's item records changed, and its context set ` +
+            `stays {t}`,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          d1Id,
+          "updated",
+          `${label} resolve of d1's subtree-coherence item --status ` +
+            `updated after d2's edit (the re-derivation, SPEC 10.5)`,
+        );
+        await t7ReadX(
+          product,
+          workspace,
+          xId,
+          "no-change",
+          joined,
+          "d1's `updated` resolve re-derived the session, the matched x " +
+            "item taking the generated origin {d1, d2} and keeping its " +
+            "recorded state (SPEC 10.5): d2 joined after x's `current` was " +
+            "last written, so it has no recorded presence, and a changed " +
+            "origin by itself invalidates nothing (SPEC 10.4, 10.5); a " +
+            "product invalidating on a changed origin reads invalidated",
+          `${label} after d1's \`updated\` resolve`,
+        );
+        await stageT1047State(
+          product,
+          workspace,
+          baseline,
+          "removed",
+          `${label} after the removal edit`,
+        );
+        await t7ReadX(
+          product,
+          workspace,
+          xId,
+          "no-change",
+          d2Absent,
+          "d2 has no recorded presence — it joined x's item at the " +
+            "re-derivation, after x's `current` was last written, and no " +
+            "resolve has recorded it since — so its deletion changes no " +
+            "recorded presence, while no hash x's item records changed and " +
+            "its context set stays {t} (SPEC 10.4); a product recording a " +
+            "joined node's presence at the re-derivation reads invalidated",
+          `${label} after the removal edit`,
+        );
+      },
+    );
+  },
+});
+
 /** TEST-SPEC §10.4, in canonical ID order (SUITE-35). */
 export const section104Tests: readonly ProductTestEntry[] = [
   T10_4_1,
@@ -5149,4 +5842,5 @@ export const section104Tests: readonly ProductTestEntry[] = [
   T10_4_4,
   T10_4_5,
   T10_4_6,
+  T10_4_7,
 ];
