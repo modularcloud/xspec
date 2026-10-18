@@ -87,12 +87,25 @@
 // (helpers/adapters/session-staging.ts); only shape-independent states —
 // unparseable bytes, truncation, a directory or symlink at the path — are
 // staged directly. The harness never writes a session file from an assumed
-// layout. The malformed-creation-parameters state uses a `coverage` session:
+// layout. A missing 10.2 field is staged twice — an item's `status`, and
+// separately its `kind`, fields every item carries (SPEC 10.2) — never
+// `note`, which is optional, or `origin`, carried when applicable. The
+// malformed-creation-parameters state uses a `coverage` session:
 // it records the profile's resolved definition, where an `audit` session
 // records none (SPEC 10.7), so there is a recorded value to garble. The
 // malformed-recorded-decompositions state first has the product perform a
 // `split` — the decomposition is recorded durably in the session (SPEC 10.7)
 // — so the garbled member holds a genuine product-recorded decomposition.
+// The decomposed-item state (an item whose kind and scope node are recorded
+// as decomposed, SPEC 10.1) is a path-blocks session's file as the product
+// wrote it after a `split`, with the original item's entry, copied from the
+// pre-`split` file the product wrote, re-inserted: in a baseline session
+// the original's `blockedBy` is empty (10.5, 10.7), its `id` is retired and
+// so unique, and no item names it or shares its kind and scope node — each
+// premise read from the product's exports — so the state violates that one
+// invariant alone. It is the one baseline session among the states: its
+// workspace is a git repository holding the baseline commit, and the
+// modifies-nothing compares cover `.git/` with the rest of the root.
 //
 // T10.1-6 (session-directory and area occupancy; `create`'s ordering):
 // - Non-directory occupants are staged at `.xspec/reviews` and at `.xspec`
@@ -155,20 +168,24 @@
 //   the link's target `elsewhere-area` is compared whole).
 //
 // Sources staged after a body's first product invocation — the stale arm's
-// and stale twins' edited `specs/A.mdx` (T10.1-1, T10.1-6) and T10.1-5's
-// invalidating `specs/B.mdx` — are staged-source records
+// and stale twins' edited `specs/A.mdx` (T10.1-1, T10.1-6), the
+// decomposed-item state's `specs/A.mdx` with `a`'s own text edited since
+// the baseline (T10.1-4), and T10.1-5's invalidating `specs/B.mdx` — are
+// staged-source records
 // (helpers/staged-mdx.ts, S-9: judged before any product exists); the other
 // stagings here are session files and occupants, which S-9 does not judge,
 // and initial workspace files.
 
 import * as fsp from "node:fs/promises";
 import type {
+  ExportReport,
   Finding,
   SessionStatusRow,
 } from "../../helpers/adapters/index.js";
 import {
   GRAPH_DATA_AREA_PATH,
   assertReportMentions,
+  decodeExportReport,
   decodeFindingsReport,
   decodeIdsReport,
   decodeInventoryDocument,
@@ -178,10 +195,12 @@ import {
   isGraphDataKey,
   stageBlockedByAbsentItem,
   stageBlockedByCycle,
-  stageDeleteItemField,
+  stageDeleteItemKind,
+  stageDeleteItemStatus,
   stageDuplicateItemEntry,
   stageGarbleCreationParameters,
   stageGarbleDecompositions,
+  stageReinsertItemEntry,
   stageUnknownItemStatus,
 } from "../../helpers/adapters/index.js";
 import {
@@ -283,6 +302,17 @@ const A_MDX = [
 const A_MDX_EDITED = stagedMdx(
   "T10.1-1/T10.1-6 specs/A.mdx with a.k's text edited (the staleness edit)",
   A_MDX.replace("Kid text.", "Kid text, edited."),
+);
+
+// T10.1-4's decomposed-item state: `a`'s own text edited since the baseline
+// commit, `a.k` untouched, so `a` is `changed` (its ownHash, SPEC 5.6) and
+// the one visited node of the path-blocks session (10.5) — its
+// subtree-coherence item has a child for `split` to decompose (10.7). The
+// edit follows the body's first invocations, so it is a staged-source
+// record (helpers/staged-mdx.ts; S-9's before-any-product clause).
+const A_MDX_OWN_TEXT_EDITED = stagedMdx(
+  "T10.1-4 specs/A.mdx with a's own text edited (the decomposed-item state's change since the baseline)",
+  A_MDX.replace("Alpha text.", "Alpha text, edited."),
 );
 
 // The initial `specs/A.mdx` of every `CORE_FILES` / `COVERAGE_FILES`
@@ -950,6 +980,23 @@ async function readSessionItems(
 }
 
 /**
+ * Decode `review export <cor> --json` (SPEC 10.7: every item with every
+ * field of 10.2) — a staging-premise read of a product-written session.
+ */
+async function exportCorruptNamedSession(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<ExportReport> {
+  const argv = ["review", "export", CORRUPT_NAME, "--json"];
+  const label = `${context} \`${argv.join(" ")}\``;
+  return decodeExportReport(
+    await runJson(product, workspace, argv, label),
+    label,
+  );
+}
+
+/**
  * Build, create the session via the given argv, and capture one item id from
  * `status --json` before the file is corrupted.
  */
@@ -973,6 +1020,129 @@ async function stageProductSession(
     `${context} \`review status ${CORRUPT_NAME} --json\` (pre-corruption item-id capture)`,
   );
   return items[0].id;
+}
+
+/**
+ * T10.1-4's decomposed-item state — an item whose kind and scope node are
+ * recorded as decomposed (SPEC 10.1) — staged in a fresh `CORE_FILES`
+ * workspace: a path-blocks session (10.5) in a git repository, where `a`'s
+ * own text edited since the baseline commit makes `a` the one visited
+ * node, so the session holds `a`'s subtree-coherence item, its `blockedBy`
+ * empty (a baseline session's subtree-coherence item carries no blockers,
+ * 10.5, 10.7). `split` replaces it by a.k's subtree-coherence item and
+ * `a`'s parent-consistency item, records the decomposition durably, and
+ * retires the original's `id` (10.7). The original's entry, copied from
+ * the pre-`split` file the product wrote, is then re-inserted into the
+ * post-`split` file through the adapter layer (H-3): a state violating
+ * 10.1's decomposed-item invariant alone — the original's `id` unique,
+ * being retired; its `blockedBy` empty; no item naming it or sharing its
+ * kind and scope node — each premise read from the product's own exports
+ * before the re-insertion. Returns an item id the post-`split` session
+ * holds, for the item-naming subcommands.
+ */
+async function stageDecomposedItemState(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<string> {
+  await workspace.gitInit();
+  const base = await workspace.gitCommitAll("baseline");
+  await workspace.file("specs/A.mdx", A_MDX_OWN_TEXT_EDITED);
+  await buildOk(product, workspace, `${context} \`build\``);
+  await expectExit(
+    product,
+    workspace,
+    ["review", "create", "--base", base, "--name", CORRUPT_NAME],
+    0,
+    `${context} \`review create --base <baseline> --name ${CORRUPT_NAME}\``,
+  );
+  const preSplit = await exportCorruptNamedSession(
+    product,
+    workspace,
+    `${context} (pre-split premise read)`,
+  );
+  // The split target: `a`'s subtree-coherence item — `a` has the child
+  // `a.k`, so the split is not refused (SPEC 10.7).
+  const splitScope = "specs/A.mdx#a";
+  const original = preSplit.items.find(
+    (item) =>
+      item.kind === "subtree-coherence" && item.scope.node === splitScope,
+  );
+  if (original === undefined) {
+    fail(
+      `${context}: staging premise — \`a\`'s own text changed since the ` +
+        `baseline, so \`a\` is a visited node of the path-blocks session ` +
+        `and its subtree-coherence item, scoped at ${splitScope}, exists ` +
+        `(SPEC 5.6, 10.5); items (kind, scope): ` +
+        JSON.stringify(
+          preSplit.items.map((item) => [item.kind, item.scope.node]),
+        ),
+    );
+  }
+  if (original.blockedBy.length !== 0) {
+    fail(
+      `${context}: staging premise — a baseline session's ` +
+        `subtree-coherence item carries no blockers (SPEC 10.5, 10.7), ` +
+        `so the re-inserted original names no item; ${original.id}'s ` +
+        `blockedBy is ${JSON.stringify(original.blockedBy)}`,
+    );
+  }
+  const earlier = await readSessionBytes(
+    workspace,
+    CORRUPT_NAME,
+    `${context} the pre-split session file the product wrote`,
+  );
+  await expectExit(
+    product,
+    workspace,
+    ["review", "split", CORRUPT_NAME, original.id],
+    0,
+    `${context} \`review split ${CORRUPT_NAME} ${original.id}\` — the ` +
+      `product-performed split removes the original, retires its id, ` +
+      `and records the decomposition durably (SPEC 10.7)`,
+  );
+  const postSplit = await exportCorruptNamedSession(
+    product,
+    workspace,
+    `${context} (post-split premise read)`,
+  );
+  if (postSplit.items.length === 0) {
+    fail(
+      `${context}: staging premise — the decomposition's items stand in ` +
+        `the original's place (SPEC 10.7), so the post-split session ` +
+        `holds items for the item-naming subcommands; got none`,
+    );
+  }
+  for (const item of postSplit.items) {
+    const which = `${context}: staging premise — post-split item ${item.id} (${item.kind} ${item.scope.node})`;
+    if (item.id === original.id) {
+      fail(
+        `${which}: the original is removed from the session and its id ` +
+          `never reused (SPEC 10.7), so the re-inserted id is unique`,
+      );
+    }
+    if (item.kind === original.kind && item.scope.node === splitScope) {
+      fail(
+        `${which}: the decomposed kind and scope node are never added ` +
+          `back (SPEC 10.5, 10.7), so no item shares the re-inserted ` +
+          `original's`,
+      );
+    }
+    if (item.blockedBy.includes(original.id)) {
+      fail(
+        `${which}: every item the original blocked is blocked by the ` +
+          `decomposition's items instead (SPEC 10.7), so no item names ` +
+          `the re-inserted original; its blockedBy is ` +
+          JSON.stringify(item.blockedBy),
+      );
+    }
+  }
+  await stageReinsertItemEntry(
+    workspace.path(sessionRel(CORRUPT_NAME)),
+    earlier,
+    original.id,
+  );
+  return postSplit.items[0].id;
 }
 
 /** What `review list` must report for a staged corrupt state. */
@@ -1244,17 +1414,17 @@ async function assertCorruptSessionContract(
 
 // The shape-dependent corrupt states, each staged through the H-3 adapter
 // layer over a session file the product itself wrote (session-staging.ts).
+// A missing 10.2 field is staged twice, once per field every item carries
+// (SPEC 10.2) — its `status`, and separately its `kind` — each deletion
+// naming the field by the adapter's assumed shape and failing loudly if the
+// product's stored shape differs (H-3); `note`, which is optional, and
+// `origin`, carried when applicable, are never deleted.
 const ADAPTER_STATES: readonly (readonly [
   string,
   (sessionAbsPath: string) => Promise<void>,
 ])[] = [
-  [
-    "missing 10.2 field",
-    // The stored item field deleted here is the status; "status" mirrors the
-    // adapter's SESSION_SHAPE key and the deletion fails loudly if the
-    // product's stored shape differs (H-3).
-    (abs) => stageDeleteItemField(abs, "status"),
-  ],
+  ["missing 10.2 field: an item's status", (abs) => stageDeleteItemStatus(abs)],
+  ["missing 10.2 field: an item's kind", (abs) => stageDeleteItemKind(abs)],
   ["unknown status", (abs) => stageUnknownItemStatus(abs)],
   ["duplicate item ids", (abs) => stageDuplicateItemEntry(abs)],
   [
@@ -1268,7 +1438,7 @@ const ADAPTER_STATES: readonly (readonly [
 const T10_1_4 = defineProductTest({
   id: "T10.1-4",
   title:
-    "each corrupt session state — unparseable bytes (garbage and truncation), missing 10.2 field, unknown status, duplicate item ids, blockedBy at an absent item, a blockedBy cycle, duplicate kind+scope, malformed recorded creation parameters, malformed recorded decompositions (garbled over a product-performed `split`'s durable record), and a directory or symlink at the session path — makes every review subcommand naming the session report corruption, exit 1, and modify nothing, its report under `--json` (and `export`'s without the flag, its only output form, the same document) the findings-only document of at least one finding, every one condition 21 `corrupt-session` concerning the session's own file (a symlink there by its own path) with `locations` []; `list` reports it corrupt in place of its fields (exit 1), the listing's findings likewise at least one, every one condition 21 `corrupt-session` concerning the session's own file with `locations` []; `check` reports 14.21; shape-dependent states are staged via the H-3 adapter over product-written files (SPEC 10.1, 10.7, 12.7, 13.4, 14.21)",
+    "each corrupt session state — unparseable bytes (garbage and truncation), a missing 10.2 field (an item's status, and separately its kind), unknown status, duplicate item ids, blockedBy at an absent item, a blockedBy cycle, duplicate kind+scope, an item whose kind and scope node are recorded as decomposed (a path-blocks session's original item, copied from the pre-`split` file the product wrote, re-inserted into the post-`split` file), malformed recorded creation parameters, malformed recorded decompositions (garbled over a product-performed `split`'s durable record), and a directory or symlink at the session path — makes every review subcommand naming the session report corruption, exit 1, and modify nothing, its report under `--json` (and `export`'s without the flag, its only output form, the same document) the findings-only document of at least one finding, every one condition 21 `corrupt-session` concerning the session's own file (a symlink there by its own path) with `locations` []; `list` reports it corrupt in place of its fields (exit 1), the listing's findings likewise at least one, every one condition 21 `corrupt-session` concerning the session's own file with `locations` []; `check` reports 14.21; shape-dependent states are staged via the H-3 adapter over product-written files (SPEC 10.1, 10.7, 12.7, 13.4, 14.21)",
   run: async (product) => {
     // --- Shape-dependent states via the adapter, over an audit session ---
     for (const [state, corrupt] of ADAPTER_STATES) {
@@ -1476,6 +1646,23 @@ const T10_1_4 = defineProductTest({
           { name: "real", corrupt: false },
         ],
       );
+    });
+
+    // --- An item whose kind and scope node are recorded as decomposed ---
+    // The one baseline session among the states (stageDecomposedItemState):
+    // a path-blocks session's post-`split` file with the original item's
+    // entry, copied from the pre-`split` file, re-inserted.
+    await withWorkspace(CORE_FILES, async (workspace) => {
+      const state =
+        "an item whose kind and scope node are recorded as decomposed";
+      const itemId = await stageDecomposedItemState(
+        product,
+        workspace,
+        `T10.1-4 [${state}]`,
+      );
+      await assertCorruptSessionContract(product, workspace, state, itemId, [
+        { name: CORRUPT_NAME, corrupt: true },
+      ]);
     });
   },
 });

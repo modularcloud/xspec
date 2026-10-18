@@ -108,9 +108,12 @@ import {
   stageBlockedByAbsentItem,
   stageBlockedByCycle,
   stageDeleteItemField,
+  stageDeleteItemKind,
+  stageDeleteItemStatus,
   stageDuplicateItemEntry,
   stageGarbleCreationParameters,
   stageGarbleDecompositions,
+  stageReinsertItemEntry,
   stageUnknownItemStatus,
 } from "../helpers/adapters/index.js";
 import type { SnapshotEntry } from "../helpers/snapshot.js";
@@ -7695,6 +7698,113 @@ test("S-5: staging deletes a named item field", async () => {
   expect(Object.hasOwn(items[1], "status")).toBe(true);
 });
 
+test("S-5: staging deletes an item's status, and separately its kind, by the assumed shape (a missing 10.2 field)", async () => {
+  for (const [field, stage] of [
+    ["status", stageDeleteItemStatus],
+    ["kind", stageDeleteItemKind],
+  ] as const) {
+    const { file, read } = await sessionWorkspace(WELL_SHAPED_SESSION);
+    await stage(file);
+    const doc = await read();
+    const items = itemsOf(doc);
+    const { [field]: deleted, ...kept } = WELL_SHAPED_SESSION.items[0];
+    expect(deleted).toBeDefined(); // the synthetic entry carried the field
+    expect(items[0]).toEqual(kept); // that one field gone, nothing else
+    expect(items[1]).toEqual(WELL_SHAPED_SESSION.items[1]);
+    expect({ ...doc, items: WELL_SHAPED_SESSION.items }).toEqual(
+      WELL_SHAPED_SESSION,
+    );
+  }
+});
+
+// The pre-`split` file of a session and the post-`split` file the product
+// wrote after it (synthetic, per the layer's assumed shape, keys sorted as
+// SPEC 13.4 writes them): `split` removed the original `i1` — its id never
+// reused — recorded its kind and scope node as decomposed, and added the
+// per-child item `i2` and the scope root's parent-consistency item `i3`.
+const PRE_SPLIT_SESSION = {
+  creationParameters: { base: "c0ffee" },
+  decompositions: [],
+  items: [
+    {
+      baseline: {
+        nodes: { "specs/A.mdx#a": { hashes: { subtreeHash: "h1" } } },
+      },
+      blockedBy: [],
+      id: "i1",
+      kind: "subtree-coherence",
+      note: "kept as written",
+      scope: "specs/A.mdx#a",
+      status: "unresolved",
+    },
+  ],
+};
+const POST_SPLIT_SESSION = {
+  creationParameters: { base: "c0ffee" },
+  decompositions: [{ kind: "subtree-coherence", scope: "specs/A.mdx#a" }],
+  items: [
+    {
+      blockedBy: [],
+      id: "i2",
+      kind: "subtree-coherence",
+      scope: "specs/A.mdx#a.k",
+      status: "unresolved",
+    },
+    {
+      blockedBy: ["i2"],
+      id: "i3",
+      kind: "parent-consistency",
+      scope: "specs/A.mdx#a",
+      status: "unresolved",
+    },
+  ],
+};
+const sessionBytes = (doc: unknown): Uint8Array =>
+  Buffer.from(`${JSON.stringify(doc, null, 2)}\n`, "utf8");
+
+test("S-5: staging re-inserts an item entry copied from an earlier file of the same session, whole and unchanged, keys still byte-sorted", async () => {
+  const { workspace, file, read } = await sessionWorkspace(POST_SPLIT_SESSION);
+  const earlier = sessionBytes(PRE_SPLIT_SESSION);
+  const earlierCopy = Buffer.from(earlier);
+  await stageReinsertItemEntry(file, earlier, "i1");
+  const doc = await read();
+  // The entry appended whole; every other member of the later file as it
+  // was written; the earlier bytes untouched.
+  expect(itemsOf(doc)).toEqual([
+    ...POST_SPLIT_SESSION.items,
+    PRE_SPLIT_SESSION.items[0],
+  ]);
+  expect({ ...doc, items: POST_SPLIT_SESSION.items }).toEqual(
+    POST_SPLIT_SESSION,
+  );
+  expect(Buffer.compare(Buffer.from(earlier), earlierCopy)).toBe(0);
+  // Key order kept as the product wrote it: the staged file is still
+  // written with byte-sorted keys (SPEC 13.4), the re-inserted entry's
+  // members included, so the one corruption is the re-inserted entry.
+  assertJsonKeysByteSorted(
+    await workspace.readBytes(SESSION_REL),
+    "S-5 re-inserted session file",
+  );
+  // Recorded creation parameters compare whole, as values: the same members
+  // written in another order record the same parameters.
+  const reordered = await sessionWorkspace({
+    ...POST_SPLIT_SESSION,
+    creationParameters: { boundary: "main", mode: "direct", target: "main" },
+  });
+  await stageReinsertItemEntry(
+    reordered.file,
+    sessionBytes({
+      ...PRE_SPLIT_SESSION,
+      creationParameters: { target: "main", mode: "direct", boundary: "main" },
+    }),
+    "i1",
+  );
+  expect(itemsOf(await reordered.read())).toEqual([
+    ...POST_SPLIT_SESSION.items,
+    PRE_SPLIT_SESSION.items[0],
+  ]);
+});
+
 test("S-5: staging garbles recorded creation parameters by structural type flip", async () => {
   const objectRecorded = await sessionWorkspace(WELL_SHAPED_SESSION);
   await stageGarbleCreationParameters(objectRecorded.file);
@@ -7743,6 +7853,8 @@ test("S-5: every staged corruption leaves the file one well-formed JSON document
     stageBlockedByCycle,
     stageBlockedByAbsentItem,
     (file: string) => stageDeleteItemField(file, "kind"),
+    stageDeleteItemStatus,
+    stageDeleteItemKind,
     stageGarbleCreationParameters,
     stageGarbleDecompositions,
   ]) {
@@ -7826,6 +7938,120 @@ const STAGING_REJECTIONS: readonly StagingRejection[] = [
     contents:
       '{"items": [{"id": "i1", "status": "unresolved", "blockedBy": []}]}',
     stage: (file) => stageDeleteItemField(file, "note"),
+  },
+  {
+    label: "deleting a status the entry does not carry",
+    contents:
+      '{"items": [{"id": "i1", "kind": "subtree-coherence", "blockedBy": []}]}',
+    stage: stageDeleteItemStatus,
+  },
+  {
+    label: "deleting a kind the entry does not carry",
+    contents:
+      '{"items": [{"id": "i1", "status": "unresolved", "blockedBy": []}]}',
+    stage: stageDeleteItemKind,
+  },
+  {
+    label: "re-inserting from earlier bytes that are no JSON document",
+    contents: JSON.stringify(POST_SPLIT_SESSION),
+    stage: (file) =>
+      stageReinsertItemEntry(file, Buffer.from('{"items": [', "utf8"), "i1"),
+  },
+  {
+    label: "re-inserting from earlier bytes that are not valid UTF-8",
+    contents: JSON.stringify(POST_SPLIT_SESSION),
+    stage: (file) =>
+      stageReinsertItemEntry(file, Uint8Array.from([0x7b, 0xff, 0x7d]), "i1"),
+  },
+  {
+    label: "re-inserting from an earlier file holding no item list",
+    contents: JSON.stringify(POST_SPLIT_SESSION),
+    stage: (file) =>
+      stageReinsertItemEntry(
+        file,
+        sessionBytes({ creationParameters: { base: "c0ffee" } }),
+        "i1",
+      ),
+  },
+  {
+    label: "re-inserting an id no entry of the earlier file bears",
+    contents: JSON.stringify(POST_SPLIT_SESSION),
+    stage: (file) =>
+      stageReinsertItemEntry(file, sessionBytes(PRE_SPLIT_SESSION), "i9"),
+  },
+  {
+    label: "re-inserting an id two entries of the earlier file bear",
+    contents: JSON.stringify(POST_SPLIT_SESSION),
+    stage: (file) =>
+      stageReinsertItemEntry(
+        file,
+        sessionBytes({
+          ...PRE_SPLIT_SESSION,
+          items: [PRE_SPLIT_SESSION.items[0], PRE_SPLIT_SESSION.items[0]],
+        }),
+        "i1",
+      ),
+  },
+  {
+    label: "re-inserting from an earlier entry without a string id",
+    contents: JSON.stringify(POST_SPLIT_SESSION),
+    stage: (file) =>
+      stageReinsertItemEntry(
+        file,
+        sessionBytes({
+          ...PRE_SPLIT_SESSION,
+          items: [{ ...PRE_SPLIT_SESSION.items[0], id: 1 }],
+        }),
+        "i1",
+      ),
+  },
+  {
+    label: "re-inserting an id the later file already bears",
+    contents: JSON.stringify(PRE_SPLIT_SESSION),
+    stage: (file) =>
+      stageReinsertItemEntry(file, sessionBytes(PRE_SPLIT_SESSION), "i1"),
+  },
+  {
+    label:
+      "re-inserting from another session's file (other creation parameters)",
+    contents: JSON.stringify(POST_SPLIT_SESSION),
+    stage: (file) =>
+      stageReinsertItemEntry(
+        file,
+        sessionBytes({
+          ...PRE_SPLIT_SESSION,
+          creationParameters: { base: "beef" },
+        }),
+        "i1",
+      ),
+  },
+  {
+    label: "re-inserting from an earlier file recording no creation parameters",
+    contents: JSON.stringify(POST_SPLIT_SESSION),
+    stage: (file) =>
+      stageReinsertItemEntry(
+        file,
+        sessionBytes({ items: PRE_SPLIT_SESSION.items }),
+        "i1",
+      ),
+  },
+  {
+    label: "re-inserting into a later file recording no creation parameters",
+    contents: JSON.stringify({ items: POST_SPLIT_SESSION.items }),
+    stage: (file) =>
+      stageReinsertItemEntry(file, sessionBytes(PRE_SPLIT_SESSION), "i1"),
+  },
+  {
+    label: "re-inserting into a later file whose items are not an array",
+    contents: JSON.stringify({ ...POST_SPLIT_SESSION, items: {} }),
+    stage: (file) =>
+      stageReinsertItemEntry(file, sessionBytes(PRE_SPLIT_SESSION), "i1"),
+  },
+  {
+    label: "re-inserting into a path holding no session file",
+    contents: undefined,
+    stage: (file) =>
+      stageReinsertItemEntry(file, sessionBytes(PRE_SPLIT_SESSION), "i1"),
   },
   {
     label: "no creationParameters member to garble",
