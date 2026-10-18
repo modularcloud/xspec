@@ -2012,10 +2012,9 @@ const T6_4_3 = defineProductTest({
 // converted uniformly; a record an exported set stages under T6.6-3 too is
 // named with both. The masking arm's unparseable origin carries its
 // declaration on the record. T6.5-5's usage stagings (section-6.5.ts) mirror
-// seven of these `.mdx` records byte for byte (all but the braced and
-// valueless arms' two, T6.4-4's alone), and identical bytes are ONE record
-// (S-9's naming rule), so those seven are exported to that module and named
-// with T6.5-5 too, never registered twice.
+// all nine of these `.mdx` records byte for byte, and identical bytes are
+// ONE record (S-9's naming rule), so all nine are exported to that module
+// and named with T6.5-5 too, never registered twice.
 const U4_FILE = "specs/A.mdx";
 export const U4_SOURCE = stagedMdx(
   "T6.4-4/T6.5-5/T6.6-3 specs/A.mdx",
@@ -2144,15 +2143,17 @@ export const U4_SOLO_SOURCE = stagedMdx(
 // product that reads the braced string, or the bare attribute's JSX value,
 // as a spelling, which finds the old ID and refuses the invalid workspace
 // instead (exit 1). Neither section has children, so no masked 14.2 adds a
-// finding: each file's findings are exactly its one 14.17.
+// finding: each file's findings are exactly its one 14.17. T6.5-5 stages
+// both byte for byte as move origins (section-6.5.ts), and T6.6-3 previews
+// both tests' arms, so each is ONE record named with all three.
 const U4_BRACED_FILE = "specs/Braced.mdx";
-const U4_BRACED_SOURCE = stagedMdx(
-  "T6.4-4 braced-id arm specs/Braced.mdx",
+export const U4_BRACED_SOURCE = stagedMdx(
+  "T6.4-4/T6.5-5/T6.6-3 braced-id arm specs/Braced.mdx",
   ['<S id={"x"}>', "Braced would-be bearer text.", "</S>", ""].join("\n"),
 );
 const U4_VALUELESS_FILE = "specs/Valueless.mdx";
-const U4_VALUELESS_SOURCE = stagedMdx(
-  "T6.4-4 valueless-id arm specs/Valueless.mdx",
+export const U4_VALUELESS_SOURCE = stagedMdx(
+  "T6.4-4/T6.5-5/T6.6-3 valueless-id arm specs/Valueless.mdx",
   ["<S id>", "Valueless would-be bearer text.", "</S>", ""].join("\n"),
 );
 
@@ -2202,23 +2203,20 @@ export const RENAME_USAGE_ORDERING_FILES: Readonly<
 };
 
 /**
- * T6.4-4's parse-local nonexistence staging (the sole would-be bearer spells
- * no identity — its `id` attribute repeated): the rename is exit 2, though
- * that file carries findings, the usage error alone reported; the first of
- * T6_4_4_SPELLS_NONE_ARMS. Exported for T6.6-3's preview variant; stage
- * under RENAME_REFUSAL_CONFIG (the same specs-only configuration) and pin
- * the one-14.17 premise before invoking.
+ * One parse-local nonexistence arm of T6.4-4 or T6.5-5 (previewed by
+ * T6.6-3): the operation's old or origin ID has one would-be bearer, and it
+ * spells no identity (SPEC 6.4, 6.5, 11.2), staged on a workspace of its own
+ * whose findings are exactly that file's one 14.17.
  */
-export const RENAME_SOLO_FILES: Readonly<Record<string, InitialFileContents>> =
-  {
-    [U4_SOLO_FILE]: U4_SOLO_SOURCE,
-  };
-export const RENAME_SOLO_ARGV: readonly string[] = [
-  "rename",
-  U4_SOLO_FILE,
-  "solo",
-  "solo2",
-];
+export interface SpellsNoneUsageArm {
+  /** The arm's label: the would-be bearer's `id` form. */
+  readonly form: string;
+  /** Why the would-be bearer spells no identity, for the diagnostics. */
+  readonly why: string;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  /** The operation's argv, `--json` not yet appended. */
+  readonly argv: readonly string[];
+}
 
 /**
  * T6.4-4's parse-local nonexistence arms, each staged on a workspace of its
@@ -2229,21 +2227,16 @@ export const RENAME_SOLO_ARGV: readonly string[] = [
  * quoted static-string form, is condition 17, never condition 1; SPEC 14),
  * the premise each arm pins before its rename; each new ID is valid, so a
  * product reading a spelling where none is finds the old ID and meets the
- * invalid-workspace refusal (exit 1) instead of the usage error.
+ * invalid-workspace refusal (exit 1) instead of the usage error. Exported
+ * for T6.6-3's preview twins, staged under the same RENAME_REFUSAL_CONFIG
+ * with the one-14.17 premise pinned before invoking.
  */
-const T6_4_4_SPELLS_NONE_ARMS: readonly {
-  /** The arm's label: the would-be bearer's `id` form. */
-  readonly form: string;
-  /** Why the would-be bearer spells no identity, for the diagnostics. */
-  readonly why: string;
-  readonly files: Readonly<Record<string, InitialFileContents>>;
-  readonly argv: readonly string[];
-}[] = [
+export const T6_4_4_SPELLS_NONE_ARMS: readonly SpellsNoneUsageArm[] = [
   {
     form: "repeated `id`",
     why: "its `id` attribute repeated on the tag — a repeated prop",
-    files: RENAME_SOLO_FILES,
-    argv: RENAME_SOLO_ARGV,
+    files: { [U4_SOLO_FILE]: U4_SOLO_SOURCE },
+    argv: ["rename", U4_SOLO_FILE, "solo", "solo2"],
   },
   {
     form: 'braced `id={"x"}`, renaming `x`',

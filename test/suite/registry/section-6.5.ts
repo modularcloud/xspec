@@ -190,9 +190,16 @@
 //   exists — the invalid-workspace refusal reports the workspace's one
 //   14.3 or 14.1 finding instead (exit 1, never exit 2, nothing modified,
 //   the target file not created) — while an origin ID whose only would-be
-//   bearer spells no identity (its `id` attribute repeated on the tag, a
-//   14.17 premise pinned via `build`) is nonexistent: exit 2 even beside
-//   that file's findings. Operand classification is by spelling alone
+//   bearer spells no identity — its `id` attribute repeated on the tag, or,
+//   each on a workspace of its own, braced (`id={"x"}`, moving `x`) or
+//   valueless (`<S id>`, moving `true`, the value JSX gives a bare
+//   attribute), T6.4-4's stagings in the section form, each a one-14.17
+//   premise pinned via `build` — is nonexistent: exit 2, though that file
+//   carries a 14.17 finding, the usage error alone reported (H-5), inside a
+//   whole-root modifies-nothing compare, failing a product that reads the
+//   repeated value, the braced string, or the bare attribute's JSX value as
+//   a spelling (it finds the origin ID and refuses the invalid workspace
+//   instead, exit 1). Operand classification is by spelling alone
 //   (SPEC 6.5: an operand containing `#` is a `<file>#<id>` pair under the
 //   12.0 split, one without is a file): the three mixed-synopsis
 //   invocations — bare-file origin with pair destination, pair origin with
@@ -300,15 +307,18 @@ import {
 } from "../../helpers/ts-identifiers.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
+import type { SpellsNoneUsageArm } from "./section-6.4.js";
 import {
   BARRED_NEW_ID_CHARACTERS,
   U4_ANC_SOURCE,
   U4_BAD_SOURCE,
+  U4_BRACED_SOURCE,
   U4_BROKEN_SOURCE,
   U4_DUP_SOURCE,
   U4_SOLO_SOURCE,
   U4_SOURCE,
   U4_STRAY_SOURCE,
+  U4_VALUELESS_SOURCE,
   assertHumanAppliedMapping,
 } from "./section-6.4.js";
 import type {
@@ -4245,6 +4255,22 @@ const U5_ANC_SOURCE = U4_ANC_SOURCE;
 const U5_SOLO = "specs/Solo.mdx";
 const U5_SOLO_SOURCE = U4_SOLO_SOURCE;
 
+// Likewise when the only would-be bearer's one `id` attribute holds a value
+// not in the quoted static-string form (11.2: a value in any other form,
+// braced or valueless included, spells none; condition 17, never 14.1):
+// braced, `id={"x"}`, the origin ID `x` its braced string's value; and,
+// separately, valueless, `<S id>`, the origin ID `true` the value JSX gives
+// a bare attribute — T6.4-4's two stagings, byte for byte (ONE record each,
+// section-6.4.ts). Each origin ID is nonexistent: exit 2, though the file
+// carries a 14.17 finding, the usage error alone reported — failing a
+// product that reads the braced string, or the bare attribute's JSX value,
+// as a spelling, which finds the origin ID and refuses the invalid workspace
+// instead (exit 1).
+const U5_BRACED = "specs/Braced.mdx";
+const U5_BRACED_SOURCE = U4_BRACED_SOURCE;
+const U5_VALUELESS = "specs/Valueless.mdx";
+const U5_VALUELESS_SOURCE = U4_VALUELESS_SOURCE;
+
 // Destination operand that is not valid UTF-8: `specs/<0xFF>.mdx` (Linux-leg
 // staging — argv is a byte channel there; T6.5-5, T12.0-5, T1.5-2's note).
 // It contains no `#`, so only the argument-value rule makes it exit 2: a
@@ -4403,25 +4429,50 @@ export const MOVE_USAGE_ORDERING_FILES: Readonly<
 };
 
 /**
- * T6.5-5's parse-local nonexistence staging (the sole would-be bearer
- * spells no identity — its `id` attribute repeated): the move is exit 2 even
- * beside that file's findings. Exported for T6.6-3's preview variant; stage
- * under MOVE_SOLO_CONFIG and pin the one-14.17 premise before invoking.
+ * T6.5-5's parse-local nonexistence arms, T6.4-4's mirrored in the section
+ * form (SPEC 6.5: existence judged as in 6.4), each staged on a workspace of
+ * its own under MOVE_SOLO_CONFIG: an origin ID whose only would-be bearer
+ * spells no identity (SPEC 11.2) — its `id` attribute repeated on the tag,
+ * or, separately, its one `id` braced or valueless. Each file's findings are
+ * exactly one 14.17 (a repeated prop, or an `id` value not in quoted
+ * static-string form, is condition 17, never condition 1; SPEC 14), the
+ * premise each arm pins before its move; each destination names a valid new
+ * ID in an absent target file, so a product reading a spelling where none is
+ * finds the origin ID and meets the invalid-workspace refusal (exit 1)
+ * instead of the usage error. Exported for T6.6-3's preview twins, staged
+ * under the same MOVE_SOLO_CONFIG with the one-14.17 premise pinned before
+ * invoking.
  */
 export const MOVE_SOLO_CONFIG = SPECS_ONLY_CONFIG;
-export const MOVE_SOLO_FILES: Readonly<Record<string, InitialFileContents>> = {
-  [U5_SOLO]: U5_SOLO_SOURCE,
-};
-export const MOVE_SOLO_ARGV: readonly string[] = [
-  "move",
-  `${U5_SOLO}#solo`,
-  "specs/New.mdx#solo2",
+export const T6_5_5_SPELLS_NONE_ARMS: readonly SpellsNoneUsageArm[] = [
+  {
+    form: "repeated `id`",
+    why: "its `id` attribute repeated on the tag — a repeated prop",
+    files: { [U5_SOLO]: U5_SOLO_SOURCE },
+    argv: ["move", `${U5_SOLO}#solo`, "specs/New.mdx#solo2"],
+  },
+  {
+    form: 'braced `id={"x"}`, moving `x`',
+    why:
+      "its one `id` braced — a value not in quoted static-string form, " +
+      "the braced string `x` no spelling",
+    files: { [U5_BRACED]: U5_BRACED_SOURCE },
+    argv: ["move", `${U5_BRACED}#x`, "specs/New.mdx#x2"],
+  },
+  {
+    form: "valueless `<S id>`, moving `true`",
+    why:
+      "its one `id` valueless — a value not in quoted static-string form, " +
+      "`true`, the value JSX gives a bare attribute, no spelling",
+    files: { [U5_VALUELESS]: U5_VALUELESS_SOURCE },
+    argv: ["move", `${U5_VALUELESS}#true`, "specs/New.mdx#true2"],
+  },
 ];
 
 const T6_5_5 = defineProductTest({
   id: "T6.5-5",
   title:
-    "usage errors (exit 2): a nonexistent origin file in either form — absent on disk, or an `.mdx` present on disk but matched by no spec group (a file named in an argument exists as a member of the discovered set), its absence from the discovered set pinned through `ids --json` — a nonexistent origin ID, and a discovered code source as the origin in each form — both forms' origin operands name discovered spec sources, so a code-source origin is a wrong-kind operand, judged like existence before any content question — are usage errors checked before source validation, the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering, as T6.4-4); an origin ID inside an unparseable origin file is masked: the validation findings are reported and the command exits 1; origin-ID existence is parse-local over spelled identities: an ID two sections both spell, or one whose sole bearer spells it beneath an ancestor spelling no identity, exists — the duplicate-ID or ancestor finding refuses instead (exit 1, never exit 2, nothing modified) — while an ID whose only would-be bearer spells no identity (its `id` attribute repeated on the tag) is nonexistent, exit 2 even beside that file's findings; operand classification is by spelling alone: the three mixed-synopsis invocations — bare-file origin with pair destination, pair origin with bare-file destination, and a `#`-containing file-form destination classified as a pair — match neither synopsis (exit 2), and a destination operand containing U+FFFD (the file form's path, the section form's id part; either leg) or not valid UTF-8 (raw argv bytes, Linux leg) is a malformed argument value — a syntax-class usage error, exit 2 with the plain usage error's document (`code` null), byte-identical with the configuration file invalid or missing, never `refused-invalid-destination` or `refused-invalid-id` — the latter the stagings T6.5-4's unspellable-destination note sets aside — the existence, wrong-kind, mixed-synopsis, dead-letter, and refusal arms each proving nothing modified (SPEC 6.5, 6.4, 11.2, 12.0, 14, 14.20)",
+    "usage errors (exit 2): a nonexistent origin file in either form — absent on disk, or an `.mdx` present on disk but matched by no spec group (a file named in an argument exists as a member of the discovered set), its absence from the discovered set pinned through `ids --json` — a nonexistent origin ID, and a discovered code source as the origin in each form — both forms' origin operands name discovered spec sources, so a code-source origin is a wrong-kind operand, judged like existence before any content question — are usage errors checked before source validation, the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering, as T6.4-4); an origin ID inside an unparseable origin file is masked: the validation findings are reported and the command exits 1; origin-ID existence is parse-local over spelled identities: an ID two sections both spell, or one whose sole bearer spells it beneath an ancestor spelling no identity, exists — the duplicate-ID or ancestor finding refuses instead (exit 1, never exit 2, nothing modified) — while an ID whose only would-be bearer spells no identity — its `id` attribute repeated on the tag, or, separately, braced (`id={\"x\"}`, moving `x`) or valueless (`<S id>`, moving `true`, the value JSX gives a bare attribute) — is nonexistent: exit 2, though that file carries a 14.17 finding, the usage error alone reported (the error document the entire stdout, no findings beside it); operand classification is by spelling alone: the three mixed-synopsis invocations — bare-file origin with pair destination, pair origin with bare-file destination, and a `#`-containing file-form destination classified as a pair — match neither synopsis (exit 2), and a destination operand containing U+FFFD (the file form's path, the section form's id part; either leg) or not valid UTF-8 (raw argv bytes, Linux leg) is a malformed argument value — a syntax-class usage error, exit 2 with the plain usage error's document (`code` null), byte-identical with the configuration file invalid or missing, never `refused-invalid-destination` or `refused-invalid-id` — the latter the stagings T6.5-4's unspellable-destination note sets aside — the existence, wrong-kind, mixed-synopsis, dead-letter, spells-no-identity, and refusal arms each proving nothing modified (SPEC 6.5, 6.4, 11.2, 12.0, 14, 14.20; H-5)",
   run: async (product) => {
     // --- Base arm: a valid workspace ---
     await withWorkspace(
@@ -4721,44 +4772,55 @@ const T6_5_5 = defineProductTest({
     );
 
     // --- Parse-local nonexistence: a would-be bearer spelling no
-    // identity ---
-    await withWorkspace(
-      MOVE_SOLO_CONFIG,
-      MOVE_SOLO_FILES,
-      async (workspace) => {
-        const context = "T6.5-5 spells-no-identity arm";
-        // Staging premise: the repeated-`id` bearer leaves the file with
-        // exactly one 14.17 finding — a repeated prop is condition 17,
-        // never 14.1, spells no identity, and has no children whose masked
-        // 14.2 could add findings (SPEC 11.2, 14). Pinning the premise
-        // makes the exit-2 assertion below demonstrably run beside that
-        // file's findings: a product that takes a repeated-`id` value as
-        // spelled, or that reports the file's findings in the origin ID's
-        // place, exits 1 here instead.
+    // identity — its `id` repeated, braced, or valueless ---
+    for (const arm of T6_5_5_SPELLS_NONE_ARMS) {
+      await withWorkspace(MOVE_SOLO_CONFIG, arm.files, async (workspace) => {
+        const context = `T6.5-5 spells-no-identity arm, ${arm.form}`;
+        // Staging premise: the would-be bearer leaves the file with exactly
+        // one 14.17 finding — a repeated prop, or an `id` value not in
+        // quoted static-string form, is condition 17, never 14.1, spells no
+        // identity, and has no children whose masked 14.2 could add
+        // findings (SPEC 11.2, 14). Pinning the premise makes the exit-2
+        // assertion below demonstrably run beside that file's finding: a
+        // product that reads a spelling where none is — the repeated value,
+        // the braced string, or the bare attribute's JSX value — or that
+        // reports the file's findings in the origin ID's place, exits 1
+        // here instead.
         const findings = await buildFindings(
           product,
           workspace,
           `${context}: \`build --json\` premise — the staged workspace ` +
-            `fails build validation (repeated \`id\` attribute, SPEC 14.17)`,
+            `fails build validation (${arm.form}, SPEC 14.17)`,
         );
         assertConditionCounts(
           findings,
           { "14.17": 1 },
-          `${context}: staging premise — the repeated-\`id\` bearer is the ` +
-            `file's one finding (SPEC 14: a repeated prop is condition 17, ` +
-            `never condition 1)`,
+          `${context}: staging premise — the would-be bearer's invalid ` +
+            `\`id\` is the file's one finding (SPEC 14: a repeated prop, ` +
+            `or an \`id\` value not in quoted static-string form, is ` +
+            `condition 17, never condition 1)`,
         );
-        await expectMoveUsageError(
-          product,
-          workspace,
-          MOVE_SOLO_ARGV,
-          `${context}: an origin ID whose only would-be bearer spells no ` +
-            `identity (its \`id\` attribute repeated on the tag) is ` +
-            `nonexistent — exit 2 even beside that file's findings ` +
-            `(SPEC 6.5, 6.4, 11.2, 12.0)`,
+        // The usage error alone (H-5): exit 2, the error document the
+        // entire stdout — no findings beside it — and nothing modified, the
+        // absent target file not created (SPEC 12.0), the lock path aside
+        // (H-6).
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            await expectMoveUsageError(
+              product,
+              workspace,
+              arm.argv,
+              `${context}: an origin ID whose only would-be bearer spells ` +
+                `no identity (${arm.why}) is nonexistent — exit 2, though ` +
+                `that file carries a 14.17 finding, the usage error alone ` +
+                `reported (SPEC 6.5, 6.4, 11.2, 12.0; H-5)`,
+            );
+          },
+          `${context}: the usage error modifies nothing (SPEC 6.5, 12.0)`,
         );
-      },
-    );
+      });
+    }
   },
 });
 

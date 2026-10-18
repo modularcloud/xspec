@@ -98,8 +98,10 @@
 //   invocation, then the `--preview` one — on the ordering-shaped staging
 //   (unrelated validation errors present) where its source test stages one,
 //   so exit 2 across the pair realizes the precedence clause; the
-//   parse-local spells-no-identity arms re-pin their one-14.17 premise
-//   first (T6.4-4's protocol), and every sweep sits inside a whole-root
+//   parse-local spells-no-identity arms — each home test's exported rows,
+//   the would-be bearer's `id` repeated, braced, or valueless, each on a
+//   workspace of its own — re-pin their one-14.17 premise first (T6.4-4's
+//   protocol; runSpellsNoneUsageArm), and every sweep sits inside a whole-root
 //   modifies-nothing compare (SPEC 12.0), which leaves the lock path out —
 //   each real invocation is a mutating command's run (TEST-SPEC H-6) — while
 //   each `--preview` invocation runs inside its own compare against the
@@ -439,15 +441,15 @@ import { pathExists, runProduct } from "../../helpers/subprocess.js";
 import { IDENTIFIER_RUN_SOURCE } from "../../helpers/ts-identifiers.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
+import type { SpellsNoneUsageArm } from "./section-6.4.js";
 import {
   RENAME_REFUSAL_CASES,
   RENAME_REFUSAL_CONFIG,
   RENAME_REFUSAL_FILES,
-  RENAME_SOLO_ARGV,
-  RENAME_SOLO_FILES,
   RENAME_USAGE_CASES,
   RENAME_USAGE_CONFIG,
   RENAME_USAGE_ORDERING_FILES,
+  T6_4_4_SPELLS_NONE_ARMS,
 } from "./section-6.4.js";
 import type { RefusalExpectation } from "./section-6.5.js";
 import {
@@ -472,13 +474,12 @@ import {
   MOVE_REFUSAL_CONFIG,
   MOVE_REFUSAL_FILES,
   MOVE_REPLACEMENT_DESTINATION_CASES,
-  MOVE_SOLO_ARGV,
   MOVE_SOLO_CONFIG,
-  MOVE_SOLO_FILES,
   MOVE_USAGE_CASES,
   MOVE_USAGE_CONFIG,
   MOVE_USAGE_ORDERING_FILES,
   MOVE_WRONG_KIND_CASES,
+  T6_5_5_SPELLS_NONE_ARMS,
   stageMoveDerivedLinkComponent,
   stageMoveLinkOutsideComponent,
   stageMoveRefusalOccupants,
@@ -1093,32 +1094,36 @@ async function expectUsageErrorEitherWay(
 }
 
 /**
- * The spells-no-identity usage arms (T6.4-4/T6.5-5's parse-local
- * nonexistence, staged identically): pin the one-14.17 premise — a repeated
- * `id` is condition 17, never 14.1, and spells no identity (SPEC 11.2, 14)
- * — then assert the operation and its preview are exit 2 even beside that
- * file's findings, modifying nothing: a whole-root compare around the pair,
- * the lock path left out, and the preview's own compare inside it, the lock
- * path included (expectUsageErrorEitherWay; TEST-SPEC H-6).
+ * One spells-no-identity usage arm (T6.4-4/T6.5-5's parse-local
+ * nonexistence, staged identically from the home test's exported row; the
+ * caller stages `arm.files` under the home test's configuration): pin the
+ * one-14.17 premise — a repeated `id`, or one `id` whose value is not in
+ * quoted static-string form (braced or valueless), is condition 17, never
+ * 14.1, and spells no identity (SPEC 11.2, 14) — then assert the operation
+ * and its preview are exit 2, though that file carries a 14.17 finding, the
+ * usage error alone reported, modifying nothing: a whole-root compare around
+ * the pair, the lock path left out, and the preview's own compare inside
+ * it, the lock path included (expectUsageErrorEitherWay; TEST-SPEC H-5,
+ * H-6).
  */
-async function runSoloUsageArm(
+async function runSpellsNoneUsageArm(
   product: ProductBinding,
   workspace: TestWorkspace,
-  argv: readonly string[],
+  arm: SpellsNoneUsageArm,
   context: string,
 ): Promise<void> {
   const findings = await buildFindings(
     product,
     workspace,
     `${context}: \`build --json\` premise — the staged workspace fails ` +
-      `build validation (repeated \`id\` attribute, SPEC 14.17)`,
+      `build validation (${arm.form}, SPEC 14.17)`,
   );
   assertConditionCounts(
     findings,
     { "14.17": 1 },
-    `${context}: staging premise — the repeated-\`id\` bearer is the ` +
-      `file's one finding (SPEC 14: a repeated prop is condition 17, never ` +
-      `condition 1)`,
+    `${context}: staging premise — the would-be bearer's invalid \`id\` is ` +
+      `the file's one finding (SPEC 14: a repeated prop, or an \`id\` value ` +
+      `not in quoted static-string form, is condition 17, never condition 1)`,
   );
   await assertLeavesUnchanged(
     workspace.root,
@@ -1126,10 +1131,11 @@ async function runSoloUsageArm(
       await expectUsageErrorEitherWay(
         product,
         workspace,
-        argv,
+        arm.argv,
         `${context} — the origin ID's only would-be bearer spells no ` +
-          `identity, so the ID is nonexistent: exit 2 even beside that ` +
-          `file's findings (SPEC 6.4, 6.5, 11.2, 12.0)`,
+          `identity (${arm.why}), so the ID is nonexistent: exit 2, though ` +
+          `that file carries a 14.17 finding, the usage error alone ` +
+          `reported (SPEC 6.4, 6.5, 11.2, 12.0; H-5)`,
       );
     },
     `${context}: the usage errors modify nothing, previewed or not ` +
@@ -2020,7 +2026,7 @@ export async function runT663AcquisitionArms(
 const T6_6_3 = defineProductTest({
   id: "T6.6-3",
   title:
-    "refusal and scheduling equivalence: each refusal of T6.4-3, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, and T6.5-21 — the invalid-workspace precondition, the exact self-move of either form (the file form refused as identity-unchanged alone, never `refused-destination-exists` beside it), the same-file after-removal collision, every `refused-invalid-rewrite` and `refused-moved-import` arm with the reasons reported beside it, T6.5-16's alone arms, and T6.5-21's two-reason move included — staged identically (T6.5-6's post-move workspace staged directly from the bytes it asserts; T6.5-16's, T6.5-17's, T6.5-20's, and T6.5-21's arms from their exported tables — T6.5-20's companion legs read as its home test reads them, each T6.5-20 and T6.5-21 staging before any build or after a `build` as its home test stages it), the `--preview` invocation exits 1 reporting the same findings (same stable codes, locations, concerned paths, identities) in the form-exact 12.7 preview document with `mapping`, `files`, and `delta` null, modifying nothing; each usage error of T6.4-4/T6.5-5 — the U+FFFD destination operands of either leg and the Linux leg's non-UTF-8 operand included — exits 2 identically under `--preview` (argument checks precede either way — asserted beside unrelated validation errors and beside a spells-no-identity origin's findings, nothing modified); the equivalence is over workspace state, never scheduling: while another mutating command is held (`--test-hold`, T13.5-2's staging), a `--preview` invocation runs to completion with its full successful report — it takes no exclusivity and never meets the mutual-exclusion refusal; the held-state comparison holds once command 1 holds and again once the preview has exited, the holder's entry byte-identical and alone (read under H-4's grant), nothing added beside it — and `--test-hold` combined with `--preview` is a usage error, exit 2, creating no hold file; acquisition's every other outcome lies outside the equivalence likewise, each arm staged beside the real operation (`rename specs/A.mdx a a2`), its preview run first: (a) with, each staged separately, `.xspec/lock` a symbolic link to a directory, an empty leftover lock directory `r-x`, one `-wx`, and a lock directory holding a subdirectory that holds a file, the subdirectory `-wx` (each verified on the harness itself), the `--preview` answers byte-identically to its run on an unobstructed twin, exit 0, the staging untouched, while the real operation exits 2, `path` `\".xspec/lock\"`, `code` `\"write-failure\"` under the first two and `\"read-failure\"` under the last two; (b) with `.xspec` a plain file, the preview gives the invalid-workspace refusal — exit 1, exactly T10.1-6's condition-22 finding concerning `.xspec`, `mapping`, `files`, and `delta` `null` — while the real operation exits 2, `code` `\"write-failure\"`, `path` `\".xspec\"`; (c) with a plain file at `.xspec/lock`, and separately a directory and a FIFO in a lock directory, the preview answers as on the leftover-free twin and leaves every leftover byte-untouched, no entry added (H-6's inclusion), while the real operation then succeeds, removing them (SPEC 6.6, 6.4, 6.5, 13.4, 13.5, 12.0, 12.7, 14, 14.22, 14.24, 14.25)",
+    "refusal and scheduling equivalence: each refusal of T6.4-3, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, and T6.5-21 — the invalid-workspace precondition, the exact self-move of either form (the file form refused as identity-unchanged alone, never `refused-destination-exists` beside it), the same-file after-removal collision, every `refused-invalid-rewrite` and `refused-moved-import` arm with the reasons reported beside it, T6.5-16's alone arms, and T6.5-21's two-reason move included — staged identically (T6.5-6's post-move workspace staged directly from the bytes it asserts; T6.5-16's, T6.5-17's, T6.5-20's, and T6.5-21's arms from their exported tables — T6.5-20's companion legs read as its home test reads them, each T6.5-20 and T6.5-21 staging before any build or after a `build` as its home test stages it), the `--preview` invocation exits 1 reporting the same findings (same stable codes, locations, concerned paths, identities) in the form-exact 12.7 preview document with `mapping`, `files`, and `delta` null, modifying nothing; each usage error of T6.4-4/T6.5-5 — the U+FFFD destination operands of either leg and the Linux leg's non-UTF-8 operand included — exits 2 identically under `--preview` (argument checks precede either way — asserted beside unrelated validation errors and beside each spells-no-identity origin's one 14.17 finding, the would-be bearer's `id` repeated, braced (`id={\"x\"}`), or valueless (`<S id>`) in each operation, the usage error alone reported, nothing modified); the equivalence is over workspace state, never scheduling: while another mutating command is held (`--test-hold`, T13.5-2's staging), a `--preview` invocation runs to completion with its full successful report — it takes no exclusivity and never meets the mutual-exclusion refusal; the held-state comparison holds once command 1 holds and again once the preview has exited, the holder's entry byte-identical and alone (read under H-4's grant), nothing added beside it — and `--test-hold` combined with `--preview` is a usage error, exit 2, creating no hold file; acquisition's every other outcome lies outside the equivalence likewise, each arm staged beside the real operation (`rename specs/A.mdx a a2`), its preview run first: (a) with, each staged separately, `.xspec/lock` a symbolic link to a directory, an empty leftover lock directory `r-x`, one `-wx`, and a lock directory holding a subdirectory that holds a file, the subdirectory `-wx` (each verified on the harness itself), the `--preview` answers byte-identically to its run on an unobstructed twin, exit 0, the staging untouched, while the real operation exits 2, `path` `\".xspec/lock\"`, `code` `\"write-failure\"` under the first two and `\"read-failure\"` under the last two; (b) with `.xspec` a plain file, the preview gives the invalid-workspace refusal — exit 1, exactly T10.1-6's condition-22 finding concerning `.xspec`, `mapping`, `files`, and `delta` `null` — while the real operation exits 2, `code` `\"write-failure\"`, `path` `\".xspec\"`; (c) with a plain file at `.xspec/lock`, and separately a directory and a FIFO in a lock directory, the preview answers as on the leftover-free twin and leaves every leftover byte-untouched, no entry added (H-6's inclusion), while the real operation then succeeds, removing them (SPEC 6.6, 6.4, 6.5, 13.4, 13.5, 12.0, 12.7, 14, 14.22, 14.24, 14.25)",
   run: async (product) => {
     // --- Refusal equivalence: T6.4-3's cases, staged identically ---
     await withWorkspace(
@@ -2324,18 +2330,23 @@ const T6_6_3 = defineProductTest({
         );
       },
     );
-    await withWorkspace(
-      RENAME_REFUSAL_CONFIG, // the same specs-only configuration (T6.4-4)
-      RENAME_SOLO_FILES,
-      async (workspace) => {
-        await runSoloUsageArm(
-          product,
-          workspace,
-          RENAME_SOLO_ARGV,
-          "T6.6-3 rename usage, spells-no-identity arm",
-        );
-      },
-    );
+    // T6.4-4's spells-no-identity arms — the would-be bearer's `id`
+    // repeated, braced, or valueless — each on a workspace of its own under
+    // the same specs-only configuration (RENAME_REFUSAL_CONFIG, T6.4-4's).
+    for (const arm of T6_4_4_SPELLS_NONE_ARMS) {
+      await withWorkspace(
+        RENAME_REFUSAL_CONFIG,
+        arm.files,
+        async (workspace) => {
+          await runSpellsNoneUsageArm(
+            product,
+            workspace,
+            arm,
+            `T6.6-3 rename usage, spells-no-identity arm, ${arm.form}`,
+          );
+        },
+      );
+    }
 
     // --- Usage-error equivalence: T6.5-5's usage errors on its
     // ordering-shaped staging ---
@@ -2394,18 +2405,19 @@ const T6_6_3 = defineProductTest({
         );
       },
     );
-    await withWorkspace(
-      MOVE_SOLO_CONFIG,
-      MOVE_SOLO_FILES,
-      async (workspace) => {
-        await runSoloUsageArm(
+    // T6.5-5's spells-no-identity arms — T6.4-4's three would-be bearers
+    // as section-form move origins — each on a workspace of its own under
+    // the same specs-only configuration (MOVE_SOLO_CONFIG, T6.5-5's).
+    for (const arm of T6_5_5_SPELLS_NONE_ARMS) {
+      await withWorkspace(MOVE_SOLO_CONFIG, arm.files, async (workspace) => {
+        await runSpellsNoneUsageArm(
           product,
           workspace,
-          MOVE_SOLO_ARGV,
-          "T6.6-3 move usage, spells-no-identity arm",
+          arm,
+          `T6.6-3 move usage, spells-no-identity arm, ${arm.form}`,
         );
-      },
-    );
+      });
+    }
 
     // --- Scheduling: the equivalence is over workspace state, never
     // scheduling (SPEC 6.6) — T13.5-2's staging and choreography ---
