@@ -353,14 +353,15 @@ function mdxSection(id: string): string {
 // body's first product invocation (module header): byte-identical wherever
 // they are staged — `mdxSection("a")` at `specs/A.mdx` here and in
 // section-7-discovery.ts, section-7.1-7.3.ts, section-7.4-7.5.ts (T7.4-1,
-// T7.5-1; T7.5-5 also at `tgt/a.mdx`), and section-12.6.ts (T12.6-1,
-// T12.6-2: the version workspaces' minimal source, the same bytes);
-// `mdxSection("b")` at `specs/sub/B.mdx` (T7-3, T7-6, T7.3-1) and
+// T7.5-1; T7.5-2 at `lo/BASE.mdx` alone; T7.5-5 also at `tgt/a.mdx`), and
+// section-12.6.ts (T12.6-1, T12.6-2: the version workspaces' minimal
+// source, the same bytes); `mdxSection("b")` at `specs/sub/B.mdx` (T7-3,
+// T7-6, T7.3-1) and
 // `specs2/B.mdx` (T7-4) — so each is ONE staged-source record, named with
 // every staging test in ID order and every path; the other modules import
 // them (section-7.4-7.5.ts and section-12.6.ts the `a` alone).
 export const SECTION_A_SOURCE = stagedMdx(
-  "T7-1/T7-2/T7-3/T7-4/T7-6/T7-7/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-5/T12.6-1/T12.6-2 specs/A.mdx (the minimal section a; T7.5-5's tgt/a.mdx)",
+  "T7-1/T7-2/T7-3/T7-4/T7-6/T7-7/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-2/T7.5-5/T12.6-1/T12.6-2 specs/A.mdx (the minimal section a; T7.5-2's lo/BASE.mdx; T7.5-5's tgt/a.mdx)",
   mdxSection("a"),
 );
 export const SECTION_B_SOURCE = stagedMdx(

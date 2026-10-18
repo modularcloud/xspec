@@ -21,8 +21,12 @@
 // optional `kinds`; `files` selectors support capture wildcards `$1`…`$9`
 // (each at most once in `from`; a `to` capture must exist in `from`; a
 // capture takes one or more bytes within a single segment, shortest-match
-// left to right). Violations are findings of `check` — and only `check`
-// (14.12): `build` does not evaluate policy (12.1).
+// left to right) and follow 7's glob rules — a `files` glob, capture-bearing
+// or not, lies outside the workspace root by its spelling alone, as a
+// group's does (14.14), and an inside-root spelling's `.`, `..`, and empty
+// segments match nothing. Violations are findings of `check` — one per rule
+// and offending edge, an edge spelled twice being one edge (5.2) — and only
+// `check` (14.12): `build` does not evaluate policy (12.1).
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — exit
@@ -73,7 +77,22 @@
 //   renderings plus an exact 14.12 condition count: SPEC 7.5 fixes the
 //   information (rule name + offending edge) and one finding per (rule, edge)
 //   pair, not an order or a location (the edge is the subject, not a source
-//   span).
+//   span). T7.5-2's twice-spelled edge (`d={[BASE.a, BASE.a]}`, one edge,
+//   5.2) pins the pair rule: exactly one finding, where a product reporting
+//   one per spelling reports two.
+// - Selector globs (T7.5-1, T7.5-4; SPEC 7): T7.5-1's outside-root `files`
+//   globs — `../x/*.ts` and the capture pattern `a/../../$1.ts` in `from`,
+//   `/src/*.ts` in `to` — are matrix rows, each rule otherwise valid, so a
+//   product vetting group globs alone accepts the configuration and builds
+//   (exit 0) where 14.14 requires exit 2. T7.5-4's inside-root counterpart
+//   stages one code source's marker edge into the spec group `product`
+//   under `from: { files: "./src/*.ts" }` and, on a second workspace built
+//   under its own configuration (a configuration changed after a build may
+//   leave graph data stale, T13.4-11(a)), under the twin `src/*.ts`: the
+//   first loads (`build` exit 0), the edge's presence pinned through `query
+//   edges` so its clean `check --json` (exit 0, findings []) is not vacuous,
+//   and the twin reports the edge (exit 1) — a product normalizing a
+//   selector glob's spelling before matching flags it under both.
 // - Every `check` run is preceded by a successful `build` in the same
 //   workspace, so generated output is fresh and the policy findings are the
 //   run's only findings (no 14.10 staleness contamination) — the exact
@@ -116,8 +135,9 @@
 //   created after its first product invocation — T7.4-1's and T7.5-1's
 //   later matrix arms, ambiguous-name arms, positive arms, and set-reading
 //   workspaces (`MATRIX_FILES`, `DUAL_FILES`, the set-reading fixtures),
-//   T7.5-2's kinds-restriction workspace, T7.5-4's files- and tags-selector
-//   workspaces, T7.5-5's arms (b)–(j) — is a ledger record, judged by
+//   T7.5-2's kinds-restriction and twice-spelled-edge workspaces, T7.5-4's
+//   files-selector, inside-root spelling, and tags-selector workspaces,
+//   T7.5-5's arms (b)–(j) — is a ledger record, judged by
 //   test/self/s9-staged-sources.test.ts before any product exists.
 //   Byte-identical sources across tests and paths are ONE record, named
 //   with every staging test in ID order and every path: `mdxSection("a")`
@@ -135,19 +155,22 @@
 //   and T7.5-1's matrix tables, every row a record made at module load, the
 //   first's too, the table being one), T7.4-1's ambiguous-name, inferred-
 //   kind, and unknown-profile-name configurations, both bodies' set-reading
-//   configurations, T7.5-2's kinds-restriction, T7.5-4's files- and
-//   tags-selector, and T7.5-5's arms (b)–(j) configurations, and the code
-//   sources of MATRIX_FILES, DUAL_FILES, and T7.5-5's arms (d), (e), and (g)
-//   — is a ledger record carrying its S-9 declaration, every one
-//   well-formed, judged by test/self/s9-staged-sources.test.ts before any
-//   product exists. Byte-identical code sources are ONE record, named with
-//   every path: `src/impl.ts` and `dualcode/d.ts` (OK_CODE_SOURCE), and
-//   CODE_MARKER_TO_P at T7.5-5's five paths, `src/end$` and `src/end`
-//   among them (code sources the default does not reach, judged because
-//   the record makes the path judged). The same first workspaces stay
-//   plain; T7.5-6's tampered generated module, an edit of product-written
-//   bytes, is staged `unchecked` (the document declares nothing of its
-//   well-formedness, and no harness constant equals its bytes).
+//   configurations, T7.5-2's kinds-restriction and twice-spelled-edge,
+//   T7.5-4's files-selector, two inside-root spelling, and tags-selector,
+//   and T7.5-5's arms (b)–(j) configurations, and the code sources of
+//   MATRIX_FILES, DUAL_FILES, T7.5-4's inside-root spelling workspaces, and
+//   T7.5-5's arms (d), (e), and (g) — is a ledger record carrying its S-9
+//   declaration, every one well-formed, judged by
+//   test/self/s9-staged-sources.test.ts before any product exists.
+//   Byte-identical code sources are ONE record, named with every staging
+//   test in ID order and every path: `src/impl.ts` and `dualcode/d.ts`
+//   (OK_CODE_SOURCE), and CODE_MARKER_TO_P at T7.5-4's `src/a.ts` and
+//   T7.5-5's five paths, `src/end$` and `src/end` among them (code sources
+//   the default does not reach, judged because the record makes the path
+//   judged). The same first workspaces stay plain; T7.5-6's tampered
+//   generated module, an edit of product-written bytes, is staged
+//   `unchecked` (the document declares nothing of its well-formedness, and
+//   no harness constant equals its bytes).
 
 import type {
   CoverageProfileReport,
@@ -211,10 +234,11 @@ function mdxSection(id: string): string {
 // body's first product invocation (module header) — one staged-source
 // record per byte sequence, named with every staging test in ID order and
 // every path: `mdxSection("a")` is section-7-basics.ts's `SECTION_A_SOURCE`
-// (T7.4-1's and T7.5-1's `specs/A.mdx`, T7.5-5's `tgt/a.mdx`) and
-// `mdxSection("c")` section-7-discovery.ts's `SECTION_C_SOURCE` (T7.5-4's
-// `specs/C.mdx`, T7.5-5's `tgt/c.mdx`), both imported above; the rest are
-// this module's own.
+// (T7.4-1's and T7.5-1's `specs/A.mdx`, T7.5-2's `lo/BASE.mdx`, T7.5-5's
+// `tgt/a.mdx`) and `mdxSection("c")` section-7-discovery.ts's
+// `SECTION_C_SOURCE` (T7.5-4's `specs/C.mdx`, T7.5-5's `tgt/c.mdx`), both
+// imported above; the rest are this module's own, CODE_MARKER_TO_P (the
+// one code source T7.5-4 and T7.5-5 share) among them.
 const SECTION_X_SOURCE = stagedMdx(
   "T7.4-1/T7.5-1/T7.5-5 the minimal section x (aux/X.mdx; T7.5-5's tgt/abc.mdx)",
   mdxSection("x"),
@@ -236,7 +260,8 @@ const SECTION_W_SOURCE = stagedMdx(
   mdxSection("w"),
 );
 const SECTION_P_SOURCE = stagedMdx(
-  "T7.5-5 the minimal section p (tgt/P.mdx; tgt/t$0.mdx; tgt/t$z.mdx)",
+  "T7.5-4/T7.5-5 the minimal section p (tgt/P.mdx; T7.5-5's tgt/t$0.mdx; " +
+    "tgt/t$z.mdx)",
   mdxSection("p"),
 );
 const SECTION_Q_SOURCE = stagedMdx(
@@ -246,6 +271,20 @@ const SECTION_Q_SOURCE = stagedMdx(
 const SECTION_R_SOURCE = stagedMdx(
   "T7.5-5 the minimal section r (tgt/t0.mdx; tgt/tQz.mdx)",
   mdxSection("r"),
+);
+
+/**
+ * A code file bearing one top-level marker into `tgt/P.mdx#p`: one
+ * TypeScript staged-source record for every path T7.5-4's inside-root
+ * spelling workspaces and T7.5-5's (e) and (g) workspaces stage it at
+ * (module header), well-formed — at `src/end$` and `src/end`, names the
+ * default does not reach, too (the record makes the path judged).
+ */
+const CODE_MARKER_TO_P = stagedTs(
+  "T7.5-4/T7.5-5 the code source bearing one marker into tgt/P.mdx#p " +
+    "(T7.5-4's src/a.ts; T7.5-5's src/a$0.ts; src/ab.ts; src/a0.ts; " +
+    "src/end$; src/end)",
+  'import P from "../tgt/P.xspec"\n\nP.p\n',
 );
 
 /** Stage a fresh workspace, run `body`, dispose (H-1). */
@@ -1758,6 +1797,54 @@ const RULE_MATRIX: readonly {
       ],
     ],
   },
+  // Selector globs (7: whether a glob lies outside the workspace root is
+  // decided by its spelling alone, a `files` selector's — capture-bearing
+  // patterns included — as a group's, T7-4): one arm each, each rule
+  // otherwise valid, so a product vetting group globs alone accepts the
+  // configuration and builds (exit 0 — `build` never evaluates policy,
+  // 12.1). The inside-root counterpart is T7.5-4's `./src/*.ts` selector.
+  {
+    label:
+      'selector `files` glob "../x/*.ts" in `from` — its depth falling ' +
+      "below zero at the leading `..`, outside the workspace root by its " +
+      "spelling alone (7), discriminating a product that vets group globs " +
+      "alone",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { files: "../x/*.ts" }',
+        'to: { group: "aux" }',
+      ],
+    ],
+  },
+  {
+    label:
+      'the capture pattern "a/../../$1.ts" in `from` — its depth falling ' +
+      "below zero at the second `..`, outside the workspace root by its " +
+      "spelling alone, its capture notwithstanding (7)",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { files: "a/../../$1.ts" }',
+        'to: { group: "aux" }',
+      ],
+    ],
+  },
+  {
+    label:
+      'selector `files` glob "/src/*.ts" in `to` — a leading `/`, outside ' +
+      "the workspace root by its spelling alone (7)",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { group: "main" }',
+        'to: { files: "/src/*.ts" }',
+      ],
+    ],
+  },
 ];
 
 // The matrix's rows as refused-configuration arms, each configuration a
@@ -1802,9 +1889,12 @@ const T7_5_1 = defineProductTest({
     "dependency edge kinds (a `contains` member, an unknown token, a " +
     "non-string element), a non-string selector `tags` element, selectors " +
     "with zero or two of group/files/tags, unknown, wrong-kind, and " +
-    "ambiguous group references, a capture used twice in `from`, and a " +
-    "`to` referencing an absent capture are configuration errors (SPEC " +
-    '7.5, 14.14, exit 2); set reading: a rule\'s `kinds: ["embeds", ' +
+    "ambiguous group references, a capture used twice in `from`, a `to` " +
+    "referencing an absent capture, and a selector `files` glob outside " +
+    "the workspace root by its spelling alone — `../x/*.ts` and the " +
+    "capture pattern `a/../../$1.ts` in `from`, `/src/*.ts` in `to`, one " +
+    "arm each — are configuration errors (SPEC 7.5, 7, 14.14, exit 2); " +
+    'set reading: a rule\'s `kinds: ["embeds", ' +
     '"depends", "embeds"]` and a selector\'s `tags: ["b", "a", "b"]` are ' +
     'valid, `inventory` reporting `kinds` exactly ["depends", "embeds"] ' +
     "(5.2's order, however configured) and the selector's `tags` exactly " +
@@ -1962,13 +2052,56 @@ Low two.
   ),
 };
 
+// An offending edge spelled twice: `hi/H.mdx#twice` declares `d={[BASE.a,
+// BASE.a]}` — one depends edge (5.2: edges of a kind form a set, duplicate
+// declarations collapsing to a single edge; the two spellings are two
+// reference occurrences, 5.7) — so the rule reports exactly one finding,
+// one per rule and offending edge (14.12), where a product reporting one
+// per spelling reports two. The configuration and `hi/H.mdx` are
+// staged-source records (module header); `lo/BASE.mdx` is the minimal
+// section a, `SECTION_A_SOURCE`.
+const FORBIDDEN_TWICE_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T7.5-2 twice-spelled edge xspec.config.ts",
+    `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    hi: ["hi/**/*.mdx"],
+    lo: ["lo/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "no-hi-to-lo",
+      type: "forbidden",
+      from: { group: "hi" },
+      to: { group: "lo" }
+    }
+  ]
+})
+`,
+  ),
+  "hi/H.mdx": stagedMdx(
+    "T7.5-2 twice-spelled edge hi/H.mdx",
+    `import BASE from "../lo/BASE.xspec"
+
+<S id="twice" d={[BASE.a, BASE.a]}>
+Depends on the low group's a, spelled twice.
+</S>
+`,
+  ),
+  "lo/BASE.mdx": SECTION_A_SOURCE,
+};
+
 const T7_5_2 = defineProductTest({
   id: "T7.5-2",
   title:
     "forbidden rules: an edge whose source matches `from` and target " +
     "matches `to` is a check finding carrying the rule name and the " +
     "offending edge (exit 1); non-matching edges are not; `kinds` restricts " +
-    "which edges are evaluated (SPEC 7.5, 14.12)",
+    "which edges are evaluated; an offending edge spelled twice " +
+    "(`d={[BASE.a, BASE.a]}`, one edge) is exactly one finding, one per " +
+    "rule and offending edge, never one per spelling (SPEC 7.5, 5.2, 14.12)",
   run: async (product) => {
     await expectPolicyFindings(
       product,
@@ -1993,6 +2126,24 @@ const T7_5_2 = defineProductTest({
       ],
       "T7.5-2 (kinds restriction — the depends edge matches from and to but " +
         "its kind is not evaluated)",
+    );
+
+    await expectPolicyFindings(
+      product,
+      FORBIDDEN_TWICE_FILES,
+      [
+        {
+          rule: "no-hi-to-lo",
+          edge: {
+            from: "hi/H.mdx#twice",
+            to: "lo/BASE.mdx#a",
+            kind: "depends",
+          },
+        },
+      ],
+      "T7.5-2 (an offending edge spelled twice, `d={[BASE.a, BASE.a]}` — " +
+        "one edge (5.2), so exactly one finding, one per rule and offending " +
+        "edge (14.12), never one per spelling)",
     );
   },
 });
@@ -2188,6 +2339,59 @@ Outer depends on C — the from glob does not match this source.
   "specs/D.mdx": SECTION_D_SOURCE,
 };
 
+// (b') `files` selectors match under 7's glob rules: an inside-root
+// spelling's `.`, `..`, and empty segments match nothing, since a
+// discovered file's workspace-relative path carries none (7). The code
+// source `src/a.ts` bears a marker on `p`, a node of the spec group
+// `product` — a `references` edge (4.5) — and each rule runs on its own such
+// workspace, built under that rule's configuration (a configuration changed
+// after a build may leave graph data stale, T13.4-11(a)): the rule from
+// `{ files: "./src/*.ts" }` loads and matches no source, so `check` reports
+// no policy finding, exit 0, where its twin from `{ files: "src/*.ts" }`
+// reports the edge, exit 1 — a product normalizing a selector glob's
+// spelling before matching flags the edge under both. Each configuration is
+// a TypeScript staged-source record (module header); `src/a.ts` is
+// CODE_MARKER_TO_P and `tgt/P.mdx` the minimal section p.
+function insideRootSelectorFiles(
+  fromGlob: string,
+): Readonly<Record<string, InitialFileContents>> {
+  return {
+    "xspec.config.ts": stagedTs(
+      `T7.5-4 inside-root selector spelling xspec.config.ts (from { files: ` +
+        `"${fromGlob}" })`,
+      `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    product: ["tgt/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  },
+  policy: [
+    {
+      name: "src-to-product",
+      type: "forbidden",
+      from: { files: "${fromGlob}" },
+      to: { group: "product" }
+    }
+  ]
+})
+`,
+    ),
+    "src/a.ts": CODE_MARKER_TO_P,
+    "tgt/P.mdx": SECTION_P_SOURCE,
+  };
+}
+const INSIDE_ROOT_SELECTOR_FILES = insideRootSelectorFiles("./src/*.ts");
+const INSIDE_ROOT_SELECTOR_TWIN_FILES = insideRootSelectorFiles("src/*.ts");
+/** (b')'s one dependency edge: `src/a.ts`'s marker on the product node. */
+const INSIDE_ROOT_SELECTOR_EDGE: GraphEdge = {
+  from: "src/a.ts",
+  kind: "references",
+  to: "tgt/P.mdx#p",
+};
+
 // (c) `tags` selectors match nodes carrying AT LEAST ONE listed tag: `r`
 // carries red only, `b` carries blue (plus the unlisted green) — both match
 // ["red", "blue"] (an all-tags product matches neither); untagged `u` does
@@ -2238,8 +2442,13 @@ const T7_5_4 = defineProductTest({
   title:
     "selectors: `group` (with `kind` where needed) matches nodes of spec " +
     "groups and code locations of code groups; `files` matches by glob on " +
-    "both sides; `tags` matches nodes carrying at least one listed tag " +
-    "(SPEC 7.5, 14.12)",
+    "both sides, under 7's glob rules — a `forbidden` rule from " +
+    '`{ files: "./src/*.ts" }` (an inside-root spelling\'s `.` segment ' +
+    "matching nothing) loads and reports no policy finding, exit 0, where " +
+    'its twin from `{ files: "src/*.ts" }` reports the marker\'s ' +
+    "references edge into the group `product`, exit 1, each built under " +
+    "its own configuration; `tags` matches nodes carrying at least one " +
+    "listed tag (SPEC 7.5, 7, 14.12)",
   run: async (product) => {
     await expectPolicyFindings(
       product,
@@ -2274,6 +2483,66 @@ const T7_5_4 = defineProductTest({
       ],
       "T7.5-4 (files selectors — glob-unmatched source and glob-unmatched " +
         "target both stay unflagged)",
+    );
+
+    // (b') An inside-root spelling's `.` segment matches nothing (7): the
+    // rule from `./src/*.ts` loads and flags no edge, exit 0, where its
+    // `src/*.ts` twin flags the marker's references edge, exit 1 — each on
+    // its own workspace, built under its own configuration (T13.4-11(a)).
+    await withWorkspace(
+      { files: INSIDE_ROOT_SELECTOR_FILES },
+      async (workspace) => {
+        const base =
+          'T7.5-4 (the inside-root spelling `from: { files: "./src/*.ts" }`)';
+        await buildOk(
+          product,
+          workspace,
+          `${base} \`build\` — the glob lies inside the workspace root by ` +
+            `its spelling (7: a \`.\` segment leaves the depth unchanged), ` +
+            `so the configuration loads without 14.14 (SPEC 7, 7.5, 14.14)`,
+        );
+        const premise = `${base} \`query edges --kinds references\` (fixture premise)`;
+        assertEdgeSetEqual(
+          decodeEdgesReport(
+            await runJson(
+              product,
+              workspace,
+              ["query", "edges", "--kinds", "references"],
+              premise,
+            ),
+            premise,
+          ),
+          [INSIDE_ROOT_SELECTOR_EDGE],
+          `${premise}: src/a.ts's marker edge into the product group's node ` +
+            `is present, so the no-findings check below is not vacuous ` +
+            `(SPEC 4.5, 7.5)`,
+        );
+        const label = `${base} \`check --json\``;
+        const result = await expectExit(
+          product,
+          workspace,
+          ["check", "--json"],
+          0,
+          `${label} — a discovered path carries no \`.\` segment, so the ` +
+            `selector matches no source and the edge is no violation: no ` +
+            `policy finding, exit 0; a product normalizing the selector's ` +
+            `spelling before matching flags the edge and exits 1 (SPEC 7, ` +
+            `7.5, 14.12, 12.0)`,
+        );
+        assertPolicyFindings(
+          decodeFindingsReport(parseJsonStdout(result, label), label).findings,
+          [],
+          label,
+        );
+      },
+    );
+    await expectPolicyFindings(
+      product,
+      INSIDE_ROOT_SELECTOR_TWIN_FILES,
+      [{ rule: "src-to-product", edge: INSIDE_ROOT_SELECTOR_EDGE }],
+      'T7.5-4 (the twin `from: { files: "src/*.ts" }`, built under its own ' +
+        "configuration — the selector matches src/a.ts, so the marker's " +
+        "references edge into the product group is a violation, exit 1)",
     );
 
     await expectPolicyFindings(
@@ -2480,19 +2749,8 @@ W.w
 // 14.14). Three forms — `$0`, a trailing `$`, and `$` before a non-digit —
 // staged in `from` and in `to`, one arm each (module header: build's success
 // is the load assertion; exact finding sets over bait paths are the match
-// assertion).
-
-/**
- * A code file bearing one top-level marker into `tgt/P.mdx#p`: one
- * TypeScript staged-source record for every path (e)'s and (g)'s workspaces
- * stage it at (module header), well-formed — at `src/end$` and `src/end`,
- * names the default does not reach, too (the record makes the path judged).
- */
-const CODE_MARKER_TO_P = stagedTs(
-  "T7.5-5 the code source bearing one marker into tgt/P.mdx#p (src/a$0.ts; " +
-    "src/ab.ts; src/a0.ts; src/end$; src/end)",
-  'import P from "../tgt/P.xspec"\n\nP.p\n',
-);
+// assertion). (e)'s and (g)'s code sources are CODE_MARKER_TO_P, one record
+// (shared fixture material above).
 
 // (e) `$0` in `from` — the spec's own example: `a$0.ts` matches the file
 // `a$0.ts` and never `ab.ts` (a capture reading matches `ab.ts` with $0 = b —

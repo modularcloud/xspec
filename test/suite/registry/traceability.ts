@@ -431,10 +431,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T7.3-1": ["7.3", "12.0", "14"],
   "T7.4-1": ["7.4", "14"],
   "T7.4-2": ["7.4", "8.1"],
-  "T7.5-1": ["7.5", "14"],
-  "T7.5-2": ["7.5", "14"],
+  // T7.5-1: its selector-glob arms 7's outside-root decision by spelling
+  // alone, met on a policy selector's `files` glob.
+  "T7.5-1": ["7.5", "7", "14"],
+  // T7.5-2: its twice-spelled edge one edge (5.2: duplicate declarations
+  // collapse to a single edge), so one finding.
+  "T7.5-2": ["7.5", "5.2", "14"],
   "T7.5-3": ["7.5", "14"],
-  "T7.5-4": ["7.5", "14"],
+  // T7.5-4: its inside-root spelling's `.` segment matching nothing (7).
+  "T7.5-4": ["7.5", "7", "14"],
   "T7.5-5": ["7.5", "14"],
   "T7.5-6": ["7.5", "12.1", "14"],
   "T8-1": ["8"],
