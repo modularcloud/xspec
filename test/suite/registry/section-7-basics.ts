@@ -109,6 +109,25 @@
 //   declarative form's (14.14), never a parse failure's; a product reading
 //   the binding loosely loads each and builds (exit 0), failing the
 //   exit-code assertion.
+// - T7-2's further form arms (SPEC 7: the specifier `"xspec"`, a literal
+//   set of strings and the two booleans, non-computed identifier or
+//   string-literal keys, one call whose sole argument is statically
+//   literal): the import from `"XSPEC"`, a single-casing arm — no case
+//   folding anywhere (12.0); `markdown: { emit: true, outDir: null }` and a
+//   profile's `targetTags: null`, one arm each — `null` lies outside 7's
+//   literal set, though `inventory` reports unset members as `null` (12.7)
+//   — each fixture valid with the member omitted (the profile's target and
+//   boundary the unambiguous group `main`), so a product reading `null` as
+//   an omitted member loads it and builds (exit 0); `defineConfig()` and
+//   `defineConfig({…}, {})`, the second's first argument the canonical
+//   configuration, so a product reading the first argument alone loads it;
+//   and the numeric-literal key `specs: { 1: ["specs/*.mdx"] }`, spelled as
+//   TEST-SPEC spells it (its glob, like the canonical one, matches the
+//   staged `specs/A.mdx`), which TypeScript admits and a product reading
+//   keys loosely takes for a group named `1`. Every one is a text
+//   TypeScript 5.9.3 accepts both as module code and as script code, so
+//   each record is declared well-formed (S-9) and the refusal is the
+//   declarative form's (14.14), never a parse failure's.
 // - T7-2 string-literal keys arm: "both groups discover their globs' files"
 //   is observed as the spec group's exact `ids` listing plus whole-graph
 //   edge-set equality carrying the code file's marker edge (T7-3's
@@ -186,9 +205,9 @@
 //   `inventory --json` document (form-decoded first), as values and as
 //   serializations — member order included.
 // - T7-3 U+FFFD names: the character is staged as the validly encoded code
-//   point EF BF BD between two letters — a string-literal group key, a
-//   profile name, a rule name — so 14.14's name rule, never the encoding
-//   rule, is at stake; each fixture is otherwise valid.
+//   point EF BF BD between two letters — a spec group's and a code group's
+//   string-literal key, a profile name, a rule name — so 14.14's name rule,
+//   never the encoding rule, is at stake; each fixture is otherwise valid.
 // - Staged-source records (TEST-SPEC S-9's before-any-product clause;
 //   helpers/staged-mdx.ts): every `.mdx` file a body stages in a workspace
 //   created after its first product invocation — `expectConfigRefused`'s
@@ -993,7 +1012,11 @@ const T7_1 = defineProductTest({
 // one call to that binding whose sole argument is statically literal —
 // object literals with non-computed identifier or string-literal keys, array
 // literals, static string literals, and the boolean literals; no other
-// statement or expression form, no spread, no computed value.
+// statement or expression form, no spread, no computed value. The rows
+// follow TEST-SPEC's order: the import (its specifier `"XSPEC"` among the
+// misdirected ones), extra statements, each non-literal argument form, the
+// `null` literal, a non-call default export, a call without a sole
+// argument, a numeric-literal key, and the import's modifiers.
 const FORM_VIOLATIONS = refusedConfigArms("T7-2", [
   {
     label: "not well-formed TypeScript — a syntax error (unclosed braces)",
@@ -1017,6 +1040,19 @@ export default defineConfig({
   {
     label: 'import from a specifier other than "xspec"',
     config: `import { defineConfig } from "not-xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label:
+      'import from the specifier "XSPEC": a single-casing arm, no case ' +
+      "folding anywhere (SPEC 12.0)",
+    config: `import { defineConfig } from "XSPEC"
 
 export default defineConfig({
   specs: {
@@ -1114,6 +1150,45 @@ export default defineConfig({
 })
 `,
   },
+  // A `null` literal lies outside 7's literal set, though `inventory`
+  // reports unset members as `null` (12.7): each fixture is valid with the
+  // member omitted (module header).
+  {
+    label:
+      "a null literal outside the literal set: markdown: { emit: true, " +
+      "outDir: null }",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true, outDir: null }
+})
+`,
+  },
+  {
+    label:
+      "a null literal outside the literal set: a coverage profile's " +
+      "targetTags: null",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "p",
+      target: "main",
+      targetTags: null,
+      boundary: "main",
+      mode: "direct"
+    }
+  ]
+})
+`,
+  },
   {
     label:
       "a default export that is not one call to the binding: the bare " +
@@ -1134,6 +1209,41 @@ export default {
     config: `import { defineConfig } from "xspec"
 
 export default defineConfig
+`,
+  },
+  // One call whose sole argument is statically literal (SPEC 7): no
+  // argument at all, and a second argument beside an otherwise valid first
+  // (module header).
+  {
+    label: "a call without a sole argument: defineConfig()",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig()
+`,
+  },
+  {
+    label:
+      "a call without a sole argument: defineConfig({…}, {}), its first " +
+      "argument an otherwise valid configuration",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+}, {})
+`,
+  },
+  // Keys are non-computed identifiers or string literals (SPEC 7): a
+  // numeric-literal key, which TypeScript admits, spelled as TEST-SPEC
+  // spells it (module header).
+  {
+    label: 'a numeric-literal key: specs: { 1: ["specs/*.mdx"] }',
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: { 1: ["specs/*.mdx"] }
+})
 `,
   },
   // The import carries no `type` or `defer` modifier and no import
@@ -1374,10 +1484,13 @@ const BOM_CONFIG = stagedTs(
 // Object-literal keys and names (SPEC 7, 14.14): a key repeated within one
 // object literal — an identifier key and a string-literal key spelling the
 // same name included, whatever TypeScript's own diagnosis of the
-// repetition — and an empty group, profile, or rule name (`""`). Every
-// fixture is otherwise valid: each repeated member is a valid group, and
-// the empty-named profile and rule reference the existing unambiguous
-// group `main`, so the repetition or the empty name is the only defect.
+// repetition — and an empty spec group, code group, profile, or rule name
+// (`""`), one arm each. Every fixture is otherwise valid: each repeated
+// member is a valid group, the empty-named code group stands beside the
+// valid spec group `main` (its glob matching no staged file — a group
+// matching no files is valid, 7), and the empty-named profile and rule
+// reference the existing unambiguous group `main`, so the repetition or
+// the empty name is the only defect.
 const KEY_AND_NAME_VIOLATIONS = refusedConfigArms("T7-2", [
   {
     label: "repeated key: `specs` twice within the top-level object literal",
@@ -1414,6 +1527,20 @@ export default defineConfig({
 export default defineConfig({
   specs: {
     "": ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label: 'empty name: a code group ""',
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    "": ["src/**/*.ts"]
   }
 })
 `,
@@ -1506,17 +1633,21 @@ const T7_2 = defineProductTest({
   id: "T7-2",
   title:
     "declarative form: a syntax error, a missing or misdirected " +
-    "defineConfig import, a type or defer modifier or import attributes " +
-    "on that import, extra statements, each non-literal argument form, " +
-    "and a non-call default export are configuration errors (14.14, exit " +
-    "2); an aliased defineConfig import is valid; string-literal " +
-    "group-name keys are part of the accepted form — they load, discover, " +
-    "and resolve in a coverage profile and a policy selector (SPEC 7, 7.4, " +
-    "7.5, 8); literals are read verbatim — an escape-spelled glob matches " +
-    "nothing and an escape-spelled group name is named only by the same " +
-    "spelling (2.4); a non-UTF-8 file, a byte-order mark, a repeated key, " +
-    "and an empty group, profile, or rule name are configuration errors; " +
-    "comments anywhere contribute nothing (inventory's configuration " +
+    'defineConfig import (the specifier "XSPEC" among them: no case ' +
+    "folding, 12.0), a type or defer modifier or import attributes on " +
+    "that import, extra statements, each non-literal argument form, a " +
+    "null literal (markdown's outDir, a profile's targetTags), a non-call " +
+    "default export, a call without a sole argument (defineConfig(), " +
+    "defineConfig({…}, {})), and a numeric-literal key are configuration " +
+    "errors (14.14, exit 2); an aliased defineConfig import is valid; " +
+    "string-literal group-name keys are part of the accepted form — they " +
+    "load, discover, and resolve in a coverage profile and a policy " +
+    "selector (SPEC 7, 7.4, 7.5, 8); literals are read verbatim — an " +
+    "escape-spelled glob matches nothing and an escape-spelled group name " +
+    "is named only by the same spelling (2.4); a non-UTF-8 file, a " +
+    "byte-order mark, a repeated key, and an empty spec group, code " +
+    "group, profile, or rule name are configuration errors; comments " +
+    "anywhere contribute nothing (inventory's configuration " +
     "byte-identical to the comment-free twin's)",
   run: async (product) => {
     for (const arm of FORM_VIOLATIONS) {
@@ -2217,13 +2348,15 @@ async function assertViolatingEdgePresent(
 
 // Names containing U+FFFD (SPEC 7, 14.14; 12.0: no argument value carries
 // the character, and configured names are named in arguments): a spec
-// group, a profile, and a rule, one arm each. The character is staged as
-// its validly encoded code point (EF BF BD) between two letters, so 14.14's
-// name rule — never the encoding rule — is at stake; the group key takes
-// the string-literal form (U+FFFD is no identifier character), and the
-// profile and rule reference the existing unambiguous group `main`, so the
-// name is each fixture's only defect. A product not checking names loads
-// each and builds (exit 0).
+// group, a code group, a profile, and a rule, one arm each. The character
+// is staged as its validly encoded code point (EF BF BD) between two
+// letters, so 14.14's name rule — never the encoding rule — is at stake;
+// each group key takes the string-literal form (U+FFFD is no identifier
+// character), the code group stands beside the valid spec group `main`
+// (its glob matching no staged file — valid, 7), and the profile and rule
+// reference the existing unambiguous group `main`, so the name is each
+// fixture's only defect. A product not checking names loads each and
+// builds (exit 0).
 const REPLACEMENT_NAME_VIOLATIONS = refusedConfigArms("T7-3", [
   {
     label: "a spec group named with U+FFFD",
@@ -2232,6 +2365,20 @@ const REPLACEMENT_NAME_VIOLATIONS = refusedConfigArms("T7-3", [
 export default defineConfig({
   specs: {
     "a${REPLACEMENT_CHARACTER}b": ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label: "a code group named with U+FFFD",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    "c${REPLACEMENT_CHARACTER}d": ["src/**/*.ts"]
   }
 })
 `,
@@ -2284,8 +2431,9 @@ const T7_3 = defineProductTest({
     "empty coverage/policy lists equal omission; unknown keys at every " +
     "position, values of the wrong shape (a group valued by a single " +
     "string, a glob list holding true, coverage/policy given as objects, " +
-    "specs/code given as lists), and a spec group, a profile, or a rule " +
-    "named with U+FFFD are configuration errors (SPEC 7, 7.1, 7.2, 14.14)",
+    "specs/code given as lists), and a spec group, a code group, a " +
+    "profile, or a rule named with U+FFFD are configuration errors (SPEC " +
+    "7, 7.1, 7.2, 14.14)",
   run: async (product) => {
     // (a) `specs` missing and the unknown-key matrix — each 14.14, exit 2.
     for (const arm of KEY_VIOLATIONS) {
@@ -2298,8 +2446,8 @@ const T7_3 = defineProductTest({
       await expectConfigRefused(product, arm.config, `T7-3 (${arm.label})`);
     }
 
-    // (a″) names containing U+FFFD — a spec group, a profile, a rule —
-    // each 14.14, exit 2 (SPEC 7, 14.14).
+    // (a″) names containing U+FFFD — a spec group, a code group, a
+    // profile, a rule — each 14.14, exit 2 (SPEC 7, 14.14).
     for (const arm of REPLACEMENT_NAME_VIOLATIONS) {
       await expectConfigRefused(product, arm.config, `T7-3 (${arm.label})`);
     }

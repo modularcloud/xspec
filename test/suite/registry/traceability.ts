@@ -400,7 +400,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // the configuration entry's name (12.0: paths compare byte-wise and
   // case-sensitively, no case folding).
   "T7-1": ["7", "14", "12.6", "12.0"],
-  "T7-2": ["7", "2.4", "7.4", "11.6", "14"],
+  // T7-2: its `"XSPEC"` specifier arm the configuration import's module
+  // specifier compared without case folding (12.0: no case folding
+  // anywhere).
+  "T7-2": ["7", "2.4", "7.4", "11.6", "12.0", "14"],
   "T7-3": ["7", "7.1", "7.2", "14"],
   "T7-4": ["7", "2.4", "11.6", "14"],
   "T7-5": ["7"],

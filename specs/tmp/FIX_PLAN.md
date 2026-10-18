@@ -138,7 +138,7 @@ Governing IP: `specs/patches/0001-external-ui-apis.md` (Stage: Tests Specified);
 
 *§7–§8.*
 - Task 54 (RB-24, RC-7): T7-1's `XSPEC.config.ts` probe, rerun on the Windows leg (E-6) and listed for S-7. Depends on Task 21. Done: `section-7-basics.ts` exports `runT71ConfigNameCasingProbe`, run last by T7-1's body — the valid root configuration and `specs/A.mdx` beside `sub/XSPEC.config.ts` holding `)` (a new staged-source record declared unparseable), the staging verified by listing `sub/` (never by a lookup a case-insensitive filesystem would answer with that entry), `build` and then `check` run from `sub/`, each exit 0; T7-1's title, the module header's notes, and its H-7 entry (now citing 12.0, the byte-wise, case-sensitive name) brought along; the probe joins `PROBES` in `test/windows/e6-subset.test.ts` (the leg 3 files, 10 tests) and S-7's layer-4 bodies as T99.7-8 (both titles naming five probes); the built product passes T7-1 before (6.22 s) and after (6.79 s), the probe alone (0.55 s) and through the Windows project on Linux (2.36 s); a case-folding stand-in fails it at `build`'s (or `check`'s) exit code; on the Windows leg the built product, finding its configuration by a filesystem lookup, is expected to fail the probe diagnosed at `build`'s exit code (14.14 on `XSPEC.config.ts`), its Phase 10 deviation; local self 38 files / 4628 tests passed (299.48 s, one S-9 record judged); certification 171 PASS / 48 FAIL / 0 / 0, 0 discrepancies, the per-pair lines as expected.
-- Task 55 (RB-25, RB-26): T7-2's new form arms; T7-3's code-group names.
+- Task 55 (RB-25, RB-26): T7-2's new form arms; T7-3's code-group names. Done: `section-7-basics.ts`'s `FORM_VIOLATIONS` gained, in TEST-SPEC's order, the import from `"XSPEC"` (after `"not-xspec"`), `markdown: { emit: true, outDir: null }` and a profile's `targetTags: null` (after the number literal; each fixture valid with the member omitted), and `defineConfig()`, `defineConfig({…}, {})` (its first argument the canonical configuration), and `specs: { 1: ["specs/*.mdx"] }` (after the uncalled reference); `KEY_AND_NAME_VIOLATIONS` a code group `""` and T7-3's `REPLACEMENT_NAME_VIOLATIONS` a code group named with U+FFFD (each after the spec group's, beside the valid spec group `main`) — eight new staged-source records, all declared well-formed, each arm held to `expectConfigRefused`'s 14.14 contract; titles, header, and comments brought along; T7-2's H-7 entry gained "12.0" (the `"XSPEC"` arm); the built product passes T7-2 (8.40 s) and T7-3 (6.12 s), as at HEAD (7.90 s, 5.89 s); every new arm but `defineConfig()` red-checked through a stand-in running the product on the configuration loosened as TEST-SPEC's failing product reads it, each caught at its own arm's exit-code assertion; local self 38 files / 4636 tests passed (301.64 s); certification 171 PASS / 48 FAIL / 0 / 0, 0 discrepancies, the per-pair lines as expected.
 - Task 56 (RB-27): T7-6's extension twin and casing arms (certified, CONF-DISC).
 - Task 57 (RB-7): T7-7 registered.
 - Task 58 (RB-8): T7-8 registered.
@@ -241,14 +241,6 @@ Governing IP: `specs/patches/0001-external-ui-apis.md` (Stage: Tests Specified);
 - Task 139: confirm locally and in CI; record the timings; delete this plan.
 
 ## Tasks
-
-### Task 55 — T7-2's new form arms; T7-3's code-group names (RB-25, RB-26)
-
-**Gap.** TEST-SPEC §7, T7-2 (revised): configuration-form violations, each 14.14 — an import from the specifier `"XSPEC"` (a single-casing arm); `markdown: { emit: true, outDir: null }` and a profile's `targetTags: null` (a `null` literal outside 7's literal set), one arm each; `defineConfig()` and `defineConfig({…}, {})` (one call whose sole argument is statically literal; the second's first argument otherwise valid); a numeric-literal key `specs: { 1: ["specs/*.mdx"] }`; and among the empty names, a code group named `""`. T7-3 (revised): among the names held to 1.4's rules, a code group (beside a spec group, a profile, and a rule) — reviewer B: a code group named with U+FFFD. `test/suite/registry/section-7-basics.ts` lacks these arms (`FORM_VIOLATIONS` and T7-3's name arms).
-
-**Change** (`section-7-basics.ts`): each new T7-2 arm as a `FORM_VIOLATIONS` row (exit 2, the error document `code` `"configuration-error"`, `path` `"xspec.config.ts"`, as the module's rows assert; each configuration file an S-9 TypeScript record where staged after an invocation, well-formed TypeScript); T7-3's code-group arm(s) as T7-3's entry states them (read it: the U+FFFD name built from its code point); titles and comments.
-
-**Checks.** T7-2 and T7-3 against the built product: record verdicts per arm.
 
 ### Task 56 — T7-6's extension twin and casing arms (RB-27; certified, CONF-DISC)
 
