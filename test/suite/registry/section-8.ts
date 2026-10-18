@@ -1,4 +1,4 @@
-// TEST-SPEC §8 (coverage) — SUITE-30: T8-1…T8-5, T8.2-1.
+// TEST-SPEC §8 (coverage) — SUITE-30: T8-1…T8-5, T8.1-1, T8.2-1.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -36,10 +36,11 @@
 //   four SPEC 8.2 reason identities, failing loudly on an unclassifiable or
 //   ambiguous one (H-3). The tests then assert reason identity and the fixed
 //   order as values.
-// - T8-1…T8-5 assert covered rows (exact paths) and uncovered membership;
-//   counts and ignored composition are T8.2-1's subject (the discipline
-//   T7.4-2 fixed). Required-set composition is observed through
-//   covered ∪ uncovered (SPEC 8.1/8.2: required = covered ∪ uncovered).
+// - T8-1…T8-5 and T8.1-1 assert covered rows (exact paths) and uncovered
+//   membership; counts and ignored composition are T8.2-1's subject (the
+//   discipline T7.4-2 fixed). Required-set composition (T8.1-1) is
+//   observed through covered ∪ uncovered (SPEC 8.1/8.2: required =
+//   covered ∪ uncovered).
 // - T8.2-1's "same information" arms: the JSON document is decoded and
 //   asserted in full; `coverage <name>` and `coverage --check` outputs are
 //   adapter-decoded and compared for information equality against the
@@ -923,87 +924,6 @@ function assertRootExclusionImpact(
   }
 }
 
-// The second T8-5 workspace: required-set composition (SPEC 8.1) — one
-// workspace asserting group restriction, `targetTags` restriction, "leaves"
-// vs "all", `coverage="none"` exclusion, and root exclusion. The boundary
-// group has no outgoing dependency edges, so nothing is covered and each
-// profile's uncovered set IS its required set (required = covered ∪
-// uncovered). It follows arm (a)'s invocations, so its `.mdx` sources are
-// staged-source records (helpers/staged-mdx.ts; S-9's before-any-product
-// clause), wrapped in place, and so is its configuration — a TypeScript
-// staged-source record (helpers/staged-ts.ts; S-9's TypeScript and timing
-// clauses), well-formed.
-const REQUIRED_SET_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": stagedTs(
-    "T8-5 required-set fixture xspec.config.ts",
-    `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    tgt: ["tgt/**/*.mdx"],
-    bnd: ["bnd/**/*.mdx"],
-    oth: ["oth/**/*.mdx"]
-  },
-  coverage: [
-    {
-      name: "req-leaves",
-      target: "tgt",
-      boundary: "bnd",
-      mode: "direct"
-    },
-    {
-      name: "req-all",
-      target: "tgt",
-      boundary: "bnd",
-      targets: "all",
-      mode: "direct"
-    },
-    {
-      name: "req-tagged",
-      target: "tgt",
-      boundary: "bnd",
-      targetTags: ["hot"],
-      mode: "direct"
-    }
-  ]
-})
-`,
-  ),
-  "tgt/T.mdx": stagedMdx(
-    "T8-5 required-set fixture tgt/T.mdx",
-    `<S id="t">
-Internal parent behavior.
-
-<S id="t.leaf" tags="hot">
-Tagged leaf behavior.
-</S>
-
-<S id="t.none" coverage="none">
-Coverage-excluded leaf behavior.
-</S>
-
-<S id="t.plain">
-Untagged leaf behavior.
-</S>
-</S>
-`,
-  ),
-  "bnd/B.mdx": stagedMdx(
-    "T8-5 required-set fixture bnd/B.mdx",
-    `<S id="b">
-Boundary node with no outgoing dependency edges.
-</S>
-`,
-  ),
-  "oth/O.mdx": stagedMdx(
-    "T8-5 required-set fixture oth/O.mdx",
-    `<S id="o">
-A node of a group that is neither target nor boundary.
-</S>
-`,
-  ),
-};
-
 // The b1 edit is staged after the root-exclusion arm's `build` and queries,
 // so it is a ledger record (S-9's before-any-product clause;
 // helpers/staged-mdx.ts) — the same template call, moved to module level.
@@ -1019,13 +939,11 @@ const T8_5 = defineProductTest({
     "non-root nodes, and root-sourced/root-targeted dependency edges never " +
     "extend a covering path — a root is never boundary node, intermediate, " +
     "or target — while the same edges remain ordinary for policy, impact " +
-    "(upstream-changed through the root pairs), and query edges; plus one " +
-    "workspace asserting the 8.1 required set: group restriction, " +
-    'targetTags, leaves vs all, coverage="none", and root exclusion ' +
-    "(SPEC 8, 8.1, 7.5, 5.5, 5.6, 11, 2.2, 2.3)",
+    "(upstream-changed through the root pairs), and query edges " +
+    "(SPEC 8, 7.5, 5.5, 5.6, 11, 2.2, 2.3)",
   run: async (product) => {
-    // (a) The root-exclusion workspace, with its coverage-scoped-exclusion
-    // arms (policy, impact, query) over the same edges.
+    // The root-exclusion workspace, with its coverage-scoped-exclusion arms
+    // (policy, impact, query) over the same edges.
     await withWorkspace(ROOT_EXCLUSION_FILES, async (workspace) => {
       await workspace.gitInit();
       const base = await workspace.gitCommitAll("baseline");
@@ -1156,15 +1074,98 @@ const T8_5 = defineProductTest({
         impactLabel,
       );
     });
+  },
+});
 
-    // (b) One workspace asserting the 8.1 required-set composition through
-    // covered ∪ uncovered: group restriction (no node of bnd or oth ever
-    // appears), targetTags restriction, "leaves" vs "all", coverage="none"
-    // exclusion, and root exclusion (the root is excluded even under
-    // targets: "all").
+// ---------------------------------------------------------------------------
+// T8.1-1 — required set
+// ---------------------------------------------------------------------------
+
+// One workspace asserting the SPEC 8.1 required set through covered ∪
+// uncovered (module header): group restriction, `targetTags` restriction,
+// "leaves" vs "all", `coverage="none"` exclusion, and root exclusion. Spec
+// groups `tgt` (the target), `bnd` (the boundary), and `oth` (neither);
+// tgt/T.mdx holds the internal node `t` over three leaves — `t.leaf`
+// tagged `hot`, `t.none` marked `coverage="none"`, and the untagged
+// `t.plain` — and three direct profiles over tgt with boundary bnd differ
+// in one field each: req-leaves (the default `targets: "leaves"`), req-all
+// (`targets: "all"`), and req-tagged (`targetTags: ["hot"]`). The boundary
+// group has no outgoing dependency edges, so nothing is covered and each
+// profile's uncovered set IS its required set (required = covered ∪
+// uncovered). The body's one workspace is created before any product
+// invocation, so its initial files are plain strings the workspace builder
+// judges (S-9; S-7's sweep reaches them).
+const REQUIRED_SET_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    tgt: ["tgt/**/*.mdx"],
+    bnd: ["bnd/**/*.mdx"],
+    oth: ["oth/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "req-leaves",
+      target: "tgt",
+      boundary: "bnd",
+      mode: "direct"
+    },
+    {
+      name: "req-all",
+      target: "tgt",
+      boundary: "bnd",
+      targets: "all",
+      mode: "direct"
+    },
+    {
+      name: "req-tagged",
+      target: "tgt",
+      boundary: "bnd",
+      targetTags: ["hot"],
+      mode: "direct"
+    }
+  ]
+})
+`,
+  "tgt/T.mdx": `<S id="t">
+Internal parent behavior.
+
+<S id="t.leaf" tags="hot">
+Tagged leaf behavior.
+</S>
+
+<S id="t.none" coverage="none">
+Coverage-excluded leaf behavior.
+</S>
+
+<S id="t.plain">
+Untagged leaf behavior.
+</S>
+</S>
+`,
+  "bnd/B.mdx": `<S id="b">
+Boundary node with no outgoing dependency edges.
+</S>
+`,
+  "oth/O.mdx": `<S id="o">
+A node of a group that is neither target nor boundary.
+</S>
+`,
+};
+
+const T8_1_1 = defineProductTest({
+  id: "T8.1-1",
+  title:
+    "required set: one workspace asserting the 8.1 required set through " +
+    "covered ∪ uncovered — group restriction (no node outside the target " +
+    'group), targetTags restriction, leaves vs all, coverage="none" ' +
+    "exclusion, and root exclusion (the root excluded even under targets: " +
+    '"all") (SPEC 8.1, 7.4)',
+  run: async (product) => {
     await withWorkspace(REQUIRED_SET_FILES, async (workspace) => {
-      await buildOk(product, workspace, "T8-5 `build` (required-set fixture)");
-      const label = "T8-5 `coverage --json` (required-set fixture)";
+      await buildOk(product, workspace, "T8.1-1 `build`");
+      const label = "T8.1-1 `coverage --json`";
       const report = await coverageJson(
         product,
         workspace,
@@ -1659,12 +1660,16 @@ const T8_2_1 = defineProductTest({
   },
 });
 
-/** TEST-SPEC §8 T8-1…T8-5, T8.2-1, in canonical ID order (SUITE-30). */
+/**
+ * TEST-SPEC §8 T8-1…T8-5, T8.1-1, and T8.2-1, in canonical ID order
+ * (SUITE-30).
+ */
 export const section8Tests: readonly ProductTestEntry[] = [
   T8_1,
   T8_2,
   T8_3,
   T8_4,
   T8_5,
+  T8_1_1,
   T8_2_1,
 ];

@@ -110,14 +110,13 @@
 //   entry.
 // - Other cross-section keys mirror TEST-SPEC's stated coverage: T1.2-3
 //   asserts the root exclusions of 8.1/8.2; T7.4-2 asserts the required-set
-//   restrictions of 8.1 via coverage runs; T8-5's one-workspace sweep
-//   asserts 8.1's exclusion list; T10.7-12 asserts 1.7's review-payload half
-//   of the two-range-presenting-outputs rule (the code-impact scope's
-//   named-unit construct range; TEST-SPEC 1.7 delegates it there from
-//   T1.7-1/T1.7-2); and section 10's body (the review mechanism/strategy
-//   split and the three built-in strategies) is exercised by T10.5-1,
-//   T10.6-1 (generation per strategy), T10.7-1 (strategy selection at
-//   `create`), and T10.7-4 (coverage sessions).
+//   restrictions of 8.1 via coverage runs; T10.7-12 asserts 1.7's
+//   review-payload half of the two-range-presenting-outputs rule (the
+//   code-impact scope's named-unit construct range; TEST-SPEC 1.7 delegates
+//   it there from T1.7-1/T1.7-2); and section 10's body (the review
+//   mechanism/strategy split and the three built-in strategies) is
+//   exercised by T10.5-1, T10.6-1 (generation per strategy), T10.7-1
+//   (strategy selection at `create`), and T10.7-4 (coverage sessions).
 //
 // A passage listed for a test is asserted by that test; the map lists each
 // test's primary passage(s), not every rule it touches in passing. S-1 fails
@@ -446,7 +445,8 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T8-2": ["8"],
   "T8-3": ["8"],
   "T8-4": ["8"],
-  "T8-5": ["8", "8.1", "14"],
+  "T8-5": ["8", "14"],
+  "T8.1-1": ["8.1"],
   "T8.2-1": ["8.2"],
   "T9-1": ["9"],
   "T9.1-1": ["9.1"],
