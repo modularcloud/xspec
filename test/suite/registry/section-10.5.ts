@@ -59,21 +59,24 @@
 //   sensitivity (SPEC 5.5), as in §10.4.
 // - Staged-source records (helpers/staged-mdx.ts, S-9: judged before any
 //   product exists): every `.mdx` edit a body stages after its first product
-//   invocation — T10.5-1's extended- and chain-fixture edits, T10.5-4's
+//   invocation — T10.5-1's extended-fixture edit and its chain fixture's two
+//   (a.b.c alone; a.b and a.b.c in the both-edited twin), T10.5-4's
 //   deletion of v.e and v.f and its tie sub-fixture's two specs/X.mdx
 //   stagings, T10.5-5's p.b edit, r.c revert, and both decomposition edits,
 //   T10.5-6's par.s edit — is the same template call moved to module level
 //   as a record, as is the initial `.mdx` file of every workspace created
-//   after the body's first `build` (T10.5-1's extended and chain fixtures,
-//   T10.5-4's tie sub-fixture, T10.5-5's decomposition sub-fixture). A
+//   after the body's first `build` (T10.5-1's extended fixture, chain
+//   fixture, and the chain fixture's both-edited twin, T10.5-4's tie
+//   sub-fixture, T10.5-5's decomposition sub-fixture). A
 //   staging that precedes a body's first `build` (each fixture's first edit,
 //   between `gitCommitAll` and that `build`) stays plain, as do each body's
 //   first workspace's initial `files` entries (S-7's sweep reaches them
 //   against the stub). The tie sub-fixture's deletions are plain removals
 //   of files (`fsp.rm`), which S-9 does not judge.
 // - The configuration of every workspace created after a body's first
-//   `build` (T10.5-1's extended and chain fixtures, T10.5-4's tie
-//   sub-fixture, T10.5-5's decomposition sub-fixture) is
+//   `build` (T10.5-1's extended fixture, chain fixture, and the chain
+//   fixture's both-edited twin, T10.5-4's tie sub-fixture, T10.5-5's
+//   decomposition sub-fixture) is
 //   `SPECS_ONLY_CONFIG`, a TypeScript staged-source record
 //   (helpers/staged-ts.ts; S-9's TypeScript and timing clauses),
 //   well-formed, staged wherever that configuration is; `SPECS_CODE_CONFIG`
@@ -392,9 +395,17 @@ async function captureHashes(
 
 // ---------------------------------------------------------------------------
 // T10.5-1 — generation: SPEC 15's worked change, plus the skipping rule,
-// subtree scope, the shared-ancestor union, and the two-levels-deep chain
-// (a > a.b > a.b.c with only a.b.c changed: a's parent-consistency context
-// is exactly {a.b} — the branch head — never a.b.c; a.b's is {a.b.c})
+// subtree scope, the shared-ancestor union over a child's and a
+// grandchild's branch, the two-levels-deep chain (a > a.b > a.b.c with only
+// a.b.c changed: a's parent-consistency context is exactly {a.b} — the
+// branch head — never a.b.c; a.b's is {a.b.c}; both origins {a.b.c}), and
+// its both-edited twin (a.b and a.b.c each edited: a.b visited, a.b.c
+// skipped, both items' origin exactly {a.b, a.b.c}). Every item's origin is
+// asserted beside its scope (the kind-and-scope-node lookup over the exact
+// kind/scope set) and its context (TEST-SPEC T10.5-1: 10.5's origin rules —
+// a subtree-coherence item's origin every changed node in its scope, a
+// parent-consistency item's every changed node in A's subtree, skipped
+// nodes included).
 // ---------------------------------------------------------------------------
 
 // The SPEC 15 example workspace, verbatim.
@@ -444,41 +455,56 @@ const S15_HELLO = "specs/SPEC.mdx#print.hello";
 const S15_DERIVED_HELLO = "specs/DERIVED.mdx#derived.hello";
 const S15_LOCATION = "src/hello.ts#hello";
 
-// Extended fixture (SPEC 10.5 rules 1–2): p and p.c both changed (the
-// skipping rule and the origin of the surviving item); a.k and a.s both
-// changed under the shared unchanged ancestor a (one parent-consistency item
-// against the union of branches).
+// Extended fixture (SPEC 10.5 rules 1–2; TEST-SPEC T10.5-1's P/Q and
+// A/X/K/Y arms). The skipping arm: the top-level p and its child p.q (P and
+// Q), each with its own text edited — p is visited and p.q, having the
+// changed ancestor p, skipped, so p's single subtree-coherence item's origin
+// is exactly {p, p.q}, the skipped node included, never {p} alone; p's
+// parent is the root, so no parent-consistency item arises on its path. The
+// union arm: the top-level a (A) whose child a.x (X) and grandchild a.k.y
+// (Y, beneath a's child a.k, K) each have their own text edited, a and a.k
+// unchanged — a receives a single parent-consistency item against the union
+// of both changed branches, context exactly {a.x, a.k} (each branch entering
+// as a's child on it) and origin exactly {a.x, a.k.y} (both branches'
+// changed nodes, never one branch's alone and never a.k, the head of
+// a.k.y's branch), while a.k's item has context and origin {a.k.y} and a.x's
+// and a.k.y's subtree-coherence items have origins {a.x} and {a.k.y}.
 const X1_FILE = "specs/X.mdx";
 const X1_P = "specs/X.mdx#p";
-const X1_PC = "specs/X.mdx#p.c";
+const X1_PQ = "specs/X.mdx#p.q";
 const X1_A = "specs/X.mdx#a";
+const X1_AX = "specs/X.mdx#a.x";
 const X1_AK = "specs/X.mdx#a.k";
-const X1_AS = "specs/X.mdx#a.s";
+const X1_AKY = "specs/X.mdx#a.k.y";
 
 function x1Spec(
   pOwn: string,
-  cText: string,
-  kText: string,
-  sText: string,
+  qText: string,
+  xText: string,
+  yText: string,
 ): string {
   return [
     '<S id="p">',
     pOwn,
     "",
-    '<S id="p.c">',
-    cText,
+    '<S id="p.q">',
+    qText,
     "</S>",
     "</S>",
     "",
     '<S id="a">',
     "Aye own text.",
     "",
-    '<S id="a.k">',
-    kText,
+    '<S id="a.x">',
+    xText,
     "</S>",
     "",
-    '<S id="a.s">',
-    sText,
+    '<S id="a.k">',
+    "Kay own text.",
+    "",
+    '<S id="a.k.y">',
+    yText,
+    "</S>",
     "</S>",
     "</S>",
     "",
@@ -486,24 +512,30 @@ function x1Spec(
 }
 
 // Chain fixture (SPEC 10.5 rule 2, the two-levels-deep change): a > a.b >
-// a.b.c with only a.b.c changed. Each changed branch enters an ancestor's
-// parent-consistency item as one context node — the ancestor's child on
-// that branch — so a's context is exactly {a.b}, never the changed node
-// a.b.c two levels beneath it, while a.b's context is {a.b.c}; the origin of
-// both is the branch's changed node. T10.4-1's deep-edit sensitivity
-// presupposes this context node (TEST-SPEC T10.5-1).
+// a.b.c (A → B → C) with only a.b.c changed. Each changed branch enters an
+// ancestor's parent-consistency item as one context node — the ancestor's
+// child on that branch — so a's context is exactly {a.b}, never the changed
+// node a.b.c two levels beneath it, while a.b's context is {a.b.c}; the
+// origin of both is exactly {a.b.c}, the changed node, never the branch head
+// a.b. T10.4-1's deep-edit sensitivity presupposes this context node
+// (TEST-SPEC T10.5-1). Its both-edited twin, on a workspace of its own, edits
+// a.b's own text and a.b.c's instead: a.b is visited and a.b.c skipped, so
+// a.b's subtree-coherence item and a's parent-consistency item (context
+// exactly {a.b}) both have origin exactly {a.b, a.b.c}, the skipped node
+// included — never {a.b}, the visited nodes alone, which a product drawing
+// origins from visited nodes gives.
 const Y_FILE = "specs/Y.mdx";
 const Y_A = "specs/Y.mdx#a";
 const Y_AB = "specs/Y.mdx#a.b";
 const Y_ABC = "specs/Y.mdx#a.b.c";
 
-function ySpec(cText: string): string {
+function ySpec(bOwn: string, cText: string): string {
   return [
     '<S id="a">',
     "Aye own text.",
     "",
     '<S id="a.b">',
-    "Abe own text.",
+    bOwn,
     "",
     '<S id="a.b.c">',
     cText,
@@ -514,34 +546,40 @@ function ySpec(cText: string): string {
   ].join("\n");
 }
 
-// T10.5-1's extended- and chain-fixture edits follow the worked change's
-// `build` (the body's first product invocation), so they are staged-source
-// records (helpers/staged-mdx.ts, S-9: judged before any product exists) —
-// the same template calls moved to module level; the worked change's own
-// edit precedes that `build` and stays plain, as does its initial file; the
-// extended and chain fixtures' initial files, staged after that `build`,
-// are records too (below).
+// T10.5-1's extended-fixture edit and its chain fixture's two edits (a.b.c
+// alone; a.b's own text and a.b.c in the both-edited twin) follow the worked
+// change's `build` (the body's first product invocation), so they are
+// staged-source records (helpers/staged-mdx.ts, S-9: judged before any
+// product exists) — the same template calls moved to module level; the
+// worked change's own edit precedes that `build` and stays plain, as does
+// its initial file; the extended fixture's initial file and the one initial
+// file of the chain fixture and its twin, staged after that `build`, are
+// records too (below).
 const T10_5_1_X1_EDITED = stagedMdx(
-  "T10.5-1 specs/X.mdx with p's own text and the three leaves at v1 (extended fixture)",
-  x1Spec("Pee own v1.", "Cee text v1.", "Kay text v1.", "Ess text v1."),
+  "T10.5-1 specs/X.mdx with p's own text and the three leaves p.q, a.x, a.k.y at v1 (extended fixture)",
+  x1Spec("Pee own v1.", "Cue text v1.", "Ex text v1.", "Why text v1."),
 );
 const T10_5_1_Y_EDITED = stagedMdx(
   "T10.5-1 specs/Y.mdx with a.b.c at v1 (chain fixture)",
-  ySpec("Cee text v1."),
+  ySpec("Abe own v0.", "Cee text v1."),
+);
+const T10_5_1_Y_BC_EDITED = stagedMdx(
+  "T10.5-1 specs/Y.mdx with a.b's own text and a.b.c at v1 (the chain fixture's both-edited twin)",
+  ySpec("Abe own v1.", "Cee text v1."),
 );
 const T10_5_1_X1_INITIAL = stagedMdx(
-  "T10.5-1 specs/X.mdx with p's own text and the three leaves at v0 (the extended fixture's initial source)",
-  x1Spec("Pee own v0.", "Cee text v0.", "Kay text v0.", "Ess text v0."),
+  "T10.5-1 specs/X.mdx with p's own text and the three leaves p.q, a.x, a.k.y at v0 (the extended fixture's initial source)",
+  x1Spec("Pee own v0.", "Cue text v0.", "Ex text v0.", "Why text v0."),
 );
 const T10_5_1_Y_INITIAL = stagedMdx(
-  "T10.5-1 specs/Y.mdx with a.b.c at v0 (the chain fixture's initial source)",
-  ySpec("Cee text v0."),
+  "T10.5-1 specs/Y.mdx with a.b's own text and a.b.c at v0 (the initial source of the chain fixture and its both-edited twin)",
+  ySpec("Abe own v0.", "Cee text v0."),
 );
 
 const T10_5_1 = defineProductTest({
   id: "T10.5-1",
   title:
-    "path-blocks generation: SPEC 15's worked change (a leaf text edit to print.hello) yields exactly the four listed items — print.hello's subtree-coherence item (context: its ancestor chain; origin: itself), print's parent-consistency item blocked by it (context/origin: print.hello), derived.hello's dependency-consistency item (context/origin: print.hello), and a code-impact item for src/hello.ts#hello (context: derived.hello, the impact-edge target that makes it impacted; origin: print.hello) — and the extended fixture pins the skipping rule (a changed node with a changed ancestor generates no own item; the ancestor's single subtree-coherence item carries both changed nodes as origin and its scope covers the node plus all descendants, its scope text the scope root's subtree text) and the shared-ancestor union (two changed leaves under one unchanged ancestor yield one parent-consistency item whose context and origin are the union of changed branches) and the two-levels-deep chain (a > a.b > a.b.c with only a.b.c changed: a's parent-consistency item's context is exactly {a.b} — the branch head, a's child on the changed branch, each changed branch entering as one context node — never the changed node a.b.c, while a.b's item's context is exactly {a.b.c}, the identities asserted, both items' origin the changed node) (SPEC 5.6, 9.2, 10.5, 15)",
+    "path-blocks generation: SPEC 15's worked change (a leaf text edit to print.hello) yields exactly the four listed items — print.hello's subtree-coherence item (context: its ancestor chain; origin: itself), print's parent-consistency item blocked by it (context/origin: print.hello), derived.hello's dependency-consistency item (context/origin: print.hello), and a code-impact item for src/hello.ts#hello (context: derived.hello, the impact-edge target that makes it impacted; origin: print.hello) — and, each item's origin asserted beside its scope and context, the extended fixture pins the skipping rule (a changed node with a changed ancestor generates no own item: the top-level p and its child p.q, each with its own text edited, yield p's subtree-coherence item and no item scoped at p.q, that item's origin exactly {p, p.q}, the skipped node included, never {p} alone, and no parent-consistency item, p's parent being the root; its scope covers the node plus all descendants, its scope text the scope root's subtree text) and the shared-ancestor union (with a's child a.x and grandchild a.k.y (beneath a's child a.k) each having its own text edited, a's single parent-consistency item has context exactly {a.x, a.k} and origin exactly {a.x, a.k.y} — both branches' changed nodes, never one branch's alone and never a.k, the head of a.k.y's branch — while a.k's item has context and origin {a.k.y}, and a.x's and a.k.y's subtree-coherence items have origins {a.x} and {a.k.y}) and the two-levels-deep chain (a > a.b > a.b.c with only a.b.c changed: a's parent-consistency item's context is exactly {a.b} — the branch head, a's child on the changed branch, each changed branch entering as one context node — never the changed node a.b.c, while a.b's item's context is exactly {a.b.c}, the identities asserted, and both items' origin exactly {a.b.c}, the changed node, never the branch head a.b) and its both-edited twin (a.b's and a.b.c's own text each edited: a.b visited and a.b.c skipped — a.b's subtree-coherence item has origin exactly {a.b, a.b.c} and a's parent-consistency item context exactly {a.b} and origin exactly {a.b, a.b.c}, the skipped node included, never {a.b}, the visited nodes alone) (SPEC 5.6, 9.2, 10.5, 15)",
   run: async (product) => {
     // --- SPEC 15's worked change ---------------------------------------------
     await withWorkspace(
@@ -697,35 +735,36 @@ const T10_5_1 = defineProductTest({
         );
         await createBaseSession(product, workspace, base, "s", prefix);
 
+        // p and p.q are changed (each its own text edited; SPEC 5.6), p.q
+        // skipped under p; a.x and a.k.y are changed, a.k and a unchanged
+        // (descendant-changed alone), so a.x and a.k.y are visited.
         const status = await sessionStatus(product, workspace, "s", prefix);
         assertSameJson(
           kindScopeSet(status),
           [
             `parent-consistency ${X1_A}`,
-            `subtree-coherence ${X1_AK}`,
-            `subtree-coherence ${X1_AS}`,
+            `parent-consistency ${X1_AK}`,
+            `subtree-coherence ${X1_AKY}`,
+            `subtree-coherence ${X1_AX}`,
             `subtree-coherence ${X1_P}`,
           ].sort(),
-          `${prefix}: p.c is changed but has the changed ancestor p, so it ` +
-            `generates no own item (skipping rule); a.k and a.s each get a ` +
-            `subtree-coherence item and their shared unchanged ancestor a ` +
-            `gets a single parent-consistency item (SPEC 10.5)`,
+          `${prefix}: p.q is changed but has the changed ancestor p, so it ` +
+            `generates no own item (skipping rule), and p's parent is the ` +
+            `root, so no parent-consistency item arises on p's path; a.x and ` +
+            `a.k.y — a's child and grandchild — each get a ` +
+            `subtree-coherence item, a.k (a non-root ancestor on a.k.y's ` +
+            `path) a parent-consistency item, and their shared unchanged ` +
+            `ancestor a a single parent-consistency item (SPEC 10.5)`,
         );
 
         const exported = await exportSession(product, workspace, "s", prefix);
+
+        // --- the skipping arm: p visited, p.q skipped under it ---
         const scP = requireItem(
           exported.items,
           "subtree-coherence",
           X1_P,
           prefix,
-        );
-        // Origin: the changed nodes in scope — the skipped descendant's
-        // change is attributed inside the ancestor's item (SPEC 10.5 rule 1).
-        assertSameJson(
-          identitySet(scP.origin),
-          [X1_P, X1_PC].sort(),
-          `${prefix}: p's subtree-coherence item's origin is the changed ` +
-            `nodes in scope — p and the skipped p.c (SPEC 10.5)`,
         );
         // Scope: the node plus all descendants — the scope root is p and its
         // scope text is p's subtree text (SPEC 10.5, 10.7: scope text for
@@ -742,7 +781,7 @@ const T10_5_1 = defineProductTest({
         if (pReport.subtreeText === pReport.ownText) {
           fail(
             `${prefix} staging premise: p's subtree text must differ from ` +
-              `its own text (the descendant p.c contributes) so the scope ` +
+              `its own text (the descendant p.q contributes) so the scope ` +
               `assertion discriminates subtree scope from own-node scope ` +
               `(SPEC 1.6)`,
           );
@@ -756,45 +795,137 @@ const T10_5_1 = defineProductTest({
               `carries ${JSON.stringify(scP.scope.text)}`,
           );
         }
+        // Context: p's ancestor chain — the file root alone, p being
+        // top-level (SPEC 10.5 rule 1).
+        assertSameJson(
+          identitySet(scP.context),
+          [X1_FILE],
+          `${prefix}: p's subtree-coherence item's context is p's ancestor ` +
+            `chain — the file root alone, p being top-level (SPEC 10.5)`,
+        );
+        // Origin: every changed node in scope — the skipped descendant's
+        // change is attributed inside the visited ancestor's item, never
+        // dropped with its skipped item (SPEC 10.5 rule 1).
+        assertSameJson(
+          identitySet(scP.origin),
+          [X1_P, X1_PQ].sort(),
+          `${prefix}: p's subtree-coherence item's origin is exactly the ` +
+            `changed nodes in its scope, {p, p.q} — the skipped p.q ` +
+            `included, never {p} alone, the visited node (SPEC 10.5)`,
+        );
+        assertBlockedBy(scP, [], `${prefix} p's subtree-coherence item`);
 
-        // Shared ancestor: one parent-consistency item for a against the
-        // union of changed branches (SPEC 10.5 rule 2). requireItem already
-        // asserted uniqueness.
+        // --- the union arm: a's child a.x and grandchild a.k.y changed ---
+        // requireItem asserts each item's uniqueness (SPEC 10.5: a single
+        // item per ancestor, against the union of changed branches).
+        const scAX = requireItem(
+          exported.items,
+          "subtree-coherence",
+          X1_AX,
+          prefix,
+        );
+        const scAKY = requireItem(
+          exported.items,
+          "subtree-coherence",
+          X1_AKY,
+          prefix,
+        );
+        const pcAK = requireItem(
+          exported.items,
+          "parent-consistency",
+          X1_AK,
+          prefix,
+        );
         const pcA = requireItem(
           exported.items,
           "parent-consistency",
           X1_A,
           prefix,
         );
+
+        // The two visited nodes' subtree-coherence items: each its ancestor
+        // chain as context, its one changed node as origin (SPEC 10.5 rule
+        // 1).
+        assertSameJson(
+          identitySet(scAX.context),
+          [X1_FILE, X1_A].sort(),
+          `${prefix}: a.x's subtree-coherence item's context is a.x's ` +
+            `ancestor chain — a and the file root (SPEC 10.5)`,
+        );
+        assertSameJson(
+          identitySet(scAX.origin),
+          [X1_AX],
+          `${prefix}: a.x's subtree-coherence item's origin is exactly ` +
+            `{a.x}, the changed node in its scope (SPEC 10.5)`,
+        );
+        assertBlockedBy(scAX, [], `${prefix} a.x's subtree-coherence item`);
+        assertSameJson(
+          identitySet(scAKY.context),
+          [X1_FILE, X1_A, X1_AK].sort(),
+          `${prefix}: a.k.y's subtree-coherence item's context is a.k.y's ` +
+            `ancestor chain — a.k, a, and the file root (SPEC 10.5)`,
+        );
+        assertSameJson(
+          identitySet(scAKY.origin),
+          [X1_AKY],
+          `${prefix}: a.k.y's subtree-coherence item's origin is exactly ` +
+            `{a.k.y}, the changed node in its scope (SPEC 10.5)`,
+        );
+        assertBlockedBy(scAKY, [], `${prefix} a.k.y's subtree-coherence item`);
+
+        // a.k: its child on the one changed branch beneath it is the changed
+        // node a.k.y itself (SPEC 10.5 rule 2).
+        assertSameJson(
+          identitySet(pcAK.context),
+          [X1_AKY],
+          `${prefix}: a.k's parent-consistency item's context is exactly ` +
+            `{a.k.y} — a.k's child on the one changed branch beneath it, ` +
+            `here the changed node itself (SPEC 10.5)`,
+        );
+        assertSameJson(
+          identitySet(pcAK.origin),
+          [X1_AKY],
+          `${prefix}: a.k's parent-consistency item's origin is exactly ` +
+            `{a.k.y}, the changed node in a.k's subtree — never a.x, which ` +
+            `lies outside it (SPEC 10.5)`,
+        );
+        assertBlockedBy(
+          pcAK,
+          [scAKY.id],
+          `${prefix} a.k's parent-consistency item — a.k.y, a.k's child on ` +
+            `the changed branch, is visited, so its subtree-coherence item ` +
+            `blocks`,
+        );
+
+        // a: one item against the union of both changed branches — each
+        // entering its context as a's child on it (a.x, itself changed; a.k,
+        // the head of a.k.y's branch), its origin both branches' changed
+        // nodes (SPEC 10.5 rule 2).
         assertSameJson(
           identitySet(pcA.context),
-          [X1_AK, X1_AS].sort(),
-          `${prefix}: a's single parent-consistency item's context is the ` +
-            `union of changed branches — a's child on each (SPEC 10.5)`,
+          [X1_AX, X1_AK].sort(),
+          `${prefix}: a's single parent-consistency item's context is ` +
+            `exactly {a.x, a.k} — the union of the changed branches beneath ` +
+            `a, each entering as one context node, a's child on that ` +
+            `branch: a.x, itself changed, and a.k, the head of a.k.y's ` +
+            `branch — never one branch's alone and never the changed node ` +
+            `a.k.y two levels beneath a (SPEC 10.5)`,
         );
         assertSameJson(
           identitySet(pcA.origin),
-          [X1_AK, X1_AS].sort(),
-          `${prefix}: a's parent-consistency item's origin is the changed ` +
-            `branches' changed nodes (SPEC 10.5)`,
-        );
-        const scAK = requireItem(
-          exported.items,
-          "subtree-coherence",
-          X1_AK,
-          prefix,
-        );
-        const scAS = requireItem(
-          exported.items,
-          "subtree-coherence",
-          X1_AS,
-          prefix,
+          [X1_AX, X1_AKY].sort(),
+          `${prefix}: a's parent-consistency item's origin is exactly ` +
+            `{a.x, a.k.y} — the changed nodes in a's subtree, both ` +
+            `branches' — never one branch's alone and never a.k, the head ` +
+            `of a.k.y's branch (SPEC 10.5)`,
         );
         assertBlockedBy(
           pcA,
-          [scAK.id, scAS.id],
+          [scAX.id, pcAK.id],
           `${prefix} a's parent-consistency item — one blocker per changed ` +
-            `branch, the child's subtree-coherence item`,
+            `branch, the item scoped at a's child on it: a.x's ` +
+            `subtree-coherence item (a.x visited) and a.k's ` +
+            `parent-consistency item (a.k not visited)`,
         );
       },
     );
@@ -875,8 +1006,8 @@ const T10_5_1 = defineProductTest({
         assertSameJson(
           identitySet(pcAB.origin),
           [Y_ABC],
-          `${prefix}: a.b's parent-consistency item's origin is the changed ` +
-            `branch's changed node (SPEC 10.5)`,
+          `${prefix}: a.b's parent-consistency item's origin is exactly ` +
+            `{a.b.c}, the changed node in a.b's subtree (SPEC 10.5)`,
         );
 
         // a: the changed branch enters as ONE context node — a's child on
@@ -894,8 +1025,9 @@ const T10_5_1 = defineProductTest({
         assertSameJson(
           identitySet(pcA.origin),
           [Y_ABC],
-          `${prefix}: a's parent-consistency item's origin is the changed ` +
-            `branch's changed node, a.b.c (SPEC 10.5)`,
+          `${prefix}: a's parent-consistency item's origin is exactly ` +
+            `{a.b.c}, the changed node in a's subtree — never the branch ` +
+            `head a.b, its context node (SPEC 10.5)`,
         );
 
         // The blocking chain over the same three items (SPEC 10.5 rule 2;
@@ -914,6 +1046,100 @@ const T10_5_1 = defineProductTest({
           [pcAB.id],
           `${prefix} a's parent-consistency item — the change lies deeper ` +
             `than a's child a.b, so a.b's parent-consistency item blocks`,
+        );
+      },
+    );
+
+    // --- the chain fixture's both-edited twin: a.b visited, a.b.c skipped ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [Y_FILE]: T10_5_1_Y_INITIAL },
+      async (workspace) => {
+        const prefix = "T10.5-1 chain fixture's both-edited twin";
+        await workspace.gitInit();
+        const base = await workspace.gitCommitAll("baseline");
+        await workspace.file(Y_FILE, T10_5_1_Y_BC_EDITED);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after the edits`,
+        );
+        await createBaseSession(product, workspace, base, "s", prefix);
+
+        // a.b and a.b.c are both changed (each its own text edited; SPEC
+        // 5.6), so a.b is visited and a.b.c, having the changed ancestor
+        // a.b, skipped: a.b gets the one subtree-coherence item and a, its
+        // one non-root ancestor, one parent-consistency item; a.b.c and the
+        // file root get none.
+        const status = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          kindScopeSet(status),
+          [`parent-consistency ${Y_A}`, `subtree-coherence ${Y_AB}`].sort(),
+          `${prefix}: a.b and a.b.c are both changed, so a.b is visited — ` +
+            `its subtree-coherence item and a's parent-consistency item — ` +
+            `and a.b.c, having the changed ancestor a.b, generates no own ` +
+            `item (skipping rule); the file root gets none (SPEC 5.6, 10.5)`,
+        );
+
+        const exported = await exportSession(product, workspace, "s", prefix);
+        const scAB = requireItem(
+          exported.items,
+          "subtree-coherence",
+          Y_AB,
+          prefix,
+        );
+        const pcA = requireItem(
+          exported.items,
+          "parent-consistency",
+          Y_A,
+          prefix,
+        );
+
+        // a.b's subtree-coherence item: its ancestor chain as context, every
+        // changed node in its scope as origin — the skipped a.b.c included
+        // (SPEC 10.5 rule 1).
+        assertSameJson(
+          identitySet(scAB.context),
+          [Y_FILE, Y_A].sort(),
+          `${prefix}: a.b's subtree-coherence item's context is a.b's ` +
+            `ancestor chain — a and the file root (SPEC 10.5)`,
+        );
+        assertSameJson(
+          identitySet(scAB.origin),
+          [Y_AB, Y_ABC].sort(),
+          `${prefix}: a.b's subtree-coherence item's origin is exactly ` +
+            `{a.b, a.b.c}, the changed nodes in its scope — the skipped ` +
+            `a.b.c included — never {a.b}, the visited node alone, which a ` +
+            `product drawing origins from visited nodes gives (SPEC 10.5)`,
+        );
+
+        // a's parent-consistency item: the one changed branch enters as a's
+        // child on it, a.b; its origin is every changed node in a's subtree,
+        // the skipped a.b.c included (SPEC 10.5 rule 2).
+        assertSameJson(
+          identitySet(pcA.context),
+          [Y_AB],
+          `${prefix}: a's parent-consistency item's context is exactly ` +
+            `{a.b} — a's child on the one changed branch (SPEC 10.5: each ` +
+            `changed branch enters as one context node)`,
+        );
+        assertSameJson(
+          identitySet(pcA.origin),
+          [Y_AB, Y_ABC].sort(),
+          `${prefix}: a's parent-consistency item's origin is exactly ` +
+            `{a.b, a.b.c}, the changed nodes in a's subtree — the skipped ` +
+            `a.b.c included — never {a.b}, the visited nodes alone, which a ` +
+            `product drawing origins from visited nodes gives (SPEC 10.5)`,
+        );
+
+        // Blocking (SPEC 10.5 rule 2): a's child on the changed branch, a.b,
+        // is itself visited, so its subtree-coherence item blocks a's item.
+        assertBlockedBy(scAB, [], `${prefix} a.b's subtree-coherence item`);
+        assertBlockedBy(
+          pcA,
+          [scAB.id],
+          `${prefix} a's parent-consistency item — a.b, a's child on the ` +
+            `changed branch, is visited, so its subtree-coherence item blocks`,
         );
       },
     );
