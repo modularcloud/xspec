@@ -416,6 +416,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // and `version` answering beside the staged configuration error (12.6),
   // as T7-1's occupancy arms do.
   "T7-7": ["7", "7.2", "12.6", "14"],
+  // T7-8: every staged run asserted never `read-failure` beside a staged
+  // refusal its discovery must not meet — 14.25's absence at the read
+  // scope's boundary, rule (c); its twin compares and outcomes are 7's.
+  "T7-8": ["7", "14"],
   "T7.1-1": ["7.1", "14"],
   "T7.2-1": ["7.2", "14"],
   "T7.3-1": ["7.3", "14"],

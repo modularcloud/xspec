@@ -1,6 +1,7 @@
 // TEST-SPEC §7 discovery (glob semantics, symbolic links, discovery
-// boundaries) — SUITE-27: T7-4…T7-6. Configuration basics (T7-1…T7-3) live in
-// section-7-basics.ts; the §7.1–7.5 tests belong to later tasks.
+// boundaries, discovery's read scope) — SUITE-27: T7-4…T7-6 and T7-8.
+// Configuration basics (T7-1…T7-3) and T7-7 live in section-7-basics.ts;
+// the §7.1–7.5 tests in section-7.1-7.3.ts and section-7.4-7.5.ts.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -73,6 +74,70 @@
 // `query edges --from <path>` answers exit 0 for its whole-file location
 // (CONF-DISC's constraint for those two).
 //
+// T7-8 (discovery's read scope; SPEC 7: discovery lists a directory exactly
+// when a configured spec or code glob matches a path below it, paths under
+// `.xspec/` counting for none, and examines the kind of exactly the entries
+// of a listed directory such a glob matches or that it would list were they
+// directories) compares each run on a staged workspace with the same
+// command on its twin, every command run from the root with JSON output in
+// effect. Its workspaces hold `specs/A.mdx` (the section `a`),
+// `specs/B.mdx` (`b`, its `d` naming `a`), and `src/app.ts` (a marker on
+// `a`) under the spec glob `specs/**/*.mdx` and the code glob
+// `src/**/*.ts`, and each is freshly built (`build`, exit 0) before it is
+// staged. Each staging is verified on the harness itself before the
+// product meets it (E-1; helpers/permissions.ts): T7-8 inverts T14-10's
+// polarity — a staging that missed would pass a product meeting the
+// refusal — so that verification is what braces the test
+// (CERTIFICATIONS.md's exclusion entry for T7-8). Three halves:
+// - unlistable: `data/` and the dot-directory `specs/.cache/`, each holding
+//   one plain file, staged unlistable together
+//   (`stageReadRefusalOfDirectory`, `--x`: the harness's own listing
+//   refused, its entry reachable by name); the twin holds neither
+//   directory;
+// - kind: `specs/sub/` holding only the dot-named `specs/sub/.keep`, and,
+//   on a pair of its own whose configuration adds the spec glob
+//   `docs/*.mdx`, `docs/` holding only `docs/notes.txt`, each staged `r--`
+//   (`stageDirectoryMode`: the harness's own listing of the directory kept,
+//   its examination of the entry's kind refused); the twin, "a twin without
+//   the entry", holds the directory empty and unstaged;
+// - carve-out: the spec glob `.xspec/*.mdx` added; `.xspec` made `-wx` on
+//   the staged workspace and on its twin, which lacks that glob, alike
+//   (`stageUnlistableArea`, helpers/acquisition-staging.ts, T13.5-10(h)'s
+//   staging: the harness's own listing refused, its own creation and
+//   removal of a file in it kept).
+// In the first two halves each of `build`, `check`, `ids`, `view
+// specs/A.mdx`, `inventory`, `review list`, and `rename specs/A.mdx a a2`
+// runs on the staged workspace and then on the twin: never `read-failure`
+// (an exit 2 decoded as the error document, its code anything but 14.25's);
+// the exit outcome and the standard output byte-equal to the twin's
+// (standard error, free wording, not compared); the files it writes
+// byte-equal to the twin's — each workspace's delta across the run
+// (`diffSnapshots`, the lock path pruned from every snapshot: H-6 leaves it
+// out of every written-file compare across workspaces) the same paths,
+// changed alike, byte-identical (helpers/determinism.ts
+// `assertWriteDeltasEqual`); and the outcome such a workspace gives (H-5),
+// which keeps the test red against S-7's stub, whose runs equal its twin's:
+// `build` and `check` exit 0 with `{"findings": []}`, `ids` exit 0 listing
+// `a` and `b`, `view` and `inventory` exit 0 finding-free, `review list`
+// exit 0 listing no session, and the `rename` exit 0 with its applied
+// mapping `specs/A.mdx#a` → `specs/A.mdx#a2`. A staged object admits no
+// snapshot, so each run's staging is applied after the snapshot before it
+// and restored before the snapshot after it, re-applied and verified anew
+// for every command. In the carve-out `build`, `check`, `ids`, and `view`
+// run with both stagings in effect throughout: never `read-failure`, the
+// exit outcome and standard output byte-equal to the twin's, `build` exit 0
+// finding-free, `ids` exit 0 with its listing, `view` exit 0 finding-free,
+// while `check` — which a conforming product's own refused listing of
+// `.xspec` outside discovery may meet as condition 23's state, reported as
+// the unreadable-record unit form (14.10) — is asserted equal to the twin's
+// alone; neither `inventory` (its `configuration` reports the added glob)
+// nor the written files (graph data's opaque content, 13.3, H-4, which the
+// differing glob may change) is compared. A discovery that lists `.xspec`
+// and takes the refusal as condition 23's state passes: TEST-SPEC's
+// residual, that refusal being the only observation of such a listing. The
+// stagings belong to the Linux leg (E-1): elsewhere the body returns at
+// once, and no other leg selects T7-8 (E-6).
+//
 // Conservative operationalizations (H-3/H-4):
 // - Listing comparisons sort both sides bytewise by file path: these tests
 //   assert discovery membership; the report's file ordering is 12.3's own
@@ -118,7 +183,10 @@
 //   exclusion workspace) precedes any invocation and stays plain; the files
 //   T7-4 and T7-5 write beside the root (`stageBesideRoot`, a raw write
 //   outside the builder) stay strings — `x/M.mdx` the one the `m` record is
-//   made from.
+//   made from. T7-8's `specs/A.mdx` and `specs/B.mdx` are its own records,
+//   staged in every one of its workspaces, its first pair included (one
+//   declaration builder, `t78Decl`, serves them all); the plain files its
+//   staged directories hold are no sources and stay strings.
 // - TypeScript staged-source records (TEST-SPEC S-9's TypeScript and
 //   timing clauses; helpers/staged-ts.ts): every configuration file and
 //   code source a body stages in a workspace created after its first
@@ -135,26 +203,49 @@
 //   inside-root spellings) carry one record per row, made at module load.
 //   The same first workspaces stay plain, and so does `x/M.mdx`'s raw
 //   write; the literal-backslash records' bytes and paths are built from
-//   the code point as before.
+//   the code point as before. T7-8's three configurations and its code
+//   source `src/app.ts` are its own records, every one well-formed, staged
+//   in every one of its workspaces, its first pair included.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import type { Finding } from "../../helpers/adapters/index.js";
-import {
-  decodeEdgesReport,
-  decodeIdsReport,
-  decodeInventoryDocument,
+import { stageUnlistableArea } from "../../helpers/acquisition-staging.js";
+import type {
+  AppliedMappingPair,
+  Finding,
 } from "../../helpers/adapters/index.js";
 import {
+  decodeAppliedMappingReport,
+  decodeEdgesReport,
+  decodeFindingsReport,
+  decodeIdsReport,
+  decodeInventoryDocument,
+  decodeSessionListReport,
+  decodeViewReport,
+} from "../../helpers/adapters/index.js";
+import {
+  assertBytesEqual,
   assertExitCode,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import type { WriteDeltaLabels } from "../../helpers/determinism.js";
+import { assertWriteDeltasEqual } from "../../helpers/determinism.js";
+import { EXCLUDE_LOCK_PATH } from "../../helpers/lock-path.js";
+import type { PermissionStaging } from "../../helpers/permissions.js";
+import {
+  stageDirectoryMode,
+  stageReadRefusalOfDirectory,
+} from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
-import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import {
+  assertLeavesUnchanged,
+  diffSnapshots,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
@@ -170,6 +261,7 @@ import type {
 } from "../../helpers/workspace.js";
 import { SECTION_A_SOURCE, SECTION_B_SOURCE } from "./section-7-basics.js";
 import {
+  assertAppliedMapping,
   assertConditionCounts,
   assertEdgeSetEqual,
   assertFindingConcernsPath,
@@ -2128,9 +2220,622 @@ const T7_6 = defineProductTest({
   },
 });
 
-/** TEST-SPEC §7 discovery T7-4…T7-6, in canonical ID order (SUITE-27). */
+// ---------------------------------------------------------------------------
+// T7-8 — discovery's read scope
+// ---------------------------------------------------------------------------
+
+/**
+ * E-1: T7-8's permission stagings belong to the Linux leg; elsewhere the
+ * body stages nothing and returns at once (T14-10's gate, the NU3_STAGED
+ * pattern of section-11.5), and no other leg selects T7-8 (E-6).
+ */
+const T7_8_STAGED = process.platform === "linux";
+
+const T7_8_CONFIG_PATH = "xspec.config.ts";
+
+/**
+ * T7-8's configuration (module header): the spec group `main` over
+ * `specGlobs` beside the code group `app` over the one code glob, every
+ * pattern a static string literal (SPEC 7).
+ */
+function t78Config(specGlobs: readonly string[]): string {
+  const specs = specGlobs.map((glob) => JSON.stringify(glob)).join(", ");
+  return `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: [${specs}]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  }
+})
+`;
+}
+
+// T7-8's staged-source records (module header): each of its workspaces past
+// the first pair follows a product invocation, and the first pair stages the
+// same records — the three configurations and the three sources, one record
+// per byte sequence.
+const T7_8_CONFIG = stagedTs(
+  "T7-8 xspec.config.ts (the globs specs/**/*.mdx and src/**/*.ts: the unlistable half's and the specs/sub kind arm's workspaces and twins, and the carve-out's twin)",
+  t78Config(["specs/**/*.mdx"]),
+);
+const T7_8_DOCS_CONFIG = stagedTs(
+  "T7-8 xspec.config.ts (the docs/ kind arm's workspace and twin: the spec glob docs/*.mdx added beside specs/**/*.mdx and src/**/*.ts)",
+  t78Config(["specs/**/*.mdx", "docs/*.mdx"]),
+);
+const T7_8_AREA_GLOB_CONFIG = stagedTs(
+  "T7-8 xspec.config.ts (the carve-out's staged workspace: the spec glob .xspec/*.mdx, its leading dot spelled, added beside specs/**/*.mdx and src/**/*.ts)",
+  t78Config(["specs/**/*.mdx", ".xspec/*.mdx"]),
+);
+const T7_8_A_SOURCE = stagedMdx(
+  "T7-8 specs/A.mdx (the section a, the rename's subject)",
+  '<S id="a">\nThe renamed section.\n</S>\n',
+);
+const T7_8_B_SOURCE = stagedMdx(
+  "T7-8 specs/B.mdx (the section b, its d reference to a, which the rename rewrites)",
+  'import A from "./A.xspec"\n\n<S id="b" d={A.a}>\nThe section depending on a.\n</S>\n',
+);
+const T7_8_CODE_SOURCE = stagedTs(
+  "T7-8 src/app.ts (the code source, its marker on a, which the rename rewrites)",
+  'import A from "../specs/A.xspec";\n\nA.a;\n',
+);
+
+/**
+ * A T7-8 workspace declaration: `config` at the root, the three sources,
+ * `extra` plain files beside them, and `dirs` created empty.
+ */
+function t78Decl(
+  config: StagedTs,
+  extra: Readonly<Record<string, string>> = {},
+  dirs: readonly string[] = [],
+): WorkspaceDecl {
+  return {
+    files: {
+      [T7_8_CONFIG_PATH]: config,
+      "specs/A.mdx": T7_8_A_SOURCE,
+      "specs/B.mdx": T7_8_B_SOURCE,
+      "src/app.ts": T7_8_CODE_SOURCE,
+      ...extra,
+    },
+    ...(dirs.length > 0 ? { dirs } : {}),
+  };
+}
+
+/** Every T7-8 workspace's discovered set: `a` and `b`, by file (SPEC 12.3). */
+const T7_8_LISTING: readonly ListingEntry[] = [
+  { file: "specs/A.mdx", ids: ["a"] },
+  { file: "specs/B.mdx", ids: ["b"] },
+];
+
+/** The representative `rename`'s applied mapping (SPEC 6.4, 12.7). */
+const T7_8_MAPPING: readonly AppliedMappingPair[] = [
+  { from: "specs/A.mdx#a", to: "specs/A.mdx#a2" },
+];
+
+/**
+ * One representative command of T7-8, run from the root with JSON output in
+ * effect (`--json`, or a JSON-only surface), and the outcome a freshly
+ * built, valid workspace gives it (H-5) — absent where TEST-SPEC asserts
+ * the run equal to the twin's alone (the carve-out's `check`).
+ */
+interface T78Command {
+  readonly argv: readonly string[];
+  readonly expect?: (result: RunResult, context: string) => void;
+}
+
+/**
+ * A findings-only surface on such a workspace: exit 0 with exactly
+ * `{"findings": []}` (SPEC 12.0, 12.7), `rule` the passage its success
+ * rests on.
+ */
+function expectT78FindingFree(
+  result: RunResult,
+  context: string,
+  rule: string,
+): void {
+  assertExitCode(
+    result,
+    0,
+    `${context} — on a freshly built, valid workspace it exits 0 ` +
+      `finding-free (${rule}; H-5)`,
+  );
+  assertSameJson(
+    decodeFindingsReport(parseJsonStdout(result, context), context).findings,
+    [],
+    `${context} — the report is exactly {"findings": []}: the ` +
+      `findings-only form's one member holding the empty array (SPEC 12.7)`,
+  );
+}
+
+const T7_8_BUILD: T78Command = {
+  argv: ["build", "--json"],
+  expect: (result, context) => {
+    expectT78FindingFree(result, context, "SPEC 12.1");
+  },
+};
+const T7_8_CHECK: T78Command = {
+  argv: ["check", "--json"],
+  expect: (result, context) => {
+    expectT78FindingFree(result, context, "SPEC 12.2: graph data current");
+  },
+};
+const T7_8_IDS: T78Command = {
+  argv: ["ids", "--json"],
+  expect: (result, context) => {
+    assertExitCode(
+      result,
+      0,
+      `${context} — a valid workspace's \`ids\` answers, exit 0 (SPEC ` +
+        `12.3, 13.3; H-5)`,
+    );
+    const report = decodeIdsReport(parseJsonStdout(result, context), context);
+    assertSameJson(
+      sortedListing(report.files),
+      sortedListing(T7_8_LISTING),
+      `${context}: its listing — requirement IDs grouped by file, compared ` +
+        `bytewise-sorted by path — is the workspace's discovered set, a in ` +
+        `specs/A.mdx and b in specs/B.mdx (SPEC 12.3, 7)`,
+    );
+  },
+};
+const T7_8_VIEW: T78Command = {
+  argv: ["view", "specs/A.mdx"],
+  expect: (result, context) => {
+    assertExitCode(
+      result,
+      0,
+      `${context} — \`view\` answers for a discovered source, exit 0 ` +
+        `(SPEC 11.4, 12.0; H-5)`,
+    );
+    const report = decodeViewReport(
+      parseJsonStdout(result, context),
+      { text: false },
+      context,
+    );
+    assertSameJson(
+      report.findings,
+      [],
+      `${context}: the answer is finding-free — the workspace is valid ` +
+        `(SPEC 11.4, 11.2)`,
+    );
+  },
+};
+const T7_8_INVENTORY: T78Command = {
+  argv: ["inventory"],
+  expect: (result, context) => {
+    assertExitCode(
+      result,
+      0,
+      `${context} — \`inventory\` answers, exit 0 (SPEC 11.6, 12.0; H-5)`,
+    );
+    const inventory = decodeInventoryDocument(
+      parseJsonStdout(result, context),
+      context,
+    );
+    assertSameJson(
+      inventory.findings,
+      [],
+      `${context}: the inventory is finding-free — no journal, session, ` +
+        `or record condition stands on the freshly built workspace (SPEC ` +
+        `11.6)`,
+    );
+  },
+};
+const T7_8_REVIEW_LIST: T78Command = {
+  argv: ["review", "list", "--json"],
+  expect: (result, context) => {
+    assertExitCode(
+      result,
+      0,
+      `${context} — \`review list\` answers, exit 0 (SPEC 10.7, 10.1; H-5)`,
+    );
+    const listing = decodeSessionListReport(
+      parseJsonStdout(result, context),
+      context,
+    );
+    assertSameJson(
+      { sessions: listing.sessions, findings: listing.findings ?? [] },
+      { sessions: [], findings: [] },
+      `${context}: no session is listed and no finding reported — the ` +
+        `workspace holds no session directory (SPEC 10.1: an absent ` +
+        `session directory holds no sessions; 10.7)`,
+    );
+  },
+};
+const T7_8_RENAME: T78Command = {
+  argv: ["rename", "specs/A.mdx", "a", "a2", "--json"],
+  expect: (result, context) => {
+    assertExitCode(
+      result,
+      0,
+      `${context} — the rename applies, exit 0 (SPEC 6.4, 12.0; H-5)`,
+    );
+    assertAppliedMapping(
+      decodeAppliedMappingReport(parseJsonStdout(result, context), context),
+      T7_8_MAPPING,
+      `${context}: its applied mapping is exactly specs/A.mdx#a → ` +
+        `specs/A.mdx#a2 (SPEC 6.4, 12.7)`,
+    );
+  },
+};
+
+/**
+ * The first two halves' representative commands, every command that loads
+ * the configuration, in TEST-SPEC's order — the `rename`, the one writing
+ * sources, last (TEST-SPEC T7-8).
+ */
+const T7_8_COMMANDS: readonly T78Command[] = [
+  T7_8_BUILD,
+  T7_8_CHECK,
+  T7_8_IDS,
+  T7_8_VIEW,
+  T7_8_INVENTORY,
+  T7_8_REVIEW_LIST,
+  T7_8_RENAME,
+];
+
+/**
+ * The carve-out's commands: `build`, `check`, `ids`, and `view`, `check`
+ * asserted equal to the twin's alone (TEST-SPEC T7-8).
+ */
+const T7_8_CARVE_OUT_COMMANDS: readonly T78Command[] = [
+  T7_8_BUILD,
+  { argv: ["check", "--json"] },
+  T7_8_IDS,
+  T7_8_VIEW,
+];
+
+/** How the written-file compare names T7-8's two runs. */
+const T7_8_TWIN_LABELS: WriteDeltaLabels = {
+  first: "the staged workspace",
+  second: "its twin",
+  pair: "the staged workspace and its twin",
+};
+
+/**
+ * Never `read-failure` (TEST-SPEC T7-8; SPEC 7, 14.25): a staged run
+ * exiting 2 carries the 12.7 error document (H-5, JSON output in effect),
+ * whose code must not be 14.25's — discovery never meets the staged
+ * refusal. Any other ending is left to the twin comparison and the outcome
+ * assertions after it.
+ */
+function assertNeverReadFailure(result: RunResult, context: string): void {
+  if (result.exitCode !== 2) return;
+  const finding = expectErrorDocument(result, context);
+  if (finding.code === "read-failure") {
+    fail(
+      `${context}: never \`read-failure\` — discovery reads only what ` +
+        `deciding the discovered set takes, so it never meets the staged ` +
+        `refusal (SPEC 7, 14.25); got the error document's ` +
+        `\`read-failure\` concerning ${JSON.stringify(finding.path)} ` +
+        `(message: ${JSON.stringify(finding.message)})`,
+    );
+  }
+}
+
+/**
+ * The staged run answers exactly as the twin's (TEST-SPEC T7-8): the same
+ * exit outcome — exit code, or death by signal — and byte-equal standard
+ * output. Standard error is not compared: its wording is free (12.0).
+ */
+function assertAnswersAsTwin(
+  staged: RunResult,
+  twin: RunResult,
+  context: string,
+  twinLabel: string,
+): void {
+  if (staged.exitCode !== twin.exitCode || staged.signal !== twin.signal) {
+    fail(
+      `${context}: it exits exactly as on the twin — ${twinLabel} — the ` +
+        `staged refusal changing nothing discovery reads (TEST-SPEC T7-8; ` +
+        `SPEC 7); the staged workspace: ${summarizeResult(staged)}; the ` +
+        `twin: ${summarizeResult(twin)}`,
+    );
+  }
+  assertBytesEqual(
+    staged.stdoutBytes,
+    twin.stdoutBytes,
+    `${context}: its standard output is byte-equal to the twin's — ` +
+      `${twinLabel} (TEST-SPEC T7-8; SPEC 7, 12.0)`,
+  );
+}
+
+/** Restore T7-8's stagings in reverse order of staging. */
+async function restoreT78Stagings(
+  stagings: readonly PermissionStaging[],
+): Promise<void> {
+  for (let i = stagings.length - 1; i >= 0; i--) {
+    await stagings[i]!.restore();
+  }
+}
+
+/**
+ * Apply `appliers` in order, each verified on the harness itself (E-1); on
+ * a failure the stagings already made are restored before it propagates.
+ */
+async function stageT78Each(
+  appliers: readonly (() => Promise<PermissionStaging>)[],
+): Promise<readonly PermissionStaging[]> {
+  const stagings: PermissionStaging[] = [];
+  try {
+    for (const apply of appliers) stagings.push(await apply());
+  } catch (error) {
+    await restoreT78Stagings(stagings);
+    throw error;
+  }
+  return stagings;
+}
+
+/** One twin pair of T7-8's first two halves (module header). */
+interface T78TwinPair {
+  /** What is staged, for every diagnosis. */
+  readonly label: string;
+  /** The staged workspace: the twin's files plus the staged entries. */
+  readonly staged: WorkspaceDecl;
+  /** The unstaged twin. */
+  readonly twin: WorkspaceDecl;
+  /** The twin, as every diagnosis names it. */
+  readonly twinLabel: string;
+  /** Stage the refusal on the staged workspace, verified (E-1). */
+  readonly stage: (
+    workspace: TestWorkspace,
+  ) => Promise<readonly PermissionStaging[]>;
+}
+
+/** The unlistable half's directories, no glob matching a path below either. */
+const T7_8_UNLISTABLE_DIRS: readonly string[] = ["data", "specs/.cache"];
+
+/** The kind half's mode, `r--`: the listing kept, search removed. */
+const T7_8_KIND_MODE = 0o400;
+
+/**
+ * A kind-half staging: `dir` given mode `r--`, verified on the harness —
+ * its own listing of the directory kept, its own examination of `entry`'s
+ * kind refused (TEST-SPEC T7-8).
+ */
+async function stageT78KindRefusal(
+  workspace: TestWorkspace,
+  dir: string,
+  entry: string,
+): Promise<PermissionStaging> {
+  return await stageDirectoryMode(workspace.path(dir), T7_8_KIND_MODE, [
+    { attempt: "list", refused: false },
+    { attempt: "examine", name: entry, refused: true },
+  ]);
+}
+
+/** T7-8's unlistable half (module header). */
+const T7_8_UNLISTABLE_PAIR: T78TwinPair = {
+  label:
+    "(unlistable half) data/ and the dot-directory specs/.cache/ — no glob " +
+    "matching a path below either, ** matching no .-led segment — each " +
+    "staged unlistable (`--x`)",
+  staged: t78Decl(T7_8_CONFIG, {
+    "data/notes.txt": "Data no configured glob reaches.\n",
+    "specs/.cache/notes.txt": "A dot-directory no glob reaches below.\n",
+  }),
+  twin: t78Decl(T7_8_CONFIG),
+  twinLabel: "a twin holding neither directory",
+  stage: async (workspace) =>
+    await stageT78Each(
+      T7_8_UNLISTABLE_DIRS.map(
+        (rel) => () => stageReadRefusalOfDirectory(workspace.path(rel)),
+      ),
+    ),
+};
+
+/** T7-8's kind half, one pair per listed directory (module header). */
+const T7_8_KIND_PAIRS: readonly T78TwinPair[] = [
+  {
+    label:
+      "(kind half) specs/sub/, holding only the dot-named plain file " +
+      "specs/sub/.keep — no glob matching it or reaching below it — " +
+      "staged `r--`",
+    staged: t78Decl(T7_8_CONFIG, { "specs/sub/.keep": "" }),
+    twin: t78Decl(T7_8_CONFIG, {}, ["specs/sub"]),
+    twinLabel: "a twin without the entry, specs/sub/ empty",
+    stage: async (workspace) =>
+      await stageT78Each([
+        () => stageT78KindRefusal(workspace, "specs/sub", ".keep"),
+      ]),
+  },
+  {
+    label:
+      "(kind half) with the spec glob docs/*.mdx added, docs/, holding only " +
+      "docs/notes.txt — no glob matching it or reaching below it — staged " +
+      "`r--`",
+    staged: t78Decl(T7_8_DOCS_CONFIG, {
+      "docs/notes.txt": "Notes no glob matches.\n",
+    }),
+    twin: t78Decl(T7_8_DOCS_CONFIG, {}, ["docs"]),
+    twinLabel: "a twin without the entry, docs/ empty",
+    stage: async (workspace) =>
+      await stageT78Each([
+        () => stageT78KindRefusal(workspace, "docs", "notes.txt"),
+      ]),
+  },
+];
+
+/**
+ * One twin pair of T7-8's first two halves (module header): the staged
+ * workspace and its twin, each freshly built; then each representative
+ * command on the staged workspace — its staging applied after the snapshot
+ * before the run and restored before the snapshot after it, a staged object
+ * admitting no snapshot — and on the twin in turn: never `read-failure`,
+ * the exit outcome and standard output the twin's, the files it writes the
+ * twin's (each workspace's delta across the run, the lock path pruned from
+ * every snapshot: H-6), and the outcome such a workspace gives (H-5).
+ */
+async function runT78TwinPair(
+  product: ProductBinding,
+  pair: T78TwinPair,
+): Promise<void> {
+  const context = `T7-8 ${pair.label}`;
+  await withWorkspace(pair.staged, async (staged) => {
+    await withWorkspace(pair.twin, async (twin) => {
+      await buildOk(
+        product,
+        staged,
+        `${context}: the staged workspace's \`build\`, before the staging — ` +
+          `freshly built, valid (SPEC 12.1)`,
+      );
+      await buildOk(
+        product,
+        twin,
+        `${context}: the \`build\` of ${pair.twinLabel} — freshly built, ` +
+          `valid (SPEC 12.1)`,
+      );
+      for (const command of T7_8_COMMANDS) {
+        const label = `${context}: \`${command.argv.join(" ")}\``;
+        const stagedBefore = await snapshotDirectory(
+          staged.root,
+          EXCLUDE_LOCK_PATH,
+        );
+        const stagings = await pair.stage(staged);
+        let stagedResult: RunResult;
+        try {
+          stagedResult = await runProduct(product, {
+            cwd: staged.root,
+            argv: command.argv,
+          });
+        } finally {
+          await restoreT78Stagings(stagings);
+        }
+        const stagedAfter = await snapshotDirectory(
+          staged.root,
+          EXCLUDE_LOCK_PATH,
+        );
+        const twinBefore = await snapshotDirectory(
+          twin.root,
+          EXCLUDE_LOCK_PATH,
+        );
+        const twinResult = await runProduct(product, {
+          cwd: twin.root,
+          argv: command.argv,
+        });
+        const twinAfter = await snapshotDirectory(twin.root, EXCLUDE_LOCK_PATH);
+        assertNeverReadFailure(stagedResult, label);
+        assertAnswersAsTwin(stagedResult, twinResult, label, pair.twinLabel);
+        assertWriteDeltasEqual(
+          diffSnapshots(stagedBefore, stagedAfter),
+          stagedAfter,
+          diffSnapshots(twinBefore, twinAfter),
+          twinAfter,
+          `${label}: the files it writes are byte-equal to those the same ` +
+            `command writes on ${pair.twinLabel} (TEST-SPEC T7-8; H-6: the ` +
+            `lock path left out of every written-file compare across ` +
+            `workspaces)`,
+          T7_8_TWIN_LABELS,
+        );
+        command.expect?.(stagedResult, label);
+      }
+    });
+  });
+}
+
+/**
+ * T7-8's carve-out (module header): the spec glob `.xspec/*.mdx` added on
+ * the staged workspace, its twin lacking it; each freshly built, then
+ * `.xspec` made `-wx` on both (T13.5-10(h)'s staging, verified on the
+ * harness itself) for `build`, `check`, `ids`, and `view` in turn: never
+ * `read-failure`, the exit outcome and standard output the twin's, and the
+ * outcome such a workspace gives but for `check`, asserted equal to the
+ * twin's alone; neither `inventory` nor the written files compared.
+ */
+async function runT78CarveOut(product: ProductBinding): Promise<void> {
+  const context =
+    "T7-8 (carve-out) the spec glob .xspec/*.mdx added, .xspec made " +
+    "unlistable but searchable and writable (`-wx`, T13.5-10(h)'s staging)";
+  const twinLabel =
+    "a twin staged alike but without that glob, .xspec made `-wx` too";
+  await withWorkspace(t78Decl(T7_8_AREA_GLOB_CONFIG), async (staged) => {
+    await withWorkspace(t78Decl(T7_8_CONFIG), async (twin) => {
+      await buildOk(
+        product,
+        staged,
+        `${context}: the staged workspace's \`build\`, before the staging — ` +
+          `freshly built, valid (SPEC 12.1)`,
+      );
+      await buildOk(
+        product,
+        twin,
+        `${context}: the \`build\` of ${twinLabel}, before its staging — ` +
+          `freshly built, valid (SPEC 12.1)`,
+      );
+      const stagedArea = await stageUnlistableArea(staged);
+      try {
+        const twinArea = await stageUnlistableArea(twin);
+        try {
+          for (const command of T7_8_CARVE_OUT_COMMANDS) {
+            const label = `${context}: \`${command.argv.join(" ")}\``;
+            const stagedResult = await runProduct(product, {
+              cwd: staged.root,
+              argv: command.argv,
+            });
+            const twinResult = await runProduct(product, {
+              cwd: twin.root,
+              argv: command.argv,
+            });
+            assertNeverReadFailure(stagedResult, label);
+            assertAnswersAsTwin(stagedResult, twinResult, label, twinLabel);
+            command.expect?.(stagedResult, label);
+          }
+        } finally {
+          await twinArea.restore();
+        }
+      } finally {
+        await stagedArea.restore();
+      }
+    });
+  });
+}
+
+const T7_8 = defineProductTest({
+  id: "T7-8",
+  title:
+    "discovery's read scope: discovery lists a directory exactly when a " +
+    "configured spec or code glob matches a path below it, paths under " +
+    ".xspec/ counting for none, and examines the kind of exactly the " +
+    "entries such a glob matches or that it would list — under " +
+    "specs/**/*.mdx and src/**/*.ts, each workspace freshly built and each " +
+    "staging verified on the harness itself: (a) data/ and the " +
+    "dot-directory specs/.cache/ staged unlistable (`--x`) — `build`, " +
+    "`check`, `ids`, `view`, `inventory`, `review list`, and a `rename` " +
+    "each exit and answer exactly as on a twin holding neither directory " +
+    "(exit code and stdout equal, written files byte-equal, the lock path " +
+    "aside), never `read-failure`: `build` and `check` exit 0 " +
+    "finding-free, `ids` 0 with its listing, `view` and `inventory` 0 " +
+    "finding-free, `review list` 0, the `rename` 0 with its applied " +
+    "mapping; (b) a listed directory staged `r--` holding only an entry " +
+    "outside that scope — specs/sub/ holding only specs/sub/.keep, and, " +
+    "with the spec glob docs/*.mdx added, docs/ holding only " +
+    "docs/notes.txt — each command as on a twin without the entry, with " +
+    "(a)'s outcomes; (c) with the spec glob .xspec/*.mdx added and .xspec " +
+    "made `-wx` on it and on a twin staged alike without that glob, " +
+    "`build`, `check`, `ids`, and `view` each exit and answer as on the " +
+    "twin, never `read-failure` — `build` 0 finding-free, `ids` 0 with " +
+    "its listing, `view` 0 finding-free, `check` equal to the twin's " +
+    "alone (SPEC 7, 13.4, 14.25)",
+  run: async (product) => {
+    // E-1: the stagings belong to the Linux leg (T7_8_STAGED).
+    if (!T7_8_STAGED) return;
+    await runT78TwinPair(product, T7_8_UNLISTABLE_PAIR);
+    for (const pair of T7_8_KIND_PAIRS) {
+      await runT78TwinPair(product, pair);
+    }
+    await runT78CarveOut(product);
+  },
+});
+
+/**
+ * TEST-SPEC §7 discovery T7-4…T7-6 and T7-8, in canonical ID order
+ * (SUITE-27).
+ */
 export const section7DiscoveryTests: readonly ProductTestEntry[] = [
   T7_4,
   T7_5,
   T7_6,
+  T7_8,
 ];
