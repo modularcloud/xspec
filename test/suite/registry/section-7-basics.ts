@@ -76,6 +76,26 @@
 //   (12.1), and the premise — the root configuration valid, discovering
 //   `specs/A.mdx` — is driven last (`ids` regenerates graph data, 13.3) so
 //   the sweeps observe a tree holding no derived file or graph data.
+// - T7-1 name casing (SPEC 7, 12.0: the search stops at an entry named
+//   `xspec.config.ts`, and names compare byte-wise and case-sensitively, no
+//   case folding): the valid canonical configuration and `specs/A.mdx` at
+//   the root, and beneath it the working directory `sub/` holding one
+//   entry, the plain file `XSPEC.config.ts` holding `)` — no well-formed
+//   TypeScript (a staged-source record declared unparseable, 14.20) and
+//   matched by no group's glob — and no entry named `xspec.config.ts`. The
+//   search passes `sub/` and loads the root's configuration: `build` and
+//   then `check`, each run from `sub/`, exit 0; a product matching the name
+//   case-insensitively, or finding the file through a case-insensitive
+//   filesystem lookup, reads `)` and exits 2 with 14.14. The fixture holds
+//   one casing alone, so it stages identically on any filesystem; its
+//   staging is verified before the first run by listing `sub/` — exactly
+//   the one entry, its name compared byte-wise, a plain file — never by
+//   looking `xspec.config.ts` up, which a case-insensitive filesystem
+//   answers with the `XSPEC.config.ts` entry itself. One shared code path
+//   (`runT71ConfigNameCasingProbe`): the registered body runs it last, and
+//   the Windows leg reruns it (E-6, test/windows/e6-subset.test.ts), where
+//   no case-sensitive filesystem masks a product resolving the name through
+//   filesystem lookups.
 // - T7-2 single-deviation staging: every invalid fixture is the valid
 //   canonical configuration with exactly one deviation, so the refusal is
 //   attributable to the arm's malformation and nothing else.
@@ -173,24 +193,25 @@
 //   helpers/staged-mdx.ts): every `.mdx` file a body stages in a workspace
 //   created after its first product invocation — `expectConfigRefused`'s
 //   one staging site (serving every arm, the first included), T7-1's
-//   no-configuration and occupancy workspaces, T7-2's and T7-3's later
-//   arms — is a ledger record, judged by test/self/s9-staged-sources.test.ts
-//   before any product exists. The minimal `mdxSection("a")` and
-//   `mdxSection("b")` sources are staged byte-identically by this module,
-//   section-7-discovery.ts, section-7.1-7.3.ts, and (the `a`)
-//   section-7.4-7.5.ts, so each is ONE record,
-//   exported from here and named with every staging test in ID order and
-//   every path. T7-1's first workspace (`LOCATION_FILES`) precedes any
-//   invocation and stays plain.
+//   no-configuration, occupancy, and name-casing workspaces, T7-2's and
+//   T7-3's later arms — is a ledger record, judged by
+//   test/self/s9-staged-sources.test.ts before any product exists. The
+//   minimal `mdxSection("a")` and `mdxSection("b")` sources are staged
+//   byte-identically by this module, section-7-discovery.ts,
+//   section-7.1-7.3.ts, and (the `a`) section-7.4-7.5.ts, so each is ONE
+//   record, exported from here and named with every staging test in ID
+//   order and every path. T7-1's first workspace (`LOCATION_FILES`)
+//   precedes any invocation and stays plain.
 // - TypeScript staged-source records (TEST-SPEC S-9's TypeScript and
 //   timing clauses; helpers/staged-ts.ts): every configuration file and
 //   code source a body stages in a workspace created after its first
 //   product invocation — `expectConfigRefused`'s one staging site (serving
 //   every arm of every refused-configuration table, the first included:
 //   `refusedConfigArms` makes one record per row at module load), T7-1's
-//   occupancy workspace, T7-2's and T7-3's later arms — is a ledger record
-//   carrying its S-9 declaration (T7-2's syntax-error and encoding arms
-//   unparseable, 14.20; every other well-formed), judged by
+//   occupancy and name-casing workspaces, T7-2's and T7-3's later arms — is
+//   a ledger record carrying its S-9 declaration (T7-2's syntax-error and
+//   encoding arms and T7-1's `XSPEC.config.ts` holding `)` unparseable,
+//   14.20; every other well-formed), judged by
 //   test/self/s9-staged-sources.test.ts before any product exists. The
 //   canonical `SPECS_ONLY_CONFIG` is one record wherever it is staged,
 //   `LOCATION_FILES` included.
@@ -269,10 +290,10 @@ export const SECTION_B_SOURCE = stagedMdx(
 
 // The canonical valid configuration (SPEC 7): exactly one spec group, no
 // optional keys. Every T7-2 violation below is this file with one deviation.
-// A staged-source record (module header): T7-1's occupancy workspace and
-// T7-3's omission arms stage it in workspaces created after a product
-// invocation; T7-1's first workspace passes the record too, and T7-2's
-// encoding arms compose their bytes from its text.
+// A staged-source record (module header): T7-1's occupancy and name-casing
+// workspaces and T7-3's omission arms stage it in workspaces created after
+// a product invocation; T7-1's first workspace passes the record too, and
+// T7-2's encoding arms compose their bytes from its text.
 const SPECS_ONLY_CONFIG = stagedTs(
   "T7-1/T7-3 xspec.config.ts (the canonical configuration: exactly one spec group, no optional keys)",
   `import { defineConfig } from "xspec"
@@ -705,6 +726,94 @@ async function runOccupancyArms(product: ProductBinding): Promise<void> {
   });
 }
 
+// --- T7-1 name casing (SPEC 7, 12.0) ----------------------------------------
+
+// The single-casing probe's working directory beneath the valid root
+// configuration, and its one entry: a plain file whose name differs from
+// `xspec.config.ts` in ASCII case alone (module header).
+const NAME_CASING_CWD = "sub";
+const NAME_CASING_ENTRY_NAME = "XSPEC.config.ts";
+const NAME_CASING_ENTRY = `${NAME_CASING_CWD}/${NAME_CASING_ENTRY_NAME}`;
+// `)` alone: no well-formed TypeScript (TEST-SPEC T7-1), so a product
+// reading the entry meets a configuration error (14.14, 14.20) and exits 2.
+// A staged-source record declared unparseable (module header): T7-1's body
+// stages it after its first product invocation, and the Windows leg's rerun
+// (E-6) and S-7's sweeps stage the same record.
+const NAME_CASING_ENTRY_SOURCE = stagedTs(
+  "T7-1 sub/XSPEC.config.ts (the name-casing probe's plain file holding `)`: no well-formed TypeScript, matched by no group's glob)",
+  ")",
+  "unparseable",
+);
+const NAME_CASING_WORKSPACE: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": SPECS_ONLY_CONFIG,
+    "specs/A.mdx": SECTION_A_SOURCE,
+    [NAME_CASING_ENTRY]: NAME_CASING_ENTRY_SOURCE,
+  },
+};
+
+/**
+ * T7-1's single-casing probe as one shared code path: run last by the
+ * registered T7-1 body on the suite leg and rerun verbatim by the Windows
+ * leg (TEST-SPEC E-6; test/windows/e6-subset.test.ts). The configuration
+ * entry's name is compared byte-wise and case-sensitively (SPEC 7, 12.0):
+ * beneath the valid root configuration, the working directory `sub/` holds
+ * the plain file `XSPEC.config.ts` (`)`, no well-formed TypeScript) and no
+ * entry named `xspec.config.ts`, so the upward search passes it and loads
+ * the root's configuration — `build` and then `check`, each run from
+ * `sub/`, exit 0. A product matching the name case-insensitively, or
+ * finding the file through a case-insensitive filesystem lookup, reads it
+ * and exits 2 with 14.14. The fixture stages one casing alone, so it stages
+ * identically on any filesystem.
+ */
+export async function runT71ConfigNameCasingProbe(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(NAME_CASING_WORKSPACE, async (workspace) => {
+    // Staging self-check (H-9): `sub/` holds exactly the one entry, its name
+    // byte-wise `XSPEC.config.ts`, a plain file — read by listing the
+    // directory, never by looking `xspec.config.ts` up, which a
+    // case-insensitive filesystem answers with this very entry. An
+    // ineffective staging is a harness error, never a pass or a diagnosed
+    // product failure.
+    const entries = await workspace.readdirNames(NAME_CASING_CWD);
+    const kind = await workspace.kind(NAME_CASING_ENTRY);
+    if (
+      entries.length !== 1 ||
+      entries[0] !== NAME_CASING_ENTRY_NAME ||
+      kind !== "file"
+    ) {
+      throw new Error(
+        `T7-1 harness staging: expected ${NAME_CASING_CWD}/ to hold exactly ` +
+          `one entry, the plain file ${NAME_CASING_ENTRY_NAME}; found ` +
+          `${JSON.stringify(entries)} (${NAME_CASING_ENTRY}: ${kind}) — the ` +
+          `name-casing probe cannot run (H-9)`,
+      );
+    }
+    for (const command of ["build", "check"] as const) {
+      const label =
+        `T7-1 \`${command}\` run from ${NAME_CASING_CWD}/ (its one entry ` +
+        `the plain file ${NAME_CASING_ENTRY_NAME} holding \`)\`; the ` +
+        `single-casing probe, rerun on the Windows leg per E-6)`;
+      const result = await runProduct(product, {
+        cwd: workspace.path(NAME_CASING_CWD),
+        argv: [command],
+      });
+      assertExitCode(
+        result,
+        0,
+        `${label} — the configuration entry's name is compared byte-wise ` +
+          `and case-sensitively (SPEC 7, 12.0): ${NAME_CASING_ENTRY_NAME} is ` +
+          `no entry named xspec.config.ts, so the upward search passes ` +
+          `${NAME_CASING_CWD}/ and loads the root's valid configuration; a ` +
+          `product matching the name case-insensitively, or finding the ` +
+          `file through a case-insensitive filesystem lookup, reads \`)\` — ` +
+          `no well-formed TypeScript — and exits 2 with 14.14`,
+      );
+    }
+  });
+}
+
 const T7_1 = defineProductTest({
   id: "T7-1",
   title:
@@ -716,7 +825,12 @@ const T7_1 = defineProductTest({
     "stops at the nearest entry named xspec.config.ts whatever occupies " +
     "it, and a found or named entry that is a directory or a symbolic " +
     "link is 14.14 for every command but version, the concerned path that " +
-    "entry, never read through (SPEC 7, 12.0, 12.6, 12.7, 14.14)",
+    "entry, never read through; the entry's name compared byte-wise and " +
+    "case-sensitively — a plain file XSPEC.config.ts holding `)` in a " +
+    "working directory beneath the valid root configuration is passed by " +
+    "the search, which loads the root's configuration, `build` and then " +
+    "`check` run from there exiting 0 (a single-casing probe, rerun on the " +
+    "Windows leg, E-6) (SPEC 7, 12.0, 12.6, 12.7, 14.14)",
   run: async (product) => {
     await withWorkspace(
       { files: LOCATION_FILES, dirs: [SEARCH_CWD] },
@@ -861,6 +975,11 @@ const T7_1 = defineProductTest({
     // Occupancy: a found or named xspec.config.ts that is a directory or a
     // symbolic link (SPEC 7, 14.14; helpers above).
     await runOccupancyArms(product);
+
+    // Name casing: a plain file XSPEC.config.ts beneath the valid root
+    // configuration is no entry named xspec.config.ts (SPEC 7, 12.0) — the
+    // single-casing probe the Windows leg reruns (E-6; helpers above).
+    await runT71ConfigNameCasingProbe(product);
   },
 });
 

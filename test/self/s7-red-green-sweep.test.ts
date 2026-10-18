@@ -34,9 +34,10 @@
 //      (`runE6RepresentativeFixture`, helpers/e6.ts), which
 //      test/suite/e6-exchange-writer.test.ts and the Windows leg's
 //      test/windows/e6-byte-identity.test.ts run before they touch the
-//      exchange; the Windows leg's four single-casing probes
-//      (test/windows/e6-subset.test.ts — T7-4's, T10.1-2's, T10.1-3's, and
-//      T12.0-6's, the probe functions their registered bodies share); and
+//      exchange; the Windows leg's five single-casing probes
+//      (test/windows/e6-subset.test.ts — T7-1's, T7-4's, T10.1-2's,
+//      T10.1-3's, and T12.0-6's, the probe functions their registered
+//      bodies share); and
 //      T11.6-1's drive-mismatch arm (`runT1161DriveMismatchArm`,
 //      helpers/e6-drive-mismatch-arm.ts, the body of
 //      test/windows/e6-drive-mismatch.test.ts). Each must reach the stub and
@@ -84,6 +85,7 @@ import {
   runT1013WrongCaseExtensionProbe,
 } from "../suite/registry/section-10.1.js";
 import { runT1206SingleCasingPathProbe } from "../suite/registry/section-12.0-i.js";
+import { runT71ConfigNameCasingProbe } from "../suite/registry/section-7-basics.js";
 import { runT74SingleCasingGlobProbe } from "../suite/registry/section-7-discovery.js";
 import type { FixtureRunReport } from "./certification-runner.js";
 import {
@@ -232,7 +234,10 @@ test(
 // exactly as it judges a registered body — a `HarnessAssertionError` a
 // fail, the driver's hang-guard kill a hang, anything else thrown an error,
 // a normal return a pass. Like a registered entry, each carries no time
-// budget of its own (TEST-SPEC S-3), nor do the tests running them.
+// budget of its own (TEST-SPEC S-3), nor do the tests running them. A
+// synthetic ID, once assigned, stays its body's: a body added later takes
+// the next free number wherever it stands in the list (T7-1's probe,
+// T99.7-8, stands with the other single-casing probes).
 
 const BODIES_OUTSIDE_THE_REGISTRY: readonly ProductTestEntry[] = [
   defineProductTest({
@@ -242,6 +247,12 @@ const BODIES_OUTSIDE_THE_REGISTRY: readonly ProductTestEntry[] = [
     run: async (product) => {
       await runE6RepresentativeFixture(product);
     },
+  }),
+  defineProductTest({
+    id: "T99.7-8",
+    title:
+      "T7-1's single-casing configuration-name probe (`runT71ConfigNameCasingProbe`), rerun by test/windows/e6-subset.test.ts",
+    run: runT71ConfigNameCasingProbe,
   }),
   defineProductTest({
     id: "T99.7-3",
@@ -316,10 +327,10 @@ function expectEveryBodyFailedAtTheStub(report: FixtureRunReport): void {
 }
 
 test(
-  "S-7: every product-facing body outside the registry — the E-6 representative fixture, the Windows leg's four single-casing probes (T7-4, T10.1-2, T10.1-3, T12.0-6), and T11.6-1's drive-mismatch arm — fails as a diagnosed assertion failure at the empty stub's answer, with no false pass, harness error, or hang (H-8)",
+  "S-7: every product-facing body outside the registry — the E-6 representative fixture, the Windows leg's five single-casing probes (T7-1, T7-4, T10.1-2, T10.1-3, T12.0-6), and T11.6-1's drive-mismatch arm — fails as a diagnosed assertion failure at the empty stub's answer, with no false pass, harness error, or hang (H-8)",
   { timeout: NO_SPAN_GUARD },
   async () => {
-    // Six bodies, each exiting at its first invocation against the stub:
+    // Seven bodies, each exiting at its first invocation against the stub:
     // one lane apiece.
     const report = await runProductTests(
       emptyStubBinding(),
@@ -457,7 +468,7 @@ test(
 );
 
 test(
-  "H-8, no product installed: every product-facing body outside the registry — the E-6 representative fixture, the Windows leg's four single-casing probes (T7-4, T10.1-2, T10.1-3, T12.0-6), and T11.6-1's drive-mismatch arm — fails as a diagnosed assertion failure naming the absent artifact, against the built product's binding shape at it, with no false pass, harness error, or hang",
+  "H-8, no product installed: every product-facing body outside the registry — the E-6 representative fixture, the Windows leg's five single-casing probes (T7-1, T7-4, T10.1-2, T10.1-3, T12.0-6), and T11.6-1's drive-mismatch arm — fails as a diagnosed assertion failure naming the absent artifact, against the built product's binding shape at it, with no false pass, harness error, or hang",
   { timeout: NO_SPAN_GUARD },
   async () => {
     const { binding, artifact, directory } = await noProductStaging();
