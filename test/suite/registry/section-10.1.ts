@@ -108,16 +108,39 @@
 // modifies-nothing compares cover `.git/` with the rest of the root.
 //
 // T10.1-6 (session-directory and area occupancy; `create`'s ordering):
+// - The absent session directory (SPEC 10.1, 13.4, 14.25): a freshly built
+//   valid workspace holds no `.xspec/reviews` — `build` brings none into
+//   existence, asserted first — and `review list` reports no sessions, exit
+//   0, while `status`, `next`, `show`, `export`, `resolve`, and `split`
+//   naming `x` (with an item ID where they take one, any serving: 12.0
+//   judges the session name against the session directory among the
+//   argument checks, an item ID only against its session's content) each
+//   exit 2 as an unknown session — a plain usage error, the error
+//   document's `code` and `path` `null` (12.0, 12.7), never condition 25's
+//   `read-failure`: nonexistence is never a refused read. After each
+//   command `.xspec/reviews` is still absent — none brings it into
+//   existence, `create`'s write alone does (T10.1-1) — inside one
+//   whole-root compare around the sweep (the workspace is fresh, so no
+//   refresh of 13.3 legitimately intervenes; H-6 leaves out the lock path
+//   `resolve` and `split` acquire).
 // - Non-directory occupants are staged at `.xspec/reviews` and at `.xspec`
 //   as a plain file and, separately, as a symbolic link to a real directory
-//   holding product-written content (a valid session `s.json`; a journal,
-//   graph data, and a valid session) — the staging the product must not
-//   list, read, or write through (SPEC 10.1, 13.4). The link's target lives
-//   inside the workspace root, outside the area, so one whole-root snapshot
-//   compare covers the occupant, the link, and its target at once (H-4:
-//   "byte-unchanged", "byte-identical", "nothing written through it").
-//   Symbolic links are never followed by the snapshot (helpers/snapshot.ts),
-//   so a product writing through the link changes the target's entries.
+//   holding product-written content — the valid session `s.json` and,
+//   beside it, a corrupt `c.json`; a journal, graph data, and, under
+//   `reviews/`, the valid sessions `s` and `t` beside a corrupt `c.json` —
+//   the staging the product must not list, read, or write through (SPEC
+//   10.1, 13.4). Each corrupt session is T10.1-4's unparseable state and
+//   the journal holds a garbage line appended to the one entry the
+//   product's journaled `rename` wrote (T6.1-3's malformed journal), each
+//   shape-independent and staged directly (H-4), so a read through the
+//   link would surface as 14.21 at the sessions and 14.13 at the journal —
+//   never reported, nothing being read below the occupant (13.4). The
+//   link's target lives inside the workspace root, outside the area, so
+//   one whole-root snapshot compare covers the occupant, the link, and its
+//   target at once (H-4: "byte-unchanged", "byte-identical", "nothing
+//   written through it"). Symbolic links are never followed by the
+//   snapshot (helpers/snapshot.ts), so a product writing through the link
+//   changes the target's entries.
 // - `create`'s ordering on a stale twin (SPEC 10.7, 13.5: `create` examines
 //   the session directory past the gate and before any write, the refresh
 //   of 13.3 included, and the outcome it meets there ends it, modifying
@@ -166,6 +189,20 @@
 //   run alone (H-6 leaves out `.xspec/lock`, which no snapshot meets while
 //   `.xspec` is a plain file or a link: the walk never follows a link, and
 //   the link's target `elsewhere-area` is compared whole).
+// - On each `.xspec` staging, nothing is read below the occupant (SPEC
+//   13.4): `inventory`'s `journal` member is exactly `{"path":
+//   ".xspec/journal", "occupied": false}` (11.6, 12.7), and the journal is
+//   empty (6.1). Each staging's workspace is a git repository whose commit
+//   `c1`, made first — before its `build` — holds the configuration and
+//   `specs/A.mdx` alone, no journal (its tree checked on the harness as a
+//   staging step), so `impact --base c1` resolves the baseline first, its
+//   journal and the current one both empty (6.3: a given baseline's
+//   resolution reads the current journal before any other cause can fail
+//   it), and the gate then reports exactly the condition-22 finding
+//   concerning `.xspec`, exit 1 (13.3) — never `journal-error`'s exit 2,
+//   which a product reading the journal through the link meets at its
+//   garbage line. The sweep's whole-root compare covers `.git/` with the
+//   rest of the root.
 //
 // Sources staged after a body's first product invocation — the stale arm's
 // and stale twins' edited `specs/A.mdx` (T10.1-1, T10.1-6), the
@@ -173,8 +210,8 @@
 // the baseline (T10.1-4), and T10.1-5's invalidating `specs/B.mdx` — are
 // staged-source records
 // (helpers/staged-mdx.ts, S-9: judged before any product exists); the other
-// stagings here are session files and occupants, which S-9 does not judge,
-// and initial workspace files.
+// stagings here are session files, journal lines, and occupants, which S-9
+// does not judge, and initial workspace files.
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -1962,6 +1999,10 @@ const T10_1_6_A_MODULE = "specs/A.xspec.ts";
 const T10_1_6_SESSION = "s";
 /** The name `create` is refused for on every occupied session directory. */
 const T10_1_6_NEW_SESSION = "n";
+/** The `.xspec` link staging's second valid product-written session. */
+const T10_1_6_SECOND_SESSION = "t";
+/** The corrupt session staged beside the valid ones behind each link. */
+const T10_1_6_CORRUPT_SESSION = "c";
 
 const T10_1_6_CREATE_S: readonly string[] = [
   "review",
@@ -1970,6 +2011,48 @@ const T10_1_6_CREATE_S: readonly string[] = [
   "audit",
   "--name",
   T10_1_6_SESSION,
+];
+
+/** The journal's path (SPEC 6.1), as `inventory` reports it (11.6, 12.7). */
+const T10_1_6_JOURNAL_PATH = `${GRAPH_DATA_AREA_PATH}/journal`;
+
+// T6.1-3's malformed-journal line: deliberately structureless bytes no
+// conforming entry format accepts, appended to a journal the product wrote
+// (shape-independent, H-4) — never a duplicate or recombination of
+// product-written entries.
+const T10_1_6_JOURNAL_GARBAGE_LINE =
+  "?? harness-injected garbage: not a journal entry ??";
+
+/** The session name the absent-directory sweep names: no session holds it. */
+const T10_1_6_UNKNOWN_SESSION = "x";
+
+/**
+ * The item ID `show`, `resolve`, and `split` pass beside `x`: any plausible
+ * ID serves — 12.0 judges a session name against the session directory
+ * among the argument checks, and an item ID only against its session's
+ * content, past the gate (10.7): an unknown session has none.
+ */
+const T10_1_6_ITEM_ID = "item-1";
+
+/**
+ * The `review` subcommands naming a session, each naming `x` (TEST-SPEC
+ * T10.1-6's absent-directory list), with an item ID where it takes one and
+ * `resolve`'s required status (SPEC 10.7).
+ */
+const T10_1_6_NAMING_X: readonly (readonly string[])[] = [
+  ["review", "status", T10_1_6_UNKNOWN_SESSION],
+  ["review", "next", T10_1_6_UNKNOWN_SESSION],
+  ["review", "show", T10_1_6_UNKNOWN_SESSION, T10_1_6_ITEM_ID],
+  ["review", "export", T10_1_6_UNKNOWN_SESSION],
+  [
+    "review",
+    "resolve",
+    T10_1_6_UNKNOWN_SESSION,
+    T10_1_6_ITEM_ID,
+    "--status",
+    "no-change",
+  ],
+  ["review", "split", T10_1_6_UNKNOWN_SESSION, T10_1_6_ITEM_ID],
 ];
 
 /** How a path comes to hold a non-directory (SPEC 13.4). */
@@ -1985,14 +2068,16 @@ type T1016Occupant =
 
 const T10_1_6_PLAIN_FILE: T1016Occupant = { kind: "plain-file" };
 // `.xspec/reviews` → `../elsewhere-reviews`: a real directory inside the
-// workspace root, outside the area, holding the product-written `s.json`.
+// workspace root, outside the area, holding the product-written `s.json`
+// and, beside it, the corrupt `c.json`.
 const T10_1_6_REVIEWS_LINK: T1016Occupant = {
   kind: "symlink",
   targetRel: "elsewhere-reviews",
   linkTarget: "../elsewhere-reviews",
 };
-// `.xspec` → `elsewhere-area`: the relocated area — journal, graph data, and
-// the valid session — beside the link.
+// `.xspec` → `elsewhere-area`: the relocated area — the journal with its
+// garbage line appended, graph data, and the valid sessions `s` and `t`
+// beside the corrupt `c` — beside the link.
 const T10_1_6_AREA_LINK: T1016Occupant = {
   kind: "symlink",
   targetRel: "elsewhere-area",
@@ -2171,17 +2256,118 @@ function assertStaleTwinStillStale(
 }
 
 /**
+ * `.xspec/reviews` holds nothing — no entry at its path — else a diagnosed
+ * failure: absent is every workspace's state before its first `review
+ * create`, whose write alone brings it into existence (SPEC 10.1, 13.4;
+ * T10.1-1).
+ */
+async function assertReviewsDirectoryAbsent(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const held = await workspace.kind(REVIEWS_DIR);
+  if (held !== "absent") {
+    fail(
+      `${context}: ${REVIEWS_DIR} must be absent — every workspace's state ` +
+        `before its first \`review create\`, whose write alone brings it ` +
+        `into existence (SPEC 10.1, 13.4; T10.1-1); found ${held}`,
+    );
+  }
+}
+
+/**
+ * The session directory absent (SPEC 10.1, 13.4, 14.25): on a freshly built
+ * valid workspace — `build` bringing no `.xspec/reviews` into existence,
+ * asserted first — it holds no sessions, and its nonexistence is never a
+ * refused read: `review list` reports no sessions, exit 0, and `status`,
+ * `next`, `show`, `export`, `resolve`, and `split` naming `x`
+ * (`T10_1_6_NAMING_X`) each exit 2 as an unknown session — a plain usage
+ * error, so the error document's `code` and `path` are `null` (12.0, 12.7),
+ * never condition 25's `read-failure`. After each command `.xspec/reviews`
+ * is still absent: none brings it into existence (`create`'s write alone
+ * does, T10.1-1). One whole-root compare around the sweep: the workspace is
+ * fresh, so no refresh of 13.3 legitimately intervenes, and H-6 leaves out
+ * the lock path `resolve` and `split` acquire (13.5) — nothing is written.
+ */
+async function assertSessionDirectoryAbsent(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<void> {
+  await assertReviewsDirectoryAbsent(
+    workspace,
+    `${label} after \`build\` — a freshly built valid workspace holds no ` +
+      `${REVIEWS_DIR}: \`build\` brings none into existence`,
+  );
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const listContext =
+        `${label} \`review list --json\` — the absent session directory ` +
+        `holds no sessions, and its nonexistence is never a refused read: ` +
+        `no sessions, exit 0 (SPEC 10.1, 10.7, 14.25)`;
+      const list = decodeSessionListReport(
+        await runJson(
+          product,
+          workspace,
+          ["review", "list", "--json"],
+          listContext,
+        ),
+        listContext,
+      );
+      assertSameJson(list.sessions, [], `${listContext}: sessions`);
+      await assertReviewsDirectoryAbsent(
+        workspace,
+        `${listContext} — none of the sweep's commands brings it into ` +
+          `existence`,
+      );
+
+      for (const argv of T10_1_6_NAMING_X) {
+        const jsonArgv = [...argv, "--json"];
+        const context =
+          `${label} \`${jsonArgv.join(" ")}\` — ` +
+          `\`${T10_1_6_UNKNOWN_SESSION}\` names no session while the ` +
+          `session directory is absent: exit 2, an unknown session (SPEC ` +
+          `10.1, 12.0)`;
+        const error = expectErrorDocument(
+          await expectExit(product, workspace, jsonArgv, 2, context),
+          context,
+        );
+        assertSameJson(
+          { code: error.code, path: error.path },
+          { code: null, path: null },
+          `${context} — a plain usage error's document carries code and ` +
+            `path null (SPEC 12.7), never condition 25's "read-failure": ` +
+            `the session directory's nonexistence is never a refused read ` +
+            `(SPEC 10.1, 14.25)`,
+        );
+        await assertReviewsDirectoryAbsent(
+          workspace,
+          `${context} — none of the sweep's commands brings it into ` +
+            `existence`,
+        );
+      }
+    },
+    `${label}: nothing is written — no ${REVIEWS_DIR} brought into ` +
+      `existence, nothing else changed (SPEC 10.1, 13.4, 12.0)`,
+  );
+}
+
+/**
  * The session directory holds sessions only while a directory occupies its
  * path (SPEC 10.1, 13.4): on a freshly built valid workspace whose
- * `.xspec/reviews` holds a non-directory, no command lists through the
- * occupant — `review list` reports no sessions, `review status s` is an
- * unknown session, `inventory` reports `sessions` [] — `check` is clean and
- * the gate carries nothing (14.22 is `create`'s finding there, never
- * `check`'s or the gate's), `ids` answers, and `create` refuses its own
- * obstructed write path with one condition-22 finding concerning
- * `.xspec/reviews`. One whole-root compare around the sweep (the workspace
- * is fresh, so no 13.3 refresh legitimately intervenes): nothing written —
- * the occupant byte-unchanged, the link and its target byte-identical.
+ * `.xspec/reviews` holds a non-directory — a plain file, or a symbolic link
+ * to a directory holding the valid `s.json` beside the corrupt `c.json`,
+ * which a read of sessions through the link surfaces as 14.21 — no command
+ * lists through the occupant: `review list` reports no sessions, `review
+ * status s` is an unknown session, `inventory` reports `sessions` [] —
+ * `check` is clean and the gate carries nothing (14.22 is `create`'s
+ * finding there, never `check`'s or the gate's), `ids` answers, and
+ * `create` refuses its own obstructed write path with one condition-22
+ * finding concerning `.xspec/reviews`. One whole-root compare around the
+ * sweep (the workspace is fresh, so no 13.3 refresh legitimately
+ * intervenes): nothing written — the occupant byte-unchanged, the link and
+ * its target byte-identical.
  */
 async function assertSessionDirectoryOccupied(
   product: ProductBinding,
@@ -2427,21 +2613,28 @@ async function assertCreateRefusedStaleStaysStale(
 
 /**
  * The graph-data area's own path occupied by a non-directory (SPEC 13.4,
- * 14.22, 14.23): `inventory` meets condition 23 in its record-supplied
- * datum — `recorded` explicitly unavailable, `journal.occupied` false and
- * `sessions` [] (nothing is read below the occupant), that one finding
- * concerning `.xspec`, exit 1 (11.6); `build`, `ids`, and `review list`
- * each refuse on `build`'s obstructed graph-data write path — exactly one
+ * 14.22, 14.23), nothing being read below it — the link staging's journal
+ * garbage line (14.13) and corrupt session (14.21) never surfacing:
+ * `inventory` meets condition 23 in its record-supplied datum — `recorded`
+ * explicitly unavailable, `journal` exactly `{"path": ".xspec/journal",
+ * "occupied": false}` and `sessions` [], that one finding concerning
+ * `.xspec`, exit 1 (11.6, 12.7); `build`, `ids`, and `review list` each
+ * refuse on `build`'s obstructed graph-data write path — exactly one
  * condition-22 finding concerning `.xspec`, the gate's report for the reads
  * (13.3), exit 1; `check` reports that finding beside condition 10 in the
  * unreadable-record unit form and nothing else (14.10, 14.23: reported
- * whatever the workspace's validity); and `view` of a clean file answers
- * finding-free (11.2, T11.2-6). One whole-root compare around the sweep:
+ * whatever the workspace's validity); `impact --base c1` resolves the
+ * baseline first — `c1`'s tree holds no journal and the current journal
+ * below the occupant is empty (6.1, 6.3, 13.4) — and the gate then reports
+ * exactly that condition-22 finding, exit 1, never `journal-error`'s exit 2
+ * (6.3, 12.0, 13.3); and `view` of a clean file answers finding-free (11.2,
+ * T11.2-6). One whole-root compare around the sweep, `.git/` included:
  * nothing written, the link's target byte-identical.
  */
 async function assertAreaOccupied(
   product: ProductBinding,
   workspace: TestWorkspace,
+  c1: string,
   label: string,
 ): Promise<void> {
   await assertLeavesUnchanged(
@@ -2476,10 +2669,13 @@ async function assertAreaOccupied(
           `14.23, 11.6)`,
       );
       assertSameJson(
-        inventory.journal.occupied,
-        false,
-        `${inventoryContext} — the journal is unoccupied to the inventory ` +
-          `below an area path holding no directory (SPEC 11.6, 13.4)`,
+        inventory.journal,
+        { path: T10_1_6_JOURNAL_PATH, occupied: false },
+        `${inventoryContext} — the journal member is exactly ` +
+          `{"path": "${T10_1_6_JOURNAL_PATH}", "occupied": false}: the ` +
+          `journal path, unoccupied to the inventory below an area path ` +
+          `holding no directory, its content never read (SPEC 11.6, 12.7, ` +
+          `13.4)`,
       );
       assertSameJson(
         inventory.sessions,
@@ -2549,6 +2745,28 @@ async function assertAreaOccupied(
           );
         }
       }
+
+      const impactContext =
+        `${label} \`impact --base c1 --json\` — the baseline resolves ` +
+        `first, its journal and the current one both empty: c1's tree ` +
+        `holds none, and below the area's occupant nothing is read, the ` +
+        `journal there empty (SPEC 6.3, 6.1, 13.4) — so the gate then ` +
+        `reports exactly that condition-22 finding concerning .xspec, exit ` +
+        `1, nothing written (SPEC 13.3, 14.22), never journal-error's exit ` +
+        `2 (a given baseline's resolution reads the current journal before ` +
+        `any other cause can fail it, 6.3)`;
+      assertExactlyOneFinding(
+        await runFindingsReport(
+          product,
+          workspace,
+          ["impact", "--base", c1, "--json"],
+          1,
+          impactContext,
+        ),
+        "14.22",
+        GRAPH_DATA_AREA_PATH,
+        impactContext,
+      );
 
       const viewContext =
         `${label} \`view specs/A.mdx --json\` — \`view\` answers from the ` +
@@ -2626,18 +2844,104 @@ async function readT1016Items(
   };
 }
 
+/** What each `.xspec` staging hands its arms. */
+export interface T1016AreaStaging {
+  /** The audit session `s`'s items `resolve` and `split` name. */
+  readonly items: T1016Items;
+  /**
+   * The commit `c1`, made before the staging — before the workspace's
+   * first `build` — whose tree holds the configuration and `specs/A.mdx`
+   * alone, no journal (`impact --base c1`, SPEC 6.3).
+   */
+  readonly c1: string;
+}
+
+/**
+ * Make the fresh `CORE_FILES` workspace a git repository and commit `c1`
+ * before any product runs, so its tree holds the configuration and sources
+ * alone — no journal, no derived file. The tree is checked on the harness
+ * before any product runs: anything else in it is machinery misuse, thrown
+ * as a plain `Error` — never a diagnosed failure (H-11).
+ */
+async function commitT1016C1(workspace: TestWorkspace): Promise<string> {
+  await workspace.gitInit();
+  const c1 = await workspace.gitCommitAll(
+    "c1: the configuration and sources alone, no journal",
+  );
+  const { stdout } = await workspace.git(["ls-tree", "-r", "--name-only", c1]);
+  const tree = stdout.split("\n").filter((line) => line !== "");
+  const expected = Object.keys(CORE_FILES).sort();
+  if (JSON.stringify(tree) !== JSON.stringify(expected)) {
+    throw new Error(
+      `T10.1-6 staging: c1's tree must hold the configuration and sources ` +
+        `alone, no journal — ${JSON.stringify(expected)}; found ` +
+        `${JSON.stringify(tree)} (a harness staging error, not a product ` +
+        `observation)`,
+    );
+  }
+  return c1;
+}
+
+/**
+ * Append T6.1-3's garbage line, as its own line, to the journal the
+ * product's journaled operation wrote — read as a plain file first, its
+ * final line terminated first if the product left the terminator off, so
+ * the tampering is a whole-line append under either line convention
+ * (shape-independent, H-4). A journal that is not a plain file holding at
+ * least one entry fails diagnosed: the operation brings the journal into
+ * existence with its entry (SPEC 6.1, 13.4).
+ */
+async function appendJournalGarbageLine(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const held = await workspace.kind(T10_1_6_JOURNAL_PATH);
+  if (held !== "file") {
+    fail(
+      `${context}: the journaled operation brings the journal into ` +
+        `existence as a plain file at ${T10_1_6_JOURNAL_PATH} (SPEC 6.1, ` +
+        `13.4); found ${held}`,
+    );
+  }
+  const written = Buffer.from(await workspace.readBytes(T10_1_6_JOURNAL_PATH));
+  if (written.length === 0) {
+    fail(
+      `${context}: the journaled operation appends its entry, one line, to ` +
+        `the journal (SPEC 6.1); ${T10_1_6_JOURNAL_PATH} is empty`,
+    );
+  }
+  const needsTerminator = written[written.length - 1] !== 0x0a;
+  await workspace.file(
+    T10_1_6_JOURNAL_PATH,
+    Buffer.concat([
+      written,
+      Buffer.from(
+        `${needsTerminator ? "\n" : ""}${T10_1_6_JOURNAL_GARBAGE_LINE}\n`,
+        "utf8",
+      ),
+    ]),
+  );
+}
+
 /**
  * T10.1-6's two stagings of the graph-data area's own path, each on a fresh
- * `CORE_FILES` workspace, built first — the derived files exist and match,
- * so `check` meets no per-file staleness beside the two findings the
- * staging pins — and holding the audit session `s`, created while the area
- * was a directory, its items read before the area is occupied:
+ * `CORE_FILES` workspace made a git repository holding `c1` first
+ * (`commitT1016C1`), then built — the derived files exist and match, so
+ * `check` meets no per-file staleness beside the two findings the staging
+ * pins — and holding the audit session `s`, created while the area was a
+ * directory, its items read before the area is occupied:
  * - `.xspec` a plain file, replacing the area's directory and all it held;
- * - `.xspec` a symbolic link to a directory holding a journal and valid
- *   sessions: a journaled rename (`a.k` to `a.k2`) brings the journal into
- *   existence (SPEC 6.1) and regenerates, `create` writes `s`, and the area
- *   is then relocated beside the link, inside the root (`elsewhere-area`).
- * `arms` runs on each, given the session's items and the staging's label.
+ * - `.xspec` a symbolic link to a directory holding a journal the product
+ *   wrote with a garbage line appended and, under `reviews/`, valid
+ *   sessions beside a corrupt one: a journaled rename (`a.k` to `a.k2`)
+ *   brings the journal into existence (SPEC 6.1) and regenerates, `create`
+ *   writes `s` and `t`, the items are read, the garbage line is appended
+ *   (`appendJournalGarbageLine`, T6.1-3's malformed journal) and a corrupt
+ *   `c.json` of garbage bytes staged beside the sessions (T10.1-4's
+ *   unparseable state), and the area is then relocated beside the link,
+ *   inside the root (`elsewhere-area`) — so a read through the link would
+ *   meet 14.13 and, at `check`, 14.21.
+ * `arms` runs on each, given the staging's items and `c1` and its label.
  * Exported for scratch probes that run one arm alone (the CONF-CORE
  * reference serves the mutating commands but not `inventory` or `view`).
  */
@@ -2645,12 +2949,13 @@ export async function withT1016AreaStagings(
   product: ProductBinding,
   arms: (
     workspace: TestWorkspace,
-    items: T1016Items,
+    staging: T1016AreaStaging,
     label: string,
   ) => Promise<void>,
 ): Promise<void> {
   await withWorkspace(CORE_FILES, async (workspace) => {
     const label = "T10.1-6 [.xspec: plain file]";
+    const c1 = await commitT1016C1(workspace);
     await buildOk(product, workspace, `${label} \`build\``);
     await expectExit(
       product,
@@ -2666,11 +2971,12 @@ export async function withT1016AreaStagings(
       GRAPH_DATA_AREA_PATH,
       T10_1_6_PLAIN_FILE,
     );
-    await arms(workspace, items, label);
+    await arms(workspace, { items, c1 }, label);
   });
   await withWorkspace(CORE_FILES, async (workspace) => {
     const label =
-      "T10.1-6 [.xspec: symbolic link to a directory holding a journal and s.json]";
+      "T10.1-6 [.xspec: symbolic link to a directory holding a journal with a garbage line appended and, under reviews/, s.json and t.json beside a corrupt c.json]";
+    const c1 = await commitT1016C1(workspace);
     await buildOk(product, workspace, `${label} \`build\``);
     await expectExit(
       product,
@@ -2685,16 +2991,42 @@ export async function withT1016AreaStagings(
       workspace,
       T10_1_6_CREATE_S,
       0,
-      `${label} \`review create --strategy audit --name s\` — the valid ` +
+      `${label} \`review create --strategy audit --name s\` — a valid ` +
         `session the link's target then holds (SPEC 10.1)`,
     );
+    await expectExit(
+      product,
+      workspace,
+      [
+        "review",
+        "create",
+        "--strategy",
+        "audit",
+        "--name",
+        T10_1_6_SECOND_SESSION,
+      ],
+      0,
+      `${label} \`review create --strategy audit --name ` +
+        `${T10_1_6_SECOND_SESSION}\` — the other valid session the link's ` +
+        `target then holds (SPEC 10.1)`,
+    );
     const items = await readT1016Items(product, workspace, "a.k2", label);
+    await appendJournalGarbageLine(
+      workspace,
+      `${label} staging the journal's garbage line`,
+    );
+    // Shape-independent corruption (module header): unparseable bytes at a
+    // session-named path beside the valid sessions (SPEC 10.1, 14.21).
+    await workspace.file(
+      sessionRel(T10_1_6_CORRUPT_SESSION),
+      NON_SESSION_GARBAGE,
+    );
     await stageNonDirectoryOccupant(
       workspace,
       GRAPH_DATA_AREA_PATH,
       T10_1_6_AREA_LINK,
     );
-    await arms(workspace, items, label);
+    await arms(workspace, { items, c1 }, label);
   });
 }
 
@@ -2818,8 +3150,18 @@ export async function assertMutatingCommandsFailAtAcquisition(
 const T10_1_6 = defineProductTest({
   id: "T10.1-6",
   title:
-    "session-directory and area occupancy; `create`'s ordering: `.xspec/reviews` occupied by a plain file, or by a symbolic link to a directory holding a valid session, holds no sessions (`list` none, `status s` exit 2, `check` clean, `inventory` sessions [], `ids` answers) and `create` is refused with one condition-22 finding concerning `.xspec/reviews`, nothing written; on stale twins the refused `create` — condition 22, the code-less existing-name refusal (in T10.7-14's finding form: `code` and `path` `null`, `locations` `[]`), or condition 21 in its place — is met at the examination of the session directory past the gate and before any write, the refresh included, and modifies nothing: stale graph data stays stale (graph data byte-identical around it, `check` then reporting the edited source's per-file staleness beside the graph-data unit form; no session written or changed); `.xspec` occupied by a plain file, or by a symbolic link to a directory holding a journal and valid sessions: `inventory` recorded unavailable with the one condition-23 finding, `build`/`ids`/`review list` one condition-22 finding concerning `.xspec`, `check` that finding beside the unreadable-record unit form, `view` finding-free, and every mutating command — `rename`, `move`, `review create`, `resolve`, `split` — failing at acquisition first: exit 2, the error document's `code` `write-failure`, `path` `.xspec`, nothing written, the plain file byte-unchanged, the link and its target byte-identical (10.1, 10.7, 11.6, 12.7, 13.3–13.5, 14, 14.10, 14.21–14.24)",
+    "session-directory and area occupancy; `create`'s ordering: `.xspec/reviews` absent on a freshly built valid workspace (`build` bringing none into existence) holds no sessions and its nonexistence is never a refused read — `list` none, exit 0, and `status`, `next`, `show`, `export`, `resolve`, and `split` naming `x` each exit 2 as an unknown session (`code` and `path` `null`, never `read-failure`), none bringing `.xspec/reviews` into existence; `.xspec/reviews` occupied by a plain file, or by a symbolic link to a directory holding a valid session `s.json` beside a corrupt `c.json` of garbage bytes, holds no sessions (`list` none, `status s` exit 2, `check` clean, `inventory` sessions [], `ids` answers) and `create` is refused with one condition-22 finding concerning `.xspec/reviews`, nothing written; on stale twins the refused `create` — condition 22, the code-less existing-name refusal (in T10.7-14's finding form: `code` and `path` `null`, `locations` `[]`), or condition 21 in its place — is met at the examination of the session directory past the gate and before any write, the refresh included, and modifies nothing: stale graph data stays stale (graph data byte-identical around it, `check` then reporting the edited source's per-file staleness beside the graph-data unit form; no session written or changed); `.xspec` occupied by a plain file, or by a symbolic link to a directory holding a journal the product wrote with a garbage line appended and, under `reviews/`, valid sessions beside a corrupt one, each workspace a git repository whose commit `c1` holds the configuration and sources alone: nothing read below the occupant — `inventory` `journal` exactly `.xspec/journal` unoccupied, `sessions` [], and recorded unavailable with the one condition-23 finding, `build`/`ids`/`review list` one condition-22 finding concerning `.xspec`, `check` that finding beside the unreadable-record unit form, `impact --base c1` exit 1 with exactly that condition-22 finding, the baseline resolving first with both journals empty, never `journal-error`'s exit 2, `view` finding-free — and every mutating command — `rename`, `move`, `review create`, `resolve`, `split` — failing at acquisition first: exit 2, the error document's `code` `write-failure`, `path` `.xspec`, nothing written, the plain file byte-unchanged, the link and its target byte-identical (6.1, 6.3, 10.1, 10.7, 11.6, 12.7, 13.3–13.5, 14, 14.10, 14.13, 14.21–14.25)",
   run: async (product) => {
+    // --- The session directory absent on a freshly built valid workspace:
+    // no session has been created, so `build` leaves `.xspec/reviews`
+    // absent (SPEC 10.1); `x` names no session, its nonexistence never a
+    // refused read (14.25).
+    await withWorkspace(CORE_FILES, async (workspace) => {
+      const label = "T10.1-6 [.xspec/reviews: absent]";
+      await buildOk(product, workspace, `${label} \`build\``);
+      await assertSessionDirectoryAbsent(product, workspace, label);
+    });
+
     // --- Session-directory occupancy on a freshly built valid workspace --
     // Plain file: no session has been created, so `.xspec/reviews` is
     // absent after `build` (SPEC 10.1) and the plain file takes its path.
@@ -2833,12 +3175,15 @@ const T10_1_6 = defineProductTest({
       );
       await assertSessionDirectoryOccupied(product, workspace, label);
     });
-    // Symbolic link: the product writes `s` first; its session directory
-    // is then relocated outside the area and linked from its path, so the
-    // link's target holds the valid product-written `s.json`.
+    // Symbolic link: the product writes `s` first and a corrupt `c.json`
+    // of garbage bytes is staged beside it (T10.1-4's unparseable state,
+    // shape-independent, staged directly); the session directory is then
+    // relocated outside the area and linked from its path, so the link's
+    // target holds the valid product-written `s.json` beside `c.json` — a
+    // read of sessions through the link would surface `c` as 14.21.
     await withWorkspace(CORE_FILES, async (workspace) => {
       const label =
-        "T10.1-6 [.xspec/reviews: symbolic link to a directory holding s.json]";
+        "T10.1-6 [.xspec/reviews: symbolic link to a directory holding s.json beside a corrupt c.json]";
       await buildOk(product, workspace, `${label} \`build\``);
       await expectExit(
         product,
@@ -2847,6 +3192,10 @@ const T10_1_6 = defineProductTest({
         0,
         `${label} \`review create --strategy audit --name s\` — the valid ` +
           `session the link's target then holds (SPEC 10.1)`,
+      );
+      await workspace.file(
+        sessionRel(T10_1_6_CORRUPT_SESSION),
+        NON_SESSION_GARBAGE,
       );
       await stageNonDirectoryOccupant(
         workspace,
@@ -2919,17 +3268,19 @@ const T10_1_6 = defineProductTest({
       );
     });
 
-    // --- The graph-data area's own path (SPEC 13.4, 13.5, 14.22–14.24) ---
-    // Each staging (`withT1016AreaStagings`: a plain file, and a symbolic
-    // link to the relocated area holding a journal and `s`): the reads'
-    // and `build`'s sweep, then every mutating command refused at
-    // acquisition first.
-    await withT1016AreaStagings(product, async (workspace, items, label) => {
-      await assertAreaOccupied(product, workspace, label);
+    // --- The graph-data area's own path (SPEC 6.3, 13.4, 13.5,
+    // 14.22–14.24) --- Each staging (`withT1016AreaStagings`, each
+    // workspace a git repository holding `c1`: a plain file, and a
+    // symbolic link to the relocated area holding the journal with its
+    // garbage line and the sessions `s` and `t` beside the corrupt `c`):
+    // the reads', `build`'s, and `impact --base c1`'s sweep, then every
+    // mutating command refused at acquisition first.
+    await withT1016AreaStagings(product, async (workspace, staging, label) => {
+      await assertAreaOccupied(product, workspace, staging.c1, label);
       await assertMutatingCommandsFailAtAcquisition(
         product,
         workspace,
-        items,
+        staging.items,
         label,
       );
     });
