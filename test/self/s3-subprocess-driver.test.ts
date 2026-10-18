@@ -2062,16 +2062,21 @@ test.runIf(onPosix)(
       }),
       killGroup: async () => undefined,
     };
-    const refusals: readonly (readonly [Promise<RunResult>, RegExp])[] = [
-      [run(counting, {}, launcher), /takes no launcher/],
-      [run(counting, { command: "node" }), /takes an absolute command/],
+    // Each refused run starts only once the one before it has been judged,
+    // so its rejection is observed as it is created: started together, a
+    // later run could reject — after the I/O each makes before its
+    // pre-flight — while an earlier one is still awaited, an unhandled
+    // rejection Vitest reports as an error of the whole run.
+    const refusals: readonly (readonly [() => Promise<RunResult>, RegExp])[] = [
+      [() => run(counting, {}, launcher), /takes no launcher/],
+      [() => run(counting, { command: "node" }), /takes an absolute command/],
       [
-        run(counting, { command: workspace.path("standin.mjs") }),
+        () => run(counting, { command: workspace.path("standin.mjs") }),
         /takes an executable regular file/,
       ],
     ];
-    for (const [pending, pattern] of refusals) {
-      const error = await rejectionOf(pending);
+    for (const [start, pattern] of refusals) {
+      const error = await rejectionOf(start());
       expect(error).toBeInstanceOf(Error);
       expect(error).not.toBeInstanceOf(HarnessAssertionError);
       expect((error as Error).message).toMatch(pattern);
