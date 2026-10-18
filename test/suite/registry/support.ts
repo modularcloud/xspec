@@ -850,6 +850,158 @@ export function assertFindingConcernsPath(
   );
 }
 
+/** {@link expectReviewRefusal}'s options. */
+export interface ReviewRefusalOptions {
+  /**
+   * Also compare the whole workspace root around the run (H-4; H-6's
+   * lock-path exclusion applied by the compare): a refusal ends its
+   * subcommand modifying nothing (SPEC 10.7, 13.5) — for the sites whose
+   * TEST-SPEC entries state "nothing modified" or "nothing created".
+   */
+  readonly nothingModified?: boolean;
+}
+
+/**
+ * The session file a refusal names, read as a plain file (SPEC 10.1: a
+ * session is stored at `.xspec/reviews/<name>.json` as a plain file, written
+ * by the product's `create`), its occupant diagnosed when it is anything
+ * else or cannot be read (H-8).
+ */
+async function refusedSessionFileBytes(
+  workspace: TestWorkspace,
+  sessionRel: string,
+  context: string,
+): Promise<Uint8Array> {
+  const kind = await workspace.kind(sessionRel);
+  if (kind !== "file") {
+    fail(
+      `${context}: the session the refusal names is a plain file at ` +
+        `${sessionRel} (SPEC 10.1); found ${kind}`,
+    );
+  }
+  try {
+    return await workspace.readBytes(sessionRel);
+  } catch (error) {
+    return fail(
+      `${context}: the session file ${sessionRel} could not be read: ` +
+        `${(error as Error).message}`,
+    );
+  }
+}
+
+/**
+ * A review-operation refusal in TEST-SPEC T10.7-14's finding form — the one
+ * check every refusal site shares (`create` naming an existing session,
+ * exactly or ignoring ASCII case alone; `resolve` of a blocked item; `split`
+ * of an item of another kind or of a `subtree-coherence` item whose scope
+ * root has no children; SPEC 10.7). The command — `argv`, `--json` appended
+ * here — exits 1 (a refused operation, SPEC 12.0) with standard output
+ * exactly `{"findings": [f]}`, a refused operation's findings-only form
+ * (12.7), decoded form-exact (H-3: the one member; `f` exactly the five
+ * members `{"code", "message", "locations", "path", "identities"}`); `f`
+ * carries no stable code — `code` `null` (SPEC 14: review-operation
+ * refusals carry none) — and neither location nor concerned path —
+ * `locations` `[]`, `path` `null` (SPEC 14, 12.7), so a product carrying
+ * the session file as the refusal's concerned path, or locating the
+ * refusal, fails; its `identities`, an array of strings (the decode's), are
+ * informational (12.7) and not asserted. The session file the refusal names
+ * (`sessionRel`, `.xspec/reviews/<name>.json` — for a `create` matching an
+ * existing session ignoring ASCII case, the existing session's file) stays
+ * byte-identical around the run. `options.nothingModified` adds the
+ * whole-root compare. Returns the decoded finding.
+ */
+export async function expectReviewRefusal(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  sessionRel: string,
+  context: string,
+  options: ReviewRefusalOptions = {},
+): Promise<Finding> {
+  if (argv.includes("--json")) {
+    throw new Error(
+      `expectReviewRefusal: pass the command without --json, which the ` +
+        `check appends (${context}; a harness usage error)`,
+    );
+  }
+  const jsonArgv = [...argv, "--json"];
+  const label = `${context} \`${jsonArgv.join(" ")}\``;
+  const refuse = async (): Promise<Finding> => {
+    const before = await refusedSessionFileBytes(
+      workspace,
+      sessionRel,
+      `${label} (before the run)`,
+    );
+    const findings = await runFindingsReport(
+      product,
+      workspace,
+      jsonArgv,
+      1,
+      `${label} — a refused review operation exits 1 with its findings-only ` +
+        `report as the entire stdout (SPEC 10.7, 12.0, 12.7; T10.7-14)`,
+    );
+    if (findings.length !== 1) {
+      fail(
+        `${label}: a refusal is one finding — standard output exactly ` +
+          `{"findings": [f]} (SPEC 10.7, 12.7; T10.7-14); got ` +
+          `${String(findings.length)}: ` +
+          JSON.stringify(
+            findings.map((each) => ({
+              code: each.code,
+              message: each.message,
+              locations: each.locations,
+              path: each.path,
+              identities: each.identities,
+            })),
+          ),
+      );
+    }
+    const finding = findings[0]!;
+    if (finding.code !== null) {
+      fail(
+        `${label}: a review-operation refusal carries no stable code — ` +
+          `\`code\` null (SPEC 14, 12.7; T10.7-14); got ` +
+          `${JSON.stringify(finding.code)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+    if (finding.locations.length !== 0) {
+      fail(
+        `${label}: a review-operation refusal carries no location — ` +
+          `\`locations\` [] (SPEC 14, 12.7; T10.7-14); got ` +
+          `${JSON.stringify(finding.locations)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+    if (finding.path !== null) {
+      fail(
+        `${label}: a review-operation refusal carries no concerned path — ` +
+          `\`path\` null, never the session file (SPEC 14, 12.7; ` +
+          `T10.7-14); got ${renderPathValue(finding.path)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+    assertBytesEqual(
+      await refusedSessionFileBytes(
+        workspace,
+        sessionRel,
+        `${label} (after the run)`,
+      ),
+      before,
+      `${label}: the session file ${sessionRel} stays byte-identical — a ` +
+        `refusal modifies nothing (SPEC 10.7, 13.5; T10.7-14)`,
+    );
+    return finding;
+  };
+  if (options.nothingModified !== true) return await refuse();
+  return await assertLeavesUnchanged(
+    workspace.root,
+    refuse,
+    `${label} — the refusal modifies nothing anywhere under the root (SPEC ` +
+      `10.7, 13.5)`,
+  );
+}
+
 /**
  * Assert a condition-10 (stale generated output) finding instructs
  * rebuilding: its message names `build` (`/build/i`; `rebuild` qualifies,

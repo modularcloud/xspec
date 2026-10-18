@@ -39,9 +39,13 @@
 // - `status` totals are compared as `totals[status] ?? 0` per defined status:
 //   whether zero-count statuses appear as explicit entries is concrete-shape
 //   territory (H-3).
-// - A refused `resolve` on a blocked item (T10.3-2) asserts exit 1 (a refused
-//   review operation is a findings-class outcome, SPEC 12.0/10.7) and a
-//   byte-identical workspace: a refusal resolves nothing and sessions change
+// - A refused `resolve` on a blocked item (T10.3-2) goes through T10.7-14's
+//   shared check (support.ts `expectReviewRefusal`): run with `--json`, exit
+//   1 (a refused review operation is a findings-class outcome, SPEC
+//   12.0/10.7) with standard output exactly one code-less finding — `code`
+//   and `path` `null`, `locations` `[]` (SPEC 14, 12.7), `identities`
+//   informational and unasserted — and the session file and the whole
+//   workspace byte-identical: a refusal resolves nothing and sessions change
 //   only through effective mutations (SPEC 10.1, 10.4, 13.4, 13.5) — the
 //   compares run against freshly built graph data, so no 13.3 refresh
 //   legitimately intervenes.
@@ -87,6 +91,7 @@ import {
   buildOk,
   expectErrorDocument,
   expectExit,
+  expectReviewRefusal,
   runJson,
 } from "./support.js";
 
@@ -1979,7 +1984,7 @@ const T10_3_2_KID_V2 = stagedMdx(
 const T10_3_2 = defineProductTest({
   id: "T10.3-2",
   title:
-    "re-blocking: a resolved blocker that becomes `invalidated` re-blocks its dependents — the dependent's blocked state flips back to blocked in `status`, `resolve` on the dependent is refused (exit 1, nothing modified) while the blocker is invalidated, and succeeds again once the blocker is re-resolved (SPEC 10.3, 10.4, 10.7, 12.0)",
+    "re-blocking: a resolved blocker that becomes `invalidated` re-blocks its dependents — the dependent's blocked state flips back to blocked in `status`, `resolve` on the dependent is refused while the blocker is invalidated — exit 1 with exactly one code-less finding in T10.7-14's form, `code` and `path` `null`, `locations` `[]`, nothing modified — and succeeds again once the blocker is re-resolved (SPEC 10.3, 10.4, 10.7, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -2066,23 +2071,19 @@ const T10_3_2 = defineProductTest({
             "status, so the blocker re-blocks its dependent (SPEC 10.3, 10.4)",
         );
 
-        // Resolving the re-blocked dependent is refused: exit 1 (a refused
-        // review operation, SPEC 10.7, 12.0), nothing modified.
-        await assertLeavesUnchanged(
-          workspace.root,
-          async () => {
-            await expectExit(
-              product,
-              workspace,
-              ["review", "resolve", "s", aId, "--status", "no-change"],
-              1,
-              "T10.3-2 `review resolve s <a item> --status no-change` while " +
-                "its blocker is invalidated — resolving a blocked item is " +
-                "refused (SPEC 10.3, 10.7, 12.0)",
-            );
-          },
-          "T10.3-2 the refused resolve modifies nothing — the session and " +
-            "workspace stay byte-identical (SPEC 10.1, 13.4)",
+        // Resolving the re-blocked dependent is refused in T10.7-14's
+        // finding form — exit 1, one code-less finding, `code` and `path`
+        // `null`, `locations` `[]` (a refused review operation, SPEC 10.7,
+        // 12.0, 12.7, 14) — nothing modified: the session file and the
+        // whole workspace stay byte-identical (SPEC 10.1, 13.4, 13.5).
+        await expectReviewRefusal(
+          product,
+          workspace,
+          ["review", "resolve", "s", aId, "--status", "no-change"],
+          ".xspec/reviews/s.json",
+          "T10.3-2 [a's item while its blocker is invalidated: resolving a " +
+            "blocked item is refused, SPEC 10.3, 10.7, 12.0]",
+          { nothingModified: true },
         );
 
         // Re-resolve the blocker (`resolve` applies to any unblocked item

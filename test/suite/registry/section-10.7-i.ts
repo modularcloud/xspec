@@ -77,15 +77,18 @@
 //   directly; an invariant violation (an unknown item status) through the
 //   H-3 adapter over the product-written file. `create` naming the corrupt
 //   session then reports condition 21 in the code-less refusal's place —
-//   exactly one finding, exit 1, nothing modified (SPEC 10.1, 10.7, 14.21).
-//   Identity, count, and empty locations are asserted for both refusals
-//   (T10.1-6's reading). The condition-21 finding's concerned path is
+//   exactly one finding, exit 1, nothing modified (SPEC 10.1, 10.7, 14.21):
+//   identity, count, and empty locations, and its concerned path, which is
 //   pinned — a session condition carries the file it concerns (SPEC 14,
 //   12.7), the session's own file `.xspec/reviews/s.json` (10.1), for a
-//   symbolic link there the link's own path, never its target's (13.4) —
-//   and is asserted too; the code-less existing-name refusal's is pinned
-//   nowhere — 14 assigns that refusal no code and no concern datum (SPEC
-//   10.7) — so it is left unasserted (H-4). T10.7-5's corrupt listing asks
+//   symbolic link there the link's own path, never its target's (13.4).
+//   The code-less existing-name refusal itself is asserted in T10.7-14's
+//   finding form through the shared check (support.ts
+//   `expectReviewRefusal`): exactly one finding, `code` `null`, `locations`
+//   `[]`, and `path` `null` — 14 gives a review-operation refusal neither
+//   location nor concerned path (SPEC 14, 12.7) — its `identities`
+//   informational and unasserted, the session file byte-identical and the
+//   whole root unchanged around the run. T10.7-5's corrupt listing asks
 //   its condition-21 finding the same way — identity (its exact stable code
 //   `corrupt-session`, TEST-SPEC line 9), count, empty locations, and
 //   concerned path, the session's own file `.xspec/reviews/c.json` — with
@@ -217,6 +220,7 @@ import {
   buildOk,
   expectErrorDocument,
   expectExit,
+  expectReviewRefusal,
   runCli,
   runFindingsReport,
   runJson,
@@ -828,47 +832,37 @@ async function requireStagedKind(
   }
 }
 
+/** The command line every refusal arm of T10.7-1 runs (`--json` added). */
+const W1_CREATE_S: readonly string[] = [
+  "review",
+  "create",
+  "--strategy",
+  "audit",
+  "--name",
+  W1_SESSION,
+];
+
 /**
- * `review create --strategy audit --name s --json` refused (SPEC 10.7):
- * exit 1 with the findings-only report holding exactly one finding of the
- * given counting identity — `(code-less)` for the existing-name refusal,
- * which 14 assigns no stable code, or `14.21` where the existing session is
- * corrupt and its corruption stands in the refusal's place, no code-less
- * refusal beside it — with no in-source location (locations [], SPEC 12.7),
- * and nothing modified anywhere under the root (the whole-root compare; the
- * snapshot never follows links, so a link occupant and its target are both
- * covered). The condition-21 finding carries the session file it concerns
- * as its 12.7 `path` — `.xspec/reviews/s.json` (SPEC 14, 12.7, 10.1), in the
+ * `review create --strategy audit --name s --json` naming an existing
+ * corrupt session (SPEC 10.7, 14.21): the corruption is reported in the
+ * refusal's place — exit 1 with the findings-only report holding exactly
+ * one finding, condition 21 `corrupt-session`, no code-less refusal beside
+ * it — with no in-source location (locations [], SPEC 12.7), and nothing
+ * modified anywhere under the root (the whole-root compare; the snapshot
+ * never follows links, so a link occupant and its target are both
+ * covered). The finding carries the session file it concerns as its 12.7
+ * `path` — `.xspec/reviews/s.json` (SPEC 14, 12.7, 10.1), in the
  * symbolic-link state the link's own path, never its target `real.json`
- * (13.4) — and that is asserted; the code-less refusal's concerned path is
- * pinned nowhere — 14 assigns that refusal no code and no concern datum
- * (SPEC 10.7; module header) — so it is left unasserted (H-4).
+ * (13.4). The existing-name refusal itself, on a valid session, is the
+ * shared T10.7-14 check's (support.ts `expectReviewRefusal`).
  */
-async function expectCreateRefused(
+async function expectCreateCorruptionReported(
   product: ProductBinding,
   workspace: TestWorkspace,
-  identity: "(code-less)" | "14.21",
   context: string,
-): Promise<Finding> {
-  const argv = [
-    "review",
-    "create",
-    "--strategy",
-    "audit",
-    "--name",
-    W1_SESSION,
-    "--json",
-  ];
+): Promise<void> {
+  const argv = [...W1_CREATE_S, "--json"];
   const label = `${context} \`${argv.join(" ")}\``;
-  const why =
-    identity === "(code-less)"
-      ? "the code-less existing-name refusal of 10.7 — one finding, " +
-        "carrying no stable code (SPEC 14)"
-      : "the existing session is corrupt, so its corruption is reported " +
-        "in the refusal's place — one finding, condition 21 " +
-        "`corrupt-session`, no code-less refusal beside it (SPEC 10.7, " +
-        "14.21)";
-  let refusal: Finding | undefined;
   await assertLeavesUnchanged(
     workspace.root,
     async () => {
@@ -882,35 +876,32 @@ async function expectCreateRefused(
       );
       assertConditionCounts(
         findings,
-        { [identity]: 1 },
-        `${label} — exactly one finding: ${why}`,
+        { "14.21": 1 },
+        `${label} — exactly one finding: the existing session is corrupt, ` +
+          `so its corruption is reported in the refusal's place — one ` +
+          `finding, condition 21 \`corrupt-session\`, no code-less refusal ` +
+          `beside it (SPEC 10.7, 14.21)`,
       );
-      refusal = findings[0];
+      const finding = findings[0]!;
       assertSameJson(
-        refusal.locations,
+        finding.locations,
         [],
         `${label}: the finding has no in-source location — locations [] ` +
           `(SPEC 12.7)`,
       );
-      if (identity === "14.21") {
-        assertFindingConcernsPath(
-          refusal,
-          W1_SESSION_REL,
-          `${label}: a session condition carries the session file it ` +
-            `concerns — the corrupt session's own path ${W1_SESSION_REL}, ` +
-            `a symbolic link there by its own path, never its target's ` +
-            `(SPEC 14, 12.7, 10.1, 13.4)`,
-        );
-      }
+      assertFindingConcernsPath(
+        finding,
+        W1_SESSION_REL,
+        `${label}: a session condition carries the session file it ` +
+          `concerns — the corrupt session's own path ${W1_SESSION_REL}, ` +
+          `a symbolic link there by its own path, never its target's ` +
+          `(SPEC 14, 12.7, 10.1, 13.4)`,
+      );
     },
     `${label} — the refused create modifies nothing: no session written, ` +
       `the existing session's file, occupant, and link target ` +
       `byte-unchanged (SPEC 10.1, 10.7)`,
   );
-  if (refusal === undefined) {
-    throw new Error(`${label}: the compare-around body did not run`);
-  }
-  return refusal;
 }
 
 /**
@@ -977,7 +968,7 @@ const CORRUPT_CREATE_ARMS: readonly CorruptCreateArm[] = [
 const T10_7_1 = defineProductTest({
   id: "T10.7-1",
   title:
-    "`review create` flag exclusivity: exactly one of `--base`, `--strategy audit`, `--coverage` is required — supplying none, any two, all three, or `--strategy` with any other value (`path-blocks`, `coverage`, garbage) is a usage error, exit 2, as is a missing `--name`; `--coverage` naming no configured profile is exit 2 (an unknown profile named in arguments) with nothing created — no session file exists and `list` reports no such session; `create` with an existing session's exact name is refused: exit 1 with exactly one code-less finding, nothing modified; naming an existing corrupt session — unparseable bytes, an invariant violation staged through the H-3 adapter over the product-written file, a directory or a symbolic link at the session path (T10.1-4's stagings) — reports the corruption in the refusal's place: exactly one finding, condition 21 `corrupt-session`, no code-less refusal beside it, exit 1, nothing modified (SPEC 10.1, 10.7, 12.0, 13.4, 14.21)",
+    "`review create` flag exclusivity: exactly one of `--base`, `--strategy audit`, `--coverage` is required — supplying none, any two, all three, or `--strategy` with any other value (`path-blocks`, `coverage`, garbage) is a usage error, exit 2, as is a missing `--name`; `--coverage` naming no configured profile is exit 2 (an unknown profile named in arguments) with nothing created — no session file exists and `list` reports no such session; `create` with an existing session's exact name is refused: exit 1 with exactly one code-less finding in T10.7-14's form — standard output exactly `{\"findings\": [f]}`, `code` and `path` `null`, `locations` `[]` — nothing modified; naming an existing corrupt session — unparseable bytes, an invariant violation staged through the H-3 adapter over the product-written file, a directory or a symbolic link at the session path (T10.1-4's stagings) — reports the corruption in the refusal's place: exactly one finding, condition 21 `corrupt-session`, no code-less refusal beside it, exit 1, nothing modified (SPEC 10.1, 10.7, 12.0, 12.7, 13.4, 14, 14.21)",
   run: async (product) => {
     await withWorkspace(
       COVERAGE_CONFIG,
@@ -1123,15 +1114,18 @@ const T10_7_1 = defineProductTest({
         );
 
         // An existing name is refused: exit 1, a refused review operation —
-        // exactly one code-less finding, nothing modified (SPEC 10.7, 12.0;
-        // the ASCII-case-fold variant is T10.1-2's business — this arm
-        // stages the exact name).
+        // exactly one code-less finding in T10.7-14's form, nothing modified
+        // (SPEC 10.7, 12.0, 12.7, 14; the ASCII-case-fold variant is
+        // T10.1-2's business — this arm stages the exact name).
         await createAuditSession(product, workspace, W1_SESSION, prefix);
-        await expectCreateRefused(
+        await expectReviewRefusal(
           product,
           workspace,
-          "(code-less)",
-          `${prefix} [existing valid session]`,
+          W1_CREATE_S,
+          W1_SESSION_REL,
+          `${prefix} [existing valid session: \`create\` with its exact ` +
+            `name is refused, SPEC 10.1, 10.7]`,
+          { nothingModified: true },
         );
       },
     );
@@ -1149,7 +1143,7 @@ const T10_7_1 = defineProductTest({
           const context = `T10.7-1 [existing corrupt session: ${arm.state}]`;
           await buildOk(product, workspace, `${context} \`build\``);
           await arm.stage(product, workspace, context);
-          await expectCreateRefused(product, workspace, "14.21", context);
+          await expectCreateCorruptionReported(product, workspace, context);
         },
       );
     }

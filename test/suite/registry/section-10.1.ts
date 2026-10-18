@@ -129,14 +129,17 @@
 // - `review status s` against the occupied session directory is an unknown
 //   session — a plain usage error, so the exit-2 error document's `code` and
 //   `path` are `null` (SPEC 12.0, 12.7).
-// - The code-less existing-name refusal and the condition-21 finding
-//   reported in its place are each asserted by identity, count, and empty
-//   locations. The condition-21 finding's concerned path is pinned — a
-//   session condition carries the file it concerns (SPEC 14, 12.7), the
-//   session's own file `.xspec/reviews/s.json` (10.1) — and is asserted
-//   too; the code-less refusal's is pinned nowhere — 14 assigns that
-//   refusal no code and no concern datum (SPEC 10.7) — so it is left
-//   unasserted.
+// - The condition-21 finding reported in the existing-name refusal's place
+//   is asserted by identity, count, empty locations, and its concerned
+//   path, which is pinned — a session condition carries the file it
+//   concerns (SPEC 14, 12.7), the session's own file
+//   `.xspec/reviews/s.json` (10.1). The code-less existing-name refusal
+//   itself is asserted in T10.7-14's finding form through the shared check
+//   (support.ts `expectReviewRefusal`): exactly one finding, `code` and
+//   `path` `null` — 14 gives a review-operation refusal neither location
+//   nor concerned path (SPEC 14, 12.7) — `locations` `[]`, `identities`
+//   informational and unasserted, and the existing session's file
+//   byte-identical; the stale twin's whole-root compare brackets it.
 // - Every mutating command fails at acquisition first on each `.xspec`
 //   staging (SPEC 10.1, 13.5, 14.24; T13.5-10(a)): `rename`, file-form
 //   `move`, `review create --strategy audit`, and `resolve` and `split`
@@ -209,6 +212,7 @@ import {
   expectErrorDocument,
   expectExit,
   expectFindingFreeReport,
+  expectReviewRefusal,
   runCli,
   runFindingsReport,
   runJson,
@@ -597,7 +601,7 @@ export async function runT1012SessionNameCasingProbe(
 const T10_1_2 = defineProductTest({
   id: "T10.1-2",
   title:
-    "session names: the full `A–Z a–z 0–9 . _ -` alphabet is accepted; `/`, whitespace, empty, leading `.`, and non-ASCII names are usage errors (exit 2, nothing created); names are case-sensitive for every subcommand (`status Foo` does not find `foo` — single-casing probe, rerun on the Windows leg via CI-01) while `create` refuses a name matching an existing session ignoring ASCII case (exit 1, nothing created) (SPEC 10.1, 10.7, 12.0)",
+    'session names: the full `A–Z a–z 0–9 . _ -` alphabet is accepted; `/`, whitespace, empty, leading `.`, and non-ASCII names are usage errors (exit 2, nothing created); names are case-sensitive for every subcommand (`status Foo` does not find `foo` — single-casing probe, rerun on the Windows leg via CI-01) while `create` refuses a name matching an existing session ignoring ASCII case (exit 1 with exactly one code-less finding in T10.7-14\'s form — standard output exactly `{"findings": [f]}`, `code` and `path` `null`, `locations` `[]` — nothing created) (SPEC 10.1, 10.7, 12.0, 12.7, 14)',
   run: async (product) => {
     await withWorkspace(CORE_FILES, async (workspace) => {
       await buildOk(product, workspace, "T10.1-2 `build`");
@@ -672,23 +676,19 @@ const T10_1_2 = defineProductTest({
 
       // `create` alone folds ASCII case when checking for an existing
       // session: `FOO` matches `foo`, is treated as an existing session, and
-      // is refused — exit 1 (a refused operation, SPEC 10.7, 12.0), nothing
-      // created, `foo`'s file byte-identical.
-      await assertLeavesUnchanged(
-        workspace.root,
-        async () => {
-          await expectExit(
-            product,
-            workspace,
-            ["review", "create", "--strategy", "audit", "--name", "FOO"],
-            1,
-            "T10.1-2 `review create --strategy audit --name FOO` — a name " +
-              "matching existing `foo` ignoring ASCII case is treated as an " +
-              "existing session and refused: exit 1 (SPEC 10.1, 10.7, 12.0)",
-          );
-        },
-        "T10.1-2 the refused `create --name FOO` modifies nothing — no " +
-          "FOO.json appears and foo.json stays byte-identical (SPEC 10.1)",
+      // is refused — exit 1, one code-less finding in T10.7-14's form (a
+      // refused operation, SPEC 10.7, 12.0, 12.7, 14), nothing created: no
+      // FOO.json appears and `foo`'s file stays byte-identical (the shared
+      // check's session-file and whole-root compares).
+      await expectReviewRefusal(
+        product,
+        workspace,
+        ["review", "create", "--strategy", "audit", "--name", "FOO"],
+        sessionRel("foo"),
+        "T10.1-2 [existing `foo`: a name matching it ignoring ASCII case is " +
+          "treated as an existing session's and refused, SPEC 10.1, 10.7, " +
+          "12.0]",
+        { nothingModified: true },
       );
     });
   },
@@ -1852,21 +1852,19 @@ async function stageNonDirectoryOccupant(
 
 /**
  * Exactly one finding, of the given counting identity — a condition token of
- * 14, or `(code-less)` for a refusal carrying no stable code (10.7) — with
- * no in-source location (locations [], SPEC 12.7) and, where SPEC pins one,
- * the concerned path.
+ * 14 — with no in-source location (locations [], SPEC 12.7) and the path it
+ * concerns (SPEC 14, 12.7). The code-less refusal of 10.7 is the shared
+ * T10.7-14 check's (support.ts `expectReviewRefusal`).
  */
 function assertExactlyOneFinding(
   findings: readonly Finding[],
   identity: string,
-  concernedPath: string | null,
+  concernedPath: string,
   context: string,
 ): Finding {
   assertConditionCounts(findings, { [identity]: 1 }, context);
   const finding = findings[0]!;
-  if (concernedPath !== null) {
-    assertFindingConcernsPath(finding, concernedPath, context);
-  }
+  assertFindingConcernsPath(finding, concernedPath, context);
   assertSameJson(
     finding.locations,
     [],
@@ -2103,19 +2101,20 @@ async function assertSessionDirectoryOccupied(
   );
 }
 
-/** The one refusal finding a stale twin's `create` reports. */
-interface ExpectedRefusal {
-  /** A condition token of 14, or `(code-less)` for the 10.7 refusal. */
-  readonly identity: string;
-  /**
-   * The concerned path where SPEC pins one — condition 22's obstructed
-   * session directory `.xspec/reviews` (14.22), condition 21's corrupt
-   * session file `.xspec/reviews/<name>.json` (SPEC 14, 12.7, 10.1) — else
-   * null, left unasserted: the code-less existing-name refusal's, to which
-   * 14 assigns no code and no concern datum (SPEC 10.7).
-   */
-  readonly concernedPath: string | null;
-}
+/**
+ * The one refusal finding a stale twin's `create` reports: a condition of
+ * 14 with the path it concerns — condition 22's obstructed session
+ * directory `.xspec/reviews` (14.22), condition 21's corrupt session file
+ * `.xspec/reviews/<name>.json` (SPEC 14, 12.7, 10.1) — or the code-less
+ * existing-name refusal of 10.7, asserted in T10.7-14's finding form
+ * through the shared check (support.ts `expectReviewRefusal`): `code` and
+ * `path` `null` — 14 gives a review-operation refusal neither location nor
+ * concerned path — `locations` `[]`, and the existing session's file
+ * byte-identical around the run.
+ */
+type ExpectedRefusal =
+  | { readonly identity: "14.21" | "14.22"; readonly concernedPath: string }
+  | { readonly identity: "(code-less)" };
 
 /**
  * Where a change around a refused `create` falls, for its diagnosis: graph
@@ -2144,7 +2143,8 @@ function refusedCreateChangeClass(key: string): string {
  * `create`'s ordering on a stale twin (SPEC 10.7, 13.5, 14.22): a section's
  * text is edited after `build`, no read run since, then `create --name
  * <name>` is refused — the one finding of `expected` (condition 22, the
- * code-less existing-name refusal, or condition 21 in its place), exit 1.
+ * code-less existing-name refusal in T10.7-14's finding form, or condition
+ * 21 in its place), exit 1.
  * `create` examines the session directory past the gate and before any
  * write, the refresh of 13.3 included, and the outcome it meets there ends
  * it, modifying nothing: the whole-root compare around `create` admits no
@@ -2168,34 +2168,36 @@ async function assertCreateRefusedStaleStaysStale(
   label: string,
 ): Promise<void> {
   await workspace.file("specs/A.mdx", A_MDX_EDITED);
-  const argv = [
-    "review",
-    "create",
-    "--strategy",
-    "audit",
-    "--name",
-    name,
-    "--json",
-  ];
-  const createContext =
-    `${label} \`${argv.join(" ")}\` on the stale twin — exit 1 with the ` +
-    `one refusal finding, met at the examination of the session directory ` +
-    `past the gate and before any write (SPEC 10.7, 14.22, 14.21, 10.1)`;
+  const argv = ["review", "create", "--strategy", "audit", "--name", name];
+  const onTwin =
+    `on the stale twin — exit 1 with the one refusal finding, met at the ` +
+    `examination of the session directory past the gate and before any ` +
+    `write (SPEC 10.7, 14.22, 14.21, 10.1)`;
   const before = await snapshotDirectory(workspace.root);
-  const findings = await runFindingsReport(
-    product,
-    workspace,
-    argv,
-    1,
-    createContext,
-  );
+  if (expected.identity === "(code-less)") {
+    await expectReviewRefusal(
+      product,
+      workspace,
+      argv,
+      sessionRel(name),
+      `${label} [${onTwin}]`,
+    );
+  } else {
+    const createContext = `${label} \`${[...argv, "--json"].join(" ")}\` ${onTwin}`;
+    assertExactlyOneFinding(
+      await runFindingsReport(
+        product,
+        workspace,
+        [...argv, "--json"],
+        1,
+        createContext,
+      ),
+      expected.identity,
+      expected.concernedPath,
+      createContext,
+    );
+  }
   const after = await snapshotDirectory(workspace.root);
-  assertExactlyOneFinding(
-    findings,
-    expected.identity,
-    expected.concernedPath,
-    createContext,
-  );
   const changes = diffSnapshots(before, after);
   if (changes.length > 0) {
     const refreshed = changes.some((change) => isGraphDataKey(change.key));
@@ -2629,7 +2631,7 @@ export async function assertMutatingCommandsFailAtAcquisition(
 const T10_1_6 = defineProductTest({
   id: "T10.1-6",
   title:
-    "session-directory and area occupancy; `create`'s ordering: `.xspec/reviews` occupied by a plain file, or by a symbolic link to a directory holding a valid session, holds no sessions (`list` none, `status s` exit 2, `check` clean, `inventory` sessions [], `ids` answers) and `create` is refused with one condition-22 finding concerning `.xspec/reviews`, nothing written; on stale twins the refused `create` — condition 22, the code-less existing-name refusal, or condition 21 in its place — is met at the examination of the session directory past the gate and before any write, the refresh included, and modifies nothing: stale graph data stays stale (graph data byte-identical around it, `check` then reporting the edited source's per-file staleness beside the graph-data unit form; no session written or changed); `.xspec` occupied by a plain file, or by a symbolic link to a directory holding a journal and valid sessions: `inventory` recorded unavailable with the one condition-23 finding, `build`/`ids`/`review list` one condition-22 finding concerning `.xspec`, `check` that finding beside the unreadable-record unit form, `view` finding-free, and every mutating command — `rename`, `move`, `review create`, `resolve`, `split` — failing at acquisition first: exit 2, the error document's `code` `write-failure`, `path` `.xspec`, nothing written, the plain file byte-unchanged, the link and its target byte-identical (10.1, 10.7, 11.6, 13.3–13.5, 14.10, 14.21–14.24)",
+    "session-directory and area occupancy; `create`'s ordering: `.xspec/reviews` occupied by a plain file, or by a symbolic link to a directory holding a valid session, holds no sessions (`list` none, `status s` exit 2, `check` clean, `inventory` sessions [], `ids` answers) and `create` is refused with one condition-22 finding concerning `.xspec/reviews`, nothing written; on stale twins the refused `create` — condition 22, the code-less existing-name refusal (in T10.7-14's finding form: `code` and `path` `null`, `locations` `[]`), or condition 21 in its place — is met at the examination of the session directory past the gate and before any write, the refresh included, and modifies nothing: stale graph data stays stale (graph data byte-identical around it, `check` then reporting the edited source's per-file staleness beside the graph-data unit form; no session written or changed); `.xspec` occupied by a plain file, or by a symbolic link to a directory holding a journal and valid sessions: `inventory` recorded unavailable with the one condition-23 finding, `build`/`ids`/`review list` one condition-22 finding concerning `.xspec`, `check` that finding beside the unreadable-record unit form, `view` finding-free, and every mutating command — `rename`, `move`, `review create`, `resolve`, `split` — failing at acquisition first: exit 2, the error document's `code` `write-failure`, `path` `.xspec`, nothing written, the plain file byte-unchanged, the link and its target byte-identical (10.1, 10.7, 11.6, 12.7, 13.3–13.5, 14, 14.10, 14.21–14.24)",
   run: async (product) => {
     // --- Session-directory occupancy on a freshly built valid workspace --
     // Plain file: no session has been created, so `.xspec/reviews` is
@@ -2702,7 +2704,7 @@ const T10_1_6 = defineProductTest({
         product,
         workspace,
         T10_1_6_SESSION,
-        { identity: "(code-less)", concernedPath: null },
+        { identity: "(code-less)" },
         {},
         label,
       );

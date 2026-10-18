@@ -118,10 +118,14 @@
 //   recorded decomposition by containment of the decomposed item's spec-fixed
 //   scope-node identity, and "state kept" as canonical-JSON equality of the
 //   reported member across the operation (the §10.2/§10.6 style).
-// - A refused `split`/`resolve` (exit 1) is additionally checked to leave the
-//   session's reported rows unchanged — a refusal resolves and splits nothing
-//   (SPEC 10.7; the byte-level modifies-nothing protocol is T10.1-4/T10.3-2
-//   territory).
+// - A refused `split`/`resolve` (T10.7-9, T10.7-10) goes through T10.7-14's
+//   shared check (support.ts `expectReviewRefusal`): run with `--json`, exit
+//   1 with standard output exactly one code-less finding — `code` and `path`
+//   `null`, `locations` `[]` (SPEC 14, 12.7), `identities` informational
+//   and unasserted — and nothing modified: the session file and the whole
+//   workspace root, `.git/` included, byte-identical around the run (SPEC
+//   10.7, 13.5: a refusal ends its subcommand modifying nothing; the
+//   preamble: no git write).
 // - Workspaces are git-less wherever no baseline is involved; every fixture
 //   edit is followed by an explicit `build` before any read, so no read
 //   relies on the 13.3 refresh path (T13.3-*'s business).
@@ -187,6 +191,7 @@ import {
   buildOk,
   expectErrorDocument,
   expectExit,
+  expectReviewRefusal,
   runJson,
 } from "./support.js";
 
@@ -264,6 +269,12 @@ export default defineConfig({
 })
 `,
 );
+
+/**
+ * The session file of the session `s` that T10.7-9's and T10.7-10's
+ * refusals name (SPEC 10.1: `.xspec/reviews/<name>.json`).
+ */
+const SESSION_S_REL = ".xspec/reviews/s.json";
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
@@ -2244,7 +2255,7 @@ const T10_7_9_H_WITH_B_C = stagedMdx(
 const T10_7_9 = defineProductTest({
   id: "T10.7-9",
   title:
-    "`review split` of a `subtree-coherence` item whose scope root has children replaces it with one `subtree-coherence` item per child subtree (context: the child's ancestor chain; blockedBy: the one its session's strategy gives a `subtree-coherence` item, never the original's blockers — none in the path-blocks session, its child sections' items in the audit session, so none for a childless child authored after `create`, where a product passing the original's stale blocker set on to new decomposition items assigns h.a's item) plus one `parent-consistency` item for the scope root (context: exactly the scope root's children; blockedBy: the per-child items); each decomposition item's origin is the `changed` nodes in its scope — for the `parent-consistency` item, in its scope node's subtree — and empty in the audit session (path-blocks: the per-child items' origins empty, the edited g.a lying in their context alone, and g.a's `parent-consistency` item's exactly g.a); newly created decomposition items enter `unresolved` — asserted on splits of resolved originals in both a path-blocks and an audit session, whose statuses must not propagate; existing kind+scope items are reused with id, status, and recorded state kept (audit case); every item blocked by the original becomes blocked by all decomposition items; the original is removed, its id never reused across subsequent re-derivations in either strategy, and the recorded decomposition governs re-derivation — a decomposed kind+scope is never re-added, a later-authored child enters through the decomposition with a fresh id, and blockedBy is recomputed per the strategy's rules; `split` on any other kind, or on a childless scope root, is refused (exit 1) leaving the session's rows unchanged (SPEC 10.2, 10.5, 10.6, 10.7)",
+    "`review split` of a `subtree-coherence` item whose scope root has children replaces it with one `subtree-coherence` item per child subtree (context: the child's ancestor chain; blockedBy: the one its session's strategy gives a `subtree-coherence` item, never the original's blockers — none in the path-blocks session, its child sections' items in the audit session, so none for a childless child authored after `create`, where a product passing the original's stale blocker set on to new decomposition items assigns h.a's item) plus one `parent-consistency` item for the scope root (context: exactly the scope root's children; blockedBy: the per-child items); each decomposition item's origin is the `changed` nodes in its scope — for the `parent-consistency` item, in its scope node's subtree — and empty in the audit session (path-blocks: the per-child items' origins empty, the edited g.a lying in their context alone, and g.a's `parent-consistency` item's exactly g.a); newly created decomposition items enter `unresolved` — asserted on splits of resolved originals in both a path-blocks and an audit session, whose statuses must not propagate; existing kind+scope items are reused with id, status, and recorded state kept (audit case); every item blocked by the original becomes blocked by all decomposition items; the original is removed, its id never reused across subsequent re-derivations in either strategy, and the recorded decomposition governs re-derivation — a decomposed kind+scope is never re-added, a later-authored child enters through the decomposition with a fresh id, and blockedBy is recomputed per the strategy's rules; `split` on any other kind, or on a childless scope root, is refused — exit 1 with exactly one code-less finding in T10.7-14's form, `code` and `path` `null`, `locations` `[]` — nothing modified (SPEC 10.2, 10.5, 10.6, 10.7, 12.7, 14)",
   run: async (product) => {
     // --- path-blocks arm ------------------------------------------------------
     await withWorkspace(
@@ -2275,21 +2286,17 @@ const T10_7_9 = defineProductTest({
         const scGA = requireRow(initial, "subtree-coherence", S9_GA, prefix).id;
         const pcG = requireRow(initial, "parent-consistency", S9_G, prefix).id;
 
-        // Refusals first (SPEC 10.7): split on a parent-consistency item,
-        // exit 1; the session's rows are unchanged by the refusal.
-        await expectExit(
+        // Refusals first (SPEC 10.7): split on a parent-consistency item —
+        // exit 1 in T10.7-14's finding form, nothing modified (the shared
+        // check: the session file and the whole workspace byte-identical).
+        await expectReviewRefusal(
           product,
           workspace,
           ["review", "split", "s", pcG],
-          1,
-          `${prefix} \`review split s <g's parent-consistency item>\` — ` +
-            `split on an item of any other kind is refused (SPEC 10.7)`,
-        );
-        assertSameJson(
-          rowSequence(await sessionStatus(product, workspace, "s", prefix)),
-          rowSequence(initial),
-          `${prefix}: a refused split changes nothing about the session ` +
-            `(SPEC 10.7)`,
+          SESSION_S_REL,
+          `${prefix} [g's parent-consistency item: split on an item of any ` +
+            `other kind is refused, SPEC 10.7]`,
+          { nothingModified: true },
         );
 
         // Resolve the original, then split it: the decomposition items must
@@ -2454,20 +2461,16 @@ const T10_7_9 = defineProductTest({
         );
 
         // The childless refusal: g.a.x's item is subtree-coherence with a
-        // childless scope root — split refused, exit 1, rows unchanged.
-        await expectExit(
+        // childless scope root — split refused, exit 1 in T10.7-14's
+        // finding form, nothing modified.
+        await expectReviewRefusal(
           product,
           workspace,
           ["review", "split", "s", scX],
-          1,
-          `${prefix} \`review split s <g.a.x's item>\` — split on a ` +
-            `subtree-coherence item whose scope root has no children is ` +
-            `refused (SPEC 10.7)`,
-        );
-        assertSameJson(
-          rowSequence(await sessionStatus(product, workspace, "s", prefix)),
-          rowSequence(afterSplit),
-          `${prefix}: the refused childless split changes nothing (SPEC 10.7)`,
+          SESSION_S_REL,
+          `${prefix} [g.a.x's item: split on a subtree-coherence item whose ` +
+            `scope root has no children is refused, SPEC 10.7]`,
+          { nothingModified: true },
         );
 
         // The decomposition governs re-derivation and the removed id is
@@ -2852,7 +2855,7 @@ const R10_NOTE = "reviewed; left as-is pending spec sync";
 const T10_7_10 = defineProductTest({
   id: "T10.7-10",
   title:
-    "`review resolve` sets the status and records the current relevant state — `current` holds the resolve-moment hash captures and, after a re-resolve bracketing an edit, the new moment's values and not the old (pairwise-distinct `query node` captures discriminate); it works on any unblocked item regardless of status: flipping a resolved `no-change` to `skipped` without any edit works, and re-resolving an `invalidated` item works and clears the invalidation; resolving a blocked item is refused (exit 1) leaving the session's rows unchanged; an unknown session name or item ID is exit 2 with the 12.7 error document as the entire stdout under `--json`; `--note` text is stored and reported by `show` and `export` (SPEC 10.2, 10.3, 10.4, 10.7, 12.0)",
+    "`review resolve` sets the status and records the current relevant state — `current` holds the resolve-moment hash captures and, after a re-resolve bracketing an edit, the new moment's values and not the old (pairwise-distinct `query node` captures discriminate); it works on any unblocked item regardless of status: flipping a resolved `no-change` to `skipped` without any edit works, and re-resolving an `invalidated` item works and clears the invalidation; resolving a blocked item is refused — exit 1 with exactly one code-less finding in T10.7-14's form, `code` and `path` `null`, `locations` `[]` — nothing modified; an unknown session name or item ID is exit 2 with the 12.7 error document as the entire stdout under `--json`; `--note` text is stored and reported by `show` and `export` (SPEC 10.2, 10.3, 10.4, 10.7, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -2884,20 +2887,17 @@ const T10_7_10 = defineProductTest({
           );
         }
 
-        // Resolving a blocked item is refused: exit 1, rows unchanged.
-        await expectExit(
+        // Resolving a blocked item is refused: exit 1 in T10.7-14's finding
+        // form, nothing modified (the shared check: the session file and the
+        // whole workspace byte-identical).
+        await expectReviewRefusal(
           product,
           workspace,
           ["review", "resolve", "s", idP, "--status", "no-change"],
-          1,
-          `${prefix} \`review resolve s <p's blocked item> --status ` +
-            `no-change\` — resolving a blocked item is refused (SPEC 10.7)`,
-        );
-        assertSameJson(
-          rowSequence(await sessionStatus(product, workspace, "s", prefix)),
-          rowSequence(initial),
-          `${prefix}: the refused resolve changes nothing about the session ` +
-            `(SPEC 10.7)`,
+          SESSION_S_REL,
+          `${prefix} [p's blocked item: resolving a blocked item is refused, ` +
+            `SPEC 10.7]`,
+          { nothingModified: true },
         );
 
         // Unknown session and unknown item are usage errors (SPEC 10.7,

@@ -62,7 +62,14 @@
 //       T13.4-4's directories at derived paths, 14.22), or in a clean
 //       state the condition would contradict (T6.4-7's and T6.5-3's
 //       `check` with no staleness, 14.10; T6.5-9's fresh identifiers, no
-//       14.15; T6.5-11's rewritten call, no 14.11).
+//       14.15; T6.5-11's rewritten call, no 14.11);
+//   (d) the code-less form 14 gives a review-operation refusal — no
+//       stable code, `locations` empty, `path` `null` — where that form is
+//       the test's subject: T10.7-14. The other refusal sites running the
+//       same shared check (support.ts `expectReviewRefusal`: T10.1-2,
+//       T10.1-6, T10.3-2, T10.7-1, T10.7-9, T10.7-10) assert it as a
+//       cross-reference to T10.7-14's assertion, which puts no "14" on them
+//       (T10.1-6's and T10.7-1's "14" stand for their numbered conditions).
 //   A condition named only as staging context, as a cross-reference to
 //   another test's assertion, or in the diagnostic of a generic clean
 //   outcome (`build` or `check` exit 0, findings []) puts no "14" on a
@@ -113,10 +120,12 @@
 //   restrictions of 8.1 via coverage runs; T10.7-12 asserts 1.7's
 //   review-payload half of the two-range-presenting-outputs rule (the
 //   code-impact scope's named-unit construct range; TEST-SPEC 1.7 delegates
-//   it there from T1.7-1/T1.7-2); and section 10's body (the review
-//   mechanism/strategy split and the three built-in strategies) is
-//   exercised by T10.5-1, T10.6-1 (generation per strategy), T10.7-1
-//   (strategy selection at `create`), and T10.7-4 (coverage sessions).
+//   it there from T1.7-1/T1.7-2); T10.7-14 asserts 12.7's findings-only
+//   form of a refused operation and the finding form it holds; and section
+//   10's body (the review mechanism/strategy split and the three built-in
+//   strategies) is exercised by T10.5-1, T10.6-1 (generation per strategy),
+//   T10.7-1 (strategy selection at `create`), and T10.7-4 (coverage
+//   sessions).
 //
 // A passage listed for a test is asserted by that test; the map lists each
 // test's primary passage(s), not every rule it touches in passing. S-1 fails
@@ -496,6 +505,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T10.7-10": ["10.7"],
   "T10.7-11": ["10.7"],
   "T10.7-12": ["1.7", "10.7"],
+  "T10.7-14": ["10.7", "12.7", "14"],
   "T11-1": ["11", "11.1"],
   "T11-2": ["11", "11.1", "1.4", "12.0", "12.7", "14"],
   "T11-3": ["11", "11.1"],
