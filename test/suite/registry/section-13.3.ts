@@ -92,13 +92,14 @@
 //   the journal for canonical identities, SPEC 5.4); that staging drives the
 //   five reads `ids`, `show`, `coverage`, `review status`, and `query` only
 //   — `impact` is absent from it by necessity, not oversight (TEST-SPEC
-//   T13.3-3): `impact` always takes `--base` (SPEC 9), baseline resolution
-//   precedes the gate (12.0), and no journal-error staging reaches the gate
-//   at `impact` — a garbage line appended after the baseline commit meets
-//   6.3's suffix replay as an unresolvable mapping (exit 2, the usage error
-//   T6.3-4 pins), and a garbage line already committed at the baseline ref
-//   makes a baseline that cannot be validated as a workspace (exit 2 again,
-//   6.3); neither verdict is asserted here. The obstructed write path
+//   T13.3-3): `impact` always takes `--base` (SPEC 9), and a given
+//   baseline's resolution, which precedes the gate (12.0), reads the
+//   current journal before any other cause can fail it, a journal error
+//   there failing it as a usage error that carries condition 13's code
+//   and concerned path — exit 2, `journal-error`, never the gate's exit 1
+//   (6.3; 12.0: a given baseline is never so masked) — so no journal-error
+//   staging reaches the gate at `impact`, nor at `review create --base`;
+//   that verdict is T6.3-6's, not asserted here. The obstructed write path
 //   stages a plain file over the emptied `markdown.outDir` directory after
 //   a successful build: the emit write path's workspace-relative component
 //   `mdout` is then occupied by a non-directory (13.4) — the workspace's
@@ -2869,12 +2870,14 @@ const T13_3_3 = defineProductTest({
     // every finding a `build` would report, source validity or not (SPEC
     // 13.3); the staging is explained in the module header. The five reads
     // taking no baseline are driven — `impact` is absent from this staging
-    // by necessity (a garbage line meets baseline resolution first, exit 2,
-    // T6.3-4; module header) — so no git repository is staged: no baseline
-    // to resolve, the gate alone standing between each invocation and an
-    // answer. Discriminates a product that gates on source validity alone
-    // and answers `query` from a broken journal with exit 0 (refresh
-    // consumes the journal for canonical identities, SPEC 5.4).
+    // by necessity (a given baseline's resolution reads the current journal
+    // first, and a journal error there fails it, exit 2 with
+    // `journal-error`, T6.3-6; module header) — so no git repository is
+    // staged: no baseline to resolve, the gate alone standing between each
+    // invocation and an answer. Discriminates a product that gates on
+    // source validity alone and answers `query` from a broken journal with
+    // exit 0 (refresh consumes the journal for canonical identities, SPEC
+    // 5.4).
     await withWorkspace(
       {
         "xspec.config.ts": GRAPH_CONFIG,

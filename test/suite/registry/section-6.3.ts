@@ -1,4 +1,8 @@
-// TEST-SPEC §6.3 (baseline resolution) — SUITE-23: T6.3-1…T6.3-5.
+// TEST-SPEC §6.3 (baseline resolution) — SUITE-23: T6.3-1…T6.3-6. T6.3-6
+// is registered with its arms (a), (b)'s unresolvable-ref and
+// no-repository stagings, and (d); its arms (c) and (e) and (b)'s
+// refused-discovery staging follow at FIX_PLAN Task 48 of the plan
+// written at 2a2b94e.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -101,35 +105,81 @@
 // - The absent-configuration arms: the offending file is the configuration
 //   absent at its repository-relative path in the ref's tree, so stderr
 //   must name it (`xspec.config.ts`).
+// - T6.3-6's journal error: T6.1-3's garbage line appended, as its own
+//   line, to the one-line journal the product's `rename specs/A.mdx a
+//   a2` wrote — read as a plain file first (`readJournal`) — on a
+//   workspace whose sources pass `build`. Where the arm's ref is `c1`
+//   ((a), (d)), `c1` is the all-inclusive commit taken before the
+//   append, its tree holding that one-entry journal
+//   (`assertJournalInTree`), so the garbage line is the one entry absent
+//   from the ref's journal: a product reading the current journal only
+//   through 6.3's replay meets it there as an unresolvable mapping, the
+//   code-less usage error the arm fails.
+// - Each T6.3-6 arm runs `impact --base <ref>`, then `review create
+//   --base <ref> --name n`, each with `--json` under a whole-root compare
+//   (H-6's lock-path exclusion applied: no session written; sources,
+//   journal, derived files, and graph data byte-identical): exit 2
+//   exactly, the 12.7 error document as the entire stdout, and its
+//   finding pinned form-exact on `code` `"journal-error"`, `path`
+//   `".xspec/journal"`, and `locations` `[]` (12.7, 14, 14.13;
+//   T12.7-3) — `message` and `identities` informational, as T6.3-6 pins
+//   neither.
+// - T6.3-6(a)'s human form (T12.0-15; SPEC 12.0): each command's argv
+//   without `--json`, run after its `--json` twin on the same state (the
+//   twin modified nothing) under its own whole-root compare, exits 2
+//   with standard output empty, and its standard-error message, decoded
+//   by the exit-2 adapter (`decodeHumanErrorMessage`,
+//   helpers/adapters/human-reports.ts), carries the code
+//   `journal-error` and the path `.xspec/journal`
+//   (`assertHumanErrorMessageCarries`) — its wording free (H-3).
+// - T6.3-6(b)'s stagings: the unresolvable ref is TEST-SPEC's `nope`,
+//   beside a commit so the repository is real; the no-repository
+//   staging is T6.3-5(c)'s — a workspace directory that is no
+//   repository, `--base HEAD` — behind H-1's ancestor precondition
+//   (`assertSelfContainedRoot`), verified before its first invocation.
+// - T6.3-6(d)'s failing sources: `specs/A.mdx` restaged after `c1` with
+//   the renamed section's unresolved local `d` reference (14.5), the
+//   premise `build --json` exiting 1 with at least one finding before
+//   the garbage line is appended; each command then exits 2 with the
+//   journal error, never the gate's exit 1 with its findings (12.0: a
+//   given baseline is never so masked).
 //
 // Journal tampering below stays product-independent (H-4): the prefix arm's
 // baseline journal, the two-entry journal of both renames, is strictly
 // longer than the one-entry journal of the first — the current journal it
 // restores — so it can be a prefix of no such current journal, whatever the
-// entry bytes are.
+// entry bytes are. T6.3-6's garbage line is structureless bytes no
+// conforming entry format accepts (T6.1-3's), never a duplicate or
+// recombination of product-written entries.
 //
 // Staged-source records (TEST-SPEC S-9's before-any-product clause;
 // helpers/staged-mdx.ts, helpers/staged-ts.ts): every workspace a body here
 // creates after its first product invocation — T6.3-2's second arm, T6.3-4's
-// five later arms, T6.3-5's arms (b)–(d) — takes its initial `.mdx` sources
-// and configuration files as ledger records, judged by
-// test/self/s9-staged-sources.test.ts before any product exists; where a
-// body's first workspace stages the same expression, the record stands there
-// too (converted uniformly). T6.3-1's and T6.3-3's one workspace each precede
-// any invocation and stay plain.
+// five later arms, T6.3-5's arms (b)–(d), T6.3-6's three stagings after (a)
+// — takes its initial `.mdx` sources and configuration files as ledger
+// records, judged by test/self/s9-staged-sources.test.ts before any product
+// exists; where a body's first workspace stages the same expression, the
+// record stands there too (converted uniformly). T6.3-6(d)'s failing
+// source, staged by `file()` after the arm's invocations, is a record too.
+// T6.3-1's and T6.3-3's one workspace each precede any invocation and stay
+// plain.
 
+import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import type {
+  ErrorInformation,
   ExportReport,
   ImpactReport,
 } from "../../helpers/adapters/index.js";
 import {
+  assertHumanErrorMessageCarries,
   decodeExportReport,
   decodeFindingsReport,
   decodeImpactReport,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
+  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
@@ -153,14 +203,15 @@ import {
 } from "./support.js";
 
 // Exactly one spec group over specs/ (SPEC 7) — every fixture here except
-// T6.3-1's, whose group membership is the moving part. T6.3-2, T6.3-4, and
-// T6.3-5 stage it after a product invocation — in a later workspace, at
-// `xspec.config.ts` or `inner/xspec.config.ts`, and by `file()` at
-// `xspec.config.ts` (T6.3-4's baseline-configuration arms, over the
-// configuration their `c1` commits), `sub/xspec.previous.config.ts`, and
-// `sub/xspec.config.ts` — so it is a staged-source record (S-9's timing
-// clause; test/self/s9-staged-sources.test.ts). Its text is kept apart for
-// T6.3-4's two baseline configurations, derived from it at module load.
+// T6.3-1's, whose group membership is the moving part. T6.3-2, T6.3-4,
+// T6.3-5, and T6.3-6 stage it after a product invocation — in a later
+// workspace, at `xspec.config.ts` or `inner/xspec.config.ts`, and by
+// `file()` at `xspec.config.ts` (T6.3-4's baseline-configuration arms,
+// over the configuration their `c1` commits), `sub/xspec.previous.config.ts`,
+// and `sub/xspec.config.ts` — so it is a staged-source record (S-9's
+// timing clause; test/self/s9-staged-sources.test.ts). Its text is kept
+// apart for T6.3-4's two baseline configurations, derived from it at
+// module load.
 const SPECS_ONLY_CONFIG_TEXT = `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -170,7 +221,7 @@ export default defineConfig({
 })
 `;
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.3-2/T6.3-4/T6.3-5 xspec.config.ts — exactly one spec group over specs/, staged at every configuration path",
+  "T6.3-2/T6.3-4/T6.3-5/T6.3-6 xspec.config.ts — exactly one spec group over specs/, staged at every configuration path",
   SPECS_ONLY_CONFIG_TEXT,
 );
 
@@ -1985,6 +2036,407 @@ const T6_3_5 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T6.3-6 — a given baseline's journal read, and git data
+// ---------------------------------------------------------------------------
+
+// SPEC 6.3: a given baseline's resolution — `impact --base` (9), `review
+// create --base` (10.7) — precedes the gate of 13.3 (12.0) and reads the
+// current journal before any other cause can fail it; a journal error
+// (14.13) there fails it as a usage error carrying condition 13's stable
+// code and concerned path (12.7), never as the gate's finding. Each staging
+// below is a fresh workspace (H-1) whose journal the product wrote — `build`
+// passing, then the journaled `rename specs/A.mdx a a2` — with the garbage
+// line appended to it, and each runs at both commands, every run exiting 2
+// and modifying nothing:
+// (a) on valid sources, `--base c1` — the error document's finding
+//     form-exact, and each command's human form;
+// (b) beside another cause that can fail the resolution, one staging each:
+//     an unresolvable ref (`--base nope`) and a configuration inside no
+//     repository's working tree (T6.3-5(c)'s staging, `--base HEAD`) —
+//     still the journal error, never the code-less error: the journal is
+//     read first;
+// (d) on sources that also fail `build`'s validations, `--base c1` — the
+//     journal error, never the gate's exit 1 (12.0: a given baseline is
+//     never so masked).
+// Arms (c) and (e) and (b)'s refused-discovery staging are not yet
+// registered (module header).
+
+// Deliberately structureless bytes no conforming entry format accepts —
+// T6.1-3's garbage line, shape-independent (H-4): never a duplicate or
+// recombination of product-written entries, whose acceptance would be
+// product-dependent.
+const J6_GARBAGE_LINE = "?? harness-injected garbage: not a journal entry ??";
+
+// The one source of every T6.3-6 workspace: section `a`, the subject of the
+// journaled rename that writes the journal the garbage line joins. Every
+// workspace after the first is created after the body's earlier
+// invocations, so its initial source is a staged-source record (module
+// header); the first workspace's is the same record, converted uniformly.
+const J6_FILE = "specs/A.mdx";
+const J6_SOURCE = stagedMdx(
+  "T6.3-6 specs/A.mdx — every arm's valid source, section a the journaled rename's subject",
+  ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
+);
+
+// (d)'s current source, staged after `c1`: the renamed section with an
+// unresolved local `d` reference (14.5) — a build validation failure.
+const J6_INVALID_SOURCE = stagedMdx(
+  "T6.3-6 (d) specs/A.mdx — the renamed section a2 with an unresolved d reference (14.5), failing build validation",
+  [
+    '<S id="a2" d={["absent"]}>',
+    "Alpha text depending on nothing that exists.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+// (b)'s unresolvable ref, as TEST-SPEC T6.3-6 spells it: no branch, tag, or
+// commit of the fixture repository bears the name.
+const J6_UNRESOLVABLE_REF = "nope";
+
+// The session name every refused `review create --base` run here asks for.
+const J6_SESSION = "n";
+
+// The journal error a given baseline's resolution reports (SPEC 6.3, 12.7,
+// 14, 14.13; T12.7-3): condition 13's stable code and its concerned path,
+// the journal path — what the `--json` error document carries and the
+// human form's standard-error message must carry too (T12.0-15).
+const J6_JOURNAL_ERROR: ErrorInformation = {
+  code: "journal-error",
+  path: JOURNAL_PATH,
+};
+
+/**
+ * T6.3-6's journal staging on a fresh workspace, before the arm's ref is
+ * fixed: `build` exit 0 — the sources valid (SPEC 12.1) — then the
+ * journaled `rename specs/A.mdx a a2`, the operation that writes the
+ * journal (SPEC 6.1).
+ */
+async function buildAndRename(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  await buildOk(
+    product,
+    workspace,
+    `${context}: \`build\` (staging premise: the sources are valid)`,
+  );
+  await expectExit(
+    product,
+    workspace,
+    ["rename", J6_FILE, "a", "a2"],
+    0,
+    `${context}: \`rename ${J6_FILE} a a2\` (the journaled operation ` +
+      `writing the journal the garbage line joins)`,
+  );
+}
+
+/**
+ * Append the garbage line to the journal the product wrote (module header):
+ * the journal read as a plain file at `.xspec/journal` (`readJournal`)
+ * holding the one line its rename appended (`assertJournalLines`), then the
+ * garbage appended as its own line — the product's final line terminated
+ * first if it left the terminator off, so the tampering is a whole-line
+ * append under either line convention (T6.1-3's staging).
+ */
+async function appendGarbageLine(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const journal = await readJournal(
+    workspace,
+    `${context}: before appending the garbage line`,
+  );
+  assertJournalLines(
+    journal,
+    1,
+    "the one journaled operation yields a one-line journal, the " +
+      "product-written entry the garbage line follows",
+    context,
+  );
+  const needsTerminator = journal[journal.length - 1] !== LF;
+  await workspace.file(
+    JOURNAL_PATH,
+    Buffer.concat([
+      journal,
+      Buffer.from(
+        (needsTerminator ? "\n" : "") + J6_GARBAGE_LINE + "\n",
+        "utf8",
+      ),
+    ]),
+  );
+}
+
+/**
+ * (a)'s and (d)'s repository: the workspace's git repository initialized,
+ * the journal staged (`buildAndRename`), and `c1` — the all-inclusive
+ * commit, its tree holding the one-entry journal the rename wrote
+ * (`assertJournalInTree`), so the garbage line appended after it is the one
+ * entry absent from the ref's journal — returned.
+ */
+async function stageRepositoryAtC1(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<string> {
+  await workspace.gitInit();
+  await buildAndRename(product, workspace, context);
+  const c1 = await workspace.gitCommitAll(
+    "c1: the valid sources and the one-entry journal the rename wrote",
+  );
+  await assertJournalInTree(workspace, c1, `${context}: c1`);
+  return c1;
+}
+
+/**
+ * T6.3-6's journal error at one baseline-taking command (`argv`, run with
+ * `--json` from the workspace root), under a whole-root compare — H-6's
+ * lock-path exclusion applied: no session written; sources, journal,
+ * derived files, and graph data byte-identical (SPEC 6.3, 10.7, 12.0):
+ * exit 2 exactly (a usage error, SPEC 6.3, 12.0; `why` says what the exit
+ * code rules out), the single 12.7 error document as the entire stdout —
+ * no report, no validation findings (12.0, H-5) — and its finding the
+ * journal error, form-exact: `code` `"journal-error"`, `path`
+ * `".xspec/journal"`, and `locations` `[]` (12.7, 14, 14.13; T12.7-3) — a
+ * journal condition has no in-source location, so the error names the
+ * offending line, never locating it — never the code-less baseline error.
+ * `message` and `identities` are informational (module header).
+ */
+async function expectJournalErrorAt(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  why: string,
+  context: string,
+): Promise<void> {
+  const label = `${context}: \`${[...argv, "--json"].join(" ")}\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const result = await expectExit(
+        product,
+        workspace,
+        [...argv, "--json"],
+        2,
+        `${label} — the given baseline's resolution reads the current ` +
+          `journal before any other cause can fail it, and a journal error ` +
+          `there fails it as a usage error (SPEC 6.3, 12.0): ${why}`,
+      );
+      const error = expectErrorDocument(
+        result,
+        `${label} — under --json, the exit-2 error document is the entire ` +
+          `stdout: no report and no validation findings (SPEC 12.0, 12.7, ` +
+          `H-5)`,
+      );
+      assertSameJson(
+        { code: error.code, path: error.path, locations: error.locations },
+        {
+          code: J6_JOURNAL_ERROR.code,
+          path: J6_JOURNAL_ERROR.path,
+          locations: [],
+        },
+        `${label}: the error reported is the journal error with its stable ` +
+          `code and concerned path, never the code-less baseline error — ` +
+          `\`code\` "journal-error", \`path\` ".xspec/journal", and empty ` +
+          `\`locations\`, a journal condition having no in-source location ` +
+          `(SPEC 6.3, 12.7, 14, 14.13; T12.7-3) (message: ` +
+          `${JSON.stringify(error.message)})`,
+      );
+    },
+    `${label}: a given baseline's resolution failing modifies nothing — no ` +
+      `session written; sources, journal, derived files, and graph data ` +
+      `byte-identical (SPEC 6.3, 10.7, 12.0)`,
+  );
+}
+
+/**
+ * The human form of T6.3-6's journal error at one baseline-taking command
+ * (T6.3-6(a); TEST-SPEC T12.0-15, H-5): `argv` without `--json`, run after
+ * its `--json` twin on the same state — the twin modified nothing — under
+ * its own whole-root compare: exit 2 exactly, standard output empty (SPEC
+ * 12.0: with JSON output not in effect, an exit-2 error leaves standard
+ * output empty), and the standard-error message, the error's only report,
+ * decoded by the exit-2 adapter (`decodeHumanErrorMessage`,
+ * helpers/adapters/human-reports.ts) and carrying the code `journal-error`
+ * and the concerned path `.xspec/journal` its twin's error document carries
+ * (`assertHumanErrorMessageCarries`) — wording free (H-3), a message
+ * omitting either failing.
+ */
+async function expectHumanJournalErrorAt(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<void> {
+  const label = `${context}: \`${argv.join(" ")}\` (human form)`;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const result = await expectExit(
+        product,
+        workspace,
+        argv,
+        2,
+        `${label} — the output form never changes an exit code: exit 2, as ` +
+          `its --json twin (SPEC 12.0, 6.3)`,
+      );
+      assertStdoutEmpty(
+        result,
+        `${label} — without JSON output in effect, an exit-2 error leaves ` +
+          `standard output empty (SPEC 12.0, H-5)`,
+      );
+      assertHumanErrorMessageCarries(
+        result,
+        J6_JOURNAL_ERROR,
+        `${label} — the standard-error message, the exit-2 error's only ` +
+          `report, carries condition 13's stable code and concerned path ` +
+          `(SPEC 12.0, 14, 14.13; TEST-SPEC T12.0-15, H-5)`,
+      );
+    },
+    `${label}: modifies nothing — no session written; sources, journal, ` +
+      `derived files, and graph data byte-identical (SPEC 6.3, 10.7, 12.0)`,
+  );
+}
+
+/**
+ * One T6.3-6 staging at both baseline-taking commands, from the workspace
+ * root: `impact --base <ref>`, then `review create --base <ref> --name n`,
+ * each the journal error (`expectJournalErrorAt`) and — `human` set, (a) —
+ * then its human form (`expectHumanJournalErrorAt`). `why` says what
+ * besides the journal error stands in the workspace.
+ */
+async function expectJournalErrorAtBothCommands(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  ref: string,
+  why: string,
+  context: string,
+  human: boolean,
+): Promise<void> {
+  const commands: readonly (readonly string[])[] = [
+    ["impact", "--base", ref],
+    ["review", "create", "--base", ref, "--name", J6_SESSION],
+  ];
+  for (const argv of commands) {
+    await expectJournalErrorAt(product, workspace, argv, why, context);
+    if (human) {
+      await expectHumanJournalErrorAt(product, workspace, argv, context);
+    }
+  }
+}
+
+const T6_3_6 = defineProductTest({
+  id: "T6.3-6",
+  title:
+    "a given baseline's journal read: `impact --base` and `review create --base … --name n` read the current journal before any other cause can fail the resolution, a journal error there failing it as a usage error that carries condition 13's code and path — a garbage line appended to a journal the product wrote, on valid sources, makes each exit 2 with the error document's `code` `journal-error`, `path` `.xspec/journal`, and `locations` [] (without `--json`: standard output empty, the standard-error message carrying the code and the path); the same journal error beside an unresolvable ref (`--base nope`) and beside a configuration inside no repository's working tree (`--base HEAD`) is still `journal-error`, never the code-less error; and beside sources failing `build`'s validations exits 2 with `journal-error`, never the gate's exit 1 — every run modifying nothing, no session written (SPEC 6.3, 10.7, 12.0, 12.7, 14.13)",
+  run: async (product) => {
+    // --- (a) The journal error on valid sources ---
+    await withWorkspace(
+      { "xspec.config.ts": SPECS_ONLY_CONFIG, [J6_FILE]: J6_SOURCE },
+      async (workspace) => {
+        const context = "T6.3-6 (a) journal-error arm";
+        const c1 = await stageRepositoryAtC1(product, workspace, context);
+        await appendGarbageLine(workspace, context);
+        await expectJournalErrorAtBothCommands(
+          product,
+          workspace,
+          c1,
+          "the sources and the ref are valid, so the journal error is the " +
+            "one cause failing the resolution",
+          context,
+          true,
+        );
+      },
+    );
+
+    // --- (b) The journal error beside an unresolvable ref ---
+    await withWorkspace(
+      { "xspec.config.ts": SPECS_ONLY_CONFIG, [J6_FILE]: J6_SOURCE },
+      async (workspace) => {
+        const context = "T6.3-6 (b) unresolvable-ref arm";
+        await workspace.gitInit();
+        await buildAndRename(product, workspace, context);
+        await workspace.gitCommitAll("a commit, so the repository is real");
+        await appendGarbageLine(workspace, context);
+        await expectJournalErrorAtBothCommands(
+          product,
+          workspace,
+          J6_UNRESOLVABLE_REF,
+          `the ref ${J6_UNRESOLVABLE_REF} resolves to no commit, and the ` +
+            `journal is read first — a product resolving the ref before ` +
+            `reading the journal reports the code-less error instead`,
+          context,
+          false,
+        );
+      },
+    );
+
+    // --- (b) The journal error beside a configuration inside no
+    // repository's working tree (T6.3-5(c)'s staging) ---
+    await withWorkspace(
+      { "xspec.config.ts": SPECS_ONLY_CONFIG, [J6_FILE]: J6_SOURCE },
+      async (workspace) => {
+        const context = "T6.3-6 (b) no-repository arm";
+        // H-1's ancestor precondition (module header), before the arm's
+        // first invocation.
+        await assertSelfContainedRoot(product, workspace.root, context);
+        await buildAndRename(product, workspace, context);
+        await appendGarbageLine(workspace, context);
+        await expectJournalErrorAtBothCommands(
+          product,
+          workspace,
+          "HEAD",
+          "the configuration file lies inside no repository's working " +
+            "tree, and the journal is read first — a product discovering " +
+            "the repository before reading the journal reports the " +
+            "code-less error instead",
+          context,
+          false,
+        );
+      },
+    );
+
+    // --- (d) The journal error beside sources failing `build`'s
+    // validations ---
+    await withWorkspace(
+      { "xspec.config.ts": SPECS_ONLY_CONFIG, [J6_FILE]: J6_SOURCE },
+      async (workspace) => {
+        const context = "T6.3-6 (d) invalid-sources arm";
+        const c1 = await stageRepositoryAtC1(product, workspace, context);
+        await workspace.file(J6_FILE, J6_INVALID_SOURCE);
+        // Staging premise: the current sources really fail build validation
+        // — a product masking the given baseline behind the gate exits 1
+        // with these findings instead.
+        const findings = await buildFindings(
+          product,
+          workspace,
+          `${context}: \`build --json\` premise — the current sources fail ` +
+            `build validation (an unresolved d reference, SPEC 14.5)`,
+        );
+        if (findings.length === 0) {
+          fail(
+            `${context}: staging premise — the failing \`build\` must ` +
+              `report at least one validation finding (SPEC 14)`,
+          );
+        }
+        await appendGarbageLine(workspace, context);
+        await expectJournalErrorAtBothCommands(
+          product,
+          workspace,
+          c1,
+          "the current sources also fail `build`'s validations, yet a given " +
+            "baseline is never masked by the gate — never exit 1 with its " +
+            "findings (SPEC 12.0, 13.3)",
+          context,
+          false,
+        );
+      },
+    );
+  },
+});
+
 /** TEST-SPEC §6.3, in canonical ID order (SUITE-23). */
 export const section63Tests: readonly ProductTestEntry[] = [
   T6_3_1,
@@ -1992,4 +2444,5 @@ export const section63Tests: readonly ProductTestEntry[] = [
   T6_3_3,
   T6_3_4,
   T6_3_5,
+  T6_3_6,
 ];
