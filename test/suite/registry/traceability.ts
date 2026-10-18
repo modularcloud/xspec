@@ -407,7 +407,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T7-3": ["7", "7.1", "7.2", "14"],
   "T7-4": ["7", "2.4", "11.6", "14"],
   "T7-5": ["7"],
-  "T7-6": ["7", "13.4", "14"],
+  // T7-6: its single-casing arms the byte-wise, case-sensitive name tests
+  // of 13.4's source exclusion (12.0: no case folding), each discovered
+  // code source listed in `inventory`'s `sources` with its group
+  // membership (11.6).
+  "T7-6": ["7", "11.6", "12.0", "13.4", "14"],
   "T7.1-1": ["7.1", "14"],
   "T7.2-1": ["7.2", "14"],
   "T7.3-1": ["7.3", "14"],

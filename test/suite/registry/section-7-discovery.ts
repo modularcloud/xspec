@@ -62,11 +62,16 @@
 // TypeScript — nothing occupies the emit destination until `build` emits
 // it — so its workspace passes `build`'s validations with 13.4's exclusion
 // lifted as well, and a product lifting it fails those observations, never
-// that `build`. Its invalid-source arm and that arm's control observe
-// through `check --json` (12.2) alone, each over a workspace staged from
-// scratch that fails `build`'s validations and on which no `build` runs —
-// so no record exists (13.3) and `check` reports exactly the validation
-// findings (CONF-DISC's constraint for those two).
+// that `build`. Its invalid-source arm, that arm's control, and its
+// extension twin observe through `check --json` (12.2) alone, each over a
+// workspace staged from scratch that fails `build`'s validations and on
+// which no `build` runs — so no record exists (13.3) and `check` reports
+// exactly the validation findings (CONF-DISC's constraint for those
+// three). Its single-casing arms are code-side alone, each on a workspace
+// of its own passing `build`'s validations: after `build`, `inventory
+// --json` (11.6) lists the code source as the whole `sources` listing and
+// `query edges --from <path>` answers exit 0 for its whole-file location
+// (CONF-DISC's constraint for those two).
 //
 // Conservative operationalizations (H-3/H-4):
 // - Listing comparisons sort both sides bytewise by file path: these tests
@@ -82,6 +87,12 @@
 //   written between the configuration literal's quotes with its single
 //   backslash, built from the code point: the literal is read verbatim
 //   (SPEC 2.4), so a doubled backslash would spell a different glob.
+// - T7-6's `.XSPEC/a.ts` single-casing arm is gated to the Linux leg by
+//   T7-6's own text, where `.XSPEC` is a directory of its own rather than
+//   the graph-data area — a case-insensitive filesystem makes the two one
+//   directory, so the staged source would lie in the area `build` writes;
+//   the gate sits inside the body, and the `src/a.XSPEC.ts` arm runs on
+//   every leg.
 // - T7-5 runs `ids` once over one workspace holding every link arm; the
 //   invocation is wrapped so a failure to complete — a discovery hang on the
 //   staged symlink cycle, killed by the subprocess driver's timeout (H-8) —
@@ -98,11 +109,16 @@
 //   test/self/s9-staged-sources.test.ts before any product exists: the
 //   minimal `a` and `b` sources are section-7-basics.ts's shared records,
 //   `c`, `m`, and `n` this module's, and the sources of T7-6's
-//   invalid-source and import arms their own. Each body's first workspace
-//   (T7-4's semantics probes, T7-5's link workspace, T7-6's exclusion
-//   workspace) precedes any invocation and stays plain; the files T7-4 and
-//   T7-5 write beside the root (`stageBesideRoot`, a raw write outside the
-//   builder) stay strings — `x/M.mdx` the one the `m` record is made from.
+//   invalid-source and import arms their own — the invalid-source arm's
+//   `<S id="a">A</S>` record staged by the extension twin too, at
+//   `specs/A.txt`: a record at a path not named `.mdx` declares that path
+//   an MDX source for its own write, as a spec-group file without `.mdx`
+//   is, its content judged by 14.20 whatever its name (11.2). Each body's
+//   first workspace (T7-4's semantics probes, T7-5's link workspace, T7-6's
+//   exclusion workspace) precedes any invocation and stays plain; the files
+//   T7-4 and T7-5 write beside the root (`stageBesideRoot`, a raw write
+//   outside the builder) stay strings — `x/M.mdx` the one the `m` record is
+//   made from.
 // - TypeScript staged-source records (TEST-SPEC S-9's TypeScript and
 //   timing clauses; helpers/staged-ts.ts): every configuration file and
 //   code source a body stages in a workspace created after its first
@@ -111,17 +127,20 @@
 //   path the Windows leg reruns, E-6), T7-6's arms past (a) — is a ledger
 //   record carrying its S-9 declaration, judged by
 //   test/self/s9-staged-sources.test.ts before any product exists: T7-6's
-//   `specs/a'b.md` holding `)` unparseable (14.20 — the record makes the
-//   path judged, a name the default does not reach), every other
-//   well-formed. Arms staged from a module-level spelling table (T7-4's
-//   outside-root patterns and inside-root spellings) carry one record per
-//   row, made at module load. The same first workspaces stay plain, and
-//   so does `x/M.mdx`'s raw write; the literal-backslash records' bytes
-//   and paths are built from the code point as before.
+//   `)` — staged at `specs/a'b.md` by the invalid-source arm and its
+//   control, and at `specs/A.md` and `specs/A.txt.md` by the extension
+//   twin — unparseable (14.20 — the record makes each path judged, a name
+//   the default does not reach), every other well-formed. Arms staged from
+//   a module-level spelling table (T7-4's outside-root patterns and
+//   inside-root spellings) carry one record per row, made at module load.
+//   The same first workspaces stay plain, and so does `x/M.mdx`'s raw
+//   write; the literal-backslash records' bytes and paths are built from
+//   the code point as before.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import type { Finding } from "../../helpers/adapters/index.js";
 import {
   decodeEdgesReport,
   decodeIdsReport,
@@ -1305,13 +1324,18 @@ const CODE_EXCLUDED: readonly {
 const INVALID_SOURCE_PATH = "specs/a'b.mdx";
 const INVALID_SOURCE_DESTINATION = "specs/a'b.md";
 
-/** T7-6's invalid-source configuration, emission enabled or disabled. */
-function invalidSourceConfig(emit: boolean): string {
+/**
+ * T7-6's configuration over a code group globbing `specs/*.md`: the one
+ * spec group `main` globbing `specGlob` and emission next to sources,
+ * enabled or disabled — the invalid-source arm's and its control's
+ * (`specs/*.mdx`) and the extension twin's (`specs/*.txt`, enabled).
+ */
+function mdCodeGroupConfig(specGlob: string, emit: boolean): string {
   return `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
-    main: ["specs/*.mdx"]
+    main: ["${specGlob}"]
   },
   code: {
     impl: ["specs/*.md"]
@@ -1325,35 +1349,267 @@ export default defineConfig({
 // (module header): T7-6 stages both after its first product invocation.
 const INVALID_SOURCE_EMIT_CONFIG = stagedTs(
   "T7-6 xspec.config.ts (the invalid-source arm: emission enabled)",
-  invalidSourceConfig(true),
+  mdCodeGroupConfig("specs/*.mdx", true),
 );
 const INVALID_SOURCE_NO_EMIT_CONFIG = stagedTs(
   "T7-6 xspec.config.ts (the invalid-source control: emission disabled)",
-  invalidSourceConfig(false),
+  mdCodeGroupConfig("specs/*.mdx", false),
 );
 
-/** specs/a'b.mdx's content, exactly as T7-6 spells it. */
+/** The invalid spec-group file's content, exactly as T7-6 spells it at
+ * both of its stagings: the invalid-source arm's and its control's
+ * specs/a'b.mdx, and the extension twin's specs/A.txt — its record at a
+ * path not named `.mdx` declaring that path an MDX source (module header). */
 const INVALID_SOURCE = stagedMdx(
-  "T7-6 specs/a'b.mdx (the invalid-source arm and its control: `'` in a " +
-    "spec-group path, 7.1)",
+  'T7-6 <S id="a">A</S> ' +
+    "(the invalid-source arm's and its control's specs/a'b.mdx, `'` in a " +
+    "spec-group path, 7.1; the extension twin's specs/A.txt, a spec-group " +
+    "file without .mdx, 14.19)",
   '<S id="a">A</S>',
 );
 
-/** specs/a'b.md's content, exactly as T7-6 spells it: no well-formed
- * TypeScript (14.20). The control's condition-20 window is spelled from it,
- * and its staged-source record below is made from it. */
-const UNPARSEABLE_DESTINATION = ")";
+/** The code-group files' content, exactly as T7-6 spells it — specs/a'b.md
+ * in the invalid-source arm and its control, specs/A.md and specs/A.txt.md
+ * in the extension twin: no well-formed TypeScript (14.20), and no
+ * well-formed file begins with it, so 14.20's one zero-length range sits at
+ * offset 0 (SPEC 14). The condition-20 windows are spelled from it, and its
+ * staged-source record below is made from it. */
+const UNPARSEABLE_CODE = ")";
 
-/** S-9: specs/a'b.md, a name the default does not reach, is declared
- * unparseable TypeScript (14.20) — T7-6's own words — by its staged-source
- * record (module header; the record makes the path judged): the arm and its
- * control stage it, both after T7-6's first product invocation. */
-const UNPARSEABLE_DESTINATION_SOURCE = stagedTs(
-  "T7-6 specs/a'b.md (the invalid-source arm and its control: `)`, no " +
-    "well-formed TypeScript, 14.20)",
-  UNPARSEABLE_DESTINATION,
+/** S-9: each path T7-6 stages `)` at, a name the default does not reach,
+ * is declared unparseable TypeScript (14.20) — T7-6's own words — by this
+ * staged-source record (module header; the record makes each path judged):
+ * the invalid-source arm and its control stage it at specs/a'b.md, the
+ * extension twin at specs/A.md and specs/A.txt.md, each after T7-6's first
+ * product invocation. */
+const UNPARSEABLE_CODE_SOURCE = stagedTs(
+  "T7-6 `)` (the invalid-source arm's and its control's specs/a'b.md; the " +
+    "extension twin's specs/A.md and specs/A.txt.md: no well-formed " +
+    "TypeScript, 14.20)",
+  UNPARSEABLE_CODE,
   "unparseable",
 );
+
+// The extension twin (SPEC 7.3, 13.1, 13.4, 7.1, 14.19, 14.20, 12.2): a
+// spec-group file without the `.mdx` extension emits nothing and
+// contributes none (7.3) — per-source derived paths follow the `NAME.mdx`
+// name shape alone, so it has no generated-module path and no Markdown
+// emit destination (13.1). Staged separately, as T7-6 pins it: emission
+// next to sources, the spec glob `specs/*.txt`, a code group globbing
+// `specs/*.md`, and
+//
+//   specs/A.txt      holding `<S id="a">A</S>` — a spec-group file without
+//                    `.mdx` (14.19)
+//   specs/A.md       a plain file holding `)`, no well-formed TypeScript
+//                    (14.20) — the destination a product replacing
+//                    specs/A.txt's extension derives
+//   specs/A.txt.md   the same — the destination a product suffixing it
+//                    derives
+//
+// `specs/*.txt` matches neither `.md` file and `specs/*.md` does not match
+// specs/A.txt, so no file lies in both kinds of group (7.2's 14.14 stays
+// dormant). No emit destination arises from specs/A.txt, so 13.4 excludes
+// neither `.md` file: the code group discovers both, and `check` reports
+// specs/A.txt's condition 19 and a condition-20 finding for each, exactly
+// as with emission disabled — a product deriving a Markdown destination for
+// specs/A.txt by replacing or suffixing its extension excludes one of them
+// from discovery and misses its condition 20, the presence of both being
+// the twin's positive observation of the code glob's reach.
+//
+// Observed as the invalid-source arm is: staged from scratch, the
+// workspace fails `build`'s validations and no `build` runs on it, so no
+// record exists (13.3) and `check` reports exactly `build`'s validation
+// findings (12.2) — the CERTIFICATIONS.md CONF-DISC staging constraint for
+// the twin. No staged path is one the 13.4 exclusion reaches, so
+// VIOL-DISC-DERIVED leaves the twin unmoved; nothing is a symbolic link and
+// no glob carries a bracket or brace (the VIOL-DISC-SYMLINK and
+// VIOL-DISC-DIALECT staging constraints).
+const EXTENSION_TWIN_SPEC_FILE = "specs/A.txt";
+
+/** The twin's code-group files, each with the derivation that excludes it. */
+const EXTENSION_TWIN_CODE_FILES: readonly {
+  readonly path: string;
+  readonly derivation: string;
+}[] = [
+  { path: "specs/A.md", derivation: "replacing its extension" },
+  { path: "specs/A.txt.md", derivation: "suffixing its extension" },
+];
+
+// The twin's configuration, a staged-source record (module header): T7-6
+// stages it after its first product invocation.
+const EXTENSION_TWIN_CONFIG = stagedTs(
+  "T7-6 xspec.config.ts (the extension twin: emission enabled, the spec " +
+    "glob specs/*.txt)",
+  mdCodeGroupConfig("specs/*.txt", true),
+);
+
+// The single-casing arms (SPEC 13.4, 12.0, 7, 7.2, 11.6, 11.1): the
+// exclusion's name tests are byte-wise and case-sensitive — 12.0 compares
+// every path byte-wise, with no case folding — so a code source whose name
+// spells `.xspec.`, or whose path spells `.xspec/`, in another casing is no
+// derived file and is discovered like any other match. Code-side alone,
+// each on a workspace of its own passing `build`'s validations (the
+// CERTIFICATIONS.md CONF-DISC staging constraint for these arms), declaring
+// no spec group (`specs: {}`, valid with zero sources, SPEC 7) and the one
+// code group `impl`:
+//
+//   src/a.XSPEC.ts  under `src/*.ts` — its name carries `.XSPEC.`, never
+//                   `.xspec.`
+//   .XSPEC/a.ts     under `.XSPEC/*.ts`, its leading `.` spelled (7) — on
+//                   the Linux leg alone, where `.XSPEC` is a directory of
+//                   its own rather than the graph-data area (module header)
+//
+// each holding the one well-formed `.ts` source below, spelling no marker,
+// `text` call, or module-linking form (CONF-DISC's scope). After `build`,
+// each is discovered: `inventory --json` (11.6) lists it as the whole
+// `sources` listing — the one code glob matches it alone and no spec group
+// is declared — under its group `impl` of kind `code`, and `query edges
+// --from <path>` (11.1), T7-3's idiom for code discovery, answers exit 0
+// with its empty edge enumeration — never the usage error of a path in no
+// configured group (12.0), which a product folding case in the exclusion
+// meets, its `inventory` listing nothing. No spec source generates a module,
+// so `build` writes graph data under `.xspec/` alone, which neither code
+// glob reaches: VIOL-DISC-DERIVED leaves these arms unmoved; nothing is a
+// symbolic link and no glob carries a bracket or brace (the
+// VIOL-DISC-SYMLINK and VIOL-DISC-DIALECT staging constraints). The arms'
+// configurations and their one code source are staged-source records
+// (module header): T7-6 stages them after its first product invocation.
+const CASED_CODE_GROUP = "impl";
+
+/** One single-casing arm: its code glob, source path, and configuration. */
+interface CasedCodeArm {
+  /** The code glob, its casing as T7-6 spells it. */
+  readonly glob: string;
+  /** The code source's workspace-relative path. */
+  readonly path: string;
+  /** What the path spells in place of the lowercase name (diagnostics). */
+  readonly casing: string;
+  /** The arm's configuration, a staged-source record. */
+  readonly config: StagedTs;
+}
+
+/** A configuration declaring no spec group and the code group `impl`
+ * globbing `glob` alone (SPEC 7: `specs` required, valid with no group). */
+function casedCodeConfig(glob: string): string {
+  return `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {},
+  code: {
+    ${CASED_CODE_GROUP}: ["${glob}"]
+  }
+})
+`;
+}
+
+/** The arms' one code source: well-formed, no marker, spec import, or text
+ * call. */
+const CASED_CODE_SOURCE = stagedTs(
+  "T7-6 src/a.XSPEC.ts and .XSPEC/a.ts (the single-casing arms: the " +
+    "discovered code source)",
+  "export const cased = 1;\n",
+);
+
+const CASED_NAME_ARM: CasedCodeArm = {
+  glob: "src/*.ts",
+  path: "src/a.XSPEC.ts",
+  casing: "its name carries `.XSPEC.`, never `.xspec.`",
+  config: stagedTs(
+    "T7-6 xspec.config.ts (the single-casing arm src/a.XSPEC.ts: the code " +
+      "group globbing src/*.ts)",
+    casedCodeConfig("src/*.ts"),
+  ),
+};
+
+const CASED_DIRECTORY_ARM: CasedCodeArm = {
+  glob: ".XSPEC/*.ts",
+  path: ".XSPEC/a.ts",
+  casing:
+    "it lies under `.XSPEC/`, a directory of its own on the Linux leg, " +
+    "never under `.xspec/`",
+  config: stagedTs(
+    "T7-6 xspec.config.ts (the single-casing arm .XSPEC/a.ts, Linux leg: " +
+      "the code group globbing .XSPEC/*.ts)",
+    casedCodeConfig(".XSPEC/*.ts"),
+  ),
+};
+
+/**
+ * One T7-6 single-casing arm (the constants above): on a workspace of its
+ * own passing `build`'s validations, the code source is discovered —
+ * `inventory --json` lists it as the whole `sources` listing under its
+ * code group, and `query edges --from <path>` answers exit 0 with its empty
+ * edge enumeration (SPEC 13.4, 12.0, 7, 11.6, 11.1).
+ */
+async function expectCasedCodeSourceDiscovered(
+  product: ProductBinding,
+  arm: CasedCodeArm,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": arm.config,
+        [arm.path]: CASED_CODE_SOURCE,
+      },
+    },
+    async (workspace) => {
+      const context = `T7-6 (single-casing arm: ${arm.path} under ${arm.glob})`;
+      await buildOk(
+        product,
+        workspace,
+        `${context}: \`build\` — the workspace passes build's validations: ` +
+          `${arm.path} is a well-formed code source (SPEC 7.2, 13.4)`,
+      );
+      const inventoryLabel = `${context} \`inventory --json\``;
+      const inventory = decodeInventoryDocument(
+        await runJson(
+          product,
+          workspace,
+          ["inventory", "--json"],
+          inventoryLabel,
+        ),
+        inventoryLabel,
+      );
+      assertSameJson(
+        inventory.sources,
+        [
+          {
+            path: arm.path,
+            groups: [{ name: CASED_CODE_GROUP, kind: "code" }],
+          },
+        ],
+        `${inventoryLabel}: ${arm.path} is discovered — ${arm.casing}, and ` +
+          `13.4's name tests are byte-wise and case-sensitive (12.0), so ` +
+          `the exclusion never reaches it; the one code glob matches it ` +
+          `alone and no spec group is declared, so it is the whole ` +
+          `\`sources\` listing, under its group ${CASED_CODE_GROUP} of kind ` +
+          `code (SPEC 7, 13.4, 12.0, 11.6) — a product folding case in the ` +
+          `exclusion lists nothing`,
+      );
+      const queryLabel = `${context} \`query edges --from ${arm.path}\``;
+      const edges = decodeEdgesReport(
+        await runJson(
+          product,
+          workspace,
+          ["query", "edges", "--from", arm.path],
+          `${queryLabel} — the discovered code source's whole-file ` +
+            `location is a graph node, so the query answers (SPEC 7.2, ` +
+            `4.6, 11.1) — never the usage error of a path in no configured ` +
+            `group (12.0), which a product folding case in the exclusion ` +
+            `meets`,
+        ),
+        queryLabel,
+      );
+      assertEdgeSetEqual(
+        edges,
+        [],
+        `${queryLabel}: the edge enumeration is empty — ${arm.path} spells ` +
+          `no marker, spec-module import, or text call, so its whole-file ` +
+          `location sources no edge (SPEC 4.3, 4.5, 4.6, 5.2)`,
+      );
+    },
+  );
+}
 
 // Import arms (SPEC 2.1/7: imports resolve references between files but
 // never add files to the workspace — the designated file must already be a
@@ -1413,9 +1669,17 @@ const T7_6 = defineProductTest({
     "are never discovered as sources of a spec or a code group even when " +
     "globs match them — the code side observed through `query edges " +
     "--from`, the invalid source's destination through `check` beside " +
-    "its emission-disabled control; an import never adds an unmatched " +
-    "file (14.15); a no-match group and empty specs/code maps are valid " +
-    "with zero sources (SPEC 7, 13.4, 13.1, 7.3, 2.1, 11.1, 12.2)",
+    "its emission-disabled control; the extension twin's spec-group file " +
+    "specs/A.txt, lacking `.mdx`, has no emit destination, so with " +
+    "emission enabled `check` reports exactly its 14.19 and a 14.20 for " +
+    "each of specs/A.md and specs/A.txt.md, neither excluded; the " +
+    "exclusion's name tests are byte-wise and case-sensitive — " +
+    "src/a.XSPEC.ts under src/*.ts and, on the Linux leg, .XSPEC/a.ts " +
+    "under .XSPEC/*.ts are each discovered, listed in `inventory`'s " +
+    "sources and answering `query edges --from` exit 0; an import never " +
+    "adds an unmatched file (14.15); a no-match group and empty " +
+    "specs/code maps are valid with zero sources (SPEC 7, 13.4, 13.1, " +
+    "7.3, 2.1, 11.1, 11.6, 12.0, 12.2)",
   run: async (product) => {
     // (a) Derived-file exclusion, before and after a `build`.
     await withWorkspace(
@@ -1567,7 +1831,7 @@ const T7_6 = defineProductTest({
         files: {
           "xspec.config.ts": INVALID_SOURCE_EMIT_CONFIG,
           [INVALID_SOURCE_PATH]: INVALID_SOURCE,
-          [INVALID_SOURCE_DESTINATION]: UNPARSEABLE_DESTINATION_SOURCE,
+          [INVALID_SOURCE_DESTINATION]: UNPARSEABLE_CODE_SOURCE,
         },
       },
       async (workspace) => {
@@ -1625,7 +1889,7 @@ const T7_6 = defineProductTest({
         files: {
           "xspec.config.ts": INVALID_SOURCE_NO_EMIT_CONFIG,
           [INVALID_SOURCE_PATH]: INVALID_SOURCE,
-          [INVALID_SOURCE_DESTINATION]: UNPARSEABLE_DESTINATION_SOURCE,
+          [INVALID_SOURCE_DESTINATION]: UNPARSEABLE_CODE_SOURCE,
         },
       },
       async (workspace) => {
@@ -1659,13 +1923,97 @@ const T7_6 = defineProductTest({
           findings.find((finding) => finding.condition === "14.20")!,
           {
             file: INVALID_SOURCE_DESTINATION,
-            window: byteWindow("", UNPARSEABLE_DESTINATION),
+            window: byteWindow("", UNPARSEABLE_CODE),
           },
           `${context}: the condition-20 finding locates the parse failure ` +
             `in ${INVALID_SOURCE_DESTINATION} (SPEC 14, 14.20)`,
         );
       },
     );
+
+    // The extension twin (fixture comment above): emission enabled, but
+    // specs/A.txt, a spec-group file without `.mdx`, has no emit destination
+    // (7.3, 13.1), so 13.4 excludes neither `.md` file — `check` reports
+    // exactly specs/A.txt's condition 19 and a condition-20 finding for each.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": EXTENSION_TWIN_CONFIG,
+          [EXTENSION_TWIN_SPEC_FILE]: INVALID_SOURCE,
+          ...Object.fromEntries(
+            EXTENSION_TWIN_CODE_FILES.map((file) => [
+              file.path,
+              UNPARSEABLE_CODE_SOURCE,
+            ]),
+          ),
+        },
+      },
+      async (workspace) => {
+        const context =
+          "T7-6 (extension twin: emission enabled, specs/A.txt a spec-group " +
+          "file without .mdx) `check --json`";
+        const findings = await runFindingsReport(
+          product,
+          workspace,
+          ["check", "--json"],
+          1,
+          `${context} — the workspace fails build's validations (14.19, ` +
+            `14.20), so check exits 1 with its findings report (SPEC 12.2, ` +
+            `12.0)`,
+        );
+        const conditionTwentyFor = (file: string): Finding | undefined =>
+          findings.find(
+            (finding) =>
+              finding.condition === "14.20" &&
+              finding.locations.some((location) => location.file === file),
+          );
+        for (const file of EXTENSION_TWIN_CODE_FILES) {
+          if (conditionTwentyFor(file.path) === undefined) {
+            fail(
+              `${context}: no condition-20 finding for ${file.path} — ` +
+                `${EXTENSION_TWIN_SPEC_FILE}, lacking .mdx, emits nothing ` +
+                `and has no Markdown emit destination (per-source derived ` +
+                `paths follow the NAME.mdx name shape alone, SPEC 7.3, ` +
+                `13.1), so 13.4 excludes neither .md file and the code ` +
+                `group discovers ${file.path}, whose \`)\` is no well-formed ` +
+                `TypeScript (14.20); a product deriving a Markdown ` +
+                `destination for ${EXTENSION_TWIN_SPEC_FILE} by ` +
+                `${file.derivation} excludes ${file.path} from discovery`,
+            );
+          }
+        }
+        assertConditionCounts(
+          findings,
+          { "14.19": 1, "14.20": 2 },
+          `${context}: exactly three findings — ${EXTENSION_TWIN_SPEC_FILE}'s ` +
+            `condition 19 (a spec-group file without .mdx, SPEC 7.1) and a ` +
+            `condition-20 finding for each .md file, as with emission ` +
+            `disabled, no emit destination arising from the file (SPEC 7.3, ` +
+            `13.1, 13.4, 14.19, 14.20)`,
+        );
+        assertFindingConcernsPath(
+          findings.find((finding) => finding.condition === "14.19")!,
+          EXTENSION_TWIN_SPEC_FILE,
+          `${context}: the condition-19 finding`,
+        );
+        for (const file of EXTENSION_TWIN_CODE_FILES) {
+          assertFindingLocated(
+            conditionTwentyFor(file.path)!,
+            { file: file.path, window: byteWindow("", UNPARSEABLE_CODE) },
+            `${context}: ${file.path}'s condition-20 finding locates the ` +
+              `parse failure in ${file.path} (SPEC 14, 14.20)`,
+          );
+        }
+      },
+    );
+
+    // The single-casing arms (fixture comment above): src/a.XSPEC.ts on
+    // every leg and, on the Linux leg alone (module header), .XSPEC/a.ts —
+    // each discovered, 13.4's name tests being byte-wise and case-sensitive.
+    await expectCasedCodeSourceDiscovered(product, CASED_NAME_ARM);
+    if (process.platform === "linux") {
+      await expectCasedCodeSourceDiscovered(product, CASED_DIRECTORY_ARM);
+    }
 
     // (b) An import never adds an unmatched file: other/unlisted.mdx exists
     // on disk and the specifier resolves to it against the importing file's
