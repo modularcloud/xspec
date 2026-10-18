@@ -24,7 +24,8 @@
 // parse-local, judged over spelled identities (11.2): a bearer whose node
 // identity is undefined (duplicate spellings; an undefined ancestor chain)
 // still establishes existence, a section spelling no identity (its `id`
-// attribute repeated) establishes none, and an old ID inside an unparseable
+// attribute repeated or in invalid value form, braced or valueless)
+// establishes none, and an old ID inside an unparseable
 // origin file is masked (14.20, 14); every other validation failure refuses
 // the rename (exit 1), the valid-workspace precondition included, before
 // modifying anything. A successful rename finishes by regenerating derived
@@ -38,6 +39,18 @@
 //   renamed nodes (`query node`), whose contains inventory the fixture pins
 //   completely — the workspace-wide `contains` inventory (root edges
 //   included) is §11's business, not this test's.
+// - T6.4-1 "an affected reference spelled twice included, in one `d` array
+//   and as two markers in one code source, every spelling rewritten":
+//   `specs/Refs.mdx`'s `twice` spells `Core.core.mid` twice in its `d`
+//   array and `src/app.ts` spells the marker `CORE.core.mid.leaf` twice —
+//   one edge each, two occurrences (SPEC 2.2, 5.2, 5.7) — and after the
+//   rename both files are compared byte-exactly against their composed
+//   post-rename bytes (templates over the renamed segment, as `r1Edges` is
+//   over the renamed identities): a product rewriting one spelling per
+//   edge, or collapsing or dropping a duplicate, fails there, while the
+//   exact edge sets pin one edge per twice-spelled reference.
+//   `specs/Core.mdx` gets the substring-level rewrite check alone, as every
+//   source does first (byte-exact edit content being T6.4-2's business).
 // - T6.4-1 "mapping appended to journal" uses the SUITE-21
 //   operationalization: the journal (absent before the first journaled
 //   operation, SPEC 6.1) exists as a plain file holding exactly one
@@ -135,11 +148,18 @@
 //   alone (exactly one 14.3 for duplicate spellings; exactly one 14.1 for
 //   the identity-less ancestor), located in the staged file, nothing
 //   modified — never exit 2: each staged bearer spells the old ID, so
-//   existence holds whatever its node identity. The spells-no-identity arm
-//   pins its staging premise first (`build --json` reports exactly one
-//   14.17 — a repeated `id` is condition 17, never 14.1, and spells no
-//   identity, SPEC 14, 11.2) so its exit-2 assertion demonstrably runs
-//   beside that file's findings.
+//   existence holds whatever its node identity. The spells-no-identity arms
+//   — the would-be bearer's `id` repeated on the tag, or, each on a
+//   workspace of its own, braced (`id={"x"}`, renaming `x`) or valueless
+//   (`<S id>`, renaming `true`, the value JSX gives a bare attribute) —
+//   each pin their staging premise first (`build --json` reports exactly
+//   one 14.17 — a repeated `id`, or one not in quoted static-string form,
+//   is condition 17, never 14.1, and spells no identity, SPEC 14, 11.2) so
+//   each exit-2 assertion demonstrably runs beside that file's finding: the
+//   usage error alone reported (H-5), inside a whole-root modifies-nothing
+//   compare, failing a product that reads the repeated value, the braced
+//   string, or the bare attribute's JSX value as a spelling (it finds the
+//   old ID and refuses the invalid workspace instead, exit 1).
 // - T6.4-5's move arm compares the product to itself across twin workspaces
 //   (H-6; H-4's product-to-itself exception for the journal's opaque entry):
 //   the twins differ only by the code file holding the `typeof` reference,
@@ -680,7 +700,16 @@ async function expectRenameUsageError(
 // of an edge). References to the affected identities cover every listed
 // surface: local string references (`d` and `text(...)` in the same file),
 // external chain references in another spec file (`d` and `text(...)`), and
-// a TS marker plus a TS `text(...)` call in a code file (SPEC 6.4).
+// TS markers plus a TS `text(...)` call in a code file (SPEC 6.4) — an
+// affected reference spelled twice among them (TEST-SPEC T6.4-1): `twice`'s
+// `d` array spells `Core.core.mid` twice, and `src/app.ts` spells the marker
+// `CORE.core.mid.leaf` twice. Duplicate references collapse to one edge
+// while each spelling stays a distinct occurrence (SPEC 2.2, 5.2, 5.7), so
+// every spelling is rewritten (6.4: every reference). The two files holding
+// them are templates over the renamed segment (`mid` staged, `hub` expected
+// after the rename), as `r1Edges` is over the renamed identities, so each
+// rewritten file's expected bytes are composed from SPEC 6.4's rules: only
+// the renamed segment's characters change.
 const R1_CORE = "specs/Core.mdx";
 const R1_REFS = "specs/Refs.mdx";
 const R1_APP = "src/app.ts";
@@ -708,22 +737,43 @@ const R1_CORE_SOURCE = [
   "",
 ].join("\n");
 
-const R1_REFS_SOURCE = [
-  'import Core from "./Core.xspec"',
-  "",
-  '<S id="refs" d={Core.core.mid}>',
-  "Refs embeds: {text(Core.core.mid.leaf)}",
-  "</S>",
-  "",
-].join("\n");
+/**
+ * Fixture R1's `specs/Refs.mdx`; `seg` spells the renamed segment (`mid`
+ * staged, `hub` after the rename). `refs` holds a single external `d`
+ * reference and an MDX `text(...)` target; `twice`'s `d` array spells one
+ * affected reference twice — one `depends` edge, two occurrences (SPEC 2.2,
+ * 5.2, 5.7).
+ */
+function r1RefsSource(seg: string): string {
+  return [
+    'import Core from "./Core.xspec"',
+    "",
+    `<S id="refs" d={Core.core.${seg}}>`,
+    `Refs embeds: {text(Core.core.${seg}.leaf)}`,
+    "</S>",
+    "",
+    `<S id="twice" d={[Core.core.${seg}, Core.core.${seg}]}>`,
+    "Twice text.",
+    "</S>",
+    "",
+  ].join("\n");
+}
 
-const R1_APP_SOURCE = [
-  'import CORE, { text } from "../specs/Core.xspec";',
-  "",
-  "CORE.core.mid.leaf;",
-  "text(CORE.core.mid);",
-  "",
-].join("\n");
+/**
+ * Fixture R1's `src/app.ts`; `seg` spells the renamed segment. The marker
+ * `CORE.core.<seg>.leaf` is spelled twice, around a TS `text(...)` call —
+ * one `references` edge, two occurrences (SPEC 4.5, 5.2, 5.7).
+ */
+function r1AppSource(seg: string): string {
+  return [
+    'import CORE, { text } from "../specs/Core.xspec";',
+    "",
+    `CORE.core.${seg}.leaf;`,
+    `text(CORE.core.${seg});`,
+    `CORE.core.${seg}.leaf;`,
+    "",
+  ].join("\n");
+}
 
 const R1_UNCHANGED_IDENTITIES = [
   "specs/Core.mdx",
@@ -732,6 +782,7 @@ const R1_UNCHANGED_IDENTITIES = [
   "specs/Core.mdx#core.plain",
   "specs/Refs.mdx",
   "specs/Refs.mdx#refs",
+  "specs/Refs.mdx#twice",
 ];
 const R1_PRE_IDENTITIES = [
   ...R1_UNCHANGED_IDENTITIES,
@@ -745,7 +796,9 @@ const R1_POST_IDENTITIES = [
 ];
 
 /** The fixture's complete dependency-kind edge sets, parameterized on the
- * renamed identities (`mid` pre-rename, `hub` post-rename). */
+ * renamed identities (`mid` pre-rename, `hub` post-rename). Each reference
+ * spelled twice records one edge (`twice`'s `depends`, the marker's
+ * `references`): edges of each kind form a set (SPEC 2.2, 5.2). */
 function r1Edges(
   subject: string,
   leaf: string,
@@ -759,6 +812,7 @@ function r1Edges(
       { from: subject, to: "specs/Core.mdx#core.plain", kind: "depends" },
       { from: "specs/Core.mdx#core.sib", to: subject, kind: "depends" },
       { from: "specs/Refs.mdx#refs", to: subject, kind: "depends" },
+      { from: "specs/Refs.mdx#twice", to: subject, kind: "depends" },
     ],
     embeds: [
       { from: "specs/Core.mdx#core.sib", to: leaf, kind: "embeds" },
@@ -790,14 +844,14 @@ async function assertDependencyEdges(
 const T6_4_1 = defineProductTest({
   id: "T6.4-1",
   title:
-    "rewrites: renaming a mid-tree ID rewrites its `id`, all descendant `id`s by prefix replacement, local string references, external chain references in other files, `text(...)` targets in MDX and TS, and TS markers — `check` clean after the rename (every rewritten reference resolves, no derived output stale), the workspace builds, all edges retarget (query-asserted), the mapping is appended to the journal, and the command's own report is the applied mapping — every journaled identity pair, the information of the preview's `mapping`, carried in JSON per 12.0 in the form-exact performed-operation document of 12.7; and the human `rename`, run on a byte copy of the pre-rename workspace, exits 0 alike and carries that mapping — every pair's `from` and `to` identity (robust matching, H-3) (SPEC 6.4, 6.6, 6.1, 12.0, 12.2, 12.7; TEST-SPEC T6.4-3; H-3 form-exact decode)",
+    "rewrites: renaming a mid-tree ID rewrites its `id`, all descendant `id`s by prefix replacement, local string references, external chain references in other files, `text(...)` targets in MDX and TS, and TS markers — an affected reference spelled twice included, in one `d` array and as two markers in one code source (one edge, two occurrences), every spelling rewritten, both files byte-equal to their composed post-rename bytes — `check` clean after the rename (every rewritten reference resolves, no derived output stale), the workspace builds, all edges retarget (query-asserted), the mapping is appended to the journal, and the command's own report is the applied mapping — every journaled identity pair, the information of the preview's `mapping`, carried in JSON per 12.0 in the form-exact performed-operation document of 12.7; and the human `rename`, run on a byte copy of the pre-rename workspace, exits 0 alike and carries that mapping — every pair's `from` and `to` identity (robust matching, H-3) (SPEC 6.4, 5.2, 5.7, 6.6, 6.1, 12.0, 12.2, 12.7; TEST-SPEC T6.4-3; H-3 form-exact decode)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
       {
         [R1_CORE]: R1_CORE_SOURCE,
-        [R1_REFS]: R1_REFS_SOURCE,
-        [R1_APP]: R1_APP_SOURCE,
+        [R1_REFS]: r1RefsSource("mid"),
+        [R1_APP]: r1AppSource("mid"),
       },
       async (workspace) => {
         await buildOk(
@@ -906,11 +960,18 @@ const T6_4_1 = defineProductTest({
         );
 
         // The rewrites, per source surface: stale spellings gone, rewritten
-        // spellings present (byte-exact edit content is T6.4-2's business).
+        // spellings present (byte-exact edit content is T6.4-2's business,
+        // but for the twice-spelled references below).
         for (const [rel, surface] of [
           [R1_CORE, "`id` attributes and local string references"],
-          [R1_REFS, "external chain references and the MDX `text(...)` target"],
-          [R1_APP, "the TS marker and the TS `text(...)` target"],
+          [
+            R1_REFS,
+            "external chain references, one spelled twice in a `d` array, and the MDX `text(...)` target",
+          ],
+          [
+            R1_APP,
+            "the TS markers, one reference spelled as two, and the TS `text(...)` target",
+          ],
         ] as const) {
           assertRewriteHappened(
             await readSourceText(workspace, rel, "T6.4-1 rewrite check"),
@@ -918,6 +979,36 @@ const T6_4_1 = defineProductTest({
             "core.mid",
             "core.hub",
             `T6.4-1 rewrite check (${surface})`,
+          );
+        }
+
+        // The affected references spelled twice — `twice`'s `d` array
+        // spelling `Core.core.mid` twice, and the marker `CORE.core.mid.leaf`
+        // spelled twice in `src/app.ts` — each spelling rewritten: the
+        // duplicates are one edge but two occurrences (SPEC 2.2, 5.2, 5.7),
+        // and the rename rewrites every reference (6.4), so neither file may
+        // keep a stale spelling, collapse the pair to one, or drop one. Both
+        // files must equal their post-rename composition byte for byte: a
+        // rewrite is a minimal in-place edit, so only the renamed segment's
+        // characters change (dot access kept, `hub` being a TS identifier;
+        // SPEC 6.4, 2.4).
+        for (const [rel, expected, spellings] of [
+          [
+            R1_REFS,
+            r1RefsSource("hub"),
+            "`twice`'s `d` array spelling `Core.core.mid` twice",
+          ],
+          [R1_APP, r1AppSource("hub"), "two `CORE.core.mid.leaf` markers"],
+        ] as const) {
+          await assertFileBytes(
+            workspace.path(rel),
+            expected,
+            `T6.4-1: ${rel} after the rename — every spelling of an affected ` +
+              `reference spelled twice (${spellings}) rewritten in place, ` +
+              `the duplicates one edge but two occurrences (SPEC 6.4: every ` +
+              `reference; 2.2, 5.2, 5.7), and nothing else changed: the file ` +
+              `must equal its post-rename composition byte for byte, only ` +
+              `the renamed segment's characters changing (SPEC 6.4, 2.4)`,
           );
         }
 
@@ -1006,14 +1097,19 @@ const T6_4_1 = defineProductTest({
               kind: "depends",
             },
             {
+              from: "specs/Refs.mdx#twice",
+              to: "specs/Core.mdx#core.hub",
+              kind: "depends",
+            },
+            {
               from: "src/app.ts",
               to: "specs/Core.mdx#core.hub",
               kind: "embeds",
             },
           ],
           "T6.4-1: the renamed node's incoming edges — `contains` from its " +
-            "parent and every dependency edge — retarget to the new identity " +
-            "(SPEC 6.4, 5.2)",
+            "parent and every dependency edge, the twice-spelled `d` " +
+            "reference's one — retarget to the new identity (SPEC 6.4, 5.2)",
         );
         assertEdgeSetEqual(
           hub.outgoingEdges,
@@ -1064,8 +1160,9 @@ const T6_4_1 = defineProductTest({
             },
           ],
           "T6.4-1: the re-identified descendant's incoming edges — MDX and " +
-            "TS `text(...)` targets and the TS marker — retarget to the new " +
-            "identity (SPEC 6.4, 5.2)",
+            "TS `text(...)` targets and the TS marker spelled twice, its " +
+            "one `references` edge — retarget to the new identity (SPEC " +
+            "6.4, 5.2)",
         );
         assertEdgeSetEqual(
           leaf.outgoingEdges,
@@ -1908,15 +2005,17 @@ const T6_4_3 = defineProductTest({
 // ---------------------------------------------------------------------------
 
 // T6.4-4's later arms — ordering, masking, duplicate spellings, undefined
-// ancestor, spells no identity — each stage a fresh workspace after the base
-// arm's invocations, so every `.mdx` source below is a ledger record wrapped
-// in place (S-9's before-any-product clause; helpers/staged-mdx.ts), the base
-// arm's — the body's first workspace — converted uniformly; a record an
-// exported set stages under T6.6-3 too is named with both. The masking arm's
-// unparseable origin carries its declaration on the record. T6.5-5's usage
-// stagings (section-6.5.ts) mirror these byte for byte, and identical bytes
-// are ONE record (S-9's naming rule), so the seven records below are exported
-// to that module and named with T6.5-5 too, never registered twice.
+// ancestor, spells no identity (repeated, braced, valueless) — each stage a
+// fresh workspace after the base arm's invocations, so every `.mdx` source
+// below is a ledger record wrapped in place (S-9's before-any-product clause;
+// helpers/staged-mdx.ts), the base arm's — the body's first workspace —
+// converted uniformly; a record an exported set stages under T6.6-3 too is
+// named with both. The masking arm's unparseable origin carries its
+// declaration on the record. T6.5-5's usage stagings (section-6.5.ts) mirror
+// seven of these `.mdx` records byte for byte (all but the braced and
+// valueless arms' two, T6.4-4's alone), and identical bytes are ONE record
+// (S-9's naming rule), so those seven are exported to that module and named
+// with T6.5-5 too, never registered twice.
 const U4_FILE = "specs/A.mdx";
 export const U4_SOURCE = stagedMdx(
   "T6.4-4/T6.5-5/T6.6-3 specs/A.mdx",
@@ -2025,13 +2124,36 @@ export const U4_ANC_SOURCE = stagedMdx(
 
 // The old ID's only would-be bearer spells no identity — its `id` attribute
 // repeated on the tag (11.2; condition 17, never 14.1) — so the old ID is
-// nonexistent: exit 2 even beside that file's findings.
+// nonexistent: exit 2, though that file carries findings, the usage error
+// alone reported.
 const U4_SOLO_FILE = "specs/Solo.mdx";
 export const U4_SOLO_SOURCE = stagedMdx(
   "T6.4-4/T6.5-5/T6.6-3 specs/Solo.mdx",
   ['<S id="solo" id="solo">', "Sole would-be bearer text.", "</S>", ""].join(
     "\n",
   ),
+);
+
+// The old ID's only would-be bearer spells no identity because its one `id`
+// attribute's value is not in the quoted static-string form (11.2: a value
+// in any other form, braced or valueless included, spells none; condition
+// 17, never 14.1): braced, `id={"x"}`, the old ID `x` its braced string's
+// value; and, separately, valueless, `<S id>`, the old ID `true` the value
+// JSX gives a bare attribute. Each old ID is nonexistent: exit 2, though the
+// file carries a 14.17 finding, the usage error alone reported — failing a
+// product that reads the braced string, or the bare attribute's JSX value,
+// as a spelling, which finds the old ID and refuses the invalid workspace
+// instead (exit 1). Neither section has children, so no masked 14.2 adds a
+// finding: each file's findings are exactly its one 14.17.
+const U4_BRACED_FILE = "specs/Braced.mdx";
+const U4_BRACED_SOURCE = stagedMdx(
+  "T6.4-4 braced-id arm specs/Braced.mdx",
+  ['<S id={"x"}>', "Braced would-be bearer text.", "</S>", ""].join("\n"),
+);
+const U4_VALUELESS_FILE = "specs/Valueless.mdx";
+const U4_VALUELESS_SOURCE = stagedMdx(
+  "T6.4-4 valueless-id arm specs/Valueless.mdx",
+  ["<S id>", "Valueless would-be bearer text.", "</S>", ""].join("\n"),
 );
 
 /**
@@ -2081,8 +2203,9 @@ export const RENAME_USAGE_ORDERING_FILES: Readonly<
 
 /**
  * T6.4-4's parse-local nonexistence staging (the sole would-be bearer spells
- * no identity — its `id` attribute repeated): the rename is exit 2 even
- * beside that file's findings. Exported for T6.6-3's preview variant; stage
+ * no identity — its `id` attribute repeated): the rename is exit 2, though
+ * that file carries findings, the usage error alone reported; the first of
+ * T6_4_4_SPELLS_NONE_ARMS. Exported for T6.6-3's preview variant; stage
  * under RENAME_REFUSAL_CONFIG (the same specs-only configuration) and pin
  * the one-14.17 premise before invoking.
  */
@@ -2097,10 +2220,53 @@ export const RENAME_SOLO_ARGV: readonly string[] = [
   "solo2",
 ];
 
+/**
+ * T6.4-4's parse-local nonexistence arms, each staged on a workspace of its
+ * own under RENAME_REFUSAL_CONFIG: an old ID whose only would-be bearer
+ * spells no identity (SPEC 6.4, 11.2) — its `id` attribute repeated on the
+ * tag, or, separately, its one `id` braced or valueless. Each file's
+ * findings are exactly one 14.17 (a repeated prop, or an `id` value not in
+ * quoted static-string form, is condition 17, never condition 1; SPEC 14),
+ * the premise each arm pins before its rename; each new ID is valid, so a
+ * product reading a spelling where none is finds the old ID and meets the
+ * invalid-workspace refusal (exit 1) instead of the usage error.
+ */
+const T6_4_4_SPELLS_NONE_ARMS: readonly {
+  /** The arm's label: the would-be bearer's `id` form. */
+  readonly form: string;
+  /** Why the would-be bearer spells no identity, for the diagnostics. */
+  readonly why: string;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  readonly argv: readonly string[];
+}[] = [
+  {
+    form: "repeated `id`",
+    why: "its `id` attribute repeated on the tag — a repeated prop",
+    files: RENAME_SOLO_FILES,
+    argv: RENAME_SOLO_ARGV,
+  },
+  {
+    form: 'braced `id={"x"}`, renaming `x`',
+    why:
+      "its one `id` braced — a value not in quoted static-string form, " +
+      "the braced string `x` no spelling",
+    files: { [U4_BRACED_FILE]: U4_BRACED_SOURCE },
+    argv: ["rename", U4_BRACED_FILE, "x", "x2"],
+  },
+  {
+    form: "valueless `<S id>`, renaming `true`",
+    why:
+      "its one `id` valueless — a value not in quoted static-string form, " +
+      "`true`, the value JSX gives a bare attribute, no spelling",
+    files: { [U4_VALUELESS_FILE]: U4_VALUELESS_SOURCE },
+    argv: ["rename", U4_VALUELESS_FILE, "true", "true2"],
+  },
+];
+
 const T6_4_4 = defineProductTest({
   id: "T6.4-4",
   title:
-    "usage errors (exit 2): a nonexistent `<file>` — absent on disk, or an `.mdx` present on disk but matched by no spec group (a file named in an argument exists as a member of the discovered set) — a nonexistent old ID, and a discovered code source as `<file>` — a wrong-kind operand, judged like existence before any content question — are usage errors checked before source validation, the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering); an old ID inside an unparseable origin file is masked — the validation findings are reported and the command exits 1; and old-ID existence is parse-local over spelled identities: an ID two sections both spell, or one whose sole bearer spells it beneath an ancestor spelling no identity, exists — the duplicate-ID or ancestor finding refuses instead (exit 1, never exit 2) — while an old ID whose only would-be bearer spells no identity (its `id` attribute repeated on the tag) is nonexistent, exit 2 even beside that file's findings (SPEC 6.4, 11.2, 12.0, 14, 14.20)",
+    'usage errors (exit 2): a nonexistent `<file>` — absent on disk, or an `.mdx` present on disk but matched by no spec group (a file named in an argument exists as a member of the discovered set) — a nonexistent old ID, and a discovered code source as `<file>` — a wrong-kind operand, judged like existence before any content question — are usage errors checked before source validation, the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering); an old ID inside an unparseable origin file is masked — the validation findings are reported and the command exits 1; and old-ID existence is parse-local over spelled identities: an ID two sections both spell, or one whose sole bearer spells it beneath an ancestor spelling no identity, exists — the duplicate-ID or ancestor finding refuses instead (exit 1, never exit 2) — while an old ID whose only would-be bearer spells no identity — its `id` attribute repeated on the tag, or, separately, braced (`id={"x"}`, renaming `x`) or valueless (`<S id>`, renaming `true`, the value JSX gives a bare attribute) — is nonexistent: exit 2, though that file carries a 14.17 finding, the usage error alone reported (the error document the entire stdout, no findings beside it), nothing modified (SPEC 6.4, 11.2, 12.0, 14, 14.20; H-5)',
   run: async (product) => {
     // --- Base arm: a valid workspace ---
     await withWorkspace(
@@ -2280,44 +2446,58 @@ const T6_4_4 = defineProductTest({
     );
 
     // --- Parse-local nonexistence: a would-be bearer spelling no
-    // identity ---
-    await withWorkspace(
-      RENAME_REFUSAL_CONFIG,
-      RENAME_SOLO_FILES,
-      async (workspace) => {
-        const context = "T6.4-4 spells-no-identity arm";
-        // Staging premise: the repeated-`id` bearer leaves the file with
-        // exactly one 14.17 finding — a repeated prop is condition 17,
-        // never 14.1, spells no identity, and has no children whose masked
-        // 14.2 could add findings (SPEC 11.2, 14). Pinning the premise
-        // makes the exit-2 assertion below demonstrably run beside that
-        // file's findings: a product that takes a repeated-`id` value as
-        // spelled, or that reports the file's findings in the old ID's
-        // place, exits 1 here instead.
-        const findings = await buildFindings(
-          product,
-          workspace,
-          `${context}: \`build --json\` premise — the staged workspace ` +
-            `fails build validation (repeated \`id\` attribute, SPEC 14.17)`,
-        );
-        assertConditionCounts(
-          findings,
-          { "14.17": 1 },
-          `${context}: staging premise — the repeated-\`id\` bearer is the ` +
-            `file's one finding (SPEC 14: a repeated prop is condition 17, ` +
-            `never condition 1)`,
-        );
-        await expectRenameUsageError(
-          product,
-          workspace,
-          RENAME_SOLO_ARGV,
-          `${context}: an old ID whose only would-be bearer spells no ` +
-            `identity (its \`id\` attribute repeated on the tag) is ` +
-            `nonexistent — exit 2 even beside that file's findings ` +
-            `(SPEC 6.4, 11.2, 12.0)`,
-        );
-      },
-    );
+    // identity — its `id` repeated, braced, or valueless ---
+    for (const arm of T6_4_4_SPELLS_NONE_ARMS) {
+      await withWorkspace(
+        RENAME_REFUSAL_CONFIG,
+        arm.files,
+        async (workspace) => {
+          const context = `T6.4-4 spells-no-identity arm, ${arm.form}`;
+          // Staging premise: the would-be bearer leaves the file with
+          // exactly one 14.17 finding — a repeated prop, or an `id` value
+          // not in quoted static-string form, is condition 17, never 14.1,
+          // spells no identity, and has no children whose masked 14.2
+          // could add findings (SPEC 11.2, 14). Pinning the premise makes
+          // the exit-2 assertion below demonstrably run beside that file's
+          // finding: a product that reads a spelling where none is — the
+          // repeated value, the braced string, or the bare attribute's JSX
+          // value — or that reports the file's findings in the old ID's
+          // place, exits 1 here instead.
+          const findings = await buildFindings(
+            product,
+            workspace,
+            `${context}: \`build --json\` premise — the staged workspace ` +
+              `fails build validation (${arm.form}, SPEC 14.17)`,
+          );
+          assertConditionCounts(
+            findings,
+            { "14.17": 1 },
+            `${context}: staging premise — the would-be bearer's invalid ` +
+              `\`id\` is the file's one finding (SPEC 14: a repeated prop, ` +
+              `or an \`id\` value not in quoted static-string form, is ` +
+              `condition 17, never condition 1)`,
+          );
+          // The usage error alone (H-5): exit 2, the error document the
+          // entire stdout — no findings beside it — and nothing modified
+          // (SPEC 12.0), the lock path aside (H-6).
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              await expectRenameUsageError(
+                product,
+                workspace,
+                arm.argv,
+                `${context}: an old ID whose only would-be bearer spells no ` +
+                  `identity (${arm.why}) is nonexistent — exit 2, though ` +
+                  `that file carries a 14.17 finding, the usage error alone ` +
+                  `reported (SPEC 6.4, 11.2, 12.0; H-5)`,
+              );
+            },
+            `${context}: the usage error modifies nothing (SPEC 12.0)`,
+          );
+        },
+      );
+    }
   },
 });
 
