@@ -11,35 +11,60 @@
 // current workspace reads as an empty journal, and an empty journal is a
 // prefix of every journal. Entries present in the current journal but absent
 // from the journal content at the baseline ref are applied, in file order, to
-// map baseline identities to current identities; chained mappings compose.
+// map baseline identities to current identities; chained mappings compose;
+// baseline hashes are computed with the journal content at the baseline ref.
 // Replay that produces an unresolvable mapping, a baseline journal that is
-// not a prefix of the current journal, and baseline content that cannot be
-// parsed and validated all MUST fail with an actionable error naming the
-// offending entries or files; a baseline that cannot be read or reconstructed
-// is a usage error (12.0, exit 2), and baseline resolution precedes source
-// validation (12.0).
+// not a prefix of the current journal, and baseline content — sources or
+// configuration — that cannot be parsed and validated all MUST fail with an
+// actionable error naming the offending entries or files; a baseline that
+// cannot be read or reconstructed is a usage error (12.0, exit 2) — a plain
+// one, its 12.7 error document's `code` and `path` `null` (T6.3-4), unlike
+// a journal error the resolution meets reading the current journal first
+// (14.13, T6.3-6) — and baseline resolution precedes source validation
+// (12.0).
 //
 // Conservative operationalizations (noted per H-4):
 // - "Resolves normally" / "reports no changes" is asserted as an empty
 //   `requirements` list plus empty impacted-code groups — the suite's fixed
 //   T1.5-1 interpretation (SPEC 9.3 groups output by category, so an
 //   uncategorized node appears under none), carried through SUITE-20/22.
+// - A baseline's journal content is what its commit's tree holds at
+//   `.xspec/journal` (6.3): where an arm's baseline commit is to hold a
+//   journal the product wrote — T6.3-3's intermediate commit, T6.3-4's
+//   prefix arm — `git ls-tree` must list that path in the commit's tree, a
+//   staging premise beside the journal's line counts (6.1: one entry per
+//   line), so an uncommitted journal never reads as a replay verdict.
 // - Every failure arm runs with `--json`: exit 2 exactly (H-5), stdout
 //   exactly one 12.7 error document (12.0: with JSON output in effect, an
 //   exit-2 invocation emits the error document as its entire stdout), and
 //   the actionable error on stderr (12.0: usage and configuration error
-//   messages are standard-error content).
-// - "Naming the offending entries" for the garbage replay line (staged on
-//   journal line 2, after one legitimate entry): entry content is opaque
-//   (SPEC 6.1, H-4), so the harness accepts any of — stderr echoing the
-//   garbage line's text, stderr citing line/entry 2, or a `journal:2`
-//   file:line form. The T6.1-3 operationalization, applied to the stderr
-//   channel.
+//   messages are standard-error content). T6.3-4's arms also pin the
+//   document's finding as the plain usage error — `code` and `path` `null`
+//   (12.7; T12.7-3), never a numbered condition's stable code and concerned
+//   path — its `message`, `locations`, and `identities` informational, as
+//   T6.3-4 pins none of them; each runs at `impact --base` and at `review
+//   create --base … --name n` alike, the latter modifying nothing.
 // - "Naming the offending entries or files" for prefix violations: the
 //   offending file is the journal, so stderr must name it — it must match
 //   /journal/i (satisfied by the path `.xspec/journal` or the word).
+// - The prefix arm's current journal is one the product wrote on its
+//   workspace — the one-entry journal of its first rename, restored byte
+//   for byte once the baseline commit holds the two-entry journal of both
+//   — and `check --json` must report no condition-13 error
+//   (`journal-error`, 14.13) on it, exiting 0 or 1 as its findings dictate
+//   (12.0, 12.2): the restored journal changes canonical identities (5.4),
+//   so graph data built beside the two-entry one is stale (14.10), a
+//   finding the premise admits. The outcome so stays the code-less prefix
+//   violation, never the current journal's own condition (T6.3-6).
 // - A baseline whose sources fail parse/validation: stderr must name the
 //   offending file — it must contain the file's name (`Broken.mdx`).
+// - A baseline whose configuration fails: `c1`'s `xspec.config.ts` is the
+//   working tree's configuration plus an unknown top-level key, or that
+//   configuration with its `defineConfig` call's closing parenthesis
+//   removed (unparseable, 14.20, so declared in its S-9 record), the
+//   working tree's configuration and sources valid; the offending file is
+//   the configuration in `c1`'s tree, so stderr must name it
+//   (`xspec.config.ts`).
 // - An unresolvable ref: the offending item is the ref itself, so the
 //   actionable error must echo its spelling on stderr.
 // - "Report no validation findings" (the precedence arm): findings are
@@ -77,22 +102,22 @@
 //   absent at its repository-relative path in the ref's tree, so stderr
 //   must name it (`xspec.config.ts`).
 //
-// Journal tampering below stays product-independent (H-4): a strictly longer
-// baseline journal can be a prefix of no shorter current journal, whatever
-// the entry bytes are; the appended garbage line is structureless bytes no
-// conforming entry format accepts (T6.1-3's sanctioned staging), appended as
-// a whole line under either final-line convention.
+// Journal tampering below stays product-independent (H-4): the prefix arm's
+// baseline journal, the two-entry journal of both renames, is strictly
+// longer than the one-entry journal of the first — the current journal it
+// restores — so it can be a prefix of no such current journal, whatever the
+// entry bytes are.
 //
 // Staged-source records (TEST-SPEC S-9's before-any-product clause;
-// helpers/staged-mdx.ts): every workspace a body here creates after its
-// first product invocation — T6.3-2's second arm, T6.3-4's four later arms,
-// T6.3-5's arms (b)–(d) — takes its initial `.mdx` sources as ledger
-// records, judged by test/self/s9-staged-sources.test.ts before any product
-// exists; where a body's first workspace stages the same expression, the
-// record stands there too (converted uniformly). T6.3-1's and T6.3-3's one
-// workspace each precede any invocation and stay plain.
+// helpers/staged-mdx.ts, helpers/staged-ts.ts): every workspace a body here
+// creates after its first product invocation — T6.3-2's second arm, T6.3-4's
+// five later arms, T6.3-5's arms (b)–(d) — takes its initial `.mdx` sources
+// and configuration files as ledger records, judged by
+// test/self/s9-staged-sources.test.ts before any product exists; where a
+// body's first workspace stages the same expression, the record stands there
+// too (converted uniformly). T6.3-1's and T6.3-3's one workspace each precede
+// any invocation and stay plain.
 
-import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import type {
   ExportReport,
@@ -100,6 +125,7 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   decodeExportReport,
+  decodeFindingsReport,
   decodeImpactReport,
 } from "../../helpers/adapters/index.js";
 import {
@@ -112,6 +138,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
@@ -129,28 +156,26 @@ import {
 // T6.3-1's, whose group membership is the moving part. T6.3-2, T6.3-4, and
 // T6.3-5 stage it after a product invocation — in a later workspace, at
 // `xspec.config.ts` or `inner/xspec.config.ts`, and by `file()` at
-// `sub/xspec.previous.config.ts` and `sub/xspec.config.ts` — so it is a
-// staged-source record (S-9's timing clause;
-// test/self/s9-staged-sources.test.ts).
-const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.3-2/T6.3-4/T6.3-5 xspec.config.ts — exactly one spec group over specs/, staged at every configuration path",
-  `import { defineConfig } from "xspec"
+// `xspec.config.ts` (T6.3-4's baseline-configuration arms, over the
+// configuration their `c1` commits), `sub/xspec.previous.config.ts`, and
+// `sub/xspec.config.ts` — so it is a staged-source record (S-9's timing
+// clause; test/self/s9-staged-sources.test.ts). Its text is kept apart for
+// T6.3-4's two baseline configurations, derived from it at module load.
+const SPECS_ONLY_CONFIG_TEXT = `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`,
+`;
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T6.3-2/T6.3-4/T6.3-5 xspec.config.ts — exactly one spec group over specs/, staged at every configuration path",
+  SPECS_ONLY_CONFIG_TEXT,
 );
 
 const JOURNAL_PATH = ".xspec/journal";
 const LF = 0x0a;
-
-// Structureless bytes no conforming journal-entry format accepts — the
-// TEST-SPEC-sanctioned shape-independent staging for an unreplayable entry
-// (T6.3-4, H-4; the T6.1-3 technique).
-const GARBAGE_LINE = "?? harness-injected garbage: not a journal entry ??";
 
 /** Stage a fresh workspace (`files` must include the config), run, dispose. */
 async function withWorkspace<T>(
@@ -200,23 +225,46 @@ function journalLineCount(bytes: Uint8Array): number {
 }
 
 /**
- * Append `line` to the journal as a whole line under either final-line
- * convention: the product's final line is terminated first when it left the
- * terminator off (the T6.1-3 technique).
+ * Staging premise on a journal the product wrote: exactly `lines` lines
+ * (`journalLineCount`; SPEC 6.1: one entry per line, each journaled
+ * operation appending one), failing diagnosed (H-8) otherwise.
  */
-async function appendJournalLine(
+function assertJournalLines(
+  journal: Uint8Array,
+  lines: number,
+  why: string,
+  context: string,
+): void {
+  const found = journalLineCount(journal);
+  if (found === lines) return;
+  fail(
+    `${context}: staging premise — ${why} (SPEC 6.1: one entry per line); ` +
+      `found ${String(found)} line(s)`,
+  );
+}
+
+/**
+ * Staging premise (module header): `commit`'s tree holds `.xspec/journal` —
+ * the all-inclusive commit took the journal the product wrote (SPEC 13.4:
+ * durable files are suitable for committing), so the baseline's journal
+ * content at the ref (6.3) is that journal, never an absent one read as
+ * empty.
+ */
+async function assertJournalInTree(
   workspace: TestWorkspace,
-  existing: Uint8Array,
-  line: string,
+  commit: string,
+  context: string,
 ): Promise<void> {
-  const needsTerminator =
-    existing.length > 0 && existing[existing.length - 1] !== LF;
-  await workspace.file(
-    JOURNAL_PATH,
-    Buffer.concat([
-      existing,
-      Buffer.from((needsTerminator ? "\n" : "") + line + "\n", "utf8"),
-    ]),
+  const listed = (await workspace.git(["ls-tree", commit, "--", JOURNAL_PATH]))
+    .stdout;
+  if (/^100(?:644|755) blob [0-9a-f]+\t\.xspec\/journal$/m.test(listed)) {
+    return;
+  }
+  fail(
+    `${context}: staging premise — the commit's tree must hold the journal ` +
+      `the product wrote at ${JOURNAL_PATH}, the baseline's journal content ` +
+      `at the ref (SPEC 6.3; 13.4: durable files are suitable for ` +
+      `committing); \`git ls-tree\` listed ${JSON.stringify(listed)}`,
   );
 }
 
@@ -298,12 +346,14 @@ function assertNoChanges(
 }
 
 /**
- * A baseline-resolution failure at a baseline-taking command (T6.3-4's
- * contract): run with `--json`, assert exit 2 exactly (a usage error,
- * SPEC 6.3, 12.0) and the single 12.7 error document as the entire stdout
- * (12.0: with JSON output in effect, an exit-2 invocation emits the error
- * document — no report, no validation findings; H-5). The actionable error
- * is stderr content (12.0); callers assert its naming duties on the result.
+ * A baseline-resolution failure at a baseline-taking command (every failure
+ * arm here; T6.3-4's arms pin its finding further,
+ * `expectCodelessBaselineError`): run with `--json`, assert exit 2 exactly
+ * (a usage error, SPEC 6.3, 12.0) and the single 12.7 error document as the
+ * entire stdout (12.0: with JSON output in effect, an exit-2 invocation
+ * emits the error document — no report, no validation findings; H-5). The
+ * actionable error is stderr content (12.0); callers assert its naming
+ * duties on the result.
  */
 async function expectBaselineUsageError(
   product: ProductBinding,
@@ -364,14 +414,152 @@ function assertStderrNames(
 }
 
 /**
- * Does the stderr text name the garbage journal entry staged on line 2?
- * Accepted forms (module header, H-4): echoing the garbage line's text,
- * citing line/entry 2, or a `journal:2` file:line form.
+ * T6.3-4's failure contract at one baseline-taking command: the exit-2 usage
+ * error with the 12.7 error document as the entire stdout
+ * (`expectBaselineUsageError`), its finding the plain usage error — `code`
+ * and `path` `null` (SPEC 6.3, 12.7: every exit-2 error but the conditions
+ * 14 codes; T12.7-3) — never a numbered condition's stable code and
+ * concerned path: neither the current journal's own journal error (14.13,
+ * T6.3-6) nor the configuration error a current-configuration loader would
+ * report for a baseline's configuration (14.14). `message`, `locations`,
+ * and `identities` are informational (module header).
  */
-function stderrNamesGarbageEntry(stderr: string): boolean {
-  if (stderr.includes(GARBAGE_LINE)) return true;
-  if (/\b(?:line|entry)\s*#?\s*2\b/i.test(stderr)) return true;
-  return stderr.includes("journal:2");
+async function expectCodelessBaselineError(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<RunResult> {
+  const result = await expectBaselineUsageError(
+    product,
+    workspace,
+    argv,
+    context,
+  );
+  const error = expectErrorDocument(result, context);
+  assertSameJson(
+    { code: error.code, path: error.path },
+    { code: null, path: null },
+    `${context}: a baseline that cannot be read or reconstructed is a plain ` +
+      `usage error — the error document's \`code\` and \`path\` \`null\` ` +
+      `(SPEC 6.3, 12.7; T12.7-3), never a numbered condition's stable code ` +
+      `and concerned path (message: ${JSON.stringify(error.message)})`,
+  );
+  return result;
+}
+
+/** A naming duty of SPEC 6.3 on the actionable error, for `assertStderrNames`. */
+interface NamingDuty {
+  readonly pattern: RegExp;
+  readonly requirement: string;
+}
+
+// The session name T6.3-4's refused `review create --base` runs ask for.
+const F4_SESSION = "n";
+
+/**
+ * One T6.3-4 failure at both baseline-taking commands on `workspace`:
+ * `impact --base <ref>`, then `review create --base <ref> --name n`, each
+ * the code-less baseline error (`expectCodelessBaselineError`) whose stderr
+ * meets `naming`, `review create` modifying nothing — a whole-root byte
+ * compare around it, H-6's lock-path exclusion applied: no session file
+ * written; sources, journal, derived files, and graph data byte-identical
+ * (SPEC 10.7, 6.3). `why` says why the baseline cannot be reconstructed.
+ */
+async function expectBaselineFailureAtBothCommands(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  ref: string,
+  naming: NamingDuty,
+  why: string,
+  context: string,
+): Promise<void> {
+  const impact = await expectCodelessBaselineError(
+    product,
+    workspace,
+    ["impact", "--base", ref],
+    `${context}: \`impact --base <ref>\` — ${why}`,
+  );
+  assertStderrNames(
+    impact,
+    naming.pattern,
+    naming.requirement,
+    `${context} (\`impact --base\`)`,
+  );
+  const create = await assertLeavesUnchanged(
+    workspace.root,
+    async () =>
+      await expectCodelessBaselineError(
+        product,
+        workspace,
+        ["review", "create", "--base", ref, "--name", F4_SESSION],
+        `${context}: \`review create --base <ref> --name ${F4_SESSION}\` — ` +
+          why,
+      ),
+    `${context}: \`review create --base\` refused at baseline resolution ` +
+      `modifies nothing — no session file written; sources, journal, ` +
+      `derived files, and graph data byte-identical (SPEC 10.7, 6.3)`,
+  );
+  assertStderrNames(
+    create,
+    naming.pattern,
+    naming.requirement,
+    `${context} (\`review create --base\`)`,
+  );
+}
+
+/**
+ * The prefix arm's current-journal premise (module header): `check --json`
+ * reports no condition-13 error (`journal-error`, 14.13) on the journal the
+ * product wrote, so the baseline-taking commands meet the code-less prefix
+ * violation rather than the current journal's own condition (T6.3-6). The
+ * report is decoded form-exact (H-3), its exit 0 exactly when it carries no
+ * finding (SPEC 12.0, 12.2) — the staleness the restored journal brings
+ * (14.10) admitted.
+ */
+async function assertCheckReportsNoJournalError(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const label =
+    `${context}: \`check --json\` on the current journal (premise: no ` +
+    `condition-13 error)`;
+  const result = await runProduct(product, {
+    cwd: workspace.root,
+    argv: ["check", "--json"],
+  });
+  if (
+    result.signal !== null ||
+    (result.exitCode !== 0 && result.exitCode !== 1)
+  ) {
+    fail(
+      `${label}: \`check\` reports its findings, exit 0 or 1 (SPEC 12.2, ` +
+        `12.0); got ${summarizeResult(result)}`,
+    );
+  }
+  const { findings } = decodeFindingsReport(
+    parseJsonStdout(result, label),
+    label,
+  );
+  assertExitCode(
+    result,
+    findings.length === 0 ? 0 : 1,
+    `${label} — \`check\` exits 1 on any finding, else 0 (SPEC 12.2, 12.0)`,
+  );
+  const journalErrors = findings.filter(
+    (finding) => finding.code === "journal-error",
+  );
+  if (journalErrors.length > 0) {
+    fail(
+      `${label}: the current journal is one the product wrote on this ` +
+        `workspace — its first rename's one entry — so \`check\` reports ` +
+        `no condition-13 error on it (SPEC 6.1, 14.13; T6.3-4: the current ` +
+        `journal kept free of condition-13 errors, so the outcome stays the ` +
+        `code-less prefix violation rather than the current journal's own, ` +
+        `T6.3-6); got ${JSON.stringify(journalErrors)}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -654,6 +842,10 @@ const T6_3_2 = defineProductTest({
 
 // The rename subject with a child (prefix replacement composes on the
 // descendant too: a.kid → b.kid → c.kid) and an untouched sibling as control.
+// The file root's own content references the subject by its canonical
+// identity (5.4), so a baseline side at the intermediate commit computed
+// with no journal — `b` its own canonical identity rather than `a` —
+// changes the root's ownHash: the intermediate arm's discrimination.
 const R3_FILE = "specs/Chain.mdx";
 const R3_SOURCE = [
   '<S id="a">',
@@ -672,7 +864,7 @@ const R3_SOURCE = [
 const T6_3_3 = defineProductTest({
   id: "T6.3-3",
   title:
-    "replay and composition: rename a→b, commit, rename b→c — `impact` with the older baseline maps a→c (descendants included) through composed journal entries and reports no changes (SPEC 6.3, 6.2)",
+    "replay and composition: rename a→b, commit, rename b→c — `impact` with the older baseline maps a→c (descendants included) through composed journal entries and reports no changes; `impact` with the intermediate commit, its tree holding the one-entry journal the a→b rename wrote, maps b→c through the one entry absent from it and likewise reports no changes, the baseline's hashes computed with the journal content at the ref (SPEC 6.3, 6.2, 5.4)",
   run: async (product) => {
     await withWorkspace(
       { "xspec.config.ts": SPECS_ONLY_CONFIG, [R3_FILE]: R3_SOURCE },
@@ -689,13 +881,34 @@ const T6_3_3 = defineProductTest({
           0,
           `T6.3-3 \`rename ${R3_FILE} a b\``,
         );
-        await workspace.gitCommitAll("mid commit, between the renames");
+        assertJournalLines(
+          await readJournal(workspace, "T6.3-3: after `rename a b`"),
+          1,
+          "the first journaled operation yields a one-line journal, the " +
+            "one entry the intermediate commit holds",
+          "T6.3-3",
+        );
+        const intermediate = await workspace.gitCommitAll(
+          "intermediate commit, between the renames: the one-entry journal",
+        );
+        await assertJournalInTree(
+          workspace,
+          intermediate,
+          "T6.3-3 the intermediate commit",
+        );
         await expectExit(
           product,
           workspace,
           ["rename", R3_FILE, "b", "c"],
           0,
           `T6.3-3 \`rename ${R3_FILE} b c\``,
+        );
+        assertJournalLines(
+          await readJournal(workspace, "T6.3-3: after `rename b c`"),
+          2,
+          "the second journaled operation appends the current journal's " +
+            "second entry, the one absent from the intermediate commit's",
+          "T6.3-3",
         );
 
         const label = "T6.3-3 `impact --base <older baseline> --json`";
@@ -708,6 +921,26 @@ const T6_3_3 = defineProductTest({
             "spurious changes",
           label,
         );
+
+        const intermediateLabel =
+          "T6.3-3 `impact --base <intermediate commit> --json`";
+        assertNoChanges(
+          await impactAgainst(
+            product,
+            workspace,
+            intermediate,
+            intermediateLabel,
+          ),
+          "the intermediate commit's journal holds the a→b entry, so the " +
+            "b→c entry alone is absent from it and replays, mapping b→c " +
+            "(b.kid→c.kid), and the baseline's hashes are computed with " +
+            "that journal content (SPEC 6.3), `b` taking `a` as its " +
+            "canonical identity as `c` does (5.4); a product that computes " +
+            "the baseline side's canonical identities with no journal takes " +
+            "`b` itself as `b`'s, and `b`'s parent, the file root, then " +
+            "differs in ownHash and reports changed",
+          intermediateLabel,
+        );
       },
     );
   },
@@ -717,14 +950,17 @@ const T6_3_3 = defineProductTest({
 // T6.3-4 — the failure matrix (exit 2)
 // ---------------------------------------------------------------------------
 
-// A minimal rename subject for the journal-tampering arms.
+// A minimal valid source: the prefix arm's rename subject, beside each
+// later arm's subject.
 const F4_FILE = "specs/A.mdx";
 // Every arm after the first creates its workspace after the earlier arms'
-// invocations, so the initial `.mdx` sources are staged-source records
-// (module header), each expression wrapped in place: the shared A.mdx
-// (staged in the first arm too), the broken source under its `unparseable`
-// declaration — the record carries what the workspace declaration's entry
-// for the path used to — and the precedence arm's invalid, parseable source.
+// invocations, so the initial `.mdx` sources and configuration files are
+// staged-source records (module header), each expression wrapped in place:
+// the shared A.mdx (staged in the first arm too), the broken source under
+// its `unparseable` declaration — the record carries what the workspace
+// declaration's entry for the path used to — the baseline-configuration
+// arms' two configurations, and the precedence arm's invalid, parseable
+// source.
 const F4_SOURCE = stagedMdx(
   "T6.3-4 specs/A.mdx",
   ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
@@ -755,6 +991,66 @@ const T6_3_4_FIXED = stagedMdx(
   "well-formed",
 );
 
+/**
+ * The working tree's configuration (`SPECS_ONLY_CONFIG_TEXT`) with its one
+ * occurrence of `anchor` replaced — a baseline configuration derived at
+ * module load, so it differs from the working tree's in exactly the stated
+ * way. An anchor occurring other than once is a defect of this module.
+ */
+function deriveBaselineConfig(
+  anchor: string,
+  replacement: string,
+  what: string,
+): string {
+  const at = SPECS_ONLY_CONFIG_TEXT.indexOf(anchor);
+  if (at < 0 || SPECS_ONLY_CONFIG_TEXT.indexOf(anchor, at + 1) >= 0) {
+    throw new Error(
+      `section-6.3 T6.3-4 ${what}: the anchor ${JSON.stringify(anchor)} ` +
+        "must occur exactly once in the configuration it derives from",
+    );
+  }
+  return (
+    SPECS_ONLY_CONFIG_TEXT.slice(0, at) +
+    replacement +
+    SPECS_ONLY_CONFIG_TEXT.slice(at + anchor.length)
+  );
+}
+
+/** A baseline-configuration arm: its label and `c1`'s configuration. */
+interface BaselineConfigArm {
+  readonly label: string;
+  readonly config: StagedTs;
+}
+
+// The baseline-configuration arms (TEST-SPEC T6.3-4): each `c1` commits one
+// of these at `xspec.config.ts` beside valid sources, no journal, and the
+// working tree then takes the valid configuration back
+// (`SPECS_ONLY_CONFIG`). The first adds the unknown top-level key `bogus`
+// after `specs`; the second removes the `defineConfig` call's closing
+// parenthesis, leaving no well-formed TypeScript (14.20) — declared so in its
+// S-9 record.
+const F4_BASELINE_CONFIG_ARMS: readonly BaselineConfigArm[] = [
+  {
+    label: "an unknown top-level key",
+    config: stagedTs(
+      "T6.3-4 baseline-configuration arm: c1's xspec.config.ts — the working tree's configuration plus an unknown top-level key",
+      deriveBaselineConfig(
+        "\n  }\n})\n",
+        "\n  },\n  bogus: true\n})\n",
+        "unknown-key configuration",
+      ),
+    ),
+  },
+  {
+    label: "its `defineConfig` call's closing parenthesis removed",
+    config: stagedTs(
+      "T6.3-4 baseline-configuration arm: c1's xspec.config.ts — the working tree's configuration, its defineConfig call's closing parenthesis removed",
+      deriveBaselineConfig("})\n", "}\n", "unclosed-call configuration"),
+      "unparseable",
+    ),
+  },
+];
+
 // The precedence arm's invalid current source: an unresolved local `d`
 // reference (14.5) — a build validation failure.
 const F4_INVALID_SOURCE = stagedMdx(
@@ -774,9 +1070,10 @@ const BOGUS_REF = "no-such-baseline-ref";
 const T6_3_4 = defineProductTest({
   id: "T6.3-4",
   title:
-    "failures: each baseline-resolution failure exits 2 at a baseline-taking command with an actionable stderr error naming the offending entries or files — a baseline journal that is not a prefix of the current journal (journal rewritten in the fixture); a garbage line appended to the current journal after the baseline commit, at `impact --base` and at `review create --base`, the error naming the offending entry and `review create` modifying nothing; a baseline whose sources fail parse/validation; an unresolvable ref; and the precedence arm — baseline resolution precedes source validation, so both commands with an unresolvable ref over currently-invalid sources exit 2 with the baseline error, report no validation findings, and modify nothing (SPEC 6.3, 10.7, 12.0)",
+    "failures: each baseline-resolution failure exits 2 at both baseline-taking commands, `impact --base` and `review create --base … --name n` — `review create` modifying nothing — as a plain usage error, the error document's `code` and `path` `null`, with an actionable stderr error naming the offending entries or files: a baseline journal that is not a prefix of the current journal (the current journal restored to the one entry the product wrote before the baseline's two, `check` reporting no 14.13 on it); a baseline whose sources fail parse/validation; a baseline whose configuration does — `c1`'s `xspec.config.ts` the working tree's configuration plus an unknown top-level key, and separately with its `defineConfig` call's closing parenthesis removed — the error naming `xspec.config.ts`, no session written; an unresolvable ref; and the precedence arm — baseline resolution precedes source validation, so both commands with an unresolvable ref over currently-invalid sources exit 2 with the baseline error, report no validation findings, and modify nothing (SPEC 6.3, 10.7, 12.0, 12.7)",
   run: async (product) => {
-    // --- Prefix violation: the current journal was rewritten ---
+    // --- Prefix violation: the current journal restored to the one entry
+    // the product wrote before the baseline's two ---
     await withWorkspace(
       { "xspec.config.ts": SPECS_ONLY_CONFIG, [F4_FILE]: F4_SOURCE },
       async (workspace) => {
@@ -790,6 +1087,16 @@ const T6_3_4 = defineProductTest({
           0,
           `${context}: first journaled operation \`rename ${F4_FILE} a a2\``,
         );
+        const first = await readJournal(
+          workspace,
+          `${context}: after the first journaled operation`,
+        );
+        assertJournalLines(
+          first,
+          1,
+          "one journaled operation yields a one-line journal",
+          context,
+        );
         await expectExit(
           product,
           workspace,
@@ -801,118 +1108,52 @@ const T6_3_4 = defineProductTest({
           workspace,
           `${context}: after two journaled operations`,
         );
-        if (journalLineCount(full) !== 2) {
+        assertJournalLines(
+          full,
+          2,
+          "two journaled operations yield a two-line journal",
+          context,
+        );
+        if (full.length <= first.length) {
           fail(
-            `${context}: staging premise — two journaled operations yield a ` +
-              `two-line journal (SPEC 6.1); found ` +
-              `${String(journalLineCount(full))} line(s)`,
+            `${context}: staging premise — the second journaled operation ` +
+              `appends to the journal (SPEC 6.1: append-only), so the ` +
+              `two-entry journal is strictly longer than the one-entry ` +
+              `journal it extends; found ${String(full.length)} byte(s) ` +
+              `after ${String(first.length)}`,
           );
         }
         const base = await workspace.gitCommitAll(
           "baseline with the two-entry journal",
         );
-        // Rewrite the current journal: keep only the first entry. The
-        // committed baseline journal is strictly longer, so it is a prefix
-        // of no such current journal, whatever the entry bytes (H-4) — the
-        // append-only invariant reads as violated.
-        const firstLf = full.indexOf(LF);
-        if (firstLf < 0 || firstLf === full.length - 1) {
-          fail(
-            `${context}: staging premise — the two-line journal must have ` +
-              `bytes after its first line terminator`,
-          );
-        }
-        await workspace.file(JOURNAL_PATH, full.subarray(0, firstLf + 1));
+        await assertJournalInTree(
+          workspace,
+          base,
+          `${context}: the baseline commit`,
+        );
+        // Restore the one-entry journal the product wrote at the first
+        // rename. The committed baseline journal is strictly longer, so it
+        // is a prefix of no such current journal, whatever the entry bytes
+        // (H-4) — the append-only invariant reads as violated — while the
+        // current journal stays one the product wrote on this workspace,
+        // `check` reporting no condition-13 error on it (module header).
+        await workspace.file(JOURNAL_PATH, first);
+        await assertCheckReportsNoJournalError(product, workspace, context);
 
-        const result = await expectBaselineUsageError(
+        await expectBaselineFailureAtBothCommands(
           product,
           workspace,
-          ["impact", "--base", base],
-          `${context}: \`impact --base <ref>\` with the current journal ` +
-            `truncated below the baseline's journal`,
-        );
-        assertStderrNames(
-          result,
-          /journal/i,
-          "name the journal — the offending file of the prefix violation " +
-            `(${JOURNAL_PATH})`,
+          base,
+          {
+            pattern: /journal/i,
+            requirement:
+              "name the journal — the offending file of the prefix " +
+              `violation (${JOURNAL_PATH})`,
+          },
+          "the baseline's two-entry journal is not a prefix of the current " +
+            "one-entry journal",
           context,
         );
-      },
-    );
-
-    // --- Unresolvable replay mapping: a garbage line appended to the
-    // current journal after the baseline commit ---
-    await withWorkspace(
-      { "xspec.config.ts": SPECS_ONLY_CONFIG, [F4_FILE]: F4_SOURCE },
-      async (workspace) => {
-        const context = "T6.3-4 garbage-replay-line arm";
-        await workspace.gitInit();
-        await buildOk(product, workspace, `${context}: \`build\``);
-        await expectExit(
-          product,
-          workspace,
-          ["rename", F4_FILE, "a", "a2"],
-          0,
-          `${context}: the legitimate journaled operation \`rename ${F4_FILE} a a2\``,
-        );
-        const legitimate = await readJournal(
-          workspace,
-          `${context}: after the legitimate operation`,
-        );
-        if (journalLineCount(legitimate) !== 1) {
-          fail(
-            `${context}: staging premise — one journaled operation yields a ` +
-              `one-line journal (SPEC 6.1), so the garbage lands on line 2; ` +
-              `found ${String(journalLineCount(legitimate))} line(s)`,
-          );
-        }
-        const base = await workspace.gitCommitAll(
-          "baseline with the one-entry journal",
-        );
-        // The baseline journal stays a byte prefix of the current journal;
-        // replay must apply exactly the appended garbage line — an entry no
-        // conforming format resolves to a mapping (H-4).
-        await appendJournalLine(workspace, legitimate, GARBAGE_LINE);
-
-        const impactResult = await expectBaselineUsageError(
-          product,
-          workspace,
-          ["impact", "--base", base],
-          `${context}: \`impact --base <ref>\` replaying the garbage entry`,
-        );
-        if (!stderrNamesGarbageEntry(impactResult.stderr)) {
-          fail(
-            `${context}: \`impact --base\` must name the offending entry — ` +
-              `the garbage on journal line 2 (SPEC 6.3): stderr echoing the ` +
-              `garbage line's text, citing line/entry 2, or a journal:2 ` +
-              `file:line form; got ${summarizeResult(impactResult)}`,
-          );
-        }
-
-        // `review create --base` fails the same way and modifies nothing
-        // (SPEC 10.7): whole-root byte snapshot around the refused command.
-        const createResult = await assertLeavesUnchanged(
-          workspace.root,
-          async () =>
-            await expectBaselineUsageError(
-              product,
-              workspace,
-              ["review", "create", "--base", base, "--name", "s1"],
-              `${context}: \`review create --base <ref> --name s1\` replaying the garbage entry`,
-            ),
-          `${context}: \`review create --base\` refused at baseline ` +
-            `resolution modifies nothing — no session file, no other write ` +
-            `(SPEC 10.7, 6.3)`,
-        );
-        if (!stderrNamesGarbageEntry(createResult.stderr)) {
-          fail(
-            `${context}: \`review create --base\` must name the offending ` +
-              `entry — the garbage on journal line 2 (SPEC 6.3): stderr ` +
-              `echoing the garbage line's text, citing line/entry 2, or a ` +
-              `journal:2 file:line form; got ${summarizeResult(createResult)}`,
-          );
-        }
       },
     );
 
@@ -940,21 +1181,66 @@ const T6_3_4 = defineProductTest({
             `premise: the failure below is attributable to the baseline alone)`,
         );
 
-        const result = await expectBaselineUsageError(
+        await expectBaselineFailureAtBothCommands(
           product,
           workspace,
-          ["impact", "--base", base],
-          `${context}: \`impact --base <ref>\` where the baseline content ` +
-            `cannot be parsed and validated as a workspace`,
-        );
-        assertStderrNames(
-          result,
-          /Broken\.mdx/,
-          `name the offending file (${F4_BROKEN_FILE})`,
+          base,
+          {
+            pattern: /Broken\.mdx/,
+            requirement: `name the offending file (${F4_BROKEN_FILE})`,
+          },
+          "the baseline content cannot be parsed and validated as a workspace",
           context,
         );
       },
     );
+
+    // --- Baseline configuration fails validation: the unknown key, then
+    // the unclosed call ---
+    for (const arm of F4_BASELINE_CONFIG_ARMS) {
+      await withWorkspace(
+        { "xspec.config.ts": arm.config, [F4_FILE]: F4_SOURCE },
+        async (workspace) => {
+          const context = `T6.3-4 baseline-configuration arm (${arm.label})`;
+          // A workspace rooted at its repository's root: `c1` commits the
+          // configuration under test beside valid sources — no journal, no
+          // operation having run here — and the working tree takes the
+          // valid configuration back.
+          await workspace.gitInit();
+          const c1 = await workspace.gitCommitAll(
+            `c1: xspec.config.ts with ${arm.label}`,
+          );
+          await workspace.file("xspec.config.ts", SPECS_ONLY_CONFIG);
+          await buildOk(
+            product,
+            workspace,
+            `${context}: \`build\` over the working tree's valid ` +
+              `configuration and sources (staging premise: the failure ` +
+              `below is attributable to c1's configuration alone)`,
+          );
+
+          await expectBaselineFailureAtBothCommands(
+            product,
+            workspace,
+            c1,
+            {
+              pattern: /xspec\.config\.ts/,
+              requirement:
+                "name the offending file — the configuration in c1's tree " +
+                "(xspec.config.ts)",
+            },
+            `c1's configuration (${arm.label}) fails validation, the ` +
+              `baseline reconstructed from sources and configuration alike ` +
+              `— its configuration the file at the current configuration's ` +
+              `repository-relative path in the ref's tree, git data (SPEC ` +
+              `6.3), never the configuration 7 locates and 14.14 judges at ` +
+              `load, so neither read leniently nor reported as ` +
+              `\`configuration-error\``,
+            context,
+          );
+        },
+      );
+    }
 
     // --- Unresolvable ref ---
     await withWorkspace(
@@ -965,16 +1251,15 @@ const T6_3_4 = defineProductTest({
         await workspace.gitCommitAll("a commit, so the repository is real");
         await buildOk(product, workspace, `${context}: \`build\``);
 
-        const result = await expectBaselineUsageError(
+        await expectBaselineFailureAtBothCommands(
           product,
           workspace,
-          ["impact", "--base", BOGUS_REF],
-          `${context}: \`impact --base ${BOGUS_REF}\``,
-        );
-        assertStderrNames(
-          result,
-          new RegExp(BOGUS_REF),
-          `echo the unresolvable ref (${BOGUS_REF}) — the offending item`,
+          BOGUS_REF,
+          {
+            pattern: new RegExp(BOGUS_REF),
+            requirement: `echo the unresolvable ref (${BOGUS_REF}) — the offending item`,
+          },
+          `the ref ${BOGUS_REF} resolves to no commit`,
           context,
         );
       },
@@ -1012,7 +1297,7 @@ const T6_3_4 = defineProductTest({
           const result = await assertLeavesUnchanged(
             workspace.root,
             async () =>
-              await expectBaselineUsageError(
+              await expectCodelessBaselineError(
                 product,
                 workspace,
                 argv,
