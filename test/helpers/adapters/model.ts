@@ -85,6 +85,18 @@ export interface NodeHashes {
   readonly metadataHash: string;
 }
 
+/**
+ * The four hash names of a requirement node (SPEC.md 5.5), as `query node`
+ * reports them and as an item's recorded state names the hashes it holds
+ * (10.2, 10.4; `RecordedNodeEntry`).
+ */
+export const NODE_HASH_NAMES: readonly (keyof NodeHashes)[] = [
+  "ownHash",
+  "subtreeHash",
+  "effectiveHash",
+  "metadataHash",
+];
+
 /** Full node report: `query node` / `show` (T11-1, T12.4-1). */
 export interface NodeReport {
   readonly identity: string;
@@ -984,10 +996,37 @@ export interface MetadataPair {
 }
 
 /**
+ * One node's entry in an item's recorded state — its `baseline` or its
+ * `current` (SPEC.md 10.2, 10.4) — as `decodeRecordedState` (review.ts)
+ * reads it: the node under its current identity (10.4: reads present every
+ * recorded node so), whether the state records it present, and the hashes
+ * the state records for it under 5.5's names — the item's relevant hashes
+ * (10.4's list per kind), none for a node whose presence alone is recorded —
+ * or, in their place, the explicit absent marker an absent node's hashes are
+ * recorded as (10.4). Value-blind: which nodes have entries, their presence,
+ * and their hashes or marker are the tests' to assert (T10.5-8).
+ */
+export interface RecordedNodeEntry {
+  /** The node's identity (a string, 12.7), its current identity (10.4). */
+  readonly node: string;
+  readonly present: boolean;
+  /**
+   * True where the entry records the explicit absent marker in place of
+   * hashes (SPEC.md 10.4: an absent node's hashes are recorded as an
+   * explicit absent marker); `hashes` is then empty.
+   */
+  readonly absentMarker: boolean;
+  /** The recorded hashes by name (5.5); empty where the marker stands. */
+  readonly hashes: Readonly<Partial<NodeHashes>>;
+}
+
+/**
  * A full review item as presented by `next --json`, `show`, and `export`
  * (SPEC.md 10.2, 10.7; T10.2-1, T10.7-7/8/12/13). `baseline` and `current`
  * carry the recorded relevant state; their inner structure is product-shaped
- * and compared whole (as decoded JSON) by the tests that assert them.
+ * and compared whole (as decoded JSON) by the tests that assert them, or read
+ * entry by entry through `decodeRecordedState` (review.ts) by a test
+ * asserting a recorded node's presence, hashes, or absent marker (T10.5-8).
  */
 export interface ReviewItem {
   /** An item ID: a well-formed argument value (SPEC.md 10.2, 12.0; T10.2-1). */

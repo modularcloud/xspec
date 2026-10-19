@@ -90,6 +90,7 @@ import {
   decodePerformedOperationReport,
   decodePreviewReport,
   decodeReachableReport,
+  decodeRecordedState,
   decodeSessionListReport,
   decodeSessionStatusReport,
   decodeVersionDocument,
@@ -5632,6 +5633,202 @@ test("S-5: requireScopeNodes returns every scope node an item's payload presents
     );
     expect(failure.message).toContain("S-5 probe: item item-1's payload");
     expect(failure.message).toContain('"scopeNodes"');
+  }
+});
+
+test("S-5: decodeRecordedState reads an item's baseline and current as node entries — each node's identity, presence, and hashes under 5.5's names or the explicit absent marker — from the assumed RecordedState shape at show, next, and export, value-blind, and fails diagnosed on any other shape, naming the item and the offending member, never reading a state as holding no entries (SPEC 10.2, 10.4; T10.5-8)", () => {
+  // The assumed shape (review.ts): one member per recorded node under
+  // "nodes", keyed by identity — a present node with its relevant hashes, a
+  // node whose presence alone is recorded (`{}`), an absent node with the
+  // marker "absent" — and a hash object's other members passed over.
+  const state = {
+    nodes: {
+      "specs/A.mdx": {
+        present: true,
+        hashes: { subtreeHash: "sub-r", metadataHash: "meta-r" },
+      },
+      "specs/A.mdx#login": { present: true, hashes: {} },
+      "specs/A.mdx#gone": { present: false, hashes: "absent" },
+      "specs/A.mdx#odd": {
+        present: true,
+        hashes: { ownHash: "own-o", effectiveHash: "eff-o", extra: 7 },
+      },
+    },
+  };
+  const entries = [
+    {
+      node: "specs/A.mdx",
+      present: true,
+      absentMarker: false,
+      hashes: { subtreeHash: "sub-r", metadataHash: "meta-r" },
+    },
+    {
+      node: "specs/A.mdx#login",
+      present: true,
+      absentMarker: false,
+      hashes: {},
+    },
+    {
+      node: "specs/A.mdx#gone",
+      present: false,
+      absentMarker: true,
+      hashes: {},
+    },
+    {
+      node: "specs/A.mdx#odd",
+      present: true,
+      absentMarker: false,
+      hashes: { ownHash: "own-o", effectiveHash: "eff-o" },
+    },
+  ];
+  const recordedItem = put(put(GOOD_ITEM, state, "baseline"), state, "current");
+  const presenting = [
+    decodeItemReport(recordedItem),
+    decodeNextReport(put(GOOD_NEXT, recordedItem, "item")).item,
+    decodeExportReport(put(GOOD_EXPORT, [recordedItem], "items")).items[0],
+  ];
+  for (const item of presenting) {
+    expect(item).toBeDefined();
+    for (const field of ["baseline", "current"] as const) {
+      expect(decodeRecordedState(item!, field, "S-5 probe")).toEqual(entries);
+    }
+  }
+  // Value-blind: contradictory entries — an absent node's hashes recorded
+  // as values, a present node's as the marker — decode as recorded, for the
+  // tests to judge (T10.5-8: never d's current hashes).
+  const contradictory = {
+    nodes: {
+      "specs/A.mdx#d": { present: false, hashes: { subtreeHash: "sub-d" } },
+      "specs/A.mdx#e": { present: true, hashes: "absent" },
+    },
+  };
+  expect(
+    decodeRecordedState(
+      decodeItemReport(put(GOOD_ITEM, contradictory, "baseline")),
+      "baseline",
+      "S-5 probe",
+    ),
+  ).toEqual([
+    {
+      node: "specs/A.mdx#d",
+      present: false,
+      absentMarker: false,
+      hashes: { subtreeHash: "sub-d" },
+    },
+    { node: "specs/A.mdx#e", present: true, absentMarker: true, hashes: {} },
+  ]);
+  const gone = ["nodes", "specs/A.mdx#gone"] as const;
+  const root = ["nodes", "specs/A.mdx"] as const;
+  const rejected: readonly {
+    readonly label: string;
+    readonly item: unknown;
+    readonly field: "baseline" | "current";
+    readonly at: string;
+  }[] = [
+    {
+      label: "an opaque state holding no nodes member",
+      item: GOOD_ITEM,
+      field: "baseline",
+      at: "$.baseline.nodes",
+    },
+    {
+      label: "a null state",
+      item: put(GOOD_ITEM, state, "baseline"),
+      field: "current",
+      at: "$.current",
+    },
+    {
+      label: "nodes an array",
+      item: put(GOOD_ITEM, { nodes: [] }, "baseline"),
+      field: "baseline",
+      at: "$.baseline.nodes",
+    },
+    {
+      label: "an entry lacking its presence",
+      item: put(GOOD_ITEM, omit(state, ...gone, "present"), "baseline"),
+      field: "baseline",
+      at: '$.baseline.nodes."specs/A.mdx#gone".present',
+    },
+    {
+      label: "a stringly-typed presence",
+      item: put(GOOD_ITEM, put(state, "false", ...gone, "present"), "baseline"),
+      field: "baseline",
+      at: '$.baseline.nodes."specs/A.mdx#gone".present',
+    },
+    {
+      label: "an absent entry lacking its hashes",
+      item: put(GOOD_ITEM, omit(state, ...gone, "hashes"), "baseline"),
+      field: "baseline",
+      at: '$.baseline.nodes."specs/A.mdx#gone".hashes',
+    },
+    {
+      label: "null hashes in place of the marker",
+      item: put(GOOD_ITEM, put(state, null, ...gone, "hashes"), "baseline"),
+      field: "baseline",
+      at: '$.baseline.nodes."specs/A.mdx#gone".hashes',
+    },
+    {
+      label: "another marker spelling",
+      item: put(GOOD_ITEM, put(state, "gone", ...gone, "hashes"), "baseline"),
+      field: "baseline",
+      at: '$.baseline.nodes."specs/A.mdx#gone".hashes',
+    },
+    {
+      label: "hashes an array",
+      item: put(
+        GOOD_ITEM,
+        put(state, ["sub-r"], ...root, "hashes"),
+        "baseline",
+      ),
+      field: "baseline",
+      at: '$.baseline.nodes."specs/A.mdx".hashes',
+    },
+    {
+      label: "an empty hash",
+      item: put(
+        GOOD_ITEM,
+        put(state, "", ...root, "hashes", "subtreeHash"),
+        "baseline",
+      ),
+      field: "baseline",
+      at: '$.baseline.nodes."specs/A.mdx".hashes.subtreeHash',
+    },
+    {
+      label: "a numeric hash",
+      item: put(
+        GOOD_ITEM,
+        put(state, 7, ...root, "hashes", "metadataHash"),
+        "baseline",
+      ),
+      field: "baseline",
+      at: '$.baseline.nodes."specs/A.mdx".hashes.metadataHash',
+    },
+    {
+      label: "an entry not an object",
+      item: put(GOOD_ITEM, put(state, true, ...root), "baseline"),
+      field: "baseline",
+      at: '$.baseline.nodes."specs/A.mdx"',
+    },
+    {
+      label: "an empty identity",
+      item: put(
+        GOOD_ITEM,
+        { nodes: { "": { present: true, hashes: {} } } },
+        "baseline",
+      ),
+      field: "baseline",
+      at: '$.baseline.nodes.""',
+    },
+  ];
+  for (const { label, item, field, at: where } of rejected) {
+    const decoded = decodeItemReport(item);
+    const failure = expectDiagnosed(label, () =>
+      decodeRecordedState(decoded, field, "S-5 probe"),
+    );
+    expect(failure.message).toContain(
+      `review item ${field} (S-5 probe: item item-1) adapter`,
+    );
+    expect(failure.message).toContain(`at ${where}:`);
   }
 });
 

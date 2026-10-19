@@ -512,6 +512,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // embeds edge, show directly), and 10.7's payload rule behind the root
   // item's byte-asserted scope text, the scope node's own text.
   "T10.5-7": ["10.5", "9.2", "10.7"],
+  // T10.5-8: 10.2's and 10.4's recorded-state rules behind item (3)'s
+  // `baseline` entries — fixed from the recorded baseline graph, the
+  // subtree-coherence item's relevant hashes per scope node, and d, in its
+  // scope when it entered though the baseline graph lacks it, presented
+  // absent with the explicit absent marker — and 10.7's payload rule behind
+  // item (3)'s byte-asserted scope text, the root's subtree text.
+  "T10.5-8": ["10.5", "10.2", "10.4", "10.7"],
   "T10.6-1": ["10", "10.6"],
   "T10.6-2": ["10.6"],
   "T10.6-3": ["10.6"],

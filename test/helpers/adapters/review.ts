@@ -13,6 +13,11 @@
 // `baseline`, `current`, and `creationParameters` are recorded,
 // product-shaped data: the adapter requires their presence and passes their
 // decoded JSON through whole for the tests to compare (T10.2-2/4, T10.7-2).
+// A test asserting a recorded state's node entries — which nodes it holds,
+// each one's presence, and its hashes or the explicit absent marker (SPEC
+// 10.2, 10.4; T10.5-8) — reads `baseline` or `current` further through
+// `decodeRecordedState`, which decodes the RecordedState shape below and
+// fails loudly on any other (H-3), never reading a state as empty.
 // The recorded decompositions are decoded one level further: each one's kind
 // and scope node, both required (SPEC 10.7: a decomposition is "the
 // original's kind and scope node"; T10.4-4, T10.7-8), any other member a
@@ -100,16 +105,33 @@
 //     range — every payload node, origin nodes included, enters with its
 //     source range when present and none when absent (SPEC 10.7, 1.7;
 //     T10.7-7).
+//   RecordedState — an item's "baseline" and "current", as
+//   `decodeRecordedState` reads them =
+//     { "nodes": { <identity>: { "present": bool,
+//                                "hashes": { <hash name>: hash, ... }
+//                                        | "absent" } } }
+//     (one member per recorded node — every scope, context, and origin node
+//     the state records, 10.4 — keyed by its current identity, 10.4, in the
+//     product's order: 10.7 fixes none, so tests look entries up by node;
+//     "hashes" holds the recorded hashes under 5.5's four names — the
+//     item's relevant hashes, 10.4, `{}` for a node whose presence alone is
+//     recorded, any other member passed over unread — or is the explicit
+//     absent marker an absent node's hashes are recorded as, 10.4, spelled
+//     "absent". Value-blind: an absent node's hashes recorded as values, or
+//     a present node's as the marker, decodes as recorded, for the tests to
+//     judge.)
 
 import type {
   ExportReport,
   MetadataPair,
   MetadataSide,
   NextReport,
+  NodeHashes,
   NodeTextState,
   OriginEntry,
   OriginTextSide,
   RecordedDecomposition,
+  RecordedNodeEntry,
   ReviewItem,
   SessionListEntry,
   SessionListReport,
@@ -120,6 +142,7 @@ import {
   COVERAGE_ATTRIBUTE_VALUES,
   ITEM_KINDS,
   ITEM_STATUSES,
+  NODE_HASH_NAMES,
 } from "./model.js";
 import type { DecodeSite } from "./decode.js";
 import {
@@ -653,6 +676,83 @@ export function requireScopeNodes(
       `required information absent (H-3: adapters fail loudly, never ` +
       `reading the scope root alone as the scope)`,
   );
+}
+
+/**
+ * The explicit absent marker an absent node's hashes are recorded as (SPEC
+ * 10.4) — SPEC fixes no spelling; this is the assumed shape's (the module
+ * header's RecordedState).
+ */
+const RECORDED_ABSENT_MARKER = "absent";
+
+/**
+ * Every node entry of a decoded item's recorded state — its `baseline` or
+ * its `current` (SPEC 10.2, 10.4) — read from the assumed RecordedState
+ * shape (the module header): one `RecordedNodeEntry` per member of the
+ * state's `"nodes"` object, in the product's order (10.7 fixes none; tests
+ * look entries up by node), its key the node's current identity (10.4), a
+ * non-empty string; its `"present"` a boolean; and its `"hashes"` either an
+ * object holding the recorded hashes under 5.5's four names, each a
+ * non-empty string — any other member passed over unread — or the explicit
+ * absent marker (10.4). Required information for a test asserting a
+ * recorded state's node entries (T10.5-8: item (3)'s `baseline`, `d`'s
+ * entry the absent marker): a state in any other shape fails loudly here
+ * (H-3), never read as one holding no entries. Value-blind: which nodes
+ * have entries, their presence, and their hashes or marker are the tests'
+ * to assert — an absent node's hashes recorded as values, or a present
+ * node's as the marker, decodes as recorded.
+ */
+export function decodeRecordedState(
+  item: ReviewItem,
+  field: "baseline" | "current",
+  context: string,
+): readonly RecordedNodeEntry[] {
+  const site: DecodeSite = {
+    adapter: `review item ${field} (${context}: item ${item.id})`,
+    path: `$.${field}`,
+  };
+  const recorded = expectObject(item[field], site);
+  const nodesSite = at(site, "nodes");
+  const nodes = expectObject(requiredKey(recorded, "nodes", site), nodesSite);
+  return Object.entries(nodes).map(([node, value]): RecordedNodeEntry => {
+    const entrySite = at(nodesSite, JSON.stringify(node));
+    if (node.length === 0) {
+      decodeFail(
+        entrySite,
+        `a recorded node's identity, a non-empty string (12.7), as its ` +
+          `entry's key`,
+        node,
+      );
+    }
+    const entry = expectObject(value, entrySite);
+    const present = expectBoolean(
+      requiredKey(entry, "present", entrySite),
+      at(entrySite, "present"),
+    );
+    const hashesSite = at(entrySite, "hashes");
+    const hashes = requiredKey(entry, "hashes", entrySite);
+    if (hashes === RECORDED_ABSENT_MARKER) {
+      return { node, present, absentMarker: true, hashes: {} };
+    }
+    if (typeof hashes !== "object" || Array.isArray(hashes)) {
+      decodeFail(
+        hashesSite,
+        `the recorded hashes — an object holding them under 5.5's names — ` +
+          `or the explicit absent marker an absent node's hashes are ` +
+          `recorded as, ${JSON.stringify(RECORDED_ABSENT_MARKER)} (SPEC ` +
+          `10.4; the assumed RecordedState shape)`,
+        hashes,
+      );
+    }
+    const held: { -readonly [Name in keyof NodeHashes]?: string } = {};
+    for (const name of NODE_HASH_NAMES) {
+      const hash = optionalKey(hashes as Record<string, unknown>, name);
+      if (hash !== undefined) {
+        held[name] = expectNonEmptyString(hash, at(hashesSite, name));
+      }
+    }
+    return { node, present, absentMarker: false, hashes: held };
+  });
 }
 
 /** `review show <name> <item-id>` (T10.7-8): the full item. */

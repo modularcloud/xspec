@@ -1,5 +1,5 @@
 // TEST-SPEC §10.5 (built-in strategy: path-blocks) — SUITE-36:
-// T10.5-1…T10.5-7.
+// T10.5-1…T10.5-8.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -32,7 +32,9 @@
 //   byte-level payload contracts are T10.7-12's business, but for T10.5-7's
 //   root-item scope text, byte-asserted in `show` and `export` against the
 //   root's own text derived by hand from SPEC 1.6 and 3, as T1.6-1's
-//   expected texts are.
+//   expected texts are, and T10.5-8's, byte-asserted there against the
+//   root's subtree text — its file's entire compiled Markdown output —
+//   derived likewise, the root's own text diagnosed.
 // - `blockedBy` is compared as a sorted id set (SPEC 10.5/10.7 fix which
 //   items block, not an order within the field).
 // - An item's scope set — every node of its scope as last assigned (SPEC
@@ -47,6 +49,17 @@
 //   member's JSON rendering, member order included, between `export`
 //   captures (T10.5-5's matching arm; its inner shape is the product's,
 //   H-3).
+// - An item's `baseline` is read entry by entry where its entries are
+//   asserted (T10.5-8's item (3)), through the review adapter's
+//   `decodeRecordedState` (its assumed RecordedState shape): each entry's
+//   node, presence, and recorded hashes or explicit absent marker (SPEC
+//   10.2, 10.4). A present node's subtreeHash and metadataHash are compared
+//   with `query node`'s capture at the baseline, before the edits — the
+//   value after them, which differs for the root, a, and a.b (a premise),
+//   diagnosed as a baseline filled from the current graph — and d's entry,
+//   d added since the baseline, must exist, present it absent, carry the
+//   marker, and hold none of d's current hashes. Entries beyond those the
+//   entry names are not asserted.
 // - Item order is asserted as the exact `(kind, scope)` row sequence of
 //   `status` and `export`; `next`'s presentation of the order is asserted by
 //   walking the session (repeated `next` + `resolve --status no-change`),
@@ -89,33 +102,39 @@
 //   p.b edit, r.c revert, both decomposition edits, its matching arm's edits
 //   and n.c's authoring, its kept-blockedBy arm's edits and a.k1's revert, and
 //   its P/Q arms' edits (p's; p's and p.q's; p.q's again with p's reverted),
-//   T10.5-6's par.s edit — is the same template call moved to module level as
-//   a record, as is the initial `.mdx` file of every workspace created after
-//   the body's first `build` (T10.5-1's extended fixture, chain fixture, and
-//   the chain fixture's both-edited twin, T10.5-3's current-graph-edges,
-//   origin-counting, and one-item-per-location workspaces, T10.5-4's tie
-//   sub-fixture, T10.5-5's decomposition sub-fixture and its matching,
-//   kept-blockedBy, skipping, and newly-visited workspaces). A staging that
-//   precedes a body's first `build` (each fixture's first edit, between
-//   `gitCommitAll` and that `build`) stays plain, as do each body's first
-//   workspace's initial `files` entries (S-7's sweep reaches them against the
-//   stub) — T10.5-7's, its one workspace, `.mdx` and code sources alike, and
-//   its t edit among them. The tie sub-fixture's deletions are plain removals
-//   of files (`fsp.rm`), which S-9 does not judge.
+//   T10.5-6's par.s edit, T10.5-8's edits in both stagings (specs/R.mdx with
+//   and without its top-level text edited, specs/S.mdx's x.y), each after
+//   the baseline capture's `build` — is the same template call moved to
+//   module level as a record, as is the initial `.mdx` file of every
+//   workspace created after the body's first `build` (T10.5-1's extended
+//   fixture, chain fixture, and the chain fixture's both-edited twin,
+//   T10.5-3's current-graph-edges, origin-counting, and one-item-per-location
+//   workspaces, T10.5-4's tie sub-fixture, T10.5-5's decomposition
+//   sub-fixture and its matching, kept-blockedBy, skipping, and
+//   newly-visited workspaces, T10.5-8's twin). A staging that precedes a
+//   body's first `build` (each fixture's first edit, between `gitCommitAll`
+//   and that `build`) stays plain, as do each body's first workspace's
+//   initial `files` entries (S-7's sweep reaches them against the stub) —
+//   T10.5-7's, its one workspace, `.mdx` and code sources alike, and its t
+//   edit among them — but T10.5-8's, whose initial sources are exported
+//   records its two workspaces share (as T10.4-7's are). The tie
+//   sub-fixture's deletions are plain removals of files (`fsp.rm`), which
+//   S-9 does not judge.
 // - The configuration of every workspace created after a body's first `build`
 //   (T10.5-1's extended fixture, chain fixture, and the chain fixture's
 //   both-edited twin, T10.5-3's current-graph-edges workspace, T10.5-4's tie
 //   sub-fixture, T10.5-5's decomposition sub-fixture and its four later
-//   workspaces) is `SPECS_ONLY_CONFIG`, a TypeScript staged-source record
-//   (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), well-formed,
-//   staged wherever that configuration is; `SPECS_CODE_CONFIG` serves only
-//   bodies' first workspaces and stays plain, its bytes staged in T10.5-3's
-//   origin-counting and one-item-per-location workspaces as the record
-//   `T10_5_3_CODE_CONFIG`, beside their code sources, records too
-//   (`T10_5_3_OC_CODE`, `T10_5_3_L_BOTH_TS`). T10.5-7's configuration,
-//   `T10_5_7_CONFIG` (the spec group over `specs/*.mdx` and the code group
-//   over `src/*.ts` its TEST-SPEC entry stages), serves its one workspace,
-//   created before any invocation, and stays plain too.
+//   workspaces, T10.5-8's twin) is `SPECS_ONLY_CONFIG`, a TypeScript
+//   staged-source record (helpers/staged-ts.ts; S-9's TypeScript and timing
+//   clauses), well-formed, staged wherever that configuration is;
+//   `SPECS_CODE_CONFIG` serves only bodies' first workspaces and stays
+//   plain, its bytes staged in T10.5-3's origin-counting and
+//   one-item-per-location workspaces as the record `T10_5_3_CODE_CONFIG`,
+//   beside their code sources, records too (`T10_5_3_OC_CODE`,
+//   `T10_5_3_L_BOTH_TS`). T10.5-7's configuration, `T10_5_7_CONFIG` (the
+//   spec group over `specs/*.mdx` and the code group over `src/*.ts` its
+//   TEST-SPEC entry stages), serves its one workspace, created before any
+//   invocation, and stays plain too.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -125,6 +144,7 @@ import type {
   ItemStatus,
   NodeHashes,
   NodeReport,
+  RecordedNodeEntry,
   ReviewItem,
   SessionStatusReport,
   SessionStatusRow,
@@ -136,6 +156,7 @@ import {
   decodeItemReport,
   decodeNextReport,
   decodeNodeReport,
+  decodeRecordedState,
   decodeSessionListReport,
   decodeSessionStatusReport,
   requireScopeNodes,
@@ -162,7 +183,7 @@ import {
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T10.5-1/T10.5-3/T10.5-4/T10.5-5 xspec.config.ts — one spec group",
+  "T10.5-1/T10.5-3/T10.5-4/T10.5-5/T10.5-8 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -5278,6 +5299,609 @@ const T10_5_7 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T10.5-8 — a `changed` root
+// ---------------------------------------------------------------------------
+
+// TEST-SPEC T10.5-8's fixture: specs/R.mdx holds top-level text, a section a
+// holding a child a.b, and a section c; specs/S.mdx holds a section x
+// holding a child x.y. After the baseline commit, a.b's and x.y's texts are
+// edited and a top-level section d is added to specs/R.mdx, after c; the
+// four-edit staging also edits specs/R.mdx's top-level text, which its twin
+// leaves unedited — there the added section alone makes the root `changed`,
+// a structural edit originating at the parent (SPEC 5.5, 5.6). Either way
+// R's root is `changed` with no `changed` ancestor, so the skipping rule
+// visits it as N: its single subtree-coherence item takes in a.b and d, the
+// file's other `changed` nodes, and no item arises at a.b, a, or d, a
+// parent-consistency item going to non-root ancestors alone (10.5); S's
+// root, no `changed` ancestor of x.y, leaves x.y visited with x's
+// parent-consistency item above it.
+//
+// The fixture is exported for T10.2-2's arm over item (3)'s `baseline`
+// (`T10_5_8_FILES`, `T10_5_8_NODES`, `T10_5_8_INITIAL_FILES`,
+// `T10_5_8_STAGINGS`, `stageT1058Session`): the staging asserts staging
+// premises alone, every outcome T10.5-8 asserts staying in its body.
+
+/** T10.5-8's source paths: the `changed` root's file R, and S. */
+export const T10_5_8_FILES = {
+  r: "specs/R.mdx",
+  s: "specs/S.mdx",
+} as const;
+
+/** T10.5-8's node identities (SPEC 1.5). */
+export const T10_5_8_NODES = {
+  rRoot: "specs/R.mdx",
+  a: "specs/R.mdx#a",
+  ab: "specs/R.mdx#a.b",
+  c: "specs/R.mdx#c",
+  d: "specs/R.mdx#d",
+  sRoot: "specs/S.mdx",
+  x: "specs/S.mdx#x",
+  xy: "specs/S.mdx#x.y",
+} as const;
+
+const R8_ROOT = T10_5_8_NODES.rRoot;
+const R8_A = T10_5_8_NODES.a;
+const R8_AB = T10_5_8_NODES.ab;
+const R8_C = T10_5_8_NODES.c;
+const R8_D = T10_5_8_NODES.d;
+const R8_S_ROOT = T10_5_8_NODES.sRoot;
+const R8_X = T10_5_8_NODES.x;
+const R8_XY = T10_5_8_NODES.xy;
+
+/** The nodes of item (3)'s scope that the baseline graph holds. */
+const R8_BASELINE_NODES: readonly string[] = [R8_ROOT, R8_A, R8_AB, R8_C];
+
+const R8_TOP_V0 = "Root top text v0.";
+const R8_TOP_V1 = "Root top text v1.";
+const R8_AB_V1 = "Ay bee text v1.";
+
+/**
+ * specs/R.mdx's bytes: the top-level text `topText`, then a (its own text,
+ * then a.b holding `abText`), c, and — `withD` — the top-level d after c.
+ */
+function t1058RSource(topText: string, abText: string, withD: boolean): string {
+  return [
+    topText,
+    "",
+    '<S id="a">',
+    "Ay own text.",
+    "",
+    '<S id="a.b">',
+    abText,
+    "</S>",
+    "</S>",
+    "",
+    '<S id="c">',
+    "Cee text.",
+    "</S>",
+    ...(withD ? ["", '<S id="d">', "Dee text.", "</S>"] : []),
+    "",
+  ].join("\n");
+}
+
+/** specs/S.mdx's bytes: x, its own text, holding x.y (`xyText`). */
+function t1058SSource(xyText: string): string {
+  return [
+    '<S id="x">',
+    "Ex own text.",
+    "",
+    '<S id="x.y">',
+    xyText,
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+// T10.5-8's sources are staged-source records (helpers/staged-mdx.ts, S-9:
+// judged before any product exists): the edits follow the baseline
+// capture's `build`, and the initial sources are exported records both
+// workspaces share, the twin's created after the body's first `build`.
+const T10_5_8_R_INITIAL = stagedMdx(
+  "T10.5-8 specs/R.mdx with top-level text, a holding a.b, and c, at v0 (the fixture's initial source)",
+  t1058RSource(R8_TOP_V0, "Ay bee text v0.", false),
+);
+const T10_5_8_S_INITIAL = stagedMdx(
+  "T10.5-8 specs/S.mdx with x holding x.y at v0 (the fixture's initial source)",
+  t1058SSource("Ex why text v0."),
+);
+const T10_5_8_R_EDITED = stagedMdx(
+  "T10.5-8 specs/R.mdx with its top-level text and a.b at v1 and d added after c (the four-edit staging)",
+  t1058RSource(R8_TOP_V1, R8_AB_V1, true),
+);
+const T10_5_8_R_TWIN_EDITED = stagedMdx(
+  "T10.5-8 specs/R.mdx with a.b at v1 and d added after c, its top-level text unedited (the twin)",
+  t1058RSource(R8_TOP_V0, R8_AB_V1, true),
+);
+const T10_5_8_S_EDITED = stagedMdx(
+  "T10.5-8 specs/S.mdx with x.y at v1 (both stagings' x.y edit)",
+  t1058SSource("Ex why text v1."),
+);
+
+/**
+ * T10.5-8's initial sources at the baseline, as a workspace declaration's
+ * `files` entries beside a configuration whose one spec group discovers
+ * every `.mdx` file under `specs/` (SPEC 7.1) — records, so any workspace
+ * stages them alike (S-9).
+ */
+export const T10_5_8_INITIAL_FILES: Readonly<Record<string, StagedMdx>> = {
+  [T10_5_8_FILES.r]: T10_5_8_R_INITIAL,
+  [T10_5_8_FILES.s]: T10_5_8_S_INITIAL,
+};
+
+/** One of T10.5-8's two stagings (TEST-SPEC T10.5-8). */
+export interface T1058Staging {
+  /** The staging's name in diagnoses. */
+  readonly name: string;
+  /** specs/R.mdx after the edits. */
+  readonly rEdited: StagedMdx;
+  /** Why R's root is `changed` after the edits (SPEC 5.5, 5.6). */
+  readonly rootChangedWhy: string;
+  /**
+   * The root's subtree text after the edits — specs/R.mdx's entire compiled
+   * Markdown output (SPEC 1.6), derived by hand from SPEC 3 as T1.6-1's
+   * expected texts are: every tag-only line emptied purely by removals and
+   * dropped with its terminator, every text and blank line kept.
+   */
+  readonly rootSubtreeText: string;
+  /**
+   * The root's own text after the edits — its subtree text with a's, c's,
+   * and d's contributions excised, its runs joined at the excision points
+   * (SPEC 1.6): the scope text a parent-consistency item presents (10.7),
+   * diagnosed where item (3)'s is expected.
+   */
+  readonly rootOwnText: string;
+}
+
+/** R's root's subtree text after the edits, its top-level text `top`. */
+function r8RootSubtreeText(top: string): string {
+  return `${top}\n\nAy own text.\n\n${R8_AB_V1}\n\nCee text.\n\nDee text.\n`;
+}
+
+/** R's root's own text after the edits, its top-level text `top`. */
+function r8RootOwnText(top: string): string {
+  return `${top}\n\n\n\n`;
+}
+
+/**
+ * T10.5-8's two stagings: the four edits, and the twin leaving specs/R.mdx's
+ * top-level text unedited — R's root `changed` either way (SPEC 5.5, 5.6).
+ */
+export const T10_5_8_STAGINGS: readonly T1058Staging[] = [
+  {
+    name: "the four-edit staging",
+    rEdited: T10_5_8_R_EDITED,
+    rootChangedWhy:
+      "its top-level text edited and the top-level d added, each an edit " +
+      "to its own content",
+    rootSubtreeText: r8RootSubtreeText(R8_TOP_V1),
+    rootOwnText: r8RootOwnText(R8_TOP_V1),
+  },
+  {
+    name: "the twin (top-level text unedited)",
+    rEdited: T10_5_8_R_TWIN_EDITED,
+    rootChangedWhy:
+      "the top-level d added alone, a structural edit originating at the " +
+      "parent",
+    rootSubtreeText: r8RootSubtreeText(R8_TOP_V0),
+    rootOwnText: r8RootOwnText(R8_TOP_V0),
+  },
+];
+
+/** The session one T10.5-8 staging leaves, and its captures. */
+export interface T1058Session {
+  /** The baseline commit `create --base` names. */
+  readonly base: string;
+  /**
+   * The root's, a's, a.b's, and c's hashes at the baseline — `query node`
+   * before the edits.
+   */
+  readonly atBaseline: ReadonlyMap<string, NodeHashes>;
+  /**
+   * The root's, a's, a.b's, c's, and d's hashes after the edits — `query
+   * node` right before `create`, nothing staged between.
+   */
+  readonly atCreate: ReadonlyMap<string, NodeHashes>;
+}
+
+/**
+ * Stage one of T10.5-8's stagings in a fresh workspace holding
+ * `T10_5_8_INITIAL_FILES` (SPEC 10.5): the baseline committed, built, and
+ * captured (the root, a, a.b, and c); `staging`'s specs/R.mdx and
+ * specs/S.mdx's x.y edit staged, built, and captured (d too) — the root's,
+ * a's, and a.b's subtreeHashes differing from their baseline values (5.5)
+ * and the `changed` nodes exactly R's root, a.b, d, and x.y (5.6; `impact
+ * --json`), staging premises; then `review create --base <baseline> --name
+ * s`. Exported for T10.2-2's arm over item (3)'s `baseline`.
+ */
+export async function stageT1058Session(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  staging: T1058Staging,
+  label: string,
+): Promise<T1058Session> {
+  await workspace.gitInit();
+  const base = await workspace.gitCommitAll("baseline");
+  await buildOk(product, workspace, `${label} \`build\` at the baseline`);
+  const atBaseline = await captureHashes(
+    product,
+    workspace,
+    R8_BASELINE_NODES,
+    `${label} baseline capture`,
+  );
+  await workspace.file(T10_5_8_FILES.r, staging.rEdited);
+  await workspace.file(T10_5_8_FILES.s, T10_5_8_S_EDITED);
+  await buildOk(product, workspace, `${label} \`build\` after the edits`);
+  const atCreate = await captureHashes(
+    product,
+    workspace,
+    [...R8_BASELINE_NODES, R8_D],
+    `${label} capture after the edits`,
+  );
+  const premise = `${label} staging premise`;
+  for (const node of [R8_ROOT, R8_A, R8_AB]) {
+    if (
+      capturedHash(atCreate, node, "subtreeHash", premise) ===
+      capturedHash(atBaseline, node, "subtreeHash", premise)
+    ) {
+      fail(
+        `${premise}: ${node}'s subtreeHash must differ from its baseline ` +
+          `value after the edits (SPEC 5.5: a node of its subtree changed), ` +
+          `so item (3)'s baseline values are told apart from the current ` +
+          `graph's (TEST-SPEC T10.5-8)`,
+      );
+    }
+  }
+  const impactLabel = `${label} \`impact --base <baseline> --json\``;
+  const impact = decodeImpactReport(
+    await runJson(
+      product,
+      workspace,
+      ["impact", "--base", base, "--json"],
+      impactLabel,
+    ),
+    impactLabel,
+  );
+  assertSameJson(
+    impact.requirements
+      .filter((entry) =>
+        entry.categories.some((category) => category.category === "changed"),
+      )
+      .flatMap((entry) => entry.nodes)
+      .sort(),
+    [R8_ROOT, R8_AB, R8_D, R8_XY].sort(),
+    `${impactLabel} staging premise: the \`changed\` nodes are exactly R's ` +
+      `root — ${staging.rootChangedWhy} (SPEC 5.5, 5.6: adding a child ` +
+      `changes its parent's ownHash, structural edits originating at the ` +
+      `parent) — a.b and x.y, their texts edited, and d, added`,
+  );
+  await createBaseSession(product, workspace, base, "s", label);
+  return { base, atBaseline, atCreate };
+}
+
+/** T10.5-8's three items in item order (SPEC 10.5): depths 2, 1, then 0. */
+const R8_EXPECTED_SEQUENCE: readonly string[] = [
+  `subtree-coherence ${R8_XY}`,
+  `parent-consistency ${R8_X}`,
+  `subtree-coherence ${R8_ROOT}`,
+];
+
+/**
+ * Assert item (3)'s `baseline` entries (TEST-SPEC T10.5-8; SPEC 10.2,
+ * 10.4), read through the review adapter's `decodeRecordedState`: fixed
+ * from the recorded baseline graph, it holds for the root, a, a.b, and c,
+ * each present, the subtreeHash and metadataHash `query node` reported at
+ * the baseline, before the edits — never the values after them, which a
+ * baseline filled from the current graph holds — and for d, in the item's
+ * scope when it entered though the baseline graph lacks it, an entry
+ * presenting it absent, its hashes the explicit absent marker: never d's
+ * current hashes, and never no entry, which 10.2 leaves to a node joining
+ * the item later.
+ */
+function assertT1058Baseline(
+  item: ReviewItem,
+  session: T1058Session,
+  label: string,
+): void {
+  const entries = decodeRecordedState(item, "baseline", label);
+  const entryOf = (node: string): RecordedNodeEntry | undefined =>
+    entries.find((entry) => entry.node === node);
+  const held = JSON.stringify(entries.map((entry) => entry.node));
+  for (const node of R8_BASELINE_NODES) {
+    const entry = entryOf(node);
+    if (entry === undefined) {
+      fail(
+        `${label}: holds no entry for ${node}, a scope node the baseline ` +
+          `graph holds — \`baseline\` holds the item's relevant hashes and ` +
+          `node presence (SPEC 10.2, 10.4); it holds entries for ${held}`,
+      );
+    }
+    if (!entry.present || entry.absentMarker) {
+      fail(
+        `${label}: ${node}'s entry must present it present, with its ` +
+          `hashes — the recorded baseline graph holds it (SPEC 10.2, ` +
+          `10.4); got ${JSON.stringify(entry)}`,
+      );
+    }
+    for (const hash of ["subtreeHash", "metadataHash"] as const) {
+      const expected = capturedHash(session.atBaseline, node, hash, label);
+      const recorded = entry.hashes[hash];
+      if (recorded === expected) continue;
+      const current = capturedHash(session.atCreate, node, hash, label);
+      fail(
+        `${label}: ${node}'s ${hash} must be ${JSON.stringify(expected)}, ` +
+          `the value \`query node\` reported at the baseline, before the ` +
+          `edits — \`baseline\` is fixed from the recorded baseline graph, ` +
+          `a subtree-coherence item's relevant hashes the subtreeHash and ` +
+          `metadataHash of each scope node (SPEC 10.2, 10.4); got ` +
+          (recorded === undefined
+            ? "none recorded"
+            : recorded === current
+              ? `${JSON.stringify(recorded)}, its value after the edits — a ` +
+                `baseline filled from the current graph`
+              : JSON.stringify(recorded)),
+      );
+    }
+  }
+  const d = entryOf(R8_D);
+  if (d === undefined) {
+    fail(
+      `${label}: holds no entry for d — d was in the item's scope when it ` +
+        `entered, though the baseline graph lacks it, so its entry presents ` +
+        `it absent, its hashes the explicit absent marker (SPEC 10.2, ` +
+        `10.4); 10.2 leaves an entry out only for a node joining the item ` +
+        `later, and a product entering only the nodes the baseline graph ` +
+        `holds gives d none; it holds entries for ${held}`,
+    );
+  }
+  const dCurrent = [
+    capturedHash(session.atCreate, R8_D, "subtreeHash", label),
+    capturedHash(session.atCreate, R8_D, "metadataHash", label),
+  ];
+  const dHeld = Object.values(d.hashes).filter(
+    (hash): hash is string => hash !== undefined,
+  );
+  if (dHeld.some((hash) => dCurrent.includes(hash))) {
+    fail(
+      `${label}: d's entry holds d's current hashes — never: the baseline ` +
+        `graph lacks d, so its entry presents it absent, its hashes the ` +
+        `explicit absent marker (SPEC 10.2, 10.4); got ${JSON.stringify(d)}`,
+    );
+  }
+  if (d.present) {
+    fail(
+      `${label}: d's entry must present it absent — the baseline graph ` +
+        `lacks d (SPEC 10.2, 10.4); got ${JSON.stringify(d)}`,
+    );
+  }
+  if (!d.absentMarker || dHeld.length > 0) {
+    fail(
+      `${label}: d's entry must record the explicit absent marker in place ` +
+        `of hashes, as an absent node's hashes are recorded (SPEC 10.4); ` +
+        `got ${JSON.stringify(d)}`,
+    );
+  }
+}
+
+/**
+ * Assert item (3)'s scope text as `surface` presents it (TEST-SPEC
+ * T10.5-8; SPEC 1.6, 10.7): a subtree-coherence item's scope text is the
+ * scope root's subtree text — for R's root, specs/R.mdx's entire compiled
+ * Markdown output — byte-asserted, and never the root's own text, which a
+ * parent-consistency item presents.
+ */
+function assertT1058RootScopeText(
+  item: ReviewItem,
+  staging: T1058Staging,
+  surface: string,
+): void {
+  if (item.scope.node !== R8_ROOT || item.scope.present !== true) {
+    fail(
+      `${surface}: the item's scope is R's root, present (SPEC 10.5, ` +
+        `10.7); got ${JSON.stringify({
+          node: item.scope.node,
+          present: item.scope.present,
+        })}`,
+    );
+  }
+  const text = item.scope.text;
+  if (text === undefined) {
+    fail(
+      `${surface}: the scope carries no text — a subtree-coherence item's ` +
+        `scope text is the scope root's subtree text (SPEC 10.7)`,
+    );
+  }
+  if (bytesEqual(text, staging.rootOwnText)) {
+    fail(
+      `${surface}: the scope text is the root's own text ` +
+        `${JSON.stringify(text)} — a's, c's, and d's contributions excised — ` +
+        `never its subtree text, which a subtree-coherence item's scope text ` +
+        `is (SPEC 1.6, 10.7)`,
+    );
+  }
+  assertBytesEqual(
+    text,
+    staging.rootSubtreeText,
+    `${surface}: the scope text is the root's subtree text — specs/R.mdx's ` +
+      `entire compiled Markdown output (SPEC 1.6, 3, 10.7)`,
+  );
+}
+
+/**
+ * Assert the session `s` one T10.5-8 staging leaves (TEST-SPEC T10.5-8;
+ * SPEC 10.2, 10.4, 10.5, 10.7): no item at a.b, a, or d; R's root its
+ * subtree-coherence item alone; S's nodes their own items; exactly three
+ * items in item order in `status` and `export`; each item's context and
+ * origin, items (2) and (3)'s `blockedBy`, and item (3)'s scope; item (3)'s
+ * `baseline` entries; and item (3)'s scope text in `export` and `show`.
+ */
+async function assertT1058Session(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  staging: T1058Staging,
+  session: T1058Session,
+  prefix: string,
+): Promise<void> {
+  const status = await sessionStatus(product, workspace, "s", prefix);
+  const rowsAt = (scopes: readonly string[]): readonly string[] =>
+    status.items
+      .filter((row) => scopes.includes(row.scope))
+      .map((row) => `${row.kind} ${row.scope}`)
+      .sort();
+  assertSameJson(
+    rowsAt([R8_AB, R8_A, R8_D]),
+    [],
+    `${prefix}: no item is scoped at a.b, a, or d — R's root, \`changed\` ` +
+      `with no \`changed\` ancestor, is visited as N, so a.b and d, ` +
+      `\`changed\` beneath it, are skipped, entering its subtree-coherence ` +
+      `item, and no parent-consistency item arises at a, those going to the ` +
+      `non-root ancestors on a visited node's path (SPEC 10.5); a product ` +
+      `that never visits a root gives a.b and d items of their own and a a ` +
+      `parent-consistency item`,
+  );
+  assertSameJson(
+    rowsAt([R8_ROOT]),
+    [`subtree-coherence ${R8_ROOT}`],
+    `${prefix}: R's root, visited as N, has exactly its subtree-coherence ` +
+      `item — no parent-consistency item, those going to non-root ` +
+      `ancestors alone (SPEC 10.5)`,
+  );
+  assertSameJson(
+    rowsAt([R8_S_ROOT, R8_X, R8_XY]),
+    [`parent-consistency ${R8_X}`, `subtree-coherence ${R8_XY}`],
+    `${prefix}: specs/S.mdx's nodes keep their own items — x.y, visited, ` +
+      `its subtree-coherence item and x its parent-consistency item — that ` +
+      `file's root being no \`changed\` ancestor of theirs (SPEC 10.5)`,
+  );
+  assertSameJson(
+    kindScopeSequence(status.items),
+    R8_EXPECTED_SEQUENCE,
+    `${prefix}: exactly three items, in item order — x.y's ` +
+      `subtree-coherence item at depth 2, x's parent-consistency item at ` +
+      `depth 1, and R's root's subtree-coherence item at depth 0 (SPEC ` +
+      `10.5: deepest first, roots 0)`,
+  );
+
+  const exported = await exportSession(product, workspace, "s", prefix);
+  assertSameJson(
+    exportKindScopeSequence(exported.items),
+    R8_EXPECTED_SEQUENCE,
+    `${prefix}: \`export\` presents the same three items in item order ` +
+      `(SPEC 10.5, 10.7)`,
+  );
+  const one = `${prefix} item (1), x.y's subtree-coherence item`;
+  const xyItem = requireItem(exported.items, "subtree-coherence", R8_XY, one);
+  assertSameJson(
+    identitySet(xyItem.context),
+    [R8_S_ROOT, R8_X].sort(),
+    `${one}: context x.y's ancestor chain, specs/S.mdx and x (SPEC 10.5)`,
+  );
+  assertSameJson(
+    identitySet(xyItem.origin),
+    [R8_XY],
+    `${one}: origin exactly {x.y}, the \`changed\` node in its scope (SPEC ` +
+      `10.5)`,
+  );
+  const two = `${prefix} item (2), x's parent-consistency item`;
+  const xItem = requireItem(exported.items, "parent-consistency", R8_X, two);
+  assertSameJson(
+    identitySet(xItem.context),
+    [R8_XY],
+    `${two}: context exactly {x.y}, the one changed branch beneath x, ` +
+      `entering as x's child on it (SPEC 10.5)`,
+  );
+  assertSameJson(
+    identitySet(xItem.origin),
+    [R8_XY],
+    `${two}: origin exactly {x.y}, the \`changed\` node in x's subtree ` +
+      `(SPEC 10.5)`,
+  );
+  assertBlockedBy(
+    xItem,
+    [xyItem.id],
+    `${two}: blocked by item (1), the subtree-coherence item of x's child ` +
+      `on its one changed branch, x.y itself visited (SPEC 10.5)`,
+  );
+  const three = `${prefix} item (3), R's root's subtree-coherence item`;
+  const rootItem = requireItem(
+    exported.items,
+    "subtree-coherence",
+    R8_ROOT,
+    three,
+  );
+  assertSameJson(
+    identitySet(requireScopeNodes(rootItem, three)),
+    [R8_ROOT, R8_A, R8_AB, R8_C, R8_D].sort(),
+    `${three}: scope the root and every section of the file — a, a.b, c, ` +
+      `and d — N and all its descendants reviewed as a single block (SPEC ` +
+      `10.5, 10.7: every scope node presented)`,
+  );
+  assertSameJson(
+    identitySet(rootItem.context),
+    [],
+    `${three}: context empty — a root's ancestor chain (SPEC 10.5)`,
+  );
+  assertSameJson(
+    identitySet(rootItem.origin),
+    [R8_ROOT, R8_AB, R8_D].sort(),
+    `${three}: origin exactly {the root, a.b, d} — the \`changed\` nodes in ` +
+      `its scope, the skipped a.b and d included (SPEC 10.5)`,
+  );
+  assertBlockedBy(
+    rootItem,
+    [],
+    `${three}: blockedBy empty — path-blocks gives blockers to ` +
+      `parent-consistency items alone (SPEC 10.2, 10.5)`,
+  );
+  assertT1058Baseline(
+    rootItem,
+    session,
+    `${three}'s \`baseline\` in \`export\``,
+  );
+  assertT1058RootScopeText(rootItem, staging, `${three} in \`export\``);
+  const rootId = requireRow(status, "subtree-coherence", R8_ROOT, prefix).id;
+  const shown = await showItem(product, workspace, "s", rootId, prefix);
+  if (shown.id !== rootId || shown.kind !== "subtree-coherence") {
+    fail(
+      `${prefix}: \`review show s ${rootId}\` reports R's root's ` +
+        `subtree-coherence item (SPEC 10.7: the full item); got ` +
+        `${JSON.stringify({ id: shown.id, kind: shown.kind })}`,
+    );
+  }
+  assertT1058RootScopeText(shown, staging, `${three} in \`show\``);
+}
+
+const T10_5_8 = defineProductTest({
+  id: "T10.5-8",
+  title:
+    "a `changed` root: an edit to a root's own content — its top-level text edited, or a top-level section added — makes the root `changed`, and the skipping rule visits it as N, its single subtree-coherence item taking in every other `changed` node of its file — with specs/R.mdx holding top-level text, a holding a.b, and c, and specs/S.mdx holding x holding x.y, after the baseline a.b's and x.y's texts edited, a top-level d added to specs/R.mdx, and its top-level text edited, `review create --base` yields exactly three items in this order: x.y's subtree-coherence item (depth 2; context specs/S.mdx and x; origin {x.y}), x's parent-consistency item (depth 1; context and origin {x.y}; blockedBy x.y's item), and specs/R.mdx's root's subtree-coherence item (depth 0; scope the root, a, a.b, c, and d; context empty; origin exactly {the root, a.b, d}; blockedBy empty) — no item at a.b, a, or d, the root no parent-consistency item, specs/S.mdx's nodes their own items; item (3)'s `baseline`, fixed from the recorded baseline graph, holds for the root, a, a.b, and c, each present, the subtreeHash and metadataHash `query node` reported before the edits (the root's, a's, and a.b's subtreeHashes differing from their current values), and for d, added since the baseline, an entry presenting it absent, its hashes the explicit absent marker — never d's current hashes, never no entry; `show` and `export` present item (3)'s scope text as the root's subtree text, specs/R.mdx's entire compiled Markdown output; and a twin leaving the top-level text unedited — the added section alone making the root `changed`, a structural edit originating at the parent — yields the same three items (SPEC 1.6, 5.5, 5.6, 10.2, 10.4, 10.5, 10.7)",
+  run: async (product) => {
+    for (const staging of T10_5_8_STAGINGS) {
+      await withWorkspace(
+        SPECS_ONLY_CONFIG,
+        T10_5_8_INITIAL_FILES,
+        async (workspace) => {
+          const prefix = `T10.5-8 ${staging.name}`;
+          const session = await stageT1058Session(
+            product,
+            workspace,
+            staging,
+            prefix,
+          );
+          await assertT1058Session(
+            product,
+            workspace,
+            staging,
+            session,
+            prefix,
+          );
+        },
+      );
+    }
+  },
+});
+
 /** TEST-SPEC §10.5, in canonical ID order (SUITE-36). */
 export const section105Tests: readonly ProductTestEntry[] = [
   T10_5_1,
@@ -5287,4 +5911,5 @@ export const section105Tests: readonly ProductTestEntry[] = [
   T10_5_5,
   T10_5_6,
   T10_5_7,
+  T10_5_8,
 ];
