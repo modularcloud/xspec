@@ -1,5 +1,5 @@
 // TEST-SPEC §10.5 (built-in strategy: path-blocks) — SUITE-36:
-// T10.5-1…T10.5-6.
+// T10.5-1…T10.5-7.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -12,21 +12,27 @@
 // ancestor, against the union of changed branches, blocked per branch by the
 // child's item); metadata and dependency impact add one
 // `metadata-consistency` item per `metadata-changed` node, one
-// `dependency-consistency` item per node having, in the current graph, a
-// dependency edge to a both-sides target whose effectiveHash changed, and
-// one `code-impact` item per impacted location, whatever its code
-// categories — the last two's origins the originating nodes of their
-// targets' categories, a target's `metadata-changed` counting only when its
-// `d` targets changed. Items are totally ordered (depth deepest-first, kind,
-// file path, document order; `code-impact` last by location identity;
-// absent scopes after present ones). Resolving `updated` re-derives the
-// session with the recorded creation parameters; `split` decompositions
-// apply recursively and are never re-added.
+// `dependency-consistency` item per node — a root included — having, in the
+// current graph, a dependency edge (`depends` or `embeds`) to a both-sides
+// target whose effectiveHash changed, and one `code-impact` item per
+// impacted location (its impact edges `references` and `embeds`, 9.2),
+// whatever its code categories — the last two's origins the originating
+// nodes of their targets' categories, a target's `metadata-changed` counting
+// only when its `d` targets changed. Items are totally ordered (depth
+// deepest-first, roots 0; kind; file path; document order; `code-impact`
+// last by location identity; absent scopes after present ones). Resolving
+// `updated` re-derives the session with the recorded creation parameters;
+// `split` decompositions apply recursively and are never re-added.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - `context` and `origin` are asserted as sorted identity sets: SPEC 10.5
-//   fixes their membership, not a payload order; texts and byte-level payload
-//   contracts are T10.7-12's business.
+//   fixes their membership, not a payload order. The sorted lists keep
+//   duplicates, so a node entering twice fails the compare (T10.5-7: f's
+//   target enters its context once though two edges reach it). Texts and
+//   byte-level payload contracts are T10.7-12's business, but for T10.5-7's
+//   root-item scope text, byte-asserted in `show` and `export` against the
+//   root's own text derived by hand from SPEC 1.6 and 3, as T1.6-1's
+//   expected texts are.
 // - `blockedBy` is compared as a sorted id set (SPEC 10.5/10.7 fix which
 //   items block, not an order within the field).
 // - An item's scope set — every node of its scope as last assigned (SPEC
@@ -93,8 +99,9 @@
 //   precedes a body's first `build` (each fixture's first edit, between
 //   `gitCommitAll` and that `build`) stays plain, as do each body's first
 //   workspace's initial `files` entries (S-7's sweep reaches them against the
-//   stub). The tie sub-fixture's deletions are plain removals of files
-//   (`fsp.rm`), which S-9 does not judge.
+//   stub) — T10.5-7's, its one workspace, `.mdx` and code sources alike, and
+//   its t edit among them. The tie sub-fixture's deletions are plain removals
+//   of files (`fsp.rm`), which S-9 does not judge.
 // - The configuration of every workspace created after a body's first `build`
 //   (T10.5-1's extended fixture, chain fixture, and the chain fixture's
 //   both-edited twin, T10.5-3's current-graph-edges workspace, T10.5-4's tie
@@ -105,12 +112,16 @@
 //   bodies' first workspaces and stays plain, its bytes staged in T10.5-3's
 //   origin-counting and one-item-per-location workspaces as the record
 //   `T10_5_3_CODE_CONFIG`, beside their code sources, records too
-//   (`T10_5_3_OC_CODE`, `T10_5_3_L_BOTH_TS`).
+//   (`T10_5_3_OC_CODE`, `T10_5_3_L_BOTH_TS`). T10.5-7's configuration,
+//   `T10_5_7_CONFIG` (the spec group over `specs/*.mdx` and the code group
+//   over `src/*.ts` its TEST-SPEC entry stages), serves its one workspace,
+//   created before any invocation, and stays plain too.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import type {
   ExportReport,
+  ImpactedCodeEntry,
   ItemStatus,
   NodeHashes,
   NodeReport,
@@ -129,7 +140,11 @@ import {
   decodeSessionStatusReport,
   requireScopeNodes,
 } from "../../helpers/adapters/index.js";
-import { fail } from "../../helpers/assertions.js";
+import {
+  assertBytesEqual,
+  bytesEqual,
+  fail,
+} from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { type StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
@@ -4785,6 +4800,484 @@ const T10_5_6 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T10.5-7 — embedding edges and a root-sourced embedding
+// ---------------------------------------------------------------------------
+
+// TEST-SPEC T10.5-7's fixture, as its entry stages it. specs/B.mdx holds the
+// top-level t. specs/A.mdx imports ./B.xspec as B and holds three
+// constructs: a top-level {text(B.t)} outside every section — a root-sourced
+// embeds edge A's root → t, staged as T8-5 stages one (SPEC 2.3) — a section
+// e holding only {text(B.t)}, an embeds edge its sole dependency edge, and a
+// section f spelled d={B.t} and holding {text(B.t)}, a depends and an embeds
+// edge to one target. src/show.ts imports ../specs/B.xspec with its `text`
+// export and calls text(B.t) in the function show; src/echo.ts imports
+// ../specs/A.xspec likewise and calls text(A.e) in the function echo — embeds
+// edges from the named units src/show.ts#show and src/echo.ts#echo (SPEC 4.3,
+// 4.6); no marker stands anywhere. With that state committed as the baseline,
+// t's text is edited: t is `changed`; e, f, and A's root are
+// `upstream-changed`, not `changed` — an embedded target's edit leaves the
+// embedder's own content unchanged (SPEC 5.5, 5.6) — so none is visited and
+// each, bearing a dependency edge to t in the current graph, gets a
+// dependency-consistency item, the root included; e's effectiveHash changes
+// and its subtreeHash does not, so echo is transitively impacted through its
+// embeds edge to e, and show directly through its embeds edge to t (SPEC
+// 9.2). The body's one workspace is created, and t edited, before any
+// product invocation, so every file stays plain (module header).
+const E7_A_FILE = "specs/A.mdx";
+const E7_B_FILE = "specs/B.mdx";
+const E7_ROOT = "specs/A.mdx";
+const E7_E = "specs/A.mdx#e";
+const E7_F = "specs/A.mdx#f";
+const E7_B_ROOT = "specs/B.mdx";
+const E7_T = "specs/B.mdx#t";
+const E7_SHOW_FILE = "src/show.ts";
+const E7_SHOW = "src/show.ts#show";
+const E7_ECHO_FILE = "src/echo.ts";
+const E7_ECHO = "src/echo.ts#echo";
+
+// The spec group over specs/*.mdx and the code group over src/*.ts that
+// T10.5-7's TEST-SPEC entry stages (module header: plain).
+const T10_5_7_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  code: {
+    app: ["src/*.ts"]
+  }
+})
+`;
+
+const E7_T_TEXT_V0 = "Target text v0.";
+const E7_T_TEXT_V1 = "Target text v1.";
+
+function e7BSource(tText: string): string {
+  return ['<S id="t">', tText, "</S>", ""].join("\n");
+}
+
+const E7_A_SOURCE = [
+  'import B from "./B.xspec"',
+  "",
+  "{text(B.t)}",
+  "",
+  '<S id="e">',
+  "{text(B.t)}",
+  "</S>",
+  "",
+  '<S id="f" d={B.t}>',
+  "{text(B.t)}",
+  "</S>",
+  "",
+].join("\n");
+
+const E7_SHOW_SOURCE = [
+  'import B, { text } from "../specs/B.xspec";',
+  "",
+  "export function show(): string {",
+  "  return text(B.t);",
+  "}",
+  "",
+].join("\n");
+
+const E7_ECHO_SOURCE = [
+  'import A, { text } from "../specs/A.xspec";',
+  "",
+  "export function echo(): string {",
+  "  return text(A.e);",
+  "}",
+  "",
+].join("\n");
+
+// Expected texts, derived by hand from SPEC 1.6 and 3 as T1.6-1's are: the
+// import line and every tag-only line are emptied purely by removals and
+// dropped with their terminators, each embedding's line compiles to t's
+// subtree text followed by the line's own terminator, and the blank lines
+// are kept. t's current subtree text is its one text line with its
+// terminator.
+const E7_T_SUBTREE_V1 = `${E7_T_TEXT_V1}\n`;
+// A's root subtree text — the file's entire compiled output: the blank line
+// after the import, the top-level embedding's line, the blank line before e,
+// e's contribution (its embedding's line), the blank line between e and f,
+// and f's contribution (its embedding's line).
+const E7_ROOT_SUBTREE_V1 = `\n${E7_T_SUBTREE_V1}\n\n${E7_T_SUBTREE_V1}\n\n${E7_T_SUBTREE_V1}\n`;
+// A's root own text — its dependency-consistency item's scope text (SPEC
+// 10.7): t's current subtree text expanded where the top-level embedding
+// stands, e's and f's contributions excised, the root's runs joined at the
+// excision points (SPEC 1.6) — the blank line after the import, the
+// top-level embedding's line, and the blank lines before e and between e and
+// f.
+const E7_ROOT_OWN_V1 = `\n${E7_T_SUBTREE_V1}\n\n\n`;
+
+/** One of T10.5-7's six expected items (TEST-SPEC T10.5-7; SPEC 10.5). */
+interface E7ExpectedItem {
+  readonly kind: ReviewItem["kind"];
+  /** The scope node — the scoped code location for `code-impact`. */
+  readonly scope: string;
+  readonly context: readonly string[];
+  /** Why that context is expected. */
+  readonly contextWhy: string;
+  readonly origin: readonly string[];
+  /** Why that origin is expected. */
+  readonly originWhy: string;
+}
+
+// The six items in item order (SPEC 10.5): requirement-scoped items first,
+// deepest first — every depth-1 item before the depth-0 root's, at depth 1
+// subtree-coherence before dependency-consistency, then e before f in
+// document order — and the code-impact items last, by location identity.
+const E7_EXPECTED_ITEMS: readonly E7ExpectedItem[] = [
+  {
+    kind: "subtree-coherence",
+    scope: E7_T,
+    context: [E7_B_ROOT],
+    contextWhy:
+      "t's ancestor chain — B's root alone, t being top-level (SPEC 10.5)",
+    origin: [E7_T],
+    originWhy: "the changed node in its scope, t itself (SPEC 10.5)",
+  },
+  {
+    kind: "dependency-consistency",
+    scope: E7_E,
+    context: [E7_T],
+    contextWhy:
+      "exactly {t}, the changed both-sides target of e's embeds edge, its " +
+      "sole dependency edge — an embeds edge is a dependency edge like a " +
+      "depends edge (SPEC 5.2, 10.5)",
+    origin: [E7_T],
+    originWhy:
+      "exactly {t}, the originating node of t's category — t itself, " +
+      "changed (SPEC 5.6, 10.5)",
+  },
+  {
+    kind: "dependency-consistency",
+    scope: E7_F,
+    context: [E7_T],
+    contextWhy:
+      "exactly {t} — f's depends and embeds edges reach the one target, " +
+      "which enters its context once, never once per edge (SPEC 5.2: edges " +
+      "of each kind form a set, 10.5: context those changed targets)",
+    origin: [E7_T],
+    originWhy:
+      "exactly {t}, the originating node of t's category (SPEC 5.6, 10.5)",
+  },
+  {
+    kind: "dependency-consistency",
+    scope: E7_ROOT,
+    context: [E7_T],
+    contextWhy:
+      "exactly {t}, the target of the root-sourced embeds edge — the " +
+      "root's own dependency edge; e and f, its children, are no targets " +
+      "(SPEC 2.3, 10.5)",
+    origin: [E7_T],
+    originWhy:
+      "exactly {t}, the originating node of t's category (SPEC 5.6, 10.5)",
+  },
+  {
+    kind: "code-impact",
+    scope: E7_ECHO,
+    context: [E7_E],
+    contextWhy:
+      "exactly {e}, the target of its one impact edge, an embeds edge, " +
+      "which makes it impacted — e's effectiveHash changed and its " +
+      "subtreeHash did not, so echo is transitively impacted (SPEC 9.2, " +
+      "10.5)",
+    origin: [E7_T],
+    originWhy:
+      "exactly {t}, the originating node of e's change — e's " +
+      "upstream-changed is attributed to t — rather than the context node " +
+      "e (SPEC 5.6, 10.5)",
+  },
+  {
+    kind: "code-impact",
+    scope: E7_SHOW,
+    context: [E7_T],
+    contextWhy:
+      "exactly {t}, the target of its one impact edge, an embeds edge — " +
+      "t's subtreeHash changed, so show is directly impacted (SPEC 9.2, " +
+      "10.5)",
+    origin: [E7_T],
+    originWhy:
+      "exactly {t}, the originating node of t's category (SPEC 5.6, 10.5)",
+  },
+];
+
+/** `kind scope` rendering of one expected item (order compare). */
+function e7KindScope(item: E7ExpectedItem): string {
+  return `${item.kind} ${item.scope}`;
+}
+
+/**
+ * Assert the root item's scope text as `surface` presents it (TEST-SPEC
+ * T10.5-7; SPEC 1.6, 10.7): a dependency-consistency item's scope text is
+ * its scope node's own text — for A's root, t's current subtree text
+ * expanded where the top-level embedding stands, e's and f's contributions
+ * excised — byte-asserted, and never the root's subtree text.
+ */
+function assertE7RootScopeText(item: ReviewItem, surface: string): void {
+  if (item.scope.node !== E7_ROOT || item.scope.present !== true) {
+    fail(
+      `${surface}: the root item's scope is A's root, present (SPEC 10.5, ` +
+        `10.7); got ${JSON.stringify({
+          node: item.scope.node,
+          present: item.scope.present,
+        })}`,
+    );
+  }
+  const text = item.scope.text;
+  if (text === undefined) {
+    fail(
+      `${surface}: the root item's scope carries no text — a ` +
+        `dependency-consistency item's scope text is its scope node's own ` +
+        `text (SPEC 10.7)`,
+    );
+  }
+  if (bytesEqual(text, E7_ROOT_SUBTREE_V1)) {
+    fail(
+      `${surface}: the root item's scope text is the root's subtree text ` +
+        `${JSON.stringify(text)} — e's and f's contributions included — ` +
+        `never its own text, which a dependency-consistency item's scope ` +
+        `text is (SPEC 1.6, 10.7)`,
+    );
+  }
+  assertBytesEqual(
+    text,
+    E7_ROOT_OWN_V1,
+    `${surface}: the root item's scope text is A's root own text — t's ` +
+      `current subtree text expanded where the top-level embedding stands, ` +
+      `e's and f's contributions excised (SPEC 1.6, 10.7)`,
+  );
+}
+
+/**
+ * Impacted-code entries, each rendered as its location and witness edge,
+ * sorted (T10.5-7's impact premise compare).
+ */
+function e7ImpactedCode(entries: readonly ImpactedCodeEntry[]): string[] {
+  return entries
+    .map(
+      (entry) =>
+        `${entry.location} through ${entry.edge.kind}: ` +
+        `${entry.edge.from} -> ${entry.edge.to}`,
+    )
+    .sort();
+}
+
+const T10_5_7 = defineProductTest({
+  id: "T10.5-7",
+  title:
+    "embedding edges and a root-sourced embedding: path-blocks derives dependency-consistency items over every dependency edge a requirement node bears, `embeds` as well as `depends`, its \"per requirement node\" excluding no root, and code-impact items over 9.2's impacted set, whose impact edges are `embeds` as well as `references` — with specs/B.mdx's top-level t edited since the baseline, specs/A.mdx holding a top-level {text(B.t)} outside every section (a root-sourced embeds edge), a section e holding only {text(B.t)}, and a section f spelled d={B.t} holding {text(B.t)}, src/show.ts's function show calling text(B.t), src/echo.ts's function echo calling text(A.e), and no marker anywhere, `review create --base` yields exactly six items in this order: t's subtree-coherence item (context B's root, origin {t}); dependency-consistency items scoped at e and then f, each with context and origin exactly {t} (f one item, not one per edge, t entering its context once though two edges reach it); the root's dependency-consistency item, context and origin likewise, at depth 0 after every depth-1 item; echo's code-impact item (transitively impacted through its embeds edge, e's effectiveHash changed and its subtreeHash not; context {e}, origin {t}, the originating node of e's change rather than the context node); and show's (directly impacted; context and origin {t}) — every blockedBy empty, no subtree-coherence item for e, f, or the root (upstream-changed, not changed: an embedded target's edit leaves the embedder's own content unchanged), and the root item's scope text in `show` and `export` byte-equal to the root's own text — t's current subtree text expanded where the top-level embedding stands, e's and f's contributions excised — never its subtree text (SPEC 1.6, 2.3, 4.3, 5.2, 5.5, 5.6, 9.2, 10.5, 10.7)",
+  run: async (product) => {
+    await withWorkspace(
+      T10_5_7_CONFIG,
+      {
+        [E7_B_FILE]: e7BSource(E7_T_TEXT_V0),
+        [E7_A_FILE]: E7_A_SOURCE,
+        [E7_SHOW_FILE]: E7_SHOW_SOURCE,
+        [E7_ECHO_FILE]: E7_ECHO_SOURCE,
+      },
+      async (workspace) => {
+        const prefix = "T10.5-7";
+        await workspace.gitInit();
+        const base = await workspace.gitCommitAll("baseline");
+        await workspace.file(E7_B_FILE, e7BSource(E7_T_TEXT_V1));
+        await buildOk(product, workspace, `${prefix} \`build\` after t's edit`);
+
+        // The staging's premises, through the impact surface (as T10.5-3's
+        // are): t `changed`; e, f, and A's root `upstream-changed` alone —
+        // never `changed`, the embedded target's text no part of the
+        // embedder's own content (SPEC 1.6, 5.5, 5.6); and the two code
+        // locations each impacted through its one impact edge, an embeds
+        // edge — show directly (t's subtreeHash changed), echo transitively
+        // (e's effectiveHash changed, its subtreeHash not) (SPEC 9.2, 9.3).
+        const impactLabel = `${prefix} \`impact --base <baseline> --json\``;
+        const impact = decodeImpactReport(
+          await runJson(
+            product,
+            workspace,
+            ["impact", "--base", base, "--json"],
+            impactLabel,
+          ),
+          impactLabel,
+        );
+        const categoriesOf = (identity: string): readonly string[] =>
+          impact.requirements
+            .filter((entry) => entry.nodes.includes(identity))
+            .flatMap((entry) =>
+              entry.categories.map((category) => category.category),
+            )
+            .sort();
+        assertSameJson(
+          categoriesOf(E7_T),
+          ["changed"],
+          `${impactLabel} staging premise: t, its own text edited, is ` +
+            `changed (SPEC 5.6)`,
+        );
+        for (const embedder of [E7_E, E7_F, E7_ROOT]) {
+          assertSameJson(
+            categoriesOf(embedder),
+            ["upstream-changed"],
+            `${impactLabel} staging premise: ${embedder}, embedding t, is ` +
+              `upstream-changed alone, never changed — an embedded target's ` +
+              `edit leaves the embedder's own content unchanged, changing ` +
+              `its effectiveHash alone (SPEC 1.6, 5.5, 5.6)`,
+          );
+        }
+        assertSameJson(
+          {
+            direct: e7ImpactedCode(impact.code.direct),
+            transitive: e7ImpactedCode(impact.code.transitive),
+          },
+          {
+            direct: [`${E7_SHOW} through embeds: ${E7_SHOW} -> ${E7_T}`],
+            transitive: [`${E7_ECHO} through embeds: ${E7_ECHO} -> ${E7_E}`],
+          },
+          `${impactLabel} staging premise: src/show.ts#show is directly ` +
+            `impacted through its one impact edge, its embeds edge to t ` +
+            `(t's subtreeHash changed), and src/echo.ts#echo transitively ` +
+            `through its one impact edge, its embeds edge to e (e's ` +
+            `effectiveHash changed, its subtreeHash not) — impact edges are ` +
+            `embeds as well as references edges (SPEC 9.2, 9.3)`,
+        );
+
+        await createBaseSession(product, workspace, base, "s", prefix);
+        const status = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          status.items
+            .filter((row) => row.kind === "subtree-coherence")
+            .map((row) => row.scope),
+          [E7_T],
+          `${prefix}: t alone is visited and gets a subtree-coherence item — ` +
+            `e, f, and specs/A.mdx's root get none: they are ` +
+            `upstream-changed, not changed, because an embedded target's ` +
+            `edit leaves the embedder's own content unchanged (SPEC 5.5, ` +
+            `5.6, 10.5)`,
+        );
+        const embedderWhy: readonly (readonly [string, string])[] = [
+          [
+            E7_E,
+            "e's sole dependency edge, its embeds edge to t, yields its " +
+              "dependency-consistency item — embeds as well as depends " +
+              "(SPEC 5.2, 10.5); a product deriving these items from d " +
+              "targets alone gives e none",
+          ],
+          [
+            E7_F,
+            "f, bearing a depends and an embeds edge to t, gets one " +
+              "dependency-consistency item, not one per edge (SPEC 10.5: one " +
+              "item per requirement node; a kind and scope node produced " +
+              "more than once in one derivation yields a single item)",
+          ],
+          [
+            E7_ROOT,
+            "the root, bearing the root-sourced embeds edge to t, gets its " +
+              'dependency-consistency item — 10.5\'s "per requirement node" ' +
+              "excludes no root (SPEC 1.2, 10.5); a product excluding roots, " +
+              "or reading d targets alone, gives it none",
+          ],
+        ];
+        for (const [scope, why] of embedderWhy) {
+          assertSameJson(
+            status.items
+              .filter((row) => row.scope === scope)
+              .map((row) => row.kind),
+            ["dependency-consistency"],
+            `${prefix}: ${scope}'s items — ${why}`,
+          );
+        }
+        assertSameJson(
+          status.items
+            .filter((row) => row.kind === "code-impact")
+            .map((row) => row.scope),
+          [E7_ECHO, E7_SHOW],
+          `${prefix}: one code-impact item per location in 9.2's impacted ` +
+            `set, whose impact edges are embeds as well as references ` +
+            `edges — src/echo.ts#echo through its embeds edge to e, ` +
+            `src/show.ts#show through its embeds edge to t — in ` +
+            `location-identity order (SPEC 9.2, 10.5); a product reading ` +
+            `markers alone gives neither`,
+        );
+        const expectedSequence = E7_EXPECTED_ITEMS.map(e7KindScope);
+        assertSameJson(
+          kindScopeSequence(status.items),
+          expectedSequence,
+          `${prefix}: exactly six items, in item order — t's ` +
+            `subtree-coherence item; at depth 1 after it the ` +
+            `dependency-consistency items of e and then f (kind order, then ` +
+            `document order); the root's dependency-consistency item at ` +
+            `depth 0, after every depth-1 item (roots are 0); then the ` +
+            `code-impact items of echo and show, by location identity ` +
+            `(SPEC 10.5)`,
+        );
+
+        const exported = await exportSession(product, workspace, "s", prefix);
+        assertSameJson(
+          exportKindScopeSequence(exported.items),
+          expectedSequence,
+          `${prefix}: \`export\` presents the same six items in item order ` +
+            `(SPEC 10.5, 10.7)`,
+        );
+        for (const expected of E7_EXPECTED_ITEMS) {
+          const label = `${prefix} ${expected.kind} item of ${expected.scope}`;
+          const item = requireItem(
+            exported.items,
+            expected.kind,
+            expected.scope,
+            prefix,
+          );
+          assertSameJson(
+            identitySet(item.context),
+            [...expected.context].sort(),
+            `${label}: context ${expected.contextWhy}`,
+          );
+          assertSameJson(
+            identitySet(item.origin),
+            [...expected.origin].sort(),
+            `${label}: origin ${expected.originWhy}`,
+          );
+          assertBlockedBy(
+            item,
+            [],
+            `${label}: every blockedBy is empty — path-blocks assigns ` +
+              `blockers to parent-consistency items alone, and this session ` +
+              `has none (SPEC 10.2, 10.5)`,
+          );
+        }
+
+        const rootItem = requireItem(
+          exported.items,
+          "dependency-consistency",
+          E7_ROOT,
+          prefix,
+        );
+        assertE7RootScopeText(
+          rootItem,
+          `${prefix} \`export\`'s root dependency-consistency item`,
+        );
+        const rootId = requireRow(
+          status,
+          "dependency-consistency",
+          E7_ROOT,
+          prefix,
+        ).id;
+        const shown = await showItem(product, workspace, "s", rootId, prefix);
+        if (shown.id !== rootId || shown.kind !== "dependency-consistency") {
+          fail(
+            `${prefix}: \`review show s ${rootId}\` reports the root's ` +
+              `dependency-consistency item (SPEC 10.7: the full item); got ` +
+              `${JSON.stringify({ id: shown.id, kind: shown.kind })}`,
+          );
+        }
+        assertE7RootScopeText(
+          shown,
+          `${prefix} \`show\`'s root dependency-consistency item`,
+        );
+      },
+    );
+  },
+});
+
 /** TEST-SPEC §10.5, in canonical ID order (SUITE-36). */
 export const section105Tests: readonly ProductTestEntry[] = [
   T10_5_1,
@@ -4793,4 +5286,5 @@ export const section105Tests: readonly ProductTestEntry[] = [
   T10_5_4,
   T10_5_5,
   T10_5_6,
+  T10_5_7,
 ];

@@ -507,6 +507,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T10.5-4": ["10.5"],
   "T10.5-5": ["10.5"],
   "T10.5-6": ["10.5"],
+  // T10.5-7: 9.2's impact edges, `embeds` as well as `references`, behind
+  // its two code-impact items (echo transitively impacted through its
+  // embeds edge, show directly), and 10.7's payload rule behind the root
+  // item's byte-asserted scope text, the scope node's own text.
+  "T10.5-7": ["10.5", "9.2", "10.7"],
   "T10.6-1": ["10", "10.6"],
   "T10.6-2": ["10.6"],
   "T10.6-3": ["10.6"],
