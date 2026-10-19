@@ -102,6 +102,7 @@ import {
   judgeManualDeletionCorrection,
   nameMention,
   numberMention,
+  requireScopeNodes,
   rootSite,
   specTokenMention,
   spellingMention,
@@ -4826,6 +4827,9 @@ const DECODERS: readonly DecoderSpec[] = [
         recorded: ["opaque", "product-shaped"],
       });
       expect(decoded.current).toBeNull();
+      // No scope-node list carried: decoded as none, never fabricated from
+      // the scope root (requireScopeNodes then fails loudly, below).
+      expect(decoded.scopeNodes).toBeUndefined();
     },
     alsoGood: [
       {
@@ -4833,6 +4837,39 @@ const DECODERS: readonly DecoderSpec[] = [
         doc: omit(GOOD_ITEM, "note"),
         verify: (decoded: ReturnType<typeof decodeItemReport>) => {
           expect(decoded.note).toBeUndefined();
+        },
+      },
+      {
+        label:
+          "every scope node presented — a subtree-coherence item's scope root and a node beneath it, one present with its range, one absent with none (SPEC 10.7; T10.5-5)",
+        doc: put(
+          put(GOOD_ITEM, "subtree-coherence", "kind"),
+          [
+            {
+              node: "specs/A.mdx#login",
+              present: true,
+              sourceRange: { start: 12, end: 96 },
+            },
+            { node: "specs/A.mdx#login.badCredentials", present: false },
+          ],
+          "scopeNodes",
+        ),
+        verify: (decoded: ReturnType<typeof decodeItemReport>) => {
+          expect(decoded.scopeNodes).toEqual([
+            {
+              node: "specs/A.mdx#login",
+              present: true,
+              sourceRange: { start: 12, end: 96 },
+            },
+            { node: "specs/A.mdx#login.badCredentials", present: false },
+          ]);
+        },
+      },
+      {
+        label: "a null scope-node list, read as none carried (optionalKey)",
+        doc: put(GOOD_ITEM, null, "scopeNodes"),
+        verify: (decoded: ReturnType<typeof decodeItemReport>) => {
+          expect(decoded.scopeNodes).toBeUndefined();
         },
       },
       {
@@ -4930,6 +4967,47 @@ const DECODERS: readonly DecoderSpec[] = [
         label:
           'present scope node\'s range as {"from", "to"} (never re-mapped, H-3)',
         doc: put(GOOD_ITEM, { from: 12, to: 96 }, "scope", "sourceRange"),
+      },
+      {
+        label: "scope nodes an object, not a list",
+        doc: put(
+          GOOD_ITEM,
+          { node: "specs/A.mdx#login", present: true },
+          "scopeNodes",
+        ),
+      },
+      {
+        label: "a scope node missing its presence",
+        doc: put(GOOD_ITEM, [{ node: "specs/A.mdx#login" }], "scopeNodes"),
+      },
+      {
+        label: "an absent scope node carrying a source range (contradiction)",
+        doc: put(
+          GOOD_ITEM,
+          [
+            {
+              node: "specs/A.mdx#login.badCredentials",
+              present: false,
+              sourceRange: { start: 3, end: 9 },
+            },
+          ],
+          "scopeNodes",
+        ),
+      },
+      {
+        label:
+          'a present scope node\'s range as {"from", "to"} in the scope-node list (never re-mapped, H-3)',
+        doc: put(
+          GOOD_ITEM,
+          [
+            {
+              node: "specs/A.mdx#login",
+              present: true,
+              sourceRange: { from: 12, to: 96 },
+            },
+          ],
+          "scopeNodes",
+        ),
       },
       { label: "missing context", doc: omit(GOOD_ITEM, "context") },
       { label: "missing origin", doc: omit(GOOD_ITEM, "origin") },
@@ -5512,6 +5590,48 @@ test("S-5: every review decode of an item ID — a status row's, an item's at sh
       );
       expect(failure.message).toContain(`not one holding ${defect}`);
     }
+  }
+});
+
+test("S-5: requireScopeNodes returns every scope node an item's payload presents at show, next, and export, and fails diagnosed — naming the item and the member — where a payload presents none, never reading the scope root alone as the scope (SPEC 10.4, 10.7; T10.5-5)", () => {
+  const scopeNodes = [
+    {
+      node: "specs/A.mdx#login",
+      present: true,
+      sourceRange: { start: 12, end: 96 },
+    },
+    {
+      node: "specs/A.mdx#login.validCredentials",
+      present: true,
+      sourceRange: { start: 30, end: 60 },
+    },
+  ];
+  const withNodes = put(
+    put(GOOD_ITEM, "subtree-coherence", "kind"),
+    scopeNodes,
+    "scopeNodes",
+  );
+  const presenting = [
+    decodeItemReport(withNodes),
+    decodeNextReport(put(GOOD_NEXT, withNodes, "item")).item,
+    decodeExportReport(put(GOOD_EXPORT, [withNodes], "items")).items[0],
+  ];
+  for (const item of presenting) {
+    expect(item).toBeDefined();
+    expect(requireScopeNodes(item!, "S-5 probe")).toEqual(scopeNodes);
+  }
+  const lacking = [
+    decodeItemReport(GOOD_ITEM),
+    decodeNextReport(GOOD_NEXT).item,
+    decodeExportReport(GOOD_EXPORT).items[0],
+  ];
+  for (const item of lacking) {
+    expect(item).toBeDefined();
+    const failure = expectDiagnosed("a payload presenting no scope nodes", () =>
+      requireScopeNodes(item!, "S-5 probe"),
+    );
+    expect(failure.message).toContain("S-5 probe: item item-1's payload");
+    expect(failure.message).toContain('"scopeNodes"');
   }
 });
 

@@ -1000,6 +1000,20 @@ export interface ReviewItem {
   readonly reason: string;
   readonly note?: string;
   readonly scope: NodeTextState;
+  /**
+   * Every node of the item's scope as the payload presents it (SPEC.md
+   * 10.7: every scope, context, and origin node, under its current identity
+   * and presence, 10.4, a present one with its source range) — the scope as
+   * last assigned (10.4: by `create`, a re-derivation, 10.5, or a `split`,
+   * 10.7): the scope root and, for a `subtree-coherence` item, each node
+   * beneath it in its scope (10.5: N and all descendants; 10.6: the node
+   * and all its current descendants at derivation) — in the product's order
+   * (10.7 fixes none, so tests compare it as a set). Absent when the
+   * document carries no such list: a test asserting an item's scope set
+   * reads it through `requireScopeNodes` (review.ts), which then fails
+   * loudly (H-3: required information absent).
+   */
+  readonly scopeNodes?: readonly NodeTextState[];
   readonly context: readonly NodeTextState[];
   readonly origin: readonly OriginEntry[];
   /**

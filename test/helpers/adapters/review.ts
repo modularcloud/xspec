@@ -59,14 +59,24 @@
 //     decode.ts's `requiredMember` convention for recorded data)
 //   Item = { "id", "kind", "status", "blocked", "blockedBy": [id...],
 //            "reason", "note"?,
-//            "scope": NodeState, "context": [NodeState],
+//            "scope": NodeState, "scopeNodes"?: [NodeState],
+//            "context": [NodeState],
 //            "origin": [ { "node", "before": Side, "after": Side,
 //                          "sourceRange"? } ],
 //            "metadata"?: { "before": MetaSide, "after": MetaSide },
 //            "baseline", "current" }
 //     ("metadata" required on a metadata-consistency item — its scope
 //     node's metadata pair, SPEC 10.7, T10.7-13 — and never read on another
-//     kind)
+//     kind. "scope" is the scope root, the one scope node 10.7 gives a
+//     text; "scopeNodes" lists every node of the item's scope — SPEC 10.7:
+//     the payload presents every scope, context, and origin node, under its
+//     current identity and presence (10.4), a present one with its source
+//     range — as last assigned (10.4): the scope root and, for a
+//     subtree-coherence item, each node beneath it in its scope (10.5, 10.6),
+//     in any order (10.7 fixes none; tests compare a set). Decoded wherever
+//     a document carries it; a test asserting an item's scope set reads it
+//     through `requireScopeNodes`, which fails loudly where it is absent —
+//     required information, H-3 — while a test asserting none passes it by)
 //   NodeState = { "node", "present": bool, "text"?, "sourceRange"? }
 //     (text optional either way: a present node's text is read from the
 //     current graph, an absent node's is the recorded value of SPEC 10.7's
@@ -134,6 +144,7 @@ import {
   documentRootSite,
 } from "./forms.js";
 import { decodeSourceRange } from "./query.js";
+import { fail } from "../assertions.js";
 
 /**
  * U+FFFD (REPLACEMENT CHARACTER), built from its code point so no tool
@@ -535,6 +546,7 @@ export function decodeReviewItemValue(
     reason: string;
     note?: string;
     scope: NodeTextState;
+    scopeNodes?: readonly NodeTextState[];
     context: readonly NodeTextState[];
     origin: readonly OriginEntry[];
     metadata?: MetadataPair;
@@ -583,6 +595,18 @@ export function decodeReviewItemValue(
   if (note !== undefined) {
     item.note = expectString(note, at(site, "note"));
   }
+  // Every scope node (SPEC 10.7), each in the payload node form — identity,
+  // presence, a source range only when present — decoded wherever the
+  // document carries the list; `requireScopeNodes` makes it required where
+  // a test asserts an item's scope set.
+  const scopeNodes = optionalKey(obj, "scopeNodes");
+  if (scopeNodes !== undefined) {
+    const scopeNodesSite = at(site, "scopeNodes");
+    item.scopeNodes = expectArray(scopeNodes, scopeNodesSite).map(
+      (element, index) =>
+        decodeNodeTextState(element, at(scopeNodesSite, index)),
+    );
+  }
   if (item.kind === "metadata-consistency") {
     const metadataSite = at(site, "metadata");
     const pair = optionalKey(obj, "metadata");
@@ -599,6 +623,36 @@ export function decodeReviewItemValue(
     item.metadata = decodeMetadataPair(pair, metadataSite);
   }
   return item;
+}
+
+/**
+ * Every node of a decoded item's scope as its payload presents it — the
+ * scope as last assigned (SPEC 10.4), each under its current identity and
+ * presence, a present one with its source range (10.7: the payload presents
+ * every scope, context, and origin node) — required information for a test
+ * asserting an item's scope set (TEST-SPEC T10.5-5: a matched item's scope
+ * presented without a child authored after its last assignment until the
+ * re-derivation takes the generated scope, and with it after). The list is
+ * the assumed member "scopeNodes" (the module header); a payload carrying
+ * none fails loudly here (H-3), never read as the scope root alone — which
+ * the separate `scope` member presents with its text.
+ */
+export function requireScopeNodes(
+  item: ReviewItem,
+  context: string,
+): readonly NodeTextState[] {
+  if (item.scopeNodes !== undefined) return item.scopeNodes;
+  return fail(
+    `${context}: item ${item.id}'s payload must present every node of its ` +
+      `scope — the scope root ${JSON.stringify(item.scope.node)} and, for ` +
+      `a subtree-coherence item, each node beneath it in its scope as last ` +
+      `assigned — under its current identity and presence, a present one ` +
+      `with its source range (SPEC 10.4, 10.7: every scope, context, and ` +
+      `origin node); the review adapter reads that list from the member ` +
+      `"scopeNodes" (its assumed shape), which this payload lacks — ` +
+      `required information absent (H-3: adapters fail loudly, never ` +
+      `reading the scope root alone as the scope)`,
+  );
 }
 
 /** `review show <name> <item-id>` (T10.7-8): the full item. */
