@@ -12,13 +12,16 @@
 // ancestor, against the union of changed branches, blocked per branch by the
 // child's item); metadata and dependency impact add one
 // `metadata-consistency` item per `metadata-changed` node, one
-// `dependency-consistency` item per node depending on a both-sides target
-// whose effectiveHash changed, and one `code-impact` item per impacted
-// location. Items are totally ordered (depth deepest-first, kind, file path,
-// document order; `code-impact` last by location identity; absent scopes
-// after present ones). Resolving `updated` re-derives the session with the
-// recorded creation parameters; `split` decompositions apply recursively and
-// are never re-added.
+// `dependency-consistency` item per node having, in the current graph, a
+// dependency edge to a both-sides target whose effectiveHash changed, and
+// one `code-impact` item per impacted location, whatever its code
+// categories — the last two's origins the originating nodes of their
+// targets' categories, a target's `metadata-changed` counting only when its
+// `d` targets changed. Items are totally ordered (depth deepest-first, kind,
+// file path, document order; `code-impact` last by location identity;
+// absent scopes after present ones). Resolving `updated` re-derives the
+// session with the recorded creation parameters; `split` decompositions
+// apply recursively and are never re-added.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - `context` and `origin` are asserted as sorted identity sets: SPEC 10.5
@@ -60,13 +63,16 @@
 // - Staged-source records (helpers/staged-mdx.ts, S-9: judged before any
 //   product exists): every `.mdx` edit a body stages after its first product
 //   invocation — T10.5-1's extended-fixture edit and its chain fixture's two
-//   (a.b.c alone; a.b and a.b.c in the both-edited twin), T10.5-4's
-//   deletion of v.e and v.f and its tie sub-fixture's two specs/X.mdx
-//   stagings, T10.5-5's p.b edit, r.c revert, and both decomposition edits,
-//   T10.5-6's par.s edit — is the same template call moved to module level
-//   as a record, as is the initial `.mdx` file of every workspace created
-//   after the body's first `build` (T10.5-1's extended fixture, chain
-//   fixture, and the chain fixture's both-edited twin, T10.5-4's tie
+//   (a.b.c alone; a.b and a.b.c in the both-edited twin), T10.5-3's
+//   current-graph-edges edit, its three origin-counting stagings, and its
+//   one-item-per-location arm's two edits (T9.2-4's), T10.5-4's deletion of
+//   v.e and v.f and its tie sub-fixture's two specs/X.mdx stagings,
+//   T10.5-5's p.b edit, r.c revert, and both decomposition edits, T10.5-6's
+//   par.s edit — is the same template call moved to module level as a
+//   record, as is the initial `.mdx` file of every workspace created after
+//   the body's first `build` (T10.5-1's extended fixture, chain fixture,
+//   and the chain fixture's both-edited twin, T10.5-3's current-graph-edges,
+//   origin-counting, and one-item-per-location workspaces, T10.5-4's tie
 //   sub-fixture, T10.5-5's decomposition sub-fixture). A
 //   staging that precedes a body's first `build` (each fixture's first edit,
 //   between `gitCommitAll` and that `build`) stays plain, as do each body's
@@ -75,12 +81,15 @@
 //   of files (`fsp.rm`), which S-9 does not judge.
 // - The configuration of every workspace created after a body's first
 //   `build` (T10.5-1's extended fixture, chain fixture, and the chain
-//   fixture's both-edited twin, T10.5-4's tie sub-fixture, T10.5-5's
-//   decomposition sub-fixture) is
+//   fixture's both-edited twin, T10.5-3's current-graph-edges workspace,
+//   T10.5-4's tie sub-fixture, T10.5-5's decomposition sub-fixture) is
 //   `SPECS_ONLY_CONFIG`, a TypeScript staged-source record
 //   (helpers/staged-ts.ts; S-9's TypeScript and timing clauses),
 //   well-formed, staged wherever that configuration is; `SPECS_CODE_CONFIG`
-//   serves only bodies' first workspaces and stays plain.
+//   serves only bodies' first workspaces and stays plain, its bytes staged
+//   in T10.5-3's origin-counting and one-item-per-location workspaces as the
+//   record `T10_5_3_CODE_CONFIG`, beside their code sources, records too
+//   (`T10_5_3_OC_CODE`, `T10_5_3_L_BOTH_TS`).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -104,7 +113,7 @@ import {
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
-import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
 import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -113,7 +122,7 @@ import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T10.5-1/T10.5-4/T10.5-5 xspec.config.ts — one spec group",
+  "T10.5-1/T10.5-3/T10.5-4/T10.5-5 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1326,7 +1335,8 @@ const T10_5_2 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T10.5-3 — metadata, dependency, and code items
+// T10.5-3 — metadata, dependency, and code items: 10.5's note, current-graph
+// edges, origin counting, and one code-impact item per location
 // ---------------------------------------------------------------------------
 
 // Top-level sections so no parent-consistency noise arises; h holds the
@@ -1469,10 +1479,301 @@ const N_CODE_CURRENT = [
   "",
 ].join("\n");
 
+// T10.5-3's current-graph-edges arm (SPEC 10.5: one dependency-consistency
+// item per node having, in the current graph, a dependency edge to a target
+// present on both sides whose effectiveHash changed). specs/G.mdx holds the
+// top-level x, t, and u: at the baseline x depends on t and t on u; then x's
+// `d` reference to t — its only reference to t — is removed, while u's text
+// edit changes t's effectiveHash. x is `metadata-changed` (its `d` targets
+// changed, SPEC 5.6), so it gets its metadata-consistency item, context the
+// removed target {t}; and, bearing no dependency edge to t in the current
+// graph, it gets no dependency-consistency item — a product reading edges
+// from either graph gives x one. t, whose `d` edge to u stands in the
+// current graph, gets its dependency-consistency item (context and origin
+// {u}), and u, `changed`, its subtree-coherence item. The arm's workspace
+// follows the body's first `build`, so its initial source and its edit are
+// staged-source records (module header).
+const G_FILE = "specs/G.mdx";
+const G_X = "specs/G.mdx#x";
+const G_T = "specs/G.mdx#t";
+const G_U = "specs/G.mdx#u";
+
+function gSpec(xProps: string, uText: string): string {
+  return [
+    `<S id="x"${xProps}>`,
+    "Ex text.",
+    "</S>",
+    "",
+    '<S id="t" d={"u"}>',
+    "Tee text.",
+    "</S>",
+    "",
+    '<S id="u">',
+    uText,
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+const T10_5_3_G_INITIAL = stagedMdx(
+  "T10.5-3 specs/G.mdx at the baseline — x depending on t, t on u (the current-graph-edges arm's initial source)",
+  gSpec(' d={"t"}', "You text v0."),
+);
+const T10_5_3_G_EDITED = stagedMdx(
+  "T10.5-3 specs/G.mdx with x's d reference to t removed and u's text at v1 (the current-graph-edges arm)",
+  gSpec("", "You text v1."),
+);
+
+// T10.5-3's origin-counting arm (SPEC 10.5: a dependency-consistency item's
+// origin is the originating nodes of its targets' categories, a target's
+// `metadata-changed` counting only when its `d` targets changed; a
+// code-impact item's origin is counted the same way). specs/O.mdx holds the
+// top-level x, t, u, and w: x depends on t and t on u, and w is never
+// edited. Every staging edits u's text — u `changed`, t `upstream-changed`
+// attributed to u, t's effectiveHash and x's changed (SPEC 5.5, 5.6) — and
+// one piece of t's metadata: its tags (the tags staging) or its coverage
+// attribute (the coverage staging), neither of which changes an
+// effectiveHash (5.5, 5.6), so t's tags- or coverage-only
+// `metadata-changed` does not count and x's dependency-consistency item's
+// origin is exactly {u}; or, in the twin, its `d` set, which gains a
+// reference to the unedited w, so t's `metadata-changed` counts and that
+// origin is exactly {t, u}. src/o.ts holds one top-level marker targeting
+// t, a whole-file code location (SPEC 4.6), transitively impacted in each
+// staging — t's subtreeHash unchanged (its tags, coverage attribute, and
+// `d` targets are no part of its own content, 5.5) while its effectiveHash
+// changed (9.2) — its code-impact item's context {t} and origin {u} under
+// the first two stagings and {t, u} under the twin. Each staging runs on a
+// workspace of its own built from the same initial records; every one of
+// them follows the body's first `build`, so its sources, configuration
+// (`T10_5_3_CODE_CONFIG`), and edit are staged-source records (module
+// header).
+const OC_FILE = "specs/O.mdx";
+const OC_X = "specs/O.mdx#x";
+const OC_T = "specs/O.mdx#t";
+const OC_U = "specs/O.mdx#u";
+const OC_W = "specs/O.mdx#w";
+const OC_CODE = "src/o.ts";
+
+function ocSpec(tProps: string, uText: string): string {
+  return [
+    '<S id="x" d={"t"}>',
+    "Ex text.",
+    "</S>",
+    "",
+    `<S id="t" ${tProps}>`,
+    "Tee text.",
+    "</S>",
+    "",
+    '<S id="u">',
+    uText,
+    "</S>",
+    "",
+    '<S id="w">',
+    "Dub text.",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+const T10_5_3_OC_INITIAL = stagedMdx(
+  "T10.5-3 specs/O.mdx at the baseline — x depending on t, t on u, w unreferenced (the origin-counting arm's initial source)",
+  ocSpec('d={"u"}', "You text v0."),
+);
+
+const T10_5_3_OC_CODE = stagedTs(
+  "T10.5-3 src/o.ts (a whole-file code location whose marker targets t, the origin-counting arm)",
+  ['import O from "../specs/O.xspec";', "", "O.t;", ""].join("\n"),
+);
+
+/** One origin-counting staging (TEST-SPEC T10.5-3; SPEC 5.5, 5.6, 10.5). */
+interface OriginCountingStaging {
+  /** The staging's name in diagnostics. */
+  readonly label: string;
+  /** specs/O.mdx after the staging's edits (u's text and t's metadata). */
+  readonly edited: StagedMdx;
+  /**
+   * t's metadata-consistency context: the `d` targets the staging added to
+   * or removed from t (SPEC 10.5).
+   */
+  readonly tMetadataContext: readonly string[];
+  /** x's dependency-consistency origin and the code-impact origin. */
+  readonly origin: readonly string[];
+  /** Why that origin is expected — the counting rule at work. */
+  readonly originWhy: string;
+}
+
+const OC_STAGINGS: readonly OriginCountingStaging[] = [
+  {
+    label: "tags staging",
+    edited: stagedMdx(
+      "T10.5-3 specs/O.mdx with t's tags edited and u's text at v1 (the origin-counting arm's tags staging)",
+      ocSpec('d={"u"} tags="edited"', "You text v1."),
+    ),
+    tMetadataContext: [],
+    origin: [OC_U],
+    originWhy:
+      "exactly {u} — t's tags-only metadata-changed does not count, its " +
+      "d targets unchanged (a tags edit changes no effectiveHash, SPEC 5.5, " +
+      "5.6), so only u, the originating node of t's upstream-changed, does " +
+      "(SPEC 10.5: a target's metadata-changed counting only when its d " +
+      "targets changed); a product counting every metadata-changed target " +
+      "gives {t, u}",
+  },
+  {
+    label: "coverage staging",
+    edited: stagedMdx(
+      "T10.5-3 specs/O.mdx with t's coverage attribute edited and u's text at v1 (the origin-counting arm's coverage staging)",
+      ocSpec('d={"u"} coverage="none"', "You text v1."),
+    ),
+    tMetadataContext: [],
+    origin: [OC_U],
+    originWhy:
+      "exactly {u} — t's coverage-only metadata-changed does not count, its " +
+      "d targets unchanged (a coverage edit changes no effectiveHash, SPEC " +
+      "5.5, 5.6), so only u, the originating node of t's upstream-changed, " +
+      "does (SPEC 10.5: a target's metadata-changed counting only when its " +
+      "d targets changed); a product counting every metadata-changed " +
+      "target gives {t, u}",
+  },
+  {
+    label: "d-set twin",
+    edited: stagedMdx(
+      "T10.5-3 specs/O.mdx with t's d set gaining w and u's text at v1 (the origin-counting arm's d-set twin)",
+      ocSpec('d={["u", "w"]}', "You text v1."),
+    ),
+    tMetadataContext: [OC_W],
+    origin: [OC_T, OC_U],
+    originWhy:
+      "exactly {t, u} — t's d targets changed (it gained w), so its " +
+      "metadata-changed counts, beside u, the originating node of t's " +
+      "upstream-changed (SPEC 5.6, 10.5: a target's metadata-changed " +
+      "counting only when its d targets changed); a product never " +
+      "counting a target's metadata-changed gives {u}",
+  },
+];
+
+// T10.5-3's one-item-per-location arm (SPEC 10.5: one code-impact item per
+// impacted code location; a kind and scope node produced more than once in
+// one derivation yields a single item): T9.2-4's staging as its TEST-SPEC
+// entry stages it — section-9.ts's T9.2-4 fixture, the same paths, sections,
+// texts, and edits — one whole-file code location, src/both.ts, with two
+// impact edges: one to dt, whose subtreeHash changes through its edited
+// child dt.kid (directly impacted, 9.2), one to tt, whose effectiveHash
+// alone changes through its edited upstream up (transitively impacted). In
+// a baseline (path-blocks) session the location, impacted in both code
+// categories (9.2, 9.3), gets exactly one code-impact item, its context
+// exactly the two targets {dt, tt} and its origin exactly their originating
+// nodes {dt.kid, up} (5.6: dt's descendant-changed attributed to dt.kid,
+// tt's upstream-changed to up) — a product deriving one item per code
+// category gives it two. The arm's workspace follows the body's first
+// `build`, so its sources, configuration, and edits are staged-source
+// records (module header).
+const L_DIRECT = "specs/Direct.mdx";
+const L_DT = "specs/Direct.mdx#dt";
+const L_DT_KID = "specs/Direct.mdx#dt.kid";
+const L_TRANS = "specs/Trans.mdx";
+const L_TT = "specs/Trans.mdx#tt";
+const L_UP = "specs/Up.mdx";
+const L_UP_NODE = "specs/Up.mdx#up";
+const L_BOTH_TS = "src/both.ts";
+
+function lDirectSource(kidText: string): string {
+  return [
+    '<S id="dt">',
+    "Direct target text.",
+    "",
+    '<S id="dt.kid">',
+    kidText,
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+function lUpSource(text: string): string {
+  return ['<S id="up">', text, "</S>", ""].join("\n");
+}
+
+const T10_5_3_L_DIRECT_INITIAL = stagedMdx(
+  "T10.5-3 specs/Direct.mdx with dt.kid at v1 (T9.2-4's staging at the baseline, the one-item-per-location arm)",
+  lDirectSource("Direct kid text v1."),
+);
+const T10_5_3_L_TRANS = stagedMdx(
+  "T10.5-3 specs/Trans.mdx — tt depending on Up.up (T9.2-4's staging, the one-item-per-location arm)",
+  [
+    'import Up from "./Up.xspec"',
+    "",
+    '<S id="tt" d={Up.up}>',
+    "Transitive target text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+const T10_5_3_L_UP_INITIAL = stagedMdx(
+  "T10.5-3 specs/Up.mdx with up at v1 (T9.2-4's staging at the baseline, the one-item-per-location arm)",
+  lUpSource("Upstream text v1."),
+);
+const T10_5_3_L_DIRECT_EDITED = stagedMdx(
+  "T10.5-3 specs/Direct.mdx with dt.kid at v2 (T9.2-4's edit, the one-item-per-location arm)",
+  lDirectSource("Direct kid text v2."),
+);
+const T10_5_3_L_UP_EDITED = stagedMdx(
+  "T10.5-3 specs/Up.mdx with up at v2 (T9.2-4's edit, the one-item-per-location arm)",
+  lUpSource("Upstream text v2."),
+);
+const T10_5_3_L_BOTH_TS = stagedTs(
+  "T10.5-3 src/both.ts (T9.2-4's whole-file code location with markers to dt and tt, the one-item-per-location arm)",
+  [
+    'import DIRECT from "../specs/Direct.xspec";',
+    'import TRANS from "../specs/Trans.xspec";',
+    "",
+    "DIRECT.dt;",
+    "TRANS.tt;",
+    "",
+  ].join("\n"),
+);
+
+// The configuration of T10.5-3's origin-counting and one-item-per-location
+// workspaces, created after the body's first `build`: SPECS_CODE_CONFIG's
+// bytes as a TypeScript staged-source record (module header).
+const T10_5_3_CODE_CONFIG = stagedTs(
+  "T10.5-3 xspec.config.ts — one spec group and the code group app (the origin-counting and one-item-per-location workspaces)",
+  SPECS_CODE_CONFIG,
+);
+
+/**
+ * `impact --base <baseline> --json`'s impacted-code locations by category
+ * (SPEC 9.2, 9.3), each group's locations sorted — a staging premise of
+ * T10.5-3's code arms (which code categories the location is in).
+ */
+async function impactedLocations(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  base: string,
+  label: string,
+): Promise<{
+  readonly direct: readonly string[];
+  readonly transitive: readonly string[];
+}> {
+  const report = decodeImpactReport(
+    await runJson(
+      product,
+      workspace,
+      ["impact", "--base", base, "--json"],
+      label,
+    ),
+    label,
+  );
+  return {
+    direct: report.code.direct.map((entry) => entry.location).sort(),
+    transitive: report.code.transitive.map((entry) => entry.location).sort(),
+  };
+}
+
 const T10_5_3 = defineProductTest({
   id: "T10.5-3",
   title:
-    "metadata, dependency, and code items: one metadata-consistency item per metadata-changed node — m's d retargeting (context: the added and removed d targets), m2's coverage and tags edits (empty context; its payload's metadata pair asserted by T10.7-13, its reason informational, SPEC 10.2, and never asserted), and dep2's added d edge — one dependency-consistency item per node with a dependency edge to a both-sides target whose effectiveHash changed (dep1 against t; context: the changed target; origin: its originating node), with both halves of 10.5's note staged (a new d edge makes the source metadata-changed, a new embedding makes it changed): dep2, whose only affected target h.newt was added since the baseline, gets no dependency-consistency item — the change is reviewed at its source as dep2's own metadata-consistency item (context: the added target) — and dep3, whose only affected target entered through a new {text(...)} embedding, likewise gets no dependency-consistency item — the new embedded reference changes dep3's own content, it is changed (not metadata-changed), and the change is reviewed via dep3's own subtree-coherence item; and one code-impact item per impacted location with context the impact-edge targets that make it impacted, deleted (h.gone) and added (h.born) targets included, unchanged targets excluded (SPEC 5.5, 5.6, 9.2, 10.5)",
+    "metadata, dependency, and code items: one metadata-consistency item per metadata-changed node — m's d retargeting (context: the added and removed d targets), m2's coverage and tags edits (empty context; its payload's metadata pair asserted by T10.7-13, its reason informational, SPEC 10.2, and never asserted), and dep2's added d edge — one dependency-consistency item per node having, in the current graph, a dependency edge to a both-sides target whose effectiveHash changed (dep1 against t; context: the changed target; origin: its originating node), with both halves of 10.5's note staged (a new d edge makes the source metadata-changed, a new embedding makes it changed): dep2, whose only affected target h.newt was added since the baseline, gets no dependency-consistency item — the change is reviewed at its source as dep2's own metadata-consistency item (context: the added target) — and dep3, whose only affected target entered through a new {text(...)} embedding, likewise gets no dependency-consistency item — the new embedded reference changes dep3's own content, it is changed (not metadata-changed), and the change is reviewed via dep3's own subtree-coherence item; one code-impact item per impacted location with context the impact-edge targets that make it impacted, deleted (h.gone) and added (h.born) targets included, unchanged targets excluded (origin: those targets' originating nodes); current-graph edges: x, whose only d reference to t stands at the baseline alone — removed since, while an edit to t's upstream u changed t's effectiveHash — gets its metadata-consistency item (context {t}) and no dependency-consistency item, which a product reading edges from either graph gives it; origin counting: with x depending on t and t on u, u's text edited and t's tags edited (and, in a second staging, t's coverage attribute instead; neither changes an effectiveHash), x's dependency-consistency item has origin exactly {u}, t's tags- or coverage-only metadata-changed not counting, and a twin in which t's d set gains a reference to the unedited w gives exactly {t, u}, while a code location whose marker targets t — transitively impacted in each staging, t's subtreeHash unchanged — has origin exactly {u} under the first stagings and {t, u} under the twin; and one item per location: T9.2-4's location, impacted in both code categories, staged in a baseline (path-blocks) session, gets exactly one code-impact item, its context exactly the two targets {dt, tt} and its origin exactly their originating nodes {dt.kid, up} — never one item per code category (SPEC 5.5, 5.6, 9.2, 10.5)",
   run: async (product) => {
     await withWorkspace(
       SPECS_CODE_CONFIG,
@@ -1697,6 +1998,307 @@ const T10_5_3 = defineProductTest({
           `${prefix}: the code-impact origin is the originating nodes of ` +
             `the targets' changes — the added and deleted nodes themselves ` +
             `(SPEC 5.6, 10.5)`,
+        );
+      },
+    );
+
+    // --- current-graph edges ----------------------------------------------
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [G_FILE]: T10_5_3_G_INITIAL },
+      async (workspace) => {
+        const prefix = "T10.5-3 current-graph edges";
+        await workspace.gitInit();
+        const base = await workspace.gitCommitAll("baseline");
+        await workspace.file(G_FILE, T10_5_3_G_EDITED);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after the edits`,
+        );
+        await createBaseSession(product, workspace, base, "s", prefix);
+
+        const status = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          status.items
+            .filter((row) => row.scope === G_X)
+            .map((row) => row.kind)
+            .sort(),
+          ["metadata-consistency"],
+          `${prefix}: x gets its metadata-consistency item and no ` +
+            `dependency-consistency item — its only d reference to t stands ` +
+            `at the baseline alone, removed since, and a ` +
+            `dependency-consistency item arises from a dependency edge in ` +
+            `the current graph (SPEC 10.5), however t's effectiveHash ` +
+            `changed; a product reading edges from either graph gives x one`,
+        );
+        assertSameJson(
+          kindScopeSet(status),
+          [
+            `dependency-consistency ${G_T}`,
+            `metadata-consistency ${G_X}`,
+            `subtree-coherence ${G_U}`,
+          ].sort(),
+          `${prefix}: exactly u's subtree-coherence item (u changed), t's ` +
+            `dependency-consistency item (its d edge to u stands in the ` +
+            `current graph, u present on both sides with a changed ` +
+            `effectiveHash), and x's metadata-consistency item (x's d ` +
+            `targets changed: t removed) — x bearing no current-graph ` +
+            `dependency edge, no dependency-consistency item (SPEC 5.6, 10.5)`,
+        );
+
+        const exported = await exportSession(product, workspace, "s", prefix);
+        const mcX = requireItem(
+          exported.items,
+          "metadata-consistency",
+          G_X,
+          prefix,
+        );
+        assertSameJson(
+          identitySet(mcX.context),
+          [G_T],
+          `${prefix}: x's metadata-consistency item's context is exactly ` +
+            `{t}, the removed d target (SPEC 10.5: the added and removed d ` +
+            `targets)`,
+        );
+        assertSameJson(
+          identitySet(mcX.origin),
+          [G_X],
+          `${prefix}: x's metadata-consistency item's origin is x itself ` +
+            `(SPEC 10.5)`,
+        );
+        const dcT = requireItem(
+          exported.items,
+          "dependency-consistency",
+          G_T,
+          prefix,
+        );
+        assertSameJson(
+          identitySet(dcT.context),
+          [G_U],
+          `${prefix}: t's dependency-consistency item — its d edge to u ` +
+            `stands in the current graph — has context exactly {u}, the ` +
+            `changed both-sides target (SPEC 10.5)`,
+        );
+        assertSameJson(
+          identitySet(dcT.origin),
+          [G_U],
+          `${prefix}: t's dependency-consistency item's origin is exactly ` +
+            `{u}, the originating node of u's change (SPEC 5.6, 10.5)`,
+        );
+      },
+    );
+
+    // --- origin counting: the tags and coverage stagings, the d-set twin ---
+    for (const staging of OC_STAGINGS) {
+      await withWorkspace(
+        T10_5_3_CODE_CONFIG,
+        { [OC_FILE]: T10_5_3_OC_INITIAL, [OC_CODE]: T10_5_3_OC_CODE },
+        async (workspace) => {
+          const prefix = `T10.5-3 origin counting, ${staging.label}`;
+          await workspace.gitInit();
+          const base = await workspace.gitCommitAll("baseline");
+          await workspace.file(OC_FILE, staging.edited);
+          await buildOk(
+            product,
+            workspace,
+            `${prefix} \`build\` after the edits`,
+          );
+
+          // The staging's premise: src/o.ts, whose one marker targets t, is
+          // transitively impacted and not directly — t's subtreeHash
+          // unchanged, its effectiveHash changed through u (SPEC 5.5, 9.2).
+          const impactLabel = `${prefix} \`impact --base <baseline> --json\``;
+          assertSameJson(
+            await impactedLocations(product, workspace, base, impactLabel),
+            { direct: [], transitive: [OC_CODE] },
+            `${impactLabel} staging premise: src/o.ts, whose one marker ` +
+              `targets t, is transitively impacted and not directly — t's ` +
+              `subtreeHash unchanged (its tags, coverage attribute, and d ` +
+              `targets are no part of its own content, SPEC 5.5) while its ` +
+              `effectiveHash changed through u (SPEC 5.5, 9.2)`,
+          );
+
+          await createBaseSession(product, workspace, base, "s", prefix);
+          const status = await sessionStatus(product, workspace, "s", prefix);
+          assertSameJson(
+            kindScopeSet(status),
+            [
+              `code-impact ${OC_CODE}`,
+              `dependency-consistency ${OC_T}`,
+              `dependency-consistency ${OC_X}`,
+              `metadata-consistency ${OC_T}`,
+              `subtree-coherence ${OC_U}`,
+            ].sort(),
+            `${prefix}: exactly u's subtree-coherence item (u changed), t's ` +
+              `metadata-consistency item (t metadata-changed), the ` +
+              `dependency-consistency items of t (its edge to u) and x (its ` +
+              `edge to t, t's effectiveHash changed through u), and ` +
+              `src/o.ts's code-impact item (SPEC 5.6, 9.2, 10.5)`,
+          );
+
+          const exported = await exportSession(product, workspace, "s", prefix);
+          const mcT = requireItem(
+            exported.items,
+            "metadata-consistency",
+            OC_T,
+            prefix,
+          );
+          assertSameJson(
+            identitySet(mcT.context),
+            [...staging.tMetadataContext].sort(),
+            `${prefix}: t's metadata-consistency item's context is the d ` +
+              `targets the staging added to or removed from t — none where ` +
+              `only its tags or coverage attribute changed, {w} in the twin ` +
+              `(SPEC 10.5)`,
+          );
+          const dcT = requireItem(
+            exported.items,
+            "dependency-consistency",
+            OC_T,
+            prefix,
+          );
+          assertSameJson(
+            identitySet(dcT.context),
+            [OC_U],
+            `${prefix}: t's dependency-consistency item's context is ` +
+              `exactly {u}, its changed target — never the unedited w, ` +
+              `whose effectiveHash did not change (SPEC 10.5)`,
+          );
+          assertSameJson(
+            identitySet(dcT.origin),
+            [OC_U],
+            `${prefix}: t's dependency-consistency item's origin is ` +
+              `exactly {u}, the originating node of u's change (SPEC 5.6, ` +
+              `10.5)`,
+          );
+          const dcX = requireItem(
+            exported.items,
+            "dependency-consistency",
+            OC_X,
+            prefix,
+          );
+          assertSameJson(
+            identitySet(dcX.context),
+            [OC_T],
+            `${prefix}: x's dependency-consistency item's context is ` +
+              `exactly {t}, its changed target (SPEC 10.5)`,
+          );
+          assertSameJson(
+            identitySet(dcX.origin),
+            [...staging.origin].sort(),
+            `${prefix}: x's dependency-consistency item's origin — the ` +
+              `originating nodes of t's categories — is ${staging.originWhy}`,
+          );
+          const ci = requireItem(
+            exported.items,
+            "code-impact",
+            OC_CODE,
+            prefix,
+          );
+          assertSameJson(
+            identitySet(ci.context),
+            [OC_T],
+            `${prefix}: src/o.ts's code-impact item's context is exactly ` +
+              `{t}, the impact-edge target that makes it impacted (SPEC ` +
+              `9.2, 10.5)`,
+          );
+          assertSameJson(
+            identitySet(ci.origin),
+            [...staging.origin].sort(),
+            `${prefix}: src/o.ts's code-impact item's origin — the ` +
+              `originating nodes of t's categories, counted as for ` +
+              `dependency-consistency — is ${staging.originWhy}`,
+          );
+        },
+      );
+    }
+
+    // --- one item per location: T9.2-4's location -------------------------
+    await withWorkspace(
+      T10_5_3_CODE_CONFIG,
+      {
+        [L_DIRECT]: T10_5_3_L_DIRECT_INITIAL,
+        [L_TRANS]: T10_5_3_L_TRANS,
+        [L_UP]: T10_5_3_L_UP_INITIAL,
+        [L_BOTH_TS]: T10_5_3_L_BOTH_TS,
+      },
+      async (workspace) => {
+        const prefix = "T10.5-3 one item per location";
+        await workspace.gitInit();
+        const base = await workspace.gitCommitAll("baseline");
+        await workspace.file(L_DIRECT, T10_5_3_L_DIRECT_EDITED);
+        await workspace.file(L_UP, T10_5_3_L_UP_EDITED);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after the edits`,
+        );
+
+        // The staging's premise (T9.2-4): src/both.ts is impacted in both
+        // code categories — directly through dt (its subtreeHash changed),
+        // transitively through tt (its effectiveHash alone) (SPEC 9.2, 9.3).
+        const impactLabel = `${prefix} \`impact --base <baseline> --json\``;
+        assertSameJson(
+          await impactedLocations(product, workspace, base, impactLabel),
+          { direct: [L_BOTH_TS], transitive: [L_BOTH_TS] },
+          `${impactLabel} staging premise: src/both.ts is impacted in both ` +
+            `code categories — directly through its edge to dt, whose ` +
+            `subtreeHash changed, and transitively through its edge to tt, ` +
+            `whose effectiveHash alone changed (SPEC 9.2, 9.3; T9.2-4)`,
+        );
+
+        await createBaseSession(product, workspace, base, "s", prefix);
+        const status = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          status.items
+            .filter((row) => row.kind === "code-impact")
+            .map((row) => row.scope),
+          [L_BOTH_TS],
+          `${prefix}: exactly one code-impact item, scoped at src/both.ts — ` +
+            `one code-impact item per impacted code location, a kind and ` +
+            `scope node produced more than once in one derivation yielding ` +
+            `a single item (SPEC 10.5), whatever code categories the ` +
+            `location is in (9.2, 9.3); a product deriving one item per ` +
+            `code category gives it two`,
+        );
+        assertSameJson(
+          kindScopeSet(status),
+          [
+            `code-impact ${L_BOTH_TS}`,
+            `dependency-consistency ${L_TT}`,
+            `parent-consistency ${L_DT}`,
+            `subtree-coherence ${L_DT_KID}`,
+            `subtree-coherence ${L_UP_NODE}`,
+          ].sort(),
+          `${prefix}: exactly dt.kid's and up's subtree-coherence items (each ` +
+            `changed), dt's parent-consistency item (dt.kid's non-root ` +
+            `ancestor), tt's dependency-consistency item (its edge to up), ` +
+            `and src/both.ts's one code-impact item (SPEC 5.6, 9.2, 10.5)`,
+        );
+
+        const exported = await exportSession(product, workspace, "s", prefix);
+        const ci = requireItem(
+          exported.items,
+          "code-impact",
+          L_BOTH_TS,
+          prefix,
+        );
+        assertSameJson(
+          identitySet(ci.context),
+          [L_DT, L_TT].sort(),
+          `${prefix}: src/both.ts's one code-impact item's context is ` +
+            `exactly the two targets that make it impacted, {dt, tt} — the ` +
+            `directly and the transitively impacting target alike (SPEC ` +
+            `9.2, 10.5)`,
+        );
+        assertSameJson(
+          identitySet(ci.origin),
+          [L_DT_KID, L_UP_NODE].sort(),
+          `${prefix}: src/both.ts's one code-impact item's origin is ` +
+            `exactly the two targets' originating nodes, {dt.kid, up} — ` +
+            `dt's descendant-changed attributed to dt.kid, tt's ` +
+            `upstream-changed to up (SPEC 5.6, 10.5)`,
         );
       },
     );
