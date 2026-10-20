@@ -648,9 +648,12 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // T12.0-5: its positive side of the backslash asserts the condition-19
   // finding over a spec-group path 7.1 bars the backslash from (so "7.1"
   // and "14") and the backslash as a literal `--file` pattern byte (7);
+  // its `move` arms, run from `specs/`, assert both forms' resulting
+  // trees byte-exact — the relocated file, the created target file, and
+  // the origin as the section form's deletion leaves it (6.5);
   // 11.3-11.5 are carriage context with home coverage at T11.3-*/T11.4-*/
   // T11.5-*.
-  "T12.0-5": ["12.0", "12.7", "13.5", "6.4", "7", "7.1", "14"],
+  "T12.0-5": ["12.0", "12.7", "13.5", "6.4", "6.5", "7", "7.1", "14"],
   "T12.0-6": ["12.0"],
   "T12.0-7": ["12.0"],
   "T12.0-8": ["12.0"],

@@ -90,6 +90,19 @@
 //   invalid or missing) ahead of the `show`/`view` normalization negatives,
 //   so a product normalizing `./` or `//` spellings fails at those after
 //   the value-level arms have run.
+//   Its `move` arms follow the first workspace's: `move` among the
+//   representative commands, its destination naming a path nothing need
+//   occupy, run from `specs/` — the file form, then the section form, each
+//   on its own fresh copy of one staging created after the first
+//   invocation (staged-source records, S-9), after a premise `build`.
+//   Read against the working directory, either destination is
+//   `specs/specs/…`, a spec-group path whose missing directory a write
+//   creates (13.4), so such a product's move exits 0 too: the exit code
+//   cannot discriminate, and the resulting tree does — nothing at
+//   `specs/specs`, and every entry of `specs/` but its derived files
+//   (`.xspec.` in their names, 13.1) exactly the relocated, or the created
+//   and the kept, spec sources, byte-exact (H-4: 6.5's move edits are
+//   exact).
 //   The positive side of the backslash (Linux leg, gated inside the body
 //   beside the non-UTF-8 arm, so the Windows leg reruns the entry and
 //   skips no arm, E-6) closes the body over two workspaces of its own,
@@ -128,6 +141,7 @@ import type {
 import {
   assertBytesEqual,
   assertExitCode,
+  assertFileBytes,
   assertStdoutEmpty,
   fail,
   parseJsonStdout,
@@ -166,9 +180,10 @@ import {
 // Minimal declarative configuration (SPEC 7): exactly one spec group. A
 // TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
 // and timing clauses), staged wherever it is used: T12.0-2's, T12.0-3's,
-// and T12.0-6's later workspaces stage it after a product invocation.
+// T12.0-5's (its `move` arms' and its backslash spec side's), and
+// T12.0-6's later workspaces stage it after a product invocation.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T12.0-2/T12.0-3/T12.0-6 xspec.config.ts — one spec group",
+  "T12.0-2/T12.0-3/T12.0-5/T12.0-6 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1201,6 +1216,164 @@ const T12_0_5_MALFORMED_VALUES: readonly (readonly [
   ],
 ];
 
+// The `move` arms (T12.0-5; SPEC 12.0, 6.5): `move` among the
+// representative commands run from a subdirectory, its destination naming
+// a path nothing need occupy. Both forms run from `specs/`, where either
+// destination read against the working directory would be `specs/specs/…`
+// — a spec-group path (`specs/**/*.mdx`) whose missing directory a write
+// creates (13.4) — so a product reading it so performs the move there,
+// exit 0: the exit code cannot discriminate, the resulting tree does. Each
+// form runs on its own fresh copy of one staging, created after the body's
+// first invocation, so its initial files are staged-source records (S-9):
+// SPECS_ONLY_CONFIG's and the origin's below. The origin holds two
+// sections — `a`, the section form's subject, and `b`, which that form
+// leaves it — neither carrying a reference, so no file needs an import
+// (6.5) and every expected byte is composed from the staged parts (H-4:
+// 6.5's move edits are exact).
+const MOVE_WORKING_DIRECTORY = "specs";
+/** Where a product reading the destination against the cwd writes it. */
+const MOVE_MISREAD_DIRECTORY = "specs/specs";
+const MOVE_ORIGIN_FILE = "specs/A.mdx";
+const MOVE_MOVED_SECTION = ['<S id="a">', "Moved text.", "</S>"].join("\n");
+const MOVE_KEPT_SECTION = ['<S id="b">', "Kept text.", "</S>"].join("\n");
+const MOVE_ORIGIN_TEXT = `${MOVE_MOVED_SECTION}\n\n${MOVE_KEPT_SECTION}\n`;
+const MOVE_ORIGIN_SOURCE = stagedMdx(
+  "T12.0-5 specs/A.mdx (the `move` arms run from specs/: the origin of " +
+    "the file form and, on a fresh copy, of the section form)",
+  MOVE_ORIGIN_TEXT,
+);
+
+/** One `move` arm run from `specs/`. */
+interface MoveFromSpecsArm {
+  readonly form: string;
+  readonly argv: readonly string[];
+  /** The destination file, workspace-relative: unoccupied before the run. */
+  readonly destination: string;
+  /** Every entry of `specs/` but its derived files after the run, by
+   * name, each a plain file holding exactly the text given. */
+  readonly sources: Readonly<Record<string, string>>;
+  /** What the move does, for the diagnostics. */
+  readonly outcome: string;
+}
+
+const MOVE_FROM_SPECS_ARMS: readonly MoveFromSpecsArm[] = [
+  {
+    form: "the file form",
+    argv: ["move", "specs/A.mdx", "specs/B.mdx"],
+    destination: "specs/B.mdx",
+    // Relocated whole: its IDs kept and no import specifier in it to
+    // rewrite, so its bytes are the origin's (6.5).
+    sources: { "B.mdx": MOVE_ORIGIN_TEXT },
+    outcome:
+      "relocates the file to the workspace-relative specs/B.mdx — its " +
+      "bytes the origin's, no import specifier in it to rewrite — leaving " +
+      "specs/A.mdx unoccupied",
+  },
+  {
+    form: "the section form",
+    argv: ["move", "specs/A.mdx#a", "specs/C.mdx#a"],
+    destination: "specs/C.mdx",
+    // At the origin the construct is deleted in place, its three lines —
+    // joined into one and left empty — dropped with their terminator (6.5,
+    // 3); the created target file needs no declaration, so it holds the
+    // moved text and its U+000A alone (6.5).
+    sources: {
+      "A.mdx": `\n${MOVE_KEPT_SECTION}\n`,
+      "C.mdx": `${MOVE_MOVED_SECTION}\n`,
+    },
+    outcome:
+      "creates its target file at the workspace-relative specs/C.mdx — " +
+      "the moved text and its terminator alone, no declaration needed — " +
+      "and deletes the construct from specs/A.mdx in place, b kept",
+  },
+];
+
+/**
+ * T12.0-5's `move` arms (SPEC 12.0, 6.5): each form, on its own fresh copy
+ * of one staging, run from `specs/` after a premise `build` — exit 0, the
+ * move performed; nothing at `specs/specs`, where a product reading the
+ * destination against the working directory writes it; and every entry of
+ * `specs/` but its derived files (each carrying `.xspec.` in its name,
+ * 13.1) exactly the arm's spec sources, byte-exact (H-4).
+ */
+async function expectMoveFromSpecsArms(product: ProductBinding): Promise<void> {
+  for (const arm of MOVE_FROM_SPECS_ARMS) {
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [MOVE_ORIGIN_FILE]: MOVE_ORIGIN_SOURCE,
+        },
+      },
+      async (workspace) => {
+        const context =
+          `T12.0-5 \`${arm.argv.join(" ")}\` from ` +
+          `${MOVE_WORKING_DIRECTORY}/ (${arm.form}, on its own fresh copy)`;
+        await buildOk(product, workspace, `${context}: the premise \`build\``);
+        // Staging premise: the destination names a path nothing occupies,
+        // and nothing stands where a cwd-relative reading would write.
+        for (const rel of [arm.destination, MOVE_MISREAD_DIRECTORY]) {
+          const kind = await workspace.kind(rel);
+          if (kind !== "absent") {
+            fail(
+              `${context}: staging premise — nothing occupies ${rel} ` +
+                `before the move; found ${kind}`,
+            );
+          }
+        }
+        const result = await runProduct(product, {
+          cwd: workspace.path(MOVE_WORKING_DIRECTORY),
+          argv: arm.argv,
+        });
+        assertExitCode(
+          result,
+          0,
+          `${context} — its operands are workspace-relative, independent ` +
+            `of the working directory, so they name the staged origin and ` +
+            `an unoccupied destination in the spec group: the move is ` +
+            `performed (SPEC 12.0, 6.5)`,
+        );
+        const misread = await workspace.kind(MOVE_MISREAD_DIRECTORY);
+        if (misread !== "absent") {
+          fail(
+            `${context}: found ${misread} at ${MOVE_MISREAD_DIRECTORY} — ` +
+              `the destination is workspace-relative, independent of the ` +
+              `working directory, so nothing is written under ` +
+              `${MOVE_MISREAD_DIRECTORY}/, where a product reading the ` +
+              `destination against the working directory writes it (SPEC ` +
+              `12.0, 6.5)`,
+          );
+        }
+        assertSameJson(
+          (await workspace.readdirNames(MOVE_WORKING_DIRECTORY)).filter(
+            (name) => !name.includes(".xspec."),
+          ),
+          Object.keys(arm.sources).sort(),
+          `${context}: the move ${arm.outcome}, so these are exactly the ` +
+            `entries ${MOVE_WORKING_DIRECTORY}/ holds beside its derived ` +
+            `files (SPEC 6.5, 12.0, 13.1)`,
+        );
+        for (const [name, text] of Object.entries(arm.sources)) {
+          const rel = `${MOVE_WORKING_DIRECTORY}/${name}`;
+          const kind = await workspace.kind(rel);
+          if (kind !== "file") {
+            fail(
+              `${context}: expected a plain file at ${rel} after the move ` +
+                `(SPEC 6.5, 13.4); found ${kind}`,
+            );
+          }
+          await assertFileBytes(
+            workspace.path(rel),
+            text,
+            `${context}: ${rel} after the move — the move ${arm.outcome} ` +
+              `(SPEC 6.5's exact edits; H-4)`,
+          );
+        }
+      },
+    );
+  }
+}
+
 // The positive side of the backslash (T12.0-5; SPEC 12.0, 7, 7.1). SPEC
 // 12.0: the backslash is an ordinary byte, no separator, so an argument
 // spelled with it names or matches only a discovered file of that very path
@@ -1629,7 +1802,7 @@ async function expectBackslashCodeArms(product: ProductBinding): Promise<void> {
 const T12_0_5 = defineProductTest({
   id: "T12.0-5",
   title:
-    "argument addressing: `<node>`, `<graph-node>`, and `<file>` arguments and `--file` globs are workspace-relative with `/` separators, independent of the working directory (representative commands run from a subdirectory), while `--test-hold <path>` resolves against the working directory; native-separator and normalization negatives — an argument spelled with `\\` (`specs\\A.mdx`), with a `.` segment (`./specs/A.mdx`), or with an empty segment (`specs//A.mdx`) is read as spelled and compared byte-wise, so it names no workspace file: an unknown-file usage error, exit 2, on `show` and `view` as representatives (the `\\` arm discriminating on the Windows leg, E-6); the positive side of the backslash (Linux leg, gated inside the body, E-6) — with a discovered spec-group file `specs/a`, backslash, `b.mdx` staged (an invalid source path, condition 19), `view` and `at … 0` name that very file: membership holds, every node identity unavailable, exit 1 with exactly its condition-19 finding, never the unknown-file exit 2; with valid code sources `src/a`, backslash, `b.ts` and `src/ab.ts` each marking a node (both discovered, the `src/*.ts` control), `occurrences --file` given the first file's path or the pattern `src/a`, backslash, `*.ts` lists the first file's occurrence alone — the backslash an ordinary byte, never a separator or an escape; malformed values — an argument value that is not valid UTF-8 (raw bytes in the OS argument vector, Linux leg) and an argument value containing U+FFFD in every position (a `<node>`, a `<file>` operand, a `--file` glob, a `--tag`, a `--to`, a `<new-id>` — never `refused-invalid-id` — a session name, a `--note` text, a `--base` ref, a `--config` path, and a `--test-hold` path) — are usage errors of the syntax class: exit 2 with the plain usage error's document (`code` null), reported without loading configuration — byte-identical with the configuration file invalid or missing (T12.0-10's discipline) — and modifying nothing (SPEC 12.0, 12.7, 13.5, 6.4, 1.5, 7, 7.1, 11.3, 11.4, 11.5, 14.19)",
+    "argument addressing: `<node>`, `<graph-node>`, and `<file>` arguments and `--file` globs are workspace-relative with `/` separators, independent of the working directory (representative commands run from a subdirectory — `move` among them, its destination naming a path nothing need occupy: run from `specs/`, each form on its own fresh copy, the file form `move specs/A.mdx specs/B.mdx` relocates the file to the workspace-relative `specs/B.mdx` and the section form `move specs/A.mdx#a specs/C.mdx#a` creates its target file at `specs/C.mdx`, `specs/` then holding exactly the expected spec sources, byte-exact, beside its derived files — never at `specs/specs/…`, where a product reading the destination against the working directory writes it), while `--test-hold <path>` resolves against the working directory; native-separator and normalization negatives — an argument spelled with `\\` (`specs\\A.mdx`), with a `.` segment (`./specs/A.mdx`), or with an empty segment (`specs//A.mdx`) is read as spelled and compared byte-wise, so it names no workspace file: an unknown-file usage error, exit 2, on `show` and `view` as representatives (the `\\` arm discriminating on the Windows leg, E-6); the positive side of the backslash (Linux leg, gated inside the body, E-6) — with a discovered spec-group file `specs/a`, backslash, `b.mdx` staged (an invalid source path, condition 19), `view` and `at … 0` name that very file: membership holds, every node identity unavailable, exit 1 with exactly its condition-19 finding, never the unknown-file exit 2; with valid code sources `src/a`, backslash, `b.ts` and `src/ab.ts` each marking a node (both discovered, the `src/*.ts` control), `occurrences --file` given the first file's path or the pattern `src/a`, backslash, `*.ts` lists the first file's occurrence alone — the backslash an ordinary byte, never a separator or an escape; malformed values — an argument value that is not valid UTF-8 (raw bytes in the OS argument vector, Linux leg) and an argument value containing U+FFFD in every position (a `<node>`, a `<file>` operand, a `--file` glob, a `--tag`, a `--to`, a `<new-id>` — never `refused-invalid-id` — a session name, a `--note` text, a `--base` ref, a `--config` path, and a `--test-hold` path) — are usage errors of the syntax class: exit 2 with the plain usage error's document (`code` null), reported without loading configuration — byte-identical with the configuration file invalid or missing (T12.0-10's discipline) — and modifying nothing (SPEC 12.0, 12.7, 13.5, 6.4, 6.5, 1.5, 7, 7.1, 11.3, 11.4, 11.5, 14.19)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -1854,6 +2027,12 @@ const T12_0_5 = defineProductTest({
         }
       },
     );
+
+    // `move` among the representative commands (SPEC 12.0, 6.5): its file
+    // form, then its section form, each run from `specs/` on its own fresh
+    // copy of one staging. Both legs run them (E-6): no Windows filesystem
+    // refuses their names.
+    await expectMoveFromSpecsArms(product);
 
     // The positive side of the backslash (SPEC 12.0, 7, 7.1) — Linux leg
     // only, where a file name can hold the byte: gated here inside the
