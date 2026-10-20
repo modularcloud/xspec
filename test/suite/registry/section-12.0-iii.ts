@@ -1,6 +1,6 @@
 // TEST-SPEC §12.0 III (global command conventions, third part) — SUITE-42
 // continued: T12.0-14 (invocation grammar) and T12.0-16 (byte order, never
-// UTF-16 order; its fixture, operationalizations, and arms (a)–(c) in the
+// UTF-16 order; its fixture, operationalizations, and arms (a)–(f) in the
 // section after T12.0-14's).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
@@ -74,12 +74,16 @@
 
 import { Buffer } from "node:buffer";
 import type {
+  AppliedMappingPair,
   DecodedDatum,
   Finding,
   FindingLocation,
   InventoryDocument,
+  ItemKind,
   OccurrenceRecord,
   PathValue,
+  PreviewDelta,
+  PreviewFileEntry,
   SourceRange,
   ViewNode,
   ViewReport,
@@ -87,11 +91,17 @@ import type {
 import {
   assertReportMentions,
   assertReportOmits,
+  decodeCoverageReport,
+  decodeExportReport,
   decodeIdsReport,
   decodeInventoryDocument,
   decodeItemReport,
   decodeNextReport,
   decodeOccurrencesReport,
+  decodePerformedOperationReport,
+  decodePreviewReport,
+  decodeReachableReport,
+  decodeSessionStatusReport,
   decodeViewReport,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
@@ -120,7 +130,8 @@ import type {
   WorkspaceDecl,
 } from "../../helpers/workspace.js";
 import { STREAMS_VALID_SOURCE } from "./section-12.0-i.js";
-import { SPECS_ONLY_CONFIG } from "./section-5.6.js";
+import { deleteGraphData } from "./section-13.3.js";
+import { impactAgainst, SPECS_ONLY_CONFIG } from "./section-5.6.js";
 import {
   assertSameJson,
   buildOk,
@@ -860,18 +871,22 @@ const T12_0_14 = defineProductTest({
 // T12.0-16's separating pair, U+FF21 and U+1F600, is such a meeting. The
 // fixture stages the pair in tags, identities, and paths, and each arm pins
 // the byte order exactly: on 12.7's documents (`view`, `inventory`,
-// `occurrences`, and the findings reports of `build` and `check`) through
-// their form-exact decodes, which reject a list out of byte order as a form
-// failure before any pin compares it, and on `ids --json`, whose shape 12.7
-// leaves to 12.3, through its H-3 adapter and the pin alone.
+// `occurrences`, the findings reports of `build` and `check`, and the
+// preview and performed `rename` documents) through their form-exact
+// decodes, which reject a list out of byte order as a form failure before
+// any pin compares it, and on the surfaces whose shape 12.7 leaves to their
+// defining sections (`ids --json`, 12.3; `review status` and `export`, 10.7;
+// `coverage`, 8.2; `impact`, 9.3; `query reachable`, 11.1) through their
+// H-3 adapters and the pins alone.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - The fixture self-check (`checkByteOrderFixtureStaging`, harness-side,
 //   before any invocation) proves that the pair separates the two orders,
 //   that every list pinned below is in byte order and differs from its
 //   UTF-16 code-unit sort — so a product ordering by UTF-16 code units
-//   never coincides with a pinned list — and that the composed ranges slice
-//   the staged bytes.
+//   never coincides with a pinned list — that each shortest path (f) pins
+//   is the byte-least of its two equal-length candidates and the other the
+//   UTF-16 least, and that the composed ranges slice the staged bytes.
 // - `view` is pinned per file by its tree's identities and tags: `p`'s tag
 //   set [U+FF21, U+1F600] from `tags="U+1F600 U+FF21"`, its children
 //   `p.U+1F600` then `p.U+FF21` in document order — the reverse of byte
@@ -903,9 +918,37 @@ const T12_0_14 = defineProductTest({
 //   (14) — and the condition-9 locations by file, in order, each within
 //   its import declaration's byte window (T2.1-5's convention for an
 //   import-cycle participant: the declaration end-widened by one byte).
-// - TEST-SPEC's arms (d)–(f) stage the same fixture: its records, paths,
-//   and staging are exported (`BYTE_ORDER_*`, `byteOrderBaseSource`,
-//   `stageByteOrderFixture`).
+// - Each staging of (d)–(f) changes the workspace it runs on (a performed
+//   rename, deleted graph data, a narrowed glob, a baseline commit and edit,
+//   a deletion, an added code source), so each sub-arm stages the built
+//   fixture afresh (`stageByteOrderFixture`), and every later staging is a
+//   staged-source record (S-9). (f)'s `impact` runs on (e)'s path-blocks
+//   workspace: against its baseline, after its edit, as TEST-SPEC words it.
+// - (d)'s previews are pinned by `mapping` exactly and `files` by path; the
+//   edits inside each file entry are T6.6-4's, their order the decode's.
+//   The delta directions hold companions 13.1 does not enumerate, so each is
+//   pinned like `recorded` (`assertByteOrderPathGroups`): with graph data
+//   deleted (T13.3-2's operational definition) nothing is recorded, so
+//   `generated` holds every spec source's module and Markdown, every other
+//   entry their companions, grouped `specs/base.`, `specs/U+FF21.`,
+//   `specs/U+1F600.`; with the glob narrowed, `removed` holds the two
+//   undiscovered sources' recorded paths alone, `specs/U+FF21.` before
+//   `specs/U+1F600.`. The performed rename's applied mapping is the same
+//   pinned `mapping`.
+// - (e)'s orders are read from `status` and from `export` alike. The
+//   path-blocks session is pinned by its `dependency-consistency` and
+//   `code-impact` items, each kind's scopes in item order, the rest of its
+//   order T10.5-4's. The `audit` and `coverage` sessions are pinned by each
+//   item's kind and scope file in item order — the file grouping TEST-SPEC
+//   words, document order within a file left to T10.6-*'s and T10.7-4's —
+//   and the coverage session's two `x` items by scope. After the deletion,
+//   `export`'s payload shows the premise (the deleted children's items
+//   absent-scoped, the root's and `p`'s present), and specs/base.mdx's
+//   present-scope items (a set) precede its absent-scope ones, pinned in
+//   order by identity.
+// - (f) pins each reported path exactly — `coverage pair`'s covering path of
+//   `p`, src/U+FF21.ts's directly impacted entry (its edge and path), and
+//   `query reachable`'s witness.
 
 /**
  * The separating pair of TEST-SPEC T12.0-16, each character built from its
@@ -941,20 +984,23 @@ export const BYTE_ORDER_PATHS = {
 const BO = BYTE_ORDER_PATHS;
 
 /**
- * The fixture's configuration (TEST-SPEC T12.0-16): spec group `specs`
- * globbing `specs/*.mdx`, code group `src` globbing `src/*.ts`, emission
- * enabled; profiles `pair` (`target` `specs`, `targets` "all", `targetTags`
- * configured [U+1F600, U+FF21] — UTF-16 order, which its set form must
- * reorder — `boundary` `src`, `mode` direct) and `bare` (`target` `specs`,
- * `boundary` `src`, `mode` direct); and rule `nope` (forbidden, from
- * `{ group: "src" }` to `{ tags: [U+1F600, U+FF21] }`). Valid (SPEC 7, 7.4,
- * 7.5): `src` names a code group alone, so each kind is inferred.
+ * The fixture's configuration (TEST-SPEC T12.0-16) with the given spec
+ * glob: spec group `specs` globbing `specGlob` — the fixture's
+ * `specs/*.mdx`; (d)'s narrowed `specs/base.mdx` — code group `src`
+ * globbing `src/*.ts`, emission enabled; profiles `pair` (`target` `specs`,
+ * `targets` "all", `targetTags` configured [U+1F600, U+FF21] — UTF-16
+ * order, which its set form must reorder — `boundary` `src`, `mode` direct)
+ * and `bare` (`target` `specs`, `boundary` `src`, `mode` direct); and rule
+ * `nope` (forbidden, from `{ group: "src" }` to `{ tags: [U+1F600,
+ * U+FF21] }`). Valid (SPEC 7, 7.4, 7.5): `src` names a code group alone, so
+ * each kind is inferred.
  */
-const BYTE_ORDER_CONFIG_SOURCE = `import { defineConfig } from "xspec"
+function byteOrderConfigSource(specGlob: string): string {
+  return `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
-    specs: ["specs/*.mdx"]
+    specs: ["${specGlob}"]
   },
   code: {
     src: ["src/*.ts"]
@@ -986,6 +1032,7 @@ export default defineConfig({
   ]
 })
 `;
+}
 
 /** The own text of each of `p`'s two children in the built fixture. */
 export const BYTE_ORDER_CHILD_TEXTS = {
@@ -994,29 +1041,48 @@ export const BYTE_ORDER_CHILD_TEXTS = {
 } as const;
 
 /**
+ * (e)'s edit, after the baseline commit: the own text of each of `p`'s two
+ * children replaced (SPEC 1.6), each child then `changed` (5.6).
+ */
+const BYTE_ORDER_EDITED_CHILD_TEXTS: {
+  readonly grin: string;
+  readonly fullA: string;
+} = {
+  grin: "Grinning-face child text, edited.",
+  fullA: "Fullwidth-A child text, edited.",
+};
+
+/**
  * The fixture's `specs/base.mdx` with the given child texts: a section `p`
  * spelled `tags="U+1F600 U+FF21"` — the tags in UTF-16 order, which the set
  * form must reorder — whose children are, in document order, `p.U+1F600`
  * then `p.U+FF21`: document order the reverse of byte order, so a list SPEC
  * orders by document (a view's `children`, `ids`' per-file IDs) and one it
  * orders by bytes part on this file. `p` carries the tags; its children
- * carry none.
+ * carry none. With `null`, both children deleted — (e)'s deletion: `p`
+ * alone, its tags and own text as staged.
  */
-export function byteOrderBaseSource(childTexts: {
-  readonly grin: string;
-  readonly fullA: string;
-}): string {
+export function byteOrderBaseSource(
+  childTexts: {
+    readonly grin: string;
+    readonly fullA: string;
+  } | null,
+): string {
+  const children =
+    childTexts === null
+      ? ""
+      : "\n" +
+        `<S id="p.${GRIN}">\n` +
+        `${childTexts.grin}\n` +
+        "</S>\n" +
+        "\n" +
+        `<S id="p.${FULL_A}">\n` +
+        `${childTexts.fullA}\n` +
+        "</S>\n";
   return (
     `<S id="p" tags="${GRIN} ${FULL_A}">\n` +
     "Parent text.\n" +
-    "\n" +
-    `<S id="p.${GRIN}">\n` +
-    `${childTexts.grin}\n` +
-    "</S>\n" +
-    "\n" +
-    `<S id="p.${FULL_A}">\n` +
-    `${childTexts.fullA}\n` +
-    "</S>\n" +
+    children +
     "</S>\n"
   );
 }
@@ -1123,13 +1189,35 @@ const BO_CYCLE_GRIN = composeByteOrderXSource(
 const BYTE_ORDER_CODE_SOURCE =
   'import BASE from "../specs/base.xspec";\n\nBASE.p;\n';
 
+/** (f)'s added code source, as TEST-SPEC names it. */
+const BYTE_ORDER_C_CODE_PATH = "src/c.ts";
+
+/**
+ * (f)'s `src/c.ts`: importing `../specs/U+FF21.xspec` and
+ * `../specs/U+1F600.xspec` and marking each module's `x` at top level — two
+ * `references` edges from the file itself, so two equal-length paths lead
+ * from it to `specs/base.mdx#p`, one through each `x` (SPEC 4.5, 4.6, 11.1).
+ */
+const BYTE_ORDER_C_CODE_SOURCE =
+  `import FULLWIDTH from "../specs/${FULL_A}.xspec";\n` +
+  `import GRINNING from "../specs/${GRIN}.xspec";\n` +
+  "\n" +
+  "FULLWIDTH.x;\n" +
+  "GRINNING.x;\n";
+
 // The staged-source records (helpers/staged-mdx.ts, helpers/staged-ts.ts;
 // S-9): the fixture's files and its twins' — workspaces each body stages,
-// the twins after its first product invocation — every one a record, so the
-// S-9 self-test judges each before any product exists.
+// the twins and (d)–(f)'s fresh fixtures after its first product invocation
+// — and the stagings (d)–(f) make on a built fixture (the narrowed
+// configuration, (e)'s edit and deletion, (f)'s code source), every one a
+// record, so the S-9 self-test judges each before any product exists.
 const BYTE_ORDER_CONFIG = stagedTs(
   "T12.0-16 byte-order fixture xspec.config.ts — spec group specs, code group src, emission enabled, profiles pair (targetTags U+1F600, U+FF21) and bare, rule nope (src to the tags U+1F600, U+FF21)",
-  BYTE_ORDER_CONFIG_SOURCE,
+  byteOrderConfigSource("specs/*.mdx"),
+);
+const BYTE_ORDER_NARROWED_CONFIG = stagedTs(
+  "T12.0-16 (d) narrowed xspec.config.ts — spec group specs globbing specs/base.mdx alone, the rest the fixture's configuration",
+  byteOrderConfigSource(BYTE_ORDER_PATHS.base),
 );
 const BYTE_ORDER_BASE = stagedMdx(
   "T12.0-16 byte-order fixture specs/base.mdx — p tagged U+1F600 U+FF21, its children p.U+1F600 then p.U+FF21",
@@ -1162,6 +1250,18 @@ const BYTE_ORDER_CYCLE_FULL_A = stagedMdx(
 const BYTE_ORDER_CYCLE_GRIN = stagedMdx(
   "T12.0-16 import-cycle twin specs/U+1F600.mdx — also importing ./U+FF21.xspec, the binding unused",
   BO_CYCLE_GRIN.source,
+);
+const BYTE_ORDER_EDITED_BASE = stagedMdx(
+  "T12.0-16 (e) specs/base.mdx — p.U+1F600's and p.U+FF21's own text edited",
+  byteOrderBaseSource(BYTE_ORDER_EDITED_CHILD_TEXTS),
+);
+const BYTE_ORDER_CHILDLESS_BASE = stagedMdx(
+  "T12.0-16 (e) specs/base.mdx — p.U+1F600 and p.U+FF21 deleted",
+  byteOrderBaseSource(null),
+);
+const BYTE_ORDER_C_CODE = stagedTs(
+  "T12.0-16 (f) src/c.ts — importing ../specs/U+FF21.xspec and ../specs/U+1F600.xspec, marking each module's x at top level",
+  BYTE_ORDER_C_CODE_SOURCE,
 );
 
 /** The byte-order fixture's files (TEST-SPEC T12.0-16), every one a record. */
@@ -1455,16 +1555,160 @@ const BYTE_ORDER_UNRESOLVED_FINDINGS: readonly OrderFindingShape[] = [
   path: null,
 }));
 
+/** (d)'s rename, as TEST-SPEC names it: `p` renamed `q` in specs/base.mdx. */
+const BYTE_ORDER_RENAME_ARGV: readonly string[] = ["rename", BO.base, "p", "q"];
+
+/**
+ * (d)'s identity mapping (SPEC 6.4, 6.6, 12.7): `p` and each descendant,
+ * ordered by `from` bytes — `specs/base.mdx#p` (a prefix of the others),
+ * then `#p.U+FF21` (EF BC A1), then `#p.U+1F600` (F0 9F 98 80) — the order
+ * of the preview's `mapping` and of the performed rename's applied mapping.
+ */
+const BYTE_ORDER_RENAME_MAPPING: readonly AppliedMappingPair[] = [
+  { from: `${BO.base}#p`, to: `${BO.base}#q` },
+  { from: `${BO.base}#p.${FULL_A}`, to: `${BO.base}#q.${FULL_A}` },
+  { from: `${BO.base}#p.${GRIN}`, to: `${BO.base}#q.${GRIN}` },
+];
+
+/**
+ * (d)'s rewritten files in byte order of path (SPEC 6.6, 12.7): every
+ * discovered source — specs/base.mdx's three `id` attributes, each
+ * `x`-holding source's `d` reference, each code source's marker.
+ */
+const BYTE_ORDER_RENAME_FILES: readonly string[] = BYTE_ORDER_SOURCES;
+
+/** The spec sources (d)'s narrowed glob leaves undiscovered (SPEC 7). */
+const BYTE_ORDER_UNDISCOVERED_FILES: readonly string[] = [BO.fullA, BO.grin];
+
+/** (e)'s session names (SPEC 10.1). */
+const BYTE_ORDER_PATH_BLOCKS_SESSION = "pb";
+const BYTE_ORDER_AUDIT_SESSION = "audit";
+const BYTE_ORDER_COVERAGE_SESSION = "cov";
+
+/**
+ * The two `x` sections, by file path bytes: (e)'s depth-1
+ * `dependency-consistency` scopes (SPEC 10.5) and its last two
+ * `uncovered-requirement` scopes (10.7).
+ */
+const BYTE_ORDER_X_SCOPES: readonly string[] = [
+  `${BO.fullA}#x`,
+  `${BO.grin}#x`,
+];
+
+/** (e)'s `code-impact` scopes, by code-location identity bytes (10.5). */
+const BYTE_ORDER_CODE_IMPACT_SCOPES: readonly string[] = [
+  BO.fullACode,
+  BO.grinCode,
+];
+
+/**
+ * (e)'s `audit` items as kind and scope file, in item order (SPEC 10.6): one
+ * `subtree-coherence` item per requirement node, roots included —
+ * specs/base.mdx's root, `p`, `p.U+1F600`, and `p.U+FF21`, then each
+ * `x`-holding file's root and `x` — by scope-node file path bytes.
+ */
+const BYTE_ORDER_AUDIT_ITEMS: readonly string[] = [
+  BO.base,
+  BO.base,
+  BO.base,
+  BO.base,
+  BO.fullA,
+  BO.fullA,
+  BO.grin,
+  BO.grin,
+].map((file) => `subtree-coherence ${file}`);
+
+/** The deletion's present specs/base.mdx scopes — the root and `p` — a set. */
+const BYTE_ORDER_PRESENT_BASE_SCOPES: readonly string[] = [
+  BO.base,
+  `${BO.base}#p`,
+];
+
+/** The deleted children's absent scopes, by scope-node identity bytes. */
+const BYTE_ORDER_ABSENT_SCOPES: readonly string[] = [
+  `${BO.base}#p.${FULL_A}`,
+  `${BO.base}#p.${GRIN}`,
+];
+
+/**
+ * (e)'s `coverage` items over `bare` as kind and scope file, in item order
+ * (SPEC 10.7, 8.1): one `uncovered-requirement` item per uncovered required
+ * node — the leaves `p.U+1F600`, `p.U+FF21`, and each `x`, none of which a
+ * code source's marker reaches directly — by file path bytes.
+ */
+const BYTE_ORDER_COVERAGE_ITEMS: readonly string[] = [
+  BO.base,
+  BO.base,
+  BO.fullA,
+  BO.grin,
+].map((file) => `uncovered-requirement ${file}`);
+
+/**
+ * One shortest path (f) pins, beside the other equal-length candidate SPEC
+ * 12.0's tie-break passes over: the byte-least node-identity sequence, the
+ * other the UTF-16 code-unit least.
+ */
+interface ByteOrderTieBreak {
+  readonly what: string;
+  readonly reported: readonly string[];
+  readonly passedOver: readonly string[];
+}
+
+/** (f)'s covering path of `p` under `pair`: the boundary's direct edge (8.2). */
+const BYTE_ORDER_COVERING_TIE: ByteOrderTieBreak = {
+  what: "(f)'s covering path",
+  reported: [BO.fullACode, `${BO.base}#p`],
+  passedOver: [BO.grinCode, `${BO.base}#p`],
+};
+
+/** (f)'s witness path of src/U+FF21.ts's direct impact: `p` to a child (9.3). */
+const BYTE_ORDER_IMPACT_TIE: ByteOrderTieBreak = {
+  what: "(f)'s impact witness path",
+  reported: [`${BO.base}#p`, `${BO.base}#p.${FULL_A}`],
+  passedOver: [`${BO.base}#p`, `${BO.base}#p.${GRIN}`],
+};
+
+/** (f)'s `reachable` witness from src/c.ts to specs/base.mdx#p (11.1). */
+const BYTE_ORDER_REACHABLE_TIE: ByteOrderTieBreak = {
+  what: "(f)'s reachable witness",
+  reported: [BYTE_ORDER_C_CODE_PATH, `${BO.fullA}#x`, `${BO.base}#p`],
+  passedOver: [BYTE_ORDER_C_CODE_PATH, `${BO.grin}#x`, `${BO.base}#p`],
+};
+
 /** Byte order over UTF-8 encodings (SPEC 12.0). */
-function byteOrderSorted(values: readonly string[]): string[] {
-  return [...values].sort((a, b) =>
-    Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")),
-  );
+function byteOrderCompare(a: string, b: string): number {
+  return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 }
 
 /** UTF-16 code-unit order: JavaScript's own string comparison. */
+function utf16Compare(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** `values` sorted by {@link byteOrderCompare}. */
+function byteOrderSorted(values: readonly string[]): string[] {
+  return [...values].sort(byteOrderCompare);
+}
+
+/** `values` sorted by {@link utf16Compare}. */
 function utf16Sorted(values: readonly string[]): string[] {
-  return [...values].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return [...values].sort(utf16Compare);
+}
+
+/**
+ * Element-wise comparison of two node-identity sequences under `compare`, a
+ * proper prefix first (SPEC 12.0's shortest-path tie-break, by bytes).
+ */
+function compareIdentitySequences(
+  a: readonly string[],
+  b: readonly string[],
+  compare: (x: string, y: string) => number,
+): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i += 1) {
+    const order = compare(a[i]!, b[i]!);
+    if (order !== 0) return order;
+  }
+  return a.length - b.length;
 }
 
 /**
@@ -1473,9 +1717,11 @@ function utf16Sorted(values: readonly string[]): string[] {
  * product result): the pair's encodings are TEST-SPEC's; each list the arms
  * pin is in byte order and differs from its UTF-16 code-unit sort, so a
  * product ordering by UTF-16 code units never coincides with it; `p`'s
- * children's document order is the reverse of byte order; (b)'s operands
- * stand in neither order; and every composed range slices the staged bytes
- * to its spelling.
+ * children's document order is the reverse of byte order; each shortest
+ * path (f) pins is the element-wise byte-least of its two equal-length
+ * candidates, the other the UTF-16 code-unit least; (e)'s edit changes both
+ * children's own text; (b)'s operands stand in neither order; and every
+ * composed range slices the staged bytes to its spelling.
  */
 function checkByteOrderFixtureStaging(): void {
   const misstaged = (what: string): never => {
@@ -1512,6 +1758,20 @@ function checkByteOrderFixtureStaging(): void {
       "the condition-5 and -9 findings' located files",
       BYTE_ORDER_LOCATED_FILES,
     ],
+    [
+      "(d)'s mapping's `from` identities",
+      BYTE_ORDER_RENAME_MAPPING.map((pair) => pair.from),
+    ],
+    ["(d)'s rewritten files", BYTE_ORDER_RENAME_FILES],
+    [
+      "(d)'s `removed` per-source prefixes",
+      BYTE_ORDER_UNDISCOVERED_FILES.map(byteOrderStemOf),
+    ],
+    ["(e)'s `x` scopes", BYTE_ORDER_X_SCOPES],
+    ["(e)'s code-impact scopes", BYTE_ORDER_CODE_IMPACT_SCOPES],
+    ["(e)'s audit items' scope files", BYTE_ORDER_AUDIT_ITEMS],
+    ["(e)'s absent scopes", BYTE_ORDER_ABSENT_SCOPES],
+    ["(e)'s coverage items' scope files", BYTE_ORDER_COVERAGE_ITEMS],
   ];
   for (const [what, list] of pinned) {
     if (JSON.stringify(byteOrderSorted(list)) !== JSON.stringify(list)) {
@@ -1531,6 +1791,36 @@ function checkByteOrderFixtureStaging(): void {
     JSON.stringify([...children].reverse())
   ) {
     misstaged("p's children's document order is not the reverse of byte order");
+  }
+  // (f): each pinned shortest path is the element-wise byte-least of its two
+  // equal-length candidates, the other the UTF-16 code-unit least.
+  for (const tie of [
+    BYTE_ORDER_COVERING_TIE,
+    BYTE_ORDER_IMPACT_TIE,
+    BYTE_ORDER_REACHABLE_TIE,
+  ]) {
+    if (
+      tie.reported.length !== tie.passedOver.length ||
+      compareIdentitySequences(
+        tie.reported,
+        tie.passedOver,
+        byteOrderCompare,
+      ) >= 0 ||
+      compareIdentitySequences(tie.reported, tie.passedOver, utf16Compare) <= 0
+    ) {
+      misstaged(
+        `${tie.what} ${JSON.stringify(tie.reported)} is not the byte-least ` +
+          `of two equal-length candidates whose UTF-16 code-unit least is ` +
+          `${JSON.stringify(tie.passedOver)}`,
+      );
+    }
+  }
+  // (e): the edit changes both children's own text.
+  if (
+    BYTE_ORDER_EDITED_CHILD_TEXTS.grin === BYTE_ORDER_CHILD_TEXTS.grin ||
+    BYTE_ORDER_EDITED_CHILD_TEXTS.fullA === BYTE_ORDER_CHILD_TEXTS.fullA
+  ) {
+    misstaged("(e)'s edit leaves a child's own text as built");
   }
   for (const order of [
     BYTE_ORDER_SPEC_FILES,
@@ -1702,13 +1992,115 @@ function assertByteOrderViews(
 }
 
 /**
+ * A list of derived-file paths made of one or more spec sources' derived
+ * paths, as a 12.7 document presents it — `inventory`'s `recorded` (SPEC
+ * 11.6) or a preview delta's direction (6.6) — with why each source's paths
+ * stand in it.
+ */
+interface ByteOrderPathList {
+  /** The list's name in a diagnosis: "`recorded`", "the delta's `removed`". */
+  readonly name: string;
+  /** The spec sources whose derived paths it holds, in byte order of path. */
+  readonly sources: readonly string[];
+  /** Why each source's module and Markdown stand in it. */
+  readonly holds: string;
+  /** The passage its content follows, cited in every diagnosis. */
+  readonly cites: string;
+}
+
+/** A derived-path stem as a diagnosis spells it, with its first bytes. */
+function byteOrderStemLabel(stem: string): string {
+  if (stem === byteOrderStemOf(BO.fullA)) return "specs/U+FF21. (EF BC A1)";
+  if (stem === byteOrderStemOf(BO.grin)) return "specs/U+1F600. (F0 9F 98 80)";
+  return `${stem}.`;
+}
+
+/** A spec source's derived-path stem (SPEC 13.1, 13.2): its path less `.mdx`. */
+function byteOrderStemOf(specFile: string): string {
+  return specFile.slice(0, -".mdx".length);
+}
+
+/**
+ * Assert a list of derived-file paths grouped by source in byte order (SPEC
+ * 12.7: `recorded` and each delta direction list their paths in byte
+ * order): every entry a plain string (every derived path here is valid
+ * UTF-8, 12.0), each listed source's module and Markdown present (13.1,
+ * 13.2), every other entry a companion attributable to one of them through
+ * 13.1's naming (`<stem>.xspec.` plus a suffix) — the companions are the
+ * product's own (H-4) — and the sources' groups in byte order of stem:
+ * `specs/base.` before `specs/U+FF21.` before `specs/U+1F600.`, never
+ * UTF-16 code-unit order.
+ */
+function assertByteOrderPathGroups(
+  paths: readonly PathValue[],
+  list: ByteOrderPathList,
+  context: string,
+): void {
+  const entries = paths.map((entry, index) => {
+    if (typeof entry === "string") return entry;
+    return fail(
+      `${context}: ${list.name} entry ${String(index)} arrived in the ` +
+        `marked byte form (${renderPathValue(entry)}) — every derived path ` +
+        `here is valid UTF-8, never presented in the byte form (SPEC 12.0, ` +
+        `12.7)`,
+    );
+  });
+  for (const pinned of [
+    ...list.sources.map(byteOrderModuleOf),
+    ...list.sources.map(byteOrderMarkdownOf),
+  ]) {
+    if (!entries.includes(pinned)) {
+      fail(
+        `${context}: ${list.name} must list ${JSON.stringify(pinned)} — ` +
+          `${list.holds}, the modules and the emitted Markdown among them ` +
+          `(${list.cites}, 13.1, 13.2); ${list.name}: ` +
+          JSON.stringify(entries),
+      );
+    }
+  }
+  const stems = list.sources.map(byteOrderStemOf);
+  const groups = entries.map((entry) => {
+    const group = stems.findIndex(
+      (stem) =>
+        entry === `${stem}.md` ||
+        (entry.startsWith(`${stem}.xspec.`) &&
+          entry.length > `${stem}.xspec.`.length),
+    );
+    if (group === -1) {
+      fail(
+        `${context}: ${list.name} entry ${JSON.stringify(entry)} is ` +
+          `attributable to none of ${stems.map(byteOrderStemLabel).join(", ")} ` +
+          `— neither its Markdown nor its module or a companion through the ` +
+          `13.1 naming scheme ("<stem>.xspec." plus a suffix) — and ` +
+          `${list.name} holds those sources' generated modules, companions, ` +
+          `and emitted Markdown alone: ${list.holds} (${list.cites}, 13.1)`,
+      );
+    }
+    return group;
+  });
+  for (let i = 1; i < groups.length; i += 1) {
+    if (groups[i - 1]! > groups[i]!) {
+      fail(
+        `${context}: ${list.name} in byte order — ` +
+          stems
+            .map((stem) => `every ${byteOrderStemLabel(stem)} path`)
+            .join(", then ") +
+          ` — never UTF-16 code-unit order, which puts specs/U+1F600. ` +
+          `(D83D) before specs/U+FF21. (FF21) (${list.cites}, 12.7, 12.0); ` +
+          `${JSON.stringify(entries[i - 1])} precedes ` +
+          `${JSON.stringify(entries[i])} in ${JSON.stringify(entries)}`,
+      );
+    }
+  }
+}
+
+/**
  * Assert `recorded` (SPEC 11.6, 13.3; T11.6-3): the plain list — the record
- * exists and is readable after the build — its every entry a plain string
- * (every derived path is valid UTF-8, 12.0), each spec source's module and
- * Markdown present (13.1, 13.2), every other entry a companion attributable
- * to its source through 13.1's naming (`<stem>.xspec.` plus a suffix), and
- * every `specs/base.` entry before every `specs/U+FF21.` entry before every
- * `specs/U+1F600.` entry.
+ * exists and is readable after the build — grouped by source in byte order
+ * ({@link assertByteOrderPathGroups}): each spec source's module and
+ * Markdown present, every other entry a companion attributable to its
+ * source, and every `specs/base.` entry before every `specs/U+FF21.` entry
+ * before every `specs/U+1F600.` entry.
  */
 function assertByteOrderRecorded(
   recorded: DecodedDatum<readonly PathValue[]>,
@@ -1721,57 +2113,16 @@ function assertByteOrderRecorded(
         `readable (SPEC 11.6, 13.3, 12.7); got state "${recorded.state}"`,
     );
   }
-  const entries = recorded.value.map((entry, index) => {
-    if (typeof entry === "string") return entry;
-    return fail(
-      `${context}: recorded entry ${String(index)} arrived in the marked ` +
-        `byte form (${renderPathValue(entry)}) — every derived path here is ` +
-        `valid UTF-8, never presented in the byte form (SPEC 12.0, 12.7)`,
-    );
-  });
-  for (const pinned of [
-    ...BYTE_ORDER_SPEC_FILES.map(byteOrderModuleOf),
-    ...BYTE_ORDER_SPEC_FILES.map(byteOrderMarkdownOf),
-  ]) {
-    if (!entries.includes(pinned)) {
-      fail(
-        `${context}: the record must list ${JSON.stringify(pinned)} — the ` +
-          `recorded paths are the paths as last generated, the modules and ` +
-          `the emitted Markdown among them (SPEC 13.3, 13.1, 13.2, 11.6); ` +
-          `recorded: ${JSON.stringify(entries)}`,
-      );
-    }
-  }
-  const groups = entries.map((entry) => {
-    const group = BYTE_ORDER_RECORDED_STEMS.findIndex(
-      (stem) =>
-        entry === `${stem}.md` ||
-        (entry.startsWith(`${stem}.xspec.`) &&
-          entry.length > `${stem}.xspec.`.length),
-    );
-    if (group === -1) {
-      fail(
-        `${context}: recorded entry ${JSON.stringify(entry)} is neither a ` +
-          `spec source's Markdown nor its module or a companion ` +
-          `attributable to it through the 13.1 naming scheme ("<stem>.xspec." ` +
-          `plus a suffix) — the record lists generated modules, their ` +
-          `companions, and emitted Markdown alone (SPEC 13.3, 13.1, 11.6)`,
-      );
-    }
-    return group;
-  });
-  for (let i = 1; i < groups.length; i += 1) {
-    if (groups[i - 1]! > groups[i]!) {
-      fail(
-        `${context}: \`recorded\` in byte order — every specs/base. path, ` +
-          `then every specs/U+FF21. path (EF BC A1), then every ` +
-          `specs/U+1F600. path (F0 9F 98 80), never UTF-16 code-unit order, ` +
-          `which puts specs/U+1F600. (D83D) before specs/U+FF21. (FF21) ` +
-          `(SPEC 11.6, 12.7, 12.0); ${JSON.stringify(entries[i - 1])} ` +
-          `precedes ${JSON.stringify(entries[i])} in ${JSON.stringify(entries)}`,
-      );
-    }
-  }
+  assertByteOrderPathGroups(
+    recorded.value,
+    {
+      name: "`recorded`",
+      sources: BYTE_ORDER_SPEC_FILES,
+      holds: "the recorded paths are the paths as last generated",
+      cites: "SPEC 11.6, 13.3",
+    },
+    context,
+  );
 }
 
 /**
@@ -2066,10 +2417,658 @@ async function expectByteOrderImportCycleTwin(
   });
 }
 
+// --- (d)–(f): previews, review items, and shortest paths --------------------
+
+/**
+ * Stage the built fixture afresh (`stageByteOrderFixture`, H-1), run `body`
+ * on it, and dispose: each of (d)–(f)'s stagings changes the workspace it
+ * runs on — a performed rename, deleted graph data, a narrowed glob, a
+ * baseline commit and edit, a deletion, an added code source — so each
+ * starts from the built fixture TEST-SPEC names.
+ */
+async function withBuiltByteOrderFixture(
+  product: ProductBinding,
+  context: string,
+  body: (workspace: TestWorkspace) => Promise<void>,
+): Promise<void> {
+  const workspace = await stageByteOrderFixture(product, context);
+  try {
+    await body(workspace);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/** A successful preview's plan: no member `null`, the delta plain (6.6). */
+interface ByteOrderPreviewPlan {
+  readonly mapping: readonly AppliedMappingPair[];
+  readonly files: readonly PreviewFileEntry[];
+  readonly delta: PreviewDelta;
+}
+
+/**
+ * Run (d)'s preview, `rename specs/base.mdx p q --preview --json`: exit 0 —
+ * the real operation would proceed, the workspace passing `build`'s
+ * validations (SPEC 6.4, 6.6) — the document decoded form-exact (12.7: the
+ * decode rejects a `mapping`, `files`, or delta direction out of byte order
+ * before any pin compares it), findings `[]`, and the success plan: no
+ * member `null`, the delta a plain two-direction value — an absent record
+ * is the nothing-recorded success path, never the 14.23 unavailability.
+ */
+async function runByteOrderPreview(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<ByteOrderPreviewPlan> {
+  const report = decodePreviewReport(
+    await runJson(
+      product,
+      workspace,
+      [...BYTE_ORDER_RENAME_ARGV, "--preview", "--json"],
+      `${context} — the real rename would proceed (the workspace passes ` +
+        `\`build\`'s validations, \`p\` exists, \`q\` collides with nothing), ` +
+        `so the preview succeeds, exit 0 (SPEC 6.4, 6.6, 12.0)`,
+    ),
+    context,
+  );
+  assertSameJson(
+    report.findings,
+    [],
+    `${context}: a preview whose real operation would proceed reports ` +
+      `findings [] (SPEC 6.6, 12.7)`,
+  );
+  const { mapping, files, delta } = report;
+  if (mapping === null || files === null || delta === null) {
+    fail(
+      `${context}: a successful preview reports its plan — \`mapping\`, ` +
+        `\`files\`, and \`delta\` are null exactly on refusal (SPEC 6.6, 12.7)`,
+    );
+  }
+  if ("unavailable" in delta) {
+    fail(
+      `${context}: the delta is explicitly unavailable only where recorded ` +
+        `state exists but cannot be read as a record (SPEC 14.23) — a ` +
+        `built record, or none, is reported as a plain two-direction value ` +
+        `(SPEC 6.6)`,
+    );
+  }
+  return { mapping, files, delta };
+}
+
+/**
+ * (d) Previews (SPEC 6.6, 6.4, 12.7; T6.6-4(a), T6.6-5): on the built
+ * fixture `rename specs/base.mdx p q --preview` reports `mapping` ordered by
+ * `from` — specs/base.mdx#p, #p.U+FF21, #p.U+1F600 — and `files` ordered
+ * specs/base.mdx, specs/U+FF21.mdx, specs/U+1F600.mdx, src/U+FF21.ts,
+ * src/U+1F600.ts, and the performed rename reports the same `mapping`; with
+ * graph data deleted (T13.3-2's operational definition), the same preview's
+ * `generated` holds every derived path, every specs/U+FF21. path before
+ * every specs/U+1F600. path; and on the built fixture with `specs`' glob
+ * narrowed to specs/base.mdx and no rebuild, its `removed` holds the two
+ * undiscovered sources' recorded paths likewise.
+ */
+async function expectByteOrderPreviews(product: ProductBinding): Promise<void> {
+  await withBuiltByteOrderFixture(
+    product,
+    "T12.0-16 (d) preview and performed rename",
+    async (workspace) => {
+      const context =
+        "T12.0-16 (d) `rename specs/base.mdx p q --preview --json` on the " +
+        "built fixture";
+      const plan = await runByteOrderPreview(product, workspace, context);
+      assertSameJson(
+        plan.mapping,
+        BYTE_ORDER_RENAME_MAPPING,
+        `${context}: \`mapping\` — one pair per identity the rename changes, ` +
+          `\`p\` and each descendant, ordered by \`from\` bytes: ` +
+          `specs/base.mdx#p, then #p.U+FF21 (EF BC A1), then #p.U+1F600 ` +
+          `(F0 9F 98 80), never UTF-16 code-unit order, which puts ` +
+          `#p.U+1F600 (D83D) first (SPEC 6.6, 6.4, 12.7, 12.0)`,
+      );
+      assertSameJson(
+        plan.files.map((entry) => entry.file),
+        BYTE_ORDER_RENAME_FILES,
+        `${context}: \`files\` — every file the rename would rewrite (the ` +
+          `three \`id\` attributes, each \`x\`'s \`d\` reference, each code ` +
+          `source's marker), ordered by file path bytes: specs/base.mdx, ` +
+          `specs/U+FF21.mdx, specs/U+1F600.mdx, src/U+FF21.ts, ` +
+          `src/U+1F600.ts, never UTF-16 code-unit order (SPEC 6.6, 12.7, 12.0)`,
+      );
+      const performedContext =
+        "T12.0-16 (d) the performed `rename specs/base.mdx p q --json`";
+      const performed = decodePerformedOperationReport(
+        await runJson(
+          product,
+          workspace,
+          [...BYTE_ORDER_RENAME_ARGV, "--json"],
+          `${performedContext} — the rename the preview planned succeeds, ` +
+            `exit 0 (SPEC 6.4, 6.6, 12.0)`,
+        ),
+        performedContext,
+      );
+      assertSameJson(
+        performed.mapping,
+        BYTE_ORDER_RENAME_MAPPING,
+        `${performedContext}: the applied mapping is the complete identity ` +
+          `mapping the operation journaled — the preview's \`mapping\`, in ` +
+          `its order by \`from\` bytes, U+FF21's child before U+1F600's ` +
+          `(SPEC 6.4, 6.6, 12.7, 12.0)`,
+      );
+    },
+  );
+
+  await withBuiltByteOrderFixture(
+    product,
+    "T12.0-16 (d) preview with graph data deleted",
+    async (workspace) => {
+      const context =
+        "T12.0-16 (d) `rename specs/base.mdx p q --preview --json` with " +
+        "graph data deleted";
+      await deleteGraphData(workspace, `${context} staging`);
+      const plan = await runByteOrderPreview(product, workspace, context);
+      assertByteOrderPathGroups(
+        plan.delta.generated,
+        {
+          name: "the delta's `generated`",
+          sources: BYTE_ORDER_SPEC_FILES,
+          holds:
+            "with graph data deleted nothing is recorded (the record " +
+            "missing, read as empty), so every derived path the " +
+            "post-operation workspace generates is newly generated",
+          cites: "SPEC 6.6, 11.6",
+        },
+        context,
+      );
+    },
+  );
+
+  await withBuiltByteOrderFixture(
+    product,
+    "T12.0-16 (d) preview with the glob narrowed",
+    async (workspace) => {
+      const context =
+        "T12.0-16 (d) `rename specs/base.mdx p q --preview --json` with " +
+        "`specs`' glob narrowed to specs/base.mdx and no rebuild";
+      await workspace.file("xspec.config.ts", BYTE_ORDER_NARROWED_CONFIG);
+      const plan = await runByteOrderPreview(product, workspace, context);
+      assertByteOrderPathGroups(
+        plan.delta.removed,
+        {
+          name: "the delta's `removed`",
+          sources: BYTE_ORDER_UNDISCOVERED_FILES,
+          holds:
+            "specs/U+FF21.mdx and specs/U+1F600.mdx no longer discovered, " +
+            "their recorded paths are the recorded paths the operation " +
+            "would leave no longer generated, and specs/base.mdx's are " +
+            "generated again",
+          cites: "SPEC 6.6, 13.3, 7",
+        },
+        context,
+      );
+    },
+  );
+}
+
+/** One review item as `status` or `export` presents it, in item order. */
+interface ByteOrderItemRow {
+  readonly kind: ItemKind;
+  readonly scope: string;
+  /** The scope node's presence (10.4) — `export`'s payload alone has it. */
+  readonly present?: boolean;
+}
+
+/** A session's items as one read subcommand presents them (10.7). */
+interface ByteOrderSessionView {
+  readonly label: string;
+  readonly items: readonly ByteOrderItemRow[];
+  /** Whether its items carry their scope nodes' presence (`export`'s). */
+  readonly withPresence: boolean;
+}
+
+/**
+ * A session's item order as `status` and `export` each present it (SPEC
+ * 10.5, 10.7: `status`, `next`, and `export` present items in item order):
+ * `review status <name> --json` and `review export <name> --json`, each a
+ * read answering exit 0, decoded (H-3).
+ */
+async function readByteOrderSession(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  context: string,
+): Promise<readonly ByteOrderSessionView[]> {
+  const statusLabel = `${context} — \`review status ${name} --json\``;
+  const status = decodeSessionStatusReport(
+    await runJson(
+      product,
+      workspace,
+      ["review", "status", name, "--json"],
+      `${statusLabel}: a read subcommand answering, exit 0 (SPEC 10.7, 12.0)`,
+    ),
+    statusLabel,
+  );
+  const exportLabel = `${context} — \`review export ${name} --json\``;
+  const exported = decodeExportReport(
+    await runJson(
+      product,
+      workspace,
+      ["review", "export", name, "--json"],
+      `${exportLabel}: a read subcommand answering, exit 0 (SPEC 10.7, 12.0)`,
+    ),
+    exportLabel,
+  );
+  return [
+    {
+      label: statusLabel,
+      items: status.items.map((row) => ({ kind: row.kind, scope: row.scope })),
+      withPresence: false,
+    },
+    {
+      label: exportLabel,
+      items: exported.items.map((item) => ({
+        kind: item.kind,
+        scope: item.scope.node,
+        present: item.scope.present,
+      })),
+      withPresence: true,
+    },
+  ];
+}
+
+/** The file part of an identity (SPEC 1.5): before `#`, or a root's whole. */
+function byteOrderFileOf(identity: string): string {
+  const hash = identity.indexOf("#");
+  return hash === -1 ? identity : identity.slice(0, hash);
+}
+
+/** A view's items as `<kind> <scope file>`, in item order. */
+function byteOrderKindFiles(view: ByteOrderSessionView): readonly string[] {
+  return view.items.map(
+    (item) => `${item.kind} ${byteOrderFileOf(item.scope)}`,
+  );
+}
+
+/** A view's scopes of one kind, in item order. */
+function byteOrderScopesOf(
+  view: ByteOrderSessionView,
+  kind: ItemKind,
+): readonly string[] {
+  return view.items
+    .filter((item) => item.kind === kind)
+    .map((item) => item.scope);
+}
+
+/**
+ * (e)'s `path-blocks` session (SPEC 10.5; T10.5-4): with the built fixture
+ * committed as the baseline and the own text of `p.U+1F600` and `p.U+FF21`
+ * then edited, the session orders its depth-1 `dependency-consistency`
+ * items specs/U+FF21.mdx#x's before specs/U+1F600.mdx#x's (by scope-node
+ * file path) and its `code-impact` items src/U+FF21.ts's before
+ * src/U+1F600.ts's (by code-location identity), as `status` and `export`
+ * present it. (f)'s impact arm then runs here, against that baseline after
+ * that edit.
+ */
+async function expectByteOrderPathBlocks(
+  product: ProductBinding,
+): Promise<void> {
+  await withBuiltByteOrderFixture(
+    product,
+    "T12.0-16 (e) path-blocks session",
+    async (workspace) => {
+      await workspace.gitInit();
+      const baseline = await workspace.gitCommitAll(
+        "T12.0-16 byte-order fixture, built",
+      );
+      await workspace.file(BO.base, BYTE_ORDER_EDITED_BASE);
+      const context =
+        "T12.0-16 (e) the path-blocks session against the built fixture, " +
+        "p.U+1F600's and p.U+FF21's own text then edited";
+      await expectExit(
+        product,
+        workspace,
+        [
+          "review",
+          "create",
+          "--base",
+          baseline,
+          "--name",
+          BYTE_ORDER_PATH_BLOCKS_SESSION,
+        ],
+        0,
+        `${context} — \`review create --base <baseline> --name ` +
+          `${BYTE_ORDER_PATH_BLOCKS_SESSION}\` on a valid workspace with a ` +
+          `resolvable baseline, exit 0 (SPEC 10.7, 6.3)`,
+      );
+      for (const view of await readByteOrderSession(
+        product,
+        workspace,
+        BYTE_ORDER_PATH_BLOCKS_SESSION,
+        context,
+      )) {
+        assertSameJson(
+          byteOrderScopesOf(view, "dependency-consistency"),
+          BYTE_ORDER_X_SCOPES,
+          `${view.label}: the depth-1 \`dependency-consistency\` items — one ` +
+            `per \`x\`, whose \`d\` edge targets \`p\`, its effectiveHash ` +
+            `changed — tied on depth and kind, ordered by scope-node file ` +
+            `path bytes: specs/U+FF21.mdx#x's (EF BC A1) before ` +
+            `specs/U+1F600.mdx#x's (F0 9F 98 80), never UTF-16 code-unit ` +
+            `order (SPEC 10.5, 5.6, 12.0)`,
+        );
+        assertSameJson(
+          byteOrderScopesOf(view, "code-impact"),
+          BYTE_ORDER_CODE_IMPACT_SCOPES,
+          `${view.label}: the \`code-impact\` items — one per directly ` +
+            `impacted code location, each code source's marker reaching ` +
+            `\`p\` — ordered by code-location identity bytes: ` +
+            `src/U+FF21.ts's before src/U+1F600.ts's, never UTF-16 code-unit ` +
+            `order (SPEC 10.5, 9.2, 12.0)`,
+        );
+      }
+      await expectByteOrderImpactTieBreak(product, workspace, baseline);
+    },
+  );
+}
+
+/**
+ * (e)'s `audit` and `coverage` sessions (SPEC 10.6, 10.7, 10.5): an `audit`
+ * session created on the built fixture orders specs/base.mdx's items, then
+ * specs/U+FF21.mdx's, then specs/U+1F600.mdx's (by file path); a `coverage`
+ * session over `bare` on the built fixture orders its
+ * `uncovered-requirement` items specs/U+FF21.mdx#x's before
+ * specs/U+1F600.mdx#x's (by file path); and, `p.U+1F600` and `p.U+FF21`
+ * then deleted, the `audit` session places their now absent-scope items
+ * after specs/base.mdx's present-scope ones, specs/base.mdx#p.U+FF21's first
+ * (by scope-node identity) — each order as `status` and `export` present
+ * it.
+ */
+async function expectByteOrderAuditAndCoverage(
+  product: ProductBinding,
+): Promise<void> {
+  await withBuiltByteOrderFixture(
+    product,
+    "T12.0-16 (e) audit and coverage sessions",
+    async (workspace) => {
+      const auditContext =
+        "T12.0-16 (e) the audit session created on the built fixture";
+      await expectExit(
+        product,
+        workspace,
+        [
+          "review",
+          "create",
+          "--strategy",
+          "audit",
+          "--name",
+          BYTE_ORDER_AUDIT_SESSION,
+        ],
+        0,
+        `${auditContext} — \`review create --strategy audit --name ` +
+          `${BYTE_ORDER_AUDIT_SESSION}\` on a valid workspace, exit 0 (SPEC ` +
+          `10.7)`,
+      );
+      for (const view of await readByteOrderSession(
+        product,
+        workspace,
+        BYTE_ORDER_AUDIT_SESSION,
+        auditContext,
+      )) {
+        assertSameJson(
+          byteOrderKindFiles(view),
+          BYTE_ORDER_AUDIT_ITEMS,
+          `${view.label}: one \`subtree-coherence\` item per requirement ` +
+            `node, roots included, ordered by scope-node file path bytes — ` +
+            `specs/base.mdx's four, then specs/U+FF21.mdx's two (EF BC A1), ` +
+            `then specs/U+1F600.mdx's two (F0 9F 98 80), never UTF-16 ` +
+            `code-unit order (SPEC 10.6, 12.0)`,
+        );
+      }
+
+      const coverageContext =
+        "T12.0-16 (e) the coverage session over `bare` on the built fixture";
+      await expectExit(
+        product,
+        workspace,
+        [
+          "review",
+          "create",
+          "--coverage",
+          "bare",
+          "--name",
+          BYTE_ORDER_COVERAGE_SESSION,
+        ],
+        0,
+        `${coverageContext} — \`review create --coverage bare --name ` +
+          `${BYTE_ORDER_COVERAGE_SESSION}\` on a valid workspace, exit 0 ` +
+          `(SPEC 10.7)`,
+      );
+      for (const view of await readByteOrderSession(
+        product,
+        workspace,
+        BYTE_ORDER_COVERAGE_SESSION,
+        coverageContext,
+      )) {
+        assertSameJson(
+          byteOrderKindFiles(view),
+          BYTE_ORDER_COVERAGE_ITEMS,
+          `${view.label}: one \`uncovered-requirement\` item per uncovered ` +
+            `required node of \`bare\` — the leaves p.U+1F600, p.U+FF21, and ` +
+            `each \`x\`, no code source marking any — ordered by file path ` +
+            `bytes, specs/base.mdx's two before specs/U+FF21.mdx's before ` +
+            `specs/U+1F600.mdx's, never UTF-16 code-unit order (SPEC 10.7, ` +
+            `8.1, 12.0)`,
+        );
+        assertSameJson(
+          view.items
+            .filter((item) => byteOrderFileOf(item.scope) !== BO.base)
+            .map((item) => item.scope),
+          BYTE_ORDER_X_SCOPES,
+          `${view.label}: the last two items are the \`x\`s', ` +
+            `specs/U+FF21.mdx#x's before specs/U+1F600.mdx#x's (SPEC 10.7, ` +
+            `8.1, 12.0)`,
+        );
+      }
+
+      await workspace.file(BO.base, BYTE_ORDER_CHILDLESS_BASE);
+      const deletedContext =
+        "T12.0-16 (e) the audit session, p.U+1F600 and p.U+FF21 then deleted";
+      for (const view of await readByteOrderSession(
+        product,
+        workspace,
+        BYTE_ORDER_AUDIT_SESSION,
+        deletedContext,
+      )) {
+        if (view.withPresence) {
+          const presenceOf = (scope: string): boolean | null =>
+            view.items.find((item) => item.scope === scope)?.present ?? null;
+          assertSameJson(
+            [
+              ...BYTE_ORDER_PRESENT_BASE_SCOPES,
+              ...BYTE_ORDER_ABSENT_SCOPES,
+            ].map(presenceOf),
+            [true, true, false, false],
+            `${view.label} — staging premise: specs/base.mdx's root's and ` +
+              `\`p\`'s items present their scope nodes present, and the ` +
+              `deleted children's items stay in the session with their scope ` +
+              `nodes absent — in that order, \`null\` for a missing item ` +
+              `(SPEC 10.4, 10.5: no re-derivation without an \`updated\` ` +
+              `resolve)`,
+          );
+        }
+        assertSameJson(
+          byteOrderKindFiles(view),
+          BYTE_ORDER_AUDIT_ITEMS,
+          `${view.label}: the same items, still by scope-node file path ` +
+            `bytes — specs/base.mdx's four, then specs/U+FF21.mdx's, then ` +
+            `specs/U+1F600.mdx's (SPEC 10.6, 10.5, 12.0)`,
+        );
+        const baseScopes = view.items.slice(0, 4).map((item) => item.scope);
+        assertSameJson(
+          [...baseScopes.slice(0, 2)].sort(byteOrderCompare),
+          BYTE_ORDER_PRESENT_BASE_SCOPES,
+          `${view.label}: specs/base.mdx's present-scope items — its root's ` +
+            `and \`p\`'s — come first among its items (SPEC 10.5: only a ` +
+            `present scope node has a document position)`,
+        );
+        assertSameJson(
+          baseScopes.slice(2),
+          BYTE_ORDER_ABSENT_SCOPES,
+          `${view.label}: the absent-scope items follow specs/base.mdx's ` +
+            `present-scope ones, ordered by scope-node identity bytes — ` +
+            `specs/base.mdx#p.U+FF21's (EF BC A1) before ` +
+            `specs/base.mdx#p.U+1F600's (F0 9F 98 80), never UTF-16 ` +
+            `code-unit order nor their former document order (SPEC 10.5, ` +
+            `10.6, 12.0)`,
+        );
+      }
+    },
+  );
+}
+
+/**
+ * (f)'s impact arm (SPEC 9.3, 12.0; T12.0-8), against (e)'s baseline after
+ * its edit: `impact` reports src/U+FF21.ts directly impacted through its
+ * edge to specs/base.mdx#p along the path specs/base.mdx#p →
+ * specs/base.mdx#p.U+FF21, of the two equal-length paths to an edited child.
+ */
+async function expectByteOrderImpactTieBreak(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  baseline: string,
+): Promise<void> {
+  const context =
+    "T12.0-16 (f) `impact --base <baseline> --json` against (e)'s baseline, " +
+    "after its edit";
+  const report = await impactAgainst(product, workspace, baseline, context);
+  const entry = report.code.direct.find(
+    (candidate) => candidate.location === BO.fullACode,
+  );
+  if (entry === undefined) {
+    fail(
+      `${context}: src/U+FF21.ts is directly impacted — its marker's ` +
+        `\`references\` edge targets specs/base.mdx#p, whose subtreeHash ` +
+        `changed with its children's edited text (SPEC 9.2) — so it must be ` +
+        `among the directly impacted code; got ` +
+        JSON.stringify(
+          report.code.direct.map((candidate) => candidate.location),
+        ),
+    );
+  }
+  assertSameJson(
+    {
+      edge: { from: entry.edge.from, to: entry.edge.to, kind: entry.edge.kind },
+      path: entry.path,
+    },
+    {
+      edge: { from: BO.fullACode, to: `${BO.base}#p`, kind: "references" },
+      path: BYTE_ORDER_IMPACT_TIE.reported,
+    },
+    `${context}: src/U+FF21.ts's one impact edge, to specs/base.mdx#p, and ` +
+      `its one shortest propagation path — of the two equal-length paths ` +
+      `from \`p\` to an edited child, the element-wise byte-least: through ` +
+      `#p.U+FF21 (EF BC A1), never #p.U+1F600 (F0 9F 98 80), which UTF-16 ` +
+      `code-unit order would pick (SPEC 9.3, 12.0)`,
+  );
+}
+
+/**
+ * (f) Shortest-path tie-break on the built fixture (SPEC 12.0, 8.2, 11.1;
+ * T12.0-8): `coverage pair` reports `p` covered through src/U+FF21.ts →
+ * specs/base.mdx#p, of two direct candidates; and, with src/c.ts added
+ * importing ../specs/U+FF21.xspec and ../specs/U+1F600.xspec and marking
+ * each module's `x`, `query reachable --from src/c.ts --to
+ * specs/base.mdx#p` reports the witness src/c.ts → specs/U+FF21.mdx#x →
+ * specs/base.mdx#p. (f)'s impact arm runs on (e)'s path-blocks workspace
+ * ({@link expectByteOrderImpactTieBreak}).
+ */
+async function expectByteOrderTieBreaks(
+  product: ProductBinding,
+): Promise<void> {
+  await withBuiltByteOrderFixture(
+    product,
+    "T12.0-16 (f) coverage and reachable",
+    async (workspace) => {
+      const coverageContext = "T12.0-16 (f) `coverage pair --json`";
+      const coverage = decodeCoverageReport(
+        await runJson(
+          product,
+          workspace,
+          ["coverage", "pair", "--json"],
+          `${coverageContext} — informational without \`--check\`, exit 0 ` +
+            `(SPEC 8.2, 12.0)`,
+        ),
+        coverageContext,
+      );
+      const profile = coverage.profiles.find((entry) => entry.name === "pair");
+      const covered = profile?.covered.find(
+        (entry) => entry.identity === `${BO.base}#p`,
+      );
+      if (covered === undefined) {
+        fail(
+          `${coverageContext}: \`p\` is \`pair\`'s one required node — it ` +
+            `alone carries a \`targetTags\` tag — and each code source's ` +
+            `marker reaches it by one direct edge, so the profile reports it ` +
+            `covered (SPEC 8, 8.1, 8.2); got ` +
+            JSON.stringify(
+              coverage.profiles.map((entry) => ({
+                name: entry.name,
+                covered: entry.covered.map((node) => node.identity),
+              })),
+            ),
+        );
+      }
+      assertSameJson(
+        covered.path,
+        BYTE_ORDER_COVERING_TIE.reported,
+        `${coverageContext}: \`p\`'s one shortest covering path — of the two ` +
+          `direct candidates, the element-wise byte-least: from ` +
+          `src/U+FF21.ts (EF BC A1), never src/U+1F600.ts (F0 9F 98 80), ` +
+          `which UTF-16 code-unit order would pick (SPEC 8.2, 12.0)`,
+      );
+
+      await workspace.file(BYTE_ORDER_C_CODE_PATH, BYTE_ORDER_C_CODE);
+      const reachableContext =
+        "T12.0-16 (f) `query reachable --from src/c.ts --to " +
+        "specs/base.mdx#p`, src/c.ts added";
+      const reachable = decodeReachableReport(
+        await runJson(
+          product,
+          workspace,
+          [
+            "query",
+            "reachable",
+            "--from",
+            BYTE_ORDER_C_CODE_PATH,
+            "--to",
+            `${BO.base}#p`,
+          ],
+          `${reachableContext} — a valid workspace's query answering, exit 0 ` +
+            `(SPEC 11.1, 12.0)`,
+        ),
+        reachableContext,
+      );
+      if (!reachable.reachable) {
+        fail(
+          `${reachableContext}: src/c.ts marks each \`x\`, whose \`d\` ` +
+            `edge targets \`p\`, so a dependency path exists (SPEC 11.1)`,
+        );
+      }
+      assertSameJson(
+        reachable.path,
+        BYTE_ORDER_REACHABLE_TIE.reported,
+        `${reachableContext}: the one shortest witness — of the two ` +
+          `equal-length paths, the element-wise byte-least: through ` +
+          `specs/U+FF21.mdx#x (EF BC A1), never specs/U+1F600.mdx#x (F0 9F ` +
+          `98 80), which UTF-16 code-unit order would pick (SPEC 11.1, 12.0)`,
+      );
+    },
+  );
+}
+
 const T12_0_16 = defineProductTest({
   id: "T12.0-16",
   title:
-    "byte order, never UTF-16 order, on the separating pair U+FF21 (UTF-8 EF BC A1, UTF-16 FF21) and U+1F600 (UTF-8 F0 9F 98 80, UTF-16 D83D DE00) — byte order placing a string holding U+FF21 before the same string holding U+1F600, UTF-16 code-unit order the reverse — over the built fixture (spec group `specs` globbing specs/*.mdx, code group `src` globbing src/*.ts, emission enabled; profiles `pair` (`targets` all, `targetTags` configured [U+1F600, U+FF21]) and `bare`; rule `nope` forbidding `src` to `{ tags: [U+1F600, U+FF21] }`; specs/base.mdx's `p` spelled tags=\"U+1F600 U+FF21\", its children p.U+1F600 then p.U+FF21 in document order, the reverse of byte order; specs/U+FF21.mdx and specs/U+1F600.mdx each importing ./base.xspec as BASE, their `x` spelling d={BASE.p}; src/U+FF21.ts and src/U+1F600.ts each marking BASE.p at top level), every pinned list differing from its UTF-16 code-unit sort (a harness-side self-check): (a) tag sets — `view` reports `p`'s `tags` exactly [U+FF21, U+1F600], and `inventory` `pair`'s `targetTags` and `nope`'s `tags` selector list each exactly so; (b) file orders — `view`, bare and with the operands specs/U+1F600.mdx specs/base.mdx specs/U+FF21.mdx, orders its views specs/base.mdx, specs/U+FF21.mdx, specs/U+1F600.mdx (each tree's children in document order), `ids` lists the files in that order, `inventory` lists `sources` specs/base.mdx, specs/U+FF21.mdx, specs/U+1F600.mdx, src/U+FF21.ts, src/U+1F600.ts, `derived` in that order of `source`, and `recorded` with every specs/U+FF21. path before every specs/U+1F600. path, and `occurrences` orders its records by referencing file specs/U+FF21.mdx, specs/U+1F600.mdx, src/U+FF21.ts, src/U+1F600.ts; (c) findings — `check` reports exactly `nope`'s two condition-12 findings (`locations` [], `path` null), src/U+FF21.ts's edge first by identities; with specs/U+FF21.xspec.ts and specs/U+1F600.xspec.ts altered, their per-file condition-10 findings, specs/U+FF21.xspec.ts's first by concerned path, beside the two; on a twin whose `x`s spell d={BASE.missing}, `build` and `check` exactly the two condition-5 findings, specs/U+FF21.mdx's first by locations; and on a twin whose two `x`-holding sources each also import the other's module, the binding unused, `check` exactly the spec import cycle's one condition-9 finding, its locations placing specs/U+FF21.mdx's declaration before specs/U+1F600.mdx's — every order form-exact on 12.7's documents and through the H-3 decode elsewhere (SPEC 12.0, 12.7, 11.4, 11.6, 12.3, 5.7, 14.5, 14.9, 14.10, 14.12)",
+    "byte order, never UTF-16 order, on the separating pair U+FF21 (UTF-8 EF BC A1, UTF-16 FF21) and U+1F600 (UTF-8 F0 9F 98 80, UTF-16 D83D DE00) — byte order placing a string holding U+FF21 before the same string holding U+1F600, UTF-16 code-unit order the reverse — over the built fixture (spec group `specs` globbing specs/*.mdx, code group `src` globbing src/*.ts, emission enabled; profiles `pair` (`targets` all, `targetTags` configured [U+1F600, U+FF21]) and `bare`; rule `nope` forbidding `src` to `{ tags: [U+1F600, U+FF21] }`; specs/base.mdx's `p` spelled tags=\"U+1F600 U+FF21\", its children p.U+1F600 then p.U+FF21 in document order, the reverse of byte order; specs/U+FF21.mdx and specs/U+1F600.mdx each importing ./base.xspec as BASE, their `x` spelling d={BASE.p}; src/U+FF21.ts and src/U+1F600.ts each marking BASE.p at top level), every pinned list differing from its UTF-16 code-unit sort (a harness-side self-check): (a) tag sets — `view` reports `p`'s `tags` exactly [U+FF21, U+1F600], and `inventory` `pair`'s `targetTags` and `nope`'s `tags` selector list each exactly so; (b) file orders — `view`, bare and with the operands specs/U+1F600.mdx specs/base.mdx specs/U+FF21.mdx, orders its views specs/base.mdx, specs/U+FF21.mdx, specs/U+1F600.mdx (each tree's children in document order), `ids` lists the files in that order, `inventory` lists `sources` specs/base.mdx, specs/U+FF21.mdx, specs/U+1F600.mdx, src/U+FF21.ts, src/U+1F600.ts, `derived` in that order of `source`, and `recorded` with every specs/U+FF21. path before every specs/U+1F600. path, and `occurrences` orders its records by referencing file specs/U+FF21.mdx, specs/U+1F600.mdx, src/U+FF21.ts, src/U+1F600.ts; (c) findings — `check` reports exactly `nope`'s two condition-12 findings (`locations` [], `path` null), src/U+FF21.ts's edge first by identities; with specs/U+FF21.xspec.ts and specs/U+1F600.xspec.ts altered, their per-file condition-10 findings, specs/U+FF21.xspec.ts's first by concerned path, beside the two; on a twin whose `x`s spell d={BASE.missing}, `build` and `check` exactly the two condition-5 findings, specs/U+FF21.mdx's first by locations; and on a twin whose two `x`-holding sources each also import the other's module, the binding unused, `check` exactly the spec import cycle's one condition-9 finding, its locations placing specs/U+FF21.mdx's declaration before specs/U+1F600.mdx's; (d) previews — `rename specs/base.mdx p q --preview` reports `mapping` ordered by `from` (specs/base.mdx#p, #p.U+FF21, #p.U+1F600) and `files` ordered specs/base.mdx, specs/U+FF21.mdx, specs/U+1F600.mdx, src/U+FF21.ts, src/U+1F600.ts, the performed rename the same `mapping`; with graph data deleted, the same preview's `delta` `generated` holds every derived path, every specs/U+FF21. path before every specs/U+1F600. path, and on the built fixture with `specs`' glob narrowed to specs/base.mdx and no rebuild its `removed` likewise; (e) review items, each order as `status` and `export` present it — with the built fixture committed as the baseline and p.U+1F600's and p.U+FF21's own text edited, a `path-blocks` session's depth-1 `dependency-consistency` items specs/U+FF21.mdx#x's before specs/U+1F600.mdx#x's and its `code-impact` items src/U+FF21.ts's before src/U+1F600.ts's; an `audit` session on the built fixture specs/base.mdx's items, then specs/U+FF21.mdx's, then specs/U+1F600.mdx's, and, p.U+1F600 and p.U+FF21 then deleted, their absent-scope items after specs/base.mdx's present-scope ones, specs/base.mdx#p.U+FF21's first; and a `coverage` session over `bare` its `uncovered-requirement` items specs/U+FF21.mdx#x's before specs/U+1F600.mdx#x's; (f) shortest-path tie-break — `coverage pair` reports `p` covered through src/U+FF21.ts → specs/base.mdx#p, of two direct candidates; `impact` against (e)'s baseline, after its edit, src/U+FF21.ts directly impacted through its edge to specs/base.mdx#p along specs/base.mdx#p → specs/base.mdx#p.U+FF21, of the two equal-length paths to an edited child; and, with src/c.ts added importing ../specs/U+FF21.xspec and ../specs/U+1F600.xspec and marking each module's `x`, `query reachable --from src/c.ts --to specs/base.mdx#p` the witness src/c.ts → specs/U+FF21.mdx#x → specs/base.mdx#p — every order form-exact on 12.7's documents and through the H-3 decode elsewhere (SPEC 12.0, 12.7, 11.4, 11.6, 12.3, 5.7, 6.4, 6.6, 8.2, 9.3, 10.5, 10.6, 10.7, 11.1, 14.5, 14.9, 14.10, 14.12)",
   run: async (product) => {
     checkByteOrderFixtureStaging();
     const workspace = await stageByteOrderFixture(product, "T12.0-16");
@@ -2082,6 +3081,10 @@ const T12_0_16 = defineProductTest({
     }
     await expectByteOrderUnresolvedTwin(product);
     await expectByteOrderImportCycleTwin(product);
+    await expectByteOrderPreviews(product);
+    await expectByteOrderPathBlocks(product);
+    await expectByteOrderAuditAndCoverage(product);
+    await expectByteOrderTieBreaks(product);
   },
 });
 
