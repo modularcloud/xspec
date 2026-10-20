@@ -1,5 +1,5 @@
 // TEST-SPEC §10.4 (relevant hashes and invalidation) — SUITE-35:
-// T10.4-1…T10.4-7.
+// T10.4-1…T10.4-8.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -31,7 +31,10 @@
 //   its `reason` as last assigned; T10.4-7 also reads `show` and
 //   `export`, whose payloads present its current context set as `context`
 //   and its `origin` as last assigned, by a re-derivation, each origin
-//   entry's after side under the node's current presence.
+//   entry's after side under the node's current presence; and T10.4-8
+//   reads every status it asserts through `status`, `show`, and `export`
+//   alike — its premises through `status` alone — and (a)'s stored status
+//   through `list` (SPEC 10.7).
 // - `reason`'s composition is unpinned (SPEC 10.2): T10.4-3 and T10.4-6
 //   compare it byte for byte between captures from the same surface, its
 //   content never asserted.
@@ -40,13 +43,16 @@
 //   the hashes it must isolate must not (SPEC 5.5), and every control edit
 //   must demonstrably change the edited node — so no arm passes or fails for
 //   the wrong reason (H-8). T10.4-6 and T10.4-7 check their hash premises
-//   at every staged state against a capture at the baseline.
+//   at every staged state against a capture at the baseline; T10.4-8
+//   checks each edit's against a capture taken right after the resolves it
+//   follows.
 // - Re-resolves between arms use `--status no-change` (no re-derivation,
 //   SPEC 10.5), so each arm starts from a freshly recorded state matching the
 //   graph; T10.4-2's journal arm, T10.4-4's reintroduction and
-//   decomposition arms, T10.4-6's (b), and T10.4-7's (a) and (b) are the
-//   places `--status updated` (re-derivation) is staged, exactly as their
-//   TEST-SPEC texts prescribe.
+//   decomposition arms, T10.4-6's (b), T10.4-7's (a) and (b), and
+//   T10.4-8's (a) (p's item, inside T10.5-5's exported staging) and (c)
+//   (P.b's item) are the places `--status updated` (re-derivation) is
+//   staged, exactly as their TEST-SPEC texts prescribe.
 // - T10.4-4's decomposition arm reads the recorded decomposition from
 //   `export`'s recorded decompositions, which the review adapter decodes to
 //   each one's kind and scope node (helpers/adapters/review.ts), and its
@@ -79,6 +85,16 @@
 //   over T10.4-7(a)'s shape: its paths, identities, and initial sources,
 //   d2's source template, and the session and state stagings, which
 //   assert staging premises alone.
+// - T10.4-8 stages each arm through another test's exported staging —
+//   T10.5-5's newly visited p.q (`stageT1055NewlyVisitedQ`,
+//   section-10.5.ts), T10.7-9's audit session (`runT1079AuditSplits`) and
+//   deleted children (`runT1079DeletedChildrenArm`, section-10.7-ii.ts) —
+//   whose own assertions (T10.7-9's (a)–(e) and (f) among them) run on the
+//   way as staging; in (a) and (b) its premises then read the session it
+//   continues: each item to resolve present, `unresolved`, and unblocked,
+//   and each item resolved `no-change` reading so right after its resolve
+//   — its fresh recording matches the graph (10.4) — so a later
+//   `invalidated` is the edit's.
 //
 // Sources staged after a body's first product invocation — T10.4-1's
 // sensitivity edits (each scenario's former `write()` closure over mutable
@@ -86,19 +102,23 @@
 // every state carrying the earlier edits forward), T10.4-2's presence flips,
 // T10.4-3's context-set edit, T10.4-4's post-rename deletion, T10.4-5's
 // staleness edit, T10.4-6's upstream edits and reverts, T10.4-7's upstream
-// edits and removal edit — are staged-source records (helpers/staged-mdx.ts,
-// S-9: judged before any product exists), the same template calls moved to
-// module level. A staging that precedes a body's first invocation stays
-// plain (S-7's sweep reaches it against the stub): T10.4-1's
-// subtree-coherence pre-`create` edit and T10.4-3's a.k1 edit, each between
-// `gitCommitAll` and the first `build`, and each body's first workspace's
-// initial files but T10.4-7's, whose initial sources are exported records
-// its twin shares. The initial `.mdx` files of every later workspace —
-// T10.4-1's five later scenarios, T10.4-2's context, origin, and journal
-// arms, T10.4-4's move, reintroduction, and decomposition arms, T10.4-6's
-// and T10.4-7's twins — are records too, passed as the `files` entries
-// (S-9's before-any-product clause covers a workspace created after the
-// body's first invocation).
+// edits and removal edit, T10.4-8's p.q and N.c.y edits — are staged-source
+// records (helpers/staged-mdx.ts, S-9: judged before any product exists),
+// the same template calls moved to module level (T10.4-8's spelled by the
+// exported source templates of the stagings it continues). A staging that
+// precedes a body's first invocation stays plain (S-7's sweep reaches it
+// against the stub): T10.4-1's subtree-coherence pre-`create` edit and
+// T10.4-3's a.k1 edit, each between `gitCommitAll` and the first `build`,
+// and each body's first workspace's initial files but T10.4-7's, whose
+// initial sources are exported records its twin shares, and T10.4-8's, the
+// exported records of the staging its (a) continues. The initial `.mdx`
+// files of every later workspace — T10.4-1's five later scenarios,
+// T10.4-2's context, origin, and journal arms, T10.4-4's move,
+// reintroduction, and decomposition arms, T10.4-6's and T10.4-7's twins,
+// and T10.4-8's (b) and (c), the exported records of the stagings they
+// continue — are records too, passed as the `files` entries (S-9's
+// before-any-product clause covers a workspace created after the body's
+// first invocation).
 // T10.4-4's reintroduction and decomposition arms append a new section a to
 // bytes the rename wrote — no harness constant equals them — so each append
 // is an anchored `workspace.edit()` (the tail's uniqueness and end position
@@ -108,7 +128,8 @@
 // TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
 // and timing clauses), every one well-formed and staged wherever it is
 // used: `SPECS_ONLY_CONFIG` (T10.4-1's, T10.4-2's, T10.4-4's, T10.4-6's,
-// and T10.4-7's later workspaces), `SPECS_CODE_CONFIG` and `CI_CODE_SOURCE`
+// and T10.4-7's later workspaces, and each of T10.4-8's three, beside the
+// stagings' sources), `SPECS_CODE_CONFIG` and `CI_CODE_SOURCE`
 // (T10.4-1's code-impact scenario), and `COVERAGE_CONFIG` (T10.4-1's
 // uncovered-requirement scenario).
 
@@ -145,11 +166,27 @@ import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
+import {
+  T10_5_5_PQ_FILE,
+  T10_5_5_PQ_INITIAL_FILES,
+  T10_5_5_PQ_NODES,
+  stageT1055NewlyVisitedQ,
+  t1055PqSource,
+} from "./section-10.5.js";
+import {
+  T10_7_9_AUDIT_FILE,
+  T10_7_9_AUDIT_INITIAL_FILES,
+  T10_7_9_AUDIT_NODES,
+  T10_7_9_P_INITIAL_FILES,
+  runT1079AuditSplits,
+  runT1079DeletedChildrenArm,
+  t1079AuditSource,
+} from "./section-10.7-ii.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T10.4-1/T10.4-2/T10.4-4/T10.4-6/T10.4-7 xspec.config.ts — one spec group",
+  "T10.4-1/T10.4-2/T10.4-4/T10.4-6/T10.4-7/T10.4-8 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -5834,6 +5871,453 @@ const T10_4_7 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T10.4-8 — items added during a session
+// ---------------------------------------------------------------------------
+
+// Items added during a session follow 10.4's rule (TEST-SPEC T10.4-8): an
+// item that entered at a re-derivation (10.5) or through a `split` (10.7),
+// once resolved, becomes `invalidated` when its recorded state diverges from
+// the current graph, and a node already absent at its resolve does not
+// invalidate it by remaining absent. Each arm runs on a workspace of its
+// own, over another test's exported staging, whose own assertions run on
+// the way:
+// (a) re-derivation — T10.5-5's newly visited p.q (`stageT1055NewlyVisitedQ`,
+//     section-10.5.ts): p.q's item, entered at p's `updated` resolve, is
+//     resolved `no-change`; p.q's text is then edited, changing p.q's
+//     subtreeHash, which the item records (10.4), so the item reads
+//     `invalidated`, while `list`, counting stored statuses (10.7), counts
+//     it `no-change`;
+// (b) a split and the re-derivation ending it — T10.7-9's audit session
+//     (`runT1079AuditSplits`, section-10.7-ii.ts), its (a)–(e) asserted:
+//     N.c.y's item, added at the re-derivation ending N's split, is resolved
+//     `no-change`, then N.c's, created by that split's decomposition and
+//     unblocked by that resolve (T10.7-9(a): blocked by exactly N.c.y's
+//     item; 10.3); N.c.y's text is then edited, changing N.c.y's subtreeHash
+//     and with it N.c's, so both read `invalidated`;
+// (c) absent at resolve — T10.7-9(f)'s deleted children
+//     (`runT1079DeletedChildrenArm`, section-10.7-ii.ts), (f) asserted: the
+//     per-child item scoped at the absent P.a, resolved `no-change`, records
+//     P.a absent (10.4) and reads `no-change`; P.b's item resolved `updated`
+//     re-derives the session (10.5), and P.a's item, P.a still absent, still
+//     reads `no-change`, never `invalidated`.
+const T8_P = T10_5_5_PQ_NODES.p;
+const T8_Q = T10_5_5_PQ_NODES.q;
+const T8_NC = T10_7_9_AUDIT_NODES.nc;
+const T8_NCY = T10_7_9_AUDIT_NODES.ncy;
+
+// T10.4-8's two edits follow product invocations, so each is a staged-source
+// record (helpers/staged-mdx.ts, S-9: judged before any product exists),
+// spelled by the exported source template of the staging it continues.
+const T10_4_8_Q_EDITED = stagedMdx(
+  "T10.4-8 specs/P.mdx with p.q's text at v3 once its item, entered at p's `updated` resolve, is resolved `no-change` (p's own text still reverted)",
+  t1055PqSource("Pee own v0.", "Cue text v3."),
+);
+const T10_4_8_NCY_EDITED = stagedMdx(
+  "T10.4-8 specs/N.mdx with N.c.y's text edited once N.c.y's and N.c's items are resolved `no-change` (T10.7-9's audit fixture after N's split)",
+  t1079AuditSource("En cee why text, edited."),
+);
+
+/** An item T10.4-8 reads back, as its diagnostics name it. */
+interface T8Item {
+  readonly id: string;
+  readonly what: string;
+}
+
+/**
+ * A staging premise read from `status` (SPEC 10.3, 10.7): the item's row
+ * reads `expected.status` and, where given, its blocked state — before
+ * T10.4-8 acts on the item or reads it back.
+ */
+function assertT8RowPremise(
+  report: SessionStatusReport,
+  item: T8Item,
+  expected: { readonly status: ItemStatus; readonly blocked?: boolean },
+  why: string,
+  context: string,
+): void {
+  const row = requireRowById(report, item.id, context);
+  if (
+    row.status === expected.status &&
+    (expected.blocked === undefined || row.blocked === expected.blocked)
+  ) {
+    return;
+  }
+  const blockedState = (blocked: boolean): string =>
+    blocked ? "blocked" : "unblocked";
+  fail(
+    `${context}: staging premise — ${item.what} reads ${expected.status}` +
+      (expected.blocked === undefined
+        ? ""
+        : `, ${blockedState(expected.blocked)}`) +
+      ` — ${why}; got ${row.status}, ${blockedState(row.blocked)}`,
+  );
+}
+
+/**
+ * Read items back through `status`, `show`, and `export` (SPEC 10.4, 10.7):
+ * each surface must report every one of them `status` — every read computes
+ * invalidation against the current graph (10.4).
+ */
+async function t8ExpectReported(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  items: readonly T8Item[],
+  status: ItemStatus,
+  why: string,
+  label: string,
+): Promise<void> {
+  const statusLabel = `${label} \`review status s --json\``;
+  const report = await sessionStatus(product, workspace, "s", label);
+  for (const { id, what } of items) {
+    const row = requireRowById(report, id, statusLabel);
+    if (row.status !== status) {
+      fail(
+        `${statusLabel}: ${what} must be reported ${status} — ${why}; got ` +
+          row.status,
+      );
+    }
+  }
+  for (const { id, what } of items) {
+    const shown = await showItem(product, workspace, "s", id, label);
+    if (shown.status !== status) {
+      fail(
+        `${label} \`review show s ${id} --json\`: ${what} must be reported ` +
+          `${status} — ${why}; got ${shown.status}`,
+      );
+    }
+  }
+  const exportLabel = `${label} \`review export s --json\``;
+  const exported = await exportSession(product, workspace, "s", label);
+  for (const { id, what } of items) {
+    const item = requireItem(exported.items, id, exportLabel);
+    if (item.status !== status) {
+      fail(
+        `${exportLabel}: ${what} must be reported ${status} — ${why}; got ` +
+          item.status,
+      );
+    }
+  }
+}
+
+/**
+ * T10.4-8(a), re-derivation: T10.5-5's newly visited p.q
+ * (`stageT1055NewlyVisitedQ`, in a fresh workspace holding
+ * `T10_5_5_PQ_INITIAL_FILES`). Once p's `updated` resolve has added p.q's
+ * item (premise: T10.5-5's three items), p.q's item — `unresolved` and
+ * unblocked — is resolved `no-change` and reads so; p.q's text is then
+ * edited, its subtreeHash changing (premise via `query node`): `status`,
+ * `show`, and `export` read the item `invalidated`, and `list` counts it
+ * `no-change`, its stored status kept (SPEC 10.4, 10.7).
+ */
+async function runT8ReDerivationArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  const label = "T10.4-8 (a)";
+  await stageT1055NewlyVisitedQ(
+    product,
+    workspace,
+    `${label}, T10.5-5's newly-visited staging`,
+  );
+  const derivedLabel = `${label} after p's \`updated\` resolve`;
+  const derived = await sessionStatus(product, workspace, "s", derivedLabel);
+  assertSameJson(
+    kindScopeSet(derived),
+    [
+      `parent-consistency ${T8_P}`,
+      `subtree-coherence ${T8_P}`,
+      `subtree-coherence ${T8_Q}`,
+    ].sort(),
+    `${derivedLabel} staging premise: the re-derivation p's \`updated\` ` +
+      `resolve triggers adds p.q's subtree-coherence item and p's ` +
+      `parent-consistency item beside p's item — p.q newly visited, its ` +
+      `\`changed\` ancestor reverted (SPEC 10.5; T10.5-5 asserts it)`,
+  );
+  const q: T8Item = {
+    id: requireRow(derived, "subtree-coherence", T8_Q, derivedLabel).id,
+    what: "p.q's item",
+  };
+  assertT8RowPremise(
+    derived,
+    q,
+    { status: "unresolved", blocked: false },
+    "it enters at the re-derivation `unresolved` (SPEC 10.2), and " +
+      "path-blocks gives a subtree-coherence item no blockers (10.5)",
+    derivedLabel,
+  );
+  await resolveOk(
+    product,
+    workspace,
+    "s",
+    q.id,
+    "no-change",
+    `${label} \`review resolve s <p.q's item> --status no-change\` (no ` +
+      `re-derivation, SPEC 10.5)`,
+  );
+  const atResolve = await captureHashes(
+    product,
+    workspace,
+    [T8_Q],
+    `${label} capture at p.q's resolve`,
+  );
+  const resolvedLabel = `${label} after p.q's resolve`;
+  assertT8RowPremise(
+    await sessionStatus(product, workspace, "s", resolvedLabel),
+    q,
+    { status: "no-change" },
+    "the resolve recorded p.q's subtreeHash, metadataHash, and presence, " +
+      "which the graph still matches (SPEC 10.4)",
+    resolvedLabel,
+  );
+  await workspace.file(T10_5_5_PQ_FILE, T10_4_8_Q_EDITED);
+  await buildOk(product, workspace, `${label} \`build\` after p.q's edit`);
+  const editedLabel = `${label} after p.q's edit`;
+  assertHashPremises(
+    atResolve,
+    await captureHashes(product, workspace, [T8_Q], `${editedLabel} capture`),
+    [{ node: T8_Q, hash: "subtreeHash" }],
+    [],
+    editedLabel,
+  );
+  await t8ExpectReported(
+    product,
+    workspace,
+    [q],
+    "invalidated",
+    "it entered at p's `updated` resolve and, resolved `no-change`, " +
+      "recorded p.q's subtreeHash, which p.q's edit changed: items added " +
+      "during a session follow 10.4's rule (SPEC 10.4); a product " +
+      "recording state, or computing read-time invalidation, for " +
+      "`create`'s items alone reads it no-change",
+    editedLabel,
+  );
+  assertStoredCounts(
+    await listedSession(product, workspace, "s", editedLabel),
+    { unresolved: 1, updated: 1, "no-change": 1, skipped: 0, invalidated: 0 },
+    `${editedLabel}: p.q's item's stored status is kept — read-time ` +
+      `invalidation is computed and reported, never persisted (SPEC 10.4) ` +
+      `— so \`list\` counts it no-change, beside p's item stored updated and ` +
+      `p's parent-consistency item stored unresolved`,
+  );
+}
+
+/**
+ * T10.4-8(b), a split and the re-derivation ending it: T10.7-9's audit
+ * session (`runT1079AuditSplits`, in a fresh workspace holding
+ * `T10_7_9_AUDIT_INITIAL_FILES`), its (a)–(e) asserted. N.c.y's item, added
+ * at the re-derivation ending N's split — `unresolved` and, a leaf's,
+ * unblocked — is resolved `no-change` and reads so; N.c's item, created by
+ * that split's decomposition and unblocked by that resolve (T10.7-9(a):
+ * blocked by exactly N.c.y's item; SPEC 10.3), is resolved `no-change`
+ * likewise; N.c.y's text is then edited, N.c.y's subtreeHash and with it
+ * N.c's changing (premises via `query node`): `status`, `show`, and
+ * `export` read both items `invalidated` (SPEC 10.4).
+ */
+async function runT8SplitArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  const label = "T10.4-8 (b)";
+  const session = await runT1079AuditSplits(
+    product,
+    workspace,
+    `${label}, T10.7-9's audit fixture`,
+  );
+  const ncy: T8Item = { id: session.ncyId, what: "N.c.y's item" };
+  const nc: T8Item = { id: session.ncId, what: "N.c's item" };
+  const splitLabel = `${label} after N's split`;
+  assertT8RowPremise(
+    await sessionStatus(product, workspace, "s", splitLabel),
+    ncy,
+    { status: "unresolved", blocked: false },
+    "it enters at the re-derivation ending N's split `unresolved` (SPEC " +
+      "10.2; T10.7-9(c)), and the audit strategy blocks an item by its " +
+      "child sections' items alone, a leaf's by none (10.6)",
+    splitLabel,
+  );
+  await resolveOk(
+    product,
+    workspace,
+    "s",
+    ncy.id,
+    "no-change",
+    `${label} \`review resolve s <N.c.y's item> --status no-change\` (no ` +
+      `re-derivation, SPEC 10.5)`,
+  );
+  const ncyLabel = `${label} after N.c.y's resolve`;
+  const afterNcy = await sessionStatus(product, workspace, "s", ncyLabel);
+  assertT8RowPremise(
+    afterNcy,
+    ncy,
+    { status: "no-change" },
+    "the resolve recorded N.c.y's subtreeHash, metadataHash, and " +
+      "presence, which the graph still matches (SPEC 10.4)",
+    ncyLabel,
+  );
+  assertT8RowPremise(
+    afterNcy,
+    nc,
+    { status: "unresolved", blocked: false },
+    "created `unresolved` by N's split (SPEC 10.2, 10.7), it is blocked by " +
+      "exactly N.c.y's item (T10.7-9(a)), now resolved, so unblocked (10.3)",
+    ncyLabel,
+  );
+  await resolveOk(
+    product,
+    workspace,
+    "s",
+    nc.id,
+    "no-change",
+    `${label} \`review resolve s <N.c's item> --status no-change\` (no ` +
+      `re-derivation, SPEC 10.5)`,
+  );
+  const atResolve = await captureHashes(
+    product,
+    workspace,
+    [T8_NCY, T8_NC],
+    `${label} capture at N.c's resolve`,
+  );
+  const ncLabel = `${label} after N.c's resolve`;
+  const afterNc = await sessionStatus(product, workspace, "s", ncLabel);
+  for (const item of [ncy, nc]) {
+    assertT8RowPremise(
+      afterNc,
+      item,
+      { status: "no-change" },
+      "each resolve recorded its scope nodes' subtreeHash and " +
+        "metadataHash and every scope and context node's presence, which " +
+        "the graph still matches (SPEC 10.4)",
+      ncLabel,
+    );
+  }
+  await workspace.file(T10_7_9_AUDIT_FILE, T10_4_8_NCY_EDITED);
+  await buildOk(product, workspace, `${label} \`build\` after N.c.y's edit`);
+  const editedLabel = `${label} after N.c.y's edit`;
+  assertHashPremises(
+    atResolve,
+    await captureHashes(
+      product,
+      workspace,
+      [T8_NCY, T8_NC],
+      `${editedLabel} capture`,
+    ),
+    [
+      { node: T8_NCY, hash: "subtreeHash" },
+      { node: T8_NC, hash: "subtreeHash" },
+    ],
+    [],
+    editedLabel,
+  );
+  await t8ExpectReported(
+    product,
+    workspace,
+    [ncy, nc],
+    "invalidated",
+    "it entered during the session — N.c.y's at the re-derivation ending " +
+      "N's split, N.c's through that split's decomposition — and, resolved " +
+      "`no-change`, recorded its scope nodes' subtreeHash, N.c.y's edit " +
+      "changing N.c.y's and with it N.c's: items added during a session " +
+      "follow 10.4's rule (SPEC 10.4); a product recording state, or " +
+      "computing read-time invalidation, for `create`'s items alone reads " +
+      "it no-change",
+    editedLabel,
+  );
+}
+
+/**
+ * T10.4-8(c), absent at resolve: T10.7-9(f)'s deleted children
+ * (`runT1079DeletedChildrenArm`, in a fresh workspace holding
+ * `T10_7_9_P_INITIAL_FILES`), (f) asserted. The per-child item scoped at the
+ * absent P.a (its blockedBy empty, T10.7-9(f)) is resolved `no-change`:
+ * `status`, `show`, and `export` read it `no-change`; P.b's item is then
+ * resolved `updated`, re-deriving the session (SPEC 10.5), and the three
+ * reads still report P.a's item `no-change`, never `invalidated` — P.a,
+ * already absent at the resolve, does not invalidate it by remaining absent
+ * (10.4).
+ */
+async function runT8AbsentArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  const label = "T10.4-8 (c)";
+  const { paId, pbId } = await runT1079DeletedChildrenArm(
+    product,
+    workspace,
+    `${label}, T10.7-9's deleted-children arm (f)`,
+  );
+  const pa: T8Item = { id: paId, what: "P.a's per-child item" };
+  await resolveOk(
+    product,
+    workspace,
+    "s",
+    pa.id,
+    "no-change",
+    `${label} \`review resolve s <P.a's item> --status no-change\` — its ` +
+      `blockedBy empty (T10.7-9(f)); no re-derivation (SPEC 10.5)`,
+  );
+  await t8ExpectReported(
+    product,
+    workspace,
+    [pa],
+    "no-change",
+    "its resolve recorded P.a absent — an absent node's hashes recorded as " +
+      "the explicit absent marker — and the graph still presents P.a " +
+      "absent, so the fresh recording matches it (SPEC 10.4)",
+    `${label} after P.a's item's resolve`,
+  );
+  await resolveOk(
+    product,
+    workspace,
+    "s",
+    pbId,
+    "updated",
+    `${label} \`review resolve s <P.b's item> --status updated\` — ` +
+      `re-derives the session (SPEC 10.5)`,
+  );
+  await t8ExpectReported(
+    product,
+    workspace,
+    [pa],
+    "no-change",
+    "P.a, already absent when the item was resolved, does not invalidate " +
+      "it by remaining absent, and the re-derivation P.b's resolve " +
+      "triggers changes no hash, presence, or context set the item " +
+      "recorded — items added during a session follow 10.4's rule (SPEC " +
+      "10.4, 10.5); a product taking a recorded absence for a divergence " +
+      "on an item added later reads it invalidated",
+    `${label} after P.b's \`updated\` resolve`,
+  );
+}
+
+const T10_4_8 = defineProductTest({
+  id: "T10.4-8",
+  title:
+    "items added during a session: an item that entered at a re-derivation or through a `split`, once resolved, becomes `invalidated` when its recorded state diverges from the current graph, and a node already absent at its resolve does not invalidate it by remaining absent — every item resolved `no-change` reading so right after its resolve; (a) re-derivation: T10.5-5's newly visited Q — its item, entered at P's `updated` resolve, resolved `no-change`, then Q's text edited (Q's subtreeHash changed, premise via `query node`): `status`, `show`, and `export` read it `invalidated`, its stored status kept (`list` counts it `no-change`); (b) a split and the re-derivation ending it: in T10.7-9's audit session, once T10.7-9(a)–(e) are asserted, N.c.y's item — added at the re-derivation ending N's split — resolved `no-change`, then N.c's — created by that split's decomposition and unblocked by that resolve — likewise; N.c.y's text then edited (N.c.y's and N.c's subtreeHash changed): both read `invalidated`; (c) absent at resolve: T10.7-9(f)'s per-child item scoped at the absent P.a, resolved `no-change` once T10.7-9(f) is asserted, reads `no-change` then, and still does after P.b's item is resolved `updated` and the session re-derived — never `invalidated` (SPEC 10.2, 10.3, 10.4, 10.5, 10.6, 10.7)",
+  run: async (product) => {
+    // (a) Re-derivation: T10.5-5's newly visited p.q.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      T10_5_5_PQ_INITIAL_FILES,
+      (workspace) => runT8ReDerivationArm(product, workspace),
+    );
+
+    // (b) A split and the re-derivation ending it: T10.7-9's audit session.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      T10_7_9_AUDIT_INITIAL_FILES,
+      (workspace) => runT8SplitArm(product, workspace),
+    );
+
+    // (c) Absent at resolve: T10.7-9(f)'s deleted children.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      T10_7_9_P_INITIAL_FILES,
+      (workspace) => runT8AbsentArm(product, workspace),
+    );
+  },
+});
+
 /** TEST-SPEC §10.4, in canonical ID order (SUITE-35). */
 export const section104Tests: readonly ProductTestEntry[] = [
   T10_4_1,
@@ -5843,4 +6327,5 @@ export const section104Tests: readonly ProductTestEntry[] = [
   T10_4_5,
   T10_4_6,
   T10_4_7,
+  T10_4_8,
 ];
