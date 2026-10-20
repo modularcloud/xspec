@@ -583,7 +583,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T11.2-3": ["11.2", "14"],
   "T11.2-4": ["11.2", "14"],
   "T11.2-5": ["11.2", "14"],
-  "T11.2-6": ["11.2", "13.3", "13.4", "14"],
+  // T11.2-6: its unreadable-emit-directory arms assert 12.0's order — the
+  // judgement's read failure met at the read it refuses, past every
+  // argument check of the surfaces of 11.2 and of the gated reads — and
+  // pin the error documents' `code` and `path` (12.7), `read-failure` at
+  // `out` or below it and the plain usage error's `null`s; its passing-side
+  // arms' 14.12 and 14.21 ride "14".
+  "T11.2-6": ["11.2", "13.3", "13.4", "12.0", "12.7", "14"],
   "T11.3-1": ["11.3", "14"],
   "T11.3-2": ["11.3", "14"],
   "T11.3-3": ["11.3", "1.4", "12.0", "12.7", "14"],

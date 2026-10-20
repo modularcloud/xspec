@@ -93,6 +93,7 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { stageDirectoryMode } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
@@ -100,16 +101,23 @@ import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import { runProduct } from "../../helpers/subprocess.js";
-import type { ArgvValue, ProductBinding } from "../../helpers/subprocess.js";
+import type {
+  ArgvValue,
+  ProductBinding,
+  RunResult,
+} from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
   assertFindingLocated,
+  assertPlainUsageError,
   assertSameJson,
   buildOk,
   expectErrorDocument,
   expectExit,
+  expectFindingFreeReport,
   runCli,
   runFindingsReport,
   runJson,
@@ -121,12 +129,13 @@ import {
 // through `occurrences` (registry/section-11.3.ts imports, never copies).
 // A TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
 // and timing clauses), staged wherever it is used and named for every body
-// staging it after a product invocation: T11.2-4's later stagings and
-// T11.2-5's second workspace here, T11.3-1's, T11.3-2's, and T11.3-3's later
-// workspaces, T11.4-3's shared workspace and T11.4-5's and T11.4-6's later
-// ones, and P-12's later trials (registry/section-16-p12.ts).
+// staging it after a product invocation: T11.2-4's later stagings,
+// T11.2-5's second workspace, and T11.2-6's corrupt-session workspace here,
+// T11.3-1's, T11.3-2's, and T11.3-3's later workspaces, T11.4-3's shared
+// workspace and T11.4-5's and T11.4-6's later ones, and P-12's later trials
+// (registry/section-16-p12.ts).
 export const SPECS_ONLY_CONFIG = stagedTs(
-  "T11.2-4/T11.2-5/T11.3-1/T11.3-2/T11.3-3/T11.4-3/T11.4-5/T11.4-6/P-12 xspec.config.ts — one spec group",
+  "T11.2-4/T11.2-5/T11.2-6/T11.3-1/T11.3-2/T11.3-3/T11.4-3/T11.4-5/T11.4-6/P-12 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -286,7 +295,7 @@ const C_SOURCE = C.source;
 // S-9's before-any-product clause) made from the string the pins use, and
 // staged at every site the bytes appear (T11.2-1's too).
 const C_STAGED = stagedMdx(
-  "T11.2-1/T11.2-5/T11.2-6 specs/C.mdx (the finding-free file; T11.2-6's outDir fixture stages it at specs/A.mdx too)",
+  "T11.2-1/T11.2-5/T11.2-6 specs/C.mdx (the finding-free file; T11.2-6's discovered-component, corrupt-session, and unreadable-emit-directory fixtures stage it at specs/A.mdx too)",
   C_SOURCE,
 );
 const C_ROOT_RANGE: SourceRange = { start: 0, end: C.pos };
@@ -5004,19 +5013,24 @@ const T11_2_5 = defineProductTest({
 // SPEC 11.2's closing paragraph, with TEST-SPEC's stated delegations: the
 // passing-workspace half — these surfaces participate in read-time refresh
 // exactly as 13.3's reads — rides T13.3-2's sweep; the failing-side
-// answer-from-current-sources-and-write-nothing discipline is T11.2-1's;
+// answer-from-current-sources-and-write-nothing discipline is T11.2-1's
+// (T13.3-3 stages the journal-error and refused-write failures stale);
 // the gated-read breadth over these two fixtures (each of `ids`, `show`,
 // `coverage`, `impact`, `review status`, `query` reporting the gate finding
 // without answering) is T13.3-3's whole-gate arms; and the
 // `occurrences`/`at` finding-free contrast on the same states rides
 // T13.3-3's never-gated sweep and T14-4's availability rows. This test owns
-// the three fixtures and the entry's own arms: a gate condition that is NO
+// the six fixtures and the entry's own arms: a gate condition that is NO
 // domain file's finding — the journal's 14.13, a write-path component's
 // 14.22, each carrying no in-source location and a concerned path that
 // names a domain file's own finding for condition 19 alone (SPEC 11.2: an
 // obstructing component that is itself a discovered file attaches
 // nothing) — accompanies no answer of these surfaces, while the state
-// surfaces through `build` and `check`.
+// surfaces through `build` and `check` (fixtures 1 to 3); findings of no
+// domain file attach nothing on the passing side either (fixtures 4 and
+// 5); and the judgement these surfaces make past their argument checks
+// makes every read the gate makes, a read failure there stopping them
+// before any answer (fixture 6).
 //
 // Fixture 1 (garbage journal, 14.13): a passing `build` first — derived
 // files and graph data then exist and match, so the later `check` stands on
@@ -5100,16 +5114,87 @@ const T11_2_5 = defineProductTest({
 // for condition 19 alone (SPEC 11.2): the discriminating arm against a
 // product attaching findings by concerned path.
 //
+// Fixtures 4 and 5 (the passing side: findings of no domain file attach
+// nothing there either — SPEC 11.2: a finding is a domain file's exactly
+// through a location in that file or a condition-19 concerned path), the
+// exported `T11_2_6_PASSING_SIDE_STAGINGS` (T11.6-4, the inventory's
+// counterpart, stages the same two workspaces): each a workspace passing
+// `build`'s validations, built (exit 0), so its graph data is fresh — 4
+// violating a `forbidden` rule (T7.5-2's staging: the spec group `hi`'s
+// `specs/A.mdx#a` depending on the spec group `lo`'s `lo/L.mdx#l`, the
+// offending edge's `d` spelled in the spec source `specs/A.mdx`, the rule
+// `no-hi-to-lo` forbidding `hi` to `lo`), 5 holding a corrupt session
+// (T10.1-4's garbage-bytes staging, `.xspec/reviews/cor.json`, written after
+// the build; `specs/A.mdx` the finding-free C-shaped bytes). `check --json`
+// reports exactly the one finding, exit 1, writing nothing — 4's 14.12 with
+// no location and no concerned path (a policy finding is no file's finding,
+// SPEC 14.12), 5's 14.21 with no location, concerning the session file, no
+// domain file (14.21) — while `occurrences` (bare: the whole discovered
+// set), `view specs/A.mdx`, and `at specs/A.mdx 0` each answer finding-free
+// at exit 0, writing nothing (the fresh graph data needs no refresh, SPEC
+// 13.3): the arm against a product attaching every finding lacking an
+// in-source location to these answers (the offending edge's spelling lies in
+// the very file viewed).
+//
+// Fixture 6 (the judgement's reads; the Linux leg, E-1): past their argument
+// checks these surfaces judge `build`'s validations exactly as the gate of
+// 13.3 does, making every read it makes whatever findings the sources carry
+// — the kinds of `build`'s write-path directory components (14.22) included
+// — and a read failure of that judgement stops them, a usage error before
+// any answer (SPEC 11.2, 14.25, 12.0). The workspace emits Markdown under
+// `out` (`markdown: { emit: true, outDir: "out" }`) beside the spec group
+// `specs/**/*.mdx` and a code group `app` (`src/**/*.ts`) over `src/x.ts`,
+// no glob reaching below `out`, so discovery never lists it (SPEC 7);
+// `specs/A.mdx` holds the finding-free C-shaped bytes. It is built (exit 0;
+// premise-checked: `out` and `out/specs` directories, the emitted
+// `out/specs/A.md` a file, SPEC 7.3, 13.2), and around each run below — made
+// just before it and restored in a `finally` once it ends, inside the run's
+// whole-root compare (T6.3-6's discipline: the harness's own walk never
+// meets the staging) — `out` is staged mode 000 (`stageDirectoryMode`,
+// helpers/permissions.ts: read, write, and search removed, the harness
+// verifying on itself that its own listing of `out` and its own examination
+// of `out/specs` are refused, E-1), so the kind of `out/specs`, a directory
+// component of every emit destination, can be read neither by examination
+// nor from a listing (TEST-SPEC T14-10's both-routes clause). On the passing
+// side, and then on the failing side — `specs/A.mdx` restaged with a
+// section spelling no `id` (14.1; premise: `build --json` reports exactly
+// {14.1: 1}, writing nothing): `view specs/A.mdx`, `occurrences`, `at
+// specs/A.mdx 0`, `build --json`, `check --json`, `ids --json`, and `query
+// nodes --json` each exit 2, standard output exactly the error document, its
+// `code` `read-failure` and its `path` `out` or a path below it (which one
+// turning on the product's read order, T14-10's last clause), the
+// diagnostic on standard error, nothing modified — a product skipping the
+// judgement answers instead, exit 0 on the passing side, exit 1 with the
+// condition-1 finding on the failing one; and the judgement comes past
+// every argument check, none of which reads below `out` (SPEC 11.2; 13.3:
+// the gate follows the argument checks; 12.0: a read failure is met at the
+// read it refuses, in the order the command makes its reads): `view
+// specs/nope.mdx` (an undiscovered file, 11.4), `view src/x.ts` (a
+// wrong-kind operand), `at specs/A.mdx <n>` with `<n>` the file's byte length
+// plus one (11.5), `show specs/A.mdx#nope` (an `id` the file spells nowhere,
+// 12.0), `query nodes --group app` (a code group's name, 11.1), `coverage
+// nope` (an unknown profile), and `review status nope` (an unknown session)
+// each exit 2 with its plain usage error, `code` and `path` `null`, never
+// `read-failure`, nothing modified, on both sides — failing a product that
+// judges the workspace, write-path kinds included, before its argument
+// checks. Between the sides, the permission restored, `build` exits 0 and
+// `check --json` is clean (SPEC 12.1, 12.2). On any other platform fixture 6
+// does not run (`T11_2_6_MODE_STAGED`, T6.3-6's `J6_ENVIRONMENT_STAGED`
+// pattern).
+//
 // Every invocation runs under a whole-root snapshot compare (the
 // CERTIFICATIONS.md Exclusions note's answer-side no-write compares): the
 // view answers write nothing — the garbage journal not repaired or
-// deleted, no graph data or derived files touched — and the failing
-// build/check modify nothing (SPEC 12.1, 12.2, 14.22).
+// deleted, no graph data or derived files touched — the failing
+// build/check modify nothing (SPEC 12.1, 12.2, 14.22), and neither do the
+// passing side's answers and `check` nor any run under fixture 6's staging.
 //
-// Fixtures 2 and 3 are created after fixture 1's invocations, so their
-// configurations are TypeScript staged-source records (helpers/staged-ts.ts;
-// S-9's TypeScript and timing clauses), both well-formed; fixture 1's is
-// SPECS_ONLY_CONFIG, a record itself.
+// Fixtures 2 to 6 are created after fixture 1's invocations, so their
+// configurations and sources are staged-source records (helpers/staged-mdx.ts,
+// helpers/staged-ts.ts; S-9's timing clause), all well-formed, as is fixture
+// 6's failing-side `specs/A.mdx`; fixture 1's configuration is
+// SPECS_ONLY_CONFIG, a record itself (fixture 5's too), and fixture 5's
+// corrupt session file is plain bytes, no source.
 
 const JOURNAL_PATH = ".xspec/journal";
 const T11_2_6_GARBAGE_LINE =
@@ -5209,10 +5294,591 @@ async function assertViewFindingFree(
   );
 }
 
+// --- Fixtures 4 and 5: the passing side (module comment) --------------------
+
+// Fixture 4: T7.5-2's forbidden-rule staging with the offending edge's `d`
+// spelled in the spec source `specs/A.mdx` — the spec group `hi`'s
+// `specs/A.mdx#a` depends on the spec group `lo`'s `lo/L.mdx#l`, and the
+// rule `no-hi-to-lo` forbids every edge from `hi` to `lo` (SPEC 7.5).
+const T11_2_6_POLICY_CONFIG = stagedTs(
+  "T11.2-6 passing-side policy fixture xspec.config.ts — a forbidden rule from the spec group hi to the spec group lo",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    hi: ["specs/**/*.mdx"],
+    lo: ["lo/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "no-hi-to-lo",
+      type: "forbidden",
+      from: { group: "hi" },
+      to: { group: "lo" }
+    }
+  ]
+})
+`,
+);
+const T11_2_6_POLICY_SOURCE = stagedMdx(
+  "T11.2-6 passing-side policy fixture specs/A.mdx — the offending edge's d spelling",
+  `import L from "../lo/L.xspec"
+
+<S id="a" d={L.l}>
+Depends on the low group.
+</S>
+`,
+);
+const T11_2_6_POLICY_TARGET_FILE = "lo/L.mdx";
+const T11_2_6_POLICY_TARGET = stagedMdx(
+  "T11.2-6 passing-side policy fixture lo/L.mdx — the forbidden edge's target",
+  `<S id="l">
+Low one.
+</S>
+`,
+);
+
+// Fixture 5: T10.1-4's shape-independent garbage bytes — no JSON document —
+// staged directly at a session file (SPEC 10.1: `.xspec/reviews/<name>.json`)
+// after the build, no assumed session layout involved.
+const T11_2_6_CORRUPT_SESSION_PATH = ".xspec/reviews/cor.json";
+const T11_2_6_CORRUPT_SESSION_BYTES =
+  "this is deliberately not a JSON document ][}{\n";
+
+/**
+ * One of T11.2-6's passing-side stagings (TEST-SPEC T11.2-6; exported for
+ * T11.6-4, the inventory's counterpart, which stages the same two
+ * workspaces): a workspace passing `build`'s validations, built, beside one
+ * finding of no domain file, which `check` reports there (exit 1) and no
+ * answer of 11.3–11.5 carries (SPEC 11.2).
+ */
+export interface T1126PassingSideStaging {
+  /** The arm, as contexts name it. */
+  readonly arm: string;
+  /** The one condition `check --json` reports on the staged workspace. */
+  readonly condition: "14.12" | "14.21";
+  /**
+   * That finding's concerned path beside its empty `locations` — `null`
+   * for the policy finding, which concerns no path (SPEC 14.12, 12.7).
+   */
+  readonly concerned: string | null;
+  /** Why the finding is no domain file's (SPEC 11.2), for diagnostics. */
+  readonly noDomainFile: string;
+  /**
+   * Create the workspace, `build` it (exit 0: policy is no validation of
+   * `build`, SPEC 7.5, 12.1, and `build` reads no session, 14.21), and stage
+   * the finding; the caller disposes the workspace.
+   */
+  readonly stage: (
+    product: ProductBinding,
+    context: string,
+  ) => Promise<TestWorkspace>;
+}
+
+/**
+ * Create a workspace from `files`, `build` it (exit 0), and apply `after`
+ * to it — the workspace disposed when any of it throws.
+ */
+async function stageBuiltWorkspace(
+  product: ProductBinding,
+  files: WorkspaceDecl["files"],
+  context: string,
+  after?: (workspace: TestWorkspace) => Promise<void>,
+): Promise<TestWorkspace> {
+  const workspace = await TestWorkspace.create({ files });
+  try {
+    await buildOk(
+      product,
+      workspace,
+      `${context} staging \`build\` — the workspace passes \`build\`'s ` +
+        `validations (SPEC 12.1)`,
+    );
+    await after?.(workspace);
+    return workspace;
+  } catch (error) {
+    await workspace.dispose();
+    throw error;
+  }
+}
+
+/** T11.2-6's two passing-side stagings, fixtures 4 and 5 (module comment). */
+export const T11_2_6_PASSING_SIDE_STAGINGS: readonly T1126PassingSideStaging[] =
+  [
+    {
+      arm: "a policy violation",
+      condition: "14.12",
+      concerned: null,
+      noDomainFile:
+        "a policy finding is no file's finding — it carries no in-source " +
+        "location and concerns no path — and accompanies no answer of " +
+        "11.3–11.5 (SPEC 14.12, 11.2), the offending edge's `d` spelling " +
+        "in the very file viewed notwithstanding",
+      stage: async (product, context) =>
+        await stageBuiltWorkspace(
+          product,
+          {
+            "xspec.config.ts": T11_2_6_POLICY_CONFIG,
+            [A_FILE]: T11_2_6_POLICY_SOURCE,
+            [T11_2_6_POLICY_TARGET_FILE]: T11_2_6_POLICY_TARGET,
+          },
+          context,
+        ),
+    },
+    {
+      arm: "a corrupt session",
+      condition: "14.21",
+      concerned: T11_2_6_CORRUPT_SESSION_PATH,
+      noDomainFile:
+        "a session file is no domain file — the corrupt-session finding " +
+        "carries no in-source location, and its concerned path names no " +
+        "domain file (SPEC 14.21, 11.2)",
+      stage: async (product, context) =>
+        await stageBuiltWorkspace(
+          product,
+          { "xspec.config.ts": SPECS_ONLY_CONFIG, [A_FILE]: C_STAGED },
+          context,
+          async (workspace) => {
+            await workspace.file(
+              T11_2_6_CORRUPT_SESSION_PATH,
+              T11_2_6_CORRUPT_SESSION_BYTES,
+            );
+          },
+        ),
+    },
+  ];
+
+/**
+ * Fixtures 4 and 5's `check --json`: exit 1 with exactly the staged finding
+ * of no domain file — no in-source location, its concerned path
+ * `staging.concerned` — writing nothing (SPEC 12.2, 14).
+ */
+async function expectCheckReportsStagedFinding(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  staging: T1126PassingSideStaging,
+  context: string,
+): Promise<void> {
+  const checkContext = `${context} \`check --json\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const findings = await runFindingsReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        1,
+        `${checkContext} — \`check\` reports condition ` +
+          `${staging.condition} on the passing workspace (SPEC 12.2, 14)`,
+      );
+      assertConditionCounts(
+        findings,
+        { [staging.condition]: 1 },
+        `${checkContext} — exactly the staged finding: the built workspace ` +
+          `passes \`build\`'s validations and its derived files and graph ` +
+          `data are fresh (SPEC 12.2, 14)`,
+      );
+      assertSameJson(
+        { locations: findings[0]!.locations, path: findings[0]!.path },
+        { locations: [], path: staging.concerned },
+        `${checkContext} — ${staging.noDomainFile}: no in-source location, ` +
+          `its concerned path ${JSON.stringify(staging.concerned)} (SPEC ` +
+          `14, 12.7)`,
+      );
+    },
+    `${checkContext} — \`check\` writes nothing (SPEC 12.2)`,
+  );
+}
+
+/**
+ * Fixtures 4 and 5's answers: `occurrences` (bare: the whole discovered
+ * set), `view specs/A.mdx`, and `at specs/A.mdx 0` each answer finding-free
+ * at exit 0 — the staged finding being no domain file's (`noDomainFile`,
+ * SPEC 11.2) — each writing nothing: the graph data the build wrote is
+ * fresh, so no refresh writes (SPEC 13.3), and these reads write nothing
+ * else.
+ */
+async function assertPassingSideAnswersFindingFree(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  noDomainFile: string,
+  context: string,
+): Promise<void> {
+  const noWrite =
+    "writes nothing: the built workspace's graph data is fresh, so no " +
+    "refresh writes, and the answer writes nothing else (SPEC 11.2, 13.3)";
+
+  const occurrencesContext = `${context} bare \`occurrences\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const report = decodeOccurrencesReport(
+        await runJson(
+          product,
+          workspace,
+          ["occurrences"],
+          `${occurrencesContext} — the whole discovered set's enumeration ` +
+            `is complete and finding-free, so it exits 0 (SPEC 11.2, 11.3)`,
+        ),
+        occurrencesContext,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${occurrencesContext} — only the consulted domain's findings ` +
+          `accompany the answer, and ${noDomainFile}`,
+      );
+    },
+    `${occurrencesContext} — ${noWrite}`,
+  );
+
+  const viewContext = `${context} \`view ${A_FILE}\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const report = decodeViewReport(
+        await runJson(
+          product,
+          workspace,
+          ["view", A_FILE],
+          `${viewContext} — the requested file's view is complete and ` +
+            `finding-free, so it exits 0 (SPEC 11.2, 11.4)`,
+        ),
+        { text: false },
+        viewContext,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${viewContext} — only the consulted domain's findings accompany ` +
+          `the answer, and ${noDomainFile}`,
+      );
+      assertSameJson(
+        report.views.map((view) => view.file),
+        [A_FILE],
+        `${viewContext} — exactly the requested file's view (SPEC 11.4)`,
+      );
+    },
+    `${viewContext} — ${noWrite}`,
+  );
+
+  const atContext = `${context} \`at ${A_FILE} 0\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const report = decodeAtReport(
+        await runJson(
+          product,
+          workspace,
+          ["at", A_FILE, "0"],
+          `${atContext} — the named file's resolution is complete and ` +
+            `finding-free, so it exits 0 (SPEC 11.2, 11.5)`,
+        ),
+        atContext,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${atContext} — only the named file's findings accompany the ` +
+          `answer, and ${noDomainFile}`,
+      );
+    },
+    `${atContext} — ${noWrite}`,
+  );
+}
+
+// --- Fixture 6: the judgement's reads (module comment) -----------------------
+
+/**
+ * Whether fixture 6 runs: its mode-000 staging is a permission removal, the
+ * Linux leg's (E-1), verified on the harness itself before any product sees
+ * it — a privileged runner's ineffective staging a harness error, never a
+ * pass or a skip (H-9, H-11). On any other platform the other fixtures alone
+ * run (T6.3-6's `J6_ENVIRONMENT_STAGED` pattern).
+ */
+const T11_2_6_MODE_STAGED = process.platform === "linux";
+/** The emit directory `out` (SPEC 7.3), staged mode 000 around each run. */
+const T11_2_6_EMIT_DIR = "out";
+/** Read, write, and search permission all removed (TEST-SPEC T14-10). */
+const T11_2_6_EMIT_DIR_MODE = 0o000;
+/**
+ * The entry below `out` whose kind the staging refuses — `out/specs`, a
+ * directory component of every emit destination (SPEC 7.3, 13.2, 14.22).
+ */
+const T11_2_6_EMIT_COMPONENT = "specs";
+/** The prior build's emission of `specs/A.mdx` (SPEC 7.3, 13.2). */
+const T11_2_6_EMITTED_A = "out/specs/A.md";
+const T11_2_6_CODE_GROUP = "app";
+const T11_2_6_CODE_FILE = "src/x.ts";
+/** 14.25's stable code, carried only by the exit-2 error document. */
+const T11_2_6_READ_FAILURE_CODE = "read-failure";
+
+const T11_2_6_UNREADABLE_EMIT_CONFIG = stagedTs(
+  "T11.2-6 unreadable-emit-directory fixture xspec.config.ts — Markdown emission under out, a code group app beside the spec group",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    ${T11_2_6_CODE_GROUP}: ["src/**/*.ts"]
+  },
+  markdown: { emit: true, outDir: "${T11_2_6_EMIT_DIR}" }
+})
+`,
+);
+const T11_2_6_CODE_SOURCE = stagedTs(
+  "T11.2-6 unreadable-emit-directory fixture src/x.ts — the code group's one source",
+  "export const x = 1;\n",
+);
+// The failing side's `specs/A.mdx`: one section spelling no `id` (14.1),
+// restaged after the build, so `out` still holds that build's emission.
+const T11_2_6_ID_LESS_SOURCE_TEXT = "Intro prose.\n\n<S>\nNo id here.\n</S>\n";
+const T11_2_6_ID_LESS_SOURCE = stagedMdx(
+  "T11.2-6 unreadable-emit-directory fixture specs/A.mdx — the failing side: a section spelling no id (14.1)",
+  T11_2_6_ID_LESS_SOURCE_TEXT,
+);
+
+/**
+ * Fixture 6's commands judging `build`'s validations past their argument
+ * checks: the three surfaces of 11.2 (bare: JSON-only, SPEC 11), `build`,
+ * `check`, and the gated reads' representatives `ids` and `query nodes`.
+ */
+const T11_2_6_JUDGING_COMMANDS: readonly (readonly string[])[] = [
+  ["view", A_FILE],
+  ["occurrences"],
+  ["at", A_FILE, "0"],
+  ["build", "--json"],
+  ["check", "--json"],
+  ["ids", "--json"],
+  ["query", "nodes", "--json"],
+];
+
+/**
+ * Fixture 6's argument checks — each a usage error judged before the
+ * judgement and reading nothing below `out` (SPEC 11.2, 13.3, 12.0) — for a
+ * `specs/A.mdx` of `length` bytes, with why each is a usage error.
+ */
+function t1126ArgumentChecks(
+  length: number,
+): readonly { readonly argv: readonly string[]; readonly why: string }[] {
+  const beyond = String(length + 1);
+  return [
+    {
+      argv: ["view", "specs/nope.mdx"],
+      why: "an undiscovered file is an unknown-file operand (SPEC 11.4, 12.0)",
+    },
+    {
+      argv: ["view", T11_2_6_CODE_FILE],
+      why:
+        "a discovered code source is a wrong-kind operand, having no " +
+        "structural view (SPEC 11.4, 12.0)",
+    },
+    {
+      argv: ["at", A_FILE, beyond],
+      why:
+        `${beyond}, the file's byte length plus one, is an out-of-range ` +
+        `offset (SPEC 11.5, 12.0)`,
+    },
+    {
+      argv: ["show", `${A_FILE}#nope`, "--json"],
+      why:
+        "an `id` the file spells nowhere names an unknown requirement node, " +
+        "judged parse-local against the named file (SPEC 12.0, 12.4)",
+    },
+    {
+      argv: ["query", "nodes", "--group", T11_2_6_CODE_GROUP, "--json"],
+      why:
+        "a code group's name under `--group` is an invalid flag value (SPEC " +
+        "11.1, 12.0)",
+    },
+    {
+      argv: ["coverage", "nope", "--json"],
+      why: "no configured coverage profile is named nope (SPEC 8.2, 12.0)",
+    },
+    {
+      argv: ["review", "status", "nope", "--json"],
+      why:
+        "no session is named nope, judged against the session directory " +
+        "(SPEC 10.1, 12.0)",
+    },
+  ];
+}
+
+/**
+ * Run `argv` from the workspace root with fixture 6's emit directory `out`
+ * staged mode 000 — made just before the run and restored in a `finally`
+ * once it ends, before anything is asserted on the result (T6.3-6's
+ * `runUnderStaging` discipline), so a caller's whole-root compare, whose
+ * snapshots are taken outside it, never meets the staging. The staging
+ * verifies on the harness itself that its own listing of `out` and its own
+ * examination of `out/specs` are refused (E-1; TEST-SPEC T11.2-6, T14-10),
+ * a privileged runner's ineffective staging a `HarnessStagingError`.
+ */
+async function runWithEmitDirectoryUnreadable(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+): Promise<RunResult> {
+  const staging = await stageDirectoryMode(
+    workspace.path(T11_2_6_EMIT_DIR),
+    T11_2_6_EMIT_DIR_MODE,
+    [
+      { attempt: "list", refused: true },
+      { attempt: "examine", name: T11_2_6_EMIT_COMPONENT, refused: true },
+    ],
+  );
+  try {
+    return await runCli(product, workspace, argv);
+  } finally {
+    await staging.restore();
+  }
+}
+
+/** Whether `concerned` is the emit directory `out` or a path below it. */
+function isEmitDirectoryPath(concerned: PathValue | null): boolean {
+  return (
+    typeof concerned === "string" &&
+    (concerned === T11_2_6_EMIT_DIR ||
+      concerned.startsWith(`${T11_2_6_EMIT_DIR}/`))
+  );
+}
+
+/**
+ * One fixture-6 run of a judging command (`T11_2_6_JUDGING_COMMANDS`):
+ * exit 2, standard output exactly the error document — no answer — its
+ * finding's stable code `read-failure` and its concerned path `out` or a
+ * path below it, the diagnostic on standard error, nothing modified (SPEC
+ * 11.2, 13.3, 14.25, 12.0, 12.7).
+ */
+async function expectJudgementReadFailure(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<void> {
+  const label = `${context}: \`${argv.join(" ")}\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const result = await runWithEmitDirectoryUnreadable(
+        product,
+        workspace,
+        argv,
+      );
+      assertExitCode(
+        result,
+        2,
+        `${label} — past its argument checks the command judges \`build\`'s ` +
+          `validations exactly as the gate of 13.3 does, whatever findings ` +
+          `the sources carry, reading the kinds of \`build\`'s write-path ` +
+          `directory components; the kind of out/specs is refused by both ` +
+          `routes, so that read fails: a usage error before any answer, ` +
+          `exit 2 (SPEC 11.2, 13.3, 14.22, 14.25, 12.0)`,
+      );
+      const error = expectErrorDocument(
+        result,
+        `${label} — standard output is exactly the error document, no ` +
+          `answer (SPEC 12.0, 12.7, 11.2)`,
+      );
+      if (error.code !== T11_2_6_READ_FAILURE_CODE) {
+        fail(
+          `${label} — the refused read of the judgement is a read failure: ` +
+            `the error document's finding carries the stable code ` +
+            `${JSON.stringify(T11_2_6_READ_FAILURE_CODE)} (SPEC 14.25, 14, ` +
+            `12.7); got ${JSON.stringify(error.code)} (message: ` +
+            `${JSON.stringify(error.message)})`,
+        );
+      }
+      if (!isEmitDirectoryPath(error.path)) {
+        fail(
+          `${label} — the concerned path is the refused object's ` +
+            `workspace-relative path, ${JSON.stringify(T11_2_6_EMIT_DIR)} or ` +
+            `a path below it as the product's read order decides (SPEC 14.25; ` +
+            `TEST-SPEC T14-10's last clause); got ` +
+            `${JSON.stringify(error.path)} (message: ` +
+            `${JSON.stringify(error.message)})`,
+        );
+      }
+      if (result.stderrBytes.length === 0) {
+        fail(
+          `${label} — usage error messages are standard-error content (SPEC ` +
+            `12.0, 14.25), but stderr is empty beside ` +
+            `${JSON.stringify(error.message)}`,
+        );
+      }
+    },
+    `${label} — the command stops at the refused read, modifying nothing ` +
+      `(SPEC 14.25, 12.0)`,
+  );
+}
+
+/**
+ * One fixture-6 run of an argument check (`t1126ArgumentChecks`): exit 2
+ * with its plain usage error — `code` and `path` `null`, never
+ * `read-failure` — nothing modified: the judgement comes past every
+ * argument check, and no argument check reads below `out` (SPEC 11.2; 13.3:
+ * the gate follows the argument checks; 12.0).
+ */
+async function expectArgumentCheckFirst(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  why: string,
+  context: string,
+): Promise<void> {
+  const label = `${context}: \`${argv.join(" ")}\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const result = await runWithEmitDirectoryUnreadable(
+        product,
+        workspace,
+        argv,
+      );
+      assertPlainUsageError(
+        result,
+        `${label} — ${why}: an argument check, which precedes the judgement ` +
+          `of \`build\`'s validations and reads nothing below out, so the ` +
+          `command exits 2 with its usage error, never \`read-failure\` ` +
+          `(SPEC 11.2, 13.3, 12.0)`,
+      );
+    },
+    `${label} — a usage error modifies nothing (SPEC 12.0)`,
+  );
+}
+
+/**
+ * One side of fixture 6 (`side` naming it), `specs/A.mdx` holding
+ * `sourceText`: every judging command meets the read failure, then every
+ * argument check answers its usage error first (module comment).
+ */
+async function runEmitDirectoryUnreadableSide(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  sourceText: string,
+  context: string,
+): Promise<void> {
+  for (const argv of T11_2_6_JUDGING_COMMANDS) {
+    await expectJudgementReadFailure(product, workspace, argv, context);
+  }
+  for (const check of t1126ArgumentChecks(
+    Buffer.byteLength(sourceText, "utf8"),
+  )) {
+    await expectArgumentCheckFirst(
+      product,
+      workspace,
+      check.argv,
+      check.why,
+      context,
+    );
+  }
+}
+
 const T11_2_6 = defineProductTest({
   id: "T11.2-6",
   title:
-    "gate findings never attach: on an otherwise-valid pre-built workspace with a garbage journal line staged (14.13), separately with the `markdown.outDir` directory replaced by a plain file (14.22, the obstructed emit write path's one offending component), and separately, on a never-built workspace, with `markdown.outDir` naming the discovered finding-free spec source `specs/A.mdx` itself (14.22 whose one offending component is a discovered file, every emit destination lying below that plain file), `view` of the finding-free file — in the third fixture `specs/A.mdx` itself, a concerned path naming a domain file's own finding for condition 19 alone (11.2) — answers complete and finding-free at exit 0, writing nothing — the state surfaces through `build` (exactly the gate condition; a failing build modifies nothing) and `check` (in every fixture exactly the gate condition — a workspace failing `build`'s validations, a journal error and a refused write alike (13.3), leaves 14.10's mismatch forms, the deleted emission and the never-generated derived files included, unreported, and neither whatever-validity form is staged: the record, where a build wrote one, stays readable and every recorded derived path still generated (14.10) — concerning the journal path, and the offending component, `mdout` and `specs/A.mdx`), and through the gated reads (T13.3-3), never these answers; the passing-workspace refresh participation is T13.3-2's sweep and the failing-side answering discipline T11.2-1's (SPEC 11.2, 13.3, 13.4, 7.3, 12.1, 12.2, 14.13, 14.22, 14.10)",
+    "gate findings never attach, and the judgement's reads stop these surfaces: on an otherwise-valid pre-built workspace with a garbage journal line staged (14.13), separately with the `markdown.outDir` directory replaced by a plain file (14.22, the obstructed emit write path's one offending component), and separately, on a never-built workspace, with `markdown.outDir` naming the discovered finding-free spec source `specs/A.mdx` itself (14.22 whose one offending component is a discovered file, every emit destination lying below that plain file), `view` of the finding-free file — in the third fixture `specs/A.mdx` itself, a concerned path naming a domain file's own finding for condition 19 alone (11.2) — answers complete and finding-free at exit 0, writing nothing — the state surfaces through `build` (exactly the gate condition; a failing build modifies nothing) and `check` (in every fixture exactly the gate condition — a workspace failing `build`'s validations, a journal error and a refused write alike (13.3), leaves 14.10's mismatch forms, the deleted emission and the never-generated derived files included, unreported, and neither whatever-validity form is staged: the record, where a build wrote one, stays readable and every recorded derived path still generated (14.10) — concerning the journal path, and the offending component, `mdout` and `specs/A.mdx`), and through the gated reads (T13.3-3), never these answers; findings of no domain file attach nothing on the passing side either — on a built workspace passing `build`'s validations that violates a `forbidden` rule (the offending edge's `d` spelled in `specs/A.mdx`), and separately on one holding a corrupt session of garbage bytes, `check` reports exactly the 14.12 (no location, no concerned path), respectively the 14.21 (concerning the session file), exit 1, while `occurrences`, `view specs/A.mdx`, and `at specs/A.mdx 0` each answer finding-free at exit 0, writing nothing; and, on the Linux leg, with Markdown emitted under `out` (`markdown.outDir`), a code group `app` over `src/x.ts` beside the spec group, and no glob reaching below `out`, the built emit directory `out` staged mode 000 around each run (the harness's own listing of `out` and examination of `out/specs` verified refused), on the passing side and, `specs/A.mdx` then given a section spelling no `id` (14.1), on the failing side, `view specs/A.mdx`, `occurrences`, `at specs/A.mdx 0`, `build`, `check`, `ids`, and `query nodes` each exit 2 with the error document alone — `code` `read-failure`, `path` `out` or a path below it — nothing modified, the judgement coming past every argument check: `view specs/nope.mdx`, `view src/x.ts`, `at specs/A.mdx <length+1>`, `show specs/A.mdx#nope`, `query nodes --group app`, `coverage nope`, and `review status nope` each exit 2 with the plain usage error, `code` and `path` `null`, never `read-failure`, nothing modified — and, the permission restored, `build` on the passing side exits 0 and `check` is clean; the passing-workspace refresh participation is T13.3-2's sweep and the failing-side answering discipline T11.2-1's (SPEC 11.2, 13.3, 13.4, 7.3, 7.5, 12.0, 12.1, 12.2, 12.7, 14.12, 14.13, 14.21, 14.22, 14.25, 14.10)",
   run: async (product) => {
     // --- Fixture 1: garbage journal line (14.13) --------------------------
     {
@@ -5583,6 +6249,129 @@ const T11_2_6 = defineProductTest({
           A_FILE,
           cShapedTreeAt(A_FILE),
           `${context} \`view ${A_FILE}\``,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- Fixtures 4 and 5: the passing side (14.12, 14.21) -----------------
+    // Findings of no domain file attach nothing on a workspace passing
+    // `build`'s validations either: `check` reports the finding, the three
+    // surfaces answer finding-free (SPEC 11.2, 14.12, 14.21).
+    for (const staging of T11_2_6_PASSING_SIDE_STAGINGS) {
+      const context = `T11.2-6 (passing side: ${staging.arm})`;
+      const workspace = await staging.stage(product, context);
+      try {
+        await expectCheckReportsStagedFinding(
+          product,
+          workspace,
+          staging,
+          context,
+        );
+        await assertPassingSideAnswersFindingFree(
+          product,
+          workspace,
+          staging.noDomainFile,
+          context,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- Fixture 6: the judgement's reads, `out` unreadable (14.25) --------
+    if (T11_2_6_MODE_STAGED) {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": T11_2_6_UNREADABLE_EMIT_CONFIG,
+          [A_FILE]: C_STAGED,
+          [T11_2_6_CODE_FILE]: T11_2_6_CODE_SOURCE,
+        },
+      });
+      try {
+        const context = "T11.2-6 (unreadable emit directory)";
+        await buildOk(
+          product,
+          workspace,
+          `${context} staging \`build\` — emits under markdown.outDir, so ` +
+            `out holds a prior build's emission (SPEC 7.3, 13.2, 12.1)`,
+        );
+        // Staging premises: the emission landed under out/ preserving
+        // workspace-relative paths (SPEC 7.3, 13.2), so out/specs is a
+        // directory component of every emit destination.
+        const premises: readonly (readonly [string, string])[] = [
+          [T11_2_6_EMIT_DIR, "dir"],
+          [`${T11_2_6_EMIT_DIR}/${T11_2_6_EMIT_COMPONENT}`, "dir"],
+          [T11_2_6_EMITTED_A, "file"],
+        ];
+        for (const [rel, kind] of premises) {
+          const found = await workspace.kind(rel);
+          if (found !== kind) {
+            fail(
+              `${context}: staging premise — \`build\` with emission ` +
+                `enabled under markdown.outDir emits ${A_FILE} as ` +
+                `${T11_2_6_EMITTED_A}, so ${rel} is a ${kind} (SPEC 7.3, ` +
+                `13.2); found ${found}`,
+            );
+          }
+        }
+
+        // The passing side.
+        await runEmitDirectoryUnreadableSide(
+          product,
+          workspace,
+          C_SOURCE,
+          `${context} (passing side)`,
+        );
+
+        // The permission restored (each staging was undone as its run
+        // ended): `build` exits 0 and `check` is clean (SPEC 12.1, 12.2).
+        await buildOk(
+          product,
+          workspace,
+          `${context} \`build\` once the permission is restored — the ` +
+            `passing side builds (SPEC 12.1)`,
+        );
+        await expectFindingFreeReport(
+          product,
+          workspace,
+          ["check", "--json"],
+          `${context} \`check --json\` once the permission is restored — ` +
+            `clean (SPEC 12.2)`,
+        );
+
+        // The failing side: `specs/A.mdx` restaged with a section spelling
+        // no `id` after the build, so out still holds its emission;
+        // premise — `build` reports exactly the staged condition-1 finding,
+        // writing nothing (SPEC 12.1, 14.1).
+        await workspace.file(A_FILE, T11_2_6_ID_LESS_SOURCE);
+        const premiseContext = `${context} failing-side premise \`build --json\``;
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const findings = await runFindingsReport(
+              product,
+              workspace,
+              ["build", "--json"],
+              1,
+              `${premiseContext} — the restaged source fails \`build\`'s ` +
+                `validations (SPEC 12.1, 14.1)`,
+            );
+            assertConditionCounts(
+              findings,
+              { "14.1": 1 },
+              `${premiseContext} — exactly the staged section spelling no ` +
+                `\`id\` (SPEC 14.1, 1.3)`,
+            );
+          },
+          `${premiseContext} — a failing build modifies nothing (SPEC 12.1)`,
+        );
+        await runEmitDirectoryUnreadableSide(
+          product,
+          workspace,
+          T11_2_6_ID_LESS_SOURCE_TEXT,
+          `${context} (failing side)`,
         );
       } finally {
         await workspace.dispose();
