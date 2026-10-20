@@ -19,15 +19,18 @@
 // fields plus the same payload); `export` emits the whole session as one JSON
 // document, with or without `--json`, read-time invalidation applied. `split`
 // decomposes a `subtree-coherence` item with children — in a baseline
-// session, deleted ones included — into per-child `subtree-coherence` items
-// plus the scope root's `parent-consistency` item, reusing existing
-// kind+scope items, recording the decomposition durably, never reusing the
-// removed original's id, and ending with a re-derivation. `resolve` sets the
-// status and records the current relevant state, on any unblocked item
-// regardless of status. Re-derivation on an `updated` resolve holds for every
-// strategy — a coverage session re-runs its recorded profile against the
-// current workspace (T10.7-11). The payload text contract (T10.7-12) fixes
-// which text each kind presents and the provenance of absent nodes' texts.
+// session, deleted ones included; in an audit session, the current ones
+// alone — into per-child `subtree-coherence` items (a per-child item
+// already recorded as decomposed replaced by its decomposition,
+// recursively) plus the scope root's `parent-consistency` item, reusing
+// existing kind+scope items, recording the decomposition durably, never
+// reusing the removed original's id, and ending with a re-derivation.
+// `resolve` sets the status and records the current relevant state, on any
+// unblocked item regardless of status. Re-derivation on an `updated`
+// resolve holds for every strategy — a coverage session re-runs its
+// recorded profile against the current workspace (T10.7-11). The payload
+// text contract (T10.7-12) fixes which text each kind presents and the
+// provenance of absent nodes' texts.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - The human fully-resolved report (T10.7-7) is asserted for information
@@ -156,20 +159,29 @@
 //   the scope set {N, N.a, N.b} (10.5's) deciding nothing there — then the
 //   two refusals beside its successful split — N's parent-consistency
 //   item, of another kind, and N.a's leaf item — and a later `updated`
-//   resolve re-deriving the session; the audit fixture's halves of (a)–(e)
-//   and TEST-SPEC's audit refusals are not yet staged (the h/h.a/h.b audit
-//   arm stands in for its reuse, blocking, and re-derivation clauses). (f)
-//   runs on a workspace of its own (specs/P.mdx; `runT1079DeletedChildrenArm`,
-//   exported with its source and identities for T10.4-8(c)): P's scope
-//   before the split is read through the review adapter's
-//   `requireScopeNodes` (section-10.5.ts' `assertScopePresence`), a
-//   per-child item's absent scope root from its `scope` member; the texts are
-//   byte-compared to `query node` captures — P.a's and P.b's subtree texts at
-//   the baseline, P's own and subtree texts after the deletion — and the
-//   recorded hashes and absent markers read through `decodeRecordedState`
-//   against the post-deletion capture. (g) runs the nested twin (specs/G.mdx)
-//   on a workspace of its own, every blockedBy read from `export` and the
-//   blocked state from `status`.
+//   resolve re-deriving the session. The audit fixture (specs/N.mdx in a
+//   workspace of its own; `runT1079AuditSplits`, exported with its source
+//   and identities for T10.4-8(b)) carries the audit halves of (a)–(e),
+//   asserted from `export` — (c)'s item order from `status` as well, (e)'s
+//   stored status from `list`, (e)'s scope set through the review
+//   adapter's `requireScopeNodes`, and (e)'s `current` byte for byte as
+//   the decoded member's JSON rendering, member order included (T10.5-5's
+//   operationalization) — then two refusals beside its successful splits
+//   — N's parent-consistency item, of another kind, and s's leaf item —
+//   and a later `updated` resolve (N.a.x's item) re-deriving the session;
+//   the third audit refusal, Q's item once its only child Q.r is deleted
+//   by manual edit after `create`, runs in an audit session of its own
+//   (specs/Q.mdx). (f) runs on a workspace of its own (specs/P.mdx;
+//   `runT1079DeletedChildrenArm`, exported with its source and identities
+//   for T10.4-8(c)): P's scope before the split is read through the review
+//   adapter's `requireScopeNodes` (section-10.5.ts' `assertScopePresence`),
+//   a per-child item's absent scope root from its `scope` member; the texts
+//   are byte-compared to `query node` captures — P.a's and P.b's subtree
+//   texts at the baseline, P's own and subtree texts after the deletion —
+//   and the recorded hashes and absent markers read through
+//   `decodeRecordedState` against the post-deletion capture. (g) runs the
+//   nested twin (specs/G.mdx) on a workspace of its own, every blockedBy
+//   read from `export` and the blocked state from `status`.
 // - A refused `split`/`resolve` (T10.7-9, T10.7-10) goes through T10.7-14's
 //   shared check (support.ts `expectReviewRefusal`): run with `--json`, exit
 //   1 with standard output exactly one code-less finding — `code` and `path`
@@ -186,26 +198,28 @@
 //   first product invocation — T10.7-7's payload-arm edit and its
 //   full-resolution arm's added specs/U.mdx, T10.7-8's x.k edit, T10.7-9's
 //   M.k edit in the path-blocks fixture, the deletion of P's children in
-//   (f), the nested twin's two edits in (g), and both audit-arm authorings,
-//   T10.7-10's p.a edit, T10.7-11's edge swap, T10.7-12's A.mdx v1/v2 and
-//   B.mdx v1/v2 edits — is a record created at module level (a converted
-//   staging's the same template call moved there), as is the initial `.mdx`
-//   file of every workspace created after the body's first invocation
-//   (T10.7-7's payload arm, T10.7-9's (f), (g), and audit workspaces,
-//   T10.7-12's provenance and coverage sub-fixtures; T10.7-7's empty-session
-//   arm stages none). T10.7-9's path-blocks edit of N and N.a precedes the
-//   body's first `build` (git staging invokes no product) and stays plain,
-//   as do each body's first workspace's initial `files` entries.
+//   (f), the nested twin's two edits in (g), the audit fixture's authoring
+//   of N.c, N.c.y, and N.b.z, and Q.r's deletion, T10.7-10's p.a edit,
+//   T10.7-11's edge swap, T10.7-12's A.mdx v1/v2 and B.mdx v1/v2 edits —
+//   is a record created at module level (a converted staging's the same
+//   template call moved there), as is the initial `.mdx` file of every
+//   workspace created after the body's first invocation (T10.7-7's
+//   payload arm, T10.7-9's (f), (g), audit-fixture, and Q workspaces,
+//   T10.7-12's provenance and coverage sub-fixtures; T10.7-7's
+//   empty-session arm stages none). T10.7-9's path-blocks edit of N and
+//   N.a precedes the body's first `build` (git staging invokes no product)
+//   and stays plain, as do each body's first workspace's initial `files`
+//   entries.
 // - TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
 //   and timing clauses), every one well-formed: the configurations of the
 //   workspaces created after a body's first invocation — `SPECS_ONLY_CONFIG`
-//   (T10.7-7's empty-session arm, T10.7-9's (f), (g), and audit workspaces,
-//   T10.7-12's provenance sub-fixture), `SPECS_CODE_CONFIG` (T10.7-7's
-//   payload arm), and `COVERAGE_ALL_CONFIG` (T10.7-12's coverage
-//   sub-fixture), each staged wherever that configuration is — and the code
-//   sources staged after one: T10.7-7's `src/next.ts` (`N7_CODE_SOURCE`) and
-//   T10.7-12's `src/ref.ts` and `src/del.ts` (`M12_CODE_SOURCE`,
-//   `M12_CODE_DEL_SOURCE`).
+//   (T10.7-7's empty-session arm, T10.7-9's (f), (g), audit-fixture, and Q
+//   workspaces, T10.7-12's provenance sub-fixture), `SPECS_CODE_CONFIG`
+//   (T10.7-7's payload arm), and `COVERAGE_ALL_CONFIG` (T10.7-12's
+//   coverage sub-fixture), each staged wherever that configuration is —
+//   and the code sources staged after one: T10.7-7's `src/next.ts`
+//   (`N7_CODE_SOURCE`) and T10.7-12's `src/ref.ts` and `src/del.ts`
+//   (`M12_CODE_SOURCE`, `M12_CODE_DEL_SOURCE`).
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -224,16 +238,19 @@ import type {
   SourceRange,
 } from "../../helpers/adapters/index.js";
 import {
+  ITEM_STATUSES,
   assertReportMentions,
   decodeExportReport,
   decodeItemReport,
   decodeNextReport,
   decodeNodeReport,
   decodeRecordedState,
+  decodeSessionListReport,
   decodeSessionStatusReport,
   identityMention,
   nameMention,
   numberMention,
+  requireScopeNodes,
   specTokenMention,
 } from "../../helpers/adapters/index.js";
 import {
@@ -3511,50 +3528,748 @@ async function runNestedTwinArm(
   );
 }
 
-// Audit arm: h with child h.a; h.b and h.c are authored later.
-const S9_H_FILE = "specs/H.mdx";
-const S9_H = "specs/H.mdx#h";
-const S9_HA = "specs/H.mdx#h.a";
-const S9_HB = "specs/H.mdx#h.b";
-const S9_HC = "specs/H.mdx#h.c";
+// The audit fixture (TEST-SPEC T10.7-9): specs/N.mdx holds the top-level N,
+// holding N.a (itself holding N.a.x) and N.b, then the top-level leaf s. An
+// audit session `s` is created; N.b's item is resolved `no-change` with a
+// note; N.a's item is split; then, by manual edit, N.c holding N.c.y is
+// authored under N and N.b.z under N.b; and N's item is split. N.a is
+// recorded as decomposed by the first split, so the second creates no
+// per-child item for it: N.a's decomposition stands in, recursively —
+// N.a.x's item and N.a's parent-consistency item, in N's
+// parent-consistency item's blockedBy too. N.b's existing item takes its
+// per-child item's place (reuse), N.c's per-child item is created, and the
+// re-derivation ending the split adds N.c.y's and N.b.z's items (SPEC
+// 10.5, 10.6, 10.7).
+//
+// The audit fixture is exported for T10.4-8(b) (`T10_7_9_AUDIT_FILE`,
+// `T10_7_9_AUDIT_NODES`, `T10_7_9_AUDIT_NCY_TEXT`, `t1079AuditSource`,
+// `T10_7_9_AUDIT_INITIAL_FILES`, `runT1079AuditSplits`): the staging asserts
+// all of (a)–(e) at N's split; the refusals and the later re-derivation stay
+// in T10.7-9's body.
 
-function s9HSpec(withB: boolean, withC: boolean): string {
-  const b = withB ? ["", '<S id="h.b">', "Habe line.", "</S>"] : [];
-  const c = withC ? ["", '<S id="h.c">', "Hace line.", "</S>"] : [];
+/** T10.7-9's audit fixture's one source path: N … s in specs/N.mdx. */
+export const T10_7_9_AUDIT_FILE = "specs/N.mdx";
+
+/** T10.7-9's audit fixture's node identities (TEST-SPEC's N … s; SPEC 1.5). */
+export const T10_7_9_AUDIT_NODES = {
+  root: "specs/N.mdx",
+  n: "specs/N.mdx#N",
+  na: "specs/N.mdx#N.a",
+  nax: "specs/N.mdx#N.a.x",
+  nb: "specs/N.mdx#N.b",
+  nbz: "specs/N.mdx#N.b.z",
+  nc: "specs/N.mdx#N.c",
+  ncy: "specs/N.mdx#N.c.y",
+  s: "specs/N.mdx#s",
+} as const;
+
+/** N.c.y's text at its authoring, after N.a's split (the audit fixture). */
+export const T10_7_9_AUDIT_NCY_TEXT = "En cee why text.";
+
+const AU_FILE = T10_7_9_AUDIT_FILE;
+const AU_ROOT = T10_7_9_AUDIT_NODES.root;
+const AU_N = T10_7_9_AUDIT_NODES.n;
+const AU_NA = T10_7_9_AUDIT_NODES.na;
+const AU_NAX = T10_7_9_AUDIT_NODES.nax;
+const AU_NB = T10_7_9_AUDIT_NODES.nb;
+const AU_NBZ = T10_7_9_AUDIT_NODES.nbz;
+const AU_NC = T10_7_9_AUDIT_NODES.nc;
+const AU_NCY = T10_7_9_AUDIT_NODES.ncy;
+const AU_S = T10_7_9_AUDIT_NODES.s;
+
+/** N.b's resolve note, which its reused item keeps (TEST-SPEC T10.7-9(e)). */
+const AU_NOTE = "reviewed; kept as authored";
+
+/**
+ * specs/N.mdx's bytes for T10.7-9's audit fixture: N, its own text, holding
+ * N.a (holding N.a.x) and N.b, then the leaf s, every tag alone on its line;
+ * given `ncyText`, also N.b.z under N.b and, under N after N.b, N.c holding
+ * N.c.y, its text `ncyText` — the authoring after N.a's split. Exported so a
+ * later arm over the audit session can stage a further N.c.y edit as a
+ * staged-source record of its own (S-9).
+ */
+export function t1079AuditSource(ncyText: string | null): string {
   return [
-    '<S id="h">',
-    "Aitch own line.",
+    '<S id="N">',
+    "En own text.",
     "",
-    '<S id="h.a">',
-    "Haa line.",
+    '<S id="N.a">',
+    "En ay own text.",
+    "",
+    '<S id="N.a.x">',
+    "En ay ex text.",
     "</S>",
-    ...b,
-    ...c,
+    "</S>",
+    "",
+    '<S id="N.b">',
+    "En bee text.",
+    ...(ncyText === null
+      ? []
+      : ["", '<S id="N.b.z">', "En bee zed text.", "</S>"]),
+    "</S>",
+    ...(ncyText === null
+      ? []
+      : [
+          "",
+          '<S id="N.c">',
+          "En cee own text.",
+          "",
+          '<S id="N.c.y">',
+          ncyText,
+          "</S>",
+          "</S>",
+        ]),
+    "</S>",
+    "",
+    '<S id="s">',
+    "Ess text.",
     "</S>",
     "",
   ].join("\n");
 }
 
-// The audit arm's initial source and two authorings follow the body's first
-// `build`, so they are staged-source records (helpers/staged-mdx.ts, S-9:
-// judged before any product exists).
-const T10_7_9_H_INITIAL = stagedMdx(
-  "T10.7-9 specs/H.mdx with h.a alone under h (the audit arm's initial source)",
-  s9HSpec(false, false),
+// The audit fixture's workspace is created after the body's first `build`,
+// so its initial source and the authoring are staged-source records
+// (helpers/staged-mdx.ts, S-9).
+const T10_7_9_AUDIT_INITIAL = stagedMdx(
+  "T10.7-9 specs/N.mdx with N holding N.a (itself holding N.a.x) and N.b, then the leaf s (the audit fixture's initial source)",
+  t1079AuditSource(null),
 );
-const T10_7_9_H_WITH_B = stagedMdx(
-  "T10.7-9 specs/H.mdx with h.b authored after create",
-  s9HSpec(true, false),
+const T10_7_9_AUDIT_AUTHORED = stagedMdx(
+  "T10.7-9 specs/N.mdx with N.c holding N.c.y authored under N and N.b.z under N.b (the audit fixture, after N.a's split)",
+  t1079AuditSource(T10_7_9_AUDIT_NCY_TEXT),
 );
-const T10_7_9_H_WITH_B_C = stagedMdx(
-  "T10.7-9 specs/H.mdx with h.b and h.c authored",
-  s9HSpec(true, true),
+
+/**
+ * The audit fixture's initial source, as a workspace declaration's `files`
+ * entry beside a configuration whose one spec group discovers every `.mdx`
+ * file under `specs/` (SPEC 7.1) — a record, so any workspace stages it
+ * alike (S-9).
+ */
+export const T10_7_9_AUDIT_INITIAL_FILES: Readonly<Record<string, StagedMdx>> =
+  {
+    [T10_7_9_AUDIT_FILE]: T10_7_9_AUDIT_INITIAL,
+  };
+
+/**
+ * The audit fixture's items once N's split exits, in audit item order —
+ * scope-node file path, then document order (SPEC 10.6): the root's item,
+ * N's and N.a's parent-consistency items at their scope nodes' places, then
+ * the subtree-coherence items of N.a.x, N.b, N.b.z, N.c, N.c.y, and s.
+ */
+const AU_ORDER_AFTER_SPLIT = [
+  `subtree-coherence ${AU_ROOT}`,
+  `parent-consistency ${AU_N}`,
+  `parent-consistency ${AU_NA}`,
+  `subtree-coherence ${AU_NAX}`,
+  `subtree-coherence ${AU_NB}`,
+  `subtree-coherence ${AU_NBZ}`,
+  `subtree-coherence ${AU_NC}`,
+  `subtree-coherence ${AU_NCY}`,
+  `subtree-coherence ${AU_S}`,
+];
+
+// The childless refusal's own audit session (TEST-SPEC T10.7-9's refusals):
+// specs/Q.mdx holds the top-level Q holding Q.r; once the session exists,
+// Q.r's section is deleted by manual edit. In an audit session the children
+// are the current ones alone (SPEC 10.7), so Q's item — its scope as last
+// assigned still listing Q.r (10.4) — has a childless scope root.
+const AQ_FILE = "specs/Q.mdx";
+const AQ_ROOT = "specs/Q.mdx";
+const AQ_Q = "specs/Q.mdx#Q";
+const AQ_QR = "specs/Q.mdx#Q.r";
+
+/** specs/Q.mdx's bytes: Q, its own text, holding — `withChild` — Q.r. */
+function aqSource(withChild: boolean): string {
+  return [
+    '<S id="Q">',
+    "Cue own text.",
+    ...(withChild ? ["", '<S id="Q.r">', "Cue ar text.", "</S>"] : []),
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+// The Q workspace is created after the body's first `build`, so its initial
+// source and Q.r's deletion are staged-source records (helpers/staged-mdx.ts,
+// S-9).
+const T10_7_9_Q_INITIAL = stagedMdx(
+  "T10.7-9 specs/Q.mdx with Q holding Q.r (the childless refusal's audit session, its initial source)",
+  aqSource(true),
 );
+const T10_7_9_Q_CHILD_DELETED = stagedMdx(
+  "T10.7-9 specs/Q.mdx with Q.r's section deleted by manual edit after `create`, nothing else edited",
+  aqSource(false),
+);
+
+/**
+ * `review list --json`'s entry for one healthy session, its item counts by
+ * stored status compared as `counts[status] ?? 0` per defined status — no
+ * read-time invalidation applied (SPEC 10.4, 10.7).
+ */
+async function assertListedCounts(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  expected: Readonly<Record<ItemStatus, number>>,
+  context: string,
+): Promise<void> {
+  const label = `${context} \`review list --json\``;
+  const report = decodeSessionListReport(
+    await runJson(product, workspace, ["review", "list", "--json"], label),
+    label,
+  );
+  const entries = report.sessions.filter((entry) => entry.name === name);
+  if (entries.length !== 1) {
+    fail(
+      `${label}: expected exactly one listed session named ` +
+        `${JSON.stringify(name)} (SPEC 10.7: \`list\` reports every ` +
+        `session); found ${String(entries.length)} among ` +
+        JSON.stringify(report.sessions.map((entry) => entry.name)),
+    );
+  }
+  const entry = entries[0];
+  if (entry.corrupt) {
+    fail(
+      `${label}: session ${JSON.stringify(name)} is listed corrupt; the ` +
+        `product wrote it and nothing else touched it, so it must be listed ` +
+        `with its strategy and counts (SPEC 10.1, 10.7)`,
+    );
+  }
+  for (const status of ITEM_STATUSES) {
+    const actual = entry.counts[status] ?? 0;
+    if (actual !== expected[status]) {
+      fail(
+        `${context}: \`review list\` counts the session's items by stored ` +
+          `status — no read-time invalidation applied (SPEC 10.4, 10.7) — ` +
+          `expected ${String(expected[status])} item(s) stored ${status}, ` +
+          `got ${String(actual)}`,
+      );
+    }
+  }
+}
+
+/** The audit session `runT1079AuditSplits` leaves, its items by id. */
+export interface T1079AuditSession {
+  /** N's subtree-coherence item, split by the second split and removed. */
+  readonly nOriginalId: string;
+  /** N.a's subtree-coherence item, split by the first split and removed. */
+  readonly naOriginalId: string;
+  /** The file root's subtree-coherence item. */
+  readonly rootId: string;
+  /** N's parent-consistency item, entered by the second split. */
+  readonly pcNId: string;
+  /** N.a's parent-consistency item, entered by the first split. */
+  readonly pcNaId: string;
+  /** N.a.x's subtree-coherence item, reused by both splits. */
+  readonly naxId: string;
+  /** N.b's subtree-coherence item, resolved `no-change`, then reused. */
+  readonly nbId: string;
+  /** N.b.z's item, added by the re-derivation ending the second split. */
+  readonly nbzId: string;
+  /** N.c's per-child item, created by the second split. */
+  readonly ncId: string;
+  /** N.c.y's item, added by the re-derivation ending the second split. */
+  readonly ncyId: string;
+  /** The leaf s's subtree-coherence item. */
+  readonly sId: string;
+}
+
+/**
+ * T10.7-9's audit fixture through N's split (TEST-SPEC T10.7-9(a)–(e); SPEC
+ * 5.5, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7), in a fresh workspace
+ * holding `T10_7_9_AUDIT_INITIAL_FILES` beside a one-group configuration:
+ * built; `review create --strategy audit --name s`, one item per requirement
+ * node in audit item order (the staging premise, from `status`); N.b's item
+ * resolved `no-change` with a note, its `current` captured from `export` and
+ * N.b's hashes via `query node`; N.a's item split — the original removed,
+ * N.a.x's existing item reused, N.a's parent-consistency item fresh and
+ * `unresolved` (context {N.a.x}, blockedBy N.a.x's item), both origins
+ * empty ((b)), N's item blocked by all items of the decomposition beside
+ * N.b's, the decomposition recorded; N.c holding N.c.y authored under N and
+ * N.b.z under N.b and built — N.b's subtreeHash changed (the premise via
+ * `query node`), no item added; then N's item split, asserting: neither
+ * original's id reused, and no subtree-coherence item scoped at N or N.a
+ * ((d)); (c) N.c.y's and N.b.z's items entered by the re-derivation ending
+ * the split, fresh and `unresolved`, every item in audit item order in
+ * `status` and `export`; N.c's per-child item and N's parent-consistency
+ * item fresh and `unresolved`; (a) N.c's item's context its ancestor chain
+ * and its blockedBy exactly N.c.y's item; (b) every decomposition item's
+ * origin empty; (d) N's parent-consistency item's context exactly {N.a,
+ * N.b, N.c} and its blockedBy exactly N.a.x's item, N.a's parent-consistency
+ * item, N.b's item, and N.c's item, the root's item blocked by exactly those
+ * four, N's parent-consistency item, and s's item, both decompositions
+ * recorded; (e) N.b's item reused — its id, its note, its `current` byte for
+ * byte (the decoded member's JSON rendering, member order included, from
+ * `export` at N.b's resolve and after the split; H-3: its inner shape is the
+ * product's), and its stored status kept, `list` counting it `no-change`
+ * and reads (`status`, `export`) presenting it `invalidated` — taking the
+ * scope {N.b, N.b.z} (every scope node the payload presents,
+ * `requireScopeNodes`) and the blockedBy N.b.z's item; N.a.x's item and
+ * N.a's parent-consistency item keeping their ids. Exported for T10.4-8(b),
+ * which continues on the session it leaves.
+ */
+export async function runT1079AuditSplits(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<T1079AuditSession> {
+  await buildOk(product, workspace, `${label} \`build\``);
+  await createAuditSession(product, workspace, "s", label);
+  const created = await sessionStatus(product, workspace, "s", label);
+  assertSameJson(
+    rowSequence(created),
+    [AU_ROOT, AU_N, AU_NA, AU_NAX, AU_NB, AU_S].map(
+      (node) => `subtree-coherence ${node} unresolved`,
+    ),
+    `${label} staging premise: one subtree-coherence item per requirement ` +
+      `node, the root's included, in audit item order — file path, then ` +
+      `document order (SPEC 10.6)`,
+  );
+  const rootId = requireRow(created, "subtree-coherence", AU_ROOT, label).id;
+  const nOriginalId = requireRow(created, "subtree-coherence", AU_N, label).id;
+  const naOriginalId = requireRow(
+    created,
+    "subtree-coherence",
+    AU_NA,
+    label,
+  ).id;
+  const naxId = requireRow(created, "subtree-coherence", AU_NAX, label).id;
+  const nbId = requireRow(created, "subtree-coherence", AU_NB, label).id;
+  const sId = requireRow(created, "subtree-coherence", AU_S, label).id;
+
+  // N.b's item, a leaf's and so unblocked, resolved `no-change` with a note:
+  // (e) follows its id, note, recorded state, and stored status through both
+  // splits.
+  await expectExit(
+    product,
+    workspace,
+    [
+      "review",
+      "resolve",
+      "s",
+      nbId,
+      "--status",
+      "no-change",
+      "--note",
+      AU_NOTE,
+    ],
+    0,
+    `${label} \`review resolve s <N.b's item> --status no-change --note ` +
+      `<text>\``,
+  );
+  const atResolve = `${label} after N.b's resolve`;
+  const nbCurrentAtResolve = JSON.stringify(
+    requireItemById(
+      (await exportSession(product, workspace, "s", atResolve)).items,
+      nbId,
+      atResolve,
+    ).current,
+  );
+  const nbAtResolve = await queryNode(product, workspace, AU_NB, atResolve);
+
+  // N.a's item split: N.a.x's existing item stands for N.a's one child
+  // subtree, and N.a's parent-consistency item enters (SPEC 10.7).
+  await expectExit(
+    product,
+    workspace,
+    ["review", "split", "s", naOriginalId],
+    0,
+    `${label} \`review split s <N.a's item>\``,
+  );
+  const first = `${label} after N.a's split`;
+  const afterFirst = await exportSession(product, workspace, "s", first);
+  assertSameJson(
+    [...exportKindScopeSequence(afterFirst.items)].sort(),
+    [
+      `subtree-coherence ${AU_ROOT}`,
+      `subtree-coherence ${AU_N}`,
+      `parent-consistency ${AU_NA}`,
+      `subtree-coherence ${AU_NAX}`,
+      `subtree-coherence ${AU_NB}`,
+      `subtree-coherence ${AU_S}`,
+    ].sort(),
+    `${first}: the original — N.a's subtree-coherence item — is removed; ` +
+      `N.a.x's item stands for N.a's one child subtree and N.a's ` +
+      `parent-consistency item enters (SPEC 10.7)`,
+  );
+  const naxAfterFirst = requireItem(
+    afterFirst.items,
+    "subtree-coherence",
+    AU_NAX,
+    first,
+  );
+  if (naxAfterFirst.id !== naxId) {
+    fail(
+      `${first}: N.a.x's existing item takes its per-child item's place, ` +
+        `keeping its id ${naxId} (SPEC 10.7); got ${naxAfterFirst.id}`,
+    );
+  }
+  const pcNaItem = requireItem(
+    afterFirst.items,
+    "parent-consistency",
+    AU_NA,
+    first,
+  );
+  assertFreshUnresolved(
+    [[pcNaItem, "N.a's new parent-consistency item"]],
+    [rootId, nOriginalId, naOriginalId, naxId, nbId, sId],
+    first,
+  );
+  const pcNaId = pcNaItem.id;
+  assertSameJson(
+    identitySet(pcNaItem.context),
+    [AU_NAX],
+    `${first}: N.a's parent-consistency item's context is exactly the ` +
+      `scope root's children, {N.a.x} (SPEC 10.7)`,
+  );
+  assertBlockedBy(
+    pcNaItem,
+    [naxId],
+    `${first}: N.a's parent-consistency item is blocked by exactly the ` +
+      `per-child item, N.a.x's (SPEC 10.7)`,
+  );
+  for (const [item, what] of [
+    [naxAfterFirst, "N.a.x's per-child item"],
+    [pcNaItem, "N.a's parent-consistency item"],
+  ] as const) {
+    assertSameJson(
+      identitySet(item.origin),
+      [],
+      `${first} (b): ${what}'s origin is empty — every decomposition ` +
+        `item's origin is empty in an audit session (SPEC 10.7)`,
+    );
+  }
+  assertBlockedBy(
+    requireItemById(afterFirst.items, nOriginalId, first),
+    [naxId, pcNaId, nbId],
+    `${first}: N's item, blocked by the original, is blocked by all items ` +
+      `of its decomposition — N.a.x's item and N.a's parent-consistency ` +
+      `item — beside N.b's item (SPEC 10.6, 10.7)`,
+  );
+  assertDecompositionRecorded(afterFirst, AU_NA, first);
+
+  // The manual authoring: N.c holding N.c.y under N, N.b.z under N.b. N.b's
+  // subtreeHash changes (the premise), so its resolved item reads
+  // `invalidated` (10.4); no item enters before the next re-derivation or
+  // split (10.5, 10.7).
+  await workspace.file(AU_FILE, T10_7_9_AUDIT_AUTHORED);
+  await buildOk(
+    product,
+    workspace,
+    `${label} \`build\` after authoring N.c, N.c.y, and N.b.z`,
+  );
+  const authored = `${label} after the authoring`;
+  const nbAuthored = await queryNode(product, workspace, AU_NB, authored);
+  if (nbAuthored.hashes.subtreeHash === nbAtResolve.hashes.subtreeHash) {
+    fail(
+      `${authored} staging premise: authoring N.b.z must change N.b's ` +
+        `subtreeHash (SPEC 5.5: a node added to the subtree) — the change ` +
+        `that invalidates N.b's resolved item (10.4)`,
+    );
+  }
+  assertSameJson(
+    (await sessionStatus(product, workspace, "s", authored)).items
+      .map((row) => `${row.kind} ${row.scope}`)
+      .sort(),
+    [...exportKindScopeSequence(afterFirst.items)].sort(),
+    `${authored} staging premise: the authoring alone adds no item — new ` +
+      `items enter only through re-derivation or split (SPEC 10.5, 10.7)`,
+  );
+
+  // N's item split: one item per current child subtree — N.a's replaced by
+  // its decomposition, N.b's existing item reused, N.c's created — plus N's
+  // parent-consistency item, then the re-derivation ending the split.
+  await expectExit(
+    product,
+    workspace,
+    ["review", "split", "s", nOriginalId],
+    0,
+    `${label} \`review split s <N's item>\``,
+  );
+  const split = `${label} after N's split`;
+  const afterSplit = await exportSession(product, workspace, "s", split);
+  for (const [id, what] of [
+    [nOriginalId, "N's"],
+    [naOriginalId, "N.a's"],
+  ] as const) {
+    if (afterSplit.items.some((item) => item.id === id)) {
+      fail(
+        `${split}: no item takes ${what} split original's id ${id} — the ` +
+          `original is removed from the session and its id never reused ` +
+          `(SPEC 10.7)`,
+      );
+    }
+  }
+  const reAdded = afterSplit.items.filter(
+    (item) =>
+      item.kind === "subtree-coherence" &&
+      (item.scope.node === AU_N || item.scope.node === AU_NA),
+  );
+  if (reAdded.length > 0) {
+    fail(
+      `${split} (d): no subtree-coherence item is scoped at N — the ` +
+        `original removed — or at N.a: recorded as decomposed, N.a gets no ` +
+        `per-child item, its decomposition standing in, recursively (SPEC ` +
+        `10.1, 10.7); \`export\` presents ` +
+        JSON.stringify(
+          reAdded.map((item) => `${item.id} ${item.kind} ${item.scope.node}`),
+        ),
+    );
+  }
+
+  // (c) Re-derivation at the split's end (SPEC 10.5, 10.7): N.c.y and N.b.z,
+  // authored after `create`, each get the subtree-coherence item the audit
+  // strategy generates (10.6), entering in audit item order.
+  const splitStatus = await sessionStatus(product, workspace, "s", split);
+  assertSameJson(
+    splitStatus.items.map((row) => `${row.kind} ${row.scope}`),
+    AU_ORDER_AFTER_SPLIT,
+    `${split} (c): once the split exits, the re-derivation ending it (SPEC ` +
+      `10.5, 10.7) has added N.c.y's and N.b.z's items — authored after ` +
+      `\`create\`, each one's subtree-coherence item generated by the audit ` +
+      `strategy (10.6) — every item in audit item order, file path then ` +
+      `document order (10.6); a product that does not re-derive at a split ` +
+      `adds neither`,
+  );
+  assertSameJson(
+    exportKindScopeSequence(afterSplit.items),
+    AU_ORDER_AFTER_SPLIT,
+    `${split} (c): \`export\` presents the same items in item order (SPEC ` +
+      `10.6, 10.7)`,
+  );
+  const ncItem = requireItem(
+    afterSplit.items,
+    "subtree-coherence",
+    AU_NC,
+    split,
+  );
+  const pcNItem = requireItem(
+    afterSplit.items,
+    "parent-consistency",
+    AU_N,
+    split,
+  );
+  const nbzItem = requireItem(
+    afterSplit.items,
+    "subtree-coherence",
+    AU_NBZ,
+    split,
+  );
+  const ncyItem = requireItem(
+    afterSplit.items,
+    "subtree-coherence",
+    AU_NCY,
+    split,
+  );
+  const priorIds = [
+    rootId,
+    nOriginalId,
+    naOriginalId,
+    naxId,
+    nbId,
+    sId,
+    pcNaId,
+  ];
+  assertFreshUnresolved(
+    [
+      [ncItem, "N.c's new per-child item"],
+      [pcNItem, "N's new parent-consistency item"],
+    ],
+    priorIds,
+    split,
+  );
+  assertFreshUnresolved(
+    [
+      [nbzItem, "N.b.z's item"],
+      [ncyItem, "N.c.y's item"],
+    ],
+    [...priorIds, ncItem.id, pcNItem.id],
+    `${split} (c)`,
+  );
+
+  // (a) Per-child blocking (SPEC 10.7): N.c's new item takes the blockedBy
+  // the audit strategy gives a subtree-coherence item — its child sections'
+  // items (10.6) — never the original's blockers.
+  assertSameJson(
+    identitySet(ncItem.context),
+    [AU_ROOT, AU_N].sort(),
+    `${split}: N.c's per-child item's context is the child's ancestor ` +
+      `chain, the file root and N (SPEC 10.6, 10.7)`,
+  );
+  assertBlockedBy(
+    ncItem,
+    [ncyItem.id],
+    `${split} (a): N.c's new per-child item's blockedBy is the one the ` +
+      `audit strategy gives a subtree-coherence item — its child sections' ` +
+      `items, exactly N.c.y's — never the original's blockers (N.a.x's ` +
+      `item, N.a's parent-consistency item, and N.b's item), which a ` +
+      `product passing them on to new decomposition items assigns (SPEC ` +
+      `10.5, 10.6, 10.7)`,
+  );
+
+  // (b) Origins (SPEC 10.7): empty for every decomposition item in an
+  // audit session.
+  const naxItem = requireItem(
+    afterSplit.items,
+    "subtree-coherence",
+    AU_NAX,
+    split,
+  );
+  const pcNaAfter = requireItem(
+    afterSplit.items,
+    "parent-consistency",
+    AU_NA,
+    split,
+  );
+  const nbItem = requireItem(
+    afterSplit.items,
+    "subtree-coherence",
+    AU_NB,
+    split,
+  );
+  for (const [item, what] of [
+    [naxItem, "N.a.x's item"],
+    [pcNaAfter, "N.a's parent-consistency item"],
+    [nbItem, "N.b's item"],
+    [ncItem, "N.c's item"],
+    [pcNItem, "N's parent-consistency item"],
+  ] as const) {
+    assertSameJson(
+      identitySet(item.origin),
+      [],
+      `${split} (b): ${what}, of N's decomposition, has an empty origin — ` +
+        `every decomposition item's origin is empty in an audit session ` +
+        `(SPEC 10.7)`,
+    );
+  }
+
+  // (d) Recursion (SPEC 10.7): N.a's decomposition stands in for its
+  // per-child item, in N's parent-consistency item's blockedBy too; the
+  // root's item, blocked by the original, is blocked by every item of N's
+  // decomposition beside s's.
+  assertSameJson(
+    identitySet(pcNItem.context),
+    [AU_NA, AU_NB, AU_NC].sort(),
+    `${split} (d): N's parent-consistency item's context is exactly the ` +
+      `scope root's children, N.a, N.b, and N.c — N.a among them though its ` +
+      `decomposition stands in for its per-child item (SPEC 10.7)`,
+  );
+  assertBlockedBy(
+    pcNItem,
+    [naxId, pcNaId, nbId, ncItem.id],
+    `${split} (d): N's parent-consistency item is blocked by exactly ` +
+      `N.a.x's item, N.a's parent-consistency item, N.b's item, and N.c's ` +
+      `item — N.a's decomposition standing in for its per-child item, ` +
+      `recursively, in the parent-consistency item's blockedBy too (SPEC ` +
+      `10.7)`,
+  );
+  assertBlockedBy(
+    requireItemById(afterSplit.items, rootId, split),
+    [naxId, pcNaId, nbId, ncItem.id, pcNItem.id, sId],
+    `${split} (d): the root's item, blocked by the original, is blocked by ` +
+      `exactly all items of its decomposition — N.a.x's item, N.a's ` +
+      `parent-consistency item, N.b's and N.c's items, and N's ` +
+      `parent-consistency item — and s's item (SPEC 10.6, 10.7)`,
+  );
+  assertDecompositionRecorded(afterSplit, AU_NA, split);
+  assertDecompositionRecorded(afterSplit, AU_N, split);
+
+  // (e) Reuse (SPEC 10.7): N.b's existing item takes its per-child item's
+  // place, keeping its id, status, note, and recorded state and taking the
+  // decomposition's scope and blockedBy; the first split's items keep their
+  // ids.
+  if (nbItem.id !== nbId) {
+    fail(
+      `${split} (e): N.b's existing item takes its per-child item's place, ` +
+        `keeping its id ${nbId} (SPEC 10.7); got ${nbItem.id}`,
+    );
+  }
+  if (nbItem.note !== AU_NOTE) {
+    fail(
+      `${split} (e): N.b's reused item keeps its note — the \`--note\` ` +
+        `text of its resolve (SPEC 10.7); expected ` +
+        `${JSON.stringify(AU_NOTE)}, got ` +
+        (nbItem.note === undefined ? "no note" : JSON.stringify(nbItem.note)),
+    );
+  }
+  const nbCurrentAfter = JSON.stringify(nbItem.current);
+  if (nbCurrentAfter !== nbCurrentAtResolve) {
+    fail(
+      `${split} (e): N.b's reused item keeps its recorded state — its ` +
+        `\`current\` byte for byte as \`export\` presented it at N.b's ` +
+        `resolve (SPEC 10.2, 10.7: the existing item keeps its recorded ` +
+        `state; reads report it as recorded)\n` +
+        `  at the resolve: ${nbCurrentAtResolve}\n` +
+        `  now:            ${nbCurrentAfter}`,
+    );
+  }
+  const nbRow = requireRow(splitStatus, "subtree-coherence", AU_NB, split);
+  for (const [status, read] of [
+    [nbItem.status, "`export`"],
+    [nbRow.status, "`status`"],
+  ] as const) {
+    if (status !== "invalidated") {
+      fail(
+        `${split} (e): ${read} presents N.b's reused item \`invalidated\` — ` +
+          `its stored status no-change kept (SPEC 10.7) and N.b's ` +
+          `subtreeHash changed since its resolve (10.4) — never ` +
+          `\`unresolved\`; got ${status}`,
+      );
+    }
+  }
+  await assertListedCounts(
+    product,
+    workspace,
+    "s",
+    { unresolved: 8, updated: 0, "no-change": 1, skipped: 0, invalidated: 0 },
+    `${split} (e): N.b's reused item's stored status is kept — \`list\` ` +
+      `counts it no-change, beside the eight unresolved items`,
+  );
+  assertSameJson(
+    identitySet(requireScopeNodes(nbItem, split)),
+    [AU_NB, AU_NBZ].sort(),
+    `${split} (e): N.b's reused item takes the decomposition's scope — N.b ` +
+      `and all its current descendants, N.b.z now included (SPEC 10.6, ` +
+      `10.7: every scope node presented)`,
+  );
+  assertBlockedBy(
+    nbItem,
+    [nbzItem.id],
+    `${split} (e): N.b's reused item takes the decomposition's blockedBy — ` +
+      `its child sections' items, exactly N.b.z's (SPEC 10.6, 10.7)`,
+  );
+  for (const [item, id, what] of [
+    [naxItem, naxId, "N.a.x's item"],
+    [pcNaAfter, pcNaId, "N.a's parent-consistency item"],
+  ] as const) {
+    if (item.id !== id) {
+      fail(
+        `${split} (e): ${what}, an existing item of N.a's decomposition, ` +
+          `keeps its id ${id} (SPEC 10.7); got ${item.id}`,
+      );
+    }
+  }
+
+  return {
+    nOriginalId,
+    naOriginalId,
+    rootId,
+    pcNId: pcNItem.id,
+    pcNaId,
+    naxId,
+    nbId,
+    nbzId: nbzItem.id,
+    ncId: ncItem.id,
+    ncyId: ncyItem.id,
+    sId,
+  };
+}
 
 const T10_7_9 = defineProductTest({
   id: "T10.7-9",
   title:
-    "`review split` of a `subtree-coherence` item whose scope root has children — in a baseline session, deleted ones included — replaces it with one `subtree-coherence` item per child subtree (context: the child's ancestor chain, a deleted child's over its baseline-parent link; blockedBy: the one its session's strategy gives a `subtree-coherence` item, never the original's blockers — none in a path-blocks session, its child sections' items in the audit session, so none for a childless child authored after `create`, where a product passing the original's stale blocker set on to new decomposition items assigns h.a's item) plus one `parent-consistency` item for the scope root (context: exactly the scope root's children; blockedBy: the per-child items); each decomposition item's origin is the `changed` nodes in its scope — for the `parent-consistency` item, in its scope node's subtree, the scope node included — and empty in the audit session; newly created decomposition items enter `unresolved` — asserted on splits of resolved originals in both strategies, whose statuses must not propagate; existing kind+scope items are reused with id, status, and recorded state kept (audit arm); every item outside the decomposition that was blocked by the original becomes blocked by all its items; the original is removed and its id never reused across subsequent re-derivations in either strategy; the decomposition is recorded durably — `export` presents it — and governs re-derivation, with which `split` ends. Path-blocks fixture (top-level N holding N.a and N.b, and M holding M.k; N's own text and N.a's edited before `create --base`, N's item resolved `no-change`, M.k's text then edited, N's item split): (a) N.a's and N.b's items have empty blockedBy and N's `parent-consistency` item exactly those two; (b) N.a's origin is exactly {N.a}, N.b's empty, and N's `parent-consistency` item's exactly {N, N.a}, never the per-child origins' union; (c) once the split exits, M.k's `subtree-coherence` item and M's `parent-consistency` item (context and origin {M.k}, blockedBy M.k's item) are in the session, `unresolved`, in item order — a product not re-deriving at a split adds neither — and a later `updated` resolve re-adds no item at N. (f) Deleted children: with P's only children P.a and P.b deleted between the baseline and `create`, P's item (scope {P, P.a, P.b}) splits into `subtree-coherence` items scoped at the absent P.a and P.b — presented absent under their baseline identities, origins {P.a} and {P.b}, context exactly the file root and P, never the empty chain the current graph gives an absent node — and P's `parent-consistency` item (context exactly {P.a, P.b}; origin exactly {P, P.a, P.b}); texts and hashes keep their definitions: P's item's scope text is P's current subtree text before the split and its `parent-consistency` item's P's current own text after it, neither carrying P.a's or P.b's token, their recorded hashes for P `query node`'s and their entries for P.a and P.b the explicit absent marker, while the per-child scope texts and the `parent-consistency` item's context texts for P.a and P.b are their baseline subtree texts. (g) In a twin nesting N under G, G's `parent-consistency` item is blocked by exactly G.N's item before the split — unblocked once that item is resolved `no-change` — by exactly G.N.a's and G.N.b's items and G.N's `parent-consistency` item after it, `status` reporting it blocked, and still by those three once G.N.a's item is resolved `updated` and the session re-derived, each read from `export`. Audit arm (h holding h.a; h.b authored after `create`, h's resolved item split, then h.c authored): h.a's item reused, h.b's new item `unresolved` with empty blockedBy, the root's item blocked by all decomposition items, and at the re-derivation h.c's item entering with a fresh id and blockedBy recomputed. `split` on any other kind, or on a childless scope root, is refused — exit 1 with exactly one code-less finding in T10.7-14's form, `code` and `path` `null`, `locations` `[]` — nothing modified (SPEC 1.6, 5.5, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 12.7, 14)",
+    "`review split` of a `subtree-coherence` item whose scope root has children — in a baseline session, deleted ones included; in an audit session, the current ones alone — replaces it with one `subtree-coherence` item per child subtree (context: the child's ancestor chain, a deleted child's over its baseline-parent link; blockedBy: the one its session's strategy gives a `subtree-coherence` item, never the original's blockers — none in a path-blocks session, its child sections' items in the audit session) plus one `parent-consistency` item for the scope root (context: exactly the scope root's children; blockedBy: the per-child items); a per-child item whose kind and scope node are recorded as decomposed is not created, its decomposition standing in, recursively, in the `parent-consistency` item's blockedBy too; each decomposition item's origin is the `changed` nodes in its scope — for the `parent-consistency` item, in its scope node's subtree, the scope node included — and empty in the audit session; newly created decomposition items enter `unresolved` — asserted on a split of a resolved original (the path-blocks fixture), whose status must not propagate; existing kind+scope items are reused, keeping id, status, note, and recorded state and taking the decomposition's scope and blockedBy (the audit fixture); every item outside the decomposition that was blocked by the original becomes blocked by all its items; the original is removed and its id never reused across subsequent re-derivations in either strategy; the decomposition is recorded durably — `export` presents it — and governs re-derivation, with which `split` ends. Path-blocks fixture (top-level N holding N.a and N.b, and M holding M.k; N's own text and N.a's edited before `create --base`, N's item resolved `no-change`, M.k's text then edited, N's item split): (a) N.a's and N.b's items have empty blockedBy and N's `parent-consistency` item exactly those two; (b) N.a's origin is exactly {N.a}, N.b's empty, and N's `parent-consistency` item's exactly {N, N.a}, never the per-child origins' union; (c) once the split exits, M.k's `subtree-coherence` item and M's `parent-consistency` item (context and origin {M.k}, blockedBy M.k's item) are in the session, `unresolved`, in item order — a product not re-deriving at a split adds neither — and a later `updated` resolve re-adds no item at N. (f) Deleted children: with P's only children P.a and P.b deleted between the baseline and `create`, P's item (scope {P, P.a, P.b}) splits into `subtree-coherence` items scoped at the absent P.a and P.b — presented absent under their baseline identities, origins {P.a} and {P.b}, context exactly the file root and P, never the empty chain the current graph gives an absent node — and P's `parent-consistency` item (context exactly {P.a, P.b}; origin exactly {P, P.a, P.b}); texts and hashes keep their definitions: P's item's scope text is P's current subtree text before the split and its `parent-consistency` item's P's current own text after it, neither carrying P.a's or P.b's token, their recorded hashes for P `query node`'s and their entries for P.a and P.b the explicit absent marker, while the per-child scope texts and the `parent-consistency` item's context texts for P.a and P.b are their baseline subtree texts. (g) In a twin nesting N under G, G's `parent-consistency` item is blocked by exactly G.N's item before the split — unblocked once that item is resolved `no-change` — by exactly G.N.a's and G.N.b's items and G.N's `parent-consistency` item after it, `status` reporting it blocked, and still by those three once G.N.a's item is resolved `updated` and the session re-derived, each read from `export`. Audit fixture (N holding N.a — itself holding N.a.x — and N.b, and the leaf s; after `create`, N.b's item resolved `no-change` with a note and N.a's item split; then N.c holding N.c.y authored under N and N.b.z under N.b; N's item split): (a) N.c's new item's blockedBy is exactly N.c.y's item, never the original's blockers, which a product passing them on to new decomposition items assigns; (b) every decomposition item's origin is empty; (c) N.c.y's and N.b.z's items enter at N's split, `unresolved`, in item order — a product not re-deriving at a split adds neither; (d) no `subtree-coherence` item scoped at N.a enters, at the split or at a later re-derivation; N's `parent-consistency` item's context is exactly {N.a, N.b, N.c} and its blockedBy exactly N.a.x's item, N.a's `parent-consistency` item, N.b's item, and N.c's item; and the root's item is blocked by exactly those four, N's `parent-consistency` item, and s's item; (e) N.b's item keeps its id, note, `current` byte for byte, and stored status (`list` counts it `no-change`; reads present it `invalidated`, never `unresolved`), taking the scope {N.b, N.b.z} and the blockedBy N.b.z's item, while N.a.x's item and N.a's `parent-consistency` item keep their ids. `split` on any other kind, or on a childless scope root — a leaf's (s's) and, in an audit session over Q, Q's once its only child Q.r is deleted by manual edit after `create` — is refused — exit 1 with exactly one code-less finding in T10.7-14's form, `code` and `path` `null`, `locations` `[]` — nothing modified (SPEC 1.6, 5.5, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 12.7, 14)",
   run: async (product) => {
     // --- path-blocks fixture: (a), (b), (c), the refusals ---------------------
     await withWorkspace(
@@ -3585,264 +4300,155 @@ const T10_7_9 = defineProductTest({
       (workspace) => runNestedTwinArm(product, workspace),
     );
 
-    // --- audit arm ------------------------------------------------------------
+    // --- the audit fixture: (a)–(e), its refusals, a later re-derivation ------
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [S9_H_FILE]: T10_7_9_H_INITIAL },
+      T10_7_9_AUDIT_INITIAL_FILES,
       async (workspace) => {
-        const prefix = "T10.7-9 audit arm";
-        await buildOk(product, workspace, `${prefix} \`build\``);
-        await createAuditSession(product, workspace, "s", prefix);
+        const prefix = "T10.7-9 audit fixture";
+        const session = await runT1079AuditSplits(product, workspace, prefix);
 
-        const initial = await sessionStatus(product, workspace, "s", prefix);
-        assertSameJson(
-          rowSequence(initial),
-          [
-            `subtree-coherence ${S9_H_FILE} unresolved`,
-            `subtree-coherence ${S9_H} unresolved`,
-            `subtree-coherence ${S9_HA} unresolved`,
-          ],
-          `${prefix} staging premise: the audit items (SPEC 10.6)`,
+        // Refused beside the successful splits (exit 1 in T10.7-14's finding
+        // form, nothing modified — the shared check: the session file and
+        // the whole workspace byte-identical): `split` of N's
+        // parent-consistency item, an item of another kind, and of s's item,
+        // a leaf's, whose scope root has no children (SPEC 10.7).
+        await expectReviewRefusal(
+          product,
+          workspace,
+          ["review", "split", "s", session.pcNId],
+          SESSION_S_REL,
+          `${prefix} [N's parent-consistency item: split on an item of any ` +
+            `other kind is refused, SPEC 10.7]`,
+          { nothingModified: true },
         );
-        const idRoot = requireRow(
-          initial,
-          "subtree-coherence",
-          S9_H_FILE,
-          prefix,
-        ).id;
-        const idH = requireRow(initial, "subtree-coherence", S9_H, prefix).id;
-        const idHA = requireRow(initial, "subtree-coherence", S9_HA, prefix).id;
+        await expectReviewRefusal(
+          product,
+          workspace,
+          ["review", "split", "s", session.sId],
+          SESSION_S_REL,
+          `${prefix} [s's item, a leaf's: split on a subtree-coherence item ` +
+            `whose scope root has no children is refused, SPEC 10.7]`,
+          { nothingModified: true },
+        );
 
-        // Resolve h.a's item, then h's (so a RESOLVED original is split),
-        // and capture h.a's recorded state for the reuse assertion.
+        // A later re-derivation (SPEC 10.5, 10.7): N.a.x's item — the leaf
+        // beneath the decomposed N.a — resolved `updated` re-derives the
+        // session. Both decompositions govern it: no subtree-coherence item
+        // scoped at N or N.a is added back and nothing else enters, every
+        // item keeps its id, neither original's id is reused, and blockedBy
+        // is recomputed with each decomposed reference replaced by all items
+        // of its decomposition, recursively.
         await resolveOk(
           product,
           workspace,
           "s",
-          idHA,
-          "no-change",
-          `${prefix} \`resolve s <h.a's item> --status no-change\``,
-        );
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          idH,
-          "no-change",
-          `${prefix} \`resolve s <h's item> --status no-change\``,
-        );
-        const haBefore = await showItem(product, workspace, "s", idHA, prefix);
-
-        // Author h.b after create: no re-derivation, so no item exists for
-        // it and h's item's blockedBy still names only h.a's item — the
-        // original's stale blocker set, which a product passing the
-        // original's blockers on to new decomposition items assigns to h.b's
-        // new item, where the audit strategy gives it its child sections'
-        // items: none, h.b being childless (SPEC 10.6, 10.7).
-        await workspace.file(S9_H_FILE, T10_7_9_H_WITH_B);
-        await buildOk(
-          product,
-          workspace,
-          `${prefix} \`build\` after authoring h.b`,
-        );
-        assertSameJson(
-          rowSequence(await sessionStatus(product, workspace, "s", prefix))
-            .map((row) => row.split(" ").slice(0, 2).join(" "))
-            .sort(),
-          [
-            `subtree-coherence ${S9_H_FILE}`,
-            `subtree-coherence ${S9_H}`,
-            `subtree-coherence ${S9_HA}`,
-          ].sort(),
-          `${prefix} staging premise: authoring h.b alone adds no item — ` +
-            `new items enter only through re-derivation or split ` +
-            `(SPEC 10.5, 10.7)`,
-        );
-
-        // Split h's resolved item: one item per CURRENT child subtree —
-        // h.a's existing item is reused (id, status, recorded state kept),
-        // h.b's is newly created (unresolved; blockedBy its child sections'
-        // items, none — never the original's [h.a's item]) — plus h's
-        // parent-consistency item (blockedBy: the per-child items; origin
-        // empty in audit).
-        await expectExit(
-          product,
-          workspace,
-          ["review", "split", "s", idH],
-          0,
-          `${prefix} \`review split s <h's resolved item>\``,
-        );
-        const afterSplit = await exportSession(product, workspace, "s", prefix);
-        assertSameJson(
-          [...exportKindScopeSequence(afterSplit.items)].sort(),
-          [
-            `parent-consistency ${S9_H}`,
-            `subtree-coherence ${S9_H_FILE}`,
-            `subtree-coherence ${S9_HA}`,
-            `subtree-coherence ${S9_HB}`,
-          ].sort(),
-          `${prefix} after the split: the original is removed; one ` +
-            `subtree-coherence item per current child subtree plus h's ` +
-            `parent-consistency item (SPEC 10.7)`,
-        );
-        const haAfter = requireItem(
-          afterSplit.items,
-          "subtree-coherence",
-          S9_HA,
-          prefix,
-        );
-        if (haAfter.id !== idHA || haAfter.status !== "no-change") {
-          fail(
-            `${prefix}: h.a's existing item is reused by the split — id and ` +
-              `status kept (SPEC 10.7); got id ${haAfter.id}, status ` +
-              `${haAfter.status}`,
-          );
-        }
-        assertSameInformation(
-          haAfter.current,
-          haBefore.current,
-          `${prefix}: the reused item's recorded state is kept across the ` +
-            `split (SPEC 10.7)`,
-        );
-        const hbItem = requireItem(
-          afterSplit.items,
-          "subtree-coherence",
-          S9_HB,
-          prefix,
-        );
-        if (hbItem.status !== "unresolved") {
-          fail(
-            `${prefix}: h.b's newly created decomposition item enters ` +
-              `unresolved — the original's no-change must not propagate ` +
-              `(SPEC 10.2, 10.7); got ${hbItem.status}`,
-          );
-        }
-        if (hbItem.id === idH || hbItem.id === idRoot || hbItem.id === idHA) {
-          fail(
-            `${prefix}: h.b's item takes a fresh id (SPEC 10.2, 10.7); got ` +
-              hbItem.id,
-          );
-        }
-        assertBlockedBy(
-          hbItem,
-          [],
-          `${prefix}: h.b's newly created per-child item's blockedBy is the ` +
-            `one the audit strategy gives a subtree-coherence item — its ` +
-            `child sections' items, none for the childless h.b — never the ` +
-            `original's blockers (SPEC 10.6, 10.7; a product passing them ` +
-            `on to new decomposition items assigns h.a's item, the ` +
-            `original's stale blocker set from before h.b existed)`,
-        );
-        const pcH = requireItem(
-          afterSplit.items,
-          "parent-consistency",
-          S9_H,
-          prefix,
-        );
-        assertSameJson(
-          identitySet(pcH.context),
-          [S9_HA, S9_HB].sort(),
-          `${prefix}: h's parent-consistency item's context is the child ` +
-            `subtrees (SPEC 10.7)`,
-        );
-        assertBlockedBy(
-          pcH,
-          [idHA, hbItem.id],
-          `${prefix}: h's parent-consistency item is blocked by exactly the ` +
-            `per-child items (SPEC 10.7)`,
-        );
-        for (const item of [hbItem, pcH]) {
-          assertSameJson(
-            identitySet(item.origin),
-            [],
-            `${prefix}: decomposition items' origin is empty in an audit ` +
-              `session (SPEC 10.7)`,
-          );
-        }
-        // Every item blocked by the original becomes blocked by all
-        // decomposition items: the root's item.
-        assertBlockedBy(
-          requireItemById(afterSplit.items, idRoot, prefix),
-          [idHA, hbItem.id, pcH.id],
-          `${prefix}: the root's item — blocked by the original — becomes ` +
-            `blocked by all items of the decomposition (SPEC 10.7)`,
-        );
-
-        // Re-derivation in the audit session (SPEC 10.5 holds for every
-        // strategy): author h.c, then resolve h.b's item `updated` (it is
-        // unblocked: its blockedBy is empty). The decomposed kind+scope for
-        // h is never re-added; h.c's item enters with a fresh id; blockedBy
-        // is recomputed per the audit rule — the childless h.b's item stays
-        // unblocked — with decomposed references replaced by the
-        // decomposition.
-        await workspace.file(S9_H_FILE, T10_7_9_H_WITH_B_C);
-        await buildOk(
-          product,
-          workspace,
-          `${prefix} \`build\` after authoring h.c`,
-        );
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          hbItem.id,
+          session.naxId,
           "updated",
-          `${prefix} \`resolve s <h.b's item> --status updated\` — triggers ` +
-            `re-derivation (SPEC 10.5)`,
+          `${prefix} \`resolve s <N.a.x's item> --status updated\` — ` +
+            `re-derives the session (SPEC 10.5)`,
         );
         const derived = await exportSession(product, workspace, "s", prefix);
+        const later = `${prefix} after the later re-derivation`;
         assertSameJson(
           exportKindScopeSequence(derived.items),
+          AU_ORDER_AFTER_SPLIT,
+          `${later} (d): no subtree-coherence item scoped at N or N.a is ` +
+            `added back — each decomposition applies in its place, ` +
+            `recursively (P-9's invariant) — and no other item enters (SPEC ` +
+            `10.1, 10.5, 10.7)`,
+        );
+        for (const [kind, node, id] of [
+          ["subtree-coherence", AU_ROOT, session.rootId],
+          ["parent-consistency", AU_N, session.pcNId],
+          ["parent-consistency", AU_NA, session.pcNaId],
+          ["subtree-coherence", AU_NAX, session.naxId],
+          ["subtree-coherence", AU_NB, session.nbId],
+          ["subtree-coherence", AU_NBZ, session.nbzId],
+          ["subtree-coherence", AU_NC, session.ncId],
+          ["subtree-coherence", AU_NCY, session.ncyId],
+          ["subtree-coherence", AU_S, session.sId],
+        ] as const) {
+          if (requireItem(derived.items, kind, node, later).id !== id) {
+            fail(
+              `${later}: the ${kind} item at ${node} keeps its id ${id} — a ` +
+                `generated or decomposition-produced item matching an ` +
+                `existing one is that item (SPEC 10.5)`,
+            );
+          }
+        }
+        for (const [id, what] of [
+          [session.nOriginalId, "N's"],
+          [session.naOriginalId, "N.a's"],
+        ] as const) {
+          if (derived.items.some((item) => item.id === id)) {
+            fail(
+              `${later}: no item takes ${what} split original's id ${id} — ` +
+                `it is never reused, across re-derivations too (SPEC 10.7)`,
+            );
+          }
+        }
+        assertBlockedBy(
+          requireItemById(derived.items, session.pcNId, later),
+          [session.naxId, session.pcNaId, session.nbId, session.ncId],
+          `${later} (d): N's parent-consistency item is still blocked by ` +
+            `exactly N.a.x's item, N.a's parent-consistency item, N.b's ` +
+            `item, and N.c's item — the reference to the decomposed N.a ` +
+            `replaced by all items of its decomposition (SPEC 10.5, 10.7)`,
+        );
+        assertBlockedBy(
+          requireItemById(derived.items, session.rootId, later),
           [
-            `subtree-coherence ${S9_H_FILE}`,
-            `parent-consistency ${S9_H}`,
-            `subtree-coherence ${S9_HA}`,
-            `subtree-coherence ${S9_HB}`,
-            `subtree-coherence ${S9_HC}`,
+            session.naxId,
+            session.pcNaId,
+            session.nbId,
+            session.ncId,
+            session.pcNId,
+            session.sId,
           ],
-          `${prefix} after the re-derivation: no subtree-coherence item for ` +
-            `h is re-added (its decomposition applies); h.c's item enters ` +
-            `at its place in audit item order (SPEC 10.5, 10.6, 10.7)`,
+          `${later} (d): the root's item is still blocked by exactly the ` +
+            `items of N's decomposition, N.a's standing in recursively, and ` +
+            `s's item — its child section N's decomposed reference replaced ` +
+            `(SPEC 10.5, 10.6, 10.7)`,
         );
-        const hcItem = requireItem(
-          derived.items,
-          "subtree-coherence",
-          S9_HC,
-          prefix,
+      },
+    );
+
+    // --- the childless refusal: Q's only child deleted after `create` ---------
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [AQ_FILE]: T10_7_9_Q_INITIAL },
+      async (workspace) => {
+        const prefix = "T10.7-9 audit session over Q";
+        await buildOk(product, workspace, `${prefix} \`build\``);
+        await createAuditSession(product, workspace, "s", prefix);
+        const created = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          rowSequence(created),
+          [AQ_ROOT, AQ_Q, AQ_QR].map(
+            (node) => `subtree-coherence ${node} unresolved`,
+          ),
+          `${prefix} staging premise: the audit items, Q.r's among them — Q ` +
+            `holding its child at \`create\` (SPEC 10.6)`,
         );
-        const auditPriorIds = [idRoot, idH, idHA, hbItem.id, pcH.id];
-        if (auditPriorIds.includes(hcItem.id)) {
-          fail(
-            `${prefix}: h.c's item takes a fresh id — the split-removed ` +
-              `original's id is never reused, across re-derivations too ` +
-              `(SPEC 10.7); got ${hcItem.id}`,
-          );
-        }
-        if (hcItem.status !== "unresolved") {
-          fail(
-            `${prefix}: h.c's item is created unresolved — the trigger's ` +
-              `updated must not propagate (SPEC 10.2); got ${hcItem.status}`,
-          );
-        }
-        assertBlockedBy(
-          requireItemById(derived.items, hbItem.id, prefix),
-          [],
-          `${prefix} after the re-derivation: blockedBy is recomputed per ` +
-            `the audit rule — the childless h.b's item has no child ` +
-            `sections' items, so its blockedBy stays empty (SPEC 10.5, 10.6)`,
+        const qId = requireRow(created, "subtree-coherence", AQ_Q, prefix).id;
+        await workspace.file(AQ_FILE, T10_7_9_Q_CHILD_DELETED);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after Q.r's deletion`,
         );
-        assertBlockedBy(
-          requireItemById(derived.items, pcH.id, prefix),
-          [idHA, hbItem.id, hcItem.id],
-          `${prefix} after the re-derivation: h's parent-consistency item ` +
-            `is blocked by the current child items (SPEC 10.5, 10.7)`,
-        );
-        assertBlockedBy(
-          requireItemById(derived.items, idRoot, prefix),
-          [idHA, hbItem.id, hcItem.id, pcH.id],
-          `${prefix} after the re-derivation: the root's blockedBy — its ` +
-            `child section's item — has the decomposed reference replaced ` +
-            `by all items of the decomposition (SPEC 10.5, 10.6, 10.7)`,
+        await expectReviewRefusal(
+          product,
+          workspace,
+          ["review", "split", "s", qId],
+          SESSION_S_REL,
+          `${prefix} [Q's item, its only child Q.r deleted by manual edit ` +
+            `after create: in an audit session the children are the current ` +
+            `ones alone, so its scope root has none, though its scope as ` +
+            `last assigned still lists Q.r — split on a subtree-coherence ` +
+            `item whose scope root has no children is refused, SPEC 10.7]`,
+          { nothingModified: true },
         );
       },
     );
