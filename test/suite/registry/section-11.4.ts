@@ -239,58 +239,68 @@
 // (the bare whole-domain form and two operand forms), the imports member
 // asserted as ONE exact list:
 //
-// - specs/imports.mdx opens with the ten-declaration matrix, one declaration
-//   per line at the very start of the file (the §2.1 staging discipline:
-//   each offending statement is its own byte window), composed by the
-//   running-offset builder: (1) a VALID single default binding
+// - specs/imports.mdx opens with the twelve-declaration matrix, one
+//   declaration per line at the very start of the file (the §2.1 staging
+//   discipline: each offending statement is its own byte window), composed
+//   by the running-offset builder: (1) a VALID single default binding
 //   `import BÄSE from "./BASE.xspec"` — the bound identifier is multi-byte
 //   (Ä: 2 bytes), so every later declaration's byte offset diverges from
 //   code-point and UTF-16 counts (SPEC 1.7); (2) the side-effect-only, (3)
 //   named-only (`{ part }`), and (4) namespace-only (`* as ns`) forms, each
-//   with the SAME valid resolving specifier; (5) a valid-form default import
-//   of the undiscovered `./typo.xspec`; (6) the bare specifier `BASE.xspec`
-//   — not beginning `./`, so specifier form defines no target even though a
-//   suffix-keyed resolver would land on the discovered specs/BASE.mdx; (7)
-//   `../docs/impl.xspec`, of valid form, designating docs/impl.mdx — an
-//   `.mdx` file matched only by the code group, a discovered code source
-//   and no spec source (SPEC 7.2, 2.1); (8) `./B.xspec`, designating the
-//   discovered spec source specs/B.mdx, which begins with a byte-order mark
-//   — unparseable (SPEC 1.6, 14.20) and masked, yet discovery, not
-//   parseability, defines designation; (9) the non-canonical
-//   `./sub/../BASE.xspec` (no `sub/` on disk) — lexical resolution
-//   designates specs/BASE.mdx (SPEC 2.1; T2.1-2); (10) the
+//   with the SAME valid resolving specifier; the two-clause forms (5)
+//   `import X, { b } from "./BASE.xspec"` and (6)
+//   `import Y, * as N from "./BASE.xspec"` — a default binding beside a
+//   named, respectively a namespace, clause: no single default binding, so
+//   each invalid (SPEC 2.1), the same specifier again; (7) a valid-form
+//   default import of the undiscovered `./typo.xspec`; (8) the bare
+//   specifier `BASE.xspec` — not beginning `./`, so specifier form defines
+//   no target even though a suffix-keyed resolver would land on the
+//   discovered specs/BASE.mdx; (9) `../docs/impl.xspec`, of valid form,
+//   designating docs/impl.mdx — an `.mdx` file matched only by the code
+//   group, a discovered code source and no spec source (SPEC 7.2, 2.1);
+//   (10) `./B.xspec`, designating the discovered spec source specs/B.mdx,
+//   which begins with a byte-order mark — unparseable (SPEC 1.6, 14.20) and
+//   masked, yet discovery, not parseability, defines designation; (11) the
+//   non-canonical `./sub/../BASE.xspec` (no `sub/` on disk) — lexical
+//   resolution designates specs/BASE.mdx (SPEC 2.1; T2.1-2); (12) the
 //   semicolon-terminated `import AGAIN from "./BASE.xspec";` — the `;` ends
 //   ECMAScript's ImportDeclaration (SPEC 14.20), so the range ends after it
 //   (T3-7's removal arm). After the block, prose holding the embedding
 //   `{text(B.x)}` into the masked target.
 // - Every declaration, valid and invalid, is listed with its range (SPEC
-//   11.4): the exact ten-entry compare fails a product that omits invalid
-//   declarations from the listing, misplaces a byte, or ends the
+//   11.4): the exact twelve-entry compare fails a product that omits
+//   invalid declarations from the listing, misplaces a byte, or ends the
 //   semicolon-terminated declaration's range before its `;`.
 // - The binding-name datum is the DEFAULT binding's identifier: plain
-//   where the declaration binds a default — validly or not — and the
-//   stated `null`, never the unavailability marker (the form-exact decode
-//   rejects a marker name outright), for the three no-default forms; `part`
-//   and `ns` are named-clause and namespace identifiers, never this datum
-//   (a product reporting either fails the `null` compare).
+//   where the declaration binds a default — validly or not, a non-default
+//   clause beside it notwithstanding: exactly "X" and "Y" for the two-clause
+//   forms, never "b" or "N" (SPEC 11.4: an identifier bound by any
+//   non-default clause is never this datum; a product reporting the
+//   clause's identifier, or withdrawing an invalid form's default name,
+//   fails the exact compare) — and the stated `null`, never the
+//   unavailability marker (the form-exact decode rejects a marker name
+//   outright), for the three no-default forms; `part` and `ns` are
+//   named-clause and namespace identifiers, never this datum (a product
+//   reporting either fails the `null` compare).
 // - The resolved-target datum turns on specifier form and discovery ALONE,
-//   never on binding validity or the target's parseability: the three
+//   never on binding validity or the target's parseability: the five
 //   invalid binding forms still carry the plain target "specs/BASE.mdx"
-//   (name `null` beside a defined target — the sharp cross-product cell
-//   against a product that marks every datum of an invalid import
-//   unavailable), the masked target's import carries the plain
-//   "specs/B.mdx" with no 14.15, and the non-canonical spelling reports the
-//   designated "specs/BASE.mdx", never the spelling; while `./typo.xspec`
-//   (discovery defines none), the bare specifier (form defines none), and
-//   the code-source target (no spec source) each carry
+//   (a `null` or plain name beside a defined target — the sharp
+//   cross-product cells against a product that marks every datum of an
+//   invalid import unavailable), the masked target's import carries the
+//   plain "specs/B.mdx" with no 14.15, and the non-canonical spelling
+//   reports the designated "specs/BASE.mdx", never the spelling; while
+//   `./typo.xspec` (discovery defines none), the bare specifier (form
+//   defines none), and the code-source target (no spec source) each carry
 //   `{"unavailable": true}` literally — never `null` (the decode rejects a
 //   `null` target outright).
-// - Findings: exactly six 14.15 — one per invalid declaration (staging
-//   integrity rides the answer itself; no gate-reference `build` —
-//   certification note below) — each located within its own declaration's
-//   end-widened byte window in specs/imports.mdx (equal codes order by
-//   locations, SPEC 12.7, so position among them pins which finding is
-//   which); one 14.6 for the embedding into the masked target, located
+// - Findings: exactly eight 14.15 — one per invalid declaration, each
+//   two-clause form's among them (staging integrity rides the answer
+//   itself; no gate-reference `build` — certification note below) — each
+//   located within its own declaration's end-widened byte window in
+//   specs/imports.mdx (equal codes order by locations, SPEC 12.7, so
+//   position among them pins which finding is which); one 14.6 for the
+//   embedding into the masked target, located
 //   exactly by its full braced container (no spelling resolves into a
 //   masked file, SPEC 11.2 — the occurrence list stays `[]`); and, exactly
 //   when B is requested, B's 14.20 at its one zero-length range, offset 0
@@ -434,7 +444,8 @@
 // the specifier designating the discovered code source) read `null` under
 // that deviation where the form-exact decode admits only a path value or
 // the marker, so the decode itself rejects the answer (its masked-target
-// and non-canonical-specifier arms carry defined targets and are unmoved);
+// and non-canonical-specifier arms carry defined targets and are unmoved,
+// as are its two-clause arms, plain names beside plain targets);
 // under VIOL-AVAIL-OMIT every stated-`null` member its answers carry (each
 // root's `tags`/`coverage`, every finding's `null` path, the three
 // no-default declarations' `null` name) is absent and the decode rejects
@@ -2790,8 +2801,8 @@ const T11_4_3 = defineProductTest({
 
 // --- T11.4-4 — imports ----------------------------------------------------------
 //
-// The declaration matrix (module header): ten imports, one per line, at the
-// very start of specs/imports.mdx (the §2.1 staging discipline — every
+// The declaration matrix (module header): twelve imports, one per line, at
+// the very start of specs/imports.mdx (the §2.1 staging discipline — every
 // offending statement is its own byte window, and nothing precedes the first
 // declaration), the valid first declaration's multi-byte bound identifier
 // `BÄSE` (Ä: 2 bytes) shifting every later declaration's byte offset away
@@ -2865,6 +2876,20 @@ IMP.add("\n");
 const IMP_NAMESPACE_TEXT = 'import * as ns from "./BASE.xspec"';
 const IMP_NAMESPACE = IMP.add(IMP_NAMESPACE_TEXT);
 IMP.add("\n");
+// The two-clause forms (TEST-SPEC T11.4-4's spellings): a default binding
+// beside a named, respectively a namespace, clause — no single default
+// binding, so each invalid (SPEC 2.1, 14.15) — whose binding-name datum is
+// the default binding's identifier, "X" and "Y", never the non-default
+// clause's "b" or "N" (SPEC 11.4); the specifier designates the discovered
+// specs/BASE.mdx, so the target is plain. The four identifiers they bind
+// collide with no other import's (`b` is not `B`: identifiers are
+// case-sensitive), so each declaration's one finding is its form's.
+const IMP_DEFAULT_NAMED_TEXT = 'import X, { b } from "./BASE.xspec"';
+const IMP_DEFAULT_NAMED = IMP.add(IMP_DEFAULT_NAMED_TEXT);
+IMP.add("\n");
+const IMP_DEFAULT_NAMESPACE_TEXT = 'import Y, * as N from "./BASE.xspec"';
+const IMP_DEFAULT_NAMESPACE = IMP.add(IMP_DEFAULT_NAMESPACE_TEXT);
+IMP.add("\n");
 const IMP_TYPO_TEXT = 'import TYPO from "./typo.xspec"';
 const IMP_TYPO = IMP.add(IMP_TYPO_TEXT);
 IMP.add("\n");
@@ -2905,17 +2930,21 @@ const IMPORTS_ROOT_RANGE: SourceRange = { start: 0, end: IMP.pos };
  * The complete expected imports member, in document order (SPEC 11.4, 12.7):
  * every declaration, valid and invalid, listed with its byte-exact range;
  * `name` the default binding's identifier — plain where the declaration
- * binds a default, validly or not, and the stated `null` (never the
- * unavailability marker, never a named-clause or namespace identifier) for
- * the no-default forms; `target` the discovered spec source the specifier
- * designates under 2.1, parseable or not, where specifier form and discovery
- * define one, `{"unavailable": true}` otherwise — never `null`.
+ * binds a default, validly or not, a non-default clause beside it
+ * notwithstanding (the two-clause forms' "X" and "Y", never "b" or "N"),
+ * and the stated `null` (never the unavailability marker, never a
+ * named-clause or namespace identifier) for the no-default forms; `target`
+ * the discovered spec source the specifier designates under 2.1, parseable
+ * or not, where specifier form and discovery define one,
+ * `{"unavailable": true}` otherwise — never `null`.
  */
 const EXPECTED_IMPORT_ENTRIES: readonly ViewImportEntry[] = [
   { range: IMP_VALID, name: "BÄSE", target: IMPORT_TARGET_FILE },
   { range: IMP_SIDE, name: null, target: IMPORT_TARGET_FILE },
   { range: IMP_NAMED, name: null, target: IMPORT_TARGET_FILE },
   { range: IMP_NAMESPACE, name: null, target: IMPORT_TARGET_FILE },
+  { range: IMP_DEFAULT_NAMED, name: "X", target: IMPORT_TARGET_FILE },
+  { range: IMP_DEFAULT_NAMESPACE, name: "Y", target: IMPORT_TARGET_FILE },
   { range: IMP_TYPO, name: "TYPO", target: UNAVAILABLE },
   { range: IMP_BARE, name: "BARE", target: UNAVAILABLE },
   { range: IMP_CODE, name: "CODE", target: UNAVAILABLE },
@@ -2925,7 +2954,7 @@ const EXPECTED_IMPORT_ENTRIES: readonly ViewImportEntry[] = [
 ];
 
 /**
- * The six invalid declarations in document order — also the order of the
+ * The eight invalid declarations in document order — also the order of the
  * answer's 14.15 findings: they share one code, and equal codes order by
  * locations (SPEC 12.7), so position among them pins which finding is which.
  * Each must fall within its own declaration's end-widened byte window (the
@@ -2939,6 +2968,14 @@ const INVALID_IMPORT_ARMS: readonly {
   { what: "the side-effect-only form", range: IMP_SIDE },
   { what: "the named-only form (`{ part }`)", range: IMP_NAMED },
   { what: "the namespace-only form (`* as ns`)", range: IMP_NAMESPACE },
+  {
+    what: "the default binding beside a named clause (`X, { b }`: no single default binding)",
+    range: IMP_DEFAULT_NAMED,
+  },
+  {
+    what: "the default binding beside a namespace clause (`Y, * as N`: no single default binding)",
+    range: IMP_DEFAULT_NAMESPACE,
+  },
   { what: "the undiscovered `./typo.xspec` target", range: IMP_TYPO },
   { what: "the bare specifier `BASE.xspec`", range: IMP_BARE },
   {
@@ -3013,7 +3050,7 @@ function assertImportsFileFindings(
 const T11_4_4 = defineProductTest({
   id: "T11.4-4",
   title:
-    'every import declaration, valid and invalid, is listed in the view\'s imports member with its byte-exact range in document order — a valid default binding whose multi-byte identifier `BÄSE` shifts every later byte offset away from code-point and UTF-16 counts, the side-effect-only, named-only (`{ part }`), and namespace-only (`* as ns`) forms each with the same valid resolving specifier, a valid-form default import of the undiscovered `./typo.xspec`, the bare specifier `BASE.xspec`, a `.xspec` specifier designating the discovered code source docs/impl.mdx (an `.mdx` file matched only by a code group), a valid import of the byte-order-mark-masked spec source specs/B.mdx, the non-canonical `./sub/../BASE.xspec`, and a semicolon-terminated declaration whose range ends after its `;` — the binding-name datum the DEFAULT binding\'s identifier: plain where a default is bound, validly or not, and the stated `null` for the three no-default forms, never the unavailability marker and never a named-clause or namespace identifier; the resolved-target datum turning on specifier form and discovery ALONE: the invalid binding forms still carry the plain target "specs/BASE.mdx" (name `null` beside a defined target), the masked target the plain "specs/B.mdx" (discovery, not parseability, defines designation — the import valid, no 14.15) and the non-canonical spelling the designated "specs/BASE.mdx", while `./typo.xspec` (discovery defines none), the bare specifier (form defines none — a suffix-keyed resolver notwithstanding), and the code-source target (no spec source) are each `{"unavailable": true}` literally, never `null`; each invalidity a located 14.15 finding beside the view — exactly six, one per invalid declaration, each within its own declaration\'s end-widened byte window — the embedding `{text(B.x)}` into the masked target recording no occurrence and reported as the importing file\'s own 14.6 at its full braced container; the masked file contributing no view, its 14.20 — one zero-length range at offset 0 — accompanying the bare whole-domain `view` and `view specs/B.mdx` (views `[]`) and NOT `view specs/imports.mdx`, whose imports member is the same list; and any finding or explicitly-unavailable datum means exit 1 with the full answer still emitted (SPEC 11.4, 11.2, 2.1, 1.6, 1.7, 7.2, 12.7, 14; T2.1-2, T3-7; CERTIFICATIONS.md CONF-AVAIL in scope)',
+    'every import declaration, valid and invalid, is listed in the view\'s imports member with its byte-exact range in document order — a valid default binding whose multi-byte identifier `BÄSE` shifts every later byte offset away from code-point and UTF-16 counts, the side-effect-only, named-only (`{ part }`), and namespace-only (`* as ns`) forms each with the same valid resolving specifier, the two-clause `import X, { b } from "./BASE.xspec"` and `import Y, * as N from "./BASE.xspec"` (a default binding beside a named, respectively a namespace, clause: no single default binding, so each invalid) with it too, a valid-form default import of the undiscovered `./typo.xspec`, the bare specifier `BASE.xspec`, a `.xspec` specifier designating the discovered code source docs/impl.mdx (an `.mdx` file matched only by a code group), a valid import of the byte-order-mark-masked spec source specs/B.mdx, the non-canonical `./sub/../BASE.xspec`, and a semicolon-terminated declaration whose range ends after its `;` — the binding-name datum the DEFAULT binding\'s identifier: plain where a default is bound, validly or not, a non-default clause beside it notwithstanding (exactly "X" and "Y" for the two-clause forms, never "b" or "N"), and the stated `null` for the three no-default forms, never the unavailability marker and never an identifier a named or namespace clause binds; the resolved-target datum turning on specifier form and discovery ALONE: the five invalid binding forms still carry the plain target "specs/BASE.mdx" (a `null` or plain name beside a defined target), the masked target the plain "specs/B.mdx" (discovery, not parseability, defines designation — the import valid, no 14.15) and the non-canonical spelling the designated "specs/BASE.mdx", while `./typo.xspec` (discovery defines none), the bare specifier (form defines none — a suffix-keyed resolver notwithstanding), and the code-source target (no spec source) are each `{"unavailable": true}` literally, never `null`; each invalidity a located 14.15 finding beside the view — exactly eight, one per invalid declaration, each within its own declaration\'s end-widened byte window — the embedding `{text(B.x)}` into the masked target recording no occurrence and reported as the importing file\'s own 14.6 at its full braced container; the masked file contributing no view, its 14.20 — one zero-length range at offset 0 — accompanying the bare whole-domain `view` and `view specs/B.mdx` (views `[]`) and NOT `view specs/imports.mdx`, whose imports member is the same list; and any finding or explicitly-unavailable datum means exit 1 with the full answer still emitted (SPEC 11.4, 11.2, 2.1, 1.6, 1.7, 7.2, 12.7, 14; T2.1-2, T3-7; CERTIFICATIONS.md CONF-AVAIL in scope)',
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline) — composed-range arithmetic
     // proven against the staged bytes before any product invocation.
@@ -3022,6 +3059,16 @@ const T11_4_4 = defineProductTest({
       [IMP_SIDE, IMP_SIDE_TEXT, "the side-effect-only import"],
       [IMP_NAMED, IMP_NAMED_TEXT, "the named-only import"],
       [IMP_NAMESPACE, IMP_NAMESPACE_TEXT, "the namespace-only import"],
+      [
+        IMP_DEFAULT_NAMED,
+        IMP_DEFAULT_NAMED_TEXT,
+        "the default-plus-named-clause import",
+      ],
+      [
+        IMP_DEFAULT_NAMESPACE,
+        IMP_DEFAULT_NAMESPACE_TEXT,
+        "the default-plus-namespace-clause import",
+      ],
       [IMP_TYPO, IMP_TYPO_TEXT, "the undiscovered-target import"],
       [IMP_BARE, IMP_BARE_TEXT, "the bare-specifier import"],
       [IMP_CODE, IMP_CODE_TEXT, "the code-source-target import"],
@@ -3068,7 +3115,7 @@ const T11_4_4 = defineProductTest({
       // Invocation 1 (CONF-AVAIL's enumerated surface: no gate-reference
       // `build`, no snapshot compare): the bare whole-domain `view` — every
       // discovered spec source requested, the masked B among them. The
-      // answer carries the six 14.15 findings, the 14.6, B's 14.20, and
+      // answer carries the eight 14.15 findings, the 14.6, B's 14.20, and
       // three explicitly-unavailable targets, so exit 1 with the full
       // document still emitted (SPEC 11.2).
       const context = "T11.4-4 bare `view` (whole domain: B, BASE, imports)";
@@ -3077,7 +3124,7 @@ const T11_4_4 = defineProductTest({
         workspace,
         ["view"],
         1,
-        `${context} — the answer carries the six staged 14.15 findings, ` +
+        `${context} — the answer carries the eight staged 14.15 findings, ` +
           `the embedding's 14.6, the masked target's 14.20, and three ` +
           `explicitly-unavailable import targets, so the invocation exits ` +
           `1 with the full document still emitted (SPEC 11.2, 11.4)`,
@@ -3096,15 +3143,18 @@ const T11_4_4 = defineProductTest({
       // exactly the staged conditions, nothing else — the valid default
       // imports (BÄSE, B, NONCANON, AGAIN) are finding-free (an unused
       // binding is valid; several imports may bind one module under
-      // different names, SPEC 2.1), no binding collision is staged (nine
-      // distinct identifiers), and no viewed file spells a section.
+      // different names, SPEC 2.1), no binding collision is staged
+      // (thirteen distinct identifiers, case-sensitive: `b` is not `B`),
+      // and no viewed file spells a section.
       assertConditionCounts(
         report.findings,
-        { "14.6": 1, "14.15": 6, "14.20": 1 },
-        `${context}: exactly six 14.15 accompany — the side-effect-only, ` +
-          `named-only, and namespace-only binding forms, the undiscovered ` +
-          `./typo.xspec target, the bare specifier, and the specifier ` +
-          `designating the discovered code source (SPEC 2.1, 14) — beside ` +
+        { "14.6": 1, "14.15": 8, "14.20": 1 },
+        `${context}: exactly eight 14.15 accompany — the side-effect-only, ` +
+          `named-only, and namespace-only binding forms, the two default ` +
+          `bindings beside a named or a namespace clause (no single default ` +
+          `binding), the undiscovered ./typo.xspec target, the bare ` +
+          `specifier, and the specifier designating the discovered code ` +
+          `source (SPEC 2.1, 14) — beside ` +
           `the embedding's 14.6 and the requested masked file's 14.20 ` +
           `(SPEC 11.2, 11.4), and nothing else: the four valid default ` +
           `imports contribute none — the masked target's import included ` +
@@ -3137,21 +3187,25 @@ const T11_4_4 = defineProductTest({
       const targetView = report.views[0]!;
       const importsView = report.views[1]!;
 
-      // The subject compare: the imports member is exactly the ten-entry
-      // list — every declaration, valid and invalid, with its byte-exact
-      // range (the semicolon-terminated one's ending after its `;`), the
-      // binding-name datum plain or the stated null, and the
-      // resolved-target datum plain or the literal unavailability marker
-      // (SPEC 11.4, 11.2, 2.1, 12.7; module header).
+      // The subject compare: the imports member is exactly the
+      // twelve-entry list — every declaration, valid and invalid, with its
+      // byte-exact range (the semicolon-terminated one's ending after its
+      // `;`), the binding-name datum plain (the two-clause forms' default
+      // identifiers "X" and "Y", never the clause's "b" or "N") or the
+      // stated null, and the resolved-target datum plain or the literal
+      // unavailability marker (SPEC 11.4, 11.2, 2.1, 12.7; module header).
       assertSameJson(
         importsView.imports,
         EXPECTED_IMPORT_ENTRIES,
         `${context} — ${IMPORTS_FILE}: every import declaration, valid ` +
           `and invalid, listed with its range in document order — the ` +
           `semicolon-terminated declaration's ending after its \`;\` (SPEC ` +
-          `14.20; T3-7); name the default binding's identifier or the ` +
-          `stated null for the side-effect-only, named-only, and ` +
-          `namespace-only forms — never the marker, never part/ns; target ` +
+          `14.20; T3-7); name the default binding's identifier, a ` +
+          `non-default clause beside it notwithstanding (exactly "X" and ` +
+          `"Y" for \`import X, { b }\` and \`import Y, * as N\`, never "b" ` +
+          `or "N"), or the stated null for the side-effect-only, ` +
+          `named-only, and namespace-only forms — never the marker, never ` +
+          `part/ns; target ` +
           `the designated discovered spec source wherever specifier form ` +
           `and discovery define one — binding validity notwithstanding, ` +
           `parseability notwithstanding (the masked "specs/B.mdx"), the ` +
@@ -3222,9 +3276,9 @@ const T11_4_4 = defineProductTest({
       );
       assertConditionCounts(
         operandReport.findings,
-        { "14.6": 1, "14.15": 6 },
+        { "14.6": 1, "14.15": 8 },
         `${operandContext}: exactly the importing file's own findings — ` +
-          `six 14.15 and the embedding's 14.6 — and NO 14.20: the masked ` +
+          `eight 14.15 and the embedding's 14.6 — and NO 14.20: the masked ` +
           `specs/B.mdx is not requested, and a masked file is never ` +
           `consulted by an expansion, so its parse-failure finding ` +
           `accompanies only when it is itself requested (SPEC 11.4, 11.2; ` +
@@ -3241,7 +3295,7 @@ const T11_4_4 = defineProductTest({
         operandReport.views[0]!.imports,
         EXPECTED_IMPORT_ENTRIES,
         `${operandContext} — ${IMPORTS_FILE}: the imports member is the ` +
-          `same ten-entry list as under the whole-domain view — the ` +
+          `same twelve-entry list as under the whole-domain view — the ` +
           `masked target's plain "specs/B.mdx" among them whether or not ` +
           `B is requested (SPEC 11.4, 2.1, 12.7)`,
       );
