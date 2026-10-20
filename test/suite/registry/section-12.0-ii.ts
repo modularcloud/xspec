@@ -7,8 +7,8 @@
 // arms of section-6.4.ts, section-6.5.ts, and section-6.3.ts — the H-7 map
 // keeps "12.0" on those three — and a re-registration here would re-run
 // those bodies (duplicated execution). The gated-read, masking,
-// past-the-gate, and within-class-2 precedence arms are T12.0-10's own
-// registered body below.
+// spelled-not-defined, past-the-gate, and within-class-2 precedence arms
+// are T12.0-10's own registered body below.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -71,7 +71,29 @@
 //   side only — its wording, like all diagnostic text, is unpinned (H-3).
 //   "Reports no validation findings" is asserted at H-5's protocol grain:
 //   the exit-2 stdout is exactly the one 12.7 error document, a form with
-//   no findings member (12.7). "Reports the corruption" reuses T10.1-4's
+//   no findings member (12.7). The mutating row, `review create --coverage
+//   <unknown-profile> --name n`, is the plain usage error (`code` and
+//   `path` null, no locations) on each side, and "no session written" is
+//   a whole-root compare around each run (H-6's lock-path exclusion: its
+//   acquisition's and release's writes no modification, release deleting
+//   the lock directory and the area's directory its acquisition brought
+//   into existence, SPEC 13.5) with `.xspec/reviews/n.json` absent after
+//   it; a twin control run after every row — the configured profile in
+//   the unknown one's place — creates that very session, so the absence is
+//   the refusal's. The failing workspace's staged findings are its `build`
+//   premise, located file by file: the unparseable `specs/Broken.mdx`
+//   (14.20) and the spelled-not-defined arm's four parseable files —
+//   `specs/Dup.mdx` spelling `dup` twice (one condition-3 finding locating
+//   both bearers, T14-8), `specs/Orphan.mdx` spelling `kid` beneath a
+//   section with no `id` (14.1, masking condition 2 for its child), and
+//   `specs/Braced.mdx`'s `id={"x"}` and `specs/Bare.mdx`'s `<S id>` (one
+//   14.17 each) — no gated row naming any of them, so the twin compare
+//   stays sound. The gated report — the masking arm's and the
+//   spelled-not-defined arms' — is "exactly the findings `build` reports
+//   there" (13.3): that premise's findings, every member but `message`
+//   compared in 12.7's order (wording unpinned, H-3; H-4's
+//   product-to-itself compare, as T6.6-3 projects a refusal's findings).
+//   "Reports the corruption" reuses T10.1-4's
 //   operationalization (exit 1, stdout matching /corrupt/i — SPEC.md's
 //   fixed vocabulary for the state; information presence, not wording),
 //   and the same `resolve` run under `--json` asserts what TEST-SPEC line
@@ -173,6 +195,7 @@ import {
   assertConditionCounts,
   assertFindingConcernsPath,
   assertFindingLocated,
+  assertPlainUsageError,
   assertSameJson,
   buildFindings,
   buildOk,
@@ -1674,10 +1697,13 @@ const T12_0_9 = defineProductTest({
 // ---------------------------------------------------------------------------
 
 // The precedence pair: a failing workspace and its valid twin, identical in
-// everything the six gated argument checks consult — the configuration (a
-// spec group, a code group, one coverage profile), the parseable named spec
-// source, and the discovered code source with one named unit — differing
-// exactly in the unparseable file that makes `build` fail (14.20).
+// everything the seven gated argument checks consult — the configuration (a
+// spec group, a code group, one coverage profile), the session directory
+// (no session), the parseable named spec source, and the discovered code
+// source with one named unit — differing exactly in the files that make
+// `build` fail: the unparseable file (14.20) and the spelled-not-defined
+// arm's four parseable files, each carrying findings of its own (14.1,
+// 14.3, 14.17).
 const PRECEDENCE_CONFIG = `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1701,6 +1727,15 @@ export default defineConfig({
 const PREC_SPEC_FILE = "specs/A.mdx";
 const PREC_CODE_FILE = "src/app.ts";
 const PREC_BROKEN_FILE = "specs/Broken.mdx";
+// The spelled-not-defined arm's files (SPEC 12.0, 11.2).
+const PREC_DUP_FILE = "specs/Dup.mdx";
+const PREC_ORPHAN_FILE = "specs/Orphan.mdx";
+const PREC_BRACED_FILE = "specs/Braced.mdx";
+const PREC_BARE_FILE = "specs/Bare.mdx";
+// The session `review create --coverage <unknown-profile> --name n` names:
+// never written by that row, written by its closing twin control.
+const PREC_SESSION_NAME = "n";
+const PREC_SESSION_REL = `.xspec/reviews/${PREC_SESSION_NAME}.json`;
 
 const PRECEDENCE_TWIN_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": PRECEDENCE_CONFIG,
@@ -1708,29 +1743,181 @@ const PRECEDENCE_TWIN_FILES: Readonly<Record<string, InitialFileContents>> = {
   [PREC_CODE_FILE]: "export function known(): void {}\n",
 };
 
+// Every file below is staged in no gated row's name, so every argument
+// check of the gated rows is judged from consulted state identical to the
+// twin's; only the masking and spelled-not-defined arms name them,
+// deliberately.
 const PRECEDENCE_FAILING_FILES: Readonly<Record<string, InitialFileContents>> =
   {
     ...PRECEDENCE_TWIN_FILES,
-    // An unclosed section tag: unparseable MDX (14.20), the workspace's one
-    // validation finding — staged in a file no gated row names, so every
-    // argument check below is judged from consulted state identical to the
-    // twin's; only the masking arm names this file, deliberately.
+    // An unclosed section tag: unparseable MDX (14.20), the masking arm's
+    // named file.
     [PREC_BROKEN_FILE]: ['<S id="broken">', "Text that never closes.", ""].join(
       "\n",
     ),
+    // `dup`, spelled by two sections: duplicate spellings leave every
+    // bearer's node identity undefined (11.2), one condition-3 finding
+    // locating both bearers (14.3, T14-8).
+    [PREC_DUP_FILE]: [
+      '<S id="dup">',
+      "First bearer.",
+      "</S>",
+      "",
+      '<S id="dup">',
+      "Second bearer.",
+      "</S>",
+      "",
+    ].join("\n"),
+    // `kid`, spelled by the one section beneath an ancestor spelling no
+    // identity — its `id` absent (14.1, masking condition 2 for its child):
+    // the chain conditions are inherited, so `kid`'s bearer has no defined
+    // identity (11.2).
+    [PREC_ORPHAN_FILE]: [
+      "<S>",
+      "Parent spelling no identity.",
+      "",
+      '<S id="kid">',
+      "Kid text.",
+      "</S>",
+      "</S>",
+      "",
+    ].join("\n"),
+    // An `id` braced (naming `x`) and an `id` valueless (naming `true`, the
+    // value JSX gives a bare attribute): neither is the quoted static-string
+    // form, so neither section spells an identity (11.2) — one 14.17 each.
+    [PREC_BRACED_FILE]: ['<S id={"x"}>', "Braced id.", "</S>", ""].join("\n"),
+    [PREC_BARE_FILE]: ["<S id>", "Valueless id.", "</S>", ""].join("\n"),
   };
+
+/** One finding the failing workspace's staging makes (its `build` premise). */
+interface StagedFinding {
+  /** The condition (SPEC 14). */
+  readonly condition: string;
+  /** The file every one of its locations lies in. */
+  readonly file: string;
+  /** What stages it. */
+  readonly what: string;
+}
+
+// Exactly the findings `build` reports on the failing workspace (SPEC 14:
+// every condition present reported), listed in no particular order.
+const PRECEDENCE_FAILING_FINDINGS: readonly StagedFinding[] = [
+  {
+    condition: "14.1",
+    file: PREC_ORPHAN_FILE,
+    what: "the section spelling no `id` (a missing ID)",
+  },
+  {
+    condition: "14.3",
+    file: PREC_DUP_FILE,
+    what: "`dup`'s two bearers (one duplicate-ID finding locating both, T14-8)",
+  },
+  {
+    condition: "14.17",
+    file: PREC_BRACED_FILE,
+    what: 'the braced `id={"x"}` (an invalid prop)',
+  },
+  {
+    condition: "14.17",
+    file: PREC_BARE_FILE,
+    what: "the valueless `<S id>` (an invalid prop)",
+  },
+  {
+    condition: "14.20",
+    file: PREC_BROKEN_FILE,
+    what: "the unclosed section (an unparseable source)",
+  },
+];
+
+/**
+ * One spelled-not-defined row (SPEC 12.0: an `id` judged over the named
+ * file's spelled identities, 11.2, as 6.4 judges the old ID): an ID named
+ * in a parseable file of the failing workspace, no node identity defined
+ * for it there.
+ */
+interface SpelledIdRow {
+  /** Why the ID's would-be bearer has no defined identity. */
+  readonly what: string;
+  readonly file: string;
+  readonly id: string;
+  /**
+   * Whether the file spells the ID: the check passes and the gated report
+   * follows, exit 1 — else the unknown-node usage error alone, exit 2.
+   */
+  readonly spelled: boolean;
+}
+
+const SPELLED_NOT_DEFINED_ROWS: readonly SpelledIdRow[] = [
+  {
+    what:
+      "an ID two sections of the file both spell, each bearer's node " +
+      "identity undefined (SPEC 11.2: duplicate spellings leave every " +
+      "bearer undefined, no winner picked)",
+    file: PREC_DUP_FILE,
+    id: "dup",
+    spelled: true,
+  },
+  {
+    what:
+      "an ID whose only bearer spells it beneath an ancestor spelling no " +
+      "identity, its `id` absent — the bearer's node identity undefined " +
+      "(SPEC 11.2: the chain conditions are inherited)",
+    file: PREC_ORPHAN_FILE,
+    id: "kid",
+    spelled: true,
+  },
+  {
+    what:
+      'an ID whose only would-be bearer spells none — its `id` braced (`id={"x"}`), ' +
+      "naming `x` (SPEC 11.2: a value in any other form than the quoted " +
+      "static string, braced included, spells no identity)",
+    file: PREC_BRACED_FILE,
+    id: "x",
+    spelled: false,
+  },
+  {
+    what:
+      "an ID whose only would-be bearer spells none — its `id` valueless " +
+      "(`<S id>`), naming `true`, the value JSX gives a bare attribute " +
+      "(SPEC 11.2: a valueless `id` spells no identity)",
+    file: PREC_BARE_FILE,
+    id: "true",
+    spelled: false,
+  },
+];
 
 /** One gated-read row: a usage-error argument checked before the 13.3 gate. */
 interface GatedUsageRow {
   /** What the row's check consults and why the argument is a usage error. */
   readonly what: string;
   readonly argv: readonly string[];
+  /**
+   * A mutating subcommand's row: the session file its `--name` would write
+   * — absent after the run, which modifies nothing, its error the plain
+   * usage error (`expectGatedUsageError`).
+   */
+  readonly session?: string;
 }
 
 const GATED_USAGE_ROWS: readonly GatedUsageRow[] = [
   {
     what: "an unknown profile, judged against the configuration (SPEC 7.4)",
     argv: ["coverage", "no-such-profile"],
+  },
+  {
+    what:
+      "an unknown profile given to a mutating subcommand, judged against " +
+      "the configuration — `review create`'s argument checks follow " +
+      "acquisition and precede the gate (SPEC 7.4, 10.7, 13.5)",
+    argv: [
+      "review",
+      "create",
+      "--coverage",
+      "no-such-profile",
+      "--name",
+      PREC_SESSION_NAME,
+    ],
+    session: PREC_SESSION_REL,
   },
   {
     what:
@@ -1787,6 +1974,107 @@ async function expectUsageErrorDocument(
   return { result, error };
 }
 
+/**
+ * One gated row's run on one workspace of the precedence pair: the usage
+ * error document (`expectUsageErrorDocument`) — and, for a mutating
+ * subcommand's row, that run inside a whole-root compare (H-6's lock-path
+ * exclusion: its acquisition's and release's writes no modification, its
+ * release deleting what its acquisition brought into existence, SPEC
+ * 13.5), its error the plain usage error (`code` and `path` null, no
+ * locations; SPEC 12.7, 14) and the row's session file absent after it: no
+ * session written. Returns the run for the pair's byte compare.
+ */
+async function expectGatedUsageError(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  row: GatedUsageRow,
+  argv: readonly string[],
+  context: string,
+): Promise<RunResult> {
+  const { session } = row;
+  if (session === undefined) {
+    return (await expectUsageErrorDocument(product, workspace, argv, context))
+      .result;
+  }
+  return await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const { result, error } = await expectUsageErrorDocument(
+        product,
+        workspace,
+        argv,
+        context,
+      );
+      assertSameJson(
+        { code: error.code, path: error.path, locations: error.locations },
+        { code: null, path: null, locations: [] },
+        `${context}: an unknown name is a plain usage error — \`code\` ` +
+          `null, \`path\` null, no locations (SPEC 12.0, 12.7, 14) ` +
+          `(message: ${JSON.stringify(error.message)})`,
+      );
+      const occupant = await workspace.kind(session);
+      if (occupant !== "absent") {
+        fail(
+          `${context}: no session written — the argument check refuses ` +
+            `the invocation before the gate, so nothing occupies ` +
+            `${session} afterwards (SPEC 12.0, 10.7, 13.5); found a ` +
+            `${occupant} there`,
+        );
+      }
+      return result;
+    },
+    `${context}: the usage error modifies nothing — no session written; ` +
+      `sources, journal, derived files, and graph data byte-identical ` +
+      `(SPEC 12.0, 10.7, 13.5)`,
+  );
+}
+
+/**
+ * The comparable projection of one 12.7 finding for T12.0-10's
+ * gated-report compares: every member but `message` — code, locations,
+ * concerned path, identities (module header; wording unpinned, H-3).
+ */
+function gateComparable(finding: Finding): unknown {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+    identities: finding.identities,
+  };
+}
+
+/**
+ * A gated read past its argument checks on a workspace failing `build`'s
+ * validations (`argv` puts JSON output in effect): exit 1 exactly with the
+ * findings-only report of 13.3 as the entire stdout, decoded form-exact
+ * (12.7, H-5), carrying exactly the findings `build --json` reported there
+ * (`expected`, the workspace's premise) — under the module header's
+ * projection, in 12.7's order — so the read answers nothing, never meeting
+ * an argument check's exit 2 (SPEC 12.0, 13.3).
+ */
+async function expectGatedReport(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  expected: readonly Finding[],
+  context: string,
+): Promise<void> {
+  const findings = await runFindingsReport(
+    product,
+    workspace,
+    argv,
+    1,
+    context,
+  );
+  assertSameJson(
+    findings.map(gateComparable),
+    expected.map(gateComparable),
+    `${context}: the gate reports exactly the findings \`build\` reports ` +
+      `on the workspace — every member but the message, in 12.7's order ` +
+      `(SPEC 13.3, 12.7, 14)`,
+  );
+}
+
 // The unknown item ID named by the past-the-gate arm (no session ever
 // contains it; harness-prefixed so a collision is impossible by staging).
 const PRECEDENCE_NO_SUCH_ITEM = "xspec-harness-no-such-item";
@@ -1814,16 +2102,19 @@ interface SyntaxClassRow {
 // One row per member of the syntax class as SPEC 12.0 enumerates it — every
 // error the arguments alone determine: an unknown command, subcommand, or
 // flag, a repeated flag, a missing required flag or argument, a surplus
-// operand, a malformed value, and every invalid flag value or operand
-// spelling that a fixed vocabulary, a spelling rule, or a co-occurrence rule
-// decides. Each is reported without loading configuration, so a product
-// that loads it first answers 14.14 on the invalid-configuration workspace
-// and fails the plain-error pin; the rows naming `specs/A.mdx` or the
-// session `n` name what the same command would consult next, staged beside
-// the invalid configuration (above) so a product consulting it before the
-// syntax check is observed. The escape character, U+2028, and U+2029 are
-// built from their code points (no tool layer decodes a `\\` or a
-// line-terminator spelling on the way in).
+// operand, operands matching no synopsis form by their spelling alone (6.5),
+// a malformed value, and every invalid flag value or operand spelling that
+// a fixed vocabulary, a spelling rule, or a co-occurrence rule decides.
+// Each is reported without loading configuration, so a product that loads
+// it first answers 14.14 on the invalid-configuration workspace and fails
+// the plain-error pin; the rows naming `specs/A.mdx` or the session `n`
+// name what the same command would consult next, staged beside the invalid
+// configuration (above) so a product consulting it before the syntax check
+// is observed — the `move` rows and the backslash `--to` row spell
+// TEST-SPEC's `a.mdx` values, staged nowhere, their spelling judged before
+// anything is consulted. The escape character, U+2028, and U+2029 are built
+// from their code points (no tool layer decodes a `\\` or a line-terminator
+// spelling on the way in).
 const T12_0_10_SYNTAX_ROWS: readonly SyntaxClassRow[] = [
   {
     what: "an unknown command",
@@ -1872,6 +2163,20 @@ const T12_0_10_SYNTAX_ROWS: readonly SyntaxClassRow[] = [
   {
     what: "a fourth `rename` operand (SPEC 6.4's three-operand synopsis)",
     argv: ["rename", SYNTAX_AT_FILE, "alpha", "beta", "gamma", "--json"],
+  },
+  {
+    what:
+      "a synopsis mismatch decided by operand spelling alone — `move a.mdx " +
+      "b.mdx#y`, a file-form origin beside a `<file>#<id>` destination, " +
+      "mixing the two forms (SPEC 6.5, 12.0; T6.5-5)",
+    argv: ["move", "a.mdx", "b.mdx#y", "--json"],
+  },
+  {
+    what:
+      "a synopsis mismatch decided by operand spelling alone — `move a.mdx " +
+      "b#c.mdx`, its `#`-containing destination a `<file>#<id>` pair under " +
+      "the 12.0 split beside a file-form origin (SPEC 6.5, 12.0; T6.5-5)",
+    argv: ["move", "a.mdx", "b#c.mdx", "--json"],
   },
   {
     what: "the malformed multi-`#` value (T12.0-13's spelling)",
@@ -1960,9 +2265,11 @@ const T12_0_10_SYNTAX_ROWS: readonly SyntaxClassRow[] = [
   },
   {
     what:
-      "a `--to` malformed as an identity (a whitespace-bearing id segment, " +
-      "SPEC 11.3, 1.4)",
-    argv: ["occurrences", "--to", `${SYNTAX_AT_FILE}#a b`],
+      "a `--to` malformed as an identity (`a.mdx#x\\y`, its id segment " +
+      "carrying `\\`, the escape character, SPEC 11.3, 1.4 — a `#`-less " +
+      "`--to` is wholly its path part, held to no segment rule, so " +
+      "`--to 'a\\b'` is no member)",
+    argv: ["occurrences", "--to", `a.mdx#x${String.fromCodePoint(0x5c)}y`],
   },
   {
     what:
@@ -2013,7 +2320,7 @@ const T12_0_10_SYNTAX_ROWS: readonly SyntaxClassRow[] = [
 const T12_0_10 = defineProductTest({
   id: "T12.0-10",
   title:
-    "argument-check precedence: the rename/move and baseline arms ride on T6.4-4/T6.5-5/T6.3-4; on one workspace failing `build`'s validations each gated read given a usage-error argument exits 2 with that error and reports no validation findings (the exit-2 stdout is exactly the one 12.7 error document) — `coverage <unknown-profile>`, `query nodes --group <code-group>`, `review status <unknown-session>`, `show <file>#<unspelled-id>`, `query node <code-source-path>`, `query edges --from <code-source-path>#<unspelled-unit>` — each check judged from what it consults (configuration; the session directory; parse-local spelled identities or named units of the named file), the same names on a valid twin workspace giving the same exit-2 errors (byte-identical error documents); masking: `show <unparseable-file>#<id>` on the failing workspace yields the gated report of 13.3, exit 1, carrying exactly the workspace's findings; past the gate: on a passing workspace `review resolve <corrupt-session> <any-item-id> --status updated` reports the corruption, exit 1 — the item ID judged only against session content, which the corruption withholds (the same unknown item ID in the well-formed session exits 2 as the pre-corruption premise); within class 2, one arm per member of the syntax class (every error the arguments alone determine): an unknown command, subcommand (`query bogus`), or flag (`--bogus`; the `--name=value` token, T12.0-14); a repeated flag; a missing required flag (`review create --name n` with none of `--base`, `--strategy audit`, or `--coverage`) or argument (`at <file>` alone; a value-taking flag as the last token); a surplus operand (`ids extra`; a fourth `rename` operand); a malformed value (`show a#b#c`, T12.0-13; a U+FFFD-bearing value, T12.0-5); `--status bogus`; `--strategy bogus`; `query nodes --coverage bogus`; a `--kinds` element outside its vocabulary or empty (`depends,`); `review create` with two of its exactly-one-of flags; `--test-hold` beside `--preview`; a `<file>` operand beside `--file` on `view`; a session name outside the form of 10.1 (`.x`); an `<offset>` spelled `+7`; a `--to` malformed as an identity and a `--tag` malformed as a tag (`a\\b`; and, one arm each, a `--tag` spelled with U+2028 and a `--to` whose id segment carries U+2029, each malformed under 1.4's quote-and-escape bullet); and a `--file` pattern outside the workspace root (`../x`, by spelling alone) — each reported without loading configuration and modifying nothing: byte-identical error documents with the configuration file invalid or missing, each the plain usage error (`code` and `path` null, no locations), the syntax-alone check preceding what the command would consult next (a session already named `n` and the named `<file>`, staged beside the invalid configuration, go unconsulted) — while a configuration error precedes every check that consults configuration or discovery: `coverage <unknown-profile>` and `query nodes --group <code-group>` with invalid configuration each report 14.14 (`configuration-error`), not the unknown profile or the wrong-kind group (SPEC 12.0, 13.3, 11.1, 11.2, 4.6, 10.1, 10.7, 11.3, 1.4, 11.4, 11.5, 6.4, 6.6, 7, 14.14, 14.20, 14.21, 12.7)",
+    "argument-check precedence: the rename/move and baseline arms ride on T6.4-4/T6.5-5/T6.3-4; on one workspace failing `build`'s validations each gated read given a usage-error argument exits 2 with that error and reports no validation findings (the exit-2 stdout is exactly the one 12.7 error document) — `coverage <unknown-profile>`, `review create --coverage <unknown-profile> --name n` (a mutating subcommand, its argument checks following acquisition and preceding the gate: the plain usage error, `code` `null`, no session written, the run modifying nothing, where the configured profile creates that session on the twin), `query nodes --group <code-group>`, `review status <unknown-session>`, `show <file>#<unspelled-id>`, `query node <code-source-path>`, `query edges --from <code-source-path>#<unspelled-unit>` — each check judged from what it consults (configuration; the session directory; parse-local spelled identities or named units of the named file), the same names on a valid twin workspace giving the same exit-2 errors (byte-identical error documents); masking: `show <unparseable-file>#<id>` on the failing workspace yields the gated report of 13.3, exit 1, carrying exactly the findings `build` reports there (every member but the message); spelled, not defined: on the failing workspace `show <file>#<id>` and `query node <file>#<id>` naming an ID two sections of the file both spell, and one whose only bearer spells it beneath an ancestor spelling no identity (its `id` absent) — each bearer's node identity undefined — pass the check, the gated report following, exit 1, never the unknown-node exit 2, while naming an ID whose only would-be bearer spells none — its `id` braced (`id={\"x\"}`, naming `x`) or valueless (`<S id>`, naming `true`) — fails it, exit 2, the plain usage error alone though that file carries a 14.17 finding; past the gate: on a passing workspace `review resolve <corrupt-session> <any-item-id> --status updated` reports the corruption, exit 1 — the item ID judged only against session content, which the corruption withholds (the same unknown item ID in the well-formed session exits 2 as the pre-corruption premise); within class 2, one arm per member of the syntax class (every error the arguments alone determine): an unknown command, subcommand (`query bogus`), or flag (`--bogus`; the `--name=value` token, T12.0-14); a repeated flag; a missing required flag (`review create --name n` with none of `--base`, `--strategy audit`, or `--coverage`) or argument (`at <file>` alone; a value-taking flag as the last token); a surplus operand (`ids extra`; a fourth `rename` operand); a synopsis mismatch decided by operand spelling alone (`move a.mdx b.mdx#y` and `move a.mdx b#c.mdx`, mixing the two forms); a malformed value (`show a#b#c`, T12.0-13; a U+FFFD-bearing value, T12.0-5); `--status bogus`; `--strategy bogus`; `query nodes --coverage bogus`; a `--kinds` element outside its vocabulary or empty (`depends,`); `review create` with two of its exactly-one-of flags; `--test-hold` beside `--preview`; a `<file>` operand beside `--file` on `view`; a session name outside the form of 10.1 (`.x`); an `<offset>` spelled `+7`; a `--to` malformed as an identity and a `--tag` malformed as a tag (`--to 'a.mdx#x\\y'`, its id segment carrying `\\`, and `--tag 'a\\b'` — a `#`-less `--to` being wholly its path part, held to no segment rule, so `--to 'a\\b'` is no member; and, one arm each, a `--tag` spelled with U+2028 and a `--to` whose id segment carries U+2029, each malformed under 1.4's quote-and-escape bullet); and a `--file` pattern outside the workspace root (`../x`, by spelling alone) — each reported without loading configuration and modifying nothing: byte-identical error documents with the configuration file invalid or missing, each the plain usage error (`code` and `path` null, no locations), the syntax-alone check preceding what the command would consult next (a session already named `n` and the named `<file>`, staged beside the invalid configuration, go unconsulted) — while a configuration error precedes every check that consults configuration or discovery: `coverage <unknown-profile>` and `query nodes --group <code-group>` with invalid configuration each report 14.14 (`configuration-error`), not the unknown profile or the wrong-kind group (SPEC 12.0, 13.3, 13.5, 11.1, 11.2, 4.6, 10.1, 10.7, 11.3, 1.4, 11.4, 11.5, 6.4, 6.5, 6.6, 7, 14.1, 14.3, 14.14, 14.17, 14.20, 14.21, 12.7)",
   run: async (product) => {
     // --- Gated reads: usage-error arguments precede the 13.3 gate, judged
     // from what they consult, identically on the failing workspace and its
@@ -2055,36 +2362,68 @@ const T12_0_10 = defineProductTest({
           }
 
           // Failing-workspace premise: the workspace fails `build`'s
-          // validations with exactly the staged 14.20 — the finding whose
-          // non-appearance the exit-2 rows assert and whose report the
-          // masking arm expects.
+          // validations with exactly the staged findings, each located in
+          // its staged file — the findings whose non-appearance the exit-2
+          // rows assert and whose report the masking and
+          // spelled-not-defined arms expect.
           const premiseContext =
             "T12.0-10 failing-workspace `build --json` premise";
           const premiseFindings = await buildFindings(
             product,
             failing,
             `${premiseContext} — the staged workspace fails build ` +
-              `validation (an unparseable source, SPEC 14.20)`,
+              `validation (an unparseable source, a missing ID, a ` +
+              `duplicate ID, and two invalid props; SPEC 14)`,
           );
+          const premiseCounts: Record<string, number> = {};
+          for (const staged of PRECEDENCE_FAILING_FINDINGS) {
+            premiseCounts[staged.condition] =
+              (premiseCounts[staged.condition] ?? 0) + 1;
+          }
           assertConditionCounts(
             premiseFindings,
-            { "14.20": 1 },
-            `${premiseContext}: the unparseable file is the workspace's ` +
-              `one validation finding (SPEC 14, 14.20)`,
+            premiseCounts,
+            `${premiseContext}: the staged files' findings are the ` +
+              `workspace's validation findings, each reported (SPEC 14, ` +
+              `14.1, 14.3, 14.17, 14.20)`,
           );
-          assertFindingLocated(
-            premiseFindings[0]!,
-            { file: PREC_BROKEN_FILE },
-            `${premiseContext}: the 14.20 finding locates the parse ` +
-              `failure in the staged unparseable file (SPEC 14, 14.20)`,
-          );
+          for (const staged of PRECEDENCE_FAILING_FINDINGS) {
+            const finding = premiseFindings.find(
+              (candidate) =>
+                candidate.condition === staged.condition &&
+                candidate.locations.some(
+                  (location) => location.file === staged.file,
+                ),
+            );
+            if (finding === undefined) {
+              fail(
+                `${premiseContext}: ${staged.condition} must be reported ` +
+                  `for ${staged.what}, located in ${staged.file} (SPEC ` +
+                  `14) — got ${JSON.stringify(
+                    premiseFindings.map((candidate) => ({
+                      code: candidate.code,
+                      files: candidate.locations.map(
+                        (location) => location.file,
+                      ),
+                    })),
+                  )}`,
+              );
+            }
+            assertFindingLocated(
+              finding,
+              { file: staged.file },
+              `${premiseContext}: the ${staged.condition} finding for ` +
+                `${staged.what} locates in ${staged.file} (SPEC 14)`,
+            );
+          }
 
           for (const row of GATED_USAGE_ROWS) {
             const argv = [...row.argv, "--json"];
             const command = argv.join(" ");
-            const onFailing = await expectUsageErrorDocument(
+            const onFailing = await expectGatedUsageError(
               product,
               failing,
+              row,
               argv,
               `T12.0-10 \`${command}\` on the failing workspace — ` +
                 `${row.what}: a gated read's argument checks precede the ` +
@@ -2093,17 +2432,18 @@ const T12_0_10 = defineProductTest({
                 `carries, and no validation finding rides the report ` +
                 `(SPEC 12.0, 13.3)`,
             );
-            const onTwin = await expectUsageErrorDocument(
+            const onTwin = await expectGatedUsageError(
               product,
               twin,
+              row,
               argv,
               `T12.0-10 \`${command}\` on the valid twin — ${row.what}: ` +
                 `the same name is the same usage error on a valid ` +
                 `workspace (SPEC 12.0)`,
             );
             assertBytesEqual(
-              onFailing.result.stdoutBytes,
-              onTwin.result.stdoutBytes,
+              onFailing.stdoutBytes,
+              onTwin.stdoutBytes,
               `T12.0-10 \`${command}\`: the check is judged from what it ` +
                 `consults — configuration, the session directory, the ` +
                 `named file's parse, identical in both workspaces — ` +
@@ -2114,6 +2454,39 @@ const T12_0_10 = defineProductTest({
             );
           }
 
+          // The mutating row's twin control, run once every row has met
+          // the twin as staged: with the configured profile in the unknown
+          // one's place the same invocation creates the session `n` (SPEC
+          // 10.7), so the row's "no session written" is the refusal's, never
+          // an unwritable session directory's.
+          const createControl = [
+            "review",
+            "create",
+            "--coverage",
+            "prof",
+            "--name",
+            PREC_SESSION_NAME,
+            "--json",
+          ];
+          await expectExit(
+            product,
+            twin,
+            createControl,
+            0,
+            `T12.0-10 twin control \`${createControl.join(" ")}\` — the ` +
+              `configured profile resolves on the valid twin, so the ` +
+              `unknown profile's exit 2 is attributable to that name alone ` +
+              `(SPEC 10.7, 7.4)`,
+          );
+          if ((await twin.kind(PREC_SESSION_REL)) !== "file") {
+            fail(
+              `T12.0-10 twin control \`${createControl.join(" ")}\`: ` +
+                `\`review create\` must store the session at ` +
+                `${PREC_SESSION_REL} (SPEC 10.1) — the session the ` +
+                `unknown-profile row must never write`,
+            );
+          }
+
           // Masking: the named file itself is unparseable, so the id check
           // cannot be judged — the gated report of 13.3 takes its place,
           // exit 1 (as in 6.4). The file even contains the bytes
@@ -2121,34 +2494,58 @@ const T12_0_10 = defineProductTest({
           // unparseable text and answering (exit 0), or reporting an
           // unknown id (exit 2), fails either way.
           const maskCommand = `show ${PREC_BROKEN_FILE}#broken --json`;
-          const maskContext = `T12.0-10 \`${maskCommand}\` (masking)`;
-          const maskResult = await expectExit(
+          await expectGatedReport(
             product,
             failing,
             ["show", `${PREC_BROKEN_FILE}#broken`, "--json"],
-            1,
-            `${maskContext} — an unparseable named file masks the ` +
-              `parse-local id check as in 6.4: the gated report of 13.3 is ` +
-              `emitted and the command exits 1, never 2 (SPEC 12.0, 13.3, ` +
-              `14.20)`,
+            premiseFindings,
+            `T12.0-10 \`${maskCommand}\` (masking) — an unparseable named ` +
+              `file masks the parse-local id check as in 6.4: the gated ` +
+              `report of 13.3 is emitted and the command exits 1, never 2 ` +
+              `(SPEC 12.0, 13.3, 14.20)`,
           );
-          const maskFindings = decodeFindingsReport(
-            parseJsonStdout(maskResult, maskContext),
-            maskContext,
-          ).findings;
-          assertConditionCounts(
-            maskFindings,
-            { "14.20": 1 },
-            `${maskContext}: the gated report carries exactly the findings ` +
-              `a \`build\` would now report — the one unparseable-source ` +
-              `condition (SPEC 13.3, 14.20)`,
-          );
-          assertFindingLocated(
-            maskFindings[0]!,
-            { file: PREC_BROKEN_FILE },
-            `${maskContext}: the 14.20 finding locates the parse failure ` +
-              `in the unparseable named file (SPEC 14, 14.20)`,
-          );
+
+          // Spelled, not defined: an `id` is judged over the named file's
+          // spelled identities (11.2), as 6.4 judges the old ID — never
+          // over defined ones. An ID the file spells passes the check
+          // though no bearer's node identity is defined, so the gated
+          // report follows, exit 1, failing a product that judges gated
+          // reads against defined identities (its unknown-node exit 2); an
+          // ID only a braced or valueless `id` would bear is spelled
+          // nowhere, so the check fails, exit 2, the usage error alone
+          // though the file carries a 14.17 finding — failing a product
+          // that reads the braced string or the bare attribute's JSX value
+          // as a spelling (it would pass the check into the gate, exit 1).
+          for (const row of SPELLED_NOT_DEFINED_ROWS) {
+            for (const read of [["show"], ["query", "node"]]) {
+              const argv = [...read, `${row.file}#${row.id}`, "--json"];
+              const context =
+                `T12.0-10 \`${argv.join(" ")}\` on the failing workspace ` +
+                `(spelled, not defined) — ${row.what}`;
+              if (row.spelled) {
+                await expectGatedReport(
+                  product,
+                  failing,
+                  argv,
+                  premiseFindings,
+                  `${context}: the file spells the ID, so the parse-local ` +
+                    `check passes though no bearer's identity is defined — ` +
+                    `the gated report of 13.3 follows, exit 1, never the ` +
+                    `unknown-node exit 2 (SPEC 12.0, 11.2, 13.3)`,
+                );
+              } else {
+                assertPlainUsageError(
+                  await runCli(product, failing, argv),
+                  `${context}: no section of the file spells the ID, so ` +
+                    `the parse-local check fails — the unknown-node usage ` +
+                    `error, exit 2, the error document the entire stdout ` +
+                    `though the file carries a 14.17 finding: the usage ` +
+                    `error alone reported, never the gated report (SPEC ` +
+                    `12.0, 11.2, 12.7, H-5)`,
+                );
+              }
+            }
+          }
         });
       },
     );

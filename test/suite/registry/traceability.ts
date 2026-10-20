@@ -108,9 +108,9 @@
 //   implemented, so their coverage rides on the implementing tests —
 //   T12.0-10's rename/move and baseline arms ride on T6.4-4/T6.5-5 and
 //   T6.3-4, putting "12.0" on those three (no longer alias-only: its
-//   gated-read, masking, past-the-gate, and within-class-2 precedence arms
-//   are implemented as the registered T12.0-10, which carries its own entry
-//   below); T12.1-2 ("T7.5-6") puts "12.1" on T7.5-6; T13.4-7 ("T7-6")
+//   gated-read, masking, spelled-not-defined, past-the-gate, and
+//   within-class-2 precedence arms are implemented as the registered
+//   T12.0-10, which carries its own entry below); T12.1-2 ("T7.5-6") puts "12.1" on T7.5-6; T13.4-7 ("T7-6")
 //   puts "13.4" on T7-6.
 // - "preamble": per H-7's own citation, T12.0-11 (git is read-only) and
 //   T12.0-12 (git-less operation) cover the preamble's git contract; its
@@ -658,15 +658,23 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T12.0-7": ["12.0"],
   "T12.0-8": ["12.0"],
   "T12.0-9": ["12.0", "14"],
+  // T12.0-10: its spelled-not-defined arms assert 11.2's line between a
+  // spelled identity and a defined one (a duplicated or orphaned spelling
+  // passes the id check; a braced or valueless `id` spells nothing), and
+  // its synopsis-mismatch rows `move`'s two forms told apart by operand
+  // spelling (6.5); its premise and gated reports pin numbered conditions
+  // ("14").
   "T12.0-10": [
     "12.0",
     "1.4",
     "10.1",
     "10.7",
     "11.1",
+    "11.2",
     "11.3",
     "11.4",
     "11.5",
+    "6.5",
     "6.6",
     "7",
     "12.7",
