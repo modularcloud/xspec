@@ -1,5 +1,5 @@
 // TEST-SPEC §11.2 (availability on imperfect files) — SUITE-52: T11.2-1
-// through T11.2-6.
+// through T11.2-7.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -24,6 +24,8 @@
 // staged conditions are
 // drawn from the scope's stated set (T11.2-2: 14.1, 14.2, 14.3, 14.4, 14.5,
 // 14.6, 14.17; T11.2-4: 14.1, 14.3, 14.5, 14.6, 14.9, 14.15, 14.16).
+// T11.2-7 lies in no fixture's in-scope set; its arms drive bare
+// `view --text` alone.
 //
 // SPEC 11.2: `occurrences`, `view`, and `at` answer per file, from parsing
 // alone, never gated on workspace-wide validity — parse-local structure (the
@@ -130,12 +132,12 @@ import {
 // A TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
 // and timing clauses), staged wherever it is used and named for every body
 // staging it after a product invocation: T11.2-4's later stagings,
-// T11.2-5's second workspace, and T11.2-6's corrupt-session workspace here,
-// T11.3-1's, T11.3-2's, and T11.3-3's later workspaces, T11.4-3's shared
-// workspace and T11.4-5's and T11.4-6's later ones, and P-12's later trials
-// (registry/section-16-p12.ts).
+// T11.2-5's second workspace, T11.2-6's corrupt-session workspace, and
+// T11.2-7's later arms here, T11.3-1's, T11.3-2's, and T11.3-3's later
+// workspaces, T11.4-3's shared workspace and T11.4-5's and T11.4-6's later
+// ones, and P-12's later trials (registry/section-16-p12.ts).
 export const SPECS_ONLY_CONFIG = stagedTs(
-  "T11.2-4/T11.2-5/T11.2-6/T11.3-1/T11.3-2/T11.3-3/T11.4-3/T11.4-5/T11.4-6/P-12 xspec.config.ts — one spec group",
+  "T11.2-4/T11.2-5/T11.2-6/T11.2-7/T11.3-1/T11.3-2/T11.3-3/T11.4-3/T11.4-5/T11.4-6/P-12 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -6380,6 +6382,512 @@ const T11_2_6 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T11.2-7 — removal by form
+// ---------------------------------------------------------------------------
+//
+// SPEC 11.2 (expanded text): the removal classification of 3 is by
+// syntactic form, never by validity or resolution — every import
+// declaration is removed whatever its binding shape, specifier validity, and
+// target discovery; a section tag is removed with every attribute it spells,
+// unknown, repeated, and spread included; and an export statement, matching
+// no removal rule's form, is content, preserved byte-for-byte and located by
+// its finding (14.16). T11.2-4 stages the deleted-target import and the
+// stray element, T2.3-3 the invalid containers; this entry stages the rest,
+// three arms, one failing workspace each. Every workspace holds
+// `specs/A.mdx`, a discovered spec source holding `a` — so each `./A.xspec`
+// specifier below designates a discovered spec source and its import fails
+// by binding shape alone — beside the arm's own `specs/B.mdx`:
+// (a) a root-level ESM block of four imports, one per line — the named
+//     `import { a } from "./A.xspec"`, the namespace
+//     `import * as N from "./A.xspec"`, the side-effect-only
+//     `import "./A.xspec"`, and the bare-specifier `import X from "x"` —
+//     each a 14.15 finding (2.1: not a single default binding; a specifier
+//     that is no relative `.xspec` path), followed by the section `b`;
+// (b) three sections whose opening tags spell an unknown attribute
+//     (`<S id="u" foo="1">`), a repeated one (`<S id="r" tags="t" tags="t">`),
+//     and a spread (`<S id="p" {...q}>`), each a 14.17 finding (2.7) — every
+//     section still spelling exactly one quoted `id`, so its identity stays
+//     defined (11.2);
+// (c) one ESM block holding `import A from "./A.xspec"` (valid, its binding
+//     unused: 2.1, records no edges), U+000A, `export const x = 1`, U+000A —
+//     the export statement a 14.16 finding — followed by the section `c`.
+//
+// Operationalization (noted per H-3/H-4):
+// - Each arm runs bare `view --text`: the whole discovered domain, so the
+//   answer carries A's view (finding-free) and B's, B's findings alone
+//   accompanying, exit 1 (11.2). The findings are pinned form-exact in 12.7
+//   order — stable code, every location's file and exact range, concerned
+//   path `null` — at the ranges SPEC 14 fixes: an import condition (14.15)
+//   at the declaration's own characters (the import range of 11.4, no
+//   terminator), an attribute condition (14.17) at the attribute's own
+//   characters (the attribute range of 11.4; a spread its whole braced
+//   construct), a repeated prop locating every attribute spelling the name
+//   in one finding, and an export statement (14.16) whole, no terminator.
+// - Every node of both views is projected to its identity, construct range,
+//   own text, and subtree text (`projectTextNode`, T11.2-4's projection) and
+//   compared with a pinned tree whose text values are hand-derived per the
+//   rules of 3 (the derivation comments beside each arm) — never computed
+//   from the staging; ranges are composed from the parts that stage the
+//   file and sliced back out of its bytes before any product runs (the
+//   T5.7-2 discipline). Import entries and attribute entries stay at their
+//   home tests (T11.4-4, T11.4-3), their forms decode-validated (H-3); the
+//   occurrence and comment lists are pinned empty (no reference or comment
+//   is staged).
+// - Every staged source is a staged-source record (S-9: the body's later
+//   workspaces follow its first invocations), well-formed MDX: each ESM
+//   block holds import and export declarations alone and stands between
+//   blank lines (an ESM block interrupts no paragraph and runs to a blank
+//   line), and the arms' bindings — `a`, `N`, `X`, and `A`, `x` — are
+//   pairwise distinct, so no early error and no collision (2.4) arises.
+
+/** One T11.2-7 arm: its `specs/B.mdx` record, composed ranges, and pins. */
+interface RemovalByFormArm {
+  readonly label: string;
+  readonly source: string;
+  /** The staged bytes as a ledger record (S-9's before-any-product clause). */
+  readonly staged: StagedMdx;
+  /** The ranges composed with the file, each with the text it must slice to. */
+  readonly slices: readonly {
+    readonly range: SourceRange;
+    readonly text: string;
+    readonly what: string;
+  }[];
+  readonly conditionCounts: Readonly<Record<string, number>>;
+  /** B's findings, form-exact, in 12.7 order (by code, then locations). */
+  readonly findings: readonly FindingProjection[];
+  readonly findingsWhat: string;
+  readonly textTree: TextTreeExpectation;
+  readonly textWhat: string;
+}
+
+// specs/A.mdx, every arm's import target. Text derivation (SPEC 3, 1.6): the
+// title line and the blank line after it stay; a's tag lines hold nothing
+// but removed tags and drop with their terminators — its `</S>` line taking
+// the root's terminator after it along — so a contributes its body line and
+// the root's own run ends at the blank line.
+const RBF_TARGET = new ByteFixture();
+RBF_TARGET.add("Prélude — the import target holding a.\n\n");
+const RBF_TARGET_A_TEXT = '<S id="a">\nA text.\n</S>';
+const RBF_TARGET_A_RANGE = RBF_TARGET.add(RBF_TARGET_A_TEXT);
+RBF_TARGET.add("\n");
+const RBF_TARGET_SOURCE = RBF_TARGET.source;
+const RBF_TARGET_STAGED = stagedMdx(
+  "T11.2-7 specs/A.mdx (every arm's import target, holding a)",
+  RBF_TARGET_SOURCE,
+);
+const RBF_TARGET_ROOT_OWN = "Prélude — the import target holding a.\n\n";
+const RBF_TARGET_A_OWN = "A text.\n";
+const RBF_TARGET_TEXT_TREE: TextTreeExpectation = {
+  identity: A_FILE,
+  range: { start: 0, end: RBF_TARGET.pos },
+  ownText: RBF_TARGET_ROOT_OWN,
+  subtreeText: RBF_TARGET_ROOT_OWN + RBF_TARGET_A_OWN,
+  children: [
+    {
+      identity: `${A_FILE}#a`,
+      range: RBF_TARGET_A_RANGE,
+      ownText: RBF_TARGET_A_OWN,
+      subtreeText: RBF_TARGET_A_OWN,
+      children: [],
+    },
+  ],
+};
+
+// (a) every import form. Text derivation: the title line and the blank line
+// after it stay; each of the four import lines holds nothing but its
+// declaration, removed by form whatever its validity, so each drops WITH its
+// terminator; the blank line closing the ESM block stays; b's tag lines
+// drop (its `</S>` line taking the root's final terminator along), b
+// contributing its body line.
+const RBF_A = new ByteFixture();
+const RBF_A_TITLE = "Prélude — removal by form: every import form.\n";
+RBF_A.add(RBF_A_TITLE + "\n");
+const RBF_A_NAMED = 'import { a } from "./A.xspec"';
+const RBF_A_NAMED_RANGE = RBF_A.add(RBF_A_NAMED);
+RBF_A.add("\n");
+const RBF_A_NAMESPACE = 'import * as N from "./A.xspec"';
+const RBF_A_NAMESPACE_RANGE = RBF_A.add(RBF_A_NAMESPACE);
+RBF_A.add("\n");
+const RBF_A_SIDE_EFFECT = 'import "./A.xspec"';
+const RBF_A_SIDE_EFFECT_RANGE = RBF_A.add(RBF_A_SIDE_EFFECT);
+RBF_A.add("\n");
+const RBF_A_BARE = 'import X from "x"';
+const RBF_A_BARE_RANGE = RBF_A.add(RBF_A_BARE);
+RBF_A.add("\n\n");
+const RBF_A_B_TEXT = '<S id="b">\nB body.\n</S>';
+const RBF_A_B_RANGE = RBF_A.add(RBF_A_B_TEXT);
+RBF_A.add("\n");
+const RBF_A_B_OWN = "B body.\n";
+//   root own      title LF, the blank line before the block, the blank line
+//                 after it — no byte of any declaration, no line of the block
+const RBF_A_ROOT_OWN = RBF_A_TITLE + "\n" + "\n";
+const RBF_ARM_A: RemovalByFormArm = {
+  label: "(a) every import form",
+  source: RBF_A.source,
+  staged: stagedMdx(
+    "T11.2-7 (a) specs/B.mdx (a root-level ESM block: named, namespace, side-effect-only, and bare-specifier imports)",
+    RBF_A.source,
+  ),
+  slices: [
+    { range: RBF_A_NAMED_RANGE, text: RBF_A_NAMED, what: "the named import" },
+    {
+      range: RBF_A_NAMESPACE_RANGE,
+      text: RBF_A_NAMESPACE,
+      what: "the namespace import",
+    },
+    {
+      range: RBF_A_SIDE_EFFECT_RANGE,
+      text: RBF_A_SIDE_EFFECT,
+      what: "the side-effect-only import",
+    },
+    {
+      range: RBF_A_BARE_RANGE,
+      text: RBF_A_BARE,
+      what: "the bare-specifier import",
+    },
+    { range: RBF_A_B_RANGE, text: RBF_A_B_TEXT, what: "section b" },
+  ],
+  conditionCounts: { "14.15": 4 },
+  findings: [
+    locatedAt("invalid-import", B_FILE, RBF_A_NAMED_RANGE),
+    locatedAt("invalid-import", B_FILE, RBF_A_NAMESPACE_RANGE),
+    locatedAt("invalid-import", B_FILE, RBF_A_SIDE_EFFECT_RANGE),
+    locatedAt("invalid-import", B_FILE, RBF_A_BARE_RANGE),
+  ],
+  findingsWhat:
+    "four invalid-import findings in document order, each located at its " +
+    "declaration's own characters (the import range of 11.4, no terminator)",
+  textTree: {
+    identity: B_FILE,
+    range: { start: 0, end: RBF_A.pos },
+    ownText: RBF_A_ROOT_OWN,
+    subtreeText: RBF_A_ROOT_OWN + RBF_A_B_OWN,
+    children: [
+      {
+        identity: `${B_FILE}#b`,
+        range: RBF_A_B_RANGE,
+        ownText: RBF_A_B_OWN,
+        subtreeText: RBF_A_B_OWN,
+        children: [],
+      },
+    ],
+  },
+  textWhat:
+    "every import declaration removed by form — binding shape, specifier " +
+    "validity, and target discovery notwithstanding — so no byte of any " +
+    "declaration is in the root's own or subtree text, and each import line, " +
+    "left empty purely by its removal, is dropped together with its " +
+    "terminator; b's own and subtree text its body line",
+};
+
+// (b) every attribute with its tag. Text derivation: each section's opening
+// tag line holds nothing but the tag — every attribute it spells removed
+// with it, unknown, repeated, and spread alike — and drops with its
+// terminator, as does each `</S>` line, taking the root's terminator after
+// it along; so each section contributes its body line alone, and the root's
+// own runs are the title line, the blank line after it, and the blank lines
+// between the sections.
+const RBF_B = new ByteFixture();
+const RBF_B_TITLE =
+  "Prélude — removal by form: every attribute with its tag.\n";
+RBF_B.add(RBF_B_TITLE + "\n");
+const RBF_B_U_START = RBF_B.pos;
+RBF_B.add('<S id="u" ');
+const RBF_B_FOO = 'foo="1"';
+const RBF_B_FOO_RANGE = RBF_B.add(RBF_B_FOO);
+RBF_B.add(">\nU body.\n</S>");
+const RBF_B_U_RANGE: SourceRange = { start: RBF_B_U_START, end: RBF_B.pos };
+RBF_B.add("\n\n");
+const RBF_B_R_START = RBF_B.pos;
+RBF_B.add('<S id="r" ');
+const RBF_B_TAGS = 'tags="t"';
+const RBF_B_TAGS_FIRST_RANGE = RBF_B.add(RBF_B_TAGS);
+RBF_B.add(" ");
+const RBF_B_TAGS_SECOND_RANGE = RBF_B.add(RBF_B_TAGS);
+RBF_B.add(">\nR body.\n</S>");
+const RBF_B_R_RANGE: SourceRange = { start: RBF_B_R_START, end: RBF_B.pos };
+RBF_B.add("\n\n");
+const RBF_B_P_START = RBF_B.pos;
+RBF_B.add('<S id="p" ');
+const RBF_B_SPREAD = "{...q}";
+const RBF_B_SPREAD_RANGE = RBF_B.add(RBF_B_SPREAD);
+RBF_B.add(">\nP body.\n</S>");
+const RBF_B_P_RANGE: SourceRange = { start: RBF_B_P_START, end: RBF_B.pos };
+RBF_B.add("\n");
+const RBF_B_U_OWN = "U body.\n";
+const RBF_B_R_OWN = "R body.\n";
+const RBF_B_P_OWN = "P body.\n";
+//   root own      title LF, the blank line after it, the blank line after u,
+//                 the blank line after r — no byte of any tag
+//   root subtree  title LF, LF, U body. LF, LF, R body. LF, LF, P body. LF
+const RBF_B_ROOT_OWN = RBF_B_TITLE + "\n" + "\n" + "\n";
+const RBF_B_ROOT_SUBTREE =
+  RBF_B_TITLE + "\n" + RBF_B_U_OWN + "\n" + RBF_B_R_OWN + "\n" + RBF_B_P_OWN;
+const RBF_ARM_B: RemovalByFormArm = {
+  label: "(b) every attribute with its tag",
+  source: RBF_B.source,
+  staged: stagedMdx(
+    "T11.2-7 (b) specs/B.mdx (opening tags spelling an unknown, a repeated, and a spread attribute)",
+    RBF_B.source,
+  ),
+  slices: [
+    { range: RBF_B_FOO_RANGE, text: RBF_B_FOO, what: "u's unknown attribute" },
+    {
+      range: RBF_B_TAGS_FIRST_RANGE,
+      text: RBF_B_TAGS,
+      what: "r's first tags attribute",
+    },
+    {
+      range: RBF_B_TAGS_SECOND_RANGE,
+      text: RBF_B_TAGS,
+      what: "r's second tags attribute",
+    },
+    {
+      range: RBF_B_SPREAD_RANGE,
+      text: RBF_B_SPREAD,
+      what: "p's spread attribute",
+    },
+    {
+      range: RBF_B_U_RANGE,
+      text: `<S id="u" ${RBF_B_FOO}>\nU body.\n</S>`,
+      what: "section u",
+    },
+    {
+      range: RBF_B_R_RANGE,
+      text: `<S id="r" ${RBF_B_TAGS} ${RBF_B_TAGS}>\nR body.\n</S>`,
+      what: "section r",
+    },
+    {
+      range: RBF_B_P_RANGE,
+      text: `<S id="p" ${RBF_B_SPREAD}>\nP body.\n</S>`,
+      what: "section p",
+    },
+  ],
+  conditionCounts: { "14.17": 3 },
+  findings: [
+    locatedAt("invalid-prop", B_FILE, RBF_B_FOO_RANGE),
+    {
+      code: "invalid-prop",
+      locations: [
+        { file: B_FILE, range: RBF_B_TAGS_FIRST_RANGE },
+        { file: B_FILE, range: RBF_B_TAGS_SECOND_RANGE },
+      ],
+      path: null,
+    },
+    locatedAt("invalid-prop", B_FILE, RBF_B_SPREAD_RANGE),
+  ],
+  findingsWhat:
+    "three invalid-prop findings — u's unknown attribute, r's repeated " +
+    "`tags` (one finding locating both of its spellings), and p's spread — " +
+    "each located at the attribute's own characters (the attribute range " +
+    "of 11.4; the spread its whole braced construct)",
+  textTree: {
+    identity: B_FILE,
+    range: { start: 0, end: RBF_B.pos },
+    ownText: RBF_B_ROOT_OWN,
+    subtreeText: RBF_B_ROOT_SUBTREE,
+    children: [
+      {
+        identity: `${B_FILE}#u`,
+        range: RBF_B_U_RANGE,
+        ownText: RBF_B_U_OWN,
+        subtreeText: RBF_B_U_OWN,
+        children: [],
+      },
+      {
+        identity: `${B_FILE}#r`,
+        range: RBF_B_R_RANGE,
+        ownText: RBF_B_R_OWN,
+        subtreeText: RBF_B_R_OWN,
+        children: [],
+      },
+      {
+        identity: `${B_FILE}#p`,
+        range: RBF_B_P_RANGE,
+        ownText: RBF_B_P_OWN,
+        subtreeText: RBF_B_P_OWN,
+        children: [],
+      },
+    ],
+  },
+  textWhat:
+    "each section tag removed whole with every attribute it spells — " +
+    "unknown, repeated, and spread alike — so each section's own and " +
+    "subtree text is its body line alone and the root's subtree text " +
+    "carries those bodies in place with no byte of either tag, every tag " +
+    "line dropped with its terminator; each identity defined (exactly one " +
+    "quoted id on each tag, 11.2)",
+};
+
+// (c) an export is content. Text derivation: the title line and the blank
+// line after it stay; the import line holds nothing but its declaration and
+// drops with its terminator; the export statement matches no removal rule's
+// form, so its line stays byte-for-byte, its terminator included; the blank
+// line closing the ESM block stays; c's tag lines drop, c contributing its
+// body line.
+const RBF_C = new ByteFixture();
+const RBF_C_TITLE = "Prélude — removal by form: an export is content.\n";
+RBF_C.add(RBF_C_TITLE + "\n");
+const RBF_C_IMPORT = 'import A from "./A.xspec"';
+const RBF_C_IMPORT_RANGE = RBF_C.add(RBF_C_IMPORT);
+RBF_C.add("\n");
+const RBF_C_EXPORT = "export const x = 1";
+const RBF_C_EXPORT_RANGE = RBF_C.add(RBF_C_EXPORT);
+RBF_C.add("\n\n");
+const RBF_C_C_TEXT = '<S id="c">\nC body.\n</S>';
+const RBF_C_C_RANGE = RBF_C.add(RBF_C_C_TEXT);
+RBF_C.add("\n");
+const RBF_C_C_OWN = "C body.\n";
+//   root own      title LF, LF, `export const x = 1` LF, LF
+const RBF_C_ROOT_OWN = RBF_C_TITLE + "\n" + RBF_C_EXPORT + "\n" + "\n";
+const RBF_ARM_C: RemovalByFormArm = {
+  label: "(c) an export is content",
+  source: RBF_C.source,
+  staged: stagedMdx(
+    "T11.2-7 (c) specs/B.mdx (an export statement on the line after an import in one ESM block)",
+    RBF_C.source,
+  ),
+  slices: [
+    { range: RBF_C_IMPORT_RANGE, text: RBF_C_IMPORT, what: "the import" },
+    {
+      range: RBF_C_EXPORT_RANGE,
+      text: RBF_C_EXPORT,
+      what: "the export statement",
+    },
+    { range: RBF_C_C_RANGE, text: RBF_C_C_TEXT, what: "section c" },
+  ],
+  conditionCounts: { "14.16": 1 },
+  findings: [locatedAt("invalid-construct", B_FILE, RBF_C_EXPORT_RANGE)],
+  findingsWhat:
+    "exactly one invalid-construct finding, located at the export statement " +
+    "whole (its terminator excluded) — no 14.15: the import is valid, its " +
+    "unused binding colliding with nothing",
+  textTree: {
+    identity: B_FILE,
+    range: { start: 0, end: RBF_C.pos },
+    ownText: RBF_C_ROOT_OWN,
+    subtreeText: RBF_C_ROOT_OWN + RBF_C_C_OWN,
+    children: [
+      {
+        identity: `${B_FILE}#c`,
+        range: RBF_C_C_RANGE,
+        ownText: RBF_C_C_OWN,
+        subtreeText: RBF_C_C_OWN,
+        children: [],
+      },
+    ],
+  },
+  textWhat:
+    "the import's line dropped with its terminator while the export " +
+    "statement — matching no removal rule's form — is content, its line " +
+    "preserved byte-for-byte, terminator included, in the root's own and " +
+    "subtree text; c's own and subtree text its body line",
+};
+
+const RBF_ARMS: readonly RemovalByFormArm[] = [RBF_ARM_A, RBF_ARM_B, RBF_ARM_C];
+
+const T11_2_7 = defineProductTest({
+  id: "T11.2-7",
+  title:
+    'removal of expanded text is classified by syntactic form, never by validity — each arm its own failing workspace beside `specs/A.mdx`, a discovered spec source holding `a`, under bare `view --text` (exit 1; the arm file\'s findings form-exact in 12.7 order; every node\'s identity, construct range, and own and subtree text byte-asserted against precomputed values, A\'s view finding-free): (a) a root-level ESM block holding, one per line, the named `import { a } from "./A.xspec"`, the namespace `import * as N from "./A.xspec"`, the side-effect-only `import "./A.xspec"`, and the bare-specifier `import X from "x"` — four 14.15 findings, each at its declaration — every declaration absent from the root\'s own and subtree text, each line dropped with its terminator; (b) sections whose opening tags spell an unknown attribute (`<S id="u" foo="1">`), a repeated one (`<S id="r" tags="t" tags="t">`, its one finding locating both spellings), and a spread (`<S id="p" {...q}>`) — three 14.17 findings, each at its attribute spellings — each tag removed whole with every attribute it spells: each section\'s own text its body alone, the root\'s subtree text carrying the bodies in place with no byte of either tag; (c) `import A from "./A.xspec"`, U+000A, `export const x = 1`, U+000A in one ESM block — one 14.16 finding at the export statement whole — the import\'s line dropped and the export\'s line preserved byte-for-byte, its terminator included, in the root\'s own and subtree text — failing a product that classifies imports by validity, keeps an invalid tag\'s attributes as content, or removes export declarations with the imports (SPEC 11.2, 11.4, 1.6, 2.1, 2.7, 3, 12.7, 14)',
+  run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
+    // out of the staged bytes before any product invocation.
+    sliceCheck(
+      RBF_TARGET_SOURCE,
+      RBF_TARGET_A_RANGE,
+      RBF_TARGET_A_TEXT,
+      "T11.2-7 specs/A.mdx: section a",
+    );
+    for (const arm of RBF_ARMS) {
+      for (const slice of arm.slices) {
+        sliceCheck(
+          arm.source,
+          slice.range,
+          slice.text,
+          `T11.2-7 ${arm.label}: ${slice.what}`,
+        );
+      }
+    }
+
+    for (const arm of RBF_ARMS) {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [A_FILE]: RBF_TARGET_STAGED,
+          [B_FILE]: arm.staged,
+        },
+      });
+      try {
+        const context = `T11.2-7 bare \`view --text\` (${arm.label})`;
+        const result = await expectExit(
+          product,
+          workspace,
+          ["view", "--text"],
+          1,
+          `${context} — specs/B.mdx's findings accompany, so exit 1 with ` +
+            `the full answer emitted (SPEC 11.2)`,
+        );
+        const report = decodeViewReport(
+          parseJsonStdout(
+            result,
+            `${context} — a single JSON document is the only output form ` +
+              `(SPEC 11)`,
+          ),
+          { text: true },
+          context,
+        );
+        assertConditionCounts(
+          report.findings,
+          arm.conditionCounts,
+          `${context} — exactly the staged conditions accompany, all ` +
+            `specs/B.mdx's (specs/A.mdx is finding-free; SPEC 11.2, 14)`,
+        );
+        assertSameJson(
+          report.findings.map(projectFinding),
+          arm.findings,
+          `${context} — specs/B.mdx's findings, form-exact in 12.7 order: ` +
+            `${arm.findingsWhat} (SPEC 14, 12.7)`,
+        );
+        assertSameJson(
+          report.views.map((view) => view.file),
+          [A_FILE, B_FILE],
+          `${context} — one per-file view per discovered spec source, in ` +
+            `path-byte order (SPEC 11.4)`,
+        );
+        const targetView = report.views[0]!;
+        const armView = report.views[1]!;
+        assertSameJson(
+          projectTextNode(targetView.root),
+          RBF_TARGET_TEXT_TREE,
+          `${context} — the import target specs/A.mdx: its text values ` +
+            `defined and byte-exact (SPEC 11.4, 1.6, 3)`,
+        );
+        assertSameJson(
+          projectTextNode(armView.root),
+          arm.textTree,
+          `${context} — specs/B.mdx's text values against their ` +
+            `precomputed bytes: ${arm.textWhat} (SPEC 11.2, 1.6, 3)`,
+        );
+        assertSameJson(
+          [
+            targetView.occurrences,
+            targetView.comments,
+            armView.occurrences,
+            armView.comments,
+          ],
+          [[], [], [], []],
+          `${context} — no reference and no comment staged: empty ` +
+            `occurrence and comment lists, never null (SPEC 5.7, 12.7)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+  },
+});
+
 /** TEST-SPEC §11.2, in canonical ID order (SUITE-52). */
 export const section112Tests: readonly ProductTestEntry[] = [
   T11_2_1,
@@ -6388,4 +6896,5 @@ export const section112Tests: readonly ProductTestEntry[] = [
   T11_2_4,
   T11_2_5,
   T11_2_6,
+  T11_2_7,
 ];

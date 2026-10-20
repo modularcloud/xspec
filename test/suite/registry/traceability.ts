@@ -590,6 +590,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // `out` or below it and the plain usage error's `null`s; its passing-side
   // arms' 14.12 and 14.21 ride "14".
   "T11.2-6": ["11.2", "13.3", "13.4", "12.0", "12.7", "14"],
+  "T11.2-7": ["11.2", "14"],
   "T11.3-1": ["11.3", "14"],
   "T11.3-2": ["11.3", "14"],
   "T11.3-3": ["11.3", "1.4", "12.0", "12.7", "14"],
