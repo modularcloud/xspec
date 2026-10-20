@@ -5,17 +5,17 @@
 // asserts exact exit codes (H-5), and rejects a product only via diagnosed
 // assertion failures (H-8). SPEC 11: `view` is JSON-only — a single JSON
 // document is its only output form, with or without `--json` — in the
-// form-exact 12.7 document form (H-3), so every invocation below runs bare
-// and its entire stdout decodes through `decodeViewReport`, which enforces
-// the top level (`{"findings", "views"}` exactly), every per-file wrapper and
-// node member (`{"identity", "range", "opening", "closing", "attributes",
-// "tags", "coverage", "children"}`, the text members absent without
-// `--text`), the three-state datum forms, and the pinned orders (per-file
-// views by path bytes, children/attributes/imports/occurrences/comments in
-// document order) over whatever the product emits.
+// form-exact 12.7 document form (H-3), so every `view` invocation below
+// runs bare and its entire stdout decodes through `decodeViewReport`, which
+// enforces the top level (`{"findings", "views"}` exactly), every per-file
+// wrapper and node member (`{"identity", "range", "opening", "closing",
+// "attributes", "tags", "coverage", "children"}`, the text members absent
+// without `--text`), the three-state datum forms, and the pinned orders
+// (per-file views by path bytes, children/attributes/imports/occurrences/
+// comments in document order) over whatever the product emits.
 //
-// T11.4-1 — views and tree. One workspace, one bare `view` (neither operands
-// nor `--file`), the whole document asserted:
+// T11.4-1 — views and tree. Two workspaces, one bare `view` (neither
+// operands nor `--file`) on each, the whole document asserted:
 //
 // - Whole domain and order: every discovered spec source is viewed — a
 //   section-less file included (a product viewing only files that hold
@@ -26,6 +26,22 @@
 //   0x6C) before "specs/sub/leaf.mdx" (s, 0x73) by path bytes, while a
 //   case-folding or locale collation orders alpha first and fails (the
 //   exact compare here; the decode's strictly-ascending check besides).
+// - Multi-file order on T11.6-3's order fixture (the second workspace, the
+//   exported `stageOrderFixture`: spec groups `tests` globbing
+//   specs/z/*.mdx then specs/a/*.mdx and `product` globbing specs/a/*.mdx,
+//   two code groups, two coverage profiles, two policy rules, Markdown
+//   emitted under `out`, built, three review sessions — the fixture section
+//   below): the bare `view` answers finding-free at exit 0 with exactly
+//   specs/a/B.mdx, specs/a/a.mdx, specs/z/Z.mdx (B 0x42 < a 0x61; a 0x61 <
+//   z 0x7A at the directory segment), never group-by-group or glob-by-glob
+//   discovery order, which meets specs/z/Z.mdx first, or a case-folded one,
+//   which puts specs/a/a.mdx first (the decode's strictly-ascending check,
+//   then the exact compare); the two files of both spec groups are
+//   viewed once (the decode rejects a repeated view), no code source is
+//   viewed, and each file's tree — its root and its one paired section —
+//   is byte-asserted against its composed offsets, so a product sorting the
+//   `file` members alone, the views' content left in discovery order, fails
+//   the tree compare; its lists are `[]`.
 // - Tree and decomposition (specs/Zebra.mdx, finding-free): the root and the
 //   full positional section tree in document order — paired sections at
 //   three depths, a self-closing leaf at depth three and another at depth
@@ -82,7 +98,8 @@
 //   12.7).
 //
 // T11.4-2 — operands vs restriction (SPEC 11.4). One failing-on-purpose
-// workspace, the whole sweep inside one modifies-nothing compare:
+// workspace, the whole sweep inside one modifies-nothing compare, then
+// T11.6-3's order fixture for the operand-order arm:
 //
 // - Staging (the `build --json` gate pins it before any arm, so every
 //   domain-and-exit assertion below reads on staged ground): specs/dup.mdx
@@ -110,6 +127,19 @@
 //   admits the discovered SPEC sources it matches, unlike 11.3's
 //   spec-and-code-alike filter): a product reusing the occurrences filter
 //   consults the finding-laden code file, carries its 14.8, and exits 1.
+//   The inside-root spellings `./specs/*.mdx` and `specs//*.mdx` (a `.` and
+//   an empty segment: inside the root, matching nothing, SPEC 7) admit the
+//   empty set the same way, though their normalization `specs/*.mdx`
+//   matches the discovered dup.mdx and bad.mdx, which a normalizing product
+//   serves (bad.mdx's 14.3 accompanying, exit 1).
+// - An outside-root glob by spelling alone (SPEC 7's depth rule; T7-4) —
+//   `../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`, and `**/../x/*.mdx`,
+//   outside though its lexical normalization `x/*.mdx` is inside — is an
+//   invalid flag value, exit 2 with the plain usage error's document
+//   (`expectFilePatternUsageError`), the file the ascending spellings name
+//   resolved staged beside the root (support.ts'
+//   `BESIDE_ROOT_FILE_PATTERN_DECOY`), so exit 2 never comes from a side
+//   reason.
 // - Combining `<file>` operands with `--file` — each part individually
 //   valid — is a usage error, exit 2 (an intersecting or union product
 //   answers instead).
@@ -121,6 +151,16 @@
 //   files (T11.2-5's ground riding as this arm's positive control). The
 //   view's substance is pinned at identity level (root and child identity);
 //   ranges, attributes, and interpreted values stay T11.4-1/-3's subject.
+// - The requested files' views are ordered by path bytes whatever the
+//   operands' order: on T11.6-3's order fixture (a second workspace, staged
+//   by `stageOrderFixture` — built, three review sessions), `view
+//   specs/z/Z.mdx specs/a/a.mdx specs/a/B.mdx` — operands in neither byte
+//   nor case-folded order — answers finding-free at exit 0 with exactly
+//   specs/a/B.mdx, specs/a/a.mdx, specs/z/Z.mdx (the decode's
+//   strictly-ascending check rejects operand order and a case-folded one
+//   first; the exact compare pins the list), each view the named file's at
+//   identity level, the `view` inside its own modifies-nothing compare (the
+//   fixture's graph data fresh from its staging `build`, SPEC 13.3).
 //
 // T11.4-3 — attributes and per-node data (SPEC 11.4, 11.2, 2.7). Two
 // workspaces, three files, three invocations:
@@ -401,19 +441,23 @@
 // the omission; under VIOL-AVAIL-NOFILE it passes untouched — T11.4-4
 // drives `view` alone.
 // T11.4-1 is NOT in scope (CERTIFICATIONS.md's CONF-AVAIL Justification):
-// TEST-SPEC runs its whole-domain arm on T11.6-3's order fixture, which the
-// scope does not serve, and its trees, ranges, and list orders are positive
-// observations, byte-asserted against precomputed offsets and form-exact,
-// failing loud — the datum decode it rides is certified on the in-scope
-// `view` tests. Its body's comments still note where its stagings keep to
-// CONF-AVAIL's shapes (one bare whole-domain `view`, no gate-reference
-// `build`, no snapshot compare); the scope no longer binds them.
+// TEST-SPEC runs its whole-domain arm on T11.6-3's order fixture — two code
+// groups of `.ts` sources, coverage profiles, policy rules, emission under
+// `outDir`, a build, and review sessions, staged by `stageOrderFixture` —
+// which the scope does not serve, and its trees, ranges, and list orders are
+// positive observations, byte-asserted against precomputed offsets and
+// form-exact, failing loud — the datum decode it rides is certified on the
+// in-scope `view` tests. Its first workspace's comments still note where its
+// stagings keep to CONF-AVAIL's shapes (one bare whole-domain `view`, no
+// gate-reference `build`, no snapshot compare); the scope no longer binds
+// them.
 // T11.4-2, T11.4-5, and T11.4-6 are NOT in scope: CERTIFICATIONS.md's
 // Exclusions name the argument, spelling, and domain-and-exit matrices of
 // the machine-interface surfaces (T11.2-5, T11.3-2/3, T11.4-2, T11.5-2) and
 // T11.4-5's consultation-domain negatives — certified representatively
 // through the shared machinery — so unlike their siblings those two are
-// free to drive the gate-reference `build` and the snapshot compare, and
+// free to drive the gate-reference `build` and the snapshot compare (and
+// T11.4-2 the order fixture's staging `build` and `review create`), and
 // T11.4-6 lies outside the scope by construction: its emission loop needs
 // the `markdown` configuration and emitted-file reads, both expressly
 // outside CONF-AVAIL's workspace scope, its assertions are the loud
@@ -429,6 +473,7 @@ import type {
   ViewAttributeEntry,
   ViewImportEntry,
   ViewNode,
+  ViewReport,
 } from "../../helpers/adapters/index.js";
 import { decodeViewReport } from "../../helpers/adapters/index.js";
 import {
@@ -442,6 +487,10 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
+import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   expectAvailabilityUsageError,
@@ -457,6 +506,7 @@ import {
   BESIDE_ROOT_FILE_PATTERN_DECOY,
   INSIDE_NO_MATCH_FILE_PATTERNS,
   OUTSIDE_ROOT_FILE_PATTERNS,
+  OUTSIDE_ROOT_FILE_PATTERN_INSIDE_ONCE_NORMALIZED,
   assertConditionCounts,
   assertFindingLocated,
   assertSameJson,
@@ -1148,10 +1198,398 @@ const EXPECTED_VIEWS: readonly {
   },
 ];
 
+// --- T11.6-3's order fixture — the multi-file order ground --------------------
+//
+// TEST-SPEC T11.4-1 and T11.4-2 assert the multi-file `view` order "on
+// T11.6-3's order fixture", the workspace T11.6-3 stages so that each fixed
+// order differs from the orders a product would plausibly emit instead
+// (exported for T11.6-3's own order arm): spec groups configured `tests` then
+// `product` — `tests` globbing `["specs/z/*.mdx", "specs/a/*.mdx"]`, out of
+// byte order, and `product` globbing `["specs/a/*.mdx"]` — code groups `web`
+// (`web/*.ts`) then `app` (`app/*.ts`), two coverage profiles and two policy
+// rules each configured in reverse byte order of name (`z-cov` then `a-cov`,
+// `z-rule` then `a-rule`), the spec sources specs/z/Z.mdx, specs/a/B.mdx, and
+// specs/a/a.mdx, the code sources web/w.ts and app/p.ts, Markdown emission
+// enabled under `outDir: "out"`, built, and sessions created as `a2`, then
+// `a`, then `B` (T10.7-5's names; audit sessions, which need no baseline).
+// The spec sources' byte order — specs/a/B.mdx < specs/a/a.mdx (B 0x42 < a
+// 0x61) < specs/z/Z.mdx (a 0x61 < z 0x7A at the directory segment) — is the
+// order 11.4 and 12.7 fix for the views, and it differs from group-by-group
+// and glob-by-glob discovery order, which meets specs/z/Z.mdx first
+// (`tests`' first glob), from a case-folded order, which puts specs/a/a.mdx
+// first, and from T11.4-2's operand order (`checkOrderFixtureStaging` proves
+// each harness-side before any invocation); specs/a/B.mdx and specs/a/a.mdx
+// lie in both spec groups, so a product viewing a file once per group
+// repeats them. Each spec source holds one paired section behind a line of
+// multi-byte prose, its tree composed by the running-offset builder (SPEC
+// 1.7); the profiles and rules are valid (SPEC 7.4, 7.5 — an invalid
+// configuration is a 14.14 at load) and the code sources reference nothing,
+// so the workspace passes `build`'s validations and every spec source is
+// finding-free. T11.4-1 and T11.4-2 stage it after their first product
+// invocation, so every file is a staged-source record (S-9).
+
+/** The order fixture's spec groups, in configuration order (T11.6-3). */
+const ORDER_SPEC_GROUPS: readonly {
+  readonly name: string;
+  readonly globs: readonly string[];
+}[] = [
+  { name: "tests", globs: ["specs/z/*.mdx", "specs/a/*.mdx"] },
+  { name: "product", globs: ["specs/a/*.mdx"] },
+];
+
+const ORDER_FIXTURE_CONFIG_SOURCE = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    tests: ["specs/z/*.mdx", "specs/a/*.mdx"],
+    product: ["specs/a/*.mdx"]
+  },
+  code: {
+    web: ["web/*.ts"],
+    app: ["app/*.ts"]
+  },
+  markdown: { emit: true, outDir: "out" },
+  coverage: [
+    {
+      name: "z-cov",
+      target: "tests",
+      boundary: "web",
+      mode: "direct"
+    },
+    {
+      name: "a-cov",
+      target: "product",
+      boundary: "app",
+      mode: "transitive"
+    }
+  ],
+  policy: [
+    {
+      name: "z-rule",
+      type: "forbidden",
+      from: { group: "web" },
+      to: { group: "product" }
+    },
+    {
+      name: "a-rule",
+      type: "allowedOnly",
+      from: { group: "app" },
+      to: { group: "tests" }
+    }
+  ]
+})
+`;
+
+/** The order fixture's configuration (TEST-SPEC T11.6-3). */
+export const ORDER_FIXTURE_CONFIG: StagedTs = stagedTs(
+  "T11.4-1/T11.4-2 order fixture xspec.config.ts — T11.6-3's order fixture's configuration: spec groups tests then product, code groups web then app, profiles z-cov then a-cov, rules z-rule then a-rule, Markdown emitted under out",
+  ORDER_FIXTURE_CONFIG_SOURCE,
+);
+
+/** One spec source of the order fixture, with its expected tree (1.7). */
+export interface OrderSpecSource {
+  readonly file: string;
+  readonly source: string;
+  readonly staged: StagedMdx;
+  readonly openingTag: string;
+  readonly opening: SourceRange;
+  readonly closing: SourceRange;
+  readonly tree: TreeShape;
+}
+
+/**
+ * Compose one order-fixture spec source — a line of prose, then one paired
+ * section `<S id="<id>">` holding one body line — with its staged-source
+ * record and its expected tree, every offset composed from the staged parts.
+ */
+function orderSpecSource(
+  file: string,
+  prose: string,
+  id: string,
+  body: string,
+): OrderSpecSource {
+  const fixture = new ByteFixture();
+  fixture.add(`${prose}\n\n`);
+  const openingTag = `<S id="${id}">`;
+  const opening = fixture.add(openingTag);
+  fixture.add(`\n${body}\n`);
+  const closing = fixture.add("</S>");
+  const range: SourceRange = { start: opening.start, end: fixture.pos };
+  fixture.add("\n");
+  const source = fixture.source;
+  return {
+    file,
+    source,
+    staged: stagedMdx(
+      `T11.4-1/T11.4-2 order fixture ${file} (T11.6-3's order fixture)`,
+      source,
+    ),
+    openingTag,
+    opening,
+    closing,
+    tree: {
+      identity: file,
+      range: { start: 0, end: fixture.pos },
+      opening: null,
+      closing: null,
+      children: [
+        {
+          identity: `${file}#${id}`,
+          range,
+          opening,
+          closing,
+          children: [],
+        },
+      ],
+    },
+  };
+}
+
+const ORDER_Z = orderSpecSource(
+  "specs/z/Z.mdx",
+  "Zed — order fixture prose.",
+  "z",
+  "Z text.",
+);
+const ORDER_B = orderSpecSource(
+  "specs/a/B.mdx",
+  "Bee — order fixture prose.",
+  "b",
+  "B text.",
+);
+const ORDER_A = orderSpecSource(
+  "specs/a/a.mdx",
+  "Ay — order fixture prose.",
+  "a",
+  "a text.",
+);
+
+/**
+ * The order fixture's spec sources in byte order of workspace-relative path
+ * — the multi-file `view` order (SPEC 11.4, 12.7).
+ */
+export const ORDER_FIXTURE_SPEC_SOURCES: readonly OrderSpecSource[] = [
+  ORDER_B,
+  ORDER_A,
+  ORDER_Z,
+];
+
+/**
+ * TEST-SPEC's pinned view order on the order fixture (T11.4-1, T11.4-2):
+ * `specs/a/B.mdx`, `specs/a/a.mdx`, `specs/z/Z.mdx`.
+ */
+const ORDER_VIEW_FILES: readonly string[] = [
+  "specs/a/B.mdx",
+  "specs/a/a.mdx",
+  "specs/z/Z.mdx",
+];
+
+/**
+ * T11.4-2's operands, as TEST-SPEC spells them — in neither byte nor
+ * case-folded order: `view specs/z/Z.mdx specs/a/a.mdx specs/a/B.mdx`.
+ */
+const ORDER_OPERANDS: readonly string[] = [
+  "specs/z/Z.mdx",
+  "specs/a/a.mdx",
+  "specs/a/B.mdx",
+];
+
+/** The order fixture's files: configuration, spec sources, code sources. */
+export const ORDER_FIXTURE_FILES: Readonly<
+  Record<string, StagedMdx | StagedTs>
+> = {
+  "xspec.config.ts": ORDER_FIXTURE_CONFIG,
+  [ORDER_Z.file]: ORDER_Z.staged,
+  [ORDER_B.file]: ORDER_B.staged,
+  [ORDER_A.file]: ORDER_A.staged,
+  "web/w.ts": stagedTs(
+    "T11.4-1/T11.4-2 order fixture web/w.ts (T11.6-3's order fixture, code group web)",
+    "export const w = 1;\n",
+  ),
+  "app/p.ts": stagedTs(
+    "T11.4-1/T11.4-2 order fixture app/p.ts (T11.6-3's order fixture, code group app)",
+    "export const p = 1;\n",
+  ),
+};
+
+/** The order fixture's session names, in creation order (T10.7-5's). */
+export const ORDER_FIXTURE_SESSION_NAMES: readonly string[] = ["a2", "a", "B"];
+
+/**
+ * Fixture self-check (harness-side, before any product invocation): the
+ * order fixture's composed tag ranges slice its staged bytes to the tags;
+ * its configuration spells the spec groups this check reads; and the view
+ * order pinned for it is the byte order of its spec sources' paths and
+ * differs from each order a product would plausibly emit instead —
+ * group-by-group or glob-by-glob discovery order (whatever order a
+ * directory listing yields within one glob), a case-folded order, and
+ * T11.4-2's operand order — so a product emitting any of them fails the
+ * decode's strictly-ascending check or the exact compare instead of
+ * coinciding with the asserted list. A failure is a staging defect of the
+ * harness, never a product failure.
+ */
+function checkOrderFixtureStaging(): void {
+  for (const spec of ORDER_FIXTURE_SPEC_SOURCES) {
+    sliceCheck(
+      spec.source,
+      spec.opening,
+      spec.openingTag,
+      `the order fixture's ${spec.file} opening tag`,
+    );
+    sliceCheck(
+      spec.source,
+      spec.closing,
+      "</S>",
+      `the order fixture's ${spec.file} closing tag`,
+    );
+  }
+  let previousLine = -1;
+  for (const group of ORDER_SPEC_GROUPS) {
+    const line =
+      `    ${group.name}: ` +
+      `[${group.globs.map((glob) => JSON.stringify(glob)).join(", ")}]`;
+    const at = ORDER_FIXTURE_CONFIG_SOURCE.indexOf(line);
+    if (at <= previousLine) {
+      fail(
+        `§11.4 fixture self-check — the order fixture's configuration ` +
+          `spells no spec-group line ${JSON.stringify(line)} after the ` +
+          `previous group's, so the discovery order checked below is not ` +
+          `the staged one (a harness-side staging error, not a product ` +
+          `failure)`,
+      );
+    }
+    previousLine = at;
+  }
+  const files = ORDER_FIXTURE_SPEC_SOURCES.map((spec) => spec.file);
+  const misstaged = (what: string): never =>
+    fail(
+      `§11.4 fixture self-check — the order fixture: ${what}, so the ` +
+        `multi-file order arms could not see a product emitting that ` +
+        `order (a harness-side staging error, not a product failure)`,
+    );
+  if (
+    JSON.stringify(sortedByBytes(files, (file) => file)) !==
+    JSON.stringify(ORDER_VIEW_FILES)
+  ) {
+    misstaged(
+      `the pinned view order ${JSON.stringify(ORDER_VIEW_FILES)} is not ` +
+        `the byte order of the staged spec sources' paths`,
+    );
+  }
+  // Group-by-group and glob-by-glob discovery both meet the files of the
+  // configuration's first glob first, in whatever order a listing yields.
+  const firstGlob = ORDER_SPEC_GROUPS[0]!.globs[0]!;
+  const firstDir = firstGlob.slice(0, firstGlob.lastIndexOf("/") + 1);
+  const metFirst = files.filter(
+    (file) =>
+      file.startsWith(firstDir) && !file.slice(firstDir.length).includes("/"),
+  );
+  if (metFirst.length === 0 || metFirst.includes(ORDER_VIEW_FILES[0]!)) {
+    misstaged(
+      `discovery order meets ${JSON.stringify(metFirst)} first (the ` +
+        `files of ${JSON.stringify(firstGlob)}), which may coincide with ` +
+        `the byte order's first file`,
+    );
+  }
+  const alternatives: readonly (readonly [string, readonly string[]])[] = [
+    ["a case-folded order", sortedByBytes(files, (file) => file.toLowerCase())],
+    ["T11.4-2's operand order", ORDER_OPERANDS],
+  ];
+  for (const [what, order] of alternatives) {
+    if (JSON.stringify(order) === JSON.stringify(ORDER_VIEW_FILES)) {
+      misstaged(`the byte order coincides with ${what}`);
+    }
+  }
+}
+
+/**
+ * Stage T11.6-3's order fixture in a fresh workspace (H-1) and bring it to
+ * the state TEST-SPEC names: built (exit 0 — the workspace passes `build`'s
+ * validations, SPEC 12.1), then the audit sessions `a2`, `a`, and `B`
+ * created in that order (each exit 0, SPEC 10.7). The caller disposes the
+ * workspace; it is disposed here when a staging step fails.
+ */
+export async function stageOrderFixture(
+  product: ProductBinding,
+  context: string,
+): Promise<TestWorkspace> {
+  const workspace = await TestWorkspace.create({ files: ORDER_FIXTURE_FILES });
+  try {
+    await buildOk(
+      product,
+      workspace,
+      `${context} — staging \`build\`: T11.6-3's order fixture passes ` +
+        `\`build\`'s validations (SPEC 12.1)`,
+    );
+    for (const name of ORDER_FIXTURE_SESSION_NAMES) {
+      await expectExit(
+        product,
+        workspace,
+        ["review", "create", "--strategy", "audit", "--name", name],
+        0,
+        `${context} — staging \`review create --strategy audit --name ` +
+          `${name}\` (T11.6-3's sessions, created a2, then a, then B; SPEC ` +
+          `10.7)`,
+      );
+    }
+    return workspace;
+  } catch (error) {
+    await workspace.dispose();
+    throw error;
+  }
+}
+
+/**
+ * The order fixture's views, as both order arms read them: exactly its three
+ * spec sources, in byte order of path (the decode's strictly-ascending check
+ * has already rejected any other order and a repeated view), each view the
+ * named file's — `projection` choosing what of its tree is pinned — with
+ * empty lists, nothing being staged there (SPEC 11.4, 12.7).
+ */
+function assertOrderFixtureViews<T>(
+  report: ViewReport,
+  projection: {
+    readonly project: (node: ViewNode) => T;
+    readonly expected: (spec: OrderSpecSource) => T;
+    readonly what: string;
+  },
+  why: string,
+  context: string,
+): void {
+  assertSameJson(
+    report.views.map((view) => view.file),
+    ORDER_VIEW_FILES,
+    `${context}: exactly the order fixture's three spec sources, in byte ` +
+      `order of workspace-relative path — specs/a/B.mdx (B 0x42) < ` +
+      `specs/a/a.mdx (a 0x61) < specs/z/Z.mdx (z 0x7A at the directory ` +
+      `segment) — ${why}; each file in both spec groups viewed once, no ` +
+      `code source viewed (SPEC 11.4, 12.7)`,
+  );
+  ORDER_FIXTURE_SPEC_SOURCES.forEach((spec, index) => {
+    const view = report.views[index]!;
+    assertSameJson(
+      projection.project(view.root),
+      projection.expected(spec),
+      `${context} — ${spec.file}: the view is the named file's — ` +
+        `${projection.what} (SPEC 11.4, 11.2, 1.7)`,
+    );
+    assertSameJson(
+      {
+        imports: view.imports,
+        occurrences: view.occurrences,
+        comments: view.comments,
+      },
+      { imports: [], occurrences: [], comments: [] },
+      `${context} — ${spec.file}: nothing is staged there, so each list ` +
+        `is [], never null (SPEC 11.4, 12.7)`,
+    );
+  });
+}
+
 const T11_4_1 = defineProductTest({
   id: "T11.4-1",
   title:
-    "with neither operands nor `--file`, one bare `view` (JSON-only, a single form-exact 12.7 document) serves every discovered spec source — a section-less file included — as per-file views in byte order of workspace-relative path (specs/Zebra.mdx < specs/alpha.mdx < specs/lists.mdx < specs/sub/leaf.mdx: 0x5A < 0x61 < 0x6C < 0x73, never a case-folding or locale collation); per file the root and the full positional section tree in document order, each node's construct range and decomposition byte-asserted against precomputed offsets behind a multi-byte prefix (SPEC 1.7): opening and closing tag ranges for paired sections at three depths, opening only — the whole self-closing tag, equal to the construct range — for self-closing sections, neither for the root, whose range is the entire file; a section nested inside an invalid `<div>` parents to the INNERMOST enclosing section construct (`wrap.mid`, never `wrap`, never the root — the enclosure 11.2's chain conditions read, so every staged identity stays a defined plain string) and a section inside a top-level `<em>` parents to the root, the invalid elements getting no view entry, exactly the two 14.16 findings accompanying (no phantom 14.2), each located within its own element's construct window; list orders (12.7): on specs/lists.mdx — three imports, four MDX comments, and six reference occurrences, `d` references and embeddings interleaved (a `d` reference after embeddings), document order differing from every byte-sorted and grouped order — `imports`, `comments`, and `occurrences` are each exactly the expected list in document order, form-exact, every entry's ranges byte-asserted (asserted here because P-12 sorts the view's occurrences itself and cannot see a misordered list), every other file's lists `[]`; exit 1 with the full answer (SPEC 11.4, 11.2, 1.7, 5.7, 12.7, 14)",
+    "with neither operands nor `--file`, one bare `view` (JSON-only, a single form-exact 12.7 document) serves every discovered spec source — a section-less file included — as per-file views in byte order of workspace-relative path (specs/Zebra.mdx < specs/alpha.mdx < specs/lists.mdx < specs/sub/leaf.mdx: 0x5A < 0x61 < 0x6C < 0x73, never a case-folding or locale collation), and on T11.6-3's order fixture — spec groups `tests` (globbing specs/z/*.mdx, then specs/a/*.mdx) then `product` (specs/a/*.mdx), two code groups, two coverage profiles, and two policy rules, Markdown emitted under `out`, built, three review sessions — exactly specs/a/B.mdx, specs/a/a.mdx, specs/z/Z.mdx (B 0x42 < a 0x61; a 0x61 < z 0x7A), never group-by-group discovery order or a case-folded one, each file of both spec groups viewed once, finding-free at exit 0; per file the root and the full positional section tree in document order, each node's construct range and decomposition byte-asserted against precomputed offsets behind a multi-byte prefix (SPEC 1.7): opening and closing tag ranges for paired sections at three depths, opening only — the whole self-closing tag, equal to the construct range — for self-closing sections, neither for the root, whose range is the entire file; a section nested inside an invalid `<div>` parents to the INNERMOST enclosing section construct (`wrap.mid`, never `wrap`, never the root — the enclosure 11.2's chain conditions read, so every staged identity stays a defined plain string) and a section inside a top-level `<em>` parents to the root, the invalid elements getting no view entry, exactly the two 14.16 findings accompanying (no phantom 14.2), each located within its own element's construct window; list orders (12.7): on specs/lists.mdx — three imports, four MDX comments, and six reference occurrences, `d` references and embeddings interleaved (a `d` reference after embeddings), document order differing from every byte-sorted and grouped order — `imports`, `comments`, and `occurrences` are each exactly the expected list in document order, form-exact, every entry's ranges byte-asserted (asserted here because P-12 sorts the view's occurrences itself and cannot see a misordered list), every other file's lists `[]`; the first workspace's answer exit 1 with the full answer (SPEC 11.4, 11.2, 1.7, 5.7, 12.7, 14)",
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline) — composed-range arithmetic
     // proven against the staged bytes before any product invocation.
@@ -1203,6 +1641,7 @@ const T11_4_1 = defineProductTest({
     );
     sliceCheck(ALPHA_SOURCE, AL_FREE_RANGE, AL_FREE_TAG, "free's tag");
     checkListOrderStaging();
+    checkOrderFixtureStaging();
 
     const workspace = await TestWorkspace.create({
       files: {
@@ -1214,10 +1653,10 @@ const T11_4_1 = defineProductTest({
       },
     });
     try {
-      // The one invocation (CONF-AVAIL's enumerated surface: no
-      // gate-reference `build`, no snapshot compare): the bare whole-domain
-      // `view`. The answer carries alpha's two 14.16 findings, so exit 1
-      // with the full answer still emitted (SPEC 11.2).
+      // The first workspace's one invocation (CONF-AVAIL's enumerated
+      // surface: no gate-reference `build`, no snapshot compare): the bare
+      // whole-domain `view`. The answer carries alpha's two 14.16 findings,
+      // so exit 1 with the full answer still emitted (SPEC 11.2).
       const context = "T11.4-1 bare `view` (whole domain, no operands)";
       const result = await expectExit(
         product,
@@ -1337,6 +1776,62 @@ const T11_4_1 = defineProductTest({
     } finally {
       await workspace.dispose();
     }
+
+    // --- The multi-file order on T11.6-3's order fixture (TEST-SPEC
+    // T11.4-1: "on T11.6-3's order fixture `specs/a/B.mdx`, `specs/a/a.mdx`,
+    // `specs/z/Z.mdx`, never group-by-group discovery order or a
+    // case-folded one"): a second workspace, staged as T11.6-3 stages it —
+    // built, three sessions created — then one bare `view`. Its spec
+    // sources are finding-free, so the whole-domain answer carries no
+    // finding and exits 0; its views are exactly the three spec sources in
+    // byte order of path (the decode's strictly-ascending check rejects any
+    // other order, and a file of both spec groups viewed twice, first; the
+    // exact compare pins the list — a dropped file, a code source viewed),
+    // each file's tree byte-asserted against its composed offsets — so a
+    // product sorting the `file` members alone, its views' content left in
+    // discovery order, fails there — and its lists `[]`.
+    const orderContext =
+      "T11.4-1 bare `view` on T11.6-3's order fixture (whole domain, no " +
+      "operands)";
+    const orderWorkspace = await stageOrderFixture(product, orderContext);
+    try {
+      const orderReport = decodeViewReport(
+        await runJson(
+          product,
+          orderWorkspace,
+          ["view"],
+          `${orderContext} — the domain's three spec sources are ` +
+            `finding-free, so the full answer exits 0 (SPEC 11.4, 11.2)`,
+        ),
+        { text: false },
+        orderContext,
+      );
+      assertSameJson(
+        orderReport.findings,
+        [],
+        `${orderContext}: the consulted domain is finding-free — the ` +
+          `fixture passes \`build\`'s validations, and its profiles, rules, ` +
+          `and sessions are no domain file's (SPEC 11.2, 11.4)`,
+      );
+      assertOrderFixtureViews(
+        orderReport,
+        {
+          project: projectShape,
+          expected: (spec) => spec.tree,
+          what:
+            "its root and its one paired section, each node's construct " +
+            "range and its decomposition against precomputed byte offsets " +
+            "(opening and closing tag ranges for the section, neither for " +
+            "the root) and each identity the defined plain string",
+        },
+        "never group-by-group or glob-by-glob discovery order (specs/z/Z.mdx " +
+          "first: `tests` globs specs/z/*.mdx first) or a case-folded one " +
+          "(specs/a/a.mdx first)",
+        orderContext,
+      );
+    } finally {
+      await orderWorkspace.dispose();
+    }
   },
 });
 
@@ -1385,11 +1880,11 @@ const OV_WORKSPACE_CONDITIONS: Readonly<Record<string, number>> = {
 };
 
 /**
- * The set arm's identity-level projection: the served view's substance is
- * pinned by node identities alone — the construct ranges, decompositions,
- * attribute entries, and interpreted values are T11.4-1's and T11.4-3's
- * subject (the form-exact decode has already enforced their presence and
- * forms).
+ * The set and operand-order arms' identity-level projection: the served
+ * views' substance is pinned by node identities alone — the construct
+ * ranges, decompositions, attribute entries, and interpreted values are
+ * T11.4-1's and T11.4-3's subject (the form-exact decode has already
+ * enforced their presence and forms).
  */
 interface IdentityShape {
   readonly identity: string | { readonly unavailable: true };
@@ -1403,6 +1898,14 @@ function projectIdentities(node: ViewNode): IdentityShape {
   };
 }
 
+/** The identity-level projection of an expected tree (the order arm's). */
+function identityShapeOf(tree: TreeShape): IdentityShape {
+  return {
+    identity: tree.identity,
+    children: tree.children.map(identityShapeOf),
+  };
+}
+
 const OV_DUP_IDENTITY_TREE: IdentityShape = {
   identity: OV_DUP_FILE,
   children: [{ identity: `${OV_DUP_FILE}#solo`, children: [] }],
@@ -1411,8 +1914,12 @@ const OV_DUP_IDENTITY_TREE: IdentityShape = {
 const T11_4_2 = defineProductTest({
   id: "T11.4-2",
   title:
-    '`<file>` operands assert membership in the DISCOVERED spec-source domain while `--file` is a set restriction over it: an undiscovered operand — a file existing nowhere, and an on-disk `docs/note.mdx` no configured group discovers — exits 2 as an unknown file, and a discovered code source exits 2 as a wrong-kind operand (12.0), its own staged 14.8 notwithstanding — the argument checks precede answering — each with the single 12.7 error document; the SAME `src/app.ts` spelling as a `--file` value instead admits the empty set — a glob matching only code sources, one matching the undiscovered on-disk decoy, and one matching nothing at all each answer `{"findings": [], "views": []}`, exit 0, no unknown-file usage error on this filter, whatever findings the workspace carries, as does an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`) whose normalized form would match the staged spec files; an outside-root glob by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx` — the depth rule of SPEC 7) exits 2 as an invalid flag value with the single 12.7 error document, code and path null, a matching file beside the root notwithstanding; combining `<file>` operands with `--file`, each part individually valid, exits 2; and the requested files form a set — the discovered `specs/dup.mdx` named twice yields ONE view, its finding-free domain exiting 0 with the root and section identities served while the rest of the workspace stays failing, no invocation of the sweep modifying anything (SPEC 11.4, 11.2, 12.0, 12.7, 7)',
+    '`<file>` operands assert membership in the DISCOVERED spec-source domain while `--file` is a set restriction over it: an undiscovered operand — a file existing nowhere, and an on-disk `docs/note.mdx` no configured group discovers — exits 2 as an unknown file, and a discovered code source exits 2 as a wrong-kind operand (12.0), its own staged 14.8 notwithstanding — the argument checks precede answering — each with the single 12.7 error document; the SAME `src/app.ts` spelling as a `--file` value instead admits the empty set — a glob matching only code sources, one matching the undiscovered on-disk decoy, and one matching nothing at all each answer `{"findings": [], "views": []}`, exit 0, no unknown-file usage error on this filter, whatever findings the workspace carries, as does an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`) — inside the root, matching nothing, though its normalization `specs/*.mdx` matches the discovered sources under `specs/`; an outside-root glob by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`, and `**/../x/*.mdx`, outside though its lexical normalization `x/*.mdx` is not — the depth rule of SPEC 7, T7-4) exits 2 as an invalid flag value with the single 12.7 error document, code and path null, a matching file beside the root notwithstanding; combining `<file>` operands with `--file`, each part individually valid, exits 2; and the requested files form a set — the discovered `specs/dup.mdx` named twice yields ONE view, its finding-free domain exiting 0 with the root and section identities served while the rest of the workspace stays failing, no invocation of the sweep modifying anything — its views ordered by path bytes whatever the operands\' order: on T11.6-3\'s order fixture (built, three review sessions) `view specs/z/Z.mdx specs/a/a.mdx specs/a/B.mdx` yields exactly the views of specs/a/B.mdx, specs/a/a.mdx, specs/z/Z.mdx, never operand order or a case-folded one, each the named file\'s at identity level, finding-free at exit 0, modifying nothing (SPEC 11.4, 11.2, 12.0, 12.7, 7)',
   run: async (product) => {
+    // Fixture self-check (harness-side, before any product invocation): the
+    // operand-order arm's order fixture discriminates the orders it names.
+    checkOrderFixtureStaging();
+
     const workspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
@@ -1568,13 +2075,18 @@ const T11_4_2 = defineProductTest({
           }
 
           // --- An outside-root glob by spelling alone (SPEC 7's depth
-          // rule, as 11.3 and 11.1) is an invalid flag value, exit 2 (SPEC
-          // 11.4, 12.0): the argument check precedes answering (11.2),
-          // whatever findings the workspace carries — the matching file
-          // beside the root notwithstanding — through the shared
+          // rule, as 11.3 and 11.1; T7-4) is an invalid flag value, exit 2
+          // (SPEC 11.4, 12.0): the argument check precedes answering
+          // (11.2), whatever findings the workspace carries — the matching
+          // file beside the root notwithstanding — through the shared
           // plain-usage-error protocol (single 12.7 error document, code
-          // and path null, message on stderr).
-          for (const { spelling, why } of OUTSIDE_ROOT_FILE_PATTERNS) {
+          // and path null, message on stderr). `**/../x/*.mdx` among them:
+          // outside though its lexical normalization `x/*.mdx` is inside,
+          // which a product normalizing before deciding answers.
+          for (const { spelling, why } of [
+            ...OUTSIDE_ROOT_FILE_PATTERNS,
+            OUTSIDE_ROOT_FILE_PATTERN_INSIDE_ONCE_NORMALIZED,
+          ]) {
             await expectFilePatternUsageError(
               product,
               workspace,
@@ -1653,6 +2165,72 @@ const T11_4_2 = defineProductTest({
       );
     } finally {
       await workspace.dispose();
+    }
+
+    // --- The requested files' views are ordered by path bytes whatever the
+    // operands' order (TEST-SPEC T11.4-2: "`view specs/z/Z.mdx
+    // specs/a/a.mdx specs/a/B.mdx` on T11.6-3's order fixture yields
+    // `specs/a/B.mdx`, `specs/a/a.mdx`, `specs/z/Z.mdx`, never operand order
+    // or a case-folded one"; SPEC 11.4, 12.7): a second workspace, staged as
+    // T11.6-3 stages it — built, three sessions created — then one
+    // three-operand `view`, the operands in neither byte nor case-folded
+    // order. The domain is the three named files, all finding-free, so the
+    // answer carries no finding and exits 0; its views are exactly the three
+    // in byte order of path (the decode's strictly-ascending check rejects
+    // operand order and a case-folded one first; the exact compare pins the
+    // list), each view the named file's at identity level, its lists `[]` —
+    // the `view` modifying nothing (the fixture's graph data is fresh from
+    // its staging `build`, SPEC 13.3).
+    {
+      const context =
+        "T11.4-2 `view specs/z/Z.mdx specs/a/a.mdx specs/a/B.mdx` on " +
+        "T11.6-3's order fixture (operands in neither byte nor case-folded " +
+        "order)";
+      const orderWorkspace = await stageOrderFixture(product, context);
+      try {
+        await assertLeavesUnchanged(
+          orderWorkspace.root,
+          async () => {
+            const report = decodeViewReport(
+              await runJson(
+                product,
+                orderWorkspace,
+                ["view", ...ORDER_OPERANDS],
+                `${context} — the requested files are discovered spec ` +
+                  `sources, all finding-free, so the full answer exits 0 ` +
+                  `(SPEC 11.4, 11.2)`,
+              ),
+              { text: false },
+              context,
+            );
+            assertSameJson(
+              report.findings,
+              [],
+              `${context}: the domain's three files are finding-free ` +
+                `(SPEC 11.2, 11.4)`,
+            );
+            assertOrderFixtureViews(
+              report,
+              {
+                project: projectIdentities,
+                expected: (spec) => identityShapeOf(spec.tree),
+                what:
+                  "its root and its one section, each identity the defined " +
+                  "plain string",
+              },
+              "whatever the operands' order — never operand order " +
+                "(specs/z/Z.mdx first) or a case-folded one (specs/a/a.mdx " +
+                "first)",
+              context,
+            );
+          },
+          `${context} — the \`view\` modifies nothing: on the built order ` +
+            `fixture its graph data is fresh, and the surface writes ` +
+            `nothing (SPEC 11.2, 13.3)`,
+        );
+      } finally {
+        await orderWorkspace.dispose();
+      }
     }
   },
 });
