@@ -6,14 +6,20 @@
 // asserts exact exit codes (H-5), decodes output through the H-3 adapters,
 // and rejects a product only via diagnosed assertion failures (H-8).
 //
-// SPEC 12.3: `ids` lists requirement IDs grouped by file — files in byte
-// order of workspace-relative path, IDs within a file in document order —
-// with `--json` per 12.0. `--tree` renders each file's IDs as a tree
-// following section nesting, in the same file and document order. `--file
-// <glob>` restricts to files the glob matches (the rules of 7: a pattern
-// outside the workspace root by its spelling alone — 7's depth rule — is an
-// invalid flag value, exit 2, while an inside pattern spelled with a `.` or
-// empty segment is admitted and matches nothing, an empty listing at exit 0).
+// SPEC 12.3: `ids` lists requirement IDs grouped by file — one entry per
+// discovered spec source, none for a code source, which bears no
+// requirement IDs, in byte order of workspace-relative path, each holding
+// its file's listed IDs in document order and present even when it holds
+// none (a file with no sections, or one whose every ID `--unreferenced`
+// excludes) — with `--json` per 12.0. `--tree` renders each file's IDs as a
+// tree following section nesting, in the same file and document order.
+// `--file <glob>` restricts the entries to the spec sources the glob matches
+// (the rules of 7: a pattern outside the workspace root by its spelling
+// alone — 7's depth rule, `**/../x/*.mdx` among them though its lexical
+// normalization is inside — is an invalid flag value, exit 2, while an
+// inside pattern spelled with a `.` or empty segment is admitted and matches
+// nothing, an empty listing at exit 0), so a glob matching none, or only
+// code sources, leaves no entry.
 // `--unreferenced` restricts to requirement nodes with no incoming dependency
 // edges from specs or code (`contains` does not count); unreferenced is not
 // uncovered. When the listing is restricted and a listed node's parent is not
@@ -35,19 +41,27 @@
 //   the listed ID at all. (Reconstructing full IDs from a differently shaped
 //   but information-complete rendering would be an H-3 shape adjustment in
 //   the adapter, never a value change.)
-// - Whether a file with no listed IDs appears as an (empty) entry in a
-//   restricted listing is not fixed by SPEC 12.3, so every listing
-//   comparison first drops entries carrying no IDs/nodes; the surviving
-//   entries — the listing's content — are asserted exactly, order included.
+// - Entries (SPEC 12.3, above): which files a listing holds is fixed — one
+//   entry per discovered spec source the listing covers, an entry holding
+//   no ID included, a code source's never — so every listing is asserted
+//   exactly, entry for entry, order included. The entries workspace stages
+//   the three files the rule turns on: a spec source of prose alone, no
+//   section in it (an empty entry in every listing); a spec source every
+//   one of whose sections another spec source references by `d` (its
+//   entry kept, empty, under `--unreferenced`); and a code source a
+//   configured code group matches, its marker referencing one of those
+//   sections, so it carries code locations (no entry in any listing, and
+//   none under a `--file` glob matching only code sources). A product
+//   listing only files holding listed IDs, or listing code sources, fails.
 // - `--json` parity (T12.0-1's information parity; SPEC 12.0: the JSON form
 //   carries the same information as the human report): the JSON document
-//   is decoded and asserted in full — grouping, membership, and both
-//   spec-fixed orders — and directly after each non-empty decoded listing,
-//   at the same state, its human form (the same argv without `--json`)
-//   exits 0 alike and mentions what the decoded listing carries (a
-//   product-to-itself comparison, H-4; `assertHumanFlatListing` and
-//   `assertHumanTreeListing`, through helpers/adapters/human.ts): the file
-//   of every entry that lists at least one ID, and every listed ID — in a
+//   is decoded and asserted in full — entries, grouping, membership, and
+//   both spec-fixed orders — and directly after each decoded listing
+//   holding an entry, at the same state, its human form (the same argv
+//   without `--json`) exits 0 alike and mentions what the decoded listing
+//   carries (a product-to-itself comparison, H-4; `assertHumanFlatListing`
+//   and `assertHumanTreeListing`, through helpers/adapters/human.ts): the
+//   file of every entry, an empty one included, and every listed ID — in a
 //   flat listing as itself; in a tree, each node by its full ID or by its
 //   ID relative to its tree parent (the part after the parent's ID and the
 //   following `.`: `minor` for `zeta.minor` under `zeta`, `par.leaf` for
@@ -56,15 +70,23 @@
 //   carries the listed ID there (`solo.kid`). Every spelling is
 //   token-bounded as an identity is (`identityMention`), so `zeta` never
 //   counts inside `zeta.minor`, nor `minor` inside it, nor an ID inside a
-//   file's path. Limits: no mention is associated with another, so
-//   nesting, order, and which ID belongs to which file stay with the JSON
-//   assertions (H-3 forbids wording and line-format assertions); a
-//   relative spelling counts wherever it stands, so two nodes sharing one
-//   (`a.x` and `b.x` under `a` and `b`) can stand in for each other —
-//   T12.3-1's fixtures stage no such pair; the empty listings (the inside
-//   `--file` patterns matching nothing) get no human run, having nothing to
-//   mention; and the listings' files and IDs hold no character a report
-//   may need to quote or escape, so every one is asked.
+//   file's path. On the entries workspace each human form is also asked
+//   the information SPEC 12.3 requires absent from it (`assertReportOmits`,
+//   the same token-bounded spellings): the code source's path, which has
+//   no entry, and, under `--unreferenced`, the IDs of the all-referenced
+//   source, whose entry is empty — information absence, never wording
+//   (H-3). Limits: no mention is associated with another, so nesting,
+//   order, and which ID belongs to which file stay with the JSON assertions
+//   (H-3 forbids wording and line-format assertions) — a human report
+//   naming an empty entry's file is credited with the entry, its emptiness
+//   asked only where the IDs it must not list are staged — and a relative
+//   spelling counts wherever it stands, so two nodes sharing one (`a.x` and
+//   `b.x` under `a` and `b`) can stand in for each other — T12.3-1's
+//   fixtures stage no such pair; the listings holding no entry (the inside
+//   `--file` patterns matching nothing, and the code-only `src/**/*.ts`) get
+//   no human run, having no entry to mention; and the listings' files and
+//   IDs hold no character a report may need to quote or escape, so every
+//   one is asked.
 // - T12.4-1's primary assertion is the adapter comparison: `show --json` and
 //   `query node --json` for the same node are both decoded by the one node
 //   adapter and compared field by field (the edge-list order, which SPEC
@@ -133,6 +155,7 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   assertReportMentions,
+  assertReportOmits,
   decodeAtReport,
   decodeCoverageReport,
   decodeIdsReport,
@@ -164,6 +187,7 @@ import {
   BESIDE_ROOT_FILE_PATTERN_DECOY,
   INSIDE_NO_MATCH_FILE_PATTERNS,
   OUTSIDE_ROOT_FILE_PATTERNS,
+  OUTSIDE_ROOT_FILE_PATTERN_INSIDE_ONCE_NORMALIZED,
   assertSameJson,
   buildOk,
   expectErrorDocument,
@@ -190,13 +214,14 @@ export default defineConfig({
 `;
 
 // One spec group plus one code group (SPEC 7.2), so code-side `references`
-// edges (4.5) enter the graph. T12.3-1's restricted-tree workspace follows
-// the ordering workspace's invocations, so S-7's sweep never reaches it
-// against the stub: a TypeScript staged-source record (helpers/staged-ts.ts;
-// S-9's TypeScript and timing clauses), staged at every site — T12.4-1's
-// first workspace too.
+// edges (4.5) enter the graph and code sources are discovered. T12.3-1's
+// restricted-tree and entries workspaces follow the ordering workspace's
+// invocations, so S-7's sweep never reaches them against the stub: a
+// TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), staged at every site — T12.4-1's first workspace
+// too.
 const SPEC_AND_CODE_CONFIG = stagedTs(
-  "T12.3-1 xspec.config.ts — one spec group and one code group (the restricted-tree workspace; T12.4-1's workspace too)",
+  "T12.3-1 xspec.config.ts — one spec group and one code group (the restricted-tree and entries workspaces; T12.4-1's workspace too)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -275,14 +300,13 @@ function tnode(id: string, children: readonly TreeNode[] = []): TreeNode {
 }
 
 /**
- * The decoded flat listing projected for comparison: entries carrying no IDs
- * dropped (module header — their presence is not fixed by SPEC 12.3), the
- * rest as plain `{ file, ids }` in the reported order.
+ * The decoded flat listing projected for comparison: every entry as plain
+ * `{ file, ids }` in the reported order, an entry holding no ID included
+ * (SPEC 12.3: one entry per discovered spec source, present even when it
+ * holds none; the module header).
  */
 function flatListing(report: IdsReport): FlatEntry[] {
-  return report.files
-    .filter((entry) => entry.ids.length > 0)
-    .map((entry) => ({ file: entry.file, ids: entry.ids }));
+  return report.files.map((entry) => ({ file: entry.file, ids: entry.ids }));
 }
 
 function projectTreeNode(node: IdsTreeNode): TreeNode {
@@ -291,12 +315,10 @@ function projectTreeNode(node: IdsTreeNode): TreeNode {
 
 /** The decoded tree listing projected like {@link flatListing}. */
 function treeListing(report: IdsTreeReport): TreeEntry[] {
-  return report.files
-    .filter((entry) => entry.nodes.length > 0)
-    .map((entry) => ({
-      file: entry.file,
-      nodes: entry.nodes.map(projectTreeNode),
-    }));
+  return report.files.map((entry) => ({
+    file: entry.file,
+    nodes: entry.nodes.map(projectTreeNode),
+  }));
 }
 
 /**
@@ -317,9 +339,11 @@ async function expectFlatListing(
   assertSameJson(
     flatListing(report),
     expected,
-    `${context}: requirement IDs grouped by file — files in byte order of ` +
+    `${context}: requirement IDs grouped by file — one entry per ` +
+      `discovered spec source the listing covers, none for a code source, ` +
+      `each present even when it holds no ID, files in byte order of ` +
       `workspace-relative path, IDs within a file in document order ` +
-      `(SPEC 12.3; entries carrying no IDs dropped per the module header)`,
+      `(SPEC 12.3)`,
   );
   return report;
 }
@@ -347,10 +371,47 @@ async function expectTreeListing(
   assertSameJson(
     treeListing(report),
     expected,
-    `${context}: per-file nesting in the same file and document order, tree ` +
-      `nodes carrying the full requirement IDs (SPEC 12.3; module header)`,
+    `${context}: per-file nesting in the same file and document order, ` +
+      `the same entries as the flat listing — one per discovered spec ` +
+      `source the listing covers, none for a code source, each present ` +
+      `even when it holds no ID — tree nodes carrying the full requirement ` +
+      `IDs (SPEC 12.3; module header)`,
   );
   return report;
+}
+
+/**
+ * Run `ids --file <spelling> --json` for a glob covering no discovered spec
+ * source and assert the listing holds no entry at all: exit 0 and `files`
+ * exactly [] — `--file` restricts the entries to the spec sources the glob
+ * matches, so a glob matching none, or only code sources, leaves no entry
+ * (SPEC 12.3, 7); an empty list is [], never null (12.7). `why` says why
+ * the glob matches no spec source.
+ */
+async function expectNoEntryListing(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  spelling: string,
+  why: string,
+  context: string,
+): Promise<void> {
+  const report = decodeIdsReport(
+    await runJson(
+      product,
+      workspace,
+      ["ids", "--file", spelling, "--json"],
+      `${context} — a glob inside the root covering no spec source is ` +
+        `admitted: an empty listing, exit 0 (SPEC 12.3, 7)`,
+    ),
+    context,
+  );
+  assertSameJson(
+    report.files,
+    [],
+    `${context}: ${why}, and \`--file\` restricts the entries to the spec ` +
+      `sources the glob matches, so the listing holds no entry (SPEC 12.3, ` +
+      `7); an empty list is [], never null (12.7)`,
+  );
 }
 
 /** The mentions in first-seen order, one per description: a datum asked once. */
@@ -365,16 +426,29 @@ function distinctMentions(mentions: readonly FormedMention[]): FormedMention[] {
 }
 
 /**
+ * Information a human listing must not carry (the module header's entries
+ * workspace): `mentions`, each formed as the listing's own mentions are
+ * (`identityMention`), and `why`, the SPEC 12.3 reason it is absent — a
+ * code source's path (no entry for a code source), an ID the listing
+ * excludes (an entry kept empty).
+ */
+interface HumanListingAbsence {
+  readonly mentions: readonly FormedMention[];
+  readonly why: string;
+}
+
+/**
  * A listing's human form — T12.0-1's information parity (SPEC 12.0: the
  * JSON form carries the same information as the human report; the module
  * header): `argv`, the argv of the `--json` listing the caller decoded and
  * asserted, without `--json`, run directly after it — nothing between
  * them, so at its state — exits 0 alike (an informational report, SPEC
  * 12.0), and its report mentions every one of `mentions`, which the caller
- * took from the decoded listing (a product-to-itself comparison, H-4). A
- * listing with nothing to mention is asked its exit code alone. Robust
- * matching (H-3): presence, never wording, and no mention associated with
- * another.
+ * took from the decoded listing (a product-to-itself comparison, H-4), and,
+ * where `absent` is given, none of its mentions (`assertReportOmits`). A
+ * listing with nothing to mention is asked its exit code and `absent`
+ * alone. Robust matching (H-3): presence and absence, never wording, and
+ * no mention associated with another.
  */
 async function expectHumanListing(
   product: ProductBinding,
@@ -383,6 +457,7 @@ async function expectHumanListing(
   mentions: readonly FormedMention[],
   what: string,
   context: string,
+  absent?: HumanListingAbsence,
 ): Promise<void> {
   const label = `${context} \`${argv.join(" ")}\` (human report)`;
   const human = await expectExit(
@@ -393,23 +468,33 @@ async function expectHumanListing(
     `${label} — the same exit code as the \`--json\` listing at this ` +
       `state: 0, an informational report (SPEC 12.3, 12.0)`,
   );
-  if (mentions.length === 0) return;
-  assertReportMentions(
-    human,
-    mentions,
-    `${label}: ${what} — the information of the JSON listing (SPEC 12.3, ` +
-      `12.0; robust matching, never wording — H-3)`,
-  );
+  if (mentions.length > 0) {
+    assertReportMentions(
+      human,
+      mentions,
+      `${label}: ${what} — the information of the JSON listing (SPEC ` +
+        `12.3, 12.0; robust matching, never wording — H-3)`,
+    );
+  }
+  if (absent !== undefined) {
+    assertReportOmits(
+      human,
+      absent.mentions,
+      `${label}: ${absent.why} — information the JSON listing does not ` +
+        `carry, absent from the human form too (SPEC 12.3, 12.0; robust ` +
+        `matching, never wording — H-3)`,
+    );
+  }
 }
 
 /**
  * The human `ids` listing beside a decoded flat `ids … --json` listing,
  * after its JSON assertions (`expectHumanListing`, `flags` the listing's
- * own): the file of every entry that lists at least one ID (an entry
- * listing none is no content: the module header) and every listed ID, each
+ * own): the file of every entry, an entry listing no ID included (SPEC
+ * 12.3: present even when it holds none), and every listed ID, each
  * token-bounded as an identity or a path is (`identityMention`), so `zeta`
  * never counts inside `zeta.minor`, nor `minor` inside it, nor an ID inside
- * a file's path.
+ * a file's path; and none of `absent`'s mentions, where given.
  */
 async function assertHumanFlatListing(
   product: ProductBinding,
@@ -417,6 +502,7 @@ async function assertHumanFlatListing(
   flags: readonly string[],
   report: IdsReport,
   context: string,
+  absent?: HumanListingAbsence,
 ): Promise<void> {
   await expectHumanListing(
     product,
@@ -427,8 +513,10 @@ async function assertHumanFlatListing(
         [entry.file, ...entry.ids].map(identityMention),
       ),
     ),
-    "every listed file and every listed ID, requirement IDs grouped by file",
+    "every entry's file, an empty entry's included, and every listed ID, " +
+      "requirement IDs grouped by file",
     context,
+    absent,
   );
 }
 
@@ -470,11 +558,12 @@ function treeNodeMention(
 /**
  * The human `ids --tree` listing beside a decoded `ids --tree … --json`
  * listing, after its JSON assertions (`expectHumanListing`, `flags` the
- * listing's own): the file of every entry that lists at least one node
- * (`identityMention`; an entry listing none is no content: the module
- * header) and every node of each file's tree, by its full ID or by its ID
- * relative to its tree parent (`treeNodeMention`), walked parents first
- * through an explicit stack, in document order.
+ * listing's own): the file of every entry (`identityMention`), an entry
+ * listing no node included (SPEC 12.3: present even when it holds none),
+ * and every node of each file's tree, by its full ID or by its ID relative
+ * to its tree parent (`treeNodeMention`), walked parents first through an
+ * explicit stack, in document order; and none of `absent`'s mentions,
+ * where given.
  */
 async function assertHumanTreeListing(
   product: ProductBinding,
@@ -482,6 +571,7 @@ async function assertHumanTreeListing(
   flags: readonly string[],
   report: IdsTreeReport,
   context: string,
+  absent?: HumanListingAbsence,
 ): Promise<void> {
   const mentions: FormedMention[] = [];
   for (const entry of treeListing(report)) {
@@ -503,9 +593,11 @@ async function assertHumanTreeListing(
     workspace,
     ["ids", "--tree", ...flags],
     distinctMentions(mentions),
-    "every listed file and every tree node, by its full ID or by its ID " +
-      "relative to its tree parent, the tree holding exactly the listed IDs",
+    "every entry's file, an empty entry's included, and every tree node, " +
+      "by its full ID or by its ID relative to its tree parent, the tree " +
+      "holding exactly the listed IDs",
     context,
+    absent,
   );
 }
 
@@ -538,7 +630,7 @@ function normalizedNodeReport(report: NodeReport): unknown {
 }
 
 // ---------------------------------------------------------------------------
-// T12.3-1 — `ids`: ordering, `--tree`, `--file`, restricted tree, parity
+// T12.3-1 — `ids`: ordering, `--tree`, `--file`, restricted tree, entries, parity
 // ---------------------------------------------------------------------------
 
 // Ordering workspace: configuration order (group order and per-group glob
@@ -651,10 +743,118 @@ const T12_3_1_APP = stagedTs(
   ].join("\n"),
 );
 
+// Entries workspace (SPEC 12.3: one entry per discovered spec source, none
+// for a code source, each present even when it holds no ID; the module
+// header): `specs/prose.mdx` holds prose alone, no section; every section
+// of `specs/held.mdx` — `tgt` and its child `tgt.sub` — is referenced by
+// `d` from `specs/user.mdx`'s `client`, so `--unreferenced` lists `client`
+// alone; and `src/x.ts`, a code source the code group matches, carries a
+// code location, its marker referencing `tgt`. The workspace follows the
+// earlier workspaces' invocations, so S-7's sweep never reaches it against
+// the stub: every initial file a staged-source record (S-9).
+const T12_3_1_HELD = stagedMdx(
+  "T12.3-1 entries workspace specs/held.mdx (tgt holding tgt.sub, each referenced by `d` from specs/user.mdx)",
+  [
+    '<S id="tgt">',
+    "Target line.",
+    "",
+    '<S id="tgt.sub">',
+    "Sub line.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+const T12_3_1_PROSE = stagedMdx(
+  "T12.3-1 entries workspace specs/prose.mdx (prose alone, no section)",
+  "Prose alone, no section.\n",
+);
+
+const T12_3_1_USER = stagedMdx(
+  "T12.3-1 entries workspace specs/user.mdx (client, its `d` naming HELD.tgt and HELD.tgt.sub)",
+  [
+    'import HELD from "./held.xspec"',
+    "",
+    '<S id="client" d={[HELD.tgt, HELD.tgt.sub]}>',
+    "Client line.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+const T12_3_1_CODE = stagedTs(
+  "T12.3-1 entries workspace src/x.ts (a code source the code group matches, its marker referencing tgt)",
+  [
+    'import HELD from "../specs/held.xspec";',
+    "",
+    "export function touchTarget(): void {",
+    "  HELD.tgt;",
+    "}",
+    "",
+  ].join("\n"),
+);
+
+/** The entries workspace's code source: no entry in any listing. */
+const T12_3_1_CODE_SOURCE = "src/x.ts";
+
+// The entries workspace's listings: every discovered spec source an entry,
+// in byte order of path (`held` < `prose` < `user`), `specs/prose.mdx`'s
+// empty; under `--unreferenced`, `specs/held.mdx`'s kept, empty; the code
+// source in none.
+const T12_3_1_ENTRIES_FLAT: readonly FlatEntry[] = [
+  { file: "specs/held.mdx", ids: ["tgt", "tgt.sub"] },
+  { file: "specs/prose.mdx", ids: [] },
+  { file: "specs/user.mdx", ids: ["client"] },
+];
+
+const T12_3_1_ENTRIES_TREE: readonly TreeEntry[] = [
+  { file: "specs/held.mdx", nodes: [tnode("tgt", [tnode("tgt.sub")])] },
+  { file: "specs/prose.mdx", nodes: [] },
+  { file: "specs/user.mdx", nodes: [tnode("client")] },
+];
+
+const T12_3_1_ENTRIES_UNREFERENCED_FLAT: readonly FlatEntry[] = [
+  { file: "specs/held.mdx", ids: [] },
+  { file: "specs/prose.mdx", ids: [] },
+  { file: "specs/user.mdx", ids: ["client"] },
+];
+
+const T12_3_1_ENTRIES_UNREFERENCED_TREE: readonly TreeEntry[] = [
+  { file: "specs/held.mdx", nodes: [] },
+  { file: "specs/prose.mdx", nodes: [] },
+  { file: "specs/user.mdx", nodes: [tnode("client")] },
+];
+
+/** The entries workspace's code source, absent from every human listing. */
+const T12_3_1_NO_CODE_ENTRY: HumanListingAbsence = {
+  mentions: [identityMention(T12_3_1_CODE_SOURCE)],
+  why:
+    `no entry for the code source ${T12_3_1_CODE_SOURCE}, which bears no ` +
+    `requirement IDs — its path never named`,
+};
+
+/**
+ * Under `--unreferenced`, the code source as above and the IDs of
+ * `specs/held.mdx`, every one referenced by `d`: its entry is kept, empty,
+ * so neither ID is named.
+ */
+const T12_3_1_UNREFERENCED_ABSENCE: HumanListingAbsence = {
+  mentions: [
+    identityMention(T12_3_1_CODE_SOURCE),
+    identityMention("tgt"),
+    identityMention("tgt.sub"),
+  ],
+  why:
+    `no entry for the code source ${T12_3_1_CODE_SOURCE}, its path never ` +
+    `named, and specs/held.mdx's entry kept empty — \`tgt\` and ` +
+    `\`tgt.sub\`, each referenced by \`d\` from specs/user.mdx, never named`,
+};
+
 const T12_3_1 = defineProductTest({
   id: "T12.3-1",
   title:
-    "`ids` groups requirement IDs by file — files in byte order of workspace-relative path (differing from configuration order), IDs within a file in document order (differing from their byte order); `--tree` renders per-file nesting in the same orders; `--file <glob>` restricts by the rules of SPEC 7 — an outside-root pattern by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`) is an invalid flag value, exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding, while an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`, and their twins over `apecs`) is admitted and matches nothing, an empty listing at exit 0; a restricted `--tree` (`--unreferenced`) nests a listed node under its nearest listed ancestor or at its file's top level, containing exactly the listed IDs; and beside each non-empty listing the human form at the same state exits 0 alike and carries the same information as `--json` — every listed file and ID, a tree node as its full ID or relative to its tree parent (robust matching, H-3) (SPEC 12.3, 7, 12.0)",
+    "`ids` groups requirement IDs by file — files in byte order of workspace-relative path (differing from configuration order), IDs within a file in document order (differing from their byte order) — one entry per discovered spec source and none for a code source, each present even when it holds no ID: a spec source of prose alone lists an empty entry and a code source a code group matches none, in the flat, tree, and human forms, and under `--unreferenced` a spec source every one of whose sections another spec source references by `d` keeps its entry, empty; `--tree` renders per-file nesting in the same orders; `--file <glob>` restricts the entries by the rules of SPEC 7 — an outside-root pattern by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`, and `**/../x/*.mdx`, inside once lexically normalized) is an invalid flag value, exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding, an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx` and `specs//*.mdx` over a discovered `specs/T.mdx`, and their twins over `apecs`) is admitted and matches nothing though its normalization matches a discovered file, an empty listing at exit 0, and `src/**/*.ts`, matching only code sources, lists no entry, exit 0; a restricted `--tree` (`--unreferenced`) nests a listed node under its nearest listed ancestor or at its file's top level, containing exactly the listed IDs; and beside each listing holding an entry the human form at the same state exits 0 alike and carries the same information as `--json` — every entry's file, an empty entry's included, and every listed ID, a tree node as its full ID or relative to its tree parent, and on the entries workspace neither the code source's path nor, under `--unreferenced`, the all-referenced source's IDs (robust matching, H-3) (SPEC 12.3, 7, 12.0)",
   run: async (product) => {
     await withWorkspace(
       T12_3_1_ORDERING_CONFIG,
@@ -743,10 +943,16 @@ const T12_3_1 = defineProductTest({
         // alone — decided as 7 decides a configured glob (T7-4) — is an
         // invalid flag value: exit 2 with the plain usage error's document,
         // like its configuration-time counterpart (SPEC 12.3, 7, 14.14,
-        // 12.0), the file the ascending spellings name when resolved staged
-        // beside the root so exit 2 never comes from a side reason.
+        // 12.0); `**/../x/*.mdx` among them, outside though its lexical
+        // normalization `x/*.mdx` is inside, which a product normalizing
+        // before deciding answers — with the file the ascending spellings
+        // name when resolved staged beside the root, so exit 2 never comes
+        // from a side reason.
         await stageBesideRoot(workspace, BESIDE_ROOT_FILE_PATTERN_DECOY);
-        for (const { spelling, why } of OUTSIDE_ROOT_FILE_PATTERNS) {
+        for (const { spelling, why } of [
+          ...OUTSIDE_ROOT_FILE_PATTERNS,
+          OUTSIDE_ROOT_FILE_PATTERN_INSIDE_ONCE_NORMALIZED,
+        ]) {
           await expectFilePatternUsageError(
             product,
             workspace,
@@ -757,34 +963,22 @@ const T12_3_1 = defineProductTest({
 
         // An inside pattern spelled with a `.` or an empty segment is
         // admitted and matches nothing — a discovered path carries no such
-        // segment (SPEC 7, 12.0) — so the restricted listing holds no file
-        // at all: `files` exactly [] (the module header's ID-less-entry
-        // caveat concerns matched files; here none is matched). TEST-SPEC's
-        // pinned `specs` spellings run beside their twins over `apecs`,
-        // whose normalized form (`apecs/*.mdx`) matches M.mdx — the arm a
-        // normalizing product fails.
-        for (const { spelling, why } of [
-          ...INSIDE_NO_MATCH_FILE_PATTERNS,
-          ...insideNoMatchFilePatterns("apecs"),
-        ]) {
-          const context = `T12.3-1 \`ids --file ${JSON.stringify(spelling)} --json\` (${why})`;
-          const report = decodeIdsReport(
-            await runJson(
-              product,
-              workspace,
-              ["ids", "--file", spelling, "--json"],
-              `${context} — an inside pattern matching nothing is admitted: ` +
-                `an empty listing, exit 0 (SPEC 12.3, 7)`,
-            ),
-            context,
-          );
-          assertSameJson(
-            report.files,
-            [],
-            `${context}: the listing restricted to the files the pattern ` +
-              `matches holds no file — a discovered path carries no \`.\` ` +
-              `or empty segment (SPEC 12.3, 7, 12.0); an empty list is [], ` +
-              `never null (12.7)`,
+        // segment (SPEC 7, 12.0) — so the restricted listing holds no
+        // entry: `files` exactly []. Here the twins over `apecs`, whose
+        // normalized form (`apecs/*.mdx`) matches M.mdx — the arm a
+        // normalizing product fails; TEST-SPEC's pinned `specs` spellings
+        // run on the restricted-tree workspace below, over the
+        // `specs/T.mdx` their normalization matches.
+        for (const { spelling, why } of insideNoMatchFilePatterns("apecs")) {
+          await expectNoEntryListing(
+            product,
+            workspace,
+            spelling,
+            `the pattern is inside the root and matches nothing — ${why}: a ` +
+              `discovered path carries no \`.\` or empty segment (SPEC 7, ` +
+              `12.0), though its normalization \`apecs/*.mdx\` matches ` +
+              `apecs/M.mdx`,
+            `T12.3-1 \`ids --file ${JSON.stringify(spelling)} --json\` (${why})`,
           );
         }
       },
@@ -800,7 +994,9 @@ const T12_3_1 = defineProductTest({
 
         // Premise: the restriction lists exactly grand, grand.par.leaf, and
         // solo.kid — `grand.par` and `solo` carry incoming `references`
-        // edges from the code markers. Its human form follows it.
+        // edges from the code markers — in the one spec source's entry, the
+        // code source src/app.ts given none (SPEC 12.3). Its human form
+        // follows it.
         const unreferenced = await expectFlatListing(
           product,
           workspace,
@@ -851,6 +1047,129 @@ const T12_3_1 = defineProductTest({
           ["--unreferenced"],
           restricted,
           "T12.3-1 (restricted tree)",
+        );
+
+        // TEST-SPEC's pinned inside spellings, `./specs/*.mdx` and
+        // `specs//*.mdx`: inside the root and matching nothing — a
+        // discovered path carries no `.` or empty segment (SPEC 7, 12.0) —
+        // though their normalization `specs/*.mdx` matches the discovered
+        // specs/T.mdx, so a product normalizing the spelling lists T.mdx's
+        // entry: the listing holds no entry, exit 0.
+        for (const { spelling, why } of INSIDE_NO_MATCH_FILE_PATTERNS) {
+          await expectNoEntryListing(
+            product,
+            workspace,
+            spelling,
+            `the pattern is inside the root and matches nothing — ${why}: a ` +
+              `discovered path carries no \`.\` or empty segment (SPEC 7, ` +
+              `12.0), though its normalization \`specs/*.mdx\` matches ` +
+              `specs/T.mdx`,
+            `T12.3-1 \`ids --file ${JSON.stringify(spelling)} --json\` (${why})`,
+          );
+        }
+      },
+    );
+
+    // Entries (SPEC 12.3: one per discovered spec source, none for a code
+    // source, each present even when it holds no ID; the module header):
+    // every listing — flat and tree, each beside its human form, and each
+    // again under `--unreferenced` — holds exactly one entry per spec
+    // source in byte order, specs/prose.mdx's empty, and none for the code
+    // source src/x.ts; under `--unreferenced` specs/held.mdx keeps its
+    // entry, empty. A product listing only files holding listed IDs fails
+    // at the first listing, as does one listing code sources — src/x.ts
+    // among them, carrying a code location.
+    await withWorkspace(
+      SPEC_AND_CODE_CONFIG,
+      {
+        "specs/held.mdx": T12_3_1_HELD,
+        "specs/prose.mdx": T12_3_1_PROSE,
+        "specs/user.mdx": T12_3_1_USER,
+        [T12_3_1_CODE_SOURCE]: T12_3_1_CODE,
+      },
+      async (workspace) => {
+        await buildOk(product, workspace, "T12.3-1 `build` (entries)");
+
+        // The unrestricted listings: specs/prose.mdx, no section in it, an
+        // empty entry; the code source no entry — its path absent from
+        // each human form too.
+        const flat = await expectFlatListing(
+          product,
+          workspace,
+          [],
+          T12_3_1_ENTRIES_FLAT,
+          "T12.3-1 `ids --json` (entries)",
+        );
+        await assertHumanFlatListing(
+          product,
+          workspace,
+          [],
+          flat,
+          "T12.3-1 (entries)",
+          T12_3_1_NO_CODE_ENTRY,
+        );
+        const tree = await expectTreeListing(
+          product,
+          workspace,
+          [],
+          T12_3_1_ENTRIES_TREE,
+          "T12.3-1 `ids --tree --json` (entries)",
+        );
+        await assertHumanTreeListing(
+          product,
+          workspace,
+          [],
+          tree,
+          "T12.3-1 (entries)",
+          T12_3_1_NO_CODE_ENTRY,
+        );
+
+        // `--unreferenced` excludes `tgt` and `tgt.sub` — each the target of
+        // client's `d` (a `depends` edge from a spec), `tgt` also of the
+        // code marker's `references` — so specs/held.mdx keeps its entry,
+        // empty, its IDs absent from each human form; specs/prose.mdx's
+        // entry stays, and the code source still has none.
+        const unreferencedFlat = await expectFlatListing(
+          product,
+          workspace,
+          ["--unreferenced"],
+          T12_3_1_ENTRIES_UNREFERENCED_FLAT,
+          "T12.3-1 `ids --unreferenced --json` (entries)",
+        );
+        await assertHumanFlatListing(
+          product,
+          workspace,
+          ["--unreferenced"],
+          unreferencedFlat,
+          "T12.3-1 (entries)",
+          T12_3_1_UNREFERENCED_ABSENCE,
+        );
+        const unreferencedTree = await expectTreeListing(
+          product,
+          workspace,
+          ["--unreferenced"],
+          T12_3_1_ENTRIES_UNREFERENCED_TREE,
+          "T12.3-1 `ids --unreferenced --tree --json` (entries)",
+        );
+        await assertHumanTreeListing(
+          product,
+          workspace,
+          ["--unreferenced"],
+          unreferencedTree,
+          "T12.3-1 (entries)",
+          T12_3_1_UNREFERENCED_ABSENCE,
+        );
+
+        // A glob matching only code sources leaves no entry: `--file`
+        // restricts the entries to the spec sources the glob matches.
+        const codeOnlyGlob = "src/**/*.ts";
+        await expectNoEntryListing(
+          product,
+          workspace,
+          codeOnlyGlob,
+          `the glob matches only the code source ${T12_3_1_CODE_SOURCE}, ` +
+            `which bears no requirement IDs and so has no entry`,
+          `T12.3-1 \`ids --file ${JSON.stringify(codeOnlyGlob)} --json\` (entries)`,
         );
       },
     );
@@ -953,12 +1272,13 @@ const T12_3_2 = defineProductTest({
         await buildOk(product, workspace, "T12.3-2 `build`");
 
         // The listing: exactly the nodes with no incoming dependency edges,
-        // in document order. `par` lists although its child `par.dep` is
-        // referenced (incoming `depends`) and although `par` carries
-        // `contains` edges (from the root, to its child) — `contains` does
-        // not count. `won` (references from boundary code), `quoted`
-        // (embeds), `ref` (references from non-boundary code), and `par.dep`
-        // (depends) are all excluded.
+        // in document order, in the one spec source's entry — the two code
+        // sources given none (SPEC 12.3). `par` lists although its child
+        // `par.dep` is referenced (incoming `depends`) and although `par`
+        // carries `contains` edges (from the root, to its child) —
+        // `contains` does not count. `won` (references from boundary code),
+        // `quoted` (embeds), `ref` (references from non-boundary code), and
+        // `par.dep` (depends) are all excluded.
         await expectFlatListing(
           product,
           workspace,
