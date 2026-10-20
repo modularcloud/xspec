@@ -287,8 +287,8 @@
 //   `.xspec/lock` — the dead entry and the hold — run last; the held
 //   `rename`, its hold lifted, completes, exit 0.
 //
-// T11.6-4 — no parse, no write, one finding (SPEC 11.6, 14.23, 14.14, 12.7,
-// 12.0, 13.3). Three arm groups, three workspaces:
+// T11.6-4 — no parse, no write, one finding (SPEC 11.6, 14.23, 14.14, 14.12,
+// 14.21, 12.7, 12.2, 12.0, 13.3). Four arm groups, six workspaces:
 //
 // - imperfect workspace: sources failing every validation family — an
 //   unparseable file included — plus a garbage journal line and a corrupt
@@ -312,6 +312,24 @@
 //   `findings` [] at exit 0: the staged findings are reported where their
 //   conditions assign them (the premise build; T13.3-3, T10.1-4, T12.2-2),
 //   never here, which IS the parses-no-sources/reads-no-content observation.
+//
+// - passing workspaces: T11.2-6's passing-side stagings, staged through
+//   section-11.2.ts's exported `T11_2_6_PASSING_SIDE_STAGINGS` (one code
+//   path; its records named for both tests) — each a workspace passing
+//   `build`'s validations, built (exit 0), beside a policy violation (a
+//   `forbidden` rule, T7.5-2's staging) and, on a second workspace, a
+//   corrupt session (T10.1-4's garbage bytes at `.xspec/reviews/cor.json`).
+//   On each, `check --json` reports exactly the staged finding, form-exact —
+//   the 14.12 with `locations` [] and `path` `null`, respectively the 14.21
+//   with `locations` [] concerning the session file — exit 1, writing
+//   nothing (section-11.2.ts's exported `expectCheckReportsStagedFinding`),
+//   while `inventory`, flag-less and `--json`, both inside one whole-root
+//   compare, answers finding-free at exit 0 in the full eleven-member form,
+//   the two forms one document (same information, SPEC 11): condition 23 is
+//   the only finding an inventory answer carries — policy is `check`'s
+//   alone (14.12) and the inventory reads no session content (14.21) — so
+//   a product attaching `check`'s findings to the inventory fails here
+//   (SPEC 11.6, 14.12, 14.21, 12.2).
 //
 // - configuration errors keep precedence (14.14): missing configuration (a
 //   bare directory tree with no reachable xspec.config.ts, the T7-1
@@ -353,13 +371,13 @@
 // lock path and while a command is held (T11.6-3) — T11.6-4's
 // no-parse/no-write negatives ride the certified compare-around machinery,
 // and every broken state T11.6-4 must ignore is positively reported from
-// the same staging by its home reporter (its premise build in-test;
-// T13.3-3, T10.1-4, T12.2-2 on their own stagings). T11.6-3's lock-path
-// inclusions, its held arm's above all, share the comparison machinery
-// VIOL-CORE-READERENTRY certifies (that violator's note: the held-state
-// comparison and `assertLockPathAsCaptured`, T13.5-4's sequence after each
-// read); its leftover stagings verify themselves on the harness before use
-// (helpers/lock-staging.ts; E-1, H-11).
+// the same staging by its home reporter (its premise build and the
+// passing-side `check` in-test; T13.3-3, T10.1-4, T12.2-2 on their own
+// stagings). T11.6-3's lock-path inclusions, its held arm's above all,
+// share the comparison machinery VIOL-CORE-READERENTRY certifies (that
+// violator's note: the held-state comparison and `assertLockPathAsCaptured`,
+// T13.5-4's sequence after each read); its leftover stagings verify
+// themselves on the harness before use (helpers/lock-staging.ts; E-1, H-11).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -435,6 +453,11 @@ import type {
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import type { EntryKind } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { T1126PassingSideStaging } from "./section-11.2.js";
+import {
+  T11_2_6_PASSING_SIDE_STAGINGS,
+  expectCheckReportsStagedFinding,
+} from "./section-11.2.js";
 import {
   ORDER_FIXTURE_CONFIG,
   ORDER_FIXTURE_FILES,
@@ -2068,16 +2091,18 @@ const JOURNAL_PATH = `${GRAPH_DATA_AREA_PATH}/journal`;
 
 /**
  * Run `inventory` and assert the finding-free full-document frame (T11.6-3;
- * reused by T11.6-4's imperfect-workspace arm and intact-record premise):
- * exit 0 exactly (a complete, finding-free answer — the inventory parses no
- * sources, reads no journal or session content, and the calling arm has not
- * corrupted the record; SPEC 11.6, 12.0; H-5); exactly one JSON document as
- * the entire stdout (JSON-only, SPEC 11); the full eleven-member 12.7 inventory
- * document form (H-3); `findings` [] — which IS the no-14.13/no-14.21
- * observation on the occupancy and session stagings; and `lock` exactly
- * `.xspec/lock`, the lock path reported unconditionally (SPEC 11.6, 12.7,
- * 13.5; T11.6-3). Returns the decoded document and the raw run for the
- * callers' value assertions and byte scans.
+ * reused by T11.6-4's imperfect-workspace arm, passing-side arm, and
+ * intact-record premise): exit 0 exactly (a complete, finding-free answer —
+ * the inventory parses no sources, reads no journal or session content, and
+ * the calling arm has not corrupted the record; SPEC 11.6, 12.0; H-5);
+ * exactly one JSON document as the entire stdout (JSON-only, SPEC 11); the
+ * full eleven-member 12.7 inventory document form (H-3); `findings` [] —
+ * which IS the no-14.13/no-14.21 observation on the occupancy and session
+ * stagings and the no-14.12/no-14.21 observation on T11.6-4's passing
+ * workspaces; and `lock` exactly `.xspec/lock`, the lock path reported
+ * unconditionally (SPEC 11.6, 12.7, 13.5; T11.6-3). Returns the decoded
+ * document and the raw run for the callers' value assertions and byte
+ * scans.
  */
 async function expectInventoryDocument(
   product: ProductBinding,
@@ -2107,9 +2132,10 @@ async function expectInventoryDocument(
       `${context}: the inventory answer is finding-free — findings [] ` +
         `(SPEC 11.6, 12.7: parsing no sources and reading no journal or ` +
         `session content, the inventory meets no condition on these ` +
-        `stagings — no 14.13, no 14.21 — and no arm corrupts the record); ` +
-        `got ${String(document.findings.length)} finding(s), first: ` +
-        `${JSON.stringify(document.findings[0]?.message)}`,
+        `stagings — no 14.12, no 14.13, no 14.21 — and no arm corrupts the ` +
+        `record); got ${String(document.findings.length)} finding(s), ` +
+        `first: code ${JSON.stringify(document.findings[0]?.code)}, ` +
+        `message ${JSON.stringify(document.findings[0]?.message)}`,
     );
   }
   assertLockMember(document.lock, context);
@@ -3839,7 +3865,10 @@ const T11_6_3 = defineProductTest({
 // plus a garbage journal line and a corrupt session staged as files. The
 // configuration is valid (a configuration error would preempt everything,
 // 14.14) with emission enabled, so the derived map carries Markdown
-// destinations for every `.mdx` source, the unparseable one included.
+// destinations for every `.mdx` source, the unparseable one included. Arm
+// B's two passing workspaces are T11.2-6's (section-11.2.ts's exported
+// `T11_2_6_PASSING_SIDE_STAGINGS`), their staged-source records named for
+// both tests.
 
 const IMPERFECT_CONFIG = `import { defineConfig } from "xspec"
 
@@ -3961,23 +3990,24 @@ const IMPERFECT_PREMISE_CONDITIONS: Readonly<Record<string, number>> = {
   "14.20": 1,
 };
 
-// Arms B and C stage their workspaces after arm A's invocations, so both
-// configurations are TypeScript staged-source records (helpers/staged-ts.ts;
-// S-9's TypeScript and timing clauses).
+// Arms B to D stage their workspaces after arm A's invocations, so every
+// configuration they stage is a TypeScript staged-source record
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses) — arm B's
+// T11.2-6's own (section-11.2.ts), arms C's and D's below.
 
 /**
  * Not well-formed TypeScript: the invalid-configuration staging (14.14) —
  * an `unparseable` record (14.20), which carries the declaration.
  */
 const IMPERFECT_BROKEN_CONFIG = stagedTs(
-  "T11.6-4 arm B xspec.config.ts — not well-formed TypeScript (the invalid configuration)",
+  "T11.6-4 arm C xspec.config.ts — not well-formed TypeScript (the invalid configuration)",
   "ceci n'est pas du TypeScript ((( donc pas une configuration\n",
   "unparseable",
 );
 
-/** Arm C's valid workspace: one source, emission on (a rich record). */
+/** Arm D's valid workspace: one source, emission on (a rich record). */
 const RECORD_EMIT_CONFIG = stagedTs(
-  "T11.6-4 arm C xspec.config.ts — one source, emission on (the corrupt-record workspace)",
+  "T11.6-4 arm D xspec.config.ts — one source, emission on (the corrupt-record workspace)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -4063,11 +4093,31 @@ function inventoryApartFromRecordSupplied(
   };
 }
 
-// T11.6-4's corrupt-record workspace (arm C) is created after the body's
+/**
+ * Arm B's reason, per staged condition, that the finding `check` reports on
+ * T11.2-6's passing workspace accompanies no inventory answer (SPEC 11.6:
+ * condition 23 is the only finding an inventory answer carries) — keyed by
+ * every condition `T11_2_6_PASSING_SIDE_STAGINGS` stages, so a staging added
+ * there without its reason here fails the type check.
+ */
+const PASSING_SIDE_NEVER_IN_INVENTORY: Readonly<
+  Record<T1126PassingSideStaging["condition"], string>
+> = {
+  "14.12":
+    "a policy finding is `check`'s alone — policy constrains the workspace " +
+    "graph, and the inventory parses no sources (SPEC 14.12, 11.6)",
+  "14.21":
+    "a corrupt session is reported where 14.21 assigns it — `check`, the " +
+    "`review` subcommands naming it, and `review list` — never by the " +
+    "inventory, which selects session files by name alone and reads no " +
+    "session content (SPEC 14.21, 11.6, 10.1)",
+};
+
+// T11.6-4's corrupt-record workspace (arm D) is created after the body's
 // first product invocation (arm A's runs), so S-7's sweep never reaches
 // its initial source against the stub: a staged-source record
 // (helpers/staged-mdx.ts; S-9's before-any-product clause), the literal
-// moved into it; arm B's `specs/a.mdx` is the anchor record above.
+// moved into it; arm C's `specs/a.mdx` is the anchor record above.
 const T11_6_4_RECORD_SEUL = stagedMdx(
   "T11.6-4 corrupt-record workspace specs/seul.mdx",
   '<S id="seul">\nContenu stable.\n</S>\n',
@@ -4076,7 +4126,7 @@ const T11_6_4_RECORD_SEUL = stagedMdx(
 const T11_6_4 = defineProductTest({
   id: "T11.6-4",
   title:
-    "inventory no parse, no write, one finding: on a workspace whose sources fail every validation family — an unparseable file included, the premise `build --json` exiting 1 with exactly one finding per staged construct (14.1–14.9, 14.11, 14.15–14.20 across MDX and TS, plus the garbage journal line's 14.13; no 14.21 — build reads no sessions) — with a garbage journal line and a corrupt session staged, `inventory` answers in full, finding-free, exit 0, modifying nothing (whole-root byte-compare; no refresh — graph data absent throughout): the complete eleven-member document asserted exactly in the flag-less and `--json` forms against one expectation — every discovered source listed with its membership (the unparseable and non-`.mdx` files included), the derived map determined by configuration and discovery alone (the unparseable source's module and Markdown paths present), `recorded` [], the journal occupied, the corrupt session listed by name, `lock` the lock path `.xspec/lock` — those findings reported where their conditions assign them, never here; configuration errors keep precedence: missing and invalid configuration each exit 2 with the single 12.7 error document as the entire stdout (stable code `configuration-error`, concerned path present, stderr naming the configuration), flag-less — a JSON-only surface — and with `--json` alike, no inventory beside the error member; the one finding it ever carries: with the record corrupted shape-blind (T6.6-6's staging) after a pinned readable-record premise, `recorded` is exactly the unavailability marker — never read as empty — beside exactly one condition-23 finding (stable code `unreadable-record`, concerned path the graph-data area, locations []: no path inside the area is named), exit 1, every other member emitted in full (deep-equal to the intact-record answer), the corrupt state left unmodified in a whole-root compare (SPEC 11.6, 14.23, 14.14, 14, 12.7, 12.0, 13.3, 12.1, 11)",
+    "inventory no parse, no write, one finding: on a workspace whose sources fail every validation family — an unparseable file included, the premise `build --json` exiting 1 with exactly one finding per staged construct (14.1–14.9, 14.11, 14.15–14.20 across MDX and TS, plus the garbage journal line's 14.13; no 14.21 — build reads no sessions) — with a garbage journal line and a corrupt session staged, `inventory` answers in full, finding-free, exit 0, modifying nothing (whole-root byte-compare; no refresh — graph data absent throughout): the complete eleven-member document asserted exactly in the flag-less and `--json` forms against one expectation — every discovered source listed with its membership (the unparseable and non-`.mdx` files included), the derived map determined by configuration and discovery alone (the unparseable source's module and Markdown paths present), `recorded` [], the journal occupied, the corrupt session listed by name, `lock` the lock path `.xspec/lock` — those findings reported where their conditions assign them, never here; on a workspace passing `build`'s validations beside a policy violation and, separately, a corrupt session (T11.2-6's passing-side stagings), `check --json` reports exactly the 14.12, respectively the 14.21 — form-exact: its stable code, locations [], the concerned path `null`, respectively the session file — exit 1, writing nothing, while `inventory` answers finding-free, exit 0, the flag-less and `--json` forms one document, modifying nothing — condition 23 being the only finding an inventory answer carries; configuration errors keep precedence: missing and invalid configuration each exit 2 with the single 12.7 error document as the entire stdout (stable code `configuration-error`, concerned path present, stderr naming the configuration), flag-less — a JSON-only surface — and with `--json` alike, no inventory beside the error member; the one finding it ever carries: with the record corrupted shape-blind (T6.6-6's staging) after a pinned readable-record premise, `recorded` is exactly the unavailability marker — never read as empty — beside exactly one condition-23 finding (stable code `unreadable-record`, concerned path the graph-data area, locations []: no path inside the area is named), exit 1, every other member emitted in full (deep-equal to the intact-record answer), the corrupt state left unmodified in a whole-root compare (SPEC 11.6, 14.23, 14.14, 14.12, 14.21, 14, 12.7, 12.0, 12.2, 13.3, 12.1, 11)",
   run: async (product) => {
     // --- arm A: the imperfect workspace ------------------------------------
     const imperfect = await TestWorkspace.create({
@@ -4250,7 +4300,63 @@ const T11_6_4 = defineProductTest({
       await imperfect.dispose();
     }
 
-    // --- arm B: configuration errors keep precedence (14.14) ---------------
+    // --- arm B: a passing workspace's check-only findings (11.6) -----------
+    // On a workspace passing `build`'s validations, beside a policy
+    // violation and, separately, a corrupt session (T11.2-6's stagings, one
+    // code path): `check` reports the staged 14.12, respectively 14.21 —
+    // exactly that finding, form-exact, exit 1, writing nothing — while
+    // `inventory` answers finding-free at exit 0, both forms one document,
+    // writing nothing: condition 23 is the only finding an inventory answer
+    // carries (SPEC 11.6).
+    for (const staging of T11_2_6_PASSING_SIDE_STAGINGS) {
+      const context = `T11.6-4 (passing side: ${staging.arm})`;
+      const workspace = await staging.stage(product, context);
+      try {
+        await expectCheckReportsStagedFinding(
+          product,
+          workspace,
+          staging,
+          context,
+        );
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const answers: InventoryDocument[] = [];
+            for (const argv of [
+              ["inventory"],
+              ["inventory", "--json"],
+            ] as const) {
+              const { document } = await expectInventoryDocument(
+                product,
+                workspace.root,
+                argv,
+                `${context} \`${argv.join(" ")}\` — the workspace bears ` +
+                  `condition ${staging.condition}, which \`check\` reports ` +
+                  `there, and still condition 23 is the only finding an ` +
+                  `inventory answer carries: ` +
+                  `${PASSING_SIDE_NEVER_IN_INVENTORY[staging.condition]}`,
+              );
+              answers.push(document);
+            }
+            assertSameJson(
+              answers[1],
+              answers[0],
+              `${context} — flag-less \`inventory\` and \`inventory ` +
+                `--json\` answer one document: inventory is JSON-only, its ` +
+                `two invocation forms carrying the same information (SPEC ` +
+                `11, 12.0)`,
+            );
+          },
+          `${context} — \`inventory\` writes nothing and never refreshes: ` +
+            `every source, derived file, graph-data, and session byte ` +
+            `untouched (SPEC 11.6)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- arm C: configuration errors keep precedence (14.14) ---------------
     const missing = await TestWorkspace.create({});
     try {
       // The upward search exhausts only where nothing above the root holds
@@ -4258,7 +4364,7 @@ const T11_6_4 = defineProductTest({
       await assertSelfContainedRoot(
         product,
         missing.root,
-        "T11.6-4 arm B (no configuration reachable by upward search)",
+        "T11.6-4 arm C (no configuration reachable by upward search)",
       );
       await expectFlaglessInventoryConfigurationError(
         product,
@@ -4309,7 +4415,7 @@ const T11_6_4 = defineProductTest({
       await invalid.dispose();
     }
 
-    // --- arm C: the one finding it ever carries (14.23) --------------------
+    // --- arm D: the one finding it ever carries (14.23) --------------------
     const record = await TestWorkspace.create({
       files: {
         [CONFIG_FILE]: RECORD_EMIT_CONFIG,

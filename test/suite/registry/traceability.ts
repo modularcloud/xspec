@@ -632,10 +632,14 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // fixture's resolved configuration (7.1–7.5) at T7.*-*.
   "T11.6-3": ["11.6", "14"],
   // T11.6-4: asserts numbered conditions — the premise build's
-  // every-family multiset and the condition-23 finding (TEST-SPEC 14's
-  // primary-test record lists T11.6-4 under 14.23) — so "14" joins the
-  // home passage; 14.14/12.7/13.3/12.1 are carriage context with home
-  // coverage at T7-*/T12.7-*/T13.3-*/T12.1-*.
+  // every-family multiset, the passing-side arm's `check` 14.12 and 14.21
+  // beside the finding-free inventory (T11.2-6's stagings), and the
+  // condition-23 finding (TEST-SPEC 14's primary-test record lists T11.6-4
+  // under 14.23) — so "14" joins the home passage; 14.14/12.7/13.3/12.1
+  // are carriage context with home coverage at T7-*/T12.7-*/T13.3-*/
+  // T12.1-*, as are the passing-side arm's `check` report (12.2), its
+  // forbidden rule (7.5), and its corrupt session (10.1) at T12.2-*/
+  // T7.5-*/T10.1-*.
   "T11.6-4": ["11.6", "14"],
   "T12.0-1": ["12.0"],
   "T12.0-2": ["12.0", "14"],
