@@ -2461,7 +2461,11 @@ const T11_2_3 = defineProductTest({
 // embedding its expansion transitively reaches records an occurrence and the
 // recursion re-enters no node already being expanded — one unresolved
 // spelling or one embedding cycle on the expansion path poisons the WHOLE
-// value (partial expansion is fabrication and never occurs) — and removal
+// value (partial expansion is fabrication and never occurs) — and own and
+// subtree text are judged apart: own text consults the embeddings of the
+// node's own contribution, subtree text those anywhere in its subtree, each
+// recursively through every embedded target's subtree, so an embedding
+// failing beneath a node poisons its subtree text alone. Removal
 // classification is by syntactic form, never by validity or resolution:
 // every import declaration is removed by form (target discovery
 // notwithstanding), while a construct matching no removal rule's form (a
@@ -2477,16 +2481,22 @@ const T11_2_3 = defineProductTest({
 // - The ambiguous reference to `a` is staged in the `d` entry form (14.5) —
 //   the one staged condition set drawn from CONF-AVAIL's stated scope; the
 //   unresolved-embedding form (14.6) rides the expansion chain's boundary
-//   spelling, where SPEC 14 pins the finding range exactly (the full braced
-//   container, the span its occurrence would occupy), asserted exactly
-//   there. Every other located finding is asserted as an exact location
-//   COUNT (one per offending construct — SPEC 14's cardinality rule: both
-//   bearers for the duplicate-ID finding) with each range inside the
-//   offending construct's byte window (end-widened by one byte): the
+//   spelling and the own-versus-subtree arm's `{text("missing")}`, where
+//   SPEC 14 pins the finding range exactly (the full braced container, the
+//   span its occurrence would occupy), asserted exactly there — as is the
+//   own-versus-subtree arm's ancestor cycle (14.9), located at its one
+//   participating reference spelling, the braced container `{text("p")}`
+//   (the `contains` edge closing the cycle spells nothing; SPEC 5.3, 14,
+//   T14-8) — each of those three findings form-exact: code, locations, and
+//   concerned path. Every other located finding is asserted as an exact
+//   location COUNT (one per offending construct — SPEC 14's cardinality
+//   rule: both bearers for the duplicate-ID finding) with each range inside
+//   the offending construct's byte window (end-widened by one byte): the
 //   ambiguous `d` reference's finding inside the opening tag that spells
-//   the reference, the cycle's inside its participating embedding
-//   container's line, 14.1/14.15/14.16 inside their constructs — file and
-//   construct discrimination without pinning T14-8's range precision.
+//   the reference, the self-embedding cycle's inside its participating
+//   embedding container's line, 14.1/14.15/14.16 inside their constructs —
+//   file and construct discrimination without pinning T14-8's range
+//   precision.
 // - Import-declaration view entries pin the declaration's range as exactly
 //   its own characters (no terminator) — the 1.7 construct convention —
 //   with `name` the default binding's identifier and `target` the resolved
@@ -2505,6 +2515,18 @@ const T11_2_3 = defineProductTest({
 //   subtreeText, and tree shape; attribute entries and interpreted
 //   tags/coverage stay at their home tests (T11.2-1/-2, T11.4-1/-3), their
 //   forms still decode-validated (H-3).
+// - The own-versus-subtree arm stages its two embeddings — the unresolved
+//   `{text("missing")}` and, staged separately, the ancestor-embedding
+//   `{text("p")}` — in the same `p`/`p.c` shape, one workspace each (the
+//   file `specs/P.mdx` in both), and pins the whole `--text` projection of
+//   each: p's own text byte-exact (p.c's contribution excised, 1.6) beside
+//   its subtree text exactly the marker, p.c's own and subtree text the
+//   marker, and the root's own text byte-exact beside its poisoned subtree
+//   text — so a product marking both of a node's values unavailable
+//   whenever an embedding anywhere beneath it fails is caught at p's (and
+//   the root's) own text — together with the view's occurrence list (the
+//   unresolved spelling records none; the ancestor embedding records its
+//   `embeds` occurrence p.c → p, cycle participation erasing no record).
 // - "Never an unavailable target" is enforced twice: the form decode admits
 //   only a plain identity string as a record's `target` (12.7), and every
 //   enumeration is pinned as a complete exact set (a phantom record for the
@@ -3034,7 +3056,184 @@ const CY_OCCURRENCES: readonly OccurrenceRecord[] = [
   },
 ];
 
-// --- staging 4: removal classification is by syntactic form -------------------
+// --- staging 4: own text and subtree text judged apart (two stagings) ---------
+//
+// SPEC 11.2 (expanded text): own text consults the embeddings of the node's
+// own contribution, subtree text those anywhere in its subtree, each
+// recursively through every embedded target's subtree. The top-level `p`,
+// whose own contribution holds no embedding, parents `p.c`, which holds the
+// one embedding: (a) the unresolved `{text("missing")}` — no occurrence, one
+// 14.6 located at its braced container — and, staged separately, (b)
+// `{text("p")}`, resolving to p.c's own ancestor, so that expanding p's
+// subtree re-enters p: an embedding cycle over p → p.c (contains) and
+// p.c → p (embeds) — SPEC 5.3's section embedding its own ancestor — whose
+// spelling records its `embeds` occurrence beside the cycle's one 14.9,
+// located at its one participating reference spelling, the braced container
+// (the `contains` edge spells nothing; SPEC 14). Either way p's own text
+// stays a plain value beside its poisoned subtree text, p.c's own and
+// subtree text are both poisoned (the embedding lies in its own
+// contribution), and the root — no embedding in its own contribution either
+// — keeps its own text beside its poisoned subtree text. Every id is unique
+// and well-formed (`p.c` extends its parent's spelling by one segment), so
+// the embedding's condition is each workspace's ONLY condition. The
+// multi-byte title shifts every later offset (SPEC 1.7).
+//
+// Text derivation (SPEC 3, 1.6), shared by both stagings: every `<S>` and
+// `</S>` line holds nothing but removed tags and drops with its terminator —
+// p.c's `</S>` line taking p's line terminator after it along — while blank
+// lines stay. p's own runs: `P head.` LF and the blank line before p.c, then
+// — p.c's whole contribution excised — the blank line after p.c and
+// `P tail.` LF. The root's own run: the title line and the blank line after
+// it, the final `</S>` line dropping.
+
+const OWN_FILE = "specs/P.mdx";
+const OWN_P_HEAD = '<S id="p">\nP head.\n\n';
+const OWN_PC_HEAD = '<S id="p.c">\nC body.\n\n';
+const OWN_P_TAIL = "\n\nP tail.\n</S>";
+// The two values defined in both stagings, pinned literals (derived above):
+const OWN_ROOT_OWN = "Prélude — own text and subtree text judged apart.\n\n";
+const OWN_P_OWN = "P head.\n\n\nP tail.\n";
+
+/** One own-versus-subtree staging: its bytes, composed ranges, and pins. */
+interface OwnSubtreeStaging {
+  readonly label: string;
+  readonly source: string;
+  /** The staged bytes as a ledger record (S-9's before-any-product clause). */
+  readonly staged: StagedMdx;
+  /** p.c's one embedding container as staged, and its range. */
+  readonly embedText: string;
+  readonly embedRange: SourceRange;
+  readonly pText: string;
+  readonly pRange: SourceRange;
+  readonly pcText: string;
+  readonly pcRange: SourceRange;
+  readonly rootRange: SourceRange;
+  /** The workspace's one staged condition, and its finding form-exact. */
+  readonly condition: string;
+  readonly finding: FindingProjection;
+  /** What the finding's one location is, for the diagnostic. */
+  readonly findingWhat: string;
+  readonly textTree: TextTreeExpectation;
+  readonly occurrences: readonly OccurrenceRecord[];
+  /** What the view's occurrence list holds, for the diagnostic. */
+  readonly occurrencesWhat: string;
+}
+
+/**
+ * Compose one staging around p.c's embedding `embedText`: its one finding
+ * (`condition`, stable `code`) located at the braced container, and the
+ * identity it resolves to — `target`, or `null` for an unresolved spelling,
+ * which records no occurrence. Every range is composed from the same parts
+ * that stage the file; the text values are the pinned literals above.
+ */
+function stageOwnSubtree(
+  label: string,
+  embedText: string,
+  expected: {
+    readonly condition: string;
+    readonly code: string;
+    readonly findingWhat: string;
+    readonly target: string | null;
+    readonly occurrencesWhat: string;
+  },
+): OwnSubtreeStaging {
+  const f = new ByteFixture();
+  f.add("Prélude — own text and subtree text judged apart.\n\n");
+  const pStart = f.pos;
+  f.add(OWN_P_HEAD);
+  const pcStart = f.pos;
+  f.add(OWN_PC_HEAD);
+  const embedRange = f.add(embedText);
+  f.add("\n</S>");
+  const pcRange: SourceRange = { start: pcStart, end: f.pos };
+  f.add(OWN_P_TAIL);
+  const pRange: SourceRange = { start: pStart, end: f.pos };
+  f.add("\n");
+  const rootRange: SourceRange = { start: 0, end: f.pos };
+  const pcText = OWN_PC_HEAD + embedText + "\n</S>";
+  const target = expected.target;
+  return {
+    label,
+    source: f.source,
+    staged: stagedMdx(
+      `T11.2-4 specs/P.mdx (own versus subtree: ${label})`,
+      f.source,
+    ),
+    embedText,
+    embedRange,
+    pText: OWN_P_HEAD + pcText + OWN_P_TAIL,
+    pRange,
+    pcText,
+    pcRange,
+    rootRange,
+    condition: expected.condition,
+    finding: locatedAt(expected.code, OWN_FILE, embedRange),
+    findingWhat: expected.findingWhat,
+    textTree: {
+      identity: OWN_FILE,
+      range: rootRange,
+      ownText: OWN_ROOT_OWN,
+      subtreeText: UNAVAILABLE,
+      children: [
+        {
+          identity: `${OWN_FILE}#p`,
+          range: pRange,
+          ownText: OWN_P_OWN,
+          subtreeText: UNAVAILABLE,
+          children: [
+            {
+              identity: `${OWN_FILE}#p.c`,
+              range: pcRange,
+              ownText: UNAVAILABLE,
+              subtreeText: UNAVAILABLE,
+              children: [],
+            },
+          ],
+        },
+      ],
+    },
+    occurrences:
+      target === null
+        ? []
+        : [
+            {
+              file: OWN_FILE,
+              range: embedRange,
+              kind: "embeds",
+              source: { identity: `${OWN_FILE}#p.c`, range: pcRange },
+              target,
+            },
+          ],
+    occurrencesWhat: expected.occurrencesWhat,
+  };
+}
+
+// (a) p.c holds the unresolved `{text("missing")}`.
+const OWN_A = stageOwnSubtree("the unresolved embedding", '{text("missing")}', {
+  condition: "14.6",
+  code: "unknown-text-target",
+  findingWhat:
+    "EXACTLY the braced container, the span its occurrence would occupy",
+  target: null,
+  occurrencesWhat:
+    "none: the unresolved spelling records no occurrence, its position " +
+    "reaching consumers through its finding's range",
+});
+// (b) p.c holds `{text("p")}`, embedding its own ancestor.
+const OWN_B = stageOwnSubtree("the ancestor embedding cycle", '{text("p")}', {
+  condition: "14.9",
+  code: "cycle",
+  findingWhat:
+    "EXACTLY the braced container, the cycle's one participating " +
+    "reference spelling (its contains edge p → p.c spells nothing)",
+  target: `${OWN_FILE}#p`,
+  occurrencesWhat:
+    "exactly the ancestor embedding's one embeds record, p.c to p — the " +
+    "spelling resolves, and cycle participation erases no record",
+});
+const OWN_STAGINGS: readonly OwnSubtreeStaging[] = [OWN_A, OWN_B];
+
+// --- staging 5: removal classification is by syntactic form -------------------
 //
 // specs/IMP.mdx imports specs/GONE.xspec with an UNUSED binding (2.1: valid,
 // records no edges — so no expansion depends on the target and the text
@@ -3135,7 +3334,7 @@ const IMP_IMPORTS_AFTER: readonly ViewImportEntry[] = [
   { range: IMP_IMPORT_RANGE, name: "GONE", target: UNAVAILABLE },
 ];
 
-// --- staging 5: enclosure — a stray element enclosing a section and an
+// --- staging 6: enclosure — a stray element enclosing a section and an
 // embedding at the root level ---------------------------------------------------
 //
 // SPEC 11.2 (removal classification by form): a stray element (14.16) is
@@ -3288,7 +3487,7 @@ const ENCL_STAGINGS: readonly EnclosureStaging[] = [ENCL_A, ENCL_B];
 const T11_2_4 = defineProductTest({
   id: "T11.2-4",
   title:
-    "resolution turns on the referenced identity's own definedness: with duplicate spellings of `a` and the unique `a.b` beneath one bearer, the `d` entry naming `a.b` on the other bearer and the `{text(\"a.b\")}` embedding inside an id-less section each resolve and record occurrences whose `source` is exactly the unavailability marker (`file`, `range`, `kind`, `target` present — never a picked bearer, never a dropped record; observed via bare `occurrences` AND `view`), while the `d` reference to `a` records none — ambiguous, every bearer undefined — reported by its 14.5 finding's range, never as a record or an unavailable target, the view still positioning each enclosing construct with identity unavailable, the file's findings (14.1, 14.3, 14.5) accompanying, exit 1; `view --text`: CH-A embeds CH-B embeds CH-C with an unresolved embedding in CH-C (14.6, its finding's range exactly the braced container) → top's and mid's own/subtree text exactly the unavailability marker — one unresolved spelling, or (staged separately) one self-embedding cycle (14.9), poisons the whole value, partial expansion never occurring — while siblings with resolved expansions stay defined and byte-exact and each root's own text stays defined beside its poisoned subtree text; removal classification is by syntactic form: after deleting the imported (unused-binding) GONE.mdx, IMP.mdx's text values are byte-identical to before — the import removed by form, its 14.15 finding notwithstanding, the import entry's `target` flipping to the marker — and the stray `<div>` (14.16) is content, preserved byte-for-byte in the enclosing text and located by its finding; enclosure: `<div><S id=\"x\">t</S>{text(\"y\")}</div>` staged in flow position at the root level (the entry's one-line spelling and the flow-tag spelling, one workspace each), `y` a section of the same file → exactly one 14.16 finding located `<div>` through `</div>`, node `x` in the view's tree a child of the root (never of the element, T11.4-1), the embedding's occurrence recorded with the root as its `source`, and under `view --text` the root's own text carrying `<div>` and `</div>` with `x`'s whole contribution excised and the embedding expanded to `y`'s subtree text, its subtree text carrying `t` in place with `x`'s tags removed — each byte-asserted via bare `view --text` and bare `occurrences` (SPEC 11.2, 11.3, 11.4, 5.7, 1.6, 2.1, 3, 12.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)",
+    "resolution turns on the referenced identity's own definedness: with duplicate spellings of `a` and the unique `a.b` beneath one bearer, the `d` entry naming `a.b` on the other bearer and the `{text(\"a.b\")}` embedding inside an id-less section each resolve and record occurrences whose `source` is exactly the unavailability marker (`file`, `range`, `kind`, `target` present — never a picked bearer, never a dropped record; observed via bare `occurrences` AND `view`), while the `d` reference to `a` records none — ambiguous, every bearer undefined — reported by its 14.5 finding's range, never as a record or an unavailable target, the view still positioning each enclosing construct with identity unavailable, the file's findings (14.1, 14.3, 14.5) accompanying, exit 1; `view --text`: CH-A embeds CH-B embeds CH-C with an unresolved embedding in CH-C (14.6, its finding's range exactly the braced container) → top's and mid's own/subtree text exactly the unavailability marker — one unresolved spelling, or (staged separately) one self-embedding cycle (14.9), poisons the whole value, partial expansion never occurring — while siblings with resolved expansions stay defined and byte-exact and each root's own text stays defined beside its poisoned subtree text; own text and subtree text are judged apart: a section `p` whose own contribution holds no embedding, its child `p.c` holding the unresolved `{text(\"missing\")}` (14.6) — and, staged separately, `{text(\"p\")}`, so that expanding `p`'s subtree re-enters `p` (an embedding cycle, a section embedding its own ancestor: one 14.9 locating the braced container, the `embeds` occurrence recorded) — under `view --text`: `p`'s own text a plain value byte-equal to its precomputed own text (`p.c`'s contribution excised) and its subtree text exactly the unavailability marker, `p.c`'s own and subtree text the marker, each finding form-exact, exit 1 — failing a product that marks both values unavailable whenever an embedding anywhere beneath the node fails; removal classification is by syntactic form: after deleting the imported (unused-binding) GONE.mdx, IMP.mdx's text values are byte-identical to before — the import removed by form, its 14.15 finding notwithstanding, the import entry's `target` flipping to the marker — and the stray `<div>` (14.16) is content, preserved byte-for-byte in the enclosing text and located by its finding; enclosure: `<div><S id=\"x\">t</S>{text(\"y\")}</div>` staged in flow position at the root level (the entry's one-line spelling and the flow-tag spelling, one workspace each), `y` a section of the same file → exactly one 14.16 finding located `<div>` through `</div>`, node `x` in the view's tree a child of the root (never of the element, T11.4-1), the embedding's occurrence recorded with the root as its `source`, and under `view --text` the root's own text carrying `<div>` and `</div>` with `x`'s whole contribution excised and the embedding expanded to `y`'s subtree text, its subtree text carrying `t` in place with `x`'s tags removed — each byte-asserted via bare `view --text` and bare `occurrences` (SPEC 11.2, 11.3, 11.4, 5.3, 5.7, 1.6, 2.1, 3, 12.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)",
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
     // out of the staged bytes before any product invocation.
@@ -3352,6 +3551,28 @@ const T11_2_4 = defineProductTest({
       CY_SELF_EMBED_TEXT,
       "the self-embedding container",
     );
+    for (const staging of OWN_STAGINGS) {
+      const what = `the own-versus-subtree staging (${staging.label})`;
+      sliceCheck(
+        staging.source,
+        staging.embedRange,
+        staging.embedText,
+        `${what}: p.c's embedding container`,
+      );
+      sliceCheck(
+        staging.source,
+        staging.pcRange,
+        staging.pcText,
+        `${what}: p.c`,
+      );
+      sliceCheck(staging.source, staging.pRange, staging.pText, `${what}: p`);
+      sliceCheck(
+        staging.source,
+        staging.rootRange,
+        staging.source,
+        `${what}: the root's whole-file range`,
+      );
+    }
     sliceCheck(
       IMP_SOURCE,
       IMP_IMPORT_RANGE,
@@ -3709,7 +3930,85 @@ const T11_2_4 = defineProductTest({
       }
     }
 
-    // --- Staging 4: removal classification is by syntactic form.
+    // --- Staging 4: own text and subtree text judged apart, one workspace
+    // per staging (SPEC 11.2: own text consults the embeddings of the
+    // node's own contribution, subtree text those anywhere in its subtree).
+    for (const staging of OWN_STAGINGS) {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [OWN_FILE]: staging.staged,
+        },
+      });
+      try {
+        const context = `T11.2-4 bare \`view --text\` (own versus subtree: ${staging.label})`;
+        const result = await expectExit(
+          product,
+          workspace,
+          ["view", "--text"],
+          1,
+          `${context} — the ${staging.condition} finding and the poisoned ` +
+            `text values accompany, so exit 1 with the full answer (SPEC ` +
+            `11.2)`,
+        );
+        const report = decodeViewReport(
+          parseJsonStdout(
+            result,
+            `${context} — a single JSON document is the only output form ` +
+              `(SPEC 11)`,
+          ),
+          { text: true },
+          context,
+        );
+        assertConditionCounts(
+          report.findings,
+          { [staging.condition]: 1 },
+          `${context} — p.c's embedding is the workspace's ONLY condition ` +
+            `(every id unique and well-formed): exactly one ` +
+            `${staging.condition} (SPEC 11.2, 14)`,
+        );
+        assertSameJson(
+          report.findings.map(projectFinding),
+          [staging.finding],
+          `${context} — the file's one finding, form-exact: its stable code, ` +
+            `no concerned path, and its one location ${staging.findingWhat} ` +
+            `(SPEC 14, 5.3, 5.7, 12.7)`,
+        );
+        assertSameJson(
+          report.views.map((view) => view.file),
+          [OWN_FILE],
+          `${context} — one per-file view (SPEC 11.4)`,
+        );
+        const ownView = report.views[0]!;
+        assertSameJson(
+          projectTextNode(ownView.root),
+          staging.textTree,
+          `${context} — own and subtree text judged apart: p's own text a ` +
+            `plain value, byte-equal to its precomputed own text with p.c's ` +
+            `contribution excised, beside its subtree text EXACTLY the ` +
+            `unavailability marker; p.c's own and subtree text the marker ` +
+            `(the embedding lies in its own contribution); the root's own ` +
+            `text defined beside its poisoned subtree text — never both ` +
+            `values marked unavailable for an embedding failing beneath the ` +
+            `node (SPEC 11.2, 1.6, 3)`,
+        );
+        assertSameJson(
+          ownView.occurrences,
+          staging.occurrences,
+          `${context} — the view's occurrence records: ` +
+            `${staging.occurrencesWhat} (SPEC 5.7, 11.2)`,
+        );
+        assertSameJson(
+          [ownView.imports, ownView.comments],
+          [[], []],
+          `${context} — no imports or comments staged (SPEC 12.7)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- Staging 5: removal classification is by syntactic form.
     {
       const workspace = await TestWorkspace.create({
         files: {
@@ -3871,7 +4170,7 @@ const T11_2_4 = defineProductTest({
         await workspace.dispose();
       }
     }
-    // --- Staging 5: enclosure — a stray element enclosing a section and an
+    // --- Staging 6: enclosure — a stray element enclosing a section and an
     // embedding at the root level, one workspace per spelling (SPEC 11.2:
     // the element is preserved by its own tags, the section and the
     // embedding it encloses classified by their own forms).
