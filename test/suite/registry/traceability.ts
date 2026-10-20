@@ -709,6 +709,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "12.7",
     "14",
   ],
+  // T12.0-16: byte order over the separating pair U+FF21/U+1F600 on 12.7's
+  // tag sets and findings order, 11.4's and 12.3's file orders, 11.6's
+  // inventory lists, and 5.7's occurrence order; its (c) arms pin the
+  // condition-5, -9, -10, and -12 findings by code ("14"). 7.4/7.5's
+  // set reading, 12.2's `check`, and 13.1/13.2's derived paths are
+  // carriage context with home coverage at T7.4-*/T7.5-*/T12.2-*/T13.1-*.
+  "T12.0-16": ["12.0", "12.7", "11.4", "11.6", "12.3", "5.7", "14"],
   "T12.1-1": ["12.1"],
   "T12.1-3": ["12.1"],
   "T12.1-4": ["12.1", "14"],

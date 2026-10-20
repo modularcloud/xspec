@@ -1,5 +1,7 @@
 // TEST-SPEC §12.0 III (global command conventions, third part) — SUITE-42
-// continued: T12.0-14 (invocation grammar).
+// continued: T12.0-14 (invocation grammar) and T12.0-16 (byte order, never
+// UTF-16 order; its fixture, operationalizations, and arms (a)–(c) in the
+// section after T12.0-14's).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -70,11 +72,28 @@
 //   pair (`depends,depends` against `depends`) is the byte-identical compare
 //   T11-4 pins in full.
 
+import { Buffer } from "node:buffer";
+import type {
+  DecodedDatum,
+  Finding,
+  FindingLocation,
+  InventoryDocument,
+  OccurrenceRecord,
+  PathValue,
+  SourceRange,
+  ViewNode,
+  ViewReport,
+} from "../../helpers/adapters/index.js";
 import {
   assertReportMentions,
   assertReportOmits,
+  decodeIdsReport,
+  decodeInventoryDocument,
   decodeItemReport,
   decodeNextReport,
+  decodeOccurrencesReport,
+  decodeViewReport,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
@@ -91,7 +110,9 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
@@ -101,11 +122,14 @@ import type {
 import { STREAMS_VALID_SOURCE } from "./section-12.0-i.js";
 import { SPECS_ONLY_CONFIG } from "./section-5.6.js";
 import {
+  assertSameJson,
   buildOk,
   expectConfigurationError,
   expectExit,
   expectPlainUsageError,
+  readGeneratedModule,
   runCli,
+  runFindingsReport,
   runJson,
 } from "./support.js";
 
@@ -824,4 +848,1244 @@ const T12_0_14 = defineProductTest({
   },
 });
 
-export const section120iiiTests: readonly ProductTestEntry[] = [T12_0_14];
+// ---------------------------------------------------------------------------
+// T12.0-16 — byte order, never UTF-16 order
+// ---------------------------------------------------------------------------
+//
+// SPEC 12.0: strings compare byte-wise, so every string order SPEC pins over
+// paths, identities, and tags is byte order. UTF-16 code-unit order — a
+// JavaScript string comparison's — agrees with it except where, at the first
+// difference, a character from U+E000 through U+FFFF meets one above U+FFFF,
+// a meeting the ordering fixtures elsewhere never stage; TEST-SPEC
+// T12.0-16's separating pair, U+FF21 and U+1F600, is such a meeting. The
+// fixture stages the pair in tags, identities, and paths, and each arm pins
+// the byte order exactly: on 12.7's documents (`view`, `inventory`,
+// `occurrences`, and the findings reports of `build` and `check`) through
+// their form-exact decodes, which reject a list out of byte order as a form
+// failure before any pin compares it, and on `ids --json`, whose shape 12.7
+// leaves to 12.3, through its H-3 adapter and the pin alone.
+//
+// Conservative operationalizations (noted per H-3/H-4):
+// - The fixture self-check (`checkByteOrderFixtureStaging`, harness-side,
+//   before any invocation) proves that the pair separates the two orders,
+//   that every list pinned below is in byte order and differs from its
+//   UTF-16 code-unit sort — so a product ordering by UTF-16 code units
+//   never coincides with a pinned list — and that the composed ranges slice
+//   the staged bytes.
+// - `view` is pinned per file by its tree's identities and tags: `p`'s tag
+//   set [U+FF21, U+1F600] from `tags="U+1F600 U+FF21"`, its children
+//   `p.U+1F600` then `p.U+FF21` in document order — the reverse of byte
+//   order, so a product sorting a document-ordered list by bytes fails as
+//   well — a tagless section's `tags` `[]`, a root's `null` (12.7). `ids`
+//   is pinned with each file's IDs in document order beside the file order
+//   (12.3).
+// - `recorded` holds companions 13.1 does not enumerate, so it is pinned as
+//   TEST-SPEC words it: its modules and Markdown present (13.1, 13.2),
+//   every other entry a companion attributable to its source through 13.1's
+//   naming, and every `specs/base.` entry before every `specs/U+FF21.` entry
+//   before every `specs/U+1F600.` entry.
+// - `occurrences` is pinned by each record's referencing file, kind, source
+//   identity, and target, in occurrence order; its ranges are T5.7-*'s.
+// - (c)'s findings are pinned form-exact by code, locations, and concerned
+//   path, and by identities where 14 makes them contractual (14.12's
+//   enumeration: the rule, then the edge's source, kind, and target);
+//   messages and every other finding's identities are informational
+//   (12.7). With both modules altered, `check` reports exactly the two
+//   per-file condition-10 findings beside the two policy findings: no other
+//   derived file differs from what `build` generates, graph data compares
+//   sources, configuration, and journal alone (13.3), and the workspace
+//   still passes `build`'s validations, so policy still holds (7.5). The
+//   twins are fresh workspaces of the fixture's files, never built: on a
+//   workspace failing `build`'s validations the mismatch forms of 14.10 are
+//   undetectable and policy is not evaluated (14.10, 14.12), so each report
+//   is exactly the staged condition's findings. The condition-5 locations
+//   are pinned exactly — `BASE.missing`, the expression the braces enclose
+//   (14) — and the condition-9 locations by file, in order, each within
+//   its import declaration's byte window (T2.1-5's convention for an
+//   import-cycle participant: the declaration end-widened by one byte).
+// - TEST-SPEC's arms (d)–(f) stage the same fixture: its records, paths,
+//   and staging are exported (`BYTE_ORDER_*`, `byteOrderBaseSource`,
+//   `stageByteOrderFixture`).
+
+/**
+ * The separating pair of TEST-SPEC T12.0-16, each character built from its
+ * code point so no tool layer can decode or normalize the spelling on the
+ * way into this file: U+FF21 (FULLWIDTH LATIN CAPITAL LETTER A; UTF-8
+ * EF BC A1, UTF-16 FF21) and U+1F600 (GRINNING FACE; UTF-8 F0 9F 98 80,
+ * UTF-16 D83D DE00). Byte order places a string holding U+FF21 before the
+ * same string holding U+1F600 in its place (EF < F0), UTF-16 code-unit
+ * order the reverse (D83D < FF21). Both are valid ID segments and tags
+ * (SPEC 1.4) and stand in valid spec- and code-source paths (7.1, 14.19);
+ * U+FF21 is an identifier character and U+1F600 none, so a reference to a
+ * U+1F600 section uses bracket notation (2.4).
+ */
+export const BYTE_ORDER_FULLWIDTH_A = String.fromCodePoint(0xff21);
+/** U+1F600, the pair's second character ({@link BYTE_ORDER_FULLWIDTH_A}). */
+export const BYTE_ORDER_GRINNING_FACE = String.fromCodePoint(0x1f600);
+const FULL_A = BYTE_ORDER_FULLWIDTH_A;
+const GRIN = BYTE_ORDER_GRINNING_FACE;
+
+/** The byte-order fixture's source paths (TEST-SPEC T12.0-16). */
+export const BYTE_ORDER_PATHS = {
+  /** The spec source holding `p` and its two children. */
+  base: "specs/base.mdx",
+  /** The spec source named by U+FF21, holding `x`. */
+  fullA: `specs/${FULL_A}.mdx`,
+  /** The spec source named by U+1F600, holding `x`. */
+  grin: `specs/${GRIN}.mdx`,
+  /** The code source named by U+FF21, marking `BASE.p`. */
+  fullACode: `src/${FULL_A}.ts`,
+  /** The code source named by U+1F600, marking `BASE.p`. */
+  grinCode: `src/${GRIN}.ts`,
+} as const;
+const BO = BYTE_ORDER_PATHS;
+
+/**
+ * The fixture's configuration (TEST-SPEC T12.0-16): spec group `specs`
+ * globbing `specs/*.mdx`, code group `src` globbing `src/*.ts`, emission
+ * enabled; profiles `pair` (`target` `specs`, `targets` "all", `targetTags`
+ * configured [U+1F600, U+FF21] — UTF-16 order, which its set form must
+ * reorder — `boundary` `src`, `mode` direct) and `bare` (`target` `specs`,
+ * `boundary` `src`, `mode` direct); and rule `nope` (forbidden, from
+ * `{ group: "src" }` to `{ tags: [U+1F600, U+FF21] }`). Valid (SPEC 7, 7.4,
+ * 7.5): `src` names a code group alone, so each kind is inferred.
+ */
+const BYTE_ORDER_CONFIG_SOURCE = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    specs: ["specs/*.mdx"]
+  },
+  code: {
+    src: ["src/*.ts"]
+  },
+  markdown: { emit: true },
+  coverage: [
+    {
+      name: "pair",
+      target: "specs",
+      targets: "all",
+      targetTags: ["${GRIN}", "${FULL_A}"],
+      boundary: "src",
+      mode: "direct"
+    },
+    {
+      name: "bare",
+      target: "specs",
+      boundary: "src",
+      mode: "direct"
+    }
+  ],
+  policy: [
+    {
+      name: "nope",
+      type: "forbidden",
+      from: { group: "src" },
+      to: { tags: ["${GRIN}", "${FULL_A}"] }
+    }
+  ]
+})
+`;
+
+/** The own text of each of `p`'s two children in the built fixture. */
+export const BYTE_ORDER_CHILD_TEXTS = {
+  grin: "Grinning-face child text.",
+  fullA: "Fullwidth-A child text.",
+} as const;
+
+/**
+ * The fixture's `specs/base.mdx` with the given child texts: a section `p`
+ * spelled `tags="U+1F600 U+FF21"` — the tags in UTF-16 order, which the set
+ * form must reorder — whose children are, in document order, `p.U+1F600`
+ * then `p.U+FF21`: document order the reverse of byte order, so a list SPEC
+ * orders by document (a view's `children`, `ids`' per-file IDs) and one it
+ * orders by bytes part on this file. `p` carries the tags; its children
+ * carry none.
+ */
+export function byteOrderBaseSource(childTexts: {
+  readonly grin: string;
+  readonly fullA: string;
+}): string {
+  return (
+    `<S id="p" tags="${GRIN} ${FULL_A}">\n` +
+    "Parent text.\n" +
+    "\n" +
+    `<S id="p.${GRIN}">\n` +
+    `${childTexts.grin}\n` +
+    "</S>\n" +
+    "\n" +
+    `<S id="p.${FULL_A}">\n` +
+    `${childTexts.fullA}\n` +
+    "</S>\n" +
+    "</S>\n"
+  );
+}
+
+/** The own text of each spec source's `x`. */
+const BYTE_ORDER_X_TEXTS = {
+  fullA: "Fullwidth-A file text.",
+  grin: "Grinning-face file text.",
+} as const;
+
+/**
+ * One `x`-holding spec source of the fixture or a twin, composed from its
+ * parts with every claimed range (SPEC 1.7; byte offsets): the `d` value's
+ * expression, by its own characters (14, 5.7), and — on the import-cycle
+ * twin — the import declaration of the other `x`-holding module.
+ */
+interface ByteOrderXSource {
+  readonly file: string;
+  readonly source: string;
+  readonly dValue: { readonly spelling: string; readonly range: SourceRange };
+  readonly otherImport: {
+    readonly spelling: string;
+    readonly range: SourceRange;
+  } | null;
+}
+
+/**
+ * Compose an `x`-holding source: `import BASE from "./base.xspec"`, then —
+ * when `otherModule` is given — `import OTHER from "./<otherModule>.xspec"`
+ * (its binding unused), then a blank line and `x` spelling
+ * `d={<dSpelling>}` around `text`.
+ */
+function composeByteOrderXSource(
+  file: string,
+  text: string,
+  dSpelling: string,
+  otherModule: string | null,
+): ByteOrderXSource {
+  let source = "";
+  const add = (segment: string): SourceRange => {
+    const start = Buffer.byteLength(source, "utf8");
+    source += segment;
+    return { start, end: Buffer.byteLength(source, "utf8") };
+  };
+  add('import BASE from "./base.xspec"\n');
+  let otherImport: ByteOrderXSource["otherImport"] = null;
+  if (otherModule !== null) {
+    const spelling = `import OTHER from "./${otherModule}.xspec"`;
+    otherImport = { spelling, range: add(spelling) };
+    add("\n");
+  }
+  add('\n<S id="x" d={');
+  const dValue = { spelling: dSpelling, range: add(dSpelling) };
+  add(`}>\n${text}\n</S>\n`);
+  return { file, source, dValue, otherImport };
+}
+
+/** The fixture's `x`-holding spec sources, each `d={BASE.p}`. */
+const BO_X_FULL_A = composeByteOrderXSource(
+  BO.fullA,
+  BYTE_ORDER_X_TEXTS.fullA,
+  "BASE.p",
+  null,
+);
+const BO_X_GRIN = composeByteOrderXSource(
+  BO.grin,
+  BYTE_ORDER_X_TEXTS.grin,
+  "BASE.p",
+  null,
+);
+/** The unresolved twin's: `x` in both spells `d={BASE.missing}`. */
+const BO_MISSING_FULL_A = composeByteOrderXSource(
+  BO.fullA,
+  BYTE_ORDER_X_TEXTS.fullA,
+  "BASE.missing",
+  null,
+);
+const BO_MISSING_GRIN = composeByteOrderXSource(
+  BO.grin,
+  BYTE_ORDER_X_TEXTS.grin,
+  "BASE.missing",
+  null,
+);
+/** The import-cycle twin's: each also imports the other's module, unused. */
+const BO_CYCLE_FULL_A = composeByteOrderXSource(
+  BO.fullA,
+  BYTE_ORDER_X_TEXTS.fullA,
+  "BASE.p",
+  GRIN,
+);
+const BO_CYCLE_GRIN = composeByteOrderXSource(
+  BO.grin,
+  BYTE_ORDER_X_TEXTS.grin,
+  "BASE.p",
+  FULL_A,
+);
+
+/**
+ * The fixture's two code sources' shared bytes: `src/U+FF21.ts` and
+ * `src/U+1F600.ts` each import `../specs/base.xspec` as `BASE` and mark
+ * `BASE.p` at top level — a `references` edge from the file itself, no unit
+ * enclosing the marker (SPEC 4.5, 4.6).
+ */
+const BYTE_ORDER_CODE_SOURCE =
+  'import BASE from "../specs/base.xspec";\n\nBASE.p;\n';
+
+// The staged-source records (helpers/staged-mdx.ts, helpers/staged-ts.ts;
+// S-9): the fixture's files and its twins' — workspaces each body stages,
+// the twins after its first product invocation — every one a record, so the
+// S-9 self-test judges each before any product exists.
+const BYTE_ORDER_CONFIG = stagedTs(
+  "T12.0-16 byte-order fixture xspec.config.ts — spec group specs, code group src, emission enabled, profiles pair (targetTags U+1F600, U+FF21) and bare, rule nope (src to the tags U+1F600, U+FF21)",
+  BYTE_ORDER_CONFIG_SOURCE,
+);
+const BYTE_ORDER_BASE = stagedMdx(
+  "T12.0-16 byte-order fixture specs/base.mdx — p tagged U+1F600 U+FF21, its children p.U+1F600 then p.U+FF21",
+  byteOrderBaseSource(BYTE_ORDER_CHILD_TEXTS),
+);
+const BYTE_ORDER_X_FULL_A = stagedMdx(
+  "T12.0-16 byte-order fixture specs/U+FF21.mdx — x depending on BASE.p",
+  BO_X_FULL_A.source,
+);
+const BYTE_ORDER_X_GRIN = stagedMdx(
+  "T12.0-16 byte-order fixture specs/U+1F600.mdx — x depending on BASE.p",
+  BO_X_GRIN.source,
+);
+const BYTE_ORDER_CODE = stagedTs(
+  "T12.0-16 byte-order fixture src/U+FF21.ts and src/U+1F600.ts — BASE.p marked at top level",
+  BYTE_ORDER_CODE_SOURCE,
+);
+const BYTE_ORDER_MISSING_FULL_A = stagedMdx(
+  "T12.0-16 unresolved twin specs/U+FF21.mdx — x spelling d={BASE.missing}",
+  BO_MISSING_FULL_A.source,
+);
+const BYTE_ORDER_MISSING_GRIN = stagedMdx(
+  "T12.0-16 unresolved twin specs/U+1F600.mdx — x spelling d={BASE.missing}",
+  BO_MISSING_GRIN.source,
+);
+const BYTE_ORDER_CYCLE_FULL_A = stagedMdx(
+  "T12.0-16 import-cycle twin specs/U+FF21.mdx — also importing ./U+1F600.xspec, the binding unused",
+  BO_CYCLE_FULL_A.source,
+);
+const BYTE_ORDER_CYCLE_GRIN = stagedMdx(
+  "T12.0-16 import-cycle twin specs/U+1F600.mdx — also importing ./U+FF21.xspec, the binding unused",
+  BO_CYCLE_GRIN.source,
+);
+
+/** The byte-order fixture's files (TEST-SPEC T12.0-16), every one a record. */
+export const BYTE_ORDER_FIXTURE_FILES: Readonly<
+  Record<string, StagedMdx | StagedTs>
+> = {
+  "xspec.config.ts": BYTE_ORDER_CONFIG,
+  [BO.base]: BYTE_ORDER_BASE,
+  [BO.fullA]: BYTE_ORDER_X_FULL_A,
+  [BO.grin]: BYTE_ORDER_X_GRIN,
+  [BO.fullACode]: BYTE_ORDER_CODE,
+  [BO.grinCode]: BYTE_ORDER_CODE,
+};
+
+/** (c)'s unresolved twin: the fixture with `x` spelling `d={BASE.missing}`. */
+const BYTE_ORDER_UNRESOLVED_TWIN_FILES: Readonly<
+  Record<string, StagedMdx | StagedTs>
+> = {
+  ...BYTE_ORDER_FIXTURE_FILES,
+  [BO.fullA]: BYTE_ORDER_MISSING_FULL_A,
+  [BO.grin]: BYTE_ORDER_MISSING_GRIN,
+};
+
+/** (c)'s import-cycle twin: each `x`-holding source imports the other's. */
+const BYTE_ORDER_CYCLE_TWIN_FILES: Readonly<
+  Record<string, StagedMdx | StagedTs>
+> = {
+  ...BYTE_ORDER_FIXTURE_FILES,
+  [BO.fullA]: BYTE_ORDER_CYCLE_FULL_A,
+  [BO.grin]: BYTE_ORDER_CYCLE_GRIN,
+};
+
+/**
+ * Stage the byte-order fixture in a fresh workspace (H-1) and build it —
+ * exit 0: the fixture passes `build`'s validations, its policy rule
+ * constraining the graph alone, which `build` never evaluates (SPEC 12.1,
+ * 7.5). The caller disposes the workspace; it is disposed here when the
+ * staging fails.
+ */
+export async function stageByteOrderFixture(
+  product: ProductBinding,
+  context: string,
+): Promise<TestWorkspace> {
+  const workspace = await TestWorkspace.create({
+    files: BYTE_ORDER_FIXTURE_FILES,
+  });
+  try {
+    await buildOk(
+      product,
+      workspace,
+      `${context} — staging \`build\`: the byte-order fixture passes ` +
+        `\`build\`'s validations, exit 0 (SPEC 12.1; \`build\` does not ` +
+        `evaluate policy, 7.5)`,
+    );
+    return workspace;
+  } catch (error) {
+    await workspace.dispose();
+    throw error;
+  }
+}
+
+// --- the byte-order expectations ---------------------------------------------
+
+/** A spec source's generated module path (SPEC 13.1: NAME.xspec.ts). */
+function byteOrderModuleOf(specFile: string): string {
+  return `${specFile.slice(0, -".mdx".length)}.xspec.ts`;
+}
+
+/** A spec source's Markdown emit destination, next to it (SPEC 13.2). */
+function byteOrderMarkdownOf(specFile: string): string {
+  return `${specFile.slice(0, -".mdx".length)}.md`;
+}
+
+/** Every tag set the fixture configures or spells, as a set: byte order. */
+const BYTE_ORDER_TAG_SET: readonly string[] = [FULL_A, GRIN];
+
+/** The spec sources in byte order of path — `view`'s and `ids`' orders. */
+const BYTE_ORDER_SPEC_FILES: readonly string[] = [BO.base, BO.fullA, BO.grin];
+
+/** (b)'s `view` operands, as TEST-SPEC names them. */
+const BYTE_ORDER_VIEW_OPERANDS: readonly string[] = [
+  BO.grin,
+  BO.base,
+  BO.fullA,
+];
+
+/** The discovered sources in byte order of path — `inventory`'s `sources`. */
+const BYTE_ORDER_SOURCES: readonly string[] = [
+  ...BYTE_ORDER_SPEC_FILES,
+  BO.fullACode,
+  BO.grinCode,
+];
+
+/** The four occurrences' referencing files, in occurrence order (5.7). */
+const BYTE_ORDER_OCCURRENCE_FILES: readonly string[] = [
+  BO.fullA,
+  BO.grin,
+  BO.fullACode,
+  BO.grinCode,
+];
+
+/** The policy violations' edge sources, in the findings' order (12.7). */
+const BYTE_ORDER_POLICY_SOURCES: readonly string[] = [
+  BO.fullACode,
+  BO.grinCode,
+];
+
+/** (c)'s altered modules, in the condition-10 findings' order (12.7). */
+const BYTE_ORDER_STALE_MODULES: readonly string[] = [
+  byteOrderModuleOf(BO.fullA),
+  byteOrderModuleOf(BO.grin),
+];
+
+/** The located files of (c)'s condition-5 and condition-9 findings. */
+const BYTE_ORDER_LOCATED_FILES: readonly string[] = [BO.fullA, BO.grin];
+
+/**
+ * Each spec source's derived-path stem and `recorded`'s per-source prefix
+ * (`<stem>.`), in byte order: `specs/base.`, `specs/U+FF21.`,
+ * `specs/U+1F600.`.
+ */
+const BYTE_ORDER_RECORDED_STEMS: readonly string[] = BYTE_ORDER_SPEC_FILES.map(
+  (file) => file.slice(0, -".mdx".length),
+);
+
+/** A view node projected to its identity, tags, and children (12.7). */
+interface IdentityTagsShape {
+  readonly identity: string | { readonly unavailable: true };
+  readonly tags: readonly string[] | null | { readonly unavailable: true };
+  readonly children: readonly IdentityTagsShape[];
+}
+
+function projectIdentityTags(node: ViewNode): IdentityTagsShape {
+  return {
+    identity: node.identity,
+    tags: node.tags,
+    children: node.children.map(projectIdentityTags),
+  };
+}
+
+/** An `x`-holding file's tree: the root, then `x`, tagless. */
+function byteOrderXTree(file: string): IdentityTagsShape {
+  return {
+    identity: file,
+    tags: null,
+    children: [{ identity: `${file}#x`, tags: [], children: [] }],
+  };
+}
+
+/**
+ * The views' trees in byte order of file: `specs/base.mdx`'s `p` carrying
+ * the tag set [U+FF21, U+1F600], its children in document order —
+ * `p.U+1F600`, then `p.U+FF21` — each tagless (`[]`), every root's tags the
+ * stated `null` (SPEC 11.4, 12.7).
+ */
+const BYTE_ORDER_VIEW_TREES: readonly IdentityTagsShape[] = [
+  {
+    identity: BO.base,
+    tags: null,
+    children: [
+      {
+        identity: `${BO.base}#p`,
+        tags: BYTE_ORDER_TAG_SET,
+        children: [
+          { identity: `${BO.base}#p.${GRIN}`, tags: [], children: [] },
+          { identity: `${BO.base}#p.${FULL_A}`, tags: [], children: [] },
+        ],
+      },
+    ],
+  },
+  byteOrderXTree(BO.fullA),
+  byteOrderXTree(BO.grin),
+];
+
+/** `ids`' listing: files in byte order, IDs in document order (12.3). */
+const BYTE_ORDER_IDS: readonly {
+  readonly file: string;
+  readonly ids: readonly string[];
+}[] = [
+  { file: BO.base, ids: ["p", `p.${GRIN}`, `p.${FULL_A}`] },
+  { file: BO.fullA, ids: ["x"] },
+  { file: BO.grin, ids: ["x"] },
+];
+
+/** `inventory`'s `sources`: path order, each with its one group (11.6). */
+const BYTE_ORDER_INVENTORY_SOURCES = BYTE_ORDER_SOURCES.map((path) => ({
+  path,
+  groups: path.startsWith("specs/")
+    ? [{ name: "specs", kind: "spec" }]
+    : [{ name: "src", kind: "code" }],
+}));
+
+/** `inventory`'s `derived`: one entry per spec source, in `source` order. */
+const BYTE_ORDER_INVENTORY_DERIVED = BYTE_ORDER_SPEC_FILES.map((source) => ({
+  source,
+  module: byteOrderModuleOf(source),
+  markdown: byteOrderMarkdownOf(source),
+}));
+
+/** An occurrence record projected to what (b) pins of it (5.7, 12.7). */
+interface OccurrenceOrderShape {
+  readonly file: PathValue;
+  readonly kind: string;
+  readonly source: string | { readonly unavailable: true };
+  readonly target: string;
+}
+
+function projectOccurrenceOrder(
+  record: OccurrenceRecord,
+): OccurrenceOrderShape {
+  return {
+    file: record.file,
+    kind: record.kind,
+    source:
+      "identity" in record.source ? record.source.identity : record.source,
+    target: record.target,
+  };
+}
+
+/**
+ * The four occurrences in occurrence order: each `x`'s `depends` reference
+ * from its section, then each code source's top-level marker, a
+ * `references` edge from the file (SPEC 5.7, 4.5, 4.6), every target `p`.
+ */
+const BYTE_ORDER_OCCURRENCES: readonly OccurrenceOrderShape[] = [
+  ...[BO.fullA, BO.grin].map((file) => ({
+    file,
+    kind: "depends",
+    source: `${file}#x`,
+    target: `${BO.base}#p`,
+  })),
+  ...[BO.fullACode, BO.grinCode].map((file) => ({
+    file,
+    kind: "references",
+    source: file,
+    target: `${BO.base}#p`,
+  })),
+];
+
+/**
+ * A finding projected to what (c) pins (SPEC 12.7): code, locations, and
+ * concerned path, and — for a policy violation alone, whose identities 14.12
+ * enumerates — identities; messages stay informational.
+ */
+interface OrderFindingShape {
+  readonly code: string | null;
+  readonly locations: readonly FindingLocation[];
+  readonly path: PathValue | null;
+  readonly identities?: readonly string[];
+}
+
+function projectOrderFinding(finding: Finding): OrderFindingShape {
+  const shape = {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+  };
+  return finding.code === "policy-violation"
+    ? { ...shape, identities: finding.identities }
+    : shape;
+}
+
+/**
+ * `nope`'s two violations (SPEC 14.12): `locations` `[]` and `path` `null`,
+ * so the identities decide — the rule, the edge's source, kind, and target,
+ * src/U+FF21.ts's edge first by bytes.
+ */
+const BYTE_ORDER_POLICY_FINDINGS: readonly OrderFindingShape[] =
+  BYTE_ORDER_POLICY_SOURCES.map((source) => ({
+    code: "policy-violation",
+    locations: [],
+    path: null,
+    identities: ["nope", source, "references", `${BO.base}#p`],
+  }));
+
+/** The altered modules' per-file condition-10 findings (SPEC 14.10). */
+const BYTE_ORDER_STALE_FINDINGS: readonly OrderFindingShape[] =
+  BYTE_ORDER_STALE_MODULES.map((path) => ({
+    code: "stale-output",
+    locations: [],
+    path,
+  }));
+
+/** The unresolved twin's two condition-5 findings, located exactly (14). */
+const BYTE_ORDER_UNRESOLVED_FINDINGS: readonly OrderFindingShape[] = [
+  BO_MISSING_FULL_A,
+  BO_MISSING_GRIN,
+].map((x) => ({
+  code: "unknown-dependency",
+  locations: [{ file: x.file, range: x.dValue.range }],
+  path: null,
+}));
+
+/** Byte order over UTF-8 encodings (SPEC 12.0). */
+function byteOrderSorted(values: readonly string[]): string[] {
+  return [...values].sort((a, b) =>
+    Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")),
+  );
+}
+
+/** UTF-16 code-unit order: JavaScript's own string comparison. */
+function utf16Sorted(values: readonly string[]): string[] {
+  return [...values].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
+ * Fixture self-check (harness-side, before any product invocation; a failure
+ * is a staging defect of this test, thrown as a harness error, never a
+ * product result): the pair's encodings are TEST-SPEC's; each list the arms
+ * pin is in byte order and differs from its UTF-16 code-unit sort, so a
+ * product ordering by UTF-16 code units never coincides with it; `p`'s
+ * children's document order is the reverse of byte order; (b)'s operands
+ * stand in neither order; and every composed range slices the staged bytes
+ * to its spelling.
+ */
+function checkByteOrderFixtureStaging(): void {
+  const misstaged = (what: string): never => {
+    throw new Error(
+      `T12.0-16 fixture self-check — ${what} (a harness-side staging ` +
+        `error, not a product failure)`,
+    );
+  };
+  if (Buffer.from(FULL_A, "utf8").toString("hex") !== "efbca1") {
+    misstaged("U+FF21 does not encode as UTF-8 EF BC A1");
+  }
+  if (Buffer.from(GRIN, "utf8").toString("hex") !== "f09f9880") {
+    misstaged("U+1F600 does not encode as UTF-8 F0 9F 98 80");
+  }
+  if (FULL_A.length !== 1 || FULL_A.charCodeAt(0) !== 0xff21) {
+    misstaged("U+FF21 is not the one UTF-16 code unit FF21");
+  }
+  if (
+    GRIN.length !== 2 ||
+    GRIN.charCodeAt(0) !== 0xd83d ||
+    GRIN.charCodeAt(1) !== 0xde00
+  ) {
+    misstaged("U+1F600 is not the UTF-16 code units D83D DE00");
+  }
+  const pinned: readonly (readonly [string, readonly string[]])[] = [
+    ["the tag set", BYTE_ORDER_TAG_SET],
+    ["the views' and ids' file order", BYTE_ORDER_SPEC_FILES],
+    ["inventory's sources", BYTE_ORDER_SOURCES],
+    ["recorded's per-source prefixes", BYTE_ORDER_RECORDED_STEMS],
+    ["the occurrences' referencing files", BYTE_ORDER_OCCURRENCE_FILES],
+    ["the policy findings' edge sources", BYTE_ORDER_POLICY_SOURCES],
+    ["the condition-10 findings' concerned paths", BYTE_ORDER_STALE_MODULES],
+    [
+      "the condition-5 and -9 findings' located files",
+      BYTE_ORDER_LOCATED_FILES,
+    ],
+  ];
+  for (const [what, list] of pinned) {
+    if (JSON.stringify(byteOrderSorted(list)) !== JSON.stringify(list)) {
+      misstaged(`${what} ${JSON.stringify(list)} is not in byte order`);
+    }
+    if (JSON.stringify(utf16Sorted(list)) === JSON.stringify(list)) {
+      misstaged(
+        `${what} ${JSON.stringify(list)} coincides with its UTF-16 ` +
+          `code-unit order, so the arm could not see a product ordering ` +
+          `by UTF-16 code units`,
+      );
+    }
+  }
+  const children = [`p.${GRIN}`, `p.${FULL_A}`];
+  if (
+    JSON.stringify(byteOrderSorted(children)) !==
+    JSON.stringify([...children].reverse())
+  ) {
+    misstaged("p's children's document order is not the reverse of byte order");
+  }
+  for (const order of [
+    BYTE_ORDER_SPEC_FILES,
+    utf16Sorted(BYTE_ORDER_SPEC_FILES),
+  ]) {
+    if (JSON.stringify(order) === JSON.stringify(BYTE_ORDER_VIEW_OPERANDS)) {
+      misstaged(
+        "(b)'s view operands stand in byte or UTF-16 order, so a product " +
+          "echoing its operands would coincide with an order",
+      );
+    }
+  }
+  const sliceCheck = (
+    x: ByteOrderXSource,
+    claim: { readonly spelling: string; readonly range: SourceRange },
+    what: string,
+  ): void => {
+    const bytes = Buffer.from(x.source, "utf8");
+    const sliced = bytes
+      .subarray(claim.range.start, claim.range.end)
+      .toString("utf8");
+    if (sliced !== claim.spelling) {
+      misstaged(
+        `${x.file}'s ${what} range [${String(claim.range.start)}, ` +
+          `${String(claim.range.end)}) slices ${JSON.stringify(sliced)}, ` +
+          `not ${JSON.stringify(claim.spelling)}`,
+      );
+    }
+  };
+  for (const x of [
+    BO_X_FULL_A,
+    BO_X_GRIN,
+    BO_MISSING_FULL_A,
+    BO_MISSING_GRIN,
+    BO_CYCLE_FULL_A,
+    BO_CYCLE_GRIN,
+  ]) {
+    sliceCheck(x, x.dValue, "`d` value");
+    if (x.otherImport !== null) sliceCheck(x, x.otherImport, "other import");
+  }
+}
+
+// --- the byte-order arms -----------------------------------------------------
+
+/** The decoded documents (a) reads, whose file orders (b) pins. */
+interface ByteOrderReads {
+  readonly view: ViewReport;
+  readonly inventory: InventoryDocument;
+}
+
+/**
+ * (a) Tag sets (SPEC 12.7; T11.4-3, T11.6-2): `view` reports `p`'s `tags`
+ * exactly [U+FF21, U+1F600] — spelled `tags="U+1F600 U+FF21"` — and
+ * `inventory` reports `pair`'s `targetTags` and `nope`'s `tags` selector
+ * list, each configured [U+1F600, U+FF21], exactly so. Both answers are
+ * complete and finding-free (exit 0, `findings` `[]`): the policy
+ * violations are no file's findings and accompany no answer (14.12, 11.6).
+ */
+async function expectByteOrderTagSets(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<ByteOrderReads> {
+  const viewContext = "T12.0-16 (a) bare `view`";
+  const view = decodeViewReport(
+    await runJson(
+      product,
+      workspace,
+      ["view"],
+      `${viewContext} — the request covers every discovered spec source: a ` +
+        `complete, finding-free answer, exit 0 (SPEC 11.4, 12.0)`,
+    ),
+    { text: false },
+    viewContext,
+  );
+  assertSameJson(
+    view.findings,
+    [],
+    `${viewContext}: finding-free — the fixture's sources carry no ` +
+      `finding, and the policy violations are no file's findings (SPEC ` +
+      `11.4, 14.12)`,
+  );
+  const p = view.views.find((entry) => entry.file === BO.base)?.root
+    .children[0];
+  if (p === undefined) {
+    fail(
+      `${viewContext}: the answer must carry specs/base.mdx's view with its ` +
+        `section \`p\` (SPEC 11.4); got the views ` +
+        JSON.stringify(view.views.map((entry) => entry.file)),
+    );
+  }
+  assertSameJson(
+    { identity: p.identity, tags: p.tags },
+    { identity: `${BO.base}#p`, tags: BYTE_ORDER_TAG_SET },
+    `${viewContext} — specs/base.mdx's \`p\`, spelled tags="U+1F600 ` +
+      `U+FF21": its interpreted tags a tag set in byte order — U+FF21 (EF ` +
+      `BC A1) before U+1F600 (F0 9F 98 80) — never UTF-16 code-unit order, ` +
+      `which puts U+1F600 (D83D) first (SPEC 12.7, 12.0, 11.4)`,
+  );
+
+  const inventoryContext = "T12.0-16 (a) `inventory`";
+  const inventory = decodeInventoryDocument(
+    await runJson(
+      product,
+      workspace,
+      ["inventory"],
+      `${inventoryContext} — the inventory answers whatever the sources' ` +
+        `validity: a complete answer, exit 0 (SPEC 11.6, 12.0)`,
+    ),
+    inventoryContext,
+  );
+  assertSameJson(
+    inventory.findings,
+    [],
+    `${inventoryContext}: finding-free — condition 23 is the only finding ` +
+      `an inventory answer carries, and nothing stages it (SPEC 11.6)`,
+  );
+  assertSameJson(
+    inventory.configuration.coverage.find((profile) => profile.name === "pair")
+      ?.targetTags,
+    BYTE_ORDER_TAG_SET,
+    `${inventoryContext} — the profile \`pair\`'s \`targetTags\`, configured ` +
+      `[U+1F600, U+FF21] and read as a set: a tag set in byte order, ` +
+      `U+FF21 first, never the configured or UTF-16 order (SPEC 12.7, 7.4, ` +
+      `11.6, 12.0; undefined: no profile \`pair\` reported)`,
+  );
+  assertSameJson(
+    inventory.configuration.policy.find((rule) => rule.name === "nope")?.to,
+    { tags: BYTE_ORDER_TAG_SET },
+    `${inventoryContext} — the rule \`nope\`'s \`to\` selector, configured ` +
+      `{ tags: [U+1F600, U+FF21] }: one member, a tag set in byte order, ` +
+      `U+FF21 first, never the configured or UTF-16 order (SPEC 12.7, 7.5, ` +
+      `11.6, 12.0; undefined: no rule \`nope\` reported)`,
+  );
+  return { view, inventory };
+}
+
+/**
+ * Assert a `view` answer's file order and trees (SPEC 11.4, 12.7): exactly
+ * the three spec sources in byte order of path — `specs/base.mdx`, then
+ * `specs/U+FF21.mdx`, then `specs/U+1F600.mdx` — each view the named
+ * file's, its tree's identities and tags as staged, children in document
+ * order.
+ */
+function assertByteOrderViews(
+  report: ViewReport,
+  why: string,
+  context: string,
+): void {
+  assertSameJson(
+    report.views.map((entry) => entry.file),
+    BYTE_ORDER_SPEC_FILES,
+    `${context}: the per-file views in byte order of workspace-relative ` +
+      `path — specs/base.mdx (0x62), specs/U+FF21.mdx (EF BC A1), ` +
+      `specs/U+1F600.mdx (F0 9F 98 80) — ${why}; never UTF-16 code-unit ` +
+      `order, which puts specs/U+1F600.mdx (D83D) before specs/U+FF21.mdx ` +
+      `(FF21) (SPEC 11.4, 12.7, 12.0)`,
+  );
+  report.views.forEach((entry, index) => {
+    assertSameJson(
+      projectIdentityTags(entry.root),
+      BYTE_ORDER_VIEW_TREES[index],
+      `${context} — ${renderPathValue(entry.file)}: the view is the named ` +
+        `file's — the root and its section tree, identities and tags, ` +
+        `children in document order (specs/base.mdx's p.U+1F600 before ` +
+        `p.U+FF21, the reverse of byte order), a tagless section's tags ` +
+        `[], a root's null (SPEC 11.4, 12.7)`,
+    );
+  });
+}
+
+/**
+ * Assert `recorded` (SPEC 11.6, 13.3; T11.6-3): the plain list — the record
+ * exists and is readable after the build — its every entry a plain string
+ * (every derived path is valid UTF-8, 12.0), each spec source's module and
+ * Markdown present (13.1, 13.2), every other entry a companion attributable
+ * to its source through 13.1's naming (`<stem>.xspec.` plus a suffix), and
+ * every `specs/base.` entry before every `specs/U+FF21.` entry before every
+ * `specs/U+1F600.` entry.
+ */
+function assertByteOrderRecorded(
+  recorded: DecodedDatum<readonly PathValue[]>,
+  context: string,
+): void {
+  if (recorded.state !== "value") {
+    fail(
+      `${context}: \`recorded\` must be the plain list of the recorded ` +
+        `derived-file paths — the build recorded them and the record is ` +
+        `readable (SPEC 11.6, 13.3, 12.7); got state "${recorded.state}"`,
+    );
+  }
+  const entries = recorded.value.map((entry, index) => {
+    if (typeof entry === "string") return entry;
+    return fail(
+      `${context}: recorded entry ${String(index)} arrived in the marked ` +
+        `byte form (${renderPathValue(entry)}) — every derived path here is ` +
+        `valid UTF-8, never presented in the byte form (SPEC 12.0, 12.7)`,
+    );
+  });
+  for (const pinned of [
+    ...BYTE_ORDER_SPEC_FILES.map(byteOrderModuleOf),
+    ...BYTE_ORDER_SPEC_FILES.map(byteOrderMarkdownOf),
+  ]) {
+    if (!entries.includes(pinned)) {
+      fail(
+        `${context}: the record must list ${JSON.stringify(pinned)} — the ` +
+          `recorded paths are the paths as last generated, the modules and ` +
+          `the emitted Markdown among them (SPEC 13.3, 13.1, 13.2, 11.6); ` +
+          `recorded: ${JSON.stringify(entries)}`,
+      );
+    }
+  }
+  const groups = entries.map((entry) => {
+    const group = BYTE_ORDER_RECORDED_STEMS.findIndex(
+      (stem) =>
+        entry === `${stem}.md` ||
+        (entry.startsWith(`${stem}.xspec.`) &&
+          entry.length > `${stem}.xspec.`.length),
+    );
+    if (group === -1) {
+      fail(
+        `${context}: recorded entry ${JSON.stringify(entry)} is neither a ` +
+          `spec source's Markdown nor its module or a companion ` +
+          `attributable to it through the 13.1 naming scheme ("<stem>.xspec." ` +
+          `plus a suffix) — the record lists generated modules, their ` +
+          `companions, and emitted Markdown alone (SPEC 13.3, 13.1, 11.6)`,
+      );
+    }
+    return group;
+  });
+  for (let i = 1; i < groups.length; i += 1) {
+    if (groups[i - 1]! > groups[i]!) {
+      fail(
+        `${context}: \`recorded\` in byte order — every specs/base. path, ` +
+          `then every specs/U+FF21. path (EF BC A1), then every ` +
+          `specs/U+1F600. path (F0 9F 98 80), never UTF-16 code-unit order, ` +
+          `which puts specs/U+1F600. (D83D) before specs/U+FF21. (FF21) ` +
+          `(SPEC 11.6, 12.7, 12.0); ${JSON.stringify(entries[i - 1])} ` +
+          `precedes ${JSON.stringify(entries[i])} in ${JSON.stringify(entries)}`,
+      );
+    }
+  }
+}
+
+/**
+ * (b) File orders: `view`, with no operand — (a)'s answer — and with the
+ * operands `specs/U+1F600.mdx specs/base.mdx specs/U+FF21.mdx`, orders its
+ * views `specs/base.mdx`, `specs/U+FF21.mdx`, `specs/U+1F600.mdx` (11.4,
+ * T11.4-1); `ids` lists the files in that order (12.3, T12.3-1); `inventory`
+ * — (a)'s answer — lists `sources` `specs/base.mdx`, `specs/U+FF21.mdx`,
+ * `specs/U+1F600.mdx`, `src/U+FF21.ts`, `src/U+1F600.ts`, `derived` in that
+ * order of `source`, and `recorded` every `specs/U+FF21.` path before every
+ * `specs/U+1F600.` path (11.6, T11.6-3); and `occurrences` orders its
+ * records by referencing file `specs/U+FF21.mdx`, `specs/U+1F600.mdx`,
+ * `src/U+FF21.ts`, `src/U+1F600.ts` (5.7, T5.7-3).
+ */
+async function expectByteOrderFileOrders(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  reads: ByteOrderReads,
+): Promise<void> {
+  assertByteOrderViews(
+    reads.view,
+    "with no operand the request covers every discovered spec source",
+    "T12.0-16 (b) bare `view` ((a)'s answer)",
+  );
+  const operandContext =
+    "T12.0-16 (b) `view specs/U+1F600.mdx specs/base.mdx specs/U+FF21.mdx`";
+  const operandView = decodeViewReport(
+    await runJson(
+      product,
+      workspace,
+      ["view", ...BYTE_ORDER_VIEW_OPERANDS],
+      `${operandContext} — three discovered spec sources named: a complete, ` +
+        `finding-free answer, exit 0 (SPEC 11.4, 12.0)`,
+    ),
+    { text: false },
+    operandContext,
+  );
+  assertSameJson(
+    operandView.findings,
+    [],
+    `${operandContext}: finding-free (SPEC 11.4)`,
+  );
+  assertByteOrderViews(
+    operandView,
+    "the requested files form a set, viewed in byte order of path " +
+      "whatever order the operands name them in",
+    operandContext,
+  );
+
+  const idsContext = "T12.0-16 (b) `ids --json`";
+  const ids = decodeIdsReport(
+    await runJson(
+      product,
+      workspace,
+      ["ids", "--json"],
+      `${idsContext} — the listing as a JSON document, exit 0 (SPEC 12.3, ` +
+        `12.0)`,
+    ),
+    idsContext,
+  );
+  assertSameJson(
+    ids.files,
+    BYTE_ORDER_IDS,
+    `${idsContext}: one entry per discovered spec source in byte order of ` +
+      `path — specs/base.mdx, specs/U+FF21.mdx, specs/U+1F600.mdx, never ` +
+      `UTF-16 code-unit order — each holding its file's IDs in document ` +
+      `order (p, p.U+1F600, p.U+FF21), no entry for a code source (SPEC ` +
+      `12.3, 12.0)`,
+  );
+
+  const inventoryContext = "T12.0-16 (b) `inventory` ((a)'s answer)";
+  assertSameJson(
+    reads.inventory.sources,
+    BYTE_ORDER_INVENTORY_SOURCES,
+    `${inventoryContext} — \`sources\` in byte order of workspace-relative ` +
+      `path — specs/base.mdx, specs/U+FF21.mdx, specs/U+1F600.mdx, ` +
+      `src/U+FF21.ts, src/U+1F600.ts — never UTF-16 code-unit order, each ` +
+      `with its group membership (SPEC 11.6, 12.7, 12.0)`,
+  );
+  assertSameJson(
+    reads.inventory.derived,
+    BYTE_ORDER_INVENTORY_DERIVED,
+    `${inventoryContext} — \`derived\` in that order of \`source\`, each ` +
+      `spec source's module and, emission enabled, its Markdown next to it ` +
+      `(SPEC 11.6, 12.7, 13.1, 13.2, 12.0)`,
+  );
+  assertByteOrderRecorded(reads.inventory.recorded, inventoryContext);
+
+  const occurrencesContext = "T12.0-16 (b) `occurrences`";
+  const occurrences = decodeOccurrencesReport(
+    await runJson(
+      product,
+      workspace,
+      ["occurrences"],
+      `${occurrencesContext} — a complete, finding-free answer, exit 0 ` +
+        `(SPEC 11.3, 12.0)`,
+    ),
+    occurrencesContext,
+  );
+  assertSameJson(
+    occurrences.findings,
+    [],
+    `${occurrencesContext}: finding-free — the policy violations accompany ` +
+      `no answer of 11.3 (SPEC 14.12)`,
+  );
+  assertSameJson(
+    occurrences.occurrences.map(projectOccurrenceOrder),
+    BYTE_ORDER_OCCURRENCES,
+    `${occurrencesContext}: the four occurrences in occurrence order, by ` +
+      `referencing file path bytes — specs/U+FF21.mdx, specs/U+1F600.mdx, ` +
+      `src/U+FF21.ts, src/U+1F600.ts — never UTF-16 code-unit order; each ` +
+      `\`x\`'s \`depends\` reference, then each code source's top-level ` +
+      `marker, a \`references\` edge from the file, every target \`p\` ` +
+      `(SPEC 5.7, 12.7, 4.5, 4.6, 12.0)`,
+  );
+}
+
+/**
+ * (c)'s first two findings arms (SPEC 12.7; T12.7-2): `check` on the built
+ * fixture reports exactly `nope`'s two condition-12 findings, the edge from
+ * `src/U+FF21.ts` first by identities; with `specs/U+FF21.xspec.ts` and
+ * `specs/U+1F600.xspec.ts` then each altered, their per-file condition-10
+ * findings, `specs/U+FF21.xspec.ts`'s first by concerned path, beside the
+ * two.
+ */
+async function expectByteOrderCheckFindings(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  const policyContext = "T12.0-16 (c) `check --json` on the built fixture";
+  const policy = await runFindingsReport(
+    product,
+    workspace,
+    ["check", "--json"],
+    1,
+    `${policyContext} — the policy violations are findings, exit 1 (SPEC ` +
+      `12.2, 7.5, 12.0)`,
+  );
+  assertSameJson(
+    policy.map(projectOrderFinding),
+    BYTE_ORDER_POLICY_FINDINGS,
+    `${policyContext}: exactly \`nope\`'s two condition-12 findings, one ` +
+      `per offending edge — \`locations\` [] and \`path\` null, so the ` +
+      `identities decide: src/U+FF21.ts's edge before src/U+1F600.ts's, ` +
+      `compared element-wise by bytes, never UTF-16 code-unit order (SPEC ` +
+      `12.7, 14.12, 12.0)`,
+  );
+
+  const staleContext =
+    "T12.0-16 (c) `check --json` with specs/U+FF21.xspec.ts and " +
+    "specs/U+1F600.xspec.ts altered";
+  for (const module of BYTE_ORDER_STALE_MODULES) {
+    const original = await readGeneratedModule(
+      workspace,
+      module,
+      `${staleContext} — ${module} as the build generated it (SPEC 13.1)`,
+    );
+    // An edit of product-written bytes — a derived file, no code source,
+    // whose well-formedness the document does not declare — staged
+    // `unchecked` (S-9), as T12.2-2's hand-edited module is.
+    await workspace.file(module, `${original}// altered\n`, {
+      ts: "unchecked",
+    });
+  }
+  const stale = await runFindingsReport(
+    product,
+    workspace,
+    ["check", "--json"],
+    1,
+    `${staleContext} — stale generated output and the policy violations ` +
+      `are findings, exit 1 (SPEC 12.2, 14.10, 12.0)`,
+  );
+  assertSameJson(
+    stale.map(projectOrderFinding),
+    [...BYTE_ORDER_STALE_FINDINGS, ...BYTE_ORDER_POLICY_FINDINGS],
+    `${staleContext}: exactly the two altered modules' per-file ` +
+      `condition-10 findings — \`locations\` [], so the concerned paths ` +
+      `decide: specs/U+FF21.xspec.ts before specs/U+1F600.xspec.ts, never ` +
+      `UTF-16 code-unit order — then \`nope\`'s two condition-12 findings ` +
+      `as before (code order: 10 before 12; no other derived file differs ` +
+      `and graph data is current; SPEC 12.7, 14.10, 14.12, 13.3, 12.0)`,
+  );
+}
+
+/**
+ * (c)'s unresolved twin: `x` in both spec sources spells `d={BASE.missing}`
+ * — `build` and `check` report exactly the two condition-5 findings,
+ * `specs/U+FF21.mdx`'s first by locations (file path bytes), each located
+ * at `BASE.missing` exactly (SPEC 14.5, 14, 12.7).
+ */
+async function expectByteOrderUnresolvedTwin(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(
+    { files: BYTE_ORDER_UNRESOLVED_TWIN_FILES },
+    async (twin) => {
+      for (const command of ["build", "check"]) {
+        const context =
+          `T12.0-16 (c) \`${command} --json\` on the twin whose \`x\`s ` +
+          `spell d={BASE.missing}`;
+        const findings = await runFindingsReport(
+          product,
+          twin,
+          [command, "--json"],
+          1,
+          `${context} — an unresolved \`d\` reference is a validation ` +
+            `error, exit 1 (SPEC 14.5, 12.0)`,
+        );
+        assertSameJson(
+          findings.map(projectOrderFinding),
+          BYTE_ORDER_UNRESOLVED_FINDINGS,
+          `${context}: exactly the two condition-5 findings, each located ` +
+            `at its \`d\` value's expression \`BASE.missing\` and concerning ` +
+            `no path — the locations decide: specs/U+FF21.mdx's before ` +
+            `specs/U+1F600.mdx's by file path bytes, never UTF-16 code-unit ` +
+            `order; a failing workspace's mismatch forms of 14.10 ` +
+            `undetectable and its policy unevaluated (SPEC 12.7, 14.5, 14, ` +
+            `14.10, 14.12, 12.0)`,
+        );
+      }
+    },
+  );
+}
+
+/**
+ * (c)'s import-cycle twin: `specs/U+FF21.mdx` and `specs/U+1F600.mdx` each
+ * also import the other's module, the binding unused — `check` reports the
+ * spec import cycle as exactly one condition-9 finding whose `locations`
+ * place `specs/U+FF21.mdx`'s declaration before `specs/U+1F600.mdx`'s, each
+ * within its declaration's byte window (SPEC 14.9, 14, 12.7, 2.1).
+ */
+async function expectByteOrderImportCycleTwin(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace({ files: BYTE_ORDER_CYCLE_TWIN_FILES }, async (twin) => {
+    const context =
+      "T12.0-16 (c) `check --json` on the twin whose `x`-holding sources " +
+      "import each other's modules";
+    const findings = await runFindingsReport(
+      product,
+      twin,
+      ["check", "--json"],
+      1,
+      `${context} — a spec import cycle is a validation error, exit 1 ` +
+        `(SPEC 2.1, 14.9, 12.0)`,
+    );
+    const [cycle] = findings;
+    if (
+      findings.length !== 1 ||
+      cycle === undefined ||
+      cycle.code !== "cycle" ||
+      cycle.path !== null
+    ) {
+      fail(
+        `${context}: exactly one finding — the spec import cycle's one ` +
+          `condition-9 finding, stable code "cycle", concerning no path ` +
+          `(located) — the workspace failing \`build\`'s validations, its ` +
+          `mismatch forms of 14.10 undetectable and its policy unevaluated ` +
+          `(SPEC 14.9, 14, 12.7, 14.10, 14.12); got ` +
+          JSON.stringify(findings.map(projectOrderFinding)),
+      );
+    }
+    assertSameJson(
+      cycle.locations.map((location) => location.file),
+      BYTE_ORDER_LOCATED_FILES,
+      `${context}: the cycle locates each participating import ` +
+        `declaration, ordered by file path bytes — specs/U+FF21.mdx's ` +
+        `before specs/U+1F600.mdx's, never UTF-16 code-unit order (SPEC ` +
+        `14.9, 14, 12.7, 12.0)`,
+    );
+    [BO_CYCLE_FULL_A, BO_CYCLE_GRIN].forEach((x, index) => {
+      const location = cycle.locations[index]!;
+      const declaration = x.otherImport!;
+      const window = {
+        start: declaration.range.start,
+        end: declaration.range.end + 1,
+      };
+      if (
+        location.range.start < window.start ||
+        location.range.end > window.end
+      ) {
+        fail(
+          `${context}: locations[${String(index)}] in ${x.file} must fall ` +
+            `within the import declaration ${JSON.stringify(declaration.spelling)}'s ` +
+            `byte window [${String(window.start)}, ${String(window.end)}] — ` +
+            `the cycle locates each participating import declaration by ` +
+            `its own characters (SPEC 14, 14.9, 11.4); got ` +
+            `[${String(location.range.start)}, ${String(location.range.end)})`,
+        );
+      }
+    });
+  });
+}
+
+const T12_0_16 = defineProductTest({
+  id: "T12.0-16",
+  title:
+    "byte order, never UTF-16 order, on the separating pair U+FF21 (UTF-8 EF BC A1, UTF-16 FF21) and U+1F600 (UTF-8 F0 9F 98 80, UTF-16 D83D DE00) — byte order placing a string holding U+FF21 before the same string holding U+1F600, UTF-16 code-unit order the reverse — over the built fixture (spec group `specs` globbing specs/*.mdx, code group `src` globbing src/*.ts, emission enabled; profiles `pair` (`targets` all, `targetTags` configured [U+1F600, U+FF21]) and `bare`; rule `nope` forbidding `src` to `{ tags: [U+1F600, U+FF21] }`; specs/base.mdx's `p` spelled tags=\"U+1F600 U+FF21\", its children p.U+1F600 then p.U+FF21 in document order, the reverse of byte order; specs/U+FF21.mdx and specs/U+1F600.mdx each importing ./base.xspec as BASE, their `x` spelling d={BASE.p}; src/U+FF21.ts and src/U+1F600.ts each marking BASE.p at top level), every pinned list differing from its UTF-16 code-unit sort (a harness-side self-check): (a) tag sets — `view` reports `p`'s `tags` exactly [U+FF21, U+1F600], and `inventory` `pair`'s `targetTags` and `nope`'s `tags` selector list each exactly so; (b) file orders — `view`, bare and with the operands specs/U+1F600.mdx specs/base.mdx specs/U+FF21.mdx, orders its views specs/base.mdx, specs/U+FF21.mdx, specs/U+1F600.mdx (each tree's children in document order), `ids` lists the files in that order, `inventory` lists `sources` specs/base.mdx, specs/U+FF21.mdx, specs/U+1F600.mdx, src/U+FF21.ts, src/U+1F600.ts, `derived` in that order of `source`, and `recorded` with every specs/U+FF21. path before every specs/U+1F600. path, and `occurrences` orders its records by referencing file specs/U+FF21.mdx, specs/U+1F600.mdx, src/U+FF21.ts, src/U+1F600.ts; (c) findings — `check` reports exactly `nope`'s two condition-12 findings (`locations` [], `path` null), src/U+FF21.ts's edge first by identities; with specs/U+FF21.xspec.ts and specs/U+1F600.xspec.ts altered, their per-file condition-10 findings, specs/U+FF21.xspec.ts's first by concerned path, beside the two; on a twin whose `x`s spell d={BASE.missing}, `build` and `check` exactly the two condition-5 findings, specs/U+FF21.mdx's first by locations; and on a twin whose two `x`-holding sources each also import the other's module, the binding unused, `check` exactly the spec import cycle's one condition-9 finding, its locations placing specs/U+FF21.mdx's declaration before specs/U+1F600.mdx's — every order form-exact on 12.7's documents and through the H-3 decode elsewhere (SPEC 12.0, 12.7, 11.4, 11.6, 12.3, 5.7, 14.5, 14.9, 14.10, 14.12)",
+  run: async (product) => {
+    checkByteOrderFixtureStaging();
+    const workspace = await stageByteOrderFixture(product, "T12.0-16");
+    try {
+      const reads = await expectByteOrderTagSets(product, workspace);
+      await expectByteOrderFileOrders(product, workspace, reads);
+      await expectByteOrderCheckFindings(product, workspace);
+    } finally {
+      await workspace.dispose();
+    }
+    await expectByteOrderUnresolvedTwin(product);
+    await expectByteOrderImportCycleTwin(product);
+  },
+});
+
+export const section120iiiTests: readonly ProductTestEntry[] = [
+  T12_0_14,
+  T12_0_16,
+];
