@@ -6125,9 +6125,10 @@ async function editRewritten(
 /**
  * The `changed` nodes `impact --base <baseline> --json` reports (SPEC 5.6,
  * 9.3), sorted, each its identity or, reported deleted, its identity
- * followed by ` (deleted)` — staging premises.
+ * followed by ` (deleted)` — staging premises. Exported for T10.7-9(f)'s
+ * premise (section-10.7-ii.ts).
  */
-async function changedNodes(
+export async function changedNodes(
   product: ProductBinding,
   workspace: TestWorkspace,
   base: string,
@@ -6220,9 +6221,10 @@ function assertNeverPresented(
  * under its current identity and presence), read through the review
  * adapter's `requireScopeNodes`: the sorted identity set first — `why`
  * stating it — then each node presented present or absent as `expected`
- * says.
+ * says. Exported for T10.7-9(f)'s scope before its split
+ * (section-10.7-ii.ts).
  */
-function assertScopePresence(
+export function assertScopePresence(
   item: ReviewItem,
   expected: readonly (readonly [string, boolean])[],
   context: string,
