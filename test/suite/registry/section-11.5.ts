@@ -104,6 +104,7 @@ import {
   buildFindings,
   expectErrorDocument,
   expectExit,
+  findingsInSourceOrder,
   REPLACEMENT_CHARACTER_SPEC_PATH,
   runCli,
   runJson,
@@ -647,6 +648,15 @@ const T11_5_1 = defineProductTest({
 // resolving operands against the filesystem accepts it and answers, or
 // surfaces its 14.20, instead of erring).
 //
+// The spelling caps no digit count (SPEC 11.5: one or more ASCII decimal
+// digits, read in decimal): `0000000000000000000000007`, 25 digits — more
+// than the 20 of 2^64 − 1, the widest fixed-width integer's — is accepted
+// as 7 like `007` (a product capping the digits refuses it; one reading a
+// fixed width reads its leading zeros as 0, the root), while
+// `18446744073709551617` (2^64 + 1) is the out-of-range usage error on
+// either file, exit 2 — never the resolution of offset 1, where a 64- or
+// 32-bit wrap leaves it, inside both files (the fixture self-check).
+//
 // Certification note: T11.5-2 is expressly in CERTIFICATIONS.md's
 // Exclusions — the argument, spelling, and domain-and-exit matrices of the
 // machine-interface surfaces (T11.2-5, T11.3-2/3, T11.4-2, T11.5-2) are
@@ -675,6 +685,25 @@ const OS_SEPT_SECTION: AtSection = {
   identity: `${OS_OK_FILE}#sept`,
   range: OS_SEPT_RANGE,
 };
+
+/**
+ * The accepted spellings of offset 7 (SPEC 11.5: one or more ASCII decimal
+ * digits, read in decimal, leading zeros permitted), each pinned to the
+ * plain `7`'s precomputed resolution: `007`, and TEST-SPEC's
+ * `0000000000000000000000007`, whose 25 digits no digit-count cap admits —
+ * failing a product that parses a fixed width or caps the digits.
+ */
+const OS_SEVEN_SPELLINGS = ["007", "0000000000000000000000007", "7"] as const;
+
+/** The decimal width of 2^64 − 1, the widest fixed-width integer's digits. */
+const OS_UINT64_DIGITS = String(2n ** 64n - 1n).length;
+
+/**
+ * 2^64 + 1 (TEST-SPEC T11.5-2): past either file's byte length, so the
+ * out-of-range usage error (SPEC 11.5, 12.0) — never the resolution of the
+ * offset a fixed-width read wraps it to (1, inside both files).
+ */
+const OS_PAST_UINT64_SPELLING = "18446744073709551617";
 
 // The finding-laden spec source: prose before any section (so offset 0
 // resolves to the root, its identity the defined path — the control arm's
@@ -751,7 +780,7 @@ const OS_REJECTED_SPELLINGS: readonly {
 const T11_5_2 = defineProductTest({
   id: "T11.5-2",
   title:
-    '`007` is accepted as 7 — leading zeros permitted, the value read in ASCII decimal: on a file whose one section opens before byte 7 behind a multi-byte prose head, `at specs/ok.mdx 007` answers exit 0, findings [], with byte-exactly offset 7\'s precomputed resolution (the section whose opening tag contains it — a product reading the spelling as 0 resolves to the root and fails), equal to the plain-`7` invocation\'s answer — while `+7`, `-1`, `" 7"`, `"7 "`, `0x7`, and an empty value are each not a digits-only spelling: exit 2 with the single 12.7 error document as the entire stdout, the same six spellings on the finding-laden specs/bad.mdx exiting 2 identically (the argument checks precede answering, never exit 1 with the domain\'s findings); `<file>` membership and wrong-kind checks as T11.4-2: an operand existing nowhere, an on-disk docs/note.mdx no configured group discovers, and a discovered code source — its own staged 14.8 notwithstanding — each exit 2; and the finding-laden file still answers when the arguments are valid: `at specs/bad.mdx 0` exits 1 with the full answer, the root resolution complete beside exactly its one 14.3, no invocation of the sweep modifying anything (SPEC 11.5, 11.2, 12.0, 12.7, 7)',
+    '`007` is accepted as 7 — leading zeros permitted, the value read in ASCII decimal: on a file whose one section opens before byte 7 behind a multi-byte prose head, `at specs/ok.mdx 007` answers exit 0, findings [], with byte-exactly offset 7\'s precomputed resolution (the section whose opening tag contains it — a product reading the spelling as 0 resolves to the root and fails), equal to the plain-`7` invocation\'s answer, and so does `0000000000000000000000007`, the spelling capping no digit count (25 digits, more than 2^64 − 1 has — failing a product that parses a fixed width or caps the digits); `18446744073709551617` (2^64 + 1) is the out-of-range usage error on specs/ok.mdx and on the finding-laden specs/bad.mdx alike, exit 2 with the single 12.7 error document as the entire stdout — never the resolution of offset 1, where a 64- or 32-bit wrap leaves it inside both files; `+7`, `-1`, `" 7"`, `"7 "`, `0x7`, and an empty value are each not a digits-only spelling: exit 2 with the single 12.7 error document as the entire stdout, the same six spellings on the finding-laden specs/bad.mdx exiting 2 identically (the argument checks precede answering, never exit 1 with the domain\'s findings); `<file>` membership and wrong-kind checks as T11.4-2: an operand existing nowhere, an on-disk docs/note.mdx no configured group discovers, and a discovered code source — its own staged 14.8 notwithstanding — each exit 2; and the finding-laden file still answers when the arguments are valid: `at specs/bad.mdx 0` exits 1 with the full answer, the root resolution complete beside exactly its one 14.3, no invocation of the sweep modifying anything (SPEC 11.5, 11.2, 12.0, 12.7, 7)',
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline) — the staging arithmetic the
     // acceptance arm's teeth rest on, proven before any product invocation.
@@ -784,6 +813,49 @@ const T11_5_2 = defineProductTest({
           `root, not to sept (a harness-side staging error, not a product ` +
           `failure)`,
       );
+    }
+    // The uncapped spelling's teeth: leading zeros then 7, more digits than
+    // 2^64 − 1 has, so a product capping the digit count at a fixed-width
+    // integer's refuses it, and one reading a fixed width reads 0 (the
+    // root, offset 0 lying in the head prose, above).
+    const uncapped = OS_SEVEN_SPELLINGS[1];
+    if (!(/^0+7$/.test(uncapped) && uncapped.length > OS_UINT64_DIGITS)) {
+      fail(
+        `§11.5 fixture self-check — ${JSON.stringify(uncapped)} must be ` +
+          `leading zeros then 7, longer than the ` +
+          `${String(OS_UINT64_DIGITS)} digits of 2^64 − 1, so no ` +
+          `fixed-width read or digit cap answers it as 7 (a harness-side ` +
+          `staging error, not a product failure)`,
+      );
+    }
+    // 2^64 + 1's teeth: the spelling is exactly 2^64 + 1, past both files'
+    // byte lengths, and the offset a 64- or 32-bit wrap leaves (1) lies
+    // inside both files, so a product reading the digits into a fixed-width
+    // integer answers a resolution instead of the usage error.
+    const past = BigInt(OS_PAST_UINT64_SPELLING);
+    if (past !== 2n ** 64n + 1n) {
+      fail(
+        `§11.5 fixture self-check — ${OS_PAST_UINT64_SPELLING} must spell ` +
+          `2^64 + 1 (a harness-side staging error, not a product failure)`,
+      );
+    }
+    for (const [file, source] of [
+      [OS_OK_FILE, OS_OK_SOURCE],
+      [OS_BAD_FILE, OS_BAD_SOURCE],
+    ] as const) {
+      const length = BigInt(Buffer.byteLength(source, "utf8"));
+      for (const width of [64n, 32n]) {
+        const wrapped = past % 2n ** width;
+        if (!(wrapped <= length && length < past)) {
+          fail(
+            `§11.5 fixture self-check — ${file}: its byte length ` +
+              `${String(length)} must lie below 2^64 + 1 and at or past ` +
+              `the ${String(width)}-bit wrap of it (${String(wrapped)}), so ` +
+              `a wrapping read answers a resolution where the usage error ` +
+              `is due (a harness-side staging error, not a product failure)`,
+          );
+        }
+      }
     }
 
     const workspace = await TestWorkspace.create({
@@ -838,15 +910,16 @@ const T11_5_2 = defineProductTest({
           // byte-exactly offset 7's — the section whose opening tag
           // contains byte 7, never offset 0's root — and equals the
           // plain-`7` invocation's, both pinned to the same precomputed
-          // constant. Findings [] beside: the consulted domain is the
-          // named file alone, and ok.mdx is finding-free — the
-          // workspace's staged 14.3/14.8 are no domain file's findings
+          // constant; and so is `0000000000000000000000007`, the spelling
+          // capping no digit count. Findings [] beside: the consulted
+          // domain is the named file alone, and ok.mdx is finding-free —
+          // the workspace's staged 14.3/14.8 are no domain file's findings
           // (SPEC 11.2), so exit 0.
           const expectedSeven = {
             section: OS_SEPT_SECTION,
             occurrence: null,
           };
-          for (const spelling of ["007", "7"] as const) {
+          for (const spelling of OS_SEVEN_SPELLINGS) {
             const context = `T11.5-2 \`at ${OS_OK_FILE} ${spelling}\``;
             const report = decodeAtReport(
               await runJson(
@@ -854,9 +927,9 @@ const T11_5_2 = defineProductTest({
                 workspace,
                 ["at", OS_OK_FILE, spelling],
                 `${context} — \`${spelling}\` is one-or-more ASCII decimal ` +
-                  `digits, read in decimal as 7 (leading zeros permitted), ` +
-                  `and the named file's domain is finding-free, so the ` +
-                  `answer exits 0 (SPEC 11.5, 11.2)`,
+                  `digits, read in decimal as 7 (leading zeros permitted, ` +
+                  `no digit count capped), and the named file's domain is ` +
+                  `finding-free, so the answer exits 0 (SPEC 11.5, 11.2)`,
               ),
               context,
             );
@@ -874,8 +947,9 @@ const T11_5_2 = defineProductTest({
                 `offset 7, which lies inside sept's opening tag: the ` +
                 `innermost containing section construct, byte-exactly ` +
                 `{identity, range}, occurrence null — a product reading ` +
-                `\`007\` as 0 resolves to the root instead (SPEC 11.5, ` +
-                `1.7, 11.2, 12.7)`,
+                `the spelling as 0 (its leading zeros, or a fixed width ` +
+                `of them) resolves to the root instead (SPEC 11.5, 1.7, ` +
+                `11.2, 12.7)`,
             );
           }
 
@@ -902,6 +976,27 @@ const T11_5_2 = defineProductTest({
                 `checks precede answering, so the usage error exits 2 ` +
                 `whatever findings the named file carries — never exit 1 ` +
                 `with its 14.3 (SPEC 11.2, 11.5)`,
+            );
+          }
+
+          // --- 2^64 + 1 (SPEC 11.5, 12.0): a digits-only spelling of an
+          // offset greater than the file's byte length is the out-of-range
+          // usage error — exit 2 with the single 12.7 error document — on
+          // the finding-free file and identically on the finding-laden
+          // one, never the resolution of offset 1, where a 64- or 32-bit
+          // wrap leaves it (a product reading the digits into a
+          // fixed-width integer answers there instead).
+          for (const file of [OS_OK_FILE, OS_BAD_FILE]) {
+            await expectAvailabilityUsageError(
+              product,
+              workspace,
+              ["at", file, OS_PAST_UINT64_SPELLING],
+              `T11.5-2 offset value ${OS_PAST_UINT64_SPELLING} (2^64 + 1) ` +
+                `on ${file === OS_OK_FILE ? "the finding-free" : "the FINDING-LADEN"} ` +
+                `${file} — an offset greater than the file's byte length ` +
+                `is the out-of-range usage error, never the resolution of ` +
+                `the offset a fixed-width read wraps it to (1) (SPEC 11.5, ` +
+                `12.0)`,
             );
           }
 
@@ -1001,12 +1096,14 @@ const T11_5_2 = defineProductTest({
 // that occurrence and its resolved target (5.7)" — containment under the one
 // range convention of 1.7 (start-inclusive, end-exclusive); "on an
 // unparseable file the resolution is reported explicitly unavailable, the
-// parse-failure finding accompanying it (11.2)"; and "a discovered spec
-// source whose path is not valid UTF-8 or contains U+FFFD is nameable by no
-// argument value (12.0), so `at` cannot address it: for such a file (14.19)
-// the view, reached by glob (11.4), is the one route to position data".
+// parse-failure finding accompanying it (11.2)"; "the offset bound above is
+// judged wherever the content was read — an encoding or syntax failure
+// (14.20) leaves the length known"; and "a discovered spec source whose path
+// is not valid UTF-8 or contains U+FFFD is nameable by no argument value
+// (12.0), so `at` cannot address it: for such a file (14.19) the view,
+// reached by glob (11.4), is the one route to position data".
 //
-// One workspace (SPECS_ONLY_CONFIG), five spec sources:
+// One workspace (SPECS_ONLY_CONFIG), eight spec sources:
 //
 // - specs/occ.mdx — the containment ground, finding-free: behind a
 //   multi-byte prose head (SPEC 1.7), a blank-line-separated import binding
@@ -1036,6 +1133,26 @@ const T11_5_2 = defineProductTest({
 //   the parse) each answer with `resolution` exactly the unavailability
 //   marker — never a root fallback bypassing the mask — beside exactly the
 //   file's one parse-failure finding, exit 1 (SPEC 11.5, 11.2, 12.7).
+// - specs/octet.mdx (not valid UTF-8: a valid prefix, then 0xFF),
+//   specs/marque.mdx (beginning with a byte-order mark), and
+//   specs/syntaxe.mdx (a syntax failure, `d={]}`) — the offset bound on an
+//   unparseable file, judged wherever the content was read (SPEC 11.5): on
+//   each, `at <file> <n>`, n the file's byte length counted in its own
+//   bytes (the BOM's three included, the ill-formed byte one — never a
+//   decoded text's length), answers `resolution` exactly the
+//   unavailability marker beside exactly the file's one parse-failure
+//   finding, exit 1, while `at <file> <n+1>` is the out-of-range usage
+//   error: exit 2, the plain error document (`code` and `path` null) as
+//   the entire stdout, the message on stderr, never the unavailable
+//   resolution (SPEC 11.5, 12.0, 12.7). Each file is staged as the very
+//   bytes its n counts, and each text carries multi-byte characters, so a
+//   product measuring a decoded text misjudges one side of the pair: a
+//   code-point or UTF-16 count, or the BOM-stripped bytes, refuses n; the
+//   lossy decode's re-encoding (U+FFFD's three bytes for the one 0xFF)
+//   accepts n + 1 (`checkBoundFiles`, proven before any invocation). A
+//   product judging the bound on no masked file answers n + 1 as n. The
+//   refused-read half — every well-formed offset unavailable where the
+//   environment refuses the content (14.25) — is T14-10(a)'s.
 // - specs/nu<0xFF>.mdx — non-UTF-8-named (14.19), staged exactly when the
 //   platform's file names are byte strings (`process.platform === "linux"`,
 //   the T11.2-3/T6.5-5 precedent for the entry's "Linux leg" note; every
@@ -1086,14 +1203,14 @@ const T11_5_2 = defineProductTest({
 //   the plain string, the full positional tree byte-exact, every node
 //   identity, root included, explicitly unavailable (SPEC 11.2, 11.4).
 //
-// The gate `build --json` doubles as staging integrity (exactly casse's
-// 14.20 plus A<U+FFFD>'s 14.19 and — where staged — nu's 14.19, so
-// occ.mdx and cible.mdx are
-// proven finding-free on pinned ground), and the whole sweep rides one
-// whole-root snapshot compare: the failing build writes nothing (SPEC 12.1)
-// and on a failing workspace these surfaces answer from current sources and
-// write nothing (SPEC 11.2; the no-write contract clauses live at
-// T11.2-1/T11.2-6).
+// The gate `build --json` doubles as staging integrity (exactly one 14.20
+// per unparseable file — casse's, octet's, marque's, and syntaxe's — plus
+// A<U+FFFD>'s 14.19 and — where staged — nu's 14.19, so occ.mdx and
+// cible.mdx are proven finding-free on pinned ground), and the whole sweep
+// rides one whole-root snapshot compare: the failing build writes nothing
+// (SPEC 12.1) and on a failing workspace these surfaces answer from current
+// sources and write nothing (SPEC 11.2; the no-write contract clauses live
+// at T11.2-1/T11.2-6).
 //
 // Certification note: CONF-AVAIL's scope expressly excludes `at` ("no
 // in-scope staging drives `at`" — CERTIFICATIONS.md), and T11.5-3 is in no
@@ -1234,6 +1351,146 @@ OC_CASSE.add("Cassé dès l’ouverture.\n\n");
 OC_CASSE.add('<S id="seul">\nJamais fermé.\n');
 const OC_CASSE_SOURCE = OC_CASSE.source;
 const OC_CASSE_LENGTH = OC_CASSE.pos;
+
+// --- The offset bound's three unparseable files (SPEC 11.5, 14.20) -----------
+// One per failure TEST-SPEC names — not valid UTF-8 (a valid prefix, then
+// 0xFF), beginning with a byte-order mark, and a syntax failure (`d={]}`) —
+// each staged as the very bytes its `n` counts: the file's byte length in
+// its own bytes, the BOM's three included, the ill-formed byte one. Every
+// text carries multi-byte characters, so a product measuring a decoded text
+// instead misjudges one side of the n / n + 1 pair (`checkBoundFiles`).
+
+/** One unparseable discovered spec source of the offset-bound arms. */
+interface BoundFile {
+  readonly path: string;
+  /** The 14.20 failure it stages (diagnostics). */
+  readonly what: string;
+  /** How its `n` counts its own bytes (diagnostics). */
+  readonly counted: string;
+  readonly bytes: Uint8Array;
+}
+
+const OC_OCTET: BoundFile = {
+  path: "specs/octet.mdx",
+  what: "not valid UTF-8: a valid prefix, then 0xFF",
+  counted: "the ill-formed byte counted once",
+  // 0xFF can occur in no valid UTF-8 sequence: the prefix is the file's
+  // longest well-formed UTF-8 prefix, the byte its last.
+  bytes: Buffer.concat([
+    Buffer.from("Préfixe valide — puis un octet mal formé.\n", "utf8"),
+    Buffer.from([0xff]),
+  ]),
+};
+
+const OC_MARQUE: BoundFile = {
+  path: "specs/marque.mdx",
+  what: "beginning with a byte-order mark",
+  counted: "the byte-order mark's three bytes included",
+  // EF BB BF, U+FEFF's encoding, then a text that is well-formed MDX alone:
+  // the mark is the file's one failure (SPEC 1.6, 14.20).
+  bytes: Buffer.concat([
+    Buffer.from([0xef, 0xbb, 0xbf]),
+    Buffer.from(
+      'Tête après la marque d’ordre des octets.\n\n<S id="b">\nCorps marqué.\n</S>\n',
+      "utf8",
+    ),
+  ]),
+};
+
+const OC_SYNTAXE: BoundFile = {
+  path: "specs/syntaxe.mdx",
+  what: "a syntax failure: `d={]}`",
+  counted: "each multi-byte character counted in its bytes",
+  // Valid UTF-8 with no byte-order mark: the braces' JavaScript syntax
+  // error is the file's one failure (SPEC 14.20).
+  bytes: Buffer.from(
+    'Syntaxe cassée — accolades.\n\n<S id="x" d={]}>\nCorps.\n</S>\n',
+    "utf8",
+  ),
+};
+
+const OC_BOUND_FILES: readonly BoundFile[] = [OC_OCTET, OC_MARQUE, OC_SYNTAXE];
+
+/**
+ * Every unparseable file of the workspace, in byte order of path (ASCII
+ * names): the gate's 14.20s in 12.7's location order.
+ */
+const OC_UNPARSEABLE_FILES: readonly string[] = [
+  OC_CASSE_FILE,
+  OC_MARQUE.path,
+  OC_OCTET.path,
+  OC_SYNTAXE.path,
+];
+
+/**
+ * The offset-bound arms' teeth (fixture self-check, before any product
+ * invocation; TEST-SPEC T11.5-3: `n` is "never a decoded text's length").
+ * Each file's decoded text — a lossy decode, every ill-formed sequence
+ * U+FFFD and a leading byte-order mark stripped — counts fewer code points
+ * and UTF-16 code units than the file has bytes, so a product counting
+ * either refuses `at <file> <n>`; re-encoded, it is longer than
+ * specs/octet.mdx (U+FFFD's three bytes for the one ill-formed byte), so a
+ * product measuring it accepts `at <file> <n+1>` there, and shorter than
+ * specs/marque.mdx (the mark's three bytes gone), so one measuring it
+ * refuses `at <file> <n>` there.
+ */
+function checkBoundFiles(): void {
+  const misreading = (
+    file: BoundFile,
+    what: string,
+    length: number,
+    holds: boolean,
+    caught: string,
+  ): void => {
+    if (!holds) {
+      fail(
+        `§11.5 fixture self-check — ${file.path} (${file.what}): ${what} ` +
+          `is ${String(length)} against its byte length ` +
+          `${String(file.bytes.length)}, so ${caught} would not catch a ` +
+          `product taking it for the file's length (a harness-side staging ` +
+          `error, not a product failure)`,
+      );
+    }
+  };
+  for (const file of OC_BOUND_FILES) {
+    const n = file.bytes.length;
+    const text = new TextDecoder("utf-8").decode(file.bytes);
+    const atN = `\`at ${file.path} ${String(n)}\``;
+    const codePoints = [...text].length;
+    misreading(
+      file,
+      "its decoded text's code points",
+      codePoints,
+      codePoints < n,
+      atN,
+    );
+    misreading(
+      file,
+      "its decoded text's UTF-16 code units",
+      text.length,
+      text.length < n,
+      atN,
+    );
+    const reencoded = Buffer.byteLength(text, "utf8");
+    if (file === OC_OCTET) {
+      misreading(
+        file,
+        "its decoded text's UTF-8 bytes",
+        reencoded,
+        reencoded > n,
+        `\`at ${file.path} ${String(n + 1)}\``,
+      );
+    } else if (file === OC_MARQUE) {
+      misreading(
+        file,
+        "its decoded text's UTF-8 bytes",
+        reencoded,
+        reencoded < n,
+        atN,
+      );
+    }
+  }
+}
 
 // --- specs/nu<0xFF>.mdx — non-UTF-8-named spec source (14.19, Linux leg) -----
 // 0xFF can occur in no valid UTF-8 sequence, so the workspace-relative path
@@ -1390,10 +1647,62 @@ function containsOffset(range: SourceRange, offset: number): boolean {
   return range.start <= offset && offset < range.end;
 }
 
+/**
+ * Run `at` on an unparseable discovered spec source at an offset the bound
+ * admits and assert SPEC 11.5's answer there: exit 1 with the full answer
+ * document still emitted (SPEC 11.2), `resolution` exactly the
+ * unavailability marker — never `null`, never a fabricated root resolution
+ * (12.7) — beside exactly the named file's one parse-failure finding,
+ * located in it (SPEC 11.2, 14.20, 14).
+ */
+async function expectUnavailableResolution(
+  product: ProductBinding,
+  workspace: Workspace,
+  file: string,
+  offset: number,
+  context: string,
+): Promise<void> {
+  const result = await expectExit(
+    product,
+    workspace,
+    ["at", file, String(offset)],
+    1,
+    `${context} — the answer carries the parse-failure finding and an ` +
+      `explicitly-unavailable resolution, so exit 1 with the full answer ` +
+      `document still emitted (SPEC 11.2, 11.5)`,
+  );
+  const report = decodeAtReport(
+    parseJsonStdout(
+      result,
+      `${context} — the full answer document is still emitted, complete ` +
+        `and parseable (SPEC 11.2, H-5)`,
+    ),
+    context,
+  );
+  assertSameJson(
+    report.resolution,
+    UNAVAILABLE,
+    `${context} — on an unparseable file the resolution is reported ` +
+      `explicitly unavailable: exactly the unavailability marker, never ` +
+      `null, never a fabricated root resolution (SPEC 11.5, 11.2, 12.7)`,
+  );
+  assertConditionCounts(
+    report.findings,
+    { "14.20": 1 },
+    `${context} — exactly the named file's parse-failure finding ` +
+      `accompanies (SPEC 11.2, 14.20)`,
+  );
+  assertFindingLocated(
+    report.findings[0]!,
+    { file },
+    `${context} — the parse failure locates in the named file (SPEC 14)`,
+  );
+}
+
 const T11_5_3 = defineProductTest({
   id: "T11.5-3",
   title:
-    "occurrence containment ends and imperfect files: on a finding-free file whose section `host` bears `d={CIBLE.but}` and embeds `{text(CIBLE.but)}` — both resolving into specs/cible.mdx#but — offsets at the d reference expression's start and end − 1 report the containing occurrence's full 12.7 record (file, byte-exact range, kind `depends`, source graph node {identity, range} = host, resolved target) while the end offset and the byte before the start report none, and likewise for the embedding container (opening brace through closing brace, kind `embeds`) — start-inclusive, end-exclusive (SPEC 1.7) — every answer findings [] at exit 0, the consulted domain being the named file alone whatever the workspace's other findings; the unparseable specs/casse.mdx (unclosed section tag) answers `at` offset 0 AND the EOF caret with `resolution` exactly the unavailability marker — no root fallback bypasses the mask — beside exactly its one located 14.20, exit 1; and — staged where file names are byte strings (Linux leg) — the non-UTF-8-pathed specs/nu<0xFF>.mdx is nameable by no argument value: the exact on-disk path bytes as raw argv, the lossy U+FFFD decode, the marked-byte-form JSON rendering, and a percent-encoded rendering each exit 2 — a malformed value or an unknown file — with the single 12.7 error document, while the glob-reached view (`view --file specs/nu*.mdx`, byte-wise glob) stays the one route to its positions: exit 1 with exactly its condition-19 finding (stable code `invalid-source-path`, locations [], the marked-byte-form concerned path) and its full positional tree byte-exact, every node identity — root included — explicitly unavailable; the U+FFFD-pathed specs/A<U+FFFD>.mdx, staged on either leg, bears its condition-19 finding with the concerned path as a plain string (never the byte form); `at specs/A<U+FFFD>.mdx 0` is a malformed value — exit 2 with the plain usage error document (`code` and `path` null), never an answer and never the unknown-file error: reported identically, byte for byte, on a configuration-less workspace holding the same file, where an unknown-file check would be preceded by the configuration error — and `view --file specs/A*.mdx` serves it exit 1 with exactly its finding (plain-string concerned path) and its positional tree byte-exact with every identity explicitly unavailable; no invocation of the sweep modifies anything (SPEC 11.5, 11.2, 5.7, 1.7, 12.0, 12.7, 14.19; T11.2-3, T11.2-5, T12.0-10)",
+    "occurrence containment ends and imperfect files: on a finding-free file whose section `host` bears `d={CIBLE.but}` and embeds `{text(CIBLE.but)}` — both resolving into specs/cible.mdx#but — offsets at the d reference expression's start and end − 1 report the containing occurrence's full 12.7 record (file, byte-exact range, kind `depends`, source graph node {identity, range} = host, resolved target) while the end offset and the byte before the start report none, and likewise for the embedding container (opening brace through closing brace, kind `embeds`) — start-inclusive, end-exclusive (SPEC 1.7) — every answer findings [] at exit 0, the consulted domain being the named file alone whatever the workspace's other findings; the unparseable specs/casse.mdx (unclosed section tag) answers `at` offset 0 AND the EOF caret with `resolution` exactly the unavailability marker — no root fallback bypasses the mask — beside exactly its one located 14.20, exit 1; the offset bound on an unparseable file is judged wherever the content was read: on three discovered spec sources failing 14.20 — specs/octet.mdx (not valid UTF-8: a valid prefix, then 0xFF), specs/marque.mdx (beginning with a byte-order mark), and specs/syntaxe.mdx (a syntax failure, `d={]}`) — `at <file> <n>`, n the file's byte length counted in its own bytes (the BOM's three included, the ill-formed byte one — never a decoded text's length), answers the unavailability marker beside exactly the file's one located 14.20, exit 1, while `at <file> <n+1>` is the out-of-range usage error — exit 2, the plain error document (`code` and `path` null) as the entire stdout, never the unavailable resolution; and — staged where file names are byte strings (Linux leg) — the non-UTF-8-pathed specs/nu<0xFF>.mdx is nameable by no argument value: the exact on-disk path bytes as raw argv, the lossy U+FFFD decode, the marked-byte-form JSON rendering, and a percent-encoded rendering each exit 2 — a malformed value or an unknown file — with the single 12.7 error document, while the glob-reached view (`view --file specs/nu*.mdx`, byte-wise glob) stays the one route to its positions: exit 1 with exactly its condition-19 finding (stable code `invalid-source-path`, locations [], the marked-byte-form concerned path) and its full positional tree byte-exact, every node identity — root included — explicitly unavailable; the U+FFFD-pathed specs/A<U+FFFD>.mdx, staged on either leg, bears its condition-19 finding with the concerned path as a plain string (never the byte form); `at specs/A<U+FFFD>.mdx 0` is a malformed value — exit 2 with the plain usage error document (`code` and `path` null), never an answer and never the unknown-file error: reported identically, byte for byte, on a configuration-less workspace holding the same file, where an unknown-file check would be preceded by the configuration error — and `view --file specs/A*.mdx` serves it exit 1 with exactly its finding (plain-string concerned path) and its positional tree byte-exact with every identity explicitly unavailable; no invocation of the sweep modifies anything (SPEC 11.5, 11.2, 5.7, 1.7, 12.0, 12.7, 14.19, 14.20; T11.2-3, T11.2-5, T12.0-10)",
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline) — composed-range arithmetic
     // proven against the staged bytes before any product invocation.
@@ -1425,6 +1734,7 @@ const T11_5_3 = defineProductTest({
           `byte length (a harness-side staging error, not a product failure)`,
       );
     }
+    checkBoundFiles();
     // Both occurrence ranges lie within host's construct and are disjoint;
     // each arm's offset lies inside host, and inside its expected record's
     // range or inside NEITHER record's range — so the arm table's section
@@ -1463,10 +1773,15 @@ const T11_5_3 = defineProductTest({
         [OC_FILE]: OC_SOURCE,
         [OC_TGT_FILE]: OC_TGT_SOURCE,
         [OC_CASSE_FILE]: OC_CASSE_SOURCE,
+        [OC_OCTET.path]: OC_OCTET.bytes,
+        [OC_MARQUE.path]: OC_MARQUE.bytes,
+        [OC_SYNTAXE.path]: OC_SYNTAXE.bytes,
         [RC_PATH]: RC_STAGED,
       },
-      // S-9: casse.mdx is the staged parse failure (14.20).
-      mdx: { unparseable: [OC_CASSE_FILE] },
+      // S-9: casse.mdx and the offset bound's three files are the staged
+      // parse failures (14.20: an unclosed section tag, invalid UTF-8, a
+      // leading byte-order mark, `d={]}`).
+      mdx: { unparseable: OC_UNPARSEABLE_FILES },
     });
     try {
       // This staging precedes the body's first product invocation (the gate
@@ -1479,13 +1794,16 @@ const T11_5_3 = defineProductTest({
         workspace.root,
         async () => {
           // Gate reference and staging integrity (SPEC 12.1, 14): exactly
-          // casse's 14.20 plus — where staged — nu's 14.19, nothing else,
-          // so occ.mdx and cible.mdx are finding-free on pinned ground
-          // (the d reference and the embedding both resolve: an unresolved
-          // or unparsed spelling would surface here as 14.5/14.8).
+          // one 14.20 per unparseable file (casse's and the offset bound's
+          // three) plus A<U+FFFD>'s and — where staged — nu's 14.19,
+          // nothing else, so occ.mdx and cible.mdx are finding-free on
+          // pinned ground (the d reference and the embedding both resolve:
+          // an unresolved or unparsed spelling would surface here as
+          // 14.5/14.8).
           const gateContext =
-            "T11.5-3 `build --json` (staging integrity: one 14.20 in " +
-            "specs/casse.mdx, one 14.19 for the U+FFFD-pathed " +
+            "T11.5-3 `build --json` (staging integrity: one 14.20 in each " +
+            "of specs/casse.mdx, specs/marque.mdx, specs/octet.mdx, and " +
+            "specs/syntaxe.mdx, one 14.19 for the U+FFFD-pathed " +
             "specs/A<U+FFFD>.mdx" +
             (NU3_STAGED
               ? ", one 14.19 for the non-UTF-8-named specs/nu<0xFF>.mdx"
@@ -1499,16 +1817,19 @@ const T11_5_3 = defineProductTest({
           assertConditionCounts(
             gateFindings,
             NU3_STAGED
-              ? { "14.20": 1, "14.19": 2 }
-              : { "14.20": 1, "14.19": 1 },
+              ? { "14.20": OC_UNPARSEABLE_FILES.length, "14.19": 2 }
+              : { "14.20": OC_UNPARSEABLE_FILES.length, "14.19": 1 },
             `${gateContext} — exactly the staged conditions (SPEC 14)`,
           );
-          assertFindingLocated(
-            gateFindings.find((finding) => finding.condition === "14.20")!,
-            { file: OC_CASSE_FILE },
-            `${gateContext} — the parse failure locates in the ` +
-              `unparseable file (SPEC 14.20, 14)`,
-          );
+          const parseFailures = findingsInSourceOrder(gateFindings, "14.20");
+          OC_UNPARSEABLE_FILES.forEach((file, index) => {
+            assertFindingLocated(
+              parseFailures[index]!,
+              { file },
+              `${gateContext} — one parse failure per unparseable file, ` +
+                `${file}'s located in it (SPEC 14.20, 14)`,
+            );
+          });
           // Each condition-19 finding: the stable code, no in-source
           // locations, and its concerned path in the form 12.0 fixes — the
           // plain string for the U+FFFD path (never the byte form), the
@@ -1582,43 +1903,46 @@ const T11_5_3 = defineProductTest({
           // no root fallback bypasses the mask — the parse-failure finding
           // accompanying, exit 1 with the full answer still emitted.
           for (const offset of [0, OC_CASSE_LENGTH]) {
-            const context = `T11.5-3 \`at ${OC_CASSE_FILE} ${String(offset)}\` (the unparseable file${offset === 0 ? "" : ", the EOF caret"})`;
-            const result = await expectExit(
+            await expectUnavailableResolution(
               product,
               workspace,
-              ["at", OC_CASSE_FILE, String(offset)],
-              1,
-              `${context} — the answer carries the parse-failure finding ` +
-                `and an explicitly-unavailable resolution, so exit 1 with ` +
-                `the full answer document still emitted (SPEC 11.2, 11.5)`,
+              OC_CASSE_FILE,
+              offset,
+              `T11.5-3 \`at ${OC_CASSE_FILE} ${String(offset)}\` (the unparseable file${offset === 0 ? "" : ", the EOF caret"})`,
             );
-            const report = decodeAtReport(
-              parseJsonStdout(
-                result,
-                `${context} — the full answer document is still emitted, ` +
-                  `complete and parseable (SPEC 11.2, H-5)`,
-              ),
-              context,
+          }
+
+          // --- The offset bound on an unparseable file (SPEC 11.5: judged
+          // wherever the content was read — an encoding or syntax failure
+          // leaves the length known): on each of the three, `at <file>
+          // <n>`, n the file's byte length counted in its own bytes,
+          // answers the unavailable resolution beside the file's
+          // condition-20 finding, exit 1, while `at <file> <n+1>` is the
+          // out-of-range usage error — exit 2, the plain error document
+          // (12.7: `code` and `path` null) as the entire stdout, never the
+          // unavailable resolution.
+          for (const file of OC_BOUND_FILES) {
+            const n = file.bytes.length;
+            await expectUnavailableResolution(
+              product,
+              workspace,
+              file.path,
+              n,
+              `T11.5-3 \`at ${file.path} ${String(n)}\` (${file.what}; n, ` +
+                `the file's byte length counted in its own bytes — ` +
+                `${file.counted}, never a decoded text's length — is within ` +
+                `the bound, judged on the content read)`,
             );
-            assertSameJson(
-              report.resolution,
-              UNAVAILABLE,
-              `${context} — on an unparseable file the resolution is ` +
-                `reported explicitly unavailable: exactly the ` +
-                `unavailability marker, never null, never a fabricated ` +
-                `root resolution (SPEC 11.5, 11.2, 12.7)`,
-            );
-            assertConditionCounts(
-              report.findings,
-              { "14.20": 1 },
-              `${context} — exactly the named file's parse-failure ` +
-                `finding accompanies (SPEC 11.2, 14.20)`,
-            );
-            assertFindingLocated(
-              report.findings[0]!,
-              { file: OC_CASSE_FILE },
-              `${context} — the parse failure locates in the named file ` +
-                `(SPEC 14)`,
+            await expectPlainUsageError(
+              product,
+              workspace,
+              ["at", file.path, String(n + 1)],
+              `T11.5-3 \`at ${file.path} ${String(n + 1)}\` (${file.what}; ` +
+                `n + 1) — the offset bound is judged wherever the content ` +
+                `was read, an encoding or syntax failure leaving the length ` +
+                `known: an offset past it is the out-of-range usage error, ` +
+                `exit 2 with the plain error document as the entire stdout, ` +
+                `never the unavailable resolution (SPEC 11.5, 12.0, 12.7)`,
             );
           }
 
