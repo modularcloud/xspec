@@ -1,5 +1,5 @@
 // TEST-SPEC §10.5 (built-in strategy: path-blocks) — SUITE-36:
-// T10.5-1…T10.5-8.
+// T10.5-1…T10.5-9.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -20,9 +20,13 @@
 // nodes of their targets' categories, a target's `metadata-changed` counting
 // only when its `d` targets changed. Items are totally ordered (depth
 // deepest-first, roots 0; kind; file path; document order; `code-impact`
-// last by location identity; absent scopes after present ones). Resolving
-// `updated` re-derives the session with the recorded creation parameters;
-// `split` decompositions apply recursively and are never re-added.
+// last by location identity; absent scopes after present ones). In a
+// baseline session a node deleted since the baseline is the child of its
+// baseline parent, identities mapped through the journal, and a present
+// node the child of its current parent, as node relations and node sets
+// alone — texts and hashes keep their definitions. Resolving `updated`
+// re-derives the session with the recorded creation parameters; `split`
+// decompositions apply recursively and are never re-added.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - `context` and `origin` are asserted as sorted identity sets: SPEC 10.5
@@ -34,15 +38,23 @@
 //   root's own text derived by hand from SPEC 1.6 and 3, as T1.6-1's
 //   expected texts are, and T10.5-8's, byte-asserted there against the
 //   root's subtree text — its file's entire compiled Markdown output —
-//   derived likewise, the root's own text diagnosed.
+//   derived likewise, the root's own text diagnosed; and for T10.5-9's
+//   deleted-node fixture, whose scope texts and parent-consistency
+//   context text are byte-asserted in `export`, `show`, and `next --json`
+//   against the value `query node` reports after the deletion (no hand
+//   derivation), no scope or context text carrying the deleted node's
+//   token.
 // - `blockedBy` is compared as a sorted id set (SPEC 10.5/10.7 fix which
 //   items block, not an order within the field).
 // - An item's scope set — every node of its scope as last assigned (SPEC
 //   10.4), which the payload presents (10.7: every scope, context, and
 //   origin node) — is read through the review adapter's `requireScopeNodes`
 //   (its assumed member `scopeNodes`) and compared as a sorted identity set:
-//   T10.5-5's matching arm asserts it before and after the re-derivation, a
-//   payload presenting no scope-node list failing it loudly (H-3). The scope
+//   T10.5-5's matching arm asserts it before and after the re-derivation,
+//   T10.5-8 its item (3)'s, and T10.5-9 each item's with every scope
+//   node's presence — a deleted node presented absent under its baseline
+//   identity mapped forward through the journal (10.4) — a payload
+//   presenting no scope-node list failing it loudly (H-3). The scope
 //   text, read from the current graph (10.7), cannot tell a scope as last
 //   assigned from the generated one.
 // - A matched item's `current` is compared byte for byte as the decoded
@@ -58,8 +70,13 @@
 //   value after them, which differs for the root, a, and a.b (a premise),
 //   diagnosed as a baseline filled from the current graph — and d's entry,
 //   d added since the baseline, must exist, present it absent, carry the
-//   marker, and hold none of d's current hashes. Entries beyond those the
-//   entry names are not asserted.
+//   marker, and hold none of d's current hashes. An item's `current` is
+//   read the same way where its entries are asserted (T10.5-9's
+//   deleted-node fixture, in `export`, `show`, and `next --json`): each
+//   relevant hash the entry names compared with `query node`'s report
+//   after the deletion, and the deleted A.B.C's entry presenting it
+//   absent with the explicit absent marker. Entries beyond those the
+//   entries name are not asserted.
 // - Item order is asserted as the exact `(kind, scope)` row sequence of
 //   `status` and `export`; `next`'s presentation of the order is asserted by
 //   walking the session (repeated `next` + `resolve --status no-change`),
@@ -104,27 +121,37 @@
 //   its P/Q arms' edits (p's; p's and p.q's; p.q's again with p's reverted),
 //   T10.5-6's par.s edit, T10.5-8's edits in both stagings (specs/R.mdx with
 //   and without its top-level text edited, specs/S.mdx's x.y), each after
-//   the baseline capture's `build` — is the same template call moved to
+//   the baseline capture's `build`, T10.5-9's deletion of A.B.C's section
+//   (after the deleted-node fixture's baseline `build`, and after its audit
+//   contrast's `create`) — is the same template call moved to
 //   module level as a record, as is the initial `.mdx` file of every
 //   workspace created after the body's first `build` (T10.5-1's extended
 //   fixture, chain fixture, and the chain fixture's both-edited twin,
 //   T10.5-3's current-graph-edges, origin-counting, and one-item-per-location
 //   workspaces, T10.5-4's tie sub-fixture, T10.5-5's decomposition
 //   sub-fixture and its matching, kept-blockedBy, skipping, and
-//   newly-visited workspaces, T10.5-8's twin). A staging that precedes a
+//   newly-visited workspaces, T10.5-8's twin, T10.5-9's journal-arm,
+//   audit-contrast, and present-node workspaces). A staging that precedes a
 //   body's first `build` (each fixture's first edit, between `gitCommitAll`
 //   and that `build`) stays plain, as do each body's first workspace's
 //   initial `files` entries (S-7's sweep reaches them against the stub) —
 //   T10.5-7's, its one workspace, `.mdx` and code sources alike, and its t
 //   edit among them — but T10.5-8's, whose initial sources are exported
-//   records its two workspaces share (as T10.4-7's are). The tie
-//   sub-fixture's deletions are plain removals of files (`fsp.rm`), which
-//   S-9 does not judge.
+//   records its two workspaces share (as T10.4-7's are), and T10.5-9's,
+//   its specs/D.mdx the record its journal arm and audit contrast share.
+//   The tie sub-fixture's deletions are plain removals of files
+//   (`fsp.rm`), which S-9 does not judge. T10.5-9's manual deletions
+//   after its `rename` and its `move` edit bytes the product rewrote,
+//   which no harness constant equals, so each is an anchored
+//   `workspace.edit()` (`editRewritten`: the anchor's single occurrence
+//   and the edited text's derivability diagnosed first), judged at
+//   staging time.
 // - The configuration of every workspace created after a body's first `build`
 //   (T10.5-1's extended fixture, chain fixture, and the chain fixture's
 //   both-edited twin, T10.5-3's current-graph-edges workspace, T10.5-4's tie
 //   sub-fixture, T10.5-5's decomposition sub-fixture and its four later
-//   workspaces, T10.5-8's twin) is `SPECS_ONLY_CONFIG`, a TypeScript
+//   workspaces, T10.5-8's twin, T10.5-9's journal-arm, audit-contrast, and
+//   present-node workspaces) is `SPECS_ONLY_CONFIG`, a TypeScript
 //   staged-source record (helpers/staged-ts.ts; S-9's TypeScript and timing
 //   clauses), well-formed, staged wherever that configuration is;
 //   `SPECS_CODE_CONFIG` serves only bodies' first workspaces and stays
@@ -166,6 +193,7 @@ import {
   bytesEqual,
   fail,
 } from "../../helpers/assertions.js";
+import { deriveMdx } from "../../helpers/mdx-derivability.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { type StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
@@ -183,7 +211,7 @@ import {
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T10.5-1/T10.5-3/T10.5-4/T10.5-5/T10.5-8 xspec.config.ts — one spec group",
+  "T10.5-1/T10.5-3/T10.5-4/T10.5-5/T10.5-8/T10.5-9 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -5902,6 +5930,1045 @@ const T10_5_8 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T10.5-9 — deleted and moved nodes in baseline sessions
+// ---------------------------------------------------------------------------
+
+// TEST-SPEC T10.5-9 (SPEC 10.5): in a baseline session a node deleted since
+// the baseline (5.6) is the child of its baseline parent, identities mapped
+// through the journal (6.3), and a present node the child of its current
+// parent; ancestors, descendants, children, and subtrees follow these links
+// as node relations and node sets alone — text values and hashes keep their
+// definitions (1.6, 5.5).
+//
+// The deleted-node fixture: specs/D.mdx holds a top-level A holding A.B,
+// which holds A.B.C — its text carrying a token no other node's own text
+// spells — committed as the baseline; A.B.C's section is then deleted,
+// nothing else edited. A.B is `changed` (it lost a child) and visited; A is
+// not `changed` (5.5, 5.6; an `impact` premise). Its journal arm renames A.B
+// to A.B2 after the baseline (`xspec rename`, journaled; A.B.C becomes
+// A.B2.C by prefix replacement) and deletes A.B2.C's section by manual
+// edit. Its audit contrast deletes A.B.C's section after an audit session's
+// `create` and resolves A.B.C's item `updated`: an audit session has no
+// baseline, its items' scopes the node and all its current descendants
+// (10.6). The present-node arm: specs/R.mdx holds P1, holding P1.M, which
+// holds P1.M.c, and then P2, each section holding a line of its own text,
+// every tag alone on its line — T6.2-3's clean-boundary shape, P2 a
+// flow-position parent whose closing tag's line start is the insertion
+// point — so the journaled `move specs/R.mdx#P1.M specs/R.mdx#P2.M` leaves
+// `changed` the two parents alone (6.2); P2.M.c's section is then deleted by
+// manual edit. Its twin is the same workspace's session `t`, created after
+// the move and before that deletion. The manual edits after the rename and
+// the move change bytes the product rewrote, which no harness constant
+// equals, so each is an anchored `workspace.edit()` (`editRewritten`).
+
+const D9_FILE = "specs/D.mdx";
+const D9_ROOT = "specs/D.mdx";
+const D9_A = "specs/D.mdx#A";
+const D9_AB = "specs/D.mdx#A.B";
+const D9_ABC = "specs/D.mdx#A.B.C";
+const D9_AB2 = "specs/D.mdx#A.B2";
+const D9_AB2C = "specs/D.mdx#A.B2.C";
+
+/** A.B.C's token: no other node's own text spells it (TEST-SPEC T10.5-9). */
+const D9_TOKEN = "GONETOKEN";
+const D9_ABC_TEXT = `Ay bee see text ${D9_TOKEN}.`;
+
+/**
+ * specs/D.mdx's bytes: A (its own text) holding A.B (its own text), which
+ * holds — `withC` — A.B.C, every tag alone on its line.
+ */
+function d9Source(withC: boolean): string {
+  return [
+    '<S id="A">',
+    "Ay own text.",
+    "",
+    '<S id="A.B">',
+    "Ay bee own text.",
+    "",
+    ...(withC ? ['<S id="A.B.C">', D9_ABC_TEXT, "</S>"] : []),
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+// T10.5-9's specs/D.mdx sources are staged-source records
+// (helpers/staged-mdx.ts, S-9: judged before any product exists): the
+// baseline is the initial source the deleted-node fixture, its journal arm,
+// and its audit contrast share — the latter two's workspaces created after
+// the body's first `build` — and the deletion follows a `build` in the
+// deleted-node fixture and the audit contrast alike.
+const T10_5_9_D_INITIAL = stagedMdx(
+  "T10.5-9 specs/D.mdx with A holding A.B holding A.B.C, A.B.C's text carrying the token (the deleted-node fixture's baseline)",
+  d9Source(true),
+);
+const T10_5_9_D_DELETED = stagedMdx(
+  "T10.5-9 specs/D.mdx with A.B.C's section deleted, nothing else edited (the deleted-node fixture and the audit contrast)",
+  d9Source(false),
+);
+
+/**
+ * A.B2.C's section as the journal arm's rename leaves it — SPEC 6.4's
+ * minimal in-place rewrite changes its `id` attribute alone — with its line
+ * terminator: the anchor whose deletion is the arm's manual edit.
+ */
+const D9_AB2C_SECTION = ['<S id="A.B2.C">', D9_ABC_TEXT, "</S>", ""].join("\n");
+
+const P9_FILE = "specs/R.mdx";
+const P9_ROOT = "specs/R.mdx";
+const P9_P1 = "specs/R.mdx#P1";
+const P9_P1MC = "specs/R.mdx#P1.M.c";
+const P9_P2 = "specs/R.mdx#P2";
+const P9_P2M = "specs/R.mdx#P2.M";
+const P9_P2MC = "specs/R.mdx#P2.M.c";
+
+// The present-node arm's specs/R.mdx at the baseline — a staged-source
+// record, its workspace created after the body's first `build`.
+const T10_5_9_R_INITIAL = stagedMdx(
+  "T10.5-9 specs/R.mdx with P1 holding P1.M holding P1.M.c, then P2, every tag alone on its line (the present-node arm's baseline)",
+  [
+    '<S id="P1">',
+    "Pee one text.",
+    "",
+    '<S id="P1.M">',
+    "Em text.",
+    "",
+    '<S id="P1.M.c">',
+    "See text.",
+    "</S>",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="P2">',
+    "Pee two text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+/**
+ * P2.M.c's section as the present-node arm's move leaves it — the moved
+ * text travels verbatim but for its rewritten `id` attributes (SPEC 6.5) —
+ * with its line terminator: the anchor whose deletion is the arm's manual
+ * edit.
+ */
+const P9_P2MC_SECTION = ['<S id="P2.M.c">', "See text.", "</S>", ""].join("\n");
+
+/** The present-node arm's two items in item order (SPEC 10.5). */
+const P9_EXPECTED_SEQUENCE: readonly string[] = [
+  `subtree-coherence ${P9_P1}`,
+  `subtree-coherence ${P9_P2}`,
+];
+
+/**
+ * Diagnose that `search` occurs exactly once in the product-rewritten
+ * `content` before `edit()` stages a manual edit at it: SPEC 6.4 and 6.5 fix
+ * the rewritten form (minimal in-place edits; the moved text verbatim but
+ * for its rewrites), so a missing or ambiguous anchor is a diagnosed
+ * assertion failure about the product's rewriting, never `edit()`'s plain
+ * refusal (H-8).
+ */
+function anchorOnce(content: string, search: string, context: string): void {
+  const first = content.indexOf(search);
+  if (first === -1) {
+    fail(
+      `${context}: expected the rewritten source to contain ` +
+        `${JSON.stringify(search)} exactly once (SPEC 6.4 and 6.5 fix the ` +
+        `rewritten form), but it does not appear; source: ` +
+        JSON.stringify(content),
+    );
+  }
+  if (content.includes(search, first + search.length)) {
+    fail(
+      `${context}: the anchor ${JSON.stringify(search)} appears more than ` +
+        `once, so the manual edit cannot be staged unambiguously; source: ` +
+        JSON.stringify(content),
+    );
+  }
+}
+
+/**
+ * Stage a manual edit of bytes the product rewrote (a rename's or a move's
+ * output, SPEC 6.4, 6.5): `anchor` replaced by `replacement` through
+ * `workspace.edit()` — the staging of product-written bytes, judged at
+ * staging time — once the anchor's uniqueness is diagnosed (`anchorOnce`)
+ * and the edited text's derivability too, with the very verdict
+ * `edit()`'s staging judge reaches (`deriveMdx`, no allowances; S-9): the
+ * anchor is one whole section construct with its line, so a text that no
+ * longer derives is the product's rewriting at fault — a diagnosed failure,
+ * never the staging judge's harness error (H-8).
+ */
+async function editRewritten(
+  workspace: TestWorkspace,
+  rel: string,
+  anchor: string,
+  replacement: string,
+  context: string,
+): Promise<void> {
+  const current = Buffer.from(await workspace.readBytes(rel)).toString("utf8");
+  anchorOnce(current, anchor, context);
+  const verdict = deriveMdx(current.replace(anchor, replacement));
+  if (!verdict.derives) {
+    fail(
+      `${context}: ${rel} as the product rewrote it, the anchor replaced, ` +
+        `is not well-formed under the stock MDX 3 grammar (S-9): ` +
+        `${verdict.reason} — a rename or move leaves its rewritten sources ` +
+        `well-formed (SPEC 6.4, 6.5, 14.20), and the edit replaces one ` +
+        `whole section construct with its line; source: ` +
+        JSON.stringify(current),
+    );
+  }
+  await workspace.edit(rel, anchor, replacement);
+}
+
+/**
+ * The `changed` nodes `impact --base <baseline> --json` reports (SPEC 5.6,
+ * 9.3), sorted, each its identity or, reported deleted, its identity
+ * followed by ` (deleted)` — staging premises.
+ */
+async function changedNodes(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  base: string,
+  label: string,
+): Promise<readonly string[]> {
+  const impactLabel = `${label} \`impact --base <baseline> --json\``;
+  const impact = decodeImpactReport(
+    await runJson(
+      product,
+      workspace,
+      ["impact", "--base", base, "--json"],
+      impactLabel,
+    ),
+    impactLabel,
+  );
+  return impact.requirements
+    .filter((entry) =>
+      entry.categories.some((category) => category.category === "changed"),
+    )
+    .flatMap((entry) =>
+      entry.nodes.map((node) => (entry.deleted ? `${node} (deleted)` : node)),
+    )
+    .sort();
+}
+
+/** `review next <name> --json`'s item, diagnosed when it reports none. */
+async function nextItem(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  context: string,
+): Promise<ReviewItem> {
+  const label = `${context} \`review next ${name} --json\``;
+  const next = decodeNextReport(
+    await runJson(
+      product,
+      workspace,
+      ["review", "next", name, "--json"],
+      label,
+    ),
+    label,
+  );
+  if (next.fullyResolved || next.item === undefined) {
+    fail(
+      `${label}: needing-review items remain, so \`next\` must return one ` +
+        `(SPEC 10.7)`,
+    );
+  }
+  return next.item;
+}
+
+/** Every node an item presents: its scope, scope nodes, context, origin. */
+function presentedNodes(item: ReviewItem): readonly string[] {
+  return [
+    item.scope.node,
+    ...(item.scopeNodes ?? []).map((state) => state.node),
+    ...item.context.map((state) => state.node),
+    ...item.origin.map((entry) => entry.node),
+  ];
+}
+
+/**
+ * Assert no item presents `unmapped` — a deleted node's baseline identity
+ * before the journal maps it forward to `mapped` — anywhere (TEST-SPEC
+ * T10.5-9; SPEC 6.3, 10.4: reads present every recorded node under its
+ * current identity, whether or not the node is still present).
+ */
+function assertNeverPresented(
+  items: readonly ReviewItem[],
+  unmapped: string,
+  mapped: string,
+  context: string,
+): void {
+  for (const item of items) {
+    const nodes = presentedNodes(item);
+    if (!nodes.includes(unmapped)) continue;
+    fail(
+      `${context}: item ${item.id} (${item.kind} ${item.scope.node}) ` +
+        `presents ${unmapped}, the deleted node's baseline identity ` +
+        `unmapped — it is presented only under that identity mapped forward ` +
+        `through the journal, ${mapped} (SPEC 6.3, 10.4, 10.5); the item ` +
+        `presents ${JSON.stringify(nodes)}`,
+    );
+  }
+}
+
+/**
+ * Assert an item's scope set and each scope node's presence (TEST-SPEC
+ * T10.5-9; SPEC 10.4, 10.5, 10.7: the payload presents every scope node
+ * under its current identity and presence), read through the review
+ * adapter's `requireScopeNodes`: the sorted identity set first — `why`
+ * stating it — then each node presented present or absent as `expected`
+ * says.
+ */
+function assertScopePresence(
+  item: ReviewItem,
+  expected: readonly (readonly [string, boolean])[],
+  context: string,
+  why: string,
+): void {
+  const nodes = requireScopeNodes(item, context);
+  assertSameJson(
+    identitySet(nodes),
+    expected.map(([node]) => node).sort(),
+    `${context}: scope ${why}`,
+  );
+  for (const [node, present] of expected) {
+    const state = nodes.find((candidate) => candidate.node === node);
+    if (state !== undefined && state.present === present) continue;
+    fail(
+      `${context}: scope node ${node} must be presented ` +
+        `${present ? "present" : "absent"} (SPEC 10.4, 10.7: every scope ` +
+        `node under its current identity and presence); got ` +
+        JSON.stringify(state),
+    );
+  }
+}
+
+/** `query node`'s reports for A and A.B after A.B.C's deletion. */
+interface D9Captured {
+  readonly a: NodeReport;
+  readonly ab: NodeReport;
+}
+
+/** Assert one presented text byte-equal to `query node`'s (SPEC 1.6, 10.7). */
+function assertD9Text(
+  text: string | undefined,
+  expected: string,
+  what: string,
+  why: string,
+): void {
+  if (text === undefined) {
+    fail(`${what}: no text is presented — it is ${why}`);
+  }
+  assertBytesEqual(
+    text,
+    expected,
+    `${what} is ${why}, byte-equal to the value \`query node\` reports ` +
+      `after the deletion (SPEC 1.6, 10.5: texts keep their definitions)`,
+  );
+}
+
+/**
+ * Assert the texts of one of the deleted-node fixture's two items as
+ * `surface` presents it (TEST-SPEC T10.5-9; SPEC 1.6, 10.5, 10.7): no scope
+ * or context text contains A.B.C's token, and each text the entry names is
+ * byte-equal to the value `query node` reports after the deletion — A.B's
+ * item's scope text to A.B's current subtree text, A's item's scope text to
+ * A's current own text, and A's item's context text for A.B to A.B's current
+ * subtree text.
+ */
+function assertD9Texts(
+  item: ReviewItem,
+  captured: D9Captured,
+  surface: string,
+): void {
+  const texts = [
+    { where: "scope text", text: item.scope.text },
+    ...item.context.map((state) => ({
+      where: `context text for ${state.node}`,
+      text: state.text,
+    })),
+  ];
+  for (const { where, text } of texts) {
+    if (text === undefined || !text.includes(D9_TOKEN)) continue;
+    fail(
+      `${surface}: the ${where} ${JSON.stringify(text)} contains A.B.C's ` +
+        `token ${D9_TOKEN} — the links bind node relations and node sets ` +
+        `alone, texts keeping their definitions (SPEC 1.6, 10.5), so no ` +
+        `scope or context text carries the deleted node's text; a product ` +
+        `computing text over the linked tree splices A.B.C's text into ` +
+        `A.B's subtree text`,
+    );
+  }
+  if (item.kind === "subtree-coherence") {
+    assertD9Text(
+      item.scope.text,
+      captured.ab.subtreeText,
+      `${surface}: A.B's item's scope text`,
+      "A.B's current subtree text — a subtree-coherence item's scope text " +
+        "is the scope root's subtree text (SPEC 10.7)",
+    );
+    return;
+  }
+  assertD9Text(
+    item.scope.text,
+    captured.a.ownText,
+    `${surface}: A's item's scope text`,
+    "A's current own text — a parent-consistency item's scope text is the " +
+      "scope node's own text (SPEC 10.7)",
+  );
+  const branch = item.context.find((state) => state.node === D9_AB);
+  if (branch === undefined) {
+    fail(
+      `${surface}: A's item presents no context node A.B — its context is ` +
+        `the changed branch beneath A, entering as A's child on it (SPEC ` +
+        `10.5); it presents ${JSON.stringify(identitySet(item.context))}`,
+    );
+  }
+  assertD9Text(
+    branch.text,
+    captured.ab.subtreeText,
+    `${surface}: A's item's context text for A.B`,
+    "A.B's current subtree text — a parent-consistency item's context " +
+      "text is subtree text (SPEC 10.7)",
+  );
+}
+
+/**
+ * Assert one of the deleted-node fixture's items' `current` entries
+ * (TEST-SPEC T10.5-9; SPEC 5.5, 10.2, 10.4, 10.5), read through the review
+ * adapter's `decodeRecordedState`: written at the item's creation, after
+ * the deletion, they hold the relevant hashes `query node` reports then — in
+ * A.B's item A.B's subtreeHash and metadataHash, A.B.C's entry presenting it
+ * absent, its hashes the explicit absent marker; in A's item A's ownHash and
+ * metadataHash and A.B's subtreeHash. Entries beyond those are not
+ * asserted.
+ */
+function assertD9Current(
+  item: ReviewItem,
+  captured: D9Captured,
+  label: string,
+): void {
+  const entries = decodeRecordedState(item, "current", label);
+  const held = JSON.stringify(entries.map((entry) => entry.node));
+  const entryOf = (node: string): RecordedNodeEntry => {
+    const entry = entries.find((candidate) => candidate.node === node);
+    if (entry === undefined) {
+      fail(
+        `${label}: holds no entry for ${node} — \`current\` records the ` +
+          `item's relevant hashes and, for every scope, context, and origin ` +
+          `node, whether it is present (SPEC 10.2, 10.4); it holds entries ` +
+          `for ${held}`,
+      );
+    }
+    return entry;
+  };
+  const expectHash = (
+    node: string,
+    hash: keyof NodeHashes,
+    report: NodeReport,
+  ): void => {
+    const entry = entryOf(node);
+    const recorded = entry.hashes[hash];
+    const expected = report.hashes[hash];
+    if (recorded === expected) return;
+    fail(
+      `${label}: ${node}'s recorded ${hash} must be ` +
+        `${JSON.stringify(expected)}, the value \`query node\` reports after ` +
+        `the deletion — hashes keep their definitions (SPEC 5.5, 10.5) and ` +
+        `\`current\` records the relevant state at the item's creation ` +
+        `(10.2, 10.4)` +
+        (node === D9_AB && hash === "subtreeHash"
+          ? "; a product computing hashes over the linked tree folds A.B.C " +
+            "into A.B's subtreeHash"
+          : "") +
+        `; got ` +
+        (recorded !== undefined
+          ? JSON.stringify(recorded)
+          : entry.absentMarker
+            ? "the explicit absent marker"
+            : "none recorded"),
+    );
+  };
+  if (item.kind === "subtree-coherence") {
+    expectHash(D9_AB, "subtreeHash", captured.ab);
+    expectHash(D9_AB, "metadataHash", captured.ab);
+    const gone = entryOf(D9_ABC);
+    if (!gone.present && gone.absentMarker) return;
+    fail(
+      `${label}: A.B.C's entry must present it absent, its hashes the ` +
+        `explicit absent marker (SPEC 10.4: an absent node's hashes are ` +
+        `recorded as an explicit absent marker); got ${JSON.stringify(gone)}`,
+    );
+  }
+  expectHash(D9_A, "ownHash", captured.a);
+  expectHash(D9_A, "metadataHash", captured.a);
+  expectHash(D9_AB, "subtreeHash", captured.ab);
+}
+
+/**
+ * The deleted-node fixture (TEST-SPEC T10.5-9): the baseline committed and
+ * built; A.B.C's section deleted and built; the `changed` nodes exactly A.B
+ * and A.B.C, deleted (an `impact` premise); A's and A.B's `query node`
+ * reports captured; `review create --base`; then exactly the two items —
+ * A.B's subtree-coherence item (scope {A.B, A.B.C}, A.B.C presented absent
+ * under its baseline identity; context the root and A; origin exactly {A.B,
+ * A.B.C}) and A's parent-consistency item (context exactly {A.B}; origin
+ * exactly {A.B, A.B.C}; blockedBy A.B's item) — and each item's texts and
+ * `current` entries in `export`, in `show`, and in `next --json`, which
+ * returns A.B's item, then A's once A.B's is resolved `no-change`.
+ */
+async function runD9DeletedNodeFixture(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  const prefix = "T10.5-9 deleted-node fixture";
+  await workspace.gitInit();
+  const base = await workspace.gitCommitAll("baseline");
+  await buildOk(product, workspace, `${prefix} \`build\` at the baseline`);
+  await workspace.file(D9_FILE, T10_5_9_D_DELETED);
+  await buildOk(
+    product,
+    workspace,
+    `${prefix} \`build\` after A.B.C's deletion`,
+  );
+  assertSameJson(
+    await changedNodes(product, workspace, base, prefix),
+    [D9_AB, `${D9_ABC} (deleted)`].sort(),
+    `${prefix} staging premise: the \`changed\` nodes are exactly A.B — it ` +
+      `lost a child, a structural edit originating at the parent — and ` +
+      `A.B.C, deleted; A is not \`changed\` (SPEC 5.5, 5.6)`,
+  );
+  const captureLabel = `${prefix} capture after the deletion`;
+  const captured: D9Captured = {
+    a: await queryNode(product, workspace, D9_A, captureLabel),
+    ab: await queryNode(product, workspace, D9_AB, captureLabel),
+  };
+  await createBaseSession(product, workspace, base, "s", prefix);
+
+  const status = await sessionStatus(product, workspace, "s", prefix);
+  const expectedRows = [
+    `parent-consistency ${D9_A}`,
+    `subtree-coherence ${D9_AB}`,
+  ].sort();
+  assertSameJson(
+    kindScopeSet(status),
+    expectedRows,
+    `${prefix}: exactly two items — A.B's subtree-coherence item, A.B ` +
+      `visited (\`changed\`, no \`changed\` ancestor), and A's ` +
+      `parent-consistency item, A the one non-root ancestor on its path ` +
+      `(SPEC 10.5)`,
+  );
+  const exported = await exportSession(product, workspace, "s", prefix);
+  assertSameJson(
+    [...exportKindScopeSequence(exported.items)].sort(),
+    expectedRows,
+    `${prefix}: \`export\` presents the same two items (SPEC 10.5, 10.7)`,
+  );
+  const one = `${prefix} A.B's subtree-coherence item`;
+  const abItem = requireItem(exported.items, "subtree-coherence", D9_AB, one);
+  assertScopePresence(
+    abItem,
+    [
+      [D9_AB, true],
+      [D9_ABC, false],
+    ],
+    one,
+    "exactly {A.B, A.B.C} — A.B and all its descendants, the deleted A.B.C " +
+      "the child of its baseline parent A.B, presented absent under its " +
+      "baseline identity (SPEC 10.4, 10.5); a product linking deleted nodes " +
+      "nowhere gives it the scope {A.B}",
+  );
+  assertSameJson(
+    identitySet(abItem.context),
+    [D9_ROOT, D9_A].sort(),
+    `${one}: context A.B's ancestor chain, the root and A (SPEC 10.5)`,
+  );
+  assertSameJson(
+    identitySet(abItem.origin),
+    [D9_AB, D9_ABC].sort(),
+    `${one}: origin exactly {A.B, A.B.C} — the \`changed\` nodes in its ` +
+      `scope, the deleted A.B.C among them (SPEC 5.6, 10.5); a product ` +
+      `linking deleted nodes nowhere gives it the origin {A.B}`,
+  );
+  const two = `${prefix} A's parent-consistency item`;
+  const aItem = requireItem(exported.items, "parent-consistency", D9_A, two);
+  assertSameJson(
+    identitySet(aItem.context),
+    [D9_AB],
+    `${two}: context exactly {A.B} — the one changed branch beneath A, ` +
+      `entering as A's child on it (SPEC 10.5)`,
+  );
+  assertSameJson(
+    identitySet(aItem.origin),
+    [D9_AB, D9_ABC].sort(),
+    `${two}: origin exactly {A.B, A.B.C} — the \`changed\` nodes in A's ` +
+      `subtree, the deleted A.B.C linked under its baseline parent A.B ` +
+      `(SPEC 5.6, 10.5); a product linking deleted nodes nowhere gives it ` +
+      `the origin {A.B}`,
+  );
+  assertBlockedBy(
+    aItem,
+    [abItem.id],
+    `${two}: blocked by A.B's subtree-coherence item — A.B, A's child on ` +
+      `its one changed branch, is itself visited (SPEC 10.5)`,
+  );
+
+  // Texts and hashes keep their definitions (SPEC 1.6, 5.5, 10.5), in
+  // `export`, in `show`, and in the `next` walk.
+  const items = [
+    { item: abItem, name: "A.B's item" },
+    { item: aItem, name: "A's item" },
+  ];
+  for (const { item, name } of items) {
+    const surface = `${prefix} \`export\`'s ${name}`;
+    assertD9Texts(item, captured, surface);
+    assertD9Current(item, captured, `${surface} \`current\``);
+  }
+  for (const { item, name } of items) {
+    const surface = `${prefix} \`review show s ${item.id}\` (${name})`;
+    const shown = await showItem(product, workspace, "s", item.id, surface);
+    if (
+      shown.id !== item.id ||
+      shown.kind !== item.kind ||
+      shown.scope.node !== item.scope.node
+    ) {
+      fail(
+        `${surface}: reports ${name}, ${item.kind} ${item.scope.node} ` +
+          `(SPEC 10.7: the full item); got ${JSON.stringify({
+            id: shown.id,
+            kind: shown.kind,
+            scope: shown.scope.node,
+          })}`,
+      );
+    }
+    assertD9Texts(shown, captured, surface);
+    assertD9Current(shown, captured, `${surface} \`current\``);
+  }
+  const walk = [
+    { item: abItem, name: "A.B's item", step: "first" },
+    { item: aItem, name: "A's item", step: "second" },
+  ];
+  for (const { item, name, step } of walk) {
+    const surface = `${prefix} ${step} \`review next s --json\``;
+    const next = await nextItem(product, workspace, "s", surface);
+    if (next.id !== item.id) {
+      fail(
+        `${surface}: returns ${name}, ${item.id} — the first needing-review ` +
+          `unblocked item in item order (SPEC 10.5, 10.7)` +
+          (step === "second"
+            ? ", A's item unblocked once A.B's is resolved"
+            : ", A's item blocked by it") +
+          `; got ${next.id} (${next.kind} ${next.scope.node})`,
+      );
+    }
+    assertD9Texts(next, captured, surface);
+    assertD9Current(next, captured, `${surface} \`current\``);
+    if (step === "first") {
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        item.id,
+        "no-change",
+        `${prefix} \`review resolve s ${item.id} --status no-change\` ` +
+          `(A.B's item)`,
+      );
+    }
+  }
+}
+
+/**
+ * The journal arm (TEST-SPEC T10.5-9): after the baseline, `rename` A.B to
+ * A.B2 (A.B.C becoming A.B2.C by prefix replacement, SPEC 6.4) and A.B2.C's
+ * section deleted by manual edit; the `changed` nodes exactly A.B2 and
+ * A.B2.C, deleted (an `impact` premise); `review create --base`; then the
+ * same two items under the mapped identities — A.B2's scope {A.B2, A.B2.C},
+ * the deleted node presented absent under A.B2.C, its baseline identity
+ * mapped forward through the journal, never under A.B.C and never outside
+ * A.B2's subtree, its origin {A.B2, A.B2.C}; A's item context {A.B2},
+ * origin {A.B2, A.B2.C}.
+ */
+async function runD9JournalArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  const prefix = "T10.5-9 journal arm";
+  await workspace.gitInit();
+  const base = await workspace.gitCommitAll("baseline");
+  await buildOk(product, workspace, `${prefix} \`build\` at the baseline`);
+  await expectExit(
+    product,
+    workspace,
+    ["rename", D9_FILE, "A.B", "A.B2"],
+    0,
+    `${prefix} \`rename specs/D.mdx A.B A.B2\` (SPEC 6.4)`,
+  );
+  await editRewritten(
+    workspace,
+    D9_FILE,
+    D9_AB2C_SECTION,
+    "",
+    `${prefix} A.B2.C's section, deleted by manual edit after the rename`,
+  );
+  await buildOk(
+    product,
+    workspace,
+    `${prefix} \`build\` after A.B2.C's deletion`,
+  );
+  assertSameJson(
+    await changedNodes(product, workspace, base, prefix),
+    [D9_AB2, `${D9_AB2C} (deleted)`].sort(),
+    `${prefix} staging premise: the \`changed\` nodes are exactly A.B2 — it ` +
+      `lost a child — and A.B2.C, deleted, reported under its baseline ` +
+      `identity mapped forward through the journal; the journaled rename ` +
+      `itself changes no hash (SPEC 5.6, 6.2, 6.3, 9.3)`,
+  );
+  await createBaseSession(product, workspace, base, "s", prefix);
+
+  const status = await sessionStatus(product, workspace, "s", prefix);
+  const expectedRows = [
+    `parent-consistency ${D9_A}`,
+    `subtree-coherence ${D9_AB2}`,
+  ].sort();
+  assertSameJson(
+    kindScopeSet(status),
+    expectedRows,
+    `${prefix}: the same two items — A.B2's subtree-coherence item and A's ` +
+      `parent-consistency item (SPEC 10.5)`,
+  );
+  const exported = await exportSession(product, workspace, "s", prefix);
+  assertSameJson(
+    [...exportKindScopeSequence(exported.items)].sort(),
+    expectedRows,
+    `${prefix}: \`export\` presents the same two items (SPEC 10.5, 10.7)`,
+  );
+  assertNeverPresented(exported.items, D9_ABC, D9_AB2C, prefix);
+  const one = `${prefix} A.B2's subtree-coherence item`;
+  const ab2Item = requireItem(exported.items, "subtree-coherence", D9_AB2, one);
+  assertScopePresence(
+    ab2Item,
+    [
+      [D9_AB2, true],
+      [D9_AB2C, false],
+    ],
+    one,
+    "exactly {A.B2, A.B2.C} — the deleted node the child of its baseline " +
+      "parent, identities mapped through the journal (SPEC 6.3, 10.5), " +
+      "presented absent under A.B2.C, its baseline identity mapped forward " +
+      "(10.4) — never under A.B.C, and never outside A.B2's subtree",
+  );
+  assertSameJson(
+    identitySet(ab2Item.context),
+    [D9_ROOT, D9_A].sort(),
+    `${one}: context A.B2's ancestor chain, the root and A (SPEC 10.5)`,
+  );
+  assertSameJson(
+    identitySet(ab2Item.origin),
+    [D9_AB2, D9_AB2C].sort(),
+    `${one}: origin exactly {A.B2, A.B2.C} — the \`changed\` nodes in its ` +
+      `scope, the deleted node under its mapped identity (SPEC 5.6, 10.4, ` +
+      `10.5)`,
+  );
+  const two = `${prefix} A's parent-consistency item`;
+  const aItem = requireItem(exported.items, "parent-consistency", D9_A, two);
+  assertSameJson(
+    identitySet(aItem.context),
+    [D9_AB2],
+    `${two}: context exactly {A.B2} — the one changed branch beneath A, ` +
+      `entering as A's child on it (SPEC 10.5)`,
+  );
+  assertSameJson(
+    identitySet(aItem.origin),
+    [D9_AB2, D9_AB2C].sort(),
+    `${two}: origin exactly {A.B2, A.B2.C} — the \`changed\` nodes in A's ` +
+      `subtree, the deleted node linked under its baseline parent mapped ` +
+      `through the journal (SPEC 5.6, 6.3, 10.5)`,
+  );
+  assertBlockedBy(
+    aItem,
+    [ab2Item.id],
+    `${two}: blocked by A.B2's subtree-coherence item, A.B2 itself visited ` +
+      `(SPEC 10.5)`,
+  );
+}
+
+/**
+ * The audit contrast (TEST-SPEC T10.5-9; SPEC 10.5, 10.6): an audit session
+ * over the baseline file, A.B.C's section deleted by manual edit after
+ * `create`, then A.B.C's item resolved `updated` — its re-derivation: A.B's
+ * re-derived item has scope exactly {A.B} — an audit item's scope is the
+ * node and all its current descendants, and an audit session has no
+ * baseline to link a deleted node under — and an empty `blockedBy`, while
+ * A.B.C's item remains (10.5: items no longer generated remain).
+ */
+async function runD9AuditContrast(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  const prefix = "T10.5-9 audit contrast";
+  await buildOk(product, workspace, `${prefix} \`build\``);
+  await expectExit(
+    product,
+    workspace,
+    ["review", "create", "--strategy", "audit", "--name", "a"],
+    0,
+    `${prefix} \`review create --strategy audit --name a\``,
+  );
+  const created = await sessionStatus(product, workspace, "a", prefix);
+  const abcId = requireRow(created, "subtree-coherence", D9_ABC, prefix).id;
+  await workspace.file(D9_FILE, T10_5_9_D_DELETED);
+  await buildOk(
+    product,
+    workspace,
+    `${prefix} \`build\` after A.B.C's deletion`,
+  );
+  await resolveOk(
+    product,
+    workspace,
+    "a",
+    abcId,
+    "updated",
+    `${prefix} \`review resolve a ${abcId} --status updated\` (A.B.C's item) ` +
+      `— its re-derivation (SPEC 10.5)`,
+  );
+  const exported = await exportSession(product, workspace, "a", prefix);
+  const label = `${prefix} A.B's re-derived item`;
+  const abItem = requireItem(exported.items, "subtree-coherence", D9_AB, label);
+  assertSameJson(
+    identitySet(requireScopeNodes(abItem, label)),
+    [D9_AB],
+    `${label}: scope exactly {A.B} — an audit item's scope is the node and ` +
+      `all its current descendants (SPEC 10.6), the re-derivation taking ` +
+      `the generated scope (10.5); a deleted node is the child of its ` +
+      `baseline parent in a baseline session alone, and an audit session ` +
+      `has none`,
+  );
+  assertBlockedBy(
+    abItem,
+    [],
+    `${label}: blockedBy empty — recomputed for every generated item (SPEC ` +
+      `10.5), an audit item's being its child sections' items (10.6), of ` +
+      `which A.B has none left`,
+  );
+  const remaining = exported.items.filter((item) => item.id === abcId);
+  if (
+    remaining.length !== 1 ||
+    remaining[0].kind !== "subtree-coherence" ||
+    remaining[0].scope.node !== D9_ABC
+  ) {
+    fail(
+      `${prefix}: A.B.C's subtree-coherence item ${abcId} remains in the ` +
+        `session, scoped at A.B.C — items no longer generated remain (SPEC ` +
+        `10.5); \`export\` presents ` +
+        JSON.stringify(
+          exported.items.map(
+            (item) => `${item.id} ${item.kind} ${item.scope.node}`,
+          ),
+        ),
+    );
+  }
+}
+
+/**
+ * Assert one of the present-node arm's sessions (TEST-SPEC T10.5-9; SPEC
+ * 6.3, 10.4, 10.5): exactly two items, in this order, in `status` and
+ * `export` — P1's subtree-coherence item, scope and origin exactly {P1},
+ * and P2's, scope {P2, P2.M, P2.M.c} — each with context specs/R.mdx and an
+ * empty `blockedBy`. After the deletion (`deleted`) P2.M.c is presented
+ * absent under its baseline identity mapped forward through the journal,
+ * never under P1.M.c, and P2's origin is exactly {P2, P2.M, P2.M.c}; in the
+ * twin, before it, every scope node is present and P2's origin is exactly
+ * {P2}.
+ */
+async function assertP9Session(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  deleted: boolean,
+  prefix: string,
+): Promise<void> {
+  const status = await sessionStatus(product, workspace, name, prefix);
+  assertSameJson(
+    kindScopeSequence(status.items),
+    P9_EXPECTED_SEQUENCE,
+    `${prefix}: exactly two items, in this order — P1's subtree-coherence ` +
+      `item, then P2's: P1 and P2 each \`changed\` with no \`changed\` ` +
+      `ancestor, of one depth, kind, and file, in document order (SPEC ` +
+      `10.5)` +
+      (deleted
+        ? "; P2.M and P2.M.c, `changed` beneath P2, are skipped under it"
+        : ""),
+  );
+  const exported = await exportSession(product, workspace, name, prefix);
+  assertSameJson(
+    exportKindScopeSequence(exported.items),
+    P9_EXPECTED_SEQUENCE,
+    `${prefix}: \`export\` presents the same two items in item order (SPEC ` +
+      `10.5, 10.7)`,
+  );
+  if (deleted) {
+    assertNeverPresented(exported.items, P9_P1MC, P9_P2MC, prefix);
+  }
+  const one = `${prefix} P1's subtree-coherence item`;
+  const p1Item = requireItem(exported.items, "subtree-coherence", P9_P1, one);
+  assertScopePresence(
+    p1Item,
+    [[P9_P1, true]],
+    one,
+    "exactly {P1} — the moved P2.M and P2.M.c, present nodes, are children " +
+      "of their current parents, never of their baseline parents (SPEC " +
+      "10.5); a product linking present nodes under their baseline parents " +
+      "gives it the moved subtree, {P1, P2.M, P2.M.c}",
+  );
+  assertSameJson(
+    identitySet(p1Item.origin),
+    [P9_P1],
+    `${one}: origin exactly {P1} — the \`changed\` nodes in its scope (SPEC ` +
+      `10.5)`,
+  );
+  const two = `${prefix} P2's subtree-coherence item`;
+  const p2Item = requireItem(exported.items, "subtree-coherence", P9_P2, two);
+  assertScopePresence(
+    p2Item,
+    [
+      [P9_P2, true],
+      [P9_P2M, true],
+      [P9_P2MC, !deleted],
+    ],
+    two,
+    deleted
+      ? "exactly {P2, P2.M, P2.M.c} — P2.M a present node, the child of its " +
+          "current parent P2, and P2.M.c, deleted, the child of its baseline " +
+          "parent P1.M mapped through the journal to P2.M (SPEC 6.3, 10.5), " +
+          "presented absent under its baseline identity mapped forward, " +
+          "never under P1.M.c (10.4); a product linking present nodes under " +
+          "their baseline parents gives it the scope {P2}, and one linking " +
+          "the deleted node under its unmapped baseline parent leaves P2.M.c " +
+          "out"
+      : "exactly {P2, P2.M, P2.M.c}, every node present — the moved nodes " +
+          "children of their current parents (SPEC 10.5); a product linking " +
+          "present nodes under their baseline parents gives it the scope {P2}",
+  );
+  assertSameJson(
+    identitySet(p2Item.origin),
+    deleted ? [P9_P2, P9_P2M, P9_P2MC].sort() : [P9_P2],
+    `${two}: origin exactly ` +
+      (deleted
+        ? "{P2, P2.M, P2.M.c} — the `changed` nodes in its scope, P2.M " +
+          "having lost a child and P2.M.c deleted"
+        : "{P2} — the one `changed` node in its scope, the moved subtree's " +
+          "nodes keeping their hashes") +
+      ` (SPEC 5.6, 6.2, 10.5)`,
+  );
+  for (const [item, label] of [
+    [p1Item, one],
+    [p2Item, two],
+  ] as const) {
+    assertSameJson(
+      identitySet(item.context),
+      [P9_ROOT],
+      `${label}: context specs/R.mdx — a top-level node's ancestor chain, ` +
+        `its file's root (SPEC 10.5)`,
+    );
+    assertBlockedBy(
+      item,
+      [],
+      `${label}: blockedBy empty — path-blocks gives blockers to ` +
+        `parent-consistency items alone (SPEC 10.2, 10.5)`,
+    );
+  }
+}
+
+/**
+ * The present-node arm (TEST-SPEC T10.5-9): the baseline committed and
+ * built; the journaled `move specs/R.mdx#P1.M specs/R.mdx#P2.M` (P1.M.c
+ * becoming P2.M.c by prefix replacement, SPEC 6.5), leaving `changed` the
+ * two parents alone (an `impact` premise; 6.2); the twin's session `t`
+ * created and asserted; P2.M.c's section deleted by manual edit and built,
+ * the `changed` nodes then exactly P1, P2, P2.M, and P2.M.c, deleted (an
+ * `impact` premise); and the session `s` created and asserted.
+ */
+async function runP9PresentNodeArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  const prefix = "T10.5-9 present-node arm";
+  await workspace.gitInit();
+  const base = await workspace.gitCommitAll("baseline");
+  await buildOk(product, workspace, `${prefix} \`build\` at the baseline`);
+  await expectExit(
+    product,
+    workspace,
+    ["move", "specs/R.mdx#P1.M", "specs/R.mdx#P2.M"],
+    0,
+    `${prefix} \`move specs/R.mdx#P1.M specs/R.mdx#P2.M\` (SPEC 6.5)`,
+  );
+  const twin = `${prefix}'s twin, stopping before the deletion`;
+  assertSameJson(
+    await changedNodes(product, workspace, base, twin),
+    [P9_P1, P9_P2].sort(),
+    `${twin} staging premise: the move leaves \`changed\` the two parents ` +
+      `alone — P1 lost its child P1.M, P2 gained P2.M — every node of the ` +
+      `moved subtree keeping its hashes, none with own-content bytes on the ` +
+      `moved construct's boundary lines (SPEC 5.6, 6.2; TEST-SPEC T6.2-3)`,
+  );
+  await createBaseSession(product, workspace, base, "t", twin);
+  await assertP9Session(product, workspace, "t", false, twin);
+  await editRewritten(
+    workspace,
+    P9_FILE,
+    P9_P2MC_SECTION,
+    "",
+    `${prefix} P2.M.c's section, deleted by manual edit after the move`,
+  );
+  await buildOk(
+    product,
+    workspace,
+    `${prefix} \`build\` after P2.M.c's deletion`,
+  );
+  assertSameJson(
+    await changedNodes(product, workspace, base, prefix),
+    [P9_P1, P9_P2, P9_P2M, `${P9_P2MC} (deleted)`].sort(),
+    `${prefix} staging premise: the \`changed\` nodes are exactly the two ` +
+      `parents, P2.M — it lost a child — and P2.M.c, deleted, reported ` +
+      `under its baseline identity mapped forward through the journal, both ` +
+      `beneath the \`changed\` P2 (SPEC 5.6, 6.3, 9.3)`,
+  );
+  await createBaseSession(product, workspace, base, "s", prefix);
+  await assertP9Session(product, workspace, "s", true, prefix);
+}
+
+const T10_5_9 = defineProductTest({
+  id: "T10.5-9",
+  title:
+    "deleted and moved nodes in baseline sessions: a node deleted since the baseline is the child of its baseline parent, identities mapped through the journal, and a present node the child of its current parent, as node relations and node sets alone — with specs/D.mdx holding A holding A.B holding A.B.C committed as the baseline and A.B.C's section then deleted (A.B `changed` and visited, A not `changed`), `review create --base` yields exactly two items: A.B's subtree-coherence item (scope {A.B, A.B.C}, A.B.C presented absent under its baseline identity; context the root and A; origin exactly {A.B, A.B.C}) and A's parent-consistency item (context exactly {A.B}; origin exactly {A.B, A.B.C}; blockedBy A.B's item); texts and hashes keep their definitions — in `export`, `show`, and `next --json` (A.B's item, then A's once A.B's is resolved `no-change`) A.B's item's scope text and A's item's context text for A.B are A.B's current subtree text and A's item's scope text A's current own text, byte-equal to `query node`'s, no scope or context text carrying A.B.C's token, and the items' `current` entries — A.B's subtreeHash and metadataHash in A.B's item, A's ownHash and metadataHash and A.B's subtreeHash in A's — equal `query node`'s after the deletion, A.B.C's the explicit absent marker; journal arm: after `rename` A.B to A.B2 and A.B2.C's section deleted, the same two items, A.B2's scope and origin {A.B2, A.B2.C}, the deleted node presented absent under A.B2.C — never under A.B.C, never outside A.B2's subtree — and A's item context {A.B2}, origin {A.B2, A.B2.C}; audit contrast: in an audit session, A.B.C's section deleted after `create` and A.B.C's item resolved `updated`, A.B's re-derived item has scope exactly {A.B} and an empty blockedBy, A.B.C's item remaining; present-node arm: with specs/R.mdx holding P1 holding P1.M holding P1.M.c, then P2, every tag alone on its line, after the journaled `move specs/R.mdx#P1.M specs/R.mdx#P2.M` (the two parents alone `changed`) and P2.M.c's section deleted, exactly two items in order — P1's subtree-coherence item (scope and origin exactly {P1}) and P2's (scope {P2, P2.M, P2.M.c}, P2.M.c presented absent under its baseline identity mapped forward through the journal, never under P1.M.c; origin exactly {P2, P2.M, P2.M.c}) — each with context specs/R.mdx and an empty blockedBy, and a twin stopping before the deletion yields the same two items, P2's scope every node present and its origin exactly {P2} (SPEC 1.6, 5.5, 5.6, 6.2, 6.3, 10.4, 10.5, 10.6, 10.7)",
+  run: async (product) => {
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [D9_FILE]: T10_5_9_D_INITIAL },
+      (workspace) => runD9DeletedNodeFixture(product, workspace),
+    );
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [D9_FILE]: T10_5_9_D_INITIAL },
+      (workspace) => runD9JournalArm(product, workspace),
+    );
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [D9_FILE]: T10_5_9_D_INITIAL },
+      (workspace) => runD9AuditContrast(product, workspace),
+    );
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [P9_FILE]: T10_5_9_R_INITIAL },
+      (workspace) => runP9PresentNodeArm(product, workspace),
+    );
+  },
+});
+
 /** TEST-SPEC §10.5, in canonical ID order (SUITE-36). */
 export const section105Tests: readonly ProductTestEntry[] = [
   T10_5_1,
@@ -5912,4 +6979,5 @@ export const section105Tests: readonly ProductTestEntry[] = [
   T10_5_6,
   T10_5_7,
   T10_5_8,
+  T10_5_9,
 ];

@@ -519,6 +519,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // absent with the explicit absent marker — and 10.7's payload rule behind
   // item (3)'s byte-asserted scope text, the root's subtree text.
   "T10.5-8": ["10.5", "10.2", "10.4", "10.7"],
+  // T10.5-9: 10.4's recorded-state and presentation rules behind the
+  // items' `current` entries — the relevant hashes at creation, the
+  // deleted A.B.C's explicit absent marker — and every deleted node
+  // presented absent under its baseline identity mapped forward through
+  // the journal; 10.6's audit scope behind the audit contrast (the node
+  // and all its current descendants); and 10.7's payload rule behind the
+  // texts byte-asserted against `query node`'s in `export`, `show`, and
+  // `next --json`.
+  "T10.5-9": ["10.5", "10.4", "10.6", "10.7"],
   "T10.6-1": ["10", "10.6"],
   "T10.6-2": ["10.6"],
   "T10.6-3": ["10.6"],
