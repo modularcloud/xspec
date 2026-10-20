@@ -489,9 +489,18 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "14",
   ],
   "T10.2-1": ["10.2", "12.0"],
-  "T10.2-2": ["10.2"],
+  // T10.2-2: 10.4's recorded-state rules behind its re-derivation arms'
+  // entries — T10.5-8's d, in item (3)'s scope though its baseline state
+  // lacks it, recorded absent with the explicit absent marker, and
+  // T10.4-7(a)'s d2, joined at the re-derivation of x's `updated` resolve,
+  // recorded present in x's `current` once that resolve records against the
+  // item as re-derived (its absence from x's `baseline` is 10.2's own rule).
+  "T10.2-2": ["10.2", "10.4"],
   "T10.2-3": ["10.2"],
-  "T10.2-4": ["10.2"],
+  // T10.2-4: 10.5's new items added with current state, behind its
+  // re-derivation arm — T10.5-5's newly visited p.q's `current`, written at
+  // the re-derivation that adds its item and reported as so recorded.
+  "T10.2-4": ["10.2", "10.5"],
   "T10.3-1": ["10.3"],
   "T10.3-2": ["10.3"],
   "T10.4-1": ["10.4"],

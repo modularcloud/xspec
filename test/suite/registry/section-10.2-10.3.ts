@@ -8,10 +8,12 @@
 //
 // SPEC 10.2: an item carries `id`, `kind`, `scope`, `context`, `reason`,
 // `origin`, `baseline`, `current`, `status`, optional `note`, `blockedBy`.
-// `baseline` is fixed when the item enters the session (baseline-commit
-// values in a `--base` session; current-graph values at entry in audit and
-// coverage sessions); `current` is written at creation and rewritten at each
-// resolve, and reads report both as recorded — read-time invalidation
+// `baseline` is fixed when the item enters the session — at `create`, at a
+// re-derivation (10.5), or at a `split` — from its baseline state
+// (baseline-commit values in a `--base` session; current-graph values at
+// entry in audit and coverage sessions), a node joining the item later
+// gaining no entry in it; `current` is written at creation and rewritten at
+// each resolve, and reads report both as recorded — read-time invalidation
 // compares `current` against the current graph and never rewrites it.
 // SPEC 10.3: `updated`/`no-change`/`skipped` are the resolved statuses;
 // `unresolved` and `invalidated` need review; a blocker that becomes
@@ -26,6 +28,24 @@
 //   record's string leaves, and the wrong moments' pairwise-distinct hash
 //   values must appear nowhere in it. Distinctness of every discriminating
 //   value is asserted as a staging premise first.
+// - The re-derivation arms (T10.2-2's newly visited p.q, authored section,
+//   absent-marker, and joined-node arms; T10.2-4's newly visited p.q) read
+//   the recorded state entry by entry instead, through the review adapter's
+//   `decodeRecordedState` (review.ts; its assumed RecordedState shape): a
+//   node's entry, its presence, and its hashes or the explicit absent marker
+//   (SPEC 10.2, 10.4). A scope node's entry must present it present, its
+//   subtreeHash and metadataHash each equal to the expected moment's capture
+//   (`assertRecordedEntryAt`), a value equal to a wrong moment's diagnosed as
+//   that moment's product; T10.5-8's d must have an entry presenting it
+//   absent with the marker and none of its current hashes; and T10.4-7's d2
+//   must have no entry in x's `baseline` and a present one in its `current`.
+//   These arms run over the exported stagings of T10.4-7(a)
+//   (section-10.4.ts `stageT1047Session`, `stageT1047State`), T10.5-5's
+//   newly visited p.q (section-10.5.ts `stageT1055NewlyVisitedQ`, whose
+//   `query node` captures at the baseline and at p's `updated` resolve they
+//   compare against), and T10.5-8's four-edit staging (`stageT1058Session`),
+//   each in a fresh workspace of its own; the stagings assert staging
+//   premises alone.
 // - "Fixed"/"still carries the recording" across reads is canonical-JSON
 //   equality of the recorded member between reads (key order normalized:
 //   SPEC.md fixes the information, not the concrete shape or member order,
@@ -63,17 +83,25 @@
 //   TEST-SPEC text stages it (T10.2-3 reads directly after the deletion).
 //
 // Sources staged after a body's first product invocation — every edit of a
-// built workspace's spec source in T10.2-2, T10.2-4, T10.3-1, and T10.3-2 —
-// are staged-source records (helpers/staged-mdx.ts, S-9: judged before any
-// product exists), the same template calls moved to module level; T10.2-1's
-// edit precedes its first `build` (staged between `gitCommitAll` and the
-// build), so S-7's sweep reaches it against the stub and it stays plain.
+// built workspace's spec source in T10.2-2, T10.2-4, T10.3-1, and T10.3-2,
+// T10.2-2's authored section b and its edit, and T10.2-4's further p.q edit
+// (spelled by section-10.5.ts's `t1055PqSource`) — are staged-source records
+// (helpers/staged-mdx.ts, S-9: judged before any product exists), the same
+// template calls moved to module level; so are the initial sources of every
+// workspace a body creates after its first invocation — this module's, and
+// the exported stagings' `T10_4_7_INITIAL_FILES`, `T10_5_5_PQ_INITIAL_FILES`,
+// and `T10_5_8_INITIAL_FILES`, each staged beside `SPECS_ONLY_CONFIG`.
+// T10.2-1's edit precedes its first `build` (staged between `gitCommitAll`
+// and the build), so S-7's sweep reaches it against the stub and it stays
+// plain.
 
 import * as fsp from "node:fs/promises";
 import type {
   ItemKind,
   ItemStatus,
+  NodeHashes,
   NodeReport,
+  RecordedNodeEntry,
   ReviewItem,
   SessionStatusReport,
   SessionStatusRow,
@@ -84,6 +112,7 @@ import {
   decodeItemReport,
   decodeNextReport,
   decodeNodeReport,
+  decodeRecordedState,
   decodeSessionStatusReport,
 } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
@@ -96,6 +125,23 @@ import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
+  T10_4_7_INITIAL_FILES,
+  T10_4_7_NODES,
+  stageT1047Session,
+  stageT1047State,
+} from "./section-10.4.js";
+import {
+  T10_5_5_PQ_FILE,
+  T10_5_5_PQ_INITIAL_FILES,
+  T10_5_5_PQ_NODES,
+  T10_5_8_INITIAL_FILES,
+  T10_5_8_NODES,
+  T10_5_8_STAGINGS,
+  stageT1055NewlyVisitedQ,
+  stageT1058Session,
+  t1055PqSource,
+} from "./section-10.5.js";
+import {
   assertSameJson,
   buildOk,
   expectErrorDocument,
@@ -105,12 +151,12 @@ import {
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
-// T10.2-2's audit arm stages it in a workspace created after the body's
-// first invocations, so it is one TypeScript staged-source record
-// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), well-formed,
-// staged wherever this configuration is.
+// T10.2-2's later arms and T10.2-4's re-derivation arm stage it in
+// workspaces created after the body's first invocations, so it is one
+// TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript and
+// timing clauses), well-formed, staged wherever this configuration is.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T10.2-2 xspec.config.ts — one spec group",
+  "T10.2-2/T10.2-4 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -425,6 +471,101 @@ function assertPairwiseDistinct(
         );
       }
     }
+  }
+}
+
+/**
+ * One node's hashes in a `query node` capture map — an exported staging's
+ * captures (section-10.4.ts, section-10.5.ts) — diagnosed where the capture
+ * lacks the node: a harness staging defect, never a product verdict.
+ */
+function capturedNodeHashes(
+  captures: ReadonlyMap<string, NodeHashes>,
+  node: string,
+  context: string,
+): NodeHashes {
+  const hashes = captures.get(node);
+  if (hashes === undefined) {
+    fail(
+      `${context}: harness staging defect — no \`query node\` capture ` +
+        `exists for ${node}, so its recorded values cannot be checked`,
+    );
+  }
+  return hashes;
+}
+
+/** A node's entry in a decoded recorded state, or undefined where none. */
+function recordedEntryOf(
+  entries: readonly RecordedNodeEntry[],
+  node: string,
+): RecordedNodeEntry | undefined {
+  return entries.find((entry) => entry.node === node);
+}
+
+/** The nodes a decoded recorded state holds entries for (diagnoses). */
+function recordedNodes(entries: readonly RecordedNodeEntry[]): string {
+  return JSON.stringify(entries.map((entry) => entry.node));
+}
+
+/** A moment whose values a recorded entry must not hold (diagnoses). */
+interface WrongMoment {
+  /** The moment, as a diagnosis names it ("at the re-derivation"). */
+  readonly moment: string;
+  /** The node's hashes `query node` reported at that moment. */
+  readonly hashes: NodeHashes;
+  /** The failing product whose record holds them. */
+  readonly product: string;
+}
+
+/**
+ * Assert `node`'s entry in an item's recorded state — its `baseline` or its
+ * `current` (SPEC 10.2, 10.4), read entry by entry through the review
+ * adapter's `decodeRecordedState` — presents it present and holds the
+ * subtreeHash and metadataHash `query node` reported at the expected moment,
+ * a subtree-coherence item's relevant hashes for its scope node (10.4); `why`
+ * names the rule. A recorded value equal to a wrong moment's is diagnosed as
+ * that moment's product: the caller first asserts, as a staging premise, that
+ * the wrong moments' subtreeHashes differ from the expected one.
+ */
+function assertRecordedEntryAt(
+  item: ReviewItem,
+  field: "baseline" | "current",
+  node: string,
+  expected: NodeHashes,
+  wrong: readonly WrongMoment[],
+  why: string,
+  context: string,
+): void {
+  const label = `${context}: \`${field}\``;
+  const entries = decodeRecordedState(item, field, context);
+  const entry = recordedEntryOf(entries, node);
+  if (entry === undefined) {
+    fail(
+      `${label} holds no entry for ${node} — ${why}; it holds entries for ` +
+        recordedNodes(entries),
+    );
+  }
+  if (!entry.present || entry.absentMarker) {
+    fail(
+      `${label}: ${node}'s entry must present it present, with its hashes — ` +
+        `${why}; got ${JSON.stringify(entry)}`,
+    );
+  }
+  for (const hash of ["subtreeHash", "metadataHash"] as const) {
+    const recorded = entry.hashes[hash];
+    if (recorded === expected[hash]) continue;
+    const match = wrong.find((moment) => moment.hashes[hash] === recorded);
+    fail(
+      `${label}: ${node}'s ${hash} must be ${JSON.stringify(expected[hash])}, ` +
+        `the value \`query node\` reported at the expected moment — ${why}; ` +
+        `got ` +
+        (recorded === undefined
+          ? "none recorded"
+          : match !== undefined
+            ? `${JSON.stringify(recorded)}, its value ${match.moment} — ` +
+              match.product
+            : JSON.stringify(recorded)),
+    );
   }
 }
 
@@ -948,11 +1089,41 @@ const T10_2_2_UNCOVERED_E1 = stagedMdx(
   t2CovSpec("Uncovered leaf e1."),
 );
 
+// T10.2-2's audit re-derivation arm: a top-level section b authored after
+// `create`, after a — specs/A.mdx's kid kept at e0 — and b's text edited
+// once its item has entered.
+const T2_B = "specs/A.mdx#b";
+
+/** specs/A.mdx with the kid text at e0 and a top-level b holding `bText`. */
+function t2AuthoredSpec(bText: string): string {
+  return `${t2Spec("Kid text e0.")}\n<S id="b">\n${bText}\n</S>\n`;
+}
+
+// Both staged into a workspace already built, so staged-source records (S-9).
+const T10_2_2_AUTHORED_R0 = stagedMdx(
+  "T10.2-2 specs/A.mdx with a top-level b authored after `create`, b at r0 (audit re-derivation arm)",
+  t2AuthoredSpec("Bee text r0."),
+);
+const T10_2_2_AUTHORED_R1 = stagedMdx(
+  "T10.2-2 specs/A.mdx with b's text at r1, after b's item entered (audit re-derivation arm)",
+  t2AuthoredSpec("Bee text r1."),
+);
+
+// The nodes the re-derivation arms over exported stagings read: T10.5-5's
+// newly visited p.q, T10.5-8's d, and T10.4-7's d1 and d2.
+const PQ_Q = T10_5_5_PQ_NODES.q;
+const R8_ROOT = T10_5_8_NODES.rRoot;
+const R8_D = T10_5_8_NODES.d;
+const J7_D1 = T10_4_7_NODES.d1;
+const J7_D2 = T10_4_7_NODES.d2;
+
 /**
- * Premises and expectations shared by the three T10.2-2 arms: `entry` is the
- * moment whose values `baseline` must hold; `others` are the later moments
- * whose subtreeHash values must appear nowhere in it. The relevant hashes of
- * a `subtree-coherence`/`uncovered-requirement` item scoped at a childless
+ * Premises and expectations shared by T10.2-2's `--base`, audit, and
+ * coverage arms at `create` (its re-derivation arms read entries through
+ * `assertRecordedEntryAt` instead): `entry` is the moment whose values
+ * `baseline` must hold; `others` are the later moments whose subtreeHash
+ * values must appear nowhere in it. The relevant hashes of a
+ * `subtree-coherence`/`uncovered-requirement` item scoped at a childless
  * node are its subtreeHash and metadataHash (SPEC 10.4).
  */
 function assertBaselineRecord(
@@ -983,10 +1154,370 @@ function assertBaselineRecord(
   }
 }
 
+/**
+ * T10.2-2's `--base` re-derivation arm (TEST-SPEC T10.2-2; SPEC 10.2): 10.2
+ * fixes `baseline` from the item's baseline state wherever the item enters,
+ * so an item a re-derivation adds holds the recorded baseline commit's
+ * values too. T10.5-5's newly visited p.q (`stageT1055NewlyVisitedQ`, in a
+ * fresh workspace holding `T10_5_5_PQ_INITIAL_FILES`): its text edited
+ * before `create --base` and again before p's `updated` resolve, whose
+ * re-derivation adds p.q's subtree-coherence item; that item's `baseline`
+ * holds p.q's subtreeHash and metadataHash at the baseline commit, never
+ * those of the graph at the re-derivation — each captured via `query node`
+ * at its moment, their subtreeHashes differing (a staging premise).
+ */
+async function runT1022NewlyVisitedArm(product: ProductBinding): Promise<void> {
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    T10_5_5_PQ_INITIAL_FILES,
+    async (workspace) => {
+      const label =
+        "T10.2-2 --base re-derivation arm (T10.5-5's newly visited p.q)";
+      const staged = await stageT1055NewlyVisitedQ(product, workspace, label);
+      const atBase = capturedNodeHashes(staged.baseline, PQ_Q, label);
+      const atReDerivation = capturedNodeHashes(
+        staged.atReDerivation,
+        PQ_Q,
+        label,
+      );
+      assertPairwiseDistinct(
+        [
+          ["p.q's subtreeHash at the baseline commit", atBase.subtreeHash],
+          [
+            "p.q's subtreeHash at the re-derivation",
+            atReDerivation.subtreeHash,
+          ],
+          ["p.q's constant metadataHash", atBase.metadataHash],
+        ],
+        label,
+      );
+      const qId = requireRow(
+        await sessionStatus(product, workspace, "s", label),
+        "subtree-coherence",
+        PQ_Q,
+        `${label} after the re-derivation`,
+      ).id;
+      assertRecordedEntryAt(
+        await showItem(product, workspace, "s", qId, label),
+        "baseline",
+        PQ_Q,
+        atBase,
+        [
+          {
+            moment: "at the re-derivation",
+            hashes: atReDerivation,
+            product:
+              "a baseline filled from the graph at the re-derivation that " +
+              "added the item",
+          },
+        ],
+        "a `--base` session fixes `baseline` from the graph at the recorded " +
+          "baseline commit wherever the item enters, a re-derivation included " +
+          "(SPEC 10.2)",
+        `${label} \`review show s <p.q item>\``,
+      );
+    },
+  );
+}
+
+/**
+ * T10.2-2's audit re-derivation arm (TEST-SPEC T10.2-2; SPEC 10.2): in a
+ * session without a baseline an item's `baseline` holds the current graph's
+ * values at the moment it enters — for a section authored after `create`,
+ * the re-derivation that adds its item. Over the audit arm's fixture (a
+ * holding a.k, e0), a top-level b is authored after `create --strategy
+ * audit` and a.k's item resolved `updated` (the re-derivation, 10.5): b's
+ * subtree-coherence item's `baseline` holds b's subtreeHash and metadataHash
+ * captured via `query node` right before that resolve, b present — never
+ * absent, as a baseline taken from the graph at `create`, which lacked b,
+ * records it — and still holds them, the same information, after a further
+ * edit to b's text, never the live values.
+ */
+async function runT1022AuthoredSectionArm(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    { [T2_SPEC]: T10_2_2_KID_E0 },
+    async (workspace) => {
+      const label =
+        "T10.2-2 audit re-derivation arm (b authored after `create`)";
+      await buildOk(product, workspace, `${label} \`build\` at e0`);
+      await expectExit(
+        product,
+        workspace,
+        ["review", "create", "--strategy", "audit", "--name", "s"],
+        0,
+        `${label} \`review create --strategy audit --name s\``,
+      );
+      const kId = requireRow(
+        await sessionStatus(product, workspace, "s", label),
+        "subtree-coherence",
+        T2_AK,
+        label,
+      ).id;
+      await workspace.file(T2_SPEC, T10_2_2_AUTHORED_R0);
+      await buildOk(
+        product,
+        workspace,
+        `${label} \`build\` once b is authored`,
+      );
+      const atReDerivation = await queryNode(
+        product,
+        workspace,
+        T2_B,
+        `${label}, the re-derivation moment (r0)`,
+      );
+      await expectExit(
+        product,
+        workspace,
+        ["review", "resolve", "s", kId, "--status", "updated"],
+        0,
+        `${label} \`review resolve s <a.k item> --status updated\` — the ` +
+          `re-derivation adding b's item (SPEC 10.5)`,
+      );
+      const bId = requireRow(
+        await sessionStatus(product, workspace, "s", label),
+        "subtree-coherence",
+        T2_B,
+        `${label} after the re-derivation`,
+      ).id;
+      const why =
+        "in a session without a baseline, `baseline` holds the values of the " +
+        "current graph at the moment the item enters — for b, authored after " +
+        "`create`, the re-derivation that added its item (SPEC 10.2); a " +
+        "baseline taken from the graph at `create`, which lacked b, records " +
+        "it absent";
+      const firstLabel = `${label}, first read`;
+      const first = await showItem(product, workspace, "s", bId, firstLabel);
+      assertRecordedEntryAt(
+        first,
+        "baseline",
+        T2_B,
+        atReDerivation.hashes,
+        [],
+        why,
+        `${firstLabel} \`review show s <b item>\``,
+      );
+
+      await workspace.file(T2_SPEC, T10_2_2_AUTHORED_R1);
+      await buildOk(product, workspace, `${label} \`build\` at r1`);
+      const afterEdit = await queryNode(
+        product,
+        workspace,
+        T2_B,
+        `${label}, post-entry edit moment (r1)`,
+      );
+      assertPairwiseDistinct(
+        [
+          ["b's r0 subtreeHash", atReDerivation.hashes.subtreeHash],
+          ["b's r1 subtreeHash", afterEdit.hashes.subtreeHash],
+          ["b's constant metadataHash", atReDerivation.hashes.metadataHash],
+        ],
+        label,
+      );
+      const secondLabel = `${label}, second read (after the edit)`;
+      const second = await showItem(product, workspace, "s", bId, secondLabel);
+      assertRecordedEntryAt(
+        second,
+        "baseline",
+        T2_B,
+        atReDerivation.hashes,
+        [
+          {
+            moment: "after the post-entry edit (r1)",
+            hashes: afterEdit.hashes,
+            product: "a baseline recomputed from the live graph",
+          },
+        ],
+        why,
+        `${secondLabel} \`review show s <b item>\``,
+      );
+      assertSameInformation(
+        second.baseline,
+        first.baseline,
+        `${label}: \`baseline\` is fixed at item entry — the same ` +
+          `information across reads bracketing a further edit (SPEC 10.2)`,
+      );
+    },
+  );
+}
+
+/**
+ * T10.2-2's absent-marker arm (TEST-SPEC T10.2-2; SPEC 10.2, 10.4): a scope
+ * node the item's baseline state lacks has an entry there presenting it
+ * absent, its hashes the explicit absent marker. T10.5-8's item (3) — R's
+ * root's subtree-coherence item, its scope holding d, added since the
+ * baseline (`stageT1058Session` over the four-edit staging, in a fresh
+ * workspace holding `T10_5_8_INITIAL_FILES`): its `baseline`, read through
+ * `decodeRecordedState`, holds an entry for d presenting it absent, the
+ * marker in place of hashes — never d's current hashes, and never no entry,
+ * which 10.2 leaves to a node joining the item later.
+ */
+async function runT1022AbsentMarkerArm(product: ProductBinding): Promise<void> {
+  const staging = T10_5_8_STAGINGS[0];
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    T10_5_8_INITIAL_FILES,
+    async (workspace) => {
+      const label = `T10.2-2 absent-marker arm (T10.5-8's item (3), ${staging.name})`;
+      const session = await stageT1058Session(
+        product,
+        workspace,
+        staging,
+        label,
+      );
+      const rootId = requireRow(
+        await sessionStatus(product, workspace, "s", label),
+        "subtree-coherence",
+        R8_ROOT,
+        label,
+      ).id;
+      const context = `${label} \`review show s <R's root item>\``;
+      const entries = decodeRecordedState(
+        await showItem(product, workspace, "s", rootId, label),
+        "baseline",
+        context,
+      );
+      const recorded = `${context}: \`baseline\``;
+      const d = recordedEntryOf(entries, R8_D);
+      if (d === undefined) {
+        fail(
+          `${recorded} holds no entry for d — d is in item (3)'s scope, ` +
+            `added since the baseline (T10.5-8: the root and every section ` +
+            `of its file), so the item's baseline state lacks it and its ` +
+            `entry presents it absent, its hashes the explicit absent marker ` +
+            `(SPEC 10.2, 10.4); 10.2 leaves an entry out only for a node ` +
+            `joining the item later, and a product entering only the nodes ` +
+            `the baseline graph holds gives d none; it holds entries for ` +
+            recordedNodes(entries),
+        );
+      }
+      const dCurrent = capturedNodeHashes(session.atCreate, R8_D, label);
+      const dHeld = Object.values(d.hashes).filter(
+        (hash): hash is string => hash !== undefined,
+      );
+      if (
+        dHeld.some(
+          (hash) =>
+            hash === dCurrent.subtreeHash || hash === dCurrent.metadataHash,
+        )
+      ) {
+        fail(
+          `${recorded}: d's entry holds d's current hashes — never: the ` +
+            `baseline state lacks d, so its entry presents it absent, its ` +
+            `hashes the explicit absent marker (SPEC 10.2, 10.4); got ` +
+            JSON.stringify(d),
+        );
+      }
+      if (d.present) {
+        fail(
+          `${recorded}: d's entry must present it absent — the baseline ` +
+            `state lacks d (SPEC 10.2, 10.4); got ${JSON.stringify(d)}`,
+        );
+      }
+      if (!d.absentMarker || dHeld.length > 0) {
+        fail(
+          `${recorded}: d's entry must record the explicit absent marker in ` +
+            `place of hashes, as an absent node's hashes are recorded (SPEC ` +
+            `10.2, 10.4); got ${JSON.stringify(d)}`,
+        );
+      }
+    },
+  );
+}
+
+/**
+ * T10.2-2's joined-node arm (TEST-SPEC T10.2-2; SPEC 10.2, 10.4): a node
+ * that joins an item later gains no entry in `baseline`. T10.4-7(a)'s
+ * staging (`stageT1047Session`, `stageT1047State`, in a fresh workspace
+ * holding `T10_4_7_INITIAL_FILES`): d2's text edited after `create --base`,
+ * then x's dependency-consistency item resolved `updated` — the
+ * re-derivation it triggers makes d2 join x's origin ({d1, d2}, a premise
+ * from `show`), and the resolve assigns and records once that re-derivation
+ * is done, against the item as re-derived (10.4). Read through
+ * `decodeRecordedState`, x's `baseline`, fixed when x entered at `create`,
+ * holds no entry for d2, while its `current` records d2 present — the
+ * resolve records every scope, context, and origin node's presence; a
+ * product recording before the re-derivation never records d2.
+ */
+async function runT1022JoinedNodeArm(product: ProductBinding): Promise<void> {
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    T10_4_7_INITIAL_FILES,
+    async (workspace) => {
+      const label = "T10.2-2 joined-node arm (T10.4-7(a)'s d2)";
+      const { baseline, xId } = await stageT1047Session(
+        product,
+        workspace,
+        label,
+      );
+      await stageT1047State(
+        product,
+        workspace,
+        baseline,
+        "d2-edited",
+        `${label} after d2's edit`,
+      );
+      await expectExit(
+        product,
+        workspace,
+        ["review", "resolve", "s", xId, "--status", "updated"],
+        0,
+        `${label} \`review resolve s <x item> --status updated\` after d2's ` +
+          `edit — the re-derivation making d2 join x's origin (SPEC 10.5)`,
+      );
+      const context = `${label} after x's \`updated\` resolve`;
+      const x = await showItem(product, workspace, "s", xId, context);
+      const shown = `${context} \`review show s <x item>\``;
+      assertSameJson(
+        identitySet(x.origin),
+        [J7_D1, J7_D2].sort(),
+        `${shown}: staging premise — the re-derivation x's \`updated\` ` +
+          `resolve triggers makes d2 join x's origin, presented {d1, d2} ` +
+          `(SPEC 5.6, 10.5; T10.4-7(a))`,
+      );
+      const baselineEntries = decodeRecordedState(x, "baseline", shown);
+      const inBaseline = recordedEntryOf(baselineEntries, J7_D2);
+      if (inBaseline !== undefined) {
+        fail(
+          `${shown}: \`baseline\` holds an entry for d2, ` +
+            `${JSON.stringify(inBaseline)} — a node that joins the item later ` +
+            `gains no entry in \`baseline\` (SPEC 10.2): x's \`baseline\` was ` +
+            `fixed when x entered the session at \`create\`, and d2 joined ` +
+            `its origin only at the re-derivation; it holds entries for ` +
+            recordedNodes(baselineEntries),
+        );
+      }
+      const currentEntries = decodeRecordedState(x, "current", shown);
+      const inCurrent = recordedEntryOf(currentEntries, J7_D2);
+      if (inCurrent === undefined) {
+        fail(
+          `${shown}: \`current\` holds no entry for d2 — an \`updated\` ` +
+            `resolve assigns and records once the re-derivation it triggers ` +
+            `is done, against the item as re-derived, recording every scope, ` +
+            `context, and origin node's presence (SPEC 10.2, 10.4), so d2, ` +
+            `joined to x's origin by that re-derivation, is recorded present; ` +
+            `a product recording before the re-derivation never records d2; ` +
+            `it holds entries for ${recordedNodes(currentEntries)}`,
+        );
+      }
+      if (!inCurrent.present || inCurrent.absentMarker) {
+        fail(
+          `${shown}: \`current\`'s entry for d2 must record it present — d2 ` +
+            `is present when the resolve records it, and only an absent ` +
+            `node's hashes are recorded as the explicit absent marker (SPEC ` +
+            `10.2, 10.4); got ${JSON.stringify(inCurrent)}`,
+        );
+      }
+    },
+  );
+}
+
 const T10_2_2 = defineProductTest({
   id: "T10.2-2",
   title:
-    "item `baseline` is fixed when the item enters the session: in a `--base` session it holds the scope node's relevant-hash values at the recorded baseline commit — not at creation time, and unchanged by further edits (byte-distinct `query node` captures at each moment discriminate); in audit and coverage sessions it holds the values of the current graph at item entry, likewise untouched by later edits (SPEC 10.2, 10.4, 10.7)",
+    "item `baseline` is fixed when the item enters the session: in a `--base` session it holds the scope node's relevant-hash values at the recorded baseline commit — not at creation time, and unchanged by further edits (byte-distinct `query node` captures at each moment discriminate); in audit and coverage sessions it holds the values of the current graph at item entry, likewise untouched by later edits; items entering by re-derivation too: in a `--base` session T10.5-5's newly visited p.q — its text edited before `create` and again before p's `updated` resolve, whose re-derivation adds its item — has a `baseline` holding p.q's subtreeHash and metadataHash at the recorded baseline commit, never those of the graph at the re-derivation; in an audit session a section b authored after `create` enters at an `updated` resolve's re-derivation with the values of the graph at it, b present, unchanged by a further edit to b; a scope node the item's baseline state lacks has an entry presenting it absent, its hashes the explicit absent marker — T10.5-8's item (3), whose scope holds d, added since the baseline — never d's current hashes, never no entry; and a node joining an item later gains no entry in `baseline` — T10.4-7(a)'s d2, joining x's origin at x's `updated` resolve's re-derivation, has none in x's `baseline`, while x's `current` records d2 present once that resolve records it; the re-derivation arms read each recorded state entry by entry (SPEC 10.2, 10.4, 10.5, 10.7)",
   run: async (product) => {
     // --- `--base` arm: baseline-commit values, not creation-time values ---
     await withWorkspace(
@@ -1235,6 +1766,12 @@ const T10_2_2 = defineProductTest({
         );
       },
     );
+
+    // --- items entering by re-derivation; absent and joined nodes ---
+    await runT1022NewlyVisitedArm(product);
+    await runT1022AuthoredSectionArm(product);
+    await runT1022AbsentMarkerArm(product);
+    await runT1022JoinedNodeArm(product);
   },
 });
 
@@ -1447,10 +1984,164 @@ const T10_2_4_WITHOUT_K_V3 = stagedMdx(
   t4SpecWithoutK("Control kid v3."),
 );
 
+// T10.2-4's re-derivation arm: p.q's text edited once more after its item
+// entered at the re-derivation, p's own text still reverted — spelled by
+// T10.5-5's exported `t1055PqSource`, a staged-source record (S-9).
+const T10_2_4_PQ_FURTHER_EDIT = stagedMdx(
+  "T10.2-4 specs/P.mdx with p.q's text at v3 after its item entered at the re-derivation (p's own text still reverted)",
+  t1055PqSource("Pee own v0.", "Cue text v3."),
+);
+
+/**
+ * Read p.q's item through `show` and `export` (T10.2-4's re-derivation arm;
+ * SPEC 10.2, 10.4, 10.7): each reports its `current` holding p.q's
+ * subtreeHash and metadataHash captured at p's `updated` resolve, and the
+ * item `unresolved` — created so (10.2) and never resolved, so never
+ * invalidated (10.4: invalidation applies to resolved items alone).
+ */
+async function assertT1024NewlyVisitedReads(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  qId: string,
+  atResolve: NodeHashes,
+  wrong: readonly WrongMoment[],
+  context: string,
+): Promise<void> {
+  const why =
+    "an item a re-derivation adds is created there, its `current` written " +
+    "then — 10.2: written at item creation; 10.5: new items are added with " +
+    "current state — and reads report it as recorded, never recomputed " +
+    "from the live graph (SPEC 10.2, 10.4); a product writing `current` " +
+    "only at `create`, `split`, and resolve, or copying `baseline` into it, " +
+    "fails";
+  const shownLabel = `${context} \`review show s <p.q item>\``;
+  const shown = await showItem(product, workspace, "s", qId, context);
+  const exportLabel = `${context} \`review export s --json\``;
+  const exported = requireItem(
+    decodeExportReport(
+      await runJson(
+        product,
+        workspace,
+        ["review", "export", "s", "--json"],
+        exportLabel,
+      ),
+      exportLabel,
+    ).items,
+    qId,
+    exportLabel,
+  );
+  for (const [item, label] of [
+    [shown, shownLabel],
+    [exported, `${exportLabel}, the p.q item`],
+  ] as const) {
+    assertRecordedEntryAt(item, "current", PQ_Q, atResolve, wrong, why, label);
+    if (item.status !== "unresolved") {
+      fail(
+        `${label}: p.q's item, created \`unresolved\` at the re-derivation ` +
+          `and never resolved, stays \`unresolved\` — invalidation applies to ` +
+          `resolved items alone (SPEC 10.2, 10.4); got ${item.status}`,
+      );
+    }
+  }
+}
+
+/**
+ * T10.2-4's re-derivation arm (TEST-SPEC T10.2-4; SPEC 10.2, 10.5): an item
+ * a re-derivation adds is created there, its `current` written then.
+ * T10.5-5's newly visited p.q (`stageT1055NewlyVisitedQ`, in a fresh
+ * workspace holding `T10_5_5_PQ_INITIAL_FILES`): its item enters at p's
+ * `updated` resolve, and `show` and `export` report its `current` holding
+ * p.q's subtreeHash and metadataHash captured via `query node` at that
+ * resolve — never its `baseline` values, the baseline commit's, which
+ * differ (T10.2-2) — and still after a further edit to p.q's text, the item
+ * staying `unresolved`; a product reporting `current` recomputed from the
+ * live graph fails at that later read.
+ */
+async function runT1024NewlyVisitedArm(product: ProductBinding): Promise<void> {
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    T10_5_5_PQ_INITIAL_FILES,
+    async (workspace) => {
+      const label = "T10.2-4 re-derivation arm (T10.5-5's newly visited p.q)";
+      const staged = await stageT1055NewlyVisitedQ(product, workspace, label);
+      const atBase = capturedNodeHashes(staged.baseline, PQ_Q, label);
+      const atResolve = capturedNodeHashes(staged.atReDerivation, PQ_Q, label);
+      assertPairwiseDistinct(
+        [
+          ["p.q's subtreeHash at the baseline commit", atBase.subtreeHash],
+          ["p.q's subtreeHash at p's `updated` resolve", atResolve.subtreeHash],
+          ["p.q's constant metadataHash", atBase.metadataHash],
+        ],
+        label,
+      );
+      const qId = requireRow(
+        await sessionStatus(product, workspace, "s", label),
+        "subtree-coherence",
+        PQ_Q,
+        `${label} after the re-derivation`,
+      ).id;
+      const copiedBaseline: WrongMoment = {
+        moment: "at the baseline commit, its `baseline` value",
+        hashes: atBase,
+        product: "a product copying `baseline` into `current`",
+      };
+      await assertT1024NewlyVisitedReads(
+        product,
+        workspace,
+        qId,
+        atResolve,
+        [copiedBaseline],
+        `${label}, right after the resolve`,
+      );
+
+      await workspace.file(T10_5_5_PQ_FILE, T10_2_4_PQ_FURTHER_EDIT);
+      await buildOk(
+        product,
+        workspace,
+        `${label} \`build\` after p.q's further edit`,
+      );
+      const afterEdit = await queryNode(
+        product,
+        workspace,
+        PQ_Q,
+        `${label}, after p.q's further edit`,
+      );
+      assertPairwiseDistinct(
+        [
+          ["p.q's subtreeHash at the baseline commit", atBase.subtreeHash],
+          ["p.q's subtreeHash at p's `updated` resolve", atResolve.subtreeHash],
+          [
+            "p.q's subtreeHash after the further edit",
+            afterEdit.hashes.subtreeHash,
+          ],
+          ["p.q's constant metadataHash", atBase.metadataHash],
+        ],
+        label,
+      );
+      await assertT1024NewlyVisitedReads(
+        product,
+        workspace,
+        qId,
+        atResolve,
+        [
+          copiedBaseline,
+          {
+            moment: "after the further edit",
+            hashes: afterEdit.hashes,
+            product:
+              "a product reporting `current` recomputed from the live graph",
+          },
+        ],
+        `${label}, after p.q's further edit`,
+      );
+    },
+  );
+}
+
 const T10_2_4 = defineProductTest({
   id: "T10.2-4",
   title:
-    "`current` is reported as recorded, never recomputed: an item recording R1 at creation, resolved `no-change` at R2, then edited to R3 (R1/R2/R3 pairwise-distinct `query node` captures) is reported `invalidated` by `show`, `next --json`, and `export` with `current` holding R2's relevant hashes — not R1, not R3; a never-resolved sibling receiving the same edits stays `unresolved` with `current` equal to its create-time R1; after a re-resolve, deleting the scope node presents it absent while `current` still carries the resolve-time recording unchanged (SPEC 10.2, 10.4, 10.7)",
+    "`current` is reported as recorded, never recomputed: an item recording R1 at creation, resolved `no-change` at R2, then edited to R3 (R1/R2/R3 pairwise-distinct `query node` captures) is reported `invalidated` by `show`, `next --json`, and `export` with `current` holding R2's relevant hashes — not R1, not R3; a never-resolved sibling receiving the same edits stays `unresolved` with `current` equal to its create-time R1; after a re-resolve, deleting the scope node presents it absent while `current` still carries the resolve-time recording unchanged; an item a re-derivation adds is created there, its `current` written then: T10.5-5's newly visited p.q, whose item enters at p's `updated` resolve, is reported by `show` and `export` with `current` holding p.q's subtreeHash and metadataHash captured via `query node` at that resolve — never its `baseline` values, which differ — and still after a further edit to p.q's text, its item staying `unresolved`, read entry by entry (SPEC 10.2, 10.4, 10.5, 10.7)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -1722,6 +2413,10 @@ const T10_2_4 = defineProductTest({
         }
       },
     );
+
+    // --- Re-derivation arm: `current` written where a re-derivation adds
+    // the item ---
+    await runT1024NewlyVisitedArm(product);
   },
 });
 
