@@ -76,19 +76,22 @@
 //   `--config`, both unrelated-tree runs, and both link runs) reports
 //   `findings`, `configuration`, `sources`, `derived`, `recorded`,
 //   `graphData`, `journal`, `sessions`, and `lock` byte-identical to it,
-//   and every answer `graphData` exactly `.xspec` and `lock` exactly
-//   `.xspec/lock` — a product relativizing every path to the working
-//   directory (`../../.xspec/lock` from `a/b`), or judging occupancy, the
-//   session listing, or the record through a path resolved against the
-//   working directory, fails (helpers/inventory-invariance.ts, one code
-//   path with the Windows leg's drive-mismatch arm, which holds its
-//   drive-mismatch runs to a root run on that leg).
+//   and every answer `graphData` exactly `.xspec`, `journal`'s `path`
+//   exactly `.xspec/journal`, and `lock` exactly `.xspec/lock` — a product
+//   relativizing every path to the working directory (`../../.xspec/lock`
+//   from `a/b`), judging occupancy, the session listing, or the record
+//   through a path resolved against the working directory, or spelling the
+//   area, the journal path, or the lock path otherwise in every answer
+//   alike (which the byte-identity alone would admit), fails
+//   (helpers/inventory-invariance.ts, one code path with the Windows leg's
+//   drive-mismatch arm, which holds its drive-mismatch runs to a root run
+//   on that leg and pins the three spellings in its every answer alike).
 //
 // T11.6-2 — configuration, sources, derived map (SPEC 11.6, 12.7, 7.3,
 // 13.1). The resolved configuration view with every default and inferred
 // kind explicit, every discovered source with its group memberships, and the
 // per-spec-source derived map — all determined by configuration and
-// discovery, asserted before any build has ever run. Five workspaces:
+// discovery, asserted before any build has ever run. Six workspaces:
 //
 // - defaults: `markdown` key absent → the view reports `{"emit": false,
 //   "outDir": null}` (7.3) and `derived[*].markdown` null for every source
@@ -136,7 +139,22 @@
 //   `targetTags` `["a", "z"]` and the selector's `tags` `["a", "b"]` (byte
 //   order, the repeated element collapsed), `edgeKinds` `["depends",
 //   "references"]` and `kinds` `["depends", "embeds"]` (5.2's order,
-//   however configured) — the inventory arms T7.4-1 and T7.5-1 cite.
+//   however configured) — the inventory arms T7.4-1 and T7.5-1 cite;
+// - selector forms (12.7: each selector `{"group", "kind"}`, `{"files"}`,
+//   or `{"tags"}`, 7.5): beside the group and `tags` forms above, the
+//   `files` form — the rule `capture`, from `{ files: "src/$1.ts" }` to
+//   `{ files: "specs/$1.mdx" }`, the `to` referencing the `from`'s capture
+//   (7.5), reports `from` exactly `{"files": "src/$1.ts"}` and `to` exactly
+//   `{"files": "specs/$1.mdx"}`, and the rule `interieur`, from T7.5-4's
+//   inside-root spelling `{ files: "./src/*.ts" }` to the group `product`,
+//   reports `from` exactly `{"files": "./src/*.ts"}` — each selector one
+//   member, its pattern as configured, verbatim (11.6: each rule carried
+//   with its complete definition; a selector glob matches by its spelling,
+//   7, T7.5-4): no member beside it (decoder-enforced, H-3), captures
+//   neither dropped nor expanded, the spelling never normalized
+//   (`"src/*.ts"`). Each of the three is diagnosed on its own before the
+//   whole-map compare, so a product reporting a `files` selector under any
+//   other shape or spelling fails there by name.
 //
 // Every list is asserted in its pinned order, the set-valued members
 // included: a tag set in byte order with duplicates collapsed and a kind
@@ -317,6 +335,7 @@ import type {
   InventoryDerivedEntry,
   InventoryDocument,
   InventoryJournalStatus,
+  InventoryPolicySelector,
   InventoryResolvedMap,
   PathValue,
 } from "../../helpers/adapters/index.js";
@@ -338,7 +357,7 @@ import {
 } from "../../helpers/assertions.js";
 import type { InvarianceStaging } from "../../helpers/inventory-invariance.js";
 import {
-  assertAreaAndLockSpellings,
+  assertAreaJournalAndLockSpellings,
   assertInvariancePremise,
   assertMembersInvariant,
   stageInvarianceWorkspace,
@@ -561,13 +580,15 @@ interface AnchoredAnswer {
  * document as the entire stdout (JSON-only, SPEC 11); `findings` decoding to
  * [] (form-exact, 12.7); the `root`/`config` anchoring byte-exact; and the
  * member-invariance arm's checks over the whole eleven-member document
- * (`decodeInventoryDocument`, form-exact): `graphData` exactly `.xspec` and
- * `lock` exactly `.xspec/lock`, and, when `reference` is given (every run
- * but the flag-less root run, whose answer is the reference), every member
- * but `root` and `config` byte-identical to the reference's
- * (helpers/inventory-invariance.ts; SPEC 11.6, 1.5). `env`, when given, is
- * merged last into the child's environment: the physical-anchoring arms set
- * `PWD` to the link path a shell would present.
+ * (`decodeInventoryDocument`, form-exact): `graphData` exactly `.xspec`,
+ * `journal`'s `path` exactly `.xspec/journal`, and `lock` exactly
+ * `.xspec/lock` in every answer (`assertAreaJournalAndLockSpellings`), and,
+ * when `reference` is given (every run but the flag-less root run, whose
+ * answer is the reference), every member but `root` and `config`
+ * byte-identical to the reference's (helpers/inventory-invariance.ts; SPEC
+ * 11.6, 1.5). `env`, when given, is merged last into the child's
+ * environment: the physical-anchoring arms set `PWD` to the link path a
+ * shell would present.
  */
 async function expectAnchoredInventory(
   product: ProductBinding,
@@ -610,7 +631,7 @@ async function expectAnchoredInventory(
   assertAnchoringMember(anchoring.root, expected.root, "`root`", context);
   assertAnchoringMember(anchoring.config, expected.config, "`config`", context);
   const document = decodeInventoryDocument(doc, context);
-  assertAreaAndLockSpellings(document, context);
+  assertAreaJournalAndLockSpellings(document, context);
   if (reference !== undefined) {
     assertMembersInvariant(
       document,
@@ -627,7 +648,7 @@ async function expectAnchoredInventory(
 const T11_6_1 = defineProductTest({
   id: "T11.6-1",
   title:
-    "inventory anchoring: `root` and `config` are identified relative to the invocation working directory in the canonical spelling — from the workspace root `.` and `xspec.config.ts` (flag-less and `--json` forms carrying the same information, JSON-only), from nested `a/b` `../..` and `../../xspec.config.ts`, from sibling directories with `--config` the ascent-`..`-then-descent form joined with `/` (multi-segment ascent and descent included), no `.` segments, no trailing separator — byte-exact, a pure function of invocation input whatever the `--config` spelling (relative or absolute); drive-mismatch arm, Linux side (E-6): from an unrelated directory tree the anchoring is still the pure relative form — no absolute form ever appears on the Linux leg — and repeated invocations are byte-identical, deterministic per invocation; physical anchoring, Linux leg: from a working directory reached through the symbolic link `R/L` → `R/a/b` inside the root (the link path as working directory and `PWD`) `root` is `../..` and `config` `../../xspec.config.ts` — the physical relation, never the link's lexical `..` — and from `elsewhere/link/a` under a link above both (`elsewhere/link` → `R`) `..` and `../xspec.config.ts`, unchanged, the configuration file entering as its own name under the root so spelled; every answer complete and finding-free at exit 0; every other member invariant under the working directory: on the workspace built with Markdown emission enabled, a journal (a journaled `rename`), and a review session — every path-bearing member carrying content in the root run's answer, the journal occupied — every run but the flag-less root run (the `--json` root run, nested `a/b`, the siblings under `--config`, the unrelated tree, and each link) reports `findings`, `configuration`, `sources`, `derived`, `recorded`, `graphData`, `journal`, `sessions`, and `lock` byte-identical to the root run's, `graphData` exactly `.xspec` and `lock` exactly `.xspec/lock` in every answer — a product relativizing every path to the working directory (`../../.xspec/lock` from `a/b`) fails (SPEC 11.6, 12.7, 12.0, 11, 1.5)",
+    "inventory anchoring: `root` and `config` are identified relative to the invocation working directory in the canonical spelling — from the workspace root `.` and `xspec.config.ts` (flag-less and `--json` forms carrying the same information, JSON-only), from nested `a/b` `../..` and `../../xspec.config.ts`, from sibling directories with `--config` the ascent-`..`-then-descent form joined with `/` (multi-segment ascent and descent included), no `.` segments, no trailing separator — byte-exact, a pure function of invocation input whatever the `--config` spelling (relative or absolute); drive-mismatch arm, Linux side (E-6): from an unrelated directory tree the anchoring is still the pure relative form — no absolute form ever appears on the Linux leg — and repeated invocations are byte-identical, deterministic per invocation; physical anchoring, Linux leg: from a working directory reached through the symbolic link `R/L` → `R/a/b` inside the root (the link path as working directory and `PWD`) `root` is `../..` and `config` `../../xspec.config.ts` — the physical relation, never the link's lexical `..` — and from `elsewhere/link/a` under a link above both (`elsewhere/link` → `R`) `..` and `../xspec.config.ts`, unchanged, the configuration file entering as its own name under the root so spelled; every answer complete and finding-free at exit 0; every other member invariant under the working directory: on the workspace built with Markdown emission enabled, a journal (a journaled `rename`), and a review session — every path-bearing member carrying content in the root run's answer, the journal occupied — every run but the flag-less root run (the `--json` root run, nested `a/b`, the siblings under `--config`, the unrelated tree, and each link) reports `findings`, `configuration`, `sources`, `derived`, `recorded`, `graphData`, `journal`, `sessions`, and `lock` byte-identical to the root run's, `graphData` exactly `.xspec`, `journal`'s `path` exactly `.xspec/journal`, and `lock` exactly `.xspec/lock` in every answer — a product relativizing every path to the working directory (`../../.xspec/lock` from `a/b`) fails (SPEC 11.6, 12.7, 12.0, 11, 1.5)",
   run: async (product) => {
     selfCheckSpellingRule();
     const workspace = await TestWorkspace.create({
@@ -659,9 +680,10 @@ const T11_6_1 = defineProductTest({
       // is not asserted, SPEC.md not requiring it). The flag-less root
       // run's answer is the reference of the member-invariance arm: its
       // every path-bearing member carries content (the staging premise),
-      // `graphData` is exactly `.xspec` and `lock` exactly `.xspec/lock`,
-      // and every later run reports every member but `root` and `config`
-      // byte-identical to it (SPEC 11.6, 1.5).
+      // `graphData` is exactly `.xspec`, `journal`'s `path` exactly
+      // `.xspec/journal`, and `lock` exactly `.xspec/lock` (as in every
+      // answer), and every later run reports every member but `root` and
+      // `config` byte-identical to it (SPEC 11.6, 1.5, 6.1).
       const atRoot: AnchoringExpectation = {
         root: ".",
         config: CONFIG_FILE,
@@ -1033,6 +1055,80 @@ export default defineConfig({
 );
 
 /**
+ * Selector forms (SPEC 7.5, 12.7, 11.6): two rules over `files` selectors —
+ * `capture`, from `{ files: "src/$1.ts" }` to `{ files: "specs/$1.mdx" }`,
+ * the `to` referencing the `from`'s one capture (7.5), and `interieur`,
+ * from T7.5-4's inside-root spelling `{ files: "./src/*.ts" }` (its `.`
+ * segment matching nothing, 7) to the spec group `product`, its kind
+ * inferred. Each is valid — `$1` appears once in `from` and `to`
+ * references no capture absent from it; each glob lies inside the root by
+ * its spelling (7) — so the inventory answers, and the view must report
+ * each `files` pattern as configured, verbatim, its captures neither
+ * dropped nor expanded and its spelling never normalized.
+ */
+const RESOLVED_SELECTORS_CONFIG = stagedTs(
+  "T11.6-2 selectors workspace xspec.config.ts — files selectors: a capture referenced across from and to, and T7.5-4's inside-root ./src/*.ts",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    product: ["specs/*.mdx"]
+  },
+  code: {
+    app: ["src/*.ts"]
+  },
+  policy: [
+    {
+      name: "capture",
+      type: "forbidden",
+      from: { files: "src/$1.ts" },
+      to: { files: "specs/$1.mdx" }
+    },
+    {
+      name: "interieur",
+      type: "forbidden",
+      from: { files: "./src/*.ts" },
+      to: { group: "product" }
+    }
+  ]
+})
+`,
+);
+
+/**
+ * The selectors workspace's three `files` selectors as the view reports
+ * them (SPEC 11.6, 12.7, 7.5): each `{"files"}` alone, its pattern exactly
+ * as configured — `capture`'s `$1` neither dropped nor expanded on either
+ * side, `interieur`'s `./` never normalized away (`"src/*.ts"`). Each is
+ * diagnosed on its own before the whole-map compare.
+ */
+const T11_6_2_FILES_SELECTORS: readonly {
+  readonly rule: string;
+  readonly side: "from" | "to";
+  readonly what: string;
+  readonly selector: InventoryPolicySelector;
+}[] = [
+  {
+    rule: "capture",
+    side: "from",
+    what: "a capture-bearing pattern",
+    selector: { files: "src/$1.ts" },
+  },
+  {
+    rule: "capture",
+    side: "to",
+    what: "a pattern referencing the `from`'s capture",
+    selector: { files: "specs/$1.mdx" },
+  },
+  {
+    rule: "interieur",
+    side: "from",
+    what: "T7.5-4's inside-root spelling",
+    selector: { files: "./src/*.ts" },
+  },
+];
+
+/**
  * The three dependency edge kinds in the order 5.2 lists them — the 12.7
  * value form of a defaulted `edgeKinds`/`kinds` (SPEC 7.4/7.5: both default
  * to all three; 12.7: a kind set is in 5.2's order, however configured).
@@ -1279,11 +1375,19 @@ const T11_6_2_SETS_X = stagedMdx(
   "T11.6-2 sets workspace aux/x.mdx",
   '<S id="x">\nAnnexe.\n</S>\n',
 );
+const T11_6_2_SELECTORS_A = stagedMdx(
+  "T11.6-2 selectors workspace specs/a.mdx",
+  '<S id="cible">\nVisée par les règles.\n</S>\n',
+);
+const T11_6_2_SELECTORS_SRC = stagedTs(
+  "T11.6-2 selectors workspace src/a.ts",
+  "export const origine = 1;\n",
+);
 
 const T11_6_2 = defineProductTest({
   id: "T11.6-2",
   title:
-    'inventory configuration, sources, derived map: the resolved configuration view with every default and inferred kind explicit — `markdown` key absent resolving to {"emit": false, "outDir": null}; a defaulted profile reporting `targets` "leaves", `edgeKinds` all three, `boundaryKind` explicit though inferred, `targetTags` null; a defaulted rule reporting `kinds` all three with each group selector\'s `kind` explicit though inferred; group references inside profiles and rules staying configured names resolving against the reported group list — every discovered source with its group memberships (a two-group file carrying both, in configuration order); the derived map per spec source: generated-module path (13.1) and Markdown emit destination exactly while emission is enabled (default next-to-source and `markdown.outDir`-redirected placements alike), both present before any build has run — determined by configuration and discovery; a spec-group file without the `.mdx` extension (14.19 staged beside it) listed in `sources` while `module` and `markdown` are the stated structural-absence null, whereas an `.mdx` source whose path is invalid keeps both — `specs/a\'b.mdx` (7.1\'s bar) → module `specs/a\'b.xspec.ts` and, emitting next to sources, Markdown `specs/a\'b.md`, and on the Linux leg a non-UTF-8-named `.mdx` source → its `source`, `module`, and `markdown` each in the marked byte form, the final `.mdx` replaced by `.xspec.ts` and `.md` — per-source derived paths following the `NAME.mdx` name shape alone; with emission disabled — the key absent, or `emit` false with `outDir` configured — `markdown` null for every source; every answer complete and finding-free at exit 0, the defaults workspace asserted in the flag-less and `--json` forms against one expectation; configured sets — a profile\'s `targetTags: ["z", "a", "a"]` and `edgeKinds: ["references", "depends"]`, a rule\'s `kinds: ["embeds", "depends"]`, and a `tags` selector `["b", "a", "b"]`, each valid and read as a set — reported in their 12.7 value forms, form-exact and compared literally: ["a", "z"] and ["a", "b"] in byte order with the repeated element collapsed, ["depends", "references"] and ["depends", "embeds"] in 5.2\'s order however configured (SPEC 11.6, 12.7, 7.3, 7.4, 7.5, 7.1, 13.1, 12.0, 11)',
+    'inventory configuration, sources, derived map: the resolved configuration view with every default and inferred kind explicit — `markdown` key absent resolving to {"emit": false, "outDir": null}; a defaulted profile reporting `targets` "leaves", `edgeKinds` all three, `boundaryKind` explicit though inferred, `targetTags` null; a defaulted rule reporting `kinds` all three with each group selector\'s `kind` explicit though inferred; group references inside profiles and rules staying configured names resolving against the reported group list — every discovered source with its group memberships (a two-group file carrying both, in configuration order); the derived map per spec source: generated-module path (13.1) and Markdown emit destination exactly while emission is enabled (default next-to-source and `markdown.outDir`-redirected placements alike), both present before any build has run — determined by configuration and discovery; a spec-group file without the `.mdx` extension (14.19 staged beside it) listed in `sources` while `module` and `markdown` are the stated structural-absence null, whereas an `.mdx` source whose path is invalid keeps both — `specs/a\'b.mdx` (7.1\'s bar) → module `specs/a\'b.xspec.ts` and, emitting next to sources, Markdown `specs/a\'b.md`, and on the Linux leg a non-UTF-8-named `.mdx` source → its `source`, `module`, and `markdown` each in the marked byte form, the final `.mdx` replaced by `.xspec.ts` and `.md` — per-source derived paths following the `NAME.mdx` name shape alone; with emission disabled — the key absent, or `emit` false with `outDir` configured — `markdown` null for every source; every answer complete and finding-free at exit 0, the defaults workspace asserted in the flag-less and `--json` forms against one expectation; configured sets — a profile\'s `targetTags: ["z", "a", "a"]` and `edgeKinds: ["references", "depends"]`, a rule\'s `kinds: ["embeds", "depends"]`, and a `tags` selector `["b", "a", "b"]`, each valid and read as a set — reported in their 12.7 value forms, form-exact and compared literally: ["a", "z"] and ["a", "b"] in byte order with the repeated element collapsed, ["depends", "references"] and ["depends", "embeds"] in 5.2\'s order however configured; selector forms — beside the group and `tags` forms, a rule from `{ files: "src/$1.ts" }` to `{ files: "specs/$1.mdx" }`, the `to` referencing the `from`\'s capture, reporting `from` exactly {"files": "src/$1.ts"} and `to` exactly {"files": "specs/$1.mdx"}, and a rule from T7.5-4\'s inside-root spelling `{ files: "./src/*.ts" }` reporting `from` exactly {"files": "./src/*.ts"} — each selector one member, its pattern as configured, verbatim: no member beside it, captures neither dropped nor expanded, the spelling never normalized (SPEC 11.6, 12.7, 7.3, 7.4, 7.5, 7.1, 7, 13.1, 12.0, 11)',
   run: async (product) => {
     // --- defaults workspace: every default and inferred kind explicit ------
     const defaults = await TestWorkspace.create({
@@ -1743,6 +1847,110 @@ const T11_6_2 = defineProductTest({
       );
     } finally {
       await sets.dispose();
+    }
+
+    // --- selector forms: each `files` selector reported verbatim ----------
+    const selectors = await TestWorkspace.create({
+      files: {
+        [CONFIG_FILE]: RESOLVED_SELECTORS_CONFIG,
+        "specs/a.mdx": T11_6_2_SELECTORS_A,
+        "src/a.ts": T11_6_2_SELECTORS_SRC,
+      },
+    });
+    try {
+      const map = await expectResolvedInventory(
+        product,
+        selectors.root,
+        ["inventory"],
+        "T11.6-2 — `inventory` with `files` selectors: a capture referenced " +
+          "across a rule's `from` and `to`, and T7.5-4's inside-root `./` " +
+          "spelling (SPEC 7.5, 12.7, 11.6)",
+      );
+      // Each `files` selector diagnosed on its own before the whole-map
+      // compare: the decode already holds it to `{"files"}` alone (no
+      // member beside it, H-3), so what remains is its pattern — exactly
+      // as configured, a capture neither dropped nor expanded, the
+      // spelling never normalized (SPEC 11.6, 12.7, 7.5, 7).
+      for (const { rule, side, what, selector } of T11_6_2_FILES_SELECTORS) {
+        const reported = map.configuration.policy.find(
+          (candidate) => candidate.name === rule,
+        );
+        if (reported === undefined) {
+          fail(
+            `T11.6-2 — the rule ${JSON.stringify(rule)}: the resolved view ` +
+              `carries every configured policy rule with its complete ` +
+              `definition (SPEC 11.6, 12.7); got rules ` +
+              `${map.configuration.policy.map((r) => JSON.stringify(r.name)).join(", ") || "none"}`,
+          );
+        }
+        assertSameJson(
+          reported[side],
+          selector,
+          `T11.6-2 — the rule ${JSON.stringify(rule)}'s \`${side}\` ` +
+            `selector, ${what}: a \`files\` selector is reported as the one ` +
+            `member \`files\`, its pattern as configured, verbatim — no ` +
+            `member beside it, captures neither dropped nor expanded, the ` +
+            `spelling never normalized (SPEC 11.6: each rule carried with ` +
+            `its complete definition; 12.7: \`{"files"}\`; 7.5, 7: a ` +
+            `selector glob matches by its spelling)`,
+        );
+      }
+      assertSameJson(
+        map,
+        {
+          configuration: {
+            specs: [{ name: "product", globs: ["specs/*.mdx"] }],
+            code: [{ name: "app", globs: ["src/*.ts"] }],
+            markdown: { emit: false, outDir: null },
+            coverage: [],
+            policy: [
+              {
+                name: "capture",
+                type: "forbidden",
+                // Both patterns verbatim: the `from`'s capture kept, and
+                // the `to`'s reference to it never expanded (7.5).
+                from: { files: "src/$1.ts" },
+                to: { files: "specs/$1.mdx" },
+                kinds: ALL_EDGE_KINDS,
+              },
+              {
+                name: "interieur",
+                type: "forbidden",
+                // The inside-root spelling as configured — its `.` segment
+                // kept, never normalized to "src/*.ts" (7, T7.5-4).
+                from: { files: "./src/*.ts" },
+                // A group selector with its inferred kind explicit (7.5,
+                // 12.7).
+                to: { group: "product", kind: "spec" },
+                kinds: ALL_EDGE_KINDS,
+              },
+            ],
+          },
+          sources: [
+            {
+              path: "specs/a.mdx",
+              groups: [{ name: "product", kind: "spec" }],
+            },
+            { path: "src/a.ts", groups: [{ name: "app", kind: "code" }] },
+          ],
+          derived: [
+            {
+              source: "specs/a.mdx",
+              module: "specs/a.xspec.ts",
+              markdown: null,
+            },
+          ],
+        } satisfies InventoryResolvedMap,
+        "T11.6-2 — selector forms: each `files` selector one member, its " +
+          "pattern as configured, verbatim — `capture`'s `from` exactly " +
+          '{"files": "src/$1.ts"} and `to` exactly {"files": ' +
+          '"specs/$1.mdx"}, `interieur`\'s `from` exactly {"files": ' +
+          '"./src/*.ts"} — beside the group selector with its inferred ' +
+          "kind explicit and each rule's `kinds` defaulted to all three " +
+          "(SPEC 11.6, 12.7, 7.5)",
+      );
+    } finally {
+      await selectors.dispose();
     }
   },
 });

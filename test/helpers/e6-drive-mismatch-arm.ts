@@ -45,9 +45,10 @@
 // leg, each path-bearing member of its answer carrying content, and each
 // drive-mismatch run reports every member but `root` and `config` —
 // `findings`, `configuration`, `sources`, `derived`, `recorded`,
-// `graphData`, `journal`, `sessions`, `lock` — byte-identical to it,
-// `graphData` exactly `.xspec` and `lock` exactly `.xspec/lock`: the
-// platform-absolute form is the anchoring's alone.
+// `graphData`, `journal`, `sessions`, `lock` — byte-identical to it, and
+// every answer `graphData` exactly `.xspec`, `journal`'s `path` exactly
+// `.xspec/journal`, and `lock` exactly `.xspec/lock`: the platform-absolute
+// form is the anchoring's alone.
 //
 // Drive letters are machine-global, per-logon-session state: the claim
 // tries free letters until `subst` accepts one, so concurrent harness
@@ -91,7 +92,7 @@ import {
 import { ANCHOR_CONFIG, ANCHOR_SOURCE } from "./e6-drive-mismatch.js";
 import type { InvarianceStaging } from "./inventory-invariance.js";
 import {
-  assertAreaAndLockSpellings,
+  assertAreaJournalAndLockSpellings,
   assertInvariancePremise,
   assertMembersInvariant,
   stageInvarianceWorkspace,
@@ -375,11 +376,12 @@ function assertAnchoringMember(
  * `root`/`config` anchoring byte-exact against `expected`, with `form`
  * naming the spelling rule the expectation realizes; and the
  * member-invariance arm's checks over the whole eleven-member document
- * (`decodeInventoryDocument`, form-exact): `graphData` exactly `.xspec` and
- * `lock` exactly `.xspec/lock`, and, when `reference` is given (the
- * drive-mismatch runs, against the root run on this leg), every member but
- * `root` and `config` byte-identical to the reference's
- * (helpers/inventory-invariance.ts; SPEC 11.6, 1.5).
+ * (`decodeInventoryDocument`, form-exact): `graphData` exactly `.xspec`,
+ * `journal`'s `path` exactly `.xspec/journal`, and `lock` exactly
+ * `.xspec/lock`, and, when `reference` is given (the drive-mismatch runs,
+ * against the root run on this leg), every member but `root` and `config`
+ * byte-identical to the reference's (helpers/inventory-invariance.ts; SPEC
+ * 11.6, 1.5).
  */
 async function expectAnchoredInventory(
   product: ProductBinding,
@@ -424,7 +426,7 @@ async function expectAnchoredInventory(
     context,
   );
   const document = decodeInventoryDocument(doc, context);
-  assertAreaAndLockSpellings(document, context);
+  assertAreaJournalAndLockSpellings(document, context);
   if (reference !== undefined) {
     assertMembersInvariant(
       document,

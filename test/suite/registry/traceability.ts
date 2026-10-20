@@ -616,7 +616,9 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // carriage context with home coverage at T7.1-*/T7.3-*/T7.4-*/T7.5-*/
   // T13.1-*/T12.0-*/T12.7-* — the invalid-path `.mdx` arms
   // (`specs/a'b.mdx`; Linux leg, a non-UTF-8 name in the marked byte form)
-  // included.
+  // and the `files` selector forms (a capture referenced across a rule's
+  // `from` and `to`, T7.5-4's inside-root `./` spelling, each reported
+  // verbatim; 7's spelling rule with home coverage at T7-*) included.
   "T11.6-2": ["11.6", "14"],
   // T11.6-3: the occupancy and listing arms assert findings [] beside a
   // garbage journal and garbage session files — no 14.13, no 14.21 from the

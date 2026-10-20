@@ -15,12 +15,15 @@
 // (a journaled `rename`, 6.1), and a review session (`review create`, 10.1)
 // — every member but `root` and `config` (`findings`, `configuration`,
 // `sources`, `derived`, `recorded`, `graphData`, `journal`, `sessions`,
-// `lock`) is byte-identical whatever the working directory, `graphData`
-// exactly `.xspec` and `lock` exactly `.xspec/lock`: a product relativizing
+// `lock`) is byte-identical whatever the working directory, and every answer
+// reports `graphData` exactly `.xspec`, `journal`'s `path` exactly
+// `.xspec/journal`, and `lock` exactly `.xspec/lock`: a product relativizing
 // every path to the working directory (`../../.xspec/lock` from `a/b`)
 // fails, and so does one judging the journal's occupancy, the session
 // listing, or the record through a path resolved against the working
-// directory rather than the root. The staging premise is asserted on the
+// directory rather than the root, or one spelling the area, the journal
+// path, or the lock path otherwise in every answer alike, which the
+// byte-identity alone would admit. The staging premise is asserted on the
 // root run's answer — each path-bearing member non-empty, the journal
 // occupied — so no member's comparison is vacuous.
 //
@@ -179,12 +182,18 @@ export function assertInvariancePremise(
   );
 }
 
+/** The journal's workspace-relative path (SPEC 6.1). */
+const JOURNAL_PATH = `${GRAPH_DATA_AREA_PATH}/journal`;
+
 /**
- * The area and lock members' exact spellings: `graphData` exactly `.xspec`
- * and `lock` exactly `.xspec/lock` — workspace-relative whatever the
- * working directory, no trailing separator (SPEC 11.6, 12.7, 1.5).
+ * The area, journal, and lock members' exact spellings, in every answer:
+ * `graphData` exactly `.xspec`, `journal`'s `path` exactly
+ * `.xspec/journal`, and `lock` exactly `.xspec/lock` — workspace-relative
+ * whatever the working directory, no trailing separator (SPEC 11.6, 12.7,
+ * 1.5, 6.1, 13.5; TEST-SPEC T11.6-1). The journal's occupancy is the
+ * invariance's (`assertMembersInvariant`), never pinned here.
  */
-export function assertAreaAndLockSpellings(
+export function assertAreaJournalAndLockSpellings(
   document: InventoryDocument,
   context: string,
 ): void {
@@ -195,6 +204,15 @@ export function assertAreaAndLockSpellings(
         `whatever the working directory — 11.6 anchors \`root\` and ` +
         `\`config\` alone (SPEC 11.6, 1.5, 13.3); got ` +
         `${renderPathValue(document.graphData)}`,
+    );
+  }
+  if (document.journal.path !== JOURNAL_PATH) {
+    fail(
+      `${context}: the journal path is reported as its workspace-relative ` +
+        `path, exactly ${JSON.stringify(JOURNAL_PATH)} whatever the working ` +
+        `directory — xspec maintains the journal there, and 11.6 anchors ` +
+        `\`root\` and \`config\` alone (SPEC 11.6, 6.1, 1.5); got ` +
+        `${renderPathValue(document.journal.path)}`,
     );
   }
   if (document.lock !== LOCK_PATH) {
