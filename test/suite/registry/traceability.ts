@@ -131,8 +131,10 @@
 //   and the finding form it holds; T10.7-15 asserts 13.3's refresh, placed
 //   past every outcome a `review` subcommand meets — stale graph data left
 //   stale by each outcome, `check`'s unit form after it, and refreshed
-//   before a performed `split`'s session write, the unit form gone — and
-//   13.3's gate ahead of the recorded baseline; and section 10's
+//   before a performed `split`'s session write and past `list`'s
+//   corruptions, the unit form gone — and 13.3's gate ahead of the recorded
+//   baseline, the session directory's examination and listing, and an item
+//   ID, the given baseline's resolution ahead of the gate; and section 10's
 //   body (the review mechanism/strategy split and the three built-in
 //   strategies) is exercised by T10.5-1, T10.6-1 (generation per strategy),
 //   T10.7-1 (strategy selection at `create`), and T10.7-4 (coverage
