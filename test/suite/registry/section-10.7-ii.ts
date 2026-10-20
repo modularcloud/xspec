@@ -32,10 +32,39 @@
 // - The human fully-resolved report (T10.7-7) is asserted for information
 //   presence via /resolv/i: SPEC fixes the fact reported ("fully resolved"),
 //   never wording — any phrasing reporting resolution qualifies (H-3).
+// - T10.7-7's full-resolution arm (SPEC 10.7: full resolution concerns the
+//   session's items alone — a change that would generate a new item enters
+//   the session only at its next re-derivation, 10.5) continues on the
+//   order arm's workspace once that arm has resolved every item, none
+//   `updated`, so nothing has re-derived the session: specs/U.mdx, holding
+//   the one section u, is added and built — a file of its own, touching no
+//   existing item's recorded state or context set (each audit item's scope
+//   and ancestor-chain context lie in its own file's tree, SPEC 10.6),
+//   while a re-derivation would generate items for its root and its section
+//   (one per requirement node, roots included) — and `next` must still
+//   report the session fully resolved in both forms, no item in the JSON
+//   payload. Then p.a's item, resolved `no-change`, is re-resolved
+//   `updated`, which re-derives the session (10.5): `next --json` must
+//   return the new section's item (`subtree-coherence`, scope u),
+//   `unresolved` (10.2), and `review status s --json` at the same state must
+//   show it the first unblocked item needing review — its row present once,
+//   unblocked and needing review, and every row before it in item order
+//   resolved or blocked (the new root's item, `unresolved`, precedes it,
+//   blocked by it, 10.6) — a product-to-itself comparison of `next` against
+//   `status` (H-4; `assertFirstUnblockedNeedingReview`). The rows are not
+//   pinned further: the re-derivation's other effects are T10.6-3's.
+// - T10.7-7's payload clause naming a `metadata-consistency` item's
+//   metadata pair points to T10.7-13 (section-10.7-iii.ts), whose `next`
+//   walk asserts the pair; the payload arm stages no such item (a.k's text
+//   edit alone: its walk meets a.k's `subtree-coherence`, a's
+//   `parent-consistency`, and the code-impact items), and the review
+//   adapter decodes the pair on every `next --json` item of that kind
+//   (helpers/adapters/review.ts).
 // - T10.7-7's human `next` (T12.0-1's information parity; SPEC 12.0: the
 //   JSON form carries the same information as the human report): after
-//   each of the eight `next --json` reads that return an item — the order
-//   arm's four (p.a's, p.b's, p's, then the root's item) and the payload
+//   each of the nine `next --json` reads that return an item — the order
+//   arm's four (p.a's, p.b's, p's, then the root's item), the
+//   full-resolution arm's one (the new section's item), and the payload
 //   arm's four (a.k's, a's, the code location's, and that item again after
 //   the code file's deletion) — and their assertions, at the same state,
 //   `review next s` without `--json` exits 0 as well, and its report names
@@ -132,17 +161,19 @@
 //   edit is followed by an explicit `build` before any read, so no read
 //   relies on the 13.3 refresh path (T13.3-*'s business).
 // - Staged-source records (helpers/staged-mdx.ts, S-9: judged before any
-//   product exists): every `.mdx` edit a body stages after its first product
-//   invocation — T10.7-7's payload-arm edit, T10.7-8's x.k edit, T10.7-9's
+//   product exists): every `.mdx` edit or addition a body stages after its
+//   first product invocation — T10.7-7's payload-arm edit and its
+//   full-resolution arm's added specs/U.mdx, T10.7-8's x.k edit, T10.7-9's
 //   g.a.z authoring and both audit-arm authorings, T10.7-10's p.a edit,
 //   T10.7-11's edge swap, T10.7-12's A.mdx v1/v2 and B.mdx v1/v2 edits — is
-//   the same template call moved to module level as a record, as is the
-//   initial `.mdx` file of every workspace created after the body's first
-//   invocation (T10.7-7's payload arm, T10.7-9's audit arm, T10.7-12's
-//   provenance and coverage sub-fixtures; T10.7-7's empty-session arm
-//   stages none). T10.7-9's path-blocks v1 edit precedes the body's first
-//   `build` (git staging invokes no product) and stays plain, as do each
-//   body's first workspace's initial `files` entries.
+//   a record created at module level (a converted staging's the same
+//   template call moved there), as is the initial `.mdx` file of every
+//   workspace created after the body's first invocation (T10.7-7's payload
+//   arm, T10.7-9's audit arm, T10.7-12's provenance and coverage
+//   sub-fixtures; T10.7-7's empty-session arm stages none). T10.7-9's
+//   path-blocks v1 edit precedes the body's first `build` (git staging
+//   invokes no product) and stays plain, as do each body's first
+//   workspace's initial `files` entries.
 // - TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
 //   and timing clauses), every one well-formed: the configurations of the
 //   workspaces created after a body's first invocation — `SPECS_ONLY_CONFIG`
@@ -1035,6 +1066,24 @@ const N7_SOURCE = [
   "",
 ].join("\n");
 
+// The full-resolution arm's added source (SPEC 10.7: full resolution
+// concerns the session's items alone): a spec file of its own holding one
+// section, so it touches no existing item's recorded state or context set —
+// each audit item's scope and ancestor-chain context lie in its own file's
+// tree (SPEC 10.6) — while an audit re-derivation would generate items for
+// its root and its section. Its path sorts after N7_FILE's, so both items
+// follow the order arm's four in audit item order (file path bytes, then
+// document order, SPEC 10.6). It is staged after the order arm's
+// invocations, so it is a staged-source record (helpers/staged-mdx.ts, S-9:
+// judged before any product exists).
+const N7_ADDED_FILE = "specs/U.mdx";
+const N7_ADDED_ROOT = "specs/U.mdx";
+const N7_ADDED_U = "specs/U.mdx#u";
+const T10_7_7_U_ADDED = stagedMdx(
+  "T10.7-7 specs/U.mdx holding the one section u (the full-resolution arm's added source)",
+  ['<S id="u">', "You line.", "</S>", ""].join("\n"),
+);
+
 const N7_PB_FILE = "specs/A2.mdx";
 const N7_PB_ROOT = "specs/A2.mdx";
 const N7_A = "specs/A2.mdx#a";
@@ -1098,9 +1147,11 @@ const N7_CODE_RANGE: SourceRange = {
 };
 
 /**
- * `review next <name>` (human form) reporting the session fully resolved:
- * exit 0 and stdout mentioning resolution (H-3: information presence — the
- * /resolv/i operationalization from the module header).
+ * `review next <name>` reporting the session fully resolved in both forms
+ * (SPEC 10.7): the human form exits 0 with stdout mentioning resolution
+ * (H-3: information presence — the /resolv/i operationalization from the
+ * module header), and `--json` reports fully resolved with no item in the
+ * payload.
  */
 async function expectFullyResolvedBothForms(
   product: ProductBinding,
@@ -1125,14 +1176,74 @@ async function expectFullyResolvedBothForms(
   );
   const next = await nextInSession(product, workspace, name, context);
   if (!next.fullyResolved) {
+    const returned =
+      next.item === undefined
+        ? "an item"
+        : `item ${next.item.id} (${next.item.kind} ${next.item.scope.node}, ` +
+          `${next.item.status})`;
     fail(
       `${context} \`review next ${name} --json\`: every item is resolved, ` +
         `so the JSON form reports fully resolved with no item in the ` +
-        `payload (SPEC 10.7); the product returned an item`,
+        `payload (SPEC 10.7); the product returned ${returned}`,
     );
   }
   // The adapter itself refuses a document that claims fullyResolved while
   // carrying an item, so reaching here pins "no item in the JSON payload".
+}
+
+/**
+ * The item `next --json` returned is, in `review status`'s item order at the
+ * same state, the first unblocked item needing review (SPEC 10.3, 10.7): its
+ * row is present exactly once, unblocked, and `unresolved` or `invalidated`,
+ * and every row before it is resolved — `updated`, `no-change`, or
+ * `skipped` — or blocked. A product-to-itself comparison of `next` against
+ * `status` (H-4): rows after it, and every row's kind and scope, are not
+ * asserted here.
+ */
+function assertFirstUnblockedNeedingReview(
+  report: SessionStatusReport,
+  itemId: string,
+  context: string,
+): void {
+  const needsReview = (status: ItemStatus): boolean =>
+    status === "unresolved" || status === "invalidated";
+  const rendered = JSON.stringify(
+    report.items.map(
+      (row) =>
+        `${row.id} ${row.kind} ${row.scope} ${row.status}` +
+        (row.blocked ? " blocked" : ""),
+    ),
+  );
+  const matches = report.items.filter((row) => row.id === itemId);
+  if (matches.length !== 1) {
+    fail(
+      `${context}: the item \`next\` returned, ${itemId}, appears exactly ` +
+        `once among the session's rows (SPEC 10.2, 10.7: item ids are ` +
+        `unique, and \`status\` reports every item); found ` +
+        `${String(matches.length)} in ${rendered}`,
+    );
+  }
+  const index = report.items.findIndex((row) => row.id === itemId);
+  const row = report.items[index];
+  if (row.blocked || !needsReview(row.status)) {
+    fail(
+      `${context}: the item \`next\` returns needs review and is unblocked ` +
+        `(SPEC 10.3, 10.7); \`status\` reports ${itemId} with status ` +
+        `${row.status}${row.blocked ? ", blocked" : ""} in ${rendered}`,
+    );
+  }
+  const earlier = report.items
+    .slice(0, index)
+    .filter((other) => needsReview(other.status) && !other.blocked);
+  if (earlier.length > 0) {
+    fail(
+      `${context}: \`next\` returns the FIRST unblocked item needing ` +
+        `review in item order (SPEC 10.7), so every item before ${itemId} ` +
+        `is resolved or blocked; \`status\` reports ` +
+        `${JSON.stringify(earlier.map((other) => other.id))} before it, ` +
+        `unblocked and needing review, in ${rendered}`,
+    );
+  }
 }
 
 /**
@@ -1175,9 +1286,11 @@ async function assertHumanNextItem(
 const T10_7_7 = defineProductTest({
   id: "T10.7-7",
   title:
-    "`review next`: returns the first needing-review unblocked item in item order — in an audit session with blocked root and parent items it returns the first leaf, then the second, then moves backward in item order to the meanwhile-unblocked parent and root; when all items are resolved, and for a session with no items, it exits 0 and reports fully resolved in the human and `--json` forms with no item in the JSON payload; the `--json` payload is self-contained — scope text, context texts, origin before/after texts, source ranges for every present node, requirement node and present code location alike (scope, context, and origin entries; the code-impact scope's named-unit construct range byte-asserted against precomputed offsets) and none for absent nodes (after the code file's deletion the same item's scope presents identity and absence alone — no text, no range), and the recorded `baseline` and `current` hashes (asserted against distinct `query node` captures at the baseline and creation moments); and wherever `next --json` returns an item, the human `review next` at the same state exits 0 and names that item by its id (robust matching, H-3) (SPEC 1.7, 4.6, 9.2, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 12.0)",
+    "`review next`: returns the first needing-review unblocked item in item order — in an audit session with blocked root and parent items it returns the first leaf, then the second, then moves backward in item order to the meanwhile-unblocked parent and root; when all items are resolved, and for a session with no items, it exits 0 and reports fully resolved in the human and `--json` forms with no item in the JSON payload; full resolution concerns the session's items alone — with every item resolved, a new spec source holding one section added leaves `next` reporting the session fully resolved in both forms, no item in the JSON payload, and once a resolved leaf item is re-resolved `updated` (the session re-derived) `next` returns the new section's item, `unresolved` and the first unblocked item needing review (every earlier item in `status`'s item order resolved or blocked); the `--json` payload is self-contained — scope text, context texts, origin before/after texts, source ranges for every present node, requirement node and present code location alike (scope, context, and origin entries; the code-impact scope's named-unit construct range byte-asserted against precomputed offsets) and none for absent nodes (after the code file's deletion the same item's scope presents identity and absence alone — no text, no range), and the recorded `baseline` and `current` hashes (asserted against distinct `query node` captures at the baseline and creation moments); and wherever `next --json` returns an item, the human `review next` at the same state exits 0 and names that item by its id (robust matching, H-3) (SPEC 1.7, 4.6, 9.2, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 12.0)",
   run: async (product) => {
     // --- arm 1: order walking and the fully-resolved report -----------------
+    // (continued on the same workspace by the full-resolution arm, once
+    // every item is resolved)
     await withWorkspace(
       SPECS_ONLY_CONFIG,
       { [N7_FILE]: N7_SOURCE },
@@ -1291,6 +1404,84 @@ const T10_7_7 = defineProductTest({
           "s",
           `${prefix}, all items resolved:`,
         );
+
+        // --- arm 1, continued: full resolution concerns the session's items
+        // alone (SPEC 10.7) ---------------------------------------------------
+        // The session holds every item resolved, none `updated`, so nothing
+        // has re-derived it (SPEC 10.5). A new spec source holding one
+        // section is added: it touches no existing item's recorded state or
+        // context set, while a re-derivation would generate items for its
+        // root and its section (SPEC 10.6). A change that would generate a
+        // new item enters the session only at its next re-derivation (SPEC
+        // 10.7), so `next` still reports the session fully resolved — a
+        // product deriving items at a read, or at `build`, fails here.
+        const fullPrefix = "T10.7-7 full-resolution arm";
+        await workspace.file(N7_ADDED_FILE, T10_7_7_U_ADDED);
+        await buildOk(
+          product,
+          workspace,
+          `${fullPrefix} \`build\` with ${N7_ADDED_FILE} added`,
+        );
+        await expectFullyResolvedBothForms(
+          product,
+          workspace,
+          "s",
+          `${fullPrefix}, every item resolved and ${N7_ADDED_FILE} added — ` +
+            `a change that would generate a new item enters the session ` +
+            `only at its next re-derivation (SPEC 10.5, 10.7):`,
+        );
+
+        // A resolved leaf item re-resolved `updated` — `resolve` applies to
+        // any unblocked item regardless of its status (SPEC 10.7) — re-derives
+        // the session (SPEC 10.5): the new source's root and section enter
+        // it, each `unresolved` (SPEC 10.2), the root's item blocked by the
+        // section's (SPEC 10.6). `next` returns the new section's item, the
+        // first unblocked item needing review — a product whose `updated`
+        // resolve re-derives nothing fails here.
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          idPA,
+          "updated",
+          `${fullPrefix} \`resolve s <p.a's item> --status updated\` (the ` +
+            `leaf item the order arm resolved \`no-change\`, re-resolved)`,
+        );
+        const rederived = `${fullPrefix}, p.a's item re-resolved \`updated\``;
+        const added = requireNextItem(
+          await nextInSession(product, workspace, "s", rederived),
+          rederived,
+        );
+        if (
+          added.kind !== "subtree-coherence" ||
+          added.scope.node !== N7_ADDED_U
+        ) {
+          fail(
+            `${rederived}: \`next\` returns the new section's item — the ` +
+              `subtree-coherence item scoped at ${N7_ADDED_U}, which the ` +
+              `re-derivation the \`updated\` resolve triggered added, the ` +
+              `first unblocked item needing review (the new root ` +
+              `${N7_ADDED_ROOT}'s item precedes it in item order, blocked by ` +
+              `it; SPEC 10.5, 10.6, 10.7); got ${added.kind} ` +
+              `${added.scope.node} (${added.id})`,
+          );
+        }
+        if (added.status !== "unresolved") {
+          fail(
+            `${rederived}: the new section's item entered the session at ` +
+              `the re-derivation, so \`next\` presents it \`unresolved\` ` +
+              `(SPEC 10.2: an item is created with status unresolved ` +
+              `wherever it enters the session); got ${added.status}`,
+          );
+        }
+        assertFirstUnblockedNeedingReview(
+          await sessionStatus(product, workspace, "s", rederived),
+          added.id,
+          `${rederived}, \`review status s --json\` at the same state`,
+        );
+        // The human form at the same state names the item returned
+        // (T12.0-1, SPEC 12.0; the module header).
+        await assertHumanNextItem(product, workspace, "s", added, rederived);
       },
     );
 
