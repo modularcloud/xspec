@@ -130,7 +130,9 @@
 //   pair; T10.7-14 asserts 12.7's findings-only form of a refused operation
 //   and the finding form it holds; T10.7-15 asserts 13.3's refresh, placed
 //   past every outcome a `review` subcommand meets — stale graph data left
-//   stale by each outcome, `check`'s unit form after it; and section 10's
+//   stale by each outcome, `check`'s unit form after it, and refreshed
+//   before a performed `split`'s session write, the unit form gone — and
+//   13.3's gate ahead of the recorded baseline; and section 10's
 //   body (the review mechanism/strategy split and the three built-in
 //   strategies) is exercised by T10.5-1, T10.6-1 (generation per strategy),
 //   T10.7-1 (strategy selection at `create`), and T10.7-4 (coverage

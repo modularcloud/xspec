@@ -113,8 +113,8 @@
 // only at the write it refuses, a refresh's too).
 //
 // Conservative operationalizations for T10.7-15 (noted per H-3/H-4):
-// - Arms (a) and (b) are staged; arms (c)–(g) are not yet (the plan's
-//   Tasks 88–89 add them to this body, on twins of the fixtures below).
+// - Arms (a)–(d) are staged; arms (e)–(g) are not yet (the plan's Task 89
+//   adds them to this body, on twins of the fixtures below).
 // - Fixture (A) (`o15StageFixtureA`): specs/A.mdx holding top-level P with
 //   its child P.c, Q with Q.r, and the leaves s and u, beside one spec
 //   group; built; the audit session `a` created and Q's subtree-coherence
@@ -136,7 +136,8 @@
 //   and blocked (10.5); then T10.7-3's staging — the repository removed
 //   (`.git` deleted, the configuration file then inside no working tree,
 //   6.3), c1 no longer resolving from the root through the harness's own
-//   git (a premise).
+//   git (a premise). That state, no section edited since `create`, is kept
+//   as a byte copy made before the staleness edit (`created`): (d)'s.
 // - Stale graph data (13.3): on each fixture a section's text is edited —
 //   u's, v's — after the last product invocation, no rebuild and no read
 //   since. That state is never invoked on again: each invocation runs on its
@@ -182,10 +183,57 @@
 //   the staging a held run's release deletes its entry but is refused the
 //   emptied lock directory's deletion, which stays behind (13.5: no outcome
 //   changes; H-6 leaves the lock path out of the compare).
+// - (c), graph judgements against the current workspace (10.7, 13.3): three
+//   twins of (A) (`o15StageTwinA`), each a fresh workspace of (A)'s initial
+//   source and configuration, built, holding its own audit session `a`,
+//   unsplit, and no second session (TEST-SPEC names `a` alone); each
+//   premise is read from `review status --json` before the hand edit, and
+//   the edit is followed by the invocation with no rebuild and no read
+//   between them, so graph data is stale when the subcommand runs. (i) P.c's
+//   item resolved `no-change` (P's item blocked before, unblocked after: a
+//   premise), then P.c's text edited: `resolve a <P's item> --status
+//   no-change` is refused through the shared check, nothing modified (the
+//   whole-root compare). (ii) Q.r's section deleted: `split a <Q's item>` is
+//   refused, nothing modified. (iii) A child s.t authored under the leaf s:
+//   `split a <s's item>` exits 0; `check --json` then runs before any
+//   refreshing read (`o15AssertRefreshed`: no unit form, graph data
+//   refreshed by the split — TEST-SPEC's observation of the refresh made
+//   before the session write — beside the edited source's per-file
+//   staleness, its module among it, 13.3's refresh never rewriting derived
+//   files), and `export` afterwards shows the session's kind and scope-node
+//   pairs gaining exactly s.t's subtree-coherence item and s's
+//   parent-consistency item, the latter's context exactly {s.t} and its
+//   blockedBy exactly s.t's item.
+// - (d), the recorded baseline's place (10.7, 12.0): `O15_PLACE_CALLS`, each
+//   on its own copy of (B)'s `created` state with its staging made on the
+//   copy (`o15StagePlace`), inside the whole-root compare: on the state
+//   itself `resolve b <G's parent-consistency item> --status no-change`
+//   (blocked by G.N's item) and `split b <it>` (another kind) answer the
+//   baseline's plain usage error; with b's file corrupted by T10.1-4's
+//   `blockedBy`-cycle staging (adapters/session-staging.ts
+//   `stageBlockedByCycle`: the first two items block each other, the file
+//   parseable, its recorded parameters untouched) `status b`, `resolve b
+//   <G.N's item> --status no-change`, and `split b <G's parent-consistency
+//   item>` report exactly the condition-21 finding concerning
+//   `.xspec/reviews/b.json`; with specs/B.mdx given a section with no id
+//   (exactly one condition-1 finding — the section has no children, so
+//   condition 2's masking never enters) `status`, `next`, `show`, `export`,
+//   `resolve`, and `split` naming `b`, each with `--json` and the real item
+//   IDs where it takes one, report exactly the gate's findings: those of
+//   `build --json` on a copy of that state (`o15GateReference`; SPEC 13.3:
+//   the findings a `build` would now report), compared by condition, code,
+//   path, and locations — message wording free (H-3) — exit 1.
+// - Unstageable, recorded here as T6.5-6 records its unstageable clauses:
+//   (d)'s place of an unknown item ID before the recorded baseline. On a
+//   baseline session whose recorded baseline cannot be reconstructed, both
+//   outcomes are the plain usage error — exit 2, `code` and `path` `null`,
+//   nothing modified — so the two orders differ only in the message's
+//   wording, which no test asserts (H-3). Not asserted.
 // - Staged-source records (S-9): both fixtures' sources and configuration —
-//   records, so the twins that arms (c)–(g) will create after an invocation
-//   stage the same bytes — and the three edits; T10.1-4's garbage bytes and
-//   the hold file are no sources.
+//   records, so the twins that arms (c)–(g) create after an invocation stage
+//   the same bytes — the three edits of the fixtures, (c)'s three hand
+//   edits, and (d)'s failing source; T10.1-4's garbage bytes and cycle
+//   staging (session files) and the hold file are no sources.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -209,6 +257,7 @@ import {
   decodeSessionStatusReport,
   isGraphDataKey,
   renderPathValue,
+  stageBlockedByCycle,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
@@ -229,9 +278,12 @@ import {
   assertConditionCounts,
   assertFindingConcernsPath,
   assertFindingInstructsRebuilding,
+  assertFindingLocated,
   assertPlainUsageError,
   assertSameJson,
+  buildFindings,
   buildOk,
+  byteWindow,
   expectErrorDocument,
   expectExit,
   expectReviewRefusal,
@@ -1151,7 +1203,7 @@ const T10_7_14 = defineProductTest({
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. A
 // staged-source record (S-9): fixture (B)'s workspace is created after the
-// body's first invocation, as are the twins of (A) that arms (c)–(g) will
+// body's first invocation, as are the twins of (A) that arms (c)–(g)
 // stage.
 const O15_CONFIG = stagedTs(
   "T10.7-15 xspec.config.ts — one spec group (fixtures (A) and (B))",
@@ -1171,7 +1223,9 @@ const O15_A_FILE = "specs/A.mdx";
 const O15_P = "specs/A.mdx#P";
 const O15_PC = "specs/A.mdx#P.c";
 const O15_Q = "specs/A.mdx#Q";
+const O15_QR = "specs/A.mdx#Q.r";
 const O15_S = "specs/A.mdx#s";
+const O15_ST = "specs/A.mdx#s.t";
 
 /** Fixture (A)'s audit session, and the second session, made corrupt. */
 const O15_A_SESSION = "a";
@@ -1179,27 +1233,42 @@ const O15_A_SESSION_REL = `.xspec/reviews/${O15_A_SESSION}.json`;
 const O15_X_SESSION = "x";
 const O15_X_SESSION_REL = `.xspec/reviews/${O15_X_SESSION}.json`;
 
-/** specs/A.mdx; `uEdited` gives u its edited text (the staleness edit). */
-function o15ASpec(edits: { readonly uEdited?: boolean } = {}): string {
+/**
+ * specs/A.mdx. `uEdited` gives u its edited text (fixture (A)'s staleness
+ * edit); the hand edits of (c)'s twins: `pcEdited` gives P.c its edited
+ * text ((c)(i)), `qrDeleted` deletes Q.r's section, leaving Q childless
+ * ((c)(ii)), and `stAuthored` authors the child s.t under the leaf s
+ * ((c)(iii)).
+ */
+function o15ASpec(
+  edits: {
+    readonly uEdited?: boolean;
+    readonly pcEdited?: boolean;
+    readonly qrDeleted?: boolean;
+    readonly stAuthored?: boolean;
+  } = {},
+): string {
   return [
     '<S id="P">',
     "Pee own text.",
     "",
     '<S id="P.c">',
-    "Pee cee text.",
+    edits.pcEdited === true ? "Pee cee text, edited." : "Pee cee text.",
     "</S>",
     "</S>",
     "",
     '<S id="Q">',
     "Queue own text.",
-    "",
-    '<S id="Q.r">',
-    "Queue are text.",
-    "</S>",
+    ...(edits.qrDeleted === true
+      ? []
+      : ["", '<S id="Q.r">', "Queue are text.", "</S>"]),
     "</S>",
     "",
     '<S id="s">',
     "Ess text.",
+    ...(edits.stAuthored === true
+      ? ["", '<S id="s.t">', "Ess tee text.", "</S>"]
+      : []),
     "</S>",
     "",
     '<S id="u">',
@@ -1210,9 +1279,9 @@ function o15ASpec(edits: { readonly uEdited?: boolean } = {}): string {
 }
 
 // Staged-source records (helpers/staged-mdx.ts, S-9): (A)'s initial source
-// serves its first workspace and the twins that arms (c)–(g) will create
-// after an invocation; the staleness edit follows the body's first
-// invocation.
+// serves its first workspace and the twins that arms (c)–(g) create after
+// an invocation; the staleness edit and (c)'s hand edits follow the body's
+// first invocation.
 const O15_A_INITIAL = stagedMdx(
   "T10.7-15 specs/A.mdx — fixture (A): top-level P holding P.c, Q holding Q.r, and the leaves s and u",
   o15ASpec(),
@@ -1221,18 +1290,44 @@ const O15_A_U_EDITED = stagedMdx(
   "T10.7-15 specs/A.mdx with u's text edited — fixture (A)'s staleness edit",
   o15ASpec({ uEdited: true }),
 );
+const O15_A_PC_EDITED = stagedMdx(
+  "T10.7-15 specs/A.mdx with P.c's text edited — (c)(i)'s hand edit, after P.c's item is resolved no-change",
+  o15ASpec({ pcEdited: true }),
+);
+const O15_A_QR_DELETED = stagedMdx(
+  "T10.7-15 specs/A.mdx with Q.r's section deleted, Q left childless — (c)(ii)'s hand edit",
+  o15ASpec({ qrDeleted: true }),
+);
+const O15_A_ST_AUTHORED = stagedMdx(
+  "T10.7-15 specs/A.mdx with a child s.t authored under the leaf s — (c)(iii)'s hand edit",
+  o15ASpec({ stAuthored: true }),
+);
 
 // Fixture (B): specs/B.mdx — top-level G holding G.N, and the leaf v.
 const O15_B_FILE = "specs/B.mdx";
 const O15_G = "specs/B.mdx#G";
 const O15_GN = "specs/B.mdx#G.N";
 
-/** Fixture (B)'s baseline session. */
+/** Fixture (B)'s baseline session, and its file. */
 const O15_B_SESSION = "b";
+const O15_B_SESSION_REL = `.xspec/reviews/${O15_B_SESSION}.json`;
 
-/** specs/B.mdx; G.N's text edited after `c1`, then v's (the staleness edit). */
+/**
+ * (d)'s section with no id (SPEC 1.3, 14.1): childless, so condition 2's
+ * masking never enters — the failing workspace's one `build` finding.
+ */
+const O15_B_IDLESS_SECTION = ["<S>", "No id text.", "</S>"].join("\n");
+
+/**
+ * specs/B.mdx; G.N's text edited after `c1`, then v's (the staleness edit);
+ * `idless` appends a section with no id after v ((d)'s failing source).
+ */
 function o15BSpec(
-  edits: { readonly gnEdited?: boolean; readonly vEdited?: boolean } = {},
+  edits: {
+    readonly gnEdited?: boolean;
+    readonly vEdited?: boolean;
+    readonly idless?: boolean;
+  } = {},
 ): string {
   return [
     '<S id="G">',
@@ -1247,11 +1342,23 @@ function o15BSpec(
     edits.vEdited === true ? "Vee text, edited." : "Vee text.",
     "</S>",
     "",
+    ...(edits.idless === true ? [O15_B_IDLESS_SECTION, ""] : []),
   ].join("\n");
 }
 
+/**
+ * The section with no id's byte window in (d)'s failing source (support.ts
+ * `byteWindow`): it follows the source as `create` saw it and one blank
+ * line.
+ */
+const O15_B_IDLESS_WINDOW = byteWindow(
+  `${o15BSpec({ gnEdited: true })}\n`,
+  O15_B_IDLESS_SECTION,
+);
+
 // Fixture (B)'s workspace is created after the body's first invocation, so
-// its initial source and both its edits are staged-source records (S-9).
+// its initial source, both its edits, and (d)'s failing source are
+// staged-source records (S-9).
 const O15_B_INITIAL = stagedMdx(
   "T10.7-15 specs/B.mdx — fixture (B) at c1: top-level G holding G.N, and the leaf v",
   o15BSpec(),
@@ -1263,6 +1370,10 @@ const O15_B_GN_EDITED = stagedMdx(
 const O15_B_V_EDITED = stagedMdx(
   "T10.7-15 specs/B.mdx with G.N's and v's text edited — fixture (B)'s staleness edit",
   o15BSpec({ gnEdited: true, vEdited: true }),
+);
+const O15_B_GATE_FAILING = stagedMdx(
+  "T10.7-15 specs/B.mdx with G.N's text edited and a section with no id after v — (d)'s source failing build's validations (14.1)",
+  o15BSpec({ gnEdited: true, idless: true }),
 );
 
 /**
@@ -1297,15 +1408,19 @@ interface O15Ids {
 }
 
 /**
- * One fixture's stale state (TEST-SPEC T10.7-15): staged once and never
- * invoked on again — each invocation runs on its own byte copy of it.
+ * A staged state (TEST-SPEC T10.7-15): staged once and never invoked on
+ * again — each invocation runs on its own byte copy of it.
  */
-interface O15State {
-  /** `(A)` or `(B)`, for diagnoses. */
+interface O15Staged {
+  /** `(A)`, `(B)`, or `(B) as created`, for diagnoses. */
   readonly label: string;
   readonly workspace: TestWorkspace;
   /** The state's bytes as staged; each copy is checked against them. */
   readonly snapshot: DirectorySnapshot;
+}
+
+/** One fixture's stale state: its graph data stale (SPEC 13.3). */
+interface O15State extends O15Staged {
   /** The source whose text the staleness edit changed. */
   readonly editedSource: string;
   /** `check`'s findings beside the staleness, counted by identity. */
@@ -1448,10 +1563,13 @@ async function o15StageFixtureA(product: ProductBinding): Promise<{
  * `status`) — then the recorded baseline made irreconstructible by
  * T10.7-3's staging, the repository removed (the configuration file then
  * inside no working tree, 6.3), and v's text edited, no rebuild and no read
- * since, so graph data is stale (13.3).
+ * since, so graph data is stale (13.3). The state before v's edit — no
+ * section edited since `create` — is kept as a byte copy (`created`, (d)'s
+ * state).
  */
 async function o15StageFixtureB(product: ProductBinding): Promise<{
   readonly state: O15State;
+  readonly created: O15Staged;
   readonly ids: Pick<O15Ids, "gnSc" | "gPc">;
 }> {
   const context = "T10.7-15 fixture (B)";
@@ -1523,18 +1641,37 @@ async function o15StageFixtureB(product: ProductBinding): Promise<{
       );
     }
 
-    // Stale graph data: v's text edited, no rebuild and no read since.
-    await workspace.file(O15_B_FILE, O15_B_V_EDITED);
-    return {
-      state: {
-        label: "(B)",
-        workspace,
-        snapshot: await snapshotDirectory(workspace.root),
-        editedSource: O15_B_FILE,
-        besideStaleness: {},
-      },
-      ids: { gnSc: gnRow.id, gPc: gRow.id },
-    };
+    // (d)'s state: (B) as `create` left it, no section edited since — a
+    // byte copy, never invoked on itself.
+    const createdLabel = "(B) as created";
+    const createdSnapshot = await snapshotDirectory(workspace.root);
+    const createdCopy = await o15CopyChecked(
+      workspace,
+      createdSnapshot,
+      "fixture (B)'s state as created",
+    );
+    try {
+      // Stale graph data: v's text edited, no rebuild and no read since.
+      await workspace.file(O15_B_FILE, O15_B_V_EDITED);
+      return {
+        state: {
+          label: "(B)",
+          workspace,
+          snapshot: await snapshotDirectory(workspace.root),
+          editedSource: O15_B_FILE,
+          besideStaleness: {},
+        },
+        created: {
+          label: createdLabel,
+          workspace: createdCopy,
+          snapshot: createdSnapshot,
+        },
+        ids: { gnSc: gnRow.id, gPc: gRow.id },
+      };
+    } catch (error) {
+      await createdCopy.dispose();
+      throw error;
+    }
   } catch (error) {
     await workspace.dispose();
     throw error;
@@ -1542,44 +1679,64 @@ async function o15StageFixtureB(product: ProductBinding): Promise<{
 }
 
 /**
- * Run `body` on a fresh byte copy of a stale state (helpers/tree-copy.ts
- * `copyTreeBytes`: every entry of its root — neither fixture holds `.git`
- * or a lock path), checked against the state's snapshot before anything
- * runs there (a difference is a harness error, never a product verdict);
- * the copy is disposed whatever happens (H-1). SPEC 13.3 judges staleness
- * by content alone, so the copy's graph data is as stale as the state's.
+ * A fresh byte copy of a workspace (helpers/tree-copy.ts `copyTreeBytes`:
+ * every entry of its root — no state copied holds `.git` or a lock path),
+ * checked against the snapshot it must equal before anything runs there (a
+ * difference is a harness error, never a product verdict); disposed by the
+ * caller (H-1), or here when the copy fails.
  */
-async function withO15Copy(
-  state: O15State,
-  body: (copy: TestWorkspace) => Promise<void>,
-): Promise<void> {
+async function o15CopyChecked(
+  from: TestWorkspace,
+  expected: DirectorySnapshot,
+  label: string,
+): Promise<TestWorkspace> {
   const copy = await TestWorkspace.create();
   try {
-    await copyTreeBytes(
-      Buffer.from(state.workspace.root),
-      Buffer.from(copy.root),
-    );
+    await copyTreeBytes(Buffer.from(from.root), Buffer.from(copy.root));
     const differences = diffSnapshots(
-      state.snapshot,
+      expected,
       await snapshotDirectory(copy.root),
     );
     if (differences.length > 0) {
       throw new Error(
-        `harness error: T10.7-15's copy of fixture ${state.label}'s state ` +
-          `${state.workspace.root} at ${copy.root} differs from it: ` +
+        `harness error: T10.7-15's copy of ${label} ${from.root} ` +
+          `at ${copy.root} differs from it: ` +
           differences
             .slice(0, 10)
             .map((change) => `${change.change} ${change.path}`)
             .join(", "),
       );
     }
+    return copy;
+  } catch (error) {
+    await copy.dispose();
+    throw error;
+  }
+}
+
+/**
+ * Run `body` on a fresh byte copy of a staged state (`o15CopyChecked`,
+ * against the state's snapshot); the copy is disposed whatever happens
+ * (H-1). SPEC 13.3 judges staleness by content alone, so the copy's graph
+ * data is as stale, or as fresh, as the state's.
+ */
+async function withO15Copy(
+  state: O15Staged,
+  body: (copy: TestWorkspace) => Promise<void>,
+): Promise<void> {
+  const copy = await o15CopyChecked(
+    state.workspace,
+    state.snapshot,
+    `fixture ${state.label}'s state`,
+  );
+  try {
     await body(copy);
   } finally {
     await copy.dispose();
   }
 }
 
-/** The outcome an invocation meets past the gate (SPEC 10.7). */
+/** The outcome an invocation meets, at the gate or past it (SPEC 10.7). */
 type O15Outcome =
   /** A refusal in T10.7-14's form, the session file it names byte-identical. */
   | { readonly kind: "refusal"; readonly sessionRel: string }
@@ -1588,19 +1745,25 @@ type O15Outcome =
   /** The named session's corruption: exactly the condition-21 finding. */
   | { readonly kind: "corrupt"; readonly sessionRel: string }
   /** The recorded baseline, irreconstructible: the plain usage error (6.3). */
-  | { readonly kind: "baseline" };
+  | { readonly kind: "baseline" }
+  /** A workspace failing `build`'s validations: the gate's findings (13.3). */
+  | { readonly kind: "gate" };
 
-/** One of (a)'s invocations, run again under (b)'s staging. */
-interface O15Invocation {
+/** One invocation and the outcome it meets. */
+interface O15Call {
   /** Why the outcome is met, for diagnoses. */
   readonly what: string;
-  /** The fixture whose stale state it runs on. */
-  readonly fixture: "A" | "B";
   /** The command, without `--json` (each run appends it). */
   readonly argv: (ids: O15Ids) => readonly string[];
+  readonly outcome: O15Outcome;
+}
+
+/** One of (a)'s invocations, run again under (b)'s staging. */
+interface O15Invocation extends O15Call {
+  /** The fixture whose stale state it runs on. */
+  readonly fixture: "A" | "B";
   /** `resolve` and `split`, held at the seam of 13.5 under (b)'s staging. */
   readonly mutating: boolean;
-  readonly outcome: O15Outcome;
 }
 
 /** (a)'s invocations, in TEST-SPEC's order. */
@@ -1731,19 +1894,67 @@ function o15ExpectCorruption(
 }
 
 /**
+ * The finding members the gate's report must reproduce (SPEC 13.3: the
+ * findings a `build` would now report): each finding's condition, code,
+ * concerned path, and locations — its message's wording free (H-3) and its
+ * informational `identities` (12.7) unasserted.
+ */
+function o15GateForm(findings: readonly Finding[]): unknown {
+  return findings.map((finding) => ({
+    condition: finding.condition,
+    code: finding.code,
+    path: finding.path,
+    locations: finding.locations,
+  }));
+}
+
+/**
+ * On a workspace failing `build`'s validations, the run reports exactly the
+ * gate's findings (SPEC 13.3, 10.7: the gate's report ends the subcommand,
+ * no session read, the recorded baseline never resolved): exit 1, the
+ * findings-only report decoded form-exact, its findings those of `build
+ * --json` on the same state (`gate`, `o15GateReference`) in condition, code,
+ * path, and locations (`o15GateForm`).
+ */
+function o15ExpectGateFindings(
+  result: RunResult,
+  gate: readonly Finding[],
+  context: string,
+): void {
+  const label =
+    `${context} — on a workspace failing \`build\`'s validations the gate's ` +
+    `report ends the subcommand: exit 1, no session read and the recorded ` +
+    `baseline never resolved (SPEC 13.3, 10.7, 12.0)`;
+  assertExitCode(result, 1, label);
+  const findings = decodeFindingsReport(
+    parseJsonStdout(result, label),
+    label,
+  ).findings;
+  assertSameJson(
+    o15GateForm(findings),
+    o15GateForm(gate),
+    `${label} — exactly the gate's findings: those \`build --json\` reports ` +
+      `on the same state, compared by condition, code, path, and locations ` +
+      `(SPEC 13.3; message wording free, H-3)`,
+  );
+}
+
+/**
  * Run an invocation through `run` and assert the outcome it meets (SPEC
  * 10.7): a refusal through T10.7-14's shared check (support.ts
  * `expectReviewRefusal`), the unknown item ID and the irreconstructible
- * baseline as the plain usage error (`assertPlainUsageError`), and the
- * corruption as exactly the condition-21 finding.
+ * baseline as the plain usage error (`assertPlainUsageError`), the
+ * corruption as exactly the condition-21 finding, and the gate's report as
+ * exactly the findings of `gate`, `build --json`'s on the same state.
  */
 async function o15AssertOutcome(
   product: ProductBinding,
   copy: TestWorkspace,
-  invocation: O15Invocation,
+  invocation: O15Call,
   ids: O15Ids,
   run: O15Run,
   context: string,
+  gate?: readonly Finding[],
 ): Promise<void> {
   const argv = invocation.argv(ids);
   const outcome = invocation.outcome;
@@ -1761,6 +1972,16 @@ async function o15AssertOutcome(
   const result = await run([...argv, "--json"]);
   if (outcome.kind === "corrupt") {
     o15ExpectCorruption(result, outcome.sessionRel, context);
+    return;
+  }
+  if (outcome.kind === "gate") {
+    if (gate === undefined) {
+      throw new Error(
+        `harness error: ${context}: a gate outcome is judged against the ` +
+          `gate reference (o15GateReference), which the caller did not pass`,
+      );
+    }
+    o15ExpectGateFindings(result, gate, context);
     return;
   }
   assertPlainUsageError(
@@ -1795,26 +2016,31 @@ function o15ChangeClass(key: string): string {
 /**
  * The outcome ended the subcommand modifying nothing (SPEC 10.7, 13.5): no
  * change between the snapshots but H-6's lock-path exclusion of a mutating
- * run — graph data byte-identical and so still stale — each change
- * diagnosed by where it falls (`o15ChangeClass`).
+ * run — on a stale state graph data byte-identical and so still stale —
+ * each change diagnosed by where it falls (`o15ChangeClass`). `graphData`
+ * says whether the state's graph data is stale (the default) or fresh
+ * ((d)'s state as `create` left it, and its corrupted twin).
  */
 function o15AssertNothingModified(
   before: DirectorySnapshot,
   after: DirectorySnapshot,
   context: string,
+  graphData: "stale" | "fresh" = "stale",
 ): void {
   const changes = diffSnapshots(before, after);
   if (changes.length === 0) return;
   const refreshed = changes.some((change) => isGraphDataKey(change.key));
   fail(
     `${context}: the outcome ends the subcommand there, modifying nothing ` +
-      `— only past every outcome does a subcommand write, the refresh of ` +
-      `13.3 first — so graph data (T13.3-2's operational path set) stays ` +
-      `byte-identical and still stale (SPEC 10.7, 13.5, 13.3)` +
-      (refreshed
-        ? ` — graph data changed: a product refreshing before it reaches ` +
-          `the outcome leaves graph data refreshed`
-        : "") +
+      (graphData === "stale"
+        ? `— only past every outcome does a subcommand write, the refresh ` +
+          `of 13.3 first — so graph data (T13.3-2's operational path set) ` +
+          `stays byte-identical and still stale (SPEC 10.7, 13.5, 13.3)` +
+          (refreshed
+            ? ` — graph data changed: a product refreshing before it ` +
+              `reaches the outcome leaves graph data refreshed`
+            : "")
+        : `(SPEC 10.7, 13.5)`) +
       `; found ${String(changes.length)} change(s), H-6 leaving out the ` +
       `lock path of a mutating run alone:\n` +
       changes
@@ -1828,17 +2054,66 @@ function o15AssertNothingModified(
 }
 
 /**
+ * The edited source's per-file staleness among `check`'s condition-10
+ * findings (SPEC 13.1, 14.10): every one of `perFile` concerns a derived
+ * path of the edited source — its path with `.mdx` replaced by `.xspec.`
+ * plus a suffix (SPEC 13.1) — with the module among them (it embeds the
+ * edited text, SPEC 4.2), locations [], each instructing rebuilding
+ * (`assertFindingInstructsRebuilding`, SPEC 14.10: a text edit leaves no
+ * recorded file obstructing a rebuild write).
+ */
+function o15AssertPerFileStaleness(
+  perFile: readonly Finding[],
+  editedSource: string,
+  context: string,
+): void {
+  const derivedPrefix = editedSource.replace(/\.mdx$/, ".xspec.");
+  const module = `${derivedPrefix}ts`;
+  for (const finding of perFile) {
+    if (
+      typeof finding.path !== "string" ||
+      !finding.path.startsWith(derivedPrefix)
+    ) {
+      fail(
+        `${context}: beside the graph-data unit form, if any, every ` +
+          `condition-10 finding is per file, concerning a derived path of ` +
+          `the edited source ${editedSource} — ${derivedPrefix}* (SPEC 13.1, ` +
+          `14.10); got a condition-10 finding concerning ` +
+          `${renderPathValue(finding.path)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+    assertSameJson(
+      finding.locations,
+      [],
+      `${context}: a per-file staleness finding names its path and has no ` +
+        `in-source location — locations [] (SPEC 14.10, 12.7)`,
+    );
+    assertFindingInstructsRebuilding(
+      finding,
+      `${context}: the per-file staleness finding concerning ` +
+        `${JSON.stringify(finding.path)} — a derived file of the edited ` +
+        `source, which the rebuild regenerates in place (SPEC 14.10)`,
+    );
+  }
+  if (!perFile.some((finding) => finding.path === module)) {
+    fail(
+      `${context}: the module ${module} itself is stale — it embeds the ` +
+        `edited text (SPEC 4.2, 13.1) — so a per-file condition-10 finding ` +
+        `concerns it (SPEC 14.10); got ` +
+        JSON.stringify(perFile.map((finding) => renderPathValue(finding.path))),
+    );
+  }
+}
+
+/**
  * `check`'s report once an invocation has left the stale state as it found
  * it (SPEC 13.3, 14.10): graph data is still stale, so exactly one
  * condition-10 finding is the graph-data unit form — concerned path the
- * area `.xspec`, no path inside it named, locations [] — where a product
- * refreshing before it reaches the outcome leaves no unit form reported.
- * Every other condition-10 finding is per file, concerning a derived path
- * of the edited source — its path with `.mdx` replaced by `.xspec.` plus a
- * suffix (SPEC 13.1) — with its module among them (it embeds the edited
- * text, SPEC 4.2), locations []; every one, the unit form included,
- * instructs rebuilding (`assertFindingInstructsRebuilding`, SPEC 14.10: a
- * text edit leaves no recorded file obstructing a rebuild write). Beside
+ * area `.xspec`, no path inside it named, locations [], instructing
+ * rebuilding — where a product refreshing before it reaches the outcome
+ * leaves no unit form reported. Every other condition-10 finding is the
+ * edited source's per-file staleness (`o15AssertPerFileStaleness`). Beside
  * the staleness, exactly the state's other findings (x's 14.21 on (A),
  * T10.1-4: `check` reports a corrupt session) and nothing else.
  */
@@ -1847,8 +2122,6 @@ function o15AssertStillStale(
   state: O15State,
   context: string,
 ): void {
-  const derivedPrefix = state.editedSource.replace(/\.mdx$/, ".xspec.");
-  const module = `${derivedPrefix}ts`;
   assertConditionCounts(
     findings.filter((finding) => finding.condition !== "14.10"),
     state.besideStaleness,
@@ -1884,42 +2157,50 @@ function o15AssertStillStale(
     `${context}: the graph-data unit form — stale graph data, which the ` +
       `rebuild regenerates — instructs rebuilding (SPEC 14.10)`,
   );
-  const perFile = stale.filter((finding) => finding !== unitForm);
-  for (const finding of perFile) {
-    if (
-      typeof finding.path !== "string" ||
-      !finding.path.startsWith(derivedPrefix)
-    ) {
-      fail(
-        `${context}: beside the graph-data unit form every condition-10 ` +
-          `finding is per file, concerning a derived path of the edited ` +
-          `source ${state.editedSource} — ${derivedPrefix}* (SPEC 13.1, ` +
-          `14.10); got a condition-10 finding concerning ` +
-          `${renderPathValue(finding.path)} (message: ` +
-          `${JSON.stringify(finding.message)})`,
-      );
-    }
-    assertSameJson(
-      finding.locations,
-      [],
-      `${context}: a per-file staleness finding names its path and has no ` +
-        `in-source location — locations [] (SPEC 14.10, 12.7)`,
-    );
-    assertFindingInstructsRebuilding(
-      finding,
-      `${context}: the per-file staleness finding concerning ` +
-        `${JSON.stringify(finding.path)} — a derived file of the edited ` +
-        `source, which the rebuild regenerates in place (SPEC 14.10)`,
-    );
-  }
-  if (!perFile.some((finding) => finding.path === module)) {
+  o15AssertPerFileStaleness(
+    stale.filter((finding) => finding !== unitForm),
+    state.editedSource,
+    context,
+  );
+}
+
+/**
+ * `check`'s report once a performed subcommand has refreshed stale graph
+ * data before its session write ((c)(iii); SPEC 10.7, 13.3, 14.10): no
+ * condition-10 finding is the graph-data unit form — graph data matches the
+ * current sources — where a product writing without that refresh leaves
+ * the unit form reported; every condition-10 finding is the edited
+ * source's per-file staleness (`o15AssertPerFileStaleness`: 13.3's refresh
+ * writes graph data alone, never a derived file); and nothing else beside
+ * it (the twin holds no corrupt session).
+ */
+function o15AssertRefreshed(
+  findings: readonly Finding[],
+  editedSource: string,
+  context: string,
+): void {
+  assertConditionCounts(
+    findings.filter((finding) => finding.condition !== "14.10"),
+    {},
+    `${context} — beside the staleness nothing else (SPEC 14, 12.2)`,
+  );
+  const stale = findings.filter((finding) => finding.condition === "14.10");
+  const unitForms = stale.filter(
+    (finding) => finding.path === GRAPH_DATA_AREA_PATH,
+  );
+  if (unitForms.length !== 0) {
     fail(
-      `${context}: the module ${module} itself is stale — it embeds the ` +
-        `edited text (SPEC 4.2, 13.1) — so a condition-10 finding concerns ` +
-        `it beside the unit form (SPEC 14.10); got ` +
+      `${context}: graph data is refreshed before the session write — only ` +
+        `past every outcome come the writes, the refresh of 13.3 first, then ` +
+        `the session file (SPEC 10.7, 13.3) — so \`check\` afterwards ` +
+        `reports no graph-data unit form (SPEC 14.10), where a product ` +
+        `writing the session without refreshing graph data leaves it stale; ` +
+        `got ${String(unitForms.length)} condition-10 finding(s) concerning ` +
+        `the area ${GRAPH_DATA_AREA_PATH} among those concerning ` +
         JSON.stringify(stale.map((finding) => renderPathValue(finding.path))),
     );
   }
+  o15AssertPerFileStaleness(stale, editedSource, context);
 }
 
 /** A run of (b) reporting `write-failure` attempted the refresh first. */
@@ -2029,10 +2310,507 @@ async function o15UnwritableArm(
   });
 }
 
+/**
+ * The unique exported item of a kind and scope node, diagnosed when missing
+ * or duplicated (SPEC 10.1, 10.5: at most one item per kind and scope node).
+ */
+function o15ExportItem(
+  report: ExportReport,
+  kind: ItemKind,
+  scope: string,
+  context: string,
+): ReviewItem {
+  const items = report.items.filter(
+    (item) => item.kind === kind && item.scope.node === scope,
+  );
+  if (items.length !== 1) {
+    fail(
+      `${context}: expected exactly one ${kind} item scoped at ${scope} ` +
+        `(SPEC 10.1, 10.5: a session never contains two items with the same ` +
+        `kind and scope node); found ${String(items.length)} among ` +
+        JSON.stringify(
+          report.items.map((item) => `${item.kind} ${item.scope.node}`),
+        ),
+    );
+  }
+  return items[0]!;
+}
+
+/**
+ * (c)'s twin of (A): a fresh workspace of (A)'s initial source and
+ * configuration (staged-source records: it is created after the body's
+ * first invocation), built, holding its own audit session `a`, unsplit, and
+ * no second session; its `status`, read before any hand edit, is returned
+ * for the arm's premises. Disposed by the caller (H-1), or here when the
+ * staging fails.
+ */
+async function o15StageTwinA(
+  product: ProductBinding,
+  context: string,
+): Promise<{
+  readonly workspace: TestWorkspace;
+  readonly status: SessionStatusReport;
+}> {
+  const workspace = await TestWorkspace.create({
+    files: { "xspec.config.ts": O15_CONFIG, [O15_A_FILE]: O15_A_INITIAL },
+  });
+  try {
+    await buildOk(product, workspace, `${context} \`build\``);
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--strategy", "audit", "--name", O15_A_SESSION],
+      0,
+      `${context} \`review create --strategy audit --name ${O15_A_SESSION}\``,
+    );
+    return {
+      workspace,
+      status: await o15Status(product, workspace, O15_A_SESSION, context),
+    };
+  } catch (error) {
+    await workspace.dispose();
+    throw error;
+  }
+}
+
+/**
+ * (c)(i), an item's blocked state judged against the current workspace
+ * (SPEC 10.3, 10.4, 10.7, 13.3): on a twin of (A), P.c's item resolved
+ * `no-change`, unblocking P's (premises from `status`: blocked before,
+ * unblocked after), then P.c's text edited by hand — invalidating P.c's item
+ * (10.4) and so re-blocking P's (10.3) in the current workspace, while stale
+ * graph data still holds P.c's recorded hashes: `resolve a <P's item>
+ * --status no-change`, run with no rebuild and no read since the edit, is
+ * refused at once in T10.7-14's form (the shared check), nothing modified.
+ */
+async function o15ReblockedArm(product: ProductBinding): Promise<void> {
+  const context = "T10.7-15 (c)(i) on a twin of (A)";
+  const { workspace, status } = await o15StageTwinA(product, context);
+  try {
+    const pRow = r14Row(status, "subtree-coherence", O15_P, context);
+    const pcRow = r14Row(status, "subtree-coherence", O15_PC, context);
+    r14ExpectRowState(
+      pRow,
+      { status: "unresolved", blocked: true },
+      "blocked by its child section's unresolved item, P.c's (SPEC 10.3, " +
+        "10.6)",
+      context,
+    );
+    r14ExpectRowState(
+      pcRow,
+      { status: "unresolved", blocked: false },
+      "a leaf's item, blocked by nothing (SPEC 10.6)",
+      context,
+    );
+    await expectExit(
+      product,
+      workspace,
+      ["review", "resolve", O15_A_SESSION, pcRow.id, "--status", "no-change"],
+      0,
+      `${context} \`review resolve ${O15_A_SESSION} <P.c's item> --status ` +
+        `no-change\` — unblocked, so resolved (SPEC 10.7)`,
+    );
+    const resolvedContext = `${context} after P.c's resolve`;
+    const resolved = await o15Status(
+      product,
+      workspace,
+      O15_A_SESSION,
+      resolvedContext,
+    );
+    r14ExpectRowState(
+      r14Row(resolved, "subtree-coherence", O15_PC, resolvedContext),
+      { status: "no-change", blocked: false },
+      "resolved no-change (SPEC 10.3, 10.7)",
+      resolvedContext,
+    );
+    r14ExpectRowState(
+      r14Row(resolved, "subtree-coherence", O15_P, resolvedContext),
+      { status: "unresolved", blocked: false },
+      "unblocked: its one blocker, its child section P.c's item, is " +
+        "resolved (SPEC 10.3, 10.6)",
+      resolvedContext,
+    );
+
+    // P.c's text edited by hand: no rebuild and no read before the
+    // invocation, so graph data is stale when it runs.
+    await workspace.file(O15_A_FILE, O15_A_PC_EDITED);
+    const refusalContext =
+      `${context} [\`review resolve ${O15_A_SESSION} <P's item> --status ` +
+      `no-change\`: P.c's text edited since its item's no-change resolve, so ` +
+      `that item is invalidated (SPEC 10.4) and P's item re-blocked (SPEC ` +
+      `10.3) in the current workspace — refused at once, never resolved by ` +
+      `a judgement from stale graph data, in which P.c's hashes still equal ` +
+      `its recorded state (SPEC 10.7, 13.3)]`;
+    const before = await snapshotDirectory(workspace.root);
+    await expectReviewRefusal(
+      product,
+      workspace,
+      ["review", "resolve", O15_A_SESSION, pRow.id, "--status", "no-change"],
+      O15_A_SESSION_REL,
+      refusalContext,
+    );
+    o15AssertNothingModified(
+      before,
+      await snapshotDirectory(workspace.root),
+      refusalContext,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (c)(ii), a scope root's children judged against the current workspace
+ * (SPEC 10.7, 13.3): on a twin of (A), Q.r's section deleted by hand, Q left
+ * childless in the current workspace while stale graph data still holds
+ * Q.r: `split a <Q's item>`, run with no rebuild and no read since the
+ * edit, is refused (the shared check), nothing modified.
+ */
+async function o15ChildlessArm(product: ProductBinding): Promise<void> {
+  const context = "T10.7-15 (c)(ii) on a twin of (A)";
+  const { workspace, status } = await o15StageTwinA(product, context);
+  try {
+    const qRow = r14Row(status, "subtree-coherence", O15_Q, context);
+    // A premise: Q's child Q.r has an item of its own (SPEC 10.6), so Q has
+    // a child in the graph `create` saw.
+    r14Row(status, "subtree-coherence", O15_QR, context);
+    await workspace.file(O15_A_FILE, O15_A_QR_DELETED);
+    const refusalContext =
+      `${context} [\`review split ${O15_A_SESSION} <Q's item>\`: Q.r's ` +
+      `section deleted by hand, so Q has no children in the current ` +
+      `workspace — refused, never split over children taken from stale ` +
+      `graph data, which still holds Q.r (SPEC 10.7, 13.3)]`;
+    const before = await snapshotDirectory(workspace.root);
+    await expectReviewRefusal(
+      product,
+      workspace,
+      ["review", "split", O15_A_SESSION, qRow.id],
+      O15_A_SESSION_REL,
+      refusalContext,
+    );
+    o15AssertNothingModified(
+      before,
+      await snapshotDirectory(workspace.root),
+      refusalContext,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (c)(iii), a scope root's children judged against the current workspace,
+ * the split performed (SPEC 10.6, 10.7, 13.3): on a twin of (A), a child s.t
+ * authored by hand under the leaf s, which stale graph data still holds
+ * childless: `split a <s's item>`, run with no rebuild and no read since
+ * the edit, exits 0; `check --json` then — before any refreshing read —
+ * reports no graph-data unit form beside the edited source's per-file
+ * staleness (`o15AssertRefreshed`: graph data refreshed before the session
+ * write); and `export` shows the session gaining exactly s.t's
+ * subtree-coherence item and s's parent-consistency item, the latter's
+ * context exactly {s.t} and its blockedBy exactly s.t's item.
+ */
+async function o15NewChildArm(product: ProductBinding): Promise<void> {
+  const context = "T10.7-15 (c)(iii) on a twin of (A)";
+  const { workspace, status } = await o15StageTwinA(product, context);
+  try {
+    const sRow = r14Row(status, "subtree-coherence", O15_S, context);
+    const itemsBefore = status.items.map((row) => `${row.kind} ${row.scope}`);
+    await workspace.file(O15_A_FILE, O15_A_ST_AUTHORED);
+    await expectExit(
+      product,
+      workspace,
+      ["review", "split", O15_A_SESSION, sRow.id],
+      0,
+      `${context} \`review split ${O15_A_SESSION} <s's item>\` — s has the ` +
+        `child s.t in the current workspace, authored by hand with no ` +
+        `rebuild and no read since, so the split is performed, never ` +
+        `refused over children taken from stale graph data, in which s has ` +
+        `none (SPEC 10.7, 13.3)`,
+    );
+    const checkContext = `${context} \`check --json\` after the split`;
+    o15AssertRefreshed(
+      await runFindingsReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        1,
+        `${checkContext} — the edited source's generated module is stale, ` +
+          `so \`check\` exits 1 (SPEC 12.2, 14.10)`,
+      ),
+      O15_A_FILE,
+      checkContext,
+    );
+    const exportContext =
+      `${context} \`review export ${O15_A_SESSION} --json\` after the ` +
+      `split`;
+    const exported = decodeExportReport(
+      await runJson(
+        product,
+        workspace,
+        ["review", "export", O15_A_SESSION, "--json"],
+        exportContext,
+      ),
+      exportContext,
+    );
+    assertSameJson(
+      exported.items
+        .map((item) => `${item.kind} ${item.scope.node}`)
+        .filter((key) => !itemsBefore.includes(key))
+        .sort(),
+      [`parent-consistency ${O15_S}`, `subtree-coherence ${O15_ST}`],
+      `${exportContext}: the session gains exactly s.t's subtree-coherence ` +
+        `item and s's parent-consistency item — s's decomposition over its ` +
+        `one child in the current workspace (SPEC 10.6, 10.7)`,
+    );
+    const stItem = o15ExportItem(
+      exported,
+      "subtree-coherence",
+      O15_ST,
+      exportContext,
+    );
+    const sPcItem = o15ExportItem(
+      exported,
+      "parent-consistency",
+      O15_S,
+      exportContext,
+    );
+    assertSameJson(
+      sPcItem.context.map((node) => node.node).sort(),
+      [O15_ST],
+      `${exportContext}: s's parent-consistency item's context is exactly ` +
+        `s's children in the current workspace, {s.t} (SPEC 10.7)`,
+    );
+    assertSameJson(
+      sPcItem.blockedBy,
+      [stItem.id],
+      `${exportContext}: s's parent-consistency item's blockedBy is exactly ` +
+        `the per-child item, s.t's (SPEC 10.7)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/** (d)'s states, each staged on its own copy of (B)'s state as created. */
+type O15PlaceState = "created" | "cycle" | "failing";
+
+/** One of (d)'s invocations, with the state it runs on. */
+interface O15PlaceCall extends O15Call {
+  readonly state: O15PlaceState;
+}
+
+/** (d)'s states, for diagnoses. */
+const O15_PLACE_STATE_LABELS: Readonly<Record<O15PlaceState, string>> = {
+  created: "(B)'s state, no section edited since `create`",
+  cycle:
+    "(B)'s state with b's file corrupted by T10.1-4's `blockedBy`-cycle " +
+    "staging",
+  failing:
+    "(B)'s state with specs/B.mdx given a section with no id, failing " +
+    "`build`'s validations",
+};
+
+/**
+ * Stage one of (d)'s states on a copy of (B)'s state as `create` left it:
+ * `created` as it is; `cycle` with b's product-written file corrupted by
+ * T10.1-4's `blockedBy`-cycle staging (adapters/session-staging.ts
+ * `stageBlockedByCycle`: the first two items block each other, the file
+ * parseable and its recorded parameters untouched — so the session violates
+ * one invariant, 10.1); `failing` with specs/B.mdx given a section with no
+ * id (a staged-source record).
+ */
+async function o15StagePlace(
+  copy: TestWorkspace,
+  state: O15PlaceState,
+): Promise<void> {
+  if (state === "cycle") {
+    await stageBlockedByCycle(copy.path(O15_B_SESSION_REL));
+  } else if (state === "failing") {
+    await copy.file(O15_B_FILE, O15_B_GATE_FAILING);
+  }
+}
+
+const O15_BASELINE_FIRST =
+  "but the recorded baseline comes first: the baseline's plain usage " +
+  "error, never the refusal's exit 1";
+const O15_CORRUPTION_FIRST =
+  "the session read meets b's corruption before the recorded baseline: " +
+  "exactly the condition-21 finding, never the baseline's exit 2";
+const O15_GATE_FIRST =
+  "the gate precedes the recorded baseline: exactly the gate's findings, " +
+  "never the baseline's exit 2";
+
+/** (d)'s invocations, in TEST-SPEC's order. */
+const O15_PLACE_CALLS: readonly O15PlaceCall[] = [
+  {
+    what: `G's parent-consistency item is blocked by G.N's unresolved item, ${O15_BASELINE_FIRST}`,
+    state: "created",
+    argv: (ids) => [
+      "review",
+      "resolve",
+      O15_B_SESSION,
+      ids.gPc,
+      "--status",
+      "no-change",
+    ],
+    outcome: { kind: "baseline" },
+  },
+  {
+    what: `G's parent-consistency item is of another kind, ${O15_BASELINE_FIRST}`,
+    state: "created",
+    argv: (ids) => ["review", "split", O15_B_SESSION, ids.gPc],
+    outcome: { kind: "baseline" },
+  },
+  {
+    what: O15_CORRUPTION_FIRST,
+    state: "cycle",
+    argv: () => ["review", "status", O15_B_SESSION],
+    outcome: { kind: "corrupt", sessionRel: O15_B_SESSION_REL },
+  },
+  {
+    what: O15_CORRUPTION_FIRST,
+    state: "cycle",
+    argv: (ids) => [
+      "review",
+      "resolve",
+      O15_B_SESSION,
+      ids.gnSc,
+      "--status",
+      "no-change",
+    ],
+    outcome: { kind: "corrupt", sessionRel: O15_B_SESSION_REL },
+  },
+  {
+    what: O15_CORRUPTION_FIRST,
+    state: "cycle",
+    argv: (ids) => ["review", "split", O15_B_SESSION, ids.gPc],
+    outcome: { kind: "corrupt", sessionRel: O15_B_SESSION_REL },
+  },
+  {
+    what: O15_GATE_FIRST,
+    state: "failing",
+    argv: () => ["review", "status", O15_B_SESSION],
+    outcome: { kind: "gate" },
+  },
+  {
+    what: O15_GATE_FIRST,
+    state: "failing",
+    argv: () => ["review", "next", O15_B_SESSION],
+    outcome: { kind: "gate" },
+  },
+  {
+    what: O15_GATE_FIRST,
+    state: "failing",
+    argv: (ids) => ["review", "show", O15_B_SESSION, ids.gPc],
+    outcome: { kind: "gate" },
+  },
+  {
+    what: O15_GATE_FIRST,
+    state: "failing",
+    argv: () => ["review", "export", O15_B_SESSION],
+    outcome: { kind: "gate" },
+  },
+  {
+    what: O15_GATE_FIRST,
+    state: "failing",
+    argv: (ids) => [
+      "review",
+      "resolve",
+      O15_B_SESSION,
+      ids.gnSc,
+      "--status",
+      "no-change",
+    ],
+    outcome: { kind: "gate" },
+  },
+  {
+    what: O15_GATE_FIRST,
+    state: "failing",
+    argv: (ids) => ["review", "split", O15_B_SESSION, ids.gPc],
+    outcome: { kind: "gate" },
+  },
+];
+
+/**
+ * (d)'s gate reference: `build --json` on a copy of (B)'s failing state —
+ * exit 1 with exactly one condition-1 finding, locating the section with no
+ * id (SPEC 12.1, 14.1; diagnosed premises) — the findings a `build` would
+ * now report, which the gate reports in their place (SPEC 13.3).
+ */
+async function o15GateReference(
+  product: ProductBinding,
+  created: O15Staged,
+): Promise<readonly Finding[]> {
+  const context =
+    `T10.7-15 (d) \`build --json\` on ${O15_PLACE_STATE_LABELS.failing} ` +
+    `(the gate reference)`;
+  let reference: readonly Finding[] = [];
+  await withO15Copy(created, async (copy) => {
+    await o15StagePlace(copy, "failing");
+    reference = await buildFindings(
+      product,
+      copy,
+      `${context} — a section with no id fails \`build\`'s validations, ` +
+        `exit 1 (SPEC 12.1, 14.1)`,
+    );
+  });
+  assertConditionCounts(
+    reference,
+    { "14.1": 1 },
+    `${context} — exactly the staged validation error, the section with no ` +
+      `id (SPEC 14.1)`,
+  );
+  assertFindingLocated(
+    reference[0]!,
+    { file: O15_B_FILE, window: O15_B_IDLESS_WINDOW },
+    `${context} — the condition-1 finding locates the section with no id ` +
+      `(SPEC 14)`,
+  );
+  return reference;
+}
+
+/**
+ * (d) on one invocation: on its own copy of (B)'s state as `create` left
+ * it, its state staged on the copy (`o15StagePlace`), the outcome, nothing
+ * modified around it — graph data fresh on the state itself and on its
+ * corrupted twin, stale on the failing one, whose source is edited.
+ */
+async function o15PlaceArm(
+  product: ProductBinding,
+  created: O15Staged,
+  call: O15PlaceCall,
+  ids: O15Ids,
+  gate: readonly Finding[] | undefined,
+): Promise<void> {
+  const context =
+    `T10.7-15 (d) on ${O15_PLACE_STATE_LABELS[call.state]} ` +
+    `[\`${call.argv(ids).join(" ")}\`: ${call.what}]`;
+  await withO15Copy(created, async (copy) => {
+    await o15StagePlace(copy, call.state);
+    const before = await snapshotDirectory(copy.root);
+    await o15AssertOutcome(
+      product,
+      copy,
+      call,
+      ids,
+      (jsonArgv) => runCli(product, copy, jsonArgv),
+      context,
+      gate,
+    );
+    o15AssertNothingModified(
+      before,
+      await snapshotDirectory(copy.root),
+      context,
+      call.state === "failing" ? "stale" : "fresh",
+    );
+  });
+}
+
 const T10_7_15 = defineProductTest({
   id: "T10.7-15",
   title:
-    "outcome order past the gate — arms (a) and (b), each invocation run on its own byte copy of a stale state: fixture (A), specs/A.mdx holding top-level P with P.c, Q with Q.r, and the leaves s and u, an audit session `a` created and Q's item split, a second session `x` made corrupt by garbage bytes, and u's text then edited with no rebuild and no read since; fixture (B), a git workspace whose specs/B.mdx holds G with G.N and the leaf v, G.N edited after `c1`, `review create --base c1 --name b`, the repository then removed, and v's text edited likewise. (a) `resolve a <P's item> --status no-change` (blocked by P.c's unresolved item), `split a <Q's parent-consistency item>`, and `split a <s's item>` (no children) each exit 1 with one code-less refusal in T10.7-14's form; `resolve a <unknown-id> --status no-change`, `show a <unknown-id>`, and `split a <unknown-id>` each exit 2 with the plain usage error, `code` and `path` `null`; `status x` and `resolve x <id> --status updated` each exit 1 with exactly the condition-21 finding concerning `.xspec/reviews/x.json`; and `status b` exits 2 with the baseline's plain usage error — each modifying nothing, graph data (T13.3-2's operational path set) byte-identical, and `check` afterwards still reporting the graph-data unit form beside the edited source's per-file staleness (and x's 14.21), where a product refreshing before it reaches the outcome leaves graph data refreshed; (b) on the Linux leg, the same invocations with the graph-data area also staged unwritable by T14-9's graph-data staging — before a read's invocation, and for `resolve` and `split` while each is held at the seam of 13.5, after acquisition — each report exactly their (a) outcome, never `write-failure`, release's refused deletions changing no outcome; arms (c)–(g) are not yet staged (SPEC 6.3, 10.1, 10.3, 10.5, 10.6, 10.7, 12.0, 13.3, 13.5, 14.21, 14.24)",
+    "outcome order past the gate — arms (a)–(d), each invocation run on its own byte copy of its state, or on a twin of its own: fixture (A), specs/A.mdx holding top-level P with P.c, Q with Q.r, and the leaves s and u, an audit session `a` created and Q's item split, a second session `x` made corrupt by garbage bytes, and u's text then edited with no rebuild and no read since; fixture (B), a git workspace whose specs/B.mdx holds G with G.N and the leaf v, G.N edited after `c1`, `review create --base c1 --name b`, the repository then removed, and v's text edited likewise. (a) `resolve a <P's item> --status no-change` (blocked by P.c's unresolved item), `split a <Q's parent-consistency item>`, and `split a <s's item>` (no children) each exit 1 with one code-less refusal in T10.7-14's form; `resolve a <unknown-id> --status no-change`, `show a <unknown-id>`, and `split a <unknown-id>` each exit 2 with the plain usage error, `code` and `path` `null`; `status x` and `resolve x <id> --status updated` each exit 1 with exactly the condition-21 finding concerning `.xspec/reviews/x.json`; and `status b` exits 2 with the baseline's plain usage error — each modifying nothing, graph data (T13.3-2's operational path set) byte-identical, and `check` afterwards still reporting the graph-data unit form beside the edited source's per-file staleness (and x's 14.21), where a product refreshing before it reaches the outcome leaves graph data refreshed; (b) on the Linux leg, the same invocations with the graph-data area also staged unwritable by T14-9's graph-data staging — before a read's invocation, and for `resolve` and `split` while each is held at the seam of 13.5, after acquisition — each report exactly their (a) outcome, never `write-failure`, release's refused deletions changing no outcome; (c) on freshly built twins of (A), each holding its own unsplit audit session `a` and edited by hand with no rebuild and no read before the invocation, graph judgements are made against the current workspace: (i) with P.c's item resolved `no-change` and P.c's text then edited, `resolve a <P's item> --status no-change` is refused at once in T10.7-14's form, nothing modified, where a product judging the blocked state from stale graph data resolves it; (ii) with Q.r's section deleted, `split a <Q's item>` is refused, nothing modified; (iii) with a child s.t authored under the leaf s, `split a <s's item>` exits 0, `check` afterwards reporting the edited source's per-file staleness and no graph-data unit form — graph data refreshed before the session write — and the session gains exactly s.t's subtree-coherence item and s's parent-consistency item, its context exactly {s.t} and its blockedBy exactly s.t's item; (d) on (B)'s state with no section edited since `create`, `resolve b <G's parent-consistency item> --status no-change` (a blocked item) and `split b <G's parent-consistency item>` (an item of another kind) each exit 2 with the baseline's plain usage error, `code` and `path` `null`, never a refusal's exit 1; with b's file corrupted by T10.1-4's `blockedBy`-cycle staging, `status b`, `resolve b <G.N's item> --status no-change`, and `split b <G's parent-consistency item>` each exit 1 with exactly the condition-21 finding concerning `.xspec/reviews/b.json`, never the baseline's exit 2; and with specs/B.mdx given a section with no id, `status`, `next`, `show`, `export`, `resolve`, and `split` naming b each report exactly the gate's findings — `build`'s one condition-1 finding — exit 1, never the baseline's exit 2; each modifying nothing; the unknown item ID's place before the recorded baseline admits no discriminating staging and is not asserted; arms (e)–(g) are not yet staged (SPEC 6.3, 10.1, 10.3, 10.4, 10.5, 10.6, 10.7, 12.0, 13.3, 13.5, 14.1, 14.21, 14.24)",
   run: async (product) => {
     const a = await o15StageFixtureA(product);
     try {
@@ -2060,8 +2838,29 @@ const T10_7_15 = defineProductTest({
             );
           }
         }
+
+        // (c) Graph judgements against the current workspace (SPEC 10.7,
+        // 13.3), each on a freshly built twin of (A), edited by hand.
+        await o15ReblockedArm(product);
+        await o15ChildlessArm(product);
+        await o15NewChildArm(product);
+
+        // (d) The recorded baseline's place (SPEC 10.7, 12.0), on (B)'s
+        // state as `create` left it; the gate reference is taken before the
+        // first invocation on the failing source.
+        let gate: readonly Finding[] | undefined;
+        for (const call of O15_PLACE_CALLS) {
+          if (call.state === "failing" && gate === undefined) {
+            gate = await o15GateReference(product, b.created);
+          }
+          await o15PlaceArm(product, b.created, call, ids, gate);
+        }
       } finally {
-        await b.state.workspace.dispose();
+        try {
+          await b.created.workspace.dispose();
+        } finally {
+          await b.state.workspace.dispose();
+        }
       }
     } finally {
       await a.state.workspace.dispose();
