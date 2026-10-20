@@ -540,7 +540,12 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T10.6-1": ["10", "10.6"],
   "T10.6-2": ["10.6"],
   "T10.6-3": ["10.6"],
-  "T10.7-1": ["10", "10.1", "10.7", "13.4", "14"],
+  // T10.7-1: 12.0's syntax class behind the foreign `--strategy` values,
+  // each answered with the plain usage error without loading configuration
+  // (byte-identical on the invalid- and missing-configuration twins), and
+  // 12.7's plain usage error (`code` and `path` `null`) and findings order
+  // (the case pair's two condition-21 findings by concerned path bytes).
+  "T10.7-1": ["10", "10.1", "10.7", "12.0", "12.7", "13.4", "14"],
   "T10.7-2": ["10.7"],
   "T10.7-3": ["10.7", "14"],
   "T10.7-4": ["10", "10.7"],
