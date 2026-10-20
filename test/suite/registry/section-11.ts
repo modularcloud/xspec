@@ -16,7 +16,9 @@
 // four hashes (5.5), tags and coverage attribute (both absent for a root,
 // 11.1, 5.5), and incoming and outgoing edges by kind. `nodes` filters
 // (`--group`, `--file`, `--tag`, `--coverage`) combine conjunctively over
-// requirement-node rows;
+// requirement-node rows, one per node — never a code location, 5.1's other
+// node kind, and never a node repeated for a second spec group holding its
+// file (7.1);
 // `--coverage` matches no root; `--group` accepts only a spec group's name —
 // a code group's name is an invalid flag value (12.0, the wrong-kind group
 // reference of 14.14); `--file` uses the glob rules of 7, the outside-root
@@ -85,6 +87,7 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   decodeEdgesReport,
+  decodeNodeIdentityRowsReport,
   decodeNodeReport,
   decodeNodeRowsReport,
   decodeReachableReport,
@@ -113,6 +116,7 @@ import {
   BESIDE_ROOT_FILE_PATTERN_DECOY,
   INSIDE_NO_MATCH_FILE_PATTERNS,
   OUTSIDE_ROOT_FILE_PATTERNS,
+  OUTSIDE_ROOT_FILE_PATTERN_INSIDE_ONCE_NORMALIZED,
   REPLACEMENT_CHARACTER,
   assertEdgeSetEqual,
   assertSameJson,
@@ -169,9 +173,14 @@ export default defineConfig({
 })
 `;
 
-/** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
+/**
+ * Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1).
+ * The config is plain text in a body's first workspace and a staged-source
+ * record in one created after the body's first invocation (S-9;
+ * helpers/staged-ts.ts).
+ */
 async function withWorkspace<T>(
-  config: string,
+  config: InitialFileContents,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -816,10 +825,257 @@ const T11_2_MALFORMED_TAGS: ReadonlyArray<{
   },
 ];
 
+// T11-2's node-kind workspace — the rows are requirement nodes, one per node
+// (SPEC 11.1), never code locations, 5.1's other node kind: spec groups `p`
+// (`specs/**/*.mdx`) and `q` (`specs/shared/*.mdx`) over `specs/x.mdx` and
+// `specs/shared/S.mdx`, the latter in both groups (7.1: a file MAY belong to
+// multiple groups), and a code group `app` (`src/*.ts`) over `src/x.ts` and
+// `src/y.ts`, whose markers and `text(...)` calls — at top level and inside
+// the named units `f` and `C.m` (4.6) — reference sections of both spec
+// sources, so the graph holds six code locations a product could list as
+// rows. `specs/x.mdx` sits directly under `specs/`, where the pinned inside
+// spellings' normalization (`specs/*.mdx`) matches it. The workspace is
+// created after the body's first invocation (in the `alpha`/`beta`
+// workspace), so every initial file, the configuration included, is a
+// staged-source record (S-9's timing clause; helpers/staged-mdx.ts,
+// helpers/staged-ts.ts), the ranges computed from the same strings.
+const T11_2_KIND_CONFIG = stagedTs(
+  "T11-2 node-kind workspace xspec.config.ts — spec groups p and q (specs/shared/*.mdx in both), code group app",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    p: ["specs/**/*.mdx"],
+    q: ["specs/shared/*.mdx"]
+  },
+  code: {
+    app: ["src/*.ts"]
+  }
+})
+`,
+);
+const T11_2_X_FILE = "specs/x.mdx";
+const T11_2_S_FILE = "specs/shared/S.mdx";
+const T11_2_X_XA = '<S id="xa" tags="core">\nX a text.\n</S>';
+const T11_2_X_XB_C = '<S id="xb.c">\nX b c text.\n</S>';
+const T11_2_X_XB = `<S id="xb">\nX b text.\n\n${T11_2_X_XB_C}\n</S>`;
+const T11_2_X_SOURCE = `${T11_2_X_XA}\n\n${T11_2_X_XB}\n`;
+const T11_2_S_SA = '<S id="sa">\nS a text.\n</S>';
+const T11_2_S_SB = '<S id="sb" coverage="none">\nS b text.\n</S>';
+const T11_2_S_SOURCE = `${T11_2_S_SA}\n\n${T11_2_S_SB}\n`;
+// The code sources: each references sections of both spec sources by a
+// marker and a `text(...)` call at top level (attributed to the file) and
+// inside `f` and `C.m` (attributed to the unit, SPEC 4.5, 4.6); src/x.ts
+// imports both `text` exports aliased (4.4).
+const T11_2_X_TS_SOURCE = [
+  'import X, { text as textX } from "../specs/x.xspec";',
+  'import S, { text as textS } from "../specs/shared/S.xspec";',
+  "",
+  "X.xa;",
+  "textS(S.sa);",
+  "",
+  "export function f(): string {",
+  "  S.sb;",
+  "  return textX(X.xb);",
+  "}",
+  "",
+  "export class C {",
+  "  m(): string {",
+  "    X.xb.c;",
+  "    return textS(S.sa);",
+  "  }",
+  "}",
+  "",
+].join("\n");
+const T11_2_Y_TS_SOURCE = [
+  'import S, { text } from "../specs/shared/S.xspec";',
+  'import X from "../specs/x.xspec";',
+  "",
+  "X.xb.c;",
+  "text(S.sb);",
+  "",
+  "export function f(): string {",
+  "  X.xa;",
+  "  return text(S.sa);",
+  "}",
+  "",
+  "export class C {",
+  "  m(): string {",
+  "    X.xb;",
+  "    return text(S.sb);",
+  "  }",
+  "}",
+  "",
+].join("\n");
+const T11_2_KIND_FILES: Readonly<Record<string, InitialFileContents>> = {
+  [T11_2_X_FILE]: stagedMdx(
+    "T11-2 node-kind workspace specs/x.mdx",
+    T11_2_X_SOURCE,
+  ),
+  [T11_2_S_FILE]: stagedMdx(
+    "T11-2 node-kind workspace specs/shared/S.mdx (in spec groups p and q)",
+    T11_2_S_SOURCE,
+  ),
+  "src/x.ts": stagedTs(
+    "T11-2 node-kind workspace src/x.ts — markers and text calls into both spec sources at top level, in f, and in C.m",
+    T11_2_X_TS_SOURCE,
+  ),
+  "src/y.ts": stagedTs(
+    "T11-2 node-kind workspace src/y.ts — markers and text calls into both spec sources at top level, in f, and in C.m",
+    T11_2_Y_TS_SOURCE,
+  ),
+};
+// The code sources' paths, and the code locations their references are
+// attributed to (SPEC 4.6) — each the source of an edge, the staging's
+// premise.
+const T11_2_KIND_CODE_PATHS: readonly string[] = ["src/x.ts", "src/y.ts"];
+const T11_2_KIND_CODE_LOCATIONS: readonly string[] = [
+  "src/x.ts",
+  "src/x.ts#C.m",
+  "src/x.ts#f",
+  "src/y.ts",
+  "src/y.ts#C.m",
+  "src/y.ts#f",
+];
+// Every requirement node of the node-kind workspace on the row contract: the
+// two roots (tags and coverage attribute absent, 11.1, 5.5) and the five
+// sections.
+const T11_2_KIND_ROWS: readonly ExpectedRow[] = [
+  {
+    identity: T11_2_S_FILE,
+    range: wholeFileRange(T11_2_S_SOURCE),
+    tags: null,
+  },
+  {
+    identity: `${T11_2_S_FILE}#sa`,
+    range: rangeOf(T11_2_S_SOURCE, T11_2_S_SA),
+    tags: [],
+    coverage: "required",
+  },
+  {
+    identity: `${T11_2_S_FILE}#sb`,
+    range: rangeOf(T11_2_S_SOURCE, T11_2_S_SB),
+    tags: [],
+    coverage: "none",
+  },
+  {
+    identity: T11_2_X_FILE,
+    range: wholeFileRange(T11_2_X_SOURCE),
+    tags: null,
+  },
+  {
+    identity: `${T11_2_X_FILE}#xa`,
+    range: rangeOf(T11_2_X_SOURCE, T11_2_X_XA),
+    tags: ["core"],
+    coverage: "required",
+  },
+  {
+    identity: `${T11_2_X_FILE}#xb`,
+    range: rangeOf(T11_2_X_SOURCE, T11_2_X_XB),
+    tags: [],
+    coverage: "required",
+  },
+  {
+    identity: `${T11_2_X_FILE}#xb.c`,
+    range: rangeOf(T11_2_X_SOURCE, T11_2_X_XB_C),
+    tags: [],
+    coverage: "required",
+  },
+];
+const T11_2_X_IDS: readonly string[] = [
+  T11_2_X_FILE,
+  `${T11_2_X_FILE}#xa`,
+  `${T11_2_X_FILE}#xb`,
+  `${T11_2_X_FILE}#xb.c`,
+];
+const T11_2_S_IDS: readonly string[] = [
+  T11_2_S_FILE,
+  `${T11_2_S_FILE}#sa`,
+  `${T11_2_S_FILE}#sb`,
+];
+// The node-kind arms, each answer's rows exactly its listed nodes.
+const T11_2_KIND_ARMS: readonly {
+  readonly argv: readonly string[];
+  readonly ids: readonly string[];
+  readonly what: string;
+}[] = [
+  {
+    argv: ["query", "nodes"],
+    ids: [...T11_2_S_IDS, ...T11_2_X_IDS],
+    what:
+      "unfiltered: exactly the two spec sources' roots and sections, each " +
+      "once — no code location, and no node of specs/shared/S.mdx repeated " +
+      "for its second group",
+  },
+  {
+    argv: ["query", "nodes", "--group", "p"],
+    ids: [...T11_2_S_IDS, ...T11_2_X_IDS],
+    what: "`--group p` returns both spec sources' nodes, each once",
+  },
+  {
+    argv: ["query", "nodes", "--group", "q"],
+    ids: T11_2_S_IDS,
+    what: "`--group q` returns those of specs/shared/S.mdx alone, each once",
+  },
+  {
+    argv: ["query", "nodes", "--file", "src/*.ts"],
+    ids: [],
+    what:
+      "`--file 'src/*.ts'`, matching code sources alone: exit 0 with no " +
+      "rows, never the code locations",
+  },
+  {
+    argv: ["query", "nodes", "--file", "**/x.*"],
+    ids: T11_2_X_IDS,
+    what:
+      "`--file '**/x.*'`, matching specs/x.mdx and src/x.ts: the nodes of " +
+      "specs/x.mdx alone, never src/x.ts's code locations",
+  },
+];
+
+/**
+ * A node-kind arm's answer: its rows are requirement nodes, one per node
+ * (SPEC 11.1) — judged on the identities first, so a listed code location
+ * or a repeated node is diagnosed as such whatever members its row carries
+ * — and then exactly `expected`, each row on the row contract.
+ */
+function assertRequirementNodeRows(
+  doc: unknown,
+  expected: readonly ExpectedRow[],
+  context: string,
+): void {
+  const identities = decodeNodeIdentityRowsReport(doc, context);
+  const codeLocations = identities.filter((identity) =>
+    T11_2_KIND_CODE_PATHS.includes(identity.split("#")[0]!),
+  );
+  if (codeLocations.length > 0) {
+    fail(
+      `${context}: the rows are requirement nodes, never code locations — ` +
+        `5.1's other node kind (SPEC 11.1, 4.6); listed: ` +
+        JSON.stringify(codeLocations),
+    );
+  }
+  const repeated = [
+    ...new Set(
+      identities.filter(
+        (identity, index) => identities.indexOf(identity) !== index,
+      ),
+    ),
+  ];
+  if (repeated.length > 0) {
+    fail(
+      `${context}: one row per node (SPEC 11.1) — never a node listed once ` +
+        `per spec group holding its file (specs/shared/S.mdx is in both p ` +
+        `and q, 7.1); repeated: ${JSON.stringify(repeated)}`,
+    );
+  }
+  assertRowSet(decodeNodeRowsReport(doc, context), expected, context);
+}
+
 const T11_2 = defineProductTest({
   id: "T11-2",
   title:
-    "`query nodes` rows are requirement nodes carrying identity, source range, tags, and coverage attribute (tags and coverage attribute both absent for roots — tags never `[]`); `--group`, `--file <glob>`, `--tag`, and `--coverage` combine conjunctively; `--coverage` matches no root; a `--file` pattern outside the workspace root by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`) is an invalid flag value — exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding — while an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`, and their twins over `specs/alpha`) is admitted and matches nothing, exit 0 with no rows; a `--group` naming a code group is an invalid flag value, exit 2; `--tag` acceptance is syntactic, as on `occurrences --to`: a well-formed tag no node carries (`green`; `a.b`, since a tag may contain `.`) matches nothing — exit 0, an empty row set — while a spelling no tag can have, one arm each — the empty string, `a b`, `#`, `then`, a control character (U+001F and U+007F, the class's argument-bearable boundaries), `\"`, `'`, `\\`, `&`, and U+FFFD — is a malformed value of the syntax class: exit 2 with the plain usage error's document (`code` and `path` null), reported without loading configuration — byte-identical with the configuration file invalid or missing (T12.0-10's discipline) — nothing modified (SPEC 11, 11.1, 1.4, 7, 12.0, 12.7, 14.14)",
+    "`query nodes` rows are requirement nodes, one per node — never code locations — carrying identity, source range, tags, and coverage attribute (tags and coverage attribute both absent for roots — tags never `[]`); `--group`, `--file <glob>`, `--tag`, and `--coverage` combine conjunctively; `--coverage` matches no root; on a workspace with spec groups `p` (`specs/**/*.mdx`) and `q` (`specs/shared/*.mdx`) over `specs/x.mdx` and `specs/shared/S.mdx` — the latter in both groups — and a code group `app` over `src/x.ts` and `src/y.ts`, whose markers and `text(...)` calls at top level and inside `f` and `C`'s method `m` reference sections of both spec sources (each of the six code locations the source of an edge, the staging's premise), unfiltered `query nodes` and `--group p` return exactly both spec sources' roots and sections and `--group q` those of `specs/shared/S.mdx` alone, each once — no code location among the rows, no node repeated for its second group — `--file 'src/*.ts'`, matching code sources alone, no rows, exit 0, and `--file '**/x.*'` the nodes of `specs/x.mdx` alone; a `--file` pattern outside the workspace root by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`, and `**/../x/*.mdx`, outside though its lexical normalization `x/*.mdx` is not) is an invalid flag value — exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding — while an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx` and `specs//*.mdx` over `specs/x.mdx`, which their normalization matches, and their twins over `specs/alpha`, likewise) is admitted and matches nothing, exit 0 with no rows; a `--group` naming a code group is an invalid flag value, exit 2; `--tag` acceptance is syntactic, as on `occurrences --to`: a well-formed tag no node carries (`green`; `a.b`, since a tag may contain `.`) matches nothing — exit 0, an empty row set — while a spelling no tag can have, one arm each — the empty string, `a b`, `#`, `then`, a control character (U+001F and U+007F, the class's argument-bearable boundaries), `\"`, `'`, `\\`, `&`, and U+FFFD — is a malformed value of the syntax class: exit 2 with the plain usage error's document (`code` and `path` null), reported without loading configuration — byte-identical with the configuration file invalid or missing (T12.0-10's discipline) — nothing modified (SPEC 11, 11.1, 1.4, 7, 7.1, 12.0, 12.7, 14.14)",
   run: async (product) => {
     await withWorkspace(
       TWO_SPEC_GROUP_CONFIG,
@@ -933,12 +1189,17 @@ const T11_2 = defineProductTest({
         // Invalid flag values (SPEC 11, 12.0): a `--file` pattern outside
         // the workspace root by its spelling alone — decided as 7 decides
         // a configured glob (T7-4), exit 2 like its configuration-time
-        // counterpart 14.14 — with the file the ascending spellings name
-        // when resolved staged beside the root, so exit 2 never comes from
-        // a side reason; and a `--group` naming a code group (the
-        // wrong-kind group reference of 14.14).
+        // counterpart 14.14; `**/../x/*.mdx` among them, outside though its
+        // lexical normalization `x/*.mdx` is inside, which a product
+        // normalizing before deciding answers — with the file the ascending
+        // spellings name when resolved staged beside the root, so exit 2
+        // never comes from a side reason; and a `--group` naming a code
+        // group (the wrong-kind group reference of 14.14).
         await stageBesideRoot(workspace, BESIDE_ROOT_FILE_PATTERN_DECOY);
-        for (const { spelling, why } of OUTSIDE_ROOT_FILE_PATTERNS) {
+        for (const { spelling, why } of [
+          ...OUTSIDE_ROOT_FILE_PATTERNS,
+          OUTSIDE_ROOT_FILE_PATTERN_INSIDE_ONCE_NORMALIZED,
+        ]) {
           await expectFilePatternUsageError(
             product,
             workspace,
@@ -949,14 +1210,14 @@ const T11_2 = defineProductTest({
 
         // An inside pattern spelled with a `.` or an empty segment is
         // admitted and matches nothing — a discovered path carries no such
-        // segment (SPEC 7, 12.0): exit 0 with no rows. TEST-SPEC's pinned
-        // `specs` spellings run beside their twins over `specs/alpha`,
-        // whose normalized form (`specs/alpha/*.mdx`) matches A.mdx — the
-        // arm a normalizing product fails.
-        for (const { spelling, why } of [
-          ...INSIDE_NO_MATCH_FILE_PATTERNS,
-          ...insideNoMatchFilePatterns("specs/alpha"),
-        ]) {
+        // segment (SPEC 7, 12.0): exit 0 with no rows. Here the twins over
+        // `specs/alpha`, whose normalized form (`specs/alpha/*.mdx`)
+        // matches A.mdx — the arm a normalizing product fails; TEST-SPEC's
+        // pinned `specs` spellings run on the node-kind workspace below,
+        // over the `specs/x.mdx` their normalization matches.
+        for (const { spelling, why } of insideNoMatchFilePatterns(
+          "specs/alpha",
+        )) {
           const context = `T11-2 \`query nodes --file ${JSON.stringify(spelling)}\` (${why})`;
           const rows = decodeNodeRowsReport(
             await runJson(
@@ -1034,6 +1295,99 @@ const T11_2 = defineProductTest({
           );
         } finally {
           await twins.dispose();
+        }
+      },
+    );
+
+    // The rows are requirement nodes, one per node (SPEC 11.1) — never code
+    // locations, 5.1's other node kind, and never a node repeated for a
+    // second spec group holding its file (7.1) — on the node-kind
+    // workspace.
+    await withWorkspace(
+      T11_2_KIND_CONFIG,
+      T11_2_KIND_FILES,
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T11-2 node-kind workspace `build` (premise: the workspace is " +
+            "valid, a file in two spec groups included, SPEC 7.1)",
+        );
+
+        // Staging integrity: each of the six code locations the code
+        // sources' references are attributed to is the source of an edge
+        // (SPEC 4.3, 4.5, 4.6, 5.2) — the graph holds the code locations
+        // the rows below must leave out, so their absence is never an
+        // empty code side's.
+        {
+          const context =
+            "T11-2 node-kind workspace `query edges --json` (staging " +
+            "integrity: the graph holds the code locations)";
+          const edges = decodeEdgesReport(
+            await runJson(
+              product,
+              workspace,
+              ["query", "edges", "--json"],
+              context,
+            ),
+            context,
+          );
+          const sources = new Set(edges.map((edge) => edge.from));
+          const missing = T11_2_KIND_CODE_LOCATIONS.filter(
+            (location) => !sources.has(location),
+          );
+          if (missing.length > 0) {
+            fail(
+              `${context}: every staged code location — a marker's or a ` +
+                `\`text(...)\` call's enclosing named unit, or the file at ` +
+                `top level — is the source of a \`references\` or ` +
+                `\`embeds\` edge (SPEC 4.3, 4.5, 4.6, 5.2); no edge from ` +
+                `${JSON.stringify(missing)}`,
+            );
+          }
+        }
+
+        for (const arm of T11_2_KIND_ARMS) {
+          const context = `T11-2 node-kind workspace \`${arm.argv.join(" ")}\` — ${arm.what}`;
+          assertRequirementNodeRows(
+            await runJson(
+              product,
+              workspace,
+              [...arm.argv, "--json"],
+              `${context}: exit 0 (SPEC 11.1)`,
+            ),
+            expectedRows(T11_2_KIND_ROWS, arm.ids),
+            context,
+          );
+        }
+
+        // TEST-SPEC's pinned inside spellings, `./specs/*.mdx` and
+        // `specs//*.mdx`, over `specs/x.mdx`, which their normalized form
+        // `specs/*.mdx` matches: admitted, matching nothing (SPEC 7, 12.0),
+        // exit 0 with no rows — a product normalizing the spelling lists
+        // specs/x.mdx's nodes.
+        for (const { spelling, why } of INSIDE_NO_MATCH_FILE_PATTERNS) {
+          const context =
+            `T11-2 node-kind workspace \`query nodes --file ` +
+            `${JSON.stringify(spelling)}\` (${why}; its normalization ` +
+            `\`specs/*.mdx\` matches specs/x.mdx)`;
+          const rows = decodeNodeRowsReport(
+            await runJson(
+              product,
+              workspace,
+              ["query", "nodes", "--file", spelling, "--json"],
+              `${context} — an inside pattern matching nothing is admitted: ` +
+                `exit 0 (SPEC 11.1, 7)`,
+            ),
+            context,
+          );
+          assertSameJson(
+            rows,
+            [],
+            `${context}: no rows — the pattern matches no discovered file, ` +
+              `whose path carries no \`.\` or empty segment (SPEC 7, 12.0); ` +
+              `an empty row set is [], never null (12.7)`,
+          );
         }
       },
     );

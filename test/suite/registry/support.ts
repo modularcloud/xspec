@@ -1153,9 +1153,32 @@ export const OUTSIDE_ROOT_FILE_PATTERNS: readonly FilePatternSpelling[] = [
 ];
 
 /**
+ * The `--file` spelling whose outside-root decision lexical normalization
+ * reverses (T7-4): a whole `**` segment, then `..`, then `x/*.mdx`. The
+ * `**` leaves the depth at zero, so the `..` takes it below zero — outside
+ * the root by spelling (SPEC 7) — while the spelling's lexical
+ * normalization, the `**` and `..` cancelling, is the inside `x/*.mdx`: a
+ * product normalizing a pattern before deciding answers where exit 2 is
+ * required. TEST-SPEC stages it on each `--file` surface (T7-4: T11-2,
+ * T11.3-2, T11.4-2, T12.3-1), beside {@link OUTSIDE_ROOT_FILE_PATTERNS}
+ * and under the same discipline: callers stage {@link
+ * BESIDE_ROOT_FILE_PATTERN_DECOY}, the file the spelling names resolved
+ * with its `**` matching no segment, and judge the invocation with {@link
+ * expectFilePatternUsageError}.
+ */
+export const OUTSIDE_ROOT_FILE_PATTERN_INSIDE_ONCE_NORMALIZED: FilePatternSpelling =
+  {
+    spelling: "**/../x/*.mdx",
+    why:
+      "a `**` segment leaves the depth at zero, so the `..` takes it below " +
+      "zero — outside, though its lexical normalization `x/*.mdx` is inside",
+  };
+
+/**
  * The file the ascending spellings of {@link OUTSIDE_ROOT_FILE_PATTERNS}
- * name when resolved against the root's parent (`stageBesideRoot`): a
- * product deciding by what it finds rather than by spelling finds it.
+ * and {@link OUTSIDE_ROOT_FILE_PATTERN_INSIDE_ONCE_NORMALIZED} name when
+ * resolved against the root's parent (`stageBesideRoot`): a product
+ * deciding by what it finds rather than by spelling finds it.
  */
 export const BESIDE_ROOT_FILE_PATTERN_DECOY: Readonly<Record<string, string>> =
   { "x/M.mdx": '<S id="m">\nM text.\n</S>\n' };

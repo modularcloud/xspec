@@ -570,7 +570,9 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T10.7-14": ["10.7", "12.7", "14"],
   "T10.7-15": ["10.7", "13.3", "14"],
   "T11-1": ["11", "11.1"],
-  "T11-2": ["11", "11.1", "1.4", "12.0", "12.7", "14"],
+  // T11-2: its node-kind arms' file in two spec groups — valid, a member of
+  // each group, its nodes listed once (7.1).
+  "T11-2": ["11", "11.1", "1.4", "7.1", "12.0", "12.7", "14"],
   "T11-3": ["11", "11.1"],
   "T11-4": ["11", "11.1", "12.0", "12.7", "14"],
   "T11-5": ["11", "11.1"],
