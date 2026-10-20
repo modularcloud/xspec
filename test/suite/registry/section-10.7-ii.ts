@@ -92,8 +92,10 @@
 //   12.0): after each `show --json` read and its assertions — T10.7-8's x.k
 //   item (the item `next` returns) and the root's item, blocked by x's (a
 //   `show --json` read this check adds, asserted against SPEC 10.6's
-//   blocking), and T10.7-12's per-item reads of sub-fixtures A and C and
-//   sub-fixture B's two provenance reads at each stage — at the same state,
+//   blocking), and T10.7-12's per-item reads of its matrix, split, and
+//   coverage sessions, its read of x's item in the joined-origin
+//   sub-fixture, sub-fixture B's three provenance reads at each stage, and
+//   its read of N's item in the resolve-state sub-fixture — at the same state,
 //   `review show <name> <item-id>` without `--json` exits 0 as well, and its
 //   report mentions what the decoded item carries (a product-to-itself
 //   comparison, H-4; `assertHumanShowItem`, through
@@ -130,13 +132,39 @@
 //   1.7 — the same values T11-1 fixes for `query node`), with distinctness
 //   premises asserted first so every discrimination (own vs subtree text,
 //   baseline vs create-time vs current values) is meaningful. A code
-//   location is no `query node` operand, so the present code-impact scope's
+//   location is no `query node` operand, so each present code-impact scope's
 //   range — review payloads are one of the two range-presenting outputs for
 //   code locations (SPEC 1.7) — is asserted against precomputed byte offsets
-//   of the staged named unit's construct (SPEC 1.7, 4.6). Embedding
-//   expansion is additionally pinned with byte literals: the asserted text
-//   must contain the embedded target's authored text and must not contain the
-//   unexpanded `text(` spelling (SPEC 1.6, 2.3).
+//   of the staged named unit's construct (SPEC 1.7, 4.6): refUnit's function
+//   declaration, and T10.7-12's two property members C.m and C.n, each run
+//   through the `;` ending it and C.n's from its decorator's `@` (the T1.7-2
+//   forms). Embedding expansion is additionally pinned with byte literals:
+//   the asserted text must contain the embedded target's authored text and
+//   must not contain the unexpanded `text(` spelling (SPEC 1.6, 2.3).
+// - T10.7-12's sub-fixtures beyond the matrix, each on a workspace of its
+//   own. The split sub-fixture (specs/S.mdx) reads the split's
+//   parent-consistency item from `export` — its scope's own text, and its
+//   context exactly sp's two unedited children, each with its subtree text —
+//   then `show` per item and a `next` walk. The joined-origin sub-fixture
+//   stages T10.4-7(a)'s fixture through section-10.4.ts' exported stagings
+//   (`stageT1047Session`, `stageT1047State`, and the record
+//   `T10_7_12_D2_V2`), loaded with a dynamic `import()` when the arm runs:
+//   section-10.4.ts imports this module at load (T10.4-8's stagings over
+//   T10.7-9's), so a static import back would close a module cycle, in which
+//   the module loaded second would read the other's constants before they
+//   exist. d2's baseline own text is captured right after `create`
+//   (specs/D2.mdx untouched since the baseline commit: the staging's
+//   ownHash premise), its join-time text after its first edit, its current
+//   text after the second. x's item, resolved by then — and the second edit
+//   moves no hash it records (SPEC 10.4), so `next` has no item to return —
+//   is read through `show` and `export`. Sub-fixture B (specs/B.mdx: A
+//   holding A.K1, dm, yq holding yq.y) reads A.K1's item, A's
+//   parent-consistency item, and dm's item through `show` and `export` after
+//   A.K1's deletion and again after A.K1's own `updated` resolve, whose
+//   re-derivation's item set — A.K1's item and A's parent-consistency item
+//   kept under their ids, A's new subtree-coherence item beside them — is a
+//   premise read from `status`. The resolve-state sub-fixture (specs/N.mdx)
+//   reads N's item through `show` and `export` once N's section is deleted.
 // - `context` and `origin` are compared as identity-keyed sets (SPEC 10.7
 //   fixes their membership, not a payload order); each entry's presence,
 //   text, and source range are then asserted per node.
@@ -210,21 +238,27 @@
 //   M.k edit in the path-blocks fixture, the deletion of P's children in
 //   (f), the nested twin's two edits in (g), the audit fixture's authoring
 //   of N.c, N.c.y, and N.b.z, and Q.r's deletion, T10.7-10's p.a edit,
-//   T10.7-11's edge swap, T10.7-12's A.mdx v1/v2 and B.mdx v1/v2 edits —
-//   is a record created at module level (a converted staging's the same
-//   template call moved there), as is the initial `.mdx` file of every
+//   T10.7-11's edge swap, T10.7-12's A.mdx v1/v2, S.mdx, B.mdx v1/v2, and
+//   N.mdx v1/v2 edits and N's deletion, and the second d2 edit it stages
+//   over T10.4-7(a)'s fixture (`T10_7_12_D2_V2`, made in section-10.4.ts
+//   beside d2's template, since this module loads that one only at run
+//   time) — is a record created at module level (a converted staging's the
+//   same template call moved there), as is the initial `.mdx` file of every
 //   workspace created after the body's first invocation (T10.7-7's
 //   payload arm, T10.7-9's (f), (g), audit-fixture, and Q workspaces,
-//   T10.7-12's provenance and coverage sub-fixtures; T10.7-7's
-//   empty-session arm stages none). T10.7-9's path-blocks edit of N and
-//   N.a precedes the body's first `build` (git staging invokes no product)
-//   and stays plain, as do each body's first workspace's initial `files`
-//   entries.
+//   T10.7-12's split, provenance, resolve-state, and coverage sub-fixtures,
+//   and its joined-origin sub-fixture's, T10.4-7's exported records;
+//   T10.7-7's empty-session arm stages none). T10.7-9's path-blocks edit of
+//   N and N.a precedes the body's first `build` (git staging invokes no
+//   product) and stays plain, as do each body's first workspace's initial
+//   `files` entries (T10.7-12's src/members.ts among them, judged
+//   well-formed by the workspace builder).
 // - TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
 //   and timing clauses), every one well-formed: the configurations of the
 //   workspaces created after a body's first invocation — `SPECS_ONLY_CONFIG`
 //   (T10.7-7's empty-session arm, T10.7-9's (f), (g), audit-fixture, and Q
-//   workspaces, T10.7-12's provenance sub-fixture), `SPECS_CODE_CONFIG`
+//   workspaces, T10.7-12's split, joined-origin, provenance, and
+//   resolve-state sub-fixtures), `SPECS_CODE_CONFIG`
 //   (T10.7-7's payload arm), and `COVERAGE_ALL_CONFIG` (T10.7-12's
 //   coverage sub-fixture), each staged wherever that configuration is —
 //   and the code sources staged after one: T10.7-7's `src/next.ts`
@@ -929,7 +963,8 @@ function assertAbsentState(
       `${context}: the absent node ${expected.node} presents its text from ` +
         `the most recent graph state containing it, among the item's ` +
         `baseline state and the states under which mutating subcommands ` +
-        `derived the item (SPEC 10.7)\n` +
+        `derived or resolved the item with that node among its nodes ` +
+        `(SPEC 10.7)\n` +
         `  actual:   ${JSON.stringify(state.text)}\n` +
         `  expected: ${JSON.stringify(expected.text)}`,
     );
@@ -5100,8 +5135,8 @@ const T10_7_11 = defineProductTest({
 
 // Sub-fixture A: a baseline (path-blocks) session generating every built-in
 // kind except uncovered-requirement (sub-fixture C's coverage session
-// supplies that one). One spec file plus one code file added after the
-// baseline. The staged nodes:
+// supplies that one). One spec file, one code file present from the
+// baseline, and two code files added after it. The staged nodes:
 //   par { par.n { par.n.c } }  par's own text embeds `emb` (the expansion
 //                              pin); par.n's own text is edited v0→v1 (the
 //                              changed node) and again v1→v2 after create
@@ -5124,13 +5159,24 @@ const T10_7_11 = defineProductTest({
 //   dep { dep.k }              depends on wt throughout: the
 //                              dependency-consistency scope (own text).
 //   wt { wt.c }                own text edited v0→v1: dep's changed target.
+//   a { a.k }                  own text edited v0→v1: the target of the
+//                              property members' markers (a fifth changed
+//                              node, with a subtree-coherence item of its
+//                              own).
 //   emb                        the embedded target (unchanged).
 // src/ref.ts (added at v1) references par.n and host.n inside the named unit
 // `refUnit` (SPEC 4.6 attribution): the impacted code location that stays
 // present (SPEC 9.2) — its item's scope enters the payload with the unit
-// construct's byte range (SPEC 1.7). src/del.ts (added at v1, deleted at v2)
-// references par.n at the top level: its whole-file location's code-impact
-// item presents a deleted location — absent, no text, no source range.
+// construct's byte range (SPEC 1.7). src/members.ts (present from the
+// baseline) holds the class C whose two property members — TEST-SPEC
+// T10.7-12's `m = () => { SPEC.a };` and decorated `@dec n = () => {
+// SPEC.a };` — each hold a marker on a, edited since the baseline: the
+// named units C.m and C.n (SPEC 4.6: a property whose initializer is an
+// arrow function) are present impacted locations whose ranges run through
+// the `;` ending each and, the decorated one's, from its `@` (SPEC 1.7; the
+// T1.7-2 forms). src/del.ts (added at v1, deleted at v2) references par.n
+// at the top level: its whole-file location's code-impact item presents a
+// deleted location — absent, no text, no source range.
 const M12_FILE = "specs/A.mdx";
 const M12_ROOT = "specs/A.mdx";
 const M12_PAR = "specs/A.mdx#par";
@@ -5143,9 +5189,13 @@ const M12_TOLD = "specs/A.mdx#told";
 const M12_TNEW = "specs/A.mdx#tnew";
 const M12_DEP = "specs/A.mdx#dep";
 const M12_WT = "specs/A.mdx#wt";
+const M12_A = "specs/A.mdx#a";
 const M12_CODE_FILE = "src/ref.ts";
 const M12_CODE = "src/ref.ts#refUnit";
 const M12_CODE_DEL = "src/del.ts";
+const M12_MEMBERS_FILE = "src/members.ts";
+const M12_MEMBER_M = "src/members.ts#C.m";
+const M12_MEMBER_N = "src/members.ts#C.n";
 
 const M12_EMBEDDED_TEXT = "Embedded target text.";
 
@@ -5155,6 +5205,7 @@ interface M12SpecState {
   readonly gone: string | null;
   readonly mTarget: "told" | "tnew";
   readonly wt: string;
+  readonly a: string;
 }
 
 function m12Spec(state: M12SpecState): string {
@@ -5213,6 +5264,14 @@ function m12Spec(state: M12SpecState): string {
     "</S>",
     "</S>",
     "",
+    '<S id="a">',
+    state.a,
+    "",
+    '<S id="a.k">',
+    "Ay kid line.",
+    "</S>",
+    "</S>",
+    "",
     '<S id="emb">',
     M12_EMBEDDED_TEXT,
     "</S>",
@@ -5226,6 +5285,7 @@ const M12_V0: M12SpecState = {
   gone: "Gone own v0 line.",
   mTarget: "told",
   wt: "Wt own v0 line.",
+  a: "Ay own v0 line.",
 };
 const M12_V1: M12SpecState = {
   parN: "Node own v1 line.",
@@ -5233,6 +5293,7 @@ const M12_V1: M12SpecState = {
   gone: "Gone own v1 line.",
   mTarget: "tnew",
   wt: "Wt own v1 line.",
+  a: "Ay own v1 line.",
 };
 const M12_V2: M12SpecState = {
   parN: "Node own v2 line.",
@@ -5240,6 +5301,7 @@ const M12_V2: M12SpecState = {
   gone: null,
   mTarget: "tnew",
   wt: "Wt own v1 line.",
+  a: "Ay own v1 line.",
 };
 
 // The matrix arm's v1 and v2 edits follow the body's first `build`, so they
@@ -5290,29 +5352,139 @@ const M12_CODE_DEL_SOURCE = stagedTs(
   'import A from "../specs/A.xspec";\n\nA.par.n;\n',
 );
 
-// Sub-fixture B: the absent-node provenance arms. px.x is edited between the
-// baseline and create, then deleted after create (its item's scope presents
-// the create-time value, not the baseline's, and keeps it across a
-// re-derivation that runs without it). yq.y is deleted before create while
-// dm's `d` reference to it is removed — the removed target enters mc dm's
-// context, recorded at create while already absent, so it presents its
-// baseline value (no mutating derivation ever saw newer text).
+// The property members' source, TEST-SPEC T10.7-12's two members spelled
+// exactly, each on a line of its own inside the class C, after a comment
+// carrying multi-byte UTF-8 bytes (byte offsets diverge from code-point and
+// UTF-16 ones) and the ambient declaration of the decorator `dec` (no unit:
+// a declaration in an ambient context, SPEC 4.6). Present from the
+// baseline, it is an initial file of the body's first workspace, created
+// before any invocation: plain contents, judged well-formed by the
+// workspace builder (S-9).
+const M12_MEMBERS_BEFORE_CLASS =
+  'import SPEC from "../specs/A.xspec";\n\n' +
+  "declare function dec(...args: unknown[]): void;\n\n" +
+  "// Präzise UTF-8-Bytes vor der Klasse (multi-byte prefix).\n";
+const M12_MEMBERS_CLASS_PRE = "class C {\n  ";
+/** C.m: a property member spelling its `;`, which its range runs through. */
+const M12_MEMBER_M_UNIT = "m = () => { SPEC.a };";
+const M12_MEMBERS_BETWEEN = "\n  ";
+/** C.n: a decorated property member, from its `@` through its `;`. */
+const M12_MEMBER_N_UNIT = "@dec n = () => { SPEC.a };";
+const M12_MEMBERS_SOURCE =
+  M12_MEMBERS_BEFORE_CLASS +
+  M12_MEMBERS_CLASS_PRE +
+  M12_MEMBER_M_UNIT +
+  M12_MEMBERS_BETWEEN +
+  M12_MEMBER_N_UNIT +
+  "\n}\n";
+
+/**
+ * The byte range of `unit` placed right after `prefix` in a file —
+ * start-inclusive, end-exclusive byte offsets (SPEC 1.7).
+ */
+function byteRangeAfter(prefix: string, unit: string): SourceRange {
+  const start = Buffer.byteLength(prefix, "utf8");
+  return { start, end: start + Buffer.byteLength(unit, "utf8") };
+}
+
+// C.m's and C.n's construct ranges (SPEC 1.7, 4.6): a property member's
+// own characters run through the `;` ending it, where it spells one, and a
+// decorated member's begin at its first decorator — `m = () => { SPEC.a };`
+// and `@dec n = () => { SPEC.a };`, whole (the T1.7-2 forms).
+const M12_MEMBER_M_RANGE = byteRangeAfter(
+  M12_MEMBERS_BEFORE_CLASS + M12_MEMBERS_CLASS_PRE,
+  M12_MEMBER_M_UNIT,
+);
+const M12_MEMBER_N_RANGE = byteRangeAfter(
+  M12_MEMBERS_BEFORE_CLASS +
+    M12_MEMBERS_CLASS_PRE +
+    M12_MEMBER_M_UNIT +
+    M12_MEMBERS_BETWEEN,
+  M12_MEMBER_N_UNIT,
+);
+
+// The split sub-fixture: TEST-SPEC T10.7-12's context text of a
+// split-produced `parent-consistency` item — every child of the scope root
+// (SPEC 10.7: "whose context is the scope root's children"), where a
+// generated item's context is its changed-branch heads (10.5). The
+// top-level sp holds sp.a (holding sp.a.x) and sp.b (holding sp.b.y); sp's
+// own text alone is edited before `create --base`, so sp is visited, its
+// item's scope {sp, sp.a, sp.a.x, sp.b, sp.b.y}, and no child of sp is
+// `changed` — a changed-branch reading of the split item's context would
+// give none. Each child holds a child of its own, so its subtree text
+// differs from its own text (SPEC 1.6) and the context-text kind is
+// discriminating.
+const SP12_FILE = "specs/S.mdx";
+const SP12_SP = "specs/S.mdx#sp";
+const SP12_A = "specs/S.mdx#sp.a";
+const SP12_B = "specs/S.mdx#sp.b";
+
+/** specs/S.mdx's bytes: sp, its own text `spOwn`, over two unedited children. */
+function sp12Spec(spOwn: string): string {
+  return [
+    '<S id="sp">',
+    spOwn,
+    "",
+    '<S id="sp.a">',
+    "Split ay own line.",
+    "",
+    '<S id="sp.a.x">',
+    "Split ay ex line.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="sp.b">',
+    "Split bee own line.",
+    "",
+    '<S id="sp.b.y">',
+    "Split bee why line.",
+    "</S>",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+// The split sub-fixture's workspace is created after the body's first
+// `build`, so its initial source and its edit are staged-source records
+// (helpers/staged-mdx.ts, S-9).
+const T10_7_12_S_V0 = stagedMdx(
+  "T10.7-12 specs/S.mdx with sp holding sp.a and sp.b, each holding a child (the split sub-fixture's baseline)",
+  sp12Spec("Split own v0 line."),
+);
+const T10_7_12_S_V1 = stagedMdx(
+  "T10.7-12 specs/S.mdx with sp's own text edited (the split sub-fixture, before `create --base`)",
+  sp12Spec("Split own v1 line."),
+);
+
+// Sub-fixture B: the absent-node provenance arms (i) and (ii) — TEST-SPEC's
+// top-level A holding K1 (here A.K1, SPEC 1.3) beside (ii)'s staging. A.K1
+// is edited between the baseline and create, then deleted after create:
+// its own item's scope root and its entry in A's parent-consistency context
+// present the create-time value, not the baseline's, and keep it across the
+// re-derivation A.K1's own `updated` resolve triggers, which runs without
+// it. yq.y is deleted before create in the same edit that removes dm's `d`
+// reference to it (T10.4-2's context-arm shape, yq.y nested under yq so the
+// root's own content stays unchanged and A stays visitable) — the removed
+// target enters mc dm's context, recorded at create while already absent,
+// so it presents its baseline value (no mutating derivation ever saw newer
+// text).
 const B12_FILE = "specs/B.mdx";
-const B12_PX = "specs/B.mdx#px";
-const B12_PXX = "specs/B.mdx#px.x";
+const B12_A = "specs/B.mdx#A";
+const B12_K1 = "specs/B.mdx#A.K1";
 const B12_DM = "specs/B.mdx#dm";
 const B12_YQ = "specs/B.mdx#yq";
 const B12_YQY = "specs/B.mdx#yq.y";
 
 function b12Spec(
-  xLine: string | null,
+  k1Line: string | null,
   withY: boolean,
   dmWithD: boolean,
 ): string {
   return [
-    '<S id="px">',
-    "Pex own line.",
-    ...(xLine === null ? [] : ["", '<S id="px.x">', xLine, "</S>"]),
+    '<S id="A">',
+    "Ay own line.",
+    ...(k1Line === null ? [] : ["", '<S id="A.K1">', k1Line, "</S>"]),
     "</S>",
     "",
     dmWithD ? '<S id="dm" d={"yq.y"}>' : '<S id="dm">',
@@ -5331,16 +5503,65 @@ function b12Spec(
 // body's first `build` (the matrix arm's), so they are staged-source records
 // (helpers/staged-mdx.ts, S-9: judged before any product exists).
 const T10_7_12_B_T0 = stagedMdx(
-  "T10.7-12 specs/B.mdx with px.x at T0, yq.y and dm's d reference present (the provenance sub-fixture's initial source)",
-  b12Spec("Ex line T0.", true, true),
+  "T10.7-12 specs/B.mdx with A.K1 at T0, yq.y and dm's d reference present (the provenance sub-fixture's initial source)",
+  b12Spec("Kay one line T0.", true, true),
 );
-const T10_7_12_B_X_T1 = stagedMdx(
-  "T10.7-12 specs/B.mdx with px.x at T1, yq.y and dm's d reference removed",
-  b12Spec("Ex line T1.", false, false),
+const T10_7_12_B_K1_T1 = stagedMdx(
+  "T10.7-12 specs/B.mdx with A.K1 at T1, yq.y and dm's d reference removed",
+  b12Spec("Kay one line T1.", false, false),
 );
-const T10_7_12_B_WITHOUT_X = stagedMdx(
-  "T10.7-12 specs/B.mdx without px.x (deleted after create)",
+const T10_7_12_B_WITHOUT_K1 = stagedMdx(
+  "T10.7-12 specs/B.mdx without A.K1 (deleted after create)",
   b12Spec(null, false, false),
+);
+
+// The resolve-state sub-fixture: TEST-SPEC T10.7-12's provenance arm (iii)
+// — resolve states count among the states an absent node's text comes from
+// (SPEC 10.7: "the states under which mutating subcommands … derived or
+// resolved the item with that node among its nodes"). The top-level N holds
+// the unedited N.c; N's own text is edited before `create --base` (v1) and
+// again after it (v2), N's subtree-coherence item resolved `no-change` at
+// v2 — a resolve re-derives nothing (10.5), so no derivation ever sees v2 —
+// and N's section then deleted, leaving the file no section (its implicit
+// root alone, SPEC 1.2).
+const RS12_FILE = "specs/N.mdx";
+const RS12_N = "specs/N.mdx#N";
+const RS12_NC_TEXT = "En cee line, never edited.";
+
+/** specs/N.mdx's bytes: N, its own text `nOwn`, holding N.c — or nothing. */
+function rs12Spec(nOwn: string | null): string {
+  return nOwn === null
+    ? ""
+    : [
+        '<S id="N">',
+        nOwn,
+        "",
+        '<S id="N.c">',
+        RS12_NC_TEXT,
+        "</S>",
+        "</S>",
+        "",
+      ].join("\n");
+}
+
+// The resolve-state sub-fixture's workspace is created after the body's
+// first `build`, so its initial source and its edits are staged-source
+// records (helpers/staged-mdx.ts, S-9).
+const T10_7_12_N_V0 = stagedMdx(
+  "T10.7-12 specs/N.mdx with N holding N.c, N at v0 (the resolve-state sub-fixture's baseline)",
+  rs12Spec("En own v0 line."),
+);
+const T10_7_12_N_V1 = stagedMdx(
+  "T10.7-12 specs/N.mdx with N's own text at v1 (the resolve-state sub-fixture, before `create --base`)",
+  rs12Spec("En own v1 line."),
+);
+const T10_7_12_N_V2 = stagedMdx(
+  "T10.7-12 specs/N.mdx with N's own text at v2 (the resolve-state sub-fixture, after `create`, before N's resolve)",
+  rs12Spec("En own v2 line."),
+);
+const T10_7_12_N_DELETED = stagedMdx(
+  "T10.7-12 specs/N.mdx with N's section deleted, no section left (the resolve-state sub-fixture, after N's resolve)",
+  rs12Spec(null),
 );
 
 // Sub-fixture C: the uncovered-requirement payload. `targets: "all"` makes
@@ -5375,12 +5596,12 @@ const U12_SOURCE = stagedMdx(
 const T10_7_12 = defineProductTest({
   id: "T10.7-12",
   title:
-    "payload text contract: a baseline fixture generating every built-in kind (a coverage session supplying `uncovered-requirement`), texts byte-asserted against `query node` captures in `export`, identically via `show` per item, and identically in `next --json` through a full walk of each session (one payload rule), with an embedding inside asserted texts to pin 1.6 expansion (the expanded target's bytes present, the unexpanded `text(` spelling absent); scope text by kind — the scope root's subtree text for `subtree-coherence`, the scope node's subtree text for `uncovered-requirement`, the scope node's own text (differing from its subtree text by fixture) for `parent-consistency`, `dependency-consistency`, and `metadata-consistency`, and a `code-impact` scope as identity, presence, and — when present — its source range, with no text (review payloads are one of the two range-presenting outputs for code locations: the present location is a named unit whose construct range is byte-asserted against precomputed offsets, and a deleted location's entry carries none); context text — own text for ancestor-chain contexts (`subtree-coherence`, `uncovered-requirement`), subtree text otherwise (`parent-consistency` branch children; `dependency-consistency`, `metadata-consistency`, and `code-impact` targets); origin text — a before/after pair of own text, before from the item's baseline and after from the current graph (an originating node re-edited after `create` differs on both sides from the create-time value), with the before side absent (no text) for a node added since the baseline and the after side absent for a since-deleted node; source ranges on present requirement nodes byte-equal to `query node`'s and absent on absent nodes; absent-node provenance — a node edited between the baseline and `create`, recorded into an item's scope or context at `create`, then deleted, presents the create-time text (not the differing baseline value) and still does after an `updated` resolve re-derives the session without it, while a node deleted since the baseline and never seen by a mutating derivation with newer text presents its baseline value; and at every `show` read — each item of the matrix and coverage sessions, and both provenance reads at either stage — the human `review show` at the same state exits 0 and mentions the item's id, kind, and status, `blocked` where it is blocked, each `blockedBy` id, its scope, context, and origin identities, `absent` for each node or origin side presented absent, every line of its texts, and its source ranges' offsets (robust matching, H-3) (SPEC 1.6, 1.7, 4.6, 5.6, 9.2, 10.2, 10.3, 10.4, 10.5, 10.7, 12.0)",
+    "payload text contract: a baseline fixture generating every built-in kind (a coverage session supplying `uncovered-requirement`), texts byte-asserted against `query node` captures in `export`, identically via `show` per item, and identically in `next --json` through a full walk of each session (one payload rule), with an embedding inside asserted texts to pin 1.6 expansion (the expanded target's bytes present, the unexpanded `text(` spelling absent); scope text by kind — the scope root's subtree text for `subtree-coherence`, the scope node's subtree text for `uncovered-requirement`, the scope node's own text (differing from its subtree text by fixture) for `parent-consistency`, `dependency-consistency`, and `metadata-consistency`, and a `code-impact` scope as identity, presence, and — when present — its source range, with no text (review payloads are one of the two range-presenting outputs for code locations: the present locations are named units whose construct ranges are byte-asserted against precomputed offsets — among them two property members, each holding a marker on a section edited since the baseline, `m = () => { SPEC.a };`, its range running through its `;`, and the decorated `@dec n = () => { SPEC.a };`, from its `@` through its `;` — and a deleted location's entry carries none); context text — own text for ancestor-chain contexts (`subtree-coherence`, `uncovered-requirement`), subtree text otherwise (the children of the scope node for `parent-consistency` — a generated item's changed-branch heads, and every child of the scope root, unchanged ones included, for a split-produced one, read after a `split` in a session of its own; `dependency-consistency`, `metadata-consistency`, and `code-impact` targets); origin text — a before/after pair of own text, before from the item's baseline state whether or not the node has an entry in `baseline`, after from the current graph (an originating node re-edited after `create` differs on both sides from the create-time value; on T10.4-7(a)'s fixture d2, joining x's origin at x's `updated` resolve's re-derivation and edited again after it — its baseline, join-time, and current texts pairwise distinct — presents its baseline text before and its current text after, never the join-time text before nor the before side absent), with the before side absent (no text) for a node added since the baseline and the after side absent for a since-deleted node; source ranges on present requirement nodes byte-equal to `query node`'s and absent on absent nodes; absent-node provenance, each arm on a node in a role 10.7 assigns a text — (i) a node edited between the baseline and `create`, recorded into items at `create`, then deleted, presents the create-time text, not the differing baseline value: the matrix's deleted scope gone, and A.K1 as A's `parent-consistency` context node and as its own `subtree-coherence` item's scope root, both still after A.K1's item is resolved `updated`, whose re-derivation over a graph without A.K1 produces neither item and keeps both, ids and all (A, having lost A.K1, is now visited: its `subtree-coherence` item added); (ii) a node deleted since the baseline and never seen by a mutating derivation with newer text — a `metadata-consistency` item's removed `d` target, deleted with the reference before `create` — presents its baseline value, at both stages; (iii) resolve states count: N, holding the unedited N.c, its own text edited before `create` and again after it, N's item resolved `no-change` and N's section then deleted, is presented absent with N's resolve-time subtree text, N.c's text included, never the create-time or baseline value (the three pairwise distinct); and at every `show` read — each item of the matrix, split, and coverage sessions, x's item, the provenance reads at either stage, and N's item — the human `review show` at the same state exits 0 and mentions the item's id, kind, and status, `blocked` where it is blocked, each `blockedBy` id, its scope, context, and origin identities, `absent` for each node or origin side presented absent, every line of its texts, and its source ranges' offsets (robust matching, H-3) (SPEC 1.6, 1.7, 4.6, 5.6, 9.2, 10.2, 10.3, 10.4, 10.5, 10.7, 12.0)",
   run: async (product) => {
     // --- sub-fixture A: the per-kind matrix over a path-blocks session -------
     await withWorkspace(
       SPECS_CODE_CONFIG,
-      { [M12_FILE]: m12Spec(M12_V0) },
+      { [M12_FILE]: m12Spec(M12_V0), [M12_MEMBERS_FILE]: M12_MEMBERS_SOURCE },
       async (workspace) => {
         const prefix = "T10.7-12 matrix";
         await workspace.gitInit();
@@ -5400,6 +5621,7 @@ const T10_7_12 = defineProductTest({
         const gone0 = await capture(M12_GONE, "v0");
         const m0 = await capture(M12_M, "v0");
         const wt0 = await capture(M12_WT, "v0");
+        const a0 = await capture(M12_A, "v0");
 
         // v1 — the reviewed differences; then create.
         await workspace.file(M12_FILE, T10_7_12_A_V1);
@@ -5437,6 +5659,7 @@ const T10_7_12 = defineProductTest({
         const tnew2 = await capture(M12_TNEW, "v2");
         const dep2 = await capture(M12_DEP, "v2");
         const wt2 = await capture(M12_WT, "v2");
+        const a2 = await capture(M12_A, "v2");
 
         // Staging premises: every own-vs-subtree discrimination is real, the
         // origin moments are pairwise distinct, and the embedding expanded.
@@ -5447,6 +5670,7 @@ const T10_7_12 = defineProductTest({
           [parN2, "par.n"],
           [tnew2, "tnew"],
           [wt2, "wt"],
+          [a2, "a"],
         ] as const) {
           if (report.ownText === report.subtreeText) {
             fail(
@@ -5485,18 +5709,23 @@ const T10_7_12 = defineProductTest({
             `subtree-coherence ${M12_HOST}`,
             `subtree-coherence ${M12_GONE}`,
             `subtree-coherence ${M12_WT}`,
+            `subtree-coherence ${M12_A}`,
             `parent-consistency ${M12_PAR}`,
             `metadata-consistency ${M12_M}`,
             `dependency-consistency ${M12_DEP}`,
             `code-impact ${M12_CODE}`,
+            `code-impact ${M12_MEMBER_M}`,
+            `code-impact ${M12_MEMBER_N}`,
             `code-impact ${M12_CODE_DEL}`,
           ].sort(),
           `${prefix}: the staged differences derive exactly one item per ` +
-            `built-in path-blocks kind — the four changed nodes' ` +
+            `built-in path-blocks kind and scope — the five changed nodes' ` +
             `subtree-coherence items, par's parent-consistency item, m's ` +
             `metadata-consistency item, dep's dependency-consistency item, ` +
             `and one code-impact item per impacted location — the named ` +
-            `unit and the since-deleted file (SPEC 4.6, 5.6, 9.2, 10.5)`,
+            `unit refUnit, the property members C.m and C.n (each holding a ` +
+            `marker on a, never the class C, whose own body references ` +
+            `nothing), and the since-deleted file (SPEC 4.6, 5.6, 9.2, 10.5)`,
         );
 
         // subtree-coherence par.n: scope subtree text (current), context =
@@ -5877,6 +6106,76 @@ const T10_7_12 = defineProductTest({
           );
         }
 
+        // code-impact src/members.ts#C.m and #C.n — the property members,
+        // present impacted locations (each holds a marker on a, whose own
+        // text was edited since the baseline): each scope enters as
+        // identity, presence, and its source range, with no text (SPEC
+        // 10.7) — C.m's construct `m = () => { SPEC.a };` running through
+        // the `;` ending it, C.n's `@dec n = () => { SPEC.a };` from its
+        // first decorator's `@` through its `;` (SPEC 1.7, 4.6; the T1.7-2
+        // forms), asserted against precomputed byte offsets. Context = a,
+        // the target that makes each impacted, with its subtree text (a has
+        // a child, so own and subtree text differ); origin = a with its
+        // own-text pair.
+        for (const [member, range, construct] of [
+          [
+            M12_MEMBER_M,
+            M12_MEMBER_M_RANGE,
+            "`m = () => { SPEC.a };`, a property member's own characters " +
+              "running through the `;` ending it",
+          ],
+          [
+            M12_MEMBER_N,
+            M12_MEMBER_N_RANGE,
+            "`@dec n = () => { SPEC.a };`, a decorated property member's " +
+              "own characters, from its first decorator's `@` through the " +
+              "`;` ending it",
+          ],
+        ] as const) {
+          const item = requireItem(
+            exported.items,
+            "code-impact",
+            member,
+            prefix,
+          );
+          const label = `${prefix} code-impact(${member})`;
+          assertPresentState(
+            item.scope,
+            { node: member, text: undefined, sourceRange: range },
+            `${label} scope — a present code location enters the payload ` +
+              `with its source range, the construct binding the unit's ` +
+              `name — ${construct} — asserted against precomputed byte ` +
+              `offsets, and with no text value (SPEC 10.7, 1.7, 4.6)`,
+          );
+          assertSameJson(
+            identitySet(item.context),
+            [M12_A],
+            `${label}: context is the impact-edge target that makes the ` +
+              `location impacted (SPEC 9.2, 10.5)`,
+          );
+          assertPresentState(
+            requireContextEntry(item, M12_A, label),
+            { node: M12_A, text: a2.subtreeText, sourceRange: a2.sourceRange },
+            `${label} context entry a — code-impact targets carry subtree ` +
+              `text (a product reporting own text fails: a has a child)`,
+          );
+          assertSameJson(
+            identitySet(item.origin),
+            [M12_A],
+            `${label}: origin is the originating node of the target's ` +
+              `change (SPEC 5.6, 10.5)`,
+          );
+          assertOriginPair(
+            requireOriginEntry(item, M12_A, label),
+            {
+              before: { present: true, text: a0.ownText },
+              after: { present: true, text: a2.ownText },
+            },
+            `${label} origin pair for a — before from the item's baseline ` +
+              `(v0), after from the current graph`,
+          );
+        }
+
         // code-impact src/del.ts — the deleted location: the file was
         // removed at v2, so its item's scope presents the code location
         // absent — identity and absence alone, no text and no source range
@@ -5965,7 +6264,280 @@ const T10_7_12 = defineProductTest({
       },
     );
 
-    // --- sub-fixture B: absent-node provenance across re-derivation ----------
+    // --- the split sub-fixture: a split-produced item's context texts -------
+    // TEST-SPEC T10.7-12's context text of a split-produced
+    // `parent-consistency` item: every child of the scope root (SPEC 10.7) —
+    // here two unedited children, which a changed-branch reading (a
+    // generated item's, 10.5) would leave out — each with its subtree text.
+    // Read from `export` after the split, then `show` per item and a full
+    // `next` walk (one payload rule).
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [SP12_FILE]: T10_7_12_S_V0 },
+      async (workspace) => {
+        const prefix = "T10.7-12 split";
+        await workspace.gitInit();
+        const base = await workspace.gitCommitAll("baseline");
+        await buildOk(product, workspace, `${prefix} \`build\` at v0`);
+        await workspace.file(SP12_FILE, T10_7_12_S_V1);
+        await buildOk(product, workspace, `${prefix} \`build\` at v1`);
+        await createBaseSession(product, workspace, base, "s", prefix);
+        const created = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          rowSequence(created),
+          [`subtree-coherence ${SP12_SP} unresolved`],
+          `${prefix} staging premise: sp's own-text edit yields sp's ` +
+            `subtree-coherence item alone — sp visited, no child of it ` +
+            `changed, and sp, top-level, without a non-root ancestor (SPEC ` +
+            `5.6, 10.5)`,
+        );
+        const idSp = requireRow(
+          created,
+          "subtree-coherence",
+          SP12_SP,
+          prefix,
+        ).id;
+        await expectExit(
+          product,
+          workspace,
+          ["review", "split", "s", idSp],
+          0,
+          `${prefix} \`review split s <sp's item>\``,
+        );
+
+        // Current captures: sp's own text (the split item's scope text) and
+        // its children's subtree texts (its context texts).
+        const sp1 = await queryNode(
+          product,
+          workspace,
+          SP12_SP,
+          `${prefix} capture of sp`,
+        );
+        const spA = await queryNode(
+          product,
+          workspace,
+          SP12_A,
+          `${prefix} capture of sp.a`,
+        );
+        const spB = await queryNode(
+          product,
+          workspace,
+          SP12_B,
+          `${prefix} capture of sp.b`,
+        );
+        for (const [report, node] of [
+          [sp1, "sp"],
+          [spA, "sp.a"],
+          [spB, "sp.b"],
+        ] as const) {
+          if (report.ownText === report.subtreeText) {
+            fail(
+              `${prefix} staging premise: ${node}'s own text must differ ` +
+                `from its subtree text (SPEC 1.6) — the fixture gives it a ` +
+                `child so the payload's text-kind selection is ` +
+                `discriminating`,
+            );
+          }
+        }
+
+        const exported = await exportSession(product, workspace, "s", prefix);
+        assertSameJson(
+          [...exportKindScopeSequence(exported.items)].sort(),
+          [
+            `subtree-coherence ${SP12_A}`,
+            `subtree-coherence ${SP12_B}`,
+            `parent-consistency ${SP12_SP}`,
+          ].sort(),
+          `${prefix} staging premise: the split replaces sp's item by one ` +
+            `subtree-coherence item per child subtree and sp's ` +
+            `parent-consistency item (SPEC 10.7)`,
+        );
+        const item = requireItem(
+          exported.items,
+          "parent-consistency",
+          SP12_SP,
+          prefix,
+        );
+        const label = `${prefix} parent-consistency(sp), split-produced`;
+        assertPresentState(
+          item.scope,
+          { node: SP12_SP, text: sp1.ownText, sourceRange: sp1.sourceRange },
+          `${label} scope — the scope node's own text, not its subtree text`,
+        );
+        assertSameJson(
+          identitySet(item.context),
+          [SP12_A, SP12_B].sort(),
+          `${label}: context is every child of the scope root — the ` +
+            `split's parent-consistency item's context is "the scope ` +
+            `root's children", unedited ones included, where a generated ` +
+            `item's is its changed-branch heads, none here (SPEC 10.5, ` +
+            `10.7)`,
+        );
+        for (const [child, report] of [
+          [SP12_A, spA],
+          [SP12_B, spB],
+        ] as const) {
+          assertPresentState(
+            requireContextEntry(item, child, label),
+            {
+              node: child,
+              text: report.subtreeText,
+              sourceRange: report.sourceRange,
+            },
+            `${label} context entry ${child} — a parent-consistency ` +
+              `item's children carry subtree text (a product reporting own ` +
+              `text fails: they differ by fixture) (SPEC 10.7)`,
+          );
+        }
+
+        // One payload rule over the decomposition: `show` per item, each
+        // followed by the human `show` at the same state (T12.0-1, SPEC
+        // 12.0; the module header), then the full `next` walk.
+        for (const each of exported.items) {
+          const shown = await showItem(
+            product,
+            workspace,
+            "s",
+            each.id,
+            `${prefix} show/export compare`,
+          );
+          assertSameInformation(
+            payloadProjection(shown),
+            payloadProjection(each),
+            `${prefix}: \`show\` of item ${each.id} (${each.kind} ` +
+              `${each.scope.node}) presents the same self-contained text ` +
+              `payload as \`export\` (SPEC 10.7)`,
+          );
+          await assertHumanShowItem(
+            product,
+            workspace,
+            "s",
+            shown,
+            `${prefix} ${shown.kind}(${shown.scope.node})`,
+          );
+        }
+        await walkNextAgainstReference(
+          product,
+          workspace,
+          "s",
+          exported.items,
+          `${prefix} next walk`,
+        );
+      },
+    );
+
+    // --- the joined-origin sub-fixture: T10.4-7(a)'s d2 ---------------------
+    // TEST-SPEC T10.7-12's origin text of a node that joined the origin at a
+    // re-derivation, which gains no entry in `baseline` (SPEC 10.2;
+    // T10.2-2): its before side is still its value in the item's baseline
+    // state (10.7). T10.4-7(a)'s fixture through section-10.4.ts' exported
+    // stagings, loaded when the arm runs: section-10.4.ts imports this module
+    // at load (T10.4-8's stagings), so a static import back would close a
+    // module cycle.
+    const t1047 = await import("./section-10.4.js");
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      t1047.T10_4_7_INITIAL_FILES,
+      async (workspace) => {
+        const prefix = "T10.7-12 joined origin (T10.4-7(a)'s d2)";
+        const d1 = t1047.T10_4_7_NODES.d1;
+        const d2 = t1047.T10_4_7_NODES.d2;
+        const { baseline, xId } = await t1047.stageT1047Session(
+          product,
+          workspace,
+          prefix,
+        );
+        // specs/D2.mdx is untouched since the baseline commit (the staging's
+        // premises keep d2's ownHash at its baseline value), so d2's own
+        // text now is its value in x's item's baseline state.
+        const atBaseline = await queryNode(
+          product,
+          workspace,
+          d2,
+          `${prefix} capture of d2 at its baseline text`,
+        );
+        await t1047.stageT1047State(
+          product,
+          workspace,
+          baseline,
+          "d2-edited",
+          `${prefix} after d2's edit`,
+        );
+        const atJoin = await queryNode(
+          product,
+          workspace,
+          d2,
+          `${prefix} capture of d2 as it joins x's origin`,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          xId,
+          "updated",
+          `${prefix} \`review resolve s <x's item> --status updated\` — the ` +
+            `re-derivation making d2 join x's origin (SPEC 10.5)`,
+        );
+        // d2's text edited a second time, once x's item is resolved.
+        await workspace.file(t1047.T10_4_7_FILES.d2, t1047.T10_7_12_D2_V2);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after d2's second edit`,
+        );
+        const atNow = await queryNode(
+          product,
+          workspace,
+          d2,
+          `${prefix} current capture of d2`,
+        );
+        assertPairwiseDistinct(
+          [
+            ["d2's baseline own text", atBaseline.ownText],
+            ["d2's own text when it joined x's origin", atJoin.ownText],
+            ["d2's current own text", atNow.ownText],
+          ],
+          prefix,
+        );
+
+        const shown = await showItem(product, workspace, "s", xId, prefix);
+        assertSameJson(
+          identitySet(shown.origin),
+          [d1, d2].sort(),
+          `${prefix} staging premise: the re-derivation x's \`updated\` ` +
+            `resolve triggered made d2 join x's origin, presented {d1, d2} ` +
+            `(SPEC 5.6, 10.5; T10.4-7(a))`,
+        );
+        assertOriginPair(
+          requireOriginEntry(shown, d2, prefix),
+          {
+            before: { present: true, text: atBaseline.ownText },
+            after: { present: true, text: atNow.ownText },
+          },
+          `${prefix} x's origin pair for d2 — before: its value in the ` +
+            `item's baseline state, the recorded baseline graph, though d2, ` +
+            `joined at a re-derivation, has no entry in \`baseline\` — ` +
+            `never its join-time text, nor the before side absent; after: ` +
+            `its current text (SPEC 10.2, 10.7)`,
+        );
+        const exported = await exportSession(product, workspace, "s", prefix);
+        assertSameInformation(
+          payloadProjection(requireItemById(exported.items, xId, prefix)),
+          payloadProjection(shown),
+          `${prefix}: \`export\` presents x's item with the same payload as ` +
+            `\`show\` (SPEC 10.7)`,
+        );
+        await assertHumanShowItem(
+          product,
+          workspace,
+          "s",
+          shown,
+          `${prefix} x's item`,
+        );
+      },
+    );
+
+    // --- sub-fixture B: absent-node provenance (i) and (ii) -------------------
     await withWorkspace(
       SPECS_ONLY_CONFIG,
       { [B12_FILE]: T10_7_12_B_T0 },
@@ -5974,11 +6546,11 @@ const T10_7_12 = defineProductTest({
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
         await buildOk(product, workspace, `${prefix} \`build\` at v0`);
-        const x0 = await queryNode(
+        const k0 = await queryNode(
           product,
           workspace,
-          B12_PXX,
-          `${prefix} v0 capture of px.x`,
+          B12_K1,
+          `${prefix} v0 capture of A.K1`,
         );
         const y0 = await queryNode(
           product,
@@ -5987,47 +6559,52 @@ const T10_7_12 = defineProductTest({
           `${prefix} v0 capture of yq.y`,
         );
 
-        // v1: px.x edited (T0→T1); yq.y deleted with dm's d reference to it
+        // v1: A.K1 edited (T0→T1); yq.y deleted with dm's d reference to it
         // removed in the same write (so no unresolved reference exists).
-        await workspace.file(B12_FILE, T10_7_12_B_X_T1);
+        await workspace.file(B12_FILE, T10_7_12_B_K1_T1);
         await buildOk(product, workspace, `${prefix} \`build\` at v1`);
-        const x1 = await queryNode(
+        const k1 = await queryNode(
           product,
           workspace,
-          B12_PXX,
-          `${prefix} v1 capture of px.x`,
+          B12_K1,
+          `${prefix} v1 capture of A.K1`,
         );
-        if (x1.subtreeText === x0.subtreeText) {
+        if (k1.subtreeText === k0.subtreeText) {
           fail(
-            `${prefix} staging premise: px.x's v0→v1 edit must change its ` +
+            `${prefix} staging premise: A.K1's v0→v1 edit must change its ` +
               `subtree text (SPEC 1.6) — the create-time and baseline ` +
               `values must differ for the provenance discrimination`,
           );
         }
         await createBaseSession(product, workspace, base, "s", prefix);
 
+        /** The session's items as sorted `kind scope` strings. */
+        const kindScopes = (report: SessionStatusReport): string[] =>
+          rowSequence(report)
+            .map((row) => row.split(" ").slice(0, 2).join(" "))
+            .sort();
         const initial = await sessionStatus(product, workspace, "s", prefix);
         assertSameJson(
-          rowSequence(initial)
-            .map((row) => row.split(" ").slice(0, 2).join(" "))
-            .sort(),
+          kindScopes(initial),
           [
             `metadata-consistency ${B12_DM}`,
-            `parent-consistency ${B12_PX}`,
-            `subtree-coherence ${B12_PXX}`,
+            `parent-consistency ${B12_A}`,
+            `subtree-coherence ${B12_K1}`,
             `subtree-coherence ${B12_YQ}`,
           ].sort(),
-          `${prefix} staging premise: the create-time items — px.x changed ` +
-            `(edit), yq changed (its child yq.y deleted, so yq.y itself is ` +
-            `skipped under its changed ancestor), dm metadata-changed (d ` +
-            `removed) (SPEC 5.6, 10.5)`,
+          `${prefix} staging premise: the create-time items — A.K1 changed ` +
+            `(edit) and visited, A its one non-root ancestor (A's ` +
+            `parent-consistency item, context {A.K1}), yq changed (its ` +
+            `child yq.y deleted, so yq.y itself is skipped under its changed ` +
+            `ancestor), dm metadata-changed (d removed) (SPEC 5.6, 10.5)`,
         );
-        const idPXX = requireRow(
+        const idK1 = requireRow(
           initial,
           "subtree-coherence",
-          B12_PXX,
+          B12_K1,
           prefix,
         ).id;
+        const idA = requireRow(initial, "parent-consistency", B12_A, prefix).id;
         const idDM = requireRow(
           initial,
           "metadata-consistency",
@@ -6035,104 +6612,241 @@ const T10_7_12 = defineProductTest({
           prefix,
         ).id;
 
-        // v2: delete px.x after create.
-        await workspace.file(B12_FILE, T10_7_12_B_WITHOUT_X);
+        // v2: delete A.K1 after create.
+        await workspace.file(B12_FILE, T10_7_12_B_WITHOUT_K1);
         await buildOk(product, workspace, `${prefix} \`build\` at v2`);
 
         const assertProvenance = async (stage: string): Promise<void> => {
-          // Arm 1: px.x — edited between the baseline and create, recorded
-          // as its item's scope at create, then deleted: it presents the
-          // create-time (v1) subtree text, not the baseline's.
-          const xItem = await showItem(
-            product,
-            workspace,
-            "s",
-            idPXX,
-            `${prefix} ${stage}`,
+          const at = `${prefix} ${stage}`;
+          // (i) A.K1 — edited between the baseline and create, recorded at
+          // create into its own item's scope and A's parent-consistency
+          // context, then deleted: in both roles 10.7 assigns a text, it
+          // presents the create-time (v1) subtree text, not the baseline's.
+          const kItem = await showItem(product, workspace, "s", idK1, at);
+          assertAbsentState(
+            kItem.scope,
+            { node: B12_K1, text: k1.subtreeText },
+            `${at}, A.K1's item scope root — the most recent graph state ` +
+              `containing A.K1 is the create-time derivation (v1), not the ` +
+              `baseline: the values differ by fixture (SPEC 10.7)`,
+          );
+          const aItem = await showItem(product, workspace, "s", idA, at);
+          assertSameJson(
+            identitySet(aItem.context),
+            [B12_K1],
+            `${at}: A's parent-consistency context is its changed branch's ` +
+              `child A.K1, as last assigned — the generators no longer ` +
+              `produce the item (SPEC 10.4, 10.5)`,
           );
           assertAbsentState(
-            xItem.scope,
-            { node: B12_PXX, text: x1.subtreeText },
-            `${prefix} ${stage}, px.x's item scope — the most recent graph ` +
-              `state containing px.x is the create-time derivation (v1), ` +
-              `not the baseline: the values differ by fixture (SPEC 10.7)`,
+            requireContextEntry(aItem, B12_K1, at),
+            { node: B12_K1, text: k1.subtreeText },
+            `${at}, A.K1 in A's parent-consistency context — a ` +
+              `parent-consistency context node carries subtree text, an ` +
+              `absent one's from the most recent graph state containing it: ` +
+              `the create-time derivation (v1), not the baseline (SPEC 10.7)`,
           );
-          // Arm 2: yq.y — deleted since the baseline before create, never
-          // seen by a mutating derivation with newer text: its context
-          // entry in dm's item presents the baseline subtree text.
-          const dmItem = await showItem(
-            product,
-            workspace,
-            "s",
-            idDM,
-            `${prefix} ${stage}`,
-          );
+          // (ii) yq.y — deleted since the baseline before create, never seen
+          // by a mutating derivation with newer text: its context entry in
+          // dm's item presents the baseline subtree text.
+          const dmItem = await showItem(product, workspace, "s", idDM, at);
           assertSameJson(
             identitySet(dmItem.context),
             [B12_YQY],
-            `${prefix} ${stage}: dm's metadata-consistency context is its ` +
-              `removed d target yq.y (SPEC 10.5)`,
+            `${at}: dm's metadata-consistency context is its removed d ` +
+              `target yq.y (SPEC 10.5)`,
           );
           assertAbsentState(
-            requireContextEntry(dmItem, B12_YQY, `${prefix} ${stage}`),
+            requireContextEntry(dmItem, B12_YQY, at),
             { node: B12_YQY, text: y0.subtreeText },
-            `${prefix} ${stage}, yq.y in dm's context — deleted since the ` +
-              `baseline and never seen by a mutating derivation with newer ` +
-              `text: it presents its baseline value (SPEC 10.7)`,
+            `${at}, yq.y in dm's context — deleted since the baseline and ` +
+              `never seen by a mutating derivation with newer text: it ` +
+              `presents its baseline value (SPEC 10.7)`,
           );
-          // One payload rule: export presents the same values.
-          const exported = await exportSession(
-            product,
-            workspace,
-            "s",
-            `${prefix} ${stage}`,
-          );
-          assertSameInformation(
-            payloadProjection(requireItemById(exported.items, idPXX, prefix)),
-            payloadProjection(xItem),
-            `${prefix} ${stage}: \`export\` presents px.x's item with the ` +
-              `same payload as \`show\` (SPEC 10.7)`,
-          );
-          assertSameInformation(
-            payloadProjection(requireItemById(exported.items, idDM, prefix)),
-            payloadProjection(dmItem),
-            `${prefix} ${stage}: \`export\` presents dm's item with the ` +
-              `same payload as \`show\` (SPEC 10.7)`,
-          );
-          // The human form of both `show` reads at the same state, only
-          // reads having run since (T12.0-1, SPEC 12.0; the module header):
-          // px.x's absent scope and yq.y's absent context entry.
-          await assertHumanShowItem(
-            product,
-            workspace,
-            "s",
-            xItem,
-            `${prefix} ${stage}, px.x's item`,
-          );
-          await assertHumanShowItem(
-            product,
-            workspace,
-            "s",
-            dmItem,
-            `${prefix} ${stage}, dm's item`,
-          );
+          // One payload rule: export presents the same values; then the
+          // human form of each `show` read at the same state, only reads
+          // having run since (T12.0-1, SPEC 12.0; the module header).
+          const exported = await exportSession(product, workspace, "s", at);
+          const reads = [
+            [kItem, "A.K1's item"],
+            [aItem, "A's parent-consistency item"],
+            [dmItem, "dm's item"],
+          ] as const;
+          for (const [shown, what] of reads) {
+            assertSameInformation(
+              payloadProjection(requireItemById(exported.items, shown.id, at)),
+              payloadProjection(shown),
+              `${at}: \`export\` presents ${what} with the same payload as ` +
+                `\`show\` (SPEC 10.7)`,
+            );
+          }
+          for (const [shown, what] of reads) {
+            await assertHumanShowItem(
+              product,
+              workspace,
+              "s",
+              shown,
+              `${at}, ${what}`,
+            );
+          }
         };
 
-        await assertProvenance("after the px.x deletion");
+        await assertProvenance("after the A.K1 deletion");
 
-        // The `updated` resolve re-derives the session against a graph
-        // containing neither px.x nor yq.y: a state not containing the node
-        // contributes nothing, so both provenance texts are unchanged.
+        // A.K1's own item resolved `updated`: the re-derivation it triggers
+        // runs over a graph containing neither A.K1 nor yq.y — a state not
+        // containing a node contributes nothing (SPEC 10.7) — and generates
+        // neither A.K1's item nor A's parent-consistency item: A, having
+        // lost A.K1, is `changed` and visited itself, A.K1 skipped beneath
+        // it, and A has no non-root ancestor (SPEC 5.6, 10.5). Both items
+        // remain, keeping their ids (10.5), beside A's new item.
         await resolveOk(
           product,
           workspace,
           "s",
-          idDM,
+          idK1,
           "updated",
-          `${prefix} \`resolve s <dm's item> --status updated\` — triggers ` +
-            `re-derivation without px.x and yq.y (SPEC 10.5)`,
+          `${prefix} \`resolve s <A.K1's item> --status updated\` — ` +
+            `re-derivation over a graph without A.K1 (SPEC 10.5)`,
         );
-        await assertProvenance("after the updated-resolve re-derivation");
+        const rederived = await sessionStatus(product, workspace, "s", prefix);
+        const after = `${prefix} after A.K1's \`updated\` resolve`;
+        assertSameJson(
+          kindScopes(rederived),
+          [
+            `metadata-consistency ${B12_DM}`,
+            `parent-consistency ${B12_A}`,
+            `subtree-coherence ${B12_A}`,
+            `subtree-coherence ${B12_K1}`,
+            `subtree-coherence ${B12_YQ}`,
+          ].sort(),
+          `${after}, staging premise: the re-derivation keeps A.K1's item ` +
+            `and A's parent-consistency item, which it no longer generates, ` +
+            `and adds A's subtree-coherence item — A, having lost A.K1, is ` +
+            `now visited (SPEC 5.6, 10.5)`,
+        );
+        for (const [kind, scope, id] of [
+          ["subtree-coherence", B12_K1, idK1],
+          ["parent-consistency", B12_A, idA],
+        ] as const) {
+          const kept = requireRow(rederived, kind, scope, after).id;
+          if (kept !== id) {
+            fail(
+              `${after}, staging premise: the ${kind} item scoped at ` +
+                `${scope} keeps its id ${id} — items that no longer ` +
+                `generate remain in the session (SPEC 10.5); got ${kept}`,
+            );
+          }
+        }
+        await assertProvenance("after A.K1's updated-resolve re-derivation");
+      },
+    );
+
+    // --- the resolve-state sub-fixture: provenance (iii) ---------------------
+    // Resolve states count among the states an absent node's text comes from
+    // (SPEC 10.7): N's item, resolved `no-change` with N at v2 — a state no
+    // derivation saw — presents N, once deleted, with its v2 subtree text.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [RS12_FILE]: T10_7_12_N_V0 },
+      async (workspace) => {
+        const prefix = "T10.7-12 resolve state";
+        await workspace.gitInit();
+        const base = await workspace.gitCommitAll("baseline");
+        await buildOk(product, workspace, `${prefix} \`build\` at v0`);
+        const n0 = await queryNode(
+          product,
+          workspace,
+          RS12_N,
+          `${prefix} v0 capture of N`,
+        );
+        await workspace.file(RS12_FILE, T10_7_12_N_V1);
+        await buildOk(product, workspace, `${prefix} \`build\` at v1`);
+        const n1 = await queryNode(
+          product,
+          workspace,
+          RS12_N,
+          `${prefix} v1 capture of N`,
+        );
+        await createBaseSession(product, workspace, base, "s", prefix);
+        const created = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          rowSequence(created),
+          [`subtree-coherence ${RS12_N} unresolved`],
+          `${prefix} staging premise: N's own-text edit yields N's ` +
+            `subtree-coherence item alone — N visited, N.c unedited, and N, ` +
+            `top-level, without a non-root ancestor (SPEC 5.6, 10.5)`,
+        );
+        const idN = requireRow(created, "subtree-coherence", RS12_N, prefix).id;
+
+        // v2: N's own text edited again after create; N's item then resolved
+        // `no-change` — the resolve records the state with N at v2 (SPEC
+        // 10.4, 10.7) and re-derives nothing (10.5).
+        await workspace.file(RS12_FILE, T10_7_12_N_V2);
+        await buildOk(product, workspace, `${prefix} \`build\` at v2`);
+        const n2 = await queryNode(
+          product,
+          workspace,
+          RS12_N,
+          `${prefix} v2 capture of N`,
+        );
+        assertPairwiseDistinct(
+          [
+            ["N's baseline subtree text", n0.subtreeText],
+            ["N's create-time subtree text", n1.subtreeText],
+            ["N's resolve-time subtree text", n2.subtreeText],
+          ],
+          prefix,
+        );
+        if (!n2.subtreeText.includes(RS12_NC_TEXT)) {
+          fail(
+            `${prefix} staging premise: N's resolve-time subtree text holds ` +
+              `N.c's text ${JSON.stringify(RS12_NC_TEXT)} (SPEC 1.6: a ` +
+              `node's subtree text includes its children's contributions); ` +
+              `got ${JSON.stringify(n2.subtreeText)}`,
+          );
+        }
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          idN,
+          "no-change",
+          `${prefix} \`resolve s <N's item> --status no-change\` at v2`,
+        );
+
+        // v3: N's section deleted.
+        await workspace.file(RS12_FILE, T10_7_12_N_DELETED);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after N's deletion`,
+        );
+
+        const shown = await showItem(product, workspace, "s", idN, prefix);
+        assertAbsentState(
+          shown.scope,
+          { node: RS12_N, text: n2.subtreeText },
+          `${prefix}, N's item scope root — deleted after its \`no-change\` ` +
+            `resolve: the most recent graph state containing N is the one ` +
+            `that resolve recorded the item under (v2), N.c's text included ` +
+            `— never the create-time derivation's (v1) nor the baseline's ` +
+            `(v0) (SPEC 10.7)`,
+        );
+        const exported = await exportSession(product, workspace, "s", prefix);
+        assertSameInformation(
+          payloadProjection(requireItemById(exported.items, idN, prefix)),
+          payloadProjection(shown),
+          `${prefix}: \`export\` presents N's item with the same payload as ` +
+            `\`show\` (SPEC 10.7)`,
+        );
+        await assertHumanShowItem(
+          product,
+          workspace,
+          "s",
+          shown,
+          `${prefix} N's item`,
+        );
       },
     );
 

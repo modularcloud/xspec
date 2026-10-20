@@ -84,7 +84,10 @@
 // - T10.4-7's fixture is exported for the arms T10.2-2 and T10.7-12 stage
 //   over T10.4-7(a)'s shape: its paths, identities, and initial sources,
 //   d2's source template, and the session and state stagings, which
-//   assert staging premises alone.
+//   assert staging premises alone — and T10.7-12's second d2 edit, a record
+//   made here from that template: section-10.7-ii.ts, which this module
+//   imports at load (T10.4-8's stagings), imports this one only when its
+//   arm runs, so no module cycle closes.
 // - T10.4-8 stages each arm through another test's exported staging —
 //   T10.5-5's newly visited p.q (`stageT1055NewlyVisitedQ`,
 //   section-10.5.ts), T10.7-9's audit session (`runT1079AuditSplits`) and
@@ -102,7 +105,8 @@
 // every state carrying the earlier edits forward), T10.4-2's presence flips,
 // T10.4-3's context-set edit, T10.4-4's post-rename deletion, T10.4-5's
 // staleness edit, T10.4-6's upstream edits and reverts, T10.4-7's upstream
-// edits and removal edit, T10.4-8's p.q and N.c.y edits — are staged-source
+// edits and removal edit, T10.4-8's p.q and N.c.y edits, and the second d2
+// edit T10.7-12 stages over T10.4-7(a)'s fixture — are staged-source
 // records (helpers/staged-mdx.ts, S-9: judged before any product exists),
 // the same template calls moved to module level (T10.4-8's spelled by the
 // exported source templates of the stagings it continues). A staging that
@@ -5224,7 +5228,9 @@ const T10_4_6 = defineProductTest({
 //
 // The fixture is exported for T10.2-2's and T10.7-12's arms over T10.4-7(a)'s
 // shape (`T10_4_7_FILES`, `T10_4_7_NODES`, `T10_4_7_INITIAL_FILES`,
-// `t1047D2Source`, `stageT1047Session`, `stageT1047State`): the stagings
+// `t1047D2Source`, `stageT1047Session`, `stageT1047State`, and T10.7-12's
+// second d2 edit `T10_7_12_D2_V2`, a record made here because
+// section-10.7-ii.ts loads this module only at run time): the stagings
 // assert staging premises alone, every outcome T10.4-7 asserts staying in
 // its body.
 
@@ -5272,7 +5278,8 @@ function t7D1Source(text: string): string {
  * specs/D2.mdx's bytes: d2 alone, holding `text` — or, for `null`, d2's
  * section deleted, the file left holding no section (its implicit root
  * alone, SPEC 1.2). Exported so a later arm over T10.4-7(a)'s fixture can
- * stage a further d2 edit as a staged-source record of its own (S-9).
+ * stage a further d2 edit as a staged-source record of its own (S-9);
+ * T10.7-12's, `T10_7_12_D2_V2`, is made below, in this module.
  */
 export function t1047D2Source(text: string | null): string {
   return text === null ? "" : ['<S id="d2">', text, "</S>", ""].join("\n");
@@ -5321,6 +5328,20 @@ const T10_4_7_T_WITHOUT_D2 = stagedMdx(
 const T10_4_7_D2_DELETED = stagedMdx(
   "T10.4-7 specs/D2.mdx with d2's section deleted, no section left (the removal edit)",
   t1047D2Source(null),
+);
+
+/**
+ * specs/D2.mdx with d2 at v2 — d2's text edited a second time once x's item
+ * is resolved `updated`: T10.7-12's joined-origin arm over T10.4-7(a)'s
+ * fixture (section-10.7-ii.ts). That module loads this one only when the
+ * arm runs — this module imports it at load (T10.4-8's stagings), so a
+ * static import back would close a module cycle — and a record must exist
+ * at module load (S-9's ledger), so the arm's record is made here, from
+ * d2's own template.
+ */
+export const T10_7_12_D2_V2 = stagedMdx(
+  "T10.7-12 specs/D2.mdx with d2 at v2 (T10.4-7(a)'s fixture: d2's text edited a second time once x's item is resolved)",
+  t1047D2Source("Dee two text v2."),
 );
 
 /**
