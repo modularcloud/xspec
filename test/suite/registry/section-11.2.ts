@@ -74,6 +74,7 @@ import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import type {
   Finding,
+  FindingLocation,
   OccurrenceRecord,
   PathValue,
   SourceRange,
@@ -110,6 +111,7 @@ import {
   expectErrorDocument,
   expectExit,
   runCli,
+  runFindingsReport,
   runJson,
 } from "./support.js";
 
@@ -1448,9 +1450,10 @@ const T11_2_2 = defineProductTest({
 // concerned `path` — it is the marked byte form `{"bytes": …}`, the exact
 // bytes as lowercase hexadecimal (12.0, 12.7).
 //
-// Staging: one workspace, spec group + code group. `specs/OK.mdx` is the
-// valid-path contrast (root identity is defined EXACTLY when the file's path
-// is valid — both directions in one document) and the reference target;
+// Staging: one workspace, spec group + code group (the target side below
+// has its own, configured alike). `specs/OK.mdx` is the valid-path
+// contrast (root identity is defined EXACTLY when the file's path is
+// valid — both directions in one document) and the reference target;
 // `specs/a#b.mdx` (the entry's literal name) and, on the Linux leg,
 // `specs/b<0xFF>.mdx` are the invalid-path spec sources; `src/co#de.ts` is
 // the invalid-path code source, spelling one `text(SPEC.ok)` call inside a
@@ -1462,6 +1465,29 @@ const T11_2_2 = defineProductTest({
 // condition-free: the gate `build --json` reports exactly the 14.19
 // multiset, so the identity unavailability observed later is attributable
 // to the paths alone.
+//
+// Target side (11.2's resolution rule read from the target: a spelling
+// resolves only to a section whose node identity is defined, or — in
+// module form — to a root whose identity is defined, its path valid; 1.5:
+// no identity is resolved against over an invalid path): a second
+// workspace, created once the first is disposed — after the body's first
+// product invocation, so its initial files are staged-source records
+// (S-9's timing clause). `specs/a'b.mdx` is discovered (the spec glob
+// matches it) and barred by 7.1 (`'` in a spec-group path, T7.1-1) — one
+// 14.19 — and holds the section `x`. `specs/A.mdx` imports it as
+// `import B from "./a'b.xspec"` and the code source `src/use.ts` as
+// `import B, { text } from "../specs/a'b.xspec"`: each import is valid,
+// its target a discovered source of a configured spec group whatever its
+// path's validity (2.1, 4), so no 14.15 arises. `specs/A.mdx` spells
+// `d={B.x}`, `d={B}` (the module form, naming the root), and the embedding
+// `{text(B.x)}`; the code source the call `text(B.x)` inside a named
+// function and the bare top-level marker `B.x`. None of the five resolves
+// — `x`'s identity and the root's are undefined over the invalid path — so
+// each records no edge and no occurrence and reports its own condition at
+// the span its occurrence would occupy (SPEC 14): 14.5 at each `d` value's
+// expression, 14.6 at the embedding's full braced container, 14.7 at the
+// call (callee through closing parenthesis) and at the bare chain (its
+// terminator excluded) — beside the target's 14.19, and nothing else.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - The non-UTF-8 arms are staged exactly when the platform's file names are
@@ -1499,7 +1525,39 @@ const T11_2_2 = defineProductTest({
 // - The gate `build` rides a whole-root snapshot compare (a failing build
 //   modifies nothing, SPEC 12.1), pinning that every later answer runs on
 //   the staged ground; the per-invocation no-write sweep is T11.2-1's home
-//   clause and is not repeated here.
+//   clause and is not repeated here. On the target side the compare spans
+//   `build` and `check` (which writes nothing, 12.2) alike.
+// - The target side's findings are pinned form-exactly — stable code,
+//   every location's file and exact range (SPEC 14 fixes a reference
+//   spelling's range as the span its occurrence occupies or would
+//   occupy), the 14.19's empty locations and concerned path — at `build
+//   --json` and `check --json` (the workspace is never built, so `check`
+//   reports `build`'s findings exactly: 14.10's mismatch forms are
+//   undetectable on a workspace failing `build`'s validations, and no
+//   record exists), at bare `occurrences` and both `--to` answers (their
+//   consulted domain the entire discovered set: all six findings), and at
+//   `view specs/A.mdx`, whose consulted domain is the named file: its
+//   three findings alone, never the code source's 14.7s or the target's
+//   14.19 (a 14.19 is a domain file's through its concerned path, 11.2).
+// - "No edge and no occurrence" is observed through the occurrence
+//   surfaces — on a failing workspace the gated reads report findings
+//   without answering (T13.3-3), so no edge listing exists: every
+//   enumeration is pinned exactly empty (bare `occurrences`, both `--to`
+//   selections, `specs/A.mdx`'s view). No record of any file therefore
+//   carries a `target` over the invalid path: a product that resolves into
+//   the invalid-path file — emitting `specs/a'b.mdx#x` or `specs/a'b.mdx`
+//   as an identity — fails those compares, and the condition counts
+//   before them, its five findings missing.
+// - The import's view entry pins `target` as the plain path
+//   `specs/a'b.mdx` — the discovered spec source the specifier designates
+//   (11.4) — never the unavailability marker of a product reading it as
+//   the target root's (undefined) identity (T11.4-4); its range is the
+//   declaration's own characters (no terminator), its name `B`.
+// - `--to "specs/a'b.mdx#x"` and `--to "specs/a'b.mdx"` are well-formed
+//   spellings (11.3: acceptance is syntactic — 1.4's segment rules judge
+//   the id part alone, so the `'` in the path part is well-formed), so
+//   each is accepted — exit 1 with the empty selection and the domain's
+//   findings, never exit 2 (T11.3-3).
 
 // One spec group plus one code group (SPEC 7.2), so `src/**/*.ts` files are
 // discovered code sources and their spec-module usage is analyzed (4.3, 4.5).
@@ -1683,17 +1741,19 @@ const NU_TREE: TreeExpectation = {
 // --- expected condition-19 findings ------------------------------------------
 
 /**
- * The asserted projection of a 14.19 finding (module-header note): the
- * stable code token, the empty locations of a path-level condition, and the
- * concerned path (SPEC 14, 12.7). Message and identities stay unpinned.
+ * The asserted projection of a finding (module-header note): the stable
+ * code token; every location — its file and exact byte range, `[]` for a
+ * path-level condition such as 14.19 — and the concerned path, `null` for
+ * a located condition (SPEC 14, 12.7). Message and identities stay
+ * unpinned.
  */
-interface PathFindingExpectation {
+interface FindingProjection {
   readonly code: string | null;
-  readonly locations: readonly unknown[];
+  readonly locations: readonly FindingLocation[];
   readonly path: PathValue | null;
 }
 
-function projectPathFinding(finding: Finding): PathFindingExpectation {
+function projectFinding(finding: Finding): FindingProjection {
   return {
     code: finding.code,
     locations: finding.locations,
@@ -1701,17 +1761,17 @@ function projectPathFinding(finding: Finding): PathFindingExpectation {
   };
 }
 
-const HP_19: PathFindingExpectation = {
+const HP_19: FindingProjection = {
   code: "invalid-source-path",
   locations: [],
   path: HP_FILE,
 };
-const NU_19: PathFindingExpectation = {
+const NU_19: FindingProjection = {
   code: "invalid-source-path",
   locations: [],
   path: NU_MARKED_PATH,
 };
-const CS_19: PathFindingExpectation = {
+const CS_19: FindingProjection = {
   code: "invalid-source-path",
   locations: [],
   path: CS_FILE,
@@ -1720,10 +1780,10 @@ const CS_19: PathFindingExpectation = {
 // Pinned 12.7 order among equal-code, location-less findings: by concerned
 // path bytes — "specs/a#b.mdx" < "specs/b\xFF.mdx" (a marked byte-form path
 // and a plain string sort in one byte order) < "src/co#de.ts".
-const WORKSPACE_19S: readonly PathFindingExpectation[] = NON_UTF8_STAGED
+const WORKSPACE_19S: readonly FindingProjection[] = NON_UTF8_STAGED
   ? [HP_19, NU_19, CS_19]
   : [HP_19, CS_19];
-const VIEW_DOMAIN_19S: readonly PathFindingExpectation[] = NON_UTF8_STAGED
+const VIEW_DOMAIN_19S: readonly FindingProjection[] = NON_UTF8_STAGED
   ? [HP_19, NU_19]
   : [HP_19];
 const WORKSPACE_19_COUNTS: Readonly<Record<string, number>> = {
@@ -1739,10 +1799,319 @@ const EXPECTED_VIEW_FILES: readonly PathValue[] = NON_UTF8_STAGED
   ? [OK_FILE, HP_FILE, NU_MARKED_PATH]
   : [OK_FILE, HP_FILE];
 
+// --- the target side: specs/a'b.mdx imported by both kinds of source --------
+// Staged after the body's first product invocation (the section comment):
+// every initial file of its workspace is a staged-source record (S-9).
+
+const TARGET_SIDE_CONFIG = stagedTs(
+  "T11.2-3 target-side workspace xspec.config.ts — one spec group and one code group (SPEC_AND_CODE_CONFIG)",
+  SPEC_AND_CODE_CONFIG,
+);
+
+// specs/a'b.mdx: `'` in a spec-group path (7.1's bar, 14.19) — the file's
+// only defect; its content is condition-free.
+const QUOTE_FILE = "specs/a'b.mdx";
+const QUOTE_STAGED = stagedMdx(
+  "T11.2-3 target-side specs/a'b.mdx (the invalid-path target behind 7.1's bar, holding section x)",
+  "Prélude — the target behind 7.1's bar.\n\n" + '<S id="x">\nX text.\n</S>\n',
+);
+
+// specs/A.mdx: the spec-source importer. Its import declaration opens the
+// file (its range the declaration's own characters, no terminator); the
+// multi-byte prose after it shifts every later offset (SPEC 1.7). The two
+// `d` values' expressions and the embedding's braced container are the
+// spans their occurrences would occupy — exactly their findings' ranges.
+const IMPORTER_FILE = "specs/A.mdx";
+const IMPORTER = new ByteFixture();
+const IMPORTER_IMPORT_TEXT = `import B from "./a'b.xspec"`;
+const IMPORTER_IMPORT_RANGE = IMPORTER.add(IMPORTER_IMPORT_TEXT);
+IMPORTER.add('\n\nPréambule — imports the invalid-path file.\n\n<S id="p" d={');
+const IMPORTER_DEP_X_RANGE = IMPORTER.add("B.x");
+IMPORTER.add('}>\nP text.\n</S>\n\n<S id="q" d={');
+const IMPORTER_DEP_ROOT_RANGE = IMPORTER.add("B");
+IMPORTER.add("}>\nQ text ");
+const IMPORTER_EMBED_TEXT = "{text(B.x)}";
+const IMPORTER_EMBED_RANGE = IMPORTER.add(IMPORTER_EMBED_TEXT);
+IMPORTER.add(" here.\n</S>\n");
+const IMPORTER_SOURCE = IMPORTER.source;
+const IMPORTER_STAGED = stagedMdx(
+  "T11.2-3 target-side specs/A.mdx (imports specs/a'b.mdx; d={B.x}, d={B}, {text(B.x)})",
+  IMPORTER_SOURCE,
+);
+
+// The import's view entry (SPEC 11.4, 12.7 member order): the target is
+// the discovered spec source the specifier designates — a path, never an
+// identity (the target root's identity is undefined; its path is not).
+const IMPORTER_IMPORT: ViewImportEntry = {
+  range: IMPORTER_IMPORT_RANGE,
+  name: "B",
+  target: QUOTE_FILE,
+};
+
+// src/use.ts: the code-source importer — the `text(B.x)` call inside the
+// named function `useText` (its would-be occurrence the whole call
+// expression, callee through closing parenthesis) and the bare top-level
+// marker `B.x` (the chain alone, its terminator excluded). The multi-byte
+// comment prefix shifts every later offset (SPEC 1.7).
+const USER_FILE = "src/use.ts";
+const USER = new ByteFixture();
+USER.add("// Präambel — imports the invalid-path file.\n");
+USER.add(`import B, { text } from "../specs/a'b.xspec";\n`);
+USER.add("\nexport function useText(): string {\n  return ");
+const USER_CALL_TEXT = "text(B.x)";
+const USER_CALL_RANGE = USER.add(USER_CALL_TEXT);
+USER.add(";\n}\n\n");
+const USER_MARKER_TEXT = "B.x";
+const USER_MARKER_RANGE = USER.add(USER_MARKER_TEXT);
+USER.add(";\n");
+const USER_SOURCE = USER.source;
+const USER_STAGED = stagedTs(
+  "T11.2-3 target-side src/use.ts (imports specs/a'b.xspec; the call text(B.x) and the marker B.x)",
+  USER_SOURCE,
+);
+
+/** One located finding's projection: a single location, no concerned path. */
+function locatedAt(
+  code: string,
+  file: string,
+  range: SourceRange,
+): FindingProjection {
+  return { code, locations: [{ file, range }], path: null };
+}
+
+// The target side's whole finding set in 12.7's pinned order — by code
+// (conditions 5, 6, 7, 19), then by locations (file path bytes, range
+// start): the five unresolved spellings at their exact spans, then the
+// target's path-level 14.19 concerning specs/a'b.mdx. No 14.15: both
+// imports are valid (2.1, 4).
+const TARGET_SIDE_FINDINGS: readonly FindingProjection[] = [
+  locatedAt("unknown-dependency", IMPORTER_FILE, IMPORTER_DEP_X_RANGE),
+  locatedAt("unknown-dependency", IMPORTER_FILE, IMPORTER_DEP_ROOT_RANGE),
+  locatedAt("unknown-text-target", IMPORTER_FILE, IMPORTER_EMBED_RANGE),
+  locatedAt("unknown-ts-reference", USER_FILE, USER_CALL_RANGE),
+  locatedAt("unknown-ts-reference", USER_FILE, USER_MARKER_RANGE),
+  { code: "invalid-source-path", locations: [], path: QUOTE_FILE },
+];
+const TARGET_SIDE_CONDITION_COUNTS: Readonly<Record<string, number>> = {
+  "14.5": 2,
+  "14.6": 1,
+  "14.7": 2,
+  "14.19": 1,
+};
+// `view specs/A.mdx`'s consulted domain is the named file: its own three
+// findings — never the code source's 14.7s or the target's 14.19 (11.2).
+const IMPORTER_DOMAIN_FINDINGS: readonly FindingProjection[] =
+  TARGET_SIDE_FINDINGS.slice(0, 3);
+
+// The two `--to` spellings naming the invalid-path file's section `x` and
+// its root: well-formed (11.3), so accepted, each selecting nothing.
+const TARGET_SIDE_TO_SPELLINGS: readonly string[] = [
+  `${QUOTE_FILE}#x`,
+  QUOTE_FILE,
+];
+
+/**
+ * T11.2-3's target side (the section comment): on its own workspace,
+ * `build --json` and `check --json` (inside one whole-root compare: neither
+ * writes), `view specs/A.mdx`, bare `occurrences`, and `occurrences --to`
+ * with each spelling of {@link TARGET_SIDE_TO_SPELLINGS} — every finding
+ * set and enumeration pinned exactly.
+ */
+async function runTargetSideArm(product: ProductBinding): Promise<void> {
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": TARGET_SIDE_CONFIG,
+      [QUOTE_FILE]: QUOTE_STAGED,
+      [IMPORTER_FILE]: IMPORTER_STAGED,
+      [USER_FILE]: USER_STAGED,
+    },
+  });
+  try {
+    // --- `build` and `check`: the five unresolved spellings' findings
+    // beside the target's 14.19, nothing else (no 14.15: both imports are
+    // valid), exit 1 — the workspace never built, so `check` reports
+    // `build`'s findings exactly.
+    const gateContext =
+      "T11.2-3 target side `build --json` and `check --json` (specs/a'b.mdx " +
+      "behind 7.1's bar, imported by specs/A.mdx and src/use.ts)";
+    await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        for (const command of ["build", "check"] as const) {
+          const context = `T11.2-3 target side \`${command} --json\``;
+          const findings = await runFindingsReport(
+            product,
+            workspace,
+            [command, "--json"],
+            1,
+            `${context} — the unresolved spellings' findings and the ` +
+              `target's condition 19 are findings: exit 1 (SPEC 12.0, ` +
+              `12.1, 12.2)`,
+          );
+          assertConditionCounts(
+            findings,
+            TARGET_SIDE_CONDITION_COUNTS,
+            `${context} — 14.5 for each \`d\` reference (d={B.x}, d={B}), ` +
+              `14.6 for the embedding, 14.7 for the call and for the ` +
+              `marker, beside specs/a'b.mdx's 14.19, and nothing else: no ` +
+              `spelling resolves into the invalid-path file — no section ` +
+              `or root identity is defined over it (SPEC 11.2, 1.5) — ` +
+              `while both imports are valid, their target discovered (2.1, ` +
+              `4: no 14.15)`,
+          );
+          assertSameJson(
+            findings.map(projectFinding),
+            TARGET_SIDE_FINDINGS,
+            `${context} — each unresolved spelling located exactly at the ` +
+              `span its occurrence would occupy (the d value's expression, ` +
+              `the full braced container, the call callee through closing ` +
+              `parenthesis, the bare chain without its terminator) and the ` +
+              `14.19 concerning specs/a'b.mdx with no locations, in 12.7's ` +
+              `order (SPEC 14, 12.7)`,
+          );
+        }
+      },
+      `${gateContext} — a failing build modifies nothing (SPEC 12.1) and ` +
+        `\`check\` writes nothing (SPEC 12.2)`,
+    );
+
+    // --- `view specs/A.mdx`: the import listed with its target a path,
+    // never an identity; no occurrence; the named file's findings alone.
+    const viewContext = `T11.2-3 target side \`view ${IMPORTER_FILE}\``;
+    const viewResult = await runCli(product, workspace, [
+      "view",
+      IMPORTER_FILE,
+    ]);
+    assertExitCode(
+      viewResult,
+      1,
+      `${viewContext} — the file's unresolved spellings' findings accompany ` +
+        `the answer, so exit 1 with the full document (SPEC 11.2)`,
+    );
+    const viewReport = decodeViewReport(
+      parseJsonStdout(
+        viewResult,
+        `${viewContext} — a single JSON document is the only output form ` +
+          `(SPEC 11)`,
+      ),
+      { text: false },
+      viewContext,
+    );
+    assertSameJson(
+      viewReport.findings.map(projectFinding),
+      IMPORTER_DOMAIN_FINDINGS,
+      `${viewContext} — the consulted domain is the named file: its two ` +
+        `14.5s and its 14.6, never the code source's 14.7s or ` +
+        `specs/a'b.mdx's 14.19, which concern no domain file (SPEC 11.2, ` +
+        `11.4)`,
+    );
+    assertSameJson(
+      viewReport.views.map((view) => view.file),
+      [IMPORTER_FILE],
+      `${viewContext} — exactly the requested file's view (SPEC 11.4)`,
+    );
+    const importerView = viewReport.views[0]!;
+    assertSameJson(
+      importerView.imports,
+      [IMPORTER_IMPORT],
+      `${viewContext} — the import listed with its range, its binding name ` +
+        `B, and its target specs/a'b.mdx: the discovered spec source its ` +
+        `specifier designates, a path and never an identity — the ` +
+        `target root's identity is undefined over the invalid path, the ` +
+        `path itself is not, so never the unavailability marker (SPEC ` +
+        `11.4, 2.1, 11.2; T11.4-4)`,
+    );
+    assertSameJson(
+      importerView.occurrences,
+      [],
+      `${viewContext} — no occurrence for d={B.x}, d={B}, or ` +
+        `{text(B.x)}: none resolves into the invalid-path file, so none ` +
+        `records (SPEC 11.2, 1.5, 5.7)`,
+    );
+
+    // --- Bare `occurrences`: the entire discovered set's enumeration —
+    // none for the five spellings, every one of their findings
+    // accompanying.
+    const occContext = "T11.2-3 target side bare `occurrences`";
+    const occResult = await runCli(product, workspace, ["occurrences"]);
+    assertExitCode(
+      occResult,
+      1,
+      `${occContext} — the domain's findings accompany the answer, so ` +
+        `exit 1 with the full answer (SPEC 11.2, 11.3)`,
+    );
+    const occReport = decodeOccurrencesReport(
+      parseJsonStdout(
+        occResult,
+        `${occContext} — a single JSON document is the only output form ` +
+          `(SPEC 11)`,
+      ),
+      occContext,
+    );
+    assertSameJson(
+      occReport.findings.map(projectFinding),
+      TARGET_SIDE_FINDINGS,
+      `${occContext} — the consulted domain is the entire discovered set: ` +
+        `every one of the five spellings' findings and specs/a'b.mdx's ` +
+        `14.19 accompany (SPEC 11.2, 11.3)`,
+    );
+    assertSameJson(
+      occReport.occurrences,
+      [],
+      `${occContext} — no record for any of the five spellings, so no ` +
+        `record of any file carries a target over the invalid path — ` +
+        `never specs/a'b.mdx#x, never specs/a'b.mdx: no identity is ` +
+        `resolved against over an invalid path (SPEC 11.2, 1.5, 5.7)`,
+    );
+
+    // --- `occurrences --to` with each spelling naming the invalid-path
+    // file's section and root: accepted (well-formed, 11.3), selecting
+    // nothing, the domain's findings accompanying, exit 1 — never exit 2.
+    for (const spelling of TARGET_SIDE_TO_SPELLINGS) {
+      const toContext = `T11.2-3 target side \`occurrences --to "${spelling}"\``;
+      const toResult = await runCli(product, workspace, [
+        "occurrences",
+        "--to",
+        spelling,
+      ]);
+      assertExitCode(
+        toResult,
+        1,
+        `${toContext} — a well-formed spelling is accepted whatever the ` +
+          `workspace holds (acceptance is syntactic: never exit 2), and the ` +
+          `domain's findings make the answer exit 1 (SPEC 11.3, 11.2; ` +
+          `T11.3-3)`,
+      );
+      const toReport = decodeOccurrencesReport(
+        parseJsonStdout(
+          toResult,
+          `${toContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        toContext,
+      );
+      assertSameJson(
+        toReport.findings.map(projectFinding),
+        TARGET_SIDE_FINDINGS,
+        `${toContext} — the consulted domain is the entire discovered set ` +
+          `(no --file): all six findings accompany (SPEC 11.2, 11.3)`,
+      );
+      assertSameJson(
+        toReport.occurrences,
+        [],
+        `${toContext} — the selection is empty: the named identity does ` +
+          `not resolve, its file's path invalid (SPEC 11.3, 14.19)`,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
 const T11_2_3 = defineProductTest({
   id: "T11.2-3",
   title:
-    "(Linux leg) invalid paths: the discovered spec sources `specs/a#b.mdx` and — staged where file names are byte strings — a non-UTF-8-named `specs/b<0xFF>.mdx` keep full views (tree, byte-exact construct ranges, raw attribute entries) with every node identity, root included, explicitly unavailable, while `specs/OK.mdx` beside them keeps defined identities — root identity defined exactly when the file's path is valid; the condition-19 finding (stable code `invalid-source-path`, no locations, the file as concerned path — the non-UTF-8 path in the marked byte form `{\"bytes\": …}`) accompanies every answer whose consulted domain includes the file and no other: bare `view` carries exactly the spec paths' findings (never the code source's), bare `occurrences` every 14.19, `at specs/a#b.mdx` exactly its own; the code source `src/co#de.ts` defines no identity for its whole-file location or any unit, its `text(SPEC.ok)` call and bare marker still recording occurrences with `source` exactly the unavailability marker and `file`, `range`, `kind`, `target` present; no identity over an invalid path is ever emitted (every identity datum in every captured document pinned); the gate `build --json` fails with exactly the staged 14.19 multiset, modifying nothing (SPEC 11.2, 11.3-11.5, 12.0, 12.7, 5.7, 1.5, 14)",
+    "(Linux leg) invalid paths: the discovered spec sources `specs/a#b.mdx` and — staged where file names are byte strings — a non-UTF-8-named `specs/b<0xFF>.mdx` keep full views (tree, byte-exact construct ranges, raw attribute entries) with every node identity, root included, explicitly unavailable, while `specs/OK.mdx` beside them keeps defined identities — root identity defined exactly when the file's path is valid; the condition-19 finding (stable code `invalid-source-path`, no locations, the file as concerned path — the non-UTF-8 path in the marked byte form `{\"bytes\": …}`) accompanies every answer whose consulted domain includes the file and no other: bare `view` carries exactly the spec paths' findings (never the code source's), bare `occurrences` every 14.19, `at specs/a#b.mdx` exactly its own; the code source `src/co#de.ts` defines no identity for its whole-file location or any unit, its `text(SPEC.ok)` call and bare marker still recording occurrences with `source` exactly the unavailability marker and `file`, `range`, `kind`, `target` present; no identity over an invalid path is ever emitted (every identity datum in every captured document pinned); the gate `build --json` fails with exactly the staged 14.19 multiset, modifying nothing; target side — no identity is resolved against over an invalid path: `specs/a'b.mdx` (7.1's bar, its 14.19) holding section `x` is imported validly (no 14.15) by `specs/A.mdx` as `import B from \"./a'b.xspec\"` and by the code source `src/use.ts` as `import B, { text } from \"../specs/a'b.xspec\"`, `view specs/A.mdx` listing the import with target `specs/a'b.mdx` — a path, never an identity; `specs/A.mdx`'s `d={B.x}`, `d={B}`, and `{text(B.x)}` and the code source's marker `B.x` and call `text(B.x)` resolve to nothing: `build` and `check` report exactly 14.5 twice, 14.6, and 14.7 twice, each at its spelling's exact span, beside the 14.19, exit 1, modifying nothing; no edge and no occurrence — `specs/A.mdx`'s view and bare `occurrences` list none (`occurrences` with all six findings), so no record carries a target over the invalid path — and `occurrences --to \"specs/a'b.mdx#x\"` and `--to \"specs/a'b.mdx\"` are accepted, each selecting nothing with the domain's findings, exit 1, never exit 2 (SPEC 11.2, 11.3-11.5, 12.0, 12.1, 12.2, 12.7, 5.7, 1.5, 2.1, 4, 7.1, 14)",
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
     // out of the staged bytes before any product invocation.
@@ -1776,6 +2145,42 @@ const T11_2_3 = defineProductTest({
       CS_MARKER_RANGE,
       CS_MARKER_TEXT,
       "the bare marker chain",
+    );
+    sliceCheck(
+      IMPORTER_SOURCE,
+      IMPORTER_IMPORT_RANGE,
+      IMPORTER_IMPORT_TEXT,
+      "the target side's import declaration (its own characters)",
+    );
+    sliceCheck(
+      IMPORTER_SOURCE,
+      IMPORTER_DEP_X_RANGE,
+      "B.x",
+      "the target side's d={B.x} expression",
+    );
+    sliceCheck(
+      IMPORTER_SOURCE,
+      IMPORTER_DEP_ROOT_RANGE,
+      "B",
+      "the target side's d={B} expression",
+    );
+    sliceCheck(
+      IMPORTER_SOURCE,
+      IMPORTER_EMBED_RANGE,
+      IMPORTER_EMBED_TEXT,
+      "the target side's embedding container",
+    );
+    sliceCheck(
+      USER_SOURCE,
+      USER_CALL_RANGE,
+      USER_CALL_TEXT,
+      "the target side's text(...) call expression",
+    );
+    sliceCheck(
+      USER_SOURCE,
+      USER_MARKER_RANGE,
+      USER_MARKER_TEXT,
+      "the target side's bare marker chain",
     );
 
     const workspace = await TestWorkspace.create({
@@ -1825,7 +2230,7 @@ const T11_2_3 = defineProductTest({
               `condition-free`,
           );
           assertSameJson(
-            findings.map(projectPathFinding),
+            findings.map(projectFinding),
             WORKSPACE_19S,
             `${buildContext} — each finding carries the stable code ` +
               `"invalid-source-path", no in-source locations, and the ` +
@@ -1858,7 +2263,7 @@ const T11_2_3 = defineProductTest({
         viewContext,
       );
       assertSameJson(
-        viewReport.findings.map(projectPathFinding),
+        viewReport.findings.map(projectFinding),
         VIEW_DOMAIN_19S,
         `${viewContext} — the condition-19 finding accompanies every ` +
           `answer whose consulted domain includes the file AND NO OTHER ` +
@@ -1943,7 +2348,7 @@ const T11_2_3 = defineProductTest({
         occContext,
       );
       assertSameJson(
-        occReport.findings.map(projectPathFinding),
+        occReport.findings.map(projectFinding),
         WORKSPACE_19S,
         `${occContext} — the consulted domain is the entire discovered ` +
           `set, so every invalid path's condition-19 finding accompanies, ` +
@@ -2012,7 +2417,7 @@ const T11_2_3 = defineProductTest({
           atContext,
         );
         assertSameJson(
-          atReport.findings.map(projectPathFinding),
+          atReport.findings.map(projectFinding),
           [HP_19],
           `${atContext} — the consulted domain is the named file alone: ` +
             `exactly its condition-19 finding, never the other invalid ` +
@@ -2030,6 +2435,9 @@ const T11_2_3 = defineProductTest({
     } finally {
       await workspace.dispose();
     }
+
+    // --- The target side, on its own workspace (the section comment).
+    await runTargetSideArm(product);
   },
 });
 
