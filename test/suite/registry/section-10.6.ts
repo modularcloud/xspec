@@ -56,16 +56,37 @@
 //   enclosing git repository at all.
 // - Every fixture edit is followed by an explicit `build` before any read,
 //   so no read relies on the 13.3 refresh path (T13.3-*'s business).
-// - Recorded state (`baseline`/`current`) is product-shaped and opaque
-//   (H-3/H-4): "keeps its recorded state" is asserted as canonical-JSON
-//   equality of the fields across reads, and "with current state" via the
-//   entry-time relevant-hash values (captured through `query node` at the
-//   recorded moment) appearing among the record's string leaves — the same
-//   operationalizations as §10.2/§10.4.
+// - Recorded state (`baseline`/`current`) is product-shaped (H-3/H-4):
+//   "keeps its recorded state" is asserted as canonical-JSON equality of the
+//   fields across reads, and the parent's item's `current` "byte-for-byte"
+//   (T10.6-3) as equality of the decoded member's JSON rendering, member
+//   order included, between `export` at its resolve and after the
+//   re-derivation — T10.5-5's matching arm's operationalization. The new
+//   item's `current` is read entry by entry through the review adapter's
+//   `decodeRecordedState` (its assumed RecordedState shape), as T10.2-4's
+//   re-derivation arm reads it: the new node's entry presents it present,
+//   its subtreeHash and metadataHash each equal to the `query node` capture
+//   at the re-derivation — after a further edit too, where a value equal to
+//   the live graph's is diagnosed as a product recomputing `current`
+//   (`assertCurrentEntryAt`). Its `baseline` holds the same values among its
+//   string leaves (§10.2/§10.4's operationalization).
+// - Scope sets (T10.6-3: a matched item presents its scope as last assigned
+//   before the re-derivation and takes the generated scope after it, SPEC
+//   10.4, 10.5) are read through the review adapter's `requireScopeNodes` —
+//   every scope node an item's payload presents — and compared as sorted
+//   identity sets; the scope text, read from the current graph, never tells
+//   a scope as last assigned from a generated one. They are asserted last in
+//   the body, from the reads made at their moments, so a payload presenting
+//   no scope-node list fails there, loudly (H-3), every other arm judged
+//   first.
+// - Stored statuses (T10.6-3: the parent's item's stored status kept) are
+//   `review list --json`'s counts — stored statuses, without the read-time
+//   invalidation `status`, `next`, `show`, and `export` apply (SPEC 10.4,
+//   10.7).
 // - Staged-source records (helpers/staged-mdx.ts, S-9: judged before any
 //   product exists): every `.mdx` edit a body stages after its first product
 //   invocation over the harness's own bytes — T10.6-2's deletion of f and e,
-//   T10.6-3's authoring and editing of p.b — is the same template call moved
+//   T10.6-3's authoring and editing of p.a.b — is the same template call moved
 //   to module level as a record, as is the initial file of each later
 //   T10.6-2 workspace (created after the body's first `build`): the split
 //   sub-fixture's (the f-and-e deletion's record, whose bytes it spells) and
@@ -86,17 +107,22 @@ import { Buffer } from "node:buffer";
 import type {
   ExportReport,
   ItemStatus,
+  NodeHashes,
   NodeReport,
   ReviewItem,
   SessionStatusReport,
   SessionStatusRow,
 } from "../../helpers/adapters/index.js";
 import {
+  ITEM_STATUSES,
   decodeExportReport,
   decodeItemReport,
   decodeNextReport,
   decodeNodeReport,
+  decodeRecordedState,
+  decodeSessionListReport,
   decodeSessionStatusReport,
+  requireScopeNodes,
 } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -1412,24 +1438,39 @@ const T10_6_2 = defineProductTest({
 // T10.6-3 — re-derivation on `updated`
 // ---------------------------------------------------------------------------
 
+// One file, never `git init`ed: the top-level p holds p.a — a leaf at
+// `create`, the parent the new section p.a.b is authored under — and the
+// top-level leaves q and s follow. p.a's item is resolved `no-change` with
+// `--note` before p.a.b is authored; after it, q's item takes the control's
+// `no-change` resolve and s's the `updated` resolve that re-derives, another
+// item's than the parent's. p.a.b lands between p.a and q in document order,
+// so its item's place in audit item order is discriminating (a product
+// appending new items last fails).
 const R_FILE = "specs/R.mdx";
 const R_ROOT = "specs/R.mdx";
 const R_P = "specs/R.mdx#p";
 const R_PA = "specs/R.mdx#p.a";
-const R_PB = "specs/R.mdx#p.b";
+const R_PAB = "specs/R.mdx#p.a.b";
+const R_Q = "specs/R.mdx#q";
 const R_S = "specs/R.mdx#s";
+/** The `--note` text of p.a's resolve, which its matched item keeps. */
+const R_NOTE = "Checked by hand: pee-a stands as written.";
 
-function rSpec(pbText: string | undefined): string {
-  const pbLines =
-    pbText === undefined ? [] : ["", '<S id="p.b">', pbText, "</S>"];
+function rSpec(pabText: string | undefined): string {
+  const pabLines =
+    pabText === undefined ? [] : ["", '<S id="p.a.b">', pabText, "</S>"];
   return [
     '<S id="p">',
     "Pee own text.",
     "",
     '<S id="p.a">',
     "Paa text.",
+    ...pabLines,
     "</S>",
-    ...pbLines,
+    "</S>",
+    "",
+    '<S id="q">',
+    "Que text.",
     "</S>",
     "",
     '<S id="s">',
@@ -1439,38 +1480,179 @@ function rSpec(pbText: string | undefined): string {
   ].join("\n");
 }
 
-// Both p.b stagings — authoring the section, then editing it — follow the
+// Both p.a.b stagings — authoring the section, then editing it — follow the
 // body's first `build`, so they are staged-source records
 // (helpers/staged-mdx.ts, S-9: judged before any product exists); the
-// initial file (no p.b) stays a plain `files` entry.
-const T10_6_3_R_PB_V0 = stagedMdx(
-  "T10.6-3 specs/R.mdx with the new section p.b authored at v0",
+// initial file (no p.a.b) stays a plain `files` entry.
+const T10_6_3_R_PAB_V0 = stagedMdx(
+  "T10.6-3 specs/R.mdx with the new section p.a.b authored under the leaf p.a at v0",
   rSpec("Pab text v0."),
 );
-const T10_6_3_R_PB_V1 = stagedMdx(
-  "T10.6-3 specs/R.mdx with p.b edited to v1",
+const T10_6_3_R_PAB_V1 = stagedMdx(
+  "T10.6-3 specs/R.mdx with p.a.b edited to v1",
   rSpec("Pab text v1."),
 );
+
+/** `review list --json`'s stored counts for one healthy session (10.7). */
+async function listedStoredCounts(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  context: string,
+): Promise<Readonly<Record<string, number>>> {
+  const label = `${context} \`review list --json\``;
+  const report = decodeSessionListReport(
+    await runJson(product, workspace, ["review", "list", "--json"], label),
+    label,
+  );
+  const entries = report.sessions.filter((entry) => entry.name === name);
+  if (entries.length !== 1) {
+    fail(
+      `${label}: expected exactly one listed session named ` +
+        `${JSON.stringify(name)} (SPEC 10.7: \`list\` reports every ` +
+        `session); found ${String(entries.length)} among ` +
+        JSON.stringify(report.sessions.map((entry) => entry.name)),
+    );
+  }
+  const entry = entries[0];
+  if (entry.corrupt) {
+    fail(
+      `${label}: session ${JSON.stringify(name)} is listed corrupt; the ` +
+        `product wrote it and nothing else touched it, so it must be listed ` +
+        `with its strategy and counts (SPEC 10.1, 10.7)`,
+    );
+  }
+  return entry.counts;
+}
+
+/**
+ * A listed session's counts, compared as `counts[status] ?? 0` per defined
+ * status — stored statuses, no read-time invalidation (SPEC 10.4, 10.7).
+ */
+function assertStoredCounts(
+  counts: Readonly<Record<string, number>>,
+  expected: Readonly<Record<ItemStatus, number>>,
+  context: string,
+): void {
+  for (const status of ITEM_STATUSES) {
+    const actual = counts[status] ?? 0;
+    if (actual !== expected[status]) {
+      fail(
+        `${context}: \`review list\` counts the session's items by stored ` +
+          `status — no read-time invalidation applied (SPEC 10.4, 10.7) — ` +
+          `expected ${String(expected[status])} item(s) stored ${status}, ` +
+          `got ${String(actual)}`,
+      );
+    }
+  }
+}
+
+/** A moment whose values a recorded entry must not hold (diagnoses). */
+interface WrongMoment {
+  /** The moment, as a diagnosis names it ("after the further edit"). */
+  readonly moment: string;
+  /** The node's hashes `query node` reported at that moment. */
+  readonly hashes: NodeHashes;
+  /** The failing product whose record holds them. */
+  readonly product: string;
+}
+
+/**
+ * Assert `node`'s entry in an item's `current` (SPEC 10.2, 10.4) — read entry
+ * by entry through the review adapter's `decodeRecordedState`, its assumed
+ * RecordedState shape — presents it present and holds the subtreeHash and
+ * metadataHash `query node` reported at the expected moment, a
+ * subtree-coherence item's relevant hashes for its scope node (10.4); `why`
+ * names the rule. A recorded value equal to a wrong moment's is diagnosed as
+ * that moment's product: the caller first asserts, as a staging premise,
+ * that the wrong moment's subtreeHash differs from the expected one.
+ */
+function assertCurrentEntryAt(
+  item: ReviewItem,
+  node: string,
+  expected: NodeHashes,
+  wrong: readonly WrongMoment[],
+  why: string,
+  context: string,
+): void {
+  const label = `${context}: \`current\``;
+  const entries = decodeRecordedState(item, "current", context);
+  const entry = entries.find((candidate) => candidate.node === node);
+  if (entry === undefined) {
+    fail(
+      `${label} holds no entry for ${node} — ${why}; it holds entries for ` +
+        JSON.stringify(entries.map((candidate) => candidate.node)),
+    );
+  }
+  if (!entry.present || entry.absentMarker) {
+    fail(
+      `${label}: ${node}'s entry must present it present, with its hashes — ` +
+        `${why}; got ${JSON.stringify(entry)}`,
+    );
+  }
+  for (const hash of ["subtreeHash", "metadataHash"] as const) {
+    const recorded = entry.hashes[hash];
+    if (recorded === expected[hash]) continue;
+    const match = wrong.find((moment) => moment.hashes[hash] === recorded);
+    fail(
+      `${label}: ${node}'s ${hash} must be ${JSON.stringify(expected[hash])}, ` +
+        `the value \`query node\` reported at the expected moment — ${why}; ` +
+        `got ` +
+        (recorded === undefined
+          ? "none recorded"
+          : match !== undefined
+            ? `${JSON.stringify(recorded)}, its value ${match.moment} — ` +
+              match.product
+            : JSON.stringify(recorded)),
+    );
+  }
+}
+
+/**
+ * Assert the scope an item's payload presents — every scope node, read
+ * through the review adapter's `requireScopeNodes` (the scope as last
+ * assigned, SPEC 10.4, 10.7) — as a sorted identity set; `why` names the
+ * rule.
+ */
+function assertScopeNodes(
+  item: ReviewItem,
+  expected: readonly string[],
+  why: string,
+  context: string,
+): void {
+  assertSameJson(
+    identitySet(requireScopeNodes(item, context)),
+    [...expected].sort(),
+    `${context}: ${why}`,
+  );
+}
+
+/** A note as a diagnosis names it. */
+function noteText(note: string | undefined): string {
+  return note === undefined ? "no note" : JSON.stringify(note);
+}
 
 const T10_6_3 = defineProductTest({
   id: "T10.6-3",
   title:
-    "audit re-derivation on `updated` (the 10.5 resolve-time re-derivation holds for every strategy; audit's generators run with no creation parameters against the current workspace): after authoring a new section p.b, resolving an unblocked item `no-change` adds no item (the control — the new node's item enters only through an `updated` resolve), while resolving an unblocked item `updated` re-derives — p.b's subtree-coherence item appears at its place in audit item order, created `unresolved` (the trigger's status does not propagate) with a fresh id and current state (its recorded current and baseline hold p.b's entry-time subtreeHash and metadataHash, and a later p.b edit leaves the reported record identical — recorded at entry, not recomputed), its context is its ancestor chain with empty origin, its parent p's item's blockedBy is recomputed to include it (the root's stays its child sections' items), and every existing item keeps its id, status, and recorded state (baseline and current byte-informationally unchanged across the re-derivation; the trigger keeps `updated`, the control keeps `no-change`) (SPEC 10.2, 10.4, 10.5, 10.6, 10.7)",
+    "audit re-derivation on `updated` (the 10.5 resolve-time re-derivation holds for every strategy; audit's generators run with no creation parameters against the current workspace): p.a, a leaf at `create`, has its item resolved `no-change` with `--note` before the new section p.a.b is authored under it; then resolving q's unblocked item `no-change` adds no item (the control — the new node's item enters only through a re-derivation, at an `updated` resolve or at the end of a `split`), while resolving s's unblocked item `updated` (another item's than the parent's) re-derives — p.a.b's subtree-coherence item appears at its place in audit item order, created `unresolved` (the trigger's status does not propagate) with a fresh id, its `current` holding, entry by entry, p.a.b's subtreeHash and metadataHash captured via `query node` at the re-derivation (its baseline holding them too) and still after a further p.a.b edit, the item staying `unresolved` (written at creation, reported as recorded, never recomputed), its context its ancestor chain with empty origin, and its parent p.a's item's blockedBy is recomputed to include it (p's and the root's staying their child sections' items); every existing item keeps its id, status, note, and recorded state (baseline and current informationally unchanged across the re-derivation; the trigger keeps `updated` and its baseline, the control `no-change`) and takes the generated scope (the node and all its current descendants) — p.a's item keeps its id, its note, and its `current` byte for byte, presents its scope as last assigned before the re-derivation (exactly {p.a}) and with the child after it (exactly {p.a, p.a.b}), every scope read through each payload's scope-node list, and reads `invalidated` (its subtreeHash changed), never `unresolved`, its stored status kept (`list` counting it `no-change`) (SPEC 10.2, 10.4, 10.5, 10.6, 10.7)",
   run: async (product) => {
     await withWorkspace({ [R_FILE]: rSpec(undefined) }, async (workspace) => {
       const prefix = "T10.6-3";
       await buildOk(product, workspace, `${prefix} \`build\``);
       await createAuditSession(product, workspace, "s", prefix);
 
+      const initialOrder = [
+        `subtree-coherence ${R_ROOT}`,
+        `subtree-coherence ${R_P}`,
+        `subtree-coherence ${R_PA}`,
+        `subtree-coherence ${R_Q}`,
+        `subtree-coherence ${R_S}`,
+      ];
       const initial = await sessionStatus(product, workspace, "s", prefix);
       assertSameJson(
         kindScopeSequence(initial.items),
-        [
-          `subtree-coherence ${R_ROOT}`,
-          `subtree-coherence ${R_P}`,
-          `subtree-coherence ${R_PA}`,
-          `subtree-coherence ${R_S}`,
-        ],
+        initialOrder,
         `${prefix}: the audit items before the edit, in item order ` +
           `(SPEC 10.6)`,
       );
@@ -1482,50 +1664,119 @@ const T10_6_3 = defineProductTest({
       ).id;
       const idP = requireRow(initial, "subtree-coherence", R_P, prefix).id;
       const idPA = requireRow(initial, "subtree-coherence", R_PA, prefix).id;
+      const idQ = requireRow(initial, "subtree-coherence", R_Q, prefix).id;
       const idS = requireRow(initial, "subtree-coherence", R_S, prefix).id;
 
-      // Author the new section p.b (a manual edit, SPEC 6.6), build, and
-      // capture its entry-time relevant hashes (SPEC 10.4: subtree-coherence
-      // records subtreeHash and metadataHash of each scope node; p.b is a
-      // leaf, so its own two values are the record) — the graph does not
-      // change between this build and the re-derivation below.
-      await workspace.file(R_FILE, T10_6_3_R_PB_V0);
+      // The parent's item, resolved before its child is authored: p.a — a
+      // leaf at `create`, so its item is unblocked (SPEC 10.6) — resolved
+      // `no-change` with `--note`. `export` then presents the `current` the
+      // resolve recorded (SPEC 10.2, 10.4), and `query node` captures p.a's
+      // subtreeHash for the invalidation premise below.
+      await expectExit(
+        product,
+        workspace,
+        [
+          "review",
+          "resolve",
+          "s",
+          idPA,
+          "--status",
+          "no-change",
+          "--note",
+          R_NOTE,
+        ],
+        0,
+        `${prefix} \`review resolve s <p.a's item> --status no-change ` +
+          `--note <text>\` before p.a.b is authored`,
+      );
+      const atParentResolve = `${prefix} after p.a's resolve`;
+      const paCurrentAtResolve = JSON.stringify(
+        requireItem(
+          (await exportSession(product, workspace, "s", atParentResolve)).items,
+          "subtree-coherence",
+          R_PA,
+          atParentResolve,
+        ).current,
+      );
+      const paAtResolve = await queryNode(
+        product,
+        workspace,
+        R_PA,
+        atParentResolve,
+      );
+
+      // Author the new section p.a.b under p.a (a manual edit, SPEC 6.6) and
+      // build: p.a's subtreeHash changes (the premise), so its resolved item
+      // reads invalidated from here on (SPEC 10.4).
+      await workspace.file(R_FILE, T10_6_3_R_PAB_V0);
       await buildOk(
         product,
         workspace,
-        `${prefix} \`build\` after authoring p.b`,
+        `${prefix} \`build\` after authoring p.a.b`,
       );
-      const pbAtEntry = await queryNode(product, workspace, R_PB, prefix);
+      const paWithChild = await queryNode(
+        product,
+        workspace,
+        R_PA,
+        `${prefix} after authoring p.a.b`,
+      );
+      if (paWithChild.hashes.subtreeHash === paAtResolve.hashes.subtreeHash) {
+        fail(
+          `${prefix} staging premise: authoring p.a.b must change p.a's ` +
+            `subtreeHash (SPEC 5.5: a node added to the subtree) — the ` +
+            `change that invalidates p.a's resolved item (10.4)`,
+        );
+      }
 
       // Control: a no-change resolve after the edit re-derives nothing — the
-      // new node's item enters only through an `updated` resolve (SPEC 10.5:
-      // resolving with no-change/skipped does not re-derive; 10.6).
+      // new node's item enters only through a re-derivation, at an `updated`
+      // resolve or at the end of a `split` (SPEC 10.5: resolving with
+      // no-change or skipped does not re-derive; 10.6).
       await resolveOk(
         product,
         workspace,
         "s",
-        idPA,
+        idQ,
         "no-change",
-        `${prefix} control \`resolve --status no-change\` of p.a's item ` +
+        `${prefix} control \`resolve --status no-change\` of q's item ` +
           `after the edit`,
       );
-      const afterControl = await sessionStatus(product, workspace, "s", prefix);
+      const afterControl = await sessionStatus(
+        product,
+        workspace,
+        "s",
+        `${prefix} control`,
+      );
       assertSameJson(
         kindScopeSequence(afterControl.items),
-        [
-          `subtree-coherence ${R_ROOT}`,
-          `subtree-coherence ${R_P}`,
-          `subtree-coherence ${R_PA}`,
-          `subtree-coherence ${R_S}`,
-        ],
-        `${prefix} control: after the p.b edit and a no-change resolve the ` +
-          `item set is unchanged — no item for p.b was added (SPEC 10.5, ` +
-          `10.6: the new node's item enters only through an updated resolve)`,
+        initialOrder,
+        `${prefix} control: after the p.a.b edit and a no-change resolve the ` +
+          `item set is unchanged — no item for p.a.b was added (SPEC 10.5, ` +
+          `10.6: the new node's item enters only through a re-derivation, ` +
+          `at an updated resolve or at the end of a split)`,
       );
 
-      // Recorded-state capture for the kept-items compare (reads report
-      // baseline and current as recorded, SPEC 10.2).
-      const exportPre = await exportSession(product, workspace, "s", prefix);
+      // Before the re-derivation: the recorded-state capture for the
+      // kept-items compare (reads report baseline and current as recorded,
+      // SPEC 10.2), p.a's item in it presenting its scope as last assigned
+      // (asserted with the other scope reads at the end of the body), and
+      // p.a.b's relevant hashes at the re-derivation (SPEC 10.4:
+      // subtree-coherence records subtreeHash and metadataHash of each scope
+      // node; p.a.b is a leaf, so its own two values are its item's) — the
+      // graph does not change between this capture and s's resolve.
+      const beforeLabel = `${prefix} before the re-derivation`;
+      const exportPre = await exportSession(
+        product,
+        workspace,
+        "s",
+        beforeLabel,
+      );
+      const pabAtReDerivation = await queryNode(
+        product,
+        workspace,
+        R_PAB,
+        beforeLabel,
+      );
 
       // The `updated` resolve of s's unblocked item triggers re-derivation.
       await resolveOk(
@@ -1538,191 +1789,354 @@ const T10_6_3 = defineProductTest({
           `re-derivation (SPEC 10.5, 10.6)`,
       );
 
-      const derived = await sessionStatus(product, workspace, "s", prefix);
+      const afterLabel = `${prefix} after the re-derivation`;
+      const derived = await sessionStatus(product, workspace, "s", afterLabel);
       assertSameJson(
         kindScopeSequence(derived.items),
         [
           `subtree-coherence ${R_ROOT}`,
           `subtree-coherence ${R_P}`,
           `subtree-coherence ${R_PA}`,
-          `subtree-coherence ${R_PB}`,
+          `subtree-coherence ${R_PAB}`,
+          `subtree-coherence ${R_Q}`,
           `subtree-coherence ${R_S}`,
         ],
-        `${prefix} after the updated resolve: p.b's subtree-coherence item ` +
-          `appears at its place in audit item order — document order within ` +
-          `the file, between p.a and s (SPEC 10.5, 10.6)`,
+        `${afterLabel}: p.a.b's subtree-coherence item appears at its place ` +
+          `in audit item order — document order within the file, between ` +
+          `p.a and q (SPEC 10.5, 10.6)`,
       );
-      const pbRow = requireRow(derived, "subtree-coherence", R_PB, prefix);
-      if ([idRoot, idP, idPA, idS].includes(pbRow.id)) {
+      const pabRow = requireRow(
+        derived,
+        "subtree-coherence",
+        R_PAB,
+        afterLabel,
+      );
+      if ([idRoot, idP, idPA, idQ, idS].includes(pabRow.id)) {
         fail(
-          `${prefix}: the new p.b item's id must be fresh (SPEC 10.2); got ` +
-            `${pbRow.id}, colliding with an existing item id`,
+          `${afterLabel}: the new p.a.b item's id must be fresh (SPEC ` +
+            `10.2); got ${pabRow.id}, colliding with an existing item id`,
         );
       }
-      if (pbRow.status !== "unresolved") {
+      if (pabRow.status !== "unresolved") {
         fail(
-          `${prefix}: a newly generated item is created unresolved ` +
+          `${afterLabel}: a newly generated item is created unresolved ` +
             `(SPEC 10.2) — the triggering item's \`updated\` status must ` +
-            `not propagate to it; got ${pbRow.status}`,
+            `not propagate to it; got ${pabRow.status}`,
         );
       }
-      // Existing items keep their ids and statuses (SPEC 10.5, 10.6).
+      // Existing items keep their ids and statuses (SPEC 10.5, 10.6); p.a's
+      // follows.
       for (const [keptId, scope, status] of [
         [idRoot, R_ROOT, "unresolved"],
         [idP, R_P, "unresolved"],
-        [idPA, R_PA, "no-change"],
+        [idQ, R_Q, "no-change"],
         [idS, R_S, "updated"],
       ] as const) {
-        const row = requireRow(derived, "subtree-coherence", scope, prefix);
+        const row = requireRow(derived, "subtree-coherence", scope, afterLabel);
         if (row.id !== keptId) {
           fail(
-            `${prefix}: ${scope}'s item keeps its id across the ` +
+            `${afterLabel}: ${scope}'s item keeps its id across the ` +
               `re-derivation (SPEC 10.5, 10.6); expected ${keptId}, got ` +
               `${row.id}`,
           );
         }
         if (row.status !== status) {
           fail(
-            `${prefix}: ${scope}'s item keeps its status across the ` +
+            `${afterLabel}: ${scope}'s item keeps its status across the ` +
               `re-derivation (SPEC 10.4, 10.5) — the trigger keeps its ` +
               `just-resolved updated status, the control its no-change; ` +
               `expected ${status}, got ${row.status}`,
           );
         }
       }
+      // The parent's item, matched by kind and scope node (SPEC 10.5): it
+      // keeps its id, and its stored no-change reads invalidated — p.a's
+      // subtreeHash changed since its resolve (10.4) — never unresolved.
+      const paRow = requireRow(derived, "subtree-coherence", R_PA, afterLabel);
+      if (paRow.id !== idPA) {
+        fail(
+          `${afterLabel}: p.a's item, matched by kind and scope node, keeps ` +
+            `its id (SPEC 10.5); expected ${idPA}, got ${paRow.id}`,
+        );
+      }
+      if (paRow.status !== "invalidated") {
+        fail(
+          `${afterLabel}: p.a's item reads invalidated — its stored status ` +
+            `kept (SPEC 10.5: a matched item keeps its status), and p.a's ` +
+            `subtreeHash changed since its resolve (10.4) — never ` +
+            `unresolved; got ${paRow.status}`,
+        );
+      }
 
-      const exportPost = await exportSession(product, workspace, "s", prefix);
-      const pbItem = requireItem(
+      const exportPost = await exportSession(
+        product,
+        workspace,
+        "s",
+        afterLabel,
+      );
+      const pabItem = requireItem(
         exportPost.items,
         "subtree-coherence",
-        R_PB,
-        prefix,
+        R_PAB,
+        afterLabel,
       );
       assertSameJson(
-        identitySet(pbItem.context),
-        [R_ROOT, R_P].sort(),
-        `${prefix}: the new item's context is p.b's ancestor chain ` +
+        identitySet(pabItem.context),
+        [R_ROOT, R_P, R_PA].sort(),
+        `${afterLabel}: the new item's context is p.a.b's ancestor chain ` +
           `(SPEC 10.6)`,
       );
       assertSameJson(
-        identitySet(pbItem.origin),
+        identitySet(pabItem.origin),
         [],
-        `${prefix}: the new audit item's origin is empty (SPEC 10.6)`,
+        `${afterLabel}: the new audit item's origin is empty (SPEC 10.6)`,
       );
-      assertBlockedBy(pbItem, [], `${prefix} p.b's new leaf item`);
-      // "With current state" (SPEC 10.5: new items are added with current
-      // state; 10.2: current is written at item creation, baseline fixed at
-      // entry from the current graph in a session without a baseline): both
-      // records hold p.b's entry-time relevant hash values.
-      for (const [record, field] of [
-        [pbItem.current, "current"],
-        [pbItem.baseline, "baseline"],
-      ] as const) {
-        assertRecordedHolds(
-          record,
-          pbAtEntry.hashes.subtreeHash,
-          `p.b's entry-time subtreeHash`,
-          `${prefix} p.b item's ${field}`,
-        );
-        assertRecordedHolds(
-          record,
-          pbAtEntry.hashes.metadataHash,
-          `p.b's entry-time metadataHash`,
-          `${prefix} p.b item's ${field}`,
-        );
-      }
-      // blockedBy is recomputed (SPEC 10.5, 10.6): p's item gains the new
-      // child item; the root's stays its child sections' items.
+      assertBlockedBy(pabItem, [], `${afterLabel} p.a.b's new leaf item`);
+      // Its `current` written at its creation (SPEC 10.2: written at item
+      // creation; 10.5: new items are added with current state): p.a.b's
+      // entry, present, holding the hashes captured at the re-derivation —
+      // and, the item entering a session without a baseline, its baseline
+      // fixed then from the current graph (10.2) holds them too.
+      const currentWhy =
+        "an item a re-derivation adds is created there, its `current` " +
+        "written then — 10.2: written at item creation; 10.5: new items are " +
+        "added with current state — and reads report it as recorded, never " +
+        "recomputed from the live graph (SPEC 10.2, 10.4)";
+      assertCurrentEntryAt(
+        pabItem,
+        R_PAB,
+        pabAtReDerivation.hashes,
+        [],
+        currentWhy,
+        `${afterLabel} p.a.b's item`,
+      );
+      assertRecordedHolds(
+        pabItem.baseline,
+        pabAtReDerivation.hashes.subtreeHash,
+        `p.a.b's entry-time subtreeHash`,
+        `${afterLabel} p.a.b's item's baseline`,
+      );
+      assertRecordedHolds(
+        pabItem.baseline,
+        pabAtReDerivation.hashes.metadataHash,
+        `p.a.b's entry-time metadataHash`,
+        `${afterLabel} p.a.b's item's baseline`,
+      );
+      // blockedBy is recomputed (SPEC 10.5, 10.6): the parent p.a's item
+      // gains the new child item; p's and the root's stay their child
+      // sections' items.
       assertBlockedBy(
-        requireItem(exportPost.items, "subtree-coherence", R_P, prefix),
-        [idPA, pbRow.id],
-        `${prefix} p's item after the re-derivation — its blockedBy is ` +
-          `recomputed to include the new child section's item`,
+        requireItem(exportPost.items, "subtree-coherence", R_PA, afterLabel),
+        [pabRow.id],
+        `${afterLabel} p.a's item — its blockedBy is recomputed to include ` +
+          `the new child section's item`,
       );
       assertBlockedBy(
-        requireItem(exportPost.items, "subtree-coherence", R_ROOT, prefix),
-        [idP, idS],
-        `${prefix} root item after the re-derivation — its child sections' ` +
-          `items, unchanged`,
+        requireItem(exportPost.items, "subtree-coherence", R_P, afterLabel),
+        [idPA],
+        `${afterLabel} p's item — its child section's item, unchanged`,
       );
-      // Existing items keep their recorded state (SPEC 10.5, 10.6): baseline
-      // and current unchanged for the untouched items; s's own resolve
-      // rewrote its current (every resolve records current state, 10.4), so
-      // for the trigger only baseline is compared.
-      for (const scope of [R_ROOT, R_P, R_PA]) {
+      assertBlockedBy(
+        requireItem(exportPost.items, "subtree-coherence", R_ROOT, afterLabel),
+        [idP, idQ, idS],
+        `${afterLabel} root item — its child sections' items, unchanged`,
+      );
+      // Existing items keep their recorded state and note (SPEC 10.5,
+      // 10.6): baseline, current, and note unchanged for every item but the
+      // trigger, whose own resolve rewrote its current and set its note
+      // (every resolve records current state and sets the note, 10.4, 10.7),
+      // so for it only baseline is compared.
+      for (const scope of [R_ROOT, R_P, R_PA, R_Q]) {
         const before = requireItem(
           exportPre.items,
           "subtree-coherence",
           scope,
-          prefix,
+          beforeLabel,
         );
         const after = requireItem(
           exportPost.items,
           "subtree-coherence",
           scope,
-          prefix,
+          afterLabel,
         );
         assertSameInformation(
           after.current,
           before.current,
-          `${prefix}: ${scope}'s matched item keeps its recorded current ` +
-            `state across the re-derivation (SPEC 10.5)`,
+          `${afterLabel}: ${scope}'s matched item keeps its recorded ` +
+            `current state across the re-derivation (SPEC 10.5)`,
         );
         assertSameInformation(
           after.baseline,
           before.baseline,
-          `${prefix}: ${scope}'s matched item keeps its recorded baseline ` +
-            `across the re-derivation (SPEC 10.2, 10.5)`,
+          `${afterLabel}: ${scope}'s matched item keeps its recorded ` +
+            `baseline across the re-derivation (SPEC 10.2, 10.5)`,
         );
+        if (after.note !== before.note) {
+          fail(
+            `${afterLabel}: ${scope}'s matched item keeps its note across ` +
+              `the re-derivation (SPEC 10.5); expected ` +
+              `${noteText(before.note)}, got ${noteText(after.note)}`,
+          );
+        }
       }
       assertSameInformation(
-        requireItem(exportPost.items, "subtree-coherence", R_S, prefix)
+        requireItem(exportPost.items, "subtree-coherence", R_S, afterLabel)
           .baseline,
-        requireItem(exportPre.items, "subtree-coherence", R_S, prefix).baseline,
-        `${prefix}: the trigger item keeps its recorded baseline — only its ` +
-          `own resolve rewrote its current (SPEC 10.2, 10.4)`,
+        requireItem(exportPre.items, "subtree-coherence", R_S, beforeLabel)
+          .baseline,
+        `${afterLabel}: the trigger item keeps its recorded baseline — only ` +
+          `its own resolve rewrote its current (SPEC 10.2, 10.4)`,
+      );
+      // The parent's item in `export` (SPEC 10.4, 10.5): its id, reading
+      // invalidated; the note its resolve set; and its `current` byte for
+      // byte — the decoded member's JSON rendering, member order included,
+      // from `export` at p.a's resolve and after the re-derivation (H-3: its
+      // inner shape is the product's). Its stored status is kept: `list`
+      // counts it no-change beside q's, s's updated, and the root's, p's,
+      // and p.a.b's unresolved.
+      const paItem = requireItem(
+        exportPost.items,
+        "subtree-coherence",
+        R_PA,
+        afterLabel,
+      );
+      if (paItem.id !== idPA || paItem.status !== "invalidated") {
+        fail(
+          `${afterLabel}: \`export\` presents p.a's matched item with its ` +
+            `id ${idPA}, reading invalidated (SPEC 10.4, 10.5); got ` +
+            `${paItem.id}, ${paItem.status}`,
+        );
+      }
+      if (paItem.note !== R_NOTE) {
+        fail(
+          `${afterLabel}: p.a's matched item keeps its note — the ` +
+            `\`--note\` text of its resolve (SPEC 10.5: a matched item keeps ` +
+            `its note); expected ${noteText(R_NOTE)}, got ` +
+            noteText(paItem.note),
+        );
+      }
+      const paCurrentAfter = JSON.stringify(paItem.current);
+      if (paCurrentAfter !== paCurrentAtResolve) {
+        fail(
+          `${afterLabel}: p.a's matched item keeps its recorded state — its ` +
+            `\`current\` byte for byte as \`export\` presented it at p.a's ` +
+            `resolve (SPEC 10.2, 10.5: a matched item keeps its recorded ` +
+            `state; reads report it as recorded)\n` +
+            `  at the resolve: ${paCurrentAtResolve}\n` +
+            `  now:            ${paCurrentAfter}`,
+        );
+      }
+      assertStoredCounts(
+        await listedStoredCounts(product, workspace, "s", afterLabel),
+        {
+          unresolved: 3,
+          updated: 1,
+          "no-change": 2,
+          skipped: 0,
+          invalidated: 0,
+        },
+        `${afterLabel}: p.a's item's stored status is kept — \`list\` ` +
+          `counts it no-change beside q's, s's updated, and the root's, ` +
+          `p's, and p.a.b's unresolved`,
       );
 
-      // Entry-time recording, not live recomputation: a later p.b edit
-      // changes the live values while the item — never resolved, so never
-      // rewritten — still reports the record written at its creation
-      // (SPEC 10.2: reads report current as recorded; 10.4: invalidation
-      // applies to resolved items alone).
-      await workspace.file(R_FILE, T10_6_3_R_PB_V1);
+      // Written at creation, never recomputed (T10.2-4's creation arm): a
+      // further p.a.b edit changes the live values while the item — never
+      // resolved, so never rewritten — still reports the `current` its
+      // creation wrote and stays unresolved (SPEC 10.2: reads report current
+      // as recorded; 10.4: invalidation applies to resolved items alone).
+      await workspace.file(R_FILE, T10_6_3_R_PAB_V1);
       await buildOk(
         product,
         workspace,
-        `${prefix} \`build\` after the p.b edit`,
+        `${prefix} \`build\` after the p.a.b edit`,
       );
-      const pbEdited = await queryNode(product, workspace, R_PB, prefix);
-      if (pbEdited.hashes.subtreeHash === pbAtEntry.hashes.subtreeHash) {
+      const editLabel = `${prefix} after the p.a.b edit`;
+      const pabEdited = await queryNode(product, workspace, R_PAB, editLabel);
+      if (
+        pabEdited.hashes.subtreeHash === pabAtReDerivation.hashes.subtreeHash
+      ) {
         fail(
-          `${prefix} staging premise: the p.b edit must change p.b's ` +
+          `${editLabel} staging premise: the p.a.b edit must change p.a.b's ` +
             `subtreeHash (SPEC 5.5) — otherwise the recorded-vs-live ` +
             `discrimination below is vacuous`,
         );
       }
-      const exportFinal = await exportSession(product, workspace, "s", prefix);
-      const pbFinal = requireItem(
+      const exportFinal = await exportSession(
+        product,
+        workspace,
+        "s",
+        editLabel,
+      );
+      const pabFinal = requireItem(
         exportFinal.items,
         "subtree-coherence",
-        R_PB,
-        prefix,
+        R_PAB,
+        editLabel,
       );
-      if (pbFinal.status !== "unresolved") {
+      if (pabFinal.status !== "unresolved") {
         fail(
-          `${prefix}: p.b's never-resolved item stays unresolved after the ` +
-            `edit (SPEC 10.3, 10.4: invalidation applies to resolved items ` +
-            `alone); got ${pbFinal.status}`,
+          `${editLabel}: p.a.b's never-resolved item stays unresolved after ` +
+            `the edit (SPEC 10.3, 10.4: invalidation applies to resolved ` +
+            `items alone); got ${pabFinal.status}`,
         );
       }
-      assertSameInformation(
-        pbFinal.current,
-        pbItem.current,
-        `${prefix}: p.b's item reports its current as recorded at entry — ` +
-          `not recomputed from the live graph after the edit (SPEC 10.2, ` +
-          `10.4)`,
+      assertCurrentEntryAt(
+        pabFinal,
+        R_PAB,
+        pabAtReDerivation.hashes,
+        [
+          {
+            moment: "after the further edit, the live graph's",
+            hashes: pabEdited.hashes,
+            product:
+              "a product reporting `current` recomputed from the live graph",
+          },
+        ],
+        currentWhy,
+        `${editLabel} p.a.b's item`,
       );
+      assertSameInformation(
+        pabFinal.current,
+        pabItem.current,
+        `${editLabel}: p.a.b's item reports its current as recorded at its ` +
+          `creation — not recomputed from the live graph after the edit ` +
+          `(SPEC 10.2, 10.4)`,
+      );
+
+      // The scope arms (SPEC 10.4, 10.5, 10.6, 10.7), from the reads made at
+      // their moments above and asserted last — a payload presenting no
+      // scope-node list fails here loudly (`requireScopeNodes`, H-3), every
+      // other arm judged first. Before the re-derivation p.a's item presents
+      // its scope as last assigned, at `create` — exactly {p.a}, without
+      // p.a.b, authored after it; after it every existing item presents the
+      // generated scope, the node and all its current descendants (10.6) —
+      // p.a's exactly {p.a, p.a.b}, p.a.b joining p's and the root's too.
+      assertScopeNodes(
+        requireItem(exportPre.items, "subtree-coherence", R_PA, beforeLabel),
+        [R_PA],
+        `reads present p.a's item's scope as last assigned, at \`create\` — ` +
+          `exactly {p.a}, without p.a.b, authored after it (SPEC 10.4, ` +
+          `10.7: every scope node presented); a product presenting the live ` +
+          `subtree shows {p.a, p.a.b}`,
+        `${beforeLabel}, p.a's item`,
+      );
+      for (const [scope, nodes] of [
+        [R_PA, [R_PA, R_PAB]],
+        [R_ROOT, [R_ROOT, R_P, R_PA, R_PAB, R_Q, R_S]],
+        [R_P, [R_P, R_PA, R_PAB]],
+        [R_Q, [R_Q]],
+        [R_S, [R_S]],
+      ] as const) {
+        assertScopeNodes(
+          requireItem(exportPost.items, "subtree-coherence", scope, afterLabel),
+          nodes,
+          `the matched item takes the generated scope — ${scope} and all its ` +
+            `current descendants (SPEC 10.5, 10.6, 10.7: every scope node ` +
+            `presented)`,
+          `${afterLabel}, ${scope}'s item`,
+        );
+      }
     });
   },
 });
