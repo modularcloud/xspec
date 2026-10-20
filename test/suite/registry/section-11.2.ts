@@ -22,8 +22,8 @@
 // integrity rides each
 // answer's own exact accompanying-findings multiset instead, and the
 // staged conditions are
-// drawn from the scope's stated set (T11.2-2: 14.1, 14.3, 14.4, 14.17;
-// T11.2-4: 14.1, 14.3, 14.5, 14.6, 14.9, 14.15, 14.16).
+// drawn from the scope's stated set (T11.2-2: 14.1, 14.2, 14.3, 14.4, 14.5,
+// 14.6, 14.17; T11.2-4: 14.1, 14.3, 14.5, 14.6, 14.9, 14.15, 14.16).
 //
 // SPEC 11.2: `occurrences`, `view`, and `at` answer per file, from parsing
 // alone, never gated on workspace-wide validity — parse-local structure (the
@@ -765,6 +765,19 @@ const T11_2_1 = defineProductTest({
 // - the chain conditions ARE inherited: descendants of a no-`id` section
 //   (child and grandchild — the grandchild discriminates a product checking
 //   only the immediate parent) and of a malformed-`id` section are undefined;
+// - structural validity is a chain condition too (each spelled identity in
+//   the chain satisfies 1.3): the well-formed, uniquely spelled `m.n`
+//   nested inside the defined `k`, and the top-level `q.r`, are unavailable
+//   (structurally invalid: one 14.2 each), their structurally consistent
+//   children `m.n.o` and `q.r.s` unavailable by inheritance (no 14.2: each
+//   extends its parent's spelling by exactly one segment, T1.3-2); the same
+//   file's `d={"m.n"}` and `{text("m.n.o")}` (on the defined `refs`)
+//   report 14.5 and 14.6 and record no occurrence — the view's
+//   `occurrences` stays empty (11.4; CONF-AVAIL's staging constraint: the
+//   no-occurrence arm rides the one file's view). A product resolving
+//   through every well-formed, uniquely spelled ID and ignoring 1.3
+//   defines all four and records two occurrences in place of the 14.5 and
+//   the 14.6;
 // - uniqueness compares spelled identities only: the unique `z` stays
 //   defined beside a braced `id={"z"}`, whose invalid form contests nothing;
 // - absent `tags`/`coverage` props define the defaults (no tags — the plain
@@ -781,7 +794,14 @@ const T11_2_1 = defineProductTest({
 // staged condition multiset — every finding located in the matrix file —
 // so a mis-staged arm (a defect that never fired, or one firing under the
 // wrong condition) fails loudly here. Finding locations are asserted at
-// file granularity (range precision is T14-8's).
+// file granularity (range precision is T14-8's), but for the
+// structural-chain arm's four findings, each attributed to its offending
+// construct by T11.2-4's window discipline (exactly one location, inside
+// the construct's end-widened byte window): "one 14.2 per invalid bearer,
+// none for its child" is that arm's own claim, so each 14.2 lies on its
+// bearer's opening tag (`m.n`'s, then `q.r`'s, in 12.7 order — never a
+// child's tag), the 14.5 on the opening tag spelling `d={"m.n"}`, and the
+// 14.6 on the `{text("m.n.o")}` container.
 
 const M_FILE = "specs/M.mdx";
 
@@ -889,7 +909,7 @@ M.add("\n\n");
 // consistent child `ha#sh.kid` — the child's own spelled identity carries
 // the malformed segment too (its own 14.4; extending a malformed identity
 // cannot avoid its segments), and both are undefined: the chain contains a
-// malformed spelled identity. No 14.2 anywhere: the child extends its
+// malformed spelled identity. No 14.2 in this arm: the child extends its
 // parent's spelling exactly.
 const M_HASH_START = M.pos;
 M.add("<S ");
@@ -922,6 +942,67 @@ M.add("<S ");
 const M_BRACEDZ_ID = M.attr("id", 'id={"z"}');
 M.add(">\nContests nothing.\n</S>");
 const M_BRACEDZ_RANGE: SourceRange = { start: M_BRACEDZ_START, end: M.pos };
+M.add("\n\n");
+
+// (k) Structural validity is a chain condition too (SPEC 11.2: each spelled
+// identity in the chain satisfies 1.3). `m.n` — well-formed (1.4) and
+// uniquely spelled — is nested inside `k` yet does not extend `k`'s
+// spelling (14.2), and the top-level `q.r` is two segments where a
+// top-level ID is exactly one (14.2): both unavailable. Their children
+// `m.n.o` and `q.r.s` each extend their own parent's spelling by exactly
+// one segment (T1.3-2: no 14.2 of their own) and are unavailable by
+// inheritance; `k` stays defined. The defined `refs` then spells the same
+// file's `d={"m.n"}` and `{text("m.n.o")}`: neither names a target whose
+// identity is defined, so each records no occurrence and reports its
+// finding (14.5, 14.6) — never an unavailable target (SPEC 11.2). Each
+// opening tag's end is kept for the findings' windows (T11.2-4's
+// discipline): the bearers' tags discriminate them from their children's.
+const M_K_START = M.pos;
+M.add("<S ");
+const M_K_ID = M.attr("id", 'id="k"');
+M.add(">\nChain host.\n\n");
+const M_MN_START = M.pos;
+M.add("<S ");
+const M_MN_ID = M.attr("id", 'id="m.n"');
+M.add(">");
+const M_MN_OPEN_END = M.pos;
+M.add("\nStructurally invalid bearer.\n\n");
+const M_MNO_START = M.pos;
+M.add("<S ");
+const M_MNO_ID = M.attr("id", 'id="m.n.o"');
+M.add(">\nInheriting child.\n</S>");
+const M_MNO_RANGE: SourceRange = { start: M_MNO_START, end: M.pos };
+M.add("\n</S>");
+const M_MN_RANGE: SourceRange = { start: M_MN_START, end: M.pos };
+M.add("\n</S>");
+const M_K_RANGE: SourceRange = { start: M_K_START, end: M.pos };
+M.add("\n\n");
+const M_QR_START = M.pos;
+M.add("<S ");
+const M_QR_ID = M.attr("id", 'id="q.r"');
+M.add(">");
+const M_QR_OPEN_END = M.pos;
+M.add("\nTop-level two-segment bearer.\n\n");
+const M_QRS_START = M.pos;
+M.add("<S ");
+const M_QRS_ID = M.attr("id", 'id="q.r.s"');
+M.add(">\nInheriting child.\n</S>");
+const M_QRS_RANGE: SourceRange = { start: M_QRS_START, end: M.pos };
+M.add("\n</S>");
+const M_QR_RANGE: SourceRange = { start: M_QR_START, end: M.pos };
+M.add("\n\n");
+const M_REFS_START = M.pos;
+M.add("<S ");
+const M_REFS_ID = M.attr("id", 'id="refs"');
+M.add(" ");
+const M_REFS_D = M.attr("d", 'd={"m.n"}');
+M.add(">");
+const M_REFS_OPEN_END = M.pos;
+M.add("\nReferences into the invalid chain.\n\n");
+const M_REFS_EMBED_TEXT = '{text("m.n.o")}';
+const M_REFS_EMBED_RANGE = M.add(M_REFS_EMBED_TEXT);
+M.add("\n</S>");
+const M_REFS_RANGE: SourceRange = { start: M_REFS_START, end: M.pos };
 M.add("\n\n");
 
 // Interpreted tags/coverage matrix (each bearer's own `id` valid and unique,
@@ -992,15 +1073,21 @@ const M_ROOT_RANGE: SourceRange = { start: 0, end: M.pos };
  * element for 14.17 (each element stages exactly one cause); 14.3 is ONE
  * finding for the jointly-duplicated `x` (locating both bearers); 14.4 once
  * per malformed spelled identity (`ha#sh`, `ha#sh.kid`) plus once for the
- * invalid tag (`bad#tag`, T1.4-4's condition). The masked checks contribute
- * nothing: no 14.1 from repeated/braced/valueless `id` (condition 17, never
- * 1), no 14.2 anywhere (the no-`id` section's child is masked; every other
- * child extends its parent's spelling exactly).
+ * invalid tag (`bad#tag`, T1.4-4's condition); 14.2 once per structurally
+ * invalid bearer (`m.n` nested inside `k`, the top-level `q.r`); 14.5 and
+ * 14.6 once each, for `refs`'s `d={"m.n"}` and `{text("m.n.o")}`. The masked
+ * checks contribute nothing: no 14.1 from repeated/braced/valueless `id`
+ * (condition 17, never 1), and no 14.2 beyond the two bearers' (the no-`id`
+ * section's child is masked; every other child — `m.n.o` and `q.r.s`
+ * included — extends its parent's spelling by exactly one segment).
  */
 const M_CONDITION_COUNTS: Readonly<Record<string, number>> = {
   "14.1": 1,
+  "14.2": 2,
   "14.3": 1,
   "14.4": 3,
+  "14.5": 1,
+  "14.6": 1,
   "14.17": 10,
 };
 
@@ -1090,6 +1177,17 @@ const M_TREE: DatumTreeExpectation = {
       tags: ["lone"],
     }),
     datumLeaf(UNAVAILABLE, M_BRACEDZ_RANGE, [M_BRACEDZ_ID]),
+    datumLeaf(`${M_FILE}#k`, M_K_RANGE, [M_K_ID], {
+      children: [
+        datumLeaf(UNAVAILABLE, M_MN_RANGE, [M_MN_ID], {
+          children: [datumLeaf(UNAVAILABLE, M_MNO_RANGE, [M_MNO_ID])],
+        }),
+      ],
+    }),
+    datumLeaf(UNAVAILABLE, M_QR_RANGE, [M_QR_ID], {
+      children: [datumLeaf(UNAVAILABLE, M_QRS_RANGE, [M_QRS_ID])],
+    }),
+    datumLeaf(`${M_FILE}#refs`, M_REFS_RANGE, [M_REFS_ID, M_REFS_D]),
     datumLeaf(`${M_FILE}#tr`, M_TR_RANGE, [M_TR_ID, M_TR_TAGS1, M_TR_TAGS2], {
       tags: UNAVAILABLE,
     }),
@@ -1119,7 +1217,7 @@ const M_TREE: DatumTreeExpectation = {
 const T11_2_2 = defineProductTest({
   id: "T11.2-2",
   title:
-    'one file\'s definedness matrix via bare `view`: exactly one quoted static `id` is defined while repeated (agreeing and disagreeing), braced (`id={"x"}`), valueless, and absent `id` each spell none — identity explicitly unavailable; duplicate spellings of `x` leave both bearers unavailable, no winner, while the uniquely spelled `x.y` beneath one keeps its defined identity (defined without defined prefixes); descendants of a no-`id` and of a malformed-`id` (`ha#sh`) section are undefined by inheritance (grandchild included); the unique `z` stays defined beside a braced `id={"z"}` (an invalid form contests nothing); absent `tags`/`coverage` props define the defaults (no tags, coverage-required) while repeated, malformed, and invalid-valued ones leave the interpreted value unavailable, raw spellings still listed; the answer carries exactly the staged findings (14.1, 14.3, one 14.4 per malformed identity or tag, one 14.17 per afflicted element), each located in the file, exit 1 (SPEC 11.2, 11.4, 2.5-2.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)',
+    'one file\'s definedness matrix via bare `view`: exactly one quoted static `id` is defined while repeated (agreeing and disagreeing), braced (`id={"x"}`), valueless, and absent `id` each spell none — identity explicitly unavailable; duplicate spellings of `x` leave both bearers unavailable, no winner, while the uniquely spelled `x.y` beneath one keeps its defined identity (defined without defined prefixes); descendants of a no-`id` and of a malformed-`id` (`ha#sh`) section are undefined by inheritance (grandchild included); structural validity is a chain condition too — the well-formed, uniquely spelled `m.n` nested inside `k` and the top-level `q.r` are unavailable (structurally invalid), their structurally consistent children `m.n.o` and `q.r.s` unavailable by inheritance, `k` defined, exactly one 14.2 per invalid bearer (on its opening tag, none for either child), and the same file\'s `d={"m.n"}` and `{text("m.n.o")}` report 14.5 and 14.6, recording no occurrence; the unique `z` stays defined beside a braced `id={"z"}` (an invalid form contests nothing); absent `tags`/`coverage` props define the defaults (no tags, coverage-required) while repeated, malformed, and invalid-valued ones leave the interpreted value unavailable, raw spellings still listed; the answer carries exactly the staged findings (14.1, one 14.2 per structurally invalid bearer, 14.3, one 14.4 per malformed identity or tag, 14.5, 14.6, one 14.17 per afflicted element), each located in the file, exit 1 (SPEC 11.2, 11.4, 1.3, 2.5-2.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)',
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
     // out of the staged bytes before any product invocation.
@@ -1147,6 +1245,37 @@ const T11_2_2 = defineProductTest({
       M_TI_TAGS.range,
       'tags="ok bad#tag"',
       "the invalid-valued tags attribute",
+    );
+    sliceCheck(
+      M_SOURCE,
+      M_MN_RANGE,
+      '<S id="m.n">\nStructurally invalid bearer.\n\n' +
+        '<S id="m.n.o">\nInheriting child.\n</S>\n</S>',
+      "the structurally invalid m.n construct, its child inside",
+    );
+    sliceCheck(
+      M_SOURCE,
+      { start: M_MN_START, end: M_MN_OPEN_END },
+      '<S id="m.n">',
+      "the m.n opening tag (its 14.2 window)",
+    );
+    sliceCheck(
+      M_SOURCE,
+      { start: M_QR_START, end: M_QR_OPEN_END },
+      '<S id="q.r">',
+      "the q.r opening tag (its 14.2 window)",
+    );
+    sliceCheck(
+      M_SOURCE,
+      { start: M_REFS_START, end: M_REFS_OPEN_END },
+      '<S id="refs" d={"m.n"}>',
+      "the refs opening tag (its 14.5 window)",
+    );
+    sliceCheck(
+      M_SOURCE,
+      M_REFS_EMBED_RANGE,
+      '{text("m.n.o")}',
+      "the refs embedding container (its 14.6 window)",
     );
     sliceCheck(M_SOURCE, M_ROOT_RANGE, M_SOURCE, "the whole matrix file");
 
@@ -1182,15 +1311,19 @@ const T11_2_2 = defineProductTest({
         report.findings,
         M_CONDITION_COUNTS,
         `${context} — exactly the staged conditions accompany the answer ` +
-          `(SPEC 11.2, 14): one 14.1 (the id-less section), one 14.3 (the ` +
-          `duplicated x, locating both bearers), three 14.4 (ha#sh, ` +
-          `ha#sh.kid, the invalid tag bad#tag), ten 14.17 (repeated ` +
+          `(SPEC 11.2, 14): one 14.1 (the id-less section), two 14.2 (the ` +
+          `structurally invalid m.n nested inside k and the top-level q.r), ` +
+          `one 14.3 (the duplicated x, locating both bearers), three 14.4 ` +
+          `(ha#sh, ha#sh.kid, the invalid tag bad#tag), one 14.5 and one ` +
+          `14.6 (refs's d={"m.n"} and {text("m.n.o")}, naming no target ` +
+          `whose identity is defined), ten 14.17 (repeated ` +
           `agreeing/disagreeing id, braced id x2, valueless id, repeated ` +
           `tags, braced tags, repeated coverage, valueless coverage, ` +
           `invalid coverage value) — and nothing masked reports: no 14.1 ` +
           `from an invalid-form id (condition 17, never 1) and no 14.2 ` +
-          `anywhere (the no-id section's child is masked, every other ` +
-          `child extends its parent's spelling exactly)`,
+          `beyond the two bearers' (the no-id section's child is masked, ` +
+          `every other child — m.n.o and q.r.s included — extends its ` +
+          `parent's spelling by exactly one segment, T1.3-2)`,
       );
       for (const finding of report.findings) {
         assertFindingLocated(
@@ -1201,6 +1334,63 @@ const T11_2_2 = defineProductTest({
             `is T14-8's)`,
         );
       }
+
+      // The structural-chain arm's findings, each on its offending
+      // construct (T11.2-4's window discipline; counts asserted above): one
+      // 14.2 per structurally invalid bearer, in 12.7 order — `m.n`'s on
+      // its opening tag, then `q.r`'s on its — so neither lies on a child's
+      // tag; the 14.5 on the opening tag spelling `d={"m.n"}`; the 14.6 on
+      // the `{text("m.n.o")}` container.
+      const structuralFindings = report.findings.filter(
+        (finding) => finding.condition === "14.2",
+      );
+      assertLocatedFinding(
+        structuralFindings[0]!,
+        [
+          {
+            file: M_FILE,
+            window: { start: M_MN_START, end: M_MN_OPEN_END + 1 },
+          },
+        ],
+        `${context} — the first 14.2 is m.n's alone: nested inside k, it ` +
+          `does not extend k's spelling by one segment (SPEC 1.3, 11.2, ` +
+          `14), located on its own opening tag — never on its structurally ` +
+          `consistent child m.n.o's`,
+      );
+      assertLocatedFinding(
+        structuralFindings[1]!,
+        [
+          {
+            file: M_FILE,
+            window: { start: M_QR_START, end: M_QR_OPEN_END + 1 },
+          },
+        ],
+        `${context} — the second 14.2 is q.r's alone: a top-level ID is ` +
+          `exactly one segment (SPEC 1.3, 11.2, 14), located on its own ` +
+          `opening tag — never on its structurally consistent child q.r.s's`,
+      );
+      assertLocatedFinding(
+        findingByCondition(report.findings, "14.5", context),
+        [
+          {
+            file: M_FILE,
+            window: { start: M_REFS_START, end: M_REFS_OPEN_END + 1 },
+          },
+        ],
+        `${context} — d={"m.n"} names a section whose identity the ` +
+          `structural chain condition leaves undefined, so it resolves to ` +
+          `no target and is reported by its finding's range (within the ` +
+          `opening tag spelling it), never as an occurrence or an ` +
+          `unavailable target (SPEC 11.2, 14)`,
+      );
+      assertLocatedFinding(
+        findingByCondition(report.findings, "14.6", context),
+        [{ file: M_FILE, window: widened(M_REFS_EMBED_RANGE) }],
+        `${context} — {text("m.n.o")} names a section undefined by ` +
+          `inheritance, so it resolves to no target and is reported by its ` +
+          `finding's range (within the embedding container), never as an ` +
+          `occurrence or an unavailable target (SPEC 11.2, 14)`,
+      );
 
       // The one requested file's view, with every node's identity datum and
       // interpreted tags/coverage per SPEC 11.2 — the matrix itself.
@@ -1221,14 +1411,19 @@ const T11_2_2 = defineProductTest({
           `empty list, coverage "required")`,
       );
       assertSameJson(
-        [
-          report.views[0]!.imports,
-          report.views[0]!.occurrences,
-          report.views[0]!.comments,
-        ],
-        [[], [], []],
-        `${context} — the matrix file holds no imports, occurrences, or ` +
-          `comments: empty arrays, never null (SPEC 12.7)`,
+        [report.views[0]!.imports, report.views[0]!.comments],
+        [[], []],
+        `${context} — the matrix file holds no imports or comments: empty ` +
+          `arrays, never null (SPEC 12.7)`,
+      );
+      assertSameJson(
+        report.views[0]!.occurrences,
+        [],
+        `${context} — the file's only reference spellings, refs's ` +
+          `d={"m.n"} and {text("m.n.o")}, record no occurrence: each names ` +
+          `a section the structural chain condition leaves undefined (SPEC ` +
+          `11.2, 5.7), so the view's occurrences (11.4) are the empty array, ` +
+          `never null (12.7)`,
       );
     } finally {
       await workspace.dispose();
