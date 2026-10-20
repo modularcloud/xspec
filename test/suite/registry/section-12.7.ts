@@ -74,11 +74,15 @@
 //   byte-exact against the staged construct (SPEC 1.7, 4.6) — every present
 //   node of the review payload included, since 10.7 gives every present
 //   scope, context, and origin node its source range.
-// - The review-refusal finding's cardinality is unpinned (SPEC 10.7/14 state
-//   no per-reason finding count for review-operation refusals, unlike the
-//   6.4/6.5 reasons): the arm asserts a nonempty findings-only report every
-//   finding of which carries `code` null — exactly the T12.7-1 clause ("null
-//   where 14 assigns none"), with the five-member form enforced by decode.
+// - The review-operation refusal (arm D: `review create` naming an existing
+//   session, SPEC 10.1, 10.7) is judged by T10.7-14's shared check
+//   (support.ts `expectReviewRefusal`), the finding form T12.7-1 indexes
+//   there: exit 1 with standard output exactly `{"findings": [f]}` (10.7:
+//   each refusal one finding), `f` decoded form-exact as the five members,
+//   `code` null (14 assigns none), `locations` [] and `path` null (an
+//   unlocated finding 14 gives no concerned path — never the session file),
+//   `identities` informational (12.7) and unasserted; the session file the
+//   refusal names byte-identical around the run.
 // - The 14.11 identities clause ("a cross-module call names the foreign
 //   module") is asserted by distinctive-stem containment, T4.4-1's former
 //   operationalization (it now pins the literal root identity): every rendering of the foreign module's identity —
@@ -276,22 +280,34 @@
 //   a `findings` member, or concatenated documents fails the decode; which
 //   defect the one finding's message describes is unpinned (12.7: the
 //   message is deterministic but otherwise unpinned).
-// - A plain usage error pins exactly what the entry states: `code` null and
-//   `path` null. Its locations and identities stay unpinned (the finding
-//   form permits informational identities, 12.7, and the entry pins neither
-//   for usage errors).
+// - Every other exit-2 error — a plain usage error — pins exactly what the
+//   entry states: `code` null and `path` null. Its locations and identities
+//   stay unpinned (the finding form permits informational identities, 12.7,
+//   and the entry pins neither for usage errors). A refused read of git
+//   data, which the entry counts among them (6.3, 14.25), is T6.3-6(e)'s
+//   arms' (mode-000 git directories, the harness verifying each staging on
+//   itself), not restaged here.
 // - "Diagnostics on stderr" is asserted as non-empty stderr on every exit-2
 //   arm; stderr byte-invariance across output forms and the /config/i
 //   actionability operationalization are T12.0-2's and T7-*'s business.
 // - Configuration-error runs use `build --json` (the T12.0-2/T7-*
 //   precedent); the JSON-only-surface clause rides `inventory` twice — a
 //   configuration error on the bare surface, a plain usage error with an
-//   unknown flag and no `--json` — and the erroneous-arguments clause rides
-//   an unknown command beside `--json`. Every arm's workspace stages a
-//   valid source under a canonical spec group so the arm's staged defect is
-//   its sole one (the T7-2 attribution discipline): a product that wrongly
-//   proceeds exits 0 with a real answer and fails the exit-code assertion
-//   attributably, never exits 2 for a side reason.
+//   unknown flag and no `--json` — and `review export` twice without
+//   `--json`, `export` the one JSON-only subcommand of a command that is
+//   not JSON-only (SPEC 10.7: its only output form is a single JSON
+//   document, with or without `--json`): `review export nosuch`, an unknown
+//   session name (10.7, 12.0), and `review export s --bogus`, an unknown
+//   flag, beside the audit session `s` the usage arm's premise `review
+//   create --strategy audit --name s` makes, so the flag is that run's sole
+//   defect — each a plain usage error, failing a product that decides
+//   JSON-only-ness per command and leaves stdout empty. The
+//   erroneous-arguments clause rides an unknown command beside `--json`.
+//   Every arm's workspace stages a valid source under a canonical spec
+//   group so the arm's staged defect is its sole one (the T7-2 attribution
+//   discipline): a product that wrongly proceeds exits 0 with a real answer
+//   and fails the exit-code assertion attributably, never exits 2 for a
+//   side reason.
 // - The busy workspace (14.26) is staged as T13.5-2 stages it, through
 //   section-13.5.ts's `judgeBusyRefusal`: on a freshly built CONF-CORE-shaped
 //   workspace, `rename specs/A.mdx g g2 --json` runs while T13.5-2's command
@@ -306,7 +322,26 @@
 //   discipline above). The rest of the exclusion's contract — every
 //   mutating command refused, modifying nothing, the holder's entry
 //   untouched, determinism — is T13.5-2's. The arm runs on every platform,
-//   last in the body: it needs the product's own exclusion (13.5).
+//   next to last in the body, before the journal-error arm: it needs the
+//   product's own exclusion (13.5).
+// - The journal error failing a given baseline's resolution (SPEC 6.3,
+//   14.13) is staged as T6.3-6(a) stages it, through section-6.3.ts's own
+//   `stageJournalErrorAtC1`: on the arm's fresh workspace (the minimal
+//   valid source under the canonical spec group, a git repository
+//   initialized), `build`, the journaled `rename specs/A.mdx a a2`, the
+//   all-inclusive commit `c1` — its tree holding that one-entry journal —
+//   and T6.1-3's garbage line appended to the current journal, the one
+//   entry absent from `c1`'s. `impact --base c1 --json` and `review create
+//   --base c1 --name n --json` (the two commands giving a baseline, 9 and
+//   10.7) then each exit 2 with stderr diagnostics and stdout exactly the
+//   error document, its finding form-exact on `code` "journal-error",
+//   `path` ".xspec/journal", and `locations` [] (a journal condition has no
+//   in-source location, SPEC 14). The resolution's own contract — the
+//   journal read before any other cause can fail it, nothing modified, the
+//   human form, the other stagings — stays T6.3-6's. The arm runs on every
+//   platform, last in the body: a product meeting the current journal only
+//   through 6.3's replay reports the code-less unreadable baseline there,
+//   having met every other arm first.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -353,6 +388,7 @@ import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import { stageJournalErrorAtC1 } from "./section-6.3.js";
 import {
   D21_A_STAGING,
   D21_TWO_REASON_MOVE,
@@ -368,6 +404,7 @@ import {
   expectErrorDocument,
   expectExit,
   expectFindingFreeReport,
+  expectReviewRefusal,
   runCli,
   runJson,
 } from "./support.js";
@@ -512,10 +549,10 @@ async function withWorkspace<T>(
 // arms after each body's first stage it in workspaces created after that
 // body's first product invocation — T12.7-1's review-refusal and byte-form
 // paths arms, T12.7-2's refusal-ordering and document-forms arms, T12.7-3's
-// usage-error and environment-refusal arms — so S-7's sweep never reaches
-// those stagings against the stub: a TypeScript staged-source record
-// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), staged at
-// every site, the first arms' too.
+// usage-error, environment-refusal, and journal-error arms — so S-7's sweep
+// never reaches those stagings against the stub: a TypeScript staged-source
+// record (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), staged
+// at every site, the first arms' too.
 const SPECS_ONLY_CONFIG = stagedTs(
   "T12.7-1/T12.7-2/T12.7-3 xspec.config.ts — one spec group (every arm staging it after its body's first invocation)",
   `import { defineConfig } from "xspec"
@@ -870,7 +907,8 @@ async function runCrossModuleArm(product: ProductBinding): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Arm D — a review-refusal finding carries `code` null
+// Arm D — a review-operation refusal: `code` null, `locations` [], `path`
+// null (T10.7-14's finding form)
 // ---------------------------------------------------------------------------
 
 // The arm follows T12.7-1's first product invocation: its source is a
@@ -879,6 +917,12 @@ const T12_7_1_REVIEWED = stagedMdx(
   "T12.7-1 review-refusal arm specs/R.mdx (the one reviewed leaf)",
   '<S id="r">\nReviewed leaf.\n</S>\n',
 );
+
+// The session the arm creates and then names again, and the session file
+// the refusal names (SPEC 10.1: a session is stored at
+// `.xspec/reviews/<name>.json`).
+const REFUSAL_SESSION = "s";
+const REFUSAL_SESSION_REL = `.xspec/reviews/${REFUSAL_SESSION}.json`;
 
 async function runReviewRefusalArm(product: ProductBinding): Promise<void> {
   await withWorkspace(
@@ -889,52 +933,37 @@ async function runReviewRefusalArm(product: ProductBinding): Promise<void> {
       },
     },
     async (workspace) => {
+      const createArgv = [
+        "review",
+        "create",
+        "--strategy",
+        "audit",
+        "--name",
+        REFUSAL_SESSION,
+      ];
       await expectExit(
         product,
         workspace,
-        ["review", "create", "--strategy", "audit", "--name", "s"],
+        createArgv,
         0,
         "T12.7-1 (review refusal) `review create --strategy audit --name " +
           "s` — the first creation succeeds on the valid workspace " +
           "(SPEC 10.1, 10.6; the audit strategy needs no git, 12.0)",
       );
-      const context =
-        "T12.7-1 (review refusal) `review create --strategy audit --name " +
-        "s --json` again";
-      const result = await expectExit(
+      // The same `create` again, `--json` appended by the shared check: a
+      // review-operation refusal in T10.7-14's finding form (module header)
+      // — exit 1, exactly one finding, `code` null, `locations` [], `path`
+      // null, the five members form-exact, `identities` informational, the
+      // session file byte-identical.
+      await expectReviewRefusal(
         product,
         workspace,
-        ["review", "create", "--strategy", "audit", "--name", "s", "--json"],
-        1,
-        `${context} — \`create\` with an existing session's exact name is ` +
-          `refused: exit 1, a refused review operation (SPEC 10.1, 10.7, ` +
-          `12.0)`,
+        createArgv,
+        REFUSAL_SESSION_REL,
+        "T12.7-1 (review refusal) [`create` with an existing session's " +
+          "exact name is refused, SPEC 10.1, 10.7, 12.0 — an unlocated " +
+          "finding 14 gives no concerned path, SPEC 12.7, 14]",
       );
-      const findings = decodeFindingsReport(
-        parseJsonStdout(
-          result,
-          `${context} — a refused operation's report is the findings-only ` +
-            `document {"findings": […]} (SPEC 12.7)`,
-        ),
-        context,
-      ).findings;
-      if (findings.length === 0) {
-        fail(
-          `${context}: the refusal must be reported as at least one ` +
-            `finding — an exit-1 refusal with an empty findings array ` +
-            `reports nothing (SPEC 10.7, 12.7, 14)`,
-        );
-      }
-      for (const finding of findings) {
-        if (finding.code !== null) {
-          fail(
-            `${context}: a review-operation refusal carries no stable ` +
-              `code — \`code\` is null where 14 assigns none (SPEC 14, ` +
-              `12.7); got ${JSON.stringify(finding.code)} (message: ` +
-              `${JSON.stringify(finding.message)})`,
-          );
-        }
-      }
     },
   );
 }
@@ -2790,13 +2819,14 @@ async function runDocumentFormsArm(product: ProductBinding): Promise<void> {
 
 // A minimal valid source, matched by SPECS_ONLY_CONFIG's spec group: the
 // initial specs/A.mdx of the config-paths, search-failure, single-finding,
-// usage, and environment-refusal arms' workspaces — all but the first
-// created after the body's first product invocation, so S-7's sweep never
-// reaches them against the stub: a staged-source record
+// usage, environment-refusal, and journal-error arms' workspaces — all but
+// the first created after the body's first product invocation, so S-7's
+// sweep never reaches them against the stub: a staged-source record
 // (helpers/staged-mdx.ts; S-9's before-any-product clause), staged at
-// every site.
+// every site. Its section `a` is the subject of the journal-error arm's
+// journaled rename (T6.3-6(a)'s staging).
 const ERR_SOURCE = stagedMdx(
-  "T12.7-3 specs/A.mdx (the minimal valid source: the config-paths, search-failure, single-finding, usage, and environment-refusal arms' workspaces)",
+  "T12.7-3 specs/A.mdx (the minimal valid source: the config-paths, search-failure, single-finding, usage, environment-refusal, and journal-error arms' workspaces)",
   '<S id="a">\nAlpha.\n</S>\n',
 );
 
@@ -2952,11 +2982,21 @@ async function expectAnchoredConfigurationError(
 }
 
 /**
- * The usage errors carrying a stable code (SPEC 14: conditions 24–26, each
- * reported by the refused command as a usage error, 12.0, never a finding):
- * each code's condition and the rule its exit 2 cites.
+ * The usage errors carrying a stable code beside the configuration error
+ * (SPEC 14: conditions 24–26, each reported by the refused command as a
+ * usage error, 12.0, never a finding; and condition 13's journal error
+ * where it fails a given baseline's resolution, 6.3): each code's condition
+ * and the rule its exit 2 cites.
  */
 const CODED_USAGE_ERRORS = {
+  "journal-error": {
+    condition: "14.13",
+    rule:
+      "a given baseline's resolution reads the current journal before any " +
+      "other cause can fail it, and a journal error there fails it as a " +
+      "usage error: the command exits 2",
+    ruleRefs: "6.3, 14.13, 12.0",
+  },
   "write-failure": {
     condition: "14.24",
     rule:
@@ -2983,13 +3023,14 @@ const CODED_USAGE_ERRORS = {
 /**
  * Assert a coded usage error's error document — an environment refusal
  * (SPEC 14.24, 14.25; T14-9 and T14-10 pin the per-command contracts and
- * states) or the busy refusal (14.26; T13.5-2 pins the exclusion's
- * contract), 12.0, 12.7: exit 2 exactly — a usage error, never a finding
- * and never an internal error — stderr diagnostics present, and stdout
- * exactly the single 12.7 error document whose one finding carries the
- * stable code `expectedCode`, locations [] (none of the three carries an
- * in-source location, SPEC 14), and the concerned path exactly
- * `expectedPath`.
+ * states), the busy refusal (14.26; T13.5-2 pins the exclusion's
+ * contract), or a journal error failing a given baseline's resolution
+ * (6.3, 14.13; T6.3-6 pins the resolution's contract), 12.0, 12.7: exit 2
+ * exactly — a usage error, never a finding and never an internal error —
+ * stderr diagnostics present, and stdout exactly the single 12.7 error
+ * document whose one finding carries the stable code `expectedCode`,
+ * locations [] (none of the four carries an in-source location, SPEC 14),
+ * and the concerned path exactly `expectedPath`.
  */
 function assertCodedErrorDocument(
   result: RunResult,
@@ -3289,13 +3330,26 @@ async function runErrorSingleFindingArm(
   );
 }
 
+// The usage arm's `review export` runs (SPEC 10.7: `export` emits a single
+// JSON document, its only output form, with or without `--json`): the
+// session the premise `review create` makes, so `review export s --bogus`'s
+// unknown flag is its run's sole defect, and a session name no session
+// bears — no ASCII-case variant of `s` either (SPEC 10.1).
+const USAGE_EXPORT_SESSION = "s";
+const USAGE_UNKNOWN_SESSION = "nosuch";
+
 /**
- * Arm: plain usage errors carry `code` null and `path` null, and JSON is
- * in effect for a JSON-only surface without `--json` (`inventory` with an
- * unknown flag) and whenever `--json` appears among the arguments, the
- * arguments themselves erroneous included (an unknown command beside
- * `--json`) — each the error document on stdout, diagnostics on stderr
- * (SPEC 12.0, 12.7; T12.0-2).
+ * Arm: every exit-2 error but the coded ones — a plain usage error —
+ * carries `code` null and `path` null, and JSON is in effect for a
+ * JSON-only surface without `--json` (`inventory` with an unknown flag;
+ * `review export` naming an unknown session, and naming the existing
+ * session `s` beside an unknown flag — `export` the one JSON-only
+ * subcommand of a command that is not JSON-only, SPEC 10.7, so a product
+ * deciding JSON-only-ness per command leaves stdout empty and fails) and
+ * whenever `--json` appears among the arguments, the arguments themselves
+ * erroneous included (an unknown command beside `--json`) — each the error
+ * document on stdout, diagnostics on stderr (SPEC 12.0, 12.7, 10.7;
+ * T12.0-2).
  */
 async function runErrorUsageArm(product: ProductBinding): Promise<void> {
   await withWorkspace(
@@ -3306,29 +3360,16 @@ async function runErrorUsageArm(product: ProductBinding): Promise<void> {
       },
     },
     async (workspace) => {
-      const cases: readonly { argv: readonly string[]; label: string }[] = [
-        {
-          argv: ["inventory", "--definitely-not-a-flag"],
-          label:
-            "T12.7-3 `inventory --definitely-not-a-flag` (JSON-only " +
-            "surface, unknown flag, no --json)",
-        },
-        {
-          argv: ["definitely-not-a-command", "--json"],
-          label:
-            "T12.7-3 `definitely-not-a-command --json` (unknown command " +
-            "beside --json)",
-        },
-      ];
-      for (const { argv, label } of cases) {
+      // One plain usage error with JSON output in effect: exit 2 (`why`
+      // names the usage error), diagnostics on stderr, and stdout exactly
+      // the error document, its finding carrying `code` and `path` null.
+      const expectPlainErrorDocument = async (
+        argv: readonly string[],
+        label: string,
+        why: string,
+      ): Promise<void> => {
         const result = await runCli(product, workspace, argv);
-        assertExitCode(
-          result,
-          2,
-          `${label} — an unknown command or flag is a usage error, and the ` +
-            `error is determined by the invocation's syntax alone ` +
-            `(SPEC 12.0)`,
-        );
+        assertExitCode(result, 2, `${label} — ${why}`);
         assertStderrDiagnostic(result, label);
         const finding = expectErrorDocument(result, label);
         if (finding.code !== null || finding.path !== null) {
@@ -3342,7 +3383,54 @@ async function runErrorUsageArm(product: ProductBinding): Promise<void> {
               `${JSON.stringify(finding.message)})`,
           );
         }
-      }
+      };
+      const syntaxWhy =
+        "an unknown command or flag is a usage error, and the error is " +
+        "determined by the invocation's syntax alone (SPEC 12.0)";
+      await expectPlainErrorDocument(
+        ["inventory", "--definitely-not-a-flag"],
+        "T12.7-3 `inventory --definitely-not-a-flag` (JSON-only " +
+          "surface, unknown flag, no --json)",
+        syntaxWhy,
+      );
+      await expectPlainErrorDocument(
+        ["definitely-not-a-command", "--json"],
+        "T12.7-3 `definitely-not-a-command --json` (unknown command " +
+          "beside --json)",
+        syntaxWhy,
+      );
+      await expectExit(
+        product,
+        workspace,
+        [
+          "review",
+          "create",
+          "--strategy",
+          "audit",
+          "--name",
+          USAGE_EXPORT_SESSION,
+        ],
+        0,
+        "T12.7-3 `review create --strategy audit --name s` (premise: the " +
+          "session `review export s --bogus` names exists, so the unknown " +
+          "flag is that run's sole defect; SPEC 10.1, 10.6)",
+      );
+      await expectPlainErrorDocument(
+        ["review", "export", USAGE_UNKNOWN_SESSION],
+        `T12.7-3 \`review export ${USAGE_UNKNOWN_SESSION}\` (no --json: ` +
+          "`export` is JSON-only, the one JSON-only subcommand of `review`, " +
+          "a command that is not JSON-only, SPEC 10.7; the session s " +
+          "exists, the name names none)",
+        "an unknown session name in a `review` command's arguments is a " +
+          "usage error (SPEC 10.7, 12.0)",
+      );
+      await expectPlainErrorDocument(
+        ["review", "export", USAGE_EXPORT_SESSION, "--bogus"],
+        "T12.7-3 `review export s --bogus` (no --json: `export` is " +
+          "JSON-only, SPEC 10.7; an unknown flag beside the existing " +
+          "session s)",
+        syntaxWhy,
+      );
     },
   );
 }
@@ -3371,10 +3459,15 @@ const T12_7_1 = defineProductTest({
     'none (a review-refusal finding), `locations` one {"file", "range"} ' +
     "per offending construct ordered by file bytes then start then end and " +
     "[] for unlocated conditions, `path` null for located conditions and " +
-    "the concerned path otherwise, `identities` contractual where 14 states " +
-    "them: a policy finding [rule, source, kind token, target] with " +
-    "locations [] and path null (14.12), a cross-module call naming the " +
-    "foreign module (14.11); on the shape-unpinned surfaces — `query node`, " +
+    "for the unlocated findings 14 gives no concerned path — a policy " +
+    "finding and a review-operation refusal — and the concerned path " +
+    "otherwise, `identities` contractual where 14 states them: a policy " +
+    "finding [rule, source, kind token, target] with locations [] and " +
+    "path null (14.12), a review-operation refusal (`review create` " +
+    "naming an existing session) exactly one finding with locations [] " +
+    "and path null, its identities informational (T10.7-14's form), a " +
+    "cross-module call naming the foreign module (14.11); on the " +
+    "shape-unpinned surfaces — `query node`, " +
     "the `query nodes`/`subtree`/`ancestors` rows (11.1), `show --json` " +
     "(12.4), and a review payload's present scope node (a requirement " +
     "node's and a `code-impact` location's), context, and origin nodes " +
@@ -3596,9 +3689,10 @@ async function runErrorEnvironmentRefusalArms(
  * diagnostics on stderr and stdout exactly the error document
  * `{"code": "workspace-busy", "path": ".xspec/lock"}`, locations []: the
  * busy refusal concerns the lock path, no entry named (SPEC 14.26).
- * Platform-independent, and last in the body: it needs the product's own
- * exclusion, so a product predating 14.26 meets every other arm first.
- * Exported so a scratch probe can run it alone.
+ * Platform-independent, and next to last in the body, before the
+ * journal-error arm: it needs the product's own exclusion, so a product
+ * predating 14.26 meets every other arm but that one first. Exported so a
+ * scratch probe can run it alone.
  */
 export async function runErrorBusyWorkspaceArm(
   product: ProductBinding,
@@ -3612,6 +3706,72 @@ export async function runErrorBusyWorkspaceArm(
         "holds the workspace",
     );
   });
+}
+
+// The journal path (SPEC 6.1), condition 13's concerned path (14.13), and
+// the session name the journal-error arm's `review create --base` asks for
+// (TEST-SPEC T6.3-6's `--name n`).
+const ERR_JOURNAL_PATH = ".xspec/journal";
+const ERR_JOURNAL_SESSION = "n";
+
+/**
+ * Arm: a journal error failing a given baseline's resolution (SPEC 6.3,
+ * 14.13, 12.0, 12.7) — staged as T6.3-6(a) stages it, through
+ * section-6.3.ts's `stageJournalErrorAtC1`: the valid sources built, the
+ * journaled `rename specs/A.mdx a a2`, the all-inclusive commit `c1`
+ * holding that one-entry journal, then T6.1-3's garbage line appended to
+ * the current journal. Each command giving a baseline, `impact --base c1
+ * --json` (9) and `review create --base c1 --name n --json` (10.7), exits
+ * 2 with diagnostics on stderr and stdout exactly the error document
+ * `{"code": "journal-error", "path": ".xspec/journal"}`, locations []: a
+ * journal condition has no in-source location (SPEC 14), its concerned path
+ * the journal path (14.13). The resolution's own contract — the journal
+ * read before any other cause can fail it, nothing modified, the human
+ * form, the other stagings — is T6.3-6's. Last in the body: it needs 6.3's
+ * journal read ahead of the ref's resolution, so a product reading the
+ * current journal only through its replay — the code-less unreadable
+ * baseline — meets every other arm first.
+ */
+async function runErrorJournalArm(product: ProductBinding): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        "specs/A.mdx": ERR_SOURCE,
+      },
+    },
+    async (workspace) => {
+      const c1 = await stageJournalErrorAtC1(
+        product,
+        workspace,
+        "T12.7-3 (14.13) journal-error arm",
+      );
+      const commands: readonly (readonly string[])[] = [
+        ["impact", "--base", c1, "--json"],
+        [
+          "review",
+          "create",
+          "--base",
+          c1,
+          "--name",
+          ERR_JOURNAL_SESSION,
+          "--json",
+        ],
+      ];
+      for (const argv of commands) {
+        const shown = argv.map((arg) => (arg === c1 ? "c1" : arg)).join(" ");
+        const result = await runCli(product, workspace, argv);
+        assertCodedErrorDocument(
+          result,
+          "journal-error",
+          ERR_JOURNAL_PATH,
+          `T12.7-3 \`${shown}\` with a garbage line appended to the ` +
+            `journal the product wrote, the sources valid (T6.3-6(a)'s ` +
+            `staging)`,
+        );
+      }
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -3633,12 +3793,16 @@ const T12_7_3 = defineProductTest({
     'separately, not well-formed TypeScript, never ".", each failing build ' +
     "modifying nothing; from the root a ./-spelled argument reports " +
     'without the "." segment; "." for a failed upward search with no ' +
-    "--config); a plain usage error " +
-    "carries code and path null; one finding however many defects (a " +
+    "--config); every other exit-2 error — a plain usage error — carries " +
+    "code and path null (a refused read of git data among them, T6.3-6(e)'s " +
+    "arms); one finding however many defects (a " +
     "configuration file with three distinct defects yields a single " +
     "condition-14 finding); JSON is in effect for a JSON-only surface " +
     "without --json (inventory with an unknown flag; bare inventory under " +
-    "an invalid configuration) and whenever --json appears among the " +
+    "an invalid configuration; and, beside an audit session s, `review " +
+    "export nosuch` and `review export s --bogus`, each a plain usage " +
+    "error — export the one JSON-only subcommand of a command that is not " +
+    "JSON-only) and whenever --json appears among the " +
     "arguments, the arguments themselves erroneous included (an unknown " +
     "command beside --json) — each the error document on stdout with " +
     "diagnostics on stderr; a --config path nothing occupies is reported as " +
@@ -3655,12 +3819,18 @@ const T12_7_3 = defineProductTest({
     "— is " +
     '{"code": "write-failure", "path": ".xspec"} and a read it refuses — ' +
     'specs/sub unlistable — is {"code": "read-failure", "path": ' +
-    '"specs/sub"}, each locations [] with diagnostics on stderr; and a busy ' +
+    '"specs/sub"}, each locations [] with diagnostics on stderr; a busy ' +
     "workspace — `rename specs/A.mdx g g2 --json` while a held `rename` " +
     "holds it (T13.5-2's staging), the operation succeeding once the " +
     'holder has completed — is {"code": "workspace-busy", "path": ' +
-    '".xspec/lock"}, locations [], with diagnostics on stderr (SPEC 12.0, ' +
-    "12.7, 14, 11.6, 7, 12.1, 14.24, 14.25, 14.26, 13.5)",
+    '".xspec/lock"}, locations [], with diagnostics on stderr; and a ' +
+    "journal error failing a given baseline's resolution — T6.3-6(a)'s " +
+    "staging, a garbage line appended to the journal the product wrote " +
+    "after the commit c1 — is " +
+    '{"code": "journal-error", "path": ".xspec/journal"}, locations [], ' +
+    "with diagnostics on stderr, at `impact --base c1 --json` and at " +
+    "`review create --base c1 --name n --json` (SPEC 12.0, 12.7, 14, 11.6, " +
+    "7, 12.1, 14.24, 14.25, 14.26, 13.5, 6.3, 14.13, 10.7)",
   run: async (product) => {
     await runErrorConfigPathsArm(product);
     await runErrorSearchFailureArm(product);
@@ -3671,6 +3841,7 @@ const T12_7_3 = defineProductTest({
       await runErrorEnvironmentRefusalArms(product);
     }
     await runErrorBusyWorkspaceArm(product);
+    await runErrorJournalArm(product);
   },
 });
 

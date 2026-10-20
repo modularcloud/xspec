@@ -113,7 +113,8 @@
 //   garbage line is the one entry absent from the ref's journal: a
 //   product reading the current journal only through 6.3's replay meets
 //   it there as an unresolvable mapping, the code-less usage error the
-//   arm fails.
+//   arm fails. (a)'s staging, `stageJournalErrorAtC1`, is exported:
+//   T12.7-3's journal-error arm (section-12.7.ts) stages through it.
 // - Each T6.3-6 arm (a)–(d) runs `impact --base <ref>`, then `review create
 //   --base <ref> --name n`, each with `--json` under a whole-root compare
 //   (H-6's lock-path exclusion applied: no session written; sources,
@@ -2348,6 +2349,26 @@ async function stageRepositoryAtC1(
 }
 
 /**
+ * (a)'s staging — the journal error on valid sources at `c1`: the
+ * repository at `c1` (`stageRepositoryAtC1`), then the garbage line
+ * appended to the one-entry journal (`appendGarbageLine`), so the current
+ * journal holds the entry the ref's journal holds and the garbage line
+ * after it; `c1` returned. The workspace holds valid sources under one spec
+ * group, `specs/A.mdx` holding section `a`, the journaled rename's subject.
+ * Exported for T12.7-3's journal-error arm (section-12.7.ts), which stages
+ * its error document's journal error exactly as (a) does.
+ */
+export async function stageJournalErrorAtC1(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<string> {
+  const c1 = await stageRepositoryAtC1(product, workspace, context);
+  await appendGarbageLine(workspace, context);
+  return c1;
+}
+
+/**
  * What a T6.3-6 staging holds around each command's run beyond the
  * workspace's own state: a staging made just before the run and restored
  * once it ends (`runUnderStaging`) — so the run's whole-root compare, whose
@@ -2767,8 +2788,7 @@ const T6_3_6 = defineProductTest({
       { "xspec.config.ts": SPECS_ONLY_CONFIG, [J6_FILE]: J6_SOURCE },
       async (workspace) => {
         const context = "T6.3-6 (a) journal-error arm";
-        const c1 = await stageRepositoryAtC1(product, workspace, context);
-        await appendGarbageLine(workspace, context);
+        const c1 = await stageJournalErrorAtC1(product, workspace, context);
         await expectJournalErrorAtBothCommands(
           product,
           workspace,

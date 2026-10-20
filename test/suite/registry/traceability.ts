@@ -67,10 +67,10 @@
 //       stable code, `locations` empty, `path` `null` — where that form is
 //       the test's subject: T10.7-14. The other refusal sites running the
 //       same shared check (support.ts `expectReviewRefusal`: T10.1-2,
-//       T10.1-6, T10.3-2, T10.7-1, T10.7-9, T10.7-10, T10.7-15) assert it
-//       as a cross-reference to T10.7-14's assertion, which puts no "14" on
-//       them (T10.1-6's, T10.7-1's, and T10.7-15's "14" stand for their
-//       numbered conditions).
+//       T10.1-6, T10.3-2, T10.7-1, T10.7-9, T10.7-10, T10.7-15, T12.7-1)
+//       assert it as a cross-reference to T10.7-14's assertion, which puts
+//       no "14" on them (T10.1-6's, T10.7-1's, T10.7-15's, and T12.7-1's
+//       "14" stand for their numbered conditions).
 //   A condition named only as staging context, as a cross-reference to
 //   another test's assertion, or in the diagnostic of a generic clean
 //   outcome (`build` or `check` exit 0, findings []) puts no "14" on a
@@ -753,10 +753,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T12.6-1": ["12.6"],
   "T12.6-2": ["12.6", "14"],
   // T12.7-1: asserts the finding form over the staged conditions (14.1,
-  // 14.3, 14.9, 14.11, 14.12, 14.19), their stable codes, and a review
-  // refusal's null code, so "14" joins the home passage; 11.2-11.6/10.7
-  // are carriage context with home coverage at T11.2-*/T11.3-*/T11.4-*/
-  // T11.6-*/T10.7-*.
+  // 14.3, 14.9, 14.11, 14.12, 14.19) and their stable codes, so "14" joins
+  // the home passage; a review refusal's code-less form (`code` null,
+  // `locations` [], `path` null) runs T10.7-14's shared check, rule (d)'s
+  // cross-reference; 11.2-11.6/10.7 are carriage context with home
+  // coverage at T11.2-*/T11.3-*/T11.4-*/T11.6-*/T10.7-*.
   "T12.7-1": ["12.7", "14"],
   // T12.7-2: asserts the staged conditions (14.1, 14.3, 14.5, 14.9, 14.12,
   // 14.15, 14.19) ordered by code and the refusal reasons in 14's listed
@@ -765,12 +766,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // coverage at T13.3-*/T11.*/T12.6-*/T6.5-*/T6.6-*/T11.6-2.
   "T12.7-2": ["12.7", "14"],
   // T12.7-3: asserts the error document's stable codes — the 14.14
-  // configuration error's, 14.24's `write-failure`, 14.25's
-  // `read-failure`, and 14.26's `workspace-busy` — so "14" joins the home
-  // passage; 12.0 (JSON-in-effect, stream separation, stderr diagnostics)
-  // and 11.6 (the anchoring form) are carriage context with home coverage
-  // at T12.0-2/T11.6-1, 7's configuration location/validity at T7-*, and
-  // 13.5's exclusion (the busy arm's held `rename`) at T13.5-2.
+  // configuration error's, 14.13's `journal-error` at a given baseline's
+  // resolution, 14.24's `write-failure`, 14.25's `read-failure`, and
+  // 14.26's `workspace-busy` — so "14" joins the home passage; 12.0
+  // (JSON-in-effect, stream separation, stderr diagnostics) and 11.6 (the
+  // anchoring form) are carriage context with home coverage at
+  // T12.0-2/T11.6-1, 7's configuration location/validity at T7-*, 13.5's
+  // exclusion (the busy arm's held `rename`) at T13.5-2, 6.3's journal
+  // read at a given baseline at T6.3-6, and 10.7's JSON-only `export` at
+  // T10.7-*.
   "T12.7-3": ["12.7", "14"],
   "T13.1-1": ["13.1"],
   "T13.1-2": ["13.1"],
