@@ -6,9 +6,10 @@
 // kind, and masking) and T6.3-4"): that content runs as the ordering/masking
 // arms of section-6.4.ts, section-6.5.ts, and section-6.3.ts — the H-7 map
 // keeps "12.0" on those three — and a re-registration here would re-run
-// those bodies (duplicated execution). The gated-read, masking,
-// spelled-not-defined, past-the-gate, and within-class-2 precedence arms
-// are T12.0-10's own registered body below.
+// those bodies (duplicated execution). The gated-read, masking (a spec
+// source's id and a code source's unit), spelled-not-defined, kind-check,
+// past-the-gate, and within-class-2 precedence arms are T12.0-10's own
+// registered body below.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -93,15 +94,33 @@
 //   there" (13.3): that premise's findings, every member but `message`
 //   compared in 12.7's order (wording unpinned, H-3; H-4's
 //   product-to-itself compare, as T6.6-3 projects a refusal's findings).
-//   "Reports the corruption" reuses T10.1-4's
-//   operationalization (exit 1, stdout matching /corrupt/i — SPEC.md's
-//   fixed vocabulary for the state; information presence, not wording),
-//   and the same `resolve` run under `--json` asserts what TEST-SPEC line
-//   9 requires of the reported error: exit 1 with the form-exact
-//   findings-only report holding exactly one finding, carrying condition
-//   21's stable code `corrupt-session`, the session file
-//   `.xspec/reviews/corrupt.json` as its 12.7 `path`, and `locations` []
-//   (SPEC 14, 14.21, 12.7, 10.1).
+//   The code-unit masking arm runs on a workspace of its own (a spec glob
+//   `specs/*.mdx`, a code glob `src/*.ts`, the parseable `specs/A.mdx`
+//   holding `a`, and `src/bad.ts` — `function f() {}` then `let x = ;`,
+//   a declared-unparseable staged-source record, S-9), its `build --json`
+//   premise exactly one 14.20 located in `src/bad.ts`: the nine `query`
+//   runs naming `src/bad.ts#f`, `src/bad.ts#g`, or the bare `src/bad.ts`
+//   each give that premise's gated report as above, while `show
+//   src/bad.ts#f` and `query node src/bad.ts` — the kind check, never
+//   masked — each give the plain usage error alone (exit 2, `code` and
+//   `path` null, the error document the entire stdout). The past-the-gate
+//   arm runs last: a premise workspace first shows `resolve`, `show`, and
+//   `split` naming the unknown item ID on a well-formed session each the
+//   plain usage error (exit 2, `code` null); then every corrupt state of
+//   T10.1-4 is staged by section-10.1.ts's own `T10_1_4_CORRUPT_STATES`
+//   (the same stagings, each on a passing workspace of its own; the
+//   unknown ID checked against the item IDs the product-written session
+//   held, a staging premise), and each of the three subcommands runs
+//   flag-less and with `--json` inside one whole-root compare (nothing
+//   modified; H-6's lock-path exclusion): "reports the corruption" reuses
+//   T10.1-4's operationalization flag-less (exit 1, stdout matching
+//   /corrupt/i — SPEC.md's fixed vocabulary for the state; information
+//   presence, not wording), and "exactly the condition-21 finding" is the
+//   `--json` run's form-exact findings-only report holding exactly one
+//   finding — TEST-SPEC line 9's rule: condition 21's stable code
+//   `corrupt-session`, the session file `.xspec/reviews/cor.json` (a
+//   symbolic link there by its own path) as its 12.7 `path`, and
+//   `locations` [] (SPEC 14, 14.21, 12.7, 10.1, 13.4).
 // - T12.0-11 partitions a whole-workspace byte diff around each git-reading
 //   invocation: any change under `.git/` fails (same file set, same bytes),
 //   and every change outside it must be a write the command's own
@@ -189,6 +208,7 @@ import {
   STREAMS_INVALID_SOURCE,
   STREAMS_VALID_SOURCE,
 } from "./section-12.0-i.js";
+import { T10_1_4_CORRUPT_STATES } from "./section-10.1.js";
 import { impactAgainst, SPECS_ONLY_CONFIG } from "./section-5.6.js";
 import { assertImpactedCode, SPEC_AND_CODE_CONFIG } from "./section-9.js";
 import {
@@ -2075,9 +2095,111 @@ async function expectGatedReport(
   );
 }
 
+// The code-unit masking workspace (SPEC 12.0: a code unit judged over the
+// named file's named units, an unparseable named file masking the check;
+// 4.6, 14.20): a spec glob `specs/*.mdx` and a code glob `src/*.ts`, the
+// parseable spec source `specs/A.mdx` holding a section `a`, and
+// `src/bad.ts` — `function f() {}` followed by the line `let x = ;`, not
+// well-formed TypeScript (14.20, T14-11) — so `build` fails through that
+// one code source alone. The workspace follows the body's first product
+// invocation, so its initial files are staged-source records
+// (helpers/staged-ts.ts, helpers/staged-mdx.ts; S-9's timing clause),
+// `src/bad.ts` declared unparseable.
+const CODE_MASK_SPEC_FILE = "specs/A.mdx";
+const CODE_MASK_CODE_FILE = "src/bad.ts";
+const CODE_MASK_CONFIG = stagedTs(
+  "T12.0-10 xspec.config.ts — the spec glob specs/*.mdx and the code glob src/*.ts (the code-unit masking workspace)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  code: {
+    app: ["src/*.ts"]
+  }
+})
+`,
+);
+const CODE_MASK_SPEC_SOURCE = stagedMdx(
+  "T12.0-10 specs/A.mdx holding the section a (the code-unit masking workspace's parseable spec source)",
+  ['<S id="a">', "A text.", "</S>", ""].join("\n"),
+);
+const CODE_MASK_BAD_SOURCE = stagedTs(
+  "T12.0-10 src/bad.ts — function f() {} followed by the line let x = ; (the code-unit masking workspace's unparseable code source, 14.20)",
+  ["function f() {}", "let x = ;", ""].join("\n"),
+  "unparseable",
+);
+const CODE_MASK_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": CODE_MASK_CONFIG,
+  [CODE_MASK_SPEC_FILE]: CODE_MASK_SPEC_SOURCE,
+  [CODE_MASK_CODE_FILE]: CODE_MASK_BAD_SOURCE,
+};
+
+// The units the code-unit masking arm names in `src/bad.ts`: one the file
+// spells and one spelled nowhere in it.
+const CODE_MASK_UNITS: readonly {
+  readonly unit: string;
+  readonly what: string;
+}[] = [
+  { unit: "f", what: "a unit the file spells (`function f() {}`)" },
+  { unit: "g", what: "a unit spelled nowhere in the file" },
+];
+
+/**
+ * The code-unit masking arm's four gated reads naming `src/bad.ts#<unit>`
+ * (SPEC 11.1): `query edges` from and to the code location, and `query
+ * reachable` from it to the section `specs/A.mdx#a` and from that section
+ * to it.
+ */
+function codeUnitMaskedQueries(unit: string): readonly (readonly string[])[] {
+  const location = `${CODE_MASK_CODE_FILE}#${unit}`;
+  const section = `${CODE_MASK_SPEC_FILE}#a`;
+  return [
+    ["query", "edges", "--from", location],
+    ["query", "edges", "--to", location],
+    ["query", "reachable", "--from", location, "--to", section],
+    ["query", "reachable", "--from", section, "--to", location],
+  ];
+}
+
+// The kind check on the same workspace (SPEC 12.0, 6.4, 11.1): a code
+// source named where a requirement-node identity is required — a code
+// location's identity, and a bare code-source path.
+const CODE_MASK_KIND_ROWS: readonly (readonly string[])[] = [
+  ["show", `${CODE_MASK_CODE_FILE}#f`],
+  ["query", "node", CODE_MASK_CODE_FILE],
+];
+
 // The unknown item ID named by the past-the-gate arm (no session ever
-// contains it; harness-prefixed so a collision is impossible by staging).
+// contains it; harness-prefixed so a collision is impossible by staging,
+// and each corrupt state's staging premise checks it against the item IDs
+// the product-written session held).
 const PRECEDENCE_NO_SUCH_ITEM = "xspec-harness-no-such-item";
+
+// The past-the-gate premise's well-formed session.
+const PAST_GATE_PREMISE_SESSION = "s";
+
+/**
+ * The past-the-gate arm's three `review` subcommands naming `session` and
+ * the unknown item ID, in TEST-SPEC's order (SPEC 12.0, 10.7).
+ */
+function pastTheGateInvocations(
+  session: string,
+): readonly (readonly string[])[] {
+  return [
+    [
+      "review",
+      "resolve",
+      session,
+      PRECEDENCE_NO_SUCH_ITEM,
+      "--status",
+      "updated",
+    ],
+    ["review", "show", session, PRECEDENCE_NO_SUCH_ITEM],
+    ["review", "split", session, PRECEDENCE_NO_SUCH_ITEM],
+  ];
+}
 
 // The within-class-2 rows' staging: the session name `review create --name n`
 // spells and the `<file>` the lone-operand `at` row names, each staged beside
@@ -2320,7 +2442,7 @@ const T12_0_10_SYNTAX_ROWS: readonly SyntaxClassRow[] = [
 const T12_0_10 = defineProductTest({
   id: "T12.0-10",
   title:
-    "argument-check precedence: the rename/move and baseline arms ride on T6.4-4/T6.5-5/T6.3-4; on one workspace failing `build`'s validations each gated read given a usage-error argument exits 2 with that error and reports no validation findings (the exit-2 stdout is exactly the one 12.7 error document) — `coverage <unknown-profile>`, `review create --coverage <unknown-profile> --name n` (a mutating subcommand, its argument checks following acquisition and preceding the gate: the plain usage error, `code` `null`, no session written, the run modifying nothing, where the configured profile creates that session on the twin), `query nodes --group <code-group>`, `review status <unknown-session>`, `show <file>#<unspelled-id>`, `query node <code-source-path>`, `query edges --from <code-source-path>#<unspelled-unit>` — each check judged from what it consults (configuration; the session directory; parse-local spelled identities or named units of the named file), the same names on a valid twin workspace giving the same exit-2 errors (byte-identical error documents); masking: `show <unparseable-file>#<id>` on the failing workspace yields the gated report of 13.3, exit 1, carrying exactly the findings `build` reports there (every member but the message); spelled, not defined: on the failing workspace `show <file>#<id>` and `query node <file>#<id>` naming an ID two sections of the file both spell, and one whose only bearer spells it beneath an ancestor spelling no identity (its `id` absent) — each bearer's node identity undefined — pass the check, the gated report following, exit 1, never the unknown-node exit 2, while naming an ID whose only would-be bearer spells none — its `id` braced (`id={\"x\"}`, naming `x`) or valueless (`<S id>`, naming `true`) — fails it, exit 2, the plain usage error alone though that file carries a 14.17 finding; past the gate: on a passing workspace `review resolve <corrupt-session> <any-item-id> --status updated` reports the corruption, exit 1 — the item ID judged only against session content, which the corruption withholds (the same unknown item ID in the well-formed session exits 2 as the pre-corruption premise); within class 2, one arm per member of the syntax class (every error the arguments alone determine): an unknown command, subcommand (`query bogus`), or flag (`--bogus`; the `--name=value` token, T12.0-14); a repeated flag; a missing required flag (`review create --name n` with none of `--base`, `--strategy audit`, or `--coverage`) or argument (`at <file>` alone; a value-taking flag as the last token); a surplus operand (`ids extra`; a fourth `rename` operand); a synopsis mismatch decided by operand spelling alone (`move a.mdx b.mdx#y` and `move a.mdx b#c.mdx`, mixing the two forms); a malformed value (`show a#b#c`, T12.0-13; a U+FFFD-bearing value, T12.0-5); `--status bogus`; `--strategy bogus`; `query nodes --coverage bogus`; a `--kinds` element outside its vocabulary or empty (`depends,`); `review create` with two of its exactly-one-of flags; `--test-hold` beside `--preview`; a `<file>` operand beside `--file` on `view`; a session name outside the form of 10.1 (`.x`); an `<offset>` spelled `+7`; a `--to` malformed as an identity and a `--tag` malformed as a tag (`--to 'a.mdx#x\\y'`, its id segment carrying `\\`, and `--tag 'a\\b'` — a `#`-less `--to` being wholly its path part, held to no segment rule, so `--to 'a\\b'` is no member; and, one arm each, a `--tag` spelled with U+2028 and a `--to` whose id segment carries U+2029, each malformed under 1.4's quote-and-escape bullet); and a `--file` pattern outside the workspace root (`../x`, by spelling alone) — each reported without loading configuration and modifying nothing: byte-identical error documents with the configuration file invalid or missing, each the plain usage error (`code` and `path` null, no locations), the syntax-alone check preceding what the command would consult next (a session already named `n` and the named `<file>`, staged beside the invalid configuration, go unconsulted) — while a configuration error precedes every check that consults configuration or discovery: `coverage <unknown-profile>` and `query nodes --group <code-group>` with invalid configuration each report 14.14 (`configuration-error`), not the unknown profile or the wrong-kind group (SPEC 12.0, 13.3, 13.5, 11.1, 11.2, 4.6, 10.1, 10.7, 11.3, 1.4, 11.4, 11.5, 6.4, 6.5, 6.6, 7, 14.1, 14.3, 14.14, 14.17, 14.20, 14.21, 12.7)",
+    "argument-check precedence: the rename/move and baseline arms ride on T6.4-4/T6.5-5/T6.3-4; on one workspace failing `build`'s validations each gated read given a usage-error argument exits 2 with that error and reports no validation findings (the exit-2 stdout is exactly the one 12.7 error document) — `coverage <unknown-profile>`, `review create --coverage <unknown-profile> --name n` (a mutating subcommand, its argument checks following acquisition and preceding the gate: the plain usage error, `code` `null`, no session written, the run modifying nothing, where the configured profile creates that session on the twin), `query nodes --group <code-group>`, `review status <unknown-session>`, `show <file>#<unspelled-id>`, `query node <code-source-path>`, `query edges --from <code-source-path>#<unspelled-unit>` — each check judged from what it consults (configuration; the session directory; parse-local spelled identities or named units of the named file), the same names on a valid twin workspace giving the same exit-2 errors (byte-identical error documents); masking: `show <unparseable-file>#<id>` on the failing workspace yields the gated report of 13.3, exit 1, carrying exactly the findings `build` reports there (every member but the message); spelled, not defined: on the failing workspace `show <file>#<id>` and `query node <file>#<id>` naming an ID two sections of the file both spell, and one whose only bearer spells it beneath an ancestor spelling no identity (its `id` absent) — each bearer's node identity undefined — pass the check, the gated report following, exit 1, never the unknown-node exit 2, while naming an ID whose only would-be bearer spells none — its `id` braced (`id={\"x\"}`, naming `x`) or valueless (`<S id>`, naming `true`) — fails it, exit 2, the plain usage error alone though that file carries a 14.17 finding; masking reaches a code unit alike: on a workspace failing `build`'s validations through one code source alone — under a spec glob `specs/*.mdx` and a code glob `src/*.ts`, `src/bad.ts` holding `function f() {}` followed by the line `let x = ;` (14.20), beside a parseable `specs/A.mdx` holding a section `a` — `query edges --from src/bad.ts#f`, `query edges --to src/bad.ts#f`, `query reachable --from src/bad.ts#f --to specs/A.mdx#a`, and `query reachable --from specs/A.mdx#a --to src/bad.ts#f`, each with `f` (a unit the file spells) and again with `g` (spelled nowhere in it), and the bare `query edges --from src/bad.ts` (a discovered path of the code kind) each end at the gate — exactly the findings `build` reports there, `src/bad.ts`'s condition 20, exit 1, never the unknown-node exit 2 — while the kind check asks no content question and is never masked: `show src/bad.ts#f` and `query node src/bad.ts` each exit 2, the plain usage error alone; past the gate: on a passing workspace `review resolve <corrupt-session> <item-id> --status updated`, `review show <corrupt-session> <item-id>`, and `review split <corrupt-session> <item-id>`, `<item-id>` an ID the session never held, each report exactly the condition-21 finding (`corrupt-session`, the session's own file its path, `locations` []), exit 1, nothing modified, never the unknown-item exit 2 — the session read, meeting the corruption, precedes the unknown item ID (the same three invocations on a well-formed session each exit 2, `code` `null`, as the premise) — on every corrupt state of T10.1-4 (its own stagings), its unparseable bytes and each of its adapter-layer stagings alike; within class 2, one arm per member of the syntax class (every error the arguments alone determine): an unknown command, subcommand (`query bogus`), or flag (`--bogus`; the `--name=value` token, T12.0-14); a repeated flag; a missing required flag (`review create --name n` with none of `--base`, `--strategy audit`, or `--coverage`) or argument (`at <file>` alone; a value-taking flag as the last token); a surplus operand (`ids extra`; a fourth `rename` operand); a synopsis mismatch decided by operand spelling alone (`move a.mdx b.mdx#y` and `move a.mdx b#c.mdx`, mixing the two forms); a malformed value (`show a#b#c`, T12.0-13; a U+FFFD-bearing value, T12.0-5); `--status bogus`; `--strategy bogus`; `query nodes --coverage bogus`; a `--kinds` element outside its vocabulary or empty (`depends,`); `review create` with two of its exactly-one-of flags; `--test-hold` beside `--preview`; a `<file>` operand beside `--file` on `view`; a session name outside the form of 10.1 (`.x`); an `<offset>` spelled `+7`; a `--to` malformed as an identity and a `--tag` malformed as a tag (`--to 'a.mdx#x\\y'`, its id segment carrying `\\`, and `--tag 'a\\b'` — a `#`-less `--to` being wholly its path part, held to no segment rule, so `--to 'a\\b'` is no member; and, one arm each, a `--tag` spelled with U+2028 and a `--to` whose id segment carries U+2029, each malformed under 1.4's quote-and-escape bullet); and a `--file` pattern outside the workspace root (`../x`, by spelling alone) — each reported without loading configuration and modifying nothing: byte-identical error documents with the configuration file invalid or missing, each the plain usage error (`code` and `path` null, no locations), the syntax-alone check preceding what the command would consult next (a session already named `n` and the named `<file>`, staged beside the invalid configuration, go unconsulted) — while a configuration error precedes every check that consults configuration or discovery: `coverage <unknown-profile>` and `query nodes --group <code-group>` with invalid configuration each report 14.14 (`configuration-error`), not the unknown profile or the wrong-kind group (SPEC 12.0, 13.3, 13.4, 13.5, 11.1, 11.2, 4.6, 10.1, 10.7, 11.3, 1.4, 11.4, 11.5, 6.4, 6.5, 6.6, 7, 14.1, 14.3, 14.14, 14.17, 14.20, 14.21, 12.7)",
   run: async (product) => {
     // --- Gated reads: usage-error arguments precede the 13.3 gate, judged
     // from what they consult, identically on the failing workspace and its
@@ -2550,131 +2672,89 @@ const T12_0_10 = defineProductTest({
       },
     );
 
-    // --- Past the gate: an item ID is judged only against session content,
-    // which a corrupt session withholds (SPEC 12.0, 10.1, 14.21).
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": T12_0_9_10_SPECS_ONLY_CONFIG,
-          "specs/A.mdx": STREAMS_VALID_SOURCE,
-        },
-      },
-      async (workspace) => {
-        await buildOk(product, workspace, "T12.0-10 past-the-gate `build`");
-        await runJson(
-          product,
-          workspace,
-          [
-            "review",
-            "create",
-            "--strategy",
-            "audit",
-            "--name",
-            "corrupt",
-            "--json",
-          ],
-          "T12.0-10 staging `review create --strategy audit --name corrupt`",
-        );
-        const sessionRel = ".xspec/reviews/corrupt.json";
-        if ((await workspace.kind(sessionRel)) !== "file") {
-          fail(
-            `T12.0-10 staging: \`review create\` must store the session at ` +
-              `${sessionRel} (SPEC 10.1) — the corruption arm overwrites ` +
-              `the file the product wrote`,
+    // --- Masking reaches a code unit alike (SPEC 12.0: a code unit judged
+    // over the named file's named units, an unparseable named file masking
+    // the check), on a workspace failing `build`'s validations through
+    // `src/bad.ts` alone; the kind check, asking no content question, is
+    // never masked (12.0, 6.4).
+    await withWorkspace({ files: CODE_MASK_FILES }, async (workspace) => {
+      const premiseContext =
+        "T12.0-10 code-unit masking workspace `build --json` premise";
+      const premiseFindings = await buildFindings(
+        product,
+        workspace,
+        `${premiseContext} — the workspace fails build validation through ` +
+          `${CODE_MASK_CODE_FILE}, not well-formed TypeScript (SPEC 14.20)`,
+      );
+      assertConditionCounts(
+        premiseFindings,
+        { "14.20": 1 },
+        `${premiseContext}: exactly ${CODE_MASK_CODE_FILE}'s condition 20 — ` +
+          `the workspace's one validation finding, beside the parseable ` +
+          `${CODE_MASK_SPEC_FILE} (SPEC 14, 14.20)`,
+      );
+      assertFindingLocated(
+        premiseFindings[0],
+        { file: CODE_MASK_CODE_FILE },
+        `${premiseContext}: the condition-20 finding locates in ` +
+          `${CODE_MASK_CODE_FILE}, the unparseable code source (SPEC 14, ` +
+          `14.20)`,
+      );
+      // A unit the file spells and one it spells nowhere: neither can be
+      // judged over an unparseable file's named units, so each masks — a
+      // product parsing the named file to judge `path#unit` and answering
+      // "unknown node" when the parse fails exits 2 on both, one judging
+      // the unit over an error-tolerant parse answers `f`'s queries.
+      for (const { unit, what } of CODE_MASK_UNITS) {
+        for (const query of codeUnitMaskedQueries(unit)) {
+          const argv = [...query, "--json"];
+          await expectGatedReport(
+            product,
+            workspace,
+            argv,
+            premiseFindings,
+            `T12.0-10 \`${argv.join(" ")}\` (code-unit masking) — ` +
+              `\`${unit}\`, ${what}: the named code file is unparseable, so ` +
+              `the check of the unit against its named units is masked — ` +
+              `the gated report of 13.3 follows, exit 1, answering nothing, ` +
+              `never the unknown-node exit 2 (SPEC 12.0, 13.3, 4.6, 14.20)`,
           );
         }
-        // The one `resolve` this arm runs: on the well-formed session (the
-        // premise), then on the corrupt one in human form and under
-        // `--json`.
-        const resolveArgv: readonly string[] = [
-          "review",
-          "resolve",
-          "corrupt",
-          PRECEDENCE_NO_SUCH_ITEM,
-          "--status",
-          "updated",
-        ];
-        // Premise: with the session well-formed, the unknown item ID stays
-        // a usage error (SPEC 10.7, 12.0; T10.7-10's contract) — so the
-        // exit-1 flip below is attributable to the corruption withholding
-        // the session content the ID would be judged against.
-        await expectExit(
-          product,
-          workspace,
-          resolveArgv,
-          2,
-          "T12.0-10 pre-corruption premise `review resolve corrupt " +
-            "<no-such-item> --status updated` — an unknown item ID in a " +
-            "well-formed session is a usage error, exit 2 (SPEC 10.7, " +
-            "12.0; T10.7-10)",
+      }
+      const bareArgv = [
+        "query",
+        "edges",
+        "--from",
+        CODE_MASK_CODE_FILE,
+        "--json",
+      ];
+      await expectGatedReport(
+        product,
+        workspace,
+        bareArgv,
+        premiseFindings,
+        `T12.0-10 \`${bareArgv.join(" ")}\` (code-unit masking) — a bare ` +
+          `discovered path of the code kind passes the check (SPEC 11.1) and ` +
+          `ends at the gate alike: the gated report of 13.3, exit 1 (SPEC ` +
+          `12.0, 13.3)`,
+      );
+      // The kind check: a code source named where a requirement-node
+      // identity is required is a usage error whatever the file holds, so
+      // a product masking every check against an unparseable named file —
+      // answering the gated report — fails it.
+      for (const kindArgv of CODE_MASK_KIND_ROWS) {
+        const argv = [...kindArgv, "--json"];
+        assertPlainUsageError(
+          await runCli(product, workspace, argv),
+          `T12.0-10 \`${argv.join(" ")}\` (kind check) — a code source ` +
+            `named where a requirement-node identity is required: the kind ` +
+            `check asks no content question and is never masked, so the ` +
+            `usage error alone is reported, exit 2, the error document the ` +
+            `entire stdout, never the gated report of the unparseable named ` +
+            `file (SPEC 12.0, 6.4, 11.1, 12.7, H-5)`,
         );
-        await workspace.file(sessionRel, "this is not a JSON document {{{\n");
-        const context =
-          "T12.0-10 `review resolve corrupt <no-such-item> --status " +
-          "updated` (corrupt session)";
-        const result = await runCli(product, workspace, resolveArgv);
-        assertExitCode(
-          result,
-          1,
-          `${context} — one check runs past the gate: the item ID is ` +
-            `judged only against session content, which the corruption ` +
-            `withholds, so the corruption is reported in the check's ` +
-            `place, exit 1 — never the well-formed session's exit-2 ` +
-            `unknown-item error (SPEC 12.0, 10.1, 14.21)`,
-        );
-        assertReportMentions(
-          result,
-          [/corrupt/i],
-          `${context} — the report identifies the session as corrupt ` +
-            `(SPEC 10.1/14.21 vocabulary; T10.1-4's operationalization: ` +
-            `information presence, never exact wording, H-3)`,
-        );
-        // The same `resolve` under `--json`, on the same corrupt state (a
-        // `review` subcommand naming a corrupt session modifies nothing,
-        // SPEC 10.1): the form-exact findings-only report holds exactly the
-        // one condition-21 finding, carrying its exact stable code
-        // `corrupt-session` and the concern information SPEC 14 requires
-        // of a session condition (TEST-SPEC line 9's rule) — no in-source
-        // location, and the corrupt session's own file as its 12.7 `path`.
-        const jsonContext =
-          "T12.0-10 `review resolve corrupt <no-such-item> --status " +
-          "updated --json` (corrupt session)";
-        const findings = await runFindingsReport(
-          product,
-          workspace,
-          [...resolveArgv, "--json"],
-          1,
-          `${jsonContext} — one check runs past the gate: the item ID is ` +
-            `judged only against session content, which the corruption ` +
-            `withholds, so the corruption is reported in the check's ` +
-            `place, exit 1, the findings-only report the entire stdout — ` +
-            `never the well-formed session's exit-2 unknown-item error ` +
-            `(SPEC 12.0, 10.1, 14.21, 12.7)`,
-        );
-        assertConditionCounts(
-          findings,
-          { "14.21": 1 },
-          `${jsonContext} — exactly one finding, carrying condition 21's ` +
-            `exact stable code \`corrupt-session\`: the corruption ` +
-            `reported in the item check's place, never an exit-2 ` +
-            `unknown-item error (SPEC 12.0, 10.1, 14, 14.21, 12.7)`,
-        );
-        const corruption = findings[0];
-        assertFindingConcernsPath(
-          corruption,
-          sessionRel,
-          `${jsonContext}: a session condition carries the session file it ` +
-            `concerns — the corrupt session's own path ${sessionRel} ` +
-            `(SPEC 14, 14.21, 12.7, 10.1)`,
-        );
-        assertSameJson(
-          corruption.locations,
-          [],
-          `${jsonContext}: a session condition has no in-source location ` +
-            `— locations [] (SPEC 14, 14.21, 12.7, 10.1)`,
-        );
-      },
-    );
+      }
+    });
 
     // --- Within class 2: an error the invocation's syntax alone determines
     // is reported without loading configuration — identically with the
@@ -2782,6 +2862,144 @@ const T12_0_10 = defineProductTest({
         });
       },
     );
+
+    // --- Past the gate: the session read, meeting a named session's
+    // corruption, precedes the unknown item ID (SPEC 12.0, 10.7, 10.1,
+    // 14.21). Last in the body: every corrupt state of T10.1-4, each on a
+    // passing workspace of its own.
+    //
+    // Premise: with the session well-formed, an item ID it never held is a
+    // usage error at each of the three subcommands (SPEC 10.7, 12.0;
+    // T10.7-10, T10.7-15) — so the exit-1 flip below is attributable to
+    // the corruption, met at the session read before the ID is judged.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": T12_0_9_10_SPECS_ONLY_CONFIG,
+          "specs/A.mdx": STREAMS_VALID_SOURCE,
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T12.0-10 past-the-gate premise `build`",
+        );
+        const createArgv = [
+          "review",
+          "create",
+          "--strategy",
+          "audit",
+          "--name",
+          PAST_GATE_PREMISE_SESSION,
+          "--json",
+        ];
+        await runJson(
+          product,
+          workspace,
+          createArgv,
+          `T12.0-10 past-the-gate premise staging \`${createArgv.join(" ")}\``,
+        );
+        for (const argv of pastTheGateInvocations(PAST_GATE_PREMISE_SESSION)) {
+          const jsonArgv = [...argv, "--json"];
+          await expectPlainUsageError(
+            product,
+            workspace,
+            jsonArgv,
+            `T12.0-10 past-the-gate premise \`${jsonArgv.join(" ")}\` — an ` +
+              `item ID a well-formed session never held is a usage error: ` +
+              `exit 2, the plain usage error, \`code\` null (SPEC 10.7, ` +
+              `12.0; T10.7-10, T10.7-15)`,
+          );
+        }
+      },
+    );
+
+    // Every corrupt state of T10.1-4 — its unparseable bytes, each of its
+    // adapter-layer stagings, and the rest (section-10.1.ts's
+    // `T10_1_4_CORRUPT_STATES`, the same stagings) — each on a passing
+    // workspace of its own: `resolve`, `show`, and `split` naming an item
+    // ID the session never held each report exactly the condition-21
+    // finding, exit 1, nothing modified, never the unknown-item exit 2. A
+    // product parsing the session, checking the item ID, and validating
+    // the invariants only afterwards fails the parseable states.
+    for (const corrupt of T10_1_4_CORRUPT_STATES) {
+      await withWorkspace({ files: corrupt.files }, async (workspace) => {
+        const label = `T12.0-10 [${corrupt.state}]`;
+        const staged = await corrupt.stage(product, workspace, label);
+        if (staged.heldItemIds.includes(PRECEDENCE_NO_SUCH_ITEM)) {
+          fail(
+            `${label}: staging premise — the arm names an item ID the ` +
+              `session never held, but the product-written session ` +
+              `${staged.session} held ${PRECEDENCE_NO_SUCH_ITEM} (item IDs ` +
+              `read before the corruption: ` +
+              `${JSON.stringify(staged.heldItemIds)})`,
+          );
+        }
+        for (const argv of pastTheGateInvocations(staged.session)) {
+          const context = `${label} \`${argv.join(" ")}\` (corrupt session)`;
+          const jsonArgv = [...argv, "--json"];
+          const jsonContext = `${label} \`${jsonArgv.join(" ")}\` (corrupt session)`;
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              const result = await runCli(product, workspace, argv);
+              assertExitCode(
+                result,
+                1,
+                `${context} — past the gate the session read, meeting the ` +
+                  `corruption, precedes the item ID: the corruption is ` +
+                  `reported, exit 1 — never the unknown-item exit 2 (SPEC ` +
+                  `12.0, 10.7, 10.1, 14.21)`,
+              );
+              assertReportMentions(
+                result,
+                [/corrupt/i],
+                `${context} — the report identifies the session as corrupt ` +
+                  `(SPEC 10.1/14.21 vocabulary; T10.1-4's ` +
+                  `operationalization: information presence, never exact ` +
+                  `wording, H-3)`,
+              );
+              const findings = await runFindingsReport(
+                product,
+                workspace,
+                jsonArgv,
+                1,
+                `${jsonContext} — past the gate the session read, meeting ` +
+                  `the corruption, precedes the item ID: exit 1, the ` +
+                  `findings-only report the entire stdout — never the ` +
+                  `unknown-item exit 2 (SPEC 12.0, 10.7, 10.1, 14.21, 12.7)`,
+              );
+              assertConditionCounts(
+                findings,
+                { "14.21": 1 },
+                `${jsonContext} — exactly the condition-21 finding, its ` +
+                  `exact stable code \`corrupt-session\`: the corruption ` +
+                  `reported in the item check's place (SPEC 12.0, 10.7, ` +
+                  `10.1, 14, 14.21, 12.7)`,
+              );
+              const corruption = findings[0];
+              assertFindingConcernsPath(
+                corruption,
+                staged.path,
+                `${jsonContext}: a session condition carries the session ` +
+                  `file it concerns — the corrupt session's own path ` +
+                  `${staged.path}, a symbolic link there by its own path ` +
+                  `(SPEC 14, 14.21, 12.7, 10.1, 13.4)`,
+              );
+              assertSameJson(
+                corruption.locations,
+                [],
+                `${jsonContext}: a session condition has no in-source ` +
+                  `location — locations [] (SPEC 14, 14.21, 12.7, 10.1)`,
+              );
+            },
+            `${context}, then with --json — a \`review\` subcommand naming ` +
+              `a corrupt session modifies nothing (SPEC 10.1, 10.7, 13.5)`,
+          );
+        }
+      });
+    }
   },
 });
 

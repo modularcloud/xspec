@@ -108,9 +108,10 @@
 //   implemented, so their coverage rides on the implementing tests —
 //   T12.0-10's rename/move and baseline arms ride on T6.4-4/T6.5-5 and
 //   T6.3-4, putting "12.0" on those three (no longer alias-only: its
-//   gated-read, masking, spelled-not-defined, past-the-gate, and
-//   within-class-2 precedence arms are implemented as the registered
-//   T12.0-10, which carries its own entry below); T12.1-2 ("T7.5-6") puts "12.1" on T7.5-6; T13.4-7 ("T7-6")
+//   gated-read, masking (a spec source's id and a code source's unit),
+//   spelled-not-defined, kind-check, past-the-gate, and within-class-2
+//   precedence arms are implemented as the registered T12.0-10, which
+//   carries its own entry below); T12.1-2 ("T7.5-6") puts "12.1" on T7.5-6; T13.4-7 ("T7-6")
 //   puts "13.4" on T7-6.
 // - "preamble": per H-7's own citation, T12.0-11 (git is read-only) and
 //   T12.0-12 (git-less operation) cover the preamble's git contract; its

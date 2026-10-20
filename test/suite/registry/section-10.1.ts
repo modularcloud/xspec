@@ -105,7 +105,14 @@
 // premise read from the product's exports — so the state violates that one
 // invariant alone. It is the one baseline session among the states: its
 // workspace is a git repository holding the baseline commit, and the
-// modifies-nothing compares cover `.git/` with the rest of the root.
+// modifies-nothing compares cover `.git/` with the rest of the root. The
+// states are one exported table, `T10_1_4_CORRUPT_STATES`, each entry
+// staging its state on a fresh workspace of its own: T10.1-4 runs its
+// contract on each, and T12.0-10's past-the-gate arm (section-12.0-ii.ts)
+// stages the same states for `resolve`, `show`, and `split` naming an
+// item ID the session never held — every staging returns the item IDs the
+// product-written session held, read before the corruption, for that
+// arm's premise (SPEC 12.0, 10.7).
 //
 // T10.1-6 (session-directory and area occupancy; `create`'s ordering):
 // - The absent session directory (SPEC 10.1, 13.4, 14.25): a freshly built
@@ -207,7 +214,8 @@
 // Sources staged after a body's first product invocation — the stale arm's
 // and stale twins' edited `specs/A.mdx` (T10.1-1, T10.1-6), the
 // decomposed-item state's `specs/A.mdx` with `a`'s own text edited since
-// the baseline (T10.1-4), and T10.1-5's invalidating `specs/B.mdx` — are
+// the baseline (T10.1-4, and T12.0-10 through T10.1-4's states), and
+// T10.1-5's invalidating `specs/B.mdx` — are
 // staged-source records
 // (helpers/staged-mdx.ts, S-9: judged before any product exists); the other
 // stagings here are session files, journal lines, and occupants, which S-9
@@ -277,12 +285,13 @@ import { WRITE_FAILURE_CODE } from "./write-refusal-staging.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. Every
 // `CORE_FILES` workspace stages it, and T10.1-1's determinism twins, T10.1-4's
-// per-state workspaces, and T10.1-6's occupancy twins follow their bodies'
-// first invocations, so it is one TypeScript staged-source record
+// per-state workspaces (T12.0-10's past-the-gate arm stages the same
+// states), and T10.1-6's occupancy twins follow their bodies' first
+// invocations, so it is one TypeScript staged-source record
 // (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), well-formed,
 // staged wherever this configuration is (T10.1-5's workspace too).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T10.1-1/T10.1-4/T10.1-6 xspec.config.ts — one spec group",
+  "T10.1-1/T10.1-4/T10.1-6/T12.0-10 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -294,14 +303,15 @@ export default defineConfig({
 );
 
 // The same spec group plus one coverage profile (SPEC 7.4) for the
-// coverage-session arm of T10.1-4: `main`'s one leaf has no incoming
+// coverage-session arm of T10.1-4 (and T12.0-10's, which stages T10.1-4's
+// states): `main`'s one leaf has no incoming
 // dependency edge, so the profile leaves it uncovered and `create --coverage`
 // derives at least one item while recording the profile definition. That
 // workspace follows the body's first invocations, so the configuration is a
 // TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript and
 // timing clauses), well-formed.
 const COVERAGE_CONFIG = stagedTs(
-  "T10.1-4 xspec.config.ts — one spec group and the coverage profile p",
+  "T10.1-4/T12.0-10 xspec.config.ts — one spec group and the coverage profile p",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -341,14 +351,15 @@ const A_MDX_EDITED = stagedMdx(
   A_MDX.replace("Kid text.", "Kid text, edited."),
 );
 
-// T10.1-4's decomposed-item state: `a`'s own text edited since the baseline
+// T10.1-4's decomposed-item state (staged by T12.0-10's past-the-gate arm
+// too): `a`'s own text edited since the baseline
 // commit, `a.k` untouched, so `a` is `changed` (its ownHash, SPEC 5.6) and
 // the one visited node of the path-blocks session (10.5) — its
 // subtree-coherence item has a child for `split` to decompose (10.7). The
 // edit follows the body's first invocations, so it is a staged-source
 // record (helpers/staged-mdx.ts; S-9's before-any-product clause).
 const A_MDX_OWN_TEXT_EDITED = stagedMdx(
-  "T10.1-4 specs/A.mdx with a's own text edited (the decomposed-item state's change since the baseline)",
+  "T10.1-4/T12.0-10 specs/A.mdx with a's own text edited (the decomposed-item state's change since the baseline)",
   A_MDX.replace("Alpha text.", "Alpha text, edited."),
 );
 
@@ -356,10 +367,11 @@ const A_MDX_OWN_TEXT_EDITED = stagedMdx(
 // workspace and of T10.1-5's: one staged-source record made from `A_MDX`
 // (the string stays for the staleness edit above), named with every
 // staging test — T10.1-1's determinism twins, T10.1-4's per-state
-// workspaces, and T10.1-6's occupancy twins follow their bodies' first
-// invocations (helpers/staged-mdx.ts; S-9's before-any-product clause).
+// workspaces (T12.0-10's past-the-gate arm stages the same states), and
+// T10.1-6's occupancy twins follow their bodies' first invocations
+// (helpers/staged-mdx.ts; S-9's before-any-product clause).
 const A_MDX_STAGED = stagedMdx(
-  "T10.1-1/T10.1-2/T10.1-3/T10.1-4/T10.1-5/T10.1-6 specs/A.mdx",
+  "T10.1-1/T10.1-2/T10.1-3/T10.1-4/T10.1-5/T10.1-6/T12.0-10 specs/A.mdx",
   A_MDX,
 );
 
@@ -1033,16 +1045,23 @@ async function exportCorruptNamedSession(
   );
 }
 
+/** The distinct ids of the given items, in first-seen order. */
+function distinctItemIds(
+  items: readonly { readonly id: string }[],
+): readonly string[] {
+  return [...new Set(items.map((item) => item.id))];
+}
+
 /**
- * Build, create the session via the given argv, and capture one item id from
- * `status --json` before the file is corrupted.
+ * Build, create the session via the given argv, and capture its items from
+ * `status --json` before the file is corrupted (at least one).
  */
 async function stageProductSession(
   product: ProductBinding,
   workspace: TestWorkspace,
   createArgv: readonly string[],
   context: string,
-): Promise<string> {
+): Promise<readonly SessionStatusRow[]> {
   await buildOk(product, workspace, `${context} \`build\``);
   await expectExit(
     product,
@@ -1051,12 +1070,11 @@ async function stageProductSession(
     0,
     `${context} \`${createArgv.join(" ")}\``,
   );
-  const items = await readSessionItems(
+  return await readSessionItems(
     product,
     workspace,
     `${context} \`review status ${CORRUPT_NAME} --json\` (pre-corruption item-id capture)`,
   );
-  return items[0].id;
 }
 
 /**
@@ -1075,13 +1093,17 @@ async function stageProductSession(
  * being retired; its `blockedBy` empty; no item naming it or sharing its
  * kind and scope node — each premise read from the product's own exports
  * before the re-insertion. Returns an item id the post-`split` session
- * holds, for the item-naming subcommands.
+ * holds, for the item-naming subcommands, and every item id the two
+ * exports showed the session holding, the retired original's included.
  */
 async function stageDecomposedItemState(
   product: ProductBinding,
   workspace: TestWorkspace,
   context: string,
-): Promise<string> {
+): Promise<{
+  readonly itemId: string;
+  readonly heldItemIds: readonly string[];
+}> {
   await workspace.gitInit();
   const base = await workspace.gitCommitAll("baseline");
   await workspace.file("specs/A.mdx", A_MDX_OWN_TEXT_EDITED);
@@ -1179,11 +1201,14 @@ async function stageDecomposedItemState(
     earlier,
     original.id,
   );
-  return postSplit.items[0].id;
+  return {
+    itemId: postSplit.items[0].id,
+    heldItemIds: distinctItemIds([...preSplit.items, ...postSplit.items]),
+  };
 }
 
 /** What `review list` must report for a staged corrupt state. */
-interface ExpectedSessionEntry {
+export interface ExpectedSessionEntry {
   readonly name: string;
   readonly corrupt: boolean;
 }
@@ -1449,6 +1474,80 @@ async function assertCorruptSessionContract(
   );
 }
 
+/**
+ * One staged corrupt state of T10.1-4: the corrupt session and its file,
+ * an item ID for the item-naming subcommands, the item IDs the session
+ * held, and the listing `review list` must give.
+ */
+export interface StagedCorruptSession {
+  /** The corrupt session's name (SPEC 10.1). */
+  readonly session: string;
+  /**
+   * Its file `.xspec/reviews/<name>.json` — every condition-21 finding's
+   * concerned path (SPEC 14, 12.7, 10.1), a symbolic link there by its own
+   * path (13.4).
+   */
+  readonly path: string;
+  /**
+   * The item ID T10.1-4's `show`, `resolve`, and `split` name: one the
+   * product-written session held before the corruption, or the placeholder
+   * for a state no readable session precedes (module header).
+   */
+  readonly itemId: string;
+  /**
+   * Every item ID the session held as the product wrote it, read from the
+   * product's own reports before the corruption — empty where no
+   * product-written session of that name preceded the state.
+   */
+  readonly heldItemIds: readonly string[];
+  /** The sessions `review list` reports, in byte order of name (SPEC 10.7). */
+  readonly sessions: readonly ExpectedSessionEntry[];
+}
+
+/**
+ * One corrupt state of T10.1-4 (SPEC 10.1, 14.21), staged on a fresh
+ * workspace of its own passing `build`'s validations (H-1). T10.1-4 runs
+ * its contract on each state, and T12.0-10's past-the-gate arm runs
+ * `resolve`, `show`, and `split` naming an item ID the session never held
+ * on each (SPEC 12.0, 10.7: the session read, meeting the corruption,
+ * precedes the unknown item ID) — one staging per state, shared.
+ */
+export interface CorruptSessionState {
+  /** The state's name, bracketed in every diagnosis (`T10.1-4 [<state>]`). */
+  readonly state: string;
+  /** The fresh workspace's initial files. */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  /**
+   * Stage the state on the fresh workspace: every invocation and staging
+   * step it takes, `context` leading each diagnosis.
+   */
+  readonly stage: (
+    product: ProductBinding,
+    workspace: TestWorkspace,
+    context: string,
+  ) => Promise<StagedCorruptSession>;
+}
+
+/**
+ * The staged corrupt session `cor` — alone in the session directory unless
+ * `sessions` lists more.
+ */
+function stagedCorruptSession(
+  itemId: string,
+  heldItemIds: readonly string[],
+  sessions: readonly ExpectedSessionEntry[] = [
+    { name: CORRUPT_NAME, corrupt: true },
+  ],
+): StagedCorruptSession {
+  return {
+    session: CORRUPT_NAME,
+    path: sessionRel(CORRUPT_NAME),
+    itemId,
+    heldItemIds,
+    sessions,
+  };
+}
+
 // The shape-dependent corrupt states, each staged through the H-3 adapter
 // layer over a session file the product itself wrote (session-staging.ts).
 // A missing 10.2 field is staged twice, once per field every item carries
@@ -1472,56 +1571,67 @@ const ADAPTER_STATES: readonly (readonly [
   ["blockedBy cycle", (abs) => stageBlockedByCycle(abs)],
 ];
 
-const T10_1_4 = defineProductTest({
-  id: "T10.1-4",
-  title:
-    "each corrupt session state — unparseable bytes (garbage and truncation), a missing 10.2 field (an item's status, and separately its kind), unknown status, duplicate item ids, blockedBy at an absent item, a blockedBy cycle, duplicate kind+scope, an item whose kind and scope node are recorded as decomposed (a path-blocks session's original item, copied from the pre-`split` file the product wrote, re-inserted into the post-`split` file), malformed recorded creation parameters, malformed recorded decompositions (garbled over a product-performed `split`'s durable record), and a directory or symlink at the session path — makes every review subcommand naming the session report corruption, exit 1, and modify nothing, its report under `--json` (and `export`'s without the flag, its only output form, the same document) the findings-only document of at least one finding, every one condition 21 `corrupt-session` concerning the session's own file (a symlink there by its own path) with `locations` []; `list` reports it corrupt in place of its fields (exit 1), the listing's findings likewise at least one, every one condition 21 `corrupt-session` concerning the session's own file with `locations` []; `check` reports 14.21; shape-dependent states are staged via the H-3 adapter over product-written files (SPEC 10.1, 10.7, 12.7, 13.4, 14.21)",
-  run: async (product) => {
-    // --- Shape-dependent states via the adapter, over an audit session ---
-    for (const [state, corrupt] of ADAPTER_STATES) {
-      await withWorkspace(CORE_FILES, async (workspace) => {
-        const itemId = await stageProductSession(
-          product,
-          workspace,
-          ["review", "create", "--strategy", "audit", "--name", CORRUPT_NAME],
-          `T10.1-4 [${state}]`,
-        );
-        await corrupt(workspace.path(sessionRel(CORRUPT_NAME)));
-        await assertCorruptSessionContract(product, workspace, state, itemId, [
-          { name: CORRUPT_NAME, corrupt: true },
-        ]);
-      });
-    }
+/**
+ * A shape-dependent state (`ADAPTER_STATES`): an audit session the product
+ * writes, transformed through the adapter.
+ */
+function adapterState(
+  state: string,
+  corrupt: (sessionAbsPath: string) => Promise<void>,
+): CorruptSessionState {
+  return {
+    state,
+    files: CORE_FILES,
+    stage: async (product, workspace, context) => {
+      const items = await stageProductSession(
+        product,
+        workspace,
+        ["review", "create", "--strategy", "audit", "--name", CORRUPT_NAME],
+        context,
+      );
+      await corrupt(workspace.path(sessionRel(CORRUPT_NAME)));
+      return stagedCorruptSession(items[0].id, distinctItemIds(items));
+    },
+  };
+}
 
-    // --- Malformed recorded creation parameters ---
-    // A coverage session records the profile's resolved definition (an audit
-    // session records none, SPEC 10.7), so there is a recorded value for the
-    // value-blind adapter transformation to garble.
-    await withWorkspace(COVERAGE_FILES, async (workspace) => {
-      const state = "malformed recorded creation parameters";
-      const itemId = await stageProductSession(
+/**
+ * Every corrupt state of T10.1-4, in its order: the shape-dependent states
+ * via the adapter, malformed recorded creation parameters and
+ * decompositions, unparseable JSON (garbage bytes, then a truncated
+ * product-written file), the session path occupied by a directory and by
+ * a symbolic link, and the decomposed item.
+ */
+export const T10_1_4_CORRUPT_STATES: readonly CorruptSessionState[] = [
+  ...ADAPTER_STATES.map(([state, corrupt]) => adapterState(state, corrupt)),
+  {
+    // A coverage session records the profile's resolved definition (an
+    // audit session records none, SPEC 10.7), so there is a recorded value
+    // for the value-blind adapter transformation to garble.
+    state: "malformed recorded creation parameters",
+    files: COVERAGE_FILES,
+    stage: async (product, workspace, context) => {
+      const items = await stageProductSession(
         product,
         workspace,
         ["review", "create", "--coverage", "p", "--name", CORRUPT_NAME],
-        `T10.1-4 [${state}]`,
+        context,
       );
       await stageGarbleCreationParameters(
         workspace.path(sessionRel(CORRUPT_NAME)),
       );
-      await assertCorruptSessionContract(product, workspace, state, itemId, [
-        { name: CORRUPT_NAME, corrupt: true },
-      ]);
-    });
-
-    // --- Malformed recorded decompositions ---
+      return stagedCorruptSession(items[0].id, distinctItemIds(items));
+    },
+  },
+  {
     // A `split` records its decomposition — the original's kind and scope
     // node — durably in the session (SPEC 10.7), so the product itself is
     // made to perform one before the recorded value is garbled: the
     // corrupted file starts as one the product wrote holding a genuine
     // recorded decomposition (an unsplit session may record none).
-    await withWorkspace(CORE_FILES, async (workspace) => {
-      const state = "malformed recorded decompositions";
-      const context = `T10.1-4 [${state}]`;
+    state: "malformed recorded decompositions",
+    files: CORE_FILES,
+    stage: async (product, workspace, context) => {
       await buildOk(product, workspace, `${context} \`build\``);
       await expectExit(
         product,
@@ -1575,46 +1685,41 @@ const T10_1_4 = defineProductTest({
         );
       }
       await stageGarbleDecompositions(workspace.path(sessionRel(CORRUPT_NAME)));
-      await assertCorruptSessionContract(
-        product,
-        workspace,
-        state,
+      return stagedCorruptSession(
         postSplit[0].id,
-        [{ name: CORRUPT_NAME, corrupt: true }],
+        distinctItemIds([...items, ...postSplit]),
       );
-    });
-
-    // --- Unparseable JSON: garbage bytes (shape-independent, staged
-    // directly — no assumed session layout is involved) ---
-    await withWorkspace(CORE_FILES, async (workspace) => {
-      const state = "unparseable JSON (garbage bytes)";
-      await buildOk(product, workspace, `T10.1-4 [${state}] \`build\``);
+    },
+  },
+  {
+    // Unparseable JSON: garbage bytes (shape-independent, staged directly
+    // — no assumed session layout is involved).
+    state: "unparseable JSON (garbage bytes)",
+    files: CORE_FILES,
+    stage: async (product, workspace, context) => {
+      await buildOk(product, workspace, `${context} \`build\``);
       await workspace.file(
         sessionRel(CORRUPT_NAME),
         "this is deliberately not a JSON document ][}{\n",
       );
-      await assertCorruptSessionContract(
-        product,
-        workspace,
-        state,
-        PLACEHOLDER_ITEM_ID,
-        [{ name: CORRUPT_NAME, corrupt: true }],
-      );
-    });
-
-    // --- Unparseable JSON: truncation of the product-written file ---
-    await withWorkspace(CORE_FILES, async (workspace) => {
-      const state = "unparseable JSON (truncated product-written file)";
-      const itemId = await stageProductSession(
+      return stagedCorruptSession(PLACEHOLDER_ITEM_ID, []);
+    },
+  },
+  {
+    // Unparseable JSON: truncation of the product-written file.
+    state: "unparseable JSON (truncated product-written file)",
+    files: CORE_FILES,
+    stage: async (product, workspace, context) => {
+      const items = await stageProductSession(
         product,
         workspace,
         ["review", "create", "--strategy", "audit", "--name", CORRUPT_NAME],
-        `T10.1-4 [${state}]`,
+        context,
       );
       const bytes = await readSessionBytes(
         workspace,
         CORRUPT_NAME,
-        `T10.1-4 [${state}] the product-written session file`,
+        `${context} the product-written session file`,
       );
       const truncated = bytes.subarray(0, Math.floor(bytes.length / 2));
       // Staging premise: the front half of the product's single JSON
@@ -1629,7 +1734,7 @@ const T10_1_4 = defineProductTest({
       }
       if (truncated.length === 0 || stillParses) {
         fail(
-          `T10.1-4 [${state}]: staging premise — truncating the ` +
+          `${context}: staging premise — truncating the ` +
             `product-written session file (${String(bytes.length)} bytes) to ` +
             `its front half must yield a non-empty, unparseable document; ` +
             `adjust the staging if the product's stored form legitimately ` +
@@ -1637,70 +1742,90 @@ const T10_1_4 = defineProductTest({
         );
       }
       await workspace.file(sessionRel(CORRUPT_NAME), truncated);
-      await assertCorruptSessionContract(product, workspace, state, itemId, [
-        { name: CORRUPT_NAME, corrupt: true },
-      ]);
-    });
-
-    // --- Session path occupied by a directory (SPEC 13.4: a durable file's
-    // path occupied by anything other than a plain file is corrupt) ---
-    await withWorkspace(CORE_FILES, async (workspace) => {
-      const state = "session path occupied by a directory";
-      await buildOk(product, workspace, `T10.1-4 [${state}] \`build\``);
+      return stagedCorruptSession(items[0].id, distinctItemIds(items));
+    },
+  },
+  {
+    // The session path occupied by a directory (SPEC 13.4: a durable
+    // file's path occupied by anything other than a plain file is corrupt).
+    state: "session path occupied by a directory",
+    files: CORE_FILES,
+    stage: async (product, workspace, context) => {
+      await buildOk(product, workspace, `${context} \`build\``);
       await workspace.dir(sessionRel(CORRUPT_NAME));
-      await assertCorruptSessionContract(
-        product,
-        workspace,
-        state,
-        PLACEHOLDER_ITEM_ID,
-        [{ name: CORRUPT_NAME, corrupt: true }],
-      );
-    });
-
-    // --- Session path occupied by a symbolic link ---
-    // The link's target is a *valid* session file (the real session beside
-    // it), so a product that follows the link instead of treating the
-    // occupied path as corrupt (13.4: never read through it) sees a
-    // perfectly healthy session and fails every arm.
-    await withWorkspace(CORE_FILES, async (workspace) => {
-      const state = "session path occupied by a symbolic link";
-      await buildOk(product, workspace, `T10.1-4 [${state}] \`build\``);
+      return stagedCorruptSession(PLACEHOLDER_ITEM_ID, []);
+    },
+  },
+  {
+    // The session path occupied by a symbolic link. The link's target is a
+    // *valid* session file (the real session beside it), so a product that
+    // follows the link instead of treating the occupied path as corrupt
+    // (13.4: never read through it) sees a perfectly healthy session and
+    // fails every arm.
+    state: "session path occupied by a symbolic link",
+    files: CORE_FILES,
+    stage: async (product, workspace, context) => {
+      await buildOk(product, workspace, `${context} \`build\``);
       await expectExit(
         product,
         workspace,
         ["review", "create", "--strategy", "audit", "--name", "real"],
         0,
-        `T10.1-4 [${state}] \`review create --strategy audit --name real\` (the link's valid target)`,
+        `${context} \`review create --strategy audit --name real\` (the link's valid target)`,
       );
       await workspace.symlink(sessionRel(CORRUPT_NAME), "real.json");
-      await assertCorruptSessionContract(
-        product,
-        workspace,
-        state,
+      return stagedCorruptSession(
         PLACEHOLDER_ITEM_ID,
+        [],
         [
           { name: CORRUPT_NAME, corrupt: true },
           { name: "real", corrupt: false },
         ],
       );
-    });
-
-    // --- An item whose kind and scope node are recorded as decomposed ---
-    // The one baseline session among the states (stageDecomposedItemState):
-    // a path-blocks session's post-`split` file with the original item's
+    },
+  },
+  {
+    // An item whose kind and scope node are recorded as decomposed — the
+    // one baseline session among the states (stageDecomposedItemState): a
+    // path-blocks session's post-`split` file with the original item's
     // entry, copied from the pre-`split` file, re-inserted.
-    await withWorkspace(CORE_FILES, async (workspace) => {
-      const state =
-        "an item whose kind and scope node are recorded as decomposed";
-      const itemId = await stageDecomposedItemState(
+    state: "an item whose kind and scope node are recorded as decomposed",
+    files: CORE_FILES,
+    stage: async (product, workspace, context) => {
+      const { itemId, heldItemIds } = await stageDecomposedItemState(
         product,
         workspace,
-        `T10.1-4 [${state}]`,
+        context,
       );
-      await assertCorruptSessionContract(product, workspace, state, itemId, [
-        { name: CORRUPT_NAME, corrupt: true },
-      ]);
-    });
+      return stagedCorruptSession(itemId, heldItemIds);
+    },
+  },
+];
+
+const T10_1_4 = defineProductTest({
+  id: "T10.1-4",
+  title:
+    "each corrupt session state — unparseable bytes (garbage and truncation), a missing 10.2 field (an item's status, and separately its kind), unknown status, duplicate item ids, blockedBy at an absent item, a blockedBy cycle, duplicate kind+scope, an item whose kind and scope node are recorded as decomposed (a path-blocks session's original item, copied from the pre-`split` file the product wrote, re-inserted into the post-`split` file), malformed recorded creation parameters, malformed recorded decompositions (garbled over a product-performed `split`'s durable record), and a directory or symlink at the session path — makes every review subcommand naming the session report corruption, exit 1, and modify nothing, its report under `--json` (and `export`'s without the flag, its only output form, the same document) the findings-only document of at least one finding, every one condition 21 `corrupt-session` concerning the session's own file (a symlink there by its own path) with `locations` []; `list` reports it corrupt in place of its fields (exit 1), the listing's findings likewise at least one, every one condition 21 `corrupt-session` concerning the session's own file with `locations` []; `check` reports 14.21; shape-dependent states are staged via the H-3 adapter over product-written files (SPEC 10.1, 10.7, 12.7, 13.4, 14.21)",
+  run: async (product) => {
+    // Each state on a fresh workspace of its own, staged by its entry of
+    // `T10_1_4_CORRUPT_STATES` (T12.0-10's past-the-gate arm stages the
+    // same states), then the full contract.
+    for (const corrupt of T10_1_4_CORRUPT_STATES) {
+      await withWorkspace(corrupt.files, async (workspace) => {
+        const staged = await corrupt.stage(
+          product,
+          workspace,
+          `T10.1-4 [${corrupt.state}]`,
+        );
+        await assertCorruptSessionContract(
+          product,
+          workspace,
+          corrupt.state,
+          staged.itemId,
+          staged.sessions,
+        );
+      });
+    }
   },
 });
 
