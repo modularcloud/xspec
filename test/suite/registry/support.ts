@@ -859,6 +859,15 @@ export interface ReviewRefusalOptions {
    * TEST-SPEC entries state "nothing modified" or "nothing created".
    */
   readonly nothingModified?: boolean;
+  /**
+   * How the command — `--json` appended — is run; by default to completion
+   * in the workspace root (`runCli`). T10.7-15(b) runs its `resolve` and
+   * `split` refusals held at the seam of 13.5 with the graph-data area
+   * staged unwritable once they have acquired
+   * (write-refusal-staging.ts `runHeldWithStaging`), each answer then
+   * judged here like any other.
+   */
+  readonly run?: (argv: readonly string[]) => Promise<RunResult>;
 }
 
 /**
@@ -908,7 +917,8 @@ async function refusedSessionFileBytes(
  * (`sessionRel`, `.xspec/reviews/<name>.json` — for a `create` matching an
  * existing session ignoring ASCII case, the existing session's file) stays
  * byte-identical around the run. `options.nothingModified` adds the
- * whole-root compare. Returns the decoded finding.
+ * whole-root compare; `options.run` replaces how the command runs.
+ * Returns the decoded finding.
  */
 export async function expectReviewRefusal(
   product: ProductBinding,
@@ -932,14 +942,18 @@ export async function expectReviewRefusal(
       sessionRel,
       `${label} (before the run)`,
     );
-    const findings = await runFindingsReport(
-      product,
-      workspace,
-      jsonArgv,
-      1,
+    const reportContext =
       `${label} — a refused review operation exits 1 with its findings-only ` +
-        `report as the entire stdout (SPEC 10.7, 12.0, 12.7; T10.7-14)`,
-    );
+      `report as the entire stdout (SPEC 10.7, 12.0, 12.7; T10.7-14)`;
+    const result =
+      options.run === undefined
+        ? await runCli(product, workspace, jsonArgv)
+        : await options.run(jsonArgv);
+    assertExitCode(result, 1, reportContext);
+    const findings = decodeFindingsReport(
+      parseJsonStdout(result, reportContext),
+      reportContext,
+    ).findings;
     if (findings.length !== 1) {
       fail(
         `${label}: a refusal is one finding — standard output exactly ` +
@@ -1226,7 +1240,23 @@ export async function expectPlainUsageError(
   argv: readonly ArgvValue[],
   context: string,
 ): Promise<RunResult> {
-  const result = await expectExit(product, workspace, argv, 2, context);
+  const result = await runCli(product, workspace, argv);
+  assertPlainUsageError(result, context);
+  return result;
+}
+
+/**
+ * {@link expectPlainUsageError}'s judgement of a run made elsewhere — held
+ * at the seam of 13.5 or under a staging (T10.7-15(b)): exit 2 exactly
+ * (H-5), the single 12.7 error document as the entire stdout with `code`
+ * null, `path` null, and no locations, and the usage message on standard
+ * error (SPEC 12.0, 12.7, 14).
+ */
+export function assertPlainUsageError(
+  result: RunResult,
+  context: string,
+): void {
+  assertExitCode(result, 2, context);
   const error = expectErrorDocument(result, context);
   assertSameJson(
     { code: error.code, path: error.path, locations: error.locations },
@@ -1242,7 +1272,6 @@ export async function expectPlainUsageError(
         `12.0), but stderr is empty`,
     );
   }
-  return result;
 }
 
 /**

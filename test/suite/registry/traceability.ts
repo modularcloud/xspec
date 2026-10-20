@@ -67,9 +67,10 @@
 //       stable code, `locations` empty, `path` `null` — where that form is
 //       the test's subject: T10.7-14. The other refusal sites running the
 //       same shared check (support.ts `expectReviewRefusal`: T10.1-2,
-//       T10.1-6, T10.3-2, T10.7-1, T10.7-9, T10.7-10) assert it as a
-//       cross-reference to T10.7-14's assertion, which puts no "14" on them
-//       (T10.1-6's and T10.7-1's "14" stand for their numbered conditions).
+//       T10.1-6, T10.3-2, T10.7-1, T10.7-9, T10.7-10, T10.7-15) assert it
+//       as a cross-reference to T10.7-14's assertion, which puts no "14" on
+//       them (T10.1-6's, T10.7-1's, and T10.7-15's "14" stand for their
+//       numbered conditions).
 //   A condition named only as staging context, as a cross-reference to
 //   another test's assertion, or in the diagnostic of a generic clean
 //   outcome (`build` or `check` exit 0, findings []) puts no "14" on a
@@ -127,10 +128,13 @@
 //   targets and context presented under a journaled rename's new identity —
 //   and 12.7's coverage-attribute and tag-set value forms on the metadata
 //   pair; T10.7-14 asserts 12.7's findings-only form of a refused operation
-//   and the finding form it holds; and section 10's body (the review
-//   mechanism/strategy split and the three built-in strategies) is
-//   exercised by T10.5-1, T10.6-1 (generation per strategy), T10.7-1
-//   (strategy selection at `create`), and T10.7-4 (coverage sessions).
+//   and the finding form it holds; T10.7-15 asserts 13.3's refresh, placed
+//   past every outcome a `review` subcommand meets — stale graph data left
+//   stale by each outcome, `check`'s unit form after it; and section 10's
+//   body (the review mechanism/strategy split and the three built-in
+//   strategies) is exercised by T10.5-1, T10.6-1 (generation per strategy),
+//   T10.7-1 (strategy selection at `create`), and T10.7-4 (coverage
+//   sessions).
 //
 // A passage listed for a test is asserted by that test; the map lists each
 // test's primary passage(s), not every rule it touches in passing. S-1 fails
@@ -560,6 +564,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T10.7-12": ["1.7", "10.7"],
   "T10.7-13": ["10.7", "10.4", "12.7"],
   "T10.7-14": ["10.7", "12.7", "14"],
+  "T10.7-15": ["10.7", "13.3", "14"],
   "T11-1": ["11", "11.1"],
   "T11-2": ["11", "11.1", "1.4", "12.0", "12.7", "14"],
   "T11-3": ["11", "11.1"],
