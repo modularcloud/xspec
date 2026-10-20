@@ -627,7 +627,9 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // joins the home passage; 13.3/13.1/6.1/10.1/12.7 are carriage context
   // with home coverage at T13.3-*/T13.1-*/T6.1-*/T10.1-*/T12.7-*, as are
   // its lock-path arms' 13.4/13.5 (the transient lock path, its leftovers,
-  // the held and the killed `rename`) at T13.4-*/T13.5-*.
+  // the held and the killed `rename`; nothing read below an area path
+  // holding no directory) at T13.4-*/T13.5-*/T10.1-6, and the order
+  // fixture's resolved configuration (7.1–7.5) at T7.*-*.
   "T11.6-3": ["11.6", "14"],
   // T11.6-4: asserts numbered conditions — the premise build's
   // every-family multiset and the condition-23 finding (TEST-SPEC 14's

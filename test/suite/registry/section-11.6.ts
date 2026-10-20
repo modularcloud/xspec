@@ -169,8 +169,13 @@
 // valid, and T11.6-2's 14.19 staging never being the inventory's finding.
 //
 // T11.6-3 — record, area, durables, order, lock path (SPEC 11.6, 13.3,
-// 13.1, 6.1, 10.1, 12.7, 7.2, 7.4, 7.5, 13.4, 13.5, 14.23). Three
-// workspaces, then the lock-path arms:
+// 13.1, 6.1, 10.1, 12.7, 7.1–7.5, 13.4, 13.5, 14.23). Two workspaces, the
+// order fixture, then the lock-path arms. In every answer
+// `journal` is exactly {"path": ".xspec/journal", "occupied": …} — the
+// member set decoder-enforced (H-3), its `path` pinned by value in every
+// arm as the literal workspace-relative journal path, whether or not
+// anything occupies it, never "journal", ".xspec", or ".xspec/journal/"
+// (6.1, 12.7) — and `occupied` is asserted by presence alone:
 //
 // - record/area/journal workspace (emission enabled; two spec groups `zz`
 //   before `aa` so configuration order has teeth): before any build,
@@ -196,10 +201,13 @@
 //   recorded) appears in no inventory list and is never claimed: the exact
 //   sources/sessions compares and the recorded attribution rule exclude it,
 //   and its name appears nowhere in the document bytes. Journal occupancy is
-//   presence alone: a garbage-content plain file, a directory, and a broken
-//   symbolic link each report occupied true with a finding-free answer (no
-//   content read, no 14.13 from inventory; the broken link discriminates a
-//   product probing occupancy through the link).
+//   presence alone: absent — false — before any build (`.xspec` absent),
+//   after the build, and after the configuration change, no journaled
+//   operation having touched the workspace (a build journals nothing, 6.1);
+//   a garbage-content plain file, a directory, and a broken symbolic link
+//   each report occupied true with a finding-free answer (no content read,
+//   no 14.13 from inventory; the broken link discriminates a product
+//   probing occupancy through the link).
 //
 // - sessions workspace: a product-written session (`review create
 //   --strategy audit --name ancien`), a garbage-content `S.json`, and a
@@ -211,38 +219,67 @@
 //   0x61 'a'), inverting under case folding, so the byte-order contract has
 //   teeth.
 //
-// - order workspace (configuration alone, no build): two spec groups, two
-//   code groups, two coverage profiles, and two policy rules, each pair
-//   declared against name byte order (`zspec`/`aspec`, `zcode`/`acode`,
-//   `zprofil`/`aprofil`, `zregle`/`aregle`), `zcode`'s globs against byte
-//   order, and a code source matched by both code groups. All four lists
-//   are asserted in configuration order — the names first, then the whole
-//   resolved entries with every default and inferred kind explicit, as
-//   T11.6-2 writes them, form-exact — beside the whole view and the
-//   source's two memberships in configuration order, flag-less and
-//   `--json` forms against one expectation: a product listing groups,
-//   profiles, or rules by name bytes, or reversed, fails here.
+// - order fixture (TEST-SPEC T11.6-3's, staged whole by section-11.4.ts's
+//   `stageOrderFixture`, which T11.4-1's and T11.4-2's multi-file view
+//   order share): spec groups `tests` (globbing specs/z/*.mdx, then
+//   specs/a/*.mdx — out of byte order) then `product` (specs/a/*.mdx), code
+//   groups `web` (web/*.ts) then `app` (app/*.ts), coverage profiles `z-cov`
+//   then `a-cov` and policy rules `z-rule` then `a-rule` (each pair in
+//   reverse byte order of name), the spec sources specs/z/Z.mdx,
+//   specs/a/B.mdx, and specs/a/a.mdx, the code sources web/w.ts and
+//   app/p.ts, Markdown emitted under `out`, built, and the audit sessions
+//   `a2`, `a`, `B` created in that order (T10.7-5's names). Each fixed order
+//   differs from the orders a product would plausibly emit instead — name
+//   order, group-by-group or glob-by-glob discovery order, a case-folded
+//   order, per-source or per-kind grouping, creation order — which
+//   `checkOrderFixtureInventoryStaging` proves harness-side before any
+//   invocation. Flag-less and `--json` forms against one expectation, each
+//   list form-exact (12.7): the spec groups, code groups, profiles, and
+//   rules in configuration order — the names first, `tests`' globs exactly
+//   as configured, then the whole resolved entries with every default and
+//   inferred kind explicit, as T11.6-2 writes them, and the whole view;
+//   `sources` in byte order — app/p.ts, specs/a/B.mdx, specs/a/a.mdx,
+//   specs/z/Z.mdx, web/w.ts — never group by group, glob by glob, or
+//   case-folded, the two-group files' `groups` each `tests` then `product`
+//   (configuration order, never byte order); `derived` in byte order of
+//   `source`, each Markdown destination under `out`; `recorded` in byte
+//   order (decoder-enforced), the three `out/` Markdown paths first and
+//   every `specs/` module and companion path after them — never grouped per
+//   source or per kind — the modules and Markdown pinned present and every
+//   further entry a 13.1-attributable companion; `sessions` exactly
+//   `.xspec/reviews/B.json`, `.xspec/reviews/a.json`,
+//   `.xspec/reviews/a2.json`, byte order of file name, never creation order;
+//   the journal unoccupied, no journaled operation having touched the
+//   workspace.
 //
 // - lock-path arms (SPEC 11.6, 12.7, 13.4, 13.5, 14.23), each on a fresh
 //   CONF-CORE-shaped workspace (CORE_DECL, section-13.5.ts), freshly built,
 //   `inventory` run bounded (a product opening a staged FIFO fails
 //   diagnosed at the bound, H-8): `.xspec` a plain file, and a symbolic link
-//   to the workspace's own area relocated outside it (graph data, a
-//   journal, the valid session `s`; T13.5-10(a)'s stagings,
-//   section-13.5-ii.ts) — exit 1 with T10.1-6's condition-23 finding alone,
-//   concerning `.xspec`, `locations` []; a plain file at `.xspec/lock`; a
-//   lock directory holding a directory (`reviews`, holding `s.json`) and a
-//   FIFO (`t.json`) — session-file names, so a product selecting sessions
-//   anywhere under the area lists them; a dead run's entry (a held `rename`
-//   killed under T13.5-3's discipline, helpers/lock-staging.ts
-//   `killHeldRun`), alone and then beside that directory and FIFO; and,
-//   while `rename specs/A.mdx a a2` is held at 13.5's seam, the inventory
-//   run once it holds — each but the area arms finding-free, exit 0. Every
-//   answer reports `lock` exactly ".xspec/lock" and lists nothing at or
-//   under the lock path in `sources`, the derived map, `recorded`, or
-//   `sessions`; after each, the held arm's held-state comparison against
-//   the `rename`'s pre-invocation state, then H-6's inclusion check
-//   (helpers/lock-state.ts `captureLockPath` then
+//   to the workspace's own area relocated outside it — a directory holding
+//   graph data, a journal, and the valid session `s` (T13.5-10(a)'s
+//   stagings, section-13.5-ii.ts; T10.1-6's two occupants), the link's
+//   target verified to hold `journal` and `reviews/s.json` first — exit 1
+//   with T10.1-6's condition-23 finding alone, concerning `.xspec`,
+//   `locations` [], `recorded` unavailable, and nothing read below such an
+//   occupant (13.4): `journal` {".xspec/journal", occupied: false} and
+//   `sessions` [], where a product reading through the link reports the
+//   target's journal occupied and lists its session; a plain file at
+//   `.xspec/lock`; a lock directory holding a directory (`reviews`, holding
+//   `s.json`) and a FIFO (`t.json`) — session-file names, so a product
+//   selecting sessions anywhere under the area lists them; a dead run's
+//   entry (a held `rename` killed under T13.5-3's discipline,
+//   helpers/lock-staging.ts `killHeldRun`), alone and then beside that
+//   directory and FIFO; and, while `rename specs/A.mdx a a2` is held at
+//   13.5's seam, the inventory run once it holds — each but the area arms
+//   finding-free, exit 0, `journal` {".xspec/journal", occupied} with
+//   `occupied` as the harness finds the journal path (absent: no journaled
+//   operation completes on these workspaces, a held run modifying nothing
+//   before its hold is lifted, 13.5). Every answer reports `lock` exactly
+//   ".xspec/lock" and lists nothing at or under the lock path in `sources`,
+//   the derived map, `recorded`, or `sessions`; after each, the held arm's
+//   held-state comparison against the `rename`'s pre-invocation state, then
+//   H-6's inclusion check (helpers/lock-state.ts `captureLockPath` then
 //   `assertLockPathAsCaptured`: whatever occupied the lock path — nothing,
 //   a leftover, or the holder's entry — occupies it byte-identical, nothing
 //   added beside it), and each staging in place, a link's target untouched,
@@ -334,6 +371,7 @@ import type {
   InventoryConfigurationView,
   InventoryDerivedEntry,
   InventoryDocument,
+  InventoryGroupMembership,
   InventoryJournalStatus,
   InventoryPolicySelector,
   InventoryResolvedMap,
@@ -395,7 +433,14 @@ import type {
   RunResult,
 } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
+import type { EntryKind } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import {
+  ORDER_FIXTURE_CONFIG,
+  ORDER_FIXTURE_FILES,
+  ORDER_FIXTURE_SESSION_NAMES,
+  stageOrderFixture,
+} from "./section-11.4.js";
 import { CORE_DECL, runBounded } from "./section-13.5.js";
 import { obstructArea, relocateAreaBehindLink } from "./section-13.5-ii.js";
 import { liftAndWait, withHeldRun } from "./section-13.5-iii.js";
@@ -1963,8 +2008,9 @@ const T11_6_2 = defineProductTest({
 // emission is enabled so the post-build record carries modules AND Markdown;
 // the lag arm rewrites the configuration to the emission-off twin (still
 // valid — a configuration error would preempt the inventory, 14.14) without
-// rebuilding. The order workspace's fixtures (code groups, profiles, and
-// rules against name byte order) follow the sessions workspace's below.
+// rebuilding. The order fixture's expectations and its harness-side
+// self-check follow the sessions workspace's fixture below (the fixture
+// itself is section-11.4.ts's, staged by `stageOrderFixture`).
 
 const DURABLES_EMIT_CONFIG = `import { defineConfig } from "xspec"
 
@@ -2149,7 +2195,13 @@ function assertGraphDataArea(actual: PathValue, context: string): void {
   );
 }
 
-/** The journal member: `{".xspec/journal", occupied}` byte-exact (11.6). */
+/**
+ * The journal member: exactly `{"path": ".xspec/journal", "occupied": …}`
+ * (the member set decoder-enforced, H-3) — its `path` the literal
+ * workspace-relative journal path whether or not anything occupies it,
+ * never `journal`, `.xspec`, or `.xspec/journal/` (SPEC 6.1, 11.6, 12.7),
+ * and `occupied` the expected presence (TEST-SPEC T11.6-3: in every arm).
+ */
 function assertJournalStatus(
   actual: InventoryJournalStatus,
   occupied: boolean,
@@ -2157,19 +2209,34 @@ function assertJournalStatus(
 ): void {
   if (actual.path !== JOURNAL_PATH) {
     fail(
-      `${context}: the inventory reports the journal path — xspec maintains ` +
-        `the journal at ${JSON.stringify(JOURNAL_PATH)} (SPEC 6.1, 11.6); ` +
-        `got ${renderPathValue(actual.path)}`,
+      `${context}: the inventory reports the journal path as the literal ` +
+        `workspace-relative path ${JSON.stringify(JOURNAL_PATH)} — xspec ` +
+        `maintains the journal there — whether or not anything occupies it, ` +
+        `never relative to the area, the area itself, or with a trailing ` +
+        `separator (SPEC 6.1, 11.6, 12.7); got ${renderPathValue(actual.path)}`,
     );
   }
   if (actual.occupied !== occupied) {
     fail(
       `${context}: journal occupancy must be ${String(occupied)} — ` +
         `occupancy is presence alone, whatever kind of filesystem object ` +
-        `occupies the path, and an absent journal is an empty journal ` +
-        `(SPEC 11.6, 6.1); got ${String(actual.occupied)}`,
+        `occupies the path, an absent journal is an empty journal, and ` +
+        `nothing below an area path holding no directory is read (SPEC ` +
+        `11.6, 6.1, 13.4); got ${String(actual.occupied)}`,
     );
   }
+}
+
+/**
+ * Whether anything occupies the journal path as the harness finds it,
+ * never through a link: `.xspec` itself a directory (below an area path
+ * holding no directory nothing is read, the journal there unoccupied to
+ * the inventory, SPEC 13.4, 11.6) and anything at all at `.xspec/journal`
+ * — occupancy is presence alone (SPEC 11.6, 6.1).
+ */
+async function journalPathOccupied(workspace: TestWorkspace): Promise<boolean> {
+  if ((await workspace.kind(GRAPH_DATA_AREA_PATH)) !== "dir") return false;
+  return (await workspace.kind(JOURNAL_PATH)) !== "absent";
 }
 
 /**
@@ -2296,140 +2363,497 @@ const T11_6_3_SESSIONS_SEUL = stagedMdx(
   '<S id="seul">\nSeul.\n</S>\n',
 );
 
-// T11.6-3's order workspace is created after the body's first product
-// invocation too, so its configuration and its code source are TypeScript
-// staged-source records (helpers/staged-ts.ts; S-9's TypeScript and timing
-// clauses), both well-formed. The configuration declares every list of the
-// resolved view against name byte order — spec groups `zspec` before
-// `aspec`, code groups `zcode` before `acode`, coverage profiles `zprofil`
-// before `aprofil`, policy rules `zregle` before `aregle` — and `zcode`'s
-// globs against byte order (`src/…` before `lib/…`), so 11.6's
-// configuration-order clause has teeth on every list it governs: a product
-// listing any of them by name bytes, or reversed, fails. Each profile and
-// rule is valid (SPEC 7.4, 7.5; an invalid configuration is 14.14 at load,
-// preempting the inventory) and spells a different mix of explicit and
-// defaulted fields, so the whole-entry compares pin complete definitions;
-// the inventory evaluates neither (SPEC 11.6). No spec source is staged:
-// a group matching no file is valid (SPEC 7).
-const ORDER_CONFIG = stagedTs(
-  "T11.6-3 order workspace xspec.config.ts — groups, profiles, and rules each declared against name byte order",
-  `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    zspec: ["specs/**/*.mdx"],
-    aspec: ["notes/**/*.mdx"]
-  },
-  code: {
-    zcode: ["src/**/*.ts", "lib/**/*.ts"],
-    acode: ["lib/**/*.ts"]
-  },
-  coverage: [
-    {
-      name: "zprofil",
-      target: "zspec",
-      targets: "all",
-      boundary: "zcode",
-      mode: "transitive"
-    },
-    {
-      name: "aprofil",
-      target: "aspec",
-      targetTags: ["t"],
-      boundary: "acode",
-      boundaryKind: "code",
-      mode: "direct",
-      edgeKinds: ["embeds"]
-    }
-  ],
-  policy: [
-    {
-      name: "zregle",
-      type: "allowedOnly",
-      from: { group: "zcode" },
-      to: { group: "zspec", kind: "spec" }
-    },
-    {
-      name: "aregle",
-      type: "forbidden",
-      from: { files: "src/**/*.ts" },
-      to: { tags: ["t"] },
-      kinds: ["references"]
-    }
-  ]
-})
-`,
-);
+// --- T11.6-3's order fixture: its expected inventory --------------------------
+//
+// TEST-SPEC T11.6-3 pins the inventory's orders (SPEC 11.6, 12.7) "on an
+// order fixture under which each fixed order differs from the orders a
+// product would plausibly emit instead". section-11.4.ts stages it whole
+// (`stageOrderFixture`: the configuration `ORDER_FIXTURE_CONFIG`, the spec
+// and code sources of `ORDER_FIXTURE_FILES` — staged-source records named
+// for T11.4-1, T11.4-2, and T11.6-3, each body staging the fixture after its
+// first product invocation (S-9) — then `build` and the audit sessions
+// `ORDER_FIXTURE_SESSION_NAMES`, `a2`, `a`, `B`, in that order). Below: its
+// expected inventory, member by member, and the harness-side proof that
+// every order pinned on it has teeth (`checkOrderFixtureInventoryStaging`).
 
 /**
- * The order workspace's one source: matched by both code groups (`zcode`
- * through its second glob), so its memberships arrive in configuration
- * order — `zcode` before `acode` (SPEC 11.6: a file's groups in
- * configuration order; 7.2 bars only a spec-and-code double match).
+ * The order fixture's resolved configuration view (SPEC 11.6, 12.7): every
+ * list in configuration order — spec groups `tests` before `product`, code
+ * groups `web` before `app`, profiles `z-cov` before `a-cov`, rules `z-rule`
+ * before `a-rule`, each pair in reverse byte order of name, and `tests`'
+ * globs exactly as configured, out of byte order — each entry carried with
+ * its complete definition and every default and inferred kind explicit, as
+ * T11.6-2 writes them: each profile's `targetTags` null, `targets`
+ * "leaves", `boundaryKind` inferred, and `edgeKinds` all three (7.4); each
+ * rule's selector kinds inferred and `kinds` all three (7.5); Markdown
+ * emitted under `out` (7.3).
  */
-const T11_6_3_ORDER_CODE = stagedTs(
-  "T11.6-3 order workspace lib/deux.ts — a code source in both code groups",
-  "export const deux = 2;\n",
-);
-
-/**
- * The order workspace's resolved configuration view (SPEC 11.6, 12.7): every
- * list in configuration order, each entry carried with its complete
- * definition and every default and inferred kind explicit, as T11.6-2 writes
- * them — `zprofil`'s `targetTags` null, `boundaryKind` inferred, and
- * `edgeKinds` all three (7.4); `zregle`'s `from` kind inferred and `kinds`
- * all three (7.5); the explicit `targets`, `boundaryKind`, selector `kind`,
- * and set-valued members reported as configured, in their value forms.
- */
-const ORDER_EXPECTED_CONFIGURATION: InventoryConfigurationView = {
+const ORDER_FIXTURE_CONFIGURATION: InventoryConfigurationView = {
   specs: [
-    { name: "zspec", globs: ["specs/**/*.mdx"] },
-    { name: "aspec", globs: ["notes/**/*.mdx"] },
+    { name: "tests", globs: ["specs/z/*.mdx", "specs/a/*.mdx"] },
+    { name: "product", globs: ["specs/a/*.mdx"] },
   ],
   code: [
-    { name: "zcode", globs: ["src/**/*.ts", "lib/**/*.ts"] },
-    { name: "acode", globs: ["lib/**/*.ts"] },
+    { name: "web", globs: ["web/*.ts"] },
+    { name: "app", globs: ["app/*.ts"] },
   ],
-  markdown: { emit: false, outDir: null },
+  markdown: { emit: true, outDir: "out" },
   coverage: [
     {
-      name: "zprofil",
-      target: "zspec",
+      name: "z-cov",
+      target: "tests",
       targetTags: null,
-      targets: "all",
-      boundary: "zcode",
+      targets: "leaves",
+      boundary: "web",
+      boundaryKind: "code",
+      mode: "direct",
+      edgeKinds: ALL_EDGE_KINDS,
+    },
+    {
+      name: "a-cov",
+      target: "product",
+      targetTags: null,
+      targets: "leaves",
+      boundary: "app",
       boundaryKind: "code",
       mode: "transitive",
       edgeKinds: ALL_EDGE_KINDS,
     },
-    {
-      name: "aprofil",
-      target: "aspec",
-      targetTags: ["t"],
-      targets: "leaves",
-      boundary: "acode",
-      boundaryKind: "code",
-      mode: "direct",
-      edgeKinds: ["embeds"],
-    },
   ],
   policy: [
     {
-      name: "zregle",
-      type: "allowedOnly",
-      from: { group: "zcode", kind: "code" },
-      to: { group: "zspec", kind: "spec" },
+      name: "z-rule",
+      type: "forbidden",
+      from: { group: "web", kind: "code" },
+      to: { group: "product", kind: "spec" },
       kinds: ALL_EDGE_KINDS,
     },
     {
-      name: "aregle",
-      type: "forbidden",
-      from: { files: "src/**/*.ts" },
-      to: { tags: ["t"] },
-      kinds: ["references"],
+      name: "a-rule",
+      type: "allowedOnly",
+      from: { group: "app", kind: "code" },
+      to: { group: "tests", kind: "spec" },
+      kinds: ALL_EDGE_KINDS,
     },
   ],
 };
+
+/**
+ * The memberships of a file both spec groups match: `tests` then `product`,
+ * configuration order — never byte order of name (SPEC 11.6, 7.1).
+ */
+const TESTS_THEN_PRODUCT: readonly InventoryGroupMembership[] = [
+  { name: "tests", kind: "spec" },
+  { name: "product", kind: "spec" },
+];
+
+/** One expected `sources` entry of the order fixture (SPEC 11.6, 12.7). */
+interface OrderFixtureSource {
+  readonly path: string;
+  readonly groups: readonly InventoryGroupMembership[];
+}
+
+/**
+ * The order fixture's discovered sources (SPEC 11.6, 12.7): in byte order of
+ * workspace-relative path — app/p.ts, specs/a/B.mdx, specs/a/a.mdx,
+ * specs/z/Z.mdx, web/w.ts — each with its memberships in configuration
+ * order.
+ */
+const ORDER_FIXTURE_SOURCES: readonly OrderFixtureSource[] = [
+  { path: "app/p.ts", groups: [{ name: "app", kind: "code" }] },
+  { path: "specs/a/B.mdx", groups: TESTS_THEN_PRODUCT },
+  { path: "specs/a/a.mdx", groups: TESTS_THEN_PRODUCT },
+  { path: "specs/z/Z.mdx", groups: [{ name: "tests", kind: "spec" }] },
+  { path: "web/w.ts", groups: [{ name: "web", kind: "code" }] },
+];
+
+/** One expected `derived` entry of the order fixture (SPEC 11.6, 12.7). */
+interface OrderFixtureDerived {
+  readonly source: string;
+  readonly module: string;
+  readonly markdown: string;
+}
+
+/**
+ * The order fixture's derived map (SPEC 11.6, 13.1, 7.3): one entry per spec
+ * source in byte order of `source`, each Markdown destination `outDir`
+ * joined to the source's default emit path.
+ */
+const ORDER_FIXTURE_DERIVED: readonly OrderFixtureDerived[] = [
+  {
+    source: "specs/a/B.mdx",
+    module: "specs/a/B.xspec.ts",
+    markdown: "out/specs/a/B.md",
+  },
+  {
+    source: "specs/a/a.mdx",
+    module: "specs/a/a.xspec.ts",
+    markdown: "out/specs/a/a.md",
+  },
+  {
+    source: "specs/z/Z.mdx",
+    module: "specs/z/Z.xspec.ts",
+    markdown: "out/specs/z/Z.md",
+  },
+];
+
+/**
+ * The order fixture's record after its staging `build` (SPEC 13.3, 11.6):
+ * the three modules and the three Markdown files emitted under `out`
+ * pinned present, every further entry a companion attributable to its
+ * source. Its byte order — every `out/` Markdown path before every
+ * `specs/` module and companion path (o 0x6F < s 0x73) — is
+ * decoder-enforced (strictly ascending), which per-source and per-kind
+ * groupings fail (`checkOrderFixtureInventoryStaging`).
+ */
+const ORDER_FIXTURE_RECORDED: RecordedExpectation = {
+  pinned: ORDER_FIXTURE_DERIVED.flatMap((entry) => [
+    entry.markdown,
+    entry.module,
+  ]),
+  specSources: ORDER_FIXTURE_DERIVED.map((entry) => entry.source),
+};
+
+/**
+ * The order fixture's sessions (SPEC 11.6, 10.1): byte order of file name —
+ * "B.json" (B 0x42) < "a.json" < "a2.json" (. 0x2E < 2 0x32) — never the
+ * creation order `a2`, `a`, `B`, nor a case-folded one.
+ */
+const ORDER_FIXTURE_SESSIONS: readonly string[] = [
+  `${GRAPH_DATA_AREA_PATH}/reviews/B.json`,
+  `${GRAPH_DATA_AREA_PATH}/reviews/a.json`,
+  `${GRAPH_DATA_AREA_PATH}/reviews/a2.json`,
+];
+
+/** `items` sorted by the UTF-8 bytes of `key` (harness-side, 11.6's order). */
+function sortedByKeyBytes(
+  items: readonly string[],
+  key: (item: string) => string = (item) => item,
+): string[] {
+  return [...items].sort((a, b) =>
+    Buffer.compare(Buffer.from(key(a), "utf8"), Buffer.from(key(b), "utf8")),
+  );
+}
+
+/** A workspace-relative path's last segment. */
+function lastSegment(file: string): string {
+  return file.slice(file.lastIndexOf("/") + 1);
+}
+
+/**
+ * Fixture self-check (harness-side, before any product invocation): the
+ * expectations above are the staged order fixture's, and every order they
+ * pin differs from each order TEST-SPEC T11.6-3 names a product as
+ * plausibly emitting instead, so a product emitting one fails an exact
+ * compare or the decode's strictly-ascending check rather than coinciding
+ * with the asserted list:
+ * - the configuration's spec- and code-group lines spell the expected
+ *   groups with their globs, and its profile and rule names occur in the
+ *   expected order; each of the four lists differs from name byte order,
+ *   `tests`' globs from their byte order, and a two-group file's
+ *   memberships from the byte order of their names;
+ * - the expected sources are exactly the fixture's staged files in byte
+ *   order of path, the derived map's sources its `.mdx` files, and the
+ *   expected sessions its session names' files in byte order of file name;
+ * - `sources` differs from group-by-group or glob-by-glob discovery order
+ *   (spec or code groups met first, whatever order a listing yields within
+ *   one glob), from a case-folded order, and from spec sources listed
+ *   before or after the code sources;
+ * - `recorded`'s byte order of the pinned paths begins with the `out/`
+ *   Markdown and differs from per-source grouping (each source's Markdown
+ *   beside its module) and from modules before Markdown;
+ * - `sessions` differs from creation order and from a case-folded order.
+ * A failure is a staging defect of the harness, never a product failure.
+ */
+function checkOrderFixtureInventoryStaging(): void {
+  const misstaged = (what: string): never =>
+    fail(
+      `§11.6 fixture self-check — T11.6-3's order fixture: ${what}, so the ` +
+        `order arm could not see a product emitting that order (a ` +
+        `harness-side staging error, not a product failure)`,
+    );
+  const same = (a: readonly string[], b: readonly string[]): boolean =>
+    JSON.stringify(a) === JSON.stringify(b);
+  const view = ORDER_FIXTURE_CONFIGURATION;
+
+  const config: string =
+    typeof ORDER_FIXTURE_CONFIG.source === "string"
+      ? ORDER_FIXTURE_CONFIG.source
+      : misstaged("its configuration is no text");
+  let previous = -1;
+  for (const group of [...view.specs, ...view.code]) {
+    const line =
+      `    ${group.name}: ` +
+      `[${group.globs.map((glob) => JSON.stringify(glob)).join(", ")}]`;
+    const at = config.indexOf(line);
+    if (at <= previous) {
+      misstaged(
+        `its configuration spells no group line ${JSON.stringify(line)} ` +
+          `after the previous group's`,
+      );
+    }
+    previous = at;
+  }
+  for (const entry of [...view.coverage, ...view.policy]) {
+    const at = config.indexOf(`name: ${JSON.stringify(entry.name)}`);
+    if (at <= previous) {
+      misstaged(
+        `its configuration names no profile or rule ` +
+          `${JSON.stringify(entry.name)} after the previous one`,
+      );
+    }
+    previous = at;
+  }
+  const lists: readonly (readonly [string, readonly string[]])[] = [
+    ["spec groups", view.specs.map((entry) => entry.name)],
+    ["code groups", view.code.map((entry) => entry.name)],
+    ["coverage profiles", view.coverage.map((entry) => entry.name)],
+    ["policy rules", view.policy.map((entry) => entry.name)],
+    ["`tests`' globs", view.specs[0]!.globs],
+    ["a two-group file's memberships", TESTS_THEN_PRODUCT.map((g) => g.name)],
+  ];
+  for (const [what, list] of lists) {
+    if (same(sortedByKeyBytes(list), list)) {
+      misstaged(
+        `its ${what} ${JSON.stringify(list)} are in byte order, so ` +
+          `configuration order coincides with it`,
+      );
+    }
+  }
+
+  const paths = ORDER_FIXTURE_SOURCES.map((entry) => entry.path);
+  const staged = Object.keys(ORDER_FIXTURE_FILES).filter(
+    (file) => file !== CONFIG_FILE,
+  );
+  if (!same(sortedByKeyBytes(staged), paths)) {
+    misstaged(
+      `the expected sources ${JSON.stringify(paths)} are not its staged ` +
+        `files ${JSON.stringify(staged)} in byte order of path`,
+    );
+  }
+  const specPaths = paths.filter((file) => file.endsWith(".mdx"));
+  const codePaths = paths.filter((file) => !file.endsWith(".mdx"));
+  if (
+    !same(
+      ORDER_FIXTURE_DERIVED.map((entry) => entry.source),
+      specPaths,
+    )
+  ) {
+    misstaged("the expected derived map's sources are not its spec sources");
+  }
+  const sessionFiles = ORDER_FIXTURE_SESSION_NAMES.map(
+    (name) => `${GRAPH_DATA_AREA_PATH}/reviews/${name}.json`,
+  );
+  if (
+    !same(sortedByKeyBytes(sessionFiles, lastSegment), ORDER_FIXTURE_SESSIONS)
+  ) {
+    misstaged(
+      `the expected sessions ${JSON.stringify(ORDER_FIXTURE_SESSIONS)} are ` +
+        `not its session names' files in byte order of file name`,
+    );
+  }
+
+  // Discovery meets the files of the first glob of the first group first.
+  const matchesGlob = (glob: string, file: string): boolean => {
+    const star = glob.indexOf("*");
+    const rest = file.slice(star);
+    return (
+      file.startsWith(glob.slice(0, star)) &&
+      !rest.includes("/") &&
+      rest.endsWith(glob.slice(star + 1))
+    );
+  };
+  for (const glob of [...view.specs, ...view.code].flatMap((g) => g.globs)) {
+    if (!/^[a-z/]+\/\*\.[a-z]+$/.test(glob)) {
+      misstaged(`the glob ${JSON.stringify(glob)} is no plain "<dir>/*.<ext>"`);
+    }
+  }
+  for (const [what, first] of [
+    ["spec groups met first", view.specs[0]!.globs[0]!],
+    ["code groups met first", view.code[0]!.globs[0]!],
+  ] as const) {
+    const metFirst = paths.filter((file) => matchesGlob(first, file));
+    if (metFirst.length === 0 || metFirst.includes(paths[0]!)) {
+      misstaged(
+        `discovery order (${what}) meets ${JSON.stringify(metFirst)} first ` +
+          `(the files of ${JSON.stringify(first)}), which may coincide with ` +
+          `the byte order's first source`,
+      );
+    }
+  }
+  const sourceAlternatives: readonly (readonly [string, readonly string[]])[] =
+    [
+      ["a case-folded order", sortedByKeyBytes(paths, (p) => p.toLowerCase())],
+      ["spec sources before code sources", [...specPaths, ...codePaths]],
+      ["code sources before spec sources", [...codePaths, ...specPaths]],
+    ];
+  for (const [what, order] of sourceAlternatives) {
+    if (same(order, paths)) {
+      misstaged(`the sources' byte order coincides with ${what}`);
+    }
+  }
+
+  const markdown = ORDER_FIXTURE_DERIVED.map((entry) => entry.markdown);
+  const modules = ORDER_FIXTURE_DERIVED.map((entry) => entry.module);
+  const recorded = sortedByKeyBytes(ORDER_FIXTURE_RECORDED.pinned);
+  if (
+    !same(recorded.slice(0, markdown.length), markdown) ||
+    !same(recorded.slice(markdown.length), modules)
+  ) {
+    misstaged(
+      `the pinned record's byte order ${JSON.stringify(recorded)} is not ` +
+        `the out/ Markdown paths, then the specs/ modules`,
+    );
+  }
+  const recordedAlternatives: readonly (readonly [
+    string,
+    readonly string[],
+  ])[] = [
+    [
+      "per-source grouping, Markdown first",
+      ORDER_FIXTURE_DERIVED.flatMap((e) => [e.markdown, e.module]),
+    ],
+    [
+      "per-source grouping, module first",
+      ORDER_FIXTURE_DERIVED.flatMap((e) => [e.module, e.markdown]),
+    ],
+    ["modules before Markdown", [...modules, ...markdown]],
+  ];
+  for (const [what, order] of recordedAlternatives) {
+    if (same(order, recorded)) {
+      misstaged(`the record's byte order coincides with ${what}`);
+    }
+  }
+
+  const sessionAlternatives: readonly (readonly [string, readonly string[]])[] =
+    [
+      ["creation order", sessionFiles],
+      [
+        "a case-folded order",
+        sortedByKeyBytes(sessionFiles, (file) =>
+          lastSegment(file).toLowerCase(),
+        ),
+      ],
+    ];
+  for (const [what, order] of sessionAlternatives) {
+    if (same(order, ORDER_FIXTURE_SESSIONS)) {
+      misstaged(`the sessions' byte order coincides with ${what}`);
+    }
+  }
+}
+
+/**
+ * T11.6-3's orders on one inventory answer of the order fixture (SPEC 11.6,
+ * 12.7): each pinned order by a compare of its own first — so a product
+ * emitting another order is diagnosed by name — then each member whole,
+ * form-exact. The decode has already enforced the byte orders of
+ * `sources`, `derived`, `recorded`, and `sessions` (strictly ascending, no
+ * duplicate), the exact compares pin the lists.
+ */
+function assertOrderFixtureInventory(
+  document: InventoryDocument,
+  context: string,
+): void {
+  const view = document.configuration;
+  const expected = ORDER_FIXTURE_CONFIGURATION;
+  assertSameJson(
+    view.specs.map((group) => group.name),
+    expected.specs.map((group) => group.name),
+    `${context} — the spec groups in configuration order, \`tests\` before ` +
+      `\`product\`, never by name byte order (SPEC 11.6)`,
+  );
+  assertSameJson(
+    view.specs.find((group) => group.name === "tests")?.globs,
+    expected.specs[0]!.globs,
+    `${context} — \`tests\`' globs exactly as configured: specs/z/*.mdx ` +
+      `before specs/a/*.mdx, out of byte order, never sorted (SPEC 11.6: a ` +
+      `group's globs in configuration order; 12.7: \`globs\` as configured)`,
+  );
+  assertConfigurationOrder(
+    view.specs,
+    expected.specs,
+    "the spec groups (`tests` before `product`)",
+    context,
+  );
+  assertConfigurationOrder(
+    view.code,
+    expected.code,
+    "the code groups (`web` before `app`)",
+    context,
+  );
+  assertConfigurationOrder(
+    view.coverage,
+    expected.coverage,
+    "the coverage profiles (`z-cov` before `a-cov`)",
+    context,
+  );
+  assertConfigurationOrder(
+    view.policy,
+    expected.policy,
+    "the policy rules (`z-rule` before `a-rule`)",
+    context,
+  );
+  assertSameJson(
+    view,
+    expected,
+    `${context} — the whole resolved configuration view: the four lists ` +
+      `above and Markdown emitted under \`out\` (SPEC 11.6, 7.3, 12.7)`,
+  );
+
+  assertSameJson(
+    document.sources.map((entry) => entry.path),
+    ORDER_FIXTURE_SOURCES.map((entry) => entry.path),
+    `${context} — \`sources\` in byte order of workspace-relative path — ` +
+      `app/p.ts, specs/a/B.mdx, specs/a/a.mdx, specs/z/Z.mdx, web/w.ts — ` +
+      `never group by group, glob by glob, case-folded, or spec sources ` +
+      `apart from code sources (SPEC 11.6)`,
+  );
+  for (const file of ["specs/a/B.mdx", "specs/a/a.mdx"]) {
+    assertSameJson(
+      document.sources.find((entry) => entry.path === file)?.groups,
+      TESTS_THEN_PRODUCT,
+      `${context} — ${file}'s \`groups\` \`tests\` then \`product\`: ` +
+        `configuration order, never byte order of name (SPEC 11.6: a file's ` +
+        `groups in configuration order; 7.1: a file two spec groups match ` +
+        `lies in both)`,
+    );
+  }
+  assertSameJson(
+    document.sources,
+    ORDER_FIXTURE_SOURCES,
+    `${context} — every discovered source with its memberships, form-exact ` +
+      `(SPEC 11.6, 12.7)`,
+  );
+  assertSameJson(
+    document.derived,
+    ORDER_FIXTURE_DERIVED,
+    `${context} — the derived map in byte order of \`source\`, each ` +
+      `Markdown destination under \`out\`, the workspace-relative path ` +
+      `preserved (SPEC 11.6, 13.1, 7.3)`,
+  );
+  assertRecordedDerivedPaths(
+    document.recorded,
+    ORDER_FIXTURE_RECORDED,
+    `${context} — \`recorded\` in byte order (decoder-enforced): the three ` +
+      `out/ Markdown paths before every specs/ module and companion path, ` +
+      `never grouped per source or per kind; the modules and Markdown ` +
+      `pinned present, every further entry a 13.1-attributable companion`,
+  );
+  assertSameJson(
+    document.sessions,
+    ORDER_FIXTURE_SESSIONS,
+    `${context} — \`sessions\` in byte order of file name — B.json (B ` +
+      `0x42) < a.json < a2.json (. 0x2E < 2 0x32) — never creation order ` +
+      `(a2, a, B) or a case-folded one (SPEC 11.6, 10.1)`,
+  );
+  assertJournalStatus(
+    document.journal,
+    false,
+    `${context} — the journal absent: \`build\` and \`review create\` ` +
+      `journal nothing (SPEC 6.1)`,
+  );
+  assertGraphDataArea(document.graphData, context);
+}
 
 /**
  * 11.6's ordering contract, configuration-order half, on one list of the
@@ -2564,7 +2988,13 @@ async function withCoreWorkspace(
  * blocks — fails diagnosed at the bound, H-8; the harness never opens one,
  * helpers/lock-staging.ts). The answer first: exit 0 and finding-free, or,
  * where `.xspec` holds no directory, exit 1 with T10.1-6's condition-23
- * finding alone — concerning `.xspec`, `locations` [] (SPEC 11.6, 14.23);
+ * finding alone — concerning `.xspec`, `locations` [] (SPEC 11.6, 14.23) —
+ * `recorded` explicitly unavailable, and nothing read below such an
+ * occupant (SPEC 13.4): `journal` `{".xspec/journal", occupied: false}` and
+ * `sessions` [], whatever a link's target holds; elsewhere `journal`
+ * `{".xspec/journal", occupied}` with `occupied` the journal path's
+ * presence as the harness finds it before the run (`journalPathOccupied`;
+ * absent on these workspaces, no journaled operation completing on them);
  * `lock` exactly `.xspec/lock`; nothing at or under the lock path in any
  * other member. Then, where a run holds (`heldBaseline`, its pre-invocation
  * state), the held-state comparison — every path but the lock path
@@ -2585,6 +3015,10 @@ async function expectLockPathInventory(
   context: string,
   heldBaseline?: DirectorySnapshot,
 ): Promise<void> {
+  const areaOccupied = answer === "area-occupied";
+  const journalOccupied = areaOccupied
+    ? false
+    : await journalPathOccupied(workspace);
   const capture = await captureLockPath(workspace.root);
   const result = await runBounded(
     product,
@@ -2592,7 +3026,6 @@ async function expectLockPathInventory(
     LOCK_ARM_INVENTORY,
     context,
   );
-  const areaOccupied = answer === "area-occupied";
   assertExitCode(
     result,
     areaOccupied ? 1 : 0,
@@ -2633,6 +3066,27 @@ async function expectLockPathInventory(
       `${context} — a path-concerned condition is unlocated: locations [] ` +
         `(SPEC 12.7)`,
     );
+    assertSameJson(
+      document.recorded,
+      { state: "unavailable" },
+      `${context} — the record-supplied datum explicitly unavailable: the ` +
+        `record reads as unreadable under such an occupant of the area's ` +
+        `own path, never as an empty record (SPEC 14.23, 11.6, 13.4)`,
+    );
+    assertJournalStatus(
+      document.journal,
+      false,
+      `${context} — with \`.xspec\` no directory nothing below it is ` +
+        `read: the journal there, a link's target's included, is unoccupied ` +
+        `to the inventory (SPEC 11.6, 13.4, 6.1)`,
+    );
+    assertSameJson(
+      document.sessions,
+      [],
+      `${context} — no session while the area's own path holds no ` +
+        `directory: nothing below it is listed, a link's target's ` +
+        `reviews/s.json included (SPEC 11.6, 10.1, 13.4)`,
+    );
   } else {
     assertSameJson(
       document.findings,
@@ -2640,6 +3094,14 @@ async function expectLockPathInventory(
       `${context} — finding-free: never a condition-23 finding (the lock ` +
         `path with everything under it is no part of the record, SPEC 13.4, ` +
         `14.23) nor any other (SPEC 11.6)`,
+    );
+    assertJournalStatus(
+      document.journal,
+      journalOccupied,
+      `${context} — the journal path as the harness found it before the ` +
+        `run, ${journalOccupied ? "occupied" : "absent"} (no journaled ` +
+        `operation completes on these workspaces: a held run modifies ` +
+        `nothing before its hold is lifted, SPEC 13.5)`,
     );
   }
   assertLockMember(document.lock, context);
@@ -2684,8 +3146,10 @@ interface AreaArm {
  * The area arms' occupants of `.xspec` — T10.1-6's two, staged as
  * T13.5-10(a) stages them (section-13.5-ii.ts): a plain file in place of
  * the area's directory, and a symbolic link to the workspace's own area
- * relocated outside it, a directory holding graph data, a journal, and the
- * valid session `s`.
+ * relocated outside it, a directory holding graph data, a journal (the
+ * area's, or an empty one where none was written), and the valid session
+ * `s` — TEST-SPEC T11.6-3's "symbolic link to a directory holding a
+ * journal".
  */
 const AREA_ARMS: readonly AreaArm[] = [
   {
@@ -2706,11 +3170,65 @@ const AREA_ARMS: readonly AreaArm[] = [
 ];
 
 /**
+ * The link arm's staging premise: every link the staging made targets a
+ * directory holding a journal and the session `s`, so the arm's
+ * `occupied` false and `sessions` [] are no vacuous observations — a
+ * product reading through the link reports the journal occupied and lists
+ * `.xspec/reviews/s.json` (SPEC 11.6, 13.4). The journal is
+ * `relocateAreaBehindLink`'s to provide, its absence a harness error; the
+ * session is the product's `review create` write (SPEC 10.1), its absence a
+ * diagnosed failure. The harness only examines the target, never writing
+ * through the link.
+ */
+async function assertLinkTargetsHoldDurables(
+  staged: StagedLeftover,
+  context: string,
+): Promise<void> {
+  for (const outside of staged.outside) {
+    const occupant = async (rel: string): Promise<EntryKind> => {
+      let stats;
+      try {
+        stats = await fsp.lstat(
+          Buffer.concat([outside.target, Buffer.from(`/${rel}`)]),
+        );
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "ENOTDIR") return "absent";
+        throw error;
+      }
+      if (stats.isSymbolicLink()) return "symlink";
+      if (stats.isDirectory()) return "dir";
+      if (stats.isFile()) return "file";
+      return "other";
+    };
+    if ((await occupant("journal")) === "absent") {
+      throw new Error(
+        `harness error: ${context} — the link's target ` +
+          `${outside.target.toString()} holds no journal, though ` +
+          `relocateAreaBehindLink stages one where the area held none`,
+      );
+    }
+    const session = await occupant("reviews/s.json");
+    if (session !== "file") {
+      fail(
+        `${context} — staging premise: \`review create --strategy audit ` +
+          `--name s\` stores the session at .xspec/reviews/s.json as a ` +
+          `plain file (SPEC 10.1), which the link's target then holds; ` +
+          `found ${session} there`,
+      );
+    }
+  }
+}
+
+/**
  * T11.6-3's area arms: on a freshly built workspace holding the audit
- * session `s`, each occupant of `.xspec` staged in turn (`AREA_ARMS`), then
- * `inventory`: exit 1 with T10.1-6's one condition-23 finding, `lock`
- * exactly `.xspec/lock`, nothing at or under the lock path listed, the
- * occupant byte-identical in place and a link's target untouched.
+ * session `s`, each occupant of `.xspec` staged in turn (`AREA_ARMS`; the
+ * link's target verified to hold the journal and the session first), then
+ * `inventory`: exit 1 with T10.1-6's one condition-23 finding, `recorded`
+ * unavailable, nothing read below the occupant — `journal`
+ * `{".xspec/journal", occupied: false}`, `sessions` [] — `lock` exactly
+ * `.xspec/lock`, nothing at or under the lock path listed, the occupant
+ * byte-identical in place and a link's target untouched.
  */
 export async function runT1163AreaArms(product: ProductBinding): Promise<void> {
   for (const arm of AREA_ARMS) {
@@ -2730,6 +3248,7 @@ export async function runT1163AreaArms(product: ProductBinding): Promise<void> {
           `session the area then holds (SPEC 10.1, 10.7)`,
       );
       const staged = await arm.stage(workspace, context);
+      await assertLinkTargetsHoldDurables(staged, context);
       await expectLockPathInventory(
         product,
         workspace,
@@ -2879,8 +3398,13 @@ export async function runT1163HeldArm(product: ProductBinding): Promise<void> {
 const T11_6_3 = defineProductTest({
   id: "T11.6-3",
   title:
-    'inventory record, area, durables, order, lock path: `recorded` is [] before any generation (never null, never unavailable) and after a build lists the recorded derived paths in byte order — generated modules and emitted Markdown pinned present, every further entry a companion attributable to its source through the 13.1 naming scheme — and after a configuration change without rebuild it lags, reported as recorded, not as configured (emission flipped off: `derived[*].markdown` null while the previously emitted `.md` paths stay recorded); the graph-data area is reported unconditionally — before any build — as ".xspec" with no trailing separator; a foreign file placed under `.xspec/` appears in no inventory list and is never claimed (its name absent from the document bytes); `journal` is {".xspec/journal", occupied} with occupancy by presence alone — absent false; a garbage-content plain file, a directory, and a broken symbolic link each true, content unread, no 14.13 from inventory, the answer finding-free; sessions are selected by name alone — a product-written session, a garbage-content S.json, and a directory named S2.json all listed (content unread, no 14.21 here) in byte order of file name ("S.json" < "S2.json" < "ancien.json", inverting under case folding), while notes.txt and .foo.json are never listed; groups, profiles, and rules stay in configuration order — the record workspace\'s spec groups `zz` before `aa`, and an order workspace declaring two spec groups, two code groups, two coverage profiles, and two policy rules, each pair against name byte order (`zspec`/`aspec`, `zcode`/`acode`, `zprofil`/`aprofil`, `zregle`/`aregle`), reporting all four lists in configuration order as whole resolved entries with every default and inferred kind explicit, form-exact — `zcode`\'s globs and a two-code-group file\'s memberships in configuration order too; the lock path reported unconditionally as exactly ".xspec/lock" — before any build with `.xspec` absent, in every finding-free answer, with `.xspec` a plain file and a symbolic link to the workspace\'s own area relocated outside it (exit 1, T10.1-6\'s condition-23 finding concerning `.xspec` alone), with a plain file at `.xspec/lock`, a lock directory holding a directory and a FIFO, and a dead run\'s entry (a held `rename` killed under T13.5-3\'s discipline) alone and beside that directory and FIFO, and while a `rename` is held — nothing at or under the lock path listed in `sources`, the derived map, `recorded`, or `sessions`, each staged occupant untouched and the held run\'s entry byte-identical and alone afterwards (H-6\'s inclusion); every other answer complete and finding-free at exit 0, the pre-build state and the order workspace asserted in the flag-less and `--json` forms against one expectation (SPEC 11.6, 13.3, 13.1, 13.2, 6.1, 10.1, 12.7, 12.0, 11, 7.2, 7.4, 7.5, 13.4, 13.5, 14.23)',
+    'inventory record, area, durables, order, lock path: `recorded` is [] before any generation (never null, never unavailable) and after a build lists the recorded derived paths in byte order — generated modules and emitted Markdown pinned present, every further entry a companion attributable to its source through the 13.1 naming scheme — and after a configuration change without rebuild it lags, reported as recorded, not as configured (emission flipped off: `derived[*].markdown` null while the previously emitted `.md` paths stay recorded); the graph-data area is reported unconditionally — before any build — as ".xspec" with no trailing separator; a foreign file placed under `.xspec/` appears in no inventory list and is never claimed (its name absent from the document bytes); `journal` is exactly {"path": ".xspec/journal", "occupied": …} in every answer — its path the literal workspace-relative journal path whether or not anything occupies it — with occupancy by presence alone: absent false, before any build (`.xspec` absent) and on a built workspace no journaled operation has touched; a garbage-content plain file, a directory, and a broken symbolic link each true, content unread, no 14.13 from inventory, the answer finding-free; and with `.xspec` a plain file and a symbolic link to a directory holding a journal (the workspace\'s own area relocated outside it) false, nothing read below such an occupant — `sessions` [] and `recorded` unavailable beside T10.1-6\'s condition-23 finding; sessions are selected by name alone — a product-written session, a garbage-content S.json, and a directory named S2.json all listed (content unread, no 14.21 here) in byte order of file name ("S.json" < "S2.json" < "ancien.json", inverting under case folding), while notes.txt and .foo.json are never listed; orders on the order fixture — spec groups `tests` (globbing specs/z/*.mdx, then specs/a/*.mdx) then `product` (specs/a/*.mdx), code groups `web` then `app`, profiles `z-cov` then `a-cov`, rules `z-rule` then `a-rule`, Markdown emitted under `out`, built, and sessions created as a2, then a, then B — each fixed order differing from name, discovery, case-folded, grouped, and creation orders (checked harness-side): groups, profiles, and rules in configuration order as whole resolved entries with every default and inferred kind explicit, `tests`\' globs exactly as configured; `sources` in byte order (app/p.ts, specs/a/B.mdx, specs/a/a.mdx, specs/z/Z.mdx, web/w.ts), the two-group files\' `groups` `tests` then `product`; `derived` in byte order of `source`; `recorded` in byte order, every `out/` Markdown path before every `specs/` module and companion path; `sessions` .xspec/reviews/B.json, .xspec/reviews/a.json, .xspec/reviews/a2.json, never creation order — each form-exact — and the record workspace\'s spec groups `zz` before `aa`; the lock path reported unconditionally as exactly ".xspec/lock" — before any build with `.xspec` absent, in every finding-free answer, with `.xspec` a plain file and that symbolic link (exit 1, T10.1-6\'s condition-23 finding concerning `.xspec` alone), with a plain file at `.xspec/lock`, a lock directory holding a directory and a FIFO, and a dead run\'s entry (a held `rename` killed under T13.5-3\'s discipline) alone and beside that directory and FIFO, and while a `rename` is held — nothing at or under the lock path listed in `sources`, the derived map, `recorded`, or `sessions`, each staged occupant untouched and the held run\'s entry byte-identical and alone afterwards (H-6\'s inclusion); every other answer complete and finding-free at exit 0, the pre-build state and the order fixture asserted in the flag-less and `--json` forms against one expectation (SPEC 11.6, 13.3, 13.1, 13.2, 6.1, 10.1, 12.7, 12.0, 11, 7.1, 7.2, 7.3, 7.4, 7.5, 13.4, 13.5, 14.23)',
   run: async (product) => {
+    // Fixture self-check (harness-side, before any product invocation): the
+    // order fixture's expectations are its staging's, and every order pinned
+    // on it differs from the orders a product would plausibly emit instead.
+    checkOrderFixtureInventoryStaging();
+
     // --- record / area / journal workspace ---------------------------------
     const workspace = await TestWorkspace.create({
       files: {
@@ -2947,8 +3471,8 @@ const T11_6_3 = defineProductTest({
         // 11.6's ordering contract, configuration-order half: groups arrive
         // in configuration order — `zz` before `aa`, inverting name byte
         // order. This workspace configures no code group, profile, or rule;
-        // the order workspace below declares two of each against name byte
-        // order and pins all four lists whole.
+        // the order fixture below configures two of each in reverse byte
+        // order of name and pins all four lists whole.
         assertSameJson(
           document.configuration.specs.map((group) => group.name),
           ["zz", "aa"],
@@ -3095,6 +3619,12 @@ const T11_6_3 = defineProductTest({
           `modules stay recorded until a rebuild replaces the record: a ` +
           `product recomputing "recorded" from the current configuration ` +
           `drops the .md paths and fails here`,
+      );
+      assertJournalStatus(
+        lag.document.journal,
+        false,
+        `${lagContext} — still no journal: neither the build nor the ` +
+          `configuration change journals anything (SPEC 6.1)`,
       );
       assertStdoutOmits(lag.result, FOREIGN_TOKEN, lagContext);
 
@@ -3261,87 +3791,30 @@ const T11_6_3 = defineProductTest({
       await sessions.dispose();
     }
 
-    // --- order workspace ----------------------------------------------------
-    // 11.6's ordering contract, configuration-order half, on every list it
-    // governs: spec groups, code groups, coverage profiles, and policy
-    // rules, each pair declared against name byte order, `zcode`'s globs
-    // against byte order, and a code source in both code groups — the
-    // flag-less and `--json` forms against one expectation (JSON-only, SPEC
-    // 11). No build runs: the view is configuration alone (SPEC 11.6).
-    const order = await TestWorkspace.create({
-      files: {
-        [CONFIG_FILE]: ORDER_CONFIG,
-        "lib/deux.ts": T11_6_3_ORDER_CODE,
-      },
-    });
+    // --- order fixture ------------------------------------------------------
+    // 11.6's ordering contract on every list the inventory orders, on
+    // TEST-SPEC's order fixture (section-11.4.ts `stageOrderFixture`:
+    // created after this body's first product invocation, every file a
+    // staged-source record; built; the audit sessions a2, a, B created in
+    // that order) — the flag-less and `--json` forms against one
+    // expectation (JSON-only, SPEC 11), each list form-exact (12.7).
+    const order = await stageOrderFixture(
+      product,
+      "T11.6-3 — the order fixture",
+    );
     try {
       for (const argv of [["inventory"], ["inventory", "--json"]] as const) {
         const context =
-          `T11.6-3 — \`${argv.join(" ")}\` on the order workspace: groups, ` +
-          `profiles, and rules each declared against name byte order ` +
-          `(SPEC 11.6)`;
+          `T11.6-3 — \`${argv.join(" ")}\` on the order fixture: every ` +
+          `order differing from the orders a product would plausibly emit ` +
+          `instead (SPEC 11.6, 12.7)`;
         const { document } = await expectInventoryDocument(
           product,
           order.root,
           argv,
           context,
         );
-        const view = document.configuration;
-        assertConfigurationOrder(
-          view.specs,
-          ORDER_EXPECTED_CONFIGURATION.specs,
-          "the spec groups (`zspec` before `aspec`)",
-          context,
-        );
-        assertConfigurationOrder(
-          view.code,
-          ORDER_EXPECTED_CONFIGURATION.code,
-          "the code groups (`zcode` before `acode`; `zcode`'s globs " +
-            "`src/**/*.ts` before `lib/**/*.ts`, a group's globs in " +
-            "configuration order)",
-          context,
-        );
-        assertConfigurationOrder(
-          view.coverage,
-          ORDER_EXPECTED_CONFIGURATION.coverage,
-          "the coverage profiles (`zprofil` before `aprofil`)",
-          context,
-        );
-        assertConfigurationOrder(
-          view.policy,
-          ORDER_EXPECTED_CONFIGURATION.policy,
-          "the policy rules (`zregle` before `aregle`)",
-          context,
-        );
-        assertSameJson(
-          view,
-          ORDER_EXPECTED_CONFIGURATION,
-          `${context} — the whole resolved configuration view: the four ` +
-            `lists above and \`markdown\` absent resolving to emit-false/` +
-            `outDir-null (SPEC 11.6, 7.3, 12.7)`,
-        );
-        assertSameJson(
-          document.sources,
-          [
-            {
-              path: "lib/deux.ts",
-              groups: [
-                { name: "zcode", kind: "code" },
-                { name: "acode", kind: "code" },
-              ],
-            },
-          ],
-          `${context} — the code source matched by both code groups ` +
-            `carries both memberships in configuration order, \`zcode\` ` +
-            `before \`acode\` (SPEC 11.6: a file's groups in configuration ` +
-            `order)`,
-        );
-        assertSameJson(
-          document.derived,
-          [],
-          `${context} — no spec source is discovered, so the derived map ` +
-            `holds no entry (SPEC 11.6, 13.1)`,
-        );
+        assertOrderFixtureInventory(document, context);
       }
     } finally {
       await order.dispose();

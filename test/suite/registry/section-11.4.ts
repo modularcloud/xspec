@@ -1214,7 +1214,8 @@ const EXPECTED_VIEWS: readonly {
 // TEST-SPEC T11.4-1 and T11.4-2 assert the multi-file `view` order "on
 // T11.6-3's order fixture", the workspace T11.6-3 stages so that each fixed
 // order differs from the orders a product would plausibly emit instead
-// (exported for T11.6-3's own order arm): spec groups configured `tests` then
+// (exported for T11.6-3's own order arm, section-11.6.ts, which pins the
+// inventory's orders on it): spec groups configured `tests` then
 // `product` — `tests` globbing `["specs/z/*.mdx", "specs/a/*.mdx"]`, out of
 // byte order, and `product` globbing `["specs/a/*.mdx"]` — code groups `web`
 // (`web/*.ts`) then `app` (`app/*.ts`), two coverage profiles and two policy
@@ -1236,8 +1237,9 @@ const EXPECTED_VIEWS: readonly {
 // 1.7); the profiles and rules are valid (SPEC 7.4, 7.5 — an invalid
 // configuration is a 14.14 at load) and the code sources reference nothing,
 // so the workspace passes `build`'s validations and every spec source is
-// finding-free. T11.4-1 and T11.4-2 stage it after their first product
-// invocation, so every file is a staged-source record (S-9).
+// finding-free. T11.4-1, T11.4-2, and T11.6-3 each stage it after their
+// first product invocation, so every file is a staged-source record (S-9),
+// named for all three.
 
 /** The order fixture's spec groups, in configuration order (T11.6-3). */
 const ORDER_SPEC_GROUPS: readonly {
@@ -1293,7 +1295,7 @@ export default defineConfig({
 
 /** The order fixture's configuration (TEST-SPEC T11.6-3). */
 export const ORDER_FIXTURE_CONFIG: StagedTs = stagedTs(
-  "T11.4-1/T11.4-2 order fixture xspec.config.ts — T11.6-3's order fixture's configuration: spec groups tests then product, code groups web then app, profiles z-cov then a-cov, rules z-rule then a-rule, Markdown emitted under out",
+  "T11.4-1/T11.4-2/T11.6-3 order fixture xspec.config.ts — spec groups tests then product, code groups web then app, profiles z-cov then a-cov, rules z-rule then a-rule, Markdown emitted under out",
   ORDER_FIXTURE_CONFIG_SOURCE,
 );
 
@@ -1332,7 +1334,7 @@ function orderSpecSource(
     file,
     source,
     staged: stagedMdx(
-      `T11.4-1/T11.4-2 order fixture ${file} (T11.6-3's order fixture)`,
+      `T11.4-1/T11.4-2/T11.6-3 order fixture ${file} — one paired section behind a line of prose`,
       source,
     ),
     openingTag,
@@ -1414,11 +1416,11 @@ export const ORDER_FIXTURE_FILES: Readonly<
   [ORDER_B.file]: ORDER_B.staged,
   [ORDER_A.file]: ORDER_A.staged,
   "web/w.ts": stagedTs(
-    "T11.4-1/T11.4-2 order fixture web/w.ts (T11.6-3's order fixture, code group web)",
+    "T11.4-1/T11.4-2/T11.6-3 order fixture web/w.ts (code group web)",
     "export const w = 1;\n",
   ),
   "app/p.ts": stagedTs(
-    "T11.4-1/T11.4-2 order fixture app/p.ts (T11.6-3's order fixture, code group app)",
+    "T11.4-1/T11.4-2/T11.6-3 order fixture app/p.ts (code group app)",
     "export const p = 1;\n",
   ),
 };
