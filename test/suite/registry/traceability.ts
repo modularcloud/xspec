@@ -684,10 +684,14 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T12.0-11": ["preamble", "12.0"],
   "T12.0-12": ["preamble", "12.0"],
   // T12.0-13: its premise pins exactly one 14.19 with its stable code, and
-  // the `view`, `at`, and `occurrences` answers carry it, so "14" joins the
-  // home passage; 11.2-11.5/12.7/6.5 are carriage context with home
-  // coverage at T11.2-3/T11.3-*/T11.4-*/T11.5-*/T12.7-*/T6.5-*.
-  "T12.0-13": ["12.0", "14"],
+  // the `view`, `at`, `occurrences`, and `rename` answers carry it, so "14"
+  // joins the home passage; its `rename specs/a#b.mdx x y` arm asserts
+  // 6.4's parse-local old-ID existence (a spelled bearer in the invalid-path
+  // file passes the argument checks) and its invalid-workspace refusal
+  // (exit 1, nothing modified), so "6.4" joins too; 11.2-11.5/12.7/6.5 are
+  // carriage context with home coverage at T11.2-3/T11.3-*/T11.4-*/
+  // T11.5-*/T12.7-*/T6.5-*.
+  "T12.0-13": ["12.0", "6.4", "14"],
   // T12.0-14: the grammar arms assert `ids --file`'s restriction (12.3),
   // `build`'s flag set (12.1), the session name `-a` and its file (10.1),
   // `review create` and `resolve --note` (10.7), `--kinds` list values

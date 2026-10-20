@@ -147,7 +147,18 @@
 //   valid-twin machinery, not re-staged here. "Malformed value → exit 2" is
 //   asserted with the FP-002 protocol (single 12.7 error document under
 //   JSON output, stderr message present); the no-configuration-load half of
-//   malformed-value precedence is T12.0-10's within-class-2 arm.
+//   malformed-value precedence is T12.0-10's within-class-2 arm. Its
+//   `rename specs/a#b.mdx x y` arm runs last, the file spelling a section
+//   `x` beside `pa`: naming neither report form, it reads the `--json`
+//   document (H-3) — exit 1, the form-exact findings-only report (12.7)
+//   holding the premise's pinned 14.19 among its findings (membership, as
+//   the entry words it), inside a whole-root compare (nothing modified;
+//   H-6's lock-path exclusion for the rename's acquisition and release,
+//   13.5). A parser splitting the `<file>` operand at `#` names the
+//   unknown file `specs/a`, and a product judging the old ID's existence
+//   over node identities — undefined over the invalid path (11.2) — finds
+//   no `x`: each the usage error, exit 2, where the spelled identity
+//   establishes existence and the invalid-workspace refusal follows (6.4).
 
 import { Buffer } from "node:buffer";
 import * as path from "node:path";
@@ -3440,22 +3451,31 @@ const T12_0_12 = defineProductTest({
 // and the split is never ambiguous. A bare `<file>` operand and a `--file`
 // glob are instead a whole path or pattern: `#` has no delimiter role in
 // them, so a `#`-containing spelling names the discovered file of that
-// invalid path (14.19, 11.4), never a `path#id` pair.
+// invalid path (14.19, 11.4), never a `path#id` pair — `rename`'s `<file>`
+// operand included (6.4), the split belonging to identity values and
+// `move`'s `<file>#<id>` operands alone (12.0, 6.5).
 //
-// One workspace serves both halves: valid `specs/OK.mdx` (the move origin
-// and valid-side contrast) beside `specs/a#b.mdx` — the entry's literal
-// name, its content deliberately condition-free (well-formed unique id `pa`,
+// One workspace serves both halves: valid `specs/OK.mdx` (the move origin and
+// valid-side contrast) beside `specs/a#b.mdx` — the entry's literal name, its
+// content deliberately condition-free (well-formed unique ids `pa` and `x`,
 // multi-byte prose prefix shifting every later byte offset, SPEC 1.7) so the
 // staging premise `build --json` reports EXACTLY one 14.19 and every later
-// observation is attributable to the path alone. The workspace failing
+// observation is attributable to the path alone. The section `x` is the
+// entry's renamed section: `rename specs/a#b.mdx x y` names the discovered
+// file, its argument checks pass — the spelled `x` establishes the old ID's
+// existence, parse-local over spelled identities though the invalid path
+// leaves its node identity undefined (6.4, 11.2; T6.4-4) — and the
+// invalid-workspace refusal follows, exit 1, the condition-19 finding among
+// its findings, nothing modified (6.4, 14), never the unknown-file usage error
+// (exit 2) of a parser splitting the operand at `#`. The workspace failing
 // `build` is itself load-bearing twice over: the malformed-value exit 2 must
-// precede the gated report (12.0 — argument checks precede the invalid-
-// workspace report), and a product that instead splits `specs/a#b.mdx#pa`
-// at the last `#` finds a discovered file whose spelled identities include
-// `pa`, passes its parse-local argument check, and answers the gated report
-// exit 1 — the sharpest observable divergence from the required exit 2.
-// The `--file` control `specs/zz#*` (a `#`-containing pattern matching
-// nothing) pins the other side: the empty admitted set is an empty,
+// precede the gated report (12.0 — argument checks precede the
+// invalid-workspace report), and a product that instead splits
+// `specs/a#b.mdx#pa` at the last `#` finds a discovered file whose spelled
+// identities include `pa`, passes its parse-local argument check, and answers
+// the gated report exit 1 — the sharpest observable divergence from the
+// required exit 2. The `--file` control `specs/zz#*` (a `#`-containing pattern
+// matching nothing) pins the other side: the empty admitted set is an empty,
 // finding-free answer, exit 0 (11.3), so the exit-1-with-14.19 answer on
 // `specs/a#*` is attributable to the pattern MATCHING the invalid path.
 
@@ -3518,11 +3538,15 @@ const H13_OK_FILE = "specs/OK.mdx";
 const H13_OK_SOURCE = ['<S id="ok">', "Anchor text.", "</S>", ""].join("\n");
 
 // --- specs/a#b.mdx — the `#`-containing discovered spec source (14.19) ------
-// The path is the file's ONLY defect: `pa` is well-formed, unique, and
-// structurally valid, so the premise `build` reports exactly one 14.19. The
-// section deliberately spells `pa` so the multi-`#` operand
+// The path is the file's ONLY defect: `pa` and `x` are well-formed, unique,
+// and structurally valid, so the premise `build` reports exactly one 14.19.
+// The first section deliberately spells `pa` so the multi-`#` operand
 // `specs/a#b.mdx#pa` below is a last-`#`-split trap: both split halves name
-// real staged things, and only rejecting the value gives exit 2.
+// real staged things, and only rejecting the value gives exit 2. The second
+// spells `x`, the entry's renamed section (`rename specs/a#b.mdx x y`, the
+// file spelling a section `x`): a spelled identity, which establishes the
+// old ID's existence (SPEC 6.4, T6.4-4) though the invalid path leaves its
+// node identity undefined (11.2).
 const H13_FILE = "specs/a#b.mdx";
 const H13 = new ByteFixture();
 H13.add("Ancré — préfixe multi-octets.\n\n");
@@ -3531,9 +3555,18 @@ H13.add("<S ");
 const H13_PA_ID = H13.attr("id", 'id="pa"');
 H13.add(">\nHash-path text.\n</S>");
 const H13_PA_RANGE: SourceRange = { start: H13_PA_START, end: H13.pos };
+H13.add("\n\n");
+const H13_X_START = H13.pos;
+H13.add("<S ");
+const H13_X_ID = H13.attr("id", 'id="x"');
+H13.add(">\nRenamed-section text.\n</S>");
+const H13_X_RANGE: SourceRange = { start: H13_X_START, end: H13.pos };
 H13.add("\n");
 const H13_SOURCE = H13.source;
 const H13_ROOT_RANGE: SourceRange = { start: 0, end: H13.pos };
+/** The entry's rename: the old ID the file spells, and a fresh new ID. */
+const H13_RENAME_OLD_ID = "x";
+const H13_RENAME_NEW_ID = "y";
 
 /**
  * The asserted projection of the 14.19 finding (SPEC 14, 12.7): the stable
@@ -3643,7 +3676,7 @@ function projectViewNode(node: ViewNode): ViewTreeExpectation {
 const T12_0_13 = defineProductTest({
   id: "T12.0-13",
   title:
-    "`#` in operands: a `<node>`, `<graph-node>`, `--to`, or move-operand value containing more than one `#` (the literal `a#b#c`, and `specs/a#b.mdx#pa` — whose last-`#` split would name a discovered file plus a spelled id) is a malformed value — exit 2 with the single 12.7 error document on `show`, `query node`, `occurrences --to`, and `move` (origin and destination operands alike, the destination the T6.5-4 dead-letter spelling — `#` in the section form's target-file part; each move wrapped in a whole-root modifies-nothing compare), the usage error preceding the failing workspace's findings; a bare `<file>` operand or `--file` glob is a whole path or pattern with no delimiter role for `#`: with `specs/a#b.mdx` discovered (condition 19 — the staging premise `build --json` fails with exactly that one pinned 14.19, modifying nothing), `view specs/a#b.mdx` names the discovered file — membership holds: exactly its one per-file view, tree and ranges on view with every node identity explicitly unavailable, its condition-19 finding accompanying, exit 1 — never a `specs/a` + `b.mdx` pair (which would be exit 2, unknown file); `at specs/a#b.mdx 0` resolves the same way (the root construct, identity unavailable, no containing occurrence); and `occurrences --file specs/a#*` matches it as a pattern — domain membership proven by the accompanying 14.19, exit 1, against the matching-nothing control `specs/zz#*` (empty, finding-free, exit 0) (SPEC 12.0, 11.2-11.5, 12.7, 14)",
+    "`#` in operands: a `<node>`, `<graph-node>`, `--to`, or move-operand value containing more than one `#` (the literal `a#b#c`, and `specs/a#b.mdx#pa` — whose last-`#` split would name a discovered file plus a spelled id) is a malformed value — exit 2 with the single 12.7 error document on `show`, `query node`, `occurrences --to`, and `move` (origin and destination operands alike, the destination the T6.5-4 dead-letter spelling — `#` in the section form's target-file part; each move wrapped in a whole-root modifies-nothing compare), the usage error preceding the failing workspace's findings; a bare `<file>` operand or `--file` glob is a whole path or pattern with no delimiter role for `#`: with `specs/a#b.mdx` discovered (condition 19 — the staging premise `build --json` fails with exactly that one pinned 14.19, modifying nothing), `view specs/a#b.mdx` names the discovered file — membership holds: exactly its one per-file view, tree and ranges on view with every node identity explicitly unavailable, its condition-19 finding accompanying, exit 1 — never a `specs/a` + `b.mdx` pair (which would be exit 2, unknown file); `at specs/a#b.mdx 0` resolves the same way (the root construct, identity unavailable, no containing occurrence); `occurrences --file specs/a#*` matches it as a pattern — domain membership proven by the accompanying 14.19, exit 1, against the matching-nothing control `specs/zz#*` (empty, finding-free, exit 0); and `rename specs/a#b.mdx x y`, the file spelling a section `x`, names it likewise — its argument checks pass (the spelled identity establishes the old ID's existence, the invalid path's undefined node identities notwithstanding) and the invalid-workspace refusal follows: exit 1, the form-exact findings-only report holding the condition-19 finding among its findings, nothing modified (a whole-root compare) — never the unknown-file usage error (exit 2) of a parser splitting the operand at `#`, the split belonging to identity values and `move`'s `<file>#<id>` operands alone (SPEC 12.0, 11.2-11.5, 12.7, 14, 6.4, 6.5)",
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
     // out of the staged bytes before any product invocation.
@@ -3659,6 +3692,13 @@ const T12_0_13 = defineProductTest({
       H13_PA_ID.text,
       "pa's id attribute",
     );
+    sliceCheck(
+      H13_SOURCE,
+      H13_X_RANGE,
+      '<S id="x">\nRenamed-section text.\n</S>',
+      "the x section construct",
+    );
+    sliceCheck(H13_SOURCE, H13_X_ID.range, H13_X_ID.text, "x's id attribute");
     const workspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
@@ -3829,6 +3869,12 @@ const T12_0_13 = defineProductTest({
               attributes: [H13_PA_ID],
               children: [],
             },
+            {
+              identity: UNAVAILABLE,
+              range: H13_X_RANGE,
+              attributes: [H13_X_ID],
+              children: [],
+            },
           ],
         },
         `${viewContext} — the invalid-path file keeps its full positional ` +
@@ -3949,6 +3995,76 @@ const T12_0_13 = defineProductTest({
         { findings: [], occurrences: [] },
         `${ctrlContext} — empty and finding-free: the empty admitted set ` +
           `consults no file (SPEC 11.3, 11.2)`,
+      );
+
+      // --- `rename specs/a#b.mdx x y`, the file spelling a section `x`:
+      // `rename`'s `<file>` operand is a whole path too — the split belongs
+      // to identity values and `move`'s `<file>#<id>` operands alone (SPEC
+      // 12.0, 6.5) — so it names the discovered file, and the argument
+      // checks pass: the file is a discovered spec source, and the section
+      // spelling `x` establishes the old ID's existence, parse-local over
+      // spelled identities, the invalid path's undefined node identities
+      // notwithstanding (SPEC 6.4, 11.2; T6.4-4). The invalid-workspace
+      // refusal follows: exit 1, the workspace's findings — the
+      // condition-19 finding among them — nothing modified (SPEC 6.4, 14).
+      // Naming neither report form, the arm reads the `--json` document
+      // (H-3), the form-exact findings-only report (12.7); the whole-root
+      // compare leaves out the lock path the rename's acquisition and
+      // release act on, and it alone (H-6, SPEC 13.5). A parser splitting
+      // the operand at `#` names the unknown file `specs/a`, and a product
+      // judging existence over node identities finds no `x`: each the
+      // usage error, exit 2.
+      const renameArgv = [
+        "rename",
+        H13_FILE,
+        H13_RENAME_OLD_ID,
+        H13_RENAME_NEW_ID,
+        "--json",
+      ];
+      const renameContext = `T12.0-13 \`${renameArgv.join(" ")}\``;
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          const renameResult = await runCli(product, workspace, renameArgv);
+          assertExitCode(
+            renameResult,
+            1,
+            `${renameContext} — the \`#\`-containing \`<file>\` operand ` +
+              `names the discovered file and the spelled \`x\` establishes ` +
+              `the old ID's existence, so the argument checks pass and the ` +
+              `invalid-workspace refusal follows: exit 1, never the ` +
+              `unknown-file (or unknown-old-ID) usage error, exit 2, of a ` +
+              `parser splitting the operand at \`#\` (SPEC 12.0, 6.4, 6.5, ` +
+              `11.2)`,
+          );
+          const renameFindings = decodeFindingsReport(
+            parseJsonStdout(
+              renameResult,
+              `${renameContext} — with JSON output in effect, the single ` +
+                `JSON document is the entire stdout (SPEC 12.0)`,
+            ),
+            `${renameContext} — a refused operation's report is the ` +
+              `form-exact 12.7 findings-only report (SPEC 12.7, H-3)`,
+          ).findings;
+          const expected = JSON.stringify(H13_19);
+          if (
+            !renameFindings.some(
+              (finding) =>
+                JSON.stringify(projectPathFinding(finding)) === expected,
+            )
+          ) {
+            fail(
+              `${renameContext}: the invalid-workspace refusal reports the ` +
+                `workspace's findings, the condition-19 finding among them ` +
+                `— stable code "invalid-source-path", \`locations\` [], ` +
+                `\`path\` ${JSON.stringify(H13_FILE)} (SPEC 6.4, 14, 14.19, ` +
+                `12.7); got ` +
+                JSON.stringify(renameFindings.map(projectPathFinding)),
+            );
+          }
+        },
+        `${renameContext} — the invalid-workspace refusal modifies nothing ` +
+          `(SPEC 6.4)`,
       );
     } finally {
       await workspace.dispose();

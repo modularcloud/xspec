@@ -11,17 +11,26 @@
 // other token is (no single-dash short forms); a value-taking flag takes the
 // whole next token whatever it looks like and lacks its value when none
 // follows; `--name=value` spells no flag; `--` ends flag reading and is
-// dropped; flag tokens stand anywhere; the remaining tokens must match the
-// synopsis exactly (no command word, an unknown command or subcommand, a
-// missing operand, a surplus operand — never accepted and ignored); a flag
-// may be given at most once; a flag's arity is fixed by its name across
-// commands and known before the command word; list-valued flags take one
-// comma-separated value (11.1).
+// dropped; flag tokens stand anywhere, between the command word and its
+// subcommand too; the remaining tokens must match the synopsis exactly (no
+// command word, an unknown command or subcommand, a missing operand, a
+// surplus operand — never accepted and ignored); a flag may be given at
+// most once; a flag's arity is fixed by its name across commands and known
+// before the command word; list-valued flags take one comma-separated
+// value (11.1).
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - "Behaves as `ids`" and "byte-identical documents" are H-4's
 //   product-to-itself compare: the same exit code and byte-identical stdout
-//   for the two spellings on one fixture.
+//   for the two spellings on one fixture. "Answers byte-identically" for a
+//   flag between the command word and its subcommand (`review --json list`
+//   against `review list --json`, `query --json nodes` against `query nodes
+//   --json`) is the same compare, each spelling exit 0 and the reference a
+//   JSON document: `query nodes` runs on the built fixture, and the
+//   `review` pair once the session `-a` exists with an item resolved, so
+//   the listing compared carries a session and its counts (10.7). A parser
+//   reading the token after the command word as the subcommand meets
+//   `--json` there — an unknown subcommand, exit 2.
 // - "Matching nothing, an empty listing, exit 0 — and JSON out of effect,
 //   stdout not a JSON document" (`ids --file --json`) is asserted as: exit
 //   0; stdout that does not parse as a JSON document (an empty human
@@ -215,10 +224,61 @@ function assertNotJsonDocument(result: RunResult, context: string): void {
   }
 }
 
+/**
+ * A flag between the command word and its subcommand (SPEC 12.0: flag
+ * tokens stand anywhere; once the flags are removed, the remaining tokens
+ * are the command, its subcommand, and its operands): `<command> --json
+ * <subcommand>` answers byte-identically to `<command> <subcommand>
+ * --json` — the reference exit 0 with one JSON document as its entire
+ * standard output, the flag-first spelling exit 0 with the same bytes
+ * (H-4's product-to-itself compare). A parser reading the token after the
+ * command word as the subcommand meets `--json` there: an unknown
+ * subcommand, exit 2.
+ */
+async function expectSubcommandAfterFlag(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  [command, subcommand]: readonly [string, string],
+  answer: string,
+): Promise<void> {
+  const referenceContext = `T12.0-14 reference \`${command} ${subcommand} --json\``;
+  const reference = await expectExit(
+    product,
+    workspace,
+    [command, subcommand, "--json"],
+    0,
+    `${referenceContext} — ${answer}, exit 0`,
+  );
+  parseJsonStdout(
+    reference,
+    `${referenceContext} — with \`--json\` read as a flag, the single JSON ` +
+      `document is the entire standard output (SPEC 12.0)`,
+  );
+  const flagFirstContext = `T12.0-14 \`${command} --json ${subcommand}\``;
+  const flagFirst = await expectExit(
+    product,
+    workspace,
+    [command, "--json", subcommand],
+    0,
+    `${flagFirstContext} — a flag token may stand between the command ` +
+      `word and its subcommand: once the flags are removed, the remaining ` +
+      `tokens are \`${command} ${subcommand}\`, the subcommand read past ` +
+      `the flag — exit 0, never \`--json\` taken for an unknown subcommand ` +
+      `(SPEC 12.0)`,
+  );
+  assertBytesEqual(
+    flagFirst.stdoutBytes,
+    reference.stdoutBytes,
+    `${flagFirstContext} against \`${command} ${subcommand} --json\`: the ` +
+      `same command with JSON output in effect, so the two spellings answer ` +
+      `byte-identically (SPEC 12.0; H-4's product-to-itself compare)`,
+  );
+}
+
 const T12_0_14 = defineProductTest({
   id: "T12.0-14",
   title:
-    "invocation grammar (12.0's token rules, each arm discriminating a lenient parser): the remaining tokens match the synopsis exactly — `ids extra` and `rename specs/A.mdx a b c` (a fourth operand) exit 2 with nothing done (whole root byte-unchanged, journal and sources included), `xspec` alone and `query bogus` exit 2; `--name=value` spells no flag (`review create --strategy audit --name=n` exits 2 as an unknown flag, no session created); flag tokens stand anywhere (`--json ids` and `ids --json` emit byte-identical documents; `--config cfg/xspec.config.ts build` loads that configuration, exit 0 with derived output under `cfg/` alone where `build` alone is a configuration error); a value-taking flag takes the whole next token (`ids --file --json` runs with the glob `--json` — exit 0, an empty listing naming no `specs/A.mdx` where the unrestricted listing does, stdout not a JSON document; `ids --config --json` names the path `--json` — exit 2, missing configuration, stdout empty, the diagnostic on stderr — where `ids --json --config` exits 2 with the error document on stdout; `ids --file` as the last token exits 2); no single-dash short forms (`review create --strategy audit --name -a` creates `.xspec/reviews/-a.json`, `resolve … --note -x` stores the note `-x`, `ids -j` exits 2 as a surplus operand with stdout empty); `--` ends flag reading and is dropped (`ids --` byte-identical to `ids`; `ids -- --json` exits 2 with stdout empty); arity is fixed by name across commands (`build --file --json` exits 2 having consumed `--json`, stdout empty; `build --bogus --json` and `build --json --file` exit 2 with the error document; each modifying nothing); a repeated `--json` exits 2 with the error document as its entire stdout; list-valued flags: `--kinds depends,`, `,depends`, and `depends,,embeds` each exit 2 with the error document while `depends,depends` answers byte-identically to `depends` (SPEC 12.0, 12.3, 12.1, 10.1, 10.7, 11.1, 7, 12.7)",
+    "invocation grammar (12.0's token rules, each arm discriminating a lenient parser): the remaining tokens match the synopsis exactly — `ids extra` and `rename specs/A.mdx a b c` (a fourth operand) exit 2 with nothing done (whole root byte-unchanged, journal and sources included), `xspec` alone and `query bogus` exit 2; `--name=value` spells no flag (`review create --strategy audit --name=n` exits 2 as an unknown flag, no session created); flag tokens stand anywhere (`--json ids` and `ids --json` emit byte-identical documents; `--config cfg/xspec.config.ts build` loads that configuration, exit 0 with derived output under `cfg/` alone where `build` alone is a configuration error; between the command word and its subcommand too, the subcommand read once the flags are removed — `review --json list` answers byte-identically to `review list --json`, and `query --json nodes` to `query nodes --json`, each exit 0); a value-taking flag takes the whole next token (`ids --file --json` runs with the glob `--json` — exit 0, an empty listing naming no `specs/A.mdx` where the unrestricted listing does, stdout not a JSON document; `ids --config --json` names the path `--json` — exit 2, missing configuration, stdout empty, the diagnostic on stderr — where `ids --json --config` exits 2 with the error document on stdout; `ids --file` as the last token exits 2); no single-dash short forms (`review create --strategy audit --name -a` creates `.xspec/reviews/-a.json`, `resolve … --note -x` stores the note `-x`, `ids -j` exits 2 as a surplus operand with stdout empty); `--` ends flag reading and is dropped (`ids --` byte-identical to `ids`; `ids -- --json` exits 2 with stdout empty); arity is fixed by name across commands (`build --file --json` exits 2 having consumed `--json`, stdout empty; `build --bogus --json` and `build --json --file` exit 2 with the error document; each modifying nothing); a repeated `--json` exits 2 with the error document as its entire stdout; list-valued flags: `--kinds depends,`, `,depends`, and `depends,,embeds` each exit 2 with the error document while `depends,depends` answers byte-identically to `depends` (SPEC 12.0, 12.3, 12.1, 10.1, 10.7, 11.1, 7, 12.7)",
   run: async (product) => {
     await withWorkspace({ files: GRAMMAR_FILES }, async (workspace) => {
       // Premise: the fixture builds, so a lenient rename or session write
@@ -267,6 +327,14 @@ const T12_0_14 = defineProductTest({
           "removed the remaining tokens are the same command, so the two " +
           "spellings emit byte-identical documents (SPEC 12.0; H-4's " +
           "product-to-itself compare)",
+      );
+      // Between the command word and its subcommand too: the subcommand is
+      // read once the flags are removed (SPEC 12.0).
+      await expectSubcommandAfterFlag(
+        product,
+        workspace,
+        ["query", "nodes"],
+        "the node listing of the built fixture (SPEC 11.1)",
       );
 
       // --- `--` ends flag reading and is dropped.
@@ -679,6 +747,18 @@ const T12_0_14 = defineProductTest({
             `(SPEC 10.3, 10.7); got ${JSON.stringify(item.status)}`,
         );
       }
+
+      // --- A flag between `review` and its subcommand: `review --json
+      // list` is `review list` with JSON output in effect, run once the
+      // session `-a` exists with an item resolved, so the listing compared
+      // carries it (SPEC 12.0, 10.7).
+      await expectSubcommandAfterFlag(
+        product,
+        workspace,
+        ["review", "list"],
+        `the session listing, \`${GRAMMAR_SESSION_NAME}\` with its counts ` +
+          `by status (SPEC 10.7)`,
+      );
     });
 
     // --- `--config <path>` before the command word loads that
