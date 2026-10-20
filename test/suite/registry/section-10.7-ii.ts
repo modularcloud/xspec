@@ -25,10 +25,13 @@
 // recursively) plus the scope root's `parent-consistency` item, reusing
 // existing kind+scope items, recording the decomposition durably, never
 // reusing the removed original's id, and ending with a re-derivation.
-// `resolve` sets the status and records the current relevant state, on any
-// unblocked item regardless of status. Re-derivation on an `updated`
-// resolve holds for every strategy — a coverage session re-runs its
-// recorded profile against the current workspace (T10.7-11). The payload
+// `resolve` sets the status, sets the note to the `--note` text — removing
+// any earlier note when `--note` is not given — and records the current
+// relevant state, on any unblocked item regardless of status (T10.7-10).
+// Re-derivation on an `updated` resolve holds for every strategy — a
+// coverage session re-runs its recorded profile against the current
+// workspace, a generated item matching an existing kind and scope node
+// keeping its id, status, note, and recorded state (T10.7-11). The payload
 // text contract (T10.7-12) fixes which text each kind presents and the
 // provenance of absent nodes' texts.
 //
@@ -144,6 +147,13 @@
 //   {scope, context, origin} payload projection per item id.
 // - `blockedBy` is compared as a sorted id set (SPEC 10.5/10.7 fix which
 //   items block, not an order within the field).
+// - An item's note (SPEC 10.2: optional) is read from `show --json` and
+//   `export --json` alike (`assertPresentedNote`): T10.7-10's three resolves
+//   of p.a's item — `--note`, a second `--note` with the status unchanged,
+//   and the flip to `skipped` without one — and T10.7-11's k3 item after
+//   the re-derivation. No note is the `note` member absent or `null` (the
+//   review adapter's reading of an absent optional member); an empty string
+//   is a note of its own, never none.
 // - Recorded state (`baseline`/`current`) and creation parameters are
 //   product-shaped and opaque (H-4): hash recording is asserted by
 //   string-leaf containment of `query node` captures at the expected moment
@@ -4484,11 +4494,58 @@ const T10_7_10_R_PA_V1 = stagedMdx(
 );
 
 const R10_NOTE = "reviewed; left as-is pending spec sync";
+// The second resolve's note: distinct from the first, so neither the first
+// note kept nor the two combined reads as it.
+const R10_NOTE_2 = "second look: kept after the spec sync";
+
+/** The rule each resolve's note follows (SPEC 10.2, 10.7). */
+const NOTE_REPLACED_RULE =
+  "each resolve replaces the note: `resolve` sets the note to the " +
+  "`--note` text, removing any earlier note when `--note` is not given " +
+  "(SPEC 10.2, 10.7)";
+
+/**
+ * Assert the note `review show <name> <item-id> --json` and `review export
+ * <name> --json` present for one item: exactly `expected`, or — `null` —
+ * none at all (SPEC 10.2: `note` is optional). No note is the member absent
+ * or `null`, the review adapter's reading of an absent optional member; an
+ * empty string is a note of its own (a `--note ""` resolve's), never none.
+ */
+async function assertPresentedNote(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  itemId: string,
+  expected: string | null,
+  context: string,
+  rule: string,
+): Promise<void> {
+  const shown = await showItem(product, workspace, name, itemId, context);
+  const exported = requireItemById(
+    (await exportSession(product, workspace, name, context)).items,
+    itemId,
+    context,
+  );
+  for (const [read, note] of [
+    ["show", shown.note],
+    ["export", exported.note],
+  ] as const) {
+    if (expected === null ? note === undefined : note === expected) continue;
+    fail(
+      `${context}: \`review ${read}\` must present ` +
+        (expected === null
+          ? "no note for the item"
+          : `exactly the note ${JSON.stringify(expected)} for the item`) +
+        ` — ${rule}; got ` +
+        (note === undefined ? "no note" : `the note ${JSON.stringify(note)}`),
+    );
+  }
+}
 
 const T10_7_10 = defineProductTest({
   id: "T10.7-10",
   title:
-    "`review resolve` sets the status and records the current relevant state — `current` holds the resolve-moment hash captures and, after a re-resolve bracketing an edit, the new moment's values and not the old (pairwise-distinct `query node` captures discriminate); it works on any unblocked item regardless of status: flipping a resolved `no-change` to `skipped` without any edit works, and re-resolving an `invalidated` item works and clears the invalidation; resolving a blocked item is refused — exit 1 with exactly one code-less finding in T10.7-14's form, `code` and `path` `null`, `locations` `[]` — nothing modified; an unknown session name or item ID is exit 2 with the 12.7 error document as the entire stdout under `--json`; `--note` text is stored and reported by `show` and `export` (SPEC 10.2, 10.3, 10.4, 10.7, 12.0, 12.7, 14)",
+    "`review resolve` sets the status and records the current relevant state — `current` holds the resolve-moment hash captures and, after a re-resolve bracketing an edit, the new moment's values and not the old (pairwise-distinct `query node` captures discriminate); it works on any unblocked item regardless of status: flipping a resolved `no-change` to `skipped` without any edit works, and re-resolving an `invalidated` item works and clears the invalidation; resolving a blocked item is refused — exit 1 with exactly one code-less finding in T10.7-14's form, `code` and `path` `null`, `locations` `[]` — nothing modified; an unknown session name or item ID is exit 2 with the 12.7 error document as the entire stdout under `--json`; `--note` text is stored and reported by `show` and `export`, and each resolve replaces the note: a second resolve with `--note`, its status unchanged, leaves exactly its own text in both, and a further resolve without `--note` (the flip to `skipped`) leaves the item no note in either (SPEC 10.2, 10.3, 10.4, 10.7, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -4620,8 +4677,41 @@ const T10_7_10 = defineProductTest({
           );
         }
 
+        // Each resolve replaces the note (SPEC 10.7): a second resolve with
+        // `--note`, the status unchanged, leaves exactly its own text in
+        // `show` and `export` — neither the first note kept nor the two
+        // combined.
+        await expectExit(
+          product,
+          workspace,
+          [
+            "review",
+            "resolve",
+            "s",
+            idPA,
+            "--status",
+            "no-change",
+            "--note",
+            R10_NOTE_2,
+          ],
+          0,
+          `${prefix} \`review resolve s <p.a's item> --status no-change ` +
+            `--note <second text>\``,
+        );
+        await assertPresentedNote(
+          product,
+          workspace,
+          "s",
+          idPA,
+          R10_NOTE_2,
+          `${prefix} after the second \`--note\` resolve`,
+          NOTE_REPLACED_RULE,
+        );
+
         // Flipping a resolved status works — no edit in between: no-change
-        // becomes skipped on the same unblocked item.
+        // becomes skipped on the same unblocked item. The flip gives no
+        // `--note`, so it removes the note as well (SPEC 10.7): the item
+        // then carries none in `show` or `export`.
         await resolveOk(
           product,
           workspace,
@@ -4641,6 +4731,15 @@ const T10_7_10 = defineProductTest({
               `reports skipped (SPEC 10.3, 10.7)`,
           );
         }
+        await assertPresentedNote(
+          product,
+          workspace,
+          "s",
+          idPA,
+          null,
+          `${prefix} after the flip, a resolve without \`--note\``,
+          NOTE_REPLACED_RULE,
+        );
 
         // Invalidate the resolution: edit p.a, with hash premises, then
         // re-resolve the invalidated item — it works like any resolve and
@@ -4719,12 +4818,26 @@ const T10_7_10 = defineProductTest({
 
 // D.mdx's `src` covers one K.mdx leaf via a direct `d` edge; the edit swaps
 // which one. k1 is declared before k2, so the newly uncovered k1's item must
-// order BEFORE the retained k2's — document order, not append order.
+// order BEFORE the retained k2's — document order, not append order. k3,
+// declared last and never covered, stays generated throughout: its item,
+// resolved `skipped` with `--note` before the re-derivation, is the generated
+// item matching an existing kind and scope node whose id, status, note, and
+// recorded state the re-derivation must keep (SPEC 10.5) — src's matching
+// item, the trigger, has its status, note, and recorded state rewritten by
+// the triggering resolve itself (SPEC 10.7), so it shows the kept id alone.
 const C11_D = "specs/D.mdx";
 const C11_SRC = "specs/D.mdx#src";
 const C11_K = "specs/K.mdx";
 const C11_K1 = "specs/K.mdx#k1";
 const C11_K2 = "specs/K.mdx#k2";
+const C11_K3 = "specs/K.mdx#k3";
+
+const C11_K3_NOTE = "skipped: k3 awaits its covering spec";
+
+/** The rule a matching item's note follows across a re-derivation. */
+const NOTE_KEPT_RULE =
+  "a generated item whose kind and scope node match an existing item is " +
+  "that item, keeping its id, status, note, and recorded state (SPEC 10.5)";
 
 function c11DSpec(target: "k1" | "k2"): string {
   return [
@@ -4753,12 +4866,16 @@ const C11_K_SOURCE = [
   "Kay-two line.",
   "</S>",
   "",
+  '<S id="k3">',
+  "Kay-three line.",
+  "</S>",
+  "",
 ].join("\n");
 
 const T10_7_11 = defineProductTest({
   id: "T10.7-11",
   title:
-    "coverage re-derivation: resolving an `uncovered-requirement` item `updated` re-derives with the session's recorded profile against the current workspace — after swapping the one covering `d` edge from k1 to k2, the newly uncovered k1 gains an `uncovered-requirement` item created `unresolved` (the trigger's `updated` does not propagate) at its place in coverage item order (before the retained k2's item — document order, not append order); the meanwhile-covered k2's item is no longer generated and remains in the session with its resolved status and recorded state; the still-generated src item matching an existing kind and scope node keeps its id, status, and recorded state (SPEC 8, 10.2, 10.5, 10.7)",
+    "coverage re-derivation: resolving an `uncovered-requirement` item `updated` re-derives with the session's recorded profile against the current workspace — after swapping the one covering `d` edge from k1 to k2, the newly uncovered k1 gains an `uncovered-requirement` item created `unresolved` (the trigger's `updated` does not propagate) at its place in coverage item order (before the retained k2's item — document order, not append order); the meanwhile-covered k2's item is no longer generated and remains in the session with its resolved status and recorded state; the still-generated items matching an existing kind and scope node keep their ids — src's, the trigger, with the `updated` status its own resolve set, and the never-covered k3's, resolved `skipped` with `--note` before the re-derivation, keeping its status, its note (presented by `show` and `export` after the re-derivation), and its recorded state (SPEC 8, 10.2, 10.5, 10.7)",
   run: async (product) => {
     await withWorkspace(
       COVERAGE_CONFIG,
@@ -4768,7 +4885,7 @@ const T10_7_11 = defineProductTest({
         await buildOk(product, workspace, `${prefix} \`build\``);
         await createCoverageSession(product, workspace, "p", "c", prefix);
 
-        // At create: src (nothing covers it) and k2 are the uncovered
+        // At create: src (nothing covers it), k2, and k3 are the uncovered
         // required leaves; k1 is covered by src's d edge (SPEC 8, 10.7).
         const initial = await sessionStatus(product, workspace, "c", prefix);
         assertSameJson(
@@ -4776,6 +4893,7 @@ const T10_7_11 = defineProductTest({
           [
             `uncovered-requirement ${C11_SRC} unresolved`,
             `uncovered-requirement ${C11_K2} unresolved`,
+            `uncovered-requirement ${C11_K3} unresolved`,
           ],
           `${prefix} staging premise: the create-time uncovered required ` +
             `nodes, in coverage item order (SPEC 8, 10.7)`,
@@ -4792,6 +4910,12 @@ const T10_7_11 = defineProductTest({
           C11_K2,
           prefix,
         ).id;
+        const idK3 = requireRow(
+          initial,
+          "uncovered-requirement",
+          C11_K3,
+          prefix,
+        ).id;
 
         // Resolve k2's item so its retention keeps a discriminating status,
         // and capture its recorded state.
@@ -4805,14 +4929,49 @@ const T10_7_11 = defineProductTest({
         );
         const k2Before = await showItem(product, workspace, "c", idK2, prefix);
 
+        // Resolve k3's item `skipped` with a note before the re-derivation,
+        // a status no other item holds, and capture its recorded state: k3
+        // stays uncovered, so the re-derivation generates its item again —
+        // a generated item matching an existing kind and scope node.
+        await expectExit(
+          product,
+          workspace,
+          [
+            "review",
+            "resolve",
+            "c",
+            idK3,
+            "--status",
+            "skipped",
+            "--note",
+            C11_K3_NOTE,
+          ],
+          0,
+          `${prefix} \`resolve c <k3's item> --status skipped --note <text>\``,
+        );
+        const k3Before = await showItem(product, workspace, "c", idK3, prefix);
+        if (k3Before.status !== "skipped" || k3Before.note !== C11_K3_NOTE) {
+          fail(
+            `${prefix} staging premise: k3's item, resolved skipped with ` +
+              `--note, reads skipped and presents that note before the ` +
+              `re-derivation (SPEC 10.2, 10.7); got status ` +
+              `${k3Before.status}, ` +
+              (k3Before.note === undefined
+                ? "no note"
+                : `the note ${JSON.stringify(k3Before.note)}`),
+          );
+        }
+
         // The swap: src's covering edge moves from k1 to k2 — k1 newly
         // uncovered, k2 covered. k2's relevant hashes (its own subtree and
         // metadata hashes, SPEC 10.4) are untouched by an incoming-edge
-        // change, so its resolution stands.
+        // change, so its resolution stands, and k3's, in a file the swap
+        // leaves alone, likewise.
         await workspace.file(C11_D, T10_7_11_D_TO_K2);
         await buildOk(product, workspace, `${prefix} \`build\` after the swap`);
+        const swapped = await sessionStatus(product, workspace, "c", prefix);
         const k2Stable = requireRow(
-          await sessionStatus(product, workspace, "c", prefix),
+          swapped,
           "uncovered-requirement",
           C11_K2,
           prefix,
@@ -4822,6 +4981,20 @@ const T10_7_11 = defineProductTest({
             `${prefix} staging premise: the d-edge swap must leave k2's ` +
               `resolution standing — an incoming edge changes none of k2's ` +
               `relevant hashes (SPEC 5.5, 10.4); got ${k2Stable.status}`,
+          );
+        }
+        const k3Stable = requireRow(
+          swapped,
+          "uncovered-requirement",
+          C11_K3,
+          prefix,
+        );
+        if (k3Stable.status !== "skipped") {
+          fail(
+            `${prefix} staging premise: the d-edge swap, in specs/D.mdx ` +
+              `alone, must leave k3's resolution standing — it changes none ` +
+              `of k3's relevant hashes (SPEC 5.5, 10.4); got ` +
+              `${k3Stable.status}`,
           );
         }
 
@@ -4844,13 +5017,15 @@ const T10_7_11 = defineProductTest({
             `uncovered-requirement ${C11_SRC} updated`,
             `uncovered-requirement ${C11_K1} unresolved`,
             `uncovered-requirement ${C11_K2} no-change`,
+            `uncovered-requirement ${C11_K3} skipped`,
           ],
           `${prefix} after the updated resolve: the newly uncovered k1 ` +
             `gains an item, created unresolved (the trigger's updated does ` +
             `not propagate), ordered at its document position before the ` +
             `retained k2's item; the meanwhile-covered k2's item is no ` +
             `longer generated and remains with its status; src's matching ` +
-            `item keeps its status (SPEC 10.2, 10.5, 10.7)`,
+            `item keeps the status its own resolve set, and k3's matching ` +
+            `item keeps its skipped status (SPEC 10.2, 10.5, 10.7)`,
         );
         const k1Row = requireRow(
           derived,
@@ -4858,7 +5033,7 @@ const T10_7_11 = defineProductTest({
           C11_K1,
           prefix,
         );
-        if (k1Row.id === idSrc || k1Row.id === idK2) {
+        if (k1Row.id === idSrc || k1Row.id === idK2 || k1Row.id === idK3) {
           fail(
             `${prefix}: k1's new item takes a fresh id (SPEC 10.2); got ` +
               `${k1Row.id}, colliding with an existing item id`,
@@ -4868,11 +5043,14 @@ const T10_7_11 = defineProductTest({
           requireRow(derived, "uncovered-requirement", C11_SRC, prefix).id !==
             idSrc ||
           requireRow(derived, "uncovered-requirement", C11_K2, prefix).id !==
-            idK2
+            idK2 ||
+          requireRow(derived, "uncovered-requirement", C11_K3, prefix).id !==
+            idK3
         ) {
           fail(
             `${prefix}: matching items keep their ids across the ` +
-              `re-derivation (SPEC 10.5)`,
+              `re-derivation, as does the no-longer-generated k2 item, which ` +
+              `remains in the session (SPEC 10.5)`,
           );
         }
         const exported = await exportSession(product, workspace, "c", prefix);
@@ -4882,15 +5060,34 @@ const T10_7_11 = defineProductTest({
           `${prefix}: the no-longer-generated k2 item retains its recorded ` +
             `state across the re-derivation (SPEC 10.5)`,
         );
+        assertSameInformation(
+          requireItemById(exported.items, idK3, prefix).current,
+          k3Before.current,
+          `${prefix}: k3's matching item keeps its recorded state across ` +
+            `the re-derivation (SPEC 10.5)`,
+        );
         assertSameJson(
           exportKindScopeSequence(exported.items),
           [
             `uncovered-requirement ${C11_SRC}`,
             `uncovered-requirement ${C11_K1}`,
             `uncovered-requirement ${C11_K2}`,
+            `uncovered-requirement ${C11_K3}`,
           ],
           `${prefix}: \`export\` presents the coverage item order too ` +
             `(SPEC 10.5, 10.7)`,
+        );
+
+        // k3's item, resolved with `--note` before the re-derivation,
+        // presents that note after it, in `show` and `export` alike.
+        await assertPresentedNote(
+          product,
+          workspace,
+          "c",
+          idK3,
+          C11_K3_NOTE,
+          `${prefix} k3's matching item after the re-derivation`,
+          NOTE_KEPT_RULE,
         );
       },
     );
