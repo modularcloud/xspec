@@ -395,7 +395,13 @@
 //   exactly one location, none beside. The home table's dependency-cycle
 //   location stays SOME-quantified (support.ts
 //   assertFindingMentionsLocation): "the would-be cycle's full path" is
-//   asserted there as the participating `d` spelling. The home table's
+//   asserted there as the participating `d` spelling. T14-7's own
+//   dependency cycle — `x` spelling its dependency on `p` twice
+//   (`d={["p", "p"]}`, one edge, 5.2) and moved under `p` — declares its
+//   complete participant set every-participant strict (`locatedAtEach`):
+//   both entries, each by its own expression, nothing for the containment
+//   the move would create (14: a `contains` edge spells nothing), a product
+//   keeping one spelling per edge failing. The home table's
 //   would-be spec import cycle (T6.5-4's, the home note) — both
 //   participating imports ones the move would add, existing in no
 //   pre-operation coordinates — declares its complete participant set
@@ -408,7 +414,12 @@
 //   declares the complete participant set every-participant strict
 //   (`locatedAtEach`): `B`'s existing import declaration by its own
 //   characters and that local reference's spelling (5.7), never a range
-//   for the import that does not yet exist. The remaining
+//   for the import that does not yet exist — and its twice-spelled twin,
+//   `user` spelling the reference twice (`d={["x", "x"]}`), both entries
+//   beside the declaration, each rooted at the added binding, exactly
+//   those three (14: no representative chosen). The twice-spelled arms'
+//   ranges are precomputed exact from the staged bytes, each its own
+//   window (the twice-spelled staging note). The remaining
 //   every-participant cardinality contract is T14-8's subject.
 //   SPEC 14 lists exactly eleven refusal reasons — the two it lists
 //   last, refused-invalid-rewrite and refused-moved-import, are
@@ -439,7 +450,8 @@
 //   target path — each naming an occupied path were it normalized, refused
 //   refused-invalid-destination alone concerning the path as spelled,
 //   occupancy being judged in discovered-path form alone (14, 6.5, 12.0);
-//   the spec import cycle's complete located participant set (above); the
+//   the complete located participant sets of the spec import cycle, its
+//   twice-spelled twin, and the twice-spelled dependency cycle (above); the
 //   both-collide-and-cycle section move (every applicable reason together,
 //   never only the first found); and the invalid-workspace refusal with
 //   the rename staged to ALSO collide — the control arm on the valid twin
@@ -525,13 +537,13 @@
 //   staged paths ASCII.
 // - T14-8 owns the every-participant strictness the home tests SOME-quantify
 //   (T1.3-5's per-occurrence, T2.1-3's and T4-2's per-import, and T2.1-5's
-//   per-file tolerance, T5.3-1's file-dimension binding, T14-7's cycle
-//   mentions-location — its collision arms are every-participant strict,
-//   above): exact finding counts and an index-wise per-participant
-//   assertion — exactly one location per participating construct, each
-//   within its construct's byte window (the module-header window
-//   convention). Participant sequences are declared in the 12.7
-//   within-finding order — document order within one file,
+//   per-file tolerance, T5.3-1's file-dimension binding, T14-7's
+//   home-table dependency-cycle mention — its collision arms and its own
+//   cycle arms are every-participant strict, above): exact finding counts
+//   and an index-wise per-participant assertion — exactly one location per
+//   participating construct, each within its construct's byte window (the
+//   module-header window convention). Participant sequences are declared
+//   in the 12.7 within-finding order — document order within one file,
 //   file-path-byte order across files — so the index-wise assertion also
 //   pins "file bytes, then start, then end" value-wise, beside the
 //   form-exact decoder's enforcement of that order on every decoded finding
@@ -4690,7 +4702,7 @@ const T14_7_CYCLE_A_SOURCE = [
 ].join("\n");
 const T14_7_IMPORT_DECLARATION = 'import A from "./A.xspec"';
 const T14_7_CYCLE_B_SOURCE = stagedMdx(
-  "T14-7 import-cycle arm specs/B.mdx (b importing A for keep)",
+  "T14-7 import-cycle arm and its twice-spelled twin specs/B.mdx (b importing A for keep)",
   [
     T14_7_IMPORT_DECLARATION,
     "",
@@ -4716,6 +4728,193 @@ const T14_7_IMPORT_DECLARATION_WINDOW = byteWindow(
   "",
   T14_7_IMPORT_DECLARATION,
 );
+
+// The twice-spelled cycle stagings (T14-7's own; SPEC 14, 5.2, 5.3, 5.7,
+// 6.5): a would-be cycle's full path is located by every participating
+// spelling, no representative chosen (14), so a `d` array spelling one
+// target twice — one edge (5.2: duplicate references collapse) behind two
+// reference occurrences (5.7: each entry of a `d` array separately) — is
+// located at both entries, each by its own expression. Both stagings follow
+// the body's first invocations, so every source is a staged-source record
+// (S-9), and every located range is precomputed from the staged bytes
+// (`assemble`/`pin`, T14-11's fixture assembly below), each exact range its
+// own window — one location within it, none beside, index-wise in 12.7's
+// within-finding order (support.ts assertFindingLocatesExactly, `path` null
+// with it) — never the window convention's one-byte widening, which would
+// admit the character after an entry (its `,` or the array's `]`).
+// - The import cycle's twice-spelled twin: the import-cycle staging above
+//   with `user` spelling its local reference to `x` twice (`d={["x",
+//   "x"]}`). Moving `x` into `B` roots each entry at the binding of `B`'s
+//   module the move adds to `A`, closing the cycle A → B → A, so the finding
+//   locates both entries beside `B`'s existing import declaration (by its
+//   own characters, `B`'s first line, the record above) — exactly those
+//   three: `specs/A.mdx`'s entries in document order, then `specs/B.mdx`'s
+//   declaration. A product locating one entry as the representative of the
+//   lacked binding fails the count.
+// - The dependency cycle a containment would make: `move specs/A.mdx#x
+//   specs/A.mdx#p.x`, `p` and `x` top-level flow-form sections, `x`
+//   spelling its dependency on `p` twice (`d={["p", "p"]}`). The move makes
+//   `x` the child `p.x` of the node it depends on, a dependency on its own
+//   ancestor (5.3: `p.x` → `p` by `depends`, `p` → `p.x` by `contains`).
+//   Both entries record the participating `depends` edge and exist before
+//   the operation, and the containment the move would create is located by
+//   no spelling (14: a `contains` edge spells nothing), so the finding
+//   locates exactly the two entries, in document order — a product keeping
+//   one spelling per edge, or locating the containment, fails the count. No
+//   other reason applies: `p.x` is intrinsically valid, its parent `p`
+//   exists outside the moved subtree, the file holds no `p.x`, the identity
+//   changes, the local spelling `"p"` still names `p` from `p.x`, and the
+//   moved text inserts before `p`'s closing tag as a flow-position tag,
+//   well-formed (T6.5-4's dependency arm, `mv` under `keep`, has the same
+//   shape).
+// Exported for T6.6-3, which stages T14-7's own stagings identically and
+// asserts each refused `--preview`'s equivalence (TEST-SPEC T6.6-3).
+
+/**
+ * One of T14-7's own refused-cycle stagings (the note above): its
+ * configuration and pre-move sources, each a staged-source record (S-9),
+ * the premise `build` passing over them, the refused move, and the report's
+ * one finding with its complete located set.
+ */
+export interface T147RefusedCycleArm {
+  /** The arm, for diagnostics. */
+  readonly name: string;
+  /** The workspace's `xspec.config.ts`. */
+  readonly config: StagedTs;
+  /** The pre-move sources, by workspace-relative path. */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  /** The refused move's argv, `--json` and `--preview` left to the caller. */
+  readonly argv: readonly string[];
+  /** The report's one finding: `refused-cycle`, its located set complete. */
+  readonly expected: RefusalExpectation;
+}
+
+/**
+ * An assembled fixture's pinned ranges (`assemble`) as complete-bearer
+ * windows in `file`, in pin order: each exact range its own window (the
+ * twice-spelled note above).
+ */
+function pinnedBearersIn(
+  file: string,
+  fixture: AssembledFixture,
+): BearerLocationExpectation[] {
+  return fixture.ranges.map((range) => ({ file, window: range }));
+}
+
+/** `B`'s import declaration by its own characters: the record's first line. */
+const T14_7_IMPORT_DECLARATION_RANGE = {
+  start: 0,
+  end: Buffer.byteLength(T14_7_IMPORT_DECLARATION, "utf8"),
+};
+
+/** The twin's `specs/A.mdx`, its two entries pinned (the note above). */
+const T14_7_TWICE_IMPORT_A_SOURCE = assemble([
+  [
+    '<S id="keep">',
+    "Keep text.",
+    "</S>",
+    "",
+    '<S id="x">',
+    "X text.",
+    "</S>",
+    "",
+    '<S id="user" d={[',
+  ].join("\n"),
+  pin('"x"'),
+  ", ",
+  pin('"x"'),
+  ["]}>", "User text.", "</S>", ""].join("\n"),
+]);
+
+export const T14_7_TWICE_IMPORT_CYCLE_ARM: T147RefusedCycleArm = {
+  name:
+    "spec import cycle, the local reference spelled twice: carrying `x` " +
+    "from A into B, where B imports A and `user` references `x` twice in " +
+    'local form (`d={["x", "x"]}`) — each entry rooted at the binding ' +
+    "the move adds to A, closing the cycle; the finding locates both " +
+    "entries beside B's existing import declaration, exactly those three, " +
+    "no representative chosen",
+  config: SPECS_ONLY_CONFIG,
+  files: {
+    [T14_7_CYCLE_A]: stagedMdx(
+      "T14-7 twice-spelled import-cycle arm specs/A.mdx (keep, x, and user referencing x twice in local form)",
+      T14_7_TWICE_IMPORT_A_SOURCE.text,
+    ),
+    [T14_7_CYCLE_B]: T14_7_CYCLE_B_SOURCE,
+  },
+  argv: ["move", `${T14_7_CYCLE_A}#x`, `${T14_7_CYCLE_B}#x`],
+  expected: {
+    finding: "refused-cycle",
+    locatedAtEach: [
+      ...pinnedBearersIn(T14_7_CYCLE_A, T14_7_TWICE_IMPORT_A_SOURCE),
+      { file: T14_7_CYCLE_B, window: T14_7_IMPORT_DECLARATION_RANGE },
+    ],
+  },
+};
+
+const T14_7_DEPENDENCY_FILE = "specs/A.mdx";
+
+/** The dependency arm's `specs/A.mdx`, both entries pinned (the note above). */
+const T14_7_TWICE_DEPENDENCY_SOURCE = assemble([
+  ['<S id="p">', "P text.", "</S>", "", '<S id="x" d={['].join("\n"),
+  pin('"p"'),
+  ", ",
+  pin('"p"'),
+  ["]}>", "X text.", "</S>", ""].join("\n"),
+]);
+
+export const T14_7_TWICE_DEPENDENCY_CYCLE_ARM: T147RefusedCycleArm = {
+  name:
+    "dependency cycle a containment would make: `x`, spelling its " +
+    'dependency on `p` twice (`d={["p", "p"]}`, one edge), moved under ' +
+    "`p` as `p.x`, a dependency on its own ancestor — the finding locates " +
+    "both entries, exactly those two, nothing for the containment the move " +
+    "would create",
+  config: SPECS_ONLY_CONFIG,
+  files: {
+    [T14_7_DEPENDENCY_FILE]: stagedMdx(
+      "T14-7 twice-spelled dependency-cycle arm specs/A.mdx (top-level p, and x depending on p twice)",
+      T14_7_TWICE_DEPENDENCY_SOURCE.text,
+    ),
+  },
+  argv: ["move", `${T14_7_DEPENDENCY_FILE}#x`, `${T14_7_DEPENDENCY_FILE}#p.x`],
+  expected: {
+    finding: "refused-cycle",
+    locatedAtEach: pinnedBearersIn(
+      T14_7_DEPENDENCY_FILE,
+      T14_7_TWICE_DEPENDENCY_SOURCE,
+    ),
+  },
+};
+
+/**
+ * One of T14-7's own refused-cycle arms (the twice-spelled note above): a
+ * fresh workspace of its configuration and pre-move sources, the premise
+ * `build` passing over them, then the refused move through T14-7's
+ * reporting contract (`assertRefusalReport`, the human-form run included).
+ */
+async function runT147RefusedCycleArm(
+  product: ProductBinding,
+  arm: T147RefusedCycleArm,
+): Promise<void> {
+  await withWorkspace(
+    { files: { "xspec.config.ts": arm.config, ...arm.files } },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `T14-7 ${arm.name}: staging \`build\` over the valid workspace`,
+      );
+      await assertRefusalReport(
+        product,
+        workspace,
+        arm.argv,
+        arm.expected,
+        `T14-7 move (${arm.name})`,
+      );
+    },
+  );
+}
 
 // refused-invalid-rewrite and refused-moved-import, via the home tables
 // (TEST-SPEC T14-7: T6.5-16, T6.5-17). T14-7 re-asserts the reporting
@@ -5366,7 +5565,7 @@ async function runT147ExposedDerivedFileArms(
 const T14_7 = defineProductTest({
   id: "T14-7",
   title:
-    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it: `[\"specs/A.mdx#a.then\"]` for `rename specs/A.mdx a a.then` (the top-level `a`, holding `a.mid` and `a.sib`, made the two-segment `a.then`, no refused-structural-parent beside it) and `[\"specs/B.mdx#x y\"]` for `move specs/A.mdx#x 'specs/B.mdx#x y'` (`x` holding `x.sub`, never `specs/B.mdx#x y.sub`) (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's full path in pre-operation coordinates — a dependency cycle's participating `d` spelling; a spec import cycle's existing import declaration by its own characters and, for the import the move would add, the local reference spelling whose rewrite requires it, exactly those two, never a range for the import that does not yet exist; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included — occupancy judged in discovered-path form alone: a destination spelled `./a.mdx` for the origin `a.mdx`, `specs//b.mdx`, or `specs/../specs/b.mdx`, each naming an occupied path were it normalized, is refused-invalid-destination alone concerning the path as spelled, never reported occupied, and a section-form target path so spelled likewise; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination, and in T6.5-4's symbolic-link arms a link to a directory at a component of the destination path, of a created target file's path, and of the `outDir` emit destination, the link and its target byte-identical after each refusal — and so do T6.5-4's barred path characters and T6.5-20's derived-path relations and module-linking designation, over T6.5-20's exported refused stagings; refused-exposed-derived-file over T6.5-21's exported refused stagings — `path` the origin's emit destination, `locations` `[]`, `identities` `[]`, the two-reason move's refused-invalid-destination beside it; every reason concerning a path carrying it as the finding's `path` with `locations` `[]`; the eleven reasons 14 lists (refused-exposed-derived-file, refused-invalid-rewrite, and refused-moved-import, T6.5-21's, T6.5-16's, and T6.5-17's subjects, included) are the whole refusal vocabulary — a code 14 does not list never appears in any report, the form-exact decode admitting only 14's codes (no unresolvable-reference reason exists); every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them; refused-invalid-rewrite and refused-moved-import re-asserted over T6.5-16's and T6.5-17's exported arms — the former locating the moved construct and, for an addition no offset admits, the spellings rooted at its binding, its identities the concerned files' paths in byte order; the latter locating each moved declaration by the import range of 11.4, its identities empty — `path` null for both, every reason the entry pins beside reported together; identities over invalid paths: `move specs/A.mdx#x 'specs/new.txt#x y'` reports refused-invalid-destination (`path` `specs/new.txt`) beside refused-invalid-id with identities exactly `[\"specs/new.txt#x y\"]`, and `move specs/A.mdx#x specs/new.txt#p.y` refused-invalid-destination beside refused-missing-target-parent with `[\"specs/new.txt#p\"]` — each a plain string over the path as spelled, defining no node: `query node` on it is a usage error, exit 2; and the spec import cycle's sibling arm — `A` imports a third module `C`, the moved text carries `d={C.foo}`, `C` imports `B` — locating `C`'s existing import of `B` and the chain's spelling in `A`, the located set the spellings rooted at the added binding, independent of whether each appears as a reference-rewrite; and at each refusal's `--json` state the human form — the same argv without `--json` — exits 1 alike and carries every finding's stable code, its location — its file and its range's start and end — its concerned path, and its identities, data a human report may quote or escape excepted (robust matching, H-3) (SPEC 14, 6.4, 6.5, 4, 5.3, 5.7, 1.5, 1.7, 7, 11.4, 12.0, 12.7, 13.4)",
+    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it: `[\"specs/A.mdx#a.then\"]` for `rename specs/A.mdx a a.then` (the top-level `a`, holding `a.mid` and `a.sib`, made the two-segment `a.then`, no refused-structural-parent beside it) and `[\"specs/B.mdx#x y\"]` for `move specs/A.mdx#x 'specs/B.mdx#x y'` (`x` holding `x.sub`, never `specs/B.mdx#x y.sub`) (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's full path in pre-operation coordinates, no representative chosen — a dependency cycle's participating `d` spellings, every one: `x` spelling its dependency on `p` twice (`d={[\"p\", \"p\"]}`, one edge) and moved under `p` (`move specs/A.mdx#x specs/A.mdx#p.x`) locating both entries, exactly those two, nothing for the containment the move would create, a product keeping one spelling per edge failing; a spec import cycle's existing import declaration by its own characters and, for the import the move would add, the local reference spelling whose rewrite requires it, exactly those two, never a range for the import that does not yet exist — and, that reference spelled twice (`d={[\"x\", \"x\"]}`), both entries beside the declaration, each rooted at the added binding, exactly those three; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included — occupancy judged in discovered-path form alone: a destination spelled `./a.mdx` for the origin `a.mdx`, `specs//b.mdx`, or `specs/../specs/b.mdx`, each naming an occupied path were it normalized, is refused-invalid-destination alone concerning the path as spelled, never reported occupied, and a section-form target path so spelled likewise; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination, and in T6.5-4's symbolic-link arms a link to a directory at a component of the destination path, of a created target file's path, and of the `outDir` emit destination, the link and its target byte-identical after each refusal — and so do T6.5-4's barred path characters and T6.5-20's derived-path relations and module-linking designation, over T6.5-20's exported refused stagings; refused-exposed-derived-file over T6.5-21's exported refused stagings — `path` the origin's emit destination, `locations` `[]`, `identities` `[]`, the two-reason move's refused-invalid-destination beside it; every reason concerning a path carrying it as the finding's `path` with `locations` `[]`; the eleven reasons 14 lists (refused-exposed-derived-file, refused-invalid-rewrite, and refused-moved-import, T6.5-21's, T6.5-16's, and T6.5-17's subjects, included) are the whole refusal vocabulary — a code 14 does not list never appears in any report, the form-exact decode admitting only 14's codes (no unresolvable-reference reason exists); every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them; refused-invalid-rewrite and refused-moved-import re-asserted over T6.5-16's and T6.5-17's exported arms — the former locating the moved construct and, for an addition no offset admits, the spellings rooted at its binding, its identities the concerned files' paths in byte order; the latter locating each moved declaration by the import range of 11.4, its identities empty — `path` null for both, every reason the entry pins beside reported together; identities over invalid paths: `move specs/A.mdx#x 'specs/new.txt#x y'` reports refused-invalid-destination (`path` `specs/new.txt`) beside refused-invalid-id with identities exactly `[\"specs/new.txt#x y\"]`, and `move specs/A.mdx#x specs/new.txt#p.y` refused-invalid-destination beside refused-missing-target-parent with `[\"specs/new.txt#p\"]` — each a plain string over the path as spelled, defining no node: `query node` on it is a usage error, exit 2; and the spec import cycle's sibling arm — `A` imports a third module `C`, the moved text carries `d={C.foo}`, `C` imports `B` — locating `C`'s existing import of `B` and the chain's spelling in `A`, the located set the spellings rooted at the added binding, independent of whether each appears as a reference-rewrite; and at each refusal's `--json` state the human form — the same argv without `--json` — exits 1 alike and carries every finding's stable code, its location — its file and its range's start and end — its concerned path, and its identities, data a human report may quote or escape excepted (robust matching, H-3) (SPEC 14, 6.4, 6.5, 4, 5.2, 5.3, 5.7, 1.5, 1.7, 7, 11.4, 12.0, 12.7, 13.4)",
   run: async (product) => {
     // --- The rename reasons, staged via T6.4-3's exported fixture: the
     // 1.4-invalid new IDs (refused-invalid-id concerning the invalid
@@ -5672,12 +5871,26 @@ const T14_7 = defineProductTest({
       },
     );
 
+    // --- refused-cycle over the import cycle's twice-spelled twin (the
+    // twice-spelled staging note): `user` referencing `x` twice in local
+    // form — both entries, each rooted at the binding the move would add,
+    // located beside `B`'s existing import declaration, exactly those
+    // three, no representative chosen (SPEC 14, 6.5, 5.7, 5.2).
+    await runT147RefusedCycleArm(product, T14_7_TWICE_IMPORT_CYCLE_ARM);
+
     // --- refused-cycle over the sibling spec-import-cycle arm (the sibling
     // staging note): the chain `C.foo` carried into `B`, `C` importing `B`
     // — the finding locates `C`'s existing import and the chain's spelling
     // in `A`, the spellings rooted at the added binding whether or not any
     // character of theirs changes (SPEC 14, 6.5, 5.7).
     await runT147SiblingCycleArm(product);
+
+    // --- refused-cycle over the dependency cycle a containment would make
+    // (the twice-spelled staging note): `x`, spelling its dependency on `p`
+    // twice, moved under `p` — both entries located, exactly those two,
+    // nothing for the containment the move would create (SPEC 14, 5.3, 5.2,
+    // 5.7).
+    await runT147RefusedCycleArm(product, T14_7_TWICE_DEPENDENCY_CYCLE_ARM);
 
     // --- refused-invalid-destination over T6.5-20's derived-path relations
     // and module-linking designation (the T6.5-20 note): every refused move
