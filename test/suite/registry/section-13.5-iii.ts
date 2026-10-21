@@ -75,29 +75,42 @@
 // - T13.5-7's write failures but (b)'s, whose read-only `.xspec` refuses
 //   release's deletion of the emptied lock directory (a residue T13.5-7
 //   states), on the Linux leg (`WRITE_REFUSALS_STAGED`: permission
-//   removals, E-1): each of T13.5-7's arms (a), (c), (d), (e), and (f) on a
-//   freshly built, valid, journal-bearing workspace of its own, staged
-//   exactly as T13.5-7 stages it (write-refusal-staging.ts: its fixtures,
+//   removals, E-1): each write failure of T13.5-7's arms (a), (c), (d),
+//   (e), (f), (g), and (h) on a freshly built, valid, journal-bearing
+//   workspace of its own, staged exactly as T13.5-7 stages it
+//   (write-refusal-staging.ts: its fixtures, pre-invocation stagings,
 //   appliers, and constants — T14-9's discipline, verified on the harness
 //   itself, restored the moment the command exits; `.xspec/lock` checked
 //   absent once the staging runs have ended): (a) `rename specs/b/B.mdx b
 //   b2` held, `specs/b` made unwritable during its hold; (c) the file-form
 //   `move specs/A.mdx specs/sub/B.mdx` (Markdown emitted under `out`) held,
-//   `out/specs` unwritable; (d) the same move held, `specs/sub` present,
-//   `specs` and the origin unwritable; (e) on the stale workspace holding
-//   the session `s`, `review resolve s <item> --status no-change`, `review
-//   create --strategy audit --name n`, and `review split s <item>` each
-//   held, `.xspec/reviews` and the session file unwritable, `.xspec` itself
+//   `out/specs` unwritable, and (a)'s rename on the rename fixture's variant
+//   emitting Markdown under `out`, `out/specs/b/B.md` deleted once built
+//   (`out/specs/b` checked to hold it alone), held, `out/specs/b`
+//   unwritable; (d) the move held, `specs/sub` present, `specs` and the
+//   origin unwritable; (e) on the stale workspace holding the session `s`,
+//   `review resolve s <item> --status no-change`, `review create --strategy
+//   audit --name n`, and `review split s <item>` each held,
+//   `.xspec/reviews` and the session file unwritable, `.xspec` itself
 //   writable; (f) on the workspace whose `specs/b/B.mdx` is edited, `build`
 //   with `specs/b` unwritable and `query nodes` and `view specs/a/A.mdx`
 //   with `.xspec` unwritable by T14-9's graph-data staging (`.xspec` and
 //   every directory of T13.3-2's operational path set read-only, every file
 //   of it unwritable, the journal, the session directory, and the lock path
-//   keeping their modes), staged before the invocation — they acquire
-//   nothing (13.5), and no write but acquisition and release touches the
-//   lock path (13.4), so `.xspec/lock` is absent all the same (for the
-//   reads the read-only `.xspec` alone forbids creating it, so only their
-//   premise can fail). Each write failure — exit 2, `code`
+//   keeping their modes), staged before the invocation; (g) `move
+//   specs/a/A.mdx#x specs/n/N.mdx#x` and, the byte order reversed, `move
+//   specs/z/Z.mdx#x specs/n/N.mdx#x`, each on its own section-move fixture
+//   held, the empty `specs/n` unwritable — the refused write the target
+//   file's creation, after the origin's rewrite or as the run's first
+//   write; (h) on the move fixture with Markdown emission disabled once
+//   built (`out/specs` checked to hold `A.md` alone, `markdown` then
+//   removed), `build` staged before the invocation and `rename specs/A.mdx
+//   a a2` held, `out/specs` unwritable — the refused write `out/specs/A.md`'s
+//   removal, the one write their regenerations owe there. `build` and the
+//   reads acquire nothing (13.5), and no write but acquisition and release
+//   touches the lock path (13.4), so `.xspec/lock` is absent all the same
+//   (for the reads the read-only `.xspec` alone forbids creating it, so only
+//   their premise can fail). Each write failure — exit 2, `code`
 //   `"write-failure"`, a concerned path T13.5-7 states — is asserted as its
 //   premise, then (the staging restored) `.xspec/lock` absent. These run
 //   last (the body says why).
@@ -253,12 +266,16 @@ import {
 } from "./section-13.5.js";
 import { assertSameJson, expectErrorDocument, expectExit } from "./support.js";
 import type {
+  CreatedTargetOrder,
   PreparedWorkspace,
   RefusalFixture,
   StagingApplier,
 } from "./write-refusal-staging.js";
 import {
   awaitHoldFile,
+  CREATED_TARGET_ORDERS,
+  deleteRenameOutMarkdown,
+  disableMoveEmission,
   E_EDIT_FROM,
   E_EDIT_TO,
   expectWriteFailure,
@@ -276,6 +293,8 @@ import {
   MOVE_ORIGIN,
   NEW_SESSION,
   NEW_SESSION_FILE,
+  ORPHAN_RENAME_ARGV,
+  ORPHANED_MARKDOWN,
   prepareRefusalWorkspace,
   refusalAt,
   refusalUnder,
@@ -285,10 +304,15 @@ import {
   RENAME_B_MODULE,
   RENAME_B_PATH,
   RENAME_FIXTURE,
+  RENAME_OUT_FIXTURE,
+  RENAME_OUT_MARKDOWN,
+  RENAME_OUT_MARKDOWN_DIR,
   requireItemByScope,
   RESOLVE_SCOPE,
   REVIEWS_DIR,
   runStaged,
+  SECTION_MOVE_TARGET,
+  SECTION_MOVE_TARGET_DIR,
   SESSION,
   SESSION_FILE,
   sessionStatus,
@@ -1074,15 +1098,19 @@ interface RefusedWrite {
   readonly concerned: readonly string[];
 }
 
-/** One of T13.5-7's arms but (b), and its refused writes in T13.5-7's order. */
+/**
+ * One of T13.5-7's arms but (b), or one of an arm's operations T13.5-7 runs
+ * on a workspace of its own, and its refused writes in T13.5-7's order.
+ */
 interface WriteFailureArm {
   /** T13.5-7's arm, for diagnoses. */
   readonly what: string;
   readonly fixture: RefusalFixture;
   /**
    * T13.5-7's own pre-invocation staging of the arm on its prepared
-   * workspace — a directory; a session, its items read, then an edit; an
-   * edit — returning the arm's refused writes.
+   * workspace — nothing; a directory; a session, its items read, then an
+   * edit; an edit; an emitted Markdown file deleted; emission disabled —
+   * returning the arm's refused writes.
    */
   readonly stage: (
     product: ProductBinding,
@@ -1112,11 +1140,50 @@ const NO_ACQUISITION =
   "lock path (13.4)";
 
 /**
- * (a)'s write failures: T13.5-7's arms but (b), whose read-only `.xspec`
- * refuses release's deletion of the emptied lock directory — a residue
- * T13.5-7 states — in T13.5-7's order, each on a freshly built, valid,
- * journal-bearing workspace of its own (`prepareRefusalWorkspace`) staged
- * as T13.5-7 stages it.
+ * (g)'s arm in one of its two byte orders (write-refusal-staging.ts
+ * `CREATED_TARGET_ORDERS`): on the order's own section-move fixture, its
+ * `specs/n` empty from the start (the declaration's `dirs`), `move
+ * <origin>#x specs/n/N.mdx#x` held, `specs/n` made unwritable during its
+ * hold — the refused write the target file's creation, a source edit, after
+ * the origin's rewrite where `files` lists the origin first and the run's
+ * first write where the byte order is reversed (SPEC 13.5, 6.5, 12.7).
+ */
+function createdTargetWriteFailureArm(
+  order: CreatedTargetOrder,
+): WriteFailureArm {
+  return {
+    what: order.originFirst
+      ? "(g), the created target file listed after the origin"
+      : "(g), the created target file listed first (the byte order reversed)",
+    fixture: order.fixture,
+    stage: async () => [
+      {
+        argv: [...order.argv, "--json"],
+        held: true,
+        apply: refusalUnder(SECTION_MOVE_TARGET_DIR),
+        staged:
+          `${SECTION_MOVE_TARGET_DIR}, empty from the start, made ` +
+          "unwritable during its hold",
+        concerned: [SECTION_MOVE_TARGET],
+      },
+    ],
+    why: HELD_RELEASE,
+  };
+}
+
+/** (h)'s pre-invocation staging, for diagnoses (`disableMoveEmission`). */
+const EMISSION_DISABLED =
+  "Markdown emission under `out` disabled once built (`markdown` removed)";
+
+/**
+ * (a)'s write failures: each of T13.5-7's but (b)'s, whose read-only
+ * `.xspec` refuses release's deletion of the emptied lock directory — a
+ * residue T13.5-7 states — in T13.5-7's order, each on a freshly built,
+ * valid, journal-bearing workspace of its own (`prepareRefusalWorkspace`)
+ * staged as T13.5-7 stages it: one entry per arm, or per operation where
+ * T13.5-7 runs an arm's operations on workspaces of their own — (c)'s move
+ * and its rename, (f)'s `build` and its refreshing reads, (g)'s two byte
+ * orders, and (h)'s `build` and its rename.
  */
 const WRITE_FAILURE_ARMS: readonly WriteFailureArm[] = [
   {
@@ -1145,6 +1212,29 @@ const WRITE_FAILURE_ARMS: readonly WriteFailureArm[] = [
         concerned: MOVE_MARKDOWN_WRITES,
       },
     ],
+    why: HELD_RELEASE,
+  },
+  {
+    what: "(c), the rename stopped at a Markdown write",
+    fixture: RENAME_OUT_FIXTURE,
+    stage: async (_product, { workspace }, context) => {
+      // T13.5-7 (c)'s rename staging: `out/specs/b` checked to hold B's
+      // emitted Markdown alone, that file deleted, so the rename's
+      // finishing regeneration owes its creation (SPEC 6.4, 12.1).
+      await deleteRenameOutMarkdown(workspace, `${context} staging`);
+      return [
+        {
+          argv: REFUSED_RENAME,
+          held: true,
+          apply: refusalUnder(RENAME_OUT_MARKDOWN_DIR),
+          staged:
+            `Markdown emitted under \`out\`, ${RENAME_OUT_MARKDOWN} deleted ` +
+            `once built, ${RENAME_OUT_MARKDOWN_DIR} made unwritable during ` +
+            "its hold",
+          concerned: [RENAME_OUT_MARKDOWN],
+        },
+      ];
+    },
     why: HELD_RELEASE,
   },
   {
@@ -1303,6 +1393,49 @@ const WRITE_FAILURE_ARMS: readonly WriteFailureArm[] = [
       `${NO_ACQUISITION} — \`.xspec\`'s staging alone forbids creating ` +
       "anything in it besides",
   },
+  ...CREATED_TARGET_ORDERS.map(createdTargetWriteFailureArm),
+  {
+    what: "(h), the removal owed alone — `build`",
+    fixture: MOVE_FIXTURE,
+    stage: async (_product, { workspace }, context) => {
+      // T13.5-7 (h)'s staging: `out/specs` checked to hold `A.md` alone,
+      // then the configuration rewritten with `markdown` removed, so a
+      // regeneration owes nothing there but that file's removal (SPEC
+      // 12.1, 13.4).
+      await disableMoveEmission(workspace, `${context} staging`);
+      return [
+        {
+          argv: ["build", "--json"],
+          held: false,
+          apply: refusalUnder(MOVE_MARKDOWN_DIR),
+          staged:
+            `${EMISSION_DISABLED}, ${MOVE_MARKDOWN_DIR} made unwritable ` +
+            "before the invocation",
+          concerned: [ORPHANED_MARKDOWN],
+        },
+      ];
+    },
+    why: NO_ACQUISITION,
+  },
+  {
+    what: "(h), the removal owed alone — the rename",
+    fixture: MOVE_FIXTURE,
+    stage: async (_product, { workspace }, context) => {
+      await disableMoveEmission(workspace, `${context} staging`);
+      return [
+        {
+          argv: [...ORPHAN_RENAME_ARGV, "--json"],
+          held: true,
+          apply: refusalUnder(MOVE_MARKDOWN_DIR),
+          staged:
+            `${EMISSION_DISABLED}, ${MOVE_MARKDOWN_DIR} made unwritable ` +
+            "during its hold",
+          concerned: [ORPHANED_MARKDOWN],
+        },
+      ];
+    },
+    why: HELD_RELEASE,
+  },
 ];
 
 /**
@@ -1335,14 +1468,15 @@ async function heldRefusedWrite(
 }
 
 /**
- * One of T13.5-7's arms but (b) (TEST-SPEC T13.5-11(a)): on a freshly built,
- * valid, journal-bearing workspace of its own staged as T13.5-7 stages the
- * arm — `.xspec/lock` checked absent once those runs have ended, itself
- * release after a success — each refused write in turn, held or staged
- * before the invocation as `RefusedWrite.held` says: its write failure
- * (exit 2, `code` `"write-failure"`, a concerned path T13.5-7 states)
- * asserted as its premise, then, the staging restored, `.xspec/lock`
- * absent.
+ * One of (a)'s write failures (TEST-SPEC T13.5-11(a)) — one of T13.5-7's
+ * arms but (b), or one of an arm's operations T13.5-7 runs on a workspace
+ * of its own: on a freshly built, valid, journal-bearing workspace of its
+ * own staged as T13.5-7 stages it — `.xspec/lock` checked absent once
+ * those runs have ended, itself release after a success — each refused
+ * write in turn, held or staged before the invocation as
+ * `RefusedWrite.held` says: its write failure (exit 2, `code`
+ * `"write-failure"`, a concerned path T13.5-7 states) asserted as its
+ * premise, then, the staging restored, `.xspec/lock` absent.
  */
 async function writeFailureRun(
   product: ProductBinding,
@@ -1383,7 +1517,7 @@ async function writeFailureRun(
   }
 }
 
-/** (a)'s write failures: T13.5-7's arms but (b), in T13.5-7's order. */
+/** (a)'s write failures: T13.5-7's but (b)'s, in T13.5-7's order. */
 async function writeFailureArms(product: ProductBinding): Promise<void> {
   for (const arm of WRITE_FAILURE_ARMS) {
     await writeFailureRun(product, arm);
@@ -1947,7 +2081,7 @@ async function unwritableLockDirectoryRun(
 const T13_5_11 = defineProductTest({
   id: "T13.5-11",
   title:
-    'release, arms (a) to (d) — a command ending normally deletes its entry, then the lock directory when that holds nothing else, then `.xspec` when its acquisition created it and it then holds nothing else, release reading nothing, a deletion the environment refuses changing no outcome: (a) `.xspec/lock` absent after each mutating command\'s success (`rename specs/A.mdx a a2`, `move specs/A.mdx specs/B.mdx`, `review create --strategy audit --name t`, `review resolve s <item> --status no-change`, `review split s <item>`, each on a freshly built valid workspace holding an `audit` session `s`, exit 0), after its usage errors past acquisition (each command\'s `--test-hold` path occupied; an unknown old ID, origin file, profile, session, or item — exit 2, `code` `null`), and after each refusal (a `rename` refused by validation, a `move` refused for a 6.5 reason, a `review create` naming an existing session and one the gate turns back, a `resolve` of a blocked item, a `split` of an item of another kind, a `resolve` and a `split` naming a corrupt session — exit 1); after a read failure past acquisition and a configuration error the rediscovery meets, each command held on a freshly built valid workspace configured as T13.5-12(d)\'s (`specs/sub` made `--x` during its hold → exit 2, `code` `"read-failure"`, `path` `"specs/sub"`; a file created during its hold at `src/both.mdx`, a path both groups match → exit 2, `code` `"configuration-error"`, `path` `"xspec.config.ts"`); after each write failure of T13.5-7 but (b)\'s, each of its arms on a freshly built, valid, journal-bearing workspace of its own staged as T13.5-7 stages it (`rename specs/b/B.mdx b b2` held, `specs/b` made unwritable during its hold; the file-form `move specs/A.mdx specs/sub/B.mdx` held, `out/specs` made unwritable, and, `specs/sub` present, `specs` and the origin; `review resolve s <item> --status no-change`, `review create --strategy audit --name n`, and `review split s <item>` each held on a stale workspace holding `s`, `.xspec/reviews` and the session file made unwritable; on a workspace whose `specs/b/B.mdx` is edited, `build` with `specs/b` made unwritable and `query nodes` and `view specs/a/A.mdx` with `.xspec` made unwritable by T14-9\'s graph-data staging (the journal, the session directory, and the lock path keeping their modes), before the invocation, which acquire nothing) — each exit 2, `code` `"write-failure"`, its concerned path, asserted first; after acquisition\'s own read and write failures, with each command (an empty leftover lock directory made `-wx` → `"read-failure"`, or `r-x` → `"write-failure"`; a read-only `.xspec` holding no `lock` → `"write-failure"`; `.xspec` made `rw-` holding no `lock` → either code; each `path` `".xspec/lock"`; an unbuilt workspace\'s root made read-only → `"write-failure"`, `path` `".xspec"`) — each failure\'s ending asserted first; after a busy refusal of each command while `rename specs/A.mdx a a2` holds (exit 2, `code` `"workspace-busy"`, `path` `".xspec/lock"`) the lock directory holds exactly the holder\'s entry, byte-identical, and once the holder completes `.xspec/lock` is absent; (b) `rename specs/A.mdx nope x` failing its argument check on an unbuilt workspace leaves no `.xspec`, also with `.xspec` made `-wx` during its hold (exit 2 with its unstaged twin\'s output); with an empty `.xspec` beforehand it leaves `.xspec` present and empty; with the root alone made `r-x` during its hold it exits 2 with the twin\'s output, no `write-failure`, leaving `.xspec` present and empty; with an empty `.xspec/lock` beforehand, no `.xspec/lock`; (c) with each command held and the lock directory made `-wx` during its hold → its unstaged twin\'s outcome (exit code, standard output and error byte-equal) or exit 2 with `code` `"read-failure"`, `path` `".xspec/lock"`, and no `.xspec/lock` either way; (d) with each command held and the lock directory made `r-x` during its hold → its unstaged twin\'s outcome, exit 0, no `write-failure`, its entry remaining under its name, the lock directory\'s only one; the permissions restored and the run\'s process group confirmed gone, `review create --strategy audit --name u` takes the entry over, exit 0, `.xspec/lock` absent (a `workspace-busy` refusal meeting T13.5-3\'s reuse check); each held run\'s held-state comparison made once it holds, each staging verified on the harness itself (SPEC 13.4, 13.5, 14.14, 14.24, 14.25, 14.26)',
+    'release, arms (a) to (d) — a command ending normally deletes its entry, then the lock directory when that holds nothing else, then `.xspec` when its acquisition created it and it then holds nothing else, release reading nothing, a deletion the environment refuses changing no outcome: (a) `.xspec/lock` absent after each mutating command\'s success (`rename specs/A.mdx a a2`, `move specs/A.mdx specs/B.mdx`, `review create --strategy audit --name t`, `review resolve s <item> --status no-change`, `review split s <item>`, each on a freshly built valid workspace holding an `audit` session `s`, exit 0), after its usage errors past acquisition (each command\'s `--test-hold` path occupied; an unknown old ID, origin file, profile, session, or item — exit 2, `code` `null`), and after each refusal (a `rename` refused by validation, a `move` refused for a 6.5 reason, a `review create` naming an existing session and one the gate turns back, a `resolve` of a blocked item, a `split` of an item of another kind, a `resolve` and a `split` naming a corrupt session — exit 1); after a read failure past acquisition and a configuration error the rediscovery meets, each command held on a freshly built valid workspace configured as T13.5-12(d)\'s (`specs/sub` made `--x` during its hold → exit 2, `code` `"read-failure"`, `path` `"specs/sub"`; a file created during its hold at `src/both.mdx`, a path both groups match → exit 2, `code` `"configuration-error"`, `path` `"xspec.config.ts"`); after each write failure of T13.5-7 but (b)\'s, each on a freshly built, valid, journal-bearing workspace of its own staged as T13.5-7 stages it (`rename specs/b/B.mdx b b2` held, `specs/b` made unwritable during its hold, and, under `markdown: { emit: true, outDir: "out" }` with `out/specs/b/B.md` deleted once built, `out/specs/b`; the file-form `move specs/A.mdx specs/sub/B.mdx` held, `out/specs` made unwritable, and, `specs/sub` present, `specs` and the origin; `review resolve s <item> --status no-change`, `review create --strategy audit --name n`, and `review split s <item>` each held on a stale workspace holding `s`, `.xspec/reviews` and the session file made unwritable; on a workspace whose `specs/b/B.mdx` is edited, `build` with `specs/b` made unwritable and `query nodes` and `view specs/a/A.mdx` with `.xspec` made unwritable by T14-9\'s graph-data staging (the journal, the session directory, and the lock path keeping their modes), before the invocation, which acquire nothing; `move specs/a/A.mdx#x specs/n/N.mdx#x` and, the byte order reversed, `move specs/z/Z.mdx#x specs/n/N.mdx#x` each held, the empty `specs/n` made unwritable during its hold; on the move\'s workspace with Markdown emission disabled once built, `build` with `out/specs` made unwritable before the invocation, which acquires nothing, and `rename specs/A.mdx a a2` held, `out/specs` made unwritable during its hold) — each exit 2, `code` `"write-failure"`, its concerned path, asserted first; after acquisition\'s own read and write failures, with each command (an empty leftover lock directory made `-wx` → `"read-failure"`, or `r-x` → `"write-failure"`; a read-only `.xspec` holding no `lock` → `"write-failure"`; `.xspec` made `rw-` holding no `lock` → either code; each `path` `".xspec/lock"`; an unbuilt workspace\'s root made read-only → `"write-failure"`, `path` `".xspec"`) — each failure\'s ending asserted first; after a busy refusal of each command while `rename specs/A.mdx a a2` holds (exit 2, `code` `"workspace-busy"`, `path` `".xspec/lock"`) the lock directory holds exactly the holder\'s entry, byte-identical, and once the holder completes `.xspec/lock` is absent; (b) `rename specs/A.mdx nope x` failing its argument check on an unbuilt workspace leaves no `.xspec`, also with `.xspec` made `-wx` during its hold (exit 2 with its unstaged twin\'s output); with an empty `.xspec` beforehand it leaves `.xspec` present and empty; with the root alone made `r-x` during its hold it exits 2 with the twin\'s output, no `write-failure`, leaving `.xspec` present and empty; with an empty `.xspec/lock` beforehand, no `.xspec/lock`; (c) with each command held and the lock directory made `-wx` during its hold → its unstaged twin\'s outcome (exit code, standard output and error byte-equal) or exit 2 with `code` `"read-failure"`, `path` `".xspec/lock"`, and no `.xspec/lock` either way; (d) with each command held and the lock directory made `r-x` during its hold → its unstaged twin\'s outcome, exit 0, no `write-failure`, its entry remaining under its name, the lock directory\'s only one; the permissions restored and the run\'s process group confirmed gone, `review create --strategy audit --name u` takes the entry over, exit 0, `.xspec/lock` absent (a `workspace-busy` refusal meeting T13.5-3\'s reuse check); each held run\'s held-state comparison made once it holds, each staging verified on the harness itself (SPEC 13.4, 13.5, 14.14, 14.24, 14.25, 14.26)',
   run: async (product) => {
     // (a) Each mutating command's success — the unstaged twins of (c) and
     // (d) — then its usage errors past acquisition, the refusals, the
