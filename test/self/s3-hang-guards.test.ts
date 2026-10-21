@@ -79,10 +79,15 @@
 //   companion stagings of T6.5-20(a), (c), (e) and T13.4-9(e), one per
 //   companion path a build records, read through their shared reading
 //   (`readRecordedCompanionPaths`, test/suite/registry/support.ts) from
-//   stand-in `recorded` sets of differing sizes — at each count no guard is
-//   applied, the longest span past one own guard. T13.3-5(a)'s trials over
-//   the files a product writes under `.xspec/` join them, with stand-in file
-//   sets, once that test is registered.
+//   stand-in `recorded` sets of differing sizes — and T13.3-5(a)'s
+//   tampering trials, as many as the files a product writes under `.xspec/`
+//   yield (rounds of one alteration per nonempty file, at least eight
+//   trials per fixed seed, and, where the product writes several files
+//   there, the mixes of two product-written states), read through their
+//   shared reading (`readTamperingTrials`,
+//   test/suite/registry/section-13.3.ts) from the stand-in file sets of one
+//   and two files a stand-in `build` writes — at each count no guard is
+//   applied, the longest span past one own guard.
 // - A held run's span: while the harness keeps the hold standing it drives
 //   invocations whose delays together pass the held run's own guard, which
 //   stands suspended (helpers/subprocess.ts), and the run completes once
@@ -127,6 +132,7 @@ import { TestWorkspace } from "../helpers/workspace.js";
 import { declareProductTests } from "../suite/declare.js";
 import type { ProductTestDeclarationOptions } from "../suite/declare.js";
 import { productTestSuite } from "../suite/registry/index.js";
+import { readTamperingTrials } from "../suite/registry/section-13.3.js";
 import { readRecordedCompanionPaths } from "../suite/registry/support.js";
 import { runProductTests } from "./certification-runner.js";
 
@@ -139,7 +145,10 @@ import { runProductTests } from "./certification-runner.js";
 // <value> <ms>` exits 0 below the threshold and 1 at or past it after a
 // fixed delay (a stand-in failing a property at the draws it names); `hang`
 // never terminates; `held --test-hold <path>` creates the hold file and
-// exits 0 once it is deleted; `build` exits 0; `inventory` answers the
+// exits 0 once it is deleted; `build` writes the stand-in graph-data file
+// set its environment names — `XSPEC_S3_GRAPH_FILES` files under `.xspec/`,
+// `s3g0` onward, each holding the bytes of `s3-source.txt` and its index,
+// none when the variable is unset — and exits 0; `inventory` answers the
 // `recorded` set its environment names.
 const STANDIN_SOURCE = `import fs from "node:fs";
 
@@ -175,6 +184,17 @@ switch (mode) {
     break;
   }
   case "build": {
+    const count = Number(process.env.XSPEC_S3_GRAPH_FILES ?? "0");
+    if (count > 0) {
+      const source = fs.readFileSync("s3-source.txt");
+      fs.mkdirSync(".xspec", { recursive: true });
+      for (let index = 0; index < count; index += 1) {
+        fs.writeFileSync(
+          ".xspec/s3g" + String(index),
+          Buffer.concat([source, Buffer.from(String(index))]),
+        );
+      }
+    }
     process.exit(0);
     break;
   }
@@ -1531,6 +1551,74 @@ test(
         expect(span.ms).toBeGreaterThan(OWN_GUARD_MS);
       }
     }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// T13.3-5(a)'s tampering trials
+// ---------------------------------------------------------------------------
+
+/** The file the stand-in's `build` derives its graph-data files from. */
+const TAMPERING_SOURCE = "s3-source.txt";
+/**
+ * Each trial's stand-in invocation's fixed delay: shorter than the other
+ * spans' — a tampering span stages at least twenty-four trials — its
+ * delays together still past one own guard at every count.
+ */
+const TRIAL_DELAY_MS = 100;
+
+test(
+  "T13.3-5(a)'s tampering trials, their count known only once staged — rounds of one alteration per nonempty file the product writes under .xspec/, at least eight trials per fixed seed, and, where it writes several files there, the mixes of the workspace's own state and a twin's: read through their shared reading (readTamperingTrials) from the stand-in file sets of one and two files a stand-in build writes, each count stages its span — one delayed stand-in invocation per trial — under no guard, each past one own guard (TEST-SPEC S-3)",
+  SPAN_DECLARATION,
+  async () => {
+    const counts: number[] = [];
+    for (const files of [1, 2]) {
+      const { workspace, binding } = await standin({
+        XSPEC_S3_GRAPH_FILES: String(files),
+      });
+      await workspace.file(TAMPERING_SOURCE, "own\n");
+      const span = await timed(() =>
+        runProductTestBody("T99.3-9", async () => {
+          assertExitCode(
+            await runProduct(binding, {
+              cwd: workspace.root,
+              argv: ["build"],
+              timeoutMs: OWN_GUARD_MS,
+            }),
+            0,
+            "the stand-in's build of the workspace's own state",
+          );
+          const trials = await readTamperingTrials(
+            binding,
+            workspace,
+            { [TAMPERING_SOURCE]: "twin\n" },
+            `S-3's stand-in file set of ${String(files)} file(s)`,
+          );
+          for (const [index, trial] of trials.entries()) {
+            const context = `trial ${String(index + 1)} of ${String(trials.length)} (${trial.description})`;
+            const result = await runProduct(binding, {
+              cwd: workspace.root,
+              argv: ["pause", String(TRIAL_DELAY_MS)],
+              timeoutMs: OWN_GUARD_MS,
+            });
+            assertExitCode(result, 0, context);
+            assertBytesEqual(result.stdoutBytes, "ok\n", `${context}: stdout`);
+          }
+          return trials.length;
+        }),
+      );
+      // Per fixed seed, ⌈8 / files⌉ rounds of one trial per file; with two
+      // files, which the twin's build writes with other bytes, the two
+      // mixes taking each one from the twin.
+      expect(span.value).toBe(
+        DEFAULT_PROPERTY_SEEDS.length * Math.ceil(8 / files) * files +
+          (files === 2 ? 2 : 0),
+      );
+      expect(span.value * TRIAL_DELAY_MS).toBeGreaterThan(OWN_GUARD_MS);
+      expect(span.ms).toBeGreaterThan(OWN_GUARD_MS);
+      counts.push(span.value);
+    }
+    expect(new Set(counts).size).toBe(counts.length);
   },
 );
 

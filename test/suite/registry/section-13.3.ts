@@ -1,5 +1,6 @@
 // TEST-SPEC §13.3 (graph data) — SUITE-46: T13.3-1 (serving reads),
-// T13.3-2 (refresh), T13.3-3 (the gate), T13.3-4 (determinism).
+// T13.3-2 (refresh), T13.3-3 (the gate), T13.3-4 (determinism), T13.3-5
+// (never stale: arm (a), tampered graph data).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -232,11 +233,88 @@
 //   byte-identical (no TypeScript or Markdown generated or removed, sources
 //   and durable files untouched); a successful `build` then replaces the
 //   state (`recorded` a plain list again at exit 0, SPEC 13.3, 14.10, 12.1).
+// - T13.3-5 (never stale), arm (a), tampered graph data (TEST-SPEC
+//   T13.3-5; SPEC 13.3, 13.4, 11.6, 14.10, 14.23; H-3, H-4, H-10, E-5,
+//   S-3): on T13.3-2's workspace, staged as T13.3-2's body stages it
+//   (`stageRefreshWorkspace`: freshly built and valid, its session `s`
+//   and baseline commit in place), graph data is tampered with shape-blind
+//   — SPEC 13.3 enumerates no layout, so no adapter is involved (H-3) and
+//   the staging never asks which file holds what. Each trial is one
+//   graph-data state staged whole on a fresh byte copy of the workspace
+//   (`withStagedTrial`, `restoreGraphData`), read off the product's own
+//   writes (`readTamperingTrials`, the shared reading S-3's pre-product
+//   check drives at stand-in file sets): per seed of the property
+//   machinery's fixed seed set (helpers/property.ts
+//   `DEFAULT_PROPERTY_SEEDS`, drawn through `drawFixedSeedTrials`; H-10,
+//   E-5), rounds of one trial per nonempty file of T13.3-2's operational
+//   path set, in key order, as many rounds as reach eight trials a seed
+//   (`TAMPERING_TRIALS_PER_SEED`) — the file's byte at a seeded offset
+//   changed to another value, one seeded bit of it flipped (a flipped bit
+//   keeps a byte in its class, so the file readable and a digest beside its
+//   content intact, far more often than an arbitrary value: only such an
+//   alteration catches a product answering from stored content whose
+//   digest still matches), or the file truncated at that offset — so every
+//   nonempty file is altered in some trial; then,
+//   where the workspace's own state and a twin's (built after alpha's own
+//   text was edited, `T13_3_5_TWIN_FILES`) hold two or more files between
+//   them, mixes: each path at which the states differ — a file in one
+//   alone, or two files' bytes — takes a distinct index by a seeded
+//   permutation (the first fixed seed), and for each bit an index needs
+//   one mix takes from the twin the paths whose index has it set and
+//   another those whose index has it clear, so every two differing paths,
+//   their indices differing at some bit, are taken one from each state,
+//   both ways round, each mix taking some from each (2·⌈log₂ d⌉ mixes over
+//   d differing paths; d = 1, the one mix taking that path from the twin);
+//   a path the states hold alike is the same file either way, the
+//   workspace's own directories stay, and a twin's file no tree can hold
+//   beside what the workspace's own state keeps is dropped, the trial's
+//   description saying so. Where the states hold several files, they must
+//   differ somewhere (graph data holds every hash and alpha's own text
+//   enters its ownHash, SPEC 13.3, 5.5; H-11: else the mixes stage the
+//   workspace's own state and discriminate nothing). The trial count
+//   follows from the files the product writes, known only once staged, so
+//   the trial loop carries no guard fixed in advance (S-3; none at all
+//   under the suite's conservative design). Every run is on its own byte
+//   copy of the staged state (`withByteCopy`, `.git` included, so
+//   `impact --base` resolves), a refresh repairing the staging for every
+//   later read: T13.3-2's ten reads, each under `--json`, then `inventory`
+//   and `check --json`. The untampered workspace's runs, made the same way,
+//   are the comparison and the premise (`observeUntampered`): each read
+//   exits 0 with one JSON document and leaves the operational path set
+//   byte-identical (graph data a `build` just wrote is current), its
+//   `recorded` a list, `check` finding-free. On each trial
+//   (`judgeTamperingTrial`): each read's exit code and stdout equal its
+//   untampered run's, byte for byte; whether each read left the
+//   operational path set byte-identical, its graph-data entries compared
+//   whole before and after (H-4), every read alike — each refreshes by
+//   13.3's one comparison exactly when graph data does not match — and
+//   `inventory`'s `recorded` (the record read without refresh, 11.6: a
+//   list at exit 0, or the unavailability marker at exit 1) are the two
+//   observations `check`'s verdict is predicted from
+//   (`assertPredictedVerdict`), never the staging (the record's files lie
+//   at unenumerated paths, and a lagging or absent record is never
+//   staleness, 13.3, 14.10, 14.23): exactly one
+//   condition-10 finding in the unit form — `path` `".xspec"`, `locations`
+//   `[]` — when `recorded` is unavailable (its form alone, 14.10's
+//   exclusive unit forms) or the reads rewrote the set; beside it, where
+//   `recorded` is a list, one recorded-file-form finding concerning each
+//   listed path outside the untampered `recorded` list (the paths the
+//   current sources generate) whose occupant 13.4's removal would remove
+//   (`removalWouldRemove`: judged on the staged state at the path's exact
+//   bytes, `lstat` component by component, never following a link —
+//   nothing, a directory, and a discovered source's file, by device and
+//   inode, left as they are); nothing else, every finding condition 10
+//   with `locations` `[]` and instructing rebuilding (no recorded path's
+//   occupant obstructs a rebuild write: the staging alters no occupant
+//   outside graph data); exit 1 exactly when it reports a finding. Arms (b)
+//   and (c) are not yet registered.
 
 import { Buffer } from "node:buffer";
+import type { BigIntStats } from "node:fs";
 import * as fsp from "node:fs/promises";
 import type {
   AtReport,
+  DecodedDatum,
   Finding,
   ItemStatus,
   OccurrenceRecord,
@@ -261,6 +339,8 @@ import {
   decodeSessionStatusReport,
   decodeViewFilesReport,
   isGraphDataKey,
+  pathValueBytes,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
@@ -272,6 +352,11 @@ import {
   assertAcrossDirectoriesDeterministic,
   assertRunTwiceDeterministic,
 } from "../../helpers/determinism.js";
+import {
+  DEFAULT_PROPERTY_SEEDS,
+  drawFixedSeedTrials,
+} from "../../helpers/property.js";
+import type { Gen } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
@@ -289,7 +374,9 @@ import {
   snapshotDirectory,
   snapshotKeyBytes,
 } from "../../helpers/snapshot.js";
+import { guardStep, guardSyncStep } from "../../helpers/step-guards.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
+import { copyTreeBytes } from "../../helpers/tree-copy.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { assertHumanFindingsMentions } from "./human-findings.js";
@@ -305,17 +392,19 @@ import {
   runCli,
   runJson,
 } from "./support.js";
+import { GRAPH_DATA_AREA } from "./write-refusal-staging.js";
 
 // One spec group plus one coverage profile (SPEC 7, 7.4): `coverage` and
 // `review create --coverage` need a configured profile, and `targets: "all"`
 // keeps the required set at every non-root node (SPEC 8.1). T13.3-2's
-// record-discipline workspace, T13.3-3's garbage-journal workspace, and
-// T13.3-4's two-directory workspaces stage it after their body's first
-// product invocation, so S-7's sweep never reaches those stagings against
-// the stub: a TypeScript staged-source record (helpers/staged-ts.ts; S-9's
-// TypeScript and timing clauses), staged at every site.
+// record-discipline workspace, T13.3-3's garbage-journal workspace,
+// T13.3-4's two-directory workspaces, and T13.3-5's twin stage it after
+// their body's first product invocation, so S-7's sweep never reaches those
+// stagings against the stub: a TypeScript staged-source record
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), staged at
+// every site.
 const GRAPH_CONFIG = stagedTs(
-  "T13.3-2/T13.3-3/T13.3-4 xspec.config.ts — one spec group and the coverage profile p (targets all)",
+  "T13.3-2/T13.3-3/T13.3-4/T13.3-5 xspec.config.ts — one spec group and the coverage profile p (targets all)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -481,16 +570,19 @@ export async function deleteGraphData(
 /**
  * Restore previously captured graph-data bytes (deleting whatever graph data
  * currently exists first) — the stale-graph staging of T13.3-2's source-edit
- * arm. Every captured directory and plain file is restored at its key's
- * exact bytes (`snapshotKeyBytes`), whatever the name — graph data's layout
- * is the product's (SPEC 13.3), so a name that is not ASCII, or not valid
- * UTF-8, is restored like any other — through raw byte-path calls that judge
- * no staged-source declaration: these are the product's own bytes at paths
- * it chose, never a source (13.4). A filesystem error while restoring is the
- * harness's own failure (H-11), thrown as an `Error`, never diagnosed. Only
- * plain files and directories are restorable: anything else captured under
- * `.xspec/` violates SPEC 13.4 (every file xspec writes is a plain file) and
- * fails diagnosed, before anything is deleted or restored.
+ * arm, and the graph-data state each trial of T13.3-5(a) stages (a
+ * product-written state with one file altered, or two states' files mixed;
+ * `deriveTamperingTrials`). Every captured directory and plain file is
+ * restored at its key's exact bytes (`snapshotKeyBytes`), whatever the name
+ * — graph data's layout is the product's (SPEC 13.3), so a name that is not
+ * ASCII, or not valid UTF-8, is restored like any other — through raw
+ * byte-path calls that judge no staged-source declaration: these are the
+ * product's own bytes at paths it chose, never a source (13.4). A
+ * filesystem error while restoring is the harness's own failure (H-11),
+ * thrown as an `Error`, never diagnosed. Only plain files and directories
+ * are restorable: anything else captured under `.xspec/` violates SPEC 13.4
+ * (every file xspec writes is a plain file) and fails diagnosed, before
+ * anything is deleted or restored.
  */
 async function restoreGraphData(
   workspace: TestWorkspace,
@@ -1127,6 +1219,56 @@ const T13_3_2_B = ['<S id="beta">', "Beta text.", "</S>", ""].join("\n");
 // staged-source record holding these bytes (T13.3-1's source).
 const T13_3_2_RECORD_A = ALPHA_ON_BETA_SOURCE;
 
+/**
+ * Stage T13.3-2's workspace on `workspace`, holding T13.3-2's initial files
+ * (`GRAPH_CONFIG`, `T13_3_2_A_V0`, `T13_3_2_B`): a baseline commit, `build`,
+ * an audit session `s` with three items resolved `no-change` — alpha's,
+ * beta's, then A's root's, leaves first (audit blocking is bottom-up, SPEC
+ * 10.6); B's root item stays unresolved — and a fixed-point rebuild, so the
+ * on-disk graph data is exactly what `build` writes for this workspace
+ * state (SPEC 12.0, 13.3 determinism). Returns the baseline commit,
+ * `impact --base`'s resolvable ref (SPEC 6.3). Shared by T13.3-2's first
+ * workspace and T13.3-5's (TEST-SPEC T13.3-5: "T13.3-2's workspace,
+ * freshly built and valid"), `context` leading every diagnosis.
+ */
+async function stageRefreshWorkspace(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<string> {
+  await workspace.gitInit();
+  const base = await workspace.gitCommitAll("baseline");
+  await buildOk(product, workspace, `${context} staging \`build\``);
+  await expectExit(
+    product,
+    workspace,
+    ["review", "create", "--strategy", "audit", "--name", "s"],
+    0,
+    `${context} staging \`review create --strategy audit --name s\``,
+  );
+  const staged = await sessionStatus(
+    product,
+    workspace,
+    "s",
+    `${context} staging`,
+  );
+  const lookup = `${context} staging item lookup`;
+  const alphaItem = requireRowByScope(staged, "specs/A.mdx#alpha", lookup).id;
+  const betaItem = requireRowByScope(staged, "specs/B.mdx#beta", lookup).id;
+  const aRootItem = requireRowByScope(staged, "specs/A.mdx", lookup).id;
+  await resolveNoChange(product, workspace, "s", alphaItem, context);
+  await resolveNoChange(product, workspace, "s", betaItem, context);
+  await resolveNoChange(product, workspace, "s", aRootItem, context);
+  await buildOk(
+    product,
+    workspace,
+    `${context} staging fixed-point rebuild — the on-disk graph data is ` +
+      "exactly what `build` writes for the current workspace state " +
+      "(SPEC 12.0/13.3 determinism)",
+  );
+  return base;
+}
+
 const T13_3_2 = defineProductTest({
   id: "T13.3-2",
   title:
@@ -1147,50 +1289,9 @@ const T13_3_2 = defineProductTest({
 
         // --- Staging: baseline commit, build, an audit session with three
         // resolved items, then a fixed-point rebuild so the on-disk graph
-        // data is exactly what `build` writes for this workspace state.
-        await workspace.gitInit();
-        const base = await workspace.gitCommitAll("baseline");
-        await buildOk(product, workspace, "T13.3-2 staging `build`");
-        await expectExit(
-          product,
-          workspace,
-          ["review", "create", "--strategy", "audit", "--name", "s"],
-          0,
-          "T13.3-2 staging `review create --strategy audit --name s`",
-        );
-        const staged = await sessionStatus(
-          product,
-          workspace,
-          "s",
-          "T13.3-2 staging",
-        );
-        const alphaItem = requireRowByScope(
-          staged,
-          ALPHA,
-          "T13.3-2 staging item lookup",
-        ).id;
-        const betaItem = requireRowByScope(
-          staged,
-          BETA,
-          "T13.3-2 staging item lookup",
-        ).id;
-        const aRootItem = requireRowByScope(
-          staged,
-          A_ROOT,
-          "T13.3-2 staging item lookup",
-        ).id;
-        // Leaves first (audit blocking is bottom-up, SPEC 10.6), then A's
-        // root; B's root item stays unresolved.
-        await resolveNoChange(product, workspace, "s", alphaItem, "T13.3-2");
-        await resolveNoChange(product, workspace, "s", betaItem, "T13.3-2");
-        await resolveNoChange(product, workspace, "s", aRootItem, "T13.3-2");
-        await buildOk(
-          product,
-          workspace,
-          "T13.3-2 staging fixed-point rebuild — the on-disk graph data is " +
-            "exactly what `build` writes for the current workspace state " +
-            "(SPEC 12.0/13.3 determinism)",
-        );
+        // data is exactly what `build` writes for this workspace state
+        // (`stageRefreshWorkspace`, T13.3-5's staging too).
+        const base = await stageRefreshWorkspace(product, workspace, "T13.3-2");
         const w0 = await snapshotDirectory(workspace.root);
         assertGraphDataPresent(w0, "T13.3-2 after the staging builds");
         const staleGraph = graphDataEntries(w0);
@@ -3812,10 +3913,1026 @@ const T13_3_4 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T13.3-5 — never stale: (a) tampered graph data
+// ---------------------------------------------------------------------------
+
+// T13.3-5(a)'s twin (TEST-SPEC T13.3-5: "a twin's built after one section's
+// text was edited"): T13.3-2's sources with alpha's own text edited, built
+// on a fresh workspace created after the body's first invocations, so its
+// two sources are staged-source records (S-9's before-any-product clause;
+// helpers/staged-mdx.ts) and its configuration `GRAPH_CONFIG`'s.
+const T13_3_5_TWIN_A = stagedMdx(
+  "T13.3-5 (a)'s twin specs/A.mdx (T13.3-2's alpha, its own text edited)",
+  ['<S id="alpha">', "Alpha edited text.", "</S>", ""].join("\n"),
+);
+const T13_3_5_TWIN_B = stagedMdx(
+  "T13.3-5 (a)'s twin specs/B.mdx (T13.3-2's beta, unedited)",
+  T13_3_2_B,
+);
+const T13_3_5_TWIN_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": GRAPH_CONFIG,
+  "specs/A.mdx": T13_3_5_TWIN_A,
+  "specs/B.mdx": T13_3_5_TWIN_B,
+};
+
+// T13.3-2's workspace's discovered sources — its spec group's two `.mdx`
+// files, its generated files excluded by name and no code group configured
+// (SPEC 7, 13.4) — whose occupants 13.4's removal never removes.
+const T13_3_5_SOURCES: readonly string[] = ["specs/A.mdx", "specs/B.mdx"];
+
+// The fixed seed set T13.3-5(a)'s trials are drawn under (TEST-SPEC
+// T13.3-5: "a fixed seed set in CI"; H-10, E-5): the property machinery's
+// (helpers/property.ts), every draw made as `checkProperty` makes its own
+// (`drawFixedSeedTrials`), so the trials are the same on every run.
+const TAMPERING_SEEDS: readonly number[] = DEFAULT_PROPERTY_SEEDS;
+
+// The single-file trials each seed draws, at the least: rounds of one
+// alteration per nonempty file, as many rounds as reach this count — a
+// count bounding work, never a guard (TEST-SPEC S-3). A file holding its
+// content beside a digest of its inputs is caught answering from that
+// content only by an alteration that leaves it readable, the digest intact
+// — a byte inside a value, its one flipped bit keeping it in its class far
+// more often than an arbitrary value would (for a pretty-printed JSON file
+// about one flip in three, against one arbitrary value in six) — so a
+// product writing few files has each altered at several offsets per seed.
+const TAMPERING_TRIALS_PER_SEED = 8;
+
+/** T13.3-5's reads, each under `--json` (TEST-SPEC T13.3-5: T13.3-2's ten). */
+function neverStaleReads(base: string): readonly (readonly string[])[] {
+  return [
+    ["ids", "--json"],
+    ["show", "specs/A.mdx#alpha", "--json"],
+    ["coverage", "--json"],
+    ["impact", "--base", base, "--json"],
+    ["review", "status", "s", "--json"],
+    ["review", "list", "--json"],
+    ["query", "nodes", "--json"],
+    ["occurrences", "--json"],
+    ["view", "--json"],
+    ["at", "specs/A.mdx", "20", "--json"],
+  ];
+}
+
+/** An argv as a diagnosis spells it. */
+function spelled(argv: readonly string[]): string {
+  return `\`${argv.join(" ")}\``;
+}
+
+/** A byte as a diagnosis spells it. */
+function hexByte(value: number): string {
+  return `0x${value.toString(16).padStart(2, "0")}`;
+}
+
+/**
+ * A product-written graph-data state: the plain files of T13.3-2's
+ * operational path set (`isGraphDataKey`), by snapshot key with their bytes,
+ * and its directories, each in byte order.
+ */
+export interface GraphDataState {
+  readonly files: ReadonlyMap<string, Uint8Array>;
+  readonly directories: readonly string[];
+}
+
+/** One trial of T13.3-5(a): the graph-data state it stages, described. */
+export interface TamperingTrial {
+  /** What the trial stages, its seed named (H-10). */
+  readonly description: string;
+  /** The staged graph data whole: every directory and file of the set. */
+  readonly entries: ReadonlyMap<string, SnapshotEntry>;
+}
+
+/**
+ * A snapshot's graph-data state. An entry of the set that is neither a plain
+ * file nor a directory fails diagnosed: every file xspec writes is a plain
+ * file (SPEC 13.4), so the state is no product-written one to tamper with.
+ */
+function graphDataStateOf(
+  snapshot: DirectorySnapshot,
+  context: string,
+): GraphDataState {
+  const files = new Map<string, Uint8Array>();
+  const directories: string[] = [];
+  for (const [key, entry] of graphDataEntries(snapshot)) {
+    if (entry.kind === "file") {
+      files.set(key, entry.bytes);
+    } else if (entry.kind === "dir") {
+      directories.push(key);
+    } else {
+      fail(
+        `${context}: graph data at ${displaySnapshotPath(key)} is a ` +
+          `${entry.kind} — every file xspec writes is a plain file (SPEC ` +
+          `13.4), so this is no product-written graph-data state the ` +
+          `harness can tamper with`,
+      );
+    }
+  }
+  return { files, directories };
+}
+
+/** A state's directories and files as the entries `restoreGraphData` stages. */
+function stateEntries(state: GraphDataState): Map<string, SnapshotEntry> {
+  const entries = new Map<string, SnapshotEntry>();
+  for (const key of state.directories) entries.set(key, { kind: "dir" });
+  for (const [key, bytes] of state.files) {
+    entries.set(key, { kind: "file", bytes });
+  }
+  return entries;
+}
+
+/** Whether two states hold the same file at a path, or both none. */
+function sameFile(
+  first: Uint8Array | undefined,
+  second: Uint8Array | undefined,
+): boolean {
+  if (first === undefined || second === undefined) return first === second;
+  return Buffer.compare(first, second) === 0;
+}
+
+/** One drawn single-file alteration (`deriveTamperingTrials`). */
+interface FileAlteration {
+  readonly key: string;
+  readonly offset: number;
+  /** -1: the file truncated at `offset`; else the bit flipped there, 0–7. */
+  readonly bit: number;
+}
+
+/**
+ * One round of single-file alterations: one per nonempty file, in key order
+ * — a seeded offset within the file, then a seeded choice between
+ * truncating the file there and changing the byte there to another value,
+ * one seeded bit of it flipped.
+ */
+function fileAlterations(
+  nonempty: readonly (readonly [string, Uint8Array])[],
+): Gen<readonly FileAlteration[]> {
+  return (choices) =>
+    nonempty.map(([key, bytes]) => {
+      const offset = choices.intInclusive(0, bytes.length - 1);
+      const truncate = choices.boolean();
+      return { key, offset, bit: truncate ? -1 : choices.intInclusive(0, 7) };
+    });
+}
+
+/** A seeded permutation of `0 … count - 1` (Fisher–Yates over the draws). */
+function seededIndices(count: number): Gen<readonly number[]> {
+  return (choices) => {
+    const indices = Array.from({ length: count }, (_, index) => index);
+    for (let index = count - 1; index > 0; index -= 1) {
+      const other = choices.intInclusive(0, index);
+      const held = indices[index] as number;
+      indices[index] = indices[other] as number;
+      indices[other] = held;
+    }
+    return indices;
+  };
+}
+
+/**
+ * The mixes' twin-side path sets over the paths at which the two states
+ * differ, `differing[i]` holding index `indices[i]`: for each bit an index
+ * needs, the mix taking from the twin the paths whose index has the bit set,
+ * and the mix taking those whose index has it clear — so every two
+ * differing paths, their indices differing at some bit, are taken one from
+ * each state, both ways round, each mix taking some paths from each state
+ * (2·⌈log₂ d⌉ mixes over d paths); one differing path alone takes the one
+ * mix taking it from the twin.
+ */
+function mixTwinSides(
+  differing: readonly string[],
+  indices: readonly number[],
+): string[][] {
+  if (differing.length === 1) return [[...differing]];
+  let bits = 0;
+  while (1 << bits < differing.length) bits += 1;
+  const sides: string[][] = [];
+  for (let bit = 0; bit < bits; bit += 1) {
+    for (const value of [1, 0]) {
+      sides.push(
+        differing.filter(
+          (_, index) => (((indices[index] as number) >> bit) & 1) === value,
+        ),
+      );
+    }
+  }
+  return sides;
+}
+
+/**
+ * The directory keys strictly above `key` within the graph-data area:
+ * `.xspec/a/b/c` → `.xspec/a`, `.xspec/a/b`.
+ */
+function graphDataAncestors(key: string): string[] {
+  const segments = key.split("/");
+  const ancestors: string[] = [];
+  for (let length = 2; length < segments.length; length += 1) {
+    ancestors.push(segments.slice(0, length).join("/"));
+  }
+  return ancestors;
+}
+
+/**
+ * Whether a file at `key` fits a tree holding `entries`: nothing at its own
+ * path, nothing below it, and no file at a directory component above it.
+ */
+function fitsBeside(
+  entries: ReadonlyMap<string, SnapshotEntry>,
+  key: string,
+): boolean {
+  if (entries.has(key)) return false;
+  for (const other of entries.keys()) {
+    if (other.startsWith(`${key}/`)) return false;
+  }
+  return !graphDataAncestors(key).some(
+    (ancestor) => entries.get(ancestor)?.kind === "file",
+  );
+}
+
+/**
+ * One mix (`deriveTamperingTrials`): the workspace's own state, but at each
+ * path of `fromTwin` the twin's file, or its absence, in its place. The
+ * workspace's own directories stay; a twin's file no tree can hold beside
+ * what the workspace's own state keeps (a directory or a file at its path,
+ * a file at a directory component above it, anything below it) is dropped,
+ * the description saying so.
+ */
+function mixTrial(
+  own: GraphDataState,
+  twin: GraphDataState,
+  union: readonly string[],
+  fromTwin: ReadonlySet<string>,
+  label: string,
+): TamperingTrial {
+  const entries = new Map<string, SnapshotEntry>();
+  for (const key of own.directories) entries.set(key, { kind: "dir" });
+  for (const key of union) {
+    const bytes = own.files.get(key);
+    if (!fromTwin.has(key) && bytes !== undefined) {
+      entries.set(key, { kind: "file", bytes });
+    }
+  }
+  const taken: string[] = [];
+  const dropped: string[] = [];
+  for (const key of union) {
+    if (!fromTwin.has(key)) continue;
+    const bytes = twin.files.get(key);
+    if (bytes === undefined) {
+      taken.push(`${displaySnapshotPath(key)} (absent there)`);
+    } else if (fitsBeside(entries, key)) {
+      entries.set(key, { kind: "file", bytes });
+      taken.push(displaySnapshotPath(key));
+    } else {
+      dropped.push(displaySnapshotPath(key));
+    }
+  }
+  const droppedClause =
+    dropped.length === 0
+      ? ""
+      : `; the twin's ${dropped.join(", ")} dropped, no tree holding it ` +
+        `beside the workspace's own files and directories`;
+  return {
+    description:
+      `${label}: from the twin ${taken.join(", ")}${droppedClause}; the ` +
+      `rest the workspace's own`,
+    entries,
+  };
+}
+
+/**
+ * T13.3-5(a)'s trials over two product-written graph-data states, the
+ * workspace's own and its twin's (TEST-SPEC T13.3-5, H-3; the module
+ * header): per fixed seed, rounds of one single-file alteration per
+ * nonempty file of the workspace's own state (`fileAlterations`), as many
+ * as reach `TAMPERING_TRIALS_PER_SEED` trials, so every nonempty file is
+ * altered in some trial; then, where the two states hold two or more files
+ * between them, the mixes (`mixTwinSides`, its indices permuted by the
+ * first fixed seed). The count follows from the files the product writes,
+ * known only once staged, so the trial loop carries no guard fixed in
+ * advance (TEST-SPEC S-3; none at all under the suite's conservative design,
+ * helpers/hang-guards.ts). Where the states hold several files, they must
+ * differ somewhere: graph data holds every hash, and the twin's edit changes
+ * alpha's own text (SPEC 13.3, 5.5) — else the mixes would stage nothing but
+ * the workspace's own state, discriminating nothing (H-11: failing loud).
+ */
+export function deriveTamperingTrials(
+  own: GraphDataState,
+  twin: GraphDataState,
+  context: string,
+): TamperingTrial[] {
+  const trials: TamperingTrial[] = [];
+  const nonempty = [...own.files].filter(([, bytes]) => bytes.length > 0);
+  const rounds =
+    nonempty.length === 0
+      ? 0
+      : Math.ceil(TAMPERING_TRIALS_PER_SEED / nonempty.length);
+  // Seed-major, as `checkProperty` draws its trials: `rounds` per seed.
+  const drawn =
+    rounds === 0
+      ? []
+      : drawFixedSeedTrials(fileAlterations(nonempty), rounds, TAMPERING_SEEDS);
+  for (const [drawIndex, round] of drawn.entries()) {
+    const seed = TAMPERING_SEEDS[Math.floor(drawIndex / rounds)] as number;
+    for (const alteration of round) {
+      const bytes = own.files.get(alteration.key) as Uint8Array;
+      const where = displaySnapshotPath(alteration.key);
+      const entries = stateEntries(own);
+      if (alteration.bit < 0) {
+        entries.set(alteration.key, {
+          kind: "file",
+          bytes: Uint8Array.from(bytes.subarray(0, alteration.offset)),
+        });
+        trials.push({
+          description:
+            `seed ${String(seed)}: ${where} truncated at offset ` +
+            `${String(alteration.offset)} of its ${String(bytes.length)} bytes`,
+          entries,
+        });
+      } else {
+        const altered = Uint8Array.from(bytes);
+        const was = altered[alteration.offset] as number;
+        const now = was ^ (1 << alteration.bit);
+        altered[alteration.offset] = now;
+        entries.set(alteration.key, { kind: "file", bytes: altered });
+        trials.push({
+          description:
+            `seed ${String(seed)}: ${where}'s byte at offset ` +
+            `${String(alteration.offset)} of its ${String(bytes.length)} ` +
+            `changed from ${hexByte(was)} to ${hexByte(now)} (bit ` +
+            `${String(alteration.bit)} flipped)`,
+          entries,
+        });
+      }
+    }
+  }
+  const union = [
+    ...new Set([...own.files.keys(), ...twin.files.keys()]),
+  ].sort();
+  if (union.length < 2) return trials;
+  const differing = union.filter(
+    (key) => !sameFile(own.files.get(key), twin.files.get(key)),
+  );
+  if (differing.length === 0) {
+    fail(
+      `${context}: the twin's premise — its graph data, built after ` +
+        `alpha's own text was edited, differs from the workspace's: graph ` +
+        `data holds every requirement node's hashes and alpha's own text ` +
+        `enters its ownHash (SPEC 13.3, 5.5) — yet the two states hold the ` +
+        `same ${String(union.length)} files byte for byte, so the mixes ` +
+        `would stage nothing but the workspace's own state`,
+    );
+  }
+  const seed = TAMPERING_SEEDS[0] as number;
+  const indices = drawFixedSeedTrials(seededIndices(differing.length), 1, [
+    seed,
+  ])[0] as readonly number[];
+  const sides = mixTwinSides(differing, indices);
+  for (const [index, side] of sides.entries()) {
+    trials.push(
+      mixTrial(
+        own,
+        twin,
+        union,
+        new Set(side),
+        `mix ${String(index + 1)} of ${String(sides.length)} (seed ` +
+          `${String(seed)})`,
+      ),
+    );
+  }
+  return trials;
+}
+
+/**
+ * T13.3-5(a)'s trials, read off what the product writes (TEST-SPEC T13.3-5,
+ * S-3): the workspace's own graph-data state as it stands — freshly built
+ * — and a twin's, the product's `build` run on a fresh workspace holding
+ * `twinFiles` (exit 0 required: the twin's sources are valid), its state
+ * read, the twin disposed; then `deriveTamperingTrials`. The shared reading
+ * S-3's pre-product check drives against a stand-in build writing file sets
+ * of differing counts under `.xspec/` (test/self/s3-hang-guards.test.ts),
+ * every span staged one per trial it returns.
+ */
+export async function readTamperingTrials(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  twinFiles: Readonly<Record<string, InitialFileContents>>,
+  context: string,
+): Promise<readonly TamperingTrial[]> {
+  const ownSnapshot = await snapshotDirectory(workspace.root);
+  const twinSnapshot = await withWorkspace(twinFiles, async (twin) => {
+    await buildOk(
+      product,
+      twin,
+      `${context}: the twin's \`build\` — its sources are valid, so it ` +
+        `succeeds, writing its graph data (SPEC 12.1, 13.3)`,
+    );
+    return await snapshotDirectory(twin.root);
+  });
+  return guardSyncStep(
+    `deriving ${context}'s trials (deriveTamperingTrials)`,
+    () =>
+      deriveTamperingTrials(
+        graphDataStateOf(ownSnapshot, `${context}: the workspace's own state`),
+        graphDataStateOf(twinSnapshot, `${context}: the twin's state`),
+        context,
+      ),
+  );
+}
+
+/**
+ * Run `body` on a fresh workspace holding a byte copy of the whole tree
+ * `base` snapshots (helpers/tree-copy.ts `copyTreeBytes`, `.git` included,
+ * so `impact --base` resolves there), checked against `base` before `body`
+ * runs — a difference is a harness error, never a product verdict — and
+ * handed `body` with its snapshot; then dispose of it (H-1). Nothing judges
+ * the copy as a staging: its sources were staged, and judged, where they
+ * were written (S-9), the rest is the product's own state and the
+ * harness's tampering with it.
+ */
+async function withByteCopy<T>(
+  base: DirectorySnapshot,
+  context: string,
+  body: (copy: TestWorkspace, copied: DirectorySnapshot) => Promise<T>,
+): Promise<T> {
+  return await withWorkspace({}, async (copy) => {
+    await copyTreeBytes(Buffer.from(base.root), Buffer.from(copy.root));
+    const copied = await snapshotDirectory(copy.root);
+    const differences = diffSnapshots(base, copied);
+    if (differences.length > 0) {
+      throw new Error(
+        `harness error: ${context}: the copy of ${base.root} at ` +
+          `${copy.root} differs from it: ` +
+          differences
+            .slice(0, 10)
+            .map((change) => `${change.change} ${change.path}`)
+            .join(", "),
+      );
+    }
+    return await body(copy, copied);
+  });
+}
+
+/**
+ * Stage `trial` on a fresh byte copy of the untampered workspace — its graph
+ * data replaced whole by the trial's state (`restoreGraphData`, a harness
+ * step under its own guard), checked to hold exactly that state (a
+ * difference is a harness error) — and run `body` with the staged state's
+ * snapshot; then dispose of the copy.
+ */
+async function withStagedTrial<T>(
+  untampered: DirectorySnapshot,
+  trial: TamperingTrial,
+  context: string,
+  body: (staged: DirectorySnapshot) => Promise<T>,
+): Promise<T> {
+  return await withByteCopy(untampered, context, async (copy) => {
+    await guardStep(`staging ${context} (restoreGraphData)`, () =>
+      restoreGraphData(copy, trial.entries, context),
+    );
+    const staged = await snapshotDirectory(copy.root);
+    const differences = diffSnapshots(
+      asSnapshot(staged, trial.entries),
+      asSnapshot(staged, graphDataEntries(staged)),
+    );
+    if (differences.length > 0) {
+      throw new Error(
+        `harness error: ${context}: the staged graph data differs from the ` +
+          `trial's state: ` +
+          differences
+            .slice(0, 10)
+            .map((change) => `${change.change} ${change.path}`)
+            .join(", "),
+      );
+    }
+    return await body(staged);
+  });
+}
+
+/** One read's run on its own copy of a state (`observeRead`). */
+interface ReadObservation {
+  readonly argv: readonly string[];
+  readonly result: RunResult;
+  /** Whether the run left T13.3-2's operational path set other than it was. */
+  readonly rewrote: boolean;
+}
+
+/**
+ * Run one read on its own byte copy of the state `base` snapshots — a
+ * refresh repairs the state for every later read (TEST-SPEC T13.3-5) — and
+ * observe its result and whether it rewrote anything in T13.3-2's
+ * operational path set, the copy's graph-data entries compared whole
+ * before and after it (H-4: opaque, compared whole, never read).
+ */
+async function observeRead(
+  product: ProductBinding,
+  base: DirectorySnapshot,
+  argv: readonly string[],
+  context: string,
+): Promise<ReadObservation> {
+  return await withByteCopy(base, context, async (copy, copied) => {
+    const result = await runCli(product, copy, argv);
+    const after = await snapshotDirectory(copy.root);
+    const changes = diffSnapshots(
+      asSnapshot(copied, graphDataEntries(copied)),
+      asSnapshot(after, graphDataEntries(after)),
+    );
+    return { argv, result, rewrote: changes.length > 0 };
+  });
+}
+
+/** A state's runs, each on its own byte copy of it (`observeState`). */
+interface StateObservations {
+  readonly reads: readonly ReadObservation[];
+  readonly inventory: RunResult;
+  readonly check: RunResult;
+}
+
+/**
+ * Run T13.3-5's reads, `inventory`, and `check --json` on the state `base`
+ * snapshots, each on its own byte copy of it, all at once — the runs share
+ * nothing, so their order is no input to any of them — and return their
+ * results once every run has settled, each bounded by its own guard (S-3):
+ * a run's rejection (a harness error, a hang-guard kill) is thrown, the
+ * first in that order, only then, so no run outlives its trial. Judging
+ * them is the caller's, in a fixed order (E-5).
+ */
+async function observeState(
+  product: ProductBinding,
+  base: DirectorySnapshot,
+  reads: readonly (readonly string[])[],
+  context: string,
+): Promise<StateObservations> {
+  const readsPending = reads.map((argv) =>
+    observeRead(product, base, argv, `${context} ${spelled(argv)}`),
+  );
+  const inventoryPending = withByteCopy(
+    base,
+    `${context} \`inventory\``,
+    (copy) => runCli(product, copy, ["inventory"]),
+  );
+  const checkPending = withByteCopy(
+    base,
+    `${context} \`check --json\``,
+    (copy) => runCli(product, copy, ["check", "--json"]),
+  );
+  const outcomes = await Promise.allSettled<
+    Promise<ReadObservation> | Promise<RunResult>
+  >([...readsPending, inventoryPending, checkPending]);
+  for (const outcome of outcomes) {
+    if (outcome.status === "rejected") throw outcome.reason;
+  }
+  return {
+    reads: await Promise.all(readsPending),
+    inventory: await inventoryPending,
+    check: await checkPending,
+  };
+}
+
+/**
+ * `inventory`'s `recorded` from its run (SPEC 11.6: the record read without
+ * refresh): a list, the inventory exiting 0, or the unavailability marker,
+ * exiting 1 (14.23, 12.0: an answer carrying explicitly unavailable data
+ * exits 1) — never `null`.
+ */
+function recordedOf(
+  result: RunResult,
+  label: string,
+): DecodedDatum<readonly PathValue[]> {
+  const recorded = decodeInventoryRecordedDatum(
+    parseJsonStdout(result, label),
+    label,
+  );
+  if (recorded.state === "null") {
+    fail(
+      `${label}: \`recorded\` is the recorded derived-file paths or ` +
+        `explicitly unavailable, never null (SPEC 11.6, 14.23, 12.7)`,
+    );
+  }
+  assertExitCode(
+    result,
+    recorded.state === "value" ? 0 : 1,
+    `${label}: with \`recorded\` ` +
+      `${recorded.state === "value" ? "a list" : "unavailable"} the ` +
+      `inventory exits ${recorded.state === "value" ? "0" : "1"} (SPEC ` +
+      `11.6, 14.23, 12.0)`,
+  );
+  return recorded;
+}
+
+/**
+ * Whether 13.4's removal of a recorded derived file the current sources and
+ * configuration no longer generate would remove what occupies the listed
+ * path on the state rooted at `rootAbs` (SPEC 13.4, 14.10: an occupant the
+ * removal would remove, so neither a directory nor a discovered source):
+ * walked component by component at the path's exact bytes, `lstat` at
+ * each, never following a link — nothing (no occupant, or a component above
+ * it occupied by anything but a directory, where nothing is read) and a
+ * directory are left as they are, as is a discovered source's file (by
+ * device and inode, whatever spelling reaches it); anything else — a plain
+ * file, a symbolic link itself, any other non-directory — is removed. A
+ * path holding a NUL byte names nothing on the filesystem.
+ */
+async function removalWouldRemove(
+  rootAbs: string,
+  listed: Buffer,
+  sources: readonly BigIntStats[],
+): Promise<boolean> {
+  if (listed.includes(0)) return false;
+  const segments: Buffer[] = [];
+  let start = 0;
+  for (let index = 0; index <= listed.length; index += 1) {
+    if (index === listed.length || listed[index] === 0x2f) {
+      segments.push(listed.subarray(start, index));
+      start = index + 1;
+    }
+  }
+  let current = Buffer.from(rootAbs);
+  for (const [index, segment] of segments.entries()) {
+    current = Buffer.concat([current, Buffer.from([0x2f]), segment]);
+    let stats: BigIntStats;
+    try {
+      stats = await fsp.lstat(current, { bigint: true });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR" || code === "ENAMETOOLONG") {
+        return false;
+      }
+      throw new Error(
+        `harness error: examining the occupant at ${current.toString()} ` +
+          `(T13.3-5 (a)'s removal judgement): ${(error as Error).message}`,
+        { cause: error },
+      );
+    }
+    if (index < segments.length - 1) {
+      if (!stats.isDirectory()) return false;
+      continue;
+    }
+    if (stats.isDirectory()) return false;
+    return !sources.some(
+      (source) => source.dev === stats.dev && source.ino === stats.ino,
+    );
+  }
+  return false;
+}
+
+/**
+ * The listed paths `check` must report in the recorded-file form on the
+ * state rooted at `rootAbs` (TEST-SPEC T13.3-5 (a)): each path `recorded`
+ * lists outside the untampered workspace's `recorded` list — the paths the
+ * current sources generate — whose occupant 13.4's removal would remove
+ * (`removalWouldRemove`), as exact bytes. A harness step under its own
+ * guard (TEST-SPEC S-3).
+ */
+async function predictedRecordedFindings(
+  rootAbs: string,
+  listed: readonly PathValue[],
+  untamperedRecorded: readonly PathValue[],
+  context: string,
+): Promise<Buffer[]> {
+  return await guardStep(
+    `judging the occupants of ${context}'s recorded paths (removalWouldRemove)`,
+    async () => {
+      const sources: BigIntStats[] = [];
+      for (const source of T13_3_5_SOURCES) {
+        sources.push(
+          await fsp.lstat(
+            Buffer.concat([Buffer.from(rootAbs), Buffer.from(`/${source}`)]),
+            { bigint: true },
+          ),
+        );
+      }
+      const generated = untamperedRecorded.map(pathValueBytes);
+      const removable: Buffer[] = [];
+      for (const value of listed) {
+        const bytes = pathValueBytes(value);
+        if (generated.some((path) => path.equals(bytes))) continue;
+        if (await removalWouldRemove(rootAbs, bytes, sources)) {
+          removable.push(bytes);
+        }
+      }
+      return removable;
+    },
+  );
+}
+
+/** Exact path bytes as `renderPathValue` renders the path value they are. */
+function renderPathBytes(bytes: Buffer): string {
+  const text = bytes.toString("utf8");
+  return Buffer.from(text, "utf8").equals(bytes)
+    ? text
+    : `bytes:${bytes.toString("hex")}`;
+}
+
+/** `check`'s predicted verdict on a staged state (`assertPredictedVerdict`). */
+interface CheckPrediction {
+  /** Whether the unit form is reported, and why, for the diagnosis. */
+  readonly unit: boolean;
+  readonly grounds: string;
+  /** The recorded-file-form findings' concerned paths, as exact bytes. */
+  readonly perFile: readonly Buffer[];
+}
+
+/**
+ * `check --json`'s verdict, as predicted (TEST-SPEC T13.3-5 (a); SPEC 14.10,
+ * 14.23, 12.2, 12.7): exactly one condition-10 finding in the unit form —
+ * `path` `".xspec"`, the graph-data area (11.6) — when predicted, beside it
+ * one recorded-file-form finding concerning each predicted path, and
+ * nothing else: every finding condition 10 (`stale-output`), `locations`
+ * `[]`, and instructing rebuilding — no recorded path's occupant obstructs a
+ * rebuild write here, the staging altering no occupant outside graph data,
+ * whose writes' directory components stay directories (SPEC 14.10, 13.4,
+ * 14.22) — exit 1 when it reports any finding and 0 otherwise (12.0).
+ */
+function assertPredictedVerdict(
+  result: RunResult,
+  prediction: CheckPrediction,
+  context: string,
+): void {
+  const reports = prediction.unit || prediction.perFile.length > 0;
+  if (result.exitCode !== 0 && result.exitCode !== 1) {
+    assertExitCode(
+      result,
+      reports ? 1 : 0,
+      `${context}: \`check\` exits 1 on any finding and 0 otherwise, never ` +
+        `a usage error on this valid workspace (SPEC 12.0, 12.2)`,
+    );
+  }
+  const findings = decodeFindingsReport(
+    parseJsonStdout(result, context),
+    context,
+  ).findings;
+  for (const finding of findings) {
+    if (finding.condition !== "14.10") {
+      fail(
+        `${context}: \`check\` reports condition 10 alone here — the ` +
+          `derived files are the workspace's own, matching, and nothing ` +
+          `but graph data was staged (SPEC 14.10, 12.2); got ` +
+          `${JSON.stringify(finding.code)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+  }
+  const unitCount = findings.filter(
+    (finding) => finding.path === GRAPH_DATA_AREA,
+  ).length;
+  if (unitCount !== (prediction.unit ? 1 : 0)) {
+    fail(
+      `${context}: exactly one condition-10 finding in the unit form, ` +
+        `concerning the graph-data area ${GRAPH_DATA_AREA}, when ` +
+        `\`recorded\` is unavailable or the reads rewrote T13.3-2's ` +
+        `operational path set, and none otherwise (SPEC 14.10, 14.23, 13.3: ` +
+        `\`check\` judges by the reads' one comparison) — here ` +
+        `${prediction.grounds}, so expected ${prediction.unit ? "1" : "0"}, ` +
+        `got ${String(unitCount)} (findings: ` +
+        `${JSON.stringify(findings.map((finding) => renderPathValue(finding.path)))})`,
+    );
+  }
+  const reported = findings
+    .filter((finding) => finding.path !== GRAPH_DATA_AREA)
+    .map((finding) => finding.path);
+  const expected = [...prediction.perFile].sort(Buffer.compare);
+  const reportedBytes = reported.map((value) =>
+    value === null ? null : pathValueBytes(value),
+  );
+  const sortedReported = [...reportedBytes].sort((first, second) =>
+    first === null || second === null
+      ? (first === null ? 0 : 1) - (second === null ? 0 : 1)
+      : Buffer.compare(first, second),
+  );
+  if (
+    sortedReported.length !== expected.length ||
+    sortedReported.some(
+      (value, index) =>
+        value === null || !value.equals(expected[index] as Buffer),
+    )
+  ) {
+    fail(
+      `${context}: beside the unit form, one recorded-file-form finding ` +
+        `concerning each path \`recorded\` lists outside the untampered ` +
+        `workspace's \`recorded\` list whose occupant 13.4's removal would ` +
+        `remove, and nothing else (SPEC 14.10, 13.4, 12.7; paths compare ` +
+        `byte-wise) — expected ` +
+        `${JSON.stringify(expected.map(renderPathBytes))}, got ` +
+        `${JSON.stringify(reported.map(renderPathValue))}`,
+    );
+  }
+  for (const finding of findings) {
+    const about = `${context} — the finding concerning ${renderPathValue(finding.path)}`;
+    assertSameJson(
+      finding.locations,
+      [],
+      `${about}: a condition-10 finding has no in-source location (SPEC ` +
+        `14.10, 14, 12.7)`,
+    );
+    assertFindingInstructsRebuilding(
+      finding,
+      `${about}: no recorded path's occupant obstructs a rebuild write on ` +
+        `this state, so every condition-10 finding instructs rebuilding ` +
+        `(SPEC 14.10, 14)`,
+    );
+  }
+  assertExitCode(
+    result,
+    reports ? 1 : 0,
+    `${context}: \`check\` exits 1 when it reports any finding, and 0 ` +
+      `otherwise (SPEC 12.0, 12.2)`,
+  );
+}
+
+/** What the untampered workspace's runs give every trial to compare with. */
+interface UntamperedObservations {
+  readonly reads: readonly ReadObservation[];
+  /** The untampered `recorded` list: the paths the current sources generate. */
+  readonly recorded: readonly PathValue[];
+}
+
+/**
+ * The untampered workspace's runs, each on its own byte copy as every
+ * trial's (TEST-SPEC T13.3-5 (a): "its run's on the untampered workspace";
+ * `observeState`), and their premises: freshly built and valid, the
+ * workspace answers every read — exit 0, one JSON document (SPEC 12.0,
+ * 13.3; T13.3-1) — leaving T13.3-2's operational path set byte-identical
+ * (graph data a `build` just wrote is current, SPEC 13.3, 12.0);
+ * `inventory`'s `recorded` is a list (after a successful `build` the record
+ * is readable, SPEC 13.3, 11.6); and `check` is clean (SPEC 12.2, 14.10).
+ */
+async function observeUntampered(
+  product: ProductBinding,
+  untampered: DirectorySnapshot,
+  reads: readonly (readonly string[])[],
+): Promise<UntamperedObservations> {
+  const context = "T13.3-5 (a) on the untampered workspace";
+  const observed = await observeState(product, untampered, reads, context);
+  for (const read of observed.reads) {
+    const label = `${context} ${spelled(read.argv)}`;
+    assertExitCode(
+      read.result,
+      0,
+      `${label}: on the freshly built, valid workspace every read answers, ` +
+        `exit 0 (SPEC 12.0, 13.3; T13.3-1)`,
+    );
+    parseJsonStdout(read.result, `${label}: its answer (SPEC 12.0)`);
+    if (read.rewrote) {
+      fail(
+        `${label}: graph data a \`build\` just wrote is current, so the ` +
+          `read refreshes nothing, leaving T13.3-2's operational path set ` +
+          `byte-identical (SPEC 13.3, 12.0)`,
+      );
+    }
+  }
+  const inventoryLabel = `${context} \`inventory\``;
+  const recorded = recordedOf(observed.inventory, inventoryLabel);
+  if (recorded.state !== "value") {
+    fail(
+      `${inventoryLabel}: after a successful \`build\` the record is ` +
+        `readable — \`recorded\` a list (SPEC 13.3, 11.6, 12.1); got the ` +
+        `unavailability marker`,
+    );
+  }
+  const checkLabel =
+    `${context} \`check --json\` — freshly built and valid, the workspace ` +
+    `is clean (SPEC 12.2, 14.10)`;
+  assertExitCode(
+    observed.check,
+    0,
+    `${checkLabel} — a finding-free report exits 0 (SPEC 12.0)`,
+  );
+  assertSameJson(
+    decodeFindingsReport(
+      parseJsonStdout(observed.check, checkLabel),
+      checkLabel,
+    ).findings,
+    [],
+    `${checkLabel} — the report is exactly {"findings": []} (SPEC 12.7)`,
+  );
+  return { reads: observed.reads, recorded: recorded.value };
+}
+
+/**
+ * One trial's verdict on its staged state (TEST-SPEC T13.3-5 (a); the module
+ * header), its runs each on its own copy (`observeState`): each read exits
+ * and answers byte for byte as on the untampered workspace; the reads
+ * rewrite T13.3-2's operational path set alike, all or none; and `check`'s
+ * verdict is as that observation and `inventory`'s `recorded` alone
+ * predict it (`assertPredictedVerdict`).
+ */
+async function judgeTamperingTrial(
+  product: ProductBinding,
+  staged: DirectorySnapshot,
+  untampered: UntamperedObservations,
+  context: string,
+): Promise<void> {
+  const observed = await observeState(
+    product,
+    staged,
+    untampered.reads.map((read) => read.argv),
+    context,
+  );
+  const rewrote: string[] = [];
+  const untouched: string[] = [];
+  for (const [index, read] of observed.reads.entries()) {
+    const want = untampered.reads[index] as ReadObservation;
+    const label = `${context} ${spelled(read.argv)}`;
+    assertExitCode(
+      read.result,
+      want.result.exitCode as number,
+      `${label}: its exit code equals its run's on the untampered ` +
+        `workspace (SPEC 13.3: read results never come from stale data — ` +
+        `graph data not matching what \`build\` would now write is ` +
+        `refreshed before the answer)`,
+    );
+    assertBytesEqual(
+      read.result.stdoutBytes,
+      want.result.stdoutBytes,
+      `${label}: its standard output equals its run's on the untampered ` +
+        `workspace, byte for byte (SPEC 13.3, 12.0)`,
+    );
+    (read.rewrote ? rewrote : untouched).push(spelled(read.argv));
+  }
+  if (rewrote.length > 0 && untouched.length > 0) {
+    fail(
+      `${context}: every read refreshes by 13.3's one comparison exactly ` +
+        `when graph data does not match, writing what \`build\` would write ` +
+        `— so the reads rewrite T13.3-2's operational path set alike, all ` +
+        `or none (SPEC 13.3); rewrote it: ${rewrote.join(", ")}; left it ` +
+        `byte-identical: ${untouched.join(", ")}`,
+    );
+  }
+  const recorded = recordedOf(observed.inventory, `${context} \`inventory\``);
+  const refreshed = rewrote.length > 0;
+  const grounds =
+    `\`recorded\` is ${recorded.state === "value" ? "a list" : "unavailable"} ` +
+    `and the reads ${refreshed ? "rewrote" : "left byte-identical"} the set`;
+  const prediction: CheckPrediction = {
+    unit: recorded.state !== "value" || refreshed,
+    grounds,
+    perFile:
+      recorded.state === "value"
+        ? await predictedRecordedFindings(
+            staged.root,
+            recorded.value,
+            untampered.recorded,
+            context,
+          )
+        : [],
+  };
+  assertPredictedVerdict(
+    observed.check,
+    prediction,
+    `${context} \`check --json\``,
+  );
+}
+
+const T13_3_5 = defineProductTest({
+  id: "T13.3-5",
+  title:
+    "never stale, (a) tampered graph data, shape-blind (H-3): on T13.3-2's workspace, freshly built and valid, each trial alters one file of T13.3-2's operational path set at a seeded offset — a single byte changed to a seeded other value, one seeded bit of it flipped, or the file truncated there — in rounds of one trial per nonempty file, at least eight trials per seed of the fixed seed set (H-10, E-5), and, where the product writes several files there, further trials mix the files of the workspace's own state and a twin's built after alpha's text was edited, every two paths at which they differ taken one from each state, both ways round; on its own copy of each staged state, each of ids, show, coverage, impact, review status, review list, query, occurrences, view, and at under --json exits and answers byte for byte as on the untampered workspace, the reads rewriting the operational path set alike, all or none, and check's verdict is predicted from that observation and inventory's recorded alone — exactly one condition-10 finding in the unit form (path .xspec, locations []) when recorded is unavailable or the reads rewrote the set, beside it, where recorded is a list, one recorded-file-form finding per listed path outside the untampered recorded list whose occupant 13.4's removal would remove, and nothing else, exit 1 exactly when it reports any (SPEC 13.3, 13.4, 11.6, 14.10, 14.23)",
+  run: async (product) => {
+    await withWorkspace(
+      {
+        "xspec.config.ts": GRAPH_CONFIG,
+        "specs/A.mdx": T13_3_2_A_V0,
+        "specs/B.mdx": T13_3_2_B,
+      },
+      async (workspace) => {
+        const base = await stageRefreshWorkspace(
+          product,
+          workspace,
+          "T13.3-5 (a)",
+        );
+        const untampered = await snapshotDirectory(workspace.root);
+        assertGraphDataPresent(
+          untampered,
+          "T13.3-5 (a) after the staging builds",
+        );
+        const baseline = await observeUntampered(
+          product,
+          untampered,
+          neverStaleReads(base),
+        );
+        const trials = await readTamperingTrials(
+          product,
+          workspace,
+          T13_3_5_TWIN_FILES,
+          "T13.3-5 (a)",
+        );
+        for (const [index, trial] of trials.entries()) {
+          const context =
+            `T13.3-5 (a) trial ${String(index + 1)} of ` +
+            `${String(trials.length)} (${trial.description})`;
+          await withStagedTrial(untampered, trial, context, (staged) =>
+            judgeTamperingTrial(product, staged, baseline, context),
+          );
+        }
+      },
+    );
+  },
+});
+
 /** TEST-SPEC §13.3, in canonical ID order (SUITE-46). */
 export const section133Tests: readonly ProductTestEntry[] = [
   T13_3_1,
   T13_3_2,
   T13_3_3,
   T13_3_4,
+  T13_3_5,
 ];

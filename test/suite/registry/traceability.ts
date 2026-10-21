@@ -783,6 +783,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T13.3-2": ["13.3", "11.6", "14"],
   "T13.3-3": ["13.3", "14"],
   "T13.3-4": ["13.3"],
+  // T13.3-5 (arm (a), tampered graph data): beside its home passage, 11.6
+  // for `inventory`'s `recorded`, read without refresh and asserted a list
+  // at exit 0 or the unavailability marker at exit 1, and 13.4 for the
+  // removal rule deciding which recorded paths' occupants `check` reports
+  // in the recorded-file form; "14" for condition 10's unit and
+  // recorded-file forms in `check`'s predicted verdict and 14.23's
+  // unavailable datum (rule (a)). 12.2 and 12.0 are carriage context with
+  // home coverage at T12.2-* and T12.0-*.
+  "T13.3-5": ["13.3", "11.6", "13.4", "14"],
   "T13.4-1": ["13.4"],
   "T13.4-2": ["13.4"],
   "T13.4-3": ["13.4", "14"],
