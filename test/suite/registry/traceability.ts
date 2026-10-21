@@ -1003,11 +1003,16 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // asserted numbered condition (14.5).
   "T14-7": ["14"],
   // T14-8: 5.7/11.4 (the embedding container span and the byte
-  // classification it keeps exact) and 12.7 (the finding form's location
-  // order) are context with home coverage at T5.7-2/T11.4-6/T12.7-*; 2.1
-  // and 5.3 (the staged cycles) have home coverage at T2.1-5/T5.3-*. The
-  // home passage "14" carries the asserted numbered conditions (14.3,
-  // 14.15, 14.9, 14.6, 14.12).
+  // classification it keeps exact; the occurrence spans and the import
+  // range the twice-spelled cycles' locations are read in) and 12.7 (the
+  // finding form's location order) are context with home coverage at
+  // T5.7-2/T11.4-6/T12.7-*; 2.1 and 5.3 (the staged cycles) have home
+  // coverage at T2.1-5/T5.3-*, 2.1's two imports binding one module under
+  // different names (the twice-spelled cycles' `B2` beside `B`) at T2.1-3,
+  // and 5.2 (the one edge behind a twice-spelled `d` array or two
+  // embeddings of one target, whose spellings the twice-spelled cycles
+  // locate) at T2.2-3. The home passage "14" carries the asserted numbered
+  // conditions (14.3, 14.15, 14.9, 14.6, 14.12).
   "T14-8": ["14"],
   // T14-9: the 14.24 contract (home "14") with the exit classes and the
   // error document it asserts (12.0, 12.7), the refreshing reads whose

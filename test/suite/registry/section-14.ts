@@ -564,7 +564,24 @@
 //   the reference spellings (element windows) vs the import declarations
 //   (import windows), disjoint by construction — while the pure
 //   mutual-import staging (bindings unused, so no dependency edge exists,
-//   SPEC 2.1) isolates the import cycle as exactly one 14.9 finding.
+//   SPEC 2.1) isolates the import cycle as exactly one 14.9 finding. The
+//   twice-spelled cross-file cycles (TEST-SPEC T14-8: no representative
+//   chosen where one edge or one import hop has several spellings; SPEC
+//   5.2, 5.7, 2.1) are pinned form-exact instead of windowed: the
+//   `depends` cycle specs/A.mdx#a → specs/B.mdx#x → specs/A.mdx#a spelling
+//   its first edge twice in one array (`d={[B.x, B.x]}`, one edge, two
+//   occurrences), specs/A.mdx importing B's module twice (`B`, and `B2`
+//   unused — two declarations for the one hop A → B), and its twin
+//   spelling that edge by two `{text(B.x)}` containers instead — each
+//   report exactly two 14.9 findings in 12.7's order, the import cycle's
+//   (both of specs/A.mdx's declarations, then specs/B.mdx's, each by its
+//   own characters) before the dependency cycle's (both entries by their
+//   own expressions, respectively both containers brace through brace,
+//   then specs/B.mdx's spelling of the edge back), every range exact as
+//   precomputed from the staged bytes (`assemble`/`pin`), `path` null,
+//   `identities` informational and unasserted (the staging note above
+//   `T14_8_TWICE_SPELLED_CYCLE_ARMS`). A product keeping one spelling per
+//   edge or one declaration per hop fails the pinned lists.
 // - T14-11 pins ranges byte-EXACT, no end-widening: every offset is the
 //   UTF-8 byte length of the staged text before the pinned construct
 //   (`assemble`/`pin`), fixtures carrying a multibyte character before it so
@@ -609,6 +626,7 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import type {
   Finding,
+  FindingLocation,
   GraphEdge,
   Mention,
 } from "../../helpers/adapters/index.js";
@@ -6302,6 +6320,211 @@ const T14_8_IMP_PARTICIPANTS: readonly ParticipantExpectation[] = [
   { file: T14_8_IMP_B_FILE, window: byteWindow("", T14_8_IMP_B_IMPORT) },
 ];
 
+// The twice-spelled cross-file cycles (TEST-SPEC T14-8: no representative
+// chosen where one edge or one import hop has several spellings — SPEC 14;
+// 5.2: duplicate references collapse to one edge, each spelling still a
+// distinct occurrence, 5.7; 2.1: several imports MAY bind one module). The
+// cross-file `depends` cycle specs/A.mdx#a → specs/B.mdx#x → specs/A.mdx#a
+// spells its first edge twice in one array (`<S id="a" d={[B.x, B.x]}>`:
+// one edge behind two reference occurrences), and specs/A.mdx imports B's
+// module twice — `import B from "./B.xspec"` and, beside it, `import B2
+// from "./B.xspec"`, `B2` unused (an unused binding is valid and records no
+// edge, 2.1) — so the import cycle's one hop A → B has two declarations.
+// The report is exactly two condition-9 findings, each locating every
+// participant (14): the dependency cycle's both array entries, each by its
+// own expression (`B.x`, its occurrence's span, 5.7), and specs/B.mdx's
+// spelling of the edge back (`A.a`, the expression `d={…}`'s braces
+// enclose); the import cycle's both of specs/A.mdx's declarations and
+// specs/B.mdx's, each by its own characters (the import range of 11.4). On
+// the twin whose first edge is instead an `embeds` edge — `a` spelling
+// `{text(B.x)}` twice in its prose, one edge behind two embedding
+// occurrences — the dependency cycle's finding locates both containers,
+// each brace through brace (an MDX embedding occurrence's span, 5.7),
+// beside the edge back, the import cycle's finding as on the arm. A product
+// detecting cycles over the edge or import set and keeping one spelling per
+// edge, or one declaration per hop, fails the pinned lists. Both stagings
+// follow the body's first invocations, so every source is a staged-source
+// record (S-9), specs/B.mdx one record shared by the arm and its twin; every
+// range is precomputed from the staged bytes (`assemble`/`pin`, T14-11's
+// fixture assembly below), and the two findings are pinned form-exact
+// (`runT148TwiceSpelledCycleArm`): in 12.7's order — the import cycle's
+// first, its first location (specs/A.mdx's first declaration, at byte 0)
+// preceding every reference spelling — each `code` `cycle`, its complete
+// location list exactly the pinned ranges in 12.7's within-finding order
+// (file bytes, then start), never the window convention's widening, and
+// `path` null; `identities` are informational for condition 9 (12.7: 14
+// names no context entity for it) and never asserted.
+const T14_8_TWICE_A_FILE = "specs/A.mdx";
+const T14_8_TWICE_B_FILE = "specs/B.mdx";
+
+/** specs/A.mdx's two declarations of B's module: pins 0 and 1. */
+const T14_8_TWICE_A_IMPORTS: readonly (string | PinnedPart)[] = [
+  pin('import B from "./B.xspec"'),
+  "\n",
+  pin('import B2 from "./B.xspec"'),
+  "\n\n",
+];
+
+/** The arm's specs/A.mdx: `a` spelling its edge to B.x twice, pins 2 and 3. */
+const T14_8_TWICE_DEPENDS_A = assemble([
+  ...T14_8_TWICE_A_IMPORTS,
+  '<S id="a" d={[',
+  pin("B.x"),
+  ", ",
+  pin("B.x"),
+  "]}>\nA text.\n</S>\n",
+]);
+
+/** The twin's specs/A.mdx: `a` embedding B.x twice, pins 2 and 3. */
+const T14_8_TWICE_EMBEDS_A = assemble([
+  ...T14_8_TWICE_A_IMPORTS,
+  '<S id="a">\nA embeds ',
+  pin("{text(B.x)}"),
+  " and again ",
+  pin("{text(B.x)}"),
+  " here.\n</S>\n",
+]);
+
+/** specs/B.mdx, shared: its import (pin 0) and `x`'s edge back (pin 1). */
+const T14_8_TWICE_B = assemble([
+  pin('import A from "./A.xspec"'),
+  '\n\n<S id="x" d={',
+  pin("A.a"),
+  "}>\nX text.\n</S>\n",
+]);
+const T14_8_TWICE_B_STAGED = stagedMdx(
+  "T14-8 twice-spelled cycle arm and its embeds twin specs/B.mdx (x depending on A.a, importing A's module)",
+  T14_8_TWICE_B.text,
+);
+
+/**
+ * One of T14-8's twice-spelled cycle stagings (the note above): its sources
+ * beside SPECS_ONLY_CONFIG, each a staged-source record (S-9), and its two
+ * condition-9 findings' complete location lists, each in 12.7's
+ * within-finding order.
+ */
+interface T148TwiceSpelledCycleArm {
+  /** The staging, for diagnostics. */
+  readonly name: string;
+  /** The sources beside the configuration, by workspace-relative path. */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  /** The spec import cycle's finding: every participating declaration. */
+  readonly importCycle: readonly ExactLocation[];
+  /** The dependency cycle's finding: every participating reference spelling. */
+  readonly dependencyCycle: readonly ExactLocation[];
+}
+
+/** The arm, then its `embeds` twin (TEST-SPEC T14-8's order). */
+const T14_8_TWICE_SPELLED_CYCLE_ARMS: readonly T148TwiceSpelledCycleArm[] = [
+  {
+    name:
+      "the cross-file `depends` cycle specs/A.mdx#a → specs/B.mdx#x → " +
+      "specs/A.mdx#a, its first edge spelled twice in one array " +
+      "(`d={[B.x, B.x]}`) and B's module imported twice by specs/A.mdx " +
+      "(`B`, and `B2` unused)",
+    files: {
+      [T14_8_TWICE_A_FILE]: stagedMdx(
+        "T14-8 twice-spelled cycle arm specs/A.mdx (a depending on B.x twice in one array; B's module imported as B and as B2, B2 unused)",
+        T14_8_TWICE_DEPENDS_A.text,
+      ),
+      [T14_8_TWICE_B_FILE]: T14_8_TWICE_B_STAGED,
+    },
+    importCycle: [
+      ...located(T14_8_TWICE_A_FILE, T14_8_TWICE_DEPENDS_A, 0, 1),
+      ...located(T14_8_TWICE_B_FILE, T14_8_TWICE_B, 0),
+    ],
+    dependencyCycle: [
+      ...located(T14_8_TWICE_A_FILE, T14_8_TWICE_DEPENDS_A, 2, 3),
+      ...located(T14_8_TWICE_B_FILE, T14_8_TWICE_B, 1),
+    ],
+  },
+  {
+    name:
+      "its `embeds` twin, the first edge spelled instead by two " +
+      "`{text(B.x)}` containers in `a` (B's module still imported as `B` " +
+      "and `B2`)",
+    files: {
+      [T14_8_TWICE_A_FILE]: stagedMdx(
+        "T14-8 twice-spelled cycle arm's embeds twin specs/A.mdx (a embedding B.x by two {text(B.x)} containers; B's module imported as B and as B2, B2 unused)",
+        T14_8_TWICE_EMBEDS_A.text,
+      ),
+      [T14_8_TWICE_B_FILE]: T14_8_TWICE_B_STAGED,
+    },
+    importCycle: [
+      ...located(T14_8_TWICE_A_FILE, T14_8_TWICE_EMBEDS_A, 0, 1),
+      ...located(T14_8_TWICE_B_FILE, T14_8_TWICE_B, 0),
+    ],
+    dependencyCycle: [
+      ...located(T14_8_TWICE_A_FILE, T14_8_TWICE_EMBEDS_A, 2, 3),
+      ...located(T14_8_TWICE_B_FILE, T14_8_TWICE_B, 1),
+    ],
+  },
+];
+
+/** A finding's form-exact members — code, exact locations, path (12.7). */
+function cycleFindingForm(finding: Finding): {
+  readonly code: string | null;
+  readonly locations: readonly FindingLocation[];
+  readonly path: Finding["path"];
+} {
+  return {
+    code: finding.code,
+    locations: finding.locations.map((location) => ({
+      file: location.file,
+      range: { start: location.range.start, end: location.range.end },
+    })),
+    path: finding.path,
+  };
+}
+
+/**
+ * One twice-spelled cycle staging (the note above): a fresh workspace of
+ * SPECS_ONLY_CONFIG and its sources, `build --json` exiting 1 with exactly
+ * two condition-9 findings, each pinned form-exact in 12.7's order — the
+ * import cycle's, then the dependency cycle's.
+ */
+async function runT148TwiceSpelledCycleArm(
+  product: ProductBinding,
+  arm: T148TwiceSpelledCycleArm,
+): Promise<void> {
+  await withWorkspace(
+    { files: { "xspec.config.ts": SPECS_ONLY_CONFIG, ...arm.files } },
+    async (workspace) => {
+      const context = `T14-8 \`build --json\` over ${arm.name}`;
+      const findings = await buildFindings(product, workspace, context);
+      assertConditionCounts(
+        findings,
+        { "14.9": 2 },
+        `${context} — two distinct condition-9 violations are present (the ` +
+          `spec import cycle; the dependency cycle), each ONE finding ` +
+          `however many spellings its edge or its hop has (SPEC 5.2, 5.3, ` +
+          `2.1, 14, 14.9)`,
+      );
+      assertSameJson(
+        cycleFindingForm(findings[0]!),
+        { code: "cycle", locations: arm.importCycle, path: null },
+        `${context}: the first condition-9 finding in 12.7's order (its ` +
+          `first location, at byte 0, preceding every reference spelling) ` +
+          `is the spec import cycle's, locating every participating import ` +
+          `declaration by its own characters — both of specs/A.mdx's ` +
+          `declarations of B's module, no representative chosen for the hop, ` +
+          `then specs/B.mdx's of A's — in 12.7's within-finding order, ` +
+          `\`path\` null (SPEC 14, 2.1, 12.7)`,
+      );
+      assertSameJson(
+        cycleFindingForm(findings[1]!),
+        { code: "cycle", locations: arm.dependencyCycle, path: null },
+        `${context}: the second is the dependency cycle's, locating every ` +
+          `reference spelling recording a participating edge by its ` +
+          `occurrence's span — both spellings of the first edge, no ` +
+          `representative chosen for the one edge, then specs/B.mdx's ` +
+          `spelling of the edge back — in 12.7's within-finding order, ` +
+          `\`path\` null (SPEC 14, 5.2, 5.7, 12.7)`,
+      );
+    },
+  );
+}
+
 // No-occurrence MDX embedding spelling (SPEC 14, 14.6, 5.7): a local
 // `text(...)` embedding whose target resolves to nothing records no
 // occurrence, so its condition-6 finding's range is the FULL braced
@@ -6366,7 +6589,7 @@ const T14_8_POL_SOURCE = stagedMdx(
 const T14_8 = defineProductTest({
   id: "T14-8",
   title:
-    "location cardinality: a condition several constructs jointly violate is one finding locating every participant, each in its containing file — a triple-duplicated ID is one condition-3 finding with three locations, one per bearer, no representative chosen; an import-binding collision is one condition-15 finding locating every colliding declaration; a cross-file dependency cycle is one condition-9 finding locating its full path — every participating reference spelling — beside exactly one further condition-9 finding locating the co-staged spec import cycle's every participating import declaration, a pure mutual-import cycle with unused bindings reporting exactly that one finding; a no-occurrence MDX embedding spelling's condition-6 finding has the full braced container as its byte-exact range, the span its occurrence would occupy, keeping T11.4-6's byte classification exact; a policy finding carries locations [], path null, its context identities alone; location order within a finding is file bytes, then start, then end (SPEC 14, 12.7, 5.7, 5.3, 2.1, 14.12)",
+    "location cardinality: a condition several constructs jointly violate is one finding locating every participant, each in its containing file — a triple-duplicated ID is one condition-3 finding with three locations, one per bearer, no representative chosen; an import-binding collision is one condition-15 finding locating every colliding declaration; a cross-file dependency cycle is one condition-9 finding locating its full path — every participating reference spelling — beside exactly one further condition-9 finding locating the co-staged spec import cycle's every participating import declaration, a pure mutual-import cycle with unused bindings reporting exactly that one finding; no representative chosen where one edge or one import hop has several spellings — the cross-file `depends` cycle specs/A.mdx#a → specs/B.mdx#x → specs/A.mdx#a spelling its first edge twice in one array (`d={[B.x, B.x]}`), specs/A.mdx importing B's module twice (`B`, and `B2` unused), reports exactly two condition-9 findings pinned form-exact, its dependency cycle locating both entries and specs/B.mdx's spelling of the edge back and its import cycle both of specs/A.mdx's declarations and specs/B.mdx's, and on the twin spelling that edge by two `{text(B.x)}` containers the dependency cycle locates both containers, brace through brace; a no-occurrence MDX embedding spelling's condition-6 finding has the full braced container as its byte-exact range, the span its occurrence would occupy, keeping T11.4-6's byte classification exact; a policy finding carries locations [], path null, its context identities alone; location order within a finding is file bytes, then start, then end (SPEC 14, 12.7, 5.7, 5.3, 5.2, 2.1, 14.12)",
   run: async (product) => {
     // --- Triple-duplicated ID → one 14.3 finding with three locations.
     await withWorkspace(
@@ -6492,6 +6715,13 @@ const T14_8 = defineProductTest({
           `import declaration`,
       );
     });
+
+    // --- Twice-spelled cross-file cycles → each 14.9 finding locates every
+    // spelling of its edge or hop, no representative chosen, form-exact: the
+    // `depends` arm, then its `embeds` twin.
+    for (const arm of T14_8_TWICE_SPELLED_CYCLE_ARMS) {
+      await runT148TwiceSpelledCycleArm(product, arm);
+    }
 
     // --- No-occurrence MDX embedding spelling → the 14.6 finding's range is
     // the full braced container, byte-exact.
