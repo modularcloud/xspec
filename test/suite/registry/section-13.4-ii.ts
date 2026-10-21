@@ -1,8 +1,11 @@
 // TEST-SPEC §13.4 (derived, durable, and transient files), part ii —
-// SUITE-47: T13.4-12 (the transient lock path). The lock path `.xspec/lock`
-// is transient (SPEC 13.4): it bears on no comparison of graph data and on
-// no record, no write but acquisition and release touches it, and graph
-// data lies beside it, so it is no write path of `build`'s either (14.22).
+// SUITE-47: T13.4-12 (the transient lock path) and T13.4-13 (any other
+// occupant: FIFOs).
+//
+// T13.4-12. The lock path `.xspec/lock` is transient (SPEC 13.4): it bears
+// on no comparison of graph data and on no record, no write but acquisition
+// and release touches it, and graph data lies beside it, so it is no write
+// path of `build`'s either (14.22).
 //
 // Every arm starts from a fresh CONF-CORE-shaped workspace (CORE_DECL,
 // section-13.5.ts: one spec group, `specs/A.mdx` holding `a` with its child
@@ -111,23 +114,96 @@
 // would carry `inventory`, `version`, and the preview documents of
 // performable operations. The Linux leg's stagings: FIFOs, permission
 // removals, the process list (E-1).
+//
+// T13.4-13. SPEC.md's catch-all occupant clauses, staged elsewhere with
+// directories, symbolic links, and plain files alone, met by a FIFO — an
+// occupant of none of those kinds, the Linux leg's (helpers/lock-staging.ts
+// `stageFifo`; at `.xspec`, section-13.5-ii.ts `obstructArea` — `mkfifo`,
+// never opened by the harness, each verified on the harness itself as a
+// FIFO in place, E-1). Each arm starts from a fresh workspace of T10.1-6's
+// shape (section-10.1.ts `CORE_FILES`: one spec group, `specs/A.mdx`
+// holding `a` with its child `a.k`), freshly built and holding the audit
+// session `s` created while it was valid, then a FIFO at one path no glob
+// matches. Every invocation once the FIFO stands runs under `--json`,
+// bounded (`runBounded`): a product opening the FIFO with no writer blocks
+// until its own guard ends it, a diagnosed failure; T10.1-6's sweeps, which
+// (d) runs on their default guards, run under `promptly`, which turns the
+// hang-guard kill alone into a diagnosed failure (S-3: termination, with
+// the FIFO's state afterward, is all "promptly" and "no FIFO opened"
+// assert; H-8). After
+// each invocation the FIFO is still a FIFO in place (`assertFifosIntact`)
+// and a whole-root compare around it finds nothing modified — no `build`
+// of these arms succeeds (H-6 leaving out the lock path alone where a
+// mutating command acquired it); (d)'s sweeps make their own compares, the
+// FIFO checked once each sweep has run. First, a FIFO-free twin — the arm
+// staging alone, then `rename specs/A.mdx a a2 --json`, exit 0 — the
+// premise that (a)'s and (b)'s `rename` is an operation succeeding there.
+// - (a) The configuration path (SPEC 7, 14.14): the root's
+//   `xspec.config.ts` replaced by a FIFO, and, on a workspace of its own,
+//   `alt.config.ts` a FIFO beside the valid root configuration, named by
+//   `--config alt.config.ts`: `build`, `check`, `ids`, `view`, `inventory`,
+//   and the `rename` (given that `--config` on the second) each exit 2 with
+//   the error document — `code` `"configuration-error"`, `path` the FIFO's
+//   path as found or named, `locations` [] (the occupant never read: no
+//   in-source location; T12.7-3, T7-1) — and `version`, so given, exits 0
+//   with its document (12.6: it loads no configuration).
+// - (b) The journal path (SPEC 13.4, 14.13): `.xspec/journal` a FIFO —
+//   `build`, `check`, and `ids` each report exactly one finding, condition
+//   13 form-exact (`journal-error`, `.xspec/journal`, `locations` [];
+//   T6.1-3's assertion), exit 1, `ids` answering nothing (the findings-only
+//   report, 13.3), and the `rename` is refused with that finding alone
+//   (6.4's precondition), exit 1; `inventory` reports `journal` exactly
+//   `{"path": ".xspec/journal", "occupied": true}`, finding-free, exit 0
+//   (11.6: occupancy by presence alone, nothing read); and `occurrences`,
+//   `view specs/A.mdx`, and `at specs/A.mdx 0` each answer finding-free,
+//   exit 0 (11.2: the journal's condition accompanies no answer).
+// - (c) A session file (SPEC 13.4, 10.1, 14.21): `.xspec/reviews/s.json` a
+//   FIFO — `check`, `review status s`, and `review list` each report `s`
+//   corrupt, exit 1: at least one finding, every one condition 21
+//   concerning `.xspec/reviews/s.json` with `locations` [] (T10.1-4's rule;
+//   `check` reporting nothing else, the workspace otherwise valid and
+//   freshly built), `review list` listing `s` corrupt in place of its
+//   fields; `inventory` lists `.xspec/reviews/s.json`, its one session,
+//   finding-free, exit 0 (11.6: sessions selected by name alone).
+// - (d) The session directory and the area's own path (SPEC 10.1, 11.6,
+//   13.4): `.xspec/reviews` a FIFO, and separately `.xspec` a FIFO, each on
+//   its workspace, run the commands T10.1-6's plain-file arm for that path
+//   runs, judged by that arm's own sweeps (section-10.1.ts
+//   `assertSessionDirectoryOccupied`; `assertAreaOccupied` and
+//   `assertMutatingCommandsFailAtAcquisition` on `stageT1016AreaWorkspace`'s
+//   staging, a git repository holding `c1`), so each answers exactly as
+//   there — T10.1-6's stale-twin runs aside.
+// Arms (e)–(i) — a derived file's path, a write path's directory
+// component, a move's destination and its components, a recorded derived
+// path no longer generated, and the hold path — are not yet registered.
+//
+// CERTIFICATIONS.md places T13.4-13 in no fixture's scope; its stagings
+// verify themselves on the harness before use, an ineffective staging a
+// harness error (E-1, H-11), never a pass or a skip.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import {
+  decodeAtReport,
   decodeFindingsReport,
   decodeInventoryDocument,
+  decodeOccurrencesReport,
   decodePreviewReport,
+  decodeVersionDocument,
+  decodeViewReport,
 } from "../../helpers/adapters/forms.js";
 import type { DecodedDatum } from "../../helpers/adapters/forms.js";
 import type { Finding, PathValue } from "../../helpers/adapters/model.js";
+import { decodeSessionListReport } from "../../helpers/adapters/review.js";
 import {
   assertBytesEqual,
   assertExitCode,
   fail,
+  HarnessAssertionError,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { isHangGuardKill } from "../../helpers/hang-guards.js";
 import { EXCLUDE_LOCK_PATH, LOCK_PATH } from "../../helpers/lock-path.js";
 import type {
   DeadRun,
@@ -138,6 +214,7 @@ import {
   assertFifosIntact,
   assertOutsideTargetsUntouched,
   killHeldRun,
+  stageFifo,
   stageLeftover,
 } from "../../helpers/lock-staging.js";
 import type {
@@ -159,17 +236,29 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import {
+  assertLeavesUnchanged,
   assertSnapshotsEqual,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
-import { summarizeResult } from "../../helpers/subprocess.js";
+import {
+  rethrowHarnessError,
+  summarizeResult,
+} from "../../helpers/subprocess.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import {
+  assertAreaOccupied,
+  assertMutatingCommandsFailAtAcquisition,
+  assertSessionDirectoryOccupied,
+  CORE_FILES as T10_1_CORE_FILES,
+  stageT1016AreaWorkspace,
+} from "./section-10.1.js";
 import type { Obstruction } from "./section-13.5-ii.js";
 import {
   OBSTRUCTIONS,
+  obstructArea,
   RENAME_A,
   stageArmWorkspace,
 } from "./section-13.5-ii.js";
@@ -179,7 +268,11 @@ import {
   CORE_DECL,
   runBounded,
 } from "./section-13.5.js";
-import { assertSameJson, expectErrorDocument } from "./support.js";
+import {
+  assertConditionCounts,
+  assertSameJson,
+  expectErrorDocument,
+} from "./support.js";
 import { holdPathFor } from "./write-refusal-staging.js";
 
 /** The stable code of 14.25, the read failure. */
@@ -1250,5 +1343,651 @@ const T13_4_12 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T13.4-13 — any other occupant: FIFOs (arms (a)–(d))
+// ---------------------------------------------------------------------------
+
+/**
+ * Every T13.4-13 workspace: T10.1-6's (section-10.1.ts `CORE_FILES` — one
+ * spec group over the `.mdx` files under `specs/`, `specs/A.mdx` holding `a`
+ * with its child `a.k`), so (d) runs T10.1-6's plain-file arms' sweeps on
+ * the workspace shape they were written for.
+ */
+const FIFO_ARM_DECL: WorkspaceDecl = { files: T10_1_CORE_FILES };
+
+/** The root's configuration file, the upward search's entry (SPEC 7). */
+const ROOT_CONFIG = "xspec.config.ts";
+/** The path (a)'s second staging names through `--config` (SPEC 7). */
+const ALT_CONFIG = "alt.config.ts";
+/** The journal path (SPEC 6.1). */
+const JOURNAL = ".xspec/journal";
+/** The session directory (SPEC 10.1). */
+const SESSION_DIRECTORY = ".xspec/reviews";
+/** The audit session `s`'s file, `.xspec/reviews/<name>.json` (SPEC 10.1). */
+const SESSION_S_FILE = ".xspec/reviews/s.json";
+
+/** Condition 13's stable code (SPEC 14, 14.13, 12.7). */
+const JOURNAL_ERROR_CODE = "journal-error";
+/** Condition 14's stable code (SPEC 14, 14.14, 12.7; T12.7-3). */
+const CONFIGURATION_ERROR_CODE = "configuration-error";
+/** Condition 21's stable code (SPEC 14, 14.21, 12.7). */
+const CORRUPT_SESSION_CODE = "corrupt-session";
+
+/**
+ * `rename specs/A.mdx a a2`: (a)'s and (b)'s `rename`, an operation
+ * succeeding on the FIFO-free twin (`fifoFreeTwin`, a premise).
+ */
+const FIFO_ARM_RENAME: readonly string[] = ["rename", "specs/A.mdx", "a", "a2"];
+
+/**
+ * Run `action` — T10.1-6's sweeps (section-10.1.ts), whose invocations
+ * carry the driver's default guard and convert nothing — turning the
+ * hang-guard kill, and it alone, into a diagnosed failure: every invocation
+ * of a T13.4-13 arm completes promptly, and a product opening a FIFO with no
+ * writer blocks until its own guard ends it (TEST-SPEC T13.4-13, S-3:
+ * termination is all "promptly" asserts; H-8: hangs become diagnosed
+ * failures). A diagnosed failure and a harness error propagate as
+ * themselves (H-11).
+ */
+async function promptly<T>(
+  context: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof HarnessAssertionError) throw error;
+    rethrowHarnessError(error);
+    if (!isHangGuardKill(error)) throw error;
+    return fail(
+      `${context}: every invocation completes promptly, the FIFO never ` +
+        `opened — an open of a FIFO with no writer blocks, and this one ` +
+        `ran until its own guard ended it (TEST-SPEC S-3; SPEC 13.4, 10.1, ` +
+        `11.6; H-8: hangs become diagnosed failures) — ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
+ * T13.4-13's arm staging ("a freshly built valid workspace holding an
+ * `audit` session `s` created while it was valid"): on a fresh
+ * `FIFO_ARM_DECL` workspace, `build`, then `review create --strategy audit
+ * --name s --json`, each bounded, exit 0.
+ */
+async function stageFifoArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  await runOk(
+    product,
+    workspace,
+    BUILD,
+    `${context} staging \`build\``,
+    "`build` succeeds on a valid workspace (SPEC 12.1)",
+  );
+  await runOk(
+    product,
+    workspace,
+    CREATE_S,
+    `${context} staging \`${CREATE_S.join(" ")}\``,
+    "an audit session is created on a valid workspace (SPEC 10.7)",
+  );
+}
+
+/**
+ * Stage a FIFO at `rel` in place of whatever occupies it (TEST-SPEC
+ * T13.4-13: "a FIFO at one path"): its parent must be a directory once the
+ * staging's `build` and `review create` have run — else a diagnosed failure
+ * (SPEC 13.3, 10.1) — its occupant, product-written or none, is removed
+ * with all it holds, and the FIFO is made by `stageFifo`
+ * (helpers/lock-staging.ts: `mkfifo`, never opened by the harness, verified
+ * on the harness itself as a FIFO in place, E-1). Returns the record
+ * `assertFifosIntact` takes.
+ */
+async function replaceWithFifo(
+  workspace: TestWorkspace,
+  rel: string,
+  context: string,
+): Promise<StagedLeftover> {
+  const parent = path.posix.dirname(rel);
+  if (parent !== ".") {
+    const held = await workspace.kind(parent);
+    if (held !== "dir") {
+      fail(
+        `${context}: staging premise — once \`build\` and \`review create ` +
+          `--strategy audit --name s\` have run, ${parent} is a directory: ` +
+          `the graph-data area, or the session directory holding \`s\` ` +
+          `(SPEC 13.3, 10.1); found ${held}`,
+      );
+    }
+  }
+  await fsp.rm(workspace.path(rel), { recursive: true, force: true });
+  return await stageFifo(workspace, rel);
+}
+
+/**
+ * One invocation of a FIFO arm (TEST-SPEC T13.4-13): `argv`, its `--json`
+ * included, run bounded — a product opening the FIFO with no writer blocks
+ * until its own guard ends it, a diagnosed failure (`runBounded`; S-3, H-8)
+ * — inside a whole-root compare: nothing modified, since no `build` of arms
+ * (a)–(d) succeeds (H-6 leaving out the lock path alone, where a mutating
+ * command acquired it); `judge` asserts the answer, given the run's
+ * context (the arm's `context` and the argv), then the FIFO is still a
+ * FIFO in place (`assertFifosIntact`: with termination, all "no FIFO
+ * opened" asserts, S-3).
+ */
+async function fifoRun(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  staged: StagedLeftover,
+  argv: readonly string[],
+  context: string,
+  judge: (result: RunResult, runContext: string) => void,
+): Promise<void> {
+  const runContext = `${context}: \`${argv.join(" ")}\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const result = await runBounded(
+        product,
+        workspace.root,
+        argv,
+        runContext,
+      );
+      judge(result, runContext);
+      await assertFifosIntact(
+        staged,
+        `${runContext}: no FIFO opened — the FIFO still a FIFO in place ` +
+          `afterward (TEST-SPEC T13.4-13, S-3; SPEC 13.4, 7)`,
+      );
+    },
+    `${runContext}: nothing modified — no \`build\` of these arms ` +
+      `succeeds, and nothing else writes (TEST-SPEC T13.4-13; SPEC 12.0, ` +
+      `13.4)`,
+  );
+}
+
+/**
+ * The FIFO-free twin (module header): the arm staging alone, then
+ * `rename specs/A.mdx a a2 --json`, bounded, exit 0 — the premise that the
+ * `rename` (a) and (b) run is an operation succeeding there.
+ */
+async function fifoFreeTwin(product: ProductBinding): Promise<void> {
+  await withWorkspace(FIFO_ARM_DECL, async (workspace) => {
+    const context = "T13.4-13 the FIFO-free twin";
+    await stageFifoArm(product, workspace, context);
+    const argv = [...FIFO_ARM_RENAME, "--json"];
+    await runOk(
+      product,
+      workspace,
+      argv,
+      `${context} \`${argv.join(" ")}\``,
+      "staging premise — the `rename` (a) and (b) run is an operation " +
+        "succeeding on a FIFO-free twin (SPEC 6.4)",
+    );
+  });
+}
+
+// --- (a) The configuration path ---------------------------------------------
+
+/** One of (a)'s two stagings (module header). */
+interface ConfigurationFifo {
+  readonly what: string;
+  /** The FIFO's path: the root's configuration, or the path `--config` names. */
+  readonly at: string;
+  /** `--config <path>` where the staging names its path, else nothing. */
+  readonly configArgs: readonly string[];
+}
+
+/** (a)'s stagings (module header), each on a workspace of its own. */
+const CONFIGURATION_FIFOS: readonly ConfigurationFifo[] = [
+  {
+    what: "the root's `xspec.config.ts` a FIFO",
+    at: ROOT_CONFIG,
+    configArgs: [],
+  },
+  {
+    what:
+      "`alt.config.ts` a FIFO beside the valid root configuration, named by " +
+      "`--config alt.config.ts`",
+    at: ALT_CONFIG,
+    configArgs: ["--config", ALT_CONFIG],
+  },
+];
+
+/**
+ * (a)'s configuration-loading commands, as TEST-SPEC T13.4-13(a) names
+ * them (SPEC 14.14: every command but `version` loads the configuration),
+ * the `rename` an operation succeeding on the FIFO-free twin.
+ */
+const CONFIGURATION_LOADING: readonly (readonly string[])[] = [
+  ["build"],
+  ["check"],
+  ["ids"],
+  ["view"],
+  ["inventory"],
+  FIFO_ARM_RENAME,
+];
+
+/**
+ * One of (a)'s stagings (module header): each configuration-loading command
+ * exits 2 with the error document — `code` `"configuration-error"`, `path`
+ * the FIFO's path as found or named, `locations` [] — and `version` exits 0
+ * with its document, each under `fifoRun`.
+ */
+async function configurationArm(
+  product: ProductBinding,
+  staging: ConfigurationFifo,
+): Promise<void> {
+  await withWorkspace(FIFO_ARM_DECL, async (workspace) => {
+    const context = `T13.4-13 (a) ${staging.what}`;
+    await stageFifoArm(product, workspace, context);
+    const staged = await replaceWithFifo(workspace, staging.at, context);
+    for (const command of CONFIGURATION_LOADING) {
+      const argv = [...command, ...staging.configArgs, "--json"];
+      await fifoRun(
+        product,
+        workspace,
+        staged,
+        argv,
+        context,
+        (result, runContext) => {
+          assertExitCode(
+            result,
+            2,
+            `${runContext}: the configuration path found or named holds a ` +
+              `FIFO — any occupant but a plain file is missing or invalid ` +
+              `configuration, never read through — reported at configuration ` +
+              `load as a usage error, exit 2 (SPEC 7, 14.14, 12.0)`,
+          );
+          const error = expectErrorDocument(result, runContext);
+          assertSameJson(
+            { code: error.code, path: error.path, locations: error.locations },
+            {
+              code: CONFIGURATION_ERROR_CODE,
+              path: staging.at,
+              locations: [],
+            },
+            `${runContext}: the error document carries condition 14 — the ` +
+              `stable code "${CONFIGURATION_ERROR_CODE}", the concerned path ` +
+              `the FIFO's as found or named (${JSON.stringify(staging.at)}), ` +
+              `and no locations, the occupant never read (SPEC 14, 12.7, 7; ` +
+              `T12.7-3, T7-1) — message: ${JSON.stringify(error.message)}`,
+          );
+        },
+      );
+    }
+    const versionArgv = ["version", ...staging.configArgs, "--json"];
+    await fifoRun(
+      product,
+      workspace,
+      staged,
+      versionArgv,
+      context,
+      (result, runContext) => {
+        assertExitCode(
+          result,
+          0,
+          `${runContext}: \`version\` loads no configuration, so the FIFO ` +
+            `is never met: exit 0 with its answer (SPEC 12.6, 14.14)`,
+        );
+        decodeVersionDocument(parseJsonStdout(result, runContext), runContext);
+      },
+    );
+  });
+}
+
+// --- (b) The journal path ----------------------------------------------------
+
+/**
+ * A findings-only report holding exactly one finding, the journal error
+ * form-exact — `code` `"journal-error"`, `path` `".xspec/journal"`,
+ * `locations` `[]` (T6.1-3's assertion) — exit 1: the FIFO at the journal
+ * path is a journal error (SPEC 13.4, 14.13), the workspace's one defect.
+ */
+function judgeJournalErrorAlone(
+  result: RunResult,
+  context: string,
+  why: string,
+): void {
+  assertExitCode(result, 1, `${context}: ${why}`);
+  const { findings } = decodeFindingsReport(
+    parseJsonStdout(result, context),
+    context,
+  );
+  assertConditionCounts(
+    findings,
+    { "14.13": 1 },
+    `${context} — exactly the journal error, the workspace's one defect ` +
+      `(SPEC 14, 14.13)`,
+  );
+  const finding = findings[0]!;
+  assertSameJson(
+    { code: finding.code, path: finding.path, locations: finding.locations },
+    { code: JOURNAL_ERROR_CODE, path: JOURNAL, locations: [] },
+    `${context} — the journal error's finding, form-exact: code ` +
+      `"${JOURNAL_ERROR_CODE}", the journal path ${JOURNAL} as its ` +
+      `concerned path, and empty locations (SPEC 12.7, 14, 14.13; T6.1-3) — ` +
+      `message: ${JSON.stringify(finding.message)}`,
+  );
+}
+
+/** One of (b)'s answering surfaces: its arguments and its decoder. */
+interface AnsweringSurface {
+  readonly argv: readonly string[];
+  /** Decode the answer form-exactly, returning its findings (12.7). */
+  readonly findings: (doc: unknown, context: string) => readonly Finding[];
+}
+
+/**
+ * (b)'s surfaces of 11.2 (module header): `occurrences`, and `view` and
+ * `at … 0` of the discovered spec source `specs/A.mdx`.
+ */
+const ANSWERING_SURFACES: readonly AnsweringSurface[] = [
+  {
+    argv: ["occurrences", "--json"],
+    findings: (doc, context) => decodeOccurrencesReport(doc, context).findings,
+  },
+  {
+    argv: ["view", "specs/A.mdx", "--json"],
+    findings: (doc, context) =>
+      decodeViewReport(doc, { text: false }, context).findings,
+  },
+  {
+    argv: ["at", "specs/A.mdx", "0", "--json"],
+    findings: (doc, context) => decodeAtReport(doc, context).findings,
+  },
+];
+
+/**
+ * (b) (module header): `.xspec/journal` a FIFO — `build`, `check`, and
+ * `ids` each the journal error alone, exit 1, and the `rename` refused with
+ * it alone; `inventory`'s `journal` exactly occupied, finding-free, exit 0;
+ * the surfaces of 11.2 finding-free, exit 0 — each under `fifoRun`.
+ */
+async function journalArm(product: ProductBinding): Promise<void> {
+  await withWorkspace(FIFO_ARM_DECL, async (workspace) => {
+    const context = "T13.4-13 (b) `.xspec/journal` a FIFO";
+    await stageFifoArm(product, workspace, context);
+    const staged = await replaceWithFifo(workspace, JOURNAL, context);
+    const run = async (
+      argv: readonly string[],
+      judge: (result: RunResult, runContext: string) => void,
+    ): Promise<void> => {
+      await fifoRun(product, workspace, staged, argv, context, judge);
+    };
+    for (const argv of [
+      ["build", "--json"],
+      ["check", "--json"],
+      ["ids", "--json"],
+    ]) {
+      await run(argv, (result, runContext) => {
+        judgeJournalErrorAlone(
+          result,
+          runContext,
+          "a journal path occupied by anything other than a plain file is a " +
+            "journal error — a finding at `build`, at `check`, and at the " +
+            "gate of `ids`, which answers nothing: exit 1, the findings-only " +
+            "report (SPEC 13.4, 14.13, 13.3, 12.7)",
+        );
+      });
+    }
+    await run([...FIFO_ARM_RENAME, "--json"], (result, runContext) => {
+      judgeJournalErrorAlone(
+        result,
+        runContext,
+        "the workspace fails `build`'s validations, so the `rename` — an " +
+          "operation succeeding on the FIFO-free twin — is refused before " +
+          "modifying anything, reporting the workspace's findings alone, " +
+          "exit 1 (SPEC 6.4, 14)",
+      );
+    });
+    await run(INVENTORY, (result, runContext) => {
+      assertExitCode(
+        result,
+        0,
+        `${runContext}: \`inventory\` answers whatever the sources' ` +
+          `validity, finding-free, exit 0 (SPEC 11.6)`,
+      );
+      const inventory = decodeInventoryDocument(
+        parseJsonStdout(result, runContext),
+        runContext,
+      );
+      assertSameJson(
+        inventory.findings,
+        [],
+        `${runContext}: finding-free — the inventory reports occupancy by ` +
+          `presence alone, reading no journal content, so no condition 13 ` +
+          `(SPEC 11.6, 14.13)`,
+      );
+      assertSameJson(
+        inventory.journal,
+        { path: JOURNAL, occupied: true },
+        `${runContext}: the journal member is exactly {"path": ` +
+          `"${JOURNAL}", "occupied": true} — a FIFO occupies the journal ` +
+          `path (SPEC 11.6, 12.7, 13.4)`,
+      );
+    });
+    for (const surface of ANSWERING_SURFACES) {
+      await run(surface.argv, (result, runContext) => {
+        assertExitCode(
+          result,
+          0,
+          `${runContext}: the surfaces of 11.2 answer, their judgement of ` +
+            `\`build\`'s validations making every read the gate makes, the ` +
+            `journal's included, whose condition accompanies no answer: ` +
+            `finding-free, exit 0 (SPEC 11.2, 11.3, 11.4, 11.5)`,
+        );
+        assertSameJson(
+          surface.findings(parseJsonStdout(result, runContext), runContext),
+          [],
+          `${runContext}: finding-free — the journal's condition ` +
+            `accompanies no answer (SPEC 11.2, 14.13)`,
+        );
+      });
+    }
+  });
+}
+
+// --- (c) A session file -------------------------------------------------------
+
+/**
+ * A report's findings holding `s`'s corruption (T10.1-4's rule): at least
+ * one finding, and every one condition 21 — the stable code
+ * `"corrupt-session"` — concerning `.xspec/reviews/s.json` with `locations`
+ * `[]` (SPEC 14, 14.21, 12.7, 10.1).
+ */
+function assertSessionSCorrupt(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  if (findings.length === 0) {
+    fail(
+      `${context}: \`s\` is reported corrupt — a session file that is not a ` +
+        `plain file is corrupt (SPEC 13.4, 10.1, 14.21); got no finding`,
+    );
+  }
+  for (const finding of findings) {
+    assertSameJson(
+      { code: finding.code, path: finding.path, locations: finding.locations },
+      { code: CORRUPT_SESSION_CODE, path: SESSION_S_FILE, locations: [] },
+      `${context}: every finding is \`s\`'s corruption — condition 21, the ` +
+        `stable code "${CORRUPT_SESSION_CODE}", concerning ` +
+        `${SESSION_S_FILE}, no in-source location — never a read failure ` +
+        `in its place, the occupant never read (SPEC 14, 14.21, 12.7, ` +
+        `13.4, 14.25) — message: ${JSON.stringify(finding.message)}`,
+    );
+  }
+}
+
+/**
+ * (c) (module header): `.xspec/reviews/s.json` a FIFO — `check`, `review
+ * status s`, and `review list` each report `s` corrupt, exit 1; `inventory`
+ * lists `.xspec/reviews/s.json`, finding-free, exit 0 — each under
+ * `fifoRun`.
+ */
+async function sessionFileArm(product: ProductBinding): Promise<void> {
+  await withWorkspace(FIFO_ARM_DECL, async (workspace) => {
+    const context = "T13.4-13 (c) `.xspec/reviews/s.json` a FIFO";
+    await stageFifoArm(product, workspace, context);
+    const staged = await replaceWithFifo(workspace, SESSION_S_FILE, context);
+    const run = async (
+      argv: readonly string[],
+      judge: (result: RunResult, runContext: string) => void,
+    ): Promise<void> => {
+      await fifoRun(product, workspace, staged, argv, context, judge);
+    };
+    for (const argv of [CHECK, REVIEW_STATUS_S]) {
+      await run(argv, (result, runContext) => {
+        assertExitCode(
+          result,
+          1,
+          `${runContext}: \`s\`'s file is a FIFO, so \`s\` is corrupt — ` +
+            `reported by \`check\` and by a \`review\` subcommand naming it, ` +
+            `exit 1 (SPEC 13.4, 10.1, 14.21, 12.0)`,
+        );
+        assertSessionSCorrupt(
+          decodeFindingsReport(parseJsonStdout(result, runContext), runContext)
+            .findings,
+          runContext,
+        );
+      });
+    }
+    await run(["review", "list", "--json"], (result, runContext) => {
+      assertExitCode(
+        result,
+        1,
+        `${runContext}: \`list\` exits 1 when a corrupt session exists ` +
+          `(SPEC 10.7, 14.21)`,
+      );
+      const list = decodeSessionListReport(
+        parseJsonStdout(result, runContext),
+        runContext,
+      );
+      assertSameJson(
+        list.sessions.map(({ name, corrupt }) => ({ name, corrupt })),
+        [{ name: "s", corrupt: true }],
+        `${runContext}: \`s\` is listed corrupt in place of its fields (SPEC ` +
+          `10.1, 10.7, 14.21)`,
+      );
+      if (list.findings === undefined) {
+        fail(
+          `${runContext}: the listing carries \`s\`'s condition 21 under its ` +
+            `"findings" member (SPEC 14.21, 12.7); the decoded document ` +
+            `carries no such member`,
+        );
+      }
+      assertSessionSCorrupt(list.findings, `${runContext} — its findings`);
+    });
+    await run(INVENTORY, (result, runContext) => {
+      assertExitCode(
+        result,
+        0,
+        `${runContext}: \`inventory\` selects sessions by name alone, ` +
+          `reading none: finding-free, exit 0 (SPEC 11.6)`,
+      );
+      const inventory = decodeInventoryDocument(
+        parseJsonStdout(result, runContext),
+        runContext,
+      );
+      assertSameJson(
+        inventory.findings,
+        [],
+        `${runContext}: finding-free — no condition 21 from the inventory, ` +
+          `which reads no session (SPEC 11.6, 14.21)`,
+      );
+      assertSameJson(
+        inventory.sessions,
+        [SESSION_S_FILE],
+        `${runContext}: the session file listed by name alone, whatever ` +
+          `occupies it (SPEC 11.6, 10.1)`,
+      );
+    });
+  });
+}
+
+// --- (d) The session directory and the area's own path -----------------------
+
+/**
+ * (d)'s session-directory staging (module header): `.xspec/reviews` — the
+ * directory holding `s.json` — a FIFO, then T10.1-6's plain-file sweep for
+ * that path (`assertSessionDirectoryOccupied`) under `promptly`, then the
+ * FIFO still in place.
+ */
+async function sessionDirectoryArm(product: ProductBinding): Promise<void> {
+  await withWorkspace(FIFO_ARM_DECL, async (workspace) => {
+    const label = "T13.4-13 (d) [.xspec/reviews: a FIFO]";
+    await stageFifoArm(product, workspace, label);
+    const staged = await replaceWithFifo(workspace, SESSION_DIRECTORY, label);
+    await promptly(label, async () => {
+      await assertSessionDirectoryOccupied(product, workspace, label);
+    });
+    await assertFifosIntact(
+      staged,
+      `${label}: no FIFO opened — the FIFO at ${SESSION_DIRECTORY} still a ` +
+        `FIFO in place once T10.1-6's plain-file sweep has run (TEST-SPEC ` +
+        `T13.4-13, S-3; SPEC 13.4, 10.1)`,
+    );
+  });
+}
+
+/**
+ * (d)'s area staging (module header): T10.1-6's `.xspec` plain-file
+ * staging up to its occupant (`stageT1016AreaWorkspace`: a git repository
+ * holding `c1`, built, holding `s`, its items read), `.xspec` then a FIFO
+ * in the plain file's place (section-13.5-ii.ts `obstructArea`), then
+ * T10.1-6's sweeps for that path (`assertAreaOccupied`,
+ * `assertMutatingCommandsFailAtAcquisition`) under `promptly`, then the
+ * FIFO still in place.
+ */
+async function areaArm(product: ProductBinding): Promise<void> {
+  await withWorkspace(FIFO_ARM_DECL, async (workspace) => {
+    const label = "T13.4-13 (d) [.xspec: a FIFO]";
+    const staging = await stageT1016AreaWorkspace(product, workspace, label);
+    const staged = await obstructArea(workspace, { kind: "fifo" }, label);
+    await promptly(label, async () => {
+      await assertAreaOccupied(product, workspace, staging.c1, label);
+      await assertMutatingCommandsFailAtAcquisition(
+        product,
+        workspace,
+        staging.items,
+        label,
+      );
+    });
+    await assertFifosIntact(
+      staged,
+      `${label}: no FIFO opened — the FIFO at .xspec still a FIFO in place ` +
+        `once T10.1-6's plain-file sweeps have run (TEST-SPEC T13.4-13, ` +
+        `S-3; SPEC 13.4, 13.5)`,
+    );
+  });
+}
+
+const T13_4_13 = defineProductTest({
+  id: "T13.4-13",
+  title:
+    'any other occupant: FIFOs — on the Linux leg, each arm on a freshly built valid workspace holding an audit session `s` created while it was valid, a FIFO staged at one path no glob matches (never opened by the harness), every invocation under `--json` completing promptly, the FIFO never opened and still in place afterward, nothing else modified: (a) the root\'s `xspec.config.ts` a FIFO — `build`, `check`, `ids`, `view`, `inventory`, and a `rename` succeeding on a FIFO-free twin each exit 2 with the error document\'s `code` `"configuration-error"`, `path` `"xspec.config.ts"`, `locations` [], and `version` exits 0 — and, beside the valid root configuration, `alt.config.ts` a FIFO, each of those commands given `--config alt.config.ts` exits 2 likewise, `path` `"alt.config.ts"`, and `version` so given exits 0; (b) `.xspec/journal` a FIFO — `build`, `check`, and `ids` (answering nothing) each report exactly condition 13 (`journal-error`, `.xspec/journal`, `locations` []), exit 1, and the `rename` is refused with that finding alone, exit 1; `inventory` reports `journal` exactly `{"path": ".xspec/journal", "occupied": true}`, finding-free, exit 0; `occurrences`, `view specs/A.mdx`, and `at specs/A.mdx 0` each answer finding-free, exit 0; (c) `.xspec/reviews/s.json` a FIFO — `check`, `review status s`, and `review list` (`s` listed corrupt) each report `s` corrupt, condition 21 concerning `.xspec/reviews/s.json`, exit 1, and `inventory` lists `.xspec/reviews/s.json`, finding-free, exit 0; (d) `.xspec/reviews` a FIFO, and separately `.xspec` a FIFO — every command T10.1-6\'s plain-file arm for that path runs answers exactly as there, its stale-twin runs aside (SPEC 13.4, 7, 10.1, 11.2, 11.6, 13.3, 13.5, 14.10, 14.13, 14.14, 14.21–14.24)',
+  run: async (product) => {
+    // The premise: the `rename` (a) and (b) run succeeds on a FIFO-free twin.
+    await fifoFreeTwin(product);
+    // (a) The configuration path found, then named, each on its workspace.
+    for (const staging of CONFIGURATION_FIFOS) {
+      await configurationArm(product, staging);
+    }
+    // (b) The journal path.
+    await journalArm(product);
+    // (c) A session file.
+    await sessionFileArm(product);
+    // (d) The session directory, then the area's own path.
+    await sessionDirectoryArm(product);
+    await areaArm(product);
+  },
+});
+
 /** TEST-SPEC §13.4, part ii, in canonical ID order (SUITE-47). */
-export const section134iiTests: readonly ProductTestEntry[] = [T13_4_12];
+export const section134iiTests: readonly ProductTestEntry[] = [
+  T13_4_12,
+  T13_4_13,
+];

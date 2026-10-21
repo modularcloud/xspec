@@ -286,12 +286,14 @@ import { WRITE_FAILURE_CODE } from "./write-refusal-staging.js";
 // Minimal declarative configuration (SPEC 7): exactly one spec group. Every
 // `CORE_FILES` workspace stages it, and T10.1-1's determinism twins, T10.1-4's
 // per-state workspaces (T12.0-10's past-the-gate arm stages the same
-// states), and T10.1-6's occupancy twins follow their bodies' first
-// invocations, so it is one TypeScript staged-source record
-// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), well-formed,
-// staged wherever this configuration is (T10.1-5's workspace too).
+// states), T10.1-6's occupancy twins, and T13.4-13's arm workspaces and
+// FIFO-free twin (section-13.4-ii.ts, which stages `CORE_FILES`) follow
+// their bodies' first invocations, so it is one TypeScript staged-source
+// record (helpers/staged-ts.ts; S-9's TypeScript and timing clauses),
+// well-formed, staged wherever this configuration is (T10.1-5's workspace
+// too).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T10.1-1/T10.1-4/T10.1-6/T12.0-10 xspec.config.ts — one spec group",
+  "T10.1-1/T10.1-4/T10.1-6/T12.0-10/T13.4-13 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -367,15 +369,22 @@ const A_MDX_OWN_TEXT_EDITED = stagedMdx(
 // workspace and of T10.1-5's: one staged-source record made from `A_MDX`
 // (the string stays for the staleness edit above), named with every
 // staging test — T10.1-1's determinism twins, T10.1-4's per-state
-// workspaces (T12.0-10's past-the-gate arm stages the same states), and
-// T10.1-6's occupancy twins follow their bodies' first invocations
-// (helpers/staged-mdx.ts; S-9's before-any-product clause).
+// workspaces (T12.0-10's past-the-gate arm stages the same states),
+// T10.1-6's occupancy twins, and T13.4-13's arm workspaces and FIFO-free
+// twin follow their bodies' first invocations (helpers/staged-mdx.ts; S-9's
+// before-any-product clause).
 const A_MDX_STAGED = stagedMdx(
-  "T10.1-1/T10.1-2/T10.1-3/T10.1-4/T10.1-5/T10.1-6/T12.0-10 specs/A.mdx",
+  "T10.1-1/T10.1-2/T10.1-3/T10.1-4/T10.1-5/T10.1-6/T12.0-10/T13.4-13 specs/A.mdx",
   A_MDX,
 );
 
-const CORE_FILES: Readonly<Record<string, InitialFileContents>> = {
+/**
+ * The workspace most §10.1 bodies stage: the one-group configuration and
+ * `specs/A.mdx` holding `a` with its child `a.k`. Exported for T13.4-13
+ * (section-13.4-ii.ts), whose arms stage it so that its (d) runs T10.1-6's
+ * plain-file arms' commands on the workspace shape they were written for.
+ */
+export const CORE_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPECS_ONLY_CONFIG,
   "specs/A.mdx": A_MDX_STAGED,
 };
@@ -2492,9 +2501,11 @@ async function assertSessionDirectoryAbsent(
  * finding concerning `.xspec/reviews`. One whole-root compare around the
  * sweep (the workspace is fresh, so no 13.3 refresh legitimately
  * intervenes): nothing written — the occupant byte-unchanged, the link and
- * its target byte-identical.
+ * its target byte-identical. Exported for T13.4-13(d) (section-13.4-ii.ts),
+ * which runs this sweep with a FIFO at `.xspec/reviews` (SPEC 13.4: any
+ * other non-directory occupant).
  */
-async function assertSessionDirectoryOccupied(
+export async function assertSessionDirectoryOccupied(
   product: ProductBinding,
   workspace: TestWorkspace,
   label: string,
@@ -2754,9 +2765,12 @@ async function assertCreateRefusedStaleStaysStale(
  * exactly that condition-22 finding, exit 1, never `journal-error`'s exit 2
  * (6.3, 12.0, 13.3); and `view` of a clean file answers finding-free (11.2,
  * T11.2-6). One whole-root compare around the sweep, `.git/` included:
- * nothing written, the link's target byte-identical.
+ * nothing written, the link's target byte-identical. Exported for
+ * T13.4-13(d) (section-13.4-ii.ts), which runs this sweep with a FIFO at
+ * `.xspec` on `stageT1016AreaWorkspace`'s staging (SPEC 13.4: any other
+ * non-directory occupant).
  */
-async function assertAreaOccupied(
+export async function assertAreaOccupied(
   product: ProductBinding,
   workspace: TestWorkspace,
   c1: string,
@@ -3049,13 +3063,42 @@ async function appendJournalGarbageLine(
 }
 
 /**
+ * The plain-file staging of the graph-data area's own path up to its
+ * occupant (`withT1016AreaStagings`), on a fresh `CORE_FILES` workspace: a
+ * git repository holding `c1` first (`commitT1016C1`), then built, then
+ * holding the audit session `s`, created while the area is a directory, its
+ * items read (`readT1016Items`). Returns the items and `c1`. Exported for
+ * T13.4-13(d) (section-13.4-ii.ts), which stages a FIFO at `.xspec` in the
+ * plain file's place and runs this arm's commands there.
+ */
+export async function stageT1016AreaWorkspace(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<T1016AreaStaging> {
+  const c1 = await commitT1016C1(workspace);
+  await buildOk(product, workspace, `${label} \`build\``);
+  await expectExit(
+    product,
+    workspace,
+    T10_1_6_CREATE_S,
+    0,
+    `${label} \`review create --strategy audit --name s\` — the session ` +
+      `whose items \`resolve\` and \`split\` name (SPEC 10.1)`,
+  );
+  const items = await readT1016Items(product, workspace, "a.k", label);
+  return { items, c1 };
+}
+
+/**
  * T10.1-6's two stagings of the graph-data area's own path, each on a fresh
  * `CORE_FILES` workspace made a git repository holding `c1` first
  * (`commitT1016C1`), then built — the derived files exist and match, so
  * `check` meets no per-file staleness beside the two findings the staging
  * pins — and holding the audit session `s`, created while the area was a
  * directory, its items read before the area is occupied:
- * - `.xspec` a plain file, replacing the area's directory and all it held;
+ * - `.xspec` a plain file, replacing the area's directory and all it held
+ *   (`stageT1016AreaWorkspace`, then the occupant);
  * - `.xspec` a symbolic link to a directory holding a journal the product
  *   wrote with a garbage line appended and, under `reviews/`, valid
  *   sessions beside a corrupt one: a journaled rename (`a.k` to `a.k2`)
@@ -3080,23 +3123,13 @@ export async function withT1016AreaStagings(
 ): Promise<void> {
   await withWorkspace(CORE_FILES, async (workspace) => {
     const label = "T10.1-6 [.xspec: plain file]";
-    const c1 = await commitT1016C1(workspace);
-    await buildOk(product, workspace, `${label} \`build\``);
-    await expectExit(
-      product,
-      workspace,
-      T10_1_6_CREATE_S,
-      0,
-      `${label} \`review create --strategy audit --name s\` — the session ` +
-        `whose items \`resolve\` and \`split\` name (SPEC 10.1)`,
-    );
-    const items = await readT1016Items(product, workspace, "a.k", label);
+    const staging = await stageT1016AreaWorkspace(product, workspace, label);
     await stageNonDirectoryOccupant(
       workspace,
       GRAPH_DATA_AREA_PATH,
       T10_1_6_PLAIN_FILE,
     );
-    await arms(workspace, { items, c1 }, label);
+    await arms(workspace, staging, label);
   });
   await withWorkspace(CORE_FILES, async (workspace) => {
     const label =

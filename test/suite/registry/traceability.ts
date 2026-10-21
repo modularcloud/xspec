@@ -853,6 +853,18 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // a kill leaves (13.5, T13.5-3), and the manual remedy's next `rename`
   // (13.5's acquisition, T13.5-10(a)) are carriage context.
   "T13.4-12": ["13.4", "14"],
+  // T13.4-13 asserts 13.4's catch-all occupant clauses with a FIFO: 7's at
+  // the configuration path (condition 14), the journal's and a session's
+  // (conditions 13 and 21; 10.1's corrupt session), the session directory's
+  // and the area's own (10.1, 11.6; conditions 22 and 23 through T10.1-6's
+  // sweeps), the inventory's occupancy and session listing (11.6), the
+  // surfaces of 11.2 answering beside the journal's condition, and the
+  // gate's refusal at `ids` (13.3) — rule (a)'s "14". The `rename`'s
+  // invalid-workspace refusal (6.4), the error document's form (12.7),
+  // `version` (12.6), `impact --base c1`'s baseline resolution (6.3), and
+  // acquisition's write failure (13.5) are carriage context with home
+  // coverage at T6.4-*/T12.7-3/T12.6-*/T10.1-6/T13.5-10.
+  "T13.4-13": ["13.4", "7", "10.1", "11.2", "11.6", "13.3", "14"],
   "T13.5-1": ["13.5"],
   "T13.5-2": ["13.5", "14"],
   "T13.5-3": ["13.5", "14"],
