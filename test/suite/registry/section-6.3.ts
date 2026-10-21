@@ -259,9 +259,11 @@ import {
 // workspace, at `xspec.config.ts` or `inner/xspec.config.ts`, and by
 // `file()` at `xspec.config.ts` (T6.3-4's baseline-configuration arms,
 // over the configuration their `c1` commits), `sub/xspec.previous.config.ts`,
-// and `sub/xspec.config.ts` — so it is a staged-source record (S-9's
-// timing clause; test/self/s9-staged-sources.test.ts). Its text is kept
-// apart for T6.3-4's two baseline configurations, derived from it at
+// and `sub/xspec.config.ts` — and T14-10 (section-14-ii.ts) at
+// `inner/xspec.config.ts`, through the nested-repository staging its arm
+// (j) shares (`NESTED_REPOSITORY_FILES`) — so it is a staged-source record
+// (S-9's timing clause; test/self/s9-staged-sources.test.ts). Its text is
+// kept apart for T6.3-4's two baseline configurations, derived from it at
 // module load.
 const SPECS_ONLY_CONFIG_TEXT = `import { defineConfig } from "xspec"
 
@@ -272,7 +274,7 @@ export default defineConfig({
 })
 `;
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.3-2/T6.3-4/T6.3-5/T6.3-6 xspec.config.ts — exactly one spec group over specs/, staged at every configuration path",
+  "T6.3-2/T6.3-4/T6.3-5/T6.3-6/T14-10 xspec.config.ts — exactly one spec group over specs/, staged at every configuration path",
   SPECS_ONLY_CONFIG_TEXT,
 );
 
@@ -1454,7 +1456,7 @@ const R5_SUB_CONFIG = "sub/xspec.config.ts";
 // and no `sub/xspec.config.ts`.
 const R5_SUB_RENAMED_CONFIG = "sub/xspec.previous.config.ts";
 const R5_SUB_A = "sub/specs/A.mdx";
-const R5_INNER = "inner";
+export const R5_INNER = "inner";
 const R5_INNER_CONFIG = "inner/xspec.config.ts";
 const R5_INNER_A = "inner/specs/A.mdx";
 // Identities are workspace-relative — to the configuration's directory
@@ -1464,7 +1466,7 @@ const R5_A_TOP = "specs/A.mdx#a";
 const R5_EXTRA_TOP = "specs/A.mdx#extra";
 const R5_TEXT_V0 = "Alpha text.";
 const R5_TEXT_V1 = "Alpha text, edited.";
-const R5_TAG = "v1";
+export const R5_TAG = "v1";
 const R5_SESSION = "s";
 
 /** `specs/A.mdx`: section `a` holding `text`, then optionally `extra`. */
@@ -1482,21 +1484,22 @@ function r5Source(text: string, withExtra: boolean): string {
 // converted uniformly), the submodule arm's `inner/specs/A.mdx`, and (c)'s
 // `specs/A.mdx`, and by `file()` as the nested-repository staging's inner
 // v1; the source with the extra section is that staging's initial
-// `inner/specs/A.mdx`, the outer v1. T6.3-6's (b) and (e) make the same
-// nested-repository staging (`stageNestedRepositories`) after earlier
-// invocations, so its records name both tests. Arm (a)'s own edit precedes
-// the body's first invocation and stays a plain staging (S-7's sweep
-// reaches it against the stub).
+// `inner/specs/A.mdx`, the outer v1. T6.3-6's (b) and (e), and T14-10's (j)
+// (section-14-ii.ts), make the same nested-repository staging
+// (`stageNestedRepositories`) after earlier invocations, so its records
+// name the three tests. Arm (a)'s own edit precedes the body's first
+// invocation and stays a plain staging (S-7's sweep reaches it against the
+// stub).
 const T6_3_5_WITHOUT_EXTRA = stagedMdx(
-  "T6.3-5/T6.3-6 specs/A.mdx without the extra section: T6.3-5 (a) and (d) under sub/, (b) under inner/ (the nested repository's v1, the submodule's initial file), (c) at the root; T6.3-6 (b) and (e) the nested repository's inner v1",
+  "T6.3-5/T6.3-6/T14-10 specs/A.mdx without the extra section: T6.3-5 (a) and (d) under sub/, (b) under inner/ (the nested repository's v1, the submodule's initial file), (c) at the root; T6.3-6 (b) and (e) and T14-10 (j) the nested repository's inner v1",
   r5Source(R5_TEXT_V0, false),
 );
 const T6_3_5_WITH_EXTRA = stagedMdx(
-  "T6.3-5/T6.3-6 nested-repository staging (T6.3-5 (b), T6.3-6 (b) and (e)): inner/specs/A.mdx with the extra section, the outer repository's v1",
+  "T6.3-5/T6.3-6/T14-10 nested-repository staging (T6.3-5 (b), T6.3-6 (b) and (e), T14-10 (j)): inner/specs/A.mdx with the extra section, the outer repository's v1",
   r5Source(R5_TEXT_V0, true),
 );
 const T6_3_5_INNER_EDITED = stagedMdx(
-  "T6.3-5/T6.3-6 nested-repository and submodule stagings: the current edit of the inner workspace's source",
+  "T6.3-5/T6.3-6/T14-10 nested-repository and submodule stagings: the current edit of the inner workspace's source",
   r5Source(R5_TEXT_V1, false),
 );
 
@@ -1559,9 +1562,12 @@ function assertDistinctTags(
 /**
  * The initial files of T6.3-5(b)'s nested-repository staging
  * (`stageNestedRepositories`): the inner workspace at `inner/`, its source
- * holding the extra section the outer repository's `v1` commits.
+ * holding the extra section the outer repository's `v1` commits. Exported,
+ * with the staging, for T14-10(j)'s discovery arm (section-14-ii.ts).
  */
-const NESTED_REPOSITORY_FILES: Readonly<Record<string, InitialFileContents>> = {
+export const NESTED_REPOSITORY_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
   [R5_INNER_CONFIG]: SPECS_ONLY_CONFIG,
   [R5_INNER_A]: T6_3_5_WITH_EXTRA,
 };
@@ -1575,7 +1581,8 @@ interface NestedRepositories {
 /**
  * T6.3-5(b)'s nested-repository staging — the nested repository, not the
  * submodule — on a workspace created with `NESTED_REPOSITORY_FILES` (T6.3-6
- * stages it too: (b)'s refused discovery and (e)'s git data): the outer
+ * stages it too: (b)'s refused discovery and (e)'s git data; and T14-10(j),
+ * section-14-ii.ts, its refused discovery, as (e) stages it): the outer
  * repository at the root commits the inner workspace's files, with the
  * extra section, and tags `v1` before the inner repository exists; the
  * inner repository at `inner/` then commits the workspace without the extra
@@ -1584,7 +1591,7 @@ interface NestedRepositories {
  * section in the outer `v1`'s tree alone — fail diagnosed when unmet (H-8).
  * Returns both commits.
  */
-async function stageNestedRepositories(
+export async function stageNestedRepositories(
   workspace: TestWorkspace,
   context: string,
 ): Promise<NestedRepositories> {
@@ -2214,8 +2221,12 @@ const J6_BASELINE_SESSION = "s";
 // The nested-repository stagings' runs, each from `R` naming the inner
 // workspace's configuration (SPEC 7: the workspace root is the
 // configuration file's directory, so the journal the garbage line joins is
-// the inner workspace's).
-const J6_INNER_CONFIG_ARGS: readonly string[] = ["--config", R5_INNER_CONFIG];
+// the inner workspace's). Exported for T14-10(j)'s discovery arm
+// (section-14-ii.ts), whose runs name it alike.
+export const J6_INNER_CONFIG_ARGS: readonly string[] = [
+  "--config",
+  R5_INNER_CONFIG,
+];
 const J6_INNER_JOURNAL = `${R5_INNER}/${JOURNAL_PATH}`;
 
 // (c)'s symbolic link's target: the journal the product wrote, moved to the
@@ -2707,20 +2718,28 @@ export async function stageObjectStoreUnsearchable(
 }
 
 /**
+ * The nested repository's refused discovery (TEST-SPEC T6.3-6(b), (e)): the
+ * inner repository's `.git` mode 000 (`stageGitDirectoryUnsearchable`, its
+ * probes the listing and the read of `HEAD`). Exported for T14-10(j)'s
+ * discovery arm (section-14-ii.ts), which stages the same refusal.
+ */
+export async function stageInnerGitUnsearchable(
+  workspace: TestWorkspace,
+): Promise<PermissionStaging> {
+  return await stageGitDirectoryUnsearchable(
+    workspace,
+    `${R5_INNER}/.git`,
+    "HEAD",
+  );
+}
+
+/**
  * (b)'s refused discovery and (e)'s nested-repository arm: the inner
- * repository's `.git` mode 000 (`stageGitDirectoryUnsearchable`, its probes
- * the listing and the read of `HEAD`), carried by each run — made just
- * before it and restored once it ends (`runUnderStaging`).
+ * `.git` mode 000 (`stageInnerGitUnsearchable`), carried by each run — made
+ * just before it and restored once it ends (`runUnderStaging`).
  */
 function innerGitUnsearchable(workspace: TestWorkspace): J6RunStaging {
-  return {
-    stage: async () =>
-      await stageGitDirectoryUnsearchable(
-        workspace,
-        `${R5_INNER}/.git`,
-        "HEAD",
-      ),
-  };
+  return { stage: async () => await stageInnerGitUnsearchable(workspace) };
 }
 
 /**

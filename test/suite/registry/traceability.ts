@@ -1030,17 +1030,22 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // T14-10: the 14.25 contract (home "14": conditions 20, 13, 21, 14, 10,
   // 23 and the read-failure usage error) with the exit classes, the read
   // order, and the syntax-class precedence it asserts (12.0), the error
-  // document (12.7), the corrupt-session reports of `review status`/`list`
-  // (10.7), the per-file availability and masking of the refused source
-  // (11.2), `at`'s unavailable resolution on it (11.5), the inventory's
-  // journal, session, and record answers (11.6), the gated and refreshing
-  // reads over the unreadable journal and graph data (13.3), and arm (i)'s
-  // refused reads at acquisition concerning the lock path and at the second
-  // discovery of a held mutating command, each stopping the command with
-  // nothing modified (13.5); 6.6/7/14.14's staged surfaces are context with
-  // home coverage at T6.6-6/T7-*/T12.7-3.
+  // document (12.7), a given baseline's resolution meeting the refused
+  // journal read as its usage error and refused git data leaving the
+  // baseline unreadable, a plain usage error (6.3), the corrupt-session
+  // reports of `review status`/`list` and the gate's report ending `review
+  // list` before its listing (10.7), the per-file availability and masking
+  // of the refused source and the surfaces' finding-free answers beside the
+  // journal's condition (11.2), `at`'s unavailable resolution on it (11.5),
+  // the inventory's journal, session, and record answers (11.6), the gated
+  // and refreshing reads over the unreadable journal and graph data (13.3),
+  // and arm (i)'s refused reads at acquisition concerning the lock path and
+  // at the second discovery of a held mutating command, each stopping the
+  // command with nothing modified (13.5); 6.6/7/14.14's staged surfaces are
+  // context with home coverage at T6.6-6/T7-*/T12.7-3.
   "T14-10": [
     "14",
+    "6.3",
     "10.7",
     "11.2",
     "11.5",

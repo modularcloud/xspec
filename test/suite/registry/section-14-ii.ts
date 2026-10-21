@@ -133,11 +133,15 @@
 // refusal), each staging verified on the harness's own process first —
 // arm (f)'s graph-data directories taking mode 0o300 instead
 // (`stageDirectoryMode`, `-wx`: the listing refused, write and search kept,
-// so a regeneration's writes there are never refused), and arm (i)'s
-// acquisition arms T13.5-10(d)'s stagings (helpers/acquisition-staging.ts:
-// the lock directory, or a subdirectory under it, unlistable but writable,
-// `-wx`; `.xspec` or the lock directory unsearchable, `rw-`), each verified
-// on the harness itself alike.
+// so a regeneration's writes there are never refused), and its second half
+// `.xspec` itself so (T7-8's carve-out staging, helpers/acquisition-staging.ts
+// `stageUnlistableArea`); arm (i)'s acquisition arms T13.5-10(d)'s stagings
+// (helpers/acquisition-staging.ts: the lock directory, or a subdirectory
+// under it, unlistable but writable, `-wx`; `.xspec` or the lock directory
+// unsearchable, `rw-`); and arm (j)'s git directories mode 000, T6.3-6(e)'s
+// stagings (section-6.3.ts: `stageObjectStoreUnsearchable`'s `.git/objects`
+// and `stageInnerGitUnsearchable`'s nested repository's inner `.git`) — each
+// verified on the harness itself alike.
 // Snapshots for the "nothing modified" laws are taken outside the staging
 // windows (a staged object cannot be snapshotted), before staging and after
 // restoring.
@@ -153,6 +157,16 @@
 //   exactly one finding" (c) are the findings-only document `{"findings":
 //   […]}` (12.7: a report whose defined content is findings alone), decoded
 //   form-exact.
+// - Arm (b)'s given baseline is the prepared workspace's baseline commit
+//   (`prepareRefusalWorkspace`'s, its tree holding the journal), at both
+//   baseline-taking commands — `impact --base` and `review create --base …
+//   --name n` — each T6.3-6(c)'s form-exact journal error: `code`
+//   `journal-error`, `path` `.xspec/journal`, `locations` [] (condition 13's
+//   concerned path). Its surfaces of 11.2 are bare `occurrences`, `view
+//   specs/a/A.mdx`, and `at specs/a/A.mdx 0`, each a complete answer —
+//   exit 0, `findings` [] — and `view` exactly A's view; "nothing
+//   modified" is the arm's whole-tree compare once the journal's mode is
+//   restored, a session written by the refused `review create` included.
 // - Arm (c)'s three reporters assert one concern contract (TEST-SPEC line
 //   9's rule for an error report): `check`'s and `review status s`'s
 //   reports and the `review list` listing each hold exactly one finding,
@@ -189,9 +203,25 @@
 //   unreadable record is T12.2-2's, staged shape-blind). The preview is the
 //   file-form `move specs/c/C.mdx specs/c/D.mdx` — same directory, C
 //   imported nowhere — a plan valid on the readable record.
+// - Arm (f)'s second half runs on a freshly prepared workspace of its own,
+//   the area's own occupant staged `-wx`: its unstaged twin is the same
+//   workspace read before the staging — the same state, the twin's reads
+//   writing nothing (asserted) — and each answer under the staging is judged
+//   by its exit code (`judgeAreaOccupantAnswer`): exit 0, the decoded answer
+//   equal to the twin's whole; exit 1, exactly one condition-23 finding
+//   concerning `.xspec` with `locations` [], the datum exactly the
+//   unavailability marker, and every other decoded member equal to the
+//   twin's; anything else fails, `read-failure`'s exit 2 above all. The
+//   preview is (f)'s own move.
 // - Arm (g)'s "a malformed value" is `at specs/a/A.mdx zz` (an offset
 //   spelled as anything but decimal digits, 11.5 — a syntax-class member,
 //   12.0); "nothing modified" is the whole-tree snapshot around the sweep.
+// - Arm (h)'s workspace failing `build`'s validations is its own
+//   session-bearing workspace with A's reference respelled to resolve
+//   nowhere (14.5), as (g)'s failing twin respells it; "exactly the gate's
+//   findings" is those `build --json` reports on the same state, compared by
+//   condition, code, path, and locations (message wording free), as
+//   T10.7-15 compares them; the reference is then restored.
 // - Arm (i)'s acquisition arms run on T13.5-10's session staging — a fresh
 //   CONF-CORE-shaped workspace (`CORE_DECL`), built, holding the audit
 //   session `s`, so the CONF-CORE reference can run them — one of
@@ -213,6 +243,18 @@
 //   workspace (`ACQUISITION_DECL`), makes `specs/sub` unlistable during the
 //   hold as T13.5-12(e) does, and asserts arm (g)'s contract at that
 //   directory and nothing modified from the state during the hold on.
+// - Arm (j)'s two stagings are T6.3-6(e)'s: the repository's stored data —
+//   `.git/objects` mode 000 on the prepared, journal-bearing workspace
+//   holding a baseline session `s` created before the staging, at `impact
+//   --base`, `review create --base … --name n`, and `review status s` (a
+//   recorded baseline's resolution, 10.7) — and, separately, its discovery:
+//   T6.3-5(b)'s nested repository (section-6.3.ts `NESTED_REPOSITORY_FILES`,
+//   `stageNestedRepositories`), the inner workspace built first, its inner
+//   `.git` mode 000, at `impact --base v1` and `review create --base v1
+//   --name n` from `R` with `--config inner/xspec.config.ts`. Each staging
+//   is made just before its run and restored once it ends; "nothing
+//   modified" is a compare around each run with the repositories' git
+//   directories left out (git data is no workspace file, SPEC 6.3).
 // - Unstageable, recorded here as T14-10 records them (and as T6.5-6
 //   records its unstageable clauses): a refused read of a path occupant's
 //   kind — the area's own occupant's at acquisition included (13.5), though
@@ -231,6 +273,7 @@ import type { AcquisitionStaging } from "../../helpers/acquisition-staging.js";
 import {
   stageReadOnlyArea,
   stageReadOnlyRoot,
+  stageUnlistableArea,
   stageUnlistableLeftoverDirectory,
   stageUnlistableLockDirectory,
   stageUnremovableLockFile,
@@ -241,7 +284,9 @@ import {
 } from "../../helpers/acquisition-staging.js";
 import type {
   Finding,
+  InventoryDocument,
   OccurrencesReport,
+  PreviewReport,
 } from "../../helpers/adapters/index.js";
 import {
   collectGraphDataEntries,
@@ -288,7 +333,15 @@ import { pathExists } from "../../helpers/subprocess.js";
 import { copyTreeBytes } from "../../helpers/tree-copy.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { stageObjectStoreUnsearchable } from "./section-6.3.js";
+import {
+  J6_INNER_CONFIG_ARGS as NESTED_INNER_CONFIG_ARGS,
+  NESTED_REPOSITORY_FILES,
+  R5_INNER as NESTED_INNER_ROOT,
+  R5_TAG as NESTED_TAG,
+  stageInnerGitUnsearchable,
+  stageNestedRepositories,
+  stageObjectStoreUnsearchable,
+} from "./section-6.3.js";
 import type { SessionOperation } from "./section-13.5.js";
 import {
   ACQUISITION_DECL,
@@ -2668,16 +2721,128 @@ async function sourceContentArm(product: ProductBinding): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// (b) The journal's content — condition 13 (SPEC 14.25, 14.13, 13.3, 6.4)
+// (b) The journal's content — condition 13 (SPEC 14.25, 14.13, 13.3, 6.4,
+// 6.3, 11.2)
 // ---------------------------------------------------------------------------
+
+/** Condition 13's stable code (SPEC 14, 14.13). */
+const JOURNAL_ERROR_CODE = "journal-error";
+
+/**
+ * A given baseline's resolution meeting the journal's refused read (TEST-SPEC
+ * T14-10(b), T6.3-6(c); SPEC 6.3, 14.13, 14.25, 12.0, 12.7): it reads the
+ * current journal before any other cause can fail it, and the journal error
+ * there — content the environment refuses to deliver included — fails it as
+ * its usage error: exit 2, the error document as the entire stdout, its
+ * finding condition 13's stable code `journal-error` and concerned path
+ * `.xspec/journal` with `locations` `[]` (a journal condition has no
+ * in-source location, 14) — never the code-less baseline error nor
+ * `read-failure`.
+ */
+function expectBaselineJournalError(result: RunResult, context: string): void {
+  assertExitCode(
+    result,
+    2,
+    `${context} — a given baseline's resolution reads the current journal ` +
+      `before any other cause can fail it, and a journal error there — ` +
+      `content the environment refuses included — fails it as a usage ` +
+      `error, exit 2 (SPEC 6.3, 12.0, 14.25)`,
+  );
+  const error = expectErrorDocument(result, context);
+  assertSameJson(
+    { code: error.code, path: error.path, locations: error.locations },
+    { code: JOURNAL_ERROR_CODE, path: JOURNAL_PATH, locations: [] },
+    `${context}: the error reported is condition 13 with its stable code ` +
+      `and concerned path — \`code\` "${JOURNAL_ERROR_CODE}", \`path\` ` +
+      `"${JOURNAL_PATH}", \`locations\` [] — never the code-less baseline ` +
+      `error nor \`read-failure\` (SPEC 6.3, 14.13, 14.25, 12.7; T6.3-6(c)) ` +
+      `(message: ${JSON.stringify(error.message)})`,
+  );
+}
+
+/**
+ * (b)'s surfaces of 11.2 on the journal-staged, otherwise valid workspace:
+ * bare `occurrences`, `view specs/a/A.mdx`, and `at specs/a/A.mdx 0` —
+ * JSON-only surfaces (SPEC 11) — each a complete, finding-free answer, exit
+ * 0: their judgement makes the journal's read and meets the refusal as
+ * condition 13 (11.2: past their argument checks they judge the workspace
+ * as the gate does, making every read it makes), a gate condition that is
+ * no domain file's finding and so accompanies none of their answers —
+ * never 14.25's usage error (exit 2), never the finding beside the answer
+ * (exit 1). `view` answers exactly the requested file's view.
+ */
+async function assertSurfacesAnswerFindingFree(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  staged: string,
+  context: string,
+): Promise<void> {
+  const why =
+    `the surfaces' judgement makes the journal's read and meets the ` +
+    `refusal as condition 13, a gate condition that is no domain file's ` +
+    `finding and accompanies none of their answers: a complete, ` +
+    `finding-free answer exits 0 — never 14.25's exit 2 (SPEC 11.2, ` +
+    `14.13, 14.25, 12.0)`;
+  const findingFree =
+    "finding-free: condition 13 is no domain file's finding and " +
+    "accompanies no answer of these surfaces (SPEC 11.2, 14.13)";
+
+  const occLabel = `${context} \`occurrences\` ${staged}`;
+  const occurrences = decodeOccurrencesReport(
+    await stagedDocument(
+      product,
+      workspace,
+      ["occurrences"],
+      0,
+      `${occLabel} — ${why}`,
+    ),
+    occLabel,
+  );
+  assertSameJson(occurrences.findings, [], `${occLabel} — ${findingFree}`);
+
+  const viewArgv = ["view", RENAME_A_PATH];
+  const viewLabel = `${context} \`${viewArgv.join(" ")}\` ${staged}`;
+  const view = decodeViewReport(
+    await stagedDocument(
+      product,
+      workspace,
+      viewArgv,
+      0,
+      `${viewLabel} — ${why}`,
+    ),
+    { text: false },
+    viewLabel,
+  );
+  assertSameJson(view.findings, [], `${viewLabel} — ${findingFree}`);
+  assertSameJson(
+    view.views.map((fileView) => fileView.file),
+    [RENAME_A_PATH],
+    `${viewLabel} — exactly the requested spec source's view (SPEC 11.4)`,
+  );
+
+  const atArgv = ["at", RENAME_A_PATH, "0"];
+  const atLabel = `${context} \`${atArgv.join(" ")}\` ${staged}`;
+  const at = decodeAtReport(
+    await stagedDocument(product, workspace, atArgv, 0, `${atLabel} — ${why}`),
+    atLabel,
+  );
+  assertSameJson(at.findings, [], `${atLabel} — ${findingFree}`);
+}
 
 /**
  * `.xspec/journal` staged unreadable on the journal-bearing rename fixture:
  * `build`, `check`, the gated `ids` (answering nothing), and the `rename`
  * (refused) each report the one condition-13 finding concerning the journal
- * and exit 1; `inventory` reports `journal.occupied` true, finding-free,
- * exit 0 — the kind read, permitted, is the only read it makes there.
- * Nothing is modified; restored, the workspace builds clean.
+ * and exit 1; a given baseline's resolution — `impact --base` and `review
+ * create --base … --name n`, the prepared baseline commit given — reports
+ * it as its usage error, exit 2, `code` `journal-error` concerning the
+ * journal (`expectBaselineJournalError`); the surfaces of 11.2 — bare
+ * `occurrences`, `view specs/a/A.mdx`, and `at specs/a/A.mdx 0` — each
+ * answer finding-free, exit 0 (`assertSurfacesAnswerFindingFree`); and
+ * `inventory` reports `journal` exactly `{"path": ".xspec/journal",
+ * "occupied": true}`, finding-free, exit 0 — the kind read, permitted, is
+ * the only read it makes there. Nothing is modified; restored, the
+ * workspace builds clean.
  */
 async function journalContentArm(product: ProductBinding): Promise<void> {
   const context = "T14-10 (b) the journal's content";
@@ -2720,6 +2885,35 @@ async function journalContentArm(product: ProductBinding): Promise<void> {
           `${label} — the journal is the concerned path (SPEC 14, 14.13)`,
         );
       }
+      // A given baseline's resolution reads the current journal before any
+      // other cause can fail it: the refused read is the journal error it
+      // reports as its usage error (SPEC 6.3) — at both baseline-taking
+      // commands, the prepared baseline commit given.
+      const baselineCommands: readonly (readonly string[])[] = [
+        ["impact", "--base", prepared.baseline, "--json"],
+        [
+          "review",
+          "create",
+          "--base",
+          prepared.baseline,
+          "--name",
+          NEW_SESSION,
+          "--json",
+        ],
+      ];
+      for (const argv of baselineCommands) {
+        const label = `${context} \`${argv.join(" ")}\` with ${JOURNAL_PATH} unreadable`;
+        expectBaselineJournalError(
+          await runSettled(product, workspace, argv, label),
+          label,
+        );
+      }
+      await assertSurfacesAnswerFindingFree(
+        product,
+        workspace,
+        `with ${JOURNAL_PATH} unreadable`,
+        context,
+      );
       const invLabel = `${context} \`inventory\` with ${JOURNAL_PATH} unreadable`;
       const inventory = decodeInventoryDocument(
         await stagedDocument(
@@ -2739,13 +2933,14 @@ async function journalContentArm(product: ProductBinding): Promise<void> {
         `${invLabel} — finding-free: the inventory reads no journal ` +
           `content, so it meets no condition-13 (SPEC 11.6, 14.25)`,
       );
-      if (inventory.journal.occupied !== true) {
-        fail(
-          `${invLabel} — \`journal.occupied\` is true: occupancy by ` +
-            `presence alone, the content unread (SPEC 11.6); got ` +
-            `${String(inventory.journal.occupied)}`,
-        );
-      }
+      assertSameJson(
+        inventory.journal,
+        { path: JOURNAL_PATH, occupied: true },
+        `${invLabel} — the journal member is exactly {"path": ` +
+          `"${JOURNAL_PATH}", "occupied": true}: the journal path, occupied ` +
+          `— occupancy by presence alone, the content unread (SPEC 11.6, ` +
+          `12.7)`,
+      );
     } finally {
       await staging.restore();
     }
@@ -2753,8 +2948,10 @@ async function journalContentArm(product: ProductBinding): Promise<void> {
       prepared.before,
       await snapshotWorkspace(workspace.root),
       `${context}: nothing modified — a failing build, a gated read, a ` +
-        `refused rename, and the inventory write nothing (SPEC 12.1, 13.3, ` +
-        `6.4, 11.6)`,
+        `refused rename, a given baseline's failed resolution (no session ` +
+        `written), the surfaces of 11.2 on a failing workspace, and the ` +
+        `inventory write nothing (SPEC 12.1, 13.3, 6.4, 6.3, 10.7, 11.2, ` +
+        `11.6)`,
     );
     await assertRecovers(product, workspace, context);
   } finally {
@@ -3246,6 +3443,257 @@ async function graphDataArm(product: ProductBinding): Promise<void> {
   }
 }
 
+/**
+ * A surface of (f)'s second half — one consulting the record without
+ * refreshing it (SPEC 14.23: the inventory, 11.6, and a preview, 6.6): its
+ * invocation, its form-exact decode, and its record-supplied datum, the
+ * inventory's `recorded` or the preview's `delta`.
+ */
+interface AreaOccupantSurface<
+  T extends { readonly findings: readonly Finding[] },
+> {
+  /** The invocation from the workspace root, JSON output in effect. */
+  readonly argv: readonly string[];
+  /** The record-supplied datum's member name. */
+  readonly datum: string;
+  readonly decode: (doc: unknown, context: string) => T;
+  /** Whether a decoded answer carries its datum, never unavailable. */
+  readonly available: (answer: T) => boolean;
+  /** Whether a decoded answer reports its datum explicitly unavailable. */
+  readonly unavailable: (answer: T) => boolean;
+}
+
+/** (f)'s second half's inventory: `recorded` its record-supplied datum. */
+const AREA_INVENTORY: AreaOccupantSurface<InventoryDocument> = {
+  argv: ["inventory"],
+  datum: "recorded",
+  decode: (doc, context) => decodeInventoryDocument(doc, context),
+  available: (answer) => answer.recorded.state === "value",
+  unavailable: (answer) => answer.recorded.state === "unavailable",
+};
+
+/** (f)'s second half's preview of (f)'s valid move: `delta` its datum. */
+const AREA_PREVIEW: AreaOccupantSurface<PreviewReport> = {
+  argv: ["move", RENAME_C_PATH, MOVE_C_DESTINATION, "--preview", "--json"],
+  datum: "delta",
+  decode: (doc, context) => decodePreviewReport(doc, context),
+  available: (answer) =>
+    answer.delta !== null && !("unavailable" in answer.delta),
+  unavailable: (answer) =>
+    answer.delta !== null && "unavailable" in answer.delta,
+};
+
+/** A decoded answer's member `name`, for diagnoses. */
+function memberOf(answer: object, name: string): unknown {
+  return (answer as Readonly<Record<string, unknown>>)[name];
+}
+
+/** Every member of a decoded answer but those named, in decode order. */
+function membersBut(
+  answer: object,
+  left: readonly string[],
+): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(
+    Object.entries(answer).filter(([name]) => !left.includes(name)),
+  );
+}
+
+/**
+ * The unstaged twin's answer of a surface of (f)'s second half: the same
+ * freshly built workspace, read before the staging — exit 0, the document
+ * decoded form-exact, its datum available (TEST-SPEC T14-10(f): "as on the
+ * unstaged twin — exit 0, `recorded`, respectively `delta`, available").
+ */
+async function areaOccupantTwin<
+  T extends { readonly findings: readonly Finding[] },
+>(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  surface: AreaOccupantSurface<T>,
+  context: string,
+): Promise<T> {
+  const label = `${context} \`${surface.argv.join(" ")}\` on the unstaged twin`;
+  const twin = surface.decode(
+    await stagedDocument(
+      product,
+      workspace,
+      surface.argv,
+      0,
+      `${label} — on a freshly built, valid workspace whose record reads, ` +
+        `a complete, finding-free answer, exit 0 (SPEC 11.6, 6.6, 12.0)`,
+    ),
+    label,
+  );
+  if (!surface.available(twin)) {
+    fail(
+      `${label}: \`${surface.datum}\` is available on the readable record ` +
+        `(SPEC 11.6, 6.6, 13.3); got ` +
+        `${JSON.stringify(memberOf(twin, surface.datum))}`,
+    );
+  }
+  return twin;
+}
+
+/**
+ * One answer of (f)'s second half, `.xspec` staged `-wx`, judged against
+ * its unstaged twin's (TEST-SPEC T14-10(f); SPEC 14.25, 14.23, 13.3): either
+ * exit 0, the decoded answer equal to the twin's whole — the datum
+ * available — or exit 1, exactly one condition-23 finding concerning
+ * `.xspec` with `locations` `[]`, the datum exactly the unavailability
+ * marker, and every other decoded member equal to the twin's; anything else
+ * fails, `read-failure`'s exit 2 above all: a refused read of the area's own
+ * occupant is condition 23's state to a surface consulting the record,
+ * never 14.25's usage error, and whether a product's record read lists the
+ * area at all is its own (13.3).
+ */
+function judgeAreaOccupantAnswer<
+  T extends { readonly findings: readonly Finding[] },
+>(
+  result: RunResult,
+  twin: T,
+  surface: AreaOccupantSurface<T>,
+  context: string,
+): void {
+  if (result.exitCode !== 1) {
+    assertExitCode(
+      result,
+      0,
+      `${context} — a refused read of the area's own occupant is ` +
+        `condition 23's state to a surface consulting the record, never ` +
+        `14.25's usage error: exit 0, the answer as on the unstaged twin, ` +
+        `or exit 1, \`${surface.datum}\` unavailable beside the ` +
+        `condition-23 finding — never \`read-failure\`'s exit 2, whether ` +
+        `a product's record read lists the area being its own (SPEC 14.25, ` +
+        `14.23, 13.3)`,
+    );
+    assertSameJson(
+      surface.decode(parseJsonStdout(result, context), context),
+      twin,
+      `${context} — exit 0: the answer as on the unstaged twin, every ` +
+        `member equal, \`${surface.datum}\` available (SPEC 13.3, 14.25)`,
+    );
+    return;
+  }
+  const answer = surface.decode(parseJsonStdout(result, context), context);
+  assertConditionCounts(
+    answer.findings,
+    { "14.23": 1 },
+    `${context} — exit 1: exactly the one condition-23 finding (SPEC 14.23, ` +
+      `14.25)`,
+  );
+  const finding = answer.findings[0]!;
+  assertFindingConcernsPath(
+    finding,
+    GRAPH_DATA_AREA,
+    `${context} — exit 1: the condition-23 finding concerns the graph-data ` +
+      `area (SPEC 14.23, 11.6)`,
+  );
+  assertSameJson(
+    finding.locations,
+    [],
+    `${context} — exit 1: no location, no path inside the area named (SPEC ` +
+      `14.23, 13.3, 12.7)`,
+  );
+  if (!surface.unavailable(answer)) {
+    fail(
+      `${context} — exit 1: \`${surface.datum}\`, the record-supplied ` +
+        `datum, is reported explicitly unavailable beside the finding, ` +
+        `never fabricated and never read as an empty record (SPEC 14.23, ` +
+        `12.7); got ${JSON.stringify(memberOf(answer, surface.datum))}`,
+    );
+  }
+  const left = ["findings", surface.datum];
+  assertSameJson(
+    membersBut(answer, left),
+    membersBut(twin, left),
+    `${context} — exit 1: every other member of the answer equal to the ` +
+      `unstaged twin's, emitted in full (SPEC 14.23)`,
+  );
+}
+
+/**
+ * (f)'s second half (TEST-SPEC T14-10(f): "and, separately, on a freshly
+ * built, valid workspace, the area's own occupant"): `.xspec` itself staged
+ * unlistable but searchable and writable (`-wx`, T7-8's carve-out staging:
+ * helpers/acquisition-staging.ts `stageUnlistableArea`, verified on the
+ * harness itself — its own listing of `.xspec` refused, its own creation
+ * and removal of a file there kept), every path under it readable:
+ * `inventory` and the preview of (f)'s valid move each answer either as on
+ * the unstaged twin or with their record-supplied datum unavailable beside
+ * the condition-23 finding concerning `.xspec`, every other member the
+ * twin's, never `read-failure` (`judgeAreaOccupantAnswer`). The unstaged
+ * twin is the same workspace read before the staging — the same state, the
+ * twin's reads writing nothing (asserted). Nothing is modified.
+ */
+async function areaOccupantArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (f) the area's own occupant";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const inventoryTwin = await areaOccupantTwin(
+      product,
+      workspace,
+      AREA_INVENTORY,
+      context,
+    );
+    const previewTwin = await areaOccupantTwin(
+      product,
+      workspace,
+      AREA_PREVIEW,
+      context,
+    );
+    assertSnapshotsEqual(
+      prepared.before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: the unstaged twin's reads write nothing — the inventory ` +
+        `and a preview never write (SPEC 11.6, 6.6)`,
+    );
+    const staged =
+      "with .xspec itself unlistable but searchable and writable (`-wx`), " +
+      "every path under it readable";
+    const inventoryLabel = `${context} \`${AREA_INVENTORY.argv.join(" ")}\` ${staged}`;
+    const previewLabel = `${context} \`${AREA_PREVIEW.argv.join(" ")}\` ${staged}`;
+    const staging = await stageUnlistableArea(workspace);
+    let inventory: RunResult;
+    let preview: RunResult;
+    try {
+      inventory = await runSettled(
+        product,
+        workspace,
+        AREA_INVENTORY.argv,
+        inventoryLabel,
+      );
+      preview = await runSettled(
+        product,
+        workspace,
+        AREA_PREVIEW.argv,
+        previewLabel,
+      );
+    } finally {
+      await staging.restore();
+    }
+    judgeAreaOccupantAnswer(
+      inventory,
+      inventoryTwin,
+      AREA_INVENTORY,
+      inventoryLabel,
+    );
+    judgeAreaOccupantAnswer(preview, previewTwin, AREA_PREVIEW, previewLabel);
+    assertSnapshotsEqual(
+      prepared.before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: nothing modified — the inventory and a preview write ` +
+        `nothing (SPEC 11.6, 6.6)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // (g) A directory discovery lists — a usage error (SPEC 14.25, 7, 12.0)
 // ---------------------------------------------------------------------------
@@ -3391,15 +3839,105 @@ async function discoveryListingArm(product: ProductBinding): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// (h) The session directory's listing — a usage error (SPEC 14.25, 10.1)
+// (h) The session directory's listing — a usage error (SPEC 14.25, 10.1),
+// behind the gate (13.3, 10.7)
 // ---------------------------------------------------------------------------
+
+/** The gate's findings as compared: condition, code, path, locations (H-3). */
+function gateForm(findings: readonly Finding[]): unknown {
+  return findings.map((finding) => ({
+    condition: finding.condition,
+    code: finding.code,
+    path: finding.path,
+    locations: finding.locations,
+  }));
+}
+
+/**
+ * (h)'s gated side (TEST-SPEC T14-10(h), T10.7-15(f)): the session-bearing
+ * workspace with A's reference respelled to resolve nowhere (14.5), so that
+ * it fails `build`'s validations, and `.xspec/reviews` staged unlistable:
+ * `review list` reports exactly the gate's findings — those `build --json`
+ * reports on the same state, compared by condition, code, path, and
+ * locations (message wording free, H-3) — exit 1, the listing never
+ * reached, never the refused listing's `read-failure` (SPEC 13.3, 10.7,
+ * 12.0); nothing modified; the reference then restored.
+ */
+async function gatedListingRun(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const label =
+    `${context} on the failing twin (${RENAME_A_PATH}'s reference ` +
+    `respelled to resolve nowhere, 14.5)`;
+  await workspace.edit(RENAME_A_PATH, A_REFERENCE, A_UNRESOLVED);
+  const before = await snapshotWorkspace(workspace.root);
+  const gate = await stagedFindings(
+    product,
+    workspace,
+    ["build", "--json"],
+    1,
+    `${label} premise \`build --json\` — the workspace fails \`build\`'s ` +
+      `validations: exit 1 with its findings, the gate's reference (SPEC ` +
+      `12.1, 13.3, 14.5)`,
+  );
+  if (gate.length === 0) {
+    fail(
+      `${label} premise: the failing \`build\` reports at least one ` +
+        `validation finding (SPEC 14)`,
+    );
+  }
+  const listLabel = `${label} \`review list --json\` with ${REVIEWS_DIR} unlistable`;
+  const staging = await stageReadRefusalOfDirectory(
+    workspace.path(REVIEWS_DIR),
+  );
+  let result: RunResult;
+  try {
+    result = await runSettled(
+      product,
+      workspace,
+      ["review", "list", "--json"],
+      listLabel,
+    );
+  } finally {
+    await staging.restore();
+  }
+  assertExitCode(
+    result,
+    1,
+    `${listLabel} — on a workspace failing \`build\`'s validations the ` +
+      `gate's report ends \`review list\` before its listing: exit 1 with ` +
+      `the gate's findings, the listing never reached — never the refused ` +
+      `listing's \`read-failure\` (SPEC 13.3, 10.7, 12.0, 14.25)`,
+  );
+  assertSameJson(
+    gateForm(
+      decodeFindingsReport(parseJsonStdout(result, listLabel), listLabel)
+        .findings,
+    ),
+    gateForm(gate),
+    `${listLabel} — exactly the gate's findings: those \`build --json\` ` +
+      `reports on the same state, compared by condition, code, path, and ` +
+      `locations (SPEC 13.3, 10.7; message wording free, H-3)`,
+  );
+  assertSnapshotsEqual(
+    before,
+    await snapshotWorkspace(workspace.root),
+    `${label}: nothing modified — a failing \`build\` and the gated ` +
+      `listing write nothing (SPEC 12.1, 13.3)`,
+  );
+  await workspace.edit(RENAME_A_PATH, A_UNRESOLVED, A_REFERENCE);
+}
 
 /**
  * `.xspec/reviews` staged unlistable on a valid workspace holding a session:
  * `review list`, `inventory`, and `check` each exit 2 with the error
  * document concerning `.xspec/reviews`, while `build` (reading no session)
- * and `ids` exit 0. `review status <name>`, which may find its session by
- * name without listing, is asserted nowhere.
+ * and `ids` exit 0; and on its failing twin `review list` reports exactly
+ * the gate's findings, exit 1, the listing never reached
+ * (`gatedListingRun`). `review status <name>`, which may find its session
+ * by name without listing, is asserted nowhere.
  */
 async function sessionDirectoryArm(product: ProductBinding): Promise<void> {
   const context = "T14-10 (h) the session directory's listing";
@@ -3465,6 +4003,16 @@ async function sessionDirectoryArm(product: ProductBinding): Promise<void> {
       0,
       `${context}: recovery — the listing permitted again, \`check\` is ` +
         `clean and the session intact (SPEC 12.2, 14.21)`,
+    );
+    await gatedListingRun(product, workspace, context);
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context}: recovery — the reference restored and the listing ` +
+        `permitted again, \`check\` is clean and the session intact (SPEC ` +
+        `12.2, 12.1, 14.21)`,
     );
   } finally {
     await workspace.dispose();
@@ -3753,13 +4301,235 @@ export async function runT1410ArmI(product: ProductBinding): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// (j) Git data — no condition: the baseline unreadable (SPEC 14.25, 6.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Refused git data's outcome (TEST-SPEC T14-10(j), T6.3-6(e); SPEC 14.25,
+ * 6.3, 12.0, 12.7): no condition — the baseline unreadable, a plain usage
+ * error: exit 2, the error document as the entire stdout, its `code` and
+ * `path` `null` — never `read-failure`: git data, the repository's
+ * discovery and its stored data, is no file this specification models
+ * (6.3), so its refused read is none of 14.25's read failures.
+ */
+function expectGitDataUnreadable(
+  result: RunResult,
+  why: string,
+  context: string,
+): void {
+  assertExitCode(
+    result,
+    2,
+    `${context} — ${why}: git data the environment refuses leaves the ` +
+      `baseline unreadable, a usage error, exit 2 — never an answer (SPEC ` +
+      `14.25, 6.3, 12.0)`,
+  );
+  const error = expectErrorDocument(result, context);
+  if (error.code === READ_FAILURE_CODE) {
+    fail(
+      `${context} — never \`read-failure\`: git data is no file this ` +
+        `specification models, so its refused read is no condition — the ` +
+        `baseline unreadable, a plain usage error (SPEC 14.25, 6.3); got ` +
+        `\`read-failure\` concerning ${renderPathValue(error.path)} ` +
+        `(message: ${JSON.stringify(error.message)})`,
+    );
+  }
+  assertSameJson(
+    { code: error.code, path: error.path },
+    { code: null, path: null },
+    `${context}: the baseline's plain usage error — the error document's ` +
+      `\`code\` and \`path\` \`null\` (SPEC 6.3, 12.7, 14.25; T6.3-6(e)), ` +
+      `never a numbered condition's code (message: ` +
+      `${JSON.stringify(error.message)})`,
+  );
+}
+
+/**
+ * One run of (j): `argv` from the workspace root under the refusal `stage`
+ * makes — made just before the run, verified on the harness itself, and
+ * restored once it ends, before anything is asserted or snapshotted — its
+ * outcome (`expectGitDataUnreadable`), and nothing modified: `snapshot`'s
+ * compare, taken outside the staging, the repositories' git directories
+ * left out (git data is no workspace file, SPEC 6.3) and H-6's lock-path
+ * exclusion applied by the compare.
+ */
+async function gitDataRun(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  stage: () => Promise<PermissionStaging>,
+  snapshot: () => Promise<DirectorySnapshot>,
+  why: string,
+  context: string,
+): Promise<void> {
+  const label = `${context}: \`${argv.join(" ")}\``;
+  const before = await snapshot();
+  const staging = await stage();
+  let result: RunResult;
+  try {
+    result = await runSettled(product, workspace, argv, label);
+  } finally {
+    await staging.restore();
+  }
+  expectGitDataUnreadable(result, why, label);
+  assertSnapshotsEqual(
+    before,
+    await snapshot(),
+    `${label}: nothing modified — a baseline that cannot be read fails ` +
+      `modifying nothing: no session written; sources, journal, derived ` +
+      `files, and graph data byte-identical (SPEC 6.3, 10.7, 12.0)`,
+  );
+}
+
+/**
+ * (j)'s stored data (T6.3-6(e)'s object-store staging, section-6.3.ts
+ * `stageObjectStoreUnsearchable`: `.git/objects` mode 000, the harness's own
+ * listing of it and read of the baseline commit's loose object refused): on
+ * the prepared, journal-bearing workspace — its sources, configuration, and
+ * journal valid and readable — holding the baseline session `s` created
+ * before the staging, `impact --base <baseline>`, `review create --base
+ * <baseline> --name n`, and `review status s`, a recorded baseline's
+ * resolution (10.7), each the baseline's plain usage error.
+ */
+async function storedGitDataRun(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (j) git data: the repository's stored data";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace, baseline } = prepared;
+  try {
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--base", baseline, "--name", SESSION],
+      0,
+      `${context} staging \`review create --base <the baseline commit> ` +
+        `--name ${SESSION}\` — the baseline session created before the ` +
+        `staging (premise: the baseline resolves on the unstaged ` +
+        `repository, SPEC 6.3, 10.7)`,
+    );
+    const commands: readonly (readonly string[])[] = [
+      ["impact", "--base", baseline, "--json"],
+      ["review", "create", "--base", baseline, "--name", NEW_SESSION, "--json"],
+      ["review", "status", SESSION, "--json"],
+    ];
+    for (const argv of commands) {
+      await gitDataRun(
+        product,
+        workspace,
+        argv,
+        async () => await stageObjectStoreUnsearchable(workspace, baseline),
+        async () => await snapshotWorkspace(workspace.root),
+        "the repository's object store is unreadable and unsearchable (mode " +
+          "000), the sources, configuration, and journal valid and " +
+          "readable — a given baseline, or the recorded one the baseline " +
+          "session names (SPEC 10.7), unreadable",
+        context,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/** The nested repositories' git directories, `.git` and the inner one. */
+const NESTED_GIT_DIRECTORIES: readonly Buffer[] = [
+  ".git",
+  `${NESTED_INNER_ROOT}/.git`,
+].map((rel) => Buffer.from(rel, "utf8"));
+
+/** Exclude exactly the two repositories' git directories (and their trees). */
+function excludeNestedGitDirectories(relPathBytes: Uint8Array): boolean {
+  return NESTED_GIT_DIRECTORIES.some(
+    (dir) => Buffer.compare(Buffer.from(relPathBytes), dir) === 0,
+  );
+}
+
+/**
+ * (j)'s discovery (T6.3-6(e)'s nested-repository staging, section-6.3.ts
+ * `stageNestedRepositories` and `stageInnerGitUnsearchable`: T6.3-5(b)'s
+ * nested repository — an outer repository at the root `R` and an inner one
+ * at `inner/`, each tagging its own `v1` — the inner `.git` mode 000, the
+ * harness's own listing of it and read of its `HEAD` refused): the inner
+ * workspace built first, `impact --base v1` and `review create --base v1
+ * --name n`, each from `R` with `--config inner/xspec.config.ts`, each the
+ * baseline's plain usage error — never `read-failure`, and never an answer
+ * computed against the outer repository's `v1`: the inner repository,
+ * whose working tree contains the configuration file, is still the
+ * innermost (6.3).
+ */
+async function gitDiscoveryRun(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (j) git data: the repository's discovery";
+  const workspace = await TestWorkspace.create({
+    files: NESTED_REPOSITORY_FILES,
+  });
+  try {
+    await stageNestedRepositories(workspace, context);
+    await expectExit(
+      product,
+      workspace,
+      ["build", ...NESTED_INNER_CONFIG_ARGS],
+      0,
+      `${context} staging \`build ${NESTED_INNER_CONFIG_ARGS.join(" ")}\` ` +
+        `from R (premise: the inner workspace's sources are valid, SPEC ` +
+        `12.1)`,
+    );
+    const commands: readonly (readonly string[])[] = [
+      ["impact", "--base", NESTED_TAG, ...NESTED_INNER_CONFIG_ARGS, "--json"],
+      [
+        "review",
+        "create",
+        "--base",
+        NESTED_TAG,
+        "--name",
+        NEW_SESSION,
+        ...NESTED_INNER_CONFIG_ARGS,
+        "--json",
+      ],
+    ];
+    for (const argv of commands) {
+      await gitDataRun(
+        product,
+        workspace,
+        argv,
+        async () => await stageInnerGitUnsearchable(workspace),
+        async () =>
+          await snapshotDirectory(workspace.root, {
+            exclude: excludeNestedGitDirectories,
+          }),
+        `the inner repository's .git directory is unreadable and ` +
+          `unsearchable (mode 000), so its discovery is refused — the ` +
+          `inner repository, whose working tree contains the configuration ` +
+          `file, still the innermost, never skipped for the outer ` +
+          `repository's ${NESTED_TAG}`,
+        context,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * T14-10's arm (j), in turn: git data's stored data, then its discovery
+ * (TEST-SPEC T14-10(j): "T6.3-6(e): the repository's stored data and,
+ * separately, its discovery"); Linux leg only, as T14-10's other arms (E-1).
+ */
+async function gitDataArm(product: ProductBinding): Promise<void> {
+  await storedGitDataRun(product);
+  await gitDiscoveryRun(product);
+}
+
+// ---------------------------------------------------------------------------
 // T14-10 — read failures (14.25)
 // ---------------------------------------------------------------------------
 
 const T14_10 = defineProductTest({
   id: "T14-10",
   title:
-    "read failures (14.25): the object read decides the outcome, one arm per row, each refusal staged by permission removal alone (a file's content: mode 0o200, its write permission kept; a directory's listing: mode 0o100, search kept; nonexistence never a refusal) — (a) a discovered source's content is condition 20 at `build` and `check`, exit 1, its one location the zero-length range at offset 0, the file masked exactly as an unparseable one (A's reference reports 14.5, nothing inside reports) while `view` serves the other requested file, `occurrences` lists no record for its spellings, and `at` at 0, 7, and 999999 reports the resolution explicitly unavailable, never the out-of-range usage error — a spec source and, separately, a code source; (b) the journal's content is condition 13 concerning .xspec/journal from `build`, `check`, `ids` (answering nothing), and a refused `rename`, while `inventory` reports `journal.occupied` true, finding-free; (c) a session file's content is condition 21 from `check`, `review status` (nothing modified), and `review list` (the session reported corrupt), each reporting one `corrupt-session` finding concerning the session file with no location, `inventory` listing the session; (d) the configuration file's content is condition 14 from `build`, `ids`, `inventory`, and `view` (`code` configuration-error, `path` xspec.config.ts), `version` exiting 0; (e) a generated module's content is one per-file condition-10 finding to `check` while `build` exits 0; (f) graph data unreadable — every file under .xspec/ but the journal, the session directory, and the lock path at mode 0o200 and every directory among them at 0o300 (`-wx`, its write and search kept) — is the state of condition 23: `inventory` and a `move --preview` report their record-supplied datum unavailable beside the finding, `check` one unit-form condition-10 finding alone, `ids` regenerates and answers (exit 0), and `build` exits 0, no later read of the record it wrote asserted; (g) a directory discovery lists, unlistable: `build`, `check`, `ids`, `view`, `inventory`, `review list`, and a `rename` each exit 2 with the error document (`code` read-failure, `path` specs/sub), nothing modified, the read failure preceding a failing source's findings and an unknown profile, the syntax class (`code` null) and an invalid configuration preceding it; (h) the session directory unlistable: `review list`, `inventory`, and `check` exit 2 concerning .xspec/reviews while `build` and `ids` exit 0; (i) at acquisition, the lock path's occupant and everything under it refused, each staged before the invocation on a freshly built workspace holding an `audit` session `s`, with `rename`, `move`, `review create`, `resolve`, and `split` in turn — an empty lock directory unlistable (`-wx`) and a subdirectory under it unlistable (`-wx`), each `read-failure`; `.xspec` unsearchable (`rw-`; holding no `lock` and, separately, an empty lock directory) and the lock directory unsearchable (`rw-`, holding a directory that holds a file), each `read-failure` or `write-failure` — each exit 2 with the error document, `path` .xspec/lock, never a nested path, `locations` [], nothing modified; and specs/sub, a directory the second discovery of 13.5 lists, made unlistable (`--x`) during the hold of `rename specs/A.mdx a a2`: exit 2, `code` read-failure, `path` specs/sub, nothing modified; two clauses — a refused read of a path occupant's kind (the area's own occupant's at acquisition included, the lock path's there excepted, which (i) stages), and of a directory above the workspace root — admit no product-independent staging and are recorded so (SPEC 14.25, 14, 11.2, 11.5, 11.6, 13.3, 13.5, 10.7, 12.0, 12.7)",
+    "read failures (14.25): the object read decides the outcome, one arm per row, each refusal staged by permission removal alone (a file's content: mode 0o200, its write permission kept; a directory's listing: mode 0o100, search kept; nonexistence never a refusal) — (a) a discovered source's content is condition 20 at `build` and `check`, exit 1, its one location the zero-length range at offset 0, the file masked exactly as an unparseable one (A's reference reports 14.5, nothing inside reports) while `view` serves the other requested file, `occurrences` lists no record for its spellings, and `at` at 0, 7, and 999999 reports the resolution explicitly unavailable, never the out-of-range usage error — a spec source and, separately, a code source; (b) the journal's content is condition 13 concerning .xspec/journal from `build`, `check`, `ids` (answering nothing), and a refused `rename`, a given baseline's resolution — `impact --base` and `review create --base` — reporting it as its usage error (exit 2, `code` journal-error, `path` .xspec/journal), while `occurrences`, `view`, and `at` answer finding-free, exit 0, and `inventory` reports `journal` exactly {path .xspec/journal, occupied true}, finding-free; (c) a session file's content is condition 21 from `check`, `review status` (nothing modified), and `review list` (the session reported corrupt), each reporting one `corrupt-session` finding concerning the session file with no location, `inventory` listing the session; (d) the configuration file's content is condition 14 from `build`, `ids`, `inventory`, and `view` (`code` configuration-error, `path` xspec.config.ts), `version` exiting 0; (e) a generated module's content is one per-file condition-10 finding to `check` while `build` exits 0; (f) graph data unreadable — every file under .xspec/ but the journal, the session directory, and the lock path at mode 0o200 and every directory among them at 0o300 (`-wx`, its write and search kept) — is the state of condition 23: `inventory` and a `move --preview` report their record-supplied datum unavailable beside the finding, `check` one unit-form condition-10 finding alone, `ids` regenerates and answers (exit 0), and `build` exits 0, no later read of the record it wrote asserted — and, on a freshly built workspace, .xspec itself staged `-wx` (every path under it readable), `inventory` and a `move --preview` each answer as on the unstaged twin (exit 0) or with their datum unavailable beside the condition-23 finding concerning .xspec (exit 1), every other member the twin's, never `read-failure`; (g) a directory discovery lists, unlistable: `build`, `check`, `ids`, `view`, `inventory`, `review list`, and a `rename` each exit 2 with the error document (`code` read-failure, `path` specs/sub), nothing modified, the read failure preceding a failing source's findings and an unknown profile, the syntax class (`code` null) and an invalid configuration preceding it; (h) the session directory unlistable: `review list`, `inventory`, and `check` exit 2 concerning .xspec/reviews while `build` and `ids` exit 0, and on a workspace failing `build`'s validations `review list` reports exactly the gate's findings, exit 1, the listing never reached; (i) at acquisition, the lock path's occupant and everything under it refused, each staged before the invocation on a freshly built workspace holding an `audit` session `s`, with `rename`, `move`, `review create`, `resolve`, and `split` in turn — an empty lock directory unlistable (`-wx`) and a subdirectory under it unlistable (`-wx`), each `read-failure`; `.xspec` unsearchable (`rw-`; holding no `lock` and, separately, an empty lock directory) and the lock directory unsearchable (`rw-`, holding a directory that holds a file), each `read-failure` or `write-failure` — each exit 2 with the error document, `path` .xspec/lock, never a nested path, `locations` [], nothing modified; and specs/sub, a directory the second discovery of 13.5 lists, made unlistable (`--x`) during the hold of `rename specs/A.mdx a a2`: exit 2, `code` read-failure, `path` specs/sub, nothing modified; (j) git data refused — the object store mode 000 (`impact --base`, `review create --base`, and `review status` of a baseline session) and, separately, a nested repository's inner `.git` mode 000 (`--base v1` from the outer root) — is the baseline's plain usage error, exit 2, `code` and `path` null, never `read-failure`, nothing modified; two clauses — a refused read of a path occupant's kind (the area's own occupant's at acquisition included, the lock path's there excepted, which (i) stages), and of a directory above the workspace root — admit no product-independent staging and are recorded so (SPEC 14.25, 14, 6.3, 11.2, 11.5, 11.6, 13.3, 13.5, 10.7, 12.0, 12.7)",
   run: async (product) => {
     // E-1: permission stagings belong to the Linux leg; elsewhere the arms
     // are not staged (the NU3_STAGED pattern of section-11.5) and no other
@@ -3771,9 +4541,11 @@ const T14_10 = defineProductTest({
     await configurationContentArm(product);
     await derivedContentArm(product);
     await graphDataArm(product);
+    await areaOccupantArm(product);
     await discoveryListingArm(product);
     await sessionDirectoryArm(product);
     await runT1410ArmI(product);
+    await gitDataArm(product);
   },
 });
 
