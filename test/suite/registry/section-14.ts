@@ -12,10 +12,13 @@
 // masking by unparseable files and by configuration errors (T14-3), the
 // reporter matrix — which of `build`/`check`/`review`/the machine-interface
 // surfaces reports which condition (T14-4) — grammar selection by file
-// name (T14-5), the stable-code contract — each of the 26 conditions'
-// exact token, conditions 1–23 as the finding's `code` and the usage
-// errors 24–26 as the exit-2 error document's, `null` where 14 assigns
-// none (T14-6) — the refusal-reason contract: each stable refusal code with
+// name, compared byte-wise and case-sensitively (T14-5), the stable-code
+// contract — each of the 26 conditions' exact token, conditions 1–13 and
+// 15–23 as the finding's `code` and the usage errors 14 and 24–26, and
+// condition 13 where a given baseline's resolution meets it, as the exit-2
+// error document's, `null` where 14 assigns none, a review-operation
+// refusal's finding carrying no location and no concerned path beside it
+// (T14-6) — the refusal-reason contract: each stable refusal code with
 // its concerned file, range, or identity, every applicable reason together,
 // and the invalid-workspace refusal reporting numbered findings alone
 // (T14-7) — and the location-cardinality contract: a condition several
@@ -137,10 +140,11 @@
 //   offset of the `]` (SPEC 14's syntax-failure rule: the prefix through
 //   `d={` begins a well-formed file), precomputed from the staged bytes as
 //   T14-11 and T14-12 pin theirs. For T14-3's other three unparseable files
-//   and T14-5's `.mts` arm, "the parse-failure location is reported" fixes
-//   presence alone, so those arms assert the finding names the file and
-//   carries a location, never a window (T14-11 pins a byte-order mark's
-//   and an encoding failure's offsets in its own fixtures).
+//   and T14-5's `.mts` and `.TSX` arms, "the parse-failure location is
+//   reported" fixes presence alone, so those arms assert the finding names
+//   the file and carries a location, never a window (T14-11 pins a
+//   byte-order mark's and an encoding failure's offsets in its own
+//   fixtures).
 // - check-side condition counts are exact, 14.10 included, like the
 //   `build`-side counts (`build` cannot observe 14.10, SPEC 14.10, 12.1):
 //   on a workspace failing `build`'s validations `check` reports 14.10 in
@@ -298,12 +302,13 @@
 //   exit-2 error, never a finding, by a given baseline's resolution, at
 //   `impact --base` and `review create --base`; SPEC 6.3, 14.13, 12.0,
 //   12.7): staged as T6.3-6(a) stages it, through section-6.3.ts's exported
-//   `stageJournalErrorAtC1` (T12.7-3's journal-error arm's staging too) —
-//   on a fresh workspace (one spec group, `specs/A.mdx` holding section
-//   `a`), a git repository initialized, `build`, the journaled `rename
-//   specs/A.mdx a a2`, the all-inclusive commit `c1` (its tree holding
-//   that one-entry journal), and T6.1-3's garbage line appended to the
-//   current journal, the one entry absent from `c1`'s. `impact --base c1
+//   `stageJournalErrorAtC1` (T12.7-3's journal-error arm's and T14-6's
+//   baseline arm's staging too) — on a fresh workspace (one spec group,
+//   `specs/A.mdx` holding section `a`), a git repository initialized,
+//   `build`, the journaled `rename specs/A.mdx a a2`, the all-inclusive
+//   commit `c1` (its tree holding that one-entry journal), and T6.1-3's
+//   garbage line appended to the current journal, the one entry absent
+//   from `c1`'s. `impact --base c1
 //   --json` and `review create --base c1 --name n --json` then each exit
 //   2 — a usage error, never the gate's exit 1 — with the 12.7 error
 //   document as the entire stdout, decoded form-exact (no `findings`
@@ -325,28 +330,45 @@
 //   T14-10 (g) does (a discovery directory unlistable) — both
 //   permission-staged, Linux leg — and 14.26 as T13.5-2 does
 //   (section-13.5.ts's `judgeBusyRefusal`: a `rename` held at 13.5's
-//   seam, a second `rename` run under `--json` while it holds). Each is
-//   read from ONE stated reporter of T14-4's matrix: `build` for every
-//   both-reporter condition, `check` for 14.10/14.12/14.21, `inventory`
-//   for 14.23, and the exit-2 error document for 14.14, 14.24, and 14.25
-//   (`build`'s) and for 14.26 (the refused `rename`'s). Its assertion is
-//   the code value alone: at least one finding, every finding carrying the
-//   staged condition's exact token — sound because every staging stages
-//   exactly one condition (T14-4 pins the counts; 14.3's per-occurrence
-//   tolerance and several stale files under 14.10 both collapse into
-//   "every finding carries the one staged token"); an error document's one
-//   finding is decoded form-exact, the document carrying no `findings`
-//   member, so the usage errors' codes appear in no findings array (12.7).
-//   The 14.26 arm runs last in the body: it needs the product's own
-//   exclusion (13.5), so a product predating 14.26 meets every other arm
+//   seam, a second `rename` run under `--json` while it holds) — and
+//   condition 13 once more, where a given baseline's resolution meets it
+//   (SPEC 6.3, 14.13): T6.3-6(a)'s staging, through section-6.3.ts's
+//   exported `stageJournalErrorAtC1` on T14-4's baseline workspace (the
+//   repository at `c1`, then T6.1-3's garbage line appended to the current
+//   journal). Each is read from ONE stated reporter of T14-4's matrix:
+//   `build` for every both-reporter condition, `check` for
+//   14.10/14.12/14.21, `inventory` for 14.23, and the exit-2 error
+//   document for 14.14, 14.24, and 14.25 (`build`'s), for 14.26 (the
+//   refused `rename`'s), and for 14.13 at the given baseline (`impact
+//   --base c1`'s, the resolution's first-listed reporter). Its assertion
+//   is the code value alone: at least one finding, every finding carrying
+//   the staged condition's exact token — sound because every staging
+//   stages exactly one condition (T14-4 pins the counts; 14.3's
+//   per-occurrence tolerance and several stale files under 14.10 both
+//   collapse into "every finding carries the one staged token"); an error
+//   document's one finding is decoded form-exact, the document carrying no
+//   `findings` member, so the usage errors' codes — and condition 13's at
+//   the baseline — appear in no findings array (12.7). The 14.26 arm and
+//   then the baseline arm run last in the body, a test ending at its first
+//   failing arm: the busy arm needs the product's own exclusion (13.5), so
+//   a product predating 14.26 meets every arm before it first, and a
+//   product meeting the current journal only through 6.3's replay (the
+//   code-less unreadable baseline, as at T6.3-6) meets every other arm
 //   first. Count precision, reporter breadth, and the concern data of
 //   these identical stagings (locations' files, concerned paths,
 //   identities) and their correction information (14.2's expected form,
 //   14.10's rebuild instruction) stay T14-4's and the home tests' subject
 //   — the usage errors' concerned paths T12.7-3's, T14-9's, and T14-10's,
-//   and the rest of the busy refusal's contract T13.5-2's; the `code`-null
-//   arms mirror T12.7-3's plain-usage-error and T12.7-1's review-refusal
-//   stagings, per T14-6's own citations.
+//   the baseline journal error's T14-4's and T6.3-6's, and the rest of the
+//   busy refusal's contract T13.5-2's. The `code`-null arms mirror
+//   T12.7-3's plain-usage-error and T12.7-1's review-refusal stagings, per
+//   T14-6's own citations, the refusal judged by the shared T10.7-14 check
+//   (support.ts `expectReviewRefusal`, which T12.7-1's arm D runs on the
+//   same staging): exit 1, standard output exactly one finding, decoded
+//   form-exact, `code` null and beside it `locations` [] and `path` null
+//   (14: a review-operation refusal carries no stable code and neither
+//   location nor concerned path), `identities` informational, the session
+//   file byte-identical.
 // - T14-7 stages the refusal reasons via the home fixtures — T6.4-3's and
 //   T6.5-4's exported staging and case tables (TEST-SPEC §14 preamble: the
 //   refusal reasons are staged at T6.4-3, T6.5-4, T6.5-6, T6.6-3) — and
@@ -709,6 +731,7 @@ import {
   expectConfigurationError,
   expectErrorDocument,
   expectExit,
+  expectReviewRefusal,
   findingsInSourceOrder,
   runCli,
   runFindingsReport,
@@ -888,10 +911,10 @@ function withInvalidUtf8Byte(prefix: string, suffix: string): Uint8Array {
 const BOM = "\u{FEFF}";
 
 // The TSX-only construct shared by T14-3 (in a `.ts` file: fails 14.20) and
-// T14-5 (in a `.tsx` file: parses; in an `.mts` file: fails 14.20). A JSX
-// fragment is valid TSX and no plain-TypeScript production: in the plain
-// grammar `<>` begins a type assertion with an empty type — a parse error
-// wherever it appears.
+// T14-5 (in a `.tsx` file: parses; in an `.mts` file and in a `.TSX` file:
+// fails 14.20). A JSX fragment is valid TSX and no plain-TypeScript
+// production: in the plain grammar `<>` begins a type assertion with an
+// empty type — a parse error wherever it appears.
 const TSX_ONLY_STATEMENT = "const view = <>markup</>;";
 
 // ---------------------------------------------------------------------------
@@ -2657,13 +2680,14 @@ const BOGUS_KEY_DECL: WorkspaceDecl = {
 // stages it, through section-6.3.ts's `stageJournalErrorAtC1`: one spec
 // group over `specs/` and `specs/A.mdx` holding section `a`, the subject of
 // the journaled `rename specs/A.mdx a a2` the staging makes before its
-// commit `c1` and the garbage line it appends. The workspace follows
-// T14-4's first invocation, so its source is a staged-source record (S-9).
+// commit `c1` and the garbage line it appends — T14-4's baseline arm's
+// workspace and T14-6's. Each follows its body's first invocation, so its
+// source is a staged-source record (S-9).
 const BASELINE_JOURNAL_DECL: WorkspaceDecl = {
   files: {
     "xspec.config.ts": SPECS_ONLY_CONFIG,
     "specs/A.mdx": stagedMdx(
-      "T14-4 specs/A.mdx (the baseline journal-error arm's valid source: section a, the subject of T6.3-6(a)'s journaled rename)",
+      "T14-4/T14-6 specs/A.mdx (the baseline journal-error arms' valid source: section a, the subject of T6.3-6(a)'s journaled rename)",
       '<S id="a">\nAlpha behavior.\n</S>\n',
     ),
   },
@@ -3591,8 +3615,10 @@ const T14_4 = defineProductTest({
 
 // One named unit holding a dependency marker, a `text(...)` call, and the
 // TSX-only construct. The same bytes serve the `.tsx` arm (parses as TSX,
-// SPEC 14.20) and the `.mts` arm (any name but `.tsx` selects plain
-// TypeScript — the fragment fails 14.20 exactly as T14-3's `.ts` arm does).
+// SPEC 14.20) and the plain-grammar arms, `.mts` and `.TSX` (any name but
+// `.tsx` selects plain TypeScript, the name compared byte-wise and
+// case-sensitively, 12.0 — the fragment fails 14.20 exactly as T14-3's
+// `.ts` arm does).
 const T14_5_UNIT_SOURCE = [
   'import SPEC, { text } from "../specs/U.xspec";',
   "",
@@ -3605,10 +3631,10 @@ const T14_5_UNIT_SOURCE = [
   "",
 ].join("\n");
 
-// Both arms' spec source: the `.mts` arm follows the `.tsx` arm's
-// invocations, so it is a staged-source record (S-9), staged by both.
+// Every arm's spec source: the plain-grammar arms follow the `.tsx` arm's
+// invocations, so it is a staged-source record (S-9), staged by all three.
 const T14_5_SPEC_SOURCE = stagedMdx(
-  "T14-5 specs/U.mdx (the .tsx and .mts arms' spec source: the marker target t1 and the embedded target t2)",
+  "T14-5 specs/U.mdx (the .tsx, .mts, and .TSX arms' spec source: the marker target t1 and the embedded target t2)",
   [
     '<S id="t1">',
     "Marker target.",
@@ -3635,26 +3661,68 @@ export default defineConfig({
 `;
 }
 
-// The `.mts` arm's configuration and code file follow the `.tsx` arm's
-// invocations, so they are staged-source records (S-9; helpers/staged-ts.ts):
-// the configuration `codeGroupConfig("src/**/*.mts")`'s record, and the
-// shared unit's bytes declared unparseable under the plain-TypeScript
-// grammar the `.mts` name selects (14.20). The `.tsx` arm, the body's first
-// workspace, stages the plain constants.
+// The plain-grammar arms' configurations and code files follow the `.tsx`
+// arm's invocations, so they are staged-source records (S-9;
+// helpers/staged-ts.ts): each configuration `codeGroupConfig(<glob>)`'s
+// record, and the shared unit's bytes declared unparseable under the
+// plain-TypeScript grammar both names select (14.20) — one record staged
+// at both paths, the `.TSX` name selecting the plain grammar in the judge
+// as in SPEC (`tsGrammarOf`: the `.tsx` suffix matched as SPEC spells it,
+// case-sensitively). The `.tsx` arm, the body's first workspace, stages
+// the plain constants.
 const T14_5_MTS_CONFIG = stagedTs(
   "T14-5 xspec.config.ts (one spec group and the code group app over src/**/*.mts)",
   codeGroupConfig("src/**/*.mts"),
 );
-const T14_5_MTS_SOURCE = stagedTs(
-  "T14-5 src/view.mts (the TSX-only unit under a plain-TypeScript name)",
+const T14_5_TSX_CASE_CONFIG = stagedTs(
+  "T14-5 xspec.config.ts (one spec group and the code group app over src/*.TSX)",
+  codeGroupConfig("src/*.TSX"),
+);
+const T14_5_PLAIN_GRAMMAR_SOURCE = stagedTs(
+  "T14-5 src/view.mts and src/x.TSX (the TSX-only unit under names selecting plain TypeScript)",
   T14_5_UNIT_SOURCE,
   "unparseable",
 );
 
+/**
+ * One T14-5 plain-grammar arm (TEST-SPEC T14-5's further arms; SPEC
+ * 14.20, 12.0): the shared TSX-only unit staged in a code-group file whose
+ * name is anything but `.tsx`, under a configuration whose code group
+ * globs it, beside the shared spec source — each failing 14.20
+ * identically, exactly one 14.20 finding naming the file.
+ */
+interface T14_5PlainGrammarArm {
+  /** The code file, its name selecting plain TypeScript. */
+  readonly file: string;
+  /** The configuration record, its code group globbing `file`. */
+  readonly config: StagedTs;
+  /** What the arm discriminates against (diagnostics). */
+  readonly why: string;
+}
+
+const T14_5_PLAIN_GRAMMAR_ARMS: readonly T14_5PlainGrammarArm[] = [
+  {
+    file: "src/view.mts",
+    config: T14_5_MTS_CONFIG,
+    why:
+      "an `.mts` name, discriminating against products keying " +
+      "specifically on `.ts` — the `.ts` direction itself is T14-3's",
+  },
+  {
+    file: "src/x.TSX",
+    config: T14_5_TSX_CASE_CONFIG,
+    why:
+      "`src/x.TSX`, its group globbing `src/*.TSX`, ends differently from " +
+      "`.tsx` in case alone, and names compare byte-wise and " +
+      "case-sensitively, SPEC 12.0 — a product folding the name's case " +
+      "before selecting the grammar fails here",
+  },
+];
+
 const T14_5 = defineProductTest({
   id: "T14-5",
   title:
-    "a code-group file named `.tsx` holding a TSX-only construct inside a named unit with a dependency marker and a `text(...)` call: `build` succeeds — `.tsx` parses as TSX — and the marker's `references` edge and the call's `embeds` edge attribute to that unit per 4.6; the same construct in a code-group `.mts` file fails 14.20 identically — any name but `.tsx` selects plain TypeScript (SPEC 14.20, 4.6)",
+    "a code-group file named `.tsx` holding a TSX-only construct inside a named unit with a dependency marker and a `text(...)` call: `build` succeeds — `.tsx` parses as TSX — and the marker's `references` edge and the call's `embeds` edge attribute to that unit per 4.6; the same construct in code-group files of other names fails 14.20 identically — any name but `.tsx` selects plain TypeScript: an `.mts` file, and `src/x.TSX` (its group globbing `src/*.TSX`), whose ending differs from `.tsx` in case alone, names comparing byte-wise and case-sensitively — a single-casing arm failing a product that folds the name's case before selecting the grammar (SPEC 14.20, 4.6, 12.0)",
   run: async (product) => {
     // Positive arm: `.tsx` parses as TSX, and both edges are recorded and
     // attributed to the enclosing named unit.
@@ -3720,38 +3788,41 @@ const T14_5 = defineProductTest({
       },
     );
 
-    // Negative arm: the same bytes in a code-group file named `.mts` fail
-    // 14.20 identically — discriminating against products keying
-    // specifically on `.ts` (the `.ts` direction itself is T14-3's).
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": T14_5_MTS_CONFIG,
-          "specs/U.mdx": T14_5_SPEC_SOURCE,
-          // S-9: any name but `.tsx` selects plain TypeScript, so the
-          // TSX-only construct is unparseable here (14.20) — the record's
-          // declaration.
-          "src/view.mts": T14_5_MTS_SOURCE,
+    // Negative arms: the same bytes in code-group files of other names fail
+    // 14.20 identically — `.mts`, discriminating against products keying
+    // specifically on `.ts` (the `.ts` direction itself is T14-3's), then
+    // `src/x.TSX`, the single-casing arm (12.0: no case folding).
+    for (const arm of T14_5_PLAIN_GRAMMAR_ARMS) {
+      await withWorkspace(
+        {
+          files: {
+            "xspec.config.ts": arm.config,
+            "specs/U.mdx": T14_5_SPEC_SOURCE,
+            // S-9: any name but `.tsx` selects plain TypeScript, so the
+            // TSX-only construct is unparseable here (14.20) — the record's
+            // declaration.
+            [arm.file]: T14_5_PLAIN_GRAMMAR_SOURCE,
+          },
         },
-      },
-      async (workspace) => {
-        const context = "T14-5 `build --json` over the `.mts` code file";
-        const findings = await buildFindings(product, workspace, context);
-        assertConditionCounts(
-          findings,
-          { "14.20": 1 },
-          `${context} — any name but \`.tsx\` selects plain TypeScript, so ` +
-            `the fragment is a parse failure and everything inside the ` +
-            `file is masked (SPEC 14.20, 14)`,
-        );
-        assertFindingLocated(
-          findingOf(findings, "14.20", context),
-          { file: "src/view.mts" },
-          `${context}: the 14.20 finding names the file and reports the ` +
-            `parse-failure location (SPEC 14.20)`,
-        );
-      },
-    );
+        async (workspace) => {
+          const context = `T14-5 \`build --json\` over the code file ${arm.file}`;
+          const findings = await buildFindings(product, workspace, context);
+          assertConditionCounts(
+            findings,
+            { "14.20": 1 },
+            `${context} — any name but \`.tsx\` selects plain TypeScript, ` +
+              `so the fragment is a parse failure and everything inside ` +
+              `the file is masked (SPEC 14.20, 14); here ${arm.why}`,
+          );
+          assertFindingLocated(
+            findingOf(findings, "14.20", context),
+            { file: arm.file },
+            `${context}: the 14.20 finding names the file and reports the ` +
+              `parse-failure location (SPEC 14.20)`,
+          );
+        },
+      );
+    }
   },
 });
 
@@ -3855,6 +3926,13 @@ const READ_REFUSAL_DECL: WorkspaceDecl = {
   },
 };
 
+// The code-null review refusal's session (T12.7-1's staging: `create`
+// naming it a second time), stored as `.xspec/reviews/s.json` (SPEC 10.1)
+// — the file the shared refusal check requires byte-identical around the
+// refused run.
+const T14_6_REFUSAL_SESSION = "s";
+const T14_6_REFUSAL_SESSION_REL = `.xspec/reviews/${T14_6_REFUSAL_SESSION}.json`;
+
 /**
  * T14-6's 14.26 arm (SPEC 14.26, 13.5, 12.0, 12.7): the busy workspace's
  * `workspace-busy` — a usage error, never a finding — carried as the `code`
@@ -3870,9 +3948,10 @@ const READ_REFUSAL_DECL: WorkspaceDecl = {
  * the exact token `workspace-busy`, the token string alone (SPEC 14). The
  * concerned path is T12.7-3's assertion, the rest of the exclusion's
  * contract T13.5-2's. Platform-independent (no permission staging), and
- * last in T14-6's body: it needs the product's own exclusion (13.5), so a
- * product predating 14.26 meets every other arm first. Exported so a
- * scratch probe can run it alone.
+ * run after every other arm of T14-6's body but the baseline arm, which
+ * runs last: it needs the product's own exclusion (13.5), so a product
+ * predating 14.26 meets every arm before it first. Exported so a scratch
+ * probe can run it alone.
  */
 export async function runStableCodeBusyArm(
   product: ProductBinding,
@@ -3898,7 +3977,7 @@ export async function runStableCodeBusyArm(
 const T14_6 = defineProductTest({
   id: "T14-6",
   title:
-    "stable codes: for each of the 26 conditions, staged via its primary test's fixture and read from its stated reporter: conditions 1–23 carry the exact token 14 lists (`missing-id` … `unreadable-record`) as the `code` of their finding in the JSON report form, and conditions 24–26 — usage errors, never findings — carry `write-failure`, `read-failure`, and `workspace-busy` as the `code` of the exit-2 error document, appearing in no findings array (the environment refusals staged by permission removal, Linux leg; the busy workspace staged as T13.5-2 stages it: a `rename` held at the seam, a second `rename` under `--json` while it holds) — the value is the token string alone, the ordinal numeral no part of it — so a product omitting or misspelling a code fails even where exit class and located information are right; a plain usage error and a review-operation refusal carry no stable code — `code` null (SPEC 14, 12.7, 12.0, 13.5)",
+    "stable codes: for each of the 26 conditions, staged via its primary test's fixture and read from its stated reporter: conditions 1–13 and 15–23 carry the exact token 14 lists (`missing-id` … `unreadable-record`) as the `code` of their finding in the JSON report form, and conditions 14 and 24–26 — usage errors, never findings — carry `configuration-error`, `write-failure`, `read-failure`, and `workspace-busy` as the `code` of the exit-2 error document, appearing in no findings array (the environment refusals staged by permission removal, Linux leg; the busy workspace staged as T13.5-2 stages it: a `rename` held at the seam, a second `rename` under `--json` while it holds), while condition 13 carries `journal-error` as that document's `code` too where a given baseline's resolution reports it as a usage error (T6.3-6(a)'s staging, read from `impact --base c1 --json`) — the value is the token string alone, the ordinal numeral no part of it — so a product omitting or misspelling a code fails even where exit class and located information are right; a plain usage error and a review-operation refusal carry no stable code — `code` null — the refusal's finding carrying `locations` [] and `path` null beside it (T10.7-14's finding form) (SPEC 14, 12.7, 12.0, 13.5, 6.3)",
   run: async (product) => {
     // --- The 18 conditions `build` reports, staged as T14-4 sweeps them
     // (their minimal primary-fixture forms) and read from `build --json` —
@@ -4123,55 +4202,84 @@ const T14_6 = defineProductTest({
 
     // --- `code` null: a review-operation refusal (T12.7-1's staging —
     // `create` with an existing session's exact name, refused per SPEC
-    // 10.1/10.7; the audit strategy needs no git).
+    // 10.1/10.7; the audit strategy needs no git), judged by the shared
+    // T10.7-14 check (support.ts `expectReviewRefusal`, `--json` appended
+    // there): exit 1, standard output exactly one finding, decoded
+    // form-exact, `code` null — and beside it `locations` [] and `path`
+    // null, a review-operation refusal carrying neither location nor
+    // concerned path (SPEC 14, 12.7) — `identities` informational, the
+    // session file byte-identical.
     await withWorkspace(VALID_SPECS_DECL, async (workspace) => {
+      const createArgv = [
+        "review",
+        "create",
+        "--strategy",
+        "audit",
+        "--name",
+        T14_6_REFUSAL_SESSION,
+      ];
       await expectExit(
         product,
         workspace,
-        ["review", "create", "--strategy", "audit", "--name", "s"],
+        createArgv,
         0,
         "T14-6 (review refusal) staging `review create --strategy audit " +
           "--name s` — the first creation succeeds on the valid workspace " +
           "(SPEC 10.1, 10.6)",
       );
-      const context =
-        "T14-6 (review refusal) `review create --strategy audit --name s " +
-        "--json` again";
-      const result = await expectExit(
+      await expectReviewRefusal(
         product,
         workspace,
-        ["review", "create", "--strategy", "audit", "--name", "s", "--json"],
-        1,
-        `${context} — \`create\` with an existing session's exact name is ` +
-          `refused: exit 1, a refused review operation (SPEC 10.1, 10.7, ` +
-          `12.0)`,
+        createArgv,
+        T14_6_REFUSAL_SESSION_REL,
+        "T14-6 (review refusal) [`create` with an existing session's exact " +
+          "name is refused, SPEC 10.1, 10.7, 12.0 — no stable code, `code` " +
+          "null, and neither location nor concerned path beside it, " +
+          "`locations` [] and `path` null, SPEC 14, 12.7]",
       );
-      const findings = decodeFindingsReport(
-        parseJsonStdout(
-          result,
-          `${context} — a refused operation's report is the findings-only ` +
-            `document {"findings": […]} (SPEC 12.7)`,
-        ),
-        context,
-      ).findings;
-      if (findings.length === 0) {
-        fail(
-          `${context}: the refusal must be reported as at least one ` +
-            `finding — an exit-1 refusal with an empty findings array ` +
-            `reports nothing (SPEC 10.7, 12.7, 14)`,
-        );
-      }
-      for (const finding of findings) {
-        assertCodeNull(finding, "a review-operation refusal", context);
-      }
     });
 
     // --- 14.26 `workspace-busy`: a usage error, never a finding (SPEC
     // 14.26, 12.0) — its stable code the exit-2 error document's `code`, in
     // no findings array (12.7) — the busy workspace staged as T13.5-2
-    // stages it. Last in the body (`runStableCodeBusyArm`): it needs the
-    // product's own exclusion (13.5).
+    // stages it. Before the baseline arm alone (`runStableCodeBusyArm`): it
+    // needs the product's own exclusion (13.5).
     await runStableCodeBusyArm(product);
+
+    // --- 14.13 `journal-error` at a given baseline's resolution: a usage
+    // error there, never the gate's finding (SPEC 6.3, 14.13, 12.0) —
+    // condition 13's stable code the exit-2 error document's `code` too,
+    // in no findings array (12.7) — staged as T6.3-6(a) stages it
+    // (section-6.3.ts's `stageJournalErrorAtC1`, on T14-4's baseline
+    // workspace) and read from `impact --base c1 --json`, the resolution's
+    // first-listed reporter (T14-4). Last in the body: a product meeting
+    // the current journal only through 6.3's replay (the code-less
+    // unreadable baseline) meets every other arm first, the busy arm
+    // included.
+    await withWorkspace(BASELINE_JOURNAL_DECL, async (workspace) => {
+      const c1 = await stageJournalErrorAtC1(
+        product,
+        workspace,
+        "T14-6 (14.13 at a given baseline)",
+      );
+      const context =
+        "T14-6 (14.13 at a given baseline) `impact --base c1 --json`";
+      const result = await expectExit(
+        product,
+        workspace,
+        ["impact", "--base", c1, "--json"],
+        2,
+        `${context} — a given baseline's resolution reads the current ` +
+          `journal before any other cause can fail it, and the journal ` +
+          `error fails it as a usage error, exit 2 — never the gate's ` +
+          `finding (SPEC 6.3, 14.13, 12.0)`,
+      );
+      assertExactCodeToken(
+        [expectErrorDocument(result, context)],
+        13,
+        `${context} — the error document's finding`,
+      );
+    });
   },
 });
 

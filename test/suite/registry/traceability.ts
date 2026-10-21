@@ -67,10 +67,11 @@
 //       stable code, `locations` empty, `path` `null` — where that form is
 //       the test's subject: T10.7-14. The other refusal sites running the
 //       same shared check (support.ts `expectReviewRefusal`: T10.1-2,
-//       T10.1-6, T10.3-2, T10.7-1, T10.7-9, T10.7-10, T10.7-15, T12.7-1)
-//       assert it as a cross-reference to T10.7-14's assertion, which puts
-//       no "14" on them (T10.1-6's, T10.7-1's, T10.7-15's, and T12.7-1's
-//       "14" stand for their numbered conditions).
+//       T10.1-6, T10.3-2, T10.7-1, T10.7-9, T10.7-10, T10.7-15, T12.7-1,
+//       T14-6) assert it as a cross-reference to T10.7-14's assertion,
+//       which puts no "14" on them (T10.1-6's, T10.7-1's, T10.7-15's, and
+//       T12.7-1's "14" stand for their numbered conditions, T14-6's for its
+//       stable codes).
 //   A condition named only as staging context, as a cross-reference to
 //   another test's assertion, or in the diagnostic of a generic clean
 //   outcome (`build` or `check` exit 0, findings []) puts no "14" on a
@@ -977,11 +978,18 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // TEST-SPEC entry cites (T13.3-3, T11.2-6, T11.6-4, T10.1-5, and T6.3-6
   // among them).
   "T14-4": ["14"],
-  "T14-5": ["14"],
+  // T14-5: its single-casing arm's byte-wise, case-sensitive suffix test of
+  // 14.20's grammar selection, `src/x.TSX` lacking `.tsx` (12.0: no case
+  // folding).
+  "T14-5": ["14", "12.0"],
   // T14-6: 12.7 (the JSON report form pinning `code`) and 12.0 (the exit-2
   // error document carriage) are context with home coverage at
-  // T12.7-*/T12.0-*, and 13.5's exclusion (the 14.26 arm's held `rename`,
-  // staged as T13.5-2 stages it) at T13.5-2.
+  // T12.7-*/T12.0-*, 13.5's exclusion (the 14.26 arm's held `rename`,
+  // staged as T13.5-2 stages it) at T13.5-2, and 6.3's given baseline (the
+  // baseline arm's `impact --base`, whose journal error is the exit-2 error
+  // document, staged as T6.3-6(a) stages it) at T6.3-6, as T14-4's entry
+  // takes it; the review refusal's form — no location, no concerned path —
+  // is T10.7-14's assertion run through the shared check (rule (d) above).
   "T14-6": ["14"],
   // T14-7: 6.4/6.5/5.3 (the staged operations and the cycle rule),
   // 12.7/12.0 (report carriage; 12.0's unknown-identity usage error on an
