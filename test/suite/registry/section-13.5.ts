@@ -43,16 +43,18 @@
 // the kill arm), T13.5-8
 // (acquisition's place in the order: the acquisition-first arms — each
 // invocation a later check refuses, on a valid workspace whose code group
-// discovers a code source and on a failing one, run under `--json` beside a
+// discovers a code source and on two failing ones, one failed by a BOM-led
+// source and one by a garbage journal line, run under `--json` beside a
 // held `review resolve`, the busy refusal of 14.26, and with `.xspec/lock` a
 // symbolic link to an outside directory, acquisition's write failure — the
 // acquisition-after arms in the same two settings — the syntax class, a
 // configuration made invalid, a file both groups match met by the first
 // discovery, and an unlistable discovered directory, each reported in
 // acquisition's place — the hold seam engaging on invocations the 12.0
-// argument checks, baseline resolution, or the 13.3 gate refuse, and the
-// non-mutating preview boundary). T13.5-6 (workspace isolation: sibling and
-// nested workspace pairs) lives in section-13.5-vii.ts.
+// argument checks, baseline resolution (its journal read included), or the
+// 13.3 gate refuse, and the non-mutating preview boundary). T13.5-6
+// (workspace isolation: sibling and nested workspace pairs) lives in
+// section-13.5-vii.ts.
 //
 // All mutual-exclusion choreography goes through the `--test-hold <path>`
 // seam (SPEC 13.5) via the subprocess driver's background-start, hold-file,
@@ -107,15 +109,18 @@
 //   (§CONF-CORE; §VIOL-CORE-READERENTRY's and §VIOL-CORE-BUILDWAIT's passing
 //   sides); and its second commands start once command 1 has exited
 //   (§VIOL-CORE-EARLYRELEASE's passing side).
-// - T13.5-8's failing workspace is a second spec source beginning with a
-//   byte-order mark (14.20 at offset 0), added after the valid `build` and
-//   the audit session's creation, masked and never an operand; the `build`
-//   establishing it runs outside every bracket and before anything is held
-//   (§CONF-CORE; §VIOL-CORE-READERENTRY's and §VIOL-CORE-BUILDWAIT's
+// - T13.5-8's two failing workspaces each stage one condition, added after
+//   the valid `build` and the audit session's creation: a second spec
+//   source beginning with a byte-order mark (14.20 at offset 0), masked and
+//   never an operand; and, separately, T6.3-6(a)'s garbage line appended to
+//   the journal a staging `rename` wrote before the session's creation (the
+//   journal error of 14.13, among `build`'s findings, 13.3); the `build`
+//   establishing each runs outside every bracket and before anything is
+//   held (§CONF-CORE; §VIOL-CORE-READERENTRY's and §VIOL-CORE-BUILDWAIT's
 //   passing sides — §VIOL-CORE-CHATTYREADS appends at `check` alone, so
 //   never there). Its acquisition-first arms' holders — `review
 //   resolve` on session `s`, created while the workspace was valid — start
-//   on a freshly built valid workspace or on the failing one, where the
+//   on a freshly built valid workspace or on a failing one, where the
 //   gate writes nothing; the held-state comparison is made against each
 //   holder's pre-invocation state while it holds (the byte half the only
 //   ground on which §VIOL-CORE-EARLYWRITE fails it, the holder's resolution
@@ -139,7 +144,8 @@
 //   at the path both groups match, and a discovered directory made
 //   unlistable (verified on the harness, E-1) — each made just before its
 //   run and undone before anything else starts or any hold is lifted. Its
-//   refused valid-workspace commands start on freshly built workspaces
+//   refused valid-workspace commands start on freshly built workspaces,
+//   and its journal-staged baseline runs on the journal-failing one, each
 //   lying in no repository and inside none, where every `--base` ref is
 //   unresolvable, H-1's precondition verified before its baseline arms run
 //   (§CONF-CORE; `assertSelfContainedRoot`,
@@ -371,6 +377,7 @@ import {
 import {
   awaitHoldFile,
   holdPathFor,
+  JOURNAL_PATH,
   renameTwin,
   runKillArm,
   runWriteRefusalArms,
@@ -3147,15 +3154,17 @@ const T13_5_7 = defineProductTest({
 // T13.5-8 — acquisition's place in the order
 // ---------------------------------------------------------------------------
 
-// The one condition CONF-CORE's failing workspace stages (CERTIFICATIONS.md
-// §CONF-CORE's staging constraint on T13.5-8): a second spec source beginning
-// with a UTF-8 byte-order mark — unparseable (SPEC 1.6, 14.20), its finding
-// the zero-length range at offset 0 (SPEC 14), the file masked and never an
-// operand of any arm's command — added after the workspace was built valid
-// and after the session the held `review resolve` names was created under
-// `--strategy audit`. U+FEFF encodes to EF BB BF; the workspace builder
-// writes string contents with BOMs kept (S-2). The code point is spelled
-// numerically so the source carries no escape sequence to misread.
+// The one condition the first of CONF-CORE's two failing workspaces stages —
+// the source validation error TEST-SPEC T13.5-8 leaves open (CERTIFICATIONS.md
+// §CONF-CORE's staging constraint on T13.5-8; the second workspace's, the
+// garbage journal line, is staged below assertGateFindings): a second spec
+// source beginning with a UTF-8 byte-order mark — unparseable (SPEC 1.6,
+// 14.20), its finding the zero-length range at offset 0 (SPEC 14), the file
+// masked and never an operand of any arm's command — added after the workspace
+// was built valid and after the session the held `review resolve` names was
+// created under `--strategy audit`. U+FEFF encodes to EF BB BF; the workspace
+// builder writes string contents with BOMs kept (S-2). The code point is
+// spelled numerically so the source carries no escape sequence to misread.
 const BOM_FILE = "specs/B.mdx";
 const BOM_MDX =
   String.fromCodePoint(0xfeff) + '<S id="b">\nBom content.\n</S>\n';
@@ -3196,6 +3205,131 @@ function assertGateFindings(
     { file: BOM_FILE },
     `${context}: the condition-20 finding locates the BOM-led file ` +
       `${BOM_FILE} — the masked source, never an operand (SPEC 14, 14.20)`,
+  );
+}
+
+// The one condition the second of CONF-CORE's failing workspaces stages
+// (TEST-SPEC T13.5-8: "and separately by that garbage journal line alone
+// (14.13: a journal error is among `build`'s findings, 13.3)";
+// CERTIFICATIONS.md §CONF-CORE's staging constraint on T13.5-8):
+// T6.3-6(a)'s staging, a garbage line appended to the current journal —
+// the journal the staging rename below wrote, the workspace's one journaled
+// operation, run once the workspace was built valid and before the session
+// the held `review resolve` names was created under `--strategy audit` —
+// appended after that creation, as the BOM-led source is. The rename's
+// subject, `g`, is a section no arm names (`rename specs/A.mdx a b` names
+// `a`), so `g2` holds the leaf item the holder resolves. The line is
+// deliberately structureless bytes no conforming entry format accepts —
+// T6.1-3's garbage line, shape-independent (H-4): never a duplicate or
+// recombination of product-written entries, whose acceptance would be
+// product-dependent.
+const JOURNAL_STAGING_RENAME: readonly string[] = [
+  "rename",
+  "specs/A.mdx",
+  "g",
+  "g2",
+];
+const JOURNAL_GARBAGE_LINE =
+  "?? harness-injected garbage: not a journal entry ??";
+const LF = 0x0a;
+
+/** Lines in a line-oriented file, either final-line convention (T6.1-3). */
+function journalLineCount(bytes: Uint8Array): number {
+  if (bytes.length === 0) return 0;
+  let count = 0;
+  for (const byte of bytes) {
+    if (byte === LF) count += 1;
+  }
+  if (bytes[bytes.length - 1] !== LF) count += 1;
+  return count;
+}
+
+/**
+ * Append the garbage line to the journal the staging rename wrote
+ * (T6.3-6(a)'s staging, T6.1-3's shape): the journal a plain file holding
+ * the one line that rename appended — staging premises, diagnosed — then
+ * the garbage appended as its own line, the product's final line
+ * terminated first if it left the terminator off, so the tampering is a
+ * whole-line append under either line convention.
+ */
+async function appendJournalGarbageLine(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const kind = await workspace.kind(JOURNAL_PATH);
+  if (kind !== "file") {
+    fail(
+      `${context}: staging premise — the staging \`` +
+        `${JOURNAL_STAGING_RENAME.join(" ")}\` brings the journal into ` +
+        `existence as a plain file at ${JOURNAL_PATH} (SPEC 6.1, 13.4); ` +
+        `found ${kind}`,
+    );
+  }
+  const journal = await workspace.readBytes(JOURNAL_PATH);
+  const lines = journalLineCount(journal);
+  if (lines !== 1) {
+    fail(
+      `${context}: staging premise — the one journaled operation yields a ` +
+        `one-line journal (SPEC 6.1), so the garbage lands on line 2; found ` +
+        `${String(lines)} line(s)`,
+    );
+  }
+  const needsTerminator = journal[journal.length - 1] !== LF;
+  await workspace.file(
+    JOURNAL_PATH,
+    Buffer.concat([
+      journal,
+      Buffer.from(
+        (needsTerminator ? "\n" : "") + JOURNAL_GARBAGE_LINE + "\n",
+        "utf8",
+      ),
+    ]),
+  );
+}
+
+/**
+ * The journal error's finding, form-exact as T6.1-3 and T6.3-6(a) pin it:
+ * condition 13's stable code `journal-error`, the journal path as its
+ * concerned path, and no locations — a journal condition has no in-source
+ * location (SPEC 14, 12.7, 14.13). Its message's naming of the offending
+ * line is T6.1-3's subject, not this test's.
+ */
+function assertJournalErrorFinding(
+  finding: Finding,
+  what: string,
+  context: string,
+): void {
+  assertSameJson(
+    { code: finding.code, path: finding.path, locations: finding.locations },
+    { code: "journal-error", path: JOURNAL_PATH, locations: [] },
+    `${context}: ${what} — \`code\` "journal-error", the journal path ` +
+      `"${JOURNAL_PATH}" as its concerned path, and no locations (SPEC ` +
+      `14.13, 14, 12.7; T6.1-3, T6.3-6) — message: ` +
+      JSON.stringify(finding.message),
+  );
+}
+
+/**
+ * The journal-failing workspace's findings as `build` and the gate of 13.3
+ * report them: exactly one finding, condition 13 — the garbage line's
+ * journal error, among `build`'s findings (13.3) — form-exact
+ * (assertJournalErrorFinding): the one condition the staging presents
+ * (§CONF-CORE).
+ */
+function assertJournalGateFindings(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertConditionCounts(
+    findings,
+    { "14.13": 1 },
+    `${context}: exactly the one condition the journal-failing workspace ` +
+      `stages — the garbage journal line's journal error (SPEC 14.13, 13.3)`,
+  );
+  assertJournalErrorFinding(
+    findings[0]!,
+    "the condition-13 finding, form-exact",
+    context,
   );
 }
 
@@ -3317,9 +3451,33 @@ function assertSeamUsageError(
   );
 }
 
+/**
+ * The journal-staged baseline's own error in its seam-ordering run
+ * (TEST-SPEC T13.5-8: "the journal-staged baseline's error `code`
+ * `"journal-error"` with `path` `".xspec/journal"` (T6.3-6(b): the journal
+ * read before the ref's resolution)"): under `--json`, the 12.7 error
+ * document as the entire stdout, its finding the journal error form-exact
+ * (assertJournalErrorFinding; SPEC 6.3: a given baseline's resolution reads
+ * the current journal before any other cause can fail it, the error
+ * reported that condition with its stable code and concerned path) — never
+ * the unresolvable ref's code-less usage error, which a product resolving
+ * the ref before reading the journal returns, nor acquisition's busy
+ * refusal or write failure (`message` and `identities` informational).
+ */
+function assertSeamJournalError(result: RunResult, context: string): void {
+  assertJournalErrorFinding(
+    expectErrorDocument(result, context),
+    "its own error, the journal error baseline resolution's journal read " +
+      "meets before the ref's resolution (SPEC 6.3), never the unresolvable " +
+      "ref's code-less usage error",
+    context,
+  );
+}
+
 // T13.5-8's acquisition-first arms: each invocation a later check refuses
-// — an argument check of 12.0, baseline resolution (6.3), the item check,
-// the gate of 13.3, the valid-workspace precondition of `rename`/`move`
+// — an argument check of 12.0, baseline resolution (6.3, its journal read
+// included), the item check, the gate of 13.3 (a journal error among its
+// findings, 13.3), the valid-workspace precondition of `rename`/`move`
 // (6.4, 6.5), the hold-file seam — runs under `--json` twice, each run
 // exiting 2 and modifying nothing: once while a `review resolve` holds its
 // workspace, meeting the busy refusal of 14.26, and once with no holder and
@@ -3863,76 +4021,225 @@ async function acquisitionSettings(
 }
 
 /**
- * The failing-workspace arms — acquisition first, beside the held `review
- * resolve` and then at the obstructed lock path, then the gate's seam
- * ordering — on one workspace built valid, its audit session created, and
- * only then failed by the BOM-led second source (§CONF-CORE): the gate
- * writes nothing on it (SPEC 13.3), so every command here starts where no
- * refresh is pending (§VIOL-CORE-EARLYREFRESH's passing side). The `build`
- * that establishes the failing workspace runs outside every bracket and
- * before anything is held (§CONF-CORE's staging constraint, which
- * §VIOL-CORE-READERENTRY's and §VIOL-CORE-BUILDWAIT's passing sides lean
- * on; §VIOL-CORE-CHATTYREADS, appending at `check` alone, appends nothing
- * there).
+ * One of T13.5-8's two failing workspaces (TEST-SPEC T13.5-8: "on a
+ * workspace failing `build`'s validations — by a source validation error,
+ * and separately by that garbage journal line alone (14.13: a journal error
+ * is among `build`'s findings, 13.3)"): CORE_DECL's workspace built valid,
+ * its audit session `s` created, and only then failed by its one condition
+ * (§CONF-CORE's staging constraint on T13.5-8), the BOM-led second source
+ * or the garbage journal line.
  */
-async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
+interface FailingWorkspace {
+  /** Names the workspace in diagnoses ("on the failing workspace"). */
+  readonly where: string;
+  /** Names its staging's runs and premises ("T13.5-8 staging"). */
+  readonly staging: string;
+  /**
+   * The staging's journaled operation, run once the workspace is built
+   * valid and before `s` is created, where its condition needs one: the
+   * rename writing the journal the garbage line joins (T6.3-6(a)'s
+   * staging).
+   */
+  readonly journaled?: readonly string[];
+  /** The scope of `s`'s leaf item, which the holder and an arm resolve. */
+  readonly leafScope: string;
+  /** The failing condition, as the premise's label names it. */
+  readonly condition: string;
+  /** Adds the failing condition, once `s` exists and its items are known. */
+  readonly stage: (workspace: TestWorkspace, context: string) => Promise<void>;
+  /** The one condition's findings as `build` and the gate report them. */
+  readonly assertFindings: (
+    findings: readonly Finding[],
+    context: string,
+  ) => void;
+  /**
+   * Whether the garbage journal line stands: then a product judging the
+   * journal before acquiring returns a `journal-error` beside the gate's and
+   * the precondition's exit 1, and the journal-staged baseline arms run
+   * here — acquisition first and, under `--test-hold`, the seam ordering —
+   * the workspace lying in no repository and inside none, H-1's
+   * precondition verified before they run (§CONF-CORE's staging
+   * constraint).
+   */
+  readonly journal: boolean;
+}
+
+/** The workspace failed by a source validation error (§CONF-CORE). */
+const BOM_FAILING_WORKSPACE: FailingWorkspace = {
+  where: "on the failing workspace",
+  staging: "T13.5-8 staging",
+  leafScope: "specs/A.mdx#g",
+  condition: `${BOM_FILE} begins with a byte-order mark`,
+  stage: async (workspace) => {
+    await workspace.file(BOM_FILE, T13_5_8_BOM);
+  },
+  assertFindings: assertGateFindings,
+  journal: false,
+};
+
+/** The workspace failed by the garbage journal line alone (§CONF-CORE). */
+const JOURNAL_FAILING_WORKSPACE: FailingWorkspace = {
+  where: "on the journal-failing workspace",
+  staging: "T13.5-8 journal-failing workspace staging",
+  journaled: JOURNAL_STAGING_RENAME,
+  leafScope: "specs/A.mdx#g2",
+  condition: `a garbage line appended to ${JOURNAL_PATH}`,
+  stage: appendJournalGarbageLine,
+  assertFindings: assertJournalGateFindings,
+  journal: true,
+};
+
+/**
+ * The acquisition-first arms on a failing workspace (TEST-SPEC T13.5-8):
+ * `review create --strategy audit --name n`, `review resolve s <item>
+ * --status skipped`, `rename specs/A.mdx a b`, and `move specs/A.mdx
+ * specs/C.mdx` — each a mutating command valid in its own right, carrying no
+ * `--test-hold` (§VIOL-CORE-NOLOCK's staging constraint) — never the gate's
+ * or the precondition's exit 1 (6.5: `move`'s validation mirrors `rename`'s,
+ * the valid-workspace precondition included) or, beside the garbage journal
+ * line, a `journal-error`, which a product judging the gate, the
+ * precondition, or the journal before acquiring returns; and, beside that
+ * line, `review create --base <unresolvable-ref> --name n` never the
+ * `journal-error` its baseline resolution's journal read meets first — 6.3's
+ * journal read is one of baseline resolution's reads, all of which follow
+ * acquisition (13.5; 12.0: the acquisition errors precede a given
+ * baseline) — which a product reading the journal as it loads the
+ * workspace, ahead of acquisition, returns.
+ */
+function failingAcquisitionFirstArms(
+  item: string,
+  failing: FailingWorkspace,
+): readonly AcquisitionFirstArm[] {
+  const orJournal = failing.journal ? " or a `journal-error` (14.13)" : "";
+  const arms: AcquisitionFirstArm[] = [
+    {
+      what: "`review create --strategy audit --name n`",
+      later: `the gate of 13.3's exit 1${orJournal}`,
+      argv: ["review", "create", "--strategy", "audit", "--name", "n"],
+    },
+    {
+      what: "`review resolve s <leaf item> --status skipped`",
+      later: `the gate of 13.3's exit 1${orJournal}`,
+      argv: ["review", "resolve", "s", item, "--status", "skipped"],
+    },
+    {
+      what: "`rename specs/A.mdx a b`",
+      later: `rename's valid-workspace precondition's exit 1 (6.4)${orJournal}`,
+      argv: ["rename", "specs/A.mdx", "a", "b"],
+    },
+    {
+      what: "`move specs/A.mdx specs/C.mdx`",
+      later:
+        "move's valid-workspace precondition's exit 1 (6.5: move's " +
+        `validation mirrors rename's)${orJournal}`,
+      argv: ["move", "specs/A.mdx", "specs/C.mdx"],
+    },
+  ];
+  if (failing.journal) {
+    arms.push({
+      what:
+        "`review create --base no-such-ref --name n` (an unresolvable " +
+        "baseline, 6.3: the workspace in no repository) beside the garbage " +
+        "journal line (T6.3-6(a)'s staging)",
+      later:
+        "the `journal-error` baseline resolution's journal read meets " +
+        "first (6.3, 14.13; T6.3-6(b))",
+      argv: ["review", "create", "--base", "no-such-ref", "--name", "n"],
+    });
+  }
+  return arms;
+}
+
+/**
+ * The failing-workspace arms — acquisition first, beside the held `review
+ * resolve` and then at the obstructed lock path, then the seam ordering —
+ * on one workspace built valid, its audit session created, and only then
+ * failed by `failing`'s condition (§CONF-CORE): the gate writes nothing on
+ * it (SPEC 13.3), so every command here starts where no refresh is pending
+ * (§VIOL-CORE-EARLYREFRESH's passing side). The `build` that establishes
+ * the failing workspace runs outside every bracket and before anything is
+ * held (§CONF-CORE's staging constraint, which §VIOL-CORE-READERENTRY's and
+ * §VIOL-CORE-BUILDWAIT's passing sides lean on; §VIOL-CORE-CHATTYREADS,
+ * appending at `check` alone, appends nothing there). Where the garbage
+ * journal line stands, the journal-staged baseline runs too, H-1's
+ * precondition verified first (§CONF-CORE's staging constraint).
+ */
+async function failingWorkspaceArms(
+  product: ProductBinding,
+  failing: FailingWorkspace,
+): Promise<void> {
+  const { where, staging } = failing;
   await withWorkspace(CORE_DECL, async (workspace) => {
-    await buildOk(product, workspace, "T13.5-8 staging `build`");
+    await buildOk(product, workspace, `${staging} \`build\``);
+    if (failing.journaled !== undefined) {
+      await expectExit(
+        product,
+        workspace,
+        failing.journaled,
+        0,
+        `${staging} \`${failing.journaled.join(" ")}\` (the journaled ` +
+          `operation writing the journal the garbage line joins, SPEC 6.1)`,
+      );
+    }
     await expectExit(
       product,
       workspace,
       ["review", "create", "--strategy", "audit", "--name", "s"],
       0,
-      "T13.5-8 staging `review create --strategy audit --name s`",
+      `${staging} \`review create --strategy audit --name s\``,
     );
-    const status = await sessionStatus(
-      product,
-      workspace,
-      "s",
-      "T13.5-8 staging",
-    );
-    const gItem = requireRowByScope(
+    const status = await sessionStatus(product, workspace, "s", staging);
+    const leafItem = requireRowByScope(
       status,
-      "specs/A.mdx#g",
-      "T13.5-8 staging (leaf item)",
+      failing.leafScope,
+      `${staging} (leaf item)`,
     );
 
     // The workspace now fails `build`'s validations: the staging premise,
-    // established through `build --json` itself — exit 1, exactly the
-    // condition-20 finding at the BOM file's offset 0 — before any command
-    // is held and outside every bracket.
-    await workspace.file(BOM_FILE, T13_5_8_BOM);
+    // established through `build --json` itself — exit 1, exactly the one
+    // condition staged — before any command is held and outside every
+    // bracket.
+    await failing.stage(workspace, staging);
     const premise =
-      "T13.5-8 staging premise `build --json` on the failing workspace " +
-      `(${BOM_FILE} begins with a byte-order mark)`;
-    assertGateFindings(
+      `${staging} premise \`build --json\` ${where} ` +
+      `(${failing.condition})`;
+    failing.assertFindings(
       await buildFindings(product, workspace, premise),
       premise,
     );
+    if (failing.journal) {
+      // H-1's precondition before the journal-staged baseline arms
+      // (§CONF-CORE's staging constraint: a workspace in no repository and
+      // inside none).
+      await assertSelfContainedRoot(
+        product,
+        workspace.root,
+        `${staging} (\`review create --base <unresolvable-ref>\` beside ` +
+          `the garbage journal line)`,
+      );
+    }
 
     // Acquisition first on the failing workspace (SPEC 13.5, 12.0: the
     // busy refusal and acquisition's write failure precede the gate's
-    // findings and the precondition's): the holder is `review resolve s
-    // <leaf item> --status skipped --test-hold <path>` — exclusivity is
-    // acquired before the gate of 13.3, so it holds rather than exiting 1 at
-    // the gate, writing nothing (13.3) — and each other mutating command,
-    // valid in its own right and carrying no `--test-hold`
-    // (§VIOL-CORE-NOLOCK's staging constraint), is refused exit 2 while it
-    // holds, `code` `"workspace-busy"`, and then, the holder having exited,
-    // with `.xspec/lock` a symbolic link to an outside directory, `code`
-    // `"write-failure"` — never the gate's or the precondition's exit 1
-    // (6.5: `move`'s validation mirrors `rename`'s, the valid-workspace
-    // precondition included) — each modifying nothing, the compare
-    // bracketing each refused run alone (§CONF-CORE, §VIOL-CORE-EARLYWRITE).
+    // findings, the precondition's, and a given baseline's resolution): the
+    // holder is `review resolve s <leaf item> --status skipped --test-hold
+    // <path>` — exclusivity is acquired before the gate of 13.3, so it holds
+    // rather than exiting 1 at the gate, writing nothing (13.3) — and each
+    // arm's command is refused exit 2 while it holds, `code`
+    // `"workspace-busy"`, and then, the holder having exited, with
+    // `.xspec/lock` a symbolic link to an outside directory, `code`
+    // `"write-failure"` (failingAcquisitionFirstArms) — each modifying
+    // nothing, the compare bracketing each refused run alone (§CONF-CORE,
+    // §VIOL-CORE-EARLYWRITE).
     await acquisitionSettings(
       product,
       workspace,
       {
-        item: gItem.id,
+        item: leafItem.id,
         holdName: "hold-resolve.tmp",
         context:
           "T13.5-8 holder `review resolve s <leaf item> --status skipped " +
-          "--test-hold <path>` on the failing workspace",
+          `--test-hold <path>\` ${where}`,
         exit: 1,
         outcome:
           "the gate of 13.3 turns it back with the failing workspace's " +
@@ -3943,43 +4250,59 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
           "refresh on a failing workspace, the lock path aside (SPEC 13.3, " +
           "13.5; H-6)",
       },
-      [
-        {
-          what: "`review create --strategy audit --name n`",
-          later: "the gate of 13.3's exit 1",
-          argv: ["review", "create", "--strategy", "audit", "--name", "n"],
-        },
-        {
-          what: "`review resolve s <leaf item> --status skipped`",
-          later: "the gate of 13.3's exit 1",
-          argv: ["review", "resolve", "s", gItem.id, "--status", "skipped"],
-        },
-        {
-          what: "`rename specs/A.mdx a b`",
-          later: "rename's valid-workspace precondition's exit 1 (6.4)",
-          argv: ["rename", "specs/A.mdx", "a", "b"],
-        },
-        {
-          what: "`move specs/A.mdx specs/C.mdx`",
-          later:
-            "move's valid-workspace precondition's exit 1 (6.5: move's " +
-            "validation mirrors rename's)",
-          argv: ["move", "specs/A.mdx", "specs/C.mdx"],
-        },
-      ],
+      failingAcquisitionFirstArms(leafItem.id, failing),
       [],
-      "on the failing workspace",
+      where,
     );
+
+    if (failing.journal) {
+      // Seam ordering beside the garbage journal line (SPEC 13.5, 6.3: a
+      // given baseline's resolution, whose first read is the current
+      // journal's, follows acquisition): with no other holder and no
+      // obstruction, `review create --base no-such-ref --name n` creates the
+      // hold file first, the held-state comparison holding while it holds,
+      // and only after the hold's deletion exits 2 with the journal error,
+      // never the unresolvable ref's code-less error (T6.3-6(b): the
+      // journal read before the ref's resolution), creating no session.
+      const journalContext =
+        "T13.5-8 (seam ordering: `review create --base no-such-ref --name n " +
+        "--json --test-hold <path>`, an unresolvable baseline beside the " +
+        `garbage journal line, ${where})`;
+      assertSeamJournalError(
+        await refusedSeamArm(
+          product,
+          workspace,
+          [
+            "review",
+            "create",
+            "--base",
+            "no-such-ref",
+            "--name",
+            "n",
+            "--json",
+          ],
+          "hold-base-journal.tmp",
+          2,
+          journalContext,
+          "exclusivity is acquired, and the hold engaged, before baseline " +
+            "resolution, whose first read is the current journal's — a " +
+            "journal error there fails it as a usage error carrying " +
+            "condition 13's stable code and concerned path (6.3)",
+        ),
+        journalContext,
+      );
+    }
 
     // Seam ordering at the gate (SPEC 13.3: for a mutating `review`
     // subcommand, exclusivity acquisition precedes the gate's report; 13.5):
     // with no other holder, `review create --strategy audit --name n` on the
     // failing workspace creates the hold file first, the held-state
     // comparison holding while it holds, and only after the hold's deletion
-    // exits 1 with the condition-20 finding, creating no session.
+    // exits 1 with the gate's finding — the one condition staged — creating
+    // no session.
     const gateContext =
       "T13.5-8 (seam ordering at the gate: `review create --strategy audit " +
-      "--name n --json --test-hold <path>` on the failing workspace)";
+      `--name n --json --test-hold <path>\` ${where})`;
     const gateResult = await refusedSeamArm(
       product,
       workspace,
@@ -3989,7 +4312,7 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
       gateContext,
       "exclusivity is acquired before the gate of 13.3",
     );
-    assertGateFindings(
+    failing.assertFindings(
       decodeFindingsReport(
         parseJsonStdout(
           gateResult,
@@ -4392,7 +4715,9 @@ interface SeamOrderingArm {
  * and baseline resolution (6.3) — each judged after acquisition and the
  * hold, so each creates the hold file first, which a product judging it
  * before acquiring exclusivity, or creating its hold file only once it has
- * passed, never does (§VIOL-CORE-LATEHOLD).
+ * passed, never does (§VIOL-CORE-LATEHOLD). The fifth, the baseline arm
+ * again beside the garbage journal line, its journal read refusing it, runs
+ * on the journal-failing workspace (failingWorkspaceArms).
  */
 const SEAM_ORDERING_USAGE_ARMS: readonly SeamOrderingArm[] = [
   {
@@ -4555,11 +4880,14 @@ async function validWorkspaceArms(product: ProductBinding): Promise<void> {
 const T13_5_8 = defineProductTest({
   id: "T13.5-8",
   title:
-    "acquisition's place in the order (SPEC 13.5, 12.0): once configuration is loaded and sources discovered, before every later check — each acquisition-first invocation, run under `--json` once while `review resolve s <item> --status skipped --test-hold <path>` holds its workspace (an `audit` session `s` created while the workspace was valid; the held-state comparison holding against the workspace before the holder started, while it holds and after each run) and once with no holder and `.xspec/lock` a symbolic link to a directory outside the workspace (the link byte-identical in place and its target untouched after each run), exits 2 promptly with the error document's `code` `\"workspace-busy\"` beside the holder — the holder still holding, its entry the lock directory's only one, byte-identical — and `\"write-failure\"` at the obstruction, each with `path` `\".xspec/lock\"` and `locations` `[]`, modifying nothing (the compare bracketing each run alone), never the later check's outcome: on a valid workspace lying in no repository, whose code group discovers `src/c.ts`, `rename specs/A.mdx nope x` (a nonexistent old ID) and `move specs/A.mdx#nope specs/B.mdx#x` (a nonexistent origin ID) never the unknown-ID usage error, `review create --base <unresolvable-ref> --name n` never the baseline error, `review create --coverage nope --name n` never the unknown-profile usage error, `rename src/c.ts a b` and `move src/c.ts specs/C.mdx` (a wrong-kind origin) never the wrong-kind usage error (`code` `null` each), `review resolve s <unknown-item> --status skipped` never the unknown-item usage error, `review resolve c <item> --status skipped` (session `c` made corrupt — unparseable bytes — for that run alone) never the unknown-item usage error or the corruption's exit 1 (14.21), and `rename specs/A.mdx a a2 --test-hold <occupied path>` never the hold-file usage error, its occupant unchanged; on a workspace failing `build`'s validations (a second spec source beginning with a byte-order mark, 14.20, added after the valid `build` and `s`'s creation), `review create --strategy audit --name n`, `review resolve s <item> --status skipped`, `rename specs/A.mdx a b`, and `move specs/A.mdx specs/C.mdx` never the gate's or the precondition's exit 1, its holder turned back by the gate once lifted, exit 1, writing nothing; each acquisition-after invocation, run on the valid workspace in the same two settings, exits 2 with its own error, never acquisition's, modifying nothing, the holder still holding and the setting standing as above: `rename specs/A.mdx a b c` (a surplus operand) the syntax-class usage error (`code` and `path` `null`), and `rename specs/A.mdx a b` with `xspec.config.ts` made invalid by an unknown top-level key `code` `\"configuration-error\"` at `xspec.config.ts`, with `src/both.mdx` created at a path both the spec and the code group match (T13.5-12(d)'s configuration; in the held setting during the hold, the holder having started with the path unoccupied) `code` `\"configuration-error\"` at the configuration file's path `xspec.config.ts`, and with `specs/sub` made unlistable (mode 0o100, verified on the harness) `code` `\"read-failure\"` at `specs/sub` (`locations` `[]` each) — each staged change made just before its run and undone before the holder's hold is lifted; each holder awaited to exit, `.xspec/lock` then absent, before the next mutating command; under `--test-hold` with no other holder and no obstruction, `rename specs/A.mdx nope x` (a nonexistent old ID, 12.0), `review create --base <unresolvable-ref> --name n` (6.3, the workspace in no repository), `review create --coverage nope --name n` (an unknown profile), and `move src/c.ts specs/C.mdx` (a wrong-kind origin), each under `--json`, and, on the failing workspace, `review create --strategy audit --name n` (13.3's gate) each create the hold file first — the wait failing loud when the command exits without creating it — the held-state comparison holding while held (every workspace path but the lock path `.xspec/lock` byte-identical, `.xspec/lock` holding the held run's one entry), and exit 2, 2, 2, 2, and 1 with their own usage error (`code` `null`, `path` `null`) or the condition-20 finding only after the hold's deletion, nothing modified and `.xspec/lock` then gone; the non-mutating boundary: `rename specs/A.mdx nope x --preview` exits 2 at once acquiring nothing, and `--test-hold` beside `--preview` is exit 2 creating no hold file (SPEC 13.5, 13.3, 12.0, 12.7, 7, 7.2, 6.3, 6.4, 6.5, 6.6, 10.1, 14.14, 14.24, 14.25, 14.26, 14)",
+    "acquisition's place in the order (SPEC 13.5, 12.0): once configuration is loaded and sources discovered, before every later check — each acquisition-first invocation, run under `--json` once while `review resolve s <item> --status skipped --test-hold <path>` holds its workspace (an `audit` session `s` created while the workspace was valid; the held-state comparison holding against the workspace before the holder started, while it holds and after each run) and once with no holder and `.xspec/lock` a symbolic link to a directory outside the workspace (the link byte-identical in place and its target untouched after each run), exits 2 promptly with the error document's `code` `\"workspace-busy\"` beside the holder — the holder still holding, its entry the lock directory's only one, byte-identical — and `\"write-failure\"` at the obstruction, each with `path` `\".xspec/lock\"` and `locations` `[]`, modifying nothing (the compare bracketing each run alone), never the later check's outcome: on a valid workspace lying in no repository, whose code group discovers `src/c.ts`, `rename specs/A.mdx nope x` (a nonexistent old ID) and `move specs/A.mdx#nope specs/B.mdx#x` (a nonexistent origin ID) never the unknown-ID usage error, `review create --base <unresolvable-ref> --name n` never the baseline error, `review create --coverage nope --name n` never the unknown-profile usage error, `rename src/c.ts a b` and `move src/c.ts specs/C.mdx` (a wrong-kind origin) never the wrong-kind usage error (`code` `null` each), `review resolve s <unknown-item> --status skipped` never the unknown-item usage error, `review resolve c <item> --status skipped` (session `c` made corrupt — unparseable bytes — for that run alone) never the unknown-item usage error or the corruption's exit 1 (14.21), and `rename specs/A.mdx a a2 --test-hold <occupied path>` never the hold-file usage error, its occupant unchanged; on each of two workspaces failing `build`'s validations — by a second spec source beginning with a byte-order mark (14.20), and separately by a garbage line appended to the journal a staging `rename specs/A.mdx g g2` wrote (T6.3-6(a)'s staging, 14.13), each added after the valid `build` and `s`'s creation — `review create --strategy audit --name n`, `review resolve s <item> --status skipped`, `rename specs/A.mdx a b`, and `move specs/A.mdx specs/C.mdx` never the gate's or the precondition's exit 1 or a `journal-error`, and, beside the garbage journal line on a workspace lying in no repository, `review create --base <unresolvable-ref> --name n` never the `journal-error` its baseline resolution's journal read meets first, each holder turned back by the gate once lifted, exit 1, writing nothing; each acquisition-after invocation, run on the valid workspace in the same two settings, exits 2 with its own error, never acquisition's, modifying nothing, the holder still holding and the setting standing as above: `rename specs/A.mdx a b c` (a surplus operand) the syntax-class usage error (`code` and `path` `null`), and `rename specs/A.mdx a b` with `xspec.config.ts` made invalid by an unknown top-level key `code` `\"configuration-error\"` at `xspec.config.ts`, with `src/both.mdx` created at a path both the spec and the code group match (T13.5-12(d)'s configuration; in the held setting during the hold, the holder having started with the path unoccupied) `code` `\"configuration-error\"` at the configuration file's path `xspec.config.ts`, and with `specs/sub` made unlistable (mode 0o100, verified on the harness) `code` `\"read-failure\"` at `specs/sub` (`locations` `[]` each) — each staged change made just before its run and undone before the holder's hold is lifted; each holder awaited to exit, `.xspec/lock` then absent, before the next mutating command; under `--test-hold` with no other holder and no obstruction, `rename specs/A.mdx nope x` (a nonexistent old ID, 12.0), `review create --base <unresolvable-ref> --name n` (6.3, the workspace in no repository), that `review create` again beside the garbage journal line (6.3's journal read, on the journal-failing workspace), `review create --coverage nope --name n` (an unknown profile), and `move src/c.ts specs/C.mdx` (a wrong-kind origin), each under `--json`, and, on each failing workspace, `review create --strategy audit --name n` (13.3's gate) each create the hold file first — the wait failing loud when the command exits without creating it — the held-state comparison holding while held (every workspace path but the lock path `.xspec/lock` byte-identical, `.xspec/lock` holding the held run's one entry), and exit 2, 2, 2, 2, 2, and 1 with their own usage error (`code` `null`, `path` `null`), the journal-staged baseline's `code` `\"journal-error\"` with `path` `\".xspec/journal\"` and `locations` `[]` (the journal read before the ref's resolution), or the condition-20 or condition-13 finding only after the hold's deletion, nothing modified and `.xspec/lock` then gone; the non-mutating boundary: `rename specs/A.mdx nope x --preview` exits 2 at once acquiring nothing, and `--test-hold` beside `--preview` is exit 2 creating no hold file (SPEC 13.5, 13.3, 12.0, 12.7, 7, 7.2, 6.3, 6.4, 6.5, 6.6, 10.1, 14.13, 14.14, 14.24, 14.25, 14.26, 14)",
   run: async (product) => {
-    await failingWorkspaceArms(product);
+    await failingWorkspaceArms(product, BOM_FAILING_WORKSPACE);
     await validWorkspaceAcquisitionArms(product);
     await validWorkspaceArms(product);
+    // The journal-failing workspace's arms run last: a test ends at its
+    // first failing arm, so a product failing one of them hides no other.
+    await failingWorkspaceArms(product, JOURNAL_FAILING_WORKSPACE);
   },
 });
 

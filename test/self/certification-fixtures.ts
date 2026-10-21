@@ -221,24 +221,25 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
         "T10.4-5",
       ]),
       // VIOL-CORE-LATEHOLD: the hold seam engages late — a mutating command
-      // acquires exclusivity where 13.5 places it (once configuration is
-      // loaded and sources discovered, before every later check) but creates
-      // its hold file only once the unknown and wrong-kind names and files
-      // of the usage class and baseline resolution (12.0, 6.3) have passed,
-      // its second discovery preceding them, instead of immediately after
-      // acquiring; the gate and refresh of 13.3, the item check, the
-      // valid-workspace precondition of rename/move (6.4, 6.5), the
+      // acquires exclusivity where 13.5 places it (once configuration is loaded
+      // and sources discovered, before every later check) but creates its hold
+      // file only once the unknown and wrong-kind names and files of the usage
+      // class and baseline resolution, its journal read included (12.0, 6.3),
+      // have passed, its second discovery preceding them, instead of
+      // immediately after acquiring; the gate and refresh of 13.3, the item
+      // check, the valid-workspace precondition of rename/move (6.4, 6.5), the
       // operation's own validation, and every modification still follow the
-      // hold, acquisition's outcomes — the busy refusal and its write and
-      // read failures — still precede every check, and the hold file still
-      // precedes every write. An invocation those checks refuse exits 2
-      // having acquired and released but created no hold file, `--test-hold`
-      // or not — T13.5-8's four seam-ordering arms (`rename specs/A.mdx nope
-      // x`, `review create --base <ref> --name n`, `review create
+      // hold, acquisition's outcomes — the busy refusal and its write and read
+      // failures — still precede every check, and the hold file still precedes
+      // every write. An invocation those checks refuse exits 2 having acquired
+      // and released but created no hold file, `--test-hold` or not — T13.5-8's
+      // five seam-ordering arms (`rename specs/A.mdx nope x`, `review create
+      // --base <ref> --name n`, the same beside a garbage journal line, its
+      // journal read refusing it with `journal-error`, `review create
       // --coverage nope --name n`, `move <code> specs/C.mdx` under
-      // `--test-hold`), where the wait for a hold file never created fails
-      // loud — while every other arm meets acquisition, or the error
-      // preceding it, exactly as the conformer's does.
+      // `--test-hold`), where the wait for a hold file never created fails loud
+      // — while every other arm meets acquisition, or the error preceding it,
+      // exactly as the conformer's does.
       violator("VIOL-CORE-LATEHOLD", "conf-core/bin-latehold.mjs", ["T13.5-8"]),
       // VIOL-CORE-EARLYRELEASE: a run releases at its hold point instead of
       // as it ends — a mutating command given `--test-hold` releases once its

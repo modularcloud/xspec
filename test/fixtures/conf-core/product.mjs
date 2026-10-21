@@ -4061,8 +4061,10 @@ async function runMutating(
       // hold file, `--test-hold` or not; an invocation passing those checks
       // — every performable one, and every one the gate, the item check, or
       // the precondition turns back — holds and proceeds or is refused
-      // exactly as the conformer's does (T13.5-8: its four seam-ordering
-      // arms those checks refuse fail; every other arm is conforming).
+      // exactly as the conformer's does (T13.5-8: its five seam-ordering
+      // arms those checks refuse fail — the baseline's beside a garbage
+      // journal line among them, its journal read refusing it; every other
+      // arm is conforming).
       const discovery = await rediscover();
       await judgeArguments(config, discovery);
       await holdIfRequested();

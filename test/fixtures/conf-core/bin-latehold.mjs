@@ -15,11 +15,12 @@
 // acquired and released but created no hold file, `--test-hold` or not; every
 // other invocation holds and proceeds or is refused exactly as the
 // conformer's does. Certifies T13.5-8 (C-1): exactly it fails against this
-// fixture, on its four seam-ordering arms those checks refuse (`rename
+// fixture, on its five seam-ordering arms those checks refuse (`rename
 // specs/A.mdx nope x`, `review create --base <unresolvable-ref> --name n`,
-// `review create --coverage nope --name n`, and `move <code> specs/C.mdx`,
-// each under `--test-hold`, whose wait for a hold file never created fails
-// loud); every other §CONF-CORE in-scope test passes.
+// the same beside a garbage journal line — its journal read refusing it
+// with `journal-error` — `review create --coverage nope --name n`, and `move
+// <code> specs/C.mdx`, each under `--test-hold`, whose wait for a hold file
+// never created fails loud); every other §CONF-CORE in-scope test passes.
 import { runXspec } from "./product.mjs";
 
 const code = await runXspec(process.argv.slice(2), process.cwd(), {
