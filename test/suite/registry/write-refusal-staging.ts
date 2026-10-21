@@ -1,4 +1,4 @@
-// TEST-SPEC T13.5-7 / T14-9 — the write-refusal stagings (a)–(f) and the
+// TEST-SPEC T13.5-7 / T14-9 — the write-refusal stagings (a)–(h) and the
 // choreography that applies them while a mutating command is held at the
 // seam of SPEC 13.5, shared by T13.5-7 (the per-command states a refused
 // write leaves; section-13.5.ts), T14-9 (the 14.24 contract; section-14),
@@ -39,9 +39,10 @@
 // holding nothing before or in the twin. `check`'s expected staleness set is
 // computed by comparison (`derivedPathsDifferingFrom`, `graphDataDiffers`):
 // with a build twin of the same edit where no operation ran (TEST-SPEC
-// T13.5-7 (e), (f)), and, for the state a rename stopped at its journal
-// append leaves, with a `build` on a copy of that state, permissions
-// restored (`stalenessAgainstRebuiltCopy`; T13.5-7 (b)) — never with the
+// T13.5-7 (e), (f)), and, for the state an operation stopped before its
+// journal append leaves — (b)'s rename at the append, (g)'s section move at
+// its created target file — with a `build` on a copy of that state,
+// permissions restored (`stalenessAgainstRebuiltCopy`) — never with the
 // twin's post-operation derived files, the twin's journal holding the entry
 // the stopped state lacks (SPEC 13.4: derived files are reproducible from
 // sources, configuration, and the journal, 5.4). T13.3-5 (b) and (c)
@@ -71,7 +72,10 @@
 // assertions (6.3, 6.7); an arm's own staging follows, on its twin alike
 // (H-6) — (c)'s rename, on the rename fixture's emitted-Markdown variant,
 // deleting `out/specs/b/B.md` so that its regeneration owes that file's
-// creation. The fixtures deliberately leave CONF-CORE's in-scope shape
+// creation, and (h), on the move fixture, disabling Markdown emission so
+// that its regenerations owe `out/specs/A.md`'s removal; (g)'s section-move
+// fixtures hold the empty target directory `specs/n` from the start. The
+// fixtures deliberately leave CONF-CORE's in-scope shape
 // (imports, a code group, Markdown emission): T13.5-7 and T14-9 are
 // uncertified (CERTIFICATIONS.md §Exclusions).
 
@@ -456,6 +460,153 @@ export const MOVE_FIXTURE: RefusalFixture = {
   priorRename: ["rename", MOVE_OTHER_PATH, "oth0", "oth"],
 };
 
+// The section-move fixtures (T13.5-7 (g): a created target file is a source
+// edit, made in its `files` place): one spec group and one spec source
+// holding `a` and `x`, a top-level section nothing references, with
+// `specs/n` an empty directory from the start (the declaration's `dirs`),
+// so `move <origin>#x specs/n/N.mdx#x` creates the target file
+// `specs/n/N.mdx` (SPEC 6.5: at a target path nothing occupies, the target
+// file is created) — two source edits, one write per file the operation
+// rewrites or creates, in the order the preview's `files` lists them, by
+// path bytes (13.5, 6.6, 12.7). The two workspaces differ in the origin's
+// path alone: `specs/a/A.mdx`, listed before the created file, so that the
+// origin's edit is the run's first write, and `specs/z/Z.mdx`, listed after
+// it, so that the creation is. The source is staged under `a0`; the prior
+// journaled rename `a0` → `a` makes each workspace journal-bearing (6.1).
+// Every workspace of the arm is created after the body's first invocation,
+// so the configuration and the source are staged-source records (S-9; one
+// record per byte sequence, the origin's at either path).
+const SECTION_MOVE_CONFIG = stagedTs(
+  "T13.5-7 the section-move fixtures' xspec.config.ts (one spec group)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+);
+const SECTION_MOVE_ORIGIN_SOURCE = stagedMdx(
+  "T13.5-7 the section-move fixtures' origin, specs/a/A.mdx or, the byte order reversed, specs/z/Z.mdx (a0, and x, a top-level section nothing references)",
+  [
+    '<S id="a0">',
+    "Alpha text.",
+    "</S>",
+    "",
+    '<S id="x">',
+    "Ex text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+/** The empty directory the section move's target file is created in. */
+export const SECTION_MOVE_TARGET_DIR = "specs/n";
+/** The target file the section move creates (SPEC 6.5). */
+export const SECTION_MOVE_TARGET = "specs/n/N.mdx";
+
+/**
+ * One of T13.5-7 (g)'s two byte orders: the workspace whose origin holds
+ * `x`, the top-level section nothing references, and the section move of
+ * `x` into the created target file `specs/n/N.mdx` (SPEC 6.5).
+ */
+export interface CreatedTargetOrder {
+  /** The origin spec source. */
+  readonly origin: string;
+  /** The origin's generated module, beside it (SPEC 13.1). */
+  readonly originModule: string;
+  /**
+   * Whether the preview's `files` lists the origin before the created file
+   * — by path bytes (SPEC 6.6, 12.7) — so that the origin's edit, and not
+   * the creation, is the run's first write (13.5).
+   */
+  readonly originFirst: boolean;
+  readonly fixture: RefusalFixture;
+  /** `move <origin>#x specs/n/N.mdx#x` (SPEC 6.5). */
+  readonly argv: readonly string[];
+  /** The `--test-hold` file's name, beside the workspace root. */
+  readonly holdName: string;
+}
+
+function createdTargetOrder(
+  origin: string,
+  holdName: string,
+): CreatedTargetOrder {
+  return {
+    origin,
+    originModule: origin.replace(/\.mdx$/, ".xspec.ts"),
+    originFirst:
+      Buffer.compare(
+        Buffer.from(origin, "utf8"),
+        Buffer.from(SECTION_MOVE_TARGET, "utf8"),
+      ) < 0,
+    fixture: {
+      decl: {
+        files: {
+          "xspec.config.ts": SECTION_MOVE_CONFIG,
+          [origin]: SECTION_MOVE_ORIGIN_SOURCE,
+        },
+        dirs: [SECTION_MOVE_TARGET_DIR],
+      },
+      priorRename: ["rename", origin, "a0", "a"],
+    },
+    argv: ["move", `${origin}#x`, `${SECTION_MOVE_TARGET}#x`],
+    holdName,
+  };
+}
+
+/**
+ * T13.5-7 (g)'s two byte orders: the origin `specs/a/A.mdx` before the
+ * created `specs/n/N.mdx` in `files`, then `specs/z/Z.mdx` after it — the
+ * refused creation then the run's first write.
+ */
+export const CREATED_TARGET_ORDERS: readonly CreatedTargetOrder[] = [
+  createdTargetOrder("specs/a/A.mdx", "hold-g.tmp"),
+  createdTargetOrder("specs/z/Z.mdx", "hold-g-reversed.tmp"),
+];
+
+// (h)'s staging on the move fixture (T13.5-7 (h): a removal owed alone):
+// once the workspace is prepared — built under `markdown: { emit: true,
+// outDir: "out" }`, `out/specs` holding `A.md` alone and `docs/Other.mdx`
+// emitting under `out/docs` — emission is disabled by rewriting the
+// configuration with `markdown` removed, so that a regeneration owes
+// nothing under `out/specs` but the removal of `out/specs/A.md`, a recorded
+// derived file the current configuration no longer generates (SPEC 12.1,
+// 13.4, 7.3). The configuration is written after the body's first
+// invocation, so it is a TypeScript staged-source record (S-9).
+const MOVE_UNEMITTED_CONFIG = stagedTs(
+  "T13.5-7 the move fixture's xspec.config.ts with emission disabled (spec groups specs/** and docs/**, code group src/**/*.ts, markdown removed)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx", "docs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  }
+})
+`,
+);
+
+/**
+ * `specs/A.mdx`'s emitted Markdown under the move fixture: recorded, and no
+ * longer generated once emission is disabled — the one write (h)'s
+ * regenerations owe under `out/specs`, its removal (SPEC 12.1, 13.4).
+ */
+export const ORPHANED_MARKDOWN = "out/specs/A.md";
+/**
+ * (h)'s rename of `specs/A.mdx`'s section `a` (SPEC 6.4), rewriting its
+ * `id` attribute and its importer `src/app.ts`'s marker.
+ */
+export const ORPHAN_RENAME_ARGV: readonly string[] = [
+  "rename",
+  MOVE_ORIGIN,
+  "a",
+  "a2",
+];
+
 export const JOURNAL_PATH = ".xspec/journal";
 export const GRAPH_DATA_AREA = ".xspec";
 export const REVIEWS_DIR = ".xspec/reviews";
@@ -654,7 +805,7 @@ export function isGraphDataPath(rel: string): boolean {
   return rel === GRAPH_DATA_AREA || isGraphDataKey(rel);
 }
 
-/** A source of either fixture: the configuration, spec sources, code sources. */
+/** A source of every fixture: the configuration, spec sources, code sources. */
 export function isSourcePath(rel: string): boolean {
   return (
     rel === "xspec.config.ts" || rel.endsWith(".mdx") || rel.startsWith("src/")
@@ -728,7 +879,8 @@ export function assertPinnedState(
 /**
  * SPEC 13.5's weaker law where the write order is unpinned (a regeneration's
  * or a `build`'s derived-file writes, graph data's included — derived files,
- * 13.4; TEST-SPEC T13.5-7 (c), its rename, and (f)), judged path by path
+ * 13.4; TEST-SPEC T13.5-7 (c), its rename, (f), and (h)'s `build` and
+ * rename), judged path by path
  * over `scope`: every file present afterwards is complete — byte-equal
  * either to its bytes before the invocation or to the twin's file at that
  * path, the one or the other required, never a partial write and never
@@ -817,8 +969,9 @@ export interface RebuiltCopyStaleness {
 
 /**
  * A state's staleness by comparison with a `build` on a copy of it,
- * permissions restored (TEST-SPEC T13.5-7 (b), a stopped rename's state;
- * (g) and T13.3-5 (c) compute their sets "as T13.5-7(b) does"): the state
+ * permissions restored (TEST-SPEC T13.5-7 (b), a rename stopped at its
+ * journal append; (g), a section move stopped at its created target file,
+ * and T13.3-5 (c) compute their sets "as T13.5-7(b) does"): the state
  * `workspace` holds is copied into a fresh workspace (helpers/tree-copy.ts
  * `copyTreeBytes`) — every entry of the root but the harness's own `.git`
  * and the lock path, transient and bearing on no comparison of derived
@@ -1178,8 +1331,9 @@ export interface StalenessExpectation {
  * form. Every caller's state keeps each recorded derived file among the
  * paths the current sources and configuration generate — T13.5-7 (b) a
  * rename's identity change, (d) a relocation whose origin stays, (e) and
- * (f) a text edit, T14-10 (e) and (f) a refused read, T13.3-5 (b) a source
- * added and (c) a journal deleted — so no recorded file obstructs a rebuild
+ * (f) a text edit, (g) a section removed from a file that stays, T14-10 (e)
+ * and (f) a refused read, T13.3-5 (b) a source added and (c) a journal
+ * deleted — so no recorded file obstructs a rebuild
  * write: the one condition-10 form whose correction is its manual deletion
  * instead (SPEC 14.10, 13.4, 14.22; T13.4-10's judge), never this helper's.
  */
@@ -1460,7 +1614,7 @@ export function requireItemByScope(
 }
 
 // ---------------------------------------------------------------------------
-// T13.5-7's arms (TEST-SPEC T13.5-7 (a)–(f) and the kill arm)
+// T13.5-7's arms (TEST-SPEC T13.5-7 (a)–(h) and the kill arm)
 // ---------------------------------------------------------------------------
 
 const RENAME_JSON: readonly string[] = [...RENAME_ARGV, "--json"];
@@ -1924,41 +2078,64 @@ export async function afterAppendArm(
 }
 
 /**
- * (c)'s rename staging once the workspace is prepared, on the arm's
- * workspace and its twin alike: the build having emitted `specs/b/B.mdx`'s
- * Markdown at `out/specs/b/B.md`, `out/specs/b` holding it alone — checked
- * first, a diagnosed failure otherwise (SPEC 13.2: `NAME.mdx` emits
- * `NAME.md`, placed per `markdown.outDir`, 7.3; 13.4: every file xspec
- * writes is a plain file) — that file is deleted, `out/specs/b` left empty,
- * so the rename's finishing regeneration owes a write there: its creation
- * (SPEC 6.4, 12.1).
+ * The premise of (c)'s rename staging and of (h)'s, checked on each arm's
+ * workspace and its twin alike before the staging: once built under
+ * `markdown: { emit: true, outDir: "out" }`, `directory` holds `source`'s
+ * emitted Markdown `markdown`, a plain file, and nothing else — a diagnosed
+ * failure otherwise (SPEC 13.2: `NAME.mdx` emits `NAME.md`, placed per
+ * `markdown.outDir`, 7.3; 13.4: every file xspec writes is a plain file).
+ * `purpose` says what the staging makes of that file.
  */
-async function deleteRenameOutMarkdown(
+async function assertEmittedMarkdownAlone(
   workspace: TestWorkspace,
+  directory: string,
+  source: string,
+  markdown: string,
+  purpose: string,
   context: string,
 ): Promise<void> {
-  const directoryKind = await workspace.kind(RENAME_OUT_MARKDOWN_DIR);
+  const directoryKind = await workspace.kind(directory);
   const names =
-    directoryKind === "dir"
-      ? await workspace.readdirBytes(RENAME_OUT_MARKDOWN_DIR)
-      : [];
-  const fileKind = await workspace.kind(RENAME_OUT_MARKDOWN);
+    directoryKind === "dir" ? await workspace.readdirBytes(directory) : [];
+  const fileKind = await workspace.kind(markdown);
   if (directoryKind !== "dir" || fileKind !== "file" || names.length !== 1) {
     const held = names.map((name) =>
       displaySnapshotPath(Buffer.from(name).toString("latin1")),
     );
     fail(
       `${context}: once built under \`markdown: { emit: true, outDir: ` +
-        `"out" }\`, ${RENAME_OUT_MARKDOWN_DIR} holds ${RENAME_B_PATH}'s ` +
-        `emitted Markdown ${RENAME_OUT_MARKDOWN}, a plain file, and nothing ` +
+        `"out" }\`, ${directory} holds ${source}'s ` +
+        `emitted Markdown ${markdown}, a plain file, and nothing ` +
         `else (SPEC 13.2: \`NAME.mdx\` emits \`NAME.md\`, placed per ` +
         `\`markdown.outDir\`, 7.3; 13.4: every file xspec writes is a plain ` +
-        `file) — the premise of deleting it so that the rename's ` +
-        `regeneration owes its creation; found ${RENAME_OUT_MARKDOWN_DIR} ` +
+        `file) — ${purpose}; found ${directory} ` +
         `${directoryKind === "dir" ? `holding ${JSON.stringify(held)}` : directoryKind}, ` +
-        `${RENAME_OUT_MARKDOWN} ${fileKind}`,
+        `${markdown} ${fileKind}`,
     );
   }
+}
+
+/**
+ * (c)'s rename staging once the workspace is prepared, on the arm's
+ * workspace and its twin alike: the build having emitted `specs/b/B.mdx`'s
+ * Markdown at `out/specs/b/B.md`, `out/specs/b` holding it alone — checked
+ * first (`assertEmittedMarkdownAlone`) — that file is deleted, `out/specs/b`
+ * left empty, so the rename's finishing regeneration owes a write there:
+ * its creation (SPEC 6.4, 12.1).
+ */
+async function deleteRenameOutMarkdown(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  await assertEmittedMarkdownAlone(
+    workspace,
+    RENAME_OUT_MARKDOWN_DIR,
+    RENAME_B_PATH,
+    RENAME_OUT_MARKDOWN,
+    "the premise of deleting it so that the rename's regeneration owes its " +
+      "creation",
+    context,
+  );
   await fsp.rm(workspace.path(RENAME_OUT_MARKDOWN));
 }
 
@@ -2658,6 +2835,429 @@ export async function refreshingReadsArm(
   }
 }
 
+/**
+ * (g)'s premise, read from the order's twin: its completed move created
+ * the target file `specs/n/N.mdx`, a plain file where nothing stood, and
+ * rewrote the origin, removing `x` — the move's two source edits (SPEC 6.5:
+ * at a target path nothing occupies, the target file is created; 13.5: one
+ * write per file the operation rewrites or creates).
+ */
+function assertCreatedTargetPremise(
+  twin: TwinOutcome,
+  order: CreatedTargetOrder,
+  context: string,
+): void {
+  const targetBefore = twin.before.entries.get(SECTION_MOVE_TARGET);
+  const created = twin.after.entries.get(SECTION_MOVE_TARGET);
+  const originBefore = twin.before.entries.get(order.origin);
+  const originAfter = twin.after.entries.get(order.origin);
+  if (
+    targetBefore !== undefined ||
+    created?.kind !== "file" ||
+    originAfter?.kind !== "file" ||
+    sameEntry(originBefore, originAfter)
+  ) {
+    fail(
+      `${context}: the twin's completed move creates the target file ` +
+        `${SECTION_MOVE_TARGET} where nothing stood (SPEC 6.5: at a target ` +
+        `path nothing occupies, the target file is created) and rewrites ` +
+        `${order.origin}, removing \`x\` — two source edits, the arm's ` +
+        `premise (13.5); found ${SECTION_MOVE_TARGET} ` +
+        `${renderEntry(targetBefore)} before and ${renderEntry(created)} ` +
+        `after, ${order.origin} ${renderEntry(originBefore)} before and ` +
+        `${renderEntry(originAfter)} after`,
+    );
+  }
+}
+
+/**
+ * (g) A created target file is a source edit, made in its `files` place
+ * (SPEC 13.5: one write per file the operation rewrites or creates, in the
+ * order the preview's `files` lists them — a created file at the path its
+ * creation would occupy, 12.7): `move <origin>#x specs/n/N.mdx#x`, `x` a
+ * top-level section of the origin that nothing references and `specs/n` an
+ * empty directory, so the target file is created (6.5), with `specs/n`
+ * staged unwritable at the hold, after acquisition. Either way the run
+ * exits 2, its stdout under `--json` exactly the error document concerning
+ * `specs/n/N.mdx` (14.24: the file the write would have produced), no
+ * `mapping` beside or instead of it (the form-exact decode of
+ * `expectWriteFailure`), and `.xspec/lock` is absent afterwards. The origin
+ * first (`specs/a/A.mdx`): the origin rewritten, byte-equal to the twin's;
+ * nothing at `specs/n/N.mdx`, `specs/n` still empty; the journal
+ * byte-unchanged (no entry: the append follows every source edit, the
+ * creation included); derived files and graph data byte-unchanged
+ * (`assertPinnedState`); and `check` reporting condition 10 alone, the
+ * workspace valid with `x` deleted as by manual restructuring (6.7): the
+ * graph-data unit form and one per-file finding for each derived path whose
+ * occupant differs from the one a `build` leaves on a copy of this state,
+ * permissions restored — computed by comparison, as in (b)
+ * (`stalenessAgainstRebuiltCopy`) — the origin's module certainly among
+ * them (4.1: its node skeleton names `x`). The creation first
+ * (`specs/z/Z.mdx`, the byte order reversed): the refused creation is the
+ * run's first write — the origin byte-untouched, nothing at
+ * `specs/n/N.mdx`, the journal, derived files, and graph data
+ * byte-unchanged — and `check` clean, exit 0. A product creating the target
+ * file after the journal append, as part of the finishing regeneration,
+ * fails both, leaving an entry; one making a section move's writes in any
+ * order but `files`' fails one or the other. Each order's twin is its own:
+ * its fixture prepared alike, the move then run unrefused (H-6), creating
+ * the target file and rewriting the origin (`assertCreatedTargetPremise`).
+ */
+export async function createdTargetArm(
+  product: ProductBinding,
+  order: CreatedTargetOrder,
+): Promise<void> {
+  const context =
+    `T13.5-7 (g) \`${order.argv.join(" ")} --json\` with ` +
+    `${SECTION_MOVE_TARGET_DIR} unwritable` +
+    (order.originFirst
+      ? ""
+      : " (the byte order reversed: the creation listed first)");
+  const twin = await completeOnTwin(
+    product,
+    order.fixture,
+    order.argv,
+    undefined,
+    `${context} move`,
+  );
+  assertCreatedTargetPremise(twin, order, context);
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    order.fixture,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    assertTwinsIdentical(prepared.before, twin.before, context);
+    const result = await runHeldWithStaging(
+      product,
+      workspace,
+      [...order.argv, "--json"],
+      order.holdName,
+      refusalUnder(SECTION_MOVE_TARGET_DIR),
+      context,
+    );
+    expectWriteFailure(
+      result,
+      [SECTION_MOVE_TARGET],
+      `${context} — the refused write is the target file's creation, a ` +
+        `source edit: the error document, the entire stdout, concerns the ` +
+        `file the write would have produced, no \`mapping\` beside or ` +
+        `instead of it (SPEC 14.24, 13.5, 6.5, 12.0)`,
+    );
+    await assertNoLockPathAfter(workspace, true, context);
+    const after = await snapshotWorkspace(workspace.root);
+    if (!order.originFirst) {
+      assertPinnedState(
+        prepared.before,
+        after,
+        twin.after,
+        [],
+        `${context}: the state left — the refused creation, listed first in ` +
+          `\`files\`, is the run's first write: ${order.origin} ` +
+          `byte-untouched, nothing at ${SECTION_MOVE_TARGET} ` +
+          `(${SECTION_MOVE_TARGET_DIR} still empty), the journal, derived ` +
+          `files, and graph data byte-unchanged`,
+      );
+      await expectExit(
+        product,
+        workspace,
+        ["check"],
+        0,
+        `${context}: \`check\` is clean — the run stopped at its first ` +
+          `write, so nothing changed (SPEC 13.5, 12.2)`,
+      );
+    } else {
+      assertPinnedState(
+        prepared.before,
+        after,
+        twin.after,
+        [order.origin],
+        `${context}: the state left — ${order.origin} rewritten (the first ` +
+          `source edit, complete and byte-equal to the twin's), nothing at ` +
+          `${SECTION_MOVE_TARGET} (${SECTION_MOVE_TARGET_DIR} still empty: ` +
+          `the creation refused), the journal byte-unchanged (no entry: the ` +
+          `append follows every source edit, the creation included), ` +
+          `derived files and graph data byte-unchanged`,
+      );
+      // The expected per-file set: what a `build` on a copy of this state,
+      // permissions restored, leaves — as in (b), never the twin's derived
+      // files, the twin's journal holding the entry this state lacks (SPEC
+      // 13.4, 5.4).
+      const expected = await stalenessAgainstRebuiltCopy(
+        product,
+        workspace,
+        context,
+      );
+      if (!expected.perFile.includes(order.originModule)) {
+        fail(
+          `${context}: the origin's generated module ${order.originModule} ` +
+            `must differ from the one a \`build\` leaves on a copy of this ` +
+            `state — its node skeleton names \`x\` (SPEC 4.1), which the ` +
+            `origin's rewrite removed — so it is certainly among the stale ` +
+            `derived paths; differing: ` +
+            JSON.stringify(expected.perFile.map(displaySnapshotPath)),
+        );
+      }
+      if (!expected.graphDataDiffers) {
+        fail(
+          `${context}: graph data must differ from the graph data a ` +
+            `\`build\` leaves on a copy of this state — it records \`x\`, ` +
+            `which the origin's rewrite removed (SPEC 13.3) — so the unit ` +
+            `form is certainly reported; found it byte-identical`,
+        );
+      }
+      assertStalenessAlone(
+        await checkFindings(product, workspace, context),
+        { perFile: expected.perFile, unit: true },
+        `${context}: \`check\` after the refused creation — condition 10 ` +
+          `alone, the workspace valid with \`x\` deleted as by manual ` +
+          `restructuring (SPEC 6.7): the graph-data unit form and one ` +
+          `per-file finding for each derived path whose occupant differs ` +
+          `from the one a \`build\` leaves on a copy of this state, ` +
+          `permissions restored (the origin's module certainly among them) ` +
+          `(SPEC 13.5, 14.10, 13.4)`,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (h)'s staging once the move fixture is prepared, on the arm's workspaces
+ * and their twins alike: the build having emitted `specs/A.mdx`'s Markdown
+ * at `out/specs/A.md`, `out/specs` holding it alone — checked first
+ * (`assertEmittedMarkdownAlone`) — the configuration is rewritten with
+ * `markdown` removed (`MOVE_UNEMITTED_CONFIG`), emission disabled, so that
+ * a regeneration owes nothing under `out/specs` but that file's removal
+ * (SPEC 12.1, 13.4).
+ */
+export async function disableMoveEmission(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  await assertEmittedMarkdownAlone(
+    workspace,
+    MOVE_MARKDOWN_DIR,
+    MOVE_ORIGIN,
+    ORPHANED_MARKDOWN,
+    "the premise of disabling emission so that a regeneration owes nothing " +
+      `under ${MOVE_MARKDOWN_DIR} but its removal`,
+    context,
+  );
+  await workspace.file("xspec.config.ts", MOVE_UNEMITTED_CONFIG);
+}
+
+/**
+ * (h)'s premise, read from a twin on which the operation completed on the
+ * emission-disabled move fixture: nothing remains under `out/specs` — its
+ * regeneration removed `out/specs/A.md`, the recorded derived file the
+ * current configuration no longer generates, and wrote nothing else there
+ * (SPEC 12.1, 13.4) — so that removal is the one write the regeneration
+ * owes under `out/specs`.
+ */
+function assertOrphanRemovalOwedAlone(
+  twin: TwinOutcome,
+  operation: string,
+  context: string,
+): void {
+  const left = [...twin.after.entries.keys()].filter((rel) =>
+    rel.startsWith(`${MOVE_MARKDOWN_DIR}/`),
+  );
+  if (left.length > 0) {
+    fail(
+      `${context}: the twin's completed ${operation} removes ` +
+        `${ORPHANED_MARKDOWN} — a regeneration removes the recorded derived ` +
+        `files the current sources and configuration no longer generate, ` +
+        `emission being disabled (SPEC 12.1, 13.4) — and writes nothing ` +
+        `else under ${MOVE_MARKDOWN_DIR}, so that removal is the one write ` +
+        `the regeneration owes there, the arm's premise; found ` +
+        JSON.stringify(left.map(displaySnapshotPath)),
+    );
+  }
+}
+
+/**
+ * (h) A removal owed alone (SPEC 14.24: a removal is a write the
+ * environment can refuse; 12.1, 13.4: removing the recorded derived files
+ * the current sources and configuration no longer generate is part of
+ * every regeneration): (c)'s workspace, built under `markdown: { emit:
+ * true, outDir: "out" }` — `out/specs` holding `A.md` alone — with emission
+ * then disabled (`disableMoveEmission`), so that a regeneration owes
+ * nothing under `out/specs` but `out/specs/A.md`'s removal, and `out/specs`
+ * staged unwritable before the invocation (`build` takes no hold): `build`
+ * exits 2, stdout under `--json` exactly the error document, `code`
+ * `"write-failure"`, `path` `"out/specs/A.md"`, the file byte-identical in
+ * place; no source and no journal written (12.1, 6.1); every derived-file
+ * and graph-data entry its state before the invocation or the build twin's
+ * (`assertEachWriteComplete`: the order among a `build`'s writes is
+ * unpinned, 13.5); `.xspec/lock` absent. A product whose orphan removal is
+ * best-effort meets no other refused write and exits 0, failing here. The
+ * build twin is its own: the fixture prepared and emission disabled alike,
+ * then `build` run unrefused (H-6), removing `out/specs/A.md` alone there
+ * (`assertOrphanRemovalOwedAlone`). The rename on the same state is
+ * {@link orphanRemovalRenameArm}.
+ */
+export async function orphanRemovalBuildArm(
+  product: ProductBinding,
+): Promise<void> {
+  const context =
+    "T13.5-7 (h) `build --json` with emission disabled and out/specs unwritable";
+  const buildTwin = await completeOnTwin(
+    product,
+    MOVE_FIXTURE,
+    ["build"],
+    (workspace) => disableMoveEmission(workspace, `${context} build twin`),
+    `${context} build`,
+  );
+  assertOrphanRemovalOwedAlone(buildTwin, "`build`", context);
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    MOVE_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    await disableMoveEmission(workspace, context);
+    const staged = await snapshotWorkspace(workspace.root);
+    assertTwinsIdentical(staged, buildTwin.before, context);
+    const result = await runStaged(
+      product,
+      workspace,
+      ["build", "--json"],
+      refusalUnder(MOVE_MARKDOWN_DIR),
+      context,
+    );
+    expectWriteFailure(
+      result,
+      [ORPHANED_MARKDOWN],
+      `${context} — the one write the regeneration owes under ` +
+        `${MOVE_MARKDOWN_DIR}, ${ORPHANED_MARKDOWN}'s removal, is refused: ` +
+        `the error document, the entire stdout, concerns the file the ` +
+        `removal would have removed (SPEC 14.24, 12.1, 13.4, 12.0)`,
+    );
+    await assertNoLockPathAfter(workspace, false, context);
+    const after = await snapshotWorkspace(workspace.root);
+    assertSameEntry(
+      after,
+      staged,
+      ORPHANED_MARKDOWN,
+      `${context}: ${ORPHANED_MARKDOWN} byte-identical in place — its ` +
+        `removal refused (SPEC 14.24, 13.5)`,
+    );
+    assertSnapshotsEqual(
+      restrictSnapshot(staged, isOrderedWritePath),
+      restrictSnapshot(after, isOrderedWritePath),
+      `${context}: \`build\` writes no source and no journal (SPEC 12.1, 6.1)`,
+    );
+    assertEachWriteComplete(
+      staged,
+      after,
+      buildTwin.after,
+      isRegenerationPath,
+      `${context}: every derived file and graph-data entry afterwards is ` +
+        `complete — byte-equal either to its bytes before the invocation ` +
+        `or to the build twin's at that path, none partial (the order ` +
+        `among a \`build\`'s writes is unpinned)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (h), the rename on the same state (SPEC 6.4: a rename a write failure
+ * stops reports it alone, its journaled mapping observable thereafter only
+ * through the journal's effects): `rename specs/A.mdx a a2` on the
+ * emission-disabled move fixture, `out/specs` staged unwritable at its
+ * hold, after acquisition — exit 2 with the same error document alone,
+ * concerning `out/specs/A.md`, no `mapping` beside or instead of it (the
+ * form-exact decode of `expectWriteFailure`); its source edits and journal
+ * append made — `specs/A.mdx` and its importer `src/app.ts` byte-equal to
+ * the twin's, the journal holding exactly one new entry byte-equal to the
+ * twin's, every other source untouched; `out/specs/A.md` byte-identical in
+ * place; every derived-file and graph-data entry its state before the
+ * invocation or the twin's (`assertEachWriteComplete`: the order among a
+ * regeneration's writes is unpinned, 13.5); `.xspec/lock` absent. A
+ * product whose orphan removal is best-effort exits 0, failing here. Its
+ * twin is its own: the fixture prepared and emission disabled alike, the
+ * rename then run unrefused (H-6), its regeneration removing
+ * `out/specs/A.md` alone there (`assertOrphanRemovalOwedAlone`).
+ */
+export async function orphanRemovalRenameArm(
+  product: ProductBinding,
+): Promise<void> {
+  const context =
+    "T13.5-7 (h) `rename specs/A.mdx a a2 --json` with emission disabled and out/specs unwritable";
+  const twin = await completeOnTwin(
+    product,
+    MOVE_FIXTURE,
+    ORPHAN_RENAME_ARGV,
+    (workspace) => disableMoveEmission(workspace, `${context} twin`),
+    `${context} rename`,
+  );
+  assertOrphanRemovalOwedAlone(twin, "rename", context);
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    MOVE_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    await disableMoveEmission(workspace, context);
+    const before = await snapshotWorkspace(workspace.root);
+    assertTwinsIdentical(before, twin.before, context);
+    const result = await runHeldWithStaging(
+      product,
+      workspace,
+      [...ORPHAN_RENAME_ARGV, "--json"],
+      "hold-h-rename.tmp",
+      refusalUnder(MOVE_MARKDOWN_DIR),
+      context,
+    );
+    expectWriteFailure(
+      result,
+      [ORPHANED_MARKDOWN],
+      `${context} — the finishing regeneration's one write under ` +
+        `${MOVE_MARKDOWN_DIR}, ${ORPHANED_MARKDOWN}'s removal, is the ` +
+        `refused one, and the rename reports that write failure alone: its ` +
+        `error document the entire stdout, no \`mapping\` beside or ` +
+        `instead of it (SPEC 6.4, 14.24, 12.0)`,
+    );
+    await assertNoLockPathAfter(workspace, true, context);
+    const after = await snapshotWorkspace(workspace.root);
+    assertPinnedState(
+      restrictSnapshot(before, isOrderedWritePath),
+      restrictSnapshot(after, isOrderedWritePath),
+      restrictSnapshot(twin.after, isOrderedWritePath),
+      [MOVE_ORIGIN, MOVE_IMPORTER, JOURNAL_PATH],
+      `${context}: the state left — its source edits made (${MOVE_ORIGIN} ` +
+        `and its importer ${MOVE_IMPORTER} byte-equal to the twin's), the ` +
+        `journal holding exactly one new entry byte-equal to the twin's ` +
+        `(the append precedes the finishing regeneration), every other ` +
+        `source untouched`,
+    );
+    assertSameEntry(
+      after,
+      before,
+      ORPHANED_MARKDOWN,
+      `${context}: ${ORPHANED_MARKDOWN} byte-identical in place — its ` +
+        `removal refused (SPEC 14.24, 13.5)`,
+    );
+    assertEachWriteComplete(
+      before,
+      after,
+      twin.after,
+      isRegenerationPath,
+      `${context}: the finishing regeneration, stopped at the refused ` +
+        `removal — every derived file and graph-data entry`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
 // Post-lift kill delays in milliseconds — scheduling choreography only,
 // never an assertion input (H-10): every assertion of a kill is conditioned
 // on what the kill found — the collected exit and the workspace — and holds
@@ -2831,10 +3431,11 @@ export async function runKillArm(
 }
 
 /**
- * T13.5-7's refusal arms (a)–(f) on the Linux leg, each starting from a
+ * T13.5-7's refusal arms (a)–(h) on the Linux leg, each starting from a
  * freshly prepared workspace; the rename twin is the caller's (shared with
  * the kill arm), the move twin ((c)'s move and (d)) is built here, and (c)'s
- * rename, (e), and (f) build their own.
+ * rename, (e), (f), each of (g)'s byte orders, and each of (h)'s two
+ * operations build their own.
  */
 export async function runWriteRefusalArms(
   product: ProductBinding,
@@ -2849,4 +3450,9 @@ export async function runWriteRefusalArms(
   await reviewMutatorsArm(product);
   await buildArm(product);
   await refreshingReadsArm(product);
+  for (const order of CREATED_TARGET_ORDERS) {
+    await createdTargetArm(product, order);
+  }
+  await orphanRemovalBuildArm(product);
+  await orphanRemovalRenameArm(product);
 }
