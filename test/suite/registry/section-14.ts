@@ -619,7 +619,20 @@
 //   `import`, two import types from `import` through the closing
 //   parenthesis of the argument list (a `typeof` before and a qualifier or
 //   type arguments after excluded), and a string-named module declaration
-//   whole and, past a leading `export`, from `declare`.
+//   whole and, past a leading `export`, from `declare`. The other kinds'
+//   spans (y)–(aa) pin, at the spans 5.7 fixes, the conditions T14-8,
+//   T4.3-2, and T4.4-1 leave: 14.8 at an MDX embedding's whole braced
+//   container (`{text()}`, `{ /* c */ text(BASE?.a) }`, its inner
+//   whitespace and comment included), 14.7 at a TypeScript `text(...)`
+//   call from its callee — `text`, or the aliased `t` — through its
+//   closing parenthesis, and a marker's bare chain exclusive of its `;`
+//   (the unresolved `SPEC.missing;` under 14.7, `(SPEC.a);` under 14.8 with
+//   its parentheses), each code file leading with a `;`-terminated
+//   declaration, so the `(` opening the next line starts a statement of its
+//   own. The trailing-comma arm (ab), run after (n), stages a valid
+//   workspace: `d={[BASE.a,]}`, ECMAScript's one-element array literal,
+//   holds no elision — `build --json` finding-free, one `depends` edge, and
+//   one occurrence spanning `BASE.a` alone.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -765,6 +778,7 @@ import {
   expectConfigurationError,
   expectErrorDocument,
   expectExit,
+  expectFindingFreeReport,
   expectReviewRefusal,
   findingsInSourceOrder,
   runCli,
@@ -6919,11 +6933,12 @@ const T14_11_PREAMBLE = '<S id="ok">\nTarget: café.\n</S>\n\n';
 
 /**
  * The spec source the code-file arms import: `a`, `a.b`, and `b` resolve —
- * a staged-source record (S-9), also the refined `d`-value arms' imported
- * `specs/BASE.mdx` and arm (o)'s readable source.
+ * a staged-source record (S-9), also the `specs/BASE.mdx` the refined
+ * `d`-value arms, the container arm (y), and the trailing-comma arm (ab)
+ * import, and arm (o)'s readable source.
  */
 const T14_11_A_MDX = stagedMdx(
-  "T14-11 specs/A.mdx (the imported module: a, a.b, and b; arms (d), (j), (l), (u), and (o), and arms (p)-(t)'s specs/BASE.mdx)",
+  "T14-11 specs/A.mdx (the imported module: a, a.b, and b; arms (d), (j), (l), (u), (x), (z), (aa), and (o), and arms (p)-(t)'s, (y)'s, and (ab)'s specs/BASE.mdx)",
   '<S id="a">\nA.\n<S id="a.b">\nA.b.\n</S>\n</S>\n\n<S id="b">\nB.\n</S>\n',
 );
 
@@ -7502,6 +7517,73 @@ const T14_11_LINKING_FILES = T14_11_LINKING_FORMS.map(
   }),
 );
 
+// (y)–(aa) The other kinds' spans: a reference spelling is located by the
+// span its occurrence occupies or would occupy, per kind (SPEC 14, 5.7),
+// under every condition locating one — T14-8 pins the MDX embedding's under
+// 14.6, T4.3-2 and T4.4-1 the TypeScript call's under 14.8 and 14.11; these
+// arms pin the conditions those leave.
+//
+// (y) 14.8 — an MDX embedding at its full braced container, opening brace
+// through closing brace: `{text()}` (no argument: 2.4's arity rule) and
+// `{ /* c */ text(BASE?.a) }` (an optional chain, dynamic: 2.4), each the
+// whole container, its inner whitespace and comment included — never the
+// call or its argument alone. Each container stands in flow position (2.3)
+// between prose lines, off the file's ends, after the import and the
+// preamble, so the multibyte `é` precedes both pins.
+const T14_11_CONTAINERS = assemble([
+  T14_11_BASE_IMPORT,
+  T14_11_PREAMBLE,
+  '<S id="y1">\nNo argument:\n\n',
+  pin("{text()}"),
+  '\n\nProse after.\n</S>\n\n<S id="y2">\nA dynamic argument:\n\n',
+  pin("{ /* c */ text(BASE?.a) }"),
+  "\n\nProse after.\n</S>\n",
+]);
+
+// The code files of (z) and (aa) lead with their import, then a declaration
+// holding the multibyte `é`, so a product counting characters misplaces
+// every range. The declaration ends with `;`: without it ECMAScript inserts
+// no semicolon before a next line opening with `(`, so `(SPEC.a);` would
+// continue it as a call (`"café"(SPEC.a)`, the node passed to a function:
+// 14.18 at `SPEC.a`, a correct answer to a different file).
+const T14_11_CODE_LEAD = 'const before = "café";\n\n';
+
+// (z) 14.7 — a TypeScript `text(...)` call, callee through closing
+// parenthesis, argument included (4.3, 5.7): an unresolved
+// `text(SPEC.missing)` from `text` and, through the aliased binding
+// `{ text as t }` (4; T5.7-2), `t(SPEC.missing)` from `t` — each the whole
+// call, never the argument chain alone, the `;` excluded; each in its own
+// code file.
+const T14_11_CALL_TS = assemble([
+  'import SPEC, { text } from "../specs/A.xspec"\n\n' + T14_11_CODE_LEAD,
+  pin("text(SPEC.missing)"),
+  ";\n",
+]);
+const T14_11_ALIASED_CALL_TS = assemble([
+  'import SPEC, { text as t } from "../specs/A.xspec"\n\n' + T14_11_CODE_LEAD,
+  pin("t(SPEC.missing)"),
+  ";\n",
+]);
+
+// (aa) A marker's bare reference chain, exclusive of any terminator (4.5,
+// 5.7): an unresolved marker `SPEC.missing;` (14.7) at `SPEC.missing` alone,
+// the `;` excluded — never the whole statement — and `(SPEC.a);` (14.8:
+// parentheses applied to the chain make it dynamic, 2.4, 4.5; T4.5-3), a
+// non-static bare reference in expression-statement position, located as
+// the statement's expression `(SPEC.a)`, its parentheses included and its
+// `;` excluded (arm (d)'s `SPEC?.a;` the third form); each in its own code
+// file.
+const T14_11_MARKER_TS = assemble([
+  'import SPEC from "../specs/A.xspec"\n\n' + T14_11_CODE_LEAD,
+  pin("SPEC.missing"),
+  ";\n",
+]);
+const T14_11_PAREN_TS = assemble([
+  'import SPEC from "../specs/A.xspec"\n\n' + T14_11_CODE_LEAD,
+  pin("(SPEC.a)"),
+  ";\n",
+]);
+
 const T14_11_SPEC = "specs/A.mdx";
 const T14_11_CODE = "src/app.ts";
 
@@ -7947,6 +8029,74 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
       locations: located(entry.file, entry.fixture, 0),
     })),
   },
+  {
+    arm: "y",
+    rule: "14.8 — an MDX embedding at its full braced container, opening brace through closing brace: `{text()}` and `{ /* c */ text(BASE?.a) }`, each whole, its inner whitespace and comment included, never the call or its argument alone",
+    config: SPECS_ONLY_CONFIG,
+    files: {
+      [T14_11_BASE]: T14_11_A_MDX,
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (y) specs/A.mdx ({text()} and { /* c */ text(BASE?.a) }, each between prose lines)",
+        T14_11_CONTAINERS.text,
+      ),
+    },
+    expected: [0, 1].map((index) => ({
+      condition: "14.8",
+      locations: located(T14_11_SPEC, T14_11_CONTAINERS, index),
+    })),
+  },
+  {
+    arm: "z",
+    rule: "14.7 — a TypeScript `text(...)` call callee through closing parenthesis, argument included: `text(SPEC.missing)` from `text` and, through `{ text as t }`, `t(SPEC.missing)` from `t`, each the whole call, never the argument chain alone, the `;` excluded",
+    config: SPEC_AND_CODE_CONFIG,
+    files: {
+      [T14_11_SPEC]: T14_11_A_MDX,
+      "src/call.ts": stagedTs(
+        "T14-11 (z) src/call.ts (an unresolved text(SPEC.missing))",
+        T14_11_CALL_TS.text,
+      ),
+      "src/alias.ts": stagedTs(
+        "T14-11 (z) src/alias.ts (an unresolved t(SPEC.missing) through { text as t })",
+        T14_11_ALIASED_CALL_TS.text,
+      ),
+    },
+    expected: [
+      {
+        condition: "14.7",
+        locations: located("src/call.ts", T14_11_CALL_TS, 0),
+      },
+      {
+        condition: "14.7",
+        locations: located("src/alias.ts", T14_11_ALIASED_CALL_TS, 0),
+      },
+    ],
+  },
+  {
+    arm: "aa",
+    rule: "14.7 and 14.8 — a marker's bare reference chain, exclusive of its `;`: the unresolved `SPEC.missing;` at `SPEC.missing` alone, never the whole statement, and `(SPEC.a);` located as `(SPEC.a)`, the parentheses included",
+    config: SPEC_AND_CODE_CONFIG,
+    files: {
+      [T14_11_SPEC]: T14_11_A_MDX,
+      "src/marker.ts": stagedTs(
+        "T14-11 (aa) src/marker.ts (an unresolved marker SPEC.missing;)",
+        T14_11_MARKER_TS.text,
+      ),
+      "src/paren.ts": stagedTs(
+        "T14-11 (aa) src/paren.ts (the parenthesized chain (SPEC.a); in statement position)",
+        T14_11_PAREN_TS.text,
+      ),
+    },
+    expected: [
+      {
+        condition: "14.7",
+        locations: located("src/marker.ts", T14_11_MARKER_TS, 0),
+      },
+      {
+        condition: "14.8",
+        locations: located("src/paren.ts", T14_11_PAREN_TS, 0),
+      },
+    ],
+  },
 ];
 
 /**
@@ -8122,6 +8272,94 @@ async function runRepeatedDependencyArm(
   );
 }
 
+// (ab) A trailing comma spells no hole: `[BASE.a,]` is ECMAScript's
+// one-element array literal, so `d={[BASE.a,]}` holds no elision for 14.8's
+// elision rule to locate (SPEC 14) — the attribute is valid: `build --json`
+// finding-free, one `depends` edge (2.2), and one occurrence spanning
+// `BASE.a` alone, no bracket or comma (5.7). A product splitting the array
+// on commas reads a hole after the entry and reports 14.8, failing the
+// `build`. The module imported as `BASE` is `T14_11_A_MDX`, as in (p)–(t).
+const T14_11_TRAILING_COMMA = assemble([
+  T14_11_BASE_IMPORT,
+  T14_11_PREAMBLE,
+  '<S id="tc" d={[',
+  pin("BASE.a"),
+  ",]}>\nA trailing comma spells no hole.\n</S>\n",
+]);
+
+// Arm (ab)'s source, staged after the earlier arms' invocations (a
+// staged-source record, S-9).
+const T14_11_TRAILING_COMMA_STAGED = stagedMdx(
+  "T14-11 (ab) specs/A.mdx (d={[BASE.a,]} — a trailing comma, no hole)",
+  T14_11_TRAILING_COMMA.text,
+);
+
+async function runTrailingCommaArm(product: ProductBinding): Promise<void> {
+  const context =
+    "T14-11 (ab) a trailing comma spells no hole: `d={[BASE.a,]}` is a " +
+    "one-element array literal (SPEC 14, 2.2, 5.7)";
+  const file = T14_11_SPEC;
+  const source = `${file}#tc`;
+  const target = `${T14_11_BASE}#a`;
+  const entry = located(file, T14_11_TRAILING_COMMA, 0)[0]!.range;
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [T14_11_BASE]: T14_11_A_MDX,
+        [file]: T14_11_TRAILING_COMMA_STAGED,
+      },
+    },
+    async (workspace) => {
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["build", "--json"],
+        `${context} — \`build --json\`: the attribute is valid, no ` +
+          `finding — never a 14.8 for a hole after the comma (SPEC 14)`,
+      );
+      const edgesContext = `${context} — \`query edges --kinds depends\``;
+      assertEdgeSetEqual(
+        decodeEdgesReport(
+          await runJson(
+            product,
+            workspace,
+            ["query", "edges", "--kinds", "depends"],
+            edgesContext,
+          ),
+          edgesContext,
+        ),
+        [{ from: source, to: target, kind: "depends" }],
+        `${edgesContext}: exactly one \`depends\` edge, ${source} → ` +
+          `${target} — the array's one entry (SPEC 2.2, 5.2)`,
+      );
+      const occurrencesContext = `${context} — \`occurrences\``;
+      const report = decodeOccurrencesReport(
+        await runJson(product, workspace, ["occurrences"], occurrencesContext),
+        occurrencesContext,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${occurrencesContext}: the answer carries no finding — the ` +
+          `consulted file is valid (SPEC 11.2, 11.3)`,
+      );
+      assertSameJson(
+        report.occurrences.map((occurrence) => ({
+          file: occurrence.file,
+          range: { start: occurrence.range.start, end: occurrence.range.end },
+          kind: occurrence.kind,
+          target: occurrence.target,
+        })),
+        [{ file, range: entry, kind: "depends", target }],
+        `${occurrencesContext}: exactly one occurrence — the array's one ` +
+          `entry, spanning \`BASE.a\` alone (no bracket, comma, or ` +
+          `whitespace), kind depends, target ${target} (SPEC 5.7)`,
+      );
+    },
+  );
+}
+
 // (o) 14.20 for a refused read (SPEC 14.25): the zero-length range at offset
 // 0. A permission-based staging (E-1): Linux leg only, run last (the
 // NU3_STAGED pattern of section-11.5.ts; the runner must be unprivileged).
@@ -8175,12 +8413,13 @@ async function runRefusedReadArm(product: ProductBinding): Promise<void> {
 const T14_11 = defineProductTest({
   id: "T14-11",
   title:
-    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF/U+1680/U+3000, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), a non-static bare reference exclusive of its `;`, the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms (`export import X = require(…)` from `import`, its `export` excluded), import types (`import` through the closing parenthesis of the argument list — `typeof import(…).default` and `import(…).T<number>`, the `typeof`, qualifier, and type arguments excluded), string-named module declarations (`declare module` whole, `export declare module` from `declare`), and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax — its own two forms and, re-asserted the same way, the offsets T2.3-3, T2.4-2, T2.7-3, T2.7-4, and T14-12 pin; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.4, 1.6, 1.7, 2.4, 4, 5.7, 11.2, 11.4, 12.7)",
+    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF/U+1680/U+3000, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings — while a trailing comma spells no hole: `d={[BASE.a,]}` valid, one `depends` edge and one occurrence spanning `BASE.a`, no finding), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), the other kinds' spans — an MDX embedding at its whole braced container under 14.8 (`{text()}` and `{ /* c */ text(BASE?.a) }`, inner whitespace and comment included), a TypeScript `text(...)` call callee through closing parenthesis under 14.7 (`text(SPEC.missing)`, and the aliased `t(SPEC.missing)` from `t`), and a marker's bare chain exclusive of its `;` (the unresolved `SPEC.missing;` at `SPEC.missing`; the non-static `SPEC?.a;`, and `(SPEC.a);` located as `(SPEC.a)`, its parentheses included) — the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms (`export import X = require(…)` from `import`, its `export` excluded), import types (`import` through the closing parenthesis of the argument list — `typeof import(…).default` and `import(…).T<number>`, the `typeof`, qualifier, and type arguments excluded), string-named module declarations (`declare module` whole, `export declare module` from `declare`), and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax — its own two forms and, re-asserted the same way, the offsets T2.3-3, T2.4-2, T2.7-3, T2.7-4, and T14-12 pin; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.4, 1.6, 1.7, 2.2, 2.3, 2.4, 4, 4.3, 4.5, 5.7, 11.2, 11.4, 12.7)",
   run: async (product) => {
     for (const kase of T14_11_CASES) {
       await runRangeRuleArm(product, kase);
     }
     await runRepeatedDependencyArm(product);
+    await runTrailingCommaArm(product);
     if (T14_11_REFUSAL_STAGED) {
       await runRefusedReadArm(product);
     }
