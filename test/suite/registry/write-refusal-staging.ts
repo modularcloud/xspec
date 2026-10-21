@@ -31,9 +31,12 @@
 // pre-invocation snapshot — SPEC 13.5 pins the state a stopped command
 // leaves as "every earlier write complete, no later one attempted" in the
 // per-command write order, which `assertPinnedState` asserts entry by entry;
-// where 13.5 leaves an order unpinned (a regeneration's derived-file writes)
-// `assertEachWriteComplete` asserts the weaker law — each entry is its prior
-// state or its complete new content. `check`'s expected staleness set is
+// where 13.5 leaves an order unpinned (a regeneration's or a `build`'s
+// derived-file writes) `assertEachWriteComplete` asserts the weaker law
+// path by path — each file present afterwards byte-equal either to its
+// bytes before the invocation or to the twin's file at that path, none
+// partial (TEST-SPEC T13.5-7 (f)), and a path holding nothing afterwards
+// holding nothing before or in the twin. `check`'s expected staleness set is
 // computed by comparison (`derivedPathsDifferingFrom`, `graphDataDiffers`):
 // with a build twin of the same edit where no operation ran (TEST-SPEC
 // T13.5-7 (e), (f)), and, for the state a rename stopped at its journal
@@ -65,11 +68,15 @@
 // journaled rename (SPEC 6.1: the journal comes into existence with the first
 // journaled operation — `build` need not create it), then `check` clean,
 // then a git commit serving as the `impact --base` baseline of the recovery
-// assertions (6.3, 6.7). The fixtures deliberately leave CONF-CORE's in-scope
-// shape (imports, a code group, Markdown emission): T13.5-7 and T14-9 are
+// assertions (6.3, 6.7); an arm's own staging follows, on its twin alike
+// (H-6) — (c)'s rename, on the rename fixture's emitted-Markdown variant,
+// deleting `out/specs/b/B.md` so that its regeneration owes that file's
+// creation. The fixtures deliberately leave CONF-CORE's in-scope shape
+// (imports, a code group, Markdown emission): T13.5-7 and T14-9 are
 // uncertified (CERTIFICATIONS.md §Exclusions).
 
 import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type {
@@ -238,11 +245,12 @@ export interface RefusalFixture {
   readonly priorRename: readonly string[];
 }
 
-// The rename fixture (T13.5-7 (a), (b), (e), (f), and the kill arm): one spec
-// group with Markdown emitted beside each source, and a rename whose section
-// lives in `specs/b/B.mdx`, referenced from `specs/a/A.mdx` (a `d`
-// reference) and `specs/c/C.mdx` (an embedding) — the preview's `files`
-// order by path bytes is A, B, C (SPEC 6.6, 12.7). The sources are staged
+// The rename fixture (T13.5-7 (a), (b), (e), (f), and the kill arm; (c)'s
+// rename through its emitted-Markdown variant below): one spec group with
+// Markdown emitted beside each source, and a rename whose section lives in
+// `specs/b/B.mdx`, referenced from `specs/a/A.mdx` (a `d` reference) and
+// `specs/c/C.mdx` (an embedding) — the preview's `files` order by path bytes
+// is A, B, C (SPEC 6.6, 12.7). The sources are staged
 // under `b0`; the prior journaled rename `b0` → `b` leaves them under `b`, so
 // the arms' rename is `b` → `b2`.
 //
@@ -328,6 +336,45 @@ export const RENAME_FIXTURE: RefusalFixture = {
     },
   },
   priorRename: ["rename", RENAME_B_PATH, "b0", "b"],
+};
+
+// The rename fixture's emitted-Markdown variant (T13.5-7 (c)'s rename stopped
+// at a Markdown write): the same sources and prior rename under a
+// configuration emitting Markdown under `outDir: "out"`, so a build leaves
+// `out/specs/a/A.md`, `out/specs/b/B.md`, and `out/specs/c/C.md` (SPEC 13.2,
+// 7.3) — `out/specs/b` holding B's alone. The arm deletes `out/specs/b/B.md`
+// and stages `out/specs/b` unwritable at the hold, so the rename's finishing
+// regeneration owes a write there, that file's creation, however it treats
+// the emitted files whose content the rename leaves unchanged (a rename
+// changes no Markdown, SPEC 3). The configuration is a TypeScript
+// staged-source record (S-9; the arm's workspaces are created after the
+// body's first invocation), the sources the rename fixture's own records.
+const RENAME_OUT_CONFIG = stagedTs(
+  "T13.5-7 the rename fixture's emitted-Markdown variant xspec.config.ts (one spec group, Markdown emission under outDir out)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "out" }
+})
+`,
+);
+
+/** The variant's emitted-Markdown directory for `specs/b/B.mdx` (SPEC 7.3). */
+export const RENAME_OUT_MARKDOWN_DIR = "out/specs/b";
+/** `specs/b/B.mdx`'s emitted Markdown under the variant (SPEC 13.2, 7.3). */
+export const RENAME_OUT_MARKDOWN = "out/specs/b/B.md";
+
+export const RENAME_OUT_FIXTURE: RefusalFixture = {
+  decl: {
+    files: {
+      ...RENAME_FIXTURE.decl.files,
+      "xspec.config.ts": RENAME_OUT_CONFIG,
+    },
+  },
+  priorRename: RENAME_FIXTURE.priorRename,
 };
 
 // The move fixture (T13.5-7 (c), (d)): a file-form move `specs/A.mdx` →
@@ -680,11 +727,18 @@ export function assertPinnedState(
 
 /**
  * SPEC 13.5's weaker law where the write order is unpinned (a regeneration's
- * derived-file writes): every entry in `scope` holds either its prior state
- * or its complete new content — the twin's — never a partial write. H-6's
- * lock-path exclusion of either pair leaves an entry out (as in
- * `assertPinnedState`; no scope here reaches the lock path, which is neither
- * a derived file nor graph data, 13.4).
+ * or a `build`'s derived-file writes, graph data's included — derived files,
+ * 13.4; TEST-SPEC T13.5-7 (c), its rename, and (f)), judged path by path
+ * over `scope`: every file present afterwards is complete — byte-equal
+ * either to its bytes before the invocation or to the twin's file at that
+ * path, the one or the other required, never a partial write and never
+ * content neither holds (12.1, 13.5) — and a path holding nothing afterwards
+ * held nothing before the invocation or holds nothing in the twin (13.5: a
+ * path xspec writes holds its prior state, absence included, or its
+ * complete new content, a removal's absence included); a directory is
+ * compared by its kind. H-6's lock-path exclusion of either pair leaves an
+ * entry out (as in `assertPinnedState`; no scope here reaches the lock
+ * path, which is neither a derived file nor graph data, 13.4).
  */
 export function assertEachWriteComplete(
   before: DirectorySnapshot,
@@ -702,9 +756,10 @@ export function assertEachWriteComplete(
     if (sameEntry(actual, before.entries.get(key))) continue;
     if (sameEntry(actual, twinAfter.entries.get(key))) continue;
     fail(
-      `${context}: ${key} must hold either its prior state or its complete ` +
-        `new content — each write complete, never partial (SPEC 13.5); ` +
-        `prior ${renderEntry(before.entries.get(key))}, complete ` +
+      `${context}: ${key} must hold either its state before the invocation ` +
+        `or the twin's at that path — each write complete, never partial, ` +
+        `never content neither holds (SPEC 12.1, 13.5); before ` +
+        `${renderEntry(before.entries.get(key))}, the twin's ` +
         `${renderEntry(twinAfter.entries.get(key))}, found ` +
         renderEntry(actual),
     );
@@ -1343,7 +1398,11 @@ export function assertManualRestructuring(
   }
 }
 
-/** A journaled file move is pure: no change categories, no impacted code. */
+/**
+ * A journaled operation changing no content is pure — T13.5-7 (c)'s file
+ * move and its rename alike, each stopped after the append: no change
+ * categories, no impacted code (SPEC 6.2).
+ */
 export function assertNoChangeCategories(
   report: ImpactReport,
   context: string,
@@ -1354,10 +1413,11 @@ export function assertNoChangeCategories(
     report.code.transitive.length !== 0
   ) {
     fail(
-      `${context}: a journaled file move produces no change categories ` +
-        `relative to the pre-move baseline — the identity effect is ` +
-        `observable through the journal's effects alone (SPEC 6.2, 13.5); ` +
-        `got ${JSON.stringify(report)}`,
+      `${context}: a journaled operation — a file move or a rename — ` +
+        `produces no change categories relative to the pre-operation ` +
+        `baseline — the identity effect is observable through the ` +
+        `journal's effects alone (SPEC 6.2, 6.4, 13.5); got ` +
+        JSON.stringify(report),
     );
   }
 }
@@ -1713,6 +1773,65 @@ function isRegenerationPath(rel: string): boolean {
 }
 
 /**
+ * `check` on the state an operation stopped after its commit point leaves
+ * (T13.5-7 (c): the file-form move, and the rename stopped there alike):
+ * condition-10 findings alone — the stale remainder (SPEC 13.5, 14.10) —
+ * each concerning its derived path or the graph-data area as its 12.7
+ * `path`, with `locations` `[]`, and instructing rebuilding
+ * (`assertStaleFindingsConcernAndCorrection`; SPEC 14, 14.10, 12.7): the
+ * recorded derived files the move leaves behind (the origin's module,
+ * companions, and Markdown) lie at paths the current sources and
+ * configuration no longer generate, none a directory component of a path a
+ * rebuild writes (14.22), and the rename, whose derived paths are its
+ * sources' own, leaves none, so nothing obstructs a rebuild write and every
+ * finding's correction is rebuilding. The emitted Markdown `missing`, which
+ * the stopped regeneration never produced, is certainly among the paths
+ * named (14.10, 13.2), compared by bytes (12.7); which further derived
+ * files are stale is the product's (its regeneration's write order is
+ * unpinned, 13.5; companions are its own, 13.1), so membership alone.
+ */
+function assertStaleRemainder(
+  findings: readonly Finding[],
+  missing: string,
+  why: string,
+  context: string,
+): void {
+  for (const finding of findings) {
+    if (finding.condition !== "14.10") {
+      fail(
+        `${context}: \`check\` reports condition 10 alone — the stale ` +
+          `remainder of an operation stopped after its commit point ` +
+          `(SPEC 13.5, 14.10); got ${JSON.stringify(finding.code)} ` +
+          `(message: ${JSON.stringify(finding.message)})`,
+      );
+    }
+  }
+  assertStaleFindingsConcernAndCorrection(
+    findings,
+    `${context} — each finding of the stale remainder concerns its derived ` +
+      `path or the graph-data area, with no in-source location, and ` +
+      `instructs rebuilding (SPEC 14, 14.10, 12.7)`,
+  );
+  const missingBytes = expectedPathBytes(missing);
+  const named = findings.some(
+    (finding) =>
+      finding.path !== null &&
+      pathValueBytes(finding.path).equals(missingBytes),
+  );
+  if (!named) {
+    fail(
+      `${context}: ${JSON.stringify(displaySnapshotPath(missing))} — ${why} ` +
+        `— is certainly among the stale derived paths \`check\` names, ` +
+        `its per-file finding concerning it (SPEC 14.10, 13.2, 12.7; paths ` +
+        `compare byte-wise); named: ` +
+        JSON.stringify(
+          findings.map((finding) => renderPathValue(finding.path)),
+        ),
+    );
+  }
+}
+
+/**
  * (c) Stopped after the append, the identity effect complete: the file-form
  * move with `out/specs` staged unwritable — every source edit made and the
  * relocation complete (origin absent, destination present, the importer
@@ -1726,14 +1845,10 @@ function isRegenerationPath(rel: string): boolean {
  * 10 alone — the stale remainder, the destination's Markdown certainly
  * missing — each finding concerning its derived path (or, the unit form,
  * the graph-data area) as its 12.7 `path` with `locations` `[]` and
- * instructing rebuilding (`assertStaleFindingsConcernAndCorrection`; SPEC
- * 14, 14.10, 12.7): the recorded derived files the move leaves behind (the
- * origin's module, companions, and Markdown) lie at paths the current
- * sources and configuration no longer generate, none of them a directory
- * component of a path a rebuild writes (14.22), so none obstructs a
- * rebuild write and every finding's correction is rebuilding; restored,
- * `impact` reports no change categories and the next `build` leaves
- * `check` clean.
+ * instructing rebuilding (`assertStaleRemainder`; SPEC 14, 14.10, 12.7);
+ * restored, `impact` reports no change categories and the next `build`
+ * leaves `check` clean. The rename stopped there alike is
+ * {@link renameAfterAppendArm}.
  */
 export async function afterAppendArm(
   product: ProductBinding,
@@ -1779,35 +1894,174 @@ export async function afterAppendArm(
       `${context}: the finishing regeneration, stopped at the refused ` +
         `Markdown write — every derived file and graph-data entry`,
     );
-    const findings = await checkFindings(product, workspace, context);
-    const stalePaths = findings.map((finding) => finding.path);
-    for (const finding of findings) {
-      if (finding.condition !== "14.10") {
-        fail(
-          `${context}: \`check\` reports condition 10 alone — the stale ` +
-            `remainder of an operation stopped after its commit point ` +
-            `(SPEC 13.5, 14.10); got ${JSON.stringify(finding.code)} ` +
-            `(message: ${JSON.stringify(finding.message)})`,
-        );
-      }
-    }
-    assertStaleFindingsConcernAndCorrection(
-      findings,
-      `${context}: \`check\` after the stopped regeneration — each ` +
-        `finding of the stale remainder concerns its derived path or the ` +
-        `graph-data area, with no in-source location, and instructs ` +
-        `rebuilding (SPEC 14, 14.10, 12.7)`,
+    assertStaleRemainder(
+      await checkFindings(product, workspace, context),
+      MOVE_MARKDOWN_WRITES[0]!,
+      "the destination's emitted Markdown, never produced — its creation " +
+        "refused or not attempted",
+      `${context}: \`check\` after the stopped regeneration`,
     );
-    const destinationMarkdown = MOVE_MARKDOWN_WRITES[0];
-    if (!stalePaths.includes(destinationMarkdown)) {
-      fail(
-        `${context}: the destination's emitted Markdown ` +
-          `${JSON.stringify(destinationMarkdown)} — never produced, its ` +
-          `creation refused or not attempted — is certainly among the ` +
-          `stale derived paths \`check\` names (SPEC 14.10, 13.2); named: ` +
-          JSON.stringify(stalePaths),
-      );
-    }
+    // Recovery, the permissions restored (SPEC 6.2, 12.1).
+    assertNoChangeCategories(
+      await impactAgainst(product, workspace, baseline, context),
+      context,
+    );
+    await buildOk(
+      product,
+      workspace,
+      `${context}: the next \`build\` (SPEC 12.1)`,
+    );
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context}: after the next \`build\`, \`check\` is clean (SPEC 12.2, 13.5)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (c)'s rename staging once the workspace is prepared, on the arm's
+ * workspace and its twin alike: the build having emitted `specs/b/B.mdx`'s
+ * Markdown at `out/specs/b/B.md`, `out/specs/b` holding it alone — checked
+ * first, a diagnosed failure otherwise (SPEC 13.2: `NAME.mdx` emits
+ * `NAME.md`, placed per `markdown.outDir`, 7.3; 13.4: every file xspec
+ * writes is a plain file) — that file is deleted, `out/specs/b` left empty,
+ * so the rename's finishing regeneration owes a write there: its creation
+ * (SPEC 6.4, 12.1).
+ */
+async function deleteRenameOutMarkdown(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const directoryKind = await workspace.kind(RENAME_OUT_MARKDOWN_DIR);
+  const names =
+    directoryKind === "dir"
+      ? await workspace.readdirBytes(RENAME_OUT_MARKDOWN_DIR)
+      : [];
+  const fileKind = await workspace.kind(RENAME_OUT_MARKDOWN);
+  if (directoryKind !== "dir" || fileKind !== "file" || names.length !== 1) {
+    const held = names.map((name) =>
+      displaySnapshotPath(Buffer.from(name).toString("latin1")),
+    );
+    fail(
+      `${context}: once built under \`markdown: { emit: true, outDir: ` +
+        `"out" }\`, ${RENAME_OUT_MARKDOWN_DIR} holds ${RENAME_B_PATH}'s ` +
+        `emitted Markdown ${RENAME_OUT_MARKDOWN}, a plain file, and nothing ` +
+        `else (SPEC 13.2: \`NAME.mdx\` emits \`NAME.md\`, placed per ` +
+        `\`markdown.outDir\`, 7.3; 13.4: every file xspec writes is a plain ` +
+        `file) — the premise of deleting it so that the rename's ` +
+        `regeneration owes its creation; found ${RENAME_OUT_MARKDOWN_DIR} ` +
+        `${directoryKind === "dir" ? `holding ${JSON.stringify(held)}` : directoryKind}, ` +
+        `${RENAME_OUT_MARKDOWN} ${fileKind}`,
+    );
+  }
+  await fsp.rm(workspace.path(RENAME_OUT_MARKDOWN));
+}
+
+/**
+ * (c), a rename stopped there alike (SPEC 6.4: it reports the write failure
+ * alone, its journaled mapping observable thereafter only through the
+ * journal's effects): (a)'s rename on the emitted-Markdown variant of (a)'s
+ * workspace (`RENAME_OUT_FIXTURE`: `markdown: { emit: true, outDir: "out"
+ * }`), built, `out/specs/b/B.md` then deleted — `out/specs/b` holding
+ * nothing else (`deleteRenameOutMarkdown`) — and `out/specs/b` staged
+ * unwritable at the hold, after acquisition, so that the regeneration owes a
+ * write there, that file's creation, however it treats the derived files
+ * whose content the rename leaves unchanged (a rename changes no Markdown,
+ * 3), the twin's completed rename creating it (the arm's premise) — A, B,
+ * and C byte-equal to the twin's and the journal holding exactly one new
+ * entry byte-equal to the twin's, every other source untouched; stdout under
+ * `--json` exactly the error document concerning `out/specs/b/B.md`, no
+ * `mapping` beside or instead of it (the form-exact decode of
+ * `expectWriteFailure`); every derived-file and graph-data entry its state
+ * before the invocation or the twin's (`assertEachWriteComplete`); `check`
+ * condition-10 findings alone, each concerning its derived path or the
+ * graph-data area with `locations` `[]` and instructing rebuilding,
+ * `out/specs/b/B.md`'s per-file finding among them (`assertStaleRemainder`);
+ * `.xspec/lock` absent; and, the permissions restored, `impact --base
+ * <pre-rename ref>` reports no change categories (6.2) and the next `build`
+ * leaves `check` clean. Its twin is its own: the variant prepared alike and
+ * `out/specs/b/B.md` deleted, the rename then run unrefused (H-6).
+ */
+export async function renameAfterAppendArm(
+  product: ProductBinding,
+): Promise<void> {
+  const context =
+    "T13.5-7 (c) `rename specs/b/B.mdx b b2 --json` with out/specs/b/B.md deleted and out/specs/b unwritable";
+  const twin = await completeOnTwin(
+    product,
+    RENAME_OUT_FIXTURE,
+    RENAME_ARGV,
+    (workspace) => deleteRenameOutMarkdown(workspace, `${context} twin`),
+    `${context} rename`,
+  );
+  const regenerated = twin.after.entries.get(RENAME_OUT_MARKDOWN);
+  if (regenerated?.kind !== "file") {
+    fail(
+      `${context}: the twin's completed rename creates ` +
+        `${RENAME_OUT_MARKDOWN} — its finishing regeneration regenerates ` +
+        `every derived file the current sources and configuration generate ` +
+        `(SPEC 6.4, 12.1, 13.2), so the regeneration owes that file's ` +
+        `creation, the arm's premise; found ${renderEntry(regenerated)}`,
+    );
+  }
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_OUT_FIXTURE,
+    context,
+  );
+  const { workspace, baseline } = prepared;
+  try {
+    await deleteRenameOutMarkdown(workspace, context);
+    const before = await snapshotWorkspace(workspace.root);
+    assertTwinsIdentical(before, twin.before, context);
+    const result = await runHeldWithStaging(
+      product,
+      workspace,
+      RENAME_JSON,
+      "hold-c-rename.tmp",
+      refusalUnder(RENAME_OUT_MARKDOWN_DIR),
+      context,
+    );
+    expectWriteFailure(
+      result,
+      [RENAME_OUT_MARKDOWN],
+      `${context} — the regeneration's one write under ` +
+        `${RENAME_OUT_MARKDOWN_DIR}, ${RENAME_OUT_MARKDOWN}'s creation, is ` +
+        `the refused one, and the rename reports that write failure alone: ` +
+        `its error document the entire stdout, no \`mapping\` beside or ` +
+        `instead of it (SPEC 6.4, 14.24, 12.0)`,
+    );
+    await assertNoLockPathAfter(workspace, true, context);
+    const after = await snapshotWorkspace(workspace.root);
+    assertPinnedState(
+      restrictSnapshot(before, isOrderedWritePath),
+      restrictSnapshot(after, isOrderedWritePath),
+      restrictSnapshot(twin.after, isOrderedWritePath),
+      [RENAME_A_PATH, RENAME_B_PATH, RENAME_C_PATH, JOURNAL_PATH],
+      `${context}: the state left — every source edit made (A, B, C ` +
+        `byte-equal to the twin's), the journal holding exactly one new ` +
+        `entry byte-equal to the twin's (the append precedes the finishing ` +
+        `regeneration), every other source untouched`,
+    );
+    assertEachWriteComplete(
+      before,
+      after,
+      twin.after,
+      isRegenerationPath,
+      `${context}: the finishing regeneration, stopped at the refused ` +
+        `Markdown write — every derived file and graph-data entry`,
+    );
+    assertStaleRemainder(
+      await checkFindings(product, workspace, context),
+      RENAME_OUT_MARKDOWN,
+      "deleted before the rename, its creation by the regeneration refused",
+      `${context}: \`check\` after the stopped regeneration`,
+    );
     // Recovery, the permissions restored (SPEC 6.2, 12.1).
     assertNoChangeCategories(
       await impactAgainst(product, workspace, baseline, context),
@@ -2174,12 +2428,15 @@ export const F_EDIT_TO = "Beta text, edited.";
  * `specs/b` is staged unwritable — `build` exits 2 with the error document
  * concerning a derived path under `specs/b/` (B's module or a companion,
  * the first `specs/b/` write in the product's order); every derived file
- * present afterwards is complete — its prior state or byte-equal to the
- * twin's — and `check` reports exactly the derived paths whose occupant
- * differs from the twin's derived state (computed by comparison, B's module
- * and companions certainly in it), the graph-data unit form exactly when
- * graph data differs; the next `build`, permissions restored, exits 0 with
- * `check` clean (12.1, 13.4).
+ * present afterwards is complete — byte-equal either to its bytes before
+ * the invocation or to the twin's file at that path, one or the other, none
+ * partial (12.1, 13.5; `assertEachWriteComplete`, graph data's files
+ * included, 13.4) — and `check` reports exactly the derived paths whose
+ * occupant differs from the twin's derived state (computed by comparison,
+ * B's module certainly in it, its companions as the comparison finds them —
+ * companions are the product's own, 13.1), the graph-data unit form exactly
+ * when graph data differs; the next `build`, permissions restored, exits 0
+ * with `check` clean (12.1, 13.4).
  */
 export async function buildArm(product: ProductBinding): Promise<void> {
   const context =
@@ -2240,9 +2497,10 @@ export async function buildArm(product: ProductBinding): Promise<void> {
       after,
       buildTwin.after,
       isRegenerationPath,
-      `${context}: every derived file present afterwards is complete — its ` +
-        `prior state or byte-equal to the twin's — and so is graph data ` +
-        `(the order among a \`build\`'s derived-file writes is unpinned)`,
+      `${context}: every derived file present afterwards, graph data's ` +
+        `included, is complete — byte-equal either to its bytes before the ` +
+        `invocation or to the twin's file at that path, none partial (the ` +
+        `order among a \`build\`'s derived-file writes is unpinned)`,
     );
     const perFile = derivedPathsDifferingFrom(after, buildTwin.after);
     if (!perFile.includes(RENAME_B_MODULE)) {
@@ -2257,9 +2515,10 @@ export async function buildArm(product: ProductBinding): Promise<void> {
       await checkFindings(product, workspace, context),
       { perFile, unit: graphDataDiffers(after, buildTwin.after) },
       `${context}: \`check\` reports exactly the derived paths whose ` +
-        `occupant differs from the twin's derived state (B's module and ` +
-        `companions certainly among them) and the graph-data unit form ` +
-        `exactly when graph data differs (SPEC 14.10, 12.1, 13.4)`,
+        `occupant differs from the twin's derived state (B's module ` +
+        `certainly among them, its companions as the comparison finds them, ` +
+        `SPEC 13.1) and the graph-data unit form exactly when graph data ` +
+        `differs (SPEC 14.10, 12.1, 13.4)`,
     );
     await buildOk(
       product,
@@ -2574,7 +2833,8 @@ export async function runKillArm(
 /**
  * T13.5-7's refusal arms (a)–(f) on the Linux leg, each starting from a
  * freshly prepared workspace; the rename twin is the caller's (shared with
- * the kill arm), the move twin is built here.
+ * the kill arm), the move twin ((c)'s move and (d)) is built here, and (c)'s
+ * rename, (e), and (f) build their own.
  */
 export async function runWriteRefusalArms(
   product: ProductBinding,
@@ -2584,6 +2844,7 @@ export async function runWriteRefusalArms(
   await journalCommitPointArm(product, rename);
   const move = await moveTwin(product);
   await afterAppendArm(product, move);
+  await renameAfterAppendArm(product);
   await relocationArm(product, move);
   await reviewMutatorsArm(product);
   await buildArm(product);
