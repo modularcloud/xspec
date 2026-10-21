@@ -4,7 +4,9 @@
 //
 // Sections 1–13 exercise each numbered condition in its home context; these
 // are the reporting-contract tests: multi-error completeness with
-// file/location/correction information (T14-1), the unresolved-reference
+// file/location/correction information, and the families a source
+// validation error leaves detectable — a journal error and a refused write
+// — reported beside it (T14-1), the unresolved-reference
 // conditions 14.5/14.6/14.7 plus the consumer-side type error, and the
 // escape-spelled forms read verbatim (T14-2),
 // masking by unparseable files and by configuration errors (T14-3), the
@@ -84,6 +86,46 @@
 //   message quotes none, and its 14.7 message the resolved identity
 //   `specs/ok.mdx#absent`, not the chain), so a product whose messages
 //   quote none has no message data checked in human form.
+// - T14-1's pairs (TEST-SPEC T14-1: families a source validation error
+//   leaves detectable are reported beside it; SPEC 14: a condition goes
+//   unreported only where another error makes it undetectable; 13.3: the
+//   gate reports exactly the findings a `build` would now report, source
+//   validation errors, journal errors, and refused writes alike): each
+//   pair's workspace is built valid first, `specs/A.mdx` holding the
+//   top-level section `a`; then a top-level section with no `id` is
+//   appended (14.1) and, beside it, T6.1-3's garbage line appended to the
+//   journal — absent on the freshly built workspace (`build` writes no
+//   journal, SPEC 6.1: an empty journal), so the line alone becomes the
+//   journal — or, on the twin built under `markdown: { emit: true,
+//   outDir: "out" }`, the directory `out` (a premise: a directory holding
+//   the emitted `out/specs/A.md`) replaced by a plain file, a directory
+//   component of every emit destination (T13.3-3's write-path
+//   obstruction), in the garbage line's place. `build`, `ids`, and `check`,
+//   each under `--json`, exit 1 with the findings-only report — `ids`
+//   answering nothing, so an answer beside the findings fails the
+//   form-exact decode — holding exactly two findings in 12.7's order (by
+//   code, the numbered conditions in numeric order; the decode enforces it
+//   on every report): the condition-1 finding, located in `specs/A.mdx`
+//   within the id-less section's byte window (the window bullet below),
+//   `path` `null` (12.7: a located condition concerns no path), and beside
+//   it the pair's finding, form-exact — `journal-error` at
+//   `.xspec/journal`, respectively `obstructed-write-path` at `out`, each
+//   with `locations` `[]` (a journal condition and a write path have no
+//   in-source location, 14, 12.7) — every message non-blank (information
+//   presence, as above); the three conditions' `identities` are
+//   informational (12.7: 14 names no context entity for them) and never
+//   asserted. Each run sits inside a whole-root compare — nothing modified
+//   throughout: a failing `build` (12.1), the gate (13.3), and `check`,
+//   which never refreshes (12.2, 13.3) — so the stale graph data the edit
+//   leaves stays unrefreshed, the garbage line stays, and the plain file at
+//   `out` stays a plain file, no Markdown written. A product judging the
+//   journal or the write paths only once the sources pass drops the pair's
+//   finding from the failing workspace's report and fails the count; that
+//   the judgement makes those reads on the failing side is T14-10(l)(i)'s
+//   failing twin's and T11.2-6's unreadable emit directory's subject
+//   (TEST-SPEC T14-1's closing sentence). The pairs run last in the body:
+//   a test ends at its first failing arm, so a product failing a pair hides
+//   none of the six-condition workspace's assertions.
 // - MDX-staged conditions locate within the offending element's byte window:
 //   every plausible attribution point — the reference expression, the prop,
 //   the element itself — lies inside it, and every other staged construct
@@ -106,12 +148,15 @@
 //   form (14.23) and the recorded-file form — the mismatch forms, per file
 //   and graph data, being undetectable and unreported there (SPEC 14.10,
 //   13.3). Judged per staging, neither whatever-validity form exists:
-//   T14-1's, T14-3's, and the sweep's never-built workspaces hold no
-//   record (a failing `build` writes nothing, 12.1), and the pre-built
-//   stagings — the sweep's journal entry, T14-4's failing-workspace 14.21
-//   row — leave the record readable with every recorded path still
-//   generated. So a product reporting phantom staleness beside the staged
-//   conditions fails.
+//   T14-1's six-condition workspace, T14-3's, and the sweep's never-built
+//   workspaces hold no record (a failing `build` writes nothing, 12.1),
+//   and the pre-built stagings — T14-1's pairs, the sweep's journal entry,
+//   T14-4's failing-workspace 14.21 row — leave the record readable with
+//   every recorded path still generated (the obstruction twin's
+//   `out/specs/A.md`, gone with the directory `out`, among them: its
+//   absence is the per-file mismatch form, undetectable there). So a
+//   product reporting phantom staleness beside the staged conditions
+//   fails.
 // - T14-4's 14.14 row: the 14.14 entry routes it through every command "as a
 //   usage error (12.0), not a finding", so its both-reporters assertion is
 //   the exit-2 contract (empty stdout under `--json`, stderr naming the
@@ -481,6 +526,7 @@
 //   whole and, past a leading `export`, from `declare`.
 
 import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import type {
   Finding,
@@ -619,6 +665,7 @@ import {
   expectExit,
   findingsInSourceOrder,
   runCli,
+  runFindingsReport,
   runJson,
 } from "./support.js";
 
@@ -805,9 +852,11 @@ const TSX_ONLY_STATEMENT = "const view = <>markup</>;";
 // T14-1 — actionable and complete reporting
 // ---------------------------------------------------------------------------
 
-// Several independent error conditions across files, every fixture pure
-// ASCII and assembled as prefix + offending construct + suffix so each
-// finding's location window is precomputed from the parts' byte lengths.
+// The six-condition workspace: several independent error conditions across
+// files, every fixture pure ASCII and assembled as prefix + offending
+// construct + suffix so each finding's location window is precomputed from
+// the parts' byte lengths. (The pairs' material follows the human-form
+// check below.)
 
 // specs/one.mdx — 14.1: a non-root section without `id`.
 const T14_1_ONE_PREFIX = '<S id="ok1">\nValid sibling.\n</S>\n\n';
@@ -1016,10 +1065,371 @@ async function assertHumanFindingsReport(
   }
 }
 
+// T14-1's pairs (the module header's pairs bullet; TEST-SPEC T14-1:
+// "Families a source validation error leaves detectable are reported beside
+// it"): one workspace per pair, built valid under the pair's configuration,
+// then `specs/A.mdx` given a section with no `id` (14.1) and, beside that
+// error, the pair's second condition — the journal pair's garbage line
+// appended to the journal, the obstruction pair's twin, under
+// `markdown: { emit: true, outDir: "out" }`, its directory `out` replaced
+// by a plain file in the garbage line's place. The pairs' workspaces follow
+// the body's first product invocation (the six-condition workspace runs
+// first), so the two configurations and both versions of `specs/A.mdx`
+// are staged-source records (S-9's timing clause; helpers/staged-mdx.ts,
+// helpers/staged-ts.ts), the edited version staged after the `build`.
+
+/** The pairs' valid `specs/A.mdx`: one top-level section, `a`. */
+const T14_1_PAIR_VALID_TEXT = '<S id="a">\nAlpha text.\n</S>\n';
+/** The edited file's bytes before the appended section: a blank line after. */
+const T14_1_PAIR_EDIT_PREFIX = `${T14_1_PAIR_VALID_TEXT}\n`;
+/** The section with no `id` the edit appends (14.1). */
+const T14_1_PAIR_ID_LESS_CONSTRUCT = "<S>\nNo id.\n</S>";
+const T14_1_PAIR_SOURCE = stagedMdx(
+  "T14-1 specs/A.mdx (the pairs' valid source, built before the edit: the top-level section a)",
+  T14_1_PAIR_VALID_TEXT,
+);
+const T14_1_PAIR_EDITED = stagedMdx(
+  "T14-1 specs/A.mdx (the pairs' edit after the build: a top-level section with no id appended, 14.1)",
+  `${T14_1_PAIR_EDIT_PREFIX}${T14_1_PAIR_ID_LESS_CONSTRUCT}\n`,
+);
+/** Where the condition-1 finding must be located (module-header windows). */
+const T14_1_PAIR_ID_LESS_WINDOW = byteWindow(
+  T14_1_PAIR_EDIT_PREFIX,
+  T14_1_PAIR_ID_LESS_CONSTRUCT,
+);
+const T14_1_PAIR_FILE = "specs/A.mdx";
+
+/** The journal pair's configuration: one spec group (SPEC 7). */
+const T14_1_JOURNAL_PAIR_CONFIG = stagedTs(
+  "T14-1 xspec.config.ts (the journal pair: one spec group)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+);
+
+/**
+ * The obstruction pair's twin: one spec group, Markdown emitted under
+ * `outDir: "out"` (SPEC 7.3), so `build` writes `out/specs/A.md` (13.2:
+ * `outDir` preserves workspace-relative paths).
+ */
+const T14_1_OBSTRUCTION_PAIR_CONFIG = stagedTs(
+  'T14-1 xspec.config.ts (the obstruction pair\'s twin: one spec group, Markdown emitted under outDir "out")',
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "out" }
+})
+`,
+);
+
+/**
+ * T6.1-3's garbage line, newline-terminated: deliberately structureless
+ * bytes no conforming entry format accepts — H-4's shape-independent
+ * journal staging, never a duplicate or recombination of product-written
+ * entries, whose acceptance would be product-dependent (T6.1-3's
+ * rationale). T14-1's journal pair appends it; T14-4's and T14-6's
+ * journal-error staging writes it as the whole journal.
+ */
+const GARBAGE_JOURNAL_LINE =
+  "?? harness-injected garbage: not a journal entry ??\n";
+
+const T14_1_JOURNAL_PATH = ".xspec/journal";
+
+/**
+ * The journal pair's staging (TEST-SPEC T14-1; H-4's shape-independent
+ * staging, T6.1-3): the garbage line appended, as its own line, to the
+ * journal of the freshly built workspace. `build` writes no journal (SPEC
+ * 6.1: the journal is written only by `rename` and `move`; a workspace in
+ * which it does not exist has an empty journal), so the path holds nothing
+ * and the append brings the file into existence holding the line; a plain
+ * file there gets the line after its last, terminated first, so the
+ * tampering is a whole-line append under either line convention. Any other
+ * occupant fails the staging, diagnosed (SPEC 6.1, 13.4).
+ */
+async function appendT14_1JournalGarbage(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const kind = await workspace.kind(T14_1_JOURNAL_PATH);
+  if (kind === "absent") {
+    await workspace.file(T14_1_JOURNAL_PATH, GARBAGE_JOURNAL_LINE);
+    return;
+  }
+  if (kind !== "file") {
+    fail(
+      `${context}: staging premise — on the freshly built workspace the ` +
+        `journal path ${T14_1_JOURNAL_PATH} holds a plain file or nothing: ` +
+        `the journal is a plain file, written only by \`rename\` and ` +
+        `\`move\` (SPEC 6.1, 13.4); found ${kind}`,
+    );
+  }
+  const journal = Buffer.from(await workspace.readBytes(T14_1_JOURNAL_PATH));
+  const needsTerminator =
+    journal.length > 0 && journal[journal.length - 1] !== 0x0a;
+  await workspace.file(
+    T14_1_JOURNAL_PATH,
+    Buffer.concat([
+      journal,
+      Buffer.from(
+        `${needsTerminator ? "\n" : ""}${GARBAGE_JOURNAL_LINE}`,
+        "utf8",
+      ),
+    ]),
+  );
+}
+
+// The twin's emit directory, the one Markdown file `build` emits beneath it
+// (SPEC 7.3, 13.2), and the plain file's bytes staged in the directory's
+// place.
+const T14_1_OUT = "out";
+const T14_1_EMITTED = "out/specs/A.md";
+const T14_1_OUT_OCCUPANT = "not a directory\n";
+
+/**
+ * The obstruction pair's staging on its twin (TEST-SPEC T14-1, T13.3-3's
+ * write-path obstruction): the staging premises — the `build` under
+ * `markdown: { emit: true, outDir: "out" }` made `out` a directory holding
+ * the emitted `out/specs/A.md` (SPEC 7.3, 13.2) — then the directory, with
+ * the Markdown it holds, replaced by a plain file: a directory component of
+ * every emit destination occupied by a non-directory (SPEC 14.22, 13.4).
+ */
+async function obstructT14_1OutDir(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const outKind = await workspace.kind(T14_1_OUT);
+  if (outKind !== "dir") {
+    fail(
+      `${context}: staging premise — \`build\` with emission enabled under ` +
+        `markdown.outDir creates the ${T14_1_OUT}/ directory (SPEC 7.3, ` +
+        `13.2, 13.4); found ${outKind}`,
+    );
+  }
+  const emittedKind = await workspace.kind(T14_1_EMITTED);
+  if (emittedKind !== "file") {
+    fail(
+      `${context}: staging premise — emission under outDir preserves ` +
+        `workspace-relative paths, so ${T14_1_PAIR_FILE} emits ` +
+        `${T14_1_EMITTED} (SPEC 7.3, 13.2); found ${emittedKind}`,
+    );
+  }
+  await fsp.rm(workspace.path(T14_1_OUT), { recursive: true });
+  await workspace.file(T14_1_OUT, T14_1_OUT_OCCUPANT);
+}
+
+/** One of T14-1's pairs: its configuration and its second condition. */
+interface T14_1Pair {
+  /** The diagnosis label. */
+  readonly label: string;
+  /** The configuration record the workspace is built under. */
+  readonly config: StagedTs;
+  /**
+   * Stage the second condition on the built workspace beside the edit, its
+   * staging premises diagnosed.
+   */
+  readonly stage: (workspace: TestWorkspace, context: string) => Promise<void>;
+  /** The second condition's finding, form-exact (SPEC 12.7, 14). */
+  readonly beside: {
+    /** The condition's `14.N` identity (the pinned token table). */
+    readonly condition: string;
+    /** Its stable code. */
+    readonly code: string;
+    /** Its concerned path. */
+    readonly path: string;
+    /** What it is, for the diagnoses. */
+    readonly what: string;
+  };
+}
+
+const T14_1_PAIRS: readonly T14_1Pair[] = [
+  {
+    label: "journal pair",
+    config: T14_1_JOURNAL_PAIR_CONFIG,
+    stage: appendT14_1JournalGarbage,
+    beside: {
+      condition: "14.13",
+      code: "journal-error",
+      path: T14_1_JOURNAL_PATH,
+      what:
+        "the garbage line's journal error, concerning the journal path " +
+        "(SPEC 14.13; T6.1-3)",
+    },
+  },
+  {
+    label: "obstruction pair (the twin under outDir out)",
+    config: T14_1_OBSTRUCTION_PAIR_CONFIG,
+    stage: obstructT14_1OutDir,
+    beside: {
+      condition: "14.22",
+      code: "obstructed-write-path",
+      path: T14_1_OUT,
+      what:
+        "the refused write's obstructed write path, concerning the " +
+        "offending component out (SPEC 14.22; T13.4-6)",
+    },
+  },
+];
+
+/**
+ * The commands T14-1 drives over each pair, in its TEST-SPEC order, each
+ * under `--json`: `build` (SPEC 12.1, 14), the gated read `ids` (13.3: the
+ * gate reports exactly the findings a `build` would now report and the read
+ * answers nothing), and `check` (12.2: every build validation, journal
+ * errors included). Every report is the 12.7 findings-only document, `ids`'
+ * too — a refusing read's findings are its whole report (12.7, 13.3) — so
+ * an `ids` answer beside the findings fails the form-exact decode.
+ */
+const T14_1_PAIR_COMMANDS: readonly {
+  readonly argv: readonly string[];
+  readonly why: string;
+}[] = [
+  {
+    argv: ["build", "--json"],
+    why:
+      "a failing `build` exits 1 with the findings report (SPEC 12.0, " +
+      "12.1, 12.7)",
+  },
+  {
+    argv: ["ids", "--json"],
+    why:
+      "the gate turns the read back: exit 1, the findings report as the " +
+      "whole stdout, answering nothing (SPEC 13.3, 12.0, 12.7)",
+  },
+  {
+    argv: ["check", "--json"],
+    why:
+      "`check` exits 1 on any finding, the findings report as the whole " +
+      "stdout (SPEC 12.2, 12.0, 12.7)",
+  },
+];
+
+/**
+ * One pair's report at one command (the module header's pairs bullet):
+ * exactly two findings in 12.7's order — by code, the numbered conditions
+ * in numeric order, which the form-exact decode enforces on every report —
+ * the condition-1 finding first, located in `specs/A.mdx` within the
+ * id-less section's byte window, `path` `null` (12.7: a located condition
+ * concerns no path), and beside it the pair's finding, form-exact: its
+ * stable code, its concerned path, and `locations` `[]` (a journal
+ * condition and a write path have no in-source location, SPEC 14, 12.7);
+ * every message non-blank (information presence, not wording, H-3). The
+ * count is exact at `check` too (the module header's check-side bullet).
+ */
+function assertT14_1PairReport(
+  findings: readonly Finding[],
+  pair: T14_1Pair,
+  context: string,
+): void {
+  assertSameJson(
+    findings.map((finding) => finding.condition ?? finding.code),
+    ["14.1", pair.beside.condition],
+    `${context} — exactly two findings, in 12.7's order: the staged ` +
+      `missing ID (14.1) and, beside it, ${pair.beside.what} — a family the ` +
+      `source validation error leaves detectable is reported beside it, ` +
+      `never dropped from the failing workspace's report (SPEC 14, 13.3, ` +
+      `12.7)`,
+  );
+  const missingId = findings[0]!;
+  const beside = findings[1]!;
+  assertFindingLocated(
+    missingId,
+    { file: T14_1_PAIR_FILE, window: T14_1_PAIR_ID_LESS_WINDOW },
+    `${context}: the condition-1 finding locates the section with no id ` +
+      `(SPEC 14, 14.1)`,
+  );
+  assertSameJson(
+    missingId.path,
+    null,
+    `${context}: the condition-1 finding, a located condition, concerns no ` +
+      `path — \`path\` null (SPEC 12.7); its message: ` +
+      JSON.stringify(missingId.message),
+  );
+  assertSameJson(
+    { code: beside.code, path: beside.path, locations: beside.locations },
+    { code: pair.beside.code, path: pair.beside.path, locations: [] },
+    `${context}: the condition-${pair.beside.condition.slice(3)} finding, ` +
+      `form-exact — \`code\` "${pair.beside.code}", the concerned path ` +
+      `"${pair.beside.path}", and no locations (SPEC 14, 12.7, ` +
+      `${pair.beside.condition}); its message: ` +
+      JSON.stringify(beside.message),
+  );
+  for (const finding of findings) {
+    if (finding.message.trim() === "") {
+      fail(
+        `${context}: the ${String(finding.condition)} finding must state a ` +
+          `correction-oriented message — information presence, not wording ` +
+          `(SPEC 14; H-3); got a blank message`,
+      );
+    }
+  }
+}
+
+/**
+ * One pair (the module header's pairs bullet): a fresh workspace of the
+ * pair's configuration and the valid `specs/A.mdx`, built (exit 0); then
+ * `specs/A.mdx` given the section with no `id` and the pair's second
+ * condition staged; then `build`, `ids`, and `check`, each under `--json`
+ * and inside a whole-root compare — nothing modified throughout (SPEC
+ * 12.1: a failing `build`; 13.3: the gate, and `check`, which never
+ * refreshes; 12.2) — each exiting 1 with the pair's report
+ * (`assertT14_1PairReport`).
+ */
+async function runT14_1Pair(
+  product: ProductBinding,
+  pair: T14_1Pair,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": pair.config,
+        [T14_1_PAIR_FILE]: T14_1_PAIR_SOURCE,
+      },
+    },
+    async (workspace) => {
+      const context = `T14-1 ${pair.label}`;
+      await buildOk(
+        product,
+        workspace,
+        `${context}: \`build\` over the valid workspace before the staging ` +
+          `(SPEC 12.1)`,
+      );
+      await workspace.file(T14_1_PAIR_FILE, T14_1_PAIR_EDITED);
+      await pair.stage(workspace, context);
+      for (const command of T14_1_PAIR_COMMANDS) {
+        const label = `${context}: \`${command.argv.join(" ")}\``;
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const findings = await runFindingsReport(
+              product,
+              workspace,
+              command.argv,
+              1,
+              `${label} — ${command.why}`,
+            );
+            assertT14_1PairReport(findings, pair, label);
+          },
+          `${label}: nothing modified throughout — sources, journal, ` +
+            `derived files, and graph data byte-identical, the stale graph ` +
+            `data unrefreshed (SPEC 12.1, 12.2, 13.3)`,
+        );
+      }
+    },
+  );
+}
+
 const T14_1 = defineProductTest({
   id: "T14-1",
   title:
-    "a workspace seeded with several independent error conditions across files: `build` and `check` report each of them (not only the first), and every report identifies file and location and states a correction-oriented message — information presence, not wording; and at each `--json` run's state the human `build` and `check` exit 1 alike and carry every finding's stable code, its location — its file and its range's start and end — its concerned path, and its identities, and each staged spelling its JSON message quotes (the 14.4 segment, the unresolved targets, the element name, the marker chain) (robust matching, H-3) (SPEC 1.7, 12.0, 14)",
+    "a workspace seeded with several independent error conditions across files: `build` and `check` report each of them (not only the first), and every report identifies file and location and states a correction-oriented message — information presence, not wording; and at each `--json` run's state the human `build` and `check` exit 1 alike and carry every finding's stable code, its location — its file and its range's start and end — its concerned path, and its identities, and each staged spelling its JSON message quotes (the 14.4 segment, the unresolved targets, the element name, the marker chain) (robust matching, H-3); and families a source validation error leaves detectable are reported beside it: a freshly built valid workspace's `specs/A.mdx` given a section with no `id` beside a garbage line appended to the journal, and separately its twin built under `markdown: { emit: true, outDir: \"out\" }` with the directory `out` replaced by a plain file in the garbage line's place — `build` and `ids` (answering nothing) each exit 1 reporting exactly two findings in 12.7's order, the condition-1 finding and beside it the condition-13 finding (`code` `journal-error`, `path` `.xspec/journal`, `locations` []), respectively the condition-22 finding (`code` `obstructed-write-path`, `path` `out`, `locations` []), and `check` reports both, exit 1, the workspace byte-identical around each run (SPEC 1.7, 12.0, 12.1, 12.2, 12.7, 13.3, 14, 14.13, 14.22)",
   run: async (product) => {
     await withWorkspace({ files: T14_1_FILES }, async (workspace) => {
       const buildContext =
@@ -1052,6 +1462,12 @@ const T14_1 = defineProductTest({
         "T14-1",
       );
     });
+    // The pairs, last (the module header's pairs bullet): a product
+    // dropping a family beside the source validation error fails here,
+    // after every assertion of the six-condition workspace.
+    for (const pair of T14_1_PAIRS) {
+      await runT14_1Pair(product, pair);
+    }
   },
 });
 
@@ -1791,9 +2207,6 @@ const ID_LESS_A_SOURCE = stagedMdx(
   "T14-4/T14-6 specs/a.mdx without an id (the sweep's missing-ID entry, 14.1; re-staged after the build by T14-4's 14.21 arm, its failing workspace)",
   "<S>\nNo id.\n</S>\n",
 );
-
-const GARBAGE_JOURNAL_LINE =
-  "?? harness-injected garbage: not a journal entry ??\n";
 
 const SWEEP_ENTRIES: readonly SweepEntry[] = [
   specArm("14.1", "missing ID", ID_LESS_A_SOURCE),

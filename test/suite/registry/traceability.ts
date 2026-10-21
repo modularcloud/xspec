@@ -959,7 +959,14 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // byte-determinism (12.0) are carriage context with home coverage at
   // T6.4-*, T10.6-*, T10.7-*, T13.3-*, and T12.0-*.
   "T13.5-13": ["13.5", "14"],
-  "T14-1": ["14"],
+  // T14-1: the reporting contract (home "14") with, on its two pairs, the
+  // gate's report at `ids` — exactly the findings a `build` would now
+  // report, a journal error or a refused write beside a source validation
+  // error, answering nothing and modifying nothing (13.3) — and each
+  // pair's findings form-exact in 12.7's order, a path condition's
+  // concerned path beside `locations` [] (12.7); its human reports (12.0's
+  // information parity) are context with home coverage at T12.0-1.
+  "T14-1": ["14", "12.7", "13.3"],
   "T14-2": ["14", "2.4", "4.5"],
   "T14-3": ["14"],
   "T14-4": ["14"],
