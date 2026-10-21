@@ -453,7 +453,7 @@ const BASE_IMPORT = 'import BASE from "./BASE.xspec"';
  * T14-11's re-staging (of (t)) stage it after their own.
  */
 const BASE_STAGED = stagedMdx(
-  "T14-4/T14-6/T14-11/T14-12 the BASE module (the (b), (g), and (t) arms) specs/BASE.mdx",
+  "T12.0-15/T14-4/T14-6/T14-11/T14-12 the BASE module (the (b), (g), and (t) arms) specs/BASE.mdx",
   BASE_MDX,
 );
 
@@ -999,7 +999,7 @@ const A_MDX = '<S id="a">\nAlpha behavior.\n</S>\n';
  * re-staging stage (p)'s, (q)'s, and (ac)'s after theirs.
  */
 const A_STAGED = stagedMdx(
-  "T14-4/T14-6/T14-11/T14-12 the code arms' spec source specs/A.mdx",
+  "T12.0-15/T14-4/T14-6/T14-11/T14-12 the code arms' spec source specs/A.mdx",
   A_MDX,
 );
 
@@ -1416,7 +1416,7 @@ function specUnparseableArm(
       "xspec.config.ts": SPECS_ONLY_CONFIG,
       ...(options.extraFiles ?? {}),
       [ARM_FILE]: stagedMdx(
-        `T14-4/T14-6/T14-11/T14-12 (${arm}) ${name} ${ARM_FILE}`,
+        `T12.0-15/T14-4/T14-6/T14-11/T14-12 (${arm}) ${name} ${ARM_FILE}`,
         fixture.text,
         "unparseable",
       ),
@@ -1446,7 +1446,7 @@ function codeUnparseableArm(
       "xspec.config.ts": SPEC_AND_CODE_CONFIG,
       "specs/A.mdx": A_STAGED,
       [CODE_FILE]: stagedTs(
-        `T14-4/T14-6/T14-11/T14-12 (${arm}) ${name} ${CODE_FILE}`,
+        `T12.0-15/T14-4/T14-6/T14-11/T14-12 (${arm}) ${name} ${CODE_FILE}`,
         fixture.text,
         "unparseable",
       ),

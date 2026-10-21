@@ -218,7 +218,12 @@
 //   product's 14.1 message cites `SPEC 1.3`, whose `3` stands in for the
 //   location's end); and no datum here holds a character a human report
 //   may quote or escape, nor does a path arise in the marked byte form (the
-//   staged paths are ASCII), so every datum is asked.
+//   staged paths are ASCII), so every datum is asked. T12.0-15 reruns the
+//   stagings (`runT1333GateStagings`, its `GateVisitor` handed each gated
+//   invocation with T13.3-3's own probe as `home`) to compare each human
+//   gate report, decoded, with its `--json` twin's findings
+//   (section-12.0-iv.ts); the probes, the never-gated contrasts, and the
+//   stale twins' premises stay T13.3-3's (`T13_3_3_HOME`).
 // - T13.3-2's record-discipline arm (record corrupted shape-blind, T6.6-6's
 //   staging via the H-3 record-staging adapter): SPEC 13.3 pins the record —
 //   the recorded derived-file paths — as neither read, repaired, nor
@@ -468,7 +473,7 @@ import {
 // (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), staged at
 // every site.
 const GRAPH_CONFIG = stagedTs(
-  "T13.3-2/T13.3-3/T13.3-4/T13.3-5 xspec.config.ts — one spec group and the coverage profile p (targets all)",
+  "T12.0-15/T13.3-2/T13.3-3/T13.3-4/T13.3-5 xspec.config.ts — one spec group and the coverage profile p (targets all)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -975,7 +980,7 @@ function assertAtAnswer(
 // staged-source record staged at every site (S-9's before-any-product
 // clause; helpers/staged-mdx.ts), aliased below where each arm names it.
 const ALPHA_ON_BETA_SOURCE = stagedMdx(
-  "T13.3-1/T13.3-2/T13.3-3 specs/A.mdx (alpha depending on beta, then beta: T13.3-1's workspace, T13.3-2's record-discipline workspace, T13.3-3's whole-gate workspaces)",
+  "T12.0-15/T13.3-1/T13.3-2/T13.3-3 specs/A.mdx (alpha depending on beta, then beta: T13.3-1's workspace, T13.3-2's record-discipline workspace, T13.3-3's whole-gate workspaces)",
   [
     '<S id="alpha" d={["beta"]}>',
     "Alpha depends on beta.",
@@ -2651,27 +2656,38 @@ function assertStaleModuleFindings(
 // T13.3-3 — the gate
 // ---------------------------------------------------------------------------
 
-const T13_3_3_A = [
-  '<S id="alpha">',
-  "Alpha intro.",
-  '<S id="alpha.one">',
-  "Alpha-one text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="gamma">',
-  "Gamma text.",
-  "</S>",
-  "",
-].join("\n");
-const T13_3_3_B_VALID = ['<S id="beta">', "Beta text.", "</S>", ""].join("\n");
+// The invalid-sources workspace's initial sources — T13.3-3's first
+// workspace, and an initial file of T12.0-15's restaging of it
+// (`runT1333GateStagings`), which follows that body's earlier invocations:
+// staged-source records (S-9's before-any-product clause;
+// helpers/staged-mdx.ts).
+const T13_3_3_A = stagedMdx(
+  "T12.0-15/T13.3-3 specs/A.mdx (the invalid-sources workspace: alpha with its child alpha.one, and gamma)",
+  [
+    '<S id="alpha">',
+    "Alpha intro.",
+    '<S id="alpha.one">',
+    "Alpha-one text.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="gamma">',
+    "Gamma text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+const T13_3_3_B_VALID = stagedMdx(
+  "T12.0-15/T13.3-3 specs/B.mdx (the invalid-sources workspace's valid beta, before its id is removed)",
+  ['<S id="beta">', "Beta text.", "</S>", ""].join("\n"),
+);
 // A non-root section without `id` — build validation condition 14.1.
 const T13_3_3_B_INVALID = ["<S>", "Beta text.", "</S>", ""].join("\n");
 // The invalidating edit is staged after the body's `build`, so it is a ledger
 // record (S-9's before-any-product clause; helpers/staged-mdx.ts) — the same
 // constant, well-formed MDX (the missing id is validation condition 14.1).
 const T13_3_3_B_ID_LESS = stagedMdx(
-  "T13.3-3 specs/B.mdx with its section's id removed (14.1)",
+  "T12.0-15/T13.3-3 specs/B.mdx with its section's id removed (14.1)",
   T13_3_3_B_INVALID,
 );
 
@@ -2695,7 +2711,7 @@ const GATE_GARBAGE_LINE = "?? harness-injected garbage: not a journal entry ??";
 const T13_3_3_GATE_A = ALPHA_ON_BETA_SOURCE;
 // An unreferenced section for the legitimate journaled rename (line 1).
 const T13_3_3_GATE_T = stagedMdx(
-  "T13.3-3 specs/T.mdx (the garbage-journal workspace's unreferenced tmp section)",
+  "T12.0-15/T13.3-3 specs/T.mdx (the garbage-journal workspace's unreferenced tmp section)",
   ['<S id="tmp">', "Tmp text.", "</S>", ""].join("\n"),
 );
 
@@ -2705,7 +2721,7 @@ const T13_3_3_GATE_T = stagedMdx(
 // The workspace follows the body's first product invocation: a TypeScript
 // staged-source record (S-9).
 const T13_3_3_OUTDIR_CONFIG = stagedTs(
-  "T13.3-3 obstructed-write-path workspace xspec.config.ts — emission under outDir mdout, the coverage profile p",
+  "T12.0-15/T13.3-3 obstructed-write-path workspace xspec.config.ts — emission under outDir mdout, the coverage profile p",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -2737,7 +2753,7 @@ export default defineConfig({
 // from what the twin holds. Staged after the twin's first product
 // invocation: a staged-source record (S-9).
 const T13_3_3_GATE_A_EDITED = stagedMdx(
-  "T13.3-3 stale twins' specs/A.mdx — beta's text edited, validly, after graph data was last written",
+  "T12.0-15/T13.3-3 stale twins' specs/A.mdx — beta's text edited, validly, after graph data was last written",
   [
     '<S id="alpha" d={["beta"]}>',
     "Alpha depends on beta.",
@@ -2758,7 +2774,7 @@ const T13_3_3_GATE_A_EDITED = stagedMdx(
 // the body's first product invocation: a TypeScript staged-source record
 // (S-9).
 const T13_3_3_OUT_CONFIG = stagedTs(
-  "T13.3-3 write-path stale twin xspec.config.ts — emission under outDir out, the coverage profile p",
+  "T12.0-15/T13.3-3 write-path stale twin xspec.config.ts — emission under outDir out, the coverage profile p",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -3239,6 +3255,44 @@ async function assertStaleTwinPremise(
 }
 
 /**
+ * One gated invocation of T13.3-3's stagings (SPEC 13.3): its argv, `--json`
+ * among it but for `query` (a JSON-only surface, SPEC 11), the context
+ * naming the staging and the invocation, and whether it is a mutating
+ * `review` subcommand (`create`, `resolve`, `split`), gated past its
+ * acquisition (13.5, 10.7).
+ */
+export interface GateInvocation {
+  readonly argv: readonly string[];
+  readonly context: string;
+  readonly mutating: boolean;
+}
+
+/**
+ * What one run of T13.3-3's stagings does (`runT1333GateStagings`): at each
+ * gated invocation `probe`, handed T13.3-3's own probe of it as `home` — the
+ * findings it pins, its human form's mentions, and the modifies-nothing
+ * compare — and, where `home` holds, the stagings' other assertions: the
+ * invalid-sources workspace's `check`, the never-gated contrasts, and the
+ * stale twins' premises. T13.3-3 runs `home` throughout; T12.0-15 runs its
+ * human twin at each invocation instead and nothing else
+ * (section-12.0-iv.ts).
+ */
+export interface GateVisitor {
+  readonly probe: (
+    workspace: TestWorkspace,
+    invocation: GateInvocation,
+    home: () => Promise<void>,
+  ) => Promise<void>;
+  readonly home: boolean;
+}
+
+/** T13.3-3's own visitor: every probe and every other assertion its own. */
+const T13_3_3_HOME: GateVisitor = {
+  probe: (_workspace, _invocation, home) => home(),
+  home: true,
+};
+
+/**
  * Whole-gate arm 1, the garbage journal line (14.13; the module header):
  * T11.2-6's garbage-journal fixture on a fresh workspace (H-1) — and, with
  * `stale`, its stale twin (TEST-SPEC T13.3-3; `stageStaleTwinEdit`). After
@@ -3260,6 +3314,7 @@ async function assertStaleTwinPremise(
 async function runGarbageJournalGate(
   product: ProductBinding,
   stale: boolean,
+  visitor: GateVisitor,
 ): Promise<void> {
   await withWorkspace(
     {
@@ -3338,16 +3393,23 @@ async function runGarbageJournalGate(
       // (the same predicate, `namesGarbageLine`; the module header's
       // T13.3-3 human-form note).
       for (const probe of gatedReadInvocations(ALPHA)) {
-        await probeWholeGate(
-          product,
+        const probeContext = `${context} ${probe.what}`;
+        await visitor.probe(
           workspace,
-          probe.argv,
-          { "14.13": 1 },
-          assertJournalGateFinding,
-          `${context} ${probe.what}`,
-          { verifyHuman: assertHumanNamesGarbageLine, unchangedWhy },
+          { argv: probe.argv, context: probeContext, mutating: false },
+          () =>
+            probeWholeGate(
+              product,
+              workspace,
+              probe.argv,
+              { "14.13": 1 },
+              assertJournalGateFinding,
+              probeContext,
+              { verifyHuman: assertHumanNamesGarbageLine, unchangedWhy },
+            ),
         );
       }
+      if (!visitor.home) return;
 
       // Never-gated contrast on the same workspace (SPEC 11.2, 11.6).
       await assertNeverGatedAnswers(
@@ -3436,6 +3498,7 @@ const WRITE_PATH_GATE_STALE_TWIN: WritePathGateStaging = {
 async function runObstructedWritePathGate(
   product: ProductBinding,
   staging: WritePathGateStaging,
+  visitor: GateVisitor,
 ): Promise<void> {
   await withWorkspace(
     { "xspec.config.ts": staging.config, "specs/A.mdx": T13_3_3_GATE_A },
@@ -3550,25 +3613,33 @@ async function runObstructedWritePathGate(
         );
       };
       for (const probe of gatedReadInvocations(ALPHA, base)) {
-        await probeWholeGate(
-          product,
+        const probeContext = `${context} ${probe.what}`;
+        await visitor.probe(
           workspace,
-          probe.argv,
-          { "14.22": 1 },
-          concernsOutDir,
-          `${context} ${probe.what}`,
-          { unchangedWhy },
+          { argv: probe.argv, context: probeContext, mutating: false },
+          () =>
+            probeWholeGate(
+              product,
+              workspace,
+              probe.argv,
+              { "14.22": 1 },
+              concernsOutDir,
+              probeContext,
+              { unchangedWhy },
+            ),
         );
       }
 
       // Never-gated contrast on the same workspace (SPEC 11.2, 11.6).
-      await assertNeverGatedAnswers(
-        product,
-        workspace,
-        [A_ROOT],
-        context,
-        unchangedWhy,
-      );
+      if (visitor.home) {
+        await assertNeverGatedAnswers(
+          product,
+          workspace,
+          [A_ROOT],
+          context,
+          unchangedWhy,
+        );
+      }
 
       if (items !== undefined) {
         // The mutating `review` subcommands meet the refused-write gate
@@ -3611,19 +3682,25 @@ async function runObstructedWritePathGate(
           },
         ];
         for (const run of mutating) {
-          await probeWholeGate(
-            product,
+          const runContext = `${context} ${run.what}`;
+          await visitor.probe(
             workspace,
-            run.argv,
-            { "14.22": 1 },
-            concernsOutDir,
-            `${context} ${run.what}`,
-            { unchangedWhy: STALE_TWIN_MUTATING_UNCHANGED },
+            { argv: run.argv, context: runContext, mutating: true },
+            () =>
+              probeWholeGate(
+                product,
+                workspace,
+                run.argv,
+                { "14.22": 1 },
+                concernsOutDir,
+                runContext,
+                { unchangedWhy: STALE_TWIN_MUTATING_UNCHANGED },
+              ),
           );
         }
       }
 
-      if (staleGraph !== undefined) {
+      if (staleGraph !== undefined && visitor.home) {
         // The twin's premise: the plain file removed — a nonexistent
         // component obstructs nothing (SPEC 13.4) — the gate condition
         // lifted.
@@ -3639,106 +3716,118 @@ async function runObstructedWritePathGate(
   );
 }
 
-const T13_3_3 = defineProductTest({
-  id: "T13.3-3",
-  title:
-    "with invalid sources, each read command and each mutating review subcommand (create under --base/--strategy audit/--coverage, resolve, split) reports the validation errors, exits 1, answers nothing, and modifies nothing — no session created, and session file, journal, derived files, and graph data byte-identical; the gate is over every finding a `build` would report: with a garbage journal line staged, ids, show, coverage, review status, and query each report exactly the journal error (14.13) naming the line, form-exact — code `journal-error`, path `.xspec/journal`, locations [] — `impact` absent from that staging by necessity, a given baseline's resolution, which precedes the gate, meeting the journal error first as a usage error (exit 2, `journal-error`, T6.3-6) — and with an obstructed write path staged, the same five and `impact --base` against a commit taken before the obstruction (its baseline resolving) each report exactly the refused write (14.22) naming its offending component — exit 1, answer nothing, and modify nothing, while on the same workspaces occurrences, view, and at answer per file finding-free at exit 0 and inventory answers, none of them modifying anything; each staging's stale twin — a section's text edited, validly, after graph data was last written, no read run since, the write-path twin's obstruction the directory `out`, its emission outDir, replaced by a plain file — gives each of those outcomes alike, graph data byte-identical around every read though a refresh would rewrite it, and on the write-path twin review create --strategy audit under a new name, review resolve naming an unblocked item, and review split naming an item whose scope root has children each exit 1 past their acquisition reporting exactly the condition-22 finding concerning `out` — no session created, the existing session, journal, derived files, and graph data byte-identical, the stale graph data unrefreshed; and at each gated `--json` run's state but `query`'s (a JSON-only surface) the human form — the same argv without `--json`, a mutating review subcommand's inside the same modifies-nothing compare — exits 1 alike and carries every finding's stable code, its location — its file and its range's start and end — its concerned path, and its identities, and in the garbage-journal stagings names the line as the JSON message does (robust matching, H-3) (SPEC 13.3, 10.7, 11.2, 11.6, 12.0, 13.5, 14, 1.7)",
-  run: async (product) => {
-    await withWorkspace(
-      {
-        "xspec.config.ts": GRAPH_CONFIG,
-        "specs/A.mdx": T13_3_3_A,
-        "specs/B.mdx": T13_3_3_B_VALID,
-      },
-      async (workspace) => {
-        const ALPHA = "specs/A.mdx#alpha";
-        const ALPHA_ONE = "specs/A.mdx#alpha.one";
-        const GAMMA = "specs/A.mdx#gamma";
+/**
+ * T13.3-3's stagings (TEST-SPEC T13.3-3; the module header): the
+ * invalid-sources workspace — a resolvable commit, a build, and a session
+ * `s` holding a resolved leaf, staged while the sources were valid, then
+ * B's id removed — and the whole-gate arms, the garbage journal line and
+ * the obstructed write path, each with its stale twin; at each gated
+ * invocation `visitor.probe`, and, where `visitor.home` holds, the
+ * stagings' other assertions (`GateVisitor`). T13.3-3 passes its own
+ * probes (`T13_3_3_HOME`); T12.0-15 its human twins (section-12.0-iv.ts).
+ * Exported for T12.0-15.
+ */
+export async function runT1333GateStagings(
+  product: ProductBinding,
+  visitor: GateVisitor,
+): Promise<void> {
+  await withWorkspace(
+    {
+      "xspec.config.ts": GRAPH_CONFIG,
+      "specs/A.mdx": T13_3_3_A,
+      "specs/B.mdx": T13_3_3_B_VALID,
+    },
+    async (workspace) => {
+      const ALPHA = "specs/A.mdx#alpha";
+      const ALPHA_ONE = "specs/A.mdx#alpha.one";
+      const GAMMA = "specs/A.mdx#gamma";
 
-        // --- Staging while the sources are valid: a resolvable commit, a
-        // build, and a session holding a resolved leaf so that `alpha`'s
-        // subtree-coherence item is unblocked (its scope root has a child,
-        // so `split` would apply) and `gamma`'s leaf item is unblocked and
-        // unresolved (so `resolve` would apply).
-        await workspace.gitInit();
-        const base = await workspace.gitCommitAll("valid baseline");
-        await buildOk(product, workspace, "T13.3-3 staging `build`");
-        await expectExit(
-          product,
-          workspace,
-          ["review", "create", "--strategy", "audit", "--name", "s"],
-          0,
-          "T13.3-3 staging `review create --strategy audit --name s`",
+      // --- Staging while the sources are valid: a resolvable commit, a
+      // build, and a session holding a resolved leaf so that `alpha`'s
+      // subtree-coherence item is unblocked (its scope root has a child,
+      // so `split` would apply) and `gamma`'s leaf item is unblocked and
+      // unresolved (so `resolve` would apply).
+      await workspace.gitInit();
+      const base = await workspace.gitCommitAll("valid baseline");
+      await buildOk(product, workspace, "T13.3-3 staging `build`");
+      await expectExit(
+        product,
+        workspace,
+        ["review", "create", "--strategy", "audit", "--name", "s"],
+        0,
+        "T13.3-3 staging `review create --strategy audit --name s`",
+      );
+      const initial = await sessionStatus(
+        product,
+        workspace,
+        "s",
+        "T13.3-3 staging",
+      );
+      const alphaOneItem = requireRowByScope(
+        initial,
+        ALPHA_ONE,
+        "T13.3-3 staging item lookup",
+      ).id;
+      await resolveNoChange(product, workspace, "s", alphaOneItem, "T13.3-3");
+      const staged = await sessionStatus(
+        product,
+        workspace,
+        "s",
+        "T13.3-3 staging (after resolving the alpha.one leaf)",
+      );
+      const alphaRow = requireRowByScope(
+        staged,
+        ALPHA,
+        "T13.3-3 staging item lookup",
+      );
+      const gammaRow = requireRowByScope(
+        staged,
+        GAMMA,
+        "T13.3-3 staging item lookup",
+      );
+      if (alphaRow.kind !== "subtree-coherence" || alphaRow.blocked) {
+        fail(
+          "T13.3-3 staging premise: alpha's item must be an unblocked " +
+            "subtree-coherence item whose scope root has a child (its " +
+            "alpha.one blocker is resolved, SPEC 10.6, 10.3), so `split` " +
+            "names an item it would otherwise decompose (SPEC 10.7); got " +
+            JSON.stringify(alphaRow),
         );
-        const initial = await sessionStatus(
-          product,
-          workspace,
-          "s",
-          "T13.3-3 staging",
+      }
+      if (gammaRow.status !== "unresolved" || gammaRow.blocked) {
+        fail(
+          "T13.3-3 staging premise: gamma's leaf item must be unblocked " +
+            "and unresolved (SPEC 10.6), so `resolve` names an item it " +
+            "would otherwise resolve (SPEC 10.7); got " +
+            JSON.stringify(gammaRow),
         );
-        const alphaOneItem = requireRowByScope(
-          initial,
-          ALPHA_ONE,
-          "T13.3-3 staging item lookup",
-        ).id;
-        await resolveNoChange(product, workspace, "s", alphaOneItem, "T13.3-3");
-        const staged = await sessionStatus(
-          product,
-          workspace,
-          "s",
-          "T13.3-3 staging (after resolving the alpha.one leaf)",
-        );
-        const alphaRow = requireRowByScope(
-          staged,
-          ALPHA,
-          "T13.3-3 staging item lookup",
-        );
-        const gammaRow = requireRowByScope(
-          staged,
-          GAMMA,
-          "T13.3-3 staging item lookup",
-        );
-        if (alphaRow.kind !== "subtree-coherence" || alphaRow.blocked) {
-          fail(
-            "T13.3-3 staging premise: alpha's item must be an unblocked " +
-              "subtree-coherence item whose scope root has a child (its " +
-              "alpha.one blocker is resolved, SPEC 10.6, 10.3), so `split` " +
-              "names an item it would otherwise decompose (SPEC 10.7); got " +
-              JSON.stringify(alphaRow),
-          );
-        }
-        if (gammaRow.status !== "unresolved" || gammaRow.blocked) {
-          fail(
-            "T13.3-3 staging premise: gamma's leaf item must be unblocked " +
-              "and unresolved (SPEC 10.6), so `resolve` names an item it " +
-              "would otherwise resolve (SPEC 10.7); got " +
-              JSON.stringify(gammaRow),
-          );
-        }
+      }
 
-        // --- The invalidating edit: B.mdx now fails build validation with
-        // exactly one condition (14.1, missing id). The baseline commit
-        // predates it, so baseline resolution succeeds and the gate's
-        // report is the operative outcome (SPEC 12.0, 6.3, 13.3).
-        await workspace.file("specs/B.mdx", T13_3_3_B_ID_LESS);
+      // --- The invalidating edit: B.mdx now fails build validation with
+      // exactly one condition (14.1, missing id). The baseline commit
+      // predates it, so baseline resolution succeeds and the gate's
+      // report is the operative outcome (SPEC 12.0, 6.3, 13.3).
+      await workspace.file("specs/B.mdx", T13_3_3_B_ID_LESS);
 
-        /**
-         * Run one probe: exit 1, stdout is the findings report carrying
-         * exactly the staged validation error (naming specs/B.mdx); then,
-         * at the same state, its human form — the same argv without
-         * `--json` (`assertHumanGateReport`; none for `query`, a JSON-only
-         * surface) — exits 1 as well and mentions what the decoded
-         * findings carry; and the whole workspace — session file, journal,
-         * derived files, graph data, `.git/` — is byte-identical around the
-         * two runs (a mutating `review` subcommand's human form included:
-         * no session created, no status recorded, no decomposition).
-         */
-        const probeSourceGate = async (
-          argv: readonly string[],
-          what: string,
-        ): Promise<void> => {
-          const context = `T13.3-3 ${what}`;
-          await assertLeavesUnchanged(
+      /**
+       * Run one probe: exit 1, stdout is the findings report carrying
+       * exactly the staged validation error (naming specs/B.mdx); then,
+       * at the same state, its human form — the same argv without
+       * `--json` (`assertHumanGateReport`; none for `query`, a JSON-only
+       * surface) — exits 1 as well and mentions what the decoded
+       * findings carry; and the whole workspace — session file, journal,
+       * derived files, graph data, `.git/` — is byte-identical around the
+       * two runs (a mutating `review` subcommand's human form included:
+       * no session created, no status recorded, no decomposition).
+       */
+      const probeSourceGate = async (
+        argv: readonly string[],
+        what: string,
+        mutating = false,
+      ): Promise<void> => {
+        const context = `T13.3-3 ${what}`;
+        await visitor.probe(workspace, { argv, context, mutating }, () =>
+          assertLeavesUnchanged(
             workspace.root,
             async () => {
               const result = await runCli(product, workspace, argv);
@@ -3775,33 +3864,36 @@ const T13_3_3 = defineProductTest({
               );
             },
             context,
-          );
-        };
+          ),
+        );
+      };
 
-        // The six gated reads (SPEC 13.3).
-        await probeSourceGate(["ids", "--json"], "`ids --json`");
-        await probeSourceGate(
-          ["show", ALPHA, "--json"],
-          `\`show ${ALPHA} --json\``,
-        );
-        await probeSourceGate(["coverage", "--json"], "`coverage --json`");
-        await probeSourceGate(
-          ["impact", "--base", base, "--json"],
-          "`impact --base <valid-ref> --json` (baseline resolution, " +
-            "which precedes the gate, succeeds, so the gate's report is " +
-            "the operative outcome)",
-        );
-        await probeSourceGate(
-          ["review", "status", "s", "--json"],
-          "`review status s --json`",
-        );
-        await probeSourceGate(["query", "nodes"], "`query nodes`");
+      // The six gated reads (SPEC 13.3).
+      await probeSourceGate(["ids", "--json"], "`ids --json`");
+      await probeSourceGate(
+        ["show", ALPHA, "--json"],
+        `\`show ${ALPHA} --json\``,
+      );
+      await probeSourceGate(["coverage", "--json"], "`coverage --json`");
+      await probeSourceGate(
+        ["impact", "--base", base, "--json"],
+        "`impact --base <valid-ref> --json` (baseline resolution, " +
+          "which precedes the gate, succeeds, so the gate's report is " +
+          "the operative outcome)",
+      );
+      await probeSourceGate(
+        ["review", "status", "s", "--json"],
+        "`review status s --json`",
+      );
+      await probeSourceGate(["query", "nodes"], "`query nodes`");
 
-        // `check` — a read command of 13.3, though it never refreshes:
-        // exit 1 with the validation error among its findings, modifying
-        // nothing. Lenient on the findings multiset (whether staleness
-        // findings are detectable beside the validation error is T14-4's
-        // reporter-matrix business, not 13.3's).
+      // `check` — a read command of 13.3, though it never refreshes:
+      // exit 1 with the validation error among its findings, modifying
+      // nothing. Lenient on the findings multiset (whether staleness
+      // findings are detectable beside the validation error is T14-4's
+      // reporter-matrix business, not 13.3's). T13.3-3's own assertion
+      // alone (`visitor.home`).
+      if (visitor.home) {
         await assertLeavesUnchanged(
           workspace.root,
           async () => {
@@ -3842,56 +3934,74 @@ const T13_3_3 = defineProductTest({
           },
           "T13.3-3 `check` with invalid sources modifies nothing",
         );
+      }
 
-        // The mutating review subcommands observe the same rule — 13.3
-        // binds `review` whole, and create/resolve/split all consult the
-        // current graph (SPEC 13.3, 10.7): no session file is created, no
-        // status recorded, no decomposition.
-        await probeSourceGate(
-          ["review", "create", "--base", base, "--name", "nb", "--json"],
-          "`review create --base <valid-ref> --name nb --json` (a given " +
-            "baseline's resolution precedes the gate, 12.0, so the gate's " +
-            "report is the operative outcome — exit 1, not 2)",
-        );
-        await probeSourceGate(
-          ["review", "create", "--strategy", "audit", "--name", "na", "--json"],
-          "`review create --strategy audit --name na --json`",
-        );
-        await probeSourceGate(
-          ["review", "create", "--coverage", "p", "--name", "nc", "--json"],
-          "`review create --coverage p --name nc --json`",
-        );
-        await probeSourceGate(
-          [
-            "review",
-            "resolve",
-            "s",
-            gammaRow.id,
-            "--status",
-            "no-change",
-            "--json",
-          ],
-          "`review resolve s <unblocked item> --status no-change --json` " +
-            "(no status recorded)",
-        );
-        await probeSourceGate(
-          ["review", "split", "s", alphaRow.id, "--json"],
-          "`review split s <unblocked splittable item> --json` (no " +
-            "decomposition)",
-        );
-      },
-    );
+      // The mutating review subcommands observe the same rule — 13.3
+      // binds `review` whole, and create/resolve/split all consult the
+      // current graph (SPEC 13.3, 10.7): no session file is created, no
+      // status recorded, no decomposition.
+      await probeSourceGate(
+        ["review", "create", "--base", base, "--name", "nb", "--json"],
+        "`review create --base <valid-ref> --name nb --json` (a given " +
+          "baseline's resolution precedes the gate, 12.0, so the gate's " +
+          "report is the operative outcome — exit 1, not 2)",
+        true,
+      );
+      await probeSourceGate(
+        ["review", "create", "--strategy", "audit", "--name", "na", "--json"],
+        "`review create --strategy audit --name na --json`",
+        true,
+      );
+      await probeSourceGate(
+        ["review", "create", "--coverage", "p", "--name", "nc", "--json"],
+        "`review create --coverage p --name nc --json`",
+        true,
+      );
+      await probeSourceGate(
+        [
+          "review",
+          "resolve",
+          "s",
+          gammaRow.id,
+          "--status",
+          "no-change",
+          "--json",
+        ],
+        "`review resolve s <unblocked item> --status no-change --json` " +
+          "(no status recorded)",
+        true,
+      );
+      await probeSourceGate(
+        ["review", "split", "s", alphaRow.id, "--json"],
+        "`review split s <unblocked splittable item> --json` (no " +
+          "decomposition)",
+        true,
+      );
+    },
+  );
 
-    // --- Whole-gate arm 1, the garbage journal line (14.13), and its stale
-    // twin (TEST-SPEC T13.3-3; `runGarbageJournalGate`, the module header).
-    await runGarbageJournalGate(product, false);
-    await runGarbageJournalGate(product, true);
+  // --- Whole-gate arm 1, the garbage journal line (14.13), and its stale
+  // twin (TEST-SPEC T13.3-3; `runGarbageJournalGate`, the module header).
+  await runGarbageJournalGate(product, false, visitor);
+  await runGarbageJournalGate(product, true, visitor);
 
-    // --- Whole-gate arm 2, the obstructed write path (14.22), and its stale
-    // twin, which also drives the mutating `review` subcommands past their
-    // acquisition (`runObstructedWritePathGate`, the module header).
-    await runObstructedWritePathGate(product, WRITE_PATH_GATE);
-    await runObstructedWritePathGate(product, WRITE_PATH_GATE_STALE_TWIN);
+  // --- Whole-gate arm 2, the obstructed write path (14.22), and its stale
+  // twin, which also drives the mutating `review` subcommands past their
+  // acquisition (`runObstructedWritePathGate`, the module header).
+  await runObstructedWritePathGate(product, WRITE_PATH_GATE, visitor);
+  await runObstructedWritePathGate(
+    product,
+    WRITE_PATH_GATE_STALE_TWIN,
+    visitor,
+  );
+}
+
+const T13_3_3 = defineProductTest({
+  id: "T13.3-3",
+  title:
+    "with invalid sources, each read command and each mutating review subcommand (create under --base/--strategy audit/--coverage, resolve, split) reports the validation errors, exits 1, answers nothing, and modifies nothing — no session created, and session file, journal, derived files, and graph data byte-identical; the gate is over every finding a `build` would report: with a garbage journal line staged, ids, show, coverage, review status, and query each report exactly the journal error (14.13) naming the line, form-exact — code `journal-error`, path `.xspec/journal`, locations [] — `impact` absent from that staging by necessity, a given baseline's resolution, which precedes the gate, meeting the journal error first as a usage error (exit 2, `journal-error`, T6.3-6) — and with an obstructed write path staged, the same five and `impact --base` against a commit taken before the obstruction (its baseline resolving) each report exactly the refused write (14.22) naming its offending component — exit 1, answer nothing, and modify nothing, while on the same workspaces occurrences, view, and at answer per file finding-free at exit 0 and inventory answers, none of them modifying anything; each staging's stale twin — a section's text edited, validly, after graph data was last written, no read run since, the write-path twin's obstruction the directory `out`, its emission outDir, replaced by a plain file — gives each of those outcomes alike, graph data byte-identical around every read though a refresh would rewrite it, and on the write-path twin review create --strategy audit under a new name, review resolve naming an unblocked item, and review split naming an item whose scope root has children each exit 1 past their acquisition reporting exactly the condition-22 finding concerning `out` — no session created, the existing session, journal, derived files, and graph data byte-identical, the stale graph data unrefreshed; and at each gated `--json` run's state but `query`'s (a JSON-only surface) the human form — the same argv without `--json`, a mutating review subcommand's inside the same modifies-nothing compare — exits 1 alike and carries every finding's stable code, its location — its file and its range's start and end — its concerned path, and its identities, and in the garbage-journal stagings names the line as the JSON message does (robust matching, H-3) (SPEC 13.3, 10.7, 11.2, 11.6, 12.0, 13.5, 14, 1.7)",
+  run: async (product) => {
+    await runT1333GateStagings(product, T13_3_3_HOME);
   },
 });
 

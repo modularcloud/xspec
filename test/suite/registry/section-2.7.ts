@@ -1567,7 +1567,7 @@ export const T2_7_3_SPREAD_UNPARSEABLE_STAGING: UnparseableStaging = {
   file: INVALID_PROP_FILE,
   files: {
     [INVALID_PROP_FILE]: stagedMdx(
-      `T2.7-3/T14-11 a spread attribute \`{...a, b}\` (the spread grammar pair's ill-formed half) ${INVALID_PROP_FILE}`,
+      `T2.7-3/T12.0-15/T14-11 a spread attribute \`{...a, b}\` (the spread grammar pair's ill-formed half) ${INVALID_PROP_FILE}`,
       invalidPropSource(T2_7_3_SPREAD_UNPARSEABLE_CONSTRUCT),
       "unparseable",
     ),
@@ -2178,7 +2178,7 @@ function unparseableCommentArm(
   return {
     name,
     source: stagedMdx(
-      `T2.7-4/T14-4/T14-6/T14-11 ${name} ${T2_7_4_UNPARSEABLE_FILE}`,
+      `T2.7-4/T12.0-15/T14-4/T14-6/T14-11 ${name} ${T2_7_4_UNPARSEABLE_FILE}`,
       source,
       "unparseable",
     ),

@@ -632,7 +632,11 @@
 //   own. The trailing-comma arm (ab), run after (n), stages a valid
 //   workspace: `d={[BASE.a,]}`, ECMAScript's one-element array literal,
 //   holds no elision — `build --json` finding-free, one `depends` edge, and
-//   one occurrence spanning `BASE.a` alone.
+//   one occurrence spanning `BASE.a` alone. T12.0-15 restages every one of
+//   these per-condition fixtures (`T14_11_FIXTURES`: the table's arms, then
+//   (n)'s, (ab)'s, and — Linux leg — (o)'s workspaces, the very file maps
+//   T14-11's body stages) for its human-form twins of `build` and `check`
+//   (section-12.0-iv.ts).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -797,7 +801,7 @@ import {
 // T6.6-7 stage it through T14-7's exported own stagings (the T14-7
 // section).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.6-3/T6.6-7/T14-4/T14-6/T14-7/T14-8/T14-11 xspec.config.ts (one spec group, specs/**/*.mdx)",
+  "T6.6-3/T6.6-7/T12.0-15/T14-4/T14-6/T14-7/T14-8/T14-11 xspec.config.ts (one spec group, specs/**/*.mdx)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -815,7 +819,7 @@ export default defineConfig({
 // it after their bodies' first invocations; T14-1's, T14-2's, and T14-3's
 // first workspaces pass the record too.
 const SPEC_AND_CODE_CONFIG = stagedTs(
-  "T14-4/T14-6/T14-11 xspec.config.ts (one spec group and the code group app, src/**/*.ts)",
+  "T12.0-15/T14-4/T14-6/T14-11 xspec.config.ts (one spec group and the code group app, src/**/*.ts)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -6940,7 +6944,7 @@ const T14_11_PREAMBLE = '<S id="ok">\nTarget: café.\n</S>\n\n';
  * import, and arm (o)'s readable source.
  */
 const T14_11_A_MDX = stagedMdx(
-  "T14-11 specs/A.mdx (the imported module: a, a.b, and b; arms (d), (j), (l), (u), (x), (z), (aa), and (o), and arms (p)-(t)'s, (y)'s, and (ab)'s specs/BASE.mdx)",
+  "T12.0-15/T14-11 specs/A.mdx (the imported module: a, a.b, and b; arms (d), (j), (l), (u), (x), (z), (aa), and (o), and arms (p)-(t)'s, (y)'s, and (ab)'s specs/BASE.mdx)",
   '<S id="a">\nA.\n<S id="a.b">\nA.b.\n</S>\n</S>\n\n<S id="b">\nB.\n</S>\n',
 );
 
@@ -7279,7 +7283,7 @@ const T14_11_COLLISION_FILES = Object.entries(T4_5_8_FURTHER_LOCATED_FORMS).map(
       file,
       fixture,
       source: stagedTs(
-        `T14-11 (u) ${file} (the ${key} form beside its import)`,
+        `T12.0-15/T14-11 (u) ${file} (the ${key} form beside its import)`,
         fixture.text,
       ),
     };
@@ -7330,12 +7334,12 @@ const T14_11_ENCODING_FILES = T14_11_ENCODING_FORMS.flatMap((form) =>
     file,
     contents: file.endsWith(".mdx")
       ? stagedMdx(
-          `T14-11 (v) ${file} (the ${form.name} encoding form)`,
+          `T12.0-15/T14-11 (v) ${file} (the ${form.name} encoding form)`,
           Uint8Array.from(form.bytes),
           "unparseable",
         )
       : stagedTs(
-          `T14-11 (v) ${file} (the ${form.name} encoding form)`,
+          `T12.0-15/T14-11 (v) ${file} (the ${form.name} encoding form)`,
           Uint8Array.from(form.bytes),
           "unparseable",
         ),
@@ -7515,7 +7519,7 @@ const T14_11_LINKING_FILES = T14_11_LINKING_FORMS.map(
   ({ file, form, fixture }) => ({
     file,
     fixture,
-    source: stagedTs(`T14-11 (x) ${file} (${form})`, fixture.text),
+    source: stagedTs(`T12.0-15/T14-11 (x) ${file} (${form})`, fixture.text),
   }),
 );
 
@@ -7596,7 +7600,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     config: SPECS_ONLY_CONFIG,
     files: {
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (a) specs/A.mdx (an unresolved d array entry)",
+        "T12.0-15/T14-11 (a) specs/A.mdx (an unresolved d array entry)",
         T14_11_D_ENTRY.text,
       ),
     },
@@ -7610,7 +7614,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     config: SPECS_ONLY_CONFIG,
     files: {
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (b) specs/A.mdx (d={foo})",
+        "T12.0-15/T14-11 (b) specs/A.mdx (d={foo})",
         T14_11_D_IDENT.text,
       ),
     },
@@ -7627,12 +7631,12 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     // records are declared unparseable.
     files: {
       "specs/empty.mdx": stagedMdx(
-        "T14-11 (c) specs/empty.mdx (d={})",
+        "T12.0-15/T14-11 (c) specs/empty.mdx (d={})",
         T14_11_D_EMPTY.text,
         "unparseable",
       ),
       "specs/comment-only.mdx": stagedMdx(
-        "T14-11 (c) specs/comment-only.mdx (d={ /* c */ })",
+        "T12.0-15/T14-11 (c) specs/comment-only.mdx (d={ /* c */ })",
         T14_11_D_COMMENT_ONLY.text,
         "unparseable",
       ),
@@ -7655,7 +7659,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     files: {
       [T14_11_SPEC]: T14_11_A_MDX,
       [T14_11_CODE]: stagedTs(
-        "T14-11 (d) src/app.ts (SPEC?.a — a non-static bare reference)",
+        "T12.0-15/T14-11 (d) src/app.ts (SPEC?.a — a non-static bare reference)",
         T14_11_OPTIONAL_CHAIN.text,
       ),
     },
@@ -7672,7 +7676,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     config: SPECS_ONLY_CONFIG,
     files: {
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (e) specs/A.mdx (a two-segment top-level ID and a level-skipping child)",
+        "T12.0-15/T14-11 (e) specs/A.mdx (a two-segment top-level ID and a level-skipping child)",
         T14_11_STRUCTURAL.text,
       ),
     },
@@ -7693,7 +7697,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     config: SPECS_ONLY_CONFIG,
     files: {
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (f) specs/A.mdx (two bearers of dup)",
+        "T12.0-15/T14-11 (f) specs/A.mdx (two bearers of dup)",
         T14_11_DUPLICATE.text,
       ),
     },
@@ -7710,7 +7714,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     config: SPECS_ONLY_CONFIG,
     files: {
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (g) specs/A.mdx (malformed id segments and a malformed tag)",
+        "T12.0-15/T14-11 (g) specs/A.mdx (malformed id segments and a malformed tag)",
         T14_11_SEGMENT_TAG.text,
       ),
     },
@@ -7725,7 +7729,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     config: SPECS_ONLY_CONFIG,
     files: {
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (h) specs/A.mdx (a repeated, an unknown, a spread, and an invalid coverage prop)",
+        "T12.0-15/T14-11 (h) specs/A.mdx (a repeated, an unknown, a spread, and an invalid coverage prop)",
         T14_11_INVALID_PROP.text,
       ),
     },
@@ -7746,7 +7750,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     config: SPECS_ONLY_CONFIG,
     files: {
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (i) specs/A.mdx (a section without an id)",
+        "T12.0-15/T14-11 (i) specs/A.mdx (a section without an id)",
         T14_11_MISSING_ID.text,
       ),
     },
@@ -7764,23 +7768,23 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     files: {
       [T14_11_SPEC]: T14_11_A_MDX,
       "specs/B.mdx": stagedMdx(
-        "T14-11 (j) specs/B.mdx (an import of a missing module beside A's)",
+        "T12.0-15/T14-11 (j) specs/B.mdx (an import of a missing module beside A's)",
         T14_11_IMPORT_MDX.text,
       ),
       "src/exp.ts": stagedTs(
-        "T14-11 (j) src/exp.ts (export * from the spec module)",
+        "T12.0-15/T14-11 (j) src/exp.ts (export * from the spec module)",
         T14_11_EXPORT_TS.text,
       ),
       "src/req.ts": stagedTs(
-        "T14-11 (j) src/req.ts (import X = require of the spec module)",
+        "T12.0-15/T14-11 (j) src/req.ts (import X = require of the spec module)",
         T14_11_REQUIRE_TS.text,
       ),
       "src/dyn.ts": stagedTs(
-        "T14-11 (j) src/dyn.ts (a dynamic import() of the spec module)",
+        "T12.0-15/T14-11 (j) src/dyn.ts (a dynamic import() of the spec module)",
         T14_11_DYNAMIC_TS.text,
       ),
       "src/collide.ts": stagedTs(
-        "T14-11 (j) src/collide.ts (a colliding const declarator beside its import)",
+        "T12.0-15/T14-11 (j) src/collide.ts (a colliding const declarator beside its import)",
         T14_11_COLLISION_TS.text,
       ),
     },
@@ -7821,7 +7825,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     config: SPECS_ONLY_CONFIG,
     files: {
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (k) specs/A.mdx (the five invalid construct forms)",
+        "T12.0-15/T14-11 (k) specs/A.mdx (the five invalid construct forms)",
         T14_11_CONSTRUCTS.text,
       ),
     },
@@ -7837,7 +7841,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     files: {
       [T14_11_SPEC]: T14_11_A_MDX,
       [T14_11_CODE]: stagedTs(
-        "T14-11 (l) src/app.ts (the node binding's chain SPEC.a.b and a text binding passed on)",
+        "T12.0-15/T14-11 (l) src/app.ts (the node binding's chain SPEC.a.b and a text binding passed on)",
         T14_11_USAGE_TS.text,
       ),
     },
@@ -7854,22 +7858,22 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     // three MDX sources' records and the TypeScript one's declared so.
     files: {
       "specs/bom.mdx": stagedMdx(
-        "T14-11 (m) specs/bom.mdx (a byte-order mark)",
+        "T12.0-15/T14-11 (m) specs/bom.mdx (a byte-order mark)",
         T14_11_BOM_MDX.text,
         "unparseable",
       ),
       "specs/enc.mdx": stagedMdx(
-        "T14-11 (m) specs/enc.mdx (an invalid byte after a valid 5-byte prefix)",
+        "T12.0-15/T14-11 (m) specs/enc.mdx (an invalid byte after a valid 5-byte prefix)",
         T14_11_ENCODING_MDX,
         "unparseable",
       ),
       "specs/open.mdx": stagedMdx(
-        "T14-11 (m) specs/open.mdx (ends inside an unclosed section)",
+        "T12.0-15/T14-11 (m) specs/open.mdx (ends inside an unclosed section)",
         T14_11_UNCLOSED_MDX.text,
         "unparseable",
       ),
       "src/bad.ts": stagedTs(
-        "T14-11 (m) src/bad.ts (let x = ; — a TypeScript syntax failure)",
+        "T12.0-15/T14-11 (m) src/bad.ts (let x = ; — a TypeScript syntax failure)",
         T14_11_SYNTAX_TS.text,
         "unparseable",
       ),
@@ -7908,7 +7912,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     files: {
       [T14_11_BASE]: T14_11_A_MDX,
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (p) specs/A.mdx (d={(BASE.a)})",
+        "T12.0-15/T14-11 (p) specs/A.mdx (d={(BASE.a)})",
         T14_11_D_PAREN.text,
       ),
     },
@@ -7923,7 +7927,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     files: {
       [T14_11_BASE]: T14_11_A_MDX,
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (q) specs/A.mdx (d={BASE.a, BASE.b})",
+        "T12.0-15/T14-11 (q) specs/A.mdx (d={BASE.a, BASE.b})",
         T14_11_D_COMMA.text,
       ),
     },
@@ -7938,7 +7942,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     files: {
       [T14_11_BASE]: T14_11_A_MDX,
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (r) specs/A.mdx (BASE.missing past a block comment, U+00A0, U+FEFF, U+1680, and U+3000)",
+        "T12.0-15/T14-11 (r) specs/A.mdx (BASE.missing past a block comment, U+00A0, U+FEFF, U+1680, and U+3000)",
         T14_11_D_TRIVIA.text,
       ),
     },
@@ -7954,7 +7958,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     files: {
       [T14_11_BASE]: T14_11_A_MDX,
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (s) specs/A.mdx (d={[...BASE.a]})",
+        "T12.0-15/T14-11 (s) specs/A.mdx (d={[...BASE.a]})",
         T14_11_D_SPREAD.text,
       ),
     },
@@ -7972,7 +7976,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     files: {
       [T14_11_BASE]: T14_11_A_MDX,
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (t) specs/A.mdx (two array literals with elisions)",
+        "T12.0-15/T14-11 (t) specs/A.mdx (two array literals with elisions)",
         T14_11_D_ELISIONS.text,
       ),
     },
@@ -8038,7 +8042,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     files: {
       [T14_11_BASE]: T14_11_A_MDX,
       [T14_11_SPEC]: stagedMdx(
-        "T14-11 (y) specs/A.mdx ({text()} and { /* c */ text(BASE?.a) }, each between prose lines)",
+        "T12.0-15/T14-11 (y) specs/A.mdx ({text()} and { /* c */ text(BASE?.a) }, each between prose lines)",
         T14_11_CONTAINERS.text,
       ),
     },
@@ -8054,11 +8058,11 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     files: {
       [T14_11_SPEC]: T14_11_A_MDX,
       "src/call.ts": stagedTs(
-        "T14-11 (z) src/call.ts (an unresolved text(SPEC.missing))",
+        "T12.0-15/T14-11 (z) src/call.ts (an unresolved text(SPEC.missing))",
         T14_11_CALL_TS.text,
       ),
       "src/alias.ts": stagedTs(
-        "T14-11 (z) src/alias.ts (an unresolved t(SPEC.missing) through { text as t })",
+        "T12.0-15/T14-11 (z) src/alias.ts (an unresolved t(SPEC.missing) through { text as t })",
         T14_11_ALIASED_CALL_TS.text,
       ),
     },
@@ -8080,11 +8084,11 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     files: {
       [T14_11_SPEC]: T14_11_A_MDX,
       "src/marker.ts": stagedTs(
-        "T14-11 (aa) src/marker.ts (an unresolved marker SPEC.missing;)",
+        "T12.0-15/T14-11 (aa) src/marker.ts (an unresolved marker SPEC.missing;)",
         T14_11_MARKER_TS.text,
       ),
       "src/paren.ts": stagedTs(
-        "T14-11 (aa) src/paren.ts (the parenthesized chain (SPEC.a); in statement position)",
+        "T12.0-15/T14-11 (aa) src/paren.ts (the parenthesized chain (SPEC.a); in statement position)",
         T14_11_PAREN_TS.text,
       ),
     },
@@ -8214,9 +8218,15 @@ function enclosedExpression(attribute: {
 // Arm (n)'s source, staged after the table's arms' invocations (a
 // staged-source record, S-9).
 const T14_11_REPEATED_D_STAGED = stagedMdx(
-  "T14-11 (n) specs/A.mdx (a repeated d, one entry resolving)",
+  "T12.0-15/T14-11 (n) specs/A.mdx (a repeated d, one entry resolving)",
   T14_11_REPEATED_D.text,
 );
+
+/** Arm (n)'s workspace (T12.0-15 restages it, `T14_11_FIXTURES`). */
+const T14_11_REPEATED_D_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": SPECS_ONLY_CONFIG,
+  [T14_11_SPEC]: T14_11_REPEATED_D_STAGED,
+};
 
 async function runRepeatedDependencyArm(
   product: ProductBinding,
@@ -8231,47 +8241,39 @@ async function runRepeatedDependencyArm(
     { condition: "14.17", locations: attributes },
     { condition: "14.5", locations: [{ file, range: unresolved }] },
   ];
-  await withWorkspace(
-    {
-      files: {
-        "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [file]: T14_11_REPEATED_D_STAGED,
-      },
-    },
-    async (workspace) => {
-      const buildContext = `${context} — \`build --json\``;
-      assertExactRanges(
-        await buildFindings(product, workspace, buildContext),
-        expected,
-        buildContext,
-      );
-      const occurrencesContext = `${context} — \`occurrences\``;
-      const report = decodeOccurrencesReport(
-        await runJsonExpecting(
-          product,
-          workspace,
-          ["occurrences"],
-          1,
-          `${occurrencesContext} exits 1: the answer carries the domain ` +
-            `file's findings (SPEC 11.2, 12.0)`,
-        ),
-        occurrencesContext,
-      );
-      assertExactRanges(report.findings, expected, occurrencesContext);
-      assertSameJson(
-        report.occurrences.map(({ file: recorded, range, kind, target }) => ({
-          file: recorded,
-          range: { start: range.start, end: range.end },
-          kind,
-          target,
-        })),
-        [{ file, range: resolving, kind: "depends", target: `${file}#ok` }],
-        `${occurrencesContext}: exactly one occurrence — the resolving ` +
-          `entry's, spanning its own expression, kind depends, target ` +
-          `${file}#ok — the unresolved entry recording none (SPEC 11.2, 5.7)`,
-      );
-    },
-  );
+  await withWorkspace({ files: T14_11_REPEATED_D_FILES }, async (workspace) => {
+    const buildContext = `${context} — \`build --json\``;
+    assertExactRanges(
+      await buildFindings(product, workspace, buildContext),
+      expected,
+      buildContext,
+    );
+    const occurrencesContext = `${context} — \`occurrences\``;
+    const report = decodeOccurrencesReport(
+      await runJsonExpecting(
+        product,
+        workspace,
+        ["occurrences"],
+        1,
+        `${occurrencesContext} exits 1: the answer carries the domain ` +
+          `file's findings (SPEC 11.2, 12.0)`,
+      ),
+      occurrencesContext,
+    );
+    assertExactRanges(report.findings, expected, occurrencesContext);
+    assertSameJson(
+      report.occurrences.map(({ file: recorded, range, kind, target }) => ({
+        file: recorded,
+        range: { start: range.start, end: range.end },
+        kind,
+        target,
+      })),
+      [{ file, range: resolving, kind: "depends", target: `${file}#ok` }],
+      `${occurrencesContext}: exactly one occurrence — the resolving ` +
+        `entry's, spanning its own expression, kind depends, target ` +
+        `${file}#ok — the unresolved entry recording none (SPEC 11.2, 5.7)`,
+    );
+  });
 }
 
 // (ab) A trailing comma spells no hole: `[BASE.a,]` is ECMAScript's
@@ -8292,9 +8294,18 @@ const T14_11_TRAILING_COMMA = assemble([
 // Arm (ab)'s source, staged after the earlier arms' invocations (a
 // staged-source record, S-9).
 const T14_11_TRAILING_COMMA_STAGED = stagedMdx(
-  "T14-11 (ab) specs/A.mdx (d={[BASE.a,]} — a trailing comma, no hole)",
+  "T12.0-15/T14-11 (ab) specs/A.mdx (d={[BASE.a,]} — a trailing comma, no hole)",
   T14_11_TRAILING_COMMA.text,
 );
+
+/** Arm (ab)'s workspace (T12.0-15 restages it, `T14_11_FIXTURES`). */
+const T14_11_TRAILING_COMMA_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  "xspec.config.ts": SPECS_ONLY_CONFIG,
+  [T14_11_BASE]: T14_11_A_MDX,
+  [T14_11_SPEC]: T14_11_TRAILING_COMMA_STAGED,
+};
 
 async function runTrailingCommaArm(product: ProductBinding): Promise<void> {
   const context =
@@ -8305,13 +8316,7 @@ async function runTrailingCommaArm(product: ProductBinding): Promise<void> {
   const target = `${T14_11_BASE}#a`;
   const entry = located(file, T14_11_TRAILING_COMMA, 0)[0]!.range;
   await withWorkspace(
-    {
-      files: {
-        "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [T14_11_BASE]: T14_11_A_MDX,
-        [file]: T14_11_TRAILING_COMMA_STAGED,
-      },
-    },
+    { files: T14_11_TRAILING_COMMA_FILES },
     async (workspace) => {
       await expectFindingFreeReport(
         product,
@@ -8370,23 +8375,28 @@ const T14_11_REFUSAL_STAGED = process.platform === "linux";
 // Arm (o)'s refused file (a staged-source record, S-9: the arm follows the
 // body's earlier invocations).
 const T14_11_REFUSED_SOURCE = stagedMdx(
-  "T14-11 (o) specs/R.mdx (the source staged unreadable)",
+  "T12.0-15/T14-11 (o) specs/R.mdx (the source staged unreadable)",
   '<S id="r">\nRefused content.\n</S>\n',
 );
+
+/** Arm (o)'s refused file. */
+const T14_11_REFUSED_FILE = "specs/R.mdx";
+
+/** Arm (o)'s workspace (T12.0-15 restages it, `T14_11_FIXTURES`). */
+const T14_11_REFUSED_READ_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    "xspec.config.ts": SPECS_ONLY_CONFIG,
+    [T14_11_SPEC]: T14_11_A_MDX,
+    [T14_11_REFUSED_FILE]: T14_11_REFUSED_SOURCE,
+  };
 
 async function runRefusedReadArm(product: ProductBinding): Promise<void> {
   const context =
     "T14-11 (o) 14.20 for a refused read: the zero-length range at offset 0 " +
     "(SPEC 14.25; Linux leg, E-1)";
-  const file = "specs/R.mdx";
+  const file = T14_11_REFUSED_FILE;
   await withWorkspace(
-    {
-      files: {
-        "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [T14_11_SPEC]: T14_11_A_MDX,
-        [file]: T14_11_REFUSED_SOURCE,
-      },
-    },
+    { files: T14_11_REFUSED_READ_FILES },
     async (workspace) => {
       const staging = await stageReadRefusalOfFile(workspace.path(file));
       try {
@@ -8411,6 +8421,65 @@ async function runRefusedReadArm(product: ProductBinding): Promise<void> {
     },
   );
 }
+
+/**
+ * One of T14-11's per-condition fixtures as T12.0-15 restages it
+ * (section-12.0-iv.ts: on each, `build` and `check` run in both output
+ * forms, the human report decoded and compared with its `--json` twin's):
+ * the arm and its rule (diagnostics), the workspace's files — the
+ * configuration and sources, staged-source records all, exactly as T14-11
+ * stages them — `build`'s exit there as T14-11 pins it (1 at every staged
+ * condition, 0 at (ab)'s valid attribute), and, at (o), the file staged
+ * unreadable (Linux leg; `stageReadRefusalOfFile`).
+ */
+export interface T1411Fixture {
+  readonly arm: string;
+  readonly rule: string;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  readonly buildExit: 0 | 1;
+  readonly refused?: string;
+}
+
+/**
+ * T14-11's per-condition fixtures, in its body's order: the range-rule
+ * table's arms, then (n)'s repeated `d`, (ab)'s trailing comma, and — on
+ * the Linux leg, where T14-11 stages it — (o)'s refused read.
+ */
+export const T14_11_FIXTURES: readonly T1411Fixture[] = [
+  ...T14_11_CASES.map((kase): T1411Fixture => ({
+    arm: kase.arm,
+    rule: kase.rule,
+    files: { "xspec.config.ts": kase.config, ...kase.files },
+    buildExit: 1,
+  })),
+  {
+    arm: "n",
+    rule: "per-spelling resolution inside a repeated `d` (SPEC 11.2)",
+    files: T14_11_REPEATED_D_FILES,
+    buildExit: 1,
+  },
+  {
+    arm: "ab",
+    rule:
+      "a trailing comma spells no hole: `d={[BASE.a,]}` is a one-element " +
+      "array literal (SPEC 14, 2.2, 5.7)",
+    files: T14_11_TRAILING_COMMA_FILES,
+    buildExit: 0,
+  },
+  ...(T14_11_REFUSAL_STAGED
+    ? [
+        {
+          arm: "o",
+          rule:
+            "14.20 for a refused read: the zero-length range at offset 0 " +
+            "(SPEC 14.25; Linux leg, E-1)",
+          files: T14_11_REFUSED_READ_FILES,
+          buildExit: 1 as const,
+          refused: T14_11_REFUSED_FILE,
+        },
+      ]
+    : []),
+];
 
 const T14_11 = defineProductTest({
   id: "T14-11",

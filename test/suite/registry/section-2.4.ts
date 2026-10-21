@@ -490,7 +490,7 @@ const DYNAMIC_ARM_PREAMBLE =
 // workspaces after its own (S-9's timing clause).
 const DYNAMIC_ARM_BASE_RECORDS = {
   "specs/BASE.mdx": stagedMdx(
-    "T2.4-2/T14-11 specs/BASE.mdx",
+    "T2.4-2/T12.0-15/T14-11 specs/BASE.mdx",
     '<S id="auth">\nAuth behavior.\n</S>\n',
   ),
 } as const;
@@ -653,7 +653,7 @@ const DYNAMIC_FORM_STAGINGS: readonly DynamicFormStagings[] =
     const [ids, mdx] =
       arm.unparseableAt === undefined
         ? (["T2.4-2", "well-formed"] as const)
-        : (["T2.4-2/T14-11", "unparseable"] as const);
+        : (["T2.4-2/T12.0-15/T14-11", "unparseable"] as const);
     return {
       arm,
       d,

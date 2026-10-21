@@ -711,6 +711,14 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "12.7",
     "14",
   ],
+  // T12.0-15: the human-form reports of `build`, `check`, and the gated
+  // reads, each decoded and compared with its `--json` twin's findings —
+  // every finding's stable code, locations, concerned path, and identities
+  // ("14") — and 12.0's marked byte form of a non-UTF-8 path in them; the
+  // fixtures' own outcomes (12.1, 12.2, 13.3, 14.19) are carriage context
+  // with home coverage at T14-11, T12.2-2, T1.5-2, and T13.3-3. The
+  // families still to come add the passages they assert.
+  "T12.0-15": ["12.0", "14"],
   // T12.0-16: byte order over the separating pair U+FF21/U+1F600 on 12.7's
   // tag sets and findings order, 11.4's and 12.3's file orders, 11.6's
   // inventory lists, and 5.7's occurrence order; its (c) arms pin the

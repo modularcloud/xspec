@@ -82,6 +82,10 @@
 //   undetectable, and with no record the other two forms cannot arise (SPEC
 //   12.2, 14.10). That a file is reachable by glob through `view` and
 //   nameable by no argument is T11.5-3's business (T11.2-3's discipline).
+//   Every arm is staged through one table, `T1_5_2_ARMS` (`stageT152Arm`),
+//   each entry carrying the findings T1.5-2 pins for it, which T12.0-15
+//   restages for its human-form twins of `build` and `check` and its
+//   non-UTF-8 marking clause (section-12.0-iv.ts).
 // - T1.5-3 exercises the `path#id` vs bare `path` addressing duality across
 //   `query node`, `show`, and `rename`/`move` arguments; sections and roots
 //   carry distinct byte-anchored texts so the two address forms are
@@ -123,10 +127,13 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { assertImpactedCode } from "./section-9.js";
 import {
@@ -148,7 +155,7 @@ import {
 // staged-source record (S-9's timing clause): T1.5-2's non-UTF-8, U+FFFD,
 // and located spec-group arms stage it after the body's first invocation.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T1.5-2 xspec.config.ts — the specs-only configuration of the non-UTF-8, U+FFFD, and located spec-group arms",
+  "T1.5-2/T12.0-15 xspec.config.ts — the specs-only configuration of the non-UTF-8, U+FFFD, and located spec-group arms",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1158,7 +1165,7 @@ const T1_5_1 = defineProductTest({
 // The `#` code arm's code source at `src/a#b.ts`, staged after the spec
 // arm's invocation: a staged-source record (S-9's timing clause).
 const CODE_ARM_SOURCE = stagedTs(
-  "T1.5-2 code arm src/a#b.ts",
+  "T1.5-2/T12.0-15 code arm src/a#b.ts",
   "export const ok = 1;\n",
 );
 
@@ -1166,7 +1173,7 @@ const CODE_ARM_SOURCE = stagedTs(
 // the `#` arm, the U+FFFD arm, and the non-UTF-8 arm — each staged after
 // the spec arm's invocation: a staged-source record (S-9).
 const SPEC_AND_CODE_CONFIG = stagedTs(
-  "T1.5-2 the code-group arms' xspec.config.ts (one spec group, one code group)",
+  "T1.5-2/T12.0-15 the code-group arms' xspec.config.ts (one spec group, one code group)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1193,7 +1200,7 @@ export default defineConfig({
 // test/self/s9-staged-sources.test.ts). Its section `ok` is the code-group
 // arms' marker target.
 const VALID_SECTION_SOURCE = stagedMdx(
-  "T1.5-2 the valid section source at the spec path of every arm but the located one",
+  "T1.5-2/T12.0-15 the valid section source at the spec path of every arm but the located one",
   '<S id="ok">\nValid content.\n</S>\n',
 );
 
@@ -1263,7 +1270,7 @@ const CODE_MARKER_PREFIX =
 const CODE_MARKER = "SPEC.ok";
 const CODE_MARKER_TEXT = `${CODE_MARKER_PREFIX}${CODE_MARKER};\n`;
 const CODE_MARKER_SOURCE = stagedTs(
-  "T1.5-2 the code-group arms' code source (an import of specs/OK.xspec and the bare marker SPEC.ok), staged at src/a<U+FFFD>.ts and, on the Linux leg, src/c<0xFF>.ts",
+  "T1.5-2/T12.0-15 the code-group arms' code source (an import of specs/OK.xspec and the bare marker SPEC.ok), staged at src/a<U+FFFD>.ts and, on the Linux leg, src/c<0xFF>.ts",
   CODE_MARKER_TEXT,
 );
 const CODE_MARKER_RANGE = byteRangeAfter(CODE_MARKER_PREFIX, CODE_MARKER);
@@ -1302,7 +1309,7 @@ const LOCATED_PRELUDE = "Prólogo — a non-UTF-8-named spec source.\n\n";
 const LOCATED_OPENING_TAG = '<S coverage="none">';
 const LOCATED_TEXT = `${LOCATED_PRELUDE}${LOCATED_OPENING_TAG}\nNo id here.\n</S>\n`;
 const LOCATED_SOURCE = stagedMdx(
-  "T1.5-2 located arm specs/b<0xFF>.mdx (Linux leg: a non-root section with no id after a multi-byte prelude)",
+  "T1.5-2/T12.0-15 located arm specs/b<0xFF>.mdx (Linux leg: a non-root section with no id after a multi-byte prelude)",
   LOCATED_TEXT,
 );
 const LOCATED_OPENING_TAG_RANGE = byteRangeAfter(
@@ -1317,7 +1324,7 @@ const LOCATED_OPENING_TAG_RANGE = byteRangeAfter(
  * that form, `null` for a located condition (SPEC 14, 12.7). Message and
  * identities stay unpinned (informational for 14.1 and 14.19 alike, 12.7).
  */
-interface FindingProjection {
+export interface FindingProjection {
   readonly code: string | null;
   readonly locations: readonly FindingLocation[];
   readonly path: PathValue | null;
@@ -1338,6 +1345,161 @@ function projectFindingForm(finding: Finding): FindingProjection {
 function invalidPathFinding(path: PathValue): FindingProjection {
   return { code: "invalid-source-path", locations: [], path };
 }
+
+/**
+ * One arm of T1.5-2 as its body stages it — and as T12.0-15 restages it
+ * (section-12.0-iv.ts: `build` and `check` in both output forms on every
+ * arm, each human report's paths held to the forms 12.0 fixes, and the
+ * non-UTF-8 arms' reports to byte-identity across two runs): a fresh
+ * workspace holding `files`, then `staged` written through the builder (a
+ * path no `files` key holds — a byte path — or the code-group arms' code
+ * source, staged beside the spec source they import), and its findings as
+ * T1.5-2 pins them, each projected onto its code, locations, and concerned
+ * path (`projectFindingForm`).
+ */
+export interface T152Arm {
+  /** The arm, for diagnostics. */
+  readonly label: string;
+  /**
+   * Its staged path is not valid UTF-8: staged on the Linux leg alone,
+   * where file names are byte strings (TEST-SPEC T1.5-2).
+   */
+  readonly nonUtf8: boolean;
+  /** The workspace's initial files. */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  /** The file written once the workspace exists, where the arm stages one. */
+  readonly staged?: {
+    readonly path: string | Buffer;
+    readonly source: StagedMdx | StagedTs;
+  };
+  /**
+   * Its findings as T1.5-2 pins them, in 12.7's order — at the `#` arms,
+   * whose body pins the one 14.19's count and concerned path, the code and
+   * the `locations` `[]` 14 and 12.7 fix for that path-level condition.
+   */
+  readonly expected: readonly FindingProjection[];
+}
+
+/** Stage `arm` on a fresh workspace (H-1), disposed by the caller. */
+export async function stageT152Arm(arm: T152Arm): Promise<TestWorkspace> {
+  const workspace = await TestWorkspace.create({ files: arm.files });
+  try {
+    if (arm.staged !== undefined) {
+      await workspace.file(arm.staged.path, arm.staged.source);
+    }
+    return workspace;
+  } catch (error) {
+    await workspace.dispose();
+    throw error;
+  }
+}
+
+/** The spec-group arm: a discovered `.mdx` whose path contains `#`. */
+const T1_5_2_HASH_SPEC_ARM: T152Arm = {
+  label: "a spec-group file at specs/a#b.mdx",
+  nonUtf8: false,
+  files: {
+    "xspec.config.ts": SPECS_ONLY_CONFIG,
+    "specs/a#b.mdx": VALID_SECTION_SOURCE,
+  },
+  expected: [invalidPathFinding("specs/a#b.mdx")],
+};
+
+/** The `#` code-group arm: the spec source beside it valid. */
+const T1_5_2_HASH_CODE_ARM: T152Arm = {
+  label: "a code-group file at src/a#b.ts",
+  nonUtf8: false,
+  files: {
+    "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+    "specs/OK.mdx": VALID_SECTION_SOURCE,
+    "src/a#b.ts": CODE_ARM_SOURCE,
+  },
+  expected: [invalidPathFinding("src/a#b.ts")],
+};
+
+/** The non-UTF-8 spec-group arm (Linux leg): `specs/b<0xFF>.mdx`. */
+const T1_5_2_NON_UTF8_SPEC_ARM: T152Arm = {
+  label: "a discovered spec source whose path is not valid UTF-8 (Linux leg)",
+  nonUtf8: true,
+  files: { "xspec.config.ts": SPECS_ONLY_CONFIG },
+  staged: { path: NON_UTF8_SPEC_PATH, source: VALID_SECTION_SOURCE },
+  expected: [invalidPathFinding(NON_UTF8_MARKED_PATH)],
+};
+
+/** The U+FFFD spec-group arm, both legs: `specs/A<U+FFFD>.mdx`. */
+const T1_5_2_REPLACEMENT_SPEC_ARM: T152Arm = {
+  label:
+    "a discovered spec source whose path contains U+FFFD (specs/A<U+FFFD>.mdx, both legs)",
+  nonUtf8: false,
+  files: {
+    "xspec.config.ts": SPECS_ONLY_CONFIG,
+    [REPLACEMENT_CHARACTER_SPEC_PATH]: VALID_SECTION_SOURCE,
+  },
+  expected: [invalidPathFinding(REPLACEMENT_CHARACTER_SPEC_PATH)],
+};
+
+/** The U+FFFD code-group arm, both legs: `src/a<U+FFFD>.ts`. */
+const T1_5_2_REPLACEMENT_CODE_ARM: T152Arm = {
+  label: "src/a<U+FFFD>.ts, both legs",
+  nonUtf8: false,
+  files: {
+    "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+    "specs/OK.mdx": VALID_SECTION_SOURCE,
+  },
+  staged: { path: REPLACEMENT_CHARACTER_CODE_PATH, source: CODE_MARKER_SOURCE },
+  expected: [invalidPathFinding(REPLACEMENT_CHARACTER_CODE_PATH)],
+};
+
+/** The non-UTF-8 code-group arm (Linux leg): `src/c<0xFF>.ts`. */
+const T1_5_2_NON_UTF8_CODE_ARM: T152Arm = {
+  label: "src/c<0xFF>.ts, not valid UTF-8, Linux leg",
+  nonUtf8: true,
+  files: {
+    "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+    "specs/OK.mdx": VALID_SECTION_SOURCE,
+  },
+  staged: { path: NON_UTF8_CODE_PATH, source: CODE_MARKER_SOURCE },
+  expected: [invalidPathFinding(NON_UTF8_CODE_MARKED_PATH)],
+};
+
+/**
+ * The located arm (Linux leg): `specs/b<0xFF>.mdx` holding an id-less
+ * non-root section — its 14.1, located at the opening tag, its location
+ * file the marked byte form, then its 14.19 (12.7's order).
+ */
+const T1_5_2_LOCATED_ARM: T152Arm = {
+  label:
+    "a non-UTF-8-named spec source holding a non-root section with no id, Linux leg",
+  nonUtf8: true,
+  files: { "xspec.config.ts": SPECS_ONLY_CONFIG },
+  staged: { path: NON_UTF8_SPEC_PATH, source: LOCATED_SOURCE },
+  expected: [
+    {
+      code: "missing-id",
+      locations: [
+        { file: NON_UTF8_MARKED_PATH, range: LOCATED_OPENING_TAG_RANGE },
+      ],
+      path: null,
+    },
+    invalidPathFinding(NON_UTF8_MARKED_PATH),
+  ],
+};
+
+/**
+ * T1.5-2's every arm, in its body's order (TEST-SPEC T1.5-2; T12.0-15's
+ * fixtures): the `#` spec and code arms, the non-UTF-8 spec arm, the U+FFFD
+ * spec arm, the U+FFFD and non-UTF-8 code-group arms, and the located arm
+ * — the non-UTF-8 arms (`nonUtf8`) staged on the Linux leg alone.
+ */
+export const T1_5_2_ARMS: readonly T152Arm[] = [
+  T1_5_2_HASH_SPEC_ARM,
+  T1_5_2_HASH_CODE_ARM,
+  T1_5_2_NON_UTF8_SPEC_ARM,
+  T1_5_2_REPLACEMENT_SPEC_ARM,
+  T1_5_2_REPLACEMENT_CODE_ARM,
+  T1_5_2_NON_UTF8_CODE_ARM,
+  T1_5_2_LOCATED_ARM,
+];
 
 /**
  * `build --json`, then `check --json`, on a never-built workspace whose
@@ -1382,20 +1544,6 @@ async function expectBuildAndCheckFindings(
 }
 
 /**
- * One code-group arm (TEST-SPEC T1.5-2): the code source staged at a path
- * containing U+FFFD or one that is not valid UTF-8, beside the valid spec
- * source it imports.
- */
-interface InvalidCodePathArm {
-  /** The arm, for diagnostics. */
-  readonly label: string;
-  /** The staged path: a string, or a non-UTF-8 name's exact bytes. */
-  readonly staged: string | Buffer;
-  /** Its 12.7 presentation: the plain string or the marked byte form. */
-  readonly presented: PathValue;
-}
-
-/**
  * A code-group arm: `build` and `check` each report exactly the code
  * source's 14.19, its concerned path in the arm's presentation, and bare
  * `occurrences` — its consulted domain the entire discovered set (SPEC
@@ -1409,18 +1557,13 @@ interface InvalidCodePathArm {
  */
 async function runInvalidCodePathArm(
   product: ProductBinding,
-  arm: InvalidCodePathArm,
+  arm: T152Arm,
 ): Promise<void> {
-  const workspace = await TestWorkspace.create({
-    files: {
-      "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-      "specs/OK.mdx": VALID_SECTION_SOURCE,
-    },
-  });
+  const workspace = await stageT152Arm(arm);
   try {
-    await workspace.file(arm.staged, CODE_MARKER_SOURCE);
     const context = `T1.5-2 code-group arm (${arm.label})`;
-    const expected19 = invalidPathFinding(arm.presented);
+    const expected19 = arm.expected[0]!;
+    const presented = expected19.path!;
     await expectBuildAndCheckFindings(
       product,
       workspace,
@@ -1458,7 +1601,7 @@ async function runInvalidCodePathArm(
         `the valid spec source contributing none (SPEC 11.2, 11.3)`,
     );
     const expectedRecord: OccurrenceRecord = {
-      file: arm.presented,
+      file: presented,
       range: CODE_MARKER_RANGE,
       kind: "references",
       source: { unavailable: true },
@@ -1524,12 +1667,7 @@ const T1_5_2 = defineProductTest({
     );
 
     // Spec-group arm: a discovered `.mdx` whose path contains `#`.
-    const specArm = await TestWorkspace.create({
-      files: {
-        "xspec.config.ts": SPECS_ONLY_CONFIG,
-        "specs/a#b.mdx": VALID_SECTION_SOURCE,
-      },
-    });
+    const specArm = await stageT152Arm(T1_5_2_HASH_SPEC_ARM);
     try {
       const context =
         "T1.5-2 `build --json` with a spec-group file at specs/a#b.mdx";
@@ -1543,13 +1681,7 @@ const T1_5_2 = defineProductTest({
     // `#` code-group arm: 14.19 covers code sources too (SPEC 14.19 names
     // both kinds); the spec source beside it is valid, so the one condition
     // is the code file's path.
-    const codeArm = await TestWorkspace.create({
-      files: {
-        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-        "specs/OK.mdx": VALID_SECTION_SOURCE,
-        "src/a#b.ts": CODE_ARM_SOURCE,
-      },
-    });
+    const codeArm = await stageT152Arm(T1_5_2_HASH_CODE_ARM);
     try {
       const context =
         "T1.5-2 `build --json` with a code-group file at src/a#b.ts";
@@ -1567,18 +1699,15 @@ const T1_5_2 = defineProductTest({
     // is the marked byte form — the path's exact bytes, the one presentation
     // 12.0 admits for a non-UTF-8 path (SPEC 12.0, 12.7).
     if (process.platform === "linux") {
-      const nonUtf8Arm = await TestWorkspace.create({
-        files: { "xspec.config.ts": SPECS_ONLY_CONFIG },
-      });
+      const nonUtf8Arm = await stageT152Arm(T1_5_2_NON_UTF8_SPEC_ARM);
       try {
-        await nonUtf8Arm.file(NON_UTF8_SPEC_PATH, VALID_SECTION_SOURCE);
         const context =
           "T1.5-2 `build --json` with a discovered spec source whose path is not valid UTF-8 (Linux leg)";
         const findings = await buildFindings(product, nonUtf8Arm, context);
         assertConditionCounts(findings, { "14.19": 1 }, context);
         assertSameJson(
           projectFindingForm(findings[0]!),
-          invalidPathFinding(NON_UTF8_MARKED_PATH),
+          T1_5_2_NON_UTF8_SPEC_ARM.expected[0],
           `${context} — the condition-19 finding carries the stable code, ` +
             `no in-source locations, and the non-UTF-8 concerned path in ` +
             `the marked byte form (SPEC 14, 12.0, 12.7)`,
@@ -1596,12 +1725,7 @@ const T1_5_2 = defineProductTest({
     // which 12.0 reserves for a non-UTF-8 path (SPEC 12.0, 12.7). A product
     // discovering the file as valid builds finding-free and fails the count;
     // one presenting the path in the byte form fails the projection.
-    const replacementArm = await TestWorkspace.create({
-      files: {
-        "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [REPLACEMENT_CHARACTER_SPEC_PATH]: VALID_SECTION_SOURCE,
-      },
-    });
+    const replacementArm = await stageT152Arm(T1_5_2_REPLACEMENT_SPEC_ARM);
     try {
       const context =
         "T1.5-2 `build --json` with a discovered spec source whose path contains U+FFFD (specs/A<U+FFFD>.mdx, both legs)";
@@ -1609,7 +1733,7 @@ const T1_5_2 = defineProductTest({
       assertConditionCounts(findings, { "14.19": 1 }, context);
       assertSameJson(
         projectFindingForm(findings[0]!),
-        invalidPathFinding(REPLACEMENT_CHARACTER_SPEC_PATH),
+        T1_5_2_REPLACEMENT_SPEC_ARM.expected[0],
         `${context} — the condition-19 finding carries the stable code, no ` +
           `in-source locations, and the U+FFFD concerned path as a plain ` +
           `string — never the marked byte form, which 12.0 reserves for a ` +
@@ -1624,17 +1748,9 @@ const T1_5_2 = defineProductTest({
     // test runs, its path presented as the plain string, and — where file
     // names are byte strings, the Linux leg — src/c<0xFF>.ts, presented in
     // the marked byte form (SPEC 12.0, 12.7).
-    await runInvalidCodePathArm(product, {
-      label: "src/a<U+FFFD>.ts, both legs",
-      staged: REPLACEMENT_CHARACTER_CODE_PATH,
-      presented: REPLACEMENT_CHARACTER_CODE_PATH,
-    });
+    await runInvalidCodePathArm(product, T1_5_2_REPLACEMENT_CODE_ARM);
     if (process.platform === "linux") {
-      await runInvalidCodePathArm(product, {
-        label: "src/c<0xFF>.ts, not valid UTF-8, Linux leg",
-        staged: NON_UTF8_CODE_PATH,
-        presented: NON_UTF8_CODE_MARKED_PATH,
-      });
+      await runInvalidCodePathArm(product, T1_5_2_NON_UTF8_CODE_ARM);
     }
 
     // Located arm (Linux leg): the non-UTF-8-named spec source holds an
@@ -1644,28 +1760,13 @@ const T1_5_2 = defineProductTest({
     // (12.0) and whose range is exactly the section's opening tag (14: the
     // opening-tag range of 11.4). In 12.7's order: 14.1, then 14.19.
     if (process.platform === "linux") {
-      const locatedArm = await TestWorkspace.create({
-        files: { "xspec.config.ts": SPECS_ONLY_CONFIG },
-      });
+      const locatedArm = await stageT152Arm(T1_5_2_LOCATED_ARM);
       try {
-        await locatedArm.file(NON_UTF8_SPEC_PATH, LOCATED_SOURCE);
         await expectBuildAndCheckFindings(
           product,
           locatedArm,
           { "14.1": 1, "14.19": 1 },
-          [
-            {
-              code: "missing-id",
-              locations: [
-                {
-                  file: NON_UTF8_MARKED_PATH,
-                  range: LOCATED_OPENING_TAG_RANGE,
-                },
-              ],
-              path: null,
-            },
-            invalidPathFinding(NON_UTF8_MARKED_PATH),
-          ],
+          T1_5_2_LOCATED_ARM.expected,
           "T1.5-2 located arm (a non-UTF-8-named spec source holding a non-root section with no id, Linux leg)",
           `the condition-1 finding, located — its location file the ` +
             `non-UTF-8 path in the marked byte form, its range exactly the ` +
