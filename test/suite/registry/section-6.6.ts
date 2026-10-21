@@ -398,8 +398,9 @@
 //   its configuration then enabling emission with no rebuild, is T6.6-5's
 //   lagging record); each refused preview of T6.6-3 is restaged through
 //   T6.6-3's own refusal stagings (`runT663RefusalStagings`, handed
-//   T6.6-7's twin in place of the equivalence), and acquisition arm (b)'s
-//   on its staging (`runT667AreaArm`). At each state
+//   T6.6-7's twin in place of the equivalence — and, exported, T12.0-15's
+//   human twin of each refused real operation, section-12.0-iv.ts), and
+//   acquisition arm (b)'s on its staging (`runT667AreaArm`). At each state
 //   `expectHumanPreviewTwin` runs the `--preview --json` invocation — its
 //   exit the staging's premise: 0, or 1 at T6.6-6's corrupt record and at
 //   every refusal — and then the same argv without `--json`, both inside
@@ -1074,15 +1075,17 @@ async function expectRefusedPreviewEquivalence(
 }
 
 /**
- * One refused preview's twin in T6.6-3's refusal stagings
+ * One refusal's twin in T6.6-3's refusal stagings
  * (`runT663RefusalStagings`), handed the staged workspace, the refused
  * operation's argv — neither `--preview` nor `--json` among it — its
  * expected refusal finding(s), the home test's code set, and the
  * diagnostic context: T6.6-3's `expectRefusedPreviewEquivalence` (the real
- * refusal, then its `--preview`), or T6.6-7's human twin of the refused
- * preview (`expectHumanRefusedPreviewTwin`).
+ * refusal, then its `--preview`), T6.6-7's human twin of the refused
+ * preview (`expectHumanRefusedPreviewTwin`), or T12.0-15's human twin of
+ * the refused real operation (section-12.0-iv.ts). Exported with
+ * `runT663RefusalStagings` for T12.0-15.
  */
-type RefusedPreviewTwin = (
+export type RefusalStagingTwin = (
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
@@ -1104,7 +1107,7 @@ type RefusedPreviewTwin = (
  */
 async function expectRefusedArmPreviewTwin(
   product: ProductBinding,
-  twin: RefusedPreviewTwin,
+  twin: RefusalStagingTwin,
   files: Readonly<Record<string, InitialFileContents>>,
   argv: readonly string[],
   codes: readonly string[],
@@ -1138,7 +1141,7 @@ async function expectRefusedArmPreviewTwin(
  */
 async function expectIntrinsicInvalidIdPreviewTwin(
   product: ProductBinding,
-  twin: RefusedPreviewTwin,
+  twin: RefusalStagingTwin,
   testId: string,
   workspace: TestWorkspace,
   arm: IntrinsicInvalidIdArm,
@@ -1170,7 +1173,7 @@ function t147TwinContext(testId: string, kase: T147RefusalCase): string {
  */
 async function expectT147StagingPreviewTwins(
   product: ProductBinding,
-  twin: RefusedPreviewTwin,
+  twin: RefusalStagingTwin,
   testId: string,
   staging: T147RefusalStaging,
 ): Promise<void> {
@@ -2199,19 +2202,23 @@ export async function runT663AcquisitionArms(
 /**
  * T6.6-3's refusal stagings, in its order (the module header): each refusal
  * of T6.4-3, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7
- * staged identically — the invalid-workspace precondition, the exact
- * self-move of either form, the same-file after-removal collision, and
- * T14-7's own stagings included — each refused operation handed to `twin`
- * on its staged workspace: T6.6-3's `expectRefusedPreviewEquivalence` (the
- * real refusal, then its `--preview`), or T6.6-7's human twin of the
- * refused preview (`expectHumanRefusedPreviewTwin`). `testId` names the
- * running test in every context, and `runs` what `twin` runs, in the
- * diagnosis of the compare around the outside-root link arms' target
- * directory, which holds for both.
+ * staged identically — the invalid-workspace precondition (T6.4-6's
+ * refused-writes staging among it), the exact self-move of either form,
+ * the same-file after-removal collision, and T14-7's own stagings included
+ * — each refused operation handed to `twin` on its staged workspace, which
+ * every twin leaves as it found it (each refusal modifies nothing, or the
+ * twin runs on copies of the state): T6.6-3's
+ * `expectRefusedPreviewEquivalence` (the real refusal, then its
+ * `--preview`), T6.6-7's human twin of the refused preview
+ * (`expectHumanRefusedPreviewTwin`), or T12.0-15's human twin of the
+ * refused real operation (section-12.0-iv.ts, which imports this sweep).
+ * `testId` names the running test in every context, and `runs` what `twin`
+ * runs, in the diagnosis of the compare around the outside-root link arms'
+ * target directory, which holds for each.
  */
-async function runT663RefusalStagings(
+export async function runT663RefusalStagings(
   product: ProductBinding,
-  twin: RefusedPreviewTwin,
+  twin: RefusalStagingTwin,
   testId: string,
   runs: string,
 ): Promise<void> {
@@ -5603,7 +5610,7 @@ async function expectHumanPreviewTwin(
  * 6.6). The expected refusal finding(s) stay T6.6-3's premise: the twin
  * compares the two forms, whatever findings the refusal reports.
  */
-const expectHumanRefusedPreviewTwin: RefusedPreviewTwin = (
+const expectHumanRefusedPreviewTwin: RefusalStagingTwin = (
   product,
   workspace,
   argv,

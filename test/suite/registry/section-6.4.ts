@@ -87,7 +87,9 @@
 //   wording). Limits: no mention is associated with another, so which
 //   `from` maps to which `to`, and that the report maps nothing else, stay
 //   with the JSON assertions; an identity counts wherever the report
-//   prints it.
+//   prints it. T12.0-15 decodes that human report onto the applied mapping
+//   and compares it pair for pair with its `--json` twin's, on the same
+//   staging (`T6_4_1_STAGING`, exported; section-12.0-iv.ts).
 // - T6.4-1 "`check` clean after the rename" (TEST-SPEC T6.4-3 asserts 6.4's
 //   "every rewritten reference resolves by construction" on the success
 //   side of every successful rename): `check --json` runs right after the
@@ -132,7 +134,9 @@
 //   in-construct precision while rejecting wrong-construct attribution.
 //   T6.4-6's invalid-workspace refusal instead reports the workspace's
 //   numbered findings alone (SPEC 14, 6.4) — exactly its one 14.5 finding
-//   located in the offending file, no refusal reason beside it.
+//   located in the offending file, no refusal reason beside it; its staging
+//   (`T6_4_6_INVALID_WORKSPACE_*`, `stageT646InvalidWorkspace`) is exported
+//   for T12.0-15's human twin of the refusal (section-12.0-iv.ts).
 // - T6.4-6's refused-writes arm (the validations are `build`'s whole,
 //   refused writes included — 13.3: source validation errors, journal
 //   errors, and refused writes alike): a valid workspace whose
@@ -277,11 +281,11 @@ import {
 
 // One spec group plus one code group (SPEC 7.2), for fixtures whose rewrites
 // span MDX and TypeScript sources. A staged-source record: T6.4-2, T6.4-4,
-// T6.4-5, and T6.6-3 (as RENAME_USAGE_CONFIG) stage it in workspaces
-// created after a product invocation (S-9's timing clause;
-// test/self/s9-staged-sources.test.ts).
+// T6.4-5, T6.6-3 (as RENAME_USAGE_CONFIG), and T12.0-15 (as T6_4_1_STAGING's
+// configuration) stage it in workspaces created after a product invocation
+// (S-9's timing clause; test/self/s9-staged-sources.test.ts).
 const SPEC_AND_CODE_CONFIG = stagedTs(
-  "T6.4-2/T6.4-4/T6.4-5/T6.6-3 xspec.config.ts — one spec group and one code group, the rewrite and usage-error fixtures'",
+  "T6.4-2/T6.4-4/T6.4-5/T6.6-3/T12.0-15 xspec.config.ts — one spec group and one code group, the rewrite and usage-error fixtures'",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -296,11 +300,12 @@ export default defineConfig({
 );
 
 // Exactly one spec group (SPEC 7), for the refusal and usage-error fixtures.
-// A staged-source record: T6.4-4, T6.6-3, and T6.6-7 (as
-// RENAME_REFUSAL_CONFIG) stage it in workspaces created after a product
-// invocation (S-9's timing clause).
+// A staged-source record: T6.4-4, T6.6-3, T6.6-7, and T12.0-15 (as
+// RENAME_REFUSAL_CONFIG; T12.0-15 as T6_4_6_INVALID_WORKSPACE_CONFIG too)
+// stage it in workspaces created after a product invocation (S-9's timing
+// clause).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.4-4/T6.6-3/T6.6-7 xspec.config.ts — exactly one spec group, the refusal and usage-error fixtures'",
+  "T6.4-4/T6.6-3/T6.6-7/T12.0-15 xspec.config.ts — exactly one spec group, the refusal and usage-error fixtures'",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -770,28 +775,35 @@ const R1_CORE = "specs/Core.mdx";
 const R1_REFS = "specs/Refs.mdx";
 const R1_APP = "src/app.ts";
 
-const R1_CORE_SOURCE = [
-  '<S id="core">',
-  "Core holder text.",
-  "",
-  '<S id="core.mid" d={"core.plain"}>',
-  "Mid text.",
-  "",
-  '<S id="core.mid.leaf">',
-  "Leaf text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="core.sib" d={"core.mid"}>',
-  'Sib embeds: {text("core.mid.leaf")}',
-  "</S>",
-  "",
-  '<S id="core.plain">',
-  "Plain text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+// The fixture's staged sources are staged-source records (S-9's timing
+// clause; helpers/staged-mdx.ts, helpers/staged-ts.ts): T6.4-1 stages them
+// in its first workspace, before any invocation, but T12.0-15 stages the
+// same workspace after its own first invocation (T6_4_1_STAGING below).
+const R1_CORE_SOURCE = stagedMdx(
+  "T12.0-15 T6.4-1's rename fixture specs/Core.mdx (the subject core.mid, its descendant core.mid.leaf)",
+  [
+    '<S id="core">',
+    "Core holder text.",
+    "",
+    '<S id="core.mid" d={"core.plain"}>',
+    "Mid text.",
+    "",
+    '<S id="core.mid.leaf">',
+    "Leaf text.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="core.sib" d={"core.mid"}>',
+    'Sib embeds: {text("core.mid.leaf")}',
+    "</S>",
+    "",
+    '<S id="core.plain">',
+    "Plain text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 /**
  * Fixture R1's `specs/Refs.mdx`; `seg` spells the renamed segment (`mid`
@@ -830,6 +842,45 @@ function r1AppSource(seg: string): string {
     "",
   ].join("\n");
 }
+
+/**
+ * A performed operation's staging, exported for T12.0-15's human twin of
+ * its report (TEST-SPEC T12.0-15: the performed reports of T6.4-1 and
+ * T6.5-1): a fresh workspace of `config` and `files`, a premise `build`,
+ * then `argv` — the operation the home test performs on that state.
+ */
+export interface PerformedOperationStaging {
+  /** The staging, for diagnostics. */
+  readonly name: string;
+  readonly config: StagedTs;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  /** The performed operation's argv, `--json` excluded. */
+  readonly argv: readonly string[];
+}
+
+/**
+ * T6.4-1's staging (the fixture note above): the three sources under one
+ * spec group and one code group, built, then the rename of the mid-tree
+ * `core.mid` to `core.hub`. T6.4-1's body stages it, and T12.0-15 stages it
+ * identically for its human twin; the staged `mid` templates are records
+ * (S-9's timing clause; the same calls, moved, never re-spelled).
+ */
+export const T6_4_1_STAGING: PerformedOperationStaging = {
+  name: "T6.4-1's rename of the mid-tree core.mid to core.hub",
+  config: SPEC_AND_CODE_CONFIG,
+  files: {
+    [R1_CORE]: R1_CORE_SOURCE,
+    [R1_REFS]: stagedMdx(
+      'T12.0-15 T6.4-1\'s rename fixture specs/Refs.mdx (r1RefsSource("mid"): the external references, one spelled twice)',
+      r1RefsSource("mid"),
+    ),
+    [R1_APP]: stagedTs(
+      'T12.0-15 T6.4-1\'s rename fixture src/app.ts (r1AppSource("mid"): the markers, one spelled twice, and the text(...) call)',
+      r1AppSource("mid"),
+    ),
+  },
+  argv: ["rename", R1_CORE, "core.mid", "core.hub"],
+};
 
 const R1_UNCHANGED_IDENTITIES = [
   "specs/Core.mdx",
@@ -903,12 +954,8 @@ const T6_4_1 = defineProductTest({
     "rewrites: renaming a mid-tree ID rewrites its `id`, all descendant `id`s by prefix replacement, local string references, external chain references in other files, `text(...)` targets in MDX and TS, and TS markers — an affected reference spelled twice included, in one `d` array and as two markers in one code source (one edge, two occurrences), every spelling rewritten, both files byte-equal to their composed post-rename bytes — `check` clean after the rename (every rewritten reference resolves, no derived output stale), the workspace builds, all edges retarget (query-asserted), the mapping is appended to the journal, and the command's own report is the applied mapping — every journaled identity pair, the information of the preview's `mapping`, carried in JSON per 12.0 in the form-exact performed-operation document of 12.7; and the human `rename`, run on a byte copy of the pre-rename workspace, exits 0 alike and carries that mapping — every pair's `from` and `to` identity (robust matching, H-3) (SPEC 6.4, 5.2, 5.7, 6.6, 6.1, 12.0, 12.2, 12.7; TEST-SPEC T6.4-3; H-3 form-exact decode)",
   run: async (product) => {
     await withWorkspace(
-      SPEC_AND_CODE_CONFIG,
-      {
-        [R1_CORE]: R1_CORE_SOURCE,
-        [R1_REFS]: r1RefsSource("mid"),
-        [R1_APP]: r1AppSource("mid"),
-      },
+      T6_4_1_STAGING.config,
+      T6_4_1_STAGING.files,
       async (workspace) => {
         await buildOk(
           product,
@@ -947,12 +994,7 @@ const T6_4_1 = defineProductTest({
         // the same `rename` without `--json` runs first on a byte copy of
         // it, exiting 0 as the `--json` run does; its report is matched once
         // the JSON report's own assertions have run.
-        const renameArgv = [
-          "rename",
-          "specs/Core.mdx",
-          "core.mid",
-          "core.hub",
-        ] as const;
+        const renameArgv = T6_4_1_STAGING.argv;
         const humanRename = await withByteCopyOf(
           workspace,
           "T6.4-1 the pre-rename workspace, copied for the human `rename`",
@@ -1836,15 +1878,19 @@ export const RENAME_REFUSAL_CONFIG = SPECS_ONLY_CONFIG;
 // The `.mdx` entries are ledger records (S-9's before-any-product clause;
 // helpers/staged-mdx.ts): T6.4-3 stages the set again for its
 // configuration-state twins after its premise `build`, so each record is
-// named with every test staging the set — T6.4-3, T6.6-3, T6.6-7, T14-7 —
+// named with every test staging the set — T6.4-3, T6.6-3, T6.6-7, T12.0-15,
+// T14-7 —
 // and made
 // from the string constant the location windows still read.
 export const RENAME_REFUSAL_FILES: Readonly<
   Record<string, InitialFileContents>
 > = {
-  [V3_FILE]: stagedMdx("T6.4-3/T6.6-3/T6.6-7/T14-7 specs/A.mdx", V3_SOURCE),
+  [V3_FILE]: stagedMdx(
+    "T6.4-3/T6.6-3/T6.6-7/T12.0-15/T14-7 specs/A.mdx",
+    V3_SOURCE,
+  ),
   [TWO_BEARER_COLLISION_FILE]: stagedMdx(
-    "T6.4-3/T6.6-3/T6.6-7/T14-7 specs/B.mdx",
+    "T6.4-3/T6.6-3/T6.6-7/T12.0-15/T14-7 specs/B.mdx",
     TWO_BEARER_COLLISION_SOURCE,
   ),
 };
@@ -2894,23 +2940,33 @@ const T6_4_5 = defineProductTest({
 // T6.4-6 — valid-workspace precondition
 // ---------------------------------------------------------------------------
 
+// The invalid-workspace arm's sources are staged-source records (S-9's
+// timing clause; helpers/staged-mdx.ts): T6.4-6 stages them in its first
+// workspace, before any invocation, but T12.0-15 stages the same workspace
+// after its own first invocation (T6_4_6_INVALID_WORKSPACE_FILES below).
 const P6_FILE = "specs/A.mdx";
-const P6_SOURCE = [
-  '<S id="a">',
-  "Holder text.",
-  "",
-  '<S id="a.mid">',
-  "Mid text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const P6_SOURCE = stagedMdx(
+  "T12.0-15 T6.4-6's invalid-workspace arm specs/A.mdx (the rename subject a.mid)",
+  [
+    '<S id="a">',
+    "Holder text.",
+    "",
+    '<S id="a.mid">',
+    "Mid text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Valid at staging (so the pre-refusal `build` succeeds and leaves derived
 // files in the snapshot), then overwritten with an unresolved local `d`
 // reference (14.5) — the pre-existing validation error elsewhere.
 const P6_OTHER_FILE = "specs/Other.mdx";
-const P6_OTHER_VALID = ['<S id="oth">', "Other text.", "</S>", ""].join("\n");
+const P6_OTHER_VALID = stagedMdx(
+  "T12.0-15 T6.4-6's invalid-workspace arm specs/Other.mdx, valid at staging",
+  ['<S id="oth">', "Other text.", "</S>", ""].join("\n"),
+);
 const P6_OTHER_INVALID = [
   '<S id="oth" d={"nope"}>',
   "Other text.",
@@ -2921,9 +2977,58 @@ const P6_OTHER_INVALID = [
 // (S-9's before-any-product clause; helpers/staged-mdx.ts) — the same
 // constant.
 const T6_4_6_OTHER_INVALID = stagedMdx(
-  "T6.4-6 specs/Other.mdx overwritten with an unresolved local d reference",
+  "T6.4-6/T12.0-15 specs/Other.mdx overwritten with an unresolved local d reference",
   P6_OTHER_INVALID,
 );
+
+/**
+ * T6.4-6's invalid-workspace arm (the module header), exported for
+ * T12.0-15's human twin of its refusal (TEST-SPEC T12.0-15: the refused
+ * real operations of T6.4-6, the invalid-workspace refusal's findings each
+ * under its own condition's code): a fresh workspace of
+ * T6_4_6_INVALID_WORKSPACE_CONFIG and _FILES, staged by
+ * `stageT646InvalidWorkspace`, then the case's rename.
+ */
+export const T6_4_6_INVALID_WORKSPACE_CONFIG = SPECS_ONLY_CONFIG;
+export const T6_4_6_INVALID_WORKSPACE_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = { [P6_FILE]: P6_SOURCE, [P6_OTHER_FILE]: P6_OTHER_VALID };
+
+/**
+ * T6.4-6's invalid-workspace staging on its fresh workspace: `build` (exit
+ * 0, the valid workspace's derived files laid down for the modifies-nothing
+ * compare), then the pre-existing validation error elsewhere — specs/
+ * Other.mdx overwritten with an unresolved local `d` reference (14.5) — the
+ * rename subject and its file untouched.
+ */
+export async function stageT646InvalidWorkspace(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  await buildOk(
+    product,
+    workspace,
+    `${context} \`build\` over the staged workspace`,
+  );
+  await workspace.file(P6_OTHER_FILE, T6_4_6_OTHER_INVALID);
+}
+
+/**
+ * The invalid-workspace arm's rename: its own arguments valid, so the
+ * refusal is the 6.4 precondition — exactly the one 14.5 finding located in
+ * the offending file, no refusal reason evaluated or reported beside it
+ * (SPEC 6.4, 14).
+ */
+export const T6_4_6_INVALID_WORKSPACE_CASE: RenameRefusalCase = {
+  argv: ["rename", P6_FILE, "a.mid", "a.hub"],
+  expected: { finding: "14.5", locatedAt: { file: P6_OTHER_FILE } },
+  reason:
+    "the workspace fails the validations of `xspec build` — an unresolved " +
+    "d reference in specs/Other.mdx, SPEC 14.5 — so the rename refuses " +
+    "before modifying anything: no source rewrite, no journal entry, no " +
+    "derived-file change",
+};
 
 // The refused-writes arm (TEST-SPEC T6.4-6: "The validations are `build`'s
 // whole, refused writes included (13.3: source validation errors, journal
@@ -2934,13 +3039,13 @@ const T6_4_6_OTHER_INVALID = stagedMdx(
 // `out` replaced by a plain file — a directory component of every emit
 // destination occupied by a non-directory (14.22), the sources still
 // valid. Its workspace is created after the body's first product
-// invocation (the 14.5 arm runs first), and T6.6-3 and T6.6-7 stage it
-// after their own (their `--preview` twins), so the configuration and the
-// source are
+// invocation (the 14.5 arm runs first), and T6.6-3, T6.6-7, and T12.0-15
+// stage it after their own (their `--preview` twins; T12.0-15's human twins
+// of the real refusals), so the configuration and the source are
 // staged-source records (S-9's timing clause; helpers/staged-ts.ts,
 // helpers/staged-mdx.ts).
 export const REFUSED_WRITES_CONFIG = stagedTs(
-  'T6.4-6/T6.6-3/T6.6-7 xspec.config.ts — one spec group, Markdown emitted under outDir "out" (the refused-writes arm)',
+  'T6.4-6/T6.6-3/T6.6-7/T12.0-15 xspec.config.ts — one spec group, Markdown emitted under outDir "out" (the refused-writes arm)',
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -2956,7 +3061,7 @@ export const REFUSED_WRITES_FILES: Readonly<
   Record<string, InitialFileContents>
 > = {
   [W6_FILE]: stagedMdx(
-    "T6.4-6/T6.6-3/T6.6-7 refused-writes arm specs/A.mdx",
+    "T6.4-6/T6.6-3/T6.6-7/T12.0-15 refused-writes arm specs/A.mdx",
     ['<S id="a">', "A text.", "</S>", ""].join("\n"),
   ),
 };
@@ -3084,17 +3189,12 @@ const T6_4_6 = defineProductTest({
     "valid-workspace precondition: with a pre-existing validation error elsewhere, rename refuses (exit 1) before modifying anything — the rename's own arguments are valid, so the refusal is the 6.4 precondition that rename only ever rewrites a valid workspace, and it reports the workspace's numbered findings alone: exactly the one located 14.5 finding, no refusal reason beside it; the validations are `build`'s whole, refused writes included: on a valid workspace whose `specs/A.mdx` holds a top-level section `a`, under `markdown: { emit: true, outDir: \"out\" }`, built, the directory `out` then replaced by a plain file — a directory component of every emit destination, the sources still valid (a premise `build --json` exits 1 with exactly that one finding, modifying nothing) — a real `rename specs/A.mdx a b` and a real file-form `move specs/A.mdx specs/C.mdx` (its would-be emit destination under `out`; T6.5-4's precondition arm) each exit 1 under `--json` with exactly the condition-22 finding concerning `out`, form-exact (`code` `obstructed-write-path`, `path` `out`, `locations` `[]`), no refusal reason beside it — `refused-invalid-destination` included — sources, journal, derived files, and graph data byte-identical around each (whole-root compare) (SPEC 6.4, 6.5, 12.1, 12.7, 13.3, 14, 14.22)",
   run: async (product) => {
     await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [P6_FILE]: P6_SOURCE, [P6_OTHER_FILE]: P6_OTHER_VALID },
+      T6_4_6_INVALID_WORKSPACE_CONFIG,
+      T6_4_6_INVALID_WORKSPACE_FILES,
       async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T6.4-6 `build` over the staged workspace",
-        );
-        // Introduce the pre-existing validation error elsewhere; the rename
-        // subject and its file stay untouched and its arguments valid.
-        await workspace.file(P6_OTHER_FILE, T6_4_6_OTHER_INVALID);
+        // `build`, then the pre-existing validation error elsewhere; the
+        // rename subject and its file stay untouched and its arguments valid.
+        await stageT646InvalidWorkspace(product, workspace, "T6.4-6");
         // The invalid-workspace refusal reports the workspace's findings
         // themselves — exactly the one 14.5 finding located in the offending
         // file, no refusal reason evaluated or reported beside it (SPEC 6.4,
@@ -3102,12 +3202,9 @@ const T6_4_6 = defineProductTest({
         await expectRefusalModifiesNothing(
           product,
           workspace,
-          ["rename", P6_FILE, "a.mid", "a.hub"],
-          { finding: "14.5", locatedAt: { file: P6_OTHER_FILE } },
-          "T6.4-6 (the workspace fails the validations of `xspec build` — an " +
-            "unresolved d reference in specs/Other.mdx, SPEC 14.5 — so the " +
-            "rename refuses before modifying anything: no source rewrite, no " +
-            "journal entry, no derived-file change)",
+          T6_4_6_INVALID_WORKSPACE_CASE.argv,
+          T6_4_6_INVALID_WORKSPACE_CASE.expected,
+          `T6.4-6 (${T6_4_6_INVALID_WORKSPACE_CASE.reason})`,
         );
       },
     );

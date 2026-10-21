@@ -47,6 +47,8 @@ import {
   assertHumanErrorMessageCarries,
   assertHumanFindingsCarry,
   assertHumanFindingsReportCarries,
+  assertHumanPerformedCarries,
+  assertHumanPerformedReportCarries,
   assertHumanPreviewCarries,
   assertHumanPreviewReportCarries,
   assertJsonKeysByteSorted,
@@ -72,6 +74,7 @@ import {
   decodeFindingsReport,
   decodeHumanErrorMessage,
   decodeHumanFindingsReport,
+  decodeHumanPerformedReport,
   decodeHumanPreviewReport,
   decodeIdsReport,
   decodeIdsTreeReport,
@@ -8950,6 +8953,278 @@ test("S-5: the human preview comparison rejects a report omitting or misplacing 
     JSON_SECTION_MOVE_TWIN,
     'the file "specs/Third.mdx" is missing',
     "lists the file the marked byte form of",
+  );
+});
+
+// --- the human performed-report decoder (T12.0-15) ------------------------------
+
+/** T6.4-1's rename: the renamed node and its descendant, form-exact. */
+const JSON_RENAME_PERFORMED_TWIN = decodePerformedOperationReport(
+  {
+    findings: [],
+    mapping: [
+      { from: "specs/Core.mdx#core.mid", to: "specs/Core.mdx#core.hub" },
+      {
+        from: "specs/Core.mdx#core.mid.leaf",
+        to: "specs/Core.mdx#core.hub.leaf",
+      },
+    ],
+  },
+  "the performed rename's --json twin",
+);
+
+/** The built product's human report of that rename (the module header's layout). */
+const HUMAN_RENAME_PERFORMED_LINES: readonly string[] = [
+  "specs/Core.mdx#core.mid -> specs/Core.mdx#core.hub",
+  "specs/Core.mdx#core.mid.leaf -> specs/Core.mdx#core.hub.leaf",
+  "2 identities mapped",
+];
+
+/** T6.5-1's file move: the root's bare paths, then every section. */
+const JSON_FILE_MOVE_PERFORMED_TWIN = decodePerformedOperationReport(
+  {
+    findings: [],
+    mapping: [
+      { from: "specs/A.mdx", to: "specs/sub/A.mdx" },
+      { from: "specs/A.mdx#a", to: "specs/sub/A.mdx#a" },
+      { from: "specs/A.mdx#a.mid", to: "specs/sub/A.mdx#a.mid" },
+      { from: "specs/A.mdx#a.mid.leaf", to: "specs/sub/A.mdx#a.mid.leaf" },
+    ],
+  },
+  "the performed file move's --json twin",
+);
+
+const HUMAN_FILE_MOVE_PERFORMED_LINES: readonly string[] = [
+  "specs/A.mdx -> specs/sub/A.mdx",
+  "specs/A.mdx#a -> specs/sub/A.mdx#a",
+  "specs/A.mdx#a.mid -> specs/sub/A.mdx#a.mid",
+  "specs/A.mdx#a.mid.leaf -> specs/sub/A.mdx#a.mid.leaf",
+  "4 identities mapped",
+];
+
+test("S-5: the human performed-report decoder decodes a well-formed report onto the applied mapping, order free", () => {
+  const decoded = decodeHumanPerformedReport(
+    previewReport(HUMAN_RENAME_PERFORMED_LINES),
+    "rename",
+  );
+  expect(
+    decoded.mapping.map(({ from, to, line }) => ({ from, to, line })),
+  ).toEqual([
+    {
+      from: "specs/Core.mdx#core.mid",
+      to: "specs/Core.mdx#core.hub",
+      line: 1,
+    },
+    {
+      from: "specs/Core.mdx#core.mid.leaf",
+      to: "specs/Core.mdx#core.hub.leaf",
+      line: 2,
+    },
+  ]);
+  assertHumanPerformedCarries(decoded, JSON_RENAME_PERFORMED_TWIN, "rename");
+  expect(
+    assertHumanPerformedReportCarries(
+      syntheticBytesResult(
+        previewReport(HUMAN_RENAME_PERFORMED_LINES),
+        Buffer.alloc(0),
+        0,
+      ),
+      JSON_RENAME_PERFORMED_TWIN,
+      "rename, as a run",
+    ).mapping,
+  ).toHaveLength(2);
+  assertHumanPerformedCarries(
+    decodeHumanPerformedReport(
+      previewReport(HUMAN_FILE_MOVE_PERFORMED_LINES),
+      "file move",
+    ),
+    JSON_FILE_MOVE_PERFORMED_TWIN,
+    "file move",
+  );
+
+  // Order free: the pairs in another order; no count line; the count line
+  // in the singular for one pair.
+  assertHumanPerformedCarries(
+    decodeHumanPerformedReport(
+      previewReport([
+        HUMAN_FILE_MOVE_PERFORMED_LINES[3]!,
+        HUMAN_FILE_MOVE_PERFORMED_LINES[1]!,
+        HUMAN_FILE_MOVE_PERFORMED_LINES[0]!,
+        HUMAN_FILE_MOVE_PERFORMED_LINES[2]!,
+        "4 identities mapped",
+      ]),
+      "file move reordered",
+    ),
+    JSON_FILE_MOVE_PERFORMED_TWIN,
+    "file move reordered",
+  );
+  assertHumanPerformedCarries(
+    decodeHumanPerformedReport(
+      previewReport(HUMAN_RENAME_PERFORMED_LINES.slice(0, 2)),
+      "rename without its count line",
+    ),
+    JSON_RENAME_PERFORMED_TWIN,
+    "rename without its count line",
+  );
+  const single = decodeHumanPerformedReport(
+    previewReport(["specs/C.mdx#c -> specs/C.mdx#c2", "1 identity mapped"]),
+    "one pair",
+  );
+  assertHumanPerformedCarries(
+    single,
+    decodePerformedOperationReport(
+      {
+        findings: [],
+        mapping: [{ from: "specs/C.mdx#c", to: "specs/C.mdx#c2" }],
+      },
+      "one pair's twin",
+    ),
+    "one pair",
+  );
+  // A report with no line decodes to no pair (the comparison names what
+  // the twin carries).
+  expect(decodeHumanPerformedReport(Buffer.alloc(0), "empty").mapping).toEqual(
+    [],
+  );
+});
+
+test("S-5: the human performed-report decoder rejects a pair half absent, an ambiguous pair, a disagreeing count, an empty line, and every line outside its layout", () => {
+  const rejected = (
+    label: string,
+    report: Buffer,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      decodeHumanPerformedReport(report, label),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_RENAME_PERFORMED_LINES;
+  rejected(
+    "a pair without its arrow",
+    previewReport(previewWithLine(lines, 1, "specs/Core.mdx#core.mid.leaf")),
+    "a mapping line `<from> -> <to>`",
+    "line 2",
+  );
+  rejected(
+    "a pair without its to identity",
+    previewReport(
+      previewWithLine(lines, 1, "specs/Core.mdx#core.mid.leaf -> "),
+    ),
+    "its `to` identity is absent",
+  );
+  rejected(
+    "a pair without its from identity",
+    previewReport(previewWithLine(lines, 0, " -> specs/Core.mdx#core.hub")),
+    "its `from` identity is absent",
+  );
+  rejected(
+    "an ambiguous pair",
+    previewReport(previewWithLine(lines, 0, "specs/a -> specs/b -> specs/c")),
+    "this line holds several",
+  );
+  rejected(
+    "a count line disagreeing",
+    previewReport(previewWithLine(lines, 2, "3 identities mapped")),
+    "a count line equal to the 2 mapping line(s) the report lists — it counts 3",
+  );
+  rejected(
+    "a count line before a pair",
+    previewReport([lines[0]!, lines[2]!, lines[1]!]),
+    "a mapping line `<from> -> <to>`",
+    "line 2",
+  );
+  rejected(
+    "an empty line",
+    previewReport(previewWithLine(lines, 1, "")),
+    "never an empty line",
+  );
+  rejected(
+    "a finding line",
+    previewReport(HUMAN_REFUSED_LINES.slice(0, 1)),
+    "a mapping line `<from> -> <to>`",
+  );
+  rejected(
+    "bytes that are not UTF-8",
+    Buffer.concat([
+      Buffer.from("specs/A.mdx -> ", "utf8"),
+      NON_UTF8_PATH_BYTES,
+      Buffer.from("\n", "utf8"),
+    ]),
+    "so these bytes are a path printed raw",
+  );
+});
+
+test("S-5: the human performed-report comparison rejects a report omitting or changing a pair, or listing one the twin lacks — naming the pair", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[],
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanPerformedCarries(
+        decodeHumanPerformedReport(previewReport(lines), label),
+        JSON_RENAME_PERFORMED_TWIN,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_RENAME_PERFORMED_LINES;
+  rejected(
+    "a pair dropped",
+    [lines[0]!, "1 identity mapped"],
+    'the mapping pair "specs/Core.mdx#core.mid.leaf" -> "specs/Core.mdx#core.hub.leaf" is missing',
+  );
+  rejected(
+    "a pair's to identity another",
+    previewWithLine(
+      lines,
+      1,
+      "specs/Core.mdx#core.mid.leaf -> specs/Core.mdx#core.hub.leaf2",
+    ),
+    'line 2 pairs "specs/Core.mdx#core.mid.leaf" -> "specs/Core.mdx#core.hub.leaf2" instead',
+  );
+  rejected(
+    "a pair's from identity another",
+    previewWithLine(
+      lines,
+      0,
+      "specs/Core.mdx#core.mid2 -> specs/Core.mdx#core.hub",
+    ),
+    'line 1 pairs "specs/Core.mdx#core.mid2" -> "specs/Core.mdx#core.hub" instead',
+  );
+  rejected(
+    "a pair's identities swapped",
+    previewWithLine(
+      lines,
+      0,
+      "specs/Core.mdx#core.hub -> specs/Core.mdx#core.mid",
+    ),
+    'the mapping pair "specs/Core.mdx#core.mid" -> "specs/Core.mdx#core.hub" is missing',
+    'line 1 lists the mapping pair "specs/Core.mdx#core.hub" -> "specs/Core.mdx#core.mid", which the --json twin\'s mapping lacks',
+  );
+  rejected(
+    "a pair too many",
+    [...lines.slice(0, 2), "specs/Core.mdx#core -> specs/Core.mdx#hub"],
+    'line 3 lists the mapping pair "specs/Core.mdx#core" -> "specs/Core.mdx#hub", which the --json twin\'s mapping lacks',
+  );
+  rejected(
+    "a pair listed twice",
+    [lines[0]!, lines[0]!, lines[1]!],
+    'line 2 lists the mapping pair "specs/Core.mdx#core.mid" -> "specs/Core.mdx#core.hub", which the --json twin\'s mapping lacks',
+  );
+  rejected(
+    "nothing printed",
+    [],
+    'the mapping pair "specs/Core.mdx#core.mid" -> "specs/Core.mdx#core.hub" is missing',
+    'the mapping pair "specs/Core.mdx#core.mid.leaf" -> "specs/Core.mdx#core.hub.leaf" is missing',
   );
 });
 

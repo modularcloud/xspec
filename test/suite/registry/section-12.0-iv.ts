@@ -2,10 +2,14 @@
 // continued: T12.0-15 (human-form reports). This registration carries the
 // `build` and `check` family — T14-11's per-condition fixtures, T12.2-2's
 // per-family workspaces, and T1.5-2's every arm — the gated reads' reports of
-// the same findings on T13.3-3's stagings, and the non-UTF-8 marking clause
-// on T1.5-2's arms; the `rename`/`move`, `impact`, `review`,
-// `coverage`/`ids`/`show`, and exit-2 families are added beside them by the
-// plan written at 2a2b94e's FIX_PLAN Tasks 131–135.
+// the same findings on T13.3-3's stagings, the non-UTF-8 marking clause on
+// T1.5-2's arms, and the `rename`/`move` family — the performed reports of
+// T6.4-1 and T6.5-1 and the refused real operations of T6.4-3, T6.4-6,
+// T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7, the
+// previews being T6.6-7's (section-6.6.ts), which this test cites rather
+// than repeats; the `impact`, `review`, `coverage`/`ids`/`show`, and exit-2
+// families are added beside them by the plan written at 2a2b94e's FIX_PLAN
+// Tasks 132–135.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspaces (H-1), drives the product strictly as a subprocess (H-2),
@@ -20,7 +24,14 @@
 // deterministically, and a valid-UTF-8 path never in it. SPEC 14: every
 // reported condition carries its stable code, a location per offending
 // construct (its file and source range, 1.7), the file or path it concerns
-// where it has no in-source location, and the identities it names.
+// where it has no in-source location, and the identities it names; a
+// refusal renders as precisely as a finding, and the invalid-workspace
+// refusal reports the workspace's numbered findings alone, each under its
+// own condition's code (6.4). SPEC 6.4: a successful rename's report is the
+// applied mapping — the complete identity mapping the operation journaled,
+// the preview's `mapping` — carried in JSON in the applied-mapping document
+// form of 12.7; 6.5: a successful move reports its applied mapping as
+// rename does.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - The twin (`expectHumanFindingsTwin`): at a fixture's state the
@@ -46,15 +57,20 @@
 //   modifies-nothing compare, the lock path compared like any other path
 //   (none of these acquires, 13.5; H-6), so the human run's state is the
 //   `--json` run's pre-invocation state, observed. Where the run writes — a
-//   mutating command (`review create`, `resolve`, `split`; 13.5), or a
-//   successful `build` (T14-11's valid trailing-comma arm, T12.2-2's states
-//   where `build` succeeds and regenerates) — each form runs on a fresh
-//   byte copy of the state (`copyTreeBytes`, `.git` included, the lock path
-//   left out unread as T6.4-1's human-form copy leaves it; each copy checked
-//   against the workspace before anything runs there — a difference is a
-//   harness error, never a product verdict; a copy composes no source text,
-//   so S-9 has nothing to judge), the workspace itself untouched, so the
-//   staging it belongs to continues exactly as its home test's does. A copy
+//   mutating command (`review create`, `resolve`, `split`, `rename`,
+//   `move`, performed or refused; 13.5), or a successful `build` (T14-11's
+//   valid trailing-comma arm, T12.2-2's states where `build` succeeds and
+//   regenerates) — each form runs on a fresh byte copy of the state
+//   (`copyTreeBytes`, `.git` included, the lock path left out unread as
+//   T6.4-1's human-form copy leaves it, and beside the copy's root a byte
+//   copy of what the staging put beside the original's in its temporary
+//   directory, so a symbolic link reaching out of the root reaches the same
+//   state from the copy — T6.5-4's outside-root link arms' `specs/sub` →
+//   `../../outside`; each copy checked against the workspace before
+//   anything runs there — a difference is a harness error, never a product
+//   verdict; a copy composes no source text, so S-9 has nothing to judge),
+//   the workspace itself untouched, so the staging it belongs to continues
+//   exactly as its home test's does. A copy
 //   is a different directory, so a product writing its absolute workspace
 //   root to standard error would differ there across the two forms: the
 //   built product writes nothing to standard error at exit 0 or 1.
@@ -79,6 +95,35 @@
 //   no human form (SPEC 11). T13.3-3's own assertions (its pinned findings,
 //   never-gated contrasts, and stale twins' premises) are its own: this
 //   test asserts the two forms against each other.
+// - The performed reports (`expectHumanPerformedTwin`): T6.4-1's rename and
+//   each of T6.5-1's five file moves, staged as their home tests stage them
+//   (section-6.4.ts `T6_4_1_STAGING`, section-6.5.ts
+//   `T6_5_1_FILE_MOVE_STAGINGS`) and built; the operation with `--json` on
+//   a fresh copy — exit 0, the staging's premise, its stdout decoded
+//   form-exact as the performed-operation document (12.7: exactly
+//   `{"findings", "mapping"}`, `findings` `[]`) — and without it on another,
+//   exiting 0 alike, its standard error byte-identical, its report decoded
+//   by the human performed-report decoder (helpers/adapters/human-reports.ts)
+//   and carrying the twin's applied mapping (`assertHumanPerformedReportCarries`):
+//   every pair's `from` and `to` identity, a multiset, order free (12.7's
+//   `from`-byte order is the JSON form's); a pair the human report omits,
+//   changes, or lists beside the twin's fails, named. The mapping's content
+//   is the home tests' (each pins it); this test compares the two forms.
+// - The refused real operations (`expectHumanRefusalTwin`, the findings
+//   twin above on fresh copies, exit 1): T6.4-6's invalid-workspace arm on
+//   its own staging (section-6.4.ts `stageT646InvalidWorkspace`, 14.5), then
+//   every refusal T6.6-3's refusal stagings stage (section-6.6.ts
+//   `runT663RefusalStagings`: each refusal of T6.4-3, T6.5-4, T6.5-6,
+//   T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7 staged identically from
+//   its home module's exports — the invalid-workspace precondition, T6.4-6's
+//   refused-writes staging among it, the exact self-moves, the same-file
+//   collision, and T14-7's own stagings included — the sweep T6.6-3 and
+//   T6.6-7 run with their own twins): each refusal finding's code,
+//   locations, concerned path, and identities as its `--json` twin's (14: a
+//   refusal renders as precisely as a finding), and an invalid-workspace
+//   refusal's numbered findings each under its own condition's code; a
+//   human refusal printing nothing or omitting any datum fails. The
+//   expected refusal findings stay the home tests' premises.
 // - Non-UTF-8 paths (12.0): on every arm of T1.5-2, each human report's
 //   paths — every finding's location files and concerned path — must be,
 //   as a multiset in form and bytes, exactly the paths T1.5-2 pins for the
@@ -104,7 +149,9 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   assertHumanFindingsReportCarries,
+  assertHumanPerformedReportCarries,
   decodeFindingsReport,
+  decodePerformedOperationReport,
   pathValueBytes,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
@@ -123,15 +170,31 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import type { SnapshotOptions } from "../../helpers/snapshot.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { copyTreeBytes } from "../../helpers/tree-copy.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import {
+  TestWorkspace,
+  WORKSPACE_ROOT_DIRECTORY_NAME,
+} from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import type { T152Arm } from "./section-1.5.js";
 import { stageT152Arm, T1_5_2_ARMS } from "./section-1.5.js";
+import type { PerformedOperationStaging } from "./section-6.4.js";
+import {
+  stageT646InvalidWorkspace,
+  T6_4_1_STAGING,
+  T6_4_6_INVALID_WORKSPACE_CASE,
+  T6_4_6_INVALID_WORKSPACE_CONFIG,
+  T6_4_6_INVALID_WORKSPACE_FILES,
+} from "./section-6.4.js";
+import { T6_5_1_FILE_MOVE_STAGINGS } from "./section-6.5.js";
+import type { RefusalStagingTwin } from "./section-6.6.js";
+import { runT663RefusalStagings } from "./section-6.6.js";
 import { runT1222Families } from "./section-12.1-12.2.js";
 import { runT1333GateStagings } from "./section-13.3.js";
 import { T14_11_FIXTURES } from "./section-14.js";
-import { expectExit, runCli } from "./support.js";
+import { buildOk, expectExit, runCli } from "./support.js";
 
 // ---------------------------------------------------------------------------
 // The twin
@@ -179,14 +242,32 @@ interface HumanFindingsTwin {
   readonly decoded: HumanFindingsReport;
 }
 
+/** The workspace root's own name in its temporary directory, as bytes. */
+const ROOT_NAME_BYTES = Buffer.from(WORKSPACE_ROOT_DIRECTORY_NAME, "utf8");
+
+/**
+ * A snapshot exclusion leaving out the workspace root itself, the
+ * temporary directory's other entries kept: what a staging put beside the
+ * root.
+ */
+const EXCLUDE_ROOT: SnapshotOptions = {
+  exclude: (relPathBytes) => Buffer.from(relPathBytes).equals(ROOT_NAME_BYTES),
+};
+
 /**
  * Run `body` on a fresh workspace holding a byte copy of `workspace` as it
  * stands (the module header): helpers/tree-copy.ts's `copyTreeBytes`
  * (directories, plain files, and symbolic links, names as bytes; `.git`
  * included), the lock path left out unread (`isLockPathBytes`: a product
- * may make its entries unreadable, H-4), checked against the original, the
- * lock path aside, before `body` runs — a difference is a harness error,
- * never a product verdict — then dispose of the copy (H-1).
+ * may make its entries unreadable, H-4), and beside the copy's root a byte
+ * copy of whatever stands beside the original's in its temporary directory
+ * — what the staging put there, which a symbolic link reaching out of the
+ * root then reaches in the copy as in the original (T6.5-4's outside-root
+ * link arms: `specs/sub` → `../../outside`, an empty directory beside the
+ * root; the harness's own git scratch there is copied alike, and the
+ * product never reads it) — each checked against the original, the lock
+ * path aside, before `body` runs — a difference is a harness error, never
+ * a product verdict — then dispose of the copy (H-1).
  */
 async function onFreshCopy<T>(
   workspace: TestWorkspace,
@@ -196,18 +277,30 @@ async function onFreshCopy<T>(
   const copy = await TestWorkspace.create({});
   try {
     await copyTreeBytes(
+      Buffer.from(workspace.tempRoot),
+      Buffer.from(copy.tempRoot),
+      EXCLUDE_ROOT.exclude,
+    );
+    await copyTreeBytes(
       Buffer.from(workspace.root),
       Buffer.from(copy.root),
       isLockPathBytes,
     );
-    const differences = diffSnapshots(
-      await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
-      await snapshotDirectory(copy.root, EXCLUDE_LOCK_PATH),
-    );
+    const differences = [
+      ...diffSnapshots(
+        await snapshotDirectory(workspace.tempRoot, EXCLUDE_ROOT),
+        await snapshotDirectory(copy.tempRoot, EXCLUDE_ROOT),
+      ),
+      ...diffSnapshots(
+        await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
+        await snapshotDirectory(copy.root, EXCLUDE_LOCK_PATH),
+      ),
+    ];
     if (differences.length > 0) {
       throw new Error(
         `harness error: ${context}: the byte copy of ${workspace.root} at ` +
-          `${copy.root} differs from it (the lock path aside): ` +
+          `${copy.root}, with what stands beside it in ` +
+          `${workspace.tempRoot}, differs from it (the lock path aside): ` +
           differences
             .slice(0, 10)
             .map((change) => `${change.change} ${change.path}`)
@@ -600,18 +693,210 @@ async function runT1333Twins(product: ProductBinding): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// `rename` and `move`: the performed reports of T6.4-1 and T6.5-1
+// ---------------------------------------------------------------------------
+
+/**
+ * Stage a fresh workspace of `config` and `files` — records, every one: the
+ * workspace is created after this body's first product invocation (S-9's
+ * timing clause) — run `body`, dispose (H-1).
+ */
+async function withStaging<T>(
+  config: StagedTs,
+  files: Readonly<Record<string, InitialFileContents>>,
+  body: (workspace: TestWorkspace) => Promise<T>,
+): Promise<T> {
+  const workspace = await TestWorkspace.create({
+    files: { "xspec.config.ts": config, ...files },
+  });
+  try {
+    return await body(workspace);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * T12.0-15's twin of one performed `rename`/`move` at the state a staging
+ * left (the module header), each form on its own fresh byte copy of the
+ * state, the workspace untouched: `argv` with `--json` — exit 0, the
+ * staging's premise (the operation its home test performs there) — its
+ * report decoded form-exact as the performed-operation document (SPEC
+ * 12.7: exactly `{"findings", "mapping"}`, `findings` `[]`); then `argv`
+ * itself, the human form, exiting as its twin with its standard error
+ * byte-identical (SPEC 12.0; T12.0-2), its report decoded by the human
+ * performed-report decoder and carrying the twin's applied mapping — every
+ * pair's `from` and `to` identity, a multiset, order free (TEST-SPEC
+ * T12.0-15; SPEC 6.4: a successful rename's report is the applied mapping,
+ * and a move reports its own as rename does, 6.5;
+ * `assertHumanPerformedReportCarries`).
+ */
+async function expectHumanPerformedTwin(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<void> {
+  const jsonArgv = [...argv, "--json"];
+  const jsonCommand = `\`${jsonArgv.join(" ")}\``;
+  const humanCommand = `\`${argv.join(" ")}\` (human report)`;
+  const json = await onFreshCopy(
+    workspace,
+    `${context}: the state copied for ${jsonCommand}`,
+    (copy) =>
+      expectExit(
+        product,
+        copy,
+        jsonArgv,
+        0,
+        `${context}: ${jsonCommand} — the staging's premise: exit 0, the ` +
+          `operation performed as its home test performs it on this state ` +
+          `(SPEC 6.4, 6.5, 12.0)`,
+      ),
+  );
+  const report = decodePerformedOperationReport(
+    parseJsonStdout(
+      json,
+      `${context}: ${jsonCommand} — a single JSON document as the entire ` +
+        `stdout (SPEC 12.0)`,
+    ),
+    `${context}: ${jsonCommand}`,
+  );
+  const human = await onFreshCopy(
+    workspace,
+    `${context}: the state copied for ${humanCommand}`,
+    (copy) =>
+      expectExit(
+        product,
+        copy,
+        argv,
+        0,
+        `${context}: ${humanCommand} — run without \`--json\` on a fresh ` +
+          `copy of the same pre-invocation state, it exits as its ` +
+          `\`--json\` twin did (0; SPEC 12.0: the output form never changes ` +
+          `an exit code; TEST-SPEC T12.0-15, T12.0-2)`,
+      ),
+  );
+  assertBytesEqual(
+    human.stderrBytes,
+    json.stderrBytes,
+    `${context}: ${humanCommand} — its standard error byte-identical to its ` +
+      `\`--json\` twin's (SPEC 12.0: the output form never changes ` +
+      `standard-error content; T12.0-2)`,
+  );
+  assertHumanPerformedReportCarries(
+    human,
+    report,
+    `${context}: ${humanCommand}`,
+  );
+}
+
+/**
+ * The performed reports (the module header): T6.4-1's rename and each of
+ * T6.5-1's file moves, each staged as its home test stages it
+ * (section-6.4.ts `T6_4_1_STAGING`, section-6.5.ts
+ * `T6_5_1_FILE_MOVE_STAGINGS`: its files under its configuration, the
+ * premise `build`), then the performed operation's human twin on fresh
+ * copies of the built state.
+ */
+async function runPerformedTwins(product: ProductBinding): Promise<void> {
+  const stagings: readonly PerformedOperationStaging[] = [
+    T6_4_1_STAGING,
+    ...T6_5_1_FILE_MOVE_STAGINGS,
+  ];
+  for (const staging of stagings) {
+    const context = `T12.0-15 (${staging.name})`;
+    await withStaging(staging.config, staging.files, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${context}: the premise \`build\` over the staged workspace (SPEC ` +
+          `12.1)`,
+      );
+      await expectHumanPerformedTwin(product, workspace, staging.argv, context);
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// `rename` and `move`: the refused real operations
+// ---------------------------------------------------------------------------
+
+/**
+ * T12.0-15's twin of one refused real `rename`/`move` (the module header):
+ * the findings twin (`expectHumanFindingsTwin`), exit 1, each form on its
+ * own fresh byte copy of the state — the real operation is a mutating
+ * command's run (13.5) — the workspace untouched, so the staging continues
+ * as its own. Handed to T6.6-3's refusal stagings
+ * (`runT663RefusalStagings`), it compares the two forms whatever the
+ * refusal reports: the expected findings stay the home tests' premises.
+ */
+const expectHumanRefusalTwin: RefusalStagingTwin = async (
+  product,
+  workspace,
+  argv,
+  _expected,
+  context,
+) => {
+  await expectHumanFindingsTwin(product, workspace, argv, context, {
+    state: "fresh",
+    expectedExit: 1,
+  });
+};
+
+/**
+ * The refused real operations of T6.4-3, T6.4-6, T6.5-4, T6.5-6, T6.5-16,
+ * T6.5-17, T6.5-20, T6.5-21, and T14-7 (the module header): T6.4-6's
+ * invalid-workspace arm on its own staging (section-6.4.ts
+ * `stageT646InvalidWorkspace`: built, then specs/Other.mdx broken, 14.5),
+ * then every refusal of T6.6-3's refusal stagings (section-6.6.ts
+ * `runT663RefusalStagings`, staged as T6.6-3 stages each from its home
+ * module's exports, T6.4-6's refused-writes staging among them), each
+ * refused operation's human twin on fresh copies of its state.
+ */
+async function runRefusalTwins(product: ProductBinding): Promise<void> {
+  const context = `T12.0-15 rename refusal (T6.4-6 ${T6_4_6_INVALID_WORKSPACE_CASE.reason})`;
+  await withStaging(
+    T6_4_6_INVALID_WORKSPACE_CONFIG,
+    T6_4_6_INVALID_WORKSPACE_FILES,
+    async (workspace) => {
+      await stageT646InvalidWorkspace(
+        product,
+        workspace,
+        "T12.0-15 (T6.4-6's invalid-workspace staging)",
+      );
+      await expectHumanRefusalTwin(
+        product,
+        workspace,
+        T6_4_6_INVALID_WORKSPACE_CASE.argv,
+        T6_4_6_INVALID_WORKSPACE_CASE.expected,
+        context,
+      );
+    },
+  );
+  await runT663RefusalStagings(
+    product,
+    expectHumanRefusalTwin,
+    "T12.0-15",
+    "the refused operation and its human twin, each run on a fresh copy",
+  );
+}
+
+// ---------------------------------------------------------------------------
 // T12.0-15
 // ---------------------------------------------------------------------------
 
 const T12_0_15 = defineProductTest({
   id: "T12.0-15",
   title:
-    "human-form reports — this registration's families: `build` and `check` on T14-11's per-condition fixtures, T12.2-2's per-family workspaces, and T1.5-2's every arm (its located arm included), and each gated read and mutating `review` subcommand on T13.3-3's stagings but `query` (JSON-only), each run again without `--json` on the same pre-invocation state (a fresh copy of it for a mutating command or a run that writes), exit as its `--json` twin, standard error byte-identical, its report — decoded by the human findings decoder — carrying every finding's stable code, locations (each file and its range's two byte offsets), concerned path, and identities as its twin does, order free, messages never compared, a human report printing nothing or omitting or changing any datum failing; and on T1.5-2's arms every reported path presented as 12.0 fixes, whatever the twin carries — the non-UTF-8 path (the condition-19 finding's concerned path, the located arm's location file) explicitly marked, the adapter recovering its exact bytes by the mark alone, each such report byte-identical across two runs on the same state, and every valid-UTF-8 path (the `#` and U+FFFD arms') a plain string, never marked; the `rename`/`move`, `impact`, `review`, `coverage`/`ids`/`show`, and exit-2 families follow (the plan written at 2a2b94e, FIX_PLAN Tasks 131–135) (SPEC 12.0, 12.7, 14, 1.7; H-3, H-6)",
+    "human-form reports — this registration's families: `build` and `check` on T14-11's per-condition fixtures, T12.2-2's per-family workspaces, and T1.5-2's every arm (its located arm included), and each gated read and mutating `review` subcommand on T13.3-3's stagings but `query` (JSON-only), each run again without `--json` on the same pre-invocation state (a fresh copy of it for a mutating command or a run that writes), exit as its `--json` twin, standard error byte-identical, its report — decoded by the human findings decoder — carrying every finding's stable code, locations (each file and its range's two byte offsets), concerned path, and identities as its twin does, order free, messages never compared, a human report printing nothing or omitting or changing any datum failing; and on T1.5-2's arms every reported path presented as 12.0 fixes, whatever the twin carries — the non-UTF-8 path (the condition-19 finding's concerned path, the located arm's location file) explicitly marked, the adapter recovering its exact bytes by the mark alone, each such report byte-identical across two runs on the same state, and every valid-UTF-8 path (the `#` and U+FFFD arms') a plain string, never marked; `rename` and `move` — the performed reports of T6.4-1's rename and T6.5-1's five file moves, staged as their home tests stage them and built, each form run on its own fresh copy of the built state, the human run exiting 0 as its `--json` twin, standard error byte-identical, its report — decoded by the human performed-report decoder — carrying the applied mapping the form-exact performed-operation document carries, every pair's `from` and `to` identity, a multiset, order free, a pair omitted, changed, or listed beside the twin's failing (the previews are T6.6-7's); and the refused real operations of T6.4-3, T6.4-6, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7 — T6.4-6's invalid-workspace arm and every refusal of T6.6-3's refusal stagings, staged as T6.6-3 stages each from its home module, T6.4-6's refused-writes staging among them — each form on its own fresh copy of the state, exit 1, the human findings report carrying every refusal finding's code, locations, concerned path, and identities, and the invalid-workspace refusal's findings each under its own condition's code, a human refusal printing nothing or omitting any of them failing; the `impact`, `review`, `coverage`/`ids`/`show`, and exit-2 families follow (the plan written at 2a2b94e, FIX_PLAN Tasks 132–135) (SPEC 12.0, 12.7, 14, 1.7, 6.4, 6.5; H-3, H-6)",
   run: async (product) => {
     await runT1411Twins(product);
     await runT1222Twins(product);
     await runT152Twins(product);
     await runT1333Twins(product);
+    await runPerformedTwins(product);
+    await runRefusalTwins(product);
   },
 });
 

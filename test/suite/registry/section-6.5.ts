@@ -89,7 +89,10 @@
 //   nothing else, stay with the JSON assertions; an identity counts
 //   wherever the report prints it. The section form's report is the same
 //   applied mapping (6.5: both forms report it as rename does), so T6.5-3
-//   asks its JSON form alone.
+//   asks its JSON form alone. T12.0-15 decodes the file moves' human
+//   reports onto the applied mapping and compares them pair for pair with
+//   their `--json` twins', on the same stagings
+//   (`T6_5_1_FILE_MOVE_STAGINGS`, exported; section-12.0-iv.ts).
 // - T6.5-1/T6.5-3 "finishing regeneration as T6.4-7" is the H-6 two-directory
 //   protocol: a second workspace is seeded with the post-move configuration,
 //   sources, and journal (derived files are reproducible from those,
@@ -311,7 +314,10 @@ import {
 } from "../../helpers/ts-identifiers.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
-import type { SpellsNoneUsageArm } from "./section-6.4.js";
+import type {
+  PerformedOperationStaging,
+  SpellsNoneUsageArm,
+} from "./section-6.4.js";
 import {
   BARRED_NEW_ID_CHARACTERS,
   U4_ANC_SOURCE,
@@ -355,11 +361,11 @@ import {
 // Exactly one spec group (SPEC 7), for the byte-exact edit and identity-terms
 // fixtures. A staged-source record: T6.5-2, T6.5-5, and T6.5-8 stage it in
 // workspaces created after a product invocation, as T6.6-3 does through
-// MOVE_SOLO_CONFIG and MOVE_IDENTITY_CONFIG, and T6.6-7 through
-// MOVE_IDENTITY_CONFIG (S-9's timing clause;
+// MOVE_SOLO_CONFIG and MOVE_IDENTITY_CONFIG, and T6.6-7 and T12.0-15
+// through MOVE_IDENTITY_CONFIG (S-9's timing clause;
 // test/self/s9-staged-sources.test.ts).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.5-2/T6.5-5/T6.5-8/T6.6-3/T6.6-7 xspec.config.ts — exactly one spec group, the byte-exact, usage-error, and identity-terms fixtures'",
+  "T6.5-2/T6.5-5/T6.5-8/T6.6-3/T6.6-7/T12.0-15 xspec.config.ts — exactly one spec group, the byte-exact, usage-error, and identity-terms fixtures'",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -412,9 +418,10 @@ export default defineConfig({
 // rewrites span MDX and TypeScript sources and whose fresh-build compare
 // covers every derived-file kind (the T6.4-7 configuration). A staged-source
 // record: T6.5-1 stages it after a product invocation — every arm's preview
-// copy, and arms (b)–(d) (S-9's timing clause).
+// copy, and arms (b)–(e) — and T12.0-15 every arm's
+// (T6_5_1_FILE_MOVE_STAGINGS; S-9's timing clause).
 const FULL_CONFIG = stagedTs(
-  "T6.5-1 xspec.config.ts — specs, code, and Markdown emission",
+  "T6.5-1/T12.0-15 xspec.config.ts — specs, code, and Markdown emission",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -435,10 +442,10 @@ export default defineConfig({
 // `specs/dual/` (the belonging-to-a-code-group-as-well refusal, 14.14). Both
 // extra globs match no staged file, so the workspace itself stays valid. A
 // staged-source record: T6.5-4's later workspaces stage it after a product
-// invocation, as T6.6-3, T6.6-7, and T14-7 do through MOVE_REFUSAL_CONFIG
-// (S-9's timing clause).
+// invocation, as T6.6-3, T6.6-7, T12.0-15, and T14-7 do through
+// MOVE_REFUSAL_CONFIG (S-9's timing clause).
 const REFUSAL_CONFIG = stagedTs(
-  "T6.5-4/T6.6-3/T6.6-7/T14-7 xspec.config.ts — the refusal configuration: a second spec glob under specs/plain/, a code group over specs/dual/",
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15/T14-7 xspec.config.ts — the refusal configuration: a second spec glob under specs/plain/, a code group over specs/dual/",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1115,20 +1122,21 @@ const A_SECTION_IDS = ["a", "a.mid", "a.mid.leaf"] as const;
 // T6.5-1's stagings: arm (a)'s workspace is the body's first; its preview
 // copy and every later arm follow (a)'s invocations, so each `.mdx` source
 // is a ledger record (S-9's before-any-product clause; helpers/staged-mdx.ts),
-// (a)'s converted uniformly. The geometries share sources — all four the
+// (a)'s converted uniformly — and T12.0-15 stages every arm after its own
+// first invocation (T6_5_1_FILE_MOVE_STAGINGS), so each record names it. The geometries share sources — all four the
 // other file, (a) and (c) the moved file, (a) and (d) the importer — and
 // identical bytes one test stages at several sites are ONE record staged at
 // each, so `fileMoveArm` composes each source as before and registers it
 // through `t651Record` under a name spelling its composition inputs, the
 // record reused where a later geometry composes the same bytes.
 const C_SOURCE = stagedMdx(
-  "T6.5-1 every arm's other file specs/C.mdx (specs/w/C.mdx in arm (c))",
+  "T6.5-1/T12.0-15 every arm's other file specs/C.mdx (specs/w/C.mdx in arm (c))",
   ['<S id="c">', "C text.", "</S>", ""].join("\n"),
 );
 const CONSUMER = "src/app.ts";
 const T6_5_1_RECORDS = new Map<string, StagedMdx>();
 function t651Record(what: string, source: string): StagedMdx {
-  const name = `T6.5-1 ${what}`;
+  const name = `T6.5-1/T12.0-15 ${what}`;
   const known = T6_5_1_RECORDS.get(name);
   if (known !== undefined) {
     if (known.source !== source) {
@@ -1339,7 +1347,7 @@ function fileMoveArm(geometry: FileMoveGeometry): FileMoveArm {
   if (geometry.consumerRewrite !== null) {
     const consumerText = consumerSource(geometry.consumerRewrite.before);
     files[CONSUMER] = stagedTs(
-      `T6.5-1 src/app.ts the .ts importer importing ${geometry.consumerRewrite.before}`,
+      `T6.5-1/T12.0-15 src/app.ts the .ts importer importing ${geometry.consumerRewrite.before}`,
       consumerText,
     );
     rewrites.push({
@@ -1471,15 +1479,15 @@ const T651E_CODE_SOURCE = [
   "",
 ].join("\n");
 const T651E_MOVED = stagedMdx(
-  "T6.5-1 (e) specs/A.mdx — the moved file, its own import of C unreferenced, and section x",
+  "T6.5-1/T12.0-15 (e) specs/A.mdx — the moved file, its own import of C unreferenced, and section x",
   T651E_MOVED_SOURCE,
 );
 const T651E_IMPORTER = stagedMdx(
-  "T6.5-1 (e) specs/B.mdx — the spec importer, its import of A unreferenced, and section b",
+  "T6.5-1/T12.0-15 (e) specs/B.mdx — the spec importer, its import of A unreferenced, and section b",
   T651E_IMPORTER_SOURCE,
 );
 const T651E_CODE = stagedTs(
-  "T6.5-1 (e) src/c.ts — a type-only import of A's module under each modifier form and a side-effect import of it",
+  "T6.5-1/T12.0-15 (e) src/c.ts — a type-only import of A's module under each modifier form and a side-effect import of it",
   T651E_CODE_SOURCE,
 );
 
@@ -1684,6 +1692,22 @@ const FILE_MOVE_ARMS: readonly FileMoveArm[] = [
   // `"../specs/sub/A.xspec"`.
   fiveDeclarationArm(),
 ];
+
+/**
+ * T6.5-1's stagings (FILE_MOVE_ARMS, in its order), exported for
+ * T12.0-15's human twin of each performed move's report (TEST-SPEC
+ * T12.0-15: the performed reports of T6.4-1 and T6.5-1): each arm's files
+ * under FULL_CONFIG, built, then the arm's file-form `move <origin>
+ * <destination>` — the staging and the move T6.5-1's driver
+ * (`runFileMoveArm`) performs on that state.
+ */
+export const T6_5_1_FILE_MOVE_STAGINGS: readonly PerformedOperationStaging[] =
+  FILE_MOVE_ARMS.map((arm) => ({
+    name: `T6.5-1's file move (${arm.name})`,
+    config: FULL_CONFIG,
+    files: arm.files,
+    argv: ["move", arm.origin, arm.destination],
+  }));
 
 /** Preview edits projected to their pinned form, for an exact compare. */
 function projectEdits(edits: readonly PreviewEdit[]): readonly PreviewEdit[] {
@@ -3412,18 +3436,18 @@ const V4_B_SOURCE = [
 
 // The A and B sources stay strings for the location windows below; the
 // records made from them serve every set staging them — MOVE_REFUSAL_FILES
-// (T6.5-4's first workspace; T6.6-3, T6.6-7, and T14-7 stage it after their
-// first
-// invocations), MOVE_LINK_OUTSIDE_FILES, and MOVE_PRECONDITION_FILES — one
+// (T6.5-4's first workspace; T6.6-3, T6.6-7, T12.0-15, and T14-7 stage it
+// after their first invocations), MOVE_LINK_OUTSIDE_FILES, and
+// MOVE_PRECONDITION_FILES — one
 // record per byte sequence, named with every staging test (S-9's
 // before-any-product clause; helpers/staged-mdx.ts); the sets' other `.mdx`
 // sources are wrapped in place below.
 const V4_A_STAGED = stagedMdx(
-  "T6.5-4/T6.6-3/T6.6-7/T14-7 specs/A.mdx",
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15/T14-7 specs/A.mdx",
   V4_A_SOURCE,
 );
 const V4_B_STAGED = stagedMdx(
-  "T6.5-4/T6.6-3/T6.6-7/T14-7 specs/B.mdx",
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15/T14-7 specs/B.mdx",
   V4_B_SOURCE,
 );
 
@@ -3437,7 +3461,7 @@ const V4_DIR_TARGET = "specs/DirTarget.mdx"; // section form: directory
 const V4_LINK_TARGET = "specs/LinkTarget.mdx"; // section form: symlink → B.mdx
 const V4_OCC = "docs/Occ.mdx"; // section form: out-of-group `.mdx` file
 const V4_OCC_SOURCE = stagedMdx(
-  "T6.5-4/T6.6-3/T6.6-7/T14-7 docs/Occ.mdx",
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15/T14-7 docs/Occ.mdx",
   ['<S id="occ">', "Occupant text.", "</S>", ""].join("\n"),
 );
 
@@ -3469,7 +3493,7 @@ const V4_Y_WINDOW = byteWindow(
 // (14.5) — the pre-existing validation error elsewhere (as T6.4-6).
 const V4_OTHER = "specs/Other.mdx";
 const V4_OTHER_VALID = stagedMdx(
-  "T6.5-4/T6.6-3/T6.6-7 precondition arm specs/Other.mdx as staged (valid)",
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15 precondition arm specs/Other.mdx as staged (valid)",
   ['<S id="oth">', "Other text.", "</S>", ""].join("\n"),
 );
 const V4_OTHER_INVALID = [
@@ -3498,10 +3522,10 @@ const V4_OTHER_INVALID = [
 // (SPEC 14, T14-7) — discriminating a product that vets only the
 // destination path's own components (it sees `new/` absent and proceeds).
 // A staged-source record: T6.5-4's derived-path workspaces are created
-// after a product invocation, as T6.6-3's, T6.6-7's, and T14-7's are
-// through MOVE_DERIVED_PATH_CONFIG (S-9's timing clause).
+// after a product invocation, as T6.6-3's, T6.6-7's, T12.0-15's, and
+// T14-7's are through MOVE_DERIVED_PATH_CONFIG (S-9's timing clause).
 const V4_OUTDIR_CONFIG = stagedTs(
-  "T6.5-4/T6.6-3/T6.6-7/T14-7 xspec.config.ts — the derived-path configuration: a second spec glob under new/, Markdown emitted under mdout/",
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15/T14-7 xspec.config.ts — the derived-path configuration: a second spec glob under new/, Markdown emitted under mdout/",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -3517,7 +3541,7 @@ const V4_SOLO = "specs/Solo.mdx";
 // twin of it, stage the same bytes as its moved file specs/Src.mdx — one
 // staged-source record (S-9) for every site.
 export const V4_SOLO_SOURCE = stagedMdx(
-  "T6.5-4/T6.6-3/T6.6-7/T14-7 the moved file solo (the derived-path arms' specs/Solo.mdx; the destination-component arm's specs/Src.mdx, T14-7's and T6.6-3's twin)",
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15/T14-7 the moved file solo (the derived-path arms' specs/Solo.mdx; the destination-component arm's specs/Src.mdx, T14-7's and T6.6-3's twin)",
   ['<S id="solo">', "Solo text.", "</S>", ""].join("\n"),
 );
 const V4_MDOUT_OCCUPANT = "mdout/new";
@@ -4010,12 +4034,11 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
 // origin is `specs/a.mdx`, and nothing occupies `specs/B.MDX` or a case
 // variant of it). The `specs/*.MDX` glob matches no staged file, so the
 // premise `build` passes and the refusal is the move's own. Its workspace is
-// created after the body's first product invocation, as T6.6-3's and
-// T6.6-7's twins' are, so the configuration and the origin are
-// staged-source records (S-9's
-// timing clause).
+// created after the body's first product invocation, as T6.6-3's,
+// T6.6-7's, and T12.0-15's twins' are, so the configuration and the origin
+// are staged-source records (S-9's timing clause).
 const V4_CASING_CONFIG = stagedTs(
-  "T6.5-4/T6.6-3/T6.6-7 xspec.config.ts — the casing arm's configuration: spec globs specs/*.mdx and specs/*.MDX",
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15 xspec.config.ts — the casing arm's configuration: spec globs specs/*.mdx and specs/*.MDX",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -4039,7 +4062,7 @@ export const MOVE_CASING_CONFIG = V4_CASING_CONFIG;
 export const MOVE_CASING_FILES: Readonly<Record<string, InitialFileContents>> =
   {
     [V4_CASING_ORIGIN]: stagedMdx(
-      "T6.5-4/T6.6-3/T6.6-7 casing arm specs/a.mdx",
+      "T6.5-4/T6.6-3/T6.6-7/T12.0-15 casing arm specs/a.mdx",
       ['<S id="a">', "Casing arm text.", "</S>", ""].join("\n"),
     ),
   };
@@ -4167,7 +4190,7 @@ const MOVE_PRECONDITION_BREAK_SOURCE = V4_OTHER_INVALID;
 // identically staged arm — so it is a ledger record (S-9's before-any-product
 // clause; helpers/staged-mdx.ts) shared by both tests: the same constant.
 export const MOVE_PRECONDITION_BREAK = stagedMdx(
-  "T6.5-4/T6.6-3/T6.6-7 precondition arm: specs/Other.mdx overwritten with an unresolved local d reference",
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15 precondition arm: specs/Other.mdx overwritten with an unresolved local d reference",
   MOVE_PRECONDITION_BREAK_SOURCE,
 );
 export const MOVE_PRECONDITION_CASE: MoveRefusalCase = {
@@ -5132,18 +5155,19 @@ const I6_B_AFTER = I6_B_SOURCE + I6_MOVED_TEXT + "\n";
  * for T6.6-3's preview twins, which stage this state directly (TEST-SPEC
  * T6.6-3: "staged identically") rather than through the product's move —
  * after T6.6-3's first invocation, so the entries are ledger records made
- * from the strings T6.5-6 asserts (helpers/staged-mdx.ts).
+ * from the strings T6.5-6 asserts (helpers/staged-mdx.ts); T6.6-7 and
+ * T12.0-15 stage it through the same sweep.
  */
 export const MOVE_IDENTITY_CONFIG = SPECS_ONLY_CONFIG;
 export const MOVE_IDENTITY_FILES_AFTER: Readonly<
   Record<string, InitialFileContents>
 > = {
   [I6_A]: stagedMdx(
-    "T6.6-3/T6.6-7 identity-terms twins specs/A.mdx",
+    "T6.6-3/T6.6-7/T12.0-15 identity-terms twins specs/A.mdx",
     I6_A_AFTER,
   ),
   [I6_B]: stagedMdx(
-    "T6.6-3/T6.6-7 identity-terms twins specs/B.mdx",
+    "T6.6-3/T6.6-7/T12.0-15 identity-terms twins specs/B.mdx",
     I6_B_AFTER,
   ),
 };

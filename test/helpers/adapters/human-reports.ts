@@ -18,18 +18,23 @@
 // --preview` report onto the preview model the form-exact `--json` decode
 // produces (model.ts `PreviewReport`): its findings as above, and its plan
 // — the mapping's pairs, each file with its edits' classes and ranges, and
-// the delta's two directions or its unavailability (TEST-SPEC T6.6-7).
+// the delta's two directions or its unavailability (TEST-SPEC T6.6-7). The
+// performed-report decoder takes a successful `rename`/`move` report onto
+// the applied mapping the form-exact `--json` decode produces (model.ts
+// `PerformedOperationReport`): every pair the operation journaled, its
+// `from` and `to` identity (TEST-SPEC T12.0-15; SPEC 6.4, 6.5).
 // Like every adapter here they are the one place aware of the report's
 // concrete shape: adjustable to shape, never to values, and failing loudly
 // — a diagnosed `HarnessAssertionError` naming the line and the datum —
 // when a report's text fits none of the layout below or lacks what the
-// layout carries. Later decoders for the other human reports (performed
-// reports, impact, review, coverage, ids, show) go beside these.
+// layout carries. Later decoders for the other human reports (impact,
+// review, coverage, ids, show) go beside these.
 //
 // The layout, fitted to what the built product emits (observed by running
 // it on T14-11's per-condition fixtures, T1.5-2's arms, T12.7-3's stagings,
 // and hand-staged 14.11, 14.12, 14.13, 14.21, refusal, and code-less
-// findings, and the previews of T6.6-2 through T6.6-6 — never by reading
+// findings, the previews of T6.6-2 through T6.6-6, and the performed
+// reports of T6.4-1's rename and T6.5-1's file moves — never by reading
 // its source):
 //
 // - A findings report — a failing `build`'s validation errors, `check`'s
@@ -85,6 +90,14 @@
 //   or, the delta unavailable (14.23), the header `delta: unavailable` with
 //   nothing beneath it. A finding line may stand at the margin between
 //   sections too; it closes the section above it.
+// - A performed report — a successful `rename …` or `move …` without
+//   `--json` (SPEC 6.4: a successful rename's report is the applied
+//   mapping, and a move reports its own as rename does, 6.5) — is one line
+//   per mapped identity at the margin, `<from> -> <to>`, in any order, then
+//   an optional count line (`2 identities mapped`, `1 identity mapped`),
+//   which must then equal the number of pair lines. A successful operation
+//   carries no finding (12.7: `findings` `[]`), so no finding line belongs
+//   there: a line holding no pair fits no layout.
 // - A code is recognized at the position the layout gives it, spelled as
 //   human.ts's `codeMention` spells one, over the whole segment: its words
 //   case-insensitive, joined by one character that is neither letter nor
@@ -123,7 +136,10 @@
 //   holding it twice fails as ambiguous), and an identity or path
 //   beginning with a space, which the indentation absorbs — the data of
 //   T6.6-2's, T6.6-4's, T6.6-5's, and T6.6-6's stagings hold none, and
-//   the refused previews of T6.6-3 print no plan.
+//   the refused previews of T6.6-3 print no plan. In a performed report,
+//   an identity holding ` -> ` likewise, or one spelling the count line's
+//   form as the report's last line — the performed operations of T6.4-1
+//   and T6.5-1 map none.
 // - A code's words at the code's position are the code — human.ts's
 //   convention, under which `missing ID` carries `missing-id` — so a line
 //   whose code token is gone but whose message opens with its own code's
@@ -149,6 +165,10 @@
 //   the delta reported unavailable exactly where the twin's is (14.23),
 //   else each direction's paths as a multiset in form and bytes, a path
 //   under the other direction named as such.
+// - A performed report's comparison is exact on the applied mapping, its
+//   order free (12.7's `from`-byte order is the JSON form's, T12.0-15): its
+//   pairs as a multiset of `from`/`to` pairs, a pair the human report
+//   omits, changes, or lists beside the twin's named as such.
 
 import { Buffer } from "node:buffer";
 import { fail } from "../assertions.js";
@@ -163,6 +183,7 @@ import type {
   FindingInformation,
   FindingLocation,
   PathValue,
+  PerformedOperationReport,
   PreviewDeltaDatum,
   PreviewEdit,
   PreviewEditClass,
@@ -192,7 +213,10 @@ export interface HumanErrorMessage extends ErrorInformation {
   readonly text: string;
 }
 
-/** One identity pair of a human preview's mapping, with where it stood. */
+/**
+ * One identity pair of a human preview's mapping or of a performed report's
+ * applied mapping, with where it stood.
+ */
 export interface HumanMappingPair extends AppliedMappingPair {
   /** The report line it was decoded from, 1-based. */
   readonly line: number;
@@ -261,6 +285,17 @@ export interface HumanPreviewReport {
   /** Every finding, in the report's own order (free, T12.0-15). */
   readonly findings: readonly HumanFinding[];
   readonly plan: HumanPreviewPlan | null;
+  /** The report's text, for diagnoses. */
+  readonly text: string;
+}
+
+/**
+ * A human performed report decoded onto the applied mapping (TEST-SPEC
+ * T12.0-15; SPEC 6.4, 6.5): every pair the report lists.
+ */
+export interface HumanPerformedReport {
+  /** Every mapped pair, in the report's own order (free, T12.0-15). */
+  readonly mapping: readonly HumanMappingPair[];
   /** The report's text, for diagnoses. */
   readonly text: string;
 }
@@ -879,22 +914,28 @@ const DELTA_DIRECTIONS: readonly {
   { direction: "removed", pattern: /^removed$/i },
 ];
 
-/** A mapping line's pair (the module header): `<from> -> <to>`, both present. */
+/**
+ * A mapping line's pair (the module header): `<from> -> <to>`, both
+ * present, after `indent` — a preview's item indentation beneath its
+ * `mapping:` header, nothing for a performed report's pair at the margin.
+ */
 function decodeMappingLine(
   text: string,
+  indent: string,
   line: number,
   adapter: string,
   report: string,
 ): HumanMappingPair {
   const where = atLine(line, text);
-  const body = text.slice(ITEM_INDENT.length);
+  const body = text.slice(indent.length);
   const arrow = body.indexOf(MAPPING_ARROW);
   if (arrow === -1) {
     decodeFail(
       adapter,
       where,
-      "a mapping line `  <from> -> <to>` — both identities of the pair present, the arrow " +
-        "between them (SPEC 6.6: the mapping's every `from` and `to` identity)",
+      `a mapping line \`${indent}<from> -> <to>\` — both identities of the pair present, the ` +
+        "arrow between them (SPEC 6.6: the mapping's every `from` and `to` identity; 6.4, " +
+        "6.5: the applied mapping a performed operation reports)",
       report,
     );
   }
@@ -1127,7 +1168,9 @@ function decodePreviewBytes(
     }
     switch (section) {
       case "mapping":
-        mapping.push(decodeMappingLine(text, line, adapter, report));
+        mapping.push(
+          decodeMappingLine(text, ITEM_INDENT, line, adapter, report),
+        );
         break;
       case "files":
         if (text.startsWith(EDIT_INDENT)) {
@@ -1234,6 +1277,71 @@ export function decodeHumanPreviewReport(
       ? "decoding a human preview report (decodeHumanPreviewReport)"
       : `decoding the human preview report of ${output.commandLine} (decodeHumanPreviewReport)`;
   return guardSyncStep(step, () => decodePreviewBytes(bytes, context));
+}
+
+// --- the performed report ------------------------------------------------------------
+
+/** The count line ending a performed report (the module header). */
+const MAPPED_COUNT_LINE = /^(0|[1-9][0-9]*) identit(?:y|ies) mapped$/;
+
+/** The decode of a performed report's bytes, under its guard. */
+function decodePerformedBytes(
+  bytes: Uint8Array,
+  context: string | undefined,
+): HumanPerformedReport {
+  const adapter = adapterName("performed report", context);
+  const report = utf8Text(bytes, adapter, "report");
+  const lines = reportLines(report);
+  const mapping: HumanMappingPair[] = [];
+  let counted: number | undefined = undefined;
+  for (const [index, text] of lines.entries()) {
+    const line = index + 1;
+    if (index === lines.length - 1 && MAPPED_COUNT_LINE.test(text)) {
+      counted = Number(MAPPED_COUNT_LINE.exec(text)![1]);
+      continue;
+    }
+    if (text.length === 0) {
+      decodeFail(
+        adapter,
+        atLine(line, text),
+        "a mapping line `<from> -> <to>`, never an empty line",
+        report,
+      );
+    }
+    mapping.push(decodeMappingLine(text, "", line, adapter, report));
+  }
+  if (counted !== undefined && counted !== mapping.length) {
+    decodeFail(
+      adapter,
+      atLine(lines.length, lines[lines.length - 1]!),
+      `a count line equal to the ${String(mapping.length)} mapping line(s) the report lists — ` +
+        `it counts ${String(counted)}`,
+      report,
+    );
+  }
+  return { mapping, text: report };
+}
+
+/**
+ * Decode a human performed report — the standard output of a successful
+ * `rename …` or `move …` without `--json` (SPEC 6.4, 6.5, 12.0) — onto the
+ * applied mapping (the module header's layout), one
+ * {@link HumanMappingPair} per pair line. Takes a run (its stdout bytes)
+ * or the report's bytes. Fails diagnosed on bytes that are not valid
+ * UTF-8, an empty line, a line holding no pair or a pair without both
+ * identities, a line holding the arrow twice, and a count line disagreeing
+ * with the pair lines. A harness step under its own guard (TEST-SPEC S-3).
+ */
+export function decodeHumanPerformedReport(
+  output: RunResult | Uint8Array,
+  context?: string,
+): HumanPerformedReport {
+  const bytes = output instanceof Uint8Array ? output : output.stdoutBytes;
+  const step =
+    output instanceof Uint8Array
+      ? "decoding a human performed report (decodeHumanPerformedReport)"
+      : `decoding the human performed report of ${output.commandLine} (decodeHumanPerformedReport)`;
+  return guardSyncStep(step, () => decodePerformedBytes(bytes, context));
 }
 
 // --- the comparisons with the --json twin ---------------------------------------------
@@ -1856,5 +1964,49 @@ export function assertHumanPreviewReportCarries(
 ): HumanPreviewReport {
   const decoded = decodeHumanPreviewReport(human, context);
   assertHumanPreviewCarries(decoded, json, context);
+  return decoded;
+}
+
+// --- the performed-report comparison with the --json twin ---------------------------
+
+/**
+ * Assert a decoded human performed report carries the applied mapping of
+ * its `--json` twin's form-exact performed-operation document (TEST-SPEC
+ * T12.0-15; SPEC 6.4, 6.5; the module header's comparison): its pairs as
+ * a multiset of `from`/`to` pairs, order free. Fails diagnosed, naming
+ * every pair the human report omits or changes and every pair it lists
+ * that the twin's mapping lacks.
+ */
+export function assertHumanPerformedCarries(
+  human: HumanPerformedReport,
+  json: PerformedOperationReport,
+  context: string,
+): void {
+  const problems = mappingProblems(json.mapping, human.mapping);
+  if (problems.length === 0) return;
+  fail(
+    `${context}: the human report of the performed operation does not carry the applied ` +
+      "mapping its --json twin carries (TEST-SPEC T12.0-15: every pair the operation " +
+      "journaled, its `from` and `to` identity — SPEC 6.4: a successful rename's report is " +
+      "the applied mapping, and a move reports its own as rename does, 6.5 — decoded by the " +
+      "human-report adapter, H-3; wording, layout, and order free):\n" +
+      `${problems.map((problem) => `- ${problem}`).join("\n")}\n` +
+      `Human report: ${excerpt(human.text)}`,
+  );
+}
+
+/**
+ * Decode a run's human performed report and assert it carries the applied
+ * mapping of its `--json` twin's decoded performed-operation document
+ * (TEST-SPEC T12.0-15): `decodeHumanPerformedReport`, then
+ * `assertHumanPerformedCarries`. Returns the decoded report.
+ */
+export function assertHumanPerformedReportCarries(
+  human: RunResult,
+  json: PerformedOperationReport,
+  context: string,
+): HumanPerformedReport {
+  const decoded = decodeHumanPerformedReport(human, context);
+  assertHumanPerformedCarries(decoded, json, context);
   return decoded;
 }
