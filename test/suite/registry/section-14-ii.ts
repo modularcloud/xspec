@@ -138,10 +138,21 @@
 // `stageUnlistableArea`); arm (i)'s acquisition arms T13.5-10(d)'s stagings
 // (helpers/acquisition-staging.ts: the lock directory, or a subdirectory
 // under it, unlistable but writable, `-wx`; `.xspec` or the lock directory
-// unsearchable, `rw-`); and arm (j)'s git directories mode 000, T6.3-6(e)'s
+// unsearchable, `rw-`); arm (j)'s git directories mode 000, T6.3-6(e)'s
 // stagings (section-6.3.ts: `stageObjectStoreUnsearchable`'s `.git/objects`
-// and `stageInnerGitUnsearchable`'s nested repository's inner `.git`) — each
-// verified on the harness itself alike.
+// and `stageInnerGitUnsearchable`'s nested repository's inner `.git`); and
+// arms (k) and (l)'s directories staged where both routes are refused
+// alike, stripped of their read and search permission both (mode 000,
+// `stageDirectoryMode`: the harness's own listing of the directory and
+// examination of the entry concerned refused, and, that entry a plain file,
+// its own read of it) — (k)'s working directory `R/tools` and (l)(iii)'s
+// root `R` each entered first and only then staged
+// (helpers/subprocess.ts `runProductInEnteredDirectory`: the harness's
+// wrapper spawned there, the staging made once it stands there, the wrapper
+// then replaced by the product, which keeps the working directory it
+// entered before the permissions went), (l)(i)'s `.xspec` and (l)(ii)'s
+// `.xspec/reviews` staged before a run from the root — each verified on the
+// harness itself alike.
 // Snapshots for the "nothing modified" laws are taken outside the staging
 // windows (a staged object cannot be snapshotted), before staging and after
 // restoring.
@@ -255,16 +266,67 @@
 //   is made just before its run and restored once it ends; "nothing
 //   modified" is a compare around each run with the repositories' git
 //   directories left out (git data is no workspace file, SPEC 6.3).
+// - Arm (k)'s valid workspace `R` is the CONF-CORE-shaped one (`CORE_DECL`:
+//   its one glob `specs/**/*.mdx` reaching nothing below `tools`), built,
+//   `check` clean, holding the empty directory `tools`; its second staging
+//   is a fresh workspace holding `specs/A.mdx` and `tools` alone — no
+//   configuration in `R` — H-1's ancestor precondition verified on it first
+//   (helpers/self-contained-root.ts `assertSelfContainedRoot`: no
+//   `xspec.config.ts` above `R`, no working tree around it). Under each,
+//   every run — `build --json`, `ids --json`, `inventory`, and `coverage
+//   no-such-profile --json` (`read-failure` at `.`), `ids extra --json`
+//   (the syntax class, `code` null), and `version` (exit 0, one JSON
+//   document) — enters `R/tools` and only then stages it, its own staging
+//   verified and restored once it ends: `ids extra` and `version` run under
+//   both stagings, "there" being the staged working directory. "Nothing
+//   modified" is a compare of `R`'s snapshots around each run.
+// - Arm (l)(i)'s workspace is the CONF-CORE-shaped one made journal-bearing
+//   by the prior journaled rename `g` → `g2` in `specs/A.mdx` and committed
+//   (`prepareRefusalWorkspace`: `c1` its baseline commit, `impact --base`
+//   given its hash); `.xspec` is staged just before each run and restored
+//   once it ends, the harness's own examination and read of the journal
+//   refused beside its listing. The surfaces of 11.2 are bare
+//   `occurrences`, `view specs/A.mdx`, and `at specs/A.mdx 0`; every
+//   concerned path is exactly `.xspec/journal` but the inventory's and the
+//   twin's `check`'s, either of `.xspec/journal` and `.xspec/reviews`. The
+//   failing twin is the same workspace after the valid runs, each having
+//   modified nothing, its product-written `specs/A.mdx` given a top-level
+//   `<S>` with no `id` (14.1) through `workspace.edit`. Arm (l)(ii)'s
+//   session is `review create --strategy audit --name s` on a built
+//   CONF-CORE-shaped workspace, its file first required to be the plain
+//   file `.xspec/reviews/s.json` (a premise, so a product storing it
+//   elsewhere fails diagnosed, never at the staging's own precondition),
+//   the harness's own examination and read of it refused beside its
+//   listing of `.xspec/reviews`. Arm (l)(iii) runs `build --json`, `ids
+//   --json`, and `inventory`, each with `--config xspec.config.ts`, from a
+//   built CONF-CORE-shaped workspace's root `R`, entered and only then
+//   staged, the harness's own examination and read of `xspec.config.ts`
+//   refused beside its listing of `R`. "Nothing modified" is the snapshot
+//   compare around each run, as in (j).
 // - Unstageable, recorded here as T14-10 records them (and as T6.5-6
 //   records its unstageable clauses): a refused read of a path occupant's
 //   kind — the area's own occupant's at acquisition included (13.5), though
 //   not the lock path's there, which arm (i) stages, a conforming
 //   acquisition taking that kind from no listing (T13.5-10(h)); whether a
 //   product learns a kind by a separate examination the environment can
-//   refuse or from a listing it already made is its own (7, 13.4) — and a
-//   refused read of a directory above the workspace root, which the working
-//   directory lies beneath and cannot be entered without traversing.
-//   Neither is asserted.
+//   refuse or from a listing it already made is its own (7, 13.4) — save
+//   where both routes are refused alike: a directory stripped of its read
+//   and search permission both refuses its listing and the examination of
+//   every kind below it, so a product judging a kind there meets a refusal
+//   whatever its route, only the concerned path, the directory's or a path
+//   below it, turning on its read order (T11.2-6's unreadable emit
+//   directory; arm (k)'s working directory; arm (l)'s three paths, each
+//   staged so); and a refused read of a directory above the workspace
+//   root, or any the anchoring resolution makes (11.6) — whether a product
+//   makes such a read at all is its own: it may spell a physical path by
+//   examining its components or take it from the working directory the
+//   process holds (11.6), and reach the directories the upward search
+//   examines by a walk from that working directory or by an absolute one
+//   from the filesystem root (7), so a directory above the root made
+//   unsearchable once the working directory is entered refuses only the
+//   absolute walk, the search stopping at the root (7) — the working
+//   directory itself, which every route examines, being arm (k)'s. Neither
+//   is asserted beyond those stagings.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -308,7 +370,10 @@ import {
 } from "../../helpers/assertions.js";
 import { EXCLUDE_LOCK_PATH, LOCK_PATH } from "../../helpers/lock-path.js";
 import { AREA_PATH } from "../../helpers/lock-staging.js";
-import type { PermissionStaging } from "../../helpers/permissions.js";
+import type {
+  DirectoryModeProbe,
+  PermissionStaging,
+} from "../../helpers/permissions.js";
 import {
   HarnessStagingError,
   stageDirectoryMode,
@@ -318,6 +383,7 @@ import {
 } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
 import type { DirectorySnapshot } from "../../helpers/snapshot.js";
 import {
   assertSnapshotsEqual,
@@ -329,7 +395,11 @@ import {
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
-import { pathExists } from "../../helpers/subprocess.js";
+import {
+  ProductRunTimeoutError,
+  pathExists,
+  runProductInEnteredDirectory,
+} from "../../helpers/subprocess.js";
 import { copyTreeBytes } from "../../helpers/tree-copy.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -345,6 +415,7 @@ import {
 import type { SessionOperation } from "./section-13.5.js";
 import {
   ACQUISITION_DECL,
+  CORE_A_STAGED,
   CORE_DECL,
   SUB_DIR as SECOND_DISCOVERY_DIR,
   UNLISTABLE_SUB_DIR,
@@ -2169,11 +2240,15 @@ async function prepareBuiltWorkspace(
 /**
  * A refused read's 14.25 contract: exit 2; the error document as the entire
  * stdout, its finding's stable code `read-failure` and `path` the object's
- * workspace-relative path; the diagnostic on stderr (12.0).
+ * concerned path — its workspace-relative path, or, for a directory
+ * examined before the root is known, its anchoring form (11.6): exactly
+ * `concerned`, or, given several, one of them, where TEST-SPEC leaves the
+ * concerned path to the product's read order or route (T14-10(l)); the
+ * diagnostic on stderr (12.0).
  */
 function expectReadFailure(
   result: RunResult,
-  concerned: string,
+  concerned: string | readonly string[],
   context: string,
 ): Finding {
   assertExitCode(
@@ -2192,11 +2267,17 @@ function expectReadFailure(
         `${JSON.stringify(finding.message)})`,
     );
   }
-  if (finding.path !== concerned) {
+  const admissible = typeof concerned === "string" ? [concerned] : concerned;
+  if (typeof finding.path !== "string" || !admissible.includes(finding.path)) {
     fail(
       `${context} — the concerned path is the refused object's ` +
-        `workspace-relative path ${JSON.stringify(concerned)} (SPEC 14.25, ` +
-        `12.7); got ${JSON.stringify(finding.path)} (message: ` +
+        (admissible.length === 1
+          ? `path ${JSON.stringify(admissible[0])}`
+          : `path, as the product's read order or route decides: one of ` +
+            admissible.map((admitted) => JSON.stringify(admitted)).join(", ")) +
+        ` — workspace-relative, or the anchoring form for a directory ` +
+        `examined before the root is known (SPEC 14.25, 11.6, 12.7); got ` +
+        `${JSON.stringify(finding.path)} (message: ` +
         `${JSON.stringify(finding.message)})`,
     );
   }
@@ -2221,8 +2302,9 @@ function expectSyntaxClassError(
     result,
     2,
     `${context} — ${why} is a syntax-class usage error, exit 2, reported ` +
-      `without loading configuration and so before the discovery read the ` +
-      `environment refuses (SPEC 12.0, 14.25)`,
+      `without loading configuration and so before the configuration ` +
+      `search's and discovery's reads, the one the environment refuses ` +
+      `among them (SPEC 12.0, 14.25)`,
   );
   const finding = expectErrorDocument(result, context);
   if (finding.code !== null) {
@@ -4523,13 +4605,655 @@ async function gitDataArm(product: ProductBinding): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// (k) and (l): stagings where both routes are refused alike — a directory
+// stripped of its read and search permission both (mode 000)
+// ---------------------------------------------------------------------------
+
+/**
+ * A directory staged where both routes are refused alike (TEST-SPEC
+ * T14-10(k), (l)): stripped of its read and search permission both (mode
+ * `000`), so its listing, the examination of every kind below it, and every
+ * read below it are refused, spelled relative to it or walked absolutely
+ * from the filesystem root (helpers/permissions.ts, Directory modes) — no
+ * route learns an occupant's kind there, and no content read below it
+ * begins. An `entered` staging's runs are made from the directory itself,
+ * entered before it is staged (helpers/subprocess.ts
+ * `runProductInEnteredDirectory`: a process keeps a working directory it
+ * entered before the permissions went); every other staging's runs start
+ * from the workspace root, the directory staged before the invocation.
+ */
+interface BothRoutesRefused {
+  /** The staged directory, workspace-relative (`""`: the root itself). */
+  readonly dir: string;
+  /**
+   * The entry whose examination the harness verifies refused on itself,
+   * beside its own listing of the directory (E-1): the object of the kind
+   * read TEST-SPEC names there.
+   */
+  readonly entry: string;
+  /**
+   * `entry` is a plain file standing there, so the harness verifies its own
+   * read of it refused too (TEST-SPEC T14-10(l): "no content read begins").
+   */
+  readonly read: boolean;
+  /** The runs enter the staged directory first: it is their working directory. */
+  readonly entered: boolean;
+  /** The staging as diagnoses name it. */
+  readonly what: string;
+}
+
+/** The staging's E-1 verification: the listing, the entry's kind, its read. */
+function bothRoutesRefusedProbes(
+  staging: BothRoutesRefused,
+): readonly DirectoryModeProbe[] {
+  return [
+    { attempt: "list", refused: true },
+    { attempt: "examine", name: staging.entry, refused: true },
+    ...(staging.read
+      ? [{ attempt: "read", name: staging.entry, refused: true } as const]
+      : []),
+  ];
+}
+
+/**
+ * `runSettled`'s counterpart for a run from a working directory it entered
+ * before `stage` staged it (helpers/subprocess.ts
+ * `runProductInEnteredDirectory`; TEST-SPEC T14-10(k), (l)(iii)): the
+ * staging is made once the run stands in `cwd`, verified on the harness
+ * itself, and undone once the run has ended, before anything is asserted.
+ * The driver's default hang guard covers the product's own run (S-3), its
+ * kill a diagnosed failure (H-8); everything else the run rejects with
+ * propagates unchanged — a `HarnessAssertionError` (the driver's in-run
+ * checks, the missing product) as the diagnosed failure it is, and the
+ * staging's own `HarnessStagingError`, the wrapper's failure, a harness
+ * step's tripped guard, or the capture limit as the harness error it is
+ * (H-11): an entered-directory run ending before its product starts is
+ * never the product's outcome.
+ */
+async function runEnteredSettled(
+  product: ProductBinding,
+  cwd: string,
+  argv: readonly string[],
+  stage: () => Promise<PermissionStaging>,
+  context: string,
+): Promise<RunResult> {
+  try {
+    return await runProductInEnteredDirectory(product, { cwd, argv }, stage);
+  } catch (error) {
+    if (!(error instanceof ProductRunTimeoutError)) throw error;
+    return fail(
+      `${context}: the command must terminate on its own rather than block ` +
+        `or hang (SPEC 12.0; H-8: hangs become diagnosed failures) — ` +
+        error.message,
+    );
+  }
+}
+
+/**
+ * One run of (k) or (l) under `staging`: `argv` from the staged directory,
+ * entered first, or from the workspace root with the directory staged just
+ * before the invocation — either way the staging made, verified on the
+ * harness itself (E-1), and restored once the run ends, before anything is
+ * asserted or snapshotted (a staged directory cannot be snapshotted). Then
+ * `judge` decides the run's outcome, and nothing is modified: the
+ * workspace's snapshots before and after the run byte-identical (the
+ * repository's git directory left out, `snapshotWorkspace`).
+ */
+async function bothRoutesRefusedRun(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  staging: BothRoutesRefused,
+  argv: readonly string[],
+  judge: (result: RunResult, label: string) => void,
+  context: string,
+): Promise<void> {
+  const label = `${context} \`${argv.join(" ")}\` ${staging.what}`;
+  const dir = workspace.path(staging.dir);
+  const stage = async (): Promise<PermissionStaging> =>
+    await stageDirectoryMode(dir, 0o000, bothRoutesRefusedProbes(staging));
+  const before = await snapshotWorkspace(workspace.root);
+  let result: RunResult;
+  if (staging.entered) {
+    result = await runEnteredSettled(product, dir, argv, stage, label);
+  } else {
+    const staged = await stage();
+    try {
+      result = await runSettled(product, workspace, argv, label);
+    } finally {
+      await staged.restore();
+    }
+  }
+  judge(result, label);
+  assertSnapshotsEqual(
+    before,
+    await snapshotWorkspace(workspace.root),
+    `${label}: nothing modified — a command stops at the read the ` +
+      `environment refuses, attempting nothing further, and neither a ` +
+      `syntax-class error nor \`version\` writes anything (SPEC 14.25, ` +
+      `12.0, 12.6)`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// (k) The directories the upward search examines — a usage error at the
+// working directory's anchoring form (SPEC 14.25, 7, 11.6, 12.0, 12.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * (k)'s working directory `R/tools`, below the root `R`, no glob reaching
+ * below it (`specs/**\/*.mdx` alone, SPEC 7), entered and only then
+ * stripped of its read and search permission both — the harness verifying
+ * on itself that its own lookup of `xspec.config.ts` there and its own
+ * listing of the directory are both refused (TEST-SPEC T14-10(k)).
+ */
+const ENTERED_WORKING_DIRECTORY: BothRoutesRefused = {
+  dir: "tools",
+  entry: CONFIG_PATH,
+  read: false,
+  entered: true,
+  what:
+    "from R/tools, entered and only then stripped of its read and search " +
+    "permission (mode 000)",
+};
+
+/**
+ * The working directory's anchoring form (SPEC 11.6, 14.25): (k)'s
+ * concerned path, a directory examined before the root is known, and, run
+ * from the root, the root's own — one of (l)(iii)'s.
+ */
+const WORKING_DIRECTORY_ANCHOR = ".";
+
+/**
+ * (k)'s commands that search for the configuration (TEST-SPEC T14-10(k)):
+ * `build`, `ids`, `inventory` (a JSON-only surface, SPEC 11.6), and
+ * `coverage <unknown-profile>`, whose profile is judged only against the
+ * configuration the search would locate (12.0).
+ */
+const SEARCHING_COMMANDS: readonly (readonly string[])[] = [
+  ["build", "--json"],
+  ["ids", "--json"],
+  ["inventory"],
+  ["coverage", "no-such-profile", "--json"],
+];
+
+/**
+ * One of (k)'s two stagings, every run from `R/tools` entered and then
+ * staged mode 000 ({@link ENTERED_WORKING_DIRECTORY}): each searching
+ * command exits 2 with `read-failure` at `.` — the search stops at the
+ * working directory, the first directory it examines, refused (`why` says
+ * what a product taking the refusal for absence meets instead); `ids
+ * extra`, of the syntax class, exits 2 code-less, reported without loading
+ * configuration (T12.0-10); and `version`, loading none, exits 0 with its
+ * document — each modifying nothing.
+ */
+async function enteredSearchSweep(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  why: string,
+  context: string,
+): Promise<void> {
+  for (const argv of SEARCHING_COMMANDS) {
+    await bothRoutesRefusedRun(
+      product,
+      workspace,
+      ENTERED_WORKING_DIRECTORY,
+      argv,
+      (result, label) => {
+        expectReadFailure(
+          result,
+          WORKING_DIRECTORY_ANCHOR,
+          `${label} — ${why}`,
+        );
+      },
+      context,
+    );
+  }
+  await bothRoutesRefusedRun(
+    product,
+    workspace,
+    ENTERED_WORKING_DIRECTORY,
+    ["ids", "extra", "--json"],
+    (result, label) => {
+      expectSyntaxClassError(result, "a surplus operand", label);
+    },
+    context,
+  );
+  await bothRoutesRefusedRun(
+    product,
+    workspace,
+    ENTERED_WORKING_DIRECTORY,
+    ["version"],
+    (result, label) => {
+      assertExitCode(
+        result,
+        0,
+        `${label} — \`version\` loads no configuration, so the search ` +
+          `never runs: exit 0 with its answer, in any working directory ` +
+          `(SPEC 12.6, 7)`,
+      );
+      parseJsonStdout(result, label);
+    },
+    context,
+  );
+}
+
+/**
+ * (k) (TEST-SPEC T14-10(k): "the directories the upward search examines
+ * (7) — examined before the root is known, so concerned in their anchoring
+ * form"): `enteredSearchSweep` on a freshly built, valid workspace `R`
+ * holding the empty directory `tools` — every searching command
+ * `read-failure` at `.`, none loading `R`'s configuration and answering,
+ * none reporting `configuration-error` — and, separately, the same staging
+ * with no configuration in `R` or in any ancestor, H-1's precondition
+ * verified first (helpers/self-contained-root.ts): `read-failure` at `.`
+ * likewise, never T7-1's missing configuration. Each fails a product whose
+ * search takes a refused examination for absence and walks on upward.
+ */
+async function upwardSearchArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (k) the directories the upward search examines";
+  const configured = await prepareBuiltWorkspace(
+    product,
+    { ...CORE_DECL, dirs: [ENTERED_WORKING_DIRECTORY.dir] },
+    context,
+  );
+  try {
+    await enteredSearchSweep(
+      product,
+      configured.workspace,
+      `the working directory, the first directory the upward search ` +
+        `examines, refused by both routes alike, stops the search with a ` +
+        `read failure concerning it in its anchoring form, \`.\` — never ` +
+        `taken for absence, the search walking on upward to R's ` +
+        `configuration to load and answer from, and never ` +
+        `\`configuration-error\` (SPEC 14.25, 7, 11.6, 12.0)`,
+      `${context} (R's configuration at its root)`,
+    );
+  } finally {
+    await configured.workspace.dispose();
+  }
+  const bare = await TestWorkspace.create({
+    files: { [CORE_SOURCE_PATH]: CORE_A_STAGED },
+    dirs: [ENTERED_WORKING_DIRECTORY.dir],
+  });
+  try {
+    const bareContext = `${context} (no configuration in R or in any ancestor)`;
+    await assertSelfContainedRoot(product, bare.root, bareContext);
+    await enteredSearchSweep(
+      product,
+      bare,
+      `the working directory, the first directory the upward search ` +
+        `examines, refused by both routes alike, stops the search with a ` +
+        `read failure concerning it in its anchoring form, \`.\` — never ` +
+        `taken for absence, the search walking on upward through R and ` +
+        `its ancestors, which hold no configuration, to report T7-1's ` +
+        `missing configuration (\`configuration-error\` at \`.\`) (SPEC ` +
+        `14.25, 7, 14.14, 11.6, 12.0)`,
+      bareContext,
+    );
+  } finally {
+    await bare.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (l) The kind halves of (b)–(d) — usage errors under mode-000 directories
+// (SPEC 14.25, 6.3, 7, 10.7, 11.2, 11.6, 13.3)
+// ---------------------------------------------------------------------------
+
+/** The CONF-CORE-shaped source (`CORE_DECL`'s: `a` holding `a.k`, then `g`). */
+const CORE_SOURCE_PATH = "specs/A.mdx";
+
+/**
+ * (l)(i)'s fixture: the CONF-CORE-shaped workspace (`CORE_DECL`), made
+ * journal-bearing by the prior journaled rename `g` → `g2` in `specs/A.mdx`
+ * (SPEC 6.1, 6.4) and committed as `c1` — `prepareRefusalWorkspace`'s
+ * baseline commit, its tree holding the journal.
+ */
+const KIND_JOURNAL_FIXTURE: RefusalFixture = {
+  decl: CORE_DECL,
+  priorRename: ["rename", CORE_SOURCE_PATH, "g", "g2"],
+};
+
+/** The journal's entry name in the graph-data area (SPEC 6.1). */
+const JOURNAL_ENTRY = "journal";
+
+/** (l)(i)'s staging: `.xspec` mode 000, the journal's kind and read refused. */
+const AREA_BOTH_ROUTES_REFUSED: BothRoutesRefused = {
+  dir: GRAPH_DATA_AREA,
+  entry: JOURNAL_ENTRY,
+  read: true,
+  entered: false,
+  what:
+    `with ${GRAPH_DATA_AREA} stripped of its read and search permission ` +
+    `(mode 000)`,
+};
+
+/**
+ * (l)(ii)'s staging: `.xspec/reviews` mode 000, the session file's kind and
+ * read refused.
+ */
+const REVIEWS_BOTH_ROUTES_REFUSED: BothRoutesRefused = {
+  dir: REVIEWS_DIR,
+  entry: `${SESSION}.json`,
+  read: true,
+  entered: false,
+  what:
+    `with ${REVIEWS_DIR} stripped of its read and search permission ` +
+    `(mode 000)`,
+};
+
+/**
+ * (l)(iii)'s staging: the root `R`, entered and only then mode 000, as (k)
+ * stages its working directory — the configuration file's kind and read
+ * refused.
+ */
+const ROOT_BOTH_ROUTES_REFUSED: BothRoutesRefused = {
+  dir: "",
+  entry: CONFIG_PATH,
+  read: true,
+  entered: true,
+  what:
+    "from the root R, entered and only then stripped of its read and " +
+    "search permission (mode 000)",
+};
+
+/**
+ * (l)(i)'s failing twin: `specs/A.mdx` given a section with no `id` (SPEC
+ * 14.1: a non-root section with no `id` attribute), appended after `g2`'s —
+ * an edit of the bytes the prior rename wrote (`workspace.edit`), which
+ * keep `g`'s text and closing tag as staged.
+ */
+const MISSING_ID_FROM = "Gamma text.\n</S>\n";
+const MISSING_ID_TO = `${MISSING_ID_FROM}\n<S>\nNo id.\n</S>\n`;
+
+/**
+ * (l)(i) the journal's kind read (TEST-SPEC T14-10(l)(i)): on the freshly
+ * built, valid, journal-bearing workspace whose repository holds `c1`,
+ * `.xspec` staged mode 000 around each run: `build`, `ids`, `impact --base
+ * c1`, and the surfaces of 11.2 — bare `occurrences`, `view specs/A.mdx`,
+ * and `at specs/A.mdx 0` — each exit 2 with `read-failure` at
+ * `.xspec/journal`, the one concerned path open to them (a refused listing
+ * of the area's own occupant is condition 23's state, never a read
+ * failure), and `inventory` likewise at `.xspec/journal` or
+ * `.xspec/reviews`; then, on its failing twin — `specs/A.mdx` given an
+ * id-less section after the build and before the staging — `build`, `ids`,
+ * and the three surfaces exactly so, and `check` at `.xspec/journal` or
+ * `.xspec/reviews`, never exit 1 with the condition-1 finding. Each run
+ * modifies nothing.
+ */
+async function journalKindArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (l)(i) the journal's kind";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    KIND_JOURNAL_FIXTURE,
+    context,
+  );
+  const { workspace, baseline } = prepared;
+  const journalAlone =
+    (why: string) =>
+    (result: RunResult, label: string): void => {
+      expectReadFailure(result, JOURNAL_PATH, `${label} — ${why}`);
+    };
+  const gate =
+    `the gate judges the journal beside the sources, and the journal's ` +
+    `kind read, refused by both routes alike, is a read failure that stops ` +
+    `the command: exit 2, \`read-failure\` at ${JOURNAL_PATH} — never ` +
+    `\`journal-error\` ((b): the refused content read's condition), nor a ` +
+    `\`write-failure\` from reading the journal as absent and then meeting ` +
+    `the area's refused write (SPEC 14.25, 13.3, 6.1)`;
+  const surfaces =
+    `the surfaces' judgement makes every read the gate makes, the ` +
+    `journal's included, a read failure there stopping them before any ` +
+    `answer: exit 2, \`read-failure\` at ${JOURNAL_PATH} — never an answer, ` +
+    `nor a \`write-failure\` from a refresh meeting the area's refused ` +
+    `write (SPEC 11.2, 14.25, 13.3)`;
+  const surfaceCommands: readonly (readonly string[])[] = [
+    ["occurrences"],
+    ["view", CORE_SOURCE_PATH],
+    ["at", CORE_SOURCE_PATH, "0"],
+  ];
+  try {
+    for (const argv of [
+      ["build", "--json"],
+      ["ids", "--json"],
+    ]) {
+      await bothRoutesRefusedRun(
+        product,
+        workspace,
+        AREA_BOTH_ROUTES_REFUSED,
+        argv,
+        journalAlone(gate),
+        context,
+      );
+    }
+    await bothRoutesRefusedRun(
+      product,
+      workspace,
+      AREA_BOTH_ROUTES_REFUSED,
+      ["impact", "--base", baseline, "--json"],
+      journalAlone(
+        `a given baseline's resolution reads the current journal before ` +
+          `any other cause can fail it, and its kind read, refused by both ` +
+          `routes alike, is a read failure: exit 2, \`read-failure\` at ` +
+          `${JOURNAL_PATH} — never \`journal-error\` ((b)) nor the ` +
+          `code-less unreadable baseline (SPEC 6.3, 14.25)`,
+      ),
+      context,
+    );
+    for (const argv of surfaceCommands) {
+      await bothRoutesRefusedRun(
+        product,
+        workspace,
+        AREA_BOTH_ROUTES_REFUSED,
+        argv,
+        journalAlone(surfaces),
+        context,
+      );
+    }
+    await bothRoutesRefusedRun(
+      product,
+      workspace,
+      AREA_BOTH_ROUTES_REFUSED,
+      ["inventory"],
+      (result, label) => {
+        expectReadFailure(
+          result,
+          [JOURNAL_PATH, REVIEWS_DIR],
+          `${label} — the inventory examines the journal path's kind and ` +
+            `the session directory, each refused by both routes alike: exit ` +
+            `2, \`read-failure\` at ${JOURNAL_PATH} or ${REVIEWS_DIR} as ` +
+            `its read order decides — never the condition-23 answer alone ` +
+            `(SPEC 11.6, 14.25, 14.23)`,
+        );
+      },
+      context,
+    );
+
+    // The failing twin: the same workspace, every run above having modified
+    // nothing, with `specs/A.mdx` given an id-less section (14.1) — a
+    // premise first, so a rename that rewrote more than the id fails
+    // diagnosed rather than at the edit.
+    const renamed = Buffer.from(
+      await workspace.readBytes(CORE_SOURCE_PATH),
+    ).toString("utf8");
+    if (!renamed.includes(MISSING_ID_FROM)) {
+      fail(
+        `${context}: the prior rename \`g\` → \`g2\` rewrites by minimal ` +
+          `in-place edits (SPEC 6.4), so ${CORE_SOURCE_PATH} keeps g's text ` +
+          `and closing tag as staged, ${JSON.stringify(MISSING_ID_FROM)}; ` +
+          `found ${JSON.stringify(renamed)}`,
+      );
+    }
+    await workspace.edit(CORE_SOURCE_PATH, MISSING_ID_FROM, MISSING_ID_TO);
+    const twinContext = `${context} on the failing twin (${CORE_SOURCE_PATH} given a section with no \`id\`, 14.1)`;
+    const failing =
+      `on a workspace whose sources also fail validation the journal is ` +
+      `still judged beside them — the judgement's reads are made whatever ` +
+      `findings the sources carry: exit 2, \`read-failure\` at ` +
+      `${JOURNAL_PATH} — never exit 1 with the condition-1 finding, which ` +
+      `a product reading the journal only once the sources pass reports ` +
+      `(SPEC 13.3, 14, 11.2, 14.25)`;
+    for (const argv of [
+      ["build", "--json"],
+      ["ids", "--json"],
+      ...surfaceCommands,
+    ]) {
+      await bothRoutesRefusedRun(
+        product,
+        workspace,
+        AREA_BOTH_ROUTES_REFUSED,
+        argv,
+        journalAlone(failing),
+        twinContext,
+      );
+    }
+    await bothRoutesRefusedRun(
+      product,
+      workspace,
+      AREA_BOTH_ROUTES_REFUSED,
+      ["check", "--json"],
+      (result, label) => {
+        expectReadFailure(
+          result,
+          [JOURNAL_PATH, REVIEWS_DIR],
+          `${label} — \`check\` judges the journal beside the sources and ` +
+            `reads the sessions (14.21), whatever findings the sources ` +
+            `carry: exit 2, \`read-failure\` at ${JOURNAL_PATH} or ` +
+            `${REVIEWS_DIR} as its read order decides — never exit 1 with ` +
+            `the condition-1 finding (SPEC 14, 13.3, 14.21, 14.25)`,
+        );
+      },
+      twinContext,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (l)(ii) a session file's kind read (TEST-SPEC T14-10(l)(ii)): on a freshly
+ * built, valid workspace holding the valid audit session `s`,
+ * `.xspec/reviews` staged mode 000: `review status s` exits 2 with
+ * `read-failure` at `.xspec/reviews` or `.xspec/reviews/s.json` as its
+ * route decides, modifying nothing — never `corrupt-session` ((c): the
+ * refused content read's condition) and never the unknown-session error.
+ */
+async function sessionKindArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (l)(ii) a session file's kind";
+  const { workspace } = await prepareBuiltWorkspace(
+    product,
+    CORE_DECL,
+    context,
+  );
+  try {
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--strategy", "audit", "--name", SESSION],
+      0,
+      `${context} staging \`review create --strategy audit --name s\` (SPEC 10.7)`,
+    );
+    const sessionKind = await workspace.kind(SESSION_FILE);
+    if (sessionKind !== "file") {
+      fail(
+        `${context}: the session \`review create\` created is stored as ` +
+          `the plain file ${SESSION_FILE} (SPEC 10.1); found ${sessionKind}`,
+      );
+    }
+    await bothRoutesRefusedRun(
+      product,
+      workspace,
+      REVIEWS_BOTH_ROUTES_REFUSED,
+      ["review", "status", SESSION, "--json"],
+      (result, label) => {
+        expectReadFailure(
+          result,
+          [REVIEWS_DIR, SESSION_FILE],
+          `${label} — a session file's kind read, refused by both routes ` +
+            `alike, is a read failure: exit 2, \`read-failure\` at ` +
+            `${REVIEWS_DIR} or ${SESSION_FILE} as its route decides — never ` +
+            `\`corrupt-session\` ((c): the refused content read's ` +
+            `condition) and never the unknown-session error (SPEC 14.25, ` +
+            `10.7, 10.1, 14.21)`,
+        );
+      },
+      context,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (l)(iii) the configuration path's kind read (TEST-SPEC T14-10(l)(iii)):
+ * `--config xspec.config.ts` naming a freshly built, valid workspace's
+ * configuration from its root `R`, `R` entered and only then staged mode
+ * 000 as (k) stages its working directory, so the path's anchoring form
+ * and its workspace-relative path coincide: `build`, `ids`, and `inventory`
+ * each exit 2 with `read-failure` at `xspec.config.ts` — or `.`, the
+ * root's own, for a product learning the kind from the root's listing —
+ * modifying nothing, never `configuration-error`, whether (d)'s refused
+ * content read or T7-1's missing configuration.
+ */
+async function configurationKindArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (l)(iii) the configuration path's kind";
+  const { workspace } = await prepareBuiltWorkspace(
+    product,
+    CORE_DECL,
+    context,
+  );
+  try {
+    for (const argv of [
+      ["build", "--config", CONFIG_PATH, "--json"],
+      ["ids", "--config", CONFIG_PATH, "--json"],
+      ["inventory", "--config", CONFIG_PATH],
+    ]) {
+      await bothRoutesRefusedRun(
+        product,
+        workspace,
+        ROOT_BOTH_ROUTES_REFUSED,
+        argv,
+        (result, label) => {
+          expectReadFailure(
+            result,
+            [CONFIG_PATH, WORKING_DIRECTORY_ANCHOR],
+            `${label} — the configuration path's kind read, refused by ` +
+              `both routes alike, is a read failure: exit 2, ` +
+              `\`read-failure\` at ${CONFIG_PATH}, its anchoring form and ` +
+              `workspace-relative path coinciding from the root, or at ` +
+              `\`.\`, the root's own, for a product learning the kind from ` +
+              `the root's listing — never \`configuration-error\`, whether ` +
+              `(d)'s refused content read or T7-1's missing configuration ` +
+              `(SPEC 14.25, 7, 14.14, 11.6)`,
+          );
+        },
+        context,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * T14-10's arm (l), in turn: the journal's, a session file's, and the
+ * configuration path's kind reads, each under a directory staged where both
+ * routes are refused alike; Linux leg only, as T14-10's other arms (E-1).
+ */
+async function kindHalvesArm(product: ProductBinding): Promise<void> {
+  await journalKindArm(product);
+  await sessionKindArm(product);
+  await configurationKindArm(product);
+}
+
+// ---------------------------------------------------------------------------
 // T14-10 — read failures (14.25)
 // ---------------------------------------------------------------------------
 
 const T14_10 = defineProductTest({
   id: "T14-10",
   title:
-    "read failures (14.25): the object read decides the outcome, one arm per row, each refusal staged by permission removal alone (a file's content: mode 0o200, its write permission kept; a directory's listing: mode 0o100, search kept; nonexistence never a refusal) — (a) a discovered source's content is condition 20 at `build` and `check`, exit 1, its one location the zero-length range at offset 0, the file masked exactly as an unparseable one (A's reference reports 14.5, nothing inside reports) while `view` serves the other requested file, `occurrences` lists no record for its spellings, and `at` at 0, 7, and 999999 reports the resolution explicitly unavailable, never the out-of-range usage error — a spec source and, separately, a code source; (b) the journal's content is condition 13 concerning .xspec/journal from `build`, `check`, `ids` (answering nothing), and a refused `rename`, a given baseline's resolution — `impact --base` and `review create --base` — reporting it as its usage error (exit 2, `code` journal-error, `path` .xspec/journal), while `occurrences`, `view`, and `at` answer finding-free, exit 0, and `inventory` reports `journal` exactly {path .xspec/journal, occupied true}, finding-free; (c) a session file's content is condition 21 from `check`, `review status` (nothing modified), and `review list` (the session reported corrupt), each reporting one `corrupt-session` finding concerning the session file with no location, `inventory` listing the session; (d) the configuration file's content is condition 14 from `build`, `ids`, `inventory`, and `view` (`code` configuration-error, `path` xspec.config.ts), `version` exiting 0; (e) a generated module's content is one per-file condition-10 finding to `check` while `build` exits 0; (f) graph data unreadable — every file under .xspec/ but the journal, the session directory, and the lock path at mode 0o200 and every directory among them at 0o300 (`-wx`, its write and search kept) — is the state of condition 23: `inventory` and a `move --preview` report their record-supplied datum unavailable beside the finding, `check` one unit-form condition-10 finding alone, `ids` regenerates and answers (exit 0), and `build` exits 0, no later read of the record it wrote asserted — and, on a freshly built workspace, .xspec itself staged `-wx` (every path under it readable), `inventory` and a `move --preview` each answer as on the unstaged twin (exit 0) or with their datum unavailable beside the condition-23 finding concerning .xspec (exit 1), every other member the twin's, never `read-failure`; (g) a directory discovery lists, unlistable: `build`, `check`, `ids`, `view`, `inventory`, `review list`, and a `rename` each exit 2 with the error document (`code` read-failure, `path` specs/sub), nothing modified, the read failure preceding a failing source's findings and an unknown profile, the syntax class (`code` null) and an invalid configuration preceding it; (h) the session directory unlistable: `review list`, `inventory`, and `check` exit 2 concerning .xspec/reviews while `build` and `ids` exit 0, and on a workspace failing `build`'s validations `review list` reports exactly the gate's findings, exit 1, the listing never reached; (i) at acquisition, the lock path's occupant and everything under it refused, each staged before the invocation on a freshly built workspace holding an `audit` session `s`, with `rename`, `move`, `review create`, `resolve`, and `split` in turn — an empty lock directory unlistable (`-wx`) and a subdirectory under it unlistable (`-wx`), each `read-failure`; `.xspec` unsearchable (`rw-`; holding no `lock` and, separately, an empty lock directory) and the lock directory unsearchable (`rw-`, holding a directory that holds a file), each `read-failure` or `write-failure` — each exit 2 with the error document, `path` .xspec/lock, never a nested path, `locations` [], nothing modified; and specs/sub, a directory the second discovery of 13.5 lists, made unlistable (`--x`) during the hold of `rename specs/A.mdx a a2`: exit 2, `code` read-failure, `path` specs/sub, nothing modified; (j) git data refused — the object store mode 000 (`impact --base`, `review create --base`, and `review status` of a baseline session) and, separately, a nested repository's inner `.git` mode 000 (`--base v1` from the outer root) — is the baseline's plain usage error, exit 2, `code` and `path` null, never `read-failure`, nothing modified; two clauses — a refused read of a path occupant's kind (the area's own occupant's at acquisition included, the lock path's there excepted, which (i) stages), and of a directory above the workspace root — admit no product-independent staging and are recorded so (SPEC 14.25, 14, 6.3, 11.2, 11.5, 11.6, 13.3, 13.5, 10.7, 12.0, 12.7)",
+    "read failures (14.25): the object read decides the outcome, one arm per row, each refusal staged by permission removal alone (a file's content: mode 0o200, its write permission kept; a directory's listing: mode 0o100, search kept; nonexistence never a refusal) — (a) a discovered source's content is condition 20 at `build` and `check`, exit 1, its one location the zero-length range at offset 0, the file masked exactly as an unparseable one (A's reference reports 14.5, nothing inside reports) while `view` serves the other requested file, `occurrences` lists no record for its spellings, and `at` at 0, 7, and 999999 reports the resolution explicitly unavailable, never the out-of-range usage error — a spec source and, separately, a code source; (b) the journal's content is condition 13 concerning .xspec/journal from `build`, `check`, `ids` (answering nothing), and a refused `rename`, a given baseline's resolution — `impact --base` and `review create --base` — reporting it as its usage error (exit 2, `code` journal-error, `path` .xspec/journal), while `occurrences`, `view`, and `at` answer finding-free, exit 0, and `inventory` reports `journal` exactly {path .xspec/journal, occupied true}, finding-free; (c) a session file's content is condition 21 from `check`, `review status` (nothing modified), and `review list` (the session reported corrupt), each reporting one `corrupt-session` finding concerning the session file with no location, `inventory` listing the session; (d) the configuration file's content is condition 14 from `build`, `ids`, `inventory`, and `view` (`code` configuration-error, `path` xspec.config.ts), `version` exiting 0; (e) a generated module's content is one per-file condition-10 finding to `check` while `build` exits 0; (f) graph data unreadable — every file under .xspec/ but the journal, the session directory, and the lock path at mode 0o200 and every directory among them at 0o300 (`-wx`, its write and search kept) — is the state of condition 23: `inventory` and a `move --preview` report their record-supplied datum unavailable beside the finding, `check` one unit-form condition-10 finding alone, `ids` regenerates and answers (exit 0), and `build` exits 0, no later read of the record it wrote asserted — and, on a freshly built workspace, .xspec itself staged `-wx` (every path under it readable), `inventory` and a `move --preview` each answer as on the unstaged twin (exit 0) or with their datum unavailable beside the condition-23 finding concerning .xspec (exit 1), every other member the twin's, never `read-failure`; (g) a directory discovery lists, unlistable: `build`, `check`, `ids`, `view`, `inventory`, `review list`, and a `rename` each exit 2 with the error document (`code` read-failure, `path` specs/sub), nothing modified, the read failure preceding a failing source's findings and an unknown profile, the syntax class (`code` null) and an invalid configuration preceding it; (h) the session directory unlistable: `review list`, `inventory`, and `check` exit 2 concerning .xspec/reviews while `build` and `ids` exit 0, and on a workspace failing `build`'s validations `review list` reports exactly the gate's findings, exit 1, the listing never reached; (i) at acquisition, the lock path's occupant and everything under it refused, each staged before the invocation on a freshly built workspace holding an `audit` session `s`, with `rename`, `move`, `review create`, `resolve`, and `split` in turn — an empty lock directory unlistable (`-wx`) and a subdirectory under it unlistable (`-wx`), each `read-failure`; `.xspec` unsearchable (`rw-`; holding no `lock` and, separately, an empty lock directory) and the lock directory unsearchable (`rw-`, holding a directory that holds a file), each `read-failure` or `write-failure` — each exit 2 with the error document, `path` .xspec/lock, never a nested path, `locations` [], nothing modified; and specs/sub, a directory the second discovery of 13.5 lists, made unlistable (`--x`) during the hold of `rename specs/A.mdx a a2`: exit 2, `code` read-failure, `path` specs/sub, nothing modified; (j) git data refused — the object store mode 000 (`impact --base`, `review create --base`, and `review status` of a baseline session) and, separately, a nested repository's inner `.git` mode 000 (`--base v1` from the outer root) — is the baseline's plain usage error, exit 2, `code` and `path` null, never `read-failure`, nothing modified; (k) the directories the upward search examines: R/tools, below a valid root R, entered and only then stripped of its read and search permission (mode 000) — `build`, `ids`, `inventory`, and `coverage <unknown-profile>` each exit 2 with `read-failure` at `.`, R's configuration never loaded and answered from, never `configuration-error`, and, separately, with no configuration in R or in any ancestor (H-1) likewise, never T7-1's missing configuration; `ids extra` the syntax class (`code` null), `version` exit 0, each nothing modified; (l) the kind halves of (b)–(d), each under a directory stripped of its read and search permission (mode 000) — (i) .xspec on a built, journal-bearing workspace whose repository holds c1: `build`, `ids`, `impact --base c1`, `occurrences`, `view`, and `at` each exit 2 with `read-failure` at .xspec/journal and `inventory` at .xspec/journal or .xspec/reviews, and on a twin also failing validation (a section with no `id`) `build`, `ids`, and the three surfaces likewise and `check` at .xspec/journal or .xspec/reviews, never exit 1 with the condition-1 finding; (ii) .xspec/reviews beside a valid session `s`: `review status s` exits 2 with `read-failure` at .xspec/reviews or .xspec/reviews/s.json, never `corrupt-session` nor the unknown-session error; (iii) the root R, entered and then so staged: `build`, `ids`, and `inventory` with `--config xspec.config.ts` each exit 2 with `read-failure` at xspec.config.ts or `.`, never `configuration-error` — each nothing modified; two clauses — a refused read of a path occupant's kind (the area's own occupant's at acquisition included, the lock path's there excepted, which (i) stages), save where both routes are refused alike, which (k) and (l) stage, and of a directory above the workspace root or any the anchoring resolution makes, the working directory itself (k)'s — admit no product-independent staging and are recorded so (SPEC 14.25, 14, 6.3, 7, 11.2, 11.5, 11.6, 12.6, 13.3, 13.5, 10.7, 12.0, 12.7)",
   run: async (product) => {
     // E-1: permission stagings belong to the Linux leg; elsewhere the arms
     // are not staged (the NU3_STAGED pattern of section-11.5) and no other
@@ -4546,6 +5270,8 @@ const T14_10 = defineProductTest({
     await sessionDirectoryArm(product);
     await runT1410ArmI(product);
     await gitDataArm(product);
+    await upwardSearchArm(product);
+    await kindHalvesArm(product);
   },
 });
 

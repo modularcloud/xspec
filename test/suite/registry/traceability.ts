@@ -1041,16 +1041,24 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // and refreshing reads over the unreadable journal and graph data (13.3),
   // and arm (i)'s refused reads at acquisition concerning the lock path and
   // at the second discovery of a held mutating command, each stopping the
-  // command with nothing modified (13.5); 6.6/7/14.14's staged surfaces are
-  // context with home coverage at T6.6-6/T7-*/T12.7-3.
+  // command with nothing modified (13.5); arm (k)'s upward search from the
+  // working directory, stopping at it refused rather than walking on, and
+  // arm (l)(iii)'s `--config` path, its refused kind read never missing or
+  // invalid configuration (7), each concerned in its anchoring form (11.6);
+  // and `version`, loading no configuration, answering beside the refused
+  // configuration and from the refused working directory (12.6);
+  // 6.6/14.14's staged surfaces are context with home coverage at
+  // T6.6-6/T12.7-3.
   "T14-10": [
     "14",
     "6.3",
+    "7",
     "10.7",
     "11.2",
     "11.5",
     "11.6",
     "12.0",
+    "12.6",
     "12.7",
     "13.3",
     "13.5",
