@@ -969,6 +969,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T14-1": ["14", "12.7", "13.3"],
   "T14-2": ["14", "2.4", "4.5"],
   "T14-3": ["14"],
+  // T14-4: the reporter matrix, home "14" alone — the surfaces it reads
+  // each condition's reporters from (13.3's gated reads, 11.2's and 11.6's
+  // answers, 10.7's review reports, 6.6's previews, and 6.3's given
+  // baseline, whose journal error is the exit-2 error document) are
+  // context, with home coverage at their own sections' tests, which its
+  // TEST-SPEC entry cites (T13.3-3, T11.2-6, T11.6-4, T10.1-5, and T6.3-6
+  // among them).
   "T14-4": ["14"],
   "T14-5": ["14"],
   // T14-6: 12.7 (the JSON report form pinning `code`) and 12.0 (the exit-2

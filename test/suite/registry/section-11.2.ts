@@ -135,11 +135,11 @@ import {
 // T11.2-5's second workspace, T11.2-6's corrupt-session workspace, and
 // T11.2-7's later arms here, T11.3-1's, T11.3-2's, and T11.3-3's later
 // workspaces, T11.4-3's shared workspace and T11.4-5's and T11.4-6's later
-// ones, T11.6-4's corrupt-session workspace (the same staging, through
-// `T11_2_6_PASSING_SIDE_STAGINGS`), and P-12's later trials
-// (registry/section-16-p12.ts).
+// ones, T11.6-4's corrupt-session workspace and T14-4's corrupt-session
+// row (the same staging, through `T11_2_6_PASSING_SIDE_STAGINGS`), and
+// P-12's later trials (registry/section-16-p12.ts).
 export const SPECS_ONLY_CONFIG = stagedTs(
-  "T11.2-4/T11.2-5/T11.2-6/T11.2-7/T11.3-1/T11.3-2/T11.3-3/T11.4-3/T11.4-5/T11.4-6/T11.6-4/P-12 xspec.config.ts — one spec group",
+  "T11.2-4/T11.2-5/T11.2-6/T11.2-7/T11.3-1/T11.3-2/T11.3-3/T11.4-3/T11.4-5/T11.4-6/T11.6-4/T14-4/P-12 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -294,14 +294,14 @@ const C_SECTION_RANGE: SourceRange = { start: C_SECTION_START, end: C.pos };
 C.add("\n");
 const C_SOURCE = C.source;
 // Restaged after a body's first product invocation (T11.2-5's cycle-pair
-// workspace, T11.2-6's later fixtures, and T11.6-4's corrupt-session
-// workspace, T11.2-6's fixture 5 staged through
+// workspace, T11.2-6's later fixtures, and T11.6-4's and T14-4's
+// corrupt-session workspaces, T11.2-6's fixture 5 staged through
 // `T11_2_6_PASSING_SIDE_STAGINGS`), so S-7's sweep never reaches those
 // stagings against the stub: a staged-source record (helpers/staged-mdx.ts;
 // S-9's before-any-product clause) made from the string the pins use, and
 // staged at every site the bytes appear (T11.2-1's too).
 const C_STAGED = stagedMdx(
-  "T11.2-1/T11.2-5/T11.2-6/T11.6-4 specs/C.mdx (the finding-free file; T11.2-6's discovered-component, corrupt-session, and unreadable-emit-directory fixtures, and T11.6-4's corrupt-session workspace, stage it at specs/A.mdx too)",
+  "T11.2-1/T11.2-5/T11.2-6/T11.6-4/T14-4 specs/C.mdx (the finding-free file; T11.2-6's discovered-component, corrupt-session, and unreadable-emit-directory fixtures, and T11.6-4's and T14-4's corrupt-session workspaces, stage it at specs/A.mdx too)",
   C_SOURCE,
 );
 const C_ROOT_RANGE: SourceRange = { start: 0, end: C.pos };
@@ -5123,24 +5123,25 @@ const T11_2_5 = defineProductTest({
 // Fixtures 4 and 5 (the passing side: findings of no domain file attach nothing
 // there either — SPEC 11.2: a finding is a domain file's exactly through a
 // location in that file or a condition-19 concerned path), the exported
-// `T11_2_6_PASSING_SIDE_STAGINGS` (T11.6-4, the inventory's counterpart, stages
-// the same two workspaces and judges their `check` through the exported
-// `expectCheckReportsStagedFinding`, one code path): each a workspace passing
-// `build`'s validations, built (exit 0), so its graph data is fresh — 4
-// violating a `forbidden` rule (T7.5-2's staging: the spec group `hi`'s
-// `specs/A.mdx#a` depending on the spec group `lo`'s `lo/L.mdx#l`, the
-// offending edge's `d` spelled in the spec source `specs/A.mdx`, the rule
-// `no-hi-to-lo` forbidding `hi` to `lo`), 5 holding a corrupt session
-// (T10.1-4's garbage-bytes staging, `.xspec/reviews/cor.json`, written after
-// the build; `specs/A.mdx` the finding-free C-shaped bytes). `check --json`
-// reports exactly the one finding, exit 1, writing nothing — 4's 14.12 with no
-// location and no concerned path (a policy finding is no file's finding, SPEC
-// 14.12), 5's 14.21 with no location, concerning the session file, no domain
-// file (14.21) — while `occurrences` (bare: the whole discovered set), `view
-// specs/A.mdx`, and `at specs/A.mdx 0` each answer finding-free at exit 0,
-// writing nothing (the fresh graph data needs no refresh, SPEC 13.3): the arm
-// against a product attaching every finding lacking an in-source location to
-// these answers (the offending edge's spelling lies in the very file viewed).
+// `T11_2_6_PASSING_SIDE_STAGINGS` (T11.6-4, the inventory's counterpart, and
+// T14-4, the reporter matrix, stage the same two workspaces and judge their
+// `check` through the exported `expectCheckReportsStagedFinding`, one code
+// path): each a workspace passing `build`'s validations, built (exit 0), so its
+// graph data is fresh — 4 violating a `forbidden` rule (T7.5-2's staging: the
+// spec group `hi`'s `specs/A.mdx#a` depending on the spec group `lo`'s
+// `lo/L.mdx#l`, the offending edge's `d` spelled in the spec source
+// `specs/A.mdx`, the rule `no-hi-to-lo` forbidding `hi` to `lo`), 5 holding a
+// corrupt session (T10.1-4's garbage-bytes staging, `.xspec/reviews/cor.json`,
+// written after the build; `specs/A.mdx` the finding-free C-shaped bytes).
+// `check --json` reports exactly the one finding, exit 1, writing nothing — 4's
+// 14.12 with no location and no concerned path (a policy finding is no file's
+// finding, SPEC 14.12), 5's 14.21 with no location, concerning the session
+// file, no domain file (14.21) — while `occurrences` (bare: the whole
+// discovered set), `view specs/A.mdx`, and `at specs/A.mdx 0` each answer
+// finding-free at exit 0, writing nothing (the fresh graph data needs no
+// refresh, SPEC 13.3): the arm against a product attaching every finding
+// lacking an in-source location to these answers (the offending edge's spelling
+// lies in the very file viewed).
 //
 // Fixture 6 (the judgement's reads; the Linux leg, E-1): past their argument
 // checks these surfaces judge `build`'s validations exactly as the gate of
@@ -5307,7 +5308,7 @@ async function assertViewFindingFree(
 // `specs/A.mdx#a` depends on the spec group `lo`'s `lo/L.mdx#l`, and the
 // rule `no-hi-to-lo` forbids every edge from `hi` to `lo` (SPEC 7.5).
 const T11_2_6_POLICY_CONFIG = stagedTs(
-  "T11.2-6/T11.6-4 passing-side policy fixture xspec.config.ts — a forbidden rule from the spec group hi to the spec group lo",
+  "T11.2-6/T11.6-4/T14-4 passing-side policy fixture xspec.config.ts — a forbidden rule from the spec group hi to the spec group lo",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -5327,7 +5328,7 @@ export default defineConfig({
 `,
 );
 const T11_2_6_POLICY_SOURCE = stagedMdx(
-  "T11.2-6/T11.6-4 passing-side policy fixture specs/A.mdx — the offending edge's d spelling",
+  "T11.2-6/T11.6-4/T14-4 passing-side policy fixture specs/A.mdx — the offending edge's d spelling",
   `import L from "../lo/L.xspec"
 
 <S id="a" d={L.l}>
@@ -5337,7 +5338,7 @@ Depends on the low group.
 );
 const T11_2_6_POLICY_TARGET_FILE = "lo/L.mdx";
 const T11_2_6_POLICY_TARGET = stagedMdx(
-  "T11.2-6/T11.6-4 passing-side policy fixture lo/L.mdx — the forbidden edge's target",
+  "T11.2-6/T11.6-4/T14-4 passing-side policy fixture lo/L.mdx — the forbidden edge's target",
   `<S id="l">
 Low one.
 </S>
@@ -5353,10 +5354,10 @@ const T11_2_6_CORRUPT_SESSION_BYTES =
 
 /**
  * One of T11.2-6's passing-side stagings (TEST-SPEC T11.2-6; exported for
- * T11.6-4, the inventory's counterpart, which stages the same two
- * workspaces): a workspace passing `build`'s validations, built, beside one
- * finding of no domain file, which `check` reports there (exit 1) and no
- * answer of 11.3–11.5 carries (SPEC 11.2).
+ * T11.6-4, the inventory's counterpart, and T14-4, the reporter matrix,
+ * which stage the same two workspaces): a workspace passing `build`'s
+ * validations, built, beside one finding of no domain file, which `check`
+ * reports there (exit 1) and no answer of 11.3–11.5 carries (SPEC 11.2).
  */
 export interface T1126PassingSideStaging {
   /** The arm, as contexts name it. */
@@ -5370,6 +5371,12 @@ export interface T1126PassingSideStaging {
   readonly concerned: string | null;
   /** Why the finding is no domain file's (SPEC 11.2), for diagnostics. */
   readonly noDomainFile: string;
+  /**
+   * The discovered spec source `view` and `at` are asked over: the
+   * finding-free `specs/A.mdx` — the policy staging's offending edge's `d`
+   * spelled in it (SPEC 11.4, 11.5).
+   */
+  readonly file: string;
   /**
    * Create the workspace, `build` it (exit 0: policy is no validation of
    * `build`, SPEC 7.5, 12.1, and `build` reads no session, 14.21), and stage
@@ -5419,6 +5426,7 @@ export const T11_2_6_PASSING_SIDE_STAGINGS: readonly T1126PassingSideStaging[] =
         "location and concerns no path — and accompanies no answer of " +
         "11.3–11.5 (SPEC 14.12, 11.2), the offending edge's `d` spelling " +
         "in the very file viewed notwithstanding",
+      file: A_FILE,
       stage: async (product, context) =>
         await stageBuiltWorkspace(
           product,
@@ -5438,6 +5446,7 @@ export const T11_2_6_PASSING_SIDE_STAGINGS: readonly T1126PassingSideStaging[] =
         "a session file is no domain file — the corrupt-session finding " +
         "carries no in-source location, and its concerned path names no " +
         "domain file (SPEC 14.21, 11.2)",
+      file: A_FILE,
       stage: async (product, context) =>
         await stageBuiltWorkspace(
           product,
@@ -5459,7 +5468,9 @@ export const T11_2_6_PASSING_SIDE_STAGINGS: readonly T1126PassingSideStaging[] =
  * condition count), no in-source location, its concerned path
  * `staging.concerned` — writing nothing (SPEC 12.2, 14). Exported for
  * T11.6-4, which judges `check` on the same stagings beside its finding-free
- * `inventory` answers (registry/section-11.6.ts).
+ * `inventory` answers (registry/section-11.6.ts), and for T14-4, beside its
+ * finding-free answers of `occurrences`, `view`, `at`, and `inventory`
+ * (registry/section-14.ts).
  */
 export async function expectCheckReportsStagedFinding(
   product: ProductBinding,
@@ -5500,18 +5511,19 @@ export async function expectCheckReportsStagedFinding(
 
 /**
  * Fixtures 4 and 5's answers: `occurrences` (bare: the whole discovered
- * set), `view specs/A.mdx`, and `at specs/A.mdx 0` each answer finding-free
- * at exit 0 — the staged finding being no domain file's (`noDomainFile`,
- * SPEC 11.2) — each writing nothing: the graph data the build wrote is
- * fresh, so no refresh writes (SPEC 13.3), and these reads write nothing
- * else.
+ * set), `view specs/A.mdx`, and `at specs/A.mdx 0` — `specs/A.mdx` the
+ * staging's `file` — each answer finding-free at exit 0, the staged
+ * finding being no domain file's (its `noDomainFile`, SPEC 11.2), each
+ * writing nothing: the graph data the build wrote is fresh, so no refresh
+ * writes (SPEC 13.3), and these reads write nothing else.
  */
 async function assertPassingSideAnswersFindingFree(
   product: ProductBinding,
   workspace: TestWorkspace,
-  noDomainFile: string,
+  staging: T1126PassingSideStaging,
   context: string,
 ): Promise<void> {
+  const { file, noDomainFile } = staging;
   const noWrite =
     "writes nothing: the built workspace's graph data is fresh, so no " +
     "refresh writes, and the answer writes nothing else (SPEC 11.2, 13.3)";
@@ -5540,7 +5552,7 @@ async function assertPassingSideAnswersFindingFree(
     `${occurrencesContext} — ${noWrite}`,
   );
 
-  const viewContext = `${context} \`view ${A_FILE}\``;
+  const viewContext = `${context} \`view ${file}\``;
   await assertLeavesUnchanged(
     workspace.root,
     async () => {
@@ -5548,7 +5560,7 @@ async function assertPassingSideAnswersFindingFree(
         await runJson(
           product,
           workspace,
-          ["view", A_FILE],
+          ["view", file],
           `${viewContext} — the requested file's view is complete and ` +
             `finding-free, so it exits 0 (SPEC 11.2, 11.4)`,
         ),
@@ -5563,14 +5575,14 @@ async function assertPassingSideAnswersFindingFree(
       );
       assertSameJson(
         report.views.map((view) => view.file),
-        [A_FILE],
+        [file],
         `${viewContext} — exactly the requested file's view (SPEC 11.4)`,
       );
     },
     `${viewContext} — ${noWrite}`,
   );
 
-  const atContext = `${context} \`at ${A_FILE} 0\``;
+  const atContext = `${context} \`at ${file} 0\``;
   await assertLeavesUnchanged(
     workspace.root,
     async () => {
@@ -5578,7 +5590,7 @@ async function assertPassingSideAnswersFindingFree(
         await runJson(
           product,
           workspace,
-          ["at", A_FILE, "0"],
+          ["at", file, "0"],
           `${atContext} — the named file's resolution is complete and ` +
             `finding-free, so it exits 0 (SPEC 11.2, 11.5)`,
         ),
@@ -6281,7 +6293,7 @@ const T11_2_6 = defineProductTest({
         await assertPassingSideAnswersFindingFree(
           product,
           workspace,
-          staging.noDomainFile,
+          staging,
           context,
         );
       } finally {

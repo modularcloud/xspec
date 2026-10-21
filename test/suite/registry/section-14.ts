@@ -274,6 +274,47 @@
 //   sources' records declared unparseable, the two unparseable `.ts`
 //   sources); the `.ts` entries are code-source rows (`occurrences` alone).
 //   The home rows precede T14-12's, in the clause's order.
+// - T14-4's passing-workspace rows (TEST-SPEC T14-4: 14.12 and 14.21
+//   accompanying no `occurrences`/`view`/`at` answer, nor `inventory`'s,
+//   on a passing workspace; SPEC 14.12, 14.21, 11.2, 11.6): T11.2-6's
+//   passing-side stagings, swept as the home rows are — section-11.2.ts's
+//   exported `T11_2_6_PASSING_SIDE_STAGINGS` (T11.6-4's too, one code
+//   path), each a workspace passing `build`'s validations, built (exit 0),
+//   beside a policy violation (T7.5-2's staging, the offending edge's `d`
+//   spelled in `specs/A.mdx`) and, on a second workspace, a corrupt
+//   session (T10.1-4's garbage bytes at `.xspec/reviews/cor.json`). On
+//   each, `check --json` — the condition's reporter — reports exactly the
+//   staged finding, form-exact (`locations` [], the concerned path `null`,
+//   respectively the session file), exit 1, writing nothing
+//   (section-11.2.ts's exported `expectCheckReportsStagedFinding`), while
+//   bare `occurrences`, bare `view`, and `at specs/A.mdx 0` (the staging's
+//   `file`; the availability rows' probes) and `inventory` each answer
+//   finding-free at exit 0, decoded form-exact: neither finding is a domain
+//   file's (11.2), and condition 23 is the only finding an inventory
+//   answer carries (11.6). Membership alone: the answers' modifies-nothing
+//   compares and the views' depth stay T11.2-6's, the inventory's full
+//   document T11.6-4's. The rows run after the sweep.
+// - T14-4's baseline arm (TEST-SPEC T14-4: 14.13 delivered besides as an
+//   exit-2 error, never a finding, by a given baseline's resolution, at
+//   `impact --base` and `review create --base`; SPEC 6.3, 14.13, 12.0,
+//   12.7): staged as T6.3-6(a) stages it, through section-6.3.ts's exported
+//   `stageJournalErrorAtC1` (T12.7-3's journal-error arm's staging too) —
+//   on a fresh workspace (one spec group, `specs/A.mdx` holding section
+//   `a`), a git repository initialized, `build`, the journaled `rename
+//   specs/A.mdx a a2`, the all-inclusive commit `c1` (its tree holding
+//   that one-entry journal), and T6.1-3's garbage line appended to the
+//   current journal, the one entry absent from `c1`'s. `impact --base c1
+//   --json` and `review create --base c1 --name n --json` then each exit
+//   2 — a usage error, never the gate's exit 1 — with the 12.7 error
+//   document as the entire stdout, decoded form-exact (no `findings`
+//   member: never a finding), its finding's `code` `journal-error`, `path`
+//   `.xspec/journal`, and `locations` [] — the concern the sweep's journal
+//   row identifies at its reporters. The resolution's own contract — the
+//   journal read before any other cause can fail it, nothing modified, the
+//   human form, the other stagings — stays T6.3-6's. The arm runs last in
+//   the body: a test ends at its first failing arm, and a product meeting
+//   the current journal only through 6.3's replay (the code-less
+//   unreadable baseline) meets every other arm first.
 // - T14-6 stages each condition via its primary test's fixture — the same
 //   minimal home-form stagings T14-4 sweeps, plus the five specially
 //   reported conditions' stagings (14.10, 14.12, 14.14, 14.21, 14.23),
@@ -575,6 +616,7 @@ import type {
   WorkspaceDecl,
 } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import { stageJournalErrorAtC1 } from "./section-6.3.js";
 import {
   RENAME_REFUSAL_CASES,
   RENAME_REFUSAL_CONFIG,
@@ -633,6 +675,10 @@ import {
   runD20RefusedStaging,
   runD21RefusedStaging,
 } from "./section-6.5-iv.js";
+import {
+  T11_2_6_PASSING_SIDE_STAGINGS,
+  expectCheckReportsStagedFinding,
+} from "./section-11.2.js";
 import {
   POLICY_HI_SOURCE,
   POLICY_LO_SOURCE,
@@ -2607,6 +2653,35 @@ const BOGUS_KEY_DECL: WorkspaceDecl = {
   },
 };
 
+// 14.13 at a given baseline's resolution (SPEC 6.3), staged as T6.3-6(a)
+// stages it, through section-6.3.ts's `stageJournalErrorAtC1`: one spec
+// group over `specs/` and `specs/A.mdx` holding section `a`, the subject of
+// the journaled `rename specs/A.mdx a a2` the staging makes before its
+// commit `c1` and the garbage line it appends. The workspace follows
+// T14-4's first invocation, so its source is a staged-source record (S-9).
+const BASELINE_JOURNAL_DECL: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": SPECS_ONLY_CONFIG,
+    "specs/A.mdx": stagedMdx(
+      "T14-4 specs/A.mdx (the baseline journal-error arm's valid source: section a, the subject of T6.3-6(a)'s journaled rename)",
+      '<S id="a">\nAlpha behavior.\n</S>\n',
+    ),
+  },
+};
+
+// What a given baseline's resolution reports for the journal error (SPEC
+// 6.3, 12.7, 14, 14.13): condition 13's stable code and its concerned path,
+// the journal path (6.1), with no in-source location.
+const BASELINE_JOURNAL_ERROR = {
+  code: "journal-error",
+  path: ".xspec/journal",
+  locations: [],
+} as const;
+
+// The session the baseline arm's `review create --base` asks for (TEST-SPEC
+// T6.3-6's `--name n`).
+const BASELINE_SESSION = "n";
+
 /**
  * One availability-surface probe (SPEC 11.2, 11.3–11.5): the invocation
  * paired with the form-exact 12.7 document decode, so asserting the decoded
@@ -2767,7 +2842,7 @@ function assertSweepFindings(
 const T14_4 = defineProductTest({
   id: "T14-4",
   title:
-    "the reporter matrix: 14.10 and 14.12 reported by `check` only (a stale workspace `build`s successfully by regenerating; a policy-violating workspace `build`s successfully); 14.21 reported by `check`, by `review` subcommands naming the session, and by `review list` — not by `build`, and on a workspace failing `build`'s validations by `check` alone, beside the gate's findings — on the passing workspace, `review status --json` emitting the findings-only report of exactly one `corrupt-session` finding, concerning the session file with `locations` [], and `review list --json` reporting the session corrupt by name, the listing's findings holding that one `corrupt-session` finding likewise; 14.23 reported by `inventory` and `rename`/`move` previews only — `check` reports the state as 14.10's unit form, and `build` and the refreshing reads never do; 14.14 as the every-command usage error — never `version`; 14.13 and 14.22 reported by `build`, `check`, and the gated reads, yet accompanying no `occurrences`/`view`/`at` answer; every other condition reported by both `build` and `check`, and as a domain file's finding accompanying the answers of each of `occurrences`/`view`/`at` whose domain can hold its staged file — all three for a spec-source staging, `occurrences` alone for a code-source one (SPEC 14, 12.1, 12.2, 12.7, 10.1, 10.7, 13.3, 11.2, 11.3-11.6, 6.6, 12.6)",
+    "the reporter matrix: 14.10 and 14.12 reported by `check` only (a stale workspace `build`s successfully by regenerating; a policy-violating workspace `build`s successfully); 14.21 reported by `check`, by `review` subcommands naming the session, and by `review list` — not by `build`, and on a workspace failing `build`'s validations by `check` alone, beside the gate's findings — on the passing workspace, `review status --json` emitting the findings-only report of exactly one `corrupt-session` finding, concerning the session file with `locations` [], and `review list --json` reporting the session corrupt by name, the listing's findings holding that one `corrupt-session` finding likewise; 14.23 reported by `inventory` and `rename`/`move` previews only — `check` reports the state as 14.10's unit form, and `build` and the refreshing reads never do; 14.14 as the every-command usage error — never `version`; 14.13 and 14.22 reported by `build`, `check`, and the gated reads, yet accompanying no `occurrences`/`view`/`at` answer — and 14.13 delivered besides as an exit-2 error, never a finding, by a given baseline's resolution: on T6.3-6(a)'s staging (a garbage line appended to the journal the product wrote after the commit c1), `impact --base c1 --json` and `review create --base c1 --name n --json` each exit 2 with the error document's `code` `journal-error`, `path` `.xspec/journal`, and `locations` []; 14.12 and 14.21 likewise accompanying none of those answers, nor `inventory`'s, on a passing workspace (T11.2-6's stagings: a policy violation, a corrupt session) — `check` reporting exactly the staged finding, form-exact, while `occurrences`, `view`, `at`, and `inventory` each answer finding-free at exit 0; every other condition reported by both `build` and `check`, and as a domain file's finding accompanying the answers of each of `occurrences`/`view`/`at` whose domain can hold its staged file — all three for a spec-source staging, `occurrences` alone for a code-source one (SPEC 14, 6.3, 12.0, 12.1, 12.2, 12.7, 10.1, 10.7, 13.3, 11.2, 11.3-11.6, 6.6, 12.6)",
   run: async (product) => {
     // --- 14.10: check-only. A stale workspace `build`s successfully by
     // regenerating (STALE_DECL: Markdown emission on, so the staged
@@ -3385,6 +3460,128 @@ const T14_4 = defineProductTest({
         }
       });
     }
+
+    // --- 14.12 and 14.21 on a passing workspace: reported by `check`, yet
+    // accompanying no `occurrences`/`view`/`at` answer, nor `inventory`'s
+    // (SPEC 14.12, 14.21, 11.2, 11.6) — T11.2-6's passing-side stagings,
+    // swept as the home rows are (section-11.2.ts's exported
+    // `T11_2_6_PASSING_SIDE_STAGINGS`, T11.6-4's too; the module header).
+    for (const staging of T11_2_6_PASSING_SIDE_STAGINGS) {
+      const context =
+        `T14-4 (${staging.condition} on a passing workspace: ` +
+        `${staging.arm})`;
+      const workspace = await staging.stage(product, context);
+      try {
+        // `check` reports exactly the staged finding, form-exact, exit 1,
+        // writing nothing (one code path with T11.2-6 and T11.6-4).
+        await expectCheckReportsStagedFinding(
+          product,
+          workspace,
+          staging,
+          context,
+        );
+        // The three surfaces over the staging's spec source: the finding
+        // is no domain file's, so each answer is finding-free, exit 0.
+        for (const probe of availabilityProbes(staging.file)) {
+          const probeContext = `${context} ${probe.what}`;
+          assertConditionCounts(
+            probe.findingsOf(
+              await runJson(
+                product,
+                workspace,
+                probe.argv,
+                `${probeContext} — a complete, finding-free answer ` +
+                  `exits 0: condition ${staging.condition} accompanies ` +
+                  `no answer of this surface (SPEC 11.2, ` +
+                  `${staging.condition})`,
+              ),
+              probeContext,
+            ),
+            {},
+            `${probeContext} — ${staging.noDomainFile}`,
+          );
+        }
+        // ...nor the inventory's answer: condition 23 is the only finding
+        // an inventory answer carries (SPEC 11.6).
+        const inventoryContext = `${context} \`inventory\``;
+        assertConditionCounts(
+          decodeInventoryFindings(
+            await runJson(
+              product,
+              workspace,
+              ["inventory"],
+              `${inventoryContext} — the inventory answers finding-free ` +
+                `and exits 0 beside condition ${staging.condition}, ` +
+                `which \`check\` reports here (SPEC 11.6, ` +
+                `${staging.condition})`,
+            ),
+            inventoryContext,
+          ),
+          {},
+          `${inventoryContext} — condition 23 is the only finding an ` +
+            `inventory answer carries: parsing no sources and reading no ` +
+            `session content, it meets neither a policy violation nor a ` +
+            `corrupt session, each reported where its condition assigns ` +
+            `it, never here (SPEC 11.6, 14.12, 14.21)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- 14.13 delivered besides as an exit-2 error, never a finding, by
+    // a given baseline's resolution — at `impact --base` and `review
+    // create --base`, on T6.3-6(a)'s staging (section-6.3.ts's
+    // `stageJournalErrorAtC1`; SPEC 6.3, 14.13, 12.0, 12.7; the module
+    // header). Last in the body: a product meeting the current journal
+    // only through 6.3's replay meets every other arm first.
+    await withWorkspace(BASELINE_JOURNAL_DECL, async (workspace) => {
+      const c1 = await stageJournalErrorAtC1(
+        product,
+        workspace,
+        "T14-4 (14.13 at a given baseline)",
+      );
+      const commands: readonly (readonly string[])[] = [
+        ["impact", "--base", c1, "--json"],
+        [
+          "review",
+          "create",
+          "--base",
+          c1,
+          "--name",
+          BASELINE_SESSION,
+          "--json",
+        ],
+      ];
+      for (const argv of commands) {
+        const shown = argv.map((arg) => (arg === c1 ? "c1" : arg)).join(" ");
+        const context = `T14-4 (14.13 at a given baseline) \`${shown}\``;
+        const error = expectErrorDocument(
+          await expectExit(
+            product,
+            workspace,
+            argv,
+            2,
+            `${context} — a given baseline's resolution reads the ` +
+              `current journal before any other cause can fail it, and ` +
+              `the journal error fails it as a usage error, exit 2 — ` +
+              `never the gate's finding, never an answer (SPEC 6.3, ` +
+              `14.13, 12.0)`,
+          ),
+          context,
+        );
+        assertSameJson(
+          { code: error.code, path: error.path, locations: error.locations },
+          BASELINE_JOURNAL_ERROR,
+          `${context}: the error document's one finding is condition ` +
+            `13's — its stable code \`journal-error\`, its concerned path ` +
+            `the journal path \`.xspec/journal\`, and \`locations\` [], ` +
+            `a journal condition having no in-source location (SPEC 14, ` +
+            `14.13, 6.3, 12.7; depth: T6.3-6) (message: ` +
+            `${JSON.stringify(error.message)})`,
+        );
+      }
+    });
   },
 });
 

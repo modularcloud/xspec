@@ -315,7 +315,8 @@
 //
 // - passing workspaces: T11.2-6's passing-side stagings, staged through
 //   section-11.2.ts's exported `T11_2_6_PASSING_SIDE_STAGINGS` (one code
-//   path; its records named for both tests) — each a workspace passing
+//   path; its records named for every test staging them, T14-4's
+//   reporter matrix among them) — each a workspace passing
 //   `build`'s validations, built (exit 0), beside a policy violation (a
 //   `forbidden` rule, T7.5-2's staging) and, on a second workspace, a
 //   corrupt session (T10.1-4's garbage bytes at `.xspec/reviews/cor.json`).
@@ -3868,7 +3869,7 @@ const T11_6_3 = defineProductTest({
 // destinations for every `.mdx` source, the unparseable one included. Arm
 // B's two passing workspaces are T11.2-6's (section-11.2.ts's exported
 // `T11_2_6_PASSING_SIDE_STAGINGS`), their staged-source records named for
-// both tests.
+// every test staging them (T11.2-6, T11.6-4, and T14-4).
 
 const IMPERFECT_CONFIG = `import { defineConfig } from "xspec"
 

@@ -114,7 +114,8 @@
 //   product reading the current journal only through 6.3's replay meets
 //   it there as an unresolvable mapping, the code-less usage error the
 //   arm fails. (a)'s staging, `stageJournalErrorAtC1`, is exported:
-//   T12.7-3's journal-error arm (section-12.7.ts) stages through it.
+//   T12.7-3's journal-error arm (section-12.7.ts) and T14-4's baseline
+//   arm (section-14.ts) stage through it.
 // - Each T6.3-6 arm (a)–(d) runs `impact --base <ref>`, then `review create
 //   --base <ref> --name n`, each with `--json` under a whole-root compare
 //   (H-6's lock-path exclusion applied: no session written; sources,
@@ -2355,8 +2356,9 @@ async function stageRepositoryAtC1(
  * journal holds the entry the ref's journal holds and the garbage line
  * after it; `c1` returned. The workspace holds valid sources under one spec
  * group, `specs/A.mdx` holding section `a`, the journaled rename's subject.
- * Exported for T12.7-3's journal-error arm (section-12.7.ts), which stages
- * its error document's journal error exactly as (a) does.
+ * Exported for T12.7-3's journal-error arm (section-12.7.ts) and T14-4's
+ * baseline arm (section-14.ts), which stage their error documents' journal
+ * error exactly as (a) does.
  */
 export async function stageJournalErrorAtC1(
   product: ProductBinding,
