@@ -456,7 +456,11 @@
 //   never only the first found); and the invalid-workspace refusal with
 //   the rename staged to ALSO collide — the control arm on the valid twin
 //   pins the staged-to-collide premise (exactly the collision refusal),
-//   then the broken workspace reports the validation findings alone. No
+//   then the broken workspace reports the validation findings alone. Every
+//   one of these own stagings, the refined arms' below included, is
+//   exported as the table T14-7's body runs (`T147RefusalStaging`,
+//   `T147RefusedCycleArm`, `IntrinsicInvalidIdArm`) for T6.6-3, whose
+//   `--preview` twins stage each identically (TEST-SPEC T6.6-3). No
 //   report carries a code outside 14's list: the form-exact decode admits
 //   only 14's codes (forms.ts, S-5), so an unlisted code fails as an H-3
 //   form failure before any count, and the exact multiset excludes every
@@ -757,9 +761,10 @@ import {
 // Minimal declarative configuration (SPEC 7): exactly one spec group. A
 // staged-source record (S-9; helpers/staged-ts.ts): most workspaces staging
 // it follow their body's first product invocation, so it is judged before
-// any product exists; the other stagings pass the record too.
+// any product exists; the other stagings pass the record too. T6.6-3 stages
+// it through T14-7's exported own stagings (the T14-7 section).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T14-4/T14-6/T14-7/T14-8/T14-11 xspec.config.ts (one spec group, specs/**/*.mdx)",
+  "T6.6-3/T14-4/T14-6/T14-7/T14-8/T14-11 xspec.config.ts (one spec group, specs/**/*.mdx)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -4510,6 +4515,110 @@ async function assertLinkAndTargetUnchanged(
   );
 }
 
+// T14-7's own stagings (the module header's note: what no home table
+// stages) are exported for T6.6-3, which stages each identically and
+// asserts every refused `--preview`'s equivalence (TEST-SPEC T6.6-3: "for
+// each refusal of … T14-7 — … T14-7's own stagings … included — staged
+// identically"): the refusal stagings below (`T147RefusalStaging`), the
+// refused-cycle arms (`T147RefusedCycleArm`, the twice-spelled note), and
+// the two spelled refused-invalid-id command lines run in the home
+// workspaces (`IntrinsicInvalidIdArm`). T14-7's body runs exactly these
+// tables, so the twins cover exactly T14-7's own refusals.
+
+/**
+ * One refused invocation of T14-7's own stagings: its argv (`--json` and
+ * `--preview` left to the caller), the report's expected finding(s) — one
+ * per applicable reason, or the invalid-workspace refusal's numbered
+ * finding — and its reason, for diagnostics (T14-7's context names the
+ * operation, then the reason in parentheses: `t147CaseContext`).
+ */
+export interface T147RefusalCase {
+  readonly argv: readonly string[];
+  readonly expected: RefusalExpectation | readonly RefusalExpectation[];
+  readonly reason: string;
+  /**
+   * The identity the refusal reports over an invalid path — a plain string
+   * over the path as spelled, defining no node — on which T14-7 asserts
+   * `query node` is 12.0's unknown-identity usage error, exit 2, right
+   * after the refusal (the invalid-path staging note).
+   */
+  readonly nodeless?: string;
+}
+
+/**
+ * One of T14-7's own stagings whose refusals run on one state: a fresh
+ * workspace of `config` and `files` (every spec source a staged-source
+ * record — T14-7's and T6.6-3's workspaces follow their bodies' first
+ * invocations, S-9), the premise `build` passing over it, then each case in
+ * order — a refusal modifies nothing (SPEC 6.4, 6.5), so each sees the
+ * state as staged — and, where `then` is given, its file restaged and its
+ * cases run on that state.
+ */
+export interface T147RefusalStaging {
+  /** The premise `build`'s description, for diagnostics. */
+  readonly build: string;
+  /** The workspace's `xspec.config.ts`. */
+  readonly config: StagedTs;
+  /** Every other initial file, by workspace-relative path. */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  readonly cases: readonly T147RefusalCase[];
+  /**
+   * A restaging after `cases`, `file` overwritten with `contents` (a
+   * staged-source record, the write following the cases' invocations), and
+   * the cases then refused on that state.
+   */
+  readonly then?: {
+    readonly file: string;
+    readonly contents: StagedMdx;
+    readonly cases: readonly T147RefusalCase[];
+  };
+}
+
+/** T14-7's diagnostic context for one of its own refusal cases. */
+function t147CaseContext(kase: T147RefusalCase): string {
+  return `T14-7 ${kase.argv[0] ?? ""} (${kase.reason})`;
+}
+
+/**
+ * One of T14-7's own refusal stagings (the note above): its fresh
+ * workspace, the premise `build`, then each case through T14-7's reporting
+ * contract (`assertRefusalReport`, the human-form run included) — a case
+ * reporting an identity over an invalid path followed by the `query node`
+ * check on it — and the `then` restaging with its cases.
+ */
+async function runT147RefusalStaging(
+  product: ProductBinding,
+  staging: T147RefusalStaging,
+): Promise<void> {
+  await withWorkspace(
+    { files: { "xspec.config.ts": staging.config, ...staging.files } },
+    async (workspace) => {
+      await buildOk(product, workspace, `T14-7 ${staging.build}`);
+      const refuse = async (kase: T147RefusalCase): Promise<void> => {
+        await assertRefusalReport(
+          product,
+          workspace,
+          kase.argv,
+          kase.expected,
+          t147CaseContext(kase),
+        );
+        if (kase.nodeless !== undefined) {
+          await assertIdentityDefinesNoNode(product, workspace, kase.nodeless);
+        }
+      };
+      for (const kase of staging.cases) {
+        await refuse(kase);
+      }
+      if (staging.then !== undefined) {
+        await workspace.file(staging.then.file, staging.then.contents);
+        for (const kase of staging.then.cases) {
+          await refuse(kase);
+        }
+      }
+    },
+  );
+}
+
 // The destination-path directory-component staging (the other
 // destination-side directory-component case of SPEC 6.5, beside T6.5-4's
 // derived-path arm): the plain file `specs/blocked` occupies a
@@ -4523,10 +4632,29 @@ async function assertLinkAndTargetUnchanged(
 // directories, 13.4) — component occupancy is the arm's sole defect.
 const T14_7_COMPONENT_OCCUPANT = "specs/blocked";
 const T14_7_COMPONENT_DEST = "specs/blocked/Out.mdx";
-const T14_7_COMPONENT_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": SPECS_ONLY_CONFIG,
-  "specs/Src.mdx": V4_SOLO_SOURCE,
-  [T14_7_COMPONENT_OCCUPANT]: "not a directory\n",
+export const T14_7_COMPONENT_STAGING: T147RefusalStaging = {
+  build:
+    "destination-component staging `build` — the plain-file occupant " +
+    "matches no glob and lies under no current source's write path, so " +
+    "the workspace passes `build`'s validations",
+  config: SPECS_ONLY_CONFIG,
+  files: {
+    "specs/Src.mdx": V4_SOLO_SOURCE,
+    [T14_7_COMPONENT_OCCUPANT]: "not a directory\n",
+  },
+  cases: [
+    {
+      argv: ["move", "specs/Src.mdx", T14_7_COMPONENT_DEST],
+      expected: {
+        finding: "refused-invalid-destination",
+        path: T14_7_COMPONENT_DEST,
+      },
+      reason:
+        "destination-path directory component occupied by a plain file — " +
+        "refused-invalid-destination concerning the destination path, " +
+        "never 14.22",
+    },
+  ],
 };
 
 // The every-applicable-reason staging: a section move staged to BOTH collide
@@ -4554,10 +4682,10 @@ const T14_7_MULTI_SOURCE = [
 ].join("\n");
 
 // The staged source (S-9: every T14-7 workspace after the first follows the
-// body's first invocations — a staged-source record, made from the string
-// the windows below are computed from).
+// body's first invocations, as T6.6-3's twin of it does — a staged-source
+// record, made from the string the windows below are computed from).
 const T14_7_MULTI_STAGED = stagedMdx(
-  "T14-7 every-applicable-reason arm specs/M.mdx (keep holding the occupant keep.mv; mv depending on keep)",
+  "T6.6-3/T14-7 every-applicable-reason arm specs/M.mdx (keep holding the occupant keep.mv; mv depending on keep)",
   T14_7_MULTI_SOURCE,
 );
 
@@ -4581,6 +4709,35 @@ const T14_7_CYCLE_WINDOW = byteWindow(
   T14_7_MULTI_SOURCE.slice(0, T14_7_MULTI_SOURCE.indexOf(T14_7_CYCLE_SPELLING)),
   T14_7_CYCLE_SPELLING,
 );
+export const T14_7_MULTI_STAGING: T147RefusalStaging = {
+  build: "multi-reason staging `build` over the valid workspace",
+  config: SPECS_ONLY_CONFIG,
+  files: { [T14_7_MULTI_FILE]: T14_7_MULTI_STAGED },
+  cases: [
+    {
+      argv: ["move", `${T14_7_MULTI_FILE}#mv`, `${T14_7_MULTI_FILE}#keep.mv`],
+      expected: [
+        {
+          finding: "refused-id-collision",
+          locatedAt: { file: T14_7_MULTI_FILE, window: T14_7_OCCUPANT_WINDOW },
+          locatedAtEach: [
+            { file: T14_7_MULTI_FILE, window: T14_7_OCCUPANT_WINDOW },
+          ],
+          identities: [`${T14_7_MULTI_FILE}#keep.mv`],
+        },
+        {
+          finding: "refused-cycle",
+          locatedAt: { file: T14_7_MULTI_FILE, window: T14_7_CYCLE_WINDOW },
+        },
+      ],
+      reason:
+        "staged to both collide — `keep.mv` present in the target file, " +
+        "remaining after the removal — and create a dependency cycle — the " +
+        "moved node depends on `keep`, its would-be ancestor: both " +
+        "findings, never only the first",
+    },
+  ],
+};
 
 // The invalid-workspace staging: rename `a.mid` → `a.sib` is staged to
 // collide with the remaining `a.sib` bearer (the control arm pins that
@@ -4613,22 +4770,96 @@ const T14_7_SIB_WINDOW = byteWindow(
   T14_7_SIB_CONSTRUCT,
 );
 const T14_7_RENAME_STAGED = stagedMdx(
-  "T14-7 invalid-workspace arm specs/R.mdx (a holding a.mid and a.sib)",
+  "T6.6-3/T14-7 invalid-workspace arm specs/R.mdx (a holding a.mid and a.sib)",
   T14_7_RENAME_SOURCE,
 );
 const T14_7_BAD_FILE = "specs/Bad.mdx";
 const T14_7_BAD_VALID = stagedMdx(
-  "T14-7 invalid-workspace arm specs/Bad.mdx (the valid twin: bad, before its unresolved dependency target is staged)",
+  "T6.6-3/T14-7 invalid-workspace arm specs/Bad.mdx (the valid twin: bad, before its unresolved dependency target is staged)",
   '<S id="bad">\nBad-file text, valid for the control arm.\n</S>\n',
 );
 // The invalid twin is staged after the control arm's invocations — a
 // staged-source record (S-9, test/self/s9-staged-sources.test.ts), as are
 // the arm's initial sources (the workspace follows the body's first
-// invocations).
+// invocations, in T14-7 and in T6.6-3's twin alike).
 const T14_7_BAD_INVALID = stagedMdx(
-  "T14-7 specs/Bad.mdx with an unresolved dependency target (the invalid-workspace arm)",
+  "T6.6-3/T14-7 specs/Bad.mdx with an unresolved dependency target (the invalid-workspace arm)",
   '<S id="bad" d={"nope"}>\nUnresolved dependency target.\n</S>\n',
 );
+// The staging's refusals: on the valid twin, the control rename (staged to
+// collide — the premise the invalid-workspace arm rides) and the exact
+// self-move of either form, each reporting refused-identity-unchanged
+// alone — no collision reason beside it (SPEC 6.4: the after-removal check
+// collides with nothing) and no refused-destination-exists for the file
+// form (SPEC 14: the origin path itself is the one occupant that reason
+// never reports) — its `identities` the unchanged identity in 1.5's form
+// over the destination: `<target-file>#<id>` for the section form, the
+// bare `<new-file>`, its root identity, for the file form (SPEC 14); then,
+// `specs/Bad.mdx` broken, the same rename, reporting the workspace's
+// numbered findings alone.
+export const T14_7_INVALID_WORKSPACE_STAGING: T147RefusalStaging = {
+  build: "invalid-workspace staging `build` over the valid twin",
+  config: SPECS_ONLY_CONFIG,
+  files: {
+    [T14_7_RENAME_FILE]: T14_7_RENAME_STAGED,
+    [T14_7_BAD_FILE]: T14_7_BAD_VALID,
+  },
+  cases: [
+    {
+      argv: ["rename", T14_7_RENAME_FILE, "a.mid", "a.sib"],
+      expected: {
+        finding: "refused-id-collision",
+        locatedAt: { file: T14_7_RENAME_FILE, window: T14_7_SIB_WINDOW },
+        locatedAtEach: [{ file: T14_7_RENAME_FILE, window: T14_7_SIB_WINDOW }],
+        identities: [`${T14_7_RENAME_FILE}#a.sib`],
+      },
+      reason:
+        "control on the valid twin: the rename is staged to collide with " +
+        "the remaining `a.sib` bearer — the premise the invalid-workspace " +
+        "arm rides",
+    },
+    {
+      argv: [
+        "move",
+        `${T14_7_RENAME_FILE}#a.mid`,
+        `${T14_7_RENAME_FILE}#a.mid`,
+      ],
+      expected: {
+        finding: "refused-identity-unchanged",
+        identities: [`${T14_7_RENAME_FILE}#a.mid`],
+      },
+      reason:
+        "the exact section-form self-move — refused-identity-unchanged " +
+        "alone, its identities the unchanged `<target-file>#<id>` identity",
+    },
+    {
+      argv: ["move", T14_7_RENAME_FILE, T14_7_RENAME_FILE],
+      expected: {
+        finding: "refused-identity-unchanged",
+        identities: [T14_7_RENAME_FILE],
+      },
+      reason:
+        "the exact file-form self-move — refused-identity-unchanged alone, " +
+        "never refused-destination-exists beside it, its identities the " +
+        "bare `<new-file>` root identity",
+    },
+  ],
+  then: {
+    file: T14_7_BAD_FILE,
+    contents: T14_7_BAD_INVALID,
+    cases: [
+      {
+        argv: ["rename", T14_7_RENAME_FILE, "a.mid", "a.sib"],
+        expected: { finding: "14.5", locatedAt: { file: T14_7_BAD_FILE } },
+        reason:
+          "invalid workspace: the same rename, still staged to collide, " +
+          "reports the workspace's numbered findings alone — the one 14.5 " +
+          "finding located in specs/Bad.mdx, no refusal reason evaluated or " +
+          "reported beside it",
+      },
+    ],
+  },
+};
 
 // The destination-spelling staging (T14-7's own; SPEC 14, 6.5, 12.0):
 // occupancy is judged at a path in discovered-path form alone, so a
@@ -4642,10 +4873,10 @@ const T14_7_BAD_INVALID = stagedMdx(
 // every match `.mdx`). The section form's target path so spelled is refused
 // alike; its `<new-id>` `z` collides with nothing anywhere, so no second
 // reason could apply even to a product normalizing the spelling. The arm's
-// workspace follows the body's first invocations, so its configuration is
-// a staged-source record (S-9; helpers/staged-ts.ts).
+// workspace follows the body's first invocations (T6.6-3's twin's too), so
+// its configuration is a staged-source record (S-9; helpers/staged-ts.ts).
 const T14_7_SPELLING_CONFIG = stagedTs(
-  "T14-7 destination-spelling arm xspec.config.ts (the root-level glob *.mdx beside specs/**/*.mdx)",
+  "T6.6-3/T14-7 destination-spelling arm xspec.config.ts (the root-level glob *.mdx beside specs/**/*.mdx)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -4656,19 +4887,44 @@ export default defineConfig({
 `,
 );
 const T14_7_SPELLING_ORIGIN = "a.mdx";
-const T14_7_SPELLING_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": T14_7_SPELLING_CONFIG,
-  [T14_7_SPELLING_ORIGIN]: stagedMdx(
-    "T14-7 destination-spelling arm a.mdx (the root-level origin x)",
-    '<S id="x">\nX text.\n</S>\n',
-  ),
-  "specs/b.mdx": A13_FOURTH_STAGED,
-};
 const T14_7_SPELLED_DESTINATIONS: readonly string[] = [
   "./a.mdx",
   "specs//b.mdx",
   "specs/../specs/b.mdx",
 ];
+export const T14_7_SPELLING_STAGING: T147RefusalStaging = {
+  build:
+    "destination-spelling staging `build` (a root-level origin under a " +
+    "root-level glob beside `specs/b.mdx`)",
+  config: T14_7_SPELLING_CONFIG,
+  files: {
+    [T14_7_SPELLING_ORIGIN]: stagedMdx(
+      "T6.6-3/T14-7 destination-spelling arm a.mdx (the root-level origin x)",
+      '<S id="x">\nX text.\n</S>\n',
+    ),
+    "specs/b.mdx": A13_FOURTH_STAGED,
+  },
+  // Each spelling in the file form, then as the section form's target path.
+  cases: T14_7_SPELLED_DESTINATIONS.flatMap((spelled): T147RefusalCase[] => [
+    {
+      argv: ["move", T14_7_SPELLING_ORIGIN, spelled],
+      expected: { finding: "refused-invalid-destination", path: spelled },
+      reason:
+        `file form; destination spelled \`${spelled}\` — no discovered ` +
+        "path carries a `.`, `..`, or empty segment: " +
+        "refused-invalid-destination alone, concerning the path as " +
+        "spelled, never reported occupied",
+    },
+    {
+      argv: ["move", `${T14_7_SPELLING_ORIGIN}#x`, `${spelled}#z`],
+      expected: { finding: "refused-invalid-destination", path: spelled },
+      reason:
+        `section form; target path spelled \`${spelled}\` — ` +
+        "refused-invalid-destination alone, concerning the target file " +
+        "path as spelled, never reported occupied",
+    },
+  ]),
+};
 
 // The spec-import-cycle location staging (T14-7's own; SPEC 14, 6.5, 5.7):
 // `B` imports `A` (the declaration `b`'s external reference to `keep` uses),
@@ -4702,7 +4958,7 @@ const T14_7_CYCLE_A_SOURCE = [
 ].join("\n");
 const T14_7_IMPORT_DECLARATION = 'import A from "./A.xspec"';
 const T14_7_CYCLE_B_SOURCE = stagedMdx(
-  "T14-7 import-cycle arm and its twice-spelled twin specs/B.mdx (b importing A for keep)",
+  "T6.6-3/T14-7 import-cycle arm and its twice-spelled twin specs/B.mdx (b importing A for keep)",
   [
     T14_7_IMPORT_DECLARATION,
     "",
@@ -4713,7 +4969,7 @@ const T14_7_CYCLE_B_SOURCE = stagedMdx(
   ].join("\n"),
 );
 const T14_7_CYCLE_A_STAGED = stagedMdx(
-  "T14-7 import-cycle arm specs/A.mdx (keep, x, and user referencing x in local form)",
+  "T6.6-3/T14-7 import-cycle arm specs/A.mdx (keep, x, and user referencing x in local form)",
   T14_7_CYCLE_A_SOURCE,
 );
 const T14_7_LOCAL_REFERENCE = 'd={"x"}';
@@ -4728,6 +4984,27 @@ const T14_7_IMPORT_DECLARATION_WINDOW = byteWindow(
   "",
   T14_7_IMPORT_DECLARATION,
 );
+export const T14_7_IMPORT_CYCLE_ARM: T147RefusedCycleArm = {
+  name:
+    "spec import cycle: carrying `x` from A into B, where B imports A and " +
+    "`user` references `x` locally — the rewrite adds B's import to A, " +
+    "closing the cycle; the finding locates B's existing import " +
+    "declaration and that local reference's spelling, exactly those two, " +
+    "never the import that does not yet exist",
+  config: SPECS_ONLY_CONFIG,
+  files: {
+    [T14_7_CYCLE_A]: T14_7_CYCLE_A_STAGED,
+    [T14_7_CYCLE_B]: T14_7_CYCLE_B_SOURCE,
+  },
+  argv: ["move", `${T14_7_CYCLE_A}#x`, `${T14_7_CYCLE_B}#x`],
+  expected: {
+    finding: "refused-cycle",
+    locatedAtEach: [
+      { file: T14_7_CYCLE_A, window: T14_7_LOCAL_REFERENCE_WINDOW },
+      { file: T14_7_CYCLE_B, window: T14_7_IMPORT_DECLARATION_WINDOW },
+    ],
+  },
+};
 
 // The twice-spelled cycle stagings (T14-7's own; SPEC 14, 5.2, 5.3, 5.7,
 // 6.5): a would-be cycle's full path is located by every participating
@@ -4768,13 +5045,16 @@ const T14_7_IMPORT_DECLARATION_WINDOW = byteWindow(
 //   well-formed (T6.5-4's dependency arm, `mv` under `keep`, has the same
 //   shape).
 // Exported for T6.6-3, which stages T14-7's own stagings identically and
-// asserts each refused `--preview`'s equivalence (TEST-SPEC T6.6-3).
+// asserts each refused `--preview`'s equivalence (TEST-SPEC T6.6-3), with
+// the import-cycle arm above and the sibling arm below
+// (`T14_7_REFUSED_CYCLE_ARMS`, all four in TEST-SPEC's order).
 
 /**
- * One of T14-7's own refused-cycle stagings (the note above): its
- * configuration and pre-move sources, each a staged-source record (S-9),
- * the premise `build` passing over them, the refused move, and the report's
- * one finding with its complete located set.
+ * One of T14-7's own refused-cycle stagings (the import-cycle note above,
+ * the twice-spelled note, and the sibling note below): its configuration
+ * and pre-move sources, each a staged-source record (S-9), the premise
+ * `build` passing over them, the refused move, and the report's one finding
+ * with its complete located set.
  */
 export interface T147RefusedCycleArm {
   /** The arm, for diagnostics. */
@@ -4837,7 +5117,7 @@ export const T14_7_TWICE_IMPORT_CYCLE_ARM: T147RefusedCycleArm = {
   config: SPECS_ONLY_CONFIG,
   files: {
     [T14_7_CYCLE_A]: stagedMdx(
-      "T14-7 twice-spelled import-cycle arm specs/A.mdx (keep, x, and user referencing x twice in local form)",
+      "T6.6-3/T14-7 twice-spelled import-cycle arm specs/A.mdx (keep, x, and user referencing x twice in local form)",
       T14_7_TWICE_IMPORT_A_SOURCE.text,
     ),
     [T14_7_CYCLE_B]: T14_7_CYCLE_B_SOURCE,
@@ -4873,7 +5153,7 @@ export const T14_7_TWICE_DEPENDENCY_CYCLE_ARM: T147RefusedCycleArm = {
   config: SPECS_ONLY_CONFIG,
   files: {
     [T14_7_DEPENDENCY_FILE]: stagedMdx(
-      "T14-7 twice-spelled dependency-cycle arm specs/A.mdx (top-level p, and x depending on p twice)",
+      "T6.6-3/T14-7 twice-spelled dependency-cycle arm specs/A.mdx (top-level p, and x depending on p twice)",
       T14_7_TWICE_DEPENDENCY_SOURCE.text,
     ),
   },
@@ -5077,8 +5357,9 @@ async function runT147MovedImportArms(product: ProductBinding): Promise<void> {
 // home table's loop: every refusal there modifies nothing (T6.4-3's and
 // T6.5-4's compares), so each arm sees the workspace as staged, and a
 // product performing either operation fails the arm's exit assertion first.
-// The shared case tables stay untouched, so T6.4-3, T6.5-4, and T6.6-3 do
-// not change.
+// The shared case tables stay untouched, so T6.4-3 and T6.5-4 do not
+// change; both arms are exported for T6.6-3, which twins each in its own
+// copy of the home workspace after the home table's loop, staged as here.
 // - The rename makes T6.4-3's top-level `a` (holding `a.mid`, with child
 //   `a.mid.kid`, and `a.sib`) the two-segment `a.then`: intrinsically
 //   invalid (the forbidden name `then`, 1.4) and misplaced at once (a
@@ -5105,7 +5386,7 @@ async function runT147MovedImportArms(product: ProductBinding): Promise<void> {
 // could have changed); a fixture no longer staging them is a harness defect.
 
 /** One spelled refused-invalid-id command line (the note above). */
-interface IntrinsicInvalidIdArm {
+export interface IntrinsicInvalidIdArm {
   /** The command line as T14-7 spells it, for diagnoses. */
   readonly spelled: string;
   readonly argv: readonly string[];
@@ -5118,7 +5399,7 @@ interface IntrinsicInvalidIdArm {
   readonly reason: string;
 }
 
-const T14_7_INTRINSIC_RENAME_ARM: IntrinsicInvalidIdArm = {
+export const T14_7_INTRINSIC_RENAME_ARM: IntrinsicInvalidIdArm = {
   spelled: "rename specs/A.mdx a a.then",
   argv: ["rename", "specs/A.mdx", "a", "a.then"],
   identity: "specs/A.mdx#a.then",
@@ -5133,7 +5414,7 @@ const T14_7_INTRINSIC_RENAME_ARM: IntrinsicInvalidIdArm = {
     "`a.then.sib`",
 };
 
-const T14_7_INTRINSIC_MOVE_ARM: IntrinsicInvalidIdArm = {
+export const T14_7_INTRINSIC_MOVE_ARM: IntrinsicInvalidIdArm = {
   spelled: "move specs/A.mdx#x 'specs/B.mdx#x y'",
   argv: ["move", "specs/A.mdx#x", "specs/B.mdx#x y"],
   identity: "specs/B.mdx#x y",
@@ -5215,14 +5496,6 @@ async function runIntrinsicInvalidIdArm(
 // — so each report is exactly its two findings.
 const T14_7_INVALID_PATH_ORIGIN = "specs/A.mdx";
 const T14_7_INVALID_PATH = "specs/new.txt";
-const T14_7_INVALID_PATH_FILES: Readonly<Record<string, InitialFileContents>> =
-  {
-    "xspec.config.ts": SPECS_ONLY_CONFIG,
-    [T14_7_INVALID_PATH_ORIGIN]: stagedMdx(
-      "T14-7 invalid-path arm specs/A.mdx (keep and x)",
-      '<S id="keep">\nKeep text.\n</S>\n\n<S id="x">\nX text.\n</S>\n',
-    ),
-  };
 
 /** One identity over the invalid path: the `<new-id>` moved to, the reason concerning the identity, and the identity itself. */
 interface InvalidPathArm {
@@ -5259,51 +5532,59 @@ const T14_7_INVALID_PATH_ARMS: readonly InvalidPathArm[] = [
   },
 ];
 
-/** Identities over invalid paths (the staging note above). */
-async function runT147InvalidPathArms(product: ProductBinding): Promise<void> {
-  await withWorkspace(
-    { files: T14_7_INVALID_PATH_FILES },
-    async (workspace) => {
-      await buildOk(
-        product,
-        workspace,
-        "T14-7 invalid-path staging `build` over the valid workspace " +
-          "(`specs/new.txt` absent)",
-      );
-      for (const arm of T14_7_INVALID_PATH_ARMS) {
-        const destination = `${T14_7_INVALID_PATH}#${arm.newId}`;
-        await assertRefusalReport(
-          product,
-          workspace,
-          ["move", `${T14_7_INVALID_PATH_ORIGIN}#x`, destination],
-          [
-            arm.beside,
-            {
-              finding: "refused-invalid-destination",
-              path: T14_7_INVALID_PATH,
-            },
-          ],
-          `T14-7 move (identities over an invalid path, \`${destination}\`: ` +
-            `${arm.reason}; the identity a spelling in 1.5's form over the ` +
-            `would-be operation, carried whatever its path's validity)`,
-        );
-        const result = await expectExit(
-          product,
-          workspace,
-          ["query", "node", arm.identity, "--json"],
-          2,
-          `T14-7 \`query node ${arm.identity}\` — the refusal's identity is a ` +
-            `plain string over the path as spelled, defining no node: 12.0's ` +
-            `unknown-identity usage error, exit 2 — \`${T14_7_INVALID_PATH}\` ` +
-            `a path in no configured group (SPEC 14, 1.5, 12.0, 12.7; T11-6)`,
-        );
-        expectErrorDocument(
-          result,
-          `T14-7 \`query node ${arm.identity} --json\` — under --json, the ` +
-            `exit-2 error document is the entire stdout (SPEC 12.0, 12.7, H-5)`,
-        );
-      }
-    },
+/** Identities over invalid paths (the staging note above): one refusal per arm. */
+export const T14_7_INVALID_PATH_STAGING: T147RefusalStaging = {
+  build:
+    "invalid-path staging `build` over the valid workspace " +
+    "(`specs/new.txt` absent)",
+  config: SPECS_ONLY_CONFIG,
+  files: {
+    [T14_7_INVALID_PATH_ORIGIN]: stagedMdx(
+      "T6.6-3/T14-7 invalid-path arm specs/A.mdx (keep and x)",
+      '<S id="keep">\nKeep text.\n</S>\n\n<S id="x">\nX text.\n</S>\n',
+    ),
+  },
+  cases: T14_7_INVALID_PATH_ARMS.map((arm): T147RefusalCase => {
+    const destination = `${T14_7_INVALID_PATH}#${arm.newId}`;
+    return {
+      argv: ["move", `${T14_7_INVALID_PATH_ORIGIN}#x`, destination],
+      expected: [
+        arm.beside,
+        { finding: "refused-invalid-destination", path: T14_7_INVALID_PATH },
+      ],
+      reason:
+        `identities over an invalid path, \`${destination}\`: ` +
+        `${arm.reason}; the identity a spelling in 1.5's form over the ` +
+        `would-be operation, carried whatever its path's validity`,
+      nodeless: arm.identity,
+    };
+  }),
+};
+
+/**
+ * An identity a refusal reports over an invalid path defines no node (the
+ * staging note above): `query node` on it is 12.0's unknown-identity usage
+ * error, exit 2, the error document the entire stdout under `--json`.
+ */
+async function assertIdentityDefinesNoNode(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  identity: string,
+): Promise<void> {
+  const result = await expectExit(
+    product,
+    workspace,
+    ["query", "node", identity, "--json"],
+    2,
+    `T14-7 \`query node ${identity}\` — the refusal's identity is a ` +
+      `plain string over the path as spelled, defining no node: 12.0's ` +
+      `unknown-identity usage error, exit 2 — \`${T14_7_INVALID_PATH}\` ` +
+      `a path in no configured group (SPEC 14, 1.5, 12.0, 12.7; T11-6)`,
+  );
+  expectErrorDocument(
+    result,
+    `T14-7 \`query node ${identity} --json\` — under --json, the ` +
+      `exit-2 error document is the entire stdout (SPEC 12.0, 12.7, H-5)`,
   );
 }
 
@@ -5340,12 +5621,12 @@ const T14_7_SIBLING_A_SOURCE = [
   "",
 ].join("\n");
 const T14_7_SIBLING_B_SOURCE = stagedMdx(
-  "T14-7 sibling import-cycle arm specs/B.mdx (bar)",
+  "T6.6-3/T14-7 sibling import-cycle arm specs/B.mdx (bar)",
   ['<S id="bar">', "Bar text.", "</S>", ""].join("\n"),
 );
 const T14_7_SIBLING_C_IMPORT = 'import B from "./B.xspec"';
 const T14_7_SIBLING_C_SOURCE = stagedMdx(
-  "T14-7 sibling import-cycle arm specs/C.mdx (foo importing B for bar)",
+  "T6.6-3/T14-7 sibling import-cycle arm specs/C.mdx (foo importing B for bar)",
   [
     T14_7_SIBLING_C_IMPORT,
     "",
@@ -5356,7 +5637,7 @@ const T14_7_SIBLING_C_SOURCE = stagedMdx(
   ].join("\n"),
 );
 const T14_7_SIBLING_A_STAGED = stagedMdx(
-  "T14-7 sibling import-cycle arm specs/A.mdx (x carrying d={C.foo} beside keep)",
+  "T6.6-3/T14-7 sibling import-cycle arm specs/A.mdx (x carrying d={C.foo} beside keep)",
   T14_7_SIBLING_A_SOURCE,
 );
 const T14_7_SIBLING_CHAIN_WINDOW = byteWindow(
@@ -5369,46 +5650,42 @@ const T14_7_SIBLING_CHAIN_WINDOW = byteWindow(
 const T14_7_SIBLING_C_IMPORT_WINDOW = byteWindow("", T14_7_SIBLING_C_IMPORT);
 
 /** The spec import cycle's sibling arm (the staging note above). */
-async function runT147SiblingCycleArm(product: ProductBinding): Promise<void> {
-  await withWorkspace(
-    {
-      files: {
-        "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [T14_7_SIBLING_A]: T14_7_SIBLING_A_STAGED,
-        [T14_7_SIBLING_B]: T14_7_SIBLING_B_SOURCE,
-        [T14_7_SIBLING_C]: T14_7_SIBLING_C_SOURCE,
-      },
-    },
-    async (workspace) => {
-      await buildOk(
-        product,
-        workspace,
-        "T14-7 sibling import-cycle staging `build` over the valid " +
-          "workspace (`A` imports `C`, `C` imports `B`, `x` references " +
-          "`C.foo`)",
-      );
-      await assertRefusalReport(
-        product,
-        workspace,
-        ["move", `${T14_7_SIBLING_A}#x`, `${T14_7_SIBLING_B}#x`],
-        {
-          finding: "refused-cycle",
-          locatedAtEach: [
-            { file: T14_7_SIBLING_A, window: T14_7_SIBLING_CHAIN_WINDOW },
-            { file: T14_7_SIBLING_C, window: T14_7_SIBLING_C_IMPORT_WINDOW },
-          ],
-        },
-        "T14-7 move (spec import cycle, the sibling arm: carrying `x` with " +
-          "`d={C.foo}` from A into B, where A imports C and C imports B — " +
-          "the chain rooted at a binding of C's module B lacks, the added " +
-          "import closing B → C → B; the finding locates C's existing " +
-          "import of B and the chain's spelling in A, exactly those two, " +
-          "though a product choosing `C` as the fresh identifier would " +
-          "rewrite nothing there)",
-      );
-    },
-  );
-}
+export const T14_7_SIBLING_CYCLE_ARM: T147RefusedCycleArm = {
+  name:
+    "spec import cycle, the sibling arm: carrying `x` with `d={C.foo}` " +
+    "from A into B, where A imports C and C imports B — the chain rooted " +
+    "at a binding of C's module B lacks, the added import closing B → C → " +
+    "B; the finding locates C's existing import of B and the chain's " +
+    "spelling in A, exactly those two, though a product choosing `C` as " +
+    "the fresh identifier would rewrite nothing there",
+  config: SPECS_ONLY_CONFIG,
+  files: {
+    [T14_7_SIBLING_A]: T14_7_SIBLING_A_STAGED,
+    [T14_7_SIBLING_B]: T14_7_SIBLING_B_SOURCE,
+    [T14_7_SIBLING_C]: T14_7_SIBLING_C_SOURCE,
+  },
+  argv: ["move", `${T14_7_SIBLING_A}#x`, `${T14_7_SIBLING_B}#x`],
+  expected: {
+    finding: "refused-cycle",
+    locatedAtEach: [
+      { file: T14_7_SIBLING_A, window: T14_7_SIBLING_CHAIN_WINDOW },
+      { file: T14_7_SIBLING_C, window: T14_7_SIBLING_C_IMPORT_WINDOW },
+    ],
+  },
+};
+
+/**
+ * T14-7's own refused-cycle arms in TEST-SPEC T14-7's order — the spec
+ * import cycle's single arm, its twice-spelled twin, and its sibling arm,
+ * then the dependency cycle a containment would make — each run by
+ * `runT147RefusedCycleArm` and exported for T6.6-3's `--preview` twins.
+ */
+export const T14_7_REFUSED_CYCLE_ARMS: readonly T147RefusedCycleArm[] = [
+  T14_7_IMPORT_CYCLE_ARM,
+  T14_7_TWICE_IMPORT_CYCLE_ARM,
+  T14_7_SIBLING_CYCLE_ARM,
+  T14_7_TWICE_DEPENDENCY_CYCLE_ARM,
+];
 
 // T6.5-4's symbolic-link arms beyond the shared table's inside-root entries
 // (TEST-SPEC T14-7's refused-invalid-destination clause: a link to a
@@ -5719,76 +5996,13 @@ const T14_7 = defineProductTest({
     // itself — refused concerning the destination path, never 14.22 (the
     // exact one-entry multiset excludes a condition-22 finding beside it;
     // SPEC 6.5, 14.22, 14).
-    await withWorkspace({ files: T14_7_COMPONENT_FILES }, async (workspace) => {
-      await buildOk(
-        product,
-        workspace,
-        "T14-7 destination-component staging `build` — the plain-file " +
-          "occupant matches no glob and lies under no current source's " +
-          "write path, so the workspace passes `build`'s validations",
-      );
-      await assertRefusalReport(
-        product,
-        workspace,
-        ["move", "specs/Src.mdx", T14_7_COMPONENT_DEST],
-        {
-          finding: "refused-invalid-destination",
-          path: T14_7_COMPONENT_DEST,
-        },
-        "T14-7 move (destination-path directory component occupied by a " +
-          "plain file — refused-invalid-destination concerning the " +
-          "destination path, never 14.22)",
-      );
-    });
+    await runT147RefusalStaging(product, T14_7_COMPONENT_STAGING);
 
     // --- Every applicable reason together: the both-collide-and-cycle
     // section move (the fixture note) reports both findings, never only the
     // first found — the exact two-entry multiset with each reason's
     // concerned participant (SPEC 14, 6.5, 5.3).
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [T14_7_MULTI_FILE]: T14_7_MULTI_STAGED,
-        },
-      },
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T14-7 multi-reason staging `build` over the valid workspace",
-        );
-        await assertRefusalReport(
-          product,
-          workspace,
-          ["move", `${T14_7_MULTI_FILE}#mv`, `${T14_7_MULTI_FILE}#keep.mv`],
-          [
-            {
-              finding: "refused-id-collision",
-              locatedAt: {
-                file: T14_7_MULTI_FILE,
-                window: T14_7_OCCUPANT_WINDOW,
-              },
-              locatedAtEach: [
-                { file: T14_7_MULTI_FILE, window: T14_7_OCCUPANT_WINDOW },
-              ],
-              identities: [`${T14_7_MULTI_FILE}#keep.mv`],
-            },
-            {
-              finding: "refused-cycle",
-              locatedAt: {
-                file: T14_7_MULTI_FILE,
-                window: T14_7_CYCLE_WINDOW,
-              },
-            },
-          ],
-          "T14-7 move (staged to both collide — `keep.mv` present in the " +
-            "target file, remaining after the removal — and create a " +
-            "dependency cycle — the moved node depends on `keep`, its " +
-            "would-be ancestor: both findings, never only the first)",
-        );
-      },
-    );
+    await runT147RefusalStaging(product, T14_7_MULTI_STAGING);
 
     // --- refused-invalid-destination alone for a destination spelled with a
     // `.`, `..`, or empty segment (the spelling fixture note): each spelling
@@ -5799,98 +6013,30 @@ const T14_7 = defineProductTest({
     // refused-identity-unchanged beside it, the concerned path the
     // destination as spelled; the section form's target path so spelled
     // likewise (SPEC 14, 6.5, 12.0).
-    await withWorkspace({ files: T14_7_SPELLING_FILES }, async (workspace) => {
-      await buildOk(
-        product,
-        workspace,
-        "T14-7 destination-spelling staging `build` (a root-level origin " +
-          "under a root-level glob beside `specs/b.mdx`)",
-      );
-      for (const spelled of T14_7_SPELLED_DESTINATIONS) {
-        await assertRefusalReport(
-          product,
-          workspace,
-          ["move", T14_7_SPELLING_ORIGIN, spelled],
-          { finding: "refused-invalid-destination", path: spelled },
-          `T14-7 move (file form; destination spelled \`${spelled}\` — no ` +
-            "discovered path carries a `.`, `..`, or empty segment: " +
-            "refused-invalid-destination alone, concerning the path as " +
-            "spelled, never reported occupied)",
-        );
-        await assertRefusalReport(
-          product,
-          workspace,
-          ["move", `${T14_7_SPELLING_ORIGIN}#x`, `${spelled}#z`],
-          { finding: "refused-invalid-destination", path: spelled },
-          `T14-7 move (section form; target path spelled \`${spelled}\` — ` +
-            "refused-invalid-destination alone, concerning the target file " +
-            "path as spelled, never reported occupied)",
-        );
-      }
-    });
+    await runT147RefusalStaging(product, T14_7_SPELLING_STAGING);
 
-    // --- refused-cycle locating a would-be spec import cycle's full path
-    // (the import-cycle fixture note): the existing import declaration by
-    // its own characters and, for the import the move would add, the local
-    // reference spelling whose rewrite requires it — exactly those two
-    // participants, in 12.7's within-finding order, never a range for the
-    // import that does not yet exist, path null (SPEC 14, 6.5, 5.7, 12.7).
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [T14_7_CYCLE_A]: T14_7_CYCLE_A_STAGED,
-          [T14_7_CYCLE_B]: T14_7_CYCLE_B_SOURCE,
-        },
-      },
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T14-7 import-cycle staging `build` over the valid workspace " +
-            "(`B` imports `A`; `user` references `x` in local form)",
-        );
-        await assertRefusalReport(
-          product,
-          workspace,
-          ["move", `${T14_7_CYCLE_A}#x`, `${T14_7_CYCLE_B}#x`],
-          {
-            finding: "refused-cycle",
-            locatedAtEach: [
-              { file: T14_7_CYCLE_A, window: T14_7_LOCAL_REFERENCE_WINDOW },
-              { file: T14_7_CYCLE_B, window: T14_7_IMPORT_DECLARATION_WINDOW },
-            ],
-          },
-          "T14-7 move (spec import cycle: carrying `x` from A into B, where " +
-            "B imports A and `user` references `x` locally — the rewrite " +
-            "adds B's import to A, closing the cycle; the finding locates " +
-            "B's existing import declaration and that local reference's " +
-            "spelling, exactly those two, never the import that does not " +
-            "yet exist)",
-        );
-      },
-    );
-
-    // --- refused-cycle over the import cycle's twice-spelled twin (the
-    // twice-spelled staging note): `user` referencing `x` twice in local
-    // form — both entries, each rooted at the binding the move would add,
-    // located beside `B`'s existing import declaration, exactly those
-    // three, no representative chosen (SPEC 14, 6.5, 5.7, 5.2).
-    await runT147RefusedCycleArm(product, T14_7_TWICE_IMPORT_CYCLE_ARM);
-
-    // --- refused-cycle over the sibling spec-import-cycle arm (the sibling
-    // staging note): the chain `C.foo` carried into `B`, `C` importing `B`
-    // — the finding locates `C`'s existing import and the chain's spelling
-    // in `A`, the spellings rooted at the added binding whether or not any
-    // character of theirs changes (SPEC 14, 6.5, 5.7).
-    await runT147SiblingCycleArm(product);
-
-    // --- refused-cycle over the dependency cycle a containment would make
-    // (the twice-spelled staging note): `x`, spelling its dependency on `p`
-    // twice, moved under `p` — both entries located, exactly those two,
-    // nothing for the containment the move would create (SPEC 14, 5.3, 5.2,
-    // 5.7).
-    await runT147RefusedCycleArm(product, T14_7_TWICE_DEPENDENCY_CYCLE_ARM);
+    // --- refused-cycle over T14-7's own cycle arms, in TEST-SPEC's order
+    // (`T14_7_REFUSED_CYCLE_ARMS`): a would-be spec import cycle's full
+    // path (the import-cycle fixture note) — the existing import declaration
+    // by its own characters and, for the import the move would add, the
+    // local reference spelling whose rewrite requires it, exactly those two
+    // participants in 12.7's within-finding order, never a range for the
+    // import that does not yet exist, path null (SPEC 14, 6.5, 5.7, 12.7);
+    // its twice-spelled twin (the twice-spelled staging note) — `user`
+    // referencing `x` twice in local form, both entries, each rooted at the
+    // binding the move would add, located beside `B`'s existing import
+    // declaration, exactly those three, no representative chosen (5.2); the
+    // sibling arm (the sibling staging note) — the chain `C.foo` carried
+    // into `B`, `C` importing `B`, the finding locating `C`'s existing
+    // import and the chain's spelling in `A`, the spellings rooted at the
+    // added binding whether or not any character of theirs changes; and the
+    // dependency cycle a containment would make (the twice-spelled staging
+    // note) — `x`, spelling its dependency on `p` twice, moved under `p`,
+    // both entries located, exactly those two, nothing for the containment
+    // the move would create (5.3).
+    for (const arm of T14_7_REFUSED_CYCLE_ARMS) {
+      await runT147RefusedCycleArm(product, arm);
+    }
 
     // --- refused-invalid-destination over T6.5-20's derived-path relations
     // and module-linking designation (the T6.5-20 note): every refused move
@@ -5919,93 +6065,17 @@ const T14_7 = defineProductTest({
     // string over the path as spelled beside refused-invalid-destination,
     // defining no node — `query node` on it exit 2 (SPEC 14, 1.5, 12.0,
     // 12.7).
-    await runT147InvalidPathArms(product);
+    await runT147RefusalStaging(product, T14_7_INVALID_PATH_STAGING);
 
-    // --- The invalid-workspace refusal: the control arm on the valid twin
-    // pins the staged-to-collide premise (exactly the collision refusal),
-    // then the broken workspace — an unresolved `d` in a file the rename
-    // never touches — reports the workspace's numbered findings alone: the
-    // one located 14.5 finding, exit 1, no refusal reason evaluated or
-    // reported beside it (SPEC 6.4, 14).
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [T14_7_RENAME_FILE]: T14_7_RENAME_STAGED,
-          [T14_7_BAD_FILE]: T14_7_BAD_VALID,
-        },
-      },
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T14-7 invalid-workspace staging `build` over the valid twin",
-        );
-        await assertRefusalReport(
-          product,
-          workspace,
-          ["rename", T14_7_RENAME_FILE, "a.mid", "a.sib"],
-          {
-            finding: "refused-id-collision",
-            locatedAt: { file: T14_7_RENAME_FILE, window: T14_7_SIB_WINDOW },
-            locatedAtEach: [
-              { file: T14_7_RENAME_FILE, window: T14_7_SIB_WINDOW },
-            ],
-            identities: [`${T14_7_RENAME_FILE}#a.sib`],
-          },
-          "T14-7 rename control (the valid twin: the rename is staged to " +
-            "collide with the remaining `a.sib` bearer — the premise the " +
-            "invalid-workspace arm rides)",
-        );
-        // The exact self-move of either form reports
-        // refused-identity-unchanged alone — no collision reason beside it
-        // (SPEC 6.4: the after-removal check collides with nothing) and no
-        // refused-destination-exists for the file form (SPEC 14: the origin
-        // path itself is the one occupant that reason never reports) — its
-        // `identities` the unchanged identity in 1.5's form over the
-        // destination: `<target-file>#<id>` for the section form, the bare
-        // `<new-file>`, its root identity, for the file form (SPEC 14).
-        await assertRefusalReport(
-          product,
-          workspace,
-          ["move", `${T14_7_RENAME_FILE}#a.mid`, `${T14_7_RENAME_FILE}#a.mid`],
-          {
-            finding: "refused-identity-unchanged",
-            identities: [`${T14_7_RENAME_FILE}#a.mid`],
-          },
-          "T14-7 move (the exact section-form self-move — " +
-            "refused-identity-unchanged alone, its identities the unchanged " +
-            "`<target-file>#<id>` identity)",
-        );
-        await assertRefusalReport(
-          product,
-          workspace,
-          ["move", T14_7_RENAME_FILE, T14_7_RENAME_FILE],
-          {
-            finding: "refused-identity-unchanged",
-            identities: [T14_7_RENAME_FILE],
-          },
-          "T14-7 move (the exact file-form self-move — " +
-            "refused-identity-unchanged alone, never " +
-            "refused-destination-exists beside it, its identities the bare " +
-            "`<new-file>` root identity)",
-        );
-        await workspace.file(T14_7_BAD_FILE, T14_7_BAD_INVALID);
-        await assertRefusalReport(
-          product,
-          workspace,
-          ["rename", T14_7_RENAME_FILE, "a.mid", "a.sib"],
-          {
-            finding: "14.5",
-            locatedAt: { file: T14_7_BAD_FILE },
-          },
-          "T14-7 rename (invalid workspace: the same rename, still staged " +
-            "to collide, reports the workspace's numbered findings alone — " +
-            "the one 14.5 finding located in specs/Bad.mdx, no refusal " +
-            "reason evaluated or reported beside it)",
-        );
-      },
-    );
+    // --- The invalid-workspace refusal (the invalid-workspace staging
+    // note): the control arm on the valid twin pins the staged-to-collide
+    // premise (exactly the collision refusal), the exact self-move of
+    // either form reports refused-identity-unchanged alone, then the broken
+    // workspace — an unresolved `d` in a file the rename never touches —
+    // reports the workspace's numbered findings alone: the one located 14.5
+    // finding, exit 1, no refusal reason evaluated or reported beside it
+    // (SPEC 6.4, 14).
+    await runT147RefusalStaging(product, T14_7_INVALID_WORKSPACE_STAGING);
   },
 });
 

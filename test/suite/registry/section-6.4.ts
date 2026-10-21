@@ -2932,11 +2932,12 @@ const T6_4_6_OTHER_INVALID = stagedMdx(
 // `out` replaced by a plain file — a directory component of every emit
 // destination occupied by a non-directory (14.22), the sources still
 // valid. Its workspace is created after the body's first product
-// invocation (the 14.5 arm runs first), and T6.6-3 may stage it after its
-// own, so the configuration and the source are staged-source records (S-9's
-// timing clause; helpers/staged-ts.ts, helpers/staged-mdx.ts).
+// invocation (the 14.5 arm runs first), and T6.6-3 stages it after its own
+// (its `--preview` twins), so the configuration and the source are
+// staged-source records (S-9's timing clause; helpers/staged-ts.ts,
+// helpers/staged-mdx.ts).
 export const REFUSED_WRITES_CONFIG = stagedTs(
-  'T6.4-6 xspec.config.ts — one spec group, Markdown emitted under outDir "out" (the refused-writes arm)',
+  'T6.4-6/T6.6-3 xspec.config.ts — one spec group, Markdown emitted under outDir "out" (the refused-writes arm)',
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -2952,7 +2953,7 @@ export const REFUSED_WRITES_FILES: Readonly<
   Record<string, InitialFileContents>
 > = {
   [W6_FILE]: stagedMdx(
-    "T6.4-6 refused-writes arm specs/A.mdx",
+    "T6.4-6/T6.6-3 refused-writes arm specs/A.mdx",
     ['<S id="a">', "A text.", "</S>", ""].join("\n"),
   ),
 };

@@ -3505,11 +3505,11 @@ export default defineConfig({
 `,
 );
 const V4_SOLO = "specs/Solo.mdx";
-// Exported: T14-7's destination-component arm (section-14.ts) stages the
-// same bytes as its moved file specs/Src.mdx — one staged-source record
-// (S-9) for every site.
+// Exported: T14-7's destination-component arm (section-14.ts), and T6.6-3's
+// twin of it, stage the same bytes as its moved file specs/Src.mdx — one
+// staged-source record (S-9) for every site.
 export const V4_SOLO_SOURCE = stagedMdx(
-  "T6.5-4/T6.6-3/T14-7 the moved file solo (the derived-path arms' specs/Solo.mdx; T14-7's destination-component arm specs/Src.mdx)",
+  "T6.5-4/T6.6-3/T14-7 the moved file solo (the derived-path arms' specs/Solo.mdx; the destination-component arm's specs/Src.mdx, T14-7's and T6.6-3's twin)",
   ['<S id="solo">', "Solo text.", "</S>", ""].join("\n"),
 );
 const V4_MDOUT_OCCUPANT = "mdout/new";
@@ -4002,10 +4002,11 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
 // origin is `specs/a.mdx`, and nothing occupies `specs/B.MDX` or a case
 // variant of it). The `specs/*.MDX` glob matches no staged file, so the
 // premise `build` passes and the refusal is the move's own. Its workspace is
-// created after the body's first product invocation, so the configuration
-// and the origin are staged-source records (S-9's timing clause).
+// created after the body's first product invocation, as T6.6-3's twin's is,
+// so the configuration and the origin are staged-source records (S-9's
+// timing clause).
 const V4_CASING_CONFIG = stagedTs(
-  "T6.5-4 xspec.config.ts — the casing arm's configuration: spec globs specs/*.mdx and specs/*.MDX",
+  "T6.5-4/T6.6-3 xspec.config.ts — the casing arm's configuration: spec globs specs/*.mdx and specs/*.MDX",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -4029,7 +4030,7 @@ export const MOVE_CASING_CONFIG = V4_CASING_CONFIG;
 export const MOVE_CASING_FILES: Readonly<Record<string, InitialFileContents>> =
   {
     [V4_CASING_ORIGIN]: stagedMdx(
-      "T6.5-4 casing arm specs/a.mdx",
+      "T6.5-4/T6.6-3 casing arm specs/a.mdx",
       ['<S id="a">', "Casing arm text.", "</S>", ""].join("\n"),
     ),
   };
@@ -4339,7 +4340,7 @@ const T6_5_4 = defineProductTest({
     // an `out` replaced by a plain file, refused with the condition-22
     // finding alone, never refused-invalid-destination — is staged where
     // T6.4-6 states it, in T6.4-6 itself (section-6.4.ts's
-    // REFUSED_WRITES_CASES).
+    // REFUSED_WRITES_CASES), and twinned in T6.6-3.
     await withWorkspace(
       MOVE_REFUSAL_CONFIG,
       MOVE_PRECONDITION_FILES,
