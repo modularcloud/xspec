@@ -1019,10 +1019,14 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // graph-data write is refused (13.3), and the seam-held stagings, the
   // hold-file usage error, the pinned "nothing written" states, and
   // acquisition's refused writes concerning the lock path or the area's own
-  // path (13.5); 6.4/6.5/10.7/11.6 (the staged operations, the area naming)
-  // and 13.4 (the occupant deleted by hand before recovery) are context
-  // with home coverage at T6.4-*/T6.5-*/T10.7-*/T11.6-*/T13.4-12.
-  "T14-9": ["14", "12.0", "12.7", "13.3", "13.5"],
+  // path (13.5); the given baselines' plain usage error — an unresolvable
+  // ref, and git data refused — met before the gate and so the refresh,
+  // graph data left stale (6.3, 12.0, 13.3); 6.4/6.5/10.7/11.6 (the staged
+  // operations, the area naming), 12.1 (the regenerations owing a Markdown
+  // file's creation or an orphaned one's removal), and 13.4 (the occupant
+  // deleted by hand before recovery) are context with home coverage at
+  // T6.4-*/T6.5-*/T10.7-*/T11.6-*/T13.5-7/T13.4-12.
+  "T14-9": ["14", "6.3", "12.0", "12.7", "13.3", "13.5"],
   // T14-10: the 14.25 contract (home "14": conditions 20, 13, 21, 14, 10,
   // 23 and the read-failure usage error) with the exit classes, the read
   // order, and the syntax-class precedence it asserts (12.0), the error

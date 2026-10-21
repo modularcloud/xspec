@@ -1,10 +1,11 @@
 // TEST-SPEC T13.5-7 / T14-9 — the write-refusal stagings (a)–(h) and the
 // choreography that applies them while a mutating command is held at the
 // seam of SPEC 13.5, shared by T13.5-7 (the per-command states a refused
-// write leaves; section-13.5.ts), T14-9 (the 14.24 contract; section-14),
-// and T13.5-11(a) (release after each of T13.5-7's refused writes but
-// (b)'s; section-13.5-iii.ts, which stages them through the fixtures,
-// pre-invocation stagings, appliers, and constants exported here).
+// write leaves; section-13.5.ts), T14-9 (the 14.24 contract, one arm per
+// concerned path; section-14-ii.ts), and T13.5-11(a) (release after each of
+// T13.5-7's refused writes but (b)'s; section-13.5-iii.ts) — the last two
+// staging T13.5-7's arms through the fixtures, pre-invocation stagings,
+// appliers, and constants exported here.
 //
 // Staging discipline (TEST-SPEC T14-9, E-1): an environment refusal is staged
 // by permission removal alone through helpers/permissions.ts — the directory
@@ -343,7 +344,8 @@ export const RENAME_FIXTURE: RefusalFixture = {
 };
 
 // The rename fixture's emitted-Markdown variant (T13.5-7 (c)'s rename stopped
-// at a Markdown write, and T13.5-11 (a)'s release after that write failure):
+// at a Markdown write, T13.5-11 (a)'s release after that write failure, and
+// T14-9's arm concerning the rename's `out/specs/b/B.md`):
 // the same sources and prior rename under a configuration emitting Markdown
 // under `outDir: "out"`, so a build leaves `out/specs/a/A.md`,
 // `out/specs/b/B.md`, and `out/specs/c/C.md` (SPEC 13.2, 7.3) —
@@ -353,11 +355,11 @@ export const RENAME_FIXTURE: RefusalFixture = {
 // the emitted files whose content the rename leaves unchanged (a rename
 // changes no Markdown, SPEC 3). The configuration is a TypeScript
 // staged-source record (S-9; the arm's workspaces are created after the
-// body's first invocation, in either test), named, as the rename fixture's
-// records are, with each test that prepares the variant; the sources are
-// the rename fixture's own records.
+// body's first invocation, in each of the three tests), named, as the
+// rename fixture's records are, with each test that prepares the variant;
+// the sources are the rename fixture's own records.
 const RENAME_OUT_CONFIG = stagedTs(
-  "T13.5-7/T13.5-11 the rename fixture's emitted-Markdown variant xspec.config.ts (one spec group, Markdown emission under outDir out)",
+  "T13.5-7/T13.5-11/T14-9 the rename fixture's emitted-Markdown variant xspec.config.ts (one spec group, Markdown emission under outDir out)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -465,24 +467,23 @@ export const MOVE_FIXTURE: RefusalFixture = {
 
 // The section-move fixtures (T13.5-7 (g): a created target file is a source
 // edit, made in its `files` place; T13.5-11 (a)'s release after that write
-// failure, in either byte order): one spec group and one spec source
-// holding `a` and `x`, a top-level section nothing references, with
-// `specs/n` an empty directory from the start (the declaration's `dirs`),
-// so `move <origin>#x specs/n/N.mdx#x` creates the target file
-// `specs/n/N.mdx` (SPEC 6.5: at a target path nothing occupies, the target
-// file is created) — two source edits, one write per file the operation
-// rewrites or creates, in the order the preview's `files` lists them, by
-// path bytes (13.5, 6.6, 12.7). The two workspaces differ in the origin's
-// path alone: `specs/a/A.mdx`, listed before the created file, so that the
-// origin's edit is the run's first write, and `specs/z/Z.mdx`, listed after
-// it, so that the creation is. The source is staged under `a0`; the prior
-// journaled rename `a0` → `a` makes each workspace journal-bearing (6.1).
-// Every workspace of the arm is created after the body's first invocation,
-// in either test, so the configuration and the source are staged-source
-// records named with both (S-9; one record per byte sequence, the origin's
-// at either path).
+// failure, and T14-9's arm concerning the created file, in either byte order):
+// one spec group and one spec source holding `a` and `x`, a top-level section
+// nothing references, with `specs/n` an empty directory from the start (the
+// declaration's `dirs`), so `move <origin>#x specs/n/N.mdx#x` creates the
+// target file `specs/n/N.mdx` (SPEC 6.5: at a target path nothing occupies, the
+// target file is created) — two source edits, one write per file the operation
+// rewrites or creates, in the order the preview's `files` lists them, by path
+// bytes (13.5, 6.6, 12.7). The two workspaces differ in the origin's path
+// alone: `specs/a/A.mdx`, listed before the created file, so that the origin's
+// edit is the run's first write, and `specs/z/Z.mdx`, listed after it, so that
+// the creation is. The source is staged under `a0`; the prior journaled rename
+// `a0` → `a` makes each workspace journal-bearing (6.1). Every workspace of the
+// arm is created after the body's first invocation, in each of the three tests,
+// so the configuration and the source are staged-source records named with all
+// three (S-9; one record per byte sequence, the origin's at either path).
 const SECTION_MOVE_CONFIG = stagedTs(
-  "T13.5-7/T13.5-11 the section-move fixtures' xspec.config.ts (one spec group)",
+  "T13.5-7/T13.5-11/T14-9 the section-move fixtures' xspec.config.ts (one spec group)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -493,7 +494,7 @@ export default defineConfig({
 `,
 );
 const SECTION_MOVE_ORIGIN_SOURCE = stagedMdx(
-  "T13.5-7/T13.5-11 the section-move fixtures' origin, specs/a/A.mdx or, the byte order reversed, specs/z/Z.mdx (a0, and x, a top-level section nothing references)",
+  "T13.5-7/T13.5-11/T14-9 the section-move fixtures' origin, specs/a/A.mdx or, the byte order reversed, specs/z/Z.mdx (a0, and x, a top-level section nothing references)",
   [
     '<S id="a0">',
     "Alpha text.",
@@ -572,18 +573,18 @@ export const CREATED_TARGET_ORDERS: readonly CreatedTargetOrder[] = [
 ];
 
 // (h)'s staging on the move fixture (T13.5-7 (h): a removal owed alone;
-// T13.5-11 (a)'s release after that write failure, for `build` and for the
-// rename): once the workspace is prepared — built under `markdown: { emit:
-// true, outDir: "out" }`, `out/specs` holding `A.md` alone and
-// `docs/Other.mdx` emitting under `out/docs` — emission is disabled by
-// rewriting the configuration with `markdown` removed, so that a
-// regeneration owes nothing under `out/specs` but the removal of
-// `out/specs/A.md`, a recorded derived file the current configuration no
-// longer generates (SPEC 12.1, 13.4, 7.3). The configuration is written
-// after the body's first invocation, in either test, so it is a TypeScript
-// staged-source record named with both (S-9).
+// T13.5-11 (a)'s release after that write failure, and T14-9's arms concerning
+// `out/specs/A.md`, for `build` and for the rename): once the workspace is
+// prepared — built under `markdown: { emit: true, outDir: "out" }`, `out/specs`
+// holding `A.md` alone and `docs/Other.mdx` emitting under `out/docs` —
+// emission is disabled by rewriting the configuration with `markdown` removed,
+// so that a regeneration owes nothing under `out/specs` but the removal of
+// `out/specs/A.md`, a recorded derived file the current configuration no longer
+// generates (SPEC 12.1, 13.4, 7.3). The configuration is written after the
+// body's first invocation, in each of the three tests, so it is a TypeScript
+// staged-source record named with all three (S-9).
 const MOVE_UNEMITTED_CONFIG = stagedTs(
-  "T13.5-7/T13.5-11 the move fixture's xspec.config.ts with emission disabled (spec groups specs/** and docs/**, code group src/**/*.ts, markdown removed)",
+  "T13.5-7/T13.5-11/T14-9 the move fixture's xspec.config.ts with emission disabled (spec groups specs/** and docs/**, code group src/**/*.ts, markdown removed)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -2123,9 +2124,9 @@ async function assertEmittedMarkdownAlone(
 }
 
 /**
- * (c)'s rename staging once the workspace is prepared, on the arm's
- * workspace and its twin alike, and on T13.5-11 (a)'s (section-13.5-iii.ts):
- * the build having emitted `specs/b/B.mdx`'s Markdown at
+ * (c)'s rename staging once the workspace is prepared, on the arm's workspace
+ * and its twin alike, and on T13.5-11 (a)'s and T14-9's (section-13.5-iii.ts,
+ * section-14-ii.ts): the build having emitted `specs/b/B.mdx`'s Markdown at
  * `out/specs/b/B.md`, `out/specs/b` holding it alone — checked first
  * (`assertEmittedMarkdownAlone`) — that file is deleted, `out/specs/b` left
  * empty, so the rename's finishing regeneration owes a write there: its
@@ -3033,14 +3034,14 @@ export async function createdTargetArm(
 }
 
 /**
- * (h)'s staging once the move fixture is prepared, on the arm's workspaces
- * and their twins alike, and on T13.5-11 (a)'s (section-13.5-iii.ts): the
- * build having emitted `specs/A.mdx`'s Markdown at `out/specs/A.md`,
- * `out/specs` holding it alone — checked first
+ * (h)'s staging once the move fixture is prepared, on the arm's workspaces and
+ * their twins alike, and on T13.5-11 (a)'s and T14-9's (section-13.5-iii.ts,
+ * section-14-ii.ts): the build having emitted `specs/A.mdx`'s Markdown at
+ * `out/specs/A.md`, `out/specs` holding it alone — checked first
  * (`assertEmittedMarkdownAlone`) — the configuration is rewritten with
- * `markdown` removed (`MOVE_UNEMITTED_CONFIG`), emission disabled, so that
- * a regeneration owes nothing under `out/specs` but that file's removal
- * (SPEC 12.1, 13.4).
+ * `markdown` removed (`MOVE_UNEMITTED_CONFIG`), emission disabled, so that a
+ * regeneration owes nothing under `out/specs` but that file's removal (SPEC
+ * 12.1, 13.4).
  */
 export async function disableMoveEmission(
   workspace: TestWorkspace,

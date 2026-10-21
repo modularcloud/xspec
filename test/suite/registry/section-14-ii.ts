@@ -12,7 +12,15 @@
 // fixtures, twins, and seam choreography are shared through
 // write-refusal-staging.ts, and every arm here is contract and recovery:
 // stage, refuse, decode, then — the permissions restored — `build` exits 0
-// and `check` is clean (12.1, 13.4).
+// and `check` is clean (12.1, 13.4). The concerned-path arms follow
+// T13.5-7's stagings in its order, each on a freshly prepared workspace of
+// its own staged as T13.5-7 stages it through write-refusal-staging.ts's
+// exported fixtures and pre-invocation stagings: (a); (b); (c)'s move and
+// its rename, `out/specs/b/B.md` deleted once built
+// (`deleteRenameOutMarkdown`); (d)'s two writes; (e); (f)'s `build`; (g)'s
+// created target file in both of its byte orders (`CREATED_TARGET_ORDERS`);
+// and (h)'s removal owed alone, from `build` and from a rename's finishing
+// regeneration, emission disabled once built (`disableMoveEmission`).
 //
 // Staging discipline (E-1, Linux leg): permission removal alone, applied at
 // the seam of 13.5 for a mutating command (`runHeldWithStaging`: after
@@ -91,6 +99,25 @@
 // - The validation refusal's one finding asserts its concerned identity
 //   exactly — the unchanged `specs/b/B.mdx#b` as the sole `identities`
 //   element — with `locations` `[]` and `path` null (14, 1.5, 12.7).
+// - The precedence clause's given baselines (`BASELINE_ARMS`): `impact
+//   --base nope` (a ref naming no commit, 6.3) and `impact --base <the
+//   prepared workspace's baseline commit>` — a commit the repository holds,
+//   written loose by `git commit` — under T6.3-6(e)'s object-store staging
+//   (section-6.3.ts `stageObjectStoreUnsearchable`: `.git/objects` mode
+//   000, verified on the harness), made around that run alone, on the
+//   reporter sweep's state with the graph-data staging standing: each the
+//   baseline's plain usage error — exit 2, the error document, `code` and
+//   `path` `null`, T6.3-6's form — never `write-failure`. Their writable
+//   twins run each invocation, under its own staging alike, on a fresh byte
+//   copy of the stale state made before the sweep (`.git` included, so the
+//   baseline is the copy's repository's too; checked against the original's
+//   snapshot, a difference a harness error): the same usage error, T13.3-2's
+//   operational path set (`isGraphDataKey`) byte-identical around it, and
+//   `check` afterwards condition 10 alone, B's module among the per-file
+//   paths and exactly one finding the graph-data unit form
+//   (`assertGraphDataStillStale`), then recovery on the copy. A product
+//   attempting the refresh first fails the unwritable run with
+//   `write-failure` and its writable twin with graph data refreshed.
 // - The refused writes of the precedence arms and the state assertions
 //   beyond the contract (nothing written where the refused write is the
 //   operation's first; the journal or the session file byte-unchanged) are
@@ -226,6 +253,8 @@ import {
   decodePreviewReport,
   decodeSessionListReport,
   decodeViewReport,
+  isGraphDataKey,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
@@ -247,6 +276,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { DirectorySnapshot } from "../../helpers/snapshot.js";
 import {
   assertSnapshotsEqual,
+  diffSnapshots,
   displaySnapshotPath,
   snapshotDirectory,
   snapshotKeyBytes,
@@ -255,8 +285,10 @@ import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { pathExists } from "../../helpers/subprocess.js";
+import { copyTreeBytes } from "../../helpers/tree-copy.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import { stageObjectStoreUnsearchable } from "./section-6.3.js";
 import type { SessionOperation } from "./section-13.5.js";
 import {
   ACQUISITION_DECL,
@@ -283,8 +315,12 @@ import {
   expectExit,
   runJson,
 } from "./support.js";
-import type { RefusalFixture } from "./write-refusal-staging.js";
+import type {
+  CreatedTargetOrder,
+  RefusalFixture,
+} from "./write-refusal-staging.js";
 import {
+  CREATED_TARGET_ORDERS,
   GRAPH_DATA_AREA,
   JOURNAL_PATH,
   MOVE_ARGV,
@@ -294,6 +330,8 @@ import {
   MOVE_MARKDOWN_DIR,
   MOVE_MARKDOWN_WRITES,
   MOVE_ORIGIN,
+  ORPHAN_RENAME_ARGV,
+  ORPHANED_MARKDOWN,
   RENAME_A_PATH,
   RENAME_B_DIR,
   RENAME_B_MODULE,
@@ -301,11 +339,19 @@ import {
   RENAME_C_PATH,
   RENAME_FIXTURE,
   RENAME_OLD_IDENTITY,
+  RENAME_OUT_FIXTURE,
+  RENAME_OUT_MARKDOWN,
+  RENAME_OUT_MARKDOWN_DIR,
   REVIEWS_DIR,
+  SECTION_MOVE_TARGET,
+  SECTION_MOVE_TARGET_DIR,
   WRITE_FAILURE_CODE,
   WRITE_REFUSALS_STAGED,
   assertEditedBStalenessConcerns,
   assertStalenessAlone,
+  checkFindings,
+  deleteRenameOutMarkdown,
+  disableMoveEmission,
   expectWriteFailure,
   graphDataRefusal,
   isDerivedFile,
@@ -570,6 +616,50 @@ async function markdownArm(product: ProductBinding): Promise<void> {
 }
 
 /**
+ * (c) The rename's emitted Markdown file, staged as T13.5-7 (c) stages its
+ * rename: the rename fixture's emitted-Markdown variant
+ * (`RENAME_OUT_FIXTURE`: `markdown: { emit: true, outDir: "out" }`), built,
+ * `out/specs/b/B.md` then deleted once `out/specs/b` is checked to hold it
+ * alone (`deleteRenameOutMarkdown`), so that the rename's finishing
+ * regeneration owes a write there, that file's creation; the full rename
+ * with `out/specs/b` staged unwritable at the seam — the error document
+ * concerns `out/specs/b/B.md`, the file the refused write would have
+ * produced (14.24). The state the stopped rename leaves is T13.5-7 (c)'s.
+ */
+async function renameMarkdownArm(product: ProductBinding): Promise<void> {
+  const context =
+    "T14-9 (c) `rename specs/b/B.mdx b b2 --json` with out/specs/b/B.md deleted and out/specs/b unwritable";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_OUT_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    await deleteRenameOutMarkdown(workspace, `${context} staging`);
+    const result = await runHeldWithStaging(
+      product,
+      workspace,
+      RENAME_B_TO_B2,
+      "hold-t14-9-c-rename.tmp",
+      refusalUnder(RENAME_OUT_MARKDOWN_DIR),
+      context,
+    );
+    expectRefusal(
+      result,
+      [RENAME_OUT_MARKDOWN],
+      `${context} — the creation of ${RENAME_OUT_MARKDOWN}, the write the ` +
+        `rename's finishing regeneration owes under ` +
+        `${RENAME_OUT_MARKDOWN_DIR}, is the concerned path (SPEC 14.24, 6.4, ` +
+        `12.1, 13.2)`,
+    );
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
  * (d) A relocation's second write, the origin's removal: the file-form move
  * with `specs/sub` present and writable and `specs` staged unwritable — the
  * destination produced, the origin's removal refused, the error document
@@ -781,6 +871,130 @@ async function derivedPathArm(product: ProductBinding): Promise<void> {
   }
 }
 
+/**
+ * (g) A section-form move's created target file, on either side of the
+ * origin's rewrite in `files` order (T13.5-7 (g)'s two fixtures,
+ * `CREATED_TARGET_ORDERS`): `move <origin>#x specs/n/N.mdx#x`, `x` a
+ * top-level section of the origin that nothing references and `specs/n` an
+ * empty directory from the start, so the move creates the target file
+ * (6.5), with `specs/n` staged unwritable at the seam — the error document
+ * concerns `specs/n/N.mdx`, the file the refused creation would have
+ * produced (14.24), whether the origin `specs/a/A.mdx`, listed before it
+ * (6.6, 12.7), is rewritten first or the creation, listed before
+ * `specs/z/Z.mdx`, is the run's first write (13.5). The state each stopped
+ * move leaves is T13.5-7 (g)'s.
+ */
+async function createdTargetFileArm(
+  product: ProductBinding,
+  order: CreatedTargetOrder,
+): Promise<void> {
+  const context =
+    `T14-9 (g) \`${order.argv.join(" ")} --json\` with ` +
+    `${SECTION_MOVE_TARGET_DIR} unwritable (` +
+    (order.originFirst
+      ? `the origin's rewrite listed first in \`files\``
+      : `the created file listed first in \`files\``) +
+    ")";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    order.fixture,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const result = await runHeldWithStaging(
+      product,
+      workspace,
+      [...order.argv, "--json"],
+      order.holdName,
+      refusalUnder(SECTION_MOVE_TARGET_DIR),
+      context,
+    );
+    expectRefusal(
+      result,
+      [SECTION_MOVE_TARGET],
+      `${context} — the target file's creation, a source edit made in its ` +
+        `\`files\` place, is the concerned path (SPEC 14.24, 6.5, 13.5)`,
+    );
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (h) An emitted Markdown file's removal owed alone, staged as T13.5-7 (h)
+ * stages it: the move fixture, built under `markdown: { emit: true, outDir:
+ * "out" }` — `out/specs` holding `A.md` alone — then emission disabled
+ * (`disableMoveEmission`: `out/specs` checked first, the configuration
+ * rewritten with `markdown` removed), so that a regeneration owes nothing
+ * under `out/specs` but the removal of `out/specs/A.md`, a recorded derived
+ * file the current configuration no longer generates (12.1, 13.4); with
+ * `out/specs` staged unwritable, from `build` — staged before the
+ * invocation, `build` taking no hold — and from a rename's finishing
+ * regeneration, `rename specs/A.mdx a a2` staged at the seam, each on a
+ * workspace of its own: the error document concerns `out/specs/A.md`, the
+ * file the refused removal would have removed (14.24). The states the
+ * stopped runs leave are T13.5-7 (h)'s.
+ */
+async function removalOwedAloneArms(product: ProductBinding): Promise<void> {
+  const renameArgv = [...ORPHAN_RENAME_ARGV, "--json"];
+  const runs: readonly {
+    readonly what: string;
+    readonly run: (
+      workspace: TestWorkspace,
+      context: string,
+    ) => Promise<RunResult>;
+  }[] = [
+    {
+      what: "`build --json`",
+      run: async (workspace, context) =>
+        await runStaged(
+          product,
+          workspace,
+          ["build", "--json"],
+          refusalUnder(MOVE_MARKDOWN_DIR),
+          context,
+        ),
+    },
+    {
+      what: `\`${renameArgv.join(" ")}\``,
+      run: async (workspace, context) =>
+        await runHeldWithStaging(
+          product,
+          workspace,
+          renameArgv,
+          "hold-t14-9-h.tmp",
+          refusalUnder(MOVE_MARKDOWN_DIR),
+          context,
+        ),
+    },
+  ];
+  for (const { what, run } of runs) {
+    const context = `T14-9 (h) ${what} with emission disabled and ${MOVE_MARKDOWN_DIR} unwritable`;
+    const prepared = await prepareRefusalWorkspace(
+      product,
+      MOVE_FIXTURE,
+      context,
+    );
+    const { workspace } = prepared;
+    try {
+      await disableMoveEmission(workspace, `${context} staging`);
+      expectRefusal(
+        await run(workspace, context),
+        [ORPHANED_MARKDOWN],
+        `${context} — the one write the regeneration owes under ` +
+          `${MOVE_MARKDOWN_DIR}, ${ORPHANED_MARKDOWN}'s removal, is refused: ` +
+          `the file it would have removed is the concerned path (SPEC ` +
+          `14.24, 12.1, 13.4)`,
+      );
+      await assertRecovers(product, workspace, context);
+    } finally {
+      await workspace.dispose();
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The reporter set, the never-reporters, and precedence (SPEC 14.24, 12.0)
 // ---------------------------------------------------------------------------
@@ -849,6 +1063,229 @@ function expectPlainUsageError(
   }
 }
 
+/** A given baseline naming no commit (SPEC 6.3: an unresolvable ref). */
+const UNRESOLVABLE_REF = "nope";
+
+/**
+ * One of the precedence clause's given baselines that cannot be resolved
+ * (TEST-SPEC T14-9; SPEC 6.3, 12.0, 13.3): `impact --base <ref> --json`, the
+ * ref naming no commit, or naming the commit the repository holds — the
+ * prepared workspace's baseline, written loose by `git commit` — with the
+ * repository's object store refused, its git data unreadable.
+ */
+interface BaselineArm {
+  /** The baseline and what fails its resolution, for diagnoses. */
+  readonly what: string;
+  /** The invocation, given the prepared workspace's baseline commit. */
+  readonly argv: (baseline: string) => readonly string[];
+  /**
+   * The refusal the run carries, made just before it and restored once it
+   * ends, verified on the harness itself (E-1): T6.3-6(e)'s staging
+   * (section-6.3.ts `stageObjectStoreUnsearchable`: `.git/objects` mode 000,
+   * its listing and the read of the commit's loose object refused).
+   */
+  readonly stage?: (
+    workspace: TestWorkspace,
+    baseline: string,
+  ) => Promise<PermissionStaging>;
+}
+
+/** The precedence clause's two given baselines, in TEST-SPEC's order. */
+const BASELINE_ARMS: readonly BaselineArm[] = [
+  {
+    what: `\`--base ${UNRESOLVABLE_REF}\`, a ref naming no commit`,
+    argv: () => ["impact", "--base", UNRESOLVABLE_REF, "--json"],
+  },
+  {
+    what:
+      "`--base <the commit the repository holds>` with the repository's " +
+      "object store refused (`.git/objects` mode 000, T6.3-6(e)'s staging)",
+    argv: (baseline) => ["impact", "--base", baseline, "--json"],
+    stage: async (workspace, baseline) =>
+      await stageObjectStoreUnsearchable(workspace, baseline),
+  },
+];
+
+/**
+ * Run a baseline arm from the workspace root, its staging, where it has
+ * one, made just before the run and restored in a `finally` once it ends —
+ * before anything is asserted on its result, so no assertion and no
+ * snapshot meets the staging.
+ */
+async function runBaselineArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  arm: BaselineArm,
+  baseline: string,
+  context: string,
+): Promise<RunResult> {
+  const staging = await arm.stage?.(workspace, baseline);
+  try {
+    return await runSettled(product, workspace, arm.argv(baseline), context);
+  } finally {
+    if (staging !== undefined) await staging.restore();
+  }
+}
+
+/**
+ * The baseline's plain usage error (SPEC 6.3, 12.0, 12.7; T6.3-6): exit 2,
+ * the error document as the entire stdout, `code` and `path` `null` —
+ * never `write-failure`: a given baseline's resolution precedes the gate,
+ * and so the refresh (12.0, 13.3), so a product attempting the refresh
+ * first — or resolving the ref's name before it and reading the baseline's
+ * git data after it — meets the graph-data staging's refusal there.
+ */
+function expectBaselineUsageError(result: RunResult, context: string): void {
+  assertExitCode(
+    result,
+    2,
+    `${context} — a given baseline that cannot be resolved is a usage ` +
+      `error, exit 2, its resolution preceding the gate and so the refresh ` +
+      `(SPEC 6.3, 12.0, 13.3)`,
+  );
+  const error = expectErrorDocument(result, context);
+  if (error.code === WRITE_FAILURE_CODE) {
+    fail(
+      `${context} — never \`write-failure\`: a given baseline's resolution ` +
+        `precedes the gate, and so the refresh, so its failure is reported ` +
+        `before any graph-data write is attempted (SPEC 12.0, 13.3, 14.24); ` +
+        `a product attempting the refresh first meets the staged refusal ` +
+        `there — got \`write-failure\` concerning ` +
+        `${renderPathValue(error.path)} (message: ` +
+        `${JSON.stringify(error.message)})`,
+    );
+  }
+  assertSameJson(
+    { code: error.code, path: error.path },
+    { code: null, path: null },
+    `${context}: the baseline's plain usage error — the error document's ` +
+      `\`code\` and \`path\` \`null\` (SPEC 6.3, 12.7; T6.3-6), never a ` +
+      `numbered condition's code nor \`read-failure\` (message: ` +
+      `${JSON.stringify(error.message)})`,
+  );
+}
+
+/**
+ * `check`'s report on a writable copy of the stale state once a baseline
+ * arm has run there (TEST-SPEC T14-9: "`check` afterwards still reporting
+ * the graph-data unit form", as T10.7-15(f)(ii) pins for `review create
+ * --base`): condition 10 alone — nothing but the staleness of B's edited
+ * text stands in the workspace — every finding concerning its path with
+ * `locations` `[]` and instructing rebuilding, B's generated module among
+ * them (`assertEditedBStalenessConcerns`), and exactly one finding the
+ * graph-data unit form, concerning the area `.xspec` (SPEC 14.10, 13.3) —
+ * where a product refreshing before it resolves the given baseline leaves
+ * graph data refreshed and no unit form reported.
+ */
+function assertGraphDataStillStale(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  for (const finding of findings) {
+    if (finding.condition !== "14.10") {
+      fail(
+        `${context}: \`check\` reports the staleness of B's edited text ` +
+          `alone — condition 10 (SPEC 14.10, 12.2); got ` +
+          `${JSON.stringify(finding.code)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+  }
+  assertEditedBStalenessConcerns(
+    findings,
+    `${context} — the staleness of B's edited text`,
+  );
+  const unitForms = findings.filter(
+    (finding) => finding.path === GRAPH_DATA_AREA,
+  ).length;
+  if (unitForms !== 1) {
+    fail(
+      `${context}: graph data is still stale — the failed resolution ended ` +
+        `the command before the refresh of 13.3 — so \`check\` reports the ` +
+        `graph-data unit form, exactly one condition-10 finding concerning ` +
+        `the area ${GRAPH_DATA_AREA} (SPEC 13.3, 14.10, 12.0), where a ` +
+        `product refreshing before it resolves the given baseline leaves ` +
+        `graph data refreshed and no unit form reported; got ` +
+        `${String(unitForms)} among the findings concerning ` +
+        JSON.stringify(
+          findings.map((finding) => renderPathValue(finding.path)),
+        ),
+    );
+  }
+}
+
+/**
+ * Precedence, a given baseline on a writable copy of the stale state
+ * (TEST-SPEC T14-9, as T10.7-15(f)(ii) pins for `review create --base`): a
+ * fresh byte copy of the whole stale tree (helpers/tree-copy.ts
+ * `copyTreeBytes`, `.git` included, so the baseline is the repository's
+ * there too), made before anything runs on the original and checked
+ * against its snapshot — a difference is a harness error, never a product
+ * verdict — with no staging of `.xspec`: the arm's run, its own staging
+ * around it, answers the baseline's plain usage error
+ * (`expectBaselineUsageError`); T13.3-2's operational path set
+ * (`isGraphDataKey`) is byte-identical around it — snapshots taken outside
+ * the staging — and `check` afterwards still reports the graph-data unit
+ * form (`assertGraphDataStillStale`); then recovery on the copy, its
+ * staging restored: `build` exits 0 and `check` is clean (12.1, 13.4).
+ */
+async function baselineWritableCopyArm(
+  product: ProductBinding,
+  stale: DirectorySnapshot,
+  arm: BaselineArm,
+  baseline: string,
+): Promise<void> {
+  const label =
+    `T14-9 precedence on a writable copy of the stale, session-bearing ` +
+    `workspace: \`${arm.argv(baseline).join(" ")}\` — ${arm.what}`;
+  const copy = await TestWorkspace.create();
+  try {
+    await copyTreeBytes(Buffer.from(stale.root), Buffer.from(copy.root));
+    const before = await snapshotDirectory(copy.root);
+    const differences = diffSnapshots(stale, before);
+    if (differences.length > 0) {
+      throw new Error(
+        `harness error: ${label}: the copy of ${stale.root} at ${copy.root} ` +
+          `differs from it: ` +
+          differences
+            .slice(0, 10)
+            .map((change) => `${change.change} ${change.path}`)
+            .join(", "),
+      );
+    }
+    expectBaselineUsageError(
+      await runBaselineArm(product, copy, arm, baseline, label),
+      label,
+    );
+    const refreshed = diffSnapshots(
+      before,
+      await snapshotDirectory(copy.root),
+    ).filter((change) => isGraphDataKey(change.key));
+    if (refreshed.length > 0) {
+      fail(
+        `${label}: T13.3-2's operational path set stays byte-identical — a ` +
+          `given baseline's resolution precedes the gate, and so the ` +
+          `refresh of 13.3, and its failure ends the command before any ` +
+          `graph-data write (SPEC 12.0, 13.3, 6.3) — where a product ` +
+          `refreshing first leaves graph data refreshed; found ` +
+          `${String(refreshed.length)} change(s):\n` +
+          refreshed
+            .map(
+              (change) => `  ${change.change} ${change.path}: ${change.detail}`,
+            )
+            .join("\n"),
+      );
+    }
+    assertGraphDataStillStale(
+      await checkFindings(product, copy, `${label}: afterwards`),
+      `${label}: \`check\` afterwards`,
+    );
+    await assertRecovers(product, copy, label);
+  } finally {
+    await copy.dispose();
+  }
+}
+
 /**
  * Graph data, the reporter set, the never-reporters, and the check-first
  * precedence, all on one state: the built precedence fixture holding an
@@ -868,7 +1305,16 @@ function expectPlainUsageError(
  * 14, 12.7; `assertEditedBStalenessConcerns`) — `inventory` and
  * `version` exit 0, a `rename --preview` exits 0 writing nothing; the
  * invalid-flag-value and unknown-node usage errors precede the refresh
- * (`code` null); nothing in the workspace changes around the sweep.
+ * (`code` null), and so does a given baseline's resolution (12.0, 13.3):
+ * `impact --base nope` and `impact --base <the workspace's baseline
+ * commit>` with the repository's object store refused (T6.3-6(e)'s
+ * staging, made around that run alone) each answer the baseline's plain
+ * usage error, `code` and `path` null, never `write-failure`
+ * (`expectBaselineUsageError`) — and, each on a writable copy of the
+ * stale state made before the sweep, leave T13.3-2's operational path set
+ * byte-identical, `check` afterwards still reporting the graph-data unit
+ * form (`baselineWritableCopyArm`); nothing in the workspace changes
+ * around the sweep.
  */
 async function reportersArm(product: ProductBinding): Promise<void> {
   const context =
@@ -889,6 +1335,14 @@ async function reportersArm(product: ProductBinding): Promise<void> {
     );
     await workspace.edit(RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
     const staged = await snapshotWorkspace(workspace.root);
+
+    // Precedence, the given baselines on writable copies of the stale state,
+    // each copied before anything runs on it (`.git` included).
+    const stale = await snapshotDirectory(workspace.root);
+    for (const arm of BASELINE_ARMS) {
+      await baselineWritableCopyArm(product, stale, arm, baseline);
+    }
+
     const staging = await graphDataRefusal()(workspace.root);
     try {
       const reporters: readonly (readonly string[])[] = [
@@ -1013,6 +1467,16 @@ async function reportersArm(product: ProductBinding): Promise<void> {
         "an unknown node identity named in an argument (SPEC 12.0)",
         `${context} \`query node ${missing}\``,
       );
+      // A given baseline's resolution precedes the gate, and so the refresh
+      // (SPEC 12.0, 13.3): each arm's own staging made around its run, the
+      // graph-data staging standing.
+      for (const arm of BASELINE_ARMS) {
+        const label = `${context} \`${arm.argv(baseline).join(" ")}\` — ${arm.what}`;
+        expectBaselineUsageError(
+          await runBaselineArm(product, workspace, arm, baseline, label),
+          label,
+        );
+      }
     } finally {
       await staging.restore();
     }
@@ -1480,7 +1944,7 @@ export async function runT149AcquisitionArms(
 const T14_9 = defineProductTest({
   id: "T14-9",
   title:
-    "write failures (14.24): a write the environment refuses is a usage error — exit 2, the error document (`code` `write-failure`, `path` the concerned path) on stdout, the diagnostic on stderr, never a finding — from every command making the write and met only at the write it refuses; one arm per concerned path through T13.5-7's stagings: a derived path under specs/b/ (`build`), an emitted Markdown file under out/specs (`move`), the rewritten source specs/b/B.mdx and the journal (`rename`), the session file (`review resolve`), a relocation's origin removal and destination production (`move`), and the graph-data area `.xspec` from every refreshing read of 13.3 and `review create` (staged at the seam) on a stale workspace under the graph-data staging (`.xspec` and every directory of T13.3-2's operational path set read-only, every file of it unwritable, the journal, the session directory, and the lock path keeping their modes) — while `check` exits 1 with the staleness, `inventory` and `version` exit 0, and a `--preview` exits 0 writing nothing; acquisition's writes through T13.5-10's stagings, each staged before the invocation, each mutating command in turn: the entry's addition, a leftover's removal (an `r-x` leftover directory; a plain file at the lock path under the full discipline), and the lock directory's creation concerning `.xspec/lock`, never an entry's path, and the area directory's creation (an unbuilt workspace, its root read-only) and an occupant of the area's own path (`.xspec` a plain file) concerning `.xspec`, each modifying nothing; precedence: the invalid-flag-value and unknown-node usage errors (`code` null), the failing twin's findings (`ids` exit 1), a validation refusal under (a)'s staging (exit 1, no write), and a hold file in a read-only directory (13.5's usage error, `code` null); after every arm, permissions restored (an occupant of the area's own path deleted by hand), `build` exits 0 and `check` is clean (SPEC 14.24, 12.0, 12.7, 13.3, 13.5)",
+    "write failures (14.24): a write the environment refuses is a usage error — exit 2, the error document (`code` `write-failure`, `path` the concerned path) on stdout, the diagnostic on stderr, never a finding — from every command making the write and met only at the write it refuses; one arm per concerned path through T13.5-7's stagings: a derived path under specs/b/ (`build`), an emitted Markdown file's creation or removal under out/specs (`move`) and the rename's out/specs/b/B.md (its creation, the file deleted once built), the removal owed alone of out/specs/A.md with emission disabled (`build`, and a rename's finishing regeneration), the rewritten source specs/b/B.mdx and the journal (`rename`), a section-form move's created target file specs/n/N.mdx on either side of the origin's rewrite in `files` order (`move`), the session file (`review resolve`), a relocation's origin removal and destination production (`move`), and the graph-data area `.xspec` from every refreshing read of 13.3 and `review create` (staged at the seam) on a stale workspace under the graph-data staging (`.xspec` and every directory of T13.3-2's operational path set read-only, every file of it unwritable, the journal, the session directory, and the lock path keeping their modes) — while `check` exits 1 with the staleness, `inventory` and `version` exit 0, and a `--preview` exits 0 writing nothing; acquisition's writes through T13.5-10's stagings, each staged before the invocation, each mutating command in turn: the entry's addition, a leftover's removal (an `r-x` leftover directory; a plain file at the lock path under the full discipline), and the lock directory's creation concerning `.xspec/lock`, never an entry's path, and the area directory's creation (an unbuilt workspace, its root read-only) and an occupant of the area's own path (`.xspec` a plain file) concerning `.xspec`, each modifying nothing; precedence: the invalid-flag-value and unknown-node usage errors (`code` null), `impact --base nope` and `impact --base` naming a commit the repository holds with its object store refused (`.git/objects` mode 000), each the baseline's plain usage error (`code` and `path` null, never `write-failure`) and, on a writable copy of the stale state, each leaving T13.3-2's operational path set byte-identical, `check` afterwards still reporting the graph-data unit form, the failing twin's findings (`ids` exit 1), a validation refusal under (a)'s staging (exit 1, no write), and a hold file in a read-only directory (13.5's usage error, `code` null); after every arm, permissions restored (an occupant of the area's own path deleted by hand), `build` exits 0 and `check` is clean (SPEC 14.24, 6.3, 12.0, 12.7, 13.3, 13.5)",
   run: async (product) => {
     // E-1: permission stagings belong to the Linux leg; elsewhere the arms
     // are not staged (the NU3_STAGED pattern of section-11.5) and no other
@@ -1489,10 +1953,15 @@ const T14_9 = defineProductTest({
     await rewrittenSourceArm(product);
     await journalArm(product);
     await markdownArm(product);
+    await renameMarkdownArm(product);
     await originRemovalArm(product);
     await destinationProductionArm(product);
     await sessionFileArm(product);
     await derivedPathArm(product);
+    for (const order of CREATED_TARGET_ORDERS) {
+      await createdTargetFileArm(product, order);
+    }
+    await removalOwedAloneArms(product);
     await reportersArm(product);
     await failingTwinArm(product);
     await validationRefusalArm(product);
