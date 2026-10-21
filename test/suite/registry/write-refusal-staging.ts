@@ -41,7 +41,11 @@
 // restored (`stalenessAgainstRebuiltCopy`; T13.5-7 (b)) — never with the
 // twin's post-operation derived files, the twin's journal holding the entry
 // the stopped state lacks (SPEC 13.4: derived files are reproducible from
-// sources, configuration, and the journal, 5.4).
+// sources, configuration, and the journal, 5.4). T13.3-5 (b) and (c)
+// (section-13.3.ts) compute their sets with these helpers too: (b) against
+// a twin on which `build` ran once a source was added, (c) against a
+// `build` on a copy of a state whose journal was deleted by hand — both
+// judged by `assertStalenessAlone`.
 //
 // Product-chosen names are compared by their exact bytes: a companion's
 // suffix is the product's choice (SPEC 13.1), so a derived path under
@@ -709,9 +713,11 @@ export function assertEachWriteComplete(
 
 /**
  * Derived paths whose occupant differs from a reference state's — a build
- * twin's (T13.5-7 (e), (f)) or a rebuilt copy's
- * (`stalenessAgainstRebuiltCopy`) — absent on one side included, as
- * snapshot keys (`assertStalenessAlone`'s `perFile` form).
+ * twin's (T13.5-7 (e), (f); T13.3-5 (b), a twin on which `build` ran once a
+ * source was added) or a rebuilt copy's (`stalenessAgainstRebuiltCopy`) —
+ * absent on one side included, as snapshot keys (`assertStalenessAlone`'s
+ * `perFile` form). The caller leaves out what no `build` writes and no
+ * comparison of derived files concerns, such as the harness's own `.git`.
  */
 export function derivedPathsDifferingFrom(
   after: DirectorySnapshot,
@@ -1117,10 +1123,10 @@ export interface StalenessExpectation {
  * form. Every caller's state keeps each recorded derived file among the
  * paths the current sources and configuration generate — T13.5-7 (b) a
  * rename's identity change, (d) a relocation whose origin stays, (e) and
- * (f) a text edit, T14-10 (e) and (f) a refused read — so no recorded file
- * obstructs a rebuild write: the one condition-10 form whose correction is
- * its manual deletion instead (SPEC 14.10, 13.4, 14.22; T13.4-10's judge),
- * never this helper's.
+ * (f) a text edit, T14-10 (e) and (f) a refused read, T13.3-5 (b) a source
+ * added and (c) a journal deleted — so no recorded file obstructs a rebuild
+ * write: the one condition-10 form whose correction is its manual deletion
+ * instead (SPEC 14.10, 13.4, 14.22; T13.4-10's judge), never this helper's.
  */
 export function assertStalenessAlone(
   findings: readonly Finding[],

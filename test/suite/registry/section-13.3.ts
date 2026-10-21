@@ -1,6 +1,6 @@
 // TEST-SPEC §13.3 (graph data) — SUITE-46: T13.3-1 (serving reads),
 // T13.3-2 (refresh), T13.3-3 (the gate), T13.3-4 (determinism), T13.3-5
-// (never stale: arm (a), tampered graph data).
+// (never stale: tampered graph data, added sources, and a changed journal).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -306,8 +306,65 @@
 //   inode, left as they are); nothing else, every finding condition 10
 //   with `locations` `[]` and instructing rebuilding (no recorded path's
 //   occupant obstructs a rebuild write: the staging alters no occupant
-//   outside graph data); exit 1 exactly when it reports a finding. Arms (b)
-//   and (c) are not yet registered.
+//   outside graph data); exit 1 exactly when it reports a finding.
+// - T13.3-5 (b), a source added after the build (TEST-SPEC T13.3-5 (b);
+//   SPEC 13.3, 13.1, 11.6, 14.10): on the same workspace — T13.3-2's, whose
+//   configuration (`REFRESH_CONFIG`) holds beside its spec group the code
+//   group `app` over `src/**/*.ts`, matching no file there, so that a code
+//   source has a configured group to match it — two arms, each on a fresh
+//   byte copy of the untampered workspace, no existing file edited
+//   (`runAddedSourceArm`): a new valid spec source `specs/C.mdx`
+//   (`T13_3_5_ADDED_SPEC`: gamma, depending on beta through B's module), and
+//   a new code source `src/marker.ts` (`T13_3_5_ADDED_CODE`: A's module
+//   imported, alpha marked inside the unit `probe`), each a staged-source
+//   record (S-9). The twin (`observeAddedSourceTwin`) is a byte copy of the
+//   staged state, `.git` included, on which `build` ran (exit 0): its reads
+//   each answer (exit 0, one JSON document), its `recorded` is a list, its
+//   `check` is decoded; and each arm's premise (H-11) is that the twin
+//   answers one read otherwise than the untampered workspace does — the spec
+//   arm's `ids`, the code arm's `occurrences` (TEST-SPEC: "so that its
+//   presence changes `occurrences`' answer") — else the added source changes
+//   nothing the reads report. The staged state's runs, each on its own byte
+//   copy (`observeState`): T13.3-2's ten reads under `--json` and, in the
+//   spec-source arm, `view specs/C.mdx` and `at specs/C.mdx <offset>` naming
+//   the new source (the offset inside the `d` reference `B.beta`), each
+//   exiting and answering byte for byte as the same read on the twin; then
+//   `check`: each of the twin's `check` findings, matched once by its
+//   information (stable code, concerned path, locations, identities; a
+//   message is wording, H-3), and beside them condition 10 alone
+//   (`assertStalenessAlone`) — one per-file finding per derived path at
+//   which the staged state's occupant differs from the twin's file, compared
+//   over the paths either holds, `.git` aside (`derivedPathsDifferingFrom`;
+//   in the spec arm the new source's module `specs/C.xspec.ts` and each path
+//   the twin's `recorded` lists under `specs/C.xspec.`, all absent on the
+//   staged state, certainly among them, SPEC 13.1; no Markdown is emitted
+//   here) and exactly one unit-form finding, graph data omitting the added
+//   source differing from the twin's (its premise, `graphDataDiffers`) —
+//   every finding without in-source location and instructing rebuilding;
+//   exit 1.
+// - T13.3-5 (c), a journal changed alone (TEST-SPEC T13.3-5 (c); SPEC 13.3,
+//   5.4, 5.5, 13.4, 14.10): on a workspace of its own (`GRAPH_CONFIG` and
+//   `T13_3_5_JOURNAL_A`, one top-level section `a`), freshly built,
+//   `rename specs/A.mdx a b` (exit 0) journals the rename, `query node
+//   specs/A.mdx` reports the root's ownHash, and the journal, checked to be
+//   a plain file, is deleted by hand, sources and configuration untouched
+//   (`runChangedJournalArm`). The expected per-file set is computed by
+//   comparison with a `build` on a copy of that state
+//   (`stalenessAgainstRebuiltCopy`, as T13.5-7(b) computes its own), never
+//   by assuming whether generated content depends on the journal (SPEC
+//   13.4); and graph data must differ from the rebuilt copy's — it holds
+//   every hash, and `b`'s canonical identity, (`a`, the journal's start)
+//   while the journal held the rename and (`b`, the journal's start) once it
+//   is deleted, enters the root's own content (5.4, 5.5) — so the unit form
+//   is certain. `check --json` on a byte copy of the state reports
+//   condition 10 alone: exactly that per-file set and one unit-form finding,
+//   without in-source location, exit 1. On another byte copy, `query node
+//   specs/A.mdx` reports the ownHash `query node specs/A.mdx` reports on a
+//   twin holding the same sources (carried from the state by
+//   `TestWorkspace.copyFrom`) and no journal, built there — an ownHash
+//   differing from the one reported before the deletion — and `check`
+//   afterwards reports no unit-form finding, its per-file findings those of
+//   the first `check`, exit 1 exactly when there are any.
 
 import { Buffer } from "node:buffer";
 import type { BigIntStats } from "node:fs";
@@ -359,6 +416,7 @@ import {
 import type { Gen } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedTs } from "../../helpers/staged-ts.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
@@ -392,15 +450,21 @@ import {
   runCli,
   runJson,
 } from "./support.js";
-import { GRAPH_DATA_AREA } from "./write-refusal-staging.js";
+import {
+  GRAPH_DATA_AREA,
+  assertStalenessAlone,
+  derivedPathsDifferingFrom,
+  graphDataDiffers,
+  stalenessAgainstRebuiltCopy,
+} from "./write-refusal-staging.js";
 
 // One spec group plus one coverage profile (SPEC 7, 7.4): `coverage` and
 // `review create --coverage` need a configured profile, and `targets: "all"`
 // keeps the required set at every non-root node (SPEC 8.1). T13.3-2's
 // record-discipline workspace, T13.3-3's garbage-journal workspace,
-// T13.3-4's two-directory workspaces, and T13.3-5's twin stage it after
-// their body's first product invocation, so S-7's sweep never reaches those
-// stagings against the stub: a TypeScript staged-source record
+// T13.3-4's two-directory workspaces, and T13.3-5(c)'s workspace stage it
+// after their body's first product invocation, so S-7's sweep never reaches
+// those stagings against the stub: a TypeScript staged-source record
 // (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), staged at
 // every site.
 const GRAPH_CONFIG = stagedTs(
@@ -410,6 +474,39 @@ const GRAPH_CONFIG = stagedTs(
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "p",
+      target: "main",
+      targets: "all",
+      boundary: "main",
+      mode: "direct"
+    }
+  ]
+})
+`,
+);
+
+// T13.3-2's workspace's configuration, shared by T13.3-5's workspace, which
+// is T13.3-2's (TEST-SPEC T13.3-5: "Two stagings, (a) and (b), on T13.3-2's
+// workspace"): `GRAPH_CONFIG`'s spec group and profile, and beside them the
+// code group `app` over `src/**/*.ts` (SPEC 7.2), matching no file there,
+// so that T13.3-5(b)'s added code source has a configured code group to
+// match it — a group matching no file is valid, discovery yielding no code
+// source and listing no `src/` (SPEC 7), so none of T13.3-2's answers
+// changes. T13.3-5(a)'s twin stages it after the body's first product
+// invocation: a TypeScript staged-source record (S-9), staged at every site.
+const REFRESH_CONFIG = stagedTs(
+  "T13.3-2/T13.3-5 xspec.config.ts — T13.3-2's workspace: one spec group, the code group app over src/**/*.ts, and the coverage profile p (targets all)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
   },
   coverage: [
     {
@@ -1221,7 +1318,7 @@ const T13_3_2_RECORD_A = ALPHA_ON_BETA_SOURCE;
 
 /**
  * Stage T13.3-2's workspace on `workspace`, holding T13.3-2's initial files
- * (`GRAPH_CONFIG`, `T13_3_2_A_V0`, `T13_3_2_B`): a baseline commit, `build`,
+ * (`REFRESH_CONFIG`, `T13_3_2_A_V0`, `T13_3_2_B`): a baseline commit, `build`,
  * an audit session `s` with three items resolved `no-change` — alpha's,
  * beta's, then A's root's, leaves first (audit blocking is bottom-up, SPEC
  * 10.6); B's root item stays unresolved — and a fixed-point rebuild, so the
@@ -1276,7 +1373,7 @@ const T13_3_2 = defineProductTest({
   run: async (product) => {
     await withWorkspace(
       {
-        "xspec.config.ts": GRAPH_CONFIG,
+        "xspec.config.ts": REFRESH_CONFIG,
         "specs/A.mdx": T13_3_2_A_V0,
         "specs/B.mdx": T13_3_2_B,
       },
@@ -3914,14 +4011,15 @@ const T13_3_4 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T13.3-5 — never stale: (a) tampered graph data
+// T13.3-5 — never stale: (a) tampered graph data, (b) added sources, (c) a
+// changed journal
 // ---------------------------------------------------------------------------
 
 // T13.3-5(a)'s twin (TEST-SPEC T13.3-5: "a twin's built after one section's
 // text was edited"): T13.3-2's sources with alpha's own text edited, built
 // on a fresh workspace created after the body's first invocations, so its
 // two sources are staged-source records (S-9's before-any-product clause;
-// helpers/staged-mdx.ts) and its configuration `GRAPH_CONFIG`'s.
+// helpers/staged-mdx.ts) and its configuration `REFRESH_CONFIG`'s.
 const T13_3_5_TWIN_A = stagedMdx(
   "T13.3-5 (a)'s twin specs/A.mdx (T13.3-2's alpha, its own text edited)",
   ['<S id="alpha">', "Alpha edited text.", "</S>", ""].join("\n"),
@@ -3931,14 +4029,15 @@ const T13_3_5_TWIN_B = stagedMdx(
   T13_3_2_B,
 );
 const T13_3_5_TWIN_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": GRAPH_CONFIG,
+  "xspec.config.ts": REFRESH_CONFIG,
   "specs/A.mdx": T13_3_5_TWIN_A,
   "specs/B.mdx": T13_3_5_TWIN_B,
 };
 
-// T13.3-2's workspace's discovered sources — its spec group's two `.mdx`
-// files, its generated files excluded by name and no code group configured
-// (SPEC 7, 13.4) — whose occupants 13.4's removal never removes.
+// T13.3-2's workspace's discovered sources as (a) stages it — its spec
+// group's two `.mdx` files, its generated files excluded by name and its
+// code group matching no file (SPEC 7, 13.4) — whose occupants 13.4's
+// removal never removes.
 const T13_3_5_SOURCES: readonly string[] = ["specs/A.mdx", "specs/B.mdx"];
 
 // The fixed seed set T13.3-5(a)'s trials are drawn under (TEST-SPEC
@@ -4738,7 +4837,10 @@ function assertPredictedVerdict(
   );
 }
 
-/** What the untampered workspace's runs give every trial to compare with. */
+/**
+ * What the untampered workspace's runs give every trial of (a) to compare
+ * with, and each arm of (b) its premise (`runAddedSourceArm`).
+ */
 interface UntamperedObservations {
   readonly reads: readonly ReadObservation[];
   /** The untampered `recorded` list: the paths the current sources generate. */
@@ -4882,28 +4984,680 @@ async function judgeTamperingTrial(
   );
 }
 
+// ---------------------------------------------------------------------------
+// T13.3-5(b) — a source added after the build
+// ---------------------------------------------------------------------------
+
+// T13.3-5(b)'s added spec source (TEST-SPEC T13.3-5 (b): "a new valid spec
+// source"): `specs/C.mdx` beside T13.3-2's two, its one section gamma
+// depending on beta through B's module (SPEC 2.1, 2.2), so that its
+// presence changes `ids`, `coverage` (gamma required, beta covered through
+// it), `impact` (gamma added), `query nodes`, `occurrences` (the `d`
+// reference), and `view` alike. Staged on a byte copy of the workspace after
+// the body's first invocations: a staged-source record (S-9).
+const T13_3_5_ADDED_SPEC_TEXT = [
+  'import B from "./B.xspec"',
+  "",
+  '<S id="gamma" d={[B.beta]}>',
+  "Gamma text.",
+  "</S>",
+  "",
+].join("\n");
+const T13_3_5_ADDED_SPEC = stagedMdx(
+  "T13.3-5 (b) added spec source specs/C.mdx (gamma, depending on beta)",
+  T13_3_5_ADDED_SPEC_TEXT,
+);
+
+// `at`'s offset in the added spec source (TEST-SPEC T13.3-5 (b): "`view` and
+// `at` also run, in the spec-source arm, naming the new source"): inside the
+// `d` reference `B.beta` — the text is ASCII, so a character index is its
+// byte offset — so that the answer carries gamma's construct and that
+// occurrence with its resolved target (SPEC 11.5, 5.7).
+const T13_3_5_ADDED_SPEC_OFFSET = T13_3_5_ADDED_SPEC_TEXT.indexOf("B.beta") + 2;
+
+// T13.3-5(b)'s added code source (TEST-SPEC T13.3-5 (b): "a new code source
+// a configured code group matches, importing an existing spec source's
+// module and holding a marker on one of its sections (4.5), so that its
+// presence changes `occurrences`' answer"): `src/marker.ts`, which
+// `REFRESH_CONFIG`'s code group `app` matches, importing A's module and
+// marking alpha inside the named code unit `probe` (SPEC 4.5, 4.6) — a
+// reference occurrence (5.7) and a `references` edge to alpha, so that
+// `occurrences` and alpha's edges in `show` change. Staged on a byte copy of
+// the workspace after the body's first invocations: a staged-source record
+// (S-9).
+const T13_3_5_ADDED_CODE = stagedTs(
+  "T13.3-5 (b) added code source src/marker.ts (a marker on alpha)",
+  [
+    'import SPEC from "../specs/A.xspec";',
+    "",
+    "export function probe(): void {",
+    "  SPEC.alpha;",
+    "}",
+    "",
+  ].join("\n"),
+);
+
+/** One arm of T13.3-5(b): a source added after the build (`runAddedSourceArm`). */
+interface AddedSourceArm {
+  /** The arm, as a diagnosis names it. */
+  readonly label: string;
+  /** The added source's workspace-relative path. */
+  readonly path: string;
+  /** The added source's bytes and S-9 declaration. */
+  readonly source: StagedMdx | StagedTs;
+  /**
+   * The reads run beside T13.3-2's ten — in the spec-source arm, `view` and
+   * `at` naming the new source (TEST-SPEC T13.3-5 (b)).
+   */
+  readonly namingReads: readonly (readonly string[])[];
+  /**
+   * The read whose answer the added source changes — the arm's premise
+   * (H-11): the twin answers it otherwise than the untampered workspace.
+   */
+  readonly changedRead: readonly string[];
+  /** Why the added source changes that answer, for the diagnosis. */
+  readonly changedWhy: string;
+  /**
+   * An added spec source's per-source derived-path prefix, `NAME.xspec.`
+   * (SPEC 13.1: its module `NAME.xspec.ts` and every companion carry it),
+   * or `null` for a code source, which generates nothing.
+   */
+  readonly derivedPrefix: string | null;
+}
+
+// T13.3-5(b)'s two arms (TEST-SPEC T13.3-5 (b): "a new valid spec source,
+// and separately a new code source"), each staged on its own byte copy of
+// the untampered workspace.
+const T13_3_5_ADDED_SOURCE_ARMS: readonly AddedSourceArm[] = [
+  {
+    label: "spec source specs/C.mdx added",
+    path: "specs/C.mdx",
+    source: T13_3_5_ADDED_SPEC,
+    namingReads: [
+      ["view", "specs/C.mdx", "--json"],
+      ["at", "specs/C.mdx", String(T13_3_5_ADDED_SPEC_OFFSET), "--json"],
+    ],
+    changedRead: ["ids", "--json"],
+    changedWhy:
+      "`ids` lists every discovered spec source's IDs, the added source's " +
+      "gamma among them (SPEC 12.3)",
+    derivedPrefix: "specs/C.xspec.",
+  },
+  {
+    label: "code source src/marker.ts added",
+    path: "src/marker.ts",
+    source: T13_3_5_ADDED_CODE,
+    namingReads: [],
+    changedRead: ["occurrences", "--json"],
+    changedWhy:
+      "its marker on alpha is a reference occurrence (SPEC 4.5, 5.7, 11.3)",
+    derivedPrefix: null,
+  },
+];
+
+/** A snapshot's entries but the harness's own `.git` tree (its baseline). */
+function withoutGitTree(snapshot: DirectorySnapshot): DirectorySnapshot {
+  return asSnapshot(
+    snapshot,
+    filteredEntries(
+      snapshot.entries,
+      (key) => key !== ".git" && !key.startsWith(".git/"),
+    ),
+  );
+}
+
+/** A finding's information as one key: its message is wording (H-3). */
+function findingInformationKey(finding: Finding): string {
+  return JSON.stringify([
+    finding.code,
+    finding.path,
+    finding.locations,
+    finding.identities,
+  ]);
+}
+
+/**
+ * `check`'s findings on T13.3-5(b)'s staged state with the twin's taken out
+ * (TEST-SPEC T13.3-5 (b): "`check` reports the findings `check` reports on
+ * that twin and, beside them, …"): each finding `check` reports on the twin
+ * must be reported here too, one for one — matched by its information, its
+ * stable code, concerned path, locations, and identities, a message being
+ * wording (H-3) — and the findings beside them are returned.
+ */
+function findingsBesideTwins(
+  findings: readonly Finding[],
+  twinFindings: readonly Finding[],
+  context: string,
+): Finding[] {
+  const beside = [...findings];
+  for (const twinFinding of twinFindings) {
+    const key = findingInformationKey(twinFinding);
+    const index = beside.findIndex(
+      (finding) => findingInformationKey(finding) === key,
+    );
+    if (index < 0) {
+      fail(
+        `${context}: \`check\` reports the findings \`check\` reports on the ` +
+          `twin — the twin's sources, configuration, journal, and sessions ` +
+          `are this state's — and, beside them, its staleness (SPEC 12.2, ` +
+          `14.10); the twin's ${key} (message: ` +
+          `${JSON.stringify(twinFinding.message)}) is not reported`,
+      );
+    }
+    beside.splice(index, 1);
+  }
+  return beside;
+}
+
+/**
+ * Every condition-10 finding has no in-source location (SPEC 14.10, 14,
+ * 12.7): `locations` `[]` — the unit form's `path` the graph-data area
+ * beside it (TEST-SPEC T13.3-5: "`path` `".xspec"`, `locations` `[]`").
+ */
+function assertStaleFindingsUnlocated(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  for (const finding of findings) {
+    assertSameJson(
+      finding.locations,
+      [],
+      `${context} — the finding concerning ${renderPathValue(finding.path)}: ` +
+        `a condition-10 finding has no in-source location (SPEC 14.10, 14, ` +
+        `12.7)`,
+    );
+  }
+}
+
+/** T13.3-5(b)'s twin, built, and what its runs give (`observeAddedSourceTwin`). */
+interface AddedSourceTwin {
+  /** The twin's state once built: every entry, `.git` included. */
+  readonly built: DirectorySnapshot;
+  /** Its runs of the arm's reads, in order, each on its own copy. */
+  readonly reads: readonly ReadObservation[];
+  /** Its `recorded`: the derived files its `build` generated (SPEC 11.6). */
+  readonly recorded: readonly PathValue[];
+  /** The findings `check` reports on it. */
+  readonly checkFindings: readonly Finding[];
+}
+
+/**
+ * T13.3-5(b)'s twin (TEST-SPEC T13.3-5 (b): "a twin on which `build` ran
+ * once the source was added"): a byte copy of the staged state, `.git`
+ * included (`withByteCopy`), built — exit 0 required, the added source valid
+ * (SPEC 12.1) — and its runs, each on its own byte copy of the built state
+ * (`observeState`), with their premises: every read answers, exit 0 with one
+ * JSON document (SPEC 12.0, 13.3; T13.3-1); `inventory`'s `recorded` is a
+ * list (after a successful `build` the record is readable, SPEC 13.3, 11.6);
+ * and `check`'s findings decode, its exit 1 exactly when it reports one
+ * (SPEC 12.0, 12.2).
+ */
+async function observeAddedSourceTwin(
+  product: ProductBinding,
+  staged: DirectorySnapshot,
+  reads: readonly (readonly string[])[],
+  context: string,
+): Promise<AddedSourceTwin> {
+  const label = `${context} on the twin`;
+  return await withByteCopy(staged, label, async (twin) => {
+    await buildOk(
+      product,
+      twin,
+      `${label}: \`build\`, run once the source was added — the source is ` +
+        `valid, so the build succeeds (SPEC 12.1)`,
+    );
+    const built = await snapshotDirectory(twin.root);
+    const observed = await observeState(product, built, reads, label);
+    for (const read of observed.reads) {
+      const readLabel = `${label} ${spelled(read.argv)}`;
+      assertExitCode(
+        read.result,
+        0,
+        `${readLabel}: on the freshly built, valid twin every read answers, ` +
+          `exit 0 (SPEC 12.0, 13.3; T13.3-1)`,
+      );
+      parseJsonStdout(read.result, `${readLabel}: its answer (SPEC 12.0)`);
+    }
+    const inventoryLabel = `${label} \`inventory\``;
+    const recorded = recordedOf(observed.inventory, inventoryLabel);
+    if (recorded.state !== "value") {
+      fail(
+        `${inventoryLabel}: after a successful \`build\` the record is ` +
+          `readable — \`recorded\` a list (SPEC 13.3, 11.6, 12.1); got the ` +
+          `unavailability marker`,
+      );
+    }
+    const checkLabel = `${label} \`check --json\``;
+    const findings = decodeFindingsReport(
+      parseJsonStdout(observed.check, checkLabel),
+      checkLabel,
+    ).findings;
+    assertExitCode(
+      observed.check,
+      findings.length > 0 ? 1 : 0,
+      `${checkLabel}: \`check\` exits 1 when it reports any finding, and 0 ` +
+        `otherwise (SPEC 12.0, 12.2)`,
+    );
+    return {
+      built,
+      reads: observed.reads,
+      recorded: recorded.value,
+      checkFindings: findings,
+    };
+  });
+}
+
+/**
+ * T13.3-5(b), one arm (TEST-SPEC T13.3-5 (b); the module header): on a
+ * fresh byte copy of the untampered workspace the arm's source is added, no
+ * existing file edited, and the staged state is judged against its twin
+ * (`observeAddedSourceTwin`), the premises first: the twin answers the arm's
+ * changed read otherwise than the untampered workspace does (`baseline`,
+ * (a)'s untampered runs; H-11); an added spec source's module and each path
+ * the twin's `recorded` lists under its derived-path prefix are among the
+ * derived paths at which the staged state's occupant differs from the
+ * twin's (SPEC 13.1: the twin's `build` generated them); and graph data
+ * differs from the twin's (13.3). Then each read, on its own copy of the
+ * staged state (`observeState`), exits and answers byte for byte as the
+ * same read on the twin; and `check` reports the twin's `check` findings
+ * and, beside them, condition 10 alone — one per-file finding per derived
+ * path at which the staged state's occupant differs from the twin's file
+ * (`derivedPathsDifferingFrom` over the paths either holds, `.git` aside),
+ * and one in the unit form — each without in-source location and
+ * instructing rebuilding, exit 1.
+ */
+async function runAddedSourceArm(
+  product: ProductBinding,
+  untampered: DirectorySnapshot,
+  baseline: UntamperedObservations,
+  base: string,
+  arm: AddedSourceArm,
+): Promise<void> {
+  const context = `T13.3-5 (b) ${arm.label}`;
+  const reads = [...neverStaleReads(base), ...arm.namingReads];
+  await withByteCopy(
+    untampered,
+    `${context}: the staged workspace`,
+    async (workspace) => {
+      await workspace.file(arm.path, arm.source);
+      const staged = await snapshotDirectory(workspace.root);
+      const twin = await observeAddedSourceTwin(
+        product,
+        staged,
+        reads,
+        context,
+      );
+
+      // The premise (H-11): the added source changes what a read answers.
+      const changed = spelled(arm.changedRead);
+      const before = baseline.reads.find(
+        (read) => spelled(read.argv) === changed,
+      );
+      const after = twin.reads.find((read) => spelled(read.argv) === changed);
+      if (before === undefined || after === undefined) {
+        throw new Error(
+          `harness error: ${context}: the premise's read ${changed} is no ` +
+            `read of the untampered workspace and the arm`,
+        );
+      }
+      if (
+        Buffer.compare(before.result.stdoutBytes, after.result.stdoutBytes) ===
+        0
+      ) {
+        fail(
+          `${context}: the arm's premise — the added source changes ` +
+            `${changed}'s answer: ${arm.changedWhy} — yet the twin, built ` +
+            `once it was added, answers as the untampered workspace does, ` +
+            `byte for byte, so the arm would discriminate nothing (H-11)`,
+        );
+      }
+
+      // The expected per-file set: every derived path at which the staged
+      // state's occupant differs from the twin's file, absent on one side
+      // included (SPEC 14.10), `.git` aside — the harness's baseline, which
+      // no `build` writes.
+      const perFile = derivedPathsDifferingFrom(
+        withoutGitTree(staged),
+        withoutGitTree(twin.built),
+      );
+      const differing = JSON.stringify(perFile.map(displaySnapshotPath));
+      if (arm.derivedPrefix !== null) {
+        const moduleKey = `${arm.derivedPrefix}ts`;
+        if (!perFile.includes(moduleKey)) {
+          fail(
+            `${context}: the new spec source's module ${moduleKey} — which the ` +
+              `twin's \`build\` generates (SPEC 13.1) and the staged state ` +
+              `never held — is among the derived paths whose occupant ` +
+              `differs from the twin's; differing: ${differing}`,
+          );
+        }
+        const prefix = Buffer.from(arm.derivedPrefix, "utf8");
+        for (const listed of twin.recorded) {
+          const bytes = pathValueBytes(listed);
+          if (!bytes.subarray(0, prefix.length).equals(prefix)) continue;
+          if (!perFile.includes(bytes.toString("latin1"))) {
+            fail(
+              `${context}: each derived file the twin's \`recorded\` lists ` +
+                `for the new spec source — its module and companions, named ` +
+                `${arm.derivedPrefix} plus a suffix (SPEC 13.1, 11.6) — is ` +
+                `absent on the staged state and so among the derived paths ` +
+                `whose occupant differs from the twin's; ` +
+                `${renderPathValue(listed)} is not (differing: ${differing})`,
+            );
+          }
+        }
+      }
+      if (!graphDataDiffers(staged, twin.built)) {
+        fail(
+          `${context}: graph data omitting the added source differs from ` +
+            `the twin's, which its \`build\` wrote once the source was added ` +
+            `— graph data holds every requirement node, code location, ` +
+            `edge, and reference occurrence (SPEC 13.3) — so the unit form ` +
+            `is certainly reported; found it byte-identical`,
+        );
+      }
+
+      // The staged state's runs, each on its own copy (TEST-SPEC T13.3-5: "a
+      // refresh repairs the staging for every later read").
+      const observed = await observeState(
+        product,
+        staged,
+        reads,
+        `${context} on the staged workspace`,
+      );
+      for (const [index, read] of observed.reads.entries()) {
+        const want = twin.reads[index] as ReadObservation;
+        const label = `${context} ${spelled(read.argv)}`;
+        assertExitCode(
+          read.result,
+          want.result.exitCode as number,
+          `${label}: its exit code equals the same read's on the twin, on ` +
+            `which \`build\` ran once the source was added (SPEC 13.3: read ` +
+            `results never come from stale data — graph data omitting the ` +
+            `added source is refreshed before the answer)`,
+        );
+        assertBytesEqual(
+          read.result.stdoutBytes,
+          want.result.stdoutBytes,
+          `${label}: its standard output equals the same read's on the ` +
+            `twin, byte for byte (SPEC 13.3, 12.0)`,
+        );
+      }
+      const checkLabel = `${context} \`check --json\``;
+      if (observed.check.exitCode !== 0 && observed.check.exitCode !== 1) {
+        assertExitCode(
+          observed.check,
+          1,
+          `${checkLabel}: \`check\` exits 1 on any finding, never a usage ` +
+            `error on this valid workspace (SPEC 12.0, 12.2)`,
+        );
+      }
+      const beside = findingsBesideTwins(
+        decodeFindingsReport(
+          parseJsonStdout(observed.check, checkLabel),
+          checkLabel,
+        ).findings,
+        twin.checkFindings,
+        checkLabel,
+      );
+      assertStalenessAlone(
+        beside,
+        { perFile, unit: true },
+        `${checkLabel}: beside the findings \`check\` reports on the twin, ` +
+          `condition 10 alone — one per-file finding per derived path at ` +
+          `which this state's occupant differs from the twin's file, and one ` +
+          `in the unit form, graph data omitting the added source (SPEC ` +
+          `14.10, 13.3, 12.2)`,
+      );
+      assertStaleFindingsUnlocated(beside, checkLabel);
+      assertExitCode(
+        observed.check,
+        1,
+        `${checkLabel}: \`check\` exits 1 when it reports any finding (SPEC ` +
+          `12.0, 12.2)`,
+      );
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T13.3-5(c) — a journal changed alone
+// ---------------------------------------------------------------------------
+
+// T13.3-5(c)'s workspace of its own (TEST-SPEC T13.3-5 (c): "staged on a
+// workspace of its own"): `GRAPH_CONFIG` and one spec source holding one
+// top-level section `a`, which `rename specs/A.mdx a b` renames. Created
+// after the body's first invocations: a staged-source record (S-9).
+const T13_3_5_JOURNAL_A = stagedMdx(
+  "T13.3-5 (c) specs/A.mdx — one top-level section a",
+  ['<S id="a">', "Section a text.", "</S>", ""].join("\n"),
+);
+
+/** The root's ownHash, as `query node specs/A.mdx` reports it (SPEC 11.1, 5.5). */
+async function rootOwnHash(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<string> {
+  const label = `${context} \`query node specs/A.mdx\``;
+  return decodeNodeReport(
+    await runJson(product, workspace, ["query", "node", "specs/A.mdx"], label),
+    label,
+  ).hashes.ownHash;
+}
+
+/**
+ * T13.3-5(c) (TEST-SPEC T13.3-5 (c); the module header): on a workspace of
+ * its own, freshly built, `rename specs/A.mdx a b` journals the rename and
+ * the root's ownHash is read; the journal, a plain file, is then deleted by
+ * hand, sources and configuration untouched — the workspace valid, its
+ * journal empty (SPEC 6.1), `b`'s canonical identity (`b`, the journal's
+ * start) where it was (`a`, the journal's start) (5.4). The expected
+ * per-file set is what a `build` on a copy of that state says
+ * (`stalenessAgainstRebuiltCopy`, as T13.5-7(b) computes its own: never an
+ * assumption on whether generated content depends on the journal, 13.4),
+ * graph data differing from the rebuilt copy's (the unit form's premise:
+ * the root's own content takes `b`'s canonical identity, 5.5). `check --json`
+ * on a byte copy of the state reports condition 10 alone — that set and one
+ * unit-form finding — exit 1. On another byte copy, a refreshing read
+ * answers from refreshed data: `query node specs/A.mdx` reports the ownHash
+ * a twin holding the same sources (`TestWorkspace.copyFrom`) and no journal
+ * reports once built — differing from the one before the deletion — and
+ * `check` then reports no unit-form finding, its per-file findings as
+ * before, exit 1 exactly when there are any.
+ */
+async function runChangedJournalArm(product: ProductBinding): Promise<void> {
+  const context = "T13.3-5 (c)";
+  await withWorkspace(
+    { "xspec.config.ts": GRAPH_CONFIG, "specs/A.mdx": T13_3_5_JOURNAL_A },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${context} staging \`build\` — a freshly built, valid workspace ` +
+          `(SPEC 12.1)`,
+      );
+      await expectExit(
+        product,
+        workspace,
+        ["rename", "specs/A.mdx", "a", "b"],
+        0,
+        `${context} staging \`rename specs/A.mdx a b\` — journaled, its ` +
+          `finishing regeneration leaving the workspace current (SPEC 6.4)`,
+      );
+      const ownBefore = await rootOwnHash(
+        product,
+        workspace,
+        `${context} before the journal's deletion`,
+      );
+      const journalKind = await workspace.kind(JOURNAL_PATH);
+      if (journalKind !== "file") {
+        fail(
+          `${context}: after the journaled rename the journal is a plain ` +
+            `file at ${JOURNAL_PATH} (SPEC 6.1: the file comes into ` +
+            `existence with the first journaled operation; 6.4), the file ` +
+            `the arm deletes; found ${journalKind}`,
+        );
+      }
+      // Deleted by hand, sources and configuration untouched (TEST-SPEC
+      // T13.3-5 (c)): the workspace stays valid, its journal empty (SPEC
+      // 6.1).
+      await fsp.rm(workspace.path(JOURNAL_PATH));
+      const state = await snapshotDirectory(workspace.root);
+      const deleted = `${context} with ${JOURNAL_PATH} deleted by hand`;
+      const expected = await stalenessAgainstRebuiltCopy(
+        product,
+        workspace,
+        deleted,
+      );
+      if (!expected.graphDataDiffers) {
+        fail(
+          `${deleted}: graph data differs from the graph data a \`build\` ` +
+            `leaves on a copy of this state — it holds every hash, and ` +
+            `\`b\`'s canonical identity, (\`a\`, the journal's start) while ` +
+            `the journal held the rename and (\`b\`, the journal's start) ` +
+            `now, enters the root's own content (SPEC 13.3, 5.4, 5.5) — so ` +
+            `the unit form is certainly reported; found it byte-identical`,
+        );
+      }
+      const firstLabel = `${deleted} \`check --json\``;
+      const first = await withByteCopy(
+        state,
+        `${deleted}: \`check\`'s copy`,
+        (copy) => runCli(product, copy, ["check", "--json"]),
+      );
+      if (first.exitCode !== 0 && first.exitCode !== 1) {
+        assertExitCode(
+          first,
+          1,
+          `${firstLabel}: \`check\` exits 1 on any finding, never a usage ` +
+            `error on this valid workspace (SPEC 12.0, 12.2)`,
+        );
+      }
+      const firstFindings = decodeFindingsReport(
+        parseJsonStdout(first, firstLabel),
+        firstLabel,
+      ).findings;
+      assertStalenessAlone(
+        firstFindings,
+        { perFile: expected.perFile, unit: true },
+        `${firstLabel}: condition 10 alone — exactly one unit-form finding ` +
+          `(SPEC 13.3: a journal changed alone is staleness, graph data no ` +
+          `longer matching what \`build\` would now write from the current ` +
+          `sources, configuration, and journal; a product comparing graph ` +
+          `data with the sources and configuration alone reports none) and ` +
+          `one per-file finding per derived path whose occupant differs from ` +
+          `the one a \`build\` leaves on a copy of this state, and nothing ` +
+          `else (SPEC 14.10, 13.4)`,
+      );
+      assertStaleFindingsUnlocated(firstFindings, firstLabel);
+      assertExitCode(
+        first,
+        1,
+        `${firstLabel}: \`check\` exits 1 when it reports any finding (SPEC ` +
+          `12.0, 12.2)`,
+      );
+
+      // On another copy of the state, a refreshing read (TEST-SPEC T13.3-5
+      // (c)).
+      await withByteCopy(
+        state,
+        `${deleted}: the refreshing read's copy`,
+        async (copy) => {
+          const refreshed = await rootOwnHash(
+            product,
+            copy,
+            `${deleted}, on another copy of the state,`,
+          );
+          const twinOwn = await withWorkspace({}, async (twin) => {
+            await twin.copyFrom(workspace, "xspec.config.ts");
+            await twin.copyFrom(workspace, "specs/A.mdx");
+            await buildOk(
+              product,
+              twin,
+              `${context} twin holding the same sources and no journal: ` +
+                `\`build\` (SPEC 12.1)`,
+            );
+            return await rootOwnHash(
+              product,
+              twin,
+              `${context} on the built twin holding the same sources and no ` +
+                `journal`,
+            );
+          });
+          if (refreshed !== twinOwn) {
+            fail(
+              `${deleted}: a refreshing read answers from refreshed data — ` +
+                `\`query node specs/A.mdx\` reports the root's ownHash that ` +
+                `\`query node specs/A.mdx\` reports on a twin holding the ` +
+                `same sources and no journal, built there (SPEC 13.3: read ` +
+                `results never come from stale data, graph data not matching ` +
+                `what \`build\` would now write from the current sources, ` +
+                `configuration, and journal refreshed first; 5.4, 5.5); got ` +
+                `${refreshed}, the twin's ${twinOwn} (before the deletion: ` +
+                `${ownBefore})`,
+            );
+          }
+          if (refreshed === ownBefore) {
+            fail(
+              `${deleted}: the root's ownHash differs from the one \`query ` +
+                `node specs/A.mdx\` reported before the deletion — \`b\`'s ` +
+                `canonical identity, which enters the root's own content, ` +
+                `became (\`b\`, the journal's start) where it was (\`a\`, the ` +
+                `journal's start) (SPEC 5.4, 5.5) — yet both are ${refreshed}`,
+            );
+          }
+          const label = `${deleted} \`check --json\` after the refreshing read`;
+          const result = await runCli(product, copy, ["check", "--json"]);
+          const wantExit = expected.perFile.length > 0 ? 1 : 0;
+          if (result.exitCode !== 0 && result.exitCode !== 1) {
+            assertExitCode(
+              result,
+              wantExit,
+              `${label}: \`check\` exits 1 on any finding and 0 otherwise, ` +
+                `never a usage error on this valid workspace (SPEC 12.0, 12.2)`,
+            );
+          }
+          const after = decodeFindingsReport(
+            parseJsonStdout(result, label),
+            label,
+          ).findings;
+          assertStalenessAlone(
+            after,
+            { perFile: expected.perFile, unit: false },
+            `${label}: no unit-form finding — the read refreshed graph data, ` +
+              `writing what \`build\` would write (SPEC 13.3) — and its ` +
+              `per-file findings as before, a refresh generating and ` +
+              `removing no TypeScript or Markdown (13.3, 14.10)`,
+          );
+          assertStaleFindingsUnlocated(after, label);
+          assertExitCode(
+            result,
+            wantExit,
+            `${label}: \`check\` exits 1 when it reports any finding, and 0 ` +
+              `otherwise (SPEC 12.0, 12.2)`,
+          );
+        },
+      );
+    },
+  );
+}
+
 const T13_3_5 = defineProductTest({
   id: "T13.3-5",
   title:
-    "never stale, (a) tampered graph data, shape-blind (H-3): on T13.3-2's workspace, freshly built and valid, each trial alters one file of T13.3-2's operational path set at a seeded offset — a single byte changed to a seeded other value, one seeded bit of it flipped, or the file truncated there — in rounds of one trial per nonempty file, at least eight trials per seed of the fixed seed set (H-10, E-5), and, where the product writes several files there, further trials mix the files of the workspace's own state and a twin's built after alpha's text was edited, every two paths at which they differ taken one from each state, both ways round; on its own copy of each staged state, each of ids, show, coverage, impact, review status, review list, query, occurrences, view, and at under --json exits and answers byte for byte as on the untampered workspace, the reads rewriting the operational path set alike, all or none, and check's verdict is predicted from that observation and inventory's recorded alone — exactly one condition-10 finding in the unit form (path .xspec, locations []) when recorded is unavailable or the reads rewrote the set, beside it, where recorded is a list, one recorded-file-form finding per listed path outside the untampered recorded list whose occupant 13.4's removal would remove, and nothing else, exit 1 exactly when it reports any (SPEC 13.3, 13.4, 11.6, 14.10, 14.23)",
+    "never stale: (a) tampered graph data, shape-blind (H-3): on T13.3-2's workspace, freshly built and valid, each trial alters one file of T13.3-2's operational path set at a seeded offset — a single byte changed to a seeded other value, one seeded bit of it flipped, or the file truncated there — in rounds of one trial per nonempty file, at least eight trials per seed of the fixed seed set (H-10, E-5), and, where the product writes several files there, further trials mix the files of the workspace's own state and a twin's built after alpha's text was edited, every two paths at which they differ taken one from each state, both ways round; on its own copy of each staged state, each of ids, show, coverage, impact, review status, review list, query, occurrences, view, and at under --json exits and answers byte for byte as on the untampered workspace, the reads rewriting the operational path set alike, all or none, and check's verdict is predicted from that observation and inventory's recorded alone — exactly one condition-10 finding in the unit form (path .xspec, locations []) when recorded is unavailable or the reads rewrote the set, beside it, where recorded is a list, one recorded-file-form finding per listed path outside the untampered recorded list whose occupant 13.4's removal would remove, and nothing else, exit 1 exactly when it reports any; (b) on the same workspace, whose code group app matches src/**/*.ts, a source added after the build, no existing file edited — a new valid spec source specs/C.mdx, and separately a new code source src/marker.ts importing A's module and marking alpha — each read, and in the spec-source arm view and at naming the new source, on its own copy of the staged state, exits and answers byte for byte as the same read on a twin on which build ran once the source was added, and check reports the twin's check findings and, beside them, condition 10 alone: one per-file finding per derived path at which the staged occupant differs from the twin's file (the new spec source's module and each companion the twin's recorded lists for it, all absent, among them) and one in the unit form, exit 1; (c) on a workspace of its own, rename specs/A.mdx a b, then .xspec/journal deleted by hand: check reports exactly one condition-10 finding in the unit form (path .xspec, locations []) and one per-file finding per derived path whose occupant differs from the one a build leaves on a copy of the state, the harness computing that set by comparison, and nothing else, exit 1; on another copy query node specs/A.mdx reports the ownHash query node specs/A.mdx reports on a twin holding the same sources and no journal, built there — differing from the one it reported before the deletion — and check afterwards reports no unit-form finding, its per-file findings as before (SPEC 13.3, 13.4, 11.6, 14.10, 14.23, 5.4, 5.5)",
   run: async (product) => {
     await withWorkspace(
       {
-        "xspec.config.ts": GRAPH_CONFIG,
+        "xspec.config.ts": REFRESH_CONFIG,
         "specs/A.mdx": T13_3_2_A_V0,
         "specs/B.mdx": T13_3_2_B,
       },
       async (workspace) => {
-        const base = await stageRefreshWorkspace(
-          product,
-          workspace,
-          "T13.3-5 (a)",
-        );
+        const base = await stageRefreshWorkspace(product, workspace, "T13.3-5");
         const untampered = await snapshotDirectory(workspace.root);
-        assertGraphDataPresent(
-          untampered,
-          "T13.3-5 (a) after the staging builds",
-        );
+        assertGraphDataPresent(untampered, "T13.3-5 after the staging builds");
         const baseline = await observeUntampered(
           product,
           untampered,
@@ -4923,8 +5677,14 @@ const T13_3_5 = defineProductTest({
             judgeTamperingTrial(product, staged, baseline, context),
           );
         }
+        // (b) on the same untampered workspace, each arm on its own byte copy.
+        for (const arm of T13_3_5_ADDED_SOURCE_ARMS) {
+          await runAddedSourceArm(product, untampered, baseline, base, arm);
+        }
       },
     );
+    // (c) on a workspace of its own.
+    await runChangedJournalArm(product);
   },
 });
 

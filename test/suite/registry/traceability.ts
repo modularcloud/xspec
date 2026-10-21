@@ -783,15 +783,23 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T13.3-2": ["13.3", "11.6", "14"],
   "T13.3-3": ["13.3", "14"],
   "T13.3-4": ["13.3"],
-  // T13.3-5 (arm (a), tampered graph data): beside its home passage, 11.6
-  // for `inventory`'s `recorded`, read without refresh and asserted a list
-  // at exit 0 or the unavailability marker at exit 1, and 13.4 for the
-  // removal rule deciding which recorded paths' occupants `check` reports
-  // in the recorded-file form; "14" for condition 10's unit and
-  // recorded-file forms in `check`'s predicted verdict and 14.23's
-  // unavailable datum (rule (a)). 12.2 and 12.0 are carriage context with
-  // home coverage at T12.2-* and T12.0-*.
-  "T13.3-5": ["13.3", "11.6", "13.4", "14"],
+  // T13.3-5 (never stale: (a) tampered graph data, (b) added sources, (c) a
+  // changed journal): beside its home passage, 5.4 and 5.5 for (c)'s root
+  // ownHash, which the journal's deletion changes — `b`'s canonical
+  // identity entering the root's own content — asserted against the one
+  // reported before the deletion; 11.6 for `inventory`'s `recorded`, read
+  // without refresh and asserted a list at exit 0 or the unavailability
+  // marker at exit 1, and (b)'s twin's `recorded` naming the added spec
+  // source's derived files; and 13.4 for the removal rule deciding which
+  // recorded paths' occupants `check` reports in the recorded-file form in
+  // (a) and for (c)'s per-file set, what a `build` on a copy of the state
+  // leaves; "14" for condition 10's unit, per-file, and recorded-file forms
+  // in `check`'s verdicts and 14.23's unavailable datum (rule (a)). 12.2
+  // and 12.0 are carriage context with home coverage at T12.2-* and
+  // T12.0-*; (b)'s premises — the added source changing a read's answer,
+  // its module among the stale derived paths — are staging context, with
+  // home coverage at T12.3-*, T11.3-*, and T13.1-*.
+  "T13.3-5": ["13.3", "5.4", "5.5", "11.6", "13.4", "14"],
   "T13.4-1": ["13.4"],
   "T13.4-2": ["13.4"],
   "T13.4-3": ["13.4", "14"],

@@ -7,12 +7,14 @@
 // harness error, never a product verdict: T13.5-3's past-the-hold copies
 // (section-13.5.ts `withCopyOf`), T6.4-1's human-form byte copy
 // (section-6.4.ts `withByteCopyOf`), P-10's reader-free twins
-// (section-16-p10.ts), P-14's kept built state (section-16-p14.ts), and the
-// rebuilt copy of a stopped state whose `build` says what `check` must find
-// stale there (TEST-SPEC T13.5-7 (b); write-refusal-staging.ts
-// `stalenessAgainstRebuiltCopy`). A copy composes no source text, so S-9
-// has nothing to judge: its sources were staged, and judged, where they
-// were written, the rest being the product's own state.
+// (section-16-p10.ts), P-14's kept built state (section-16-p14.ts),
+// T13.3-5's copies of a staged state, one per run, and (b)'s built twin
+// (section-13.3.ts `withByteCopy`), and the rebuilt copy of a state whose
+// `build` says what `check` must find stale there (TEST-SPEC T13.5-7 (b),
+// T13.3-5 (c); write-refusal-staging.ts `stalenessAgainstRebuiltCopy`). A
+// copy composes no source text, so S-9 has nothing to judge: its sources
+// were staged, and judged, where they were written, the rest being the
+// product's own state.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
