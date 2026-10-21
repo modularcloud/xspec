@@ -84,26 +84,69 @@
 //   writing), so the configuration change is known to find the record
 //   unreadable and untouched.
 // - T13.4-5 lies outside every certification scope (CERTIFICATIONS.md
-//   §Exclusions, "T6.1-1 and T13.4-5"). Its fixture: one spec group of
-//   importless, tagless `.mdx` sources; no `code`, `markdown`, `coverage`,
-//   or `policy` keys; no git; mutating commands drawn from `rename` and
-//   `review` under `--strategy audit`. In this git-less fixture `impact
-//   --base HEAD` is the exit-2 unreadable-baseline case (SPEC 6.3, 12.0) —
-//   asserted as such, durables still untouched. The fixture session holds
-//   no stale resolution while the `build`-and-read byte-compares run — the
-//   one resolve is the last staging step and no source changes afterward,
-//   so read-time invalidation computes nothing. The byte-compare loop runs
-//   through `snapshotDirectory` and `assertSnapshotsEqual`
-//   (test/helpers/snapshot.ts), the compare-around-command machinery the
-//   Exclusions bullet leans on: VIOL-CORE-CHATTYREADS certifies its capture
-//   and per-entry compare over the same journal on T13.5-4. The
-//   never-regenerated arm after the loop is the session file's alone —
-//   TEST-SPEC's T13.4-5 parenthetical: the session file deleted, `review`
-//   naming it exits 2, `build` leaves it absent — and journal-neutral: it
-//   asserts nothing of the journal. The journal's never-regenerated half
-//   (SPEC 6.1: written only by `rename` and `move`, the file coming into
-//   existence with a journaled operation; 13.4) is T6.1-1's deleted-journal
-//   arm (section-6.1.ts).
+//   §Exclusions, "T6.1-1 and T13.4-5"). Its first workspace: one spec
+//   group of importless, tagless `.mdx` sources; no `code`, `markdown`,
+//   `coverage`, or `policy` keys; no git; mutating commands drawn from
+//   `rename` and `review` under `--strategy audit`. In this git-less
+//   fixture `impact --base HEAD` is the exit-2 unreadable-baseline case
+//   (SPEC 6.3, 12.0) — asserted as such, durables still untouched. The
+//   fixture session holds no stale resolution while the `build`-and-read
+//   byte-compares run — the one resolve is the last staging step and no
+//   source changes afterward, so read-time invalidation computes nothing.
+//   The byte-compare loop runs through `snapshotDirectory` and
+//   `assertSnapshotsEqual` (test/helpers/snapshot.ts), the
+//   compare-around-command machinery the Exclusions bullet leans on:
+//   VIOL-CORE-CHATTYREADS certifies its capture and per-entry compare over
+//   the same journal on T13.5-4. The never-regenerated arm after the loop
+//   is the session file's alone — TEST-SPEC's T13.4-5 parenthetical: the
+//   session file deleted, `review` naming it exits 2, `build` leaves it
+//   absent — and journal-neutral: it asserts nothing of the journal. The
+//   journal's never-regenerated half (SPEC 6.1: written only by `rename`
+//   and `move`, the file coming into existence with a journaled operation;
+//   13.4) is T6.1-1's deleted-journal arm (section-6.1.ts).
+// - T13.4-5's identity arm (`runIdentityArm`), on a second workspace:
+//   `rename` and `move` never write a session file (SPEC 13.4: a durable
+//   file is modified only by its owning commands, a session's being the
+//   mutating `review` subcommands, 10.4). A git repository whose baseline
+//   commit holds `specs/A.mdx` (top-level a holding a.x, then s) and
+//   `specs/B.mdx` (top-level t) under one spec group and the direct
+//   coverage profile `p` over it — no `d` reference or embedding anywhere,
+//   so its required set, the group's non-root leaves a.x, s, and t, is
+//   uncovered (7.4, 8, 8.1) — then a.x's text edited and built. Three
+//   sessions, each with staging premises: the path-blocks `pb` over the
+//   baseline commit, a.x's subtree-coherence item resolved `no-change`;
+//   the audit `au`, a's item split — the one decomposition recorded at a,
+//   read from `export` — and s's item resolved `no-change`; and the
+//   coverage `cv`, exactly one uncovered-requirement item for each of a.x,
+//   s, and t, a.x's resolved `no-change`. Then `rename specs/A.mdx a b`,
+//   the file-form `move specs/A.mdx specs/C.mdx`, and the section-form
+//   `move specs/C.mdx#s specs/B.mdx#t.s`, each exiting 0 between two
+//   captures of the workspace (`.git` left out; the first capture finding
+//   the three session files, a premise): journaled, as T6.1-1 asserts it
+//   (section-6.1.ts `assertJournalAppend`: the prior bytes a prefix, the
+//   journal holding one line per journaled operation so far), and the
+//   session directory with everything under it byte-identical across the
+//   operation (`assertSnapshotsEqual`, as the compares around the reads
+//   above). Afterwards `status` and `export` of each session, each read
+//   inside the durable compare: every node identity a read presents — each
+//   status row's scope; each exported item's scope, `scopeNodes` where
+//   carried, context, and origin, and the node entries of its `baseline`
+//   and `current` (the review adapter's `decodeRecordedState`); each
+//   recorded decomposition's scope node — is one of the six current
+//   identities, every node recorded here being present (10.4: every
+//   recorded node under its current identity, mapped forward through the
+//   journal); the items recorded against a.x and s, found by the ids the
+//   staging read, scoped at `specs/C.mdx#b.x` and `specs/B.mdx#t.s` in
+//   `status` and `export` alike; and `au`'s recorded decompositions exactly
+//   the one at `specs/C.mdx#b`, through the adapter's decode of each one's
+//   kind and scope node (T10.4-4's). A product writing the mapped
+//   identities into the session files presents the same identities, so the
+//   per-operation compare alone discriminates it. Unasserted: statuses (the
+//   section move gives s's audit item another current context set, its
+//   ancestor chain now in `specs/B.mdx`, so it reads `invalidated`, 10.4),
+//   context sets beyond their identities (T10.4-3's subject), and `reason`
+//   (10.2: its composition unpinned; one composed at derivation may spell
+//   the identities then current).
 // - T13.4-6 refusal arm: the symlinked write-path component is staged as
 //   `markdown.outDir` naming a symlink to a real directory inside the
 //   workspace root (no outside-root confound, 14.14). With one source file,
@@ -301,7 +344,9 @@ import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import type {
+  ExportReport,
   Finding,
+  ItemKind,
   SessionStatusReport,
   SessionStatusRow,
 } from "../../helpers/adapters/index.js";
@@ -309,8 +354,10 @@ import {
   assertJsonKeysByteSorted,
   assertReportMentions,
   corruptGraphDataShapeBlind,
+  decodeExportReport,
   decodeFindingsReport,
   decodeInventoryRecordedDatum,
+  decodeRecordedState,
   decodeSessionStatusReport,
   isGraphDataKey,
   judgeManualDeletionCorrection,
@@ -333,6 +380,7 @@ import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
   assertSnapshotsEqual,
+  describeEntry,
   displaySnapshotPath,
   snapshotDirectory,
   snapshotKeyBytes,
@@ -351,6 +399,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import { STREAMS_VALID_SOURCE } from "./section-12.0-i.js";
 import { deleteGraphData } from "./section-13.3.js";
 import { CORE_A_STAGED } from "./section-13.5.js";
+import { assertJournalAppend } from "./section-6.1.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
@@ -434,13 +483,17 @@ function excludeGitDir(relPathBytes: Uint8Array): boolean {
   return Buffer.from(relPathBytes).toString("latin1") === ".git";
 }
 
+/**
+ * Whether a snapshot key lies in the session directory: `.xspec/reviews`
+ * itself or anything under it (SPEC 10.1).
+ */
+function isSessionDirectoryKey(key: string): boolean {
+  return key === REVIEWS_REL || key.startsWith(`${REVIEWS_REL}/`);
+}
+
 /** Whether a snapshot key is a durable path: the journal or a session. */
 function isDurableKey(key: string): boolean {
-  return (
-    key === JOURNAL_REL ||
-    key === REVIEWS_REL ||
-    key.startsWith(`${REVIEWS_REL}/`)
-  );
+  return key === JOURNAL_REL || isSessionDirectoryKey(key);
 }
 
 /**
@@ -1737,10 +1790,603 @@ const T13_4_4 = defineProductTest({
 // T13.4-5 — durable protection
 // ---------------------------------------------------------------------------
 
+// The identity arm (module header) runs in a workspace created after the
+// body's first product invocation, so its configuration, its two baseline
+// sources, and the edit of a.x's text are staged-source records
+// (helpers/staged-ts.ts, helpers/staged-mdx.ts; S-9's TypeScript and timing
+// clauses), staged at their sites.
+
+// One spec group globbing `specs/**/*.mdx` — the file move's destination
+// `specs/C.mdx` inside it — and the direct coverage profile `p` over that
+// group, `targets` at its default `"leaves"` (SPEC 7.4): no source spells a
+// `d` reference or an embedding, so no dependency edge exists and the
+// required set, the group's non-root leaves a.x, s, and t (8.1), is
+// uncovered (8).
+const IDENTITY_CONFIG = stagedTs(
+  "T13.4-5 identity arm xspec.config.ts — one spec group and the direct coverage profile p over it",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "p",
+      target: "main",
+      boundary: "main",
+      mode: "direct"
+    }
+  ]
+})
+`,
+);
+
+/** The identity arm's `specs/A.mdx`: top-level a holding a.x, then s. */
+function identityASource(axText: string): string {
+  return [
+    '<S id="a">',
+    "Aye own text.",
+    "",
+    '<S id="a.x">',
+    axText,
+    "</S>",
+    "</S>",
+    "",
+    '<S id="s">',
+    "Ess text.",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+const IDENTITY_A_BASELINE = stagedMdx(
+  "T13.4-5 identity arm specs/A.mdx — top-level a holding a.x, and s (the baseline commit's)",
+  identityASource("Ex text."),
+);
+
+const IDENTITY_A_EDITED = stagedMdx(
+  "T13.4-5 identity arm specs/A.mdx with a.x's text edited after the baseline commit",
+  identityASource("Ex text, edited."),
+);
+
+const IDENTITY_B = stagedMdx(
+  "T13.4-5 identity arm specs/B.mdx — top-level t",
+  ['<S id="t">', "Tee text.", "</S>", ""].join("\n"),
+);
+
+/** The identity arm's nodes the sessions are staged against (SPEC 1.5). */
+const IDENTITY_STAGED = {
+  a: "specs/A.mdx#a",
+  ax: "specs/A.mdx#a.x",
+  s: "specs/A.mdx#s",
+  t: "specs/B.mdx#t",
+} as const;
+
+/**
+ * The current identities once the three operations have run (SPEC 6.4,
+ * 6.5): `rename specs/A.mdx a b` re-identifies a and a.x as b and b.x, the
+ * file move re-identifies every node of A.mdx, its root included, in its
+ * file part alone, and the section move re-identifies s as t.s in B.mdx.
+ * Nothing is deleted, so these six are the current identities of every
+ * node any session records (10.4).
+ */
+const IDENTITY_CURRENT = {
+  cRoot: "specs/C.mdx",
+  b: "specs/C.mdx#b",
+  bx: "specs/C.mdx#b.x",
+  bRoot: "specs/B.mdx",
+  t: "specs/B.mdx#t",
+  ts: "specs/B.mdx#t.s",
+} as const;
+const IDENTITY_CURRENT_SET: readonly string[] = Object.values(IDENTITY_CURRENT);
+
+/** The three journaled operations, in TEST-SPEC's order. */
+const IDENTITY_OPERATIONS: readonly {
+  readonly argv: readonly string[];
+  readonly what: string;
+}[] = [
+  {
+    argv: ["rename", A_ROOT, "a", "b"],
+    what: "`rename specs/A.mdx a b` (SPEC 6.4)",
+  },
+  {
+    argv: ["move", A_ROOT, "specs/C.mdx"],
+    what: "the file-form `move specs/A.mdx specs/C.mdx` (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/C.mdx#s", "specs/B.mdx#t.s"],
+    what: "the section-form `move specs/C.mdx#s specs/B.mdx#t.s` (SPEC 6.5)",
+  },
+];
+
+/** One session item the identity arm follows, by the id its staging read. */
+interface FollowedItem {
+  readonly id: string;
+  readonly kind: ItemKind;
+  /** The current identity its recorded scope node is presented under. */
+  readonly scope: string;
+  readonly what: string;
+}
+
+/**
+ * The unique status row of a kind scoped at `scope`, diagnosed loudly when
+ * missing or duplicated (SPEC 10.1, 10.5: at most one item per kind and
+ * scope node).
+ */
+function requireRowByKindAndScope(
+  report: SessionStatusReport,
+  kind: ItemKind,
+  scope: string,
+  context: string,
+): SessionStatusRow {
+  const rows = report.items.filter(
+    (row) => row.kind === kind && row.scope === scope,
+  );
+  if (rows.length !== 1) {
+    fail(
+      `${context}: expected exactly one ${kind} item scoped at ${scope} ` +
+        `(SPEC 10.1, 10.5: at most one item per kind and scope node); found ` +
+        `${String(rows.length)} among ` +
+        JSON.stringify(report.items.map((row) => `${row.kind} ${row.scope}`)),
+    );
+  }
+  return rows[0] as SessionStatusRow;
+}
+
+/** `review export <name> --json`, decoded (SPEC 10.7). */
+async function exportSession(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  context: string,
+): Promise<ExportReport> {
+  const label = `${context} \`review export ${name} --json\``;
+  return decodeExportReport(
+    await runJson(
+      product,
+      workspace,
+      ["review", "export", name, "--json"],
+      label,
+    ),
+    label,
+  );
+}
+
+/** A capture of the identity arm's workspace, `.git` left out. */
+async function captureIdentityWorkspace(
+  workspace: TestWorkspace,
+): Promise<DirectorySnapshot> {
+  return await snapshotDirectory(workspace.root, { exclude: excludeGitDir });
+}
+
+/** A capture viewed as the entries `keep` selects (`asSnapshot`). */
+function viewOf(
+  snapshot: DirectorySnapshot,
+  keep: (key: string) => boolean,
+): DirectorySnapshot {
+  return asSnapshot(
+    snapshot,
+    filteredEntries(snapshot.entries, (key) => keep(key)),
+  );
+}
+
+/**
+ * The journal's bytes in a capture: empty where no journal file exists —
+ * a workspace without the file has an empty journal (SPEC 6.1) — unless
+ * `required`, the capture following a journaled operation, which brings
+ * the file into existence; a plain file's bytes; and anything else a
+ * diagnosed failure (13.4: a durable file is a plain file).
+ */
+function journalBytesIn(
+  snapshot: DirectorySnapshot,
+  required: boolean,
+  context: string,
+): Uint8Array {
+  const entry = snapshot.entries.get(JOURNAL_REL);
+  if (entry === undefined && !required) return new Uint8Array(0);
+  if (entry?.kind === "file") return entry.bytes;
+  return fail(
+    `${context}: expected the journal as a plain file at ${JOURNAL_REL} ` +
+      `(SPEC 6.1, 13.4${required ? "; a journaled operation brings it into existence" : ""}); ` +
+      `found ${entry === undefined ? "nothing" : describeEntry(entry)}`,
+  );
+}
+
+/**
+ * Run one read of the identity arm's sessions inside the durable compare
+ * around a read — the journal and the session directory captured before
+ * and after it, byte-identical, as the loop over the first workspace's
+ * reads compares them (SPEC 13.4, 6.1, 10.4: reads never write the session
+ * file) — and return its one JSON document (exit 0, H-5).
+ */
+async function readInsideDurableCompare(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  label: string,
+): Promise<unknown> {
+  const before = await captureIdentityWorkspace(workspace);
+  const doc = await runJson(product, workspace, argv, label);
+  const after = await captureIdentityWorkspace(workspace);
+  assertSnapshotsEqual(
+    viewOf(before, isDurableKey),
+    viewOf(after, isDurableKey),
+    `${label}: the journal and session files after the read — never ` +
+      `modified, deleted, or added to by a read command (SPEC 13.4, 6.1, ` +
+      `10.4)`,
+  );
+  return doc;
+}
+
+/**
+ * Every node identity an `export` presents, each with where it stands:
+ * each recorded decomposition's scope node, and each item's payload nodes —
+ * its scope, the `scopeNodes` list where the document carries it, its
+ * context and origin — and the node entries of its recorded `baseline` and
+ * `current`, read through the review adapter's `decodeRecordedState`
+ * (SPEC 10.2: reads report both fields as recorded, nodes presented per
+ * 10.4; 10.7).
+ */
+function exportedNodeIdentities(
+  report: ExportReport,
+  context: string,
+): { readonly where: string; readonly node: string }[] {
+  const presented: { where: string; node: string }[] = [];
+  for (const decomposition of report.decompositions) {
+    presented.push({
+      where: `a recorded ${decomposition.kind} decomposition's scope node`,
+      node: decomposition.scope,
+    });
+  }
+  for (const item of report.items) {
+    const at = `item ${item.id}`;
+    presented.push({ where: `${at}'s scope`, node: item.scope.node });
+    for (const node of item.scopeNodes ?? []) {
+      presented.push({ where: `${at}'s scopeNodes`, node: node.node });
+    }
+    for (const node of item.context) {
+      presented.push({ where: `${at}'s context`, node: node.node });
+    }
+    for (const entry of item.origin) {
+      presented.push({ where: `${at}'s origin`, node: entry.node });
+    }
+    for (const field of ["baseline", "current"] as const) {
+      for (const entry of decodeRecordedState(item, field, context)) {
+        presented.push({ where: `${at}'s \`${field}\``, node: entry.node });
+      }
+    }
+  }
+  return presented;
+}
+
+/**
+ * Every presented node identity is one of the six current identities
+ * (`IDENTITY_CURRENT`): reads present every recorded node under its current
+ * identity — the recorded identity mapped forward through the journal
+ * (SPEC 10.4, 6.3) — and every node a session here records is present.
+ */
+function assertPresentedUnderCurrentIdentities(
+  presented: readonly { readonly where: string; readonly node: string }[],
+  context: string,
+): void {
+  const stale = presented.filter(
+    ({ node }) => !IDENTITY_CURRENT_SET.includes(node),
+  );
+  if (stale.length === 0) return;
+  fail(
+    `${context}: a read presents every recorded node under its current ` +
+      `identity — the recorded identity mapped forward through the journal ` +
+      `(SPEC 10.4, 6.3) — and every node these sessions record is present, ` +
+      `so each presented identity is one of ` +
+      `${JSON.stringify(IDENTITY_CURRENT_SET)}; found ` +
+      stale
+        .map(({ where, node }) => `${where} ${JSON.stringify(node)}`)
+        .join("; "),
+  );
+}
+
+/**
+ * T13.4-5's identity arm (module header): `rename` and `move` never write
+ * a session file, while reads afterwards present the recorded nodes under
+ * their current identities.
+ */
+async function runIdentityArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  const prefix = "T13.4-5 identity arm";
+  await workspace.gitInit();
+  const baseline = await workspace.gitCommitAll("baseline");
+  await workspace.file(A_ROOT, IDENTITY_A_EDITED);
+  await buildOk(
+    product,
+    workspace,
+    `${prefix} \`build\` after a.x's edit (SPEC 12.1)`,
+  );
+
+  // The path-blocks session over the baseline commit, a.x's
+  // subtree-coherence item resolved `no-change` (SPEC 10.5, 10.7).
+  await expectExit(
+    product,
+    workspace,
+    ["review", "create", "--base", baseline, "--name", "pb"],
+    0,
+    `${prefix} \`review create --base <the baseline commit> --name pb\` ` +
+      `(SPEC 10.7)`,
+  );
+  const pbAx = requireRowByKindAndScope(
+    await sessionStatus(product, workspace, "pb", prefix),
+    "subtree-coherence",
+    IDENTITY_STAGED.ax,
+    `${prefix} staging: the path-blocks session`,
+  ).id;
+  await expectExit(
+    product,
+    workspace,
+    ["review", "resolve", "pb", pbAx, "--status", "no-change"],
+    0,
+    `${prefix} \`review resolve pb <a.x's item> --status no-change\` (SPEC ` +
+      `10.7)`,
+  );
+
+  // The audit session: a's item split, recording the decomposition at a,
+  // and s's item resolved `no-change` (SPEC 10.6, 10.7).
+  await expectExit(
+    product,
+    workspace,
+    ["review", "create", "--strategy", "audit", "--name", "au"],
+    0,
+    `${prefix} \`review create --strategy audit --name au\` (SPEC 10.7)`,
+  );
+  const auCreated = await sessionStatus(product, workspace, "au", prefix);
+  const auStaging = `${prefix} staging: the audit session`;
+  const auA = requireRowByKindAndScope(
+    auCreated,
+    "subtree-coherence",
+    IDENTITY_STAGED.a,
+    auStaging,
+  ).id;
+  const auS = requireRowByKindAndScope(
+    auCreated,
+    "subtree-coherence",
+    IDENTITY_STAGED.s,
+    auStaging,
+  ).id;
+  await expectExit(
+    product,
+    workspace,
+    ["review", "split", "au", auA],
+    0,
+    `${prefix} \`review split au <a's item>\` (SPEC 10.7)`,
+  );
+  await expectExit(
+    product,
+    workspace,
+    ["review", "resolve", "au", auS, "--status", "no-change"],
+    0,
+    `${prefix} \`review resolve au <s's item> --status no-change\` (SPEC ` +
+      `10.7)`,
+  );
+  const auAx = requireRowByKindAndScope(
+    await sessionStatus(product, workspace, "au", `${prefix} after the split`),
+    "subtree-coherence",
+    IDENTITY_STAGED.ax,
+    `${auStaging} after the split`,
+  ).id;
+  assertSameJson(
+    (await exportSession(product, workspace, "au", auStaging)).decompositions,
+    [{ kind: "subtree-coherence", scope: IDENTITY_STAGED.a }],
+    `${auStaging}: staging premise — the split recorded the one ` +
+      `decomposition, a's subtree-coherence item's, at a (SPEC 10.7)`,
+  );
+
+  // The coverage session over `p`: one uncovered-requirement item per
+  // uncovered required leaf, a.x's resolved `no-change` (SPEC 8.1, 10.7).
+  await expectExit(
+    product,
+    workspace,
+    ["review", "create", "--coverage", "p", "--name", "cv"],
+    0,
+    `${prefix} \`review create --coverage p --name cv\` (SPEC 10.7)`,
+  );
+  const cvCreated = await sessionStatus(product, workspace, "cv", prefix);
+  const cvStaging = `${prefix} staging: the coverage session`;
+  assertSameJson(
+    cvCreated.items.map((row) => `${row.kind} ${row.scope}`).sort(),
+    [IDENTITY_STAGED.ax, IDENTITY_STAGED.s, IDENTITY_STAGED.t]
+      .map((scope) => `uncovered-requirement ${scope}`)
+      .sort(),
+    `${cvStaging}: staging premise — profile p's required set, the spec ` +
+      `group's non-root leaves a.x, s, and t, is uncovered, one ` +
+      `uncovered-requirement item each (SPEC 8, 8.1, 10.7)`,
+  );
+  const cvAx = requireRowByKindAndScope(
+    cvCreated,
+    "uncovered-requirement",
+    IDENTITY_STAGED.ax,
+    cvStaging,
+  ).id;
+  const cvS = requireRowByKindAndScope(
+    cvCreated,
+    "uncovered-requirement",
+    IDENTITY_STAGED.s,
+    cvStaging,
+  ).id;
+  await expectExit(
+    product,
+    workspace,
+    ["review", "resolve", "cv", cvAx, "--status", "no-change"],
+    0,
+    `${prefix} \`review resolve cv <a.x's item> --status no-change\` (SPEC ` +
+      `10.7)`,
+  );
+
+  // The three operations, each exiting 0 between two captures: journaled —
+  // T6.1-1's assertion — and the session directory byte-identical to the
+  // capture just before the operation (SPEC 13.4: a durable file is
+  // modified only by its owning commands, a session's being the mutating
+  // `review` subcommands, 10.4; a rename's or move's writes are its source
+  // edits, its journal append, and its finishing regeneration, 6.4, 13.5).
+  let before = await captureIdentityWorkspace(workspace);
+  for (const name of ["pb", "au", "cv"]) {
+    if (before.entries.get(sessionRel(name))?.kind !== "file") {
+      fail(
+        `${prefix}: staging premise — the three sessions' files stand as ` +
+          `plain files before the first operation (SPEC 10.1); found no ` +
+          `plain file at ${sessionRel(name)}`,
+      );
+    }
+  }
+  for (const [index, operation] of IDENTITY_OPERATIONS.entries()) {
+    const context = `${prefix} ${operation.what}`;
+    await expectExit(product, workspace, operation.argv, 0, context);
+    const after = await captureIdentityWorkspace(workspace);
+    assertJournalAppend(
+      journalBytesIn(before, false, `${context}: the capture before it`),
+      journalBytesIn(after, true, `${context}: the capture after it`),
+      index + 1,
+      operation.what,
+      context,
+    );
+    assertSnapshotsEqual(
+      viewOf(before, isSessionDirectoryKey),
+      viewOf(after, isSessionDirectoryKey),
+      `${context}: the session directory and every session file in it, ` +
+        `byte-identical to their bytes just before the operation — \`rename\` ` +
+        `and \`move\` never write a session file: a session is modified only ` +
+        `by the mutating \`review\` subcommands, reads mapping recorded ` +
+        `identities forward through the journal (SPEC 13.4, 10.4, 6.4, 6.5, ` +
+        `13.5)`,
+    );
+    before = after;
+  }
+
+  // The reads afterwards, each inside the durable compare: the recorded
+  // nodes under their current identities (SPEC 10.4; T10.4-4).
+  const sessions: readonly {
+    readonly name: string;
+    readonly followed: readonly FollowedItem[];
+    readonly decompositions?: readonly unknown[];
+  }[] = [
+    {
+      name: "pb",
+      followed: [
+        {
+          id: pbAx,
+          kind: "subtree-coherence",
+          scope: IDENTITY_CURRENT.bx,
+          what: "a.x's subtree-coherence item",
+        },
+      ],
+    },
+    {
+      name: "au",
+      followed: [
+        {
+          id: auAx,
+          kind: "subtree-coherence",
+          scope: IDENTITY_CURRENT.bx,
+          what: "a.x's subtree-coherence item, reused by the split",
+        },
+        {
+          id: auS,
+          kind: "subtree-coherence",
+          scope: IDENTITY_CURRENT.ts,
+          what: "s's subtree-coherence item",
+        },
+      ],
+      decompositions: [
+        { kind: "subtree-coherence", scope: IDENTITY_CURRENT.b },
+      ],
+    },
+    {
+      name: "cv",
+      followed: [
+        {
+          id: cvAx,
+          kind: "uncovered-requirement",
+          scope: IDENTITY_CURRENT.bx,
+          what: "a.x's uncovered-requirement item",
+        },
+        {
+          id: cvS,
+          kind: "uncovered-requirement",
+          scope: IDENTITY_CURRENT.ts,
+          what: "s's uncovered-requirement item",
+        },
+      ],
+    },
+  ];
+  for (const session of sessions) {
+    const statusLabel = `${prefix} \`review status ${session.name} --json\` after the operations`;
+    const status = decodeSessionStatusReport(
+      await readInsideDurableCompare(
+        product,
+        workspace,
+        ["review", "status", session.name, "--json"],
+        statusLabel,
+      ),
+      statusLabel,
+    );
+    assertPresentedUnderCurrentIdentities(
+      status.items.map((row) => ({
+        where: `item ${row.id}'s scope`,
+        node: row.scope,
+      })),
+      statusLabel,
+    );
+    const exportLabel = `${prefix} \`review export ${session.name} --json\` after the operations`;
+    const exported = decodeExportReport(
+      await readInsideDurableCompare(
+        product,
+        workspace,
+        ["review", "export", session.name, "--json"],
+        exportLabel,
+      ),
+      exportLabel,
+    );
+    assertPresentedUnderCurrentIdentities(
+      exportedNodeIdentities(exported, exportLabel),
+      exportLabel,
+    );
+    for (const item of session.followed) {
+      const why =
+        `${item.what} (${item.id}) is presented under its recorded scope ` +
+        `node's current identity ${item.scope} (SPEC 10.4: the recorded ` +
+        `identity mapped forward through the journal; T10.4-4)`;
+      const rows = status.items.filter((row) => row.id === item.id);
+      assertSameJson(
+        rows.map((row) => [row.kind, row.scope]),
+        [[item.kind, item.scope]],
+        `${statusLabel}: ${why}`,
+      );
+      const items = exported.items.filter((entry) => entry.id === item.id);
+      assertSameJson(
+        items.map((entry) => [entry.kind, entry.scope.node]),
+        [[item.kind, item.scope]],
+        `${exportLabel}: ${why}`,
+      );
+    }
+    if (session.decompositions !== undefined) {
+      assertSameJson(
+        exported.decompositions,
+        session.decompositions,
+        `${exportLabel}: the session's one recorded decomposition — a's ` +
+          `subtree-coherence item's, recorded by \`split\` — presented at ` +
+          `its scope node's current identity ${IDENTITY_CURRENT.b} (SPEC ` +
+          `10.4: every recorded node under its current identity; 10.7), ` +
+          `read through the review adapter's decode of each one's kind ` +
+          `and scope node`,
+      );
+    }
+  }
+}
+
 const T13_4_5 = defineProductTest({
   id: "T13.4-5",
   title:
-    "`build` and the read commands never modify or delete the journal or session files (byte-compare around each command), and durable files are never regenerated: a deleted session file stays absent — `review` naming it exits 2 unknown session (SPEC 13.4, 6.1, 10.1, 12.0)",
+    "`build` and the read commands never modify or delete the journal or session files (byte-compare around each command), and durable files are never regenerated: a deleted session file stays absent — `review` naming it exits 2 unknown session; and `rename` and `move` never write a session file either: on a git repository whose baseline commit holds `specs/A.mdx` (top-level `a` holding `a.x`, and `s`) and `specs/B.mdx` (top-level `t`), `a.x`'s text then edited, with a path-blocks session over that commit (`a.x`'s subtree-coherence item resolved `no-change`), an audit session (`a`'s item split, `s`'s item resolved `no-change`), and a coverage session over the uncovered leaves `a.x`, `s`, and `t` (`a.x`'s item resolved `no-change`), `rename specs/A.mdx a b`, the file-form `move specs/A.mdx specs/C.mdx`, and the section-form `move specs/C.mdx#s specs/B.mdx#t.s` — each exiting 0 and journaled — leave every session file byte-identical to its bytes just before the operation, while reads afterwards present the recorded nodes under their current identities: `a.x`'s as `specs/C.mdx#b.x`, `s`'s as `specs/B.mdx#t.s`, and the audit session's recorded decomposition at `specs/C.mdx#b` (SPEC 13.4, 6.1, 6.4, 6.5, 10.1, 10.4, 10.7, 12.0)",
   run: async (product) => {
     await withWorkspace(
       { files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/A.mdx": A_MDX } },
@@ -1912,6 +2558,21 @@ const T13_4_5 = defineProductTest({
           "T13.4-5 `check` after the session-deletion arm — the rebuilt, " +
             "sessionless workspace is clean (SPEC 12.2)",
         );
+      },
+    );
+
+    // The identity arm (module header): `rename` and `move` never write a
+    // session file, on a workspace of its own.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": IDENTITY_CONFIG,
+          "specs/A.mdx": IDENTITY_A_BASELINE,
+          "specs/B.mdx": IDENTITY_B,
+        },
+      },
+      async (workspace) => {
+        await runIdentityArm(product, workspace);
       },
     );
   },

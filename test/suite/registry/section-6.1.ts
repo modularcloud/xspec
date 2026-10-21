@@ -254,9 +254,11 @@ function journalLineCount(bytes: Uint8Array): number {
  * Assert one journaled operation appended exactly one line-oriented entry
  * and rewrote nothing above it: the prior bytes are a strict byte prefix of
  * the new bytes, and the journal now holds exactly `operationCount` lines
- * (SPEC 6.1; T6.1-1).
+ * (SPEC 6.1; T6.1-1). Exported for T13.4-5's identity arm
+ * (section-13.4.ts), whose `rename` and `move` are journaled as T6.1-1
+ * asserts.
  */
-function assertJournalAppend(
+export function assertJournalAppend(
   before: Uint8Array,
   after: Uint8Array,
   operationCount: number,

@@ -811,7 +811,14 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // passage; its 12.1 citation is carriage context (every arm a success
   // path).
   "T13.4-4": ["13.4", "14"],
-  "T13.4-5": ["13.4"],
+  // T13.4-5: its identity arm's reads present every recorded node — items'
+  // payload nodes, their recorded states' node entries, the audit
+  // session's decomposition — under its current identity, mapped forward
+  // through the journal (10.4), the `rename` and `move` before them writing
+  // no session file (13.4); the operations' journaling is a cross-reference
+  // to T6.1-1's assertion, and 6.4's, 6.5's, and 13.5's write sets are
+  // carriage context with home coverage at T6.4-*/T6.5-*/T13.5-*.
+  "T13.4-5": ["13.4", "10.4"],
   "T13.4-6": ["13.4", "13.3", "14"],
   // T13.4-8's 6.5/7.3/13.1/13.2 citations are carriage context with home
   // coverage at T6.5-*/T7.3-1/T13.1-*/T13.2-1; no numbered condition is
