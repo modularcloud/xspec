@@ -20,13 +20,16 @@
 //                      requires its absence
 //   human-reports.ts   the human-report decoders (H-3's report forms,
 //                      T12.0-15, T6.6-7): a findings report, an exit-2
-//                      standard-error message, a preview, and a
-//                      performed rename/move report decoded onto the
-//                      information model — each finding's code,
+//                      standard-error message, a preview, a performed
+//                      rename/move report, and an impact report decoded
+//                      onto the information model — each finding's code,
 //                      locations, concerned path, and identities; an
 //                      error's code and concerned path; a preview's
-//                      plan; a performed operation's applied mapping —
-//                      and compared with the --json twin's
+//                      plan; a performed operation's applied mapping; an
+//                      impact report's categories with their entries'
+//                      nodes, deletions, and attributions, and its
+//                      impacted code with witness edges and paths — and
+//                      compared with the --json twin's
 //   session-staging.ts T10.1-4 corruption transformations (shape-aware,
 //                      value-blind, over product-written session files)
 //   record-staging.ts  T13.3-2's operational path set (its predicate, the

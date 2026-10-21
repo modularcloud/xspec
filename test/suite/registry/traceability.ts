@@ -722,9 +722,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // decoded and compared with the form-exact performed-operation document,
   // and its refused real operations every refusal finding's stable code
   // and concerned data ("14"), the invalid-workspace refusal's findings
-  // each under its own condition's code (6.4). The families still to come
-  // add the passages they assert.
-  "T12.0-15": ["12.0", "14", "6.4", "6.5"],
+  // each under its own condition's code (6.4). The `impact` family's human
+  // reports carry each category with its attribution ("5.6", "9.1"), each
+  // impacted location under its group ("9.2"), and the collapsed chains,
+  // deleted nodes under their baseline identities, and witness edges and
+  // paths of the output ("9.3"), decoded and compared with the `--json`
+  // twin's; the baselines' reconstruction (9, 6.3) is carriage context
+  // with home coverage at T9-1 and T6.3-*. The families still to come add
+  // the passages they assert.
+  "T12.0-15": ["12.0", "14", "6.4", "6.5", "5.6", "9.1", "9.2", "9.3"],
   // T12.0-16: byte order over the separating pair U+FF21/U+1F600 on 12.7's
   // tag sets and findings order, 11.4's and 12.3's file orders, 11.6's
   // inventory lists, and 5.7's occurrence order; its (c) arms pin the

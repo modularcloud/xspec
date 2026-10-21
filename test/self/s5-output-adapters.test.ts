@@ -29,6 +29,7 @@ import type { RunResult } from "../helpers/subprocess.js";
 import type {
   ErrorInformation,
   Finding,
+  ImpactReport,
   ManualDeletionVerdict,
   Mention,
   PreviewReport,
@@ -47,6 +48,8 @@ import {
   assertHumanErrorMessageCarries,
   assertHumanFindingsCarry,
   assertHumanFindingsReportCarries,
+  assertHumanImpactCarries,
+  assertHumanImpactReportCarries,
   assertHumanPerformedCarries,
   assertHumanPerformedReportCarries,
   assertHumanPreviewCarries,
@@ -74,6 +77,7 @@ import {
   decodeFindingsReport,
   decodeHumanErrorMessage,
   decodeHumanFindingsReport,
+  decodeHumanImpactReport,
   decodeHumanPerformedReport,
   decodeHumanPreviewReport,
   decodeIdsReport,
@@ -9225,6 +9229,748 @@ test("S-5: the human performed-report comparison rejects a report omitting or ch
     [],
     'the mapping pair "specs/Core.mdx#core.mid" -> "specs/Core.mdx#core.hub" is missing',
     'the mapping pair "specs/Core.mdx#core.mid.leaf" -> "specs/Core.mdx#core.hub.leaf" is missing',
+  );
+});
+
+// --- the human impact decoder (T12.0-15's `impact` family) ----------------------
+
+// The impact layout's separator is the module's `EM_DASH` above (U+2014).
+
+/** A category line (human-reports.ts' header): the entry's nodes, its mark, its attribution. */
+function impactCategoryLine(
+  nodes: readonly string[],
+  attributedTo: readonly string[],
+  deleted = false,
+): string {
+  return `  ${nodes.join(", ")}${deleted ? " (deleted)" : ""} ${EM_DASH} attributed to: ${attributedTo.join(", ")}`;
+}
+
+/** An impacted-code line (human-reports.ts' header): location, witness edge, path. */
+function impactCodeLine(
+  location: string,
+  kind: string,
+  target: string,
+  path: readonly string[],
+): string {
+  return `  ${location} ${EM_DASH} via ${kind} ${target}; path: ${path.join(" -> ")}`;
+}
+
+const IMPACT_PARENT = "specs/Add.mdx#wrap.parent";
+const IMPACT_NEW = "specs/Add.mdx#wrap.parent.new";
+const IMPACT_GONE = "specs/Rem.mdx#wrap2.gone";
+const IMPACT_DM = "specs/Twice.mdx#dm";
+const IMPACT_UP = "specs/Up.mdx#up";
+
+/**
+ * An `impact --base` report's `--json` twin, modeled on T5.6-2's, T9.3-3's,
+ * and T9.2-4's: a node carrying two categories in one entry, a collapsed
+ * chain, a deleted node, an identity reported twice — once deleted, once
+ * added — and a location in both code groups.
+ */
+const JSON_IMPACT_TWIN = decodeImpactReport(
+  {
+    baseline: "3ca7e70def7c773eeb82223ffba5072030f3b443",
+    code: {
+      direct: [
+        {
+          edge: {
+            from: "src/both.ts",
+            kind: "references",
+            to: "specs/Direct.mdx#dt",
+          },
+          location: "src/both.ts",
+          path: ["specs/Direct.mdx#dt", "specs/Direct.mdx#dt.kid"],
+        },
+        {
+          edge: { from: "src/kinds.ts", kind: "embeds", to: "specs/Em.mdx#em" },
+          location: "src/kinds.ts",
+          path: ["specs/Em.mdx#em"],
+        },
+      ],
+      transitive: [
+        {
+          edge: {
+            from: "src/both.ts",
+            kind: "references",
+            to: "specs/Trans.mdx#tt",
+          },
+          location: "src/both.ts",
+          path: ["specs/Trans.mdx#tt", IMPACT_UP],
+        },
+      ],
+    },
+    requirements: [
+      {
+        categories: [
+          {
+            attributedTo: [IMPACT_PARENT, IMPACT_NEW],
+            category: "descendant-changed",
+          },
+        ],
+        deleted: false,
+        nodes: ["specs/Add.mdx", "specs/Add.mdx#wrap"],
+      },
+      {
+        categories: [
+          { attributedTo: [IMPACT_PARENT], category: "changed" },
+          { attributedTo: [IMPACT_NEW], category: "descendant-changed" },
+        ],
+        deleted: false,
+        nodes: [IMPACT_PARENT],
+      },
+      {
+        categories: [{ attributedTo: [IMPACT_NEW], category: "changed" }],
+        deleted: false,
+        nodes: [IMPACT_NEW],
+      },
+      {
+        categories: [{ attributedTo: [IMPACT_GONE], category: "changed" }],
+        deleted: true,
+        nodes: [IMPACT_GONE],
+      },
+      {
+        categories: [{ attributedTo: [IMPACT_DM], category: "changed" }],
+        deleted: false,
+        nodes: [IMPACT_DM],
+      },
+      {
+        categories: [{ attributedTo: [IMPACT_DM], category: "changed" }],
+        deleted: true,
+        nodes: [IMPACT_DM],
+      },
+      {
+        categories: [
+          { attributedTo: [IMPACT_UP], category: "upstream-changed" },
+        ],
+        deleted: false,
+        nodes: ["specs/Trans.mdx#tt"],
+      },
+    ],
+  },
+  "the impact report's --json twin",
+);
+
+/** The built product's human report of that twin (human-reports.ts' header). */
+const HUMAN_IMPACT_LINES: readonly string[] = [
+  "baseline 3ca7e70def7c773eeb82223ffba5072030f3b443",
+  "changed:",
+  impactCategoryLine([IMPACT_PARENT], [IMPACT_PARENT]),
+  impactCategoryLine([IMPACT_NEW], [IMPACT_NEW]),
+  impactCategoryLine([IMPACT_DM], [IMPACT_DM]),
+  impactCategoryLine([IMPACT_GONE], [IMPACT_GONE], true),
+  impactCategoryLine([IMPACT_DM], [IMPACT_DM], true),
+  "descendant-changed:",
+  impactCategoryLine(
+    ["specs/Add.mdx", "specs/Add.mdx#wrap"],
+    [IMPACT_PARENT, IMPACT_NEW],
+  ),
+  impactCategoryLine([IMPACT_PARENT], [IMPACT_NEW]),
+  "upstream-changed:",
+  impactCategoryLine(["specs/Trans.mdx#tt"], [IMPACT_UP]),
+  "directly impacted code:",
+  impactCodeLine("src/both.ts", "references", "specs/Direct.mdx#dt", [
+    "specs/Direct.mdx#dt",
+    "specs/Direct.mdx#dt.kid",
+  ]),
+  impactCodeLine("src/kinds.ts", "embeds", "specs/Em.mdx#em", [
+    "specs/Em.mdx#em",
+  ]),
+  "transitively impacted code:",
+  impactCodeLine("src/both.ts", "references", "specs/Trans.mdx#tt", [
+    "specs/Trans.mdx#tt",
+    IMPACT_UP,
+  ]),
+];
+
+/** An empty `impact` report's `--json` twin: no category, no impacted code. */
+const JSON_EMPTY_IMPACT_TWIN = decodeImpactReport(
+  {
+    baseline: "4c8fa9e04828b4e0fedfe1190ba582516ad693b6",
+    code: { direct: [], transitive: [] },
+    requirements: [],
+  },
+  "the empty impact report's --json twin",
+);
+
+test("S-5: the human impact decoder decodes a well-formed report onto the impact model, order free", () => {
+  const decoded = decodeHumanImpactReport(
+    previewReport(HUMAN_IMPACT_LINES),
+    "impact",
+  );
+  expect(decoded.baseline).toBe("3ca7e70def7c773eeb82223ffba5072030f3b443");
+  expect(
+    decoded.categories.map(
+      ({ category, nodes, deleted, attributedTo, line }) => ({
+        category,
+        nodes,
+        deleted,
+        attributedTo,
+        line,
+      }),
+    ),
+  ).toEqual([
+    {
+      category: "changed",
+      nodes: [IMPACT_PARENT],
+      deleted: false,
+      attributedTo: [IMPACT_PARENT],
+      line: 3,
+    },
+    {
+      category: "changed",
+      nodes: [IMPACT_NEW],
+      deleted: false,
+      attributedTo: [IMPACT_NEW],
+      line: 4,
+    },
+    {
+      category: "changed",
+      nodes: [IMPACT_DM],
+      deleted: false,
+      attributedTo: [IMPACT_DM],
+      line: 5,
+    },
+    {
+      category: "changed",
+      nodes: [IMPACT_GONE],
+      deleted: true,
+      attributedTo: [IMPACT_GONE],
+      line: 6,
+    },
+    {
+      category: "changed",
+      nodes: [IMPACT_DM],
+      deleted: true,
+      attributedTo: [IMPACT_DM],
+      line: 7,
+    },
+    {
+      category: "descendant-changed",
+      nodes: ["specs/Add.mdx", "specs/Add.mdx#wrap"],
+      deleted: false,
+      attributedTo: [IMPACT_PARENT, IMPACT_NEW],
+      line: 9,
+    },
+    {
+      category: "descendant-changed",
+      nodes: [IMPACT_PARENT],
+      deleted: false,
+      attributedTo: [IMPACT_NEW],
+      line: 10,
+    },
+    {
+      category: "upstream-changed",
+      nodes: ["specs/Trans.mdx#tt"],
+      deleted: false,
+      attributedTo: [IMPACT_UP],
+      line: 12,
+    },
+  ]);
+  expect(
+    decoded.code.map(({ group, location, edge, path, line }) => ({
+      group,
+      location,
+      edge,
+      path,
+      line,
+    })),
+  ).toEqual([
+    {
+      group: "direct",
+      location: "src/both.ts",
+      edge: {
+        from: "src/both.ts",
+        to: "specs/Direct.mdx#dt",
+        kind: "references",
+      },
+      path: ["specs/Direct.mdx#dt", "specs/Direct.mdx#dt.kid"],
+      line: 14,
+    },
+    {
+      group: "direct",
+      location: "src/kinds.ts",
+      edge: { from: "src/kinds.ts", to: "specs/Em.mdx#em", kind: "embeds" },
+      path: ["specs/Em.mdx#em"],
+      line: 15,
+    },
+    {
+      group: "transitive",
+      location: "src/both.ts",
+      edge: {
+        from: "src/both.ts",
+        to: "specs/Trans.mdx#tt",
+        kind: "references",
+      },
+      path: ["specs/Trans.mdx#tt", IMPACT_UP],
+      line: 17,
+    },
+  ]);
+  assertHumanImpactCarries(decoded, JSON_IMPACT_TWIN, "impact");
+  expect(
+    assertHumanImpactReportCarries(
+      syntheticBytesResult(
+        previewReport(HUMAN_IMPACT_LINES),
+        Buffer.alloc(0),
+        0,
+      ),
+      JSON_IMPACT_TWIN,
+      "impact, as a run",
+    ).code,
+  ).toHaveLength(3);
+
+  // Order free: the sections in another order, the lines within each
+  // reversed, a chain's members and an attribution's identities reversed,
+  // the baseline line last; a header's words spelled as a code is.
+  const chain = impactCategoryLine(
+    ["specs/Add.mdx#wrap", "specs/Add.mdx"],
+    [IMPACT_NEW, IMPACT_PARENT],
+  );
+  assertHumanImpactCarries(
+    decodeHumanImpactReport(
+      previewReport([
+        "Transitively-Impacted-Code:",
+        HUMAN_IMPACT_LINES[16]!,
+        "directly impacted code:",
+        HUMAN_IMPACT_LINES[14]!,
+        HUMAN_IMPACT_LINES[13]!,
+        "upstream changed:",
+        HUMAN_IMPACT_LINES[11]!,
+        "descendant-changed:",
+        HUMAN_IMPACT_LINES[9]!,
+        chain,
+        "changed:",
+        ...HUMAN_IMPACT_LINES.slice(2, 7).reverse(),
+        HUMAN_IMPACT_LINES[0]!,
+      ]),
+      "impact reordered",
+    ),
+    JSON_IMPACT_TWIN,
+    "impact reordered",
+  );
+
+  // No baseline line; an entry printing no attribution clause where its
+  // twin's attribution is empty.
+  assertHumanImpactCarries(
+    decodeHumanImpactReport(
+      previewReport(["changed:", `  ${IMPACT_NEW}`]),
+      "no attribution",
+    ),
+    decodeImpactReport(
+      {
+        code: { direct: [], transitive: [] },
+        requirements: [
+          {
+            categories: [{ attributedTo: [], category: "changed" }],
+            deleted: false,
+            nodes: [IMPACT_NEW],
+          },
+        ],
+      },
+      "an unattributed twin",
+    ),
+    "no attribution",
+  );
+
+  // A report without differences: the baseline line alone, or nothing.
+  for (const [label, lines] of [
+    [
+      "the baseline line alone",
+      ["baseline 4c8fa9e04828b4e0fedfe1190ba582516ad693b6"],
+    ],
+    ["nothing", []],
+  ] as const) {
+    const empty = decodeHumanImpactReport(previewReport(lines), label);
+    expect(empty.categories).toEqual([]);
+    expect(empty.code).toEqual([]);
+    assertHumanImpactCarries(empty, JSON_EMPTY_IMPACT_TWIN, label);
+  }
+});
+
+test("S-5: the human impact decoder rejects a section opened twice, an entry outside every section, an impacted-code line without its edge kind, target, or path, an empty identity, and every line outside its layout", () => {
+  const rejected = (
+    label: string,
+    report: Buffer,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      decodeHumanImpactReport(report, label),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_IMPACT_LINES;
+  rejected(
+    "a section opened twice",
+    previewReport([...lines, "changed:", lines[3]!]),
+    "the changed section opened on line 2 opens again here",
+  );
+  rejected(
+    "an entry outside every section",
+    previewReport([lines[0]!, lines[2]!]),
+    "an indented entry line inside one of the report's sections",
+    "line 2",
+  );
+  rejected(
+    "an entry after the baseline line",
+    previewReport([lines[1]!, lines[0]!, lines[2]!]),
+    "an indented entry line inside one of the report's sections",
+    "line 3",
+  );
+  rejected(
+    "a header naming no section",
+    previewReport(previewWithLine(lines, 10, "impacted:")),
+    "a section header at the margin",
+    "line 11",
+  );
+  rejected(
+    "a line at the margin naming no section",
+    previewReport(previewWithLine(lines, 2, IMPACT_PARENT)),
+    "a section header at the margin",
+    "line 3",
+  );
+  rejected(
+    "two baseline lines",
+    previewReport([...lines, lines[0]!]),
+    "one baseline line — line 1 names the baseline already",
+  );
+  rejected(
+    "an empty line",
+    previewReport(previewWithLine(lines, 7, "")),
+    "never an empty line",
+  );
+  rejected(
+    "an empty node in a chain",
+    previewReport(
+      previewWithLine(
+        lines,
+        8,
+        impactCategoryLine(["specs/Add.mdx", ""], [IMPACT_PARENT]),
+      ),
+    ),
+    "never an empty one",
+    "line 9",
+  );
+  rejected(
+    "an empty attribution identity",
+    previewReport(
+      previewWithLine(
+        lines,
+        8,
+        impactCategoryLine(["specs/Add.mdx"], [IMPACT_PARENT, ""]),
+      ),
+    ),
+    "an attribution of non-empty identities",
+  );
+  rejected(
+    "two attribution clauses",
+    previewReport(
+      previewWithLine(
+        lines,
+        2,
+        `${impactCategoryLine([IMPACT_PARENT], [IMPACT_PARENT])} ${EM_DASH} attributed to: ${IMPACT_NEW}`,
+      ),
+    ),
+    "this line holds several",
+  );
+  rejected(
+    "an impacted-code line without its witness edge",
+    previewReport(
+      previewWithLine(lines, 14, "  src/kinds.ts; path: specs/Em.mdx#em"),
+    ),
+    "an impacted-code line `  <location> — via <kind> <target>; path:",
+    "line 15",
+  );
+  rejected(
+    "an impacted-code line without its location",
+    previewReport(
+      previewWithLine(
+        lines,
+        14,
+        `   ${EM_DASH} via embeds specs/Em.mdx#em; path: specs/Em.mdx#em`,
+      ),
+    ),
+    "an impacted-code line `  <location> — via <kind> <target>; path:",
+  );
+  rejected(
+    "an impacted-code line without its witness path",
+    previewReport(
+      previewWithLine(
+        lines,
+        14,
+        `  src/kinds.ts ${EM_DASH} via embeds specs/Em.mdx#em`,
+      ),
+    ),
+    "the witness path after",
+  );
+  rejected(
+    "an impacted-code line without its edge target",
+    previewReport(
+      previewWithLine(
+        lines,
+        14,
+        `  src/kinds.ts ${EM_DASH} via embeds; path: specs/Em.mdx#em`,
+      ),
+    ),
+    "the witness edge is not `<kind> <target>`",
+  );
+  rejected(
+    "an impacted-code line whose edge kind is none",
+    previewReport(
+      previewWithLine(
+        lines,
+        14,
+        impactCodeLine("src/kinds.ts", "calls", "specs/Em.mdx#em", [
+          "specs/Em.mdx#em",
+        ]),
+      ),
+    ),
+    "the witness edge's kind, one of the edge kinds SPEC 5.2 lists",
+    '"calls"',
+  );
+  rejected(
+    "an impacted-code line with an empty path",
+    previewReport(
+      previewWithLine(
+        lines,
+        14,
+        impactCodeLine("src/kinds.ts", "embeds", "specs/Em.mdx#em", []),
+      ),
+    ),
+    "a witness path of node identities joined by ` -> `, never an empty one",
+  );
+  rejected(
+    "an impacted-code line opening its path twice",
+    previewReport(
+      previewWithLine(lines, 14, `${lines[14]!}; path: specs/Em.mdx#em`),
+    ),
+    "several times",
+  );
+  rejected(
+    "bytes that are not UTF-8",
+    Buffer.concat([
+      previewReport(lines.slice(0, 2)),
+      Buffer.from("  specs/A", "utf8"),
+      Buffer.from([0xff]),
+      Buffer.from(".mdx\n", "utf8"),
+    ]),
+    "so these bytes are a path printed raw",
+  );
+});
+
+test("S-5: the human impact comparison rejects a report omitting or changing a category, an attribution, a chain member, a deletion, or a location's group, witness edge, or path — naming the datum", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[],
+    ...fragments: readonly string[]
+  ): void => {
+    rejectedAgainst(label, lines, JSON_IMPACT_TWIN, ...fragments);
+  };
+  const rejectedAgainst = (
+    label: string,
+    lines: readonly string[],
+    twin: ImpactReport,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanImpactCarries(
+        decodeHumanImpactReport(previewReport(lines), label),
+        twin,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+    expect(failure.message, label).toContain("TEST-SPEC T12.0-15");
+  };
+  const lines = HUMAN_IMPACT_LINES;
+  rejected(
+    "a category line dropped",
+    previewWithLine(lines, 3, null),
+    `the changed category of the entry ["${IMPACT_NEW}"], attributed to ["${IMPACT_NEW}"] is missing`,
+  );
+  rejected(
+    "a node's second category dropped",
+    previewWithLine(lines, 9, null),
+    `the descendant-changed category of the entry ["${IMPACT_PARENT}"], attributed to ["${IMPACT_NEW}"] is missing`,
+  );
+  rejected(
+    "an attribution identity dropped",
+    previewWithLine(
+      lines,
+      8,
+      impactCategoryLine(
+        ["specs/Add.mdx", "specs/Add.mdx#wrap"],
+        [IMPACT_PARENT],
+      ),
+    ),
+    `missing attribution ["${IMPACT_NEW}"]`,
+  );
+  rejected(
+    "an attribution the twin lacks",
+    previewWithLine(
+      lines,
+      11,
+      impactCategoryLine(["specs/Trans.mdx#tt"], [IMPACT_UP, IMPACT_NEW]),
+    ),
+    `attribution the --json category lacks ["${IMPACT_NEW}"]`,
+  );
+  rejected(
+    "the attribution clause dropped",
+    previewWithLine(lines, 11, "  specs/Trans.mdx#tt"),
+    `missing attribution ["${IMPACT_UP}"]`,
+  );
+  rejected(
+    "a chain member dropped",
+    previewWithLine(
+      lines,
+      8,
+      impactCategoryLine(["specs/Add.mdx#wrap"], [IMPACT_PARENT, IMPACT_NEW]),
+    ),
+    'missing node(s) ["specs/Add.mdx"]',
+  );
+  rejected(
+    "a chain split into its members",
+    [
+      ...lines.slice(0, 8),
+      impactCategoryLine(["specs/Add.mdx"], [IMPACT_PARENT, IMPACT_NEW]),
+      impactCategoryLine(["specs/Add.mdx#wrap"], [IMPACT_PARENT, IMPACT_NEW]),
+      ...lines.slice(9),
+    ],
+    'the descendant-changed category of the collapsed entry ["specs/Add.mdx","specs/Add.mdx#wrap"]',
+    "which the --json twin lacks",
+  );
+  rejected(
+    "a deletion mark dropped",
+    previewWithLine(lines, 5, impactCategoryLine([IMPACT_GONE], [IMPACT_GONE])),
+    "no deletion mark where the --json entry is deleted",
+  );
+  rejected(
+    "the twice-reported identity reported once",
+    previewWithLine(lines, 6, null),
+    `the changed category of the entry ["${IMPACT_DM}"] (deleted), attributed to ["${IMPACT_DM}"] is missing`,
+  );
+  rejected(
+    "a deletion mark the twin lacks",
+    previewWithLine(
+      lines,
+      2,
+      impactCategoryLine([IMPACT_PARENT], [IMPACT_PARENT], true),
+    ),
+    "a deletion mark the --json entry lacks",
+  );
+  rejected(
+    "an entry under another category",
+    [
+      ...lines.slice(0, 2),
+      ...lines.slice(3, 12),
+      lines[2]!,
+      ...lines.slice(12),
+    ],
+    `the changed category of the entry ["${IMPACT_PARENT}"], attributed to ["${IMPACT_PARENT}"] is missing — line 12 lists the upstream-changed category`,
+    "the category upstream-changed where the --json twin carries changed",
+  );
+  rejected(
+    "a location under the other group",
+    [...lines.slice(0, 14), ...lines.slice(15), lines[14]!],
+    "listed in the transitively impacted group where the --json twin lists it in the directly impacted one",
+  );
+  rejected(
+    "a witness edge's kind changed",
+    previewWithLine(
+      lines,
+      14,
+      impactCodeLine("src/kinds.ts", "references", "specs/Em.mdx#em", [
+        "specs/Em.mdx#em",
+      ]),
+    ),
+    "the edge kind references where the --json twin carries embeds",
+  );
+  rejected(
+    "a witness edge's target changed",
+    previewWithLine(
+      lines,
+      13,
+      impactCodeLine("src/both.ts", "references", "specs/Direct.mdx#dt.kid", [
+        "specs/Direct.mdx#dt",
+        "specs/Direct.mdx#dt.kid",
+      ]),
+    ),
+    'the edge target "specs/Direct.mdx#dt.kid" where the --json twin carries "specs/Direct.mdx#dt"',
+  );
+  rejected(
+    "a witness path reversed",
+    previewWithLine(
+      lines,
+      16,
+      impactCodeLine("src/both.ts", "references", "specs/Trans.mdx#tt", [
+        IMPACT_UP,
+        "specs/Trans.mdx#tt",
+      ]),
+    ),
+    `the witness path ["${IMPACT_UP}","specs/Trans.mdx#tt"] where the --json twin carries ["specs/Trans.mdx#tt","${IMPACT_UP}"]`,
+  );
+  rejected(
+    "a location dropped",
+    previewWithLine(lines, 14, null),
+    'the directly impacted location "src/kinds.ts" via its embeds edge "src/kinds.ts" -> "specs/Em.mdx#em", witness path ["specs/Em.mdx#em"] is missing',
+  );
+  rejected(
+    "a location the twin lacks",
+    [
+      ...lines,
+      impactCodeLine("src/extra.ts", "references", IMPACT_UP, [IMPACT_UP]),
+    ],
+    'line 18 lists the transitively impacted location "src/extra.ts"',
+    "which the --json twin lacks",
+  );
+  rejected(
+    "nothing printed",
+    [],
+    `the changed category of the entry ["${IMPACT_PARENT}"], attributed to ["${IMPACT_PARENT}"] is missing`,
+    'the transitively impacted location "src/both.ts" via its references edge',
+  );
+  rejectedAgainst(
+    "a --json entry carrying no category",
+    lines,
+    decodeImpactReport(
+      {
+        code: { direct: [], transitive: [] },
+        requirements: [
+          { categories: [], deleted: true, nodes: ["specs/Gone.mdx#g"] },
+        ],
+      },
+      "a category-less twin",
+    ),
+    'the --json twin reports the entry ["specs/Gone.mdx#g"] (deleted), carrying no category, which no line beneath a category',
+  );
+  rejectedAgainst(
+    "a --json witness edge not from its location",
+    lines.slice(12, 14),
+    decodeImpactReport(
+      {
+        code: {
+          direct: [
+            {
+              edge: {
+                from: "src/other.ts",
+                kind: "references",
+                to: "specs/Direct.mdx#dt",
+              },
+              location: "src/both.ts",
+              path: ["specs/Direct.mdx#dt", "specs/Direct.mdx#dt.kid"],
+            },
+          ],
+          transitive: [],
+        },
+        requirements: [],
+      },
+      "an edge-from twin",
+    ),
+    'the edge from "src/both.ts" (the location itself, as the layout prints it) where the --json twin\'s runs from "src/other.ts"',
   );
 });
 

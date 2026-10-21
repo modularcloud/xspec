@@ -30,6 +30,16 @@
 //   so their `attributedTo` is asserted to lie within the fixture's
 //   originating-node set, the empty list accepted — attribution of an
 //   originating node to itself may be left implicit.
+//
+// Each body is its staging (`runT56<n>Staging`) run with the home visitor:
+// the staging builds the workspace, commits the baseline, stages the edits,
+// and builds, then hands each `impact --base` read to a visitor at the
+// state it reaches — the home tests' (`HOME_IMPACT_READS`) runs their own
+// read and assertions there. T12.0-15's `impact` family
+// (section-12.0-iv.ts) runs the same stagings (`T5_6_IMPACT_STAGINGS`) with
+// its human twin as the visitor, so every source they stage — each staged
+// after T12.0-15's first product invocation — is a staged-source record
+// (S-9), the same bytes the home tests stage.
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -41,14 +51,20 @@ import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit } from "./support.js";
 
 // Several definitions below are exported for test/suite/registry/section-9.ts:
 // T9.1-1 asserts that requirement-level `impact` output equals the categories
 // and attributions of 5.6 over fixtures shared with T5.6-* (TEST-SPEC §9), so
-// it drives the same staging, fixture sources, and assertion machinery.
+// it drives the same staging, fixture sources, and assertion machinery. The
+// impact-staging protocol below (`ImpactRead`, `ImpactReadVisitor`,
+// `ImpactStaging`, `HOME_IMPACT_READS`) and the stagings themselves are
+// exported for section-9.ts, section-9.3.ts, and section-12.0-iv.ts
+// (T12.0-15's `impact` family).
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. No code
 // groups exist in any fixture here, so no code location can be impacted.
@@ -61,19 +77,81 @@ export default defineConfig({
 })
 `;
 
+/**
+ * {@link SPECS_ONLY_CONFIG} as a staged-source record (S-9's TypeScript and
+ * timing clauses): the configuration of every spec-only impact staging —
+ * T5.6-1 through T5.6-6, T9-1, T9.1-1, T9.3-1, and T9.3-3's two arms —
+ * which T12.0-15 stages after its first product invocation, and T9.3-3
+ * after its own for its arm 2. The exported plain constant stays for the
+ * other modules that import it.
+ */
+export const IMPACT_SPECS_ONLY_CONFIG = stagedTs(
+  "T9.3-3/T12.0-15 xspec.config.ts — one spec group (section-5.6.ts's SPECS_ONLY_CONFIG: the spec-only impact stagings of T5.6-1 through T5.6-6, T9-1, T9.1-1, T9.3-1, and T9.3-3's two arms)",
+  SPECS_ONLY_CONFIG,
+);
+
 /** Stage a fresh spec-only workspace, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
-    files: { "xspec.config.ts": SPECS_ONLY_CONFIG, ...files },
+    files: { "xspec.config.ts": IMPACT_SPECS_ONLY_CONFIG, ...files },
   });
   try {
     return await body(workspace);
   } finally {
     await workspace.dispose();
   }
+}
+
+// ---------------------------------------------------------------------------
+// The impact-staging protocol (shared with T12.0-15)
+// ---------------------------------------------------------------------------
+
+/**
+ * One `impact --base` read an impact staging reaches: a label naming the
+ * staging's state, the baseline ref the read passes, and the home test's
+ * own invocations and assertions there.
+ */
+export interface ImpactRead {
+  /** The staging's state, for a diagnosis: `<home test> <state>`. */
+  readonly label: string;
+  /** The baseline git ref the read passes to `--base`. */
+  readonly ref: string;
+  /** The home test's own invocations and assertions at this state. */
+  readonly home: () => Promise<void>;
+}
+
+/**
+ * A visitor handed each impact read of a staging at the state the staging
+ * reaches — the workspace built, so a read there refreshes nothing (SPEC
+ * 13.3) — the staging continuing once it returns.
+ */
+export type ImpactReadVisitor = (
+  workspace: TestWorkspace,
+  read: ImpactRead,
+) => Promise<void>;
+
+/** The home tests' visitor: each read runs its home test's own assertions. */
+export const HOME_IMPACT_READS: ImpactReadVisitor = async (
+  _workspace,
+  read,
+) => {
+  await read.home();
+};
+
+/**
+ * A home test's staging: its workspaces, git baselines, edits, and builds,
+ * each `impact --base` read handed to the visitor.
+ */
+export interface ImpactStaging {
+  /** The home test's ID. */
+  readonly test: string;
+  readonly run: (
+    product: ProductBinding,
+    visit: ImpactReadVisitor,
+  ) => Promise<void>;
 }
 
 /**
@@ -360,7 +438,22 @@ const depsSource = (onmidD: string): string =>
     "",
   ].join("\n");
 
-const T1_DEPS_SOURCE = depsSource("Tree.top.mid");
+// The worked example's sources as staged-source records (S-9): T5.6-1 and
+// T9.1-1 stage them before their first product invocation, T12.0-15's
+// `impact` family after its own — the same template calls, moved to
+// module level.
+const T1_TREE_V1 = stagedMdx(
+  "T12.0-15 T5.6-1's and T9.1-1's worked-example specs/Tree.mdx at the baseline (treeSource(\"Leaf text v1.\"))",
+  treeSource("Leaf text v1."),
+);
+const T1_TREE_V2 = stagedMdx(
+  "T12.0-15 T5.6-1's and T9.1-1's worked-example specs/Tree.mdx with the leaf edited (treeSource(\"Leaf text v2.\"))",
+  treeSource("Leaf text v2."),
+);
+const T1_DEPS_SOURCE = stagedMdx(
+  "T12.0-15 T5.6-1's and T9.1-1's worked-example specs/Deps.mdx (depsSource(\"Tree.top.mid\"): onleaf.dep on the leaf, onmid.dep on an ancestor on the path)",
+  depsSource("Tree.top.mid"),
+);
 
 /**
  * The worked-example fixture of T5.6-1 (SPEC 5.6's leaf-edit example) —
@@ -375,6 +468,12 @@ export const workedExample = {
   treeSource,
   /** Deps source, parameterized by onmid.dep's `d` expression. */
   depsSource,
+  /** The tree at the baseline, a record: `treeSource("Leaf text v1.")`. */
+  treeAtBaseline: T1_TREE_V1,
+  /** The tree with its leaf edited, a record: `treeSource("Leaf text v2.")`. */
+  treeLeafEdited: T1_TREE_V2,
+  /** The dependents as staged, a record: `depsSource("Tree.top.mid")`. */
+  depsOnMid: T1_DEPS_SOURCE,
   identities: {
     tree: T1_TREE,
     top: T1_TOP,
@@ -445,33 +544,45 @@ export function workedExampleLeafEditExpectations(): readonly ExpectedNodeImpact
   ];
 }
 
+/** T5.6-1's staging: the worked example, its leaf edited (the module header). */
+async function runT561Staging(
+  product: ProductBinding,
+  visit: ImpactReadVisitor,
+): Promise<void> {
+  await withWorkspace(
+    { [T1_TREE]: T1_TREE_V1, [T1_DEPS]: T1_DEPS_SOURCE },
+    async (workspace) => {
+      await workspace.gitInit();
+      const base = await workspace.gitCommitAll("baseline");
+      await workspace.file(T1_TREE, T1_TREE_V2);
+      await buildOk(
+        product,
+        workspace,
+        "T5.6-1 `build` over the leaf-edited workspace",
+      );
+
+      const label =
+        "T5.6-1 `impact --base <baseline> --json` after the leaf edit";
+      await visit(workspace, {
+        label: "T5.6-1 after the leaf edit",
+        ref: base,
+        home: async () => {
+          assertImpactCategories(
+            await impactAgainst(product, workspace, base, label),
+            workedExampleLeafEditExpectations(),
+            label,
+          );
+        },
+      });
+    },
+  );
+}
+
 const T5_6_1 = defineProductTest({
   id: "T5.6-1",
   title:
     "leaf edit, SPEC.md's worked example: `impact --base <ref>` reports the leaf `changed`; every ancestor `descendant-changed` attributed to the leaf; sibling subtrees uncategorized; dependents of nodes on the path (the leaf and an ancestor) and those dependents' ancestors `upstream-changed`, all attributed to the leaf (SPEC 5.6, 9.1)",
-  run: async (product) => {
-    await withWorkspace(
-      { [T1_TREE]: treeSource("Leaf text v1."), [T1_DEPS]: T1_DEPS_SOURCE },
-      async (workspace) => {
-        await workspace.gitInit();
-        const base = await workspace.gitCommitAll("baseline");
-        await workspace.file(T1_TREE, treeSource("Leaf text v2."));
-        await buildOk(
-          product,
-          workspace,
-          "T5.6-1 `build` over the leaf-edited workspace",
-        );
-
-        const label =
-          "T5.6-1 `impact --base <baseline> --json` after the leaf edit";
-        assertImpactCategories(
-          await impactAgainst(product, workspace, base, label),
-          workedExampleLeafEditExpectations(),
-          label,
-        );
-      },
-    );
-  },
+  run: (product) => runT561Staging(product, HOME_IMPACT_READS),
 });
 
 // ---------------------------------------------------------------------------
@@ -497,15 +608,21 @@ const T2_ADD_HEAD = [
   "</S>",
 ];
 const T2_ADD_TAIL = ["</S>", "</S>", ""];
-const T2_ADD_BASELINE = [...T2_ADD_HEAD, ...T2_ADD_TAIL].join("\n");
-const T2_ADD_CURRENT = [
-  ...T2_ADD_HEAD,
-  "",
-  '<S id="wrap.parent.new">',
-  "Added child text.",
-  "</S>",
-  ...T2_ADD_TAIL,
-].join("\n");
+const T2_ADD_BASELINE = stagedMdx(
+  "T12.0-15 T5.6-2's specs/Add.mdx at the baseline (wrap.parent with its one child, old)",
+  [...T2_ADD_HEAD, ...T2_ADD_TAIL].join("\n"),
+);
+const T2_ADD_CURRENT = stagedMdx(
+  "T12.0-15 T5.6-2's specs/Add.mdx with wrap.parent's child new added",
+  [
+    ...T2_ADD_HEAD,
+    "",
+    '<S id="wrap.parent.new">',
+    "Added child text.",
+    "</S>",
+    ...T2_ADD_TAIL,
+  ].join("\n"),
+);
 
 // Remove arm: `wrap2.parent2` loses child `gone` (its sibling `keep` stays).
 const T2_REM = "specs/Rem.mdx";
@@ -532,171 +649,199 @@ const T2_REM_GONE = [
   "</S>",
 ];
 const T2_REM_TAIL = ["</S>", "</S>", ""];
-const T2_REM_BASELINE = [...T2_REM_HEAD, ...T2_REM_GONE, ...T2_REM_TAIL].join(
-  "\n",
+const T2_REM_BASELINE = stagedMdx(
+  "T12.0-15 T5.6-2's specs/Rem.mdx at the baseline (wrap2.parent2 with its children keep and gone)",
+  [...T2_REM_HEAD, ...T2_REM_GONE, ...T2_REM_TAIL].join("\n"),
 );
-const T2_REM_CURRENT = [...T2_REM_HEAD, ...T2_REM_TAIL].join("\n");
+const T2_REM_CURRENT = stagedMdx(
+  "T12.0-15 T5.6-2's specs/Rem.mdx with wrap2.parent2's child gone removed",
+  [...T2_REM_HEAD, ...T2_REM_TAIL].join("\n"),
+);
 
 // One dependent of each parent, each in its own file, so the upstream cascade
 // of each arm attributes to exactly that arm's originating nodes.
 const T2_ADD_DEPS = "specs/AddDeps.mdx";
 const T2_HOLDADD = "specs/AddDeps.mdx#holdadd";
 const T2_HOLDADD_DEP = "specs/AddDeps.mdx#holdadd.dep";
-const T2_ADD_DEPS_SOURCE = [
-  'import Add from "./Add.xspec"',
-  "",
-  '<S id="holdadd">',
-  "Add-side holder text.",
-  "",
-  '<S id="holdadd.dep" d={Add.wrap.parent}>',
-  "Depends on the parent gaining a child.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const T2_ADD_DEPS_SOURCE = stagedMdx(
+  "T12.0-15 T5.6-2's specs/AddDeps.mdx (holdadd.dep depending on wrap.parent)",
+  [
+    'import Add from "./Add.xspec"',
+    "",
+    '<S id="holdadd">',
+    "Add-side holder text.",
+    "",
+    '<S id="holdadd.dep" d={Add.wrap.parent}>',
+    "Depends on the parent gaining a child.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T2_REM_DEPS = "specs/RemDeps.mdx";
 const T2_HOLDREM = "specs/RemDeps.mdx#holdrem";
 const T2_HOLDREM_DEP = "specs/RemDeps.mdx#holdrem.dep";
-const T2_REM_DEPS_SOURCE = [
-  'import Rem from "./Rem.xspec"',
-  "",
-  '<S id="holdrem">',
-  "Remove-side holder text.",
-  "",
-  '<S id="holdrem.dep" d={Rem.wrap2.parent2}>',
-  "Depends on the parent losing a child.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const T2_REM_DEPS_SOURCE = stagedMdx(
+  "T12.0-15 T5.6-2's specs/RemDeps.mdx (holdrem.dep depending on wrap2.parent2)",
+  [
+    'import Rem from "./Rem.xspec"',
+    "",
+    '<S id="holdrem">',
+    "Remove-side holder text.",
+    "",
+    '<S id="holdrem.dep" d={Rem.wrap2.parent2}>',
+    "Depends on the parent losing a child.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // The originating nodes of the two staged edits (SPEC 5.6: those carrying
 // `changed` — structural edits originate at the parent, and the added and the
 // removed child are `changed` themselves).
 const T2_ORIGINATORS = [T2_NEW, T2_P_ADD, T2_GONE, T2_P_REM];
 
+/** T5.6-2's staging: one child added, another removed (the module header). */
+async function runT562Staging(
+  product: ProductBinding,
+  visit: ImpactReadVisitor,
+): Promise<void> {
+  await withWorkspace(
+    {
+      [T2_ADD]: T2_ADD_BASELINE,
+      [T2_REM]: T2_REM_BASELINE,
+      [T2_ADD_DEPS]: T2_ADD_DEPS_SOURCE,
+      [T2_REM_DEPS]: T2_REM_DEPS_SOURCE,
+    },
+    async (workspace) => {
+      await workspace.gitInit();
+      const base = await workspace.gitCommitAll("baseline");
+      await workspace.file(T2_ADD, T2_ADD_CURRENT);
+      await workspace.file(T2_REM, T2_REM_CURRENT);
+      await buildOk(
+        product,
+        workspace,
+        "T5.6-2 `build` over the child-added/child-removed workspace",
+      );
+
+      await visit(workspace, {
+        label: "T5.6-2 after the child add and remove",
+        ref: base,
+        home: async () => {
+          const label =
+            "T5.6-2 `impact --base <baseline> --json` after the child add and remove";
+          assertImpactCategories(
+            await impactAgainst(product, workspace, base, label),
+            [
+              // Add arm.
+              {
+                identity: T2_NEW,
+                categories: [{ category: "changed", within: T2_ORIGINATORS }],
+              },
+              {
+                identity: T2_P_ADD,
+                categories: [
+                  { category: "changed", within: T2_ORIGINATORS },
+                  { category: "descendant-changed", exact: [T2_NEW] },
+                ],
+              },
+              {
+                identity: T2_WRAP,
+                categories: [
+                  { category: "descendant-changed", exact: [T2_P_ADD, T2_NEW] },
+                ],
+              },
+              {
+                identity: T2_ADD,
+                categories: [
+                  { category: "descendant-changed", exact: [T2_P_ADD, T2_NEW] },
+                ],
+              },
+              { identity: T2_OLD, categories: [] },
+              {
+                identity: T2_HOLDADD_DEP,
+                categories: [
+                  { category: "upstream-changed", exact: [T2_P_ADD, T2_NEW] },
+                ],
+              },
+              {
+                identity: T2_HOLDADD,
+                categories: [
+                  { category: "upstream-changed", exact: [T2_P_ADD, T2_NEW] },
+                ],
+              },
+              {
+                identity: T2_ADD_DEPS,
+                categories: [
+                  { category: "upstream-changed", exact: [T2_P_ADD, T2_NEW] },
+                ],
+              },
+              // Remove arm: the removed child reports as deleted and `changed`.
+              {
+                identity: T2_GONE,
+                deleted: true,
+                categories: [{ category: "changed", within: T2_ORIGINATORS }],
+              },
+              {
+                identity: T2_P_REM,
+                categories: [
+                  { category: "changed", within: T2_ORIGINATORS },
+                  { category: "descendant-changed", exact: [T2_GONE] },
+                ],
+              },
+              {
+                identity: T2_WRAP2,
+                categories: [
+                  {
+                    category: "descendant-changed",
+                    exact: [T2_P_REM, T2_GONE],
+                  },
+                ],
+              },
+              {
+                identity: T2_REM,
+                categories: [
+                  {
+                    category: "descendant-changed",
+                    exact: [T2_P_REM, T2_GONE],
+                  },
+                ],
+              },
+              { identity: T2_KEEP, categories: [] },
+              {
+                identity: T2_HOLDREM_DEP,
+                categories: [
+                  { category: "upstream-changed", exact: [T2_P_REM, T2_GONE] },
+                ],
+              },
+              {
+                identity: T2_HOLDREM,
+                categories: [
+                  { category: "upstream-changed", exact: [T2_P_REM, T2_GONE] },
+                ],
+              },
+              {
+                identity: T2_REM_DEPS,
+                categories: [
+                  { category: "upstream-changed", exact: [T2_P_REM, T2_GONE] },
+                ],
+              },
+            ],
+            label,
+          );
+        },
+      });
+    },
+  );
+}
+
 const T5_6_2 = defineProductTest({
   id: "T5.6-2",
   title:
     "child add/remove: the added child C is `changed`; the removed child reports as deleted and `changed`; each parent P is `changed` and `descendant-changed` attributed to C; P's ancestors are `descendant-changed` attributed to P and C; and the upstream cascade follows as in T5.6-1, attributed to the originating nodes (SPEC 5.6, 9.1, 9.3)",
-  run: async (product) => {
-    await withWorkspace(
-      {
-        [T2_ADD]: T2_ADD_BASELINE,
-        [T2_REM]: T2_REM_BASELINE,
-        [T2_ADD_DEPS]: T2_ADD_DEPS_SOURCE,
-        [T2_REM_DEPS]: T2_REM_DEPS_SOURCE,
-      },
-      async (workspace) => {
-        await workspace.gitInit();
-        const base = await workspace.gitCommitAll("baseline");
-        await workspace.file(T2_ADD, T2_ADD_CURRENT);
-        await workspace.file(T2_REM, T2_REM_CURRENT);
-        await buildOk(
-          product,
-          workspace,
-          "T5.6-2 `build` over the child-added/child-removed workspace",
-        );
-
-        const label =
-          "T5.6-2 `impact --base <baseline> --json` after the child add and remove";
-        assertImpactCategories(
-          await impactAgainst(product, workspace, base, label),
-          [
-            // Add arm.
-            {
-              identity: T2_NEW,
-              categories: [{ category: "changed", within: T2_ORIGINATORS }],
-            },
-            {
-              identity: T2_P_ADD,
-              categories: [
-                { category: "changed", within: T2_ORIGINATORS },
-                { category: "descendant-changed", exact: [T2_NEW] },
-              ],
-            },
-            {
-              identity: T2_WRAP,
-              categories: [
-                { category: "descendant-changed", exact: [T2_P_ADD, T2_NEW] },
-              ],
-            },
-            {
-              identity: T2_ADD,
-              categories: [
-                { category: "descendant-changed", exact: [T2_P_ADD, T2_NEW] },
-              ],
-            },
-            { identity: T2_OLD, categories: [] },
-            {
-              identity: T2_HOLDADD_DEP,
-              categories: [
-                { category: "upstream-changed", exact: [T2_P_ADD, T2_NEW] },
-              ],
-            },
-            {
-              identity: T2_HOLDADD,
-              categories: [
-                { category: "upstream-changed", exact: [T2_P_ADD, T2_NEW] },
-              ],
-            },
-            {
-              identity: T2_ADD_DEPS,
-              categories: [
-                { category: "upstream-changed", exact: [T2_P_ADD, T2_NEW] },
-              ],
-            },
-            // Remove arm: the removed child reports as deleted and `changed`.
-            {
-              identity: T2_GONE,
-              deleted: true,
-              categories: [{ category: "changed", within: T2_ORIGINATORS }],
-            },
-            {
-              identity: T2_P_REM,
-              categories: [
-                { category: "changed", within: T2_ORIGINATORS },
-                { category: "descendant-changed", exact: [T2_GONE] },
-              ],
-            },
-            {
-              identity: T2_WRAP2,
-              categories: [
-                { category: "descendant-changed", exact: [T2_P_REM, T2_GONE] },
-              ],
-            },
-            {
-              identity: T2_REM,
-              categories: [
-                { category: "descendant-changed", exact: [T2_P_REM, T2_GONE] },
-              ],
-            },
-            { identity: T2_KEEP, categories: [] },
-            {
-              identity: T2_HOLDREM_DEP,
-              categories: [
-                { category: "upstream-changed", exact: [T2_P_REM, T2_GONE] },
-              ],
-            },
-            {
-              identity: T2_HOLDREM,
-              categories: [
-                { category: "upstream-changed", exact: [T2_P_REM, T2_GONE] },
-              ],
-            },
-            {
-              identity: T2_REM_DEPS,
-              categories: [
-                { category: "upstream-changed", exact: [T2_P_REM, T2_GONE] },
-              ],
-            },
-          ],
-          label,
-        );
-      },
-    );
-  },
+  run: (product) => runT562Staging(product, HOME_IMPACT_READS),
 });
 
 // ---------------------------------------------------------------------------
@@ -710,16 +855,19 @@ const T5_6_2 = defineProductTest({
 const T3_TARGETS = "specs/Targets.mdx";
 const T3_T1 = "specs/Targets.mdx#t1";
 const T3_T2 = "specs/Targets.mdx#t2";
-const T3_TARGETS_SOURCE = [
-  '<S id="t1">',
-  "Target one text.",
-  "</S>",
-  "",
-  '<S id="t2">',
-  "Target two text.",
-  "</S>",
-  "",
-].join("\n");
+const T3_TARGETS_SOURCE = stagedMdx(
+  "T12.0-15 T5.6-3's specs/Targets.mdx (the d targets t1 and t2)",
+  [
+    '<S id="t1">',
+    "Target one text.",
+    "</S>",
+    "",
+    '<S id="t2">',
+    "Target two text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T3_GROW_FILE = "specs/Grow.mdx";
 const T3_OUTERGROW = "specs/Grow.mdx#outergrow";
@@ -755,150 +903,190 @@ const shrinkSource = (d: string): string =>
     "",
   ].join("\n");
 
+// T5.6-3's grow and shrink sources as staged-source records (S-9): the
+// same template calls, moved to module level.
+const T3_GROW_ONE = stagedMdx(
+  "T12.0-15 T5.6-3's specs/Grow.mdx at the baseline (growSource(\"Targets.t1\"): grow's one d target)",
+  growSource("Targets.t1"),
+);
+const T3_GROW_TWO = stagedMdx(
+  'T12.0-15 T5.6-3\'s specs/Grow.mdx with a d target gained (growSource("[Targets.t1, Targets.t2]"))',
+  growSource("[Targets.t1, Targets.t2]"),
+);
+const T3_SHRINK_TWO = stagedMdx(
+  "T12.0-15 T5.6-3's specs/Shrink.mdx at the baseline (shrinkSource(\"[Targets.t1, Targets.t2]\"): shrink's two d targets)",
+  shrinkSource("[Targets.t1, Targets.t2]"),
+);
+const T3_SHRINK_ONE = stagedMdx(
+  'T12.0-15 T5.6-3\'s specs/Shrink.mdx with a d target lost (shrinkSource("Targets.t1"))',
+  shrinkSource("Targets.t1"),
+);
+
 // Per-arm dependents: a direct dependent of D, a transitive dependent of that
 // dependent (the "transitively" clause), and their shared ancestors.
 const T3_GROW_DEPS = "specs/GrowDeps.mdx";
 const T3_GROWHOLD = "specs/GrowDeps.mdx#growhold";
 const T3_GROWHOLD_DIRECT = "specs/GrowDeps.mdx#growhold.direct";
 const T3_GROWHOLD_CHAIN = "specs/GrowDeps.mdx#growhold.chain";
-const T3_GROW_DEPS_SOURCE = [
-  'import Grow from "./Grow.xspec"',
-  "",
-  '<S id="growhold">',
-  "Grow-dependent holder text.",
-  "",
-  '<S id="growhold.direct" d={Grow.outergrow.grow}>',
-  "Direct dependent of the growing node.",
-  "</S>",
-  "",
-  '<S id="growhold.chain" d={"growhold.direct"}>',
-  "Transitive dependent through the direct dependent.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const T3_GROW_DEPS_SOURCE = stagedMdx(
+  "T12.0-15 T5.6-3's specs/GrowDeps.mdx (growhold.direct depending on grow, growhold.chain on growhold.direct)",
+  [
+    'import Grow from "./Grow.xspec"',
+    "",
+    '<S id="growhold">',
+    "Grow-dependent holder text.",
+    "",
+    '<S id="growhold.direct" d={Grow.outergrow.grow}>',
+    "Direct dependent of the growing node.",
+    "</S>",
+    "",
+    '<S id="growhold.chain" d={"growhold.direct"}>',
+    "Transitive dependent through the direct dependent.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T3_SHRINK_DEPS = "specs/ShrinkDeps.mdx";
 const T3_SHRINKHOLD = "specs/ShrinkDeps.mdx#shrinkhold";
 const T3_SHRINKHOLD_DIRECT = "specs/ShrinkDeps.mdx#shrinkhold.direct";
 const T3_SHRINKHOLD_CHAIN = "specs/ShrinkDeps.mdx#shrinkhold.chain";
-const T3_SHRINK_DEPS_SOURCE = [
-  'import Shrink from "./Shrink.xspec"',
-  "",
-  '<S id="shrinkhold">',
-  "Shrink-dependent holder text.",
-  "",
-  '<S id="shrinkhold.direct" d={Shrink.outershrink.shrink}>',
-  "Direct dependent of the shrinking node.",
-  "</S>",
-  "",
-  '<S id="shrinkhold.chain" d={"shrinkhold.direct"}>',
-  "Transitive dependent through the direct dependent.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const T3_SHRINK_DEPS_SOURCE = stagedMdx(
+  "T12.0-15 T5.6-3's specs/ShrinkDeps.mdx (shrinkhold.direct depending on shrink, shrinkhold.chain on shrinkhold.direct)",
+  [
+    'import Shrink from "./Shrink.xspec"',
+    "",
+    '<S id="shrinkhold">',
+    "Shrink-dependent holder text.",
+    "",
+    '<S id="shrinkhold.direct" d={Shrink.outershrink.shrink}>',
+    "Direct dependent of the shrinking node.",
+    "</S>",
+    "",
+    '<S id="shrinkhold.chain" d={"shrinkhold.direct"}>',
+    "Transitive dependent through the direct dependent.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+/** T5.6-3's staging: one `d` target added, another removed (the module header). */
+async function runT563Staging(
+  product: ProductBinding,
+  visit: ImpactReadVisitor,
+): Promise<void> {
+  await withWorkspace(
+    {
+      [T3_TARGETS]: T3_TARGETS_SOURCE,
+      [T3_GROW_FILE]: T3_GROW_ONE,
+      [T3_SHRINK_FILE]: T3_SHRINK_TWO,
+      [T3_GROW_DEPS]: T3_GROW_DEPS_SOURCE,
+      [T3_SHRINK_DEPS]: T3_SHRINK_DEPS_SOURCE,
+    },
+    async (workspace) => {
+      await workspace.gitInit();
+      const base = await workspace.gitCommitAll("baseline");
+      await workspace.file(T3_GROW_FILE, T3_GROW_TWO);
+      await workspace.file(T3_SHRINK_FILE, T3_SHRINK_ONE);
+      await buildOk(
+        product,
+        workspace,
+        "T5.6-3 `build` over the d-target-edited workspace",
+      );
+
+      await visit(workspace, {
+        label: "T5.6-3 after the d-target add and remove",
+        ref: base,
+        home: async () => {
+          const label =
+            "T5.6-3 `impact --base <baseline> --json` after the d-target add and remove";
+          const impact = await impactAgainst(product, workspace, base, label);
+
+          // The test's global clause first: a d-target-only edit makes no node
+          // `changed` or `descendant-changed` (SPEC 5.6).
+          for (const entry of impact.requirements) {
+            for (const category of entry.categories) {
+              if (
+                category.category === "changed" ||
+                category.category === "descendant-changed"
+              ) {
+                fail(
+                  `${label}: an edit that only adds or removes \`d\` targets makes no ` +
+                    `node \`changed\` or \`descendant-changed\` (SPEC 5.6 — d targets ` +
+                    `enter metadataHash and effectiveHash, never ownHash or ` +
+                    `subtreeHash); got ${JSON.stringify(entry)}`,
+                );
+              }
+            }
+          }
+
+          const growCascade = {
+            category: "upstream-changed",
+            exact: [T3_GROW],
+          } as const;
+          const shrinkCascade = {
+            category: "upstream-changed",
+            exact: [T3_SHRINK],
+          } as const;
+          assertImpactCategories(
+            impact,
+            [
+              // The two originating nodes: `metadata-changed`, and never
+              // `upstream-changed` — a node's own dependency-edge edits are
+              // excluded from that category ("other than the node itself").
+              {
+                identity: T3_GROW,
+                categories: [
+                  {
+                    category: "metadata-changed",
+                    within: [T3_GROW, T3_SHRINK],
+                  },
+                ],
+              },
+              {
+                identity: T3_SHRINK,
+                categories: [
+                  {
+                    category: "metadata-changed",
+                    within: [T3_GROW, T3_SHRINK],
+                  },
+                ],
+              },
+              // The targets gain and lose incoming edges only: uncategorized.
+              { identity: T3_T1, categories: [] },
+              { identity: T3_T2, categories: [] },
+              { identity: T3_TARGETS, categories: [] },
+              // Grow arm cascade: ancestors, dependents, their dependents, and
+              // the dependents' ancestors — all attributed to the grow node.
+              { identity: T3_OUTERGROW, categories: [growCascade] },
+              { identity: T3_GROW_FILE, categories: [growCascade] },
+              { identity: T3_GROWHOLD_DIRECT, categories: [growCascade] },
+              { identity: T3_GROWHOLD_CHAIN, categories: [growCascade] },
+              { identity: T3_GROWHOLD, categories: [growCascade] },
+              { identity: T3_GROW_DEPS, categories: [growCascade] },
+              // Shrink arm cascade, attributed to the shrink node.
+              { identity: T3_OUTERSHRINK, categories: [shrinkCascade] },
+              { identity: T3_SHRINK_FILE, categories: [shrinkCascade] },
+              { identity: T3_SHRINKHOLD_DIRECT, categories: [shrinkCascade] },
+              { identity: T3_SHRINKHOLD_CHAIN, categories: [shrinkCascade] },
+              { identity: T3_SHRINKHOLD, categories: [shrinkCascade] },
+              { identity: T3_SHRINK_DEPS, categories: [shrinkCascade] },
+            ],
+            label,
+          );
+        },
+      });
+    },
+  );
+}
 
 const T5_6_3 = defineProductTest({
   id: "T5.6-3",
   title:
     "d-target edit: adding a `d` target on one node and removing one on another makes each D `metadata-changed`; no node anywhere is `changed` or `descendant-changed`; and every node whose effectiveHash changed — D's ancestors, dependents, dependents' dependents, and their ancestors, transitively — is `upstream-changed` attributed to its arm's D (SPEC 5.6, 9.1)",
-  run: async (product) => {
-    await withWorkspace(
-      {
-        [T3_TARGETS]: T3_TARGETS_SOURCE,
-        [T3_GROW_FILE]: growSource("Targets.t1"),
-        [T3_SHRINK_FILE]: shrinkSource("[Targets.t1, Targets.t2]"),
-        [T3_GROW_DEPS]: T3_GROW_DEPS_SOURCE,
-        [T3_SHRINK_DEPS]: T3_SHRINK_DEPS_SOURCE,
-      },
-      async (workspace) => {
-        await workspace.gitInit();
-        const base = await workspace.gitCommitAll("baseline");
-        await workspace.file(
-          T3_GROW_FILE,
-          growSource("[Targets.t1, Targets.t2]"),
-        );
-        await workspace.file(T3_SHRINK_FILE, shrinkSource("Targets.t1"));
-        await buildOk(
-          product,
-          workspace,
-          "T5.6-3 `build` over the d-target-edited workspace",
-        );
-
-        const label =
-          "T5.6-3 `impact --base <baseline> --json` after the d-target add and remove";
-        const impact = await impactAgainst(product, workspace, base, label);
-
-        // The test's global clause first: a d-target-only edit makes no node
-        // `changed` or `descendant-changed` (SPEC 5.6).
-        for (const entry of impact.requirements) {
-          for (const category of entry.categories) {
-            if (
-              category.category === "changed" ||
-              category.category === "descendant-changed"
-            ) {
-              fail(
-                `${label}: an edit that only adds or removes \`d\` targets makes no ` +
-                  `node \`changed\` or \`descendant-changed\` (SPEC 5.6 — d targets ` +
-                  `enter metadataHash and effectiveHash, never ownHash or ` +
-                  `subtreeHash); got ${JSON.stringify(entry)}`,
-              );
-            }
-          }
-        }
-
-        const growCascade = {
-          category: "upstream-changed",
-          exact: [T3_GROW],
-        } as const;
-        const shrinkCascade = {
-          category: "upstream-changed",
-          exact: [T3_SHRINK],
-        } as const;
-        assertImpactCategories(
-          impact,
-          [
-            // The two originating nodes: `metadata-changed`, and never
-            // `upstream-changed` — a node's own dependency-edge edits are
-            // excluded from that category ("other than the node itself").
-            {
-              identity: T3_GROW,
-              categories: [
-                { category: "metadata-changed", within: [T3_GROW, T3_SHRINK] },
-              ],
-            },
-            {
-              identity: T3_SHRINK,
-              categories: [
-                { category: "metadata-changed", within: [T3_GROW, T3_SHRINK] },
-              ],
-            },
-            // The targets gain and lose incoming edges only: uncategorized.
-            { identity: T3_T1, categories: [] },
-            { identity: T3_T2, categories: [] },
-            { identity: T3_TARGETS, categories: [] },
-            // Grow arm cascade: ancestors, dependents, their dependents, and
-            // the dependents' ancestors — all attributed to the grow node.
-            { identity: T3_OUTERGROW, categories: [growCascade] },
-            { identity: T3_GROW_FILE, categories: [growCascade] },
-            { identity: T3_GROWHOLD_DIRECT, categories: [growCascade] },
-            { identity: T3_GROWHOLD_CHAIN, categories: [growCascade] },
-            { identity: T3_GROWHOLD, categories: [growCascade] },
-            { identity: T3_GROW_DEPS, categories: [growCascade] },
-            // Shrink arm cascade, attributed to the shrink node.
-            { identity: T3_OUTERSHRINK, categories: [shrinkCascade] },
-            { identity: T3_SHRINK_FILE, categories: [shrinkCascade] },
-            { identity: T3_SHRINKHOLD_DIRECT, categories: [shrinkCascade] },
-            { identity: T3_SHRINKHOLD_CHAIN, categories: [shrinkCascade] },
-            { identity: T3_SHRINKHOLD, categories: [shrinkCascade] },
-            { identity: T3_SHRINK_DEPS, categories: [shrinkCascade] },
-          ],
-          label,
-        );
-      },
-    );
-  },
+  run: (product) => runT563Staging(product, HOME_IMPACT_READS),
 });
 
 // ---------------------------------------------------------------------------
@@ -933,59 +1121,81 @@ const metaSource = (coverage: string, tags: string): string =>
 // Arm 2's staging follows arm 1's `build` and `impact` (the body's first
 // product invocations), so it is a ledger record (S-9's before-any-product
 // clause; helpers/staged-mdx.ts) — the same template call, moved to module
-// level. Arm 1's staging precedes the body's first invocation and stays a
-// plain `file()` (S-7's sweep reaches it against the stub).
+// level. Arm 1's staging precedes the body's first invocation (S-7's sweep
+// reaches it against the stub), but T12.0-15's `impact` family stages it
+// after its own first invocation, so its two sources are records too, the
+// same template calls.
 const T5_6_4_TAGS_EDITED = stagedMdx(
-  "T5.6-4 arm 2: tags alpha beta to alpha gamma, coverage none",
+  "T5.6-4/T12.0-15 arm 2: tags alpha beta to alpha gamma, coverage none",
   metaSource("none", "alpha gamma"),
 );
+const T5_6_4_BASELINE = stagedMdx(
+  'T12.0-15 T5.6-4\'s specs/Meta.mdx at the baseline (metaSource("required", "alpha beta"))',
+  metaSource("required", "alpha beta"),
+);
+const T5_6_4_COVERAGE_EDITED = stagedMdx(
+  'T12.0-15 T5.6-4\'s specs/Meta.mdx with its coverage edited (metaSource("none", "alpha beta"))',
+  metaSource("none", "alpha beta"),
+);
 
-const T5_6_4 = defineProductTest({
-  id: "T5.6-4",
-  title:
-    "coverage/tags-only edit: changing only the node's coverage attribute, and only its tags, each make the node `metadata-changed` and give no other node — dependent and ancestors included — any category (SPEC 5.6, 9.1: such an edit changes no effectiveHash and propagates nothing)",
-  run: async (product) => {
-    await withWorkspace(
-      { [T4_META]: metaSource("required", "alpha beta") },
-      async (workspace) => {
-        await workspace.gitInit();
-        const coverageBase = await workspace.gitCommitAll("baseline");
+/**
+ * T5.6-4's staging: one workspace, two sequential baselines — the
+ * coverage-only edit read against the first, the tags-only edit against
+ * the second (the module header).
+ */
+async function runT564Staging(
+  product: ProductBinding,
+  visit: ImpactReadVisitor,
+): Promise<void> {
+  await withWorkspace({ [T4_META]: T5_6_4_BASELINE }, async (workspace) => {
+    await workspace.gitInit();
+    const coverageBase = await workspace.gitCommitAll("baseline");
 
-        // Arm 1: coverage `required` → `none` (both defined values, SPEC 2.5).
-        await workspace.file(T4_META, metaSource("none", "alpha beta"));
-        // Commit arm 2's baseline before any build, so both baselines hold
-        // sources only.
-        const tagsBase = await workspace.gitCommitAll("coverage edited");
-        await buildOk(
-          product,
-          workspace,
-          "T5.6-4 `build` over the coverage-edited workspace",
-        );
+    // Arm 1: coverage `required` → `none` (both defined values, SPEC 2.5).
+    await workspace.file(T4_META, T5_6_4_COVERAGE_EDITED);
+    // Commit arm 2's baseline before any build, so both baselines hold
+    // sources only.
+    const tagsBase = await workspace.gitCommitAll("coverage edited");
+    await buildOk(
+      product,
+      workspace,
+      "T5.6-4 `build` over the coverage-edited workspace",
+    );
+    const expectations = (): ExpectedNodeImpact[] => [
+      {
+        identity: T4_M,
+        categories: [{ category: "metadata-changed", within: [T4_M] }],
+      },
+      { identity: T4_DEP, categories: [] },
+      { identity: T4_OUTER, categories: [] },
+      { identity: T4_META, categories: [] },
+    ];
+    await visit(workspace, {
+      label: "T5.6-4 after the coverage-only edit",
+      ref: coverageBase,
+      home: async () => {
         const coverageLabel =
           "T5.6-4 `impact --base <baseline> --json` after the coverage-only edit";
-        const expectations = (): ExpectedNodeImpact[] => [
-          {
-            identity: T4_M,
-            categories: [{ category: "metadata-changed", within: [T4_M] }],
-          },
-          { identity: T4_DEP, categories: [] },
-          { identity: T4_OUTER, categories: [] },
-          { identity: T4_META, categories: [] },
-        ];
         assertImpactCategories(
           await impactAgainst(product, workspace, coverageBase, coverageLabel),
           expectations(),
           coverageLabel,
         );
+      },
+    });
 
-        // Arm 2: tags `alpha beta` → `alpha gamma` against the second
-        // baseline, so the tags edit is the only difference.
-        await workspace.file(T4_META, T5_6_4_TAGS_EDITED);
-        await buildOk(
-          product,
-          workspace,
-          "T5.6-4 `build` over the tags-edited workspace",
-        );
+    // Arm 2: tags `alpha beta` → `alpha gamma` against the second
+    // baseline, so the tags edit is the only difference.
+    await workspace.file(T4_META, T5_6_4_TAGS_EDITED);
+    await buildOk(
+      product,
+      workspace,
+      "T5.6-4 `build` over the tags-edited workspace",
+    );
+    await visit(workspace, {
+      label: "T5.6-4 after the tags-only edit",
+      ref: tagsBase,
+      home: async () => {
         const tagsLabel =
           "T5.6-4 `impact --base <coverage-edited> --json` after the tags-only edit";
         assertImpactCategories(
@@ -994,8 +1204,15 @@ const T5_6_4 = defineProductTest({
           tagsLabel,
         );
       },
-    );
-  },
+    });
+  });
+}
+
+const T5_6_4 = defineProductTest({
+  id: "T5.6-4",
+  title:
+    "coverage/tags-only edit: changing only the node's coverage attribute, and only its tags, each make the node `metadata-changed` and give no other node — dependent and ancestors included — any category (SPEC 5.6, 9.1: such an edit changes no effectiveHash and propagates nothing)",
+  run: (product) => runT564Staging(product, HOME_IMPACT_READS),
 });
 
 // ---------------------------------------------------------------------------
@@ -1024,66 +1241,97 @@ const xSource = (text: string): string =>
     "",
   ].join("\n");
 
+// T5.6-5's sources as staged-source records (S-9): the same template calls,
+// moved to module level.
+const T5_UP_V1 = stagedMdx(
+  'T12.0-15 T5.6-5\'s specs/Up.mdx at the baseline (upSource("Upstream target text v1."))',
+  upSource("Upstream target text v1."),
+);
+const T5_UP_V2 = stagedMdx(
+  'T12.0-15 T5.6-5\'s specs/Up.mdx with t edited (upSource("Upstream target text v2."))',
+  upSource("Upstream target text v2."),
+);
+const T5_X_V1 = stagedMdx(
+  'T12.0-15 T5.6-5\'s specs/X.mdx at the baseline (xSource("Own text of x v1."): x depending on t)',
+  xSource("Own text of x v1."),
+);
+const T5_X_V2 = stagedMdx(
+  'T12.0-15 T5.6-5\'s specs/X.mdx with x edited (xSource("Own text of x v2."))',
+  xSource("Own text of x v2."),
+);
+
+/** T5.6-5's staging: an own edit plus a dependency-target edit (the module header). */
+async function runT565Staging(
+  product: ProductBinding,
+  visit: ImpactReadVisitor,
+): Promise<void> {
+  await withWorkspace(
+    {
+      [T5_UP]: T5_UP_V1,
+      [T5_X_FILE]: T5_X_V1,
+    },
+    async (workspace) => {
+      await workspace.gitInit();
+      const base = await workspace.gitCommitAll("baseline");
+      await workspace.file(T5_UP, T5_UP_V2);
+      await workspace.file(T5_X_FILE, T5_X_V2);
+      await buildOk(
+        product,
+        workspace,
+        "T5.6-5 `build` over the doubly-edited workspace",
+      );
+
+      await visit(workspace, {
+        label: "T5.6-5 after the own edit plus dependency-target edit",
+        ref: base,
+        home: async () => {
+          const label =
+            "T5.6-5 `impact --base <baseline> --json` after the own edit plus dependency-target edit";
+          assertImpactCategories(
+            await impactAgainst(product, workspace, base, label),
+            [
+              // The node under test: both categories simultaneously. Its
+              // `upstream-changed` originates at the edited target `t`; its own
+              // edit is no upstream cause (SPEC 5.6's category definition).
+              {
+                identity: T5_X,
+                categories: [
+                  { category: "changed", within: [T5_X, T5_T] },
+                  { category: "upstream-changed", exact: [T5_T] },
+                ],
+              },
+              {
+                identity: T5_T,
+                categories: [{ category: "changed", within: [T5_X, T5_T] }],
+              },
+              {
+                identity: T5_UP,
+                categories: [{ category: "descendant-changed", exact: [T5_T] }],
+              },
+              // The mirror multi-flag node: `x`'s subtree change and the
+              // subtree-borne dependency on `t`, each attributed to its own
+              // originating node.
+              {
+                identity: T5_X_FILE,
+                categories: [
+                  { category: "descendant-changed", exact: [T5_X] },
+                  { category: "upstream-changed", exact: [T5_T] },
+                ],
+              },
+            ],
+            label,
+          );
+        },
+      });
+    },
+  );
+}
+
 const T5_6_5 = defineProductTest({
   id: "T5.6-5",
   title:
     "multiple flags: a node with an own edit plus a dependency-target edit carries both `changed` and `upstream-changed` (categories are independent flags); its file root likewise carries `descendant-changed` and `upstream-changed` (SPEC 5.6, 9.1)",
-  run: async (product) => {
-    await withWorkspace(
-      {
-        [T5_UP]: upSource("Upstream target text v1."),
-        [T5_X_FILE]: xSource("Own text of x v1."),
-      },
-      async (workspace) => {
-        await workspace.gitInit();
-        const base = await workspace.gitCommitAll("baseline");
-        await workspace.file(T5_UP, upSource("Upstream target text v2."));
-        await workspace.file(T5_X_FILE, xSource("Own text of x v2."));
-        await buildOk(
-          product,
-          workspace,
-          "T5.6-5 `build` over the doubly-edited workspace",
-        );
-
-        const label =
-          "T5.6-5 `impact --base <baseline> --json` after the own edit plus dependency-target edit";
-        assertImpactCategories(
-          await impactAgainst(product, workspace, base, label),
-          [
-            // The node under test: both categories simultaneously. Its
-            // `upstream-changed` originates at the edited target `t`; its own
-            // edit is no upstream cause (SPEC 5.6's category definition).
-            {
-              identity: T5_X,
-              categories: [
-                { category: "changed", within: [T5_X, T5_T] },
-                { category: "upstream-changed", exact: [T5_T] },
-              ],
-            },
-            {
-              identity: T5_T,
-              categories: [{ category: "changed", within: [T5_X, T5_T] }],
-            },
-            {
-              identity: T5_UP,
-              categories: [{ category: "descendant-changed", exact: [T5_T] }],
-            },
-            // The mirror multi-flag node: `x`'s subtree change and the
-            // subtree-borne dependency on `t`, each attributed to its own
-            // originating node.
-            {
-              identity: T5_X_FILE,
-              categories: [
-                { category: "descendant-changed", exact: [T5_X] },
-                { category: "upstream-changed", exact: [T5_T] },
-              ],
-            },
-          ],
-          label,
-        );
-      },
-    );
-  },
+  run: (product) => runT565Staging(product, HOME_IMPACT_READS),
 });
 
 // ---------------------------------------------------------------------------
@@ -1117,43 +1365,49 @@ const T6_DOOMED = "specs/Doomed.mdx";
 const T6_GONE = "specs/Doomed.mdx#gone";
 const T6_GONE_KID = "specs/Doomed.mdx#gone.kid";
 const T6_GONE_KID2 = "specs/Doomed.mdx#gone.kid2";
-const T6_DOOMED_SOURCE = [
-  'import Present from "./Present.xspec"',
-  "",
-  '<S id="gone" d={[Present.tgt, Present.emb]} coverage="none" tags="legacy stale">',
-  "Doomed subtree root embedding: {text(Present.emb)}",
-  "",
-  '<S id="gone.kid">',
-  "Doomed child text.",
-  "</S>",
-  "",
-  '<S id="gone.kid2">',
-  "Second doomed child text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const T6_DOOMED_SOURCE = stagedMdx(
+  'T12.0-15 T5.6-6\'s specs/Doomed.mdx at the baseline (the deleted subtree gone with d targets, coverage="none", tags, children, and an embedding)',
+  [
+    'import Present from "./Present.xspec"',
+    "",
+    '<S id="gone" d={[Present.tgt, Present.emb]} coverage="none" tags="legacy stale">',
+    "Doomed subtree root embedding: {text(Present.emb)}",
+    "",
+    '<S id="gone.kid">',
+    "Doomed child text.",
+    "</S>",
+    "",
+    '<S id="gone.kid2">',
+    "Second doomed child text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T6_FRESH = "specs/Fresh.mdx";
 const T6_BORN = "specs/Fresh.mdx#born";
 const T6_BORN_KID = "specs/Fresh.mdx#born.kid";
 const T6_BORN_KID2 = "specs/Fresh.mdx#born.kid2";
-const T6_FRESH_SOURCE = [
-  'import Present from "./Present.xspec"',
-  "",
-  '<S id="born" d={[Present.tgt, Present.emb]} coverage="none" tags="fresh added">',
-  "Added subtree root embedding: {text(Present.emb)}",
-  "",
-  '<S id="born.kid">',
-  "Added child text.",
-  "</S>",
-  "",
-  '<S id="born.kid2">',
-  "Second added child text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const T6_FRESH_SOURCE = stagedMdx(
+  'T12.0-15 T5.6-6\'s specs/Fresh.mdx, added (the subtree born with d targets, coverage="none", tags, children, and an embedding)',
+  [
+    'import Present from "./Present.xspec"',
+    "",
+    '<S id="born" d={[Present.tgt, Present.emb]} coverage="none" tags="fresh added">',
+    "Added subtree root embedding: {text(Present.emb)}",
+    "",
+    '<S id="born.kid">',
+    "Added child text.",
+    "</S>",
+    "",
+    '<S id="born.kid2">',
+    "Second added child text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Every node carrying `changed`: the edited target plus all added and all
 // deleted nodes (added/deleted nodes are originating nodes — they carry
@@ -1170,74 +1424,110 @@ const T6_ORIGINATORS = [
   T6_GONE_KID2,
 ];
 
+// T5.6-6's persisting sources as staged-source records (S-9): the same
+// template calls, moved to module level.
+const T6_PRESENT_V1 = stagedMdx(
+  'T12.0-15 T5.6-6\'s specs/Present.mdx at the baseline (presentSource("Edited target text v1."): tgt and the embedding target emb)',
+  presentSource("Edited target text v1."),
+);
+const T6_PRESENT_V2 = stagedMdx(
+  'T12.0-15 T5.6-6\'s specs/Present.mdx with tgt edited (presentSource("Edited target text v2."))',
+  presentSource("Edited target text v2."),
+);
+
+/** T5.6-6's staging: a subtree added, another deleted, a target edited (the module header). */
+async function runT566Staging(
+  product: ProductBinding,
+  visit: ImpactReadVisitor,
+): Promise<void> {
+  await withWorkspace(
+    {
+      [T6_PRESENT]: T6_PRESENT_V1,
+      [T6_DOOMED]: T6_DOOMED_SOURCE,
+    },
+    async (workspace) => {
+      await workspace.gitInit();
+      const base = await workspace.gitCommitAll("baseline");
+      await workspace.file(T6_PRESENT, T6_PRESENT_V2);
+      await fsp.rm(workspace.path(T6_DOOMED));
+      await workspace.file(T6_FRESH, T6_FRESH_SOURCE);
+      await buildOk(
+        product,
+        workspace,
+        "T5.6-6 `build` over the workspace with the added subtree and without the deleted one",
+      );
+
+      await visit(workspace, {
+        label: "T5.6-6 after the subtree add, subtree delete, and target edit",
+        ref: base,
+        home: async () => {
+          const label =
+            "T5.6-6 `impact --base <baseline> --json` after the subtree add, subtree delete, and target edit";
+          const changedOnly = (
+            identity: string,
+            deleted: boolean,
+          ): ExpectedNodeImpact => ({
+            identity,
+            deleted,
+            categories: [{ category: "changed", within: T6_ORIGINATORS }],
+          });
+          assertImpactCategories(
+            await impactAgainst(product, workspace, base, label),
+            [
+              // The persisting side: the edited target and its cascade.
+              {
+                identity: T6_TGT,
+                categories: [{ category: "changed", within: T6_ORIGINATORS }],
+              },
+              {
+                identity: T6_PRESENT,
+                categories: [
+                  { category: "descendant-changed", exact: [T6_TGT] },
+                ],
+              },
+              { identity: T6_EMB, categories: [] },
+              // Every added node — the created file's root included — is
+              // `changed` only, whatever metadata, children, or dependency
+              // edges it carries.
+              changedOnly(T6_FRESH, false),
+              changedOnly(T6_BORN, false),
+              changedOnly(T6_BORN_KID, false),
+              changedOnly(T6_BORN_KID2, false),
+              // Every deleted node reports as deleted, under its baseline
+              // identity, and `changed` only.
+              changedOnly(T6_DOOMED, true),
+              changedOnly(T6_GONE, true),
+              changedOnly(T6_GONE_KID, true),
+              changedOnly(T6_GONE_KID2, true),
+            ],
+            label,
+          );
+        },
+      });
+    },
+  );
+}
+
 const T5_6_6 = defineProductTest({
   id: "T5.6-6",
   title:
     'added/deleted convention: every node of an added file-and-subtree whose root carries `d` targets (one to a node also edited since the baseline), `coverage="none"`, tags, children, and an embedding is `changed` only — never `metadata-changed`, `descendant-changed`, or `upstream-changed`; every node of a deleted subtree with the same features reports as deleted and `changed` only (SPEC 5.6, 9.1, 9.3)',
-  run: async (product) => {
-    await withWorkspace(
-      {
-        [T6_PRESENT]: presentSource("Edited target text v1."),
-        [T6_DOOMED]: T6_DOOMED_SOURCE,
-      },
-      async (workspace) => {
-        await workspace.gitInit();
-        const base = await workspace.gitCommitAll("baseline");
-        await workspace.file(
-          T6_PRESENT,
-          presentSource("Edited target text v2."),
-        );
-        await fsp.rm(workspace.path(T6_DOOMED));
-        await workspace.file(T6_FRESH, T6_FRESH_SOURCE);
-        await buildOk(
-          product,
-          workspace,
-          "T5.6-6 `build` over the workspace with the added subtree and without the deleted one",
-        );
-
-        const label =
-          "T5.6-6 `impact --base <baseline> --json` after the subtree add, subtree delete, and target edit";
-        const changedOnly = (
-          identity: string,
-          deleted: boolean,
-        ): ExpectedNodeImpact => ({
-          identity,
-          deleted,
-          categories: [{ category: "changed", within: T6_ORIGINATORS }],
-        });
-        assertImpactCategories(
-          await impactAgainst(product, workspace, base, label),
-          [
-            // The persisting side: the edited target and its cascade.
-            {
-              identity: T6_TGT,
-              categories: [{ category: "changed", within: T6_ORIGINATORS }],
-            },
-            {
-              identity: T6_PRESENT,
-              categories: [{ category: "descendant-changed", exact: [T6_TGT] }],
-            },
-            { identity: T6_EMB, categories: [] },
-            // Every added node — the created file's root included — is
-            // `changed` only, whatever metadata, children, or dependency
-            // edges it carries.
-            changedOnly(T6_FRESH, false),
-            changedOnly(T6_BORN, false),
-            changedOnly(T6_BORN_KID, false),
-            changedOnly(T6_BORN_KID2, false),
-            // Every deleted node reports as deleted, under its baseline
-            // identity, and `changed` only.
-            changedOnly(T6_DOOMED, true),
-            changedOnly(T6_GONE, true),
-            changedOnly(T6_GONE_KID, true),
-            changedOnly(T6_GONE_KID2, true),
-          ],
-          label,
-        );
-      },
-    );
-  },
+  run: (product) => runT566Staging(product, HOME_IMPACT_READS),
 });
+
+/**
+ * The stagings of T5.6-1 through T5.6-6, in canonical ID order — T12.0-15's
+ * `impact` family runs each with its human twin as the visitor
+ * (section-12.0-iv.ts).
+ */
+export const T5_6_IMPACT_STAGINGS: readonly ImpactStaging[] = [
+  { test: "T5.6-1", run: runT561Staging },
+  { test: "T5.6-2", run: runT562Staging },
+  { test: "T5.6-3", run: runT563Staging },
+  { test: "T5.6-4", run: runT564Staging },
+  { test: "T5.6-5", run: runT565Staging },
+  { test: "T5.6-6", run: runT566Staging },
+];
 
 /** TEST-SPEC §5.6, in canonical ID order (SUITE-20). */
 export const section56Tests: readonly ProductTestEntry[] = [

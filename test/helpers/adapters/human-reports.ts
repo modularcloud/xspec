@@ -22,20 +22,27 @@
 // performed-report decoder takes a successful `rename`/`move` report onto
 // the applied mapping the form-exact `--json` decode produces (model.ts
 // `PerformedOperationReport`): every pair the operation journaled, its
-// `from` and `to` identity (TEST-SPEC T12.0-15; SPEC 6.4, 6.5).
+// `from` and `to` identity (TEST-SPEC T12.0-15; SPEC 6.4, 6.5). The
+// impact-report decoder takes an `impact --base <ref>` report onto the
+// impact model the `--json` adapter produces (model.ts `ImpactReport`):
+// each category of each requirement entry with its attribution, the nodes
+// the entry covers — a collapsed ancestor chain's several — and its
+// deletion, and each impacted location of each code group with its
+// witness edge and path (TEST-SPEC T12.0-15; SPEC 5.6, 9.1–9.3).
 // Like every adapter here they are the one place aware of the report's
 // concrete shape: adjustable to shape, never to values, and failing loudly
 // — a diagnosed `HarnessAssertionError` naming the line and the datum —
 // when a report's text fits none of the layout below or lacks what the
-// layout carries. Later decoders for the other human reports (impact,
-// review, coverage, ids, show) go beside these.
+// layout carries. Later decoders for the other human reports (review,
+// coverage, ids, show) go beside these.
 //
 // The layout, fitted to what the built product emits (observed by running
 // it on T14-11's per-condition fixtures, T1.5-2's arms, T12.7-3's stagings,
 // and hand-staged 14.11, 14.12, 14.13, 14.21, refusal, and code-less
-// findings, the previews of T6.6-2 through T6.6-6, and the performed
-// reports of T6.4-1's rename and T6.5-1's file moves — never by reading
-// its source):
+// findings, the previews of T6.6-2 through T6.6-6, the performed reports
+// of T6.4-1's rename and T6.5-1's file moves, and the impact reports of
+// T5.6-1 through T5.6-6 and T9-1 through T9.3-3 — never by reading its
+// source):
 //
 // - A findings report — a failing `build`'s validation errors, `check`'s
 //   findings, a gated read's report (13.3), a refused operation's refusal
@@ -98,6 +105,29 @@
 //   which must then equal the number of pair lines. A successful operation
 //   carries no finding (12.7: `findings` `[]`), so no finding line belongs
 //   there: a line holding no pair fits no layout.
+// - An impact report — `impact --base <ref>` without `--json` (SPEC 9.3) —
+//   is a line naming the resolved baseline, `baseline <commit>` (read once,
+//   never compared: 9.3 defines no such datum for the report), then its
+//   sections, each opened by a header line at the margin, each at most once
+//   (9.3: output is grouped by category), in any order: one per change
+//   category (5.6), `<category>:` — the category spelled as a code is
+//   (below) — and `directly impacted code:` and `transitively impacted
+//   code:` (9.2), each printed only where it holds an entry, so a report
+//   without differences is the baseline line alone. Beneath a category, one
+//   line per entry carrying it, indented two spaces:
+//   `<node>[, <node>…][ (deleted)] — attributed to: <identity>[, …]` — the
+//   nodes the entry covers (several for a collapsed ancestor chain, 9.3),
+//   the mark of a deleted node reported under its baseline identity mapped
+//   forward (9.3), and the category's attribution (5.6, 9.1), an entry
+//   printing no attribution clause read as attributed to none; a node
+//   carrying several categories stands under each. Beneath a code group,
+//   one line per impacted location, indented two spaces:
+//   `<location> — via <kind> <target>; path: <node>[ -> <node>…]` — the
+//   location, its witness edge's kind (5.2, spelled as a code is) and
+//   target, the edge running from the location itself (9.2: a location's
+//   impact edges are its own `references` and `embeds` edges, the reported
+//   one targeting the path's first node, 9.3), and the witness path in
+//   order from the edge's target.
 // - A code is recognized at the position the layout gives it, spelled as
 //   human.ts's `codeMention` spells one, over the whole segment: its words
 //   case-insensitive, joined by one character that is neither letter nor
@@ -139,7 +169,11 @@
 //   the refused previews of T6.6-3 print no plan. In a performed report,
 //   an identity holding ` -> ` likewise, or one spelling the count line's
 //   form as the report's last line — the performed operations of T6.4-1
-//   and T6.5-1 map none.
+//   and T6.5-1 map none. In an impact report, an identity holding `, `,
+//   ` -> `, ` — attributed to:`, ` — via `, or `; path: `, or ending in
+//   ` (deleted)`, a location holding ` — via `, an identity beginning with
+//   a space, and an edge kind holding one — the data of T5.6-*, T9-*, and
+//   T9.x-* hold none.
 // - A code's words at the code's position are the code — human.ts's
 //   convention, under which `missing ID` carries `missing-id` — so a line
 //   whose code token is gone but whose message opens with its own code's
@@ -169,6 +203,23 @@
 //   order free (12.7's `from`-byte order is the JSON form's, T12.0-15): its
 //   pairs as a multiset of `from`/`to` pairs, a pair the human report
 //   omits, changes, or lists beside the twin's named as such.
+// - An impact report's comparison is exact on the impact model, its order
+//   free (T12.0-15 lists none for `impact`: SPEC fixes no order for the
+//   report itself). Its unit is one category of one requirement entry —
+//   the category, the nodes the entry covers as a multiset (a collapsed
+//   chain's members, their order free), the deletion, and the category's
+//   attribution as a multiset — the human report's lines and the `--json`
+//   entries' categories compared as multisets of such data: the `--json`
+//   form gathers a node's several categories into one entry, the human
+//   report stands it under each category (9.3: grouped by category), and
+//   neither grouping is a datum. A `--json` entry carrying no category is
+//   a datum no line under a category carries, so it never matches. Each
+//   impacted location of each group is one datum — the group, the
+//   location, its witness edge's source, target, and kind, and its witness
+//   path as a sequence — the two forms' data compared as multisets. The
+//   resolved baseline either form may echo is not compared. A datum the
+//   human report omits, changes, misplaces, or lists beside its twin's is
+//   named as such.
 
 import { Buffer } from "node:buffer";
 import { fail } from "../assertions.js";
@@ -178,10 +229,14 @@ import { pathValueBytes, renderPathValue } from "./forms.js";
 import { STABLE_CODES } from "./human.js";
 import type {
   AppliedMappingPair,
+  ChangeCategory,
+  EdgeKind,
   ErrorInformation,
   Finding,
   FindingInformation,
   FindingLocation,
+  GraphEdge,
+  ImpactReport,
   PathValue,
   PerformedOperationReport,
   PreviewDeltaDatum,
@@ -189,7 +244,11 @@ import type {
   PreviewEditClass,
   PreviewReport,
 } from "./model.js";
-import { PREVIEW_EDIT_CLASSES } from "./model.js";
+import {
+  CHANGE_CATEGORIES,
+  EDGE_KINDS,
+  PREVIEW_EDIT_CLASSES,
+} from "./model.js";
 
 // --- the decoded forms ---------------------------------------------------------
 
@@ -296,6 +355,62 @@ export interface HumanPreviewReport {
 export interface HumanPerformedReport {
   /** Every mapped pair, in the report's own order (free, T12.0-15). */
   readonly mapping: readonly HumanMappingPair[];
+  /** The report's text, for diagnoses. */
+  readonly text: string;
+}
+
+/** The two impacted-code groups (SPEC 9.2), as the impact model names them. */
+export type ImpactCodeGroup = "direct" | "transitive";
+
+/**
+ * One requirement-level line of a human impact report: one category of one
+ * entry (SPEC 5.6, 9.1, 9.3), with where it stood.
+ */
+export interface HumanImpactCategoryLine {
+  /** The category its section's header names (SPEC 5.6). */
+  readonly category: ChangeCategory;
+  /** The nodes the entry covers — several for a collapsed chain (9.3). */
+  readonly nodes: readonly string[];
+  /** Whether it is marked deleted, under its baseline identity (9.3). */
+  readonly deleted: boolean;
+  /** The category's attribution (5.6, 9.1), empty where none is printed. */
+  readonly attributedTo: readonly string[];
+  /** The report line it was decoded from, 1-based. */
+  readonly line: number;
+  /** That line's text. */
+  readonly text: string;
+}
+
+/**
+ * One impacted-code line of a human impact report: one location of one
+ * group with its witness edge and path (SPEC 9.2, 9.3), with where it
+ * stood.
+ */
+export interface HumanImpactedCodeLine {
+  /** The group its section's header names (SPEC 9.2). */
+  readonly group: ImpactCodeGroup;
+  /** The impacted code location's identity. */
+  readonly location: string;
+  /** The witness edge: from the location itself, its kind and target. */
+  readonly edge: GraphEdge;
+  /** The witness path, in order from the edge's target (9.3). */
+  readonly path: readonly string[];
+  /** The report line it was decoded from, 1-based. */
+  readonly line: number;
+  /** That line's text. */
+  readonly text: string;
+}
+
+/**
+ * A human impact report decoded onto the impact model (TEST-SPEC T12.0-15;
+ * SPEC 9.3): every category line and every impacted-code line, each in the
+ * report's own order (free, T12.0-15).
+ */
+export interface HumanImpactReport {
+  /** The `baseline <commit>` line's commit, `null` where none is printed. */
+  readonly baseline: string | null;
+  readonly categories: readonly HumanImpactCategoryLine[];
+  readonly code: readonly HumanImpactedCodeLine[];
   /** The report's text, for diagnoses. */
   readonly text: string;
 }
@@ -1344,6 +1459,379 @@ export function decodeHumanPerformedReport(
   return guardSyncStep(step, () => decodePerformedBytes(bytes, context));
 }
 
+// --- the impact report ----------------------------------------------------------------
+
+/** One of the impact report's sections: a change category or a code group. */
+type ImpactSection =
+  | { readonly kind: "category"; readonly category: ChangeCategory }
+  | { readonly kind: "code"; readonly group: ImpactCodeGroup };
+
+/**
+ * The whole-segment spelling of a phrase's words, as a stable code's is
+ * spelled (the module header): its words case-insensitive, joined by one
+ * character that is neither letter nor digit or by nothing.
+ */
+function phrasePattern(phrase: string): RegExp {
+  return new RegExp(`^${phrase.split(/[- ]/).join(CODE_WORD_SEPARATOR)}$`, "i");
+}
+
+/** Each section's header words and their spelling (the module header). */
+const IMPACT_SECTION_SPELLINGS: readonly {
+  readonly section: ImpactSection;
+  /** The header's words, naming the section in a diagnosis. */
+  readonly words: string;
+  readonly pattern: RegExp;
+}[] = [
+  ...CHANGE_CATEGORIES.map((category) => ({
+    section: { kind: "category" as const, category },
+    words: category,
+    pattern: phrasePattern(category),
+  })),
+  {
+    section: { kind: "code", group: "direct" },
+    words: "directly impacted code",
+    pattern: phrasePattern("directly impacted code"),
+  },
+  {
+    section: { kind: "code", group: "transitive" },
+    words: "transitively impacted code",
+    pattern: phrasePattern("transitively impacted code"),
+  },
+];
+
+/**
+ * A line at the margin opening one of the impact report's sections (the
+ * module header): `<words>:`, the words a change category's or a code
+ * group's — or `undefined` for any other line.
+ */
+function impactSectionHeader(
+  text: string,
+): (typeof IMPACT_SECTION_SPELLINGS)[number] | undefined {
+  if (!text.endsWith(":")) return undefined;
+  const words = text.slice(0, -1);
+  const spelled = IMPACT_SECTION_SPELLINGS.filter(({ pattern }) =>
+    pattern.test(words),
+  );
+  if (spelled.length > 1) {
+    throw new Error(
+      `harness defect: the header ${JSON.stringify(text)} spells the impact sections ` +
+        `${spelled.map((spelling) => spelling.words).join(", ")} at once — SPEC 5.6's four ` +
+        `categories and 9.2's two groups are a closed vocabulary no two of whose spellings ` +
+        `coincide`,
+    );
+  }
+  return spelled[0];
+}
+
+/** The line naming the resolved baseline (the module header). */
+const BASELINE_LINE = /^baseline (\S+)$/i;
+
+/** U+2014 EM DASH, the layout's separator, built from its code point. */
+const EM_DASH = String.fromCodePoint(0x2014);
+
+/** The attribution clause's opening on a category line (the module header). */
+const ATTRIBUTION_OPENING = ` ${EM_DASH} attributed to:`;
+
+/** The mark of a deleted node's entry (the module header). */
+const DELETED_MARK = " (deleted)";
+
+/** The separator between a list's identities. */
+const LIST_SEPARATOR = ", ";
+
+/** The witness edge's opening on an impacted-code line (the module header). */
+const VIA_OPENING = ` ${EM_DASH} via `;
+
+/** The witness path's opening on an impacted-code line (the module header). */
+const PATH_OPENING = "; path: ";
+
+/** The separator between a witness path's nodes. */
+const PATH_ARROW = " -> ";
+
+/** The whole-segment spelling of each edge kind, as a stable code's (the module header). */
+const EDGE_KIND_SPELLINGS: readonly {
+  readonly kind: EdgeKind;
+  readonly pattern: RegExp;
+}[] = EDGE_KINDS.map((kind) => ({ kind, pattern: phrasePattern(kind) }));
+
+/**
+ * A category line beneath its header (the module header):
+ * `<node>[, <node>…][ (deleted)] — attributed to: <identity>[, …]`, the
+ * attribution clause optional (its absence an empty attribution).
+ */
+function decodeImpactCategoryLine(
+  text: string,
+  category: ChangeCategory,
+  line: number,
+  adapter: string,
+  report: string,
+): HumanImpactCategoryLine {
+  const where = atLine(line, text);
+  const body = text.slice(ITEM_INDENT.length);
+  const opening = body.indexOf(ATTRIBUTION_OPENING);
+  let covered = opening === -1 ? body : body.slice(0, opening);
+  let attributedTo: string[] = [];
+  if (opening !== -1) {
+    const clause = body.slice(opening + ATTRIBUTION_OPENING.length);
+    if (clause.includes(ATTRIBUTION_OPENING)) {
+      decodeFail(
+        adapter,
+        where,
+        `one attribution clause ${JSON.stringify(ATTRIBUTION_OPENING.trim())} per entry line — ` +
+          "this line holds several, so where the entry's nodes end is ambiguous",
+        report,
+      );
+    }
+    if (clause.length > 0) {
+      if (!clause.startsWith(" ")) {
+        decodeFail(
+          adapter,
+          where,
+          "the attribution's identities after `attributed to: ` (SPEC 5.6: every category " +
+            "attributed to its originating nodes)",
+          report,
+        );
+      }
+      attributedTo = clause.slice(1).split(LIST_SEPARATOR);
+      if (attributedTo.some((identity) => identity.length === 0)) {
+        decodeFail(
+          adapter,
+          where,
+          "an attribution of non-empty identities, `, `-separated (SPEC 5.6, 9.1)",
+          report,
+        );
+      }
+    }
+  }
+  const deleted = covered.endsWith(DELETED_MARK);
+  if (deleted) covered = covered.slice(0, -DELETED_MARK.length);
+  const nodes = covered.split(LIST_SEPARATOR);
+  if (nodes.some((node) => node.length === 0)) {
+    decodeFail(
+      adapter,
+      where,
+      "a category line `  <node>[, <node>…][ (deleted)] — attributed to: <identity>[, …]` — " +
+        "the entry's node identities, `, `-separated, never an empty one (SPEC 9.3: an entry " +
+        "covers one node or a collapsed chain)",
+      report,
+    );
+  }
+  return { category, nodes, deleted, attributedTo, line, text };
+}
+
+/**
+ * An impacted-code line beneath its header (the module header):
+ * `<location> — via <kind> <target>; path: <node>[ -> <node>…]`.
+ */
+function decodeImpactedCodeLine(
+  text: string,
+  group: ImpactCodeGroup,
+  line: number,
+  adapter: string,
+  report: string,
+): HumanImpactedCodeLine {
+  const where = atLine(line, text);
+  const layout =
+    "an impacted-code line `  <location> — via <kind> <target>; path: <node>[ -> <node>…]` — " +
+    "the location, its witness edge's kind and target, then its witness path (SPEC 9.3: each " +
+    "impacted location with one impact edge that makes it impacted and one shortest " +
+    "propagation path witnessing it)";
+  const body = text.slice(ITEM_INDENT.length);
+  const via = body.indexOf(VIA_OPENING);
+  if (via === -1 || via === 0) {
+    decodeFail(adapter, where, layout, report);
+  }
+  const location = body.slice(0, via);
+  const rest = body.slice(via + VIA_OPENING.length);
+  const opening = rest.indexOf(PATH_OPENING);
+  if (opening === -1) {
+    decodeFail(
+      adapter,
+      where,
+      `${layout}; the witness path after ${JSON.stringify(PATH_OPENING.trim())} is absent`,
+      report,
+    );
+  }
+  const edge = rest.slice(0, opening);
+  const space = edge.indexOf(" ");
+  if (space === -1 || space === edge.length - 1) {
+    decodeFail(
+      adapter,
+      where,
+      `${layout}; the witness edge is not \`<kind> <target>\`, got ${JSON.stringify(edge)}`,
+      report,
+    );
+  }
+  const word = edge.slice(0, space);
+  const spelled = EDGE_KIND_SPELLINGS.filter(({ pattern }) =>
+    pattern.test(word),
+  );
+  if (spelled.length > 1) {
+    throw new Error(
+      `harness defect: the segment ${JSON.stringify(word)} spells the edge kinds ` +
+        `${spelled.map(({ kind }) => kind).join(", ")} at once — SPEC 5.2's four kinds are a ` +
+        `closed vocabulary no two of whose spellings coincide`,
+    );
+  }
+  const kind = spelled[0]?.kind;
+  if (kind === undefined) {
+    decodeFail(
+      adapter,
+      where,
+      `the witness edge's kind, one of the edge kinds SPEC 5.2 lists (${EDGE_KINDS.join(", ")}), ` +
+        `after \`via\` — got ${JSON.stringify(word)}`,
+      report,
+    );
+  }
+  const listed = rest.slice(opening + PATH_OPENING.length);
+  if (listed.includes(PATH_OPENING)) {
+    decodeFail(
+      adapter,
+      where,
+      `one witness path per line — this line opens ${JSON.stringify(PATH_OPENING.trim())} ` +
+        "several times, so where the edge's target ends is ambiguous",
+      report,
+    );
+  }
+  const path = listed.split(PATH_ARROW);
+  if (path.some((node) => node.length === 0)) {
+    decodeFail(
+      adapter,
+      where,
+      "a witness path of node identities joined by ` -> `, never an empty one (SPEC 9.3: a " +
+        "sequence of nodes from the edge's target to a node whose own edit explains the change)",
+      report,
+    );
+  }
+  return {
+    group,
+    location,
+    edge: { from: location, to: edge.slice(space + 1), kind },
+    path,
+    line,
+    text,
+  };
+}
+
+/** The decode of an impact report's bytes, under its guard. */
+function decodeImpactBytes(
+  bytes: Uint8Array,
+  context: string | undefined,
+): HumanImpactReport {
+  const adapter = adapterName("impact report", context);
+  const report = utf8Text(bytes, adapter, "report");
+  const lines = reportLines(report);
+  let baseline: { readonly commit: string; readonly line: number } | undefined =
+    undefined;
+  const opened = new Map<string, number>();
+  let section: ImpactSection | undefined = undefined;
+  const categories: HumanImpactCategoryLine[] = [];
+  const code: HumanImpactedCodeLine[] = [];
+  for (const [index, text] of lines.entries()) {
+    const line = index + 1;
+    const where = atLine(line, text);
+    if (text.length === 0) {
+      decodeFail(
+        adapter,
+        where,
+        "a line of the impact layout — the baseline line, a section header, or a section's " +
+          "entry — never an empty line",
+        report,
+      );
+    }
+    if (!text.startsWith(ITEM_INDENT)) {
+      const header = impactSectionHeader(text);
+      if (header !== undefined) {
+        const first = opened.get(header.words);
+        if (first !== undefined) {
+          decodeFail(
+            adapter,
+            where,
+            `each section once — the report is grouped by category (SPEC 9.3) — the ` +
+              `${header.words} section opened on line ${String(first)} opens again here`,
+            report,
+          );
+        }
+        opened.set(header.words, line);
+        section = header.section;
+        continue;
+      }
+      const named = BASELINE_LINE.exec(text);
+      if (named !== null) {
+        if (baseline !== undefined) {
+          decodeFail(
+            adapter,
+            where,
+            `one baseline line — line ${String(baseline.line)} names the baseline already`,
+            report,
+          );
+        }
+        baseline = { commit: named[1]!, line };
+        section = undefined;
+        continue;
+      }
+      decodeFail(
+        adapter,
+        where,
+        "a section header at the margin — a change category of SPEC 5.6 (`changed:`, " +
+          "`metadata-changed:`, `descendant-changed:`, `upstream-changed:`), " +
+          "`directly impacted code:`, or `transitively impacted code:` (9.2) — or the " +
+          "`baseline <commit>` line",
+        report,
+      );
+    }
+    if (section === undefined) {
+      decodeFail(
+        adapter,
+        where,
+        "an indented entry line inside one of the report's sections, a header line at the " +
+          "margin opening it",
+        report,
+      );
+    }
+    if (section.kind === "category") {
+      categories.push(
+        decodeImpactCategoryLine(text, section.category, line, adapter, report),
+      );
+    } else {
+      code.push(
+        decodeImpactedCodeLine(text, section.group, line, adapter, report),
+      );
+    }
+  }
+  return {
+    baseline: baseline?.commit ?? null,
+    categories,
+    code,
+    text: report,
+  };
+}
+
+/**
+ * Decode a human impact report — the standard output of `impact --base
+ * <ref>` without `--json` (SPEC 9.3, 12.0) — onto the impact model (the
+ * module header's layout): one {@link HumanImpactCategoryLine} per entry
+ * line beneath a category, one {@link HumanImpactedCodeLine} per line
+ * beneath a code group. Takes a run (its stdout bytes) or the report's
+ * bytes. Fails diagnosed on bytes that are not valid UTF-8, an empty line,
+ * a margin line that is neither a section header nor the baseline line, a
+ * section opened twice, a second baseline line, an indented line outside
+ * every section, a category line with an empty node or attribution
+ * identity or two attribution clauses, and an impacted-code line without
+ * its location, its witness edge's kind or target, or its witness path. A
+ * harness step under its own guard (TEST-SPEC S-3).
+ */
+export function decodeHumanImpactReport(
+  output: RunResult | Uint8Array,
+  context?: string,
+): HumanImpactReport {
+  const bytes = output instanceof Uint8Array ? output : output.stdoutBytes;
+  const step =
+    output instanceof Uint8Array
+      ? "decoding a human impact report (decodeHumanImpactReport)"
+      : `decoding the human impact report of ${output.commandLine} (decodeHumanImpactReport)`;
+  return guardSyncStep(step, () => decodeImpactBytes(bytes, context));
+}
+
 // --- the comparisons with the --json twin ---------------------------------------------
 
 /**
@@ -2008,5 +2496,371 @@ export function assertHumanPerformedReportCarries(
 ): HumanPerformedReport {
   const decoded = decodeHumanPerformedReport(human, context);
   assertHumanPerformedCarries(decoded, json, context);
+  return decoded;
+}
+
+// --- the impact-report comparison with the --json twin ------------------------------
+
+/**
+ * One category of one requirement entry, the impact comparison's unit (the
+ * module header): the category — `null` for a `--json` entry carrying none
+ * — the nodes the entry covers, its deletion, and the category's
+ * attribution.
+ */
+interface ImpactCategoryDatum {
+  readonly category: ChangeCategory | null;
+  readonly nodes: readonly string[];
+  readonly deleted: boolean;
+  readonly attributedTo: readonly string[];
+}
+
+/**
+ * One impacted location of one code group, the impact comparison's other
+ * unit (the module header): its witness edge and path.
+ */
+interface ImpactedCodeDatum {
+  readonly group: ImpactCodeGroup;
+  readonly location: string;
+  readonly edge: GraphEdge;
+  readonly path: readonly string[];
+}
+
+/**
+ * The `--json` twin's category data: one per category of each entry, one
+ * category-less datum for an entry carrying none (the module header).
+ */
+function jsonCategoryData(json: ImpactReport): ImpactCategoryDatum[] {
+  return json.requirements.flatMap((entry): ImpactCategoryDatum[] =>
+    entry.categories.length === 0
+      ? [
+          {
+            category: null,
+            nodes: entry.nodes,
+            deleted: entry.deleted,
+            attributedTo: [],
+          },
+        ]
+      : entry.categories.map((category) => ({
+          category: category.category,
+          nodes: entry.nodes,
+          deleted: entry.deleted,
+          attributedTo: category.attributedTo,
+        })),
+  );
+}
+
+/** The `--json` twin's impacted-code data, both groups. */
+function jsonCodeData(json: ImpactReport): ImpactedCodeDatum[] {
+  return (["direct", "transitive"] as const).flatMap((group) =>
+    json.code[group].map((entry) => ({
+      group,
+      location: entry.location,
+      edge: entry.edge,
+      path: entry.path,
+    })),
+  );
+}
+
+/** A multiset of strings as a key part: its elements sorted. */
+function multisetKey(values: readonly string[]): string[] {
+  return [...values].sort();
+}
+
+/**
+ * A category datum as one comparable key: the category, the nodes and the
+ * attribution as multisets, the deletion (the module header).
+ */
+function categoryDatumKey(datum: ImpactCategoryDatum): string {
+  return JSON.stringify([
+    datum.category,
+    multisetKey(datum.nodes),
+    datum.deleted,
+    multisetKey(datum.attributedTo),
+  ]);
+}
+
+/**
+ * An impacted-code datum as one comparable key: the group, the location,
+ * the witness edge's source, target, and kind, and the witness path in
+ * order (the module header).
+ */
+function codeDatumKey(datum: ImpactedCodeDatum): string {
+  return JSON.stringify([
+    datum.group,
+    datum.location,
+    datum.edge.from,
+    datum.edge.to,
+    datum.edge.kind,
+    datum.path,
+  ]);
+}
+
+/** The strings of `of` missing from `from`, as multisets. */
+function missingStrings(
+  of: readonly string[],
+  from: readonly string[],
+): string[] {
+  const left = [...from];
+  const missing: string[] = [];
+  for (const value of of) {
+    const at = left.indexOf(value);
+    if (at === -1) missing.push(value);
+    else left.splice(at, 1);
+  }
+  return missing;
+}
+
+/** A category datum, rendered for a diagnosis. */
+function describeCategoryDatum(datum: ImpactCategoryDatum): string {
+  const entry =
+    `the ${datum.nodes.length === 1 ? "entry" : "collapsed entry"} ` +
+    `${JSON.stringify(datum.nodes)}${datum.deleted ? " (deleted)" : ""}`;
+  return datum.category === null
+    ? `${entry}, carrying no category`
+    : `the ${datum.category} category of ${entry}, attributed to ` +
+        JSON.stringify(datum.attributedTo);
+}
+
+/** What the human category line holds differently from the `--json` datum, named. */
+function describeCategoryDifference(
+  json: ImpactCategoryDatum,
+  human: HumanImpactCategoryLine,
+): string {
+  const parts: string[] = [];
+  if (json.category !== human.category) {
+    parts.push(
+      `the category ${human.category} where the --json twin carries ${String(json.category)}`,
+    );
+  }
+  const missingNodes = missingStrings(json.nodes, human.nodes);
+  const extraNodes = missingStrings(human.nodes, json.nodes);
+  if (missingNodes.length > 0) {
+    parts.push(`missing node(s) ${JSON.stringify(missingNodes)}`);
+  }
+  if (extraNodes.length > 0) {
+    parts.push(`node(s) the --json entry lacks ${JSON.stringify(extraNodes)}`);
+  }
+  if (json.deleted !== human.deleted) {
+    parts.push(
+      json.deleted
+        ? "no deletion mark where the --json entry is deleted, reported under its baseline identity"
+        : "a deletion mark the --json entry lacks",
+    );
+  }
+  const missingAttribution = missingStrings(
+    json.attributedTo,
+    human.attributedTo,
+  );
+  const extraAttribution = missingStrings(
+    human.attributedTo,
+    json.attributedTo,
+  );
+  if (missingAttribution.length > 0) {
+    parts.push(`missing attribution ${JSON.stringify(missingAttribution)}`);
+  }
+  if (extraAttribution.length > 0) {
+    parts.push(
+      `attribution the --json category lacks ${JSON.stringify(extraAttribution)}`,
+    );
+  }
+  return parts.join("; ");
+}
+
+/**
+ * What the human category lines omit, change, misplace, or hold beside the
+ * `--json` twin's category data (the module header).
+ */
+function categoryProblems(
+  json: readonly ImpactCategoryDatum[],
+  human: readonly HumanImpactCategoryLine[],
+): string[] {
+  const { missing, extra } = multisetDifference(
+    json,
+    human,
+    categoryDatumKey,
+    categoryDatumKey,
+  );
+  const problems: string[] = [];
+  const left = [...extra];
+  for (const datum of missing) {
+    if (datum.category === null) {
+      problems.push(
+        `the --json twin reports ${describeCategoryDatum(datum)}, which no line beneath a ` +
+          "category — the human report's grouping (SPEC 9.3) — can carry",
+      );
+      continue;
+    }
+    // The nearest line: one of the same category sharing the most nodes,
+    // else one covering the same nodes under another category.
+    let at = -1;
+    let shared = 0;
+    left.forEach((candidate, index) => {
+      if (candidate.category !== datum.category) return;
+      const common =
+        candidate.nodes.length -
+        missingStrings(candidate.nodes, datum.nodes).length;
+      if (common > shared) {
+        at = index;
+        shared = common;
+      }
+    });
+    if (at === -1) {
+      const nodes = JSON.stringify(multisetKey(datum.nodes));
+      at = left.findIndex(
+        (candidate) => JSON.stringify(multisetKey(candidate.nodes)) === nodes,
+      );
+    }
+    if (at === -1) {
+      problems.push(`${describeCategoryDatum(datum)} is missing`);
+      continue;
+    }
+    const [near] = left.splice(at, 1);
+    problems.push(
+      `${describeCategoryDatum(datum)} is missing — line ${String(near!.line)} lists ` +
+        `${describeCategoryDatum(near!)} instead: ${describeCategoryDifference(datum, near!)}`,
+    );
+  }
+  for (const line of left) {
+    problems.push(
+      `line ${String(line.line)} lists ${describeCategoryDatum(line)}, which the --json twin lacks`,
+    );
+  }
+  return problems;
+}
+
+/** An impacted-code datum, rendered for a diagnosis. */
+function describeCodeDatum(datum: ImpactedCodeDatum): string {
+  return (
+    `the ${datum.group === "direct" ? "directly" : "transitively"} impacted location ` +
+    `${JSON.stringify(datum.location)} via its ${datum.edge.kind} edge ` +
+    `${JSON.stringify(datum.edge.from)} -> ${JSON.stringify(datum.edge.to)}, witness path ` +
+    JSON.stringify(datum.path)
+  );
+}
+
+/** What the human impacted-code line holds differently from the `--json` datum, named. */
+function describeCodeDifference(
+  json: ImpactedCodeDatum,
+  human: HumanImpactedCodeLine,
+): string {
+  const parts: string[] = [];
+  if (json.group !== human.group) {
+    parts.push(
+      `listed in the ${human.group === "direct" ? "directly" : "transitively"} impacted group ` +
+        `where the --json twin lists it in the ${json.group === "direct" ? "directly" : "transitively"} impacted one`,
+    );
+  }
+  if (json.edge.kind !== human.edge.kind) {
+    parts.push(
+      `the edge kind ${human.edge.kind} where the --json twin carries ${json.edge.kind}`,
+    );
+  }
+  if (json.edge.from !== human.edge.from) {
+    parts.push(
+      `the edge from ${JSON.stringify(human.edge.from)} (the location itself, as the layout ` +
+        `prints it) where the --json twin's runs from ${JSON.stringify(json.edge.from)}`,
+    );
+  }
+  if (json.edge.to !== human.edge.to) {
+    parts.push(
+      `the edge target ${JSON.stringify(human.edge.to)} where the --json twin carries ` +
+        JSON.stringify(json.edge.to),
+    );
+  }
+  if (JSON.stringify(json.path) !== JSON.stringify(human.path)) {
+    parts.push(
+      `the witness path ${JSON.stringify(human.path)} where the --json twin carries ` +
+        JSON.stringify(json.path),
+    );
+  }
+  return parts.join("; ");
+}
+
+/**
+ * What the human impacted-code lines omit, change, misplace, or hold beside
+ * the `--json` twin's impacted-code data (the module header).
+ */
+function codeProblems(
+  json: readonly ImpactedCodeDatum[],
+  human: readonly HumanImpactedCodeLine[],
+): string[] {
+  const { missing, extra } = multisetDifference(
+    json,
+    human,
+    codeDatumKey,
+    codeDatumKey,
+  );
+  const problems: string[] = [];
+  const left = [...extra];
+  for (const datum of missing) {
+    let at = left.findIndex(
+      (candidate) =>
+        candidate.group === datum.group &&
+        candidate.location === datum.location,
+    );
+    if (at === -1) {
+      at = left.findIndex((candidate) => candidate.location === datum.location);
+    }
+    if (at === -1) {
+      problems.push(`${describeCodeDatum(datum)} is missing`);
+      continue;
+    }
+    const [near] = left.splice(at, 1);
+    problems.push(
+      `${describeCodeDatum(datum)} is missing — line ${String(near!.line)} lists ` +
+        `${describeCodeDatum(near!)} instead: ${describeCodeDifference(datum, near!)}`,
+    );
+  }
+  for (const line of left) {
+    problems.push(
+      `line ${String(line.line)} lists ${describeCodeDatum(line)}, which the --json twin lacks`,
+    );
+  }
+  return problems;
+}
+
+/**
+ * Assert a decoded human impact report carries the information of its
+ * `--json` twin's decoded impact report (TEST-SPEC T12.0-15; SPEC 5.6,
+ * 9.1–9.3; the module header's comparison): each category of each entry —
+ * the nodes the entry covers, its deletion, and the category's attribution
+ * — and each impacted location of each group with its witness edge and
+ * path, as multisets, order free. Fails diagnosed, naming every datum the
+ * human report omits, changes, misplaces, or lists beside its twin's.
+ */
+export function assertHumanImpactCarries(
+  human: HumanImpactReport,
+  json: ImpactReport,
+  context: string,
+): void {
+  const problems = [
+    ...categoryProblems(jsonCategoryData(json), human.categories),
+    ...codeProblems(jsonCodeData(json), human.code),
+  ];
+  if (problems.length === 0) return;
+  fail(
+    `${context}: the human impact report does not carry the information its --json twin ` +
+      "carries (TEST-SPEC T12.0-15: each category with its attribution, the collapsed " +
+      "chains, deleted nodes under their baseline identities, and each impacted location " +
+      "with its witness edge and path — SPEC 5.6, 9.1, 9.3 — decoded by the human-report " +
+      "adapter, H-3; wording, layout, and order free):\n" +
+      `${problems.map((problem) => `- ${problem}`).join("\n")}\n` +
+      `Human report: ${excerpt(human.text)}`,
+  );
+}
+
+/**
+ * Decode a run's human impact report and assert it carries the information
+ * of its `--json` twin's decoded impact report (TEST-SPEC T12.0-15):
+ * `decodeHumanImpactReport`, then `assertHumanImpactCarries`. Returns the
+ * decoded report.
+ */
+export function assertHumanImpactReportCarries(
+  human: RunResult,
+  json: ImpactReport,
+  context: string,
+): HumanImpactReport {
+  const decoded = decodeHumanImpactReport(human, context);
+  assertHumanImpactCarries(decoded, json, context);
   return decoded;
 }

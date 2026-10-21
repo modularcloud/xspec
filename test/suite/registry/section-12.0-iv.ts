@@ -3,13 +3,14 @@
 // `build` and `check` family — T14-11's per-condition fixtures, T12.2-2's
 // per-family workspaces, and T1.5-2's every arm — the gated reads' reports of
 // the same findings on T13.3-3's stagings, the non-UTF-8 marking clause on
-// T1.5-2's arms, and the `rename`/`move` family — the performed reports of
+// T1.5-2's arms, the `rename`/`move` family — the performed reports of
 // T6.4-1 and T6.5-1 and the refused real operations of T6.4-3, T6.4-6,
 // T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7, the
 // previews being T6.6-7's (section-6.6.ts), which this test cites rather
-// than repeats; the `impact`, `review`, `coverage`/`ids`/`show`, and exit-2
-// families are added beside them by the plan written at 2a2b94e's FIX_PLAN
-// Tasks 132–135.
+// than repeats — and the `impact` family, the reports of T5.6-1 through
+// T5.6-6 and T9-1 through T9.3-3; the `review`, `coverage`/`ids`/`show`,
+// and exit-2 families are added beside them by the plan written at
+// 2a2b94e's FIX_PLAN Tasks 133–135.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspaces (H-1), drives the product strictly as a subprocess (H-2),
@@ -140,6 +141,34 @@
 //   plain one. On the Linux-leg non-UTF-8 arms each human report is run a
 //   second time on the same state (inside the same compare), its stdout
 //   byte-identical to the first's (H-6: deterministic presentation).
+// - The `impact` reports (`expectHumanImpactTwin`): the stagings of T5.6-1
+//   through T5.6-6, T9-1 through T9.2-5, and T9.3-1 through T9.3-3, each
+//   run as its home test runs it (section-5.6.ts `T5_6_IMPACT_STAGINGS`,
+//   section-9.ts `T9_IMPACT_STAGINGS`, section-9.3.ts
+//   `T9_3_IMPACT_STAGINGS`: their workspaces, git baselines, edits,
+//   journaled renames, and builds; every source they stage a staged-source
+//   record, S-9), each `impact --base <ref>` read they reach handed to the
+//   twin in place of the home test's own assertions: at that state —
+//   built, so graph data is current and the read refreshes nothing (13.3),
+//   and `impact` acquires nothing (13.5) — the `--json` read and the human
+//   one run inside one whole-root modifies-nothing compare, `.git` and the
+//   lock path included (T12.0-11: a git-reading invocation leaves `.git`
+//   untouched), each exiting 0 (impact is informational, 9.3; the home
+//   tests pin it), standard error byte-identical, the `--json` report
+//   decoded by the impact adapter (reports.ts) and the human one by the
+//   human impact decoder (helpers/adapters/human-reports.ts: fitted to the
+//   built product's layout, shape-aware, value-blind, failing loudly),
+//   which must carry the twin's information (`assertHumanImpactReportCarries`):
+//   each category of each entry with the nodes it covers — a collapsed
+//   chain's every member — its deletion (a deleted node under its baseline
+//   identity mapped forward), and the category's attribution, and each
+//   impacted location under its group with its witness edge's kind and
+//   target and its witness path in order, as multisets, order free (SPEC
+//   fixes no order for the report itself; 9.3 groups it by category, so the
+//   `--json` form's gathering of a node's categories into one entry is no
+//   datum). The reports' content is the home tests' (each pins it); this
+//   test compares the two forms, the readings without differences (T9-1's
+//   empty reports) included.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -149,8 +178,10 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   assertHumanFindingsReportCarries,
+  assertHumanImpactReportCarries,
   assertHumanPerformedReportCarries,
   decodeFindingsReport,
+  decodeImpactReport,
   decodePerformedOperationReport,
   pathValueBytes,
   renderPathValue,
@@ -188,12 +219,15 @@ import {
   T6_4_6_INVALID_WORKSPACE_CONFIG,
   T6_4_6_INVALID_WORKSPACE_FILES,
 } from "./section-6.4.js";
+import { T5_6_IMPACT_STAGINGS } from "./section-5.6.js";
 import { T6_5_1_FILE_MOVE_STAGINGS } from "./section-6.5.js";
 import type { RefusalStagingTwin } from "./section-6.6.js";
 import { runT663RefusalStagings } from "./section-6.6.js";
 import { runT1222Families } from "./section-12.1-12.2.js";
 import { runT1333GateStagings } from "./section-13.3.js";
 import { T14_11_FIXTURES } from "./section-14.js";
+import { T9_IMPACT_STAGINGS } from "./section-9.js";
+import { T9_3_IMPACT_STAGINGS } from "./section-9.3.js";
 import { buildOk, expectExit, runCli } from "./support.js";
 
 // ---------------------------------------------------------------------------
@@ -883,13 +917,119 @@ async function runRefusalTwins(product: ProductBinding): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// `impact`: the reports of T5.6-1 through T5.6-6 and T9-1 through T9.3-3
+// ---------------------------------------------------------------------------
+
+/**
+ * T12.0-15's twin of one `impact --base <ref>` read at the state a staging
+ * reached (the module header): inside one whole-root modifies-nothing
+ * compare, the lock path compared — the staging built the workspace, so
+ * graph data is current and the read refreshes nothing (SPEC 13.3), and
+ * `impact` acquires nothing (13.5) — `impact --base <ref> --json`, exit 0,
+ * the staging's premise (impact is informational, 9.3; its home test pins
+ * the exit), decoded by the impact adapter; then `impact --base <ref>`, the
+ * human form, exiting 0 as its twin, its standard error byte-identical
+ * (SPEC 12.0; T12.0-2), its report decoded by the human impact decoder and
+ * carrying the twin's information — each category of each entry with the
+ * nodes the entry covers, its deletion, and its attribution, and each
+ * impacted location of each group with its witness edge and path, as
+ * multisets, order free (TEST-SPEC T12.0-15; SPEC 5.6, 9.1–9.3;
+ * `assertHumanImpactReportCarries`).
+ */
+async function expectHumanImpactTwin(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  ref: string,
+  context: string,
+): Promise<void> {
+  const argv = ["impact", "--base", ref];
+  const jsonArgv = [...argv, "--json"];
+  const jsonCommand = `\`${jsonArgv.join(" ")}\``;
+  const humanCommand = `\`${argv.join(" ")}\` (human report)`;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const json = await expectExit(
+        product,
+        workspace,
+        jsonArgv,
+        0,
+        `${context}: ${jsonCommand} — the staging's premise: exit 0, impact ` +
+          `is informational whether or not differences exist, as the home ` +
+          `test pins it (SPEC 9.3, 12.0)`,
+      );
+      const report = decodeImpactReport(
+        parseJsonStdout(
+          json,
+          `${context}: ${jsonCommand} — a single JSON document as the ` +
+            `entire stdout (SPEC 12.0)`,
+        ),
+        `${context}: ${jsonCommand}`,
+      );
+      const human = await expectExit(
+        product,
+        workspace,
+        argv,
+        0,
+        `${context}: ${humanCommand} — run without \`--json\` on the same ` +
+          `pre-invocation state, it exits as its \`--json\` twin did (0; ` +
+          `SPEC 12.0: the output form never changes an exit code; 9.3; ` +
+          `TEST-SPEC T12.0-15, T12.0-2)`,
+      );
+      assertBytesEqual(
+        human.stderrBytes,
+        json.stderrBytes,
+        `${context}: ${humanCommand} — its standard error byte-identical to ` +
+          `its \`--json\` twin's (SPEC 12.0: the output form never changes ` +
+          `standard-error content; T12.0-2)`,
+      );
+      assertHumanImpactReportCarries(
+        human,
+        report,
+        `${context}: ${humanCommand}`,
+      );
+    },
+    `${context}: ${jsonCommand} and its human twin on the same state — ` +
+      `neither writes anything there, the lock path and \`.git\` included ` +
+      `(SPEC 13.3: the staging built the workspace, so graph data is ` +
+      `current and the read refreshes nothing; \`impact\` acquires ` +
+      `nothing, 13.5; TEST-SPEC H-6, T12.0-11, T12.0-15)`,
+  );
+}
+
+/**
+ * The `impact` family (the module header): the stagings of T5.6-1 through
+ * T5.6-6 (section-5.6.ts `T5_6_IMPACT_STAGINGS`), T9-1 through T9.2-5
+ * (section-9.ts `T9_IMPACT_STAGINGS`), and T9.3-1 through T9.3-3
+ * (section-9.3.ts `T9_3_IMPACT_STAGINGS`), each run as its home test runs
+ * it, every `impact --base` read it reaches handed to the human twin in
+ * place of the home test's own assertions.
+ */
+async function runImpactTwins(product: ProductBinding): Promise<void> {
+  for (const staging of [
+    ...T5_6_IMPACT_STAGINGS,
+    ...T9_IMPACT_STAGINGS,
+    ...T9_3_IMPACT_STAGINGS,
+  ]) {
+    await staging.run(product, async (workspace, read) => {
+      await expectHumanImpactTwin(
+        product,
+        workspace,
+        read.ref,
+        `T12.0-15 (${read.label})`,
+      );
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // T12.0-15
 // ---------------------------------------------------------------------------
 
 const T12_0_15 = defineProductTest({
   id: "T12.0-15",
   title:
-    "human-form reports — this registration's families: `build` and `check` on T14-11's per-condition fixtures, T12.2-2's per-family workspaces, and T1.5-2's every arm (its located arm included), and each gated read and mutating `review` subcommand on T13.3-3's stagings but `query` (JSON-only), each run again without `--json` on the same pre-invocation state (a fresh copy of it for a mutating command or a run that writes), exit as its `--json` twin, standard error byte-identical, its report — decoded by the human findings decoder — carrying every finding's stable code, locations (each file and its range's two byte offsets), concerned path, and identities as its twin does, order free, messages never compared, a human report printing nothing or omitting or changing any datum failing; and on T1.5-2's arms every reported path presented as 12.0 fixes, whatever the twin carries — the non-UTF-8 path (the condition-19 finding's concerned path, the located arm's location file) explicitly marked, the adapter recovering its exact bytes by the mark alone, each such report byte-identical across two runs on the same state, and every valid-UTF-8 path (the `#` and U+FFFD arms') a plain string, never marked; `rename` and `move` — the performed reports of T6.4-1's rename and T6.5-1's five file moves, staged as their home tests stage them and built, each form run on its own fresh copy of the built state, the human run exiting 0 as its `--json` twin, standard error byte-identical, its report — decoded by the human performed-report decoder — carrying the applied mapping the form-exact performed-operation document carries, every pair's `from` and `to` identity, a multiset, order free, a pair omitted, changed, or listed beside the twin's failing (the previews are T6.6-7's); and the refused real operations of T6.4-3, T6.4-6, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7 — T6.4-6's invalid-workspace arm and every refusal of T6.6-3's refusal stagings, staged as T6.6-3 stages each from its home module, T6.4-6's refused-writes staging among them — each form on its own fresh copy of the state, exit 1, the human findings report carrying every refusal finding's code, locations, concerned path, and identities, and the invalid-workspace refusal's findings each under its own condition's code, a human refusal printing nothing or omitting any of them failing; the `impact`, `review`, `coverage`/`ids`/`show`, and exit-2 families follow (the plan written at 2a2b94e, FIX_PLAN Tasks 132–135) (SPEC 12.0, 12.7, 14, 1.7, 6.4, 6.5; H-3, H-6)",
+    "human-form reports — this registration's families: `build` and `check` on T14-11's per-condition fixtures, T12.2-2's per-family workspaces, and T1.5-2's every arm (its located arm included), and each gated read and mutating `review` subcommand on T13.3-3's stagings but `query` (JSON-only), each run again without `--json` on the same pre-invocation state (a fresh copy of it for a mutating command or a run that writes), exit as its `--json` twin, standard error byte-identical, its report — decoded by the human findings decoder — carrying every finding's stable code, locations (each file and its range's two byte offsets), concerned path, and identities as its twin does, order free, messages never compared, a human report printing nothing or omitting or changing any datum failing; and on T1.5-2's arms every reported path presented as 12.0 fixes, whatever the twin carries — the non-UTF-8 path (the condition-19 finding's concerned path, the located arm's location file) explicitly marked, the adapter recovering its exact bytes by the mark alone, each such report byte-identical across two runs on the same state, and every valid-UTF-8 path (the `#` and U+FFFD arms') a plain string, never marked; `rename` and `move` — the performed reports of T6.4-1's rename and T6.5-1's five file moves, staged as their home tests stage them and built, each form run on its own fresh copy of the built state, the human run exiting 0 as its `--json` twin, standard error byte-identical, its report — decoded by the human performed-report decoder — carrying the applied mapping the form-exact performed-operation document carries, every pair's `from` and `to` identity, a multiset, order free, a pair omitted, changed, or listed beside the twin's failing (the previews are T6.6-7's); and the refused real operations of T6.4-3, T6.4-6, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7 — T6.4-6's invalid-workspace arm and every refusal of T6.6-3's refusal stagings, staged as T6.6-3 stages each from its home module, T6.4-6's refused-writes staging among them — each form on its own fresh copy of the state, exit 1, the human findings report carrying every refusal finding's code, locations, concerned path, and identities, and the invalid-workspace refusal's findings each under its own condition's code, a human refusal printing nothing or omitting any of them failing; `impact` — every `impact --base <ref>` read of the stagings of T5.6-1 through T5.6-6 and T9-1 through T9.3-3, run as their home tests run them, the read and its human twin on the same built state, exit 0 each, standard error byte-identical, the human report — decoded by the human impact decoder — carrying each category with its attribution, the collapsed chains, deleted nodes under their baseline identities, and each impacted location under its group with its witness edge and path as the `--json` twin does, order free, a datum omitted, changed, or misplaced failing; the `review`, `coverage`/`ids`/`show`, and exit-2 families follow (the plan written at 2a2b94e, FIX_PLAN Tasks 133–135) (SPEC 12.0, 12.7, 14, 1.7, 6.4, 6.5, 5.6, 9.1, 9.2, 9.3; H-3, H-6)",
   run: async (product) => {
     await runT1411Twins(product);
     await runT1222Twins(product);
@@ -897,6 +1037,7 @@ const T12_0_15 = defineProductTest({
     await runT1333Twins(product);
     await runPerformedTwins(product);
     await runRefusalTwins(product);
+    await runImpactTwins(product);
   },
 });
 
