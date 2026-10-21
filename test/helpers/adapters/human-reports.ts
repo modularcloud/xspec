@@ -14,18 +14,23 @@
 // so a comparison against the `--json` twin's decoded document can tell
 // which datum belongs to which finding and which the human report omits
 // (T12.0-15: "a datum the `--json` document carries and the human report
-// omits fails"). Like every adapter here they are the one place aware of
-// the report's concrete shape: adjustable to shape, never to values, and
-// failing loudly — a diagnosed `HarnessAssertionError` naming the line and
-// the datum — when a report's text fits none of the layout below or lacks
-// what the layout carries. Later decoders for the other human reports
-// (previews, performed reports, impact, review, coverage, ids, show) go
-// beside these.
+// omits fails"). The preview decoder beside them takes a `rename`/`move
+// --preview` report onto the preview model the form-exact `--json` decode
+// produces (model.ts `PreviewReport`): its findings as above, and its plan
+// — the mapping's pairs, each file with its edits' classes and ranges, and
+// the delta's two directions or its unavailability (TEST-SPEC T6.6-7).
+// Like every adapter here they are the one place aware of the report's
+// concrete shape: adjustable to shape, never to values, and failing loudly
+// — a diagnosed `HarnessAssertionError` naming the line and the datum —
+// when a report's text fits none of the layout below or lacks what the
+// layout carries. Later decoders for the other human reports (performed
+// reports, impact, review, coverage, ids, show) go beside these.
 //
 // The layout, fitted to what the built product emits (observed by running
 // it on T14-11's per-condition fixtures, T1.5-2's arms, T12.7-3's stagings,
 // and hand-staged 14.11, 14.12, 14.13, 14.21, refusal, and code-less
-// findings — never by reading its source):
+// findings, and the previews of T6.6-2 through T6.6-6 — never by reading
+// its source):
 //
 // - A findings report — a failing `build`'s validation errors, `check`'s
 //   findings, a gated read's report (13.3), a refused operation's refusal
@@ -41,13 +46,45 @@
 //   finding (10.7), the word `finding`; the parenthesized list holds every
 //   further location in the same `<path>:<start>-<end>` form; and the
 //   bracketed list holds the identities, in their order. The message is
-//   free wording (H-3; T12.0-15: never asked) and is never decoded.
+//   free wording (H-3; T12.0-15: never asked) and is never decoded. A
+//   datum the built product prints as it stands may hold a line feed
+//   (U+000A) — T6.5-4's barred destination `specs/a<U+000A>b.mdx`, the
+//   concerned path of its refusal, a valid-UTF-8 path with no marked form
+//   (12.0) — which then breaks its finding line in two: a line holding no
+//   `: ` at all is no finding line by itself, so it is read together with
+//   the line after it, joined by the line feed, until the text holds a
+//   `: ` (never joined with the count line ending the report, nor in a
+//   preview with a section header or a section's item). SPEC fixes no
+//   human spelling for such a path: a product printing the line feed
+//   escaped or quoted reads here as another path, failing the comparison —
+//   a layout this adapter would be adjusted to, as to any other shape,
+//   never a value.
 // - An exit-2 error's standard-error message (12.0: with JSON output not
 //   in effect, its only report) opens with the diagnostic prefix
 //   `xspec: `; a coded error continues `<code>: <path>: <message>`, with
 //   one such line per defect where a condition reports several (a
 //   configuration file's distinct defects), each repeating the code and
 //   the path; a plain usage error continues with its message alone.
+// - A preview report — `rename … --preview` or `move … --preview` without
+//   `--json` (SPEC 6.6) — is, for a refused preview, the findings report of
+//   its refusal findings alone (above, its count line ending it). Any other
+//   preview prints its plan: three sections, each opened by a header line
+//   at the margin — `mapping:`, `files:`, and `delta:`, in that order as
+//   the built product prints them, read in any order, each exactly once —
+//   after the finding lines of an answer carrying a finding (14.23's
+//   unavailable delta beside its condition-23 finding; the built product
+//   prints no count line there, and one ending the finding lines is read).
+//   Beneath `mapping:`, one line per mapped identity, indented two spaces:
+//   `<from> -> <to>`. Beneath `files:`, each file's path indented two
+//   spaces, and beneath it one line per edit indented four:
+//   `<start>-<end> <class>` — the range's two pre-operation byte offsets
+//   (1.7; a creation's `0-0`, the new file's start) and its class, one of
+//   the ten 12.7 class names, read as a code is (below). Beneath `delta:`,
+//   one line per derived path, indented two spaces: `generated <path>` or
+//   `removed <path>`, nothing beneath it where both directions are empty —
+//   or, the delta unavailable (14.23), the header `delta: unavailable` with
+//   nothing beneath it. A finding line may stand at the margin between
+//   sections too; it closes the section above it.
 // - A code is recognized at the position the layout gives it, spelled as
 //   human.ts's `codeMention` spells one, over the whole segment: its words
 //   case-insensitive, joined by one character that is neither letter nor
@@ -75,11 +112,18 @@
 //   a stable code before its finding's code, or ending in `:<n>-<n>`, a
 //   location path or identity holding `, `, an identity holding ` [`, a
 //   concerned path holding `: ` in a standard-error message, a message
-//   ending in `)` after ` (also at ` or in `]` after ` [`, and any datum
-//   holding a line break (U+000A) would mis-decode — never into a pass:
+//   ending in `)` after ` (also at ` or in `]` after ` [`, and a line
+//   feed (U+000A) anywhere but in a finding's head — or in a head whose
+//   part before it holds `: ` — would mis-decode — never into a pass:
 //   the decoded finding then differs from its twin, or the line fits no
 //   layout, and the comparison or the decode fails diagnosed. The data of
-//   T14-11's fixtures, T1.5-2's arms, and T12.7-3's stagings hold none.
+//   T14-11's fixtures, T1.5-2's arms, T12.7-3's stagings, and T6.6-3's
+//   refused previews hold none.
+//   Likewise in a preview's plan: an identity holding ` -> ` (a pair line
+//   holding it twice fails as ambiguous), and an identity or path
+//   beginning with a space, which the indentation absorbs — the data of
+//   T6.6-2's, T6.6-4's, T6.6-5's, and T6.6-6's stagings hold none, and
+//   the refused previews of T6.6-3 print no plan.
 // - A code's words at the code's position are the code — human.ts's
 //   convention, under which `missing ID` carries `missing-id` — so a line
 //   whose code token is gone but whose message opens with its own code's
@@ -95,6 +139,16 @@
 //   carry their roles: 14.12's rule, source, kind, and target; a
 //   refusal's bearers in location order), and every path compared in form
 //   and bytes.
+// - A preview's comparison is exact on the preview model, its order free
+//   (SPEC fixes none for the human report; 12.7's orders are the JSON
+//   form's, T12.0-15): its findings as above; a plan exactly where the
+//   `--json` twin reports one — none beside a refusal's findings (6.6) —
+//   its mapping as a multiset of `from`/`to` pairs, its files as a set of
+//   paths in form and bytes (a path listed twice reads as one file, its
+//   edits merged), each file's edits as a multiset of class and range, and
+//   the delta reported unavailable exactly where the twin's is (14.23),
+//   else each direction's paths as a multiset in form and bytes, a path
+//   under the other direction named as such.
 
 import { Buffer } from "node:buffer";
 import { fail } from "../assertions.js";
@@ -103,12 +157,18 @@ import type { RunResult } from "../subprocess.js";
 import { pathValueBytes, renderPathValue } from "./forms.js";
 import { STABLE_CODES } from "./human.js";
 import type {
+  AppliedMappingPair,
   ErrorInformation,
   Finding,
   FindingInformation,
   FindingLocation,
   PathValue,
+  PreviewDeltaDatum,
+  PreviewEdit,
+  PreviewEditClass,
+  PreviewReport,
 } from "./model.js";
+import { PREVIEW_EDIT_CLASSES } from "./model.js";
 
 // --- the decoded forms ---------------------------------------------------------
 
@@ -129,6 +189,79 @@ export interface HumanFindingsReport {
 /** An exit-2 standard-error message decoded onto the information model. */
 export interface HumanErrorMessage extends ErrorInformation {
   /** The message's text. */
+  readonly text: string;
+}
+
+/** One identity pair of a human preview's mapping, with where it stood. */
+export interface HumanMappingPair extends AppliedMappingPair {
+  /** The report line it was decoded from, 1-based. */
+  readonly line: number;
+  /** That line's text. */
+  readonly text: string;
+}
+
+/** One edit a human preview lists beneath its file, with where it stood. */
+export interface HumanPreviewEdit extends PreviewEdit {
+  /** The report line it was decoded from, 1-based. */
+  readonly line: number;
+  /** That line's text. */
+  readonly text: string;
+}
+
+/** One file a human preview lists, with the edits beneath it. */
+export interface HumanPreviewFile {
+  /** The file's path, plain or in the marked byte form's model value. */
+  readonly file: PathValue;
+  /** Its edits, in the report's own order (free, T12.0-15). */
+  readonly edits: readonly HumanPreviewEdit[];
+  /** The report line its path stood on, 1-based. */
+  readonly line: number;
+  /** That line's text. */
+  readonly text: string;
+}
+
+/** One derived path a human preview's delta lists, with where it stood. */
+export interface HumanDeltaPath {
+  /** The path, plain or in the marked byte form's model value. */
+  readonly path: PathValue;
+  /** The report line it was decoded from, 1-based. */
+  readonly line: number;
+  /** That line's text. */
+  readonly text: string;
+}
+
+/**
+ * A human preview's delta: its two directions, each in the report's own
+ * order, or reported unavailable as one datum (SPEC 6.6, 14.23).
+ */
+export type HumanPreviewDelta =
+  | {
+      readonly generated: readonly HumanDeltaPath[];
+      readonly removed: readonly HumanDeltaPath[];
+    }
+  | {
+      readonly unavailable: true;
+      /** The report line of the `delta: unavailable` header, 1-based. */
+      readonly line: number;
+    };
+
+/** A human preview's plan: its mapping, files, and delta (SPEC 6.6). */
+export interface HumanPreviewPlan {
+  readonly mapping: readonly HumanMappingPair[];
+  readonly files: readonly HumanPreviewFile[];
+  readonly delta: HumanPreviewDelta;
+}
+
+/**
+ * A human preview report decoded onto the preview model (TEST-SPEC
+ * T6.6-7): its findings, and its plan — `null` where the report prints none,
+ * as a refused preview's does (SPEC 6.6).
+ */
+export interface HumanPreviewReport {
+  /** Every finding, in the report's own order (free, T12.0-15). */
+  readonly findings: readonly HumanFinding[];
+  readonly plan: HumanPreviewPlan | null;
+  /** The report's text, for diagnoses. */
   readonly text: string;
 }
 
@@ -266,8 +399,12 @@ function decodeHumanPathToken(
   return mark === null ? token : { bytes: mark[1]! };
 }
 
-/** A decimal offset as the layout spells it: no sign, no leading zero. */
-const LOCATION_TOKEN = /^(.+):(0|[1-9][0-9]*)-(0|[1-9][0-9]*)$/;
+/**
+ * A location token: its path — whatever it holds, a line feed included
+ * (the module header) — then its offsets, each decimal as the layout
+ * spells it: no sign, no leading zero.
+ */
+const LOCATION_TOKEN = /^([\s\S]+):(0|[1-9][0-9]*)-(0|[1-9][0-9]*)$/;
 
 /**
  * A location token `<path>:<start>-<end>` (the module header), or
@@ -455,6 +592,34 @@ function decodeFindingLine(
   };
 }
 
+/**
+ * The finding line opening at `index`, with every line a line feed broke
+ * off it (the module header): a line holding no `: ` separator is no
+ * finding line by itself — a datum holding a line feed (U+000A), printed
+ * as it stands, ends it there — so it is read together with the line after
+ * it, joined by the line feed, while the text holds no separator and that
+ * line may continue it (`continues`: never the count line ending the
+ * report, a section header, or a section's item). Returns the text and the
+ * index of its last line.
+ */
+function findingLineAt(
+  lines: readonly string[],
+  index: number,
+  continues: (next: number) => boolean,
+): { readonly text: string; readonly last: number } {
+  let text = lines[index]!;
+  let last = index;
+  while (
+    !text.includes(SEGMENT_SEPARATOR) &&
+    last + 1 < lines.length &&
+    continues(last + 1)
+  ) {
+    last += 1;
+    text = `${text}\n${lines[last]!}`;
+  }
+  return { text, last };
+}
+
 /** The decode of a findings report's bytes, under its guard. */
 function decodeFindingsBytes(
   bytes: Uint8Array,
@@ -465,11 +630,13 @@ function decodeFindingsBytes(
   const lines = reportLines(report);
   const findings: HumanFinding[] = [];
   let counted: number | undefined = undefined;
-  for (const [index, text] of lines.entries()) {
+  const endsReport = (index: number): boolean =>
+    index === lines.length - 1 && COUNT_LINE.test(lines[index]!);
+  for (let index = 0; index < lines.length; index += 1) {
+    const text = lines[index]!;
     const line = index + 1;
-    const count = COUNT_LINE.exec(text);
-    if (count !== null && index === lines.length - 1) {
-      counted = Number(count[1]);
+    if (endsReport(index)) {
+      counted = Number(COUNT_LINE.exec(text)![1]);
       continue;
     }
     if (text.length === 0) {
@@ -480,7 +647,9 @@ function decodeFindingsBytes(
         report,
       );
     }
-    findings.push(decodeFindingLine(text, line, adapter, report));
+    const run = findingLineAt(lines, index, (next) => !endsReport(next));
+    findings.push(decodeFindingLine(run.text, line, adapter, report));
+    index = run.last;
   }
   if (counted !== undefined && counted !== findings.length) {
     decodeFail(
@@ -637,6 +806,434 @@ export function decodeHumanErrorMessage(
       ? "decoding a standard-error message (decodeHumanErrorMessage)"
       : `decoding the standard-error message of ${output.commandLine} (decodeHumanErrorMessage)`;
   return guardSyncStep(step, () => decodeErrorBytes(bytes, context));
+}
+
+// --- the preview report ------------------------------------------------------------
+
+/** The plan's three sections, by the word of each header line. */
+type PreviewSection = "mapping" | "files" | "delta";
+
+/** The plan's sections, in the order the built product prints them. */
+const PREVIEW_SECTIONS: readonly PreviewSection[] = [
+  "mapping",
+  "files",
+  "delta",
+];
+
+/** The word after `delta: ` where the delta is unavailable (14.23). */
+const UNAVAILABLE_WORD = /^unavailable$/i;
+
+/**
+ * A line at the margin opening one of the plan's sections (the module
+ * header): `mapping:`, `files:`, `delta:`, or `delta: unavailable` — or
+ * `undefined` for any other line.
+ */
+function previewSectionHeader(
+  text: string,
+):
+  | { readonly section: PreviewSection; readonly unavailable: boolean }
+  | undefined {
+  if (text === "mapping:") return { section: "mapping", unavailable: false };
+  if (text === "files:") return { section: "files", unavailable: false };
+  if (text === "delta:") return { section: "delta", unavailable: false };
+  const opening = "delta: ";
+  if (
+    text.startsWith(opening) &&
+    UNAVAILABLE_WORD.test(text.slice(opening.length))
+  ) {
+    return { section: "delta", unavailable: true };
+  }
+  return undefined;
+}
+
+/** The indentation of a section's item lines (the module header). */
+const ITEM_INDENT = "  ";
+
+/** The indentation of an edit beneath its file (the module header). */
+const EDIT_INDENT = "    ";
+
+/** The separator between a mapping pair's two identities. */
+const MAPPING_ARROW = " -> ";
+
+/** An edit's range as the layout spells it — no sign, no leading zero — then its class. */
+const EDIT_LINE = /^(0|[1-9][0-9]*)-(0|[1-9][0-9]*) (.+)$/;
+
+/** The whole-segment spelling of each edit class, as a stable code's (the module header). */
+const EDIT_CLASS_SPELLINGS: readonly {
+  readonly editClass: PreviewEditClass;
+  readonly pattern: RegExp;
+}[] = PREVIEW_EDIT_CLASSES.map((editClass) => ({
+  editClass,
+  pattern: new RegExp(
+    `^${editClass.split("-").join(CODE_WORD_SEPARATOR)}$`,
+    "i",
+  ),
+}));
+
+/** The delta's two direction words, opening each of its lines. */
+const DELTA_DIRECTIONS: readonly {
+  readonly direction: "generated" | "removed";
+  readonly pattern: RegExp;
+}[] = [
+  { direction: "generated", pattern: /^generated$/i },
+  { direction: "removed", pattern: /^removed$/i },
+];
+
+/** A mapping line's pair (the module header): `<from> -> <to>`, both present. */
+function decodeMappingLine(
+  text: string,
+  line: number,
+  adapter: string,
+  report: string,
+): HumanMappingPair {
+  const where = atLine(line, text);
+  const body = text.slice(ITEM_INDENT.length);
+  const arrow = body.indexOf(MAPPING_ARROW);
+  if (arrow === -1) {
+    decodeFail(
+      adapter,
+      where,
+      "a mapping line `  <from> -> <to>` — both identities of the pair present, the arrow " +
+        "between them (SPEC 6.6: the mapping's every `from` and `to` identity)",
+      report,
+    );
+  }
+  if (body.indexOf(MAPPING_ARROW, arrow + 1) !== -1) {
+    decodeFail(
+      adapter,
+      where,
+      `one ${JSON.stringify(MAPPING_ARROW)} between a pair's two identities — this line holds ` +
+        "several, so where the `from` identity ends is ambiguous",
+      report,
+    );
+  }
+  const from = body.slice(0, arrow);
+  const to = body.slice(arrow + MAPPING_ARROW.length);
+  if (from.length === 0 || to.length === 0) {
+    decodeFail(
+      adapter,
+      where,
+      `both identities of a mapping pair, never an empty one — its ${from.length === 0 ? "`from`" : "`to`"} ` +
+        "identity is absent (SPEC 6.6)",
+      report,
+    );
+  }
+  return { from, to, line, text };
+}
+
+/** An edit line beneath its file (the module header): `<start>-<end> <class>`. */
+function decodeEditLine(
+  text: string,
+  line: number,
+  adapter: string,
+  report: string,
+): HumanPreviewEdit {
+  const where = atLine(line, text);
+  const match = EDIT_LINE.exec(text.slice(EDIT_INDENT.length));
+  if (match === null) {
+    decodeFail(
+      adapter,
+      where,
+      "an edit line `    <start>-<end> <class>` — the edit's range as its two pre-operation " +
+        "byte offsets (SPEC 1.7, 6.6; a creation's at the new file's start), then its class",
+      report,
+    );
+  }
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) {
+    decodeFail(
+      adapter,
+      where,
+      `byte offsets within the safe integers (SPEC 1.7), got ${match[1]!}-${match[2]!}`,
+      report,
+    );
+  }
+  if (end < start) {
+    decodeFail(
+      adapter,
+      where,
+      `a range whose end is not before its start (SPEC 1.7), got ${match[1]!}-${match[2]!}`,
+      report,
+    );
+  }
+  const spelled = EDIT_CLASS_SPELLINGS.filter(({ pattern }) =>
+    pattern.test(match[3]!),
+  );
+  if (spelled.length > 1) {
+    throw new Error(
+      `harness defect: the segment ${JSON.stringify(match[3]!)} spells the edit classes ` +
+        `${spelled.map(({ editClass }) => editClass).join(", ")} at once — 12.7's ten class ` +
+        `names are a closed vocabulary no two of whose spellings coincide`,
+    );
+  }
+  const editClass = spelled[0]?.editClass;
+  if (editClass === undefined) {
+    decodeFail(
+      adapter,
+      where,
+      `the edit's class, one of the ten class names SPEC 12.7 lists (${PREVIEW_EDIT_CLASSES.join(", ")}), ` +
+        `after its range — got ${JSON.stringify(match[3]!)}`,
+      report,
+    );
+  }
+  return { class: editClass, range: { start, end }, line, text };
+}
+
+/**
+ * A delta line (the module header): `<direction> <path>`, the direction
+ * `generated` or `removed`.
+ */
+function decodeDeltaLine(
+  text: string,
+  line: number,
+  adapter: string,
+  report: string,
+): {
+  readonly direction: "generated" | "removed";
+  readonly path: HumanDeltaPath;
+} {
+  const where = atLine(line, text);
+  const body = text.slice(ITEM_INDENT.length);
+  const space = body.indexOf(" ");
+  const word = space === -1 ? body : body.slice(0, space);
+  const direction = DELTA_DIRECTIONS.find(({ pattern }) =>
+    pattern.test(word),
+  )?.direction;
+  if (direction === undefined || space === -1) {
+    decodeFail(
+      adapter,
+      where,
+      "a delta line `  <direction> <path>` — the direction `generated` or `removed`, then " +
+        "the derived path (SPEC 6.6: the delta's paths in both directions, one datum)",
+      report,
+    );
+  }
+  return {
+    direction,
+    path: {
+      path: decodeHumanPathToken(body.slice(space + 1), adapter, where, report),
+      line,
+      text,
+    },
+  };
+}
+
+/** A file being read, its edits still gathering beneath it. */
+interface GatheringFile {
+  readonly file: PathValue;
+  readonly edits: HumanPreviewEdit[];
+  readonly line: number;
+  readonly text: string;
+}
+
+/** The decode of a preview report's bytes, under its guard. */
+function decodePreviewBytes(
+  bytes: Uint8Array,
+  context: string | undefined,
+): HumanPreviewReport {
+  const adapter = adapterName("preview report", context);
+  const report = utf8Text(bytes, adapter, "report");
+  const lines = reportLines(report);
+  const findings: HumanFinding[] = [];
+  let counted: { readonly count: number; readonly line: number } | undefined =
+    undefined;
+  const opened = new Map<PreviewSection, number>();
+  let unavailable: number | undefined = undefined;
+  let section: PreviewSection | undefined = undefined;
+  let file: GatheringFile | undefined = undefined;
+  const mapping: HumanMappingPair[] = [];
+  const files: GatheringFile[] = [];
+  const generated: HumanDeltaPath[] = [];
+  const removed: HumanDeltaPath[] = [];
+  // The count line ending the finding lines: the report's last line, or
+  // one a section header follows.
+  const endsFindings = (index: number): boolean => {
+    const next = lines[index + 1];
+    return (
+      COUNT_LINE.test(lines[index]!) &&
+      (next === undefined || previewSectionHeader(next) !== undefined)
+    );
+  };
+  for (let index = 0; index < lines.length; index += 1) {
+    const text = lines[index]!;
+    const line = index + 1;
+    const where = atLine(line, text);
+    if (text.length === 0) {
+      decodeFail(
+        adapter,
+        where,
+        "a line of the preview layout — a finding, a section header, or a section's " +
+          "item — never an empty line",
+        report,
+      );
+    }
+    const header = previewSectionHeader(text);
+    if (header !== undefined) {
+      const first = opened.get(header.section);
+      if (first !== undefined) {
+        decodeFail(
+          adapter,
+          where,
+          `each of the plan's sections once — the ${header.section} section opened on line ` +
+            `${String(first)} opens again here`,
+          report,
+        );
+      }
+      opened.set(header.section, line);
+      if (header.unavailable) unavailable = line;
+      section = header.section;
+      file = undefined;
+      continue;
+    }
+    if (!text.startsWith(ITEM_INDENT)) {
+      // At the margin: the count line ending the finding lines, or a
+      // finding line — which closes the section above it.
+      section = undefined;
+      file = undefined;
+      if (endsFindings(index)) {
+        if (counted !== undefined) {
+          decodeFail(
+            adapter,
+            where,
+            `one count line ending the finding lines — line ${String(counted.line)} counts them ` +
+              "already",
+            report,
+          );
+        }
+        counted = { count: Number(COUNT_LINE.exec(text)![1]), line };
+        continue;
+      }
+      const run = findingLineAt(
+        lines,
+        index,
+        (next) =>
+          previewSectionHeader(lines[next]!) === undefined &&
+          !lines[next]!.startsWith(ITEM_INDENT) &&
+          !endsFindings(next),
+      );
+      findings.push(decodeFindingLine(run.text, line, adapter, report));
+      index = run.last;
+      continue;
+    }
+    if (section === undefined) {
+      decodeFail(
+        adapter,
+        where,
+        "an indented line inside one of the plan's sections, a header line at the margin " +
+          "— `mapping:`, `files:`, or `delta:` — opening it",
+        report,
+      );
+    }
+    switch (section) {
+      case "mapping":
+        mapping.push(decodeMappingLine(text, line, adapter, report));
+        break;
+      case "files":
+        if (text.startsWith(EDIT_INDENT)) {
+          if (file === undefined) {
+            decodeFail(
+              adapter,
+              where,
+              "an edit line beneath the file it edits — a file line `  <path>` above it",
+              report,
+            );
+          }
+          file.edits.push(decodeEditLine(text, line, adapter, report));
+        } else {
+          file = {
+            file: decodeHumanPathToken(
+              text.slice(ITEM_INDENT.length),
+              adapter,
+              where,
+              report,
+            ),
+            edits: [],
+            line,
+            text,
+          };
+          files.push(file);
+        }
+        break;
+      case "delta": {
+        if (unavailable !== undefined) {
+          decodeFail(
+            adapter,
+            where,
+            "nothing beneath `delta: unavailable` — the delta is reported unavailable as one " +
+              "datum (SPEC 6.6, 14.23), never beside paths",
+            report,
+          );
+        }
+        const decoded = decodeDeltaLine(text, line, adapter, report);
+        (decoded.direction === "generated" ? generated : removed).push(
+          decoded.path,
+        );
+        break;
+      }
+    }
+  }
+  if (counted !== undefined && counted.count !== findings.length) {
+    decodeFail(
+      adapter,
+      atLine(counted.line, lines[counted.line - 1]!),
+      `a count line equal to the ${String(findings.length)} finding line(s) the report lists — ` +
+        `it counts ${String(counted.count)}`,
+      report,
+    );
+  }
+  if (opened.size === 0) return { findings, plan: null, text: report };
+  for (const expected of PREVIEW_SECTIONS) {
+    if (!opened.has(expected)) {
+      decodeFail(
+        adapter,
+        "the whole report",
+        `the plan's three sections — \`mapping:\`, \`files:\`, and \`delta:\` — each once ` +
+          `(SPEC 6.6: the mapping, every file with its edits, and the delta); the ${expected} ` +
+          "section is missing",
+        report,
+      );
+    }
+  }
+  return {
+    findings,
+    plan: {
+      mapping,
+      files,
+      delta:
+        unavailable === undefined
+          ? { generated, removed }
+          : { unavailable: true, line: unavailable },
+    },
+    text: report,
+  };
+}
+
+/**
+ * Decode a human preview report — the standard output of `rename …
+ * --preview` or `move … --preview` without `--json` (SPEC 6.6, 12.0) —
+ * onto the preview model (the module header's layout): its findings, one
+ * {@link HumanFinding} per finding line, and its plan, `null` where the
+ * report prints none (a refused preview's findings report). Takes a run
+ * (its stdout bytes) or the report's bytes. Fails diagnosed on bytes that
+ * are not valid UTF-8, an empty line, a finding line fitting no layout, a
+ * count line disagreeing with the finding lines, a section opened twice or
+ * missing beside the others, an indented line outside every section, a
+ * mapping line without both identities, an edit line without its range or
+ * its class or above every file, a delta line without its direction, and
+ * a path beneath `delta: unavailable`. A harness step under its own guard
+ * (TEST-SPEC S-3).
+ */
+export function decodeHumanPreviewReport(
+  output: RunResult | Uint8Array,
+  context?: string,
+): HumanPreviewReport {
+  const bytes = output instanceof Uint8Array ? output : output.stdoutBytes;
+  const step =
+    output instanceof Uint8Array
+      ? "decoding a human preview report (decodeHumanPreviewReport)"
+      : `decoding the human preview report of ${output.commandLine} (decodeHumanPreviewReport)`;
+  return guardSyncStep(step, () => decodePreviewBytes(bytes, context));
 }
 
 // --- the comparisons with the --json twin ---------------------------------------------
@@ -929,4 +1526,335 @@ export function assertHumanErrorMessageCarries(
     error,
     context,
   );
+}
+
+// --- the preview comparison with the --json twin --------------------------------------
+
+/**
+ * The multiset difference of two lists by key (the module header): the
+ * `--json` elements with no human counterpart, and the human elements left
+ * over once each `--json` element has taken its counterpart — linear in
+ * both.
+ */
+function multisetDifference<J, H>(
+  json: readonly J[],
+  human: readonly H[],
+  jsonKey: (element: J) => string,
+  humanKey: (element: H) => string,
+): { readonly missing: J[]; readonly extra: H[] } {
+  const queued = new Map<string, number[]>();
+  human.forEach((element, index) => {
+    const key = humanKey(element);
+    const indices = queued.get(key);
+    if (indices === undefined) queued.set(key, [index]);
+    else indices.push(index);
+  });
+  const matched = new Set<number>();
+  const missing: J[] = [];
+  for (const element of json) {
+    const at = queued.get(jsonKey(element))?.shift();
+    if (at === undefined) missing.push(element);
+    else matched.add(at);
+  }
+  return {
+    missing,
+    extra: human.filter((_element, index) => !matched.has(index)),
+  };
+}
+
+/** A mapping pair as one comparable key. */
+function pairKey(pair: AppliedMappingPair): string {
+  return JSON.stringify([pair.from, pair.to]);
+}
+
+/** A mapping pair, rendered for a diagnosis. */
+function describePair(pair: AppliedMappingPair): string {
+  return `${JSON.stringify(pair.from)} -> ${JSON.stringify(pair.to)}`;
+}
+
+/** An edit's class and range as one comparable key. */
+function editKey(edit: PreviewEdit): string {
+  return `${edit.class}@${String(edit.range.start)}-${String(edit.range.end)}`;
+}
+
+/** An edit, rendered for a diagnosis. */
+function describeEdit(edit: PreviewEdit): string {
+  return `${edit.class} ${String(edit.range.start)}-${String(edit.range.end)}`;
+}
+
+/** What the human mapping omits, misplaces, or holds beside the `--json` one. */
+function mappingProblems(
+  json: readonly AppliedMappingPair[],
+  human: readonly HumanMappingPair[],
+): string[] {
+  const { missing, extra } = multisetDifference(json, human, pairKey, pairKey);
+  const problems: string[] = [];
+  const left = [...extra];
+  for (const pair of missing) {
+    const sameFrom = left.findIndex(
+      (candidate) => candidate.from === pair.from,
+    );
+    const at =
+      sameFrom !== -1
+        ? sameFrom
+        : left.findIndex((candidate) => candidate.to === pair.to);
+    if (at === -1) {
+      problems.push(`the mapping pair ${describePair(pair)} is missing`);
+      continue;
+    }
+    const [near] = left.splice(at, 1);
+    problems.push(
+      `the mapping pair ${describePair(pair)} is missing — line ${String(near!.line)} pairs ` +
+        `${describePair(near!)} instead`,
+    );
+  }
+  for (const pair of left) {
+    problems.push(
+      `line ${String(pair.line)} lists the mapping pair ${describePair(pair)}, which the ` +
+        "--json twin's mapping lacks",
+    );
+  }
+  return problems;
+}
+
+/** A file's edits gathered under its path, every listing of it merged. */
+interface FileEdits<E extends PreviewEdit> {
+  readonly file: PathValue;
+  readonly edits: E[];
+  readonly lines: number[];
+}
+
+/** Files gathered by path in form and bytes (the module header). */
+function filesByPath<E extends PreviewEdit>(
+  entries: readonly {
+    readonly file: PathValue;
+    readonly edits: readonly E[];
+    readonly line?: number;
+  }[],
+): Map<string, FileEdits<E>> {
+  const byPath = new Map<string, FileEdits<E>>();
+  for (const entry of entries) {
+    const key = pathKey(entry.file);
+    let gathered = byPath.get(key);
+    if (gathered === undefined) {
+      gathered = { file: entry.file, edits: [], lines: [] };
+      byPath.set(key, gathered);
+    }
+    gathered.edits.push(...entry.edits);
+    if (entry.line !== undefined) gathered.lines.push(entry.line);
+  }
+  return byPath;
+}
+
+/** What the human files omit, misplace, or hold beside the `--json` ones. */
+function filesProblems(
+  json: readonly {
+    readonly file: PathValue;
+    readonly edits: readonly PreviewEdit[];
+  }[],
+  human: readonly HumanPreviewFile[],
+): string[] {
+  const problems: string[] = [];
+  const humanFiles = filesByPath(human);
+  const jsonFiles = filesByPath(json);
+  for (const [key, entry] of jsonFiles) {
+    const listed = humanFiles.get(key);
+    if (listed === undefined) {
+      problems.push(
+        `the file ${describePath(entry.file)} is missing, with its ${String(entry.edits.length)} ` +
+          `edit(s) ${entry.edits.map(describeEdit).join(", ")}`,
+      );
+      continue;
+    }
+    const { missing, extra } = multisetDifference(
+      entry.edits,
+      listed.edits,
+      editKey,
+      editKey,
+    );
+    const left = [...extra];
+    for (const edit of missing) {
+      let at = -1;
+      let distance = Number.POSITIVE_INFINITY;
+      left.forEach((candidate, index) => {
+        if (candidate.class !== edit.class) return;
+        const apart =
+          Math.abs(candidate.range.start - edit.range.start) +
+          Math.abs(candidate.range.end - edit.range.end);
+        if (apart < distance) {
+          at = index;
+          distance = apart;
+        }
+      });
+      if (at === -1) {
+        problems.push(
+          `in ${describePath(entry.file)}, the edit ${describeEdit(edit)} is missing`,
+        );
+        continue;
+      }
+      const [near] = left.splice(at, 1);
+      problems.push(
+        `in ${describePath(entry.file)}, the edit ${describeEdit(edit)} is missing — the ` +
+          `nearest ${edit.class} edit there, line ${String(near!.line)}, spans ` +
+          `${String(near!.range.start)}-${String(near!.range.end)}`,
+      );
+    }
+    for (const edit of left) {
+      problems.push(
+        `in ${describePath(entry.file)}, line ${String(edit.line)} lists the edit ` +
+          `${describeEdit(edit)}, which the --json twin lacks`,
+      );
+    }
+  }
+  for (const [key, entry] of humanFiles) {
+    if (jsonFiles.has(key)) continue;
+    problems.push(
+      `line ${String(entry.lines[0] ?? 0)} lists the file ${describePath(entry.file)}, which ` +
+        "the --json twin's files lack",
+    );
+  }
+  return problems;
+}
+
+/** A derived path of the human delta as a key part. */
+function deltaPathKey(path: HumanDeltaPath): string {
+  return pathKey(path.path);
+}
+
+/** What the human delta omits, misplaces, or holds beside the `--json` one. */
+function deltaProblems(
+  json: PreviewDeltaDatum,
+  human: HumanPreviewDelta,
+): string[] {
+  if ("unavailable" in json) {
+    if ("unavailable" in human) return [];
+    return [
+      `the --json twin reports the delta unavailable (SPEC 6.6, 14.23), but the human ` +
+        `report lists it as a value — ${String(human.generated.length)} generated and ` +
+        `${String(human.removed.length)} removed path(s) — never \`delta: unavailable\``,
+    ];
+  }
+  if ("unavailable" in human) {
+    return [
+      `line ${String(human.line)} reports the delta unavailable where the --json twin ` +
+        `carries its two directions — ${String(json.generated.length)} generated and ` +
+        `${String(json.removed.length)} removed path(s) (SPEC 6.6, 14.23)`,
+    ];
+  }
+  const problems: string[] = [];
+  const generated = multisetDifference(
+    json.generated,
+    human.generated,
+    pathKey,
+    deltaPathKey,
+  );
+  const removed = multisetDifference(
+    json.removed,
+    human.removed,
+    pathKey,
+    deltaPathKey,
+  );
+  const directions = [
+    { name: "generated", own: generated, other: removed, otherName: "removed" },
+    { name: "removed", own: removed, other: generated, otherName: "generated" },
+  ];
+  for (const { name, own, other, otherName } of directions) {
+    for (const path of own.missing) {
+      const at = other.extra.findIndex(
+        (candidate) => deltaPathKey(candidate) === pathKey(path),
+      );
+      if (at === -1) {
+        problems.push(`the ${name} path ${describePath(path)} is missing`);
+        continue;
+      }
+      const [misplaced] = other.extra.splice(at, 1);
+      problems.push(
+        `the path ${describePath(path)}, ${name} in the --json twin, is listed under ` +
+          `${otherName} on line ${String(misplaced!.line)}`,
+      );
+    }
+  }
+  for (const { name, own } of directions) {
+    for (const path of own.extra) {
+      problems.push(
+        `line ${String(path.line)} lists the ${name} path ${describePath(path.path)}, which ` +
+          "the --json twin's delta lacks",
+      );
+    }
+  }
+  return problems;
+}
+
+/**
+ * Assert a decoded human preview report carries the information of its
+ * `--json` twin's decoded preview document (TEST-SPEC T6.6-7, T12.0-15;
+ * the module header's comparison): its findings as
+ * `assertHumanFindingsCarry` compares them, then its plan — none beside a
+ * refusal's findings, and otherwise the mapping's every `from` and `to`
+ * identity, every file with each of its edits' class and range, and the
+ * delta's paths in both directions or its unavailability, order free.
+ * Fails diagnosed, naming every datum the human report omits, misplaces,
+ * or holds beside its twin's.
+ */
+export function assertHumanPreviewCarries(
+  human: HumanPreviewReport,
+  json: PreviewReport,
+  context: string,
+): void {
+  assertHumanFindingsCarry(
+    human,
+    json.findings.map(findingInformation),
+    context,
+  );
+  const problems: string[] = [];
+  const { mapping, files, delta } = json;
+  if (mapping === null || files === null || delta === null) {
+    if (human.plan !== null) {
+      problems.push(
+        "the --json twin is a refused preview, reporting its refusal findings alone — " +
+          "`mapping`, `files`, and `delta` null (SPEC 6.6, 12.7) — but the human report " +
+          `prints a plan (${String(human.plan.mapping.length)} mapping pair(s), ` +
+          `${String(human.plan.files.length)} file(s))`,
+      );
+    }
+  } else if (human.plan === null) {
+    problems.push(
+      "the human report prints no plan — no `mapping:`, `files:`, or `delta:` section — " +
+        `where the --json twin reports ${String(mapping.length)} mapping pair(s), ` +
+        `${String(files.length)} file(s), and its delta (SPEC 6.6)`,
+    );
+  } else {
+    problems.push(
+      ...mappingProblems(mapping, human.plan.mapping),
+      ...filesProblems(files, human.plan.files),
+      ...deltaProblems(delta, human.plan.delta),
+    );
+  }
+  if (problems.length === 0) return;
+  fail(
+    `${context}: the human preview report does not carry the information its --json twin ` +
+      "carries (TEST-SPEC T6.6-7: the mapping's every `from` and `to` identity; every file " +
+      "the operation would rewrite, relocate, or create, with each of its edits' class and " +
+      "range as its two pre-operation byte offsets; and the delta's paths in both " +
+      "directions, or the delta reported unavailable beside the condition-23 finding — " +
+      "decoded by the human-report adapter, H-3; wording, layout, and order free):\n" +
+      `${problems.map((problem) => `- ${problem}`).join("\n")}\n` +
+      `Human report: ${excerpt(human.text)}`,
+  );
+}
+
+/**
+ * Decode a run's human preview report and assert it carries the
+ * information of its `--json` twin's decoded preview document (TEST-SPEC
+ * T6.6-7): `decodeHumanPreviewReport`, then `assertHumanPreviewCarries`.
+ * Returns the decoded report.
+ */
+export function assertHumanPreviewReportCarries(
+  human: RunResult,
+  json: PreviewReport,
+  context: string,
+): HumanPreviewReport {
+  const decoded = decodeHumanPreviewReport(human, context);
+  assertHumanPreviewCarries(decoded, json, context);
+  return decoded;
 }

@@ -271,11 +271,11 @@ import {
 // One spec group (SPEC 7.1), no code group: every staged `.mdx` under
 // `specs/` is a discovered spec source. A staged-source record: T6.5-12
 // through T6.5-14, T6.5-16, T6.5-17, and T6.5-19 stage it in workspaces
-// created after a product invocation, as T6.5-23, T6.6-3, T6.6-4, and T14-7
-// do through R16_CONFIG (S-9's timing clause;
+// created after a product invocation, as T6.5-23, T6.6-3, T6.6-4, T6.6-7,
+// and T14-7 do through R16_CONFIG (S-9's timing clause;
 // test/self/s9-staged-sources.test.ts).
 const CONFIG = stagedTs(
-  "T6.5-12/T6.5-13/T6.5-14/T6.5-16/T6.5-17/T6.5-19/T6.5-23/T6.6-3/T6.6-4/T14-7 xspec.config.ts — one spec group, no code group, the module's configuration (R16_CONFIG)",
+  "T6.5-12/T6.5-13/T6.5-14/T6.5-16/T6.5-17/T6.5-19/T6.5-23/T6.6-3/T6.6-4/T6.6-7/T14-7 xspec.config.ts — one spec group, no code group, the module's configuration (R16_CONFIG)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1390,15 +1390,16 @@ const A13_THIRD_SOURCE = ['<S id="a">', "A text.", "</S>", ""].join("\n");
  * The third module as staged, `a` alone — a ledger record (S-9's
  * before-any-product clause; helpers/staged-mdx.ts) shared by every site
  * staging these bytes, identical bytes being one record staged at each:
- * T6.5-13's cross-file arms and (g), T6.5-19's (a), and T6.6-4's tie-break
- * restagings at `specs/x.mdx`; T6.5-16's (g) family, T6.5-17's arms, and
- * their T6.6-3 and T14-7 restagings at `specs/x.mdx` (`R16_G_THIRD_STAGED`,
+ * T6.5-13's cross-file arms and (g), T6.5-19's (a), and T6.6-4's and
+ * T6.6-7's tie-break restagings at `specs/x.mdx`; T6.5-16's (g) family,
+ * T6.5-17's arms, and their T6.6-3, T6.6-7, and T14-7 restagings at
+ * `specs/x.mdx` (`R16_G_THIRD_STAGED`,
  * `M17_X_STAGED` below); T6.5-15's `specs/A.mdx`; T6.5-23(g)'s
  * `specs/x.mdx` and `specs/k.mdx` (section-6.5-v.ts). The string stays for
  * the untouched-file compares and the S-9 vectors.
  */
 export const A13_THIRD_STAGED = stagedMdx(
-  "T6.5-13/T6.5-15/T6.5-16/T6.5-17/T6.5-19/T6.5-23/T6.6-3/T6.6-4/T14-7 the module holding a alone (specs/x.mdx; T6.5-15's specs/A.mdx; T6.5-23's specs/k.mdx)",
+  "T6.5-13/T6.5-15/T6.5-16/T6.5-17/T6.5-19/T6.5-23/T6.6-3/T6.6-4/T6.6-7/T14-7 the module holding a alone (specs/x.mdx; T6.5-15's specs/A.mdx; T6.5-23's specs/k.mdx)",
   A13_THIRD_SOURCE,
 );
 /** The canonical specifier the receiving file's added declaration carries (SPEC 6.5, 2.1). */
@@ -1446,7 +1447,7 @@ const A13_ORIGIN_BEFORE = [
 const A13_ORIGIN_AFTER = [...A13_ORIGIN_HEAD, ""].join("\n");
 /** The cross-file origin as staged — one record (S-9) for T6.5-13's cross-file arms, T6.5-19's (a), T6.5-23's (g) (section-6.5-v.ts), and T6.6-4's tie-break restagings. */
 export const A13_ORIGIN_STAGED = stagedMdx(
-  "T6.5-13/T6.5-19/T6.5-23/T6.6-4 specs/a.mdx the cross-file origin",
+  "T6.5-13/T6.5-19/T6.5-23/T6.6-4/T6.6-7 specs/a.mdx the cross-file origin",
   A13_ORIGIN_BEFORE,
 );
 
@@ -1671,12 +1672,12 @@ const A13_D_TARGET = "para";
 // The targets as staged — ledger records (S-9); the strings stay for the
 // offsets the preview edits pin. Identical bytes are one record: (a)'s
 // target is T6.5-17's arms' and T6.5-16's (g) control's `specs/b.mdx` too
-// (`M17_TARGET_SOURCE`, `R16_G_CONTROL_TARGET` below; T6.6-3 and T14-7
-// restage T6.5-17's arms), (b)'s is (g)'s, and (d)'s two variants are
-// T6.5-16's top-level (g) twin's (restaged by T6.6-3 and T14-7); (b), (d),
-// and (g) are T6.6-4's tie-break restagings.
+// (`M17_TARGET_SOURCE`, `R16_G_CONTROL_TARGET` below; T6.6-3, T6.6-7, and
+// T14-7 restage T6.5-17's arms), (b)'s is (g)'s, and (d)'s two variants are
+// T6.5-16's top-level (g) twin's (restaged by T6.6-3, T6.6-7, and T14-7);
+// (b), (d), and (g) are T6.6-4's and T6.6-7's tie-break restagings.
 const A13_A_STAGED = stagedMdx(
-  "T6.5-13/T6.5-16/T6.5-17/T6.6-3/T14-7 specs/b.mdx the flow-form parent p holding x",
+  "T6.5-13/T6.5-16/T6.5-17/T6.6-3/T6.6-7/T14-7 specs/b.mdx the flow-form parent p holding x",
   A13_A_TARGET,
 );
 const A13_A_SIBLING_STAGED = stagedMdx(
@@ -1684,7 +1685,7 @@ const A13_A_SIBLING_STAGED = stagedMdx(
   A13_A_SIBLING_TARGET,
 );
 const A13_B_STAGED = stagedMdx(
-  "T6.5-13/T6.6-4 arms (b) and (g) specs/b.mdx",
+  "T6.5-13/T6.6-4/T6.6-7 arms (b) and (g) specs/b.mdx",
   A13_B_TARGET,
 );
 const A13_B_TERMINATED_STAGED = stagedMdx(
@@ -1693,11 +1694,11 @@ const A13_B_TERMINATED_STAGED = stagedMdx(
 );
 const A13_C_STAGED = stagedMdx("T6.5-13 arm (c) specs/b.mdx", A13_C_TARGET);
 const A13_D_STAGED = stagedMdx(
-  "T6.5-13/T6.5-16/T6.6-3/T6.6-4/T14-7 specs/b.mdx the paragraph line para, unterminated",
+  "T6.5-13/T6.5-16/T6.6-3/T6.6-4/T6.6-7/T14-7 specs/b.mdx the paragraph line para, unterminated",
   A13_D_TARGET,
 );
 const A13_D_TERMINATED_STAGED = stagedMdx(
-  "T6.5-13/T6.5-16/T6.6-3/T6.6-4/T14-7 specs/b.mdx the paragraph line para, terminated",
+  "T6.5-13/T6.5-16/T6.6-3/T6.6-4/T6.6-7/T14-7 specs/b.mdx the paragraph line para, terminated",
   `${A13_D_TARGET}\n`,
 );
 
@@ -1760,7 +1761,7 @@ const A13_F_STAGED = stagedMdx("T6.5-13 arm (f) specs/a.mdx", A13_F_BEFORE);
 const A13_FOURTH_SOURCE = ['<S id="b">', "B text.", "</S>", ""].join("\n");
 /** The fourth module as staged, `b` alone — one record (S-9) for (g) and its T6.6-4 restaging, T6.5-17's (b) and its T6.6-3 and T14-7 restagings (`M17_Y_STAGED` below), T6.5-15's `specs/B.mdx`, and T14-7's destination-spelling arm's `specs/b.mdx` (section-14.ts, by import). */
 export const A13_FOURTH_STAGED = stagedMdx(
-  "T6.5-13/T6.5-15/T6.5-17/T6.6-3/T6.6-4/T14-7 the module holding b alone (specs/y.mdx; T6.5-15's specs/B.mdx; T14-7's destination-spelling arm specs/b.mdx)",
+  "T6.5-13/T6.5-15/T6.5-17/T6.6-3/T6.6-4/T6.6-7/T14-7 the module holding b alone (specs/y.mdx; T6.5-15's specs/B.mdx; T14-7's destination-spelling arm specs/b.mdx)",
   A13_FOURTH_SOURCE,
 );
 
@@ -1783,7 +1784,7 @@ const A13_G_ORIGIN_HEAD: readonly string[] = [
   "",
 ];
 const A13_G_ORIGIN_BEFORE = stagedMdx(
-  "T6.5-13/T6.6-4 arm (g) specs/a.mdx",
+  "T6.5-13/T6.6-4/T6.6-7 arm (g) specs/a.mdx",
   [...A13_G_ORIGIN_HEAD, ...a13TwiceMovedLines("m", "X", "Y"), ""].join("\n"),
 );
 const A13_G_ORIGIN_AFTER = [...A13_G_ORIGIN_HEAD, ""].join("\n");
@@ -1830,7 +1831,7 @@ const A13_I_ORIGIN_STAGED = stagedMdx(
 );
 /** The existing target as staged, `k` alone — one record (S-9) for (i), (k), T6.5-19's (b), and T6.5-16's arms staging `R16_K` (below) whole, with their T6.6-3 and T14-7 restagings. */
 const A13_K_STAGED = stagedMdx(
-  "T6.5-13/T6.5-16/T6.5-19/T6.6-3/T14-7 specs/b.mdx holding k alone",
+  "T6.5-13/T6.5-16/T6.5-19/T6.6-3/T6.6-7/T14-7 specs/b.mdx holding k alone",
   A13_EXISTING_TARGET,
 );
 
@@ -3877,14 +3878,14 @@ const R16_FF = String.fromCodePoint(0x000c);
 const R16_FLOW_SECTION = '<S id="m">\nx\n</S>';
 /** The origin holding `k` then the flow-form section — one record (S-9) for (c)'s first shape, the collision arm, and the alone arms, with their T6.6-3 and T14-7 restagings. */
 const R16_FLOW_ORIGIN_STAGED = stagedMdx(
-  "T6.5-16/T6.6-3/T14-7 specs/a.mdx holding k then the flow-form section m",
+  "T6.5-16/T6.6-3/T6.6-7/T14-7 specs/a.mdx holding k then the flow-form section m",
   `${R16_K}${R16_FLOW_SECTION}\n`,
 );
 /** The text-position parent of (c)'s first arm, as a whole target file. */
 const R16_TEXT_PARENT = 'foo <S id="p">bar</S> baz\n';
 /** That parent as staged — one record (S-9) for (c)'s first parent, (g) terminated and twice-spelled, (i), and the alone arms, with their T6.6-3 and T14-7 restagings. */
 const R16_TEXT_PARENT_STAGED = stagedMdx(
-  "T6.5-16/T6.6-3/T14-7 specs/b.mdx the text-position parent, terminated",
+  "T6.5-16/T6.6-3/T6.6-7/T14-7 specs/b.mdx the text-position parent, terminated",
   R16_TEXT_PARENT,
 );
 
@@ -4041,7 +4042,7 @@ function r16ArmA(name: string, ws: string): R16RefusedArm {
       `tag of \`body</S>\` cannot close (SPEC 6.2, 14.20)`,
     files: {
       [R16_ORIGIN]: stagedMdx(
-        `T6.5-16/T6.6-3/T14-7 ${key} ${R16_ORIGIN}`,
+        `T6.5-16/T6.6-3/T6.6-7/T14-7 ${key} ${R16_ORIGIN}`,
         `foo ${moved}\n`,
       ),
       [R16_TARGET]: R16_K_STAGED,
@@ -4086,7 +4087,7 @@ function r16ArmB(
           `text position, closing no flow-position tag (SPEC 6.2, 14.20)`,
     files: {
       [R16_ORIGIN]: stagedMdx(
-        `T6.5-16/T6.6-3/T14-7 ${key} ${R16_ORIGIN}`,
+        `T6.5-16/T6.6-3/T6.6-7/T14-7 ${key} ${R16_ORIGIN}`,
         `foo ${moved} bar\n`,
       ),
       [R16_TARGET]: R16_K_STAGED,
@@ -4120,7 +4121,8 @@ interface R16MovedShape {
 
 /**
  * A moved shape with its origin file as staged: `ids` the tests staging it
- * (the refused shapes' T6.6-3 and T14-7 restagings included). The first
+ * (the refused shapes' T6.6-3, T6.6-7, and T14-7 restagings included). The
+ * first
  * shape's origin is the flow-form origin's record, passed in; a passed
  * record must hold the composition's bytes (a defect of this table
  * otherwise, never a verdict).
@@ -4150,20 +4152,20 @@ function r16MovedShape(
 
 const R16_C_SHAPES: readonly R16MovedShape[] = [
   r16MovedShape(
-    "T6.5-16/T6.6-3/T14-7",
+    "T6.5-16/T6.6-3/T6.6-7/T14-7",
     "a flow-position section",
     R16_FLOW_SECTION,
     '<S id="p.n">\nx\n</S>',
     R16_FLOW_ORIGIN_STAGED,
   ),
   r16MovedShape(
-    "T6.5-16/T6.6-3/T14-7",
+    "T6.5-16/T6.6-3/T6.6-7/T14-7",
     "a self-closing section",
     '<S id="m" />',
     '<S id="p.n" />',
   ),
   r16MovedShape(
-    "T6.5-16/T6.6-3/T14-7",
+    "T6.5-16/T6.6-3/T6.6-7/T14-7",
     "a single-line section holding nothing outside its tags",
     '<S id="m"><S id="m.q" /></S>',
     '<S id="p.n"><S id="p.n.q" /></S>',
@@ -4205,7 +4207,7 @@ const R16_C_PARENTS: readonly R16Parent[] = [
     name: "the text-position parent with its closing tag on a later line",
     source: R16_C_LATER_CLOSING_PARENT,
     staged: stagedMdx(
-      "T6.5-16/T6.6-3/T14-7 specs/b.mdx the text-position parent with its closing tag on a later line",
+      "T6.5-16/T6.6-3/T6.6-7/T14-7 specs/b.mdx the text-position parent with its closing tag on a later line",
       R16_C_LATER_CLOSING_PARENT,
     ),
     compose: (moved) => `foo <S id="p">bar\n${moved}\n</S> baz\n`,
@@ -4217,7 +4219,7 @@ const R16_C_PARENTS: readonly R16Parent[] = [
     name: "the self-closing parent after its paired-form rewrite",
     source: R16_C_SELF_CLOSING_PARENT,
     staged: stagedMdx(
-      "T6.5-16/T6.6-3/T14-7 specs/b.mdx the self-closing parent",
+      "T6.5-16/T6.6-3/T6.6-7/T14-7 specs/b.mdx the self-closing parent",
       R16_C_SELF_CLOSING_PARENT,
     ),
     compose: (moved) => `foo <S id="p">\n${moved}\n</S> baz\n`,
@@ -4280,14 +4282,14 @@ const R16_D_TARGET_AFTER = `${R16_K}<S id="m">x</S>\n`;
  * (d)'s origin as staged for a `remainder`: the text-position parent holding
  * `p.m` then the remainder on its line — one ledger record (S-9) per
  * remainder, the list-marker origin being the missing-parent applicability
- * arm's too; each is restaged by T6.6-3 and T14-7.
+ * arm's too; each is restaged by T6.6-3, T6.6-7, and T14-7.
  */
 const R16_D_ORIGINS = new Map<string, StagedMdx>();
 function r16DOrigin(remainder: string): StagedMdx {
   const known = R16_D_ORIGINS.get(remainder);
   if (known !== undefined) return known;
   const record = stagedMdx(
-    `T6.5-16/T6.6-3/T14-7 specs/a.mdx (d) the parent p holding p.m then ${JSON.stringify(remainder)} on its line`,
+    `T6.5-16/T6.6-3/T6.6-7/T14-7 specs/a.mdx (d) the parent p holding p.m then ${JSON.stringify(remainder)} on its line`,
     `${R16_D_PREFIX}${R16_D_MOVED}${remainder}\n</S> baz\n`,
   );
   R16_D_ORIGINS.set(remainder, record);
@@ -4319,7 +4321,7 @@ const R16_D_CLOSING_ARM: R16RefusedArm = {
     "the parent's opening tag interrupted (SPEC 6.5, 6.2, 14.20)",
   files: {
     [R16_ORIGIN]: stagedMdx(
-      "T6.5-16/T6.6-3/T14-7 specs/a.mdx (d) the parent p holding p.m then its own closing tag",
+      "T6.5-16/T6.6-3/T6.6-7/T14-7 specs/a.mdx (d) the parent p holding p.m then its own closing tag",
       `${R16_D_PREFIX}${R16_D_MOVED}</S>\n`,
     ),
     [R16_TARGET]: R16_K_STAGED,
@@ -4371,11 +4373,11 @@ const R16_D_INSERTION_ARM: R16RefusedArm = {
     "6.2, 14.20)",
   files: {
     [R16_ORIGIN]: stagedMdx(
-      "T6.5-16/T6.6-3/T14-7 (d) the insertion leaving a sibling's tags alone on their line specs/a.mdx",
+      "T6.5-16/T6.6-3/T6.6-7/T14-7 (d) the insertion leaving a sibling's tags alone on their line specs/a.mdx",
       `${R16_K}${R16_D_INSERTION_MOVED}\n`,
     ),
     [R16_TARGET]: stagedMdx(
-      "T6.5-16/T6.6-3/T14-7 (d) the insertion leaving a sibling's tags alone on their line specs/b.mdx",
+      "T6.5-16/T6.6-3/T6.6-7/T14-7 (d) the insertion leaving a sibling's tags alone on their line specs/b.mdx",
       'foo <S id="p">\n<S id="p.s"> </S></S> tail\n',
     ),
   },
@@ -4400,11 +4402,11 @@ const R16_D_INSERTION_ARM: R16RefusedArm = {
 const R16_E_DECLARATION = 'import A from "./A.xspec"';
 const R16_E_MOVED = '<S id="m">\nx\n</S>';
 const R16_E_ORIGIN_BEFORE = stagedMdx(
-  "T6.5-16/T6.6-3/T14-7 (e) specs/o.mdx",
+  "T6.5-16/T6.6-3/T6.6-7/T14-7 (e) specs/o.mdx",
   `${R16_K}${R16_E_MOVED}\n`,
 );
 const R16_E_MODULE = stagedMdx(
-  "T6.5-16/T6.6-3/T14-7 (e) specs/A.mdx holding q",
+  "T6.5-16/T6.6-3/T6.6-7/T14-7 (e) specs/A.mdx holding q",
   '<S id="q">Q text.</S>\n',
 );
 const R16_E_ARGV = ["move", "specs/o.mdx#m", "specs/b.mdx#m"] as const;
@@ -4419,7 +4421,7 @@ function r16ArmE(name: string, target: string): R16RefusedArm {
     files: {
       [R16_E_ORIGIN]: R16_E_ORIGIN_BEFORE,
       [R16_TARGET]: stagedMdx(
-        `T6.5-16/T6.6-3/T14-7 (e) the target ${name} ${R16_TARGET}`,
+        `T6.5-16/T6.6-3/T6.6-7/T14-7 (e) the target ${name} ${R16_TARGET}`,
         target,
       ),
       [R16_E_MODULE_SOURCE]: R16_E_MODULE,
@@ -4472,7 +4474,7 @@ const R16_F_ARM: R16RefusedArm = {
     "stands outside, closing nothing there (SPEC 6.5, 14.20)",
   files: {
     [R16_ORIGIN]: stagedMdx(
-      "T6.5-16/T6.6-3/T14-7 (f) specs/a.mdx",
+      "T6.5-16/T6.6-3/T6.6-7/T14-7 (f) specs/a.mdx",
       `> ${R16_F_MOVED}\n`,
     ),
     [R16_TARGET]: R16_K_STAGED,
@@ -4511,7 +4513,7 @@ const R16_G_MOVED = `<S id="m">x ${R16_G_CONTAINER}</S>`;
 /** The origin as the deletion leaves it: the declaration, an empty line, the kept sibling. */
 const R16_G_ORIGIN_KEPT = `${R16_G_DECLARATION}\n\n<S id="k">z ${R16_G_CONTAINER}</S>\n`;
 const R16_G_ORIGIN_BEFORE = stagedMdx(
-  "T6.5-16/T6.6-3/T14-7 (g) specs/a.mdx the origin holding k and m embedding X.a",
+  "T6.5-16/T6.6-3/T6.6-7/T14-7 (g) specs/a.mdx the origin holding k and m embedding X.a",
   `${R16_G_ORIGIN_KEPT}${R16_G_MOVED}\n`,
 );
 const R16_G_LOCATIONS: readonly R16Location[] = [
@@ -4573,7 +4575,7 @@ function r16ArmG(name: string, terminated: boolean): R16RefusedArm {
       [R16_TARGET]: terminated
         ? R16_TEXT_PARENT_STAGED
         : stagedMdx(
-            "T6.5-16/T6.6-3/T14-7 specs/b.mdx the text-position parent, unterminated",
+            "T6.5-16/T6.6-3/T6.6-7/T14-7 specs/b.mdx the text-position parent, unterminated",
             R16_TEXT_PARENT.slice(0, -1),
           ),
       [R16_G_THIRD]: R16_G_THIRD_STAGED,
@@ -4618,7 +4620,7 @@ const R16_G_TWICE_ARM: R16RefusedArm = {
     "representative chosen (SPEC 14)",
   files: {
     [R16_ORIGIN]: stagedMdx(
-      "T6.5-16/T6.6-3/T14-7 (g) specs/a.mdx the origin holding k and m embedding X.a twice",
+      "T6.5-16/T6.6-3/T6.6-7/T14-7 (g) specs/a.mdx the origin holding k and m embedding X.a twice",
       `${R16_G_ORIGIN_KEPT}${R16_G_TWICE_MOVED}\n`,
     ),
     [R16_TARGET]: R16_TEXT_PARENT_STAGED,
@@ -4682,7 +4684,7 @@ const R16_G_PSEUDO_ARM: R16RefusedArm = {
   files: {
     [R16_ORIGIN]: R16_G_ORIGIN_BEFORE,
     [R16_TARGET]: stagedMdx(
-      "T6.5-16/T6.6-3/T14-7 (g) the pseudo-block twin specs/b.mdx",
+      "T6.5-16/T6.6-3/T6.6-7/T14-7 (g) the pseudo-block twin specs/b.mdx",
       `${R16_G_PSEUDO_HEAD}${R16_TEXT_PARENT}`,
     ),
     [R16_G_THIRD]: R16_G_THIRD_STAGED,
@@ -4815,11 +4817,11 @@ const R16_G_SIDE_ARM: R16RefusedArm = {
     "the line (SPEC 6.5)",
   files: {
     [R16_ORIGIN]: stagedMdx(
-      "T6.5-16/T6.6-3/T14-7 (g) the origin-side twin specs/a.mdx",
+      "T6.5-16/T6.6-3/T6.6-7/T14-7 (g) the origin-side twin specs/a.mdx",
       `${R16_G_SIDE_PREFIX}${R16_G_SIDE_MOVED}${R16_G_SIDE_TAIL}`,
     ),
     [R16_TARGET]: stagedMdx(
-      "T6.5-16/T6.6-3/T14-7 (g) the origin-side twin specs/b.mdx holding q",
+      "T6.5-16/T6.6-3/T6.6-7/T14-7 (g) the origin-side twin specs/b.mdx holding q",
       '<S id="q">\nz\n</S>\n',
     ),
   },
@@ -4881,7 +4883,7 @@ const R16_I_ARM: R16RefusedArm = {
     "(SPEC 6.5, 14, 12.7)",
   files: {
     [R16_I_ORIGIN]: stagedMdx(
-      "T6.5-16/T6.6-3/T14-7 (i) specs/z.mdx",
+      "T6.5-16/T6.6-3/T6.6-7/T14-7 (i) specs/z.mdx",
       `${R16_I_PREFIX}${R16_I_MOVED}- item\n</S> baz\n`,
     ),
     [R16_TARGET]: R16_TEXT_PARENT_STAGED,
@@ -4922,7 +4924,7 @@ const R16_H_ARM: R16RefusedArm = {
     "`identities` (SPEC 6.5, 6.2, 14.20)",
   files: {
     [R16_ORIGIN]: stagedMdx(
-      "T6.5-16/T6.6-3/T14-7 (h) the same-file variant specs/a.mdx",
+      "T6.5-16/T6.6-3/T6.6-7/T14-7 (h) the same-file variant specs/a.mdx",
       `${R16_TEXT_PARENT}${R16_FLOW_SECTION}\n`,
     ),
   },
@@ -4960,7 +4962,7 @@ const R16_COLLISION_ARM: R16RefusedArm = {
   files: {
     [R16_ORIGIN]: R16_FLOW_ORIGIN_STAGED,
     [R16_TARGET]: stagedMdx(
-      "T6.5-16/T6.6-3 (c) beside refused-id-collision specs/b.mdx",
+      "T6.5-16/T6.6-3/T6.6-7 (c) beside refused-id-collision specs/b.mdx",
       `${R16_COLLISION_TARGET_PREFIX}${R16_COLLISION_BEARER}</S> baz\n`,
     ),
   },
@@ -5016,7 +5018,7 @@ const R16_D_MISSING_PARENT_ARM: R16RefusedArm = {
 const R16_CREATED_MOVED = '<S id="m"> \nbody</S>';
 /** The created-target arms' origin — one record (S-9) for both arms and their T6.6-3 and T14-7 restagings. */
 const R16_CREATED_ORIGIN_STAGED = stagedMdx(
-  "T6.5-16/T6.6-3/T14-7 the created-target arms specs/a.mdx",
+  "T6.5-16/T6.6-3/T6.6-7/T14-7 the created-target arms specs/a.mdx",
   `foo ${R16_CREATED_MOVED}\n`,
 );
 function r16CreatedArm(
@@ -5782,7 +5784,7 @@ export interface M17RefusedArm {
 
 const M17_A_FILES: Readonly<Record<string, InitialFileContents>> = {
   [M17_ORIGIN]: stagedMdx(
-    "T6.5-17/T6.6-3/T14-7 arms (a) and (d) specs/a.mdx",
+    "T6.5-17/T6.6-3/T6.6-7/T14-7 arms (a) and (d) specs/a.mdx",
     m17Origin([M17_X_DECLARATION], "body {text(X.a)}"),
   ),
   [M17_TARGET]: M17_TARGET_STAGED,
@@ -5809,7 +5811,7 @@ export const M17_REFUSED_ARMS: readonly M17RefusedArm[] = [
       "characters in start order (SPEC 6.5, 14, 12.7)",
     files: {
       [M17_ORIGIN]: stagedMdx(
-        "T6.5-17/T6.6-3/T14-7 arm (b) specs/a.mdx",
+        "T6.5-17/T6.6-3/T6.6-7/T14-7 arm (b) specs/a.mdx",
         m17Origin(
           [M17_X_DECLARATION, M17_Y_DECLARATION],
           "body {text(X.a)} {text(Y.b)}",
@@ -5831,7 +5833,7 @@ export const M17_REFUSED_ARMS: readonly M17RefusedArm[] = [
       "it stands (SPEC 6.5)",
     files: {
       [M17_ORIGIN]: stagedMdx(
-        "T6.5-17/T6.6-3/T14-7 arm (c) specs/a.mdx",
+        "T6.5-17/T6.6-3/T6.6-7/T14-7 arm (c) specs/a.mdx",
         m17Origin([M17_X_DECLARATION], "body"),
       ),
       [M17_TARGET]: M17_TARGET_STAGED,

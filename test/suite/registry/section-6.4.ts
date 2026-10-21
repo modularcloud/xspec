@@ -296,10 +296,11 @@ export default defineConfig({
 );
 
 // Exactly one spec group (SPEC 7), for the refusal and usage-error fixtures.
-// A staged-source record: T6.4-4 and T6.6-3 (as RENAME_REFUSAL_CONFIG) stage
-// it in workspaces created after a product invocation (S-9's timing clause).
+// A staged-source record: T6.4-4, T6.6-3, and T6.6-7 (as
+// RENAME_REFUSAL_CONFIG) stage it in workspaces created after a product
+// invocation (S-9's timing clause).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.4-4/T6.6-3 xspec.config.ts — exactly one spec group, the refusal and usage-error fixtures'",
+  "T6.4-4/T6.6-3/T6.6-7 xspec.config.ts — exactly one spec group, the refusal and usage-error fixtures'",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1835,14 +1836,15 @@ export const RENAME_REFUSAL_CONFIG = SPECS_ONLY_CONFIG;
 // The `.mdx` entries are ledger records (S-9's before-any-product clause;
 // helpers/staged-mdx.ts): T6.4-3 stages the set again for its
 // configuration-state twins after its premise `build`, so each record is
-// named with every test staging the set — T6.4-3, T6.6-3, T14-7 — and made
+// named with every test staging the set — T6.4-3, T6.6-3, T6.6-7, T14-7 —
+// and made
 // from the string constant the location windows still read.
 export const RENAME_REFUSAL_FILES: Readonly<
   Record<string, InitialFileContents>
 > = {
-  [V3_FILE]: stagedMdx("T6.4-3/T6.6-3/T14-7 specs/A.mdx", V3_SOURCE),
+  [V3_FILE]: stagedMdx("T6.4-3/T6.6-3/T6.6-7/T14-7 specs/A.mdx", V3_SOURCE),
   [TWO_BEARER_COLLISION_FILE]: stagedMdx(
-    "T6.4-3/T6.6-3/T14-7 specs/B.mdx",
+    "T6.4-3/T6.6-3/T6.6-7/T14-7 specs/B.mdx",
     TWO_BEARER_COLLISION_SOURCE,
   ),
 };
@@ -2932,12 +2934,13 @@ const T6_4_6_OTHER_INVALID = stagedMdx(
 // `out` replaced by a plain file — a directory component of every emit
 // destination occupied by a non-directory (14.22), the sources still
 // valid. Its workspace is created after the body's first product
-// invocation (the 14.5 arm runs first), and T6.6-3 stages it after its own
-// (its `--preview` twins), so the configuration and the source are
+// invocation (the 14.5 arm runs first), and T6.6-3 and T6.6-7 stage it
+// after their own (their `--preview` twins), so the configuration and the
+// source are
 // staged-source records (S-9's timing clause; helpers/staged-ts.ts,
 // helpers/staged-mdx.ts).
 export const REFUSED_WRITES_CONFIG = stagedTs(
-  'T6.4-6/T6.6-3 xspec.config.ts — one spec group, Markdown emitted under outDir "out" (the refused-writes arm)',
+  'T6.4-6/T6.6-3/T6.6-7 xspec.config.ts — one spec group, Markdown emitted under outDir "out" (the refused-writes arm)',
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -2953,7 +2956,7 @@ export const REFUSED_WRITES_FILES: Readonly<
   Record<string, InitialFileContents>
 > = {
   [W6_FILE]: stagedMdx(
-    "T6.4-6/T6.6-3 refused-writes arm specs/A.mdx",
+    "T6.4-6/T6.6-3/T6.6-7 refused-writes arm specs/A.mdx",
     ['<S id="a">', "A text.", "</S>", ""].join("\n"),
   ),
 };

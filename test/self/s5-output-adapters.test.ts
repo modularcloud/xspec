@@ -31,6 +31,7 @@ import type {
   Finding,
   ManualDeletionVerdict,
   Mention,
+  PreviewReport,
   ViewReport,
 } from "../helpers/adapters/index.js";
 import {
@@ -46,6 +47,8 @@ import {
   assertHumanErrorMessageCarries,
   assertHumanFindingsCarry,
   assertHumanFindingsReportCarries,
+  assertHumanPreviewCarries,
+  assertHumanPreviewReportCarries,
   assertJsonKeysByteSorted,
   assertNodeEdgeListsBare,
   assertReportMentions,
@@ -69,6 +72,7 @@ import {
   decodeFindingsReport,
   decodeHumanErrorMessage,
   decodeHumanFindingsReport,
+  decodeHumanPreviewReport,
   decodeIdsReport,
   decodeIdsTreeReport,
   decodeImpactReport,
@@ -8136,6 +8140,816 @@ test("S-5: the exit-2 comparison rejects a standard-error message missing the co
     "xspec: read failure: specs/A\\xff.mdx: refused (SPEC 14.25)\n",
     'it carries the concerned path "specs/A\\\\xff.mdx"',
     twin,
+  );
+});
+
+// --- the human preview decoder (human-reports.ts) --------------------------------
+//
+// TEST-SPEC T6.6-7 and H-3's report forms: a `rename`/`move --preview`
+// report decoded onto the preview model the form-exact `--json` decode
+// produces — its findings, and its plan: the mapping's pairs, every file
+// with each of its edits' class and range, the delta's two directions or
+// its unavailability — and compared with the `--json` twin's decoded
+// document, order free. The synthetic reports take the built product's
+// layout (human-reports.ts' header); every one either decodes to exactly
+// the modeled information or fails diagnosed — an edit without its range,
+// a delta line without its direction, a mapping pair half absent, and
+// every datum a report omits or misplaces each rejected loudly (S-5).
+
+/** One decoded `--json` preview document (12.7), for the twins. */
+function jsonPreview(document: Record<string, unknown>): PreviewReport {
+  return decodePreviewReport(
+    { findings: [], ...document },
+    "the human preview decoder's --json twin",
+  );
+}
+
+/** A preview edit's `--json` form. */
+function jsonEdit(
+  editClass: string,
+  start: number,
+  end: number,
+): Record<string, unknown> {
+  return { class: editClass, range: { start, end } };
+}
+
+/**
+ * A section move into an existing target file (T6.6-4(b)'s shape): two
+ * mapping pairs, three files whose edits span seven classes — a nested
+ * `id-rewrite` and a zero-length coincidence among them — and an empty
+ * delta, in the pinned 12.7 orders.
+ */
+const JSON_SECTION_MOVE_TWIN = jsonPreview({
+  mapping: [
+    { from: "specs/Origin.mdx#org.mv", to: "specs/Target.mdx#tp.nw" },
+    { from: "specs/Origin.mdx#org.mv.kid", to: "specs/Target.mdx#tp.nw.kid" },
+  ],
+  files: [
+    {
+      file: "specs/Origin.mdx",
+      edits: [
+        jsonEdit("import-removal", 0, 33),
+        jsonEdit("origin-deletion", 69, 182),
+        jsonEdit("id-rewrite", 74, 85),
+        jsonEdit("reference-rewrite", 90, 98),
+      ],
+    },
+    {
+      file: "specs/Target.mdx",
+      edits: [
+        jsonEdit("target-parent-rewrite", 40, 53),
+        jsonEdit("import-addition", 53, 53),
+        jsonEdit("target-insertion", 53, 53),
+      ],
+    },
+    {
+      file: "specs/Third.mdx",
+      edits: [
+        jsonEdit("import-addition", 33, 33),
+        jsonEdit("reference-rewrite", 85, 99),
+      ],
+    },
+  ],
+  delta: { generated: [], removed: [] },
+});
+
+/** Its human report as the built product prints it. */
+const HUMAN_SECTION_MOVE_LINES: readonly string[] = [
+  "mapping:",
+  "  specs/Origin.mdx#org.mv -> specs/Target.mdx#tp.nw",
+  "  specs/Origin.mdx#org.mv.kid -> specs/Target.mdx#tp.nw.kid",
+  "files:",
+  "  specs/Origin.mdx",
+  "    0-33 import-removal",
+  "    69-182 origin-deletion",
+  "    74-85 id-rewrite",
+  "    90-98 reference-rewrite",
+  "  specs/Target.mdx",
+  "    40-53 target-parent-rewrite",
+  "    53-53 target-insertion",
+  "    53-53 import-addition",
+  "  specs/Third.mdx",
+  "    33-33 import-addition",
+  "    85-99 reference-rewrite",
+  "delta:",
+];
+
+/**
+ * A file-form move (T6.6-5's shape): the moved file's root and section
+ * mapped, its relocation beside the specifier rewrites, and the delta's
+ * two directions.
+ */
+const JSON_FILE_MOVE_TWIN = jsonPreview({
+  mapping: [
+    { from: "specs/Mv.mdx", to: "specs/sub/Mv2.mdx" },
+    { from: "specs/Mv.mdx#mv", to: "specs/sub/Mv2.mdx#mv" },
+  ],
+  files: [
+    {
+      file: "specs/Mv.mdx",
+      edits: [
+        jsonEdit("file-relocation", 0, 78),
+        jsonEdit("import-specifier-rewrite", 16, 29),
+      ],
+    },
+    {
+      file: "specs/User.mdx",
+      edits: [jsonEdit("import-specifier-rewrite", 15, 27)],
+    },
+  ],
+  delta: {
+    generated: ["specs/sub/Mv2.md", "specs/sub/Mv2.xspec.ts"],
+    removed: ["specs/Mv.md", "specs/Mv.xspec.ts"],
+  },
+});
+
+const HUMAN_FILE_MOVE_LINES: readonly string[] = [
+  "mapping:",
+  "  specs/Mv.mdx -> specs/sub/Mv2.mdx",
+  "  specs/Mv.mdx#mv -> specs/sub/Mv2.mdx#mv",
+  "files:",
+  "  specs/Mv.mdx",
+  "    0-78 file-relocation",
+  "    16-29 import-specifier-rewrite",
+  "  specs/User.mdx",
+  "    15-27 import-specifier-rewrite",
+  "delta:",
+  "  generated specs/sub/Mv2.md",
+  "  generated specs/sub/Mv2.xspec.ts",
+  "  removed specs/Mv.md",
+  "  removed specs/Mv.xspec.ts",
+];
+
+/** The condition-23 finding's human line (T6.6-6's corrupt record). */
+const UNREADABLE_RECORD_LINE =
+  ".xspec: unreadable-record: the recorded generation state under the graph-data area exists but cannot be read as a record, so the recorded derived-file paths are unavailable (SPEC 14.23, 13.3)";
+
+/**
+ * A move preview on a corrupt record (T6.6-6's shape): the condition-23
+ * finding beside the full plan, the delta unavailable as one datum, exit 1.
+ */
+const JSON_CORRUPT_RECORD_TWIN = decodePreviewReport(
+  {
+    findings: [jsonFinding("unreadable-record", [], ".xspec", [])],
+    mapping: [{ from: "specs/Origin.mdx#org.mv", to: "specs/Target.mdx#tm" }],
+    files: [
+      {
+        file: "specs/Origin.mdx",
+        edits: [
+          jsonEdit("origin-deletion", 34, 124),
+          jsonEdit("id-rewrite", 37, 48),
+        ],
+      },
+      {
+        file: "specs/Target.mdx",
+        edits: [jsonEdit("target-insertion", 31, 31)],
+      },
+    ],
+    delta: { unavailable: true },
+  },
+  "the corrupt-record --json twin",
+);
+
+const HUMAN_CORRUPT_RECORD_LINES: readonly string[] = [
+  UNREADABLE_RECORD_LINE,
+  "mapping:",
+  "  specs/Origin.mdx#org.mv -> specs/Target.mdx#tm",
+  "files:",
+  "  specs/Origin.mdx",
+  "    34-124 origin-deletion",
+  "    37-48 id-rewrite",
+  "  specs/Target.mdx",
+  "    31-31 target-insertion",
+  "delta: unavailable",
+];
+
+/** A refused preview (T6.6-3's): the refusal findings alone, plans null. */
+const JSON_REFUSED_TWIN = decodePreviewReport(
+  {
+    findings: [
+      jsonFinding(
+        "refused-id-collision",
+        [{ file: "specs/M.mdx", start: 33, end: 75 }],
+        null,
+        ["specs/M.mdx#keep.mv"],
+      ),
+      jsonFinding(
+        "refused-cycle",
+        [{ file: "specs/M.mdx", start: 96, end: 102 }],
+        null,
+        [],
+      ),
+    ],
+    mapping: null,
+    files: null,
+    delta: null,
+  },
+  "the refused --json twin",
+);
+
+const HUMAN_REFUSED_LINES: readonly string[] = [
+  'specs/M.mdx:33-75: refused-id-collision: ID collision: the operation would produce "keep.mv" (SPEC 6.4, 6.5, 14) [specs/M.mdx#keep.mv]',
+  "specs/M.mdx:96-102: refused-cycle: the move would create a dependency cycle (SPEC 6.5, 14)",
+  "2 findings",
+];
+
+/** A report's bytes: each line ended by a line feed. */
+function previewReport(lines: readonly string[]): Buffer {
+  return Buffer.from(lines.map((line) => `${line}\n`).join(""), "utf8");
+}
+
+/** `lines` with line `index` replaced by `line`, or dropped for `null`. */
+function previewWithLine(
+  lines: readonly string[],
+  index: number,
+  line: string | null,
+): string[] {
+  return lines.flatMap((original, at) =>
+    at === index ? (line === null ? [] : [line]) : [original],
+  );
+}
+
+test("S-5: the human preview decoder decodes a well-formed preview onto the preview model, order free", () => {
+  const decoded = decodeHumanPreviewReport(
+    previewReport(HUMAN_SECTION_MOVE_LINES),
+    "section move",
+  );
+  expect(decoded.findings).toEqual([]);
+  expect(
+    decoded.plan?.mapping.map(({ from, to, line }) => ({ from, to, line })),
+  ).toEqual([
+    {
+      from: "specs/Origin.mdx#org.mv",
+      to: "specs/Target.mdx#tp.nw",
+      line: 2,
+    },
+    {
+      from: "specs/Origin.mdx#org.mv.kid",
+      to: "specs/Target.mdx#tp.nw.kid",
+      line: 3,
+    },
+  ]);
+  expect(
+    decoded.plan?.files.map(({ file, edits, line }) => ({
+      file,
+      line,
+      edits: edits.map((edit) => [
+        edit.class,
+        edit.range.start,
+        edit.range.end,
+        edit.line,
+      ]),
+    })),
+  ).toEqual([
+    {
+      file: "specs/Origin.mdx",
+      line: 5,
+      edits: [
+        ["import-removal", 0, 33, 6],
+        ["origin-deletion", 69, 182, 7],
+        ["id-rewrite", 74, 85, 8],
+        ["reference-rewrite", 90, 98, 9],
+      ],
+    },
+    {
+      file: "specs/Target.mdx",
+      line: 10,
+      edits: [
+        ["target-parent-rewrite", 40, 53, 11],
+        ["target-insertion", 53, 53, 12],
+        ["import-addition", 53, 53, 13],
+      ],
+    },
+    {
+      file: "specs/Third.mdx",
+      line: 14,
+      edits: [
+        ["import-addition", 33, 33, 15],
+        ["reference-rewrite", 85, 99, 16],
+      ],
+    },
+  ]);
+  expect(decoded.plan?.delta).toEqual({ generated: [], removed: [] });
+  assertHumanPreviewCarries(decoded, JSON_SECTION_MOVE_TWIN, "section move");
+  assertHumanPreviewReportCarries(
+    syntheticBytesResult(
+      previewReport(HUMAN_SECTION_MOVE_LINES),
+      Buffer.alloc(0),
+      0,
+    ),
+    JSON_SECTION_MOVE_TWIN,
+    "section move, as a run",
+  );
+
+  // Order free: the pairs, the files, the edits, and the sections in
+  // another order, the delta's directions interleaved; a class spelled in
+  // another case with a space, as a code is read.
+  const reordered = [
+    "delta:",
+    "  removed specs/Mv.xspec.ts",
+    "  generated specs/sub/Mv2.xspec.ts",
+    "  removed specs/Mv.md",
+    "  generated specs/sub/Mv2.md",
+    "files:",
+    "  specs/User.mdx",
+    "    15-27 Import Specifier Rewrite",
+    "  specs/Mv.mdx",
+    "    16-29 import-specifier-rewrite",
+    "    0-78 file-relocation",
+    "mapping:",
+    "  specs/Mv.mdx#mv -> specs/sub/Mv2.mdx#mv",
+    "  specs/Mv.mdx -> specs/sub/Mv2.mdx",
+  ];
+  assertHumanPreviewCarries(
+    decodeHumanPreviewReport(previewReport(HUMAN_FILE_MOVE_LINES), "file move"),
+    JSON_FILE_MOVE_TWIN,
+    "file move",
+  );
+  const shuffled = decodeHumanPreviewReport(
+    previewReport(reordered),
+    "file move reordered",
+  );
+  expect(shuffled.plan?.delta).toMatchObject({
+    generated: [
+      { path: "specs/sub/Mv2.xspec.ts", line: 3 },
+      { path: "specs/sub/Mv2.md", line: 5 },
+    ],
+    removed: [
+      { path: "specs/Mv.xspec.ts", line: 2 },
+      { path: "specs/Mv.md", line: 4 },
+    ],
+  });
+  assertHumanPreviewCarries(
+    shuffled,
+    JSON_FILE_MOVE_TWIN,
+    "file move reordered",
+  );
+
+  // A file listed twice reads as one file, its edits merged.
+  assertHumanPreviewCarries(
+    decodeHumanPreviewReport(
+      previewReport([
+        ...HUMAN_FILE_MOVE_LINES.slice(0, 6),
+        "  specs/User.mdx",
+        "    15-27 import-specifier-rewrite",
+        "  specs/Mv.mdx",
+        "    16-29 import-specifier-rewrite",
+        ...HUMAN_FILE_MOVE_LINES.slice(9),
+      ]),
+      "a file listed twice",
+    ),
+    JSON_FILE_MOVE_TWIN,
+    "a file listed twice",
+  );
+
+  // A creation's edit at the new file's start (T6.6-4(d)'s shape).
+  const created = decodeHumanPreviewReport(
+    previewReport([
+      "mapping:",
+      "  specs/Solo.mdx#hold.out -> specs/Made.mdx#made",
+      "files:",
+      "  specs/Made.mdx",
+      "    0-0 file-creation",
+      "delta:",
+      "  generated specs/Made.xspec.ts",
+    ]),
+    "created target",
+  );
+  expect(created.plan?.files[0]?.edits[0]).toMatchObject({
+    class: "file-creation",
+    range: { start: 0, end: 0 },
+  });
+});
+
+test("S-5: the human preview decoder decodes a refused preview's findings and an answer's finding beside its unavailable delta", () => {
+  // A refused preview: the findings report, its count line ending it, and
+  // no plan — carrying its refused twin, plans null.
+  const refused = decodeHumanPreviewReport(
+    previewReport(HUMAN_REFUSED_LINES),
+    "refused",
+  );
+  expect(refused.plan).toBeNull();
+  expect(refused.findings.map(findingInformation)).toEqual([
+    {
+      code: "refused-id-collision",
+      locations: [{ file: "specs/M.mdx", range: { start: 33, end: 75 } }],
+      path: null,
+      identities: ["specs/M.mdx#keep.mv"],
+    },
+    {
+      code: "refused-cycle",
+      locations: [{ file: "specs/M.mdx", range: { start: 96, end: 102 } }],
+      path: null,
+      identities: [],
+    },
+  ]);
+  assertHumanPreviewCarries(refused, JSON_REFUSED_TWIN, "refused");
+
+  // The corrupt record: the condition-23 finding at the margin, then the
+  // plan, `delta: unavailable` its delta — no count line, and with one.
+  const corrupt = decodeHumanPreviewReport(
+    previewReport(HUMAN_CORRUPT_RECORD_LINES),
+    "corrupt record",
+  );
+  expect(corrupt.findings.map(findingInformation)).toEqual([
+    {
+      code: "unreadable-record",
+      locations: [],
+      path: ".xspec",
+      identities: [],
+    },
+  ]);
+  expect(corrupt.plan?.delta).toEqual({ unavailable: true, line: 10 });
+  assertHumanPreviewCarries(corrupt, JSON_CORRUPT_RECORD_TWIN, "corrupt");
+  assertHumanPreviewCarries(
+    decodeHumanPreviewReport(
+      previewReport([
+        UNREADABLE_RECORD_LINE,
+        "1 finding",
+        ...HUMAN_CORRUPT_RECORD_LINES.slice(1),
+      ]),
+      "corrupt record, counted",
+    ),
+    JSON_CORRUPT_RECORD_TWIN,
+    "corrupt record, counted",
+  );
+
+  // A concerned path holding a line feed (T6.5-4's barred destination),
+  // printed as it stands: the line it breaks off is read with the next.
+  const broken = "specs/a\nb.mdx";
+  const brokenTwin = decodePreviewReport(
+    {
+      findings: [jsonFinding("refused-invalid-destination", [], broken, [])],
+      mapping: null,
+      files: null,
+      delta: null,
+    },
+    "a line-fed path's twin",
+  );
+  const brokenReport = previewReport([
+    `${broken}: refused-invalid-destination: invalid destination "specs/a\\nb.mdx" (SPEC 6.5)`,
+    "1 finding",
+  ]);
+  assertHumanPreviewCarries(
+    decodeHumanPreviewReport(brokenReport, "a line-fed path"),
+    brokenTwin,
+    "a line-fed path",
+  );
+  assertHumanFindingsCarry(
+    decodeHumanFindingsReport(brokenReport, "a line-fed path"),
+    brokenTwin.findings,
+    "a line-fed path, as a findings report",
+  );
+  assertHumanFindingsCarry(
+    decodeHumanFindingsReport(
+      previewReport([
+        `${broken}:3-4: missing-id: missing ID (SPEC 14.1)`,
+        "1 finding",
+      ]),
+      "a line-fed location file",
+    ),
+    decodeFindingsReport(
+      {
+        findings: [
+          jsonFinding(
+            "missing-id",
+            [{ file: broken, start: 3, end: 4 }],
+            null,
+            [],
+          ),
+        ],
+      },
+      "a line-fed location file's twin",
+    ).findings,
+    "a line-fed location file",
+  );
+});
+
+test("S-5: the human preview decoder rejects an edit without its range, a delta line without its direction, a mapping pair half absent, and every line outside its layout", () => {
+  const rejected = (
+    label: string,
+    report: Buffer,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      decodeHumanPreviewReport(report, label),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_SECTION_MOVE_LINES;
+  // An edit: without its range, with one offset, its range reversed, its
+  // class unknown or absent, above every file.
+  rejected(
+    "an edit without its range",
+    previewReport(previewWithLine(lines, 7, "    id-rewrite")),
+    "an edit line `    <start>-<end> <class>`",
+    "line 8",
+  );
+  rejected(
+    "an edit with one offset",
+    previewReport(previewWithLine(lines, 7, "    74 id-rewrite")),
+    "an edit line `    <start>-<end> <class>`",
+  );
+  rejected(
+    "an edit's range reversed",
+    previewReport(previewWithLine(lines, 7, "    85-74 id-rewrite")),
+    "a range whose end is not before its start",
+  );
+  rejected(
+    "an edit's class unknown",
+    previewReport(previewWithLine(lines, 7, "    74-85 id-rename")),
+    "the edit's class, one of the ten class names SPEC 12.7 lists",
+  );
+  rejected(
+    "an edit's class absent",
+    previewReport(previewWithLine(lines, 7, "    74-85")),
+    "an edit line `    <start>-<end> <class>`",
+  );
+  rejected(
+    "an edit above every file",
+    previewReport(previewWithLine(lines, 4, null)),
+    "an edit line beneath the file it edits",
+  );
+  // A mapping pair: its arrow or either identity absent, or ambiguous.
+  rejected(
+    "a mapping pair without its arrow",
+    previewReport(previewWithLine(lines, 1, "  specs/Origin.mdx#org.mv")),
+    "a mapping line `  <from> -> <to>`",
+  );
+  rejected(
+    "a mapping pair without its to identity",
+    previewReport(previewWithLine(lines, 1, "  specs/Origin.mdx#org.mv -> ")),
+    "its `to` identity is absent",
+  );
+  rejected(
+    "a mapping pair without its from identity",
+    previewReport(previewWithLine(lines, 1, "   -> specs/Target.mdx#tp.nw")),
+    "its `from` identity is absent",
+  );
+  rejected(
+    "an ambiguous mapping pair",
+    previewReport(previewWithLine(lines, 1, "  specs/a -> specs/b -> specs/c")),
+    "this line holds several",
+  );
+  // A delta line: its direction absent or unknown; a path beneath an
+  // unavailable delta.
+  rejected(
+    "a delta line without its direction",
+    previewReport([...lines, "  specs/Target.md"]),
+    "a delta line `  <direction> <path>`",
+  );
+  rejected(
+    "a delta line with another direction",
+    previewReport([...lines, "  added specs/Target.md"]),
+    "a delta line `  <direction> <path>`",
+  );
+  rejected(
+    "a delta line without its path",
+    previewReport([...lines, "  generated "]),
+    "a path, never an empty token",
+  );
+  rejected(
+    "a path beneath an unavailable delta",
+    previewReport([
+      ...HUMAN_CORRUPT_RECORD_LINES,
+      "  generated specs/Target.xspec.ts",
+    ]),
+    "nothing beneath `delta: unavailable`",
+  );
+  // The sections: one opened twice, one missing; an indented line outside
+  // every section; an empty line; a count line disagreeing; a line fitting
+  // no layout; bytes that are not UTF-8.
+  rejected(
+    "a section opened twice",
+    previewReport([...lines, "files:"]),
+    "each of the plan's sections once",
+  );
+  rejected(
+    "the delta section missing",
+    previewReport(lines.slice(0, -1)),
+    "the delta section is missing",
+  );
+  rejected(
+    "the mapping section missing",
+    previewReport(lines.slice(3)),
+    "the mapping section is missing",
+  );
+  rejected(
+    "an indented line outside every section",
+    previewReport(["  specs/Origin.mdx#org.mv -> specs/Target.mdx#tm"]),
+    "an indented line inside one of the plan's sections",
+  );
+  rejected(
+    "an empty line",
+    previewReport(previewWithLine(lines, 3, "")),
+    "never an empty line",
+  );
+  rejected(
+    "a count line disagreeing",
+    previewReport([
+      UNREADABLE_RECORD_LINE,
+      "2 findings",
+      ...HUMAN_CORRUPT_RECORD_LINES.slice(1),
+    ]),
+    "it counts 2",
+  );
+  rejected(
+    "a line fitting no layout",
+    previewReport(["plan:", ...lines.slice(1)]),
+    "no segment of this line spells a stable code",
+  );
+  rejected(
+    "bytes that are not UTF-8",
+    Buffer.concat([
+      previewReport(lines.slice(0, 4)),
+      Buffer.from("  ", "utf8"),
+      NON_UTF8_PATH_BYTES,
+      Buffer.from("\n", "utf8"),
+      previewReport(lines.slice(5)),
+    ]),
+    "so these bytes are a path printed raw",
+  );
+});
+
+test("S-5: the human preview comparison rejects a report omitting or misplacing a mapping pair, a file, an edit's class or range, a delta path or direction, the delta's unavailability, a finding, or the plan — naming the datum", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[],
+    twin: PreviewReport,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanPreviewCarries(
+        decodeHumanPreviewReport(previewReport(lines), label),
+        twin,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const section = HUMAN_SECTION_MOVE_LINES;
+  const file = HUMAN_FILE_MOVE_LINES;
+  // The mapping: a pair dropped, its `to` another, a pair too many.
+  rejected(
+    "a mapping pair dropped",
+    previewWithLine(section, 2, null),
+    JSON_SECTION_MOVE_TWIN,
+    'the mapping pair "specs/Origin.mdx#org.mv.kid" -> "specs/Target.mdx#tp.nw.kid" is missing',
+  );
+  rejected(
+    "a mapping pair's to identity another",
+    previewWithLine(
+      section,
+      2,
+      "  specs/Origin.mdx#org.mv.kid -> specs/Target.mdx#tp.kid",
+    ),
+    JSON_SECTION_MOVE_TWIN,
+    'line 3 pairs "specs/Origin.mdx#org.mv.kid" -> "specs/Target.mdx#tp.kid" instead',
+  );
+  rejected(
+    "a mapping pair too many",
+    [
+      ...section.slice(0, 3),
+      "  specs/Origin.mdx#org -> specs/Target.mdx#tp",
+      ...section.slice(3),
+    ],
+    JSON_SECTION_MOVE_TWIN,
+    "which the --json twin's mapping lacks",
+  );
+  // The files: one dropped with its edits, one too many.
+  rejected(
+    "a file dropped",
+    section.slice(0, 13).concat(section.slice(16)),
+    JSON_SECTION_MOVE_TWIN,
+    'the file "specs/Third.mdx" is missing, with its 2 edit(s) import-addition 33-33, reference-rewrite 85-99',
+  );
+  rejected(
+    "a file too many",
+    [
+      ...section.slice(0, 16),
+      "  specs/Fourth.mdx",
+      "    1-2 reference-rewrite",
+      "delta:",
+    ],
+    JSON_SECTION_MOVE_TWIN,
+    'line 17 lists the file "specs/Fourth.mdx", which the --json twin\'s files lack',
+  );
+  // The edits: one dropped, an offset moved, a class another, one under
+  // another file, a zero-length coincidence printed once.
+  rejected(
+    "an edit dropped",
+    previewWithLine(section, 15, null),
+    JSON_SECTION_MOVE_TWIN,
+    'in "specs/Third.mdx", the edit reference-rewrite 85-99 is missing',
+  );
+  rejected(
+    "an edit's offset moved",
+    previewWithLine(section, 15, "    85-100 reference-rewrite"),
+    JSON_SECTION_MOVE_TWIN,
+    'in "specs/Third.mdx", the edit reference-rewrite 85-99 is missing — the nearest reference-rewrite edit there, line 16, spans 85-100',
+  );
+  rejected(
+    "an edit's class another",
+    previewWithLine(section, 7, "    74-85 reference-rewrite"),
+    JSON_SECTION_MOVE_TWIN,
+    'in "specs/Origin.mdx", the edit id-rewrite 74-85 is missing',
+    "line 8 lists the edit reference-rewrite 74-85, which the --json twin lacks",
+  );
+  rejected(
+    "an edit under another file",
+    [
+      ...section.slice(0, 9),
+      "    85-99 reference-rewrite",
+      ...section.slice(9, 15),
+      ...section.slice(16),
+    ],
+    JSON_SECTION_MOVE_TWIN,
+    'in "specs/Third.mdx", the edit reference-rewrite 85-99 is missing',
+    'in "specs/Origin.mdx", line 10 lists the edit reference-rewrite 85-99',
+  );
+  rejected(
+    "a coincidence printed once",
+    previewWithLine(section, 12, null),
+    JSON_SECTION_MOVE_TWIN,
+    'in "specs/Target.mdx", the edit import-addition 53-53 is missing',
+  );
+  // The delta: a path dropped, a path under the other direction, a path
+  // too many, the delta unavailable on either side alone.
+  rejected(
+    "a delta path dropped",
+    previewWithLine(file, 11, null),
+    JSON_FILE_MOVE_TWIN,
+    'the generated path "specs/sub/Mv2.xspec.ts" is missing',
+  );
+  rejected(
+    "a delta path under the other direction",
+    previewWithLine(file, 12, "  generated specs/Mv.md"),
+    JSON_FILE_MOVE_TWIN,
+    'the path "specs/Mv.md", removed in the --json twin, is listed under generated on line 13',
+  );
+  rejected(
+    "a delta path too many",
+    [...file, "  removed specs/Pal.md"],
+    JSON_FILE_MOVE_TWIN,
+    'line 15 lists the removed path "specs/Pal.md", which the --json twin\'s delta lacks',
+  );
+  rejected(
+    "the delta unavailable where the twin carries it",
+    [...file.slice(0, 9), "delta: unavailable"],
+    JSON_FILE_MOVE_TWIN,
+    "line 10 reports the delta unavailable where the --json twin carries its two directions",
+  );
+  rejected(
+    "the delta a value where the twin's is unavailable",
+    [...HUMAN_CORRUPT_RECORD_LINES.slice(0, -1), "delta:"],
+    JSON_CORRUPT_RECORD_TWIN,
+    "the --json twin reports the delta unavailable",
+  );
+  // The findings: the condition-23 finding dropped beside the plan; a
+  // refusal's finding dropped.
+  rejected(
+    "the condition-23 finding dropped",
+    HUMAN_CORRUPT_RECORD_LINES.slice(1),
+    JSON_CORRUPT_RECORD_TWIN,
+    "has no counterpart: the human report carries no further finding with its code unreadable-record",
+  );
+  rejected(
+    "a refusal's finding dropped",
+    [HUMAN_REFUSED_LINES[0]!, "1 finding"],
+    JSON_REFUSED_TWIN,
+    "the human report carries no further finding with its code refused-cycle",
+  );
+  // The plan: none printed for a successful preview, one printed beside a
+  // refusal's findings.
+  rejected(
+    "nothing printed",
+    [],
+    JSON_SECTION_MOVE_TWIN,
+    "the human report prints no plan",
+  );
+  rejected(
+    "a plan beside a refusal's findings",
+    [...HUMAN_REFUSED_LINES.slice(0, 2), ...section],
+    JSON_REFUSED_TWIN,
+    "but the human report prints a plan (2 mapping pair(s), 3 file(s))",
+  );
+  // A path in another form: a plain file path presented marked.
+  rejected(
+    "a plain path presented marked",
+    previewWithLine(
+      section,
+      13,
+      `  <bytes ${Buffer.from("specs/Third.mdx", "utf8").toString("hex")}>`,
+    ),
+    JSON_SECTION_MOVE_TWIN,
+    'the file "specs/Third.mdx" is missing',
+    "lists the file the marked byte form of",
   );
 });
 

@@ -1,5 +1,5 @@
 // TEST-SPEC §6.6 (previews) — SUITE-24: T6.6-2, T6.6-3, T6.6-4, T6.6-5,
-// T6.6-6. (T6.6-1 is retired.)
+// T6.6-6, T6.6-7. (T6.6-1 is retired.)
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -338,10 +338,12 @@
 //   identity `specs/Origin.mdx#org`, the sole element, in 1.5's form over
 //   the rename's file (SPEC 14, 1.5).
 // - T6.6-4's, T6.6-5's, and T6.6-6's human form (T12.0-1's information
-//   parity; SPEC 12.0: the JSON form carries the same information as the
-//   human report; 6.6: a preview reports the complete identity mapping,
-//   every file the operation would rewrite, relocate, or create with every
-//   edit classed and located, and the derived-file delta): every successful
+//   parity, a robust-matching add-on beside the decoded comparison that is
+//   T6.6-7's, the last bullet; SPEC 12.0: the JSON form carries the same
+//   information as the human report; 6.6: a preview reports the complete
+//   identity mapping, every file the operation would rewrite, relocate, or
+//   create with every edit classed and located, and the derived-file
+//   delta): every successful
 //   preview the three tests decode — each `runPreviewJson` run, and
 //   T6.6-6's corrupt-record move preview — is followed directly, at the
 //   same state and inside whatever modifies-nothing compare the caller
@@ -372,12 +374,11 @@
 //   finding is unlocated (condition 23, locations []), so no offset of its
 //   own is asked. The delta's direction words are no SPEC-named tokens and
 //   are not asked, and T6.6-6's refused preview, a refusal, reports
-//   findings alone (findings parity is T14-7's: a refused preview reports
-//   exactly the refused operation's findings, SPEC 14, whose human parity
-//   T14-7 asks for a refused `rename` and `move`). Limits: no mention is
+//   findings alone, its human form T6.6-7's. Limits: no mention is
 //   associated with another, so which file holds which edit, which class
 //   and range belong together, which `from` maps to which `to`, and which
-//   delta direction lists a path stay with the JSON assertions; an identity
+//   delta direction lists a path stay with the JSON assertions and T6.6-7's
+//   decode; an identity
 //   counts wherever the report prints it; a message the report rewords is
 //   not blanked, so its digits may then stand in for an offset; and a token
 //   counts wherever it stands outside the blanked data, a finding's message
@@ -387,6 +388,38 @@
 //   passes T6.6-6 (FIX_PLAN Task 10's scratch build `t9jd0c10-nodelta`),
 //   while T6.6-4 (at its file-form arm) and T6.6-5 (at its first arm) fail
 //   it, naming the delta paths.
+// - T6.6-7 (the human form, H-3's report forms; SPEC 12.0: the JSON form
+//   carries the same information as the human report): each preview of
+//   T6.6-2, T6.6-4, T6.6-5, and T6.6-6 is restaged identically — the same
+//   configuration and sources, the premise `build`, and then T6.6-5's
+//   graph-data deletion and emission-enabling configuration edit and
+//   T6.6-6's shape-blind corruption — a state two tests share twinned once
+//   (T6.6-4(d)'s created-target move is T6.6-5's; T6.6-4(c)'s workspace,
+//   its configuration then enabling emission with no rebuild, is T6.6-5's
+//   lagging record); each refused preview of T6.6-3 is restaged through
+//   T6.6-3's own refusal stagings (`runT663RefusalStagings`, handed
+//   T6.6-7's twin in place of the equivalence), and acquisition arm (b)'s
+//   on its staging (`runT667AreaArm`). At each state
+//   `expectHumanPreviewTwin` runs the `--preview --json` invocation — its
+//   exit the staging's premise: 0, or 1 at T6.6-6's corrupt record and at
+//   every refusal — and then the same argv without `--json`, both inside
+//   one whole-root modifies-nothing compare keeping the lock path in (a
+//   preview acquires nothing, H-6): the human run exits as its twin, its
+//   standard error byte-identical (SPEC 12.0; T12.0-2), and its report,
+//   decoded by the human preview decoder (helpers/adapters/human-reports.ts:
+//   fitted to the built product's layout, value-blind, failing loudly),
+//   carries the twin's decoded document (`assertHumanPreviewReportCarries`)
+//   — every finding's code, locations, concerned path, and identities; no
+//   plan beside a refusal's findings; otherwise the mapping's pairs, every
+//   file with each of its edits' class and range, and the delta's two
+//   directions or its unavailability — each a multiset, order free (SPEC
+//   fixes no order for the human report; 12.7's orders are the JSON
+//   form's). T6.5-4's barred destination `specs/a<U+000A>b.mdx`, its
+//   refusal's concerned path printed as it stands, is read through the
+//   decoder's line-feed continuation. The twin compares the two forms
+//   whatever the twin carries: the content is the home tests', and T6.6-3's
+//   real refusals are not rerun, their human reports T12.0-15's (TEST-SPEC
+//   T6.6-7). Every staged-source record the restagings stage names T6.6-7.
 
 import { Buffer } from "node:buffer";
 import type { AcquisitionStaging } from "../../helpers/acquisition-staging.js";
@@ -430,6 +463,7 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   GRAPH_DATA_AREA_PATH,
+  assertHumanPreviewReportCarries,
   assertReportMentions,
   corruptGraphDataShapeBlind,
   decodeFindingsReport,
@@ -580,7 +614,7 @@ import {
 // product invocation, and T6.6-5 by `file()` after one (S-9's timing clause;
 // test/self/s9-staged-sources.test.ts).
 const SPECS_MD_CONFIG = stagedTs(
-  "T6.6-2/T6.6-5 xspec.config.ts — one spec group with Markdown emission",
+  "T6.6-2/T6.6-5/T6.6-7 xspec.config.ts — one spec group with Markdown emission",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -807,7 +841,7 @@ const P1_RENAME_ARGV = ["rename", P1_CORE, "core.mid", "core.hub"] as const;
 const P2_ORIGIN = "specs/Origin.mdx";
 const P2_TARGET = "specs/Target.mdx";
 const P2_ORIGIN_SOURCE = stagedMdx(
-  "T6.6-2 move arm specs/Origin.mdx",
+  "T6.6-2/T6.6-7 move arm specs/Origin.mdx",
   [
     '<S id="org">',
     "Origin holder text.",
@@ -1040,18 +1074,37 @@ async function expectRefusedPreviewEquivalence(
 }
 
 /**
- * One T6.6-3 twin of a T6.5-16/T6.5-17 arm (their exported arm tables,
- * staged identically: the pre-move files under those arms' configuration,
- * the premise `build` laying down the derived files the modifies-nothing
- * compare covers): the real refusal, then its `--preview`, through
- * expectRefusedPreviewEquivalence. The premise re-pins the arm's code set
- * alone — `refused-invalid-rewrite` or `refused-moved-import` beside every
- * other applicable reason, or an alone arm's reasons — while the finding's
- * concerned data and the S-9 premises stay the home test's; the equivalence
- * compare then covers every contractual member (SPEC 6.5, 6.6, 14).
+ * One refused preview's twin in T6.6-3's refusal stagings
+ * (`runT663RefusalStagings`), handed the staged workspace, the refused
+ * operation's argv — neither `--preview` nor `--json` among it — its
+ * expected refusal finding(s), the home test's code set, and the
+ * diagnostic context: T6.6-3's `expectRefusedPreviewEquivalence` (the real
+ * refusal, then its `--preview`), or T6.6-7's human twin of the refused
+ * preview (`expectHumanRefusedPreviewTwin`).
+ */
+type RefusedPreviewTwin = (
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  expected: RefusalExpectation | readonly RefusalExpectation[],
+  context: string,
+) => Promise<void>;
+
+/**
+ * One twin of a T6.5-16/T6.5-17 arm (their exported arm tables, staged
+ * identically: the pre-move files under those arms' configuration, the
+ * premise `build` laying down the derived files the modifies-nothing
+ * compare covers), through `twin` — for T6.6-3 the real refusal, then its
+ * `--preview` (expectRefusedPreviewEquivalence). The premise re-pins the
+ * arm's code set alone — `refused-invalid-rewrite` or
+ * `refused-moved-import` beside every other applicable reason, or an alone
+ * arm's reasons — while the finding's concerned data and the S-9 premises
+ * stay the home test's; the equivalence compare then covers every
+ * contractual member (SPEC 6.5, 6.6, 14).
  */
 async function expectRefusedArmPreviewTwin(
   product: ProductBinding,
+  twin: RefusedPreviewTwin,
   files: Readonly<Record<string, InitialFileContents>>,
   argv: readonly string[],
   codes: readonly string[],
@@ -1064,7 +1117,7 @@ async function expectRefusedArmPreviewTwin(
       `${context}: \`build\` over the staging — the pre-move workspace is ` +
         `valid, every staged file well-formed (SPEC 6.4, 6.5, 14.20)`,
     );
-    await expectRefusedPreviewEquivalence(
+    await twin(
       product,
       workspace,
       argv,
@@ -1075,66 +1128,72 @@ async function expectRefusedArmPreviewTwin(
 }
 
 /**
- * T6.6-3's twin of one of T14-7's two spelled refused-invalid-id command
- * lines (section-14.ts's exported `IntrinsicInvalidIdArm`), run as T14-7
- * runs it: in the home workspace after the home table's loop, every
- * refusal there modifying nothing. The premise re-pins refused-invalid-id
- * alone; the identity and the prefix-produced identities' absence stay
- * T14-7's (SPEC 6.6, 14).
+ * The twin of one of T14-7's two spelled refused-invalid-id command lines
+ * (section-14.ts's exported `IntrinsicInvalidIdArm`), run as T14-7 runs
+ * it: in the home workspace after the home table's loop, every refusal
+ * there modifying nothing — through `twin`, the running test `testId`
+ * naming its context. The premise re-pins refused-invalid-id alone; the
+ * identity and the prefix-produced identities' absence stay T14-7's (SPEC
+ * 6.6, 14).
  */
 async function expectIntrinsicInvalidIdPreviewTwin(
   product: ProductBinding,
+  twin: RefusedPreviewTwin,
+  testId: string,
   workspace: TestWorkspace,
   arm: IntrinsicInvalidIdArm,
 ): Promise<void> {
-  await expectRefusedPreviewEquivalence(
+  await twin(
     product,
     workspace,
     arm.argv,
     { finding: "refused-invalid-id", identities: [arm.identity] },
-    `T6.6-3 ${arm.argv[0] ?? ""} refusal (T14-7 \`${arm.spelled}\`: ` +
+    `${testId} ${arm.argv[0] ?? ""} refusal (T14-7 \`${arm.spelled}\`: ` +
       `${arm.reason})`,
   );
 }
 
-/** T6.6-3's diagnostic context for one of T14-7's own refusal cases. */
-function t147TwinContext(kase: T147RefusalCase): string {
-  return `T6.6-3 ${kase.argv[0] ?? ""} refusal (T14-7 ${kase.reason})`;
+/** The diagnostic context of a twin of one of T14-7's own refusal cases. */
+function t147TwinContext(testId: string, kase: T147RefusalCase): string {
+  return `${testId} ${kase.argv[0] ?? ""} refusal (T14-7 ${kase.reason})`;
 }
 
 /**
- * T6.6-3's twins of one of T14-7's own refusal stagings (section-14.ts's
+ * The twins of one of T14-7's own refusal stagings (section-14.ts's
  * exported `T147RefusalStaging`, staged identically: a fresh workspace of
  * its configuration and files, the premise `build`, each case in order,
- * then the `then` restaging and its cases), each real refusal and then its
- * `--preview` through expectRefusedPreviewEquivalence. The premise re-pins
- * each case's code set alone; the concerned data and the `query node`
- * checks stay T14-7's (SPEC 6.6, 14).
+ * then the `then` restaging and its cases), each refused operation through
+ * `twin` — for T6.6-3 the real refusal and then its `--preview`
+ * (expectRefusedPreviewEquivalence) — the running test `testId` naming the
+ * contexts. The premise re-pins each case's code set alone; the concerned
+ * data and the `query node` checks stay T14-7's (SPEC 6.6, 14).
  */
 async function expectT147StagingPreviewTwins(
   product: ProductBinding,
+  twin: RefusedPreviewTwin,
+  testId: string,
   staging: T147RefusalStaging,
 ): Promise<void> {
   await withWorkspace(staging.config, staging.files, async (workspace) => {
-    await buildOk(product, workspace, `T6.6-3 (T14-7) ${staging.build}`);
+    await buildOk(product, workspace, `${testId} (T14-7) ${staging.build}`);
     for (const kase of staging.cases) {
-      await expectRefusedPreviewEquivalence(
+      await twin(
         product,
         workspace,
         kase.argv,
         kase.expected,
-        t147TwinContext(kase),
+        t147TwinContext(testId, kase),
       );
     }
     if (staging.then !== undefined) {
       await workspace.file(staging.then.file, staging.then.contents);
       for (const kase of staging.then.cases) {
-        await expectRefusedPreviewEquivalence(
+        await twin(
           product,
           workspace,
           kase.argv,
           kase.expected,
-          t147TwinContext(kase),
+          t147TwinContext(testId, kase),
         );
       }
     }
@@ -2137,384 +2196,441 @@ export async function runT663AcquisitionArms(
   }
 }
 
+/**
+ * T6.6-3's refusal stagings, in its order (the module header): each refusal
+ * of T6.4-3, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7
+ * staged identically — the invalid-workspace precondition, the exact
+ * self-move of either form, the same-file after-removal collision, and
+ * T14-7's own stagings included — each refused operation handed to `twin`
+ * on its staged workspace: T6.6-3's `expectRefusedPreviewEquivalence` (the
+ * real refusal, then its `--preview`), or T6.6-7's human twin of the
+ * refused preview (`expectHumanRefusedPreviewTwin`). `testId` names the
+ * running test in every context, and `runs` what `twin` runs, in the
+ * diagnosis of the compare around the outside-root link arms' target
+ * directory, which holds for both.
+ */
+async function runT663RefusalStagings(
+  product: ProductBinding,
+  twin: RefusedPreviewTwin,
+  testId: string,
+  runs: string,
+): Promise<void> {
+  // --- Refusal equivalence: T6.4-3's cases, staged identically ---
+  await withWorkspace(
+    RENAME_REFUSAL_CONFIG,
+    RENAME_REFUSAL_FILES,
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${testId} rename-refusal staging \`build\` (the T6.4-3 protocol: ` +
+          "derived files sit under the modifies-nothing compares)",
+      );
+      for (const { argv, expected, reason } of RENAME_REFUSAL_CASES) {
+        await twin(
+          product,
+          workspace,
+          argv,
+          expected,
+          `${testId} rename refusal (${reason})`,
+        );
+      }
+      // T14-7's spelled `rename specs/A.mdx a a.then`, staged as T14-7
+      // stages it: here, after the home table's loop.
+      await expectIntrinsicInvalidIdPreviewTwin(
+        product,
+        twin,
+        testId,
+        workspace,
+        T14_7_INTRINSIC_RENAME_ARM,
+      );
+    },
+  );
+
+  // --- Refusal equivalence: T6.5-4's cases, staged identically ---
+  await withWorkspace(
+    MOVE_REFUSAL_CONFIG,
+    MOVE_REFUSAL_FILES,
+    async (workspace) => {
+      // Occupants before the premise `build`, which must still pass
+      // (T6.5-4's staging note).
+      await stageMoveRefusalOccupants(workspace);
+      await buildOk(
+        product,
+        workspace,
+        `${testId} move-refusal staging \`build\` (occupants staged before it; ` +
+          "T6.5-4's protocol)",
+      );
+      for (const { argv, expected, reason } of MOVE_REFUSAL_CASES) {
+        await twin(
+          product,
+          workspace,
+          argv,
+          expected,
+          `${testId} move refusal (${reason})`,
+        );
+      }
+      // T14-7's spelled `move specs/A.mdx#x 'specs/B.mdx#x y'`, staged as
+      // T14-7 stages it: here, after the home table's loop.
+      await expectIntrinsicInvalidIdPreviewTwin(
+        product,
+        twin,
+        testId,
+        workspace,
+        T14_7_INTRINSIC_MOVE_ARM,
+      );
+    },
+  );
+
+  // T6.5-4's single-casing arm, staged identically on its own workspace
+  // (section-6.5.ts's MOVE_CASING_* exports): the file-form move to
+  // `specs/B.MDX`, in a spec group through the glob `specs/*.MDX` yet
+  // lacking `.mdx` byte-wise (SPEC 12.0: no case folding) — the real move
+  // and its preview each refused-invalid-destination concerning that path.
+  await withWorkspace(
+    MOVE_CASING_CONFIG,
+    MOVE_CASING_FILES,
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${testId} casing staging \`build\` — the glob specs/*.MDX matches no ` +
+          "staged file, so the refusal previewed below is the move's own " +
+          "(T6.5-4's single-casing arm)",
+      );
+      await twin(
+        product,
+        workspace,
+        MOVE_CASING_CASE.argv,
+        MOVE_CASING_CASE.expected,
+        `${testId} move refusal (${MOVE_CASING_CASE.reason})`,
+      );
+    },
+  );
+
+  // T6.5-4's outside-root link-component arms, staged identically on
+  // their own workspace: the real operation and the preview alike leave
+  // the link's target directory outside the root byte-identical.
+  await withWorkspace(
+    MOVE_REFUSAL_CONFIG,
+    MOVE_LINK_OUTSIDE_FILES,
+    async (workspace) => {
+      const outside = await stageMoveLinkOutsideComponent(workspace);
+      await buildOk(
+        product,
+        workspace,
+        `${testId} outside-root link staging \`build\` (the link staged before ` +
+          "it lies under no current source's write path; T6.5-4's protocol)",
+      );
+      for (const { argv, expected, reason } of MOVE_LINK_OUTSIDE_CASES) {
+        await assertLeavesUnchanged(
+          outside,
+          () =>
+            twin(
+              product,
+              workspace,
+              argv,
+              expected,
+              `${testId} move refusal (${reason})`,
+            ),
+          `${testId} move refusal (${reason}): the link's target directory ` +
+            `outside the workspace root stays byte-identical across ${runs} ` +
+            `(SPEC 6.5, 6.6, 13.4)`,
+        );
+      }
+    },
+  );
+
+  // T6.5-4's derived-path arm, staged identically on its own workspace.
+  await withWorkspace(
+    MOVE_DERIVED_PATH_CONFIG,
+    MOVE_DERIVED_PATH_FILES,
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${testId} derived-path staging \`build\` — the occupant lies under no ` +
+          "current source's write path (T6.5-4's derived-path arm), so " +
+          "the refusal previewed below is the move's own",
+      );
+      await twin(
+        product,
+        workspace,
+        MOVE_DERIVED_PATH_CASE.argv,
+        MOVE_DERIVED_PATH_CASE.expected,
+        `${testId} move refusal (${MOVE_DERIVED_PATH_CASE.reason})`,
+      );
+    },
+  );
+
+  // T6.5-4's derived-path link sibling, staged identically on its own
+  // workspace.
+  await withWorkspace(
+    MOVE_DERIVED_PATH_CONFIG,
+    MOVE_DERIVED_LINK_FILES,
+    async (workspace) => {
+      await stageMoveDerivedLinkComponent(workspace);
+      await buildOk(
+        product,
+        workspace,
+        `${testId} derived-path link-sibling staging \`build\` — the link ` +
+          "mdout/new lies under no current source's write path (T6.5-4's " +
+          "sibling arm), so the refusal previewed below is the move's own",
+      );
+      await twin(
+        product,
+        workspace,
+        MOVE_DERIVED_LINK_CASE.argv,
+        MOVE_DERIVED_LINK_CASE.expected,
+        `${testId} move refusal (${MOVE_DERIVED_LINK_CASE.reason})`,
+      );
+    },
+  );
+
+  // T6.5-4's valid-workspace precondition arm, staged identically: the
+  // invalid-workspace refusal previews as it refuses — the workspace's
+  // numbered findings alone (SPEC 6.6, 6.4, 6.5, 14).
+  await withWorkspace(
+    MOVE_REFUSAL_CONFIG,
+    MOVE_PRECONDITION_FILES,
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${testId} precondition staging \`build\` over the staged workspace`,
+      );
+      await workspace.file(
+        MOVE_PRECONDITION_BREAK_FILE,
+        MOVE_PRECONDITION_BREAK,
+      );
+      await twin(
+        product,
+        workspace,
+        MOVE_PRECONDITION_CASE.argv,
+        MOVE_PRECONDITION_CASE.expected,
+        `${testId} move refusal (${MOVE_PRECONDITION_CASE.reason})`,
+      );
+    },
+  );
+
+  // The precondition's refused-writes staging, staged identically through
+  // T6.4-6's own staging code (section-6.4.ts's REFUSED_WRITES_* exports
+  // and `stageRefusedWrites`: `out` replaced by a plain file after
+  // `build`, the premise `build --json` pinning its one condition-22
+  // finding): the real rename and file-form move — the latter T6.5-4's
+  // precondition arm — each refused with the condition-22 finding
+  // concerning `out` alone, no refusal reason beside it, and each preview
+  // alike (SPEC 6.6, 6.4, 6.5, 13.3, 14.22).
+  await withWorkspace(
+    REFUSED_WRITES_CONFIG,
+    REFUSED_WRITES_FILES,
+    async (workspace) => {
+      await stageRefusedWrites(
+        product,
+        workspace,
+        `${testId} refused-writes staging (T6.4-6's)`,
+      );
+      for (const { argv, expected, reason } of REFUSED_WRITES_CASES) {
+        await twin(
+          product,
+          workspace,
+          argv,
+          expected,
+          `${testId} ${argv[0] ?? ""} refusal (${reason})`,
+        );
+      }
+    },
+  );
+
+  // --- Refusal equivalence: T6.5-6's identity-terms refusals, staged
+  // identically — the post-kept-ID-move workspace that test asserts
+  // byte-exact, staged directly from those bytes (SPEC 6.5, 6.6): the
+  // exact self-move of either form (the file form refused as
+  // identity-unchanged alone) and the same-file after-removal collision,
+  // each reported alike by the real operation and its preview ---
+  await withWorkspace(
+    MOVE_IDENTITY_CONFIG,
+    MOVE_IDENTITY_FILES_AFTER,
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${testId} identity-terms staging \`build\` (T6.5-6's post-move ` +
+          "workspace, staged directly; the derived files sit under the " +
+          "modifies-nothing compares)",
+      );
+      for (const { argv, expected, reason } of MOVE_IDENTITY_REFUSAL_CASES) {
+        await twin(
+          product,
+          workspace,
+          argv,
+          expected,
+          `${testId} move refusal (${reason})`,
+        );
+      }
+    },
+  );
+
+  // --- Refusal equivalence: T6.5-16's `refused-invalid-rewrite` arms —
+  // every refused shape beside the reasons reported with it, and the
+  // alone arms refused for another reason with no would-be text judged —
+  // staged identically from the exported arm tables (SPEC 6.5, 6.6, 14)
+  // ---
+  for (const arm of R16_REFUSED_ARMS) {
+    await expectRefusedArmPreviewTwin(
+      product,
+      twin,
+      arm.files,
+      arm.argv,
+      ["refused-invalid-rewrite", ...(arm.beside ?? [])],
+      `${testId} move refusal (T6.5-16 ${arm.key})`,
+    );
+  }
+  for (const arm of R16_ALONE_ARMS) {
+    await expectRefusedArmPreviewTwin(
+      product,
+      twin,
+      arm.files,
+      arm.argv,
+      arm.codes,
+      `${testId} move refusal (T6.5-16 ${arm.key})`,
+    );
+  }
+
+  // --- Refusal equivalence: T6.5-17's `refused-moved-import` arms,
+  // staged identically from the exported arm table (SPEC 6.5, 6.6, 14) ---
+  for (const arm of M17_REFUSED_ARMS) {
+    await expectRefusedArmPreviewTwin(
+      product,
+      twin,
+      arm.files,
+      arm.argv,
+      ["refused-moved-import", ...(arm.beside ?? [])],
+      `${testId} move refusal (T6.5-17 ${arm.key})`,
+    );
+  }
+
+  // --- Refusal equivalence: T6.5-20's refused stagings, staged
+  // identically from the exported table through the home test's own
+  // staging code — the companion legs read as the home test reads them,
+  // each staging before any build or after its premise `build` as the
+  // home test stages it (SPEC 6.5, 6.6, 14) ---
+  for (const staging of await d20RefusedStagings(
+    product,
+    `${testId} (T6.5-20)`,
+  )) {
+    await runD20RefusedStaging(
+      product,
+      staging,
+      `${testId} move refusal (T6.5-20 ${staging.key})`,
+      (workspace, move, context) =>
+        twin(
+          product,
+          workspace,
+          move.argv,
+          { finding: "refused-invalid-destination" },
+          context,
+        ),
+    );
+  }
+
+  // --- Refusal equivalence: T6.5-21's refused stagings — (a) with its
+  // two-reason move, and (b) — staged identically from the exported table
+  // through the home test's own staging code, (a) after its premise
+  // `build` and (b) before any build as the home test stages them, the
+  // code set re-pinned before the compare (SPEC 6.5, 6.6, 14) ---
+  for (const staging of D21_REFUSED_STAGINGS) {
+    await runD21RefusedStaging(
+      product,
+      staging,
+      `${testId} move refusal (T6.5-21 ${staging.key})`,
+      (workspace, move, context) =>
+        twin(
+          product,
+          workspace,
+          move.argv,
+          move.findings.map((expected) => ({ finding: expected.code })),
+          context,
+        ),
+    );
+  }
+
+  // --- Refusal equivalence: T14-7's own stagings, staged identically
+  // from section-14.ts's exported tables, in T14-7's order — its two
+  // spelled refused-invalid-id command lines twinned above, in the home
+  // workspaces — each case's code set re-pinned before the compare (SPEC
+  // 6.5, 6.4, 6.6, 14): the plain file at a directory component of the
+  // destination path; the both-collide-and-cycle section move (every
+  // applicable reason together); the destination spellings `./a.mdx`,
+  // `specs//b.mdx`, and `specs/../specs/b.mdx`, in the file form and as a
+  // section form's target path (refused-invalid-destination alone);
+  // `refused-cycle` located at the spellings rooted at an import the move
+  // would add — the local reference spelled once, then twice (`d={["x",
+  // "x"]}`), and the sibling chain whose characters need not change — and
+  // at the dependency cycle a containment would make; the identities over
+  // invalid paths; and, on the staged-to-collide workspace, the control
+  // collision, the exact self-move of either form, and — `specs/Bad.mdx`
+  // broken — the invalid-workspace rename, its numbered finding alone ---
+  await expectT147StagingPreviewTwins(
+    product,
+    twin,
+    testId,
+    T14_7_COMPONENT_STAGING,
+  );
+  await expectT147StagingPreviewTwins(
+    product,
+    twin,
+    testId,
+    T14_7_MULTI_STAGING,
+  );
+  await expectT147StagingPreviewTwins(
+    product,
+    twin,
+    testId,
+    T14_7_SPELLING_STAGING,
+  );
+  for (const arm of T14_7_REFUSED_CYCLE_ARMS) {
+    await withWorkspace(arm.config, arm.files, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${testId} (T14-7 ${arm.name}): staging \`build\` over the valid ` +
+          `workspace`,
+      );
+      await twin(
+        product,
+        workspace,
+        arm.argv,
+        arm.expected,
+        `${testId} move refusal (T14-7 ${arm.name})`,
+      );
+    });
+  }
+  await expectT147StagingPreviewTwins(
+    product,
+    twin,
+    testId,
+    T14_7_INVALID_PATH_STAGING,
+  );
+  await expectT147StagingPreviewTwins(
+    product,
+    twin,
+    testId,
+    T14_7_INVALID_WORKSPACE_STAGING,
+  );
+}
+
 const T6_6_3 = defineProductTest({
   id: "T6.6-3",
   title:
     "refusal and scheduling equivalence: each refusal of T6.4-3, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7 — the invalid-workspace precondition (T6.5-4's arm and, on T6.4-6's refused-writes staging — `out` a plain file — the real rename and file-form move, each refused with the condition-22 finding concerning `out` alone), the exact self-move of either form (the file form refused as identity-unchanged alone, never `refused-destination-exists` beside it), the same-file after-removal collision, T6.5-4's single-casing move to `specs/B.MDX`, every `refused-invalid-rewrite` and `refused-moved-import` arm with the reasons reported beside it, T6.5-16's alone arms, T6.5-21's two-reason move, and T14-7's own stagings — `refused-cycle` located at the spellings rooted at an import the move would add (the local reference spelled once and twice, `d={[\"x\", \"x\"]}`, and the sibling chain whose characters need not change) and at the dependency cycle a containment would make, the non-canonical destination spellings `./a.mdx`, `specs//b.mdx`, and `specs/../specs/b.mdx` in either form, the identities over invalid paths, its two spelled refused-invalid-id command lines, the plain file at a destination-path component, the both-collide-and-cycle move, and on its staged-to-collide workspace the control collision, the self-moves, and the invalid-workspace rename — included — staged identically (T6.5-6's post-move workspace staged directly from the bytes it asserts; T6.5-16's, T6.5-17's, T6.5-20's, and T6.5-21's arms from their exported tables — T6.5-20's companion legs read as its home test reads them, each T6.5-20 and T6.5-21 staging before any build or after a `build` as its home test stages it; T6.4-6's through its own staging code; T14-7's from its exported stagings, its spelled command lines in the home workspaces after the home tables' loops), the `--preview` invocation exits 1 reporting the same findings (same stable codes, locations, concerned paths, identities) in the form-exact 12.7 preview document with `mapping`, `files`, and `delta` null, modifying nothing; each usage error of T6.4-4/T6.5-5 — the U+FFFD destination operands of either leg and the Linux leg's non-UTF-8 operand included — exits 2 identically under `--preview` (argument checks precede either way — asserted beside unrelated validation errors and beside each spells-no-identity origin's one 14.17 finding, the would-be bearer's `id` repeated, braced (`id={\"x\"}`), or valueless (`<S id>`) in each operation, the usage error alone reported, nothing modified); the equivalence is over workspace state, never scheduling: while another mutating command is held (`--test-hold`, T13.5-2's staging), a `--preview` invocation runs to completion with its full successful report — it takes no exclusivity and never meets the mutual-exclusion refusal; the held-state comparison holds once command 1 holds and again once the preview has exited, the holder's entry byte-identical and alone (read under H-4's grant), nothing added beside it — and `--test-hold` combined with `--preview` is a usage error, exit 2, creating no hold file; acquisition's every other outcome lies outside the equivalence likewise, each arm staged beside the real operation (`rename specs/A.mdx a a2`), its preview run first: (a) with, each staged separately, `.xspec/lock` a symbolic link to a directory, an empty leftover lock directory `r-x`, one `-wx`, and a lock directory holding a subdirectory that holds a file, the subdirectory `-wx` (each verified on the harness itself), the `--preview` answers byte-identically to its run on an unobstructed twin, exit 0, the staging untouched, while the real operation exits 2, `path` `\".xspec/lock\"`, `code` `\"write-failure\"` under the first two and `\"read-failure\"` under the last two; (b) with `.xspec` a plain file, the preview gives the invalid-workspace refusal — exit 1, exactly T10.1-6's condition-22 finding concerning `.xspec`, `mapping`, `files`, and `delta` `null` — while the real operation exits 2, `code` `\"write-failure\"`, `path` `\".xspec\"`; (c) with a plain file at `.xspec/lock`, and separately a directory and a FIFO in a lock directory, the preview answers as on the leftover-free twin and leaves every leftover byte-untouched, no entry added (H-6's inclusion), while the real operation then succeeds, removing them (SPEC 6.6, 6.4, 6.5, 13.4, 13.5, 12.0, 12.7, 14, 14.22, 14.24, 14.25)",
   run: async (product) => {
-    // --- Refusal equivalence: T6.4-3's cases, staged identically ---
-    await withWorkspace(
-      RENAME_REFUSAL_CONFIG,
-      RENAME_REFUSAL_FILES,
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T6.6-3 rename-refusal staging `build` (the T6.4-3 protocol: " +
-            "derived files sit under the modifies-nothing compares)",
-        );
-        for (const { argv, expected, reason } of RENAME_REFUSAL_CASES) {
-          await expectRefusedPreviewEquivalence(
-            product,
-            workspace,
-            argv,
-            expected,
-            `T6.6-3 rename refusal (${reason})`,
-          );
-        }
-        // T14-7's spelled `rename specs/A.mdx a a.then`, staged as T14-7
-        // stages it: here, after the home table's loop.
-        await expectIntrinsicInvalidIdPreviewTwin(
-          product,
-          workspace,
-          T14_7_INTRINSIC_RENAME_ARM,
-        );
-      },
-    );
-
-    // --- Refusal equivalence: T6.5-4's cases, staged identically ---
-    await withWorkspace(
-      MOVE_REFUSAL_CONFIG,
-      MOVE_REFUSAL_FILES,
-      async (workspace) => {
-        // Occupants before the premise `build`, which must still pass
-        // (T6.5-4's staging note).
-        await stageMoveRefusalOccupants(workspace);
-        await buildOk(
-          product,
-          workspace,
-          "T6.6-3 move-refusal staging `build` (occupants staged before it; " +
-            "T6.5-4's protocol)",
-        );
-        for (const { argv, expected, reason } of MOVE_REFUSAL_CASES) {
-          await expectRefusedPreviewEquivalence(
-            product,
-            workspace,
-            argv,
-            expected,
-            `T6.6-3 move refusal (${reason})`,
-          );
-        }
-        // T14-7's spelled `move specs/A.mdx#x 'specs/B.mdx#x y'`, staged as
-        // T14-7 stages it: here, after the home table's loop.
-        await expectIntrinsicInvalidIdPreviewTwin(
-          product,
-          workspace,
-          T14_7_INTRINSIC_MOVE_ARM,
-        );
-      },
-    );
-
-    // T6.5-4's single-casing arm, staged identically on its own workspace
-    // (section-6.5.ts's MOVE_CASING_* exports): the file-form move to
-    // `specs/B.MDX`, in a spec group through the glob `specs/*.MDX` yet
-    // lacking `.mdx` byte-wise (SPEC 12.0: no case folding) — the real move
-    // and its preview each refused-invalid-destination concerning that path.
-    await withWorkspace(
-      MOVE_CASING_CONFIG,
-      MOVE_CASING_FILES,
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T6.6-3 casing staging `build` — the glob specs/*.MDX matches no " +
-            "staged file, so the refusal previewed below is the move's own " +
-            "(T6.5-4's single-casing arm)",
-        );
-        await expectRefusedPreviewEquivalence(
-          product,
-          workspace,
-          MOVE_CASING_CASE.argv,
-          MOVE_CASING_CASE.expected,
-          `T6.6-3 move refusal (${MOVE_CASING_CASE.reason})`,
-        );
-      },
-    );
-
-    // T6.5-4's outside-root link-component arms, staged identically on
-    // their own workspace: the real operation and the preview alike leave
-    // the link's target directory outside the root byte-identical.
-    await withWorkspace(
-      MOVE_REFUSAL_CONFIG,
-      MOVE_LINK_OUTSIDE_FILES,
-      async (workspace) => {
-        const outside = await stageMoveLinkOutsideComponent(workspace);
-        await buildOk(
-          product,
-          workspace,
-          "T6.6-3 outside-root link staging `build` (the link staged before " +
-            "it lies under no current source's write path; T6.5-4's protocol)",
-        );
-        for (const { argv, expected, reason } of MOVE_LINK_OUTSIDE_CASES) {
-          await assertLeavesUnchanged(
-            outside,
-            () =>
-              expectRefusedPreviewEquivalence(
-                product,
-                workspace,
-                argv,
-                expected,
-                `T6.6-3 move refusal (${reason})`,
-              ),
-            `T6.6-3 move refusal (${reason}): the link's target directory ` +
-              `outside the workspace root stays byte-identical across the ` +
-              `real operation and its preview (SPEC 6.5, 6.6, 13.4)`,
-          );
-        }
-      },
-    );
-
-    // T6.5-4's derived-path arm, staged identically on its own workspace.
-    await withWorkspace(
-      MOVE_DERIVED_PATH_CONFIG,
-      MOVE_DERIVED_PATH_FILES,
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T6.6-3 derived-path staging `build` — the occupant lies under no " +
-            "current source's write path (T6.5-4's derived-path arm), so " +
-            "the refusal previewed below is the move's own",
-        );
-        await expectRefusedPreviewEquivalence(
-          product,
-          workspace,
-          MOVE_DERIVED_PATH_CASE.argv,
-          MOVE_DERIVED_PATH_CASE.expected,
-          `T6.6-3 move refusal (${MOVE_DERIVED_PATH_CASE.reason})`,
-        );
-      },
-    );
-
-    // T6.5-4's derived-path link sibling, staged identically on its own
-    // workspace.
-    await withWorkspace(
-      MOVE_DERIVED_PATH_CONFIG,
-      MOVE_DERIVED_LINK_FILES,
-      async (workspace) => {
-        await stageMoveDerivedLinkComponent(workspace);
-        await buildOk(
-          product,
-          workspace,
-          "T6.6-3 derived-path link-sibling staging `build` — the link " +
-            "mdout/new lies under no current source's write path (T6.5-4's " +
-            "sibling arm), so the refusal previewed below is the move's own",
-        );
-        await expectRefusedPreviewEquivalence(
-          product,
-          workspace,
-          MOVE_DERIVED_LINK_CASE.argv,
-          MOVE_DERIVED_LINK_CASE.expected,
-          `T6.6-3 move refusal (${MOVE_DERIVED_LINK_CASE.reason})`,
-        );
-      },
-    );
-
-    // T6.5-4's valid-workspace precondition arm, staged identically: the
-    // invalid-workspace refusal previews as it refuses — the workspace's
-    // numbered findings alone (SPEC 6.6, 6.4, 6.5, 14).
-    await withWorkspace(
-      MOVE_REFUSAL_CONFIG,
-      MOVE_PRECONDITION_FILES,
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T6.6-3 precondition staging `build` over the staged workspace",
-        );
-        await workspace.file(
-          MOVE_PRECONDITION_BREAK_FILE,
-          MOVE_PRECONDITION_BREAK,
-        );
-        await expectRefusedPreviewEquivalence(
-          product,
-          workspace,
-          MOVE_PRECONDITION_CASE.argv,
-          MOVE_PRECONDITION_CASE.expected,
-          `T6.6-3 move refusal (${MOVE_PRECONDITION_CASE.reason})`,
-        );
-      },
-    );
-
-    // The precondition's refused-writes staging, staged identically through
-    // T6.4-6's own staging code (section-6.4.ts's REFUSED_WRITES_* exports
-    // and `stageRefusedWrites`: `out` replaced by a plain file after
-    // `build`, the premise `build --json` pinning its one condition-22
-    // finding): the real rename and file-form move — the latter T6.5-4's
-    // precondition arm — each refused with the condition-22 finding
-    // concerning `out` alone, no refusal reason beside it, and each preview
-    // alike (SPEC 6.6, 6.4, 6.5, 13.3, 14.22).
-    await withWorkspace(
-      REFUSED_WRITES_CONFIG,
-      REFUSED_WRITES_FILES,
-      async (workspace) => {
-        await stageRefusedWrites(
-          product,
-          workspace,
-          "T6.6-3 refused-writes staging (T6.4-6's)",
-        );
-        for (const { argv, expected, reason } of REFUSED_WRITES_CASES) {
-          await expectRefusedPreviewEquivalence(
-            product,
-            workspace,
-            argv,
-            expected,
-            `T6.6-3 ${argv[0] ?? ""} refusal (${reason})`,
-          );
-        }
-      },
-    );
-
-    // --- Refusal equivalence: T6.5-6's identity-terms refusals, staged
-    // identically — the post-kept-ID-move workspace that test asserts
-    // byte-exact, staged directly from those bytes (SPEC 6.5, 6.6): the
-    // exact self-move of either form (the file form refused as
-    // identity-unchanged alone) and the same-file after-removal collision,
-    // each reported alike by the real operation and its preview ---
-    await withWorkspace(
-      MOVE_IDENTITY_CONFIG,
-      MOVE_IDENTITY_FILES_AFTER,
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T6.6-3 identity-terms staging `build` (T6.5-6's post-move " +
-            "workspace, staged directly; the derived files sit under the " +
-            "modifies-nothing compares)",
-        );
-        for (const { argv, expected, reason } of MOVE_IDENTITY_REFUSAL_CASES) {
-          await expectRefusedPreviewEquivalence(
-            product,
-            workspace,
-            argv,
-            expected,
-            `T6.6-3 move refusal (${reason})`,
-          );
-        }
-      },
-    );
-
-    // --- Refusal equivalence: T6.5-16's `refused-invalid-rewrite` arms —
-    // every refused shape beside the reasons reported with it, and the
-    // alone arms refused for another reason with no would-be text judged —
-    // staged identically from the exported arm tables (SPEC 6.5, 6.6, 14)
-    // ---
-    for (const arm of R16_REFUSED_ARMS) {
-      await expectRefusedArmPreviewTwin(
-        product,
-        arm.files,
-        arm.argv,
-        ["refused-invalid-rewrite", ...(arm.beside ?? [])],
-        `T6.6-3 move refusal (T6.5-16 ${arm.key})`,
-      );
-    }
-    for (const arm of R16_ALONE_ARMS) {
-      await expectRefusedArmPreviewTwin(
-        product,
-        arm.files,
-        arm.argv,
-        arm.codes,
-        `T6.6-3 move refusal (T6.5-16 ${arm.key})`,
-      );
-    }
-
-    // --- Refusal equivalence: T6.5-17's `refused-moved-import` arms,
-    // staged identically from the exported arm table (SPEC 6.5, 6.6, 14) ---
-    for (const arm of M17_REFUSED_ARMS) {
-      await expectRefusedArmPreviewTwin(
-        product,
-        arm.files,
-        arm.argv,
-        ["refused-moved-import", ...(arm.beside ?? [])],
-        `T6.6-3 move refusal (T6.5-17 ${arm.key})`,
-      );
-    }
-
-    // --- Refusal equivalence: T6.5-20's refused stagings, staged
-    // identically from the exported table through the home test's own
-    // staging code — the companion legs read as the home test reads them,
-    // each staging before any build or after its premise `build` as the
-    // home test stages it (SPEC 6.5, 6.6, 14) ---
-    for (const staging of await d20RefusedStagings(
+    // --- Refusal equivalence: T6.6-3's refusal stagings (module header) ---
+    await runT663RefusalStagings(
       product,
-      "T6.6-3 (T6.5-20)",
-    )) {
-      await runD20RefusedStaging(
-        product,
-        staging,
-        `T6.6-3 move refusal (T6.5-20 ${staging.key})`,
-        (workspace, move, context) =>
-          expectRefusedPreviewEquivalence(
-            product,
-            workspace,
-            move.argv,
-            { finding: "refused-invalid-destination" },
-            context,
-          ),
-      );
-    }
-
-    // --- Refusal equivalence: T6.5-21's refused stagings — (a) with its
-    // two-reason move, and (b) — staged identically from the exported table
-    // through the home test's own staging code, (a) after its premise
-    // `build` and (b) before any build as the home test stages them, the
-    // code set re-pinned before the compare (SPEC 6.5, 6.6, 14) ---
-    for (const staging of D21_REFUSED_STAGINGS) {
-      await runD21RefusedStaging(
-        product,
-        staging,
-        `T6.6-3 move refusal (T6.5-21 ${staging.key})`,
-        (workspace, move, context) =>
-          expectRefusedPreviewEquivalence(
-            product,
-            workspace,
-            move.argv,
-            move.findings.map((expected) => ({ finding: expected.code })),
-            context,
-          ),
-      );
-    }
-
-    // --- Refusal equivalence: T14-7's own stagings, staged identically
-    // from section-14.ts's exported tables, in T14-7's order — its two
-    // spelled refused-invalid-id command lines twinned above, in the home
-    // workspaces — each case's code set re-pinned before the compare (SPEC
-    // 6.5, 6.4, 6.6, 14): the plain file at a directory component of the
-    // destination path; the both-collide-and-cycle section move (every
-    // applicable reason together); the destination spellings `./a.mdx`,
-    // `specs//b.mdx`, and `specs/../specs/b.mdx`, in the file form and as a
-    // section form's target path (refused-invalid-destination alone);
-    // `refused-cycle` located at the spellings rooted at an import the move
-    // would add — the local reference spelled once, then twice (`d={["x",
-    // "x"]}`), and the sibling chain whose characters need not change — and
-    // at the dependency cycle a containment would make; the identities over
-    // invalid paths; and, on the staged-to-collide workspace, the control
-    // collision, the exact self-move of either form, and — `specs/Bad.mdx`
-    // broken — the invalid-workspace rename, its numbered finding alone ---
-    await expectT147StagingPreviewTwins(product, T14_7_COMPONENT_STAGING);
-    await expectT147StagingPreviewTwins(product, T14_7_MULTI_STAGING);
-    await expectT147StagingPreviewTwins(product, T14_7_SPELLING_STAGING);
-    for (const arm of T14_7_REFUSED_CYCLE_ARMS) {
-      await withWorkspace(arm.config, arm.files, async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          `T6.6-3 (T14-7 ${arm.name}): staging \`build\` over the valid ` +
-            `workspace`,
-        );
-        await expectRefusedPreviewEquivalence(
-          product,
-          workspace,
-          arm.argv,
-          arm.expected,
-          `T6.6-3 move refusal (T14-7 ${arm.name})`,
-        );
-      });
-    }
-    await expectT147StagingPreviewTwins(product, T14_7_INVALID_PATH_STAGING);
-    await expectT147StagingPreviewTwins(
-      product,
-      T14_7_INVALID_WORKSPACE_STAGING,
+      expectRefusedPreviewEquivalence,
+      "T6.6-3",
+      "the real operation and its preview",
     );
 
     // --- Usage-error equivalence: T6.4-4's usage errors on its
@@ -3332,7 +3448,7 @@ async function assertRealRunInsertsImportAtPreviewedOffset(
 // staged-source record: T6.6-4's arms (b)–(d) and T6.6-5's later workspaces
 // stage it after a product invocation (S-9's timing clause).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.6-4/T6.6-5 xspec.config.ts — exactly one spec group, no code group",
+  "T6.6-4/T6.6-5/T6.6-7 xspec.config.ts — exactly one spec group, no code group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -3344,8 +3460,12 @@ export default defineConfig({
 );
 
 // Arm (a) adds a code group: the rename's reference rewrites span MDX and TS
-// (TEST-SPEC T6.6-4(a)).
-const SPECS_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// (TEST-SPEC T6.6-4(a)). A staged-source record, as are arm (a)'s sources
+// below: T6.6-7 stages the workspace after a product invocation (S-9's
+// timing clause).
+const SPECS_AND_CODE_CONFIG = stagedTs(
+  "T6.6-4/T6.6-7 xspec.config.ts — one spec group and one code group (arm (a)'s)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -3355,7 +3475,8 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 // --- Arm (a): rename preview — id-rewrites and the four 5.7 occurrence
 // kinds across MDX and TS. `core.mid` (with descendants `core.mid.z` and
@@ -3440,6 +3561,20 @@ const A4_USE_SOURCE = [
   "",
 ].join("\n");
 const A4_RENAME_ARGV = ["rename", A4_CORE, "core.mid", "core.hub"] as const;
+// Arm (a)'s sources as records (the configuration's note above), made from
+// the string constants the plan's locators read.
+const A4_CORE_STAGED = stagedMdx(
+  "T6.6-4/T6.6-7 arm (a) specs/Core.mdx",
+  A4_CORE_SOURCE,
+);
+const A4_OTHER_STAGED = stagedMdx(
+  "T6.6-4/T6.6-7 arm (a) specs/Other.mdx",
+  A4_OTHER_SOURCE,
+);
+const A4_USE_STAGED = stagedTs(
+  "T6.6-4/T6.6-7 arm (a) src/use.ts",
+  A4_USE_SOURCE,
+);
 
 /**
  * The expected mapping in `from`-byte order (SPEC 12.7), composed from the
@@ -3649,15 +3784,15 @@ const B4_THIRD_SOURCE = [
 // Arm (b)'s initial files as staged-source records (S-9): the strings stay
 // for the offsets `armBPlan` and the real-run byte assertion pin.
 const B4_ORIGIN_STAGED = stagedMdx(
-  "T6.6-4 arm (b) specs/Origin.mdx",
+  "T6.6-4/T6.6-7 arm (b) specs/Origin.mdx",
   B4_ORIGIN_SOURCE,
 );
 const B4_TARGET_STAGED = stagedMdx(
-  "T6.6-4 arm (b) specs/Target.mdx",
+  "T6.6-4/T6.6-7 arm (b) specs/Target.mdx",
   B4_TARGET_SOURCE,
 );
 const B4_THIRD_STAGED = stagedMdx(
-  "T6.6-4 arm (b) specs/Third.mdx",
+  "T6.6-4/T6.6-7 arm (b) specs/Third.mdx",
   B4_THIRD_SOURCE,
 );
 const B4_MOVE_ARGV = [
@@ -3808,13 +3943,16 @@ const C4_USER_SOURCE = [
 // The file-form move's initial files as staged-source records (S-9), staged
 // by T6.6-4's arm (c) and both of T6.6-5's file-form arms: `Mv` and `User`
 // keep their strings for the spans `armCPlan` pins.
-const C4_MV_STAGED = stagedMdx("T6.6-4/T6.6-5 specs/Mv.mdx", C4_MV_SOURCE);
+const C4_MV_STAGED = stagedMdx(
+  "T6.6-4/T6.6-5/T6.6-7 specs/Mv.mdx",
+  C4_MV_SOURCE,
+);
 const C4_PAL_STAGED = stagedMdx(
-  "T6.6-4/T6.6-5 specs/Pal.mdx",
+  "T6.6-4/T6.6-5/T6.6-7 specs/Pal.mdx",
   ['<S id="pal">', "Pal text.", "</S>", ""].join("\n"),
 );
 const C4_USER_STAGED = stagedMdx(
-  "T6.6-4/T6.6-5 specs/User.mdx",
+  "T6.6-4/T6.6-5/T6.6-7 specs/User.mdx",
   C4_USER_SOURCE,
 );
 const C4_MOVE_ARGV = ["move", C4_MV, "specs/sub/Mv2.mdx"] as const;
@@ -3894,7 +4032,7 @@ const D4_SOLO_SOURCE = [
 // by T6.6-4's arm (d) and T6.6-5's created-target arm: the string stays for
 // the offsets `armDPlan` pins.
 const D4_SOLO_STAGED = stagedMdx(
-  "T6.6-4/T6.6-5 specs/Solo.mdx",
+  "T6.6-4/T6.6-5/T6.6-7 specs/Solo.mdx",
   D4_SOLO_SOURCE,
 );
 const D4_MOVE_ARGV = [
@@ -4157,9 +4295,9 @@ const T6_6_4 = defineProductTest({
     await withWorkspace(
       SPECS_AND_CODE_CONFIG,
       {
-        [A4_CORE]: A4_CORE_SOURCE,
-        [A4_OTHER]: A4_OTHER_SOURCE,
-        [A4_USE]: A4_USE_SOURCE,
+        [A4_CORE]: A4_CORE_STAGED,
+        [A4_OTHER]: A4_OTHER_STAGED,
+        [A4_USE]: A4_USE_STAGED,
       },
       async (workspace) => {
         const context = "T6.6-4(a) rename preview";
@@ -5035,6 +5173,12 @@ const R6_ORIGIN_SOURCE = [
   "</S>",
   "",
 ].join("\n");
+// A staged-source record: T6.6-7 stages it after a product invocation
+// (S-9's timing clause).
+const R6_ORIGIN_STAGED = stagedMdx(
+  "T6.6-6/T6.6-7 specs/Origin.mdx",
+  R6_ORIGIN_SOURCE,
+);
 // The plain target again (T6.5-8/T6.5-9's, T6.6-2's): section-6.5.ts's record.
 const R6_TARGET_SOURCE = A8_PLAIN_TARGET;
 const R6_MOVE_ARGV = [
@@ -5091,7 +5235,7 @@ const T6_6_6 = defineProductTest({
   run: async (product) => {
     await withWorkspace(
       SPECS_MD_CONFIG,
-      { [R6_ORIGIN]: R6_ORIGIN_SOURCE, [R6_TARGET]: R6_TARGET_SOURCE },
+      { [R6_ORIGIN]: R6_ORIGIN_STAGED, [R6_TARGET]: R6_TARGET_SOURCE },
       async (workspace) => {
         const context = "T6.6-6";
         // Premise: the record under corruption is one the product itself
@@ -5366,10 +5510,371 @@ const T6_6_6 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T6.6-7 — human form
+// ---------------------------------------------------------------------------
+
+/**
+ * T6.6-7's twin of one preview at the state its staging left (the module
+ * header): inside one whole-root modifies-nothing compare — a preview
+ * acquires nothing, so the lock path stays in it (SPEC 6.6, 13.4; TEST-SPEC
+ * H-6) — the `--preview --json` run, its exit the staging's premise
+ * (`expectedExit`: 0 where the operation would proceed, 1 at T6.6-6's
+ * corrupt record and at every refusal), decoded form-exact (12.7); then the
+ * same argv without `--json`, which exits as its `--json` twin, its
+ * standard error byte-identical (SPEC 12.0: the output form never changes
+ * an exit code or standard-error content; T12.0-2), and whose report,
+ * decoded by the human preview decoder (helpers/adapters/human-reports.ts),
+ * carries the information the document carries — its findings' every code,
+ * location, concerned path, and identity, and its plan: none beside a
+ * refusal's findings, else the mapping's every pair, every file with each
+ * of its edits' class and range, and the delta's paths in both directions
+ * or its unavailability (TEST-SPEC T6.6-7; `assertHumanPreviewReportCarries`).
+ */
+async function expectHumanPreviewTwin(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  operationArgv: readonly string[],
+  expectedExit: 0 | 1,
+  context: string,
+): Promise<void> {
+  const jsonArgv = [...operationArgv, "--preview", "--json"];
+  const humanArgv = [...operationArgv, "--preview"];
+  const jsonCommand = `\`${jsonArgv.join(" ")}\``;
+  const humanCommand = `\`${humanArgv.join(" ")}\` (human report)`;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const json = await expectExit(
+        product,
+        workspace,
+        jsonArgv,
+        expectedExit,
+        expectedExit === 0
+          ? `${context}: ${jsonCommand} — the staging's premise: the ` +
+              `preview succeeds exactly when the real operation would ` +
+              `proceed (SPEC 6.6, 12.0)`
+          : `${context}: ${jsonCommand} — the staging's premise: exit 1, ` +
+              `the preview refused as the real operation would be, or ` +
+              `answering beside a finding (SPEC 6.6, 14.23, 12.0)`,
+      );
+      const report = decodePreviewReport(
+        parseJsonStdout(
+          json,
+          `${context}: ${jsonCommand} — a single JSON document as the ` +
+            `entire stdout (SPEC 12.0)`,
+        ),
+        `${context}: ${jsonCommand}`,
+      );
+      const human = await expectExit(
+        product,
+        workspace,
+        humanArgv,
+        expectedExit,
+        `${context}: ${humanCommand} — the preview run without \`--json\` ` +
+          `on the same state exits as its \`--json\` twin (SPEC 12.0: the ` +
+          `output form never changes an exit code; TEST-SPEC T6.6-7)`,
+      );
+      assertBytesEqual(
+        human.stderrBytes,
+        json.stderrBytes,
+        `${context}: ${humanCommand} — its standard error byte-identical ` +
+          `to its \`--json\` twin's (SPEC 12.0: the output form never ` +
+          `changes standard-error content; T12.0-2)`,
+      );
+      assertHumanPreviewReportCarries(
+        human,
+        report,
+        `${context}: ${humanCommand}`,
+      );
+    },
+    `${context}: the preview and its human twin modify nothing, the lock ` +
+      `path included — a preview acquires nothing (SPEC 6.6, 13.4; ` +
+      `TEST-SPEC H-6, T6.6-7)`,
+  );
+}
+
+/**
+ * T6.6-7's twin of each refused preview of T6.6-3's refusal stagings
+ * (`runT663RefusalStagings`): the refused preview and its human twin
+ * (`expectHumanPreviewTwin`, exit 1), the human report decoded onto the
+ * refusal's findings — every code, location, concerned path, and identity
+ * of the `--json` twin's — and no plan beside them (TEST-SPEC T6.6-7; SPEC
+ * 6.6). The expected refusal finding(s) stay T6.6-3's premise: the twin
+ * compares the two forms, whatever findings the refusal reports.
+ */
+const expectHumanRefusedPreviewTwin: RefusedPreviewTwin = (
+  product,
+  workspace,
+  argv,
+  _expected,
+  context,
+) => expectHumanPreviewTwin(product, workspace, argv, 1, context);
+
+/**
+ * T6.6-7's twin of T6.6-3's refused preview at acquisition arm (b)
+ * (`runT663AreaArm`, staged identically): a fresh CORE_DECL workspace,
+ * freshly built, `.xspec` then replaced by a plain file
+ * (section-13.5-ii.ts `obstructArea`) — the preview of `rename specs/A.mdx
+ * a a2` the invalid-workspace refusal, exit 1, its findings T10.1-6's
+ * condition-22 finding concerning `.xspec` — and its human twin
+ * (`expectHumanPreviewTwin`), the plain file byte-unchanged across both.
+ */
+async function runT667AreaArm(product: ProductBinding): Promise<void> {
+  await withCoreWorkspace(async (workspace) => {
+    const context = "T6.6-7 (T6.6-3(b) `.xspec` a plain file)";
+    await buildLeftoverFree(product, workspace, context);
+    const staged = await obstructArea(
+      workspace,
+      { kind: "file", content: AREA_OCCUPANT_FILE_BYTES },
+      context,
+    );
+    await expectHumanPreviewTwin(
+      product,
+      workspace,
+      ACQUISITION_RENAME,
+      1,
+      context,
+    );
+    await assertStagingInPlace(
+      [staged],
+      `${context}: the plain file at ${AREA_PATH} byte-unchanged`,
+    );
+  });
+}
+
+const T6_6_7 = defineProductTest({
+  id: "T6.6-7",
+  title:
+    "human form: what 6.6 says a preview reports binds its human report as its JSON document — each preview of T6.6-2 (the rename and the section-form move), T6.6-4 (arms (a)–(d) and (e)'s tie-break stagings), T6.6-5 (the file-form move with the record present, deleted, and lagging, the rename, and the created-target move), and T6.6-6 (the intact-record and corrupt-record moves and the refused identity-unchanged rename), restaged identically, run without `--json` on the same state, exits as its `--json` twin, its standard error byte-identical, and writes nothing (the lock path included), and its report, decoded by the human preview decoder, carries the same information, order free: the mapping's every `from` and `to` identity; every file the operation would rewrite, relocate, or create, with each of its edits' class and range as its two pre-operation byte offsets — a creation's at the new file's start; and the delta's paths in both directions, or, at T6.6-6's corrupt record, the delta reported unavailable beside the condition-23 finding (`unreadable-record` concerning `.xspec`); and each refused preview of T6.6-3 — its refusal stagings and acquisition arm (b) — run without `--json` reports its findings, every code, location, concerned path, and identity of the `--json` twin's, and no plan, exit 1; a human preview printing nothing, or omitting a mapping pair, a file, an edit's class or range, a delta path or direction, the delta's unavailability, or a refusal's findings, fails (SPEC 6.6, 12.0, 12.7, 14, 14.22, 14.23; H-3, H-6)",
+  run: async (product) => {
+    // --- T6.6-2's previews: each after its premise `build` ---
+    await withWorkspace(
+      SPECS_MD_CONFIG,
+      { [P1_CORE]: P1_CORE_SOURCE },
+      async (workspace) => {
+        const context = "T6.6-7 (T6.6-2 rename arm)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          P1_RENAME_ARGV,
+          0,
+          context,
+        );
+      },
+    );
+    await withWorkspace(
+      SPECS_MD_CONFIG,
+      { [P2_ORIGIN]: P2_ORIGIN_SOURCE, [P2_TARGET]: P2_TARGET_SOURCE },
+      async (workspace) => {
+        const context = "T6.6-7 (T6.6-2 move arm)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          P2_MOVE_ARGV,
+          0,
+          context,
+        );
+      },
+    );
+
+    // --- T6.6-4's previews: arms (a) and (b), each after its premise
+    // `build` ---
+    await withWorkspace(
+      SPECS_AND_CODE_CONFIG,
+      {
+        [A4_CORE]: A4_CORE_STAGED,
+        [A4_OTHER]: A4_OTHER_STAGED,
+        [A4_USE]: A4_USE_STAGED,
+      },
+      async (workspace) => {
+        const context = "T6.6-7 (T6.6-4(a) rename preview)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          A4_RENAME_ARGV,
+          0,
+          context,
+        );
+      },
+    );
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      {
+        [B4_ORIGIN]: B4_ORIGIN_STAGED,
+        [B4_TARGET]: B4_TARGET_STAGED,
+        [B4_THIRD]: B4_THIRD_STAGED,
+      },
+      async (workspace) => {
+        const context =
+          "T6.6-7 (T6.6-4(b) section-move preview, existing target)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          B4_MOVE_ARGV,
+          0,
+          context,
+        );
+      },
+    );
+
+    // --- T6.6-4(c)'s file-form move and, on the same workspace with
+    // emission then enabled and no rebuild, T6.6-5's lagging-record
+    // preview of it ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      {
+        [C4_MV]: C4_MV_STAGED,
+        [C4_PAL]: C4_PAL_STAGED,
+        [C4_USER]: C4_USER_STAGED,
+      },
+      async (workspace) => {
+        const context = "T6.6-7 (T6.6-4(c) file-form move preview)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          C4_MOVE_ARGV,
+          0,
+          context,
+        );
+        await workspace.file("xspec.config.ts", SPECS_MD_CONFIG);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          C4_MOVE_ARGV,
+          0,
+          "T6.6-7 (T6.6-5 file-form move, record lagging: emission enabled " +
+            "after the build, no rebuild)",
+        );
+      },
+    );
+
+    // --- T6.6-4(d)'s created-target move — T6.6-5's created-target arm,
+    // staged identically ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [D4_SOLO]: D4_SOLO_STAGED },
+      async (workspace) => {
+        const context =
+          "T6.6-7 (T6.6-4(d) and T6.6-5 created-target move preview)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          D4_MOVE_ARGV,
+          0,
+          context,
+        );
+      },
+    );
+
+    // --- T6.6-4(e)'s tie-break stagings, T6.5-13's restaged byte for
+    // byte ---
+    for (const arm of A13_TIE_BREAK_ARMS) {
+      await withWorkspace(R16_CONFIG, arm.files, async (workspace) => {
+        const context = `T6.6-7 (T6.6-4(e) tie-break staging, T6.5-13 ${arm.key})`;
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(product, workspace, arm.argv, 0, context);
+      });
+    }
+
+    // --- T6.6-5's Markdown-emitting workspace: the file-form move and the
+    // rename with the record present, then the move with graph data
+    // deleted ---
+    await withWorkspace(
+      SPECS_MD_CONFIG,
+      {
+        [C4_MV]: C4_MV_STAGED,
+        [C4_PAL]: C4_PAL_STAGED,
+        [C4_USER]: C4_USER_STAGED,
+      },
+      async (workspace) => {
+        const context = "T6.6-7 (T6.6-5 file-form move)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          C4_MOVE_ARGV,
+          0,
+          `${context}, record present`,
+        );
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          F5_RENAME_ARGV,
+          0,
+          `${context}'s workspace, rename \`${F5_RENAME_ARGV.join(" ")}\``,
+        );
+        await deleteGraphData(workspace, `${context}, record deleted`);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          C4_MOVE_ARGV,
+          0,
+          `${context}, record deleted`,
+        );
+      },
+    );
+
+    // --- T6.6-6's previews: the move with the record intact, then on the
+    // corrupt record the move (exit 1, the delta unavailable beside the
+    // condition-23 finding) and the refused identity-unchanged rename ---
+    await withWorkspace(
+      SPECS_MD_CONFIG,
+      { [R6_ORIGIN]: R6_ORIGIN_STAGED, [R6_TARGET]: R6_TARGET_SOURCE },
+      async (workspace) => {
+        const context = "T6.6-7 (T6.6-6)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          R6_MOVE_ARGV,
+          0,
+          `${context}, record intact, move preview`,
+        );
+        await corruptGraphDataShapeBlind(
+          workspace.root,
+          `${context}: corrupt-record staging`,
+        );
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          R6_MOVE_ARGV,
+          1,
+          `${context}, record corrupt, move preview`,
+        );
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          R6_RENAME_SAME_ARGV,
+          1,
+          `${context}, record corrupt, refused rename preview`,
+        );
+      },
+    );
+
+    // --- T6.6-3's refused previews: its refusal stagings, staged
+    // identically through its own staging code, and acquisition arm (b) ---
+    await runT663RefusalStagings(
+      product,
+      expectHumanRefusedPreviewTwin,
+      "T6.6-7",
+      "the preview and its human twin",
+    );
+    await runT667AreaArm(product);
+  },
+});
+
 export const section66Tests: readonly ProductTestEntry[] = [
   T6_6_2,
   T6_6_3,
   T6_6_4,
   T6_6_5,
   T6_6_6,
+  T6_6_7,
 ];

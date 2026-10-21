@@ -355,10 +355,11 @@ import {
 // Exactly one spec group (SPEC 7), for the byte-exact edit and identity-terms
 // fixtures. A staged-source record: T6.5-2, T6.5-5, and T6.5-8 stage it in
 // workspaces created after a product invocation, as T6.6-3 does through
-// MOVE_SOLO_CONFIG and MOVE_IDENTITY_CONFIG (S-9's timing clause;
+// MOVE_SOLO_CONFIG and MOVE_IDENTITY_CONFIG, and T6.6-7 through
+// MOVE_IDENTITY_CONFIG (S-9's timing clause;
 // test/self/s9-staged-sources.test.ts).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.5-2/T6.5-5/T6.5-8/T6.6-3 xspec.config.ts — exactly one spec group, the byte-exact, usage-error, and identity-terms fixtures'",
+  "T6.5-2/T6.5-5/T6.5-8/T6.6-3/T6.6-7 xspec.config.ts — exactly one spec group, the byte-exact, usage-error, and identity-terms fixtures'",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -434,10 +435,10 @@ export default defineConfig({
 // `specs/dual/` (the belonging-to-a-code-group-as-well refusal, 14.14). Both
 // extra globs match no staged file, so the workspace itself stays valid. A
 // staged-source record: T6.5-4's later workspaces stage it after a product
-// invocation, as T6.6-3 and T14-7 do through MOVE_REFUSAL_CONFIG (S-9's
-// timing clause).
+// invocation, as T6.6-3, T6.6-7, and T14-7 do through MOVE_REFUSAL_CONFIG
+// (S-9's timing clause).
 const REFUSAL_CONFIG = stagedTs(
-  "T6.5-4/T6.6-3/T14-7 xspec.config.ts — the refusal configuration: a second spec glob under specs/plain/, a code group over specs/dual/",
+  "T6.5-4/T6.6-3/T6.6-7/T14-7 xspec.config.ts — the refusal configuration: a second spec glob under specs/plain/, a code group over specs/dual/",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -3411,13 +3412,20 @@ const V4_B_SOURCE = [
 
 // The A and B sources stay strings for the location windows below; the
 // records made from them serve every set staging them — MOVE_REFUSAL_FILES
-// (T6.5-4's first workspace; T6.6-3 and T14-7 stage it after their first
+// (T6.5-4's first workspace; T6.6-3, T6.6-7, and T14-7 stage it after their
+// first
 // invocations), MOVE_LINK_OUTSIDE_FILES, and MOVE_PRECONDITION_FILES — one
 // record per byte sequence, named with every staging test (S-9's
 // before-any-product clause; helpers/staged-mdx.ts); the sets' other `.mdx`
 // sources are wrapped in place below.
-const V4_A_STAGED = stagedMdx("T6.5-4/T6.6-3/T14-7 specs/A.mdx", V4_A_SOURCE);
-const V4_B_STAGED = stagedMdx("T6.5-4/T6.6-3/T14-7 specs/B.mdx", V4_B_SOURCE);
+const V4_A_STAGED = stagedMdx(
+  "T6.5-4/T6.6-3/T6.6-7/T14-7 specs/A.mdx",
+  V4_A_SOURCE,
+);
+const V4_B_STAGED = stagedMdx(
+  "T6.5-4/T6.6-3/T6.6-7/T14-7 specs/B.mdx",
+  V4_B_SOURCE,
+);
 
 // Destination-occupant paths (the staging note above): non-file occupants at
 // in-group `.mdx` paths, staged in the test body before the pre-refusal
@@ -3429,7 +3437,7 @@ const V4_DIR_TARGET = "specs/DirTarget.mdx"; // section form: directory
 const V4_LINK_TARGET = "specs/LinkTarget.mdx"; // section form: symlink → B.mdx
 const V4_OCC = "docs/Occ.mdx"; // section form: out-of-group `.mdx` file
 const V4_OCC_SOURCE = stagedMdx(
-  "T6.5-4/T6.6-3/T14-7 docs/Occ.mdx",
+  "T6.5-4/T6.6-3/T6.6-7/T14-7 docs/Occ.mdx",
   ['<S id="occ">', "Occupant text.", "</S>", ""].join("\n"),
 );
 
@@ -3461,7 +3469,7 @@ const V4_Y_WINDOW = byteWindow(
 // (14.5) — the pre-existing validation error elsewhere (as T6.4-6).
 const V4_OTHER = "specs/Other.mdx";
 const V4_OTHER_VALID = stagedMdx(
-  "T6.5-4/T6.6-3 precondition arm specs/Other.mdx as staged (valid)",
+  "T6.5-4/T6.6-3/T6.6-7 precondition arm specs/Other.mdx as staged (valid)",
   ['<S id="oth">', "Other text.", "</S>", ""].join("\n"),
 );
 const V4_OTHER_INVALID = [
@@ -3490,10 +3498,10 @@ const V4_OTHER_INVALID = [
 // (SPEC 14, T14-7) — discriminating a product that vets only the
 // destination path's own components (it sees `new/` absent and proceeds).
 // A staged-source record: T6.5-4's derived-path workspaces are created
-// after a product invocation, as T6.6-3's and T14-7's are through
-// MOVE_DERIVED_PATH_CONFIG (S-9's timing clause).
+// after a product invocation, as T6.6-3's, T6.6-7's, and T14-7's are
+// through MOVE_DERIVED_PATH_CONFIG (S-9's timing clause).
 const V4_OUTDIR_CONFIG = stagedTs(
-  "T6.5-4/T6.6-3/T14-7 xspec.config.ts — the derived-path configuration: a second spec glob under new/, Markdown emitted under mdout/",
+  "T6.5-4/T6.6-3/T6.6-7/T14-7 xspec.config.ts — the derived-path configuration: a second spec glob under new/, Markdown emitted under mdout/",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -3509,7 +3517,7 @@ const V4_SOLO = "specs/Solo.mdx";
 // twin of it, stage the same bytes as its moved file specs/Src.mdx — one
 // staged-source record (S-9) for every site.
 export const V4_SOLO_SOURCE = stagedMdx(
-  "T6.5-4/T6.6-3/T14-7 the moved file solo (the derived-path arms' specs/Solo.mdx; the destination-component arm's specs/Src.mdx, T14-7's and T6.6-3's twin)",
+  "T6.5-4/T6.6-3/T6.6-7/T14-7 the moved file solo (the derived-path arms' specs/Solo.mdx; the destination-component arm's specs/Src.mdx, T14-7's and T6.6-3's twin)",
   ['<S id="solo">', "Solo text.", "</S>", ""].join("\n"),
 );
 const V4_MDOUT_OCCUPANT = "mdout/new";
@@ -4002,11 +4010,12 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
 // origin is `specs/a.mdx`, and nothing occupies `specs/B.MDX` or a case
 // variant of it). The `specs/*.MDX` glob matches no staged file, so the
 // premise `build` passes and the refusal is the move's own. Its workspace is
-// created after the body's first product invocation, as T6.6-3's twin's is,
-// so the configuration and the origin are staged-source records (S-9's
+// created after the body's first product invocation, as T6.6-3's and
+// T6.6-7's twins' are, so the configuration and the origin are
+// staged-source records (S-9's
 // timing clause).
 const V4_CASING_CONFIG = stagedTs(
-  "T6.5-4/T6.6-3 xspec.config.ts — the casing arm's configuration: spec globs specs/*.mdx and specs/*.MDX",
+  "T6.5-4/T6.6-3/T6.6-7 xspec.config.ts — the casing arm's configuration: spec globs specs/*.mdx and specs/*.MDX",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -4030,7 +4039,7 @@ export const MOVE_CASING_CONFIG = V4_CASING_CONFIG;
 export const MOVE_CASING_FILES: Readonly<Record<string, InitialFileContents>> =
   {
     [V4_CASING_ORIGIN]: stagedMdx(
-      "T6.5-4/T6.6-3 casing arm specs/a.mdx",
+      "T6.5-4/T6.6-3/T6.6-7 casing arm specs/a.mdx",
       ['<S id="a">', "Casing arm text.", "</S>", ""].join("\n"),
     ),
   };
@@ -4158,7 +4167,7 @@ const MOVE_PRECONDITION_BREAK_SOURCE = V4_OTHER_INVALID;
 // identically staged arm — so it is a ledger record (S-9's before-any-product
 // clause; helpers/staged-mdx.ts) shared by both tests: the same constant.
 export const MOVE_PRECONDITION_BREAK = stagedMdx(
-  "T6.5-4/T6.6-3 precondition arm: specs/Other.mdx overwritten with an unresolved local d reference",
+  "T6.5-4/T6.6-3/T6.6-7 precondition arm: specs/Other.mdx overwritten with an unresolved local d reference",
   MOVE_PRECONDITION_BREAK_SOURCE,
 );
 export const MOVE_PRECONDITION_CASE: MoveRefusalCase = {
@@ -5129,8 +5138,14 @@ export const MOVE_IDENTITY_CONFIG = SPECS_ONLY_CONFIG;
 export const MOVE_IDENTITY_FILES_AFTER: Readonly<
   Record<string, InitialFileContents>
 > = {
-  [I6_A]: stagedMdx("T6.6-3 identity-terms twins specs/A.mdx", I6_A_AFTER),
-  [I6_B]: stagedMdx("T6.6-3 identity-terms twins specs/B.mdx", I6_B_AFTER),
+  [I6_A]: stagedMdx(
+    "T6.6-3/T6.6-7 identity-terms twins specs/A.mdx",
+    I6_A_AFTER,
+  ),
+  [I6_B]: stagedMdx(
+    "T6.6-3/T6.6-7 identity-terms twins specs/B.mdx",
+    I6_B_AFTER,
+  ),
 };
 
 /**
@@ -6067,7 +6082,7 @@ const A8_PLAIN_TARGET_LINES: readonly string[] = [
  * for identical bytes across tests).
  */
 export const A8_PLAIN_TARGET = stagedMdx(
-  "T6.5-8/T6.5-9/T6.6-2/T6.6-6 the plain target (specs/target.mdx in T6.5-8 and T6.5-9, specs/Target.mdx elsewhere)",
+  "T6.5-8/T6.5-9/T6.6-2/T6.6-6/T6.6-7 the plain target (specs/target.mdx in T6.5-8 and T6.5-9, specs/Target.mdx elsewhere)",
   A8_PLAIN_TARGET_LINES.join(X2_LF),
 );
 

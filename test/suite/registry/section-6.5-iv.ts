@@ -205,7 +205,7 @@ import {
 // ---------------------------------------------------------------------------
 // Stagings — every file a staged-source record (S-9's timing clause: every
 // staging but the body's first follows a product invocation, and T6.6-3
-// stages them all after many)
+// and T6.6-7 stage the refused ones after many)
 // ---------------------------------------------------------------------------
 
 /** The one spec glob of every staging (TEST-SPEC: "throughout"). */
@@ -233,32 +233,32 @@ function d20ConfigText(
 }
 
 const D20_SPECS_CONFIG = stagedTs(
-  "T6.5-20/T6.6-3 xspec.config.ts — specs/**/*.mdx alone, no Markdown emission ((a)'s module and companion stagings and the companion twin)",
+  "T6.5-20/T6.6-3/T6.6-7 xspec.config.ts — specs/**/*.mdx alone, no Markdown emission ((a)'s module and companion stagings and the companion twin)",
   d20ConfigText(null),
 );
 const D20_OUT_CONFIG = stagedTs(
-  "T6.5-20/T6.6-3 xspec.config.ts — specs/**/*.mdx, Markdown emitted under outDir \"out\" ((a)'s outDir staging, (b)'s first)",
+  "T6.5-20/T6.6-3/T6.6-7 xspec.config.ts — specs/**/*.mdx, Markdown emitted under outDir \"out\" ((a)'s outDir staging, (b)'s first)",
   d20ConfigText('{ emit: true, outDir: "out" }'),
 );
 const D20_NESTED_OUT_CONFIG = stagedTs(
-  'T6.5-20/T6.6-3 xspec.config.ts — specs/**/*.mdx, Markdown emitted under outDir "specs/B.mdx/md" ((b)\'s second staging)',
+  'T6.5-20/T6.6-3/T6.6-7 xspec.config.ts — specs/**/*.mdx, Markdown emitted under outDir "specs/B.mdx/md" ((b)\'s second staging)',
   d20ConfigText('{ emit: true, outDir: "specs/B.mdx/md" }'),
 );
 /** (c)'s configurations: emission next to sources, and one code group. */
 const D20_EMIT_NEXT = "{ emit: true }";
 const D20_C_MD_CONFIG = stagedTs(
-  "T6.5-20/T6.6-3 xspec.config.ts — specs/**/*.mdx, a code group globbing specs/*.md, Markdown emitted next to sources ((c)'s stagings beside specs/B.md and beside specs/B.md/C.mdx, and its exemption's)",
+  "T6.5-20/T6.6-3/T6.6-7 xspec.config.ts — specs/**/*.mdx, a code group globbing specs/*.md, Markdown emitted next to sources ((c)'s stagings beside specs/B.md and beside specs/B.md/C.mdx, and its exemption's)",
   d20ConfigText(D20_EMIT_NEXT, "specs/*.md"),
 );
 const D20_C_TS_CONFIG = stagedTs(
-  "T6.5-20/T6.6-3 xspec.config.ts — specs/**/*.mdx, a code group globbing specs/**/*.ts, Markdown emitted next to sources ((c)'s stagings beside specs/B.md/x.ts, specs/A.xspec.ts/c.ts, and specs/A.xspec.<suffix>/c.ts, and the companion twin)",
+  "T6.5-20/T6.6-3/T6.6-7 xspec.config.ts — specs/**/*.mdx, a code group globbing specs/**/*.ts, Markdown emitted next to sources ((c)'s stagings beside specs/B.md/x.ts, specs/A.xspec.ts/c.ts, and specs/A.xspec.<suffix>/c.ts, and the companion twin)",
   d20ConfigText(D20_EMIT_NEXT, "specs/**/*.ts"),
 );
 
 /** The moved file: the section `x` the section-form moves move. */
 const D20_Z = "specs/Z.mdx";
 const D20_Z_SOURCE = stagedMdx(
-  "T6.5-20/T6.6-3 specs/Z.mdx — the moved file, holding the one section x",
+  "T6.5-20/T6.6-3/T6.6-7 specs/Z.mdx — the moved file, holding the one section x",
   ['<S id="x">', "Zed text.", "</S>", ""].join("\n"),
 );
 /** The section the section-form moves move, keeping its ID. */
@@ -267,7 +267,7 @@ const D20_SECTION = "x";
 /** (a)'s discovered source, whose module path is `specs/A.xspec.ts`. */
 const D20_A = "specs/A.mdx";
 const D20_A_SOURCE = stagedMdx(
-  "T6.5-20/T6.6-3 specs/A.mdx — (a)'s discovered source, module path specs/A.xspec.ts (the companion twin's source as well)",
+  "T6.5-20/T6.6-3/T6.6-7 specs/A.mdx — (a)'s discovered source, module path specs/A.xspec.ts (the companion twin's source as well)",
   ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
 );
 const D20_A_MODULE = "specs/A.xspec.ts";
@@ -275,14 +275,14 @@ const D20_A_MODULE = "specs/A.xspec.ts";
 /** (a)'s outDir staging: a discovered source emitting `out/specs/x.md`. */
 const D20_X = "specs/x.mdx";
 const D20_X_SOURCE = stagedMdx(
-  "T6.5-20/T6.6-3 specs/x.mdx — (a)'s outDir staging, emitting out/specs/x.md",
+  "T6.5-20/T6.6-3/T6.6-7 specs/x.mdx — (a)'s outDir staging, emitting out/specs/x.md",
   ['<S id="w">', "Emitted text.", "</S>", ""].join("\n"),
 );
 
 /** (b)'s first staging: a discovered source emitting `out/specs/a.md/b.md`. */
 const D20_AB = "specs/a.md/b.mdx";
 const D20_AB_SOURCE = stagedMdx(
-  "T6.5-20/T6.6-3 specs/a.md/b.mdx — (b)'s discovered source, emitting out/specs/a.md/b.md",
+  "T6.5-20/T6.6-3/T6.6-7 specs/a.md/b.mdx — (b)'s discovered source, emitting out/specs/a.md/b.md",
   ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
 );
 
@@ -300,7 +300,7 @@ const D20_C_EMIT_PATH = "specs/B.md";
  * content").
  */
 const D20_CODE_SOURCE = stagedTs(
-  "T6.5-20/T6.6-3 (c)'s discovered code sources specs/B.md, specs/B.md/x.ts, specs/A.xspec.ts/c.ts, and specs/A.xspec.<suffix>/c.ts — export const v = 1",
+  "T6.5-20/T6.6-3/T6.6-7 (c)'s discovered code sources specs/B.md, specs/B.md/x.ts, specs/A.xspec.ts/c.ts, and specs/A.xspec.<suffix>/c.ts — export const v = 1",
   "export const v = 1\n",
 );
 
@@ -311,7 +311,7 @@ const D20_CODE_SOURCE = stagedTs(
  */
 const D20_BC = "specs/B.md/C.mdx";
 const D20_BC_SOURCE = stagedMdx(
-  "T6.5-20/T6.6-3 specs/B.md/C.mdx — (c)'s discovered source below the emit path specs/B.md, holding no import and the one section x (the exemption's origin; at specs/B.mdx, the exemption twin's source)",
+  "T6.5-20/T6.6-3/T6.6-7 specs/B.md/C.mdx — (c)'s discovered source below the emit path specs/B.md, holding no import and the one section x (the exemption's origin; at specs/B.mdx, the exemption twin's source)",
   ['<S id="x">', "Cee text.", "</S>", ""].join("\n"),
 );
 
@@ -324,7 +324,7 @@ const D20_BC_SOURCE = stagedMdx(
  */
 const D20_D_CODE_GLOB = "src/**/*.ts";
 const D20_D_CONFIG = stagedTs(
-  "T6.5-20/T6.6-3 xspec.config.ts — specs/**/*.mdx, a code group globbing src/**/*.ts, Markdown emitted next to sources ((d)'s refused stagings and its emission-enabled controls)",
+  "T6.5-20/T6.6-3/T6.6-7 xspec.config.ts — specs/**/*.mdx, a code group globbing src/**/*.ts, Markdown emitted next to sources ((d)'s refused stagings and its emission-enabled controls)",
   d20ConfigText(D20_EMIT_NEXT, D20_D_CODE_GLOB),
 );
 const D20_D_NO_EMIT_CONFIG = stagedTs(
@@ -371,32 +371,32 @@ function d20DesignationCode(
  */
 const D20_D_FORMS: readonly D20DesignationCode[] = [
   d20DesignationCode(
-    "T6.5-20/T6.6-3",
+    "T6.5-20/T6.6-3/T6.6-7",
     "an import declaration",
     'import "../specs/B.md"',
   ),
   d20DesignationCode(
-    "T6.5-20/T6.6-3",
+    "T6.5-20/T6.6-3/T6.6-7",
     "an export declaration with a module specifier",
     'export * from "../specs/B.md"',
   ),
   d20DesignationCode(
-    "T6.5-20/T6.6-3",
+    "T6.5-20/T6.6-3/T6.6-7",
     "an import X = require(…) declaration",
     'import X = require("../specs/B.md")',
   ),
   d20DesignationCode(
-    "T6.5-20/T6.6-3",
+    "T6.5-20/T6.6-3/T6.6-7",
     "a dynamic import() whose specifier is a static string literal",
     'import("../specs/B.md")',
   ),
   d20DesignationCode(
-    "T6.5-20/T6.6-3",
+    "T6.5-20/T6.6-3/T6.6-7",
     "an import type",
     'type T = import("../specs/B.md")',
   ),
   d20DesignationCode(
-    "T6.5-20/T6.6-3",
+    "T6.5-20/T6.6-3/T6.6-7",
     "a string-named module declaration",
     'declare module "../specs/B.md" { }',
   ),
@@ -431,7 +431,7 @@ const D20_D_NON_FORMS: readonly D20DesignationCode[] = [
  * sources, no code group.
  */
 const D20_E_CONFIG = stagedTs(
-  "T6.5-20/T6.6-3 xspec.config.ts — specs/**/*.mdx alone, Markdown emitted next to sources ((e)'s stagings and its companion twins)",
+  "T6.5-20/T6.6-3/T6.6-7 xspec.config.ts — specs/**/*.mdx alone, Markdown emitted next to sources ((e)'s stagings and its companion twins)",
   d20ConfigText(D20_EMIT_NEXT),
 );
 
@@ -440,7 +440,7 @@ const D20_E_CONFIG = stagedTs(
  * import (unlike (a)'s `specs/A.mdx`).
  */
 const D20_E_A_SOURCE = stagedMdx(
-  "T6.5-20/T6.6-3 specs/A.mdx — (e)'s only source, holding the one section x and no import (the companion twins' source, at specs/A.mdx and at each performed destination)",
+  "T6.5-20/T6.6-3/T6.6-7 specs/A.mdx — (e)'s only source, holding the one section x and no import (the companion twins' source, at specs/A.mdx and at each performed destination)",
   ['<S id="x">', "Alpha text.", "</S>", ""].join("\n"),
 );
 
@@ -1280,11 +1280,11 @@ function d21ConfigText(
 }
 
 const D21_SPEC_MD_CONFIG = stagedTs(
-  "T6.5-21/T6.6-3/T12.7-2 xspec.config.ts — specs/**/*.mdx and a second spec glob specs/*.md in the one spec group, Markdown emitted next to sources ((a)'s staging with its two-reason move, (d)'s, (e)'s, and (e)'s twin)",
+  "T6.5-21/T6.6-3/T6.6-7/T12.7-2 xspec.config.ts — specs/**/*.mdx and a second spec glob specs/*.md in the one spec group, Markdown emitted next to sources ((a)'s staging with its two-reason move, (d)'s, (e)'s, and (e)'s twin)",
   d21ConfigText([D20_SPEC_GLOB, D21_MD_GLOB], null),
 );
 const D21_CODE_MD_CONFIG = stagedTs(
-  "T6.5-21/T6.6-3 xspec.config.ts — specs/**/*.mdx, a code group globbing specs/*.md, Markdown emitted next to sources ((b)'s staging)",
+  "T6.5-21/T6.6-3/T6.6-7 xspec.config.ts — specs/**/*.mdx, a code group globbing specs/*.md, Markdown emitted next to sources ((b)'s staging)",
   d21ConfigText([D20_SPEC_GLOB], D21_MD_GLOB),
 );
 const D21_UNREACHED_CONFIG = stagedTs(
@@ -1299,7 +1299,7 @@ const D21_UNREACHED_CONFIG = stagedTs(
  * nothing imports it, so no relocation rewrites a byte (SPEC 6.5).
  */
 const D21_A_SOURCE = stagedMdx(
-  "T6.5-21/T6.6-3/T12.7-2 specs/A.mdx — the moved file, sections x and y, no import or reference (every staging's origin; at specs/sub/A.mdx, (c)'s twin's source)",
+  "T6.5-21/T6.6-3/T6.6-7/T12.7-2 specs/A.mdx — the moved file, sections x and y, no import or reference (every staging's origin; at specs/sub/A.mdx, (c)'s twin's source)",
   [
     `<S id="${D21_SECTION}">`,
     "Alpha text.",
@@ -1320,7 +1320,7 @@ const D21_A_SOURCE = stagedMdx(
  * refusal 6.5's reason alone.
  */
 const D21_USER_OCCUPANT = stagedTs(
-  "T6.5-21/T6.6-3 specs/A.md — (b)'s plain file of the user's at the origin's emit destination, before any emission (export const v = 1)",
+  "T6.5-21/T6.6-3/T6.6-7 specs/A.md — (b)'s plain file of the user's at the origin's emit destination, before any emission (export const v = 1)",
   "export const v = 1\n",
 );
 

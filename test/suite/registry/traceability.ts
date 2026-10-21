@@ -418,6 +418,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T6.6-4": ["6.6", "6.5", "12.7"],
   "T6.6-5": ["6.6", "13.2", "13.3"],
   "T6.6-6": ["6.6", "14"],
+  "T6.6-7": ["6.6", "12.0", "14"],
   "T6.7-1": ["6.7", "14"],
   // T7-1: its name-casing probe the byte-wise, case-sensitive comparison of
   // the configuration entry's name (12.0: paths compare byte-wise and

@@ -393,10 +393,11 @@ import {
 // P-15 stage it in workspaces created after a product invocation (CORE_DECL,
 // section-13.5-vii.ts's ISO_TWO_DECL and NESTED_DECL — at both of its
 // roots — section-13.5-vi.ts's T13_5_13_DECL), as T6.6-3's scheduling and
-// acquisition arms do (S-9's timing clause;
+// acquisition arms and T6.6-7's twin of acquisition arm (b) do (S-9's
+// timing clause;
 // test/self/s9-staged-sources.test.ts).
 export const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.6-3/T11.6-3/T12.7-3/T13.4-12/T13.5-1/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-13/T14-6/T14-9/T14-10/P-15 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's, ISO_TWO_DECL's, NESTED_DECL's at both roots, and T13_5_13_DECL's)",
+  "T6.6-3/T6.6-7/T11.6-3/T12.7-3/T13.4-12/T13.5-1/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-13/T14-6/T14-9/T14-10/P-15 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's, ISO_TWO_DECL's, NESTED_DECL's at both roots, and T13_5_13_DECL's)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -430,7 +431,8 @@ const A_MDX = [
 // T13.5-8's valid-workspace arms, T13.5-10's,
 // T13.5-11's, and T13.5-12's per-arm workspaces and twins — T13.5-12(c)
 // creating it in one during a hold — T6.6-3's scheduling workspace, its
-// acquisition arms' workspaces and their unobstructed twin,
+// acquisition arms' workspaces and their unobstructed twin, T6.6-7's twin
+// of acquisition arm (b),
 // T13.4-12's per-arm workspaces and twin, T13.5-13's trial and twin
 // workspaces, T11.6-3's lock-path arms' workspaces, the busy arms' of
 // T12.7-3 and T14-6, `judgeBusyRefusal`, T14-9's acquisition-write arms'
@@ -441,7 +443,7 @@ const A_MDX = [
 // clause; helpers/staged-mdx.ts) — the string stays for the staleness edit
 // below — staged wherever the bytes are.
 export const CORE_A_STAGED = stagedMdx(
-  "T6.6-3/T11.6-3/T12.7-3/T13.4-1/T13.4-2/T13.4-3/T13.4-4/T13.4-5/T13.4-6/T13.4-12/T13.5-1/T13.5-2/T13.5-3/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-12/T13.5-13/T14-6/T14-9/T14-10/P-15 specs/A.mdx (the CONF-CORE-shaped source: a holding a.k, then g; T13.4-6's specs/one/A.mdx too; T13.5-12(c)'s, created during a hold)",
+  "T6.6-3/T6.6-7/T11.6-3/T12.7-3/T13.4-1/T13.4-2/T13.4-3/T13.4-4/T13.4-5/T13.4-6/T13.4-12/T13.5-1/T13.5-2/T13.5-3/T13.5-4/T13.5-6/T13.5-8/T13.5-10/T13.5-11/T13.5-12/T13.5-13/T14-6/T14-9/T14-10/P-15 specs/A.mdx (the CONF-CORE-shaped source: a holding a.k, then g; T13.4-6's specs/one/A.mdx too; T13.5-12(c)'s, created during a hold)",
   A_MDX,
 );
 

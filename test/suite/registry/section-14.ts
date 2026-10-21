@@ -793,10 +793,11 @@ import {
 // Minimal declarative configuration (SPEC 7): exactly one spec group. A
 // staged-source record (S-9; helpers/staged-ts.ts): most workspaces staging
 // it follow their body's first product invocation, so it is judged before
-// any product exists; the other stagings pass the record too. T6.6-3 stages
-// it through T14-7's exported own stagings (the T14-7 section).
+// any product exists; the other stagings pass the record too. T6.6-3 and
+// T6.6-7 stage it through T14-7's exported own stagings (the T14-7
+// section).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T6.6-3/T14-4/T14-6/T14-7/T14-8/T14-11 xspec.config.ts (one spec group, specs/**/*.mdx)",
+  "T6.6-3/T6.6-7/T14-4/T14-6/T14-7/T14-8/T14-11 xspec.config.ts (one spec group, specs/**/*.mdx)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -4580,8 +4581,9 @@ export interface T147RefusalCase {
 /**
  * One of T14-7's own stagings whose refusals run on one state: a fresh
  * workspace of `config` and `files` (every spec source a staged-source
- * record — T14-7's and T6.6-3's workspaces follow their bodies' first
- * invocations, S-9), the premise `build` passing over it, then each case in
+ * record — T14-7's, T6.6-3's, and T6.6-7's workspaces follow their bodies'
+ * first invocations, S-9), the premise `build` passing over it, then each
+ * case in
  * order — a refusal modifies nothing (SPEC 6.4, 6.5), so each sees the
  * state as staged — and, where `then` is given, its file restaged and its
  * cases run on that state.
@@ -4717,7 +4719,7 @@ const T14_7_MULTI_SOURCE = [
 // body's first invocations, as T6.6-3's twin of it does — a staged-source
 // record, made from the string the windows below are computed from).
 const T14_7_MULTI_STAGED = stagedMdx(
-  "T6.6-3/T14-7 every-applicable-reason arm specs/M.mdx (keep holding the occupant keep.mv; mv depending on keep)",
+  "T6.6-3/T6.6-7/T14-7 every-applicable-reason arm specs/M.mdx (keep holding the occupant keep.mv; mv depending on keep)",
   T14_7_MULTI_SOURCE,
 );
 
@@ -4802,12 +4804,12 @@ const T14_7_SIB_WINDOW = byteWindow(
   T14_7_SIB_CONSTRUCT,
 );
 const T14_7_RENAME_STAGED = stagedMdx(
-  "T6.6-3/T14-7 invalid-workspace arm specs/R.mdx (a holding a.mid and a.sib)",
+  "T6.6-3/T6.6-7/T14-7 invalid-workspace arm specs/R.mdx (a holding a.mid and a.sib)",
   T14_7_RENAME_SOURCE,
 );
 const T14_7_BAD_FILE = "specs/Bad.mdx";
 const T14_7_BAD_VALID = stagedMdx(
-  "T6.6-3/T14-7 invalid-workspace arm specs/Bad.mdx (the valid twin: bad, before its unresolved dependency target is staged)",
+  "T6.6-3/T6.6-7/T14-7 invalid-workspace arm specs/Bad.mdx (the valid twin: bad, before its unresolved dependency target is staged)",
   '<S id="bad">\nBad-file text, valid for the control arm.\n</S>\n',
 );
 // The invalid twin is staged after the control arm's invocations — a
@@ -4815,7 +4817,7 @@ const T14_7_BAD_VALID = stagedMdx(
 // the arm's initial sources (the workspace follows the body's first
 // invocations, in T14-7 and in T6.6-3's twin alike).
 const T14_7_BAD_INVALID = stagedMdx(
-  "T6.6-3/T14-7 specs/Bad.mdx with an unresolved dependency target (the invalid-workspace arm)",
+  "T6.6-3/T6.6-7/T14-7 specs/Bad.mdx with an unresolved dependency target (the invalid-workspace arm)",
   '<S id="bad" d={"nope"}>\nUnresolved dependency target.\n</S>\n',
 );
 // The staging's refusals: on the valid twin, the control rename (staged to
@@ -4908,7 +4910,7 @@ export const T14_7_INVALID_WORKSPACE_STAGING: T147RefusalStaging = {
 // workspace follows the body's first invocations (T6.6-3's twin's too), so
 // its configuration is a staged-source record (S-9; helpers/staged-ts.ts).
 const T14_7_SPELLING_CONFIG = stagedTs(
-  "T6.6-3/T14-7 destination-spelling arm xspec.config.ts (the root-level glob *.mdx beside specs/**/*.mdx)",
+  "T6.6-3/T6.6-7/T14-7 destination-spelling arm xspec.config.ts (the root-level glob *.mdx beside specs/**/*.mdx)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -4931,7 +4933,7 @@ export const T14_7_SPELLING_STAGING: T147RefusalStaging = {
   config: T14_7_SPELLING_CONFIG,
   files: {
     [T14_7_SPELLING_ORIGIN]: stagedMdx(
-      "T6.6-3/T14-7 destination-spelling arm a.mdx (the root-level origin x)",
+      "T6.6-3/T6.6-7/T14-7 destination-spelling arm a.mdx (the root-level origin x)",
       '<S id="x">\nX text.\n</S>\n',
     ),
     "specs/b.mdx": A13_FOURTH_STAGED,
@@ -4990,7 +4992,7 @@ const T14_7_CYCLE_A_SOURCE = [
 ].join("\n");
 const T14_7_IMPORT_DECLARATION = 'import A from "./A.xspec"';
 const T14_7_CYCLE_B_SOURCE = stagedMdx(
-  "T6.6-3/T14-7 import-cycle arm and its twice-spelled twin specs/B.mdx (b importing A for keep)",
+  "T6.6-3/T6.6-7/T14-7 import-cycle arm and its twice-spelled twin specs/B.mdx (b importing A for keep)",
   [
     T14_7_IMPORT_DECLARATION,
     "",
@@ -5001,7 +5003,7 @@ const T14_7_CYCLE_B_SOURCE = stagedMdx(
   ].join("\n"),
 );
 const T14_7_CYCLE_A_STAGED = stagedMdx(
-  "T6.6-3/T14-7 import-cycle arm specs/A.mdx (keep, x, and user referencing x in local form)",
+  "T6.6-3/T6.6-7/T14-7 import-cycle arm specs/A.mdx (keep, x, and user referencing x in local form)",
   T14_7_CYCLE_A_SOURCE,
 );
 const T14_7_LOCAL_REFERENCE = 'd={"x"}';
@@ -5149,7 +5151,7 @@ export const T14_7_TWICE_IMPORT_CYCLE_ARM: T147RefusedCycleArm = {
   config: SPECS_ONLY_CONFIG,
   files: {
     [T14_7_CYCLE_A]: stagedMdx(
-      "T6.6-3/T14-7 twice-spelled import-cycle arm specs/A.mdx (keep, x, and user referencing x twice in local form)",
+      "T6.6-3/T6.6-7/T14-7 twice-spelled import-cycle arm specs/A.mdx (keep, x, and user referencing x twice in local form)",
       T14_7_TWICE_IMPORT_A_SOURCE.text,
     ),
     [T14_7_CYCLE_B]: T14_7_CYCLE_B_SOURCE,
@@ -5185,7 +5187,7 @@ export const T14_7_TWICE_DEPENDENCY_CYCLE_ARM: T147RefusedCycleArm = {
   config: SPECS_ONLY_CONFIG,
   files: {
     [T14_7_DEPENDENCY_FILE]: stagedMdx(
-      "T6.6-3/T14-7 twice-spelled dependency-cycle arm specs/A.mdx (top-level p, and x depending on p twice)",
+      "T6.6-3/T6.6-7/T14-7 twice-spelled dependency-cycle arm specs/A.mdx (top-level p, and x depending on p twice)",
       T14_7_TWICE_DEPENDENCY_SOURCE.text,
     ),
   },
@@ -5572,7 +5574,7 @@ export const T14_7_INVALID_PATH_STAGING: T147RefusalStaging = {
   config: SPECS_ONLY_CONFIG,
   files: {
     [T14_7_INVALID_PATH_ORIGIN]: stagedMdx(
-      "T6.6-3/T14-7 invalid-path arm specs/A.mdx (keep and x)",
+      "T6.6-3/T6.6-7/T14-7 invalid-path arm specs/A.mdx (keep and x)",
       '<S id="keep">\nKeep text.\n</S>\n\n<S id="x">\nX text.\n</S>\n',
     ),
   },
@@ -5653,12 +5655,12 @@ const T14_7_SIBLING_A_SOURCE = [
   "",
 ].join("\n");
 const T14_7_SIBLING_B_SOURCE = stagedMdx(
-  "T6.6-3/T14-7 sibling import-cycle arm specs/B.mdx (bar)",
+  "T6.6-3/T6.6-7/T14-7 sibling import-cycle arm specs/B.mdx (bar)",
   ['<S id="bar">', "Bar text.", "</S>", ""].join("\n"),
 );
 const T14_7_SIBLING_C_IMPORT = 'import B from "./B.xspec"';
 const T14_7_SIBLING_C_SOURCE = stagedMdx(
-  "T6.6-3/T14-7 sibling import-cycle arm specs/C.mdx (foo importing B for bar)",
+  "T6.6-3/T6.6-7/T14-7 sibling import-cycle arm specs/C.mdx (foo importing B for bar)",
   [
     T14_7_SIBLING_C_IMPORT,
     "",
@@ -5669,7 +5671,7 @@ const T14_7_SIBLING_C_SOURCE = stagedMdx(
   ].join("\n"),
 );
 const T14_7_SIBLING_A_STAGED = stagedMdx(
-  "T6.6-3/T14-7 sibling import-cycle arm specs/A.mdx (x carrying d={C.foo} beside keep)",
+  "T6.6-3/T6.6-7/T14-7 sibling import-cycle arm specs/A.mdx (x carrying d={C.foo} beside keep)",
   T14_7_SIBLING_A_SOURCE,
 );
 const T14_7_SIBLING_CHAIN_WINDOW = byteWindow(
