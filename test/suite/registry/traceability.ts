@@ -858,13 +858,31 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // (conditions 13 and 21; 10.1's corrupt session), the session directory's
   // and the area's own (10.1, 11.6; conditions 22 and 23 through T10.1-6's
   // sweeps), the inventory's occupancy and session listing (11.6), the
-  // surfaces of 11.2 answering beside the journal's condition, and the
-  // gate's refusal at `ids` (13.3) — rule (a)'s "14". The `rename`'s
+  // surfaces of 11.2 answering beside the journal's condition and beside a
+  // write path's, the gate's refusal at `ids` (13.3), a derived file's path
+  // stale and replaced and a recorded one reported and removed (13.4;
+  // condition 10's per-file and recorded-file forms), a write path's
+  // directory component (condition 22), a move's destination and its
+  // components (6.5's refused-destination-exists and
+  // refused-invalid-destination, rule (b)), and the hold path's failed
+  // creation (13.5's usage error) — rule (a)'s "14". The `rename`'s
   // invalid-workspace refusal (6.4), the error document's form (12.7),
-  // `version` (12.6), `impact --base c1`'s baseline resolution (6.3), and
-  // acquisition's write failure (13.5) are carriage context with home
-  // coverage at T6.4-*/T12.7-3/T12.6-*/T10.1-6/T13.5-10.
-  "T13.4-13": ["13.4", "7", "10.1", "11.2", "11.6", "13.3", "14"],
+  // `version` (12.6), `impact --base c1`'s baseline resolution (6.3),
+  // acquisition's write failure (13.5), 7.3's emission settings and 13.2's
+  // emit paths, and `build`'s success paths (12.1) are carriage context
+  // with home coverage at
+  // T6.4-*/T12.7-3/T12.6-*/T10.1-6/T13.5-10/T7.3-1/T13.2-1/T13.4-4.
+  "T13.4-13": [
+    "13.4",
+    "6.5",
+    "7",
+    "10.1",
+    "11.2",
+    "11.6",
+    "13.3",
+    "13.5",
+    "14",
+  ],
   "T13.5-1": ["13.5"],
   "T13.5-2": ["13.5", "14"],
   "T13.5-3": ["13.5", "14"],
