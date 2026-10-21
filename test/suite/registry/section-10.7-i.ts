@@ -182,6 +182,17 @@
 //   and which total labels which status stay with the JSON assertions — a
 //   status token found on a row also satisfies a total's, and a report may
 //   name every status beside a zero count.
+// - T12.0-15's stagings (section-12.0-iv.ts; TEST-SPEC T12.0-15's `review`
+//   fixtures `list` (T10.7-5) and `status` (T10.7-6)): T10.7-5's body is
+//   `runT1075Listings(product, visit)`, each of its two `review list`
+//   reads — the clean listing, then the one with c corrupt — handed to
+//   `visit` with its pinned exit and the home test's own read, assertions,
+//   and human parity check as `home`; T10.7-6's is `runT1076Stages(product,
+//   visit)`, each of its four stages' `review status s` reads handed so,
+//   stage A's `home` asserting over the staging's own read (its rows' ids
+//   are the items the staging resolves, its item order the staging's
+//   premise). The home tests pass `home` through; T12.0-15 hands its human
+//   twin in its place, the staging between the reads the home test's own.
 // - Workspaces are git-less wherever no baseline is involved (T10.7-2,
 //   T10.7-4, T10.7-6): coverage and audit sessions require no git.
 // - Every fixture edit is followed by an explicit `build` before any read,
@@ -197,10 +208,13 @@
 //   and its corrupt-session, case-fold, and case-pair workspaces with the
 //   case pair's identical twin (`W1_SOURCE`, the one record serving the
 //   body's first workspace too), T10.7-2's audit arm (leaf a, the coverage
-//   arm's same call: one record staged in both), and T10.7-4's item-id tie
-//   sub-fixture (its specs/A.mdx); every other initial `files` entry, a
-//   body's first workspace's, stays plain; T10.7-1's and T10.7-5's
-//   corrupt-session bytes stage no `.mdx` path. The tie sub-fixture's three edits follow a
+//   arm's same call: one record staged in both), T10.7-4's item-id tie
+//   sub-fixture (its specs/A.mdx), and T10.7-5's and T10.7-6's first
+//   workspaces' sources (specs/W.mdx and specs/T.mdx: T12.0-15 runs those
+//   two stagings after its body's first invocation, below); every other
+//   initial `files` entry, a body's first workspace's, stays plain;
+//   T10.7-1's and T10.7-5's corrupt-session bytes stage no `.mdx` path.
+//   Each record T12.0-15 stages names it. The tie sub-fixture's three edits follow a
 //   `rename` and change bytes the product rewrote, which no harness constant
 //   equals, so each is an anchored `workspace.edit()`, its anchor's
 //   uniqueness diagnosed first (SPEC 6.4 fixes the rewritten form), as
@@ -208,9 +222,11 @@
 // - TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
 //   and timing clauses), every one well-formed: the configurations of those
 //   later workspaces — `COVERAGE_CONFIG` (T10.7-1's corrupt-session,
-//   case-fold, and case-pair workspaces and the case pair's twin, and
-//   T10.7-4's item-id tie sub-fixture) and `SPECS_ONLY_CONFIG` (T10.7-2's
-//   audit arm), each staged wherever that configuration is — and T10.7-2's
+//   case-fold, and case-pair workspaces and the case pair's twin,
+//   T10.7-4's item-id tie sub-fixture, and T10.7-5's workspace as T12.0-15
+//   stages it) and `SPECS_ONLY_CONFIG` (T10.7-2's audit arm, and T10.7-6's
+//   workspace as T12.0-15 stages it), each staged wherever that
+//   configuration is — and T10.7-2's
 //   two post-create configuration edits (`C2_CONFIG_EDITED`,
 //   `A2_CONFIG_EDITED`); T10.7-1's invalid configuration-state twin stages
 //   support.ts's record `UNKNOWN_KEY_CONFIG`.
@@ -274,7 +290,7 @@ import {
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T10.7-2 xspec.config.ts — one spec group",
+  "T10.7-2/T12.0-15 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -289,7 +305,7 @@ export default defineConfig({
 // group serving as its own boundary, a leaf is covered exactly when some
 // non-root node has a single dependency edge to it (SPEC 8).
 const COVERAGE_CONFIG = stagedTs(
-  "T10.7-1/T10.7-4 xspec.config.ts — one spec group and the coverage profile p",
+  "T10.7-1/T10.7-4/T12.0-15 xspec.config.ts — one spec group and the coverage profile p",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -2745,11 +2761,18 @@ function c5Spec(text: string): string {
   return ['<S id="w">', text, "</S>", ""].join("\n");
 }
 
-// The edit of w after a2's resolution follows the body's first `build`, so it
-// is a staged-source record (helpers/staged-mdx.ts, S-9: judged before any
-// product exists); the corrupt session's bytes stage no `.mdx` path.
+// The workspace's initial specs/W.mdx: T12.0-15 (section-12.0-iv.ts) runs
+// this staging after its body's first invocation, so it is a staged-source
+// record (helpers/staged-mdx.ts, S-9's timing clause) — the same expression,
+// moved into the record. The edit of w after a2's resolution follows the
+// body's first `build`, so it is one too (S-9: judged before any product
+// exists); the corrupt session's bytes stage no `.mdx` path.
+const T10_7_5_W_INITIAL = stagedMdx(
+  "T10.7-5/T12.0-15 specs/W.mdx with w's text at v0 (the listing fixture's initial source)",
+  c5Spec("Dub text v0."),
+);
 const T10_7_5_W_EDITED = stagedMdx(
-  "T10.7-5 specs/W.mdx with w's text at v1 (the edit after a2's resolution)",
+  "T10.7-5/T12.0-15 specs/W.mdx with w's text at v1 (the edit after a2's resolution)",
   c5Spec("Dub text v1."),
 );
 
@@ -2829,223 +2852,270 @@ function assertListingCorruptFinding(
   }
 }
 
+/**
+ * One `review list` read T10.7-5's staging reaches — the listing with no
+ * corrupt session, then the one with session c corrupt — handed to the
+ * staging's visitor at the state it reads: its label, the exit the home
+ * test pins there (SPEC 10.7: 1 iff any corrupt session exists, else 0),
+ * and the home test's own `review list --json` read with its assertions and
+ * the human form's parity check (`home`). Exported for T12.0-15
+ * (section-12.0-iv.ts), which hands its human twin of the read in their
+ * place.
+ */
+export interface T1075Listing {
+  readonly label: string;
+  readonly expectedExit: 0 | 1;
+  readonly home: () => Promise<void>;
+}
+
+/** A visitor of T10.7-5's listings, each at the state it reads. */
+export type T1075ListingVisitor = (
+  workspace: TestWorkspace,
+  listing: T1075Listing,
+) => Promise<void>;
+
+/**
+ * T10.7-5's staging, its two listings handed to `visit` (exported for
+ * T12.0-15): a git-backed workspace of `COVERAGE_CONFIG` and specs/W.mdx,
+ * built; the audit session a2, w's item resolved `no-change` and then made
+ * stale by w's edit (rebuilt, `status` reading it invalidated — the
+ * premise); the path-blocks session a and the coverage session B, each
+ * holding one item (`status`); the clean listing; the audit session c, its
+ * file then overwritten by unparseable bytes; the corrupt listing. `prefix`
+ * leads every staging step's diagnosis.
+ */
+export async function runT1075Listings(
+  product: ProductBinding,
+  visit: T1075ListingVisitor,
+  prefix = "T10.7-5",
+): Promise<void> {
+  await withWorkspace(
+    COVERAGE_CONFIG,
+    { [C5_FILE]: T10_7_5_W_INITIAL },
+    async (workspace) => {
+      await workspace.gitInit();
+      await workspace.gitCommitAll("baseline");
+      await buildOk(product, workspace, `${prefix} \`build\``);
+
+      // Session a2 (audit) first: two items (the root's and w's). w's
+      // item is resolved no-change, then w is edited so the resolution
+      // goes stale — the read-time invalidation discriminator for the
+      // stored-status counting below.
+      await createAuditSession(product, workspace, "a2", prefix);
+      const a2Initial = await sessionStatus(product, workspace, "a2", prefix);
+      assertSameJson(
+        rowSequence(a2Initial),
+        [
+          `subtree-coherence ${C5_FILE} unresolved`,
+          `subtree-coherence ${C5_W} unresolved`,
+        ],
+        `${prefix}: a2's audit items (SPEC 10.6)`,
+      );
+      const idW = requireRow(a2Initial, "subtree-coherence", C5_W, prefix).id;
+      await resolveOk(
+        product,
+        workspace,
+        "a2",
+        idW,
+        "no-change",
+        `${prefix} \`resolve a2 <w's item> --status no-change\``,
+      );
+      await workspace.file(C5_FILE, T10_7_5_W_EDITED);
+      await buildOk(product, workspace, `${prefix} \`build\` after the w edit`);
+      // Staging premise: the resolution is stale — `status` (read-time
+      // invalidation applied, SPEC 10.4) reports w's item invalidated
+      // while its stored status stays no-change.
+      const a2Stale = await sessionStatus(product, workspace, "a2", prefix);
+      const staleRow = requireRow(a2Stale, "subtree-coherence", C5_W, prefix);
+      if (staleRow.status !== "invalidated") {
+        fail(
+          `${prefix} staging premise: after the w edit, w's resolved item ` +
+            `must read invalidated (SPEC 10.4) so the list counts below ` +
+            `discriminate stored statuses from invalidation-applied ones; ` +
+            `got ${staleRow.status}`,
+        );
+      }
+
+      // Sessions a (path-blocks: w changed against the baseline gives one
+      // subtree-coherence item; w's only ancestor is the root, so no
+      // parent-consistency item, SPEC 10.5) and B (coverage: the one
+      // uncovered leaf w). Creation order a2, a, B.
+      await createBaseSession(product, workspace, "main", "a", prefix);
+      assertSameJson(
+        rowSequence(await sessionStatus(product, workspace, "a", prefix)),
+        [`subtree-coherence ${C5_W} unresolved`],
+        `${prefix}: a's path-blocks item (SPEC 10.5)`,
+      );
+      await createCoverageSession(product, workspace, "p", "B", prefix);
+      assertSameJson(
+        rowSequence(await sessionStatus(product, workspace, "B", prefix)),
+        [`uncovered-requirement ${C5_W} unresolved`],
+        `${prefix}: B's coverage item (SPEC 10.7)`,
+      );
+
+      await visit(workspace, {
+        label: `${prefix} the listing with no corrupt session`,
+        expectedExit: 0,
+        home: async () => {
+          // No corrupt session: exit 0; byte order of name — "B" (0x42) <
+          // "a" (0x61) < "a2" — differing from creation order (a2, a, B) and
+          // from ASCII-case-folded order (a, a2, B). Strategy names are the
+          // ones SPEC 10 fixes.
+          const clean = await listSessions(product, workspace, prefix);
+          assertSameJson(
+            clean.sessions.map((entry) => ({
+              name: entry.name,
+              corrupt: entry.corrupt,
+              strategy: entry.corrupt ? undefined : entry.strategy,
+            })),
+            [
+              { name: "B", corrupt: false, strategy: "coverage" },
+              { name: "a", corrupt: false, strategy: "path-blocks" },
+              { name: "a2", corrupt: false, strategy: "audit" },
+            ],
+            `${prefix}: \`list\` reports every session in byte order of name ` +
+              `with its strategy (SPEC 10, 10.7, 12.0)`,
+          );
+          assertStoredCounts(
+            clean.sessions[0],
+            {
+              unresolved: 1,
+              invalidated: 0,
+              updated: 0,
+              "no-change": 0,
+              skipped: 0,
+            },
+            `${prefix} session B`,
+          );
+          assertStoredCounts(
+            clean.sessions[1],
+            {
+              unresolved: 1,
+              invalidated: 0,
+              updated: 0,
+              "no-change": 0,
+              skipped: 0,
+            },
+            `${prefix} session a`,
+          );
+          // The discriminator: w's stale resolution still counts under its
+          // stored no-change — a product applying read-time invalidation to
+          // `list` would report it invalidated (SPEC 10.4, 10.7).
+          assertStoredCounts(
+            clean.sessions[2],
+            {
+              unresolved: 1,
+              invalidated: 0,
+              updated: 0,
+              "no-change": 1,
+              skipped: 0,
+            },
+            `${prefix} session a2 (stored statuses, no read-time invalidation)`,
+          );
+          // The human form at the same state carries the listing's
+          // information: names, strategies, stored statuses, and counts
+          // (T12.0-1, SPEC 12.0; the module header).
+          await assertHumanSessionList(product, workspace, clean, 0, prefix);
+        },
+      });
+
+      // A fourth session, then corrupt it: unparseable bytes written over
+      // the session file the product itself wrote — the shape-independent
+      // corrupt state, staged directly per the T10.1-4 conventions.
+      await createAuditSession(product, workspace, "c", prefix);
+      const sessionRel = ".xspec/reviews/c.json";
+      const kind = await workspace.kind(sessionRel);
+      if (kind !== "file") {
+        fail(
+          `${prefix} staging premise: after \`create --name c\`, expected ` +
+            `the product-written session file at ${sessionRel} ` +
+            `(SPEC 10.1); found ${kind}`,
+        );
+      }
+      await workspace.file(sessionRel, "{ this is not JSON");
+
+      await visit(workspace, {
+        label: `${prefix} the listing with session c corrupt`,
+        expectedExit: 1,
+        home: async () => {
+          const corruptContext = `${prefix} \`review list --json\` with session c corrupt`;
+          const result = await runCli(product, workspace, [
+            "review",
+            "list",
+            "--json",
+          ]);
+          assertExitCode(
+            result,
+            1,
+            `${corruptContext} — \`list\` exits 1 iff any corrupt session ` +
+              `exists (SPEC 10.7, 14.21)`,
+          );
+          const corrupt = decodeSessionListReport(
+            parseJsonStdout(result, corruptContext),
+            corruptContext,
+          );
+          assertSameJson(
+            corrupt.sessions.map((entry) => ({
+              name: entry.name,
+              corrupt: entry.corrupt,
+            })),
+            [
+              { name: "B", corrupt: false },
+              { name: "a", corrupt: false },
+              { name: "a2", corrupt: false },
+              { name: "c", corrupt: true },
+            ],
+            `${corruptContext}: the corrupt session is reported by name as ` +
+              `corrupt in place of its fields — the adapter refuses strategy ` +
+              `and counts on a corrupt entry — while the healthy sessions ` +
+              `keep theirs, all in byte order of name (SPEC 10.1, 10.7)`,
+          );
+          // The listing's condition 21, with no invocation of its own: `list`
+          // reports the corrupt session (SPEC 14.21, exit 1) and carries its
+          // finding under the document's "findings" member (12.7), which the
+          // decoder requires while a session is listed corrupt — as `c` now
+          // is. Exactly one finding, `corrupt-session` concerning c's own
+          // file with `locations` [] (the module header: one session holds
+          // unparseable bytes, the three others are healthy).
+          assertListingCorruptFinding(
+            corrupt,
+            sessionRel,
+            `${corruptContext} — the listing's findings`,
+          );
+          assertStoredCounts(
+            corrupt.sessions[2],
+            {
+              unresolved: 1,
+              invalidated: 0,
+              updated: 0,
+              "no-change": 1,
+              skipped: 0,
+            },
+            `${corruptContext} session a2 — fields unchanged beside the ` +
+              `corrupt entry`,
+          );
+          // The human form at the same state: exit 1 as well, the healthy
+          // sessions' information, and the corrupt session's name beside the
+          // token `corrupt` (T12.0-1, SPEC 12.0; the module header).
+          await assertHumanSessionList(
+            product,
+            workspace,
+            corrupt,
+            1,
+            `${prefix} (session c corrupt)`,
+          );
+        },
+      });
+    },
+  );
+}
+
 const T10_7_5 = defineProductTest({
   id: "T10.7-5",
   title:
     "`review list`: every session is reported in byte order of session name — created `a2`, then `a`, then `B`, listed `B`, `a`, `a2`, an order differing from both creation order and ASCII-case-folded order — each with its name, strategy (the spec-fixed strategy names `coverage`, `path-blocks`, `audit`), and item counts by stored status with no read-time invalidation applied: a resolved item whose scope was edited afterward reads as invalidated in `status` yet still counts under its stored `no-change`; a corrupt session (unparseable bytes over a product-written session file) is reported by name as corrupt in place of those fields, the corrupt listing carrying condition 21's one finding — `corrupt-session`, concerning the session's own file `.xspec/reviews/c.json`, with no location (`locations` []); `list` exits 1 iff any corrupt session exists, else 0; and the human `review list` at each listing's state exits alike and carries the listing's information — every session's name, each healthy session's strategy, the statuses it stores items under, and its nonzero counts, and `corrupt` beside the corrupt session's name (robust matching, H-3) (SPEC 10.1, 10.4, 10.7, 12.0, 12.7, 14, 14.21)",
   run: async (product) => {
-    await withWorkspace(
-      COVERAGE_CONFIG,
-      { [C5_FILE]: c5Spec("Dub text v0.") },
-      async (workspace) => {
-        const prefix = "T10.7-5";
-        await workspace.gitInit();
-        await workspace.gitCommitAll("baseline");
-        await buildOk(product, workspace, `${prefix} \`build\``);
-
-        // Session a2 (audit) first: two items (the root's and w's). w's
-        // item is resolved no-change, then w is edited so the resolution
-        // goes stale — the read-time invalidation discriminator for the
-        // stored-status counting below.
-        await createAuditSession(product, workspace, "a2", prefix);
-        const a2Initial = await sessionStatus(product, workspace, "a2", prefix);
-        assertSameJson(
-          rowSequence(a2Initial),
-          [
-            `subtree-coherence ${C5_FILE} unresolved`,
-            `subtree-coherence ${C5_W} unresolved`,
-          ],
-          `${prefix}: a2's audit items (SPEC 10.6)`,
-        );
-        const idW = requireRow(a2Initial, "subtree-coherence", C5_W, prefix).id;
-        await resolveOk(
-          product,
-          workspace,
-          "a2",
-          idW,
-          "no-change",
-          `${prefix} \`resolve a2 <w's item> --status no-change\``,
-        );
-        await workspace.file(C5_FILE, T10_7_5_W_EDITED);
-        await buildOk(
-          product,
-          workspace,
-          `${prefix} \`build\` after the w edit`,
-        );
-        // Staging premise: the resolution is stale — `status` (read-time
-        // invalidation applied, SPEC 10.4) reports w's item invalidated
-        // while its stored status stays no-change.
-        const a2Stale = await sessionStatus(product, workspace, "a2", prefix);
-        const staleRow = requireRow(a2Stale, "subtree-coherence", C5_W, prefix);
-        if (staleRow.status !== "invalidated") {
-          fail(
-            `${prefix} staging premise: after the w edit, w's resolved item ` +
-              `must read invalidated (SPEC 10.4) so the list counts below ` +
-              `discriminate stored statuses from invalidation-applied ones; ` +
-              `got ${staleRow.status}`,
-          );
-        }
-
-        // Sessions a (path-blocks: w changed against the baseline gives one
-        // subtree-coherence item; w's only ancestor is the root, so no
-        // parent-consistency item, SPEC 10.5) and B (coverage: the one
-        // uncovered leaf w). Creation order a2, a, B.
-        await createBaseSession(product, workspace, "main", "a", prefix);
-        assertSameJson(
-          rowSequence(await sessionStatus(product, workspace, "a", prefix)),
-          [`subtree-coherence ${C5_W} unresolved`],
-          `${prefix}: a's path-blocks item (SPEC 10.5)`,
-        );
-        await createCoverageSession(product, workspace, "p", "B", prefix);
-        assertSameJson(
-          rowSequence(await sessionStatus(product, workspace, "B", prefix)),
-          [`uncovered-requirement ${C5_W} unresolved`],
-          `${prefix}: B's coverage item (SPEC 10.7)`,
-        );
-
-        // No corrupt session: exit 0; byte order of name — "B" (0x42) <
-        // "a" (0x61) < "a2" — differing from creation order (a2, a, B) and
-        // from ASCII-case-folded order (a, a2, B). Strategy names are the
-        // ones SPEC 10 fixes.
-        const clean = await listSessions(product, workspace, prefix);
-        assertSameJson(
-          clean.sessions.map((entry) => ({
-            name: entry.name,
-            corrupt: entry.corrupt,
-            strategy: entry.corrupt ? undefined : entry.strategy,
-          })),
-          [
-            { name: "B", corrupt: false, strategy: "coverage" },
-            { name: "a", corrupt: false, strategy: "path-blocks" },
-            { name: "a2", corrupt: false, strategy: "audit" },
-          ],
-          `${prefix}: \`list\` reports every session in byte order of name ` +
-            `with its strategy (SPEC 10, 10.7, 12.0)`,
-        );
-        assertStoredCounts(
-          clean.sessions[0],
-          {
-            unresolved: 1,
-            invalidated: 0,
-            updated: 0,
-            "no-change": 0,
-            skipped: 0,
-          },
-          `${prefix} session B`,
-        );
-        assertStoredCounts(
-          clean.sessions[1],
-          {
-            unresolved: 1,
-            invalidated: 0,
-            updated: 0,
-            "no-change": 0,
-            skipped: 0,
-          },
-          `${prefix} session a`,
-        );
-        // The discriminator: w's stale resolution still counts under its
-        // stored no-change — a product applying read-time invalidation to
-        // `list` would report it invalidated (SPEC 10.4, 10.7).
-        assertStoredCounts(
-          clean.sessions[2],
-          {
-            unresolved: 1,
-            invalidated: 0,
-            updated: 0,
-            "no-change": 1,
-            skipped: 0,
-          },
-          `${prefix} session a2 (stored statuses, no read-time invalidation)`,
-        );
-        // The human form at the same state carries the listing's
-        // information: names, strategies, stored statuses, and counts
-        // (T12.0-1, SPEC 12.0; the module header).
-        await assertHumanSessionList(product, workspace, clean, 0, prefix);
-
-        // A fourth session, then corrupt it: unparseable bytes written over
-        // the session file the product itself wrote — the shape-independent
-        // corrupt state, staged directly per the T10.1-4 conventions.
-        await createAuditSession(product, workspace, "c", prefix);
-        const sessionRel = ".xspec/reviews/c.json";
-        const kind = await workspace.kind(sessionRel);
-        if (kind !== "file") {
-          fail(
-            `${prefix} staging premise: after \`create --name c\`, expected ` +
-              `the product-written session file at ${sessionRel} ` +
-              `(SPEC 10.1); found ${kind}`,
-          );
-        }
-        await workspace.file(sessionRel, "{ this is not JSON");
-
-        const corruptContext = `${prefix} \`review list --json\` with session c corrupt`;
-        const result = await runCli(product, workspace, [
-          "review",
-          "list",
-          "--json",
-        ]);
-        assertExitCode(
-          result,
-          1,
-          `${corruptContext} — \`list\` exits 1 iff any corrupt session ` +
-            `exists (SPEC 10.7, 14.21)`,
-        );
-        const corrupt = decodeSessionListReport(
-          parseJsonStdout(result, corruptContext),
-          corruptContext,
-        );
-        assertSameJson(
-          corrupt.sessions.map((entry) => ({
-            name: entry.name,
-            corrupt: entry.corrupt,
-          })),
-          [
-            { name: "B", corrupt: false },
-            { name: "a", corrupt: false },
-            { name: "a2", corrupt: false },
-            { name: "c", corrupt: true },
-          ],
-          `${corruptContext}: the corrupt session is reported by name as ` +
-            `corrupt in place of its fields — the adapter refuses strategy ` +
-            `and counts on a corrupt entry — while the healthy sessions ` +
-            `keep theirs, all in byte order of name (SPEC 10.1, 10.7)`,
-        );
-        // The listing's condition 21, with no invocation of its own: `list`
-        // reports the corrupt session (SPEC 14.21, exit 1) and carries its
-        // finding under the document's "findings" member (12.7), which the
-        // decoder requires while a session is listed corrupt — as `c` now
-        // is. Exactly one finding, `corrupt-session` concerning c's own
-        // file with `locations` [] (the module header: one session holds
-        // unparseable bytes, the three others are healthy).
-        assertListingCorruptFinding(
-          corrupt,
-          sessionRel,
-          `${corruptContext} — the listing's findings`,
-        );
-        assertStoredCounts(
-          corrupt.sessions[2],
-          {
-            unresolved: 1,
-            invalidated: 0,
-            updated: 0,
-            "no-change": 1,
-            skipped: 0,
-          },
-          `${corruptContext} session a2 — fields unchanged beside the ` +
-            `corrupt entry`,
-        );
-        // The human form at the same state: exit 1 as well, the healthy
-        // sessions' information, and the corrupt session's name beside the
-        // token `corrupt` (T12.0-1, SPEC 12.0; the module header).
-        await assertHumanSessionList(
-          product,
-          workspace,
-          corrupt,
-          1,
-          `${prefix} (session c corrupt)`,
-        );
-      },
-    );
+    await runT1075Listings(product, (_workspace, listing) => listing.home());
   },
 });
 
@@ -3083,262 +3153,327 @@ function fullRowSequence(report: SessionStatusReport): readonly string[] {
   );
 }
 
-// Stage D's edit follows the body's first `build`, so it is a staged-source
-// record (helpers/staged-mdx.ts, S-9: judged before any product exists).
+// The workspace's initial specs/T.mdx: T12.0-15 (section-12.0-iv.ts) runs
+// this staging after its body's first invocation, so it is a staged-source
+// record (helpers/staged-mdx.ts, S-9's timing clause) — the same expression,
+// moved into the record. Stage D's edit follows the body's first `build`, so
+// it is one too (S-9: judged before any product exists).
+const T10_7_6_T_INITIAL = stagedMdx(
+  "T10.7-6/T12.0-15 specs/T.mdx with p.a's text at v0 (the status fixture's initial source)",
+  c6Spec("Paa text v0."),
+);
 const T10_7_6_T_PA_EDITED = stagedMdx(
-  "T10.7-6 specs/T.mdx with p.a's text at v1 (stage D's edit under two resolved scopes)",
+  "T10.7-6/T12.0-15 specs/T.mdx with p.a's text at v1 (stage D's edit under two resolved scopes)",
   c6Spec("Paa text v1."),
 );
+
+/**
+ * One `review status s` read T10.7-6's staging reaches — stages A through
+ * D — handed to the staging's visitor at the state it reads: its label,
+ * the session it reads, and the home test's own assertions there with the
+ * human form's parity check (`home`; stage A's over the staging's own
+ * read, which yields the item ids, each later stage's over a read of its
+ * own). Exported for T12.0-15 (section-12.0-iv.ts), which hands its human
+ * twin of the read in their place.
+ */
+export interface T1076Stage {
+  readonly label: string;
+  readonly session: string;
+  readonly home: () => Promise<void>;
+}
+
+/** A visitor of T10.7-6's stages, each at the state its read sees. */
+export type T1076StageVisitor = (
+  workspace: TestWorkspace,
+  stage: T1076Stage,
+) => Promise<void>;
+
+/**
+ * T10.7-6's staging, its four stages handed to `visit` (exported for
+ * T12.0-15): a workspace of `SPECS_ONLY_CONFIG` and specs/T.mdx (p holding
+ * p.a and p.b), built; the audit session s, read by `status` — its item
+ * order the staging's premise and its rows' ids the items it resolves —
+ * at stage A; p.a's item resolved `no-change` and p.b's `skipped` (stage
+ * B); p's item `updated` (stage C); then p.a's text edited under the two
+ * resolved scopes, the edit's hash premises read by `query node` around
+ * it, and rebuilt (stage D). `prefix` leads every staging step's
+ * diagnosis.
+ */
+export async function runT1076Stages(
+  product: ProductBinding,
+  visit: T1076StageVisitor,
+  prefix = "T10.7-6",
+): Promise<void> {
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    { [C6_FILE]: T10_7_6_T_INITIAL },
+    async (workspace) => {
+      await buildOk(product, workspace, `${prefix} \`build\``);
+      await createAuditSession(product, workspace, "s", prefix);
+
+      // Stage A — fresh: items in audit item order (root first, then
+      // document order), every field present per row; the items with
+      // child sections report blocked (SPEC 10.3, 10.6).
+      const fresh = await sessionStatus(product, workspace, "s", prefix);
+      assertSameJson(
+        rowSequence(fresh),
+        [
+          `subtree-coherence ${C6_FILE} unresolved`,
+          `subtree-coherence ${C6_P} unresolved`,
+          `subtree-coherence ${C6_PA} unresolved`,
+          `subtree-coherence ${C6_PB} unresolved`,
+        ],
+        `${prefix} stage A: items in item order (SPEC 10.6, 10.7)`,
+      );
+      const idRoot = requireRow(fresh, "subtree-coherence", C6_FILE, prefix).id;
+      const idP = requireRow(fresh, "subtree-coherence", C6_P, prefix).id;
+      const idPA = requireRow(fresh, "subtree-coherence", C6_PA, prefix).id;
+      const idPB = requireRow(fresh, "subtree-coherence", C6_PB, prefix).id;
+      const expectRows = (
+        rows: readonly (readonly [string, string, ItemStatus, boolean])[],
+      ): readonly string[] =>
+        rows.map(
+          ([id, scope, status, blocked]) =>
+            `${id}|subtree-coherence|${scope}|${status}|blocked=${String(blocked)}`,
+        );
+      await visit(workspace, {
+        label: `${prefix} stage A (fresh: every item unresolved, the parents blocked)`,
+        session: "s",
+        home: async () => {
+          assertSameJson(
+            fullRowSequence(fresh),
+            expectRows([
+              [idRoot, C6_FILE, "unresolved", true],
+              [idP, C6_P, "unresolved", true],
+              [idPA, C6_PA, "unresolved", false],
+              [idPB, C6_PB, "unresolved", false],
+            ]),
+            `${prefix} stage A: every row carries id, kind, scope, status, ` +
+              `and blocked state — the parent items blocked while their ` +
+              `children's items are unresolved, the leaves unblocked ` +
+              `(SPEC 10.3, 10.6, 10.7)`,
+          );
+          assertTotals(
+            fresh,
+            {
+              unresolved: 4,
+              invalidated: 0,
+              updated: 0,
+              "no-change": 0,
+              skipped: 0,
+            },
+            `${prefix} stage A`,
+          );
+          // The human form at the same state carries the report's
+          // information — rows, blocked state, and totals — at every stage
+          // (T12.0-1, SPEC 12.0; the module header).
+          await assertHumanSessionStatus(
+            product,
+            workspace,
+            "s",
+            fresh,
+            `${prefix} stage A`,
+          );
+        },
+      });
+
+      // Stage B — the leaves resolve (no-change and skipped are both
+      // resolved statuses, SPEC 10.3): p unblocks, the root stays blocked
+      // by unresolved p.
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        idPA,
+        "no-change",
+        `${prefix} \`resolve s <p.a's item> --status no-change\``,
+      );
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        idPB,
+        "skipped",
+        `${prefix} \`resolve s <p.b's item> --status skipped\``,
+      );
+      await visit(workspace, {
+        label: `${prefix} stage B (both leaves resolved)`,
+        session: "s",
+        home: async () => {
+          const stageB = await sessionStatus(product, workspace, "s", prefix);
+          assertSameJson(
+            fullRowSequence(stageB),
+            expectRows([
+              [idRoot, C6_FILE, "unresolved", true],
+              [idP, C6_P, "unresolved", false],
+              [idPA, C6_PA, "no-change", false],
+              [idPB, C6_PB, "skipped", false],
+            ]),
+            `${prefix} stage B: with both leaves resolved p's item unblocks ` +
+              `while the root stays blocked by unresolved p (SPEC 10.3)`,
+          );
+          assertTotals(
+            stageB,
+            {
+              unresolved: 2,
+              invalidated: 0,
+              updated: 0,
+              "no-change": 1,
+              skipped: 1,
+            },
+            `${prefix} stage B`,
+          );
+          await assertHumanSessionStatus(
+            product,
+            workspace,
+            "s",
+            stageB,
+            `${prefix} stage B`,
+          );
+        },
+      });
+
+      // Stage C — p resolves `updated`: the re-derivation over the
+      // unchanged workspace changes nothing, every id survives, and the
+      // root unblocks (SPEC 10.5, 10.6).
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        idP,
+        "updated",
+        `${prefix} \`resolve s <p's item> --status updated\``,
+      );
+      await visit(workspace, {
+        label: `${prefix} stage C (p resolved updated)`,
+        session: "s",
+        home: async () => {
+          const stageC = await sessionStatus(product, workspace, "s", prefix);
+          assertSameJson(
+            fullRowSequence(stageC),
+            expectRows([
+              [idRoot, C6_FILE, "unresolved", false],
+              [idP, C6_P, "updated", false],
+              [idPA, C6_PA, "no-change", false],
+              [idPB, C6_PB, "skipped", false],
+            ]),
+            `${prefix} stage C: p resolved updated — the re-derivation over ` +
+              `the unchanged workspace keeps every item and id, and the root ` +
+              `unblocks (SPEC 10.3, 10.5, 10.6)`,
+          );
+          assertTotals(
+            stageC,
+            {
+              unresolved: 1,
+              invalidated: 0,
+              updated: 1,
+              "no-change": 1,
+              skipped: 1,
+            },
+            `${prefix} stage C`,
+          );
+          await assertHumanSessionStatus(
+            product,
+            workspace,
+            "s",
+            stageC,
+            `${prefix} stage C`,
+          );
+        },
+      });
+
+      // Stage D — an edit under two resolved items' scopes: p.a's text
+      // changes, so p.a's item (scope p.a) and p's item (p.a is in its
+      // scope) hold stale recorded state, while p.b's relevant hashes are
+      // untouched (SPEC 5.5, 10.4). Hash premises via `query node`
+      // bracket the edit.
+      const paBefore = await queryNode(product, workspace, C6_PA, prefix);
+      const pBefore = await queryNode(product, workspace, C6_P, prefix);
+      const pbBefore = await queryNode(product, workspace, C6_PB, prefix);
+      await workspace.file(C6_FILE, T10_7_6_T_PA_EDITED);
+      await buildOk(
+        product,
+        workspace,
+        `${prefix} \`build\` after the p.a edit`,
+      );
+      const paAfter = await queryNode(product, workspace, C6_PA, prefix);
+      const pAfter = await queryNode(product, workspace, C6_P, prefix);
+      const pbAfter = await queryNode(product, workspace, C6_PB, prefix);
+      if (
+        paAfter.hashes.subtreeHash === paBefore.hashes.subtreeHash ||
+        pAfter.hashes.subtreeHash === pBefore.hashes.subtreeHash
+      ) {
+        fail(
+          `${prefix} staging premise: the p.a edit must change p.a's and ` +
+            `p's subtreeHash (SPEC 5.5) so both resolved items go stale`,
+        );
+      }
+      if (
+        pbAfter.hashes.subtreeHash !== pbBefore.hashes.subtreeHash ||
+        pbAfter.hashes.metadataHash !== pbBefore.hashes.metadataHash
+      ) {
+        fail(
+          `${prefix} staging premise: the p.a edit must leave p.b's ` +
+            `relevant hashes untouched (SPEC 5.5) so p.b's resolution ` +
+            `stays standing`,
+        );
+      }
+
+      await visit(workspace, {
+        label: `${prefix} stage D (an edit under two resolved scopes)`,
+        session: "s",
+        home: async () => {
+          // Read-time invalidation applied to rows and totals (SPEC 10.4,
+          // 10.7): the two stale resolutions read invalidated — their stored
+          // updated/no-change no longer appear in the totals — the
+          // invalidated p re-blocks the root and invalidated p.a re-blocks p
+          // (SPEC 10.3), p.b keeps skipped, and the unresolved root cannot
+          // invalidate.
+          const stageD = await sessionStatus(product, workspace, "s", prefix);
+          assertSameJson(
+            fullRowSequence(stageD),
+            expectRows([
+              [idRoot, C6_FILE, "unresolved", true],
+              [idP, C6_P, "invalidated", true],
+              [idPA, C6_PA, "invalidated", false],
+              [idPB, C6_PB, "skipped", false],
+            ]),
+            `${prefix} stage D: read-time invalidation applied — the stale ` +
+              `resolutions read invalidated, the invalidated blockers ` +
+              `re-block their dependents, the untouched p.b keeps skipped ` +
+              `(SPEC 10.3, 10.4, 10.7)`,
+          );
+          assertTotals(
+            stageD,
+            {
+              unresolved: 1,
+              invalidated: 2,
+              updated: 0,
+              "no-change": 0,
+              skipped: 1,
+            },
+            `${prefix} stage D (totals with read-time invalidation applied — ` +
+              `the stored updated and no-change count under invalidated)`,
+          );
+          await assertHumanSessionStatus(
+            product,
+            workspace,
+            "s",
+            stageD,
+            `${prefix} stage D`,
+          );
+        },
+      });
+    },
+  );
+}
 
 const T10_7_6 = defineProductTest({
   id: "T10.7-6",
   title:
     "`review status`: items are reported in item order, each with id, kind, scope, status, and blocked state, plus totals by status — asserted through an audit session's lifecycle: all-unresolved with the parent items blocked; after resolving the leaves the parent unblocks; after resolving the parent `updated` (a re-derivation that changes nothing) the root unblocks and every id survives; and after an edit under two resolved items' scopes the read-time invalidation is applied to rows and totals alike — the stale resolutions read `invalidated` (their stored statuses no longer appear in the totals), the invalidated blocker re-blocks its dependents, and the untouched resolved item keeps its status; and at every stage the human `review status` at the same state exits 0 and carries the report's information — every row's id, scope, kind, and status, `blocked` where a row is blocked, and each status with a nonzero total and that total (robust matching, H-3) (SPEC 10.3, 10.4, 10.6, 10.7, 12.0)",
   run: async (product) => {
-    await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [C6_FILE]: c6Spec("Paa text v0.") },
-      async (workspace) => {
-        const prefix = "T10.7-6";
-        await buildOk(product, workspace, `${prefix} \`build\``);
-        await createAuditSession(product, workspace, "s", prefix);
-
-        // Stage A — fresh: items in audit item order (root first, then
-        // document order), every field present per row; the items with
-        // child sections report blocked (SPEC 10.3, 10.6).
-        const fresh = await sessionStatus(product, workspace, "s", prefix);
-        assertSameJson(
-          rowSequence(fresh),
-          [
-            `subtree-coherence ${C6_FILE} unresolved`,
-            `subtree-coherence ${C6_P} unresolved`,
-            `subtree-coherence ${C6_PA} unresolved`,
-            `subtree-coherence ${C6_PB} unresolved`,
-          ],
-          `${prefix} stage A: items in item order (SPEC 10.6, 10.7)`,
-        );
-        const idRoot = requireRow(
-          fresh,
-          "subtree-coherence",
-          C6_FILE,
-          prefix,
-        ).id;
-        const idP = requireRow(fresh, "subtree-coherence", C6_P, prefix).id;
-        const idPA = requireRow(fresh, "subtree-coherence", C6_PA, prefix).id;
-        const idPB = requireRow(fresh, "subtree-coherence", C6_PB, prefix).id;
-        const expectRows = (
-          rows: readonly (readonly [string, string, ItemStatus, boolean])[],
-        ): readonly string[] =>
-          rows.map(
-            ([id, scope, status, blocked]) =>
-              `${id}|subtree-coherence|${scope}|${status}|blocked=${String(blocked)}`,
-          );
-        assertSameJson(
-          fullRowSequence(fresh),
-          expectRows([
-            [idRoot, C6_FILE, "unresolved", true],
-            [idP, C6_P, "unresolved", true],
-            [idPA, C6_PA, "unresolved", false],
-            [idPB, C6_PB, "unresolved", false],
-          ]),
-          `${prefix} stage A: every row carries id, kind, scope, status, ` +
-            `and blocked state — the parent items blocked while their ` +
-            `children's items are unresolved, the leaves unblocked ` +
-            `(SPEC 10.3, 10.6, 10.7)`,
-        );
-        assertTotals(
-          fresh,
-          {
-            unresolved: 4,
-            invalidated: 0,
-            updated: 0,
-            "no-change": 0,
-            skipped: 0,
-          },
-          `${prefix} stage A`,
-        );
-        // The human form at the same state carries the report's
-        // information — rows, blocked state, and totals — at every stage
-        // (T12.0-1, SPEC 12.0; the module header).
-        await assertHumanSessionStatus(
-          product,
-          workspace,
-          "s",
-          fresh,
-          `${prefix} stage A`,
-        );
-
-        // Stage B — the leaves resolve (no-change and skipped are both
-        // resolved statuses, SPEC 10.3): p unblocks, the root stays blocked
-        // by unresolved p.
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          idPA,
-          "no-change",
-          `${prefix} \`resolve s <p.a's item> --status no-change\``,
-        );
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          idPB,
-          "skipped",
-          `${prefix} \`resolve s <p.b's item> --status skipped\``,
-        );
-        const stageB = await sessionStatus(product, workspace, "s", prefix);
-        assertSameJson(
-          fullRowSequence(stageB),
-          expectRows([
-            [idRoot, C6_FILE, "unresolved", true],
-            [idP, C6_P, "unresolved", false],
-            [idPA, C6_PA, "no-change", false],
-            [idPB, C6_PB, "skipped", false],
-          ]),
-          `${prefix} stage B: with both leaves resolved p's item unblocks ` +
-            `while the root stays blocked by unresolved p (SPEC 10.3)`,
-        );
-        assertTotals(
-          stageB,
-          {
-            unresolved: 2,
-            invalidated: 0,
-            updated: 0,
-            "no-change": 1,
-            skipped: 1,
-          },
-          `${prefix} stage B`,
-        );
-        await assertHumanSessionStatus(
-          product,
-          workspace,
-          "s",
-          stageB,
-          `${prefix} stage B`,
-        );
-
-        // Stage C — p resolves `updated`: the re-derivation over the
-        // unchanged workspace changes nothing, every id survives, and the
-        // root unblocks (SPEC 10.5, 10.6).
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          idP,
-          "updated",
-          `${prefix} \`resolve s <p's item> --status updated\``,
-        );
-        const stageC = await sessionStatus(product, workspace, "s", prefix);
-        assertSameJson(
-          fullRowSequence(stageC),
-          expectRows([
-            [idRoot, C6_FILE, "unresolved", false],
-            [idP, C6_P, "updated", false],
-            [idPA, C6_PA, "no-change", false],
-            [idPB, C6_PB, "skipped", false],
-          ]),
-          `${prefix} stage C: p resolved updated — the re-derivation over ` +
-            `the unchanged workspace keeps every item and id, and the root ` +
-            `unblocks (SPEC 10.3, 10.5, 10.6)`,
-        );
-        assertTotals(
-          stageC,
-          {
-            unresolved: 1,
-            invalidated: 0,
-            updated: 1,
-            "no-change": 1,
-            skipped: 1,
-          },
-          `${prefix} stage C`,
-        );
-        await assertHumanSessionStatus(
-          product,
-          workspace,
-          "s",
-          stageC,
-          `${prefix} stage C`,
-        );
-
-        // Stage D — an edit under two resolved items' scopes: p.a's text
-        // changes, so p.a's item (scope p.a) and p's item (p.a is in its
-        // scope) hold stale recorded state, while p.b's relevant hashes are
-        // untouched (SPEC 5.5, 10.4). Hash premises via `query node`
-        // bracket the edit.
-        const paBefore = await queryNode(product, workspace, C6_PA, prefix);
-        const pBefore = await queryNode(product, workspace, C6_P, prefix);
-        const pbBefore = await queryNode(product, workspace, C6_PB, prefix);
-        await workspace.file(C6_FILE, T10_7_6_T_PA_EDITED);
-        await buildOk(
-          product,
-          workspace,
-          `${prefix} \`build\` after the p.a edit`,
-        );
-        const paAfter = await queryNode(product, workspace, C6_PA, prefix);
-        const pAfter = await queryNode(product, workspace, C6_P, prefix);
-        const pbAfter = await queryNode(product, workspace, C6_PB, prefix);
-        if (
-          paAfter.hashes.subtreeHash === paBefore.hashes.subtreeHash ||
-          pAfter.hashes.subtreeHash === pBefore.hashes.subtreeHash
-        ) {
-          fail(
-            `${prefix} staging premise: the p.a edit must change p.a's and ` +
-              `p's subtreeHash (SPEC 5.5) so both resolved items go stale`,
-          );
-        }
-        if (
-          pbAfter.hashes.subtreeHash !== pbBefore.hashes.subtreeHash ||
-          pbAfter.hashes.metadataHash !== pbBefore.hashes.metadataHash
-        ) {
-          fail(
-            `${prefix} staging premise: the p.a edit must leave p.b's ` +
-              `relevant hashes untouched (SPEC 5.5) so p.b's resolution ` +
-              `stays standing`,
-          );
-        }
-
-        // Read-time invalidation applied to rows and totals (SPEC 10.4,
-        // 10.7): the two stale resolutions read invalidated — their stored
-        // updated/no-change no longer appear in the totals — the
-        // invalidated p re-blocks the root and invalidated p.a re-blocks p
-        // (SPEC 10.3), p.b keeps skipped, and the unresolved root cannot
-        // invalidate.
-        const stageD = await sessionStatus(product, workspace, "s", prefix);
-        assertSameJson(
-          fullRowSequence(stageD),
-          expectRows([
-            [idRoot, C6_FILE, "unresolved", true],
-            [idP, C6_P, "invalidated", true],
-            [idPA, C6_PA, "invalidated", false],
-            [idPB, C6_PB, "skipped", false],
-          ]),
-          `${prefix} stage D: read-time invalidation applied — the stale ` +
-            `resolutions read invalidated, the invalidated blockers ` +
-            `re-block their dependents, the untouched p.b keeps skipped ` +
-            `(SPEC 10.3, 10.4, 10.7)`,
-        );
-        assertTotals(
-          stageD,
-          {
-            unresolved: 1,
-            invalidated: 2,
-            updated: 0,
-            "no-change": 0,
-            skipped: 1,
-          },
-          `${prefix} stage D (totals with read-time invalidation applied — ` +
-            `the stored updated and no-change count under invalidated)`,
-        );
-        await assertHumanSessionStatus(
-          product,
-          workspace,
-          "s",
-          stageD,
-          `${prefix} stage D`,
-        );
-      },
-    );
+    await runT1076Stages(product, (_workspace, stage) => stage.home());
   },
 });
 

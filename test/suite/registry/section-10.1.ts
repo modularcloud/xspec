@@ -55,10 +55,14 @@
 //   collapses only findings identical in every member). The flag-less runs
 //   of the other five subcommands are human reports, asserted as exit 1
 //   with stdout matching /corrupt/i (information presence, never exact
-//   wording, H-3): the human parity of a findings report is asked at the
-//   findings sites (T14-1, T14-7, T13.3-3), not per staging. Each state's
-//   `check --json` arm asserts the same concern information over its
-//   condition-21 findings.
+//   wording, H-3): TEST-SPEC T10.1-4 leaves those human reports to
+//   T12.0-15 (section-12.0-iv.ts), which stages the same states
+//   (`T10_1_4_CORRUPT_STATES`) and runs each subcommand with a human form
+//   (`t1014NamingSubcommands`, the list this test runs) as its `--json`
+//   twin and again without the flag, the human findings report carrying
+//   the twin's condition-21 findings — code and concerned path. Each
+//   state's `check --json` arm asserts the same concern information over
+//   its condition-21 findings.
 // - "modifies nothing" is a whole-workspace snapshot compare around each
 //   command — for T10.1-4's naming subcommands, one compare around both of
 //   a subcommand's runs, flag-less and with `--json` (H-4); the compares
@@ -285,15 +289,16 @@ import { WRITE_FAILURE_CODE } from "./write-refusal-staging.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. Every
 // `CORE_FILES` workspace stages it, and T10.1-1's determinism twins, T10.1-4's
-// per-state workspaces (T12.0-10's past-the-gate arm stages the same
-// states), T10.1-6's occupancy twins, and T13.4-13's arm workspaces and
+// per-state workspaces (T12.0-10's past-the-gate arm and T12.0-15's human
+// twins of the naming subcommands stage the same states), T10.1-6's
+// occupancy twins, and T13.4-13's arm workspaces and
 // FIFO-free twin (section-13.4-ii.ts, which stages `CORE_FILES`) follow
 // their bodies' first invocations, so it is one TypeScript staged-source
 // record (helpers/staged-ts.ts; S-9's TypeScript and timing clauses),
 // well-formed, staged wherever this configuration is (T10.1-5's workspace
 // too).
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T10.1-1/T10.1-4/T10.1-6/T12.0-10/T13.4-13 xspec.config.ts — one spec group",
+  "T10.1-1/T10.1-4/T10.1-6/T12.0-10/T12.0-15/T13.4-13 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -305,15 +310,15 @@ export default defineConfig({
 );
 
 // The same spec group plus one coverage profile (SPEC 7.4) for the
-// coverage-session arm of T10.1-4 (and T12.0-10's, which stages T10.1-4's
-// states): `main`'s one leaf has no incoming
+// coverage-session arm of T10.1-4 (and T12.0-10's and T12.0-15's, which
+// stage T10.1-4's states): `main`'s one leaf has no incoming
 // dependency edge, so the profile leaves it uncovered and `create --coverage`
 // derives at least one item while recording the profile definition. That
 // workspace follows the body's first invocations, so the configuration is a
 // TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript and
 // timing clauses), well-formed.
 const COVERAGE_CONFIG = stagedTs(
-  "T10.1-4/T12.0-10 xspec.config.ts — one spec group and the coverage profile p",
+  "T10.1-4/T12.0-10/T12.0-15 xspec.config.ts — one spec group and the coverage profile p",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -354,14 +359,14 @@ const A_MDX_EDITED = stagedMdx(
 );
 
 // T10.1-4's decomposed-item state (staged by T12.0-10's past-the-gate arm
-// too): `a`'s own text edited since the baseline
+// and T12.0-15 too): `a`'s own text edited since the baseline
 // commit, `a.k` untouched, so `a` is `changed` (its ownHash, SPEC 5.6) and
 // the one visited node of the path-blocks session (10.5) — its
 // subtree-coherence item has a child for `split` to decompose (10.7). The
 // edit follows the body's first invocations, so it is a staged-source
 // record (helpers/staged-mdx.ts; S-9's before-any-product clause).
 const A_MDX_OWN_TEXT_EDITED = stagedMdx(
-  "T10.1-4/T12.0-10 specs/A.mdx with a's own text edited (the decomposed-item state's change since the baseline)",
+  "T10.1-4/T12.0-10/T12.0-15 specs/A.mdx with a's own text edited (the decomposed-item state's change since the baseline)",
   A_MDX.replace("Alpha text.", "Alpha text, edited."),
 );
 
@@ -369,12 +374,13 @@ const A_MDX_OWN_TEXT_EDITED = stagedMdx(
 // workspace and of T10.1-5's: one staged-source record made from `A_MDX`
 // (the string stays for the staleness edit above), named with every
 // staging test — T10.1-1's determinism twins, T10.1-4's per-state
-// workspaces (T12.0-10's past-the-gate arm stages the same states),
+// workspaces (T12.0-10's past-the-gate arm and T12.0-15 stage the same
+// states),
 // T10.1-6's occupancy twins, and T13.4-13's arm workspaces and FIFO-free
 // twin follow their bodies' first invocations (helpers/staged-mdx.ts; S-9's
 // before-any-product clause).
 const A_MDX_STAGED = stagedMdx(
-  "T10.1-1/T10.1-2/T10.1-3/T10.1-4/T10.1-5/T10.1-6/T12.0-10/T13.4-13 specs/A.mdx",
+  "T10.1-1/T10.1-2/T10.1-3/T10.1-4/T10.1-5/T10.1-6/T12.0-10/T12.0-15/T13.4-13 specs/A.mdx",
   A_MDX,
 );
 
@@ -1284,6 +1290,53 @@ function assertCorruptSessionReport(
 }
 
 /**
+ * One `review` subcommand naming a staged corrupt session (T10.1-4): its
+ * argv, whether its only output form is a single JSON document (`export`,
+ * SPEC 10.7), and whether it is a mutating subcommand (`resolve`, `split`;
+ * 13.5).
+ */
+export interface T1014NamingSubcommand {
+  readonly argv: readonly string[];
+  readonly jsonOnly: boolean;
+  readonly mutating: boolean;
+}
+
+/**
+ * Every `review` subcommand naming the session T10.1-4 runs on each
+ * corrupt state, in its order — `status`, `next`, `show`, `export`,
+ * `resolve` (`--status updated`), and `split`, the item-naming ones naming
+ * `itemId` (SPEC 10.1: each reports the corruption, exits 1, and modifies
+ * nothing). Exported for T12.0-15 (section-12.0-iv.ts), whose human twins
+ * run every one with a human form on the same states
+ * (`T10_1_4_CORRUPT_STATES`).
+ */
+export function t1014NamingSubcommands(
+  session: string,
+  itemId: string,
+): readonly T1014NamingSubcommand[] {
+  return [
+    { argv: ["review", "status", session], jsonOnly: false, mutating: false },
+    { argv: ["review", "next", session], jsonOnly: false, mutating: false },
+    {
+      argv: ["review", "show", session, itemId],
+      jsonOnly: false,
+      mutating: false,
+    },
+    { argv: ["review", "export", session], jsonOnly: true, mutating: false },
+    {
+      argv: ["review", "resolve", session, itemId, "--status", "updated"],
+      jsonOnly: false,
+      mutating: true,
+    },
+    {
+      argv: ["review", "split", session, itemId],
+      jsonOnly: false,
+      mutating: true,
+    },
+  ];
+}
+
+/**
  * The full T10.1-4 contract for one staged corrupt state: every `review`
  * subcommand naming the session reports the corruption, exits 1, and
  * modifies nothing — one whole-workspace snapshot compare around both of
@@ -1311,20 +1364,13 @@ async function assertCorruptSessionContract(
   itemId: string,
   expectedSessions: readonly ExpectedSessionEntry[],
 ): Promise<void> {
-  const namingSubcommands: readonly (readonly string[])[] = [
-    ["review", "status", CORRUPT_NAME],
-    ["review", "next", CORRUPT_NAME],
-    ["review", "show", CORRUPT_NAME, itemId],
-    ["review", "export", CORRUPT_NAME],
-    ["review", "resolve", CORRUPT_NAME, itemId, "--status", "updated"],
-    ["review", "split", CORRUPT_NAME, itemId],
-  ];
-  for (const argv of namingSubcommands) {
+  for (const { argv, jsonOnly } of t1014NamingSubcommands(
+    CORRUPT_NAME,
+    itemId,
+  )) {
     const context = `T10.1-4 [${state}] \`${argv.join(" ")}\``;
     const jsonArgv = [...argv, "--json"];
     const jsonContext = `T10.1-4 [${state}] \`${jsonArgv.join(" ")}\``;
-    // `review export` is the JSON-only `review` subcommand (SPEC 10.7).
-    const jsonOnly = argv[1] === "export";
     await assertLeavesUnchanged(
       workspace.root,
       async () => {

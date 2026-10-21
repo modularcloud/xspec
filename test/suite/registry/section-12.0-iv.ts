@@ -7,10 +7,14 @@
 // T6.4-1 and T6.5-1 and the refused real operations of T6.4-3, T6.4-6,
 // T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7, the
 // previews being T6.6-7's (section-6.6.ts), which this test cites rather
-// than repeats — and the `impact` family, the reports of T5.6-1 through
-// T5.6-6 and T9-1 through T9.3-3; the `review`, `coverage`/`ids`/`show`,
-// and exit-2 families are added beside them by the plan written at
-// 2a2b94e's FIX_PLAN Tasks 133–135.
+// than repeats — the `impact` family, the reports of T5.6-1 through
+// T5.6-6 and T9-1 through T9.3-3 — and, of the `review` family, `list`
+// (T10.7-5, a corrupt session's report included), `status` (T10.7-6), and
+// `status`, `next`, `show`, `resolve`, and `split` naming each corrupt
+// session of T10.1-4; the rest of the `review` family (`next`, `show`, and
+// the refusals of T10.7-1, T10.7-9, and T10.7-10), the
+// `coverage`/`ids`/`show` family, and the exit-2 family are added beside
+// them by the plan written at 2a2b94e's FIX_PLAN Tasks 133–135.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspaces (H-1), drives the product strictly as a subprocess (H-2),
@@ -54,10 +58,11 @@
 // - The same pre-invocation state: where the run writes nothing at that
 //   state — a failing `build` (12.1: it modifies nothing), `check` (13.3: it
 //   never refreshes and writes nothing), a gated read on a failing workspace
-//   (13.3) — both forms run on the workspace itself inside one whole-root
-//   modifies-nothing compare, the lock path compared like any other path
-//   (none of these acquires, 13.5; H-6), so the human run's state is the
-//   `--json` run's pre-invocation state, observed. Where the run writes — a
+//   (13.3), a `review` read naming a corrupt session (10.1) — both forms
+//   run on the workspace itself inside one whole-root modifies-nothing
+//   compare, the lock path compared like any other path (none of these
+//   acquires, 13.5; H-6), so the human run's state is the `--json` run's
+//   pre-invocation state, observed. Where the run writes — a
 //   mutating command (`review create`, `resolve`, `split`, `rename`,
 //   `move`, performed or refused; 13.5), or a successful `build` (T14-11's
 //   valid trailing-comma arm, T12.2-2's states where `build` succeeds and
@@ -169,6 +174,48 @@
 //   datum). The reports' content is the home tests' (each pins it); this
 //   test compares the two forms, the readings without differences (T9-1's
 //   empty reports) included.
+// - The `review` family's listings and status reads (`expectHumanListTwin`,
+//   `expectHumanStatusTwin`): T10.7-5's staging (section-10.7-i.ts
+//   `runT1075Listings`: a git-backed workspace, the audit session a2 — its
+//   resolved item made stale by an edit — the path-blocks session a, the
+//   coverage session B, then the audit session c corrupted by unparseable
+//   bytes) and T10.7-6's (`runT1076Stages`: an audit session through its
+//   four stages), each `review list` or `review status s` read they reach
+//   handed to the twin in place of the home test's own assertions, the
+//   staging between the reads the home test's own: at that state — built,
+//   so graph data is current and the read refreshes nothing (13.3); reads
+//   never write a session (10.4) and acquire nothing (13.5) — the `--json`
+//   read (its exit the staging's premise: `list` 1 iff a session is
+//   corrupt, else 0; `status` 0) and the human one run inside one
+//   whole-root modifies-nothing compare, the lock path compared, exiting
+//   alike, standard error byte-identical, the human report decoded by the
+//   human review-list or review-status decoder
+//   (helpers/adapters/human-reports.ts: fitted to the built product's
+//   layout, shape-aware, value-blind, failing loudly) and carrying the
+//   twin's information (`assertHumanSessionListReportCarries`,
+//   `assertHumanSessionStatusReportCarries`): every session's name with its
+//   strategy and its item counts by stored status — or its corruption in
+//   their place — and each corrupt session's condition-21 finding (14.21);
+//   every item's id, kind, scope node, status, and blocked state, and the
+//   totals by status. T12.0-15 lists 10.7's `list` and `status` among the
+//   orders SPEC fixes for the report itself, so the human report lists the
+//   sessions and the items in the twin's order — byte order of session
+//   name, item order — every other datum compared order free; a status the
+//   human report prints no count or total for reads as 0, the review
+//   adapter's own convention (whether a zero appears is concrete shape,
+//   H-3). The listings' and reads' content is the home tests' (each pins
+//   it); this test compares the two forms.
+// - The subcommands naming each corrupt session of T10.1-4: every corrupt
+//   state (section-10.1.ts `T10_1_4_CORRUPT_STATES`), each staged on a
+//   fresh workspace as T10.1-4 stages it, then each subcommand of
+//   T10.1-4's own list (`t1014NamingSubcommands`) with a human form —
+//   `status`, `next`, and `show` on the same state, `resolve` and `split`,
+//   mutating subcommands, each form on its own fresh copy — through the
+//   findings twin above, exit 1 (the staging's premise, as T10.1-4 pins
+//   it): the corruption is the report (SPEC 10.1, 14.21), so the human
+//   report carries the condition-21 finding's code and concerned path —
+//   the session's own file, a symbolic link there by its own path — as its
+//   `--json` twin's. `export`, JSON-only (10.7), has no human form.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -180,9 +227,13 @@ import {
   assertHumanFindingsReportCarries,
   assertHumanImpactReportCarries,
   assertHumanPerformedReportCarries,
+  assertHumanSessionListReportCarries,
+  assertHumanSessionStatusReportCarries,
   decodeFindingsReport,
   decodeImpactReport,
   decodePerformedOperationReport,
+  decodeSessionListReport,
+  decodeSessionStatusReport,
   pathValueBytes,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
@@ -221,6 +272,11 @@ import {
 } from "./section-6.4.js";
 import { T5_6_IMPACT_STAGINGS } from "./section-5.6.js";
 import { T6_5_1_FILE_MOVE_STAGINGS } from "./section-6.5.js";
+import {
+  T10_1_4_CORRUPT_STATES,
+  t1014NamingSubcommands,
+} from "./section-10.1.js";
+import { runT1075Listings, runT1076Stages } from "./section-10.7-i.js";
 import type { RefusalStagingTwin } from "./section-6.6.js";
 import { runT663RefusalStagings } from "./section-6.6.js";
 import { runT1222Families } from "./section-12.1-12.2.js";
@@ -486,7 +542,9 @@ async function expectHumanFindingsTwin(
         `neither writes anything there, the lock path included (SPEC 12.1: ` +
         `a failing \`build\` modifies nothing; 13.3: \`check\` never ` +
         `refreshes, and a gated read on a failing workspace modifies ` +
-        `nothing; none of them acquires, 13.5; TEST-SPEC H-6, T12.0-15)`,
+        `nothing; 10.1: a \`review\` read naming a corrupt session ` +
+        `modifies nothing; none of them acquires, 13.5; TEST-SPEC H-6, ` +
+        `T12.0-15)`,
       options.exclude === undefined ? {} : { exclude: options.exclude },
     );
   }
@@ -1023,13 +1081,245 @@ async function runImpactTwins(product: ProductBinding): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// `review`: the listings of T10.7-5, the status reads of T10.7-6, and the
+// subcommands naming each corrupt session of T10.1-4
+// ---------------------------------------------------------------------------
+
+/**
+ * T12.0-15's twin of one `review list` read at the state T10.7-5's staging
+ * reached (the module header): inside one whole-root modifies-nothing
+ * compare, the lock path compared — the staging built the workspace, so
+ * graph data is current and the read refreshes nothing (SPEC 13.3), and
+ * `list` acquires nothing (13.5) — `review list --json`, its exit the
+ * staging's premise (10.7: 1 iff any corrupt session exists, else 0, as
+ * the home test pins it), decoded by the review adapter; then `review
+ * list`, the human form, exiting as its twin, its standard error
+ * byte-identical (SPEC 12.0; T12.0-2), its report decoded by the human
+ * review-list decoder and carrying the twin's listing — every session's
+ * name with its strategy and item counts by stored status, or its
+ * corruption in their place, in the order 10.7 fixes, and each corrupt
+ * session's condition-21 finding (TEST-SPEC T12.0-15; SPEC 10.7, 14.21;
+ * `assertHumanSessionListReportCarries`).
+ */
+async function expectHumanListTwin(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  expectedExit: number,
+  context: string,
+): Promise<void> {
+  const argv = ["review", "list"];
+  const jsonArgv = [...argv, "--json"];
+  const jsonCommand = `\`${jsonArgv.join(" ")}\``;
+  const humanCommand = `\`${argv.join(" ")}\` (human report)`;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const json = await expectExit(
+        product,
+        workspace,
+        jsonArgv,
+        expectedExit,
+        `${context}: ${jsonCommand} — the staging's premise: exit ` +
+          `${String(expectedExit)}, 1 iff any corrupt session exists, as the ` +
+          `home test pins it (SPEC 10.7, 14.21, 12.0)`,
+      );
+      const listing = decodeSessionListReport(
+        parseJsonStdout(
+          json,
+          `${context}: ${jsonCommand} — a single JSON document as the ` +
+            `entire stdout (SPEC 12.0)`,
+        ),
+        `${context}: ${jsonCommand}`,
+      );
+      const human = await expectExit(
+        product,
+        workspace,
+        argv,
+        expectedExit,
+        `${context}: ${humanCommand} — run without \`--json\` on the same ` +
+          `pre-invocation state, it exits as its \`--json\` twin did ` +
+          `(${String(expectedExit)}; SPEC 12.0: the output form never ` +
+          `changes an exit code; TEST-SPEC T12.0-15, T12.0-2)`,
+      );
+      assertBytesEqual(
+        human.stderrBytes,
+        json.stderrBytes,
+        `${context}: ${humanCommand} — its standard error byte-identical to ` +
+          `its \`--json\` twin's (SPEC 12.0: the output form never changes ` +
+          `standard-error content; T12.0-2)`,
+      );
+      assertHumanSessionListReportCarries(
+        human,
+        listing,
+        `${context}: ${humanCommand}`,
+      );
+    },
+    `${context}: ${jsonCommand} and its human twin on the same state — ` +
+      `neither writes anything there, the lock path included (SPEC 13.3: ` +
+      `the staging built the workspace, so graph data is current and the ` +
+      `read refreshes nothing; 10.4: reads never write a session; \`list\` ` +
+      `acquires nothing, 13.5; TEST-SPEC H-6, T12.0-15)`,
+  );
+}
+
+/**
+ * T12.0-15's twin of one `review status <session>` read at the state
+ * T10.7-6's staging reached (the module header): inside one whole-root
+ * modifies-nothing compare, the lock path compared — the staging built the
+ * workspace, so graph data is current and the read refreshes nothing (SPEC
+ * 13.3); reads never write the session (10.4) and acquire nothing (13.5) —
+ * `review status <session> --json`, exit 0 (the staging's premise, the
+ * home test pinning it), decoded by the review adapter; then the human
+ * form, exiting 0 as its twin, its standard error byte-identical (SPEC
+ * 12.0; T12.0-2), its report decoded by the human review-status decoder
+ * and carrying the twin's report — every item's id, kind, scope node,
+ * status, and blocked state in item order, and the totals by status
+ * (TEST-SPEC T12.0-15; SPEC 10.7; `assertHumanSessionStatusReportCarries`).
+ */
+async function expectHumanStatusTwin(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  session: string,
+  context: string,
+): Promise<void> {
+  const argv = ["review", "status", session];
+  const jsonArgv = [...argv, "--json"];
+  const jsonCommand = `\`${jsonArgv.join(" ")}\``;
+  const humanCommand = `\`${argv.join(" ")}\` (human report)`;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const json = await expectExit(
+        product,
+        workspace,
+        jsonArgv,
+        0,
+        `${context}: ${jsonCommand} — the staging's premise: exit 0, a read ` +
+          `of a healthy session, as the home test pins it (SPEC 10.7, 12.0)`,
+      );
+      const report = decodeSessionStatusReport(
+        parseJsonStdout(
+          json,
+          `${context}: ${jsonCommand} — a single JSON document as the ` +
+            `entire stdout (SPEC 12.0)`,
+        ),
+        `${context}: ${jsonCommand}`,
+      );
+      const human = await expectExit(
+        product,
+        workspace,
+        argv,
+        0,
+        `${context}: ${humanCommand} — run without \`--json\` on the same ` +
+          `pre-invocation state, it exits as its \`--json\` twin did (0; ` +
+          `SPEC 12.0: the output form never changes an exit code; TEST-SPEC ` +
+          `T12.0-15, T12.0-2)`,
+      );
+      assertBytesEqual(
+        human.stderrBytes,
+        json.stderrBytes,
+        `${context}: ${humanCommand} — its standard error byte-identical to ` +
+          `its \`--json\` twin's (SPEC 12.0: the output form never changes ` +
+          `standard-error content; T12.0-2)`,
+      );
+      assertHumanSessionStatusReportCarries(
+        human,
+        report,
+        `${context}: ${humanCommand}`,
+      );
+    },
+    `${context}: ${jsonCommand} and its human twin on the same state — ` +
+      `neither writes anything there, the lock path included (SPEC 13.3: ` +
+      `the staging built the workspace, so graph data is current and the ` +
+      `read refreshes nothing; 10.4: reads never write the session file; ` +
+      `\`status\` acquires nothing, 13.5; TEST-SPEC H-6, T12.0-15)`,
+  );
+}
+
+/**
+ * The `review` family's listings and status reads (the module header):
+ * T10.7-5's staging (section-10.7-i.ts `runT1075Listings`), its clean and
+ * corrupt listings each handed to the `review list` twin, then T10.7-6's
+ * (`runT1076Stages`), each of its four stages' `review status s` read
+ * handed to the `review status` twin — in place of the home tests' own
+ * assertions, the staging between the reads theirs.
+ */
+async function runListingAndStatusTwins(
+  product: ProductBinding,
+): Promise<void> {
+  await runT1075Listings(
+    product,
+    async (workspace, listing) => {
+      await expectHumanListTwin(
+        product,
+        workspace,
+        listing.expectedExit,
+        listing.label,
+      );
+    },
+    "T12.0-15 (T10.7-5)",
+  );
+  await runT1076Stages(
+    product,
+    async (workspace, stage) => {
+      await expectHumanStatusTwin(
+        product,
+        workspace,
+        stage.session,
+        stage.label,
+      );
+    },
+    "T12.0-15 (T10.7-6)",
+  );
+}
+
+/**
+ * The subcommands naming each corrupt session of T10.1-4 (the module
+ * header): every corrupt state (section-10.1.ts `T10_1_4_CORRUPT_STATES`),
+ * each staged on a fresh workspace of its own as T10.1-4 stages it, then
+ * the human twin of every subcommand of T10.1-4's list
+ * (`t1014NamingSubcommands`) with a human form — `status`, `next`, and
+ * `show` on the same state, `resolve` and `split`, mutating subcommands,
+ * each form on its own fresh copy — exit 1, the corruption the report
+ * (SPEC 10.1, 14.21): its condition-21 finding's code and concerned path
+ * as the `--json` twin's. `export`, JSON-only (10.7), has no human form.
+ */
+async function runCorruptNamingTwins(product: ProductBinding): Promise<void> {
+  for (const corrupt of T10_1_4_CORRUPT_STATES) {
+    const context = `T12.0-15 (T10.1-4 [${corrupt.state}])`;
+    const workspace = await TestWorkspace.create({ files: corrupt.files });
+    try {
+      const staged = await corrupt.stage(product, workspace, context);
+      for (const naming of t1014NamingSubcommands(
+        staged.session,
+        staged.itemId,
+      )) {
+        if (naming.jsonOnly) continue;
+        await expectHumanFindingsTwin(
+          product,
+          workspace,
+          naming.argv,
+          context,
+          {
+            state: naming.mutating ? "fresh" : "same",
+            expectedExit: 1,
+          },
+        );
+      }
+    } finally {
+      await workspace.dispose();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // T12.0-15
 // ---------------------------------------------------------------------------
 
 const T12_0_15 = defineProductTest({
   id: "T12.0-15",
   title:
-    "human-form reports — this registration's families: `build` and `check` on T14-11's per-condition fixtures, T12.2-2's per-family workspaces, and T1.5-2's every arm (its located arm included), and each gated read and mutating `review` subcommand on T13.3-3's stagings but `query` (JSON-only), each run again without `--json` on the same pre-invocation state (a fresh copy of it for a mutating command or a run that writes), exit as its `--json` twin, standard error byte-identical, its report — decoded by the human findings decoder — carrying every finding's stable code, locations (each file and its range's two byte offsets), concerned path, and identities as its twin does, order free, messages never compared, a human report printing nothing or omitting or changing any datum failing; and on T1.5-2's arms every reported path presented as 12.0 fixes, whatever the twin carries — the non-UTF-8 path (the condition-19 finding's concerned path, the located arm's location file) explicitly marked, the adapter recovering its exact bytes by the mark alone, each such report byte-identical across two runs on the same state, and every valid-UTF-8 path (the `#` and U+FFFD arms') a plain string, never marked; `rename` and `move` — the performed reports of T6.4-1's rename and T6.5-1's five file moves, staged as their home tests stage them and built, each form run on its own fresh copy of the built state, the human run exiting 0 as its `--json` twin, standard error byte-identical, its report — decoded by the human performed-report decoder — carrying the applied mapping the form-exact performed-operation document carries, every pair's `from` and `to` identity, a multiset, order free, a pair omitted, changed, or listed beside the twin's failing (the previews are T6.6-7's); and the refused real operations of T6.4-3, T6.4-6, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7 — T6.4-6's invalid-workspace arm and every refusal of T6.6-3's refusal stagings, staged as T6.6-3 stages each from its home module, T6.4-6's refused-writes staging among them — each form on its own fresh copy of the state, exit 1, the human findings report carrying every refusal finding's code, locations, concerned path, and identities, and the invalid-workspace refusal's findings each under its own condition's code, a human refusal printing nothing or omitting any of them failing; `impact` — every `impact --base <ref>` read of the stagings of T5.6-1 through T5.6-6 and T9-1 through T9.3-3, run as their home tests run them, the read and its human twin on the same built state, exit 0 each, standard error byte-identical, the human report — decoded by the human impact decoder — carrying each category with its attribution, the collapsed chains, deleted nodes under their baseline identities, and each impacted location under its group with its witness edge and path as the `--json` twin does, order free, a datum omitted, changed, or misplaced failing; the `review`, `coverage`/`ids`/`show`, and exit-2 families follow (the plan written at 2a2b94e, FIX_PLAN Tasks 133–135) (SPEC 12.0, 12.7, 14, 1.7, 6.4, 6.5, 5.6, 9.1, 9.2, 9.3; H-3, H-6)",
+    "human-form reports — this registration's families: `build` and `check` on T14-11's per-condition fixtures, T12.2-2's per-family workspaces, and T1.5-2's every arm (its located arm included), and each gated read and mutating `review` subcommand on T13.3-3's stagings but `query` (JSON-only), each run again without `--json` on the same pre-invocation state (a fresh copy of it for a mutating command or a run that writes), exit as its `--json` twin, standard error byte-identical, its report — decoded by the human findings decoder — carrying every finding's stable code, locations (each file and its range's two byte offsets), concerned path, and identities as its twin does, order free, messages never compared, a human report printing nothing or omitting or changing any datum failing; and on T1.5-2's arms every reported path presented as 12.0 fixes, whatever the twin carries — the non-UTF-8 path (the condition-19 finding's concerned path, the located arm's location file) explicitly marked, the adapter recovering its exact bytes by the mark alone, each such report byte-identical across two runs on the same state, and every valid-UTF-8 path (the `#` and U+FFFD arms') a plain string, never marked; `rename` and `move` — the performed reports of T6.4-1's rename and T6.5-1's five file moves, staged as their home tests stage them and built, each form run on its own fresh copy of the built state, the human run exiting 0 as its `--json` twin, standard error byte-identical, its report — decoded by the human performed-report decoder — carrying the applied mapping the form-exact performed-operation document carries, every pair's `from` and `to` identity, a multiset, order free, a pair omitted, changed, or listed beside the twin's failing (the previews are T6.6-7's); and the refused real operations of T6.4-3, T6.4-6, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7 — T6.4-6's invalid-workspace arm and every refusal of T6.6-3's refusal stagings, staged as T6.6-3 stages each from its home module, T6.4-6's refused-writes staging among them — each form on its own fresh copy of the state, exit 1, the human findings report carrying every refusal finding's code, locations, concerned path, and identities, and the invalid-workspace refusal's findings each under its own condition's code, a human refusal printing nothing or omitting any of them failing; `impact` — every `impact --base <ref>` read of the stagings of T5.6-1 through T5.6-6 and T9-1 through T9.3-3, run as their home tests run them, the read and its human twin on the same built state, exit 0 each, standard error byte-identical, the human report — decoded by the human impact decoder — carrying each category with its attribution, the collapsed chains, deleted nodes under their baseline identities, and each impacted location under its group with its witness edge and path as the `--json` twin does, order free, a datum omitted, changed, or misplaced failing; `review` — the human `review list` at T10.7-5's clean and corrupt listings and `review status s` at T10.7-6's four stages, staged as their home tests stage them, each run on the same built state as its `--json` twin and exiting as it (`list` 1 iff a session is corrupt, else 0; `status` 0), standard error byte-identical, the human report — decoded by the human review-list or review-status decoder — carrying every session's name with its strategy and item counts by stored status, or its corruption in their place, and each corrupt session's condition-21 finding, or every item's id, kind, scope, status, and blocked state and the totals by status, the sessions and the items in the order 10.7 fixes, a datum omitted, changed, or misordered failing; and `status`, `next`, `show`, `resolve`, and `split` naming the corrupt session of each of T10.1-4's states, staged as T10.1-4 stages them, exit 1, each mutating subcommand's two forms on their own fresh copies, the human findings report carrying the condition-21 finding's code and concerned path as its twin does; the rest of the `review` family (`next`, `show`, and the refusals), the `coverage`/`ids`/`show` family, and the exit-2 family follow (the plan written at 2a2b94e, FIX_PLAN Tasks 133–135) (SPEC 12.0, 12.7, 14, 1.7, 6.4, 6.5, 5.6, 9.1, 9.2, 9.3, 10.1, 10.7, 14.21; H-3, H-6)",
   run: async (product) => {
     await runT1411Twins(product);
     await runT1222Twins(product);
@@ -1038,6 +1328,8 @@ const T12_0_15 = defineProductTest({
     await runPerformedTwins(product);
     await runRefusalTwins(product);
     await runImpactTwins(product);
+    await runListingAndStatusTwins(product);
+    await runCorruptNamingTwins(product);
   },
 });
 

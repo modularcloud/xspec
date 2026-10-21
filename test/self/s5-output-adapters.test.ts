@@ -54,6 +54,10 @@ import {
   assertHumanPerformedReportCarries,
   assertHumanPreviewCarries,
   assertHumanPreviewReportCarries,
+  assertHumanSessionListCarries,
+  assertHumanSessionListReportCarries,
+  assertHumanSessionStatusCarries,
+  assertHumanSessionStatusReportCarries,
   assertJsonKeysByteSorted,
   assertNodeEdgeListsBare,
   assertReportMentions,
@@ -80,6 +84,8 @@ import {
   decodeHumanImpactReport,
   decodeHumanPerformedReport,
   decodeHumanPreviewReport,
+  decodeHumanSessionListReport,
+  decodeHumanSessionStatusReport,
   decodeIdsReport,
   decodeIdsTreeReport,
   decodeImpactReport,
@@ -9971,6 +9977,736 @@ test("S-5: the human impact comparison rejects a report omitting or changing a c
       "an edge-from twin",
     ),
     'the edge from "src/both.ts" (the location itself, as the layout prints it) where the --json twin\'s runs from "src/other.ts"',
+  );
+});
+
+// --- the human review-list and review-status decoders ---------------------------
+
+/** A listing's counts by stored status, every status of 10.3 present. */
+function sessionCounts(
+  counts: Partial<Record<string, number>>,
+): Record<string, number> {
+  return {
+    invalidated: 0,
+    "no-change": 0,
+    skipped: 0,
+    unresolved: 0,
+    updated: 0,
+    ...counts,
+  };
+}
+
+/** T10.7-5's corrupt listing's --json twin, as the built product emits it. */
+const JSON_LISTING_TWIN = decodeSessionListReport(
+  {
+    findings: [
+      {
+        code: "corrupt-session",
+        identities: [],
+        locations: [],
+        message:
+          'corrupt review session "c": the session file cannot be parsed as one JSON document (SPEC 10.1)',
+        path: ".xspec/reviews/c.json",
+      },
+    ],
+    sessions: [
+      {
+        corrupt: false,
+        counts: sessionCounts({ unresolved: 1 }),
+        name: "B",
+        strategy: "coverage",
+      },
+      {
+        corrupt: false,
+        counts: sessionCounts({ unresolved: 1 }),
+        name: "a",
+        strategy: "path-blocks",
+      },
+      {
+        corrupt: false,
+        counts: sessionCounts({ unresolved: 1, "no-change": 1 }),
+        name: "a2",
+        strategy: "audit",
+      },
+      { corrupt: true, name: "c" },
+    ],
+  },
+  "the listing twin",
+);
+
+/** Its human report as the built product prints it (human-reports.ts' header). */
+const HUMAN_LISTING_LINES: readonly string[] = [
+  "B coverage unresolved=1 updated=0 no-change=0 skipped=0 invalidated=0",
+  "a path-blocks unresolved=1 updated=0 no-change=0 skipped=0 invalidated=0",
+  "a2 audit unresolved=1 updated=0 no-change=1 skipped=0 invalidated=0",
+  "c corrupt",
+  '.xspec/reviews/c.json: corrupt-session: corrupt review session "c": the session file cannot be parsed as one JSON document (SPEC 10.1)',
+  "1 finding",
+];
+
+/** T10.7-6's stage-B status report's --json twin, as the built product emits it. */
+const JSON_STATUS_TWIN = decodeSessionStatusReport(
+  {
+    items: [
+      {
+        blocked: true,
+        id: "item-1",
+        kind: "subtree-coherence",
+        scope: "specs/T.mdx",
+        status: "unresolved",
+      },
+      {
+        blocked: false,
+        id: "item-2",
+        kind: "subtree-coherence",
+        scope: "specs/T.mdx#p",
+        status: "unresolved",
+      },
+      {
+        blocked: false,
+        id: "item-3",
+        kind: "subtree-coherence",
+        scope: "specs/T.mdx#p.a",
+        status: "no-change",
+      },
+      {
+        blocked: false,
+        id: "item-4",
+        kind: "subtree-coherence",
+        scope: "specs/T.mdx#p.b",
+        status: "skipped",
+      },
+    ],
+    totals: sessionCounts({ unresolved: 2, "no-change": 1, skipped: 1 }),
+  },
+  "the status twin",
+);
+
+/** Its human report as the built product prints it (human-reports.ts' header). */
+const HUMAN_STATUS_LINES: readonly string[] = [
+  "item-1 subtree-coherence specs/T.mdx unresolved blocked=true",
+  "item-2 subtree-coherence specs/T.mdx#p unresolved blocked=false",
+  "item-3 subtree-coherence specs/T.mdx#p.a no-change blocked=false",
+  "item-4 subtree-coherence specs/T.mdx#p.b skipped blocked=false",
+  "totals: unresolved=2 updated=0 no-change=1 skipped=1 invalidated=0",
+];
+
+test("S-5: the human review-list decoder decodes a well-formed listing onto the listing model, its session order kept", () => {
+  const decoded = decodeHumanSessionListReport(
+    previewReport(HUMAN_LISTING_LINES),
+    "listing",
+  );
+  expect(
+    decoded.sessions.map(({ name, corrupt, strategy, counts, line }) => ({
+      name,
+      corrupt,
+      strategy,
+      counts,
+      line,
+    })),
+  ).toEqual([
+    {
+      name: "B",
+      corrupt: false,
+      strategy: "coverage",
+      counts: {
+        unresolved: 1,
+        updated: 0,
+        "no-change": 0,
+        skipped: 0,
+        invalidated: 0,
+      },
+      line: 1,
+    },
+    {
+      name: "a",
+      corrupt: false,
+      strategy: "path-blocks",
+      counts: {
+        unresolved: 1,
+        updated: 0,
+        "no-change": 0,
+        skipped: 0,
+        invalidated: 0,
+      },
+      line: 2,
+    },
+    {
+      name: "a2",
+      corrupt: false,
+      strategy: "audit",
+      counts: {
+        unresolved: 1,
+        updated: 0,
+        "no-change": 1,
+        skipped: 0,
+        invalidated: 0,
+      },
+      line: 3,
+    },
+    { name: "c", corrupt: true, strategy: null, counts: {}, line: 4 },
+  ]);
+  expect(
+    decoded.findings.map(({ code, locations, path, identities, line }) => ({
+      code,
+      locations,
+      path,
+      identities,
+      line,
+    })),
+  ).toEqual([
+    {
+      code: "corrupt-session",
+      locations: [],
+      path: ".xspec/reviews/c.json",
+      identities: [],
+      line: 5,
+    },
+  ]);
+  assertHumanSessionListCarries(decoded, JSON_LISTING_TWIN, "listing");
+  expect(
+    assertHumanSessionListReportCarries(
+      syntheticBytesResult(
+        previewReport(HUMAN_LISTING_LINES),
+        Buffer.alloc(0),
+        1,
+      ),
+      JSON_LISTING_TWIN,
+      "listing, as a run",
+    ).sessions,
+  ).toHaveLength(4);
+
+  // Spellings: a status, a strategy, and the corrupt mark read as codes
+  // are; a zero count omitted reads as 0; the findings before the sessions;
+  // no count line.
+  assertHumanSessionListCarries(
+    decodeHumanSessionListReport(
+      previewReport([
+        HUMAN_LISTING_LINES[4]!,
+        "B Coverage UNRESOLVED=1",
+        "a path_blocks unresolved=1 invalidated=0",
+        "a2 AUDIT no_change=1 unresolved=1",
+        "c CORRUPT",
+      ]),
+      "listing respelled",
+    ),
+    JSON_LISTING_TWIN,
+    "listing respelled",
+  );
+  // The empty listing: no session, no finding.
+  const empty = decodeHumanSessionListReport(Buffer.alloc(0), "empty");
+  expect(empty.sessions).toEqual([]);
+  expect(empty.findings).toEqual([]);
+  assertHumanSessionListCarries(
+    empty,
+    decodeSessionListReport({ findings: [], sessions: [] }, "empty twin"),
+    "empty",
+  );
+  // A strategy word spelling no built-in strategy reads as printed.
+  expect(
+    decodeHumanSessionListReport(
+      previewReport(["x custom unresolved=0"]),
+      "custom strategy",
+    ).sessions[0]!.strategy,
+  ).toBe("custom");
+});
+
+test("S-5: the human review-list decoder rejects a session line without its strategy, a malformed or twice-counted count, words after `corrupt`, a disagreeing count line, an empty line, and every line outside its layout", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[] | Buffer,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      decodeHumanSessionListReport(
+        Buffer.isBuffer(lines) ? lines : previewReport(lines),
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_LISTING_LINES;
+  rejected(
+    "a session line of its name alone",
+    previewWithLine(lines, 0, "B"),
+    "a session line `<name> <strategy> <status>=<n> …`",
+    "line 1",
+  );
+  rejected(
+    "a session line without its strategy",
+    previewWithLine(lines, 0, "B unresolved=1 updated=0"),
+    "the session's strategy before its counts",
+  );
+  rejected(
+    "a count without its number",
+    previewWithLine(lines, 0, "B coverage unresolved="),
+    "each `<status>=<n>`",
+  );
+  rejected(
+    "a count with a leading zero",
+    previewWithLine(lines, 0, "B coverage unresolved=01"),
+    "each `<status>=<n>`",
+  );
+  rejected(
+    "a count under no status",
+    previewWithLine(lines, 0, "B coverage resolved=1"),
+    'the status one SPEC 10.3 lists (unresolved, invalidated, updated, no-change, skipped) — got "resolved"',
+  );
+  rejected(
+    "a status counted twice",
+    previewWithLine(lines, 0, "B coverage unresolved=1 unresolved=0"),
+    "unresolved is counted twice",
+  );
+  rejected(
+    "words after corrupt",
+    previewWithLine(lines, 3, "c corrupt unresolved=0"),
+    "nothing after `corrupt`",
+  );
+  rejected(
+    "a doubled space",
+    previewWithLine(lines, 0, "B  coverage unresolved=1"),
+    "its words separated by single spaces",
+  );
+  rejected(
+    "a count line disagreeing",
+    previewWithLine(lines, 5, "2 findings"),
+    "a count line equal to the 1 finding line(s) the report lists — it counts 2",
+  );
+  rejected(
+    "a count line without its finding",
+    previewWithLine(lines, 4, null),
+    "a count line equal to the 0 finding line(s) the report lists — it counts 1",
+  );
+  rejected(
+    "an empty line",
+    previewWithLine(lines, 1, ""),
+    "never an empty line",
+  );
+  rejected(
+    "a finding line fitting no layout",
+    previewWithLine(lines, 4, ".xspec/reviews/c.json: not a code: message"),
+    "no segment of this line spells a stable code",
+  );
+  rejected(
+    "bytes that are not UTF-8",
+    Buffer.concat([
+      Buffer.from("B coverage unresolved=1\n", "utf8"),
+      NON_UTF8_PATH_BYTES,
+      Buffer.from(": corrupt-session: m\n", "utf8"),
+    ]),
+    "so these bytes are a path printed raw",
+  );
+});
+
+test("S-5: the human review-list comparison rejects a listing omitting, adding, or reordering a session, changing its strategy, a count, or its corruption, or omitting a corrupt session's finding — naming the datum", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[],
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanSessionListCarries(
+        decodeHumanSessionListReport(previewReport(lines), label),
+        JSON_LISTING_TWIN,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_LISTING_LINES;
+  rejected(
+    "a session dropped",
+    previewWithLine(lines, 1, null),
+    'the session "a" (path-blocks; unresolved 1, invalidated 0, updated 0, no-change 0, skipped 0) is missing',
+  );
+  rejected(
+    "a session the twin lacks",
+    [...lines.slice(0, 4), "z audit unresolved=0", ...lines.slice(4)],
+    'line 5 lists the session "z" (audit; unresolved 0, invalidated 0, updated 0, no-change 0, skipped 0), which the --json twin lacks',
+  );
+  rejected(
+    "a session listed twice",
+    [lines[0]!, ...lines],
+    'line 2 lists the session "B" (coverage; unresolved 1, invalidated 0, updated 0, no-change 0, skipped 0), which the --json twin lacks',
+  );
+  rejected(
+    "two sessions swapped",
+    [lines[1]!, lines[0]!, ...lines.slice(2)],
+    'the human report lists the sessions in the order ["a","B","a2","c"] where the --json twin lists them in the order ["B","a","a2","c"]',
+    "byte order of session name",
+  );
+  rejected(
+    "a strategy changed",
+    previewWithLine(
+      lines,
+      1,
+      "a audit unresolved=1 updated=0 no-change=0 skipped=0 invalidated=0",
+    ),
+    'line 2 (the session "a") lists the strategy "audit" where the --json twin\'s is "path-blocks"',
+  );
+  rejected(
+    "a count changed",
+    previewWithLine(
+      lines,
+      2,
+      "a2 audit unresolved=1 updated=0 no-change=0 skipped=0 invalidated=0",
+    ),
+    'line 3 (the session "a2"): its item count by stored status under no-change is 0 where the --json twin\'s is 1',
+  );
+  rejected(
+    "a count under the read-time status",
+    previewWithLine(
+      lines,
+      2,
+      "a2 audit unresolved=1 updated=0 no-change=0 skipped=0 invalidated=1",
+    ),
+    "under invalidated is 1 where the --json twin's is 0",
+    "under no-change is 0 where the --json twin's is 1",
+  );
+  rejected(
+    "a corrupt session listed with fields",
+    previewWithLine(lines, 3, "c audit unresolved=0"),
+    'line 4 (the session "c") lists the session with fields where the --json twin reports it corrupt',
+  );
+  rejected(
+    "a healthy session reported corrupt",
+    previewWithLine(lines, 0, "B corrupt"),
+    'line 1 (the session "B") reports the session corrupt where the --json twin lists it with its strategy and counts',
+  );
+  rejected(
+    "the corrupt session's finding dropped",
+    lines.slice(0, 4),
+    "the listing's findings",
+    'the --json finding (code corrupt-session; no location; concerned path ".xspec/reviews/c.json"; no identity) has no counterpart',
+  );
+  rejected(
+    "the finding's concerned path another",
+    previewWithLine(
+      lines,
+      4,
+      ".xspec/reviews/d.json: corrupt-session: corrupt review session",
+    ),
+    'concerned path ".xspec/reviews/d.json" where the --json finding carries ".xspec/reviews/c.json"',
+  );
+  rejected(
+    "a finding the twin lacks",
+    [
+      ...lines.slice(0, 5),
+      ".xspec/reviews/d.json: corrupt-session: corrupt review session",
+      "2 findings",
+    ],
+    'the human finding on line 6 (code corrupt-session; no location; concerned path ".xspec/reviews/d.json"; no identity) matches no --json finding',
+  );
+});
+
+test("S-5: the human review-status decoder decodes a well-formed report onto the status model, its row order kept", () => {
+  const decoded = decodeHumanSessionStatusReport(
+    previewReport(HUMAN_STATUS_LINES),
+    "status",
+  );
+  expect(
+    decoded.items.map(({ id, kind, scope, status, blocked, line }) => ({
+      id,
+      kind,
+      scope,
+      status,
+      blocked,
+      line,
+    })),
+  ).toEqual([
+    {
+      id: "item-1",
+      kind: "subtree-coherence",
+      scope: "specs/T.mdx",
+      status: "unresolved",
+      blocked: true,
+      line: 1,
+    },
+    {
+      id: "item-2",
+      kind: "subtree-coherence",
+      scope: "specs/T.mdx#p",
+      status: "unresolved",
+      blocked: false,
+      line: 2,
+    },
+    {
+      id: "item-3",
+      kind: "subtree-coherence",
+      scope: "specs/T.mdx#p.a",
+      status: "no-change",
+      blocked: false,
+      line: 3,
+    },
+    {
+      id: "item-4",
+      kind: "subtree-coherence",
+      scope: "specs/T.mdx#p.b",
+      status: "skipped",
+      blocked: false,
+      line: 4,
+    },
+  ]);
+  expect(decoded.totals).toEqual({
+    unresolved: 2,
+    updated: 0,
+    "no-change": 1,
+    skipped: 1,
+    invalidated: 0,
+  });
+  assertHumanSessionStatusCarries(decoded, JSON_STATUS_TWIN, "status");
+  expect(
+    assertHumanSessionStatusReportCarries(
+      syntheticBytesResult(
+        previewReport(HUMAN_STATUS_LINES),
+        Buffer.alloc(0),
+        0,
+      ),
+      JSON_STATUS_TWIN,
+      "status, as a run",
+    ).items,
+  ).toHaveLength(4);
+
+  // Spellings: a kind, a status, and the blocked state read as codes are;
+  // the totals line first, its zero totals omitted.
+  assertHumanSessionStatusCarries(
+    decodeHumanSessionStatusReport(
+      previewReport([
+        "Totals: skipped=1 no_change=1 unresolved=2",
+        "item-1 Subtree_Coherence specs/T.mdx UNRESOLVED blocked=TRUE",
+        ...HUMAN_STATUS_LINES.slice(1, 3),
+        "item-4 subtreecoherence specs/T.mdx#p.b skipped blocked=false",
+      ]),
+      "status respelled",
+    ),
+    JSON_STATUS_TWIN,
+    "status respelled",
+  );
+  // A session holding no item: the totals line alone, or nothing.
+  const emptyTwin = decodeSessionStatusReport(
+    { items: [], totals: sessionCounts({}) },
+    "the empty status twin",
+  );
+  assertHumanSessionStatusCarries(
+    decodeHumanSessionStatusReport(
+      previewReport([
+        "totals: unresolved=0 updated=0 no-change=0 skipped=0 invalidated=0",
+      ]),
+      "empty session",
+    ),
+    emptyTwin,
+    "empty session",
+  );
+  const nothing = decodeHumanSessionStatusReport(Buffer.alloc(0), "nothing");
+  expect(nothing.items).toEqual([]);
+  expect(nothing.totals).toBeNull();
+  assertHumanSessionStatusCarries(nothing, emptyTwin, "nothing");
+  // A scope is every word between the kind and the status.
+  expect(
+    decodeHumanSessionStatusReport(
+      previewReport([
+        "i1 code-impact src/a b.ts#unit unresolved blocked=false",
+      ]),
+      "a scope holding a space",
+    ).items[0]!.scope,
+  ).toBe("src/a b.ts#unit");
+});
+
+test("S-5: the human review-status decoder rejects a row without its kind, status, or blocked state, a malformed or repeated totals line, an empty line, and every line outside its layout", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[] | Buffer,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      decodeHumanSessionStatusReport(
+        Buffer.isBuffer(lines) ? lines : previewReport(lines),
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_STATUS_LINES;
+  rejected(
+    "a row without its blocked state",
+    previewWithLine(
+      lines,
+      0,
+      "item-1 subtree-coherence specs/T.mdx unresolved",
+    ),
+    "an item row `<id> <kind> <scope> <status> blocked=<true|false>`",
+    "line 1",
+  );
+  rejected(
+    "a row without its kind",
+    previewWithLine(
+      lines,
+      1,
+      "item-2 specs/T.mdx#p x unresolved blocked=false",
+    ),
+    'the item\'s kind after its id, one SPEC 10.4–10.7 names (subtree-coherence, parent-consistency, dependency-consistency, metadata-consistency, code-impact, uncovered-requirement), got "specs/T.mdx#p"',
+  );
+  rejected(
+    "a row under no status",
+    previewWithLine(
+      lines,
+      1,
+      "item-2 subtree-coherence specs/T.mdx#p resolved blocked=false",
+    ),
+    'the item\'s status before its blocked state, one SPEC 10.3 lists (unresolved, invalidated, updated, no-change, skipped), got "resolved"',
+  );
+  rejected(
+    "a row whose blocked state is a word",
+    previewWithLine(
+      lines,
+      1,
+      "item-2 subtree-coherence specs/T.mdx#p unresolved blocked=no",
+    ),
+    "the item's blocked state last, `blocked=true` or `blocked=false`",
+  );
+  rejected(
+    "a doubled space",
+    previewWithLine(
+      lines,
+      1,
+      "item-2  subtree-coherence specs/T.mdx#p unresolved blocked=false",
+    ),
+    "its words separated by single spaces",
+  );
+  rejected(
+    "the totals line twice",
+    [...lines, lines[4]!],
+    "one totals line — line 5 prints the totals already",
+  );
+  rejected(
+    "a total without its number",
+    previewWithLine(lines, 4, "totals: unresolved= updated=0"),
+    "the totals line's totals: each `<status>=<n>`",
+  );
+  rejected(
+    "a status totaled twice",
+    previewWithLine(lines, 4, "totals: unresolved=2 unresolved=2"),
+    "unresolved is counted twice",
+  );
+  rejected(
+    "the totals line without its space",
+    previewWithLine(lines, 4, "totals:unresolved=2"),
+    "a space after its opening",
+  );
+  rejected(
+    "an empty line",
+    previewWithLine(lines, 2, ""),
+    "never an empty line",
+  );
+  rejected(
+    "bytes that are not UTF-8",
+    Buffer.concat([
+      Buffer.from("item-1 code-impact src/", "utf8"),
+      NON_UTF8_PATH_BYTES,
+      Buffer.from(" unresolved blocked=false\n", "utf8"),
+    ]),
+    "so these bytes are a path printed raw",
+  );
+});
+
+test("S-5: the human review-status comparison rejects a report omitting, adding, or reordering a row, changing its kind, scope, status, or blocked state, or a total — naming the datum", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[],
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanSessionStatusCarries(
+        decodeHumanSessionStatusReport(previewReport(lines), label),
+        JSON_STATUS_TWIN,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_STATUS_LINES;
+  rejected(
+    "a row dropped",
+    previewWithLine(lines, 2, null),
+    'the item "item-3" (subtree-coherence of "specs/T.mdx#p.a", no-change, unblocked) is missing',
+  );
+  rejected(
+    "a row the twin lacks",
+    [
+      ...lines.slice(0, 4),
+      "item-5 subtree-coherence specs/T.mdx#p.c unresolved blocked=false",
+      lines[4]!,
+    ],
+    'line 5 prints a row for the item "item-5", which the --json twin lacks',
+  );
+  rejected(
+    "two rows swapped",
+    [lines[1]!, lines[0]!, ...lines.slice(2)],
+    'the human report lists the items in the order ["item-2","item-1","item-3","item-4"] where the --json twin lists them in the order ["item-1","item-2","item-3","item-4"]',
+    "item order",
+  );
+  rejected(
+    "a kind changed",
+    previewWithLine(
+      lines,
+      1,
+      "item-2 parent-consistency specs/T.mdx#p unresolved blocked=false",
+    ),
+    'line 2 (the item "item-2") prints the kind parent-consistency where the --json twin\'s is subtree-coherence',
+  );
+  rejected(
+    "a scope changed",
+    previewWithLine(
+      lines,
+      1,
+      "item-2 subtree-coherence specs/T.mdx#q unresolved blocked=false",
+    ),
+    'line 2 (the item "item-2") prints the scope "specs/T.mdx#q" where the --json twin\'s is "specs/T.mdx#p"',
+  );
+  rejected(
+    "a stored status where the read-time one stands",
+    previewWithLine(
+      lines,
+      2,
+      "item-3 subtree-coherence specs/T.mdx#p.a invalidated blocked=false",
+    ),
+    'line 3 (the item "item-3") prints the status invalidated where the --json twin\'s is no-change',
+  );
+  rejected(
+    "a blocked state flipped",
+    previewWithLine(
+      lines,
+      0,
+      "item-1 subtree-coherence specs/T.mdx unresolved blocked=false",
+    ),
+    'line 1 (the item "item-1") prints the item unblocked where the --json twin reports it blocked',
+  );
+  rejected(
+    "a total changed",
+    previewWithLine(
+      lines,
+      4,
+      "totals: unresolved=2 updated=0 no-change=0 skipped=1 invalidated=1",
+    ),
+    "the total under invalidated is 1 where the --json twin's is 0",
+    "the total under no-change is 0 where the --json twin's is 1",
+  );
+  rejected(
+    "the totals line dropped",
+    lines.slice(0, 4),
+    "the report prints no totals line, so its total under unresolved is 0 where the --json twin's is 2",
   );
 });
 

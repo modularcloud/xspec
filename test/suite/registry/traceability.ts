@@ -728,9 +728,29 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // deleted nodes under their baseline identities, and witness edges and
   // paths of the output ("9.3"), decoded and compared with the `--json`
   // twin's; the baselines' reconstruction (9, 6.3) is carriage context
-  // with home coverage at T9-1 and T6.3-*. The families still to come add
-  // the passages they assert.
-  "T12.0-15": ["12.0", "14", "6.4", "6.5", "5.6", "9.1", "9.2", "9.3"],
+  // with home coverage at T9-1 and T6.3-*. The `review` family's human
+  // `list` and `status` reports carry every session's name, strategy, and
+  // item counts by stored status or its corruption, and every item's id,
+  // kind, scope, status, and blocked state with the totals by status, in
+  // the orders 10.7 fixes for the report itself ("10.7"), decoded and
+  // compared with the `--json` twin's; and its subcommands naming each
+  // corrupt session of T10.1-4 report the corruption ("10.1"), the
+  // condition-21 finding's code and concerned path compared ("14"); the
+  // stagings' sessions, resolutions, and invalidation (10.3–10.6) are
+  // carriage context with home coverage at T10.7-5, T10.7-6, and T10.1-4.
+  // The families still to come add the passages they assert.
+  "T12.0-15": [
+    "12.0",
+    "14",
+    "6.4",
+    "6.5",
+    "5.6",
+    "9.1",
+    "9.2",
+    "9.3",
+    "10.1",
+    "10.7",
+  ],
   // T12.0-16: byte order over the separating pair U+FF21/U+1F600 on 12.7's
   // tag sets and findings order, 11.4's and 12.3's file orders, 11.6's
   // inventory lists, and 5.7's occurrence order; its (c) arms pin the

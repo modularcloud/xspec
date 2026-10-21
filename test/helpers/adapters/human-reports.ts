@@ -28,20 +28,30 @@
 // each category of each requirement entry with its attribution, the nodes
 // the entry covers — a collapsed ancestor chain's several — and its
 // deletion, and each impacted location of each code group with its
-// witness edge and path (TEST-SPEC T12.0-15; SPEC 5.6, 9.1–9.3).
+// witness edge and path (TEST-SPEC T12.0-15; SPEC 5.6, 9.1–9.3). The
+// review-report decoders take a `review list` report onto the listing
+// model the review adapter produces (model.ts `SessionListReport`): each
+// session's name with its strategy and its item counts by stored status,
+// or its corruption in their place, and the listing's findings; and a
+// `review status` report onto the status model (`SessionStatusReport`):
+// each item's id, kind, scope, status, and blocked state, and the totals
+// by status (TEST-SPEC T12.0-15; SPEC 10.7). A refusal or a corrupt
+// session's report — `review create`, `resolve`, or `split` refused, a
+// subcommand naming a corrupt session — is a findings report (14, 14.21).
 // Like every adapter here they are the one place aware of the report's
 // concrete shape: adjustable to shape, never to values, and failing loudly
 // — a diagnosed `HarnessAssertionError` naming the line and the datum —
 // when a report's text fits none of the layout below or lacks what the
-// layout carries. Later decoders for the other human reports (review,
-// coverage, ids, show) go beside these.
+// layout carries. Later decoders for the other human reports (`review
+// next` and `review show`, coverage, ids, show) go beside these.
 //
 // The layout, fitted to what the built product emits (observed by running
 // it on T14-11's per-condition fixtures, T1.5-2's arms, T12.7-3's stagings,
 // and hand-staged 14.11, 14.12, 14.13, 14.21, refusal, and code-less
 // findings, the previews of T6.6-2 through T6.6-6, the performed reports
-// of T6.4-1's rename and T6.5-1's file moves, and the impact reports of
-// T5.6-1 through T5.6-6 and T9-1 through T9.3-3 — never by reading its
+// of T6.4-1's rename and T6.5-1's file moves, the impact reports of
+// T5.6-1 through T5.6-6 and T9-1 through T9.3-3, and the `review` reports
+// of T10.7-1, T10.7-5 through T10.7-10, and T10.1-4 — never by reading its
 // source):
 //
 // - A findings report — a failing `build`'s validation errors, `check`'s
@@ -128,12 +138,31 @@
 //   impact edges are its own `references` and `embeds` edges, the reported
 //   one targeting the path's first node, 9.3), and the witness path in
 //   order from the edge's target.
+// - A listing — `review list` without `--json` (SPEC 10.7) — is empty with
+//   no session, and is otherwise one line per session, in the order 10.7
+//   fixes: `<name> <strategy> <status>=<n> …` for a healthy session — its
+//   strategy, then its item counts by stored status, each `<status>=<n>`
+//   (the built product prints all five statuses of 10.3, zeros included)
+//   — or `<name> corrupt` for a corrupt one, reported by name in place of
+//   those fields; then each corrupt session's condition-21 finding (14.21)
+//   as a finding line of the findings report above, and that report's
+//   count line. A line holding a `: ` is a finding line, any other a
+//   session line; a strategy word spelling a built-in strategy (SPEC 10:
+//   `path-blocks`, `audit`, `coverage`) reads as its name, any other word
+//   as printed.
+// - A status report — `review status <name>` without `--json` (SPEC 10.7)
+//   — is one row per item, in the order 10.7 fixes:
+//   `<id> <kind> <scope> <status> blocked=<true|false>` — the scope every
+//   word between the kind and the status — then the totals line
+//   `totals: <status>=<n> …` (the built product prints all five statuses,
+//   zeros included), the line a session holding no item prints alone.
 // - A code is recognized at the position the layout gives it, spelled as
 //   human.ts's `codeMention` spells one, over the whole segment: its words
 //   case-insensitive, joined by one character that is neither letter nor
 //   digit or by nothing — the findings report prints `missing-id`, the
 //   standard-error message `configuration error`. A segment spelling no
-//   stable code is no code.
+//   stable code is no code. An item status, an item kind, and a built-in
+//   strategy's name — closed vocabularies — are read the same way.
 // - A path is a plain path as it stands, or the marked byte form 12.0
 //   requires for a non-UTF-8 path — `<bytes <hex>>`, the path's exact
 //   bytes as lowercase hexadecimal, two digits per byte — recognized by
@@ -173,7 +202,15 @@
 //   ` -> `, ` — attributed to:`, ` — via `, or `; path: `, or ending in
 //   ` (deleted)`, a location holding ` — via `, an identity beginning with
 //   a space, and an edge kind holding one — the data of T5.6-*, T9-*, and
-//   T9.x-* hold none.
+//   T9.x-* hold none. In a listing, a session line holding `: ` reads as a
+//   finding line and a finding line holding none as a session line (no
+//   line-feed continuation is read there: a condition-21 finding concerns
+//   `.xspec/reviews/<name>.json`, whose valid session name holds no line
+//   feed, 10.1), and a name holding a space cannot be told from its
+//   strategy — 10.1's session names hold neither. In a status report, an
+//   item id holding a space or spelling `totals:` mis-decodes, and a scope
+//   holding two spaces in a row fails the decode — the item ids and
+//   identities of T10.7-6's and T10.1-4's sessions hold none.
 // - A code's words at the code's position are the code — human.ts's
 //   convention, under which `missing ID` carries `missing-id` — so a line
 //   whose code token is gone but whose message opens with its own code's
@@ -203,6 +240,21 @@
 //   order free (12.7's `from`-byte order is the JSON form's, T12.0-15): its
 //   pairs as a multiset of `from`/`to` pairs, a pair the human report
 //   omits, changes, or lists beside the twin's named as such.
+// - A listing's comparison is exact on the listing model: its sessions
+//   matched by name, every session once, corrupt exactly where the twin's
+//   is, a healthy one's strategy equal and its counts by stored status
+//   equal under each status of 10.3 — a status a line or the twin's
+//   record holds no count for reading as 0, the review adapter's own
+//   convention (whether a zero count appears is concrete shape, H-3) — and
+//   the sessions in the twin's order: T12.0-15 lists 10.7's `list` among
+//   the orders SPEC fixes for the report itself (byte order of session
+//   name; the twin's order the home test asserts); its findings compared
+//   as a findings report's are, order free. A status report's comparison
+//   likewise: its rows matched by id, every row once, kind, scope, status,
+//   and blocked state equal, in the twin's order (10.7's item order), and
+//   its totals equal under each status, a status with no total reading as
+//   0 — a report printing no totals line reads as all zeros, which fails
+//   wherever the twin totals any item.
 // - An impact report's comparison is exact on the impact model, its order
 //   free (T12.0-15 lists none for `impact`: SPEC fixes no order for the
 //   report itself). Its unit is one category of one requirement entry —
@@ -237,16 +289,24 @@ import type {
   FindingLocation,
   GraphEdge,
   ImpactReport,
+  ItemKind,
+  ItemStatus,
   PathValue,
   PerformedOperationReport,
   PreviewDeltaDatum,
   PreviewEdit,
   PreviewEditClass,
   PreviewReport,
+  SessionListEntry,
+  SessionListReport,
+  SessionStatusReport,
+  SessionStatusRow,
 } from "./model.js";
 import {
   CHANGE_CATEGORIES,
   EDGE_KINDS,
+  ITEM_KINDS,
+  ITEM_STATUSES,
   PREVIEW_EDIT_CLASSES,
 } from "./model.js";
 
@@ -411,6 +471,81 @@ export interface HumanImpactReport {
   readonly baseline: string | null;
   readonly categories: readonly HumanImpactCategoryLine[];
   readonly code: readonly HumanImpactedCodeLine[];
+  /** The report's text, for diagnoses. */
+  readonly text: string;
+}
+
+/**
+ * Counts by item status as a human report prints them (SPEC 10.3, 10.7):
+ * one per count printed — a status the report prints no count for reads as
+ * 0 in the comparison (the module header).
+ */
+export type HumanStatusCounts = Readonly<Partial<Record<ItemStatus, number>>>;
+
+/**
+ * One session line of a human `review list` report (SPEC 10.7), with where
+ * it stood: the session's name and, for a healthy session, its strategy
+ * and its item counts by stored status — or, for a corrupt one, the mark
+ * printed in their place.
+ */
+export interface HumanSessionListEntry {
+  readonly name: string;
+  readonly corrupt: boolean;
+  /**
+   * A healthy session's strategy — a built-in strategy's name (SPEC 10)
+   * where the line spells one, else the word as printed — `null` for a
+   * corrupt session.
+   */
+  readonly strategy: string | null;
+  /** A healthy session's counts by stored status; none for a corrupt one. */
+  readonly counts: HumanStatusCounts;
+  /** The report line it was decoded from, 1-based. */
+  readonly line: number;
+  /** That line's text. */
+  readonly text: string;
+}
+
+/**
+ * A human `review list` report decoded onto the listing model (TEST-SPEC
+ * T12.0-15; SPEC 10.7): its session lines in the report's own order — the
+ * order 10.7 fixes for the report itself, byte order of session name — and
+ * its findings, each corrupt session's condition 21 (14.21), order free.
+ */
+export interface HumanSessionListReport {
+  readonly sessions: readonly HumanSessionListEntry[];
+  readonly findings: readonly HumanFinding[];
+  /** The report's text, for diagnoses. */
+  readonly text: string;
+}
+
+/**
+ * One item row of a human `review status` report (SPEC 10.7), with where
+ * it stood: the item's id, kind, scope node, status (read-time
+ * invalidation applied, 10.4), and blocked state (10.3).
+ */
+export interface HumanStatusRow {
+  readonly id: string;
+  readonly kind: ItemKind;
+  /** The scope node's identity, as the row prints it. */
+  readonly scope: string;
+  readonly status: ItemStatus;
+  readonly blocked: boolean;
+  /** The report line it was decoded from, 1-based. */
+  readonly line: number;
+  /** That line's text. */
+  readonly text: string;
+}
+
+/**
+ * A human `review status` report decoded onto the status model (TEST-SPEC
+ * T12.0-15; SPEC 10.7): its item rows in the report's own order — the
+ * order 10.7 fixes for the report itself, item order — and its totals by
+ * status.
+ */
+export interface HumanSessionStatusReport {
+  readonly items: readonly HumanStatusRow[];
+  /** The totals line's totals, `null` where the report prints none. */
+  readonly totals: HumanStatusCounts | null;
   /** The report's text, for diagnoses. */
   readonly text: string;
 }
@@ -1832,6 +1967,418 @@ export function decodeHumanImpactReport(
   return guardSyncStep(step, () => decodeImpactBytes(bytes, context));
 }
 
+// --- the review list and status reports -----------------------------------------------
+
+/** One entry of a closed vocabulary with its words and their spelling. */
+interface VocabularySpelling<T> {
+  readonly entry: T;
+  /** The entry's words, naming it in a diagnosis. */
+  readonly words: string;
+  readonly pattern: RegExp;
+}
+
+/** Each entry's spelling, as a stable code's (the module header). */
+function vocabularySpellings<T extends string>(
+  entries: readonly T[],
+): readonly VocabularySpelling<T>[] {
+  return entries.map((entry) => ({
+    entry,
+    words: entry,
+    pattern: phrasePattern(entry),
+  }));
+}
+
+/**
+ * The entry of a closed vocabulary a whole word spells (the module
+ * header), or `undefined` for a word spelling none.
+ */
+function spelledEntry<T>(
+  word: string,
+  spellings: readonly VocabularySpelling<T>[],
+  vocabulary: string,
+): T | undefined {
+  const spelled = spellings.filter(({ pattern }) => pattern.test(word));
+  if (spelled.length > 1) {
+    throw new Error(
+      `harness defect: the word ${JSON.stringify(word)} spells the ${vocabulary} ` +
+        `${spelled.map(({ words }) => words).join(", ")} at once — a closed vocabulary no ` +
+        `two of whose spellings coincide`,
+    );
+  }
+  return spelled[0]?.entry;
+}
+
+/** The item statuses' spellings (SPEC 10.3). */
+const ITEM_STATUS_SPELLINGS = vocabularySpellings(ITEM_STATUSES);
+
+/** The item kinds' spellings (SPEC 10.4–10.7). */
+const ITEM_KIND_SPELLINGS = vocabularySpellings(ITEM_KINDS);
+
+/** The built-in strategies' names (SPEC 10) and their spellings. */
+const STRATEGY_SPELLINGS = vocabularySpellings([
+  "path-blocks",
+  "audit",
+  "coverage",
+] as const);
+
+/** A count as the list and status reports print one: `<status>=<n>`. */
+const COUNT_TOKEN = /^([^=]+)=(0|[1-9][0-9]*)$/;
+
+/**
+ * Counts by status from their tokens (the module header): each
+ * `<status>=<n>`, the status spelled as a code is and counted once, the
+ * count decimal as the layout spells it — no sign, no leading zero.
+ */
+function decodeStatusCounts(
+  tokens: readonly string[],
+  what: string,
+  adapter: string,
+  where: string,
+  report: string,
+): HumanStatusCounts {
+  const counts: Partial<Record<ItemStatus, number>> = {};
+  for (const token of tokens) {
+    const match = COUNT_TOKEN.exec(token);
+    if (match === null) {
+      decodeFail(
+        adapter,
+        where,
+        `${what} each \`<status>=<n>\` — a status SPEC 10.3 lists and its count in ` +
+          `decimal — got ${JSON.stringify(token)}`,
+        report,
+      );
+    }
+    const status = spelledEntry(
+      match[1]!,
+      ITEM_STATUS_SPELLINGS,
+      "item statuses",
+    );
+    if (status === undefined) {
+      decodeFail(
+        adapter,
+        where,
+        `${what} each \`<status>=<n>\`, the status one SPEC 10.3 lists ` +
+          `(${ITEM_STATUSES.join(", ")}) — got ${JSON.stringify(match[1])}`,
+        report,
+      );
+    }
+    if (counts[status] !== undefined) {
+      decodeFail(
+        adapter,
+        where,
+        `${what} each status counted once — ${status} is counted twice, so which ` +
+          "count is its is ambiguous",
+        report,
+      );
+    }
+    const count = Number(match[2]);
+    if (!Number.isSafeInteger(count)) {
+      decodeFail(
+        adapter,
+        where,
+        `${what} counts within the safe integers, got ${match[2]!}`,
+        report,
+      );
+    }
+    counts[status] = count;
+  }
+  return counts;
+}
+
+/** The word a listing prints in a corrupt session's fields' place (the module header). */
+const CORRUPT_WORD = /^corrupt$/i;
+
+/**
+ * One session line of a listing (the module header): `<name> corrupt`, or
+ * `<name> <strategy>` and the session's counts `<status>=<n>`.
+ */
+function decodeSessionLine(
+  text: string,
+  line: number,
+  adapter: string,
+  report: string,
+): HumanSessionListEntry {
+  const where = atLine(line, text);
+  const layout =
+    "a session line `<name> <strategy> <status>=<n> …` — the session's name, its strategy, " +
+    "and its item counts by stored status — or `<name> corrupt`, a corrupt session reported " +
+    "by name as corrupt in place of those fields (SPEC 10.7)";
+  const tokens = text.split(" ");
+  if (tokens.length < 2 || tokens.some((token) => token.length === 0)) {
+    decodeFail(
+      adapter,
+      where,
+      `${layout}, its words separated by single spaces`,
+      report,
+    );
+  }
+  const [name, second, ...rest] = tokens as [string, string, ...string[]];
+  if (CORRUPT_WORD.test(second)) {
+    if (rest.length > 0) {
+      decodeFail(
+        adapter,
+        where,
+        `${layout} — nothing after \`corrupt\`: a corrupt session has no fields to print`,
+        report,
+      );
+    }
+    return { name, corrupt: true, strategy: null, counts: {}, line, text };
+  }
+  if (COUNT_TOKEN.test(second)) {
+    decodeFail(
+      adapter,
+      where,
+      `${layout} — the session's strategy before its counts, got the count ` +
+        `${JSON.stringify(second)} in its place`,
+      report,
+    );
+  }
+  return {
+    name,
+    corrupt: false,
+    strategy:
+      spelledEntry(second, STRATEGY_SPELLINGS, "built-in strategies") ?? second,
+    counts: decodeStatusCounts(
+      rest,
+      "a session line's counts:",
+      adapter,
+      where,
+      report,
+    ),
+    line,
+    text,
+  };
+}
+
+/** The decode of a listing's bytes, under its guard. */
+function decodeSessionListBytes(
+  bytes: Uint8Array,
+  context: string | undefined,
+): HumanSessionListReport {
+  const adapter = adapterName("review list report", context);
+  const report = utf8Text(bytes, adapter, "report");
+  const lines = reportLines(report);
+  const sessions: HumanSessionListEntry[] = [];
+  const findings: HumanFinding[] = [];
+  let counted: number | undefined = undefined;
+  for (const [index, text] of lines.entries()) {
+    const line = index + 1;
+    if (index === lines.length - 1 && COUNT_LINE.test(text)) {
+      counted = Number(COUNT_LINE.exec(text)![1]);
+      continue;
+    }
+    if (text.length === 0) {
+      decodeFail(
+        adapter,
+        atLine(line, text),
+        "a session line or a finding line, never an empty line",
+        report,
+      );
+    }
+    if (text.includes(SEGMENT_SEPARATOR)) {
+      findings.push(decodeFindingLine(text, line, adapter, report));
+    } else {
+      sessions.push(decodeSessionLine(text, line, adapter, report));
+    }
+  }
+  if (counted !== undefined && counted !== findings.length) {
+    decodeFail(
+      adapter,
+      atLine(lines.length, lines[lines.length - 1]!),
+      `a count line equal to the ${String(findings.length)} finding line(s) the report lists — ` +
+        `it counts ${String(counted)}`,
+      report,
+    );
+  }
+  return { sessions, findings, text: report };
+}
+
+/**
+ * Decode a human `review list` report — its standard output without
+ * `--json` (SPEC 10.7, 12.0) — onto the listing model (the module header's
+ * layout): one {@link HumanSessionListEntry} per session line, in the
+ * report's order, and one {@link HumanFinding} per finding line. Takes a
+ * run (its stdout bytes) or the report's bytes. Fails diagnosed on bytes
+ * that are not valid UTF-8, an empty line, a session line without its
+ * strategy or with words after `corrupt`, a count that is not `<status>=<n>`
+ * over a status SPEC 10.3 lists or that counts a status twice, a finding
+ * line fitting no layout, and a count line disagreeing with the finding
+ * lines. A harness step under its own guard (TEST-SPEC S-3).
+ */
+export function decodeHumanSessionListReport(
+  output: RunResult | Uint8Array,
+  context?: string,
+): HumanSessionListReport {
+  const bytes = output instanceof Uint8Array ? output : output.stdoutBytes;
+  const step =
+    output instanceof Uint8Array
+      ? "decoding a human review list report (decodeHumanSessionListReport)"
+      : `decoding the human review list report of ${output.commandLine} (decodeHumanSessionListReport)`;
+  return guardSyncStep(step, () => decodeSessionListBytes(bytes, context));
+}
+
+/** A status row's blocked state as the layout prints it (the module header). */
+const BLOCKED_TOKEN = /^blocked=(true|false)$/i;
+
+/** The totals line's opening (the module header). */
+const TOTALS_OPENING = /^totals:/i;
+
+/**
+ * One item row of a status report (the module header):
+ * `<id> <kind> <scope> <status> blocked=<true|false>`, the scope every word
+ * between the kind and the status.
+ */
+function decodeStatusRowLine(
+  text: string,
+  line: number,
+  adapter: string,
+  report: string,
+): HumanStatusRow {
+  const where = atLine(line, text);
+  const layout =
+    "an item row `<id> <kind> <scope> <status> blocked=<true|false>` — the item's id, kind, " +
+    "scope node, status, and blocked state (SPEC 10.7) — or the totals line " +
+    "`totals: <status>=<n> …`";
+  const tokens = text.split(" ");
+  if (tokens.length < 5 || tokens.some((token) => token.length === 0)) {
+    decodeFail(
+      adapter,
+      where,
+      `${layout}, its words separated by single spaces`,
+      report,
+    );
+  }
+  const kindWord = tokens[1]!;
+  const kind = spelledEntry(kindWord, ITEM_KIND_SPELLINGS, "item kinds");
+  if (kind === undefined) {
+    decodeFail(
+      adapter,
+      where,
+      `${layout} — the item's kind after its id, one SPEC 10.4–10.7 names ` +
+        `(${ITEM_KINDS.join(", ")}), got ${JSON.stringify(kindWord)}`,
+      report,
+    );
+  }
+  const statusWord = tokens[tokens.length - 2]!;
+  const status = spelledEntry(
+    statusWord,
+    ITEM_STATUS_SPELLINGS,
+    "item statuses",
+  );
+  if (status === undefined) {
+    decodeFail(
+      adapter,
+      where,
+      `${layout} — the item's status before its blocked state, one SPEC 10.3 lists ` +
+        `(${ITEM_STATUSES.join(", ")}), got ${JSON.stringify(statusWord)}`,
+      report,
+    );
+  }
+  const blocked = BLOCKED_TOKEN.exec(tokens[tokens.length - 1]!);
+  if (blocked === null) {
+    decodeFail(
+      adapter,
+      where,
+      `${layout} — the item's blocked state last, \`blocked=true\` or \`blocked=false\` ` +
+        `(SPEC 10.3), got ${JSON.stringify(tokens[tokens.length - 1])}`,
+      report,
+    );
+  }
+  return {
+    id: tokens[0]!,
+    kind,
+    scope: tokens.slice(2, -2).join(" "),
+    status,
+    blocked: blocked[1]!.toLowerCase() === "true",
+    line,
+    text,
+  };
+}
+
+/** The decode of a status report's bytes, under its guard. */
+function decodeSessionStatusBytes(
+  bytes: Uint8Array,
+  context: string | undefined,
+): HumanSessionStatusReport {
+  const adapter = adapterName("review status report", context);
+  const report = utf8Text(bytes, adapter, "report");
+  const lines = reportLines(report);
+  const items: HumanStatusRow[] = [];
+  let totals:
+    { readonly counts: HumanStatusCounts; readonly line: number } | undefined =
+    undefined;
+  for (const [index, text] of lines.entries()) {
+    const line = index + 1;
+    const where = atLine(line, text);
+    if (text.length === 0) {
+      decodeFail(
+        adapter,
+        where,
+        "an item row or the totals line, never an empty line",
+        report,
+      );
+    }
+    const opening = TOTALS_OPENING.exec(text);
+    if (opening === null) {
+      items.push(decodeStatusRowLine(text, line, adapter, report));
+      continue;
+    }
+    if (totals !== undefined) {
+      decodeFail(
+        adapter,
+        where,
+        `one totals line — line ${String(totals.line)} prints the totals already, so which ` +
+          "are the session's is ambiguous",
+        report,
+      );
+    }
+    const rest = text.slice(opening[0].length);
+    if (rest.length > 0 && !rest.startsWith(" ")) {
+      decodeFail(
+        adapter,
+        where,
+        "the totals line `totals: <status>=<n> …`, a space after its opening",
+        report,
+      );
+    }
+    totals = {
+      counts: decodeStatusCounts(
+        rest.length === 0 ? [] : rest.slice(1).split(" "),
+        "the totals line's totals:",
+        adapter,
+        where,
+        report,
+      ),
+      line,
+    };
+  }
+  return { items, totals: totals?.counts ?? null, text: report };
+}
+
+/**
+ * Decode a human `review status <name>` report — its standard output
+ * without `--json` (SPEC 10.7, 12.0) — onto the status model (the module
+ * header's layout): one {@link HumanStatusRow} per item row, in the
+ * report's order, and the totals line's totals. Takes a run (its stdout
+ * bytes) or the report's bytes. Fails diagnosed on bytes that are not
+ * valid UTF-8, an empty line, a row without its kind, status, or blocked
+ * state where the layout places them, a totals line printed twice or
+ * malformed, and a total that is not `<status>=<n>` over a status SPEC 10.3
+ * lists or that counts a status twice. A harness step under its own guard
+ * (TEST-SPEC S-3).
+ */
+export function decodeHumanSessionStatusReport(
+  output: RunResult | Uint8Array,
+  context?: string,
+): HumanSessionStatusReport {
+  const bytes = output instanceof Uint8Array ? output : output.stdoutBytes;
+  const step =
+    output instanceof Uint8Array
+      ? "decoding a human review status report (decodeHumanSessionStatusReport)"
+      : `decoding the human review status report of ${output.commandLine} (decodeHumanSessionStatusReport)`;
+  return guardSyncStep(step, () => decodeSessionStatusBytes(bytes, context));
+}
+
 // --- the comparisons with the --json twin ---------------------------------------------
 
 /**
@@ -2862,5 +3409,350 @@ export function assertHumanImpactReportCarries(
 ): HumanImpactReport {
   const decoded = decodeHumanImpactReport(human, context);
   assertHumanImpactCarries(decoded, json, context);
+  return decoded;
+}
+
+// --- the review list and status comparisons with the --json twin --------------------
+
+/**
+ * A count by `status` (SPEC 10.3), a status a record or a report holds no
+ * count for reading as 0 (the module header).
+ */
+function countOf(
+  counts: Readonly<Partial<Record<string, number>>> | null,
+  status: ItemStatus,
+): number {
+  return counts?.[status] ?? 0;
+}
+
+/** Every status whose count the two differ in, named. */
+function countDifferences(
+  json: Readonly<Record<string, number>>,
+  human: HumanStatusCounts | null,
+  what: string,
+): string[] {
+  return ITEM_STATUSES.flatMap((status) => {
+    const expected = countOf(json, status);
+    const printed = countOf(human, status);
+    return expected === printed
+      ? []
+      : [
+          `${what} under ${status} is ${String(printed)} where the --json twin's is ` +
+            String(expected),
+        ];
+  });
+}
+
+/** A listed session, rendered for a diagnosis. */
+function describeSession(entry: {
+  readonly name: string;
+  readonly corrupt: boolean;
+  readonly strategy?: string | null;
+  readonly counts?: Readonly<Partial<Record<string, number>>>;
+}): string {
+  if (entry.corrupt)
+    return `the session ${JSON.stringify(entry.name)} (corrupt)`;
+  const counts = ITEM_STATUSES.map(
+    (status) => `${status} ${String(countOf(entry.counts ?? null, status))}`,
+  ).join(", ");
+  return (
+    `the session ${JSON.stringify(entry.name)} (${String(entry.strategy)}; ` +
+    `${counts})`
+  );
+}
+
+/**
+ * The matches of the `--json` twin's elements among the human report's,
+ * each the first unmatched one bearing its key — linear in both — the
+ * twin's elements without one, and the human elements left over.
+ */
+function matchByKey<J, H>(
+  json: readonly J[],
+  human: readonly H[],
+  jsonKey: (element: J) => string,
+  humanKey: (element: H) => string,
+): {
+  readonly pairs: readonly { readonly json: J; readonly human: H }[];
+  readonly missing: readonly J[];
+  readonly extra: readonly H[];
+} {
+  const queued = new Map<string, number[]>();
+  human.forEach((element, index) => {
+    const key = humanKey(element);
+    const indices = queued.get(key);
+    if (indices === undefined) queued.set(key, [index]);
+    else indices.push(index);
+  });
+  const matched = new Set<number>();
+  const pairs: { readonly json: J; readonly human: H }[] = [];
+  const missing: J[] = [];
+  for (const element of json) {
+    const at = queued.get(jsonKey(element))?.shift();
+    if (at === undefined) {
+      missing.push(element);
+      continue;
+    }
+    matched.add(at);
+    pairs.push({ json: element, human: human[at]! });
+  }
+  return {
+    pairs,
+    missing,
+    extra: human.filter((_element, index) => !matched.has(index)),
+  };
+}
+
+/**
+ * Where the matched elements' order in the human report — by the lines
+ * they stand on — differs from the `--json` twin's, named (the module
+ * header: 10.7 fixes the order of a listing and of a status report for the
+ * report itself).
+ */
+function orderProblem<J, H extends { readonly line: number }>(
+  pairs: readonly { readonly json: J; readonly human: H }[],
+  key: (element: J) => string,
+  what: string,
+  order: string,
+): string[] {
+  const jsonOrder = pairs.map((pair) => key(pair.json));
+  const humanOrder = [...pairs]
+    .sort((a, b) => a.human.line - b.human.line)
+    .map((pair) => key(pair.json));
+  if (JSON.stringify(humanOrder) === JSON.stringify(jsonOrder)) return [];
+  return [
+    `the human report lists the ${what} in the order ${JSON.stringify(humanOrder)} where ` +
+      `the --json twin lists them in the order ${JSON.stringify(jsonOrder)} — SPEC 10.7 fixes ` +
+      `the order for the report itself, ${order}`,
+  ];
+}
+
+/**
+ * What the human listing's session lines omit, change, misorder, or list
+ * beside the `--json` twin's sessions (the module header).
+ */
+function sessionListProblems(
+  json: readonly SessionListEntry[],
+  human: readonly HumanSessionListEntry[],
+): string[] {
+  const { pairs, missing, extra } = matchByKey(
+    json,
+    human,
+    (entry) => entry.name,
+    (entry) => entry.name,
+  );
+  const problems: string[] = missing.map(
+    (entry) =>
+      `${describeSession(entry)} is missing — no session line names it (SPEC 10.7: \`list\` ` +
+      "reports every session)",
+  );
+  for (const pair of pairs) {
+    const where = `line ${String(pair.human.line)} (the session ${JSON.stringify(pair.json.name)})`;
+    if (pair.json.corrupt !== pair.human.corrupt) {
+      problems.push(
+        pair.json.corrupt
+          ? `${where} lists the session with fields where the --json twin reports it corrupt, ` +
+              "by name in place of its fields (SPEC 10.7)"
+          : `${where} reports the session corrupt where the --json twin lists it with its ` +
+              "strategy and counts",
+      );
+      continue;
+    }
+    if (pair.json.corrupt) continue;
+    if (pair.json.strategy !== pair.human.strategy) {
+      problems.push(
+        `${where} lists the strategy ${JSON.stringify(pair.human.strategy)} where the --json ` +
+          `twin's is ${JSON.stringify(pair.json.strategy)}`,
+      );
+    }
+    problems.push(
+      ...countDifferences(
+        pair.json.counts,
+        pair.human.counts,
+        `${where}: its item count by stored status`,
+      ),
+    );
+  }
+  for (const entry of extra) {
+    problems.push(
+      `line ${String(entry.line)} lists ${describeSession(entry)}, which the --json twin lacks`,
+    );
+  }
+  problems.push(
+    ...orderProblem(
+      pairs,
+      (entry) => entry.name,
+      "sessions",
+      "byte order of session name",
+    ),
+  );
+  return problems;
+}
+
+/**
+ * Assert a decoded human `review list` report carries the information of
+ * its `--json` twin's decoded listing (TEST-SPEC T12.0-15; SPEC 10.7,
+ * 14.21; the module header's comparison): every session, matched by name,
+ * corrupt exactly where the twin's is, and a healthy one's strategy and
+ * item counts by stored status, each status's count equal (one printed or
+ * recorded with none reading as 0); the sessions in the twin's order (10.7
+ * fixes it: byte order of session name); and the listing's findings — each
+ * corrupt session's condition 21 — as `assertHumanFindingsCarry` compares
+ * findings, order free. Fails diagnosed, naming every datum the human
+ * report omits, changes, misorders, or lists beside its twin's.
+ */
+export function assertHumanSessionListCarries(
+  human: HumanSessionListReport,
+  json: SessionListReport,
+  context: string,
+): void {
+  const problems = sessionListProblems(json.sessions, human.sessions);
+  if (problems.length > 0) {
+    fail(
+      `${context}: the human \`review list\` report does not carry the listing its --json ` +
+        "twin carries (TEST-SPEC T12.0-15: every session's name with its strategy and item " +
+        "counts by stored status, or its corruption in their place, in the order 10.7 fixes, " +
+        "and each corrupt session's condition-21 finding — SPEC 10.7, 14.21 — decoded by the " +
+        "human-report adapter, H-3; wording and layout free):\n" +
+        `${problems.map((problem) => `- ${problem}`).join("\n")}\n` +
+        `Human report: ${excerpt(human.text)}`,
+    );
+  }
+  assertHumanFindingsCarry(
+    { findings: human.findings },
+    (json.findings ?? []).map(findingInformation),
+    `${context} — the listing's findings`,
+  );
+}
+
+/**
+ * Decode a run's human `review list` report and assert it carries the
+ * information of its `--json` twin's decoded listing (TEST-SPEC T12.0-15):
+ * `decodeHumanSessionListReport`, then `assertHumanSessionListCarries`.
+ * Returns the decoded report.
+ */
+export function assertHumanSessionListReportCarries(
+  human: RunResult,
+  json: SessionListReport,
+  context: string,
+): HumanSessionListReport {
+  const decoded = decodeHumanSessionListReport(human, context);
+  assertHumanSessionListCarries(decoded, json, context);
+  return decoded;
+}
+
+/** A status row, rendered for a diagnosis. */
+function describeStatusRow(row: SessionStatusRow): string {
+  return (
+    `the item ${JSON.stringify(row.id)} (${row.kind} of ${JSON.stringify(row.scope)}, ` +
+    `${row.status}, ${row.blocked ? "blocked" : "unblocked"})`
+  );
+}
+
+/**
+ * What the human status report's rows omit, change, misorder, or list
+ * beside the `--json` twin's rows (the module header).
+ */
+function statusRowProblems(
+  json: readonly SessionStatusRow[],
+  human: readonly HumanStatusRow[],
+): string[] {
+  const { pairs, missing, extra } = matchByKey(
+    json,
+    human,
+    (row) => row.id,
+    (row) => row.id,
+  );
+  const problems: string[] = missing.map(
+    (row) =>
+      `${describeStatusRow(row)} is missing — no row names it (SPEC 10.7: \`status\` reports ` +
+      "the session's items)",
+  );
+  for (const pair of pairs) {
+    const where = `line ${String(pair.human.line)} (the item ${JSON.stringify(pair.json.id)})`;
+    if (pair.json.kind !== pair.human.kind) {
+      problems.push(
+        `${where} prints the kind ${pair.human.kind} where the --json twin's is ${pair.json.kind}`,
+      );
+    }
+    if (pair.json.scope !== pair.human.scope) {
+      problems.push(
+        `${where} prints the scope ${JSON.stringify(pair.human.scope)} where the --json ` +
+          `twin's is ${JSON.stringify(pair.json.scope)}`,
+      );
+    }
+    if (pair.json.status !== pair.human.status) {
+      problems.push(
+        `${where} prints the status ${pair.human.status} where the --json twin's is ` +
+          `${pair.json.status} (read-time invalidation applied, SPEC 10.4)`,
+      );
+    }
+    if (pair.json.blocked !== pair.human.blocked) {
+      problems.push(
+        `${where} prints the item ${pair.human.blocked ? "blocked" : "unblocked"} where the ` +
+          `--json twin reports it ${pair.json.blocked ? "blocked" : "unblocked"} (SPEC 10.3)`,
+      );
+    }
+  }
+  for (const row of extra) {
+    problems.push(
+      `line ${String(row.line)} prints a row for the item ${JSON.stringify(row.id)}, which ` +
+        "the --json twin lacks",
+    );
+  }
+  problems.push(
+    ...orderProblem(pairs, (row) => row.id, "items", "item order (10.5, 10.6)"),
+  );
+  return problems;
+}
+
+/**
+ * Assert a decoded human `review status` report carries the information of
+ * its `--json` twin's decoded status report (TEST-SPEC T12.0-15; SPEC 10.7;
+ * the module header's comparison): every item row, matched by id, with its
+ * kind, scope node, status, and blocked state equal; the rows in the twin's
+ * order (10.7 fixes it: item order); and the totals by status, each
+ * status's total equal (one printed or reported with none reading as 0).
+ * Fails diagnosed, naming every datum the human report omits, changes,
+ * misorders, or lists beside its twin's.
+ */
+export function assertHumanSessionStatusCarries(
+  human: HumanSessionStatusReport,
+  json: SessionStatusReport,
+  context: string,
+): void {
+  const problems = [
+    ...statusRowProblems(json.items, human.items),
+    ...countDifferences(
+      json.totals,
+      human.totals,
+      human.totals === null
+        ? "the report prints no totals line, so its total"
+        : "the total",
+    ),
+  ];
+  if (problems.length === 0) return;
+  fail(
+    `${context}: the human \`review status\` report does not carry the information its ` +
+      "--json twin carries (TEST-SPEC T12.0-15: every item's id, kind, scope, status, and " +
+      "blocked state in the order 10.7 fixes, and the totals by status — SPEC 10.7 — " +
+      "decoded by the human-report adapter, H-3; wording and layout free):\n" +
+      `${problems.map((problem) => `- ${problem}`).join("\n")}\n` +
+      `Human report: ${excerpt(human.text)}`,
+  );
+}
+
+/**
+ * Decode a run's human `review status` report and assert it carries the
+ * information of its `--json` twin's decoded status report (TEST-SPEC
+ * T12.0-15): `decodeHumanSessionStatusReport`, then
+ * `assertHumanSessionStatusCarries`. Returns the decoded report.
+ */
+export function assertHumanSessionStatusReportCarries(
+  human: RunResult,
+  json: SessionStatusReport,
+  context: string,
+): HumanSessionStatusReport {
+  const decoded = decodeHumanSessionStatusReport(human, context);
+  assertHumanSessionStatusCarries(decoded, json, context);
   return decoded;
 }
