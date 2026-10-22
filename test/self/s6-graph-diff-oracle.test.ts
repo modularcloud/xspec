@@ -33,9 +33,25 @@
 //     a relocated non-originating member with a dependency cause, and
 //     edge-bearing added/deleted members under kept ancestors, each
 //     predicting `upstream-changed` as tolerated-optional;
+//   * the relocation tolerance (opt-in, `relocatedOriginators:
+//     "tolerate"`, the path-blocks oracle's — P-16, S-6), on T10.5-9's
+//     present-node shapes: the move of `P1.M` under `P2` and then its
+//     child's deletion, the moved node `changed` — refused by default, and
+//     under the option `descendant-changed` tolerated-optional on its two
+//     one-sided holders and required on its both-sides holder and on the
+//     moved node itself; the twin stopping before the deletion (no
+//     relocated originator) predicted alike under either setting; and a
+//     holder of a relocated changed node and of a changed node it holds on
+//     both sides, the latter's `descendant-changed` required, with an added
+//     node below the relocated one;
+// and on every vector the hash facts beside the categories (the oracle's
+// module header): the kept nodes whose subtreeHash and effectiveHash
+// changed, hand-computed from SPEC 5.5's recursions, and an empty
+// `optionalDescendant` wherever the default guard admits the input;
 // plus misuse guards: relocated originators, an ownKey not covering the
-// child tokens, incomplete graphs, and contains/dependency cycles throw
-// plain errors (harness defects), never diagnosed product failures.
+// child tokens, incomplete graphs, contains/dependency cycles, and an
+// unknown relocation setting throw plain errors (harness defects), never
+// diagnosed product failures.
 
 import { expect, test } from "vitest";
 import { computeGraphDiff } from "../helpers/oracles/graph-diff.js";
@@ -141,8 +157,15 @@ test("S-6 (5.6 leaf edit): leaf changed; ancestors descendant-changed; siblings 
   expect(sortedSet(diff.added)).toEqual([]);
   expect(sortedSet(diff.deleted)).toEqual([]);
   expect(sortedSet(diff.optionalUpstream)).toEqual([]);
+  expect(sortedSet(diff.optionalDescendant)).toEqual([]);
   // "all attributed to the leaf": the attribution bound is exactly the leaf.
   expect(sortedSet(diff.originators)).toEqual([LEAF]);
+  // Hash facts: the path's subtreeHashes; beside them every dependent's and
+  // its ancestors' effectiveHashes (SPEC 5.5).
+  expect(sortedSet(diff.subtreeChanged)).toEqual([LEAF, MID, TOP, TREE].sort());
+  expect(sortedSet(diff.effectiveChanged)).toEqual(
+    [LEAF, MID, TOP, TREE, ONLEAF_DEP, ONLEAF, ONMID_DEP, ONMID, DEPS].sort(),
+  );
   expect(tableOf(diff)).toEqual({
     [LEAF]: ["changed"],
     [MID]: ["descendant-changed"],
@@ -214,7 +237,29 @@ test("S-6 (5.6 child add/remove): C changed as added or deleted, P changed and d
   expect(sortedSet(diff.added)).toEqual([NEW]);
   expect(sortedSet(diff.deleted)).toEqual([GONE]);
   expect(sortedSet(diff.optionalUpstream)).toEqual([]);
+  expect(sortedSet(diff.optionalDescendant)).toEqual([]);
   expect(sortedSet(diff.originators)).toEqual([NEW, P_ADD, GONE, P_REM].sort());
+  // Hash facts over kept nodes alone: each parent and its ancestors in both
+  // hashes, each parent's dependents and their ancestors in effectiveHash.
+  expect(sortedSet(diff.subtreeChanged)).toEqual(
+    [P_ADD, WRAP, ADD, P_REM, WRAP2, REM].sort(),
+  );
+  expect(sortedSet(diff.effectiveChanged)).toEqual(
+    [
+      P_ADD,
+      WRAP,
+      ADD,
+      HOLDADD_DEP,
+      HOLDADD,
+      ADD_DEPS,
+      P_REM,
+      WRAP2,
+      REM,
+      HOLDREM_DEP,
+      HOLDREM,
+      REM_DEPS,
+    ].sort(),
+  );
   expect(tableOf(diff)).toEqual({
     // Add arm.
     [NEW]: ["changed"],
@@ -301,7 +346,29 @@ test("S-6 (5.6 d-target edit): D metadata-changed; nothing changed or descendant
   expect(sortedSet(diff.added)).toEqual([]);
   expect(sortedSet(diff.deleted)).toEqual([]);
   expect(sortedSet(diff.optionalUpstream)).toEqual([]);
+  expect(sortedSet(diff.optionalDescendant)).toEqual([]);
   expect(sortedSet(diff.originators)).toEqual([GROW, SHRINK].sort());
+  // Hash facts: no subtreeHash changes (a `d` set is no own content); every
+  // node of each arm's cascade, the edited nodes included, in effectiveHash.
+  expect(sortedSet(diff.subtreeChanged)).toEqual([]);
+  expect(sortedSet(diff.effectiveChanged)).toEqual(
+    [
+      GROW,
+      OUTERGROW,
+      GROW_FILE,
+      GROWHOLD_DIRECT,
+      GROWHOLD_CHAIN,
+      GROWHOLD,
+      GROW_DEPS,
+      SHRINK,
+      OUTERSHRINK,
+      SHRINK_FILE,
+      SHRINKHOLD_DIRECT,
+      SHRINKHOLD_CHAIN,
+      SHRINKHOLD,
+      SHRINK_DEPS,
+    ].sort(),
+  );
   expect(tableOf(diff)).toEqual({
     // The originating nodes: metadata-changed, never upstream-changed from
     // their own edge edits ("other than the node itself").
@@ -352,7 +419,12 @@ test("S-6 (5.6 coverage/tags-only edit): the node metadata-changed alone — no 
   expect(sortedSet(diff.added)).toEqual([]);
   expect(sortedSet(diff.deleted)).toEqual([]);
   expect(sortedSet(diff.optionalUpstream)).toEqual([]);
+  expect(sortedSet(diff.optionalDescendant)).toEqual([]);
   expect(sortedSet(diff.originators)).toEqual([META_M]);
+  // Hash facts: neither hash changes anywhere (coverage and tags enter
+  // metadataHash alone, 5.5).
+  expect(sortedSet(diff.subtreeChanged)).toEqual([]);
+  expect(sortedSet(diff.effectiveChanged)).toEqual([]);
   expect(tableOf(diff)).toEqual({
     [META_M]: ["metadata-changed"],
     [META_DEP]: [],
@@ -431,6 +503,11 @@ test("S-6 (T5.6-6): every added and every deleted node is changed only — whate
     [DOOMED, GONE6, GONE6_KID, GONE6_KID2].sort(),
   );
   expect(sortedSet(diff.optionalUpstream)).toEqual([]);
+  expect(sortedSet(diff.optionalDescendant)).toEqual([]);
+  // Hash facts over kept nodes alone: the edited target and its file's root;
+  // added and deleted nodes are in neither set (the oracle's module header).
+  expect(sortedSet(diff.subtreeChanged)).toEqual([TGT, PRESENT].sort());
+  expect(sortedSet(diff.effectiveChanged)).toEqual([TGT, PRESENT].sort());
   // Added and deleted nodes are originating nodes beside the edited target.
   expect(sortedSet(diff.originators)).toEqual(
     [
@@ -498,6 +575,11 @@ test("S-6 (tolerance, relocated member): a relocated non-originating member with
   expect(sortedSet(diff.originators)).toEqual([R_A, R_H, R_T].sort());
   // H's only member cause is the relocated M (one-side-only): optional.
   expect(sortedSet(diff.optionalUpstream)).toEqual([R_H]);
+  expect(sortedSet(diff.optionalDescendant)).toEqual([]);
+  // Hash facts: M keeps its subtreeHash wherever it sits; its effectiveHash
+  // changes through its target T (5.5).
+  expect(sortedSet(diff.subtreeChanged)).toEqual([R_A, R_H, R_T].sort());
+  expect(sortedSet(diff.effectiveChanged)).toEqual([R_A, R_H, R_M, R_T].sort());
   expect(tableOf(diff)).toEqual({
     // A holds M on both sides — its member cause is two-sided: required.
     [R_A]: ["changed", "descendant-changed", "upstream-changed"],
@@ -538,6 +620,9 @@ test("S-6 (tolerance, edge-bearing added/deleted members): an added and a delete
   expect(sortedSet(diff.deleted)).toEqual([E_G]);
   expect(sortedSet(diff.originators)).toEqual([E_P, E_Q, E_T, E_C, E_G].sort());
   expect(sortedSet(diff.optionalUpstream)).toEqual([E_A, E_P, E_Q].sort());
+  expect(sortedSet(diff.optionalDescendant)).toEqual([]);
+  expect(sortedSet(diff.subtreeChanged)).toEqual([E_A, E_P, E_Q, E_T].sort());
+  expect(sortedSet(diff.effectiveChanged)).toEqual([E_A, E_P, E_Q, E_T].sort());
   expect(tableOf(diff)).toEqual({
     [E_A]: ["descendant-changed"],
     [E_P]: ["changed", "descendant-changed"],
@@ -546,6 +631,164 @@ test("S-6 (tolerance, edge-bearing added/deleted members): an added and a delete
     [E_G]: ["changed"],
     [E_T]: ["changed"],
   });
+});
+
+// =============================================================================
+// The relocation tolerance (opt-in; the path-blocks oracle's): T10.5-9's
+// present-node shapes
+// =============================================================================
+
+// T10.5-9's present-node arm, every identity already mapped through the
+// journaled `move specs/R.mdx#P1.M specs/R.mdx#P2.M` (P1.M -> P2.M, P1.M.c ->
+// P2.M.c; SPEC 6.3): at the baseline P1 holds the moved node and its child,
+// currently P2 does.
+const PN = "specs/R.mdx";
+const PN_P1 = "specs/R.mdx#P1";
+const PN_P2 = "specs/R.mdx#P2";
+const PN_M = "specs/R.mdx#P2.M";
+const PN_C = "specs/R.mdx#P2.M.c";
+
+const presentNodeBaseline = (): GraphDiffSide =>
+  graph({
+    [PN]: { children: [PN_P1, PN_P2] },
+    [PN_P1]: { own: "Pee one text.", children: [PN_M] },
+    [PN_M]: { own: "Em text.", children: [PN_C] },
+    [PN_C]: { own: "See text." },
+    [PN_P2]: { own: "Pee two text." },
+  });
+
+/** After the move; `withChild` false once P2.M.c's section is deleted. */
+const presentNodeCurrent = (withChild: boolean): GraphDiffSide =>
+  graph({
+    [PN]: { children: [PN_P1, PN_P2] },
+    [PN_P1]: { own: "Pee one text." },
+    [PN_P2]: { own: "Pee two text.", children: [PN_M] },
+    [PN_M]: { own: "Em text.", children: withChild ? [PN_C] : [] },
+    ...(withChild ? { [PN_C]: { own: "See text." } } : {}),
+  });
+
+test("S-6 (relocation tolerance, T10.5-9's present-node arm): the moved node changed by its child's deletion is refused by default; under the tolerance descendant-changed is optional on its two one-sided holders and required on its both-sides holder and on the moved node itself", () => {
+  expect(() =>
+    computeGraphDiff(presentNodeBaseline(), presentNodeCurrent(false)),
+  ).toThrow(/oracle misuse:.*relocated/);
+  const diff = computeGraphDiff(
+    presentNodeBaseline(),
+    presentNodeCurrent(false),
+    { relocatedOriginators: "tolerate" },
+  );
+  expect(sortedSet(diff.added)).toEqual([]);
+  expect(sortedSet(diff.deleted)).toEqual([PN_C]);
+  expect(sortedSet(diff.originators)).toEqual(
+    [PN_P1, PN_P2, PN_M, PN_C].sort(),
+  );
+  expect(sortedSet(diff.optionalUpstream)).toEqual([]);
+  // P1 held the moved node (and, below it, the deleted child) at the
+  // baseline alone, P2 holds it currently alone: each one-sided.
+  expect(sortedSet(diff.optionalDescendant)).toEqual([PN_P1, PN_P2].sort());
+  expect(tableOf(diff)).toEqual({
+    // The root holds the changed P1 (and P2, and the moved node) on both
+    // sides: required.
+    [PN]: ["descendant-changed"],
+    [PN_P1]: ["changed"],
+    [PN_P2]: ["changed"],
+    // The moved node lost its child — changed — and holds the deleted child
+    // directly: required.
+    [PN_M]: ["changed", "descendant-changed"],
+    [PN_C]: ["changed"],
+  });
+  expect(sortedSet(diff.subtreeChanged)).toEqual(
+    [PN, PN_P1, PN_P2, PN_M].sort(),
+  );
+  expect(sortedSet(diff.effectiveChanged)).toEqual(
+    [PN, PN_P1, PN_P2, PN_M].sort(),
+  );
+});
+
+test("S-6 (relocation tolerance, T10.5-9's present-node twin): the move alone relocates no originator, and both settings predict alike — the two parents changed, the root descendant-changed, the moved subtree uncategorized", () => {
+  const expected = {
+    [PN]: ["descendant-changed"],
+    [PN_P1]: ["changed"],
+    [PN_P2]: ["changed"],
+    [PN_M]: [],
+    [PN_C]: [],
+  };
+  for (const options of [
+    {},
+    { relocatedOriginators: "refuse" },
+    { relocatedOriginators: "tolerate" },
+  ] as const) {
+    const diff = computeGraphDiff(
+      presentNodeBaseline(),
+      presentNodeCurrent(true),
+      options,
+    );
+    expect(sortedSet(diff.added)).toEqual([]);
+    expect(sortedSet(diff.deleted)).toEqual([]);
+    expect(sortedSet(diff.originators)).toEqual([PN_P1, PN_P2].sort());
+    expect(sortedSet(diff.optionalUpstream)).toEqual([]);
+    expect(sortedSet(diff.optionalDescendant)).toEqual([]);
+    expect(tableOf(diff)).toEqual(expected);
+    expect(sortedSet(diff.subtreeChanged)).toEqual([PN, PN_P1, PN_P2].sort());
+    expect(sortedSet(diff.effectiveChanged)).toEqual([PN, PN_P1, PN_P2].sort());
+  }
+});
+
+const HD = "specs/H.mdx";
+const HD_H = "specs/H.mdx#h";
+const HD_P1 = "specs/H.mdx#h.P1";
+const HD_P2 = "specs/H.mdx#h.P2";
+const HD_M = "specs/H.mdx#h.P2.M"; // moved from under P1 (journal-mapped)
+const HD_K = "specs/H.mdx#h.P2.M.k"; // added below the moved node
+const HD_Q = "specs/H.mdx#h.P2.Q";
+
+test("S-6 (relocation tolerance): a holder of a relocated changed node that also holds a changed node on both sides is descendant-changed required; an added node below the relocated one leaves its one-sided holder optional", () => {
+  const before = graph({
+    [HD]: { children: [HD_H] },
+    [HD_H]: { own: "Holder text.", children: [HD_P1, HD_P2] },
+    [HD_P1]: { own: "First parent text.", children: [HD_M] },
+    [HD_M]: { own: "Mover text." },
+    [HD_P2]: { own: "Second parent text.", children: [HD_Q] },
+    [HD_Q]: { own: "Cue text v1." },
+  });
+  const after = graph({
+    [HD]: { children: [HD_H] },
+    [HD_H]: { own: "Holder text.", children: [HD_P1, HD_P2] },
+    [HD_P1]: { own: "First parent text." },
+    [HD_P2]: { own: "Second parent text.", children: [HD_M, HD_Q] },
+    [HD_M]: { own: "Mover text.", children: [HD_K] },
+    [HD_K]: { own: "Added below the mover." },
+    [HD_Q]: { own: "Cue text v2." },
+  });
+  expect(() => computeGraphDiff(before, after)).toThrow(
+    /oracle misuse:.*relocated/,
+  );
+  const diff = computeGraphDiff(before, after, {
+    relocatedOriginators: "tolerate",
+  });
+  expect(sortedSet(diff.added)).toEqual([HD_K]);
+  expect(sortedSet(diff.deleted)).toEqual([]);
+  expect(sortedSet(diff.originators)).toEqual(
+    [HD_P1, HD_P2, HD_M, HD_K, HD_Q].sort(),
+  );
+  expect(sortedSet(diff.optionalUpstream)).toEqual([]);
+  // P1 held the relocated M at the baseline alone; P2 holds M (and the
+  // added K below it) currently alone, but Q on both sides.
+  expect(sortedSet(diff.optionalDescendant)).toEqual([HD_P1]);
+  expect(tableOf(diff)).toEqual({
+    [HD]: ["descendant-changed"],
+    [HD_H]: ["descendant-changed"],
+    [HD_P1]: ["changed"],
+    [HD_P2]: ["changed", "descendant-changed"],
+    [HD_M]: ["changed", "descendant-changed"],
+    [HD_K]: ["changed"],
+    [HD_Q]: ["changed"],
+  });
+  expect(sortedSet(diff.subtreeChanged)).toEqual(
+    [HD, HD_H, HD_P1, HD_P2, HD_M, HD_Q].sort(),
+  );
+  expect(sortedSet(diff.effectiveChanged)).toEqual(
+    [HD, HD_H, HD_P1, HD_P2, HD_M, HD_Q].sort(),
+  );
 });
 
 // =============================================================================
@@ -619,4 +862,13 @@ test("S-6: a dependency cycle throws", () => {
     [R_H]: { own: "h", d: [R_A] },
   });
   expect(() => computeGraphDiff(side, side)).toThrow(/oracle misuse:.*cycle/);
+});
+
+test("S-6: an unknown relocation setting throws", () => {
+  const side = graph({ [R_A]: { own: "a" } });
+  expect(() =>
+    computeGraphDiff(side, side, {
+      relocatedOriginators: "ignore" as unknown as "tolerate",
+    }),
+  ).toThrow(/oracle misuse:.*relocatedOriginators must be/);
 });

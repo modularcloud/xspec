@@ -59,10 +59,43 @@
 // a diagnosed product failure: a relocated originator (a kept `changed` or
 // `metadata-changed` node whose kept strict-ancestor sets differ across
 // sides) would make `descendant-changed` two-sidedly ambiguous on its
-// holders and is outside the oracle's input space; so are incomplete
-// graphs (a child or walked dependency-edge target with no node on its
-// side), contains or dependency cycles (5.3), and an `ownKey` that fails
-// to cover the child reference tokens.
+// holders and is outside the oracle's default input space (P-6's: its
+// generator never lets an originator relocate); so are incomplete graphs
+// (a child or walked dependency-edge target with no node on its side),
+// contains or dependency cycles (5.3), and an `ownKey` that fails to cover
+// the child reference tokens.
+//
+// The relocation tolerance (opt-in, `relocatedOriginators: "tolerate"`):
+// the path-blocks oracle (helpers/oracles/path-blocks.ts, P-16) admits
+// relocated originators — P-16 draws section moves into another parent
+// beside edits, and T10.5-9's present-node arm moves `P1.M` under `P2` and
+// then deletes its child, leaving the moved node `changed` — so under this
+// option the guard stands down and `descendant-changed` is predicted by
+// which changed strict descendants a kept node holds unambiguously: a kept
+// one held on both sides, and an added (deleted) one hanging, through
+// added (deleted) nodes alone, below the node itself or below a kept node
+// it holds on both sides — its nearest kept current-side (baseline-side)
+// ancestor. Holding one such is `descendant-changed` required; holding
+// changed strict descendants only otherwise — one side's holder of a
+// relocated changed node, or of what hangs below one — is the same
+// two-sided ambiguity, predicted tolerated-optional (`optionalDescendant`,
+// accepted present or absent). Under the default every changed strict
+// descendant a node holds on either side is held unambiguously (a
+// relocation reaching one would relocate an originator: a changed kept
+// node, or the kept parent an added or deleted child changes), so the
+// option alters nothing the guard admits: `optionalDescendant` is then
+// always empty and every category as before.
+//
+// Hash facts beside the categories: `subtreeChanged` and `effectiveChanged`
+// are the kept nodes whose subtreeHash, respectively effectiveHash, changed
+// — the 5.5 recursions over both-sides structure (own content changed, or a
+// both-sides child changed, and for effectiveHash also the pair multiset
+// changed or a both-sides dependency-edge target changed effectively). They
+// are what SPEC 9.2's impacted-code evaluation and 10.5's
+// `dependency-consistency` rule read (the path-blocks oracle); an added or
+// deleted node is in neither, 9.2's counting of it as changed in both
+// hashes being that consumer's to apply (5.6 compares hashes only on both
+// sides).
 //
 // Its evaluation, `computeGraphDiff`, is a harness step under its own guard
 // (TEST-SPEC S-3, helpers/step-guards.ts): synchronous, bounded by
@@ -118,6 +151,24 @@ export interface GraphDiff {
    */
   readonly optionalUpstream: ReadonlySet<string>;
   /**
+   * Nodes that may additionally carry `descendant-changed` — the relocation
+   * tolerance (module header), accepted present or absent; always empty
+   * unless `relocatedOriginators` is `"tolerate"`.
+   */
+  readonly optionalDescendant: ReadonlySet<string>;
+  /**
+   * Kept nodes whose subtreeHash changed (SPEC 5.5's recursion over
+   * both-sides structure; module header). Added and deleted nodes are in
+   * neither this set nor `effectiveChanged`.
+   */
+  readonly subtreeChanged: ReadonlySet<string>;
+  /**
+   * Kept nodes whose effectiveHash changed (SPEC 5.5's recursion,
+   * evaluated as a fixpoint; module header). Every member of
+   * `subtreeChanged` is one.
+   */
+  readonly effectiveChanged: ReadonlySet<string>;
+  /**
    * Attribution bound: every originating node — those carrying `changed`
    * (added and deleted included) or `metadata-changed` (SPEC 5.6: every
    * category MUST be attributed to its originating nodes).
@@ -127,6 +178,17 @@ export interface GraphDiff {
   readonly added: ReadonlySet<string>;
   /** Nodes present on the baseline side only (each required `changed`). */
   readonly deleted: ReadonlySet<string>;
+}
+
+/** How {@link computeGraphDiff} meets its input (module header). */
+export interface GraphDiffOptions {
+  /**
+   * A relocated originating node: `"refuse"` (the default; P-6's input
+   * space) throws the misuse error; `"tolerate"` admits it, predicting
+   * `descendant-changed` on its one-sided holders as tolerated-optional
+   * (`optionalDescendant`).
+   */
+  readonly relocatedOriginators?: "refuse" | "tolerate";
 }
 
 function misuse(message: string): never {
@@ -174,15 +236,17 @@ function strictDescendants(
  * Diff two workspace graphs per SPEC 5.6 (module header): the baseline side
  * already mapped into current identities (SPEC 6.3), the current side as it
  * stands. Returns the exact required category set per node, the
- * tolerated-optional `upstream-changed` set, the originating-node
- * attribution bound, and the added and deleted identity sets.
+ * tolerated-optional `upstream-changed` and `descendant-changed` sets, the
+ * originating-node attribution bound, the added and deleted identity sets,
+ * and the kept nodes whose subtreeHash and effectiveHash changed.
  */
 export function computeGraphDiff(
   before: GraphDiffSide,
   after: GraphDiffSide,
+  options: GraphDiffOptions = {},
 ): GraphDiff {
   return guardSyncStep("the graph-diff oracle (computeGraphDiff)", () =>
-    computeGraphDiffUnguarded(before, after),
+    computeGraphDiffUnguarded(before, after, options),
   );
 }
 
@@ -190,7 +254,15 @@ export function computeGraphDiff(
 function computeGraphDiffUnguarded(
   before: GraphDiffSide,
   after: GraphDiffSide,
+  options: GraphDiffOptions,
 ): GraphDiff {
+  const relocation = options.relocatedOriginators ?? "refuse";
+  if (relocation !== "refuse" && relocation !== "tolerate") {
+    misuse(
+      `relocatedOriginators must be "refuse" or "tolerate", got ` +
+        JSON.stringify(relocation),
+    );
+  }
   const kept = [...before.keys()].filter((identity) => after.has(identity));
   const added = [...after.keys()].filter((identity) => !before.has(identity));
   const deleted = [...before.keys()].filter((identity) => !after.has(identity));
@@ -245,8 +317,11 @@ function computeGraphDiffUnguarded(
   // Misuse guard (module header): an originator never relocates — its
   // kept strict-ancestor relation is two-sided — so `descendant-changed`
   // is never ambiguous. Added and deleted nodes are one-sided by nature
-  // (the 5.6 worked examples pin their ancestors' category).
+  // (the 5.6 worked examples pin their ancestors' category). Under the
+  // relocation tolerance the guard stands down and the ambiguity is
+  // predicted tolerated-optional instead (`optionalDescendant`, below).
   for (const id of kept) {
+    if (relocation === "tolerate") break;
     if (!ownChanged.has(id) && !metaChanged.has(id)) continue;
     const beforeHolders = kept.filter((a) => descAt(descBefore, a).has(id));
     const afterHolders = kept.filter((a) => descAt(descAfter, a).has(id));
@@ -296,6 +371,59 @@ function computeGraphDiffUnguarded(
     return result;
   };
 
+  // subChanged over kept nodes: own content changed or a both-sides child's
+  // subtreeHash changed (SPEC 5.5; a differing child list surfaces through
+  // ownKey, guarded above). Contains cycles were refused by
+  // strictDescendants, so the recursion terminates.
+  const subMemo = new Map<string, boolean>();
+  const subChanged = (id: string): boolean => {
+    const cached = subMemo.get(id);
+    if (cached !== undefined) return cached;
+    const result =
+      ownChanged.has(id) ||
+      commonOf(beforeAt(id).children, afterAt(id).children).some(subChanged);
+    subMemo.set(id, result);
+    return result;
+  };
+
+  // The relocation tolerance's holding rule (module header): which changed
+  // strict descendants a kept node holds unambiguously — a kept one on both
+  // sides; an added (deleted) one below its nearest kept current-side
+  // (baseline-side) ancestor, that ancestor the node itself or a kept node
+  // it holds on both sides.
+  const addedSet = new Set(added);
+  const parentsOf = (side: GraphDiffSide): Map<string, string> => {
+    const parents = new Map<string, string>();
+    for (const [identity, node] of side) {
+      for (const child of node.children) parents.set(child, identity);
+    }
+    return parents;
+  };
+  const parentBefore = parentsOf(before);
+  const parentAfter = parentsOf(after);
+  const nearestKeptAncestor = (
+    identity: string,
+    parents: ReadonlyMap<string, string>,
+  ): string | undefined => {
+    let current = parents.get(identity);
+    while (current !== undefined && !keptSet.has(current)) {
+      current = parents.get(current);
+    }
+    return current;
+  };
+  const holdsUnambiguously = (holder: string, held: string): boolean => {
+    const beforeDesc = descAt(descBefore, holder);
+    const afterDesc = descAt(descAfter, holder);
+    const heldOnBoth = (k: string): boolean =>
+      k === holder || (beforeDesc.has(k) && afterDesc.has(k));
+    if (keptSet.has(held)) return beforeDesc.has(held) && afterDesc.has(held);
+    const [desc, parents] = addedSet.has(held)
+      ? [afterDesc, parentAfter]
+      : [beforeDesc, parentBefore];
+    const anchor = nearestKeptAncestor(held, parents);
+    return desc.has(held) && anchor !== undefined && heldOnBoth(anchor);
+  };
+
   // A node's dependency-edge cause (SPEC 5.6 upstream-changed): a common
   // dependency-edge target of the node itself or of a subtree node whose
   // effective state changed, or a strict-subtree node (not the node itself)
@@ -311,6 +439,7 @@ function computeGraphDiffUnguarded(
 
   const required = new Map<string, Set<GraphDiffCategory>>();
   const optionalUpstream = new Set<string>();
+  const optionalDescendant = new Set<string>();
   for (const id of kept) {
     const categories = new Set<GraphDiffCategory>();
     if (ownChanged.has(id)) categories.add("changed");
@@ -318,8 +447,14 @@ function computeGraphDiffUnguarded(
     const beforeDesc = descAt(descBefore, id);
     const afterDesc = descAt(descAfter, id);
     const eitherDesc = new Set([...beforeDesc, ...afterDesc]);
-    if ([...eitherDesc].some((d) => changedSet.has(d))) {
+    // A changed strict descendant on either side; required where one is
+    // held unambiguously — under the default guard, every one is (module
+    // header) — else tolerated-optional (the relocation tolerance).
+    const changedDesc = [...eitherDesc].filter((d) => changedSet.has(d));
+    if (changedDesc.some((d) => holdsUnambiguously(id, d))) {
       categories.add("descendant-changed");
+    } else if (changedDesc.length > 0) {
+      optionalDescendant.add(id);
     }
     if (effChanged(id)) {
       const bothMembers = [...beforeDesc].filter(
@@ -358,8 +493,11 @@ function computeGraphDiffUnguarded(
   return {
     required,
     optionalUpstream,
+    optionalDescendant,
     originators,
-    added: new Set(added),
+    added: addedSet,
     deleted: new Set(deleted),
+    subtreeChanged: new Set(kept.filter(subChanged)),
+    effectiveChanged: new Set(kept.filter(effChanged)),
   };
 }

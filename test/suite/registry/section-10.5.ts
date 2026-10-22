@@ -4960,7 +4960,7 @@ const E7_ROOT_SUBTREE_V1 = `\n${E7_T_SUBTREE_V1}\n\n${E7_T_SUBTREE_V1}\n\n${E7_T
 const E7_ROOT_OWN_V1 = `\n${E7_T_SUBTREE_V1}\n\n\n`;
 
 /** One of T10.5-7's six expected items (TEST-SPEC T10.5-7; SPEC 10.5). */
-interface E7ExpectedItem {
+export interface E7ExpectedItem {
   readonly kind: ReviewItem["kind"];
   /** The scope node — the scoped code location for `code-impact`. */
   readonly scope: string;
@@ -4976,7 +4976,10 @@ interface E7ExpectedItem {
 // deepest first — every depth-1 item before the depth-0 root's, at depth 1
 // subtree-coherence before dependency-consistency, then e before f in
 // document order — and the code-impact items last, by location identity.
-const E7_EXPECTED_ITEMS: readonly E7ExpectedItem[] = [
+// Exported for the path-blocks oracle's S-6 vector (TEST-SPEC S-6;
+// test/self/s6-path-blocks-oracle.test.ts), which derives these six items,
+// every `blockedBy` empty, from the fixture's graphs.
+export const E7_EXPECTED_ITEMS: readonly E7ExpectedItem[] = [
   {
     kind: "subtree-coherence",
     scope: E7_T,
