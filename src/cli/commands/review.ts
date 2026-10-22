@@ -18,24 +18,23 @@
 //   1. `--coverage`: the named profile must be configured (SPEC 10.7 →
 //      12.0 "unknown profiles named in arguments", exit 2) — an argument
 //      check judged against the configuration, preceding the gate;
-//   2. `--base`: read the baseline — first the current journal as the
-//      analysis loaded it, a journal error there (14.13) failing the
-//      resolution before any other cause as the usage error carrying its
-//      stable code and concerned path (SPEC 6.3, 12.7), then ref
-//      resolution and the journal prefix/replay (SPEC 6.3 → 12.0, exit 2)
-//      — preceding source validation;
+//   2. `--base`: resolve the given baseline whole — first the current
+//      journal as the analysis loaded it, a journal error there (14.13)
+//      failing the resolution before any other cause as the usage error
+//      carrying its stable code and concerned path (SPEC 6.3, 12.7), then
+//      ref resolution, the journal prefix/replay, and the baseline
+//      content's parse and validation as a workspace (SPEC 6.3 → 12.0,
+//      exit 2) — preceding source validation: exit 2, nothing created,
+//      even when the current workspace also fails `build`'s validations;
 //   3. the SPEC 13.3 gate: invalid sources report the validation errors,
-//      exit 1, nothing created;
-//   4. `--base`: validate the baseline content as a workspace (SPEC 6.3 →
-//      12.0, exit 2) — past the gate, so a baseline sharing the current
-//      workspace's findings is the gate's exit-1 report — then commit the
-//      refresh write (a no-op when the store already matches);
-//   5. an existing session name — matched ignoring ASCII case (SPEC 10.1)
+//      exit 1, nothing created; then commit the refresh write (a no-op
+//      when the store already matches);
+//   4. an existing session name — matched ignoring ASCII case (SPEC 10.1)
 //      — is refused, exit 1, nothing created (SPEC 10.7); when the session
 //      so named — the exact-name occupant, else the byte-least name
 //      colliding ignoring ASCII case — is corrupt, its corruption is
 //      reported in the refusal's place (SPEC 10.7, 14.21, 13.5);
-//   6. derive the items (SPEC 10.5–10.7), validate the write path
+//   5. derive the items (SPEC 10.5–10.7), validate the write path
 //      (SPEC 14.22), and write the session file (SPEC 10.1, 13.4).
 //
 // `list` (read) — refresh-on-read, then every session in byte order of
@@ -72,14 +71,8 @@ import {
   expandDecompositions,
 } from "../../core/review-derive.js";
 import { spellingOfReference } from "../../core/review-state.js";
-import type {
-  BaselineRead,
-  ResolvedBaseline,
-} from "../../workspace/baseline.js";
-import {
-  readBaseline,
-  validateBaselineContent,
-} from "../../workspace/baseline.js";
+import type { ResolvedBaseline } from "../../workspace/baseline.js";
+import { resolveBaseline } from "../../workspace/baseline.js";
 import { assessWorkspaceRead } from "../../workspace/refresh.js";
 import {
   listSessionNames,
@@ -152,7 +145,7 @@ async function runCreate(
   const baseRef = flagValue(invocation, "--base");
   const profileName = flagValue(invocation, "--coverage");
   let parameters: SessionParameters;
-  let baselineRead: BaselineRead | undefined;
+  let baseline: ResolvedBaseline | undefined;
   if (profileName !== undefined) {
     // SPEC 10.7 → 12.0: an unknown profile named in arguments is a usage
     // error — an argument check judged against the configuration, as for
@@ -173,13 +166,15 @@ async function runCreate(
       profile: recordCoverageProfile(workspace.configuration, profile),
     };
   } else if (baseRef !== undefined) {
-    // SPEC 6.3 → 12.0: reading the baseline — the current journal first,
-    // then ref resolution and the journal prefix/replay — precedes source
-    // validation: a journal error in the current journal (the coded usage
-    // error of 6.3 and 12.7), an unresolvable ref, or a replay failure is a
-    // usage error (exit 2), nothing modified, even when the current sources
-    // also fail build validation.
-    const resolution = await readBaseline(
+    // SPEC 6.3 → 12.0, 10.7: the given baseline's resolution — the current
+    // journal first, then ref resolution, the journal prefix/replay, and
+    // the baseline content's parse and validation as a workspace —
+    // precedes source validation: a journal error in the current journal
+    // (the coded usage error of 6.3 and 12.7), an unresolvable ref, a
+    // replay failure, or baseline content that cannot be parsed and
+    // validated is a usage error (exit 2), nothing modified, even when the
+    // current sources also fail build validation.
+    const resolution = await resolveBaseline(
       workspace,
       baseRef,
       analyzed.analysis.journal,
@@ -187,12 +182,12 @@ async function runCreate(
     if (!resolution.ok) {
       return reportBaselineFailure(invocation, context, resolution);
     }
-    baselineRead = resolution.read;
+    baseline = resolution.baseline;
     // SPEC 10.7: a baseline session records the commit identity `--base`
     // resolved to at creation, never the ref spelling.
     parameters = {
       strategy: "path-blocks",
-      baseCommit: resolution.read.commit,
+      baseCommit: resolution.baseline.commit,
     };
   } else {
     // SPEC 10.7: an audit session records no creation parameters.
@@ -200,25 +195,12 @@ async function runCreate(
   }
 
   // SPEC 13.3: the gate — with invalid sources, report the validation
-  // errors, exit 1, nothing created (a `review` subcommand like any other);
-  // the baseline content is not validated past it (module header).
+  // errors, exit 1, nothing created (a `review` subcommand like any other).
   const { analysis } = analyzed;
   const assessed = await assessWorkspaceRead(workspace, analysis);
   if (assessed.kind === "findings") {
     emitFindingsReport(invocation.json, stdout, assessed.findings);
     return 1;
-  }
-
-  // SPEC 6.3 → 12.0: past the gate, a baseline whose content cannot be
-  // parsed and validated as a workspace is a usage error (exit 2) —
-  // reported before the refresh write commits, so nothing is modified.
-  let baseline: ResolvedBaseline | undefined;
-  if (baselineRead !== undefined) {
-    const resolution = await validateBaselineContent(baselineRead);
-    if (!resolution.ok) {
-      return reportBaselineFailure(invocation, context, resolution);
-    }
-    baseline = resolution.baseline;
   }
 
   // SPEC 13.3: the one refresh write (a no-op when the store already

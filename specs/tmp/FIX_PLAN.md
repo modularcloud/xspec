@@ -4,7 +4,7 @@ Source: the compliance determination at `e049255` (2026-10-22; branch `claude/xs
 
 Findings are cited as A<n>, B<n>, C<n>. Where reviewers reported one gap, it is one task: A1 = B22 (Task 2), A2 = B24 (Task 4), A3 = B28 (Task 8), A4 = B20 (Task 5), A5 = B26 (Tasks 31–33), B5 = C2 (Task 13). VERIFY's suite-windows failure (T7-1), which no reviewer counted, is Task 9.
 
-Goal: every test passes — locally under the recipes below, and in CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head — and the product meets SPEC.md. Tasks 2 and 36 (both landed), 4–27, and 34 turn VERIFY's 46 failures green (the index says which task each test waits on; Task 36 was found behind Task 2's arms). Tasks 3 and 28–33 fix SPEC departures no test pins; they are in scope all the same. Task 1 (landed) recorded the Developer's third accepted residual in AGENTS.md. Task 34 runs after every other task but Task 35, because it is expected to end in a TEST-SPEC problem (its text says why), and Task 35 confirms everything and deletes this file.
+Goal: every test passes — locally under the recipes below, and in CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head — and the product meets SPEC.md. Tasks 2 and 36 (both landed), 4–27, and 34 turn VERIFY's 46 failures green (the index says which task each test waits on; Task 36 was found behind Task 2's arms). Tasks 28–33 fix SPEC departures no test pins; they are in scope all the same, as was Task 3 (landed), which resolves a given baseline whole, its content's validation included, ahead of the gate. Task 1 (landed) recorded the Developer's third accepted residual in AGENTS.md. Task 34 runs after every other task but Task 35, because it is expected to end in a TEST-SPEC problem (its text says why), and Task 35 confirms everything and deletes this file.
 
 Not planned:
 - A6 and B27 (the dot forms `SPEC.toString`, `SPEC.a.valueOf`, … type-checking clean) and A's and B's blocking spec defect (the bare bracket form `SPEC.a["toString"];`): the Developer's third accepted residual (below). Nothing is logged to a problems file for them and no fix is planned; Task 1 (landed) recorded the residual in AGENTS.md, as the "Known SPEC 4.1/14.7 gap for `Object`-member path names" bullet, which also records the hand check that `build` and `check` report the 14.7 finding for both spellings. xspec's own 14.7 finding for such paths stays required.
@@ -46,7 +46,7 @@ Not planned:
 
 ## Index — each failing test and the tasks it waits on
 
-VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 1550, job 119847008510) and 1 on `suite-windows` (CI only, job 119865815416). Suite files are `test/suite/<file>.test.ts`; registry modules `test/suite/registry/<module>.ts`. Tasks 3 and 28–33 have no failing test (nor had Task 1, now landed). CI at `3c214eb` (Task 36's commit; run 1556, id 39841546785): `harness-self` green; `suite-linux` 39 failures (job 120043577445), exactly the rows below not marked passing, T13.5-9 and T13.5-10 passing; `suite-windows` T7-1 alone (job 120062535462), at the same assertion as at `e049255`.
+VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 1550, job 119847008510) and 1 on `suite-windows` (CI only, job 119865815416). Suite files are `test/suite/<file>.test.ts`; registry modules `test/suite/registry/<module>.ts`. Tasks 28–33 have no failing test (nor had Tasks 1 and 3, now landed). CI at `3c214eb` (Task 36's commit; run 1556, id 39841546785): `harness-self` green; `suite-linux` 39 failures (job 120043577445), exactly the rows below not marked passing, T13.5-9 and T13.5-10 passing; `suite-windows` T7-1 alone (job 120062535462), at the same assertion as at `e049255`.
 
 | Test | Suite file | Tasks | First failure at `e049255` |
 |---|---|---|---|
@@ -96,18 +96,6 @@ VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 15
 | T10.6-3 | section-10.6 | 34 | p.a's item before the re-derivation: no `scopeNodes` member |
 | P-16 | section-16-p16 | 34 (first), 15, 20, 26 | falsified at seed 271828183, trial 1 of 6: `review export p16 --json` item-1 (subtree-coherence `specs/A.mdx`) has no `scopeNodes` member |
 | T7-1 (suite-windows) | `test/windows/e6-subset.test.ts` | 9 | the single-casing probe: `build` run from `sub/`, which holds only the plain file `XSPEC.config.ts` holding `)`, exits 2 with a configuration error, expected 0 |
-
-## Task 3 — A given baseline's content validation precedes the gate (SPEC 6.3, 12.0, 13.3, 9, 10.7; B23; after Task 2)
-
-**Requirement.** 6.3: "if the baseline content cannot be parsed and validated as a workspace, the command MUST fail with an actionable error naming the offending entries or files; a baseline that cannot be read or reconstructed is a usage error (12.0)", and a given baseline's resolution "precedes the gate of 13.3". 12.0: "the resolution of a given baseline (6.3) — `impact --base` (9), `review create --base` (10.7) — precede source validation: these usage errors are reported, and the command exits 2, even when the current workspace also fails the validations of `xspec build`". 10.7: ahead of the gate come "the errors 12.0 orders before it, `create`'s given baseline (6.3) among them".
-
-**Observed** (B23; reviewer B's probes `p8` and `ws-impo.eScFlq`): a baseline commit whose sources hold a duplicate ID, the current sources also failing validation: `impact --base` and `review create --base` report the gate's findings, exit 1, where the baseline's usage error, exit 2, is due.
-
-**Location.** `validateBaselineContent` (`src/workspace/baseline.ts`) runs past the gate in `src/cli/commands/impact.ts` (~line 190) and in `runCreate` (`src/cli/commands/review.ts`); baseline.ts's module header still describes that placement — Task 2 (landed) removed its shared-journal defense, moot now that a current journal carrying a condition-13 error fails resolution first (`readBaseline`'s first step, over the journal the caller's analysis loaded).
-
-**Change.** Validate the given baseline's content as part of its resolution, before the gate, in both callers; rewrite the two module headers to match. The recorded baseline of a baseline session stays past the gate (10.7).
-
-**Verification.** No suite test pins it. By hand (AGENTS.md's git recipe): commit `c1` with `specs/A.mdx` holding two sections spelled `a`, then edit the current `specs/A.mdx` to hold one section `a` and one section with no `id`: `impact --base c1 --json` and `review create --base c1 --name n --json` exit 2, `code` and `path` `null`, the message naming the baseline's offending file, nothing written (no session file, graph data byte-identical); with the current sources valid instead, the same exit 2. Regressions: `section-6.3`, `section-9`, `section-9.3`, `section-10.7-i` (T10.7-3), `section-12.0-ii`, `section-13.5` (T13.5-8), `section-14` (T14-4).
 
 ## Task 4 — The generated module's runtime compiles and runs under standard TypeScript tooling (SPEC 13.1, 4.1–4.5, 4.2; A2, B24)
 
@@ -203,7 +191,7 @@ VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 15
 
 **Location.** `runCreate` in `src/cli/commands/review.ts`: `assessed.commit()` (~line 217) runs before `loadSession`, `existingNameIgnoringAsciiCase`, and the `obstructedWritePathFindings` check of `sessionFilePath(name)`, which comes only after the derivation.
 
-**Change.** Order `runCreate` as 10.7 does: the argument checks and the given baseline (Tasks 2 and 3), the gate (assessment only, no write), then the examination — the existing-name refusal or the corruption in its place (Task 12 extends the matching) and the 14.22 obstruction of `.xspec/reviews/<name>.json`'s write path — then the refresh commit, the derivation, and the session write.
+**Change.** Order `runCreate` as 10.7 does: the argument checks and the given baseline (Tasks 2 and 3, both landed: `resolveBaseline` whole, its content validated, already precedes the gate), the gate (assessment only, no write), then the examination — the existing-name refusal or the corruption in its place (Task 12 extends the matching) and the 14.22 obstruction of `.xspec/reviews/<name>.json`'s write path — then the refresh commit, the derivation, and the session write.
 
 **Verification.** T10.1-6 (section-10.1); T10.7-15(f)(i) (section-10.7-iii) once Task 13 lands its earlier arms. Regressions: `section-10.1`, `section-10.7-i` (T10.7-1–T10.7-3), `section-13.3`, `section-13.5` (T13.5-1), `section-14-ii` (T14-9).
 
@@ -429,7 +417,7 @@ VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 15
 
 **Observed** (C1; git 2.43.0, the product built from `e049255`; reviewer C's probes under `<scratchpad>/cr-ajndWI`): in a `git clone --filter=blob:none file://<origin>` whose baseline blob is missing, `xspec impact --base HEAD~1` exits 0 and `.git/objects/pack/` gains a `pack-*.{pack,idx,promisor,rev}` set — the blob fetched and written. With `remote.origin.url` pointed at a local HTTP listener, `impact --base HEAD~1`, `review create --base HEAD~1 --name b`, and `review status rb` (a baseline session copied in) each make the listener receive `GET /origin.git/info/refs?service=git-upload-pack` before exiting 2. This git honours `GIT_NO_LAZY_FETCH=1` and `-c protocol.allow=never`; under either, `cat-file` fails without fetching, which yields the specified unreadable-baseline outcome.
 
-**Location.** `runGit` and `gitEnvironment` in `src/workspace/git.ts`: the one spawn behind every git call (`rev-parse`, `ls-tree`, and `cat-file --batch` from `readBaseline`, `validateBaselineContent`, and `resolveBaseline` in `src/workspace/baseline.ts`).
+**Location.** `runGit` and `gitEnvironment` in `src/workspace/git.ts`: the one spawn behind every git call (`rev-parse`, `ls-tree`, and `cat-file --batch` from `readBaseline` and `validateBaselineContent`, the two module-private stages of `resolveBaseline` in `src/workspace/baseline.ts`, its one export since Task 3).
 
 **Change.** Disable lazy fetching for every spawned git: `GIT_NO_LAZY_FETCH=1` in its environment, plus `-c protocol.allow=never` before the subcommand as a guard for a git predating the variable. Make sure each resulting failure — `rev-parse` or `ls-tree` exiting nonzero, `cat-file --batch` answering `missing` or exiting nonzero — reaches 6.3's plain usage error, never a crash or a partial baseline. Update git.ts's module header.
 

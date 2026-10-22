@@ -9,24 +9,21 @@
 //    one included, exits 2 before the baseline is read (14.14), and a
 //    discovery read the environment refuses stops the command (14.25). The
 //    analysis loads the current journal, read once.
-// 1. Read the baseline (workspace/baseline.ts `readBaseline`): first the
-//    current journal as the analysis loaded it — a journal error there
-//    (14.13) fails the resolution before any other cause can, a usage
-//    error carrying its stable code and concerned path (SPEC 6.3, 12.7) —
-//    then resolve the ref, list the tree at it, and compute the journal
-//    prefix/replay. Each failure, an unresolvable ref and a prefix/replay
-//    failure among them, is a usage error, exit 2, preceding source
-//    validation (SPEC 12.0): reported even when the current sources also
-//    fail build validation.
+// 1. Resolve the given baseline whole (workspace/baseline.ts
+//    `resolveBaseline`): first the current journal as the analysis loaded
+//    it — a journal error there (14.13) fails the resolution before any
+//    other cause can, a usage error carrying its stable code and concerned
+//    path (SPEC 6.3, 12.7) — then resolve the ref, list the tree at it,
+//    compute the journal prefix/replay, and parse and validate the
+//    baseline content as a workspace. Each failure — an unresolvable ref,
+//    a prefix/replay failure, and baseline content that cannot be parsed
+//    and validated among them — is a usage error, exit 2, preceding source
+//    validation (SPEC 6.3, 12.0): reported even when the current sources
+//    also fail build validation, nothing modified.
 // 2. The SPEC 13.3 gate over the current workspace (cli/prepare.ts,
 //    workspace/refresh.ts): validation findings report and exit 1, nothing
 //    answered, nothing modified.
-// 3. Validate the baseline content as a workspace (`validateBaselineContent`
-//    — reachable only past the gate, so a baseline sharing the current
-//    workspace's findings is the gate's exit-1 report, never this exit-2
-//    error): a baseline that cannot be parsed and validated is a usage
-//    error, exit 2, reported before the refresh write commits.
-// 4. Commit the refresh write (a no-op when the store already matches),
+// 3. Commit the refresh write (a no-op when the store already matches),
 //    then derive the SPEC 5.6 change categories (core/changes.ts) and the
 //    report content (core/impact.ts), and render it — human or `--json`,
 //    the same information (SPEC 12.0).
@@ -45,10 +42,7 @@ import type {
   ImpactRequirementReportEntry,
 } from "../../core/impact.js";
 import { deriveImpactReport } from "../../core/impact.js";
-import {
-  readBaseline,
-  validateBaselineContent,
-} from "../../workspace/baseline.js";
+import { resolveBaseline } from "../../workspace/baseline.js";
 import { assessWorkspaceRead } from "../../workspace/refresh.js";
 import type { Invocation } from "../args.js";
 import { flagValue } from "../args.js";
@@ -161,40 +155,32 @@ export async function impactCommand(
     return analyzed.exit;
   }
 
-  // SPEC 6.3/12.0: reading the baseline — the current journal first, then
-  // ref resolution and the journal prefix/replay — precedes source
-  // validation: a journal error in the current journal (the coded usage
-  // error of 6.3 and 12.7), an unresolvable ref, or a replay failure is a
-  // usage error (exit 2, stderr) even when the current sources also fail
-  // build validation.
+  // SPEC 6.3/12.0: the given baseline's resolution — the current journal
+  // first, then ref resolution, the journal prefix/replay, and the
+  // baseline content's parse and validation as a workspace — precedes
+  // source validation: a journal error in the current journal (the coded
+  // usage error of 6.3 and 12.7), an unresolvable ref, a replay failure,
+  // or baseline content that cannot be parsed and validated is a usage
+  // error (exit 2, stderr), nothing modified, even when the current
+  // sources also fail build validation.
   const { analysis } = analyzed;
-  const readResolution = await readBaseline(
+  const resolution = await resolveBaseline(
     context.workspace,
     ref,
     analysis.journal,
   );
-  if (!readResolution.ok) {
-    return reportBaselineFailure(invocation, context, readResolution);
+  if (!resolution.ok) {
+    return reportBaselineFailure(invocation, context, resolution);
   }
+  const { baseline } = resolution;
 
   // SPEC 13.3: the gate — on a workspace failing `build`'s validations,
-  // the findings report alone, exit 1, nothing modified; the baseline
-  // content is not validated past it (module header).
+  // the findings report alone, exit 1, nothing answered, nothing modified.
   const assessed = await assessWorkspaceRead(context.workspace, analysis);
   if (assessed.kind === "findings") {
     emitFindingsReport(invocation.json, context.stdout, assessed.findings);
     return 1;
   }
-
-  // SPEC 6.3/12.0: past the gate, a baseline whose content cannot be
-  // parsed and validated as a workspace is a usage error (exit 2) —
-  // reported before the refresh write commits, so a failing invocation
-  // modifies nothing.
-  const resolution = await validateBaselineContent(readResolution.read);
-  if (!resolution.ok) {
-    return reportBaselineFailure(invocation, context, resolution);
-  }
-  const { baseline } = resolution;
 
   // SPEC 13.3: the one refresh write (a no-op when the store already
   // matches), every check passed; then answer.

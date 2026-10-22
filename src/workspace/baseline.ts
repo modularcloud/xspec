@@ -16,8 +16,8 @@
 // offending entries or files; a baseline that cannot be read or
 // reconstructed is a usage error — exit 2 (SPEC 12.0).
 //
-// Resolution is split in two, sequenced around the SPEC 13.3 gate by the
-// baseline-taking commands (`impact --base`, `review create --base`):
+// `resolveBaseline`, the module's one entry point, is the whole
+// resolution, in two stages:
 //
 // - `readBaseline` — everything up to and including the journal
 //   prefix/replay. Its first step judges the current journal (SPEC 6.3: a
@@ -40,22 +40,23 @@
 //   failure (14.25) and never an answer from an enclosing repository —
 //   then resolves the ref, lists the tree at it, reads the configuration
 //   and journal blobs, and computes the replay against the loaded current
-//   journal's bytes. Its failures precede source validation of the
-//   current workspace (SPEC 12.0): the journal error, a refused
-//   discovery, an unresolvable ref, or a prefix/replay failure is reported
-//   as a usage error (exit 2) even when the current workspace also fails
-//   `build`'s validations.
+//   journal's bytes.
 // - `validateBaselineContent` — parse and validate the baseline content as
-//   a workspace (configuration, sources, journal findings). The callers run
-//   it past the gate: on a current workspace failing `build`'s validations
-//   the gate's findings report first (exit 1), while on a passing current
-//   workspace a baseline that cannot be parsed and validated stays the
-//   usage error of SPEC 6.3 (exit 2), reported before the refresh write
-//   commits.
+//   a workspace (configuration, sources, and the journal at the ref): a
+//   baseline that cannot be parsed and validated is the same usage error
+//   (exit 2), its message naming the offending files.
 //
-// `resolveBaseline` composes the two for the post-gate call site (a
-// session's recorded baseline, review-session.ts, where the gate has
-// already passed, so the current journal carries no condition-13 error).
+// Every failure of either stage is a usage error, exit 2 (SPEC 12.0): the
+// current journal's error with its stable code and concerned path, every
+// other a plain one. Its place in a command's order (SPEC 6.3, 12.0,
+// 13.3, 10.7): a given baseline — `impact --base` (9), `review create
+// --base` (10.7) — is resolved whole ahead of the gate of 13.3, its
+// content's validation included: these usage errors "are reported, and
+// the command exits 2, even when the current workspace also fails the
+// validations of `xspec build`" (12.0), and nothing is modified, the
+// refresh write never reached. A session's recorded baseline is resolved
+// past the gate, where 10.7 orders it (cli/commands/review-session.ts),
+// so the current journal carries no condition-13 error there.
 //
 // IMPLEMENTATION (Key libraries, Architecture): the system `git`
 // executable via read-only plumbing subcommands only — `rev-parse`,
@@ -141,10 +142,9 @@ export type BaselineResolution =
  * A read baseline (SPEC 6.3): the ref resolved to a commit, the workspace
  * tree at it listed, and the journal prefix/replay computed — everything
  * of baseline resolution except the content's parse and validation, which
- * `validateBaselineContent` performs on this value past the SPEC 13.3
- * gate (module header).
+ * `validateBaselineContent` performs on this value next (`resolveBaseline`).
  */
-export interface BaselineRead {
+interface BaselineRead {
   /** The full hash of the commit the ref resolved to. */
   readonly commit: string;
   /** SPEC 6.3: the replay Journal (see `ResolvedBaseline.replay`). */
@@ -156,7 +156,7 @@ export interface BaselineRead {
 
 /** What `validateBaselineContent` consumes — read once by `readBaseline`
  * so the content stage re-reads nothing but the source blobs. */
-export interface BaselineContentInputs {
+interface BaselineContentInputs {
   readonly ref: string;
   readonly root: string;
   readonly configFileName: string;
@@ -178,10 +178,10 @@ export interface BaselineContentInputs {
  * The outcome of the read half of baseline resolution (SPEC 6.3). A
  * failure — the current journal's error, an unreadable baseline, or a
  * failed journal prefix/replay, each naming the offending entries or
- * files — precedes source validation of the current workspace (SPEC
- * 12.0): callers report it and exit 2 before the gate.
+ * files — ends the resolution there, the content never parsed
+ * (`resolveBaseline`).
  */
-export type BaselineReadResolution =
+type BaselineReadResolution =
   { readonly ok: true; readonly read: BaselineRead } | BaselineFailure;
 
 /** A plain usage-error failure (`BaselineFailure`, kind `usage`). */
@@ -357,17 +357,12 @@ function unreadableMessage(ref: string): string {
  * its bytes the replay's current side. Reads the repository through
  * read-only git plumbing, and the `.git` entries git's discovery passed by
  * through the filesystem; modifies nothing, and parses no baseline source
- * content — `validateBaselineContent` does, past the SPEC 13.3 gate
- * (module header).
- *
- * Callers run this before the gate's judgement of the current workspace:
- * these failures precede source validation (SPEC 12.0), each a usage error
- * (exit 2) — the current journal's error with its stable code and
- * concerned path, every other a plain one with `message` as the
- * standard-error diagnostic — even when the current workspace also fails
- * `build`'s validations.
+ * content — `validateBaselineContent` does, next (`resolveBaseline`).
+ * Each failure is a usage error (exit 2, SPEC 12.0): the current journal's
+ * error with its stable code and concerned path, every other a plain one
+ * with `message` as the standard-error diagnostic.
  */
-export async function readBaseline(
+async function readBaseline(
   workspace: LoadedWorkspace,
   ref: string,
   currentJournal: LoadedJournal,
@@ -585,12 +580,12 @@ export async function readBaseline(
  * validate the read baseline's content as a workspace — configuration,
  * sources, and journal findings, through the same pure core the current
  * workspace's pipeline composes. A baseline that cannot be parsed and
- * validated is a usage error (exit 2, SPEC 12.0); callers run this only
- * past the SPEC 13.3 gate and before the refresh write commits, so a
- * failing current workspace reports the gate's findings instead (module
- * header) and a failing invocation modifies nothing.
+ * validated is a plain usage error (exit 2, SPEC 12.0) naming the
+ * offending files — for a given baseline, met ahead of the SPEC 13.3 gate
+ * whatever the current workspace's validity (module header). Reads git
+ * blobs alone; modifies nothing.
  */
-export async function validateBaselineContent(
+async function validateBaselineContent(
   read: BaselineRead,
 ): Promise<BaselineResolution> {
   const {
@@ -702,15 +697,20 @@ export async function validateBaselineContent(
 }
 
 /**
- * Resolve a baseline git ref whole (SPEC 6.3): `readBaseline` composed
- * with `validateBaselineContent`, over the current journal as the caller's
- * analysis loaded it. For the post-gate call site — a session's recorded
- * baseline (review-session.ts), resolved after the SPEC 13.3 gate has
- * passed, so the current journal carries no condition-13 error and every
- * failure is a plain usage error (exit 2) with `message` as the
- * standard-error diagnostic. The baseline-taking commands (`impact
- * --base`, `review create --base`) call the halves separately, sequencing
- * the gate between them (module header).
+ * Resolve a baseline git ref whole (SPEC 6.3): `readBaseline` — the
+ * current journal first, then git — composed with
+ * `validateBaselineContent`, over the current journal as the caller's
+ * analysis of the current workspace loaded it (`WorkspaceAnalysis.journal`,
+ * read once). Every failure is a usage error (exit 2, SPEC 12.0), reported
+ * through cli/commands/common.ts `reportBaselineFailure`; nothing is
+ * modified. A given baseline (`impact --base`, `review create --base`) is
+ * resolved here before the SPEC 13.3 gate judges the current workspace,
+ * so its failures — baseline content that cannot be parsed and validated
+ * among them — exit 2 even when the current workspace also fails
+ * `build`'s validations (SPEC 6.3, 12.0); a session's recorded baseline is
+ * resolved past the gate (review-session.ts, SPEC 10.7), where the current
+ * journal carries no condition-13 error and every failure is a plain usage
+ * error (module header).
  */
 export async function resolveBaseline(
   workspace: LoadedWorkspace,
