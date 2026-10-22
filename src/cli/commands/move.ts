@@ -45,12 +45,17 @@
 //    exclusivity, it discovers its sources again, and every later check
 //    and read consults that discovery's sources (SPEC 13.5). A preview
 //    acquires nothing and discovers once (SPEC 6.6).
-// 3. Argument existence (SPEC 6.5 → 12.0): a nonexistent origin file (either
-//    form) or origin ID is a usage error (exit 2) — checked before source
+// 3. Argument existence and kind (SPEC 6.5 → 12.0): a nonexistent or
+//    wrong-kind (code-source) origin file (either form) or a nonexistent
+//    origin ID is a usage error (exit 2) — checked before source
 //    validation, so it is reported even when the sources also fail build
-//    validation. One exception (SPEC 12.0, 14): an origin ID inside an
-//    unparseable origin file (14.20) is masked — the validation findings are
-//    reported and the command exits 1.
+//    validation. Existence and kind are judged as in 6.4, over every
+//    discovered file: a spec-kind file whose own path 14.19 rejects is a
+//    spec source by kind, its spelled identities establishing the origin
+//    ID's existence, and the invalid-workspace refusal (4) follows
+//    (./origin-args.ts). One exception (SPEC 12.0, 14): an origin ID inside
+//    an unparseable origin file (14.20) is masked — the validation findings
+//    are reported and the command exits 1.
 // 4. Valid-workspace precondition (SPEC 6.5 → 6.4): when the current
 //    workspace fails the validations of `xspec build`, the move refuses
 //    (exit 1) before modifying anything, reporting those findings alone —
@@ -143,6 +148,7 @@ import {
   reportAnalysisConfigurationErrors,
   runMutatingCommand,
 } from "./mutation.js";
+import { judgeOriginFile, originSpellsId } from "./origin-args.js";
 import { emitSuccessfulPreview } from "./preview.js";
 import {
   emitFindingsRefusal,
@@ -278,18 +284,30 @@ async function runMove(
     return 2;
   }
 
-  // SPEC 6.5 → 12.0: the argument existence checks precede source
-  // validation. The origin file must name a discovered spec source
-  // (workspace-relative, SPEC 12.0, 1.5; byte-wise comparison).
-  if (
-    !analysis.classification.specSources.some((s) => s.path === origin.file)
-  ) {
+  // SPEC 6.5 → 12.0: the argument checks precede source validation. In
+  // either form the origin file must name a discovered spec source
+  // (workspace-relative, SPEC 12.0, 1.5; byte-wise comparison) — judged
+  // over every discovered file, a 14.19 member of the spec kind included
+  // (`specs/n.txt` under a spec glob `specs/*.txt`), existence and kind
+  // as in 6.4 (./origin-args.ts). A discovered code source is the
+  // wrong-kind operand, judged like existence before any content question.
+  const originFile = judgeOriginFile(analysis, origin.file);
+  if (originFile.kind === "unknown") {
     return usageError(
       invocation,
       context,
       `unknown file '${origin.file}' — the origin must name a discovered ` +
         `source file of a configured spec group, workspace-relative ` +
         `(SPEC 6.5, 12.0)`,
+    );
+  }
+  if (originFile.kind === "wrong-kind") {
+    return usageError(
+      invocation,
+      context,
+      `wrong-kind file '${origin.file}' — the origin names a discovered ` +
+        `code source, which bears no requirement IDs; name a discovered ` +
+        `source file of a configured spec group (SPEC 6.5, 6.4, 12.0)`,
     );
   }
 
@@ -299,10 +317,8 @@ async function runMove(
   // refusal below is the report: the workspace's findings, exit 1. The
   // file form takes the same path: an unparseable origin fails build
   // validation.
-  const originSpec = analysis.specs.find(
-    (s) => s.document.path === origin.file,
-  );
-  if (originSpec === undefined) {
+  const parsedOrigin = originFile.parsed;
+  if (parsedOrigin === null) {
     return emitFindingsRefusal(
       preview,
       invocation.json,
@@ -312,19 +328,15 @@ async function runMove(
   }
 
   // SPEC 6.5 → 12.0: a nonexistent origin ID (section form) is a usage
-  // error, checked before source validation.
-  if (origin.id !== null) {
-    const section = originSpec.document.sections.find(
-      (s) => s.id === origin.id,
+  // error, checked before source validation — parse-local, judged over
+  // spelled identities as in 6.4 (11.2), an invalid-path origin's included.
+  if (origin.id !== null && !originSpellsId(parsedOrigin, origin.id)) {
+    return usageError(
+      invocation,
+      context,
+      `unknown ID '${origin.id}' in '${origin.file}' — <id> must name an ` +
+        `existing requirement ID of that file (SPEC 6.5, 12.0)`,
     );
-    if (section === undefined) {
-      return usageError(
-        invocation,
-        context,
-        `unknown ID '${origin.id}' in '${origin.file}' — <id> must name an ` +
-          `existing requirement ID of that file (SPEC 6.5, 12.0)`,
-      );
-    }
   }
 
   // SPEC 6.5 → 6.4: refuse, before modifying anything, when the current
@@ -345,6 +357,14 @@ async function runMove(
       workspaceFindings,
     );
   }
+  // A valid workspace discovers no invalid-path source (its 14.19 finding
+  // fails `build`, SPEC 12.1), so the origin is a valid-path spec source.
+  if (!originFile.pathValid) {
+    throw new Error(
+      "xspec internal error: an invalid-path move origin on a valid workspace",
+    );
+  }
+  const originSpec = parsedOrigin;
 
   if (origin.id !== null) {
     if (destination.id === null) {

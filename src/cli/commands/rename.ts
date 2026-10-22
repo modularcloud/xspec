@@ -24,13 +24,18 @@
 //    exclusivity, it discovers its sources again, and every later check
 //    and read consults that discovery's sources (SPEC 13.5). A preview
 //    acquires nothing and discovers once (SPEC 6.6).
-// 3. Argument existence (SPEC 6.4 → 12.0): a `<file>` that is not a
-//    discovered spec source, or an old ID absent from the origin file, is a
-//    usage error (exit 2) — checked before source validation, so it is
-//    reported even when the sources also fail build validation. One
-//    exception (SPEC 12.0, 14): an old ID inside an unparseable origin
-//    file (14.20) is masked — the validation findings are reported and the
-//    command exits 1.
+// 3. Argument existence and kind (SPEC 6.4 → 12.0): a `<file>` that is no
+//    discovered file, or a discovered code source (the wrong-kind
+//    operand), or an old ID the origin file spells nowhere, is a usage
+//    error (exit 2) — checked before source validation, so it is reported
+//    even when the sources also fail build validation. The file check
+//    covers every discovered file: a spec-kind file whose own path 14.19
+//    rejects (`specs/a#b.mdx` — a bare `<file>` is a whole path, SPEC
+//    12.0) is a spec source by kind, its spelled identities establishing
+//    the old ID's existence, and the invalid-workspace refusal (4)
+//    follows (./origin-args.ts). One exception (SPEC 12.0, 14): an old ID
+//    inside an unparseable origin file (14.20) is masked — the validation
+//    findings are reported and the command exits 1.
 // 4. Valid-workspace precondition (SPEC 6.4): when the current workspace
 //    fails the validations of `xspec build`, the rename refuses (exit 1)
 //    before modifying anything, reporting those findings alone — no
@@ -88,6 +93,7 @@ import {
   reportAnalysisConfigurationErrors,
   runMutatingCommand,
 } from "./mutation.js";
+import { judgeOriginFile, originSpellsId } from "./origin-args.js";
 import { emitSuccessfulPreview } from "./preview.js";
 import {
   emitFindingsRefusal,
@@ -128,10 +134,15 @@ async function runRename(
     return 2;
   }
 
-  // SPEC 6.4 → 12.0: the argument existence checks precede source
-  // validation. `<file>` must name a discovered spec source
-  // (workspace-relative, SPEC 12.0, 1.5; byte-wise comparison).
-  if (!analysis.classification.specSources.some((s) => s.path === file)) {
+  // SPEC 6.4 → 12.0: the argument checks precede source validation.
+  // `<file>` must name a discovered spec source (workspace-relative,
+  // SPEC 12.0, 1.5; byte-wise comparison) — judged over every discovered
+  // file, a 14.19 member of the spec kind included, and a bare `<file>`
+  // being a whole path, `#` and all (SPEC 12.0; ./origin-args.ts). A
+  // discovered code source is the wrong-kind operand, judged like
+  // existence before any content question (SPEC 6.4).
+  const originFile = judgeOriginFile(analysis, file);
+  if (originFile.kind === "unknown") {
     return usageError(
       invocation,
       context,
@@ -139,13 +150,22 @@ async function runRename(
         `of a configured spec group, workspace-relative (SPEC 6.4, 12.0)`,
     );
   }
+  if (originFile.kind === "wrong-kind") {
+    return usageError(
+      invocation,
+      context,
+      `wrong-kind file '${file}' — <file> names a discovered code source, ` +
+        `which bears no requirement IDs; name a discovered source file of ` +
+        `a configured spec group (SPEC 6.4, 11.4, 12.0)`,
+    );
+  }
 
   // SPEC 12.0/14: an old ID inside an unparseable origin file (14.20) is
   // masked — the origin was discovered but yielded no document, so the
   // workspace fails `build`'s validations and the invalid-workspace
   // refusal below is the report: the workspace's findings, exit 1.
-  const origin = analysis.specs.find((s) => s.document.path === file);
-  if (origin === undefined) {
+  const parsedOrigin = originFile.parsed;
+  if (parsedOrigin === null) {
     return emitFindingsRefusal(
       preview,
       invocation.json,
@@ -155,8 +175,10 @@ async function runRename(
   }
 
   // SPEC 6.4 → 12.0: a nonexistent old ID is a usage error, checked before
-  // source validation — parse-local, judged over spelled identities (11.2).
-  if (!origin.document.sections.some((s) => s.id === oldId)) {
+  // source validation — parse-local, judged over spelled identities (11.2),
+  // an invalid-path origin's included (SPEC 14.19: its structure is
+  // parse-local though no node identity of it is defined).
+  if (!originSpellsId(parsedOrigin, oldId)) {
     return usageError(
       invocation,
       context,
@@ -183,6 +205,14 @@ async function runRename(
       workspaceFindings,
     );
   }
+  // A valid workspace discovers no invalid-path source (its 14.19 finding
+  // fails `build`, SPEC 12.1), so the origin is a valid-path spec source.
+  if (!originFile.pathValid) {
+    throw new Error(
+      "xspec internal error: an invalid-path rename origin on a valid workspace",
+    );
+  }
+  const origin = parsedOrigin;
 
   // SPEC 6.4/14: evaluate every applicable refusal reason together over
   // the valid workspace — one finding per reason, never only the first
