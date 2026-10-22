@@ -73,7 +73,22 @@
 //   they stay with the JSON assertions (`classifyIgnoredReasons`), blanked
 //   only so their digits never stand in for a count. The fixture's names
 //   and identities hold no digit and no character a report may need to
-//   quote or escape, so every one is asked.
+//   quote or escape, so every one is asked. (T12.0-15 holds each of these
+//   human reports to its `--json` twin through the human coverage decoder,
+//   which classifies the reasons as `classifyIgnoredReasons` classifies the
+//   twin's — their order included, 8.2's fixed order being the report's
+//   own.)
+// - T12.0-15's staging (section-12.0-iv.ts; TEST-SPEC T12.0-15's `coverage`
+//   fixtures, T8.2-1): T8.2-1's body is `runT821Reads(product, visit)`,
+//   each of its four `coverage` reads — the report workspace's default run,
+//   `coverage prof-aux`, and `coverage --check`, then the covered fixture's
+//   `coverage --check` — handed to `visit` with its argv, the exit the home
+//   test pins, and the home test's own `--json` read, assertions, and human
+//   parity check as `home`. T8.2-1 passes `home` through; T12.0-15 hands its
+//   human twin in its place, the staging between the reads — the two
+//   workspaces and their builds — the home test's own. Every initial file
+//   of both workspaces is a staged-source record (S-9), T12.0-15 staging
+//   them after its own first invocation.
 // - T8-5's impact arm follows the SUITE-20 (§5.6) conventions: entries are
 //   merged per node identity (SPEC 9.3 fixes the grouping by category, not
 //   the adapter-level entry granularity); an uncategorized, undeleted node
@@ -1229,9 +1244,15 @@ const T8_1_1 = defineProductTest({
 // `win`'s incoming-edge order: a product reporting the first-found candidate
 // — a search from the boundary nodes in document order, or one backward from
 // `win` over its incoming edges — reports the route through #second, and
-// only the 12.0 tie-break yields the asserted path.
-const REPORT_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+// only the 12.0 tie-break yields the asserted path. T12.0-15 runs this
+// staging after its own first product invocation (`runT821Reads`, below),
+// so each file is a staged-source record (helpers/staged-ts.ts,
+// helpers/staged-mdx.ts; S-9's TypeScript and timing clauses), the same
+// bytes T8.2-1 stages first.
+const REPORT_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T8.2-1/T12.0-15 report fixture xspec.config.ts (prof-main transitive over targetTags hot, prof-aux direct)",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1256,7 +1277,10 @@ export default defineConfig({
   ]
 })
 `,
-  "tgt/T.mdx": `<S id="win" tags="hot">
+  ),
+  "tgt/T.mdx": stagedMdx(
+    "T8.2-1/T12.0-15 report fixture tgt/T.mdx (win and lone tagged hot; combo coverage=none holding combo.kid; plain untagged)",
+    `<S id="win" tags="hot">
 Covered winner leaf.
 </S>
 
@@ -1276,7 +1300,10 @@ Tagged child leaf.
 Untagged leaf.
 </S>
 `,
-  "bnd/B.mdx": `import T from "../tgt/T.xspec"
+  ),
+  "bnd/B.mdx": stagedMdx(
+    "T8.2-1/T12.0-15 report fixture bnd/B.mdx (chain, then second, then first — the last two each a depends edge to win)",
+    `import T from "../tgt/T.xspec"
 
 <S id="chain" d={"first"}>
 A longer route to the winner, through first.
@@ -1290,6 +1317,7 @@ Second equal-length covering edge.
 First equal-length covering edge.
 </S>
 `,
+  ),
 };
 
 const WIN_ROW: ExpectedCoveredRow = {
@@ -1441,13 +1469,13 @@ function normalizedReport(report: CoverageReport): unknown {
 
 // The fully covered workspace for `--check`'s "0 otherwise" arm: one
 // profile, one required leaf, covered. It follows the report workspace's
-// invocations, so its `.mdx` sources are staged-source records
-// (helpers/staged-mdx.ts; S-9's before-any-product clause), wrapped in place,
-// and so is its configuration — a TypeScript staged-source record
+// invocations (and T12.0-15's), so its `.mdx` sources are staged-source
+// records (helpers/staged-mdx.ts; S-9's before-any-product clause), wrapped
+// in place, and so is its configuration — a TypeScript staged-source record
 // (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), well-formed.
 const CHECK_GREEN_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": stagedTs(
-    "T8.2-1 covered fixture xspec.config.ts",
+    "T8.2-1/T12.0-15 covered fixture xspec.config.ts",
     `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1467,14 +1495,14 @@ export default defineConfig({
 `,
   ),
   "tgt/T.mdx": stagedMdx(
-    "T8.2-1 covered fixture tgt/T.mdx",
+    "T8.2-1/T12.0-15 covered fixture tgt/T.mdx",
     `<S id="only">
 The only required leaf.
 </S>
 `,
   ),
   "bnd/B.mdx": stagedMdx(
-    "T8.2-1 covered fixture bnd/B.mdx",
+    "T8.2-1/T12.0-15 covered fixture bnd/B.mdx",
     `import T from "../tgt/T.xspec"
 
 <S id="covers" d={T.only}>
@@ -1483,6 +1511,246 @@ Covers the only leaf.
 `,
   ),
 };
+
+/**
+ * One `coverage` read T8.2-1's staging reaches, handed to the staging's
+ * visitor at the state it reads: its label, its argv without `--json`, the
+ * exit the home test pins there (SPEC 8.2: with `--check`, 1 iff a required
+ * node is uncovered, else 0; without it, 0), and the home test's own
+ * `coverage … --json` read with its assertions and the human form's parity
+ * check (`home`). Exported for T12.0-15 (section-12.0-iv.ts), which hands
+ * its human twin of the read in their place.
+ */
+export interface T821Read {
+  readonly label: string;
+  readonly argv: readonly string[];
+  readonly expectedExit: 0 | 1;
+  readonly home: () => Promise<void>;
+}
+
+/** A visitor of T8.2-1's reads, each at the state it reads. */
+export type T821ReadVisitor = (
+  workspace: TestWorkspace,
+  read: T821Read,
+) => Promise<void>;
+
+/**
+ * T8.2-1's staging, its four `coverage` reads handed to `visit` (exported
+ * for T12.0-15): the report workspace (`REPORT_FILES`), built, and its
+ * default run, `coverage prof-aux`, and `coverage --check`; then the covered
+ * fixture (`CHECK_GREEN_FILES`), built, and its `coverage --check`. The
+ * named and `--check` reads' home assertions compare with the default
+ * run's decoded report, which its own home reads — T8.2-1 runs every home
+ * in order. `prefix` leads every staging step's diagnosis.
+ */
+export async function runT821Reads(
+  product: ProductBinding,
+  visit: T821ReadVisitor,
+  prefix = "T8.2-1",
+): Promise<void> {
+  await withWorkspace(REPORT_FILES, async (workspace) => {
+    await buildOk(product, workspace, `${prefix} \`build\``);
+
+    // The default run's decoded report, read by its own home and compared
+    // with by the later reads' homes.
+    let full: CoverageReport | undefined = undefined;
+    const fullLabel = `${prefix} \`coverage --json\``;
+    const defaultRun = (reader: string): CoverageReport => {
+      if (full === undefined) {
+        throw new Error(
+          `harness error: ${reader}: the default run's home (${fullLabel}) ` +
+            `must run first — T8.2-1 runs its reads' homes in order`,
+        );
+      }
+      return full;
+    };
+
+    await visit(workspace, {
+      label: `${prefix} the default run`,
+      argv: ["coverage"],
+      expectedExit: 0,
+      home: async () => {
+        // All profiles run by default; full per-profile content: counts,
+        // covered rows with the tie-broken shortest path, uncovered and
+        // ignored identities, and each ignored node's reasons in the fixed
+        // order.
+        const report = await coverageJson(
+          product,
+          workspace,
+          ["coverage", "--json"],
+          fullLabel,
+        );
+        full = report;
+        assertSameJson(
+          report.profiles.map((profile) => profile.name).sort(),
+          ["prof-aux", "prof-main"],
+          `${fullLabel}: all configured profiles run by default (SPEC 8.2)`,
+        );
+        assertProfileContent(
+          profileNamed(report, "prof-main", fullLabel),
+          PROF_MAIN_EXPECTED,
+          `${fullLabel} profile prof-main — the equal-length paths through ` +
+            `#second and #first (in that document and incoming-edge order) ` +
+            `tie-break to the byte-least sequence, through #first, never the ` +
+            `first-found route through #second; the longer #chain route ` +
+            `loses to the shortest, the root reports ` +
+            `reasons [root node, non-leaf, lacking every tag] pinning the ` +
+            `root reason's first position, and combo reports ` +
+            `[coverage="none", non-leaf, lacking every tag] (SPEC 8.2, 12.0)`,
+        );
+        assertProfileContent(
+          profileNamed(report, "prof-aux", fullLabel),
+          PROF_AUX_EXPECTED,
+          `${fullLabel} profile prof-aux — without targetTags the tag reason ` +
+            `applies to no ignored node, the untagged leaf joins the ` +
+            `required set, and the two single-edge paths through #second and ` +
+            `#first tie-break alike to the byte-least, through #first ` +
+            `(SPEC 8.1, 8.2, 12.0)`,
+        );
+        // Human form, at the same state: the default run's information —
+        // both profiles' names, rows, paths, and counts (module header; H-3).
+        await assertHumanCoverageReport(
+          product,
+          workspace,
+          ["coverage"],
+          report,
+          0,
+          prefix,
+        );
+      },
+    });
+
+    // `coverage <name>` runs exactly the named profile, carrying the same
+    // information as the default run's profile (adapter-asserted equality,
+    // product-to-itself).
+    await visit(workspace, {
+      label: `${prefix} the named run`,
+      argv: ["coverage", "prof-aux"],
+      expectedExit: 0,
+      home: async () => {
+        const oneLabel = `${prefix} \`coverage prof-aux --json\``;
+        const one = await coverageJson(
+          product,
+          workspace,
+          ["coverage", "prof-aux", "--json"],
+          oneLabel,
+        );
+        assertSameJson(
+          one.profiles.map((profile) => profile.name),
+          ["prof-aux"],
+          `${oneLabel}: \`coverage <name>\` runs exactly the named profile (SPEC 8.2)`,
+        );
+        assertSameJson(
+          normalizedProfile(profileNamed(one, "prof-aux", oneLabel)),
+          normalizedProfile(
+            profileNamed(defaultRun(oneLabel), "prof-aux", fullLabel),
+          ),
+          `${oneLabel}: the named run reports the same information for the ` +
+            `profile as the all-profiles run (SPEC 8.2)`,
+        );
+        // Human form, at the same state: the named run's information.
+        await assertHumanCoverageReport(
+          product,
+          workspace,
+          ["coverage", "prof-aux"],
+          one,
+          0,
+          prefix,
+        );
+      },
+    });
+
+    // --check exits 1 iff any required node is uncovered — here some are,
+    // with and without --json; the JSON document still carries the same
+    // information as the checkless run (SPEC 12.0: exit 1 is a findings
+    // outcome, the report is the stdout).
+    await visit(workspace, {
+      label: `${prefix} the --check run`,
+      argv: ["coverage", "--check"],
+      expectedExit: 1,
+      home: async () => {
+        const checkJsonLabel = `${prefix} \`coverage --check --json\``;
+        const checkResult = await expectExit(
+          product,
+          workspace,
+          ["coverage", "--check", "--json"],
+          1,
+          `${checkJsonLabel} — required nodes are uncovered, so --check ` +
+            `exits 1 (SPEC 8.2, 12.0)`,
+        );
+        const check = decodeCoverageReport(
+          parseJsonStdout(checkResult, checkJsonLabel),
+          checkJsonLabel,
+        );
+        assertSameJson(
+          normalizedReport(check),
+          normalizedReport(defaultRun(checkJsonLabel)),
+          `${checkJsonLabel}: --check changes the exit code, not the ` +
+            `information — the JSON document carries the same report (SPEC 8.2)`,
+        );
+        // Human form, at the same state: exit 1 alike, with the --check
+        // run's information (module header; H-3).
+        await assertHumanCoverageReport(
+          product,
+          workspace,
+          ["coverage", "--check"],
+          check,
+          1,
+          prefix,
+        );
+      },
+    });
+  });
+
+  // The "0 otherwise" arm: a workspace whose every required node is
+  // covered — --check exits 0, and the report is non-vacuous (a required
+  // node exists and is covered).
+  await withWorkspace(CHECK_GREEN_FILES, async (workspace) => {
+    await buildOk(product, workspace, `${prefix} \`build\` (covered fixture)`);
+    await visit(workspace, {
+      label: `${prefix} the covered fixture's --check run`,
+      argv: ["coverage", "--check"],
+      expectedExit: 0,
+      home: async () => {
+        const greenLabel = `${prefix} \`coverage --check --json\` (covered fixture)`;
+        const green = decodeCoverageReport(
+          await runJson(
+            product,
+            workspace,
+            ["coverage", "--check", "--json"],
+            greenLabel,
+          ),
+          greenLabel,
+        );
+        assertProfileContent(
+          profileNamed(green, "p-green", greenLabel),
+          {
+            covered: [
+              {
+                identity: "tgt/T.mdx#only",
+                path: ["bnd/B.mdx#covers", "tgt/T.mdx#only"],
+              },
+            ],
+            uncovered: [],
+          },
+          `${greenLabel}: the one required node is covered, so the exit-0 ` +
+            `outcome is not vacuous (SPEC 8.2)`,
+        );
+        // Human form, at the same state: exit 0 alike — no required node is
+        // uncovered — with the covered fixture's information (module header;
+        // H-3).
+        await assertHumanCoverageReport(
+          product,
+          workspace,
+          ["coverage", "--check"],
+          green,
+          0,
+          `${prefix} (covered fixture)`,
+        );
+      },
+    });
+  });
+}
 
 const T8_2_1 = defineProductTest({
   id: "T8.2-1",
@@ -1499,164 +1767,7 @@ const T8_2_1 = defineProductTest({
     "node of each covering path, and each nonzero count (robust matching, " +
     "H-3) (SPEC 8.1, 8.2, 12.0)",
   run: async (product) => {
-    await withWorkspace(REPORT_FILES, async (workspace) => {
-      await buildOk(product, workspace, "T8.2-1 `build`");
-
-      // All profiles run by default; full per-profile content: counts,
-      // covered rows with the tie-broken shortest path, uncovered and
-      // ignored identities, and each ignored node's reasons in the fixed
-      // order.
-      const fullLabel = "T8.2-1 `coverage --json`";
-      const full = await coverageJson(
-        product,
-        workspace,
-        ["coverage", "--json"],
-        fullLabel,
-      );
-      assertSameJson(
-        full.profiles.map((profile) => profile.name).sort(),
-        ["prof-aux", "prof-main"],
-        `${fullLabel}: all configured profiles run by default (SPEC 8.2)`,
-      );
-      assertProfileContent(
-        profileNamed(full, "prof-main", fullLabel),
-        PROF_MAIN_EXPECTED,
-        `${fullLabel} profile prof-main — the equal-length paths through ` +
-          `#second and #first (in that document and incoming-edge order) ` +
-          `tie-break to the byte-least sequence, through #first, never the ` +
-          `first-found route through #second; the longer #chain route ` +
-          `loses to the shortest, the root reports ` +
-          `reasons [root node, non-leaf, lacking every tag] pinning the ` +
-          `root reason's first position, and combo reports ` +
-          `[coverage="none", non-leaf, lacking every tag] (SPEC 8.2, 12.0)`,
-      );
-      assertProfileContent(
-        profileNamed(full, "prof-aux", fullLabel),
-        PROF_AUX_EXPECTED,
-        `${fullLabel} profile prof-aux — without targetTags the tag reason ` +
-          `applies to no ignored node, the untagged leaf joins the ` +
-          `required set, and the two single-edge paths through #second and ` +
-          `#first tie-break alike to the byte-least, through #first ` +
-          `(SPEC 8.1, 8.2, 12.0)`,
-      );
-      // Human form, at the same state: the default run's information —
-      // both profiles' names, rows, paths, and counts (module header; H-3).
-      await assertHumanCoverageReport(
-        product,
-        workspace,
-        ["coverage"],
-        full,
-        0,
-        "T8.2-1",
-      );
-
-      // `coverage <name>` runs exactly the named profile, carrying the same
-      // information as the default run's profile (adapter-asserted
-      // equality, product-to-itself).
-      const oneLabel = "T8.2-1 `coverage prof-aux --json`";
-      const one = await coverageJson(
-        product,
-        workspace,
-        ["coverage", "prof-aux", "--json"],
-        oneLabel,
-      );
-      assertSameJson(
-        one.profiles.map((profile) => profile.name),
-        ["prof-aux"],
-        `${oneLabel}: \`coverage <name>\` runs exactly the named profile (SPEC 8.2)`,
-      );
-      assertSameJson(
-        normalizedProfile(profileNamed(one, "prof-aux", oneLabel)),
-        normalizedProfile(profileNamed(full, "prof-aux", fullLabel)),
-        `${oneLabel}: the named run reports the same information for the ` +
-          `profile as the all-profiles run (SPEC 8.2)`,
-      );
-      // Human form, at the same state: the named run's information.
-      await assertHumanCoverageReport(
-        product,
-        workspace,
-        ["coverage", "prof-aux"],
-        one,
-        0,
-        "T8.2-1",
-      );
-
-      // --check exits 1 iff any required node is uncovered — here some are,
-      // with and without --json; the JSON document still carries the same
-      // information as the checkless run (SPEC 12.0: exit 1 is a findings
-      // outcome, the report is the stdout).
-      const checkJsonLabel = "T8.2-1 `coverage --check --json`";
-      const checkResult = await expectExit(
-        product,
-        workspace,
-        ["coverage", "--check", "--json"],
-        1,
-        `${checkJsonLabel} — required nodes are uncovered, so --check exits ` +
-          `1 (SPEC 8.2, 12.0)`,
-      );
-      const check = decodeCoverageReport(
-        parseJsonStdout(checkResult, checkJsonLabel),
-        checkJsonLabel,
-      );
-      assertSameJson(
-        normalizedReport(check),
-        normalizedReport(full),
-        `${checkJsonLabel}: --check changes the exit code, not the ` +
-          `information — the JSON document carries the same report (SPEC 8.2)`,
-      );
-      // Human form, at the same state: exit 1 alike, with the --check run's
-      // information (module header; H-3).
-      await assertHumanCoverageReport(
-        product,
-        workspace,
-        ["coverage", "--check"],
-        check,
-        1,
-        "T8.2-1",
-      );
-    });
-
-    // The "0 otherwise" arm: a workspace whose every required node is
-    // covered — --check exits 0, and the report is non-vacuous (a required
-    // node exists and is covered).
-    await withWorkspace(CHECK_GREEN_FILES, async (workspace) => {
-      await buildOk(product, workspace, "T8.2-1 `build` (covered fixture)");
-      const greenLabel = "T8.2-1 `coverage --check --json` (covered fixture)";
-      const green = decodeCoverageReport(
-        await runJson(
-          product,
-          workspace,
-          ["coverage", "--check", "--json"],
-          greenLabel,
-        ),
-        greenLabel,
-      );
-      assertProfileContent(
-        profileNamed(green, "p-green", greenLabel),
-        {
-          covered: [
-            {
-              identity: "tgt/T.mdx#only",
-              path: ["bnd/B.mdx#covers", "tgt/T.mdx#only"],
-            },
-          ],
-          uncovered: [],
-        },
-        `${greenLabel}: the one required node is covered, so the exit-0 ` +
-          `outcome is not vacuous (SPEC 8.2)`,
-      );
-      // Human form, at the same state: exit 0 alike — no required node is
-      // uncovered — with the covered fixture's information (module header;
-      // H-3).
-      await assertHumanCoverageReport(
-        product,
-        workspace,
-        ["coverage", "--check"],
-        green,
-        0,
-        "T8.2-1 (covered fixture)",
-      );
-    });
+    await runT821Reads(product, (_workspace, read) => read.home());
   },
 });
 

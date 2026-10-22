@@ -750,7 +750,17 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // contents (10.2, 10.4, 1.6, 1.7) are carriage context with home
   // coverage at T10.7-1, T10.7-5 through T10.7-10, and T10.1-4 (T10.7-7
   // and T10.7-8 cite the payload's contents under "10.7" alone, as this
-  // entry does). The families still to come add the passages they assert.
+  // entry does). The `coverage` family's human reports carry every
+  // profile's counts, node identities, covering paths, and ignored nodes'
+  // reasons, the reasons in the order 8.2 fixes for the report itself
+  // ("8.2"); the `ids` family's human listings carry every entry, an empty
+  // one included, and its IDs or tree, in the orders 12.3 fixes for the
+  // report itself ("12.3"); and the `show` family's human reports carry the
+  // full 12.4 enumeration ("12.4") — each decoded and compared with the
+  // `--json` twin's; the fixtures' own coverage (8, 8.1) and the texts and
+  // hashes the enumeration carries (1.6, 1.7, 5.5) are carriage context
+  // with home coverage at T8.2-1, T12.3-1, and T12.4-1. The exit-2 family
+  // still to come adds the passages it asserts.
   "T12.0-15": [
     "12.0",
     "14",
@@ -762,6 +772,9 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "9.3",
     "10.1",
     "10.7",
+    "8.2",
+    "12.3",
+    "12.4",
   ],
   // T12.0-16: byte order over the separating pair U+FF21/U+1F600 on 12.7's
   // tag sets and findings order, 11.4's and 12.3's file orders, 11.6's

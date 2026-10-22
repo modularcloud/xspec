@@ -70,23 +70,36 @@
 //   carries the listed ID there (`solo.kid`). Every spelling is
 //   token-bounded as an identity is (`identityMention`), so `zeta` never
 //   counts inside `zeta.minor`, nor `minor` inside it, nor an ID inside a
-//   file's path. On the entries workspace each human form is also asked
-//   the information SPEC 12.3 requires absent from it (`assertReportOmits`,
-//   the same token-bounded spellings): the code source's path, which has
-//   no entry, and, under `--unreferenced`, the IDs of the all-referenced
-//   source, whose entry is empty — information absence, never wording
-//   (H-3). Limits: no mention is associated with another, so nesting,
-//   order, and which ID belongs to which file stay with the JSON assertions
-//   (H-3 forbids wording and line-format assertions) — a human report
-//   naming an empty entry's file is credited with the entry, its emptiness
-//   asked only where the IDs it must not list are staged — and a relative
-//   spelling counts wherever it stands, so two nodes sharing one (`a.x` and
-//   `b.x` under `a` and `b`) can stand in for each other — T12.3-1's
-//   fixtures stage no such pair; the listings holding no entry (the inside
-//   `--file` patterns matching nothing, and the code-only `src/**/*.ts`) get
-//   no human run, having no entry to mention; and the listings' files and
-//   IDs hold no character a report may need to quote or escape, so every
-//   one is asked.
+//   file's path. Limits: no mention is associated with another, so
+//   nesting, order, and which ID belongs to which file stay with the JSON
+//   assertions — and a relative spelling counts wherever it stands, so two
+//   nodes sharing one (`a.x` and `b.x` under `a` and `b`) can stand in for
+//   each other — T12.3-1's fixtures stage no such pair; the listings
+//   holding no entry (the inside `--file` patterns matching nothing, and
+//   the code-only `src/**/*.ts`) get no human run, having no entry to
+//   mention; and the listings' files and IDs hold no character a report
+//   may need to quote or escape, so every one is asked. (T12.0-15 holds
+//   every one of these human listings to its `--json` twin through the
+//   human ids decoders.)
+// - The entries workspace's human forms (TEST-SPEC T12.3-1: "`ids --json`,
+//   `ids` in human form (T12.0-15), and `ids --tree` each list the
+//   prose-only source with an empty entry and give the code source no
+//   entry; `ids --unreferenced`, in each of those forms, keeps the
+//   all-referenced source's entry, empty"; H-3: a test naming the human
+//   form reads it through a human-report adapter): directly after each
+//   decoded listing — `ids`, `ids --tree`, and both under `--unreferenced`
+//   — its human form exits 0 alike and is decoded by the human ids decoder
+//   or ids tree decoder (helpers/adapters/human-reports.ts: fitted to the
+//   built product's layout, shape-aware, value-blind, failing loudly) and
+//   held to the decoded listing entry for entry (`assertHumanFlatEntries`,
+//   `assertHumanTreeEntries`): every entry's file, the empty ones included,
+//   in byte order of path, its IDs in document order or its tree nested as
+//   the listing's, and nothing beside them — so a human form omitting the
+//   prose-only source's empty entry, listing the code source, or naming
+//   under `--unreferenced` the all-referenced source's IDs fails, its
+//   emptiness asked by exactness. The decoder reads a tree node's line as
+//   its full ID or, nested, as its ID relative to its tree parent, as the
+//   mention checks above do (SPEC 1.3).
 // - T12.4-1's primary assertion is the adapter comparison: `show --json` and
 //   `query node --json` for the same node are both decoded by the one node
 //   adapter and compared field by field (the edge-list order, which SPEC
@@ -146,6 +159,21 @@
 // - T12.3-2's coverage arm asserts the demonstration facts (the profile's
 //   uncovered set, the referenced-yet-uncovered node among it) — full §8
 //   report content is T8-*'s subject.
+// - T12.0-15's stagings (section-12.0-iv.ts; TEST-SPEC T12.0-15's `ids`
+//   and `show` fixtures): T12.3-1's body is `runT1231Listings(product,
+//   visitor)`, each of its fifteen listings at exit 0 — flat or tree, the
+//   inside `--file` spellings matching nothing among them — handed to
+//   `visitor.listing` with its argv and the home test's own `--json` read,
+//   assertions, and human check as `home`, and its outside-root `--file`
+//   arms (exit 2, no listing) run where `visitor.home` holds, the decoy
+//   beside the root staged either way; T12.4-1's is `runT1241Shows(product,
+//   visit)`, its path#id and bare-path arms' `show` reads handed to `visit`
+//   with the node and the home test's own reads, assertions, and human
+//   parity check as `home`. The home tests pass `home` through; T12.0-15
+//   hands its human twin in its place, the staging between the reads — the
+//   workspaces, their builds, and the decoy — the home test's own. Every
+//   initial file of their workspaces is a staged-source record (S-9),
+//   T12.0-15 staging them after its own first invocation.
 
 import type {
   IdsReport,
@@ -154,8 +182,9 @@ import type {
   NodeReport,
 } from "../../helpers/adapters/index.js";
 import {
+  assertHumanIdsReportCarries,
+  assertHumanIdsTreeReportCarries,
   assertReportMentions,
-  assertReportOmits,
   decodeAtReport,
   decodeCoverageReport,
   decodeIdsReport,
@@ -216,12 +245,13 @@ export default defineConfig({
 // One spec group plus one code group (SPEC 7.2), so code-side `references`
 // edges (4.5) enter the graph and code sources are discovered. T12.3-1's
 // restricted-tree and entries workspaces follow the ordering workspace's
-// invocations, so S-7's sweep never reaches them against the stub: a
-// TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
-// and timing clauses), staged at every site — T12.4-1's first workspace
-// too.
+// invocations, so S-7's sweep never reaches them against the stub, and
+// T12.0-15 stages every workspace of T12.3-1 and T12.4-1 after its own
+// first invocation: a TypeScript staged-source record (helpers/staged-ts.ts;
+// S-9's TypeScript and timing clauses), staged at every site — T12.4-1's
+// first workspace too.
 const SPEC_AND_CODE_CONFIG = stagedTs(
-  "T12.3-1 xspec.config.ts — one spec group and one code group (the restricted-tree and entries workspaces; T12.4-1's workspace too)",
+  "T12.3-1/T12.4-1/T12.0-15 xspec.config.ts — one spec group and one code group (T12.3-1's restricted-tree and entries workspaces; T12.4-1's workspace)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -426,29 +456,18 @@ function distinctMentions(mentions: readonly FormedMention[]): FormedMention[] {
 }
 
 /**
- * Information a human listing must not carry (the module header's entries
- * workspace): `mentions`, each formed as the listing's own mentions are
- * (`identityMention`), and `why`, the SPEC 12.3 reason it is absent — a
- * code source's path (no entry for a code source), an ID the listing
- * excludes (an entry kept empty).
- */
-interface HumanListingAbsence {
-  readonly mentions: readonly FormedMention[];
-  readonly why: string;
-}
-
-/**
  * A listing's human form — T12.0-1's information parity (SPEC 12.0: the
  * JSON form carries the same information as the human report; the module
  * header): `argv`, the argv of the `--json` listing the caller decoded and
  * asserted, without `--json`, run directly after it — nothing between
  * them, so at its state — exits 0 alike (an informational report, SPEC
  * 12.0), and its report mentions every one of `mentions`, which the caller
- * took from the decoded listing (a product-to-itself comparison, H-4), and,
- * where `absent` is given, none of its mentions (`assertReportOmits`). A
- * listing with nothing to mention is asked its exit code and `absent`
- * alone. Robust matching (H-3): presence and absence, never wording, and
- * no mention associated with another.
+ * took from the decoded listing (a product-to-itself comparison, H-4). A
+ * listing with nothing to mention is asked its exit code alone. Robust
+ * matching (H-3): presence, never wording, and no mention associated with
+ * another. The entries workspace's listings read their human forms through
+ * the human ids decoder instead (`assertHumanFlatEntries`,
+ * `assertHumanTreeEntries`).
  */
 async function expectHumanListing(
   product: ProductBinding,
@@ -457,7 +476,6 @@ async function expectHumanListing(
   mentions: readonly FormedMention[],
   what: string,
   context: string,
-  absent?: HumanListingAbsence,
 ): Promise<void> {
   const label = `${context} \`${argv.join(" ")}\` (human report)`;
   const human = await expectExit(
@@ -476,15 +494,6 @@ async function expectHumanListing(
         `12.3, 12.0; robust matching, never wording — H-3)`,
     );
   }
-  if (absent !== undefined) {
-    assertReportOmits(
-      human,
-      absent.mentions,
-      `${label}: ${absent.why} — information the JSON listing does not ` +
-        `carry, absent from the human form too (SPEC 12.3, 12.0; robust ` +
-        `matching, never wording — H-3)`,
-    );
-  }
 }
 
 /**
@@ -494,7 +503,7 @@ async function expectHumanListing(
  * 12.3: present even when it holds none), and every listed ID, each
  * token-bounded as an identity or a path is (`identityMention`), so `zeta`
  * never counts inside `zeta.minor`, nor `minor` inside it, nor an ID inside
- * a file's path; and none of `absent`'s mentions, where given.
+ * a file's path.
  */
 async function assertHumanFlatListing(
   product: ProductBinding,
@@ -502,7 +511,6 @@ async function assertHumanFlatListing(
   flags: readonly string[],
   report: IdsReport,
   context: string,
-  absent?: HumanListingAbsence,
 ): Promise<void> {
   await expectHumanListing(
     product,
@@ -516,7 +524,6 @@ async function assertHumanFlatListing(
     "every entry's file, an empty entry's included, and every listed ID, " +
       "requirement IDs grouped by file",
     context,
-    absent,
   );
 }
 
@@ -562,8 +569,7 @@ function treeNodeMention(
  * listing no node included (SPEC 12.3: present even when it holds none),
  * and every node of each file's tree, by its full ID or by its ID relative
  * to its tree parent (`treeNodeMention`), walked parents first through an
- * explicit stack, in document order; and none of `absent`'s mentions,
- * where given.
+ * explicit stack, in document order.
  */
 async function assertHumanTreeListing(
   product: ProductBinding,
@@ -571,7 +577,6 @@ async function assertHumanTreeListing(
   flags: readonly string[],
   report: IdsTreeReport,
   context: string,
-  absent?: HumanListingAbsence,
 ): Promise<void> {
   const mentions: FormedMention[] = [];
   for (const entry of treeListing(report)) {
@@ -597,7 +602,6 @@ async function assertHumanTreeListing(
       "by its full ID or by its ID relative to its tree parent, the tree " +
       "holding exactly the listed IDs",
     context,
-    absent,
   );
 }
 
@@ -637,8 +641,14 @@ function normalizedNodeReport(report: NodeReport): unknown {
 // order) is the exact reverse of the byte order of the workspace-relative
 // paths, and document order inside Z.mdx differs from the byte order of the
 // IDs at both nesting levels — a product listing files in
-// configuration/discovery order, or IDs sorted, fails.
-const T12_3_1_ORDERING_CONFIG = `import { defineConfig } from "xspec"
+// configuration/discovery order, or IDs sorted, fails. T12.0-15 stages this
+// workspace after its own first product invocation (`runT1231Listings`,
+// below), so its files are staged-source records (helpers/staged-ts.ts,
+// helpers/staged-mdx.ts; S-9's TypeScript and timing clauses), the same
+// bytes T12.3-1 stages first.
+const T12_3_1_ORDERING_CONFIG = stagedTs(
+  "T12.3-1/T12.0-15 ordering workspace xspec.config.ts (groups zulu then apex, configuration order the reverse of the paths' byte order)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -646,29 +656,39 @@ export default defineConfig({
     apex: ["apecs/nested/**/*.mdx", "apecs/*.mdx"]
   }
 })
-`;
+`,
+);
 
-const T12_3_1_Z = [
-  '<S id="zeta">',
-  "Zeta intro.",
-  "",
-  '<S id="zeta.minor">',
-  "Minor point.",
-  "</S>",
-  "",
-  '<S id="zeta.aleph">',
-  "Aleph point.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="alpha">',
-  "Alpha line.",
-  "</S>",
-  "",
-].join("\n");
+const T12_3_1_Z = stagedMdx(
+  "T12.3-1/T12.0-15 ordering workspace zpecs/Z.mdx (zeta holding zeta.minor then zeta.aleph, then alpha: document order differing from the IDs' byte order)",
+  [
+    '<S id="zeta">',
+    "Zeta intro.",
+    "",
+    '<S id="zeta.minor">',
+    "Minor point.",
+    "</S>",
+    "",
+    '<S id="zeta.aleph">',
+    "Aleph point.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="alpha">',
+    "Alpha line.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-const T12_3_1_M = '<S id="emm">\nEmm line.\n</S>\n';
-const T12_3_1_N = '<S id="enn">\nEnn line.\n</S>\n';
+const T12_3_1_M = stagedMdx(
+  "T12.3-1/T12.0-15 ordering workspace apecs/M.mdx (emm)",
+  '<S id="emm">\nEmm line.\n</S>\n',
+);
+const T12_3_1_N = stagedMdx(
+  "T12.3-1/T12.0-15 ordering workspace apecs/nested/N.mdx (enn)",
+  '<S id="enn">\nEnn line.\n</S>\n',
+);
 
 // Files in byte order of workspace-relative path; IDs in document order.
 const T12_3_1_FLAT: readonly FlatEntry[] = [
@@ -700,7 +720,7 @@ const T12_3_1_TREE: readonly TreeEntry[] = [
 // reaches it against the stub: a staged-source record
 // (helpers/staged-mdx.ts; S-9's before-any-product clause).
 const T12_3_1_T = stagedMdx(
-  "T12.3-1 restricted-tree workspace specs/T.mdx (grand holding grand.par holding grand.par.leaf; solo holding solo.kid)",
+  "T12.3-1/T12.0-15 restricted-tree workspace specs/T.mdx (grand holding grand.par holding grand.par.leaf; solo holding solo.kid)",
   [
     '<S id="grand">',
     "Grand line.",
@@ -728,7 +748,7 @@ const T12_3_1_T = stagedMdx(
 // The restricted-tree workspace's code markers, staged after the ordering
 // workspace's invocations: a TypeScript staged-source record (S-9).
 const T12_3_1_APP = stagedTs(
-  "T12.3-1 restricted-tree workspace src/app.ts (code markers referencing grand.par and solo)",
+  "T12.3-1/T12.0-15 restricted-tree workspace src/app.ts (code markers referencing grand.par and solo)",
   [
     'import SPEC from "../specs/T.xspec";',
     "",
@@ -753,7 +773,7 @@ const T12_3_1_APP = stagedTs(
 // earlier workspaces' invocations, so S-7's sweep never reaches it against
 // the stub: every initial file a staged-source record (S-9).
 const T12_3_1_HELD = stagedMdx(
-  "T12.3-1 entries workspace specs/held.mdx (tgt holding tgt.sub, each referenced by `d` from specs/user.mdx)",
+  "T12.3-1/T12.0-15 entries workspace specs/held.mdx (tgt holding tgt.sub, each referenced by `d` from specs/user.mdx)",
   [
     '<S id="tgt">',
     "Target line.",
@@ -767,12 +787,12 @@ const T12_3_1_HELD = stagedMdx(
 );
 
 const T12_3_1_PROSE = stagedMdx(
-  "T12.3-1 entries workspace specs/prose.mdx (prose alone, no section)",
+  "T12.3-1/T12.0-15 entries workspace specs/prose.mdx (prose alone, no section)",
   "Prose alone, no section.\n",
 );
 
 const T12_3_1_USER = stagedMdx(
-  "T12.3-1 entries workspace specs/user.mdx (client, its `d` naming HELD.tgt and HELD.tgt.sub)",
+  "T12.3-1/T12.0-15 entries workspace specs/user.mdx (client, its `d` naming HELD.tgt and HELD.tgt.sub)",
   [
     'import HELD from "./held.xspec"',
     "",
@@ -784,7 +804,7 @@ const T12_3_1_USER = stagedMdx(
 );
 
 const T12_3_1_CODE = stagedTs(
-  "T12.3-1 entries workspace src/x.ts (a code source the code group matches, its marker referencing tgt)",
+  "T12.3-1/T12.0-15 entries workspace src/x.ts (a code source the code group matches, its marker referencing tgt)",
   [
     'import HELD from "../specs/held.xspec";',
     "",
@@ -826,86 +846,224 @@ const T12_3_1_ENTRIES_UNREFERENCED_TREE: readonly TreeEntry[] = [
   { file: "specs/user.mdx", nodes: [tnode("client")] },
 ];
 
-/** The entries workspace's code source, absent from every human listing. */
-const T12_3_1_NO_CODE_ENTRY: HumanListingAbsence = {
-  mentions: [identityMention(T12_3_1_CODE_SOURCE)],
-  why:
-    `no entry for the code source ${T12_3_1_CODE_SOURCE}, which bears no ` +
-    `requirement IDs — its path never named`,
+/**
+ * One `ids` listing T12.3-1's staging reaches (exit 0), handed to the
+ * staging's visitor at the state it reads: its label (`<prefix>
+ * (<workspace>)`, the workspace one of ordering, restricted tree, and
+ * entries), its argv without
+ * `--json` (`ids` and the listing's flags, `--tree` among them for a tree
+ * listing), whether it is the tree form, and the home test's own `ids …
+ * --json` read with its assertions and the human form's check (`home`).
+ * Exported for T12.0-15 (section-12.0-iv.ts), which hands its human twin of
+ * the listing in their place.
+ */
+export interface T1231Listing {
+  readonly label: string;
+  readonly argv: readonly string[];
+  readonly tree: boolean;
+  readonly home: () => Promise<void>;
+}
+
+/**
+ * A visitor of T12.3-1's listings, each at the state it reads (`listing`),
+ * and whether the staging's other assertions run (`home`): its `--file`
+ * arms outside the root, each a plain usage error, exit 2 — invocations
+ * with no listing to hand over.
+ */
+export interface T1231ListingVisitor {
+  readonly home: boolean;
+  readonly listing: (
+    workspace: TestWorkspace,
+    listing: T1231Listing,
+  ) => Promise<void>;
+}
+
+/** T12.3-1's own visitor: each listing's home, and every other assertion. */
+const T1231_HOME_VISITOR: T1231ListingVisitor = {
+  home: true,
+  listing: async (_workspace, listing) => {
+    await listing.home();
+  },
 };
 
 /**
- * Under `--unreferenced`, the code source as above and the IDs of
- * `specs/held.mdx`, every one referenced by `d`: its entry is kept, empty,
- * so neither ID is named.
+ * A decoded `--json` listing's human form, read through the human ids
+ * decoder (TEST-SPEC T12.3-1's entries clause: "`ids --json`, `ids` in
+ * human form (T12.0-15), and `ids --tree` each list the prose-only source
+ * with an empty entry and give the code source no entry; `ids
+ * --unreferenced`, in each of those forms, keeps the all-referenced
+ * source's entry, empty"; H-3: a test naming the human form reads it
+ * through a human-report adapter; the module header): `ids` with the
+ * listing's flags, without `--json`, run directly after the decoded listing
+ * — nothing between them, so at its state — exits 0 alike, and its report,
+ * decoded by the human ids decoder (helpers/adapters/human-reports.ts:
+ * fitted to the built product's layout, shape-aware, value-blind, failing
+ * loudly), carries the decoded listing entry for entry
+ * (`assertHumanIdsReportCarries`): every entry's file, an empty one
+ * included, in byte order of path, its IDs in document order, and nothing
+ * beside them — so a human form omitting the empty entry, listing the code
+ * source, or naming an ID the listing excludes fails.
  */
-const T12_3_1_UNREFERENCED_ABSENCE: HumanListingAbsence = {
-  mentions: [
-    identityMention(T12_3_1_CODE_SOURCE),
-    identityMention("tgt"),
-    identityMention("tgt.sub"),
-  ],
-  why:
-    `no entry for the code source ${T12_3_1_CODE_SOURCE}, its path never ` +
-    `named, and specs/held.mdx's entry kept empty — \`tgt\` and ` +
-    `\`tgt.sub\`, each referenced by \`d\` from specs/user.mdx, never named`,
-};
+async function assertHumanFlatEntries(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  flags: readonly string[],
+  report: IdsReport,
+  context: string,
+): Promise<void> {
+  const argv = ["ids", ...flags];
+  const label = `${context} \`${argv.join(" ")}\` (human report)`;
+  const human = await expectExit(
+    product,
+    workspace,
+    argv,
+    0,
+    `${label} — the same exit code as the \`--json\` listing at this ` +
+      `state: 0, an informational report (SPEC 12.3, 12.0)`,
+  );
+  assertHumanIdsReportCarries(
+    human,
+    report,
+    `${label}: the --json listing's entries, entry for entry — one per ` +
+      `discovered spec source, an empty one included, none for a code ` +
+      `source, in byte order of path, IDs in document order (SPEC 12.3; ` +
+      `TEST-SPEC T12.3-1, T12.0-15)`,
+  );
+}
 
-const T12_3_1 = defineProductTest({
-  id: "T12.3-1",
-  title:
-    "`ids` groups requirement IDs by file — files in byte order of workspace-relative path (differing from configuration order), IDs within a file in document order (differing from their byte order) — one entry per discovered spec source and none for a code source, each present even when it holds no ID: a spec source of prose alone lists an empty entry and a code source a code group matches none, in the flat, tree, and human forms, and under `--unreferenced` a spec source every one of whose sections another spec source references by `d` keeps its entry, empty; `--tree` renders per-file nesting in the same orders; `--file <glob>` restricts the entries by the rules of SPEC 7 — an outside-root pattern by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`, and `**/../x/*.mdx`, inside once lexically normalized) is an invalid flag value, exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding, an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx` and `specs//*.mdx` over a discovered `specs/T.mdx`, and their twins over `apecs`) is admitted and matches nothing though its normalization matches a discovered file, an empty listing at exit 0, and `src/**/*.ts`, matching only code sources, lists no entry, exit 0; a restricted `--tree` (`--unreferenced`) nests a listed node under its nearest listed ancestor or at its file's top level, containing exactly the listed IDs; and beside each listing holding an entry the human form at the same state exits 0 alike and carries the same information as `--json` — every entry's file, an empty entry's included, and every listed ID, a tree node as its full ID or relative to its tree parent, and on the entries workspace neither the code source's path nor, under `--unreferenced`, the all-referenced source's IDs (robust matching, H-3) (SPEC 12.3, 7, 12.0)",
-  run: async (product) => {
-    await withWorkspace(
-      T12_3_1_ORDERING_CONFIG,
-      {
-        "zpecs/Z.mdx": T12_3_1_Z,
-        "apecs/M.mdx": T12_3_1_M,
-        "apecs/nested/N.mdx": T12_3_1_N,
-      },
-      async (workspace) => {
-        await buildOk(product, workspace, "T12.3-1 `build` (ordering)");
+/**
+ * {@link assertHumanFlatEntries}' tree form: `ids --tree` with the
+ * listing's flags, without `--json`, its report decoded by the human ids
+ * tree decoder and carrying the decoded tree entry for entry and node for
+ * node (`assertHumanIdsTreeReportCarries`): every entry's file, an empty
+ * one included, and each entry's nodes nested as the twin nests them, in
+ * document order, nothing beside them.
+ */
+async function assertHumanTreeEntries(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  flags: readonly string[],
+  report: IdsTreeReport,
+  context: string,
+): Promise<void> {
+  const argv = ["ids", "--tree", ...flags];
+  const label = `${context} \`${argv.join(" ")}\` (human report)`;
+  const human = await expectExit(
+    product,
+    workspace,
+    argv,
+    0,
+    `${label} — the same exit code as the \`--json\` listing at this ` +
+      `state: 0, an informational report (SPEC 12.3, 12.0)`,
+  );
+  assertHumanIdsTreeReportCarries(
+    human,
+    report,
+    `${label}: the --json tree's entries, entry for entry and node for ` +
+      `node — one per discovered spec source, an empty one included, none ` +
+      `for a code source, in byte order of path, each file's nodes nested ` +
+      `as its sections are, in document order (SPEC 12.3; TEST-SPEC ` +
+      `T12.3-1, T12.0-15)`,
+  );
+}
 
-        // Flat listing: both spec-fixed orders, asserted exactly; then, at
-        // the same state, its human form — `--json` parity, every listed
-        // file and ID (module header; H-3), as after each listing below.
-        const flat = await expectFlatListing(
+/**
+ * T12.3-1's staging, each of its `ids` listings at exit 0 handed to the
+ * visitor (exported for T12.0-15): the ordering workspace, built — the flat
+ * and tree listings, the two `--file` globs over `apecs` (the `**` one and
+ * the single-`*` one), the decoy beside the root, the outside-root `--file`
+ * arms (exit 2, run where `visitor.home` holds), and the inside `apecs`
+ * spellings matching nothing; the restricted-tree workspace, built —
+ * `--unreferenced` flat and tree, and TEST-SPEC's pinned inside `specs`
+ * spellings; and the entries workspace, built — the flat and tree
+ * listings, each under `--unreferenced` too, and the `--file` glob matching
+ * only code sources. `prefix` leads every staging step's diagnosis.
+ */
+export async function runT1231Listings(
+  product: ProductBinding,
+  visitor: T1231ListingVisitor,
+  prefix = "T12.3-1",
+): Promise<void> {
+  const flat = (
+    workspace: TestWorkspace,
+    state: string,
+    flags: readonly string[],
+    home: () => Promise<void>,
+  ): Promise<void> =>
+    visitor.listing(workspace, {
+      label: `${prefix} (${state})`,
+      argv: ["ids", ...flags],
+      tree: false,
+      home,
+    });
+  const tree = (
+    workspace: TestWorkspace,
+    state: string,
+    flags: readonly string[],
+    home: () => Promise<void>,
+  ): Promise<void> =>
+    visitor.listing(workspace, {
+      label: `${prefix} (${state})`,
+      argv: ["ids", "--tree", ...flags],
+      tree: true,
+      home,
+    });
+
+  await withWorkspace(
+    T12_3_1_ORDERING_CONFIG,
+    {
+      "zpecs/Z.mdx": T12_3_1_Z,
+      "apecs/M.mdx": T12_3_1_M,
+      "apecs/nested/N.mdx": T12_3_1_N,
+    },
+    async (workspace) => {
+      await buildOk(product, workspace, `${prefix} \`build\` (ordering)`);
+
+      // Flat listing: both spec-fixed orders, asserted exactly; then, at
+      // the same state, its human form — `--json` parity, every listed
+      // file and ID (module header; H-3), as after each listing below.
+      await flat(workspace, "ordering", [], async () => {
+        const report = await expectFlatListing(
           product,
           workspace,
           [],
           T12_3_1_FLAT,
-          "T12.3-1 `ids --json`",
+          `${prefix} \`ids --json\``,
         );
         await assertHumanFlatListing(
           product,
           workspace,
           [],
-          flat,
-          "T12.3-1 (ordering)",
+          report,
+          `${prefix} (ordering)`,
         );
+      });
 
-        // `--tree`: per-file nesting in the same file and document order;
-        // its human form names every node by its full ID or relative to
-        // its tree parent.
-        const tree = await expectTreeListing(
+      // `--tree`: per-file nesting in the same file and document order;
+      // its human form names every node by its full ID or relative to its
+      // tree parent.
+      await tree(workspace, "ordering", [], async () => {
+        const report = await expectTreeListing(
           product,
           workspace,
           [],
           T12_3_1_TREE,
-          "T12.3-1 `ids --tree --json`",
+          `${prefix} \`ids --tree --json\``,
         );
         await assertHumanTreeListing(
           product,
           workspace,
           [],
-          tree,
-          "T12.3-1 (ordering)",
+          report,
+          `${prefix} (ordering)`,
         );
+      });
 
-        // `--file <glob>` restricts to files the glob matches (the rules of
-        // SPEC 7: `**` spans segments, `*` never crosses `/`).
-        const spanFlags = ["--file", "apecs/**/*.mdx"];
-        const spanListing = await expectFlatListing(
+      // `--file <glob>` restricts to files the glob matches (the rules of
+      // SPEC 7: `**` spans segments, `*` never crosses `/`).
+      const spanFlags = ["--file", "apecs/**/*.mdx"];
+      await flat(workspace, "ordering", spanFlags, async () => {
+        const report = await expectFlatListing(
           product,
           workspace,
           spanFlags,
@@ -913,42 +1071,47 @@ const T12_3_1 = defineProductTest({
             { file: "apecs/M.mdx", ids: ["emm"] },
             { file: "apecs/nested/N.mdx", ids: ["enn"] },
           ],
-          "T12.3-1 `ids --file apecs/**/*.mdx --json`",
+          `${prefix} \`ids --file apecs/**/*.mdx --json\``,
         );
         await assertHumanFlatListing(
           product,
           workspace,
           spanFlags,
-          spanListing,
-          "T12.3-1 (ordering)",
+          report,
+          `${prefix} (ordering)`,
         );
-        const singleFlags = ["--file", "apecs/*.mdx"];
-        const singleListing = await expectFlatListing(
+      });
+      const singleFlags = ["--file", "apecs/*.mdx"];
+      await flat(workspace, "ordering", singleFlags, async () => {
+        const report = await expectFlatListing(
           product,
           workspace,
           singleFlags,
           [{ file: "apecs/M.mdx", ids: ["emm"] }],
-          "T12.3-1 `ids --file apecs/*.mdx --json` (a single `*` never " +
-            "crosses `/`, SPEC 7)",
+          `${prefix} \`ids --file apecs/*.mdx --json\` (a single \`*\` ` +
+            "never crosses `/`, SPEC 7)",
         );
         await assertHumanFlatListing(
           product,
           workspace,
           singleFlags,
-          singleListing,
-          "T12.3-1 (ordering)",
+          report,
+          `${prefix} (ordering)`,
         );
+      });
 
-        // A `--file` pattern outside the workspace root by its spelling
-        // alone — decided as 7 decides a configured glob (T7-4) — is an
-        // invalid flag value: exit 2 with the plain usage error's document,
-        // like its configuration-time counterpart (SPEC 12.3, 7, 14.14,
-        // 12.0); `**/../x/*.mdx` among them, outside though its lexical
-        // normalization `x/*.mdx` is inside, which a product normalizing
-        // before deciding answers — with the file the ascending spellings
-        // name when resolved staged beside the root, so exit 2 never comes
-        // from a side reason.
-        await stageBesideRoot(workspace, BESIDE_ROOT_FILE_PATTERN_DECOY);
+      // A `--file` pattern outside the workspace root by its spelling
+      // alone — decided as 7 decides a configured glob (T7-4) — is an
+      // invalid flag value: exit 2 with the plain usage error's document,
+      // like its configuration-time counterpart (SPEC 12.3, 7, 14.14,
+      // 12.0); `**/../x/*.mdx` among them, outside though its lexical
+      // normalization `x/*.mdx` is inside, which a product normalizing
+      // before deciding answers — with the file the ascending spellings
+      // name when resolved staged beside the root, so exit 2 never comes
+      // from a side reason. The decoy is staged either way, so the later
+      // listings read the state T12.3-1 reads them at.
+      await stageBesideRoot(workspace, BESIDE_ROOT_FILE_PATTERN_DECOY);
+      if (visitor.home) {
         for (const { spelling, why } of [
           ...OUTSIDE_ROOT_FILE_PATTERNS,
           OUTSIDE_ROOT_FILE_PATTERN_INSIDE_ONCE_NORMALIZED,
@@ -957,47 +1120,55 @@ const T12_3_1 = defineProductTest({
             product,
             workspace,
             ["ids", "--file", spelling, "--json"],
-            `T12.3-1 \`ids --file ${JSON.stringify(spelling)} --json\` (${why})`,
+            `${prefix} \`ids --file ${JSON.stringify(spelling)} --json\` (${why})`,
           );
         }
+      }
 
-        // An inside pattern spelled with a `.` or an empty segment is
-        // admitted and matches nothing — a discovered path carries no such
-        // segment (SPEC 7, 12.0) — so the restricted listing holds no
-        // entry: `files` exactly []. Here the twins over `apecs`, whose
-        // normalized form (`apecs/*.mdx`) matches M.mdx — the arm a
-        // normalizing product fails; TEST-SPEC's pinned `specs` spellings
-        // run on the restricted-tree workspace below, over the
-        // `specs/T.mdx` their normalization matches.
-        for (const { spelling, why } of insideNoMatchFilePatterns("apecs")) {
+      // An inside pattern spelled with a `.` or an empty segment is
+      // admitted and matches nothing — a discovered path carries no such
+      // segment (SPEC 7, 12.0) — so the restricted listing holds no
+      // entry: `files` exactly []. Here the twins over `apecs`, whose
+      // normalized form (`apecs/*.mdx`) matches M.mdx — the arm a
+      // normalizing product fails; TEST-SPEC's pinned `specs` spellings
+      // run on the restricted-tree workspace below, over the
+      // `specs/T.mdx` their normalization matches.
+      for (const { spelling, why } of insideNoMatchFilePatterns("apecs")) {
+        await flat(workspace, "ordering", ["--file", spelling], async () => {
           await expectNoEntryListing(
             product,
             workspace,
             spelling,
-            `the pattern is inside the root and matches nothing — ${why}: a ` +
-              `discovered path carries no \`.\` or empty segment (SPEC 7, ` +
-              `12.0), though its normalization \`apecs/*.mdx\` matches ` +
+            `the pattern is inside the root and matches nothing — ${why}: ` +
+              `a discovered path carries no \`.\` or empty segment (SPEC ` +
+              `7, 12.0), though its normalization \`apecs/*.mdx\` matches ` +
               `apecs/M.mdx`,
-            `T12.3-1 \`ids --file ${JSON.stringify(spelling)} --json\` (${why})`,
+            `${prefix} \`ids --file ${JSON.stringify(spelling)} --json\` (${why})`,
           );
-        }
-      },
-    );
+        });
+      }
+    },
+  );
 
-    // Restricted `--tree`: nesting under the nearest listed ancestor, or at
-    // the file's top level; the tree contains exactly the listed IDs.
-    await withWorkspace(
-      SPEC_AND_CODE_CONFIG,
-      { "specs/T.mdx": T12_3_1_T, "src/app.ts": T12_3_1_APP },
-      async (workspace) => {
-        await buildOk(product, workspace, "T12.3-1 `build` (restricted tree)");
+  // Restricted `--tree`: nesting under the nearest listed ancestor, or at
+  // the file's top level; the tree contains exactly the listed IDs.
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    { "specs/T.mdx": T12_3_1_T, "src/app.ts": T12_3_1_APP },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${prefix} \`build\` (restricted tree)`,
+      );
 
-        // Premise: the restriction lists exactly grand, grand.par.leaf, and
-        // solo.kid — `grand.par` and `solo` carry incoming `references`
-        // edges from the code markers — in the one spec source's entry, the
-        // code source src/app.ts given none (SPEC 12.3). Its human form
-        // follows it.
-        const unreferenced = await expectFlatListing(
+      // Premise: the restriction lists exactly grand, grand.par.leaf, and
+      // solo.kid — `grand.par` and `solo` carry incoming `references`
+      // edges from the code markers — in the one spec source's entry, the
+      // code source src/app.ts given none (SPEC 12.3). Its human form
+      // follows it.
+      await flat(workspace, "restricted tree", ["--unreferenced"], async () => {
+        const report = await expectFlatListing(
           product,
           workspace,
           ["--unreferenced"],
@@ -1007,22 +1178,26 @@ const T12_3_1 = defineProductTest({
               ids: ["grand", "grand.par.leaf", "solo.kid"],
             },
           ],
-          "T12.3-1 `ids --unreferenced --json` (the restriction premise)",
+          `${prefix} \`ids --unreferenced --json\` (the restriction premise)`,
         );
         await assertHumanFlatListing(
           product,
           workspace,
           ["--unreferenced"],
-          unreferenced,
-          "T12.3-1 (restricted tree)",
+          report,
+          `${prefix} (restricted tree)`,
         );
+      });
 
-        // grand.par.leaf's parent is unlisted, so it nests under its nearest
-        // listed ancestor (grand); solo.kid has no listed ancestor, so it
-        // sits at the file's top level. Exact equality also asserts "the
-        // tree contains exactly the listed IDs" — neither grand.par nor solo
-        // appears.
-        const restricted = await expectTreeListing(
+      // grand.par.leaf's parent is unlisted, so it nests under its nearest
+      // listed ancestor (grand); solo.kid has no listed ancestor, so it
+      // sits at the file's top level. Exact equality also asserts "the
+      // tree contains exactly the listed IDs" — neither grand.par nor solo
+      // appears. Its human form: grand.par.leaf by its full ID or as
+      // `par.leaf` under grand, solo.kid by its full ID alone — at the top
+      // level no other spelling carries the listed ID (module header; H-3).
+      await tree(workspace, "restricted tree", ["--unreferenced"], async () => {
+        const report = await expectTreeListing(
           product,
           workspace,
           ["--unreferenced"],
@@ -1035,144 +1210,161 @@ const T12_3_1 = defineProductTest({
               ],
             },
           ],
-          "T12.3-1 `ids --unreferenced --tree --json` (restricted tree)",
+          `${prefix} \`ids --unreferenced --tree --json\` (restricted tree)`,
         );
-
-        // Its human form: grand.par.leaf by its full ID or as `par.leaf`
-        // under grand, solo.kid by its full ID alone — at the top level no
-        // other spelling carries the listed ID (module header; H-3).
         await assertHumanTreeListing(
           product,
           workspace,
           ["--unreferenced"],
-          restricted,
-          "T12.3-1 (restricted tree)",
+          report,
+          `${prefix} (restricted tree)`,
         );
+      });
 
-        // TEST-SPEC's pinned inside spellings, `./specs/*.mdx` and
-        // `specs//*.mdx`: inside the root and matching nothing — a
-        // discovered path carries no `.` or empty segment (SPEC 7, 12.0) —
-        // though their normalization `specs/*.mdx` matches the discovered
-        // specs/T.mdx, so a product normalizing the spelling lists T.mdx's
-        // entry: the listing holds no entry, exit 0.
-        for (const { spelling, why } of INSIDE_NO_MATCH_FILE_PATTERNS) {
-          await expectNoEntryListing(
-            product,
-            workspace,
-            spelling,
-            `the pattern is inside the root and matches nothing — ${why}: a ` +
-              `discovered path carries no \`.\` or empty segment (SPEC 7, ` +
-              `12.0), though its normalization \`specs/*.mdx\` matches ` +
-              `specs/T.mdx`,
-            `T12.3-1 \`ids --file ${JSON.stringify(spelling)} --json\` (${why})`,
-          );
-        }
-      },
-    );
+      // TEST-SPEC's pinned inside spellings, `./specs/*.mdx` and
+      // `specs//*.mdx`: inside the root and matching nothing — a
+      // discovered path carries no `.` or empty segment (SPEC 7, 12.0) —
+      // though their normalization `specs/*.mdx` matches the discovered
+      // specs/T.mdx, so a product normalizing the spelling lists T.mdx's
+      // entry: the listing holds no entry, exit 0.
+      for (const { spelling, why } of INSIDE_NO_MATCH_FILE_PATTERNS) {
+        await flat(
+          workspace,
+          "restricted tree",
+          ["--file", spelling],
+          async () => {
+            await expectNoEntryListing(
+              product,
+              workspace,
+              spelling,
+              `the pattern is inside the root and matches nothing — ${why}: ` +
+                `a discovered path carries no \`.\` or empty segment (SPEC ` +
+                `7, 12.0), though its normalization \`specs/*.mdx\` matches ` +
+                `specs/T.mdx`,
+              `${prefix} \`ids --file ${JSON.stringify(spelling)} --json\` (${why})`,
+            );
+          },
+        );
+      }
+    },
+  );
 
-    // Entries (SPEC 12.3: one per discovered spec source, none for a code
-    // source, each present even when it holds no ID; the module header):
-    // every listing — flat and tree, each beside its human form, and each
-    // again under `--unreferenced` — holds exactly one entry per spec
-    // source in byte order, specs/prose.mdx's empty, and none for the code
-    // source src/x.ts; under `--unreferenced` specs/held.mdx keeps its
-    // entry, empty. A product listing only files holding listed IDs fails
-    // at the first listing, as does one listing code sources — src/x.ts
-    // among them, carrying a code location.
-    await withWorkspace(
-      SPEC_AND_CODE_CONFIG,
-      {
-        "specs/held.mdx": T12_3_1_HELD,
-        "specs/prose.mdx": T12_3_1_PROSE,
-        "specs/user.mdx": T12_3_1_USER,
-        [T12_3_1_CODE_SOURCE]: T12_3_1_CODE,
-      },
-      async (workspace) => {
-        await buildOk(product, workspace, "T12.3-1 `build` (entries)");
+  // Entries (SPEC 12.3: one per discovered spec source, none for a code
+  // source, each present even when it holds no ID; the module header):
+  // every listing — flat and tree, each beside its human form read through
+  // the human ids decoder, and each again under `--unreferenced` — holds
+  // exactly one entry per spec source in byte order, specs/prose.mdx's
+  // empty, and none for the code source src/x.ts; under `--unreferenced`
+  // specs/held.mdx keeps its entry, empty. A product listing only files
+  // holding listed IDs fails at the first listing, as does one listing code
+  // sources — src/x.ts among them, carrying a code location.
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    {
+      "specs/held.mdx": T12_3_1_HELD,
+      "specs/prose.mdx": T12_3_1_PROSE,
+      "specs/user.mdx": T12_3_1_USER,
+      [T12_3_1_CODE_SOURCE]: T12_3_1_CODE,
+    },
+    async (workspace) => {
+      await buildOk(product, workspace, `${prefix} \`build\` (entries)`);
 
-        // The unrestricted listings: specs/prose.mdx, no section in it, an
-        // empty entry; the code source no entry — its path absent from
-        // each human form too.
-        const flat = await expectFlatListing(
+      // The unrestricted listings: specs/prose.mdx, no section in it, an
+      // empty entry; the code source no entry — in each human form too.
+      await flat(workspace, "entries", [], async () => {
+        const report = await expectFlatListing(
           product,
           workspace,
           [],
           T12_3_1_ENTRIES_FLAT,
-          "T12.3-1 `ids --json` (entries)",
+          `${prefix} \`ids --json\` (entries)`,
         );
-        await assertHumanFlatListing(
+        await assertHumanFlatEntries(
           product,
           workspace,
           [],
-          flat,
-          "T12.3-1 (entries)",
-          T12_3_1_NO_CODE_ENTRY,
+          report,
+          `${prefix} (entries)`,
         );
-        const tree = await expectTreeListing(
+      });
+      await tree(workspace, "entries", [], async () => {
+        const report = await expectTreeListing(
           product,
           workspace,
           [],
           T12_3_1_ENTRIES_TREE,
-          "T12.3-1 `ids --tree --json` (entries)",
+          `${prefix} \`ids --tree --json\` (entries)`,
         );
-        await assertHumanTreeListing(
+        await assertHumanTreeEntries(
           product,
           workspace,
           [],
-          tree,
-          "T12.3-1 (entries)",
-          T12_3_1_NO_CODE_ENTRY,
+          report,
+          `${prefix} (entries)`,
         );
+      });
 
-        // `--unreferenced` excludes `tgt` and `tgt.sub` — each the target of
-        // client's `d` (a `depends` edge from a spec), `tgt` also of the
-        // code marker's `references` — so specs/held.mdx keeps its entry,
-        // empty, its IDs absent from each human form; specs/prose.mdx's
-        // entry stays, and the code source still has none.
-        const unreferencedFlat = await expectFlatListing(
+      // `--unreferenced` excludes `tgt` and `tgt.sub` — each the target of
+      // client's `d` (a `depends` edge from a spec), `tgt` also of the
+      // code marker's `references` — so specs/held.mdx keeps its entry,
+      // empty, in each human form too; specs/prose.mdx's entry stays, and
+      // the code source still has none.
+      await flat(workspace, "entries", ["--unreferenced"], async () => {
+        const report = await expectFlatListing(
           product,
           workspace,
           ["--unreferenced"],
           T12_3_1_ENTRIES_UNREFERENCED_FLAT,
-          "T12.3-1 `ids --unreferenced --json` (entries)",
+          `${prefix} \`ids --unreferenced --json\` (entries)`,
         );
-        await assertHumanFlatListing(
+        await assertHumanFlatEntries(
           product,
           workspace,
           ["--unreferenced"],
-          unreferencedFlat,
-          "T12.3-1 (entries)",
-          T12_3_1_UNREFERENCED_ABSENCE,
+          report,
+          `${prefix} (entries)`,
         );
-        const unreferencedTree = await expectTreeListing(
+      });
+      await tree(workspace, "entries", ["--unreferenced"], async () => {
+        const report = await expectTreeListing(
           product,
           workspace,
           ["--unreferenced"],
           T12_3_1_ENTRIES_UNREFERENCED_TREE,
-          "T12.3-1 `ids --unreferenced --tree --json` (entries)",
+          `${prefix} \`ids --unreferenced --tree --json\` (entries)`,
         );
-        await assertHumanTreeListing(
+        await assertHumanTreeEntries(
           product,
           workspace,
           ["--unreferenced"],
-          unreferencedTree,
-          "T12.3-1 (entries)",
-          T12_3_1_UNREFERENCED_ABSENCE,
+          report,
+          `${prefix} (entries)`,
         );
+      });
 
-        // A glob matching only code sources leaves no entry: `--file`
-        // restricts the entries to the spec sources the glob matches.
-        const codeOnlyGlob = "src/**/*.ts";
+      // A glob matching only code sources leaves no entry: `--file`
+      // restricts the entries to the spec sources the glob matches.
+      const codeOnlyGlob = "src/**/*.ts";
+      await flat(workspace, "entries", ["--file", codeOnlyGlob], async () => {
         await expectNoEntryListing(
           product,
           workspace,
           codeOnlyGlob,
           `the glob matches only the code source ${T12_3_1_CODE_SOURCE}, ` +
             `which bears no requirement IDs and so has no entry`,
-          `T12.3-1 \`ids --file ${JSON.stringify(codeOnlyGlob)} --json\` (entries)`,
+          `${prefix} \`ids --file ${JSON.stringify(codeOnlyGlob)} --json\` (entries)`,
         );
-      },
-    );
+      });
+    },
+  );
+}
+
+const T12_3_1 = defineProductTest({
+  id: "T12.3-1",
+  title:
+    "`ids` groups requirement IDs by file — files in byte order of workspace-relative path (differing from configuration order), IDs within a file in document order (differing from their byte order) — one entry per discovered spec source and none for a code source, each present even when it holds no ID: a spec source of prose alone lists an empty entry and a code source a code group matches none, in the flat, tree, and human forms — the human forms read through the human ids decoder, entry for entry — and under `--unreferenced` a spec source every one of whose sections another spec source references by `d` keeps its entry, empty; `--tree` renders per-file nesting in the same orders; `--file <glob>` restricts the entries by the rules of SPEC 7 — an outside-root pattern by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`, and `**/../x/*.mdx`, inside once lexically normalized) is an invalid flag value, exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding, an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx` and `specs//*.mdx` over a discovered `specs/T.mdx`, and their twins over `apecs`) is admitted and matches nothing though its normalization matches a discovered file, an empty listing at exit 0, and `src/**/*.ts`, matching only code sources, lists no entry, exit 0; a restricted `--tree` (`--unreferenced`) nests a listed node under its nearest listed ancestor or at its file's top level, containing exactly the listed IDs; and beside each listing holding an entry the human form at the same state exits 0 alike and carries the same information as `--json` — on the ordering and restricted-tree workspaces every entry's file and every listed ID, a tree node as its full ID or relative to its tree parent (robust matching, H-3), and on the entries workspace the decoded listing entry for entry, so neither the code source's path nor, under `--unreferenced`, the all-referenced source's IDs (SPEC 12.3, 7, 12.0)",
+  run: async (product) => {
+    await runT1231Listings(product, T1231_HOME_VISITOR);
   },
 });
 
@@ -1353,35 +1545,45 @@ const T12_3_2 = defineProductTest({
 // member — so their set form, `T12_4_1_STAR_TAGS`, differs from the spelled
 // order with or without the duplicate, from a case-insensitive collation
 // (`amber`, `vital`, `Zeta`), and from the case-folded set (`zeta`).
-const T12_4_1_S = [
-  '<S id="star" tags="vital amber amber Zeta" coverage="none" d={"peer"}>',
-  "Star intro.",
-  "",
-  '<S id="star.point">',
-  "Point line.",
-  "</S>",
-  "",
-  '{text("peer")}',
-  "</S>",
-  "",
-  '<S id="peer">',
-  "Peer line.",
-  "</S>",
-  "",
-].join("\n");
+// T12.0-15 stages this workspace after its own first product invocation
+// (`runT1241Shows`, below), so its sources are staged-source records
+// (helpers/staged-mdx.ts, helpers/staged-ts.ts; S-9's timing clause), the
+// same bytes T12.4-1 stages first.
+const T12_4_1_S = stagedMdx(
+  'T12.4-1/T12.0-15 specs/S.mdx (star — tags spelled "vital amber amber Zeta", coverage="none", `d` and `{text(...)}` naming peer — holding star.point; peer)',
+  [
+    '<S id="star" tags="vital amber amber Zeta" coverage="none" d={"peer"}>',
+    "Star intro.",
+    "",
+    '<S id="star.point">',
+    "Point line.",
+    "</S>",
+    "",
+    '{text("peer")}',
+    "</S>",
+    "",
+    '<S id="peer">',
+    "Peer line.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-const T12_4_1_APP = [
-  'import SPEC, { text } from "../specs/S.xspec";',
-  "",
-  "export function embedStar(): string {",
-  "  return text(SPEC.star);",
-  "}",
-  "",
-  "export function markPeer(): void {",
-  "  SPEC.peer;",
-  "}",
-  "",
-].join("\n");
+const T12_4_1_APP = stagedTs(
+  "T12.4-1/T12.0-15 src/app.ts (embedStar's text(SPEC.star), markPeer's SPEC.peer marker)",
+  [
+    'import SPEC, { text } from "../specs/S.xspec";',
+    "",
+    "export function embedStar(): string {",
+    "  return text(SPEC.star);",
+    "}",
+    "",
+    "export function markPeer(): void {",
+    "  SPEC.peer;",
+    "}",
+    "",
+  ].join("\n"),
+);
 
 const T12_4_1_STAR = "specs/S.mdx#star";
 const T12_4_1_ROOT = "specs/S.mdx";
@@ -1478,123 +1680,169 @@ async function assertHumanShowReport(
   );
 }
 
+/**
+ * One `show` read T12.4-1's staging reaches, handed to the staging's
+ * visitor at the state it reads: its label, the node it shows, and the home
+ * test's own `show --json` and `query node --json` reads with their
+ * assertions and the human form's parity check (`home`). Exported for
+ * T12.0-15 (section-12.0-iv.ts), which hands its human twin of the read in
+ * their place.
+ */
+export interface T1241Show {
+  readonly label: string;
+  readonly node: string;
+  readonly home: () => Promise<void>;
+}
+
+/** A visitor of T12.4-1's reads, each at the state it reads. */
+export type T1241ShowVisitor = (
+  workspace: TestWorkspace,
+  show: T1241Show,
+) => Promise<void>;
+
+/**
+ * T12.4-1's staging, its two `show` reads handed to `visit` (exported for
+ * T12.0-15): the workspace of specs/S.mdx and src/app.ts, built; the path#id
+ * arm's `show specs/S.mdx#star` and the bare-path root arm's `show
+ * specs/S.mdx`. `prefix` leads every staging step's diagnosis.
+ */
+export async function runT1241Shows(
+  product: ProductBinding,
+  visit: T1241ShowVisitor,
+  prefix = "T12.4-1",
+): Promise<void> {
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    { "specs/S.mdx": T12_4_1_S, "src/app.ts": T12_4_1_APP },
+    async (workspace) => {
+      await buildOk(product, workspace, `${prefix} \`build\``);
+
+      const decodeBoth = async (
+        node: string,
+        label: string,
+      ): Promise<{ show: NodeReport; query: NodeReport }> => {
+        const showContext = `T12.4-1 \`show ${node} --json\` (${label})`;
+        const show = decodeNodeReport(
+          await runJson(
+            product,
+            workspace,
+            ["show", node, "--json"],
+            showContext,
+          ),
+          showContext,
+        );
+        const queryContext = `T12.4-1 \`query node ${node} --json\` (${label})`;
+        const query = decodeNodeReport(
+          await runJson(
+            product,
+            workspace,
+            ["query", "node", node, "--json"],
+            queryContext,
+          ),
+          queryContext,
+        );
+        assertSameJson(
+          normalizedNodeReport(show),
+          normalizedNodeReport(query),
+          `T12.4-1 (${label}): every \`show\` field — identity, source ` +
+            `range, own and subtree text, hashes, tags, coverage ` +
+            `attribute, and edges by kind — equals the corresponding ` +
+            `\`query node\` field for ${node} (SPEC 12.4, 11; H-3, ` +
+            `spec-unordered members normalized)`,
+        );
+        assertSameJson(
+          show.identity,
+          node,
+          `T12.4-1 (${label}): \`show ${node}\` reports the addressed ` +
+            `node's identity (SPEC 12.4, 1.5)`,
+        );
+        return { show, query };
+      };
+
+      await visit(workspace, {
+        label: `${prefix} (path#id arm)`,
+        node: T12_4_1_STAR,
+        home: async () => {
+          // path#id arm: the discriminating fields pinned on the show side —
+          // the adapter compare alone would accept a symmetric omission. The
+          // tags are pinned literally in their 12.7 set form on both surfaces
+          // (each decoded form-exact, never re-sorted here): the decode
+          // rejects an unsorted or duplicated array, the adapter compare a
+          // form one surface alone deviates in, and these pins a form both
+          // share — a case-folded set is byte-sorted, so only they catch it.
+          const star = await decodeBoth(T12_4_1_STAR, "path#id arm");
+          assertSameJson(
+            star.show.tags,
+            T12_4_1_STAR_TAGS,
+            `T12.4-1: \`show ${T12_4_1_STAR} --json\` reports the staged ` +
+              `tags (spelled "vital amber amber Zeta") in the 12.7 tag-set ` +
+              `form — byte order, duplicates collapsed, never case-folded; a ` +
+              `show omitting tags fails (SPEC 12.4, 12.7, 2.6)`,
+          );
+          assertSameJson(
+            star.query.tags,
+            T12_4_1_STAR_TAGS,
+            `T12.4-1: \`query node ${T12_4_1_STAR} --json\` reports the ` +
+              `staged tags (spelled "vital amber amber Zeta") in the 12.7 ` +
+              `tag-set form — byte order, duplicates collapsed, never ` +
+              `case-folded (SPEC 11.1, 12.7, 2.6)`,
+          );
+          if (star.show.coverage !== "none") {
+            fail(
+              `T12.4-1: \`show ${T12_4_1_STAR}\` reports the staged ` +
+                `coverage="none" attribute — a show omitting the coverage ` +
+                `attribute fails (SPEC 12.4, 2.5); got ` +
+                `${star.show.coverage === undefined ? "absent" : JSON.stringify(star.show.coverage)}`,
+            );
+          }
+          // Human form, at the same state: the full enumeration the decoded
+          // report carries — star's data, its edges' endpoints and kinds
+          // across the workspace, its expanded texts (1.6), and its range
+          // (module header; H-3).
+          await assertHumanShowReport(
+            product,
+            workspace,
+            star.show,
+            "T12.4-1 (path#id arm)",
+          );
+        },
+      });
+
+      await visit(workspace, {
+        label: `${prefix} (bare-path root arm)`,
+        node: T12_4_1_ROOT,
+        home: async () => {
+          // bare-path (root) arm: the coverage attribute is reported absent
+          // (SPEC 12.4: absent for a root node, 11).
+          const root = await decodeBoth(T12_4_1_ROOT, "bare-path root arm");
+          if (root.show.coverage !== undefined) {
+            fail(
+              `T12.4-1: \`show ${T12_4_1_ROOT}\` reports the coverage ` +
+                `attribute as absent for a root node (SPEC 12.4, 11); got ` +
+                `${JSON.stringify(root.show.coverage)}`,
+            );
+          }
+          // Human form, at the same state: the root's enumeration — no tags
+          // and no coverage value to ask, its `contains` edges' endpoints and
+          // kind, its texts, hashes, and the whole file's range.
+          await assertHumanShowReport(
+            product,
+            workspace,
+            root.show,
+            "T12.4-1 (bare-path root arm)",
+          );
+        },
+      });
+    },
+  );
+}
+
 const T12_4_1 = defineProductTest({
   id: "T12.4-1",
   title:
     "`show` accepts `path#id` and bare `path` (root) and prints the full 12.4 enumeration — identity, source range, own and subtree text, hashes, tags, coverage attribute, and edges by kind — each field equal to the corresponding `query node` field for the same node (adapter-compared); the staged tags — spelled out of byte order, with a duplicate and a mixed-case member — are pinned in 12.7's tag-set form (byte order, duplicates collapsed, never case-folded) on both `show` and `query node`, coverage=\"none\" is pinned on the `show` side, and the root arm reports the coverage attribute absent; and at each arm the human `show` at the same state exits 0 alike and mentions the identity, every edge's endpoints and kind, the tags and coverage value where the node has them, every line of its own and subtree text, the four hashes, and the source range's start and end (robust matching, H-3) (SPEC 12.4, 11, 1.7, 12.7, 2.6, 12.0)",
   run: async (product) => {
-    await withWorkspace(
-      SPEC_AND_CODE_CONFIG,
-      { "specs/S.mdx": T12_4_1_S, "src/app.ts": T12_4_1_APP },
-      async (workspace) => {
-        await buildOk(product, workspace, "T12.4-1 `build`");
-
-        const decodeBoth = async (
-          node: string,
-          label: string,
-        ): Promise<{ show: NodeReport; query: NodeReport }> => {
-          const showContext = `T12.4-1 \`show ${node} --json\` (${label})`;
-          const show = decodeNodeReport(
-            await runJson(
-              product,
-              workspace,
-              ["show", node, "--json"],
-              showContext,
-            ),
-            showContext,
-          );
-          const queryContext = `T12.4-1 \`query node ${node} --json\` (${label})`;
-          const query = decodeNodeReport(
-            await runJson(
-              product,
-              workspace,
-              ["query", "node", node, "--json"],
-              queryContext,
-            ),
-            queryContext,
-          );
-          assertSameJson(
-            normalizedNodeReport(show),
-            normalizedNodeReport(query),
-            `T12.4-1 (${label}): every \`show\` field — identity, source ` +
-              `range, own and subtree text, hashes, tags, coverage ` +
-              `attribute, and edges by kind — equals the corresponding ` +
-              `\`query node\` field for ${node} (SPEC 12.4, 11; H-3, ` +
-              `spec-unordered members normalized)`,
-          );
-          assertSameJson(
-            show.identity,
-            node,
-            `T12.4-1 (${label}): \`show ${node}\` reports the addressed ` +
-              `node's identity (SPEC 12.4, 1.5)`,
-          );
-          return { show, query };
-        };
-
-        // path#id arm: the discriminating fields pinned on the show side —
-        // the adapter compare alone would accept a symmetric omission. The
-        // tags are pinned literally in their 12.7 set form on both surfaces
-        // (each decoded form-exact, never re-sorted here): the decode
-        // rejects an unsorted or duplicated array, the adapter compare a
-        // form one surface alone deviates in, and these pins a form both
-        // share — a case-folded set is byte-sorted, so only they catch it.
-        const star = await decodeBoth(T12_4_1_STAR, "path#id arm");
-        assertSameJson(
-          star.show.tags,
-          T12_4_1_STAR_TAGS,
-          `T12.4-1: \`show ${T12_4_1_STAR} --json\` reports the staged ` +
-            `tags (spelled "vital amber amber Zeta") in the 12.7 tag-set ` +
-            `form — byte order, duplicates collapsed, never case-folded; a ` +
-            `show omitting tags fails (SPEC 12.4, 12.7, 2.6)`,
-        );
-        assertSameJson(
-          star.query.tags,
-          T12_4_1_STAR_TAGS,
-          `T12.4-1: \`query node ${T12_4_1_STAR} --json\` reports the ` +
-            `staged tags (spelled "vital amber amber Zeta") in the 12.7 ` +
-            `tag-set form — byte order, duplicates collapsed, never ` +
-            `case-folded (SPEC 11.1, 12.7, 2.6)`,
-        );
-        if (star.show.coverage !== "none") {
-          fail(
-            `T12.4-1: \`show ${T12_4_1_STAR}\` reports the staged ` +
-              `coverage="none" attribute — a show omitting the coverage ` +
-              `attribute fails (SPEC 12.4, 2.5); got ` +
-              `${star.show.coverage === undefined ? "absent" : JSON.stringify(star.show.coverage)}`,
-          );
-        }
-        // Human form, at the same state: the full enumeration the decoded
-        // report carries — star's data, its edges' endpoints and kinds
-        // across the workspace, its expanded texts (1.6), and its range
-        // (module header; H-3).
-        await assertHumanShowReport(
-          product,
-          workspace,
-          star.show,
-          "T12.4-1 (path#id arm)",
-        );
-
-        // bare-path (root) arm: the coverage attribute is reported absent
-        // (SPEC 12.4: absent for a root node, 11).
-        const root = await decodeBoth(T12_4_1_ROOT, "bare-path root arm");
-        if (root.show.coverage !== undefined) {
-          fail(
-            `T12.4-1: \`show ${T12_4_1_ROOT}\` reports the coverage ` +
-              `attribute as absent for a root node (SPEC 12.4, 11); got ` +
-              `${JSON.stringify(root.show.coverage)}`,
-          );
-        }
-        // Human form, at the same state: the root's enumeration — no tags
-        // and no coverage value to ask, its `contains` edges' endpoints and
-        // kind, its texts, hashes, and the whole file's range.
-        await assertHumanShowReport(
-          product,
-          workspace,
-          root.show,
-          "T12.4-1 (bare-path root arm)",
-        );
-      },
-    );
+    await runT1241Shows(product, (_workspace, show) => show.home());
   },
 });
 

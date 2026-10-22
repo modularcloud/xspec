@@ -44,12 +44,20 @@
 // item returned (TEST-SPEC T12.0-15; SPEC 10.2, 10.7). A refusal or a
 // corrupt session's report — `review create`, `resolve`, or `split`
 // refused, a subcommand naming a corrupt session — is a findings report
-// (14, 14.21). Like every adapter here they are the one place aware of
-// the report's concrete shape: adjustable to shape, never to values, and
-// failing loudly — a diagnosed `HarnessAssertionError` naming the line and
-// the datum — when a report's text fits none of the layout below or lacks
-// what the layout carries. Later decoders for the other human reports
-// (coverage, ids, show) go beside these.
+// (14, 14.21). The coverage decoder takes a `coverage` report onto the
+// coverage model the coverage adapter produces (model.ts `CoverageReport`):
+// each profile's counts, its covered nodes with their covering paths, its
+// uncovered nodes, and its ignored nodes with their reasons (TEST-SPEC
+// T12.0-15; SPEC 8.2); the ids decoders take an `ids` listing and an `ids
+// --tree` listing onto the listing models (`IdsReport`, `IdsTreeReport`):
+// each entry's file and its IDs, or its tree (TEST-SPEC T12.0-15, T12.3-1;
+// SPEC 12.3); and the show decoder takes a `show <node>` report onto the
+// node model (`NodeReport`): the full 12.4 enumeration (TEST-SPEC
+// T12.0-15, T12.4-1; SPEC 12.4). Like every adapter here they are the one
+// place aware of the report's concrete shape: adjustable to shape, never
+// to values, and failing loudly — a diagnosed `HarnessAssertionError`
+// naming the line and the datum — when a report's text fits none of the
+// layout below or lacks what the layout carries.
 //
 // The layout, fitted to what the built product emits (observed by running
 // it on T14-11's per-condition fixtures, T1.5-2's arms, T12.7-3's stagings,
@@ -59,8 +67,11 @@
 // T5.6-1 through T5.6-6 and T9-1 through T9.3-3, the `review` reports of
 // T10.7-1, T10.7-5 through T10.7-13, and T10.1-4, the item reports of the
 // T10.2, T10.4, T10.5, and T10.6 tests, and hand-staged notes — empty and
-// holding a line feed — and a deleted origin node — never by reading its
-// source):
+// holding a line feed — and a deleted origin node, the `coverage`, `ids`,
+// and `show` reports of T8.2-1's, T12.3-1's, and T12.4-1's stagings, and
+// hand-staged empty profile sections, a configuration of no profile,
+// tagless sections, and texts empty, holding indented lines, and ending
+// without a line feed — never by reading its source):
 //
 // - A findings report — a failing `build`'s validation errors, `check`'s
 //   findings, a gated read's report (13.3), a refused operation's refusal
@@ -198,6 +209,49 @@
 //   report is either such an item report or the fully-resolved report —
 //   one line holding the phrase `fully resolved` (the built product's
 //   `review session '<name>' is fully resolved: no item needs review`).
+// - A coverage report — `coverage` or `coverage <name>` without `--json`,
+//   `--check` or not (SPEC 8.2) — is empty with no profile, and is
+//   otherwise each profile in turn, any order: `profile <name>` at the
+//   margin, then, indented two spaces, its counts line
+//   `required: <n>, covered: <n>, uncovered: <n>, ignored: <n>` (each count
+//   `<name>: <n>` under one of 8.2's names, read as a code is, in any order,
+//   each once) and its three sections, each once, in any order, each opened
+//   by its header — `covered:`, `uncovered:`, `ignored:`, read as codes are
+//   — with its rows beneath it indented four: a covered node's identity,
+//   followed by its covering path indented six, `path: <node> -> …`; an
+//   uncovered node's identity; and an ignored node's row,
+//   `<identity>: <reason>; <reason>…` (the built product prints 8.2's
+//   wording, `root node`, `coverage="none"`, `non-leaf under targets:
+//   "leaves"`, `lacking every targetTags tag`, never read: the reasons are
+//   classified onto 8.2's four by reports.ts' `classifyIgnoredReasons`, as
+//   the `--json` twin's are). The built product prints every section's
+//   header, an empty one with nothing beneath it; a section not printed
+//   reads as empty, as a missing blockedBy line does in an item report.
+// - An `ids` listing — `ids` without `--json` or `--tree` (SPEC 12.3) — is
+//   empty with no entry, and is otherwise each entry in turn: its file's
+//   path at the margin, then one line per listed ID, indented two spaces;
+//   an empty entry is its file line alone. An `ids --tree` listing is the
+//   same, each node line indented two spaces per level of nesting beneath
+//   the line it nests under — the nearest line above it indented one level
+//   less — the built product printing each node's full ID; a nested node's
+//   line that does not open with its tree parent's ID and `.` reads as
+//   relative to it, its ID the parent's, `.`, and the line (SPEC 1.3: a
+//   child's ID is its parent's plus `.` and one more segment, so a full ID
+//   nested under any ancestor opens with that ancestor's ID and `.`) — the
+//   reading T12.3-1's mention checks give a tree node.
+// - A show report — `show <node>` without `--json` (SPEC 12.4) — opens with
+//   the node's identity at the margin, then one field per line at the
+//   margin, each at most once, in any order (the built product's order:
+//   `source range: bytes <start>-<end>`; `tags: <tag> <tag>…` — `tags:`
+//   alone for a tagless section, no tags line for a root node;
+//   `coverage: <value>` — none for a root node; `hashes:` with one line per
+//   hash beneath it indented two, `<hash name>: <hash>` under 5.5's names;
+//   `edges:` with `incoming:` and `outgoing:` beneath it indented two and
+//   their edges beneath them indented four, `<kind> from <identity>` and
+//   `<kind> to <identity>`, the kind read as a code is — the shown node
+//   standing at each edge's other end; `own text:` and `subtree text:`,
+//   each with every line of its text beneath it indented two spaces, each
+//   line's line feed ending it, so the empty text prints no line).
 // - A code is recognized at the position the layout gives it, spelled as
 //   human.ts's `codeMention` spells one, over the whole segment: its words
 //   case-insensitive, joined by one character that is neither letter nor
@@ -258,7 +312,19 @@
 //   hash holding a space or `}`, and a reason or note holding a line feed
 //   followed by two spaces mis-decode — never into a pass: the decoded item
 //   then differs from its twin, or a line fits no layout — and the items
-//   of T10.7-7's and T10.7-8's sessions hold none.
+//   of T10.7-7's and T10.7-8's sessions hold none. In a coverage report, a
+//   profile name or identity beginning with a space (the indentation
+//   absorbs it), an ignored node's identity holding `: `, a reason holding
+//   `; `, and a covering path's identity holding ` -> ` mis-decode; in an
+//   `ids` listing, a file path or ID beginning with a space; and in a show
+//   report, a tag holding a space, a hash holding one, and an edge line's
+//   identity holding a line feed — never into a pass: the decoded datum
+//   then differs from its twin, or the line fits no layout — and the data
+//   of T8.2-1's, T12.3-1's, and T12.4-1's stagings hold none. A text whose
+//   last line has no line feed prints as the text with one — the built
+//   product prints the texts `abc` and `abc` plus a line feed alike — so
+//   such a text reads one line feed longer than its twin, failing: the
+//   texts of T12.4-1's arms each end in a line feed or are empty.
 // - A code's words at the code's position are the code — human.ts's
 //   convention, under which `missing ID` carries `missing-id` — so a line
 //   whose code token is gone but whose message opens with its own code's
@@ -347,6 +413,37 @@
 //   resolved baseline either form may echo is not compared. A datum the
 //   human report omits, changes, misplaces, or lists beside its twin's is
 //   named as such.
+// - A coverage report's comparison is exact on the coverage model: its
+//   profiles matched by name, every profile once, order free (SPEC 8.2
+//   fixes none); each one's four counts equal, a count the report prints
+//   none of failing; its covered nodes matched by identity, each with its
+//   covering path equal node for node (one shortest path, 12.0's byte-least
+//   on a tie — the twin's); its uncovered nodes as a multiset; and its
+//   ignored nodes matched by identity, each node's reasons — the human
+//   report's and the twin's each classified onto 8.2's four — equal as a
+//   sequence: T12.0-15 lists 8.2's reasons among the orders SPEC fixes for
+//   the report itself. Every row order free.
+// - An `ids` listing's comparison is exact on the listing model: its
+//   entries matched by file, every entry once, an empty one included, in
+//   the twin's order — byte order of path, the order T12.0-15 lists 12.3's
+//   listing among the orders SPEC fixes for the report itself — and each
+//   entry's IDs equal and in the twin's order, document order. A tree's
+//   entries likewise, each entry's nodes compared place by place, walked
+//   through an explicit stack: the nodes at each place — a file's top
+//   level, or beneath a node — matched by ID, in the twin's order, and
+//   their children compared beneath them, so a node nested elsewhere than
+//   the twin nests it is named missing where the twin holds it and extra
+//   where the report prints it.
+// - A show report's comparison is exact on the node model, its order free
+//   (SPEC 12.4 fixes none): the identity, the source range's two byte
+//   offsets, the own and the subtree text, and each of 5.5's four hashes
+//   equal; the tags as a set — 12.7's byte order and duplicate collapse are
+//   the JSON form's — and absent exactly where the twin's are (a root
+//   node's, 12.4, 11), an empty tags line reading as the empty set, which a
+//   tagless section's twin carries; the coverage attribute equal, absent
+//   exactly where the twin's is; and the incoming and the outgoing edges,
+//   each a multiset of kind and endpoints — each human edge taking the
+//   report's identity as the end its direction gives the shown node.
 
 import { Buffer } from "node:buffer";
 import { fail } from "../assertions.js";
@@ -357,17 +454,24 @@ import { STABLE_CODES } from "./human.js";
 import type {
   AppliedMappingPair,
   ChangeCategory,
+  CoverageReport,
+  CoveredNode,
   EdgeKind,
   ErrorInformation,
   Finding,
   FindingInformation,
   FindingLocation,
   GraphEdge,
+  IdsReport,
+  IdsTreeNode,
+  IdsTreeReport,
+  IgnoredNode,
   ImpactReport,
   ItemKind,
   ItemStatus,
   NextReport,
   NodeHashes,
+  NodeReport,
   NodeTextState,
   OriginTextSide,
   PathValue,
@@ -392,6 +496,7 @@ import {
   NODE_HASH_NAMES,
   PREVIEW_EDIT_CLASSES,
 } from "./model.js";
+import { classifyIgnoredReasons } from "./reports.js";
 import { decodeRecordedState } from "./review.js";
 
 // --- the decoded forms ---------------------------------------------------------
@@ -3365,6 +3470,1145 @@ export function decodeHumanNextReport(
   return guardSyncStep(step, () => decodeNextReportBytes(bytes, context));
 }
 
+// --- the coverage, ids, and show reports -------------------------------------------------
+
+/** A line's leading spaces: its indentation (the module header). */
+function leadingSpaces(text: string): number {
+  let count = 0;
+  while (count < text.length && text[count] === " ") count += 1;
+  return count;
+}
+
+/** SPEC 8.2's four counts of a profile, under the names the layout prints. */
+const COVERAGE_COUNT_NAMES = [
+  "required",
+  "covered",
+  "uncovered",
+  "ignored",
+] as const;
+
+/** One of SPEC 8.2's four counts. */
+export type CoverageCountName = (typeof COVERAGE_COUNT_NAMES)[number];
+
+/**
+ * A profile's counts as a human coverage report prints them (SPEC 8.2):
+ * each count `null` where the profile's counts line prints none, or where
+ * the profile prints no counts line.
+ */
+export type HumanCoverageCounts = Readonly<
+  Record<CoverageCountName, number | null>
+>;
+
+/**
+ * One covered row of a human coverage report (SPEC 8.2), with where it
+ * stood: the covered node's identity and its covering path's node
+ * identities in order — `null` where no path line follows the row.
+ */
+export interface HumanCoveredRow {
+  readonly identity: string;
+  readonly path: readonly string[] | null;
+  /** The report line it was decoded from, 1-based. */
+  readonly line: number;
+}
+
+/** One uncovered row of a human coverage report (SPEC 8.2), with where it stood. */
+export interface HumanUncoveredRow {
+  readonly identity: string;
+  /** The report line it was decoded from, 1-based. */
+  readonly line: number;
+}
+
+/**
+ * One ignored row of a human coverage report (SPEC 8.1, 8.2), with where
+ * it stood: the ignored node's identity and its exclusion reasons as
+ * printed, in the printed order — their wording never read (the reasons
+ * are classified onto 8.2's four in the comparison, as the `--json`
+ * twin's are).
+ */
+export interface HumanIgnoredRow {
+  readonly identity: string;
+  readonly reasons: readonly string[];
+  /** The report line it was decoded from, 1-based. */
+  readonly line: number;
+}
+
+/**
+ * One profile of a human coverage report (SPEC 8.2), with where it stood:
+ * its name, its counts, and its covered, uncovered, and ignored rows in the
+ * report's order — a section the report prints no header for read as
+ * holding no row (the module header).
+ */
+export interface HumanCoverageProfile {
+  readonly name: string;
+  readonly counts: HumanCoverageCounts;
+  readonly covered: readonly HumanCoveredRow[];
+  readonly uncovered: readonly HumanUncoveredRow[];
+  readonly ignored: readonly HumanIgnoredRow[];
+  /** The report line its profile line stood on, 1-based. */
+  readonly line: number;
+}
+
+/**
+ * A human `coverage` report decoded onto the coverage model (TEST-SPEC
+ * T12.0-15; SPEC 8.2): its profiles in the report's order.
+ */
+export interface HumanCoverageReport {
+  readonly profiles: readonly HumanCoverageProfile[];
+  /** The report's text, for diagnoses. */
+  readonly text: string;
+}
+
+/**
+ * One entry of a human flat `ids` listing (SPEC 12.3), with where it stood:
+ * the spec source's path and its listed IDs in the report's order.
+ */
+export interface HumanIdsEntry {
+  readonly file: string;
+  readonly ids: readonly string[];
+  /** The report line its file line stood on, 1-based. */
+  readonly line: number;
+}
+
+/**
+ * A human flat `ids` listing decoded onto the listing model (TEST-SPEC
+ * T12.0-15, T12.3-1; SPEC 12.3): its entries in the report's order.
+ */
+export interface HumanIdsReport {
+  readonly files: readonly HumanIdsEntry[];
+  /** The report's text, for diagnoses. */
+  readonly text: string;
+}
+
+/**
+ * One node of a human `ids --tree` listing (SPEC 12.3), with where it
+ * stood: its full requirement ID and the nodes nested beneath it, in the
+ * report's order.
+ */
+export interface HumanIdsTreeNode {
+  readonly id: string;
+  readonly children: readonly HumanIdsTreeNode[];
+  /** The report line it was decoded from, 1-based. */
+  readonly line: number;
+}
+
+/**
+ * One entry of a human `ids --tree` listing (SPEC 12.3), with where it
+ * stood: the spec source's path and its top-level nodes in the report's
+ * order.
+ */
+export interface HumanIdsTreeEntry {
+  readonly file: string;
+  readonly nodes: readonly HumanIdsTreeNode[];
+  /** The report line its file line stood on, 1-based. */
+  readonly line: number;
+}
+
+/**
+ * A human `ids --tree` listing decoded onto the tree model (TEST-SPEC
+ * T12.0-15, T12.3-1; SPEC 12.3): its entries in the report's order.
+ */
+export interface HumanIdsTreeReport {
+  readonly files: readonly HumanIdsTreeEntry[];
+  /** The report's text, for diagnoses. */
+  readonly text: string;
+}
+
+/**
+ * One edge of a human `show` report (SPEC 12.4: edges by kind), with where
+ * it stood: its kind and its two endpoints — the shown node at the end the
+ * line's direction gives it, the line's identity at the other.
+ */
+export interface HumanNodeEdge extends GraphEdge {
+  /** The report line it was decoded from, 1-based. */
+  readonly line: number;
+}
+
+/**
+ * A human `show <node>` report decoded onto the node model (TEST-SPEC
+ * T12.0-15, T12.4-1; SPEC 12.4): the node's identity, source range (1.7),
+ * tags, coverage attribute, hashes (5.5), incoming and outgoing edges, and
+ * own and subtree text (1.6) — each field `null` (the hashes: missing)
+ * where its line is not printed, an edge list the report prints no line of
+ * empty.
+ */
+export interface HumanNodeReport {
+  readonly identity: string;
+  readonly sourceRange: SourceRange | null;
+  /** The node's tags, `null` where no tags line is printed (absent). */
+  readonly tags: readonly string[] | null;
+  /** The node's coverage attribute, `null` where none is printed (absent). */
+  readonly coverage: string | null;
+  readonly hashes: Readonly<Partial<NodeHashes>>;
+  readonly incomingEdges: readonly HumanNodeEdge[];
+  readonly outgoingEdges: readonly HumanNodeEdge[];
+  readonly ownText: string | null;
+  readonly subtreeText: string | null;
+  /** The report's text, for diagnoses. */
+  readonly text: string;
+}
+
+/** A profile's line at the margin: `profile <name>` (the module header). */
+const PROFILE_LINE = /^profile (.+)$/i;
+
+/** A profile's three row sections (SPEC 8.2), each opened by its header. */
+const COVERAGE_SECTIONS = ["covered", "uncovered", "ignored"] as const;
+
+/** One of a profile's row sections. */
+type CoverageSection = (typeof COVERAGE_SECTIONS)[number];
+
+/** The sections' header words, spelled as a code is (the module header). */
+const COVERAGE_SECTION_SPELLINGS = vocabularySpellings(COVERAGE_SECTIONS);
+
+/** The counts' names, spelled as a code is (the module header). */
+const COVERAGE_COUNT_SPELLINGS = vocabularySpellings(COVERAGE_COUNT_NAMES);
+
+/** One count of a profile's counts line: `<name>: <n>`. */
+const COVERAGE_COUNT_TOKEN = /^(.+): (0|[1-9][0-9]*)$/;
+
+/** The separator between a counts line's counts. */
+const COVERAGE_COUNT_SEPARATOR = ", ";
+
+/** A covering path's line beneath its covered row: `path: <node> -> …`. */
+const COVERING_PATH_LINE = /^path: (.*)$/i;
+
+/** The separator between an ignored row's identity and its reasons. */
+const IGNORED_REASONS_OPENING = ": ";
+
+/** The separator between an ignored row's reasons. */
+const REASON_SEPARATOR = "; ";
+
+/** A covered row as its decode gathers it, its path read from the line after it. */
+interface GatheringCoveredRow {
+  readonly identity: string;
+  path: string[] | null;
+  readonly line: number;
+}
+
+/** A profile as its decode gathers it. */
+interface GatheringProfile {
+  readonly name: string;
+  readonly counts: Record<CoverageCountName, number | null>;
+  readonly covered: GatheringCoveredRow[];
+  readonly uncovered: HumanUncoveredRow[];
+  readonly ignored: HumanIgnoredRow[];
+  readonly line: number;
+  /** The line its counts line stood on, once read. */
+  countsLine: number | undefined;
+  /** Each section's header line, once opened. */
+  readonly opened: Map<CoverageSection, number>;
+}
+
+/**
+ * A profile's counts line (the module header): its counts joined by `, `,
+ * each `<name>: <n>` under one of SPEC 8.2's names, read as a code is and
+ * printed once, the count decimal as the layout spells it.
+ */
+function decodeCoverageCountsLine(
+  body: string,
+  counts: Record<CoverageCountName, number | null>,
+  where: string,
+  adapter: string,
+  report: string,
+): void {
+  const layout =
+    "a profile's counts line `required: <n>, covered: <n>, uncovered: <n>, ignored: <n>` — " +
+    "SPEC 8.2's counts of required, covered, uncovered, and ignored nodes, each in decimal — or " +
+    "a section header, `covered:`, `uncovered:`, or `ignored:`";
+  for (const token of body.split(COVERAGE_COUNT_SEPARATOR)) {
+    const match = COVERAGE_COUNT_TOKEN.exec(token);
+    if (match === null) {
+      decodeFail(
+        adapter,
+        where,
+        `${layout}; got ${JSON.stringify(token)}`,
+        report,
+      );
+    }
+    const name = spelledEntry(
+      match[1]!,
+      COVERAGE_COUNT_SPELLINGS,
+      "coverage counts",
+    );
+    if (name === undefined) {
+      decodeFail(
+        adapter,
+        where,
+        `${layout} — each count under one of 8.2's names (${COVERAGE_COUNT_NAMES.join(", ")}), ` +
+          `got ${JSON.stringify(match[1])}`,
+        report,
+      );
+    }
+    if (counts[name] !== null) {
+      decodeFail(
+        adapter,
+        where,
+        `${layout} — each count printed once: the ${name} count is printed twice, so which is ` +
+          "the profile's is ambiguous",
+        report,
+      );
+    }
+    const count = Number(match[2]);
+    if (!Number.isSafeInteger(count)) {
+      decodeFail(
+        adapter,
+        where,
+        `counts within the safe integers, got ${match[2]!}`,
+        report,
+      );
+    }
+    counts[name] = count;
+  }
+}
+
+/**
+ * An ignored row (the module header): `<identity>: <reason>[; <reason>…]`,
+ * split at its first `: ` — a row holding none reads as reporting no
+ * reason, which the comparison names.
+ */
+function decodeIgnoredRow(
+  body: string,
+  line: number,
+  where: string,
+  adapter: string,
+  report: string,
+): HumanIgnoredRow {
+  const opening = body.indexOf(IGNORED_REASONS_OPENING);
+  const identity = opening === -1 ? body : body.slice(0, opening);
+  const reasons =
+    opening === -1
+      ? []
+      : body
+          .slice(opening + IGNORED_REASONS_OPENING.length)
+          .split(REASON_SEPARATOR);
+  if (identity.length === 0 || reasons.some((reason) => reason.length === 0)) {
+    decodeFail(
+      adapter,
+      where,
+      "an ignored row `<identity>: <reason>[; <reason>…]` — the ignored node's identity, then " +
+        "its exclusion reasons separated by `; `, none of them empty (SPEC 8.2)",
+      report,
+    );
+  }
+  return { identity, reasons, line };
+}
+
+/** The decode of a coverage report's bytes, under its guard. */
+function decodeCoverageBytes(
+  bytes: Uint8Array,
+  context: string | undefined,
+): HumanCoverageReport {
+  const adapter = adapterName("coverage report", context);
+  const report = utf8Text(bytes, adapter, "report");
+  const lines = reportLines(report);
+  const profiles: GatheringProfile[] = [];
+  const named = new Map<string, number>();
+  let profile: GatheringProfile | undefined = undefined;
+  let section: CoverageSection | undefined = undefined;
+  let lastCovered: GatheringCoveredRow | undefined = undefined;
+  for (const [index, text] of lines.entries()) {
+    const line = index + 1;
+    const where = atLine(line, text);
+    const indent = leadingSpaces(text);
+    const body = text.slice(indent);
+    if (body.length === 0) {
+      decodeFail(
+        adapter,
+        where,
+        "a line of the coverage layout — a profile's line, its counts line, a section header, " +
+          "or a section's row — never an empty or blank line",
+        report,
+      );
+    }
+    if (indent === 0) {
+      const opening = PROFILE_LINE.exec(text);
+      if (opening === null) {
+        decodeFail(
+          adapter,
+          where,
+          "a profile's line `profile <name>` at the margin, opening its report (SPEC 8.2: " +
+            "every profile runs by default, `coverage <name>` runs one)",
+          report,
+        );
+      }
+      const name = opening[1]!;
+      const first = named.get(name);
+      if (first !== undefined) {
+        decodeFail(
+          adapter,
+          where,
+          `each profile reported once — the profile ${JSON.stringify(name)} reported on line ` +
+            `${String(first)} is reported again here`,
+          report,
+        );
+      }
+      named.set(name, line);
+      profile = {
+        name,
+        counts: {
+          required: null,
+          covered: null,
+          uncovered: null,
+          ignored: null,
+        },
+        covered: [],
+        uncovered: [],
+        ignored: [],
+        line,
+        countsLine: undefined,
+        opened: new Map(),
+      };
+      profiles.push(profile);
+      section = undefined;
+      lastCovered = undefined;
+      continue;
+    }
+    if (profile === undefined) {
+      decodeFail(
+        adapter,
+        where,
+        "an indented line inside a profile's report, its `profile <name>` line at the margin " +
+          "opening it",
+        report,
+      );
+    }
+    if (indent === 2) {
+      lastCovered = undefined;
+      const header = body.endsWith(":")
+        ? spelledEntry(
+            body.slice(0, -1),
+            COVERAGE_SECTION_SPELLINGS,
+            "coverage sections",
+          )
+        : undefined;
+      if (header !== undefined) {
+        const first = profile.opened.get(header);
+        if (first !== undefined) {
+          decodeFail(
+            adapter,
+            where,
+            `each section once per profile — the profile's ${header} section opened on line ` +
+              `${String(first)} opens again here`,
+            report,
+          );
+        }
+        profile.opened.set(header, line);
+        section = header;
+        continue;
+      }
+      if (profile.countsLine !== undefined) {
+        decodeFail(
+          adapter,
+          where,
+          `one counts line per profile — line ${String(profile.countsLine)} prints the ` +
+            "profile's counts already, so which are its is ambiguous",
+          report,
+        );
+      }
+      decodeCoverageCountsLine(body, profile.counts, where, adapter, report);
+      profile.countsLine = line;
+      section = undefined;
+      continue;
+    }
+    if (indent === 4) {
+      if (section === undefined) {
+        decodeFail(
+          adapter,
+          where,
+          "a row inside one of the profile's sections, its header — `covered:`, `uncovered:`, " +
+            "or `ignored:` — opening it",
+          report,
+        );
+      }
+      if (section === "covered") {
+        const row: GatheringCoveredRow = { identity: body, path: null, line };
+        profile.covered.push(row);
+        lastCovered = row;
+      } else if (section === "uncovered") {
+        profile.uncovered.push({ identity: body, line });
+        lastCovered = undefined;
+      } else {
+        profile.ignored.push(
+          decodeIgnoredRow(body, line, where, adapter, report),
+        );
+        lastCovered = undefined;
+      }
+      continue;
+    }
+    if (indent === 6) {
+      if (lastCovered === undefined) {
+        decodeFail(
+          adapter,
+          where,
+          "a covering path line `path: <node> -> …` beneath its covered row, inside the " +
+            "profile's covered section",
+          report,
+        );
+      }
+      const match = COVERING_PATH_LINE.exec(body);
+      const nodes = match === null ? [] : match[1]!.split(PATH_ARROW);
+      if (match === null || nodes.some((node) => node.length === 0)) {
+        decodeFail(
+          adapter,
+          where,
+          "a covering path line `path: <node> -> …` — the path's node identities in order, " +
+            "joined by ` -> ` (SPEC 8.2: one shortest covering path per covered node)",
+          report,
+        );
+      }
+      if (lastCovered.path !== null) {
+        decodeFail(
+          adapter,
+          where,
+          `one covering path per covered node — line ${String(lastCovered.line)}'s node has ` +
+            "its path printed already (SPEC 8.2: one shortest covering path)",
+          report,
+        );
+      }
+      lastCovered.path = nodes;
+      continue;
+    }
+    decodeFail(
+      adapter,
+      where,
+      "a line indented as the layout indents one — a profile's line at the margin, its counts " +
+        "line and section headers at two spaces, a section's rows at four, a covering path at " +
+        `six — got ${String(indent)} spaces`,
+      report,
+    );
+  }
+  return {
+    profiles: profiles.map(
+      ({ name, counts, covered, uncovered, ignored, line }) => ({
+        name,
+        counts: { ...counts },
+        covered: covered.map((row) => ({ ...row })),
+        uncovered,
+        ignored,
+        line,
+      }),
+    ),
+    text: report,
+  };
+}
+
+/**
+ * Decode a human `coverage` report — its standard output without `--json`
+ * (SPEC 8.2, 12.0), `--check` or not — onto the coverage model (the module
+ * header's layout): one {@link HumanCoverageProfile} per profile line, each
+ * with its counts and its covered, uncovered, and ignored rows. Takes a run
+ * (its stdout bytes) or the report's bytes. Fails diagnosed on bytes that
+ * are not valid UTF-8, an empty or blank line, a margin line that opens no
+ * profile, a profile reported twice, an indented line before every profile,
+ * a counts line printed twice or holding a count not `<name>: <n>` under
+ * one of 8.2's names or a count printed twice, a section opened twice, a
+ * row outside every section, an ignored row with an empty identity or
+ * reason, a covering path line outside a covered row, malformed, or printed
+ * twice, and a line indented as the layout indents none. A harness step
+ * under its own guard (TEST-SPEC S-3).
+ */
+export function decodeHumanCoverageReport(
+  output: RunResult | Uint8Array,
+  context?: string,
+): HumanCoverageReport {
+  const bytes = output instanceof Uint8Array ? output : output.stdoutBytes;
+  const step =
+    output instanceof Uint8Array
+      ? "decoding a human coverage report (decodeHumanCoverageReport)"
+      : `decoding the human coverage report of ${output.commandLine} (decodeHumanCoverageReport)`;
+  return guardSyncStep(step, () => decodeCoverageBytes(bytes, context));
+}
+
+/** The indentation of one listed ID beneath its file line (the module header). */
+const IDS_INDENT = 2;
+
+/** The decode of a flat `ids` listing's bytes, under its guard. */
+function decodeIdsBytes(
+  bytes: Uint8Array,
+  context: string | undefined,
+): HumanIdsReport {
+  const adapter = adapterName("ids listing", context);
+  const report = utf8Text(bytes, adapter, "report");
+  const lines = reportLines(report);
+  const files: { file: string; ids: string[]; line: number }[] = [];
+  const named = new Map<string, number>();
+  for (const [index, text] of lines.entries()) {
+    const line = index + 1;
+    const where = atLine(line, text);
+    const indent = leadingSpaces(text);
+    const body = text.slice(indent);
+    if (body.length === 0) {
+      decodeFail(
+        adapter,
+        where,
+        "an entry's file line or one of its ID lines, never an empty or blank line",
+        report,
+      );
+    }
+    if (indent === 0) {
+      const first = named.get(text);
+      if (first !== undefined) {
+        decodeFail(
+          adapter,
+          where,
+          `each file's entry once — the entry of ${JSON.stringify(text)} listed on line ` +
+            `${String(first)} is listed again here (SPEC 12.3: one entry per discovered spec ` +
+            "source)",
+          report,
+        );
+      }
+      named.set(text, line);
+      files.push({ file: text, ids: [], line });
+      continue;
+    }
+    const entry = files[files.length - 1];
+    if (entry === undefined) {
+      decodeFail(
+        adapter,
+        where,
+        "an ID line beneath its entry's file line at the margin",
+        report,
+      );
+    }
+    if (indent !== IDS_INDENT) {
+      decodeFail(
+        adapter,
+        where,
+        `an ID line indented ${String(IDS_INDENT)} spaces beneath its file's line — a flat ` +
+          `listing nests nothing (SPEC 12.3: \`--tree\` renders the nesting) — got ` +
+          `${String(indent)} spaces`,
+        report,
+      );
+    }
+    entry.ids.push(body);
+  }
+  return { files, text: report };
+}
+
+/**
+ * Decode a human `ids` listing — its standard output without `--json` or
+ * `--tree` (SPEC 12.3, 12.0) — onto the listing model (the module header's
+ * layout): one {@link HumanIdsEntry} per file line at the margin, holding
+ * the ID lines beneath it, in the report's order. Takes a run (its stdout
+ * bytes) or the report's bytes. Fails diagnosed on bytes that are not
+ * valid UTF-8, an empty or blank line, an ID line before every file line or
+ * indented as a flat listing indents none, and a file listed twice. A
+ * harness step under its own guard (TEST-SPEC S-3).
+ */
+export function decodeHumanIdsReport(
+  output: RunResult | Uint8Array,
+  context?: string,
+): HumanIdsReport {
+  const bytes = output instanceof Uint8Array ? output : output.stdoutBytes;
+  const step =
+    output instanceof Uint8Array
+      ? "decoding a human ids listing (decodeHumanIdsReport)"
+      : `decoding the human ids listing of ${output.commandLine} (decodeHumanIdsReport)`;
+  return guardSyncStep(step, () => decodeIdsBytes(bytes, context));
+}
+
+/** A tree node as its decode gathers it. */
+interface GatheringTreeNode {
+  readonly id: string;
+  readonly children: GatheringTreeNode[];
+  readonly line: number;
+}
+
+/** The decode of an `ids --tree` listing's bytes, under its guard. */
+function decodeIdsTreeBytes(
+  bytes: Uint8Array,
+  context: string | undefined,
+): HumanIdsTreeReport {
+  const adapter = adapterName("ids --tree listing", context);
+  const report = utf8Text(bytes, adapter, "report");
+  const lines = reportLines(report);
+  const files: { file: string; nodes: GatheringTreeNode[]; line: number }[] =
+    [];
+  const named = new Map<string, number>();
+  // The open node at each depth of the current entry, depth 1 first.
+  const open: GatheringTreeNode[] = [];
+  for (const [index, text] of lines.entries()) {
+    const line = index + 1;
+    const where = atLine(line, text);
+    const indent = leadingSpaces(text);
+    const body = text.slice(indent);
+    if (body.length === 0) {
+      decodeFail(
+        adapter,
+        where,
+        "an entry's file line or one of its tree's node lines, never an empty or blank line",
+        report,
+      );
+    }
+    if (indent === 0) {
+      const first = named.get(text);
+      if (first !== undefined) {
+        decodeFail(
+          adapter,
+          where,
+          `each file's entry once — the entry of ${JSON.stringify(text)} listed on line ` +
+            `${String(first)} is listed again here (SPEC 12.3: one entry per discovered spec ` +
+            "source)",
+          report,
+        );
+      }
+      named.set(text, line);
+      files.push({ file: text, nodes: [], line });
+      open.length = 0;
+      continue;
+    }
+    const entry = files[files.length - 1];
+    if (entry === undefined) {
+      decodeFail(
+        adapter,
+        where,
+        "a node line beneath its entry's file line at the margin",
+        report,
+      );
+    }
+    const depth = indent / IDS_INDENT;
+    if (!Number.isInteger(depth) || depth > open.length + 1) {
+      decodeFail(
+        adapter,
+        where,
+        `a node line indented ${String(IDS_INDENT)} spaces per level beneath its file's line, ` +
+          `one level below the line it nests under at most — got ${String(indent)} spaces where ` +
+          `the deepest level open is ${String(open.length)} (SPEC 12.3: the tree follows ` +
+          "section nesting)",
+        report,
+      );
+    }
+    // A nested node line's text not opening with its tree parent's ID and
+    // `.` reads as relative to it (the module header; SPEC 1.3).
+    const parent = depth === 1 ? undefined : open[depth - 2]!;
+    const id =
+      parent === undefined || body.startsWith(`${parent.id}.`)
+        ? body
+        : `${parent.id}.${body}`;
+    const node: GatheringTreeNode = { id, children: [], line };
+    if (parent === undefined) entry.nodes.push(node);
+    else parent.children.push(node);
+    open.length = depth - 1;
+    open.push(node);
+  }
+  return { files, text: report };
+}
+
+/**
+ * Decode a human `ids --tree` listing — its standard output without
+ * `--json` (SPEC 12.3, 12.0) — onto the tree model (the module header's
+ * layout): one {@link HumanIdsTreeEntry} per file line at the margin,
+ * holding the nodes beneath it, each node line nesting under the nearest
+ * line above it indented one level less, in the report's order, a nested
+ * node's ID read as printed where it opens with its tree parent's ID and
+ * `.`, else as relative to it (SPEC 1.3). Takes a
+ * run (its stdout bytes) or the report's bytes. Fails diagnosed on bytes
+ * that are not valid UTF-8, an empty or blank line, a node line before
+ * every file line, indented by an odd number of spaces, or nested more than
+ * one level below the line above it, and a file listed twice. A harness
+ * step under its own guard (TEST-SPEC S-3).
+ */
+export function decodeHumanIdsTreeReport(
+  output: RunResult | Uint8Array,
+  context?: string,
+): HumanIdsTreeReport {
+  const bytes = output instanceof Uint8Array ? output : output.stdoutBytes;
+  const step =
+    output instanceof Uint8Array
+      ? "decoding a human ids --tree listing (decodeHumanIdsTreeReport)"
+      : `decoding the human ids --tree listing of ${output.commandLine} (decodeHumanIdsTreeReport)`;
+  return guardSyncStep(step, () => decodeIdsTreeBytes(bytes, context));
+}
+
+/** The fields a `show` report prints at the margin (the module header). */
+const NODE_FIELD_LABELS = [
+  "source range",
+  "tags",
+  "coverage",
+  "hashes",
+  "edges",
+  "own text",
+  "subtree text",
+] as const;
+
+/** One of a `show` report's fields. */
+type NodeField = (typeof NODE_FIELD_LABELS)[number];
+
+/** A field line at the margin: `<label>:` and its value (the module header). */
+const NODE_FIELD_LINE = /^([a-z]+(?: [a-z]+)*):(?: (.*))?$/;
+
+/** A source range's value: `bytes <start>-<end>` (the module header). */
+const NODE_RANGE_VALUE = /^bytes (0|[1-9][0-9]*)-(0|[1-9][0-9]*)$/;
+
+/** A hash line beneath `hashes:`: `<hash name>: <hash>` (the module header). */
+const NODE_HASH_LINE = /^ {2}([A-Za-z]+): (\S+)$/;
+
+/** An edge direction's header beneath `edges:` (the module header). */
+const EDGE_DIRECTION_LINE = /^ {2}(incoming|outgoing):$/;
+
+/** An edge line beneath its direction: `<kind> from|to <identity>`. */
+const NODE_EDGE_LINE = /^ {4}(\S+) (from|to) (.+)$/;
+
+/** The indentation of a text block's lines beneath its field (the module header). */
+const SHOW_TEXT_INDENT = "  ";
+
+/** A `show` report's lines, with the adapter and the report for diagnoses. */
+interface NodeReportLines {
+  readonly adapter: string;
+  readonly report: string;
+  readonly lines: readonly string[];
+}
+
+/** Fail a `show` report's decode at its 0-based line `index`. */
+function nodeDecodeFail(
+  at: NodeReportLines,
+  index: number,
+  expected: string,
+): never {
+  decodeFail(
+    at.adapter,
+    atLine(index + 1, at.lines[index] ?? ""),
+    expected,
+    at.report,
+  );
+}
+
+/** A field that holds its lines beneath it and no value of its own. */
+function expectNoFieldValue(
+  at: NodeReportLines,
+  index: number,
+  label: NodeField,
+  value: string | undefined,
+): void {
+  if (value !== undefined) {
+    nodeDecodeFail(
+      at,
+      index,
+      `the ${label} field's header \`${label}:\` alone, its contents on the lines beneath it`,
+    );
+  }
+}
+
+/**
+ * The hashes beneath `hashes:` (the module header): one line per hash,
+ * indented two spaces, `<hash name>: <hash>` under one of 5.5's names, each
+ * once. Returns the index of the block's last line.
+ */
+function readNodeHashes(
+  at: NodeReportLines,
+  index: number,
+  hashes: { -readonly [Name in keyof NodeHashes]?: string },
+): number {
+  let last = index;
+  while (last + 1 < at.lines.length && at.lines[last + 1]!.startsWith(" ")) {
+    const next = last + 1;
+    const match = NODE_HASH_LINE.exec(at.lines[next]!);
+    const known =
+      match === null
+        ? undefined
+        : NODE_HASH_NAMES.find((candidate) => candidate === match[1]);
+    if (match === null || known === undefined) {
+      nodeDecodeFail(
+        at,
+        next,
+        `beneath \`hashes:\`, one hash per line indented two spaces, \`<hash name>: <hash>\` ` +
+          `under one of 5.5's names (${NODE_HASH_NAMES.join(", ")})`,
+      );
+    }
+    if (hashes[known] !== undefined) {
+      nodeDecodeFail(
+        at,
+        next,
+        `each hash printed once — ${known} is printed twice, so which is the node's is ambiguous`,
+      );
+    }
+    hashes[known] = match[2]!;
+    last = next;
+  }
+  return last;
+}
+
+/**
+ * The edges beneath `edges:` (the module header): a direction's header,
+ * `incoming:` or `outgoing:` at two spaces, each once, and beneath it one
+ * line per edge at four, `<kind> from <identity>` (incoming) or `<kind> to
+ * <identity>` (outgoing), the kind spelled as a code is — the shown node
+ * standing at the edge's other end. Returns the index of the block's last
+ * line.
+ */
+function readNodeEdges(
+  at: NodeReportLines,
+  index: number,
+  node: string,
+  incoming: HumanNodeEdge[],
+  outgoing: HumanNodeEdge[],
+): number {
+  const opened = new Map<string, number>();
+  let direction: "incoming" | "outgoing" | undefined = undefined;
+  let last = index;
+  while (last + 1 < at.lines.length && at.lines[last + 1]!.startsWith(" ")) {
+    const next = last + 1;
+    const text = at.lines[next]!;
+    last = next;
+    const header = EDGE_DIRECTION_LINE.exec(text);
+    if (header !== null) {
+      const first = opened.get(header[1]!);
+      if (first !== undefined) {
+        nodeDecodeFail(
+          at,
+          next,
+          `each edge direction once — the ${header[1]!} edges opened on line ` +
+            `${String(first)} open again here`,
+        );
+      }
+      opened.set(header[1]!, next + 1);
+      direction = header[1] === "incoming" ? "incoming" : "outgoing";
+      continue;
+    }
+    const edge = NODE_EDGE_LINE.exec(text);
+    if (edge === null || direction === undefined) {
+      nodeDecodeFail(
+        at,
+        next,
+        "beneath `edges:`, a direction's header — `incoming:` or `outgoing:` at two spaces — " +
+          "or, beneath it at four, an edge line `<kind> from <identity>` or `<kind> to " +
+          "<identity>` (SPEC 12.4: edges by kind)",
+      );
+    }
+    const kind = EDGE_KIND_SPELLINGS.filter(({ pattern }) =>
+      pattern.test(edge[1]!),
+    );
+    if (kind.length !== 1) {
+      nodeDecodeFail(
+        at,
+        next,
+        `an edge line's kind, one SPEC 5.2 names (${EDGE_KINDS.join(", ")}), got ` +
+          JSON.stringify(edge[1]),
+      );
+    }
+    const word = direction === "incoming" ? "from" : "to";
+    if (edge[2] !== word) {
+      nodeDecodeFail(
+        at,
+        next,
+        `an ${direction} edge line \`<kind> ${word} <identity>\` — the edge's ` +
+          `${direction === "incoming" ? "source" : "target"}, the shown node standing at its ` +
+          "other end",
+      );
+    }
+    const other = edge[3]!;
+    const decoded =
+      direction === "incoming"
+        ? { from: other, to: node, kind: kind[0]!.kind, line: next + 1 }
+        : { from: node, to: other, kind: kind[0]!.kind, line: next + 1 };
+    (direction === "incoming" ? incoming : outgoing).push(decoded);
+  }
+  return last;
+}
+
+/**
+ * A text block beneath `own text:` or `subtree text:` (the module header):
+ * every line of the text indented two spaces, each line's line feed ending
+ * it, so a text of no line is empty. Returns the text and the index of the
+ * block's last line.
+ */
+function readNodeText(
+  at: NodeReportLines,
+  index: number,
+): { readonly value: string; readonly last: number } {
+  const parts: string[] = [];
+  let last = index;
+  while (
+    last + 1 < at.lines.length &&
+    at.lines[last + 1]!.startsWith(SHOW_TEXT_INDENT)
+  ) {
+    last += 1;
+    parts.push(`${at.lines[last]!.slice(SHOW_TEXT_INDENT.length)}\n`);
+  }
+  return { value: parts.join(""), last };
+}
+
+/** Decode a `show` report's lines, the identity line first (the module header). */
+function decodeNodeLines(at: NodeReportLines): HumanNodeReport {
+  const identity = at.lines[0];
+  if (
+    identity === undefined ||
+    identity.length === 0 ||
+    identity.startsWith(" ")
+  ) {
+    nodeDecodeFail(
+      at,
+      0,
+      "the shown node's identity on the report's first line, at the margin (SPEC 12.4: " +
+        "identity) — never an empty report",
+    );
+  }
+  const seen = new Map<NodeField, number>();
+  let sourceRange: SourceRange | null = null;
+  let tags: string[] | null = null;
+  let coverage: string | null = null;
+  const hashes: { -readonly [Name in keyof NodeHashes]?: string } = {};
+  const incomingEdges: HumanNodeEdge[] = [];
+  const outgoingEdges: HumanNodeEdge[] = [];
+  let ownText: string | null = null;
+  let subtreeText: string | null = null;
+  for (let index = 1; index < at.lines.length; index += 1) {
+    const field = NODE_FIELD_LINE.exec(at.lines[index]!);
+    const label = NODE_FIELD_LABELS.find(
+      (candidate) => candidate === field?.[1],
+    );
+    if (field === null || label === undefined) {
+      nodeDecodeFail(
+        at,
+        index,
+        "a field line at the margin — `source range: bytes <start>-<end>`, `tags: …`, " +
+          "`coverage: …`, `hashes:`, `edges:`, `own text:`, or `subtree text:` — or a line of " +
+          "the field above it, indented beneath it",
+      );
+    }
+    const first = seen.get(label);
+    if (first !== undefined) {
+      nodeDecodeFail(
+        at,
+        index,
+        `each field once — the ${label} field printed on line ${String(first)} is printed again ` +
+          "here",
+      );
+    }
+    seen.set(label, index + 1);
+    const value = field[2];
+    switch (label) {
+      case "source range": {
+        const range = value === undefined ? null : NODE_RANGE_VALUE.exec(value);
+        if (range === null) {
+          nodeDecodeFail(
+            at,
+            index,
+            "a source range `source range: bytes <start>-<end>`, its two byte offsets in " +
+              "decimal (SPEC 12.4, 1.7)",
+          );
+        }
+        const start = Number(range[1]);
+        const end = Number(range[2]);
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) {
+          nodeDecodeFail(
+            at,
+            index,
+            `byte offsets within the safe integers (SPEC 1.7), got ${range[1]!}-${range[2]!}`,
+          );
+        }
+        if (end < start) {
+          nodeDecodeFail(
+            at,
+            index,
+            `a range whose end is not before its start (SPEC 1.7), got ${range[1]!}-${range[2]!}`,
+          );
+        }
+        sourceRange = { start, end };
+        break;
+      }
+      case "tags": {
+        const listed =
+          value === undefined || value.length === 0 ? [] : value.split(" ");
+        if (listed.some((tag) => tag.length === 0)) {
+          nodeDecodeFail(
+            at,
+            index,
+            "a tags line `tags: <tag> …`, the tags separated by single spaces, or `tags:` alone " +
+              "for a node with no tag (SPEC 12.4, 1.4)",
+          );
+        }
+        tags = listed;
+        break;
+      }
+      case "coverage": {
+        if (value === undefined || value.length === 0) {
+          nodeDecodeFail(
+            at,
+            index,
+            "a coverage line `coverage: <value>` holding the node's coverage attribute (SPEC " +
+              "12.4, 2.5)",
+          );
+        }
+        coverage = value;
+        break;
+      }
+      case "hashes":
+        expectNoFieldValue(at, index, label, value);
+        index = readNodeHashes(at, index, hashes);
+        break;
+      case "edges":
+        expectNoFieldValue(at, index, label, value);
+        index = readNodeEdges(
+          at,
+          index,
+          identity,
+          incomingEdges,
+          outgoingEdges,
+        );
+        break;
+      case "own text":
+      case "subtree text": {
+        expectNoFieldValue(at, index, label, value);
+        const block = readNodeText(at, index);
+        if (label === "own text") ownText = block.value;
+        else subtreeText = block.value;
+        index = block.last;
+        break;
+      }
+    }
+  }
+  return {
+    identity,
+    sourceRange,
+    tags,
+    coverage,
+    hashes,
+    incomingEdges,
+    outgoingEdges,
+    ownText,
+    subtreeText,
+    text: at.report,
+  };
+}
+
+/** The decode of a `show` report's bytes, under its guard. */
+function decodeNodeReportBytes(
+  bytes: Uint8Array,
+  context: string | undefined,
+): HumanNodeReport {
+  const adapter = adapterName("show report", context);
+  const report = utf8Text(bytes, adapter, "report");
+  return decodeNodeLines({ adapter, report, lines: reportLines(report) });
+}
+
+/**
+ * Decode a human `show <node>` report — its standard output without
+ * `--json` (SPEC 12.4, 12.0) — onto the node model (the module header's
+ * layout): the identity on the first line, then each field — the source
+ * range, the tags, the coverage attribute, the hashes, the edges by
+ * direction and kind, the own and the subtree text — at most once, in any
+ * order. Takes a run (its stdout bytes) or the report's bytes. Fails
+ * diagnosed on bytes that are not valid UTF-8, an empty report or a first
+ * line that is no identity at the margin, a margin line that is no field
+ * line, a field printed twice, a malformed or reversed range, an empty tag
+ * or coverage value, a hash line under no name of 5.5 or printed twice, an
+ * edge line outside a direction, under no kind of 5.2, or naming its other
+ * end with the other direction's word, a direction opened twice, and a
+ * value beside a field that holds lines beneath it. A harness step under
+ * its own guard (TEST-SPEC S-3).
+ */
+export function decodeHumanNodeReport(
+  output: RunResult | Uint8Array,
+  context?: string,
+): HumanNodeReport {
+  const bytes = output instanceof Uint8Array ? output : output.stdoutBytes;
+  const step =
+    output instanceof Uint8Array
+      ? "decoding a human show report (decodeHumanNodeReport)"
+      : `decoding the human show report of ${output.commandLine} (decodeHumanNodeReport)`;
+  return guardSyncStep(step, () => decodeNodeReportBytes(bytes, context));
+}
+
 // --- the comparisons with the --json twin ---------------------------------------------
 
 /**
@@ -4499,6 +5743,7 @@ function orderProblem<J, H extends { readonly line: number }>(
   key: (element: J) => string,
   what: string,
   order: string,
+  section = "10.7",
 ): string[] {
   const jsonOrder = pairs.map((pair) => key(pair.json));
   const humanOrder = [...pairs]
@@ -4507,8 +5752,8 @@ function orderProblem<J, H extends { readonly line: number }>(
   if (JSON.stringify(humanOrder) === JSON.stringify(jsonOrder)) return [];
   return [
     `the human report lists the ${what} in the order ${JSON.stringify(humanOrder)} where ` +
-      `the --json twin lists them in the order ${JSON.stringify(jsonOrder)} — SPEC 10.7 fixes ` +
-      `the order for the report itself, ${order}`,
+      `the --json twin lists them in the order ${JSON.stringify(jsonOrder)} — SPEC ${section} ` +
+      `fixes the order for the report itself, ${order}`,
   ];
 }
 
@@ -5227,5 +6472,680 @@ export function assertHumanNextReportCarries(
 ): HumanNextReport {
   const decoded = decodeHumanNextReport(human, context);
   assertHumanNextCarries(decoded, json, context);
+  return decoded;
+}
+
+// --- the coverage, ids, and show comparisons with the --json twin -------------------
+
+/** A list of node identities or IDs, rendered for a diagnosis. */
+function describeList(values: readonly string[]): string {
+  return JSON.stringify(values);
+}
+
+/**
+ * What the human report's covered rows omit, change, or list beside the
+ * `--json` twin's (the module header): every covered node matched by
+ * identity, order free, its covering path equal node for node.
+ */
+function coveredRowProblems(
+  json: readonly CoveredNode[],
+  human: readonly HumanCoveredRow[],
+  where: string,
+): string[] {
+  const { pairs, missing, extra } = matchByKey(
+    json,
+    human,
+    (row) => row.identity,
+    (row) => row.identity,
+  );
+  const problems: string[] = missing.map(
+    (row) =>
+      `${where}: the covered node ${JSON.stringify(row.identity)} (path ` +
+      `${describeList(row.path)}) is missing — no covered row names it (SPEC 8.2: the identity ` +
+      "of every covered node, with one shortest covering path)",
+  );
+  for (const pair of pairs) {
+    const at = `line ${String(pair.human.line)} (the covered node ${JSON.stringify(pair.json.identity)})`;
+    if (pair.human.path === null) {
+      problems.push(
+        `${at} prints no covering path where the --json twin's is ${describeList(pair.json.path)} ` +
+          "(SPEC 8.2: one shortest covering path per covered node)",
+      );
+    } else if (
+      JSON.stringify(pair.human.path) !== JSON.stringify(pair.json.path)
+    ) {
+      problems.push(
+        `${at} prints the covering path ${describeList(pair.human.path)} where the --json ` +
+          `twin's is ${describeList(pair.json.path)} (SPEC 8.2, 12.0: one shortest covering ` +
+          "path, the byte-least where several qualify)",
+      );
+    }
+  }
+  for (const row of extra) {
+    problems.push(
+      `line ${String(row.line)} lists ${JSON.stringify(row.identity)} as covered in ${where}, ` +
+        "which the --json twin's covered nodes lack",
+    );
+  }
+  return problems;
+}
+
+/**
+ * What the human report's uncovered rows omit or list beside the `--json`
+ * twin's (the module header): every uncovered node by identity, a
+ * multiset, order free.
+ */
+function uncoveredRowProblems(
+  json: readonly string[],
+  human: readonly HumanUncoveredRow[],
+  where: string,
+): string[] {
+  const { missing, extra } = multisetDifference(
+    json,
+    human,
+    (identity) => identity,
+    (row) => row.identity,
+  );
+  return [
+    ...missing.map(
+      (identity) =>
+        `${where}: the uncovered node ${JSON.stringify(identity)} is missing — no uncovered ` +
+        "row names it (SPEC 8.2: the identity of every uncovered node)",
+    ),
+    ...extra.map(
+      (row) =>
+        `line ${String(row.line)} lists ${JSON.stringify(row.identity)} as uncovered in ` +
+        `${where}, which the --json twin's uncovered nodes lack`,
+    ),
+  ];
+}
+
+/**
+ * What the human report's ignored rows omit, change, or list beside the
+ * `--json` twin's (the module header): every ignored node matched by
+ * identity, order free, and its exclusion reasons — each side's classified
+ * onto SPEC 8.2's four by `classifyIgnoredReasons` (reports.ts; their
+ * wording never compared, H-3) — equal as a sequence: 8.2 fixes their
+ * order for the report itself (T12.0-15).
+ */
+function ignoredRowProblems(
+  json: readonly IgnoredNode[],
+  human: readonly HumanIgnoredRow[],
+  where: string,
+  context: string,
+): string[] {
+  const { pairs, missing, extra } = matchByKey(
+    json,
+    human,
+    (row) => row.identity,
+    (row) => row.identity,
+  );
+  const problems: string[] = missing.map(
+    (row) =>
+      `${where}: the ignored node ${JSON.stringify(row.identity)} is missing — no ignored row ` +
+      "names it (SPEC 8.2: the identity of every ignored node, with its exclusion reasons)",
+  );
+  for (const pair of pairs) {
+    const at = `line ${String(pair.human.line)} (the ignored node ${JSON.stringify(pair.json.identity)})`;
+    const expected = classifyIgnoredReasons(
+      pair.json.reasons,
+      `${context} — the --json twin's reasons for ${pair.json.identity}`,
+    );
+    const printed = classifyIgnoredReasons(
+      pair.human.reasons,
+      `${context} — the human report's reasons for ${pair.json.identity}, ${at}`,
+    );
+    if (JSON.stringify(printed) !== JSON.stringify(expected)) {
+      problems.push(
+        `${at} reports the exclusion reasons ${describeList(printed)} where the --json twin's ` +
+          `are ${describeList(expected)} — every reason that applies, in the order SPEC 8.2 ` +
+          'fixes for the report itself (root node, coverage="none", non-leaf under targets: ' +
+          '"leaves", lacking every targetTags tag)',
+      );
+    }
+  }
+  for (const row of extra) {
+    problems.push(
+      `line ${String(row.line)} lists ${JSON.stringify(row.identity)} as ignored in ${where}, ` +
+        "which the --json twin's ignored nodes lack",
+    );
+  }
+  return problems;
+}
+
+/**
+ * Assert a decoded human `coverage` report carries the information of its
+ * `--json` twin's decoded report (TEST-SPEC T12.0-15: every profile's
+ * counts, node identities, covering paths, and ignored nodes' reasons;
+ * SPEC 8.2; the module header's comparison): every profile, matched by
+ * name, order free; its four counts equal; its covered nodes, each with its
+ * covering path node for node, its uncovered nodes, and its ignored nodes,
+ * each a multiset by identity, order free; and each ignored node's
+ * exclusion reasons, classified onto 8.2's four on both sides, equal in
+ * the fixed order 8.2 gives them. Fails diagnosed, naming every datum the
+ * human report omits, changes, misorders, or lists beside its twin's.
+ */
+export function assertHumanCoverageCarries(
+  human: HumanCoverageReport,
+  json: CoverageReport,
+  context: string,
+): void {
+  const { pairs, missing, extra } = matchByKey(
+    json.profiles,
+    human.profiles,
+    (profile) => profile.name,
+    (profile) => profile.name,
+  );
+  const problems: string[] = missing.map(
+    (profile) =>
+      `the profile ${JSON.stringify(profile.name)} is missing — no profile line names it (SPEC ` +
+      "8.2: every profile runs by default, and `coverage <name>` runs the one named)",
+  );
+  for (const pair of pairs) {
+    const where = `the profile ${JSON.stringify(pair.json.name)} (line ${String(pair.human.line)})`;
+    for (const name of COVERAGE_COUNT_NAMES) {
+      const printed = pair.human.counts[name];
+      const expected = pair.json.counts[name];
+      if (printed === null) {
+        problems.push(
+          `${where} prints no ${name} count where the --json twin's is ${String(expected)} ` +
+            "(SPEC 8.2: the counts of required, covered, uncovered, and ignored nodes)",
+        );
+      } else if (printed !== expected) {
+        problems.push(
+          `${where} prints the ${name} count ${String(printed)} where the --json twin's is ` +
+            String(expected),
+        );
+      }
+    }
+    problems.push(
+      ...coveredRowProblems(pair.json.covered, pair.human.covered, where),
+      ...uncoveredRowProblems(pair.json.uncovered, pair.human.uncovered, where),
+      ...ignoredRowProblems(
+        pair.json.ignored,
+        pair.human.ignored,
+        where,
+        context,
+      ),
+    );
+  }
+  for (const profile of extra) {
+    problems.push(
+      `line ${String(profile.line)} reports the profile ${JSON.stringify(profile.name)}, which ` +
+        "the --json twin lacks",
+    );
+  }
+  if (problems.length === 0) return;
+  fail(
+    `${context}: the human \`coverage\` report does not carry the information its --json twin ` +
+      "carries (TEST-SPEC T12.0-15: every profile's counts, node identities, covering paths, " +
+      "and ignored nodes' reasons, the reasons in the order 8.2 fixes — SPEC 8.2 — decoded by " +
+      "the human-report adapter, H-3; wording and layout free, the order free elsewhere):\n" +
+      `${problems.map((problem) => `- ${problem}`).join("\n")}\n` +
+      `Human report: ${excerpt(human.text)}`,
+  );
+}
+
+/**
+ * Decode a run's human `coverage` report and assert it carries the
+ * information of its `--json` twin's decoded report (TEST-SPEC T12.0-15):
+ * `decodeHumanCoverageReport`, then `assertHumanCoverageCarries`. Returns
+ * the decoded report.
+ */
+export function assertHumanCoverageReportCarries(
+  human: RunResult,
+  json: CoverageReport,
+  context: string,
+): HumanCoverageReport {
+  const decoded = decodeHumanCoverageReport(human, context);
+  assertHumanCoverageCarries(decoded, json, context);
+  return decoded;
+}
+
+/**
+ * What a listed sequence of IDs omits, adds, or reorders against the
+ * `--json` twin's (the module header): the IDs as multisets, then, where
+ * they agree, their order — SPEC 12.3 fixes it for the report itself,
+ * document order.
+ */
+function idSequenceProblems(
+  json: readonly string[],
+  human: readonly string[],
+  where: string,
+  listed: string,
+): string[] {
+  const { missing, extra } = multisetDifference(
+    json,
+    human,
+    (id) => id,
+    (id) => id,
+  );
+  const problems = [
+    ...missing.map(
+      (id) =>
+        `${where} lists no ID ${JSON.stringify(id)}, which the --json twin lists ${listed} ` +
+        "(SPEC 12.3)",
+    ),
+    ...extra.map(
+      (id) =>
+        `${where} lists the ID ${JSON.stringify(id)}, which the --json twin does not list ${listed}`,
+    ),
+  ];
+  if (problems.length === 0 && JSON.stringify(human) !== JSON.stringify(json)) {
+    problems.push(
+      `${where} lists the IDs in the order ${describeList(human)} where the --json twin lists ` +
+        `them in the order ${describeList(json)} — SPEC 12.3 fixes the order for the report ` +
+        "itself, document order",
+    );
+  }
+  return problems;
+}
+
+/**
+ * What the human listing's entries omit, change, misorder, or list beside
+ * the `--json` twin's (the module header): every entry matched by its
+ * file, in the twin's order — SPEC 12.3 fixes it for the report itself,
+ * byte order of workspace-relative path — and `entryProblems` for each
+ * matched pair.
+ */
+function idsEntryProblems<
+  J extends { readonly file: string },
+  H extends { readonly file: string; readonly line: number },
+>(
+  json: readonly J[],
+  human: readonly H[],
+  describeEntry: (entry: J) => string,
+  entryProblems: (json: J, human: H, where: string) => string[],
+): string[] {
+  const { pairs, missing, extra } = matchByKey(
+    json,
+    human,
+    (entry) => entry.file,
+    (entry) => entry.file,
+  );
+  const problems: string[] = missing.map(
+    (entry) =>
+      `the entry of ${JSON.stringify(entry.file)} (${describeEntry(entry)}) is missing — no ` +
+      "file line names it (SPEC 12.3: one entry per discovered spec source the listing covers, " +
+      "present even when it holds no ID)",
+  );
+  for (const pair of pairs) {
+    problems.push(
+      ...entryProblems(
+        pair.json,
+        pair.human,
+        `line ${String(pair.human.line)} (the entry of ${JSON.stringify(pair.json.file)})`,
+      ),
+    );
+  }
+  for (const entry of extra) {
+    problems.push(
+      `line ${String(entry.line)} lists an entry for ${JSON.stringify(entry.file)}, which the ` +
+        "--json twin lacks (SPEC 12.3: an entry per discovered spec source the listing covers, " +
+        "none for a code source)",
+    );
+  }
+  problems.push(
+    ...orderProblem(
+      pairs,
+      (entry) => entry.file,
+      "entries",
+      "byte order of workspace-relative path",
+      "12.3",
+    ),
+  );
+  return problems;
+}
+
+/**
+ * Assert a decoded human `ids` listing carries the information of its
+ * `--json` twin's decoded listing (TEST-SPEC T12.0-15, T12.3-1; SPEC 12.3;
+ * the module header's comparison): every entry, matched by its file, an
+ * entry holding no ID included, in the twin's order (12.3 fixes it: byte
+ * order of path), each entry's IDs equal and in the twin's order (document
+ * order). Fails diagnosed, naming every entry or ID the human listing
+ * omits, misorders, or lists beside its twin's.
+ */
+export function assertHumanIdsCarries(
+  human: HumanIdsReport,
+  json: IdsReport,
+  context: string,
+): void {
+  const problems = idsEntryProblems(
+    json.files,
+    human.files,
+    (entry) => `IDs ${describeList(entry.ids)}`,
+    (jsonEntry, humanEntry, where) =>
+      idSequenceProblems(jsonEntry.ids, humanEntry.ids, where, "there"),
+  );
+  if (problems.length === 0) return;
+  fail(
+    `${context}: the human \`ids\` listing does not carry the listing its --json twin carries ` +
+      "(TEST-SPEC T12.0-15: the listing in the order 12.3 fixes — SPEC 12.3: one entry per " +
+      "discovered spec source, in byte order of path, its IDs in document order — decoded by " +
+      "the human-report adapter, H-3; wording and layout free):\n" +
+      `${problems.map((problem) => `- ${problem}`).join("\n")}\n` +
+      `Human listing: ${excerpt(human.text)}`,
+  );
+}
+
+/**
+ * Decode a run's human `ids` listing and assert it carries the information
+ * of its `--json` twin's decoded listing (TEST-SPEC T12.0-15, T12.3-1):
+ * `decodeHumanIdsReport`, then `assertHumanIdsCarries`. Returns the decoded
+ * listing.
+ */
+export function assertHumanIdsReportCarries(
+  human: RunResult,
+  json: IdsReport,
+  context: string,
+): HumanIdsReport {
+  const decoded = decodeHumanIdsReport(human, context);
+  assertHumanIdsCarries(decoded, json, context);
+  return decoded;
+}
+
+/** A tree's node count, for a diagnosis. */
+function describeTree(nodes: readonly IdsTreeNode[]): string {
+  let count = 0;
+  const pending = [...nodes];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    count += 1;
+    pending.push(...next.children);
+  }
+  return count === 0 ? "no node" : `${String(count)} node(s)`;
+}
+
+/**
+ * What one entry's human tree omits, misplaces, misorders, or nests beside
+ * the `--json` twin's tree (the module header): walked level by level
+ * through an explicit stack, the nodes at each place matched by ID, in the
+ * twin's order — SPEC 12.3 fixes it for the report itself, document order
+ * — and their children compared beneath them.
+ */
+function treeNodeProblems(
+  json: readonly IdsTreeNode[],
+  human: readonly HumanIdsTreeNode[],
+  where: string,
+): string[] {
+  const problems: string[] = [];
+  const pending: {
+    readonly json: readonly IdsTreeNode[];
+    readonly human: readonly HumanIdsTreeNode[];
+    readonly place: string;
+  }[] = [{ json, human, place: `${where}: at the tree's top level` }];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const { pairs, missing, extra } = matchByKey(
+      next.json,
+      next.human,
+      (node) => node.id,
+      (node) => node.id,
+    );
+    for (const node of missing) {
+      problems.push(
+        `${next.place}, the node ${JSON.stringify(node.id)} is missing — no line nests it there ` +
+          "(SPEC 12.3: `--tree` follows section nesting, a restricted tree nesting a listed node " +
+          "under its nearest listed ancestor, or at its file's top level)",
+      );
+    }
+    for (const node of extra) {
+      problems.push(
+        `${next.place}, line ${String(node.line)} nests the node ${JSON.stringify(node.id)}, ` +
+          "which the --json twin's tree does not hold there",
+      );
+    }
+    const jsonOrder = pairs.map((pair) => pair.json.id);
+    const humanOrder = [...pairs]
+      .sort((a, b) => a.human.line - b.human.line)
+      .map((pair) => pair.json.id);
+    if (JSON.stringify(humanOrder) !== JSON.stringify(jsonOrder)) {
+      problems.push(
+        `${next.place}, the human listing nests the nodes in the order ` +
+          `${describeList(humanOrder)} where the --json twin's order is ` +
+          `${describeList(jsonOrder)} — SPEC 12.3 fixes the order for the report itself, ` +
+          "document order",
+      );
+    }
+    for (let index = pairs.length - 1; index >= 0; index -= 1) {
+      const pair = pairs[index]!;
+      pending.push({
+        json: pair.json.children,
+        human: pair.human.children,
+        place: `${where}: beneath ${JSON.stringify(pair.json.id)}`,
+      });
+    }
+  }
+  return problems;
+}
+
+/**
+ * Assert a decoded human `ids --tree` listing carries the information of
+ * its `--json` twin's decoded tree (TEST-SPEC T12.0-15, T12.3-1: `--tree`
+ * included; SPEC 12.3; the module header's comparison): every entry,
+ * matched by its file, an entry holding no node included, in the twin's
+ * order (byte order of path), and each entry's tree equal to the twin's —
+ * the same nodes at the same places, each place's nodes in the twin's order
+ * (document order). Fails diagnosed, naming every entry or node the human
+ * listing omits, misplaces, misorders, or nests beside its twin's.
+ */
+export function assertHumanIdsTreeCarries(
+  human: HumanIdsTreeReport,
+  json: IdsTreeReport,
+  context: string,
+): void {
+  const problems = idsEntryProblems(
+    json.files,
+    human.files,
+    (entry) => describeTree(entry.nodes),
+    (jsonEntry, humanEntry, where) =>
+      treeNodeProblems(jsonEntry.nodes, humanEntry.nodes, where),
+  );
+  if (problems.length === 0) return;
+  fail(
+    `${context}: the human \`ids --tree\` listing does not carry the tree its --json twin ` +
+      "carries (TEST-SPEC T12.0-15: `--tree` included, the listing in the order 12.3 fixes — " +
+      "SPEC 12.3: one entry per discovered spec source, in byte order of path, its nodes " +
+      "nested as its sections are, in document order — decoded by the human-report adapter, " +
+      "H-3; wording and layout free):\n" +
+      `${problems.map((problem) => `- ${problem}`).join("\n")}\n` +
+      `Human listing: ${excerpt(human.text)}`,
+  );
+}
+
+/**
+ * Decode a run's human `ids --tree` listing and assert it carries the
+ * information of its `--json` twin's decoded tree (TEST-SPEC T12.0-15,
+ * T12.3-1): `decodeHumanIdsTreeReport`, then `assertHumanIdsTreeCarries`.
+ * Returns the decoded listing.
+ */
+export function assertHumanIdsTreeReportCarries(
+  human: RunResult,
+  json: IdsTreeReport,
+  context: string,
+): HumanIdsTreeReport {
+  const decoded = decodeHumanIdsTreeReport(human, context);
+  assertHumanIdsTreeCarries(decoded, json, context);
+  return decoded;
+}
+
+/** An edge as one comparable key: its kind and its two endpoints. */
+function nodeEdgeKey(edge: GraphEdge): string {
+  return JSON.stringify([edge.kind, edge.from, edge.to]);
+}
+
+/** An edge, rendered for a diagnosis. */
+function describeNodeEdge(edge: GraphEdge): string {
+  return `the ${edge.kind} edge from ${JSON.stringify(edge.from)} to ${JSON.stringify(edge.to)}`;
+}
+
+/**
+ * What the human report's edges of one direction omit or list beside the
+ * `--json` twin's (the module header): a multiset of kind and endpoints,
+ * order free (SPEC 12.4 fixes none).
+ */
+function nodeEdgeProblems(
+  json: readonly GraphEdge[],
+  human: readonly HumanNodeEdge[],
+  direction: "incoming" | "outgoing",
+): string[] {
+  const { missing, extra } = multisetDifference(
+    json,
+    human,
+    nodeEdgeKey,
+    nodeEdgeKey,
+  );
+  return [
+    ...missing.map(
+      (edge) =>
+        `${describeNodeEdge(edge)} is missing — no ${direction} edge line prints it (SPEC 12.4: ` +
+        "edges by kind)",
+    ),
+    ...extra.map(
+      (edge) =>
+        `line ${String(edge.line)} prints the ${direction} ${edge.kind} edge from ` +
+        `${JSON.stringify(edge.from)} to ${JSON.stringify(edge.to)}, which the --json twin lacks`,
+    ),
+  ];
+}
+
+/** A tag set, rendered for a diagnosis. */
+function describeTags(tags: readonly string[] | null): string {
+  return tags === null ? "absent" : describeList(tags);
+}
+
+/**
+ * Assert a decoded human `show <node>` report carries the information of
+ * its `--json` twin's decoded node report (TEST-SPEC T12.0-15: its root
+ * and non-root arms; T12.4-1; SPEC 12.4; the module header's comparison):
+ * the identity, the source range's two byte offsets (1.7), the own and the
+ * subtree text (1.6), each of the four hashes (5.5), the tags as a set —
+ * absent exactly where the twin's are (a root node's, 11) — the coverage
+ * attribute, absent exactly where the twin's is, and the incoming and the
+ * outgoing edges, each a multiset of kind and endpoints, order free. Fails
+ * diagnosed, naming every datum the human report omits, changes, or lists
+ * beside its twin's.
+ */
+export function assertHumanNodeCarries(
+  human: HumanNodeReport,
+  json: NodeReport,
+  context: string,
+): void {
+  const problems: string[] = [];
+  if (human.identity !== json.identity) {
+    problems.push(
+      `the report's first line names the node ${JSON.stringify(human.identity)} where the ` +
+        `--json twin's identity is ${JSON.stringify(json.identity)} (SPEC 12.4: identity)`,
+    );
+  }
+  const range = `${String(json.sourceRange.start)}-${String(json.sourceRange.end)}`;
+  if (human.sourceRange === null) {
+    problems.push(
+      `the report prints no source range where the --json twin's is ${range} (SPEC 12.4, 1.7)`,
+    );
+  } else if (
+    human.sourceRange.start !== json.sourceRange.start ||
+    human.sourceRange.end !== json.sourceRange.end
+  ) {
+    problems.push(
+      `the report prints the source range ${String(human.sourceRange.start)}-` +
+        `${String(human.sourceRange.end)} where the --json twin's is ${range} (SPEC 1.7: its ` +
+        "two byte offsets)",
+    );
+  }
+  for (const [field, printed, expected] of [
+    ["own text", human.ownText, json.ownText],
+    ["subtree text", human.subtreeText, json.subtreeText],
+  ] as const) {
+    if (printed === null) {
+      problems.push(
+        `the report prints no ${field} where the --json twin's is ${quotedText(expected)} ` +
+          "(SPEC 12.4, 1.6)",
+      );
+    } else if (printed !== expected) {
+      problems.push(
+        `the report prints the ${field} ${quotedText(printed)} where the --json twin's is ` +
+          `${quotedText(expected)} (SPEC 12.4, 1.6)`,
+      );
+    }
+  }
+  for (const name of NODE_HASH_NAMES) {
+    const printed = human.hashes[name];
+    if (printed === undefined) {
+      problems.push(
+        `the report prints no ${name} where the --json twin's is ${json.hashes[name]} (SPEC ` +
+          "12.4, 5.5: hashes)",
+      );
+    } else if (printed !== json.hashes[name]) {
+      problems.push(
+        `the report prints the ${name} ${printed} where the --json twin's is ` +
+          `${json.hashes[name]} (SPEC 12.4, 5.5)`,
+      );
+    }
+  }
+  if (json.tags === null || human.tags === null) {
+    if (json.tags !== human.tags) {
+      problems.push(
+        `the report presents the tags ${describeTags(human.tags)} where the --json twin's ` +
+          `are ${describeTags(json.tags)} (SPEC 12.4: tags — absent for a root node, 11; a ` +
+          "section's tag set, empty where it carries none)",
+      );
+    }
+  } else {
+    const printed = new Set(human.tags);
+    const expected = new Set(json.tags);
+    for (const tag of expected) {
+      if (!printed.has(tag)) {
+        problems.push(
+          `the tag ${JSON.stringify(tag)} is missing — the tags line lists no such tag (SPEC ` +
+            "12.4: tags, a set)",
+        );
+      }
+    }
+    for (const tag of printed) {
+      if (!expected.has(tag)) {
+        problems.push(
+          `the report lists the tag ${JSON.stringify(tag)}, which the --json twin's tag set ` +
+            "lacks",
+        );
+      }
+    }
+  }
+  const coverage = json.coverage ?? null;
+  if (coverage !== human.coverage) {
+    problems.push(
+      `the report presents the coverage attribute ` +
+        `${human.coverage === null ? "absent" : JSON.stringify(human.coverage)} where the ` +
+        `--json twin's is ${coverage === null ? "absent" : JSON.stringify(coverage)} (SPEC ` +
+        "12.4: the coverage attribute — absent for a root node, 11)",
+    );
+  }
+  problems.push(
+    ...nodeEdgeProblems(json.incomingEdges, human.incomingEdges, "incoming"),
+    ...nodeEdgeProblems(json.outgoingEdges, human.outgoingEdges, "outgoing"),
+  );
+  if (problems.length === 0) return;
+  fail(
+    `${context}: the human \`show\` report does not carry the information its --json twin ` +
+      "carries (TEST-SPEC T12.0-15: the full 12.4 enumeration — SPEC 12.4: identity, source " +
+      "range, own and subtree text, hashes, tags and coverage attribute, and edges by kind — " +
+      "decoded by the human-report adapter, H-3; wording, layout, and order free):\n" +
+      `${problems.map((problem) => `- ${problem}`).join("\n")}\n` +
+      `Human report: ${excerpt(human.text)}`,
+  );
+}
+
+/**
+ * Decode a run's human `show <node>` report and assert it carries the
+ * information of its `--json` twin's decoded node report (TEST-SPEC
+ * T12.0-15, T12.4-1): `decodeHumanNodeReport`, then
+ * `assertHumanNodeCarries`. Returns the decoded report.
+ */
+export function assertHumanNodeReportCarries(
+  human: RunResult,
+  json: NodeReport,
+  context: string,
+): HumanNodeReport {
+  const decoded = decodeHumanNodeReport(human, context);
+  assertHumanNodeCarries(decoded, json, context);
   return decoded;
 }

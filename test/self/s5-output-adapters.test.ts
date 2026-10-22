@@ -44,16 +44,24 @@ import {
   SPEC_NAMED_TOKENS,
   STABLE_CODES,
   assertBareEdgeEndpoints,
+  assertHumanCoverageCarries,
+  assertHumanCoverageReportCarries,
   assertHumanErrorCarries,
   assertHumanErrorMessageCarries,
   assertHumanFindingsCarry,
   assertHumanFindingsReportCarries,
+  assertHumanIdsCarries,
+  assertHumanIdsReportCarries,
+  assertHumanIdsTreeCarries,
+  assertHumanIdsTreeReportCarries,
   assertHumanImpactCarries,
   assertHumanImpactReportCarries,
   assertHumanItemCarries,
   assertHumanItemReportCarries,
   assertHumanNextCarries,
   assertHumanNextReportCarries,
+  assertHumanNodeCarries,
+  assertHumanNodeReportCarries,
   assertHumanPerformedCarries,
   assertHumanPerformedReportCarries,
   assertHumanPreviewCarries,
@@ -83,11 +91,15 @@ import {
   decodeErrorDocument,
   decodeExportReport,
   decodeFindingsReport,
+  decodeHumanCoverageReport,
   decodeHumanErrorMessage,
   decodeHumanFindingsReport,
+  decodeHumanIdsReport,
+  decodeHumanIdsTreeReport,
   decodeHumanImpactReport,
   decodeHumanItemReport,
   decodeHumanNextReport,
+  decodeHumanNodeReport,
   decodeHumanPerformedReport,
   decodeHumanPreviewReport,
   decodeHumanSessionListReport,
@@ -11703,6 +11715,1454 @@ test("S-5: the human review-next comparison rejects the fully-resolved report wh
     previewWithLine(lines, 5, null),
     itemTwin,
     "the report prints no reason where the --json twin carries one",
+  );
+});
+
+// --- the human coverage, ids, and show decoders --------------------------------
+
+/** T8.2-1's `coverage --json` document as the built product writes it. */
+const COVERAGE_DOC = {
+  profiles: [
+    {
+      counts: { covered: 1, ignored: 3, required: 3, uncovered: 2 },
+      covered: [
+        {
+          identity: "tgt/T.mdx#win",
+          path: ["bnd/B.mdx#first", "tgt/T.mdx#win"],
+        },
+      ],
+      ignored: [
+        {
+          identity: "tgt/T.mdx",
+          reasons: [
+            "root node",
+            'non-leaf under targets: "leaves"',
+            "lacking every targetTags tag",
+          ],
+        },
+        {
+          identity: "tgt/T.mdx#combo",
+          reasons: [
+            'coverage="none"',
+            'non-leaf under targets: "leaves"',
+            "lacking every targetTags tag",
+          ],
+        },
+        {
+          identity: "tgt/T.mdx#plain",
+          reasons: ["lacking every targetTags tag"],
+        },
+      ],
+      name: "prof-main",
+      uncovered: ["tgt/T.mdx#lone", "tgt/T.mdx#combo.kid"],
+    },
+    {
+      counts: { covered: 1, ignored: 2, required: 4, uncovered: 3 },
+      covered: [
+        {
+          identity: "tgt/T.mdx#win",
+          path: ["bnd/B.mdx#first", "tgt/T.mdx#win"],
+        },
+      ],
+      ignored: [
+        {
+          identity: "tgt/T.mdx",
+          reasons: ["root node", 'non-leaf under targets: "leaves"'],
+        },
+        {
+          identity: "tgt/T.mdx#combo",
+          reasons: ['coverage="none"', 'non-leaf under targets: "leaves"'],
+        },
+      ],
+      name: "prof-aux",
+      uncovered: ["tgt/T.mdx#lone", "tgt/T.mdx#combo.kid", "tgt/T.mdx#plain"],
+    },
+  ],
+};
+
+/** Its --json twin, decoded by the coverage adapter. */
+const JSON_COVERAGE_TWIN = decodeCoverageReport(
+  COVERAGE_DOC,
+  "the coverage twin",
+);
+
+/** Its human report as the built product prints it. */
+const HUMAN_COVERAGE_LINES: readonly string[] = [
+  "profile prof-main",
+  "  required: 3, covered: 1, uncovered: 2, ignored: 3",
+  "  covered:",
+  "    tgt/T.mdx#win",
+  "      path: bnd/B.mdx#first -> tgt/T.mdx#win",
+  "  uncovered:",
+  "    tgt/T.mdx#lone",
+  "    tgt/T.mdx#combo.kid",
+  "  ignored:",
+  '    tgt/T.mdx: root node; non-leaf under targets: "leaves"; lacking every targetTags tag',
+  '    tgt/T.mdx#combo: coverage="none"; non-leaf under targets: "leaves"; lacking every targetTags tag',
+  "    tgt/T.mdx#plain: lacking every targetTags tag",
+  "profile prof-aux",
+  "  required: 4, covered: 1, uncovered: 3, ignored: 2",
+  "  covered:",
+  "    tgt/T.mdx#win",
+  "      path: bnd/B.mdx#first -> tgt/T.mdx#win",
+  "  uncovered:",
+  "    tgt/T.mdx#lone",
+  "    tgt/T.mdx#combo.kid",
+  "    tgt/T.mdx#plain",
+  "  ignored:",
+  '    tgt/T.mdx: root node; non-leaf under targets: "leaves"',
+  '    tgt/T.mdx#combo: coverage="none"; non-leaf under targets: "leaves"',
+];
+
+test("S-5: the human coverage decoder decodes a well-formed report onto the coverage model, order free", () => {
+  const decoded = decodeHumanCoverageReport(
+    previewReport(HUMAN_COVERAGE_LINES),
+    "coverage",
+  );
+  expect(decoded.profiles.map(({ name, line }) => ({ name, line }))).toEqual([
+    { name: "prof-main", line: 1 },
+    { name: "prof-aux", line: 13 },
+  ]);
+  const main = decoded.profiles[0]!;
+  expect(main.counts).toEqual({
+    required: 3,
+    covered: 1,
+    uncovered: 2,
+    ignored: 3,
+  });
+  expect(main.covered).toEqual([
+    {
+      identity: "tgt/T.mdx#win",
+      path: ["bnd/B.mdx#first", "tgt/T.mdx#win"],
+      line: 4,
+    },
+  ]);
+  expect(main.uncovered).toEqual([
+    { identity: "tgt/T.mdx#lone", line: 7 },
+    { identity: "tgt/T.mdx#combo.kid", line: 8 },
+  ]);
+  expect(main.ignored[0]).toEqual({
+    identity: "tgt/T.mdx",
+    reasons: [
+      "root node",
+      'non-leaf under targets: "leaves"',
+      "lacking every targetTags tag",
+    ],
+    line: 10,
+  });
+  assertHumanCoverageCarries(decoded, JSON_COVERAGE_TWIN, "coverage");
+  expect(
+    assertHumanCoverageReportCarries(
+      syntheticBytesResult(
+        previewReport(HUMAN_COVERAGE_LINES),
+        Buffer.alloc(0),
+        0,
+      ),
+      JSON_COVERAGE_TWIN,
+      "coverage, as a run",
+    ).profiles,
+  ).toHaveLength(2);
+
+  // Order free but for the reasons: the profiles, the counts, the sections,
+  // and the rows reordered; the headers and count names respelled as codes
+  // are read.
+  assertHumanCoverageCarries(
+    decodeHumanCoverageReport(
+      previewReport([
+        ...HUMAN_COVERAGE_LINES.slice(12, 13),
+        "  Ignored: 2, uncovered: 3, covered: 1, REQUIRED: 4",
+        "  Uncovered:",
+        "    tgt/T.mdx#plain",
+        "    tgt/T.mdx#combo.kid",
+        "    tgt/T.mdx#lone",
+        HUMAN_COVERAGE_LINES[21]!,
+        ...HUMAN_COVERAGE_LINES.slice(22, 24).reverse(),
+        ...HUMAN_COVERAGE_LINES.slice(14, 17),
+        ...HUMAN_COVERAGE_LINES.slice(0, 12),
+      ]),
+      "coverage reordered",
+    ),
+    JSON_COVERAGE_TWIN,
+    "coverage reordered",
+  );
+  // No profile: the empty report; a profile's empty sections printed as
+  // headers alone, or not printed.
+  const noProfile = decodeCoverageReport({ profiles: [] }, "no profile");
+  const nothing = decodeHumanCoverageReport(Buffer.alloc(0), "nothing");
+  expect(nothing.profiles).toEqual([]);
+  assertHumanCoverageCarries(nothing, noProfile, "nothing");
+  const green = decodeCoverageReport(
+    {
+      profiles: [
+        {
+          counts: { covered: 1, ignored: 1, required: 1, uncovered: 0 },
+          covered: [
+            {
+              identity: "tgt/T.mdx#only",
+              path: ["bnd/B.mdx#covers", "tgt/T.mdx#only"],
+            },
+          ],
+          ignored: [
+            {
+              identity: "tgt/T.mdx",
+              reasons: ["root node", 'non-leaf under targets: "leaves"'],
+            },
+          ],
+          name: "p-green",
+          uncovered: [],
+        },
+      ],
+    },
+    "the green twin",
+  );
+  const greenLines = [
+    "profile p-green",
+    "  required: 1, covered: 1, uncovered: 0, ignored: 1",
+    "  covered:",
+    "    tgt/T.mdx#only",
+    "      path: bnd/B.mdx#covers -> tgt/T.mdx#only",
+    "  uncovered:",
+    "  ignored:",
+    '    tgt/T.mdx: root node; non-leaf under targets: "leaves"',
+  ];
+  assertHumanCoverageCarries(
+    decodeHumanCoverageReport(previewReport(greenLines), "green"),
+    green,
+    "green",
+  );
+  assertHumanCoverageCarries(
+    decodeHumanCoverageReport(
+      previewReport(previewWithLine(greenLines, 5, null)),
+      "green, no uncovered header",
+    ),
+    green,
+    "green, no uncovered header",
+  );
+});
+
+test("S-5: the human coverage decoder rejects a profile reported twice, a malformed or repeated counts line, a section opened twice, a row outside its section, a covering path outside its row or malformed, an empty reason, an empty line, and every line outside its layout", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[] | Buffer,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      decodeHumanCoverageReport(
+        Buffer.isBuffer(lines) ? lines : previewReport(lines),
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_COVERAGE_LINES;
+  rejected(
+    "an empty line",
+    previewWithLine(lines, 5, ""),
+    "never an empty or blank line",
+    "line 6",
+  );
+  rejected(
+    "a margin line opening no profile",
+    previewWithLine(lines, 12, "prof-aux"),
+    "a profile's line `profile <name>` at the margin",
+  );
+  rejected(
+    "a profile reported twice",
+    [...lines.slice(0, 12), ...lines.slice(0, 2)],
+    'the profile "prof-main" reported on line 1 is reported again here',
+  );
+  rejected(
+    "an indented line before every profile",
+    lines.slice(1),
+    "its `profile <name>` line at the margin opening it",
+  );
+  rejected(
+    "the counts line twice",
+    [...lines.slice(0, 2), lines[1]!, ...lines.slice(2, 12)],
+    "one counts line per profile — line 2 prints the profile's counts already",
+  );
+  rejected(
+    "a count without its colon",
+    previewWithLine(
+      lines,
+      1,
+      "  required 3, covered: 1, uncovered: 2, ignored: 3",
+    ),
+    "a profile's counts line `required: <n>, covered: <n>, uncovered: <n>, ignored: <n>`",
+    'got "required 3"',
+  );
+  rejected(
+    "a count under no name of 8.2",
+    previewWithLine(
+      lines,
+      1,
+      "  required: 3, covered: 1, skipped: 2, ignored: 3",
+    ),
+    'each count under one of 8.2\'s names (required, covered, uncovered, ignored), got "skipped"',
+  );
+  rejected(
+    "a count printed twice",
+    previewWithLine(
+      lines,
+      1,
+      "  required: 3, covered: 1, required: 2, ignored: 3",
+    ),
+    "the required count is printed twice",
+  );
+  rejected(
+    "a section opened twice",
+    [...lines.slice(0, 9), "  uncovered:", ...lines.slice(9, 12)],
+    "the profile's uncovered section opened on line 6 opens again here",
+  );
+  rejected(
+    "a row outside every section",
+    [lines[0]!, lines[1]!, "    tgt/T.mdx#win", ...lines.slice(2, 12)],
+    "a row inside one of the profile's sections",
+    "line 3",
+  );
+  rejected(
+    "a covering path beneath an uncovered row",
+    [...lines.slice(0, 7), "      path: bnd/B.mdx#first -> tgt/T.mdx#lone"],
+    "a covering path line `path: <node> -> …` beneath its covered row",
+  );
+  rejected(
+    "a covering path printed twice",
+    [...lines.slice(0, 5), lines[4]!, ...lines.slice(5, 12)],
+    "one covering path per covered node — line 4's node has its path printed already",
+  );
+  rejected(
+    "a covering path holding an empty node",
+    previewWithLine(
+      lines,
+      4,
+      "      path: bnd/B.mdx#first ->  -> tgt/T.mdx#win",
+    ),
+    "the path's node identities in order, joined by ` -> `",
+  );
+  rejected(
+    "a covering path line spelled otherwise",
+    previewWithLine(lines, 4, "      route: bnd/B.mdx#first -> tgt/T.mdx#win"),
+    "a covering path line `path: <node> -> …`",
+  );
+  rejected(
+    "an ignored row's empty reason",
+    previewWithLine(
+      lines,
+      11,
+      "    tgt/T.mdx#plain: lacking every targetTags tag; ",
+    ),
+    "its exclusion reasons separated by `; `, none of them empty",
+  );
+  rejected(
+    "a line indented three spaces",
+    previewWithLine(lines, 6, "   tgt/T.mdx#lone"),
+    "a line indented as the layout indents one",
+    "got 3 spaces",
+  );
+  rejected(
+    "bytes that are not UTF-8",
+    Buffer.concat([
+      previewReport(lines.slice(0, 6)),
+      Buffer.from("    ", "utf8"),
+      NON_UTF8_PATH_BYTES,
+      Buffer.from("#lone\n", "utf8"),
+    ]),
+    "so these bytes are a path printed raw",
+  );
+});
+
+test("S-5: the human coverage comparison rejects a report omitting, adding, or changing a profile, a count, a covered node or its covering path, an uncovered node, an ignored node, or a reason or the reasons' order — naming the datum", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[],
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanCoverageCarries(
+        decodeHumanCoverageReport(previewReport(lines), label),
+        JSON_COVERAGE_TWIN,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_COVERAGE_LINES;
+  rejected(
+    "a profile dropped",
+    lines.slice(0, 12),
+    'the profile "prof-aux" is missing — no profile line names it',
+  );
+  rejected(
+    "a profile the twin lacks",
+    [
+      ...lines,
+      "profile prof-x",
+      "  required: 0, covered: 0, uncovered: 0, ignored: 0",
+    ],
+    'line 25 reports the profile "prof-x", which the --json twin lacks',
+  );
+  rejected(
+    "a count changed",
+    previewWithLine(
+      lines,
+      1,
+      "  required: 3, covered: 1, uncovered: 2, ignored: 2",
+    ),
+    'the profile "prof-main" (line 1) prints the ignored count 2 where the --json twin\'s is 3',
+  );
+  rejected(
+    "the counts line dropped",
+    previewWithLine(lines, 13, null),
+    'the profile "prof-aux" (line 13) prints no required count where the --json twin\'s is 4',
+    "prints no ignored count where the --json twin's is 2",
+  );
+  rejected(
+    "a covered node dropped",
+    [...lines.slice(0, 3), ...lines.slice(5)],
+    'the profile "prof-main" (line 1): the covered node "tgt/T.mdx#win" (path ["bnd/B.mdx#first","tgt/T.mdx#win"]) is missing',
+  );
+  rejected(
+    "the first-found covering path",
+    previewWithLine(lines, 4, "      path: bnd/B.mdx#second -> tgt/T.mdx#win"),
+    'line 4 (the covered node "tgt/T.mdx#win") prints the covering path ["bnd/B.mdx#second","tgt/T.mdx#win"] where the --json twin\'s is ["bnd/B.mdx#first","tgt/T.mdx#win"]',
+    "the byte-least where several qualify",
+  );
+  rejected(
+    "a covering path dropped",
+    previewWithLine(lines, 16, null),
+    'line 16 (the covered node "tgt/T.mdx#win") prints no covering path',
+  );
+  rejected(
+    "an uncovered node dropped",
+    previewWithLine(lines, 20, null),
+    'the profile "prof-aux" (line 13): the uncovered node "tgt/T.mdx#plain" is missing',
+  );
+  rejected(
+    "an uncovered node the twin lacks",
+    [...lines.slice(0, 8), "    tgt/T.mdx#plain", ...lines.slice(8)],
+    'line 9 lists "tgt/T.mdx#plain" as uncovered in the profile "prof-main" (line 1), which the --json twin\'s uncovered nodes lack',
+  );
+  rejected(
+    "an uncovered node listed as covered",
+    [...lines.slice(0, 5), "    tgt/T.mdx#lone", ...lines.slice(5)],
+    'line 6 lists "tgt/T.mdx#lone" as covered in the profile "prof-main" (line 1), which the --json twin\'s covered nodes lack',
+  );
+  rejected(
+    "an ignored node dropped",
+    previewWithLine(lines, 11, null),
+    'the ignored node "tgt/T.mdx#plain" is missing — no ignored row names it',
+  );
+  rejected(
+    "the reasons out of their order",
+    previewWithLine(
+      lines,
+      9,
+      '    tgt/T.mdx: non-leaf under targets: "leaves"; root node; lacking every targetTags tag',
+    ),
+    'line 10 (the ignored node "tgt/T.mdx") reports the exclusion reasons ["non-leaf","root","lacking-tags"] where the --json twin\'s are ["root","non-leaf","lacking-tags"]',
+    "in the order SPEC 8.2 fixes for the report itself",
+  );
+  rejected(
+    "a reason dropped",
+    previewWithLine(
+      lines,
+      10,
+      '    tgt/T.mdx#combo: coverage="none"; lacking every targetTags tag',
+    ),
+    'reports the exclusion reasons ["coverage-none","lacking-tags"] where the --json twin\'s are ["coverage-none","non-leaf","lacking-tags"]',
+  );
+  rejected(
+    "the reasons dropped",
+    previewWithLine(lines, 11, "    tgt/T.mdx#plain"),
+    'reports the exclusion reasons [] where the --json twin\'s are ["lacking-tags"]',
+  );
+  rejected(
+    "a reason no 8.2 reason classifies",
+    previewWithLine(lines, 11, "    tgt/T.mdx#plain: excluded"),
+    "a reason string classifiable as one SPEC.md 8.2 exclusion reason",
+  );
+});
+
+/** T12.3-1's flat listing of its ordering workspace (12.3's two orders). */
+const IDS_DOC = {
+  files: [
+    { file: "apecs/M.mdx", ids: ["emm"] },
+    { file: "apecs/nested/N.mdx", ids: ["enn"] },
+    { file: "zpecs/Z.mdx", ids: ["zeta", "zeta.minor", "zeta.aleph", "alpha"] },
+  ],
+};
+
+/** Its human listing as the built product prints it. */
+const HUMAN_IDS_LINES: readonly string[] = [
+  "apecs/M.mdx",
+  "  emm",
+  "apecs/nested/N.mdx",
+  "  enn",
+  "zpecs/Z.mdx",
+  "  zeta",
+  "  zeta.minor",
+  "  zeta.aleph",
+  "  alpha",
+];
+
+/** Its tree listing (`--tree --json`) as the built product writes it. */
+const IDS_TREE_DOC = {
+  files: [
+    { file: "apecs/M.mdx", nodes: [{ children: [], id: "emm" }] },
+    { file: "apecs/nested/N.mdx", nodes: [{ children: [], id: "enn" }] },
+    {
+      file: "zpecs/Z.mdx",
+      nodes: [
+        {
+          children: [
+            { children: [], id: "zeta.minor" },
+            { children: [], id: "zeta.aleph" },
+          ],
+          id: "zeta",
+        },
+        { children: [], id: "alpha" },
+      ],
+    },
+  ],
+};
+
+/** Its human tree listing as the built product prints it. */
+const HUMAN_IDS_TREE_LINES: readonly string[] = [
+  "apecs/M.mdx",
+  "  emm",
+  "apecs/nested/N.mdx",
+  "  enn",
+  "zpecs/Z.mdx",
+  "  zeta",
+  "    zeta.minor",
+  "    zeta.aleph",
+  "  alpha",
+];
+
+/** T12.3-1's restricted tree, a listed node under its nearest listed ancestor. */
+const RESTRICTED_TREE_DOC = {
+  files: [
+    {
+      file: "specs/T.mdx",
+      nodes: [
+        { children: [{ children: [], id: "grand.par.leaf" }], id: "grand" },
+        { children: [], id: "solo.kid" },
+      ],
+    },
+  ],
+};
+
+/** Its human listing as the built product prints it. */
+const HUMAN_RESTRICTED_TREE_LINES: readonly string[] = [
+  "specs/T.mdx",
+  "  grand",
+  "    grand.par.leaf",
+  "  solo.kid",
+];
+
+/** T12.3-1's entries listing, an empty entry among them (SPEC 12.3). */
+const ENTRIES_DOC = {
+  files: [
+    { file: "specs/held.mdx", ids: ["tgt", "tgt.sub"] },
+    { file: "specs/prose.mdx", ids: [] },
+    { file: "specs/user.mdx", ids: ["client"] },
+  ],
+};
+
+/** Its human listing, the empty entry a file line alone. */
+const HUMAN_ENTRIES_LINES: readonly string[] = [
+  "specs/held.mdx",
+  "  tgt",
+  "  tgt.sub",
+  "specs/prose.mdx",
+  "specs/user.mdx",
+  "  client",
+];
+
+test("S-5: the human ids decoders decode a well-formed flat or tree listing onto the listing model, an empty entry kept, its order kept", () => {
+  const flatTwin = decodeIdsReport(IDS_DOC, "the ids twin");
+  const flat = decodeHumanIdsReport(previewReport(HUMAN_IDS_LINES), "ids");
+  expect(flat.files).toEqual([
+    { file: "apecs/M.mdx", ids: ["emm"], line: 1 },
+    { file: "apecs/nested/N.mdx", ids: ["enn"], line: 3 },
+    {
+      file: "zpecs/Z.mdx",
+      ids: ["zeta", "zeta.minor", "zeta.aleph", "alpha"],
+      line: 5,
+    },
+  ]);
+  assertHumanIdsCarries(flat, flatTwin, "ids");
+  expect(
+    assertHumanIdsReportCarries(
+      syntheticBytesResult(previewReport(HUMAN_IDS_LINES), Buffer.alloc(0), 0),
+      flatTwin,
+      "ids, as a run",
+    ).files,
+  ).toHaveLength(3);
+  // An empty entry: a file line with no ID line beneath it.
+  const entries = decodeHumanIdsReport(
+    previewReport(HUMAN_ENTRIES_LINES),
+    "entries",
+  );
+  expect(entries.files[1]).toEqual({
+    file: "specs/prose.mdx",
+    ids: [],
+    line: 4,
+  });
+  assertHumanIdsCarries(
+    entries,
+    decodeIdsReport(ENTRIES_DOC, "the entries twin"),
+    "entries",
+  );
+  // No entry: the empty listing.
+  const none = decodeHumanIdsReport(Buffer.alloc(0), "no entry");
+  expect(none.files).toEqual([]);
+  assertHumanIdsCarries(none, decodeIdsReport({ files: [] }), "no entry");
+
+  const treeTwin = decodeIdsTreeReport(IDS_TREE_DOC, "the tree twin");
+  const tree = decodeHumanIdsTreeReport(
+    previewReport(HUMAN_IDS_TREE_LINES),
+    "tree",
+  );
+  expect(tree.files[2]).toEqual({
+    file: "zpecs/Z.mdx",
+    nodes: [
+      {
+        id: "zeta",
+        children: [
+          { id: "zeta.minor", children: [], line: 7 },
+          { id: "zeta.aleph", children: [], line: 8 },
+        ],
+        line: 6,
+      },
+      { id: "alpha", children: [], line: 9 },
+    ],
+    line: 5,
+  });
+  assertHumanIdsTreeCarries(tree, treeTwin, "tree");
+  expect(
+    assertHumanIdsTreeReportCarries(
+      syntheticBytesResult(
+        previewReport(HUMAN_IDS_TREE_LINES),
+        Buffer.alloc(0),
+        0,
+      ),
+      treeTwin,
+      "tree, as a run",
+    ).files,
+  ).toHaveLength(3);
+  assertHumanIdsTreeCarries(
+    decodeHumanIdsTreeReport(
+      previewReport(HUMAN_RESTRICTED_TREE_LINES),
+      "restricted",
+    ),
+    decodeIdsTreeReport(RESTRICTED_TREE_DOC, "the restricted twin"),
+    "restricted",
+  );
+  // A nested node printed relative to its tree parent reads as its full ID
+  // (SPEC 1.3: a child's ID is its parent's, `.`, and one more segment), a
+  // restricted tree's nearest listed ancestor included.
+  const relative = decodeHumanIdsTreeReport(
+    previewReport([
+      ...HUMAN_IDS_TREE_LINES.slice(0, 6),
+      "    minor",
+      "    aleph",
+      HUMAN_IDS_TREE_LINES[8]!,
+    ]),
+    "relative",
+  );
+  expect(relative.files[2]!.nodes[0]!.children.map((node) => node.id)).toEqual([
+    "zeta.minor",
+    "zeta.aleph",
+  ]);
+  assertHumanIdsTreeCarries(relative, treeTwin, "relative");
+  assertHumanIdsTreeCarries(
+    decodeHumanIdsTreeReport(
+      previewReport(["specs/T.mdx", "  grand", "    par.leaf", "  solo.kid"]),
+      "restricted, relative",
+    ),
+    decodeIdsTreeReport(RESTRICTED_TREE_DOC, "the restricted twin"),
+    "restricted, relative",
+  );
+  // A deep tree's node lines, back up to a shallower level, and an empty
+  // entry.
+  const deep = decodeHumanIdsTreeReport(
+    previewReport([
+      "specs/D.mdx",
+      "  a",
+      "    a.b",
+      "      a.b.c",
+      "  d",
+      "specs/E.mdx",
+    ]),
+    "deep",
+  );
+  expect(deep.files.map((entry) => entry.nodes.map((node) => node.id))).toEqual(
+    [["a", "d"], []],
+  );
+  expect(deep.files[0]!.nodes[0]!.children[0]!.children[0]!.id).toBe("a.b.c");
+});
+
+test("S-5: the human ids decoders reject an ID line before every file line or nested in a flat listing, a node line indented oddly or skipping a level, a file listed twice, an empty line, and non-UTF-8 bytes", () => {
+  const rejected = (
+    label: string,
+    decode: (bytes: Buffer, context: string) => unknown,
+    lines: readonly string[] | Buffer,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      decode(Buffer.isBuffer(lines) ? lines : previewReport(lines), label),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  rejected(
+    "an ID line before every file line",
+    decodeHumanIdsReport,
+    HUMAN_IDS_LINES.slice(1),
+    "an ID line beneath its entry's file line at the margin",
+  );
+  rejected(
+    "a flat listing nesting an ID",
+    decodeHumanIdsReport,
+    HUMAN_IDS_TREE_LINES,
+    "a flat listing nests nothing",
+    "line 7",
+    "got 4 spaces",
+  );
+  rejected(
+    "a flat ID indented one space",
+    decodeHumanIdsReport,
+    previewWithLine(HUMAN_IDS_LINES, 1, " emm"),
+    "an ID line indented 2 spaces beneath its file's line",
+  );
+  rejected(
+    "a file listed twice",
+    decodeHumanIdsReport,
+    [...HUMAN_IDS_LINES, "apecs/M.mdx"],
+    'the entry of "apecs/M.mdx" listed on line 1 is listed again here',
+  );
+  rejected(
+    "an empty line in a flat listing",
+    decodeHumanIdsReport,
+    previewWithLine(HUMAN_IDS_LINES, 2, ""),
+    "never an empty or blank line",
+  );
+  rejected(
+    "a blank line in a flat listing",
+    decodeHumanIdsReport,
+    previewWithLine(HUMAN_IDS_LINES, 2, "  "),
+    "never an empty or blank line",
+  );
+  rejected(
+    "a node line before every file line",
+    decodeHumanIdsTreeReport,
+    HUMAN_IDS_TREE_LINES.slice(1),
+    "a node line beneath its entry's file line at the margin",
+  );
+  rejected(
+    "a node line indented three spaces",
+    decodeHumanIdsTreeReport,
+    previewWithLine(HUMAN_IDS_TREE_LINES, 6, "   zeta.minor"),
+    "a node line indented 2 spaces per level",
+    "got 3 spaces",
+  );
+  rejected(
+    "a node line skipping a level",
+    decodeHumanIdsTreeReport,
+    previewWithLine(HUMAN_IDS_TREE_LINES, 1, "    emm"),
+    "one level below the line it nests under at most — got 4 spaces where the deepest level open is 0",
+  );
+  rejected(
+    "a file listed twice in a tree",
+    decodeHumanIdsTreeReport,
+    [...HUMAN_IDS_TREE_LINES, "zpecs/Z.mdx"],
+    'the entry of "zpecs/Z.mdx" listed on line 5 is listed again here',
+  );
+  rejected(
+    "an empty line in a tree",
+    decodeHumanIdsTreeReport,
+    previewWithLine(HUMAN_IDS_TREE_LINES, 6, ""),
+    "never an empty or blank line",
+  );
+  rejected(
+    "bytes that are not UTF-8",
+    decodeHumanIdsReport,
+    Buffer.concat([NON_UTF8_PATH_BYTES, Buffer.from("\n  a\n", "utf8")]),
+    "so these bytes are a path printed raw",
+  );
+});
+
+test("S-5: the human ids comparisons reject a listing omitting, adding, or reordering an entry, omitting, adding, or reordering an ID, or misplacing a tree node — naming the datum", () => {
+  const flatTwin = decodeIdsReport(IDS_DOC, "the ids twin");
+  const treeTwin = decodeIdsTreeReport(IDS_TREE_DOC, "the tree twin");
+  const entriesTwin = decodeIdsReport(ENTRIES_DOC, "the entries twin");
+  const restrictedTwin = decodeIdsTreeReport(
+    RESTRICTED_TREE_DOC,
+    "the restricted twin",
+  );
+  const rejectedFlat = (
+    label: string,
+    lines: readonly string[],
+    twin: ReturnType<typeof decodeIdsReport>,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanIdsCarries(
+        decodeHumanIdsReport(previewReport(lines), label),
+        twin,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const rejectedTree = (
+    label: string,
+    lines: readonly string[],
+    twin: ReturnType<typeof decodeIdsTreeReport>,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanIdsTreeCarries(
+        decodeHumanIdsTreeReport(previewReport(lines), label),
+        twin,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  rejectedFlat(
+    "the empty entry dropped",
+    previewWithLine(HUMAN_ENTRIES_LINES, 3, null),
+    entriesTwin,
+    'the entry of "specs/prose.mdx" (IDs []) is missing — no file line names it',
+    "present even when it holds no ID",
+  );
+  rejectedFlat(
+    "an entry for a code source",
+    [...HUMAN_ENTRIES_LINES, "src/x.ts"],
+    entriesTwin,
+    'line 7 lists an entry for "src/x.ts", which the --json twin lacks',
+    "none for a code source",
+  );
+  rejectedFlat(
+    "the entries out of byte order",
+    [
+      ...HUMAN_IDS_LINES.slice(2, 4),
+      ...HUMAN_IDS_LINES.slice(0, 2),
+      ...HUMAN_IDS_LINES.slice(4),
+    ],
+    flatTwin,
+    'the human report lists the entries in the order ["apecs/nested/N.mdx","apecs/M.mdx","zpecs/Z.mdx"]',
+    "SPEC 12.3 fixes the order for the report itself, byte order of workspace-relative path",
+  );
+  rejectedFlat(
+    "the IDs out of document order",
+    previewWithLine(HUMAN_IDS_LINES, 8, "  zeta.aleph").map((line, index) =>
+      index === 7 ? "  alpha" : line,
+    ),
+    flatTwin,
+    'line 5 (the entry of "zpecs/Z.mdx") lists the IDs in the order ["zeta","zeta.minor","alpha","zeta.aleph"]',
+    "document order",
+  );
+  rejectedFlat(
+    "an ID dropped",
+    previewWithLine(HUMAN_IDS_LINES, 6, null),
+    flatTwin,
+    'line 5 (the entry of "zpecs/Z.mdx") lists no ID "zeta.minor", which the --json twin lists there',
+  );
+  rejectedFlat(
+    "an ID the twin lacks",
+    previewWithLine(HUMAN_ENTRIES_LINES, 3, "specs/prose.mdx").flatMap(
+      (line, index) => (index === 3 ? [line, "  tgt"] : [line]),
+    ),
+    entriesTwin,
+    'line 4 (the entry of "specs/prose.mdx") lists the ID "tgt", which the --json twin does not list there',
+  );
+  rejectedTree(
+    "a tree node dropped",
+    previewWithLine(HUMAN_IDS_TREE_LINES, 7, null),
+    treeTwin,
+    'line 5 (the entry of "zpecs/Z.mdx"): beneath "zeta", the node "zeta.aleph" is missing — no line nests it there',
+  );
+  rejectedTree(
+    "a tree node at its file's top level instead of under its nearest listed ancestor",
+    previewWithLine(HUMAN_RESTRICTED_TREE_LINES, 2, "  grand.par.leaf"),
+    restrictedTwin,
+    'beneath "grand", the node "grand.par.leaf" is missing',
+    "at the tree's top level, line 3 nests the node \"grand.par.leaf\", which the --json twin's tree does not hold there",
+  );
+  rejectedTree(
+    "a tree printed flat",
+    HUMAN_IDS_LINES,
+    treeTwin,
+    'beneath "zeta", the node "zeta.minor" is missing',
+    'at the tree\'s top level, line 7 nests the node "zeta.minor"',
+  );
+  rejectedTree(
+    "children out of document order",
+    [
+      ...HUMAN_IDS_TREE_LINES.slice(0, 6),
+      HUMAN_IDS_TREE_LINES[7]!,
+      HUMAN_IDS_TREE_LINES[6]!,
+      HUMAN_IDS_TREE_LINES[8]!,
+    ],
+    treeTwin,
+    'beneath "zeta", the human listing nests the nodes in the order ["zeta.aleph","zeta.minor"] where the --json twin\'s order is ["zeta.minor","zeta.aleph"]',
+  );
+  rejectedTree(
+    "an entry dropped from a tree",
+    HUMAN_IDS_TREE_LINES.slice(2),
+    treeTwin,
+    'the entry of "apecs/M.mdx" (1 node(s)) is missing',
+  );
+});
+
+/** T12.4-1's non-root `show --json` document as the built product writes it. */
+const SHOW_STAR_DOC = {
+  coverage: "none",
+  edges: {
+    incoming: [
+      { from: "specs/S.mdx", kind: "contains", to: "specs/S.mdx#star" },
+      {
+        from: "src/app.ts#embedStar",
+        kind: "embeds",
+        to: "specs/S.mdx#star",
+      },
+    ],
+    outgoing: [
+      {
+        from: "specs/S.mdx#star",
+        kind: "contains",
+        to: "specs/S.mdx#star.point",
+      },
+      { from: "specs/S.mdx#star", kind: "depends", to: "specs/S.mdx#peer" },
+      { from: "specs/S.mdx#star", kind: "embeds", to: "specs/S.mdx#peer" },
+    ],
+  },
+  hashes: {
+    effectiveHash: itemHash("e"),
+    metadataHash: itemHash("d"),
+    ownHash: itemHash("a"),
+    subtreeHash: itemHash("b"),
+  },
+  identity: "specs/S.mdx#star",
+  ownText: "Star intro.\n\n\nPeer line.\n\n",
+  sourceRange: { end: 141, start: 0 },
+  subtreeText: "Star intro.\n\nPoint line.\n\nPeer line.\n\n",
+  tags: ["Zeta", "amber", "vital"],
+};
+
+/** Its human report as the built product prints it. */
+const HUMAN_SHOW_STAR_LINES: readonly string[] = [
+  "specs/S.mdx#star",
+  "source range: bytes 0-141",
+  "tags: Zeta amber vital",
+  "coverage: none",
+  "hashes:",
+  `  ownHash: ${itemHash("a")}`,
+  `  subtreeHash: ${itemHash("b")}`,
+  `  effectiveHash: ${itemHash("e")}`,
+  `  metadataHash: ${itemHash("d")}`,
+  "edges:",
+  "  incoming:",
+  "    contains from specs/S.mdx",
+  "    embeds from src/app.ts#embedStar",
+  "  outgoing:",
+  "    contains to specs/S.mdx#star.point",
+  "    depends to specs/S.mdx#peer",
+  "    embeds to specs/S.mdx#peer",
+  "own text:",
+  "  Star intro.",
+  "  ",
+  "  ",
+  "  Peer line.",
+  "  ",
+  "subtree text:",
+  "  Star intro.",
+  "  ",
+  "  Point line.",
+  "  ",
+  "  Peer line.",
+  "  ",
+];
+
+/** T12.4-1's root `show --json` document: no tags, no coverage attribute. */
+const SHOW_ROOT_DOC = {
+  edges: {
+    incoming: [],
+    outgoing: [
+      { from: "specs/S.mdx", kind: "contains", to: "specs/S.mdx#peer" },
+      { from: "specs/S.mdx", kind: "contains", to: "specs/S.mdx#star" },
+    ],
+  },
+  hashes: {
+    effectiveHash: itemHash("9"),
+    metadataHash: itemHash("8"),
+    ownHash: itemHash("7"),
+    subtreeHash: itemHash("6"),
+  },
+  identity: "specs/S.mdx",
+  ownText: "\n",
+  sourceRange: { end: 173, start: 0 },
+  subtreeText: "Peer line.\n",
+};
+
+/** Its human report as the built product prints it. */
+const HUMAN_SHOW_ROOT_LINES: readonly string[] = [
+  "specs/S.mdx",
+  "source range: bytes 0-173",
+  "hashes:",
+  `  ownHash: ${itemHash("7")}`,
+  `  subtreeHash: ${itemHash("6")}`,
+  `  effectiveHash: ${itemHash("9")}`,
+  `  metadataHash: ${itemHash("8")}`,
+  "edges:",
+  "  incoming:",
+  "  outgoing:",
+  "    contains to specs/S.mdx#peer",
+  "    contains to specs/S.mdx#star",
+  "own text:",
+  "  ",
+  "subtree text:",
+  "  Peer line.",
+];
+
+test("S-5: the human show decoder decodes a well-formed report onto the node model, order free", () => {
+  const starTwin = decodeNodeReport(SHOW_STAR_DOC, "the star twin");
+  const star = decodeHumanNodeReport(
+    previewReport(HUMAN_SHOW_STAR_LINES),
+    "star",
+  );
+  expect({
+    identity: star.identity,
+    sourceRange: star.sourceRange,
+    tags: star.tags,
+    coverage: star.coverage,
+    hashes: star.hashes,
+    ownText: star.ownText,
+    subtreeText: star.subtreeText,
+  }).toEqual({
+    identity: "specs/S.mdx#star",
+    sourceRange: { start: 0, end: 141 },
+    tags: ["Zeta", "amber", "vital"],
+    coverage: "none",
+    hashes: {
+      ownHash: itemHash("a"),
+      subtreeHash: itemHash("b"),
+      effectiveHash: itemHash("e"),
+      metadataHash: itemHash("d"),
+    },
+    ownText: "Star intro.\n\n\nPeer line.\n\n",
+    subtreeText: "Star intro.\n\nPoint line.\n\nPeer line.\n\n",
+  });
+  expect(star.incomingEdges).toEqual([
+    {
+      from: "specs/S.mdx",
+      to: "specs/S.mdx#star",
+      kind: "contains",
+      line: 12,
+    },
+    {
+      from: "src/app.ts#embedStar",
+      to: "specs/S.mdx#star",
+      kind: "embeds",
+      line: 13,
+    },
+  ]);
+  expect(star.outgoingEdges.map(({ kind, to }) => `${kind} ${to}`)).toEqual([
+    "contains specs/S.mdx#star.point",
+    "depends specs/S.mdx#peer",
+    "embeds specs/S.mdx#peer",
+  ]);
+  assertHumanNodeCarries(star, starTwin, "star");
+  expect(
+    assertHumanNodeReportCarries(
+      syntheticBytesResult(
+        previewReport(HUMAN_SHOW_STAR_LINES),
+        Buffer.alloc(0),
+        0,
+      ),
+      starTwin,
+      "star, as a run",
+    ).identity,
+  ).toBe("specs/S.mdx#star");
+  // The root: no tags line, no coverage line, an empty incoming list.
+  const root = decodeHumanNodeReport(
+    previewReport(HUMAN_SHOW_ROOT_LINES),
+    "root",
+  );
+  expect({
+    tags: root.tags,
+    coverage: root.coverage,
+    own: root.ownText,
+  }).toEqual({ tags: null, coverage: null, own: "\n" });
+  assertHumanNodeCarries(
+    root,
+    decodeNodeReport(SHOW_ROOT_DOC, "the root twin"),
+    "root",
+  );
+  // Order free: the fields, the hashes, the directions, and the edges
+  // reordered, the tags listed in another order, an edge kind respelled.
+  assertHumanNodeCarries(
+    decodeHumanNodeReport(
+      previewReport([
+        HUMAN_SHOW_STAR_LINES[0]!,
+        ...HUMAN_SHOW_STAR_LINES.slice(23),
+        "edges:",
+        "  outgoing:",
+        "    Embeds to specs/S.mdx#peer",
+        ...HUMAN_SHOW_STAR_LINES.slice(14, 16),
+        "  incoming:",
+        ...HUMAN_SHOW_STAR_LINES.slice(11, 13).reverse(),
+        "tags: vital Zeta amber",
+        ...HUMAN_SHOW_STAR_LINES.slice(17, 23),
+        "hashes:",
+        ...HUMAN_SHOW_STAR_LINES.slice(5, 9).reverse(),
+        ...HUMAN_SHOW_STAR_LINES.slice(3, 4),
+        ...HUMAN_SHOW_STAR_LINES.slice(1, 2),
+      ]),
+      "star reordered",
+    ),
+    starTwin,
+    "star reordered",
+  );
+  // A tagless section prints `tags:` alone; an empty text prints no line.
+  const plainTwin = decodeNodeReport(
+    {
+      ...SHOW_STAR_DOC,
+      identity: "specs/S.mdx#peer",
+      tags: [],
+      coverage: "required",
+      ownText: "",
+      subtreeText: "",
+      edges: { incoming: [], outgoing: [] },
+    },
+    "the plain twin",
+  );
+  assertHumanNodeCarries(
+    decodeHumanNodeReport(
+      previewReport([
+        "specs/S.mdx#peer",
+        "source range: bytes 0-141",
+        "tags:",
+        "coverage: required",
+        ...HUMAN_SHOW_STAR_LINES.slice(4, 9),
+        "edges:",
+        "  incoming:",
+        "  outgoing:",
+        "own text:",
+        "subtree text:",
+      ]),
+      "plain",
+    ),
+    plainTwin,
+    "plain",
+  );
+});
+
+test("S-5: the human show decoder rejects an empty report, a field printed twice or unknown, a malformed or reversed range, an empty tag or coverage value, a hash under no name of 5.5 or twice, an edge line outside its direction, under no kind, or with the other direction's word, and every line outside its layout", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[] | Buffer,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      decodeHumanNodeReport(
+        Buffer.isBuffer(lines) ? lines : previewReport(lines),
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_SHOW_STAR_LINES;
+  rejected(
+    "an empty report",
+    Buffer.alloc(0),
+    "the shown node's identity on the report's first line",
+  );
+  rejected(
+    "an indented first line",
+    previewWithLine(lines, 0, "  specs/S.mdx#star"),
+    "the shown node's identity on the report's first line, at the margin",
+  );
+  rejected(
+    "a margin line that is no field",
+    previewWithLine(lines, 3, "specs/S.mdx#peer"),
+    "a field line at the margin",
+    "line 4",
+  );
+  rejected(
+    "a field printed twice",
+    [...lines.slice(0, 3), lines[2]!, ...lines.slice(3)],
+    "the tags field printed on line 3 is printed again here",
+  );
+  rejected(
+    "a range without its bytes word",
+    previewWithLine(lines, 1, "source range: 0-141"),
+    "a source range `source range: bytes <start>-<end>`",
+  );
+  rejected(
+    "a reversed range",
+    previewWithLine(lines, 1, "source range: bytes 141-0"),
+    "a range whose end is not before its start (SPEC 1.7), got 141-0",
+  );
+  rejected(
+    "a tag list holding a doubled space",
+    previewWithLine(lines, 2, "tags: Zeta  amber vital"),
+    "the tags separated by single spaces",
+  );
+  rejected(
+    "a coverage line without its value",
+    previewWithLine(lines, 3, "coverage:"),
+    "a coverage line `coverage: <value>`",
+  );
+  rejected(
+    "a hash under no name of 5.5",
+    previewWithLine(lines, 6, `  treeHash: ${itemHash("b")}`),
+    "under one of 5.5's names (ownHash, subtreeHash, effectiveHash, metadataHash)",
+    "line 7",
+  );
+  rejected(
+    "a hash printed twice",
+    [...lines.slice(0, 6), lines[5]!, ...lines.slice(6)],
+    "ownHash is printed twice",
+  );
+  rejected(
+    "a hash line indented four spaces",
+    previewWithLine(lines, 6, `    subtreeHash: ${itemHash("b")}`),
+    "one hash per line indented two spaces",
+  );
+  rejected(
+    "a value beside the hashes header",
+    previewWithLine(lines, 4, "hashes: four"),
+    "the hashes field's header `hashes:` alone",
+  );
+  rejected(
+    "an edge line outside its direction",
+    [...lines.slice(0, 10), ...lines.slice(11)],
+    "beneath `edges:`, a direction's header",
+    "line 11",
+  );
+  rejected(
+    "an edge under no kind of 5.2",
+    previewWithLine(lines, 11, "    nests from specs/S.mdx"),
+    'an edge line\'s kind, one SPEC 5.2 names (contains, depends, embeds, references), got "nests"',
+  );
+  rejected(
+    "an incoming edge naming its target",
+    previewWithLine(lines, 11, "    contains to specs/S.mdx"),
+    "an incoming edge line `<kind> from <identity>`",
+  );
+  rejected(
+    "a direction opened twice",
+    [...lines.slice(0, 14), "  incoming:", ...lines.slice(14)],
+    "the incoming edges opened on line 11 open again here",
+  );
+  rejected(
+    "a value beside a text field",
+    previewWithLine(lines, 17, "own text: Star intro."),
+    "the own text field's header `own text:` alone",
+  );
+  rejected(
+    "a text line indented one space",
+    previewWithLine(lines, 19, " "),
+    "a field line at the margin",
+    "line 20",
+  );
+  rejected(
+    "bytes that are not UTF-8",
+    Buffer.concat([
+      previewReport(lines.slice(0, 11)),
+      Buffer.from("    contains from ", "utf8"),
+      NON_UTF8_PATH_BYTES,
+      Buffer.from("\n", "utf8"),
+    ]),
+    "so these bytes are a path printed raw",
+  );
+});
+
+test("S-5: the human show comparison rejects a report omitting or changing the identity, the source range, a text, a hash, a tag, the coverage attribute, or an edge, or presenting a root's absent tags or coverage — naming the datum", () => {
+  const starTwin = decodeNodeReport(SHOW_STAR_DOC, "the star twin");
+  const rootTwin = decodeNodeReport(SHOW_ROOT_DOC, "the root twin");
+  const rejected = (
+    label: string,
+    lines: readonly string[],
+    twin: ReturnType<typeof decodeNodeReport>,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanNodeCarries(
+        decodeHumanNodeReport(previewReport(lines), label),
+        twin,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_SHOW_STAR_LINES;
+  rejected(
+    "another identity",
+    previewWithLine(lines, 0, "specs/S.mdx#star.point"),
+    starTwin,
+    'the report\'s first line names the node "specs/S.mdx#star.point" where the --json twin\'s identity is "specs/S.mdx#star"',
+  );
+  rejected(
+    "the range moved",
+    previewWithLine(lines, 1, "source range: bytes 1-141"),
+    starTwin,
+    "the report prints the source range 1-141 where the --json twin's is 0-141",
+  );
+  rejected(
+    "the range dropped",
+    previewWithLine(lines, 1, null),
+    starTwin,
+    "the report prints no source range where the --json twin's is 0-141",
+  );
+  rejected(
+    "a text line changed",
+    previewWithLine(lines, 21, "  Peer line!"),
+    starTwin,
+    'the report prints the own text "Star intro.\\n\\n\\nPeer line!\\n\\n" where the --json twin\'s is "Star intro.\\n\\n\\nPeer line.\\n\\n"',
+  );
+  rejected(
+    "a text's last line dropped",
+    lines.slice(0, -1),
+    starTwin,
+    "the report prints the subtree text",
+  );
+  rejected(
+    "the subtree text dropped",
+    lines.slice(0, 23),
+    starTwin,
+    "the report prints no subtree text where the --json twin's is",
+  );
+  rejected(
+    "a hash changed",
+    previewWithLine(lines, 7, `  effectiveHash: ${itemHash("f")}`),
+    starTwin,
+    `the report prints the effectiveHash ${itemHash("f")} where the --json twin's is ${itemHash("e")}`,
+  );
+  rejected(
+    "a hash dropped",
+    previewWithLine(lines, 8, null),
+    starTwin,
+    `the report prints no metadataHash where the --json twin's is ${itemHash("d")}`,
+  );
+  rejected(
+    "a tag dropped",
+    previewWithLine(lines, 2, "tags: Zeta vital"),
+    starTwin,
+    'the tag "amber" is missing — the tags line lists no such tag',
+  );
+  rejected(
+    "a tag case-folded",
+    previewWithLine(lines, 2, "tags: zeta amber vital"),
+    starTwin,
+    'the tag "Zeta" is missing',
+    'the report lists the tag "zeta", which the --json twin\'s tag set lacks',
+  );
+  rejected(
+    "the tags line dropped",
+    previewWithLine(lines, 2, null),
+    starTwin,
+    'the report presents the tags absent where the --json twin\'s are ["Zeta","amber","vital"]',
+  );
+  rejected(
+    "a root's tags presented",
+    [
+      ...HUMAN_SHOW_ROOT_LINES.slice(0, 2),
+      "tags:",
+      ...HUMAN_SHOW_ROOT_LINES.slice(2),
+    ],
+    rootTwin,
+    "the report presents the tags [] where the --json twin's are absent",
+    "absent for a root node",
+  );
+  rejected(
+    "the coverage attribute dropped",
+    previewWithLine(lines, 3, null),
+    starTwin,
+    'the report presents the coverage attribute absent where the --json twin\'s is "none"',
+  );
+  rejected(
+    "a root's coverage attribute presented",
+    [
+      ...HUMAN_SHOW_ROOT_LINES.slice(0, 2),
+      "coverage: required",
+      ...HUMAN_SHOW_ROOT_LINES.slice(2),
+    ],
+    rootTwin,
+    'the report presents the coverage attribute "required" where the --json twin\'s is absent',
+  );
+  rejected(
+    "an incoming edge dropped",
+    previewWithLine(lines, 12, null),
+    starTwin,
+    'the embeds edge from "src/app.ts#embedStar" to "specs/S.mdx#star" is missing — no incoming edge line prints it',
+  );
+  rejected(
+    "an edge's kind changed",
+    previewWithLine(lines, 16, "    references to specs/S.mdx#peer"),
+    starTwin,
+    'the embeds edge from "specs/S.mdx#star" to "specs/S.mdx#peer" is missing',
+    'line 17 prints the outgoing references edge from "specs/S.mdx#star" to "specs/S.mdx#peer", which the --json twin lacks',
+  );
+  // A twin whose incoming edge runs from the shown node: the human
+  // report's incoming lines give the node as each edge's target, so the
+  // edge is compared end for end, never as an unordered pair.
+  rejected(
+    "a twin's incoming edge reversed",
+    lines,
+    decodeNodeReport(
+      {
+        ...SHOW_STAR_DOC,
+        edges: {
+          ...SHOW_STAR_DOC.edges,
+          incoming: [
+            { from: "specs/S.mdx#star", kind: "contains", to: "specs/S.mdx" },
+            SHOW_STAR_DOC.edges.incoming[1]!,
+          ],
+        },
+      },
+      "the reversed twin",
+    ),
+    'the contains edge from "specs/S.mdx#star" to "specs/S.mdx" is missing — no incoming edge line prints it',
+    'line 12 prints the incoming contains edge from "specs/S.mdx" to "specs/S.mdx#star", which the --json twin lacks',
+  );
+  rejected(
+    "an edge's direction flipped",
+    [
+      ...lines.slice(0, 10),
+      "  incoming:",
+      ...lines.slice(11, 13),
+      "    contains from specs/S.mdx#star.point",
+      "  outgoing:",
+      ...lines.slice(15),
+    ],
+    starTwin,
+    'the contains edge from "specs/S.mdx#star" to "specs/S.mdx#star.point" is missing — no outgoing edge line prints it',
+    'prints the incoming contains edge from "specs/S.mdx#star.point" to "specs/S.mdx#star", which the --json twin lacks',
   );
 });
 

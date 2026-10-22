@@ -19,11 +19,13 @@
 //                      required information present, or absent where SPEC
 //                      requires its absence
 //   human-reports.ts   the human-report decoders (H-3's report forms,
-//                      T12.0-15, T6.6-7): a findings report, an exit-2
-//                      standard-error message, a preview, a performed
-//                      rename/move report, an impact report, a `review
-//                      list` and `review status` report, and a `review
-//                      show` and `review next` report decoded onto the
+//                      T12.0-15, T6.6-7, T12.3-1): a findings report, an
+//                      exit-2 standard-error message, a preview, a
+//                      performed rename/move report, an impact report, a
+//                      `review list` and `review status` report, a
+//                      `review show` and `review next` report, a
+//                      `coverage` report, an `ids` and `ids --tree`
+//                      listing, and a `show` report decoded onto the
 //                      information model — each finding's code,
 //                      locations, concerned path, and identities; an
 //                      error's code and concerned path; a preview's
@@ -36,7 +38,11 @@
 //                      report's items and totals; an item's fields, its
 //                      payload's nodes, texts, ranges, and origin pairs,
 //                      and its recorded states, or the fully-resolved
-//                      report — and compared with the --json twin's
+//                      report; a coverage profile's counts, covered,
+//                      uncovered, and ignored nodes, covering paths, and
+//                      reasons; a listing's entries and their IDs or
+//                      trees; a node's full 12.4 enumeration — and
+//                      compared with the --json twin's
 //   session-staging.ts T10.1-4 corruption transformations (shape-aware,
 //                      value-blind, over product-written session files)
 //   record-staging.ts  T13.3-2's operational path set (its predicate, the
