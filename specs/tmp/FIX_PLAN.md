@@ -46,7 +46,7 @@ Not planned:
 
 ## Index — each failing test and the tasks it waits on
 
-VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 1550, job 119847008510) and 1 on `suite-windows` (CI only, job 119865815416). Suite files are `test/suite/<file>.test.ts`; registry modules `test/suite/registry/<module>.ts`. Tasks 28–33 have no failing test (nor had Tasks 1 and 3, now landed). CI at `3c214eb` (Task 36's commit; run 1556, id 39841546785): `harness-self` green; `suite-linux` 39 failures (job 120043577445), exactly the rows below not marked passing, T13.5-9 and T13.5-10 passing; `suite-windows` T7-1 alone (job 120062535462), at the same assertion as at `e049255`.
+VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 1550, job 119847008510) and 1 on `suite-windows` (CI only, job 119865815416). Suite files are `test/suite/<file>.test.ts`; registry modules `test/suite/registry/<module>.ts`. Tasks 28–33 have no failing test (nor had Tasks 1 and 3, now landed). CI at `bb882a9` (Task 3's commit; run 1558, id 39850026910): `harness-self` green (job 120073541857); `suite-linux` 39 failures of 5395 tests (job 120073541459), exactly the rows below not marked passing and each at the same first assertion as at `3c214eb` (Task 36's commit; run 1556, job 120043577445), T13.5-9 and T13.5-10 passing; `suite-windows` T7-1 alone (job 120094748444), at the same assertion as at `e049255`.
 
 | Test | Suite file | Tasks | First failure at `e049255` |
 |---|---|---|---|
