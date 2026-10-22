@@ -342,6 +342,15 @@
 //   platform, last in the body: a product meeting the current journal only
 //   through 6.3's replay reports the code-less unreadable baseline there,
 //   having met every other arm first.
+// - The configuration-error arms — the config-paths, search-failure,
+//   single-finding, and symlink working-directory arms — hand each `build
+//   --json` they run to an exit-2 visitor (support.ts
+//   `ErrorInvocationVisitor`, through `visitConfigurationError`): T12.7-3
+//   runs the arm's own check there (`ERROR_INVOCATION_HOME`), and T12.0-15's
+//   exit-2 family (section-12.0-iv.ts) restages the same arms through
+//   `runT1273ConfigurationErrorStagings`, its human twin at each in their
+//   place; the bare `inventory` run, a JSON-only surface with no human
+//   form, stays T12.7-3's alone.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -395,12 +404,14 @@ import {
   runD21RefusedStaging,
 } from "./section-6.5-iv.js";
 import { judgeBusyRefusal } from "./section-13.5.js";
+import type { ErrorInvocationVisitor } from "./support.js";
 import {
   assertConditionCounts,
   assertFindingMentionsLocation,
   assertSameJson,
   buildFindings,
   buildOk,
+  ERROR_INVOCATION_HOME,
   expectErrorDocument,
   expectExit,
   expectFindingFreeReport,
@@ -2820,13 +2831,15 @@ async function runDocumentFormsArm(product: ProductBinding): Promise<void> {
 // A minimal valid source, matched by SPECS_ONLY_CONFIG's spec group: the
 // initial specs/A.mdx of the config-paths, search-failure, single-finding,
 // usage, environment-refusal, and journal-error arms' workspaces — all but
-// the first created after the body's first product invocation, so S-7's
-// sweep never reaches them against the stub: a staged-source record
-// (helpers/staged-mdx.ts; S-9's before-any-product clause), staged at
-// every site. Its section `a` is the subject of the journal-error arm's
-// journaled rename (T6.3-6(a)'s staging).
+// the first created after the body's first product invocation, and the
+// configuration-error arms' restaged by T12.0-15's exit-2 family
+// (section-12.0-iv.ts) after its own, so S-7's sweep never reaches them
+// against the stub: a staged-source record (helpers/staged-mdx.ts; S-9's
+// before-any-product clause), staged at every site. Its section `a` is the
+// subject of the journal-error arm's journaled rename (T6.3-6(a)'s
+// staging).
 const ERR_SOURCE = stagedMdx(
-  "T12.7-3 specs/A.mdx (the minimal valid source: the config-paths, search-failure, single-finding, usage, environment-refusal, and journal-error arms' workspaces)",
+  "T12.7-3/T12.0-15 specs/A.mdx (the minimal valid source: the config-paths, search-failure, single-finding, usage, environment-refusal, and journal-error arms' workspaces)",
   '<S id="a">\nAlpha.\n</S>\n',
 );
 
@@ -2844,9 +2857,16 @@ const T12_7_3_A_EDITED = stagedMdx(
  * discipline): the canonical valid file plus one unknown top-level key, so
  * the refusal is attributable to that one 14.14 defect and nothing else
  * (SPEC 7: unknown keys anywhere in the defineConfig argument are a
- * configuration error).
+ * configuration error). The config-paths arm — T12.7-3's first workspace —
+ * stages it at `xspec.config.ts` and `cfg/broken.config.ts`, and T12.0-15's
+ * exit-2 family restages that workspace after its own first product
+ * invocation, so S-7's sweep never reaches the restaging against the stub:
+ * a TypeScript staged-source record (helpers/staged-ts.ts; S-9's
+ * TypeScript and timing clauses), well-formed.
  */
-const ERR_UNKNOWN_KEY_CONFIG = `import { defineConfig } from "xspec"
+const ERR_UNKNOWN_KEY_CONFIG = stagedTs(
+  "T12.7-3/T12.0-15 xspec.config.ts and cfg/broken.config.ts — the canonical valid file plus one unknown top-level key (the config-paths arm's invalid configuration)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2854,7 +2874,8 @@ export default defineConfig({
   },
   definitelyUnknownKey: true
 })
-`;
+`,
+);
 
 /**
  * Three independent 14.14 defects in one well-formed declarative-form file
@@ -2862,11 +2883,12 @@ export default defineConfig({
  * workspace root, and an unknown `markdown` field — "a configuration file
  * with several distinct defects" (T12.7-3), each a configuration error on
  * its own. Staged by the single-finding arm, after T12.7-3's first product
- * invocation: a TypeScript staged-source record (helpers/staged-ts.ts; S-9's
- * TypeScript and timing clauses), well-formed.
+ * invocation (and T12.0-15's, whose exit-2 family restages the arm): a
+ * TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+ * and timing clauses), well-formed.
  */
 const ERR_MULTI_DEFECT_CONFIG = stagedTs(
-  "T12.7-3 xspec.config.ts — three independent 14.14 defects in one well-formed file (the single-finding arm)",
+  "T12.7-3/T12.0-15 xspec.config.ts — three independent 14.14 defects in one well-formed file (the single-finding arm)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -2888,13 +2910,14 @@ export default defineConfig({
  * the refusal is attributable to nothing but its form. Staged after T12.7-3's
  * first product invocation — by the sibling-directory arm's `file()` at
  * `cfg/xspec.config.ts` and as the symlink-working-directory arm's
- * `a/xspec.config.ts` — so S-7's sweep never reaches it against the stub: a
- * TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
- * and timing clauses), declared unparseable (14.20); the record carries the
- * declaration at both sites.
+ * `a/xspec.config.ts`, T12.0-15's exit-2 family restaging both arms — so
+ * S-7's sweep never reaches it against the stub: a TypeScript staged-source
+ * record (helpers/staged-ts.ts; S-9's TypeScript and timing clauses),
+ * declared unparseable (14.20); the record carries the declaration at both
+ * sites.
  */
 const ERR_MALFORMED_CONFIG = stagedTs(
-  "T12.7-3 cfg/xspec.config.ts and a/xspec.config.ts — not well-formed TypeScript (the malformed configuration)",
+  "T12.7-3/T12.0-15 cfg/xspec.config.ts and a/xspec.config.ts — not well-formed TypeScript (the malformed configuration)",
   "this is not TypeScript ((( and so not a configuration\n",
   "unparseable",
 );
@@ -2982,6 +3005,52 @@ async function expectAnchoredConfigurationError(
 }
 
 /**
+ * Hand one configuration-error invocation of T12.7-3's stagings to
+ * `visitor` (support.ts `ErrorInvocationVisitor`) at the state it runs on:
+ * `jsonArgv`, run from `cwd` with `env` merged in, its human form the same
+ * command line without the `--json` token, `root` the workspace root whose
+ * tree it leaves unchanged (SPEC 12.1: a build failing at configuration
+ * load modifies nothing), and its `home` the arm's own check
+ * (`expectAnchoredConfigurationError`, `expectedPath` the anchoring form
+ * pinned). T12.7-3 runs `home`; T12.0-15's exit-2 family runs its human
+ * twin there instead (section-12.0-iv.ts).
+ */
+async function visitConfigurationError(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+  root: string,
+  cwd: string,
+  jsonArgv: readonly string[],
+  expectedPath: string,
+  context: string,
+  env?: Readonly<Record<string, string>>,
+): Promise<void> {
+  await visitor.error(
+    {
+      label: context,
+      jsonArgv,
+      argv: jsonArgv.filter((token) => token !== "--json"),
+      root,
+      run: (argv) =>
+        runProduct(product, {
+          cwd,
+          argv,
+          ...(env === undefined ? {} : { env }),
+        }),
+    },
+    () =>
+      expectAnchoredConfigurationError(
+        product,
+        cwd,
+        jsonArgv,
+        expectedPath,
+        context,
+        env,
+      ),
+  );
+}
+
+/**
  * The usage errors carrying a stable code beside the configuration error
  * (SPEC 14: conditions 24–26, each reported by the refused command as a
  * usage error, 12.0, never a finding; and condition 13's journal error
@@ -3063,9 +3132,15 @@ function assertCodedErrorDocument(
  * `--config`-named configuration file, each in the canonical anchoring
  * spelling (SPEC 14, 11.6), on `build --json` and on the bare JSON-only
  * `inventory` surface; a `--config` path nothing occupies echoed exactly as
- * given (SPEC 14, 12.0).
+ * given (SPEC 14, 12.0). Each `build --json` is handed to `visitor`
+ * (`visitConfigurationError`); the bare `inventory` run, a JSON-only
+ * surface with no human form (SPEC 11), is the staging's other assertion,
+ * run where `visitor.home` holds.
  */
-async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
+async function runErrorConfigPathsArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   await withWorkspace(
     {
       files: {
@@ -3079,8 +3154,10 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
       // The upward-search-found file from the workspace root: zero ascent
       // segments, one descending segment, no `.` segment and no trailing
       // separator (SPEC 11.6's canonical spelling).
-      await expectAnchoredConfigurationError(
+      await visitConfigurationError(
         product,
+        visitor,
+        workspace.root,
         workspace.root,
         ["build", "--json"],
         "xspec.config.ts",
@@ -3091,8 +3168,10 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
       // the same file — identified relative to the INVOCATION working
       // directory: ascent spelled `..`, joined with `/` (SPEC 14, 11.6) —
       // failing a product that reports the path workspace-relative.
-      await expectAnchoredConfigurationError(
+      await visitConfigurationError(
         product,
+        visitor,
+        workspace.root,
         workspace.path("nested/inner"),
         ["build", "--json"],
         "../../xspec.config.ts",
@@ -3105,8 +3184,10 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
       // segments (SPEC 11.6), so the concerned path is
       // "cfg/broken.config.ts" — failing a product that echoes the
       // argument verbatim.
-      await expectAnchoredConfigurationError(
+      await visitConfigurationError(
         product,
+        visitor,
+        workspace.root,
         workspace.root,
         ["build", "--json", "--config", "./cfg/broken.config.ts"],
         "cfg/broken.config.ts",
@@ -3139,8 +3220,10 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
       await assertLeavesUnchanged(
         workspace.root,
         () =>
-          expectAnchoredConfigurationError(
+          visitConfigurationError(
             product,
+            visitor,
+            workspace.root,
             siblingCwd,
             siblingArgv,
             ERR_SIBLING_CONFIG_ARG,
@@ -3163,8 +3246,10 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
       await assertLeavesUnchanged(
         workspace.root,
         async () => {
-          await expectAnchoredConfigurationError(
+          await visitConfigurationError(
             product,
+            visitor,
+            workspace.root,
             siblingCwd,
             [
               "build",
@@ -3177,8 +3262,10 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
               "the sibling directory work/ (the named path unoccupied: the " +
               "argument value echoed byte-for-byte, SPEC 14)",
           );
-          await expectAnchoredConfigurationError(
+          await visitConfigurationError(
             product,
+            visitor,
+            workspace.root,
             siblingCwd,
             ["build", "--json", "--config", absentAbsoluteArg],
             absentAbsoluteArg,
@@ -3197,8 +3284,10 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
       await assertLeavesUnchanged(
         workspace.root,
         () =>
-          expectAnchoredConfigurationError(
+          visitConfigurationError(
             product,
+            visitor,
+            workspace.root,
             siblingCwd,
             siblingArgv,
             ERR_SIBLING_CONFIG_ARG,
@@ -3217,8 +3306,10 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
       // form), never the argument as given: existence, not spelling, decides
       // the form.
       const existingAbsoluteArg = workspace.path(ERR_SIBLING_CONFIG_FILE);
-      await expectAnchoredConfigurationError(
+      await visitConfigurationError(
         product,
+        visitor,
+        workspace.root,
         siblingCwd,
         ["build", "--json", "--config", ERR_SIBLING_CONFIG_ARG_NONCANONICAL],
         ERR_SIBLING_CONFIG_ARG,
@@ -3227,8 +3318,10 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
           "malformed: the canonical anchoring spelling, never the argument " +
           "as given)",
       );
-      await expectAnchoredConfigurationError(
+      await visitConfigurationError(
         product,
+        visitor,
+        workspace.root,
         siblingCwd,
         ["build", "--json", "--config", existingAbsoluteArg],
         ERR_SIBLING_CONFIG_ARG,
@@ -3240,7 +3333,9 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
       // A JSON-only surface without `--json`: bare `inventory` under the
       // invalid configuration — JSON output is in effect (SPEC 12.0, 11),
       // and configuration errors keep their precedence on the inventory
-      // (SPEC 11.6), so the error arrives as the error document.
+      // (SPEC 11.6), so the error arrives as the error document. No human
+      // form exists (SPEC 11), so no twin: the home test's alone.
+      if (!visitor.home) return;
       await expectAnchoredConfigurationError(
         product,
         workspace.root,
@@ -3256,10 +3351,12 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
 /**
  * Arm: a failed upward search with no `--config` concerns the directory it
  * started from — the invocation working directory, spelled `.` (SPEC 14,
- * 11.6) — whatever that directory's position in the tree.
+ * 11.6) — whatever that directory's position in the tree. Each
+ * `build --json` is handed to `visitor` (`visitConfigurationError`).
  */
 async function runErrorSearchFailureArm(
   product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
 ): Promise<void> {
   // The workspace is a fresh unique temporary directory whose filesystem
   // ancestors (the OS temp directory and its parents) hold no
@@ -3275,8 +3372,10 @@ async function runErrorSearchFailureArm(
         workspace.root,
         "T12.7-3 (a failed upward search and its `.` concerned path)",
       );
-      await expectAnchoredConfigurationError(
+      await visitConfigurationError(
         product,
+        visitor,
+        workspace.root,
         workspace.root,
         ["build", "--json"],
         ".",
@@ -3287,8 +3386,10 @@ async function runErrorSearchFailureArm(
       // the working directory itself, spelled "." (SPEC 11.6 spells the
       // working directory "."), never that directory's path from anywhere
       // else.
-      await expectAnchoredConfigurationError(
+      await visitConfigurationError(
         product,
+        visitor,
+        workspace.root,
         workspace.path("nested/inner"),
         ["build", "--json"],
         ".",
@@ -3304,10 +3405,12 @@ async function runErrorSearchFailureArm(
  * several distinct defects yields a single condition-14 finding (SPEC
  * 12.7: "One invocation reports one error"). The cardinality rides the
  * decode: one JSON document as the entire stdout, `{"error": …}` with the
- * one member holding one finding form.
+ * one member holding one finding form. The `build --json` is handed to
+ * `visitor` (`visitConfigurationError`).
  */
 async function runErrorSingleFindingArm(
   product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
 ): Promise<void> {
   await withWorkspace(
     {
@@ -3317,8 +3420,10 @@ async function runErrorSingleFindingArm(
       },
     },
     async (workspace) => {
-      await expectAnchoredConfigurationError(
+      await visitConfigurationError(
         product,
+        visitor,
+        workspace.root,
         workspace.root,
         ["build", "--json"],
         "xspec.config.ts",
@@ -3565,6 +3670,7 @@ const T12_7_2 = defineProductTest({
  */
 async function runErrorSymlinkWorkingDirectoryArm(
   product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
 ): Promise<void> {
   await withWorkspace(
     {
@@ -3577,8 +3683,10 @@ async function runErrorSymlinkWorkingDirectoryArm(
     async (workspace) => {
       // The link path as working directory and as `PWD` (doc comment).
       const linkCwd = workspace.path("L");
-      await expectAnchoredConfigurationError(
+      await visitConfigurationError(
         product,
+        visitor,
+        workspace.root,
         linkCwd,
         ["build", "--json", "--config", "./../xspec.config.ts"],
         "../xspec.config.ts",
@@ -3591,6 +3699,34 @@ async function runErrorSymlinkWorkingDirectoryArm(
       );
     },
   );
+}
+
+/**
+ * T12.7-3's configuration-error stagings, for T12.0-15's exit-2 family
+ * (TEST-SPEC T12.0-15: "on T12.7-3's configuration-error stagings — each
+ * concerned-path form: the file the upward search found, `.` for a failed
+ * upward search, and `--config`'s canonical anchoring and as-given forms"):
+ * the config-paths arm (the found file from the root and from a nested
+ * working directory; `--config` naming the broken file with a `./`
+ * segment; from `work/`, `--config` naming no file — as spelled, non-
+ * canonically, and absolutely — then the malformed file, as spelled,
+ * non-canonically, and absolutely), the search-failure arm (`.` from the
+ * root and from a nested working directory), the single-finding arm (three
+ * defects, one finding), and — Linux leg — the symlink working-directory
+ * arm, each `build --json` handed to `visitor` at the state it runs on;
+ * T12.7-3's body runs the same arms with `ERROR_INVOCATION_HOME`, in its
+ * own order.
+ */
+export async function runT1273ConfigurationErrorStagings(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  await runErrorConfigPathsArm(product, visitor);
+  await runErrorSearchFailureArm(product, visitor);
+  await runErrorSingleFindingArm(product, visitor);
+  if (LINUX_LEG_STAGED) {
+    await runErrorSymlinkWorkingDirectoryArm(product, visitor);
+  }
 }
 
 // A second valid source, under the directory staged unlistable — an
@@ -3832,12 +3968,12 @@ const T12_7_3 = defineProductTest({
     "`review create --base c1 --name n --json` (SPEC 12.0, 12.7, 14, 11.6, " +
     "7, 12.1, 14.24, 14.25, 14.26, 13.5, 6.3, 14.13, 10.7)",
   run: async (product) => {
-    await runErrorConfigPathsArm(product);
-    await runErrorSearchFailureArm(product);
-    await runErrorSingleFindingArm(product);
+    await runErrorConfigPathsArm(product, ERROR_INVOCATION_HOME);
+    await runErrorSearchFailureArm(product, ERROR_INVOCATION_HOME);
+    await runErrorSingleFindingArm(product, ERROR_INVOCATION_HOME);
     await runErrorUsageArm(product);
     if (LINUX_LEG_STAGED) {
-      await runErrorSymlinkWorkingDirectoryArm(product);
+      await runErrorSymlinkWorkingDirectoryArm(product, ERROR_INVOCATION_HOME);
       await runErrorEnvironmentRefusalArms(product);
     }
     await runErrorBusyWorkspaceArm(product);

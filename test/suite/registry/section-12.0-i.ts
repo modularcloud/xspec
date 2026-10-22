@@ -78,7 +78,14 @@
 //   product-to-itself): 12.0 — the output form never changes an exit code or
 //   standard-error content. Exit-2 arms with `--json` decode the 12.7 error
 //   document (12.0); the human exit-2 arms assert byte-empty stdout (JSON
-//   not in effect).
+//   not in effect), and the human configuration error's standard-error
+//   message — the error's only report without JSON output in effect —
+//   carries the stable code and the concerned path its `--json` twin's
+//   error document carries (H-5, T12.0-15), decoded by the exit-2 adapter
+//   (helpers/adapters/human-reports.ts `decodeHumanErrorMessage`, through
+//   `assertHumanErrorMessageCarries`) — its wording free; the plain usage
+//   error's message, carrying no code and concerning no path (14), is
+//   asserted for neither.
 // - T12.0-5 uses exit 0 from a subdirectory as the resolution observable for
 //   `<node>`/`<graph-node>`/`<file>` arguments — resolved against the cwd
 //   each would name a nonexistent file and exit 2 — and content for `--file`,
@@ -121,6 +128,7 @@
 
 import { Buffer } from "node:buffer";
 import {
+  assertHumanErrorMessageCarries,
   assertReportMentions,
   decodeAtReport,
   decodeExportReport,
@@ -645,7 +653,7 @@ export default defineConfig({
 const T12_0_2 = defineProductTest({
   id: "T12.0-2",
   title:
-    "streams: a failing `build`'s validation errors and `check`'s findings are standard-output content (exit 1) in both output forms; usage and configuration errors print diagnostics to standard error, with JSON output in effect an exit-2 invocation emits the 12.7 error document as its entire stdout, and without JSON in effect exit-2 stdout is empty; non-JSON diagnostics never contaminate a JSON stdout, and the output form never changes an exit code or standard-error content — a representative exit-2 usage error and a failing `build`, each run with and without `--json`, exit identically with stderr byte-identical across the two forms (SPEC 12.0, 12.7, 14.14, H-4, H-5)",
+    "streams: a failing `build`'s validation errors and `check`'s findings are standard-output content (exit 1) in both output forms; usage and configuration errors print diagnostics to standard error, with JSON output in effect an exit-2 invocation emits the 12.7 error document as its entire stdout, and without JSON in effect exit-2 stdout is empty, the configuration error's standard-error message — decoded by the exit-2 adapter — carrying the stable code and the concerned path its `--json` twin's error document carries; non-JSON diagnostics never contaminate a JSON stdout, and the output form never changes an exit code or standard-error content — a representative exit-2 usage error and a failing `build`, each run with and without `--json`, exit identically with stderr byte-identical across the two forms (SPEC 12.0, 12.7, 14.14, H-4, H-5)",
   run: async (product) => {
     // Findings are stdout content (exit 1) — human and --json forms of a
     // failing `build` and of `check` over the same invalid workspace. The
@@ -794,7 +802,9 @@ const T12_0_2 = defineProductTest({
 
     // Configuration errors: stderr diagnostics; the error document under
     // --json (expectConfigurationError asserts it, stable code and concerned
-    // path included); empty stdout without JSON in effect.
+    // path included); empty stdout without JSON in effect, the
+    // standard-error message carrying the code and path the document
+    // carries (H-5; T12.0-15).
     await withWorkspace(
       {
         files: {
@@ -803,11 +813,16 @@ const T12_0_2 = defineProductTest({
         },
       },
       async (workspace) => {
-        await expectConfigurationError(
-          product,
-          workspace,
-          ["build"],
-          "T12.0-2 `build --json` under an unknown-key configuration (SPEC 14.14)",
+        const jsonConfigContext =
+          "T12.0-2 `build --json` under an unknown-key configuration (SPEC 14.14)";
+        const configError = expectErrorDocument(
+          await expectConfigurationError(
+            product,
+            workspace,
+            ["build"],
+            jsonConfigContext,
+          ),
+          jsonConfigContext,
         );
         const humanConfigContext =
           "T12.0-2 `build` under an unknown-key configuration (human form)";
@@ -825,6 +840,11 @@ const T12_0_2 = defineProductTest({
             `error leaves standard output empty (SPEC 12.0, H-5)`,
         );
         assertStderrNonEmpty(humanConfig, humanConfigContext);
+        assertHumanErrorMessageCarries(
+          humanConfig,
+          { code: configError.code, path: configError.path },
+          humanConfigContext,
+        );
       },
     );
   },

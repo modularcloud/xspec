@@ -1083,6 +1083,62 @@ export async function visitReviewRefusal(
 }
 
 /**
+ * One exit-2 invocation a home test's staging reaches — T12.7-3's
+ * configuration errors (section-12.7.ts), T6.3-6's journal errors at a
+ * given baseline (section-6.3.ts), T13.5-2's busy refusals while its
+ * command 1 holds (section-13.5.ts) — handed to the staging's visitor at
+ * the state it runs on (TEST-SPEC T12.0-15's exit-2 family): its label,
+ * leading every diagnosis of it; its command line with `--json`, as the
+ * home test runs it, and without it, the human form; the workspace root
+ * whose tree the invocation leaves unchanged (an exit-2 run modifies
+ * nothing there but acquisition's coordination writes, H-6); `run`, which
+ * runs a command line at the invocation's pre-invocation state — its
+ * working directory, environment, staging (made just before the run and
+ * restored once it ends, so a compare taken outside it reads what it
+ * refuses), and bound; and `settled`, a premise checked once each run has
+ * ended (T13.5-2: command 1 still holding as the run exits; T6.3-6: a
+ * FIFO at the journal path still a FIFO, never opened).
+ */
+export interface ErrorInvocation {
+  readonly label: string;
+  readonly jsonArgv: readonly string[];
+  readonly argv: readonly string[];
+  readonly root: string;
+  readonly run: (argv: readonly string[]) => Promise<RunResult>;
+  readonly settled?: (result: RunResult, label: string) => Promise<void>;
+}
+
+/**
+ * What one run of an exit-2 staging does (section-12.7.ts
+ * `runT1273ConfigurationErrorStagings`, section-6.3.ts
+ * `runT636JournalErrorStagings`, section-13.5.ts `runT1352HeldRun`): at
+ * each exit-2 invocation `error`, handed the home test's own check of it as
+ * `home`, and, where `home` holds, the staging's other assertions — the
+ * home test's arms and outcomes beside the invocations handed over (a
+ * JSON-only surface's error document, which has no human form; T13.5-2's
+ * second commands and determinism repeats). The home tests run `home`
+ * throughout (`ERROR_INVOCATION_HOME`); T12.0-15 runs its human twin at
+ * each invocation instead and nothing else (section-12.0-iv.ts). Either way
+ * the staging keeps its premises.
+ */
+export interface ErrorInvocationVisitor {
+  readonly error: (
+    invocation: ErrorInvocation,
+    home: () => Promise<void>,
+  ) => Promise<void>;
+  readonly home: boolean;
+}
+
+/**
+ * The home tests' own visitor of their exit-2 stagings: every check and
+ * every other assertion theirs.
+ */
+export const ERROR_INVOCATION_HOME: ErrorInvocationVisitor = {
+  error: (_invocation, home) => home(),
+  home: true,
+};
+
+/**
  * Assert a condition-10 (stale generated output) finding instructs
  * rebuilding: its message names `build` (`/build/i`; `rebuild` qualifies,
  * H-3). SPEC 14.10 has each per-file finding — a missing or mismatched

@@ -759,8 +759,17 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // full 12.4 enumeration ("12.4") — each decoded and compared with the
   // `--json` twin's; the fixtures' own coverage (8, 8.1) and the texts and
   // hashes the enumeration carries (1.6, 1.7, 5.5) are carriage context
-  // with home coverage at T8.2-1, T12.3-1, and T12.4-1. The exit-2 family
-  // still to come adds the passages it asserts.
+  // with home coverage at T8.2-1, T12.3-1, and T12.4-1. The exit-2
+  // family's human errors leave standard output empty, their standard-error
+  // message carrying the stable code and concerned path the `--json` twin's
+  // error document carries ("12.0", "14"): T12.7-3's configuration errors
+  // in every concerned-path form (the anchoring forms, 11.6, and the
+  // configuration search, 7, carriage context with home coverage at
+  // T12.7-3, T11.6-1, and T7-1); T6.3-6's journal errors at a given
+  // baseline, the resolution's usage error carrying condition 13's code and
+  // path ("6.3"); and T13.5-2's busy refusals while its command 1 holds,
+  // each refused promptly, modifying nothing ("13.5"). The family's T14-9
+  // and T14-10 stagings, still to come, add the passages they assert.
   "T12.0-15": [
     "12.0",
     "14",
@@ -775,6 +784,8 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "8.2",
     "12.3",
     "12.4",
+    "6.3",
+    "13.5",
   ],
   // T12.0-16: byte order over the separating pair U+FF21/U+1F600 on 12.7's
   // tag sets and findings order, 11.4's and 12.3's file orders, 11.6's
