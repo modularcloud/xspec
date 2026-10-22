@@ -30,13 +30,21 @@
 //   14.25), resolution fails with that condition, before any git
 //   invocation: a usage error carrying its stable code `journal-error` and
 //   concerned path `.xspec/journal` (SPEC 6.3, 14.13, 12.7), never the
-//   gate's finding. Then it locates the workspace in its repository,
-//   resolves the ref, lists the tree at it, reads the configuration and
-//   journal blobs, and computes the replay against the loaded current
+//   gate's finding. Then it locates the workspace in its repository — the
+//   innermost whose working tree contains the configuration file (SPEC
+//   6.3): git's discovery, confirmed on every `.git` entry git passed by
+//   below the top level it reported (./git.ts `refusedDiscovery`), since
+//   git walks on past a `.git` it is refused to examine; such a refusal,
+//   like every refused read of git data, leaves the baseline unreadable,
+//   a plain usage error (`code` and `path` null, 12.7), never a read
+//   failure (14.25) and never an answer from an enclosing repository —
+//   then resolves the ref, lists the tree at it, reads the configuration
+//   and journal blobs, and computes the replay against the loaded current
 //   journal's bytes. Its failures precede source validation of the
-//   current workspace (SPEC 12.0): the journal error, an unresolvable ref,
-//   or a prefix/replay failure is reported as a usage error (exit 2) even
-//   when the current workspace also fails `build`'s validations.
+//   current workspace (SPEC 12.0): the journal error, a refused
+//   discovery, an unresolvable ref, or a prefix/replay failure is reported
+//   as a usage error (exit 2) even when the current workspace also fails
+//   `build`'s validations.
 // - `validateBaselineContent` — parse and validate the baseline content as
 //   a workspace (configuration, sources, journal findings). The callers run
 //   it past the gate: on a current workspace failing `build`'s validations
@@ -51,10 +59,12 @@
 //
 // IMPLEMENTATION (Key libraries, Architecture): the system `git`
 // executable via read-only plumbing subcommands only — `rev-parse`,
-// `ls-tree`, `cat-file` (./git.ts) — and the same pure core the filesystem
-// pipeline composes (classification, parsing, validation, hashing), over
-// bytes read from the ref's tree (pipeline.ts `analyzeWorkspaceContent`):
-// the baseline analysis and the current analysis can never drift apart.
+// `ls-tree`, `cat-file` (./git.ts), the discovery's confirmation reading
+// the filesystem alone and writing nothing — and the same pure core the
+// filesystem pipeline composes (classification, parsing, validation,
+// hashing), over bytes read from the ref's tree (pipeline.ts
+// `analyzeWorkspaceContent`): the baseline analysis and the current
+// analysis can never drift apart.
 
 import { Buffer } from "node:buffer";
 import { classifySources } from "../core/discovery.js";
@@ -65,7 +75,7 @@ import { renderPathText } from "../core/path-text.js";
 import { computeJournalReplay, JOURNAL_PATH } from "../core/journal.js";
 import type { LoadedWorkspace } from "./config.js";
 import { parseConfigurationBytes } from "./config.js";
-import { runGit } from "./git.js";
+import { refusedDiscovery, runGit } from "./git.js";
 import type { LoadedJournal } from "./journal.js";
 import { journalFromBytes, occupiedJournal } from "./journal.js";
 import type { WorkspaceAnalysis } from "./pipeline.js";
@@ -336,15 +346,19 @@ function unreadableMessage(ref: string): string {
 
 /**
  * The read half of baseline resolution (SPEC 6.3): judge the current
- * journal first, then resolve the ref to a commit, list the workspace tree
- * at it, read the configuration and journal blobs, and compute the journal
- * prefix/replay against the current journal. `currentJournal` is the
- * current journal as the caller's analysis of the current workspace loaded
- * it (`WorkspaceAnalysis.journal`), so the journal is read once: its
- * findings are what `build` reports for it, and its bytes the replay's
- * current side. Reads the repository through read-only git plumbing;
- * modifies nothing, and parses no baseline source content —
- * `validateBaselineContent` does, past the SPEC 13.3 gate (module header).
+ * journal first, then discover the repository — the innermost whose
+ * working tree contains the configuration file, a refused read of its
+ * discovery leaving the baseline unreadable — resolve the ref to a commit,
+ * list the workspace tree at it, read the configuration and journal blobs,
+ * and compute the journal prefix/replay against the current journal.
+ * `currentJournal` is the current journal as the caller's analysis of the
+ * current workspace loaded it (`WorkspaceAnalysis.journal`), so the
+ * journal is read once: its findings are what `build` reports for it, and
+ * its bytes the replay's current side. Reads the repository through
+ * read-only git plumbing, and the `.git` entries git's discovery passed by
+ * through the filesystem; modifies nothing, and parses no baseline source
+ * content — `validateBaselineContent` does, past the SPEC 13.3 gate
+ * (module header).
  *
  * Callers run this before the gate's judgement of the current workspace:
  * these failures precede source validation (SPEC 12.0), each a usage error
@@ -394,6 +408,30 @@ export async function readBaseline(
     .toString("utf8")
     .replace(/\n$/, "")
     .replace(/\/$/, "");
+
+  // --- confirm the discovery: the innermost repository (SPEC 6.3) -------
+  // SPEC 6.3: the repository is the innermost whose working tree contains
+  // the configuration file, and its discovery is git data: a read of it the
+  // environment refuses leaves the baseline unreadable — this plain usage
+  // error, never a read failure (14.25), never an answer from an enclosing
+  // repository git reached by passing that `.git` by. The directories git
+  // walked through below its top level number the prefix's segments.
+  const refusal = await refusedDiscovery(
+    root,
+    prefix === "" ? 0 : prefix.split("/").length,
+  );
+  if (refusal !== undefined) {
+    return failure(
+      `cannot reconstruct the baseline at ref '${ref}': the environment ` +
+        `refused a read of '${refusal.path}' (${refusal.code}; the path is ` +
+        `relative to the workspace root) while discovering the repository ` +
+        `whose working tree contains the configuration file — that ` +
+        `innermost repository, never an enclosing one, holds the baseline, ` +
+        `so the baseline is unreadable (SPEC 6.3); restore read and search ` +
+        `permission on that path and the directories leading to it, then ` +
+        `re-run`,
+    );
+  }
 
   // --- resolve the ref to a commit (SPEC 6.3, 12.0) ---------------------
   const commitResult = await runGit(root, [
