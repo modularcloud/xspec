@@ -177,12 +177,7 @@ export function generatedDerivedPaths(
       continue;
     }
     const modulePaths = specModulePaths(specPath);
-    paths.push(
-      modulePaths.module,
-      modulePaths.runtime,
-      modulePaths.types,
-      modulePaths.typesMap,
-    );
+    paths.push(modulePaths.module, modulePaths.types, modulePaths.typesMap);
     if (emitMarkdown) {
       // SPEC 13.2: the `.mdx` source emits `.md` — the trailing "x" dropped.
       paths.push(prefix + specPath.slice(0, -1));

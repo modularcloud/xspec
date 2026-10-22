@@ -56,7 +56,6 @@ const MDX_SUFFIX_LENGTH = ".mdx".length;
 
 /** The companions' suffixes as bytes (SPEC 13.1; emission's naming). */
 const COMPANION_SUFFIXES: readonly Uint8Array[] = [
-  SPEC_MODULE_SUFFIXES.runtime,
   SPEC_MODULE_SUFFIXES.types,
   SPEC_MODULE_SUFFIXES.typesMap,
 ].map((suffix) => utf8Encoder.encode(suffix));

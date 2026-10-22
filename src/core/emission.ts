@@ -1,40 +1,53 @@
-// Generated TypeScript module emission (SPEC 4, 4.1, 4.2, 4.3, 4.4, 13.1).
+// Generated TypeScript module emission (SPEC 4, 4.1, 4.2, 4.3, 4.4, 4.5, 13.1).
 //
 // Pure core (IMPLEMENTATION Architecture: emission is pure text generation —
 // deterministic, I/O-free): for one parsed spec source, this module renders
 // the generated TypeScript module `NAME.xspec.ts` and its companion files as
 // exact text; the workspace layer writes them (SPEC 12.1, 13.4).
 //
-// File arrangement (SPEC 13.1). Consumers import `./NAME.xspec` from
-// TypeScript compiled for Node without a package.json — CommonJS format
-// under `node16`/`nodenext` resolution — where the extensionless specifier
-// resolves by Node-style extension lookup. Four generated files serve that
-// specifier with no xspec runtime dependency:
+// File arrangement (SPEC 13.1). Consumers import the extensionless specifier
+// `./NAME.xspec`, and type checking, hover and go-to-definition, and runtime
+// behavior must all hold under standard TypeScript tooling with no xspec
+// runtime dependency. Standard tooling compiles the consumer together with
+// the TypeScript files it imports and may write the output anywhere — beside
+// the sources or into an output directory elsewhere (TEST-SPEC H-2 runs the
+// consumer from such a directory) — and only what the compiler emits is
+// there: a plain `.js` file beside the sources never is. So the runtime is
+// TypeScript the compiler compiles with the consumer, and every other
+// generated file is a declaration file, needed at compile time alone. Three
+// generated files serve the specifier:
 //
 // - `NAME.xspec.ts` — the generated module itself (SPEC 13.1 fixes this
-//   path), beginning with the generated-file header (SPEC 4). TypeScript's
-//   extension lookup for `./NAME.xspec` finds this file first, so it is the
-//   compile-time resolution target; it re-exports the default and `text`
-//   bindings from the runtime companion, so every declaration a consumer
-//   navigates to lives in the type companion below. The consumer's own
-//   compilation emits `NAME.xspec.js` beside it, which is what Node's
-//   runtime extension lookup then finds for `require("./NAME.xspec")`.
-//   It also carries a textual duplicate of every node's documentation
-//   comment (SPEC 4.2), so the generated module itself contains each
-//   node's documentation.
-// - `NAME.xspec.impl.js` — the runtime companion, a plain CommonJS module
-//   (the format `.js` has beside these sources): the frozen node tokens, the
-//   module-private subtree-text store, and the `text` export (SPEC 4.3,
-//   4.4). The re-export shell reaches it by its exact file name, so the
-//   consumer's emit of `NAME.xspec.js` never collides with it.
-// - `NAME.xspec.impl.d.ts` — the type companion the shell's re-export
-//   resolves to (`./NAME.xspec.impl.js` → `.d.ts` under standard
-//   resolution): the branded node interfaces (SPEC 4.1, 4.4), the default
-//   export, and the `text` signature. Keeping every declaration here — not
-//   in the `.ts` shell — is what lets go-to-definition land in a
-//   declaration file, which the declaration map below redirects into the
-//   source `.mdx` (SPEC 4.2); standard tooling maps only declaration-file
-//   positions.
+//   path), beginning with the generated-file header (SPEC 4), and the
+//   runtime: the frozen node objects, the module-private subtree-text table,
+//   the root node — exported as `root` and as the default export — and the
+//   `text` function (SPEC 4.1, 4.3, 4.4). TypeScript's extension lookup for
+//   `./NAME.xspec` finds this file, and the consumer's own compilation emits
+//   `NAME.xspec.js` from it wherever it writes the consumer's output, which
+//   Node's runtime extension lookup then finds. Its values are typed through
+//   local aliases of import types naming the node interfaces in the type
+//   companion — types alone, erased from the output, so the runtime requires
+//   nothing. Import types rather than an import declaration: the type
+//   companion augments this module (below), and an import declaration of it
+//   would have to be kept for that augmentation by declaration emit, which
+//   `isolatedDeclarations` refuses (TS9026); an import type stays in the
+//   emitted declarations as written. Each node's constant carries the
+//   node's documentation comment (SPEC 4.2), so the generated module itself
+//   contains every node's documentation.
+// - `NAME.xspec.impl.d.ts` — the type companion: the branded node
+//   interfaces (SPEC 4.1, 4.4), every child property declared with its
+//   node's documentation, and a module augmentation of `./NAME.xspec`
+//   declaring an empty namespace `root` — non-instantiated, so it adds no
+//   value — that merges into the generated module's exported `root`
+//   constant and carries the root's documentation. Standard tooling redirects
+//   go-to-definition through a declaration map only from declaration-file
+//   positions, which is why every navigable declaration lives here: a child
+//   property for a non-root node, and for the root the merged namespace —
+//   the root's definitions being the module's constant and this namespace,
+//   the latter mapped into the `.mdx` (SPEC 4.2). The augmentation needs a
+//   named export to merge into (a default export cannot be augmented),
+//   hence the module's `root` export beside its default export; a consumer
+//   importing it is still a 14.15 (SPEC 4: only the default and `text`).
 // - `NAME.xspec.impl.d.ts.map` — the type companion's declaration map, a
 //   standard version-3 source map named by the companion's trailing
 //   `//# sourceMappingURL=` comment (and by the standard `<file>.map`
@@ -43,50 +56,65 @@
 //   editor go-to-definition on a node reference resolves into the source
 //   `.mdx` file (SPEC 4.2).
 //
-// Every companion is named `NAME.xspec.` plus a suffix (SPEC 13.1), so all
-// generated files carry `.xspec.` in their names and fall under the
-// source-discovery exclusion (SPEC 13.4).
+// The import types and the augmentation name their targets by
+// extensionless relative specifiers, `./NAME.xspec.impl` and `./NAME.xspec`,
+// so they resolve under exactly the resolution rules under which the
+// consumer's own `./NAME.xspec` does. Every companion is named `NAME.xspec.`
+// plus a suffix (SPEC 13.1), so all generated files carry `.xspec.` in their
+// names and fall under the source-discovery exclusion (SPEC 13.4). A build
+// recording files that no longer exist in this arrangement (the plain
+// runtime companion `NAME.xspec.impl.js` of earlier builds) removes them as
+// orphans (SPEC 12.1, 13.4).
 //
 // Documentation and navigation (SPEC 4.2):
 //
 // - Every generated node carries a documentation comment holding the node's
 //   own text truncated to its first 1000 Unicode code points, `…` appended
 //   when truncation occurred, each `*/` in the emitted text written `*\/`.
-//   The comment sits as JSDoc on the node's navigable declaration in the
-//   type companion — the child property signature for a non-root node, the
-//   `root` constant for the root — where editors surface it as hover
-//   documentation for node references (the default import resolves through
-//   the re-export alias chain to `root`, whose documentation hover shows).
-//   The identical comments are duplicated textually in `NAME.xspec.ts`.
+//   In the generated module it sits on the node's constant; in the type
+//   companion, on the node's navigable declaration — the child property
+//   signature for a non-root node, the merged `root` namespace for the
+//   root — where editors surface it as hover documentation for node
+//   references (the default import resolves through the export alias to
+//   `root`, whose declarations carry the same comment, which hover shows).
 // - Go-to-definition: the declaration map carries one mapping per navigable
 //   declaration name — a non-root node's property name maps to the first
-//   character of its `<S>` construct (SPEC 1.7), the `root` constant's name
+//   character of its `<S>` construct (SPEC 1.7), the `root` namespace's name
 //   to the start of the file (SPEC 1.2, 4.2). The TypeScript language
 //   service's source mapper matches a queried declaration position exactly
 //   against these mappings and lands in the `.mdx`.
 //
-// Runtime design (SPEC 4.1, 4.3, 4.4):
+// Runtime design (SPEC 4.1, 4.3, 4.4, 4.5). The module uses nothing beyond
+// ES5's standard library — no `Symbol`, no `WeakMap` — so it type-checks
+// under any target's default library, the release's default target
+// included:
 //
 // - Nodes are frozen plain objects whose enumerable own properties are
 //   exactly their child sections by ID segment — opaque tokens carrying no
-//   requirement text as values (SPEC 4.1). Segment names are safe as object
-//   keys because SPEC 1.4 excludes `__proto__`, `constructor`, `prototype`,
-//   `then`, and `$` as segments.
-// - Subtree texts live in a module-scope WeakMap keyed by node, closed over
-//   by the `text` export and never exported, so requirement text is
-//   reachable at runtime only through `text` (SPEC 4.3): a consumer that
-//   never imports `text` can observe only child structure.
-// - Each node carries its owning module's workspace-relative source path
-//   under the shared registry symbol `Symbol.for("xspec.module")` — not
-//   requirement text — so a foreign module's `text` can name both modules
-//   when it throws on a cross-module call (SPEC 4.4 → 14.11 runtime half).
+//   requirement text as values (SPEC 4.1); a marker is a plain property read
+//   (SPEC 4.5). Segment names are safe as object keys because SPEC 1.4
+//   excludes `__proto__`, `constructor`, `prototype`, `then`, and `$` as
+//   segments, and a segment naming a built-in member (`toString`) is an own
+//   property shadowing the inherited one.
+// - Subtree texts live in a module-private table beside the table of the
+//   module's nodes, read by the `text` export alone and never exported, so
+//   requirement text is reachable at runtime only through `text` (SPEC
+//   4.3): a consumer that never imports `text` can observe only child
+//   structure.
+// - Each node carries its owning module's workspace-relative source path as
+//   a non-enumerable property under the key `xspec.module`, which no ID
+//   segment can spell (SPEC 1.4: a segment contains no `.`) — not
+//   requirement text — so a foreign module's `text` can name both modules'
+//   paths when it throws on a cross-module call (SPEC 4.4 → 14.11 runtime
+//   half).
 //
 // Type design (SPEC 4.1, 4.4): each type companion declares its own
 // module-local `unique symbol` and brands every node interface with it plus
 // the module's source path as a string-literal type. Distinct declaration
 // sites make distinct symbol types, so another module's nodes are never
 // assignable here — the cross-module `text` call is a type error at the
-// argument (SPEC 4.4) — and the unexported symbol makes node types
+// argument (SPEC 4.4) — and the unexported symbol (the companion's `export
+// {}` keeps its other declarations module-private) makes node types
 // unconstructible by consumers. Child sections are readonly properties named
 // by ID segment (bracket-form string names when the segment is not an
 // identifier, SPEC 1.4), and a missing requirement path is a property-access
@@ -94,10 +122,13 @@
 //
 // All output is a pure function of the document, its texts, and the
 // workspace-relative path: byte-deterministic, LF-only line breaks of its
-// own, no wall clock, no absolute paths (SPEC 12.0). Requirement text enters
-// string literals only through JSON escaping, which never introduces raw
-// line breaks; inside documentation comments it is embedded raw, made safe
-// by the SPEC 4.2 `*/` escaping rule.
+// own, no wall clock, no absolute paths (SPEC 12.0). Requirement text and
+// paths enter string literals only through JSON escaping — which never
+// introduces raw line breaks — with each `*` escaped besides, so no string
+// literal holds the comment delimiters `/*` and `*/` and a generated file's
+// documentation comments are exactly its `/**` … `*/` spans; inside
+// documentation comments requirement text is embedded raw, made safe by the
+// SPEC 4.2 `*/` escaping rule.
 
 import { canonicalJson } from "./canonical-json.js";
 import type { SpecDocument, SpecSection } from "./mdx.js";
@@ -117,10 +148,8 @@ export interface GeneratedFile {
 
 /** The generated-file paths of one spec source (SPEC 13.1). */
 export interface SpecModulePaths {
-  /** `DIR/NAME.xspec.ts` — the generated module (SPEC 13.1). */
+  /** `DIR/NAME.xspec.ts` — the generated module and its runtime (SPEC 13.1). */
   readonly module: string;
-  /** `DIR/NAME.xspec.impl.js` — the runtime companion. */
-  readonly runtime: string;
   /** `DIR/NAME.xspec.impl.d.ts` — the type companion. */
   readonly types: string;
   /** `DIR/NAME.xspec.impl.d.ts.map` — the declaration map (SPEC 4.2). */
@@ -136,7 +165,6 @@ export interface SpecModulePaths {
  */
 export const SPEC_MODULE_SUFFIXES: SpecModulePaths = {
   module: ".xspec.ts",
-  runtime: ".xspec.impl.js",
   types: ".xspec.impl.d.ts",
   typesMap: ".xspec.impl.d.ts.map",
 };
@@ -152,7 +180,6 @@ export function specModulePaths(specPath: string): SpecModulePaths {
     : specPath;
   return {
     module: stem + SPEC_MODULE_SUFFIXES.module,
-    runtime: stem + SPEC_MODULE_SUFFIXES.runtime,
     types: stem + SPEC_MODULE_SUFFIXES.types,
     typesMap: stem + SPEC_MODULE_SUFFIXES.typesMap,
   };
@@ -160,10 +187,10 @@ export function specModulePaths(specPath: string): SpecModulePaths {
 
 /**
  * Render the generated TypeScript module and companions for one parsed spec
- * source (SPEC 4, 13.1), in `SpecModulePaths` order (module, runtime,
- * types, typesMap). Only valid workspaces emit generated output (SPEC
- * 12.1); to stay total, a section without a usable ID (null, possible only
- * alongside its own findings) is skipped with its subtree.
+ * source (SPEC 4, 13.1), in `SpecModulePaths` order (module, types,
+ * typesMap). Only valid workspaces emit generated output (SPEC 12.1); to
+ * stay total, a section without a usable ID (null, possible only alongside
+ * its own findings) is skipped with its subtree.
  */
 export function generateSpecModule(
   document: SpecDocument,
@@ -171,16 +198,14 @@ export function generateSpecModule(
 ): readonly GeneratedFile[] {
   const paths = specModulePaths(document.path);
   const fileName = lastPathSegment(document.path);
-  const moduleFileName = lastPathSegment(paths.module);
   const root = collectNodes(document, textModel);
   const nodes = flattenPreOrder(root);
   const brand = brandTypeName(fileName);
-  const types = renderTypes(document, paths, moduleFileName, brand, nodes);
+  const types = renderTypes(document, paths, brand, root, nodes);
   return [
-    { path: paths.module, content: renderShell(document.path, paths, nodes) },
     {
-      path: paths.runtime,
-      content: renderRuntime(document, textModel, moduleFileName, nodes),
+      path: paths.module,
+      content: renderModule(document, textModel, paths, brand, root),
     },
     { path: paths.types, content: types.content },
     { path: paths.typesMap, content: types.mapContent },
@@ -264,14 +289,32 @@ function lastPathSegment(path: string): string {
 
 /**
  * A double-quoted TypeScript/JavaScript string literal holding exactly
- * `value`. JSON escaping covers every control character, quote, and
- * backslash; U+2028/U+2029 are escaped additionally so the literal never
- * contains a raw line terminator (safe inside `//` comments too).
+ * `value`, JSON-escaped: JSON escaping covers every control character,
+ * quote, and backslash; U+2028/U+2029 are escaped additionally so the
+ * literal never contains a raw line terminator (safe inside `//` comments
+ * too).
  */
-function stringLiteral(value: string): string {
+function jsonStringLiteral(value: string): string {
   return JSON.stringify(value)
     .replaceAll("\u2028", "\\u2028")
     .replaceAll("\u2029", "\\u2029");
+}
+
+/**
+ * The escape sequence for `*` in a string literal: a backslash (code 0x5c)
+ * and the hexadecimal escape body `x2a`.
+ */
+const ESCAPED_ASTERISK = String.fromCharCode(0x5c) + "x2a";
+
+/**
+ * A double-quoted TypeScript/JavaScript string literal holding exactly
+ * `value` — `jsonStringLiteral`'s, each `*` escaped besides, so no literal
+ * a generated file carries (requirement text, paths, segments) holds `/*`
+ * or `*\/` and the file's documentation comments (SPEC 4.2) are exactly
+ * its `/**` … `*\/` spans, whatever the text holds.
+ */
+function stringLiteral(value: string): string {
+  return jsonStringLiteral(value).replaceAll("*", ESCAPED_ASTERISK);
 }
 
 /** ASCII identifier test for property-name and type-name rendering. */
@@ -512,21 +555,56 @@ function encodeMappings(entries: readonly MappingEntry[]): string {
 // File templates
 // ---------------------------------------------------------------------------
 
+/** The extension of a TypeScript module file. */
+const MODULE_FILE_EXTENSION = ".ts";
+
+/** The extension of a TypeScript declaration file. */
+const DECLARATION_FILE_EXTENSION = ".d.ts";
+
 /**
- * `NAME.xspec.ts` — the generated module (SPEC 13.1): the header
- * identifying it as generated by xspec from its source file (SPEC 4), the
- * re-export of the runtime companion's default and `text` bindings — which
- * keeps every navigable declaration in the type companion (see the module
- * header) — and a textual duplicate of every node's documentation comment
- * (SPEC 4.2), so the generated module carries each node's documentation.
+ * The extensionless relative specifier by which a generated file beside it
+ * names the generated file at `path` (SPEC 13.1: every generated file lies
+ * in its source's directory), `extension` dropped — `./NAME.xspec` for the
+ * module `NAME.xspec.ts`, `./NAME.xspec.impl` for the type companion
+ * `NAME.xspec.impl.d.ts`. It is the form the consumer's own `./NAME.xspec`
+ * takes, so it resolves under exactly the rules under which that does.
  */
-function renderShell(
-  specPath: string,
+function extensionlessSpecifier(path: string, extension: string): string {
+  const fileName = lastPathSegment(path);
+  return `./${fileName.slice(0, fileName.length - extension.length)}`;
+}
+
+/**
+ * `NAME.xspec.ts` — the generated module and its runtime (SPEC 13.1, 4,
+ * 4.1, 4.3, 4.4, 4.5): the header identifying it as generated by xspec from
+ * its source file (SPEC 4); local aliases of the node interfaces the type
+ * companion declares, through import types (the module header says why);
+ * the module-private node and subtree-text tables and the node
+ * constructor; every node's constant, children first so each literal
+ * references already-built nodes, carrying the node's documentation
+ * comment (SPEC 4.2); the root, exported as `root` — the declaration the
+ * type companion's augmentation merges into — and as the default export
+ * (SPEC 4.1); and the `text` export (SPEC 4.3, 4.4). It type-checks under
+ * the strict standard configurations with nothing beyond ES5's standard
+ * library: no `@types/node` (`exports`, `require`, `process`), types
+ * reached by type-level syntax alone (`isolatedModules`,
+ * `verbatimModuleSyntax`), and every export annotated
+ * (`isolatedDeclarations`).
+ */
+function renderModule(
+  document: SpecDocument,
+  textModel: WorkspaceTextModel,
   paths: SpecModulePaths,
-  nodes: readonly EmitNode[],
+  brand: string,
+  root: EmitNode,
 ): string {
-  const runtimeSpecifier = `./${lastPathSegment(paths.runtime)}`;
-  const lines = [
+  const specPath = document.path;
+  const rootType = nodeTypeName(brand, root.index);
+  const typesSpecifier = extensionlessSpecifier(
+    paths.types,
+    DECLARATION_FILE_EXTENSION,
+  );
+  const lines: string[] = [
     // SPEC 4: the generated-file header — the module begins with a comment
     // region identifying xspec and the source file.
     `// Generated by xspec from ${stringLiteral(specPath)}. Do not edit: manual`,
@@ -534,110 +612,100 @@ function renderShell(
     `// (SPEC 14.10); \`xspec build\` regenerates this module and its companion`,
     `// files (SPEC 13.1).`,
     ``,
-    `export { default, text } from ${stringLiteral(runtimeSpecifier)};`,
+    `// The node types (SPEC 4.1, 4.4), declared in the type companion, whose`,
+    `// declaration map sends go-to-definition into the source (SPEC 4.2).`,
+    `type ${brand} = import(${stringLiteral(typesSpecifier)}).${brand};`,
+    `type ${rootType} = import(${stringLiteral(typesSpecifier)}).${rootType};`,
     ``,
-    `// SPEC 4.2: every generated node's documentation comment — the node's own`,
-    `// text truncated to its first 1000 Unicode code points (\`…\` appended when`,
-    `// truncated), each \`*/\` in the emitted text written \`*\\/\`. The same`,
-    `// comments sit on the declarations in ${stringLiteral(lastPathSegment(paths.types))},`,
-    `// where editors read them as hover documentation.`,
-  ];
-  for (const node of nodes) {
-    lines.push(`// ${stringLiteral(node.identity)}`);
-    lines.push(docComment(node.ownText));
-  }
-  lines.push(``);
-  return lines.join("\n");
-}
-
-/**
- * `NAME.xspec.impl.js` — the runtime companion: a plain CommonJS module
- * providing the frozen node tokens, the module-private subtree-text store,
- * and the `text` export (SPEC 4.1, 4.3, 4.4).
- */
-function renderRuntime(
-  document: SpecDocument,
-  textModel: WorkspaceTextModel,
-  moduleFileName: string,
-  nodes: readonly EmitNode[],
-): string {
-  const lines: string[] = [
-    `// Generated by xspec from ${stringLiteral(document.path)} — the runtime`,
-    `// companion of ${stringLiteral(moduleFileName)} (SPEC 13.1). Do not edit:`,
-    `// \`xspec build\` regenerates this file.`,
-    `"use strict";`,
-    `Object.defineProperty(exports, "__esModule", { value: true });`,
-    `// SPEC 4.4: every node carries its owning module's source path under the`,
-    `// shared registry symbol, so a foreign module's \`text\` can identify the`,
-    `// node's module when it throws (14.11).`,
-    `var XSPEC_MODULE = ${stringLiteral(document.path)};`,
-    `var XSPEC_MODULE_KEY = Symbol.for("xspec.module");`,
+    `// SPEC 4.4: every node carries this module's source path, non-enumerable,`,
+    `// under the key every generated module shares — one no ID segment spells`,
+    `// (SPEC 1.4) — so a foreign module's \`text\` can name both modules when`,
+    `// it throws (14.11).`,
+    `const XSPEC_MODULE: string = ${stringLiteral(specPath)};`,
+    `const XSPEC_MODULE_KEY = "xspec.module";`,
     `// SPEC 4.3: requirement text is reachable at runtime only through the`,
-    `// \`text\` export — subtree texts live in this module-private map, never`,
-    `// on the nodes (SPEC 4.1: nodes carry no requirement text as values).`,
-    `var XSPEC_TEXTS = new WeakMap();`,
-    `function xspecNode(children) {`,
+    `// \`text\` export: subtree texts live in this module-private table, beside`,
+    `// the table of this module's nodes, never on the nodes (SPEC 4.1: nodes`,
+    `// carry no requirement text as values).`,
+    `const XSPEC_NODES: object[] = [];`,
+    `const XSPEC_TEXTS: string[] = [];`,
+    `function xspecNode(children: object, subtreeText: string): object {`,
     `  Object.defineProperty(children, XSPEC_MODULE_KEY, { value: XSPEC_MODULE });`,
+    `  XSPEC_NODES.push(children);`,
+    `  XSPEC_TEXTS.push(subtreeText);`,
     `  return Object.freeze(children);`,
     `}`,
-    `// SPEC 4.1: each node's enumerable properties are exactly its child`,
-    `// sections by ID segment; declarations are children-first so every`,
-    `// literal references already-built nodes.`,
+    ``,
+    `// SPEC 4.1: each node is frozen, its enumerable own properties exactly its`,
+    `// child sections by ID segment; SPEC 4.2: each node's constant carries the`,
+    `// node's documentation comment. Children come first, so every literal`,
+    `// references already-built nodes.`,
   ];
-  const emitDeclarations = (node: EmitNode): void => {
-    for (const child of node.children) emitDeclarations(child);
+  // A node's constructor call: its children by ID segment — the runtime
+  // object keys always string literals, uniform and safe for every segment
+  // SPEC 1.4 admits — and its subtree text (SPEC 1.6, 4.3).
+  const nodeValue = (node: EmitNode): string => {
     const entries = node.children
-      .map((child) => {
-        // Runtime object keys are always string literals: uniform, and safe
-        // for every segment SPEC 1.4 admits.
-        return `${stringLiteral(child.segment ?? "")}: n${String(child.index)}`;
-      })
+      .map(
+        (child) =>
+          `${stringLiteral(child.segment ?? "")}: n${String(child.index)}`,
+      )
       .join(", ");
-    lines.push(
-      `var n${String(node.index)} = xspecNode({${entries === "" ? "" : ` ${entries} `}}); // ${stringLiteral(node.identity)}`,
+    const children = entries === "" ? "{}" : `{ ${entries} }`;
+    const subtreeText = stringLiteral(
+      textModel.subtreeText(document, node.section),
     );
+    return `xspecNode(${children}, ${subtreeText})`;
   };
-  const root = nodes[0];
-  if (root !== undefined) emitDeclarations(root);
-  for (const node of nodes) {
-    lines.push(
-      `XSPEC_TEXTS.set(n${String(node.index)}, ${stringLiteral(
-        textModel.subtreeText(document, node.section),
-      )});`,
-    );
-  }
+  const emitDescendants = (node: EmitNode): void => {
+    for (const child of node.children) {
+      emitDescendants(child);
+      lines.push(
+        `// ${stringLiteral(child.identity)}`,
+        docComment(child.ownText),
+        `const n${String(child.index)} = ${nodeValue(child)};`,
+      );
+    }
+  };
+  emitDescendants(root);
   lines.push(
+    `// ${stringLiteral(root.identity)}: the root node (SPEC 1.2).`,
+    docComment(root.ownText),
+    `export const root: ${rootType} = ${nodeValue(root)} as ${rootType};`,
     `// SPEC 4.1: the default export is the root node.`,
-    `exports.default = n0;`,
+    `export { root as default };`,
+    ``,
     `// SPEC 4.3: \`text(node)\` returns the node's subtree text as a string.`,
-    `// SPEC 4.4 → 14.11: a node from another generated module causes a throw`,
-    `// identifying both the node's module and the called module.`,
-    `exports.text = function text(node) {`,
-    `  var value = XSPEC_TEXTS.get(node);`,
-    `  if (value !== undefined) {`,
-    `    return value;`,
+    `// SPEC 4.4 → 14.11: a node of another generated module causes a throw`,
+    `// naming both the node's module and this one by their source files'`,
+    `// workspace-relative paths.`,
+    `export function text(node: ${brand}): string {`,
+    `  const index = XSPEC_NODES.indexOf(node);`,
+    `  if (index >= 0) {`,
+    `    return XSPEC_TEXTS[index] as string;`,
     `  }`,
-    `  var owner =`,
-    `    node !== null && (typeof node === "object" || typeof node === "function")`,
-    `      ? node[XSPEC_MODULE_KEY]`,
+    `  const candidate: unknown = node;`,
+    `  const owner: unknown =`,
+    `    typeof candidate === "object" && candidate !== null`,
+    `      ? (candidate as { readonly [key: string]: unknown })[XSPEC_MODULE_KEY]`,
     `      : undefined;`,
     `  if (typeof owner === "string" && owner !== XSPEC_MODULE) {`,
     `    throw new Error(`,
-    `      "xspec: cross-module text() call (SPEC 4.4): the node belongs to the " +`,
-    `        "spec module generated from " +`,
-    `        JSON.stringify(owner) +`,
-    `        " but was passed to the \`text\` export of the module generated " +`,
-    `        "from " +`,
-    `        JSON.stringify(XSPEC_MODULE) +`,
-    `        ".",`,
+    `      "xspec: cross-module text() call (SPEC 4.4): the node belongs to " +`,
+    `        "the spec module generated from '" +`,
+    `        owner +`,
+    `        "' but was passed to the \`text\` export of the module generated " +`,
+    `        "from '" +`,
+    `        XSPEC_MODULE +`,
+    `        "'.",`,
     `    );`,
     `  }`,
     `  throw new Error(`,
-    `    "xspec: text() expects a node of the spec module generated from " +`,
-    `      JSON.stringify(XSPEC_MODULE) +`,
-    `      " (SPEC 4.1, 4.3).",`,
+    `    "xspec: text() expects a node of the spec module generated from '" +`,
+    `      XSPEC_MODULE +`,
+    `      "' (SPEC 4.1, 4.3).",`,
     `  );`,
-    `};`,
+    `}`,
     ``,
   );
   return lines.join("\n");
@@ -652,21 +720,29 @@ interface RenderedTypes {
 }
 
 /**
- * `NAME.xspec.impl.d.ts` — the type companion: the module-local brand
- * (SPEC 4.4), the per-node interfaces with readonly segment-named child
- * properties (SPEC 4.1), the default export, and the `text` signature
- * (SPEC 4.3). Every node's navigable declaration carries its documentation
- * comment, and the accompanying declaration map sends each declaration
- * name to the node's `.mdx` position (SPEC 4.2).
+ * `NAME.xspec.impl.d.ts` — the type companion (SPEC 4.1, 4.2, 4.4): the
+ * module-local brand, the per-node interfaces with readonly segment-named
+ * child properties — exported, so the generated module's import types
+ * name them — and
+ * the augmentation of the generated module that merges a namespace carrying
+ * the root's documentation into its `root` export. Every node's navigable
+ * declaration carries its documentation comment, and the accompanying
+ * declaration map sends each declaration name to the node's `.mdx`
+ * position (SPEC 4.2).
  */
 function renderTypes(
   document: SpecDocument,
   paths: SpecModulePaths,
-  moduleFileName: string,
   brand: string,
+  root: EmitNode,
   nodes: readonly EmitNode[],
 ): RenderedTypes {
   const specPath = document.path;
+  const moduleFileName = lastPathSegment(paths.module);
+  const moduleSpecifier = extensionlessSpecifier(
+    paths.module,
+    MODULE_FILE_EXTENSION,
+  );
   const typesFileName = lastPathSegment(paths.types);
   const mapFileName = lastPathSegment(paths.typesMap);
   const sourceFileName = lastPathSegment(specPath);
@@ -699,7 +775,7 @@ function renderTypes(
     `// assignable to this module's node types: the cross-module \`text\` call`,
     `// is a type error at the argument (14.11).`,
     `declare const XSPEC_BRAND: unique symbol;`,
-    `interface ${brand} {`,
+    `export interface ${brand} {`,
     `  readonly [XSPEC_BRAND]: ${stringLiteral(specPath)};`,
     `}`,
     ``,
@@ -710,7 +786,7 @@ function renderTypes(
     // SPEC 4.1: child sections as readonly properties named by ID segment;
     // a missing requirement path is a property-access type error.
     writer.appendLine(
-      `interface ${nodeTypeName(brand, node.index)} extends ${brand} {`,
+      `export interface ${nodeTypeName(brand, node.index)} extends ${brand} {`,
     );
     for (const child of node.children) {
       // SPEC 4.2: the child node's documentation comment, as JSDoc on its
@@ -730,27 +806,29 @@ function renderTypes(
     writer.appendLine(`}`);
   }
   writer.appendLine(``);
-  const root = nodes[0];
-  if (root !== undefined) {
-    // SPEC 4.2: the root node's documentation comment. The default import
-    // resolves through the re-export chain to this constant, so hover on a
-    // root reference shows it and definition queries land on its name.
-    writer.appendLine(docComment(root.ownText));
-  }
-  writer.append(`declare const `);
-  if (root !== undefined) {
-    mappings.push({
-      generated: { line: writer.line, character: writer.column },
-      source: sourcePosition(root),
-    });
-  }
-  writer.appendLine(`root: ${nodeTypeName(brand, 0)};`);
   for (const line of [
-    `// SPEC 4.1: the default export is the root node.`,
-    `export default root;`,
-    `// SPEC 4.3: \`text(node)\` returns the node's subtree text as a \`string\`.`,
-    `// SPEC 4.4: only this module's nodes are accepted (14.11).`,
-    `export declare function text(node: ${brand}): string;`,
+    `// SPEC 4.2: the root node's documentation and go-to-definition target.`,
+    `// This augmentation merges an empty namespace — adding no value — into`,
+    `// the generated module's \`root\` export, the root node its default export`,
+    `// names, so the root has a declaration in this declaration file, which`,
+    `// the declaration map sends to the start of the source.`,
+    `declare module ${stringLiteral(moduleSpecifier)} {`,
+  ]) {
+    writer.appendLine(line);
+  }
+  // SPEC 4.2: the root node's documentation comment; hover on a root
+  // reference shows it (the default import resolves to `root`).
+  writer.appendLine(docComment(root.ownText));
+  writer.append(`  namespace `);
+  mappings.push({
+    generated: { line: writer.line, character: writer.column },
+    source: sourcePosition(root),
+  });
+  writer.appendLine(`root {}`);
+  for (const line of [
+    `}`,
+    `// Only the declarations marked \`export\` above are exported.`,
+    `export {};`,
     `// SPEC 4.2: the declaration map redirecting go-to-definition into the`,
     `// source \`.mdx\`.`,
     `//# sourceMappingURL=${mapFileName}`,
