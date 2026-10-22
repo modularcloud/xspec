@@ -267,8 +267,8 @@ export interface RefusalFixture {
 // refused writes but (b)'s), T14-9 and T14-10 (section-14-ii.ts; their
 // `PRECEDENCE_FIXTURE` and `LISTING_FIXTURE` spread the rename fixture's
 // files too), and T12.0-15 (section-12.0-iv.ts: its exit-2 family restages
-// T14-10's arms (b), (d), (g), and (h)) — and their configurations and code
-// source are TypeScript
+// T14-9's arms and T14-10's arms (b), (d), (g), and (h)) — and their
+// configurations and code source are TypeScript
 // staged-source records (helpers/staged-ts.ts; S-9's TypeScript and timing
 // clauses), named likewise.
 const RENAME_CONFIG = stagedTs(
@@ -347,7 +347,8 @@ export const RENAME_FIXTURE: RefusalFixture = {
 
 // The rename fixture's emitted-Markdown variant (T13.5-7 (c)'s rename stopped
 // at a Markdown write, T13.5-11 (a)'s release after that write failure, and
-// T14-9's arm concerning the rename's `out/specs/b/B.md`):
+// T14-9's arm concerning the rename's `out/specs/b/B.md`, which T12.0-15's
+// exit-2 family restages):
 // the same sources and prior rename under a configuration emitting Markdown
 // under `outDir: "out"`, so a build leaves `out/specs/a/A.md`,
 // `out/specs/b/B.md`, and `out/specs/c/C.md` (SPEC 13.2, 7.3) —
@@ -357,11 +358,11 @@ export const RENAME_FIXTURE: RefusalFixture = {
 // the emitted files whose content the rename leaves unchanged (a rename
 // changes no Markdown, SPEC 3). The configuration is a TypeScript
 // staged-source record (S-9; the arm's workspaces are created after the
-// body's first invocation, in each of the three tests), named, as the
+// body's first invocation, in each of the four tests), named, as the
 // rename fixture's records are, with each test that prepares the variant;
 // the sources are the rename fixture's own records.
 const RENAME_OUT_CONFIG = stagedTs(
-  "T13.5-7/T13.5-11/T14-9 the rename fixture's emitted-Markdown variant xspec.config.ts (one spec group, Markdown emission under outDir out)",
+  "T12.0-15/T13.5-7/T13.5-11/T14-9 the rename fixture's emitted-Markdown variant xspec.config.ts (one spec group, Markdown emission under outDir out)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -400,9 +401,11 @@ export const RENAME_OUT_FIXTURE: RefusalFixture = {
 // `out/specs/sub/B.md` to create — whatever else a regeneration rewrites
 // (arm (c) stages `out/specs` unwritable and admits exactly those two
 // writes). The prior journaled rename `oth0` → `oth` in `docs/Other.mdx`
-// makes the workspace journal-bearing.
+// makes the workspace journal-bearing. Its records are named with every
+// test that prepares it: T13.5-7, T13.5-11, T14-9 ((c), (d), and (h)),
+// and T12.0-15, whose exit-2 family restages T14-9's arms.
 const MOVE_CONFIG = stagedTs(
-  "T13.5-7/T13.5-11/T14-9 the move fixture xspec.config.ts (spec groups specs/** and docs/**, code group src/**/*.ts, Markdown emission under outDir out)",
+  "T12.0-15/T13.5-7/T13.5-11/T14-9 the move fixture xspec.config.ts (spec groups specs/** and docs/**, code group src/**/*.ts, Markdown emission under outDir out)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -417,11 +420,11 @@ export default defineConfig({
 `,
 );
 const MOVE_OTHER = stagedMdx(
-  "T13.5-7/T13.5-11/T14-9 the move fixture docs/Other.mdx (oth0)",
+  "T12.0-15/T13.5-7/T13.5-11/T14-9 the move fixture docs/Other.mdx (oth0)",
   ['<S id="oth0">', "Other text.", "</S>", ""].join("\n"),
 );
 const MOVE_A = stagedMdx(
-  "T13.5-7/T13.5-11/T14-9 the move fixture specs/A.mdx (importing docs/Other.mdx, a d reference to oth0)",
+  "T12.0-15/T13.5-7/T13.5-11/T14-9 the move fixture specs/A.mdx (importing docs/Other.mdx, a d reference to oth0)",
   [
     'import Other from "../docs/Other.xspec"',
     "",
@@ -432,7 +435,7 @@ const MOVE_A = stagedMdx(
   ].join("\n"),
 );
 const MOVE_APP = stagedTs(
-  "T13.5-7/T13.5-11/T14-9 the move fixture src/app.ts (the importer of specs/A.mdx's module whose specifier the move rewrites)",
+  "T12.0-15/T13.5-7/T13.5-11/T14-9 the move fixture src/app.ts (the importer of specs/A.mdx's module whose specifier the move rewrites)",
   ['import A from "../specs/A.xspec";', "", "A.a;", ""].join("\n"),
 );
 
@@ -469,7 +472,8 @@ export const MOVE_FIXTURE: RefusalFixture = {
 
 // The section-move fixtures (T13.5-7 (g): a created target file is a source
 // edit, made in its `files` place; T13.5-11 (a)'s release after that write
-// failure, and T14-9's arm concerning the created file, in either byte order):
+// failure, and T14-9's arm concerning the created file, in either byte order,
+// which T12.0-15's exit-2 family restages):
 // one spec group and one spec source holding `a` and `x`, a top-level section
 // nothing references, with `specs/n` an empty directory from the start (the
 // declaration's `dirs`), so `move <origin>#x specs/n/N.mdx#x` creates the
@@ -481,11 +485,11 @@ export const MOVE_FIXTURE: RefusalFixture = {
 // edit is the run's first write, and `specs/z/Z.mdx`, listed after it, so that
 // the creation is. The source is staged under `a0`; the prior journaled rename
 // `a0` → `a` makes each workspace journal-bearing (6.1). Every workspace of the
-// arm is created after the body's first invocation, in each of the three tests,
+// arm is created after the body's first invocation, in each of the four tests,
 // so the configuration and the source are staged-source records named with all
-// three (S-9; one record per byte sequence, the origin's at either path).
+// four (S-9; one record per byte sequence, the origin's at either path).
 const SECTION_MOVE_CONFIG = stagedTs(
-  "T13.5-7/T13.5-11/T14-9 the section-move fixtures' xspec.config.ts (one spec group)",
+  "T12.0-15/T13.5-7/T13.5-11/T14-9 the section-move fixtures' xspec.config.ts (one spec group)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -496,7 +500,7 @@ export default defineConfig({
 `,
 );
 const SECTION_MOVE_ORIGIN_SOURCE = stagedMdx(
-  "T13.5-7/T13.5-11/T14-9 the section-move fixtures' origin, specs/a/A.mdx or, the byte order reversed, specs/z/Z.mdx (a0, and x, a top-level section nothing references)",
+  "T12.0-15/T13.5-7/T13.5-11/T14-9 the section-move fixtures' origin, specs/a/A.mdx or, the byte order reversed, specs/z/Z.mdx (a0, and x, a top-level section nothing references)",
   [
     '<S id="a0">',
     "Alpha text.",
@@ -576,17 +580,18 @@ export const CREATED_TARGET_ORDERS: readonly CreatedTargetOrder[] = [
 
 // (h)'s staging on the move fixture (T13.5-7 (h): a removal owed alone;
 // T13.5-11 (a)'s release after that write failure, and T14-9's arms concerning
-// `out/specs/A.md`, for `build` and for the rename): once the workspace is
+// `out/specs/A.md`, for `build` and for the rename, which T12.0-15's exit-2
+// family restages): once the workspace is
 // prepared — built under `markdown: { emit: true, outDir: "out" }`, `out/specs`
 // holding `A.md` alone and `docs/Other.mdx` emitting under `out/docs` —
 // emission is disabled by rewriting the configuration with `markdown` removed,
 // so that a regeneration owes nothing under `out/specs` but the removal of
 // `out/specs/A.md`, a recorded derived file the current configuration no longer
 // generates (SPEC 12.1, 13.4, 7.3). The configuration is written after the
-// body's first invocation, in each of the three tests, so it is a TypeScript
-// staged-source record named with all three (S-9).
+// body's first invocation, in each of the four tests, so it is a TypeScript
+// staged-source record named with all four (S-9).
 const MOVE_UNEMITTED_CONFIG = stagedTs(
-  "T13.5-7/T13.5-11/T14-9 the move fixture's xspec.config.ts with emission disabled (spec groups specs/** and docs/**, code group src/**/*.ts, markdown removed)",
+  "T12.0-15/T13.5-7/T13.5-11/T14-9 the move fixture's xspec.config.ts with emission disabled (spec groups specs/** and docs/**, code group src/**/*.ts, markdown removed)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -636,8 +641,12 @@ export interface PreparedWorkspace {
 
 const GIT_DIR_BYTES = Buffer.from(".git", "utf8");
 
-/** Exclude exactly the top-level `.git` tree (the harness's own baseline). */
-function excludeGitTree(relPathBytes: Uint8Array): boolean {
+/**
+ * Exclude exactly the top-level `.git` tree (the harness's own baseline):
+ * what `snapshotWorkspace` leaves out, and so what T12.0-15's twins of
+ * T14-9's exit-2 invocations leave out of their compares (section-14-ii.ts).
+ */
+export function excludeGitTree(relPathBytes: Uint8Array): boolean {
   return Buffer.compare(Buffer.from(relPathBytes), GIT_DIR_BYTES) === 0;
 }
 

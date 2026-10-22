@@ -776,8 +776,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // the discovery and upward search (7), the anchoring forms (11.6), the
   // session directory (10.1), and the gate's reads (13.3) — carriage
   // context with home coverage at T14-10, T7-1, T11.6-1, T10.1-1, and
-  // T13.3-1. The family's T14-9 stagings, still to come, add the passages
-  // they assert.
+  // T13.3-1; and T14-9's exit-2 stagings, 14.24's write failures at every
+  // concerned path, each with its code and concerned path ("14"; its
+  // held commands and acquisition's writes "13.5"), and the plain usage
+  // errors of its precedence clause, asserted for neither (its given
+  // baselines "6.3"; its hold file "13.5"), the refused writes' routes —
+  // the per-command write order (13.5), the refresh (13.3), a
+  // regeneration's derived files (12.1, 13.1, 13.2) — carriage context
+  // with home coverage at T14-9, T13.5-7, T13.3-2, and T12.1-3. Every
+  // passage the family asserts is cited.
   "T12.0-15": [
     "12.0",
     "14",

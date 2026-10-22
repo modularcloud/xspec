@@ -34,6 +34,33 @@
 // (the NU3_STAGED pattern of section-11.5, here `WRITE_REFUSALS_STAGED`),
 // and the Windows subset (E-6) selects T14-9 nowhere.
 //
+// T14-9's exit-2 stagings hand each exit-2 invocation to a visitor
+// (support.ts `ErrorInvocationVisitor`; `visitWriteFailure`,
+// `visitUsageError`): T14-9's body runs them with `ERROR_INVOCATION_HOME`,
+// its own check at each invocation and every other run and assertion of
+// the arm beside them — the never-reporters, the failing twin and the
+// validation refusal (exit 1, no write attempted), the state assertions
+// beyond the contract, and the recoveries — while T12.0-15's exit-2 family
+// (section-12.0-iv.ts) runs them through `runT149WriteFailureStagings` with
+// its human twin at each invocation instead. Each staging stands around one
+// run alone — at the seam for a held command, before the invocation for
+// `build`, the reads, and acquisition's writes, the reporter sweep's
+// graph-data staging made and restored around each of its runs (`.xspec`'s
+// own occupant, a byte staging, put in place once before the invocation) —
+// so a compare taken outside it reads every path. A refused write stops the
+// command with every earlier write complete (14.24), so the twin's two forms
+// cannot share one state: each write failure is handed over `fresh`, each
+// form then running on its own fresh copy of the pre-invocation state made
+// at the workspace root itself, compared modifies-nothing there where T14-9
+// asserts nothing modified — (a), (d)'s destination production, the
+// reporter sweep and its held `review create`, and acquisition's writes —
+// while the precedence clause's plain usage errors (the given baselines, the
+// hold file), which precede every write, share the state; a JSON-only
+// surface's run (`query`, `occurrences`, `view`, `at`), which has no human
+// form (SPEC 11), is T14-9's alone. The twin's compares leave out what
+// T14-9's snapshots leave out, the harness's own git baseline `.git`
+// (write-refusal-staging.ts `excludeGitTree`).
+//
 // Conservative operationalizations (H-3):
 // - Arm (a)'s rename is `b.k` → `b.k2` in `specs/b/B.mdx` — the child
 //   identity, referenced nowhere — so the refused source rewrite is the
@@ -447,7 +474,7 @@ import {
   stageArmWorkspace,
 } from "./section-13.5-ii.js";
 import { liftAndWait, withHeldRun } from "./section-13.5-iii.js";
-import type { ErrorInvocationVisitor } from "./support.js";
+import type { ErrorInvocation, ErrorInvocationVisitor } from "./support.js";
 import {
   ERROR_INVOCATION_HOME,
   assertConditionCounts,
@@ -499,6 +526,7 @@ import {
   checkFindings,
   deleteRenameOutMarkdown,
   disableMoveEmission,
+  excludeGitTree,
   expectWriteFailure,
   graphDataRefusal,
   isDerivedFile,
@@ -635,6 +663,115 @@ function assertFileUnchanged(
 }
 
 // ---------------------------------------------------------------------------
+// Exit-2 invocations handed to a visitor (TEST-SPEC T12.0-15's exit-2 family)
+// ---------------------------------------------------------------------------
+
+/**
+ * SPEC 11's JSON-only surfaces among the commands T14-9's and T14-10's
+ * exit-2 stagings run: each emits one JSON document whatever its flags
+ * (SPEC 11; H-5), so an invocation of one has no human form to twin
+ * (TEST-SPEC T12.0-15).
+ */
+const JSON_ONLY_SURFACES: ReadonlySet<string> = new Set([
+  "query",
+  "inventory",
+  "occurrences",
+  "view",
+  "at",
+]);
+
+/** The parts of an exit-2 invocation its staging gives `visitExitTwo`. */
+interface ExitTwoInvocation {
+  /** Leads every diagnosis of the invocation. */
+  readonly label: string;
+  /** The command line as the home test runs it, `--json` among its tokens. */
+  readonly jsonArgv: readonly string[];
+  /** The workspace root whose tree the invocation runs in. */
+  readonly root: string;
+  /** A run at the invocation's pre-invocation state, its staging around it. */
+  readonly run: (argv: readonly string[]) => Promise<RunResult>;
+  /**
+   * What the compare under `root` leaves out (T14-10(i)'s lock path;
+   * T14-9's `.git`).
+   */
+  readonly exclude?: SnapshotOptions["exclude"];
+  /**
+   * T14-9's write failures: each form on its own fresh copy of the
+   * pre-invocation state, compared where T14-9 asserts nothing modified
+   * (support.ts `ErrorInvocation.fresh`).
+   */
+  readonly fresh?: ErrorInvocation["fresh"];
+}
+
+/**
+ * Hand one exit-2 invocation of T14-9's or T14-10's stagings to `visitor`
+ * (support.ts `ErrorInvocationVisitor`; TEST-SPEC T12.0-15's exit-2 family)
+ * at the state it runs on — its human form the same command line without
+ * its `--json` token, `home` the home test's own check of it — or, a
+ * JSON-only surface's ({@link JSON_ONLY_SURFACES}), which has no human
+ * form, run `home` alone where `visitor.home` holds: that run is the home
+ * test's.
+ */
+async function visitExitTwo(
+  visitor: ErrorInvocationVisitor,
+  invocation: ExitTwoInvocation,
+  home: () => Promise<void>,
+): Promise<void> {
+  if (JSON_ONLY_SURFACES.has(invocation.jsonArgv[0] ?? "")) {
+    if (visitor.home) await home();
+    return;
+  }
+  await visitor.error(
+    {
+      ...invocation,
+      argv: invocation.jsonArgv.filter((token) => token !== "--json"),
+    },
+    home,
+  );
+}
+
+/** One of T14-9's exit-2 invocations as its arm hands it over. */
+type T149Invocation = Omit<ExitTwoInvocation, "exclude" | "fresh">;
+
+/**
+ * Hand one of T14-9's write failures to `visitor` (`visitExitTwo`): its two
+ * forms each on its own fresh copy of the pre-invocation state — a refused
+ * write stops the command with every earlier write complete (SPEC 14.24),
+ * so the forms cannot share one state — each form's modifies-nothing
+ * compare kept where `unchanged` says T14-9 asserts nothing modified (the
+ * refused write the run's first, or acquisition's), leaving out what
+ * T14-9's snapshots leave out, the harness's own git baseline `.git`
+ * (write-refusal-staging.ts `snapshotWorkspace`, `excludeGitTree`).
+ */
+async function visitWriteFailure(
+  visitor: ErrorInvocationVisitor,
+  invocation: T149Invocation & { readonly unchanged: boolean },
+  home: () => Promise<void>,
+): Promise<void> {
+  const { unchanged, ...handed } = invocation;
+  await visitExitTwo(
+    visitor,
+    { ...handed, exclude: excludeGitTree, fresh: { compare: unchanged } },
+    home,
+  );
+}
+
+/**
+ * Hand one of T14-9's plain usage errors to `visitor` (`visitExitTwo`): it
+ * precedes every write (SPEC 12.0; 6.3: a given baseline's resolution
+ * precedes the gate, and so the refresh; 13.5: the hold file is created
+ * before any modification), so its two forms run on the state itself inside
+ * one compare, `.git` left out as T14-9's snapshots leave it.
+ */
+async function visitUsageError(
+  visitor: ErrorInvocationVisitor,
+  invocation: T149Invocation,
+  home: () => Promise<void>,
+): Promise<void> {
+  await visitExitTwo(visitor, { ...invocation, exclude: excludeGitTree }, home);
+}
+
+// ---------------------------------------------------------------------------
 // The concerned paths, one arm each (T13.5-7's stagings)
 // ---------------------------------------------------------------------------
 
@@ -643,9 +780,14 @@ function assertFileUnchanged(
  * staged unwritable at the seam — the error document concerns
  * `specs/b/B.mdx`; the refused rewrite being the operation's first write
  * (the child identity is referenced nowhere), nothing is written: no
- * journal entry, nothing regenerated (13.5).
+ * journal entry, nothing regenerated (13.5). The run is handed to `visitor`
+ * (`visitWriteFailure`), nothing modified; the recovery where
+ * `visitor.home` holds.
  */
-async function rewrittenSourceArm(product: ProductBinding): Promise<void> {
+async function rewrittenSourceArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context =
     "T14-9 (a) `rename specs/b/B.mdx b.k b.k2 --json` with specs/b unwritable";
   const prepared = await prepareRefusalWorkspace(
@@ -655,29 +797,42 @@ async function rewrittenSourceArm(product: ProductBinding): Promise<void> {
   );
   const { workspace } = prepared;
   try {
-    const result = await runHeldWithStaging(
-      product,
-      workspace,
-      RENAME_CHILD,
-      "hold-t14-9-a.tmp",
-      refusalUnder(RENAME_B_DIR),
-      context,
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-a.tmp",
+        refusalUnder(RENAME_B_DIR),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: context,
+        jsonArgv: RENAME_CHILD,
+        root: workspace.root,
+        run,
+        unchanged: true,
+      },
+      async () => {
+        expectRefusal(
+          await run(RENAME_CHILD),
+          [RENAME_B_PATH],
+          `${context} — the rewritten source is the concerned path (SPEC 14.24, 6.4)`,
+        );
+        assertSnapshotsEqual(
+          prepared.before,
+          await snapshotWorkspace(workspace.root),
+          `${context}: nothing written — the child identity \`b.k\` is ` +
+            `referenced nowhere, so B's refused rewrite is the operation's ` +
+            `first write and the command stops there: no journal entry (the ` +
+            `append follows every source edit), nothing regenerated (SPEC ` +
+            `13.5, 14.24)`,
+        );
+      },
     );
-    expectRefusal(
-      result,
-      [RENAME_B_PATH],
-      `${context} — the rewritten source is the concerned path (SPEC 14.24, 6.4)`,
-    );
-    assertSnapshotsEqual(
-      prepared.before,
-      await snapshotWorkspace(workspace.root),
-      `${context}: nothing written — the child identity \`b.k\` is ` +
-        `referenced nowhere, so B's refused rewrite is the operation's ` +
-        `first write and the command stops there: no journal entry (the ` +
-        `append follows every source edit), nothing regenerated (SPEC ` +
-        `13.5, 14.24)`,
-    );
-    await assertRecovers(product, workspace, context);
+    if (visitor.home) await assertRecovers(product, workspace, context);
   } finally {
     await workspace.dispose();
   }
@@ -687,9 +842,14 @@ async function rewrittenSourceArm(product: ProductBinding): Promise<void> {
  * (b) The journal: the full rename with `.xspec/journal` staged unwritable
  * (`.xspec` read-only, its occupant unwritable) — the error document
  * concerns `.xspec/journal`, the journal byte-unchanged (no entry); restored,
- * the consistently rewritten sources build clean (T13.5-7 (b)).
+ * the consistently rewritten sources build clean (T13.5-7 (b)). The run is
+ * handed to `visitor` (`visitWriteFailure`); the recovery where
+ * `visitor.home` holds.
  */
-async function journalArm(product: ProductBinding): Promise<void> {
+async function journalArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context =
     "T14-9 (b) `rename specs/b/B.mdx b b2 --json` with .xspec/journal unwritable";
   const prepared = await prepareRefusalWorkspace(
@@ -699,26 +859,39 @@ async function journalArm(product: ProductBinding): Promise<void> {
   );
   const { workspace } = prepared;
   try {
-    const result = await runHeldWithStaging(
-      product,
-      workspace,
-      RENAME_B_TO_B2,
-      "hold-t14-9-b.tmp",
-      refusalAt(JOURNAL_PATH),
-      context,
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-b.tmp",
+        refusalAt(JOURNAL_PATH),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: context,
+        jsonArgv: RENAME_B_TO_B2,
+        root: workspace.root,
+        run,
+        unchanged: false,
+      },
+      async () => {
+        expectRefusal(
+          await run(RENAME_B_TO_B2),
+          [JOURNAL_PATH],
+          `${context} — the journal is the concerned path (SPEC 14.24, 6.1)`,
+        );
+        assertFileUnchanged(
+          prepared.before,
+          await snapshotWorkspace(workspace.root),
+          JOURNAL_PATH,
+          `${context}: the refused append leaves no entry (SPEC 13.5, 6.1)`,
+        );
+      },
     );
-    expectRefusal(
-      result,
-      [JOURNAL_PATH],
-      `${context} — the journal is the concerned path (SPEC 14.24, 6.1)`,
-    );
-    assertFileUnchanged(
-      prepared.before,
-      await snapshotWorkspace(workspace.root),
-      JOURNAL_PATH,
-      `${context}: the refused append leaves no entry (SPEC 13.5, 6.1)`,
-    );
-    await assertRecovers(product, workspace, context);
+    if (visitor.home) await assertRecovers(product, workspace, context);
   } finally {
     await workspace.dispose();
   }
@@ -730,9 +903,14 @@ async function journalArm(product: ProductBinding): Promise<void> {
  * the two Markdown writes the finishing regeneration owes there,
  * `out/specs/sub/B.md`'s creation (the directory it needs is part of that
  * write, 13.4) or `out/specs/A.md`'s removal, the order among a
- * regeneration's derived-file writes being unpinned (13.5).
+ * regeneration's derived-file writes being unpinned (13.5). The run is
+ * handed to `visitor` (`visitWriteFailure`); the recovery where
+ * `visitor.home` holds.
  */
-async function markdownArm(product: ProductBinding): Promise<void> {
+async function markdownArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context =
     "T14-9 (c) `move specs/A.mdx specs/sub/B.mdx --json` with out/specs unwritable";
   const prepared = await prepareRefusalWorkspace(
@@ -742,21 +920,34 @@ async function markdownArm(product: ProductBinding): Promise<void> {
   );
   const { workspace } = prepared;
   try {
-    const result = await runHeldWithStaging(
-      product,
-      workspace,
-      MOVE_JSON,
-      "hold-t14-9-c.tmp",
-      refusalUnder(MOVE_MARKDOWN_DIR),
-      context,
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-c.tmp",
+        refusalUnder(MOVE_MARKDOWN_DIR),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: context,
+        jsonArgv: MOVE_JSON,
+        root: workspace.root,
+        run,
+        unchanged: false,
+      },
+      async () => {
+        expectRefusal(
+          await run(MOVE_JSON),
+          MOVE_MARKDOWN_WRITES,
+          `${context} — an emitted Markdown file's creation or removal under ` +
+            `${MOVE_MARKDOWN_DIR} is the concerned path (SPEC 14.24, 13.2, 13.5)`,
+        );
+      },
     );
-    expectRefusal(
-      result,
-      MOVE_MARKDOWN_WRITES,
-      `${context} — an emitted Markdown file's creation or removal under ` +
-        `${MOVE_MARKDOWN_DIR} is the concerned path (SPEC 14.24, 13.2, 13.5)`,
-    );
-    await assertRecovers(product, workspace, context);
+    if (visitor.home) await assertRecovers(product, workspace, context);
   } finally {
     await workspace.dispose();
   }
@@ -772,8 +963,13 @@ async function markdownArm(product: ProductBinding): Promise<void> {
  * with `out/specs/b` staged unwritable at the seam — the error document
  * concerns `out/specs/b/B.md`, the file the refused write would have
  * produced (14.24). The state the stopped rename leaves is T13.5-7 (c)'s.
+ * The run is handed to `visitor` (`visitWriteFailure`); the recovery where
+ * `visitor.home` holds.
  */
-async function renameMarkdownArm(product: ProductBinding): Promise<void> {
+async function renameMarkdownArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context =
     "T14-9 (c) `rename specs/b/B.mdx b b2 --json` with out/specs/b/B.md deleted and out/specs/b unwritable";
   const prepared = await prepareRefusalWorkspace(
@@ -784,23 +980,36 @@ async function renameMarkdownArm(product: ProductBinding): Promise<void> {
   const { workspace } = prepared;
   try {
     await deleteRenameOutMarkdown(workspace, `${context} staging`);
-    const result = await runHeldWithStaging(
-      product,
-      workspace,
-      RENAME_B_TO_B2,
-      "hold-t14-9-c-rename.tmp",
-      refusalUnder(RENAME_OUT_MARKDOWN_DIR),
-      context,
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-c-rename.tmp",
+        refusalUnder(RENAME_OUT_MARKDOWN_DIR),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: context,
+        jsonArgv: RENAME_B_TO_B2,
+        root: workspace.root,
+        run,
+        unchanged: false,
+      },
+      async () => {
+        expectRefusal(
+          await run(RENAME_B_TO_B2),
+          [RENAME_OUT_MARKDOWN],
+          `${context} — the creation of ${RENAME_OUT_MARKDOWN}, the write the ` +
+            `rename's finishing regeneration owes under ` +
+            `${RENAME_OUT_MARKDOWN_DIR}, is the concerned path (SPEC 14.24, 6.4, ` +
+            `12.1, 13.2)`,
+        );
+      },
     );
-    expectRefusal(
-      result,
-      [RENAME_OUT_MARKDOWN],
-      `${context} — the creation of ${RENAME_OUT_MARKDOWN}, the write the ` +
-        `rename's finishing regeneration owes under ` +
-        `${RENAME_OUT_MARKDOWN_DIR}, is the concerned path (SPEC 14.24, 6.4, ` +
-        `12.1, 13.2)`,
-    );
-    await assertRecovers(product, workspace, context);
+    if (visitor.home) await assertRecovers(product, workspace, context);
   } finally {
     await workspace.dispose();
   }
@@ -811,9 +1020,13 @@ async function renameMarkdownArm(product: ProductBinding): Promise<void> {
  * with `specs/sub` present and writable and `specs` staged unwritable — the
  * destination produced, the origin's removal refused, the error document
  * concerning `specs/A.mdx`, the origin's own path (14.24: each of a
- * relocation's two writes concerns its own path).
+ * relocation's two writes concerns its own path). The run is handed to
+ * `visitor` (`visitWriteFailure`); the recovery where `visitor.home` holds.
  */
-async function originRemovalArm(product: ProductBinding): Promise<void> {
+async function originRemovalArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context =
     "T14-9 (d) `move specs/A.mdx specs/sub/B.mdx --json` with specs unwritable, specs/sub present and writable";
   const prepared = await prepareRefusalWorkspace(
@@ -824,21 +1037,34 @@ async function originRemovalArm(product: ProductBinding): Promise<void> {
   const { workspace } = prepared;
   try {
     await workspace.dir(MOVE_DESTINATION_DIR);
-    const result = await runHeldWithStaging(
-      product,
-      workspace,
-      MOVE_JSON,
-      "hold-t14-9-d.tmp",
-      refusalAt(MOVE_ORIGIN),
-      context,
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-d.tmp",
+        refusalAt(MOVE_ORIGIN),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: context,
+        jsonArgv: MOVE_JSON,
+        root: workspace.root,
+        run,
+        unchanged: false,
+      },
+      async () => {
+        expectRefusal(
+          await run(MOVE_JSON),
+          [MOVE_ORIGIN],
+          `${context} — the origin's removal, the relocation's second write, ` +
+            `concerns the origin's own path (SPEC 14.24, 13.5)`,
+        );
+      },
     );
-    expectRefusal(
-      result,
-      [MOVE_ORIGIN],
-      `${context} — the origin's removal, the relocation's second write, ` +
-        `concerns the origin's own path (SPEC 14.24, 13.5)`,
-    );
-    await assertRecovers(product, workspace, context);
+    if (visitor.home) await assertRecovers(product, workspace, context);
   } finally {
     await workspace.dispose();
   }
@@ -850,10 +1076,13 @@ async function originRemovalArm(product: ProductBinding): Promise<void> {
  * document concerns `specs/sub/B.mdx`, the origin still present and nothing
  * relocated: the relocation's entry precedes `src/` in `files` order (6.6,
  * 12.7), so its refused first write leaves the whole workspace
- * byte-unchanged (13.5).
+ * byte-unchanged (13.5). The run is handed to `visitor`
+ * (`visitWriteFailure`), nothing modified; the recovery where
+ * `visitor.home` holds.
  */
 async function destinationProductionArm(
   product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
 ): Promise<void> {
   const context =
     "T14-9 (d) `move specs/A.mdx specs/sub/B.mdx --json` with specs/sub unwritable";
@@ -865,30 +1094,43 @@ async function destinationProductionArm(
   const { workspace } = prepared;
   try {
     await workspace.dir(MOVE_DESTINATION_DIR);
-    const staged = await snapshotWorkspace(workspace.root);
-    const result = await runHeldWithStaging(
-      product,
-      workspace,
-      MOVE_JSON,
-      "hold-t14-9-d2.tmp",
-      refusalUnder(MOVE_DESTINATION_DIR),
-      context,
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-d2.tmp",
+        refusalUnder(MOVE_DESTINATION_DIR),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: context,
+        jsonArgv: MOVE_JSON,
+        root: workspace.root,
+        run,
+        unchanged: true,
+      },
+      async () => {
+        const staged = await snapshotWorkspace(workspace.root);
+        expectRefusal(
+          await run(MOVE_JSON),
+          [MOVE_DESTINATION],
+          `${context} — the destination's production, the relocation's first ` +
+            `write, concerns the destination's own path (SPEC 14.24, 13.5)`,
+        );
+        assertSnapshotsEqual(
+          staged,
+          await snapshotWorkspace(workspace.root),
+          `${context}: the origin still present, nothing relocated — the ` +
+            `relocation's entry precedes src/ in files order (SPEC 6.6, 12.7), ` +
+            `so its refused first write leaves every source, the journal, ` +
+            `derived files, and graph data byte-unchanged (SPEC 13.5, 14.24)`,
+        );
+      },
     );
-    expectRefusal(
-      result,
-      [MOVE_DESTINATION],
-      `${context} — the destination's production, the relocation's first ` +
-        `write, concerns the destination's own path (SPEC 14.24, 13.5)`,
-    );
-    assertSnapshotsEqual(
-      staged,
-      await snapshotWorkspace(workspace.root),
-      `${context}: the origin still present, nothing relocated — the ` +
-        `relocation's entry precedes src/ in files order (SPEC 6.6, 12.7), ` +
-        `so its refused first write leaves every source, the journal, ` +
-        `derived files, and graph data byte-unchanged (SPEC 13.5, 14.24)`,
-    );
-    await assertRecovers(product, workspace, context);
+    if (visitor.home) await assertRecovers(product, workspace, context);
   } finally {
     await workspace.dispose();
   }
@@ -900,9 +1142,13 @@ async function destinationProductionArm(
  * session file staged unwritable at the seam (`.xspec` itself writable, so
  * the refresh preceding the session write succeeds, 13.5) — the error
  * document concerns `.xspec/reviews/s.json`, the session file
- * byte-unchanged.
+ * byte-unchanged. The run is handed to `visitor` (`visitWriteFailure`); the
+ * recovery where `visitor.home` holds.
  */
-async function sessionFileArm(product: ProductBinding): Promise<void> {
+async function sessionFileArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context =
     "T14-9 (e) `review resolve s <item> --status no-change --json` with .xspec/reviews and the session file unwritable";
   const prepared = await prepareRefusalWorkspace(
@@ -927,36 +1173,44 @@ async function sessionFileArm(product: ProductBinding): Promise<void> {
       `${context} staging`,
     );
     await workspace.edit(RENAME_A_PATH, A_EDIT_FROM, A_EDIT_TO);
-    const staged = await snapshotWorkspace(workspace.root);
-    const result = await runHeldWithStaging(
-      product,
-      workspace,
-      [
-        "review",
-        "resolve",
-        SESSION,
-        item.id,
-        "--status",
-        "no-change",
-        "--json",
-      ],
-      "hold-t14-9-e.tmp",
-      refusalAt(SESSION_FILE),
-      context,
+    const jsonArgv = [
+      "review",
+      "resolve",
+      SESSION,
+      item.id,
+      "--status",
+      "no-change",
+      "--json",
+    ];
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-e.tmp",
+        refusalAt(SESSION_FILE),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      { label: context, jsonArgv, root: workspace.root, run, unchanged: false },
+      async () => {
+        const staged = await snapshotWorkspace(workspace.root);
+        expectRefusal(
+          await run(jsonArgv),
+          [SESSION_FILE],
+          `${context} — the session file is the concerned path (SPEC 14.24, 10.7)`,
+        );
+        assertFileUnchanged(
+          staged,
+          await snapshotWorkspace(workspace.root),
+          SESSION_FILE,
+          `${context}: the session write, the mutator's last write, refused ` +
+            `(SPEC 13.5, 14.24)`,
+        );
+      },
     );
-    expectRefusal(
-      result,
-      [SESSION_FILE],
-      `${context} — the session file is the concerned path (SPEC 14.24, 10.7)`,
-    );
-    assertFileUnchanged(
-      staged,
-      await snapshotWorkspace(workspace.root),
-      SESSION_FILE,
-      `${context}: the session write, the mutator's last write, refused ` +
-        `(SPEC 13.5, 14.24)`,
-    );
-    await assertRecovers(product, workspace, context);
+    if (visitor.home) await assertRecovers(product, workspace, context);
   } finally {
     await workspace.dispose();
   }
@@ -970,9 +1224,14 @@ async function sessionFileArm(product: ProductBinding): Promise<void> {
  * writes there is the set the prior build left (12.1 rewrites every derived
  * file; the edit changes content, not the set). The set is the prior
  * snapshot's keys, so a companion whose suffix the product chose (13.1)
- * matches the reported path by its exact bytes, whatever they are.
+ * matches the reported path by its exact bytes, whatever they are. The run
+ * is handed to `visitor` (`visitWriteFailure`); the recovery where
+ * `visitor.home` holds.
  */
-async function derivedPathArm(product: ProductBinding): Promise<void> {
+async function derivedPathArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context =
     "T14-9 (f) `build --json` with specs/b unwritable on the B-edited workspace";
   const prepared = await prepareRefusalWorkspace(
@@ -998,21 +1257,23 @@ async function derivedPathArm(product: ProductBinding): Promise<void> {
       );
     }
     await workspace.edit(RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
-    const result = await runStaged(
-      product,
-      workspace,
-      ["build", "--json"],
-      refusalUnder(RENAME_B_DIR),
-      context,
+    const jsonArgv = ["build", "--json"];
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runStaged(product, workspace, argv, refusalUnder(RENAME_B_DIR), context);
+    await visitWriteFailure(
+      visitor,
+      { label: context, jsonArgv, root: workspace.root, run, unchanged: false },
+      async () => {
+        expectRefusal(
+          await run(jsonArgv),
+          derivedUnderB,
+          `${context} — a generated module or companion under ${RENAME_B_DIR}/, ` +
+            `the first ${RENAME_B_DIR}/ write in the product's order, is the ` +
+            `concerned path (SPEC 14.24, 12.1, 13.1)`,
+        );
+      },
     );
-    expectRefusal(
-      result,
-      derivedUnderB,
-      `${context} — a generated module or companion under ${RENAME_B_DIR}/, ` +
-        `the first ${RENAME_B_DIR}/ write in the product's order, is the ` +
-        `concerned path (SPEC 14.24, 12.1, 13.1)`,
-    );
-    await assertRecovers(product, workspace, context);
+    if (visitor.home) await assertRecovers(product, workspace, context);
   } finally {
     await workspace.dispose();
   }
@@ -1029,11 +1290,13 @@ async function derivedPathArm(product: ProductBinding): Promise<void> {
  * produced (14.24), whether the origin `specs/a/A.mdx`, listed before it
  * (6.6, 12.7), is rewritten first or the creation, listed before
  * `specs/z/Z.mdx`, is the run's first write (13.5). The state each stopped
- * move leaves is T13.5-7 (g)'s.
+ * move leaves is T13.5-7 (g)'s. The run is handed to `visitor`
+ * (`visitWriteFailure`); the recovery where `visitor.home` holds.
  */
 async function createdTargetFileArm(
   product: ProductBinding,
   order: CreatedTargetOrder,
+  visitor: ErrorInvocationVisitor,
 ): Promise<void> {
   const context =
     `T14-9 (g) \`${order.argv.join(" ")} --json\` with ` +
@@ -1049,21 +1312,29 @@ async function createdTargetFileArm(
   );
   const { workspace } = prepared;
   try {
-    const result = await runHeldWithStaging(
-      product,
-      workspace,
-      [...order.argv, "--json"],
-      order.holdName,
-      refusalUnder(SECTION_MOVE_TARGET_DIR),
-      context,
+    const jsonArgv = [...order.argv, "--json"];
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        order.holdName,
+        refusalUnder(SECTION_MOVE_TARGET_DIR),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      { label: context, jsonArgv, root: workspace.root, run, unchanged: false },
+      async () => {
+        expectRefusal(
+          await run(jsonArgv),
+          [SECTION_MOVE_TARGET],
+          `${context} — the target file's creation, a source edit made in its ` +
+            `\`files\` place, is the concerned path (SPEC 14.24, 6.5, 13.5)`,
+        );
+      },
     );
-    expectRefusal(
-      result,
-      [SECTION_MOVE_TARGET],
-      `${context} — the target file's creation, a source edit made in its ` +
-        `\`files\` place, is the concerned path (SPEC 14.24, 6.5, 13.5)`,
-    );
-    await assertRecovers(product, workspace, context);
+    if (visitor.home) await assertRecovers(product, workspace, context);
   } finally {
     await workspace.dispose();
   }
@@ -1082,42 +1353,50 @@ async function createdTargetFileArm(
  * regeneration, `rename specs/A.mdx a a2` staged at the seam, each on a
  * workspace of its own: the error document concerns `out/specs/A.md`, the
  * file the refused removal would have removed (14.24). The states the
- * stopped runs leave are T13.5-7 (h)'s.
+ * stopped runs leave are T13.5-7 (h)'s. Each run is handed to `visitor`
+ * (`visitWriteFailure`); the recoveries where `visitor.home` holds.
  */
-async function removalOwedAloneArms(product: ProductBinding): Promise<void> {
+async function removalOwedAloneArms(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const renameArgv = [...ORPHAN_RENAME_ARGV, "--json"];
   const runs: readonly {
     readonly what: string;
+    readonly jsonArgv: readonly string[];
     readonly run: (
       workspace: TestWorkspace,
+      argv: readonly string[],
       context: string,
     ) => Promise<RunResult>;
   }[] = [
     {
       what: "`build --json`",
-      run: async (workspace, context) =>
+      jsonArgv: ["build", "--json"],
+      run: async (workspace, argv, context) =>
         await runStaged(
           product,
           workspace,
-          ["build", "--json"],
+          argv,
           refusalUnder(MOVE_MARKDOWN_DIR),
           context,
         ),
     },
     {
       what: `\`${renameArgv.join(" ")}\``,
-      run: async (workspace, context) =>
+      jsonArgv: renameArgv,
+      run: async (workspace, argv, context) =>
         await runHeldWithStaging(
           product,
           workspace,
-          renameArgv,
+          argv,
           "hold-t14-9-h.tmp",
           refusalUnder(MOVE_MARKDOWN_DIR),
           context,
         ),
     },
   ];
-  for (const { what, run } of runs) {
+  for (const { what, jsonArgv, run } of runs) {
     const context = `T14-9 (h) ${what} with emission disabled and ${MOVE_MARKDOWN_DIR} unwritable`;
     const prepared = await prepareRefusalWorkspace(
       product,
@@ -1127,15 +1406,29 @@ async function removalOwedAloneArms(product: ProductBinding): Promise<void> {
     const { workspace } = prepared;
     try {
       await disableMoveEmission(workspace, `${context} staging`);
-      expectRefusal(
-        await run(workspace, context),
-        [ORPHANED_MARKDOWN],
-        `${context} — the one write the regeneration owes under ` +
-          `${MOVE_MARKDOWN_DIR}, ${ORPHANED_MARKDOWN}'s removal, is refused: ` +
-          `the file it would have removed is the concerned path (SPEC ` +
-          `14.24, 12.1, 13.4)`,
+      const runHere = (argv: readonly string[]): Promise<RunResult> =>
+        run(workspace, argv, context);
+      await visitWriteFailure(
+        visitor,
+        {
+          label: context,
+          jsonArgv,
+          root: workspace.root,
+          run: runHere,
+          unchanged: false,
+        },
+        async () => {
+          expectRefusal(
+            await runHere(jsonArgv),
+            [ORPHANED_MARKDOWN],
+            `${context} — the one write the regeneration owes under ` +
+              `${MOVE_MARKDOWN_DIR}, ${ORPHANED_MARKDOWN}'s removal, is refused: ` +
+              `the file it would have removed is the concerned path (SPEC ` +
+              `14.24, 12.1, 13.4)`,
+          );
+        },
       );
-      await assertRecovers(product, workspace, context);
+      if (visitor.home) await assertRecovers(product, workspace, context);
     } finally {
       await workspace.dispose();
     }
@@ -1151,12 +1444,14 @@ async function removalOwedAloneArms(product: ProductBinding): Promise<void> {
 // app` names a code group, an invalid flag value (SPEC 11.1: `--group`
 // accepts only a configured spec group's name). The prior journaled rename
 // is the rename fixture's; the code source references nothing it rewrites.
-// T14-9 prepares it after its first product invocation, so its
+// T14-9 prepares it after its first product invocation, and so does
+// T12.0-15, whose exit-2 family restages the reporter sweep, so its
 // configuration and code source are TypeScript staged-source records
-// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses).
+// named with both (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses).
 const CODE_GROUP = "app";
 const PRECEDENCE_CONFIG = stagedTs(
-  "T14-9 the precedence fixture xspec.config.ts (one spec group, the code group app, Markdown emission next to sources)",
+  "T12.0-15/T14-9 the precedence fixture xspec.config.ts (one spec group, the code group app, Markdown emission next to sources)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1171,7 +1466,7 @@ export default defineConfig({
 `,
 );
 const PRECEDENCE_APP = stagedTs(
-  "T14-9 the precedence fixture src/app.ts (importing specs/a/A.mdx's module)",
+  "T12.0-15/T14-9 the precedence fixture src/app.ts (importing specs/a/A.mdx's module)",
   ['import A from "../specs/a/A.xspec";', "", "A.a;", ""].join("\n"),
 );
 const PRECEDENCE_FIXTURE: RefusalFixture = {
@@ -1254,23 +1549,32 @@ const BASELINE_ARMS: readonly BaselineArm[] = [
 ];
 
 /**
- * Run a baseline arm from the workspace root, its staging, where it has
- * one, made just before the run and restored in a `finally` once it ends —
- * before anything is asserted on its result, so no assertion and no
- * snapshot meets the staging.
+ * Run a baseline arm's command line from the workspace root — `arm.argv`'s
+ * `--json` form or its human twin (TEST-SPEC T12.0-15) — its staging, where
+ * it has one, made just before the run and restored in a `finally` once it
+ * ends, inside `around`'s where given (the reporter sweep's graph-data
+ * staging, made and restored around the run alike) — before anything is
+ * asserted on its result, so no assertion and no snapshot meets a staging.
  */
 async function runBaselineArm(
   product: ProductBinding,
   workspace: TestWorkspace,
   arm: BaselineArm,
   baseline: string,
+  argv: readonly string[],
   context: string,
+  around?: StagingApplier,
 ): Promise<RunResult> {
-  const staging = await arm.stage?.(workspace, baseline);
+  const outer = await around?.(workspace.root);
   try {
-    return await runSettled(product, workspace, arm.argv(baseline), context);
+    const staging = await arm.stage?.(workspace, baseline);
+    try {
+      return await runSettled(product, workspace, argv, context);
+    } finally {
+      if (staging !== undefined) await staging.restore();
+    }
   } finally {
-    if (staging !== undefined) await staging.restore();
+    if (outer !== undefined) await outer.restore();
   }
 }
 
@@ -1370,7 +1674,8 @@ function assertGraphDataStillStale(
  * against its snapshot — a difference is a harness error, never a product
  * verdict — with no staging of `.xspec`: the arm's run, its own staging
  * around it, answers the baseline's plain usage error
- * (`expectBaselineUsageError`); T13.3-2's operational path set
+ * (`expectBaselineUsageError`), handed to `visitor` (`visitUsageError`);
+ * where `visitor.home` holds, T13.3-2's operational path set
  * (`isGraphDataKey`) is byte-identical around it — snapshots taken outside
  * the staging — and `check` afterwards still reports the graph-data unit
  * form (`assertGraphDataStillStale`); then recovery on the copy, its
@@ -1381,10 +1686,12 @@ async function baselineWritableCopyArm(
   stale: DirectorySnapshot,
   arm: BaselineArm,
   baseline: string,
+  visitor: ErrorInvocationVisitor,
 ): Promise<void> {
+  const jsonArgv = arm.argv(baseline);
   const label =
     `T14-9 precedence on a writable copy of the stale, session-bearing ` +
-    `workspace: \`${arm.argv(baseline).join(" ")}\` — ${arm.what}`;
+    `workspace: \`${jsonArgv.join(" ")}\` — ${arm.what}`;
   const copy = await TestWorkspace.create();
   try {
     await copyTreeBytes(Buffer.from(stale.root), Buffer.from(copy.root));
@@ -1400,10 +1707,16 @@ async function baselineWritableCopyArm(
             .join(", "),
       );
     }
-    expectBaselineUsageError(
-      await runBaselineArm(product, copy, arm, baseline, label),
-      label,
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runBaselineArm(product, copy, arm, baseline, argv, label);
+    await visitUsageError(
+      visitor,
+      { label, jsonArgv, root: copy.root, run },
+      async () => {
+        expectBaselineUsageError(await run(jsonArgv), label);
+      },
     );
+    if (!visitor.home) return;
     const refreshed = diffSnapshots(
       before,
       await snapshotDirectory(copy.root),
@@ -1440,30 +1753,38 @@ async function baselineWritableCopyArm(
  * staged unwritable by T14-9's graph-data staging (`graphDataRefusal`: the
  * area and every path of T13.3-2's operational path set, the journal, the
  * session directory, and the lock path keeping their modes) before each
- * read's invocation (the reads take no hold) and, for the mutating `review
- * create`, at the seam of 13.5 — after acquisition, before any
- * modification (T14-9; `runHeldWithStaging`), the staging otherwise
- * refusing acquisition's creation of the lock directory first. Every
- * refreshing read of 13.3 and `review create` exit 2 with the
- * error document concerning `.xspec` (14.24: a graph-data write concerns
- * the area); `check` exits 1 with the staleness alone — every finding
- * condition 10 concerning a path with `locations` `[]` and instructing
- * rebuilding, B's generated module `specs/b/B.xspec.ts` among them (14.10,
- * 14, 12.7; `assertEditedBStalenessConcerns`) — `inventory` and
- * `version` exit 0, a `rename --preview` exits 0 writing nothing; the
- * invalid-flag-value and unknown-node usage errors precede the refresh
- * (`code` null), and so does a given baseline's resolution (12.0, 13.3):
- * `impact --base nope` and `impact --base <the workspace's baseline
- * commit>` with the repository's object store refused (T6.3-6(e)'s
- * staging, made around that run alone) each answer the baseline's plain
- * usage error, `code` and `path` null, never `write-failure`
- * (`expectBaselineUsageError`) — and, each on a writable copy of the
- * stale state made before the sweep, leave T13.3-2's operational path set
- * byte-identical, `check` afterwards still reporting the graph-data unit
- * form (`baselineWritableCopyArm`); nothing in the workspace changes
- * around the sweep.
+ * read's invocation (the reads take no hold), made and restored around each
+ * run alone, and, for the mutating `review create`, at the seam of 13.5 —
+ * after acquisition, before any modification (T14-9;
+ * `runHeldWithStaging`), the staging otherwise refusing acquisition's
+ * creation of the lock directory first. Every refreshing read of 13.3 and
+ * `review create` exit 2 with the error document concerning `.xspec`
+ * (14.24: a graph-data write concerns the area); `check` exits 1 with the
+ * staleness alone — every finding condition 10 concerning a path with
+ * `locations` `[]` and instructing rebuilding, B's generated module
+ * `specs/b/B.xspec.ts` among them (14.10, 14, 12.7;
+ * `assertEditedBStalenessConcerns`) — `inventory` and `version` exit 0, a
+ * `rename --preview` exits 0 writing nothing; the invalid-flag-value and
+ * unknown-node usage errors precede the refresh (`code` null), and so does
+ * a given baseline's resolution (12.0, 13.3): `impact --base nope` and
+ * `impact --base <the workspace's baseline commit>` with the repository's
+ * object store refused (T6.3-6(e)'s staging, made around that run alone)
+ * each answer the baseline's plain usage error, `code` and `path` null,
+ * never `write-failure` (`expectBaselineUsageError`) — and, each on a
+ * writable copy of the stale state made before the sweep, leave T13.3-2's
+ * operational path set byte-identical, `check` afterwards still reporting
+ * the graph-data unit form (`baselineWritableCopyArm`); nothing in the
+ * workspace changes around the sweep. Each exit-2 invocation is handed to
+ * `visitor` — a refreshing read with a human form and the held `review
+ * create` through `visitWriteFailure`, nothing modified; the given
+ * baselines through `visitUsageError`; `query`, JSON-only, T14-9's alone —
+ * and the never-reporters, the compare, and the recovery are made where
+ * `visitor.home` holds.
  */
-async function reportersArm(product: ProductBinding): Promise<void> {
+async function reportersArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context =
     "T14-9 reporters: the stale, session-bearing workspace with .xspec unwritable";
   const prepared = await prepareRefusalWorkspace(
@@ -1472,6 +1793,14 @@ async function reportersArm(product: ProductBinding): Promise<void> {
     context,
   );
   const { workspace, baseline } = prepared;
+  // A run on the stale state under T14-9's graph-data staging, made just
+  // before it and restored once it ends, so a compare taken outside it
+  // reads every path.
+  const underGraphData = (
+    argv: readonly string[],
+    label: string,
+  ): Promise<RunResult> =>
+    runStaged(product, workspace, argv, graphDataRefusal(), label);
   try {
     await expectExit(
       product,
@@ -1487,43 +1816,45 @@ async function reportersArm(product: ProductBinding): Promise<void> {
     // each copied before anything runs on it (`.git` included).
     const stale = await snapshotDirectory(workspace.root);
     for (const arm of BASELINE_ARMS) {
-      await baselineWritableCopyArm(product, stale, arm, baseline);
+      await baselineWritableCopyArm(product, stale, arm, baseline, visitor);
     }
 
-    const staging = await graphDataRefusal()(workspace.root);
-    try {
-      const reporters: readonly (readonly string[])[] = [
-        ["ids", "--json"],
-        ["show", SHOW_IDENTITY, "--json"],
-        ["coverage", "--json"],
-        ["impact", "--base", baseline, "--json"],
-        ["review", "status", SESSION, "--json"],
-        ["query", "nodes"],
-        ["occurrences"],
-        ["view", RENAME_A_PATH],
-        ["at", RENAME_A_PATH, "0"],
-      ];
-      for (const argv of reporters) {
-        const label = `${context} \`${argv.join(" ")}\``;
-        expectRefusal(
-          await runSettled(product, workspace, argv, label),
-          [GRAPH_DATA_AREA],
-          `${label} — a refreshing read of 13.3 whose graph-data write the ` +
-            `environment refuses reports the write failure concerning the ` +
-            `graph-data area, never a path inside it, and answers nothing ` +
-            `(SPEC 14.24, 11.6, 13.3)`,
-        );
-      }
+    const reporters: readonly (readonly string[])[] = [
+      ["ids", "--json"],
+      ["show", SHOW_IDENTITY, "--json"],
+      ["coverage", "--json"],
+      ["impact", "--base", baseline, "--json"],
+      ["review", "status", SESSION, "--json"],
+      ["query", "nodes"],
+      ["occurrences"],
+      ["view", RENAME_A_PATH],
+      ["at", RENAME_A_PATH, "0"],
+    ];
+    for (const argv of reporters) {
+      const label = `${context} \`${argv.join(" ")}\``;
+      const run = (runArgv: readonly string[]): Promise<RunResult> =>
+        underGraphData(runArgv, label);
+      await visitWriteFailure(
+        visitor,
+        { label, jsonArgv: argv, root: workspace.root, run, unchanged: true },
+        async () => {
+          expectRefusal(
+            await run(argv),
+            [GRAPH_DATA_AREA],
+            `${label} — a refreshing read of 13.3 whose graph-data write the ` +
+              `environment refuses reports the write failure concerning the ` +
+              `graph-data area, never a path inside it, and answers nothing ` +
+              `(SPEC 14.24, 11.6, 13.3)`,
+          );
+        },
+      );
+    }
 
+    if (visitor.home) {
       // Never-reporters on the same state (14.24: never `check` or any other
       // command that writes nothing; 6.6: a preview writes nothing).
       const checkLabel = `${context} \`check --json\``;
-      const checkResult = await runSettled(
-        product,
-        workspace,
-        ["check", "--json"],
-        checkLabel,
-      );
+      const checkResult = await underGraphData(["check", "--json"], checkLabel);
       assertExitCode(
         checkResult,
         1,
@@ -1554,20 +1885,24 @@ async function reportersArm(product: ProductBinding): Promise<void> {
         checkFindings,
         `${checkLabel} — the staleness of B's edited text`,
       );
-      await runJson(
+      await stagedDocument(
         product,
         workspace,
         ["inventory"],
+        0,
         `${context} \`inventory\` — \`inventory\` parses no sources and ` +
           `writes nothing: exit 0 with its answer on the stale workspace ` +
           `whose graph-data area is unwritable (SPEC 14.24, 11.6)`,
+        graphDataRefusal(),
       );
-      await runJson(
+      await stagedDocument(
         product,
         workspace,
         ["version"],
+        0,
         `${context} \`version\` — \`version\` writes nothing and loads no ` +
           `configuration: exit 0 (SPEC 14.24, 12.6)`,
+        graphDataRefusal(),
       );
       const previewArgv = [
         "rename",
@@ -1578,54 +1913,63 @@ async function reportersArm(product: ProductBinding): Promise<void> {
         "--json",
       ];
       const previewLabel = `${context} \`${previewArgv.join(" ")}\``;
-      const preview = await runSettled(
-        product,
-        workspace,
-        previewArgv,
-        previewLabel,
-      );
       assertExitCode(
-        preview,
+        await underGraphData(previewArgv, previewLabel),
         0,
         `${previewLabel} — a preview writes nothing — no sources, no ` +
           `journal, no derived files, no graph data — so it exits 0 on the ` +
           `valid, stale workspace, refreshing nothing (SPEC 6.6, 14.24)`,
       );
+    }
 
-      // Precedence: the checks of 12.0 precede the write (and the refresh).
-      expectPlainUsageError(
-        await runSettled(
-          product,
-          workspace,
-          ["query", "nodes", "--group", CODE_GROUP],
-          `${context} \`query nodes --group ${CODE_GROUP}\``,
-        ),
+    // Precedence: the checks of 12.0 precede the write (and the refresh) —
+    // `query`'s, JSON-only, T14-9's alone (`visitExitTwo`).
+    const missing = `${RENAME_A_PATH}#missing`;
+    const precedence: readonly (readonly [readonly string[], string])[] = [
+      [
+        ["query", "nodes", "--group", CODE_GROUP],
         `an invalid flag value — a code group's name under \`--group\` (SPEC 11.1)`,
-        `${context} \`query nodes --group ${CODE_GROUP}\``,
+      ],
+      [
+        ["query", "node", missing],
+        "an unknown node identity named in an argument (SPEC 12.0)",
+      ],
+    ];
+    for (const [argv, why] of precedence) {
+      const label = `${context} \`${argv.join(" ")}\``;
+      const run = (runArgv: readonly string[]): Promise<RunResult> =>
+        underGraphData(runArgv, label);
+      await visitUsageError(
+        visitor,
+        { label, jsonArgv: argv, root: workspace.root, run },
+        async () => {
+          expectPlainUsageError(await run(argv), why, label);
+        },
       );
-      const missing = `${RENAME_A_PATH}#missing`;
-      expectPlainUsageError(
-        await runSettled(
+    }
+    // A given baseline's resolution precedes the gate, and so the refresh
+    // (SPEC 12.0, 13.3): each arm's own staging made around its run, inside
+    // the graph-data staging's.
+    for (const arm of BASELINE_ARMS) {
+      const jsonArgv = arm.argv(baseline);
+      const label = `${context} \`${jsonArgv.join(" ")}\` — ${arm.what}`;
+      const run = (argv: readonly string[]): Promise<RunResult> =>
+        runBaselineArm(
           product,
           workspace,
-          ["query", "node", missing],
-          `${context} \`query node ${missing}\``,
-        ),
-        "an unknown node identity named in an argument (SPEC 12.0)",
-        `${context} \`query node ${missing}\``,
-      );
-      // A given baseline's resolution precedes the gate, and so the refresh
-      // (SPEC 12.0, 13.3): each arm's own staging made around its run, the
-      // graph-data staging standing.
-      for (const arm of BASELINE_ARMS) {
-        const label = `${context} \`${arm.argv(baseline).join(" ")}\` — ${arm.what}`;
-        expectBaselineUsageError(
-          await runBaselineArm(product, workspace, arm, baseline, label),
+          arm,
+          baseline,
+          argv,
           label,
+          graphDataRefusal(),
         );
-      }
-    } finally {
-      await staging.restore();
+      await visitUsageError(
+        visitor,
+        { label, jsonArgv, root: workspace.root, run },
+        async () => {
+          expectBaselineUsageError(await run(jsonArgv), label);
+        },
+      );
     }
 
     // The mutating `review create` on the same state, the same staging
@@ -1641,24 +1985,39 @@ async function reportersArm(product: ProductBinding): Promise<void> {
       "--json",
     ];
     const createLabel = `${context} \`${createArgv.join(" ")}\` held at the seam`;
-    expectRefusal(
-      await runHeldWithStaging(
+    const runCreate = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
         product,
         workspace,
-        createArgv,
+        argv,
         "hold-t14-9-reporters.tmp",
         graphDataRefusal(),
         createLabel,
-      ),
-      [GRAPH_DATA_AREA],
-      `${createLabel} — a review mutator refreshes before its session write ` +
-        `(13.5): with \`.xspec\` staged unwritable once it has acquired, its ` +
-        `refused graph-data write reports the write failure concerning the ` +
-        `graph-data area, never a path inside it — nor the lock path, ` +
-        `release's refused deletion of the emptied lock directory changing ` +
-        `no outcome — and no session is created (SPEC 14.24, 11.6, 13.3, ` +
-        `13.5)`,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: createLabel,
+        jsonArgv: createArgv,
+        root: workspace.root,
+        run: runCreate,
+        unchanged: true,
+      },
+      async () => {
+        expectRefusal(
+          await runCreate(createArgv),
+          [GRAPH_DATA_AREA],
+          `${createLabel} — a review mutator refreshes before its session write ` +
+            `(13.5): with \`.xspec\` staged unwritable once it has acquired, its ` +
+            `refused graph-data write reports the write failure concerning the ` +
+            `graph-data area, never a path inside it — nor the lock path, ` +
+            `release's refused deletion of the emptied lock directory changing ` +
+            `no outcome — and no session is created (SPEC 14.24, 11.6, 13.3, ` +
+            `13.5)`,
+        );
+      },
     );
+    if (!visitor.home) return;
     assertSnapshotsEqual(
       staged,
       await snapshotWorkspace(workspace.root),
@@ -1817,11 +2176,16 @@ async function validationRefusalArm(product: ProductBinding): Promise<void> {
 /**
  * Precedence, the hold file: `--test-hold` naming a path in a read-only
  * directory (staged under T14-9's path-form discipline, beside the
- * workspace) — the hold file cannot be created, 13.5's usage error: exit 2,
- * the error document with `code` null, never this condition; nothing
- * modified.
+ * workspace, just before each run and restored once it ends) — the hold
+ * file cannot be created, 13.5's usage error: exit 2, the error document
+ * with `code` null, never this condition; nothing modified. The run is
+ * handed to `visitor` (`visitUsageError`); the compare and the recovery
+ * where `visitor.home` holds.
  */
-async function holdFileArm(product: ProductBinding): Promise<void> {
+async function holdFileArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context =
     "T14-9 precedence: `rename specs/b/B.mdx b b2 --test-hold <read-only directory>/hold.tmp --json`";
   const prepared = await prepareRefusalWorkspace(
@@ -1834,22 +2198,28 @@ async function holdFileArm(product: ProductBinding): Promise<void> {
     const holdDir = path.join(workspace.tempRoot, "t14-9-read-only");
     await fsp.mkdir(holdDir);
     const hold = path.join(holdDir, "hold.tmp");
-    const staging = await stageWriteRefusal(hold);
-    try {
-      expectPlainUsageError(
-        await runSettled(
-          product,
-          workspace,
-          [...RENAME_B_TO_B2, "--test-hold", hold],
+    const jsonArgv = [...RENAME_B_TO_B2, "--test-hold", hold];
+    const run = async (argv: readonly string[]): Promise<RunResult> => {
+      const staging = await stageWriteRefusal(hold);
+      try {
+        return await runSettled(product, workspace, argv, context);
+      } finally {
+        await staging.restore();
+      }
+    };
+    await visitUsageError(
+      visitor,
+      { label: context, jsonArgv, root: workspace.root, run },
+      async () => {
+        expectPlainUsageError(
+          await run(jsonArgv),
+          "a hold file that cannot be created — the usage error of 13.5, " +
+            "never a write of 14.24 (SPEC 13.5, 14.24)",
           context,
-        ),
-        "a hold file that cannot be created — the usage error of 13.5, " +
-          "never a write of 14.24 (SPEC 13.5, 14.24)",
-        context,
-      );
-    } finally {
-      await staging.restore();
-    }
+        );
+      },
+    );
+    if (!visitor.home) return;
     assertSnapshotsEqual(
       prepared.before,
       await snapshotWorkspace(workspace.root),
@@ -1896,13 +2266,22 @@ interface AcquisitionWriteArm {
    */
   readonly unbuilt?: true;
   /**
-   * Stage it before the invocation, verified on the harness itself; its
-   * `restore()` reinstates every mode the staging changed (idempotent).
+   * The staging's modes (and what it places at the lock path), made just
+   * before each run of the command and verified on the harness itself; its
+   * `restore()`, once the run ends, reinstates every mode the staging
+   * changed (idempotent). Absent for the area's own occupant, which
+   * `occupy` stages.
    */
-  readonly stage: (
+  readonly stage?: (workspace: TestWorkspace) => Promise<AcquisitionStaging>;
+  /**
+   * A byte staging made once before the invocation, nothing to restore —
+   * part of the state every run of the command meets: the plain file at
+   * `.xspec` in place of the area's directory (`obstructArea`).
+   */
+  readonly occupy?: (
     workspace: TestWorkspace,
     context: string,
-  ) => Promise<AcquisitionStaging>;
+  ) => Promise<void>;
   /**
    * Its undoing beyond the permissions, before recovery: the occupant of
    * the area's own path deleted by hand (SPEC 13.4: the remedy for an
@@ -1966,17 +2345,12 @@ const ACQUISITION_WRITE_ARMS: readonly AcquisitionWriteArm[] = [
     staging: "`.xspec` a plain file",
     path: AREA_PATH,
     operation: 0,
-    stage: async (workspace, context) => {
+    occupy: async (workspace, context) => {
       await obstructArea(
         workspace,
         { kind: "file", content: AREA_OCCUPANT_BYTES },
         context,
       );
-      // No mode changed: nothing to restore or reapply.
-      return {
-        restore: async () => undefined,
-        reapply: async () => undefined,
-      };
     },
     remedy: async (workspace) => {
       await fsp.unlink(path.join(workspace.root, AREA_PATH));
@@ -2002,20 +2376,25 @@ function acquisitionOperation(index: number): SessionOperation {
 /**
  * One acquisition-write arm (TEST-SPEC T14-9): on a fresh CONF-CORE-shaped
  * workspace — T13.5-10's session staging, or unbuilt where the arm says so
- * (`resolve` and `split` then naming the absent session `s`) — the arm
- * staged before the invocation, verified on the harness itself; its
- * command under `--json`, settled; the staging's modes restored once it
- * exits → the 14.24 contract (`expectRefusal`: exit 2, the error document
- * as stdout, `code` `"write-failure"`, `path` the arm's concerned path
+ * (`resolve` and `split` then naming the absent session `s`) — the area's
+ * occupant, where the arm stages one, put in place once; its command under
+ * `--json`, settled, the arm's staging of modes made just before the run
+ * and verified on the harness itself, its modes restored once it exits →
+ * the 14.24 contract (`expectRefusal`: exit 2, the error document as
+ * stdout, `code` `"write-failure"`, `path` the arm's concerned path
  * exactly, a non-empty stderr); nothing modified — every path but the lock
- * path byte-identical, the compare bracketing this run alone (H-6: the lock
- * path a mutating run touched left out, its residue T13.5-10(d)'s subject;
+ * path byte-identical, the compare bracketing this run and its staging
+ * alone (H-6: the lock path a mutating run touched, where the staging also
+ * places its leftovers, left out, its residue T13.5-10(d)'s subject;
  * `.xspec` itself compared); and recovery — the arm's remedy where it has
- * one, then `build` exits 0 and `check` is clean (12.1, 13.4).
+ * one, then `build` exits 0 and `check` is clean (12.1, 13.4). The run is
+ * handed to `visitor` (`visitWriteFailure`), nothing modified; the remedy
+ * and the recovery where `visitor.home` holds.
  */
 async function acquisitionWriteRun(
   product: ProductBinding,
   arm: AcquisitionWriteArm,
+  visitor: ErrorInvocationVisitor,
 ): Promise<void> {
   const operation = acquisitionOperation(arm.operation);
   const context =
@@ -2027,42 +2406,46 @@ async function acquisitionWriteRun(
       arm.unbuilt === true
         ? ABSENT_SESSION_ITEMS
         : await stageArmWorkspace(product, workspace, context);
-    const staging = await arm.stage(workspace, context);
-    let before: DirectorySnapshot;
-    let result: RunResult;
-    try {
-      before = await snapshotWorkspace(workspace.root);
-      result = await runSettled(
-        product,
-        workspace,
-        [...operation.argv(items), "--json"],
-        context,
-      );
-    } finally {
-      await staging.restore();
-    }
-    expectRefusal(
-      result,
-      [arm.path],
-      arm.path === LOCK_PATH
-        ? `${context} — a write of acquisition the environment refuses ` +
-            `concerns the lock path \`${LOCK_PATH}\`, never an entry's or ` +
-            `a leftover's own path, its entries' names being opaque (SPEC ` +
-            `14.24, 13.5, 13.4)`
-        : `${context} — a write of acquisition producing the area's ` +
-            `directory, or obstructed by the area's own path holding ` +
-            `anything but a directory, concerns that path, ` +
-            `\`${AREA_PATH}\` (SPEC 14.24, 13.5)`,
+    await arm.occupy?.(workspace, context);
+    const jsonArgv = [...operation.argv(items), "--json"];
+    const run = async (argv: readonly string[]): Promise<RunResult> => {
+      const staging = await arm.stage?.(workspace);
+      try {
+        return await runSettled(product, workspace, argv, context);
+      } finally {
+        await staging?.restore();
+      }
+    };
+    await visitWriteFailure(
+      visitor,
+      { label: context, jsonArgv, root: workspace.root, run, unchanged: true },
+      async () => {
+        const before = await snapshotWorkspace(workspace.root);
+        expectRefusal(
+          await run(jsonArgv),
+          [arm.path],
+          arm.path === LOCK_PATH
+            ? `${context} — a write of acquisition the environment refuses ` +
+                `concerns the lock path \`${LOCK_PATH}\`, never an entry's or ` +
+                `a leftover's own path, its entries' names being opaque (SPEC ` +
+                `14.24, 13.5, 13.4)`
+            : `${context} — a write of acquisition producing the area's ` +
+                `directory, or obstructed by the area's own path holding ` +
+                `anything but a directory, concerns that path, ` +
+                `\`${AREA_PATH}\` (SPEC 14.24, 13.5)`,
+        );
+        assertSnapshotsEqual(
+          before,
+          await snapshotWorkspace(workspace.root),
+          `${context}: modifies nothing — acquisition precedes every ` +
+            `modification and the command stops at the refused write, so every ` +
+            `path but the lock path is byte-identical, the area's own path ` +
+            `included (SPEC 13.5, 14.24; H-6: the lock path, which acquisition ` +
+            `and release touch, left out)`,
+        );
+      },
     );
-    assertSnapshotsEqual(
-      before,
-      await snapshotWorkspace(workspace.root),
-      `${context}: modifies nothing — acquisition precedes every ` +
-        `modification and the command stops at the refused write, so every ` +
-        `path but the lock path is byte-identical, the area's own path ` +
-        `included (SPEC 13.5, 14.24; H-6: the lock path, which acquisition ` +
-        `and release touch, left out)`,
-    );
+    if (!visitor.home) return;
     if (arm.remedy !== undefined) await arm.remedy(workspace);
     await assertRecovers(product, workspace, context);
   } finally {
@@ -2072,16 +2455,64 @@ async function acquisitionWriteRun(
 
 /**
  * T14-9's acquisition-write arms, in turn (TEST-SPEC T14-9: acquisition's
- * writes, staged before the invocation, T13.5-10(a), (d)). Exported so
- * scratch probes can run them alone, against the CONF-CORE reference among
- * others; Linux leg only, as T14-9's other arms (E-1).
+ * writes, staged before the invocation, T13.5-10(a), (d)), each invocation
+ * handed to `visitor` — `ERROR_INVOCATION_HOME` by default, T14-9's own
+ * checks. Exported so scratch probes can run them alone, against the
+ * CONF-CORE reference among others; Linux leg only, as T14-9's other arms
+ * (E-1).
  */
 export async function runT149AcquisitionArms(
   product: ProductBinding,
+  visitor: ErrorInvocationVisitor = ERROR_INVOCATION_HOME,
 ): Promise<void> {
   for (const arm of ACQUISITION_WRITE_ARMS) {
-    await acquisitionWriteRun(product, arm);
+    await acquisitionWriteRun(product, arm, visitor);
   }
+}
+
+// ---------------------------------------------------------------------------
+// T14-9's exit-2 stagings, for T12.0-15's exit-2 family
+// ---------------------------------------------------------------------------
+
+/**
+ * T14-9's stagings, in T14-9's order (TEST-SPEC T12.0-15's exit-2 family:
+ * "T14-9's write failure"): the concerned-path arms — (a), (b), (c)'s move
+ * and rename, (d)'s two writes, (e), (f), (g) in both byte orders, and
+ * (h)'s `build` and rename — then the reporter sweep, its precedence arms,
+ * and the held `review create`; the failing twin and the validation
+ * refusal, which exit 1 with no write attempted and hand nothing over,
+ * where `visitor.home` holds alone; the hold file; and acquisition's
+ * writes — each exit-2 invocation with a human form handed to `visitor`
+ * (`visitWriteFailure`, `visitUsageError`), every other run and assertion
+ * made where `visitor.home` holds. T14-9's body runs it with
+ * `ERROR_INVOCATION_HOME`; T12.0-15 runs it with its human twin
+ * (section-12.0-iv.ts). Linux leg only (E-1): elsewhere nothing is staged
+ * or handed over.
+ */
+export async function runT149WriteFailureStagings(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  if (!WRITE_REFUSALS_STAGED) return;
+  await rewrittenSourceArm(product, visitor);
+  await journalArm(product, visitor);
+  await markdownArm(product, visitor);
+  await renameMarkdownArm(product, visitor);
+  await originRemovalArm(product, visitor);
+  await destinationProductionArm(product, visitor);
+  await sessionFileArm(product, visitor);
+  await derivedPathArm(product, visitor);
+  for (const order of CREATED_TARGET_ORDERS) {
+    await createdTargetFileArm(product, order, visitor);
+  }
+  await removalOwedAloneArms(product, visitor);
+  await reportersArm(product, visitor);
+  if (visitor.home) {
+    await failingTwinArm(product);
+    await validationRefusalArm(product);
+  }
+  await holdFileArm(product, visitor);
+  await runT149AcquisitionArms(product, visitor);
 }
 
 // ---------------------------------------------------------------------------
@@ -2097,23 +2528,7 @@ const T14_9 = defineProductTest({
     // are not staged (the NU3_STAGED pattern of section-11.5) and no other
     // leg selects T14-9 (E-6).
     if (!WRITE_REFUSALS_STAGED) return;
-    await rewrittenSourceArm(product);
-    await journalArm(product);
-    await markdownArm(product);
-    await renameMarkdownArm(product);
-    await originRemovalArm(product);
-    await destinationProductionArm(product);
-    await sessionFileArm(product);
-    await derivedPathArm(product);
-    for (const order of CREATED_TARGET_ORDERS) {
-      await createdTargetFileArm(product, order);
-    }
-    await removalOwedAloneArms(product);
-    await reportersArm(product);
-    await failingTwinArm(product);
-    await validationRefusalArm(product);
-    await holdFileArm(product);
-    await runT149AcquisitionArms(product);
+    await runT149WriteFailureStagings(product, ERROR_INVOCATION_HOME);
   },
 });
 
@@ -2422,58 +2837,6 @@ function readRefusalOfFileAt(rel: string): StagingApplier {
 function readRefusalOfDirectoryAt(rel: string): StagingApplier {
   return async (root) =>
     await stageReadRefusalOfDirectory(path.join(root, rel));
-}
-
-/**
- * SPEC 11's JSON-only surfaces among the commands T14-10's exit-2 stagings
- * run: each emits one JSON document whatever its flags (SPEC 11; H-5), so
- * an invocation of one has no human form to twin (TEST-SPEC T12.0-15).
- */
-const JSON_ONLY_SURFACES: ReadonlySet<string> = new Set([
-  "inventory",
-  "occurrences",
-  "view",
-  "at",
-]);
-
-/** The parts of an exit-2 invocation its staging gives `visitExitTwo`. */
-interface ExitTwoInvocation {
-  /** Leads every diagnosis of the invocation. */
-  readonly label: string;
-  /** The command line as T14-10 runs it, `--json` among its tokens. */
-  readonly jsonArgv: readonly string[];
-  /** The workspace root whose tree the invocation leaves unchanged. */
-  readonly root: string;
-  /** A run at the invocation's pre-invocation state, its staging around it. */
-  readonly run: (argv: readonly string[]) => Promise<RunResult>;
-  /** What the compare under `root` leaves out (T14-10(i)'s lock path). */
-  readonly exclude?: SnapshotOptions["exclude"];
-}
-
-/**
- * Hand one exit-2 invocation of T14-10's stagings to `visitor` (support.ts
- * `ErrorInvocationVisitor`; TEST-SPEC T12.0-15's exit-2 family) at the
- * state it runs on — its human form the same command line without its
- * `--json` token, `home` T14-10's own check of it — or, a JSON-only
- * surface's ({@link JSON_ONLY_SURFACES}), which has no human form, run
- * `home` alone where `visitor.home` holds: that run is T14-10's.
- */
-async function visitExitTwo(
-  visitor: ErrorInvocationVisitor,
-  invocation: ExitTwoInvocation,
-  home: () => Promise<void>,
-): Promise<void> {
-  if (JSON_ONLY_SURFACES.has(invocation.jsonArgv[0] ?? "")) {
-    if (visitor.home) await home();
-    return;
-  }
-  await visitor.error(
-    {
-      ...invocation,
-      argv: invocation.jsonArgv.filter((token) => token !== "--json"),
-    },
-    home,
-  );
 }
 
 /**

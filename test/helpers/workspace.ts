@@ -1710,8 +1710,12 @@ function assertValidBytePath(bytes: Buffer): void {
   }
 }
 
-/** Best-effort recursive chmod so `rm` can delete read-only entries. */
-async function makeTreeWritable(dir: Buffer): Promise<void> {
+/**
+ * Best-effort recursive chmod so `rm` can delete read-only entries: the
+ * disposal's fallback, and T12.0-15's when it discards a fresh copy of a
+ * state made at a workspace root (section-12.0-iv.ts).
+ */
+export async function makeTreeWritable(dir: Buffer): Promise<void> {
   await fsp.chmod(dir, 0o700).catch(() => undefined);
   const names = await fsp
     .readdir(dir, { encoding: "buffer" })
