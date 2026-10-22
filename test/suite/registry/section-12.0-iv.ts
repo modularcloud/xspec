@@ -11,12 +11,11 @@
 // T5.6-6 and T9-1 through T9.3-3 — and, of the `review` family, `list`
 // (T10.7-5, a corrupt session's report included), `status` (T10.7-6),
 // `next` (T10.7-7: the item returned, and the fully-resolved report),
-// `show` (T10.7-8: the full item with its text payload), and `status`,
-// `next`, `show`, `resolve`, and `split` naming each corrupt session of
-// T10.1-4; the rest of the `review` family (the refusals of T10.7-1,
-// T10.7-9, and T10.7-10), the `coverage`/`ids`/`show` family, and the
-// exit-2 family are added beside them by the plan written at 2a2b94e's
-// FIX_PLAN Tasks 133–135.
+// `show` (T10.7-8: the full item with its text payload), the refusals of
+// T10.7-1, T10.7-9, and T10.7-10, and `status`, `next`, `show`, `resolve`,
+// and `split` naming each corrupt session of T10.1-4; the
+// `coverage`/`ids`/`show` family and the exit-2 family are added beside
+// them by the plan written at 2a2b94e's FIX_PLAN Tasks 134 and 135.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspaces (H-1), drives the product strictly as a subprocess (H-2),
@@ -244,6 +243,39 @@
 //   (10.2: its composition unpinned), so its presence alone is asked (H-3).
 //   The reads' content is the home tests' (each pins it); this test
 //   compares the two forms.
+// - The `review` family's refusals (`runReviewRefusalTwins`, the findings
+//   twin above on fresh copies, exit 1): T10.7-1's staging
+//   (section-10.7-i.ts `runT1071Stagings`: `create --name s` naming the
+//   existing valid session s, and naming s under each of T10.1-4's
+//   corruptions — unparseable bytes, an invariant violation, a directory,
+//   a symbolic link to a valid session — `create --name Foo` beside a
+//   corrupt foo.json, and on the Linux leg the three case pairs: both
+//   corrupt, `--name Foo`; foo.json valid and FOO.json corrupt, `--name
+//   Foo` and `--name foo`; both valid, `--name Foo`), T10.7-9's
+//   (section-10.7-ii.ts `runT1079Stagings`: the path-blocks fixture's
+//   `split` of N's parent-consistency item and of N.a's leaf item, the
+//   audit fixture's of N's parent-consistency item and of s's leaf item,
+//   and Q's item once its only child is deleted), and T10.7-10's
+//   (`runT10710Stagings`: `resolve` of p's blocked item), each run with a
+//   refusal visitor (support.ts `ReviewRefusalVisitor`) whose `home` is
+//   false: every refused invocation handed to the twin in place of the
+//   home test's own check, the stagings' other assertions — the arms the
+//   home tests assert beside the refusals, T10.7-9's (f) and (g), the
+//   later re-derivations — left to the home tests, and their workspaces,
+//   sessions, premises, and the items the refusals name kept, so the run
+//   reaches each refusal at the state its home test refuses at (the built
+//   product fails T10.7-1 at case pair (i)'s count and T10.7-9 at the
+//   path-blocks fixture's (b), neither asserted here). Each refusal's two
+//   forms run each on its own fresh copy (a refused `create`, `split`, or
+//   `resolve` is still a mutating subcommand's run, 13.5): the human
+//   findings report carries every refusal finding's code, locations,
+//   concerned path, and identities as its `--json` twin's (14: a refusal
+//   renders as precisely as a finding) — a code-less refusal's absent code
+//   and path, a corruption's condition-21 code and the corrupt session's
+//   own file as its concerned path (10.7: the corruption reported in a
+//   `create` refusal's place, one finding per corrupt match) — whatever
+//   the twin reports: the refusals and corruptions themselves stay the
+//   home tests' premises.
 // - The subcommands naming each corrupt session of T10.1-4: every corrupt
 //   state (section-10.1.ts `T10_1_4_CORRUPT_STATES`), each staged on a
 //   fresh workspace as T10.1-4 stages it, then each subcommand of
@@ -319,8 +351,17 @@ import {
   T10_1_4_CORRUPT_STATES,
   t1014NamingSubcommands,
 } from "./section-10.1.js";
-import { runT1075Listings, runT1076Stages } from "./section-10.7-i.js";
-import { runT1077Reads, runT1078ShowReads } from "./section-10.7-ii.js";
+import {
+  runT1071Stagings,
+  runT1075Listings,
+  runT1076Stages,
+} from "./section-10.7-i.js";
+import {
+  runT1077Reads,
+  runT1078ShowReads,
+  runT1079Stagings,
+  runT10710Stagings,
+} from "./section-10.7-ii.js";
 import type { RefusalStagingTwin } from "./section-6.6.js";
 import { runT663RefusalStagings } from "./section-6.6.js";
 import { runT1222Families } from "./section-12.1-12.2.js";
@@ -328,6 +369,7 @@ import { runT1333GateStagings } from "./section-13.3.js";
 import { T14_11_FIXTURES } from "./section-14.js";
 import { T9_IMPACT_STAGINGS } from "./section-9.js";
 import { T9_3_IMPACT_STAGINGS } from "./section-9.3.js";
+import type { ReviewRefusalVisitor } from "./support.js";
 import { buildOk, expectExit, runCli } from "./support.js";
 
 // ---------------------------------------------------------------------------
@@ -1516,6 +1558,40 @@ async function runShowTwins(product: ProductBinding): Promise<void> {
   );
 }
 
+// ---------------------------------------------------------------------------
+// `review`: the refusals of T10.7-1, T10.7-9, and T10.7-10
+// ---------------------------------------------------------------------------
+
+/**
+ * The `review` family's refusals (the module header): T10.7-1's staging
+ * (section-10.7-i.ts `runT1071Stagings`), T10.7-9's (section-10.7-ii.ts
+ * `runT1079Stagings`), and T10.7-10's (`runT10710Stagings`), each run with
+ * a refusal visitor whose `home` is false — the stagings' other assertions
+ * the home tests' own — every refused `create`, `split`, and `resolve` it
+ * reaches handed to the findings twin in place of the home test's check:
+ * exit 1, the staging's premise (a refused review operation, 10.7, as the
+ * home test pins it), each form on its own fresh copy of the state (a
+ * refused mutating subcommand's run, 13.5), the human findings report
+ * carrying the refusal's every finding as its `--json` twin's.
+ */
+async function runReviewRefusalTwins(product: ProductBinding): Promise<void> {
+  const visitor: ReviewRefusalVisitor = {
+    home: false,
+    refusal: async (workspace, refusal) => {
+      await expectHumanFindingsTwin(
+        product,
+        workspace,
+        refusal.argv,
+        refusal.label,
+        { state: "fresh", expectedExit: 1 },
+      );
+    },
+  };
+  await runT1071Stagings(product, visitor, "T12.0-15 (T10.7-1)");
+  await runT1079Stagings(product, visitor, "T12.0-15 (T10.7-9)");
+  await runT10710Stagings(product, visitor, "T12.0-15 (T10.7-10)");
+}
+
 /**
  * The subcommands naming each corrupt session of T10.1-4 (the module
  * header): every corrupt state (section-10.1.ts `T10_1_4_CORRUPT_STATES`),
@@ -1562,7 +1638,7 @@ async function runCorruptNamingTwins(product: ProductBinding): Promise<void> {
 const T12_0_15 = defineProductTest({
   id: "T12.0-15",
   title:
-    "human-form reports — this registration's families: `build` and `check` on T14-11's per-condition fixtures, T12.2-2's per-family workspaces, and T1.5-2's every arm (its located arm included), and each gated read and mutating `review` subcommand on T13.3-3's stagings but `query` (JSON-only), each run again without `--json` on the same pre-invocation state (a fresh copy of it for a mutating command or a run that writes), exit as its `--json` twin, standard error byte-identical, its report — decoded by the human findings decoder — carrying every finding's stable code, locations (each file and its range's two byte offsets), concerned path, and identities as its twin does, order free, messages never compared, a human report printing nothing or omitting or changing any datum failing; and on T1.5-2's arms every reported path presented as 12.0 fixes, whatever the twin carries — the non-UTF-8 path (the condition-19 finding's concerned path, the located arm's location file) explicitly marked, the adapter recovering its exact bytes by the mark alone, each such report byte-identical across two runs on the same state, and every valid-UTF-8 path (the `#` and U+FFFD arms') a plain string, never marked; `rename` and `move` — the performed reports of T6.4-1's rename and T6.5-1's five file moves, staged as their home tests stage them and built, each form run on its own fresh copy of the built state, the human run exiting 0 as its `--json` twin, standard error byte-identical, its report — decoded by the human performed-report decoder — carrying the applied mapping the form-exact performed-operation document carries, every pair's `from` and `to` identity, a multiset, order free, a pair omitted, changed, or listed beside the twin's failing (the previews are T6.6-7's); and the refused real operations of T6.4-3, T6.4-6, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7 — T6.4-6's invalid-workspace arm and every refusal of T6.6-3's refusal stagings, staged as T6.6-3 stages each from its home module, T6.4-6's refused-writes staging among them — each form on its own fresh copy of the state, exit 1, the human findings report carrying every refusal finding's code, locations, concerned path, and identities, and the invalid-workspace refusal's findings each under its own condition's code, a human refusal printing nothing or omitting any of them failing; `impact` — every `impact --base <ref>` read of the stagings of T5.6-1 through T5.6-6 and T9-1 through T9.3-3, run as their home tests run them, the read and its human twin on the same built state, exit 0 each, standard error byte-identical, the human report — decoded by the human impact decoder — carrying each category with its attribution, the collapsed chains, deleted nodes under their baseline identities, and each impacted location under its group with its witness edge and path as the `--json` twin does, order free, a datum omitted, changed, or misplaced failing; `review` — the human `review list` at T10.7-5's clean and corrupt listings and `review status s` at T10.7-6's four stages, staged as their home tests stage them, each run on the same built state as its `--json` twin and exiting as it (`list` 1 iff a session is corrupt, else 0; `status` 0), standard error byte-identical, the human report — decoded by the human review-list or review-status decoder — carrying every session's name with its strategy and item counts by stored status, or its corruption in their place, and each corrupt session's condition-21 finding, or every item's id, kind, scope, status, and blocked state and the totals by status, the sessions and the items in the order 10.7 fixes, a datum omitted, changed, or misordered failing; the human `review next s` at each read of T10.7-7's staging — the order walk's four items and its fully-resolved report, the full-resolution arm's fully-resolved report and new section's item, the empty session's fully-resolved report, and the payload walk's four reads — and the human `review show s <item>` at T10.7-8's two reads, x.k's item and the root's, staged as their home tests stage them, each run on the same built state as its `--json` twin, exit 0 each, standard error byte-identical, the human report — decoded by the human review-next or review-item decoder — reporting the session fully resolved exactly where the twin does, else carrying the item's id, kind, status, blocked state, blockers, note, and a reason (its wording never compared; `next --json`'s self-contained payload the JSON form's alone), and for `show` also the scope node's identity, presence, source range, and text, each context and origin entry with its presence, range, text, and before and after sides, and the `baseline` and `current` recorded states, each node's presence and hashes or absent marker, order free, a datum omitted or changed failing; and `status`, `next`, `show`, `resolve`, and `split` naming the corrupt session of each of T10.1-4's states, staged as T10.1-4 stages them, exit 1, each mutating subcommand's two forms on their own fresh copies, the human findings report carrying the condition-21 finding's code and concerned path as its twin does; the rest of the `review` family (the refusals), the `coverage`/`ids`/`show` family, and the exit-2 family follow (the plan written at 2a2b94e, FIX_PLAN Tasks 133–135) (SPEC 12.0, 12.7, 14, 1.7, 6.4, 6.5, 5.6, 9.1, 9.2, 9.3, 10.1, 10.7, 14.21; H-3, H-6)",
+    "human-form reports — this registration's families: `build` and `check` on T14-11's per-condition fixtures, T12.2-2's per-family workspaces, and T1.5-2's every arm (its located arm included), and each gated read and mutating `review` subcommand on T13.3-3's stagings but `query` (JSON-only), each run again without `--json` on the same pre-invocation state (a fresh copy of it for a mutating command or a run that writes), exit as its `--json` twin, standard error byte-identical, its report — decoded by the human findings decoder — carrying every finding's stable code, locations (each file and its range's two byte offsets), concerned path, and identities as its twin does, order free, messages never compared, a human report printing nothing or omitting or changing any datum failing; and on T1.5-2's arms every reported path presented as 12.0 fixes, whatever the twin carries — the non-UTF-8 path (the condition-19 finding's concerned path, the located arm's location file) explicitly marked, the adapter recovering its exact bytes by the mark alone, each such report byte-identical across two runs on the same state, and every valid-UTF-8 path (the `#` and U+FFFD arms') a plain string, never marked; `rename` and `move` — the performed reports of T6.4-1's rename and T6.5-1's five file moves, staged as their home tests stage them and built, each form run on its own fresh copy of the built state, the human run exiting 0 as its `--json` twin, standard error byte-identical, its report — decoded by the human performed-report decoder — carrying the applied mapping the form-exact performed-operation document carries, every pair's `from` and `to` identity, a multiset, order free, a pair omitted, changed, or listed beside the twin's failing (the previews are T6.6-7's); and the refused real operations of T6.4-3, T6.4-6, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7 — T6.4-6's invalid-workspace arm and every refusal of T6.6-3's refusal stagings, staged as T6.6-3 stages each from its home module, T6.4-6's refused-writes staging among them — each form on its own fresh copy of the state, exit 1, the human findings report carrying every refusal finding's code, locations, concerned path, and identities, and the invalid-workspace refusal's findings each under its own condition's code, a human refusal printing nothing or omitting any of them failing; `impact` — every `impact --base <ref>` read of the stagings of T5.6-1 through T5.6-6 and T9-1 through T9.3-3, run as their home tests run them, the read and its human twin on the same built state, exit 0 each, standard error byte-identical, the human report — decoded by the human impact decoder — carrying each category with its attribution, the collapsed chains, deleted nodes under their baseline identities, and each impacted location under its group with its witness edge and path as the `--json` twin does, order free, a datum omitted, changed, or misplaced failing; `review` — the human `review list` at T10.7-5's clean and corrupt listings and `review status s` at T10.7-6's four stages, staged as their home tests stage them, each run on the same built state as its `--json` twin and exiting as it (`list` 1 iff a session is corrupt, else 0; `status` 0), standard error byte-identical, the human report — decoded by the human review-list or review-status decoder — carrying every session's name with its strategy and item counts by stored status, or its corruption in their place, and each corrupt session's condition-21 finding, or every item's id, kind, scope, status, and blocked state and the totals by status, the sessions and the items in the order 10.7 fixes, a datum omitted, changed, or misordered failing; the human `review next s` at each read of T10.7-7's staging — the order walk's four items and its fully-resolved report, the full-resolution arm's fully-resolved report and new section's item, the empty session's fully-resolved report, and the payload walk's four reads — and the human `review show s <item>` at T10.7-8's two reads, x.k's item and the root's, staged as their home tests stage them, each run on the same built state as its `--json` twin, exit 0 each, standard error byte-identical, the human report — decoded by the human review-next or review-item decoder — reporting the session fully resolved exactly where the twin does, else carrying the item's id, kind, status, blocked state, blockers, note, and a reason (its wording never compared; `next --json`'s self-contained payload the JSON form's alone), and for `show` also the scope node's identity, presence, source range, and text, each context and origin entry with its presence, range, text, and before and after sides, and the `baseline` and `current` recorded states, each node's presence and hashes or absent marker, order free, a datum omitted or changed failing; the refusals of T10.7-1 — `create` naming an existing session, naming one under each of T10.1-4's corruptions, naming a corrupt one ignoring ASCII case alone, and on the Linux leg naming a case pair, both corrupt, one of them corrupt, or both valid — of T10.7-9 — `split` of an item of another kind or of a `subtree-coherence` item whose scope root has no children, on its path-blocks and audit fixtures and in its Q session — and of T10.7-10 — `resolve` of a blocked item — staged as their home tests stage them, the home tests' other assertions theirs, each form run on its own fresh copy of the state, exit 1, the human findings report carrying every refusal finding's code, locations, concerned path, and identities as its twin does, a code-less refusal's and a corruption's condition-21 finding alike; and `status`, `next`, `show`, `resolve`, and `split` naming the corrupt session of each of T10.1-4's states, staged as T10.1-4 stages them, exit 1, each mutating subcommand's two forms on their own fresh copies, the human findings report carrying the condition-21 finding's code and concerned path as its twin does; the `coverage`/`ids`/`show` family and the exit-2 family follow (the plan written at 2a2b94e, FIX_PLAN Tasks 134 and 135) (SPEC 12.0, 12.7, 14, 1.7, 6.4, 6.5, 5.6, 9.1, 9.2, 9.3, 10.1, 10.7, 14.21; H-3, H-6)",
   run: async (product) => {
     await runT1411Twins(product);
     await runT1222Twins(product);
@@ -1574,6 +1650,7 @@ const T12_0_15 = defineProductTest({
     await runListingAndStatusTwins(product);
     await runNextTwins(product);
     await runShowTwins(product);
+    await runReviewRefusalTwins(product);
     await runCorruptNamingTwins(product);
   },
 });

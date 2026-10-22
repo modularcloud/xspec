@@ -183,16 +183,29 @@
 //   status token found on a row also satisfies a total's, and a report may
 //   name every status beside a zero count.
 // - T12.0-15's stagings (section-12.0-iv.ts; TEST-SPEC T12.0-15's `review`
-//   fixtures `list` (T10.7-5) and `status` (T10.7-6)): T10.7-5's body is
-//   `runT1075Listings(product, visit)`, each of its two `review list`
-//   reads — the clean listing, then the one with c corrupt — handed to
-//   `visit` with its pinned exit and the home test's own read, assertions,
-//   and human parity check as `home`; T10.7-6's is `runT1076Stages(product,
-//   visit)`, each of its four stages' `review status s` reads handed so,
-//   stage A's `home` asserting over the staging's own read (its rows' ids
-//   are the items the staging resolves, its item order the staging's
-//   premise). The home tests pass `home` through; T12.0-15 hands its human
-//   twin in its place, the staging between the reads the home test's own.
+//   fixtures `list` (T10.7-5), `status` (T10.7-6), and the refusals of
+//   T10.7-1): T10.7-5's body is `runT1075Listings(product, visit)`, each of
+//   its two `review list` reads — the clean listing, then the one with c
+//   corrupt — handed to `visit` with its pinned exit and the home test's
+//   own read, assertions, and human parity check as `home`; T10.7-6's is
+//   `runT1076Stages(product, visit)`, each of its four stages' `review
+//   status s` reads handed so, stage A's `home` asserting over the
+//   staging's own read (its rows' ids are the items the staging resolves,
+//   its item order the staging's premise). The home tests pass `home`
+//   through; T12.0-15 hands its human twin in its place, the staging
+//   between the reads the home test's own. T10.7-1's body is
+//   `runT1071Stagings(product, visitor)`, over support.ts' refusal
+//   protocol (`ReviewRefusalVisitor`, which T10.7-9's and T10.7-10's
+//   stagings share, section-10.7-ii.ts): each refused `create` — the
+//   existing valid session's, each corrupt state's, the case-fold arm's,
+//   and on the Linux leg the case pairs' four — handed to
+//   `visitor.refusal` with its argv and the home test's own check of it
+//   (`expectReviewRefusal`, or `expectCreateCorruptionReported`, which
+//   pins the corruption findings) as `home`, and the flag arms
+//   (`runT1071FlagArms`) run where `visitor.home` holds. T10.7-1 passes
+//   `REVIEW_REFUSAL_HOME`, so every assertion runs as before; T12.0-15 a
+//   visitor whose `home` is false, its human twin at each refusal, the
+//   staging's workspaces, sessions, and corrupt states kept.
 // - Workspaces are git-less wherever no baseline is involved (T10.7-2,
 //   T10.7-4, T10.7-6): coverage and audit sessions require no git.
 // - Every fixture edit is followed by an explicit `build` before any read,
@@ -214,22 +227,23 @@
 //   two stagings after its body's first invocation, below); every other
 //   initial `files` entry, a body's first workspace's, stays plain;
 //   T10.7-1's and T10.7-5's corrupt-session bytes stage no `.mdx` path.
-//   Each record T12.0-15 stages names it. The tie sub-fixture's three edits follow a
-//   `rename` and change bytes the product rewrote, which no harness constant
-//   equals, so each is an anchored `workspace.edit()`, its anchor's
-//   uniqueness diagnosed first (SPEC 6.4 fixes the rewritten form), as
-//   T10.4-4's reintroduction arm stages.
+//   Each record T12.0-15 stages names it (`W1_SOURCE` among them: it
+//   stages T10.7-1's every workspace). The tie sub-fixture's three edits
+//   follow a `rename` and change bytes the product rewrote, which no
+//   harness constant equals, so each is an anchored `workspace.edit()`, its
+//   anchor's uniqueness diagnosed first (SPEC 6.4 fixes the rewritten
+//   form), as T10.4-4's reintroduction arm stages.
 // - TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
 //   and timing clauses), every one well-formed: the configurations of those
 //   later workspaces — `COVERAGE_CONFIG` (T10.7-1's corrupt-session,
 //   case-fold, and case-pair workspaces and the case pair's twin,
-//   T10.7-4's item-id tie sub-fixture, and T10.7-5's workspace as T12.0-15
-//   stages it) and `SPECS_ONLY_CONFIG` (T10.7-2's audit arm, and T10.7-6's
-//   workspace as T12.0-15 stages it), each staged wherever that
-//   configuration is — and T10.7-2's
-//   two post-create configuration edits (`C2_CONFIG_EDITED`,
-//   `A2_CONFIG_EDITED`); T10.7-1's invalid configuration-state twin stages
-//   support.ts's record `UNKNOWN_KEY_CONFIG`.
+//   T10.7-4's item-id tie sub-fixture, and T10.7-1's and T10.7-5's
+//   workspaces as T12.0-15 stages them) and `SPECS_ONLY_CONFIG` (T10.7-2's
+//   audit arm, and T10.7-6's workspace as T12.0-15 stages it), each staged
+//   wherever that configuration is — and T10.7-2's two post-create
+//   configuration edits (`C2_CONFIG_EDITED`, `A2_CONFIG_EDITED`); T10.7-1's
+//   invalid configuration-state twin stages support.ts's record
+//   `UNKNOWN_KEY_CONFIG`.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -273,19 +287,21 @@ import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
+import type { ReviewRefusalVisitor } from "./support.js";
 import {
+  REVIEW_REFUSAL_HOME,
   assertConditionCounts,
   assertFindingConcernsPath,
   assertSameJson,
   buildOk,
   expectErrorDocument,
   expectExit,
-  expectReviewRefusal,
   expectSyntaxClassUsageError,
   runCli,
   runFindingsReport,
   runJson,
   stageConfigurationStateTwins,
+  visitReviewRefusal,
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
@@ -866,10 +882,12 @@ const W1_FILE = "specs/W.mdx";
 // Staged by the body's first workspace and, after its invocations, by its
 // configuration-state twins and by every later workspace — each
 // corrupt-session state's, the case-fold arm's, each case-pair arm's, and
-// the case pair's identical twin: one staged-source record (S-9's
-// before-any-product clause), wrapped in place.
+// the case pair's identical twin — and by T12.0-15, which runs the staging
+// (`runT1071Stagings`) after its own body's earlier invocations: one
+// staged-source record (S-9's before-any-product and timing clauses),
+// wrapped in place.
 const W1_SOURCE = stagedMdx(
-  "T10.7-1 specs/W.mdx (the flag-exclusivity workspace's initial source, its configuration-state twins', and every later workspace's: each corrupt-session state's, the case-fold and case-pair arms', and the case pair's identical twin's)",
+  "T10.7-1/T12.0-15 specs/W.mdx (the flag-exclusivity workspace's initial source, its configuration-state twins', and every later workspace's: each corrupt-session state's, the case-fold and case-pair arms', and the case pair's identical twin's)",
   ['<S id="w">', "Dub text.", "</S>", ""].join("\n"),
 );
 
@@ -1149,333 +1167,389 @@ const CORRUPT_CREATE_ARMS: readonly CorruptCreateArm[] = [
   },
 ];
 
-const T10_7_1 = defineProductTest({
-  id: "T10.7-1",
-  title:
-    "`review create` flag exclusivity: exactly one of `--base`, `--strategy audit`, `--coverage` is required — supplying none, any two, or all three is a usage error, exit 2, as is a missing `--name`, and `--strategy` with any other value — `path-blocks` and `coverage`, the strategies `--base` and `--coverage` alone select, and `bogus` — is a usage error of the syntax class: exit 2 with the plain usage error (`code` and `path` `null`), byte-identical with the configuration file invalid or missing; `--coverage` naming no configured profile is exit 2 (an unknown profile named in arguments) with nothing created — no session file exists and `list` reports no such session; `create` with an existing session's exact name is refused: exit 1 with exactly one code-less finding in T10.7-14's form — standard output exactly `{\"findings\": [f]}`, `code` and `path` `null`, `locations` `[]` — nothing modified; naming an existing corrupt session — unparseable bytes, an invariant violation staged through the H-3 adapter over the product-written file, a directory or a symbolic link at the session path (T10.1-4's stagings) — reports the corruption in the refusal's place: exactly one finding, condition 21 `corrupt-session`, no code-less refusal beside it, exit 1, nothing modified; and so does a name matching the corrupt session's ignoring ASCII case alone: `--name Foo` beside a corrupt `foo.json` reports exactly that finding, concerning `.xspec/reviews/foo.json`, and writes no `Foo.json`; on the Linux leg, beside both `foo.json` and `FOO.json` — each written by the product (`FOO.json` in an identical twin workspace, copied in) or T10.1-4's garbage bytes — the corruption is one finding per corrupt session the name matches, the refusal not beside them: both corrupt, `--name Foo` reports exactly two condition-21 findings, `FOO.json`'s then `foo.json`'s (by concerned path bytes); `foo.json` valid and `FOO.json` corrupt, `--name Foo` and `--name foo` each exactly `FOO.json`'s; both valid, `--name Foo` exactly one code-less refusal — each exit 1, nothing written (SPEC 10.1, 10.7, 12.0, 12.7, 13.4, 14, 14.21)",
-  run: async (product) => {
+/**
+ * `review create --strategy audit --name <name>` beside the corrupt sessions
+ * the name matches, handed to `visitor` at the state it runs on, labelled
+ * `context`: its `home` the home test's check that the corruption stands in
+ * the refusal's place (`expectCreateCorruptionReported`, `corruptRels` the
+ * corrupt matches' files in 12.7 order).
+ */
+async function visitCreateCorruption(
+  product: ProductBinding,
+  visitor: ReviewRefusalVisitor,
+  workspace: TestWorkspace,
+  name: string,
+  corruptRels: readonly string[],
+  context: string,
+): Promise<void> {
+  await visitor.refusal(
+    workspace,
+    { label: context, argv: createAuditArgv(name) },
+    () =>
+      expectCreateCorruptionReported(
+        product,
+        workspace,
+        name,
+        corruptRels,
+        context,
+      ),
+  );
+}
+
+/**
+ * T10.7-1's flag arms on the flag-exclusivity workspace, git-backed and
+ * built, before any session exists — the home test's own assertions
+ * (`runT1071Stagings` runs them where its visitor's `home` holds): the
+ * unknown profile, nothing created and `list` reporting no session; the
+ * exclusivity arms; the foreign `--strategy` values on the
+ * configuration-state twins; and the missing `--name` — each a usage error.
+ */
+async function runT1071FlagArms(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  prefix: string,
+): Promise<void> {
+  // Unknown profile first — before any session exists, so "nothing
+  // created" is exactly observable: no session file, and `list`
+  // reports no session at all (SPEC 10.7: `create` records the
+  // profile's resolved definition, so an unknown profile leaves
+  // nothing to record; 12.0: an unknown profile named in arguments is
+  // a usage error).
+  await expectCreateUsageError(
+    product,
+    workspace,
+    ["review", "create", "--coverage", "nope", "--name", "c"],
+    `${prefix} \`review create --coverage nope --name c\` — no ` +
+      `configured profile is named "nope" (the configured profile is ` +
+      `"p")`,
+  );
+  const sessionKind = await workspace.kind(".xspec/reviews/c.json");
+  if (sessionKind !== "absent") {
+    fail(
+      `${prefix}: \`create --coverage nope\` failed (exit 2), so no ` +
+        `session file may exist at .xspec/reviews/c.json (SPEC 10.1, ` +
+        `10.7: nothing created); found ${sessionKind}`,
+    );
+  }
+  const list = await listSessions(
+    product,
+    workspace,
+    `${prefix} after the unknown-profile create`,
+  );
+  assertSameJson(
+    list.sessions.map((entry) => entry.name),
+    [],
+    `${prefix}: \`list\` reports no such session — nothing was ` +
+      `created by the failed create, and no other session exists yet ` +
+      `(SPEC 10.7)`,
+  );
+
+  // Exactly one of --base / --strategy audit / --coverage (SPEC 10.7):
+  // none, each pair, and all three are usage errors.
+  const exclusivityArms: readonly (readonly [readonly string[], string])[] = [
+    [
+      ["review", "create", "--name", "x"],
+      "none of --base/--strategy/--coverage",
+    ],
+    [
+      [
+        "review",
+        "create",
+        "--base",
+        "main",
+        "--strategy",
+        "audit",
+        "--name",
+        "x",
+      ],
+      "--base and --strategy together",
+    ],
+    [
+      ["review", "create", "--base", "main", "--coverage", "p", "--name", "x"],
+      "--base and --coverage together",
+    ],
+    [
+      [
+        "review",
+        "create",
+        "--strategy",
+        "audit",
+        "--coverage",
+        "p",
+        "--name",
+        "x",
+      ],
+      "--strategy and --coverage together",
+    ],
+    [
+      [
+        "review",
+        "create",
+        "--base",
+        "main",
+        "--strategy",
+        "audit",
+        "--coverage",
+        "p",
+        "--name",
+        "x",
+      ],
+      "all three together",
+    ],
+  ];
+  for (const [argv, why] of exclusivityArms) {
+    await expectCreateUsageError(
+      product,
+      workspace,
+      argv,
+      `${prefix} \`${argv.join(" ")}\` (${why}) — exactly one of ` +
+        `--base, --strategy audit, --coverage is required`,
+    );
+  }
+
+  // --strategy accepts only `audit` (SPEC 10.7): any other value —
+  // path-blocks and coverage, which --base and --coverage alone
+  // select, and bogus — is a usage error of the syntax class (12.0:
+  // a fixed vocabulary decides it, from the arguments alone),
+  // reported without loading configuration: the plain usage error,
+  // `code` and `path` null, byte-identical on the configuration-state
+  // twins holding specs/W.mdx under an invalid and under no
+  // configuration (T12.0-10's discipline; each twin unchanged).
+  const twins = await stageConfigurationStateTwins({
+    [W1_FILE]: W1_SOURCE,
+  });
+  try {
+    for (const value of W1_FOREIGN_STRATEGIES) {
+      const argv = [
+        "review",
+        "create",
+        "--strategy",
+        value,
+        "--name",
+        "x",
+        "--json",
+      ];
+      await expectSyntaxClassUsageError(
+        product,
+        workspace,
+        twins,
+        argv,
+        `${prefix} \`${argv.join(" ")}\` — the only accepted ` +
+          `--strategy value is "audit"`,
+      );
+    }
+  } finally {
+    await twins.dispose();
+  }
+
+  // Missing --name (SPEC 10.7: a missing required flag is a usage
+  // error, 12.0).
+  await expectCreateUsageError(
+    product,
+    workspace,
+    ["review", "create", "--strategy", "audit"],
+    `${prefix} \`review create --strategy audit\` — missing --name`,
+  );
+}
+
+/**
+ * T10.7-1's staging, each refused `create` handed to `visitor.refusal` with
+ * the home test's own check of it as `home` (exported for T12.0-15,
+ * section-12.0-iv.ts): the flag-exclusivity workspace — `COVERAGE_CONFIG`
+ * and specs/W.mdx, git-backed and built — its flag arms where
+ * `visitor.home` holds (`runT1071FlagArms`), then the audit session s and
+ * `create --name s` (`expectReviewRefusal`: one code-less refusal); one
+ * workspace per corrupt state of s (`CORRUPT_CREATE_ARMS`, T10.1-4's
+ * stagings), `create --name s` (`expectCreateCorruptionReported`: the
+ * corruption in the refusal's place); the case-fold workspace, a corrupt
+ * foo.json, `create --name Foo`; and on the Linux leg the three case-pair
+ * workspaces — (i) both corrupt, `--name Foo`; (ii) foo.json valid and
+ * FOO.json corrupt, `--name Foo`, then `--name foo`; (iii) both valid,
+ * `--name Foo`, one code-less refusal. `prefix` leads every staging step's
+ * diagnosis.
+ */
+export async function runT1071Stagings(
+  product: ProductBinding,
+  visitor: ReviewRefusalVisitor,
+  prefix = "T10.7-1",
+): Promise<void> {
+  await withWorkspace(
+    COVERAGE_CONFIG,
+    { [W1_FILE]: W1_SOURCE },
+    async (workspace) => {
+      // A resolvable ref for the pair arms, so flag exclusivity is the
+      // only usage-error cause staged in them.
+      await workspace.gitInit();
+      await workspace.gitCommitAll("baseline");
+      await buildOk(product, workspace, `${prefix} \`build\``);
+      if (visitor.home) await runT1071FlagArms(product, workspace, prefix);
+
+      // An existing name is refused: exit 1, a refused review operation —
+      // exactly one code-less finding in T10.7-14's form, nothing modified
+      // (SPEC 10.7, 12.0, 12.7, 14; the ASCII-case-fold variant is
+      // T10.1-2's business — this arm stages the exact name).
+      await createAuditSession(product, workspace, W1_SESSION, prefix);
+      await visitReviewRefusal(
+        product,
+        visitor,
+        workspace,
+        W1_CREATE_S,
+        W1_SESSION_REL,
+        `${prefix} [existing valid session: \`create\` with its exact ` +
+          `name is refused, SPEC 10.1, 10.7]`,
+      );
+    },
+  );
+
+  // Naming an existing corrupt session (SPEC 10.7, 14.21): the corruption
+  // stands in the refusal's place. One fresh workspace per state, so no
+  // other session's state can enter the report: each is built, the
+  // session `s` staged corrupt T10.1-4's way, then `create --name s`
+  // driven against it.
+  for (const arm of CORRUPT_CREATE_ARMS) {
     await withWorkspace(
       COVERAGE_CONFIG,
       { [W1_FILE]: W1_SOURCE },
       async (workspace) => {
-        const prefix = "T10.7-1";
-        // A resolvable ref for the pair arms, so flag exclusivity is the
-        // only usage-error cause staged in them.
-        await workspace.gitInit();
-        await workspace.gitCommitAll("baseline");
-        await buildOk(product, workspace, `${prefix} \`build\``);
-
-        // Unknown profile first — before any session exists, so "nothing
-        // created" is exactly observable: no session file, and `list`
-        // reports no session at all (SPEC 10.7: `create` records the
-        // profile's resolved definition, so an unknown profile leaves
-        // nothing to record; 12.0: an unknown profile named in arguments is
-        // a usage error).
-        await expectCreateUsageError(
+        const context = `${prefix} [existing corrupt session: ${arm.state}]`;
+        await buildOk(product, workspace, `${context} \`build\``);
+        await arm.stage(product, workspace, context);
+        await visitCreateCorruption(
           product,
+          visitor,
           workspace,
-          ["review", "create", "--coverage", "nope", "--name", "c"],
-          `${prefix} \`review create --coverage nope --name c\` — no ` +
-            `configured profile is named "nope" (the configured profile is ` +
-            `"p")`,
-        );
-        const sessionKind = await workspace.kind(".xspec/reviews/c.json");
-        if (sessionKind !== "absent") {
-          fail(
-            `${prefix}: \`create --coverage nope\` failed (exit 2), so no ` +
-              `session file may exist at .xspec/reviews/c.json (SPEC 10.1, ` +
-              `10.7: nothing created); found ${sessionKind}`,
-          );
-        }
-        const list = await listSessions(
-          product,
-          workspace,
-          `${prefix} after the unknown-profile create`,
-        );
-        assertSameJson(
-          list.sessions.map((entry) => entry.name),
-          [],
-          `${prefix}: \`list\` reports no such session — nothing was ` +
-            `created by the failed create, and no other session exists yet ` +
-            `(SPEC 10.7)`,
-        );
-
-        // Exactly one of --base / --strategy audit / --coverage (SPEC 10.7):
-        // none, each pair, and all three are usage errors.
-        const exclusivityArms: readonly (readonly [
-          readonly string[],
-          string,
-        ])[] = [
-          [
-            ["review", "create", "--name", "x"],
-            "none of --base/--strategy/--coverage",
-          ],
-          [
-            [
-              "review",
-              "create",
-              "--base",
-              "main",
-              "--strategy",
-              "audit",
-              "--name",
-              "x",
-            ],
-            "--base and --strategy together",
-          ],
-          [
-            [
-              "review",
-              "create",
-              "--base",
-              "main",
-              "--coverage",
-              "p",
-              "--name",
-              "x",
-            ],
-            "--base and --coverage together",
-          ],
-          [
-            [
-              "review",
-              "create",
-              "--strategy",
-              "audit",
-              "--coverage",
-              "p",
-              "--name",
-              "x",
-            ],
-            "--strategy and --coverage together",
-          ],
-          [
-            [
-              "review",
-              "create",
-              "--base",
-              "main",
-              "--strategy",
-              "audit",
-              "--coverage",
-              "p",
-              "--name",
-              "x",
-            ],
-            "all three together",
-          ],
-        ];
-        for (const [argv, why] of exclusivityArms) {
-          await expectCreateUsageError(
-            product,
-            workspace,
-            argv,
-            `${prefix} \`${argv.join(" ")}\` (${why}) — exactly one of ` +
-              `--base, --strategy audit, --coverage is required`,
-          );
-        }
-
-        // --strategy accepts only `audit` (SPEC 10.7): any other value —
-        // path-blocks and coverage, which --base and --coverage alone
-        // select, and bogus — is a usage error of the syntax class (12.0:
-        // a fixed vocabulary decides it, from the arguments alone),
-        // reported without loading configuration: the plain usage error,
-        // `code` and `path` null, byte-identical on the configuration-state
-        // twins holding specs/W.mdx under an invalid and under no
-        // configuration (T12.0-10's discipline; each twin unchanged).
-        const twins = await stageConfigurationStateTwins({
-          [W1_FILE]: W1_SOURCE,
-        });
-        try {
-          for (const value of W1_FOREIGN_STRATEGIES) {
-            const argv = [
-              "review",
-              "create",
-              "--strategy",
-              value,
-              "--name",
-              "x",
-              "--json",
-            ];
-            await expectSyntaxClassUsageError(
-              product,
-              workspace,
-              twins,
-              argv,
-              `${prefix} \`${argv.join(" ")}\` — the only accepted ` +
-                `--strategy value is "audit"`,
-            );
-          }
-        } finally {
-          await twins.dispose();
-        }
-
-        // Missing --name (SPEC 10.7: a missing required flag is a usage
-        // error, 12.0).
-        await expectCreateUsageError(
-          product,
-          workspace,
-          ["review", "create", "--strategy", "audit"],
-          `${prefix} \`review create --strategy audit\` — missing --name`,
-        );
-
-        // An existing name is refused: exit 1, a refused review operation —
-        // exactly one code-less finding in T10.7-14's form, nothing modified
-        // (SPEC 10.7, 12.0, 12.7, 14; the ASCII-case-fold variant is
-        // T10.1-2's business — this arm stages the exact name).
-        await createAuditSession(product, workspace, W1_SESSION, prefix);
-        await expectReviewRefusal(
-          product,
-          workspace,
-          W1_CREATE_S,
-          W1_SESSION_REL,
-          `${prefix} [existing valid session: \`create\` with its exact ` +
-            `name is refused, SPEC 10.1, 10.7]`,
-          { nothingModified: true },
+          W1_SESSION,
+          [W1_SESSION_REL],
+          context,
         );
       },
     );
+  }
 
-    // Naming an existing corrupt session (SPEC 10.7, 14.21): the corruption
-    // stands in the refusal's place. One fresh workspace per state, so no
-    // other session's state can enter the report: each is built, the
-    // session `s` staged corrupt T10.1-4's way, then `create --name s`
-    // driven against it.
-    for (const arm of CORRUPT_CREATE_ARMS) {
-      await withWorkspace(
-        COVERAGE_CONFIG,
-        { [W1_FILE]: W1_SOURCE },
-        async (workspace) => {
-          const context = `T10.7-1 [existing corrupt session: ${arm.state}]`;
-          await buildOk(product, workspace, `${context} \`build\``);
-          await arm.stage(product, workspace, context);
-          await expectCreateCorruptionReported(
-            product,
-            workspace,
-            W1_SESSION,
-            [W1_SESSION_REL],
-            context,
-          );
-        },
+  // A name matching the corrupt session's ignoring ASCII case alone is
+  // treated at `create` as that existing session's (SPEC 10.1), so the
+  // corruption stands in the refusal's place there too (10.7): `--name
+  // Foo` beside a corrupt foo.json reports foo.json's finding, concerning
+  // the stored file's own path, and writes no Foo.json — a product
+  // matching names case-insensitively against readable sessions alone
+  // finds no match, creates the session, and fails at the exit code.
+  await withWorkspace(
+    COVERAGE_CONFIG,
+    { [W1_FILE]: W1_SOURCE },
+    async (workspace) => {
+      const context = `${prefix} [case-fold: a corrupt foo.json, \`create --name Foo\`]`;
+      await buildOk(product, workspace, `${context} \`build\``);
+      await stageGarbageSession(workspace, FOLD_LOWER, context);
+      await visitCreateCorruption(
+        product,
+        visitor,
+        workspace,
+        FOLD_MIXED,
+        [sessionRelOf(FOLD_LOWER)],
+        context,
       );
-    }
+    },
+  );
 
-    // A name matching the corrupt session's ignoring ASCII case alone is
-    // treated at `create` as that existing session's (SPEC 10.1), so the
-    // corruption stands in the refusal's place there too (10.7): `--name
-    // Foo` beside a corrupt foo.json reports foo.json's finding, concerning
-    // the stored file's own path, and writes no Foo.json — a product
-    // matching names case-insensitively against readable sessions alone
-    // finds no match, creates the session, and fails at the exit code.
+  // A name matching several sessions ignoring ASCII case names each of
+  // them (SPEC 10.1): the corruption is one finding per corrupt session
+  // it matches, the refusal not beside them (10.7). Only on the Linux leg
+  // do foo.json and FOO.json stand side by side (CASE_PAIR_STAGED), each
+  // arm a fresh workspace holding both, every `create` inside a
+  // whole-root compare: no Foo.json created, both files byte-unchanged.
+  if (CASE_PAIR_STAGED) {
+    // (i) Both corrupt: two condition-21 findings, FOO.json's then
+    // foo.json's — equal codes and empty locations, so by concerned path
+    // bytes (12.7: `F`, 0x46, before `f`, 0x66) — failing a product that
+    // reports the first match alone.
     await withWorkspace(
       COVERAGE_CONFIG,
       { [W1_FILE]: W1_SOURCE },
       async (workspace) => {
-        const context =
-          "T10.7-1 [case-fold: a corrupt foo.json, `create --name Foo`]";
+        const context = `${prefix} [case pair (i): foo.json and FOO.json both corrupt]`;
         await buildOk(product, workspace, `${context} \`build\``);
         await stageGarbageSession(workspace, FOLD_LOWER, context);
-        await expectCreateCorruptionReported(
+        await stageGarbageSession(workspace, FOLD_UPPER, context);
+        await visitCreateCorruption(
           product,
+          visitor,
           workspace,
           FOLD_MIXED,
-          [sessionRelOf(FOLD_LOWER)],
+          [sessionRelOf(FOLD_UPPER), sessionRelOf(FOLD_LOWER)],
           context,
         );
       },
     );
 
-    // A name matching several sessions ignoring ASCII case names each of
-    // them (SPEC 10.1): the corruption is one finding per corrupt session
-    // it matches, the refusal not beside them (10.7). Only on the Linux leg
-    // do foo.json and FOO.json stand side by side (CASE_PAIR_STAGED), each
-    // arm a fresh workspace holding both, every `create` inside a
-    // whole-root compare: no Foo.json created, both files byte-unchanged.
-    if (CASE_PAIR_STAGED) {
-      // (i) Both corrupt: two condition-21 findings, FOO.json's then
-      // foo.json's — equal codes and empty locations, so by concerned path
-      // bytes (12.7: `F`, 0x46, before `f`, 0x66) — failing a product that
-      // reports the first match alone.
-      await withWorkspace(
-        COVERAGE_CONFIG,
-        { [W1_FILE]: W1_SOURCE },
-        async (workspace) => {
-          const context =
-            "T10.7-1 [case pair (i): foo.json and FOO.json both corrupt]";
-          await buildOk(product, workspace, `${context} \`build\``);
-          await stageGarbageSession(workspace, FOLD_LOWER, context);
-          await stageGarbageSession(workspace, FOLD_UPPER, context);
-          await expectCreateCorruptionReported(
-            product,
-            workspace,
-            FOLD_MIXED,
-            [sessionRelOf(FOLD_UPPER), sessionRelOf(FOLD_LOWER)],
-            context,
-          );
-        },
-      );
+    // (ii) foo.json valid — written by this workspace's own `create`,
+    // made before FOO.json is staged, which that `create` would meet —
+    // and FOO.json corrupt: `--name Foo`, and `--name foo`, whose exact
+    // match is the valid session, each report FOO.json's corruption
+    // alone — failing a product that answers a refusal beside it, or in
+    // its place where the name matches a valid session exactly.
+    await withWorkspace(
+      COVERAGE_CONFIG,
+      { [W1_FILE]: W1_SOURCE },
+      async (workspace) => {
+        const context = `${prefix} [case pair (ii): foo.json valid, FOO.json corrupt]`;
+        await buildOk(product, workspace, `${context} \`build\``);
+        await createAuditSession(product, workspace, FOLD_LOWER, context);
+        await requireCreatedSessionFile(workspace, FOLD_LOWER, context);
+        await stageGarbageSession(workspace, FOLD_UPPER, context);
+        await visitCreateCorruption(
+          product,
+          visitor,
+          workspace,
+          FOLD_MIXED,
+          [sessionRelOf(FOLD_UPPER)],
+          context,
+        );
+        await visitCreateCorruption(
+          product,
+          visitor,
+          workspace,
+          FOLD_LOWER,
+          [sessionRelOf(FOLD_UPPER)],
+          `${context} [\`foo\`: its exact match is the valid session]`,
+        );
+      },
+    );
 
-      // (ii) foo.json valid — written by this workspace's own `create`,
-      // made before FOO.json is staged, which that `create` would meet —
-      // and FOO.json corrupt: `--name Foo`, and `--name foo`, whose exact
-      // match is the valid session, each report FOO.json's corruption
-      // alone — failing a product that answers a refusal beside it, or in
-      // its place where the name matches a valid session exactly.
-      await withWorkspace(
-        COVERAGE_CONFIG,
-        { [W1_FILE]: W1_SOURCE },
-        async (workspace) => {
-          const context =
-            "T10.7-1 [case pair (ii): foo.json valid, FOO.json corrupt]";
-          await buildOk(product, workspace, `${context} \`build\``);
-          await createAuditSession(product, workspace, FOLD_LOWER, context);
-          await requireCreatedSessionFile(workspace, FOLD_LOWER, context);
-          await stageGarbageSession(workspace, FOLD_UPPER, context);
-          await expectCreateCorruptionReported(
-            product,
-            workspace,
-            FOLD_MIXED,
-            [sessionRelOf(FOLD_UPPER)],
-            context,
-          );
-          await expectCreateCorruptionReported(
-            product,
-            workspace,
-            FOLD_LOWER,
-            [sessionRelOf(FOLD_UPPER)],
-            `${context} [\`foo\`: its exact match is the valid session]`,
-          );
-        },
-      );
+    // (iii) Both valid — foo.json written by this workspace's `create`,
+    // FOO.json by `create` in an identical twin workspace and copied in:
+    // `--name Foo` is refused with exactly one code-less finding (10.7:
+    // each refusal one finding) — failing a product answering one
+    // refusal per match — the shared check's whole-root compare covering
+    // FOO.json beside the foo.json it names.
+    await withWorkspace(
+      COVERAGE_CONFIG,
+      { [W1_FILE]: W1_SOURCE },
+      async (workspace) => {
+        const context = `${prefix} [case pair (iii): foo.json and FOO.json both valid]`;
+        await buildOk(product, workspace, `${context} \`build\``);
+        await createAuditSession(product, workspace, FOLD_LOWER, context);
+        await requireCreatedSessionFile(workspace, FOLD_LOWER, context);
+        await copyTwinCreatedSession(product, workspace, FOLD_UPPER, context);
+        await visitReviewRefusal(
+          product,
+          visitor,
+          workspace,
+          createAuditArgv(FOLD_MIXED),
+          sessionRelOf(FOLD_LOWER),
+          `${context} [\`Foo\` matches both ignoring ASCII case: one ` +
+            `refusal, SPEC 10.1, 10.7]`,
+        );
+      },
+    );
+  }
+}
 
-      // (iii) Both valid — foo.json written by this workspace's `create`,
-      // FOO.json by `create` in an identical twin workspace and copied in:
-      // `--name Foo` is refused with exactly one code-less finding (10.7:
-      // each refusal one finding) — failing a product answering one
-      // refusal per match — the shared check's whole-root compare covering
-      // FOO.json beside the foo.json it names.
-      await withWorkspace(
-        COVERAGE_CONFIG,
-        { [W1_FILE]: W1_SOURCE },
-        async (workspace) => {
-          const context =
-            "T10.7-1 [case pair (iii): foo.json and FOO.json both valid]";
-          await buildOk(product, workspace, `${context} \`build\``);
-          await createAuditSession(product, workspace, FOLD_LOWER, context);
-          await requireCreatedSessionFile(workspace, FOLD_LOWER, context);
-          await copyTwinCreatedSession(product, workspace, FOLD_UPPER, context);
-          await expectReviewRefusal(
-            product,
-            workspace,
-            createAuditArgv(FOLD_MIXED),
-            sessionRelOf(FOLD_LOWER),
-            `${context} [\`Foo\` matches both ignoring ASCII case: one ` +
-              `refusal, SPEC 10.1, 10.7]`,
-            { nothingModified: true },
-          );
-        },
-      );
-    }
+const T10_7_1 = defineProductTest({
+  id: "T10.7-1",
+  title:
+    "`review create` flag exclusivity: exactly one of `--base`, `--strategy audit`, `--coverage` is required — supplying none, any two, or all three is a usage error, exit 2, as is a missing `--name`, and `--strategy` with any other value — `path-blocks` and `coverage`, the strategies `--base` and `--coverage` alone select, and `bogus` — is a usage error of the syntax class: exit 2 with the plain usage error (`code` and `path` `null`), byte-identical with the configuration file invalid or missing; `--coverage` naming no configured profile is exit 2 (an unknown profile named in arguments) with nothing created — no session file exists and `list` reports no such session; `create` with an existing session's exact name is refused: exit 1 with exactly one code-less finding in T10.7-14's form — standard output exactly `{\"findings\": [f]}`, `code` and `path` `null`, `locations` `[]` — nothing modified; naming an existing corrupt session — unparseable bytes, an invariant violation staged through the H-3 adapter over the product-written file, a directory or a symbolic link at the session path (T10.1-4's stagings) — reports the corruption in the refusal's place: exactly one finding, condition 21 `corrupt-session`, no code-less refusal beside it, exit 1, nothing modified; and so does a name matching the corrupt session's ignoring ASCII case alone: `--name Foo` beside a corrupt `foo.json` reports exactly that finding, concerning `.xspec/reviews/foo.json`, and writes no `Foo.json`; on the Linux leg, beside both `foo.json` and `FOO.json` — each written by the product (`FOO.json` in an identical twin workspace, copied in) or T10.1-4's garbage bytes — the corruption is one finding per corrupt session the name matches, the refusal not beside them: both corrupt, `--name Foo` reports exactly two condition-21 findings, `FOO.json`'s then `foo.json`'s (by concerned path bytes); `foo.json` valid and `FOO.json` corrupt, `--name Foo` and `--name foo` each exactly `FOO.json`'s; both valid, `--name Foo` exactly one code-less refusal — each exit 1, nothing written (SPEC 10.1, 10.7, 12.0, 12.7, 13.4, 14, 14.21)",
+  run: async (product) => {
+    await runT1071Stagings(product, REVIEW_REFUSAL_HOME);
   },
 });
 

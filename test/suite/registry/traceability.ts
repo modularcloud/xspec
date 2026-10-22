@@ -737,15 +737,20 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // carry the item returned or the session's full resolution, and the full
   // item with its text payload ("10.7": `show` reports every field of 10.2
   // plus the payload of `next --json`, which `next`'s human form does not
-  // owe), decoded and compared with the `--json` twin's; and its
-  // subcommands naming each corrupt session of T10.1-4 report the
-  // corruption ("10.1"), the condition-21 finding's code and concerned path
-  // compared ("14"); the stagings' sessions, resolutions, and invalidation
-  // (10.3–10.6) and the payload's contents (10.2, 10.4, 1.6, 1.7) are
-  // carriage context with home coverage at T10.7-5 through T10.7-8 and
-  // T10.1-4 (T10.7-7 and T10.7-8 cite the payload's contents under "10.7"
-  // alone, as this entry does). The families still to come add the
-  // passages they assert.
+  // owe), decoded and compared with the `--json` twin's; its refusals —
+  // T10.7-1's refused `create`s, the corruption reported in a refusal's
+  // place among them (a name matching corrupt sessions ignoring ASCII case
+  // alone naming each, "10.1"), T10.7-9's refused `split`s, and T10.7-10's
+  // refused `resolve`, each refusal one finding ("10.7") — render as
+  // precisely as findings, every refusal finding's code and concerned data
+  // compared ("14"); and its subcommands naming each corrupt session of
+  // T10.1-4 report the corruption ("10.1"), the condition-21 finding's
+  // code and concerned path compared ("14"); the stagings' sessions,
+  // resolutions, splits, and invalidation (10.3–10.6) and the payload's
+  // contents (10.2, 10.4, 1.6, 1.7) are carriage context with home
+  // coverage at T10.7-1, T10.7-5 through T10.7-10, and T10.1-4 (T10.7-7
+  // and T10.7-8 cite the payload's contents under "10.7" alone, as this
+  // entry does). The families still to come add the passages they assert.
   "T12.0-15": [
     "12.0",
     "14",

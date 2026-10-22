@@ -227,7 +227,9 @@
 //   and unasserted — and nothing modified: the session file and the whole
 //   workspace root, `.git/` included, byte-identical around the run (SPEC
 //   10.7, 13.5: a refusal ends its subcommand modifying nothing; the
-//   preamble: no git write).
+//   preamble: no git write). Each is handed to its staging's refusal
+//   visitor (support.ts `visitReviewRefusal`), the check its `home`
+//   (below).
 // - Workspaces are git-less wherever no baseline is involved; every fixture
 //   edit is followed by an explicit `build` before any read, so no read
 //   relies on the 13.3 refresh path (T13.3-*'s business).
@@ -248,15 +250,17 @@
 //   payload arm, T10.7-9's (f), (g), audit-fixture, and Q workspaces,
 //   T10.7-12's split, provenance, resolve-state, and coverage sub-fixtures,
 //   and its joined-origin sub-fixture's, T10.4-7's exported records;
-//   T10.7-7's empty-session arm stages none). T10.7-9's path-blocks edit of
-//   N and N.a precedes the body's first `build` (git staging invokes no
-//   product) and stays plain, as do each body's first workspace's initial
-//   `files` entries (T10.7-12's src/members.ts among them, judged
-//   well-formed by the workspace builder) — but T10.7-7's order-arm
-//   specs/T.mdx and T10.7-8's specs/X.mdx, records too
-//   (`T10_7_7_T_INITIAL`, `T10_7_8_X_KAY_V0`): T12.0-15 runs those
-//   stagings after its own body's first invocation (S-9's timing clause),
-//   and every record its stagings stage names it.
+//   T10.7-7's empty-session arm stages none). Each body's first
+//   workspace's initial `files` entries stay plain (T10.7-12's
+//   src/members.ts among them, judged well-formed by the workspace
+//   builder) — but T10.7-7's order-arm specs/T.mdx, T10.7-8's specs/X.mdx,
+//   T10.7-9's path-blocks specs/N.mdx and its edit of N and N.a (which
+//   precedes T10.7-9's first `build`: git staging invokes no product), and
+//   T10.7-10's specs/R.mdx are records too (`T10_7_7_T_INITIAL`,
+//   `T10_7_8_X_KAY_V0`, `T10_7_9_N_INITIAL`, `T10_7_9_N_EDITED`,
+//   `T10_7_10_R_INITIAL`): T12.0-15 runs those stagings after its own
+//   body's first invocation (S-9's timing clause), and every record its
+//   stagings stage names it.
 // - T10.7-7's and T10.7-8's stagings are exported for T12.0-15
 //   (section-12.0-iv.ts), as section-10.7-i.ts exports T10.7-5's and
 //   T10.7-6's: `runT1077Reads(product, visit, prefix?)` hands each
@@ -273,19 +277,38 @@
 //   their own assertions run as before; T12.0-15 hands its human twins in
 //   their place. Staging premises (the order arm's item order, the empty
 //   session's emptiness, the payload arm's distinctness premises, the ids
-//   `status` yields) stay in the stagings.
+//   `status` yields) stay in the stagings. T10.7-9's and T10.7-10's
+//   stagings are exported for T12.0-15 too (TEST-SPEC T12.0-15: the
+//   refusals of T10.7-1, T10.7-9, and T10.7-10), over support.ts' refusal
+//   protocol, which T10.7-1's staging shares (section-10.7-i.ts):
+//   `runT1079Stagings(product, visitor, prefix?)` hands each of T10.7-9's
+//   five refused `split`s — the path-blocks fixture's two, the audit
+//   fixture's two, and the Q session's — to `visitor.refusal` with
+//   T10.7-14's shared check as `home`, and runs everything else — the
+//   arms' assertions, (f), (g), and the later re-derivations — where
+//   `visitor.home` holds, the workspaces' staging steps, premises, and the
+//   items the refusals name running either way (`runPathBlocksFixture`
+//   past the split, and the audit fixture's `stageT1079AuditSplits`, whose
+//   `home` run `runT1079AuditSplits` is, T10.4-8(b)'s staging);
+//   `runT10710Stagings(product, visitor, prefix?)` hands its blocked
+//   `resolve` so, the arms after it and p.a's v0 capture before it run
+//   where `visitor.home` holds. T10.7-9 and T10.7-10 pass
+//   `REVIEW_REFUSAL_HOME`, so every assertion runs as before; T12.0-15 a
+//   visitor whose `home` is false, its human twin at each refusal — so its
+//   run reaches every refusal past the fixtures' (b) and (c), which it
+//   does not assert.
 // - TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
 //   and timing clauses), every one well-formed: the configurations of the
 //   workspaces created after a body's first invocation — `SPECS_ONLY_CONFIG`
-//   (T10.7-7's empty-session arm, and T10.7-7's and T10.7-8's first
-//   workspaces where T12.0-15 runs their stagings, T10.7-9's (f), (g),
-//   audit-fixture, and Q workspaces, T10.7-12's split, joined-origin,
-//   provenance, and resolve-state sub-fixtures), `SPECS_CODE_CONFIG`
-//   (T10.7-7's payload arm), and `COVERAGE_ALL_CONFIG` (T10.7-12's
-//   coverage sub-fixture), each staged wherever that configuration is —
-//   and the code sources staged after one: T10.7-7's `src/next.ts`
-//   (`N7_CODE_SOURCE`) and T10.7-12's `src/ref.ts` and `src/del.ts`
-//   (`M12_CODE_SOURCE`, `M12_CODE_DEL_SOURCE`).
+//   (T10.7-7's empty-session arm, and T10.7-7's, T10.7-8's, T10.7-9's,
+//   and T10.7-10's first workspaces where T12.0-15 runs their stagings,
+//   T10.7-9's (f), (g), audit-fixture, and Q workspaces, T10.7-12's split,
+//   joined-origin, provenance, and resolve-state sub-fixtures),
+//   `SPECS_CODE_CONFIG` (T10.7-7's payload arm), and `COVERAGE_ALL_CONFIG`
+//   (T10.7-12's coverage sub-fixture), each staged wherever that
+//   configuration is — and the code sources staged after one: T10.7-7's
+//   `src/next.ts` (`N7_CODE_SOURCE`) and T10.7-12's `src/ref.ts` and
+//   `src/del.ts` (`M12_CODE_SOURCE`, `M12_CODE_DEL_SOURCE`).
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -333,13 +356,15 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import { assertScopePresence, changedNodes } from "./section-10.5.js";
 import { digitHoldingData } from "./section-10.7-i.js";
+import type { ReviewRefusalVisitor } from "./support.js";
 import {
+  REVIEW_REFUSAL_HOME,
   assertSameJson,
   buildOk,
   expectErrorDocument,
   expectExit,
-  expectReviewRefusal,
   runJson,
+  visitReviewRefusal,
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
@@ -2732,13 +2757,23 @@ function pbSource(nOwn: string, naText: string, mkText: string): string {
   ].join("\n");
 }
 
-// The path-blocks fixture's M.k edit follows the body's first `build`, so it
-// is a staged-source record (helpers/staged-mdx.ts, S-9: judged before any
-// product exists); its baseline and the edit of N and N.a precede the body's
-// first product invocation and stay plain (S-7's sweep reaches them against
-// the stub).
+// The path-blocks fixture's sources are staged-source records
+// (helpers/staged-mdx.ts, S-9: judged before any product exists): its M.k
+// edit follows the body's first `build`, and T12.0-15, which runs the
+// fixture's staging (`runT1079Stagings`) after its own body's earlier
+// invocations, stages its baseline and the edit of N and N.a too (S-9's
+// timing clause) — before T10.7-9's own first invocation, where plain
+// contents would do.
+const T10_7_9_N_INITIAL = stagedMdx(
+  "T10.7-9/T12.0-15 specs/N.mdx with N holding N.a and N.b, then M holding M.k (the path-blocks fixture's baseline)",
+  pbSource("En own v0.", "En ay text v0.", "Em kay text v0."),
+);
+const T10_7_9_N_EDITED = stagedMdx(
+  "T10.7-9/T12.0-15 specs/N.mdx with N's own text and N.a's edited (the path-blocks fixture, before `create --base`)",
+  pbSource("En own v1.", "En ay text v1.", "Em kay text v0."),
+);
 const T10_7_9_N_MK_EDITED = stagedMdx(
-  "T10.7-9 specs/N.mdx with N's own text, N.a's, and M.k's edited (the path-blocks fixture, after N's resolve)",
+  "T10.7-9/T12.0-15 specs/N.mdx with N's own text, N.a's, and M.k's edited (the path-blocks fixture, after N's resolve)",
   pbSource("En own v1.", "En ay text v1.", "Em kay text v1."),
 );
 
@@ -2932,6 +2967,42 @@ function assertFreshUnresolved(
 }
 
 /**
+ * The path-blocks fixture's two refusals (TEST-SPEC T10.7-9; SPEC 10.7),
+ * each handed to `visitor` with T10.7-14's shared check — exit 1 in its
+ * finding form, the session file and the whole workspace byte-identical —
+ * as its `home`: `split` of N's parent-consistency item (`pcNId`), an item
+ * of another kind, and of N.a's item (`naId`), whose scope root has no
+ * children.
+ */
+async function visitPathBlocksRefusals(
+  product: ProductBinding,
+  visitor: ReviewRefusalVisitor,
+  workspace: TestWorkspace,
+  pcNId: string,
+  naId: string,
+  prefix: string,
+): Promise<void> {
+  await visitReviewRefusal(
+    product,
+    visitor,
+    workspace,
+    ["review", "split", "s", pcNId],
+    SESSION_S_REL,
+    `${prefix} [N's parent-consistency item: split on an item of any other ` +
+      `kind is refused, SPEC 10.7]`,
+  );
+  await visitReviewRefusal(
+    product,
+    visitor,
+    workspace,
+    ["review", "split", "s", naId],
+    SESSION_S_REL,
+    `${prefix} [N.a's item: split on a subtree-coherence item whose scope ` +
+      `root has no children is refused, SPEC 10.7]`,
+  );
+}
+
+/**
  * The path-blocks fixture (TEST-SPEC T10.7-9; SPEC 10.2, 10.5, 10.7): the
  * staging premise — N's item alone — then N's item resolved `no-change`,
  * M.k's text edited, and N's item split; after it, from `export`: N.a's and
@@ -2948,21 +3019,21 @@ function assertFreshUnresolved(
  * `parent-consistency` item, of another kind, and N.a's leaf item); and a
  * later re-derivation (N.a's item resolved `updated`) re-adding no item at N,
  * every id kept and the original's never reused, `blockedBy` recomputed.
+ * The two refusals are handed to `visitor.refusal`, T10.7-14's shared check
+ * their `home` (`visitPathBlocksRefusals`); every other assertion runs
+ * where `visitor.home` holds, the staging's premise and the decomposition
+ * items the refusals name kept for T12.0-15 (`runT1079Stagings`). `prefix`
+ * leads every diagnosis.
  */
 async function runPathBlocksFixture(
   product: ProductBinding,
   workspace: TestWorkspace,
+  visitor: ReviewRefusalVisitor,
+  prefix: string,
 ): Promise<void> {
-  const prefix = "T10.7-9 path-blocks fixture";
   await workspace.gitInit();
   const base = await workspace.gitCommitAll("baseline");
-  // This edit precedes the body's first product invocation (git staging
-  // invokes none), so S-7's sweep reaches it against the stub: plain
-  // contents, no ledger record (helpers/staged-mdx.ts).
-  await workspace.file(
-    PB_FILE,
-    pbSource("En own v1.", "En ay text v1.", "Em kay text v0."),
-  );
+  await workspace.file(PB_FILE, T10_7_9_N_EDITED);
   await buildOk(
     product,
     workspace,
@@ -3002,6 +3073,20 @@ async function runPathBlocksFixture(
 
   const afterSplit = await exportSession(product, workspace, "s", prefix);
   const split = `${prefix} after the split`;
+  if (!visitor.home) {
+    // T12.0-15's run (its visitor's `home` false): the two refusals alone,
+    // at the state the split left — N's parent-consistency item and N.a's
+    // item, the decomposition items they name.
+    await visitPathBlocksRefusals(
+      product,
+      visitor,
+      workspace,
+      requireItem(afterSplit.items, "parent-consistency", PB_N, split).id,
+      requireItem(afterSplit.items, "subtree-coherence", PB_NA, split).id,
+      prefix,
+    );
+    return;
+  }
   const removed = afterSplit.items.filter(
     (item) =>
       item.id === idN ||
@@ -3185,23 +3270,13 @@ async function runPathBlocksFixture(
   // shared check: the session file and the whole workspace byte-identical):
   // `split` of N's parent-consistency item, an item of another kind, and of
   // N.a's item, whose scope root has no children (SPEC 10.7).
-  await expectReviewRefusal(
+  await visitPathBlocksRefusals(
     product,
+    visitor,
     workspace,
-    ["review", "split", "s", pcNItem.id],
-    SESSION_S_REL,
-    `${prefix} [N's parent-consistency item: split on an item of any other ` +
-      `kind is refused, SPEC 10.7]`,
-    { nothingModified: true },
-  );
-  await expectReviewRefusal(
-    product,
-    workspace,
-    ["review", "split", "s", naItem.id],
-    SESSION_S_REL,
-    `${prefix} [N.a's item: split on a subtree-coherence item whose scope ` +
-      `root has no children is refused, SPEC 10.7]`,
-    { nothingModified: true },
+    pcNItem.id,
+    naItem.id,
+    prefix,
   );
 
   // A later re-derivation (SPEC 10.5, 10.7): N.a's item resolved `updated`
@@ -3905,11 +3980,11 @@ export function t1079AuditSource(ncyText: string | null): string {
 // so its initial source and the authoring are staged-source records
 // (helpers/staged-mdx.ts, S-9).
 const T10_7_9_AUDIT_INITIAL = stagedMdx(
-  "T10.7-9 specs/N.mdx with N holding N.a (itself holding N.a.x) and N.b, then the leaf s (the audit fixture's initial source)",
+  "T10.7-9/T12.0-15 specs/N.mdx with N holding N.a (itself holding N.a.x) and N.b, then the leaf s (the audit fixture's initial source)",
   t1079AuditSource(null),
 );
 const T10_7_9_AUDIT_AUTHORED = stagedMdx(
-  "T10.7-9 specs/N.mdx with N.c holding N.c.y authored under N and N.b.z under N.b (the audit fixture, after N.a's split)",
+  "T10.7-9/T12.0-15 specs/N.mdx with N.c holding N.c.y authored under N and N.b.z under N.b (the audit fixture, after N.a's split)",
   t1079AuditSource(T10_7_9_AUDIT_NCY_TEXT),
 );
 
@@ -3967,11 +4042,11 @@ function aqSource(withChild: boolean): string {
 // source and Q.r's deletion are staged-source records (helpers/staged-mdx.ts,
 // S-9).
 const T10_7_9_Q_INITIAL = stagedMdx(
-  "T10.7-9 specs/Q.mdx with Q holding Q.r (the childless refusal's audit session, its initial source)",
+  "T10.7-9/T12.0-15 specs/Q.mdx with Q holding Q.r (the childless refusal's audit session, its initial source)",
   aqSource(true),
 );
 const T10_7_9_Q_CHILD_DELETED = stagedMdx(
-  "T10.7-9 specs/Q.mdx with Q.r's section deleted by manual edit after `create`, nothing else edited",
+  "T10.7-9/T12.0-15 specs/Q.mdx with Q.r's section deleted by manual edit after `create`, nothing else edited",
   aqSource(false),
 );
 
@@ -4049,109 +4124,28 @@ export interface T1079AuditSession {
 }
 
 /**
- * T10.7-9's audit fixture through N's split (TEST-SPEC T10.7-9(a)–(e); SPEC
- * 5.5, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7), in a fresh workspace
- * holding `T10_7_9_AUDIT_INITIAL_FILES` beside a one-group configuration:
- * built; `review create --strategy audit --name s`, one item per requirement
- * node in audit item order (the staging premise, from `status`); N.b's item
- * resolved `no-change` with a note, its `current` captured from `export` and
- * N.b's hashes via `query node`; N.a's item split — the original removed,
- * N.a.x's existing item reused, N.a's parent-consistency item fresh and
- * `unresolved` (context {N.a.x}, blockedBy N.a.x's item), both origins
- * empty ((b)), N's item blocked by all items of the decomposition beside
- * N.b's, the decomposition recorded; N.c holding N.c.y authored under N and
- * N.b.z under N.b and built — N.b's subtreeHash changed (the premise via
- * `query node`), no item added; then N's item split, asserting: neither
- * original's id reused, and no subtree-coherence item scoped at N or N.a
- * ((d)); (c) N.c.y's and N.b.z's items entered by the re-derivation ending
- * the split, fresh and `unresolved`, every item in audit item order in
- * `status` and `export`; N.c's per-child item and N's parent-consistency
- * item fresh and `unresolved`; (a) N.c's item's context its ancestor chain
- * and its blockedBy exactly N.c.y's item; (b) every decomposition item's
- * origin empty; (d) N's parent-consistency item's context exactly {N.a,
- * N.b, N.c} and its blockedBy exactly N.a.x's item, N.a's parent-consistency
- * item, N.b's item, and N.c's item, the root's item blocked by exactly those
- * four, N's parent-consistency item, and s's item, both decompositions
- * recorded; (e) N.b's item reused — its id, its note, its `current` byte for
- * byte (the decoded member's JSON rendering, member order included, from
- * `export` at N.b's resolve and after the split; H-3: its inner shape is the
- * product's), and its stored status kept, `list` counting it `no-change`
- * and reads (`status`, `export`) presenting it `invalidated` — taking the
- * scope {N.b, N.b.z} (every scope node the payload presents,
- * `requireScopeNodes`) and the blockedBy N.b.z's item; N.a.x's item and
- * N.a's parent-consistency item keeping their ids. Exported for T10.4-8(b),
- * which continues on the session it leaves.
+ * The audit fixture's first split, N.a's, from the `export` after it (the
+ * home test's assertions, `stageT1079AuditSplits` running them where `home`
+ * holds; `ids` the items `status` reported at `create`): the original
+ * removed, N.a.x's existing item reused, N.a's parent-consistency item
+ * fresh and `unresolved` (context {N.a.x}, blockedBy N.a.x's item), both
+ * origins empty ((b)), N's item blocked by all items of the decomposition
+ * beside N.b's, the decomposition recorded. Returns N.a's parent-consistency
+ * item's id.
  */
-export async function runT1079AuditSplits(
-  product: ProductBinding,
-  workspace: TestWorkspace,
-  label: string,
-): Promise<T1079AuditSession> {
-  await buildOk(product, workspace, `${label} \`build\``);
-  await createAuditSession(product, workspace, "s", label);
-  const created = await sessionStatus(product, workspace, "s", label);
-  assertSameJson(
-    rowSequence(created),
-    [AU_ROOT, AU_N, AU_NA, AU_NAX, AU_NB, AU_S].map(
-      (node) => `subtree-coherence ${node} unresolved`,
-    ),
-    `${label} staging premise: one subtree-coherence item per requirement ` +
-      `node, the root's included, in audit item order — file path, then ` +
-      `document order (SPEC 10.6)`,
-  );
-  const rootId = requireRow(created, "subtree-coherence", AU_ROOT, label).id;
-  const nOriginalId = requireRow(created, "subtree-coherence", AU_N, label).id;
-  const naOriginalId = requireRow(
-    created,
-    "subtree-coherence",
-    AU_NA,
-    label,
-  ).id;
-  const naxId = requireRow(created, "subtree-coherence", AU_NAX, label).id;
-  const nbId = requireRow(created, "subtree-coherence", AU_NB, label).id;
-  const sId = requireRow(created, "subtree-coherence", AU_S, label).id;
-
-  // N.b's item, a leaf's and so unblocked, resolved `no-change` with a note:
-  // (e) follows its id, note, recorded state, and stored status through both
-  // splits.
-  await expectExit(
-    product,
-    workspace,
-    [
-      "review",
-      "resolve",
-      "s",
-      nbId,
-      "--status",
-      "no-change",
-      "--note",
-      AU_NOTE,
-    ],
-    0,
-    `${label} \`review resolve s <N.b's item> --status no-change --note ` +
-      `<text>\``,
-  );
-  const atResolve = `${label} after N.b's resolve`;
-  const nbCurrentAtResolve = JSON.stringify(
-    requireItemById(
-      (await exportSession(product, workspace, "s", atResolve)).items,
-      nbId,
-      atResolve,
-    ).current,
-  );
-  const nbAtResolve = await queryNode(product, workspace, AU_NB, atResolve);
-
-  // N.a's item split: N.a.x's existing item stands for N.a's one child
-  // subtree, and N.a's parent-consistency item enters (SPEC 10.7).
-  await expectExit(
-    product,
-    workspace,
-    ["review", "split", "s", naOriginalId],
-    0,
-    `${label} \`review split s <N.a's item>\``,
-  );
-  const first = `${label} after N.a's split`;
-  const afterFirst = await exportSession(product, workspace, "s", first);
+function assertAuditFirstSplit(
+  afterFirst: ExportReport,
+  ids: {
+    readonly rootId: string;
+    readonly nOriginalId: string;
+    readonly naOriginalId: string;
+    readonly naxId: string;
+    readonly nbId: string;
+    readonly sId: string;
+  },
+  first: string,
+): string {
+  const { rootId, nOriginalId, naOriginalId, naxId, nbId, sId } = ids;
   assertSameJson(
     [...exportKindScopeSequence(afterFirst.items)].sort(),
     [
@@ -4221,6 +4215,121 @@ export async function runT1079AuditSplits(
       `item — beside N.b's item (SPEC 10.6, 10.7)`,
   );
   assertDecompositionRecorded(afterFirst, AU_NA, first);
+  return pcNaId;
+}
+
+/** What T10.7-9's audit staging leaves (`stageT1079AuditSplits`). */
+interface T1079AuditStaged {
+  /** N's parent-consistency item: the refusal of an item of another kind. */
+  readonly pcNId: string;
+  /** The leaf s's item: the refusal of a childless scope root. */
+  readonly sId: string;
+  /**
+   * The session's items by id where the staging's own assertions ran
+   * (`home`), else `null`.
+   */
+  readonly session: T1079AuditSession | null;
+}
+
+/**
+ * T10.7-9's audit fixture through N's split (`runT1079AuditSplits`, below):
+ * its staging steps, its premises, and the two items its refusals name
+ * either way; with `home`, every assertion of (a)–(e) and the captures
+ * only they read, the session's items returned by id — without it
+ * (T12.0-15's run, `runT1079Stagings`), neither.
+ */
+async function stageT1079AuditSplits(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+  home: true,
+): Promise<T1079AuditStaged & { readonly session: T1079AuditSession }>;
+async function stageT1079AuditSplits(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+  home: boolean,
+): Promise<T1079AuditStaged>;
+async function stageT1079AuditSplits(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+  home: boolean,
+): Promise<T1079AuditStaged> {
+  await buildOk(product, workspace, `${label} \`build\``);
+  await createAuditSession(product, workspace, "s", label);
+  const created = await sessionStatus(product, workspace, "s", label);
+  assertSameJson(
+    rowSequence(created),
+    [AU_ROOT, AU_N, AU_NA, AU_NAX, AU_NB, AU_S].map(
+      (node) => `subtree-coherence ${node} unresolved`,
+    ),
+    `${label} staging premise: one subtree-coherence item per requirement ` +
+      `node, the root's included, in audit item order — file path, then ` +
+      `document order (SPEC 10.6)`,
+  );
+  const rootId = requireRow(created, "subtree-coherence", AU_ROOT, label).id;
+  const nOriginalId = requireRow(created, "subtree-coherence", AU_N, label).id;
+  const naOriginalId = requireRow(
+    created,
+    "subtree-coherence",
+    AU_NA,
+    label,
+  ).id;
+  const naxId = requireRow(created, "subtree-coherence", AU_NAX, label).id;
+  const nbId = requireRow(created, "subtree-coherence", AU_NB, label).id;
+  const sId = requireRow(created, "subtree-coherence", AU_S, label).id;
+
+  // N.b's item, a leaf's and so unblocked, resolved `no-change` with a note:
+  // (e) follows its id, note, recorded state, and stored status through both
+  // splits.
+  await expectExit(
+    product,
+    workspace,
+    [
+      "review",
+      "resolve",
+      "s",
+      nbId,
+      "--status",
+      "no-change",
+      "--note",
+      AU_NOTE,
+    ],
+    0,
+    `${label} \`review resolve s <N.b's item> --status no-change --note ` +
+      `<text>\``,
+  );
+  const atResolve = `${label} after N.b's resolve`;
+  const nbCurrentAtResolve = home
+    ? JSON.stringify(
+        requireItemById(
+          (await exportSession(product, workspace, "s", atResolve)).items,
+          nbId,
+          atResolve,
+        ).current,
+      )
+    : null;
+  const nbAtResolve = await queryNode(product, workspace, AU_NB, atResolve);
+
+  // N.a's item split: N.a.x's existing item stands for N.a's one child
+  // subtree, and N.a's parent-consistency item enters (SPEC 10.7).
+  await expectExit(
+    product,
+    workspace,
+    ["review", "split", "s", naOriginalId],
+    0,
+    `${label} \`review split s <N.a's item>\``,
+  );
+  const first = `${label} after N.a's split`;
+  const afterFirst = await exportSession(product, workspace, "s", first);
+  const pcNaId = home
+    ? assertAuditFirstSplit(
+        afterFirst,
+        { rootId, nOriginalId, naOriginalId, naxId, nbId, sId },
+        first,
+      )
+    : null;
 
   // The manual authoring: N.c holding N.c.y under N, N.b.z under N.b. N.b's
   // subtreeHash changes (the premise), so its resolved item reads
@@ -4262,6 +4371,16 @@ export async function runT1079AuditSplits(
   );
   const split = `${label} after N's split`;
   const afterSplit = await exportSession(product, workspace, "s", split);
+  if (pcNaId === null || nbCurrentAtResolve === null) {
+    // T12.0-15's run (`home` false): no assertion of the staging's own ran,
+    // and none follows — the ids of the two items its refusals name.
+    return {
+      pcNId: requireItem(afterSplit.items, "parent-consistency", AU_N, split)
+        .id,
+      sId,
+      session: null,
+    };
+  }
   for (const [id, what] of [
     [nOriginalId, "N's"],
     [naOriginalId, "N.a's"],
@@ -4525,34 +4644,97 @@ export async function runT1079AuditSplits(
   }
 
   return {
-    nOriginalId,
-    naOriginalId,
-    rootId,
     pcNId: pcNItem.id,
-    pcNaId,
-    naxId,
-    nbId,
-    nbzId: nbzItem.id,
-    ncId: ncItem.id,
-    ncyId: ncyItem.id,
     sId,
+    session: {
+      nOriginalId,
+      naOriginalId,
+      rootId,
+      pcNId: pcNItem.id,
+      pcNaId,
+      naxId,
+      nbId,
+      nbzId: nbzItem.id,
+      ncId: ncItem.id,
+      ncyId: ncyItem.id,
+      sId,
+    },
   };
 }
 
-const T10_7_9 = defineProductTest({
-  id: "T10.7-9",
-  title:
-    "`review split` of a `subtree-coherence` item whose scope root has children — in a baseline session, deleted ones included; in an audit session, the current ones alone — replaces it with one `subtree-coherence` item per child subtree (context: the child's ancestor chain, a deleted child's over its baseline-parent link; blockedBy: the one its session's strategy gives a `subtree-coherence` item, never the original's blockers — none in a path-blocks session, its child sections' items in the audit session) plus one `parent-consistency` item for the scope root (context: exactly the scope root's children; blockedBy: the per-child items); a per-child item whose kind and scope node are recorded as decomposed is not created, its decomposition standing in, recursively, in the `parent-consistency` item's blockedBy too; each decomposition item's origin is the `changed` nodes in its scope — for the `parent-consistency` item, in its scope node's subtree, the scope node included — and empty in the audit session; newly created decomposition items enter `unresolved` — asserted on a split of a resolved original (the path-blocks fixture), whose status must not propagate; existing kind+scope items are reused, keeping id, status, note, and recorded state and taking the decomposition's scope and blockedBy (the audit fixture); every item outside the decomposition that was blocked by the original becomes blocked by all its items; the original is removed and its id never reused across subsequent re-derivations in either strategy; the decomposition is recorded durably — `export` presents it — and governs re-derivation, with which `split` ends. Path-blocks fixture (top-level N holding N.a and N.b, and M holding M.k; N's own text and N.a's edited before `create --base`, N's item resolved `no-change`, M.k's text then edited, N's item split): (a) N.a's and N.b's items have empty blockedBy and N's `parent-consistency` item exactly those two; (b) N.a's origin is exactly {N.a}, N.b's empty, and N's `parent-consistency` item's exactly {N, N.a}, never the per-child origins' union; (c) once the split exits, M.k's `subtree-coherence` item and M's `parent-consistency` item (context and origin {M.k}, blockedBy M.k's item) are in the session, `unresolved`, in item order — a product not re-deriving at a split adds neither — and a later `updated` resolve re-adds no item at N. (f) Deleted children: with P's only children P.a and P.b deleted between the baseline and `create`, P's item (scope {P, P.a, P.b}) splits into `subtree-coherence` items scoped at the absent P.a and P.b — presented absent under their baseline identities, origins {P.a} and {P.b}, context exactly the file root and P, never the empty chain the current graph gives an absent node — and P's `parent-consistency` item (context exactly {P.a, P.b}; origin exactly {P, P.a, P.b}); texts and hashes keep their definitions: P's item's scope text is P's current subtree text before the split and its `parent-consistency` item's P's current own text after it, neither carrying P.a's or P.b's token, their recorded hashes for P `query node`'s and their entries for P.a and P.b the explicit absent marker, while the per-child scope texts and the `parent-consistency` item's context texts for P.a and P.b are their baseline subtree texts. (g) In a twin nesting N under G, G's `parent-consistency` item is blocked by exactly G.N's item before the split — unblocked once that item is resolved `no-change` — by exactly G.N.a's and G.N.b's items and G.N's `parent-consistency` item after it, `status` reporting it blocked, and still by those three once G.N.a's item is resolved `updated` and the session re-derived, each read from `export`. Audit fixture (N holding N.a — itself holding N.a.x — and N.b, and the leaf s; after `create`, N.b's item resolved `no-change` with a note and N.a's item split; then N.c holding N.c.y authored under N and N.b.z under N.b; N's item split): (a) N.c's new item's blockedBy is exactly N.c.y's item, never the original's blockers, which a product passing them on to new decomposition items assigns; (b) every decomposition item's origin is empty; (c) N.c.y's and N.b.z's items enter at N's split, `unresolved`, in item order — a product not re-deriving at a split adds neither; (d) no `subtree-coherence` item scoped at N.a enters, at the split or at a later re-derivation; N's `parent-consistency` item's context is exactly {N.a, N.b, N.c} and its blockedBy exactly N.a.x's item, N.a's `parent-consistency` item, N.b's item, and N.c's item; and the root's item is blocked by exactly those four, N's `parent-consistency` item, and s's item; (e) N.b's item keeps its id, note, `current` byte for byte, and stored status (`list` counts it `no-change`; reads present it `invalidated`, never `unresolved`), taking the scope {N.b, N.b.z} and the blockedBy N.b.z's item, while N.a.x's item and N.a's `parent-consistency` item keep their ids. `split` on any other kind, or on a childless scope root — a leaf's (s's) and, in an audit session over Q, Q's once its only child Q.r is deleted by manual edit after `create` — is refused — exit 1 with exactly one code-less finding in T10.7-14's form, `code` and `path` `null`, `locations` `[]` — nothing modified (SPEC 1.6, 5.5, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 12.7, 14)",
-  run: async (product) => {
-    // --- path-blocks fixture: (a), (b), (c), the refusals ---------------------
-    await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      {
-        [PB_FILE]: pbSource("En own v0.", "En ay text v0.", "Em kay text v0."),
-      },
-      (workspace) => runPathBlocksFixture(product, workspace),
-    );
+/**
+ * T10.7-9's audit fixture through N's split (TEST-SPEC T10.7-9(a)–(e); SPEC
+ * 5.5, 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7), in a fresh workspace
+ * holding `T10_7_9_AUDIT_INITIAL_FILES` beside a one-group configuration:
+ * built; `review create --strategy audit --name s`, one item per requirement
+ * node in audit item order (the staging premise, from `status`); N.b's item
+ * resolved `no-change` with a note, its `current` captured from `export` and
+ * N.b's hashes via `query node`; N.a's item split — the original removed,
+ * N.a.x's existing item reused, N.a's parent-consistency item fresh and
+ * `unresolved` (context {N.a.x}, blockedBy N.a.x's item), both origins
+ * empty ((b)), N's item blocked by all items of the decomposition beside
+ * N.b's, the decomposition recorded; N.c holding N.c.y authored under N and
+ * N.b.z under N.b and built — N.b's subtreeHash changed (the premise via
+ * `query node`), no item added; then N's item split, asserting: neither
+ * original's id reused, and no subtree-coherence item scoped at N or N.a
+ * ((d)); (c) N.c.y's and N.b.z's items entered by the re-derivation ending
+ * the split, fresh and `unresolved`, every item in audit item order in
+ * `status` and `export`; N.c's per-child item and N's parent-consistency
+ * item fresh and `unresolved`; (a) N.c's item's context its ancestor chain
+ * and its blockedBy exactly N.c.y's item; (b) every decomposition item's
+ * origin empty; (d) N's parent-consistency item's context exactly {N.a,
+ * N.b, N.c} and its blockedBy exactly N.a.x's item, N.a's parent-consistency
+ * item, N.b's item, and N.c's item, the root's item blocked by exactly those
+ * four, N's parent-consistency item, and s's item, both decompositions
+ * recorded; (e) N.b's item reused — its id, its note, its `current` byte for
+ * byte (the decoded member's JSON rendering, member order included, from
+ * `export` at N.b's resolve and after the split; H-3: its inner shape is the
+ * product's), and its stored status kept, `list` counting it `no-change`
+ * and reads (`status`, `export`) presenting it `invalidated` — taking the
+ * scope {N.b, N.b.z} (every scope node the payload presents,
+ * `requireScopeNodes`) and the blockedBy N.b.z's item; N.a.x's item and
+ * N.a's parent-consistency item keeping their ids. Exported for T10.4-8(b),
+ * which continues on the session it leaves.
+ */
+export async function runT1079AuditSplits(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<T1079AuditSession> {
+  return (await stageT1079AuditSplits(product, workspace, label, true)).session;
+}
 
+/**
+ * T10.7-9's staging (exported for T12.0-15, section-12.0-iv.ts), its five
+ * `split` refusals handed to `visitor.refusal` with T10.7-14's shared check
+ * as `home`, and, where `visitor.home` holds, every other assertion: the
+ * path-blocks fixture (`runPathBlocksFixture`: (a), (b), (c), its two
+ * refusals, a later re-derivation); (f) and (g), the home test's alone; the
+ * audit fixture (`stageT1079AuditSplits`: (a)–(e)), its two refusals, and
+ * a later re-derivation; and the audit session over Q, its refusal once
+ * Q.r is deleted. Each workspace's staging steps and premises, and the
+ * items its refusals name, run either way. `prefix` leads every staging
+ * step's diagnosis.
+ */
+export async function runT1079Stagings(
+  product: ProductBinding,
+  visitor: ReviewRefusalVisitor,
+  prefix = "T10.7-9",
+): Promise<void> {
+  // --- path-blocks fixture: (a), (b), (c), the refusals ---------------------
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    { [PB_FILE]: T10_7_9_N_INITIAL },
+    (workspace) =>
+      runPathBlocksFixture(
+        product,
+        workspace,
+        visitor,
+        `${prefix} path-blocks fixture`,
+      ),
+  );
+
+  if (visitor.home) {
     // --- (f) deleted children -------------------------------------------------
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -4561,7 +4743,7 @@ const T10_7_9 = defineProductTest({
         await runT1079DeletedChildrenArm(
           product,
           workspace,
-          "T10.7-9 deleted-children arm (f)",
+          `${prefix} deleted-children arm (f)`,
         );
       },
     );
@@ -4572,159 +4754,179 @@ const T10_7_9 = defineProductTest({
       { [TW_FILE]: T10_7_9_G_INITIAL },
       (workspace) => runNestedTwinArm(product, workspace),
     );
+  }
 
-    // --- the audit fixture: (a)–(e), its refusals, a later re-derivation ------
-    await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      T10_7_9_AUDIT_INITIAL_FILES,
-      async (workspace) => {
-        const prefix = "T10.7-9 audit fixture";
-        const session = await runT1079AuditSplits(product, workspace, prefix);
+  // --- the audit fixture: (a)–(e), its refusals, a later re-derivation ------
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    T10_7_9_AUDIT_INITIAL_FILES,
+    async (workspace) => {
+      const fixture = `${prefix} audit fixture`;
+      const staged = await stageT1079AuditSplits(
+        product,
+        workspace,
+        fixture,
+        visitor.home,
+      );
 
-        // Refused beside the successful splits (exit 1 in T10.7-14's finding
-        // form, nothing modified — the shared check: the session file and
-        // the whole workspace byte-identical): `split` of N's
-        // parent-consistency item, an item of another kind, and of s's item,
-        // a leaf's, whose scope root has no children (SPEC 10.7).
-        await expectReviewRefusal(
-          product,
-          workspace,
-          ["review", "split", "s", session.pcNId],
-          SESSION_S_REL,
-          `${prefix} [N's parent-consistency item: split on an item of any ` +
-            `other kind is refused, SPEC 10.7]`,
-          { nothingModified: true },
-        );
-        await expectReviewRefusal(
-          product,
-          workspace,
-          ["review", "split", "s", session.sId],
-          SESSION_S_REL,
-          `${prefix} [s's item, a leaf's: split on a subtree-coherence item ` +
-            `whose scope root has no children is refused, SPEC 10.7]`,
-          { nothingModified: true },
-        );
+      // Refused beside the successful splits (exit 1 in T10.7-14's finding
+      // form, nothing modified — the shared check: the session file and
+      // the whole workspace byte-identical): `split` of N's
+      // parent-consistency item, an item of another kind, and of s's item,
+      // a leaf's, whose scope root has no children (SPEC 10.7).
+      await visitReviewRefusal(
+        product,
+        visitor,
+        workspace,
+        ["review", "split", "s", staged.pcNId],
+        SESSION_S_REL,
+        `${fixture} [N's parent-consistency item: split on an item of any ` +
+          `other kind is refused, SPEC 10.7]`,
+      );
+      await visitReviewRefusal(
+        product,
+        visitor,
+        workspace,
+        ["review", "split", "s", staged.sId],
+        SESSION_S_REL,
+        `${fixture} [s's item, a leaf's: split on a subtree-coherence item ` +
+          `whose scope root has no children is refused, SPEC 10.7]`,
+      );
 
-        // A later re-derivation (SPEC 10.5, 10.7): N.a.x's item — the leaf
-        // beneath the decomposed N.a — resolved `updated` re-derives the
-        // session. Both decompositions govern it: no subtree-coherence item
-        // scoped at N or N.a is added back and nothing else enters, every
-        // item keeps its id, neither original's id is reused, and blockedBy
-        // is recomputed with each decomposed reference replaced by all items
-        // of its decomposition, recursively.
-        await resolveOk(
-          product,
-          workspace,
-          "s",
+      // T12.0-15's run (its visitor's `home` false) ends at the refusals:
+      // the staging yields the session's ids where the home test's own
+      // assertions ran, and the rest is the home test's.
+      const session = staged.session;
+      if (session === null) return;
+
+      // A later re-derivation (SPEC 10.5, 10.7): N.a.x's item — the leaf
+      // beneath the decomposed N.a — resolved `updated` re-derives the
+      // session. Both decompositions govern it: no subtree-coherence item
+      // scoped at N or N.a is added back and nothing else enters, every
+      // item keeps its id, neither original's id is reused, and blockedBy
+      // is recomputed with each decomposed reference replaced by all items
+      // of its decomposition, recursively.
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        session.naxId,
+        "updated",
+        `${fixture} \`resolve s <N.a.x's item> --status updated\` — ` +
+          `re-derives the session (SPEC 10.5)`,
+      );
+      const derived = await exportSession(product, workspace, "s", fixture);
+      const later = `${fixture} after the later re-derivation`;
+      assertSameJson(
+        exportKindScopeSequence(derived.items),
+        AU_ORDER_AFTER_SPLIT,
+        `${later} (d): no subtree-coherence item scoped at N or N.a is ` +
+          `added back — each decomposition applies in its place, ` +
+          `recursively (P-9's invariant) — and no other item enters (SPEC ` +
+          `10.1, 10.5, 10.7)`,
+      );
+      for (const [kind, node, id] of [
+        ["subtree-coherence", AU_ROOT, session.rootId],
+        ["parent-consistency", AU_N, session.pcNId],
+        ["parent-consistency", AU_NA, session.pcNaId],
+        ["subtree-coherence", AU_NAX, session.naxId],
+        ["subtree-coherence", AU_NB, session.nbId],
+        ["subtree-coherence", AU_NBZ, session.nbzId],
+        ["subtree-coherence", AU_NC, session.ncId],
+        ["subtree-coherence", AU_NCY, session.ncyId],
+        ["subtree-coherence", AU_S, session.sId],
+      ] as const) {
+        if (requireItem(derived.items, kind, node, later).id !== id) {
+          fail(
+            `${later}: the ${kind} item at ${node} keeps its id ${id} — a ` +
+              `generated or decomposition-produced item matching an ` +
+              `existing one is that item (SPEC 10.5)`,
+          );
+        }
+      }
+      for (const [id, what] of [
+        [session.nOriginalId, "N's"],
+        [session.naOriginalId, "N.a's"],
+      ] as const) {
+        if (derived.items.some((item) => item.id === id)) {
+          fail(
+            `${later}: no item takes ${what} split original's id ${id} — ` +
+              `it is never reused, across re-derivations too (SPEC 10.7)`,
+          );
+        }
+      }
+      assertBlockedBy(
+        requireItemById(derived.items, session.pcNId, later),
+        [session.naxId, session.pcNaId, session.nbId, session.ncId],
+        `${later} (d): N's parent-consistency item is still blocked by ` +
+          `exactly N.a.x's item, N.a's parent-consistency item, N.b's ` +
+          `item, and N.c's item — the reference to the decomposed N.a ` +
+          `replaced by all items of its decomposition (SPEC 10.5, 10.7)`,
+      );
+      assertBlockedBy(
+        requireItemById(derived.items, session.rootId, later),
+        [
           session.naxId,
-          "updated",
-          `${prefix} \`resolve s <N.a.x's item> --status updated\` — ` +
-            `re-derives the session (SPEC 10.5)`,
-        );
-        const derived = await exportSession(product, workspace, "s", prefix);
-        const later = `${prefix} after the later re-derivation`;
-        assertSameJson(
-          exportKindScopeSequence(derived.items),
-          AU_ORDER_AFTER_SPLIT,
-          `${later} (d): no subtree-coherence item scoped at N or N.a is ` +
-            `added back — each decomposition applies in its place, ` +
-            `recursively (P-9's invariant) — and no other item enters (SPEC ` +
-            `10.1, 10.5, 10.7)`,
-        );
-        for (const [kind, node, id] of [
-          ["subtree-coherence", AU_ROOT, session.rootId],
-          ["parent-consistency", AU_N, session.pcNId],
-          ["parent-consistency", AU_NA, session.pcNaId],
-          ["subtree-coherence", AU_NAX, session.naxId],
-          ["subtree-coherence", AU_NB, session.nbId],
-          ["subtree-coherence", AU_NBZ, session.nbzId],
-          ["subtree-coherence", AU_NC, session.ncId],
-          ["subtree-coherence", AU_NCY, session.ncyId],
-          ["subtree-coherence", AU_S, session.sId],
-        ] as const) {
-          if (requireItem(derived.items, kind, node, later).id !== id) {
-            fail(
-              `${later}: the ${kind} item at ${node} keeps its id ${id} — a ` +
-                `generated or decomposition-produced item matching an ` +
-                `existing one is that item (SPEC 10.5)`,
-            );
-          }
-        }
-        for (const [id, what] of [
-          [session.nOriginalId, "N's"],
-          [session.naOriginalId, "N.a's"],
-        ] as const) {
-          if (derived.items.some((item) => item.id === id)) {
-            fail(
-              `${later}: no item takes ${what} split original's id ${id} — ` +
-                `it is never reused, across re-derivations too (SPEC 10.7)`,
-            );
-          }
-        }
-        assertBlockedBy(
-          requireItemById(derived.items, session.pcNId, later),
-          [session.naxId, session.pcNaId, session.nbId, session.ncId],
-          `${later} (d): N's parent-consistency item is still blocked by ` +
-            `exactly N.a.x's item, N.a's parent-consistency item, N.b's ` +
-            `item, and N.c's item — the reference to the decomposed N.a ` +
-            `replaced by all items of its decomposition (SPEC 10.5, 10.7)`,
-        );
-        assertBlockedBy(
-          requireItemById(derived.items, session.rootId, later),
-          [
-            session.naxId,
-            session.pcNaId,
-            session.nbId,
-            session.ncId,
-            session.pcNId,
-            session.sId,
-          ],
-          `${later} (d): the root's item is still blocked by exactly the ` +
-            `items of N's decomposition, N.a's standing in recursively, and ` +
-            `s's item — its child section N's decomposed reference replaced ` +
-            `(SPEC 10.5, 10.6, 10.7)`,
-        );
-      },
-    );
+          session.pcNaId,
+          session.nbId,
+          session.ncId,
+          session.pcNId,
+          session.sId,
+        ],
+        `${later} (d): the root's item is still blocked by exactly the ` +
+          `items of N's decomposition, N.a's standing in recursively, and ` +
+          `s's item — its child section N's decomposed reference replaced ` +
+          `(SPEC 10.5, 10.6, 10.7)`,
+      );
+    },
+  );
 
-    // --- the childless refusal: Q's only child deleted after `create` ---------
-    await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [AQ_FILE]: T10_7_9_Q_INITIAL },
-      async (workspace) => {
-        const prefix = "T10.7-9 audit session over Q";
-        await buildOk(product, workspace, `${prefix} \`build\``);
-        await createAuditSession(product, workspace, "s", prefix);
-        const created = await sessionStatus(product, workspace, "s", prefix);
-        assertSameJson(
-          rowSequence(created),
-          [AQ_ROOT, AQ_Q, AQ_QR].map(
-            (node) => `subtree-coherence ${node} unresolved`,
-          ),
-          `${prefix} staging premise: the audit items, Q.r's among them — Q ` +
-            `holding its child at \`create\` (SPEC 10.6)`,
-        );
-        const qId = requireRow(created, "subtree-coherence", AQ_Q, prefix).id;
-        await workspace.file(AQ_FILE, T10_7_9_Q_CHILD_DELETED);
-        await buildOk(
-          product,
-          workspace,
-          `${prefix} \`build\` after Q.r's deletion`,
-        );
-        await expectReviewRefusal(
-          product,
-          workspace,
-          ["review", "split", "s", qId],
-          SESSION_S_REL,
-          `${prefix} [Q's item, its only child Q.r deleted by manual edit ` +
-            `after create: in an audit session the children are the current ` +
-            `ones alone, so its scope root has none, though its scope as ` +
-            `last assigned still lists Q.r — split on a subtree-coherence ` +
-            `item whose scope root has no children is refused, SPEC 10.7]`,
-          { nothingModified: true },
-        );
-      },
-    );
+  // --- the childless refusal: Q's only child deleted after `create` ---------
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    { [AQ_FILE]: T10_7_9_Q_INITIAL },
+    async (workspace) => {
+      const label = `${prefix} audit session over Q`;
+      await buildOk(product, workspace, `${label} \`build\``);
+      await createAuditSession(product, workspace, "s", label);
+      const created = await sessionStatus(product, workspace, "s", label);
+      assertSameJson(
+        rowSequence(created),
+        [AQ_ROOT, AQ_Q, AQ_QR].map(
+          (node) => `subtree-coherence ${node} unresolved`,
+        ),
+        `${label} staging premise: the audit items, Q.r's among them — Q ` +
+          `holding its child at \`create\` (SPEC 10.6)`,
+      );
+      const qId = requireRow(created, "subtree-coherence", AQ_Q, label).id;
+      await workspace.file(AQ_FILE, T10_7_9_Q_CHILD_DELETED);
+      await buildOk(
+        product,
+        workspace,
+        `${label} \`build\` after Q.r's deletion`,
+      );
+      await visitReviewRefusal(
+        product,
+        visitor,
+        workspace,
+        ["review", "split", "s", qId],
+        SESSION_S_REL,
+        `${label} [Q's item, its only child Q.r deleted by manual edit ` +
+          `after create: in an audit session the children are the current ` +
+          `ones alone, so its scope root has none, though its scope as ` +
+          `last assigned still lists Q.r — split on a subtree-coherence ` +
+          `item whose scope root has no children is refused, SPEC 10.7]`,
+      );
+    },
+  );
+}
+
+const T10_7_9 = defineProductTest({
+  id: "T10.7-9",
+  title:
+    "`review split` of a `subtree-coherence` item whose scope root has children — in a baseline session, deleted ones included; in an audit session, the current ones alone — replaces it with one `subtree-coherence` item per child subtree (context: the child's ancestor chain, a deleted child's over its baseline-parent link; blockedBy: the one its session's strategy gives a `subtree-coherence` item, never the original's blockers — none in a path-blocks session, its child sections' items in the audit session) plus one `parent-consistency` item for the scope root (context: exactly the scope root's children; blockedBy: the per-child items); a per-child item whose kind and scope node are recorded as decomposed is not created, its decomposition standing in, recursively, in the `parent-consistency` item's blockedBy too; each decomposition item's origin is the `changed` nodes in its scope — for the `parent-consistency` item, in its scope node's subtree, the scope node included — and empty in the audit session; newly created decomposition items enter `unresolved` — asserted on a split of a resolved original (the path-blocks fixture), whose status must not propagate; existing kind+scope items are reused, keeping id, status, note, and recorded state and taking the decomposition's scope and blockedBy (the audit fixture); every item outside the decomposition that was blocked by the original becomes blocked by all its items; the original is removed and its id never reused across subsequent re-derivations in either strategy; the decomposition is recorded durably — `export` presents it — and governs re-derivation, with which `split` ends. Path-blocks fixture (top-level N holding N.a and N.b, and M holding M.k; N's own text and N.a's edited before `create --base`, N's item resolved `no-change`, M.k's text then edited, N's item split): (a) N.a's and N.b's items have empty blockedBy and N's `parent-consistency` item exactly those two; (b) N.a's origin is exactly {N.a}, N.b's empty, and N's `parent-consistency` item's exactly {N, N.a}, never the per-child origins' union; (c) once the split exits, M.k's `subtree-coherence` item and M's `parent-consistency` item (context and origin {M.k}, blockedBy M.k's item) are in the session, `unresolved`, in item order — a product not re-deriving at a split adds neither — and a later `updated` resolve re-adds no item at N. (f) Deleted children: with P's only children P.a and P.b deleted between the baseline and `create`, P's item (scope {P, P.a, P.b}) splits into `subtree-coherence` items scoped at the absent P.a and P.b — presented absent under their baseline identities, origins {P.a} and {P.b}, context exactly the file root and P, never the empty chain the current graph gives an absent node — and P's `parent-consistency` item (context exactly {P.a, P.b}; origin exactly {P, P.a, P.b}); texts and hashes keep their definitions: P's item's scope text is P's current subtree text before the split and its `parent-consistency` item's P's current own text after it, neither carrying P.a's or P.b's token, their recorded hashes for P `query node`'s and their entries for P.a and P.b the explicit absent marker, while the per-child scope texts and the `parent-consistency` item's context texts for P.a and P.b are their baseline subtree texts. (g) In a twin nesting N under G, G's `parent-consistency` item is blocked by exactly G.N's item before the split — unblocked once that item is resolved `no-change` — by exactly G.N.a's and G.N.b's items and G.N's `parent-consistency` item after it, `status` reporting it blocked, and still by those three once G.N.a's item is resolved `updated` and the session re-derived, each read from `export`. Audit fixture (N holding N.a — itself holding N.a.x — and N.b, and the leaf s; after `create`, N.b's item resolved `no-change` with a note and N.a's item split; then N.c holding N.c.y authored under N and N.b.z under N.b; N's item split): (a) N.c's new item's blockedBy is exactly N.c.y's item, never the original's blockers, which a product passing them on to new decomposition items assigns; (b) every decomposition item's origin is empty; (c) N.c.y's and N.b.z's items enter at N's split, `unresolved`, in item order — a product not re-deriving at a split adds neither; (d) no `subtree-coherence` item scoped at N.a enters, at the split or at a later re-derivation; N's `parent-consistency` item's context is exactly {N.a, N.b, N.c} and its blockedBy exactly N.a.x's item, N.a's `parent-consistency` item, N.b's item, and N.c's item; and the root's item is blocked by exactly those four, N's `parent-consistency` item, and s's item; (e) N.b's item keeps its id, note, `current` byte for byte, and stored status (`list` counts it `no-change`; reads present it `invalidated`, never `unresolved`), taking the scope {N.b, N.b.z} and the blockedBy N.b.z's item, while N.a.x's item and N.a's `parent-consistency` item keep their ids. `split` on any other kind, or on a childless scope root — a leaf's (s's) and, in an audit session over Q, Q's once its only child Q.r is deleted by manual edit after `create` — is refused — exit 1 with exactly one code-less finding in T10.7-14's form, `code` and `path` `null`, `locations` `[]` — nothing modified (SPEC 1.6, 5.5, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 12.7, 14)",
+  run: async (product) => {
+    await runT1079Stagings(product, REVIEW_REFUSAL_HOME);
   },
 });
 
@@ -4748,6 +4950,15 @@ function r10Spec(paText: string): string {
     "",
   ].join("\n");
 }
+
+// The resolve workspace's initial source: T12.0-15 runs T10.7-10's staging
+// (`runT10710Stagings`) after its own body's earlier invocations, so it is a
+// staged-source record (helpers/staged-mdx.ts, S-9's timing clause) — the
+// home test's first workspace, where plain contents would do.
+const T10_7_10_R_INITIAL = stagedMdx(
+  "T10.7-10/T12.0-15 specs/R.mdx with p holding p.a, p.a's text at v0 (the resolve workspace's initial source)",
+  r10Spec("Paa line v0."),
+);
 
 // The p.a edit follows the body's first `build`, so it is a staged-source
 // record (helpers/staged-mdx.ts, S-9: judged before any product exists).
@@ -4805,273 +5016,282 @@ async function assertPresentedNote(
   }
 }
 
+/**
+ * T10.7-10's staging (exported for T12.0-15, section-12.0-iv.ts): a
+ * workspace of `SPECS_ONLY_CONFIG` and specs/R.mdx (p holding p.a), built;
+ * the audit session s, its items' ids read from `status`, p's item blocked
+ * by p.a's (the premise); `resolve` of p's blocked item, refused, handed to
+ * `visitor.refusal` with T10.7-14's shared check as `home`; and, where
+ * `visitor.home` holds, the home test's own arms — p.a's v0 capture (taken
+ * before the refusal), the unknown session and item, the `--note`
+ * resolves, the flip to `skipped`, and the re-resolve of the invalidated
+ * item. `prefix` leads every staging step's diagnosis.
+ */
+export async function runT10710Stagings(
+  product: ProductBinding,
+  visitor: ReviewRefusalVisitor,
+  prefix = "T10.7-10",
+): Promise<void> {
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    { [R10_FILE]: T10_7_10_R_INITIAL },
+    async (workspace) => {
+      await buildOk(product, workspace, `${prefix} \`build\` at v0`);
+      await createAuditSession(product, workspace, "s", prefix);
+      const v0 = visitor.home
+        ? await queryNode(product, workspace, R10_PA, `${prefix} v0 capture`)
+        : null;
+
+      const initial = await sessionStatus(product, workspace, "s", prefix);
+      const idP = requireRow(initial, "subtree-coherence", R10_P, prefix).id;
+      const idPA = requireRow(initial, "subtree-coherence", R10_PA, prefix).id;
+      const pRow = requireRow(initial, "subtree-coherence", R10_P, prefix);
+      if (!pRow.blocked) {
+        fail(
+          `${prefix} staging premise: p's item is blocked by p.a's ` +
+            `unresolved item (SPEC 10.3, 10.6)`,
+        );
+      }
+
+      // Resolving a blocked item is refused: exit 1 in T10.7-14's finding
+      // form, nothing modified (the shared check: the session file and the
+      // whole workspace byte-identical).
+      await visitReviewRefusal(
+        product,
+        visitor,
+        workspace,
+        ["review", "resolve", "s", idP, "--status", "no-change"],
+        SESSION_S_REL,
+        `${prefix} [p's blocked item: resolving a blocked item is refused, ` +
+          `SPEC 10.7]`,
+      );
+
+      // T12.0-15's run (its visitor's `home` false) ends at the refusal:
+      // what follows is the home test's own, and v0, captured for it, is
+      // null there.
+      if (v0 === null) return;
+
+      // Unknown session and unknown item are usage errors (SPEC 10.7,
+      // 12.0): exit 2, the 12.7 error document as the entire stdout
+      // under --json.
+      for (const [argv, why] of [
+        [
+          ["review", "resolve", "nosuch", idPA, "--status", "no-change"],
+          "an unknown session name",
+        ],
+        [
+          ["review", "resolve", "s", "no-such-item", "--status", "no-change"],
+          "an unknown item ID",
+        ],
+      ] as const) {
+        const context = `${prefix} \`${argv.join(" ")} --json\` (${why})`;
+        const result = await expectExit(
+          product,
+          workspace,
+          [...argv, "--json"],
+          2,
+          `${context} — unknown names in a review command's arguments are ` +
+            `usage errors (SPEC 10.7, 12.0)`,
+        );
+        expectErrorDocument(
+          result,
+          `${context} — under --json, the exit-2 error document is the ` +
+            `entire stdout (SPEC 12.0, 12.7, H-5)`,
+        );
+      }
+
+      // Resolve with --note: status set, current relevant state recorded
+      // (the v0 hashes), note stored and reported by show and export.
+      await expectExit(
+        product,
+        workspace,
+        [
+          "review",
+          "resolve",
+          "s",
+          idPA,
+          "--status",
+          "no-change",
+          "--note",
+          R10_NOTE,
+        ],
+        0,
+        `${prefix} \`review resolve s <p.a's item> --status no-change ` +
+          `--note <text>\``,
+      );
+      const noted = await showItem(product, workspace, "s", idPA, prefix);
+      if (noted.status !== "no-change") {
+        fail(
+          `${prefix}: resolve sets the status (SPEC 10.7); expected ` +
+            `no-change, got ${noted.status}`,
+        );
+      }
+      if (noted.note !== R10_NOTE) {
+        fail(
+          `${prefix}: the --note text is stored and reported (SPEC 10.2, ` +
+            `10.7); expected ${JSON.stringify(R10_NOTE)}, got ` +
+            JSON.stringify(noted.note),
+        );
+      }
+      assertRecordedHolds(
+        noted.current,
+        v0.hashes.subtreeHash,
+        "the resolve-moment (v0) subtreeHash",
+        `${prefix} post-resolve \`current\``,
+      );
+      assertRecordedHolds(
+        noted.current,
+        v0.hashes.metadataHash,
+        "the scope node's metadataHash",
+        `${prefix} post-resolve \`current\``,
+      );
+      const exportedNote = requireItemById(
+        (await exportSession(product, workspace, "s", prefix)).items,
+        idPA,
+        prefix,
+      ).note;
+      if (exportedNote !== R10_NOTE) {
+        fail(
+          `${prefix}: \`export\` reports the stored note too (SPEC 10.2, ` +
+            `10.7); expected ${JSON.stringify(R10_NOTE)}, got ` +
+            JSON.stringify(exportedNote),
+        );
+      }
+
+      // Each resolve replaces the note (SPEC 10.7): a second resolve with
+      // `--note`, the status unchanged, leaves exactly its own text in
+      // `show` and `export` — neither the first note kept nor the two
+      // combined.
+      await expectExit(
+        product,
+        workspace,
+        [
+          "review",
+          "resolve",
+          "s",
+          idPA,
+          "--status",
+          "no-change",
+          "--note",
+          R10_NOTE_2,
+        ],
+        0,
+        `${prefix} \`review resolve s <p.a's item> --status no-change ` +
+          `--note <second text>\``,
+      );
+      await assertPresentedNote(
+        product,
+        workspace,
+        "s",
+        idPA,
+        R10_NOTE_2,
+        `${prefix} after the second \`--note\` resolve`,
+        NOTE_REPLACED_RULE,
+      );
+
+      // Flipping a resolved status works — no edit in between: no-change
+      // becomes skipped on the same unblocked item. The flip gives no
+      // `--note`, so it removes the note as well (SPEC 10.7): the item
+      // then carries none in `show` or `export`.
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        idPA,
+        "skipped",
+        `${prefix} \`review resolve s <p.a's resolved item> --status ` +
+          `skipped\` — resolve applies to any unblocked item regardless ` +
+          `of status (SPEC 10.7)`,
+      );
+      if (
+        (await showItem(product, workspace, "s", idPA, prefix)).status !==
+        "skipped"
+      ) {
+        fail(
+          `${prefix}: flipping a resolved status works — the item now ` +
+            `reports skipped (SPEC 10.3, 10.7)`,
+        );
+      }
+      await assertPresentedNote(
+        product,
+        workspace,
+        "s",
+        idPA,
+        null,
+        `${prefix} after the flip, a resolve without \`--note\``,
+        NOTE_REPLACED_RULE,
+      );
+
+      // Invalidate the resolution: edit p.a, with hash premises, then
+      // re-resolve the invalidated item — it works like any resolve and
+      // records the new current state (v1), clearing the invalidation.
+      await workspace.file(R10_FILE, T10_7_10_R_PA_V1);
+      await buildOk(product, workspace, `${prefix} \`build\` at v1`);
+      const v1 = await queryNode(
+        product,
+        workspace,
+        R10_PA,
+        `${prefix} v1 capture`,
+      );
+      assertPairwiseDistinct(
+        [
+          ["the v0 subtreeHash", v0.hashes.subtreeHash],
+          ["the v1 subtreeHash", v1.hashes.subtreeHash],
+          ["p.a's metadataHash", v0.hashes.metadataHash],
+        ],
+        prefix,
+      );
+      const staleRow = requireRow(
+        await sessionStatus(product, workspace, "s", prefix),
+        "subtree-coherence",
+        R10_PA,
+        prefix,
+      );
+      if (staleRow.status !== "invalidated") {
+        fail(
+          `${prefix} staging premise: after the edit, p.a's resolved item ` +
+            `reads invalidated (SPEC 10.4); got ${staleRow.status}`,
+        );
+      }
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        idPA,
+        "no-change",
+        `${prefix} \`review resolve s <p.a's invalidated item> --status ` +
+          `no-change\` — re-resolving an invalidated item works (SPEC 10.7)`,
+      );
+      const reResolved = await showItem(product, workspace, "s", idPA, prefix);
+      if (reResolved.status !== "no-change") {
+        fail(
+          `${prefix}: the re-resolve set the status and recorded the ` +
+            `current state, so the item no longer reads invalidated ` +
+            `(SPEC 10.4, 10.7); got ${reResolved.status}`,
+        );
+      }
+      assertRecordedHolds(
+        reResolved.current,
+        v1.hashes.subtreeHash,
+        "the re-resolve-moment (v1) subtreeHash",
+        `${prefix} post-re-resolve \`current\``,
+      );
+      assertRecordedLacks(
+        reResolved.current,
+        v0.hashes.subtreeHash,
+        "the previous resolve's (v0) subtreeHash",
+        `${prefix} post-re-resolve \`current\``,
+      );
+    },
+  );
+}
+
 const T10_7_10 = defineProductTest({
   id: "T10.7-10",
   title:
     "`review resolve` sets the status and records the current relevant state — `current` holds the resolve-moment hash captures and, after a re-resolve bracketing an edit, the new moment's values and not the old (pairwise-distinct `query node` captures discriminate); it works on any unblocked item regardless of status: flipping a resolved `no-change` to `skipped` without any edit works, and re-resolving an `invalidated` item works and clears the invalidation; resolving a blocked item is refused — exit 1 with exactly one code-less finding in T10.7-14's form, `code` and `path` `null`, `locations` `[]` — nothing modified; an unknown session name or item ID is exit 2 with the 12.7 error document as the entire stdout under `--json`; `--note` text is stored and reported by `show` and `export`, and each resolve replaces the note: a second resolve with `--note`, its status unchanged, leaves exactly its own text in both, and a further resolve without `--note` (the flip to `skipped`) leaves the item no note in either (SPEC 10.2, 10.3, 10.4, 10.7, 12.0, 12.7, 14)",
   run: async (product) => {
-    await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [R10_FILE]: r10Spec("Paa line v0.") },
-      async (workspace) => {
-        const prefix = "T10.7-10";
-        await buildOk(product, workspace, `${prefix} \`build\` at v0`);
-        await createAuditSession(product, workspace, "s", prefix);
-        const v0 = await queryNode(
-          product,
-          workspace,
-          R10_PA,
-          `${prefix} v0 capture`,
-        );
-
-        const initial = await sessionStatus(product, workspace, "s", prefix);
-        const idP = requireRow(initial, "subtree-coherence", R10_P, prefix).id;
-        const idPA = requireRow(
-          initial,
-          "subtree-coherence",
-          R10_PA,
-          prefix,
-        ).id;
-        const pRow = requireRow(initial, "subtree-coherence", R10_P, prefix);
-        if (!pRow.blocked) {
-          fail(
-            `${prefix} staging premise: p's item is blocked by p.a's ` +
-              `unresolved item (SPEC 10.3, 10.6)`,
-          );
-        }
-
-        // Resolving a blocked item is refused: exit 1 in T10.7-14's finding
-        // form, nothing modified (the shared check: the session file and the
-        // whole workspace byte-identical).
-        await expectReviewRefusal(
-          product,
-          workspace,
-          ["review", "resolve", "s", idP, "--status", "no-change"],
-          SESSION_S_REL,
-          `${prefix} [p's blocked item: resolving a blocked item is refused, ` +
-            `SPEC 10.7]`,
-          { nothingModified: true },
-        );
-
-        // Unknown session and unknown item are usage errors (SPEC 10.7,
-        // 12.0): exit 2, the 12.7 error document as the entire stdout
-        // under --json.
-        for (const [argv, why] of [
-          [
-            ["review", "resolve", "nosuch", idPA, "--status", "no-change"],
-            "an unknown session name",
-          ],
-          [
-            ["review", "resolve", "s", "no-such-item", "--status", "no-change"],
-            "an unknown item ID",
-          ],
-        ] as const) {
-          const context = `${prefix} \`${argv.join(" ")} --json\` (${why})`;
-          const result = await expectExit(
-            product,
-            workspace,
-            [...argv, "--json"],
-            2,
-            `${context} — unknown names in a review command's arguments are ` +
-              `usage errors (SPEC 10.7, 12.0)`,
-          );
-          expectErrorDocument(
-            result,
-            `${context} — under --json, the exit-2 error document is the ` +
-              `entire stdout (SPEC 12.0, 12.7, H-5)`,
-          );
-        }
-
-        // Resolve with --note: status set, current relevant state recorded
-        // (the v0 hashes), note stored and reported by show and export.
-        await expectExit(
-          product,
-          workspace,
-          [
-            "review",
-            "resolve",
-            "s",
-            idPA,
-            "--status",
-            "no-change",
-            "--note",
-            R10_NOTE,
-          ],
-          0,
-          `${prefix} \`review resolve s <p.a's item> --status no-change ` +
-            `--note <text>\``,
-        );
-        const noted = await showItem(product, workspace, "s", idPA, prefix);
-        if (noted.status !== "no-change") {
-          fail(
-            `${prefix}: resolve sets the status (SPEC 10.7); expected ` +
-              `no-change, got ${noted.status}`,
-          );
-        }
-        if (noted.note !== R10_NOTE) {
-          fail(
-            `${prefix}: the --note text is stored and reported (SPEC 10.2, ` +
-              `10.7); expected ${JSON.stringify(R10_NOTE)}, got ` +
-              JSON.stringify(noted.note),
-          );
-        }
-        assertRecordedHolds(
-          noted.current,
-          v0.hashes.subtreeHash,
-          "the resolve-moment (v0) subtreeHash",
-          `${prefix} post-resolve \`current\``,
-        );
-        assertRecordedHolds(
-          noted.current,
-          v0.hashes.metadataHash,
-          "the scope node's metadataHash",
-          `${prefix} post-resolve \`current\``,
-        );
-        const exportedNote = requireItemById(
-          (await exportSession(product, workspace, "s", prefix)).items,
-          idPA,
-          prefix,
-        ).note;
-        if (exportedNote !== R10_NOTE) {
-          fail(
-            `${prefix}: \`export\` reports the stored note too (SPEC 10.2, ` +
-              `10.7); expected ${JSON.stringify(R10_NOTE)}, got ` +
-              JSON.stringify(exportedNote),
-          );
-        }
-
-        // Each resolve replaces the note (SPEC 10.7): a second resolve with
-        // `--note`, the status unchanged, leaves exactly its own text in
-        // `show` and `export` — neither the first note kept nor the two
-        // combined.
-        await expectExit(
-          product,
-          workspace,
-          [
-            "review",
-            "resolve",
-            "s",
-            idPA,
-            "--status",
-            "no-change",
-            "--note",
-            R10_NOTE_2,
-          ],
-          0,
-          `${prefix} \`review resolve s <p.a's item> --status no-change ` +
-            `--note <second text>\``,
-        );
-        await assertPresentedNote(
-          product,
-          workspace,
-          "s",
-          idPA,
-          R10_NOTE_2,
-          `${prefix} after the second \`--note\` resolve`,
-          NOTE_REPLACED_RULE,
-        );
-
-        // Flipping a resolved status works — no edit in between: no-change
-        // becomes skipped on the same unblocked item. The flip gives no
-        // `--note`, so it removes the note as well (SPEC 10.7): the item
-        // then carries none in `show` or `export`.
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          idPA,
-          "skipped",
-          `${prefix} \`review resolve s <p.a's resolved item> --status ` +
-            `skipped\` — resolve applies to any unblocked item regardless ` +
-            `of status (SPEC 10.7)`,
-        );
-        if (
-          (await showItem(product, workspace, "s", idPA, prefix)).status !==
-          "skipped"
-        ) {
-          fail(
-            `${prefix}: flipping a resolved status works — the item now ` +
-              `reports skipped (SPEC 10.3, 10.7)`,
-          );
-        }
-        await assertPresentedNote(
-          product,
-          workspace,
-          "s",
-          idPA,
-          null,
-          `${prefix} after the flip, a resolve without \`--note\``,
-          NOTE_REPLACED_RULE,
-        );
-
-        // Invalidate the resolution: edit p.a, with hash premises, then
-        // re-resolve the invalidated item — it works like any resolve and
-        // records the new current state (v1), clearing the invalidation.
-        await workspace.file(R10_FILE, T10_7_10_R_PA_V1);
-        await buildOk(product, workspace, `${prefix} \`build\` at v1`);
-        const v1 = await queryNode(
-          product,
-          workspace,
-          R10_PA,
-          `${prefix} v1 capture`,
-        );
-        assertPairwiseDistinct(
-          [
-            ["the v0 subtreeHash", v0.hashes.subtreeHash],
-            ["the v1 subtreeHash", v1.hashes.subtreeHash],
-            ["p.a's metadataHash", v0.hashes.metadataHash],
-          ],
-          prefix,
-        );
-        const staleRow = requireRow(
-          await sessionStatus(product, workspace, "s", prefix),
-          "subtree-coherence",
-          R10_PA,
-          prefix,
-        );
-        if (staleRow.status !== "invalidated") {
-          fail(
-            `${prefix} staging premise: after the edit, p.a's resolved item ` +
-              `reads invalidated (SPEC 10.4); got ${staleRow.status}`,
-          );
-        }
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          idPA,
-          "no-change",
-          `${prefix} \`review resolve s <p.a's invalidated item> --status ` +
-            `no-change\` — re-resolving an invalidated item works (SPEC 10.7)`,
-        );
-        const reResolved = await showItem(
-          product,
-          workspace,
-          "s",
-          idPA,
-          prefix,
-        );
-        if (reResolved.status !== "no-change") {
-          fail(
-            `${prefix}: the re-resolve set the status and recorded the ` +
-              `current state, so the item no longer reads invalidated ` +
-              `(SPEC 10.4, 10.7); got ${reResolved.status}`,
-          );
-        }
-        assertRecordedHolds(
-          reResolved.current,
-          v1.hashes.subtreeHash,
-          "the re-resolve-moment (v1) subtreeHash",
-          `${prefix} post-re-resolve \`current\``,
-        );
-        assertRecordedLacks(
-          reResolved.current,
-          v0.hashes.subtreeHash,
-          "the previous resolve's (v0) subtreeHash",
-          `${prefix} post-re-resolve \`current\``,
-        );
-      },
-    );
+    await runT10710Stagings(product, REVIEW_REFUSAL_HOME);
   },
 });
 

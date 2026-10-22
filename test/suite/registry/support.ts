@@ -1017,6 +1017,72 @@ export async function expectReviewRefusal(
 }
 
 /**
+ * One refused `review` invocation a home test's staging reaches — T10.7-1's
+ * refused `create`s (section-10.7-i.ts), T10.7-9's refused `split`s and
+ * T10.7-10's refused `resolve` (section-10.7-ii.ts) — handed to the
+ * staging's visitor at the state it runs on: its label, leading every
+ * diagnosis of it, and its command line without `--json` (each check, and
+ * T12.0-15's twin, appends it).
+ */
+export interface ReviewRefusal {
+  readonly label: string;
+  readonly argv: readonly string[];
+}
+
+/**
+ * What one run of a refusal staging does (section-10.7-i.ts
+ * `runT1071Stagings`, section-10.7-ii.ts `runT1079Stagings` and
+ * `runT10710Stagings`): at each refused invocation `refusal`, handed the
+ * home test's own check of it as `home` — `expectReviewRefusal`, T10.7-14's
+ * finding form, or section-10.7-i.ts' `expectCreateCorruptionReported`, the
+ * corruption reported in a `create` refusal's place — and, where `home`
+ * holds, the staging's other assertions: the home test's arms and outcomes
+ * beside the refusals. The home tests run `home` throughout
+ * (`REVIEW_REFUSAL_HOME`); T12.0-15 runs its human twin at each refusal
+ * instead and nothing else (section-12.0-iv.ts). Either way the staging
+ * keeps its premises and the ids its refusals name.
+ */
+export interface ReviewRefusalVisitor {
+  readonly refusal: (
+    workspace: TestWorkspace,
+    refusal: ReviewRefusal,
+    home: () => Promise<void>,
+  ) => Promise<void>;
+  readonly home: boolean;
+}
+
+/**
+ * The home tests' own visitor of their refusal stagings: every refusal
+ * check and every other assertion theirs.
+ */
+export const REVIEW_REFUSAL_HOME: ReviewRefusalVisitor = {
+  refusal: (_workspace, _refusal, home) => home(),
+  home: true,
+};
+
+/**
+ * Hand one code-less refusal to `visitor` at the state it runs on: `argv`
+ * (without `--json`) labelled `label`, its `home` the shared T10.7-14 check
+ * (`expectReviewRefusal`) with `sessionRel` the session file the refusal
+ * names and the whole-root compare (`nothingModified`: every such site of
+ * T10.7-1, T10.7-9, and T10.7-10 states nothing modified).
+ */
+export async function visitReviewRefusal(
+  product: ProductBinding,
+  visitor: ReviewRefusalVisitor,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  sessionRel: string,
+  label: string,
+): Promise<void> {
+  await visitor.refusal(workspace, { label, argv }, async () => {
+    await expectReviewRefusal(product, workspace, argv, sessionRel, label, {
+      nothingModified: true,
+    });
+  });
+}
+
+/**
  * Assert a condition-10 (stale generated output) finding instructs
  * rebuilding: its message names `build` (`/build/i`; `rebuild` qualifies,
  * H-3). SPEC 14.10 has each per-file finding — a missing or mismatched
