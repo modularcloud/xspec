@@ -9,7 +9,13 @@
 // sections deleted; `build` after every edit), and asserts P-9's invariants
 // after `create` and after every subsequent operation:
 //
-//   * at most one item per kind and scope node (SPEC 10.1, 10.5);
+//   * at most one item per kind and scope node, and none whose kind and
+//     scope node are recorded as decomposed (SPEC 10.1, 10.5, 10.7) — read
+//     from `export`'s items and recorded decompositions, scope nodes
+//     compared as canonical identities (SPEC 5.4, 10.4), which the harness
+//     derives from the journaled operations its own draw performed, as P-6
+//     maps identities: P-9's draws perform none, so the mapping is the
+//     identity (`canonicalScopeNode` below);
 //   * `blockedBy` acyclic — and naming only item ids present in the session
 //     (SPEC 10.1: a stored session violating either invariant is corrupt);
 //   * retired ids never reused: `split` removes the original item and its id
@@ -25,6 +31,13 @@
 //     (`unresolved` or `invalidated`), every one of its blockers is resolved
 //     in the same view, and fully-resolved is reported exactly when no item
 //     needs review (SPEC 10.3, 10.7);
+//   * immediately after any `resolve`, with no workspace edit between, a
+//     read presents the resolved item with the status just set, never
+//     `invalidated` (SPEC 10.4: the recorded state is taken against the
+//     item as re-derived — an `updated` resolve re-derives the session
+//     first, 10.5 — and the recorded context set is the context a read of
+//     the same workspace presents) — read from the post-operation sweep's
+//     `export` of the resolved session, its first read after the `resolve`;
 //   * reads never change session bytes: every read this body issues
 //     (`status`, `next`, `show`, `export`, `list`) is bracketed by byte
 //     captures of every session file, compared exactly (SPEC 10.4:
@@ -100,10 +113,17 @@
 // edit kinds, all three resolve statuses, split, the status+show read, the
 // extra create) occurs across the fixed trial set — and that every staged
 // source, initial and after every edit, parses under remark-mdx — so CI
-// (E-5) exercises the full menu deterministically.
+// (E-5) exercises the full menu deterministically. A later instrumented run
+// of the same trials against the built product found both checks added for
+// the revised entry exercised: of the sweeps' 50 exports, 15 carry recorded
+// decompositions (4 of them two, a decomposition's item decomposed again),
+// and each of the 11 resolves (5 `updated`, 5 `no-change`, 1 `skipped`) is
+// followed by its post-resolve check, 3 of them in a session already
+// holding a decomposition.
 
 import type {
   ExportReport,
+  ItemKind,
   ItemStatus,
   NextReport,
   ReviewItem,
@@ -751,6 +771,38 @@ async function createAuditSession(
   sessions.push({ name, retired: new Set(), present: new Set() });
 }
 
+/**
+ * A scope node's canonical identity (SPEC 5.4), the form in which P-9
+ * compares scope nodes (SPEC 10.4: item matching, decomposition matching,
+ * and the at-most-one invariant compare requirement nodes as canonical
+ * identities, never as spellings) — derived, as TEST-SPEC P-9 requires,
+ * from the journaled operations the draw itself performed, mapping
+ * identities as P-6 does (section-16-p5-p6.ts: each `rename` and `move` it
+ * requests contributes its identity map, the maps composed in journal
+ * order). P-9's generator draws no journaled operation — its edits replace
+ * prose and add and delete sections, and `review` appends no journal entry
+ * (SPEC 6.1: only `rename` and `move` do) — so every trial's journal stays
+ * empty and every node's canonical identity is its identity paired with
+ * the journal's start: the mapping is the identity, and two scope nodes a
+ * read presents are one canonical identity exactly when their identities
+ * are equal (and no identity names two nodes: section segments never
+ * recur, module header). Every comparison goes through this function, the
+ * rule's one place: a generator drawing `rename` or `move` derives the
+ * canonical identity here from the per-operation maps it requested and the
+ * node each presented identity names — never from the presented spelling
+ * alone, since an absent node is presented under its recorded identity
+ * mapped forward (SPEC 10.4), which a later operation can leave equal to a
+ * present node's.
+ */
+function canonicalScopeNode(presented: string): string {
+  return presented;
+}
+
+/** The (kind, canonical scope node) pair P-9 compares items by (SPEC 10.4). */
+function kindScopeKey(kind: ItemKind, scopeNode: string): string {
+  return JSON.stringify([kind, canonicalScopeNode(scopeNode)]);
+}
+
 /** The structural invariants of one session's export view (module header). */
 function assertSessionInvariants(
   tracker: SessionTracker,
@@ -772,20 +824,48 @@ function assertSessionInvariants(
     byId.set(item.id, item);
   }
 
-  // At most one item per kind and scope node (P-9; SPEC 10.1, 10.5).
-  const byKindScope = new Map<string, string>();
+  // At most one item per kind and scope node (P-9; SPEC 10.1, 10.5), scope
+  // nodes compared as canonical identities (SPEC 10.4).
+  const byKindScope = new Map<string, ReviewItem>();
   for (const item of items) {
-    const key = `${item.kind} ${item.scope.node}`;
+    const key = kindScopeKey(item.kind, item.scope.node);
     const prior = byKindScope.get(key);
     if (prior !== undefined) {
       fail(
         `${context}: at most one item per kind and scope node (P-9; ` +
           `SPEC 10.1, 10.5: a session never contains two items with the ` +
-          `same kind and scope node) — items ${prior} and ${item.id} are ` +
-          `both \`${key}\``,
+          `same kind and scope node, scope nodes compared as canonical ` +
+          `identities, 10.4) — items ${prior.id} (\`${prior.kind} ` +
+          `${prior.scope.node}\`) and ${item.id} (\`${item.kind} ` +
+          `${item.scope.node}\`) share their kind and canonical scope node`,
       );
     }
-    byKindScope.set(key, item.id);
+    byKindScope.set(key, item);
+  }
+
+  // None whose kind and scope node are recorded as decomposed (P-9; SPEC
+  // 10.1, 10.5, 10.7: a generated item recorded as decomposed by `split` is
+  // never added back — its decomposition applies instead — and a session
+  // holding one is corrupt), read from the same export's recorded
+  // decompositions, scope nodes compared as canonical identities (10.4).
+  const decomposed = new Set(
+    exported.decompositions.map((decomposition) =>
+      kindScopeKey(decomposition.kind, decomposition.scope),
+    ),
+  );
+  for (const item of items) {
+    if (decomposed.has(kindScopeKey(item.kind, item.scope.node))) {
+      fail(
+        `${context}: no item's kind and scope node are recorded as ` +
+          `decomposed (P-9; SPEC 10.1, 10.5, 10.7: a generated item whose ` +
+          `kind and scope node are recorded as decomposed by split is never ` +
+          `added back — its decomposition applies instead — and a session ` +
+          `holding one is corrupt; scope nodes compared as canonical ` +
+          `identities, 10.4) — item ${item.id} is \`${item.kind} ` +
+          `${item.scope.node}\`, which the export's recorded decompositions ` +
+          `(${JSON.stringify(exported.decompositions)}) name`,
+      );
+    }
   }
 
   // blockedBy names only present ids (SPEC 10.1) and is acyclic (P-9).
@@ -955,9 +1035,63 @@ function assertNextContract(
   }
 }
 
+/** The item a `resolve` just set, for the read that follows it (P-9). */
+interface ResolvedItem {
+  readonly session: string;
+  readonly id: string;
+  readonly kind: ItemKind;
+  readonly scope: string;
+  readonly status: ResolveStatus;
+}
+
+/**
+ * Immediately after a `resolve`, with no workspace edit between, a read
+ * presents the resolved item with the status just set, never `invalidated`
+ * (P-9; SPEC 10.4: resolving assigns the item its current context set and
+ * records its relevant state against the item as re-derived — an `updated`
+ * resolve once the re-derivation it triggers, 10.5, is done — so the
+ * recorded context set is the context a read of the same workspace
+ * presents, and nothing the read compares has changed since). The read is
+ * the post-operation sweep's `export` of the resolved session, its first
+ * read after the `resolve`: only reads, which change no session byte, run
+ * between them. The item is found by its id — resolving keeps it in the
+ * session, as every operation but `split` keeps every item (SPEC 10.5,
+ * 10.7).
+ */
+function assertResolvedStatusPresented(
+  resolved: ResolvedItem,
+  exported: ExportReport,
+  context: string,
+): void {
+  const setBy =
+    `\`review resolve ${resolved.session} ${resolved.id} --status ` +
+    `${resolved.status}\` (${resolved.kind} ${resolved.scope})`;
+  const item = exported.items.find((candidate) => candidate.id === resolved.id);
+  if (item === undefined) {
+    fail(
+      `${context}: immediately after ${setBy}, with no workspace edit ` +
+        `between, a read presents the resolved item with the status just ` +
+        `set (P-9; SPEC 10.4) — the export holds no item ${resolved.id} ` +
+        `(items leave a session only through split, SPEC 10.5, 10.7)`,
+    );
+  }
+  if (item.status !== resolved.status) {
+    fail(
+      `${context}: immediately after ${setBy}, with no workspace edit ` +
+        `between, a read presents the resolved item with the status just ` +
+        `set, never \`invalidated\` (P-9; SPEC 10.4: the recorded state is ` +
+        `taken against the item as re-derived, and the recorded context ` +
+        `set is the context a read of the same workspace presents) — the ` +
+        `export presents ${item.id} (\`${item.kind} ${item.scope.node}\`) ` +
+        `with status ${item.status}`,
+    );
+  }
+}
+
 /**
  * The full invariant sweep, run after `create` and after every operation:
- * per session an `export` (structural invariants) and a `next` (contract),
+ * per session an `export` (structural invariants, and — after a `resolve`,
+ * for its session — the resolved item's status) and a `next` (contract),
  * then one `list` — every read byte-stable, exit 0, decodable (P-9
  * "non-corrupt": a corrupt session exits 1 from every subcommand naming it,
  * SPEC 10.1, 14.21).
@@ -967,6 +1101,7 @@ async function sweepInvariants(
   workspace: TestWorkspace,
   sessions: readonly SessionTracker[],
   label: string,
+  resolved: ResolvedItem | null,
 ): Promise<void> {
   for (const tracker of sessions) {
     const exportLabel = `${label} — \`review export ${tracker.name} --json\``;
@@ -981,6 +1116,9 @@ async function sweepInvariants(
       exportLabel,
     );
     assertSessionInvariants(tracker, exported, exportLabel);
+    if (resolved !== null && resolved.session === tracker.name) {
+      assertResolvedStatusPresented(resolved, exported, exportLabel);
+    }
     const nextLabel = `${label} — \`review next ${tracker.name} --json\``;
     const next = decodeNextReport(
       await stableJsonRead(
@@ -1022,7 +1160,11 @@ async function sweepInvariants(
   }
 }
 
-/** Execute one drawn operation (module header: validity discipline). */
+/**
+ * Execute one drawn operation (module header: validity discipline); a
+ * `resolve` returns the item it set, for the sweep's read that follows it,
+ * every other operation null.
+ */
 async function executeOp(
   product: ProductBinding,
   workspace: TestWorkspace,
@@ -1030,7 +1172,7 @@ async function executeOp(
   sessions: SessionTracker[],
   op: P9Op,
   label: string,
-): Promise<void> {
+): Promise<ResolvedItem | null> {
   switch (op.kind) {
     case "edit": {
       applyP9Edit(model, op.edit);
@@ -1046,11 +1188,11 @@ async function executeOp(
         `${label} — \`build\` after the edit (edited workspaces stay valid ` +
           `by construction)`,
       );
-      return;
+      return null;
     }
     case "createSession": {
       await createAuditSession(product, workspace, sessions, label);
-      return;
+      return null;
     }
     case "read": {
       // Every read operation exercises both non-sweep reads: `status`, then
@@ -1090,7 +1232,7 @@ async function executeOp(
             `asked for ${row.id}, got ${item.id}`,
         );
       }
-      return;
+      return null;
     }
     case "resolve": {
       const tracker = sessionAt(sessions, op.session);
@@ -1123,7 +1265,13 @@ async function executeOp(
           `${row.scope}) with --status ${op.status} is a valid operation ` +
           `regardless of its current status and must succeed (SPEC 10.7)`,
       );
-      return;
+      return {
+        session: tracker.name,
+        id: row.id,
+        kind: row.kind,
+        scope: row.scope,
+        status: op.status,
+      };
     }
     case "split": {
       const tracker = sessionAt(sessions, op.session);
@@ -1141,7 +1289,7 @@ async function executeOp(
       );
       // No eligible target: the operation degrades to the status read it
       // already performed (module header) — never an invalid `split`.
-      if (eligible.length === 0) return;
+      if (eligible.length === 0) return null;
       const row = eligible[op.rank % eligible.length];
       await expectExit(
         product,
@@ -1153,7 +1301,7 @@ async function executeOp(
           `operation and must succeed (SPEC 10.7)`,
       );
       tracker.retired.add(row.id);
-      return;
+      return null;
     }
   }
 }
@@ -1321,16 +1469,27 @@ async function runP9Trial(
       workspace,
       sessions,
       "P-9 after `review create`",
+      null,
     );
     for (let index = 0; index < trial.ops.length; index += 1) {
       const op = trial.ops[index];
       const label = `P-9 op ${String(index + 1)}/${String(trial.ops.length)} [${describeOp(op)}]`;
-      await executeOp(product, workspace, model, sessions, op, label);
+      const resolved = await executeOp(
+        product,
+        workspace,
+        model,
+        sessions,
+        op,
+        label,
+      );
+      // The sweep follows the operation directly, so a `resolve`'s sweep is
+      // the read immediately after it, no workspace edit between (P-9).
       await sweepInvariants(
         product,
         workspace,
         sessions,
         `${label} — post-operation sweep`,
+        resolved,
       );
     }
   } finally {
@@ -1344,7 +1503,7 @@ async function runP9Trial(
 const P_9 = defineProductTest({
   id: "P-9",
   title:
-    "review session invariants under random sequences of valid review operations interleaved with workspace edits (TEST-SPEC §16 P-9): audit sessions driven through create, resolve (re-derive triggers included: --status updated), split, and reads, with prose edits, section additions, and section deletions (each followed by `build`) in between — after every operation the session holds at most one item per kind and scope node; blockedBy is acyclic and names only present items, with every item's blocked state consistent with its blockers' reported statuses; ids retired by split never reappear (and items leave the session only through split); `next` returns an unblocked needing-review item consistent with an adjacent export, or reports fully resolved exactly when no item needs review; reads (status/next/show/export/list) never change session bytes; and stored sessions always re-read as non-corrupt plain files, with `review list` reporting exactly the created sessions, none corrupt (SPEC 10.1-10.7, 13.4, 14.21)",
+    "review session invariants under random sequences of valid review operations interleaved with workspace edits (TEST-SPEC §16 P-9): audit sessions driven through create, resolve (re-derive triggers included: --status updated), split, and reads, with prose edits, section additions, and section deletions (each followed by `build`) in between — after every operation the session holds at most one item per kind and scope node and none whose kind and scope node are recorded as decomposed (read from export's items and recorded decompositions, scope nodes compared as canonical identities — the identity mapping, the draws performing no journaled operation); blockedBy is acyclic and names only present items, with every item's blocked state consistent with its blockers' reported statuses; ids retired by split never reappear (and items leave the session only through split); `next` returns an unblocked needing-review item consistent with an adjacent export, or reports fully resolved exactly when no item needs review; immediately after each resolve, with no workspace edit between, a read (the sweep's export) presents the resolved item with the status just set, never invalidated; reads (status/next/show/export/list) never change session bytes; and stored sessions always re-read as non-corrupt plain files, with `review list` reporting exactly the created sessions, none corrupt (SPEC 10.1-10.7, 13.4, 14.21)",
   run: async (product) => {
     await checkProperty(
       "P-9 review session invariants",
