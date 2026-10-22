@@ -46,7 +46,7 @@ Not planned:
 
 ## Index — each failing test and the tasks it waits on
 
-VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 1550, job 119847008510) and 1 on `suite-windows` (CI only, job 119865815416). Suite files are `test/suite/<file>.test.ts`; registry modules `test/suite/registry/<module>.ts`. Tasks 3 and 28–33 have no failing test (nor had Task 1, now landed).
+VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 1550, job 119847008510) and 1 on `suite-windows` (CI only, job 119865815416). Suite files are `test/suite/<file>.test.ts`; registry modules `test/suite/registry/<module>.ts`. Tasks 3 and 28–33 have no failing test (nor had Task 1, now landed). CI at `3c214eb` (Task 36's commit; run 1556, id 39841546785): `harness-self` green; `suite-linux` 39 failures (job 120043577445), exactly the rows below not marked passing, T13.5-9 and T13.5-10 passing; `suite-windows` T7-1 alone (job 120062535462), at the same assertion as at `e049255`.
 
 | Test | Suite file | Tasks | First failure at `e049255` |
 |---|---|---|---|
@@ -61,11 +61,11 @@ VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 15
 | T4.5-1 | section-4.5 | 4 | the compiled marker program, exit 1 |
 | T13.1-2 | section-13.1-13.2 | 4 | the CommonJS runtime arm, exit 1 (its type, hover, and definition arms pass) |
 | T2.1-2 | section-2.1 | 8 | the root-re-entering specifier `../../work/specs/BASE.xspec`: `build --json` reports `["14.15 x1"]`, expected `["14.15 x1","14.5 x1"]` |
-| T6.3-6 | section-6.3 | 2 (landed), 36 (landed) | passes since Task 36 (19.7 s locally) |
+| T6.3-6 | section-6.3 | 2 (landed), 36 (landed) | passes since Task 36 (19.7 s locally; and in CI run 1556 at `3c214eb`) |
 | T12.7-3 | section-12.7 | 2 (landed) | passes since Task 2 |
 | T14-4 | section-14 | 2 (landed) | passes since Task 2 |
 | T14-6 | section-14 | 2 (landed) | passes since Task 2 |
-| T14-10 | section-14-ii | 2 (landed), 36 (landed) | passes whole since Task 36, arms (k) and (l) included (56.4 s locally) |
+| T14-10 | section-14-ii | 2 (landed), 36 (landed) | passes whole since Task 36, arms (k) and (l) included (56.4 s locally; and in CI run 1556 at `3c214eb`) |
 | T13.5-8 | section-13.5 | 2 (landed) | passes since Task 2 |
 | T11.2-6 | section-11.2 | 7 | the unreadable emit directory, failing side: `view specs/A.mdx` answers, exit 1; expected the read failure, exit 2 |
 | T12.0-13 | section-12.0-ii | 5 | `rename specs/a#b.mdx x y --json` exits 2 (unknown file), expected 1 (the invalid-workspace refusal) |
