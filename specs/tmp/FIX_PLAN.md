@@ -46,20 +46,20 @@ Not planned:
 
 ## Index — each failing test and the tasks it waits on
 
-VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 1550, job 119847008510) and 1 on `suite-windows` (CI only, job 119865815416). Suite files are `test/suite/<file>.test.ts`; registry modules `test/suite/registry/<module>.ts`. Tasks 28–33 have no failing test (nor had Tasks 1 and 3, now landed). CI at `bb882a9` (Task 3's commit; run 1558, id 39850026910): `harness-self` green (job 120073541857); `suite-linux` 39 failures of 5395 tests (job 120073541459), exactly the rows below not marked passing and each at the same first assertion as at `3c214eb` (Task 36's commit; run 1556, job 120043577445), T13.5-9 and T13.5-10 passing; `suite-windows` T7-1 alone (job 120094748444), at the same assertion as at `e049255`.
+VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 1550, job 119847008510) and 1 on `suite-windows` (CI only, job 119865815416). Suite files are `test/suite/<file>.test.ts`; registry modules `test/suite/registry/<module>.ts`. Tasks 28–33 have no failing test (nor had Tasks 1 and 3, now landed). CI at `bb882a9` (Task 3's commit; run 1558, id 39850026910): `harness-self` green (job 120073541857); `suite-linux` 39 failures of 5395 tests (job 120073541459), exactly the rows below not marked passing and each at the same first assertion as at `3c214eb` (Task 36's commit; run 1556, job 120043577445), T13.5-9 and T13.5-10 passing; `suite-windows` T7-1 alone (job 120094748444), at the same assertion as at `e049255`. CI at `4fa5804` (Task 4's commit; run 1560, id 39861280978): `harness-self` green (job 120112327110; 42 files, 5021 tests); `suite-linux` 29 failures of 5395 tests (job 120112327205), exactly the rows below not marked passing and each at the same first assertion as at `0f0f9f0` (run 1559, job 120095999754), Task 4's ten rows passing, T13.5-9 and T13.5-10 passing; `suite-windows` T7-1 alone (job 120131013503), at the same assertion as at `e049255`, the E-6 byte-identity test passing over the new generated files.
 
 | Test | Suite file | Tasks | First failure at `e049255` |
 |---|---|---|---|
-| T1.2-2 | section-1.1-1.2 | 4 (landed) | passes since Task 4 (at `e049255`: the compiled consumer, under H-2's CommonJS configuration with its output outside the workspace, exited 1: `Cannot find module './<NAME>.xspec.impl.js'`) |
-| T1.6-3 | section-1.6-1.7 | 4 (landed) | passes since Task 4 |
-| T4-3 | section-4 | 4 (landed) | passes since Task 4 |
-| T4.1-1 | section-4.1-4.2 | 4 (landed) | passes since Task 4, its built-in-member runtime arm included |
-| T4.1-3 | section-4.1-4.2 | 4 (landed) | passes since Task 4 |
-| T4.3-1 | section-4.3-4.4 | 4 (landed) | passes since Task 4 |
-| T4.4-1 | section-4.3-4.4 | 4 (landed) | passes since Task 4 |
-| T4.4-2 | section-4.3-4.4 | 4 (landed) | passes since Task 4 |
-| T4.5-1 | section-4.5 | 4 (landed) | passes since Task 4 |
-| T13.1-2 | section-13.1-13.2 | 4 (landed) | passes since Task 4 |
+| T1.2-2 | section-1.1-1.2 | 4 (landed) | passes since Task 4 (3.8 s locally in a seven-file run; and in CI run 1560 at `4fa5804`); at `e049255` the compiled consumer, under H-2's CommonJS configuration with its output outside the workspace, exited 1: `Cannot find module './<NAME>.xspec.impl.js'` |
+| T1.6-3 | section-1.6-1.7 | 4 (landed) | passes since Task 4 (8.4 s locally in a seven-file run; and in CI run 1560 at `4fa5804`) |
+| T4-3 | section-4 | 4 (landed) | passes since Task 4 (6.2 s locally in a seven-file run; and in CI run 1560 at `4fa5804`) |
+| T4.1-1 | section-4.1-4.2 | 4 (landed) | passes since Task 4 (12.2 s locally in a seven-file run; and in CI run 1560 at `4fa5804`), its built-in-member runtime arm included |
+| T4.1-3 | section-4.1-4.2 | 4 (landed) | passes since Task 4 (6.0 s locally in a seven-file run; and in CI run 1560 at `4fa5804`) |
+| T4.3-1 | section-4.3-4.4 | 4 (landed) | passes since Task 4 (5.4 s locally in a seven-file run; and in CI run 1560 at `4fa5804`) |
+| T4.4-1 | section-4.3-4.4 | 4 (landed) | passes since Task 4 (7.2 s locally in a seven-file run; and in CI run 1560 at `4fa5804`) |
+| T4.4-2 | section-4.3-4.4 | 4 (landed) | passes since Task 4 (6.2 s locally in a seven-file run; and in CI run 1560 at `4fa5804`) |
+| T4.5-1 | section-4.5 | 4 (landed) | passes since Task 4 (7.6 s locally in a seven-file run; and in CI run 1560 at `4fa5804`) |
+| T13.1-2 | section-13.1-13.2 | 4 (landed) | passes since Task 4 (8.6 s locally in a seven-file run; and in CI run 1560 at `4fa5804`) |
 | T2.1-2 | section-2.1 | 8 | the root-re-entering specifier `../../work/specs/BASE.xspec`: `build --json` reports `["14.15 x1"]`, expected `["14.15 x1","14.5 x1"]` |
 | T6.3-6 | section-6.3 | 2 (landed), 36 (landed) | passes since Task 36 (19.7 s locally; and in CI run 1556 at `3c214eb`) |
 | T12.7-3 | section-12.7 | 2 (landed) | passes since Task 2 |
