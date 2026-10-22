@@ -7,12 +7,17 @@
 //    the configuration search and the discovery of 7 precede every error
 //    consulting them (SPEC 12.0) — a configuration error, a discovery-level
 //    one included, exits 2 before the baseline is read (14.14), and a
-//    discovery read the environment refuses stops the command (14.25).
-// 1. Read the baseline — resolve the ref, list the tree at it, and compute
-//    the journal prefix/replay (workspace/baseline.ts `readBaseline`). An
-//    unresolvable ref or a prefix/replay failure is a usage error, exit 2,
-//    preceding source validation (SPEC 12.0): reported even when the
-//    current sources also fail build validation.
+//    discovery read the environment refuses stops the command (14.25). The
+//    analysis loads the current journal, read once.
+// 1. Read the baseline (workspace/baseline.ts `readBaseline`): first the
+//    current journal as the analysis loaded it — a journal error there
+//    (14.13) fails the resolution before any other cause can, a usage
+//    error carrying its stable code and concerned path (SPEC 6.3, 12.7) —
+//    then resolve the ref, list the tree at it, and compute the journal
+//    prefix/replay. Each failure, an unresolvable ref and a prefix/replay
+//    failure among them, is a usage error, exit 2, preceding source
+//    validation (SPEC 12.0): reported even when the current sources also
+//    fail build validation.
 // 2. The SPEC 13.3 gate over the current workspace (cli/prepare.ts,
 //    workspace/refresh.ts): validation findings report and exit 1, nothing
 //    answered, nothing modified.
@@ -50,7 +55,7 @@ import { flagValue } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { analyzeGraphForRead } from "../prepare.js";
 import { emitFindingsReport } from "../report.js";
-import { emitDocument, usageError } from "./common.js";
+import { emitDocument, reportBaselineFailure } from "./common.js";
 
 /** One impacted-code entry as JSON data (SPEC 9.3: location, the minimized
  * witness edge — sourced at the location — and the witness path). */
@@ -156,19 +161,25 @@ export async function impactCommand(
     return analyzed.exit;
   }
 
-  // SPEC 6.3/12.0: reading the baseline — ref resolution and the journal
-  // prefix/replay — precedes source validation: an unresolvable ref or a
-  // replay failure is a usage error (exit 2, stderr) even when the current
-  // sources also fail build validation.
-  const readResolution = await readBaseline(context.workspace, ref);
+  // SPEC 6.3/12.0: reading the baseline — the current journal first, then
+  // ref resolution and the journal prefix/replay — precedes source
+  // validation: a journal error in the current journal (the coded usage
+  // error of 6.3 and 12.7), an unresolvable ref, or a replay failure is a
+  // usage error (exit 2, stderr) even when the current sources also fail
+  // build validation.
+  const { analysis } = analyzed;
+  const readResolution = await readBaseline(
+    context.workspace,
+    ref,
+    analysis.journal,
+  );
   if (!readResolution.ok) {
-    return usageError(invocation, context, readResolution.message);
+    return reportBaselineFailure(invocation, context, readResolution);
   }
 
   // SPEC 13.3: the gate — on a workspace failing `build`'s validations,
   // the findings report alone, exit 1, nothing modified; the baseline
   // content is not validated past it (module header).
-  const { analysis } = analyzed;
   const assessed = await assessWorkspaceRead(context.workspace, analysis);
   if (assessed.kind === "findings") {
     emitFindingsReport(invocation.json, context.stdout, assessed.findings);
@@ -181,7 +192,7 @@ export async function impactCommand(
   // modifies nothing.
   const resolution = await validateBaselineContent(readResolution.read);
   if (!resolution.ok) {
-    return usageError(invocation, context, resolution.message);
+    return reportBaselineFailure(invocation, context, resolution);
   }
   const { baseline } = resolution;
 

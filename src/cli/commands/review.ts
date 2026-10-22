@@ -14,13 +14,16 @@
 // environment refuses stops the command (14.25, exit 2); then, under
 // workspace exclusivity with the `--test-hold` seam:
 //   0. the analysis of the current workspace over that discovery — the
-//      sources' content and the journal read;
+//      sources' content and the journal read, once;
 //   1. `--coverage`: the named profile must be configured (SPEC 10.7 →
 //      12.0 "unknown profiles named in arguments", exit 2) — an argument
 //      check judged against the configuration, preceding the gate;
-//   2. `--base`: read the baseline — ref resolution and the journal
-//      prefix/replay (SPEC 6.3 → 12.0, exit 2) — preceding source
-//      validation;
+//   2. `--base`: read the baseline — first the current journal as the
+//      analysis loaded it, a journal error there (14.13) failing the
+//      resolution before any other cause as the usage error carrying its
+//      stable code and concerned path (SPEC 6.3, 12.7), then ref
+//      resolution and the journal prefix/replay (SPEC 6.3 → 12.0, exit 2)
+//      — preceding source validation;
 //   3. the SPEC 13.3 gate: invalid sources report the validation errors,
 //      exit 1, nothing created;
 //   4. `--base`: validate the baseline content as a workspace (SPEC 6.3 →
@@ -94,7 +97,7 @@ import {
   findingToJson,
   renderFindingsHuman,
 } from "../report.js";
-import { emitDocument, usageError } from "./common.js";
+import { emitDocument, reportBaselineFailure, usageError } from "./common.js";
 import { runMutatingCommand } from "./mutation.js";
 import {
   countsJson,
@@ -170,13 +173,19 @@ async function runCreate(
       profile: recordCoverageProfile(workspace.configuration, profile),
     };
   } else if (baseRef !== undefined) {
-    // SPEC 6.3 → 12.0: reading the baseline — ref resolution and the
-    // journal prefix/replay — precedes source validation: an unresolvable
-    // ref or a replay failure is a usage error (exit 2), nothing modified,
-    // even when the current sources also fail build validation.
-    const resolution = await readBaseline(workspace, baseRef);
+    // SPEC 6.3 → 12.0: reading the baseline — the current journal first,
+    // then ref resolution and the journal prefix/replay — precedes source
+    // validation: a journal error in the current journal (the coded usage
+    // error of 6.3 and 12.7), an unresolvable ref, or a replay failure is a
+    // usage error (exit 2), nothing modified, even when the current sources
+    // also fail build validation.
+    const resolution = await readBaseline(
+      workspace,
+      baseRef,
+      analyzed.analysis.journal,
+    );
     if (!resolution.ok) {
-      return usageError(invocation, context, resolution.message);
+      return reportBaselineFailure(invocation, context, resolution);
     }
     baselineRead = resolution.read;
     // SPEC 10.7: a baseline session records the commit identity `--base`
@@ -207,7 +216,7 @@ async function runCreate(
   if (baselineRead !== undefined) {
     const resolution = await validateBaselineContent(baselineRead);
     if (!resolution.ok) {
-      return usageError(invocation, context, resolution.message);
+      return reportBaselineFailure(invocation, context, resolution);
     }
     baseline = resolution.baseline;
   }

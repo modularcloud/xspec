@@ -359,12 +359,14 @@ export function renderConfigurationError(finding: Finding): string {
 }
 
 /**
- * The diagnostic label of a coded refusal's condition (SPEC 14.24–14.26):
- * each condition's own, so the stderr line names which one stopped the
- * command.
+ * The diagnostic label of a coded refusal's condition (SPEC 14.24–14.26,
+ * and 14.13 where a given baseline's resolution reports it, 6.3): each
+ * condition's own, so the stderr line names which one stopped the command.
  */
 function codedRefusalLabel(code: FindingCode | null): string {
   switch (code) {
+    case "journal-error":
+      return "journal error"; // 14.13 at a given baseline (6.3)
     case "write-failure":
       return "write failure"; // 14.24
     case "read-failure":
@@ -378,10 +380,11 @@ function codedRefusalLabel(code: FindingCode | null): string {
 
 /**
  * SPEC 14.24–14.26/12.0: render a coded refusal — the environment's
- * refusal of a write or a read, or a mutating command refused at
- * acquisition, its workspace busy — as a diagnostic line, a usage error's
- * standard-error content, under its condition's own label and naming the
- * concerned path, as a configuration error's line does.
+ * refusal of a write or a read, a mutating command refused at acquisition,
+ * its workspace busy, or a journal error failing a given baseline's
+ * resolution (6.3) — as a diagnostic line, a usage error's standard-error
+ * content, under its condition's own label and naming the concerned path,
+ * as a configuration error's line does.
  */
 export function renderCodedRefusal(finding: Finding): string {
   const label = codedRefusalLabel(finding.code);
@@ -392,7 +395,8 @@ export function renderCodedRefusal(finding: Finding): string {
 
 /**
  * Report a coded refusal — a write or a read the environment refused (SPEC
- * 14.24, 14.25), or the busy refusal at acquisition (14.26) — the way every
+ * 14.24, 14.25), the busy refusal at acquisition (14.26), or a journal
+ * error failing a given baseline's resolution (14.13, 6.3) — the way every
  * command must: a usage error (12.0), not a finding — the diagnostic on
  * standard error and, when JSON output is in effect, the exit-2 error
  * document of 12.0/12.7 as the entire standard output, its one finding

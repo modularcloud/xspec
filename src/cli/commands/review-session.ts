@@ -97,7 +97,7 @@ import type { Invocation } from "../args.js";
 import type { CliWriter, CommandContext } from "../io.js";
 import { analyzeGraphForRead } from "../prepare.js";
 import { emitFindingsReport } from "../report.js";
-import { rangeJson, usageError } from "./common.js";
+import { rangeJson, reportBaselineFailure, usageError } from "./common.js";
 
 // ---------------------------------------------------------------------------
 // Generator runs with recorded parameters (SPEC 10.4, 10.7)
@@ -436,18 +436,22 @@ export async function loadSessionForCommand(
   // failing workspace, the gate) reports instead.
   let baseline: ResolvedBaseline | undefined;
   if (loaded.session.parameters.strategy === "path-blocks") {
+    // The current journal as the analysis loaded it, read once — past the
+    // passing gate, free of condition-13 errors (SPEC 13.3, 14.13).
     const resolution = await resolveBaseline(
       context.workspace,
       loaded.session.parameters.baseCommit,
+      analyzed.analysis.journal,
     );
     if (!resolution.ok) {
       return {
         ok: false,
-        exit: usageError(
+        exit: reportBaselineFailure(
           invocation,
           context,
+          resolution,
           `the recorded baseline of session '${name}' cannot be ` +
-            `reconstructed: ${resolution.message}`,
+            `reconstructed: `,
         ),
       };
     }

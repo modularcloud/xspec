@@ -12,11 +12,16 @@ import { canonicalJson } from "../../core/canonical-json.js";
 import type { ByteRange } from "../../core/bytes.js";
 import type { CompiledGlob } from "../../core/glob.js";
 import { compileGlob } from "../../core/glob.js";
+import type { BaselineFailure } from "../../workspace/baseline.js";
 import type { TestHoldSpec } from "../../workspace/lock.js";
 import type { Invocation } from "../args.js";
 import { flagValue, jsonOutputInEffect } from "../args.js";
 import type { CliWriter, CommandIo } from "../io.js";
-import { emitErrorDocument, usageErrorFinding } from "../report.js";
+import {
+  emitCodedRefusal,
+  emitErrorDocument,
+  usageErrorFinding,
+} from "../report.js";
 
 /**
  * SPEC 12.0: usage errors — unknown identities, unknown groups, invalid
@@ -40,6 +45,28 @@ export function usageError(
     );
   }
   return 2;
+}
+
+/**
+ * SPEC 6.3 → 12.0, 12.7: report a baseline's failed resolution, exit 2 —
+ * a journal error in the current journal as the coded usage error carrying
+ * condition 13's stable code and concerned path (the diagnostic on
+ * standard error and, with JSON output in effect, the error document,
+ * `emitCodedRefusal`), every other failure as a plain usage error, `code`
+ * and `path` null, its message prefixed by `subject` where the caller
+ * names what failed (a session's recorded baseline).
+ */
+export function reportBaselineFailure(
+  invocation: Invocation,
+  io: CommandIo,
+  failure: BaselineFailure,
+  subject = "",
+): 2 {
+  if (failure.kind === "journal-error") {
+    emitCodedRefusal(io, jsonOutputInEffect(invocation), failure.finding);
+    return 2;
+  }
+  return usageError(invocation, io, `${subject}${failure.message}`);
 }
 
 /** SPEC 12.0: emit the single JSON document — the entire standard output. */
