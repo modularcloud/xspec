@@ -237,10 +237,45 @@ export interface WorkspaceModel {
   files: FileModel[];
 }
 
-const FILE_NAMES = ["A", "B", "C"] as const;
+/**
+ * Model-space file names by file index. P-4, P-5, and P-6 draw at most three
+ * files; P-16 (section-16-p16.ts) appends files at later indices — the spec
+ * files it adds and the target files its section moves create — so the list
+ * runs past three, and an index past its end is a harness defect.
+ */
+const FILE_NAMES = [
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+  "F",
+  "G",
+  "H",
+  "I",
+  "J",
+  "K",
+  "L",
+  "M",
+  "N",
+  "O",
+  "P",
+] as const;
+
+/** The model-space file name of file `fileIndex` (`A` for index 0). */
+function fileName(fileIndex: number): string {
+  const name = FILE_NAMES[fileIndex] as string | undefined;
+  if (name === undefined) {
+    throw new Error(
+      `PROP-03 harness defect: no model-space file name for file index ` +
+        `${String(fileIndex)} (the model names ${String(FILE_NAMES.length)} files)`,
+    );
+  }
+  return name;
+}
 
 function filePath(fileIndex: number): string {
-  return `specs/${FILE_NAMES[fileIndex]}.mdx`;
+  return `specs/${fileName(fileIndex)}.mdx`;
 }
 
 /** Import binding of file `j` in every later file (never S/Spec/text, 2.1). */
@@ -368,7 +403,7 @@ export function renderWorkspace(model: WorkspaceModel): Record<string, string> {
   model.files.forEach((file, fileIndex) => {
     const lines: string[] = [];
     for (let j = 0; j < fileIndex; j += 1) {
-      lines.push(`import ${importBinding(j)} from "./${FILE_NAMES[j]}.xspec"`);
+      lines.push(`import ${importBinding(j)} from "./${fileName(j)}.xspec"`);
     }
     // Mandatory blank line after the import block (module header).
     if (fileIndex > 0) lines.push("");
@@ -627,8 +662,11 @@ const PROSE_REST: ReadonlyArray<readonly [number, string]> = [
   [1, ":"],
 ];
 
-/** A prose run: anchored non-empty plain text (kept under SPEC 3, always). */
-const proseText: Gen<string> = (choices) => {
+/**
+ * A prose run: anchored non-empty plain text (kept under SPEC 3, always).
+ * Exported for P-16's edit and file generators (section-16-p16.ts).
+ */
+export const proseText: Gen<string> = (choices) => {
   const anchor = choices.pick(ANCHOR_CHARS);
   const rest = listOf((c: Choices) => c.weightedPick(PROSE_REST), { max: 7 })(
     choices,
@@ -652,8 +690,11 @@ const commentWords: Gen<string> = (choices) => {
   return anchor + rest;
 };
 
-/** 1.4-valid tag tokens (one dotted: tags MAY contain `.`). */
-const TAG_POOL = ["t1", "t2", "t3", "alpha", "beta.x", "zeta"] as const;
+/**
+ * 1.4-valid tag tokens (one dotted: tags MAY contain `.`). Exported for P-16's
+ * metadata edits (section-16-p16.ts).
+ */
+export const TAG_POOL = ["t1", "t2", "t3", "alpha", "beta.x", "zeta"] as const;
 
 /** A reference target available to a generator or edit site. */
 interface RefTarget {

@@ -44,6 +44,7 @@ import { P12_TS_FORM_VECTORS } from "../suite/registry/section-16-p12.js";
 import { P13_TS_FORM_VECTORS } from "../suite/registry/section-16-p13.js";
 import { P14_TS_FORM_VECTORS } from "../suite/registry/section-16-p14.js";
 import { P15_TS_FORM_VECTORS } from "../suite/registry/section-16-p15.js";
+import { P16_TS_FORM_VECTORS } from "../suite/registry/section-16-p16.js";
 import { P2_P3_TS_FORM_VECTORS } from "../suite/registry/section-16-p2-p3.js";
 import { P4_TS_FORM_VECTORS } from "../suite/registry/section-16-p4.js";
 import { P5_P6_TS_FORM_VECTORS } from "../suite/registry/section-16-p5-p6.js";
@@ -599,8 +600,10 @@ describe("S-9 (TypeScript): every code source and configuration T14-12's positiv
 // and P-13's composed per draw, the rest fixed records also judged
 // by test/self/s9-staged-sources.test.ts — P-7's capture sources, P-13's
 // `c0/U.ts` and `c1/V.ts`, P-14's code sources (top-level markers,
-// function units, `src/lib/` specifiers), and P-8's and P-11's base code
-// source, each
+// function units, `src/lib/` specifiers), P-16's code sources (imports of
+// every spec module with their `text` exports aliased, top-level markers and
+// `text(...)` calls on roots and sections, function units holding both), and
+// P-8's and P-11's base code source, each
 // built from its generator's own templates and constants and judged under
 // the grammar its staged path selects, through the per-draw judgement the
 // property runner applies to each draw (helpers/property.ts `drawSources`).
@@ -624,6 +627,7 @@ const GENERATED_TS_FORM_VECTORS: Readonly<
   "P-13": P13_TS_FORM_VECTORS,
   "P-14": P14_TS_FORM_VECTORS,
   "P-15": P15_TS_FORM_VECTORS,
+  "P-16": P16_TS_FORM_VECTORS,
 };
 
 const GENERATED_TS_VECTORS = Object.entries(GENERATED_TS_FORM_VECTORS).flatMap(
@@ -647,7 +651,7 @@ describe("S-9 (TypeScript): every configuration file and code source the §16 ge
     for (const vectors of Object.values(GENERATED_TS_FORM_VECTORS)) {
       expect(vectors.some(([, path]) => path === "xspec.config.ts")).toBe(true);
     }
-    expect(GENERATED_TS_VECTORS.length).toBe(28);
+    expect(GENERATED_TS_VECTORS.length).toBe(31);
     expect(new Set(GENERATED_TS_VECTORS.map(([name]) => name)).size).toBe(
       GENERATED_TS_VECTORS.length,
     );

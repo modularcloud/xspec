@@ -49,6 +49,7 @@ import { P9_FORM_VECTORS } from "../suite/registry/section-16-p9.js";
 import { P12_FORM_VECTORS } from "../suite/registry/section-16-p12.js";
 import { P13_FORM_VECTORS } from "../suite/registry/section-16-p13.js";
 import { P14_FORM_VECTORS } from "../suite/registry/section-16-p14.js";
+import { P16_FORM_VECTORS } from "../suite/registry/section-16-p16.js";
 import {
   I3_HALL_MOVED_SOURCE,
   I3_ROOM_MOVED_SOURCE,
@@ -452,6 +453,18 @@ describe("S-9: every form the P-7 discovery and capture stagings compose derives
     );
   });
   test.each(P7_FORM_VECTORS)("%s", (_name, source) => {
+    expectDerives(source);
+  });
+});
+
+describe("S-9: every form P-16's spec-source rendering composes beyond PROP-03's and P-5's derives", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(P16_FORM_VECTORS.length).toBe(5);
+    expect(new Set(P16_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      P16_FORM_VECTORS.length,
+    );
+  });
+  test.each(P16_FORM_VECTORS)("%s", (_name, source) => {
     expectDerives(source);
   });
 });

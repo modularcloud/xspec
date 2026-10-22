@@ -623,8 +623,11 @@ function specBasename(path: string): string {
   return match[1];
 }
 
-/** `A` → `specs/A.mdx`: where a drawn basename is staged. */
-function specPath(basename: string): string {
+/**
+ * `A` → `specs/A.mdx`: where a drawn basename is staged (P-16 stages its spec
+ * sources so too, section-16-p16.ts).
+ */
+export function specPath(basename: string): string {
   return `specs/${basename}.mdx`;
 }
 
@@ -687,7 +690,7 @@ const SPEC_BASENAME_CLASSES: readonly (readonly string[])[] = [
  * an eighth of the time), then a name of it not yet taken — a plain one
  * when the class is spent. Shrinks toward the first free plain name.
  */
-function drawSpecBasename(
+export function drawSpecBasename(
   choices: Choices,
   taken: ReadonlySet<string>,
 ): string {
@@ -704,7 +707,7 @@ function drawSpecBasename(
 }
 
 /** `count` distinct basenames, one per model file in file order. */
-function drawSpecBasenames(choices: Choices, count: number): string[] {
+export function drawSpecBasenames(choices: Choices, count: number): string[] {
   const names: string[] = [];
   for (let index = 0; index < count; index += 1) {
     names.push(drawSpecBasename(choices, new Set(names)));
@@ -742,7 +745,7 @@ function pathTableIdentityFn(
   };
 }
 
-interface SectionSite {
+export interface SectionSite {
   readonly file: number;
   readonly dotted: string;
   readonly parentDotted: string;
@@ -750,7 +753,7 @@ interface SectionSite {
 }
 
 /** Every section of the model, document order, with its dotted context. */
-function sectionsOf(model: WorkspaceModel): SectionSite[] {
+export function sectionsOf(model: WorkspaceModel): SectionSite[] {
   const sites: SectionSite[] = [];
   const walk = (
     items: readonly BodyItem[],
@@ -772,7 +775,7 @@ function sectionsOf(model: WorkspaceModel): SectionSite[] {
 }
 
 /** Locate a section by its dotted ID: its container item list and index. */
-function locateSection(
+export function locateSection(
   model: WorkspaceModel,
   file: number,
   dotted: string,
@@ -799,7 +802,10 @@ function locateSection(
 }
 
 /** All dotted IDs of a section subtree (itself first), document order. */
-function subtreeDotteds(section: SectionItem, selfDotted: string): string[] {
+export function subtreeDotteds(
+  section: SectionItem,
+  selfDotted: string,
+): string[] {
   const out = [selfDotted];
   for (const item of section.items) {
     if (item.kind === "section") {
@@ -832,7 +838,7 @@ function forEachRef(
 }
 
 /** Prefix-rewrite: `old` or `old.<suffix>` → `new` + suffix, else null. */
-function rewriteDotted(
+export function rewriteDotted(
   dotted: string,
   oldPrefix: string,
   newPrefix: string,
@@ -1547,7 +1553,7 @@ function genMovedLayout(choices: Choices, section: SectionItem): MovedLayout {
   return choices.weightedPick(options)();
 }
 
-interface SectionMoveTrial {
+export interface SectionMoveTrial {
   readonly model: WorkspaceModel;
   readonly fromFile: number;
   /** Dotted ID of the moved section in the origin file. */
@@ -1577,7 +1583,7 @@ interface SectionMoveTrial {
   readonly createdBasename: string | null;
 }
 
-interface MoveCandidate {
+export interface MoveCandidate {
   /** Existing target file index; null = the move creates the target file. */
   readonly toFile: number | null;
   /** Target parent's dotted ID; null = the target file's root. */
@@ -2104,10 +2110,12 @@ const LEADING_EMPTY_LINE = "\n";
 /**
  * The PROP-03 rendering with every spec source begun by an empty line — the
  * bytes P-5 stages, both arms (module header: TEST-SPEC §16 P-5's line-start
- * admissible offset for any import addition) — keyed by, and its import
- * headers naming, the staged `paths` (default: model space).
+ * admissible offset for any import addition), and P-16's spec sources
+ * (section-16-p16.ts), whose section moves are drawn under P-5's discipline
+ * — keyed by, and its import headers naming, the staged `paths` (default:
+ * model space).
  */
-function renderP5Workspace(
+export function renderP5Workspace(
   model: WorkspaceModel,
   paths?: readonly string[],
 ): Record<string, string> {

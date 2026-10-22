@@ -1215,4 +1215,12 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // T11-*, T11.3-*, T12.3-*, T12.1-*, T12.2-*, T6.4-*, and T10.7-*.
   "P-14": ["11.4", "11.5", "12.0", "13.5", "14"],
   "P-15": ["13.4", "13.5"],
+  // P-16 asserts 10.5's path-blocks derivation over random histories — its
+  // items' kinds, scope sets, contexts, origins, blocking, and order — with
+  // 5.6's originating nodes as each origin's ground, 9.2's impacted code
+  // over impact edges in either graph as the code-impact items' ground,
+  // identities mapped through the journal suffix (6.3), and every scope
+  // node compared as a canonical identity and presented under its current
+  // identity and presence (10.4).
+  "P-16": ["5.6", "6.3", "9.2", "10.4", "10.5"],
 };

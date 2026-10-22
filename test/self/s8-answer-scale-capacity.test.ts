@@ -15,7 +15,10 @@
 //      — never assumed; `staged-scale.ts` states the derivation (shared with
 //      S-2, which stages the same maxima through the workspace builder), and
 //      the fixed CI seed set (E-5) is replayed to confirm the staged draws
-//      stay inside the generator maxima;
+//      stay inside the generator maxima — P-16's `review export` answers
+//      included, their scale derived from its generator's model and a
+//      synthetic export at the largest one decoded and walked by P-16's
+//      comparison;
 //   2. synthetic conforming-form documents at that scale are built
 //      iteratively (never by recursion — `JSON.stringify` itself overflows
 //      at these depths) and driven through every H-3/12.7 decoder and every
@@ -76,6 +79,7 @@ import {
   decodeAtReport,
   decodeEdgesReport,
   decodeErrorDocument,
+  decodeExportReport,
   decodeFindingsReport,
   decodeHumanErrorMessage,
   decodeHumanFindingsReport,
@@ -145,6 +149,17 @@ import {
   genAvailabilityTrial,
   runAvailabilityCommand,
 } from "../suite/registry/section-16-p11.js";
+import type { PathBlocksPrediction } from "../helpers/oracles/path-blocks.js";
+import type {
+  P16AnswerScale,
+  P16Trial,
+} from "../suite/registry/section-16-p16.js";
+import {
+  assertP16Export,
+  genP16Trial,
+  p16AnswerScale,
+  predictP16Trial,
+} from "../suite/registry/section-16-p16.js";
 import {
   generatedDoc,
   specSubtreeTexts,
@@ -307,6 +322,138 @@ test("S-8: the fixed CI seed set stages within the derived scale (E-5 replay)", 
   }
   expect(largestText).toBeGreaterThan(0);
   expect(largestText).toBeLessThan(LARGEST_GENERATED_INPUT_BYTES);
+});
+
+/**
+ * A `review export` document in the review adapter's assumed shape
+ * (helpers/adapters/review.ts) holding exactly `prediction`'s items, every
+ * text value `largestText` bytes long — LF-terminated lines of plain prose,
+ * as P-16's texts are — every node entry carrying its presence and, when
+ * present, a source range, and every recorded state holding each node's
+ * four hashes or the absent marker: a conforming answer at P-16's derived
+ * scale, built from the oracle's prediction, never from product output.
+ */
+function syntheticP16Export(
+  prediction: PathBlocksPrediction,
+  largestText: number,
+): unknown {
+  const line = `${"k".repeat(63)}\n`;
+  const text =
+    line.repeat(Math.floor(largestText / line.length)) +
+    "k".repeat(largestText % line.length);
+  const present = (node: string): boolean => !prediction.absent.has(node);
+  const range = { start: 0, end: 1 };
+  const nodeState = (node: string, isPresent: boolean): unknown =>
+    isPresent
+      ? { node, present: true, text, sourceRange: range }
+      : { node, present: false, text };
+  const hash = (name: string): string => name.repeat(64);
+  const ids = new Map(
+    prediction.items.map((item, index) => [
+      `${item.kind} ${item.scope}`,
+      `item-${String(index + 1)}`,
+    ]),
+  );
+  const metaSide = { present: true, d: [], coverage: "required", tags: [] };
+  return {
+    name: "p16",
+    strategy: "path-blocks",
+    creationParameters: { base: hash("0").slice(0, 40) },
+    decompositions: null,
+    items: prediction.items.map((item, index) => {
+      const origin = [...item.origin, ...item.originOptional];
+      const recorded = {
+        nodes: Object.fromEntries(
+          [...new Set([...item.scopeSet, ...item.context, ...origin])].map(
+            (node) => [
+              node,
+              present(node)
+                ? {
+                    present: true,
+                    hashes: {
+                      ownHash: hash("a"),
+                      subtreeHash: hash("b"),
+                      effectiveHash: hash("c"),
+                      metadataHash: hash("d"),
+                    },
+                  }
+                : { present: false, hashes: "absent" },
+            ],
+          ),
+        ),
+      };
+      return {
+        id: `item-${String(index + 1)}`,
+        kind: item.kind,
+        status: "unresolved",
+        blocked: item.blockedBy.length > 0,
+        blockedBy: item.blockedBy.map((key) => ids.get(key)),
+        reason: "r",
+        scope: nodeState(item.scope, item.scopePresent),
+        scopeNodes: item.scopeSet.map((node) => nodeState(node, present(node))),
+        context: item.context.map((node) => nodeState(node, present(node))),
+        origin: origin.map((node) =>
+          present(node)
+            ? {
+                node,
+                before: { present: true, text },
+                after: { present: true, text },
+                sourceRange: range,
+              }
+            : {
+                node,
+                before: { present: true, text },
+                after: { present: false },
+              },
+        ),
+        ...(item.kind === "metadata-consistency"
+          ? { metadata: { before: metaSide, after: metaSide } }
+          : {}),
+        baseline: recorded,
+        current: recorded,
+      };
+    }),
+  };
+}
+
+test("S-8: P-16's `review create --base`/`export` answers — the fixed CI seed set's largest stays inside the derived scale, and a synthetic `review export` at that scale decodes and passes P-16's comparison walk (E-5 replay; H-11)", () => {
+  // DEFAULT_RUNS_PER_SEED (25) bounds P-16's registered runs too, its
+  // trials one sequential PRNG stream per seed, so the draws P-16 stages
+  // under the fixed plan are a prefix of these. Each answer's scale is
+  // derived from the generator's model alone (`p16AnswerScale`: the
+  // oracle's items, their payload's text values and node entries, the
+  // largest expanded text of any node in any graph state the trial passes
+  // through — 10.7's text values are 1.6's expanded ones), never measured
+  // from a product.
+  const RUNS = 25;
+  let largest: { scale: P16AnswerScale; trial: P16Trial } | undefined;
+  for (const trial of drawFixedSeedTrials(genP16Trial, RUNS)) {
+    const scale = p16AnswerScale(trial);
+    if (largest === undefined || scale.bound > largest.scale.bound) {
+      largest = { scale, trial };
+    }
+  }
+  if (largest === undefined) throw new Error("no P-16 draw replayed");
+  const { scale, trial } = largest;
+  expect(scale.items).toBeGreaterThan(0);
+  expect(scale.largestText).toBeGreaterThan(0);
+  // P-16's answers lie inside the scale the synthetic documents below and
+  // the capture gate are dimensioned to (the generator maximum, whose 500×
+  // the capture gate's document exceeds).
+  expect(scale.bound).toBeLessThan(LARGEST_GENERATED_INPUT_BYTES);
+  // A conforming export at that scale: every decode the review adapter
+  // makes, the scope-node read P-16 takes (`requireScopeNodes`), and P-16's
+  // whole comparison walk succeed on it, every datum evaluated.
+  const { prediction } = predictP16Trial(trial);
+  const text = JSON.stringify(
+    syntheticP16Export(prediction, scale.largestText),
+  );
+  expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(scale.bound);
+  const report = decodeExportReport(JSON.parse(text), "S-8 P-16 export");
+  expect(report.items).toHaveLength(scale.items);
+  expect(() => {
+    assertP16Export(report, prediction, "S-8 P-16 export");
+  }).not.toThrow();
 });
 
 // ---------------------------------------------------------------------------
