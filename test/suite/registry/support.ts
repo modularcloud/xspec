@@ -31,6 +31,7 @@ import {
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import type { SnapshotOptions } from "../../helpers/snapshot.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type {
   ArgvValue,
@@ -1086,18 +1087,25 @@ export async function visitReviewRefusal(
  * One exit-2 invocation a home test's staging reaches — T12.7-3's
  * configuration errors (section-12.7.ts), T6.3-6's journal errors at a
  * given baseline (section-6.3.ts), T13.5-2's busy refusals while its
- * command 1 holds (section-13.5.ts) — handed to the staging's visitor at
- * the state it runs on (TEST-SPEC T12.0-15's exit-2 family): its label,
- * leading every diagnosis of it; its command line with `--json`, as the
- * home test runs it, and without it, the human form; the workspace root
- * whose tree the invocation leaves unchanged (an exit-2 run modifies
- * nothing there but acquisition's coordination writes, H-6); `run`, which
- * runs a command line at the invocation's pre-invocation state — its
- * working directory, environment, staging (made just before the run and
- * restored once it ends, so a compare taken outside it reads what it
- * refuses), and bound; and `settled`, a premise checked once each run has
- * ended (T13.5-2: command 1 still holding as the run exits; T6.3-6: a
- * FIFO at the journal path still a FIFO, never opened).
+ * command 1 holds (section-13.5.ts), T14-10's exit-2 read failures and the
+ * configuration and journal errors its stagings meet (section-14-ii.ts) —
+ * handed to the staging's visitor at the state it runs on (TEST-SPEC
+ * T12.0-15's exit-2 family): its label, leading every diagnosis of it; its
+ * command line with `--json`, as the home test runs it, and without it, the
+ * human form; the workspace root whose tree the invocation leaves unchanged
+ * (an exit-2 run modifies nothing there but acquisition's coordination
+ * writes, H-6); `run`, which runs a command line at the invocation's
+ * pre-invocation state — its working directory, environment, staging (made
+ * just before the run and restored once it ends, so a compare taken outside
+ * it reads what it refuses; T14-10(i)'s first clearing what an earlier
+ * run's acquisition and release left at the lock path its staging occupies,
+ * so every run meets the state the first one met), and bound; `settled`, a
+ * premise checked once each run has ended (T13.5-2: command 1 still holding
+ * as the run exits; T6.3-6: a FIFO at the journal path still a FIFO, never
+ * opened); and `exclude`, what the compare under `root` leaves out of both
+ * walks beside H-6's own lock-path exclusion (T14-10(i): the lock path,
+ * which its home test prunes so — acquisition and release touch it, and
+ * its residue is T13.5-10(d)'s subject); absent, the whole root.
  */
 export interface ErrorInvocation {
   readonly label: string;
@@ -1106,20 +1114,23 @@ export interface ErrorInvocation {
   readonly root: string;
   readonly run: (argv: readonly string[]) => Promise<RunResult>;
   readonly settled?: (result: RunResult, label: string) => Promise<void>;
+  readonly exclude?: SnapshotOptions["exclude"];
 }
 
 /**
  * What one run of an exit-2 staging does (section-12.7.ts
  * `runT1273ConfigurationErrorStagings`, section-6.3.ts
- * `runT636JournalErrorStagings`, section-13.5.ts `runT1352HeldRun`): at
- * each exit-2 invocation `error`, handed the home test's own check of it as
- * `home`, and, where `home` holds, the staging's other assertions — the
- * home test's arms and outcomes beside the invocations handed over (a
- * JSON-only surface's error document, which has no human form; T13.5-2's
- * second commands and determinism repeats). The home tests run `home`
- * throughout (`ERROR_INVOCATION_HOME`); T12.0-15 runs its human twin at
- * each invocation instead and nothing else (section-12.0-iv.ts). Either way
- * the staging keeps its premises.
+ * `runT636JournalErrorStagings`, section-13.5.ts `runT1352HeldRun`,
+ * section-14-ii.ts `runT1410ReadFailureStagings`): at each exit-2
+ * invocation `error`, handed the home test's own check of it as `home`,
+ * and, where `home` holds, the staging's other assertions — the home
+ * test's arms and outcomes beside the invocations handed over (a JSON-only
+ * surface's error document, which has no human form; T13.5-2's second
+ * commands and determinism repeats; T14-10's exit-0 and exit-1 runs under
+ * its stagings, its nothing-modified compares, and its recoveries). The
+ * home tests run `home` throughout (`ERROR_INVOCATION_HOME`); T12.0-15 runs
+ * its human twin at each invocation instead and nothing else
+ * (section-12.0-iv.ts). Either way the staging keeps its premises.
  */
 export interface ErrorInvocationVisitor {
   readonly error: (

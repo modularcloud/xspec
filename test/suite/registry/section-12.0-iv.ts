@@ -19,10 +19,10 @@
 // `ids` (T12.3-1, `--tree` included), and `show` (T12.4-1, its root and
 // non-root arms) — and, of the exit-2 family, T12.7-3's
 // configuration-error stagings (each concerned-path form), T6.3-6's
-// journal errors at a given baseline, and T13.5-2's busy workspace; the
-// family's T14-9 write failures and T14-10 exit-2 read failures are added
-// beside them by the plan written at 2a2b94e's FIX_PLAN Task 135, in its
-// later parts.
+// journal errors at a given baseline, T13.5-2's busy workspace, and
+// T14-10's exit-2 read failures; the family's T14-9 write failures are
+// added beside them by the plan written at 2a2b94e's FIX_PLAN Task 135, in
+// its last part.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspaces (H-1), drives the product strictly as a subprocess (H-2),
@@ -362,20 +362,48 @@
 //   create --base … --name n` at each, under each arm's staging), and
 //   T13.5-2's busy workspace (section-13.5.ts `runT1352HeldRun`: each
 //   excluded mutating command while command 1 holds, every run bounded and
-//   exiting while command 1 still holds), each run as its home test runs
-//   it, every exit-2 invocation handed to the twin in place of the home
-//   test's own check (support.ts `ErrorInvocationVisitor`, `home` false:
-//   the stagings' other assertions — T13.5-2's held-state comparison,
-//   second commands, and determinism repeats among them — the home tests'
-//   own): inside one whole-root modifies-nothing compare (an exit-2 run
-//   modifies nothing — 12.1, 6.3, 13.5 — the lock path aside where a
-//   mutating command reached acquisition, H-6), the `--json` run exits 2,
-//   the staging's premise (each home test pins it), its stdout decoded
-//   form-exact as the error document (12.7); then the human run on the
-//   same pre-invocation state — the `--json` run's working directory,
-//   environment, and staging (T6.3-6's journal-path occupants and
-//   unsearchable git directories, made just before each run and restored
-//   once it ends, its FIFO checked unopened after each) — exits 2 alike
+//   exiting while command 1 still holds), and T14-10's exit-2 read
+//   failures (section-14-ii.ts `runT1410ReadFailureStagings`: (b)'s given
+//   baselines on the unreadable journal, `impact --base` and `review create
+//   --base … --name n`, each resolution's journal error; (d)'s
+//   configuration errors on the unreadable configuration file, `build` and
+//   `ids`; (g)'s refused listing of `specs/sub` — `build`, `check`, `ids`,
+//   `review list`, and a `rename` — and its precedence arms: `coverage
+//   <unknown-profile>`, the syntax class's surplus operand and outside-root
+//   `--file` pattern (plain usage errors), the read failure beside a source
+//   failing validation, and the invalid configuration preceding the read;
+//   (h)'s refused listing of `.xspec/reviews`, `review list` and `check`;
+//   (i)'s acquisition stagings at the lock path, one mutating command each,
+//   and the second discovery's refused `specs/sub` during a held `rename`;
+//   (k)'s entered, mode-000 working directory `R/tools`, configured and
+//   bare, `build`, `ids`, `coverage <unknown-profile>`, and the syntax
+//   class's `ids extra`; and (l)'s kind halves under mode-000 directories —
+//   `.xspec`'s `build`, `ids`, and `impact --base c1`, and on its failing
+//   twin `build`, `ids`, and `check`; `.xspec/reviews`'s `review status s`;
+//   and the entered root's `build` and `ids` with `--config
+//   xspec.config.ts`), each run as its home test runs it, every exit-2
+//   invocation handed to the twin in place of the home test's own check
+//   (support.ts `ErrorInvocationVisitor`, `home` false: the stagings' other
+//   assertions — T13.5-2's held-state comparison, second commands, and
+//   determinism repeats among them, and T14-10's exit-0 and exit-1 runs,
+//   compares, and recoveries — the home tests' own; a JSON-only surface's
+//   exit-2 run — `inventory`, `occurrences`, `view`, `at`, which have no
+//   human form — and (j)'s refused git data, a plain usage error and no
+//   read failure, left to them): inside one whole-root modifies-nothing
+//   compare (an exit-2 run modifies nothing — 12.1, 6.3, 13.5, 14.25 — the
+//   lock path aside where a mutating command reached acquisition, H-6, and
+//   left out of both walks at T14-10(i), whose staging stands there and
+//   whose home test prunes it so), the `--json` run exits 2, the staging's
+//   premise (each home test pins it), its stdout decoded form-exact as the
+//   error document (12.7); then the human run on the same pre-invocation
+//   state — the `--json` run's working directory, environment, and staging
+//   (T6.3-6's journal-path occupants and unsearchable git directories and
+//   T14-10's refused objects, each made just before each run and restored
+//   once it ends — T6.3-6's FIFO checked unopened after each, T14-10(k)'s
+//   and (l)(iii)'s directories entered first and staged once entered, and
+//   at T14-10(i) the lock path an earlier run's acquisition and release
+//   left cleared before the staging is made again, so the human run meets
+//   the state the `--json` run met, at the same absolute path) — exits 2 alike
 //   with standard output empty (12.0), its standard error byte-identical
 //   (12.0: the output form never changes standard-error content; T12.0-2),
 //   and its message — decoded by the exit-2 adapter
@@ -386,9 +414,8 @@
 //   wording free; a code-less twin, a plain usage error, is asserted for
 //   neither (14: it carries no code and concerns no path). The errors'
 //   codes and paths are the home tests' (each pins them); this test
-//   compares the two forms. T14-9's write failures and T14-10's exit-2 read
-//   failures join them in the later parts of the plan written at 2a2b94e's
-//   FIX_PLAN Task 135.
+//   compares the two forms. T14-9's write failures join them in the last
+//   part of the plan written at 2a2b94e's FIX_PLAN Task 135.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -485,6 +512,7 @@ import { runT1273ConfigurationErrorStagings } from "./section-12.7.js";
 import { runT1333GateStagings } from "./section-13.3.js";
 import { runT1352HeldRun } from "./section-13.5.js";
 import { T14_11_FIXTURES } from "./section-14.js";
+import { runT1410ReadFailureStagings } from "./section-14-ii.js";
 import { T9_IMPACT_STAGINGS } from "./section-9.js";
 import { T9_3_IMPACT_STAGINGS } from "./section-9.3.js";
 import type {
@@ -1965,7 +1993,9 @@ async function runNodeShowTwins(product: ProductBinding): Promise<void> {
  * T12.0-15's twin of one exit-2 invocation at the state its home test's
  * staging reached (the module header): inside one whole-root
  * modifies-nothing compare under `invocation.root` (an exit-2 run modifies
- * nothing; acquisition's coordination writes at the lock path aside, H-6),
+ * nothing; acquisition's coordination writes at the lock path aside, H-6 —
+ * and `invocation.exclude` left out of both walks where given, T14-10(i)'s
+ * lock path, as its home test leaves it out),
  * the command line with `--json` — exit 2, the staging's premise, as the
  * home test pins it — its stdout decoded form-exact as the error document
  * (SPEC 12.7); then the command line without it, the human form, on the
@@ -2033,8 +2063,10 @@ async function expectHumanErrorTwin(
       `neither modifies anything (SPEC 12.0: an exit-2 error; 12.1: a build ` +
       `failing at configuration load modifies nothing; 6.3: a given ` +
       `baseline's resolution failing modifies nothing; 13.5: a busy ` +
-      `refusal modifies nothing — acquisition's own writes at the lock ` +
+      `refusal modifies nothing; 14.25: a command stops at a refused read, ` +
+      `attempting nothing further — acquisition's own writes at the lock ` +
       `path aside, H-6; TEST-SPEC T12.0-15)`,
+    invocation.exclude === undefined ? {} : { exclude: invocation.exclude },
   );
 }
 
@@ -2088,6 +2120,23 @@ async function runBusyRefusalTwins(product: ProductBinding): Promise<void> {
   await runT1352HeldRun(product, HUMAN_ERROR_TWINS, "T13.5-2");
 }
 
+/**
+ * The exit-2 read failures and the errors beside them (the module header):
+ * T14-10's exit-2 stagings (section-14-ii.ts `runT1410ReadFailureStagings`:
+ * (b)'s given baselines, (d)'s configuration errors, (g)'s refused
+ * discovery listing and its precedence arms, (h)'s session-directory
+ * listings, (i)'s acquisition and second-discovery read failures, (k)'s
+ * entered-directory sweeps, and (l)'s kind halves), each exit-2 invocation
+ * with a human form handed to the twin, the human message carrying
+ * `read-failure` — or the configuration error's, the journal error's, or
+ * a write failure's code where the staging meets one — and the concerned
+ * path as its twin's error document does, a plain usage error's asserted
+ * for neither (SPEC 14.25, 14.14, 6.3, 14.24, 14). Linux leg only (E-1).
+ */
+async function runReadFailureTwins(product: ProductBinding): Promise<void> {
+  await runT1410ReadFailureStagings(product, HUMAN_ERROR_TWINS);
+}
+
 // ---------------------------------------------------------------------------
 // T12.0-15
 // ---------------------------------------------------------------------------
@@ -2095,7 +2144,7 @@ async function runBusyRefusalTwins(product: ProductBinding): Promise<void> {
 const T12_0_15 = defineProductTest({
   id: "T12.0-15",
   title:
-    "human-form reports — this registration's families: `build` and `check` on T14-11's per-condition fixtures, T12.2-2's per-family workspaces, and T1.5-2's every arm (its located arm included), and each gated read and mutating `review` subcommand on T13.3-3's stagings but `query` (JSON-only), each run again without `--json` on the same pre-invocation state (a fresh copy of it for a mutating command or a run that writes), exit as its `--json` twin, standard error byte-identical, its report — decoded by the human findings decoder — carrying every finding's stable code, locations (each file and its range's two byte offsets), concerned path, and identities as its twin does, order free, messages never compared, a human report printing nothing or omitting or changing any datum failing; and on T1.5-2's arms every reported path presented as 12.0 fixes, whatever the twin carries — the non-UTF-8 path (the condition-19 finding's concerned path, the located arm's location file) explicitly marked, the adapter recovering its exact bytes by the mark alone, each such report byte-identical across two runs on the same state, and every valid-UTF-8 path (the `#` and U+FFFD arms') a plain string, never marked; `rename` and `move` — the performed reports of T6.4-1's rename and T6.5-1's five file moves, staged as their home tests stage them and built, each form run on its own fresh copy of the built state, the human run exiting 0 as its `--json` twin, standard error byte-identical, its report — decoded by the human performed-report decoder — carrying the applied mapping the form-exact performed-operation document carries, every pair's `from` and `to` identity, a multiset, order free, a pair omitted, changed, or listed beside the twin's failing (the previews are T6.6-7's); and the refused real operations of T6.4-3, T6.4-6, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7 — T6.4-6's invalid-workspace arm and every refusal of T6.6-3's refusal stagings, staged as T6.6-3 stages each from its home module, T6.4-6's refused-writes staging among them — each form on its own fresh copy of the state, exit 1, the human findings report carrying every refusal finding's code, locations, concerned path, and identities, and the invalid-workspace refusal's findings each under its own condition's code, a human refusal printing nothing or omitting any of them failing; `impact` — every `impact --base <ref>` read of the stagings of T5.6-1 through T5.6-6 and T9-1 through T9.3-3, run as their home tests run them, the read and its human twin on the same built state, exit 0 each, standard error byte-identical, the human report — decoded by the human impact decoder — carrying each category with its attribution, the collapsed chains, deleted nodes under their baseline identities, and each impacted location under its group with its witness edge and path as the `--json` twin does, order free, a datum omitted, changed, or misplaced failing; `review` — the human `review list` at T10.7-5's clean and corrupt listings and `review status s` at T10.7-6's four stages, staged as their home tests stage them, each run on the same built state as its `--json` twin and exiting as it (`list` 1 iff a session is corrupt, else 0; `status` 0), standard error byte-identical, the human report — decoded by the human review-list or review-status decoder — carrying every session's name with its strategy and item counts by stored status, or its corruption in their place, and each corrupt session's condition-21 finding, or every item's id, kind, scope, status, and blocked state and the totals by status, the sessions and the items in the order 10.7 fixes, a datum omitted, changed, or misordered failing; the human `review next s` at each read of T10.7-7's staging — the order walk's four items and its fully-resolved report, the full-resolution arm's fully-resolved report and new section's item, the empty session's fully-resolved report, and the payload walk's four reads — and the human `review show s <item>` at T10.7-8's two reads, x.k's item and the root's, staged as their home tests stage them, each run on the same built state as its `--json` twin, exit 0 each, standard error byte-identical, the human report — decoded by the human review-next or review-item decoder — reporting the session fully resolved exactly where the twin does, else carrying the item's id, kind, status, blocked state, blockers, note, and a reason (its wording never compared; `next --json`'s self-contained payload the JSON form's alone), and for `show` also the scope node's identity, presence, source range, and text, each context and origin entry with its presence, range, text, and before and after sides, and the `baseline` and `current` recorded states, each node's presence and hashes or absent marker, order free, a datum omitted or changed failing; the refusals of T10.7-1 — `create` naming an existing session, naming one under each of T10.1-4's corruptions, naming a corrupt one ignoring ASCII case alone, and on the Linux leg naming a case pair, both corrupt, one of them corrupt, or both valid — of T10.7-9 — `split` of an item of another kind or of a `subtree-coherence` item whose scope root has no children, on its path-blocks and audit fixtures and in its Q session — and of T10.7-10 — `resolve` of a blocked item — staged as their home tests stage them, the home tests' other assertions theirs, each form run on its own fresh copy of the state, exit 1, the human findings report carrying every refusal finding's code, locations, concerned path, and identities as its twin does, a code-less refusal's and a corruption's condition-21 finding alike; and `status`, `next`, `show`, `resolve`, and `split` naming the corrupt session of each of T10.1-4's states, staged as T10.1-4 stages them, exit 1, each mutating subcommand's two forms on their own fresh copies, the human findings report carrying the condition-21 finding's code and concerned path as its twin does; `coverage` — every read of T8.2-1's staging (the default run, `coverage prof-aux`, `coverage --check`, and the covered fixture's `coverage --check`) — `ids` — every listing of T12.3-1's staging at exit 0, flat and `--tree` — and `show` — T12.4-1's non-root and root arms — staged as their home tests stage them, each run on the same built state as its `--json` twin and exiting as it (`coverage --check` 1 iff a required node is uncovered, else 0; every other read 0), standard error byte-identical, the human report — decoded by the human coverage, ids, ids tree, or show decoder — carrying every profile's counts, node identities, covering paths, and ignored nodes' reasons, the reasons in 8.2's fixed order; every entry of the listing, an empty one included, in byte order of path, its IDs in document order or nested as the twin's tree; or the identity, source range, own and subtree text, hashes, tags and coverage attribute — a root's absent — and edges by kind, a datum omitted, changed, or misordered failing; and exit-2 errors — each configuration error of T12.7-3's stagings (the found file from the root and from a nested working directory; `--config` naming the broken file with a `./` segment; from `work/`, `--config` naming no file and then the malformed file, each as spelled, non-canonically, and absolutely; the failed upward search's `.` from the root and from a nested working directory; the three-defect file; and on the Linux leg `--config` from a symbolic-link working directory), each journal error at a given baseline of T6.3-6's (a)–(d) at `impact --base` and `review create --base`, and each busy refusal of T13.5-2's held run, staged as their home tests stage them — each run again without `--json` on the same pre-invocation state, exiting 2 as its twin with standard output empty and standard error byte-identical, its standard-error message — decoded by the exit-2 adapter — carrying the stable code and the concerned path its twin's error document carries, a message omitting either failing, a plain usage error's asserted for neither; T14-9's write failures and T14-10's exit-2 read failures follow (the plan written at 2a2b94e, FIX_PLAN Task 135) (SPEC 12.0, 12.7, 14, 1.7, 6.4, 6.5, 5.6, 9.1, 9.2, 9.3, 10.1, 10.7, 14.21, 8.2, 12.3, 12.4, 6.3, 13.5, 14.13, 14.14, 14.26; H-3, H-5, H-6)",
+    "human-form reports — this registration's families: `build` and `check` on T14-11's per-condition fixtures, T12.2-2's per-family workspaces, and T1.5-2's every arm (its located arm included), and each gated read and mutating `review` subcommand on T13.3-3's stagings but `query` (JSON-only), each run again without `--json` on the same pre-invocation state (a fresh copy of it for a mutating command or a run that writes), exit as its `--json` twin, standard error byte-identical, its report — decoded by the human findings decoder — carrying every finding's stable code, locations (each file and its range's two byte offsets), concerned path, and identities as its twin does, order free, messages never compared, a human report printing nothing or omitting or changing any datum failing; and on T1.5-2's arms every reported path presented as 12.0 fixes, whatever the twin carries — the non-UTF-8 path (the condition-19 finding's concerned path, the located arm's location file) explicitly marked, the adapter recovering its exact bytes by the mark alone, each such report byte-identical across two runs on the same state, and every valid-UTF-8 path (the `#` and U+FFFD arms') a plain string, never marked; `rename` and `move` — the performed reports of T6.4-1's rename and T6.5-1's five file moves, staged as their home tests stage them and built, each form run on its own fresh copy of the built state, the human run exiting 0 as its `--json` twin, standard error byte-identical, its report — decoded by the human performed-report decoder — carrying the applied mapping the form-exact performed-operation document carries, every pair's `from` and `to` identity, a multiset, order free, a pair omitted, changed, or listed beside the twin's failing (the previews are T6.6-7's); and the refused real operations of T6.4-3, T6.4-6, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7 — T6.4-6's invalid-workspace arm and every refusal of T6.6-3's refusal stagings, staged as T6.6-3 stages each from its home module, T6.4-6's refused-writes staging among them — each form on its own fresh copy of the state, exit 1, the human findings report carrying every refusal finding's code, locations, concerned path, and identities, and the invalid-workspace refusal's findings each under its own condition's code, a human refusal printing nothing or omitting any of them failing; `impact` — every `impact --base <ref>` read of the stagings of T5.6-1 through T5.6-6 and T9-1 through T9.3-3, run as their home tests run them, the read and its human twin on the same built state, exit 0 each, standard error byte-identical, the human report — decoded by the human impact decoder — carrying each category with its attribution, the collapsed chains, deleted nodes under their baseline identities, and each impacted location under its group with its witness edge and path as the `--json` twin does, order free, a datum omitted, changed, or misplaced failing; `review` — the human `review list` at T10.7-5's clean and corrupt listings and `review status s` at T10.7-6's four stages, staged as their home tests stage them, each run on the same built state as its `--json` twin and exiting as it (`list` 1 iff a session is corrupt, else 0; `status` 0), standard error byte-identical, the human report — decoded by the human review-list or review-status decoder — carrying every session's name with its strategy and item counts by stored status, or its corruption in their place, and each corrupt session's condition-21 finding, or every item's id, kind, scope, status, and blocked state and the totals by status, the sessions and the items in the order 10.7 fixes, a datum omitted, changed, or misordered failing; the human `review next s` at each read of T10.7-7's staging — the order walk's four items and its fully-resolved report, the full-resolution arm's fully-resolved report and new section's item, the empty session's fully-resolved report, and the payload walk's four reads — and the human `review show s <item>` at T10.7-8's two reads, x.k's item and the root's, staged as their home tests stage them, each run on the same built state as its `--json` twin, exit 0 each, standard error byte-identical, the human report — decoded by the human review-next or review-item decoder — reporting the session fully resolved exactly where the twin does, else carrying the item's id, kind, status, blocked state, blockers, note, and a reason (its wording never compared; `next --json`'s self-contained payload the JSON form's alone), and for `show` also the scope node's identity, presence, source range, and text, each context and origin entry with its presence, range, text, and before and after sides, and the `baseline` and `current` recorded states, each node's presence and hashes or absent marker, order free, a datum omitted or changed failing; the refusals of T10.7-1 — `create` naming an existing session, naming one under each of T10.1-4's corruptions, naming a corrupt one ignoring ASCII case alone, and on the Linux leg naming a case pair, both corrupt, one of them corrupt, or both valid — of T10.7-9 — `split` of an item of another kind or of a `subtree-coherence` item whose scope root has no children, on its path-blocks and audit fixtures and in its Q session — and of T10.7-10 — `resolve` of a blocked item — staged as their home tests stage them, the home tests' other assertions theirs, each form run on its own fresh copy of the state, exit 1, the human findings report carrying every refusal finding's code, locations, concerned path, and identities as its twin does, a code-less refusal's and a corruption's condition-21 finding alike; and `status`, `next`, `show`, `resolve`, and `split` naming the corrupt session of each of T10.1-4's states, staged as T10.1-4 stages them, exit 1, each mutating subcommand's two forms on their own fresh copies, the human findings report carrying the condition-21 finding's code and concerned path as its twin does; `coverage` — every read of T8.2-1's staging (the default run, `coverage prof-aux`, `coverage --check`, and the covered fixture's `coverage --check`) — `ids` — every listing of T12.3-1's staging at exit 0, flat and `--tree` — and `show` — T12.4-1's non-root and root arms — staged as their home tests stage them, each run on the same built state as its `--json` twin and exiting as it (`coverage --check` 1 iff a required node is uncovered, else 0; every other read 0), standard error byte-identical, the human report — decoded by the human coverage, ids, ids tree, or show decoder — carrying every profile's counts, node identities, covering paths, and ignored nodes' reasons, the reasons in 8.2's fixed order; every entry of the listing, an empty one included, in byte order of path, its IDs in document order or nested as the twin's tree; or the identity, source range, own and subtree text, hashes, tags and coverage attribute — a root's absent — and edges by kind, a datum omitted, changed, or misordered failing; and exit-2 errors — each configuration error of T12.7-3's stagings (the found file from the root and from a nested working directory; `--config` naming the broken file with a `./` segment; from `work/`, `--config` naming no file and then the malformed file, each as spelled, non-canonically, and absolutely; the failed upward search's `.` from the root and from a nested working directory; the three-defect file; and on the Linux leg `--config` from a symbolic-link working directory), each journal error at a given baseline of T6.3-6's (a)–(d) at `impact --base` and `review create --base`, each busy refusal of T13.5-2's held run, and on the Linux leg each exit-2 invocation with a human form of T14-10's stagings — (b)'s given baselines on the unreadable journal (`impact --base`, `review create --base`), (d)'s configuration errors on the unreadable configuration file (`build`, `ids`), (g)'s refused listing of specs/sub (`build`, `check`, `ids`, `review list`, a `rename`) with its precedence arms (`coverage <unknown-profile>`, the syntax class's `ids extra` and `ids --file ../x`, a source failing validation, and the invalid configuration preceding the read), (h)'s refused listing of .xspec/reviews (`review list`, `check`), (i)'s acquisition stagings at the lock path (`rename`, `move`, `review create`, `resolve`, `split`) and the second discovery's refused specs/sub during a held `rename`, (k)'s entered mode-000 working directory, configured and bare (`build`, `ids`, `coverage <unknown-profile>`, `ids extra`), and (l)'s kind halves (.xspec's `build`, `ids`, and `impact --base`, and on its failing twin `build`, `ids`, and `check`; .xspec/reviews's `review status`; the entered root's `build` and `ids` with `--config`), its JSON-only surfaces' runs and (j)'s plain git-data errors left to T14-10 — staged as their home tests stage them, each run again without `--json` on the same pre-invocation state (at T14-10(i) the lock path an earlier run left cleared before the staging is made again), exiting 2 as its twin with standard output empty and standard error byte-identical, its standard-error message — decoded by the exit-2 adapter — carrying the stable code and the concerned path its twin's error document carries, a message omitting either failing, a plain usage error's asserted for neither; T14-9's write failures follow (the plan written at 2a2b94e, FIX_PLAN Task 135) (SPEC 12.0, 12.7, 14, 1.7, 6.4, 6.5, 5.6, 9.1, 9.2, 9.3, 10.1, 10.7, 14.21, 8.2, 12.3, 12.4, 6.3, 13.5, 14.13, 14.14, 14.25, 14.26; H-3, H-5, H-6)",
   run: async (product) => {
     await runT1411Twins(product);
     await runT1222Twins(product);
@@ -2114,6 +2163,7 @@ const T12_0_15 = defineProductTest({
     await runConfigurationErrorTwins(product);
     await runJournalErrorTwins(product);
     await runBusyRefusalTwins(product);
+    await runReadFailureTwins(product);
     await runCorruptNamingTwins(product);
   },
 });

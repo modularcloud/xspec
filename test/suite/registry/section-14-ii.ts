@@ -156,6 +156,19 @@
 // Snapshots for the "nothing modified" laws are taken outside the staging
 // windows (a staged object cannot be snapshotted), before staging and after
 // restoring.
+// T14-10's exit-2 stagings — (b)'s given baselines, (d), (g), (h), (i),
+// (k), and (l) — hand each exit-2 invocation to a visitor (support.ts
+// `ErrorInvocationVisitor`; `visitExitTwo`): T14-10's body runs each arm
+// with `ERROR_INVOCATION_HOME`, its own check at each invocation and every
+// other run and assertion of the arm beside them, while T12.0-15's exit-2
+// family (section-12.0-iv.ts) runs them through `runT1410ReadFailureStagings`
+// with its human twin at each invocation instead. Their stagings stand
+// around each run alone — made just before the run, verified, and restored
+// once it ends (`runStaged`, `bothRoutesRefusedRun`'s run; (i)'s a later
+// run first clearing the lock path an earlier one left, `clearLockPath`) —
+// so a compare taken outside them reads every path; a JSON-only surface's
+// run (`inventory`, `occurrences`, `view`, `at`), which has no human form
+// (SPEC 11), is T14-10's alone.
 //
 // Conservative operationalizations (H-3):
 // - Arm (a)'s fixture: `specs/A.mdx` → `specs/B.mdx` → `specs/C.mdx` ←
@@ -368,7 +381,11 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
-import { EXCLUDE_LOCK_PATH, LOCK_PATH } from "../../helpers/lock-path.js";
+import {
+  EXCLUDE_LOCK_PATH,
+  LOCK_PATH,
+  isLockPathBytes,
+} from "../../helpers/lock-path.js";
 import { AREA_PATH } from "../../helpers/lock-staging.js";
 import type {
   DirectoryModeProbe,
@@ -384,7 +401,10 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
-import type { DirectorySnapshot } from "../../helpers/snapshot.js";
+import type {
+  DirectorySnapshot,
+  SnapshotOptions,
+} from "../../helpers/snapshot.js";
 import {
   assertSnapshotsEqual,
   diffSnapshots,
@@ -427,7 +447,9 @@ import {
   stageArmWorkspace,
 } from "./section-13.5-ii.js";
 import { liftAndWait, withHeldRun } from "./section-13.5-iii.js";
+import type { ErrorInvocationVisitor } from "./support.js";
 import {
+  ERROR_INVOCATION_HOME,
   assertConditionCounts,
   assertFindingConcernsPath,
   assertFindingLocated,
@@ -442,6 +464,7 @@ import {
 import type {
   CreatedTargetOrder,
   RefusalFixture,
+  StagingApplier,
 } from "./write-refusal-staging.js";
 import {
   CREATED_TARGET_ORDERS,
@@ -2171,7 +2194,8 @@ const SOURCE_DECL: WorkspaceDecl = {
 // directory the discovery of SPEC 7 lists under the glob `specs/**/*.mdx`.
 // Arm (g) follows T14-10's earlier arms' invocations, so the source is a
 // staged-source record (S-9, test/self/s9-staged-sources.test.ts), staged
-// by the prepared workspace and the invalid-configuration one alike.
+// by the prepared workspace and the invalid-configuration one alike — and
+// by T12.0-15's exit-2 family, which restages arm (g).
 const SUB_DIR = "specs/sub";
 const SUB_PATH = `${SUB_DIR}/S.mdx`;
 const LISTING_FIXTURE: RefusalFixture = {
@@ -2179,7 +2203,7 @@ const LISTING_FIXTURE: RefusalFixture = {
     files: {
       ...RENAME_FIXTURE.decl.files,
       [SUB_PATH]: stagedMdx(
-        "T14-10 specs/sub/S.mdx (arm (g)'s listing fixture: the source under the unlistable directory)",
+        "T12.0-15/T14-10 specs/sub/S.mdx (arm (g)'s listing fixture: the source under the unlistable directory)",
         ['<S id="s">', "Sub text.", "</S>", ""].join("\n"),
       ),
     },
@@ -2189,10 +2213,11 @@ const LISTING_FIXTURE: RefusalFixture = {
 /**
  * The rename fixture's configuration with an unknown top-level key (14.14):
  * a staged-source record (S-9), since arm (g)'s invalid-configuration
- * workspace follows the body's first product invocation.
+ * workspace follows the body's first product invocation — in T14-10, and in
+ * T12.0-15, which restages arm (g).
  */
 const INVALID_CONFIG = stagedTs(
-  "T14-10 (g) xspec.config.ts (the rename fixture's configuration with an unknown top-level key, 14.14)",
+  "T12.0-15/T14-10 (g) xspec.config.ts (the rename fixture's configuration with an unknown top-level key, 14.14)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -2318,9 +2343,29 @@ function expectSyntaxClassError(
 }
 
 /**
- * A findings-report surface under a staging: the exact exit code (a hang
- * becomes a diagnosed failure), the findings-only document `{"findings":
- * […]}` as the entire stdout, decoded form-exact (SPEC 12.7).
+ * Run `argv` from the workspace root under a staging: `apply`'s, made just
+ * before the run and restored once it ends (write-refusal-staging.ts
+ * `runStaged`), where given — the exit-2 stagings', each run under its own
+ * — else the caller's, standing around it. A hang becomes a diagnosed
+ * failure either way.
+ */
+async function runUnderStaging(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+  apply?: StagingApplier,
+): Promise<RunResult> {
+  return apply === undefined
+    ? await runSettled(product, workspace, argv, context)
+    : await runStaged(product, workspace, argv, apply, context);
+}
+
+/**
+ * A findings-report surface under a staging (`runUnderStaging`: `apply`'s
+ * around the run where given): the exact exit code (a hang becomes a
+ * diagnosed failure), the findings-only document `{"findings": […]}` as the
+ * entire stdout, decoded form-exact (SPEC 12.7).
  */
 async function stagedFindings(
   product: ProductBinding,
@@ -2328,24 +2373,107 @@ async function stagedFindings(
   argv: readonly string[],
   exitCode: number,
   context: string,
+  apply?: StagingApplier,
 ): Promise<readonly Finding[]> {
-  const result = await runSettled(product, workspace, argv, context);
+  const result = await runUnderStaging(
+    product,
+    workspace,
+    argv,
+    context,
+    apply,
+  );
   assertExitCode(result, exitCode, context);
   return decodeFindingsReport(parseJsonStdout(result, context), context)
     .findings;
 }
 
-/** A staged run expected to exit `exitCode`, its stdout parsed as one document. */
+/**
+ * A staged run (`runUnderStaging`: `apply`'s around the run where given)
+ * expected to exit `exitCode`, its stdout parsed as one document.
+ */
 async function stagedDocument(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
   exitCode: number,
   context: string,
+  apply?: StagingApplier,
 ): Promise<unknown> {
-  const result = await runSettled(product, workspace, argv, context);
+  const result = await runUnderStaging(
+    product,
+    workspace,
+    argv,
+    context,
+    apply,
+  );
   assertExitCode(result, exitCode, context);
   return parseJsonStdout(result, context);
+}
+
+/** A file's content read refused at the workspace-relative `rel` (mode 0o200). */
+function readRefusalOfFileAt(rel: string): StagingApplier {
+  return async (root) => await stageReadRefusalOfFile(path.join(root, rel));
+}
+
+/**
+ * A directory's listing refused at the workspace-relative `rel` (mode
+ * 0o100, search kept).
+ */
+function readRefusalOfDirectoryAt(rel: string): StagingApplier {
+  return async (root) =>
+    await stageReadRefusalOfDirectory(path.join(root, rel));
+}
+
+/**
+ * SPEC 11's JSON-only surfaces among the commands T14-10's exit-2 stagings
+ * run: each emits one JSON document whatever its flags (SPEC 11; H-5), so
+ * an invocation of one has no human form to twin (TEST-SPEC T12.0-15).
+ */
+const JSON_ONLY_SURFACES: ReadonlySet<string> = new Set([
+  "inventory",
+  "occurrences",
+  "view",
+  "at",
+]);
+
+/** The parts of an exit-2 invocation its staging gives `visitExitTwo`. */
+interface ExitTwoInvocation {
+  /** Leads every diagnosis of the invocation. */
+  readonly label: string;
+  /** The command line as T14-10 runs it, `--json` among its tokens. */
+  readonly jsonArgv: readonly string[];
+  /** The workspace root whose tree the invocation leaves unchanged. */
+  readonly root: string;
+  /** A run at the invocation's pre-invocation state, its staging around it. */
+  readonly run: (argv: readonly string[]) => Promise<RunResult>;
+  /** What the compare under `root` leaves out (T14-10(i)'s lock path). */
+  readonly exclude?: SnapshotOptions["exclude"];
+}
+
+/**
+ * Hand one exit-2 invocation of T14-10's stagings to `visitor` (support.ts
+ * `ErrorInvocationVisitor`; TEST-SPEC T12.0-15's exit-2 family) at the
+ * state it runs on — its human form the same command line without its
+ * `--json` token, `home` T14-10's own check of it — or, a JSON-only
+ * surface's ({@link JSON_ONLY_SURFACES}), which has no human form, run
+ * `home` alone where `visitor.home` holds: that run is T14-10's.
+ */
+async function visitExitTwo(
+  visitor: ErrorInvocationVisitor,
+  invocation: ExitTwoInvocation,
+  home: () => Promise<void>,
+): Promise<void> {
+  if (JSON_ONLY_SURFACES.has(invocation.jsonArgv[0] ?? "")) {
+    if (visitor.home) await home();
+    return;
+  }
+  await visitor.error(
+    {
+      ...invocation,
+      argv: invocation.jsonArgv.filter((token) => token !== "--json"),
+    },
+    home,
+  );
 }
 
 /**
@@ -2851,13 +2979,16 @@ function expectBaselineJournalError(result: RunResult, context: string): void {
  * as the gate does, making every read it makes), a gate condition that is
  * no domain file's finding and so accompanies none of their answers —
  * never 14.25's usage error (exit 2), never the finding beside the answer
- * (exit 1). `view` answers exactly the requested file's view.
+ * (exit 1). `view` answers exactly the requested file's view. Each run is
+ * made under `apply`'s staging, made just before it and restored once it
+ * ends.
  */
 async function assertSurfacesAnswerFindingFree(
   product: ProductBinding,
   workspace: TestWorkspace,
   staged: string,
   context: string,
+  apply: StagingApplier,
 ): Promise<void> {
   const why =
     `the surfaces' judgement makes the journal's read and meets the ` +
@@ -2877,6 +3008,7 @@ async function assertSurfacesAnswerFindingFree(
       ["occurrences"],
       0,
       `${occLabel} — ${why}`,
+      apply,
     ),
     occLabel,
   );
@@ -2891,6 +3023,7 @@ async function assertSurfacesAnswerFindingFree(
       viewArgv,
       0,
       `${viewLabel} — ${why}`,
+      apply,
     ),
     { text: false },
     viewLabel,
@@ -2905,7 +3038,14 @@ async function assertSurfacesAnswerFindingFree(
   const atArgv = ["at", RENAME_A_PATH, "0"];
   const atLabel = `${context} \`${atArgv.join(" ")}\` ${staged}`;
   const at = decodeAtReport(
-    await stagedDocument(product, workspace, atArgv, 0, `${atLabel} — ${why}`),
+    await stagedDocument(
+      product,
+      workspace,
+      atArgv,
+      0,
+      `${atLabel} — ${why}`,
+      apply,
+    ),
     atLabel,
   );
   assertSameJson(at.findings, [], `${atLabel} — ${findingFree}`);
@@ -2924,9 +3064,16 @@ async function assertSurfacesAnswerFindingFree(
  * `inventory` reports `journal` exactly `{"path": ".xspec/journal",
  * "occupied": true}`, finding-free, exit 0 — the kind read, permitted, is
  * the only read it makes there. Nothing is modified; restored, the
- * workspace builds clean.
+ * workspace builds clean. The staging stands around each run alone, made
+ * just before it and restored once it ends; each given baseline's run is
+ * handed to `visitor` (`visitExitTwo`), its `home` the journal error's
+ * check, and every other run and assertion is made where `visitor.home`
+ * holds.
  */
-async function journalContentArm(product: ProductBinding): Promise<void> {
+async function journalContentArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context = "T14-10 (b) the journal's content";
   const prepared = await prepareRefusalWorkspace(
     product,
@@ -2934,9 +3081,9 @@ async function journalContentArm(product: ProductBinding): Promise<void> {
     context,
   );
   const { workspace } = prepared;
+  const unreadable = readRefusalOfFileAt(JOURNAL_PATH);
   try {
-    const staging = await stageReadRefusalOfFile(workspace.path(JOURNAL_PATH));
-    try {
+    if (visitor.home) {
       const reporters: readonly (readonly string[])[] = [
         ["build", "--json"],
         ["check", "--json"],
@@ -2955,6 +3102,7 @@ async function journalContentArm(product: ProductBinding): Promise<void> {
             `\`check\` report it, a gated read answers nothing but the ` +
             `findings, and a \`rename\` is refused — exit 1 with the ` +
             `findings-only document (SPEC 14.25, 14.13, 13.3, 6.4, 12.7)`,
+          unreadable,
         );
         assertConditionCounts(
           findings,
@@ -2967,65 +3115,71 @@ async function journalContentArm(product: ProductBinding): Promise<void> {
           `${label} — the journal is the concerned path (SPEC 14, 14.13)`,
         );
       }
-      // A given baseline's resolution reads the current journal before any
-      // other cause can fail it: the refused read is the journal error it
-      // reports as its usage error (SPEC 6.3) — at both baseline-taking
-      // commands, the prepared baseline commit given.
-      const baselineCommands: readonly (readonly string[])[] = [
-        ["impact", "--base", prepared.baseline, "--json"],
-        [
-          "review",
-          "create",
-          "--base",
-          prepared.baseline,
-          "--name",
-          NEW_SESSION,
-          "--json",
-        ],
-      ];
-      for (const argv of baselineCommands) {
-        const label = `${context} \`${argv.join(" ")}\` with ${JOURNAL_PATH} unreadable`;
-        expectBaselineJournalError(
-          await runSettled(product, workspace, argv, label),
-          label,
-        );
-      }
-      await assertSurfacesAnswerFindingFree(
+    }
+    // A given baseline's resolution reads the current journal before any
+    // other cause can fail it: the refused read is the journal error it
+    // reports as its usage error (SPEC 6.3) — at both baseline-taking
+    // commands, the prepared baseline commit given.
+    const baselineCommands: readonly (readonly string[])[] = [
+      ["impact", "--base", prepared.baseline, "--json"],
+      [
+        "review",
+        "create",
+        "--base",
+        prepared.baseline,
+        "--name",
+        NEW_SESSION,
+        "--json",
+      ],
+    ];
+    for (const argv of baselineCommands) {
+      const label = `${context} \`${argv.join(" ")}\` with ${JOURNAL_PATH} unreadable`;
+      const run = (runArgv: readonly string[]): Promise<RunResult> =>
+        runStaged(product, workspace, runArgv, unreadable, label);
+      await visitExitTwo(
+        visitor,
+        { label, jsonArgv: argv, root: workspace.root, run },
+        async () => {
+          expectBaselineJournalError(await run(argv), label);
+        },
+      );
+    }
+    if (!visitor.home) return;
+    await assertSurfacesAnswerFindingFree(
+      product,
+      workspace,
+      `with ${JOURNAL_PATH} unreadable`,
+      context,
+      unreadable,
+    );
+    const invLabel = `${context} \`inventory\` with ${JOURNAL_PATH} unreadable`;
+    const inventory = decodeInventoryDocument(
+      await stagedDocument(
         product,
         workspace,
-        `with ${JOURNAL_PATH} unreadable`,
-        context,
-      );
-      const invLabel = `${context} \`inventory\` with ${JOURNAL_PATH} unreadable`;
-      const inventory = decodeInventoryDocument(
-        await stagedDocument(
-          product,
-          workspace,
-          ["inventory"],
-          0,
-          `${invLabel} — the inventory reads the journal path's kind alone, ` +
-            `permitted, never its content: a complete, finding-free ` +
-            `answer, exit 0 (SPEC 11.6, 14.25)`,
-        ),
-        invLabel,
-      );
-      assertSameJson(
-        inventory.findings,
-        [],
-        `${invLabel} — finding-free: the inventory reads no journal ` +
-          `content, so it meets no condition-13 (SPEC 11.6, 14.25)`,
-      );
-      assertSameJson(
-        inventory.journal,
-        { path: JOURNAL_PATH, occupied: true },
-        `${invLabel} — the journal member is exactly {"path": ` +
-          `"${JOURNAL_PATH}", "occupied": true}: the journal path, occupied ` +
-          `— occupancy by presence alone, the content unread (SPEC 11.6, ` +
-          `12.7)`,
-      );
-    } finally {
-      await staging.restore();
-    }
+        ["inventory"],
+        0,
+        `${invLabel} — the inventory reads the journal path's kind alone, ` +
+          `permitted, never its content: a complete, finding-free ` +
+          `answer, exit 0 (SPEC 11.6, 14.25)`,
+        unreadable,
+      ),
+      invLabel,
+    );
+    assertSameJson(
+      inventory.findings,
+      [],
+      `${invLabel} — finding-free: the inventory reads no journal ` +
+        `content, so it meets no condition-13 (SPEC 11.6, 14.25)`,
+    );
+    assertSameJson(
+      inventory.journal,
+      { path: JOURNAL_PATH, occupied: true },
+      `${invLabel} — the journal member is exactly {"path": ` +
+        `"${JOURNAL_PATH}", "occupied": true}: the journal path, occupied ` +
+        `— occupancy by presence alone, the content unread (SPEC 11.6, ` +
+        `12.7)`,
+    );
     assertSnapshotsEqual(
       prepared.before,
       await snapshotWorkspace(workspace.root),
@@ -3207,9 +3361,16 @@ async function sessionContentArm(product: ProductBinding): Promise<void> {
  * `view` (representatives of every command but `version`) exit 2 with the
  * error document — `code` `configuration-error`, `path` the configuration
  * path in the anchoring form — while `version` answers, exit 0. Nothing is
- * modified; restored, the workspace builds clean.
+ * modified; restored, the workspace builds clean. The staging stands around
+ * each run alone; each configuration error is handed to `visitor`
+ * (`visitExitTwo`: `inventory` and `view`, JSON-only, run as T14-10's
+ * alone), its `home` the configuration error's check, and `version`, the
+ * compare, and the recovery are made where `visitor.home` holds.
  */
-async function configurationContentArm(product: ProductBinding): Promise<void> {
+async function configurationContentArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context = "T14-10 (d) the configuration file's content";
   const prepared = await prepareRefusalWorkspace(
     product,
@@ -3217,48 +3378,65 @@ async function configurationContentArm(product: ProductBinding): Promise<void> {
     context,
   );
   const { workspace } = prepared;
+  const unreadable = readRefusalOfFileAt(CONFIG_PATH);
   try {
-    const staging = await stageReadRefusalOfFile(workspace.path(CONFIG_PATH));
-    try {
-      const loaders: readonly (readonly string[])[] = [
-        ["build"],
-        ["ids"],
-        ["inventory"],
-        ["view", RENAME_A_PATH],
-      ];
-      for (const argv of loaders) {
-        const label = `${context} \`${argv.join(" ")} --json\` with ${CONFIG_PATH} unreadable`;
-        const result = await expectConfigurationError(
-          product,
-          workspace,
-          argv,
-          `${label} — a configuration file the environment refuses to read ` +
-            `is invalid configuration, condition 14, from every command ` +
-            `that loads it (SPEC 14.25, 14.14, 7)`,
-        );
-        const finding = expectErrorDocument(result, label);
-        if (finding.path !== CONFIG_PATH) {
-          fail(
-            `${label} — the concerned path is the configuration path in ` +
-              `the anchoring form, ${JSON.stringify(CONFIG_PATH)} from the ` +
-              `root (SPEC 14, 11.6); got ${JSON.stringify(finding.path)} ` +
-              `(message: ${JSON.stringify(finding.message)})`,
-          );
-        }
-      }
-      const versionLabel = `${context} \`version\` with ${CONFIG_PATH} unreadable`;
-      await stagedDocument(
-        product,
-        workspace,
-        ["version"],
-        0,
-        `${versionLabel} — \`version\` loads no configuration, so the ` +
-          `refused read never occurs: exit 0 with its answer (SPEC 12.6, ` +
-          `14.14, 14.25)`,
+    const loaders: readonly (readonly string[])[] = [
+      ["build"],
+      ["ids"],
+      ["inventory"],
+      ["view", RENAME_A_PATH],
+    ];
+    for (const argv of loaders) {
+      const jsonArgv = [...argv, "--json"];
+      const label = `${context} \`${jsonArgv.join(" ")}\` with ${CONFIG_PATH} unreadable`;
+      await visitExitTwo(
+        visitor,
+        {
+          label,
+          jsonArgv,
+          root: workspace.root,
+          run: (runArgv) =>
+            runStaged(product, workspace, runArgv, unreadable, label),
+        },
+        async () => {
+          const staging = await unreadable(workspace.root);
+          let result: RunResult;
+          try {
+            result = await expectConfigurationError(
+              product,
+              workspace,
+              argv,
+              `${label} — a configuration file the environment refuses to ` +
+                `read is invalid configuration, condition 14, from every ` +
+                `command that loads it (SPEC 14.25, 14.14, 7)`,
+            );
+          } finally {
+            await staging.restore();
+          }
+          const finding = expectErrorDocument(result, label);
+          if (finding.path !== CONFIG_PATH) {
+            fail(
+              `${label} — the concerned path is the configuration path in ` +
+                `the anchoring form, ${JSON.stringify(CONFIG_PATH)} from the ` +
+                `root (SPEC 14, 11.6); got ${JSON.stringify(finding.path)} ` +
+                `(message: ${JSON.stringify(finding.message)})`,
+            );
+          }
+        },
       );
-    } finally {
-      await staging.restore();
     }
+    if (!visitor.home) return;
+    const versionLabel = `${context} \`version\` with ${CONFIG_PATH} unreadable`;
+    await stagedDocument(
+      product,
+      workspace,
+      ["version"],
+      0,
+      `${versionLabel} — \`version\` loads no configuration, so the ` +
+        `refused read never occurs: exit 0 with its answer (SPEC 12.6, ` +
+        `14.14, 14.25)`,
+      unreadable,
+    );
     assertSnapshotsEqual(
       prepared.before,
       await snapshotWorkspace(workspace.root),
@@ -3790,9 +3968,16 @@ async function areaOccupantArm(product: ProductBinding): Promise<void> {
  * reports the read failure; the syntax class — a surplus operand, a
  * `--file` pattern outside the root, a malformed offset — is reported
  * without loading configuration (`code` null); and with the configuration
- * file itself invalid the configuration error precedes the read.
+ * file itself invalid the configuration error precedes the read. The
+ * staging stands around each run alone; every exit-2 run is handed to
+ * `visitor` (`visitExitTwo`: `view`, `inventory`, and `at`, JSON-only, run
+ * as T14-10's alone), its `home` T14-10's check of it, and the compare and
+ * the recovery are made where `visitor.home` holds.
  */
-async function discoveryListingArm(product: ProductBinding): Promise<void> {
+async function discoveryListingArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context = "T14-10 (g) a directory discovery lists";
   const prepared = await prepareRefusalWorkspace(
     product,
@@ -3800,89 +3985,101 @@ async function discoveryListingArm(product: ProductBinding): Promise<void> {
     context,
   );
   const { workspace } = prepared;
+  const unlistable = readRefusalOfDirectoryAt(SUB_DIR);
+  // One exit-2 run on the workspace under the staging, handed over: its
+  // `home` judges the run (`judge`) at its label.
+  const visitListingRun = async (
+    argv: readonly string[],
+    label: string,
+    judge: (result: RunResult) => void,
+  ): Promise<void> => {
+    const run = (runArgv: readonly string[]): Promise<RunResult> =>
+      runStaged(product, workspace, runArgv, unlistable, label);
+    await visitExitTwo(
+      visitor,
+      { label, jsonArgv: argv, root: workspace.root, run },
+      async () => {
+        judge(await run(argv));
+      },
+    );
+  };
   try {
-    const staging = await stageReadRefusalOfDirectory(workspace.path(SUB_DIR));
-    try {
-      const loaders: readonly (readonly string[])[] = [
-        ["build", "--json"],
-        ["check", "--json"],
-        ["ids", "--json"],
-        ["view", RENAME_A_PATH],
-        ["inventory"],
-        ["review", "list", "--json"],
-        RENAME_B_TO_B2,
-      ];
-      for (const argv of loaders) {
-        const label = `${context} \`${argv.join(" ")}\` with ${SUB_DIR} unlistable`;
+    const loaders: readonly (readonly string[])[] = [
+      ["build", "--json"],
+      ["check", "--json"],
+      ["ids", "--json"],
+      ["view", RENAME_A_PATH],
+      ["inventory"],
+      ["review", "list", "--json"],
+      RENAME_B_TO_B2,
+    ];
+    for (const argv of loaders) {
+      const label = `${context} \`${argv.join(" ")}\` with ${SUB_DIR} unlistable`;
+      await visitListingRun(argv, label, (result) => {
         expectReadFailure(
-          await runSettled(product, workspace, argv, label),
+          result,
           SUB_DIR,
           `${label} — a directory the discovery of 7 lists, refused: every ` +
             `command that loads the configuration stops at the read (SPEC ` +
             `14.25, 7, 12.0)`,
         );
-      }
-      const coverageArgv = ["coverage", "no-such-profile", "--json"];
-      const coverageLabel = `${context} \`${coverageArgv.join(" ")}\` with ${SUB_DIR} unlistable`;
+      });
+    }
+    const coverageArgv = ["coverage", "no-such-profile", "--json"];
+    const coverageLabel = `${context} \`${coverageArgv.join(" ")}\` with ${SUB_DIR} unlistable`;
+    await visitListingRun(coverageArgv, coverageLabel, (result) => {
       expectReadFailure(
-        await runSettled(product, workspace, coverageArgv, coverageLabel),
+        result,
         SUB_DIR,
         `${coverageLabel} — discovery precedes every error consulting the ` +
           `configuration: the unknown profile is judged after the reads ` +
           `its load makes, so the read failure is reported (SPEC 12.0, ` +
           `14.25, 7.4)`,
       );
-      const syntaxClass: readonly (readonly [readonly string[], string])[] = [
-        [["ids", "extra", "--json"], "a surplus operand"],
-        [
-          ["ids", "--file", "../x", "--json"],
-          "a `--file` pattern outside the workspace root, decided by its spelling alone",
-        ],
-        [
-          ["at", RENAME_A_PATH, "zz"],
-          "an offset spelled as anything but decimal digits — a malformed value",
-        ],
-      ];
-      for (const [argv, why] of syntaxClass) {
-        const label = `${context} \`${argv.join(" ")}\` with ${SUB_DIR} unlistable`;
-        expectSyntaxClassError(
-          await runSettled(product, workspace, argv, label),
-          why,
-          label,
-        );
-      }
-    } finally {
-      await staging.restore();
+    });
+    const syntaxClass: readonly (readonly [readonly string[], string])[] = [
+      [["ids", "extra", "--json"], "a surplus operand"],
+      [
+        ["ids", "--file", "../x", "--json"],
+        "a `--file` pattern outside the workspace root, decided by its spelling alone",
+      ],
+      [
+        ["at", RENAME_A_PATH, "zz"],
+        "an offset spelled as anything but decimal digits — a malformed value",
+      ],
+    ];
+    for (const [argv, why] of syntaxClass) {
+      const label = `${context} \`${argv.join(" ")}\` with ${SUB_DIR} unlistable`;
+      await visitListingRun(argv, label, (result) => {
+        expectSyntaxClassError(result, why, label);
+      });
     }
-    assertSnapshotsEqual(
-      prepared.before,
-      await snapshotWorkspace(workspace.root),
-      `${context}: nothing modified — every command stops at the refused ` +
-        `read, attempting nothing further, the rename included (SPEC ` +
-        `14.25, 13.5)`,
-    );
+    if (visitor.home) {
+      assertSnapshotsEqual(
+        prepared.before,
+        await snapshotWorkspace(workspace.root),
+        `${context}: nothing modified — every command stops at the refused ` +
+          `read, attempting nothing further, the rename included (SPEC ` +
+          `14.25, 13.5)`,
+      );
+    }
 
     // The failing twin on the same workspace: A's reference respelled to
     // resolve nowhere (14.5) — the read failure is still what `build`
     // reports, never the findings.
     await workspace.edit(RENAME_A_PATH, A_REFERENCE, A_UNRESOLVED);
-    const twinStaging = await stageReadRefusalOfDirectory(
-      workspace.path(SUB_DIR),
-    );
-    try {
-      const label = `${context} \`build --json\` with ${SUB_DIR} unlistable and ${RENAME_A_PATH} failing validation`;
+    const twinLabel = `${context} \`build --json\` with ${SUB_DIR} unlistable and ${RENAME_A_PATH} failing validation`;
+    await visitListingRun(["build", "--json"], twinLabel, (result) => {
       expectReadFailure(
-        await runSettled(product, workspace, ["build", "--json"], label),
+        result,
         SUB_DIR,
-        `${label} — a read failure is met at the read, in read order: the ` +
-          `discovery of 7 precedes every validation consulting it, so the ` +
-          `findings are never reported (SPEC 12.0, 14.25)`,
+        `${twinLabel} — a read failure is met at the read, in read order: ` +
+          `the discovery of 7 precedes every validation consulting it, so ` +
+          `the findings are never reported (SPEC 12.0, 14.25)`,
       );
-    } finally {
-      await twinStaging.restore();
-    }
+    });
     await workspace.edit(RENAME_A_PATH, A_UNRESOLVED, A_REFERENCE);
-    await assertRecovers(product, workspace, context);
+    if (visitor.home) await assertRecovers(product, workspace, context);
   } finally {
     await workspace.dispose();
   }
@@ -3893,28 +4090,39 @@ async function discoveryListingArm(product: ProductBinding): Promise<void> {
     files: { ...LISTING_FIXTURE.decl.files, [CONFIG_PATH]: INVALID_CONFIG },
   });
   try {
-    const staging = await stageReadRefusalOfDirectory(invalid.path(SUB_DIR));
-    try {
-      const label = `${context} \`build --json\` with the configuration invalid and ${SUB_DIR} unlistable`;
-      const finding = expectErrorDocument(
-        await expectConfigurationError(
-          product,
-          invalid,
-          ["build"],
-          `${label} — a configuration error precedes every other error of ` +
-            `exit class 2, the read failure included: the configuration is ` +
-            `read before the discovery it defines (SPEC 14.14, 12.0, 14.25)`,
-        ),
+    const label = `${context} \`build --json\` with the configuration invalid and ${SUB_DIR} unlistable`;
+    await visitExitTwo(
+      visitor,
+      {
         label,
-      );
-      assertFindingConcernsPath(
-        finding,
-        CONFIG_PATH,
-        `${label} — the configuration path is the concerned path (SPEC 14, 14.14)`,
-      );
-    } finally {
-      await staging.restore();
-    }
+        jsonArgv: ["build", "--json"],
+        root: invalid.root,
+        run: (runArgv) =>
+          runStaged(product, invalid, runArgv, unlistable, label),
+      },
+      async () => {
+        const staging = await unlistable(invalid.root);
+        let result: RunResult;
+        try {
+          result = await expectConfigurationError(
+            product,
+            invalid,
+            ["build"],
+            `${label} — a configuration error precedes every other error of ` +
+              `exit class 2, the read failure included: the configuration ` +
+              `is read before the discovery it defines (SPEC 14.14, 12.0, ` +
+              `14.25)`,
+          );
+        } finally {
+          await staging.restore();
+        }
+        assertFindingConcernsPath(
+          expectErrorDocument(result, label),
+          CONFIG_PATH,
+          `${label} — the configuration path is the concerned path (SPEC 14, 14.14)`,
+        );
+      },
+    );
   } finally {
     await invalid.dispose();
   }
@@ -4019,9 +4227,16 @@ async function gatedListingRun(
  * and `ids` exit 0; and on its failing twin `review list` reports exactly
  * the gate's findings, exit 1, the listing never reached
  * (`gatedListingRun`). `review status <name>`, which may find its session
- * by name without listing, is asserted nowhere.
+ * by name without listing, is asserted nowhere. The staging stands around
+ * each run alone; each listing's read failure is handed to `visitor`
+ * (`visitExitTwo`: `inventory`, JSON-only, run as T14-10's alone), its
+ * `home` the read failure's check, and every other run and assertion is
+ * made where `visitor.home` holds.
  */
-async function sessionDirectoryArm(product: ProductBinding): Promise<void> {
+async function sessionDirectoryArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context = "T14-10 (h) the session directory's listing";
   const prepared = await prepareRefusalWorkspace(
     product,
@@ -4029,6 +4244,7 @@ async function sessionDirectoryArm(product: ProductBinding): Promise<void> {
     context,
   );
   const { workspace } = prepared;
+  const unlistable = readRefusalOfDirectoryAt(REVIEWS_DIR);
   try {
     await expectExit(
       product,
@@ -4037,47 +4253,50 @@ async function sessionDirectoryArm(product: ProductBinding): Promise<void> {
       0,
       `${context} staging \`review create --strategy audit --name s\` (SPEC 10.7)`,
     );
-    const staging = await stageReadRefusalOfDirectory(
-      workspace.path(REVIEWS_DIR),
-    );
-    try {
-      const listers: readonly (readonly string[])[] = [
-        ["review", "list", "--json"],
-        ["inventory"],
-        ["check", "--json"],
-      ];
-      for (const argv of listers) {
-        const label = `${context} \`${argv.join(" ")}\` with ${REVIEWS_DIR} unlistable`;
-        expectReadFailure(
-          await runSettled(product, workspace, argv, label),
-          REVIEWS_DIR,
-          `${label} — the session directory's listing, refused, is a usage ` +
-            `error from every command making it (SPEC 14.25, 10.1, 11.6, ` +
-            `14.21)`,
-        );
-      }
-      const buildLabel = `${context} \`build\` with ${REVIEWS_DIR} unlistable`;
-      assertExitCode(
-        await runSettled(product, workspace, ["build"], buildLabel),
-        0,
-        `${buildLabel} — \`build\` reads no session, so the refused listing ` +
-          `never occurs: exit 0 (SPEC 14.21, 12.1, 14.25)`,
+    const listers: readonly (readonly string[])[] = [
+      ["review", "list", "--json"],
+      ["inventory"],
+      ["check", "--json"],
+    ];
+    for (const argv of listers) {
+      const label = `${context} \`${argv.join(" ")}\` with ${REVIEWS_DIR} unlistable`;
+      const run = (runArgv: readonly string[]): Promise<RunResult> =>
+        runStaged(product, workspace, runArgv, unlistable, label);
+      await visitExitTwo(
+        visitor,
+        { label, jsonArgv: argv, root: workspace.root, run },
+        async () => {
+          expectReadFailure(
+            await run(argv),
+            REVIEWS_DIR,
+            `${label} — the session directory's listing, refused, is a ` +
+              `usage error from every command making it (SPEC 14.25, 10.1, ` +
+              `11.6, 14.21)`,
+          );
+        },
       );
-      const idsLabel = `${context} \`ids --json\` with ${REVIEWS_DIR} unlistable`;
-      decodeIdsReport(
-        await stagedDocument(
-          product,
-          workspace,
-          ["ids", "--json"],
-          0,
-          `${idsLabel} — a refreshing read lists no session: exit 0 with ` +
-            `its answer (SPEC 13.3, 14.25)`,
-        ),
-        idsLabel,
-      );
-    } finally {
-      await staging.restore();
     }
+    if (!visitor.home) return;
+    const buildLabel = `${context} \`build\` with ${REVIEWS_DIR} unlistable`;
+    assertExitCode(
+      await runStaged(product, workspace, ["build"], unlistable, buildLabel),
+      0,
+      `${buildLabel} — \`build\` reads no session, so the refused listing ` +
+        `never occurs: exit 0 (SPEC 14.21, 12.1, 14.25)`,
+    );
+    const idsLabel = `${context} \`ids --json\` with ${REVIEWS_DIR} unlistable`;
+    decodeIdsReport(
+      await stagedDocument(
+        product,
+        workspace,
+        ["ids", "--json"],
+        0,
+        `${idsLabel} — a refreshing read lists no session: exit 0 with ` +
+          `its answer (SPEC 13.3, 14.25)`,
+        unlistable,
+      ),
+      idsLabel,
+    );
     await expectExit(
       product,
       workspace,
@@ -4242,6 +4461,19 @@ function expectAcquisitionReadFailure(
 }
 
 /**
+ * Clear whatever stands at the workspace's lock path once a run of (i) has
+ * ended and its staging's modes are restored — what the staging placed
+ * there and what the run's acquisition and release left beside it, the
+ * residue T13.5-10(d) judges (H-6) — so the next run of the same
+ * invocation meets the state the first one met, nothing at `.xspec/lock`
+ * before the staging (TEST-SPEC T12.0-15: each form on the same
+ * pre-invocation state). Nothing there, nothing to do.
+ */
+async function clearLockPath(workspace: TestWorkspace): Promise<void> {
+  await fsp.rm(workspace.path(LOCK_PATH), { recursive: true, force: true });
+}
+
+/**
  * One of (i)'s refused reads at acquisition (TEST-SPEC T14-10(i)): on a
  * fresh CONF-CORE-shaped workspace — T13.5-10's session staging
  * (`stageArmWorkspace`: built, holding the audit session `s`, nothing at
@@ -4252,11 +4484,16 @@ function expectAcquisitionReadFailure(
  * the modes are restored, `.xspec` itself compared, the compare bracketing
  * this run and its staging alone (H-6: the lock path, which acquisition
  * and release touch and the staging occupies, pruned from both walks; its
- * residue T13.5-10(d)'s subject).
+ * residue T13.5-10(d)'s subject). The invocation is handed to `visitor`
+ * (`visitExitTwo`), its `home` that check, its `run` the staged run — a
+ * later run of it first clearing the lock path an earlier one left
+ * (`clearLockPath`), so each meets the staging on the same state — and its
+ * compare leaving the lock path out as the home test's does.
  */
 async function acquisitionReadRun(
   product: ProductBinding,
   arm: AcquisitionReadArm,
+  visitor: ErrorInvocationVisitor,
 ): Promise<void> {
   const operation = acquisitionOperation(arm.operation);
   const context =
@@ -4265,30 +4502,46 @@ async function acquisitionReadRun(
   const workspace = await TestWorkspace.create(CORE_DECL);
   try {
     const items = await stageArmWorkspace(product, workspace, context);
-    const before = await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH);
-    const staging = await arm.stage(workspace);
-    let result: RunResult;
-    try {
-      result = await runSettled(
-        product,
-        workspace,
-        [...operation.argv(items), "--json"],
-        context,
-      );
-    } finally {
-      await staging.restore();
-    }
-    expectAcquisitionReadFailure(result, arm.codes, context);
-    assertSnapshotsEqual(
-      before,
-      await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
-      `${context}: modifies nothing — acquisition precedes every ` +
-        `modification and the command stops at the refused read, ` +
-        `attempting nothing further but release, so every path but the ` +
-        `lock path is byte-identical once the staging's modes are ` +
-        `restored, \`.xspec\` itself compared (SPEC 13.5, 14.25, 14.24; ` +
-        `H-6: the lock path, which acquisition and release touch, left ` +
-        `out — its residue T13.5-10(d)'s subject)`,
+    const jsonArgv = [...operation.argv(items), "--json"];
+    let runs = 0;
+    const run = async (argv: readonly string[]): Promise<RunResult> => {
+      if (runs > 0) await clearLockPath(workspace);
+      runs += 1;
+      const staging = await arm.stage(workspace);
+      try {
+        return await runSettled(product, workspace, argv, context);
+      } finally {
+        await staging.restore();
+      }
+    };
+    await visitExitTwo(
+      visitor,
+      {
+        label: context,
+        jsonArgv,
+        root: workspace.root,
+        run,
+        exclude: isLockPathBytes,
+      },
+      async () => {
+        const before = await snapshotDirectory(
+          workspace.root,
+          EXCLUDE_LOCK_PATH,
+        );
+        const result = await run(jsonArgv);
+        expectAcquisitionReadFailure(result, arm.codes, context);
+        assertSnapshotsEqual(
+          before,
+          await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
+          `${context}: modifies nothing — acquisition precedes every ` +
+            `modification and the command stops at the refused read, ` +
+            `attempting nothing further but release, so every path but the ` +
+            `lock path is byte-identical once the staging's modes are ` +
+            `restored, \`.xspec\` itself compared (SPEC 13.5, 14.25, 14.24; ` +
+            `H-6: the lock path, which acquisition and release touch, left ` +
+            `out — its residue T13.5-10(d)'s subject)`,
+        );
+      },
     );
   } finally {
     await workspace.dispose();
@@ -4314,9 +4567,16 @@ async function acquisitionReadRun(
  * to its state during the hold before the change (the change and its
  * undoing restore a directory's mode alone, never a byte; H-6: the run's
  * lock path pruned from both walks, the held-state comparison having
- * judged it once the run held).
+ * judged it once the run held). The invocation is handed to `visitor`
+ * (`visitExitTwo`), its `home` that held run and its checks, its `run` the
+ * same held run with the same change during the hold — a later run of it
+ * first clearing the lock path an earlier one left (`clearLockPath`) — and
+ * its compare leaving the lock path out as the home test's does.
  */
-async function secondDiscoveryRun(product: ProductBinding): Promise<void> {
+async function secondDiscoveryRun(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const operation = acquisitionOperation(0);
   const context =
     `T14-10 (i) at the second discovery of 13.5: ${operation.what} --json ` +
@@ -4326,42 +4586,36 @@ async function secondDiscoveryRun(product: ProductBinding): Promise<void> {
   const workspace = await TestWorkspace.create(ACQUISITION_DECL);
   try {
     const items = await stageArmWorkspace(product, workspace, context);
-    await withHeldRun(
-      product,
-      workspace,
-      [...operation.argv(items), "--json"],
-      context,
-      async (held) => {
-        const before = await snapshotDirectory(
-          workspace.root,
-          EXCLUDE_LOCK_PATH,
-        );
-        const undo = await UNLISTABLE_SUB_DIR.make(workspace, context);
-        let result: RunResult;
-        try {
-          result = await liftAndWait(held, context);
-        } finally {
-          await undo();
-        }
-        expectReadFailure(
-          result,
-          SECOND_DISCOVERY_DIR,
-          `${context} — holding exclusivity, past its hold, the command ` +
-            `discovers its sources again, and that discovery's refused ` +
-            `listing of a directory it lists is a read failure concerning ` +
-            `that directory (SPEC 13.5, 14.25, 7)`,
-        );
-        assertSnapshotsEqual(
-          before,
-          await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
-          `${context}: modifies nothing — the command stops at the ` +
-            `refused read, attempting nothing further but release, so the ` +
-            `workspace once the run has ended and the mode is restored is ` +
-            `byte-identical to its state during the hold before the change, ` +
-            `which with its undoing restores a directory's mode alone (SPEC ` +
-            `14.25, 13.5; H-6: the run's lock path left out)`,
-        );
+    const jsonArgv = [...operation.argv(items), "--json"];
+    let runs = 0;
+    const run = async (argv: readonly string[]): Promise<RunResult> => {
+      if (runs > 0) await clearLockPath(workspace);
+      runs += 1;
+      return await withHeldRun(
+        product,
+        workspace,
+        argv,
+        context,
+        async (held) => {
+          const undo = await UNLISTABLE_SUB_DIR.make(workspace, context);
+          try {
+            return await liftAndWait(held, context);
+          } finally {
+            await undo();
+          }
+        },
+      );
+    };
+    await visitExitTwo(
+      visitor,
+      {
+        label: context,
+        jsonArgv,
+        root: workspace.root,
+        run,
+        exclude: isLockPathBytes,
       },
+      () => secondDiscoveryHome(product, workspace, jsonArgv, context),
     );
   } finally {
     await workspace.dispose();
@@ -4369,17 +4623,64 @@ async function secondDiscoveryRun(product: ProductBinding): Promise<void> {
 }
 
 /**
+ * (i)'s second-discovery arm's own check (`secondDiscoveryRun`): the held
+ * run of `jsonArgv` on `workspace`, `specs/sub` made unlistable during the
+ * hold and the mode restored once the run has ended → the 14.25 contract
+ * at that directory and nothing modified from the state during the hold
+ * on, the lock path pruned (H-6).
+ */
+async function secondDiscoveryHome(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  jsonArgv: readonly string[],
+  context: string,
+): Promise<void> {
+  await withHeldRun(product, workspace, jsonArgv, context, async (held) => {
+    const before = await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH);
+    const undo = await UNLISTABLE_SUB_DIR.make(workspace, context);
+    let result: RunResult;
+    try {
+      result = await liftAndWait(held, context);
+    } finally {
+      await undo();
+    }
+    expectReadFailure(
+      result,
+      SECOND_DISCOVERY_DIR,
+      `${context} — holding exclusivity, past its hold, the command ` +
+        `discovers its sources again, and that discovery's refused ` +
+        `listing of a directory it lists is a read failure concerning ` +
+        `that directory (SPEC 13.5, 14.25, 7)`,
+    );
+    assertSnapshotsEqual(
+      before,
+      await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
+      `${context}: modifies nothing — the command stops at the ` +
+        `refused read, attempting nothing further but release, so the ` +
+        `workspace once the run has ended and the mode is restored is ` +
+        `byte-identical to its state during the hold before the change, ` +
+        `which with its undoing restores a directory's mode alone (SPEC ` +
+        `14.25, 13.5; H-6: the run's lock path left out)`,
+    );
+  });
+}
+
+/**
  * T14-10's arm (i), in turn: acquisition's refused reads, each staged
  * before the invocation (T13.5-10(d)'s stagings), then the second
- * discovery's (T13.5-12(e)'s staging, during a hold). Exported so scratch
- * probes can run the arm alone, against the CONF-CORE reference among
- * others; Linux leg only, as T14-10's other arms (E-1).
+ * discovery's (T13.5-12(e)'s staging, during a hold) — each invocation
+ * handed to `visitor` (T14-10's body: `ERROR_INVOCATION_HOME`). Exported so
+ * scratch probes can run the arm alone, against the CONF-CORE reference
+ * among others; Linux leg only, as T14-10's other arms (E-1).
  */
-export async function runT1410ArmI(product: ProductBinding): Promise<void> {
+export async function runT1410ArmI(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   for (const arm of ACQUISITION_READ_ARMS) {
-    await acquisitionReadRun(product, arm);
+    await acquisitionReadRun(product, arm, visitor);
   }
-  await secondDiscoveryRun(product);
+  await secondDiscoveryRun(product, visitor);
 }
 
 // ---------------------------------------------------------------------------
@@ -4697,7 +4998,11 @@ async function runEnteredSettled(
  * asserted or snapshotted (a staged directory cannot be snapshotted). Then
  * `judge` decides the run's outcome, and nothing is modified: the
  * workspace's snapshots before and after the run byte-identical (the
- * repository's git directory left out, `snapshotWorkspace`).
+ * repository's git directory left out, `snapshotWorkspace`). An exit-2
+ * run (`exitTwo`: every run but `version`'s) is handed to `visitor`
+ * (`visitExitTwo`: a JSON-only surface's run as T14-10's alone), its `home`
+ * that run, judgement, and compare, its `run` the staged run; `version`'s
+ * is made where `visitor.home` holds.
  */
 async function bothRoutesRefusedRun(
   product: ProductBinding,
@@ -4706,31 +5011,44 @@ async function bothRoutesRefusedRun(
   argv: readonly string[],
   judge: (result: RunResult, label: string) => void,
   context: string,
+  visitor: ErrorInvocationVisitor,
+  exitTwo = true,
 ): Promise<void> {
   const label = `${context} \`${argv.join(" ")}\` ${staging.what}`;
   const dir = workspace.path(staging.dir);
   const stage = async (): Promise<PermissionStaging> =>
     await stageDirectoryMode(dir, 0o000, bothRoutesRefusedProbes(staging));
-  const before = await snapshotWorkspace(workspace.root);
-  let result: RunResult;
-  if (staging.entered) {
-    result = await runEnteredSettled(product, dir, argv, stage, label);
-  } else {
+  const run = async (runArgv: readonly string[]): Promise<RunResult> => {
+    if (staging.entered) {
+      return await runEnteredSettled(product, dir, runArgv, stage, label);
+    }
     const staged = await stage();
     try {
-      result = await runSettled(product, workspace, argv, label);
+      return await runSettled(product, workspace, runArgv, label);
     } finally {
       await staged.restore();
     }
+  };
+  const home = async (): Promise<void> => {
+    const before = await snapshotWorkspace(workspace.root);
+    judge(await run(argv), label);
+    assertSnapshotsEqual(
+      before,
+      await snapshotWorkspace(workspace.root),
+      `${label}: nothing modified — a command stops at the read the ` +
+        `environment refuses, attempting nothing further, and neither a ` +
+        `syntax-class error nor \`version\` writes anything (SPEC 14.25, ` +
+        `12.0, 12.6)`,
+    );
+  };
+  if (!exitTwo) {
+    if (visitor.home) await home();
+    return;
   }
-  judge(result, label);
-  assertSnapshotsEqual(
-    before,
-    await snapshotWorkspace(workspace.root),
-    `${label}: nothing modified — a command stops at the read the ` +
-      `environment refuses, attempting nothing further, and neither a ` +
-      `syntax-class error nor \`version\` writes anything (SPEC 14.25, ` +
-      `12.0, 12.6)`,
+  await visitExitTwo(
+    visitor,
+    { label, jsonArgv: argv, root: workspace.root, run },
+    home,
   );
 }
 
@@ -4784,13 +5102,16 @@ const SEARCHING_COMMANDS: readonly (readonly string[])[] = [
  * what a product taking the refusal for absence meets instead); `ids
  * extra`, of the syntax class, exits 2 code-less, reported without loading
  * configuration (T12.0-10); and `version`, loading none, exits 0 with its
- * document — each modifying nothing.
+ * document — each modifying nothing. Every exit-2 run is handed to
+ * `visitor` (`bothRoutesRefusedRun`: `inventory`, JSON-only, run as
+ * T14-10's alone); `version`'s is made where `visitor.home` holds.
  */
 async function enteredSearchSweep(
   product: ProductBinding,
   workspace: TestWorkspace,
   why: string,
   context: string,
+  visitor: ErrorInvocationVisitor,
 ): Promise<void> {
   for (const argv of SEARCHING_COMMANDS) {
     await bothRoutesRefusedRun(
@@ -4806,6 +5127,7 @@ async function enteredSearchSweep(
         );
       },
       context,
+      visitor,
     );
   }
   await bothRoutesRefusedRun(
@@ -4817,6 +5139,7 @@ async function enteredSearchSweep(
       expectSyntaxClassError(result, "a surplus operand", label);
     },
     context,
+    visitor,
   );
   await bothRoutesRefusedRun(
     product,
@@ -4834,6 +5157,8 @@ async function enteredSearchSweep(
       parseJsonStdout(result, label);
     },
     context,
+    visitor,
+    false,
   );
 }
 
@@ -4847,9 +5172,13 @@ async function enteredSearchSweep(
  * with no configuration in `R` or in any ancestor, H-1's precondition
  * verified first (helpers/self-contained-root.ts): `read-failure` at `.`
  * likewise, never T7-1's missing configuration. Each fails a product whose
- * search takes a refused examination for absence and walks on upward.
+ * search takes a refused examination for absence and walks on upward. The
+ * sweeps' exit-2 runs are handed to `visitor` (`enteredSearchSweep`).
  */
-async function upwardSearchArm(product: ProductBinding): Promise<void> {
+async function upwardSearchArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context = "T14-10 (k) the directories the upward search examines";
   const configured = await prepareBuiltWorkspace(
     product,
@@ -4867,6 +5196,7 @@ async function upwardSearchArm(product: ProductBinding): Promise<void> {
         `configuration to load and answer from, and never ` +
         `\`configuration-error\` (SPEC 14.25, 7, 11.6, 12.0)`,
       `${context} (R's configuration at its root)`,
+      visitor,
     );
   } finally {
     await configured.workspace.dispose();
@@ -4889,6 +5219,7 @@ async function upwardSearchArm(product: ProductBinding): Promise<void> {
         `missing configuration (\`configuration-error\` at \`.\`) (SPEC ` +
         `14.25, 7, 14.14, 11.6, 12.0)`,
       bareContext,
+      visitor,
     );
   } finally {
     await bare.dispose();
@@ -4979,9 +5310,14 @@ const MISSING_ID_TO = `${MISSING_ID_FROM}\n<S>\nNo id.\n</S>\n`;
  * id-less section after the build and before the staging — `build`, `ids`,
  * and the three surfaces exactly so, and `check` at `.xspec/journal` or
  * `.xspec/reviews`, never exit 1 with the condition-1 finding. Each run
- * modifies nothing.
+ * modifies nothing. Every run is handed to `visitor`
+ * (`bothRoutesRefusedRun`: the surfaces and `inventory`, JSON-only, run as
+ * T14-10's alone); the failing twin's edit, a premise, is made either way.
  */
-async function journalKindArm(product: ProductBinding): Promise<void> {
+async function journalKindArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context = "T14-10 (l)(i) the journal's kind";
   const prepared = await prepareRefusalWorkspace(
     product,
@@ -5024,6 +5360,7 @@ async function journalKindArm(product: ProductBinding): Promise<void> {
         argv,
         journalAlone(gate),
         context,
+        visitor,
       );
     }
     await bothRoutesRefusedRun(
@@ -5039,6 +5376,7 @@ async function journalKindArm(product: ProductBinding): Promise<void> {
           `code-less unreadable baseline (SPEC 6.3, 14.25)`,
       ),
       context,
+      visitor,
     );
     for (const argv of surfaceCommands) {
       await bothRoutesRefusedRun(
@@ -5048,6 +5386,7 @@ async function journalKindArm(product: ProductBinding): Promise<void> {
         argv,
         journalAlone(surfaces),
         context,
+        visitor,
       );
     }
     await bothRoutesRefusedRun(
@@ -5067,6 +5406,7 @@ async function journalKindArm(product: ProductBinding): Promise<void> {
         );
       },
       context,
+      visitor,
     );
 
     // The failing twin: the same workspace, every run above having modified
@@ -5105,6 +5445,7 @@ async function journalKindArm(product: ProductBinding): Promise<void> {
         argv,
         journalAlone(failing),
         twinContext,
+        visitor,
       );
     }
     await bothRoutesRefusedRun(
@@ -5124,6 +5465,7 @@ async function journalKindArm(product: ProductBinding): Promise<void> {
         );
       },
       twinContext,
+      visitor,
     );
   } finally {
     await workspace.dispose();
@@ -5137,8 +5479,12 @@ async function journalKindArm(product: ProductBinding): Promise<void> {
  * `read-failure` at `.xspec/reviews` or `.xspec/reviews/s.json` as its
  * route decides, modifying nothing — never `corrupt-session` ((c): the
  * refused content read's condition) and never the unknown-session error.
+ * The run is handed to `visitor` (`bothRoutesRefusedRun`).
  */
-async function sessionKindArm(product: ProductBinding): Promise<void> {
+async function sessionKindArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context = "T14-10 (l)(ii) a session file's kind";
   const { workspace } = await prepareBuiltWorkspace(
     product,
@@ -5178,6 +5524,7 @@ async function sessionKindArm(product: ProductBinding): Promise<void> {
         );
       },
       context,
+      visitor,
     );
   } finally {
     await workspace.dispose();
@@ -5193,9 +5540,14 @@ async function sessionKindArm(product: ProductBinding): Promise<void> {
  * each exit 2 with `read-failure` at `xspec.config.ts` — or `.`, the
  * root's own, for a product learning the kind from the root's listing —
  * modifying nothing, never `configuration-error`, whether (d)'s refused
- * content read or T7-1's missing configuration.
+ * content read or T7-1's missing configuration. Each run is handed to
+ * `visitor` (`bothRoutesRefusedRun`: `inventory`, JSON-only, run as
+ * T14-10's alone).
  */
-async function configurationKindArm(product: ProductBinding): Promise<void> {
+async function configurationKindArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
   const context = "T14-10 (l)(iii) the configuration path's kind";
   const { workspace } = await prepareBuiltWorkspace(
     product,
@@ -5228,6 +5580,7 @@ async function configurationKindArm(product: ProductBinding): Promise<void> {
           );
         },
         context,
+        visitor,
       );
     }
   } finally {
@@ -5238,12 +5591,52 @@ async function configurationKindArm(product: ProductBinding): Promise<void> {
 /**
  * T14-10's arm (l), in turn: the journal's, a session file's, and the
  * configuration path's kind reads, each under a directory staged where both
- * routes are refused alike; Linux leg only, as T14-10's other arms (E-1).
+ * routes are refused alike, each exit-2 run handed to `visitor`
+ * (`bothRoutesRefusedRun`); Linux leg only, as T14-10's other arms (E-1).
  */
-async function kindHalvesArm(product: ProductBinding): Promise<void> {
-  await journalKindArm(product);
-  await sessionKindArm(product);
-  await configurationKindArm(product);
+async function kindHalvesArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  await journalKindArm(product, visitor);
+  await sessionKindArm(product, visitor);
+  await configurationKindArm(product, visitor);
+}
+
+// ---------------------------------------------------------------------------
+// T14-10's exit-2 stagings, for T12.0-15's exit-2 family
+// ---------------------------------------------------------------------------
+
+/**
+ * T14-10's exit-2 stagings (TEST-SPEC T12.0-15's exit-2 family: "T14-10's
+ * exit-2 read failures"), in T14-10's order: (b)'s given baselines, the
+ * journal error each resolution reports; (d)'s configuration errors; (g)'s
+ * read failures at the discovery's refused listing with their precedence
+ * arms — the unknown profile, the syntax class, the failing source, and the
+ * invalid configuration preceding the read; (h)'s session-directory
+ * listings; (i)'s acquisition and second-discovery read failures; (k)'s
+ * entered-directory sweeps, the syntax class among them; and (l)'s kind
+ * halves — each exit-2 invocation with a human form handed to `visitor`
+ * (`visitExitTwo`), every other run and assertion made where
+ * `visitor.home` holds. T14-10's body runs each arm with
+ * `ERROR_INVOCATION_HOME` among its other arms; T12.0-15 runs this with
+ * its human twin (section-12.0-iv.ts). (j)'s refused git data, a plain
+ * usage error and no read failure (14.25: no condition), stays T14-10's
+ * alone, as T6.3-6(e)'s does. Linux leg only (E-1): elsewhere nothing is
+ * staged or handed over.
+ */
+export async function runT1410ReadFailureStagings(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  if (!READ_REFUSALS_STAGED) return;
+  await journalContentArm(product, visitor);
+  await configurationContentArm(product, visitor);
+  await discoveryListingArm(product, visitor);
+  await sessionDirectoryArm(product, visitor);
+  await runT1410ArmI(product, visitor);
+  await upwardSearchArm(product, visitor);
+  await kindHalvesArm(product, visitor);
 }
 
 // ---------------------------------------------------------------------------
@@ -5260,18 +5653,18 @@ const T14_10 = defineProductTest({
     // leg selects T14-10 (E-6).
     if (!READ_REFUSALS_STAGED) return;
     await sourceContentArm(product);
-    await journalContentArm(product);
+    await journalContentArm(product, ERROR_INVOCATION_HOME);
     await sessionContentArm(product);
-    await configurationContentArm(product);
+    await configurationContentArm(product, ERROR_INVOCATION_HOME);
     await derivedContentArm(product);
     await graphDataArm(product);
     await areaOccupantArm(product);
-    await discoveryListingArm(product);
-    await sessionDirectoryArm(product);
-    await runT1410ArmI(product);
+    await discoveryListingArm(product, ERROR_INVOCATION_HOME);
+    await sessionDirectoryArm(product, ERROR_INVOCATION_HOME);
+    await runT1410ArmI(product, ERROR_INVOCATION_HOME);
     await gitDataArm(product);
-    await upwardSearchArm(product);
-    await kindHalvesArm(product);
+    await upwardSearchArm(product, ERROR_INVOCATION_HOME);
+    await kindHalvesArm(product, ERROR_INVOCATION_HOME);
   },
 });
 

@@ -264,13 +264,15 @@ export interface RefusalFixture {
 // staged-source records (S-9's before-any-product clause;
 // helpers/staged-mdx.ts) named with every test that prepares the fixture —
 // T13.5-7, T13.5-11 (section-13.5-iii.ts, its (a) after each of T13.5-7's
-// refused writes but (b)'s), and T14-9 and T14-10 (section-14-ii.ts; their
+// refused writes but (b)'s), T14-9 and T14-10 (section-14-ii.ts; their
 // `PRECEDENCE_FIXTURE` and `LISTING_FIXTURE` spread the rename fixture's
-// files too) — and their configurations and code source are TypeScript
+// files too), and T12.0-15 (section-12.0-iv.ts: its exit-2 family restages
+// T14-10's arms (b), (d), (g), and (h)) — and their configurations and code
+// source are TypeScript
 // staged-source records (helpers/staged-ts.ts; S-9's TypeScript and timing
 // clauses), named likewise.
 const RENAME_CONFIG = stagedTs(
-  "T13.5-7/T13.5-11/T14-9/T14-10 the rename fixture xspec.config.ts (one spec group, Markdown emission next to sources)",
+  "T12.0-15/T13.5-7/T13.5-11/T14-9/T14-10 the rename fixture xspec.config.ts (one spec group, Markdown emission next to sources)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -282,7 +284,7 @@ export default defineConfig({
 `,
 );
 const RENAME_A = stagedMdx(
-  "T13.5-7/T13.5-11/T14-9/T14-10 the rename fixture specs/a/A.mdx (a d reference to b0)",
+  "T12.0-15/T13.5-7/T13.5-11/T14-9/T14-10 the rename fixture specs/a/A.mdx (a d reference to b0)",
   [
     'import B from "../b/B.xspec"',
     "",
@@ -293,7 +295,7 @@ const RENAME_A = stagedMdx(
   ].join("\n"),
 );
 const RENAME_B = stagedMdx(
-  "T13.5-7/T13.5-11/T14-9/T14-10 the rename fixture specs/b/B.mdx (b0 holding b0.k)",
+  "T12.0-15/T13.5-7/T13.5-11/T14-9/T14-10 the rename fixture specs/b/B.mdx (b0 holding b0.k)",
   [
     '<S id="b0">',
     "Beta text.",
@@ -305,7 +307,7 @@ const RENAME_B = stagedMdx(
   ].join("\n"),
 );
 const RENAME_C = stagedMdx(
-  "T13.5-7/T13.5-11/T14-9/T14-10 the rename fixture specs/c/C.mdx (an embedding of b0)",
+  "T12.0-15/T13.5-7/T13.5-11/T14-9/T14-10 the rename fixture specs/c/C.mdx (an embedding of b0)",
   [
     'import B from "../b/B.xspec"',
     "",

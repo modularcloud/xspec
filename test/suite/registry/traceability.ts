@@ -767,9 +767,17 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // configuration search, 7, carriage context with home coverage at
   // T12.7-3, T11.6-1, and T7-1); T6.3-6's journal errors at a given
   // baseline, the resolution's usage error carrying condition 13's code and
-  // path ("6.3"); and T13.5-2's busy refusals while its command 1 holds,
-  // each refused promptly, modifying nothing ("13.5"). The family's T14-9
-  // and T14-10 stagings, still to come, add the passages they assert.
+  // path ("6.3"); T13.5-2's busy refusals while its command 1 holds, each
+  // refused promptly, modifying nothing ("13.5"); and T14-10's exit-2
+  // stagings, 14.25's read failures and the configuration errors, journal
+  // errors, and acquisition's write failure its stagings meet, each with
+  // its code and concerned path ("14"; its given baselines' journal errors
+  // "6.3", its acquisition stagings "13.5"), the refused objects' routes —
+  // the discovery and upward search (7), the anchoring forms (11.6), the
+  // session directory (10.1), and the gate's reads (13.3) — carriage
+  // context with home coverage at T14-10, T7-1, T11.6-1, T10.1-1, and
+  // T13.3-1. The family's T14-9 stagings, still to come, add the passages
+  // they assert.
   "T12.0-15": [
     "12.0",
     "14",

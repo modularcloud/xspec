@@ -4420,13 +4420,14 @@ async function failingWorkspaceArms(
 // every arm, those two changes during each command's hold among them
 // (section-13.5-iv.ts); and T14-10 stages it, session-staged, for arm (i)'s
 // second-discovery arm, `specs/sub` made unlistable during a hold
-// (section-14-ii.ts).
+// (section-14-ii.ts), as T12.0-15's exit-2 family restages that arm
+// (section-12.0-iv.ts).
 export const CONFIG_PATH = "xspec.config.ts";
 const CODE_SOURCE_PATH = "src/c.ts";
 export const SUB_DIR = "specs/sub";
 export const DOUBLY_MATCHED_PATH = "src/both.mdx";
 const T13_5_8_CONFIG = stagedTs(
-  "T13.5-8/T13.5-11/T13.5-12/T14-10 xspec.config.ts — one spec group and one code group, both matching the unoccupied src/*.mdx paths (T13.5-12(d)'s configuration), the code group discovering src/c.ts",
+  "T12.0-15/T13.5-8/T13.5-11/T13.5-12/T14-10 xspec.config.ts — one spec group and one code group, both matching the unoccupied src/*.mdx paths (T13.5-12(d)'s configuration), the code group discovering src/c.ts",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -4455,11 +4456,11 @@ export default defineConfig({
 `,
 );
 const T13_5_8_CODE_SOURCE = stagedTs(
-  "T13.5-8/T13.5-11/T13.5-12/T14-10 src/c.ts — a discovered code source spelling no marker, text call, or specifier naming a spec module (the wrong-kind origin of T13.5-8's acquisition-first arms' rename and move and of its seam-ordering move)",
+  "T12.0-15/T13.5-8/T13.5-11/T13.5-12/T14-10 src/c.ts — a discovered code source spelling no marker, text call, or specifier naming a spec module (the wrong-kind origin of T13.5-8's acquisition-first arms' rename and move and of its seam-ordering move)",
   "export const c = 1\n",
 );
 const T13_5_8_SUB_SOURCE = stagedMdx(
-  "T13.5-8/T13.5-11/T13.5-12/T14-10 specs/sub/S.mdx (the source under specs/sub, the discovered directory T13.5-8's acquisition-after read-failure arm, and T13.5-11(a)'s, T13.5-12(e)'s, and T14-10(i)'s read failures past acquisition during a hold, make unlistable)",
+  "T12.0-15/T13.5-8/T13.5-11/T13.5-12/T14-10 specs/sub/S.mdx (the source under specs/sub, the discovered directory T13.5-8's acquisition-after read-failure arm, and T13.5-11(a)'s, T13.5-12(e)'s, and T14-10(i)'s read failures past acquisition during a hold, make unlistable)",
   ['<S id="sub">', "Sub text.", "</S>", ""].join("\n"),
 );
 const T13_5_8_DOUBLY_MATCHED = stagedMdx(
