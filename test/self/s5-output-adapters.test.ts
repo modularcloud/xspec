@@ -50,6 +50,10 @@ import {
   assertHumanFindingsReportCarries,
   assertHumanImpactCarries,
   assertHumanImpactReportCarries,
+  assertHumanItemCarries,
+  assertHumanItemReportCarries,
+  assertHumanNextCarries,
+  assertHumanNextReportCarries,
   assertHumanPerformedCarries,
   assertHumanPerformedReportCarries,
   assertHumanPreviewCarries,
@@ -82,6 +86,8 @@ import {
   decodeHumanErrorMessage,
   decodeHumanFindingsReport,
   decodeHumanImpactReport,
+  decodeHumanItemReport,
+  decodeHumanNextReport,
   decodeHumanPerformedReport,
   decodeHumanPreviewReport,
   decodeHumanSessionListReport,
@@ -10707,6 +10713,996 @@ test("S-5: the human review-status comparison rejects a report omitting, adding,
     "the totals line dropped",
     lines.slice(0, 4),
     "the report prints no totals line, so its total under unresolved is 0 where the --json twin's is 2",
+  );
+});
+
+/** A recorded hash of the item twins below: 64 hexadecimal digits. */
+function itemHash(digit: string): string {
+  return digit.repeat(64);
+}
+
+/** A parent-consistency item's --json document (the item twins below). */
+const ITEM_DOC = {
+  baseline: {
+    nodes: {
+      "specs/T.mdx#p": {
+        hashes: { metadataHash: itemHash("1"), ownHash: itemHash("2") },
+        present: true,
+      },
+      "specs/T.mdx#p.a": {
+        hashes: { subtreeHash: itemHash("4") },
+        present: true,
+      },
+      "specs/T.mdx#p.c": {
+        hashes: { subtreeHash: itemHash("5") },
+        present: true,
+      },
+      "specs/T.mdx#p.d": { hashes: "absent", present: false },
+    },
+  },
+  blocked: true,
+  blockedBy: ["item-3", "item-4"],
+  context: [
+    {
+      node: "specs/T.mdx#p.a",
+      present: true,
+      sourceRange: { end: 53, start: 26 },
+      text: "Paa line.\n",
+    },
+    { node: "specs/T.mdx#p.c", present: false, text: "Gone line.\n" },
+  ],
+  current: {
+    nodes: {
+      "specs/T.mdx#p": {
+        hashes: { metadataHash: itemHash("1"), ownHash: itemHash("3") },
+        present: true,
+      },
+      "specs/T.mdx#p.a": { hashes: {}, present: true },
+      "specs/T.mdx#p.c": { hashes: "absent", present: false },
+      "specs/T.mdx#p.d": {
+        hashes: { subtreeHash: itemHash("6") },
+        present: true,
+      },
+    },
+  },
+  id: "item-5",
+  kind: "parent-consistency",
+  note: "kept: see v2",
+  origin: [
+    {
+      after: { present: true, text: "Paa line.\n" },
+      before: { present: true, text: "Paa v0.\n" },
+      node: "specs/T.mdx#p.a",
+      sourceRange: { end: 53, start: 26 },
+    },
+    {
+      after: { present: false },
+      before: { present: true, text: "Pac line.\n" },
+      node: "specs/T.mdx#p.c",
+    },
+    {
+      after: { present: true, text: "" },
+      before: { present: false },
+      node: "specs/T.mdx#p.d",
+      sourceRange: { end: 80, start: 55 },
+    },
+  ],
+  reason:
+    "changed branches lie beneath specs/T.mdx#p; review its own text against them for consistency (SPEC 10.5)",
+  scope: {
+    node: "specs/T.mdx#p",
+    present: true,
+    sourceRange: { end: 87, start: 0 },
+    text: "Pee own line.\n\n",
+  },
+  status: "invalidated",
+};
+
+/** Its --json twin, decoded by the review adapter. */
+const JSON_ITEM_TWIN = decodeItemReport(ITEM_DOC, "the item twin");
+
+/** Its human report as the built product prints it, field by field. */
+const HUMAN_ITEM_FIELDS = {
+  kind: ["  kind: parent-consistency"],
+  status: ["  status: invalidated"],
+  blocked: ["  blocked: true"],
+  blockedBy: ["  blockedBy: item-3, item-4"],
+  reason: [`  reason: ${ITEM_DOC.reason}`],
+  note: ["  note: kept: see v2"],
+  scope: [
+    "  scope: specs/T.mdx#p (present)",
+    "    range: 0-87",
+    "    text: |",
+    "      Pee own line.",
+    "      ",
+    "      ",
+  ],
+  context: [
+    "  context:",
+    "    -: specs/T.mdx#p.a (present)",
+    "    range: 26-53",
+    "    text: |",
+    "      Paa line.",
+    "      ",
+    "    -: specs/T.mdx#p.c (absent)",
+    "    text: |",
+    "      Gone line.",
+    "      ",
+  ],
+  origin: [
+    "  origin:",
+    "  - specs/T.mdx#p.a",
+    "    range: 26-53",
+    "    before: present",
+    "      text: |",
+    "        Paa v0.",
+    "        ",
+    "    after: present",
+    "      text: |",
+    "        Paa line.",
+    "        ",
+    "  - specs/T.mdx#p.c",
+    "    before: present",
+    "      text: |",
+    "        Pac line.",
+    "        ",
+    "    after: absent",
+    "  - specs/T.mdx#p.d",
+    "    range: 55-80",
+    "    before: absent",
+    "    after: present",
+    "      text: (empty)",
+  ],
+  baseline: [
+    `  baseline: specs/T.mdx#p={metadataHash:${itemHash("1")} ownHash:${itemHash("2")}}; ` +
+      `specs/T.mdx#p.a={subtreeHash:${itemHash("4")}}; specs/T.mdx#p.c={subtreeHash:${itemHash("5")}}; ` +
+      "specs/T.mdx#p.d=absent",
+  ],
+  current: [
+    `  current: specs/T.mdx#p={metadataHash:${itemHash("1")} ownHash:${itemHash("3")}}; ` +
+      `specs/T.mdx#p.a={}; specs/T.mdx#p.c=absent; specs/T.mdx#p.d={subtreeHash:${itemHash("6")}}`,
+  ],
+} as const;
+
+/** The whole human report, in the built product's order. */
+const HUMAN_ITEM_LINES: readonly string[] = [
+  "item item-5",
+  ...HUMAN_ITEM_FIELDS.kind,
+  ...HUMAN_ITEM_FIELDS.status,
+  ...HUMAN_ITEM_FIELDS.blocked,
+  ...HUMAN_ITEM_FIELDS.blockedBy,
+  ...HUMAN_ITEM_FIELDS.reason,
+  ...HUMAN_ITEM_FIELDS.note,
+  ...HUMAN_ITEM_FIELDS.scope,
+  ...HUMAN_ITEM_FIELDS.context,
+  ...HUMAN_ITEM_FIELDS.origin,
+  ...HUMAN_ITEM_FIELDS.baseline,
+  ...HUMAN_ITEM_FIELDS.current,
+];
+
+/** The index of the first line of `lines` equal to `line` (a vector anchor). */
+function lineIndex(lines: readonly string[], line: string): number {
+  const index = lines.indexOf(line);
+  if (index === -1) throw new Error(`S-5 vector anchor missing: ${line}`);
+  return index;
+}
+
+/** The fully-resolved report as the built product prints it. */
+const HUMAN_FULLY_RESOLVED = [
+  "review session 's' is fully resolved: no item needs review",
+];
+
+test("S-5: the human review-item decoder decodes a well-formed `show` report onto the item model, order free", () => {
+  const decoded = decodeHumanItemReport(
+    previewReport(HUMAN_ITEM_LINES),
+    "item",
+  );
+  expect({
+    id: decoded.id,
+    kind: decoded.kind,
+    status: decoded.status,
+    blocked: decoded.blocked,
+    blockedBy: decoded.blockedBy,
+    reason: decoded.reason,
+    note: decoded.note,
+  }).toEqual({
+    id: "item-5",
+    kind: "parent-consistency",
+    status: "invalidated",
+    blocked: true,
+    blockedBy: ["item-3", "item-4"],
+    reason: ITEM_DOC.reason,
+    note: "kept: see v2",
+  });
+  expect(decoded.scope).toEqual({
+    node: "specs/T.mdx#p",
+    present: true,
+    range: { start: 0, end: 87 },
+    value: "Pee own line.\n\n",
+    line: 8,
+    text: "  scope: specs/T.mdx#p (present)",
+  });
+  expect(
+    decoded.context?.map(({ node, present, range, value, line }) => ({
+      node,
+      present,
+      range,
+      value,
+      line,
+    })),
+  ).toEqual([
+    {
+      node: "specs/T.mdx#p.a",
+      present: true,
+      range: { start: 26, end: 53 },
+      value: "Paa line.\n",
+      line: 15,
+    },
+    {
+      node: "specs/T.mdx#p.c",
+      present: false,
+      range: null,
+      value: "Gone line.\n",
+      line: 20,
+    },
+  ]);
+  expect(
+    decoded.origin?.map(({ node, range, before, after }) => ({
+      node,
+      range,
+      before: before === null ? null : [before.present, before.value],
+      after: after === null ? null : [after.present, after.value],
+    })),
+  ).toEqual([
+    {
+      node: "specs/T.mdx#p.a",
+      range: { start: 26, end: 53 },
+      before: [true, "Paa v0.\n"],
+      after: [true, "Paa line.\n"],
+    },
+    {
+      node: "specs/T.mdx#p.c",
+      range: null,
+      before: [true, "Pac line.\n"],
+      after: [false, null],
+    },
+    {
+      node: "specs/T.mdx#p.d",
+      range: { start: 55, end: 80 },
+      before: [false, null],
+      after: [true, ""],
+    },
+  ]);
+  expect(decoded.current?.entries).toEqual([
+    {
+      node: "specs/T.mdx#p",
+      present: true,
+      absentMarker: false,
+      hashes: { metadataHash: itemHash("1"), ownHash: itemHash("3") },
+    },
+    { node: "specs/T.mdx#p.a", present: true, absentMarker: false, hashes: {} },
+    { node: "specs/T.mdx#p.c", present: false, absentMarker: true, hashes: {} },
+    {
+      node: "specs/T.mdx#p.d",
+      present: true,
+      absentMarker: false,
+      hashes: { subtreeHash: itemHash("6") },
+    },
+  ]);
+  assertHumanItemCarries(decoded, JSON_ITEM_TWIN, "item");
+  expect(
+    assertHumanItemReportCarries(
+      syntheticBytesResult(previewReport(HUMAN_ITEM_LINES), Buffer.alloc(0), 0),
+      JSON_ITEM_TWIN,
+      "item, as a run",
+    ).id,
+  ).toBe("item-5");
+
+  // Order free: the fields, the context and origin entries, a node's range
+  // and text, and the recorded entries in other orders; a kind, a status, a
+  // blocked state, and a presence respelled.
+  const origin = HUMAN_ITEM_FIELDS.origin;
+  assertHumanItemCarries(
+    decodeHumanItemReport(
+      previewReport([
+        "item item-5",
+        `  current: specs/T.mdx#p.d={subtreeHash:${itemHash("6")}}; specs/T.mdx#p.c=ABSENT; ` +
+          `specs/T.mdx#p.a={}; specs/T.mdx#p={ownHash:${itemHash("3")} metadataHash:${itemHash("1")}}`,
+        ...origin.slice(0, 1),
+        ...origin.slice(17),
+        ...origin.slice(11, 17),
+        ...origin.slice(1, 11),
+        ...HUMAN_ITEM_FIELDS.context.slice(0, 1),
+        ...HUMAN_ITEM_FIELDS.context.slice(6),
+        ...HUMAN_ITEM_FIELDS.context.slice(1, 6),
+        "  scope: specs/T.mdx#p (PRESENT)",
+        ...HUMAN_ITEM_FIELDS.scope.slice(2),
+        HUMAN_ITEM_FIELDS.scope[1]!,
+        ...HUMAN_ITEM_FIELDS.note,
+        ...HUMAN_ITEM_FIELDS.reason,
+        "  blockedBy: item-4, item-3",
+        "  blocked: TRUE",
+        "  status: Invalidated",
+        "  kind: parent_consistency",
+        ...HUMAN_ITEM_FIELDS.baseline,
+      ]),
+      "reordered",
+    ),
+    JSON_ITEM_TWIN,
+    "reordered",
+  );
+
+  // A code location's scope (SPEC 10.7: no text): identity, presence, and
+  // range — then, the location absent, identity and presence alone; a
+  // field reading as none where its line is not printed (blockers, context,
+  // origin); the empty note; and a note a line feed broke, continued at the
+  // margin.
+  const codeDoc = {
+    ...ITEM_DOC,
+    kind: "code-impact",
+    blocked: false,
+    blockedBy: [],
+    note: "",
+    scope: {
+      node: "src/a.ts#unit",
+      present: true,
+      sourceRange: { end: 131, start: 99 },
+    },
+    context: [],
+    origin: [],
+  };
+  const codeLines = [
+    "item item-5",
+    "  kind: code-impact",
+    ...HUMAN_ITEM_FIELDS.status,
+    "  blocked: false",
+    ...HUMAN_ITEM_FIELDS.reason,
+    "  note: ",
+    "  scope: src/a.ts#unit (present)",
+    "    range: 99-131",
+    ...HUMAN_ITEM_FIELDS.baseline,
+    ...HUMAN_ITEM_FIELDS.current,
+  ];
+  assertHumanItemCarries(
+    decodeHumanItemReport(previewReport(codeLines), "code location"),
+    decodeItemReport(codeDoc, "code twin"),
+    "code location",
+  );
+  const absentLines = previewWithLine(
+    previewWithLine(codeLines, 6, "  scope: src/a.ts#unit (absent)"),
+    7,
+    null,
+  );
+  assertHumanItemCarries(
+    decodeHumanItemReport(previewReport(absentLines), "absent location"),
+    decodeItemReport(
+      { ...codeDoc, scope: { node: "src/a.ts#unit", present: false } },
+      "absent code twin",
+    ),
+    "absent location",
+  );
+  const broken = decodeHumanItemReport(
+    previewReport([
+      ...codeLines.slice(0, 5),
+      "  note: line one",
+      "line two",
+      "",
+      ...codeLines.slice(6),
+    ]),
+    "a note a line feed broke",
+  );
+  expect(broken.note).toBe("line one\nline two\n");
+  expect(broken.blockedBy).toBeNull();
+  expect(broken.context).toBeNull();
+  expect(broken.origin).toBeNull();
+});
+
+test("S-5: the human review-item decoder rejects a field printed twice or unknown, a kind, status, or blocked state outside its vocabulary, a node without its presence, a malformed range or text block, an origin side without its presence, a recorded entry without its state or under no hash name, an empty line, and every line outside its layout", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[] | Buffer,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      decodeHumanItemReport(
+        Buffer.isBuffer(lines) ? lines : previewReport(lines),
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_ITEM_LINES;
+  const at = (line: string): number => lineIndex(lines, line);
+  rejected("an empty report", Buffer.alloc(0), "never an empty report");
+  rejected(
+    "a first line other than the item line",
+    lines.slice(1),
+    "the item line `item <id>` opening the item's report",
+    "line 1",
+  );
+  rejected(
+    "an empty line",
+    previewWithLine(lines, 2, ""),
+    "a field line, never an empty line",
+  );
+  rejected(
+    "a field printed twice",
+    [...lines, "  status: no-change"],
+    "the field status printed once — line 3 prints it already",
+  );
+  rejected(
+    "an unknown field",
+    previewWithLine(lines, 1, "  colour: red"),
+    'a field the item\'s report prints — kind, status, blocked, blockedBy, reason, note, scope, context, origin, baseline, current — got the label "colour"',
+  );
+  rejected(
+    "a kind outside the vocabulary",
+    previewWithLine(lines, 1, "  kind: section-coherence"),
+    'the item\'s kind, one SPEC 10.4–10.7 names (subtree-coherence, parent-consistency, dependency-consistency, metadata-consistency, code-impact, uncovered-requirement), got "section-coherence"',
+  );
+  rejected(
+    "a status outside the vocabulary",
+    previewWithLine(lines, 2, "  status: resolved"),
+    'the item\'s status, one SPEC 10.3 lists (unresolved, invalidated, updated, no-change, skipped), got "resolved"',
+  );
+  rejected(
+    "a blocked state as a word",
+    previewWithLine(lines, 3, "  blocked: yes"),
+    "`blocked: true` or `blocked: false`",
+  );
+  rejected(
+    "an empty blocker",
+    previewWithLine(lines, 4, "  blockedBy: item-3, "),
+    "each a non-empty item id",
+  );
+  rejected(
+    "a scope without its presence",
+    previewWithLine(lines, 7, "  scope: specs/T.mdx#p"),
+    "the scope: the node's identity and its presence, `<node> (present)` or `<node> (absent)`",
+  );
+  rejected(
+    "a range whose end precedes its start",
+    previewWithLine(lines, 8, "    range: 87-0"),
+    "a range whose end is not before its start (SPEC 1.7), got 87-0",
+  );
+  rejected(
+    "a range without its end",
+    previewWithLine(lines, 8, "    range: 0-"),
+    "a source range `range: <start>-<end>`",
+  );
+  rejected(
+    "a text block without its lines",
+    [...lines.slice(0, 10), ...lines.slice(13)],
+    "every text has at least one line",
+  );
+  rejected(
+    "a text value in no layout",
+    previewWithLine(lines, 9, "    text: Pee own line."),
+    "a text value — `text: |` with the text's lines beneath it, or `text: (empty)`",
+  );
+  rejected(
+    "two ranges beneath the scope",
+    [...lines.slice(0, 9), "    range: 0-87", ...lines.slice(9)],
+    'one source range beneath the scope node "specs/T.mdx#p", never two',
+  );
+  rejected(
+    "a context header with no entry beneath it",
+    [...lines.slice(0, at("  context:") + 1), ...lines.slice(at("  origin:"))],
+    "no entry stands beneath this one",
+  );
+  rejected(
+    "a context entry without its presence",
+    previewWithLine(
+      lines,
+      at("    -: specs/T.mdx#p.c (absent)"),
+      "    -: specs/T.mdx#p.c",
+    ),
+    "a context entry: the node's identity and its presence",
+  );
+  rejected(
+    "an origin side without its presence",
+    previewWithLine(lines, at("    after: absent"), "    after: maybe"),
+    "the origin entry's after side, `after: present` or `after: absent`",
+  );
+  rejected(
+    "a line beneath an origin entry holding no datum of it",
+    [
+      ...lines.slice(0, at("    after: absent")),
+      "    note: x",
+      ...lines.slice(at("    after: absent")),
+    ],
+    'beneath the origin entry "specs/T.mdx#p.c", its source range',
+  );
+  rejected(
+    "a recorded entry without its state",
+    previewWithLine(lines, lines.length - 1, "  current: specs/T.mdx#p"),
+    "current: the recorded state's entries",
+  );
+  rejected(
+    "a recorded hash under no name of 5.5",
+    previewWithLine(
+      lines,
+      lines.length - 1,
+      "  current: specs/T.mdx#p={nodeHash:12}",
+    ),
+    'current: each recorded hash `<hash name>:<hash>` under one of 5.5\'s names (ownHash, subtreeHash, effectiveHash, metadataHash), got "nodeHash:12"',
+  );
+  rejected(
+    "a node recorded twice",
+    previewWithLine(
+      lines,
+      lines.length - 1,
+      "  current: specs/T.mdx#p={}; specs/T.mdx#p=absent",
+    ),
+    'each node recorded once — "specs/T.mdx#p" is recorded twice',
+  );
+  rejected(
+    "a hash recorded twice for a node",
+    previewWithLine(
+      lines,
+      lines.length - 1,
+      "  current: specs/T.mdx#p={ownHash:1 ownHash:2}",
+    ),
+    'ownHash is recorded twice for "specs/T.mdx#p"',
+  );
+  rejected(
+    "a range beneath no node",
+    [...lines.slice(0, 3), "    range: 0-87", ...lines.slice(3)],
+    "a line beneath a scope, a context entry, or an origin entry — this one stands beneath none",
+  );
+  rejected(
+    "a text line beneath no text",
+    [...lines.slice(0, 3), "      Pee own line.", ...lines.slice(3)],
+    "a line beneath a scope, a context entry, or an origin entry — this one stands beneath none",
+  );
+  rejected(
+    "a line at the margin beneath a field other than a reason or a note",
+    [...lines.slice(0, 2), "stray", ...lines.slice(2)],
+    "a line at the margin stands only first",
+  );
+  rejected(
+    "bytes that are not UTF-8",
+    Buffer.concat([
+      previewReport(lines.slice(0, 7)),
+      Buffer.from("  scope: src/", "utf8"),
+      NON_UTF8_PATH_BYTES,
+      Buffer.from(" (present)\n", "utf8"),
+    ]),
+    "so these bytes are a path printed raw",
+  );
+});
+
+test("S-5: the human review-item comparison rejects a `show` report omitting or changing the id, kind, status, blocked state, a blocker, the note, the reason, the scope node's identity, presence, range, or text, a context or origin entry, an origin side, or a recorded entry, or omitting a twin's scope set or metadata pair — naming the datum", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[],
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanItemCarries(
+        decodeHumanItemReport(previewReport(lines), label),
+        JSON_ITEM_TWIN,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_ITEM_LINES;
+  const at = (line: string): number => lineIndex(lines, line);
+  rejected(
+    "the id changed",
+    previewWithLine(lines, 0, "item item-6"),
+    'the item line names the item "item-6" where the --json twin\'s id is "item-5"',
+  );
+  rejected(
+    "the kind changed",
+    previewWithLine(lines, 1, "  kind: subtree-coherence"),
+    "the report prints the kind subtree-coherence where the --json twin's is parent-consistency",
+  );
+  rejected(
+    "the kind dropped",
+    previewWithLine(lines, 1, null),
+    "the report prints no kind where the --json twin's is parent-consistency",
+  );
+  rejected(
+    "the status changed",
+    previewWithLine(lines, 2, "  status: no-change"),
+    "the report prints the status no-change where the --json twin's is invalidated",
+  );
+  rejected(
+    "the blocked state flipped",
+    previewWithLine(lines, 3, "  blocked: false"),
+    "the report prints the item unblocked where the --json twin reports it blocked",
+  );
+  rejected(
+    "a blocker dropped",
+    previewWithLine(lines, 4, "  blockedBy: item-3"),
+    'the blocker "item-4" is missing — the report\'s blockedBy line lists no such id',
+  );
+  rejected(
+    "the blockedBy line dropped",
+    previewWithLine(lines, 4, null),
+    'the blocker "item-3" is missing — the report prints no blockedBy line',
+  );
+  rejected(
+    "a blocker the twin lacks",
+    previewWithLine(lines, 4, "  blockedBy: item-3, item-4, item-7"),
+    'the report lists the blocker "item-7", which the --json twin\'s blockedBy lacks',
+  );
+  rejected(
+    "the reason dropped",
+    previewWithLine(lines, 5, null),
+    "the report prints no reason where the --json twin carries one",
+  );
+  rejected(
+    "the note changed",
+    previewWithLine(lines, 6, "  note: kept: see v3"),
+    'the report prints the note "kept: see v3" where the --json twin\'s is "kept: see v2"',
+  );
+  rejected(
+    "the note dropped",
+    previewWithLine(lines, 6, null),
+    'the note "kept: see v2" is missing — the report prints no note line',
+  );
+  rejected(
+    "the scope node changed",
+    previewWithLine(lines, 7, "  scope: specs/T.mdx#q (present)"),
+    'line 8 prints the scope node "specs/T.mdx#q" where the --json twin\'s is "specs/T.mdx#p"',
+  );
+  rejected(
+    "the scope presented absent",
+    previewWithLine(lines, 7, "  scope: specs/T.mdx#p (absent)"),
+    'line 8 (the scope node "specs/T.mdx#p") presents the node absent where the --json twin presents it present',
+  );
+  rejected(
+    "the scope's range changed",
+    previewWithLine(lines, 8, "    range: 0-86"),
+    "prints the source range 0-86 where the --json twin carries the source range 0-87",
+  );
+  rejected(
+    "the scope's range dropped",
+    previewWithLine(lines, 8, null),
+    "prints no source range where the --json twin carries the source range 0-87",
+  );
+  rejected(
+    "the scope's text changed",
+    previewWithLine(lines, 10, "      Pee own line!"),
+    'prints the text "Pee own line!\\n\\n" where the --json twin carries the text "Pee own line.\\n\\n"',
+  );
+  rejected(
+    "a context entry dropped",
+    [
+      ...lines.slice(0, at("    -: specs/T.mdx#p.c (absent)")),
+      ...lines.slice(at("  origin:")),
+    ],
+    'the context entry "specs/T.mdx#p.c" (absent) is missing — no context entry names it',
+  );
+  rejected(
+    "an absent context entry's text dropped",
+    [
+      ...lines.slice(0, at("    -: specs/T.mdx#p.c (absent)") + 1),
+      ...lines.slice(at("  origin:")),
+    ],
+    'line 20 (the context entry "specs/T.mdx#p.c") prints no text where the --json twin carries the text "Gone line.\\n"',
+  );
+  rejected(
+    "a context entry the twin lacks",
+    [
+      ...lines.slice(0, at("  origin:")),
+      "    -: specs/T.mdx#p.z (absent)",
+      ...lines.slice(at("  origin:")),
+    ],
+    'presents the context entry "specs/T.mdx#p.z", which the --json twin lacks',
+  );
+  rejected(
+    "an origin entry dropped",
+    lines
+      .slice(0, at("  - specs/T.mdx#p.d"))
+      .concat(lines.slice(at("  - specs/T.mdx#p.d") + 5)),
+    'the origin entry "specs/T.mdx#p.d" is missing — no origin entry names it',
+  );
+  rejected(
+    "an origin entry's range dropped",
+    previewWithLine(lines, at("  - specs/T.mdx#p.a") + 1, null),
+    '(the origin entry "specs/T.mdx#p.a") prints no source range where the --json twin carries the source range 26-53',
+  );
+  rejected(
+    "an origin side's text changed",
+    previewWithLine(lines, at("        Paa v0."), "        Paa v1."),
+    'prints the text "Paa v1.\\n" on the before side where the --json twin carries the text "Paa v0.\\n"',
+  );
+  rejected(
+    "an origin side presented present",
+    previewWithLine(lines, at("    after: absent"), "    after: present"),
+    "prints the after side present where the --json twin's is absent",
+  );
+  rejected(
+    "an origin side dropped",
+    previewWithLine(lines, at("    after: absent"), null),
+    "prints no after side where the --json twin's is absent",
+  );
+  rejected(
+    "an origin side's empty text dropped",
+    previewWithLine(lines, at("      text: (empty)"), null),
+    'prints no text on the after side where the --json twin carries the text ""',
+  );
+  rejected(
+    "a recorded hash changed",
+    previewWithLine(
+      lines,
+      lines.length - 1,
+      lines[lines.length - 1]!.replace(itemHash("3"), itemHash("2")),
+    ),
+    `(current) records "specs/T.mdx#p" (present, {ownHash:${itemHash("2")} metadataHash:${itemHash("1")}}) where the --json twin records "specs/T.mdx#p" (present, {ownHash:${itemHash("3")} metadataHash:${itemHash("1")}})`,
+  );
+  rejected(
+    "the absent marker printed as an empty record",
+    previewWithLine(
+      lines,
+      lines.length - 2,
+      lines[lines.length - 2]!.replace(
+        "specs/T.mdx#p.d=absent",
+        "specs/T.mdx#p.d={}",
+      ),
+    ),
+    '(baseline) records "specs/T.mdx#p.d" (present, {}) where the --json twin records "specs/T.mdx#p.d" (absent, the explicit absent marker)',
+  );
+  rejected(
+    "a recorded entry dropped",
+    previewWithLine(
+      lines,
+      lines.length - 1,
+      lines[lines.length - 1]!.replace("specs/T.mdx#p.a={}; ", ""),
+    ),
+    'current: the recorded node "specs/T.mdx#p.a" (present, {}) is missing',
+  );
+  rejected(
+    "the current line dropped",
+    lines.slice(0, -1),
+    "the report prints no current line",
+  );
+  const scopeSet = expectDiagnosed("a twin's scope set", () =>
+    assertHumanItemCarries(
+      decodeHumanItemReport(previewReport(lines), "a twin's scope set"),
+      decodeItemReport(
+        {
+          ...ITEM_DOC,
+          scopeNodes: [
+            { node: "specs/T.mdx#p", present: true },
+            { node: "specs/T.mdx#p.b", present: true },
+          ],
+        },
+        "the scope-set twin",
+      ),
+      "a twin's scope set",
+    ),
+  );
+  expect(scopeSet.message).toContain(
+    'the --json twin\'s scope holds "specs/T.mdx#p.b" beside the scope root',
+  );
+  const metadata = expectDiagnosed("a twin's metadata pair", () =>
+    assertHumanItemCarries(
+      decodeHumanItemReport(
+        previewReport(
+          previewWithLine(lines, 1, "  kind: metadata-consistency"),
+        ),
+        "a twin's metadata pair",
+      ),
+      decodeItemReport(
+        {
+          ...ITEM_DOC,
+          kind: "metadata-consistency",
+          metadata: {
+            after: { coverage: "required", d: [], present: true, tags: ["t"] },
+            before: { coverage: "required", d: [], present: true, tags: [] },
+          },
+        },
+        "the metadata twin",
+      ),
+      "a twin's metadata pair",
+    ),
+  );
+  expect(metadata.message).toContain(
+    "the --json twin carries the scope node's metadata pair",
+  );
+});
+
+test("S-5: the human review-next decoder decodes the fully-resolved report and the item returned", () => {
+  const resolvedTwin = decodeNextReport(
+    { fullyResolved: true },
+    "the fully-resolved twin",
+  );
+  const resolved = decodeHumanNextReport(
+    previewReport(HUMAN_FULLY_RESOLVED),
+    "fully resolved",
+  );
+  expect({
+    fullyResolved: resolved.fullyResolved,
+    item: resolved.item,
+  }).toEqual({ fullyResolved: true, item: null });
+  assertHumanNextCarries(resolved, resolvedTwin, "fully resolved");
+  assertHumanNextCarries(
+    decodeHumanNextReport(
+      previewReport(["Session s: FULLY-RESOLVED."]),
+      "fully resolved respelled",
+    ),
+    resolvedTwin,
+    "fully resolved respelled",
+  );
+  const itemTwin = decodeNextReport(
+    { fullyResolved: false, item: ITEM_DOC },
+    "the next twin",
+  );
+  const decoded = decodeHumanNextReport(
+    previewReport(HUMAN_ITEM_LINES),
+    "next",
+  );
+  expect(decoded.fullyResolved).toBe(false);
+  expect(decoded.item?.scope?.value).toBe("Pee own line.\n\n");
+  assertHumanNextCarries(decoded, itemTwin, "next");
+  expect(
+    assertHumanNextReportCarries(
+      syntheticBytesResult(previewReport(HUMAN_ITEM_LINES), Buffer.alloc(0), 0),
+      itemTwin,
+      "next, as a run",
+    ).item?.id,
+  ).toBe("item-5");
+  // `next --json`'s self-contained payload is the JSON form's alone
+  // (TEST-SPEC T12.0-15): the item's fields with no payload line, or with a
+  // payload the twin's differs from, carry the item returned.
+  assertHumanNextCarries(
+    decodeHumanNextReport(
+      previewReport(HUMAN_ITEM_LINES.slice(0, 7)),
+      "next without its payload",
+    ),
+    itemTwin,
+    "next without its payload",
+  );
+  assertHumanNextCarries(
+    decodeHumanNextReport(
+      previewReport(
+        previewWithLine(HUMAN_ITEM_LINES, 10, "      Pee own line!"),
+      ),
+      "next with another scope text",
+    ),
+    itemTwin,
+    "next with another scope text",
+  );
+});
+
+test("S-5: the human review-next decoder rejects an empty report, a report that is neither the item returned nor the fully-resolved report, and every failure of the item decode", () => {
+  const rejected = (
+    label: string,
+    lines: readonly string[] | Buffer,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      decodeHumanNextReport(
+        Buffer.isBuffer(lines) ? lines : previewReport(lines),
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  rejected("an empty report", Buffer.alloc(0), "never an empty report");
+  rejected(
+    "a report naming no resolution",
+    ["review session 's': no item needs review"],
+    "the item line `item <id>` opening the item `next` returns, or one line reporting the session fully resolved",
+  );
+  rejected(
+    "the fully-resolved report twice",
+    [...HUMAN_FULLY_RESOLVED, ...HUMAN_FULLY_RESOLVED],
+    "or one line reporting the session fully resolved",
+    "line 1",
+  );
+  rejected(
+    "an item block without its item line",
+    HUMAN_ITEM_LINES.slice(1),
+    "the item line `item <id>` opening the item `next` returns",
+  );
+  rejected(
+    "an item decode failure",
+    previewWithLine(HUMAN_ITEM_LINES, 2, "  status: resolved"),
+    "the item's status, one SPEC 10.3 lists",
+  );
+  rejected(
+    "bytes that are not UTF-8",
+    Buffer.concat([
+      Buffer.from("item item-", "utf8"),
+      Buffer.from([0xff]),
+      Buffer.from("\n", "utf8"),
+    ]),
+    "so these bytes are a path printed raw",
+  );
+});
+
+test("S-5: the human review-next comparison rejects the fully-resolved report where an item is returned or an item where none is, and an item omitting or changing the id, kind, status, blocked state, a blocker, the note, or the reason — naming the datum", () => {
+  const itemTwin = decodeNextReport(
+    { fullyResolved: false, item: ITEM_DOC },
+    "the next twin",
+  );
+  const rejected = (
+    label: string,
+    lines: readonly string[],
+    twin: ReturnType<typeof decodeNextReport>,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanNextCarries(
+        decodeHumanNextReport(previewReport(lines), label),
+        twin,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_ITEM_LINES;
+  rejected(
+    "an item where the twin reports the session fully resolved",
+    lines,
+    decodeNextReport({ fullyResolved: true }, "the fully-resolved twin"),
+    'the human `review next` report presents the item "item-5" where its --json twin reports the session fully resolved',
+  );
+  rejected(
+    "the fully-resolved report where the twin returns an item",
+    HUMAN_FULLY_RESOLVED,
+    itemTwin,
+    'the human `review next` report reports the session fully resolved where its --json twin returns the item "item-5"',
+  );
+  rejected(
+    "the id changed",
+    previewWithLine(lines, 0, "item item-6"),
+    itemTwin,
+    'the item line names the item "item-6" where the --json twin\'s id is "item-5"',
+  );
+  rejected(
+    "the kind changed",
+    previewWithLine(lines, 1, "  kind: subtree-coherence"),
+    itemTwin,
+    "the report prints the kind subtree-coherence where the --json twin's is parent-consistency",
+  );
+  rejected(
+    "the status changed",
+    previewWithLine(lines, 2, "  status: unresolved"),
+    itemTwin,
+    "the report prints the status unresolved where the --json twin's is invalidated",
+  );
+  rejected(
+    "the blocked state dropped",
+    previewWithLine(lines, 3, null),
+    itemTwin,
+    "the report prints no blocked state where the --json twin reports the item blocked",
+  );
+  rejected(
+    "a blocker dropped",
+    previewWithLine(lines, 4, "  blockedBy: item-4"),
+    itemTwin,
+    'the blocker "item-3" is missing',
+  );
+  rejected(
+    "the note dropped",
+    previewWithLine(lines, 6, null),
+    itemTwin,
+    'the note "kept: see v2" is missing',
+  );
+  rejected(
+    "the reason dropped",
+    previewWithLine(lines, 5, null),
+    itemTwin,
+    "the report prints no reason where the --json twin carries one",
   );
 });
 

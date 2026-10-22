@@ -21,9 +21,10 @@
 //   human-reports.ts   the human-report decoders (H-3's report forms,
 //                      T12.0-15, T6.6-7): a findings report, an exit-2
 //                      standard-error message, a preview, a performed
-//                      rename/move report, an impact report, and a
-//                      `review list` and `review status` report decoded
-//                      onto the information model — each finding's code,
+//                      rename/move report, an impact report, a `review
+//                      list` and `review status` report, and a `review
+//                      show` and `review next` report decoded onto the
+//                      information model — each finding's code,
 //                      locations, concerned path, and identities; an
 //                      error's code and concerned path; a preview's
 //                      plan; a performed operation's applied mapping; an
@@ -32,8 +33,10 @@
 //                      impacted code with witness edges and paths; a
 //                      listing's sessions with their strategies and
 //                      counts or corruption, and its findings; a status
-//                      report's items and totals — and compared with the
-//                      --json twin's
+//                      report's items and totals; an item's fields, its
+//                      payload's nodes, texts, ranges, and origin pairs,
+//                      and its recorded states, or the fully-resolved
+//                      report — and compared with the --json twin's
 //   session-staging.ts T10.1-4 corruption transformations (shape-aware,
 //                      value-blind, over product-written session files)
 //   record-staging.ts  T13.3-2's operational path set (its predicate, the

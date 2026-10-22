@@ -35,23 +35,31 @@
 // or its corruption in their place, and the listing's findings; and a
 // `review status` report onto the status model (`SessionStatusReport`):
 // each item's id, kind, scope, status, and blocked state, and the totals
-// by status (TEST-SPEC T12.0-15; SPEC 10.7). A refusal or a corrupt
-// session's report — `review create`, `resolve`, or `split` refused, a
-// subcommand naming a corrupt session — is a findings report (14, 14.21).
-// Like every adapter here they are the one place aware of the report's
-// concrete shape: adjustable to shape, never to values, and failing loudly
-// — a diagnosed `HarnessAssertionError` naming the line and the datum —
-// when a report's text fits none of the layout below or lacks what the
-// layout carries. Later decoders for the other human reports (`review
-// next` and `review show`, coverage, ids, show) go beside these.
+// by status (TEST-SPEC T12.0-15; SPEC 10.7). The review-item decoders take
+// a `review show` report onto the item model the review adapter produces
+// (model.ts `ReviewItem`): the full item — every field of 10.2 and the
+// self-contained text payload, its nodes' presence, ranges, and texts,
+// the origin pairs, and the recorded states — and a `review next` report
+// onto the next model (`NextReport`): the fully-resolved report, or the
+// item returned (TEST-SPEC T12.0-15; SPEC 10.2, 10.7). A refusal or a
+// corrupt session's report — `review create`, `resolve`, or `split`
+// refused, a subcommand naming a corrupt session — is a findings report
+// (14, 14.21). Like every adapter here they are the one place aware of
+// the report's concrete shape: adjustable to shape, never to values, and
+// failing loudly — a diagnosed `HarnessAssertionError` naming the line and
+// the datum — when a report's text fits none of the layout below or lacks
+// what the layout carries. Later decoders for the other human reports
+// (coverage, ids, show) go beside these.
 //
 // The layout, fitted to what the built product emits (observed by running
 // it on T14-11's per-condition fixtures, T1.5-2's arms, T12.7-3's stagings,
 // and hand-staged 14.11, 14.12, 14.13, 14.21, refusal, and code-less
 // findings, the previews of T6.6-2 through T6.6-6, the performed reports
 // of T6.4-1's rename and T6.5-1's file moves, the impact reports of
-// T5.6-1 through T5.6-6 and T9-1 through T9.3-3, and the `review` reports
-// of T10.7-1, T10.7-5 through T10.7-10, and T10.1-4 — never by reading its
+// T5.6-1 through T5.6-6 and T9-1 through T9.3-3, the `review` reports of
+// T10.7-1, T10.7-5 through T10.7-13, and T10.1-4, the item reports of the
+// T10.2, T10.4, T10.5, and T10.6 tests, and hand-staged notes — empty and
+// holding a line feed — and a deleted origin node — never by reading its
 // source):
 //
 // - A findings report — a failing `build`'s validation errors, `check`'s
@@ -156,6 +164,40 @@
 //   word between the kind and the status — then the totals line
 //   `totals: <status>=<n> …` (the built product prints all five statuses,
 //   zeros included), the line a session holding no item prints alone.
+// - An item report — `review show <name> <item-id>` without `--json`, and
+//   the item `review next <name>` returns (SPEC 10.7) — opens with the item
+//   line `item <id>` at the margin; then one field line per field,
+//   two-space-indented, `<label>: <value>`, each at most once, in any order
+//   (the built product's order: `kind`, `status`, `blocked` — `true` or
+//   `false` — `blockedBy` — the ids joined by `, `, or `(none)` — `reason`,
+//   the optional `note`, `scope`, `context`, `origin`, `baseline`,
+//   `current`; the kind and status read as codes are). A reason or a note
+//   is printed as it stands: a line feed it holds breaks it, and each
+//   following line at the margin continues it, joined by the line feed
+//   (an empty note prints `note: ` with nothing after). `scope: <node>
+//   (present|absent)` is followed by its details, four-space-indented, each
+//   at most once, in either order: `range: <start>-<end>`, the source
+//   range's two byte offsets (1.7; none for an absent node), and its text —
+//   `text: |` with every line of the text beneath it at six spaces, the
+//   last included (so a text ending in a line feed ends in an indented
+//   empty line), or `text: (empty)` for the empty text, and no text line
+//   where the payload holds none (a code location, 10.7). `context: (none)`,
+//   or `context:` with its entries beneath it, each `-: <node>
+//   (present|absent)` at four spaces with its details at four as well.
+//   `origin: (none)`, or `origin:` with its entries, each `- <node>` at two
+//   spaces, then at four its range (none for a currently absent node) and
+//   its sides `before: present|absent` and `after: present|absent`, each
+//   followed, where it carries text, by `text: …` at six with the text's
+//   lines at eight. `baseline: ` and `current: ` hold the recorded entries,
+//   joined by `; `: `<node>={<hash name>:<hash> …}` — the node recorded
+//   present, its hashes under 5.5's names separated by spaces, `{}` for
+//   none — or `<node>=absent`, the explicit absent marker of 10.4 (and
+//   `(none)` reads as no entry). The built product prints neither a
+//   metadata-consistency item's metadata pair nor a scope set beyond the
+//   scope root, in either form; no layout for them is fitted. A `next`
+//   report is either such an item report or the fully-resolved report —
+//   one line holding the phrase `fully resolved` (the built product's
+//   `review session '<name>' is fully resolved: no item needs review`).
 // - A code is recognized at the position the layout gives it, spelled as
 //   human.ts's `codeMention` spells one, over the whole segment: its words
 //   case-insensitive, joined by one character that is neither letter nor
@@ -210,7 +252,13 @@
 //   strategy — 10.1's session names hold neither. In a status report, an
 //   item id holding a space or spelling `totals:` mis-decodes, and a scope
 //   holding two spaces in a row fails the decode — the item ids and
-//   identities of T10.7-6's and T10.1-4's sessions hold none.
+//   identities of T10.7-6's and T10.1-4's sessions hold none. In an item
+//   report, an item id holding `, ` in a blockedBy list, a node identity
+//   ending in ` (present)` or ` (absent)` or holding `; ` or a line feed, a
+//   hash holding a space or `}`, and a reason or note holding a line feed
+//   followed by two spaces mis-decode — never into a pass: the decoded item
+//   then differs from its twin, or a line fits no layout — and the items
+//   of T10.7-7's and T10.7-8's sessions hold none.
 // - A code's words at the code's position are the code — human.ts's
 //   convention, under which `missing ID` carries `missing-id` — so a line
 //   whose code token is gone but whose message opens with its own code's
@@ -255,6 +303,33 @@
 //   its totals equal under each status, a status with no total reading as
 //   0 — a report printing no totals line reads as all zeros, which fails
 //   wherever the twin totals any item.
+// - An item report's comparison is exact on the item model, its order free
+//   (T12.0-15 lists none for `next` or `show`: SPEC fixes no order for the
+//   report itself). `show` (T12.0-15: "the full item with its text
+//   payload"): the id, kind, status, and blocked state equal; the blockers
+//   as a set (10.7 fixes no order); the note equal — none on both sides, or
+//   the same text — and a reason present, its text never compared (10.2:
+//   informational wording, its composition unpinned; H-3); the scope node's
+//   identity, presence, range, and text equal; the context and origin
+//   entries matched by node, each context entry's presence, range, and text,
+//   and each origin entry's range and its before and after sides' presence
+//   and text, equal; the `baseline` and `current` recorded states matched by
+//   node against the twin's `decodeRecordedState` entries, each one's
+//   presence, absent marker, and hash under each of 5.5's names equal; and,
+//   where the twin carries them, every scope node beyond the scope root and
+//   the metadata pair, which the human report — the layout fitted holding
+//   no reading of either — then fails to carry. A blockedBy, context, or
+//   origin line the report does not print reads as none, as a missing count
+//   does in a listing (whether an empty list is printed is concrete shape,
+//   H-3); a missing scope, recorded state, kind, status, or blocked state
+//   fails wherever the twin carries one. `next` (T12.0-15: "the item
+//   returned, and the fully-resolved report"): the session fully resolved
+//   exactly where the twin reports it so, else the item's id, kind,
+//   status, blocked state, blockers, note, and reason compared as `show`'s
+//   are; `next --json`'s self-contained payload — the nodes, their texts
+//   and ranges, the recorded states, a metadata pair — is content SPEC 10.7
+//   defines for the JSON form alone, which T12.0-15 does not ask of the
+//   human report.
 // - An impact report's comparison is exact on the impact model, its order
 //   free (T12.0-15 lists none for `impact`: SPEC fixes no order for the
 //   report itself). Its unit is one category of one requirement entry —
@@ -291,24 +366,33 @@ import type {
   ImpactReport,
   ItemKind,
   ItemStatus,
+  NextReport,
+  NodeHashes,
+  NodeTextState,
+  OriginTextSide,
   PathValue,
   PerformedOperationReport,
   PreviewDeltaDatum,
   PreviewEdit,
   PreviewEditClass,
   PreviewReport,
+  RecordedNodeEntry,
+  ReviewItem,
   SessionListEntry,
   SessionListReport,
   SessionStatusReport,
   SessionStatusRow,
+  SourceRange,
 } from "./model.js";
 import {
   CHANGE_CATEGORIES,
   EDGE_KINDS,
   ITEM_KINDS,
   ITEM_STATUSES,
+  NODE_HASH_NAMES,
   PREVIEW_EDIT_CLASSES,
 } from "./model.js";
+import { decodeRecordedState } from "./review.js";
 
 // --- the decoded forms ---------------------------------------------------------
 
@@ -2379,6 +2463,908 @@ export function decodeHumanSessionStatusReport(
   return guardSyncStep(step, () => decodeSessionStatusBytes(bytes, context));
 }
 
+// --- the review item reports: `next` and `show` ----------------------------------------
+
+/** The item line opening an item report: `item <id>` (the module header). */
+const ITEM_LINE = /^item (.+)$/;
+
+/**
+ * A field line at an item's first level (the module header): two spaces,
+ * the field's label, a colon, and — after one space — its value, `undefined`
+ * where nothing follows the colon.
+ */
+const ITEM_FIELD_LINE = /^ {2}([A-Za-z]+):(?: (.*))?$/;
+
+/** An origin entry's line (the module header): `  - <node>`. */
+const ORIGIN_ENTRY_LINE = /^ {2}- (.+)$/;
+
+/**
+ * A line beneath a payload node (the module header): four spaces, its label
+ * — `range`, `text`, `before`, `after`, or a context entry's `-` — a colon,
+ * and after one space its value, `undefined` where nothing follows.
+ */
+const NODE_DETAIL_LINE = /^ {4}([A-Za-z]+|-):(?: (.*))?$/;
+
+/** An origin side's text line (the module header): six spaces, `text:`. */
+const SIDE_TEXT_LINE = /^ {6}text:(?: (.*))?$/;
+
+/** The indentation of a scope's or context entry's text lines. */
+const NODE_TEXT_INDENT = " ".repeat(6);
+
+/** The indentation of an origin side's text lines. */
+const SIDE_TEXT_INDENT = " ".repeat(8);
+
+/** A node presented with its presence: `<node> (present)` or `<node> (absent)`. */
+const PRESENTED_NODE = /^(.+) \((present|absent)\)$/i;
+
+/** A presence word, an origin side's (SPEC 10.7). */
+const PRESENCE_WORD = /^(present|absent)$/i;
+
+/** A source range's value: `<start>-<end>`, each offset decimal. */
+const RANGE_VALUE = /^(0|[1-9][0-9]*)-(0|[1-9][0-9]*)$/;
+
+/** The empty text's spelling, `(empty)`, and an empty list's, `(none)`. */
+const EMPTY_TEXT_WORD = /^\(empty\)$/i;
+const NONE_WORD = /^\(none\)$/i;
+
+/** A blocked state's word (SPEC 10.3). */
+const BOOLEAN_WORD = /^(true|false)$/i;
+
+/** A recorded entry's absent marker (SPEC 10.4), as the layout prints it. */
+const ABSENT_MARKER_WORD = /^absent$/i;
+
+/** The fully-resolved report's phrase (SPEC 10.7: "fully resolved"). */
+const FULLY_RESOLVED_PHRASE = /\bfully[^A-Za-z0-9]?resolved\b/i;
+
+/**
+ * One node a human item report presents — its scope node or one of its
+ * context entries (SPEC 10.7) — with where it stood: its identity and
+ * presence (10.4), and the source range (1.7) and the text value (1.6)
+ * printed beneath it, each `null` where none is printed.
+ */
+export interface HumanItemNode {
+  readonly node: string;
+  readonly present: boolean;
+  readonly range: SourceRange | null;
+  /** Its text value, `null` where no text is printed. */
+  readonly value: string | null;
+  /** The report line its identity stood on, 1-based. */
+  readonly line: number;
+  /** That line's text. */
+  readonly text: string;
+}
+
+/**
+ * One side of an origin entry's before/after pair as a human item report
+ * prints it (SPEC 10.7): the side's presence and the node's own text there,
+ * `null` where none is printed.
+ */
+export interface HumanOriginSide {
+  readonly present: boolean;
+  readonly value: string | null;
+  /** The report line it stood on, 1-based. */
+  readonly line: number;
+}
+
+/**
+ * One origin entry of a human item report (SPEC 10.7), with where it
+ * stood: its node, the source range printed beneath it, and its before and
+ * after sides, each `null` where none is printed.
+ */
+export interface HumanOriginEntry {
+  readonly node: string;
+  readonly range: SourceRange | null;
+  readonly before: HumanOriginSide | null;
+  readonly after: HumanOriginSide | null;
+  /** The report line its node stood on, 1-based. */
+  readonly line: number;
+  /** That line's text. */
+  readonly text: string;
+}
+
+/**
+ * One node's entry of a recorded state (`baseline`, `current`; SPEC 10.2,
+ * 10.4) as a human item report prints it: the node, its presence, and its
+ * recorded hashes by name — or the explicit absent marker in their place —
+ * the reading `decodeRecordedState` (review.ts) gives the `--json` form.
+ */
+export interface HumanRecordedEntry {
+  readonly node: string;
+  readonly present: boolean;
+  readonly absentMarker: boolean;
+  readonly hashes: Readonly<Partial<NodeHashes>>;
+}
+
+/** A recorded state's line of a human item report, decoded. */
+export interface HumanRecordedState {
+  readonly entries: readonly HumanRecordedEntry[];
+  /** The report line it stood on, 1-based. */
+  readonly line: number;
+  /** That line's text. */
+  readonly text: string;
+}
+
+/**
+ * A human item report — `review show <name> <item-id>`, or the item
+ * `review next <name>` returns — decoded onto the item model (TEST-SPEC
+ * T12.0-15; SPEC 10.2, 10.7): every field it prints, each `null` where its
+ * line is not printed, the comparisons below deciding which each report
+ * must carry.
+ */
+export interface HumanItemReport {
+  readonly id: string;
+  readonly kind: ItemKind | null;
+  readonly status: ItemStatus | null;
+  readonly blocked: boolean | null;
+  /** The blockers listed (a set: 10.7 fixes no order), `null` where none is printed. */
+  readonly blockedBy: readonly string[] | null;
+  /** The reason (SPEC 10.2: informational wording, never compared). */
+  readonly reason: string | null;
+  readonly note: string | null;
+  readonly scope: HumanItemNode | null;
+  readonly context: readonly HumanItemNode[] | null;
+  readonly origin: readonly HumanOriginEntry[] | null;
+  readonly baseline: HumanRecordedState | null;
+  readonly current: HumanRecordedState | null;
+  /** The report's text, for diagnoses. */
+  readonly text: string;
+}
+
+/**
+ * A human `review next <name>` report decoded (TEST-SPEC T12.0-15; SPEC
+ * 10.7): the report that the session is fully resolved, or the item
+ * returned.
+ */
+export interface HumanNextReport {
+  readonly fullyResolved: boolean;
+  /** The item returned, `null` for the fully-resolved report. */
+  readonly item: HumanItemReport | null;
+  /** The report's text, for diagnoses. */
+  readonly text: string;
+}
+
+/** An item report's lines, with the adapter and the report for diagnoses. */
+interface ItemReportLines {
+  readonly adapter: string;
+  readonly report: string;
+  readonly lines: readonly string[];
+}
+
+/** Fail an item report's decode at its 0-based line `index`. */
+function itemDecodeFail(
+  at: ItemReportLines,
+  index: number,
+  expected: string,
+): never {
+  decodeFail(
+    at.adapter,
+    atLine(index + 1, at.lines[index] ?? ""),
+    expected,
+    at.report,
+  );
+}
+
+/** A source range's value (the module header): `<start>-<end>`. */
+function decodeItemRange(
+  at: ItemReportLines,
+  index: number,
+  value: string | undefined,
+): SourceRange {
+  const match = value === undefined ? null : RANGE_VALUE.exec(value);
+  if (match === null) {
+    itemDecodeFail(
+      at,
+      index,
+      "a source range `range: <start>-<end>`, its two byte offsets in decimal (SPEC 1.7)",
+    );
+  }
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) {
+    itemDecodeFail(
+      at,
+      index,
+      `byte offsets within the safe integers (SPEC 1.7), got ${match[1]!}-${match[2]!}`,
+    );
+  }
+  if (end < start) {
+    itemDecodeFail(
+      at,
+      index,
+      `a range whose end is not before its start (SPEC 1.7), got ${match[1]!}-${match[2]!}`,
+    );
+  }
+  return { start, end };
+}
+
+/**
+ * A text value's block (the module header): `text: (empty)` for the empty
+ * text, or `text: |` and beneath it the text's lines — every line of the
+ * text, the last included, each behind `indent` — the value those lines
+ * joined by line feeds. Returns the value and the 0-based index of the
+ * block's last line.
+ */
+function readItemTextBlock(
+  at: ItemReportLines,
+  index: number,
+  value: string | undefined,
+  indent: string,
+): { readonly value: string; readonly last: number } {
+  if (value !== undefined && EMPTY_TEXT_WORD.test(value)) {
+    return { value: "", last: index };
+  }
+  if (value !== "|") {
+    itemDecodeFail(
+      at,
+      index,
+      "a text value — `text: |` with the text's lines beneath it, or `text: (empty)` for the " +
+        "empty text (SPEC 1.6, 10.7)",
+    );
+  }
+  const parts: string[] = [];
+  let last = index;
+  while (last + 1 < at.lines.length && at.lines[last + 1]!.startsWith(indent)) {
+    last += 1;
+    parts.push(at.lines[last]!.slice(indent.length));
+  }
+  if (parts.length === 0) {
+    itemDecodeFail(
+      at,
+      index,
+      `the text's lines beneath \`text: |\`, each indented ${String(indent.length)} spaces — ` +
+        "every text has at least one line (`text: (empty)` prints the empty text)",
+    );
+  }
+  return { value: parts.join("\n"), last };
+}
+
+/** A node with its presence (the module header): `<node> (present|absent)`. */
+function decodePresentedNode(
+  at: ItemReportLines,
+  index: number,
+  value: string | undefined,
+  what: string,
+): { readonly node: string; readonly present: boolean } {
+  const match = value === undefined ? null : PRESENTED_NODE.exec(value);
+  if (match === null) {
+    itemDecodeFail(
+      at,
+      index,
+      `${what}: the node's identity and its presence, \`<node> (present)\` or ` +
+        "`<node> (absent)` (SPEC 10.4, 10.7)",
+    );
+  }
+  return {
+    node: match[1]!,
+    present: match[2]!.toLowerCase() === "present",
+  };
+}
+
+/**
+ * The details beneath a scope node or a context entry (the module header):
+ * its source range and its text value, each at most once, in either order,
+ * until a line holding neither — a context entry's `-:` line included.
+ */
+function readItemNodeDetails(
+  at: ItemReportLines,
+  index: number,
+  owner: string,
+): {
+  readonly range: SourceRange | null;
+  readonly value: string | null;
+  readonly last: number;
+} {
+  let range: SourceRange | null = null;
+  let value: string | null = null;
+  let last = index;
+  while (last + 1 < at.lines.length) {
+    const next = last + 1;
+    const detail = NODE_DETAIL_LINE.exec(at.lines[next]!);
+    if (detail === null || detail[1] === "-") break;
+    const label = detail[1]!;
+    if (label === "range") {
+      if (range !== null) {
+        itemDecodeFail(
+          at,
+          next,
+          `one source range beneath ${owner}, never two`,
+        );
+      }
+      range = decodeItemRange(at, next, detail[2]);
+      last = next;
+      continue;
+    }
+    if (label === "text") {
+      if (value !== null) {
+        itemDecodeFail(at, next, `one text value beneath ${owner}, never two`);
+      }
+      const block = readItemTextBlock(at, next, detail[2], NODE_TEXT_INDENT);
+      value = block.value;
+      last = block.last;
+      continue;
+    }
+    itemDecodeFail(
+      at,
+      next,
+      `beneath ${owner}, its source range \`range: <start>-<end>\` or its text \`text: …\` ` +
+        "— no other line stands there",
+    );
+  }
+  return { range, value, last };
+}
+
+/**
+ * One side of an origin entry (the module header): `before: present|absent`
+ * or `after: …`, and beneath it, at six spaces, the node's own text there —
+ * `text: |` with its lines at eight, or `text: (empty)` — where printed.
+ */
+function readOriginSide(
+  at: ItemReportLines,
+  index: number,
+  value: string | undefined,
+  side: string,
+): { readonly side: HumanOriginSide; readonly last: number } {
+  if (value === undefined || !PRESENCE_WORD.test(value)) {
+    itemDecodeFail(
+      at,
+      index,
+      `the origin entry's ${side} side, \`${side}: present\` or \`${side}: absent\` (SPEC 10.7)`,
+    );
+  }
+  const present = value.toLowerCase() === "present";
+  const textLine =
+    index + 1 < at.lines.length
+      ? SIDE_TEXT_LINE.exec(at.lines[index + 1]!)
+      : null;
+  if (textLine === null) {
+    return { side: { present, value: null, line: index + 1 }, last: index };
+  }
+  const block = readItemTextBlock(at, index + 1, textLine[1], SIDE_TEXT_INDENT);
+  return {
+    side: { present, value: block.value, line: index + 1 },
+    last: block.last,
+  };
+}
+
+/**
+ * An origin entry's details (the module header): its source range and its
+ * before and after sides, each at most once, in any order.
+ */
+function readOriginEntry(
+  at: ItemReportLines,
+  index: number,
+  node: string,
+): {
+  readonly range: SourceRange | null;
+  readonly before: HumanOriginSide | null;
+  readonly after: HumanOriginSide | null;
+  readonly last: number;
+} {
+  const owner = `the origin entry ${JSON.stringify(node)}`;
+  let range: SourceRange | null = null;
+  let before: HumanOriginSide | null = null;
+  let after: HumanOriginSide | null = null;
+  let last = index;
+  while (last + 1 < at.lines.length) {
+    const next = last + 1;
+    const detail = NODE_DETAIL_LINE.exec(at.lines[next]!);
+    if (detail === null) break;
+    const label = detail[1]!;
+    if (label === "range") {
+      if (range !== null) {
+        itemDecodeFail(
+          at,
+          next,
+          `one source range beneath ${owner}, never two`,
+        );
+      }
+      range = decodeItemRange(at, next, detail[2]);
+      last = next;
+      continue;
+    }
+    if (label === "before" || label === "after") {
+      if ((label === "before" ? before : after) !== null) {
+        itemDecodeFail(
+          at,
+          next,
+          `one ${label} side beneath ${owner}, never two`,
+        );
+      }
+      const read = readOriginSide(at, next, detail[2], label);
+      if (label === "before") before = read.side;
+      else after = read.side;
+      last = read.last;
+      continue;
+    }
+    itemDecodeFail(
+      at,
+      next,
+      `beneath ${owner}, its source range \`range: <start>-<end>\` or its sides ` +
+        "`before: …` and `after: …` — no other line stands there",
+    );
+  }
+  return { range, before, after, last };
+}
+
+/**
+ * A recorded state's value (the module header): its entries separated by
+ * `; `, each `<node>={<hash name>:<hash> …}` — the node recorded present,
+ * with its recorded hashes under 5.5's names, `{}` where none — or
+ * `<node>=absent`, the explicit absent marker (SPEC 10.4); `(none)` for a
+ * state recording no node.
+ */
+function decodeRecordedStateValue(
+  at: ItemReportLines,
+  index: number,
+  value: string | undefined,
+  field: string,
+): HumanRecordedEntry[] {
+  const layout =
+    `the recorded state's entries — \`<node>={<hash name>:<hash> …}\` or \`<node>=absent\`, ` +
+    "separated by `; ` (SPEC 10.2, 10.4)";
+  if (value === undefined || value.length === 0) {
+    itemDecodeFail(at, index, `${field}: ${layout}`);
+  }
+  if (NONE_WORD.test(value)) return [];
+  const entries: HumanRecordedEntry[] = [];
+  const seen = new Set<string>();
+  for (const part of value.split("; ")) {
+    const equals = part.lastIndexOf("=");
+    if (equals <= 0) {
+      itemDecodeFail(
+        at,
+        index,
+        `${field}: ${layout}, got the entry ${JSON.stringify(part)}`,
+      );
+    }
+    const node = part.slice(0, equals);
+    const state = part.slice(equals + 1);
+    if (seen.has(node)) {
+      itemDecodeFail(
+        at,
+        index,
+        `${field}: each node recorded once — ${JSON.stringify(node)} is recorded twice, so which ` +
+          "entry is its is ambiguous",
+      );
+    }
+    seen.add(node);
+    if (ABSENT_MARKER_WORD.test(state)) {
+      entries.push({ node, present: false, absentMarker: true, hashes: {} });
+      continue;
+    }
+    if (!state.startsWith("{") || !state.endsWith("}")) {
+      itemDecodeFail(
+        at,
+        index,
+        `${field}: ${layout}, got the entry ${JSON.stringify(part)}`,
+      );
+    }
+    const inner = state.slice(1, -1);
+    const hashes: { -readonly [Name in keyof NodeHashes]?: string } = {};
+    for (const token of inner.length === 0 ? [] : inner.split(" ")) {
+      const colon = token.indexOf(":");
+      const name = colon === -1 ? token : token.slice(0, colon);
+      const hash = colon === -1 ? "" : token.slice(colon + 1);
+      const known = NODE_HASH_NAMES.find((candidate) => candidate === name);
+      if (known === undefined || hash.length === 0) {
+        itemDecodeFail(
+          at,
+          index,
+          `${field}: each recorded hash \`<hash name>:<hash>\` under one of 5.5's names ` +
+            `(${NODE_HASH_NAMES.join(", ")}), got ${JSON.stringify(token)} in the entry of ` +
+            JSON.stringify(node),
+        );
+      }
+      if (hashes[known] !== undefined) {
+        itemDecodeFail(
+          at,
+          index,
+          `${field}: each hash recorded once per node — ${known} is recorded twice for ` +
+            `${JSON.stringify(node)}, so which is its is ambiguous`,
+        );
+      }
+      hashes[known] = hash;
+    }
+    entries.push({ node, present: true, absentMarker: false, hashes });
+  }
+  return entries;
+}
+
+/** The fields an item report prints at its first level (the module header). */
+const ITEM_FIELD_LABELS: readonly string[] = [
+  "kind",
+  "status",
+  "blocked",
+  "blockedBy",
+  "reason",
+  "note",
+  "scope",
+  "context",
+  "origin",
+  "baseline",
+  "current",
+];
+
+/** Decode an item report's lines, the item line first (the module header). */
+function decodeItemLines(at: ItemReportLines): HumanItemReport {
+  const opening = ITEM_LINE.exec(at.lines[0] ?? "");
+  if (opening === null) {
+    itemDecodeFail(
+      at,
+      0,
+      "the item line `item <id>` opening the item's report (SPEC 10.2, 10.7)",
+    );
+  }
+  const printed = new Map<string, number>();
+  let kind: ItemKind | null = null;
+  let status: ItemStatus | null = null;
+  let blocked: boolean | null = null;
+  let blockedBy: string[] | null = null;
+  let reason: string | null = null;
+  let note: string | null = null;
+  let scope: HumanItemNode | null = null;
+  let context: HumanItemNode[] | null = null;
+  let origin: HumanOriginEntry[] | null = null;
+  let baseline: HumanRecordedState | null = null;
+  let current: HumanRecordedState | null = null;
+  for (let index = 1; index < at.lines.length; index += 1) {
+    const text = at.lines[index]!;
+    if (text.length === 0) {
+      itemDecodeFail(at, index, "a field line, never an empty line");
+    }
+    const field = ITEM_FIELD_LINE.exec(text);
+    if (field === null) {
+      itemDecodeFail(
+        at,
+        index,
+        text.startsWith("   ")
+          ? "a line beneath a scope, a context entry, or an origin entry — this one stands " +
+              "beneath none, or holds neither a source range, a text, nor an origin side"
+          : "a field line `  <label>: <value>` at the item's first level — a line at the " +
+              "margin stands only first, `item <id>`, or continues a reason or a note a line " +
+              "feed broke",
+      );
+    }
+    const label = field[1]!;
+    const value = field[2];
+    if (!ITEM_FIELD_LABELS.includes(label)) {
+      itemDecodeFail(
+        at,
+        index,
+        `a field the item's report prints — ${ITEM_FIELD_LABELS.join(", ")} — got the label ` +
+          JSON.stringify(label),
+      );
+    }
+    const earlier = printed.get(label);
+    if (earlier !== undefined) {
+      itemDecodeFail(
+        at,
+        index,
+        `the field ${label} printed once — line ${String(earlier)} prints it already, so which ` +
+          "is the item's is ambiguous",
+      );
+    }
+    printed.set(label, index + 1);
+    switch (label) {
+      case "kind": {
+        const spelled =
+          value === undefined
+            ? undefined
+            : spelledEntry(value, ITEM_KIND_SPELLINGS, "item kinds");
+        if (spelled === undefined) {
+          itemDecodeFail(
+            at,
+            index,
+            `the item's kind, one SPEC 10.4–10.7 names (${ITEM_KINDS.join(", ")}), got ` +
+              JSON.stringify(value ?? ""),
+          );
+        }
+        kind = spelled;
+        break;
+      }
+      case "status": {
+        const spelled =
+          value === undefined
+            ? undefined
+            : spelledEntry(value, ITEM_STATUS_SPELLINGS, "item statuses");
+        if (spelled === undefined) {
+          itemDecodeFail(
+            at,
+            index,
+            `the item's status, one SPEC 10.3 lists (${ITEM_STATUSES.join(", ")}), got ` +
+              JSON.stringify(value ?? ""),
+          );
+        }
+        status = spelled;
+        break;
+      }
+      case "blocked": {
+        if (value === undefined || !BOOLEAN_WORD.test(value)) {
+          itemDecodeFail(
+            at,
+            index,
+            "the item's blocked state, `blocked: true` or `blocked: false` (SPEC 10.3)",
+          );
+        }
+        blocked = value.toLowerCase() === "true";
+        break;
+      }
+      case "blockedBy": {
+        if (value === undefined || value.length === 0) {
+          itemDecodeFail(
+            at,
+            index,
+            "the item's blockers, `blockedBy: <id>, …` or `blockedBy: (none)` (SPEC 10.2)",
+          );
+        }
+        if (NONE_WORD.test(value)) {
+          blockedBy = [];
+          break;
+        }
+        const ids = value.split(", ");
+        if (ids.some((id) => id.length === 0)) {
+          itemDecodeFail(
+            at,
+            index,
+            "the item's blockers, `blockedBy: <id>, …`, each a non-empty item id (SPEC 10.2)",
+          );
+        }
+        blockedBy = ids;
+        break;
+      }
+      case "reason":
+      case "note": {
+        // A line feed the free text holds, printed as it stands, breaks it:
+        // each following line at the margin continues it (the module header).
+        let joined = value ?? "";
+        while (
+          index + 1 < at.lines.length &&
+          !at.lines[index + 1]!.startsWith(" ")
+        ) {
+          index += 1;
+          joined = `${joined}\n${at.lines[index]!}`;
+        }
+        if (label === "reason") reason = joined;
+        else note = joined;
+        break;
+      }
+      case "scope": {
+        const presented = decodePresentedNode(at, index, value, "the scope");
+        const details = readItemNodeDetails(
+          at,
+          index,
+          `the scope node ${JSON.stringify(presented.node)}`,
+        );
+        scope = {
+          ...presented,
+          range: details.range,
+          value: details.value,
+          line: index + 1,
+          text,
+        };
+        index = details.last;
+        break;
+      }
+      case "context": {
+        if (value !== undefined) {
+          if (!NONE_WORD.test(value)) {
+            itemDecodeFail(
+              at,
+              index,
+              "`context:` with its entries beneath it, or `context: (none)` (SPEC 10.7)",
+            );
+          }
+          context = [];
+          break;
+        }
+        const entries: HumanItemNode[] = [];
+        while (index + 1 < at.lines.length) {
+          const entry = NODE_DETAIL_LINE.exec(at.lines[index + 1]!);
+          if (entry === null || entry[1] !== "-") break;
+          index += 1;
+          const presented = decodePresentedNode(
+            at,
+            index,
+            entry[2],
+            "a context entry",
+          );
+          const details = readItemNodeDetails(
+            at,
+            index,
+            `the context entry ${JSON.stringify(presented.node)}`,
+          );
+          entries.push({
+            ...presented,
+            range: details.range,
+            value: details.value,
+            line: index + 1,
+            text: at.lines[index]!,
+          });
+          index = details.last;
+        }
+        if (entries.length === 0) {
+          itemDecodeFail(
+            at,
+            index,
+            "`context:` with its entries beneath it, `    -: <node> (present|absent)`, or " +
+              "`context: (none)` (SPEC 10.7) — no entry stands beneath this one",
+          );
+        }
+        context = entries;
+        break;
+      }
+      case "origin": {
+        if (value !== undefined) {
+          if (!NONE_WORD.test(value)) {
+            itemDecodeFail(
+              at,
+              index,
+              "`origin:` with its entries beneath it, or `origin: (none)` (SPEC 10.7)",
+            );
+          }
+          origin = [];
+          break;
+        }
+        const entries: HumanOriginEntry[] = [];
+        while (index + 1 < at.lines.length) {
+          const entry = ORIGIN_ENTRY_LINE.exec(at.lines[index + 1]!);
+          if (entry === null) break;
+          index += 1;
+          const node = entry[1]!;
+          const details = readOriginEntry(at, index, node);
+          entries.push({
+            node,
+            range: details.range,
+            before: details.before,
+            after: details.after,
+            line: index + 1,
+            text: at.lines[index]!,
+          });
+          index = details.last;
+        }
+        if (entries.length === 0) {
+          itemDecodeFail(
+            at,
+            index,
+            "`origin:` with its entries beneath it, `  - <node>`, or `origin: (none)` (SPEC " +
+              "10.7) — no entry stands beneath this one",
+          );
+        }
+        origin = entries;
+        break;
+      }
+      default: {
+        const state: HumanRecordedState = {
+          entries: decodeRecordedStateValue(at, index, value, label),
+          line: index + 1,
+          text,
+        };
+        if (label === "baseline") baseline = state;
+        else current = state;
+        break;
+      }
+    }
+  }
+  return {
+    id: opening[1]!,
+    kind,
+    status,
+    blocked,
+    blockedBy,
+    reason,
+    note,
+    scope,
+    context,
+    origin,
+    baseline,
+    current,
+    text: at.report,
+  };
+}
+
+/** The decode of an item report's bytes, under its guard. */
+function decodeItemReportBytes(
+  bytes: Uint8Array,
+  context: string | undefined,
+): HumanItemReport {
+  const adapter = adapterName("review item report", context);
+  const report = utf8Text(bytes, adapter, "report");
+  const lines = reportLines(report);
+  if (lines.length === 0) {
+    decodeFail(
+      adapter,
+      "the report",
+      "the item's report, `item <id>` and its fields (SPEC 10.7) — never an empty report",
+      report,
+    );
+  }
+  return decodeItemLines({ adapter, report, lines });
+}
+
+/**
+ * Decode a human `review show <name> <item-id>` report — its standard
+ * output without `--json` (SPEC 10.7, 12.0) — onto the item model (the
+ * module header's layout): the item's id and every field it prints. Takes a
+ * run (its stdout bytes) or the report's bytes. Fails diagnosed on bytes
+ * that are not valid UTF-8, an empty report or line, a first line other
+ * than `item <id>`, a field printed twice or unknown, a kind, status, or
+ * blocked state outside its vocabulary, a node without its presence, a
+ * malformed range, a text block without its lines, an origin side without
+ * its presence, a recorded entry without its hashes or marker or holding a
+ * hash under no name of 5.5, and every line outside the layout. A harness
+ * step under its own guard (TEST-SPEC S-3).
+ */
+export function decodeHumanItemReport(
+  output: RunResult | Uint8Array,
+  context?: string,
+): HumanItemReport {
+  const bytes = output instanceof Uint8Array ? output : output.stdoutBytes;
+  const step =
+    output instanceof Uint8Array
+      ? "decoding a human review item report (decodeHumanItemReport)"
+      : `decoding the human review item report of ${output.commandLine} (decodeHumanItemReport)`;
+  return guardSyncStep(step, () => decodeItemReportBytes(bytes, context));
+}
+
+/** The decode of a `next` report's bytes, under its guard. */
+function decodeNextReportBytes(
+  bytes: Uint8Array,
+  context: string | undefined,
+): HumanNextReport {
+  const adapter = adapterName("review next report", context);
+  const report = utf8Text(bytes, adapter, "report");
+  const lines = reportLines(report);
+  if (lines.length === 0) {
+    decodeFail(
+      adapter,
+      "the report",
+      "the item `next` returns, or the report that the session is fully resolved (SPEC " +
+        "10.7) — never an empty report",
+      report,
+    );
+  }
+  const first = lines[0]!;
+  if (!ITEM_LINE.test(first)) {
+    if (lines.length === 1 && FULLY_RESOLVED_PHRASE.test(first)) {
+      return { fullyResolved: true, item: null, text: report };
+    }
+    decodeFail(
+      adapter,
+      atLine(1, first),
+      "the item line `item <id>` opening the item `next` returns, or one line reporting the " +
+        "session fully resolved — its phrase `fully resolved` — alone (SPEC 10.7)",
+      report,
+    );
+  }
+  return {
+    fullyResolved: false,
+    item: decodeItemLines({ adapter, report, lines }),
+    text: report,
+  };
+}
+
+/**
+ * Decode a human `review next <name>` report — its standard output without
+ * `--json` (SPEC 10.7, 12.0) — onto the next model (the module header's
+ * layout): the fully-resolved report, one line holding the phrase `fully
+ * resolved`, or the item returned, decoded as `decodeHumanItemReport`
+ * decodes an item. Takes a run (its stdout bytes) or the report's bytes.
+ * Fails diagnosed on bytes that are not valid UTF-8, an empty report, a
+ * report that is neither, and every failure of the item decode. A harness
+ * step under its own guard (TEST-SPEC S-3).
+ */
+export function decodeHumanNextReport(
+  output: RunResult | Uint8Array,
+  context?: string,
+): HumanNextReport {
+  const bytes = output instanceof Uint8Array ? output : output.stdoutBytes;
+  const step =
+    output instanceof Uint8Array
+      ? "decoding a human review next report (decodeHumanNextReport)"
+      : `decoding the human review next report of ${output.commandLine} (decodeHumanNextReport)`;
+  return guardSyncStep(step, () => decodeNextReportBytes(bytes, context));
+}
+
 // --- the comparisons with the --json twin ---------------------------------------------
 
 /**
@@ -3754,5 +4740,492 @@ export function assertHumanSessionStatusReportCarries(
 ): HumanSessionStatusReport {
   const decoded = decodeHumanSessionStatusReport(human, context);
   assertHumanSessionStatusCarries(decoded, json, context);
+  return decoded;
+}
+
+/** A source range, rendered for a diagnosis. */
+function describeItemRange(range: SourceRange | null | undefined): string {
+  return range === null || range === undefined
+    ? "no source range"
+    : `the source range ${String(range.start)}-${String(range.end)}`;
+}
+
+/** A text quoted for a diagnosis, bounded — the empty text as `""`. */
+function quotedText(text: string): string {
+  return text.length === 0 ? '""' : excerpt(text);
+}
+
+/** A text value, rendered for a diagnosis. */
+function describeItemText(value: string | null | undefined): string {
+  return value === null || value === undefined
+    ? "no text"
+    : `the text ${quotedText(value)}`;
+}
+
+/** Whether two source ranges are the same — or both absent. */
+function sameItemRange(
+  json: SourceRange | undefined,
+  human: SourceRange | null,
+): boolean {
+  if (json === undefined || human === null) {
+    return json === undefined && human === null;
+  }
+  return json.start === human.start && json.end === human.end;
+}
+
+/** A presence, rendered for a diagnosis. */
+function presenceWord(present: boolean): string {
+  return present ? "present" : "absent";
+}
+
+/**
+ * What the human item report omits or changes of the fields `next` and
+ * `show` both carry outside `next --json`'s self-contained payload (the
+ * module header): the id, kind, status, blocked state, the blockers as a
+ * set (10.7 fixes no order), the note, and the reason's presence — its
+ * wording informational, never compared (SPEC 10.2; H-3).
+ */
+function itemFieldProblems(json: ReviewItem, human: HumanItemReport): string[] {
+  const problems: string[] = [];
+  if (human.id !== json.id) {
+    problems.push(
+      `the item line names the item ${JSON.stringify(human.id)} where the --json twin's id is ` +
+        JSON.stringify(json.id),
+    );
+  }
+  if (human.kind === null) {
+    problems.push(
+      `the report prints no kind where the --json twin's is ${json.kind} (SPEC 10.2)`,
+    );
+  } else if (human.kind !== json.kind) {
+    problems.push(
+      `the report prints the kind ${human.kind} where the --json twin's is ${json.kind}`,
+    );
+  }
+  if (human.status === null) {
+    problems.push(
+      `the report prints no status where the --json twin's is ${json.status} (SPEC 10.2, 10.3)`,
+    );
+  } else if (human.status !== json.status) {
+    problems.push(
+      `the report prints the status ${human.status} where the --json twin's is ${json.status} ` +
+        "(read-time invalidation applied, SPEC 10.4)",
+    );
+  }
+  if (human.blocked === null) {
+    problems.push(
+      `the report prints no blocked state where the --json twin reports the item ` +
+        `${json.blocked ? "blocked" : "unblocked"} (SPEC 10.3)`,
+    );
+  } else if (human.blocked !== json.blocked) {
+    problems.push(
+      `the report prints the item ${human.blocked ? "blocked" : "unblocked"} where the --json ` +
+        `twin reports it ${json.blocked ? "blocked" : "unblocked"} (SPEC 10.3)`,
+    );
+  }
+  const printed = new Set(human.blockedBy ?? []);
+  const expected = new Set(json.blockedBy);
+  for (const id of expected) {
+    if (!printed.has(id)) {
+      problems.push(
+        `the blocker ${JSON.stringify(id)} is missing — ` +
+          (human.blockedBy === null
+            ? "the report prints no blockedBy line"
+            : "the report's blockedBy line lists no such id") +
+          " (SPEC 10.2: blockedBy, a set — 10.7 fixes no order)",
+      );
+    }
+  }
+  for (const id of printed) {
+    if (!expected.has(id)) {
+      problems.push(
+        `the report lists the blocker ${JSON.stringify(id)}, which the --json twin's blockedBy lacks`,
+      );
+    }
+  }
+  if (human.reason === null || human.reason.length === 0) {
+    problems.push(
+      "the report prints no reason where the --json twin carries one (SPEC 10.2: every item " +
+        "carries its reason — informational wording, so its presence alone is asked, never its " +
+        "text)",
+    );
+  }
+  const jsonNote = json.note ?? null;
+  if (jsonNote !== human.note) {
+    problems.push(
+      jsonNote === null
+        ? `the report prints the note ${quotedText(human.note ?? "")}, which the --json twin ` +
+            "lacks (SPEC 10.2, 10.7: no note is set)"
+        : human.note === null
+          ? `the note ${quotedText(jsonNote)} is missing — the report prints no note line ` +
+            "(SPEC 10.2, 10.7)"
+          : `the report prints the note ${quotedText(human.note)} where the --json twin's is ` +
+            quotedText(jsonNote),
+    );
+  }
+  return problems;
+}
+
+/**
+ * What the human report's presentation of one payload node — the scope
+ * node or a context entry — omits or changes against the --json twin's:
+ * its presence (SPEC 10.4, 10.7), its source range (1.7), and its text
+ * value (1.6, 10.7), each present on neither side or equal on both.
+ */
+function itemNodeProblems(
+  json: NodeTextState,
+  human: HumanItemNode,
+  what: string,
+): string[] {
+  const where = `line ${String(human.line)} (${what} ${JSON.stringify(json.node)})`;
+  const problems: string[] = [];
+  if (human.present !== json.present) {
+    problems.push(
+      `${where} presents the node ${presenceWord(human.present)} where the --json twin ` +
+        `presents it ${presenceWord(json.present)} (SPEC 10.4, 10.7)`,
+    );
+  }
+  if (!sameItemRange(json.sourceRange, human.range)) {
+    problems.push(
+      `${where} prints ${describeItemRange(human.range)} where the --json twin carries ` +
+        `${describeItemRange(json.sourceRange)} (SPEC 1.7, 10.7)`,
+    );
+  }
+  if ((json.text ?? null) !== human.value) {
+    problems.push(
+      `${where} prints ${describeItemText(human.value)} where the --json twin carries ` +
+        `${describeItemText(json.text)} (SPEC 1.6, 10.7)`,
+    );
+  }
+  return problems;
+}
+
+/**
+ * What the human report's origin entry omits or changes of one side of the
+ * --json twin's before/after pair: its presence and the node's own text
+ * there, none on an absent side (SPEC 10.7).
+ */
+function originSideProblems(
+  json: OriginTextSide,
+  human: HumanOriginSide | null,
+  side: "before" | "after",
+  where: string,
+): string[] {
+  const expected = json.present ? json.text : null;
+  if (human === null) {
+    return [
+      `${where} prints no ${side} side where the --json twin's is ${presenceWord(json.present)}` +
+        (json.present ? `, with ${describeItemText(expected)}` : "") +
+        " (SPEC 10.7: origin text is a before/after pair)",
+    ];
+  }
+  const problems: string[] = [];
+  if (human.present !== json.present) {
+    problems.push(
+      `${where} prints the ${side} side ${presenceWord(human.present)} where the --json twin's ` +
+        `is ${presenceWord(json.present)} (SPEC 10.7)`,
+    );
+  }
+  if (human.value !== expected) {
+    problems.push(
+      `${where} prints ${describeItemText(human.value)} on the ${side} side where the --json ` +
+        `twin carries ${describeItemText(expected)} (SPEC 1.6, 10.7)`,
+    );
+  }
+  return problems;
+}
+
+/** A recorded entry, rendered for a diagnosis. */
+function describeRecordedEntry(entry: {
+  readonly node: string;
+  readonly present: boolean;
+  readonly absentMarker: boolean;
+  readonly hashes: Readonly<Partial<NodeHashes>>;
+}): string {
+  const state = entry.absentMarker
+    ? "the explicit absent marker"
+    : `{${NODE_HASH_NAMES.filter((name) => entry.hashes[name] !== undefined)
+        .map((name) => `${name}:${entry.hashes[name]!}`)
+        .join(" ")}}`;
+  return `${JSON.stringify(entry.node)} (${presenceWord(entry.present)}, ${state})`;
+}
+
+/**
+ * What the human report's recorded state omits, changes, or lists beside
+ * the --json twin's (SPEC 10.2, 10.4; the module header): its entries
+ * matched by node, order free (10.7 fixes none), each one's presence, its
+ * absent marker, and its hash under each of 5.5's names.
+ */
+function recordedStateProblems(
+  json: readonly RecordedNodeEntry[],
+  human: HumanRecordedState | null,
+  field: "baseline" | "current",
+): string[] {
+  const { pairs, missing, extra } = matchByKey(
+    json,
+    human?.entries ?? [],
+    (entry) => entry.node,
+    (entry) => entry.node,
+  );
+  const problems: string[] = missing.map(
+    (entry) =>
+      `${field}: the recorded node ${describeRecordedEntry(entry)} is missing — ` +
+      (human === null
+        ? `the report prints no ${field} line`
+        : `line ${String(human.line)} records no entry for it`) +
+      " (SPEC 10.2, 10.4)",
+  );
+  for (const pair of pairs) {
+    const differs =
+      pair.json.present !== pair.human.present ||
+      pair.json.absentMarker !== pair.human.absentMarker ||
+      NODE_HASH_NAMES.some(
+        (name) => pair.json.hashes[name] !== pair.human.hashes[name],
+      );
+    if (differs) {
+      problems.push(
+        `line ${String(human!.line)} (${field}) records ${describeRecordedEntry(pair.human)} ` +
+          `where the --json twin records ${describeRecordedEntry(pair.json)} (SPEC 10.2, 10.4)`,
+      );
+    }
+  }
+  for (const entry of extra) {
+    problems.push(
+      `line ${String(human!.line)} (${field}) records ${describeRecordedEntry(entry)}, which ` +
+        `the --json twin's ${field} lacks`,
+    );
+  }
+  return problems;
+}
+
+/**
+ * What the human `show` report omits or changes of the --json twin's full
+ * item beyond the fields `next` shares (the module header): the scope
+ * node — its identity, presence, range, and text — each context entry and
+ * each origin entry, matched by node, order free (10.7 fixes no order), the
+ * `baseline` and `current` recorded states, and, where the twin carries
+ * them, the scope set beyond the scope root and the metadata pair, which
+ * the layout the adapter is fitted to holds no reading of.
+ */
+function itemPayloadProblems(
+  json: ReviewItem,
+  human: HumanItemReport,
+  context: string,
+): string[] {
+  const problems: string[] = [];
+  if (human.scope === null) {
+    problems.push(
+      `the report prints no scope where the --json twin's is ${JSON.stringify(json.scope.node)} ` +
+        "(SPEC 10.2, 10.7)",
+    );
+  } else if (human.scope.node !== json.scope.node) {
+    problems.push(
+      `line ${String(human.scope.line)} prints the scope node ${JSON.stringify(human.scope.node)} ` +
+        `where the --json twin's is ${JSON.stringify(json.scope.node)}`,
+    );
+  } else {
+    problems.push(
+      ...itemNodeProblems(json.scope, human.scope, "the scope node"),
+    );
+  }
+  const contextMatch = matchByKey(
+    json.context,
+    human.context ?? [],
+    (state) => state.node,
+    (entry) => entry.node,
+  );
+  for (const state of contextMatch.missing) {
+    problems.push(
+      `the context entry ${JSON.stringify(state.node)} (${presenceWord(state.present)}) is ` +
+        "missing — no context entry names it (SPEC 10.7: every context node)",
+    );
+  }
+  for (const pair of contextMatch.pairs) {
+    problems.push(
+      ...itemNodeProblems(pair.json, pair.human, "the context entry"),
+    );
+  }
+  for (const entry of contextMatch.extra) {
+    problems.push(
+      `line ${String(entry.line)} presents the context entry ${JSON.stringify(entry.node)}, ` +
+        "which the --json twin lacks",
+    );
+  }
+  const originMatch = matchByKey(
+    json.origin,
+    human.origin ?? [],
+    (entry) => entry.node,
+    (entry) => entry.node,
+  );
+  for (const entry of originMatch.missing) {
+    problems.push(
+      `the origin entry ${JSON.stringify(entry.node)} is missing — no origin entry names it ` +
+        "(SPEC 10.2, 10.7: every origin node)",
+    );
+  }
+  for (const pair of originMatch.pairs) {
+    const where = `line ${String(pair.human.line)} (the origin entry ${JSON.stringify(pair.json.node)})`;
+    if (!sameItemRange(pair.json.sourceRange, pair.human.range)) {
+      problems.push(
+        `${where} prints ${describeItemRange(pair.human.range)} where the --json twin carries ` +
+          `${describeItemRange(pair.json.sourceRange)} (SPEC 1.7, 10.7)`,
+      );
+    }
+    problems.push(
+      ...originSideProblems(
+        pair.json.before,
+        pair.human.before,
+        "before",
+        where,
+      ),
+      ...originSideProblems(pair.json.after, pair.human.after, "after", where),
+    );
+  }
+  for (const entry of originMatch.extra) {
+    problems.push(
+      `line ${String(entry.line)} presents the origin entry ${JSON.stringify(entry.node)}, ` +
+        "which the --json twin lacks",
+    );
+  }
+  for (const field of ["baseline", "current"] as const) {
+    problems.push(
+      ...recordedStateProblems(
+        decodeRecordedState(json, field, context),
+        human[field],
+        field,
+      ),
+    );
+  }
+  for (const state of json.scopeNodes ?? []) {
+    if (state.node === json.scope.node) continue;
+    problems.push(
+      `the --json twin's scope holds ${JSON.stringify(state.node)} beside the scope root, which ` +
+        "the report presents alone — the layout the adapter is fitted to prints no other scope " +
+        "node (SPEC 10.4, 10.7: every scope node)",
+    );
+  }
+  if (json.metadata !== undefined) {
+    problems.push(
+      "the --json twin carries the scope node's metadata pair (SPEC 10.7: a " +
+        "metadata-consistency item's payload; T10.7-13), which the report does not carry — the " +
+        "layout the adapter is fitted to prints none",
+    );
+  }
+  return problems;
+}
+
+/**
+ * Assert a decoded human `review show` report carries the information of
+ * its `--json` twin's decoded item (TEST-SPEC T12.0-15: "the full item with
+ * its text payload"; SPEC 10.2, 10.7; the module header's comparison): its
+ * id, kind, status, blocked state, blockers (a set), note, and a reason
+ * (its wording never compared); its scope node's identity, presence,
+ * source range, and text; each context entry's and each origin entry's,
+ * matched by node, order free — an origin entry's range and its before and
+ * after sides' presence and text; the `baseline` and `current` recorded
+ * states, entry by entry — each node's presence and hashes or absent marker
+ * (read from the twin through `decodeRecordedState`); and, where the twin
+ * carries them, the scope set beyond the scope root and the metadata pair.
+ * Fails diagnosed, naming every datum the human report omits, changes, or
+ * lists beside its twin's.
+ */
+export function assertHumanItemCarries(
+  human: HumanItemReport,
+  json: ReviewItem,
+  context: string,
+): void {
+  const problems = [
+    ...itemFieldProblems(json, human),
+    ...itemPayloadProblems(json, human, context),
+  ];
+  if (problems.length === 0) return;
+  fail(
+    `${context}: the human \`review show\` report does not carry the item its --json twin ` +
+      "carries (TEST-SPEC T12.0-15: the full item with its text payload — every 10.2 field " +
+      "and the payload of `next --json`, SPEC 10.7 — decoded by the human-report adapter, H-3; " +
+      "wording, layout, and order free):\n" +
+      `${problems.map((problem) => `- ${problem}`).join("\n")}\n` +
+      `Human report: ${excerpt(human.text)}`,
+  );
+}
+
+/**
+ * Decode a run's human `review show` report and assert it carries the
+ * information of its `--json` twin's decoded item (TEST-SPEC T12.0-15):
+ * `decodeHumanItemReport`, then `assertHumanItemCarries`. Returns the
+ * decoded report.
+ */
+export function assertHumanItemReportCarries(
+  human: RunResult,
+  json: ReviewItem,
+  context: string,
+): HumanItemReport {
+  const decoded = decodeHumanItemReport(human, context);
+  assertHumanItemCarries(decoded, json, context);
+  return decoded;
+}
+
+/**
+ * Assert a decoded human `review next` report carries the information of
+ * its `--json` twin's decoded report (TEST-SPEC T12.0-15: "the item
+ * returned, and the fully-resolved report"; SPEC 10.7; the module header's
+ * comparison): the session reported fully resolved exactly where the twin
+ * reports it so, and otherwise the item the twin returns — its id, kind,
+ * status, blocked state, blockers (a set), note, and a reason (its wording
+ * never compared). Not asked: `next --json`'s self-contained payload —
+ * scope, context, and origin nodes, their texts and ranges, the recorded
+ * states, a metadata pair — content SPEC 10.7 defines for the JSON form
+ * alone (T12.0-15). Fails diagnosed, naming every datum the human report
+ * omits or changes.
+ */
+export function assertHumanNextCarries(
+  human: HumanNextReport,
+  json: NextReport,
+  context: string,
+): void {
+  const why =
+    "(TEST-SPEC T12.0-15: the item returned, and the fully-resolved report — SPEC 10.7 — " +
+    "decoded by the human-report adapter, H-3; wording and layout free; `next --json`'s " +
+    "self-contained payload is the JSON form's alone)";
+  if (json.fullyResolved || json.item === undefined) {
+    if (human.fullyResolved) return;
+    fail(
+      `${context}: the human \`review next\` report presents the item ` +
+        `${JSON.stringify(human.item?.id ?? "")} where its --json twin reports the session ` +
+        `fully resolved, no item returned (SPEC 10.7: \`next\` reports the session fully ` +
+        `resolved in both human and --json output) ${why}\n` +
+        `Human report: ${excerpt(human.text)}`,
+    );
+  }
+  if (human.item === null) {
+    fail(
+      `${context}: the human \`review next\` report reports the session fully resolved where ` +
+        `its --json twin returns the item ${JSON.stringify(json.item.id)} ${why}\n` +
+        `Human report: ${excerpt(human.text)}`,
+    );
+  }
+  const problems = itemFieldProblems(json.item, human.item);
+  if (problems.length === 0) return;
+  fail(
+    `${context}: the human \`review next\` report does not carry the item its --json twin ` +
+      `returns ${why}:\n` +
+      `${problems.map((problem) => `- ${problem}`).join("\n")}\n` +
+      `Human report: ${excerpt(human.text)}`,
+  );
+}
+
+/**
+ * Decode a run's human `review next` report and assert it carries the
+ * information of its `--json` twin's decoded report (TEST-SPEC T12.0-15):
+ * `decodeHumanNextReport`, then `assertHumanNextCarries`. Returns the
+ * decoded report.
+ */
+export function assertHumanNextReportCarries(
+  human: RunResult,
+  json: NextReport,
+  context: string,
+): HumanNextReport {
+  const decoded = decodeHumanNextReport(human, context);
+  assertHumanNextCarries(decoded, json, context);
   return decoded;
 }

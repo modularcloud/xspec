@@ -252,13 +252,35 @@
 //   N and N.a precedes the body's first `build` (git staging invokes no
 //   product) and stays plain, as do each body's first workspace's initial
 //   `files` entries (T10.7-12's src/members.ts among them, judged
-//   well-formed by the workspace builder).
+//   well-formed by the workspace builder) — but T10.7-7's order-arm
+//   specs/T.mdx and T10.7-8's specs/X.mdx, records too
+//   (`T10_7_7_T_INITIAL`, `T10_7_8_X_KAY_V0`): T12.0-15 runs those
+//   stagings after its own body's first invocation (S-9's timing clause),
+//   and every record its stagings stage names it.
+// - T10.7-7's and T10.7-8's stagings are exported for T12.0-15
+//   (section-12.0-iv.ts), as section-10.7-i.ts exports T10.7-5's and
+//   T10.7-6's: `runT1077Reads(product, visit, prefix?)` hands each
+//   `review next s` read of T10.7-7's arms to `visit(workspace, read)` —
+//   `read.home` the home test's own read with its assertions and the human
+//   parity check, over the staging's own read where the staging needs the
+//   item it returns (the payload walk's, whose items it resolves), over a
+//   read of its own elsewhere — and `runT1078ShowReads(product, visit,
+//   prefix?, rest?)` each `review show s <item>` read of T10.7-8 (x.k's
+//   item, whose id the staging's own `next --json` read yields, and the
+//   root's), `rest` T10.7-8's continuation on the same workspace — the
+//   split, `export`, the unknown item IDs, and the invalidation — which
+//   T12.0-15 leaves out. T10.7-7 and T10.7-8 pass `read.home` through, so
+//   their own assertions run as before; T12.0-15 hands its human twins in
+//   their place. Staging premises (the order arm's item order, the empty
+//   session's emptiness, the payload arm's distinctness premises, the ids
+//   `status` yields) stay in the stagings.
 // - TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
 //   and timing clauses), every one well-formed: the configurations of the
 //   workspaces created after a body's first invocation — `SPECS_ONLY_CONFIG`
-//   (T10.7-7's empty-session arm, T10.7-9's (f), (g), audit-fixture, and Q
-//   workspaces, T10.7-12's split, joined-origin, provenance, and
-//   resolve-state sub-fixtures), `SPECS_CODE_CONFIG`
+//   (T10.7-7's empty-session arm, and T10.7-7's and T10.7-8's first
+//   workspaces where T12.0-15 runs their stagings, T10.7-9's (f), (g),
+//   audit-fixture, and Q workspaces, T10.7-12's split, joined-origin,
+//   provenance, and resolve-state sub-fixtures), `SPECS_CODE_CONFIG`
 //   (T10.7-7's payload arm), and `COVERAGE_ALL_CONFIG` (T10.7-12's
 //   coverage sub-fixture), each staged wherever that configuration is —
 //   and the code sources staged after one: T10.7-7's `src/next.ts`
@@ -322,7 +344,7 @@ import {
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T10.7-7/T10.7-9/T10.7-12 xspec.config.ts — one spec group",
+  "T10.7-7/T10.7-9/T10.7-12/T12.0-15 xspec.config.ts — one spec group",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -381,7 +403,7 @@ export default defineConfig({
 // Spec group plus a code group (SPEC 7.2) — the T10.7-12 matrix fixture needs
 // a `code-impact` item (an impacted code location, SPEC 9.2, 10.5).
 const SPECS_CODE_CONFIG = stagedTs(
-  "T10.7-7 xspec.config.ts — one spec group and the code group app",
+  "T10.7-7/T12.0-15 xspec.config.ts — one spec group and the code group app",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1144,20 +1166,27 @@ const N7_P = "specs/T.mdx#p";
 const N7_PA = "specs/T.mdx#p.a";
 const N7_PB = "specs/T.mdx#p.b";
 
-const N7_SOURCE = [
-  '<S id="p">',
-  "Pee own line.",
-  "",
-  '<S id="p.a">',
-  "Paa line.",
-  "</S>",
-  "",
-  '<S id="p.b">',
-  "Pab line.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+// The order arm's initial specs/T.mdx: T12.0-15 (section-12.0-iv.ts) runs
+// this staging after its body's first invocation, so it is a staged-source
+// record (helpers/staged-mdx.ts, S-9's timing clause) — the same expression,
+// moved into the record.
+const T10_7_7_T_INITIAL = stagedMdx(
+  "T10.7-7/T12.0-15 specs/T.mdx holding p, with p.a and p.b (the order arm's initial source)",
+  [
+    '<S id="p">',
+    "Pee own line.",
+    "",
+    '<S id="p.a">',
+    "Paa line.",
+    "</S>",
+    "",
+    '<S id="p.b">',
+    "Pab line.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // The full-resolution arm's added source (SPEC 10.7: full resolution
 // concerns the session's items alone): a spec file of its own holding one
@@ -1173,7 +1202,7 @@ const N7_ADDED_FILE = "specs/U.mdx";
 const N7_ADDED_ROOT = "specs/U.mdx";
 const N7_ADDED_U = "specs/U.mdx#u";
 const T10_7_7_U_ADDED = stagedMdx(
-  "T10.7-7 specs/U.mdx holding the one section u (the full-resolution arm's added source)",
+  "T10.7-7/T12.0-15 specs/U.mdx holding the one section u (the full-resolution arm's added source)",
   ['<S id="u">', "You line.", "</S>", ""].join("\n"),
 );
 
@@ -1200,11 +1229,11 @@ function n7PbSpec(kidText: string): string {
 // (helpers/staged-mdx.ts, S-9: judged before any product exists); the code
 // source beside them is a TypeScript record (`N7_CODE_SOURCE`).
 const T10_7_7_A2_KID_V0 = stagedMdx(
-  "T10.7-7 specs/A2.mdx with a.k's text at v0 (the payload arm's initial source)",
+  "T10.7-7/T12.0-15 specs/A2.mdx with a.k's text at v0 (the payload arm's initial source)",
   n7PbSpec("Kid line v0."),
 );
 const T10_7_7_A2_KID_V1 = stagedMdx(
-  "T10.7-7 specs/A2.mdx with a.k's text at v1 (the payload arm's reviewed edit)",
+  "T10.7-7/T12.0-15 specs/A2.mdx with a.k's text at v1 (the payload arm's reviewed edit)",
   n7PbSpec("Kid line v1."),
 );
 
@@ -1225,7 +1254,7 @@ const N7_CODE_UNIT_DECL = "function nextUnit() {\n  A.a.k;\n}";
 // code source is staged after its first `build`, so it is a TypeScript
 // staged-source record (module header), well-formed.
 const N7_CODE_SOURCE = stagedTs(
-  "T10.7-7 src/next.ts (the payload arm's impacted code location nextUnit)",
+  "T10.7-7/T12.0-15 src/next.ts (the payload arm's impacted code location nextUnit)",
   `${N7_CODE_BEFORE_UNIT}${N7_CODE_UNIT_DECL}\n`,
 );
 
@@ -1376,584 +1405,709 @@ async function assertHumanNextItem(
   );
 }
 
-const T10_7_7 = defineProductTest({
-  id: "T10.7-7",
-  title:
-    "`review next`: returns the first needing-review unblocked item in item order — in an audit session with blocked root and parent items it returns the first leaf, then the second, then moves backward in item order to the meanwhile-unblocked parent and root; when all items are resolved, and for a session with no items, it exits 0 and reports fully resolved in the human and `--json` forms with no item in the JSON payload; full resolution concerns the session's items alone — with every item resolved, a new spec source holding one section added leaves `next` reporting the session fully resolved in both forms, no item in the JSON payload, and once a resolved leaf item is re-resolved `updated` (the session re-derived) `next` returns the new section's item, `unresolved` and the first unblocked item needing review (every earlier item in `status`'s item order resolved or blocked); the `--json` payload is self-contained — scope text, context texts, origin before/after texts, source ranges for every present node, requirement node and present code location alike (scope, context, and origin entries; the code-impact scope's named-unit construct range byte-asserted against precomputed offsets) and none for absent nodes (after the code file's deletion the same item's scope presents identity and absence alone — no text, no range), and the recorded `baseline` and `current` hashes (asserted against distinct `query node` captures at the baseline and creation moments); and wherever `next --json` returns an item, the human `review next` at the same state exits 0 and names that item by its id (robust matching, H-3) (SPEC 1.7, 4.6, 9.2, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 12.0)",
-  run: async (product) => {
-    // --- arm 1: order walking and the fully-resolved report -----------------
-    // (continued on the same workspace by the full-resolution arm, once
-    // every item is resolved)
-    await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [N7_FILE]: N7_SOURCE },
-      async (workspace) => {
-        const prefix = "T10.7-7 order arm";
-        await buildOk(product, workspace, `${prefix} \`build\``);
-        await createAuditSession(product, workspace, "s", prefix);
+/**
+ * One `review next` read T10.7-7's staging reaches — the order arm's four
+ * items and its fully-resolved report, the full-resolution arm's
+ * fully-resolved report and the new section's item, the empty session's
+ * fully-resolved report, and the payload arm's four reads — handed to the
+ * staging's visitor at the state it reads: its label, the session it
+ * reads, and the home test's own `review next` read with its assertions
+ * and the human form's parity check (`home`; each payload-arm read's over
+ * the staging's own read, which yields the item the staging resolves next,
+ * every other read's over a read of its own). Exported for T12.0-15
+ * (section-12.0-iv.ts), which hands its human twin of the read in their
+ * place.
+ */
+export interface T1077Read {
+  readonly label: string;
+  readonly session: string;
+  readonly home: () => Promise<void>;
+}
 
-        // Item order (SPEC 10.6): root, p, p.a, p.b — with the root and p
-        // blocked by their children's items, so the first needing-review
-        // UNBLOCKED item is p.a's, not the root's (a product ignoring the
-        // blocked state fails here).
-        const initial = await sessionStatus(product, workspace, "s", prefix);
-        assertSameJson(
-          rowSequence(initial),
-          [
-            `subtree-coherence ${N7_FILE} unresolved`,
-            `subtree-coherence ${N7_P} unresolved`,
-            `subtree-coherence ${N7_PA} unresolved`,
-            `subtree-coherence ${N7_PB} unresolved`,
-          ],
-          `${prefix} staging premise: the audit items in item order (SPEC 10.6)`,
-        );
-        const idRoot = requireRow(
-          initial,
-          "subtree-coherence",
-          N7_FILE,
-          prefix,
-        ).id;
-        const idP = requireRow(initial, "subtree-coherence", N7_P, prefix).id;
-        const idPA = requireRow(initial, "subtree-coherence", N7_PA, prefix).id;
-        const idPB = requireRow(initial, "subtree-coherence", N7_PB, prefix).id;
+/** A visitor of T10.7-7's `review next` reads, each at the state it reads. */
+export type T1077ReadVisitor = (
+  workspace: TestWorkspace,
+  read: T1077Read,
+) => Promise<void>;
 
-        const expectNextId = async (
-          expected: string,
-          why: string,
-        ): Promise<void> => {
-          const item = requireNextItem(
-            await nextInSession(product, workspace, "s", `${prefix} ${why}`),
-            `${prefix} ${why}`,
+/**
+ * T10.7-7's staging, its `review next` reads handed to `visit` (exported for
+ * T12.0-15): the order arm — a workspace of `SPECS_ONLY_CONFIG` and
+ * specs/T.mdx (p holding p.a and p.b), built, the audit session s, whose
+ * item order `status` reads (the premise, yielding the ids) — its four
+ * items read in turn, each resolved after its read, then its fully-resolved
+ * report; continued by the full-resolution arm — specs/U.mdx added and
+ * built, the fully-resolved report again, then p.a's item re-resolved
+ * `updated` and the new section's item read; the empty-session arm — an
+ * audit session over no requirement node (the premise), its fully-resolved
+ * report; and the payload arm — a git-backed workspace of
+ * `SPECS_CODE_CONFIG` and specs/A2.mdx at v0, built and captured, a.k then
+ * edited and src/next.ts added, built and captured (the distinctness
+ * premises), the path-blocks session s created against the baseline, and
+ * its walk: a.k's item, then a's, then the code location's, each read by
+ * the staging (the item it resolves `no-change` before the next read), the
+ * code file then deleted and the workspace rebuilt, and the code
+ * location's item read again. `prefix` leads every staging step's
+ * diagnosis.
+ */
+export async function runT1077Reads(
+  product: ProductBinding,
+  visit: T1077ReadVisitor,
+  prefix = "T10.7-7",
+): Promise<void> {
+  // --- arm 1: order walking and the fully-resolved report -----------------
+  // (continued on the same workspace by the full-resolution arm, once
+  // every item is resolved)
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    { [N7_FILE]: T10_7_7_T_INITIAL },
+    async (workspace) => {
+      const orderPrefix = `${prefix} order arm`;
+      await buildOk(product, workspace, `${orderPrefix} \`build\``);
+      await createAuditSession(product, workspace, "s", orderPrefix);
+
+      // Item order (SPEC 10.6): root, p, p.a, p.b — with the root and p
+      // blocked by their children's items, so the first needing-review
+      // UNBLOCKED item is p.a's, not the root's (a product ignoring the
+      // blocked state fails here).
+      const initial = await sessionStatus(product, workspace, "s", orderPrefix);
+      assertSameJson(
+        rowSequence(initial),
+        [
+          `subtree-coherence ${N7_FILE} unresolved`,
+          `subtree-coherence ${N7_P} unresolved`,
+          `subtree-coherence ${N7_PA} unresolved`,
+          `subtree-coherence ${N7_PB} unresolved`,
+        ],
+        `${orderPrefix} staging premise: the audit items in item order (SPEC 10.6)`,
+      );
+      const idRoot = requireRow(
+        initial,
+        "subtree-coherence",
+        N7_FILE,
+        orderPrefix,
+      ).id;
+      const idP = requireRow(
+        initial,
+        "subtree-coherence",
+        N7_P,
+        orderPrefix,
+      ).id;
+      const idPA = requireRow(
+        initial,
+        "subtree-coherence",
+        N7_PA,
+        orderPrefix,
+      ).id;
+      const idPB = requireRow(
+        initial,
+        "subtree-coherence",
+        N7_PB,
+        orderPrefix,
+      ).id;
+
+      const nextRead = async (expected: string, why: string): Promise<void> => {
+        const label = `${orderPrefix} ${why}`;
+        await visit(workspace, {
+          label,
+          session: "s",
+          home: async () => {
+            const item = requireNextItem(
+              await nextInSession(product, workspace, "s", label),
+              label,
+            );
+            if (item.id !== expected) {
+              fail(
+                `${label}: \`next\` returns the first needing-review ` +
+                  `unblocked item in item order (SPEC 10.7); expected ` +
+                  `${expected}, got ${item.id}`,
+              );
+            }
+            // The human form at the same state names the item returned
+            // (T12.0-1, SPEC 12.0; the module header).
+            await assertHumanNextItem(product, workspace, "s", item, label);
+          },
+        });
+      };
+      const fullyResolvedRead = async (label: string): Promise<void> => {
+        await visit(workspace, {
+          label,
+          session: "s",
+          home: () =>
+            expectFullyResolvedBothForms(product, workspace, "s", `${label}:`),
+        });
+      };
+
+      await nextRead(
+        idPA,
+        "fresh session — the root's and p's items are blocked, so the " +
+          "first needing-review unblocked item is p.a's",
+      );
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        idPA,
+        "no-change",
+        `${orderPrefix} \`resolve s <p.a's item> --status no-change\``,
+      );
+      await nextRead(idPB, "after resolving p.a's item");
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        idPB,
+        "skipped",
+        `${orderPrefix} \`resolve s <p.b's item> --status skipped\``,
+      );
+      // p's item precedes p.a's and p.b's in item order and just became
+      // unblocked: next moves backward in item order — a product scanning
+      // forward from the last returned item fails here.
+      await nextRead(
+        idP,
+        "after resolving both leaves — p's item, earlier in item order, " +
+          "is now the first needing-review unblocked item",
+      );
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        idP,
+        "no-change",
+        `${orderPrefix} \`resolve s <p's item> --status no-change\``,
+      );
+      await nextRead(idRoot, "after resolving p's item");
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        idRoot,
+        "skipped",
+        `${orderPrefix} \`resolve s <root's item> --status skipped\``,
+      );
+
+      await fullyResolvedRead(`${orderPrefix}, all items resolved`);
+
+      // --- arm 1, continued: full resolution concerns the session's items
+      // alone (SPEC 10.7) ---------------------------------------------------
+      // The session holds every item resolved, none `updated`, so nothing
+      // has re-derived it (SPEC 10.5). A new spec source holding one
+      // section is added: it touches no existing item's recorded state or
+      // context set, while a re-derivation would generate items for its
+      // root and its section (SPEC 10.6). A change that would generate a
+      // new item enters the session only at its next re-derivation (SPEC
+      // 10.7), so `next` still reports the session fully resolved — a
+      // product deriving items at a read, or at `build`, fails here.
+      const fullPrefix = `${prefix} full-resolution arm`;
+      await workspace.file(N7_ADDED_FILE, T10_7_7_U_ADDED);
+      await buildOk(
+        product,
+        workspace,
+        `${fullPrefix} \`build\` with ${N7_ADDED_FILE} added`,
+      );
+      await fullyResolvedRead(
+        `${fullPrefix}, every item resolved and ${N7_ADDED_FILE} added — ` +
+          `a change that would generate a new item enters the session ` +
+          `only at its next re-derivation (SPEC 10.5, 10.7)`,
+      );
+
+      // A resolved leaf item re-resolved `updated` — `resolve` applies to
+      // any unblocked item regardless of its status (SPEC 10.7) — re-derives
+      // the session (SPEC 10.5): the new source's root and section enter
+      // it, each `unresolved` (SPEC 10.2), the root's item blocked by the
+      // section's (SPEC 10.6). `next` returns the new section's item, the
+      // first unblocked item needing review — a product whose `updated`
+      // resolve re-derives nothing fails here.
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        idPA,
+        "updated",
+        `${fullPrefix} \`resolve s <p.a's item> --status updated\` (the ` +
+          `leaf item the order arm resolved \`no-change\`, re-resolved)`,
+      );
+      const rederived = `${fullPrefix}, p.a's item re-resolved \`updated\``;
+      await visit(workspace, {
+        label: rederived,
+        session: "s",
+        home: async () => {
+          const added = requireNextItem(
+            await nextInSession(product, workspace, "s", rederived),
+            rederived,
           );
-          if (item.id !== expected) {
+          if (
+            added.kind !== "subtree-coherence" ||
+            added.scope.node !== N7_ADDED_U
+          ) {
             fail(
-              `${prefix} ${why}: \`next\` returns the first needing-review ` +
-                `unblocked item in item order (SPEC 10.7); expected ` +
-                `${expected}, got ${item.id}`,
+              `${rederived}: \`next\` returns the new section's item — the ` +
+                `subtree-coherence item scoped at ${N7_ADDED_U}, which the ` +
+                `re-derivation the \`updated\` resolve triggered added, the ` +
+                `first unblocked item needing review (the new root ` +
+                `${N7_ADDED_ROOT}'s item precedes it in item order, blocked by ` +
+                `it; SPEC 10.5, 10.6, 10.7); got ${added.kind} ` +
+                `${added.scope.node} (${added.id})`,
             );
           }
+          if (added.status !== "unresolved") {
+            fail(
+              `${rederived}: the new section's item entered the session at ` +
+                `the re-derivation, so \`next\` presents it \`unresolved\` ` +
+                `(SPEC 10.2: an item is created with status unresolved ` +
+                `wherever it enters the session); got ${added.status}`,
+            );
+          }
+          assertFirstUnblockedNeedingReview(
+            await sessionStatus(product, workspace, "s", rederived),
+            added.id,
+            `${rederived}, \`review status s --json\` at the same state`,
+          );
           // The human form at the same state names the item returned
           // (T12.0-1, SPEC 12.0; the module header).
+          await assertHumanNextItem(product, workspace, "s", added, rederived);
+        },
+      });
+    },
+  );
+
+  // --- arm 2: a session with no items reports fully resolved --------------
+  await withWorkspace(SPECS_ONLY_CONFIG, {}, async (workspace) => {
+    const emptyPrefix = `${prefix} empty-session arm`;
+    // The configured spec group matches no file: a zero-source group is a
+    // valid workspace (SPEC 7), and audit derives one item per requirement
+    // node — zero nodes, zero items (SPEC 10.6).
+    await buildOk(product, workspace, `${emptyPrefix} \`build\``);
+    await createAuditSession(product, workspace, "s", emptyPrefix);
+    const status = await sessionStatus(product, workspace, "s", emptyPrefix);
+    if (status.items.length !== 0) {
+      fail(
+        `${emptyPrefix} staging premise: an audit session over a workspace ` +
+          `with no requirement nodes holds no items (SPEC 10.6); got ` +
+          JSON.stringify(rowSequence(status)),
+      );
+    }
+    await visit(workspace, {
+      label: emptyPrefix,
+      session: "s",
+      home: () =>
+        expectFullyResolvedBothForms(
+          product,
+          workspace,
+          "s",
+          `${emptyPrefix}:`,
+        ),
+    });
+  });
+
+  // --- arm 3: the self-contained --json payload ----------------------------
+  // Source ranges are asserted for EVERY present payload node — requirement
+  // node and present code location alike — and for none of the absent ones
+  // (SPEC 10.7, 1.7): the walk below reaches the code-impact item, whose
+  // scope is first a present code location (named-unit construct range,
+  // precomputed byte offsets) and then, after the code file's deletion, an
+  // absent one (identity and absence alone — no text, no range).
+  await withWorkspace(
+    SPECS_CODE_CONFIG,
+    { [N7_PB_FILE]: T10_7_7_A2_KID_V0 },
+    async (workspace) => {
+      const payloadPrefix = `${prefix} payload arm`;
+      await workspace.gitInit();
+      const base = await workspace.gitCommitAll("baseline");
+      await buildOk(product, workspace, `${payloadPrefix} \`build\` at v0`);
+      const akAtBase = await queryNode(
+        product,
+        workspace,
+        N7_AK,
+        `${payloadPrefix} baseline capture`,
+      );
+
+      // v1: the reviewed edit, plus the code source whose named unit
+      // references a.k — the impacted location (SPEC 9.2) whose
+      // code-impact item the walk below reaches.
+      await workspace.file(N7_PB_FILE, T10_7_7_A2_KID_V1);
+      await workspace.file(N7_CODE_FILE, N7_CODE_SOURCE);
+      await buildOk(product, workspace, `${payloadPrefix} \`build\` at v1`);
+      const akAtCreate = await queryNode(
+        product,
+        workspace,
+        N7_AK,
+        `${payloadPrefix} creation capture`,
+      );
+      const aNow = await queryNode(
+        product,
+        workspace,
+        N7_A,
+        `${payloadPrefix} current capture of a`,
+      );
+      const rootNow = await queryNode(
+        product,
+        workspace,
+        N7_PB_ROOT,
+        `${payloadPrefix} current capture of the root`,
+      );
+      assertPairwiseDistinct(
+        [
+          ["the v0 subtreeHash of a.k", akAtBase.hashes.subtreeHash],
+          ["the v1 subtreeHash of a.k", akAtCreate.hashes.subtreeHash],
+          ["a.k's metadataHash", akAtBase.hashes.metadataHash],
+        ],
+        payloadPrefix,
+      );
+      if (akAtBase.ownText === akAtCreate.ownText) {
+        fail(
+          `${payloadPrefix} staging premise: the a.k edit must change its ` +
+            `own text (SPEC 1.6) so the origin pair's sides differ`,
+        );
+      }
+
+      await createBaseSession(product, workspace, base, "s", payloadPrefix);
+
+      // The changed leaf's subtree-coherence item is first in item order
+      // (depth-deepest first) and unblocked (SPEC 10.5). The staging's own
+      // read yields the item it resolves before the next read; the home
+      // test asserts over it.
+      const item = requireNextItem(
+        await nextInSession(product, workspace, "s", payloadPrefix),
+        payloadPrefix,
+      );
+      await visit(workspace, {
+        label: `${payloadPrefix} (the first item)`,
+        session: "s",
+        home: async () => {
+          if (item.kind !== "subtree-coherence" || item.scope.node !== N7_AK) {
+            fail(
+              `${payloadPrefix}: the first needing-review unblocked item is ` +
+                `a.k's subtree-coherence item — deepest first, and the ` +
+                `parent-consistency item is blocked (SPEC 10.5, 10.7); got ` +
+                `${item.kind} ${item.scope.node}`,
+            );
+          }
+
+          // Self-contained payload (SPEC 10.7): scope with subtree text and
+          // source range; context (the ancestor chain) with own texts and
+          // source ranges; origin with the before/after own-text pair AND
+          // the origin node's current source range (every present payload
+          // node carries one, SPEC 10.7, 1.7); the recorded baseline and
+          // current hashes.
+          assertPresentState(
+            item.scope,
+            {
+              node: N7_AK,
+              text: akAtCreate.subtreeText,
+              sourceRange: akAtCreate.sourceRange,
+            },
+            `${payloadPrefix} scope (subtree-coherence scope text is the ` +
+              `scope root's subtree text)`,
+          );
+          assertSameJson(
+            identitySet(item.context),
+            [N7_A, N7_PB_ROOT].sort(),
+            `${payloadPrefix}: the context is a.k's ancestor chain (SPEC 10.5)`,
+          );
+          assertPresentState(
+            requireContextEntry(item, N7_A, payloadPrefix),
+            { node: N7_A, text: aNow.ownText, sourceRange: aNow.sourceRange },
+            `${payloadPrefix} context entry a (ancestor-chain context ` +
+              `carries own text)`,
+          );
+          assertPresentState(
+            requireContextEntry(item, N7_PB_ROOT, payloadPrefix),
+            {
+              node: N7_PB_ROOT,
+              text: rootNow.ownText,
+              sourceRange: rootNow.sourceRange,
+            },
+            `${payloadPrefix} context entry root (ancestor-chain context ` +
+              `carries own text)`,
+          );
+          assertSameJson(
+            identitySet(item.origin),
+            [N7_AK],
+            `${payloadPrefix}: the origin is the changed node (SPEC 10.5)`,
+          );
+          const akOrigin = requireOriginEntry(item, N7_AK, payloadPrefix);
+          assertOriginPair(
+            akOrigin,
+            {
+              before: { present: true, text: akAtBase.ownText },
+              after: { present: true, text: akAtCreate.ownText },
+            },
+            `${payloadPrefix} origin pair for a.k — before from the item's ` +
+              `baseline state, after from the current graph`,
+          );
+          assertOriginRange(
+            akOrigin,
+            akAtCreate.sourceRange,
+            `${payloadPrefix} origin entry a.k`,
+          );
+          assertRecordedHolds(
+            item.baseline,
+            akAtBase.hashes.subtreeHash,
+            "the scope node's baseline subtreeHash",
+            `${payloadPrefix} payload \`baseline\``,
+          );
+          assertRecordedHolds(
+            item.baseline,
+            akAtBase.hashes.metadataHash,
+            "the scope node's baseline metadataHash",
+            `${payloadPrefix} payload \`baseline\``,
+          );
+          assertRecordedLacks(
+            item.baseline,
+            akAtCreate.hashes.subtreeHash,
+            "the creation-time subtreeHash",
+            `${payloadPrefix} payload \`baseline\``,
+          );
+          assertRecordedHolds(
+            item.current,
+            akAtCreate.hashes.subtreeHash,
+            "the scope node's creation-time subtreeHash",
+            `${payloadPrefix} payload \`current\``,
+          );
+          assertRecordedLacks(
+            item.current,
+            akAtBase.hashes.subtreeHash,
+            "the baseline subtreeHash",
+            `${payloadPrefix} payload \`current\``,
+          );
+          // The human form at the same state names the item returned
+          // (T12.0-1, SPEC 12.0; the module header) — at each of the arm's
+          // four reads, before anything mutates the session.
           await assertHumanNextItem(
             product,
             workspace,
             "s",
             item,
-            `${prefix} ${why}`,
+            payloadPrefix,
           );
-        };
+        },
+      });
 
-        await expectNextId(
-          idPA,
-          "fresh session — the root's and p's items are blocked, so the " +
-            "first needing-review unblocked item is p.a's",
-        );
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          idPA,
-          "no-change",
-          `${prefix} \`resolve s <p.a's item> --status no-change\``,
-        );
-        await expectNextId(idPB, "after resolving p.a's item");
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          idPB,
-          "skipped",
-          `${prefix} \`resolve s <p.b's item> --status skipped\``,
-        );
-        // p's item precedes p.a's and p.b's in item order and just became
-        // unblocked: next moves backward in item order — a product scanning
-        // forward from the last returned item fails here.
-        await expectNextId(
-          idP,
-          "after resolving both leaves — p's item, earlier in item order, " +
-            "is now the first needing-review unblocked item",
-        );
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          idP,
-          "no-change",
-          `${prefix} \`resolve s <p's item> --status no-change\``,
-        );
-        await expectNextId(idRoot, "after resolving p's item");
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          idRoot,
-          "skipped",
-          `${prefix} \`resolve s <root's item> --status skipped\``,
-        );
-
-        await expectFullyResolvedBothForms(
-          product,
-          workspace,
-          "s",
-          `${prefix}, all items resolved:`,
-        );
-
-        // --- arm 1, continued: full resolution concerns the session's items
-        // alone (SPEC 10.7) ---------------------------------------------------
-        // The session holds every item resolved, none `updated`, so nothing
-        // has re-derived it (SPEC 10.5). A new spec source holding one
-        // section is added: it touches no existing item's recorded state or
-        // context set, while a re-derivation would generate items for its
-        // root and its section (SPEC 10.6). A change that would generate a
-        // new item enters the session only at its next re-derivation (SPEC
-        // 10.7), so `next` still reports the session fully resolved — a
-        // product deriving items at a read, or at `build`, fails here.
-        const fullPrefix = "T10.7-7 full-resolution arm";
-        await workspace.file(N7_ADDED_FILE, T10_7_7_U_ADDED);
-        await buildOk(
-          product,
-          workspace,
-          `${fullPrefix} \`build\` with ${N7_ADDED_FILE} added`,
-        );
-        await expectFullyResolvedBothForms(
-          product,
-          workspace,
-          "s",
-          `${fullPrefix}, every item resolved and ${N7_ADDED_FILE} added — ` +
-            `a change that would generate a new item enters the session ` +
-            `only at its next re-derivation (SPEC 10.5, 10.7):`,
-        );
-
-        // A resolved leaf item re-resolved `updated` — `resolve` applies to
-        // any unblocked item regardless of its status (SPEC 10.7) — re-derives
-        // the session (SPEC 10.5): the new source's root and section enter
-        // it, each `unresolved` (SPEC 10.2), the root's item blocked by the
-        // section's (SPEC 10.6). `next` returns the new section's item, the
-        // first unblocked item needing review — a product whose `updated`
-        // resolve re-derives nothing fails here.
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          idPA,
-          "updated",
-          `${fullPrefix} \`resolve s <p.a's item> --status updated\` (the ` +
-            `leaf item the order arm resolved \`no-change\`, re-resolved)`,
-        );
-        const rederived = `${fullPrefix}, p.a's item re-resolved \`updated\``;
-        const added = requireNextItem(
-          await nextInSession(product, workspace, "s", rederived),
-          rederived,
-        );
-        if (
-          added.kind !== "subtree-coherence" ||
-          added.scope.node !== N7_ADDED_U
-        ) {
-          fail(
-            `${rederived}: \`next\` returns the new section's item — the ` +
-              `subtree-coherence item scoped at ${N7_ADDED_U}, which the ` +
-              `re-derivation the \`updated\` resolve triggered added, the ` +
-              `first unblocked item needing review (the new root ` +
-              `${N7_ADDED_ROOT}'s item precedes it in item order, blocked by ` +
-              `it; SPEC 10.5, 10.6, 10.7); got ${added.kind} ` +
-              `${added.scope.node} (${added.id})`,
+      // Walk to the code-impact item (item order: the two spec items
+      // precede the code location's, whose file path sorts after
+      // specs/…; `resolve --status no-change` never re-derives, SPEC
+      // 10.5). The parent's item, unblocked by the leaf's resolve, is
+      // returned next — its scope a present requirement node with own
+      // text and source range.
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        item.id,
+        "no-change",
+        `${payloadPrefix} \`resolve s <a.k's item> --status no-change\``,
+      );
+      const secondLabel = `${payloadPrefix} second`;
+      const second = requireNextItem(
+        await nextInSession(product, workspace, "s", secondLabel),
+        secondLabel,
+      );
+      await visit(workspace, {
+        label: secondLabel,
+        session: "s",
+        home: async () => {
+          if (
+            second.kind !== "parent-consistency" ||
+            second.scope.node !== N7_A
+          ) {
+            fail(
+              `${payloadPrefix}: after resolving a.k's item, the first ` +
+                `needing-review unblocked item is a's parent-consistency ` +
+                `item (SPEC 10.5, 10.7); got ${second.kind} ` +
+                `${second.scope.node}`,
+            );
+          }
+          assertPresentState(
+            second.scope,
+            { node: N7_A, text: aNow.ownText, sourceRange: aNow.sourceRange },
+            `${payloadPrefix} second scope (parent-consistency scope text ` +
+              `is the scope node's own text)`,
           );
-        }
-        if (added.status !== "unresolved") {
-          fail(
-            `${rederived}: the new section's item entered the session at ` +
-              `the re-derivation, so \`next\` presents it \`unresolved\` ` +
-              `(SPEC 10.2: an item is created with status unresolved ` +
-              `wherever it enters the session); got ${added.status}`,
+          await assertHumanNextItem(
+            product,
+            workspace,
+            "s",
+            second,
+            secondLabel,
           );
-        }
-        assertFirstUnblockedNeedingReview(
-          await sessionStatus(product, workspace, "s", rederived),
-          added.id,
-          `${rederived}, \`review status s --json\` at the same state`,
-        );
-        // The human form at the same state names the item returned
-        // (T12.0-1, SPEC 12.0; the module header).
-        await assertHumanNextItem(product, workspace, "s", added, rederived);
-      },
-    );
+        },
+      });
+      await resolveOk(
+        product,
+        workspace,
+        "s",
+        second.id,
+        "no-change",
+        `${payloadPrefix} \`resolve s <a's item> --status no-change\``,
+      );
 
-    // --- arm 2: a session with no items reports fully resolved --------------
-    await withWorkspace(SPECS_ONLY_CONFIG, {}, async (workspace) => {
-      const prefix = "T10.7-7 empty-session arm";
-      // The configured spec group matches no file: a zero-source group is a
-      // valid workspace (SPEC 7), and audit derives one item per requirement
-      // node — zero nodes, zero items (SPEC 10.6).
-      await buildOk(product, workspace, `${prefix} \`build\``);
-      await createAuditSession(product, workspace, "s", prefix);
-      const status = await sessionStatus(product, workspace, "s", prefix);
-      if (status.items.length !== 0) {
-        fail(
-          `${prefix} staging premise: an audit session over a workspace ` +
-            `with no requirement nodes holds no items (SPEC 10.6); got ` +
-            JSON.stringify(rowSequence(status)),
-        );
-      }
-      await expectFullyResolvedBothForms(product, workspace, "s", `${prefix}:`);
-    });
-
-    // --- arm 3: the self-contained --json payload ----------------------------
-    // Source ranges are asserted for EVERY present payload node — requirement
-    // node and present code location alike — and for none of the absent ones
-    // (SPEC 10.7, 1.7): the walk below reaches the code-impact item, whose
-    // scope is first a present code location (named-unit construct range,
-    // precomputed byte offsets) and then, after the code file's deletion, an
-    // absent one (identity and absence alone — no text, no range).
-    await withWorkspace(
-      SPECS_CODE_CONFIG,
-      { [N7_PB_FILE]: T10_7_7_A2_KID_V0 },
-      async (workspace) => {
-        const prefix = "T10.7-7 payload arm";
-        await workspace.gitInit();
-        const base = await workspace.gitCommitAll("baseline");
-        await buildOk(product, workspace, `${prefix} \`build\` at v0`);
-        const akAtBase = await queryNode(
-          product,
-          workspace,
-          N7_AK,
-          `${prefix} baseline capture`,
-        );
-
-        // v1: the reviewed edit, plus the code source whose named unit
-        // references a.k — the impacted location (SPEC 9.2) whose
-        // code-impact item the walk below reaches.
-        await workspace.file(N7_PB_FILE, T10_7_7_A2_KID_V1);
-        await workspace.file(N7_CODE_FILE, N7_CODE_SOURCE);
-        await buildOk(product, workspace, `${prefix} \`build\` at v1`);
-        const akAtCreate = await queryNode(
-          product,
-          workspace,
-          N7_AK,
-          `${prefix} creation capture`,
-        );
-        const aNow = await queryNode(
-          product,
-          workspace,
-          N7_A,
-          `${prefix} current capture of a`,
-        );
-        const rootNow = await queryNode(
-          product,
-          workspace,
-          N7_PB_ROOT,
-          `${prefix} current capture of the root`,
-        );
-        assertPairwiseDistinct(
-          [
-            ["the v0 subtreeHash of a.k", akAtBase.hashes.subtreeHash],
-            ["the v1 subtreeHash of a.k", akAtCreate.hashes.subtreeHash],
-            ["a.k's metadataHash", akAtBase.hashes.metadataHash],
-          ],
-          prefix,
-        );
-        if (akAtBase.ownText === akAtCreate.ownText) {
-          fail(
-            `${prefix} staging premise: the a.k edit must change its own ` +
-              `text (SPEC 1.6) so the origin pair's sides differ`,
+      // The code-impact item: its scope is a PRESENT code location —
+      // identity, presence, and the named unit's construct range,
+      // byte-asserted against precomputed offsets (review payloads are
+      // one of the two range-presenting outputs for code locations,
+      // SPEC 1.7, 4.6), with no text value; its context and origin nodes
+      // are present requirement nodes carrying their ranges.
+      const codeLabel = `${payloadPrefix} code item`;
+      const codeItem = requireNextItem(
+        await nextInSession(product, workspace, "s", codeLabel),
+        codeLabel,
+      );
+      await visit(workspace, {
+        label: codeLabel,
+        session: "s",
+        home: async () => {
+          if (
+            codeItem.kind !== "code-impact" ||
+            codeItem.scope.node !== N7_CODE
+          ) {
+            fail(
+              `${payloadPrefix}: after resolving both spec items, the ` +
+                `remaining needing-review item is the impacted location's ` +
+                `code-impact item (SPEC 9.2, 10.5, 10.7); got ` +
+                `${codeItem.kind} ${codeItem.scope.node}`,
+            );
+          }
+          const codeImpact = `${payloadPrefix} code-impact(${N7_CODE})`;
+          assertPresentState(
+            codeItem.scope,
+            { node: N7_CODE, text: undefined, sourceRange: N7_CODE_RANGE },
+            `${codeImpact} scope — a present code location enters the ` +
+              `payload with its source range (the construct binding the ` +
+              `unit's name, precomputed byte offsets) and no text (SPEC ` +
+              `10.7, 1.7, 4.6)`,
           );
-        }
-
-        await createBaseSession(product, workspace, base, "s", prefix);
-
-        // The changed leaf's subtree-coherence item is first in item order
-        // (depth-deepest first) and unblocked (SPEC 10.5).
-        const item = requireNextItem(
-          await nextInSession(product, workspace, "s", prefix),
-          prefix,
-        );
-        if (item.kind !== "subtree-coherence" || item.scope.node !== N7_AK) {
-          fail(
-            `${prefix}: the first needing-review unblocked item is a.k's ` +
-              `subtree-coherence item — deepest first, and the ` +
-              `parent-consistency item is blocked (SPEC 10.5, 10.7); got ` +
-              `${item.kind} ${item.scope.node}`,
+          assertSameJson(
+            identitySet(codeItem.context),
+            [N7_AK],
+            `${codeImpact}: context is the impact-edge target (SPEC 9.2, ` +
+              `10.5)`,
           );
-        }
-
-        // Self-contained payload (SPEC 10.7): scope with subtree text and
-        // source range; context (the ancestor chain) with own texts and
-        // source ranges; origin with the before/after own-text pair AND the
-        // origin node's current source range (every present payload node
-        // carries one, SPEC 10.7, 1.7); the recorded baseline and current
-        // hashes.
-        assertPresentState(
-          item.scope,
-          {
-            node: N7_AK,
-            text: akAtCreate.subtreeText,
-            sourceRange: akAtCreate.sourceRange,
-          },
-          `${prefix} scope (subtree-coherence scope text is the scope ` +
-            `root's subtree text)`,
-        );
-        assertSameJson(
-          identitySet(item.context),
-          [N7_A, N7_PB_ROOT].sort(),
-          `${prefix}: the context is a.k's ancestor chain (SPEC 10.5)`,
-        );
-        assertPresentState(
-          requireContextEntry(item, N7_A, prefix),
-          { node: N7_A, text: aNow.ownText, sourceRange: aNow.sourceRange },
-          `${prefix} context entry a (ancestor-chain context carries own text)`,
-        );
-        assertPresentState(
-          requireContextEntry(item, N7_PB_ROOT, prefix),
-          {
-            node: N7_PB_ROOT,
-            text: rootNow.ownText,
-            sourceRange: rootNow.sourceRange,
-          },
-          `${prefix} context entry root (ancestor-chain context carries own text)`,
-        );
-        assertSameJson(
-          identitySet(item.origin),
-          [N7_AK],
-          `${prefix}: the origin is the changed node (SPEC 10.5)`,
-        );
-        const akOrigin = requireOriginEntry(item, N7_AK, prefix);
-        assertOriginPair(
-          akOrigin,
-          {
-            before: { present: true, text: akAtBase.ownText },
-            after: { present: true, text: akAtCreate.ownText },
-          },
-          `${prefix} origin pair for a.k — before from the item's baseline ` +
-            `state, after from the current graph`,
-        );
-        assertOriginRange(
-          akOrigin,
-          akAtCreate.sourceRange,
-          `${prefix} origin entry a.k`,
-        );
-        assertRecordedHolds(
-          item.baseline,
-          akAtBase.hashes.subtreeHash,
-          "the scope node's baseline subtreeHash",
-          `${prefix} payload \`baseline\``,
-        );
-        assertRecordedHolds(
-          item.baseline,
-          akAtBase.hashes.metadataHash,
-          "the scope node's baseline metadataHash",
-          `${prefix} payload \`baseline\``,
-        );
-        assertRecordedLacks(
-          item.baseline,
-          akAtCreate.hashes.subtreeHash,
-          "the creation-time subtreeHash",
-          `${prefix} payload \`baseline\``,
-        );
-        assertRecordedHolds(
-          item.current,
-          akAtCreate.hashes.subtreeHash,
-          "the scope node's creation-time subtreeHash",
-          `${prefix} payload \`current\``,
-        );
-        assertRecordedLacks(
-          item.current,
-          akAtBase.hashes.subtreeHash,
-          "the baseline subtreeHash",
-          `${prefix} payload \`current\``,
-        );
-        // The human form at the same state names the item returned
-        // (T12.0-1, SPEC 12.0; the module header) — at each of the arm's
-        // four reads, before anything mutates the session.
-        await assertHumanNextItem(product, workspace, "s", item, prefix);
-
-        // Walk to the code-impact item (item order: the two spec items
-        // precede the code location's, whose file path sorts after
-        // specs/…; `resolve --status no-change` never re-derives, SPEC
-        // 10.5). The parent's item, unblocked by the leaf's resolve, is
-        // returned next — its scope a present requirement node with own
-        // text and source range.
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          item.id,
-          "no-change",
-          `${prefix} \`resolve s <a.k's item> --status no-change\``,
-        );
-        const second = requireNextItem(
-          await nextInSession(product, workspace, "s", `${prefix} second`),
-          `${prefix} second`,
-        );
-        if (
-          second.kind !== "parent-consistency" ||
-          second.scope.node !== N7_A
-        ) {
-          fail(
-            `${prefix}: after resolving a.k's item, the first needing-review ` +
-              `unblocked item is a's parent-consistency item (SPEC 10.5, ` +
-              `10.7); got ${second.kind} ${second.scope.node}`,
+          assertPresentState(
+            requireContextEntry(codeItem, N7_AK, codeImpact),
+            {
+              node: N7_AK,
+              text: akAtCreate.subtreeText,
+              sourceRange: akAtCreate.sourceRange,
+            },
+            `${codeImpact} context entry a.k — code-impact targets carry ` +
+              `subtree text, with the present node's source range`,
           );
-        }
-        assertPresentState(
-          second.scope,
-          { node: N7_A, text: aNow.ownText, sourceRange: aNow.sourceRange },
-          `${prefix} second scope (parent-consistency scope text is the ` +
-            `scope node's own text)`,
-        );
-        await assertHumanNextItem(
-          product,
-          workspace,
-          "s",
-          second,
-          `${prefix} second`,
-        );
-        await resolveOk(
-          product,
-          workspace,
-          "s",
-          second.id,
-          "no-change",
-          `${prefix} \`resolve s <a's item> --status no-change\``,
-        );
-
-        // The code-impact item: its scope is a PRESENT code location —
-        // identity, presence, and the named unit's construct range,
-        // byte-asserted against precomputed offsets (review payloads are
-        // one of the two range-presenting outputs for code locations,
-        // SPEC 1.7, 4.6), with no text value; its context and origin nodes
-        // are present requirement nodes carrying their ranges.
-        const codeItem = requireNextItem(
-          await nextInSession(product, workspace, "s", `${prefix} code item`),
-          `${prefix} code item`,
-        );
-        if (
-          codeItem.kind !== "code-impact" ||
-          codeItem.scope.node !== N7_CODE
-        ) {
-          fail(
-            `${prefix}: after resolving both spec items, the remaining ` +
-              `needing-review item is the impacted location's code-impact ` +
-              `item (SPEC 9.2, 10.5, 10.7); got ` +
-              `${codeItem.kind} ${codeItem.scope.node}`,
+          assertSameJson(
+            identitySet(codeItem.origin),
+            [N7_AK],
+            `${codeImpact}: origin is the originating node (SPEC 5.6, 10.5)`,
           );
-        }
-        const codeLabel = `${prefix} code-impact(${N7_CODE})`;
-        assertPresentState(
-          codeItem.scope,
-          { node: N7_CODE, text: undefined, sourceRange: N7_CODE_RANGE },
-          `${codeLabel} scope — a present code location enters the payload ` +
-            `with its source range (the construct binding the unit's name, ` +
-            `precomputed byte offsets) and no text (SPEC 10.7, 1.7, 4.6)`,
-        );
-        assertSameJson(
-          identitySet(codeItem.context),
-          [N7_AK],
-          `${codeLabel}: context is the impact-edge target (SPEC 9.2, 10.5)`,
-        );
-        assertPresentState(
-          requireContextEntry(codeItem, N7_AK, codeLabel),
-          {
-            node: N7_AK,
-            text: akAtCreate.subtreeText,
-            sourceRange: akAtCreate.sourceRange,
-          },
-          `${codeLabel} context entry a.k — code-impact targets carry ` +
-            `subtree text, with the present node's source range`,
-        );
-        assertSameJson(
-          identitySet(codeItem.origin),
-          [N7_AK],
-          `${codeLabel}: origin is the originating node (SPEC 5.6, 10.5)`,
-        );
-        const codeItemOrigin = requireOriginEntry(codeItem, N7_AK, codeLabel);
-        assertOriginPair(
-          codeItemOrigin,
-          {
-            before: { present: true, text: akAtBase.ownText },
-            after: { present: true, text: akAtCreate.ownText },
-          },
-          `${codeLabel} origin pair for a.k`,
-        );
-        assertOriginRange(
-          codeItemOrigin,
-          akAtCreate.sourceRange,
-          `${codeLabel} origin entry a.k`,
-        );
-        await assertHumanNextItem(
-          product,
-          workspace,
-          "s",
-          codeItem,
-          `${prefix} code item`,
-        );
-
-        // None for absent nodes (SPEC 10.7, 1.7): delete the code file —
-        // the location leaves the current graph while the workspace stays
-        // valid (a zero-source code group, SPEC 7) — and the still-
-        // unresolved item presents its scope ABSENT: identity and absence
-        // alone, no text (a code location has none and no recorded state
-        // supplies one), no source range; the present context and origin
-        // nodes keep their ranges. Reads never re-derive, so it is the
-        // same item (SPEC 10.5, 10.7).
-        await fsp.rm(workspace.path(N7_CODE_FILE));
-        await buildOk(
-          product,
-          workspace,
-          `${prefix} \`build\` after the deletion`,
-        );
-        const goneItem = requireNextItem(
-          await nextInSession(product, workspace, "s", `${prefix} deleted`),
-          `${prefix} deleted`,
-        );
-        if (goneItem.id !== codeItem.id) {
-          fail(
-            `${prefix}: deleting the code file re-derives nothing — \`next\` ` +
-              `still returns the same unresolved code-impact item (SPEC ` +
-              `10.5, 10.7); expected ${codeItem.id}, got ${goneItem.id} ` +
-              `(${goneItem.kind} ${goneItem.scope.node})`,
+          const codeItemOrigin = requireOriginEntry(
+            codeItem,
+            N7_AK,
+            codeImpact,
           );
-        }
-        const goneLabel = `${prefix} code-impact(${N7_CODE}) after deletion`;
-        assertAbsentState(
-          goneItem.scope,
-          { node: N7_CODE, text: undefined },
-          `${goneLabel} scope — a deleted code location's entry carries no ` +
-            `source range and no text (SPEC 10.7, 1.7)`,
-        );
-        assertPresentState(
-          requireContextEntry(goneItem, N7_AK, goneLabel),
-          {
-            node: N7_AK,
-            text: akAtCreate.subtreeText,
-            sourceRange: akAtCreate.sourceRange,
-          },
-          `${goneLabel} context entry a.k — still present, still ranged`,
-        );
-        const goneOrigin = requireOriginEntry(goneItem, N7_AK, goneLabel);
-        assertOriginPair(
-          goneOrigin,
-          {
-            before: { present: true, text: akAtBase.ownText },
-            after: { present: true, text: akAtCreate.ownText },
-          },
-          `${goneLabel} origin pair for a.k`,
-        );
-        assertOriginRange(
-          goneOrigin,
-          akAtCreate.sourceRange,
-          `${goneLabel} origin entry a.k`,
-        );
-        await assertHumanNextItem(
-          product,
-          workspace,
-          "s",
-          goneItem,
-          `${prefix} deleted`,
-        );
-      },
-    );
+          assertOriginPair(
+            codeItemOrigin,
+            {
+              before: { present: true, text: akAtBase.ownText },
+              after: { present: true, text: akAtCreate.ownText },
+            },
+            `${codeImpact} origin pair for a.k`,
+          );
+          assertOriginRange(
+            codeItemOrigin,
+            akAtCreate.sourceRange,
+            `${codeImpact} origin entry a.k`,
+          );
+          await assertHumanNextItem(
+            product,
+            workspace,
+            "s",
+            codeItem,
+            codeLabel,
+          );
+        },
+      });
+
+      // None for absent nodes (SPEC 10.7, 1.7): delete the code file —
+      // the location leaves the current graph while the workspace stays
+      // valid (a zero-source code group, SPEC 7) — and the still-
+      // unresolved item presents its scope ABSENT: identity and absence
+      // alone, no text (a code location has none and no recorded state
+      // supplies one), no source range; the present context and origin
+      // nodes keep their ranges. Reads never re-derive, so it is the
+      // same item (SPEC 10.5, 10.7).
+      await fsp.rm(workspace.path(N7_CODE_FILE));
+      await buildOk(
+        product,
+        workspace,
+        `${payloadPrefix} \`build\` after the deletion`,
+      );
+      const goneLabel = `${payloadPrefix} deleted`;
+      const goneItem = requireNextItem(
+        await nextInSession(product, workspace, "s", goneLabel),
+        goneLabel,
+      );
+      await visit(workspace, {
+        label: goneLabel,
+        session: "s",
+        home: async () => {
+          if (goneItem.id !== codeItem.id) {
+            fail(
+              `${payloadPrefix}: deleting the code file re-derives nothing ` +
+                `— \`next\` still returns the same unresolved code-impact ` +
+                `item (SPEC 10.5, 10.7); expected ${codeItem.id}, got ` +
+                `${goneItem.id} (${goneItem.kind} ${goneItem.scope.node})`,
+            );
+          }
+          const gone = `${payloadPrefix} code-impact(${N7_CODE}) after deletion`;
+          assertAbsentState(
+            goneItem.scope,
+            { node: N7_CODE, text: undefined },
+            `${gone} scope — a deleted code location's entry carries no ` +
+              `source range and no text (SPEC 10.7, 1.7)`,
+          );
+          assertPresentState(
+            requireContextEntry(goneItem, N7_AK, gone),
+            {
+              node: N7_AK,
+              text: akAtCreate.subtreeText,
+              sourceRange: akAtCreate.sourceRange,
+            },
+            `${gone} context entry a.k — still present, still ranged`,
+          );
+          const goneOrigin = requireOriginEntry(goneItem, N7_AK, gone);
+          assertOriginPair(
+            goneOrigin,
+            {
+              before: { present: true, text: akAtBase.ownText },
+              after: { present: true, text: akAtCreate.ownText },
+            },
+            `${gone} origin pair for a.k`,
+          );
+          assertOriginRange(
+            goneOrigin,
+            akAtCreate.sourceRange,
+            `${gone} origin entry a.k`,
+          );
+          await assertHumanNextItem(
+            product,
+            workspace,
+            "s",
+            goneItem,
+            goneLabel,
+          );
+        },
+      });
+    },
+  );
+}
+
+const T10_7_7 = defineProductTest({
+  id: "T10.7-7",
+  title:
+    "`review next`: returns the first needing-review unblocked item in item order — in an audit session with blocked root and parent items it returns the first leaf, then the second, then moves backward in item order to the meanwhile-unblocked parent and root; when all items are resolved, and for a session with no items, it exits 0 and reports fully resolved in the human and `--json` forms with no item in the JSON payload; full resolution concerns the session's items alone — with every item resolved, a new spec source holding one section added leaves `next` reporting the session fully resolved in both forms, no item in the JSON payload, and once a resolved leaf item is re-resolved `updated` (the session re-derived) `next` returns the new section's item, `unresolved` and the first unblocked item needing review (every earlier item in `status`'s item order resolved or blocked); the `--json` payload is self-contained — scope text, context texts, origin before/after texts, source ranges for every present node, requirement node and present code location alike (scope, context, and origin entries; the code-impact scope's named-unit construct range byte-asserted against precomputed offsets) and none for absent nodes (after the code file's deletion the same item's scope presents identity and absence alone — no text, no range), and the recorded `baseline` and `current` hashes (asserted against distinct `query node` captures at the baseline and creation moments); and wherever `next --json` returns an item, the human `review next` at the same state exits 0 and names that item by its id (robust matching, H-3) (SPEC 1.7, 4.6, 9.2, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 12.0)",
+  run: async (product) => {
+    await runT1077Reads(product, (_workspace, read) => read.home());
   },
 });
-
 // ---------------------------------------------------------------------------
 // T10.7-8 — show/export
 // ---------------------------------------------------------------------------
@@ -2147,129 +2301,204 @@ function e8Spec(kidText: string): string {
   ].join("\n");
 }
 
-// The x.k edit follows the body's first `build`, so it is a staged-source
-// record (helpers/staged-mdx.ts, S-9: judged before any product exists).
+// The workspace's initial specs/X.mdx: T12.0-15 (section-12.0-iv.ts) runs
+// this staging after its body's first invocation, so it is a staged-source
+// record (helpers/staged-mdx.ts, S-9's timing clause) — the same expression,
+// moved into the record. The x.k edit follows the body's first `build`, so
+// it is one too (S-9: judged before any product exists).
+const T10_7_8_X_KAY_V0 = stagedMdx(
+  "T10.7-8/T12.0-15 specs/X.mdx with x.k's text at v0 (the show/export fixture's initial source)",
+  e8Spec("Kay line v0."),
+);
 const T10_7_8_X_KAY_V1 = stagedMdx(
   "T10.7-8 specs/X.mdx with x.k's text at v1 (the edit invalidating its stored no-change)",
   e8Spec("Kay line v1."),
 );
+
+/**
+ * One `review show` read T10.7-8's staging reaches — x.k's item (the item
+ * `next` returns) and the root's item, blocked by x's — handed to the
+ * staging's visitor at the state it reads: its label, the session and the
+ * item it reads, and the home test's own `review show --json` read with its
+ * assertions and the human form's parity check (`home`). Exported for
+ * T12.0-15 (section-12.0-iv.ts), which hands its human twin of the read in
+ * their place.
+ */
+export interface T1078Read {
+  readonly label: string;
+  readonly session: string;
+  readonly itemId: string;
+  readonly home: () => Promise<void>;
+}
+
+/** A visitor of T10.7-8's `review show` reads, each at the state it reads. */
+export type T1078ReadVisitor = (
+  workspace: TestWorkspace,
+  read: T1078Read,
+) => Promise<void>;
+
+/** The ids of T10.7-8's three audit items, as `status` reports them. */
+interface T1078Ids {
+  readonly idRoot: string;
+  readonly idX: string;
+  readonly idXK: string;
+}
+
+/**
+ * T10.7-8's staging, its two `review show` reads handed to `visit`
+ * (exported for T12.0-15): a workspace of `SPECS_ONLY_CONFIG` and
+ * specs/X.mdx (x holding x.k), built; the audit session s; the item
+ * `next --json` returns, read by the staging, its id the first read's —
+ * x.k's item, the first needing-review unblocked item; then the items' ids
+ * read from `status` (the premise: one item per node), the root's the
+ * second read's. `rest` — T10.7-8's continuation on the same workspace:
+ * the split, `export`, the unknown item IDs, and the read-time
+ * invalidation — runs last where given. `prefix` leads every staging
+ * step's diagnosis.
+ */
+export async function runT1078ShowReads(
+  product: ProductBinding,
+  visit: T1078ReadVisitor,
+  prefix = "T10.7-8",
+  rest?: (workspace: TestWorkspace, ids: T1078Ids) => Promise<void>,
+): Promise<void> {
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    { [E8_FILE]: T10_7_8_X_KAY_V0 },
+    async (workspace) => {
+      await buildOk(product, workspace, `${prefix} \`build\``);
+      await createAuditSession(product, workspace, "s", prefix);
+
+      // `show` = the full item with the same payload as `next --json`:
+      // compare the item `next` returns against `show` of the same id,
+      // whole (same read state, nothing mutated between). The staging's
+      // own `next --json` read yields the id.
+      const nextItem = requireNextItem(
+        await nextInSession(product, workspace, "s", prefix),
+        prefix,
+      );
+      const xkLabel = `${prefix} x.k's item`;
+      await visit(workspace, {
+        label: xkLabel,
+        session: "s",
+        itemId: nextItem.id,
+        home: async () => {
+          if (nextItem.scope.node !== E8_XK) {
+            fail(
+              `${prefix}: the first needing-review unblocked item in audit ` +
+                `order is x.k's — the root's and x's items are blocked ` +
+                `(SPEC 10.3, 10.6); got ${nextItem.scope.node}`,
+            );
+          }
+          const shown = await showItem(
+            product,
+            workspace,
+            "s",
+            nextItem.id,
+            prefix,
+          );
+          assertSameInformation(
+            shown,
+            nextItem,
+            `${prefix}: \`show <name> <item-id>\` reports the full item — ` +
+              `every 10.2 field plus the same self-contained text payload ` +
+              `as \`next --json\` (SPEC 10.7)`,
+          );
+          // The human form at the same state (T12.0-1, SPEC 12.0; the
+          // module header): x.k's item, with a `query node` capture of x.k
+          // taken at this state for the hashes its recorded state holds.
+          const xkNow = await queryNode(
+            product,
+            workspace,
+            E8_XK,
+            `${prefix} capture of x.k`,
+          );
+          await assertHumanShowItem(product, workspace, "s", shown, xkLabel, [
+            xkNow,
+          ]);
+        },
+      });
+
+      const status = await sessionStatus(product, workspace, "s", prefix);
+      const idRoot = requireRow(
+        status,
+        "subtree-coherence",
+        E8_FILE,
+        prefix,
+      ).id;
+      const idX = requireRow(status, "subtree-coherence", E8_X, prefix).id;
+      const idXK = requireRow(status, "subtree-coherence", E8_XK, prefix).id;
+
+      // The root's item at the same state — nothing has mutated since the
+      // reads above — through `show --json`, then its human form: an item
+      // that is blocked, with a non-empty `blockedBy` (x's item, the
+      // root's one child section's, unresolved: SPEC 10.3, 10.6).
+      const rootLabel = `${prefix} root's item`;
+      await visit(workspace, {
+        label: rootLabel,
+        session: "s",
+        itemId: idRoot,
+        home: async () => {
+          const rootShown = await showItem(
+            product,
+            workspace,
+            "s",
+            idRoot,
+            rootLabel,
+          );
+          assertSameJson(
+            {
+              id: rootShown.id,
+              kind: rootShown.kind,
+              scope: rootShown.scope.node,
+              status: rootShown.status,
+              blocked: rootShown.blocked,
+            },
+            {
+              id: idRoot,
+              kind: "subtree-coherence",
+              scope: E8_FILE,
+              status: "unresolved",
+              blocked: true,
+            },
+            `${rootLabel}: \`show\` reports the root's audit item — ` +
+              `unresolved, and blocked while its child x's item is ` +
+              `unresolved (SPEC 10.2, 10.3, 10.6, 10.7)`,
+          );
+          assertBlockedBy(
+            rootShown,
+            [idX],
+            `${rootLabel} — an audit item is blocked by its child ` +
+              `sections' items, here x's (SPEC 10.6)`,
+          );
+          await assertHumanShowItem(
+            product,
+            workspace,
+            "s",
+            rootShown,
+            rootLabel,
+          );
+        },
+      });
+
+      await rest?.(workspace, { idRoot, idX, idXK });
+    },
+  );
+}
 
 const T10_7_8 = defineProductTest({
   id: "T10.7-8",
   title:
     "`review show <name> <item-id>` reports the full item — the 10.2 fields plus the identical self-contained text payload as `next --json` (compared whole against the item `next` returns); an unknown item ID, including the id of an item removed by `split`, is exit 2; `review export <name>` emits one JSON document as its only output form — byte-parsed and information-identical with and without `--json` — containing the session's name, strategy, recorded creation parameters, recorded decompositions (holding the split item's scope-node identity), and every item in item order with its fields, blocked state, payload, and read-time invalidation applied (a stored `no-change` under an edited scope exports as `invalidated`, re-blocking its dependents); and the human `review show` at the same state as a `show --json` read — of the item `next` returns and of the root's item, blocked by its child's — exits 0 and mentions the item's id, kind, and status, `blocked` where it is blocked, each `blockedBy` id, its scope and context identities, every line of its texts, its source ranges' offsets, and the recorded hashes `query node` captured (robust matching, H-3) (SPEC 1.7, 10.2, 10.3, 10.4, 10.6, 10.7, 12.0)",
   run: async (product) => {
-    await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [E8_FILE]: e8Spec("Kay line v0.") },
-      async (workspace) => {
+    await runT1078ShowReads(
+      product,
+      (_workspace, read) => read.home(),
+      "T10.7-8",
+      async (workspace, { idRoot, idX, idXK }) => {
         const prefix = "T10.7-8";
-        await buildOk(product, workspace, `${prefix} \`build\``);
-        await createAuditSession(product, workspace, "s", prefix);
-
-        // `show` = the full item with the same payload as `next --json`:
-        // compare the item `next` returns against `show` of the same id,
-        // whole (same read state, nothing mutated between).
-        const nextItem = requireNextItem(
-          await nextInSession(product, workspace, "s", prefix),
-          prefix,
-        );
-        if (nextItem.scope.node !== E8_XK) {
-          fail(
-            `${prefix}: the first needing-review unblocked item in audit ` +
-              `order is x.k's — the root's and x's items are blocked ` +
-              `(SPEC 10.3, 10.6); got ${nextItem.scope.node}`,
-          );
-        }
-        const shown = await showItem(
-          product,
-          workspace,
-          "s",
-          nextItem.id,
-          prefix,
-        );
-        assertSameInformation(
-          shown,
-          nextItem,
-          `${prefix}: \`show <name> <item-id>\` reports the full item — ` +
-            `every 10.2 field plus the same self-contained text payload as ` +
-            `\`next --json\` (SPEC 10.7)`,
-        );
-        // The human form at the same state (T12.0-1, SPEC 12.0; the module
-        // header): x.k's item, with a `query node` capture of x.k taken at
-        // this state for the hashes its recorded state holds.
-        const xkNow = await queryNode(
-          product,
-          workspace,
-          E8_XK,
-          `${prefix} capture of x.k`,
-        );
-        await assertHumanShowItem(
-          product,
-          workspace,
-          "s",
-          shown,
-          `${prefix} x.k's item`,
-          [xkNow],
-        );
-
-        const status = await sessionStatus(product, workspace, "s", prefix);
-        const idRoot = requireRow(
-          status,
-          "subtree-coherence",
-          E8_FILE,
-          prefix,
-        ).id;
-        const idX = requireRow(status, "subtree-coherence", E8_X, prefix).id;
-        const idXK = requireRow(status, "subtree-coherence", E8_XK, prefix).id;
-
-        // The root's item at the same state — nothing has mutated since the
-        // reads above — through `show --json`, then its human form: an item
-        // that is blocked, with a non-empty `blockedBy` (x's item, the
-        // root's one child section's, unresolved: SPEC 10.3, 10.6).
-        const rootLabel = `${prefix} root's item`;
-        const rootShown = await showItem(
-          product,
-          workspace,
-          "s",
-          idRoot,
-          rootLabel,
-        );
-        assertSameJson(
-          {
-            id: rootShown.id,
-            kind: rootShown.kind,
-            scope: rootShown.scope.node,
-            status: rootShown.status,
-            blocked: rootShown.blocked,
-          },
-          {
-            id: idRoot,
-            kind: "subtree-coherence",
-            scope: E8_FILE,
-            status: "unresolved",
-            blocked: true,
-          },
-          `${rootLabel}: \`show\` reports the root's audit item — ` +
-            `unresolved, and blocked while its child x's item is unresolved ` +
-            `(SPEC 10.2, 10.3, 10.6, 10.7)`,
-        );
-        assertBlockedBy(
-          rootShown,
-          [idX],
-          `${rootLabel} — an audit item is blocked by its child sections' ` +
-            `items, here x's (SPEC 10.6)`,
-        );
-        await assertHumanShowItem(
-          product,
-          workspace,
-          "s",
-          rootShown,
-          rootLabel,
-        );
-
-        // Stage the decomposition: resolve x.k's item so nothing blocks x's,
-        // then split x's item (x has the one child x.k).
+        // Stage the decomposition: resolve x.k's item so nothing blocks
+        // x's, then split x's item (x has the one child x.k).
         await resolveOk(
           product,
           workspace,
@@ -2347,8 +2576,8 @@ const T10_7_8 = defineProductTest({
         // explicit "none"); its content is T10.7-2's business.
 
         // Item order after the split (SPEC 10.6, 10.7): root, then x's
-        // parent-consistency item (scope x precedes x.k in document order),
-        // then x.k's reused item.
+        // parent-consistency item (scope x precedes x.k in document
+        // order), then x.k's reused item.
         assertSameJson(
           exportKindScopeSequence(withJson.items),
           [
@@ -2455,7 +2684,6 @@ const T10_7_8 = defineProductTest({
     );
   },
 });
-
 // ---------------------------------------------------------------------------
 // T10.7-9 — split
 // ---------------------------------------------------------------------------
