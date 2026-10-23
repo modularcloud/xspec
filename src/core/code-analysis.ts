@@ -649,17 +649,32 @@ const UNDEFINED_TARGET_REASON =
   `invalid (SPEC 14.19, 11.2); rename that file to a valid source path or ` +
   `retarget the reference`;
 
-/** What one import-bound identifier means as a reference root (SPEC 4.5). */
+/**
+ * What one import-bound identifier means as a reference root (SPEC 4.5).
+ * A `node` or `text` binding's `target` is null where its spec module
+ * import's specifier designates nothing — no discovered spec source: a
+ * non-relative specifier, one whose ascent passes above the workspace
+ * root, or one designating a missing file or a file outside every spec
+ * group (SPEC 2.1, 4 → 14.15). It is still a spec module import's
+ * binding, its uses judged as any other's (4.5, 14.18), but a chain
+ * rooted at it — and a `text` call through it — names no target: no edge,
+ * no occurrence (5.7, 11.2), unresolved (14.7) beside the import's 14.15,
+ * which makes nothing about the use undetectable (SPEC 14).
+ */
 type TrackedBinding =
   | {
       readonly kind: "node";
-      readonly target: SpecModuleTarget;
+      readonly target: SpecModuleTarget | null;
+      /** The import's specifier as spelled (messages). */
+      readonly specifier: string;
       /** The index, in `imports`, of the declaration giving the binding. */
       readonly importIndex: number;
     }
   | {
       readonly kind: "text";
-      readonly target: SpecModuleTarget;
+      readonly target: SpecModuleTarget | null;
+      /** The import's specifier as spelled (messages). */
+      readonly specifier: string;
       /** The index, in `imports`, of the declaration giving the binding. */
       readonly importIndex: number;
     }
@@ -669,8 +684,12 @@ type TrackedBinding =
     }
   | {
       /**
-       * A binding of an invalid import (one not colliding): the 14.15
-       * accounts for it, and references rooted here are masked (SPEC 14).
+       * A binding of any other invalid import (one not colliding) — the
+       * default or `text` binding of a spec module import that designates
+       * a discovered spec source but is otherwise invalid, or an
+       * `import X = require(…)` binding of a `.xspec` specifier: the
+       * 14.15 accounts for it, and references rooted here are masked
+       * (SPEC 14).
        */
       readonly kind: "poisoned";
     }
@@ -1369,13 +1388,18 @@ class CodeAnalyzer {
     const importIndex = this.imports.length;
     for (const { declaration, binding, role } of roles) {
       this.importBindings.push({ name: binding.name, declaration });
+      // A valid import designates a member (`target` set). One whose
+      // specifier designates nothing (`target` null) still gives the
+      // default and `text` bindings their roles, the chains and calls
+      // through them unresolved (SPEC 2.1, 4, 11.2, 14 → 14.7); every
+      // other invalid import's bindings are masked by its 14.15.
       this.declarations.set(
         declaration,
-        !valid || target === null
+        !valid && target !== null
           ? { kind: "poisoned" }
           : binding.typeOnly
             ? { kind: "type-level" }
-            : { kind: role, target, importIndex },
+            : { kind: role, target, specifier, importIndex },
       );
     }
 
@@ -2012,6 +2036,20 @@ class CodeAnalyzer {
               `single binding, so the chain names no target; resolve the ` +
               `collision (SPEC 2.4, 4.5, 14.7)`,
           );
+        } else if (binding.target === null) {
+          // SPEC 2.1, 4, 11.2, 14 → 14.7: rooted at the binding of a spec
+          // module import designating nothing, the chain names no target
+          // — no edge, no occurrence (5.7) — beside the import's 14.15,
+          // located as its occurrence would be (SPEC 14).
+          this.addFinding(
+            7,
+            use,
+            `unknown TypeScript reference: the marker's chain is rooted ` +
+              `at ${JSON.stringify(identifier.text)}, whose import's ` +
+              `specifier ${JSON.stringify(binding.specifier)} designates ` +
+              `no discovered spec source, so the chain names no target; ` +
+              `correct the import's specifier (SPEC 2.1, 4, 4.5, 14.7)`,
+          );
         } else if (binding.target.defined) {
           this.references.push(
             this.chainReference(
@@ -2133,11 +2171,14 @@ class CodeAnalyzer {
    * form is MDX-only (4.3 → 14.8); a cross-module node is recorded with
    * its called module, resolution reporting 14.11 (4.4, graph.ts).
    * `calleeIdentifier` is the call's callee and `callee` the `text`
-   * binding it resolves to. SPEC 14: every condition of the call as a
-   * reference spelling — unresolved (14.7), non-static or of wrong arity
-   * (14.8), cross-module (14.11) — is located by the span its occurrence
-   * occupies or would occupy (5.7), the entire call expression, callee
-   * through closing parenthesis, whichever part of it offends.
+   * binding it resolves to — one whose import designates nothing (a null
+   * target) makes the call name no module's `text` export, unresolved
+   * (14.7) once the argument is judged (SPEC 2.1, 4, 11.2). SPEC 14:
+   * every condition of the call as a reference spelling — unresolved
+   * (14.7), non-static or of wrong arity (14.8), cross-module (14.11) —
+   * is located by the span its occurrence occupies or would occupy (5.7),
+   * the entire call expression, callee through closing parenthesis,
+   * whichever part of it offends.
    */
   private analyzeTextCall(
     call: tst.CallExpression,
@@ -2262,6 +2303,23 @@ class CodeAnalyzer {
       );
       return;
     }
+    if (rootBinding.target === null) {
+      // SPEC 2.1, 4, 11.2, 14 → 14.7: an argument rooted at the binding
+      // of a spec module import designating nothing names no target — no
+      // edge, no occurrence (5.7) — beside the import's 14.15, the call
+      // located as its occurrence would be (SPEC 14); needing a resolving
+      // argument, it is never 14.11 (SPEC 14.11).
+      this.addFinding(
+        7,
+        call,
+        `unknown TypeScript reference: the text(...) argument is rooted ` +
+          `at ${JSON.stringify(classified.rootName)}, whose import's ` +
+          `specifier ${JSON.stringify(rootBinding.specifier)} designates ` +
+          `no discovered spec source, so the chain names no target; ` +
+          `correct the import's specifier (SPEC 2.1, 4, 4.3, 14.7)`,
+      );
+      return;
+    }
     if (!rootBinding.target.defined) {
       // SPEC 14.7: a text(...) call that does not resolve — into a member
       // whose identities are all undefined (SPEC 14.19, 11.2), a
@@ -2280,6 +2338,24 @@ class CodeAnalyzer {
             classified.segments.map((segment) => segment.name),
           )} ` +
           `does not resolve — ${UNDEFINED_TARGET_REASON} (SPEC 4.3, 14.7)`,
+      );
+      return;
+    }
+    if (calleeTarget === null) {
+      // SPEC 2.1, 4, 11.2, 14 → 14.7: the callee is the `text` binding of
+      // a spec module import designating nothing, so the call names no
+      // module's `text` export and embeds nothing — no edge, no
+      // occurrence (5.7) — beside the import's 14.15, located callee
+      // through closing parenthesis (SPEC 14).
+      this.addFinding(
+        7,
+        call,
+        `unknown TypeScript reference: the text(...) call's callee ` +
+          `${JSON.stringify(calleeIdentifier.text)} is bound by an import ` +
+          `whose specifier ${JSON.stringify(callee.specifier)} designates ` +
+          `no discovered spec source, so the call names no module's text ` +
+          `export and does not resolve; correct the import's specifier ` +
+          `(SPEC 2.1, 4, 4.3, 14.7)`,
       );
       return;
     }

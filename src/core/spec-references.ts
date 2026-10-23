@@ -121,8 +121,27 @@ export type SpecImportBinding =
     }
   | {
       /**
-       * A binding of an invalid import (one not colliding): the 14.15
-       * accounts for it, and references rooted here are masked (SPEC 14).
+       * SPEC 2.1, 11.2, 14: the default binding of an import whose
+       * specifier designates nothing — no discovered source of a
+       * configured spec group: a specifier not of the relative `.xspec`
+       * form, one whose ascent passes above the workspace root, or one
+       * designating a missing file or a file outside every spec group.
+       * The import's 14.15 locates the declaration; a chain rooted here
+       * names no target, so it records no edge and no occurrence (5.7)
+       * and reports as unresolved (14.5/14.6) beside the 14.15 — no other
+       * error makes its non-resolution undetectable (SPEC 14).
+       */
+      readonly kind: "designates-nothing";
+      /** The import's specifier as spelled (messages). */
+      readonly specifier: string;
+    }
+  | {
+      /**
+       * A binding of any other invalid import (one not colliding) — a
+       * non-default binding, a compiler-provided name, or the default
+       * binding of an import that designates a discovered source but is
+       * of no permitted form: the 14.15 accounts for it, and references
+       * rooted here are masked (SPEC 14).
        */
       readonly kind: "poisoned";
     }
@@ -588,15 +607,26 @@ export function analyzeSpecImports(
         const declared = declarationsByName.get(name);
         if (declared === undefined) {
           declarationsByName.set(name, [statement]);
+          const defaultBinding = name === clause?.name?.text;
           bindings.set(
             name,
-            valid && name === clause?.name?.text
+            valid && defaultBinding
               ? targetPath !== null
                 ? { kind: "module", targetPath }
                 : undefinedTarget !== null
                   ? { kind: "undefined-module", modulePath: undefinedTarget }
                   : { kind: "poisoned" }
-              : { kind: "poisoned" },
+              : // SPEC 2.1, 11.2, 14: the default binding of an import
+                // designating nothing — specifier form and discovery define
+                // no target — roots chains that report as unresolved
+                // beside its 14.15, whatever other defects the declaration
+                // carries; a compiler-provided name is never shadowed (2.1),
+                // so no chain is rooted at such a binding.
+                defaultBinding &&
+                  designatedFile === null &&
+                  !COMPILER_PROVIDED_NAMES.has(name)
+                ? { kind: "designates-nothing", specifier }
+                : { kind: "poisoned" },
           );
         } else if (!declared.includes(statement)) {
           declared.push(statement);
@@ -823,7 +853,7 @@ export interface DependencyReference {
  * when the embedding yields none: a 14.8 finding accounts for it, its
  * chain root is an invalid import's poisoned binding (masked, SPEC 14),
  * or its chain names no target decidably per file, a 14.6 reported here
- * (SPEC 14.19, 11.2, 2.4).
+ * (SPEC 14.19, 11.2, 2.4, 2.1).
  */
 export interface EmbeddingReference {
   readonly embedding: SpecEmbedding;
@@ -848,8 +878,9 @@ type ResolvedReference =
       /**
        * A static chain that never resolves, decidably per file — rooted
        * at a valid import of a member whose path is invalid (SPEC 14.19:
-       * every identity of that file is undefined, 11.2), or at an
-       * identifier a declaration an export statement holds also binds
+       * every identity of that file is undefined, 11.2), at the default
+       * binding of an import designating nothing (SPEC 2.1, 11.2), or at
+       * an identifier a declaration an export statement holds also binds
        * (SPEC 2.4: the language names no single binding). The caller
        * reports its 14.5/14.6 with the span rules of its construct kind.
        */
@@ -885,8 +916,10 @@ const UNDEFINED_TARGET_REASON =
  * Extract the file's references (SPEC 2.2, 2.3) through the shared
  * static-reference analyzer (SPEC 2.4). Every `d` reference and
  * embedding argument is classified; dynamic ones report 14.8, chains
- * rooted at poisoned bindings are masked (SPEC 14), and the rest are
- * recorded with target, spelling, and spans. Resolution against declared
+ * rooted at poisoned bindings are masked (SPEC 14), chains that name no
+ * target decidably per file — an import designating nothing among them
+ * (SPEC 2.1, 11.2) — report 14.5/14.6 here, and the rest are recorded
+ * with target, spelling, and spans. Resolution against declared
  * IDs — and duplicate-target collapse (SPEC 2.2, 5.2) — happens in the
  * graph, which reports 14.5/14.6 for unknown targets.
  */
@@ -1207,6 +1240,22 @@ class ReferenceAnalyzer {
           `${root} is bound by ${binding.binders} — the language names no ` +
           `single binding, so the chain names no target (SPEC 2.4, 2.1); ` +
           `resolve the collision`,
+        span: classified.span,
+      };
+    }
+    if (binding.kind === "designates-nothing") {
+      // SPEC 2.1, 11.2, 14: the import designates nothing, so the chain
+      // names no target — no edge, no occurrence (5.7) — and reports as
+      // unresolved beside the import's 14.15, decidably per file.
+      const root = JSON.stringify(classified.rootName);
+      return {
+        outcome: "unresolved",
+        subject: `rooted at ${root}`,
+        reason:
+          `the specifier ${JSON.stringify(binding.specifier)} of the ` +
+          `import binding ${root} designates no discovered source file of ` +
+          `a configured spec group, so the chain names no target (SPEC ` +
+          `2.1, 11.2, 14.15); correct the import's specifier`,
         span: classified.span,
       };
     }
