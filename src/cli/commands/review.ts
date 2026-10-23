@@ -26,16 +26,20 @@
 //      content's parse and validation as a workspace (SPEC 6.3 → 12.0,
 //      exit 2) — preceding source validation: exit 2, nothing created,
 //      even when the current workspace also fails `build`'s validations;
-//   3. the SPEC 13.3 gate: invalid sources report the validation errors,
-//      exit 1, nothing created; then commit the refresh write (a no-op
-//      when the store already matches);
-//   4. an existing session name — matched ignoring ASCII case (SPEC 10.1)
-//      — is refused, exit 1, nothing created (SPEC 10.7); when the session
+//   3. the SPEC 13.3 gate, assessment only: invalid sources report the
+//      validation errors, exit 1, nothing created;
+//   4. the examination of the session directory (SPEC 10.7), each outcome
+//      ending the command with nothing modified — stale graph data stays
+//      stale (13.5): an existing session name — matched ignoring ASCII
+//      case (SPEC 10.1) — is refused, exit 1 (SPEC 10.7); when the session
 //      so named — the exact-name occupant, else the byte-least name
 //      colliding ignoring ASCII case — is corrupt, its corruption is
-//      reported in the refusal's place (SPEC 10.7, 14.21, 13.5);
-//   5. derive the items (SPEC 10.5–10.7), validate the write path
-//      (SPEC 14.22), and write the session file (SPEC 10.1, 13.4).
+//      reported in the refusal's place (SPEC 10.7, 14.21); and an
+//      obstructed session-file write path is refused, exit 1 (SPEC 14.22);
+//   5. derive the items (SPEC 10.5–10.7); then the writes, only past every
+//      outcome above: the refresh write of 13.3 (a no-op when the store
+//      already matches), then the session file, once, last (SPEC 10.7,
+//      13.5, 10.1, 13.4).
 //
 // `list` (read) — refresh-on-read, then every session in byte order of
 // name with its name, strategy, and item counts by stored status (no
@@ -196,6 +200,8 @@ async function runCreate(
 
   // SPEC 13.3: the gate — with invalid sources, report the validation
   // errors, exit 1, nothing created (a `review` subcommand like any other).
+  // The assessment alone: its refresh write is committed only past the
+  // examination of the session directory below (SPEC 10.7, 13.5).
   const { analysis } = analyzed;
   const assessed = await assessWorkspaceRead(workspace, analysis);
   if (assessed.kind === "findings") {
@@ -203,9 +209,12 @@ async function runCreate(
     return 1;
   }
 
-  // SPEC 13.3: the one refresh write (a no-op when the store already
-  // matches), every pre-creation check of the workspace passed.
-  await assessed.commit();
+  // SPEC 10.7: past the gate, `create` examines the session directory —
+  // meeting the existing-name refusal, the corruption reported in its
+  // place, or the obstruction of the session file's write path (14.22) —
+  // and each of these outcomes ends it there, modifying nothing (13.5):
+  // stale graph data stays stale, the refresh of 13.3 waiting until every
+  // one has passed.
 
   // SPEC 10.1/10.7: `create` with the name of an existing session is
   // refused (exit 1, nothing created); a name matching an existing
@@ -262,6 +271,19 @@ async function runCreate(
     );
   }
 
+  // SPEC 14.22, 10.1, 10.7: a workspace-relative directory component of
+  // the session file's write path occupied by anything other than a
+  // directory — the session directory a plain file or a symbolic link,
+  // which then holds no sessions (10.1) — refuses the write, reported at
+  // the examination of the session directory, before any write.
+  const writeFindings = await obstructedWritePathFindings(workspace.root, [
+    sessionFilePath(name),
+  ]);
+  if (writeFindings.length > 0) {
+    emitFindingsReport(invocation.json, stdout, writeFindings);
+    return 1;
+  }
+
   // Derive the session's items with the creation-time generator run
   // (SPEC 10.5–10.7; `create` merges into an empty session, so every
   // generated item enters with current state and a fresh id).
@@ -297,16 +319,11 @@ async function runCreate(
     items: derived.items,
   };
 
-  // SPEC 14.22: a workspace-relative directory component of the write path
-  // occupied by anything other than a directory refuses the write, reported
-  // before modifying anything.
-  const writeFindings = await obstructedWritePathFindings(workspace.root, [
-    sessionFilePath(name),
-  ]);
-  if (writeFindings.length > 0) {
-    emitFindingsReport(invocation.json, stdout, writeFindings);
-    return 1;
-  }
+  // SPEC 10.7, 13.3, 13.5: only past all of its outcomes does `create`
+  // write — the refresh of 13.3, where graph data is stale (a no-op when
+  // the store already matches), then the session file, once, last. A
+  // write the environment refuses stops the command there (14.24).
+  await assessed.commit();
   await writeSession(workspace.root, name, session);
 
   if (invocation.json) {
