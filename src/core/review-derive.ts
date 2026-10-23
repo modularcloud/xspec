@@ -32,7 +32,9 @@
 //   re-derivation with which `split` ends (SPEC 10.5, 10.7), and
 //   `resolve`'s status, context, and state
 //   update — the item assigned its current context set and its state
-//   recorded over it (SPEC 10.4) — with its `updated`-triggered
+//   recorded over it (SPEC 10.4), its nodes' texts snapshotted in the
+//   graph it records against (SPEC 10.7: the states under which mutating
+//   subcommands derived or resolved the item) — with its `updated`-triggered
 //   re-derivation (SPEC 10.5, `resolveSessionItem`), which an `updated`
 //   resolve runs first, assigning and recording once it is done, against
 //   the item as re-derived (SPEC 10.4);
@@ -943,23 +945,67 @@ function baselineTextTable(
   return table;
 }
 
-/** SPEC 10.7: the derivation-time text snapshots — every item node present
- * per 10.4 (canonically resolving, in the current graph) records its
- * texts, rewritten per node at each derivation that finds it present and
- * never removed (`previous` entries for nodes absent now are kept). */
+/**
+ * SPEC 10.7: the mutating-state text snapshots (`ReviewItem.derivedTexts`)
+ * — an absent node's text is its value in the most recent graph state that
+ * contained it, among the item's baseline state and "the states under which
+ * mutating subcommands (13.5) derived or resolved the item with that node
+ * among its nodes". Each such state records, for every listed node present
+ * per 10.4 (canonically resolving, in the current graph), its texts there:
+ * an entry is rewritten per node at each derivation or resolve that finds
+ * the node present among the item's nodes and never removed (`previous`
+ * entries for nodes absent now, or no longer the item's, are kept), so the
+ * table always holds each node's most recent such state.
+ */
+function snapshotCurrentTexts(
+  references: Iterable<string>,
+  current: CurrentDerivationSide,
+  previous: RecordedTextTable,
+): RecordedTextTable {
+  const table: Record<string, RecordedTexts> = { ...previous };
+  for (const reference of references) {
+    const texts = currentNodeTexts(current, reference);
+    if (texts !== null) {
+      table[reference] = texts;
+    }
+  }
+  return table;
+}
+
+/** SPEC 10.7: the derivation-time text snapshots — a derivation's state
+ * (`create`, a re-derivation, a `split`) over the generated item's nodes
+ * (`snapshotCurrentTexts`). */
 function derivedTextTable(
   item: GeneratedItem,
   current: CurrentDerivationSide,
   previous: RecordedTextTable,
 ): RecordedTextTable {
-  const table: Record<string, RecordedTexts> = { ...previous };
-  for (const node of textBearingNodes(item)) {
-    const texts = currentNodeTexts(current, node.identity);
-    if (texts !== null) {
-      table[node.identity] = texts;
-    }
-  }
-  return table;
+  return snapshotCurrentTexts(
+    textBearingNodes(item).map((node) => node.identity),
+    current,
+    previous,
+  );
+}
+
+/**
+ * SPEC 10.7: the resolve-time text snapshots — a resolve's state is among
+ * "the states under which mutating subcommands (13.5) … resolved the item
+ * with that node among its nodes", so the item as the resolve assigns and
+ * records it (SPEC 10.4: its scope and origin as last assigned, its
+ * context the current context set the resolve assigns) snapshots the
+ * texts of its scope node (none for a code location, which has no text
+ * value), context nodes, and origin nodes present in the graph the
+ * resolve records against (`snapshotCurrentTexts`), exactly as a
+ * derivation does.
+ */
+function resolvedTextTable(
+  item: ReviewItem,
+  current: CurrentDerivationSide,
+): RecordedTextTable {
+  const references = kindScopesCodeLocation(item.kind)
+    ? [...item.context, ...item.origin]
+    : [item.scope, ...item.context, ...item.origin];
+  return snapshotCurrentTexts(references, current, item.derivedTexts);
 }
 
 // ---------------------------------------------------------------------------
@@ -1027,7 +1073,8 @@ function newItemFromGenerated(
  * reason, and `blockedBy` (the caller's, resolved to item ids). The
  * derivation-time text snapshots are rewritten per node of the item as
  * assigned that the current graph contains, never removed (SPEC 10.7: the
- * states under which mutating subcommands derived the item count).
+ * states under which mutating subcommands derived or resolved the item
+ * count).
  */
 function reassignedExistingItem(
   existing: ReviewItem,
@@ -1580,7 +1627,13 @@ export interface ResolveItemArgs {
  * resolve assigns and records once the re-derivation it triggers (10.5) is
  * done, against the item as re-derived"). A node the re-derivation joined
  * to the item is thus recorded in `current` and gains no entry in
- * `baseline`, which the merge keeps as fixed at entry (SPEC 10.2).
+ * `baseline`, which the merge keeps as fixed at entry (SPEC 10.2). With
+ * the recording, the item as assigned snapshots the texts of its scope,
+ * context, and origin nodes present in that same graph
+ * (`resolvedTextTable`): a resolve's state counts among those an absent
+ * node's text comes from (SPEC 10.7), whatever the status, so a
+ * `no-change` or `skipped` resolve — which re-derives nothing — records
+ * a state no derivation saw.
  */
 export function resolveSessionItem(args: ResolveItemArgs): ReviewSession {
   const { session, itemId, status, note, expanded, current, baseline } = args;
@@ -1592,6 +1645,10 @@ export function resolveSessionItem(args: ResolveItemArgs): ReviewSession {
   // forming its recorded context set, which is thus the context a read of
   // the same workspace presents". Scope, origin, reason, and blockedBy
   // stay as last assigned: the resolve itself assigns the context alone.
+  // SPEC 10.7: the state this resolve records the item under is among the
+  // states an absent node's text comes from ("derived or resolved the item
+  // with that node among its nodes"), so the item as assigned snapshots its
+  // nodes' texts in that graph — after the re-derivation, for `updated`.
   const assignAndRecord = (item: ReviewItem): ReviewItem => {
     const context =
       currentContextSets([item], expanded).get(item.id) ?? item.context;
@@ -1600,6 +1657,7 @@ export function resolveSessionItem(args: ResolveItemArgs): ReviewSession {
       ...assigned,
       current: computeRecordedState(assigned, stateInputs),
       recordedContext: context,
+      derivedTexts: resolvedTextTable(assigned, current),
     };
   };
   const withStatus = session.items.map((item): ReviewItem =>

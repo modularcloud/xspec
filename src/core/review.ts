@@ -34,7 +34,8 @@
 // keep items actionable after the referenced nodes are edited, moved, or
 // deleted (SPEC 10.2, 10.7: an absent node's text is its value in the most
 // recent graph state that contained it, among the item's `baseline` state
-// and the states under which mutating subcommands derived the item).
+// and the states under which mutating subcommands derived or resolved the
+// item with that node among its nodes).
 //
 // Identity policy: every stored node reference — an item's `scope`, its
 // `context` and `origin` entries, the node keys of `baseline`/`current` and
@@ -296,9 +297,12 @@ export interface ReviewItem {
    */
   readonly baselineTexts: RecordedTextTable;
   /**
-   * Text snapshots from the most recent mutating-subcommand derivation
-   * whose graph contained the node (SPEC 10.7): rewritten per node at each
-   * derivation that finds it present, never removed.
+   * Text snapshots from the most recent state under which a mutating
+   * subcommand derived or resolved the item with the node among its nodes
+   * and found it present (SPEC 10.7) — `create`, a re-derivation, a
+   * `split`, or a resolve of any status: rewritten per node at each such
+   * state, never removed (src/core/review-derive.ts
+   * `snapshotCurrentTexts`).
    */
   readonly derivedTexts: RecordedTextTable;
 }

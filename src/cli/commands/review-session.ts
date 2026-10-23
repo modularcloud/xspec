@@ -60,7 +60,8 @@
 // and presence, source ranges for present requirement nodes, the recorded
 // `baseline`/`current` states, and text per item kind — a present node's
 // text from the current graph, an absent node's from the most recent
-// recorded state containing it (the derivation-time snapshots, else the
+// recorded state containing it (the snapshots of the derivations and
+// resolves that held it among the item's nodes, else the
 // item's baseline state: its baseline snapshots, and in a baseline session
 // the recorded-baseline graph the read reconstructed), and no text for a
 // node contained in none or for a code-location scope — each origin node's
@@ -653,18 +654,19 @@ function contextTextSelection(kind: ItemKind): TextSelection {
 /**
  * SPEC 10.7: an absent node's text is its value in the most recent graph
  * state that contained it, among the item's baseline state (10.2) and the
- * states under which mutating subcommands derived the item with that node
- * among its nodes — the derivation-time snapshots are rewritten per node at
- * each derivation that finds it present, so they are the most recent
- * wherever they exist; else the item's baseline state: its baseline
- * snapshots (the nodes it held at entry), and — in a baseline session,
- * whose items' baseline state is the graph at the recorded baseline — that
- * graph itself (`baselineGraphTexts`), which holds a node that joined the
- * item later too: a node entering the current context set at a read
- * (SPEC 10.4), or one a re-derivation joined while already absent. A node
- * contained in none has no text. The tables are keyed by canonical
- * reference (10.4), so the lookup is exact whatever the node's spelling
- * became.
+ * states under which mutating subcommands derived or resolved the item
+ * with that node among its nodes — the mutating-state snapshots
+ * (`derivedTexts`) are rewritten per node at each derivation and each
+ * resolve that finds it present among the item's nodes, so they are the
+ * most recent wherever they exist; else the item's baseline state: its
+ * baseline snapshots (the nodes it held at entry), and — in a baseline
+ * session, whose items' baseline state is the graph at the recorded
+ * baseline — that graph itself (`baselineGraphTexts`), which holds a node
+ * that joined the item later too: a node entering the current context set
+ * at a read (SPEC 10.4), or one a re-derivation joined while already
+ * absent. A node contained in none has no text. The tables are keyed by
+ * canonical reference (10.4), so the lookup is exact whatever the node's
+ * spelling became.
  */
 function absentNodeText(
   view: SessionReadView,
