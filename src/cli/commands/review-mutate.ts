@@ -42,12 +42,13 @@
 //      over the effective statuses of SPEC 10.4 against the current
 //      workspace, so an invalidated blocker re-blocks its dependents
 //      (SPEC 10.3);
-//   5. otherwise the status and note are set, the item is assigned its
-//      current context set as `context` — the set reads present — and the
-//      current relevant state is recorded over its scope, that context,
-//      and its origin (SPEC 10.4; `resolve` applies to any unblocked item
-//      regardless of current status), an `updated` resolve re-derives the
-//      session (SPEC 10.5, every strategy), the write path is validated
+//   5. otherwise the status and note are set, an `updated` resolve
+//      re-derives the session (SPEC 10.5, every strategy), the item — as
+//      re-derived, for `updated` (SPEC 10.4) — is assigned its current
+//      context set as `context` — the set reads present — and the current
+//      relevant state is recorded over its scope, that context, and its
+//      origin (SPEC 10.4; `resolve` applies to any unblocked item
+//      regardless of current status), the write path is validated
 //      (SPEC 14.22, exit 1), and only then come the writes: the refresh of
 //      13.3, then the session file, once, last (SPEC 10.7, 13.5).
 //
@@ -303,7 +304,9 @@ async function runResolve(
   // it — and record the current relevant state over it; an `updated`
   // resolve re-derives the session with the recorded creation parameters
   // and decompositions against the current workspace (SPEC 10.5 —
-  // view.expanded is exactly that decomposition-expanded run).
+  // view.expanded is exactly that decomposition-expanded run) first, and
+  // assigns and records once that re-derivation is done, against the item
+  // as re-derived (SPEC 10.4).
   const session = resolveSessionItem({
     session: view.session,
     itemId,

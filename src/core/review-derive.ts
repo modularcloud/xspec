@@ -28,7 +28,9 @@
 //   `splitItemDecomposition`) and `resolve`'s status, context, and state
 //   update — the item assigned its current context set and its state
 //   recorded over it (SPEC 10.4) — with its `updated`-triggered
-//   re-derivation (SPEC 10.5, `resolveSessionItem`);
+//   re-derivation (SPEC 10.5, `resolveSessionItem`), which an `updated`
+//   resolve runs first, assigning and recording once it is done, against
+//   the item as re-derived (SPEC 10.4);
 // - derives the generator-assigned current context sets reads feed to
 //   read-time invalidation and present as each item's `context`
 //   (SPEC 10.4, `currentContextSets`);
@@ -1445,46 +1447,71 @@ export interface ResolveItemArgs {
  * expanded generation, else the item's `context` as last assigned), and
  * `current` is recorded over the item's scope, that context, and its
  * origin, so a read of the same workspace finds the recorded context set
- * equal to the current one (SPEC 10.4). When the status is `updated`, the
- * session is re-derived at resolve time (SPEC 10.5, for every strategy):
- * the expanded generation is merged under the re-derivation rules — the
- * just-resolved item, matched by kind and scope node, keeps its new status
- * and recorded state through the merge. Resolving with `no-change` or
- * `skipped` never re-derives.
+ * equal to the current one (SPEC 10.4). Resolving with `no-change` or
+ * `skipped` never re-derives: the item is assigned and recorded as it
+ * stands. When the status is `updated`, the session is re-derived at
+ * resolve time (SPEC 10.5, for every strategy) — the expanded generation
+ * merged under the re-derivation rules, with the item in the session
+ * holding its new status and note, which the merge keeps (a matched item
+ * keeps its status, note, and recorded state and takes the generated
+ * scope, context, origin, reason, and `blockedBy`) — and only once that
+ * re-derivation is done is the item, as re-derived, assigned its current
+ * context set and its state recorded, over its re-derived scope, context,
+ * and origin in the graph the re-derivation used (SPEC 10.4: "an `updated`
+ * resolve assigns and records once the re-derivation it triggers (10.5) is
+ * done, against the item as re-derived"). A node the re-derivation joined
+ * to the item is thus recorded in `current` and gains no entry in
+ * `baseline`, which the merge keeps as fixed at entry (SPEC 10.2).
  */
 export function resolveSessionItem(args: ResolveItemArgs): ReviewSession {
   const { session, itemId, status, note, expanded, current, baseline } = args;
   const stateInputs = reviewStateInputs(current);
-  const items = session.items.map((item): ReviewItem => {
-    if (item.id !== itemId) return item;
-    // SPEC 10.4: "Resolving an item assigns it its current context set as
-    // `context` and records, in its `current` field (10.2), its relevant
-    // hashes per the list above and, for every scope, context, and origin
-    // node, whether the node is present — the context nodes so recorded
-    // forming its recorded context set, which is thus the context a read of
-    // the same workspace presents". Scope, origin, reason, and blockedBy
-    // stay as last assigned: a resolve assigns the context alone.
+  // SPEC 10.4: "Resolving an item assigns it its current context set as
+  // `context` and records, in its `current` field (10.2), its relevant
+  // hashes per the list above and, for every scope, context, and origin
+  // node, whether the node is present — the context nodes so recorded
+  // forming its recorded context set, which is thus the context a read of
+  // the same workspace presents". Scope, origin, reason, and blockedBy
+  // stay as last assigned: the resolve itself assigns the context alone.
+  const assignAndRecord = (item: ReviewItem): ReviewItem => {
     const context =
       currentContextSets([item], expanded).get(item.id) ?? item.context;
     const assigned: ReviewItem = { ...item, context };
     return {
       ...assigned,
-      status,
-      note,
       current: computeRecordedState(assigned, stateInputs),
     };
-  });
+  };
+  const withStatus = session.items.map((item): ReviewItem =>
+    item.id === itemId ? { ...item, status, note } : item,
+  );
   if (status !== "updated") {
-    return { ...session, items };
+    return {
+      ...session,
+      items: withStatus.map((item) =>
+        item.id === itemId ? assignAndRecord(item) : item,
+      ),
+    };
   }
+  // SPEC 10.5: the re-derivation an `updated` resolve triggers runs first,
+  // with the item in the session under its new status and note; SPEC 10.4:
+  // the assignment and the recording follow it, against the item as
+  // re-derived. Items that no longer generate remain in the session
+  // (10.5), so the resolved item is among the derived items.
   const derived = deriveSessionItems({
-    existing: items,
+    existing: withStatus,
     nextItemId: session.nextItemId,
     generated: expanded,
     current,
     baseline,
   });
-  return { ...session, nextItemId: derived.nextItemId, items: derived.items };
+  return {
+    ...session,
+    nextItemId: derived.nextItemId,
+    items: derived.items.map((item) =>
+      item.id === itemId ? assignAndRecord(item) : item,
+    ),
+  };
 }
 
 // ---------------------------------------------------------------------------

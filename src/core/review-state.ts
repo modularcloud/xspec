@@ -50,7 +50,9 @@
 // creation and re-derivation (10.5), a `split` (10.7), and each resolve,
 // which assigns the item its current context set and records `current`
 // over it (10.4: "the context a read of the same workspace presents",
-// review-derive.ts `resolveSessionItem`) — and the current context
+// review-derive.ts `resolveSessionItem`; an `updated` resolve once the
+// re-derivation it triggers is done, against the item as re-derived) —
+// and the current context
 // set is the one the session's strategy generators, re-run with the
 // recorded creation parameters and decompositions against the current
 // workspace, assign to the item; callers supply it (`ItemValidityInputs`)
